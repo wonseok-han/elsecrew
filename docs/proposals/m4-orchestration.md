@@ -167,7 +167,7 @@ sandbox_mode = "workspace-write"
 **결론 — 문구와 동작의 불일치 3건:**
 
 1. **`tips.know2`("파일을 바꾸기 전에 에이전트가 먼저 확인을 구해요")는 Codex에서 거짓이다.** Claude Code에서는 참이다. 이 문구는 `UsageTips`(`src/App.tsx:552`)에서 에이전트 구분 없이 표시되므로, Codex 사용자에게는 사실과 다른 안전 약속이 노출된다.
-2. **`project.done.safe`("위험한 작업은 시작 전에 꼭 물어보도록")도 Codex에서 부정확하다.** `untrusted`는 "모든 명령을 묻는다"가 아니라 "신뢰 목록 밖 명령을 묻는다"이며, 실측상 작업 폴더 안 쓰기 명령은 묻지 않고 실행됐다. Codex의 실제 보호는 **묻는 것이 아니라 작업 폴더 경계**다.
+2. **`project.done.safe`("위험한 작업은 시작 전에 꼭 물어보도록")도 Codex에서 부정확하다.** `untrusted`는 "모든 명령을 묻는다"가 아니라 "신뢰 목록 밖 명령을 묻는다"이며, 실측상 작업 폴더 안 쓰기 명령은 묻지 않고 실행됐다. Codex의 실제 보호는 **묻는 것이 아니라 샌드박스가 허용한 쓰기 루트 경계**다(작업 폴더 + 임시 디렉터리 — 아래 `경계 정정` 참조).
 3. **프리셋이 적용되지 않아도 안전 문구는 그대로 표시된다.** `apply_safety_preset`의 `write_if_absent`(`src-tauri/src/project.rs:176-187`)는 기존 파일을 절대 덮어쓰지 않는데, `project.done.safe`는 프로젝트 생성 성공 시 **무조건** 렌더된다(`src/App.tsx:1239-1247`). 즉 실제로 아무 설정도 쓰이지 않은 경우에도 "안전장치를 넣어뒀어요"라고 말한다.
    - **실증**: 이 개발 머신의 `~/.codex/config.toml`은 이미 존재하며 `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`다. 앱 프리셋과 **정반대**이고, 앱은 이 파일을 건드리지 않으면서 안전 문구만 보여준다. 기존 Codex 사용자 전원이 이 경로에 해당한다.
 
@@ -427,7 +427,8 @@ M4는 기존 제품의 안정선인 `main`과 분리해 개발한다.
 
 사용자에게 약속할 수준을 다음처럼 고정한다.
 
-- **현재 공통 약속**: 에이전트가 정해진 작업 폴더를 중심으로 일하고, 적용된 안전 상태와 변경 결과를 사용자가 확인할 수 있다.
+- **S1 완료 후 제공할 약속**: 에이전트가 정해진 작업 폴더를 중심으로 일하고, **적용된 안전 상태**와 변경 결과를 사용자가 확인할 수 있다. 앱이 아직 프리셋 적용 여부를 표시하지 않으므로 이는 현재 약속이 아니라 S1의 완료 조건이다.
+- **지금 사실인 것**: 에이전트는 정해진 작업 폴더를 중심으로 일한다. 단 "폴더 밖은 절대 못 건드린다"까지는 말하지 않는다 — 셸 명령은 임시 디렉터리까지 쓸 수 있다(§3 `경계 정정`).
 - **말하지 않을 것**: “모든 파일 변경 전에 반드시 묻는다”, “기존 설정과 관계없이 안전장치를 적용했다.” 현재 사실이 아니다.
 - **실제 프로젝트 M4의 미래 약속**: 실행 전 변경 제안·승인, Git 체크포인트, 변경 확인, 복원 경로가 모두 검증된 뒤에만 제공한다.
 
@@ -441,6 +442,85 @@ M4는 기존 제품의 안정선인 `main`과 분리해 개발한다.
 | 한국어·영어 문구와 타입·빌드 검증 | Claude | Codex | ko/en 키 누락 없음, `pnpm build`·관련 Rust 테스트 통과 |
 
 문구 초안은 구현 전에 사용자가 확인한다. 코드 구현 브랜치는 `m4/orchestration`에서 분기하고 결과도 그곳으로만 합친다.
+
+##### S1 재작업 (2026-08-12 — Claude Opus 5) · Codex 교차 검토 지적 3건 반영
+
+Codex 교차 검토가 S1을 **미통과**로 판정했다. 지적 3건 모두 타당해 수정했고, 재검토를 요청한다. 검증: `cargo test` **19 passed**(신규 3건 추가), `pnpm build` 통과.
+
+| 지적 | 수정 |
+| --- | --- |
+| **차단 1 — 안전 상태 과장.** `Applied`는 "파일을 썼다"일 뿐 유효 정책이 아니다. CLI 옵션 등이 더 높은 우선순위로 덮을 수 있는데 UI는 적용됐다고 단정 | 문구를 **파일 작성 사실로 한정**: "이 폴더에서 안전하게 일하도록 기본 설정을 넣어뒀어요" → **"처음이라 안전 관련 기본 설정 파일을 새로 만들어 뒀어요"**. Codex 설정은 전역이라 "이 폴더" 표현도 틀렸는데 함께 해소됨 |
+| **차단 2 — 팁이 S0 계약 위반.** `tips.know2.codex`가 "폴더 밖은 막혀 있다"고 단정. 기존 설정이 `danger-full-access`인 사용자에게도 노출 | 모든 승인 문구에 **"기본 설정에서는"** 전제를 붙이고, 코덱스 문구는 **"폴더 밖까지 완전히 막아 주는 건 아니니 중요한 파일은 따로 복사해 두세요"** 로 교체. 클로드 문구에는 자동 진행 시 확인이 생략된다는 사실을 추가 |
+| **테스트 공백.** 신규 테스트가 Claude 경로만 실행 | `apply_safety_preset_in(.., home)`으로 **홈 경로를 주입 가능하게 분리**하고 Codex 테스트 3건 추가: 전역 설정 신규 생성/재호출 시 `Kept`, **기존 `never + danger-full-access` 설정을 한 글자도 바꾸지 않음**, 직렬화가 `{"guide":"applied","config":"kept"}`인지 |
+
+> 차단 1의 근거 중 **프로젝트 단위 `.codex/config.toml`이 전역 설정을 덮는지는 Claude가 독립 확인하지 않았다.** 다만 CLI 옵션 우선순위만으로도 "파일 작성 ≠ 유효 정책"은 성립하므로 수정 방향에는 영향이 없다.
+
+##### S1 재검토 완료 (2026-08-12 — GPT-5 Codex)
+
+Claude의 재작업을 실제 diff와 독립 검증으로 다시 확인했다. 이전 차단 2건은 해소됐고 새 차단 사항은 발견하지 못했다.
+
+- 적용 안내는 유효 정책을 보장하지 않고 **설정 파일 작성 사실**만 말한다.
+- 에이전트별 팁은 기본 설정 기준임을 밝히며 Claude 자동 진행과 Codex 폴더 밖 쓰기 예외를 함께 안내한다.
+- Codex 테스트는 주입한 임시 홈을 사용해 최초 생성·기존 설정 보존·직렬화 계약을 검증하며 실제 사용자 설정을 건드리지 않는다.
+- 독립 검증: `cargo test --manifest-path src-tauri/Cargo.toml` **19 passed**·6 ignored, `pnpm build` 통과, `git diff --check` 통과.
+
+**판정: S1 교차 검토 통과.** 다음 단계는 S2 파일럿 실행 경계 구현이며, 커밋·push는 사용자 승인을 기다린다.
+
+##### S1 최초 구현 (2026-08-12 — Claude Opus 5)
+
+사용자가 초안과 추가 발견 2건의 처리 방향을 승인해 아래 초안대로 구현했다. 검증: `cargo test` 16 passed(신규 2건 포함), `pnpm build`(tsc+vite) 통과, 제거한 키의 잔존 참조 없음, ko/en 키 1:1 대조 완료.
+
+- `src-tauri/src/project.rs` — `SafetyStatus { guide, config }`·`PresetOutcome{Applied,Kept}` 추가. `write_if_absent`가 "새로 썼는지"를 반환하도록 바꿨고 **기존 파일을 덮어쓰지 않는 동작은 그대로**다.
+- `src/App.tsx` — `ProjectInfo.safety` 타입 추가, 졸업 직전 안내를 `config` 결과로 분기, `UsageTips`가 `agent` 유무로 승인 문구 3종을 고름.
+- `src/locales/{ko,en}.ts` — `project.done.safe` → `.applied`/`.kept`, `tips.know2` → `.general`/`.claude-code`/`.codex`. `project.make.desc`와 `tips.agent.claude-code`도 승인된 방향으로 교정.
+- 신규 테스트 `safety_status_reports_each_preset_separately` — 안내 파일만 있고 권한 설정은 없는 폴더에서 `guide=Kept` · `config=Applied`로 **따로** 보고되는지, 기존 안내 파일이 보존되는지 확인.
+- **함정(폴더 rename 잔재)**: `cargo test`가 `/Users/wonseok-han/projects/agent-starter/...` 경로를 찾다 빌드 스크립트에서 실패했다. `target/`에 옛 절대경로가 남아 있던 것으로, `cargo clean`(12.6GiB 제거) 후 정상. 같은 증상이 나오면 재빌드가 아니라 clean이 답이다.
+
+##### S1 초안 (2026-08-12 — Claude Opus 5)
+
+**① 구조화 — `ProjectInfo`에 프리셋 적용 결과 추가**
+
+`create_first_project`가 무엇을 실제로 썼는지 프론트가 알 수 없는 것이 불일치 3번의 원인이다. `write_if_absent`의 결과를 그대로 올린다.
+
+```rust
+pub struct ProjectInfo {
+    pub path: String,
+    pub created: bool,
+    pub safety: SafetyStatus,   // 신규
+}
+
+pub struct SafetyStatus {
+    pub guide: PresetOutcome,   // CLAUDE.md / AGENTS.md
+    pub config: PresetOutcome,  // .claude/settings.json | ~/.codex/config.toml
+}
+
+pub enum PresetOutcome { Applied, Kept }  // "새로 넣음" | "기존 설정 유지"
+```
+
+`write_if_absent`가 `bool`(썼는지)을 반환하도록 바꾸면 기존 "덮어쓰지 않는다" 동작은 그대로 유지된다. 테스트로 두 상태를 구분한다(기존 파일 있는 케이스 추가).
+
+**② 문구 — 조건부로 분리**
+
+| 키 | 상태 | ko 초안 | en 초안 |
+| --- | --- | --- | --- |
+| `project.done.safe.applied` | config = Applied | 이 폴더에서 안전하게 일하도록 기본 설정을 넣어뒀어요. | We set up beginner-safe defaults for this folder. |
+| `project.done.safe.kept` | config = Kept | 이미 쓰던 설정이 있어서 그대로 뒀어요. 지금 설정 그대로 진행할게요. | You already had your own settings, so we left them as they are. |
+| `tips.know2.claude-code` | 클로드 | 파일을 바꾸기 전에 클로드가 먼저 확인을 구해요. 내용을 보고 승인하면 됩니다. | Claude asks first before changing a file. Review it, then approve. |
+| `tips.know2.codex` | 코덱스 | 코덱스는 작업 폴더 안에서는 확인 없이 파일을 바꿔요. 대신 폴더 밖은 함부로 건드리지 못하게 막혀 있어요. | Codex changes files inside your project folder without asking. It is blocked from freely touching things outside that folder. |
+| `tips.know2.general` | 홈(에이전트 미지정) | 에이전트마다 달라요. 클로드는 파일을 바꾸기 전에 확인을 구하고, 코덱스는 작업 폴더 안에서는 확인 없이 바꿔요. | It depends on the agent. Claude asks before changing a file; Codex changes files inside your project folder without asking. |
+
+기존 `project.done.safe`·`tips.know2` 키는 제거한다. `UsageTips`는 `agent` prop 유무로 세 문구를 고른다(`src/App.tsx:538`).
+
+**③ 추가 발견 — 같은 성격의 문구 2건 (사용자 결정 필요)**
+
+S1 표에는 없었지만 이번 감사 기준으로 같은 문제를 가진 문구를 찾았다.
+
+- **`project.make.desc`** — "다른 파일은 건드리지 않으니 안전해요 / nothing else is touched, so it's safe." 앱의 폴더 생성 동작을 말한 것인지 **에이전트의 작업 범위**를 말한 것인지 모호하다. 후자로 읽히면 §3 `경계 정정`과 어긋난다. → 앱 동작에 한정하는 표현으로 좁힐 것을 제안한다.
+- **`tips.agent.claude-code`** — "'auto mode'(자동 진행)를 켜두면 매번 허락받지 않고 (…) 익숙해지면 켜보세요." 이는 **Claude Code의 유일한 실질 보호(변경 전 승인)를 끄도록 권하는 문구**이며, 같은 카드의 `tips.know2`와 정면으로 충돌한다. → 권유 톤을 낮추고 무엇이 꺼지는지 명시할 것을 제안한다.
+
+**④ 범위 밖으로 둔 것**
+
+기존 Codex 설정이 `danger-full-access`처럼 위험할 때 **경고**하는 기능은 S1에 넣지 않았다. 설정을 읽고 위험도를 판정하는 별도 설계가 필요하고, S1의 목표는 "거짓말하지 않기"이지 "남의 설정 평가하기"가 아니다. 필요하면 별도 항목으로 다룬다.
 
 #### S2. Codex 파일럿 실행 경계 고정
 
@@ -477,9 +557,9 @@ S2는 **품질 가설 검증용 파일럿**만 허용한다. 실제 사용자 �
 - [x] M4 전용 통합 브랜치 `m4/orchestration` 생성 및 Claude·Codex 공통 규칙 명문화
 - [x] **§3 현행 안전 감사** — Claude·Codex 교차 실측 완료. 문구·동작 불일치 3건과 `--approve-for-me`의 저장소 밖 자동 승인 확인 (§3 `감사 결과`)
 - [x] **§5.1 실측** — `untrusted + exec`는 작업 폴더 안에서 승인 지점 없이 실행됨. 호스트 기반 파일럿의 `--approve-for-me` 사용은 철회
-- [ ] **【1순위·사용자 승인 대기】** §7.9 공동 안전 개선 계획과 S0 안전 계약 확정. 권장안은 **문구 정정 + 동작 강화 둘 다**
-- [ ] 계획 승인 후 S1 현행 안전 문구·표시 조건 교정 — M4보다 먼저 처리
-- [ ] S1 교차 검토·검증 후 S2 파일럿 실행 경계 구현
+- [x] §7.9 공동 안전 개선 계획과 S0 안전 계약 사용자 승인 완료. 권장안은 **문구 정정 + 동작 강화 둘 다**
+- [x] **S1 현행 안전 문구·표시 조건 교정** — 구현 → Codex 미통과 → 지적 3건 반영 → Codex 재검토 통과 (§7.9 `S1 재검토 완료`)
+- [ ] **S2 파일럿 실행 경계 구현** — Codex 1차 담당, 호스트에서 `--approve-for-me` 사용 금지
 - [ ] (사용자 승인 시) `Bash(rm -rf:*)` deny 규칙 우회 가능성 실측 — 권한 우회 모드 실행이 필요해 보류 중
 - [ ] §7.6 비교용 과제 3~5개·성공 조건·공통 품질 체크리스트·작업 예산 정의
 - [ ] §5.2 수동 프로토콜 검증 — 단독 2조건 + 순차 2조건 비교

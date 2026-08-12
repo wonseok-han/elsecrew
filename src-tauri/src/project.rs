@@ -10,6 +10,38 @@ pub struct ProjectInfo {
     pub path: String,
     /// false면 이미 있던 폴더를 그대로 재사용
     pub created: bool,
+    /// 안전 프리셋을 실제로 썼는지. 프론트는 이 값으로 안내 문구를 고른다
+    pub safety: SafetyStatus,
+}
+
+/// 안전 프리셋 파일 하나의 처리 결과.
+/// 기존 파일은 절대 덮어쓰지 않으므로 "이미 있었음"이 정상 경로다.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PresetOutcome {
+    /// 앱이 새로 만들었다
+    Applied,
+    /// 이미 있어서 그대로 뒀다
+    Kept,
+}
+
+impl PresetOutcome {
+    fn from_written(written: bool) -> Self {
+        if written {
+            PresetOutcome::Applied
+        } else {
+            PresetOutcome::Kept
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyStatus {
+    /// 초보자 안내 파일 (CLAUDE.md · AGENTS.md)
+    pub guide: PresetOutcome,
+    /// 권한·승인 설정 (.claude/settings.json · ~/.codex/config.toml)
+    pub config: PresetOutcome,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -163,19 +195,33 @@ fn create(
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("cannot create project folder '{}': {e}", dir.display()))?;
 
-    apply_safety_preset(agent, &dir, language.as_deref() == Some("en"))?;
+    let safety = apply_safety_preset(agent, &dir, language.as_deref() == Some("en"))?;
 
     Ok(ProjectInfo {
         path: dir.display().to_string(),
         created,
+        safety,
     })
 }
 
 /// 에이전트별 안전 프리셋. 이미 있는 파일은 절대 덮어쓰지 않는다.
-fn apply_safety_preset(agent: Agent, dir: &Path, english: bool) -> Result<(), String> {
-    let write_if_absent = |path: PathBuf, content: &str| -> Result<(), String> {
+/// 무엇을 실제로 썼는지 돌려주므로, 앱이 적용하지 않은 것을 적용했다고 말하지 않는다.
+fn apply_safety_preset(agent: Agent, dir: &Path, english: bool) -> Result<SafetyStatus, String> {
+    apply_safety_preset_in(agent, dir, english, &crate::detect::home_dir())
+}
+
+/// 코덱스 설정은 사용자 전역 홈에 쓰므로, 테스트가 실제 `~/.codex`를 건드리지 않도록
+/// 홈 경로를 주입받는다. 실제 실행 경로는 위 `apply_safety_preset`이다.
+fn apply_safety_preset_in(
+    agent: Agent,
+    dir: &Path,
+    english: bool,
+    home: &Path,
+) -> Result<SafetyStatus, String> {
+    // 새로 썼으면 true, 이미 있어서 건너뛰었으면 false
+    let write_if_absent = |path: PathBuf, content: &str| -> Result<bool, String> {
         if path.exists() {
-            return Ok(());
+            return Ok(false);
         }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -183,42 +229,42 @@ fn apply_safety_preset(agent: Agent, dir: &Path, english: bool) -> Result<(), St
             })?;
         }
         std::fs::write(&path, content)
-            .map_err(|e| format!("cannot write settings file '{}': {e}", path.display()))
+            .map_err(|e| format!("cannot write settings file '{}': {e}", path.display()))?;
+        Ok(true)
     };
 
-    match agent {
-        Agent::ClaudeCode => {
-            let guide = if english {
-                BEGINNER_GUIDE_EN
-            } else {
-                BEGINNER_GUIDE_KO
-            };
-            write_if_absent(dir.join("CLAUDE.md"), guide)?;
+    let guide = if english {
+        BEGINNER_GUIDE_EN
+    } else {
+        BEGINNER_GUIDE_KO
+    };
+
+    let (guide_written, config_written) = match agent {
+        Agent::ClaudeCode => (
+            write_if_absent(dir.join("CLAUDE.md"), guide)?,
             write_if_absent(
                 dir.join(".claude").join("settings.json"),
                 CLAUDE_SAFE_SETTINGS,
-            )?;
-        }
+            )?,
+        ),
         Agent::Codex => {
-            let guide = if english {
-                BEGINNER_GUIDE_EN
-            } else {
-                BEGINNER_GUIDE_KO
-            };
             let config = if english {
                 CODEX_SAFE_CONFIG_EN
             } else {
                 CODEX_SAFE_CONFIG_KO
             };
-            write_if_absent(dir.join("AGENTS.md"), guide)?;
-            // 코덱스의 승인 정책은 전역 설정이므로, 설정 파일이 아예 없을 때만 생성
-            write_if_absent(
-                crate::detect::home_dir().join(".codex").join("config.toml"),
-                config,
-            )?;
+            (
+                write_if_absent(dir.join("AGENTS.md"), guide)?,
+                // 코덱스의 승인 정책은 전역 설정이므로, 설정 파일이 아예 없을 때만 생성
+                write_if_absent(home.join(".codex").join("config.toml"), config)?,
+            )
         }
-    }
-    Ok(())
+    };
+
+    Ok(SafetyStatus {
+        guide: PresetOutcome::from_written(guide_written),
+        config: PresetOutcome::from_written(config_written),
+    })
 }
 
 /// 프로젝트 폴더에서 비대화형으로 첫 인사를 주고받는다.
@@ -329,10 +375,95 @@ mod tests {
         let settings = std::fs::read_to_string(dir.join(".claude").join("settings.json")).unwrap();
         assert!(settings.contains("deny"));
         serde_json::from_str::<serde_json::Value>(&settings).expect("valid json");
-        // 두 번째 호출은 재사용으로 판정돼야 함
+        // 처음이므로 둘 다 앱이 새로 쓴 것
+        assert_eq!(info.safety.guide, PresetOutcome::Applied);
+        assert_eq!(info.safety.config, PresetOutcome::Applied);
+        // 두 번째 호출은 재사용으로 판정되고, 기존 파일을 덮어쓰지 않았음이 보고돼야 함
         let again = create(Agent::ClaudeCode, Some(name), base_s, Some("ko".into())).unwrap();
         assert!(!again.created);
+        assert_eq!(again.safety.guide, PresetOutcome::Kept);
+        assert_eq!(again.safety.config, PresetOutcome::Kept);
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// 안내 파일만 있고 권한 설정은 없는 폴더 — 둘을 따로 보고해야 한다.
+    #[test]
+    fn safety_status_reports_each_preset_separately() {
+        let base = std::env::temp_dir().join(format!("ha-mixed-{}", std::process::id()));
+        let dir = base.join("mixed-project");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("CLAUDE.md"), "사용자가 이미 쓰던 안내").unwrap();
+
+        let info = create(
+            Agent::ClaudeCode,
+            Some("mixed-project".into()),
+            Some(base.display().to_string()),
+            Some("ko".into()),
+        )
+        .unwrap();
+
+        assert_eq!(info.safety.guide, PresetOutcome::Kept);
+        assert_eq!(info.safety.config, PresetOutcome::Applied);
+        // 기존 안내 파일은 그대로여야 한다
+        let guide = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+        assert_eq!(guide, "사용자가 이미 쓰던 안내");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// 코덱스는 전역 홈에 설정을 쓴다. 주입한 임시 홈으로 실제 `~/.codex`를 건드리지 않고 검증한다.
+    #[test]
+    fn codex_preset_reports_global_config_state() {
+        let base = std::env::temp_dir().join(format!("ha-codex-{}", std::process::id()));
+        let dir = base.join("codex-project");
+        let home = base.join("home");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+
+        // 전역 설정이 없는 상태 — 안내와 설정을 모두 새로 쓴다
+        let first = apply_safety_preset_in(Agent::Codex, &dir, false, &home).unwrap();
+        assert_eq!(first.guide, PresetOutcome::Applied);
+        assert_eq!(first.config, PresetOutcome::Applied);
+        let config_path = home.join(".codex").join("config.toml");
+        assert!(config_path.is_file());
+        assert!(dir.join("AGENTS.md").is_file());
+
+        // 두 번째 호출 — 둘 다 기존 것을 그대로 둔다
+        let again = apply_safety_preset_in(Agent::Codex, &dir, false, &home).unwrap();
+        assert_eq!(again.guide, PresetOutcome::Kept);
+        assert_eq!(again.config, PresetOutcome::Kept);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// 사용자가 이미 전역 설정을 갖고 있으면 덮어쓰지 않고 `Kept`로 보고해야 한다.
+    /// 실제 개발 머신이 이 경로에 해당한다(`approval_policy = "never"`).
+    #[test]
+    fn codex_preset_never_overwrites_existing_global_config() {
+        let base = std::env::temp_dir().join(format!("ha-codex-keep-{}", std::process::id()));
+        let dir = base.join("codex-project");
+        let home = base.join("home");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let existing = "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n";
+        std::fs::write(home.join(".codex").join("config.toml"), existing).unwrap();
+
+        let status = apply_safety_preset_in(Agent::Codex, &dir, false, &home).unwrap();
+        assert_eq!(status.config, PresetOutcome::Kept);
+        assert_eq!(status.guide, PresetOutcome::Applied);
+        // 사용자 설정은 한 글자도 바뀌지 않아야 한다
+        let after = std::fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
+        assert_eq!(after, existing);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// 프론트가 문자열로 분기하므로 직렬화 형태가 계약이다.
+    #[test]
+    fn safety_status_serializes_as_camel_case_strings() {
+        let json = serde_json::to_string(&SafetyStatus {
+            guide: PresetOutcome::Applied,
+            config: PresetOutcome::Kept,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"guide":"applied","config":"kept"}"#);
     }
 
     #[test]

@@ -102,10 +102,13 @@ export const en: Record<MessageKey, string> = {
   "project.done.title": "Your folder is ready 📁",
   "project.done.created": "We made a new folder inside your Documents.",
   "project.done.reuse": "We'll use the folder that was already there.",
-  "project.done.safe": "We also added guardrails so risky actions always ask first.",
+  "project.done.safe.applied":
+    "Since this is your first time, we created a starter settings file with safer defaults.",
+  "project.done.safe.kept":
+    "You already had your own settings, so we left them as they are.",
   "project.next": "Next: say your first hello",
   "project.make.title": "Let's make a folder to work in",
-  "project.make.desc": "A dedicated folder for the agent. It's created inside your Documents,\nand nothing else is touched, so it's safe.",
+  "project.make.desc": "A dedicated folder for the agent. We create it fresh inside your Documents,\nand we don't modify files that are already there.",
   "project.folder.placeholder": "Folder name",
   "project.making": "Creating…",
   "project.make.btn": "Create folder",
@@ -183,10 +186,15 @@ export const en: Record<MessageKey, string> = {
   "tips.ex3": "The text is hard to read — make the color darker",
   "tips.know.title": "Good to know",
   "tips.know1": "Just ask the way you'd talk normally. You don't need any technical terms.",
-  "tips.know2": "The agent asks first before it changes any files. Review it, then approve.",
+  "tips.know2.general":
+    "It depends on the agent. With default settings Claude asks before changing a file, while Codex changes files inside your project folder without asking. If you've changed your settings, this may differ.",
+  "tips.know2.claude-code":
+    "With default settings Claude asks first before changing a file. Review it, then approve. Turning on auto mode skips this check.",
+  "tips.know2.codex":
+    "With default settings Codex changes files inside your project folder without asking. It won't fully wall off everything outside that folder, so keep a copy of anything important.",
   "tips.know3": "If you see an error message, copy it as-is and say “Fix this.”",
   "tips.agent.title": "What makes this agent special",
-  "tips.agent.claude-code": "Turn on ‘auto mode’ and it keeps going through several steps on its own, without asking each time. Try it once you're comfortable.",
+  "tips.agent.claude-code": "There's an ‘auto mode’ on screen. It keeps going through several steps on its own, but it also turns off the check it does before changing a file. Turn it on once you know what you're handing over.",
   "tips.agent.codex": "Set a ‘goal’ with what you want done, and it works through the steps on its own until it's finished.",
   "tips.context.title": "How to make it remember · CLAUDE.md · AGENTS.md",
   "tips.context.desc1": "Put rules in CLAUDE.md (Claude) or AGENTS.md (Codex) in your project folder, and the agent reads them first every time.",

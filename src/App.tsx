@@ -48,9 +48,18 @@ type LoginEvent =
   | { type: "log"; line: string }
   | { type: "exit"; success: boolean };
 
+/** 안전 프리셋을 앱이 새로 썼는지("applied"), 기존 설정을 그대로 뒀는지("kept") */
+type PresetOutcome = "applied" | "kept";
+
 interface ProjectInfo {
   path: string;
   created: boolean;
+  safety: {
+    /** CLAUDE.md · AGENTS.md */
+    guide: PresetOutcome;
+    /** .claude/settings.json · ~/.codex/config.toml */
+    config: PresetOutcome;
+  };
 }
 
 interface EditorInfo {
@@ -549,7 +558,12 @@ function UsageTips({ agent }: { agent?: AgentId }) {
       <p className="tips-lead">{t("tips.know.title")}</p>
       <ul className="tips-know">
         <li>{t("tips.know1")}</li>
-        <li>{t("tips.know2")}</li>
+        {/* 승인 동작이 에이전트마다 다르므로 하나로 뭉뚱그리지 않는다 */}
+        <li>
+          {agent
+            ? t(`tips.know2.${agent}` as MessageKey)
+            : t("tips.know2.general")}
+        </li>
         <li>{t("tips.know3")}</li>
       </ul>
 
@@ -1243,7 +1257,10 @@ function ProjectStep({
         <p className="muted">
           {project.created ? t("project.done.created") : t("project.done.reuse")}
           <br />
-          {t("project.done.safe")}
+          {/* 실제로 설정을 쓴 경우에만 "넣어뒀다"고 말한다 (docs/proposals/m4-orchestration.md §3) */}
+          {project.safety.config === "applied"
+            ? t("project.done.safe.applied")
+            : t("project.done.safe.kept")}
         </p>
         <code className="path-box">{project.path}</code>
         <button className="primary" onClick={onNext}>

@@ -101,10 +101,13 @@ export const ko = {
   "project.done.title": "폴더가 준비됐어요 📁",
   "project.done.created": "문서 폴더 안에 새 폴더를 만들었어요.",
   "project.done.reuse": "이미 있던 폴더를 그대로 쓸게요.",
-  "project.done.safe": "위험한 작업은 시작 전에 꼭 물어보도록 안전장치도 넣어뒀어요.",
+  "project.done.safe.applied":
+    "처음이라 안전 관련 기본 설정 파일을 새로 만들어 뒀어요.",
+  "project.done.safe.kept":
+    "이미 쓰던 설정이 있어서 그대로 뒀어요. 지금 설정 그대로 진행할게요.",
   "project.next": "다음: 첫 인사 나누기",
   "project.make.title": "작업할 폴더를 만들게요",
-  "project.make.desc": "에이전트가 일할 전용 폴더예요. 문서 폴더 안에 만들어지고,\n다른 파일은 건드리지 않으니 안전해요.",
+  "project.make.desc": "에이전트가 일할 전용 폴더예요. 문서 폴더 안에 새로 만들고,\n이미 있는 파일은 손대지 않아요.",
   "project.folder.placeholder": "폴더 이름",
   "project.making": "만드는 중…",
   "project.make.btn": "폴더 만들기",
@@ -182,10 +185,15 @@ export const ko = {
   "tips.ex3": "글씨가 잘 안 보여, 색을 더 진하게 바꿔줘",
   "tips.know.title": "알아두면 좋아요",
   "tips.know1": "평소 말하듯 편하게 부탁하면 돼요. 전문용어는 몰라도 괜찮아요.",
-  "tips.know2": "파일을 바꾸기 전에 에이전트가 먼저 확인을 구해요. 내용을 보고 승인하면 됩니다.",
+  "tips.know2.general":
+    "에이전트마다 달라요. 기본 설정에서 클로드는 파일을 바꾸기 전에 확인을 구하고, 코덱스는 작업 폴더 안에서는 확인 없이 바꿔요. 설정을 바꿨다면 달라질 수 있어요.",
+  "tips.know2.claude-code":
+    "기본 설정에서는 파일을 바꾸기 전에 클로드가 먼저 확인을 구해요. 내용을 보고 승인하면 됩니다. 자동 진행을 켜두면 이 확인은 생략돼요.",
+  "tips.know2.codex":
+    "코덱스는 기본 설정에서 작업 폴더 안 파일을 확인 없이 바꿔요. 폴더 밖까지 완전히 막아 주는 건 아니니, 중요한 파일은 따로 복사해 두세요.",
   "tips.know3": "오류 메시지가 나오면 그대로 복사해 붙여넣고 “이거 고쳐줘”라고 하세요.",
   "tips.agent.title": "이 에이전트만의 특징",
-  "tips.agent.claude-code": "화면에서 ‘auto mode’(자동 진행)를 켜두면, 매번 허락받지 않고 여러 작업을 알아서 이어서 해줘요. 익숙해지면 켜보세요.",
+  "tips.agent.claude-code": "화면에 ‘auto mode’(자동 진행)가 있어요. 켜면 여러 작업을 알아서 이어서 하지만, 파일을 바꾸기 전에 확인을 구하는 절차도 함께 꺼져요. 무엇을 맡길지 알고 나서 켜세요.",
   "tips.agent.codex": "‘goal’(목표)에 하고 싶은 일을 적어주면, 다 끝날 때까지 스스로 단계를 밟아가며 작업해요.",
   "tips.context.title": "기억시키는 방법 · CLAUDE.md · AGENTS.md",
   "tips.context.desc1": "프로젝트 폴더의 CLAUDE.md(클로드)·AGENTS.md(코덱스)에 규칙을 적어두면, 에이전트가 매번 그 내용을 먼저 참고해요.",
