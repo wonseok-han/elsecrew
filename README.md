@@ -67,8 +67,9 @@ npm run lint  # 코드 검사
 
 ## 문서
 
+- [문서 안내](docs/README.md) — 문서 분류와 색인. 어느 문서를 언제 여는지
 - [기술 설계](docs/architecture.md) — 시스템 구성, 위저드 상태 머신, 에이전트 레시피, 플랫폼별 전략, 검증 현황
 - [릴리스 체크리스트](docs/release-checklist.md) — 자동 검증, 깨끗한 기기 확인, 실패 경로, 서명·배포 기준
 - [소개 웹사이트](website/README.md) — 랜딩 페이지 개발·배포 구조
 - [작업 이력](docs/history.md) — 현재 구현 상태, 주요 결정, 다음 작업
-- 설계 다이어그램은 `docs/diagrams/*.excalidraw`
+- 검토 중인 제안은 `docs/proposals/`, 지난 작업 이력은 `docs/archive/`, 설계 다이어그램은 `docs/diagrams/*.excalidraw`
