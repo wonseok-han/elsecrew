@@ -40,6 +40,7 @@
 - **홈베이스**: 프로젝트가 있거나 설치·로그인된 에이전트가 있으면 홈으로 진입. 기준 폴더 바로 아래에서 `.claude`/`CLAUDE.md`/`AGENTS.md` 표식을 스캔하고, 에이전트 상태와 업데이트를 표시
 - **릴리스 게이트**: `.github/workflows/ci.yml`에서 데스크톱 macOS·Windows 빌드/테스트/격리 설치와 소개 웹사이트 빌드·렌더·린트를 검증. 사람 확인 항목과 미서명 베타/정식 서명 기준은 `docs/release-checklist.md`를 단일 체크리스트로 사용
 - **M4 S1 교차 검토 상태**: `PresetOutcome::Applied`는 설정 파일을 새로 썼다는 사실만 나타내며 유효한 안전 정책을 보장하지 않는다. 화면 문구도 파일 작성 사실로 한정하고, 권한 팁은 기본 설정 기준·예외 가능성을 밝힌다. Claude가 Codex 경로의 생성·보존·직렬화 테스트까지 보완했고 2026-08-12 Codex 재검토를 통과했다. 다음 단계는 S2 파일럿 실행 경계 구현이다.
+- **M4 S2 현재 경계**: 앱 데이터 `m4-pilots/` 아래에 만든 매니페스트 있는 Git 복제본만 대상으로 삼고, Codex 파일럿은 사용자 config·rules를 무시한 `workspace-write + untrusted` 고정 정책을 사용한다. 자동 승인·bypass·추가 쓰기 폴더는 금지한다. Unix 그룹 `TERM` → `KILL`, Windows `taskkill` 실패 판정, child 부착 전 취소 실패의 비차단 반환은 자동 테스트까지 통과했다. 다만 child가 이미 붙은 정상 실행 중 취소에서 트리 종료가 실패하면 오류가 실행 상태에 전달되지 않아, 살아남은 하위 프로세스가 파이프를 붙든 채 실행 스레드를 멈출 수 있다. 이 경로와 수동 경계를 닫기 전까지 UI를 열지 않는다.
 
 ## 작업 규칙 (고정)
 
@@ -47,12 +48,339 @@
 - **커밋·push 전 반드시 사용자 승인**을 받는다 (이 프로젝트 관행)
 - `git`은 scm_breeze 충돌(`_safe_eval` 오류)로 **`/usr/bin/git` 절대경로** 사용. 커밋 메시지는 임시 파일 방식(HEREDOC 미동작), Co-Authored-By 트레일러 포함
 - **검증**: `pnpm build`(tsc+vite) · `cargo test --manifest-path src-tauri/Cargo.toml` · 네트워크 격리 E2E는 `-- --ignored` · push 시 CI(macOS/Windows)
-- 실행: `pnpm tauri dev`(개발) / `pnpm tauri build`(설치 파일). Rust 1.85+ (edition 2024)
+- 실행: `pnpm tauri dev`(개발) / `pnpm tauri build`(설치 파일). Rust 1.85+ 권장, 실제 crate edition은 **2021**
 - 초보자(비개발자) 대상 — 모든 문구는 전문용어 없이 쉬운 한국어. ".md도 IDE도 모르는 사람" 기준으로 검토
 
 ---
 
 ## 워크로그 (최신이 위)
+
+### 2026-08-14 · by Claude Opus 5
+
+**S2 실행기 9차 재작업 — poisoned 상태 디스크 영속화 (제품 코드 변경 있음)**
+
+Codex 지적 4건을 반영했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 9차 재작업`.
+
+- **결함**: poisoned가 `PilotSession` 메모리에만 있어 **앱을 껐다 켜면 보호가 통째로 사라졌다.** 남은 프로세스가 있는 복제본을 그대로 재실행할 수 있었다.
+- **수정**: 종료 실패 **즉시** 파일럿 루트에 `.hello-agent-pilot.poisoned`(pid·오류·경로 JSON)를 기록한다. 복제본 **밖**이라 남은 프로세스가 지울 수 없다. `validate_pilot_workspace`가 이 표시를 보면 거부하므로 **새 세션에서도** 막힌다.
+- **표시 생애주기**: 검증된 `Gone` 복구 → `.poisoned` **제거**(다시 사용 가능) / 명시적 폐기 → `.abandoned`로 대체(**영구** 재사용 불가).
+- **기준 이동**: 복구·폐기가 메모리가 아니라 **디스크 표시**를 근거로 하도록 `recover_codex_pilot`·`discard_codex_pilot`이 `workspace_path`를 받는다. 재시작 뒤 빈 세션에서도 동작해야 하기 때문이다. 메모리 `PoisonedRun`은 "어느 복제본 때문에 잠겼는가"만 안다(미사용 `pid` 필드 제거).
+- **문구 교정**: `Unknown` 안내에서 *"restart the app"* 을 삭제했다. **재시작은 해결책이 아니다** — 표시는 디스크에 남고 프로세스도 그대로다. 이제 "프로세스 확인 후 복구 또는 작업공간 폐기"만 안내한다.
+- **신규 테스트**: 실제 종료 실패 후 `SlotGuard`·`SlotHandle`을 버리고 새 핸들을 만들어 재시작을 모사한다. 실패 전 정상 사용 가능(대조군) → 재시작 후 `awaiting recovery` 거부 → 프로세스 생존 중 복구도 거부 → 정리 후 복구되면 표시가 사라지고 재사용 가능까지 확인한다.
+- **검증**: `cargo test` **43 passed·경고 0**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ffe2e-…")`, 잔존 프로세스 0, 코드에 `restart the app` 문구 0건.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건 실측, Windows CI 확인, `recover`/`discard`의 사용자 노출 문구(UI 단계). **커밋·push하지 않음**
+
+### 2026-08-14 · by Claude Opus 5
+
+**S2 실행기 8차 재작업 — Windows 복구 fail-closed 전환 (제품 코드 변경 있음)**
+
+Codex가 짚은 마지막 결함을 고쳤다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 8차 재작업`.
+
+- **결함**: `process_tree_alive()`가 Windows에서 **항상 `false`** 라, `recover_pilot_slot`이 이를 "사라졌다"로 읽고 **`taskkill` 실패 직후에도 poisoned 슬롯을 풀어 줬다.** 보호가 가장 필요한 순간에 보호가 없었다.
+- **수정**: `TreeLiveness { Gone, Alive, Unknown }`을 도입해 **"모름"을 성공으로 접지 않는다.** Unix는 `kill -0 -<pgid>`로 그룹을 직접 조회해 결론이 나지만, Windows는 `tasklist`로 직계 PID만 알 수 있고 `taskkill /T` 실패 후 남은 **손자**까지 사라졌는지는 Job Object 없이 증명할 수 없어 부재를 `Unknown`으로 본다. PID 미상도 `Unknown`이다. 복구는 **`Gone`일 때만** 열린다.
+- **명시적 탈출구**: `Unknown`에서 영원히 잠기지 않도록 `discard_codex_pilot(confirm_discard_workspace)`를 추가했다. 확인 플래그 없이는 거부하고, 실행 시 복제본에 폐기 표시를 남겨 슬롯을 연다. `validate_pilot_workspace`가 이 표시를 보면 거부하므로 **그 복제본은 두 번 다시 실행 대상이 못 된다.** 증거 파일은 보존된다.
+- **신규 테스트 3건**: 판정을 주입 가능하게 만들어 **macOS에서도 Windows 규칙을 고정**한다 — `Unknown` 거부(+대처 안내)·슬롯 잠김 유지·재예약 거부, `Alive` 거부, `Gone`일 때만 해제, PID 미상은 `Unknown`, 명시적 폐기 후 재사용 차단·증거 보존.
+- **검증**: `cargo test` **42 passed·경고 0**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ffe06-…")`, 잔존 프로세스 0.
+- **미검증(명시)**: `windows_pid_alive`의 `tasklist` 실동작과 Windows 빌드 컴파일은 로컬에서 확인 못 했다(툴체인에 Windows 타깃 미설치). 판정 규칙 자체는 주입 테스트로 고정됐으나 **Windows CI 통과 확인이 필요하다.**
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건 실측, Windows CI 확인, `recover`/`discard`의 사용자 노출 문구(UI 단계). **커밋·push하지 않음**
+
+### 2026-08-14 · by Claude Opus 5
+
+**S2 실행기 7차 재작업 — poisoned 상태 도입 + 검사 순서 교정 (제품 코드 변경 있음)**
+
+Codex가 지적한 후속 2건을 반영했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 7차 재작업`.
+
+- **① 실패 시 슬롯을 열지 않는다**: 이전엔 종료 실패에도 `release()`로 슬롯을 열었는데, 그 시점엔 **살아남은 프로세스와 배출 스레드가 아직 증거 파일에 쓰고 있다.** `RunSlot.poisoned`(pid·오류)를 추가해 **복구 대기** 상태로 남기고, `reserve`는 "실행 중"과 구분해 `requires recovery`로 거부한다. 새 커맨드 `recover_codex_pilot`이 유일한 해제 경로이며 **프로세스 그룹이 실제로 사라졌을 때만** 열어 준다.
+- **② 검사 순서**: `await_drain()` 헬퍼가 **`termination_error`를 먼저 확인하고 그다음 스레드 완료**를 본다. events join **이후 stderr join 이전에도** 재확인하고, stderr를 기다리는 **동안에도** 계속 확인한다.
+- **③ 신규 테스트(가장 놓치기 쉬운 조합)**: 손자가 stdout을 `/dev/null`로 돌리고 부모도 stdout을 닫아 **이벤트 스트림은 정상 EOF에 닿지만** 손자가 stderr를 물고 있는 경우. stdout 완료만 보면 "잘 끝났다"고 착각하고 stderr join에서 영영 멈춘다. Codex 지적이 정확했다. 실측 **3.23초** 반환(취소의 `TERM 1.5s + KILL 1.5s`와 일치) — 수정 전이라면 60초를 기다렸을 것이다.
+- 기존 실패 테스트 2건도 새 계약으로 갱신했다: 실패 직후 슬롯 `is_some()`, 재예약은 `requires recovery`로 거부, `recover_pilot_slot()` 성공 후에야 다음 실행 가능.
+- **검증**: `cargo test` **39 passed·경고 0**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ffdfb-…")`, 잔존 프로세스 0.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측과, `recover_codex_pilot`의 사용자 노출 방식(UI 단계에서 결정). **커밋·push하지 않음**
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 6차 재작업 — 부착 후 취소 종료 실패 경로 종결 (제품 코드 변경 있음)**
+
+마지막 경로를 닫았다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 6차 재작업`.
+
+- **문제**: `cancel_pilot_child`가 종료 실패를 호출자에게만 알리고, **실행 소유자는 모른 채 stdout EOF를 기다렸다.** 살아남은 손자가 파이프를 물면 EOF가 오지 않아 실행이 영영 끝나지 않는다.
+- **수정**: `RunSlot`에 `termination_error`를 추가해 취소가 실패를 **공유 상태에 저장**한다. **이벤트 읽기를 별도 스레드로 옮기고** 메인 흐름은 `is_finished()`와 `termination_error()`를 함께 감시한다 — 소유자가 블로킹 읽기에 갇히면 어떤 신호도 받을 수 없기 때문이다. 오류가 보이면 스레드를 기다리지 않고 제한된 정리 → diff 기록 → 슬롯 해제 → **취소가 본 것과 같은 오류**를 반환한다. 세션 ID는 채널로 즉시 받아 join하지 않는 경로에서도 쓴다.
+- **절충 명시**: 남겨 둔 스레드는 살아남은 프로세스가 끝나면 스스로 종료한다. 안전한 Rust에서 다른 스레드가 소유한 파이프를 강제로 닫을 수단이 없어 택한 선택이며, "소유자가 갇히지 않는다"는 계약은 지켜진다.
+- **신규 테스트**(`#[cfg(unix)]`): 자식이 붙은 뒤 취소하고 **취소 쪽에만** 실패 신호를 주입한다. ① 실행 반환 오류 == 취소가 본 오류, ② 경과 20초 미만(손자는 60초), ③ 슬롯이 비고 다음 예약 성공, ④ diff에 실행 중 만든 파일 포함. 실측 **3.15초**로 취소의 `TERM 1.5s + KILL 1.5s`와 일치한다.
+- **테스트 함정 발견·수정**: 신호 기록용 전역을 두 테스트가 공유해 **병렬 실행 시 정리 대상이 엇갈려 `sleep 60` 프로세스가 샜다.** 전용 뮤텍스로 직렬화하고 정리를 `kill_recorded_group()`으로 통일했다. `ps`로 잔존 없음을 확인했다.
+- **검증**: `cargo test` **38 passed·경고 0**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ff527-…")`, 잔존 프로세스 0.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 5차 재작업 재검토 — 요청한 두 경로 해소, 실행 중 취소 실패 전파 1건 잔존 (제품 코드 변경 없음)**
+
+- Windows 판정을 `TreeProbe::SignalStatus`로 분리해 `taskkill` 실패 시 직계 자식이 끝나도 성공으로 보지 않는 것을 확인했다. 순수 함수 테스트와 실제 child 종료 후 실패 신호 테스트가 해당 계약을 고정한다.
+- child 부착 전 취소에서 `attach_with`가 종료 오류를 반환하면 stdout/stderr를 즉시 닫고, 제한된 정리·diff 기록·슬롯 해제 뒤 오류를 반환한다. `TERM`을 무시하며 파이프를 상속한 손자와 실패 신호를 조합한 회귀 테스트가 약 3.2초에 끝나므로 직전 EOF 무기한 대기 지적은 해소됐다.
+- **차단 — child가 이미 붙은 실행 중 취소 실패는 여전히 실행 스레드에 전달되지 않는다.** 실제 UI 취소 경로인 `cancel_pilot_child`는 `signal_process_tree` 오류를 취소 호출자에게만 반환하고, `RunSlot`에는 `canceled = true` 외에 종료 오류를 남기지 않는다. 실행 소유자는 계속 stdout 순회와 stderr join에서 EOF를 기다린다. 종료 실패로 하위 프로세스가 파이프를 붙들면 취소 호출은 오류가 나더라도 실행 자체는 무기한 끝나지 않는다. 이번 신규 테스트는 spawn 전 취소로 `attach_with` 오류 분기만 덮어 이 일반 경로를 재현하지 않는다.
+- 해결하려면 실행 중 종료 오류도 슬롯/공유 상태에 저장하고 실행 소유자가 차단 스트림 회수를 건너뛸 수 있어야 한다. 예를 들어 stdout/stderr drain을 별도 작업으로 두고 실행 소유자가 child 종료·취소 오류를 기준으로 제한된 join을 하거나, 취소 실패 시 읽기 핸들을 닫을 수 있는 소유 구조가 필요하다. 신호 실패를 주입한 **child 부착 후 취소** 테스트로 오류 반환 시간과 증거 보존을 고정해야 한다.
+- **검증**: `cargo test --manifest-path src-tauri/Cargo.toml` **37 passed·7 ignored**, `pnpm build`, `rustfmt --edition 2021 --check`, `git diff --check` 통과. Windows `taskkill` 실동작은 아직 CI/실기기 미검증이다.
+
+**결론** → 이번에 요청한 Windows 판정과 조기 `attach` 실패 수정은 통과했지만, 사용자가 실행 도중 누르는 일반 취소의 실패 경로 때문에 S2 실행기 전체는 **아직 미통과**다. 해당 한 경로를 닫은 뒤 재검토한다. 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 5차 재작업 — Windows 종료 판정·EOF 무기한 대기 수정 + 실패 경로 테스트 고정 (제품 코드 변경 있음)**
+
+사용자 지시로 남은 2건을 수정하고 주입 가능한 신호 실행부로 실패 경로를 고정했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 5차 재작업`.
+
+- **Windows 종료 판정**: 판정을 순수 함수 `tree_is_gone(probe, signal_ok, child_exited, group_alive)`로 분리했다. Windows는 그룹 조회 수단이 없어 `taskkill` 결과가 유일한 근거이므로, **실패했다면 `child.kill()`로 직계 자식이 끝났어도 성공으로 보지 않는다.** 순수 함수라 **macOS에서도 두 플랫폼 규칙을 함께 검증**할 수 있다 — Windows CI를 기다리지 않아도 된다.
+- **EOF 무기한 대기 제거**: `attach_with`가 오류를 돌려주면 스트림 루프에 들어가지 않는다. 종료 실패는 프로세스가 파이프를 문 채 살아 있을 수 있다는 뜻이라 EOF를 기다리면 영영 멈춘다. 파이프 드롭 → 자식 회수·`kill()`·`try_wait()`(대기 없음) → **diff 증거는 기록** → 슬롯 해제 → 오류 반환 순으로 바꿨다.
+- **주입 가능한 seam**: `type SignalFn`을 도입해 `signal_process_tree_with`·`attach_with`·`run_pilot_process_with`가 실행부를 받는다. 프로덕션은 `tree_signal` 그대로.
+- **신규 테스트 3건**: ① 다섯 조합으로 두 플랫폼 판정 규칙 단언, ② 실제 프로세스로 같은 규칙 확인, ③ 신호를 실패로 주입해 **TERM 무시 손자가 파이프를 문** 상황에서 오류 반환·경과 20초 미만·diff 생존 단언.
+- **실효성 확인**: ③이 **3.16초**에 끝난다 — `TERM 유예 1.5초 + KILL 유예 1.5초`와 정확히 일치. EOF를 기다렸다면 손자의 60초를 채웠을 것이다. 주입 신호는 아무것도 죽이지 않으므로 테스트가 대상 PID를 기록했다가 그룹을 실제로 정리하며, **잔존 프로세스 없음을 `ps`로 확인**했다.
+- **검증**: `cargo test` **37 passed·경고 0**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ff516-…")`.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측과 Windows CI에서의 `taskkill` 실동작 확인(판정 규칙 자체는 순수 함수 테스트로 고정됨). **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 4차 재작업 재검토 — Unix 성공 경로는 해소, 종료 실패 경로 2건 잔존 (제품 코드 변경 없음)**
+
+- Unix 프로세스 그룹에 `TERM` 후 1.5초 유예, 그룹 `KILL` 후 1.5초 확인을 적용한 것과 `TERM`을 무시하며 파이프를 상속하는 손자 프로세스 회귀 테스트를 확인했다. 해당 테스트는 약 1.8초에 통과해 직전 Unix 트리 종료 회귀는 해소됐다.
+- `SlotGuard::attach`가 종료 오류를 반환하고 `run_pilot_process`가 보관하는 변경도 확인했다. 다만 오류를 실제 호출자에게 확실히 전달하는 제어 흐름은 아직 완성되지 않았다.
+- **차단 1 — Windows에서 트리 종료 실패를 성공으로 오판할 수 있다.** Windows의 `process_tree_alive`는 항상 `false`다. `/T /F` `taskkill`이 실패해도 뒤이은 `child.kill()`이 직계 자식만 끝내면 `wait_for_tree_exit`가 즉시 참이 되고, 저장해 둔 `kill` 오류를 확인하지 않은 채 `Ok(())`를 반환한다. 하위 프로세스가 남았다는 사실이 다시 숨겨진다. Windows 승격 단계에서는 최소한 강제 `taskkill`의 성공을 요구하고, 실패 시 직계 자식 종료 여부와 무관하게 오류로 반환해야 한다.
+- **차단 2 — 조기 취소 종료 오류가 최종 반환 전에 멈출 수 있다.** `attach` 오류를 `early_cancel_error`에 저장한 뒤에도 stdout 순회와 stderr drain join을 먼저 수행한다. 종료 실패의 의미가 “하위 프로세스가 남았을 수 있음”인데, 그 프로세스가 파이프를 상속했다면 EOF가 오지 않아 523행의 오류 반환까지 도달하지 못한다. `attach` 실패 시 파이프를 닫고 제한된 정리만 수행한 뒤 오류를 우선 반환하거나, 스트림 회수 자체에 종료 한계를 둬야 한다.
+- **검증**: `cargo test --manifest-path src-tauri/Cargo.toml` **34 passed·7 ignored**, `pnpm build`, `rustfmt --edition 2021 --check`, `git diff --check` 통과. Windows 실행은 로컬에서 미실측이다.
+
+**결론** → Unix에서 정상적으로 신호를 전달할 수 있는 취소 경로는 통과했지만 S2 실행기 전체는 **아직 미통과**다. Windows `taskkill` 실패 판정과 `attach` 실패 시 비차단 오류 반환을 보완하고 해당 실패를 주입 가능한 테스트로 고정한 뒤 재검토한다. 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 4차 재작업 — 종료 보장 3건 구현 (제품 코드 변경 있음)**
+
+사용자 지시로 취소 종료 보장을 마무리했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 4차 재작업`.
+
+- **TERM → KILL 승격**: 그룹(`-pid`)에 `TERM` → 1.5초 유예 → 안 죽으면 `KILL` → 1.5초 확인. 둘 다 실패하면 `survived both TERM and KILL` 오류로 보고한다. 생존 판정은 `kill -0 -<pid>`로 **그룹 전체**를 보며, 좀비가 판정을 흐리지 않도록 매 회차 `try_wait`으로 자식을 회수한 뒤 검사한다. Windows도 `taskkill /T` → `/T /F`로 같은 2단계를 쓴다.
+- **`attach` 조기 취소 오류 전파**: `attach`가 `Result`를 돌려주고 `run_pilot_process`가 증거 확정 후 최종 결과로 반환한다. 프로세스 잔존 가능성이 증거 결함보다 급하므로 먼저 보고한다. 이전에는 `let _ =`로 버려졌다.
+- **회귀 테스트 추가**: 부모와 손자가 **둘 다 TERM을 무시**하고 손자가 stdout 파이프를 상속한 시나리오(`trap '' TERM` 중첩). TERM만으로는 파이프가 닫히지 않아 실행이 60초를 채운다 — KILL 승격이 있어야 끝난다.
+- **승격이 실제로 동작함을 시간으로 확인**: TERM 무시 테스트 **1.80s**(유예 1.5초 소진 후 KILL) vs TERM 수용 대조군 **0.20s**. 대조가 없으면 "그냥 빨리 끝났다"와 구분되지 않는다.
+- **검증**: `cargo test` **34 passed**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e `outcome=Completed session=Some("019ff506-…")`.
+- **한계 2건 명시**: ① 새 회귀 테스트는 `#[cfg(unix)]`다(`trap`은 POSIX 셸 기능). **Windows의 `/T /F` 승격은 미실측**이며 CI 실행이 필요하다. ② 종료 실패 시 오류 전파는 자동 테스트로 못 덮었다 — `SIGKILL`을 견디는 프로세스를 만들 수 없어 실패를 강제할 방법이 없다.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측과 Windows CI에서의 승격 확인. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 3차 재작업 재검토 — 직전 경합 2건 해소, 프로세스 트리 종료 회귀로 미통과 (제품 코드 변경 없음)**
+
+- `attach`가 예약 직후 들어온 취소를 집행하고, `reclaim_child()`와 `release()`를 분리해 diff 증거 확정까지 슬롯을 유지하는 것을 확인했다. 직전 검토의 부착 전 취소·증거 확정 전 슬롯 개방 문제는 해소됐다.
+- **차단 1 — Unix에서 프로세스 트리 강제 종료가 보장되지 않는다.** 현재 프로세스 그룹에는 `TERM`만 보낸 직후 `child.kill()`로 직계 자식만 강제 종료한다. `TERM`을 무시하는 손자 프로세스는 살아남을 수 있고, 그 프로세스가 stdout/stderr 파이프를 상속했다면 실행기의 스트림 회수도 끝나지 않아 취소가 멈출 수 있다. 그룹 전체에 `TERM` → 짧은 유예 → `KILL`을 적용하거나 동등한 트리 강제 종료가 필요하다.
+- **차단 2 — 부착 전 취소의 실제 종료 실패가 숨겨진다.** child가 없을 때 `cancel_pilot_child`는 성공을 반환하고, 이후 `attach`가 호출한 `signal_process_tree`의 오류를 버린다. 따라서 나중의 그룹 종료 실패가 호출자에게 전달되지 않은 채 결과가 `Canceled`로 확정될 수 있다. `attach`가 오류를 반환하거나 실행 상태에 보존해 최종 결과에서 드러내야 한다.
+- 현재 취소 테스트는 직접 실행한 장기 대역만 종료하며, `TERM`을 무시하고 파이프를 상속한 하위 프로세스를 만들지 않아 위 회귀를 잡지 못한다. 이 트리 시나리오를 Unix 자동 테스트로 추가해야 한다.
+- **검증**: `cargo test --manifest-path src-tauri/Cargo.toml` **33 passed·7 ignored**, `pnpm build`, `rustfmt --edition 2021 --check`, `git diff --check` 통과. 첫 `pnpm build`는 샌드박스가 `node_modules/.vite-temp` 쓰기를 막아 실패했으며 권한 확장 재실행에서 통과했다.
+
+**결론** → 직전 두 경합 수정은 승인할 수 있지만 S2 실행기 전체는 **아직 미통과**다. 프로세스 그룹 강제 종료·조기 취소 오류 전파·하위 프로세스 회귀 테스트를 보완한 뒤 재검토한다. 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 3차 재작업 — 취소 선점·증거 확정 경합 2건 해소 (제품 코드 변경 있음)**
+
+Codex 재검토의 잔여 차단 2건 모두 타당해 수정했다. 핵심은 **`RunSlot`의 소유 범위를 예약 시점부터 증거 확정까지로 넓힌 것**이다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 3차 재작업`.
+
+- **차단 1(부착 전 취소 무시)**: 슬롯은 spawn보다 먼저 예약되는데, 그 사이 취소가 들어오면 표시만 남고 `attach`가 취소를 보지 않은 채 자식을 붙여 **작업이 끝까지 실행된 뒤 결과만 `Canceled`** 였다. 사용자에겐 취소가 안 먹는 것과 같다. `attach`가 이미 취소된 슬롯이면 붙이는 즉시 프로세스 트리를 종료한다.
+- **차단 2(증거 확정 전 슬롯 개방)**: `finish()`가 슬롯을 비운 뒤 `wait()`·`write_pilot_diff()`를 해서, 그 틈에 새 실행이 같은 복제본을 고치면 이전 diff가 오염됐다. `reclaim_child()`(자식만 회수, 슬롯 유지)와 `release()`(diff 확정 후 개방)로 분리하고 `Drop`은 `released` 플래그로 이중 해제를 막는다.
+- **보완**: `taskkill`·`kill` 종료 상태를 더 이상 버리지 않는다. 실패 시 오류를 전파해 "트리를 못 끊고 부모만 죽였다"를 숨기지 않되, **이미 끝난 프로세스에 대한 신호 실패는 정상**으로 처리한다(중복 취소). Windows 대역을 `timeout` → `ping`으로 교체했다 — `timeout`은 stdin 리다이렉트 환경에서 즉시 실패해 대역 노릇을 못 한다는 Codex 지적이 맞았다.
+- **신규 테스트 2건**: ① spawn 전 취소 후 30초 대역이 **20초 미만에 끝나는지**(표시만 남고 완주하면 실패), ② `reclaim_child()` 뒤에도 슬롯이 유지돼 **다른 예약이 거부**되고 `release()` 후에야 열리는지.
+- **검증**: `cargo test` **33 passed**, `pnpm build`·`rustfmt --edition 2021 --check` 통과, e2e 재실행 `outcome=Completed session=Some("019ff4fb-…")`.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 2차 재작업 재검토 — 직전 3건은 대부분 해소, 취소 선점·증거 확정 경합 2건 잔존 (제품 코드 변경 없음)**
+
+- `RunSlot { run_id, child, canceled }`, `SlotGuard`, Windows `taskkill /T /F`, 플랫폼별 실행 대역, 증거 I/O 오류 수집과 실행 중 취소 통합 테스트를 확인했다. Rust 전체 **31 passed·7 ignored**, `pnpm build`, `rustfmt --edition 2021 --check`, `git diff --check`가 통과했다.
+- Claude의 rustfmt 정정은 맞다. `src-tauri/Cargo.toml`의 실제 edition은 2021이며, 이전 Codex 검토는 프로젝트 문서의 잘못된 edition 2024 안내를 따랐다. `AGENTS.md`·`CLAUDE.md`·history의 edition 정정도 실제 설정과 일치한다.
+- **차단 1 — child 부착 전 취소가 실행을 중단하지 못한다.** 슬롯은 Codex 탐색·증거 파일 생성·spawn보다 먼저 예약된다. 이 사이 `cancel_pilot_child`가 호출되면 `canceled = true`만 남고 child가 없어 신호를 못 보낸다. 이후 `SlotGuard::attach`는 취소 여부를 보지 않고 child를 붙이므로 작업이 끝까지 실행된 뒤 결과만 `Canceled`가 된다. `attach`가 이미 canceled인 슬롯에는 즉시 프로세스 트리 종료를 적용하거나, 예약/starting 상태의 취소를 spawn 전에 다시 확인해야 한다.
+- **차단 2 — 슬롯이 diff 증거 확정 전에 비워진다.** `guard.finish()`가 슬롯을 제거한 뒤 child `wait()`와 `write_pilot_diff()`를 수행한다. 그 사이 새 실행이 같은 복제본을 수정하면 이전 실행의 diff에 새 실행 변경이 섞인다. 실행 상태는 프로세스 종료뿐 아니라 스트림·diff 증거 확정까지 소유해야 하며, 슬롯 해제는 `PilotRun` 또는 오류 결과가 확정된 마지막 단계여야 한다.
+- 현재 `cancel_during_run_is_owned_by_the_running_slot` 테스트는 child가 붙을 때까지 기다린 뒤 취소하므로 차단 1의 시작 직후 취소를 재현하지 않는다. 또한 슬롯이 diff까지 유지되는 동안 새 실행이 거부되는 회귀 테스트가 필요하다.
+- Windows 트리 종료는 `taskkill` 경로를 추가했지만 종료 상태를 무시한다. 최소한 실패 시 `child.kill()`이 부모만 종료했다는 사실을 숨기지 않도록 결과를 전파해야 한다. Windows 대역인 `cmd /C timeout`이 stdin null 환경에서 충분히 오래 살아 있는지도 CI 실측이 필요하다.
+
+**결론** → S2 2차 실행기는 **아직 미통과**다. `RunSlot` 소유 범위를 예약 시점부터 증거 확정까지 유지하고, 부착 전 취소와 diff 생성 중 동시 시작을 자동 테스트로 닫은 뒤 다시 검토한다. 이번 검토에서는 제품 코드를 수정하거나 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 2차 재작업 — 차단 3건 수용, rustfmt 지적 1건 정정 (제품 코드 변경 있음)**
+
+Codex 재검토의 차단 3건은 모두 타당해 수정했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 2차 재작업`.
+
+- **차단 1(취소 소유권 경합)**: 취소가 슬롯을 즉시 비워, 취소된 실행이 뒷정리하는 사이 새 실행의 자식을 가져갈 수 있었다. `RunSlot { run_id, child, canceled }`로 재설계해 **취소는 신호와 표시만 남기고 회수는 실행 소유자만** 한다. `SlotGuard`가 `Drop`으로 예약을 자동 해제한다.
+- **차단 2(Windows·테스트 이식성)**: Windows도 `taskkill /T /F`로 트리를 종료한다 — 더는 플랫폼 한계로 두지 않는다. 테스트의 `/bin/sleep`·`/bin/ps` 의존을 없애고 대역 프로세스를 플랫폼별로 고르며 생사는 `try_wait()`로 확인한다. **슬롯 예약을 Codex 탐색보다 앞으로** 옮겨 Codex 없는 CI에서도 거부가 먼저 판정된다.
+- **차단 3(증거 I/O 은폐)**: `writeln!`·`flush`·읽기·join 오류를 모두 수집해 **실행 결과를 오류로 반환**한다. 잘린 로그를 `Completed`로 보고하던 경로가 사라졌다.
+- **신규 테스트**: Codex가 요구한 **실행 중 취소 통합 테스트**를 추가했다(실행 대상 주입으로 Codex 없이 동작). 동시 실행 테스트에는 유령 증거 파일 검사를 더했다. `cargo test` **31 passed**, e2e 재실행 통과.
+
+**정정 — rustfmt 지적은 edition 불일치였다**
+
+- Codex는 `rustfmt --edition 2024 --check` 4건 실패를 근거로 내 "클린" 기록을 틀렸다고 했다. 확인 결과 **이 크레이트의 실제 edition은 2021**이다(`src-tauri/Cargo.toml:6`). `--edition 2021`로 검사하면 **0건**이다. 컴파일러도 let chain을 *"only allowed in Rust 2024 or later"* 로 거부해 이를 확인해 준다.
+- **부수 발견 — 고정 문서가 틀렸다.** `CLAUDE.md`·`AGENTS.md`·이 문서가 *"Rust 1.85+ 필요(edition 2024)"* 라고 적어 왔다. Codex가 2024로 검사한 것도 이 문서를 따랐을 가능성이 크다. **세 곳을 실제 값(edition 2021)으로 정정하고 포맷 검사 명령을 명시**했다. CLAUDE.md와 AGENTS.md 동일성도 재확인했다.
+
+**아카이브 롤오버 수행**: 이 엔트리로 파일이 573줄이 돼 임계(500)를 넘겨, 2026-07-23 엔트리 2건을 `docs/archive/history-2026-07.md`로 옮겼다(573 → 452줄). **목표치 300줄에는 못 미친다** — 남은 것이 고정 섹션 56줄 + **단일 날짜(2026-08-12) 약 390줄**이고, 규칙이 같은 날짜를 쪼개는 것을 금지하기 때문이다. 오늘 M4 왕복이 하루에 30개 엔트리로 몰린 결과다. 날짜가 바뀌면 정상 범위로 내려간다.
+
+**다음 할 일** → Codex 재검토. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 재검토 — 이전 지적은 반영됐지만 취소 소유권·Windows·증거 오류 차단 3건 잔존 (제품 코드 변경 없음)**
+
+- 실행별 `run_id` 증거 경로, 동시 시작 거부, stderr 배출 스레드, spawn 전 증거 파일 생성, Unix 프로세스 그룹 종료, `git add -N` 실패 전파는 이전 지적의 직접 원인을 해결했다. Rust 전체 테스트를 독립 재실행해 **30 passed·7 ignored**, `pnpm build`, `git diff --check` 통과를 확인했다.
+- **차단 1 — 취소 시 child 소유권 경합이 여전히 남는다.** `cancel_pilot_child`가 현재 child를 슬롯에서 `take()`해 슬롯을 즉시 비운다. 취소된 실행이 stdout/stderr 정리와 diff 생성을 끝내기 전에 새 실행이 시작될 수 있고, 이전 실행의 마지막 `handle.take()`가 새 child를 가져가 기다리거나 결과를 오판하며 이전 diff에 새 실행 변경이 섞일 수 있다. 취소는 슬롯을 비우지 말고 같은 run ID의 child에 종료 신호와 canceled 상태만 기록하며, 실행 함수만 자기 run ID를 확인해 최종 정리·슬롯 해제를 해야 한다.
+- **차단 2 — Windows 취소·테스트 계약이 성립하지 않는다.** Unix만 프로세스 그룹 전체를 종료하고 Windows는 직접 child만 kill해 하위 셸 명령이 남을 수 있다. 제품 범위가 Windows를 포함하므로 플랫폼 한계로 남길 수 없다. 또한 취소·동시 실행 테스트가 `/bin/sleep`·`/bin/ps`에 의존하고, 동시 실행 테스트는 슬롯 확인 전에 설치된 Codex를 찾으므로 Codex가 없는 Windows/macOS CI에서 실패한다. Windows Job Object 또는 동등한 트리 종료와 플랫폼 독립 실행 대역/주입이 필요하다.
+- **차단 3 — 실행 중 증거 I/O 오류를 여전히 숨긴다.** stdout 이벤트와 stderr 로그의 `writeln!`·`flush`, 줄 읽기 오류, stderr 스레드 join 결과를 모두 무시한다. 디스크 부족·권한·I/O 오류가 발생하면 불완전한 이벤트/로그인데도 `Completed` 결과를 반환할 수 있어 증거 기반 완료 계약과 충돌한다. 스트림 배출 결과를 수집하고 증거 실패를 실행 결과에 반영해야 한다.
+- 동시 실행 거부 전에 고유 증거 파일들을 먼저 만들기 때문에 거부된 호출도 반환되지 않는 빈 증거 파일을 남기는 부작용이 있다. 실행 슬롯을 먼저 **예약**하는 상태가 필요하다.
+- Claude가 “`orchestration.rs`는 rustfmt 클린”이라고 기록했지만 독립 `rustfmt --edition 2024 --check`는 기존 테스트 구간을 포함한 여러 위치에서 실패했다. 기능 차단보다 낮지만 검증 기록은 현재 사실로 정정해야 한다.
+- Claude가 남긴 대로 실제 `execute_pilot` 실행 중 취소 통합 경로는 아직 검증되지 않았다. 이는 위 취소 경합을 잡을 핵심 회귀 테스트이므로 수동 확인만으로 미루지 말고 자동화 가능한 프로세스 대역으로 추가해야 한다.
+
+**결론** → S2 2차 실행기 재작업은 **아직 미통과**다. 이전 지적을 단순 보완하는 수준을 넘어 `run_id`를 가진 실행 상태가 child의 전체 수명주기를 소유하도록 정리한 뒤 다시 검토해야 한다. 이번 검토에서는 제품 코드를 수정하거나 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 실행기 재작업 — Codex 지적 5건 전부 반영 (제품 코드 변경 있음)**
+
+Codex가 실행기를 미통과로 판정했다. **차단 3건·보완 2건 모두 내 코드의 실제 결함이 맞아 반박 없이 수정했다.** 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 재작업`.
+
+- **차단 1(증거 덮어쓰기)**: 실행별 `run_id`(밀리초+PID+원자적 시퀀스)를 도입해 모든 증거 경로를 갈랐다. 특히 취소된 재실행이 **이전 실행의 최종 메시지를 자기 결과로 반환하던 버그**는, 실행 시작 시 파일을 빈 내용으로 만들어 해소했다 — 중단되면 빈 파일 자체가 이 실행의 증거다.
+- **차단 2(슬롯 탈취)**: 새 실행이 기존 실행을 자동 취소하던 동작을 없애고, 슬롯 점검과 `spawn`을 **한 잠금 안에서** 처리해 이미 실행 중이면 거부한다.
+- **차단 3(프로세스 I/O·정리)**: stderr를 전용 스레드로 배출해 교착을 막고(`…stderr.log`), **증거 파일을 모두 만든 뒤 spawn**해 실패 시 프로세스가 슬롯에 남지 않게 했다. 취소는 자식을 프로세스 그룹 리더로 띄운 뒤(`process_group(0)`) 그룹 전체에 `TERM` → 유예 → `KILL`을 보내 **하위 셸 명령까지 끊는다**(Windows는 자식만 — 플랫폼 한계).
+- **보완**: `git add -N` 실패를 오류로 전파한다. 증거 생성 실패가 "변경 없음"으로 위장되면 안 된다. `orchestration.rs`는 rustfmt 클린이 됐다.
+- **검증**: `cargo test` **30 passed**(신규 3건). end-to-end 재실행 `outcome=Completed session=Some("019ff4df-…")`, 증거 4종 생성, 원본 무변경.
+- **함정 발견 — `cargo fmt`는 크레이트 전체를 건드린다.** 실행 후 `agent.rs`·`detect.rs`·`error.rs`·`install.rs`·`login.rs`·`status.rs`가 함께 바뀌어 전부 되돌렸다. 이 저장소의 기존 파일들은 **원래 rustfmt 클린이 아니다.** 포맷 정리를 하려면 이번 변경과 섞이지 않게 별도 작업으로 해야 한다.
+
+**다음 할 일** → **Codex 재검토**. 남은 것은 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측과, Codex가 짚은 대로 `execute_pilot` 실행 중 동시 취소를 거는 통합 경로 확인. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 실행기 교차 검토 — S2 2차 구현 조각으로 확인, 실행 수명주기 차단 3건 (제품 코드 변경 없음)**
+
+- 이번 Claude 작업은 S2 1차의 복제본·사전 점검 다음에 실제 실행·취소·증거 포착을 붙인 것이므로 **S2 2차 구현 조각(취소 가능한 실행기)**으로 부르는 것이 맞다. 다만 S2 전체 완료는 아니며 수동 경계 실측도 남아 있다.
+- 고정 인자의 `--json`·`--output-last-message`, `thread.started` 세션 ID 파싱, 파일럿 루트 내부 소스 거부와 Tauri 커맨드 등록은 의도와 일치한다. Rust 전체 테스트를 독립 재실행해 **27 passed·7 ignored**, `git diff --check` 통과를 확인했다.
+- **차단 1 — 반복 실행 증거가 보존되지 않는다.** 이벤트·최종 메시지·diff 경로가 작업공간 이름으로 고정돼 매 실행마다 이전 증거를 덮어쓴다. 특히 취소된 재실행에서 이전 `last-message`가 이미 있으면 현재 실행의 결과처럼 그대로 반환된다. 재작업 라운드별 고유 실행 ID/경로가 필요하다.
+- **차단 2 — 전역 `Option<Child>` 소유권 경합이 있다.** 새 실행은 기존 실행을 자동 취소하고 같은 슬롯을 재사용한다. 두 `run_codex_pilot` 호출이 겹치면 먼저 끝난 실행이 새 실행의 child를 `take()`해 기다리고, 새 실행은 자신을 `Canceled`로 오판할 수 있다. 새 실행을 거부하거나 실행 ID별 소유권을 분리해야 한다. 현재 취소 테스트는 `execute_pilot`과 동시에 취소하는 통합 경로를 검증하지 않는다.
+- **차단 3 — 프로세스 I/O·실패 정리가 불완전하다.** stderr를 `piped`로 만들고 읽지 않아 버퍼가 차면 자식이 멈출 수 있다. 또한 자식을 시작한 뒤 이벤트 파일 생성이 실패하면 함수가 오류로 빠지면서 실행 중인 child가 슬롯에 남는다. 취소도 직접 child만 kill하므로 하위 프로세스까지 종료된다는 보장이 없다. stdout/stderr 동시 배출과 모든 오류 경로의 종료·wait, 플랫폼별 프로세스 트리 취소가 필요하다.
+- 추가로 `git add -N` 실패를 무시하면 새 파일이 diff에서 빠져도 성공 증거로 반환될 수 있다. 증거 생성 실패는 숨기지 말고 실행 결과에 실패로 반영해야 한다.
+- 수정 파일 자체의 `rustfmt --check`는 새 테스트의 3곳에서 실패한다. 기능 차단보다는 낮지만 재검토 전에 정리해야 한다.
+
+**결론** → S2 실행기 2차 구현은 **미통과**다. 위 실행 수명주기·증거 보존 문제를 코드와 회귀 테스트로 보완한 뒤 다시 Codex가 검토한다. 이번 검토에서는 제품 코드를 수정하거나 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 차단 종료 + 취소 가능한 실행기 구현 (제품 코드 변경 있음)**
+
+사용자 지시로 S2 차단 2건을 닫고, 다음 조각인 실행기를 이어서 구현했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 실행기 구현`.
+
+- **오래된 상태 문구 2곳 정정**: "S2 1차 구현 · Claude 교차 검토 대기" → 검토 완료·차단 해소. §8의 "Claude 교차 검토와 실행기·수동 실측 남음" → 실행기까지 완료, 수동 시나리오와 Codex 검토만 남음.
+- **세션 ID 포착 경로 실측 확정**: `codex exec --json`의 첫 이벤트 `{"type":"thread.started","thread_id":"…"}`가 ID를 싣고 오며, **같은 UUID의 rollout 파일이 `~/.codex/sessions`에 존재**함을 대조해 재개용 ID와 동일함을 확인했다. §7.4의 "정확한 세션 ID 저장"이 이제 실제로 가능하다.
+- **고정 인자에 `--json`·`--output-last-message` 추가**. `validate_pilot_args`가 **둘의 부재를 거부**해, 증거 없이 실행되는 경로를 코드가 막는다.
+- **증거 3종(이벤트·최종 메시지·diff)을 복제본 밖 앱 전용 루트에 보존**한다. 에이전트가 자기 증거를 고칠 수 없다. diff는 `git add -N` 후 `git diff <시작 커밋>`이라 **새로 생긴 파일도 잡힌다.** `cancel_pilot_child`의 계약은 "프로세스만 죽이고 어떤 파일도 지우지 않는다"이다.
+- **파일럿 루트 안의 소스 재복제 거부**를 추가했다(검사 순서를 바꿔 루트를 먼저 정규화).
+- **검증**: `cargo test` **27 passed**. 신규 4건 중 취소 테스트는 `/bin/sleep`를 실행 중 프로세스 대역으로 두고 취소 → `ps`로 사망 확인, 복제본·매니페스트 생존, diff에 실행 중 만든 파일 포함, 증거가 복제본 밖에 위치, 중복 취소 안전까지 본다.
+- **end-to-end 실측**(`#[ignore]`, 사용량 소모): 실제 Codex로 1회 실행해 `outcome=Completed session=Some("019ff4d3-…")`. 증거 3종 생성, diff에 에이전트가 만든 파일 포함, **원본 저장소 무변경** 확인.
+
+**다음 할 일** → **Codex 교차 검토**(§7.9는 S2를 Codex 담당으로 뒀지만 이 조각은 Claude가 구현했으므로 검토 담당이 바뀐다). 그 뒤 수동 경계 시나리오 3건(저장소 밖 쓰기·임시 경로 쓰기·저장소 안 삭제) 실측. **커밋·push하지 않음**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**확인 — Claude의 S2 차단 해소 재검토는 타당, 제안서 상태 문구 2곳만 오래됨 (제품 코드 변경 없음)**
+
+- 실제 코드에서 `--ephemeral` 제거, `merge-base --is-ancestor` 판정, 후속 커밋 허용·amend 거부 테스트를 다시 대조했다. orchestration 테스트 4건을 독립 재실행해 모두 통과했고 `git diff --check`도 통과했다.
+- Claude가 남긴 세션 rollout 실측 근거도 확인했다. `~/.codex/sessions`에 기록한 `019ff4c8-…` rollout 파일이 실제로 존재하고 현재 파일 수가 448개여서, 세션 보존과 사용자 Codex 기록 혼입이라는 두 결론이 증거와 일치한다.
+- 신규 차단 사항은 없다. `--json` 기반 세션 ID 포착, `--output-last-message`, 취소 가능한 실행기, 파일럿 루트 내부 소스 거부와 수동 경계 4건은 Claude가 적은 대로 다음 구현 범위이며 **S2 전체는 아직 완료가 아니다.**
+- 문서상 작은 불일치가 남았다. `m4-orchestration.md`의 S2 1차 구현 제목은 아직 “Claude 교차 검토 대기”, §8 TODO는 “Claude 교차 검토 … 남음”이라고 되어 있지만 재검토는 끝났다. 다음 문서 수정 시 현재 상태로 고쳐야 한다.
+
+**결론** → Claude의 차단 2건 해소 판정은 통과로 받아들인다. 이번 확인에서는 제품 코드를 수정하거나 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 재검토 — 차단 2건 해소 확인 + 부작용 실측 완료 (제품 코드 변경 없음)**
+
+Codex가 차단 2건을 코드·테스트에 반영했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 재검토`.
+
+- **차단 1 해소**: `--ephemeral`이 고정 인자에서 제거됐고 테스트가 부재를 단언한다.
+- **차단 2 해소**: `git_is_ancestor`가 `merge-base --is-ancestor` 종료 코드로 판정한다. 오류 문구도 "history was rewritten"으로 바뀌어 **훼손과 이력 재작성을 구분**한다 — 내가 요청한 구분이 반영됐다. 테스트가 정상 커밋 후 통과와 `--amend` 후 거부를 각각 잡는다. `cargo test` **23 passed**.
+- **부작용 실측 완료 — 앞서 추정으로 표시했던 것을 사실로 갱신**: 재작업된 인자를 그대로 실행하니 세션 파일이 `~/.codex/sessions` **447 → 448개**로 늘고 `rollout-…-019ff4c8-….jsonl`이 생성됐다. 즉 ① 재개에 필요한 rollout이 실제로 남아 차단 1의 수정이 목적을 달성했고, ② **파일럿 세션이 사용자의 실제 Codex 기록에 섞인다**는 예측도 사실로 확인됐다.
+- **남은 것(차단 아님)**: 세션 ID를 앱이 얻을 수단이 아직 없다. rollout 파일명에 ID가 있지만 안정적으로 포착하려면 `--json`이 필요하다 — **재개는 가능해졌을 뿐 아직 구현되지 않았다.** 실행기 조각에서 닫아야 §7.4 원장 계약이 성립한다. `source`가 파일럿 루트 안인지 검사하는 항목도 미반영.
+
+**다음 할 일** → S2는 실행기(`--json`·`--output-last-message`·취소)와 수동 경계 시나리오 4건이 남았다. Codex 1차 담당. 미커밋 변경(`orchestration.rs` 신규 포함)은 커밋 승인 대기
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S2 차단 2건 코드·테스트 반영 — 재개 가능한 세션과 후속 커밋 허용**
+
+- 사용자 지적에 따라 문서 확인에서 멈추지 않고 합의된 수정안을 `orchestration.rs`에 반영했다. Codex 고정 실행 인자에서 `--ephemeral`을 제거해 세션 rollout과 정확한 세션 ID 재개 계약이 양립하도록 했다.
+- `HEAD == start_commit` 동일성 검사는 `git merge-base --is-ancestor <start_commit> HEAD`로 교체했다. 정상적인 구현·재작업 커밋은 허용하고, amend·rebase·squash 등으로 시작 커밋이 이력에서 사라지면 이력 재작성 때문에 복원 기준을 찾을 수 없다는 오류로 거부한다.
+- 회귀 테스트에 후속 커밋 허용, 시작 커밋을 제거한 amend 거부와 오류 문구, `--ephemeral` 부재를 추가했다.
+- 검증은 수정 파일 `rustfmt --check`, Rust 전체 **23 passed·6 ignored**, `pnpm build`, `git diff --check`를 통과했다. 전체 `cargo fmt --check`는 이번 변경과 무관한 기존 Rust 파일들의 포맷 차이 때문에 실패해 해당 파일들을 임의 변경하지 않았다.
+
+**다음 할 일** → Claude가 차단 2건의 코드·테스트 반영을 교차 재검토한다. S2 변경은 아직 커밋·push하지 않는다.
+
+### 2026-08-12 · by GPT-5 Codex
+
+**확인 — Claude의 S2 재검토는 수정 완료가 아니라 현재 코드 상태의 재확인 (제품 코드 변경 없음)**
+
+- Claude가 지적한 상태는 실제 코드와 일치한다. `orchestration.rs`에는 여전히 `--ephemeral`과 `HEAD == start_commit` 비교가 남아 있어, 앞서 합의한 **세션 보존**과 **시작 커밋 자손 검사**가 아직 구현되지 않았다.
+- 파생 경계도 타당하다. `--ephemeral` 제거 후 세션 기록이 사용자 `CODEX_HOME`에 남을 가능성은 재개 기능의 비용으로 명시하되, 실제 파일 생성 위치·동작은 아직 실측하지 않았으므로 확정 사실로 확대하지 않는다.
+- 자손 검사는 정상 후속 커밋을 허용하지만 amend·rebase·squash처럼 시작 커밋을 이력에서 제거하면 거부한다. 구현 시 `git merge-base --is-ancestor` 종료 코드로 판정하고, 오류 문구는 일반 훼손이 아니라 **이력 재작성으로 복원 기준을 찾을 수 없음**을 설명해야 한다.
+- 이번 확인에서는 제품 코드나 테스트를 변경하지 않았고 테스트도 재실행하지 않았다. 커밋·push도 하지 않았다.
+
+**결론** → Claude의 재검토는 정확하며 S2는 여전히 **미통과**다. 다음 작업은 차단 2건을 코드와 테스트에 반영한 뒤 다시 교차 검토하는 것이다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 상태 확인 — 차단 2건은 결정만 났고 코드는 아직 그대로 (제품 코드 변경 없음)**
+
+- Codex가 차단 2건을 모두 수용하고 해결 방향을 정했다. `--ephemeral` 제거, `HEAD == start_commit`을 **자손 검사**로 교체. 후자는 내가 제시한 두 선택지 중 강한 쪽이고 복원 기준을 실제로 지키므로 단순 제거보다 낫다 — 동의한다.
+- **다만 코드는 아직 반영되지 않았다.** `orchestration.rs:192`에 `--ephemeral`이, `:172`에 `head != marker.start_commit`이 그대로 있다. Codex 자신도 "S2는 아직 미통과"로 적었다. 문서상 결정과 코드 상태를 혼동하지 않도록 여기 기록한다.
+- **재작업 전 파생 결과 1건 추가**(§7.9 `재작업 전 확인 사항`): `--ephemeral`을 빼면 파일럿 세션이 **사용자의 실제 `~/.codex/sessions`에 섞인다.** `--ignore-user-config`는 설정만 배제하고 인증은 `CODEX_HOME`을 계속 쓰므로, 앱 전용 홈으로 돌리면 로그인이 깨진다. 재개 가능성과 맞바꾸는 값이니 명시적으로 수용한 결과로 남겨야 한다(세션 파일 실제 생성은 미실측).
+- 자손 검사의 경계 조건도 남겼다: `--amend`·rebase·squash 시 조상 관계가 끊겨 거부되는데, 오류 문구가 훼손이 아니라 **이력 재작성** 때문임을 구분해야 한다. 판정은 `git merge-base --is-ancestor`의 종료 코드로 충분하다.
+
+**다음 할 일** → Codex가 차단 2건을 코드·테스트에 반영 → Claude 재검토. S2는 여전히 **미통과**
+
+### 2026-08-12 · by GPT-5 Codex
+
+**확인 — Claude의 S2 조건부 검토와 차단 2건에 동의 (제품 코드 변경 없음)**
+
+- Claude가 전역 `never + danger-full-access` 설정이 S2 고정 인자에 섞이지 않는다는 점을 비임시 홈 경로 쓰기 실패로 실측한 방법과 결론은 타당하다. 플래그 존재·로그인 유지·Rust 테스트 확인도 현재 코드와 일치한다.
+- `--ephemeral`은 세션 rollout을 남기지 않아 정확한 세션 ID 재개 계약과 충돌한다. 기존 §6·§7.4·§7.7 설계를 유지하고 **플래그를 제거**하기로 결론냈다. OpenAI 공식 문서의 ephemeral·resume 설명과도 일치한다.
+- `HEAD == start_commit`은 정상적인 구현 커밋 뒤 재작업까지 막는다. 시작 커밋을 복원 기준으로 유지하되 **현재 HEAD가 시작 커밋의 자손인지 검사**하도록 바꾸는 것이 맞다.
+- 보완 권고 4건도 수용한다. `--json`·마지막 메시지 파일은 실행기와 함께, 파일럿 복제본 재복제 거부·원본 dirty 상태 노출·Windows Git not-found 분류는 각 준비/실행 경계에 반영한다.
+
+**결론** → S2 1차 구현은 **아직 미통과**다. 다음 작업은 위 두 차단의 코드·테스트 반영이며, 이번 확인에서는 제품 코드를 수정하거나 커밋·push하지 않았다.
+
+### 2026-08-12 · by Claude Opus 5
+
+**S2 교차 검토 — 안전 경계는 실측 통과, 설계 충돌 2건으로 조건부 (제품 코드 변경 없음)**
+
+Codex의 S2 1차 구현(`src-tauri/src/orchestration.rs`)을 검토했다. 상세는 `docs/proposals/m4-orchestration.md` §7.9 `S2 교차 검토`.
+
+- **완료 기준 실측 통과**: 이 머신의 전역 설정이 `never + danger-full-access`인 상태에서 S2 고정 인자를 그대로 실행해 **비임시 경로(홈)에 쓰기**를 시도시켰다. `operation not permitted`, 종료 코드 1, 파일 미생성 — **사용자 설정이 파일럿에 새지 않는다.** 임시 경로 예외를 피하려 일부러 홈을 대상으로 했고 canary는 즉시 제거했다.
+- 플래그 6개가 설치된 CLI에 모두 실재함을 확인했다. `--ignore-user-config`가 *"auth still uses CODEX_HOME"* 이라 **위험한 설정만 배제하고 로그인은 유지**하는 정확한 선택이다. `cargo test` 22 passed.
+- **차단 1 — `--ephemeral`이 재개 설계와 충돌**: 실제 의미가 "세션 파일을 디스크에 남기지 않음"이라, §6·§7.4·§7.7이 요구하는 "정확한 세션 ID로 재개"가 **성립하지 않는다.** 플래그를 빼든 재개를 포기하든 택일이 필요하다. 지금은 코드와 설계 문서가 다른 말을 한다.
+- **차단 2 — `HEAD == start_commit` 검사가 재작업을 막음**: 구현 역할이 커밋을 한 번이라도 하면 이후 preflight가 영구 실패한다(`orchestration.rs:171-174`). §6·§7.3이 재작업 라운드를 정상 분기로 두는 것과 어긋나고, 커밋 여부에 따라 갈리는 비결정적 경계다. 경계 검사는 "앱이 만든 복제본인가"까지로 좁히고, 커밋을 보려면 동일성이 아니라 자손 여부를 봐야 한다.
+- **보완 권고(차단 아님)** 4건: `--json`·`--output-last-message` 누락, 원본이 파일럿 루트 안인지 미검사, `git clone`이 미커밋 변경을 안 가져온다는 점의 사용자 노출, Windows `git`의 PATH 의존.
+
+**다음 할 일** → 차단 2건은 **코드와 설계 문서 중 어느 쪽을 고칠지**의 결정이 먼저다. 정해지면 Codex가 반영 후 재검토. 수동 경계 시나리오 4건은 실행기 구현 후 실측
+
+### 2026-08-12 · by GPT-5 Codex
+
+**S1 커밋 + S2 파일럿 실행 경계 1차 구현 (제품 UI 미노출)**
+
+- 사용자 승인에 따라 검토 통과한 S1 변경을 `m4/orchestration`에 `bcf49f1`(`fix: 안전 프리셋 적용 상태와 안내 문구 정합성 개선`)로 커밋했다. push와 `main` 병합은 하지 않았다.
+- OpenAI 공식 `codex exec` 문서와 로컬 CLI `--help`를 대조해 `--ignore-user-config --ignore-rules --sandbox workspace-write --config approval_policy="untrusted"`를 파일럿 고정 정책으로 채택했다. `--ephemeral`과 프롬프트 옵션 종료자 `--`도 포함한다.
+- `src-tauri/src/orchestration.rs`를 추가했다. 앱 데이터 `m4-pilots/` 아래의 `--no-hardlinks` Git 복제본만 준비하고, 매니페스트를 작업 폴더 밖에 저장하며 실제 경로·시작 커밋을 실행 직전에 다시 확인한다. 원본·무표식 폴더는 거부한다.
+- `--approve-for-me`, bypass 2종, `--full-auto`, `--add-dir`를 사전 거부한다. 샌드박스와 승인 정책을 정확히 한 번만 허용해 중복 옵션으로 뒤에서 덮는 경우도 거부한다.
+- Tauri에는 `prepare_codex_pilot`과 `codex_pilot_preflight`만 연결했다. 아직 UI와 실제 Codex 실행은 연결하지 않았다. 취소 가능한 자식 프로세스 관리와 중단 후 증거 보존을 먼저 구현해야 하기 때문이다.
+- 관련 자동 테스트 3건 통과: 복제본/원본 분리, 원본·무표식 대상 거부, 사용자 정책 배제와 위험 플래그·중복 샌드박스 거부. 전체 검증은 Rust 22 passed·6 ignored, `pnpm build`, `git diff --check` 통과. 토큰과 로그인은 사용하지 않았다.
+
+**다음 할 일** → Claude가 S2 1차 구현을 교차 검토한다. 통과 후 취소 가능한 실행기를 구현하고, 제안서 §7.9의 저장소 안 변경·비임시 밖 쓰기·임시 경로 한계·취소 시나리오를 실제 Codex로 검증한다. S2 변경은 아직 커밋·push하지 않았다.
 
 ### 2026-08-12 · by GPT-5 Codex
 
@@ -274,127 +602,6 @@ M4 §8의 1순위였던 현행 안전 감사를 수행했다. 격리 픽스처�
 
 **다음 할 일** → `docs/proposals/m4-orchestration.md` §8 참조
 
-### 2026-07-23 · by Claude Opus 4.8
+### 2026-07-23 및 그 이전 → `docs/archive/history-2026-07.md`
 
-**추가 작업 — v0.1.2 범프 (자동 업데이터 첫 탑재 릴리스)**
-- 업데이터 배선이 CI에서 완전 검증됨(build-macos/windows가 서명 env로 통과) → v0.1.2로 범프. tauri.conf.json·package.json·Cargo.toml·Cargo.lock 동기화
-- 이 버전이 **업데이터를 처음 담은 릴리스**. 태그 push하면 서명된 latest.json이 릴리스에 올라가 이후 버전부터 앱이 자동 업데이트. v0.1.0/v0.1.1 사용자는 v0.1.2를 한 번 수동 설치해야 함
-- **결과**: v0.1.2(`a453dc9`) 릴리스 빌드 macOS·Windows 성공. 자산에 `latest.json` + 각 업데이터 아티팩트 `.sig`(서명) 첨부. `latest.json` 검증: version 0.1.2, 7개 플랫폼 항목 전부 서명 포함, URL이 v0.1.2 자산을 정확히 가리킴 → 자동 업데이터 완전 작동 확인. 릴리스 노트 작성(자동 업데이트 강조). **draft 상태 — 공개는 사용자 결정 대기**
-
-**버그 수정 — 웹사이트 네비게이션 반복 시 먹통**
-- 증상: 앵커 네비게이션(#homebase 등)을 빠르게 왔다갔다 여러 번 누르면 페이지가 멈춤
-- 원인: page.tsx는 커스텀 JS 없는 순수 서버 컴포넌트 → JS 문제 아님. **sticky `.site-header`의 `backdrop-filter: blur(18px) saturate(150%)`** 가 `scroll-behavior: smooth`와 겹쳐, 반복 스크롤 중 매 프레임 blur 재계산으로 컴포지터가 과부하되어 멈춤
-- 수정(`website/app/globals.css`): sticky 헤더 배경을 거의 불투명(0.88→0.96)으로 올리고 `backdrop-filter`(webkit 포함) 제거. `.trust-chip`의 blur(8px)도 제거(배경 0.92→0.96, 비sticky라 부차적). 배경이 이미 불투명해 시각 변화는 미미
-- 검증: `npm test` 2 pass, `npm run lint` 클린, prerender OK. 테스트가 의존하는 `.site-header{position:sticky; top:0}`·`scroll-padding-top` 유지
-
-**추가 작업 — 인앱 자동 업데이터 구현 (tauri-plugin-updater, 무료 서명)**
-- 배경: v0.1.x 사용자는 새 버전 받으려면 수동 재다운로드뿐 → 앱이 스스로 업데이트하도록. 업데이터 서명 키는 무료(ed25519), 유료 코드 서명과 무관
-- Rust: `Cargo.toml`에 `tauri-plugin-updater`·`tauri-plugin-process` 추가, `lib.rs`에 플러그인 등록
-- 설정: `tauri.conf.json` bundle에 `createUpdaterArtifacts: true`, `plugins.updater`(endpoints=releases/latest/download/latest.json, pubkey=**자리표시자 REPLACE_WITH_UPDATER_PUBLIC_KEY**). `capabilities/default.json`에 `updater:default`·`process:default`
-- 프론트: `@tauri-apps/plugin-updater`·`plugin-process` 설치. `AppUpdateBanner` 컴포넌트(시작 시 `check()` → 있으면 배너 → `downloadAndInstall()`+`relaunch()`) 헤더 밑에 배치. `appUpdate.*` i18n ko/en, `.app-update-banner` CSS
-- CI: `release.yml`에 `TAURI_SIGNING_PRIVATE_KEY`·`_PASSWORD` env 추가(있으면 tauri-action이 업데이터 서명 + latest.json 생성·업로드)
-- 검증: `pnpm build`·`cargo check` 통과
-- 키 생성 완료(사용자, 빈 비밀번호). 공개 키를 `~/.tauri/hello-agent-updater.key.pub`에서 읽어 tauri.conf.json pubkey에 **반영 완료**(개인 키는 미접근). 개인 키는 저장소 밖 `~/.tauri/`에 보관
-- **남은 수동 단계(사용자)**: GitHub 시크릿 2개 등록 — `TAURI_SIGNING_PRIVATE_KEY`(개인 키 파일 내용), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`(빈 값). 그다음 v0.1.2 범프·태그 push하면 서명된 latest.json이 릴리스에 올라가 자동 업데이트 활성화
-- **함정: 소급 안 됨** — v0.1.1까지는 업데이터가 없어 latest.json 확인 불가. 업데이터 첫 탑재 버전(v0.1.2)은 사용자가 한 번 수동 설치해야 이후부터 자동 업데이트됨
-- **CI 실패·수정(발견)**: `createUpdaterArtifacts: true` + pubkey면 `tauri build`가 **서명을 강제** → ci.yml의 build-macos/build-windows가 "public key는 있는데 private key 없음"으로 실패. 시크릿을 저장소에 등록한 뒤 **ci.yml의 두 build 스텝에도 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` env 추가**로 해결. (test 잡은 `cargo test`뿐이라 무관, 통과). release.yml은 원래 env를 넣어둠
-
-**추가 작업 — v0.1.1 릴리스 준비 (버전 범프)**
-- 사용 팁 기능을 담아 v0.1.1로 배포하려고 버전을 3곳 모두 올림: `src-tauri/tauri.conf.json`(파일명 기준)·`package.json`·`src-tauri/Cargo.toml` → `0.1.1`, `Cargo.lock`도 `cargo update -p hello-agent`로 동기화
-- 배포 흐름: 커밋·push 후 `v0.1.1` 태그 push → release.yml이 초안 릴리스 빌드(태그·push는 분류기 차단이라 사용자가 `!`로 실행)
-- 릴리스 노트는 초안 생성 후 gh release edit로 작성 예정(사용 팁 추가 강조)
-- **문서 버전 하드코딩 제거**: 다운로드 링크는 이미 `releases/latest`라 버전 무관. 유일하게 버전이 박혀 있던 README 문구("첫 베타 v0.1.0")를 "베타 버전이 공개되어 있어요 + 최신"으로 바꿔 릴리스마다 문서 수정 불필요하게 함. 웹사이트 page.tsx는 원래 버전 무관 문구라 무변경(0.145.0은 목업 속 가짜 Codex 버전)
-- **결과**: v0.1.1 태그(`d086ce4`) 릴리스 빌드 **macOS·Windows 성공**. `0.1.1` .dmg/.exe/.msi + app.tar.gz 첨부. 릴리스 노트 작성(사용 팁 강조, v0.1.1 다운로드 링크). 사용자 승인으로 **공개 완료**
-- **함정 발견·수정 — prerelease와 releases/latest**: `releases/latest`는 **정식(비-prerelease) 최신만** 가리킴. v0.1.0·v0.1.1이 모두 prerelease라 문서의 latest 링크가 `/releases` 목록으로 튕겼음 → 두 릴리스 모두 `--prerelease=false`로 끄고 `release.yml`의 `prerelease: true`→`false`로 변경. 확인: API `isLatest=true`(v0.1.1), `releases/latest`→`/tag/v0.1.1` 정상. 베타 표시는 버전·노트로 대체
-
-**논의 — 앱 자동 업데이트(다음 작업 후보)**
-- 사용자 질문: v0.1.0 받은 사람이 v0.1.1로 어떻게 업데이트? 현재는 **수동 재다운로드만 가능**(앱 본체는 자기 업데이트 기능 없음. 홈의 "업데이트"는 Claude/Codex 에이전트 대상이지 앱 본체가 아님)
-- 해결책: `tauri-plugin-updater`. 업데이터 서명 키는 **무료**(ed25519, 유료 코드 서명과 별개). 릴리스가 이미 `app.tar.gz`(업데이터 번들) 생성 중이라 절반 준비됨. 플러그인+키+`latest.json` 설정+앱 체크 로직만 추가하면 됨
-- 함정: (1) 소급 안 됨 — v0.1.0/v0.1.1 사용자는 업데이터 첫 탑재 버전(예 v0.1.2)까지 한 번 수동 설치 필요, 이후 자동. (2) macOS 미서명이면 업데이트 후 첫 실행 경고 재발 가능(기능엔 무관)
-
-**추가 작업 — 초보자용 "코딩 에이전트 사용 팁" 추가 (졸업식 + 홈)**
-- 배경: 온보딩 끝난 비개발자가 "그래서 뭘 어떻게 시키지?"에서 다시 막히는 게 제품 최대 공백. 사용자 제안으로 팁 추가, 위치는 두 곳 다 합의
-- `src/App.tsx`: 재사용 컴포넌트 `UsageTips` 신설. **졸업식** 성공 화면 next-guide 뒤에 인라인(`agent` prop 전달), **홈** 하단에 접이식 `<details className="tips-card">` 카드로 배치
-- 팁 구성: ①예시 프롬프트 3(복사용) ②알아두면 좋은 것 3 ③**에이전트별 특징** ④**컨텍스트 파일**(CLAUDE.md·AGENTS.md에 규칙 적어두면 매번 참고). 졸업식은 해당 에이전트만, 홈은 둘 다 표시
-- **에이전트 특징 문구는 실제 화면 용어를 그대로 사용**(Claude=`auto mode`, Codex=`goal`) + 괄호로 한국어 뜻. 사용자 피드백: "자동 승인/목표"로 의역하면 실제 버튼을 못 찾아 애매함
-- i18n: `tips.*`·`tips.agent.{claude-code,codex}`·`tips.context.*`·`home.tips.title` 키를 ko/en 양쪽에 추가(tsc가 MessageKey 정합성 검증). 전문용어 없이 비개발자 눈높이
-- CSS(`src/App.css`): 팁 카드·예시 칩·접이식 스타일 추가. **예시 프롬프트는 복사해서 쓰는 것이라 `user-select` 예외 목록에 `.tips-examples li` 추가**(전역 user-select:none 때문에 안 그러면 복사 불가)
-- 참고: `ProjectInfo`엔 agent 필드가 없음 → 졸업식은 `GraduationStep`의 `agent` prop을 사용
-- 검증: `pnpm build`(tsc+vite) 통과. 아직 커밋 안 함(사용자 승인 대기)
-
-**한 일 — README 현행화 커밋·push, 정식 배포(코드 서명) 경로 정리**
-- 앞선 Codex의 README 보완 변경(루트·웹사이트 README + 이력)을 한 커밋으로 묶어 커밋·push (`1e59690`). 세 파일을 함께 묶은 이유는 history 최신 엔트리가 바로 그 README 작업 기록이라 코드+이력이 한 단위이기 때문
-- push 후 CI 끝까지 감시: website / build-macos / build-windows / test(macOS·Windows) **전부 success**
-- 사용자 질문("정식버전은 어떻게? 뭘 등록?")에 정식 배포 경로 분석 제공
-
-**정식 배포(코드 서명) 정리 — 다음 작업자 참고**
-- **macOS**: Apple Developer Program 등록($99/년) → Developer ID 서명 → notarization(공증) → staple. 최신 macOS는 우클릭>열기 우회도 조여지는 추세라 사실상 필수
-- **Windows**: OV($100~300/년) 또는 EV($300~600+/년) 코드사인 인증서. 2023년부터 키는 하드웨어 토큰/HSM 의무 → CI 자동 서명은 클라우드 HSM(예: Azure Trusted Signing ~$10/월) 필요. EV는 SmartScreen 경고 즉시 제거
-- **배포 채널**: GitHub Releases 추천(무료, 현 CI가 이미 .dmg/.exe 아티팩트 생성). `tauri-plugin-updater`로 앱 내 자동 업데이트 가능. **Mac App Store는 샌드박스 필수라 "다른 CLI를 설치하는 앱" 성격상 부적합 — 비추천**
-- **제안한 단계**: (1) 무료 미서명 GitHub Releases = 베타/지인용, (2) macOS 서명·공증부터($99), (3) Windows 인증서+Azure Trusted Signing. 서명 자리를 잡아둘 릴리스 워크플로(태그 push→빌드→릴리스 생성)는 미착수(사용자 결정 대기)
-
-**추가 작업 — GitHub Releases 자동 배포 워크플로 신설(`.github/workflows/release.yml`)**
-- 사용자가 "GitHub 릴리즈가 맞는 방향" 확정 → `v*` 태그 push 시 빌드하는 릴리스 워크플로 추가
-- `tauri-apps/tauri-action`으로 빌드+릴리스 생성/업로드 일원화. macOS는 `--target universal-apple-darwin`(Intel·Apple Silicon 공용 .dmg), Windows는 기본(.exe). 매트릭스 두 잡이 같은 tagName으로 한 릴리스에 아티팩트를 누적
-- `releaseDraft: true` + `prerelease: true` → 초안으로 올라가 사람이 검토 후 공개. 미완성 공개 방지
-- **서명은 자리만 확보**: Apple 시크릿(APPLE_CERTIFICATE/…/APPLE_TEAM_ID)을 env로 연결해둠. 시크릿이 비면 미서명 빌드, 채우면 코드 변경 없이 서명·공증 켜짐
-- 아직 태그 미발행 → 실제 릴리스는 돌지 않음. YAML 문법만 로컬 검증(python yaml.safe_load 통과). 아직 커밋 안 함(사용자 승인 대기)
-
-**추가 작업 — 소개 웹사이트 Vercel 배포 문제 진단·해결(prerender 방식)**
-- 증상: 사용자가 Vercel에 배포(프리셋 Vite) 성공했으나 페이지가 안 뜸
-- **근본 원인**: `website`는 표준 Next가 아니라 **vinext**(Vite+Cloudflare Worker) 앱. 빌드 산출물 `dist/`에 **`index.html`이 없음** — HTML은 요청 때 `dist/server/index.js`(Worker)가 SSR로 생성. Vercel 정적 서빙엔 렌더할 서버가 없어 빈 화면. (`dist/server/wrangler.json`도 자동 생성돼 Cloudflare 배포는 원래 준비돼 있음)
-- 사용자가 "모든 게 Vercel에 있다"며 Vercel 유지 원함 → **prerender 방식** 채택: 페이지가 완전 정적(next/image·데이터패칭 없음, 유일 동적요소는 `layout.tsx`의 `headers()` 기반 og 절대 URL)이라 안전
-- 신설 `website/build/prerender.mjs`: 빌드 후 Worker를 1회 `fetch("/")` 실행해 완성 HTML을 `out/index.html`로 저장 + `dist/client/`(assets·og.png) 복사 + `app/{icon,apple-icon}.png`를 정적 경로로 복사. 호스트는 `VERCEL_PROJECT_PRODUCTION_URL`(빌드 시 주입)→`SITE_HOST`→기본값
-- 신설 `website/vercel.json`: `framework: null`, installCommand는 CI와 동일한 rolldown optional-deps 우회(`rm -f package-lock.json && npm install`), buildCommand `npm run build && node build/prerender.mjs`, outputDirectory `out`
-- **검증(로컬)**: 전체 체인 `npm run build`(exit 0) → prerender(exit 0, 29KB HTML). HTML이 참조하는 `/assets/*.js·css` 5개 전부 `out/`에 실존, og 절대 URL·title·아이콘 정상. `npm run lint` 클린(eslint config가 `out/**`·`build/**` 무시), `npm test` 2 pass. `out/`·`dist/`는 이미 gitignore
-- 미검증: 실제 Vercel 빌드 컨테이너에서의 재현(push 후 확인 필요)
-
-**추가 작업 — 첫 릴리스(v0.1.0) 실행, macOS 서명 실패 → 수정**
-- 사용자가 Vercel 배포 성공 확인 후 릴리스 진행. `v0.1.0` 태그 push로 release.yml 첫 실행(태그·push는 auto-mode 분류기가 차단 → 사용자가 `!`로 직접 실행)
-- 결과: **Windows 성공**(초안 릴리스에 `.exe`·`.msi` 첨부), **macOS 실패**
-- **실패 원인**: release.yml에 `APPLE_*` env를 빈 시크릿으로라도 넘겼더니 tauri가 서명을 시도 → `security import: failed to import keychain certificate`. 인증서 없는데 서명 경로가 켜진 것
-- **수정**: env 블록에서 `APPLE_*` 6개를 제거(빈 값도 넘기지 않음)해 미서명으로 빌드되게 함. 서명 켜는 방법은 주석으로 명시. YAML 검증 통과
-- **주의(핵심 발견)**: 미서명 배포 시 `APPLE_*` env는 아예 넘기지 말 것. 빈 문자열이라도 존재하면 tauri가 서명을 시도하다 실패. Windows는 서명 env가 없어 미서명으로 정상 빌드됨
-- 재실행 주의: 워크플로 파일은 **태그가 가리키는 커밋** 기준으로 실행됨 → 수정본을 적용하려면 v0.1.0 태그를 새 커밋으로 재지정(delete+recreate) 후 재push해야 함. 기존 초안 릴리스는 tauri-action이 같은 tagName으로 재사용
-
-**재실행 결과 — 성공 ✅**
-- 수정본(`84201b2`)으로 v0.1.0 태그 재지정·push → 워크플로 재실행. **macOS·Windows 둘 다 success**
-- 초안(draft·prerelease) 릴리스 `v0.1.0`에 아티팩트 4개 첨부: `Hello.Agent_0.1.0_universal.dmg`(6.6MB)·`Hello.Agent_universal.app.tar.gz`·`Hello.Agent_0.1.0_x64-setup.exe`(2.3MB)·`Hello.Agent_0.1.0_x64_en-US.msi`(3.4MB)
-- 릴리스 파이프라인 **첫 통과 검증 완료**. 이후 릴리스는 `vX.Y.Z` 태그 push만 하면 됨(단, tauri.conf.json version과 태그 일치)
-- 미공개 상태: 초안이라 GitHub Releases에서 사람이 직접 Publish해야 공개됨
-
-**공개(Publish) 완료 ✅ — v0.1.0 정식 라이브**
-- 릴리스 노트 작성: 6단계 온보딩·홈베이스 소개 + 다운로드 표(실제 파일 링크) + 미서명 경고 우회법(macOS 우클릭>열기/시스템 설정, Windows 추가 정보>실행). `gh release edit`로 적용
-- **다운로드 링크 주의(발견)**: 초안 상태의 자산 URL은 `.../download/untagged-<hash>/...` 형태 → Publish하면 `.../download/v0.1.0/...`로 바뀜. 그래서 노트 링크는 처음부터 `v0.1.0` 정식 형태로 작성(초안일 땐 404, 공개 후 동작)
-- 사용자 승인으로 공개: `gh release edit v0.1.0 --draft=false`. `draft=false, prerelease=true`. dmg 다운로드 링크 HEAD 200 확인
-- 공개 URL: https://github.com/wonseok-han/hello-agent/releases/tag/v0.1.0
-
-**다음 할 일**
-- [ ] 웹사이트 다운로드 섹션·README의 GitHub 링크를 실제 릴리스(v0.1.0 다운로드)로 반영
-- [ ] Apple Developer / Windows 코드사인 인증서 등록 여부 결정 → 시크릿 채우고 release.yml에 APPLE_* env 복원해 서명 활성화
-- [ ] (미커밋) 이 이력 업데이트 커밋·push 대기
-- [ ] 첫 릴리스 시 `v0.1.0` 태그 push → 초안 릴리스 확인 후 공개. 릴리스 워크플로 실제 통과 검증(현재 미검증, 태그 발행해야 실행됨)
-- [ ] Apple Developer / Windows 코드사인 인증서 등록 여부 결정 → 시크릿 채워 서명 활성화
-- [ ] (참고) Vercel 대신 Cloudflare Workers도 `npm run build` 후 `wrangler deploy`로 즉시 가능(SSR·이미지 최적화 유지). prerender는 정적화라 `/_vinext/image` 런타임 최적화는 포기(현재 페이지는 미사용이라 무영향)
-
-### 2026-07-23 · by GPT-5 Codex
-
-**한 일 — 프로젝트와 소개 웹사이트 README 보완**
-- 루트 README의 오래된 한국어 단일 지원 표기를 한·영 지원으로 바로잡고, 공개 다운로드 전 베타 준비 상태를 명시
-- 온보딩 이후 프로젝트 자동 발견, 에이전트 상태·업데이트, 오류 복구를 제품 핵심 기능으로 추가
-- 데스크톱 앱의 개발 요구 사항, 실제 설치 E2E, CI 검증 범위와 작업 이력 문서 링크를 보강
-- 웹사이트 README에 Node 요구 버전, 명령별 역할, 파일 구조, 수정 시 동기화 원칙, 렌더링 테스트와 OpenAI Sites 배포 구조를 정리
-
-**검증**
-- 두 README의 명령·지원 범위·배포 설명을 `package.json`, `website/package.json`, CI, Sites 설정, 최신 워크로그와 대조
-- 웹사이트 README에 기록한 페이지·아이콘·공유 이미지·테스트·호스팅 설정 파일의 실제 존재 확인
-- `website/`의 `npm test`: 빌드 및 렌더링 테스트 2 passed
-- `website/`의 `npm run lint` 통과
-
-**다음 할 일**
-- [ ] 깨끗한 macOS·Windows 환경에서 출시 후보를 검증한 뒤 공개 다운로드 링크와 설치 안내 추가
-- [ ] 첫 베타 배포 시 웹사이트 README에 실제 배포 주소와 운영 절차 기록
-
-### 2026-07-22 및 그 이전 → `docs/archive/history-2026-07.md`
-
-15개 엔트리(2026-07-16 ~ 2026-07-22)를 아카이브로 옮겼다. 재사용할 결정·함정은 위 `핵심 결정·발견`에 반영돼 있으므로, 통상 아카이브를 열 필요는 없다.
+17개 엔트리(2026-07-16 ~ 2026-07-23)를 아카이브로 옮겼다. 재사용할 결정·함정은 위 `핵심 결정·발견`에 반영돼 있으므로, 통상 아카이브를 열 필요는 없다.

@@ -4,6 +4,7 @@ mod editor;
 mod error;
 mod install;
 mod login;
+mod orchestration;
 mod project;
 mod status;
 
@@ -16,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(login::LoginSession::default())
+        .manage(orchestration::PilotSession::default())
         .invoke_handler(tauri::generate_handler![
             detect::detect_environment,
             install::install_agent,
@@ -23,6 +25,12 @@ pub fn run() {
             login::start_login,
             login::submit_login_code,
             login::cancel_login,
+            orchestration::prepare_codex_pilot,
+            orchestration::codex_pilot_preflight,
+            orchestration::run_codex_pilot,
+            orchestration::cancel_codex_pilot,
+            orchestration::recover_codex_pilot,
+            orchestration::discard_codex_pilot,
             project::create_first_project,
             project::run_first_chat,
             project::scan_projects,

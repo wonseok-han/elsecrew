@@ -101,7 +101,7 @@ npm run lint
 ```
 
 - 네트워크 격리 설치 E2E: `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`
-- Rust 1.85+ 필요(edition 2024)
+- Rust 1.85+ 권장. `src-tauri/Cargo.toml`의 실제 edition은 **2021**이다(포맷 검사 시 `rustfmt --edition 2021`)
 
 ## Git 작업 규칙
 
