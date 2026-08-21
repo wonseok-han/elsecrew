@@ -1,10 +1,13 @@
 mod agent;
+mod claude_pilot;
 mod detect;
 mod editor;
 mod error;
+mod handoff;
 mod install;
 mod login;
 mod orchestration;
+mod proctree;
 mod project;
 mod status;
 
@@ -18,6 +21,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(login::LoginSession::default())
         .manage(orchestration::PilotSession::default())
+        .manage(handoff::HandoffSession::default())
         .invoke_handler(tauri::generate_handler![
             detect::detect_environment,
             install::install_agent,
@@ -31,6 +35,12 @@ pub fn run() {
             orchestration::cancel_codex_pilot,
             orchestration::recover_codex_pilot,
             orchestration::discard_codex_pilot,
+            handoff::begin_handoff,
+            handoff::release_handoff,
+            handoff::run_handoff,
+            handoff::cancel_handoff,
+            handoff::discard_handoff_workspace,
+            handoff::handoff_available,
             project::create_first_project,
             project::run_first_chat,
             project::scan_projects,

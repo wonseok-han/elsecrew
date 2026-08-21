@@ -1284,3 +1284,237 @@ button.ghost:hover:not(:disabled) {
     color: #1c120e;
   }
 }
+
+/* ── §7.10 자동 인계 파일럿 (macOS 전용) ──
+   화면 계약은 §7.10.2다. 목표·진행 상태·결과 요약·변경 내용·보관/폐기만 앞에 두고,
+   증거 경로와 세션 식별자는 접이식 상세 뒤로 보낸다. */
+.handoff-card {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+}
+
+.handoff-head h3 {
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.handoff-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.handoff-head p {
+  margin: 0;
+}
+
+.handoff-notice {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 13px;
+}
+
+.handoff-goal {
+  display: block;
+}
+
+.handoff-goal > span {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.handoff-goal textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.handoff-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+
+/* 진행 상태는 역할 이름이 아니라 일의 이름으로 보여준다 */
+.handoff-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.handoff-step {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.handoff-step.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+
+.handoff-step.done {
+  color: var(--text);
+}
+
+/* 멈춘 지점. 진행을 통째로 지우지 않고 **어디서 멈췄는지**를 남긴다 */
+.handoff-step.stopped {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* 막고 있는 사본 — 새 실행보다 먼저 눈에 들어와야 한다 */
+.handoff-blocked {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--warn-soft);
+}
+
+.handoff-blocked h4 {
+  margin: 0 0 6px;
+  color: var(--danger);
+}
+
+.handoff-blocked p {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.handoff-blocked-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.handoff-result {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.handoff-result h4 {
+  margin: 0 0 8px;
+}
+
+.handoff-result h5 {
+  margin: 16px 0 6px;
+  font-size: 13px;
+}
+
+.handoff-summary {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.handoff-locked {
+  margin: 0 0 8px;
+  color: var(--accent-deep);
+  font-size: 13px;
+}
+
+/* 잠금을 저장하지 못했다 — 다시 켜면 풀리므로 더 강하게 알린다 */
+.handoff-locked.warn {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.handoff-files {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.handoff-files code {
+  font-size: 12px;
+}
+
+.handoff-files li {
+  margin-bottom: 4px;
+}
+
+/* 무엇이 어떻게 바뀌었는지 — 삭제·이름 변경을 목록에서 구분한다 */
+.handoff-change {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.handoff-change.deleted {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.handoff-change.added {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.handoff-keep {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.handoff-details {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.handoff-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.handoff-details dt {
+  margin-top: 10px;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.handoff-details dd {
+  margin: 4px 0 0;
+}
+
+.handoff-path {
+  display: block;
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--muted);
+}
+
+.handoff-reason code {
+  font-size: 11px;
+  word-break: break-all;
+}

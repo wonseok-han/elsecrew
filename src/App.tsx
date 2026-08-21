@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "./i18n";
 import { diagnoseError, toAppError, type AppError } from "./doctor";
@@ -8,6 +9,15 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getBaseDir, setBaseDir, saveProject, lastOpenedMap } from "./store";
 import type { MessageKey } from "./locales/ko";
+import {
+  NO_RUN,
+  ownsStage,
+  requestCancel,
+  runReserved,
+  runSettled,
+  startingRun,
+  type RunTracker,
+} from "./handoffRun";
 import "./App.css";
 
 interface ToolInfo {
@@ -697,11 +707,526 @@ function HomeView({
         </ul>
       )}
 
+      {projects.length > 0 && <HandoffPilot project={projects[0]} />}
+
       <details className="tips-card">
         <summary>{t("home.tips.title")}</summary>
         <UsageTips />
       </details>
     </main>
+  );
+}
+
+/**
+ * §7.10 최소 자동 인계 파일럿 (macOS 전용).
+ *
+ * 화면 계약은 §7.10.2다 — **오케스트레이션을 노출하지 않는다.**
+ * 기본 화면에는 목표·진행 상태·결과 요약·변경 내용·보관/폐기만 둔다.
+ * 세션 ID·증거 경로·권한 플래그·역할 선택은 전부 "자세히 보기" 뒤로 보낸다.
+ */
+type HandoffStage =
+  | "organizing"
+  | "building"
+  | "checking"
+  | "done"
+  | "needsAttention";
+
+/** 화면 단계. 백엔드 단계에 **준비**만 더한다 — 준비는 이 화면이 직접 하는 일이다. */
+type ViewStage = "idle" | "preparing" | HandoffStage;
+
+/** 복제본이 잠긴 방식. `sessionOnly`는 앱을 껐다 켜면 잠금이 풀린다는 뜻이다. */
+type WorkspaceLock = "none" | "persisted" | "sessionOnly";
+
+type ChangeKind =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "other";
+
+interface ChangedFile {
+  path: string;
+  kind: ChangeKind;
+  from: string | null;
+  status: string;
+}
+
+interface HandoffEvidence {
+  claudeEventsPath: string;
+  claudeStderrPath: string;
+  claudeDiffPath: string;
+  claudeSessionId: string;
+  claudeCliVersion: string;
+  codexEventsPath: string;
+  codexLastMessagePath: string;
+  codexStderrPath: string;
+  codexDiffPath: string;
+  codexSessionId: string;
+  codexRunId: string;
+  permissionDenials: string[];
+  termination: string;
+}
+
+/** 앞선 실행이 남긴 잠긴 사본. 이걸 정리하기 전에는 새 실행이 시작되지 않는다. */
+interface BlockedWorkspace {
+  workspacePath: string;
+  reason: string;
+  /** 잠금이 디스크에도 남아 있는가 — 다시 확인(복구)을 시도할 수 있는지 가른다 */
+  persisted: boolean;
+  markerError: string | null;
+}
+
+type HandoffStart =
+  | { state: "ready"; runId: string }
+  | { state: "blocked"; blocker: BlockedWorkspace };
+
+interface HandoffResult {
+  stage: HandoffStage;
+  goal: string;
+  /** 하려던 것 — 결과가 아니다 */
+  planSummary: string;
+  /** 실제로 한 것 */
+  resultSummary: string;
+  changedFiles: ChangedFile[];
+  attention: string | null;
+  workspaceLock: WorkspaceLock;
+  lockError: string | null;
+  blocker: BlockedWorkspace | null;
+  workspacePath: string;
+  evidence: HandoffEvidence;
+}
+
+const STAGE_ORDER: ViewStage[] = [
+  "preparing",
+  "organizing",
+  "building",
+  "checking",
+  "done",
+];
+
+/**
+ * 각 단계를 어떻게 그릴지.
+ *
+ * 멈춘 경우 **진행이 초기화되면 안 된다** — 어디까지 갔다가 어디서 멈췄는지가
+ * 사용자가 다음에 무엇을 할지 정하는 근거다.
+ */
+function stepState(
+  index: number,
+  reached: number,
+  stage: ViewStage,
+): "done" | "active" | "stopped" | "todo" {
+  if (stage === "done") return "done";
+  if (index < reached) return "done";
+  if (index > reached) return "todo";
+  return stage === "needsAttention" ? "stopped" : "active";
+}
+
+function HandoffPilot({ project }: { project: HomeProject }) {
+  const { t } = useI18n();
+  const [available, setAvailable] = useState(false);
+  const [goal, setGoal] = useState("");
+  const [stage, setStage] = useState<ViewStage>("idle");
+  // 어디까지 갔는가. 멈춰도 이 값은 유지된다 — 멈춘 지점을 보여 주려면 필요하다.
+  const [reached, setReached] = useState<ViewStage>("preparing");
+  const [result, setResult] = useState<HandoffResult | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
+  const [cleanup, setCleanup] = useState<"none" | "working" | "discarded" | "kept">(
+    "none",
+  );
+  /** 앞선 사본이 잠겨 새 실행을 시작할 수 없는 상태. 이것부터 치워야 한다. */
+  const [blocker, setBlocker] = useState<BlockedWorkspace | null>(null);
+  const [clearing, setClearing] = useState(false);
+  /**
+   * 지금 따라가는 실행과, 아직 전달하지 못한 중단.
+   *
+   * 상태 전이는 `handoffRun.ts`의 순수 함수가 정하고 여기서는 배선만 한다 —
+   * ref 두 개를 손으로 굴리면 "끝난 실행 ID가 남아 새 실행의 중단을 삼키는" 경합이 난다.
+   */
+  const runRef = useRef<RunTracker>(NO_RUN);
+
+  useEffect(() => {
+    invoke<boolean>("handoff_available")
+      .then(setAvailable)
+      .catch(() => setAvailable(false));
+  }, []);
+
+  // 진행 상태는 백엔드가 알려 준다. 사용자는 어느 에이전트가 도는지 몰라도 된다.
+  useEffect(() => {
+    const unlisten = listen<{ runId: string; stage: HandoffStage }>(
+      "handoff:stage",
+      (event) => {
+        // 다른(이미 끝난) 실행의 상태는 이 화면의 진행이 아니다
+        if (!ownsStage(runRef.current, event.payload.runId)) return;
+        setStage(event.payload.stage);
+        if (STAGE_ORDER.includes(event.payload.stage)) {
+          setReached(event.payload.stage);
+        }
+      },
+    );
+    return () => {
+      unlisten.then((off) => off());
+    };
+  }, []);
+
+  if (!available) return null;
+
+  const running =
+    stage !== "idle" && stage !== "done" && stage !== "needsAttention";
+
+  async function start() {
+    setError(null);
+    setResult(null);
+    setCleanup("none");
+    setStage("preparing");
+    setReached("preparing");
+    setBlocker(null);
+    // ★ **`begin_handoff`를 부르기 전에** 이전 실행 ID를 버린다.
+    //   남겨 두면 예약을 기다리는 동안 누른 중단이 "실행 중"으로 오인돼
+    //   이미 끝난 슬롯으로 나가고, 새 실행은 그대로 진행된다.
+    runRef.current = startingRun();
+    let runId = "";
+    try {
+      // **사본을 만들기 전에** 실행을 예약한다. 그래야 준비 중에 누른 중단이 살아남고,
+      // 두 번째 실행이 같은 사본을 건드리는 일도 막힌다.
+      // 앞선 사본이 잠겨 있으면 여기서 막힌다 — 새 사본을 만들어 봐야 실행이 거부되고,
+      // 화면에는 새 사본만 보여 정작 막고 있는 사본에 손댈 수 없게 된다.
+      const started = await invoke<HandoffStart>("begin_handoff");
+      if (started.state === "blocked") {
+        setBlocker(started.blocker);
+        runRef.current = runSettled();
+        setStage("idle");
+        return;
+      }
+      runId = started.runId;
+      const reserved = runReserved(runRef.current, runId);
+      runRef.current = reserved.next;
+      if (reserved.abort) {
+        // 예약을 기다리는 동안 중단을 눌렀다. 보류된 취소를 전달하고
+        // **사본을 만들기 전에** 멈춘다 — 그만두라는 작업의 사본을 남길 이유가 없다.
+        await invoke("cancel_handoff").catch(() => {});
+        await invoke("release_handoff", { runId }).catch(() => {});
+        runRef.current = runSettled();
+        setStage("idle");
+        return;
+      }
+      // 원본이 아니라 **폐기 가능한 사본**에서만 돈다 (S2 경계 그대로)
+      const workspace = await invoke<{ path: string }>("prepare_codex_pilot", {
+        sourcePath: project.path,
+      });
+      const outcome = await invoke<HandoffResult>("run_handoff", {
+        runId,
+        workspacePath: workspace.path,
+        goal,
+      });
+      setResult(outcome);
+      setBlocker(outcome.blocker);
+      setStage(outcome.stage);
+      // 결과를 받았으면 따라갈 실행이 없다
+      runRef.current = runSettled();
+    } catch (e) {
+      // 준비에서 실패했다면 예약이 남는다. 돌려주지 않으면 다음 실행이 영영 막힌다.
+      if (runId) {
+        await invoke("release_handoff", { runId }).catch(() => {});
+      }
+      runRef.current = runSettled();
+      setError(toAppError(e));
+      setStage("idle");
+    }
+  }
+
+  async function stop() {
+    const decision = requestCancel(runRef.current);
+    runRef.current = decision.next;
+    if (!decision.deliverNow) {
+      // 아직 예약 전이다. 슬롯이 생기는 즉시 `start`가 이 요청을 전달한다.
+      return;
+    }
+    try {
+      await invoke("cancel_handoff");
+    } catch {
+      /* 중단 요청 실패는 결과 화면에서 드러난다 */
+    }
+  }
+
+  /** 막고 있는 사본을 정리한다. 이걸 해야 다음 실행이 열린다. */
+  async function clearBlocker(mode: "discard" | "recover") {
+    if (!blocker) return;
+    setClearing(true);
+    setError(null);
+    try {
+      if (mode === "recover") {
+        await invoke("recover_codex_pilot", {
+          workspacePath: blocker.workspacePath,
+        });
+      } else {
+        await invoke("discard_handoff_workspace", {
+          workspacePath: blocker.workspacePath,
+          confirmDiscardWorkspace: true,
+        });
+      }
+      setBlocker(null);
+    } catch (e) {
+      setError(toAppError(e));
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function discard() {
+    if (!result) return;
+    setCleanup("working");
+    try {
+      // 인계 전용 폐기다. `discard_codex_pilot`은 잠긴 사본만 다뤄서
+      // 정상 완료·취소 결과에서는 전부 실패한다.
+      await invoke("discard_handoff_workspace", {
+        workspacePath: result.workspacePath,
+        confirmDiscardWorkspace: true,
+      });
+      setCleanup("discarded");
+    } catch (e) {
+      setError(toAppError(e));
+      setCleanup("none");
+    }
+  }
+
+  return (
+    <section className="handoff-card">
+      <div className="handoff-head">
+        <h3>
+          {t("handoff.title")} <span className="handoff-badge">{t("handoff.badge")}</span>
+        </h3>
+        <p className="muted">{t("handoff.subtitle")}</p>
+      </div>
+
+      <p className="handoff-notice">{t("handoff.notice", { name: project.name })}</p>
+
+      <label className="handoff-goal">
+        <span>{t("handoff.goal.label")}</span>
+        <textarea
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          placeholder={t("handoff.goal.placeholder")}
+          rows={3}
+          disabled={running}
+        />
+      </label>
+
+      {/* 막고 있는 사본을 먼저 보여 준다 — 이걸 치우지 않으면 새 실행이 시작되지 않는다 */}
+      {blocker && (
+        <div className="handoff-blocked">
+          <h4>{t("handoff.blocked.title")}</h4>
+          <p>{t("handoff.blocked.desc")}</p>
+          <div className="handoff-blocked-actions">
+            <button
+              className="primary"
+              onClick={() => clearBlocker("discard")}
+              disabled={clearing}
+            >
+              {clearing ? t("handoff.blocked.working") : t("handoff.blocked.discard")}
+            </button>
+            {blocker.persisted && (
+              <button
+                className="ghost"
+                onClick={() => clearBlocker("recover")}
+                disabled={clearing}
+              >
+                {t("handoff.blocked.recover")}
+              </button>
+            )}
+          </div>
+          <details className="handoff-details">
+            <summary>{t("handoff.details")}</summary>
+            <dl>
+              <dt>{t("handoff.blocked.which")}</dt>
+              <dd>
+                <code className="handoff-path">{blocker.workspacePath}</code>
+              </dd>
+              <dt>{t("handoff.blocked.reason")}</dt>
+              <dd>
+                <code>{blocker.reason}</code>
+              </dd>
+              {blocker.markerError && (
+                <>
+                  <dt>{t("handoff.details.lockError")}</dt>
+                  <dd>
+                    <code>{blocker.markerError}</code>
+                  </dd>
+                </>
+              )}
+            </dl>
+          </details>
+        </div>
+      )}
+
+      <div className="handoff-actions">
+        {running ? (
+          <button className="ghost" onClick={stop}>
+            {t("handoff.cancel")}
+          </button>
+        ) : (
+          <button
+            className="primary"
+            onClick={start}
+            disabled={goal.trim() === "" || blocker !== null}
+          >
+            {t("handoff.start")}
+          </button>
+        )}
+      </div>
+
+      {stage !== "idle" && (
+        <ol className="handoff-steps">
+          {STAGE_ORDER.map((s, index) => (
+            <li
+              key={s}
+              className={`handoff-step ${stepState(index, STAGE_ORDER.indexOf(reached), stage)}`}
+            >
+              {t(`handoff.stage.${s}` as MessageKey)}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {error && <DoctorCard error={error} onRetry={start} />}
+
+      {result && (
+        <div className="handoff-result">
+          {result.attention ? (
+            <>
+              <h4>{t("handoff.attention.title")}</h4>
+              {result.workspaceLock === "persisted" && (
+                <p className="handoff-locked">{t("handoff.attention.locked")}</p>
+              )}
+              {/* 잠금을 저장하지 못했다 — 앱을 껐다 켜면 풀린다. 지금 정리해야 한다 */}
+              {result.workspaceLock === "sessionOnly" && (
+                <p className="handoff-locked warn">
+                  {t("handoff.attention.lockedSessionOnly")}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <h4>{t("handoff.result.title")}</h4>
+              {/* 계획 요약이 아니라 **실제 구현 결과**다 */}
+              <p className="handoff-summary">
+                {result.resultSummary || t("handoff.result.noSummary")}
+              </p>
+            </>
+          )}
+
+          <h5>{t("handoff.result.changed")}</h5>
+          {result.changedFiles.length === 0 ? (
+            <p className="muted">{t("handoff.result.noChanges")}</p>
+          ) : (
+            <ul className="handoff-files">
+              {result.changedFiles.map((f) => (
+                <li key={`${f.status}:${f.path}`}>
+                  <code>{f.path}</code>
+                  <span className={`handoff-change ${f.kind}`}>
+                    {t(`handoff.change.${f.kind}` as MessageKey)}
+                  </span>
+                  {f.from && (
+                    <span className="muted">
+                      {t("handoff.change.from", { name: f.from })}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="handoff-keep">
+            {cleanup === "discarded" ? (
+              <p className="muted">{t("handoff.result.discarded")}</p>
+            ) : cleanup === "kept" ? (
+              <p className="muted">{t("handoff.result.kept")}</p>
+            ) : (
+              <>
+                <button className="ghost" onClick={() => setCleanup("kept")}>
+                  {t("handoff.result.keep")}
+                </button>
+                <button
+                  className="link"
+                  onClick={discard}
+                  disabled={cleanup === "working"}
+                >
+                  {cleanup === "working"
+                    ? t("handoff.result.discarding")
+                    : t("handoff.result.discard")}
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* 원시 증거는 접이식 상세 뒤에 둔다 — 경로를 읽게 하는 순간 터미널 사용자를 요구하는 셈이다 */}
+          <details className="handoff-details">
+            <summary>{t("handoff.details")}</summary>
+            <p className="muted">{t("handoff.details.desc")}</p>
+            <dl>
+              {/* 계획은 **하려던 것**이다. 결과 자리에 두지 않고 여기서만 보여 준다 */}
+              {result.planSummary && (
+                <>
+                  <dt>{t("handoff.details.plan")}</dt>
+                  <dd>{result.planSummary}</dd>
+                </>
+              )}
+              {result.lockError && (
+                <>
+                  <dt>{t("handoff.details.lockError")}</dt>
+                  <dd>
+                    <code>{result.lockError}</code>
+                  </dd>
+                </>
+              )}
+              <dt>{t("handoff.details.session")}</dt>
+              <dd>
+                <code>{result.evidence.claudeSessionId || "—"}</code>
+                {result.evidence.claudeCliVersion
+                  ? ` · ${result.evidence.claudeCliVersion}`
+                  : ""}
+              </dd>
+              <dt>{t("handoff.details.termination")}</dt>
+              <dd>
+                <code>{result.evidence.termination || "—"}</code>
+              </dd>
+              {result.evidence.permissionDenials.length > 0 && (
+                <>
+                  <dt>{t("handoff.details.denials")}</dt>
+                  <dd>{result.evidence.permissionDenials.join(", ")}</dd>
+                </>
+              )}
+              <dt>{t("handoff.details.evidence")}</dt>
+              <dd>
+                {result.evidence.codexRunId && (
+                  <code className="handoff-path">
+                    {t("handoff.details.runId")}: {result.evidence.codexRunId}
+                  </code>
+                )}
+                {/* **실제로 저장된 파일만** 보여 준다 — 없는 경로를 주면 사용자는
+                    열리지 않는 경로를 들고 도움을 요청하게 된다 */}
+                {[
+                  result.evidence.claudeEventsPath,
+                  result.evidence.codexEventsPath,
+                  result.evidence.codexDiffPath,
+                ]
+                  .filter((path) => path !== "")
+                  .map((path) => (
+                    <code className="handoff-path" key={path}>
+                      {path}
+                    </code>
+                  ))}
+              </dd>
+            </dl>
+            {result.attention && (
+              <p className="handoff-reason">
+                <code>{result.attention}</code>
+              </p>
+            )}
+          </details>
+        </div>
+      )}
+    </section>
   );
 }
 

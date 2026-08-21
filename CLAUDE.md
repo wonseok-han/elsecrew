@@ -92,6 +92,7 @@
 
 ```bash
 pnpm build
+npm test                       # 프런트 순수 로직 (node --test)
 cargo test --manifest-path src-tauri/Cargo.toml
 pnpm tauri build
 

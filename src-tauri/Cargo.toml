@@ -27,3 +27,8 @@ tauri-plugin-dialog = "2.7.2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+[target.'cfg(unix)'.dependencies]
+# 종료 계약의 프로세스 신원(pid, 마이크로초 시작 시각) 조회용.
+# `ps` 파싱은 로캘 의존이라 쓰지 않는다 (docs/proposals/m4-orchestration.md §7.10.1.2 ⑤).
+libc = "0.2"
+

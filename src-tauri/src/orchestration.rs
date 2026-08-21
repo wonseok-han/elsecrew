@@ -69,7 +69,12 @@ pub(crate) struct PoisonedRun {
     /// 어느 복제본이 잠겼는지. **PID·오류의 진실은 디스크 표시**이며(재시작 후에도 남아야 하므로)
     /// 메모리 상태는 "이 슬롯이 어느 복제본 때문에 잠겼는가"만 안다.
     workspace: PathBuf,
+    /// 무엇이 잘못됐나 — 종료 실패 오류
     error: String,
+    /// 왜 그 잠금을 디스크에 남기지 못했나. **`error`와 다른 사실이다** —
+    /// 슬롯에도 나눠 두지 않으면 최초 실패 결과가 사라진 뒤 종료 오류가
+    /// "표시를 저장하지 못한 이유"로 다시 쓰인다.
+    marker_error: Option<String>,
 }
 
 /// 트리가 정말 사라졌는지에 대한 대답. **"모름"을 성공으로 접지 않는 것이 요점이다.**
@@ -186,7 +191,7 @@ impl SlotGuard {
 
     /// 종료 실패로 프로세스·배출 스레드가 남았다. **슬롯을 열지 않고** 복구 대기 상태로 표시한다.
     /// 여는 순간 새 실행이 같은 작업공간을 건드려 남은 스레드가 쓰는 증거와 뒤엉킨다.
-    fn poison(&self, workspace: &Path, error: &str) {
+    fn poison(&self, workspace: &Path, error: &str, marker_error: Option<String>) {
         let mut guard = self.handle.lock().unwrap();
         if let Some(slot) = guard.as_mut() {
             if slot.run_id == self.run_id {
@@ -194,6 +199,7 @@ impl SlotGuard {
                 slot.poisoned = Some(PoisonedRun {
                     workspace: workspace.to_path_buf(),
                     error: error.to_string(),
+                    marker_error,
                 });
             }
         }
@@ -260,6 +266,164 @@ pub(crate) struct PilotRun {
     pub diff_path: String,
 }
 
+/// 다른 복제본 때문에 실행이 막혔다.
+///
+/// **그 복제본의 경로를 잃으면 사용자가 손댈 수 없다.** 슬롯은 하나뿐이라 잠긴 복제본 A가
+/// 슬롯을 쥐고 있으면 새 실행 B는 전부 거부되는데, 화면에 B만 보이면 B를 아무리 정리해도
+/// A는 그대로 남아 실행이 영영 막힌다.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BlockedWorkspace {
+    pub workspace_path: String,
+    /// 왜 잠겼나 — 종료 실패 오류
+    pub reason: String,
+    /// 잠금이 디스크에도 남아 있는가. **복구를 시도할 수 있는지를 가른다**
+    pub persisted: bool,
+    /// 표시를 저장하지 못한 이유 (있으면 재시작 시 잠금이 풀린다)
+    pub marker_error: Option<String>,
+}
+
+/// 지금 슬롯을 잠그고 있는 복제본. 새 실행을 거부할 때 **누구 때문인지** 알려주려면 필요하다.
+pub(crate) fn blocking_workspace(handle: &SlotHandle) -> Option<BlockedWorkspace> {
+    let (workspace, reason, marker_error) = {
+        let guard = handle.lock().unwrap_or_else(|e| e.into_inner());
+        let poisoned = guard.as_ref().and_then(|slot| slot.poisoned.as_ref())?;
+        (
+            poisoned.workspace.clone(),
+            poisoned.error.clone(),
+            poisoned.marker_error.clone(),
+        )
+    };
+    Some(BlockedWorkspace {
+        persisted: pilot_is_poisoned(&workspace),
+        workspace_path: workspace.display().to_string(),
+        reason,
+        marker_error,
+    })
+}
+
+/// 실행이 남긴 증거 파일 경로.
+///
+/// **"만들 예정이던 경로"와 "실제로 저장된 파일"은 다르다.** 없는 파일의 경로를
+/// "저장된 기록 위치"라고 보여 주면 사용자는 열리지 않는 경로를 들고 도움을 요청하게 된다.
+/// 그래서 각 항목은 `Option`이고, 실패 시점에 **실제로 존재하는 것만** 채워진다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PilotEvidencePaths {
+    pub events: Option<String>,
+    pub last_message: Option<String>,
+    pub stderr: Option<String>,
+    pub diff: Option<String>,
+}
+
+/// 실행이 실패한 방식.
+///
+/// **오류를 문자열 하나로 줄이면 증거가 사라진다.** 이미 만들어 둔 이벤트·stderr·최종 메시지
+/// 경로와 잠금 상태를 잃으면 화면에는 빨간 문구만 남고, 사용자는 그 복제본을 폐기할 수도
+/// 복구할 수도 없다. 그래서 실패도 결과와 같은 무게로 실어 나른다.
+#[derive(Debug, Clone)]
+pub(crate) struct PilotFailure {
+    /// 무엇이 잘못됐나. 실행·종료·증거 오류 그대로다
+    pub error: String,
+    /// 이 실행의 식별자. 증거 경로가 이 값으로 갈린다
+    pub run_id: Option<String>,
+    pub workspace_path: Option<PathBuf>,
+    /// **이미 만들어진** 증거 경로. 실행 준비 전에 실패했으면 비어 있다
+    pub evidence: Option<PilotEvidencePaths>,
+    /// 복제본을 신뢰할 수 없게 만든 사유. `Some`이면 이 실행이 복제본을 오염시켰다
+    pub poisoned: Option<String>,
+    /// 오염 표시를 **디스크에 남기지 못한** 이유.
+    /// `poisoned`(무엇이 잘못됐나)와 **다른 사실이다** — 이걸 섞으면 화면의
+    /// "표시를 저장하지 못한 이유"에 종료 오류가 나타난다.
+    pub marker_error: Option<String>,
+    /// **다른 복제본** 때문에 시작조차 못 했다면 그 복제본. 화면이 그것을 정리할 수 있어야 한다
+    pub blocker: Option<BlockedWorkspace>,
+}
+
+impl std::fmt::Display for PilotFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl PilotFailure {
+    /// 증거를 만들기도 전에 끝난 실패 (대상 검증·슬롯 거부·Codex 미설치 등).
+    pub fn plain(error: impl Into<String>) -> Self {
+        Self {
+            error: error.into(),
+            run_id: None,
+            workspace_path: None,
+            evidence: None,
+            poisoned: None,
+            marker_error: None,
+            blocker: None,
+        }
+    }
+}
+
+/// 실패에 붙는 맥락. 오류 경로마다 손으로 채우면 반드시 하나를 빠뜨린다.
+///
+/// **경로가 정해진 직후 만든다** — 파일 생성 중간에 실패해도(예: events는 만들어졌는데
+/// stderr에서 실패) 이미 생긴 파일의 경로를 잃지 않기 위해서다.
+struct FailureContext {
+    run_id: String,
+    workspace_path: PathBuf,
+    events: PathBuf,
+    last_message: PathBuf,
+    stderr: PathBuf,
+    diff: PathBuf,
+}
+
+impl FailureContext {
+    fn new(run_id: &str, workspace: &Path, evidence: &PilotEvidence) -> Self {
+        Self {
+            run_id: run_id.to_string(),
+            workspace_path: workspace.to_path_buf(),
+            events: evidence.events.clone(),
+            last_message: evidence.last_message.clone(),
+            stderr: evidence.stderr.clone(),
+            diff: evidence.diff.clone(),
+        }
+    }
+
+    /// **실제로 저장된 파일만** 돌려준다.
+    ///
+    /// 생성 여부를 따로 세어 두는 대신 디스크에 묻는다 — 상태 변수는 실제와 어긋날 수 있지만
+    /// 존재 확인은 어긋날 수 없다. 실행마다 `run_id`가 달라 남의 파일을 볼 일도 없다.
+    fn stored(&self) -> PilotEvidencePaths {
+        // `exists()`가 아니라 `is_file()`이다 — 같은 이름의 폴더를 "저장된 기록"이라 보고하면
+        // 사용자는 열리지 않는 경로를 들고 도움을 요청하게 된다.
+        let stored = |path: &Path| path.is_file().then(|| path.display().to_string());
+        PilotEvidencePaths {
+            events: stored(&self.events),
+            last_message: stored(&self.last_message),
+            stderr: stored(&self.stderr),
+            diff: stored(&self.diff),
+        }
+    }
+
+    /// 복제본은 멀쩡하지만 이번 실행이 실패했다.
+    fn failed(&self, error: impl Into<String>) -> PilotFailure {
+        PilotFailure {
+            error: error.into(),
+            run_id: Some(self.run_id.clone()),
+            workspace_path: Some(self.workspace_path.clone()),
+            evidence: Some(self.stored()),
+            poisoned: None,
+            marker_error: None,
+            blocker: None,
+        }
+    }
+
+    /// 복제본을 신뢰할 수 없다. `marker_error`는 **표시 저장 실패**이지 종료 실패가 아니다.
+    fn poisoned(&self, error: String, marker_error: Option<String>) -> PilotFailure {
+        PilotFailure {
+            poisoned: Some(error.clone()),
+            marker_error,
+            ..self.failed(error)
+        }
+    }
+}
+
 /// 파일럿 실행 전용 복제본을 앱 데이터 폴더에 만든다. 아직 Codex는 실행하지 않는다.
 #[tauri::command]
 pub(crate) async fn prepare_codex_pilot(
@@ -319,7 +483,7 @@ pub(crate) async fn run_codex_pilot(
     let handle = session.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         execute_pilot(&root, Path::new(&workspace_path), &prompt, &handle)
-            .map_err(crate::error::AppError::classify)
+            .map_err(|failure| crate::error::AppError::classify(failure.error))
     })
     .await
     .map_err(|e| crate::error::AppError::generic(e.to_string()))?
@@ -478,6 +642,110 @@ fn discard_poisoned_pilot(
 
     clear_poisoned_slot(handle, workspace);
     Ok(workspace.display().to_string())
+}
+
+/// 앱이 만든 파일럿 복제본을 **명시적으로 폐기**한다. `poisoned` 여부와 무관하다.
+///
+/// `discard_poisoned_pilot`은 종료 실패로 잠긴 복제본만 다룬다. 그런데 사용자는
+/// **정상 완료·단순 취소 복제본도** 버릴 수 있어야 한다 — 그것이 "결과 버리기"의 의미다.
+///
+/// 폐기 = **영구 `abandoned` 표시**다. 파일을 지우지 않는다 — 증거 보존 계약을 그대로 따른다
+/// (증거는 복제본 밖 파일럿 루트에 있고, 표시가 붙은 복제본은 다시 실행 대상이 되지 못한다).
+///
+/// 임의 폴더를 폐기할 수 없도록 **파일럿 루트 포함 여부와 매니페스트**를 확인한다.
+pub(crate) fn abandon_pilot_copy(
+    workspace: &Path,
+    pilot_root: &Path,
+    handle: &SlotHandle,
+    confirmed: bool,
+) -> Result<String, String> {
+    if !confirmed {
+        return Err("discarding a pilot workspace must be confirmed explicitly".into());
+    }
+    let root = pilot_root
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve pilot root '{}': {e}", pilot_root.display()))?;
+    let workspace = workspace.canonicalize().map_err(|e| {
+        format!(
+            "cannot resolve pilot workspace '{}': {e}",
+            workspace.display()
+        )
+    })?;
+    if workspace == root || !workspace.starts_with(&root) {
+        return Err("only an app-created copy inside the pilot root can be discarded".into());
+    }
+    // 앱이 만들었다는 증명은 매니페스트다. 이것이 없으면 남의 폴더다.
+    let manifest_text = std::fs::read_to_string(pilot_manifest_path(&root, &workspace)?)
+        .map_err(|e| format!("pilot marker is missing or unreadable: {e}"))?;
+    let marker: PilotMarker = serde_json::from_str(&manifest_text)
+        .map_err(|e| format!("pilot marker is invalid: {e}"))?;
+    if marker.workspace_path != workspace.display().to_string() {
+        return Err("pilot marker does not match this workspace".into());
+    }
+
+    // 잠긴 복제본이었다면 그 사유를 폐기 기록에 옮긴다
+    let reason = read_poisoned_marker(&workspace)
+        .map(|poisoned| poisoned.error)
+        .unwrap_or_else(|_| "discarded by the user".to_string());
+
+    // 영구 표시를 먼저 남긴다. 중간에 실패해도 복제본이 풀리지 않게.
+    let abandoned = pilot_artifact_path(&root, &workspace, PILOT_ABANDONED_SUFFIX)?;
+    std::fs::write(&abandoned, reason.as_bytes())
+        .map_err(|e| format!("cannot mark pilot workspace as abandoned: {e}"))?;
+    // 복구 대기 표시는 영구 폐기 표시로 대체됐다
+    let poisoned = pilot_artifact_path(&root, &workspace, PILOT_POISONED_SUFFIX)?;
+    let _ = std::fs::remove_file(&poisoned);
+
+    clear_poisoned_slot(handle, &workspace);
+    Ok(workspace.display().to_string())
+}
+
+/// 이 복제본에 **디스크 잠금 표시**가 붙어 있는가. 재시작해도 남는 사실이다.
+pub(crate) fn pilot_is_poisoned(workspace: &Path) -> bool {
+    read_poisoned_marker(workspace).is_ok()
+}
+
+/// "디스크 표시를 남기지 못한 채 오염된 슬롯" 상태를 만든다.
+/// `abandon_run`이 표시 쓰기에 실패한 경우와 같은 상태다 — 테스트로만 재현할 수 있다.
+#[cfg(test)]
+pub(crate) fn poison_slot_for_test(
+    handle: &SlotHandle,
+    workspace: &Path,
+    error: &str,
+    marker_error: Option<&str>,
+) {
+    let mut guard = handle.lock().unwrap();
+    *guard = Some(RunSlot {
+        run_id: "test".into(),
+        child: None,
+        canceled: false,
+        termination_error: None,
+        poisoned: Some(PoisonedRun {
+            workspace: workspace.to_path_buf(),
+            error: error.to_string(),
+            marker_error: marker_error.map(|e| e.to_string()),
+        }),
+    });
+}
+
+/// 오염된 슬롯이 있다면 **어느 복제본 때문인지와 함께** 돌려준다.
+///
+/// 경로 없이 오류만 돌려주면 호출부가 *다른* 복제본의 오염을 지금 다루는 복제본의 것으로
+/// 오판한다. 슬롯은 하나뿐이므로 이 혼동은 반드시 일어난다.
+///
+/// **표시 저장에 실패한 경우에도 값이 있다** — `abandon_run`은 디스크에 쓰기 전에 슬롯부터 잠근다.
+pub(crate) fn poisoned_slot(handle: &SlotHandle) -> Option<(PathBuf, String, Option<String>)> {
+    let guard = handle.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .as_ref()
+        .and_then(|slot| slot.poisoned.as_ref())
+        .map(|poisoned| {
+            (
+                poisoned.workspace.clone(),
+                poisoned.error.clone(),
+                poisoned.marker_error.clone(),
+            )
+        })
 }
 
 /// 실행 중인 자식에게 종료 신호만 보내고 `canceled`로 표시한다.
@@ -673,29 +941,50 @@ fn configure_process_group(command: &mut Command) {
     }
 }
 
-fn execute_pilot(
+pub(crate) fn execute_pilot(
     pilot_root: &Path,
     workspace_path: &Path,
     prompt: &str,
     handle: &SlotHandle,
-) -> Result<PilotRun, String> {
-    let root = pilot_root
-        .canonicalize()
-        .map_err(|e| format!("cannot resolve pilot root '{}': {e}", pilot_root.display()))?;
-    let workspace = validate_pilot_workspace(workspace_path, &root)?;
+) -> Result<PilotRun, PilotFailure> {
+    let program = crate::detect::agent_bin(crate::agent::Agent::Codex)
+        .ok_or_else(|| PilotFailure::plain("codex is not installed"))?;
+    execute_pilot_program(pilot_root, workspace_path, prompt, handle, &program)
+}
+
+/// 실행 대상을 주입해 돌린다. **증거가 생긴 뒤의 실패 경로**를 Codex 없이 재현하려면
+/// 실제 실행 흐름을 그대로 타야 하므로, 테스트도 이 진입점을 쓴다.
+pub(crate) fn execute_pilot_program(
+    pilot_root: &Path,
+    workspace_path: &Path,
+    prompt: &str,
+    handle: &SlotHandle,
+    program: &Path,
+) -> Result<PilotRun, PilotFailure> {
+    let root = pilot_root.canonicalize().map_err(|e| {
+        PilotFailure::plain(format!(
+            "cannot resolve pilot root '{}': {e}",
+            pilot_root.display()
+        ))
+    })?;
+    let workspace = validate_pilot_workspace(workspace_path, &root).map_err(PilotFailure::plain)?;
 
     // 실행마다 고유 경로를 쓴다. 재작업 라운드가 이전 라운드의 증거를 덮어쓰면 안 된다.
     let run_id = new_run_id();
-    let evidence = PilotEvidence::new(&root, &workspace.path, &run_id)?;
+    let evidence =
+        PilotEvidence::new(&root, &workspace.path, &run_id).map_err(PilotFailure::plain)?;
 
     // **슬롯을 먼저 예약한다.** Codex 탐색이나 증거 파일 생성보다 앞이어야
     // 거부된 호출이 쓰이지 않을 파일을 남기지 않고, Codex 미설치 환경에서도 거부가 먼저 판정된다.
-    let guard = SlotGuard::reserve(handle, &run_id)?;
+    let guard = SlotGuard::reserve(handle, &run_id).map_err(|error| PilotFailure {
+        // **누가 막고 있는지를 잃으면 사용자가 그 복제본에 손댈 수 없다.**
+        blocker: blocking_workspace(handle),
+        ..PilotFailure::plain(error)
+    })?;
 
-    let program = crate::detect::agent_bin(crate::agent::Agent::Codex)
-        .ok_or_else(|| "codex is not installed".to_string())?;
-    let args = codex_pilot_args(&workspace.path, prompt, &evidence.last_message)?;
-    run_pilot_process(&guard, workspace, evidence, run_id, &program, &args)
+    let args = codex_pilot_args(&workspace.path, prompt, &evidence.last_message)
+        .map_err(PilotFailure::plain)?;
+    run_pilot_process(&guard, workspace, evidence, run_id, program, &args)
 }
 
 /// 프로세스 수명주기와 증거 수집. 실행 대상이 주입되므로 취소 경로를 Codex 없이 시험할 수 있다.
@@ -706,7 +995,7 @@ fn run_pilot_process(
     run_id: String,
     program: &Path,
     args: &[String],
-) -> Result<PilotRun, String> {
+) -> Result<PilotRun, PilotFailure> {
     run_pilot_process_with(
         guard,
         workspace,
@@ -727,15 +1016,19 @@ fn run_pilot_process_with(
     program: &Path,
     args: &[String],
     signal: SignalFn,
-) -> Result<PilotRun, String> {
+) -> Result<PilotRun, PilotFailure> {
+    // **경로가 정해지는 순간** 맥락을 만든다. 증거 파일 생성 도중에 실패해도
+    // 이미 생긴 파일의 경로를 잃지 않는다 (`stored()`가 존재하는 것만 보고한다).
+    let context = FailureContext::new(&run_id, &workspace.path, &evidence);
+
     // 증거 파일을 먼저 만든다. 자식을 띄운 뒤 생성이 실패하면 프로세스가 붕 뜬다.
     let mut events = std::fs::File::create(&evidence.events)
-        .map_err(|e| format!("cannot create pilot event log: {e}"))?;
+        .map_err(|e| context.failed(format!("cannot create pilot event log: {e}")))?;
     let mut stderr_log = std::fs::File::create(&evidence.stderr)
-        .map_err(|e| format!("cannot create pilot stderr log: {e}"))?;
+        .map_err(|e| context.failed(format!("cannot create pilot stderr log: {e}")))?;
     // 이 실행의 결과만 담기도록 비운 채 시작한다 (중단되면 빈 파일이 곧 증거다)
     std::fs::write(&evidence.last_message, "")
-        .map_err(|e| format!("cannot create pilot final-message file: {e}"))?;
+        .map_err(|e| context.failed(format!("cannot create pilot final-message file: {e}")))?;
 
     let mut command = crate::detect::command(program);
     command
@@ -746,14 +1039,14 @@ fn run_pilot_process_with(
     configure_process_group(&mut command);
     let mut child = command
         .spawn()
-        .map_err(|e| format!("cannot start codex pilot: {e}"))?;
+        .map_err(|e| context.failed(format!("cannot start codex pilot: {e}")))?;
     let (stdout, stderr) = match (child.stdout.take(), child.stderr.take()) {
         (Some(out), Some(err)) => (out, err),
         _ => {
             // 파이프를 못 얻으면 슬롯에 붙이지 않고 즉시 정리한다
             let _ = signal_process_tree_with(&mut child, signal);
             let _ = child.wait();
-            return Err("codex pilot produced no event stream".into());
+            return Err(context.failed("codex pilot produced no event stream"));
         }
     };
     // 예약~spawn 사이에 들어온 취소는 여기서 집행된다.
@@ -762,7 +1055,7 @@ fn run_pilot_process_with(
         // **EOF를 기다리면 무기한 멈춘다.** 파이프를 닫고 제한된 정리만 한 뒤 오류를 먼저 알린다.
         drop(stdout);
         drop(stderr);
-        return abandon_run(guard, &workspace, &evidence, error);
+        return Err(abandon_run(guard, &workspace, &evidence, &context, error));
     }
 
     // stderr를 읽지 않으면 버퍼가 차서 자식이 멈춘다. 별도 스레드로 계속 배출한다.
@@ -801,7 +1094,7 @@ fn run_pilot_process_with(
 
     // stdout이 끝나기를 기다리되 **취소 종료 실패를 먼저 확인한다.**
     if let Some(error) = await_drain(&events_drain, guard) {
-        return abandon_run(guard, &workspace, &evidence, error);
+        return Err(abandon_run(guard, &workspace, &evidence, &context, error));
     }
 
     let mut session_id = session_rx.try_recv().ok();
@@ -824,10 +1117,10 @@ fn run_pilot_process_with(
     // stdout이 먼저 닫혀도 **stderr만 물고 있는 손자**가 남을 수 있다.
     // join 전에 다시 확인하고, 기다리는 동안에도 계속 확인한다.
     if let Some(error) = guard.termination_error() {
-        return abandon_run(guard, &workspace, &evidence, error);
+        return Err(abandon_run(guard, &workspace, &evidence, &context, error));
     }
     if let Some(error) = await_drain(&stderr_drain, guard) {
-        return abandon_run(guard, &workspace, &evidence, error);
+        return Err(abandon_run(guard, &workspace, &evidence, &context, error));
     }
     match stderr_drain.join() {
         Ok(Ok(())) => {}
@@ -856,9 +1149,9 @@ fn run_pilot_process_with(
     let diff_result = write_pilot_diff(&workspace, &evidence.diff);
     // 증거가 확정된 지금에야 다음 실행을 허용한다
     guard.release();
-    diff_result?;
+    diff_result.map_err(|e| context.failed(e))?;
     if let Some(error) = evidence_error {
-        return Err(error);
+        return Err(context.failed(error));
     }
 
     let PilotEvidence {
@@ -901,8 +1194,9 @@ fn abandon_run(
     guard: &SlotGuard,
     workspace: &PilotWorkspace,
     evidence: &PilotEvidence,
+    context: &FailureContext,
     error: String,
-) -> Result<PilotRun, String> {
+) -> PilotFailure {
     let (reclaimed, _) = guard.reclaim_child();
     let pid = reclaimed.as_ref().map(|child| child.id());
     if let Some(mut child) = reclaimed {
@@ -912,17 +1206,31 @@ fn abandon_run(
     }
     // 증거 보존 계약은 실패 경로에서도 지킨다
     let diff_result = write_pilot_diff(workspace, &evidence.diff);
-    // **슬롯을 열지 않는다.** 남은 프로세스·스레드가 다음 실행과 뒤엉키면 증거를 믿을 수 없다.
-    guard.poison(&workspace.path, &error);
     // 메모리 상태는 앱 종료와 함께 사라진다. 디스크에도 즉시 남겨 재시작 후에도 막는다.
+    // (슬롯은 이 실행이 계속 쥐고 있으므로 표시를 먼저 써도 다른 실행이 끼어들 수 없다.)
     let marker_result = write_poisoned_marker(&workspace.path, pid, &error);
-    diff_result?;
-    marker_result?;
-    Err(error)
+    // **슬롯을 열지 않는다.** 남은 프로세스·스레드가 다음 실행과 뒤엉키면 증거를 믿을 수 없다.
+    // 표시 저장 실패도 **슬롯에 따로** 남긴다 — 이 실패 결과가 화면에서 사라진 뒤에도
+    // 슬롯만 보고 잠금 상태를 다시 물을 수 있어야 하기 때문이다.
+    let marker_error = marker_result.as_ref().err().cloned();
+    guard.poison(&workspace.path, &error, marker_error.clone());
+
+    // **무엇이 잘못됐나**는 종료 오류다. diff를 못 뜬 것은 그 위에 얹히는 증거 손실이고,
+    // 표시를 저장하지 못한 것은 **또 다른 사실**이라 별도 필드로 간다 —
+    // 섞으면 화면의 "표시를 저장하지 못한 이유"에 종료 오류가 나타난다.
+    let mut detail = error;
+    if let Err(e) = diff_result {
+        detail.push_str(&format!("; the evidence diff could not be written: {e}"));
+    }
+    context.poisoned(detail, marker_error)
 }
 
 /// 종료 실패를 파일럿 루트에 영속화한다. 복제본 **밖**이라 남은 프로세스가 지울 수 없다.
-fn write_poisoned_marker(workspace: &Path, pid: Option<u32>, error: &str) -> Result<(), String> {
+pub(crate) fn write_poisoned_marker(
+    workspace: &Path,
+    pid: Option<u32>,
+    error: &str,
+) -> Result<(), String> {
     let root = workspace
         .parent()
         .ok_or_else(|| "pilot workspace has no parent".to_string())?;
@@ -967,7 +1275,7 @@ impl PilotEvidence {
 }
 
 /// 같은 밀리초에 두 번 시작해도 겹치지 않는 실행 식별자.
-fn new_run_id() -> String {
+pub(crate) fn new_run_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let stamp = SystemTime::now()
@@ -986,6 +1294,37 @@ fn extract_session_id(line: &str) -> Option<String> {
         return None;
     }
     Some(event.get("thread_id")?.as_str()?.to_string())
+}
+
+/// 시작 커밋 대비 변경 **목록**을 상태 코드와 함께 얻는다.
+///
+/// 패치 본문을 파싱하지 않는 이유: `+++ b/…` 줄은 **삭제·이름만 변경·바이너리 변경에 나타나지 않는다.**
+/// 패치로 목록을 만들면 사용자에게 "바뀐 게 없다"고 거짓말하게 된다.
+/// `-z`는 공백·따옴표가 든 경로를 그대로 주고, `-M`은 이름 변경을 삭제+추가로 쪼개지 않는다.
+pub(crate) fn pilot_name_status(workspace: &PilotWorkspace) -> Result<String, String> {
+    // 새로 생긴 파일이 목록에 들어오려면 의도 등록이 먼저다 (`write_pilot_diff`와 같은 이유)
+    let intent = Command::new(git_program())
+        .args(["add", "-N", "."])
+        .current_dir(&workspace.path)
+        .status()
+        .map_err(|e| format!("cannot start git: {e}"))?;
+    if !intent.success() {
+        return Err(format!(
+            "cannot register new files for the changed-file list (git add -N exited with {intent})"
+        ));
+    }
+    git_stdout(
+        &workspace.path,
+        &[
+            "diff",
+            "--name-status",
+            "-z",
+            "-M",
+            &workspace.start_commit,
+            "--",
+            ".",
+        ],
+    )
 }
 
 /// 시작 커밋 대비 변경을 패치로 남긴다. 새로 생긴 파일도 포함되도록 의도만 등록(`add -N`)한다.
@@ -1010,7 +1349,7 @@ pub(crate) fn write_pilot_diff(workspace: &PilotWorkspace, diff_path: &Path) -> 
         .map_err(|e| format!("cannot write pilot diff '{}': {e}", diff_path.display()))
 }
 
-fn pilot_root(app: &tauri::AppHandle) -> Result<PathBuf, crate::error::AppError> {
+pub(crate) fn pilot_root(app: &tauri::AppHandle) -> Result<PathBuf, crate::error::AppError> {
     app.path()
         .app_local_data_dir()
         .map(|path| path.join("m4-pilots"))
@@ -1258,7 +1597,11 @@ fn pilot_manifest_path(root: &Path, workspace: &Path) -> Result<PathBuf, String>
 }
 
 /// 증거 파일 경로는 항상 파일럿 루트 바로 아래다 — 복제본 안이 아니다.
-fn pilot_artifact_path(root: &Path, workspace: &Path, suffix: &str) -> Result<PathBuf, String> {
+pub(crate) fn pilot_artifact_path(
+    root: &Path,
+    workspace: &Path,
+    suffix: &str,
+) -> Result<PathBuf, String> {
     let name = workspace
         .file_name()
         .and_then(|name| name.to_str())
@@ -1267,7 +1610,7 @@ fn pilot_artifact_path(root: &Path, workspace: &Path, suffix: &str) -> Result<Pa
 }
 
 /// 실행별 증거 경로. `run_id`가 들어가 재작업 라운드끼리 서로 덮어쓰지 않는다.
-fn pilot_run_artifact(
+pub(crate) fn pilot_run_artifact(
     root: &Path,
     workspace: &Path,
     run_id: &str,
@@ -1605,7 +1948,7 @@ mod tests {
 
         let error = execute_pilot(&root, &pilot.path, "무시될 프롬프트", &handle).unwrap_err();
         assert!(
-            error.contains("already in progress"),
+            error.error.contains("already in progress"),
             "concurrent run must be rejected: {error}"
         );
         // 기존 실행은 그대로 살아 있어야 한다
@@ -1826,6 +2169,163 @@ mod tests {
     /// 끝내므로 **TERM을 무시하는 손자가 파이프를 문 채 살아남는다** — EOF를 기다리면 60초를
     /// 다 채운다. 파이프를 닫고 오류를 먼저 반환해야 제시간에 끝난다.
     #[cfg(unix)]
+    /// 증거 파일을 만드는 **도중**에 실패하는 경우 — events는 만들어졌는데 stderr에서 막힌다.
+    ///
+    /// 맥락을 파일 생성 **뒤에** 만들면 이 구간의 실패가 맨몸 오류로 축약되고,
+    /// 이미 만들어진 events 파일은 아무도 경로를 모르는 고아가 된다.
+    #[test]
+    fn partial_evidence_creation_keeps_the_path_of_what_was_created() {
+        let base = unique_temp("pilot-partial-evidence");
+        std::fs::remove_dir_all(&base).ok();
+        let source = make_source(&base);
+        let root = base.join("pilots");
+        let pilot = prepare_pilot_copy(&source, &root).unwrap();
+        let root = root.canonicalize().unwrap();
+
+        let run_id = new_run_id();
+        let evidence = PilotEvidence::new(&root, &pilot.path, &run_id).unwrap();
+        // **stderr만** 만들 수 없게 한다 — 그 경로를 폴더로 선점한다
+        std::fs::create_dir_all(&evidence.stderr).unwrap();
+        let events_path = evidence.events.clone();
+        let last_message_path = evidence.last_message.clone();
+
+        let handle: SlotHandle = Arc::new(Mutex::new(None));
+        let guard = SlotGuard::reserve(&handle, &run_id).unwrap();
+        let workspace = PilotWorkspace {
+            path: pilot.path.clone(),
+            start_commit: pilot.start_commit.clone(),
+        };
+
+        let failure = run_pilot_process_with(
+            &guard,
+            workspace,
+            evidence,
+            run_id.clone(),
+            Path::new("/bin/echo"),
+            &[],
+            tree_signal,
+        )
+        .expect_err("stderr 증거를 만들 수 없으면 실패해야 한다");
+
+        assert!(
+            failure.error.contains("cannot create pilot stderr log"),
+            "{}",
+            failure.error
+        );
+        // 맨몸 오류로 축약되지 않았는가
+        assert_eq!(failure.run_id.as_deref(), Some(run_id.as_str()));
+        assert_eq!(
+            failure.workspace_path.as_deref(),
+            Some(pilot.path.as_path())
+        );
+
+        let stored = failure.evidence.clone().expect("증거 상태가 사라졌다");
+        // ① 이미 만들어진 events의 경로는 **살아 있어야 한다**
+        assert_eq!(
+            stored.events.as_deref(),
+            Some(events_path.display().to_string().as_str()),
+            "만들어진 증거의 경로를 잃었다 (고아 파일이 된다)"
+        );
+        assert!(events_path.is_file());
+        // ② 만들지 못한 것은 **보고되면 안 된다** (stderr 자리는 폴더일 뿐 저장된 기록이 아니다)
+        assert_eq!(stored.stderr, None, "저장되지 않은 stderr가 보고됐다");
+        assert_eq!(stored.last_message, None);
+        assert!(!last_message_path.exists());
+        assert_eq!(stored.diff, None);
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// **종료 오류와 표시 저장 오류는 다른 사실이다.**
+    ///
+    /// 한 문자열로 합치거나 하나를 버리면, 화면의 "표시를 저장하지 못한 이유" 자리에
+    /// 종료 오류가 나타난다. 사용자는 잠금이 왜 재시작을 넘기지 못하는지 알 수 없게 된다.
+    #[cfg(unix)]
+    #[test]
+    fn abandon_run_keeps_the_marker_error_apart_from_the_termination_error() {
+        let _serial = serialize_signal_tests();
+        let base = unique_temp("pilot-two-errors");
+        std::fs::remove_dir_all(&base).ok();
+        let source = make_source(&base);
+        let root = base.join("pilots");
+        let pilot = prepare_pilot_copy(&source, &root).unwrap();
+        let root = root.canonicalize().unwrap();
+
+        // 표시 저장을 실패시킨다 — 그 경로를 **폴더로** 선점한다
+        let marker = pilot_artifact_path(&root, &pilot.path, PILOT_POISONED_SUFFIX).unwrap();
+        std::fs::create_dir_all(&marker).unwrap();
+
+        let run_id = new_run_id();
+        let evidence = PilotEvidence::new(&root, &pilot.path, &run_id).unwrap();
+        let handle: SlotHandle = Arc::new(Mutex::new(None));
+        let guard = SlotGuard::reserve(&handle, &run_id).unwrap();
+        // spawn 전에 취소 → attach가 종료를 시도하고, 주입된 신호가 실패한다
+        assert!(cancel_pilot_child(&handle).unwrap());
+
+        let program = PathBuf::from("/bin/sh");
+        let args = vec![
+            "-c".to_string(),
+            "trap '' TERM; /bin/sh -c \"trap '' TERM; sleep 60\" & wait".to_string(),
+        ];
+        *SIGNALED_PID.lock().unwrap() = None;
+        let workspace = PilotWorkspace {
+            path: pilot.path.clone(),
+            start_commit: pilot.start_commit.clone(),
+        };
+
+        let failure = run_pilot_process_with(
+            &guard,
+            workspace,
+            evidence,
+            run_id,
+            &program,
+            &args,
+            failing_signal_recording,
+        )
+        .expect_err("종료 실패는 보고돼야 한다");
+
+        // 살아남은 손자를 실제로 정리한다 (주입된 신호는 아무것도 죽이지 않았다)
+        kill_recorded_group();
+
+        // ① 무엇이 잘못됐나 = 종료 실패
+        assert!(
+            failure.error.contains("survived both TERM and KILL"),
+            "{}",
+            failure.error
+        );
+        assert!(
+            failure.poisoned.is_some(),
+            "복제본이 오염으로 표시되지 않았다"
+        );
+        // ② 표시를 왜 저장하지 못했나 = 다른 사실
+        let marker_error = failure
+            .marker_error
+            .clone()
+            .expect("표시 저장 실패가 기록되지 않았다");
+        assert!(
+            marker_error.contains("cannot persist poisoned marker"),
+            "{marker_error}"
+        );
+        assert_ne!(
+            marker_error, failure.error,
+            "두 오류가 한 문자열로 합쳐졌다"
+        );
+        // ③ 증거 경로는 실패해도 남되, **실제로 저장된 것만** 보고돼야 한다
+        let evidence = failure.evidence.clone().expect("증거 경로가 사라졌다");
+        let events = evidence.events.clone().expect("이벤트 증거 경로가 없다");
+        assert!(Path::new(&events).exists(), "이벤트 증거가 없다: {events}");
+        let stderr = evidence.stderr.clone().expect("stderr 증거 경로가 없다");
+        assert!(Path::new(&stderr).exists());
+        // 이 경로에서는 diff까지 남는다 (복제본이 멀쩡하므로)
+        assert!(evidence.diff.is_some(), "실패 경로의 diff 증거가 빠졌다");
+        assert_eq!(
+            failure.workspace_path.as_deref(),
+            Some(pilot.path.as_path())
+        );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
     #[test]
     fn attach_termination_failure_returns_without_waiting_for_eof() {
         let _serial = serialize_signal_tests();
@@ -1873,7 +2373,7 @@ mod tests {
         kill_recorded_group();
 
         assert!(
-            error.contains("survived both TERM and KILL"),
+            error.error.contains("survived both TERM and KILL"),
             "unexpected error: {error}"
         );
         // 손자는 60초짜리다. EOF를 기다렸다면 이 단언이 깨진다
@@ -1980,9 +2480,9 @@ mod tests {
         kill_recorded_group();
 
         // ① 취소가 본 오류와 실행이 반환한 오류가 같아야 한다
-        assert_eq!(error, cancel_error);
+        assert_eq!(error.error, cancel_error);
         assert!(
-            error.contains("survived both TERM and KILL"),
+            error.error.contains("survived both TERM and KILL"),
             "unexpected error: {error}"
         );
         // ② 손자는 60초짜리다. EOF를 기다렸다면 깨진다
@@ -2093,7 +2593,7 @@ mod tests {
         kill_recorded_group();
 
         assert!(
-            error.contains("survived both TERM and KILL"),
+            error.error.contains("survived both TERM and KILL"),
             "unexpected error: {error}"
         );
         // 손자는 60초짜리다. stderr join에 갇혔다면 이 단언이 깨진다
@@ -2139,7 +2639,7 @@ mod tests {
         let handle: SlotHandle = Arc::new(Mutex::new(None));
         let guard = SlotGuard::reserve(&handle, "poisoned-run").unwrap();
         // poison이 released를 세우므로 guard가 떨어져도 Drop은 슬롯을 건드리지 않는다
-        guard.poison(workspace, "injected termination failure");
+        guard.poison(workspace, "injected termination failure", None);
         write_poisoned_marker(workspace, Some(4242), "injected termination failure").unwrap();
         handle
     }
@@ -2257,7 +2757,10 @@ mod tests {
             failing_signal_recording,
         )
         .expect_err("termination failure must be reported");
-        assert!(error.contains("survived both TERM and KILL"), "{error}");
+        assert!(
+            error.error.contains("survived both TERM and KILL"),
+            "{error}"
+        );
 
         // === 앱 재시작 모사: 메모리 상태를 통째로 버린다 ===
         drop(guard);
@@ -2531,7 +3034,11 @@ mod tests {
 
     /// 그 명령줄이 **대상 쓰기를 실제로 시도했음**을 상태 파일로 증명하고 종료 코드를 돌려준다.
     #[cfg(unix)]
-    fn boundary_exit_status(pilot: &Path, index: usize, run: &Result<PilotRun, String>) -> i32 {
+    fn boundary_exit_status(
+        pilot: &Path,
+        index: usize,
+        run: &Result<PilotRun, PilotFailure>,
+    ) -> i32 {
         let path = pilot.join(boundary_status_file(index));
         let body = std::fs::read_to_string(&path).unwrap_or_else(|_| {
             panic!(
