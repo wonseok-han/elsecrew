@@ -51,6 +51,12 @@ pub struct ScannedProject {
     pub name: String,
     /// 표식으로 추정한 에이전트 ("claude-code" | "codex")
     pub agent: String,
+    /// 자동 인계 파일럿을 쓸 수 있는가 — **안전한 작업 사본을 만들 수 있는지**다.
+    ///
+    /// 에이전트 표식(`CLAUDE.md` 등)이 있다고 파일럿을 쓸 수 있는 건 아니다.
+    /// 복제본은 Git 클론으로 만들기 때문이다. 판정은 실행 쪽과 **같은 함수**를 쓴다 —
+    /// 기준이 갈리면 눌러도 되는 것처럼 보여 놓고 실행에서 거절하게 된다.
+    pub pilot_eligible: bool,
 }
 
 /// 기본 프로젝트 폴더(사용자가 지정 안 하면 Documents).
@@ -95,6 +101,7 @@ pub async fn scan_projects(base: String) -> Result<Vec<ScannedProject>, AppError
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 found.push(ScannedProject {
+                    pilot_eligible: crate::orchestration::can_copy_pilot_source(&path),
                     path: path.display().to_string(),
                     name,
                     agent: agent.into(),
@@ -152,15 +159,25 @@ const CLAUDE_SAFE_SETTINGS: &str = r#"{
 }
 "#;
 
-/// 코덱스 전역 안전 프리셋 — 확인 없는 명령 실행 금지 + 작업 폴더 밖 쓰기 차단.
+/// 코덱스 전역 안전 프리셋 — 작업 폴더 밖 쓰기 차단 + 승격 시 사람에게 확인.
 /// 사용자가 이미 설정 파일을 갖고 있으면 절대 건드리지 않는다.
+///
+/// ⚠️ **`approval_policy = "untrusted"`를 쓰면 안 된다.** codex-cli 0.149.1이
+/// `approval_policy = "untrusted" is no longer supported; remove this setting`으로
+/// **거부하며, 그 설정이 있으면 codex 실행 자체가 실패한다**(실측). 즉 앱이 그 값을 써 두면
+/// 신규 사용자의 Codex를 통째로 망가뜨린다. 유효한 값은
+/// `on-failure`·`on-request`·`granular`·`never`이며, 승격 시 확인이라는 원래 의도에
+/// 가장 가까운 `on-request`를 쓴다.
+///
+/// **실제 경계는 `sandbox_mode`다**(§7.10.1.2와 같은 원칙 — 실측된 것만 경계로 센다).
+/// `on-request`의 구체적 동작은 아직 실측하지 않았다.
 const CODEX_SAFE_CONFIG_KO: &str = "# Hello, Agent가 만든 초보자 안전 설정
-approval_policy = \"untrusted\"
+approval_policy = \"on-request\"
 sandbox_mode = \"workspace-write\"
 ";
 
 const CODEX_SAFE_CONFIG_EN: &str = "# Beginner-safe defaults created by Hello, Agent
-approval_policy = \"untrusted\"
+approval_policy = \"on-request\"
 sandbox_mode = \"workspace-write\"
 ";
 
@@ -196,6 +213,18 @@ fn create(
         .map_err(|e| format!("cannot create project folder '{}': {e}", dir.display()))?;
 
     let safety = apply_safety_preset(agent, &dir, language.as_deref() == Some("en"))?;
+
+    // 처음부터 **되돌릴 수 있는 상태**로 만든다. 앱이 만든 프로젝트가 나중에
+    // "아직 맡길 수 없어요"에 걸리면, 사용자는 자기가 만들지도 않은 문제를 풀어야 한다.
+    // 앱이 방금 만든 폴더이므로 여기서는 동의가 이미 성립한다.
+    //
+    // **실패해도 프로젝트 생성 자체는 성공이다.** 준비는 파일럿을 쓰기 위한 편의일 뿐이고,
+    // 이것 때문에 첫 프로젝트 만들기가 막히면 안 된다. 나중에 카드에서 다시 준비할 수 있다.
+    let _ = crate::orchestration::prepare_project_for_pilot(
+        &dir,
+        language.as_deref() != Some("en"),
+        true,
+    );
 
     Ok(ProjectInfo {
         path: dir.display().to_string(),
@@ -346,6 +375,49 @@ fn sanitize_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 목록에 **자격까지 실어 보내야** 화면이 실행 전에 판정할 수 있다.
+    /// 실사용에서 터진 모양 그대로 — 에이전트 표식만 있고 Git 저장소가 아닌 프로젝트다.
+    #[test]
+    fn scanned_projects_carry_whether_the_pilot_can_use_them() {
+        let base = std::env::temp_dir().join(format!(
+            "hello-agent-scan-eligible-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+
+        // ① 표식만 있고 .git 없음 → 파일럿을 쓸 수 없다
+        let notes = base.join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::write(notes.join("CLAUDE.md"), "# notes\n").unwrap();
+        // ② 표식 + Git 저장소 → 쓸 수 있다
+        let repo = base.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(repo.join("AGENTS.md"), "# repo\n").unwrap();
+
+        let found = tauri::async_runtime::block_on(scan_projects(base.display().to_string()))
+            .expect("스캔 실패");
+
+        let by_name = |name: &str| {
+            found
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("{name}을(를) 찾지 못했다: {found:?}"))
+        };
+        // 둘 다 프로젝트로는 잡힌다 — 자격만 다르다
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            !by_name("notes").pilot_eligible,
+            "Git 저장소가 아닌데 맡길 수 있다고 표시했다"
+        );
+        assert!(by_name("repo").pilot_eligible, "Git 저장소를 거절했다");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn sanitize_strips_path_separators() {

@@ -1,5 +1,6 @@
 mod agent;
 mod claude_pilot;
+mod codex_pilot;
 mod detect;
 mod editor;
 mod error;
@@ -35,6 +36,7 @@ pub fn run() {
             orchestration::cancel_codex_pilot,
             orchestration::recover_codex_pilot,
             orchestration::discard_codex_pilot,
+            orchestration::prepare_project_for_handoff,
             handoff::begin_handoff,
             handoff::release_handoff,
             handoff::run_handoff,

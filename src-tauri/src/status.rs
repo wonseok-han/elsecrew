@@ -18,6 +18,30 @@ pub struct AgentStatus {
     pub version: Option<String>,
     pub logged_in: bool,
     pub path: Option<String>,
+    /// **설치는 됐는데 온전하지 않다.** 다시 설치하면 고쳐진다.
+    ///
+    /// 설치·로그인·최신 여부가 다 참인데도 실제로는 동작하지 않는 상태가 있다.
+    /// 그러면 화면에 아무 버튼도 안 뜨고 사용자는 손쓸 방법이 없다 —
+    /// 실제로 그 상태에 빠진 적이 있다(Codex 셸 호스트 누락).
+    pub needs_repair: bool,
+}
+
+/// 설치된 에이전트가 **실제로 일할 수 있는 상태인가.**
+///
+/// 버전이 최신이어도 온전하지 않을 수 있다. Codex는 `codex` 바이너리 옆에
+/// `codex-code-mode-host`가 있어야 셸 명령을 실행한다 — 없으면 **어떤 명령도 못 돌리고**,
+/// 그때 파일이 안 생기는 것을 "샌드박스가 막았다"로 오판하기 쉽다(실측).
+fn installation_is_complete(agent: Agent, path: &std::path::Path) -> bool {
+    match agent {
+        // Claude는 단일 바이너리로 동작한다
+        Agent::ClaudeCode => true,
+        Agent::Codex => match path.parent() {
+            Some(dir) => dir
+                .join(crate::detect::exe("codex-code-mode-host"))
+                .is_file(),
+            None => true,
+        },
+    }
 }
 
 #[tauri::command]
@@ -30,6 +54,7 @@ pub async fn agent_status(agent: String) -> Result<AgentStatus, AppError> {
                 version: None,
                 logged_in: false,
                 path: None,
+                needs_repair: false,
             };
         };
         let version = crate::detect::agent_version(&path);
@@ -38,6 +63,7 @@ pub async fn agent_status(agent: String) -> Result<AgentStatus, AppError> {
             installed: true,
             version,
             logged_in,
+            needs_repair: !installation_is_complete(agent, &path),
             path: Some(path.display().to_string()),
         }
     })
@@ -103,7 +129,11 @@ fn curl_cmd() -> Command {
 }
 
 fn null_device() -> &'static str {
-    if cfg!(windows) { "NUL" } else { "/dev/null" }
+    if cfg!(windows) {
+        "NUL"
+    } else {
+        "/dev/null"
+    }
 }
 
 fn curl_path() -> PathBuf {
@@ -143,7 +173,54 @@ fn semver_of(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::semver_of;
+    /// **설치됐다고 다 쓸 수 있는 게 아니다.**
+    ///
+    /// Codex는 `codex` 옆에 `codex-code-mode-host`가 있어야 셸 명령을 실행한다.
+    /// 없으면 어떤 명령도 못 돌리는데, 버전은 최신이라 화면에는 아무 버튼도 안 뜬다 —
+    /// 사용자가 손쓸 방법이 없어진다(실사용에서 실제로 그 상태에 빠졌다).
+    #[test]
+    fn a_codex_without_its_shell_host_needs_repair() {
+        let dir = std::env::temp_dir().join(format!(
+            "hello-agent-repair-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let codex = dir.join(crate::detect::exe("codex"));
+        std::fs::write(&codex, b"binary").unwrap();
+
+        // 호스트가 없다 → 고쳐야 한다
+        assert!(
+            !installation_is_complete(Agent::Codex, &codex),
+            "셸 호스트가 없는데 온전하다고 판정했다"
+        );
+
+        // 옆에 놓이면 온전하다
+        std::fs::write(
+            dir.join(crate::detect::exe("codex-code-mode-host")),
+            b"host",
+        )
+        .unwrap();
+        assert!(installation_is_complete(Agent::Codex, &codex));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Claude는 단일 바이너리로 동작한다 — 없는 조건을 요구하면 멀쩡한 설치가 고장으로 보인다.
+    #[test]
+    fn claude_needs_no_sibling_to_be_complete() {
+        assert!(installation_is_complete(
+            Agent::ClaudeCode,
+            std::path::Path::new("/nowhere/claude")
+        ));
+    }
+
+    use super::{installation_is_complete, semver_of};
+    use crate::agent::Agent;
 
     #[test]
     fn extract_semver() {

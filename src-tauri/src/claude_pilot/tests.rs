@@ -295,6 +295,27 @@ fn permission_denials_are_captured() {
     assert_eq!(plan.permission_denials, vec!["Write", "Bash"]);
 }
 
+/// **실행이 왜 끝났는지 CLI가 말해 줬다면 그대로 전한다.**
+///
+/// 실사용에서 토큰이 만료돼 계획 단계가 죽었는데, 원인을 "계획이 없다"로 덮어써서
+/// 화면이 "다시 로그인하세요"라고 안내하지 못했다. 원인을 잃으면 사용자는 막다른 길에 선다.
+#[test]
+fn a_failure_reported_by_the_cli_is_not_replaced_with_a_generic_message() {
+    let line = r#"{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token has been revoked.","structured_output":null}"#;
+
+    let error = parse_result(line).expect_err("실패인데 계획으로 읽었다");
+
+    assert!(error.contains("OAuth"), "원인이 사라졌다: {error}");
+    assert!(error.contains("revoked"), "{error}");
+}
+
+/// CLI가 아무 말도 없으면 그때만 기본 문구를 쓴다.
+#[test]
+fn a_silent_failure_still_gets_a_message() {
+    let error = parse_result(r#"{"type":"result","is_error":true}"#).unwrap_err();
+    assert!(error.contains("no structured plan"), "{error}");
+}
+
 // ───────────────────────── 인계 ─────────────────────────
 
 /// 인계는 **앱이 한다.** 사용자가 옮겨 나르지 않는다(§5.2 가설 A).

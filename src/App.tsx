@@ -10,6 +10,12 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getBaseDir, setBaseDir, saveProject, lastOpenedMap } from "./store";
 import type { MessageKey } from "./locales/ko";
 import {
+  canStartPilot,
+  chooseTarget,
+  initialTarget,
+  retainTarget,
+} from "./handoffTarget";
+import {
   NO_RUN,
   ownsStage,
   requestCancel,
@@ -84,6 +90,8 @@ interface AgentStatus {
   version: string | null;
   loggedIn: boolean;
   path: string | null;
+  /** 설치는 됐는데 온전하지 않다 — 다시 설치하면 고쳐진다 */
+  needsRepair: boolean;
 }
 
 // 기준 폴더 스캔으로 발견한 프로젝트 (앱 기억이 아니라 디스크 실제 폴더)
@@ -91,6 +99,11 @@ interface ScannedProject {
   path: string;
   name: string;
   agent: string;
+  /**
+   * 안전한 작업 사본을 만들 수 있는가 — **백엔드가 실행과 같은 기준으로 채운다.**
+   * 에이전트 표식이 있다고 파일럿을 쓸 수 있는 건 아니다(복제본은 Git 클론이다).
+   */
+  pilotEligible: boolean;
 }
 interface HomeProject extends ScannedProject {
   lastOpenedAt: number;
@@ -470,6 +483,10 @@ function AgentRow({ id, onSetup }: { id: AgentId; onSetup: () => void }) {
   } else if (!status.loggedIn) {
     statusText = t("home.agent.needLogin");
     statusClass = "warn";
+  } else if (status.needsRepair) {
+    // 버전은 최신인데 실제로는 못 쓰는 상태. 이걸 "설치됨"이라 말하면 손쓸 방법이 없다
+    statusText = t("home.agent.needsRepair");
+    statusClass = "warn";
   } else if (updateAvailable) {
     statusText = t("home.agent.updateAvailable", {
       version: semverParts(latest!)!.join("."),
@@ -496,6 +513,10 @@ function AgentRow({ id, onSetup }: { id: AgentId; onSetup: () => void }) {
         ) : status && !status.loggedIn ? (
           <button className="ghost small" onClick={onSetup}>
             {t("home.agent.setup")}
+          </button>
+        ) : status && status.needsRepair ? (
+          <button className="primary small" onClick={update} disabled={updating}>
+            {updating ? t("home.agent.repairing") : t("home.agent.repair")}
           </button>
         ) : updateAvailable ? (
           <button className="primary small" onClick={update} disabled={updating}>
@@ -623,6 +644,42 @@ function HomeView({
 }) {
   const { t, lang } = useI18n();
   const [opening, setOpening] = useState<string | null>(null);
+  /**
+   * 자동 인계를 맡길 프로젝트. **자동으로 정해지지 않는다** —
+   * 사용자가 카드에서 고르기 전까지 파일럿은 열리지 않는다.
+   */
+  const [pilotTarget, setPilotTarget] = useState<string | null>(initialTarget());
+  /** "되돌릴 수 있게 준비하기" 확인을 기다리는 프로젝트. 확인 없이는 원본을 건드리지 않는다. */
+  const [preparing, setPreparing] = useState<HomeProject | null>(null);
+  const [preparingBusy, setPreparingBusy] = useState(false);
+  const [prepareError, setPrepareError] = useState<AppError | null>(null);
+
+  // 목록이 새로고침되면 고른 프로젝트가 사라졌거나 자격을 잃었는지 다시 본다
+  useEffect(() => {
+    setPilotTarget((current) => retainTarget(projects, current));
+  }, [projects]);
+
+  const pilotProject = projects.find((p) => p.path === pilotTarget) ?? null;
+
+  /** 사용자가 확인 창에서 "준비하기"를 눌렀다. */
+  async function prepareProject(project: HomeProject) {
+    setPreparingBusy(true);
+    setPrepareError(null);
+    try {
+      await invoke("prepare_project_for_handoff", {
+        projectPath: project.path,
+        language: lang,
+        confirmPrepareProject: true,
+      });
+      setPreparing(null);
+      // 목록을 다시 읽어야 자격이 갱신된다
+      onChanged();
+    } catch (e) {
+      setPrepareError(toAppError(e));
+    } finally {
+      setPreparingBusy(false);
+    }
+  }
 
   async function open(p: HomeProject) {
     setOpening(p.path);
@@ -701,13 +758,71 @@ function HomeView({
                 >
                   {opening === p.path ? t("home.opening") : t("home.open")}
                 </button>
+                {/* 맡길 수 있는 프로젝트에만 버튼을 준다. 쓸 수 없으면
+                    누르게 해 놓고 거절하는 대신 **이유를 먼저 알려 준다.** */}
+                {p.pilotEligible ? (
+                  <button
+                    className="ghost"
+                    onClick={() => setPilotTarget(chooseTarget(projects, p.path))}
+                    disabled={pilotTarget === p.path}
+                  >
+                    {pilotTarget === p.path
+                      ? t("home.handoff.picked")
+                      : t("home.handoff.pick")}
+                  </button>
+                ) : (
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      setPrepareError(null);
+                      setPreparing(p);
+                    }}
+                  >
+                    {t("home.handoff.prepare")}
+                  </button>
+                )}
               </div>
             </li>
           ))}
         </ul>
       )}
 
-      {projects.length > 0 && <HandoffPilot project={projects[0]} />}
+      {/* 원본 폴더를 건드리는 유일한 동작이다. **무엇이 생기는지 먼저 보여 준다.** */}
+      {preparing && (
+        <div className="prepare-card">
+          <h4>{t("home.prepare.title", { name: preparing.name })}</h4>
+          <p>{t("home.prepare.desc")}</p>
+          <ul className="prepare-facts">
+            <li>{t("home.prepare.keepsFiles")}</li>
+            <li>{t("home.prepare.addsFolder")}</li>
+          </ul>
+          {prepareError && <DoctorCard error={prepareError} />}
+          <div className="prepare-actions">
+            <button
+              className="primary"
+              onClick={() => prepareProject(preparing)}
+              disabled={preparingBusy}
+            >
+              {preparingBusy ? t("home.prepare.working") : t("home.prepare.confirm")}
+            </button>
+            <button
+              className="ghost"
+              onClick={() => setPreparing(null)}
+              disabled={preparingBusy}
+            >
+              {t("home.prepare.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 사용자가 고른 프로젝트에만 열린다 — `projects[0]`을 말없이 쓰지 않는다 */}
+      {pilotProject && (
+        <HandoffPilot
+          project={pilotProject}
+          onClose={() => setPilotTarget(null)}
+        />
+      )}
 
       <details className="tips-card">
         <summary>{t("home.tips.title")}</summary>
@@ -729,6 +844,8 @@ type HandoffStage =
   | "building"
   | "checking"
   | "done"
+  /** 무엇을 바꿀지 알아야 한다 — 사고가 아니라 되묻기 */
+  | "needsGoal"
   | "needsAttention";
 
 /** 화면 단계. 백엔드 단계에 **준비**만 더한다 — 준비는 이 화면이 직접 하는 일이다. */
@@ -819,10 +936,18 @@ function stepState(
   if (stage === "done") return "done";
   if (index < reached) return "done";
   if (index > reached) return "todo";
-  return stage === "needsAttention" ? "stopped" : "active";
+  if (stage === "needsAttention") return "stopped";
+  // 되묻기는 사고가 아니다. 빨갛게 칠하지 않는다
+  return stage === "needsGoal" ? "done" : "active";
 }
 
-function HandoffPilot({ project }: { project: HomeProject }) {
+function HandoffPilot({
+  project,
+  onClose,
+}: {
+  project: HomeProject;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const [available, setAvailable] = useState(false);
   const [goal, setGoal] = useState("");
@@ -899,6 +1024,11 @@ function HandoffPilot({ project }: { project: HomeProject }) {
         return;
       }
       runId = started.runId;
+      if (!runId) {
+        // 백엔드 응답 모양이 바뀌었다. 빈 값을 그대로 다음 호출에 넘기면
+        // **인자가 통째로 사라져** 엉뚱한 곳에서 터진다. 여기서 멈추는 게 낫다.
+        throw new Error("handoff start reply did not include a run id");
+      }
       const reserved = runReserved(runRef.current, runId);
       runRef.current = reserved.next;
       if (reserved.abort) {
@@ -917,6 +1047,8 @@ function HandoffPilot({ project }: { project: HomeProject }) {
       const outcome = await invoke<HandoffResult>("run_handoff", {
         runId,
         workspacePath: workspace.path,
+        // 카드에 보이는 그 에이전트가 실제로 일한다 — 화면과 실행이 갈리면 안 된다
+        agent: project.agent,
         goal,
       });
       setResult(outcome);
@@ -999,7 +1131,18 @@ function HandoffPilot({ project }: { project: HomeProject }) {
         <p className="muted">{t("handoff.subtitle")}</p>
       </div>
 
-      <p className="handoff-notice">{t("handoff.notice", { name: project.name })}</p>
+      {/* 어느 프로젝트에 맡기는지 화면에서 분명해야 한다 */}
+      <p className="handoff-notice">
+        {t("handoff.notice", { name: project.name })}
+        <button className="link" onClick={onClose} disabled={running}>
+          {t("handoff.changeProject")}
+        </button>
+      </p>
+
+      {/* 목록 새로고침 사이에 자격을 잃을 수 있다. 그때도 폼을 내밀지 않는다 */}
+      {!project.pilotEligible && (
+        <p className="handoff-locked warn">{t("handoff.notEligible")}</p>
+      )}
 
       <label className="handoff-goal">
         <span>{t("handoff.goal.label")}</span>
@@ -1008,7 +1151,7 @@ function HandoffPilot({ project }: { project: HomeProject }) {
           onChange={(e) => setGoal(e.target.value)}
           placeholder={t("handoff.goal.placeholder")}
           rows={3}
-          disabled={running}
+          disabled={running || !project.pilotEligible}
         />
       </label>
 
@@ -1068,7 +1211,7 @@ function HandoffPilot({ project }: { project: HomeProject }) {
           <button
             className="primary"
             onClick={start}
-            disabled={goal.trim() === "" || blocker !== null}
+            disabled={!canStartPilot(project, goal) || blocker !== null}
           >
             {t("handoff.start")}
           </button>
@@ -1092,9 +1235,23 @@ function HandoffPilot({ project }: { project: HomeProject }) {
 
       {result && (
         <div className="handoff-result">
-          {result.attention ? (
+          {result.stage === "needsGoal" ? (
+            // 잘못된 것이 없다. 사고 화면이 아니라 **되묻는** 화면이다
+            <>
+              <h4>{t("handoff.needsGoal.title")}</h4>
+              <p>{t("handoff.needsGoal.desc")}</p>
+              <p className="muted">{t("handoff.needsGoal.example")}</p>
+              <div className="handoff-actions">
+                <button className="primary" onClick={() => setResult(null)}>
+                  {t("handoff.needsGoal.retry")}
+                </button>
+              </div>
+            </>
+          ) : result.attention ? (
             <>
               <h4>{t("handoff.attention.title")}</h4>
+              {/* **왜 멈췄는지 쉬운 말로 알려 준다.** 원문은 닥터의 상세 안에만 남는다 */}
+              <DoctorCard error={{ kind: "generic", detail: result.attention }} />
               {result.workspaceLock === "persisted" && (
                 <p className="handoff-locked">{t("handoff.attention.locked")}</p>
               )}
@@ -1115,6 +1272,8 @@ function HandoffPilot({ project }: { project: HomeProject }) {
             </>
           )}
 
+          {result.stage !== "needsGoal" && (
+            <>
           <h5>{t("handoff.result.changed")}</h5>
           {result.changedFiles.length === 0 ? (
             <p className="muted">{t("handoff.result.noChanges")}</p>
@@ -1134,6 +1293,9 @@ function HandoffPilot({ project }: { project: HomeProject }) {
                 </li>
               ))}
             </ul>
+          )}
+
+            </>
           )}
 
           <div className="handoff-keep">
@@ -1218,11 +1380,6 @@ function HandoffPilot({ project }: { project: HomeProject }) {
                   ))}
               </dd>
             </dl>
-            {result.attention && (
-              <p className="handoff-reason">
-                <code>{result.attention}</code>
-              </p>
-            )}
           </details>
         </div>
       )}

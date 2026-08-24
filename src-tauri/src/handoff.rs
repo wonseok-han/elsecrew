@@ -18,6 +18,7 @@
 //! 플랫폼은 **macOS 전용**이다(§7.10.1.2 ⑥). 종료 계약의 Windows 대응물을 실측하지 않았다.
 
 use crate::claude_pilot::{self, InitFacts, PlanResult};
+use crate::codex_pilot;
 use crate::orchestration::{self, PilotWorkspace};
 use crate::proctree::{
     self, SystemClock, SystemProcTable, TerminationConfig, TerminationReport, TreeTracker,
@@ -37,6 +38,9 @@ use tauri::{Emitter, State};
 const CLAUDE_EVENTS_SUFFIX: &str = ".hello-agent-claude.events.jsonl";
 const CLAUDE_STDERR_SUFFIX: &str = ".hello-agent-claude.stderr.log";
 const CLAUDE_DIFF_SUFFIX: &str = ".hello-agent-claude.diff";
+/// 계획 역할의 구조화 출력·스키마. Codex 계획 경로에서만 쓴다
+const PLAN_LAST_MESSAGE_SUFFIX: &str = ".hello-agent-plan.last-message.txt";
+const PLAN_SCHEMA_SUFFIX: &str = ".hello-agent-plan.schema.json";
 
 /// 실행 중 후손 신원을 누적하는 간격. 짧을수록 §7.10.1.2 ⑤의 잔여 빈틈이 줄어든다.
 const OBSERVE_INTERVAL_MS: u64 = 250;
@@ -62,6 +66,9 @@ pub(crate) enum HandoffStage {
     Checking,
     /// 완료
     Done,
+    /// **무엇을 바꿀지 알아야 한다.** 사고가 아니라 되묻기다 —
+    /// 계획 역할이 "할 일이 없다"고 답한 경우(인사말만 넣었을 때 등)
+    NeedsGoal,
     /// 사용자 확인 필요 — 안전하게 멈췄다
     NeedsAttention,
 }
@@ -323,9 +330,18 @@ fn ensure_reusable(workspace: &Path) -> Result<(), String> {
 // ───────────────────────── 계획 역할 실행 ─────────────────────────
 
 /// 계획 역할 실행의 산출물.
-struct ClaudeRun {
+struct PlanRun {
     plan: PlanResult,
-    facts: InitFacts,
+    /// 실행 세션 식별자. Claude는 `system:init`, Codex는 `thread.started`에서 온다
+    session_id: String,
+    /// 원장 기록용 CLI 판올림 정보. Codex는 이벤트로 주지 않아 비어 있을 수 있다
+    cli_version: String,
+    /// `system:init`으로 검증한 사실들. **Claude에만 있다** —
+    /// Codex는 대응 이벤트가 없어 검증 자체가 불가능하다(`codex_pilot` 머리말).
+    /// 실행 흐름은 `session_id`·`cli_version`만 쓰고, 이 값은 실사용 검증이 계약 전체를
+    /// 확인하는 데 쓴다(도구 집합·권한 모드·모델).
+    #[cfg_attr(not(test), allow(dead_code))]
+    facts: Option<InitFacts>,
     events_path: PathBuf,
     stderr_path: PathBuf,
     diff_path: PathBuf,
@@ -334,20 +350,25 @@ struct ClaudeRun {
 }
 
 /// 실행이 계약을 지키지 못한 방식.
-enum ClaudeFailure {
+#[derive(Debug)]
+enum PlanFailure {
     /// 복제본을 신뢰할 수 없다 — `poisoned`로 잠근다
     Poisoned(String),
     /// 복제본은 멀쩡하지만 이번 실행은 실패했다
     Failed(String),
 }
 
-struct ClaudeEvidence {
+struct PlanEvidence {
     events: PathBuf,
     stderr: PathBuf,
     diff: PathBuf,
+    /// Codex 계획 역할의 **구조화 출력이 담기는 곳**. Claude는 쓰지 않는다
+    last_message: PathBuf,
+    /// Codex는 스키마를 파일로만 받는다. **복제본 밖**에 둬야 에이전트가 못 고친다
+    schema: PathBuf,
 }
 
-impl ClaudeEvidence {
+impl PlanEvidence {
     fn new(root: &Path, workspace: &Path, run_id: &str) -> Result<Self, String> {
         Ok(Self {
             events: orchestration::pilot_run_artifact(
@@ -363,6 +384,13 @@ impl ClaudeEvidence {
                 CLAUDE_STDERR_SUFFIX,
             )?,
             diff: orchestration::pilot_run_artifact(root, workspace, run_id, CLAUDE_DIFF_SUFFIX)?,
+            last_message: orchestration::pilot_run_artifact(
+                root,
+                workspace,
+                run_id,
+                PLAN_LAST_MESSAGE_SUFFIX,
+            )?,
+            schema: orchestration::pilot_run_artifact(root, workspace, run_id, PLAN_SCHEMA_SUFFIX)?,
         })
     }
 }
@@ -401,9 +429,13 @@ fn new_session_id() -> String {
 
 /// stdout 수집 결과. 읽기는 별도 스레드에서 돌고 여기에 담겨 돌아온다.
 #[derive(Default)]
-struct ClaudeOutput {
+struct PlanOutput {
     facts: Option<InitFacts>,
     result_line: Option<String>,
+    /// 실행 세션 식별자 — 원장에 남긴다
+    session_id: String,
+    /// CLI 판올림 정보. Codex는 이벤트로 주지 않아 비어 있다
+    cli_version: String,
     /// 계약 위반 — 복제본을 신뢰할 수 없다
     violation: Option<String>,
     /// 증거를 남기지 못했다. **삼키지 않는다** — 기록 없는 실행은 증명할 수 없다
@@ -414,43 +446,116 @@ struct ClaudeOutput {
 /// **확인 실패 이후의 행동**(제한된 회수 후 즉시 poisoned)은 이 주입으로만 검증된다.
 type TerminateFn = fn(&Arc<Mutex<TreeTracker>>) -> TerminationReport;
 
-/// Claude를 **읽기 전용 계획 역할**로 한 번 실행한다.
-fn run_claude_plan(
-    workspace: &PilotWorkspace,
-    goal: &str,
-    evidence: &ClaudeEvidence,
-    cancel: &AtomicBool,
-) -> Result<ClaudeRun, ClaudeFailure> {
-    let program = crate::detect::agent_bin(crate::agent::Agent::ClaudeCode)
-        .ok_or_else(|| ClaudeFailure::Failed("claude is not installed".into()))?;
-    run_claude_plan_with(&program, workspace, goal, evidence, cancel, terminate)
+/// stdout을 읽어 증거로 남기고 계획 재료를 모으는 방식. 에이전트마다 다르다.
+type ReadStream = fn(ChildStdout, std::fs::File, PathBuf, String) -> PlanOutput;
+
+/// 계획 역할을 **어느 에이전트가 어떻게** 수행하는가.
+///
+/// 감독(신원 추적·취소·종료·증거)은 두 에이전트가 **똑같이** 받는다 —
+/// 종료 계약(F1~F8)이 갈라지면 한쪽만 고쳐지는 날이 온다.
+/// 다른 것은 이 네 가지뿐이다.
+struct PlanRole {
+    /// 오류 문구에 쓰는 이름
+    name: &'static str,
+    args: Vec<String>,
+    /// stdin으로 보낼 프롬프트. `None`이면 인자에 이미 실려 있다
+    stdin_prompt: Option<String>,
+    read: ReadStream,
+    /// 감독이 끝난 뒤 계획을 뽑는다
+    extract: fn(&PlanOutput, &PlanEvidence) -> Result<PlanResult, String>,
 }
 
-fn run_claude_plan_with(
-    program: &Path,
+/// 프로젝트의 에이전트에게 **읽기 전용 계획 역할**을 맡긴다.
+///
+/// 프로젝트를 만들 때 이미 고른 에이전트를 그대로 쓴다 — Codex로 만든 프로젝트에
+/// 말없이 Claude를 끌어오지 않는다(§7.6A 2차 실사용에서 드러난 결함).
+fn run_plan(
+    agent: crate::agent::Agent,
     workspace: &PilotWorkspace,
     goal: &str,
-    evidence: &ClaudeEvidence,
+    evidence: &PlanEvidence,
+    cancel: &AtomicBool,
+) -> Result<PlanRun, PlanFailure> {
+    let program = crate::detect::agent_bin(agent)
+        .ok_or_else(|| PlanFailure::Failed(format!("{} is not installed", agent.bin_name())))?;
+    let role = plan_role(agent, goal, evidence)?;
+    supervise_plan(&program, role, workspace, evidence, cancel, terminate)
+}
+
+fn plan_role(
+    agent: crate::agent::Agent,
+    goal: &str,
+    evidence: &PlanEvidence,
+) -> Result<PlanRole, PlanFailure> {
+    Ok(match agent {
+        crate::agent::Agent::ClaudeCode => PlanRole {
+            name: "claude",
+            // 세션 ID를 우리가 정해 주고 `system:init`에서 되돌아오는지 검증한다
+            args: claude_pilot::claude_pilot_args(&new_session_id()),
+            // 프롬프트는 **stdin**으로 — 변수 인자 플래그가 뒤따르는 프롬프트를 삼킨다(실측)
+            stdin_prompt: Some(planning_prompt(goal)),
+            read: read_claude_stream,
+            extract: extract_claude_plan,
+        },
+        crate::agent::Agent::Codex => {
+            // 스키마는 파일로만 받는다. 복제본 밖에 미리 써 둔다
+            std::fs::write(&evidence.schema, codex_pilot::PLAN_SCHEMA).map_err(|e| {
+                PlanFailure::Failed(format!(
+                    "cannot write the plan schema '{}': {e}",
+                    evidence.schema.display()
+                ))
+            })?;
+            let mut args = codex_pilot::codex_plan_args(
+                &evidence.schema, // 자리표는 아래에서 실제 경로로 바뀐다
+                &evidence.schema,
+                &evidence.last_message,
+            )
+            .map_err(PlanFailure::Failed)?;
+            // 마지막 인자가 프롬프트 자리표다. Codex는 프롬프트를 argv로 받는다
+            let last = args.len() - 1;
+            args[last] = planning_prompt(goal);
+            PlanRole {
+                name: "codex",
+                args,
+                stdin_prompt: None,
+                read: read_codex_stream,
+                extract: extract_codex_plan,
+            }
+        }
+    })
+}
+
+fn supervise_plan(
+    program: &Path,
+    role: PlanRole,
+    workspace: &PilotWorkspace,
+    evidence: &PlanEvidence,
     cancel: &AtomicBool,
     terminate: TerminateFn,
-) -> Result<ClaudeRun, ClaudeFailure> {
+) -> Result<PlanRun, PlanFailure> {
+    let agent = role.name;
+    let args = role.args;
     // ── 증거 파일을 **자식보다 먼저** 만든다 ──
     // 띄운 뒤에 만들다 실패하면 프로세스와 감시 스레드가 붕 뜬다. 순서가 곧 방어다.
     let events = std::fs::File::create(&evidence.events).map_err(|e| {
-        ClaudeFailure::Failed(format!(
-            "cannot create the claude event log '{}': {e}",
+        PlanFailure::Failed(format!(
+            "cannot create the {agent} event log '{}': {e}",
             evidence.events.display()
         ))
     })?;
     let stderr_file = std::fs::File::create(&evidence.stderr).map_err(|e| {
-        ClaudeFailure::Failed(format!(
-            "cannot create the claude stderr log '{}': {e}",
+        PlanFailure::Failed(format!(
+            "cannot create the {agent} stderr log '{}': {e}",
             evidence.stderr.display()
         ))
     })?;
-
-    let session_id = new_session_id();
-    let args = claude_pilot::claude_pilot_args(&session_id);
+    // Claude는 우리가 정한 세션 ID가 `init`으로 되돌아오는지 검증한다.
+    // Codex는 세션 ID를 스스로 발급해 `thread.started`로 알려 준다.
+    let expected_session = args
+        .iter()
+        .position(|a| a == "--session-id")
+        .and_then(|i| args.get(i + 1).cloned())
+        .unwrap_or_default();
 
     let mut command = crate::detect::command(program);
     command
@@ -467,30 +572,31 @@ fn run_claude_plan_with(
 
     let mut child = command
         .spawn()
-        .map_err(|e| ClaudeFailure::Failed(format!("cannot start claude: {e}")))?;
+        .map_err(|e| PlanFailure::Failed(format!("cannot start {agent}: {e}")))?;
 
     // 신원을 얻지 못하면 추적을 시작할 수 없다 → 복제본을 신뢰할 수 없다.
     let identity = match proctree::identity_of(child.id()) {
         Ok(identity) => identity,
         Err(e) => {
             bounded_reap(&mut child);
-            return Err(ClaudeFailure::Poisoned(format!(
-                "cannot track the claude process tree: {e}"
+            return Err(PlanFailure::Poisoned(format!(
+                "cannot track the {agent} process tree: {e}"
             )));
         }
     };
     let tracker = Arc::new(Mutex::new(TreeTracker::new(identity)));
 
-    // 프롬프트는 **stdin**으로 넣는다 — 변수 인자 플래그가 뒤따르는 프롬프트를 삼킨다(실측).
-    // 쓰기도 별도 스레드다. 상대가 읽지 않으면 파이프가 차서 여기서 막힌다.
-    let prompt = planning_prompt(goal);
-    let stdin_handle = child.stdin.take().map(|mut stdin| {
-        std::thread::spawn(move || {
+    // 프롬프트를 stdin으로 받는 에이전트만 여기서 쓴다.
+    // 쓰기도 별도 스레드다 — 상대가 읽지 않으면 파이프가 차서 여기서 막힌다.
+    let stdin_handle = match (role.stdin_prompt, child.stdin.take()) {
+        (Some(prompt), Some(mut stdin)) => Some(std::thread::spawn(move || {
             stdin
                 .write_all(prompt.as_bytes())
-                .map_err(|e| format!("cannot send the prompt to claude: {e}"))
-        })
-    });
+                .map_err(|e| format!("cannot send the prompt to {agent}: {e}"))
+        })),
+        // 인자로 넘긴 경우엔 stdin을 곧바로 닫는다. 열어 두면 상대가 입력을 기다린다
+        _ => None,
+    };
 
     // stderr는 별도 파일로 받는다. 정상 실행에서는 비어 있고, 프로세스 오류가 여기로 온다.
     let stderr_handle = child
@@ -518,11 +624,9 @@ fn run_claude_plan_with(
     // stdout(NDJSON) 읽기도 별도 스레드다. **읽기 루프 안에서 취소를 보면 안 된다** —
     // 아무것도 출력하지 않는 실행에서는 그 검사에 영영 닿지 못한다.
     let workspace_path = workspace.path.clone();
-    let expected_session = session_id.clone();
+    let read = role.read;
     let reader = child.stdout.take().map(|stdout| {
-        std::thread::spawn(move || {
-            read_claude_stream(stdout, events, workspace_path, expected_session)
-        })
+        std::thread::spawn(move || read(stdout, events, workspace_path, expected_session))
     });
 
     // 취소는 stdout이 조용해도 이 주기 안에 닿는다.
@@ -550,8 +654,8 @@ fn run_claude_plan_with(
         drop(watcher);
         drop(stderr_handle);
         drop(stdin_handle);
-        return Err(ClaudeFailure::Poisoned(format!(
-            "claude process tree could not be confirmed gone: {} ({} tracked, survivors: {})",
+        return Err(PlanFailure::Poisoned(format!(
+            "{agent} process tree could not be confirmed gone: {} ({} tracked, survivors: {})",
             report.detail,
             report.tracked.len(),
             survivor_text(&report)
@@ -573,43 +677,39 @@ fn run_claude_plan_with(
 
     if let Some(violation) = output.violation {
         // 계약이 깨진 세션은 복제본을 신뢰할 수 없다
-        return Err(ClaudeFailure::Poisoned(format!(
-            "claude execution contract violated: {violation}"
+        return Err(PlanFailure::Poisoned(format!(
+            "{agent} execution contract violated: {violation}"
         )));
     }
     if canceled {
-        return Err(ClaudeFailure::Failed("canceled by the user".into()));
+        return Err(PlanFailure::Failed("canceled by the user".into()));
     }
     // 증거를 남기지 못한 실행은 통과시키지 않는다. 기록이 없으면 증명도 없다.
-    if let Some(error) = output.evidence_error.or(stderr_error) {
-        return Err(ClaudeFailure::Failed(format!(
+    if let Some(error) = output.evidence_error.clone().or(stderr_error) {
+        return Err(PlanFailure::Failed(format!(
             "the run could not be recorded: {error}"
         )));
     }
     if let Some(error) = stdin_error {
-        return Err(ClaudeFailure::Failed(error));
+        return Err(PlanFailure::Failed(error));
     }
 
     // 계획 역할이 정말 아무것도 바꾸지 않았는지 **관측으로** 확인한다.
     // 이것은 예방책이 아니라 사후 확인이다(§7.10.1.2 ④).
-    orchestration::write_pilot_diff(workspace, &evidence.diff).map_err(ClaudeFailure::Failed)?;
+    orchestration::write_pilot_diff(workspace, &evidence.diff).map_err(PlanFailure::Failed)?;
     if diff_has_changes(&evidence.diff) {
-        return Err(ClaudeFailure::Poisoned(
+        return Err(PlanFailure::Poisoned(
             "the planning role modified the clone; its contents can no longer be trusted".into(),
         ));
     }
 
-    let facts = output
-        .facts
-        .ok_or_else(|| ClaudeFailure::Failed("claude produced no init event".into()))?;
-    let result_line = output
-        .result_line
-        .ok_or_else(|| ClaudeFailure::Failed("claude produced no result".into()))?;
-    let plan = claude_pilot::parse_result(&result_line).map_err(ClaudeFailure::Failed)?;
+    let plan = (role.extract)(&output, evidence).map_err(PlanFailure::Failed)?;
 
-    Ok(ClaudeRun {
+    Ok(PlanRun {
         plan,
-        facts,
+        session_id: output.session_id,
+        cli_version: output.cli_version,
+        facts: output.facts,
         events_path: evidence.events.clone(),
         stderr_path: evidence.stderr.clone(),
         diff_path: evidence.diff.clone(),
@@ -623,8 +723,8 @@ fn read_claude_stream(
     mut events: std::fs::File,
     workspace: PathBuf,
     session_id: String,
-) -> ClaudeOutput {
-    let mut out = ClaudeOutput::default();
+) -> PlanOutput {
+    let mut out = PlanOutput::default();
     for line in BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
         if let Err(e) = writeln!(events, "{line}") {
@@ -634,7 +734,11 @@ fn read_claude_stream(
         if out.facts.is_none() {
             match claude_pilot::parse_init(&line) {
                 Ok(parsed) => match claude_pilot::validate_init(&parsed, &workspace, &session_id) {
-                    Ok(()) => out.facts = Some(parsed),
+                    Ok(()) => {
+                        out.session_id = parsed.session_id.clone();
+                        out.cli_version = parsed.cli_version.clone();
+                        out.facts = Some(parsed);
+                    }
                     Err(e) => {
                         out.violation = Some(e.0);
                         break;
@@ -656,6 +760,72 @@ fn read_claude_stream(
             .get_or_insert(format!("cannot flush the claude event log: {e}"));
     }
     out
+}
+
+/// Codex의 NDJSON을 증거로 남기며 세션 ID만 건진다.
+///
+/// **검증할 것이 없다.** Codex는 `thread.started{thread_id}`만 주고 어떤 샌드박스·도구로
+/// 떴는지 알려주지 않는다 — Claude의 `system:init` fail-closed 검증에 대응하는 것이 없다.
+/// 그래서 이 경로의 근거는 argv 통제와 실측된 샌드박스, 그리고 사후 빈 diff다
+/// (`codex_pilot` 머리말).
+fn read_codex_stream(
+    stdout: ChildStdout,
+    mut events: std::fs::File,
+    _workspace: PathBuf,
+    _session_id: String,
+) -> PlanOutput {
+    let mut out = PlanOutput::default();
+    for line in BufReader::new(stdout).lines() {
+        let Ok(line) = line else { break };
+        if let Err(e) = writeln!(events, "{line}") {
+            out.evidence_error = Some(format!("cannot write the codex event log: {e}"));
+            break;
+        }
+        if out.session_id.is_empty() {
+            if let Some(id) = codex_session_id(&line) {
+                out.session_id = id;
+            }
+        }
+    }
+    if let Err(e) = events.flush() {
+        out.evidence_error
+            .get_or_insert(format!("cannot flush the codex event log: {e}"));
+    }
+    out
+}
+
+fn codex_session_id(line: &str) -> Option<String> {
+    let event: serde_json::Value = serde_json::from_str(line).ok()?;
+    if event.get("type")?.as_str()? != "thread.started" {
+        return None;
+    }
+    Some(event.get("thread_id")?.as_str()?.to_string())
+}
+
+/// Claude는 `result` 이벤트의 구조화 출력이 계획이다.
+fn extract_claude_plan(
+    output: &PlanOutput,
+    _evidence: &PlanEvidence,
+) -> Result<PlanResult, String> {
+    if output.facts.is_none() {
+        return Err("claude produced no init event".into());
+    }
+    let line = output
+        .result_line
+        .as_deref()
+        .ok_or("claude produced no result")?;
+    claude_pilot::parse_result(line)
+}
+
+/// Codex는 **최종 메시지 파일이 곧 구조화 출력**이다(실측).
+fn extract_codex_plan(_output: &PlanOutput, evidence: &PlanEvidence) -> Result<PlanResult, String> {
+    let text = std::fs::read_to_string(&evidence.last_message).map_err(|e| {
+        format!(
+            "cannot read the codex plan '{}': {e}",
+            evidence.last_message.display()
+        )
+    })?;
+    codex_pilot::parse_codex_plan(&text)
 }
 
 fn drain_stderr(stderr: ChildStderr, mut file: std::fs::File) -> Result<(), String> {
@@ -854,8 +1024,17 @@ impl CancelBridge {
 // ───────────────────────── Tauri 명령 ─────────────────────────
 
 /// 흐름을 시작할 수 있는가, 아니면 먼저 치워야 할 것이 있는가.
+///
+/// ⚠️ `rename_all`은 **변형 이름만** 바꾼다(`Ready` → `"ready"`). 변형 **안의 필드**까지
+/// 바꾸려면 `rename_all_fields`가 따로 필요하다 — 빠뜨리면 `run_id`가 그대로 나가고
+/// 화면은 `runId`를 읽어 `undefined`가 된다. 그러면 그 인자는 통째로 사라진다.
+/// (`InstallEvent`가 같은 이유로 둘 다 달고 있다.)
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub(crate) enum HandoffStart {
     /// 시작해도 된다
     Ready { run_id: String },
@@ -915,6 +1094,8 @@ pub(crate) async fn run_handoff(
     pilot: State<'_, orchestration::PilotSession>,
     run_id: String,
     workspace_path: String,
+    // 프로젝트 카드가 보여 준 그 에이전트. 화면과 실행이 갈리면 안 된다
+    agent: String,
     goal: String,
 ) -> Result<HandoffResult, crate::error::AppError> {
     if !handoff_available() {
@@ -922,6 +1103,7 @@ pub(crate) async fn run_handoff(
             "the automatic handoff pilot is available on macOS only",
         ));
     }
+    let agent = crate::agent::Agent::from_id(&agent)?;
     let root = orchestration::pilot_root(&app)?;
     let handle = HandoffSession(session.0.clone());
     // 깃발을 **초기화하지 않고** 받아 온다 — 준비 중에 들어온 취소를 지우면 안 된다
@@ -949,6 +1131,7 @@ pub(crate) async fn run_handoff(
             &announce,
             &root,
             Path::new(&workspace_path),
+            agent,
             &goal,
             &cancel,
             &pilot_handle,
@@ -1035,6 +1218,9 @@ fn execute_handoff(
     announce_stage: Announce<'_>,
     root: &Path,
     workspace_path: &Path,
+    // 프로젝트를 만들 때 고른 에이전트. **계획도 구현도 이 에이전트가 한다** —
+    // Codex로 만든 프로젝트에 말없이 Claude를 끌어오지 않는다.
+    agent: crate::agent::Agent,
     goal: &str,
     cancel: &Arc<AtomicBool>,
     pilot_handle: &Arc<Mutex<Option<orchestration::RunSlot>>>,
@@ -1047,7 +1233,7 @@ fn execute_handoff(
     let workspace = orchestration::validate_pilot_workspace(workspace_path, &root)?;
     ensure_reusable(&workspace.path)?;
     let run_id = orchestration::new_run_id();
-    let evidence = ClaudeEvidence::new(&root, &workspace.path, &run_id)?;
+    let evidence = PlanEvidence::new(&root, &workspace.path, &run_id)?;
 
     let claude_paths = || HandoffEvidence {
         claude_events_path: evidence.events.display().to_string(),
@@ -1071,9 +1257,9 @@ fn execute_handoff(
 
     // ── 1단계: 요청 정리 (Claude, 읽기 전용) ──
     announce_stage(HandoffStage::Organizing);
-    let claude = match run_claude_plan(&workspace, goal, &evidence, cancel) {
+    let claude = match run_plan(agent, &workspace, goal, &evidence, cancel) {
         Ok(run) => run,
-        Err(ClaudeFailure::Poisoned(reason)) => {
+        Err(PlanFailure::Poisoned(reason)) => {
             // 복제본을 잠근다. **Codex 자동 인계는 여기서 멈춘다** — 재사용도 막힌다.
             let (lock, lock_error) = lock_workspace(&workspace.path, &reason);
             announce_stage(HandoffStage::NeedsAttention);
@@ -1086,7 +1272,7 @@ fn execute_handoff(
                 claude_paths(),
             ));
         }
-        Err(ClaudeFailure::Failed(reason)) => {
+        Err(PlanFailure::Failed(reason)) => {
             announce_stage(HandoffStage::NeedsAttention);
             return Ok(stopped(
                 goal,
@@ -1103,8 +1289,8 @@ fn execute_handoff(
         claude_events_path: claude.events_path.display().to_string(),
         claude_stderr_path: claude.stderr_path.display().to_string(),
         claude_diff_path: claude.diff_path.display().to_string(),
-        claude_session_id: claude.facts.session_id.clone(),
-        claude_cli_version: claude.facts.cli_version.clone(),
+        claude_session_id: claude.session_id.clone(),
+        claude_cli_version: claude.cli_version.clone(),
         permission_denials: claude.plan.permission_denials.clone(),
         termination: claude.termination.clone(),
         ..Default::default()
@@ -1120,6 +1306,28 @@ fn execute_handoff(
             None,
             collected,
         ));
+    }
+
+    // 계획 역할이 **할 일이 없다**고 답했다. 잘못된 것은 없다 —
+    // 무엇을 바꿀지 알아야 할 뿐이다. 이걸 사고와 같은 화면으로 보내면
+    // 사용자는 자기가 무언가 망가뜨린 줄 안다.
+    if claude.plan.steps.is_empty() && !claude.plan.is_error {
+        announce_stage(HandoffStage::NeedsGoal);
+        return Ok(HandoffResult {
+            stage: HandoffStage::NeedsGoal,
+            goal: goal.to_string(),
+            // 계획 역할이 왜 할 일이 없다고 보는지 써 줬다. 상세에서 볼 수 있게 남긴다
+            plan_summary: claude.plan.summary.clone(),
+            result_summary: String::new(),
+            changed_files: Vec::new(),
+            // **비어 있다.** 확인해야 할 사고가 아니다
+            attention: None,
+            workspace_lock: WorkspaceLock::None,
+            lock_error: None,
+            blocker: None,
+            workspace_path: workspace.path.display().to_string(),
+            evidence: collected,
+        });
     }
 
     // ── 2단계: 앱이 계획을 인계한다. 사용자는 아무것도 옮기지 않는다 ──

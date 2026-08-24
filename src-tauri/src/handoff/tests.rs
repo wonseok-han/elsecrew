@@ -19,6 +19,25 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+/// 감독부를 시험할 때 쓰는 역할 명세.
+///
+/// **실제 Claude 계약 인자를 그대로 쓴다** — 가짜 인자를 만들면 감독부가 실제 계약과
+/// 다른 모양을 받게 되고, 그러면 이 테스트들이 검증하는 대상이 실물이 아니게 된다.
+fn fake_claude_role(goal: &str) -> PlanRole {
+    plan_role(
+        crate::agent::Agent::ClaudeCode,
+        goal,
+        &PlanEvidence {
+            events: PathBuf::from("/unused"),
+            stderr: PathBuf::from("/unused"),
+            diff: PathBuf::from("/unused"),
+            last_message: PathBuf::from("/unused"),
+            schema: PathBuf::from("/unused"),
+        },
+    )
+    .unwrap_or_else(|_| panic!("Claude 역할 명세를 만들지 못했다"))
+}
+
 /// 제한 시간 안에 끝나야 하는 작업. **돌아오지 않는 구현을 테스트가 붙잡고 있지 않게 한다.**
 fn within<T: Send + 'static>(
     limit: Duration,
@@ -348,11 +367,13 @@ impl FakeClaude {
         }
     }
 
-    fn evidence(&self) -> ClaudeEvidence {
-        ClaudeEvidence {
+    fn evidence(&self) -> PlanEvidence {
+        PlanEvidence {
             events: self.base.join("events.jsonl"),
             stderr: self.base.join("stderr.log"),
             diff: self.base.join("run.diff"),
+            last_message: self.base.join("last-message.txt"),
+            schema: self.base.join("plan-schema.json"),
         }
     }
 
@@ -417,12 +438,19 @@ fn cancel_reaches_a_run_that_never_prints() {
 
     let started = Instant::now();
     let outcome = within(Duration::from_secs(20), move || {
-        run_claude_plan_with(&program, &workspace, "목표", &evidence, &cancel, terminate)
-            .map(|_| ())
-            .map_err(|e| match e {
-                ClaudeFailure::Poisoned(reason) => format!("poisoned: {reason}"),
-                ClaudeFailure::Failed(reason) => reason,
-            })
+        supervise_plan(
+            &program,
+            fake_claude_role("목표"),
+            &workspace,
+            &evidence,
+            &cancel,
+            terminate,
+        )
+        .map(|_| ())
+        .map_err(|e| match e {
+            PlanFailure::Poisoned(reason) => format!("poisoned: {reason}"),
+            PlanFailure::Failed(reason) => reason,
+        })
     });
 
     let Some(outcome) = outcome else {
@@ -484,18 +512,18 @@ fn an_unconfirmed_termination_returns_poisoned_without_waiting() {
     }
 
     let outcome = within(Duration::from_secs(5), move || {
-        run_claude_plan_with(
+        supervise_plan(
             &program,
+            fake_claude_role("목표"),
             &workspace,
-            "목표",
             &evidence,
             &cancel,
             never_confirms,
         )
         .map(|_| String::new())
         .map_err(|e| match e {
-            ClaudeFailure::Poisoned(reason) => reason,
-            ClaudeFailure::Failed(reason) => panic!("잠기지 않고 실패로만 끝났다: {reason}"),
+            PlanFailure::Poisoned(reason) => reason,
+            PlanFailure::Failed(reason) => panic!("잠기지 않고 실패로만 끝났다: {reason}"),
         })
     });
 
@@ -519,23 +547,23 @@ fn a_run_that_cannot_record_evidence_never_starts_a_process() {
     // 부모 폴더가 없는 경로 — 생성이 실패한다
     evidence.events = fake.base.join("no-such-dir").join("events.jsonl");
 
-    let result = run_claude_plan_with(
+    let result = supervise_plan(
         &fake.program,
+        fake_claude_role("목표"),
         &fake.workspace(),
-        "목표",
         &evidence,
         &AtomicBool::new(false),
         terminate,
     );
 
     match result {
-        Err(ClaudeFailure::Failed(reason)) => {
+        Err(PlanFailure::Failed(reason)) => {
             assert!(
                 reason.contains("cannot create the claude event log"),
                 "{reason}"
             );
         }
-        Err(ClaudeFailure::Poisoned(reason)) => panic!("복제본을 잠글 이유가 없다: {reason}"),
+        Err(PlanFailure::Poisoned(reason)) => panic!("복제본을 잠글 이유가 없다: {reason}"),
         Ok(_) => panic!("증거를 못 남기는데 성공했다"),
     }
     assert!(
@@ -554,16 +582,16 @@ fn a_run_that_cannot_record_stderr_never_starts_a_process() {
     let mut evidence = fake.evidence();
     evidence.stderr = fake.base.join("no-such-dir").join("stderr.log");
 
-    let result = run_claude_plan_with(
+    let result = supervise_plan(
         &fake.program,
+        fake_claude_role("목표"),
         &fake.workspace(),
-        "목표",
         &evidence,
         &AtomicBool::new(false),
         terminate,
     );
 
-    assert!(matches!(result, Err(ClaudeFailure::Failed(_))));
+    assert!(matches!(result, Err(PlanFailure::Failed(_))));
     assert!(!fake.started(), "stderr 증거 실패 후에도 프로세스가 떴다");
 
     fake.cleanup();
@@ -1433,6 +1461,264 @@ fn a_run_that_stored_nothing_reports_no_evidence_paths() {
     fixture.cleanup();
 }
 
+// ───────────────────────── 화면과 주고받는 모양 ─────────────────────────
+
+/// **화면이 읽는 키 이름을 그대로 못 박는다.**
+///
+/// TypeScript 인터페이스는 손으로 적은 것이라 백엔드가 실제로 내보내는 모양과
+/// 어긋나도 컴파일이 통과한다. 실제로 어긋났다 — `rename_all`이 변형 이름만 바꾸고
+/// 필드는 `run_id` 그대로 나가서, 화면의 `started.runId`가 `undefined`가 됐다.
+/// 그 값을 그대로 다음 호출에 넘기니 **인자가 통째로 사라져**
+/// `command run_handoff missing required key runId`로 터졌다.
+///
+/// 값이 `undefined`면 키가 사라지는 것이 이 사고의 핵심이다 — 타입은 거짓말했고,
+/// 런타임은 조용히 넘어갔다. 그래서 **키 이름 자체를** 테스트한다.
+#[test]
+fn the_start_reply_uses_the_key_names_the_screen_reads() {
+    let ready = serde_json::to_value(HandoffStart::Ready {
+        run_id: "run-1".into(),
+    })
+    .unwrap();
+
+    assert_eq!(ready["state"], "ready");
+    assert_eq!(
+        ready["runId"], "run-1",
+        "화면은 `runId`를 읽는다. 실제로 나간 모양: {ready}"
+    );
+    assert!(
+        ready.get("run_id").is_none(),
+        "snake_case가 그대로 나갔다 — 화면은 이 키를 읽지 못한다: {ready}"
+    );
+}
+
+#[test]
+fn the_blocked_reply_carries_the_workspace_the_screen_must_clean_up() {
+    let blocked = serde_json::to_value(HandoffStart::Blocked {
+        blocker: orchestration::BlockedWorkspace {
+            workspace_path: "/pilots/clone".into(),
+            reason: "tree survived".into(),
+            persisted: true,
+            marker_error: None,
+        },
+    })
+    .unwrap();
+
+    assert_eq!(blocked["state"], "blocked");
+    // 화면이 이 경로로 정리·복구를 부른다. 이름이 어긋나면 막힌 상태에서 빠져나올 수 없다
+    assert_eq!(blocked["blocker"]["workspacePath"], "/pilots/clone");
+    assert_eq!(blocked["blocker"]["persisted"], true);
+    assert!(blocked["blocker"].get("workspace_path").is_none());
+}
+
+/// 결과에서도 화면이 읽는 키가 살아 있어야 한다.
+#[test]
+fn the_result_uses_the_key_names_the_screen_reads() {
+    let workspace = PilotWorkspace {
+        path: std::env::temp_dir().join("ws"),
+        start_commit: "abc".into(),
+    };
+    let result = serde_json::to_value(stopped(
+        "목표",
+        &workspace,
+        "멈춤".into(),
+        WorkspaceLock::SessionOnly,
+        Some("표시 저장 실패".into()),
+        HandoffEvidence::default(),
+    ))
+    .unwrap();
+
+    for key in [
+        "stage",
+        "planSummary",
+        "resultSummary",
+        "changedFiles",
+        "workspaceLock",
+        "lockError",
+        "workspacePath",
+        "evidence",
+    ] {
+        assert!(
+            result.get(key).is_some(),
+            "화면이 읽는 `{key}`가 없다: {result}"
+        );
+    }
+    assert_eq!(result["workspaceLock"], "sessionOnly");
+    assert!(result["evidence"].get("codexRunId").is_some());
+}
+
+// ───────────────── 할 일이 없는 요청 ─────────────────
+
+/// 인사말만 넣으면 계획 역할이 **할 일이 없다**고 답한다(실측).
+///
+/// ```json
+/// { "steps": [], "summary": "the user's message (\"Hi\") is a greeting, not a task ..." }
+/// ```
+///
+/// 이건 사고가 아니다 — 무엇을 바꿀지 알아야 할 뿐이다.
+/// 사고와 같은 화면으로 보내면 사용자는 자기가 무언가 망가뜨린 줄 안다.
+#[test]
+fn a_greeting_asks_for_a_clearer_goal_instead_of_reporting_a_failure() {
+    let line = r#"{"type":"result","is_error":false,"structured_output":{"steps":[],"summary":"No implementation plan produced: the user's message is a greeting, not a task."}}"#;
+
+    let plan = claude_pilot::parse_result(line).expect("빈 계획도 계획으로 읽어야 한다");
+
+    // 계획은 읽히되 인계는 막힌다
+    assert!(plan.steps.is_empty());
+    assert!(!plan.is_error, "잘못된 것은 없다");
+    assert!(!plan.summary.is_empty(), "왜 할 일이 없는지 설명이 있다");
+    assert!(
+        claude_pilot::plan_to_codex_prompt("Hi", &plan).is_err(),
+        "할 일이 없는데 구현 단계로 넘어갔다"
+    );
+}
+
+/// 되묻기와 사고는 **다른 상태**여야 한다. 같은 값이면 화면이 구분할 수 없다.
+#[test]
+fn asking_for_a_goal_is_not_the_same_state_as_stopping_for_attention() {
+    assert_ne!(HandoffStage::NeedsGoal, HandoffStage::NeedsAttention);
+
+    let asking = serde_json::to_value(HandoffStage::NeedsGoal).unwrap();
+    assert_eq!(asking, "needsGoal", "화면이 읽는 값이 바뀌었다");
+}
+
+// ───────────── 두 에이전트가 같은 감독을 받는가 ─────────────
+
+/// 계획 역할은 **프로젝트의 에이전트**가 맡는다.
+/// Codex로 만든 프로젝트에 말없이 Claude를 끌어오면 안 된다(§7.6A 2차 실사용 결함).
+#[test]
+fn the_planning_role_follows_the_project_agent() {
+    let dir = temp_dir("plan-role");
+    let evidence = PlanEvidence {
+        events: dir.join("events.jsonl"),
+        stderr: dir.join("stderr.log"),
+        diff: dir.join("run.diff"),
+        last_message: dir.join("last-message.txt"),
+        schema: dir.join("schema.json"),
+    };
+
+    let claude = plan_role(crate::agent::Agent::ClaudeCode, "목표", &evidence).unwrap();
+    let codex = plan_role(crate::agent::Agent::Codex, "목표", &evidence).unwrap();
+
+    assert_eq!(claude.name, "claude");
+    assert_eq!(codex.name, "codex");
+    // Codex는 스키마를 파일로만 받는다 — 실행 전에 실제로 놓여 있어야 한다
+    assert!(evidence.schema.is_file(), "계획 스키마가 없다");
+
+    // 각자 자기 계약을 쓴다
+    assert!(claude.args.join(" ").contains("--tools Read,Glob,Grep"));
+    assert!(codex.args.join(" ").contains("--sandbox read-only"));
+
+    // 프롬프트 전달 방식이 다르다 — Claude는 stdin, Codex는 argv
+    assert!(claude.stdin_prompt.is_some(), "Claude는 stdin으로 받는다");
+    assert!(codex.stdin_prompt.is_none(), "Codex는 argv로 받는다");
+    assert!(
+        codex.args.last().unwrap().contains("목표"),
+        "Codex 프롬프트가 인자에 실리지 않았다"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// **두 에이전트가 같은 종료 계약을 쓴다.** 감독부가 하나여야 한 쪽만 고쳐지는 일이 없다.
+#[test]
+fn both_agents_share_one_supervisor() {
+    let source = std::fs::read_to_string("src/handoff.rs").expect("소스를 읽지 못했다");
+    // 감독부는 하나뿐이다
+    assert_eq!(
+        source.matches("fn supervise_plan(").count(),
+        1,
+        "감독부가 복제되면 종료 계약이 갈라진다"
+    );
+    // 그리고 그 하나가 누적 신원 추적을 쓴다
+    let supervisor = source
+        .split("fn supervise_plan(")
+        .nth(1)
+        .expect("감독부를 찾지 못했다");
+    for required in ["TreeTracker::new", "tracker.observe", "terminate(&tracker)"] {
+        assert!(
+            supervisor.contains(required),
+            "감독부에 종료 계약의 {required}가 없다"
+        );
+    }
+}
+
+/// Codex 계획 구간을 **실제로** 한 번 돌린다. Codex 로그인과 사용량을 쓴다.
+///
+/// ⚠️ 설치된 codex 옆에 `codex-code-mode-host`가 없으면 셸이 아예 안 뜬다 —
+/// 그때 파일이 안 생기는 것을 "차단됐다"로 오판하지 말 것(실측에서 겪었다).
+///
+/// ```bash
+/// cargo test --manifest-path src-tauri/Cargo.toml codex_planning_leg -- --ignored --nocapture
+/// ```
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "codex 로그인 + 사용량 소모"]
+fn codex_planning_leg_runs_end_to_end() {
+    use std::process::Command;
+
+    let base = std::env::temp_dir().join(format!("hello-agent-codex-plan-{}", std::process::id()));
+    let source = base.join("source");
+    let root = base.join("pilots");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(source.join("greeting.txt"), "hello\n").unwrap();
+    std::fs::write(source.join("AGENTS.md"), "# codex project\n").unwrap();
+
+    let git = |args: &[&str]| {
+        assert!(Command::new("/usr/bin/git")
+            .args(args)
+            .current_dir(&source)
+            .status()
+            .unwrap()
+            .success());
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "pilot@example.com"]);
+    git(&["config", "user.name", "pilot"]);
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+
+    let workspace = orchestration::prepare_pilot_copy(&source, &root).expect("복제본 준비 실패");
+    let root = root.canonicalize().unwrap();
+    let evidence = PlanEvidence::new(&root, &workspace.path, "codex-e2e").unwrap();
+
+    let run = match run_plan(
+        crate::agent::Agent::Codex,
+        &workspace,
+        "greeting.txt의 인사말을 더 친근한 문장으로 바꿔 줘",
+        &evidence,
+        &AtomicBool::new(false),
+    ) {
+        Ok(run) => run,
+        Err(PlanFailure::Poisoned(reason)) => panic!("복제본이 잠겼다: {reason}"),
+        Err(PlanFailure::Failed(reason)) => panic!("계획 실행 실패: {reason}"),
+    };
+
+    println!("session    : {}", run.session_id);
+    println!("summary    : {}", run.plan.summary);
+    println!("steps      : {}", run.plan.steps.len());
+    println!("termination: {}", run.termination);
+
+    assert!(!run.plan.summary.is_empty(), "계획 요약이 비었다");
+    assert!(!run.plan.steps.is_empty(), "계획 단계가 비었다");
+    // Codex는 init 대응물이 없다 — 없는 것을 있는 척하지 않는다
+    assert!(
+        run.facts.is_none(),
+        "Codex에는 init 검증 결과가 없어야 한다"
+    );
+    assert!(!run.session_id.is_empty(), "세션 ID를 얻지 못했다");
+    // **계획 역할은 아무것도 바꾸지 않았어야 한다** (사후 확인)
+    assert!(
+        !diff_has_changes(&run.diff_path),
+        "계획 역할이 복제본을 수정했다"
+    );
+    // 인계까지 이어지는가
+    assert!(claude_pilot::plan_to_codex_prompt("목표", &run.plan).is_ok());
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 // ───────────────────────── 실사용 검증 ─────────────────────────
 
 /// 계획 역할의 **실제 실행**을 확인한다. Claude 로그인과 사용량을 쓰므로 기본 실행에서 제외한다.
@@ -1476,36 +1762,39 @@ fn claude_planning_leg_runs_end_to_end() {
 
     let workspace = orchestration::prepare_pilot_copy(&source, &root).expect("복제본 준비 실패");
     let root = root.canonicalize().unwrap();
-    let evidence = ClaudeEvidence::new(&root, &workspace.path, "e2e").unwrap();
+    let evidence = PlanEvidence::new(&root, &workspace.path, "e2e").unwrap();
     let cancel = AtomicBool::new(false);
 
-    let run = match run_claude_plan(
+    let run = match run_plan(
+        crate::agent::Agent::ClaudeCode,
         &workspace,
         "인사말을 더 친근하게 바꿔 줘",
         &evidence,
         &cancel,
     ) {
         Ok(run) => run,
-        Err(ClaudeFailure::Poisoned(reason)) => panic!("복제본이 잠겼다: {reason}"),
-        Err(ClaudeFailure::Failed(reason)) => panic!("계획 실행 실패: {reason}"),
+        Err(PlanFailure::Poisoned(reason)) => panic!("복제본이 잠겼다: {reason}"),
+        Err(PlanFailure::Failed(reason)) => panic!("계획 실행 실패: {reason}"),
     };
 
-    println!("session    : {}", run.facts.session_id);
-    println!("cli        : {}", run.facts.cli_version);
-    println!("model      : {}", run.facts.model);
-    println!("tools      : {:?}", run.facts.tools);
+    // Claude 경로는 `init`으로 계약을 검증한다 — 그 사실이 실제로 실려 왔어야 한다
+    let facts = run.facts.clone().expect("init 검증 결과가 없다");
+    println!("session    : {}", facts.session_id);
+    println!("cli        : {}", facts.cli_version);
+    println!("model      : {}", facts.model);
+    println!("tools      : {:?}", facts.tools);
     println!("summary    : {}", run.plan.summary);
     println!("steps      : {}", run.plan.steps.len());
     println!("termination: {}", run.termination);
 
     // 계약대로 도구는 정확히 4개여야 한다
-    assert_eq!(run.facts.tools.len(), 4, "{:?}", run.facts.tools);
-    assert_eq!(run.facts.permission_mode, "dontAsk");
+    assert_eq!(facts.tools.len(), 4, "{:?}", facts.tools);
+    assert_eq!(facts.permission_mode, "dontAsk");
     // 모델은 실측된 허용값 목록 그대로여야 한다 (부분 문자열 대조가 아니다)
     assert!(
-        claude_pilot::ALLOWED_INIT_MODELS.contains(&run.facts.model.as_str()),
+        claude_pilot::ALLOWED_INIT_MODELS.contains(&facts.model.as_str()),
         "실측 허용값과 다른 모델이다: {}",
-        run.facts.model
+        facts.model
     );
     // 계획이 실제로 나왔는가
     assert!(!run.plan.summary.is_empty(), "계획 요약이 비었다");
@@ -1582,6 +1871,7 @@ fn handoff_vertical_slice_runs_end_to_end() {
         &announce,
         &root,
         &workspace.path,
+        crate::agent::Agent::ClaudeCode,
         "greeting.txt의 인사말을 더 친근한 문장으로 바꿔 줘",
         &cancel,
         &pilot,

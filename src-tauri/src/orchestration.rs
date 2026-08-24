@@ -424,6 +424,145 @@ impl FailureContext {
     }
 }
 
+/// 이 폴더로 안전한 작업 사본을 만들 수 있는가 — **화면 표시용 사전 판정**.
+///
+/// 복제본은 Git 클론으로 만든다. 그래서 Git 저장소가 아닌 프로젝트는 파일럿을 쓸 수 없다.
+///
+/// **이것은 권한 경계가 아니다.** 화면을 그린 뒤 폴더가 바뀔 수 있으므로(TOCTOU)
+/// 최종 거절은 언제나 `prepare_pilot_copy`가 한다. 이 함수의 존재 이유는 오직 하나 —
+/// **눌러도 되는 것처럼 보여 놓고 실행에서 거절하지 않기 위해서**다.
+/// 두 곳이 같은 기준을 봐야 그 약속이 지켜지므로 `prepare_pilot_copy`도 이 함수를 쓴다.
+pub(crate) fn can_copy_pilot_source(source: &Path) -> bool {
+    source.join(".git").exists()
+}
+
+/// 원본 폴더를 파일럿에 쓸 수 있는 상태로 만든다 — 화면의 "되돌릴 수 있게 준비하기".
+///
+/// **이것은 원본 폴더를 건드리는 유일한 동작이다.** 그래서 사용자의 명시적 동의가 있어야 하고,
+/// 하는 일을 둘로 못 박는다: Git 저장소로 만들고(`.git` 생성), 지금 상태를 첫 복원 지점으로
+/// 커밋한다. **파일 내용은 바꾸지 않고, 아무것도 지우지 않는다.**
+///
+/// 왜 필요한가: 파일럿의 안전 모델 전체가 Git에 얹혀 있다 — 원본을 안 건드리는 사본(clone),
+/// 시작 지점(`rev-parse HEAD`), 무엇이 바뀌었나(`diff`). `git init`만으로는 부족하다.
+/// 커밋이 없으면 시작 지점을 잡을 수 없다(실측).
+pub(crate) fn prepare_project_for_pilot(
+    project: &Path,
+    korean: bool,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("preparing a project must be confirmed explicitly".into());
+    }
+    let project = project
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve project '{}': {e}", project.display()))?;
+    if !project.is_dir() {
+        return Err("only a project folder can be prepared".into());
+    }
+
+    // 이미 준비돼 있으면 아무것도 하지 않는다. **기존 이력을 절대 건드리지 않는다.**
+    if can_copy_pilot_source(&project) {
+        return match git_stdout(&project, &["rev-parse", "HEAD"]) {
+            // 저장소이고 커밋도 있다 — 할 일 없음
+            Ok(_) => Ok(()),
+            // 저장소인데 커밋이 없다. 시작 지점만 만들어 준다
+            Err(_) => commit_restore_point(&project, korean),
+        };
+    }
+
+    // **이미 다른 저장소 안에 있는 폴더는 거부한다.** 여기서 `git init`을 하면 중첩 저장소가
+    // 되어 사용자의 기존 저장소를 어지럽힌다. 남의 이력에 손대는 것은 동의 범위 밖이다.
+    if let Ok(top) = git_stdout(&project, &["rev-parse", "--show-toplevel"]) {
+        if !top.is_empty() {
+            let top = PathBuf::from(&top);
+            let top = top.canonicalize().unwrap_or(top);
+            if top != project {
+                return Err(format!(
+                    "this folder is already inside another repository at '{}';                      preparing it would nest repositories",
+                    top.display()
+                ));
+            }
+        }
+    }
+
+    let init = Command::new(git_program())
+        .args(["init", "--quiet"])
+        .current_dir(&project)
+        .status()
+        .map_err(|e| format!("cannot start git: {e}"))?;
+    if !init.success() {
+        return Err(format!(
+            "cannot prepare the project folder (git init exited with {init})"
+        ));
+    }
+    commit_restore_point(&project, korean)
+}
+
+/// 지금 상태를 첫 복원 지점으로 남긴다.
+///
+/// 빈 폴더에서도 시작 지점이 필요하므로 `--allow-empty`를 쓴다. 커밋 신원이 설정되지 않은
+/// 기기에서도 실패하지 않도록 **이 커밋에만** 앱 신원을 주입한다 —
+/// `git config --global`은 건드리지 않는다. 사용자 설정이 있으면 그것이 그대로 쓰인다.
+fn commit_restore_point(project: &Path, korean: bool) -> Result<(), String> {
+    let staged = Command::new(git_program())
+        .args(["add", "-A"])
+        .current_dir(project)
+        .status()
+        .map_err(|e| format!("cannot start git: {e}"))?;
+    if !staged.success() {
+        return Err(format!(
+            "cannot record the project files (git add exited with {staged})"
+        ));
+    }
+
+    let message = if korean {
+        "첫 복원 지점 (Hello, Agent)"
+    } else {
+        "First restore point (Hello, Agent)"
+    };
+    let mut command = Command::new(git_program());
+    command.current_dir(project);
+    // 신원이 없는 기기에서만 앱 신원을 빌려준다. 있으면 사용자 것을 그대로 쓴다.
+    if git_stdout(project, &["config", "user.email"])
+        .map(|email| email.is_empty())
+        .unwrap_or(true)
+    {
+        command.args([
+            "-c",
+            "user.name=Hello, Agent",
+            "-c",
+            "user.email=hello-agent@localhost",
+        ]);
+    }
+    let committed = command
+        .args(["commit", "--quiet", "--allow-empty", "-m", message])
+        .status()
+        .map_err(|e| format!("cannot start git: {e}"))?;
+    if !committed.success() {
+        return Err(format!(
+            "cannot save the first restore point (git commit exited with {committed})"
+        ));
+    }
+    Ok(())
+}
+
+/// 원본 폴더를 파일럿에 쓸 수 있게 준비한다 — 화면의 "되돌릴 수 있게 준비하기".
+/// **사용자가 무엇이 생기는지 확인한 뒤에만** 호출된다.
+#[tauri::command]
+pub(crate) async fn prepare_project_for_handoff(
+    project_path: String,
+    language: Option<String>,
+    confirm_prepare_project: bool,
+) -> Result<(), crate::error::AppError> {
+    let korean = language.as_deref() != Some("en");
+    tauri::async_runtime::spawn_blocking(move || {
+        prepare_project_for_pilot(Path::new(&project_path), korean, confirm_prepare_project)
+            .map_err(crate::error::AppError::classify)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::generic(e.to_string()))?
+}
+
 /// 파일럿 실행 전용 복제본을 앱 데이터 폴더에 만든다. 아직 Codex는 실행하지 않는다.
 #[tauri::command]
 pub(crate) async fn prepare_codex_pilot(
@@ -1365,7 +1504,9 @@ pub(crate) fn prepare_pilot_copy(
     let source = source
         .canonicalize()
         .map_err(|e| format!("cannot resolve pilot source '{}': {e}", source.display()))?;
-    if !source.join(".git").exists() {
+    // 화면이 이미 같은 기준으로 걸렀더라도 여기서 다시 본다 —
+    // 이쪽이 **최종 권한 경계**이며, 화면을 그린 뒤 폴더가 바뀌었을 수 있다(TOCTOU).
+    if !can_copy_pilot_source(&source) {
         return Err("pilot source must be a Git repository".into());
     }
 
@@ -1485,10 +1626,13 @@ pub(crate) fn codex_pilot_args(
         "exec".into(),
         "--ignore-user-config".into(),
         "--ignore-rules".into(),
+        // 사용자 설정을 무시하면 신뢰 폴더 목록도 비어 codex가 실행을 거부한다(실측).
+        // 대상 검증은 `validate_pilot_workspace`가 이미 한다 — 그것을 대신하지 않는다.
+        "--skip-git-repo-check".into(),
+        // ★ **유일한 실질 경계.** `codex exec`에서 승인 정책은 제거됐다(0.149.1 실측:
+        //    `approval_policy = "untrusted" is no longer supported`). 샌드박스만 남았다.
         "--sandbox".into(),
         "workspace-write".into(),
-        "--config".into(),
-        "approval_policy=\"untrusted\"".into(),
         // 세션 ID를 얻는 유일한 안정 경로. `thread.started` 이벤트에 실려 온다
         "--json".into(),
         "--output-last-message".into(),
@@ -1532,11 +1676,15 @@ fn validate_pilot_args(args: &[String]) -> Result<(), String> {
         return Err("Codex pilot must use the workspace-write sandbox".into());
     }
 
-    let approval_policies: Vec<_> = options
+    // **승인 정책은 더 이상 쓰지 않는다.** `codex exec` 0.149.1이 `approval_policy`를
+    // 거부한다(실측) — 넣으면 실행 자체가 실패한다. 그러면 경계는 샌드박스 하나뿐이므로,
+    // 승인 정책이 **다시 끼어드는 것도** 막는다(옛 값이 되살아나면 실행이 통째로 죽는다).
+    if options
         .windows(2)
-        .filter(|pair| pair[0] == "--config" && pair[1].starts_with("approval_policy="))
-        .map(|pair| pair[1].as_str())
-        .collect();
+        .any(|pair| pair[0] == "--config" && pair[1].starts_with("approval_policy="))
+    {
+        return Err("Codex pilot must not set approval_policy; the current CLI rejects it".into());
+    }
     if options
         .iter()
         .filter(|arg| *arg == "--ignore-user-config")
@@ -1547,9 +1695,18 @@ fn validate_pilot_args(args: &[String]) -> Result<(), String> {
             .filter(|arg| *arg == "--ignore-rules")
             .count()
             != 1
-        || approval_policies != ["approval_policy=\"untrusted\""]
     {
-        return Err("Codex pilot must ignore user policy and force untrusted approvals".into());
+        return Err("Codex pilot must ignore user config and rules".into());
+    }
+
+    // 이게 빠지면 실행이 시작조차 못 한다(실측)
+    if options
+        .iter()
+        .filter(|arg| *arg == "--skip-git-repo-check")
+        .count()
+        != 1
+    {
+        return Err("Codex pilot must skip the redundant git repo check".into());
     }
 
     // 증거 계약: 세션 ID와 최종 메시지를 얻을 수단이 빠지면 원장을 채울 수 없다
@@ -1704,6 +1861,166 @@ mod tests {
             .unwrap()
             .success());
         source
+    }
+
+    /// "되돌릴 수 있게 준비하기"가 실제로 파일럿을 열어 주는가.
+    #[test]
+    fn preparing_a_plain_folder_makes_it_usable_by_the_pilot() {
+        let base = unique_temp("prepare-plain");
+        std::fs::remove_dir_all(&base).ok();
+        let project = base.join("my-first-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("CLAUDE.md"), "# my-first-project\n").unwrap();
+        assert!(!can_copy_pilot_source(&project), "시작 조건이 틀렸다");
+
+        prepare_project_for_pilot(&project, true, true).expect("준비 실패");
+
+        // 사전 판정이 열리고
+        assert!(can_copy_pilot_source(&project), "준비했는데 여전히 못 쓴다");
+        // 시작 지점이 실제로 잡힌다 (`git init`만으로는 부족하다)
+        let head = git_stdout(&project, &["rev-parse", "HEAD"]).expect("시작 지점이 없다");
+        assert!(!head.is_empty());
+        // 그리고 진짜 복제본을 만들 수 있다
+        prepare_pilot_copy(&project, &base.join("pilots")).expect("복제본 생성 실패");
+        // 파일은 그대로다
+        assert_eq!(
+            std::fs::read_to_string(project.join("CLAUDE.md")).unwrap(),
+            "# my-first-project\n"
+        );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// **동의 없이는 원본을 건드리지 않는다.**
+    #[test]
+    fn preparing_without_confirmation_touches_nothing() {
+        let base = unique_temp("prepare-unconfirmed");
+        std::fs::remove_dir_all(&base).ok();
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let refused =
+            prepare_project_for_pilot(&project, true, false).expect_err("동의 없이 준비됐다");
+
+        assert!(refused.contains("confirmed"), "{refused}");
+        assert!(!project.join(".git").exists(), "동의 없이 .git이 생겼다");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// **이미 있는 저장소의 이력은 절대 건드리지 않는다.**
+    #[test]
+    fn preparing_an_existing_repository_keeps_its_history() {
+        let base = unique_temp("prepare-existing");
+        std::fs::remove_dir_all(&base).ok();
+        let project = make_source(&base);
+        let before = git_stdout(&project, &["rev-parse", "HEAD"]).unwrap();
+
+        prepare_project_for_pilot(&project, true, true).expect("준비 실패");
+
+        let after = git_stdout(&project, &["rev-parse", "HEAD"]).unwrap();
+        assert_eq!(before, after, "기존 저장소에 커밋을 얹었다");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// **다른 저장소 안의 폴더는 거부한다.** 중첩 저장소를 만들면 사용자의 기존 이력을
+    /// 어지럽힌다 — 남의 저장소에 손대는 것은 동의 범위 밖이다.
+    #[test]
+    fn preparing_a_folder_inside_another_repository_is_refused() {
+        let base = unique_temp("prepare-nested");
+        std::fs::remove_dir_all(&base).ok();
+        let outer = make_source(&base);
+        let inner = outer.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("CLAUDE.md"), "# inner\n").unwrap();
+
+        let refused =
+            prepare_project_for_pilot(&inner, true, true).expect_err("중첩 저장소를 만들었다");
+
+        assert!(
+            refused.contains("already inside another repository"),
+            "{refused}"
+        );
+        assert!(!inner.join(".git").exists(), "중첩 저장소가 생겼다");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// 커밋 신원이 없는 기기에서도 준비가 된다. **전역 설정은 건드리지 않는다.**
+    #[test]
+    fn preparing_works_without_a_configured_commit_identity() {
+        let base = unique_temp("prepare-no-identity");
+        std::fs::remove_dir_all(&base).ok();
+        let project = base.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("AGENTS.md"), "# p\n").unwrap();
+
+        prepare_project_for_pilot(&project, true, true).expect("준비 실패");
+
+        // 이 저장소에만 신원이 남지 않았는지 — 전역·로컬 설정을 쓰지 않고 커밋에만 주입한다
+        let local = git_stdout(&project, &["config", "--local", "user.email"]);
+        assert!(
+            local.map(|v| v.is_empty()).unwrap_or(true),
+            "저장소 설정에 앱 신원을 써 넣었다"
+        );
+        assert!(git_stdout(&project, &["rev-parse", "HEAD"]).is_ok());
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// 화면 표시용 판정과 실제 실행이 **같은 기준**을 봐야 한다.
+    /// 갈리면 눌러도 되는 것처럼 보여 놓고 실행에서 거절하게 된다(§7.6A A5 실패).
+    #[test]
+    fn pilot_eligibility_matches_what_the_copy_step_accepts() {
+        let base = unique_temp("pilot-eligibility");
+        std::fs::remove_dir_all(&base).ok();
+        let git_source = make_source(&base);
+        // 에이전트 표식만 있고 Git 저장소가 아닌 프로젝트 — 실사용에서 터진 모양 그대로다
+        let plain = base.join("notes");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("CLAUDE.md"), "# notes\n").unwrap();
+        let root = base.join("pilots");
+
+        // 사전 판정
+        assert!(can_copy_pilot_source(&git_source), "Git 저장소를 거절했다");
+        assert!(
+            !can_copy_pilot_source(&plain),
+            "Git 저장소가 아닌데 쓸 수 있다고 표시했다"
+        );
+
+        // 실제 실행이 같은 답을 내는가
+        assert!(
+            prepare_pilot_copy(&git_source, &root).is_ok(),
+            "사전 판정은 통과인데 실행이 거절했다"
+        );
+        let refused =
+            prepare_pilot_copy(&plain, &root).expect_err("Git 저장소가 아닌데 복제본을 만들었다");
+        assert!(refused.contains("must be a Git repository"), "{refused}");
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// **백엔드 검증은 최종 권한 경계다.** 화면이 이미 걸렀더라도 약화하면 안 된다 —
+    /// 화면을 그린 뒤 `.git`이 사라질 수 있다(TOCTOU).
+    #[test]
+    fn the_copy_step_still_refuses_after_the_repository_disappears() {
+        let base = unique_temp("pilot-toctou");
+        std::fs::remove_dir_all(&base).ok();
+        let source = make_source(&base);
+        let root = base.join("pilots");
+
+        // 화면을 그릴 때는 쓸 수 있었다
+        assert!(can_copy_pilot_source(&source));
+
+        // 그 사이 저장소가 사라졌다
+        std::fs::remove_dir_all(source.join(".git")).unwrap();
+
+        let refused =
+            prepare_pilot_copy(&source, &root).expect_err("사라진 저장소를 그대로 복제했다");
+        assert!(refused.contains("must be a Git repository"), "{refused}");
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

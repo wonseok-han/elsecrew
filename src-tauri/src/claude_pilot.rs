@@ -254,14 +254,36 @@ pub(crate) fn parse_result(line: &str) -> Result<PlanResult, String> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let structured = event.get("structured_output").cloned().or_else(|| {
-        event
-            .get("result")
-            .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-    });
+    // **CLI가 왜 끝났는지 말해 줬다면 그것을 버리지 않는다.**
+    // 실사용에서 `OAuth access token has been revoked`가 여기 있었는데 "계획이 없다"로
+    // 덮어써서, 화면이 "다시 로그인하세요"라고 말해 줄 수 있었는데 못 했다.
+    let reported = event
+        .get("result")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim();
+    let failed = |fallback: &str| -> String {
+        if reported.is_empty() {
+            fallback.to_string()
+        } else {
+            reported.to_string()
+        }
+    };
+
+    // ⚠️ `structured_output: null`은 **없는 것과 같다.** `get`은 `Some(Null)`을 주므로
+    // 걸러 내지 않으면 대체 경로도, 위 오류 보고도 건너뛴다(실측에서 이걸로 원인을 잃었다).
+    let structured = event
+        .get("structured_output")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .or_else(|| {
+            event
+                .get("result")
+                .and_then(|v| v.as_str())
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        });
     let Some(structured) = structured else {
-        return Err("run produced no structured plan".into());
+        return Err(failed("run produced no structured plan"));
     };
 
     let summary = structured
@@ -301,7 +323,7 @@ pub(crate) fn parse_result(line: &str) -> Result<PlanResult, String> {
         .unwrap_or_default();
 
     if summary.is_empty() && steps.is_empty() {
-        return Err("structured plan is empty".into());
+        return Err(failed("structured plan is empty"));
     }
     Ok(PlanResult {
         summary,

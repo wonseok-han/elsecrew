@@ -11,12 +11,22 @@ const CLAUDE_SCRIPT_URL_WINDOWS: &str = "https://claude.ai/install.ps1";
 const CODEX_RELEASE_BASE: &str = "https://github.com/openai/codex/releases/latest/download";
 
 #[derive(Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum InstallEvent {
-    Phase { name: String },
-    Log { line: String },
+    Phase {
+        name: String,
+    },
+    Log {
+        line: String,
+    },
     /// 지금까지 내려받은 바이트 수
-    Progress { downloaded_bytes: u64 },
+    Progress {
+        downloaded_bytes: u64,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -78,7 +88,9 @@ pub fn run_install(
         .map_err(|e| AppError::classify(e.to_string()))?;
     let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if !out.status.success() || version.is_empty() {
-        return Err(AppError::generic("agent --version check failed after install"));
+        return Err(AppError::generic(
+            "agent --version check failed after install",
+        ));
     }
 
     Ok(InstallResult {
@@ -195,7 +207,85 @@ fn install_via_github_tarball(
     }
     let _ = std::fs::remove_file(&tarball);
     let _ = std::fs::remove_file(&inner);
+
+    // **셸 실행 호스트도 같이 설치한다.**
+    //
+    // 릴리스는 `codex`와 `codex-code-mode-host`를 **별도 자산**으로 배포하는데,
+    // 예전엔 앞의 것만 받았다. 그러면 codex가 자기 옆에서 호스트를 찾다 실패해
+    // **모든 셸 명령이 실행되지 않는다**(실측):
+    //
+    // ```text
+    // ERROR codex_core::tools::router: failed to spawn code-mode host
+    //   ~/.local/bin/codex-code-mode-host: No such file or directory
+    // ```
+    //
+    // 더 나쁜 건 이때 **파일이 안 생기니 "샌드박스가 막았다"로 오판하기 쉽다**는 점이다.
+    // 실제로 첫 실측이 그렇게 나왔고, 호스트를 옆에 둔 뒤에야 진짜 차단이 확인됐다.
+    install_codex_shell_host(target, &cache, &bin_dir, emit);
     Ok(())
+}
+
+/// `codex-code-mode-host`를 `codex` 옆에 놓는다.
+///
+/// **실패해도 설치 전체를 되돌리지 않는다.** 호스트가 없어도 codex 자체는 뜨고, 벤더가
+/// 자산 이름을 바꾸면 이 단계만 조용히 실패한다 — 그것 때문에 설치가 통째로 막히면 안 된다.
+/// 대신 무슨 일이 있었는지 로그로 남겨 진단에 쓴다.
+fn install_codex_shell_host(
+    target: &str,
+    cache: &Path,
+    bin_dir: &Path,
+    emit: &(dyn Fn(InstallEvent) + Sync),
+) {
+    let url = format!("{CODEX_RELEASE_BASE}/codex-code-mode-host-{target}.tar.gz");
+    let tarball = cache.join("codex-code-mode-host.tar.gz");
+    let log = |line: String| emit(InstallEvent::Log { line });
+
+    let downloaded = crate::detect::command(&curl_path())
+        .args(["-fsSL", "--retry", "2", &url, "-o"])
+        .arg(&tarball)
+        .stdin(Stdio::null())
+        .status();
+    match downloaded {
+        Ok(status) if status.success() => {}
+        _ => {
+            log(format!(
+                "codex shell host not installed (download failed): {url}"
+            ));
+            return;
+        }
+    }
+
+    let extracted = crate::detect::command(&tar_path())
+        .arg("-xzf")
+        .arg(&tarball)
+        .arg("-C")
+        .arg(cache)
+        .status();
+    let _ = std::fs::remove_file(&tarball);
+    match extracted {
+        Ok(status) if status.success() => {}
+        _ => {
+            log("codex shell host not installed (extract failed)".into());
+            return;
+        }
+    }
+
+    let inner = cache.join(format!("codex-code-mode-host-{target}"));
+    // 호스트는 codex **바로 옆**에 있어야 한다. 다른 곳에 두면 찾지 못한다.
+    let dest = bin_dir.join(crate::detect::exe("codex-code-mode-host"));
+    let placed =
+        std::fs::rename(&inner, &dest).or_else(|_| std::fs::copy(&inner, &dest).map(|_| ()));
+    let _ = std::fs::remove_file(&inner);
+    if placed.is_err() {
+        log("codex shell host not installed (copy failed)".into());
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+    }
+    log("codex shell host installed".into());
 }
 
 /// 자식 프로세스의 출력 줄과 다운로드 크기를 이벤트로 흘리며 종료를 기다린다
@@ -269,7 +359,11 @@ fn codex_target() -> Result<&'static str, AppError> {
 }
 
 fn home_env_var() -> &'static str {
-    if cfg!(windows) { "USERPROFILE" } else { "HOME" }
+    if cfg!(windows) {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    }
 }
 
 fn curl_path() -> PathBuf {
@@ -367,7 +461,9 @@ fn ensure_path(home: &Path) -> Result<Option<String>, AppError> {
         .output()
         .map_err(|e| AppError::classify(e.to_string()))?;
     if !out.status.success() {
-        return Err(AppError::generic("failed to update user PATH via PowerShell"));
+        return Err(AppError::generic(
+            "failed to update user PATH via PowerShell",
+        ));
     }
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     Ok(if text == "updated" {
@@ -383,10 +479,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn isolated_install(agent: Agent, tag: &str) -> (PathBuf, InstallResult) {
-        let home = std::env::temp_dir().join(format!(
-            "hello-agent-{tag}-{}",
-            std::process::id()
-        ));
+        let home = std::env::temp_dir().join(format!("hello-agent-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         let events = Mutex::new(Vec::new());
         let result = run_install(agent, &home, &|e| {
@@ -431,6 +524,18 @@ mod tests {
         let (home, report) = isolated_install(Agent::Codex, "codex");
         assert!(report.version.contains("codex"));
         assert_common(&home, &report, "codex");
+
+        // **셸 실행 호스트가 codex 옆에 있어야 한다.** 없으면 codex가 어떤 명령도
+        // 실행하지 못하고, 파일이 안 생기니 "샌드박스가 막았다"로 오판하게 된다(실측).
+        let host = home
+            .join(".local")
+            .join("bin")
+            .join(crate::detect::exe("codex-code-mode-host"));
+        assert!(
+            host.is_file(),
+            "codex는 설치됐는데 셸 실행 호스트가 없다 — 명령을 하나도 실행할 수 없다: {}",
+            host.display()
+        );
         std::fs::remove_dir_all(&home).ok();
     }
 }

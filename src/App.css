@@ -1288,6 +1288,42 @@ button.ghost:hover:not(:disabled) {
 /* ── §7.10 자동 인계 파일럿 (macOS 전용) ──
    화면 계약은 §7.10.2다. 목표·진행 상태·결과 요약·변경 내용·보관/폐기만 앞에 두고,
    증거 경로와 세션 식별자는 접이식 상세 뒤로 보낸다. */
+/* 원본을 건드리기 전 확인 — 눈에 띄되 경고처럼 겁주지 않는다 */
+.prepare-card {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.prepare-card h4 {
+  margin: 0 0 8px;
+  color: var(--accent-deep);
+}
+
+.prepare-card p {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.prepare-facts {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.prepare-facts li {
+  margin-bottom: 3px;
+}
+
+.prepare-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .handoff-card {
   margin-top: 22px;
   padding: 20px;
