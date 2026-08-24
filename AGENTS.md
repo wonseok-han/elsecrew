@@ -60,10 +60,11 @@
 
 - 에이전트: Claude Code + Codex
 - 플랫폼: macOS + Windows
-- UI: 한국어·영어 전환, 이름 `Hello, Agent`는 고정
-- 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화)
+- UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
+- 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
+- M5 방향: Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar 위에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·worktree·코드 편집/diff를 갖춘 agent-first IDE를 만든다. 아직 현행 구현이 아니며 `docs/proposals/m5-coding-agent-ide.md`가 착수 기준
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구 흐름 구현. 실기기 출시 후보 검증과 서명·배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5.0 착수 준비와 실기기 출시 후보 검증·서명/배포 결정이 남음
 
 ## 코드 지도
 
@@ -77,7 +78,9 @@
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
-- `docs/proposals/m4-orchestration.md`: M4(멀티 에이전트 오케스트레이션) 설계 검토. **아직 제안이며 구현된 것이 아니다.** 이 주제는 워크로그가 아니라 이 문서가 단일 기준점이고, M4를 다루기 전 §9 `철회된 주장`을 먼저 확인한다
+- `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
+- `docs/proposals/m5-coding-agent-ide.md`: M5.0 제품·상태·안전·기술 착수 기준. **제안 경계이며 현행 구현으로 인용하지 않는다**
+- `docs/proposals/m5-{agent-ide,guided-start}-concept.html`: 작업대와 처음 시작하기 인터랙티브 검토 시안
 
 ## 구현 원칙과 함정
 
@@ -110,6 +113,6 @@ npm run lint
 - `git`은 `/usr/bin/git` 절대경로를 사용한다.
 - 커밋 메시지는 임시 파일 방식으로 작성하고 `Co-Authored-By` 트레일러를 포함한다.
 - 사용자 변경과 무관한 파일을 임의로 스테이징하거나 되돌리지 않는다.
-- **M4 오케스트레이션 통합 브랜치**: `m4/orchestration`. Claude와 Codex가 함께 쓰는 중립적인 통합 기준선이다. M4 관련 작업을 시작하기 전에 현재 브랜치를 확인하며, `main`이면 작업하지 말고 이 통합 브랜치로 전환한다.
-- M4의 개별 구현·실험 브랜치가 필요하면 `m4/orchestration`에서 분기하고, 병합 대상도 `main`이 아니라 이 통합 브랜치로 한다. Claude와 Codex 모두 같은 규칙을 따른다.
-- M4 작업 중 `main`에 직접 커밋·병합·push하지 않는다. M4 전체가 완료되고 검증된 뒤 **사용자가 명시적으로 승인한 경우에만** `m4/orchestration`을 `main`에 병합한다.
+- **M5 통합 브랜치**: `m5/coding-agent-ide`. M5 관련 작업 전 현재 브랜치를 확인하며, 기능·실험 브랜치는 여기서 분기하고 이 브랜치로만 병합한다.
+- M5 작업 중 `main`에 직접 커밋·병합·push하지 않는다. M5 전체 완료·검증 뒤 **사용자가 명시적으로 승인한 경우에만** `m5/coding-agent-ide`를 `main`에 병합한다.
+- `m4/orchestration`은 완료된 M4 파일럿 기준선이다. 별도 M4 후속을 명시적으로 수행하지 않는 한 새 M5 작업의 분기·병합 대상으로 사용하지 않는다.

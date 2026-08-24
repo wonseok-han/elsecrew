@@ -29,7 +29,13 @@
 이 주제는 워크로그가 아니라 **이 문서가 단일 기준점**이다. 논의·결정·철회를 전부 여기 쌓는다. **손대기 전 §9 `철회된 주장`을 먼저 읽을 것** — 이미 틀린 것으로 판명된 결론에 다시 도달하는 것을 막는다.
 
 **M5(코딩 에이전트 IDE)를 검토할 때 → [`proposals/m5-coding-agent-ide.md`](proposals/m5-coding-agent-ide.md)**
-새 제품명, 여러 영속 채팅, 역할별 에이전트·모델, Git worktree, 코드 편집·diff를 포함한 설정 이후의 agent-first IDE 제안. 기술 스택 재평가와 확정 결정·현재 제안·열린 질문을 구분하며 **아직 구현된 현행 사실이 아니다.**
+여러 영속 채팅, 역할별 에이전트·모델, Git worktree, 코드 편집·diff를 포함한 agent-first IDE의 M5.0 착수 기준. Electron + React/TypeScript + Monaco 셸과 Rust sidecar, 상태·저장·안전 계약을 정의하며 **아직 구현된 현행 사실이 아니다.** 새 제품 이름은 개발과 분리해 보류한다.
+
+**M5 작업대 화면을 직접 조작해 볼 때 → [`proposals/m5-agent-ide-concept.html`](proposals/m5-agent-ide-concept.html)**
+여러 프로젝트, 재배치 가능한 패널, 파일·변경 탐색, 프로젝트별 역할/모델 설정과 역할 간 팀 대화를 담은 독립 실행형 인터랙티브 시안. 제안서의 동반 검토 자료이며 제품 구현이 아니다.
+
+**M5 처음 시작하기 흐름을 직접 조작해 볼 때 → [`proposals/m5-guided-start-concept.html`](proposals/m5-guided-start-concept.html)**
+에이전트 진단·설치·로그인부터 실제 프로젝트 선택, 프로젝트별 역할 배정, 격리 작업, 팀 대화와 첫 diff 검토를 거쳐 작업대로 이어지는 독립 실행형 인터랙티브 시안. 제품 구현이 아니다.
 
 **옛날 기록을 찾을 때 → [`archive/`](archive/)**
 `history.md`에서 롤오버된 과거 워크로그. 재사용할 결정·함정은 `history.md`의 `핵심 결정·발견`에 반영돼 있으므로 통상 열 필요가 없다.
