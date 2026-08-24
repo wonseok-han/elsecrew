@@ -28,6 +28,9 @@
 **M4(멀티 에이전트 오케스트레이션)를 다룰 때 → [`proposals/m4-orchestration.md`](proposals/m4-orchestration.md)**
 이 주제는 워크로그가 아니라 **이 문서가 단일 기준점**이다. 논의·결정·철회를 전부 여기 쌓는다. **손대기 전 §9 `철회된 주장`을 먼저 읽을 것** — 이미 틀린 것으로 판명된 결론에 다시 도달하는 것을 막는다.
 
+**M5(코딩 에이전트 IDE)를 검토할 때 → [`proposals/m5-coding-agent-ide.md`](proposals/m5-coding-agent-ide.md)**
+새 제품명, 여러 영속 채팅, 역할별 에이전트·모델, Git worktree, 코드 편집·diff를 포함한 설정 이후의 agent-first IDE 제안. 기술 스택 재평가와 확정 결정·현재 제안·열린 질문을 구분하며 **아직 구현된 현행 사실이 아니다.**
+
 **옛날 기록을 찾을 때 → [`archive/`](archive/)**
 `history.md`에서 롤오버된 과거 워크로그. 재사용할 결정·함정은 `history.md`의 `핵심 결정·발견`에 반영돼 있으므로 통상 열 필요가 없다.
 

@@ -40,6 +40,7 @@
 - **홈베이스**: 프로젝트가 있거나 설치·로그인된 에이전트가 있으면 홈으로 진입. 기준 폴더 바로 아래에서 `.claude`/`CLAUDE.md`/`AGENTS.md` 표식을 스캔하고, 에이전트 상태와 업데이트를 표시
 - **릴리스 게이트**: `.github/workflows/ci.yml`에서 데스크톱 macOS·Windows 빌드/테스트/격리 설치와 소개 웹사이트 빌드·렌더·린트를 검증. 사람 확인 항목과 미서명 베타/정식 서명 기준은 `docs/release-checklist.md`를 단일 체크리스트로 사용
 - **M4 파일럿 완료(2026-08-24)**: S1·S2·§7.10 구현과 교차 검토를 마쳤고, §7.6A 사용자 실사용을 통과해 **가설 A(사용자가 에이전트 사이를 직접 중계하지 않아도 된다)가 성립**했다. §7.6B 품질·비용 비교, Windows 자손 회수, 재작업 루프·다역할 같은 고비용 확장은 보류/후속이며 M4 완료 조건이 아니다. `main`에는 미병합
+- **M5 설계 방향(2026-08-24)**: 기존 M0~M4는 최초 설정·튜토리얼로 유지하고, 이후 **새 제품명**, 여러 영속 채팅, 역할별 에이전트·모델·추론 수준 설정, Git worktree, 명확한 diff와 실제 코드 편집을 갖춘 초보자용 agent-first IDE로 확장한다. Tauri와 TypeScript는 별도 선택이며, 기존 Rust 안전 코어를 재사용하는 Tauri 2 + React/TS + Monaco 기준선을 스파이크로 검증한 뒤 실패 증거가 있을 때만 대체한다. 통합 브랜치는 `m5/coding-agent-ide`; `main` 병합은 전체 완료 뒤 사용자 승인 사항
 - **M4 Claude 실행 계약(2026-08-19 실측, CLI `2.1.235`)**: 읽기 전용을 강제하는 것은 **`--tools` 허용목록**뿐이다. `--disallowed-tools`는 거부목록이라 `Task`·`ToolSearch` 등 23개를 남기고 **거부 증거도 안 남긴다**. `--setting-sources project`는 **대상 프로젝트 설정을 로드해** 권한을 `bypassPermissions`로 승격시키고 훅·MCP를 실행시키므로 안전 정책이 아니다 → **`--setting-sources ''`** 를 쓴다. `--safe-mode`는 훅·MCP·스킬만 끄고 **권한 승격은 못 막는다**. `--permission-mode dontAsk`는 자동 승인이 아니라 거부 게이트이며 `permission_denials`로 기계 판독 가능한 증거를 남긴다. **작업 폴더 경계와 사후 빈 diff는 예방책이 아니라 사후 확인 수단**이다(경계는 복제본 *안* 쓰기를 허용한다). 실행 형식은 **`--output-format stream-json --verbose` 고정**이고 `system:init`을 fail-closed로 검증한다(`tools` 집합 일치·`permissionMode`·`mcp_servers`·`plugins`·`model`·`cwd`·`session_id`). ⚠️ **`--json-schema`는 요청하지 않은 `StructuredOutput` 도구를 주입**하므로 기대 도구 집합은 4개다. §7.10 파일럿은 **macOS 전용**(Windows 종료 계약 미실측). 상세는 `proposals/m4-orchestration.md` §7.10.1.2
 - **Claude CLI 프로세스 트리·종료(2026-08-19 실측, Codex 2차 검토 반영)**: Bash 도구 자식은 **부모 프로세스 그룹에 없고 별도 세션 리더**(`Ss`)다. 그룹 `TERM`으로 죽는 것은 Claude 자체 정리 동작일 뿐이라, **루트에 `SIGKILL`을 보내면 자손이 남는다**(15초까지 생존 확인). **종료 성공은 신호 결과가 아니라 관측으로만 판정한다** — 한 번이라도 관측한 **`(pid, 시작 시각)` 신원을 누적 추적**하고 **누적 집합 전체의 소멸을 확인**해야 성공이다. ⚠️ **루트 기준 ppid 트리 순회는 오판한다** — 부모가 먼저 죽으면 자손이 `ppid=1`로 재부모화돼 트리에서 사라지고, 살아 있는데 빈 집합으로 보인다(C6로 재현). 열거는 **살아 있는 모든 추적 대상**에서 출발한다. **PID 재사용(신원 불일치)과 조회 실패는 `poisoned`**. `killpg`의 **`EPERM`은 성공도 소멸 증거도 아니다**(좀비만 남은 그룹에서도 난다). **확인 불가는 곧 `poisoned`** — 실행과 복제본을 함께 표시하고 자동 인계·재사용을 차단하며 해소는 명시적 복구/폐기뿐. `run_in_background` 때문에 **정상 종료 경로에서도** 회수가 필요하다. 상세는 `proposals/m4-orchestration.md` §7.10.1.2 ⑤
 - **M4 §7.10 최소 자동 인계 — 구현·검토·실사용 완료**: `proctree.rs`(종료 계약, F1~F8), `claude_pilot.rs`(실행 계약 + `system:init` fail-closed), `handoff.rs`(사용자 1회 입력 → 계획 → **앱이 인계** → 구현), `App.tsx`의 macOS 전용 `HandoffPilot`으로 구성된다. 신원 조회는 `libc::proc_pidinfo(PROC_PIDTBSDINFO)`를 쓴다. 통합 테스트는 `#[ignore]`이며 **`env -i`로 돌리면 인증이 사라져 실패**한다
@@ -77,6 +78,18 @@
 ---
 
 ## 워크로그 (최신이 위)
+
+### 2026-08-24 · by GPT-5 Codex (M5 제안서 검토·커밋)
+
+사용자 검토 결과 M5 제안서는 M5.0 구현 착수의 기준 문서로 충분하다고 판정했다. 이름·기술 스파이크 합격 수치·채팅/worktree 관계처럼 제품 방향을 바꾸는 항목은 열린 질문과 승인 게이트로 유지하며, 제안서·색인·워크로그와 규칙상 필요한 아카이브 롤오버를 `m5/coding-agent-ide`에 함께 커밋한다. 코드 구현·`main` 병합·push는 하지 않는다.
+
+### 2026-08-24 · by GPT-5 Codex (M5 필수 기능·기술 결정 기준 보강)
+
+사용자 결정을 반영해 이름 변경, 여러 채팅, 역할별 에이전트/모델 설정, Git worktree, 코드 편집을 M5 필수 범위로 올렸다. Tauri·React/TypeScript·Rust를 한 선택으로 묶지 않고 Monaco 기반 현재 스택 스파이크와 Electron 등 대안의 실패 조건을 제안서에 추가했다. 문서 검토만 수행했으며 M5 초안은 계속 미커밋 상태다.
+
+### 2026-08-24 · by GPT-5 Codex (M5 코딩 에이전트 IDE 설계 착수)
+
+Codex·Cursor·Orca의 공식 자료를 재확인하고 `proposals/m5-coding-agent-ide.md` 검토용 초안을 작성했다. 단일 작업의 영속 기록과 검토·적용·폐기·복구를 첫 단계로 두며, 병렬 에이전트·다중 터미널·전체 편집기는 후속으로 미룬다. 새 제안서·색인·이 워크로그는 사용자 검토 전까지 커밋하지 않는다.
 
 ### 2026-08-24 · by GPT-5 Codex (M4 파일럿 마감)
 
@@ -271,215 +284,9 @@ Failed to authenticate. API Error: 401 OAuth access token has been revoked.
 
 ---
 
-### 2026-08-21 · by Claude Opus 5 (Codex 최종 통과 → 커밋)
+### 2026-08-21 및 그 이전 → `docs/archive/history-2026-08.md`
 
-**Codex 재검토를 통과했다.** 추가 차단 사항 없음. Codex가 `npm test` 9건, Rust 137건, TypeScript·Vite 빌드, rustfmt, `git diff --check`를 독립 검증했다.
-
-사용자 승인을 받아 `m4/orchestration`에 **커밋 2개**로 나눠 넣었다. 각 커밋이 독립적으로 빌드·테스트를 통과한다.
-
-| 커밋 | 내용 |
-| --- | --- |
-| `b6f2142` `feat(m4)` | `proctree`·`claude_pilot`·`handoff` 신규, `orchestration` 실패 구조화, 화면·프런트 테스트·검증 명령 |
-| `70510ae` `docs(m4)` | §7.10 구현 상태, §9 철회된 주장, §10 결정 이력, 워크로그 아카이브 롤오버 |
-
-**`main`에는 병합·push하지 않았다.** 현재 `m4/orchestration`은 `main`보다 8개 앞선다. 병합은 M4 전체가 완료·검증된 뒤 사용자가 명시적으로 승인한 경우에만 한다.
-
-**다음 할 일**
-
-- **§7.6A 자동 인계 UX 판정(A1~A5)** — 사람이 실제로 써 보고 내리는 판정. 구현이 끝나 막힌 것이 없다. M4의 다음 관문이다
-- (별건) S2 `tree_is_gone`/`signal_ok`의 `EPERM` 오판 검토
-- (별건, Windows 게이트) 자손 회수 실측 전까지 Windows에 노출하지 않는다
-
----
-
-### 2026-08-21 · by Claude Opus 5 (Codex 8차 반려 — 준비 단계 취소 경합 1건)
-
-7차 지적은 모두 해소 확인. 남은 경합 1건을 고쳤다. 여전히 **미커밋**이다.
-
-**무엇이 틀렸나** — 화면이 정상 완료 뒤에도 이전 실행 ID를 들고 있었다.
-
-1. 첫 실행이 끝난다 (화면은 `run-1`을 계속 보유)
-2. 두 번째 실행 시작 → `begin_handoff` 응답 대기
-3. 그 사이 중단 클릭 → ID가 있으니 "실행 중"으로 보고 **곧바로** `cancel_handoff`
-4. 그 슬롯은 이미 끝난 실행의 것이라 **아무 일도 하지 않는다**
-5. 새 ID가 와도 보류된 중단이 없어 **두 번째 실행이 그대로 진행**
-
-끝난 실행의 늦은 진행 상태가 새 화면을 덮는 문제도 같은 뿌리였다.
-
-**어떻게 고쳤나** — 실행 추적과 보류 중단을 `src/handoffRun.ts`의 **순수 전이 함수**로 분리했다. ref 두 개를 손으로 굴리던 것을 대체한다.
-
-| 규칙 | 어디서 |
-| --- | --- |
-| 새 실행을 시작할 때 이전 ID를 버린다 | `startingRun()` — **`begin_handoff` 호출 전에** |
-| 실행이 끝나면 비운다 | `runSettled()` — 결과·막힘·오류 **모든 경로** |
-| 예약 전 중단은 보류했다가 예약 즉시 전달 | `requestCancel()` → `runReserved()` |
-| 예약 대기 중 중단이 있었으면 **사본을 만들기 전에** 멈춘다 | `abort` — 그만두라는 작업의 사본을 남길 이유가 없다 |
-
-**프런트 테스트를 처음 붙였다.** 새 프레임워크는 들이지 않았다 — `website/`가 이미 `node --test`를 쓰고 있어 같은 방식에 노드의 타입 제거 실행(`--experimental-strip-types`, Node 22.18)을 얹었다. `tests/handoff-run.test.mts` 9건을 `npm test`로 묶었다.
-
-**결함을 되돌려 확인했다.** 처음 쓴 테스트 대역은 결함을 **가리고 있었다** — `finish()`가 이미 ID를 비워서, 시작 시 정리를 지워도 통과했다. 실제 옛 코드는 성공 경로에서 비우지 않았다. 대역에 `leaveStaleRunId()`를 넣어 그 상태를 재현하니 세 결함이 각각 잡힌다.
-
-| 되돌린 결함 | 실패한 테스트 |
-| --- | --- |
-| 시작 시 이전 ID 미정리 | 예약 대기 중 중단 유실 · 늦은 진행 상태 덮어쓰기 (2건) |
-| 종료 시 미정리 | 끝난 실행의 진행 상태 수신 (1건) |
-| 보류된 중단 폐기 | 중단 전달 · 경합 시나리오 · 소비 확인 (3건) |
-
-**검증**: `cargo test --locked` **137 통과 / 0 실패 / 12 무시**, `npm test` **9 통과 / 0 실패**, `npx tsc --noEmit` 통과, `pnpm build` 통과, 변경 Rust 파일 `rustfmt --edition 2021 --check` 통과, `git diff --check` 통과.
-
-**변경 파일**: `docs/history.md`, `docs/proposals/m4-orchestration.md`, `package.json`, `src/App.tsx`, `src/handoffRun.ts`(신규), `tests/handoff-run.test.mts`(신규)
-
-**다음 할 일**
-
-- Codex 재검토 요청
-- 통과 시 사용자 승인을 받아 커밋. **`main` 병합은 하지 않는다**
-- §7.6A 자동 인계 UX 판정(A1~A5)
-
----
-
-### 2026-08-20 · by Claude Opus 5 (Codex 7차 반려 3건 + 추가 1건 반영)
-
-6차 지적 3건은 해소 확인. 남은 것들을 고쳤다. 모두 **사용자가 막힌 상태에서 빠져나올 수 있는가**에 관한 문제였다. 여전히 **미커밋**이다.
-
-| 반려 | 무엇이 틀렸나 | 어떻게 고쳤나 |
-| --- | --- | --- |
-| 복구 흐름이 막힘 | 잠금 **오판**은 고쳤지만, 잠긴 A가 슬롯을 쥐면 새 B는 전부 거부되는데 화면에는 B만 보였다. B를 정리해도 슬롯은 A의 것이라 안 풀려 **후속 실행이 영영 거부**된다 | `begin_handoff`가 **사본을 만들기 전에** 막고(`HandoffStart::Blocked`) A의 경로·사유·잠금 상태를 돌려준다. 화면이 그 경로로 A를 정리·복구한다. 우회 경로용으로 `PilotFailure.blocker`도 같은 정보를 싣는다 |
-| 증거 생성 도중 부분 실패가 축약됨 | `FailureContext`를 **파일 생성 뒤에** 만들어서, events는 만들어졌는데 stderr에서 실패하면 그 경로를 잃었다. 만들어진 events는 아무도 모르는 고아가 된다 | 맥락을 **경로가 정해지는 즉시** 만든다 |
-| "만들 예정이던 경로"와 "저장된 파일"을 구분 안 함 | diff 생성에 실패해도 `evidence.diff`가 채워져 화면의 "저장된 기록 위치"에 **존재하지 않는 파일**이 노출됐다 | `PilotEvidencePaths`를 `Option`으로. 실패 시점에 **`is_file()`인 것만** 채운다(`exists()`가 아니다 — 같은 이름의 폴더를 저장된 기록이라 말하면 안 된다) |
-| (추가) `PoisonedRun`에 표시 오류 없음 | 최초 실패 결과가 화면에서 사라진 뒤 같은 슬롯을 다시 확인하면 **종료 오류가 `lockError`로 다시 쓰였다** | 슬롯에도 `error`(종료 실패)와 `marker_error`(표시 저장 실패)를 나눠 저장 |
-
-**회귀 테스트는 전체 흐름을 확인한다.** "B가 잠기지 않는다"만으로는 부족하다는 지적이 맞다 — A를 poison → 시작 시도가 막힘 → **알림에 담긴 경로로 실제 A를 정리** → 다음 실행이 열림 → A는 영구 폐기돼 재사용 불가, 까지 한 테스트로 확인한다. 부분 실패는 stderr 경로를 **폴더로 선점**해 events만 만들어진 상태를 실제로 만들어 검증한다(`orchestration`).
-
-**발견**
-
-- 테스트에서 `session.slot()` 가드를 쥔 채 `session.release()`를 부르면 **데드락**이다. `std::sync::Mutex`는 재진입이 안 된다. 테스트가 120초 타임아웃으로 잡혔고, `reserve()`가 돌려준 run_id를 쓰도록 고쳤다
-- 파일 존재 확인은 `exists()`가 아니라 **`is_file()`** 이어야 한다. 폴더로 선점하는 실패 주입 기법을 쓰면 `exists()`는 참이 되어 "저장된 기록"으로 오보고된다
-
-**검증**: `cargo test --locked` **137 통과 / 0 실패 / 12 무시 · 경고 0**, `npx tsc --noEmit` 통과, `pnpm build` 통과, 변경 Rust 파일 `rustfmt --edition 2021 --check` 통과, `git diff --check` 통과, 통합 테스트 2건 재실행 통과(CLI `2.1.237`).
-
-**변경 파일**: `docs/history.md`, `docs/proposals/m4-orchestration.md`, `src-tauri/src/{orchestration.rs,handoff.rs,handoff/tests.rs}`, `src/App.tsx`, `src/App.css`, `src/locales/{ko,en}.ts`
-
-**다음 할 일**
-
-- Codex 재검토 요청
-- 통과 시 사용자 승인을 받아 커밋. **`main` 병합은 하지 않는다**
-- §7.6A 자동 인계 UX 판정(A1~A5)
-
----
-
-### 2026-08-20 · by Claude Opus 5 (Codex 6차 반려 3건 반영)
-
-5차 지적 6건은 해소 확인. 남은 3건을 고쳤다. 셋 다 **증거·잠금 정보를 잃거나 뒤섞는** 문제였다. 여전히 **미커밋**이다.
-
-| 반려 | 무엇이 틀렸나 | 어떻게 고쳤나 |
-| --- | --- | --- |
-| 다른 복제본의 오염을 이 복제본 것으로 오판 | `poisoned_slot_error`가 오류만 돌려주고 경로를 안 줬다. **슬롯은 하나뿐**이라 A의 오염이 깨끗한 B를 `sessionOnly`로 잠그고, B를 폐기해도 `clear_poisoned_slot`은 경로가 달라 슬롯을 못 풀어 **실행이 영영 막힌다** | `poisoned_slot`이 `(복제본 경로, 오류)`를 반환하고, 대상과 일치할 때만 잠근다 |
-| 실패 시 Codex 증거 경로가 사라짐 | `execute_pilot`이 `Result<_, String>`이라 오류가 문자열로 축약됐다. 증거 파일은 이미 만들어져 있는데 경로를 잃어 화면에 Claude 증거만 남았다 | `PilotFailure`로 오류·`run_id`·복제본 경로·증거 경로·오염·표시 오류를 실어 나른다. `run_id`는 화면 상세에도 노출(증거 파일 이름이 그 값으로 갈린다) |
-| `sessionOnly`의 `lockError`가 종료 오류 | `guard.poison`에 저장되는 건 **종료 실패 오류**다. 표시 저장 실패 오류는 따로 보존되지 않아, "표시를 저장하지 못한 이유" 자리에 엉뚱한 문구가 나왔다 | `abandon_run`이 `poisoned`(무엇이 잘못됐나)와 `marker_error`(왜 저장 못 했나)를 분리. `attention`·`lockError`에 각각 |
-
-**잠금 판정을 네 갈래로 명시했다**: ① 이번 실행이 오염시킴 → `marker_error` 유무로 `persisted`/`sessionOnly` · ② 이 복제본의 디스크 표시 → `persisted` · ③ **경로가 일치하는** 슬롯 오염 → `sessionOnly` · ④ 그 외 → 잠그지 않음.
-
-**테스트를 실제 실패 경로로 옮겼다.** `stopped()`를 손으로 조립하면 증거를 잃는 지점을 검증하지 못한다.
-
-- 증거 생성 **뒤에** 복제본의 `.git`을 지우는 실행 대상을 주입해 진짜 `PilotFailure`를 만들고(실패 문구: `cannot register new files for the pilot diff (git add -N exited with exit status: 128)`), production 매핑에 통과시켜 Codex 증거 경로가 결과까지 오는지 확인
-- `abandon_run`의 두 오류 분리는 **표시 경로를 폴더로 선점**해 저장을 실패시켜 검증. 두 문자열이 실제로 다른지 단언
-- A/B 두 복제본으로 슬롯 오판 회귀 고정 — B는 잠기지 않고 A의 오염은 A에 남아야 한다
-
-**검증**: `cargo test --locked` **131 통과 / 0 실패 / 12 무시 · 경고 0**, `npx tsc --noEmit` 통과, `pnpm build` 통과, 변경 Rust 파일 `rustfmt --edition 2021 --check` 통과, `git diff --check` 통과, 통합 테스트 2건 재실행 통과(CLI `2.1.237`, `stages: [Organizing, Building, Checking, Done]`).
-
-**변경 파일**: `docs/history.md`, `docs/proposals/m4-orchestration.md`, `src-tauri/src/{orchestration.rs,handoff.rs,handoff/tests.rs}`, `src/App.tsx`, `src/locales/{ko,en}.ts`
-
-**다음 할 일**
-
-- Codex 재검토 요청
-- 통과 시 사용자 승인을 받아 커밋. **`main` 병합은 하지 않는다**
-- §7.6A 자동 인계 UX 판정(A1~A5)
-
----
-
-### 2026-08-20 · by Claude Opus 5 (Codex 5차 반려 6건 반영)
-
-4차 지적 5건은 해소 확인. 남은 6건을 고쳤다. 여전히 **미커밋**이다.
-
-**차단 2건 — 종료 계약의 구멍**
-
-| 반려 | 무엇이 틀렸나 | 어떻게 고쳤나 |
-| --- | --- | --- |
-| 누적 집합의 키가 pid | 소멸을 확인한 pid를 새 자손이 재사용하면 `contains_key(pid)`가 참이라 **편입이 막힌다.** 옛 신원은 `Gone`이라 이후 조회에서도 건너뛰므로 **살아 있는 자손을 아무도 보지 않는 채 `Confirmed`** 가 난다 | 키를 `(pid, start_us)` 전체로. `ProcIdentity`에 `Ord` 파생. **F7** 추가 |
-| 실행 중 `observe` 오류를 버림 | 일시적 열거 실패나 신원 불일치가 종료 시점에 사라져 있으면 그 사실을 잊고 `Confirmed`가 난다. 실패한 회차에 생겼다 사라진 자손이 있었는지 **알 방법이 없다** | `integrity_error`에 최초 오류를 영구 저장하고 `report_final`이 반드시 `Unconfirmed`를 내게. **F8** 2종 추가 |
-
-**나머지 4건**
-
-- **"결과 버리기"가 잠긴 사본에서만 동작했다** — `discard_codex_pilot`은 poisoned 표시가 있는 복제본만 받는다. 즉 정상 완료·단순 취소·`sessionOnly` 결과의 버튼은 **전부 실패**했다. 인계 전용 `discard_handoff_workspace`를 만들어 네 경우 모두 영구 `abandoned`로 전환한다. 파일은 지우지 않는다(증거 보존 계약 그대로), 루트·매니페스트 검증은 유지
-- **구현 단계 실패가 오류로 던져졌다** — 화면에 오류 문구만 남고 복제본 경로·잠금·증거가 사라져 폐기도 복구도 못 했다. `NeedsAttention` 결과로 변환하되 잠금은 **사실대로** 읽는다(디스크 표시 → `persisted`, 슬롯만 오염 → `sessionOnly`, 복제본 손대기 전 실패 → 잠그지 않음)
-- **예약 전 중단 요청이 사라졌다** — 화면이 `begin_handoff` 완료 전에 이미 중단 버튼을 보여 준다. 그 요청을 기억했다가 예약 직후 전달하게 했다
-- 문서 §8의 §7.6A 중복 줄 정리
-
-**회귀 테스트 14개 추가** (113 → 127). F7, F8 2종, 무결성 정상 실행, 폐기 6종(정상 완료·취소·persisted·sessionOnly·미확인 거부·임의 폴더 거부), 실패 보고 4종.
-
-**F7·F8이 실제로 결함을 잡는지 옛 동작으로 되돌려 확인했다** — 셋 다 정확히 그 자리에서 실패했다(`재사용된 pid의 새 자손이 편입되지 않았다`, `일시적 열거 실패를 잊고 소멸을 주장했다`).
-
-**발견**
-
-- **테스트 하네스에도 같은 결함이 있었다.** 가짜 `signal`이 pid로 첫 항목을 찾아 **같은 pid를 쓰던 죽은 프로세스**에 신호를 보내고, 실제 대상은 멀쩡히 살아남았다. F7이 이걸 먼저 잡아냈다 — 살아 있는 것만 찾도록 고쳤다
-- pid 기반 조회는 프로덕션 코드든 테스트 코드든 **같은 방식으로 틀린다.** pid는 식별자가 아니다
-
-**검증**: `cargo test --locked` **127 통과 / 0 실패 / 12 무시**, `npx tsc --noEmit` 통과, `pnpm build` 통과, 변경 Rust 파일 `rustfmt --edition 2021 --check` 통과, 통합 테스트 2건 재실행 통과(CLI `2.1.237`, `stages: [Organizing, Building, Checking, Done]`).
-
-**변경 파일**: `docs/history.md`, `docs/proposals/m4-orchestration.md`, `src-tauri/src/{proctree.rs,proctree/tests.rs,handoff.rs,handoff/tests.rs,orchestration.rs,lib.rs}`, `src/App.tsx`
-
-**다음 할 일**
-
-- Codex 재검토 요청
-- 통과 시 사용자 승인을 받아 커밋. **`main` 병합은 하지 않는다**
-- §7.6A 자동 인계 UX 판정(A1~A5)
-
----
-
-### 2026-08-20 · by Claude Opus 5 (Codex 4차 반려 5건 반영)
-
-**§7.10 1차 구현이 Codex 재검토를 통과하지 못했다.** 지적은 전부 *구현이 계약을 지키지 못한* 지점이었다. 코드와 회귀 테스트로 고쳤고 여전히 **미커밋**이다.
-
-**고친 것 5건**
-
-| 반려 | 무엇이 틀렸나 | 어떻게 고쳤나 |
-| --- | --- | --- |
-| 중단 경로 | 준비 중 취소가 `cancel.store(false)`로 지워지고, Claude가 조용하면 취소가 영영 닿지 않고, 구현 중 취소가 Codex에 전달되지 않았다 | 취소 깃발을 **슬롯 소유**로 이동(`HandoffSession`), stdout 읽기를 별도 스레드로 분리해 실행 소유자가 취소를 폴링, `CancelBridge`가 Codex 슬롯 예약 직전의 취소까지 재시도 전달 |
-| 단일 정리 절차 | 증거 파일 생성 실패 시 자식·watcher가 남는 조기 반환. 종료 확인 실패 뒤 blocking `child.wait()` | 증거 파일을 **자식보다 먼저** 만들어 그 경로 자체를 없앰. 확인 실패 뒤에는 제한된 `try_wait`만 하고 즉시 poisoned 반환(스레드도 join하지 않음). stderr·events 기록 실패를 증거 실패로 보고 |
-| 잠금 보고 | `write_poisoned_marker` 오류를 무시하고 `workspaceLocked: true`로 보고 — **거짓 안전 보고** | `WorkspaceLock` 3상태(`none`/`persisted`/`sessionOnly`) + `lockError`. 저장 실패해도 프로세스 내 목록이 재사용을 막고, 화면은 폐기를 요구 |
-| 완료 화면 | 계획 요약을 "실제 수행 결과"로 표시. 변경 목록이 삭제·이름 변경·바이너리를 누락. `확인 중`이 화면에만 존재. 멈추면 진행 표시가 초기화 | 결과는 Codex 최종 메시지에서, 계획은 상세의 *하려던 것*으로 분리. 목록은 `git diff --name-status -z -M` 상태 코드로. `Checking`을 실제 백엔드 단계로. 멈춘 지점을 표시 |
-| fail-closed | 도구 목록을 `filter_map`으로 읽어 비문자열 항목이 섞여도 통과. 모델을 `contains("sonnet")`로 대조 | 비문자열 항목·목록 부재를 위반으로. `ALLOWED_INIT_MODELS` **완전 일치**. `is_error` 계획은 `plan_to_codex_prompt`가 구조적으로 거부 |
-
-**단일 실행 슬롯**: `begin_handoff`로 **복제본 준비보다 먼저** 예약하고 `run_handoff`가 소유권을 잡는다. 그래야 준비 중 취소가 살아남고 동시 실행이 거부된다. 진행 이벤트에 `runId`를 실어 끝난 실행의 늦은 상태가 새 실행 화면에 섞이지 않게 했다.
-
-**회귀 테스트** — Codex가 요구한 8종을 전부 넣었다. 중단 3종(준비 중·무출력 중·Codex 구간), 동시 실행 거부, 증거 실패 후 프로세스 잔존 없음, 확인 실패의 제한 시간 내 poisoned, 잠금 저장 실패 후 재사용 거부, 삭제·이름 변경 표시, 결과와 계획 분리, malformed 도구/모델 거부.
-
-- 프로세스가 필요한 경계는 **가짜 실행 대상**(아무것도 출력하지 않고 배경 자손을 남기는 스크립트)으로 실제 트리를 만들어 검증했다
-- 실제로 안 죽는 트리는 만들 수 없으므로 **종료 절차를 주입 가능**하게 두고(`TerminateFn`) 확인 실패 이후의 행동만 고정했다
-- 돌아오지 않는 구현을 테스트가 붙잡지 않도록 제한 시간 헬퍼(`within`)를 썼다
-
-**검증**: `cargo test --locked` **113 통과 / 0 실패 / 12 무시**, `npx tsc --noEmit` 통과, `pnpm build` 통과, 변경 Rust 파일 `rustfmt --edition 2021 --check` 통과(기존 파일 재포맷 없음), 통합 테스트 2건 실제 재실행 통과, 잔여 프로세스·임시 폴더 없음.
-
-**발견**
-
-- **CLI가 `2.1.235` → `2.1.237`로 올라갔는데 계약이 그대로 통과했다.** 도구 집합·권한 모드·모델(`claude-sonnet-5`)이 모두 동일 — 정확 일치 목록이 패치 판올림에 곧바로 부서지지는 않는다는 첫 관측이다
-- **계획과 결과가 실제로 다르다는 것이 실행에서 드러났다.** 계획 요약은 영어, 구현 결과는 한국어였다. 이전 구현이라면 사용자는 *하려던 것*을 *한 것*으로 읽었을 것이다
-- `CancelBridge`가 접으라는 신호를 **취소 확인보다 먼저** 보면 실행 종료 직전의 취소를 흘린다. 테스트가 잡아 순서를 뒤집었다
-- 테스트에서 **고정 시간 대기로 실행 기동을 가정하면 병렬 실행에서 깨진다.** 실제 기동(pid 파일)을 기다리도록 고쳤다
-
-**변경 파일**: `docs/history.md`, `docs/proposals/m4-orchestration.md`, `src-tauri/src/{handoff.rs,handoff/tests.rs,claude_pilot.rs,claude_pilot/tests.rs,orchestration.rs,lib.rs}`, `src/App.tsx`, `src/App.css`, `src/locales/{ko,en}.ts`
-
-**다음 할 일**
-
-- Codex 재검토 요청 (중단 계약·정리 절차·잠금 보고·결과 표시·fail-closed 엄밀성)
-- 통과 시 사용자 승인을 받아 커밋. **`main` 병합은 하지 않는다**
-- §7.6A 자동 인계 UX 판정(A1~A5) — 사람이 써 보고 내리는 판정
-
----
-
-### 2026-08-19 및 그 이전 → `docs/archive/history-2026-08.md`
-
-2026-08-12 ~ 2026-08-19 엔트리(초기 교차 검토 왕복 38개 + M4 실행 계약 실측·§7.10 1차 구현 12개)를 아카이브로 옮겼다. M4의 현재 결론은 `docs/proposals/m4-orchestration.md`에 있으므로 통상 아카이브를 열 필요는 없다.
+2026-08-12 ~ 2026-08-21 엔트리를 날짜 경계로 아카이브했다. M4의 현재 결론은 `docs/proposals/m4-orchestration.md`에 있으므로 통상 아카이브를 열 필요는 없다.
 
 ### 2026-07-23 및 그 이전 → `docs/archive/history-2026-07.md`
 
