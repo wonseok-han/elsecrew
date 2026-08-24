@@ -1023,7 +1023,7 @@ fn a_failure_after_evidence_exists_keeps_the_codex_evidence_paths() {
         &fixture.workspace,
         failure,
         HandoffEvidence {
-            claude_events_path: "/pilots/.claude.events.jsonl".into(),
+            plan_events_path: "/pilots/.claude.events.jsonl".into(),
             ..Default::default()
         },
         &handle,
@@ -1042,7 +1042,7 @@ fn a_failure_after_evidence_exists_keeps_the_codex_evidence_paths() {
         result.evidence.codex_diff_path
     );
     // 앞 단계의 증거도 그대로 남는다
-    assert!(!result.evidence.claude_events_path.is_empty());
+    assert!(!result.evidence.plan_events_path.is_empty());
     // 폐기할 대상을 알 수 있어야 한다
     assert!(!result.workspace_path.is_empty());
     assert!(result.attention.is_some());
@@ -1567,7 +1567,7 @@ fn a_greeting_asks_for_a_clearer_goal_instead_of_reporting_a_failure() {
     assert!(!plan.is_error, "잘못된 것은 없다");
     assert!(!plan.summary.is_empty(), "왜 할 일이 없는지 설명이 있다");
     assert!(
-        claude_pilot::plan_to_codex_prompt("Hi", &plan).is_err(),
+        claude_pilot::plan_to_implementation_prompt("Hi", &plan).is_err(),
         "할 일이 없는데 구현 단계로 넘어갔다"
     );
 }
@@ -1714,7 +1714,7 @@ fn codex_planning_leg_runs_end_to_end() {
         "계획 역할이 복제본을 수정했다"
     );
     // 인계까지 이어지는가
-    assert!(claude_pilot::plan_to_codex_prompt("목표", &run.plan).is_ok());
+    assert!(claude_pilot::plan_to_implementation_prompt("목표", &run.plan).is_ok());
 
     let _ = std::fs::remove_dir_all(&base);
 }
@@ -1815,8 +1815,9 @@ fn claude_planning_leg_runs_end_to_end() {
         );
     }
     // 인계 프롬프트가 만들어지는가
-    let prompt = claude_pilot::plan_to_codex_prompt("인사말을 더 친근하게 바꿔 줘", &run.plan)
-        .expect("인계가 막혔다");
+    let prompt =
+        claude_pilot::plan_to_implementation_prompt("인사말을 더 친근하게 바꿔 줘", &run.plan)
+            .expect("인계가 막혔다");
     assert!(prompt.contains("Steps:"));
 
     let _ = std::fs::remove_dir_all(&base);
@@ -1913,7 +1914,7 @@ fn handoff_vertical_slice_runs_end_to_end() {
     );
     // 증거는 복제본 밖에 있어야 한다
     for path in [
-        &result.evidence.claude_events_path,
+        &result.evidence.plan_events_path,
         &result.evidence.codex_events_path,
         &result.evidence.codex_diff_path,
     ] {

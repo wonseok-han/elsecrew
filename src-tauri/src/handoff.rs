@@ -35,9 +35,9 @@ use std::time::Duration;
 use tauri::{Emitter, State};
 
 /// 증거는 전부 복제본 **밖**에 둔다 — 에이전트가 자기 증거를 고칠 수 없게 한다.
-const CLAUDE_EVENTS_SUFFIX: &str = ".hello-agent-claude.events.jsonl";
-const CLAUDE_STDERR_SUFFIX: &str = ".hello-agent-claude.stderr.log";
-const CLAUDE_DIFF_SUFFIX: &str = ".hello-agent-claude.diff";
+const PLAN_EVENTS_SUFFIX: &str = ".hello-agent-plan.events.jsonl";
+const PLAN_STDERR_SUFFIX: &str = ".hello-agent-plan.stderr.log";
+const PLAN_DIFF_SUFFIX: &str = ".hello-agent-plan.diff";
 /// 계획 역할의 구조화 출력·스키마. Codex 계획 경로에서만 쓴다
 const PLAN_LAST_MESSAGE_SUFFIX: &str = ".hello-agent-plan.last-message.txt";
 const PLAN_SCHEMA_SUFFIX: &str = ".hello-agent-plan.schema.json";
@@ -155,11 +155,11 @@ pub(crate) struct HandoffResult {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HandoffEvidence {
-    pub claude_events_path: String,
-    pub claude_stderr_path: String,
-    pub claude_diff_path: String,
-    pub claude_session_id: String,
-    pub claude_cli_version: String,
+    pub plan_events_path: String,
+    pub plan_stderr_path: String,
+    pub plan_diff_path: String,
+    pub plan_session_id: String,
+    pub plan_cli_version: String,
     pub codex_events_path: String,
     pub codex_last_message_path: String,
     pub codex_stderr_path: String,
@@ -371,19 +371,9 @@ struct PlanEvidence {
 impl PlanEvidence {
     fn new(root: &Path, workspace: &Path, run_id: &str) -> Result<Self, String> {
         Ok(Self {
-            events: orchestration::pilot_run_artifact(
-                root,
-                workspace,
-                run_id,
-                CLAUDE_EVENTS_SUFFIX,
-            )?,
-            stderr: orchestration::pilot_run_artifact(
-                root,
-                workspace,
-                run_id,
-                CLAUDE_STDERR_SUFFIX,
-            )?,
-            diff: orchestration::pilot_run_artifact(root, workspace, run_id, CLAUDE_DIFF_SUFFIX)?,
+            events: orchestration::pilot_run_artifact(root, workspace, run_id, PLAN_EVENTS_SUFFIX)?,
+            stderr: orchestration::pilot_run_artifact(root, workspace, run_id, PLAN_STDERR_SUFFIX)?,
+            diff: orchestration::pilot_run_artifact(root, workspace, run_id, PLAN_DIFF_SUFFIX)?,
             last_message: orchestration::pilot_run_artifact(
                 root,
                 workspace,
@@ -1236,9 +1226,9 @@ fn execute_handoff(
     let evidence = PlanEvidence::new(&root, &workspace.path, &run_id)?;
 
     let claude_paths = || HandoffEvidence {
-        claude_events_path: evidence.events.display().to_string(),
-        claude_stderr_path: evidence.stderr.display().to_string(),
-        claude_diff_path: evidence.diff.display().to_string(),
+        plan_events_path: evidence.events.display().to_string(),
+        plan_stderr_path: evidence.stderr.display().to_string(),
+        plan_diff_path: evidence.diff.display().to_string(),
         ..Default::default()
     };
 
@@ -1257,7 +1247,7 @@ fn execute_handoff(
 
     // ── 1단계: 요청 정리 (Claude, 읽기 전용) ──
     announce_stage(HandoffStage::Organizing);
-    let claude = match run_plan(agent, &workspace, goal, &evidence, cancel) {
+    let planned = match run_plan(agent, &workspace, goal, &evidence, cancel) {
         Ok(run) => run,
         Err(PlanFailure::Poisoned(reason)) => {
             // 복제본을 잠근다. **Codex 자동 인계는 여기서 멈춘다** — 재사용도 막힌다.
@@ -1286,13 +1276,13 @@ fn execute_handoff(
     };
 
     let mut collected = HandoffEvidence {
-        claude_events_path: claude.events_path.display().to_string(),
-        claude_stderr_path: claude.stderr_path.display().to_string(),
-        claude_diff_path: claude.diff_path.display().to_string(),
-        claude_session_id: claude.session_id.clone(),
-        claude_cli_version: claude.cli_version.clone(),
-        permission_denials: claude.plan.permission_denials.clone(),
-        termination: claude.termination.clone(),
+        plan_events_path: planned.events_path.display().to_string(),
+        plan_stderr_path: planned.stderr_path.display().to_string(),
+        plan_diff_path: planned.diff_path.display().to_string(),
+        plan_session_id: planned.session_id.clone(),
+        plan_cli_version: planned.cli_version.clone(),
+        permission_denials: planned.plan.permission_denials.clone(),
+        termination: planned.termination.clone(),
         ..Default::default()
     };
 
@@ -1311,13 +1301,13 @@ fn execute_handoff(
     // 계획 역할이 **할 일이 없다**고 답했다. 잘못된 것은 없다 —
     // 무엇을 바꿀지 알아야 할 뿐이다. 이걸 사고와 같은 화면으로 보내면
     // 사용자는 자기가 무언가 망가뜨린 줄 안다.
-    if claude.plan.steps.is_empty() && !claude.plan.is_error {
+    if planned.plan.steps.is_empty() && !planned.plan.is_error {
         announce_stage(HandoffStage::NeedsGoal);
         return Ok(HandoffResult {
             stage: HandoffStage::NeedsGoal,
             goal: goal.to_string(),
             // 계획 역할이 왜 할 일이 없다고 보는지 써 줬다. 상세에서 볼 수 있게 남긴다
-            plan_summary: claude.plan.summary.clone(),
+            plan_summary: planned.plan.summary.clone(),
             result_summary: String::new(),
             changed_files: Vec::new(),
             // **비어 있다.** 확인해야 할 사고가 아니다
@@ -1331,8 +1321,8 @@ fn execute_handoff(
     }
 
     // ── 2단계: 앱이 계획을 인계한다. 사용자는 아무것도 옮기지 않는다 ──
-    // 실패로 끝난 계획은 여기서 거부된다(`plan_to_codex_prompt`).
-    let prompt = match claude_pilot::plan_to_codex_prompt(goal, &claude.plan) {
+    // 실패로 끝난 계획은 여기서 거부된다(`plan_to_implementation_prompt`).
+    let prompt = match claude_pilot::plan_to_implementation_prompt(goal, &planned.plan) {
         Ok(prompt) => prompt,
         Err(reason) => {
             announce_stage(HandoffStage::NeedsAttention);
@@ -1413,7 +1403,7 @@ fn execute_handoff(
     Ok(HandoffResult {
         stage,
         goal: goal.to_string(),
-        plan_summary: claude.plan.summary.clone(),
+        plan_summary: planned.plan.summary.clone(),
         result_summary,
         changed_files: changed,
         attention,

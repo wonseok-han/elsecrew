@@ -337,7 +337,10 @@ pub(crate) fn parse_result(line: &str) -> Result<PlanResult, String> {
 ///
 /// 실패로 끝난 실행(`is_error`)은 **여기서 거부한다.** 호출부의 검사에 맡기면
 /// 경로가 하나 늘 때마다 다시 잊을 수 있다. 인계 함수 자체가 막으면 구조적으로 불가능해진다.
-pub(crate) fn plan_to_codex_prompt(goal: &str, plan: &PlanResult) -> Result<String, String> {
+pub(crate) fn plan_to_implementation_prompt(
+    goal: &str,
+    plan: &PlanResult,
+) -> Result<String, String> {
     if plan.is_error {
         return Err("the planning step ended in an error; its plan is not handed off".into());
     }

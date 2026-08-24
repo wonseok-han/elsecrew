@@ -117,8 +117,8 @@ fn the_measured_plan_is_read_back() {
 fn the_plan_can_be_handed_to_the_implementation_role() {
     let plan = parse_codex_plan(REAL_PLAN).unwrap();
 
-    let prompt =
-        crate::claude_pilot::plan_to_codex_prompt("인사말 바꿔 줘", &plan).expect("인계가 막혔다");
+    let prompt = crate::claude_pilot::plan_to_implementation_prompt("인사말 바꿔 줘", &plan)
+        .expect("인계가 막혔다");
 
     assert!(prompt.contains("인사말 바꿔 줘"));
     assert!(prompt.contains("인사말 변경"));

@@ -870,11 +870,11 @@ interface ChangedFile {
 }
 
 interface HandoffEvidence {
-  claudeEventsPath: string;
-  claudeStderrPath: string;
-  claudeDiffPath: string;
-  claudeSessionId: string;
-  claudeCliVersion: string;
+  planEventsPath: string;
+  planStderrPath: string;
+  planDiffPath: string;
+  planSessionId: string;
+  planCliVersion: string;
   codexEventsPath: string;
   codexLastMessagePath: string;
   codexStderrPath: string;
@@ -1343,9 +1343,9 @@ function HandoffPilot({
               )}
               <dt>{t("handoff.details.session")}</dt>
               <dd>
-                <code>{result.evidence.claudeSessionId || "—"}</code>
-                {result.evidence.claudeCliVersion
-                  ? ` · ${result.evidence.claudeCliVersion}`
+                <code>{result.evidence.planSessionId || "—"}</code>
+                {result.evidence.planCliVersion
+                  ? ` · ${result.evidence.planCliVersion}`
                   : ""}
               </dd>
               <dt>{t("handoff.details.termination")}</dt>
@@ -1368,7 +1368,7 @@ function HandoffPilot({
                 {/* **실제로 저장된 파일만** 보여 준다 — 없는 경로를 주면 사용자는
                     열리지 않는 경로를 들고 도움을 요청하게 된다 */}
                 {[
-                  result.evidence.claudeEventsPath,
+                  result.evidence.planEventsPath,
                   result.evidence.codexEventsPath,
                   result.evidence.codexDiffPath,
                 ]

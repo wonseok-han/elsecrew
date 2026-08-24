@@ -331,7 +331,8 @@ fn plan_becomes_a_codex_prompt() {
         permission_denials: vec![],
         is_error: false,
     };
-    let prompt = plan_to_codex_prompt("인사말을 한국어로 바꿔줘", &plan).expect("인계가 막혔다");
+    let prompt =
+        plan_to_implementation_prompt("인사말을 한국어로 바꿔줘", &plan).expect("인계가 막혔다");
 
     assert!(prompt.contains("인사말을 한국어로 바꿔줘"));
     assert!(prompt.contains("target.txt 수정"));
@@ -353,7 +354,7 @@ fn errored_plan_is_never_handed_off() {
         permission_denials: vec![],
         is_error: true,
     };
-    let err = plan_to_codex_prompt("목표", &plan).expect_err("실패한 계획을 인계했다");
+    let err = plan_to_implementation_prompt("목표", &plan).expect_err("실패한 계획을 인계했다");
     assert!(err.contains("error"), "{err}");
 }
 
@@ -363,7 +364,7 @@ fn is_error_is_read_from_the_result_event() {
     let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"structured_output":{"summary":"s","steps":[{"title":"t","detail":"","files":[]}]}}"#;
     let plan = parse_result(line).unwrap();
     assert!(plan.is_error);
-    assert!(plan_to_codex_prompt("목표", &plan).is_err());
+    assert!(plan_to_implementation_prompt("목표", &plan).is_err());
 }
 
 /// 단계가 없는 계획도 인계 대상이 아니다 — Codex에게 시킬 일이 없다.
@@ -373,5 +374,5 @@ fn plan_without_steps_is_not_handed_off() {
         summary: "요약만 있다".into(),
         ..PlanResult::default()
     };
-    assert!(plan_to_codex_prompt("목표", &plan).is_err());
+    assert!(plan_to_implementation_prompt("목표", &plan).is_err());
 }
