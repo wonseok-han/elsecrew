@@ -91,6 +91,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 Monaco 작업대 standalone snapshot 포트)
+
+- **한 일**: 독립 승인된 Monaco renderer 최종 상태를 standalone snapshot 계약 기준선으로 다시 포팅했다. 파일 탐색·Monaco 편집·hash 기반 dirty/conflict 보호·변경 diff와 로컬 worker, descriptor 전 chunk buffer, project epoch를 유지했다. protocol 호환 `worktree` API 식별자는 바꾸지 않았고, 사용자에게 보이는 작업 공간 표현은 모두 `원본과 분리된 작업 복사본`으로 명확히 했다.
+- **경계**: renderer는 이미 검증된 `M5BridgeV2`와 project contract만 소비하며 standalone snapshot manifest를 자체 재검증하거나 Electron bridge/Rust/protocol을 수정하지 않는다. 파일 5 MiB, diff 10 MiB, stream 256 chunk 상한과 Chromium local-worker smoke를 유지한다.
+- **검증·다음 할 일**: `pnpm run m5:test:editor`(Vite/Monaco build, state 15개와 Chromium smoke 1개), `pnpm build`, G4/Electron contract 14개, `git diff --check`를 통과했다. 이 기능 commit을 독립 리뷰한 뒤 Rust snapshot/Electron bridge와 최신 통합 commit에서 QA한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 snapshot composite activation 계약)
 
 - **리뷰 수정**: 독립 리뷰에서 개별 manifest·source trace·workspace invariant·activation 기록이 각각 유효해도 서로 다른 작업 복사본의 증거를 섞을 수 있음을 확인했다. proposed active manifest의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree를 기준으로 source, workspace, activation trace, DB, 외부 manifest, `.git` marker를 한 composite evidence validator가 모두 교차 검증한 뒤에만 active 전이를 허용하도록 Rust/TypeScript 공통 fixture를 추가했다.
