@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 통합 테스트 경계 회귀 수정)
+
+- **한 일**: G4 preload의 유일한 `ipcRenderer.send`인 고정 event ACK(`eventAck`, `{ streamId, seq }`)를 허용하되 raw IPC와 다른 send 계열 노출은 계속 금지하도록 scaffold 검사를 좁혔다. 하네스 자기 검사는 G4 `READY`와 다음 미구현 G5의 `NOT_READY`/exit 2를 검증해 누적 명령 재귀를 피한다. Chromium renderer mount smoke는 기본 순수 프런트 `npm test` glob에서 빼고 G4 editor gate에서만 명시 실행하게 이름과 script를 맞췄다.
+- **검증**: `npm test` 81 PASS, `npm run m5:test:project` Node 24 PASS·Rust project 28 PASS(+의도한 ignored 1개)·stdio 1 PASS, 승인된 GUI 실행의 `npm run m5:test:editor` editor-state 15 PASS·Chromium Monaco worker 1 PASS, `npm run harness:list` G4 READY/G5 NOT_READY, `npm run build`, `npx tsc --noEmit --pretty false`, `git diff --check`를 통과했다. `pnpm-lock.yaml` Git blob은 전후 `072de6c88fe06530ab922486494cb3524db692e9`로 동일하다.
+- **다음 할 일**: 이 좁은 회귀 수정 commit을 독립 리뷰한 뒤 최신 통합 branch에서 G4 누적 하네스·QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 하네스 연결)
 
 - **한 일**: `m5:test:project`를 추가해 G4 TypeScript 계약·Electron bridge, Rust `project::` 단위 테스트와 G4 stdio process 시나리오를 `--locked`로 한 번에 실행하도록 연결했다. G4 하네스 설명은 linked worktree가 아닌 `standalone snapshot` 프로젝트 안전 API를 가리키도록 정리했다. `m5:test:editor`는 그대로 유지했다.

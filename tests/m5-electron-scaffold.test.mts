@@ -81,7 +81,14 @@ test("preload, renderer, Forge 설정은 좁은 bridge와 로컬 자산만 허�
   assert.match(preload, /contextBridge\.exposeInMainWorld\("m5", bridge\)/);
   assert.match(preload, /import \{ contextBridge, ipcRenderer \} from "electron"/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/);
-  assert.doesNotMatch(preload, /\b(send|sendSync|sendTo|postMessage)\s*\(/);
+  assert.doesNotMatch(preload, /\bipcRenderer\.(sendSync|sendTo|postMessage)\s*\(/);
+  const sends = [...preload.matchAll(/\bipcRenderer\.send\(([^;]+)\);/g)];
+  assert.equal(sends.length, 1, "only the bounded event acknowledgement may use ipcRenderer.send");
+  assert.equal(
+    sends[0]?.[1],
+    "M5_BRIDGE_V2_CHANNELS.eventAck, { streamId: event.streamId, seq: event.seq }",
+  );
+  assert.doesNotMatch(preload, /(?:^|[,{]\s*)(send|sendSync|sendTo|postMessage)\s*:/m);
   assert.doesNotMatch(html, /https?:\/\/|unsafe-eval|<script(?![^>]+src="\/bootstrap\.tsx")/);
   for (const directive of ["default-src 'self'", "script-src 'self'", "connect-src 'self'", "object-src 'none'"]) {
     assert.ok(html.includes(directive), `missing CSP directive: ${directive}`);
