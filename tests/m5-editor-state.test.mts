@@ -971,6 +971,109 @@ test("picker 취소는 기존 프로젝트의 tree·tabs·notice·error를 그�
   controller.dispose();
 });
 
+test("dispose 뒤 늦은 create 성공은 publish/downstream 없이 한 번만 evidence-preserving close로 소비한다", async () => {
+  class DeferredCreateBridge extends FakeBridge {
+    readonly creation = deferred<WorktreeManifestV1>();
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      return this.creation.promise;
+    }
+  }
+
+  const bridge = new DeferredCreateBridge();
+  const controller = new ProjectEditorController(bridge);
+  const unhandled: unknown[] = [];
+  const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", observeUnhandled);
+  try {
+    controller.start();
+    const choosing = controller.chooseProject();
+    await nextTurn();
+    controller.dispose();
+    bridge.creation.resolve(snapshotManifest("project_01", "/work/example"));
+    await choosing;
+    await nextTurn();
+
+    assert.equal(controller.snapshot().project, null);
+    assert.equal(bridge.calls.filter((call) => call === "closeProject:project_01").length, 1);
+    assert.deepEqual(
+      bridge.calls.filter((call) => /^(getProjectTree|getDiffSummary|watchProjectFiles)/.test(call)),
+      [],
+    );
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", observeUnhandled);
+  }
+});
+
+test("dispose 뒤 늦은 create 거부는 close/downstream/state write 없이 소비한다", async () => {
+  class DeferredCreateBridge extends FakeBridge {
+    readonly creation = deferred<WorktreeManifestV1>();
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      return this.creation.promise;
+    }
+  }
+
+  const bridge = new DeferredCreateBridge();
+  const controller = new ProjectEditorController(bridge);
+  const unhandled: unknown[] = [];
+  const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", observeUnhandled);
+  try {
+    controller.start();
+    const choosing = controller.chooseProject();
+    await nextTurn();
+    controller.dispose();
+    bridge.creation.reject(new Error("E_LATE_CREATE_REJECTED"));
+    await choosing;
+    await nextTurn();
+
+    assert.equal(controller.snapshot().project, null);
+    assert.equal(bridge.calls.includes("closeProject:project_01"), false);
+    assert.deepEqual(
+      bridge.calls.filter((call) => /^(getProjectTree|getDiffSummary|watchProjectFiles)/.test(call)),
+      [],
+    );
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", observeUnhandled);
+  }
+});
+
+test("dispose 중 native open 완료는 opened identity를 close하지 않고 create를 시작하지 않는다", async () => {
+  class DeferredOpenBridge extends FakeBridge {
+    readonly opening = deferred<ProjectIdentityV1>();
+
+    async openProject(): Promise<ProjectIdentityV1> {
+      this.calls.push("openProject");
+      return this.opening.promise;
+    }
+  }
+
+  const bridge = new DeferredOpenBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  const choosing = controller.chooseProject();
+  await nextTurn();
+  controller.dispose();
+  bridge.opening.resolve({
+    schemaVersion: 1,
+    projectId: "project_01",
+    selectedPath: "/work/example",
+    canonicalGitRoot: "/work/example",
+  });
+  await choosing;
+  await nextTurn();
+
+  // project.close validates an active snapshot, so an opened-only identity is left to the
+  // sidecar lifecycle rather than issuing an invalid close request after unmount.
+  assert.deepEqual(bridge.calls, ["openProject"]);
+  assert.equal(controller.snapshot().project, null);
+});
+
 function resolveTree(bridge: { trees: { projectId: string; deferred: Deferred<TreePageV1> }[] }, projectId: string): void {
   const request = bridge.trees.find((item) => item.projectId === projectId);
   assert.ok(request, `missing ${projectId} tree request`);
