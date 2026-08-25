@@ -92,7 +92,7 @@
 
 - **한 일**: 독립 승인된 Rust sidecar와 Electron bridge를 순서대로 `m5/coding-agent-ide`에 통합하고, `m5:test:storage`를 G3 계약·Electron failure injection·실제 Rust sidecar 테스트에 연결했다. package smoke는 ASAR/Fuse/sidecar 파일 존재뿐 아니라 외부 sidecar binary를 고유 임시 cwd에서 실행해 v1 `system.ready` 전체 identity, `system.status`, `app.prepareQuit`, exit 0과 실제 SQLite clean marker를 확인한다.
 - **리뷰 수정**: 실패 smoke는 child 종료를 요청한 뒤 bounded `exit`을 기다리고 나서만 임시 cwd를 지우며, cleanup 오류가 원래 protocol/assertion 실패를 덮지 않는다. packaged response는 protocol/schema/stream/instance/capability와 status의 ready identity·DB schema·recovery blocker를 모두 확인한다. 독립 재리뷰가 이 wiring을 승인했다.
-- **검증**: `m5:test:storage`에서 Node 17개와 Rust sidecar 15개가 통과했다. 승인된 네트워크 환경의 macOS arm64 `m5:package:smoke`가 release sidecar build, ASAR/Fuse, ready→status→quit→clean marker를 통과했다. 일반 sandbox의 최초 package 시도는 Electron 다운로드 `fetch failed`였으며 같은 코드의 승인 실행에서 통과했다.
+- **검증**: `m5:test:storage`에서 Node 17개와 Rust sidecar 15개가 통과했다. 승인된 네트워크 환경의 macOS arm64 `m5:package:smoke`가 release sidecar build, ASAR/Fuse, ready→status→quit→clean marker를 통과했다. 일반 sandbox의 최초 package 시도는 Electron 다운로드 `fetch failed`였으며 같은 코드의 승인 실행에서 통과했다. 첫 누적 G3 하네스는 자기 테스트가 아직 G3 `NOT_READY`를 기대해 실패했으므로 기대를 G3 `READY`·G4 `NOT_READY`로 전진시키고, 미구현 게이트 검사를 명령 실행 전 exit 2가 나는 G4로 옮겼다. 독립 재리뷰와 하네스 자기 테스트 2개가 통과했다.
 - **다음 할 일**: G3 누적 하네스를 최신 통합 commit에서 실행하고 현행 아키텍처·QA 증거를 기록한다. G4는 그 뒤에만 착수한다.
 
 ### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C partial-pipe 종료 수정)
