@@ -13,6 +13,8 @@ dist-ssr
 *.local
 .worktrees/
 .artifacts/
+.vite/
+out/
 /target/
 
 # Editor directories and files
