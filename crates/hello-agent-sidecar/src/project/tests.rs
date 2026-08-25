@@ -802,7 +802,7 @@ fn post_rename_failures_keep_recovery_blocker_and_report_unknown_outcome() {
 
 #[cfg(unix)]
 #[test]
-fn parent_move_before_root_relative_save_rename_never_writes_external_target() {
+fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
     let mut fixture = Fixture::open();
     let active = fixture.create();
     let parent = active.worktree_path.join("src");
@@ -827,14 +827,18 @@ fn parent_move_before_root_relative_save_rename_never_writes_external_target() {
         .unwrap();
     let error = fixture
         .manager
-        .commit_save_with_pre_rename_hook(
+        .commit_save_with_pre_syscall_hook(
             &mut fixture.storage,
             &save_id,
             &expected,
             1,
             5,
             "req_parent_move",
-            || fs::rename(&parent, &external_parent).unwrap(),
+            || {
+                fs::rename(&parent, &external_parent).unwrap();
+                fs::create_dir(&parent).unwrap();
+                fs::write(parent.join("edit.txt"), b"hello").unwrap();
+            },
         )
         .unwrap_err();
     assert_eq!(error.kind, "recoveryRequired");
@@ -843,6 +847,7 @@ fn parent_move_before_root_relative_save_rename_never_writes_external_target() {
         fs::read(external_parent.join("edit.txt")).unwrap(),
         b"hello"
     );
+    assert_eq!(fs::read(parent.join("edit.txt")).unwrap(), b"hello");
     assert!(fixture
         .storage
         .blocker_ids()
@@ -853,15 +858,15 @@ fn parent_move_before_root_relative_save_rename_never_writes_external_target() {
 
 #[cfg(unix)]
 #[test]
-fn managed_worktree_child_swap_before_save_rename_never_writes_symlink_target() {
+fn parent_symlink_swap_at_stable_root_rename_syscall_never_writes_external_target() {
     let mut fixture = Fixture::open();
     let active = fixture.create();
-    let managed_child = active.worktree_path.clone();
-    let held_child = fixture._root.path().join("held-managed-child");
-    let external_child = fixture._root.path().join("external-managed-child");
-    fs::create_dir_all(external_child.join("src")).unwrap();
-    fs::write(external_child.join("src/edit.txt"), b"external").unwrap();
-    let target = managed_child.join("src/edit.txt");
+    let managed_parent = active.worktree_path.join("src");
+    let held_parent = fixture._root.path().join("held-managed-parent");
+    let external_parent = fixture._root.path().join("external-managed-parent");
+    fs::create_dir_all(&external_parent).unwrap();
+    fs::write(external_parent.join("edit.txt"), b"external").unwrap();
+    let target = managed_parent.join("edit.txt");
     let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
     let begin = fixture
         .manager
@@ -881,7 +886,7 @@ fn managed_worktree_child_swap_before_save_rename_never_writes_symlink_target() 
         .unwrap();
     let error = fixture
         .manager
-        .commit_save_with_pre_rename_hook(
+        .commit_save_with_pre_syscall_hook(
             &mut fixture.storage,
             &save_id,
             &expected,
@@ -889,15 +894,15 @@ fn managed_worktree_child_swap_before_save_rename_never_writes_symlink_target() 
             5,
             "req_child_swap",
             || {
-                fs::rename(&managed_child, &held_child).unwrap();
-                std::os::unix::fs::symlink(&external_child, &managed_child).unwrap();
+                fs::rename(&managed_parent, &held_parent).unwrap();
+                std::os::unix::fs::symlink(&external_parent, &managed_parent).unwrap();
             },
         )
         .unwrap_err();
     assert_eq!(error.kind, "recoveryRequired");
     assert!(!error.outcome_unknown);
     assert_eq!(
-        fs::read(external_child.join("src/edit.txt")).unwrap(),
+        fs::read(external_parent.join("edit.txt")).unwrap(),
         b"external"
     );
     assert!(fixture
@@ -906,8 +911,8 @@ fn managed_worktree_child_swap_before_save_rename_never_writes_symlink_target() 
         .unwrap()
         .iter()
         .any(|id| id.starts_with("lock:")));
-    fs::remove_file(&managed_child).unwrap();
-    fs::rename(&held_child, &managed_child).unwrap();
+    fs::remove_file(&managed_parent).unwrap();
+    fs::rename(&held_parent, &managed_parent).unwrap();
 }
 
 #[cfg(unix)]

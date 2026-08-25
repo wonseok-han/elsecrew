@@ -1,4 +1,6 @@
 use crate::{AppendOutcome, SidecarError, Storage};
+#[cfg(unix)]
+use cap_fs_ext::OsMetadataExt;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::ambient_authority;
 #[cfg(unix)]
@@ -16,14 +18,17 @@ use hello_agent_protocol::MAX_TEXT_CHUNK_BYTES;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::ffi::OsStr;
+use std::ffi::{CString, OsStr};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
 use std::thread::JoinHandle;
 #[cfg(unix)]
-use std::{os::fd::AsRawFd, os::unix::process::CommandExt};
+use std::{
+    os::fd::AsRawFd,
+    os::unix::{ffi::OsStrExt, fs::MetadataExt, process::CommandExt},
+};
 use uuid::Uuid;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
@@ -148,8 +153,12 @@ struct PendingSave {
 
 struct PreparedTarget {
     data_root: Dir,
+    temp_parent: Dir,
+    temp_name: String,
     temp_relative: PathBuf,
     target_relative: PathBuf,
+    #[cfg(unix)]
+    target_parent_identity: (u64, u64),
     file: Option<CapFile>,
     renamed: bool,
 }
@@ -158,7 +167,7 @@ impl Drop for PreparedTarget {
     fn drop(&mut self) {
         if !self.renamed {
             self.file.take();
-            remove_capability_temp(&self.data_root, &self.temp_relative);
+            remove_capability_temp(&self.temp_parent, &self.temp_name);
         }
     }
 }
@@ -960,7 +969,7 @@ impl ProjectManager {
 
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    fn commit_save_with_pre_rename_hook<F>(
+    fn commit_save_with_pre_syscall_hook<F>(
         &mut self,
         storage: &mut Storage,
         save_id: &str,
@@ -995,7 +1004,7 @@ impl ProjectManager {
         total_bytes: u64,
         request_id: &str,
         failure: Option<SaveFailurePoint>,
-        pre_rename_hook: Option<&mut dyn FnMut()>,
+        pre_syscall_hook: Option<&mut dyn FnMut()>,
     ) -> Result<ProjectAction, ProjectFailure> {
         let mut pending = self.pending_saves.remove(save_id).ok_or_else(|| {
             ProjectFailure::recovery("save identity is missing and cannot be retried automatically")
@@ -1008,7 +1017,7 @@ impl ProjectManager {
             total_bytes,
             request_id,
             failure,
-            pre_rename_hook,
+            pre_syscall_hook,
             &mut pending,
         );
         let preserve_staging = result
@@ -1032,7 +1041,7 @@ impl ProjectManager {
         total_bytes: u64,
         request_id: &str,
         failure: Option<SaveFailurePoint>,
-        mut pre_rename_hook: Option<&mut dyn FnMut()>,
+        pre_syscall_hook: Option<&mut dyn FnMut()>,
         pending: &mut PendingSave,
     ) -> Result<ProjectAction, ProjectFailure> {
         if pending.expected_version != expected_version
@@ -1066,6 +1075,8 @@ impl ProjectManager {
                 ProjectFailure::manifest(format!("could not inspect save permissions: {error}"))
             })?
             .permissions();
+        #[cfg(unix)]
+        let target_parent_identity = capability_directory_identity(&parent)?;
         let (_, _, current) = read_file_bounded_handle(&mut target, 0)?;
         if current != pending.expected_version {
             let error = ProjectFailure::dirty(
@@ -1104,8 +1115,16 @@ impl ProjectManager {
                     "could not clone stable data-root capability for save: {error}"
                 ))
             })?,
+            temp_parent: worktree.try_clone().map_err(|error| {
+                ProjectFailure::recovery(format!(
+                    "could not clone stable save-temp parent capability: {error}"
+                ))
+            })?,
+            temp_name,
             temp_relative,
             target_relative,
+            #[cfg(unix)]
+            target_parent_identity,
             file: Some(file),
             renamed: false,
         };
@@ -1162,19 +1181,7 @@ impl ProjectManager {
         drop(target_temp);
 
         self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;
-        if let Some(hook) = &mut pre_rename_hook {
-            hook();
-        }
-        prepared
-            .data_root
-            .rename(
-                &prepared.temp_relative,
-                &prepared.data_root,
-                &prepared.target_relative,
-            )
-            .map_err(|error| {
-                ProjectFailure::recovery(format!("atomic save replace failed: {error}"))
-            })?;
+        self.rename_prepared_save_from_stable_root(&prepared, expected_version, pre_syscall_hook)?;
         prepared.renamed = true;
         if failure == Some(SaveFailurePoint::AfterRenameBeforeDirectorySync) {
             return Err(ProjectFailure::ambiguous(
@@ -1233,6 +1240,127 @@ impl ProjectManager {
             result: json!({"outcome":"committed","version":version}),
             ..ProjectAction::default()
         })
+    }
+
+    #[cfg(unix)]
+    fn rename_prepared_save_from_stable_root(
+        &self,
+        prepared: &PreparedTarget,
+        expected_version: &str,
+        mut pre_syscall_hook: Option<&mut dyn FnMut()>,
+    ) -> Result<(), ProjectFailure> {
+        let root_file = prepared
+            .data_root
+            .try_clone()
+            .map_err(|error| {
+                ProjectFailure::recovery(format!(
+                    "could not clone the stable data-root rename capability: {error}"
+                ))
+            })?
+            .into_std_file();
+        let source = root_relative_cstring(&prepared.temp_relative)?;
+        let destination = root_relative_cstring(&prepared.target_relative)?;
+
+        self.validate_prepared_save_boundary(prepared, expected_version)?;
+
+        // Test-only fault injection belongs here: all syscall arguments and the stable root FD
+        // and final validation already exist, while the atomic root-relative rename has not
+        // happened yet. Production immediately repeats the no-follow validation after the hook.
+        if let Some(hook) = &mut pre_syscall_hook {
+            hook();
+        }
+
+        self.validate_prepared_save_boundary(prepared, expected_version)?;
+
+        // SAFETY: both NUL-terminated paths were validated as relative normal components and
+        // both are resolved by the kernel from the same held data-root FD in this one syscall.
+        let result = unsafe {
+            libc::renameat(
+                root_file.as_raw_fd(),
+                source.as_ptr(),
+                root_file.as_raw_fd(),
+                destination.as_ptr(),
+            )
+        };
+        if result != 0 {
+            return Err(ProjectFailure::recovery(format!(
+                "atomic stable-root save replace failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn validate_prepared_save_boundary(
+        &self,
+        prepared: &PreparedTarget,
+        expected_version: &str,
+    ) -> Result<(), ProjectFailure> {
+        self.verify_stable_data_root(&prepared.data_root)?;
+        let _ = verify_real_parent_and_file(
+            &prepared.data_root,
+            &prepared.temp_relative,
+            "managed save temp",
+        )?;
+        let (current_parent, mut current) = verify_real_parent_and_file(
+            &prepared.data_root,
+            &prepared.target_relative,
+            "save destination",
+        )?;
+        if capability_directory_identity(&current_parent)? != prepared.target_parent_identity {
+            return Err(ProjectFailure::recovery(
+                "save destination hierarchy changed at the final rename boundary",
+            ));
+        }
+        let (_, _, current_version) =
+            read_file_bounded_handle(&mut current, 0).map_err(|error| {
+                ProjectFailure::recovery(format!(
+                    "save destination changed at the final rename boundary: {}",
+                    error.detail
+                ))
+            })?;
+        if current_version != expected_version {
+            return Err(ProjectFailure::recovery(
+                "save destination changed at the final rename boundary",
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn rename_prepared_save_from_stable_root(
+        &self,
+        _prepared: &PreparedTarget,
+        _expected_version: &str,
+        _pre_syscall_hook: Option<&mut dyn FnMut()>,
+    ) -> Result<(), ProjectFailure> {
+        Err(ProjectFailure::recovery(
+            "atomic stable-root save replacement is unavailable on this platform",
+        ))
+    }
+
+    #[cfg(unix)]
+    fn verify_stable_data_root(&self, held: &Dir) -> Result<(), ProjectFailure> {
+        self.verify_managed_paths()?;
+        let held_metadata = held.metadata(".").map_err(|error| {
+            ProjectFailure::recovery(format!(
+                "could not inspect held managed data-root identity: {error}"
+            ))
+        })?;
+        let ambient_metadata = fs::metadata(&self.data_root).map_err(|error| {
+            ProjectFailure::recovery(format!(
+                "could not inspect current managed data-root identity: {error}"
+            ))
+        })?;
+        if held_metadata.dev() != ambient_metadata.dev()
+            || held_metadata.ino() != ambient_metadata.ino()
+        {
+            return Err(ProjectFailure::recovery(
+                "managed data root changed after startup",
+            ));
+        }
+        Ok(())
     }
 
     pub fn watch_project(
@@ -3337,6 +3465,23 @@ fn validate_relative_path(value: &str, allow_empty: bool) -> Result<(), ProjectF
 }
 
 #[cfg(unix)]
+fn root_relative_cstring(path: &Path) -> Result<CString, ProjectFailure> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(ProjectFailure::recovery(
+            "stable-root rename path is not a normalized relative path",
+        ));
+    }
+    CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        ProjectFailure::recovery("stable-root rename path contains an interior NUL byte")
+    })
+}
+
+#[cfg(unix)]
 fn open_absolute_directory_capability(path: &Path) -> Result<Dir, ProjectFailure> {
     if !path.is_absolute() {
         return Err(ProjectFailure::symlink(
@@ -3450,6 +3595,39 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
         ));
     }
     Ok(opened)
+}
+
+fn verify_real_parent_and_file(
+    root: &Dir,
+    relative: &Path,
+    name: &str,
+) -> Result<(Dir, CapFile), ProjectFailure> {
+    let relative = relative.to_str().ok_or_else(|| {
+        ProjectFailure::recovery(format!("{name} path is not protocol-safe UTF-8"))
+    })?;
+    let (parent, child) = open_parent_capability(root, relative).map_err(|error| {
+        ProjectFailure::recovery(format!(
+            "{name} hierarchy changed before atomic replace: {}",
+            error.detail
+        ))
+    })?;
+    let file = open_real_file_at(&parent, &child).map_err(|error| {
+        ProjectFailure::recovery(format!(
+            "{name} changed before atomic replace: {}",
+            error.detail
+        ))
+    })?;
+    Ok((parent, file))
+}
+
+#[cfg(unix)]
+fn capability_directory_identity(directory: &Dir) -> Result<(u64, u64), ProjectFailure> {
+    let metadata = directory.metadata(".").map_err(|error| {
+        ProjectFailure::recovery(format!(
+            "could not inspect held directory identity: {error}"
+        ))
+    })?;
+    Ok((metadata.dev(), metadata.ino()))
 }
 
 fn read_file_bounded_handle(

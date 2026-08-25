@@ -91,6 +91,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 stable-root save rename P1 수정)
+
+- **수정**: 독립 리뷰에서 cap-std `Dir::rename`이 대상 부모 FD를 연 뒤 `renameat`을 호출하는 사이 그 부모가 관리 영역 밖으로 이동하면 외부의 같은 파일을 덮을 수 있음을 확인했다. 최종 저장 교체를 이동 가능한 하위 부모 FD가 아니라 시작 때 보유한 data-root FD 양쪽과 정규화한 상대 경로를 한 macOS/Unix `renameat` syscall에 직접 전달하도록 바꿨다. syscall 직전에는 stable data-root device/inode, 저장 시작 때 잡은 대상 부모 device/inode, 모든 중간 컴포넌트의 no-follow 상태와 대상 version을 재검증하며 계층 변화는 이미 저장한 recovery lock을 유지한 채 실패한다.
+- **회귀·검증**: 실제 syscall 인자와 root FD를 준비하고 최종 검증까지 끝낸 뒤 실행되는 test hook에서 `src` 부모를 외부로 이동하고 동일 byte의 새 부모로 교체하는 경우와 외부 디렉터리 symlink로 교체하는 경우를 재현했다. 두 경우 모두 외부·교체 대상 byte가 그대로이고 저장은 실패하며 recovery blocker가 남았다. sidecar unit 42개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
+- **다음 할 일**: 새 원자 fix commit을 독립 재리뷰한 뒤에만 G4 통합을 진행한다. Windows/비-macOS ready gate, push와 `main` 미병합 정책은 그대로다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot Rust 안전 코어)
 
 - **한 일**: 기존 linked-worktree 구현에서 SQLite project/lock 수명주기, bounded tree/read/save/diff, capability-rooted atomic save, watcher overflow, abandon-without-delete와 stdio stream framing만 보존하고 생성 경로를 `standaloneSnapshot`/`gitBundle` 계약으로 교체했다. sidecar는 no-follow로 잡은 source root·`.git` capability에서 고정 `/usr/bin/git`과 정리된 환경으로 self-contained HEAD bundle을 제한 스트리밍하고, 앱 data의 staging capability에서 standalone repo를 만든 뒤 `ls-tree -rz`와 `cat-file --batch`의 raw committed blob/mode를 직접 materialize한다. checkout/filter/EOL/encoding/ident/LFS 변환, source remote/ref/alternate 연결과 source-dependent diff는 사용하지 않는다.
