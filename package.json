@@ -8,6 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "node --test --experimental-strip-types tests/*.test.mts",
+    "test:harness": "node scripts/m5-harness.mjs --gate baseline",
+    "test:m5": "node scripts/m5-harness.mjs --gate g6-release",
+    "harness:list": "node scripts/m5-harness.mjs --list",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -214,6 +214,29 @@ M5.0은 [`../proposals/m5-electron-spike.md`](../proposals/m5-electron-spike.md)
 
 Windows agent 실행은 별도 종료 계약 전까지 비활성화 상태를 테스트한다. macOS 실제 에이전트 smoke는 자동 병렬 작업에서 제외하고 사용자의 별도 동의를 받은 뒤 통합 commit에서 한 번 실행한다.
 
+## 13. 기계 검증 하네스
+
+[`../../scripts/m5-harness.mjs`](../../scripts/m5-harness.mjs)가 모든 작업자와 통합 담당이 공유하는 검증 진입점이다. 하위 에이전트가 임의의 축약 명령으로 합격을 주장하지 않게 다음 규칙을 적용한다.
+
+- `pnpm test:harness`: 현재 기준선의 diff check, 프런트 빌드·unit, 기존 Rust 회귀를 순서대로 실행한다.
+- `pnpm harness:list`: `baseline`, `g1-foundation`부터 `g6-release`까지 준비 상태와 아직 없는 필수 package script를 나열한다.
+- `pnpm test:m5`: G6까지 앞선 모든 게이트를 누적 실행한다.
+- 구현되지 않은 단계는 `SKIP`이나 `PASS`가 아니라 `NOT_READY`와 exit code `2`다.
+- 실제 실행 결과는 `.artifacts/m5-harness/*.json`에 schema version, branch, commit, dirty 상태, 명령, exit code, 소요 시간, stdout/stderr와 함께 남는다. artifact는 Git에 넣지 않고 QA·게이트 보고에서 정확한 경로를 인용한다.
+- macOS/Windows CI도 `pnpm test:harness`를 실행하고 성공·실패와 관계없이 JSON artifact를 업로드한다. 로컬 축약 명령과 CI 판정이 갈라지지 않는다.
+- 각 단계의 단일 소유자는 아래 예약 script를 실제 검증 명령에 연결한다. 이름을 바꿔 우회하지 않는다.
+
+| 게이트 | 활성화에 필요한 `package.json` script |
+| --- | --- |
+| G1 foundation | `m5:test:electron`, `m5:test:core` |
+| G2 contracts | `m5:test:contracts` |
+| G3 storage | `m5:test:storage` |
+| G4 project/editor | `m5:test:project`, `m5:test:editor` |
+| G5 run/recovery | `m5:test:run-recovery` |
+| G6 release | `m5:test:security`, `m5:test:package`, `m5:test:performance` |
+
+게이트 실행은 항상 `baseline`부터 해당 단계까지 누적된다. 필수 script를 빈 명령이나 무조건 성공하는 placeholder에 연결하지 않는다. 실제 유료 에이전트 smoke와 사용자 승인 항목은 이 자동 하네스 바깥의 별도 증거로 남기며, 없으면 최종 게이트 담당이 전체 완료를 승인하지 않는다.
+
 ## 참고 근거
 
 - [OpenAI Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents): 프로젝트 전용 `.codex/agents/*.toml`, 역할별 모델·추론 강도·sandbox, 동시 thread 설정과 독립 작업 위임 방식을 따른다.

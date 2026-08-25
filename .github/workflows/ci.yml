@@ -53,17 +53,22 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: 프론트엔드 빌드 (tsc + vite)
-        run: pnpm build
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Rust 테스트
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: 기준선 기계 검증 하네스
+        run: pnpm test:harness
+
+      - name: 하네스 증거 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-harness-${{ matrix.os }}
+          path: .artifacts/m5-harness/*.json
+          if-no-files-found: warn
 
       # 실제 인스톨러를 내려받아 격리 HOME에 무인 설치하는 E2E (네트워크 사용)
       # Windows는 일회용 러너라 레지스트리 PATH 반영까지 실제로 검증한다 (M0 가정 4)

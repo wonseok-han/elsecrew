@@ -77,6 +77,7 @@
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
 - `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정
+- `scripts/m5-harness.mjs`: 기준선과 M5 G1~G6의 누적 기계 검증·JSON 증거 단일 진입점
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
 - `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
@@ -112,6 +113,7 @@
 pnpm build
 npm test                       # 프런트 순수 로직 (node --test)
 cargo test --manifest-path src-tauri/Cargo.toml
+pnpm test:harness              # 위 세 검증 + diff check를 실행하고 JSON 증거 저장
 pnpm tauri build
 
 cd website
@@ -120,6 +122,7 @@ npm run lint
 ```
 
 - 네트워크 격리 설치 E2E: `cargo test --manifest-path src-tauri/Cargo.toml isolated_install -- --ignored --nocapture`
+- M5 게이트 목록: `pnpm harness:list`; 최종 누적 게이트: `pnpm test:m5` (`NOT_READY`는 종료 코드 2이며 합격이 아님)
 - Rust 1.85+ 권장. `src-tauri/Cargo.toml`의 실제 edition은 **2021**이다(포맷 검사 시 `rustfmt --edition 2021`)
 
 ## Git 작업 규칙

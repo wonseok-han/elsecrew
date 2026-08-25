@@ -273,6 +273,8 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 
 ### 11.1 자동 테스트
 
+저장소의 [`../../scripts/m5-harness.mjs`](../../scripts/m5-harness.mjs)를 단일 진입점으로 사용한다. `baseline`부터 G6까지 누적 실행하며, 단계별 필수 package script가 아직 없으면 성공으로 건너뛰지 않고 `NOT_READY`로 실패한다. 명령·exit code·소요 시간·commit이 들어간 JSON 증거는 `.artifacts/m5-harness/`에 생성한다. 예약된 정확한 script 이름과 판정 규칙은 [`../procedures/multi-agent-orchestration.md`](../procedures/multi-agent-orchestration.md) §13이 기준이다.
+
 - TypeScript unit: bridge runtime validation, stream sequence, projection reducer, dirty editor 전이
 - Rust unit: envelope size/version, SQLite append+projection transaction, replay, canonical path, lock 전이
 - 기존 Rust 회귀: `proctree` F1~F8, Claude/Codex 실행 계약, poisoned/증거 보존
