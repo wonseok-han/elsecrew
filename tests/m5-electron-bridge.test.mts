@@ -128,6 +128,33 @@ test("ready timeout, pre-ready stderr exit, and oversized partial output fail cl
   assert.equal(malformed.child.terminations, 1);
 });
 
+test("a partial spawned process is terminated before any pipe listener can leak", async () => {
+  const child = new FixtureSidecar();
+  let spawns = 0;
+  const client = new SidecarClientV1(
+    { command: "fixture", args: ["--stdio"], cwd: "/private/tmp" },
+    {
+      spawn: () => {
+        spawns += 1;
+        return {
+          stdin: child.stdin,
+          stdout: child.stdout,
+          stderr: null,
+          once: (event, listener) => child.once(event, listener),
+          terminate: () => child.terminate(),
+        } as unknown as SidecarProcessV1;
+      },
+    },
+  );
+  await assert.rejects(client.start(), /stdio pipes are unavailable/);
+  assert.equal(spawns, 1);
+  assert.equal(child.terminations, 1);
+  assert.equal(child.stdout.listenerCount("data"), 0);
+  assert.equal(child.stderr.listenerCount("data"), 0);
+  await assert.rejects(client.start(), /stdio pipes are unavailable/);
+  assert.equal(spawns, 1, "partial startup is never retried automatically");
+});
+
 test("unknown response and abrupt exit reject pending work without restart or retry", async () => {
   const { child, client, spawns } = createClient();
   const start = client.start();

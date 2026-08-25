@@ -114,11 +114,12 @@ export class SidecarClientV1 {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
+      // Own the child before validating its pipes so partial spawn failures can stop it.
+      this.#process = process;
       if (!process.stdin || !process.stdout || !process.stderr) {
         this.#fail(new Error("sidecar stdio pipes are unavailable"));
         return this.#readyPromise;
       }
-      this.#process = process;
       process.stdout.on("data", (chunk: Buffer) => this.#onStdout(Buffer.from(chunk)));
       process.stderr.on("data", (chunk: Buffer) => this.#onStderr(Buffer.from(chunk)));
       process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start")));

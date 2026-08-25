@@ -87,6 +87,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C partial-pipe 종료 수정)
+
+- **한 일**: spawn이 성공했지만 stdin/stdout/stderr pipe 중 하나가 없는 partial child를 검증 전에 main-owned client가 즉시 소유하도록 순서를 고쳤다. 따라서 pipe 검증 실패도 `terminate()` 한 번, pending fail-closed, 재시작 없음으로 같은 수명주기 규칙을 따른다. pipe listener를 붙이기 전 종료하므로 partial child에 listener가 남지 않는다.
+- **검증**: missing stderr fake child가 start reject·terminate 1회·spawn 1회·stdout/stderr data listener 0개를 보장하는 회귀를 추가했다. Electron test 11개, TypeScript no-emit, `git diff --check`를 통과했다.
+- **다음 할 일**: 이 작은 fix를 독립 재리뷰한 뒤 G3-D 실제 sidecar/package handshake를 최신 통합에서 확인한다.
+
 ### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron bridge 리뷰 수정)
 
 - **한 일**: 독립 리뷰의 차단점 3건을 닫았다. sidecar transport는 timeout, oversized/invalid stdout, session·identity corruption에서 child `terminate()`를 한 번만 호출하고 모든 pending 요청을 fail-closed로 거부한다. `system.status`의 ready identity·version·capability는 처음 `system.ready`와 정확히 같아야 하며 불일치는 연결 손상이다. stderr는 마지막 32 KiB만 유지하고 제어 문자를 정규화해 unavailable의 기술 detail에만 붙인다. 이는 token/secret redaction이 아니며 기본 UI 문구나 안전 보장으로 쓰지 않는다.
