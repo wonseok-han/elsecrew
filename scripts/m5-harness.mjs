@@ -44,7 +44,7 @@ const gates = [
   },
   {
     id: "g4-project-editor",
-    description: "project/worktree 안전 API와 Monaco 편집·diff",
+    description: "standalone snapshot 프로젝트 안전 API와 Monaco 편집·diff",
     scripts: ["m5:test:project", "m5:test:editor"],
   },
   {

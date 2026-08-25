@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 하네스 연결)
+
+- **한 일**: `m5:test:project`를 추가해 G4 TypeScript 계약·Electron bridge, Rust `project::` 단위 테스트와 G4 stdio process 시나리오를 `--locked`로 한 번에 실행하도록 연결했다. G4 하네스 설명은 linked worktree가 아닌 `standalone snapshot` 프로젝트 안전 API를 가리키도록 정리했다. `m5:test:editor`는 그대로 유지했다.
+- **검증**: `CI=true pnpm run m5:test:project`에서 Node 24개, Rust project 28개(+의도한 ignored 1개), G4 stdio 1개가 통과했다. `CI=true pnpm run m5:test:editor`에서 Vite build와 editor-state 15개 및 Chromium smoke 1개가 통과했다. `CI=true pnpm harness:list`는 G4 `READY`, `git diff --check`도 통과했다. `pnpm-lock.yaml` SHA-256은 설치 전후 `a88b2ac7f4ac3afe4644b0766f96e3a7099b0b5eec1a64a64632962ca0bb3bb5`로 동일하다.
+- **다음 할 일**: 이 기능 commit을 독립 리뷰한 뒤 최신 `m5/coding-agent-ide`에서 Rust snapshot·Electron·Monaco 변경과 함께 G4 누적 하네스/QA를 실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5.6 Terra
 
 G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로 포팅했다. 호환 API 이름(`project.createWorktree`, `createProjectWorktree`, `worktreeId/path`)은 유지하되, renderer에는 고정된 V2 capability만 노출한다. native 폴더 선택, 엄격한 IPC 입력 검증, 파일 5 MiB·diff 10 MiB·동시 stream 16개·stream당 최대 256 chunk 경계, renderer ACK 기반 이벤트 credit/backpressure, 창 종료 시 미확인 전달 fail-closed, sidecar startup/quit 수명주기를 적용했다. manifest 검증은 `workspaceKind: standaloneSnapshot`을 포함한 G4 계약 validator를 그대로 사용한다.
