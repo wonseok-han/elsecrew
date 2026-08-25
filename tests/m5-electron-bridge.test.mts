@@ -282,6 +282,10 @@ test("main, preload, and package boundary retain fixed channels, origin checks, 
   assert.match(forge, /m5-stage-sidecar\.mjs/);
   assert.match(smoke, /sidecar/);
   assert.match(smoke, /must remain outside app\.asar/);
+  assert.match(smoke, /assert\.deepEqual\(status\.result\.sidecar, ready\.payload\)/);
+  assert.match(smoke, /assertCleanMarker\(dataDirectory, ready\.sidecarInstanceId\)/);
+  assert.match(smoke, /await stopChild\(child\)/);
+  assert.match(smoke, /await withDeadline\(exited, 3_000, "failed packaged sidecar cleanup"\)/);
 });
 
 function source(path: string) {
