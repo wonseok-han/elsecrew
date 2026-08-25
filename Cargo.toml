@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/hello-agent-core",
+    "crates/hello-agent-protocol",
     "crates/hello-agent-sidecar",
     "src-tauri",
 ]

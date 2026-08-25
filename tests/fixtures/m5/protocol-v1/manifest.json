@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "contract": {
+    "protocolVersion": 1,
+    "sidecarSchemaVersion": 1,
+    "appSchemaVersion": 1,
+    "maxControlLineBytes": 1048576,
+    "maxTextChunkBytes": 262144,
+    "maxSequence": 9007199254740991,
+    "methods": [
+      "system.status",
+      "app.prepareQuit",
+      "project.open",
+      "project.getTree",
+      "project.createWorktree",
+      "project.close",
+      "file.read",
+      "file.save",
+      "file.watch",
+      "diff.getSummary",
+      "diff.getFile",
+      "chat.create",
+      "chat.list",
+      "chat.get",
+      "run.startFixture",
+      "run.startAgentSmoke",
+      "run.cancel",
+      "recovery.list",
+      "recovery.inspect",
+      "recovery.markResolved"
+    ],
+    "events": [
+      "system.ready",
+      "system.fatal",
+      "file.changed",
+      "file.conflict",
+      "diff.changed",
+      "chat.eventAppended",
+      "run.event",
+      "run.finished",
+      "blob.chunk"
+    ],
+    "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"]
+  },
+  "valid": [
+    {
+      "file": "valid/session.jsonl",
+      "readyEnvelope": 0,
+      "prepareQuitEnvelope": 4
+    },
+    {
+      "file": "valid/unknown-outcome-not-retryable.jsonl",
+      "readyEnvelope": 0
+    },
+    {
+      "file": "valid/sequence-max.jsonl",
+      "observeSession": false
+    }
+  ],
+  "invalid": [
+    { "file": "invalid/malformed-json.jsonl", "validator": "transcript" },
+    { "file": "invalid/unknown-protocol.jsonl", "validator": "transcript" },
+    { "file": "invalid/unknown-kind.jsonl", "validator": "transcript" },
+    { "file": "invalid/missing-sidecar-instance.jsonl", "validator": "transcript" },
+    { "file": "invalid/missing-request-id.jsonl", "validator": "transcript" },
+    { "file": "invalid/unknown-method.jsonl", "validator": "transcript" },
+    { "file": "invalid/unknown-event.jsonl", "validator": "transcript" },
+    { "file": "invalid/event-payload-array.jsonl", "validator": "transcript" },
+    { "file": "invalid/run-event-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
+    { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/response-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/event-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/duplicate-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/stream-starts-at-two.jsonl", "validator": "transcript" },
+    { "file": "invalid/stream-sequence-gap.jsonl", "validator": "transcript" },
+    { "file": "invalid/sequence-over-js-safe-integer.jsonl", "validator": "transcript" },
+    { "file": "invalid/blob-chunk-extra-data.jsonl", "validator": "transcript" },
+    { "file": "invalid/sidecar-instance-changed.jsonl", "validator": "transcript" },
+    { "file": "invalid/ambiguous-error-retryable.jsonl", "validator": "transcript" },
+    {
+      "file": "invalid/ready-instance-mismatch.jsonl",
+      "validator": "transcript"
+    },
+    {
+      "file": "invalid/prepare-quit-safe-with-blockers.jsonl",
+      "validator": "prepareQuit",
+      "envelope": 2
+    }
+  ],
+  "generated": [
+    {
+      "name": "control-line-at-limit",
+      "sizeKind": "controlLine",
+      "targetBytes": 1048576,
+      "repeatPath": ["params", "padding"],
+      "expectedValid": true,
+      "template": {
+        "protocolVersion": 1,
+        "kind": "request",
+        "sidecarInstanceId": "sidecar_fixture_01",
+        "requestId": "req_boundary_control",
+        "method": "system.status",
+        "params": { "padding": "" }
+      }
+    },
+    {
+      "name": "control-line-over-limit",
+      "sizeKind": "controlLine",
+      "targetBytes": 1048577,
+      "repeatPath": ["params", "padding"],
+      "expectedValid": false,
+      "template": {
+        "protocolVersion": 1,
+        "kind": "request",
+        "sidecarInstanceId": "sidecar_fixture_01",
+        "requestId": "req_boundary_control_over",
+        "method": "system.status",
+        "params": { "padding": "" }
+      }
+    },
+    {
+      "name": "text-chunk-at-limit",
+      "sizeKind": "textChunk",
+      "targetBytes": 262144,
+      "repeatPath": ["payload", "text"],
+      "expectedValid": true,
+      "template": {
+        "protocolVersion": 1,
+        "kind": "event",
+        "sidecarInstanceId": "sidecar_fixture_01",
+        "streamId": "stream_boundary_text",
+        "seq": 1,
+        "event": "blob.chunk",
+        "payload": { "text": "" }
+      }
+    },
+    {
+      "name": "text-chunk-over-limit",
+      "sizeKind": "textChunk",
+      "targetBytes": 262145,
+      "repeatPath": ["payload", "text"],
+      "expectedValid": false,
+      "template": {
+        "protocolVersion": 1,
+        "kind": "event",
+        "sidecarInstanceId": "sidecar_fixture_01",
+        "streamId": "stream_boundary_text_over",
+        "seq": 1,
+        "event": "blob.chunk",
+        "payload": { "text": "" }
+      }
+    }
+  ]
+}
