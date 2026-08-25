@@ -17,6 +17,7 @@ pub const PRODUCTION_SIDECAR_ARGV_V1: &[&str] = &["--stdio"];
 
 pub const STARTUP_STEPS_V1: &[&str] = &[
     "sidecarStarted",
+    "storageConnectionVerified",
     "migrationComplete",
     "integrityCheckComplete",
     "projectionReplayComplete",
@@ -169,7 +170,7 @@ pub fn validate_startup_trace_v1(trace: &StartupTraceV1) -> Result<(), Lifecycle
         StartupTraceV1::Ready { steps, ready } => {
             if !same_strings(steps, STARTUP_STEPS_V1) {
                 return Err(LifecycleContractError::new(
-                    "ready cannot be emitted before migration, integrity, replay, and recovery",
+                    "ready requires verified storage connection, migration, integrity, replay, and recovery",
                 ));
             }
             validate_ready_identity(ready)?;

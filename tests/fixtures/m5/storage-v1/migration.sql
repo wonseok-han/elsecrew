@@ -1,3 +1,5 @@
+-- This migration repeats the setting defensively. It does not replace the
+-- sidecar opener requirement to enable and verify it on every connection.
 PRAGMA foreign_keys = ON;
 
 -- Writer contract: BEGIN IMMEDIATE, look up operation_id, insert the event,

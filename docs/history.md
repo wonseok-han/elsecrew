@@ -87,6 +87,14 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 2차 리뷰 수정)
+
+- **한 일**: 모양만 RFC3339인 불가능한 시각을 통과시키던 predecessor 검증을 양 언어에서 실제 Gregorian UTC 달력 검증으로 교체했다. 계약은 `YYYY-MM-DDTHH:mm:ssZ`, 0001~9999년, 실제 월별 일수와 윤년, 00~23시·00~59분·00~59초만 허용한다. `2026-99-99T99:99:99Z`, 숫자 offset, missing/malformed marker는 공통 fixture에서 `unavailable`로 fail-closed한다.
+- **연결별 불변식**: migration 파일 첫 줄의 pragma가 다른 연결에 전파된다고 가정하지 않는다. 모든 sidecar SQLite connection은 open 직후 `PRAGMA foreign_keys = ON;`을 실행하고 `PRAGMA foreign_keys; == 1`을 검증한 뒤에만 migration/read/write와 ready로 진행한다. 실패는 stderr+nonzero exit의 pre-ready `unavailable`이다. lifecycle 시작 순서에도 `storageConnectionVerified`를 migration 앞에 고정했다.
+- **실제 SQLite 검증**: 새 in-memory 연결 두 개를 raw foreign-key default로 열어 각각 0임을 확인하고, 한 연결에서만 ON→1 검증 뒤 FK orphan insert가 거부되는 것을 확인했다. 이는 설정이 connection-local이며 migration pragma만으로 충분하지 않음을 실제 엔진으로 증명한다.
+- **검증**: G2+G3 TypeScript contract 13개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite migration/integrity, G2 fixture 불변과 diff check를 통과했다. 새 crate/npm 의존성과 lockfile 변경은 없다.
+- **다음 할 일**: 이 2차 fix commit을 재리뷰한 뒤 sidecar의 모든 SQLite open 경로가 공통 opener를 강제하고 ready gate와 실제 failure injection을 통과하는지 구현 단계에서 확인한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 독립 리뷰 수정)
 
 - **한 일**: 독립 리뷰의 차단점 4개를 공통 Rust/TypeScript 계약과 language-neutral fixture에서 닫았다. 직전 계약의 claimed `content_hash` 비교는 신뢰 경계가 아니어서 제거하고, 같은 `operation_id`의 재시도는 `request_id`만 제외한 영속 event 레코드 전체가 같을 때만 no-op으로 인정한다. payload·aggregate·event identity 중 하나라도 달라지면 conflict다.

@@ -32,5 +32,20 @@
   "recoveryFile": "recovery.json",
   "transactionFile": "transaction.json",
   "idempotencyComparison": "fullImmutableLedgerRecordExceptRequestId",
-  "recoveryValidationFailureStatus": "unavailable"
+  "recoveryValidationFailureStatus": "unavailable",
+  "timestampFormat": "YYYY-MM-DDTHH:mm:ssZ; Gregorian year 0001-9999; second 00-59",
+  "connection": {
+    "scope": "everySidecarConnection",
+    "enableStatement": "PRAGMA foreign_keys = ON;",
+    "verifyQuery": "PRAGMA foreign_keys;",
+    "requiredValue": 1,
+    "steps": [
+      "connectionOpened",
+      "foreignKeysEnabled",
+      "foreignKeysVerified",
+      "storageAllowed"
+    ],
+    "failureStatus": "unavailable",
+    "readyBeforeVerification": false
+  }
 }

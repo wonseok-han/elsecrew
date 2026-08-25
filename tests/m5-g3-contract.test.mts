@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
@@ -22,7 +23,10 @@ import {
   RECOVERY_VALIDATION_FAILURE_STATUS_V1,
   replayLedgerV1,
   SQLITE_SCHEMA_VERSION,
+  SQLITE_CONNECTION_V1,
   SQLITE_TABLES_V1,
+  UTC_TIMESTAMP_FORMAT_V1,
+  validateForeignKeysEnabledV1,
   type LedgerEventV1,
   type OperationDecisionV1,
   type OperationRecordV1,
@@ -50,6 +54,8 @@ interface StorageManifest {
   transactionFile: string;
   idempotencyComparison: string;
   recoveryValidationFailureStatus: string;
+  timestampFormat: string;
+  connection: typeof SQLITE_CONNECTION_V1;
 }
 
 interface LifecycleCase<T> {
@@ -128,6 +134,8 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
     storageManifest.recoveryValidationFailureStatus,
     RECOVERY_VALIDATION_FAILURE_STATUS_V1,
   );
+  assert.equal(storageManifest.timestampFormat, UTC_TIMESTAMP_FORMAT_V1);
+  assert.deepEqual(storageManifest.connection, SQLITE_CONNECTION_V1);
 
   const sql = readFileSync(resolve(storageRoot, storageManifest.migration.file), "utf8");
   assert.equal(sql.match(/CREATE TABLE /g)?.length, SQLITE_TABLES_V1.length);
@@ -141,6 +149,31 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
   assert.doesNotMatch(events, /content_hash/);
   assert.match(sql, /BEFORE UPDATE ON events/);
   assert.match(sql, /BEFORE DELETE ON events/);
+});
+
+test("모든 SQLite connection이 foreign_keys를 직접 켜고 1을 검증한 뒤에만 저장한다", () => {
+  const first = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+  const second = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+  try {
+    const firstDefault = foreignKeysValue(first);
+    const secondDefault = foreignKeysValue(second);
+    assert.equal(firstDefault, 0);
+    assert.equal(secondDefault, 0, "another connection must not inherit migration connection state");
+    assert.throws(() => validateForeignKeysEnabledV1(firstDefault));
+
+    first.exec(SQLITE_CONNECTION_V1.enableStatement);
+    const verified = foreignKeysValue(first);
+    validateForeignKeysEnabledV1(verified);
+    assert.equal(verified, SQLITE_CONNECTION_V1.requiredValue);
+    first.exec(
+      "CREATE TABLE parent(id TEXT PRIMARY KEY);" +
+        "CREATE TABLE child(parent_id TEXT REFERENCES parent(id));",
+    );
+    assert.throws(() => first.exec("INSERT INTO child(parent_id) VALUES ('orphan');"));
+  } finally {
+    first.close();
+    second.close();
+  }
 });
 
 test("TypeScript replay와 idempotency가 canonical storage fixture와 일치한다", () => {
@@ -254,4 +287,11 @@ function tableDefinition(sql: string, table: string): string {
   const end = tail.indexOf(") STRICT;");
   assert.notEqual(end, -1);
   return tail.slice(0, end);
+}
+
+function foreignKeysValue(database: DatabaseSync): number {
+  const row = database.prepare(SQLITE_CONNECTION_V1.verifyQuery).get() as
+    | Record<string, unknown>
+    | undefined;
+  return Number(row?.foreign_keys);
 }

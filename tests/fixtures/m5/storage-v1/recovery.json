@@ -253,6 +253,40 @@
         "runs": [],
         "locks": []
       }
+    },
+    {
+      "name": "impossible but shaped UTC timestamp fails closed",
+      "expected_valid": false,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_bad_03",
+          "pid": 4192,
+          "platform": "darwin",
+          "started_at": "2026-08-25T03:20:00Z",
+          "heartbeat_at": "2026-08-25T03:20:01Z",
+          "clean_shutdown_at": "2026-99-99T99:99:99Z",
+          "last_event_sequence": 7
+        },
+        "runs": [],
+        "locks": []
+      }
+    },
+    {
+      "name": "UTC contract rejects numeric offsets",
+      "expected_valid": false,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_bad_04",
+          "pid": 4193,
+          "platform": "darwin",
+          "started_at": "2026-08-25T03:30:00Z",
+          "heartbeat_at": "2026-08-25T03:30:01Z",
+          "clean_shutdown_at": "2026-08-25T12:30:00+09:00",
+          "last_event_sequence": 8
+        },
+        "runs": [],
+        "locks": []
+      }
     }
   ]
 }

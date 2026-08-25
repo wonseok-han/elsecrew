@@ -14,6 +14,8 @@ struct Manifest {
     transaction_file: String,
     idempotency_comparison: String,
     recovery_validation_failure_status: String,
+    timestamp_format: String,
+    connection: ConnectionContract,
 }
 
 #[derive(Deserialize)]
@@ -25,6 +27,18 @@ struct MigrationContract {
     operation_id_unique: bool,
     request_id_durable_key: bool,
     events_append_only: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionContract {
+    scope: String,
+    enable_statement: String,
+    verify_query: String,
+    required_value: u32,
+    steps: Vec<String>,
+    failure_status: String,
+    ready_before_verification: bool,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +121,26 @@ fn sqlite_v1_migration_matches_the_language_neutral_schema_contract() {
         manifest.recovery_validation_failure_status,
         RECOVERY_VALIDATION_FAILURE_STATUS_V1
     );
+    assert_eq!(manifest.timestamp_format, UTC_TIMESTAMP_FORMAT_V1);
+    assert_eq!(manifest.connection.scope, "everySidecarConnection");
+    assert_eq!(
+        manifest.connection.enable_statement,
+        SQLITE_FOREIGN_KEYS_ENABLE_V1
+    );
+    assert_eq!(
+        manifest.connection.verify_query,
+        SQLITE_FOREIGN_KEYS_VERIFY_V1
+    );
+    assert_eq!(manifest.connection.required_value, 1);
+    assert!(SQLITE_CONNECTION_OPEN_STEPS_V1.iter().copied().eq(manifest
+        .connection
+        .steps
+        .iter()
+        .map(String::as_str)));
+    assert_eq!(manifest.connection.failure_status, "unavailable");
+    assert!(!manifest.connection.ready_before_verification);
+    assert!(validate_foreign_keys_enabled_v1(0).is_err());
+    validate_foreign_keys_enabled_v1(1).expect("foreign keys enabled");
 
     let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read migration");
     let created_tables = sql.matches("CREATE TABLE ").count();

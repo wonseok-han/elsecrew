@@ -1,5 +1,16 @@
 export const SQLITE_SCHEMA_VERSION = 1 as const;
 export const RECOVERY_VALIDATION_FAILURE_STATUS_V1 = "unavailable" as const;
+export const UTC_TIMESTAMP_FORMAT_V1 =
+  "YYYY-MM-DDTHH:mm:ssZ; Gregorian year 0001-9999; second 00-59" as const;
+export const SQLITE_CONNECTION_V1 = {
+  scope: "everySidecarConnection",
+  enableStatement: "PRAGMA foreign_keys = ON;",
+  verifyQuery: "PRAGMA foreign_keys;",
+  requiredValue: 1,
+  steps: ["connectionOpened", "foreignKeysEnabled", "foreignKeysVerified", "storageAllowed"],
+  failureStatus: "unavailable",
+  readyBeforeVerification: false,
+} as const;
 
 export const SQLITE_TABLES_V1 = [
   "schema_meta",
@@ -243,6 +254,12 @@ export function canonicalJsonV1(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
+export function validateForeignKeysEnabledV1(value: unknown): void {
+  if (value !== SQLITE_CONNECTION_V1.requiredValue) {
+    fail("every SQLite connection must verify PRAGMA foreign_keys = 1 before storage or ready");
+  }
+}
+
 function validateLedgerEvent(event: LedgerEventV1): void {
   for (const field of [
     "event_id",
@@ -355,8 +372,27 @@ function requireId(value: unknown, name: string): asserts value is string {
 }
 
 function requireTimestamp(value: unknown, name: string): asserts value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) {
+  const match =
+    typeof value === "string"
+      ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/.exec(value)
+      : null;
+  if (match === null) {
     fail(`${name} must be an RFC 3339 UTC second timestamp`);
+  }
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [0, 31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > days[month] ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    fail(`${name} must be a real RFC 3339 UTC calendar timestamp`);
   }
 }
 

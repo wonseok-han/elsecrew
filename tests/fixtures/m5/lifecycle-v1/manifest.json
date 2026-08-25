@@ -149,6 +149,7 @@
         "outcome": "ready",
         "steps": [
           "sidecarStarted",
+          "storageConnectionVerified",
           "migrationComplete",
           "integrityCheckComplete",
           "projectionReplayComplete",
@@ -171,7 +172,7 @@
       "expectedValid": true,
       "value": {
         "outcome": "failedBeforeReady",
-        "steps": ["sidecarStarted"],
+        "steps": ["sidecarStarted", "storageConnectionVerified"],
         "stdoutLines": [],
         "stderr": "migration v1 failed: fixture write error",
         "exitCode": 70
@@ -184,6 +185,7 @@
         "outcome": "ready",
         "steps": [
           "sidecarStarted",
+          "storageConnectionVerified",
           "migrationComplete",
           "integrityCheckComplete",
           "projectionReplayComplete",
@@ -205,7 +207,7 @@
       "expectedValid": false,
       "value": {
         "outcome": "failedBeforeReady",
-        "steps": ["sidecarStarted", "migrationComplete"],
+        "steps": ["sidecarStarted", "storageConnectionVerified", "migrationComplete"],
         "stdoutLines": [],
         "stderr": "integrity check failed",
         "exitCode": 0
@@ -219,6 +221,17 @@
         "steps": ["sidecarStarted"],
         "stdoutLines": ["{\"event\":\"system.ready\"}"],
         "stderr": "migration v1 failed",
+        "exitCode": 70
+      }
+    },
+    {
+      "name": "foreign key verification failure is unavailable before migration or ready",
+      "expectedValid": true,
+      "value": {
+        "outcome": "failedBeforeReady",
+        "steps": ["sidecarStarted"],
+        "stdoutLines": [],
+        "stderr": "PRAGMA foreign_keys verification returned 0",
         "exitCode": 70
       }
     }

@@ -65,6 +65,7 @@ export type SystemStatusV1 =
 
 export const STARTUP_STEPS_V1 = [
   "sidecarStarted",
+  "storageConnectionVerified",
   "migrationComplete",
   "integrityCheckComplete",
   "projectionReplayComplete",
@@ -162,7 +163,7 @@ export function validateStartupTraceV1(value: StartupTraceV1): void {
   assertOrderedPrefix(steps, STARTUP_STEPS_V1, "startup");
   if (value.outcome === "ready") {
     if (!sameStrings(steps, STARTUP_STEPS_V1)) {
-      fail("ready cannot be emitted before migration, integrity, replay, and recovery");
+      fail("ready requires verified storage connection, migration, integrity, replay, and recovery");
     }
     validateReadyIdentity(value.ready);
     return;

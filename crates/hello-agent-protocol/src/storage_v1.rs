@@ -6,6 +6,16 @@ use std::fmt::{self, Display};
 
 pub const SQLITE_SCHEMA_VERSION: u32 = 1;
 pub const RECOVERY_VALIDATION_FAILURE_STATUS_V1: &str = "unavailable";
+pub const UTC_TIMESTAMP_FORMAT_V1: &str =
+    "YYYY-MM-DDTHH:mm:ssZ; Gregorian year 0001-9999; second 00-59";
+pub const SQLITE_FOREIGN_KEYS_ENABLE_V1: &str = "PRAGMA foreign_keys = ON;";
+pub const SQLITE_FOREIGN_KEYS_VERIFY_V1: &str = "PRAGMA foreign_keys;";
+pub const SQLITE_CONNECTION_OPEN_STEPS_V1: &[&str] = &[
+    "connectionOpened",
+    "foreignKeysEnabled",
+    "foreignKeysVerified",
+    "storageAllowed",
+];
 pub const SQLITE_TABLES_V1: &[&str] = &[
     "schema_meta",
     "app_instances",
@@ -337,6 +347,16 @@ pub fn canonical_json_v1(value: Value) -> Result<String, StorageContractError> {
         .map_err(|error| StorageContractError::new(format!("could not encode JSON: {error}")))
 }
 
+pub fn validate_foreign_keys_enabled_v1(value: u32) -> Result<(), StorageContractError> {
+    if value == 1 {
+        Ok(())
+    } else {
+        Err(StorageContractError::new(
+            "every SQLite connection must verify PRAGMA foreign_keys = 1 before storage or ready",
+        ))
+    }
+}
+
 fn validate_ledger_event(event: &LedgerEventV1) -> Result<(), StorageContractError> {
     for (name, value) in [
         ("event_id", event.event_id.as_str()),
@@ -554,20 +574,60 @@ fn require_timestamp(value: Option<&str>, name: &str) -> Result<(), StorageContr
         (16, b':'),
         (19, b'Z'),
     ];
-    let valid = bytes.len() == 20
+    let shape_valid = bytes.len() == 20
         && separators
             .iter()
             .all(|(index, expected)| bytes.get(*index) == Some(expected))
         && bytes.iter().enumerate().all(|(index, byte)| {
             separators.iter().any(|(separator, _)| *separator == index) || byte.is_ascii_digit()
         });
-    if valid {
-        Ok(())
-    } else {
-        Err(StorageContractError::new(format!(
+    if !shape_valid {
+        return Err(StorageContractError::new(format!(
             "{name} must be an RFC 3339 UTC second timestamp"
-        )))
+        )));
     }
+    let parse = |start: usize, end: usize| value[start..end].parse::<u32>().ok();
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        parse(0, 4),
+        parse(5, 7),
+        parse(8, 10),
+        parse(11, 13),
+        parse(14, 16),
+        parse(17, 19),
+    ) else {
+        return Err(StorageContractError::new(format!(
+            "{name} must be an RFC 3339 UTC second timestamp"
+        )));
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        0,
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let valid = year >= 1
+        && (1..=12).contains(&month)
+        && day >= 1
+        && day <= month_days[month as usize]
+        && hour <= 23
+        && minute <= 59
+        && second <= 59;
+    if !valid {
+        return Err(StorageContractError::new(format!(
+            "{name} must be a real RFC 3339 UTC calendar timestamp"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
