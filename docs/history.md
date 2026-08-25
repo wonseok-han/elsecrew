@@ -84,6 +84,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust core 리뷰 P1 수정)
+
+독립 리뷰에서 루트 Cargo workspace가 기본 `target/`을 만들지만 저장소 ignore가 `src-tauri/target/`만 전제로 해 생성물이 추적 후보가 된 P1을 확인했다. `.gitignore`에 저장소 루트만 가리키는 `/target/` 한 줄을 추가했으며 다른 ignore 규칙은 바꾸지 않았다. `cargo test --workspace --locked -q`에서 Tauri 105개와 core 66개가 통과하고 기존 13개 승인 필요 테스트만 무시됐으며, 이후 `git status --short`에 `target/`이 나타나지 않고 `git diff --check`가 통과했다.
+
+**다음 할 일**: 이 수정 commit을 포함해 독립 재리뷰와 통합 branch 하네스를 수행한다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust 안전 코어 추출)
 
 `m5/rust-core-extraction` worktree에서 루트 Cargo workspace와 canonical `Cargo.lock`을 만들고, 기존 Tauri crate의 `Agent`·`AppError`·프로세스 트리 종료 계약(F1~F8)·Claude/Codex 실행 계약 및 66개 직접 테스트를 `crates/hello-agent-core`로 옮겼다. Tauri 쪽 기존 모듈은 core를 다시 내보내는 한 줄 shim이라 `handoff.rs`와 `orchestration.rs`는 수정하지 않았다. `hello-agent-sidecar`는 core를 링크하는 빈 실행 골격뿐이며 protocol·SQLite·Electron 계약은 추가하지 않았다. core 직접 의존성은 `serde`·`serde_json`·macOS 프로세스 조회용 `libc`뿐임을 `cargo tree`로 확인했다.
