@@ -87,6 +87,35 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A FK 실제 migration 검증)
+
+- **한 일**: foreign-key connection-local 계약 테스트를 서로 다른 in-memory DB의 generic parent/child 테이블에서, 하나의 고유 OS 임시 SQLite 파일과 실제 `storage-v1/migration.sql`을 쓰는 시나리오로 교체했다. 연결 A가 실제 migration을 적용해 `foreign_keys=1`을 확인하고 닫은 뒤, 같은 파일을 여는 연결 B는 다시 0으로 시작하며 계약 validator가 저장을 거부한다. B에서 ON→1을 검증한 뒤 실제 `runs.chat_id → chats.chat_id`에 필수 열을 모두 채운 orphan insert가 FK 오류로 거부되고 `runs`에 행이 남지 않음을 확인했다.
+- **안전·검증**: 테스트 DB와 부속 파일은 `mkdtemp`가 만든 고유 OS temp 디렉터리에만 두고 두 연결을 닫은 뒤 `finally`에서 정리해 저장소 산출물을 남기지 않는다. G2+G3 TypeScript contract 13개, Rust 10개, TypeScript no-emit, fmt/check/clippy, G2 fixture 불변과 diff check를 통과했다.
+- **다음 할 일**: 이 최종 P1 fix를 재리뷰하고, sidecar 실제 opener 구현에서도 migration 연결 성공을 후속 runtime 연결의 FK 활성화 증거로 재사용하지 않는지 확인한다.
+
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 2차 리뷰 수정)
+
+- **한 일**: 모양만 RFC3339인 불가능한 시각을 통과시키던 predecessor 검증을 양 언어에서 실제 Gregorian UTC 달력 검증으로 교체했다. 계약은 `YYYY-MM-DDTHH:mm:ssZ`, 0001~9999년, 실제 월별 일수와 윤년, 00~23시·00~59분·00~59초만 허용한다. `2026-99-99T99:99:99Z`, 숫자 offset, missing/malformed marker는 공통 fixture에서 `unavailable`로 fail-closed한다.
+- **연결별 불변식**: migration 파일 첫 줄의 pragma가 다른 연결에 전파된다고 가정하지 않는다. 모든 sidecar SQLite connection은 open 직후 `PRAGMA foreign_keys = ON;`을 실행하고 `PRAGMA foreign_keys; == 1`을 검증한 뒤에만 migration/read/write와 ready로 진행한다. 실패는 stderr+nonzero exit의 pre-ready `unavailable`이다. lifecycle 시작 순서에도 `storageConnectionVerified`를 migration 앞에 고정했다.
+- **실제 SQLite 검증**: 새 in-memory 연결 두 개를 raw foreign-key default로 열어 각각 0임을 확인하고, 한 연결에서만 ON→1 검증 뒤 FK orphan insert가 거부되는 것을 확인했다. 이는 설정이 connection-local이며 migration pragma만으로 충분하지 않음을 실제 엔진으로 증명한다.
+- **검증**: G2+G3 TypeScript contract 13개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite migration/integrity, G2 fixture 불변과 diff check를 통과했다. 새 crate/npm 의존성과 lockfile 변경은 없다.
+- **다음 할 일**: 이 2차 fix commit을 재리뷰한 뒤 sidecar의 모든 SQLite open 경로가 공통 opener를 강제하고 ready gate와 실제 failure injection을 통과하는지 구현 단계에서 확인한다.
+
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 독립 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단점 4개를 공통 Rust/TypeScript 계약과 language-neutral fixture에서 닫았다. 직전 계약의 claimed `content_hash` 비교는 신뢰 경계가 아니어서 제거하고, 같은 `operation_id`의 재시도는 `request_id`만 제외한 영속 event 레코드 전체가 같을 때만 no-op으로 인정한다. payload·aggregate·event identity 중 하나라도 달라지면 conflict다.
+- **복구 안전**: `previous_app_instance: null`만 이전 실행이 없는 정상 첫 시작이다. 이전 row가 있으면 sidecar identity·pid/platform·시작/heartbeat·event sequence와 explicit nullable `clean_shutdown_at`을 정확히 검증하고 missing/malformed row는 `unavailable`로 fail-closed한다. 정상 종료 row가 있어도 이미 저장된 `poisoned` 또는 `recovery_required` lock은 항상 blocker와 status에 남으며 조용히 정상화하지 않는다.
+- **transaction 계약**: writer는 `BEGIN IMMEDIATE` 안에서 operation lookup → event insert → projection update를 수행하고 commit 뒤에만 위험한 외부 작업을 시작한다. event insert 뒤 projection 전 실패 주입은 두 쓰기를 모두 rollback하며 위험 작업을 시작하지 않는다. duplicate no-op과 conflict 판정도 같은 transaction 안에서 이뤄진다.
+- **검증**: G2+G3 TypeScript contract 12개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite 7-table migration과 `integrity_check=ok`, G2 fixture 불변과 diff check를 통과했다.
+- **다음 할 일**: 이 fix commit을 독립 재리뷰한 뒤에만 sidecar SQLite writer와 Electron status/quit consumer 구현을 시작한다. 실제 DB writer는 renderer가 제공한 hash나 operation 판정을 신뢰하지 않고 이 transaction/record-equality 계약을 내부에서 수행해야 한다.
+
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 저장·수명주기 계약)
+
+- **한 일**: G2 protocol fixture와 공개 bridge 메서드 목록을 그대로 둔 채 G3 구현 착수용 저장·수명주기 계약을 추가했다. SQLite v1은 별도 `userData/com.wonseokhan.helloagent/m5/hello-agent.sqlite3`에 7개 테이블(`schema_meta/app_instances/events/projects/chats/runs/locks`)을 만들며, append-only event 원장은 `request_id`와 별개인 unique `operation_id`·canonical payload·content hash를 영속 키로 쓴다. 같은 operation/content는 재시작 뒤에도 no-op이고 같은 operation의 다른 content는 conflict다. 양 언어 reducer가 공통 replay/projection·unclean recovery fixture를 같은 결과로 만든다.
+- **수명주기 결정**: 내부 channel은 `m5:v1:system:get-status`, `m5:v1:app:prepare-quit`, `m5:v1:sidecar:event`로 고정했다. G3 ready capability는 `system.status/app.prepareQuit` 둘뿐이며 migration·DB integrity·projection replay·unclean recovery가 모두 끝나기 전 `system.ready`를 금지한다. pre-ready 실패는 stderr 증거와 nonzero exit로 끝난다. renderer의 `prepareQuit()`은 상태 조회가 아니라 main 소유 single-flight 실제 종료 조정이며, sidecar는 새 요청 차단·작업 중단·DB checkpoint·clean marker 뒤에만 `safeToQuit: true`를 답한다. production 실행은 `process.resourcesPath/sidecar/hello-agent-sidecar[.exe]`, fixed argv, `shell:false`, stdout protocol/stderr log 분리, 환경 override 금지다.
+- **검증**: 공통 fixture를 읽는 TypeScript G2+G3 contract test 11개와 Rust protocol/storage/lifecycle test 9개, protocol crate check, TypeScript no-emit 검사를 통과했다. SQLite CLI가 migration으로 정확히 7개 테이블을 만들고 `integrity_check=ok`를 냈으며, G2 fixture 경로는 기준 commit과 byte diff가 없고 protocol fmt·`git diff --check`도 통과했다.
+- **다음 할 일**: 독립 계약 리뷰 뒤 sidecar SQLite/stdio 구현과 Electron main/preload 소비자를 각각 별도 소유 worktree에서 구현하고, 최신 통합 commit에서 G3 누적 하네스를 실행한다. G4/G5 project/chat/run 제품 동작은 이 계약에 포함하지 않았다.
+
 ### 2026-08-25 · by GPT-5.6-Terra (M5 G2 통합 QA)
 
 - **판정**: 최신 통합 `cd1a9e7`은 `G2_READY`다. TypeScript protocol 4개와 Rust protocol 3개, 프런트 전체 33개, Tauri 회귀 105개/기존 13 ignored를 확인했고, 기존 macOS arm64 패키지에서 ASAR 내용과 V1 Fuse 9개가 모두 통과했다. G2는 `READY`, 아직 구현하지 않은 G3는 성공이나 skip 대신 exit 2 `NOT_READY`로 닫힌다.

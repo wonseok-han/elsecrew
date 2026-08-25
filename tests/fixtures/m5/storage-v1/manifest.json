@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "migration": {
+    "file": "migration.sql",
+    "tables": [
+      "schema_meta",
+      "app_instances",
+      "events",
+      "projects",
+      "chats",
+      "runs",
+      "locks"
+    ],
+    "ledgerFields": [
+      "event_id",
+      "operation_id",
+      "request_id",
+      "aggregate_type",
+      "aggregate_id",
+      "aggregate_sequence",
+      "event_type",
+      "payload_schema_version",
+      "canonical_json_payload",
+      "timestamp"
+    ],
+    "operationIdUnique": true,
+    "requestIdDurableKey": false,
+    "eventsAppendOnly": true
+  },
+  "replayFile": "replay.json",
+  "idempotencyFile": "idempotency.json",
+  "recoveryFile": "recovery.json",
+  "transactionFile": "transaction.json",
+  "idempotencyComparison": "fullImmutableLedgerRecordExceptRequestId",
+  "recoveryValidationFailureStatus": "unavailable",
+  "timestampFormat": "YYYY-MM-DDTHH:mm:ssZ; Gregorian year 0001-9999; second 00-59",
+  "connection": {
+    "scope": "everySidecarConnection",
+    "enableStatement": "PRAGMA foreign_keys = ON;",
+    "verifyQuery": "PRAGMA foreign_keys;",
+    "requiredValue": 1,
+    "steps": [
+      "connectionOpened",
+      "foreignKeysEnabled",
+      "foreignKeysVerified",
+      "storageAllowed"
+    ],
+    "failureStatus": "unavailable",
+    "readyBeforeVerification": false
+  }
+}

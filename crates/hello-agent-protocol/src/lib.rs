@@ -4,6 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{self, Display};
 
+pub mod lifecycle_v1;
+pub mod storage_v1;
+
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
 pub const APP_SCHEMA_VERSION: u32 = 1;

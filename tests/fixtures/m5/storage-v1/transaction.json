@@ -1,0 +1,186 @@
+{
+  "before": {
+    "events": [
+      {
+        "event_id": "evt_tx_run_01",
+        "operation_id": "op_tx_run_01",
+        "request_id": "req_tx_run_01",
+        "aggregate_type": "run",
+        "aggregate_id": "run_tx_01",
+        "aggregate_sequence": 1,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_tx_01\",\"state\":\"preparing\"}",
+        "timestamp": "2026-08-25T04:00:00Z"
+      }
+    ],
+    "projection": {
+      "app_instances": {},
+      "projects": {},
+      "chats": {},
+      "runs": {
+        "run_tx_01": {
+          "last_event_sequence": 1,
+          "run_id": "run_tx_01",
+          "state": "preparing"
+        }
+      },
+      "locks": {}
+    }
+  },
+  "cases": [
+    {
+      "name": "append and projection commit before risky operation",
+      "failure_point": null,
+      "incoming": {
+        "event_id": "evt_tx_run_02",
+        "operation_id": "op_tx_run_02",
+        "request_id": "req_tx_run_02",
+        "aggregate_type": "run",
+        "aggregate_id": "run_tx_01",
+        "aggregate_sequence": 2,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_tx_01\",\"state\":\"running\"}",
+        "timestamp": "2026-08-25T04:00:01Z"
+      },
+      "expected": {
+        "outcome": "committed",
+        "steps": [
+          "beginImmediate",
+          "operationLookup",
+          "eventInserted",
+          "projectionUpdated",
+          "commit",
+          "riskyOperationStarted"
+        ],
+        "event_ids": ["evt_tx_run_01", "evt_tx_run_02"],
+        "projection": {
+          "app_instances": {},
+          "projects": {},
+          "chats": {},
+          "runs": {
+            "run_tx_01": {
+              "last_event_sequence": 2,
+              "run_id": "run_tx_01",
+              "state": "running"
+            }
+          },
+          "locks": {}
+        },
+        "risky_operation_started": true
+      }
+    },
+    {
+      "name": "failure after event insert rolls back event and projection",
+      "failure_point": "afterEventInsertBeforeProjection",
+      "incoming": {
+        "event_id": "evt_tx_run_02",
+        "operation_id": "op_tx_run_02",
+        "request_id": "req_tx_run_02",
+        "aggregate_type": "run",
+        "aggregate_id": "run_tx_01",
+        "aggregate_sequence": 2,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_tx_01\",\"state\":\"running\"}",
+        "timestamp": "2026-08-25T04:00:01Z"
+      },
+      "expected": {
+        "outcome": "rolledBack",
+        "steps": [
+          "beginImmediate",
+          "operationLookup",
+          "eventInserted",
+          "failureInjected",
+          "rollback"
+        ],
+        "event_ids": ["evt_tx_run_01"],
+        "projection": {
+          "app_instances": {},
+          "projects": {},
+          "chats": {},
+          "runs": {
+            "run_tx_01": {
+              "last_event_sequence": 1,
+              "run_id": "run_tx_01",
+              "state": "preparing"
+            }
+          },
+          "locks": {}
+        },
+        "risky_operation_started": false
+      }
+    },
+    {
+      "name": "same immutable operation is a transactional no-op",
+      "failure_point": null,
+      "incoming": {
+        "event_id": "evt_tx_run_01",
+        "operation_id": "op_tx_run_01",
+        "request_id": "req_tx_retry_01",
+        "aggregate_type": "run",
+        "aggregate_id": "run_tx_01",
+        "aggregate_sequence": 1,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_tx_01\",\"state\":\"preparing\"}",
+        "timestamp": "2026-08-25T04:00:00Z"
+      },
+      "expected": {
+        "outcome": "duplicateNoOp",
+        "steps": ["beginImmediate", "operationLookup", "duplicateNoOp", "commit"],
+        "event_ids": ["evt_tx_run_01"],
+        "projection": {
+          "app_instances": {},
+          "projects": {},
+          "chats": {},
+          "runs": {
+            "run_tx_01": {
+              "last_event_sequence": 1,
+              "run_id": "run_tx_01",
+              "state": "preparing"
+            }
+          },
+          "locks": {}
+        },
+        "risky_operation_started": false
+      }
+    },
+    {
+      "name": "same operation with altered immutable content rolls back",
+      "failure_point": null,
+      "incoming": {
+        "event_id": "evt_tx_run_01",
+        "operation_id": "op_tx_run_01",
+        "request_id": "req_tx_retry_02",
+        "aggregate_type": "run",
+        "aggregate_id": "run_tx_01",
+        "aggregate_sequence": 1,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_tx_01\",\"state\":\"completed\"}",
+        "timestamp": "2026-08-25T04:00:00Z"
+      },
+      "expected": {
+        "outcome": "conflict",
+        "steps": ["beginImmediate", "operationLookup", "operationConflict", "rollback"],
+        "event_ids": ["evt_tx_run_01"],
+        "projection": {
+          "app_instances": {},
+          "projects": {},
+          "chats": {},
+          "runs": {
+            "run_tx_01": {
+              "last_event_sequence": 1,
+              "run_id": "run_tx_01",
+              "state": "preparing"
+            }
+          },
+          "locks": {}
+        },
+        "risky_operation_started": false
+      }
+    }
+  ]
+}
