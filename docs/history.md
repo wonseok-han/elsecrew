@@ -89,6 +89,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3 독립 통합 QA)
+
+- **판정**: exact 통합 `3c3799d7978313dcc15b3c6d137dd19e496eb72c`는 `G3_READY`다. 부모 `79d3375` 대비 `architecture.md`와 `history.md`만 바뀐 문서 커밋임을 확인했고 QA 시작·종료 워킹 트리는 clean이었다.
+- **검증**: `CI=true pnpm install --frozen-lockfile`, `pnpm run m5:test:storage`(Node 17개, sidecar unit 13개·stdio process 2개), `node scripts/m5-electron-package-smoke.mjs`, `git diff --check`가 통과했다. `node scripts/m5-harness.mjs --list`는 G3 `READY`, 아직 `m5:test:project`·`m5:test:editor`가 없는 G4 `NOT_READY`를 보고했다. 누적 증거는 `.artifacts/m5-harness/g3-storage-2026-08-25T06-13-24-654Z.json`이다.
+- **잔여 위험·다음 할 일**: Forge 8 alpha, Windows sidecar/SQLite 종료, packaged Electron의 OS Quit 전체 E2E, macOS plist hardening은 후속이다. 이제 G4 프로젝트 선택·worktree·파일/diff 계약을 먼저 고정하고 독립 계약 리뷰 뒤 구현을 분리 착수한다. push와 `main` 병합은 하지 않는다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G3 누적 하네스 통과·현행 문서 반영)
 
 - **한 일**: 최신 통합 `79d3375`에서 G3 누적 게이트를 실행해 Electron 셸, protocol, storage/lifecycle 계약, 실제 Rust sidecar·SQLite, preload와 package smoke를 한 번에 검증했다. `architecture.md`의 G2 시점 설명을 실제 G3 구조로 올리고, 아직 구현되지 않은 project/chat/run·Monaco·diff와 Windows 경계를 현행 사실에서 분리했다.
