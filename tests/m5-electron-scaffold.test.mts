@@ -22,6 +22,7 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
         "@electron-forge/plugin-fuses",
         "@electron-forge/plugin-vite",
         "@electron/fuses",
+        "@electron/asar",
         "vite",
         "@vitejs/plugin-react",
       ].map((name) => [name, dependencies[name]]),
@@ -33,6 +34,7 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
       "@electron-forge/plugin-fuses": "8.0.0-alpha.10",
       "@electron-forge/plugin-vite": "8.0.0-alpha.10",
       "@electron/fuses": "2.1.3",
+      "@electron/asar": "4.3.0",
       vite: "8.2.2",
       "@vitejs/plugin-react": "6.1.0",
     },
@@ -41,6 +43,11 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.equal(manifest.main, ".vite/build/main.js");
   assert.equal(manifest.scripts["m5:test:core"], "cargo test --workspace --manifest-path Cargo.toml");
   assert.equal(manifest.scripts["m5:package"], "electron-forge package");
+  assert.equal(manifest.scripts["m5:package:smoke"], "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs");
+  assert.equal(
+    manifest.scripts["m5:test:electron"],
+    "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
+  );
   assert.match(source("pnpm-workspace.yaml"), /^nodeLinker: hoisted$/m);
 });
 
@@ -79,11 +86,16 @@ test("preload, renderer, Forge 설정은 좁은 bridge와 로컬 자산만 허�
   }
   for (const fuse of [
     "asar: true",
+    "strictlyRequireAllFuses: true",
     "FuseV1Options.RunAsNode]: false",
+    "FuseV1Options.EnableCookieEncryption]: false",
     "FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false",
     "FuseV1Options.EnableNodeCliInspectArguments]: false",
     "FuseV1Options.OnlyLoadAppFromAsar]: true",
     "FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true",
+    "FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false",
+    "FuseV1Options.GrantFileProtocolExtraPrivileges]: false",
+    "FuseV1Options.WasmTrapHandlers]: true",
   ]) {
     assert.ok(forge.includes(fuse), `missing Forge security setting: ${fuse}`);
   }
