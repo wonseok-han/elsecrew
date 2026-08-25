@@ -1,0 +1,2 @@
+{"kind":"request","method":"project.createWorktree","params":{"projectId":"project_01"},"protocolVersion":1,"requestId":"req_worktree_01","sidecarInstanceId":"sidecar_fixture_02"}
+{"error":{"code":"outcome_unknown","detail":"The sidecar stopped before the worktree result was persisted.","kind":"recoveryRequired","outcomeUnknown":true,"retryable":false},"kind":"response","ok":false,"protocolVersion":1,"requestId":"req_worktree_01","sidecarInstanceId":"sidecar_fixture_02"}

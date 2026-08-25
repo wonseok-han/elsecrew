@@ -1,0 +1,2 @@
+{"kind":"request","method":"system.status","params":{},"protocolVersion":1,"requestId":"req_01","sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"request","method":"system.status","params":{},"protocolVersion":1,"requestId":"req_02","sidecarInstanceId":"sidecar_fixture_02"}

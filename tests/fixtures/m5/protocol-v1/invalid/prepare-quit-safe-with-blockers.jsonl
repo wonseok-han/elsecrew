@@ -1,0 +1,2 @@
+{"kind":"request","method":"app.prepareQuit","params":{},"protocolVersion":1,"requestId":"req_quit_01","sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"response","ok":true,"protocolVersion":1,"requestId":"req_quit_01","result":{"blockers":["run_01"],"safeToQuit":true},"sidecarInstanceId":"sidecar_fixture_01"}

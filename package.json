@@ -18,7 +18,8 @@
     "m5:package:smoke": "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs",
     "m5:make": "electron-forge make",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
-    "m5:test:core": "cargo test --workspace --manifest-path Cargo.toml"
+    "m5:test:core": "cargo test --workspace --manifest-path Cargo.toml",
+    "m5:test:contracts": "node --test --experimental-strip-types tests/m5-protocol-contract.test.mts && cargo test -p hello-agent-protocol"
   },
   "config": {
     "forge": "./electron/forge.config.ts"

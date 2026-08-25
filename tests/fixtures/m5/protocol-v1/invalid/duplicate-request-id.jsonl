@@ -1,0 +1,2 @@
+{"kind":"request","method":"system.status","params":{},"protocolVersion":1,"requestId":"req_duplicate","sidecarInstanceId":"sidecar_fixture_01"}
+{"kind":"request","method":"app.prepareQuit","params":{},"protocolVersion":1,"requestId":"req_duplicate","sidecarInstanceId":"sidecar_fixture_01"}

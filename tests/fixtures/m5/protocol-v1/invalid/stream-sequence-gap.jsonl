@@ -1,0 +1,2 @@
+{"event":"blob.chunk","kind":"event","payload":{"text":"one"},"protocolVersion":1,"seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"stream_01"}
+{"event":"blob.chunk","kind":"event","payload":{"text":"three"},"protocolVersion":1,"seq":3,"sidecarInstanceId":"sidecar_fixture_01","streamId":"stream_01"}
