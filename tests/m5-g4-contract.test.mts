@@ -14,15 +14,27 @@ import {
   G4_CAPABILITIES_V1,
   G4_ERROR_KINDS_V1,
   PROJECT_SCHEMA_VERSION_V1,
+  SNAPSHOT_CREATION_PHASES_V1,
+  SNAPSHOT_FAILURE_KINDS_V1,
+  SNAPSHOT_LIMITS_V1,
+  SNAPSHOT_TRANSPORT_V1,
+  SOURCE_MUTATION_POLICY_V1,
   TREE_PAGE_MAX_ENTRIES_V1,
   validateG4SafetyErrorV1,
   validateProjectCloseResultV1,
   validateProjectIdentityV1,
+  validateSnapshotFailureV1,
+  validateSnapshotLifecycleV1,
+  validateSnapshotMaterializationV1,
+  validateSnapshotSizingV1,
+  validateSourceMutationTraceV1,
+  validateStandaloneSnapshotInvariantV1,
   validateTreePageV1,
   validateWatchEventV1,
   validateWorktreeManifestV1,
   WORKTREE_HEAD_MODE_V1,
   WORKTREE_LIFECYCLES_V1,
+  WORKSPACE_KIND_V1,
 } from "../src/m5/contracts/project-v1.ts";
 import {
   sha256FileVersionV1,
@@ -44,6 +56,12 @@ import {
 type ValidatorName =
   | "projectIdentity"
   | "worktreeManifest"
+  | "standaloneSnapshotInvariant"
+  | "sourceMutationTrace"
+  | "snapshotSizing"
+  | "snapshotMaterialization"
+  | "snapshotLifecycle"
+  | "snapshotFailure"
   | "treePage"
   | "fileClassification"
   | "fileDigest"
@@ -88,7 +106,16 @@ interface Manifest {
     fileVersionDigestInput: string;
     canonicalPathFormat: string;
     worktreeHeadMode: string;
+    workspaceKind: string;
+    snapshotTransport: string;
+    sourceMutationPolicy: string;
     worktreeLifecycles: string[];
+    snapshotLimits: typeof SNAPSHOT_LIMITS_V1;
+    snapshotCreationPhases: string[];
+    snapshotFailureKinds: string[];
+    materialization: Record<string, unknown>;
+    threatModel: Record<string, unknown>;
+    platformSupport: Record<string, string>;
     projectCloseLifecycle: string;
     projectClosePhysicallyDeletes: boolean;
     treeCursorSemantics: string;
@@ -126,7 +153,33 @@ test("G4 manifest 한 곳이 capability, page/chunk/size/hash/lifecycle 계약�
     "absoluteRealPathForwardSlashesUppercaseWindowsDrive",
   );
   assert.equal(manifest.contract.worktreeHeadMode, WORKTREE_HEAD_MODE_V1);
+  assert.equal(manifest.contract.workspaceKind, WORKSPACE_KIND_V1);
+  assert.equal(manifest.contract.snapshotTransport, SNAPSHOT_TRANSPORT_V1);
+  assert.equal(manifest.contract.sourceMutationPolicy, SOURCE_MUTATION_POLICY_V1);
   assert.deepEqual(manifest.contract.worktreeLifecycles, [...WORKTREE_LIFECYCLES_V1]);
+  assert.deepEqual(manifest.contract.snapshotLimits, SNAPSHOT_LIMITS_V1);
+  assert.deepEqual(manifest.contract.snapshotCreationPhases, [...SNAPSHOT_CREATION_PHASES_V1]);
+  assert.deepEqual(manifest.contract.snapshotFailureKinds, [...SNAPSHOT_FAILURE_KINDS_V1]);
+  assert.deepEqual(manifest.contract.materialization, {
+    blobSource: "rawCommittedBytes",
+    modeSource: "committedTreeMode",
+    symlinkPolicy: "noFollow",
+    submodulePolicy: "noInit",
+    forbiddenTransforms: ["checkout", "filter", "eol", "encoding", "ident", "exportAttributes", "lfs"],
+    failClosedEntries: ["caseCollision", "nonUtf8Path", "dotGitEntry", "abnormalMode"],
+  });
+  assert.deepEqual(manifest.contract.threatModel, {
+    protected: ["selectedRootPathSwap", "managedTargetPathSwap", "ordinaryConcurrentSourceChange"],
+    requiredChecks: ["exportedBaseCommit", "exportedBaseTree", "objectFormat", "sourceDigestBeforeAfter"],
+    outOfBoundary: ["activelyMaliciousSameUserEntryMutationInsideHeldSourceDirectoryDuringExport"],
+  });
+  assert.deepEqual(manifest.contract.platformSupport, {
+    macos: "contracted",
+    windows: "unsupportedUntilSeparateGate",
+  });
+  for (const limit of Object.values(SNAPSHOT_LIMITS_V1)) {
+    if (typeof limit === "number") assert.ok(Number.isSafeInteger(limit));
+  }
   assert.equal(manifest.contract.projectCloseLifecycle, "abandoned");
   assert.equal(manifest.contract.projectClosePhysicallyDeletes, false);
   assert.equal(manifest.contract.treeCursorSemantics, "opaque");
@@ -173,6 +226,18 @@ function validate(name: ValidatorName, value: unknown): unknown {
       return validateProjectIdentityV1(value);
     case "worktreeManifest":
       return validateWorktreeManifestV1(value);
+    case "standaloneSnapshotInvariant":
+      return validateStandaloneSnapshotInvariantV1(value);
+    case "sourceMutationTrace":
+      return validateSourceMutationTraceV1(value);
+    case "snapshotSizing":
+      return validateSnapshotSizingV1(value);
+    case "snapshotMaterialization":
+      return validateSnapshotMaterializationV1(value);
+    case "snapshotLifecycle":
+      return validateSnapshotLifecycleV1(value);
+    case "snapshotFailure":
+      return validateSnapshotFailureV1(value);
     case "treePage":
       return validateTreePageV1(value);
     case "fileClassification":

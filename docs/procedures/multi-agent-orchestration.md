@@ -38,7 +38,7 @@ Codex는 저장소의 [`.codex/config.toml`](../../.codex/config.toml)과 [`.cod
 | `m5_architect` | `gpt-5.6-sol` high | 읽기 전용 | 경계·의존성·직렬화 지점 분석 |
 | `m5_contract_engineer` | `gpt-5.6-sol` high | 작업 공간 쓰기 | protocol/schema/API/migration/fixture 단일 소유 |
 | `m5_electron_engineer` | `gpt-5.6-terra` high | 작업 공간 쓰기 | Electron main/preload/lifecycle/package |
-| `m5_rust_safety_engineer` | `gpt-5.6-sol` high | 작업 공간 쓰기 | Rust core/sidecar/process/worktree/recovery |
+| `m5_rust_safety_engineer` | `gpt-5.6-sol` high | 작업 공간 쓰기 | Rust core/sidecar/process/standalone snapshot/recovery |
 | `m5_ui_engineer` | `gpt-5.6-terra` high | 작업 공간 쓰기 | React/TypeScript/Monaco 작업대와 상태 UI |
 | `m5_code_reviewer` | `gpt-5.6-terra` high | 읽기 전용 | 정확한 commit/diff의 독립 코드 리뷰 |
 | `m5_qa_executor` | `gpt-5.6-terra` high | QA artifact만 쓰기 | 최신 통합 commit의 시나리오·실패 주입 |
@@ -211,7 +211,7 @@ M5.0은 [`../proposals/m5-electron-spike.md`](../proposals/m5-electron-spike.md)
 | G1 | Electron package manifest / Cargo workspace 각각 한 명 | Electron scaffold ↔ Rust core 추출 | package smoke + 기존 M4 회귀 |
 | G2 | protocol v1과 typed bridge 계약 | contract test 검토 | Rust/TypeScript golden fixture 일치 |
 | G3 | SQLite migration | sidecar protocol ↔ renderer mock shell ↔ fixture generator | replay·CSP·preload 검증 |
-| G4 | project/worktree 안전 API | sidecar file/diff ↔ Monaco renderer | 원본 무변경·dirty/conflict QA |
+| G4 | project/standalone snapshot 안전 API | sidecar file/diff ↔ Monaco renderer | 원본 무변경·dirty/conflict QA |
 | G5 | run/recovery state machine | chat stream UI ↔ fake agent fixture | 순서·취소·종료·복구 QA |
 | G6 | 통합 manifest/CI/evidence | 보안 리뷰 ↔ 성능/패키지 QA | M5.0 완료 게이트 |
 

@@ -10,7 +10,36 @@ pub const FILE_VERSION_ALGORITHM_V1: &str = "sha256";
 pub const FILE_VERSION_PREFIX_V1: &str = "sha256:";
 pub const FILE_VERSION_DIGEST_INPUT_V1: &str = "exactFileBytes";
 pub const WORKTREE_HEAD_MODE_V1: &str = "detached";
+pub const WORKSPACE_KIND_V1: &str = "standaloneSnapshot";
+pub const SNAPSHOT_TRANSPORT_V1: &str = "gitBundle";
+pub const SOURCE_MUTATION_POLICY_V1: &str = "forbidden";
 pub const WORKTREE_LIFECYCLES_V1: &[&str] = &["active", "abandoned", "recoveryRequired"];
+pub const SNAPSHOT_BUNDLE_MAX_BYTES_V1: u64 = 2 * 1024 * 1024 * 1024;
+pub const SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1: u64 = 4 * 1024 * 1024 * 1024;
+pub const SNAPSHOT_ENTRIES_MAX_V1: u64 = 200_000;
+pub const SNAPSHOT_SINGLE_BLOB_MAX_BYTES_V1: u64 = 1024 * 1024 * 1024;
+pub const SNAPSHOT_DISK_RESERVE_BYTES_V1: u64 = 512 * 1024 * 1024;
+pub const SNAPSHOT_CREATION_PHASES_V1: &[&str] = &[
+    "recoveryMarkerPersisted",
+    "sourceDigestBefore",
+    "bundleHeaderVerified",
+    "bundleExportStreamed",
+    "sourceDigestAfter",
+    "bundleVerified",
+    "materializationStreamed",
+    "workspaceVerified",
+    "externalManifestPersisted",
+    "gitMarkerPersisted",
+    "workspaceRenamed",
+    "databaseCommitted",
+    "activated",
+];
+pub const SNAPSHOT_FAILURE_KINDS_V1: &[&str] = &[
+    "corruptBundle",
+    "truncatedBundle",
+    "oversizeBundle",
+    "shallowMissingObjects",
+];
 pub const G4_CAPABILITIES_V1: &[&str] = &[
     "system.status",
     "app.prepareQuit",
@@ -76,6 +105,12 @@ pub fn validate_project_payload_v1(
     match validator {
         "projectIdentity" => validate_project_identity(value),
         "worktreeManifest" => validate_worktree_manifest(value),
+        "standaloneSnapshotInvariant" => validate_standalone_snapshot_invariant(value),
+        "sourceMutationTrace" => validate_source_mutation_trace(value),
+        "snapshotSizing" => validate_snapshot_sizing(value),
+        "snapshotMaterialization" => validate_snapshot_materialization(value),
+        "snapshotLifecycle" => validate_snapshot_lifecycle(value),
+        "snapshotFailure" => validate_snapshot_failure(value),
         "treePage" => validate_tree_page(value),
         "fileClassification" => validate_file_classification(value),
         "fileDigest" => validate_file_digest(value),
@@ -145,7 +180,13 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
             "canonicalGitRoot",
             "worktreeId",
             "worktreePath",
+            "workspaceKind",
+            "snapshotTransport",
+            "sourceMutationPolicy",
+            "objectFormat",
             "baseCommit",
+            "baseTree",
+            "workspaceIdentity",
             "headMode",
             "lifecycle",
         ],
@@ -156,24 +197,316 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
     }
     id(object.get("projectId"), "projectId")?;
     id(object.get("worktreeId"), "worktreeId")?;
+    id(object.get("workspaceIdentity"), "workspaceIdentity")?;
     let root = absolute_path(object.get("canonicalGitRoot"), "canonicalGitRoot")?;
     let worktree = absolute_path(object.get("worktreePath"), "worktreePath")?;
     if root == worktree || at_or_below(worktree, root) {
-        return fail("isolated worktreePath cannot be the original Git root or inside it");
+        return fail(
+            "snapshot compatibility worktreePath cannot be the original Git root or inside it",
+        );
     }
-    let commit = string(object.get("baseCommit"), "baseCommit")?;
-    if !matches!(commit.len(), 40 | 64)
-        || !commit
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    if string(object.get("workspaceKind"), "workspaceKind")? != WORKSPACE_KIND_V1 {
+        return fail("workspace must be a standalone snapshot");
+    }
+    if string(object.get("snapshotTransport"), "snapshotTransport")? != SNAPSHOT_TRANSPORT_V1 {
+        return fail("snapshot transport must be gitBundle");
+    }
+    if string(object.get("sourceMutationPolicy"), "sourceMutationPolicy")?
+        != SOURCE_MUTATION_POLICY_V1
     {
-        return fail("baseCommit must be a full lowercase Git object id");
+        return fail("source mutation is forbidden");
     }
+    let object_format = string(object.get("objectFormat"), "objectFormat")?;
+    if !matches!(object_format, "sha1" | "sha256") {
+        return fail("unsupported Git object format");
+    }
+    git_oid(object.get("baseCommit"), object_format, "baseCommit")?;
+    git_oid(object.get("baseTree"), object_format, "baseTree")?;
     if string(object.get("headMode"), "headMode")? != WORKTREE_HEAD_MODE_V1 {
-        return fail("worktree must use detached HEAD");
+        return fail("standalone snapshot must use detached HEAD");
     }
     if !WORKTREE_LIFECYCLES_V1.contains(&string(object.get("lifecycle"), "lifecycle")?) {
-        return fail("unknown worktree lifecycle");
+        return fail("unknown snapshot lifecycle");
+    }
+    Ok(())
+}
+
+fn validate_standalone_snapshot_invariant(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "standalone snapshot invariant")?;
+    exact_keys(
+        object,
+        &[
+            "workspaceIdentity",
+            "objectFormat",
+            "headCommit",
+            "baseCommit",
+            "indexTree",
+            "baseTree",
+            "remoteCount",
+            "alternatesCount",
+            "sourceRefCount",
+            "sourceAbsolutePathCount",
+            "objectConnectivity",
+            "externalManifestIdentity",
+            "gitMarkerIdentity",
+            "databaseIdentity",
+        ],
+    )?;
+    let identity = id(object.get("workspaceIdentity"), "workspaceIdentity")?;
+    let object_format = string(object.get("objectFormat"), "objectFormat")?;
+    if !matches!(object_format, "sha1" | "sha256") {
+        return fail("unsupported Git object format");
+    }
+    let head = git_oid(object.get("headCommit"), object_format, "headCommit")?;
+    let commit = git_oid(object.get("baseCommit"), object_format, "baseCommit")?;
+    let index = git_oid(object.get("indexTree"), object_format, "indexTree")?;
+    let tree = git_oid(object.get("baseTree"), object_format, "baseTree")?;
+    if head != commit || index != tree {
+        return fail("detached HEAD and index tree must match the snapshot base");
+    }
+    for field in [
+        "remoteCount",
+        "alternatesCount",
+        "sourceRefCount",
+        "sourceAbsolutePathCount",
+    ] {
+        if unsigned(object.get(field), field)? != 0 {
+            return fail(format!("{field} must be zero in a standalone snapshot"));
+        }
+    }
+    if !boolean(object.get("objectConnectivity"), "objectConnectivity")? {
+        return fail("snapshot object connectivity must be verified");
+    }
+    for field in [
+        "externalManifestIdentity",
+        "gitMarkerIdentity",
+        "databaseIdentity",
+    ] {
+        if string(object.get(field), field)? != identity {
+            return fail(format!("{field} must match workspaceIdentity"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_source_mutation_trace(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "source mutation trace")?;
+    exact_keys(
+        object,
+        &[
+            "sourceCapability",
+            "sourceLockCount",
+            "sourceWriteCount",
+            "before",
+            "after",
+        ],
+    )?;
+    if string(object.get("sourceCapability"), "sourceCapability")? != "readOnly"
+        || unsigned(object.get("sourceLockCount"), "sourceLockCount")? != 0
+        || unsigned(object.get("sourceWriteCount"), "sourceWriteCount")? != 0
+    {
+        return fail(
+            "snapshot export must hold only a read-only source capability without locks or writes",
+        );
+    }
+    let before = source_digest_set(object.get("before"), "before source digest")?;
+    let after = source_digest_set(object.get("after"), "after source digest")?;
+    for field in SOURCE_DIGEST_FIELDS_V1 {
+        if before.get(*field) != after.get(*field) {
+            return fail(format!("source {field} changed during snapshot export"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_snapshot_sizing(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "snapshot sizing")?;
+    exact_keys(
+        object,
+        &[
+            "bundleBytes",
+            "materializedTotalBytes",
+            "entryCount",
+            "singleBlobBytes",
+            "diskBytesAfterMaterialization",
+            "streaming",
+            "fullAllocation",
+        ],
+    )?;
+    for (field, limit) in [
+        ("bundleBytes", SNAPSHOT_BUNDLE_MAX_BYTES_V1),
+        (
+            "materializedTotalBytes",
+            SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1,
+        ),
+        ("entryCount", SNAPSHOT_ENTRIES_MAX_V1),
+        ("singleBlobBytes", SNAPSHOT_SINGLE_BLOB_MAX_BYTES_V1),
+    ] {
+        let value = unsigned(object.get(field), field)?;
+        if value > super::MAX_SEQUENCE || value > limit {
+            return fail(format!("{field} exceeds the standalone snapshot limit"));
+        }
+    }
+    if unsigned(
+        object.get("diskBytesAfterMaterialization"),
+        "diskBytesAfterMaterialization",
+    )? < SNAPSHOT_DISK_RESERVE_BYTES_V1
+    {
+        return fail("diskBytesAfterMaterialization must preserve the required disk reserve");
+    }
+    if !boolean(object.get("streaming"), "streaming")?
+        || boolean(object.get("fullAllocation"), "fullAllocation")?
+    {
+        return fail("snapshot export and materialization must stream without full allocation");
+    }
+    Ok(())
+}
+
+fn validate_snapshot_materialization(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "snapshot materialization policy")?;
+    exact_keys(
+        object,
+        &[
+            "rawCommittedBlobBytes",
+            "preserveGitMode",
+            "checkout",
+            "filters",
+            "eolTransform",
+            "encodingTransform",
+            "identTransform",
+            "exportAttributes",
+            "lfsTransform",
+            "symlinkPolicy",
+            "submodulePolicy",
+            "rejectCaseCollision",
+            "rejectNonUtf8Path",
+            "rejectDotGitEntry",
+            "rejectAbnormalMode",
+        ],
+    )?;
+    if !boolean(object.get("rawCommittedBlobBytes"), "rawCommittedBlobBytes")?
+        || !boolean(object.get("preserveGitMode"), "preserveGitMode")?
+    {
+        return fail("materialization must preserve committed blob bytes and mode");
+    }
+    for field in [
+        "checkout",
+        "filters",
+        "eolTransform",
+        "encodingTransform",
+        "identTransform",
+        "exportAttributes",
+        "lfsTransform",
+    ] {
+        if boolean(object.get(field), field)? {
+            return fail(format!("{field} transformation is forbidden"));
+        }
+    }
+    if string(object.get("symlinkPolicy"), "symlinkPolicy")? != "noFollow"
+        || string(object.get("submodulePolicy"), "submodulePolicy")? != "noInit"
+    {
+        return fail("symlinks cannot be followed and submodules cannot be initialized");
+    }
+    for field in [
+        "rejectCaseCollision",
+        "rejectNonUtf8Path",
+        "rejectDotGitEntry",
+        "rejectAbnormalMode",
+    ] {
+        if !boolean(object.get(field), field)? {
+            return fail(format!("{field} must fail closed"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_snapshot_lifecycle(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "snapshot lifecycle")?;
+    exact_keys(
+        object,
+        &[
+            "phases",
+            "bundleHeader",
+            "workspaceIdentity",
+            "externalManifestIdentity",
+            "gitMarkerIdentity",
+            "databaseIdentity",
+            "activatedWorkspaceCount",
+        ],
+    )?;
+    let phases = array(object.get("phases"), "snapshot phases")?;
+    if phases.len() != SNAPSHOT_CREATION_PHASES_V1.len()
+        || phases
+            .iter()
+            .zip(SNAPSHOT_CREATION_PHASES_V1)
+            .any(|(actual, expected)| actual.as_str() != Some(expected))
+    {
+        return fail("snapshot creation phases must be complete and ordered");
+    }
+    let header = self::object(
+        object
+            .get("bundleHeader")
+            .ok_or_else(|| missing("bundleHeader"))?,
+        "bundle header",
+    )?;
+    exact_keys(
+        header,
+        &[
+            "transport",
+            "references",
+            "prerequisites",
+            "selfContainedHead",
+        ],
+    )?;
+    let references = array(header.get("references"), "bundle references")?;
+    let prerequisites = array(header.get("prerequisites"), "bundle prerequisites")?;
+    if string(header.get("transport"), "bundle transport")? != SNAPSHOT_TRANSPORT_V1
+        || references.len() != 1
+        || references[0].as_str() != Some("HEAD")
+        || !prerequisites.is_empty()
+        || !boolean(header.get("selfContainedHead"), "selfContainedHead")?
+    {
+        return fail("bundle header must prove a self-contained HEAD snapshot");
+    }
+    let identity = id(object.get("workspaceIdentity"), "workspaceIdentity")?;
+    for field in [
+        "externalManifestIdentity",
+        "gitMarkerIdentity",
+        "databaseIdentity",
+    ] {
+        if string(object.get(field), field)? != identity {
+            return fail(format!("{field} must match before activation"));
+        }
+    }
+    if unsigned(
+        object.get("activatedWorkspaceCount"),
+        "activatedWorkspaceCount",
+    )? != 1
+    {
+        return fail("exactly one workspace may activate after all durable identity records");
+    }
+    Ok(())
+}
+
+fn validate_snapshot_failure(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "snapshot failure")?;
+    exact_keys(
+        object,
+        &[
+            "failureKind",
+            "activeWorkspaceCount",
+            "recoveryMarkerPresent",
+        ],
+    )?;
+    if !SNAPSHOT_FAILURE_KINDS_V1.contains(&string(object.get("failureKind"), "failureKind")?) {
+        return fail("unknown snapshot failure kind");
+    }
+    if unsigned(object.get("activeWorkspaceCount"), "activeWorkspaceCount")? != 0
+        || !boolean(object.get("recoveryMarkerPresent"), "recoveryMarkerPresent")?
+    {
+        return fail(
+            "failed snapshot creation must activate nothing and retain its recovery marker",
+        );
     }
     Ok(())
 }
@@ -600,7 +933,9 @@ fn validate_project_close(value: &Value) -> Result<(), ProjectContractError> {
     if string(object.get("lifecycle"), "close lifecycle")? != "abandoned"
         || boolean(object.get("physicallyDeleted"), "physicallyDeleted")?
     {
-        return fail("project.close must abandon without physically deleting the worktree");
+        return fail(
+            "project.close must abandon without physically deleting the standalone snapshot",
+        );
     }
     Ok(())
 }
@@ -662,6 +997,56 @@ fn diff_kind(value: Option<&Value>) -> Result<&str, ProjectContractError> {
         return fail("unknown diff change kind");
     }
     Ok(kind)
+}
+
+const SOURCE_DIGEST_FIELDS_V1: &[&str] = &[
+    "head",
+    "index",
+    "refs",
+    "config",
+    "objects",
+    "packedRefs",
+    "entrySet",
+];
+
+fn source_digest_set<'a>(
+    value: Option<&'a Value>,
+    name: &str,
+) -> Result<&'a Map<String, Value>, ProjectContractError> {
+    let object = object(value.ok_or_else(|| missing(name))?, name)?;
+    exact_keys(object, SOURCE_DIGEST_FIELDS_V1)?;
+    for field in SOURCE_DIGEST_FIELDS_V1 {
+        let digest = string(object.get(*field), field)?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return fail(format!("{name} {field} must be a lowercase SHA-256 digest"));
+        }
+    }
+    Ok(object)
+}
+
+fn git_oid<'a>(
+    value: Option<&'a Value>,
+    object_format: &str,
+    name: &str,
+) -> Result<&'a str, ProjectContractError> {
+    let value = string(value, name)?;
+    let length = match object_format {
+        "sha1" => 40,
+        "sha256" => 64,
+        _ => return fail("unsupported Git object format"),
+    };
+    if value.len() != length
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return fail(format!("{name} length must match {object_format}"));
+    }
+    Ok(value)
 }
 
 fn object<'a>(

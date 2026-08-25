@@ -27,13 +27,34 @@ struct ContractFixture {
     file_version_digest_input: String,
     canonical_path_format: String,
     worktree_head_mode: String,
+    workspace_kind: String,
+    snapshot_transport: String,
+    source_mutation_policy: String,
     worktree_lifecycles: Vec<String>,
+    snapshot_limits: SnapshotLimitsFixture,
+    snapshot_creation_phases: Vec<String>,
+    snapshot_failure_kinds: Vec<String>,
+    materialization: Value,
+    threat_model: Value,
+    platform_support: Value,
     project_close_lifecycle: String,
     project_close_physically_deletes: bool,
     tree_cursor_semantics: String,
     save_concurrency: String,
     watch_overflow: String,
     safety_error_kinds: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotLimitsFixture {
+    bundle_max_bytes: u64,
+    materialized_total_max_bytes: u64,
+    entries_max: u64,
+    single_blob_max_bytes: u64,
+    disk_reserve_bytes: u64,
+    streaming_required: bool,
+    full_allocation_forbidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -102,11 +123,75 @@ fn manifest_is_the_canonical_g4_limits_and_capabilities_contract() {
         "absoluteRealPathForwardSlashesUppercaseWindowsDrive"
     );
     assert_eq!(manifest.contract.worktree_head_mode, WORKTREE_HEAD_MODE_V1);
+    assert_eq!(manifest.contract.workspace_kind, WORKSPACE_KIND_V1);
+    assert_eq!(manifest.contract.snapshot_transport, SNAPSHOT_TRANSPORT_V1);
+    assert_eq!(
+        manifest.contract.source_mutation_policy,
+        SOURCE_MUTATION_POLICY_V1
+    );
     assert!(WORKTREE_LIFECYCLES_V1.iter().copied().eq(manifest
         .contract
         .worktree_lifecycles
         .iter()
         .map(String::as_str)));
+    assert_eq!(
+        manifest.contract.snapshot_limits.bundle_max_bytes,
+        SNAPSHOT_BUNDLE_MAX_BYTES_V1
+    );
+    assert_eq!(
+        manifest
+            .contract
+            .snapshot_limits
+            .materialized_total_max_bytes,
+        SNAPSHOT_MATERIALIZED_TOTAL_MAX_BYTES_V1
+    );
+    assert_eq!(
+        manifest.contract.snapshot_limits.entries_max,
+        SNAPSHOT_ENTRIES_MAX_V1
+    );
+    assert_eq!(
+        manifest.contract.snapshot_limits.single_blob_max_bytes,
+        SNAPSHOT_SINGLE_BLOB_MAX_BYTES_V1
+    );
+    assert_eq!(
+        manifest.contract.snapshot_limits.disk_reserve_bytes,
+        SNAPSHOT_DISK_RESERVE_BYTES_V1
+    );
+    assert!(manifest.contract.snapshot_limits.streaming_required);
+    assert!(manifest.contract.snapshot_limits.full_allocation_forbidden);
+    assert!(SNAPSHOT_CREATION_PHASES_V1.iter().copied().eq(manifest
+        .contract
+        .snapshot_creation_phases
+        .iter()
+        .map(String::as_str)));
+    assert!(SNAPSHOT_FAILURE_KINDS_V1.iter().copied().eq(manifest
+        .contract
+        .snapshot_failure_kinds
+        .iter()
+        .map(String::as_str)));
+    assert_eq!(
+        manifest.contract.materialization,
+        json!({
+            "blobSource":"rawCommittedBytes",
+            "modeSource":"committedTreeMode",
+            "symlinkPolicy":"noFollow",
+            "submodulePolicy":"noInit",
+            "forbiddenTransforms":["checkout","filter","eol","encoding","ident","exportAttributes","lfs"],
+            "failClosedEntries":["caseCollision","nonUtf8Path","dotGitEntry","abnormalMode"]
+        })
+    );
+    assert_eq!(
+        manifest.contract.threat_model,
+        json!({
+            "protected":["selectedRootPathSwap","managedTargetPathSwap","ordinaryConcurrentSourceChange"],
+            "requiredChecks":["exportedBaseCommit","exportedBaseTree","objectFormat","sourceDigestBeforeAfter"],
+            "outOfBoundary":["activelyMaliciousSameUserEntryMutationInsideHeldSourceDirectoryDuringExport"]
+        })
+    );
+    assert_eq!(
+        manifest.contract.platform_support,
+        json!({"macos":"contracted","windows":"unsupportedUntilSeparateGate"})
+    );
     assert_eq!(manifest.contract.project_close_lifecycle, "abandoned");
     assert!(!manifest.contract.project_close_physically_deletes);
     assert_eq!(manifest.contract.tree_cursor_semantics, "opaque");

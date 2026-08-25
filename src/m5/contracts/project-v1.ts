@@ -7,10 +7,43 @@ export const FILE_VERSION_ALGORITHM_V1 = "sha256" as const;
 export const FILE_VERSION_PREFIX_V1 = "sha256:" as const;
 export const FILE_VERSION_DIGEST_INPUT_V1 = "exactFileBytes" as const;
 export const WORKTREE_HEAD_MODE_V1 = "detached" as const;
+export const WORKSPACE_KIND_V1 = "standaloneSnapshot" as const;
+export const SNAPSHOT_TRANSPORT_V1 = "gitBundle" as const;
+export const SOURCE_MUTATION_POLICY_V1 = "forbidden" as const;
 export const WORKTREE_LIFECYCLES_V1 = [
   "active",
   "abandoned",
   "recoveryRequired",
+] as const;
+export const SNAPSHOT_LIMITS_V1 = {
+  bundleMaxBytes: 2 * 1024 * 1024 * 1024,
+  materializedTotalMaxBytes: 4 * 1024 * 1024 * 1024,
+  entriesMax: 200_000,
+  singleBlobMaxBytes: 1024 * 1024 * 1024,
+  diskReserveBytes: 512 * 1024 * 1024,
+  streamingRequired: true,
+  fullAllocationForbidden: true,
+} as const;
+export const SNAPSHOT_CREATION_PHASES_V1 = [
+  "recoveryMarkerPersisted",
+  "sourceDigestBefore",
+  "bundleHeaderVerified",
+  "bundleExportStreamed",
+  "sourceDigestAfter",
+  "bundleVerified",
+  "materializationStreamed",
+  "workspaceVerified",
+  "externalManifestPersisted",
+  "gitMarkerPersisted",
+  "workspaceRenamed",
+  "databaseCommitted",
+  "activated",
+] as const;
+export const SNAPSHOT_FAILURE_KINDS_V1 = [
+  "corruptBundle",
+  "truncatedBundle",
+  "oversizeBundle",
+  "shallowMissingObjects",
 ] as const;
 
 export const G4_CAPABILITIES_V1 = [
@@ -47,7 +80,13 @@ export interface WorktreeManifestV1 {
   canonicalGitRoot: string;
   worktreeId: string;
   worktreePath: string;
+  workspaceKind: typeof WORKSPACE_KIND_V1;
+  snapshotTransport: typeof SNAPSHOT_TRANSPORT_V1;
+  sourceMutationPolicy: typeof SOURCE_MUTATION_POLICY_V1;
+  objectFormat: "sha1" | "sha256";
   baseCommit: string;
+  baseTree: string;
+  workspaceIdentity: string;
   headMode: typeof WORKTREE_HEAD_MODE_V1;
   lifecycle: (typeof WORKTREE_LIFECYCLES_V1)[number];
 }
@@ -109,24 +148,152 @@ export function validateWorktreeManifestV1(value: unknown): WorktreeManifestV1 {
     "canonicalGitRoot",
     "worktreeId",
     "worktreePath",
+    "workspaceKind",
+    "snapshotTransport",
+    "sourceMutationPolicy",
+    "objectFormat",
     "baseCommit",
+    "baseTree",
+    "workspaceIdentity",
     "headMode",
     "lifecycle",
   ]);
   if (object.schemaVersion !== PROJECT_SCHEMA_VERSION_V1) fail("manifest schemaVersion must be 1");
   requireId(object.projectId, "projectId");
   requireId(object.worktreeId, "worktreeId");
+  requireId(object.workspaceIdentity, "workspaceIdentity");
   const root = requireAbsolutePath(object.canonicalGitRoot, "canonicalGitRoot");
   const worktree = requireAbsolutePath(object.worktreePath, "worktreePath");
   if (root === worktree || isAtOrBelow(worktree, root)) {
-    fail("isolated worktreePath cannot be the original Git root or inside it");
+    fail("snapshot compatibility worktreePath cannot be the original Git root or inside it");
   }
-  if (typeof object.baseCommit !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(object.baseCommit)) {
-    fail("baseCommit must be a full lowercase Git object id");
-  }
-  if (object.headMode !== WORKTREE_HEAD_MODE_V1) fail("worktree must use detached HEAD");
-  if (!WORKTREE_LIFECYCLES_V1.includes(object.lifecycle as never)) fail("unknown worktree lifecycle");
+  if (object.workspaceKind !== WORKSPACE_KIND_V1) fail("workspace must be a standalone snapshot");
+  if (object.snapshotTransport !== SNAPSHOT_TRANSPORT_V1) fail("snapshot transport must be gitBundle");
+  if (object.sourceMutationPolicy !== SOURCE_MUTATION_POLICY_V1) fail("source mutation is forbidden");
+  if (object.objectFormat !== "sha1" && object.objectFormat !== "sha256") fail("unsupported Git object format");
+  requireGitOid(object.baseCommit, object.objectFormat, "baseCommit");
+  requireGitOid(object.baseTree, object.objectFormat, "baseTree");
+  if (object.headMode !== WORKTREE_HEAD_MODE_V1) fail("standalone snapshot must use detached HEAD");
+  if (!WORKTREE_LIFECYCLES_V1.includes(object.lifecycle as never)) fail("unknown snapshot lifecycle");
   return object as unknown as WorktreeManifestV1;
+}
+
+export function validateStandaloneSnapshotInvariantV1(value: unknown): void {
+  const object = requireObject(value, "standalone snapshot invariant");
+  exactKeys(object, [
+    "workspaceIdentity", "objectFormat", "headCommit", "baseCommit", "indexTree", "baseTree",
+    "remoteCount", "alternatesCount", "sourceRefCount", "sourceAbsolutePathCount",
+    "objectConnectivity", "externalManifestIdentity", "gitMarkerIdentity", "databaseIdentity",
+  ]);
+  requireId(object.workspaceIdentity, "workspaceIdentity");
+  if (object.objectFormat !== "sha1" && object.objectFormat !== "sha256") fail("unsupported Git object format");
+  for (const field of ["headCommit", "baseCommit", "indexTree", "baseTree"] as const) {
+    requireGitOid(object[field], object.objectFormat, field);
+  }
+  if (object.headCommit !== object.baseCommit || object.indexTree !== object.baseTree) {
+    fail("detached HEAD and index tree must match the snapshot base");
+  }
+  for (const field of ["remoteCount", "alternatesCount", "sourceRefCount", "sourceAbsolutePathCount"] as const) {
+    if (object[field] !== 0) fail(`${field} must be zero in a standalone snapshot`);
+  }
+  if (object.objectConnectivity !== true) fail("snapshot object connectivity must be verified");
+  for (const field of ["externalManifestIdentity", "gitMarkerIdentity", "databaseIdentity"] as const) {
+    if (object[field] !== object.workspaceIdentity) fail(`${field} must match workspaceIdentity`);
+  }
+}
+
+export function validateSourceMutationTraceV1(value: unknown): void {
+  const object = requireObject(value, "source mutation trace");
+  exactKeys(object, ["sourceCapability", "sourceLockCount", "sourceWriteCount", "before", "after"]);
+  if (object.sourceCapability !== "readOnly" || object.sourceLockCount !== 0 || object.sourceWriteCount !== 0) {
+    fail("snapshot export must hold only a read-only source capability without locks or writes");
+  }
+  const before = sourceDigestSet(object.before, "before source digest");
+  const after = sourceDigestSet(object.after, "after source digest");
+  for (const field of SOURCE_DIGEST_FIELDS_V1) {
+    if (before[field] !== after[field]) fail(`source ${field} changed during snapshot export`);
+  }
+}
+
+export function validateSnapshotSizingV1(value: unknown): void {
+  const object = requireObject(value, "snapshot sizing");
+  exactKeys(object, [
+    "bundleBytes", "materializedTotalBytes", "entryCount", "singleBlobBytes",
+    "diskBytesAfterMaterialization", "streaming", "fullAllocation",
+  ]);
+  const checks = [
+    ["bundleBytes", SNAPSHOT_LIMITS_V1.bundleMaxBytes],
+    ["materializedTotalBytes", SNAPSHOT_LIMITS_V1.materializedTotalMaxBytes],
+    ["entryCount", SNAPSHOT_LIMITS_V1.entriesMax],
+    ["singleBlobBytes", SNAPSHOT_LIMITS_V1.singleBlobMaxBytes],
+  ] as const;
+  for (const [field, limit] of checks) {
+    if (typeof object[field] !== "number" || !Number.isSafeInteger(object[field]) || object[field] < 0 || object[field] > limit) {
+      fail(`${field} exceeds the standalone snapshot limit`);
+    }
+  }
+  if (typeof object.diskBytesAfterMaterialization !== "number" || !Number.isSafeInteger(object.diskBytesAfterMaterialization) || object.diskBytesAfterMaterialization < SNAPSHOT_LIMITS_V1.diskReserveBytes) {
+    fail("diskBytesAfterMaterialization must preserve the required disk reserve");
+  }
+  if (object.streaming !== true || object.fullAllocation !== false) {
+    fail("snapshot export and materialization must stream without full allocation");
+  }
+}
+
+export function validateSnapshotMaterializationV1(value: unknown): void {
+  const object = requireObject(value, "snapshot materialization policy");
+  exactKeys(object, [
+    "rawCommittedBlobBytes", "preserveGitMode", "checkout", "filters", "eolTransform",
+    "encodingTransform", "identTransform", "exportAttributes", "lfsTransform",
+    "symlinkPolicy", "submodulePolicy", "rejectCaseCollision", "rejectNonUtf8Path",
+    "rejectDotGitEntry", "rejectAbnormalMode",
+  ]);
+  if (object.rawCommittedBlobBytes !== true || object.preserveGitMode !== true) fail("materialization must preserve committed blob bytes and mode");
+  for (const field of ["checkout", "filters", "eolTransform", "encodingTransform", "identTransform", "exportAttributes", "lfsTransform"] as const) {
+    if (object[field] !== false) fail(`${field} transformation is forbidden`);
+  }
+  if (object.symlinkPolicy !== "noFollow" || object.submodulePolicy !== "noInit") fail("symlinks cannot be followed and submodules cannot be initialized");
+  for (const field of ["rejectCaseCollision", "rejectNonUtf8Path", "rejectDotGitEntry", "rejectAbnormalMode"] as const) {
+    if (object[field] !== true) fail(`${field} must fail closed`);
+  }
+}
+
+export function validateSnapshotLifecycleV1(value: unknown): void {
+  const object = requireObject(value, "snapshot lifecycle");
+  exactKeys(object, [
+    "phases", "bundleHeader", "workspaceIdentity", "externalManifestIdentity",
+    "gitMarkerIdentity", "databaseIdentity", "activatedWorkspaceCount",
+  ]);
+  if (!Array.isArray(object.phases) || object.phases.length !== SNAPSHOT_CREATION_PHASES_V1.length || object.phases.some((phase, index) => phase !== SNAPSHOT_CREATION_PHASES_V1[index])) {
+    fail("snapshot creation phases must be complete and ordered");
+  }
+  const header = requireObject(object.bundleHeader, "bundle header");
+  exactKeys(header, ["transport", "references", "prerequisites", "selfContainedHead"]);
+  if (
+    header.transport !== SNAPSHOT_TRANSPORT_V1 ||
+    !Array.isArray(header.references) ||
+    header.references.length !== 1 ||
+    header.references[0] !== "HEAD" ||
+    !Array.isArray(header.prerequisites) ||
+    header.prerequisites.length !== 0 ||
+    header.selfContainedHead !== true
+  ) {
+    fail("bundle header must prove a self-contained HEAD snapshot");
+  }
+  requireId(object.workspaceIdentity, "workspaceIdentity");
+  for (const field of ["externalManifestIdentity", "gitMarkerIdentity", "databaseIdentity"] as const) {
+    if (object[field] !== object.workspaceIdentity) fail(`${field} must match before activation`);
+  }
+  if (object.activatedWorkspaceCount !== 1) fail("exactly one workspace may activate after all durable identity records");
+}
+
+export function validateSnapshotFailureV1(value: unknown): void {
+  const object = requireObject(value, "snapshot failure");
+  exactKeys(object, ["failureKind", "activeWorkspaceCount", "recoveryMarkerPresent"]);
+  if (!SNAPSHOT_FAILURE_KINDS_V1.includes(object.failureKind as never)) fail("unknown snapshot failure kind");
+  if (object.activeWorkspaceCount !== 0 || object.recoveryMarkerPresent !== true) {
+    fail("failed snapshot creation must activate nothing and retain its recovery marker");
+  }
 }
 
 export function validateTreePageV1(value: unknown): TreePageV1 {
@@ -162,7 +329,7 @@ export function validateProjectCloseResultV1(value: unknown): ProjectCloseResult
   exactKeys(object, ["projectId", "lifecycle", "physicallyDeleted"]);
   requireId(object.projectId, "projectId");
   if (object.lifecycle !== "abandoned" || object.physicallyDeleted !== false) {
-    fail("project.close must abandon without physically deleting the worktree");
+    fail("project.close must abandon without physically deleting the standalone snapshot");
   }
   return object as unknown as ProjectCloseResultV1;
 }
@@ -229,6 +396,29 @@ export function requireRelativePath(value: unknown, name: string, allowEmpty: bo
   }
   if (value.split("/").some((segment) => segment === "." || segment === ".." || segment === "")) {
     if (!(allowEmpty && value === "")) fail(`${name} must not traverse or contain empty segments`);
+  }
+  return value;
+}
+
+const SOURCE_DIGEST_FIELDS_V1 = [
+  "head", "index", "refs", "config", "objects", "packedRefs", "entrySet",
+] as const;
+
+function sourceDigestSet(value: unknown, name: string): Record<(typeof SOURCE_DIGEST_FIELDS_V1)[number], string> {
+  const object = requireObject(value, name);
+  exactKeys(object, SOURCE_DIGEST_FIELDS_V1);
+  for (const field of SOURCE_DIGEST_FIELDS_V1) {
+    if (typeof object[field] !== "string" || !/^[0-9a-f]{64}$/.test(object[field])) {
+      fail(`${name} ${field} must be a lowercase SHA-256 digest`);
+    }
+  }
+  return object as Record<(typeof SOURCE_DIGEST_FIELDS_V1)[number], string>;
+}
+
+function requireGitOid(value: unknown, objectFormat: "sha1" | "sha256", name: string): string {
+  const length = objectFormat === "sha1" ? 40 : 64;
+  if (typeof value !== "string" || value.length !== length || !/^[0-9a-f]+$/.test(value)) {
+    fail(`${name} length must match ${objectFormat}`);
   }
   return value;
 }
