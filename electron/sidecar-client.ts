@@ -25,6 +25,7 @@ import {
 } from "../src/m5/contracts/lifecycle-v1.ts";
 
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
+export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
 
 export interface SidecarLaunchV1 {
   command: string;
@@ -37,6 +38,8 @@ export interface SidecarProcessV1 {
   readonly stdout: ChildProcess["stdout"];
   readonly stderr: ChildProcess["stderr"];
   once(event: "error" | "exit", listener: (...args: unknown[]) => void): unknown;
+  /** Must be idempotent: the client calls it at most once on protocol failure. */
+  terminate(): void;
 }
 
 export type SidecarSpawnV1 = (
@@ -68,14 +71,26 @@ export class SidecarClientV1 {
   #rejectReady: ((error: Error) => void) | undefined;
   #readyTimer: NodeJS.Timeout | undefined;
   #failure: Error | undefined;
+  #stderrTail = Buffer.alloc(0);
+  #terminationAttempted = false;
 
   constructor(
     launch: SidecarLaunchV1,
     options: { spawn?: SidecarSpawnV1; readyTimeoutMs?: number } = {},
   ) {
     this.#launch = launch;
-    this.#spawn = options.spawn ?? ((command, args, spawnOptions) =>
-      spawn(command, args, spawnOptions) as SidecarProcessV1);
+    this.#spawn = options.spawn ?? ((command, args, spawnOptions) => {
+      const child = spawn(command, args, spawnOptions);
+      return {
+        stdin: child.stdin,
+        stdout: child.stdout,
+        stderr: child.stderr,
+        once: (event, listener) => child.once(event, listener),
+        terminate: () => {
+          if (!child.killed) child.kill();
+        },
+      };
+    });
     this.#readyTimeoutMs = options.readyTimeoutMs ?? SIDECAR_READY_TIMEOUT_MS;
   }
 
@@ -105,9 +120,7 @@ export class SidecarClientV1 {
       }
       this.#process = process;
       process.stdout.on("data", (chunk: Buffer) => this.#onStdout(Buffer.from(chunk)));
-      process.stderr.on("data", () => {
-        // stderr is diagnostic evidence only. It must never become a protocol channel.
-      });
+      process.stderr.on("data", (chunk: Buffer) => this.#onStderr(Buffer.from(chunk)));
       process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start")));
       process.once("exit", (code: unknown, signal: unknown) => {
         this.#fail(new Error(`sidecar exited (${String(code ?? "null")}, ${String(signal ?? "none")})`));
@@ -124,6 +137,19 @@ export class SidecarClientV1 {
 
   get failure(): Error | undefined {
     return this.#failure;
+  }
+
+  get failedBeforeReady(): boolean {
+    return this.#failure !== undefined && this.#lastReady === null;
+  }
+
+  /**
+   * This bounded diagnostic is for a technical detail view, never a basic UI
+   * message. Control characters are normalized, but this is not token or
+   * secret redaction and callers must not claim that it is.
+   */
+  get technicalDetail(): string {
+    return normalizeDiagnostic(this.#stderrTail);
   }
 
   onEvent(listener: (event: EventV1) => void): () => void {
@@ -200,6 +226,15 @@ export class SidecarClientV1 {
     }
   }
 
+  #onStderr(chunk: Buffer): void {
+    this.#stderrTail = Buffer.concat([this.#stderrTail, chunk]);
+    if (this.#stderrTail.byteLength > MAX_SIDECAR_STDERR_TAIL_BYTES) {
+      this.#stderrTail = this.#stderrTail.subarray(
+        this.#stderrTail.byteLength - MAX_SIDECAR_STDERR_TAIL_BYTES,
+      );
+    }
+  }
+
   #onEnvelope(envelope: EnvelopeV1): void {
     this.#session.observe(envelope);
     if (envelope.kind === "event") {
@@ -234,6 +269,9 @@ export class SidecarClientV1 {
     }
     if (pending.method === "system.status") {
       const status = parseSystemStatusV1(response.result);
+      if (status.state === "ready" && !sameReady(status.sidecar, this.#ready)) {
+        throw new Error("system.status identity does not match system.ready");
+      }
       this.#pending.delete(response.requestId);
       pending.resolve(status);
       return;
@@ -252,11 +290,39 @@ export class SidecarClientV1 {
     this.#rejectReady = undefined;
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+    this.#terminateOnce();
+  }
+
+  #terminateOnce(): void {
+    if (this.#terminationAttempted) return;
+    this.#terminationAttempted = true;
+    try {
+      this.#process?.terminate();
+    } catch {
+      // The original protocol failure remains the error reported to callers.
+    }
   }
 }
 
 function sameStrings(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
+function sameReady(left: ReadyPayloadV1, right: ReadyPayloadV1 | undefined): boolean {
+  return right !== undefined &&
+    left.protocolVersion === right.protocolVersion &&
+    left.sidecarSchemaVersion === right.sidecarSchemaVersion &&
+    left.appSchemaVersion === right.appSchemaVersion &&
+    left.pid === right.pid &&
+    left.platform === right.platform &&
+    left.sidecarInstanceId === right.sidecarInstanceId &&
+    sameStrings(left.capabilities, right.capabilities);
+}
+
+function normalizeDiagnostic(value: Buffer): string {
+  return value.toString("utf8")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "�");
 }
 
 function asError(value: unknown, fallback: string): Error {

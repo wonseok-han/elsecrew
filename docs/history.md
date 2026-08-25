@@ -87,6 +87,13 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron bridge 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단점 3건을 닫았다. sidecar transport는 timeout, oversized/invalid stdout, session·identity corruption에서 child `terminate()`를 한 번만 호출하고 모든 pending 요청을 fail-closed로 거부한다. `system.status`의 ready identity·version·capability는 처음 `system.ready`와 정확히 같아야 하며 불일치는 연결 손상이다. stderr는 마지막 32 KiB만 유지하고 제어 문자를 정규화해 unavailable의 기술 detail에만 붙인다. 이는 token/secret redaction이 아니며 기본 UI 문구나 안전 보장으로 쓰지 않는다.
+- **종료 결정**: main-owned coordinator는 safe sidecar 응답 뒤에만 clean exit을 허용한다. 반대로 ready 전 sidecar startup이 실패한 경우에는 clean marker나 재시도를 시도하지 않고, 다음 시작의 unclean recovery 의미를 보존한 채 before-quit 재진입 없이 한 번만 unclean exit을 허용한다. ready 뒤 손상/종료는 이 예외에 포함하지 않는다.
+- **검증**: fake child timeout/oversize/unknown response/identity mismatch 종료 1회, pending reject, stderr tail truncation·control normalization, pre-ready unclean close single-flight를 포함한 Electron test 10개와 TypeScript no-emit, `git diff --check`를 통과했다. 최종 packaged handshake는 G3-D 통합 QA에서 실제 sidecar와 다시 확인한다.
+- **다음 할 일**: 이 fix commit을 독립 재리뷰하고, 승인되면 G3-D sidecar와 함께 package smoke·storage harness를 최신 통합에서 실행한다.
+
 ### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron sidecar bridge)
 
 - **한 일**: Electron main/preload에 G2의 세 내부 channel만 연결했다. main은 `system.ready` first JSONL 세션, 3초 ready 제한, 1 MiB bounded stdout framing, request/response 상관관계와 method별 결과 검증을 가진 단일 sidecar client를 소유한다. 알 수 없거나 중복·불일치인 response와 sidecar 종료는 모든 pending 요청을 fail-closed로 거부하며 재시작·자동 재시도를 하지 않는다. renderer에는 versioned `M5BridgeV1`만 노출하고 정확한 listener wrapper를 해제한다.

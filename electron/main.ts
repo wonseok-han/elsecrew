@@ -8,6 +8,7 @@ import {
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { EventV1, PrepareQuitResultV1 } from "../src/m5/contracts/protocol-v1.ts";
+import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -21,8 +22,14 @@ const DEV_FIXTURE_SIDECAR = resolve(__dirname, "..", "..", "scripts", "m5-sideca
 
 let mainWindow: BrowserWindow | undefined;
 let sidecar: SidecarClientV1 | undefined;
-let quitAllowed = false;
-let quitInFlight: Promise<PrepareQuitResultV1> | undefined;
+const quitCoordinator = new QuitCoordinatorV1({
+  prepareSidecarQuit: () => {
+    if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
+    return sidecar.prepareQuit();
+  },
+  failedBeforeReady: () => sidecar?.failedBeforeReady ?? false,
+  allowProcessExit: () => app.quit(),
+});
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -119,7 +126,8 @@ function assertCurrentMainFrame(event: Electron.IpcMainInvokeEvent): void {
 }
 
 function unavailableStatus(error: unknown): SystemStatusV1 {
-  const detail = error instanceof Error ? error.message : String(error);
+  const fallback = error instanceof Error ? error.message : String(error);
+  const stderr = sidecar?.technicalDetail;
   return {
     state: "unavailable",
     lastReadySidecar: sidecar?.lastReady ?? null,
@@ -129,7 +137,9 @@ function unavailableStatus(error: unknown): SystemStatusV1 {
     error: {
       code: "sidecarUnavailable",
       kind: "sidecarUnavailable",
-      detail,
+      // Technical detail is intentionally separate from kind. Stderr is control-normalized
+      // and bounded, but is not a token/secret redaction guarantee.
+      detail: stderr ? `${fallback}\n${stderr}` : fallback,
       retryable: false,
       outcomeUnknown: true,
     },
@@ -162,22 +172,7 @@ async function getSystemStatus(): Promise<SystemStatusV1> {
 }
 
 function prepareQuit(): Promise<PrepareQuitResultV1> {
-  if (quitAllowed) return Promise.resolve({ safeToQuit: true, blockers: [] });
-  if (quitInFlight) return quitInFlight;
-  quitInFlight = (async () => {
-    if (!sidecar) throw new Error("sidecar was not started");
-    const result = await sidecar.prepareQuit();
-    if (!result.safeToQuit) return result;
-    quitAllowed = true;
-    app.quit();
-    return result;
-  })();
-  void quitInFlight.catch(() => {
-    // A sidecar error is unsafe: do not quit and do not automatically retry.
-  }).finally(() => {
-    if (!quitAllowed) quitInFlight = undefined;
-  });
-  return quitInFlight;
+  return quitCoordinator.prepareQuit();
 }
 
 function registerIpcHandlers(): void {
@@ -230,11 +225,9 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", (event) => {
-  if (quitAllowed) return;
+  if (quitCoordinator.exitAllowed) return;
   event.preventDefault();
-  void prepareQuit().catch(() => {
-    // An unsafe/error response deliberately leaves the app alive.
-  });
+  quitCoordinator.handleBeforeQuit();
 });
 
 app.on("window-all-closed", () => {
