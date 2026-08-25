@@ -800,9 +800,9 @@ fn post_rename_failures_keep_recovery_blocker_and_report_unknown_outcome() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
-fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
+fn same_content_parent_replacement_before_revalidation_is_recovery_required() {
     let mut fixture = Fixture::open();
     let active = fixture.create();
     let parent = active.worktree_path.join("src");
@@ -827,7 +827,7 @@ fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
         .unwrap();
     let error = fixture
         .manager
-        .commit_save_with_pre_syscall_hook(
+        .commit_save_with_pre_revalidation_hook(
             &mut fixture.storage,
             &save_id,
             &expected,
@@ -856,7 +856,58 @@ fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
         .any(|id| id.starts_with("lock:")));
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
+#[test]
+fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let parent = active.worktree_path.join("src");
+    let external_parent = fixture._root.path().join("syscall-moved-parent");
+    let target = parent.join("edit.txt");
+    let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap().to_string();
+    fixture
+        .manager
+        .append_save_chunk(&save_id, 1, "world")
+        .unwrap();
+    let error = fixture
+        .manager
+        .commit_save_with_pre_syscall_hook(
+            &mut fixture.storage,
+            &save_id,
+            &expected,
+            1,
+            5,
+            "req_syscall_parent_move",
+            || fs::rename(&parent, &external_parent).unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert!(!error.outcome_unknown);
+    assert_eq!(
+        fs::read(external_parent.join("edit.txt")).unwrap(),
+        b"hello"
+    );
+    assert!(fixture
+        .storage
+        .blocker_ids()
+        .unwrap()
+        .iter()
+        .any(|id| id.starts_with("lock:")));
+}
+
+#[cfg(target_os = "macos")]
 #[test]
 fn parent_symlink_swap_at_stable_root_rename_syscall_never_writes_external_target() {
     let mut fixture = Fixture::open();

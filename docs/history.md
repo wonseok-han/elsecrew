@@ -91,6 +91,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 macOS kernel no-follow rename 보강)
+
+- **보강**: local macOS SDK와 pinned `libc`를 확인해 `renameatx_np`의 `RENAME_NOFOLLOW_ANY`를 최종 stable data-root rename에 적용했다. 두 경로는 이미 절대/`.`/`..`/NUL을 거부한 상대 경로이며 같은 보유 data-root FD에서 해석되고, 모든 symlink 추적은 커널 syscall 자체가 거부하므로 최종 사용자 공간 검증 뒤의 symlink 교체도 외부 쓰기로 이어지지 않는다. 함께 검토한 `RENAME_RESOLVE_BENEATH`는 이 런타임에서 정상 저장에도 `EINVAL`이어서 사용하지 않는다. `NOFOLLOW_ANY` 자체가 지원되지 않아 `EINVAL`이면 `renameat` fallback 없이 recovery-required로 실패하며, 비-macOS는 기존대로 ready 전에 fail-closed한다.
+- **회귀·검증**: 최종 재검증까지 끝난 실제 syscall 직전 hook에서 (1) 대상 부모를 외부로 이동하고 (2) 대상 부모를 외부 symlink로 바꾸는 두 경우를 각각 주입했다. 둘 다 macOS syscall이 실패하고 외부 byte는 그대로이며 recovery blocker가 남는다. 동일 byte 새 부모 교체는 별도 pre-revalidation hook에서 parent device/inode 불일치로 거부한다. 정상 저장을 포함한 sidecar unit 43개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
+- **다음 할 일**: 후속 hardening commit까지 포함한 head를 독립 재리뷰하고 G4 통합 여부를 판단한다. 의존성·protocol·플랫폼 gate와 push/`main` 미병합 정책은 바꾸지 않았다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 stable-root save rename P1 수정)
 
 - **수정**: 독립 리뷰에서 cap-std `Dir::rename`이 대상 부모 FD를 연 뒤 `renameat`을 호출하는 사이 그 부모가 관리 영역 밖으로 이동하면 외부의 같은 파일을 덮을 수 있음을 확인했다. 최종 저장 교체를 이동 가능한 하위 부모 FD가 아니라 시작 때 보유한 data-root FD 양쪽과 정규화한 상대 경로를 한 macOS/Unix `renameat` syscall에 직접 전달하도록 바꿨다. syscall 직전에는 stable data-root device/inode, 저장 시작 때 잡은 대상 부모 device/inode, 모든 중간 컴포넌트의 no-follow 상태와 대상 version을 재검증하며 계층 변화는 이미 저장한 recovery lock을 유지한 채 실패한다.

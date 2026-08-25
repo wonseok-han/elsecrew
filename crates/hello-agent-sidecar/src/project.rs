@@ -42,6 +42,10 @@ const SNAPSHOT_MARKER: &str = "hello-agent-snapshot-v1.json";
 const SNAPSHOT_BUNDLE: &str = ".hello-agent-snapshot.bundle";
 const GIT_CONTROL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const GIT_STDERR_TAIL_BYTES: usize = 8 * 1024;
+#[cfg(target_os = "macos")]
+// macOS SDK sys/stdio.h defines this newer flag; pinned libc exposes renameatx_np but not the
+// constant. Older kernels/filesystems return EINVAL/ENOTSUP, which remains a fail-closed save.
+const RENAME_NOFOLLOW_ANY: libc::c_uint = 0x0000_0010;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectFailure {
@@ -964,6 +968,7 @@ impl ProjectManager {
             request_id,
             failure,
             None,
+            None,
         )
     }
 
@@ -990,7 +995,36 @@ impl ProjectManager {
             total_bytes,
             request_id,
             None,
+            None,
             Some(&mut hook),
+        )
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    fn commit_save_with_pre_revalidation_hook<F>(
+        &mut self,
+        storage: &mut Storage,
+        save_id: &str,
+        expected_version: &str,
+        last_seq: u64,
+        total_bytes: u64,
+        request_id: &str,
+        mut hook: F,
+    ) -> Result<ProjectAction, ProjectFailure>
+    where
+        F: FnMut(),
+    {
+        self.commit_save_inner(
+            storage,
+            save_id,
+            expected_version,
+            last_seq,
+            total_bytes,
+            request_id,
+            None,
+            Some(&mut hook),
+            None,
         )
     }
 
@@ -1004,6 +1038,7 @@ impl ProjectManager {
         total_bytes: u64,
         request_id: &str,
         failure: Option<SaveFailurePoint>,
+        pre_revalidation_hook: Option<&mut dyn FnMut()>,
         pre_syscall_hook: Option<&mut dyn FnMut()>,
     ) -> Result<ProjectAction, ProjectFailure> {
         let mut pending = self.pending_saves.remove(save_id).ok_or_else(|| {
@@ -1017,6 +1052,7 @@ impl ProjectManager {
             total_bytes,
             request_id,
             failure,
+            pre_revalidation_hook,
             pre_syscall_hook,
             &mut pending,
         );
@@ -1041,6 +1077,7 @@ impl ProjectManager {
         total_bytes: u64,
         request_id: &str,
         failure: Option<SaveFailurePoint>,
+        pre_revalidation_hook: Option<&mut dyn FnMut()>,
         pre_syscall_hook: Option<&mut dyn FnMut()>,
         pending: &mut PendingSave,
     ) -> Result<ProjectAction, ProjectFailure> {
@@ -1181,7 +1218,12 @@ impl ProjectManager {
         drop(target_temp);
 
         self.persist_save_lock(storage, &active, save_id, request_id, true, None)?;
-        self.rename_prepared_save_from_stable_root(&prepared, expected_version, pre_syscall_hook)?;
+        self.rename_prepared_save_from_stable_root(
+            &prepared,
+            expected_version,
+            pre_revalidation_hook,
+            pre_syscall_hook,
+        )?;
         prepared.renamed = true;
         if failure == Some(SaveFailurePoint::AfterRenameBeforeDirectorySync) {
             return Err(ProjectFailure::ambiguous(
@@ -1242,11 +1284,12 @@ impl ProjectManager {
         })
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     fn rename_prepared_save_from_stable_root(
         &self,
         prepared: &PreparedTarget,
         expected_version: &str,
+        mut pre_revalidation_hook: Option<&mut dyn FnMut()>,
         mut pre_syscall_hook: Option<&mut dyn FnMut()>,
     ) -> Result<(), ProjectFailure> {
         let root_file = prepared
@@ -1263,23 +1306,27 @@ impl ProjectManager {
 
         self.validate_prepared_save_boundary(prepared, expected_version)?;
 
-        // Test-only fault injection belongs here: all syscall arguments and the stable root FD
-        // and final validation already exist, while the atomic root-relative rename has not
-        // happened yet. Production immediately repeats the no-follow validation after the hook.
-        if let Some(hook) = &mut pre_syscall_hook {
+        if let Some(hook) = &mut pre_revalidation_hook {
             hook();
         }
 
         self.validate_prepared_save_boundary(prepared, expected_version)?;
 
-        // SAFETY: both NUL-terminated paths were validated as relative normal components and
-        // both are resolved by the kernel from the same held data-root FD in this one syscall.
+        // This test-only hook is the real syscall boundary: validation, root FD, and arguments
+        // are complete. macOS still rejects every symlink component in-kernel.
+        if let Some(hook) = &mut pre_syscall_hook {
+            hook();
+        }
+
+        // SAFETY: both NUL-terminated paths were validated as relative normal components, are
+        // resolved from the same held data-root FD, and cannot follow a symlink in-kernel.
         let result = unsafe {
-            libc::renameat(
+            libc::renameatx_np(
                 root_file.as_raw_fd(),
                 source.as_ptr(),
                 root_file.as_raw_fd(),
                 destination.as_ptr(),
+                RENAME_NOFOLLOW_ANY,
             )
         };
         if result != 0 {
@@ -1291,7 +1338,7 @@ impl ProjectManager {
         Ok(())
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     fn validate_prepared_save_boundary(
         &self,
         prepared: &PreparedTarget,
@@ -1328,11 +1375,12 @@ impl ProjectManager {
         Ok(())
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "macos"))]
     fn rename_prepared_save_from_stable_root(
         &self,
         _prepared: &PreparedTarget,
         _expected_version: &str,
+        _pre_revalidation_hook: Option<&mut dyn FnMut()>,
         _pre_syscall_hook: Option<&mut dyn FnMut()>,
     ) -> Result<(), ProjectFailure> {
         Err(ProjectFailure::recovery(
@@ -1340,7 +1388,7 @@ impl ProjectManager {
         ))
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     fn verify_stable_data_root(&self, held: &Dir) -> Result<(), ProjectFailure> {
         self.verify_managed_paths()?;
         let held_metadata = held.metadata(".").map_err(|error| {
@@ -3464,7 +3512,7 @@ fn validate_relative_path(value: &str, allow_empty: bool) -> Result<(), ProjectF
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn root_relative_cstring(path: &Path) -> Result<CString, ProjectFailure> {
     if path.as_os_str().is_empty()
         || path.is_absolute()
@@ -3597,6 +3645,7 @@ fn open_real_file_at(parent: &Dir, name: &str) -> Result<CapFile, ProjectFailure
     Ok(opened)
 }
 
+#[cfg(target_os = "macos")]
 fn verify_real_parent_and_file(
     root: &Dir,
     relative: &Path,
