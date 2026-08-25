@@ -44,6 +44,7 @@ export type ProjectBridge = Pick<
   M5BridgeV2,
   | "openProject"
   | "getProjectTree"
+  | "createProjectWorktree"
   | "closeProject"
   | "readFile"
   | "beginFileSave"
@@ -90,6 +91,7 @@ export class ProjectEditorController {
   #started = false;
   #projectEpoch = 0;
   #selectionGeneration = 0;
+  #snapshotCreationQueue: Promise<void> = Promise.resolve();
   #state: EditorSnapshot = {
     project: null,
     tree: [],
@@ -152,10 +154,49 @@ export class ProjectEditorController {
     try {
       const project = await this.#bridge.openProject();
       if (selection !== this.#selectionGeneration) return;
+      const active = await this.#createSnapshot(project, selection);
+      if (!active || selection !== this.#selectionGeneration) return;
+      await Promise.all([
+        this.#loadTree(project.projectId, active.epoch, ""),
+        this.#refreshChanges(project.projectId, active.epoch),
+        this.#bridge.watchProjectFiles({ projectId: project.projectId }),
+      ]);
+    } catch (error) {
+      if (selection !== this.#selectionGeneration) return;
+      if (isPickerCancelled(error)) {
+        return;
+      }
+      this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+    }
+  }
+
+  async #createSnapshot(
+    project: { projectId: string; canonicalGitRoot: string },
+    selection: number,
+  ): Promise<{ epoch: number } | null> {
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => { release = resolve; });
+    const previous = this.#snapshotCreationQueue;
+    this.#snapshotCreationQueue = previous.then(() => next, () => next);
+    await previous;
+    try {
+      if (selection !== this.#selectionGeneration) return null;
+      const manifest = await this.#bridge.createProjectWorktree({ projectId: project.projectId });
+      if (manifest.projectId !== project.projectId || manifest.workspaceKind !== "standaloneSnapshot" || manifest.lifecycle !== "active") {
+        await this.#bridge.closeProject({ projectId: project.projectId });
+        throw new Error("snapshot manifest does not match the selected project");
+      }
+      if (selection !== this.#selectionGeneration) {
+        // project.close is an evidence-preserving abandon operation, not deletion.
+        await this.#bridge.closeProject({ projectId: project.projectId });
+        return null;
+      }
       const epoch = ++this.#projectEpoch;
       this.#set({
         project: {
           id: project.projectId,
+          // Keep the picker-approved source root as the visible project identity. The private
+          // snapshot path is never rendered; all workspace operations use this project ID.
           name: basename(project.canonicalGitRoot),
           root: project.canonicalGitRoot,
         },
@@ -168,18 +209,14 @@ export class ProjectEditorController {
         diffText: "",
         rescanRequired: false,
       });
-      await Promise.all([
-        this.#loadTree(project.projectId, epoch, ""),
-        this.#refreshChanges(project.projectId, epoch),
-        this.#bridge.watchProjectFiles({ projectId: project.projectId }),
-      ]);
+      return { epoch };
     } catch (error) {
-      if (selection !== this.#selectionGeneration) return;
-      if (isPickerCancelled(error)) {
-        this.#setNotice("프로젝트 선택을 취소했어요.");
-        return;
+      if (selection === this.#selectionGeneration) {
+        this.#setError("작업 복사본을 준비하지 못했어요. 원본 프로젝트는 건드리지 않았어요.", error);
       }
-      this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+      return null;
+    } finally {
+      release();
     }
   }
 

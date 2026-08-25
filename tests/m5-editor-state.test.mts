@@ -13,10 +13,36 @@ import {
 import { sha256FileVersionV1, type FileReadDescriptorV1, type FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 import type { DiffFileDescriptorV1, DiffSummaryV1 } from "../src/m5/contracts/diff-v1.ts";
 import type { EventV1 } from "../src/m5/contracts/protocol-v1.ts";
-import { FILE_MAX_BYTES_V1, type ProjectIdentityV1, type TreePageV1, type WatchEventV1 } from "../src/m5/contracts/project-v1.ts";
+import {
+  FILE_MAX_BYTES_V1,
+  type ProjectIdentityV1,
+  type TreePageV1,
+  type WatchEventV1,
+  type WorktreeManifestV1,
+} from "../src/m5/contracts/project-v1.ts";
 
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
+
+function snapshotManifest(projectId: string, canonicalGitRoot: string): WorktreeManifestV1 {
+  return {
+    schemaVersion: 1,
+    projectId,
+    canonicalGitRoot,
+    worktreeId: `worktree_${projectId}`,
+    worktreePath: `/private/workspaces/worktree_${projectId}`,
+    workspaceKind: "standaloneSnapshot",
+    snapshotTransport: "gitBundle",
+    sourceMutationPolicy: "forbidden",
+    objectFormat: "sha1",
+    baseCommit,
+    baseTree: "b".repeat(40),
+    sourceIdentity: `source_${projectId}`,
+    workspaceIdentity: `workspace_${projectId}`,
+    headMode: "detached",
+    lifecycle: "active",
+  };
+}
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -42,7 +68,9 @@ class FakeBridge implements ProjectBridge {
   readonly sidecarListeners = new Set<(event: EventV1) => void>();
   readonly projectListeners = new Set<(event: WatchEventV1) => void>();
   readonly appended: { seq: number; text: string }[] = [];
+  readonly calls: string[] = [];
   openError: Error | null = null;
+  createError: Error | null = null;
   classification: "utf8" | "binary" | "tooLarge" = "utf8";
   saveConflict = false;
   treeCount = 1;
@@ -56,6 +84,7 @@ class FakeBridge implements ProjectBridge {
   > | null = null;
 
   async openProject() {
+    this.calls.push("openProject");
     if (this.openError) throw this.openError;
     return {
       schemaVersion: 1 as const,
@@ -66,6 +95,7 @@ class FakeBridge implements ProjectBridge {
   }
 
   async getProjectTree() {
+    this.calls.push("getProjectTree");
     return {
       projectId: "project_01",
       parentPath: "",
@@ -78,8 +108,15 @@ class FakeBridge implements ProjectBridge {
     };
   }
 
-  async closeProject() {
-    return { projectId: "project_01", lifecycle: "abandoned" as const, physicallyDeleted: false as const };
+  async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+    this.calls.push(`createProjectWorktree:${projectId}`);
+    if (this.createError) throw this.createError;
+    return snapshotManifest(projectId, "/work/example");
+  }
+
+  async closeProject({ projectId }: { projectId: string }) {
+    this.calls.push(`closeProject:${projectId}`);
+    return { projectId, lifecycle: "abandoned" as const, physicallyDeleted: false as const };
   }
 
   async readFile({ path }: { projectId: string; path: string }) {
@@ -117,9 +154,13 @@ class FakeBridge implements ProjectBridge {
     return { outcome: "committed" as const, version: version(this.savedText) };
   }
 
-  async watchProjectFiles() { return { watching: true as const }; }
+  async watchProjectFiles() {
+    this.calls.push("watchProjectFiles");
+    return { watching: true as const };
+  }
 
   async getDiffSummary(): Promise<DiffSummaryV1> {
+    this.calls.push("getDiffSummary");
     return {
       projectId: "project_01",
       baseCommit,
@@ -236,14 +277,34 @@ test("외부 파일 event는 dirty draft를 conflicted로 바꾸되 draft를 보
   controller.dispose();
 });
 
-test("picker AbortError는 조용한 취소이고 다른 오류는 쉬운 오류와 technical detail을 남긴다", async () => {
+test("선택 뒤 스냅샷을 먼저 만들고 나서만 tree·변경·watch를 시작한다", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+
+  await controller.chooseProject();
+
+  assert.deepEqual(bridge.calls.slice(0, 5), [
+    "openProject",
+    "createProjectWorktree:project_01",
+    "getProjectTree",
+    "getDiffSummary",
+    "watchProjectFiles",
+  ]);
+  assert.equal(controller.snapshot().project?.name, "example");
+  assert.equal(controller.snapshot().project?.root, "/work/example");
+  controller.dispose();
+});
+
+test("picker AbortError는 상태를 바꾸지 않는 조용한 취소이고 open 오류는 쉬운 오류와 technical detail을 남긴다", async () => {
   const cancelled = new FakeBridge();
   cancelled.openError = Object.assign(new Error("native picker cancelled"), { name: "AbortError" });
   const cancelledController = new ProjectEditorController(cancelled);
   cancelledController.start();
   await cancelledController.chooseProject();
   assert.equal(cancelledController.snapshot().project, null);
-  assert.match(cancelledController.snapshot().notice ?? "", /취소/);
+  assert.equal(cancelledController.snapshot().notice, null);
+  assert.equal(cancelledController.snapshot().error, null);
 
   const failed = new FakeBridge();
   failed.openError = new Error("E_NOT_GIT /tmp/not-a-project");
@@ -254,6 +315,21 @@ test("picker AbortError는 조용한 취소이고 다른 오류는 쉬운 오류
   assert.match(failedController.snapshot().error?.technicalDetail ?? "", /E_NOT_GIT/);
   cancelledController.dispose();
   failedController.dispose();
+});
+
+test("스냅샷 생성 실패는 프로젝트를 활성화하거나 tree·변경·watch를 호출하지 않고 증거를 남긴다", async () => {
+  const bridge = new FakeBridge();
+  bridge.createError = new Error("E_SNAPSHOT_RECOVERY_REQUIRED export evidence is retained");
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+
+  await controller.chooseProject();
+
+  assert.equal(controller.snapshot().project, null);
+  assert.match(controller.snapshot().error?.message ?? "", /작업 복사본을 준비하지 못했어요/);
+  assert.match(controller.snapshot().error?.technicalDetail ?? "", /E_SNAPSHOT_RECOVERY_REQUIRED/);
+  assert.deepEqual(bridge.calls, ["openProject", "createProjectWorktree:project_01"]);
+  controller.dispose();
 });
 
 test("binary·tooLarge 파일, watcher overflow, bounded tree와 rename diff를 분명히 표시한다", async () => {
@@ -575,6 +651,12 @@ test("A의 늦은 tree/read/diff 결과와 오류는 B 프로젝트 상태를 �
       return this.projects[this.projectIndex++]!;
     }
 
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      const project = this.projects.find((candidate) => candidate.projectId === projectId);
+      assert.ok(project, `missing ${projectId} identity`);
+      return snapshotManifest(projectId, project.canonicalGitRoot);
+    }
+
     async getProjectTree({ projectId }: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> {
       const request = { projectId, deferred: deferred<TreePageV1>() };
       this.trees.push(request);
@@ -637,6 +719,76 @@ test("A의 늦은 tree/read/diff 결과와 오류는 B 프로젝트 상태를 �
   assert.equal(controller.snapshot().tabs.length, 0);
   assert.equal(controller.snapshot().diffFile, null);
   assert.equal(controller.snapshot().error, null);
+  controller.dispose();
+});
+
+test("A의 늦은 스냅샷 생성은 B를 덮지 않고 evidence-preserving abandon 뒤에만 B를 만든다", async () => {
+  class SnapshotRaceBridge extends FakeBridge {
+    readonly projects: ProjectIdentityV1[] = [
+      { schemaVersion: 1, projectId: "project_a", selectedPath: "/work/a", canonicalGitRoot: "/work/a" },
+      { schemaVersion: 1, projectId: "project_b", selectedPath: "/work/b", canonicalGitRoot: "/work/b" },
+    ];
+    readonly creations: { projectId: string; deferred: Deferred<WorktreeManifestV1> }[] = [];
+    projectIndex = 0;
+
+    async openProject(): Promise<ProjectIdentityV1> {
+      const project = this.projects[this.projectIndex++]!;
+      this.calls.push(`openProject:${project.projectId}`);
+      return project;
+    }
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      const request = { projectId, deferred: deferred<WorktreeManifestV1>() };
+      this.creations.push(request);
+      return request.deferred.promise;
+    }
+
+    async getProjectTree({ projectId }: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> {
+      this.calls.push(`getProjectTree:${projectId}`);
+      return { projectId, parentPath: "", entries: [], nextCursor: null };
+    }
+
+    async getDiffSummary({ projectId }: { projectId: string }): Promise<DiffSummaryV1> {
+      this.calls.push(`getDiffSummary:${projectId}`);
+      return { projectId, baseCommit, entries: [] };
+    }
+
+    async watchProjectFiles({ projectId }: { projectId: string }): Promise<{ watching: true }> {
+      this.calls.push(`watchProjectFiles:${projectId}`);
+      return { watching: true };
+    }
+  }
+
+  const bridge = new SnapshotRaceBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  const choosingA = controller.chooseProject();
+  await nextTurn();
+  assert.deepEqual(bridge.calls, ["openProject:project_a", "createProjectWorktree:project_a"]);
+
+  const choosingB = controller.chooseProject();
+  await nextTurn();
+  assert.deepEqual(bridge.calls, [
+    "openProject:project_a",
+    "createProjectWorktree:project_a",
+    "openProject:project_b",
+  ]);
+
+  bridge.creations[0]?.deferred.resolve(snapshotManifest("project_a", "/work/a"));
+  await nextTurn();
+  assert.deepEqual(bridge.calls.slice(3), ["closeProject:project_a", "createProjectWorktree:project_b"]);
+
+  bridge.creations[1]?.deferred.resolve(snapshotManifest("project_b", "/work/b"));
+  await Promise.all([choosingA, choosingB]);
+
+  assert.equal(controller.snapshot().project?.id, "project_b");
+  assert.equal(controller.snapshot().project?.root, "/work/b");
+  assert.ok(bridge.calls.includes("closeProject:project_a"));
+  assert.deepEqual(
+    bridge.calls.filter((call) => /^(getProjectTree|getDiffSummary|watchProjectFiles):/.test(call)),
+    ["getProjectTree:project_b", "getDiffSummary:project_b", "watchProjectFiles:project_b"],
+  );
   controller.dispose();
 });
 
