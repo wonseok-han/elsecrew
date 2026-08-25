@@ -266,6 +266,60 @@ impl Storage {
         Ok(blockers.into_iter().collect())
     }
 
+    pub fn projection_record(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+    ) -> Result<Option<Map<String, Value>>, SidecarError> {
+        let projection = load_projection(&self.connection)?;
+        let table = match aggregate_type {
+            "project" => &projection.projects,
+            "lock" => &projection.locks,
+            "run" => &projection.runs,
+            _ => {
+                return Err(SidecarError::new(
+                    "aggregateUnsupported",
+                    "projection lookup supports only project, lock, and run",
+                ))
+            }
+        };
+        Ok(table.get(aggregate_id).cloned())
+    }
+
+    pub fn upsert_projection_record(
+        &mut self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        operation_id: &str,
+        request_id: Option<&str>,
+        mut payload: Map<String, Value>,
+    ) -> Result<AppendOutcome, SidecarError> {
+        let sequence = self
+            .projection_record(aggregate_type, aggregate_id)?
+            .as_ref()
+            .map(|record| required_u64(record, "last_event_sequence"))
+            .transpose()?
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| SidecarError::new("sequenceOverflow", "event sequence overflow"))?;
+        payload.remove("last_event_sequence");
+        let timestamp = now_utc();
+        let event = LedgerEventV1 {
+            event_id: format!("evt_{}", Uuid::new_v4().simple()),
+            operation_id: operation_id.to_string(),
+            request_id: request_id.map(str::to_string),
+            aggregate_type: aggregate_type.to_string(),
+            aggregate_id: aggregate_id.to_string(),
+            aggregate_sequence: sequence,
+            event_type: format!("{aggregate_type}.upserted"),
+            payload_schema_version: SQLITE_SCHEMA_VERSION,
+            canonical_json_payload: canonical_json_v1(Value::Object(payload))
+                .map_err(storage_contract_error)?,
+            timestamp,
+        };
+        self.append_event(&event)
+    }
+
     fn append_recovery_events(&mut self, incoming: &[LedgerEventV1]) -> Result<(), SidecarError> {
         if incoming.is_empty() {
             return Ok(());

@@ -1,5 +1,5 @@
 use super::*;
-use hello_agent_protocol::lifecycle_v1::{validate_system_status_v1, SystemStatusV1};
+use hello_agent_protocol::lifecycle_v1::{validate_g4_system_status_v1, SystemStatusV1};
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 use std::ffi::OsString;
@@ -12,15 +12,73 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn request(instance: &str, id: &str, method: &str) -> String {
+    request_with_params(instance, id, method, serde_json::json!({}))
+}
+
+fn request_with_params(instance: &str, id: &str, method: &str, params: Value) -> String {
     encode_jsonl(&EnvelopeV1::Request(RequestV1 {
         protocol_version: PROTOCOL_VERSION,
         kind: "request".to_string(),
         sidecar_instance_id: instance.to_string(),
         request_id: id.to_string(),
         method: method.to_string(),
-        params: serde_json::json!({}),
+        params,
     }))
     .expect("encode request")
+}
+
+#[test]
+fn project_error_response_preserves_ambiguous_save_outcome() {
+    let request = RequestV1 {
+        protocol_version: PROTOCOL_VERSION,
+        kind: "request".to_string(),
+        sidecar_instance_id: "sidecar_unknown_save".to_string(),
+        request_id: "req_unknown_save".to_string(),
+        method: "file.save".to_string(),
+        params: serde_json::json!({}),
+    };
+    let response = project_error_response(
+        &request,
+        &ProjectFailure::ambiguous("rename completed before durable confirmation"),
+    );
+    assert!(!response.ok);
+    assert_eq!(
+        response.error.unwrap().outcome_unknown,
+        Some(true),
+        "library response must not downgrade an ambiguous replacement"
+    );
+}
+
+#[test]
+fn invalid_g4_params_return_structured_error_without_killing_the_session() {
+    let (_root, path) = database();
+    let instance = "sidecar_invalid_g4_params";
+    let input = format!(
+        "{}{}{}",
+        request(instance, "req_invalid", "project.open"),
+        request_with_params(
+            instance,
+            "req_invalid_save",
+            "file.save",
+            serde_json::json!({"saveId":"save_01","seq":"one","text":"hello"}),
+        ),
+        request(instance, "req_quit_after_invalid", "app.prepareQuit")
+    );
+    let mut output = Vec::new();
+    serve_stdio_with_identity(&path, Cursor::new(input), &mut output, instance.to_string())
+        .expect("invalid request is isolated to one response");
+    let envelopes = output_envelopes(&output);
+    for envelope in &envelopes[1..=2] {
+        let EnvelopeV1::Response(invalid) = envelope else {
+            panic!("invalid response")
+        };
+        assert!(!invalid.ok);
+        assert_eq!(invalid.error.as_ref().unwrap().code, "invalidParams");
+    }
+    let EnvelopeV1::Response(quit) = &envelopes[3] else {
+        panic!("quit response")
+    };
+    assert!(quit.ok);
 }
 
 fn output_envelopes(output: &[u8]) -> Vec<EnvelopeV1> {
@@ -52,7 +110,7 @@ fn ready_status_and_idempotent_prepare_quit_mark_clean_before_safe_response() {
     let status: SystemStatusV1 =
         serde_json::from_value(status_response.result.clone().expect("status result"))
             .expect("decode status");
-    validate_system_status_v1(&status).expect("valid status");
+    validate_g4_system_status_v1(&status).expect("valid status");
     for envelope in &envelopes[2..] {
         let EnvelopeV1::Response(response) = envelope else {
             panic!("quit response")
@@ -158,7 +216,7 @@ fn later_wave_method_is_structured_error_and_new_status_is_blocked_after_quit() 
     let instance = "sidecar_capabilities";
     let input = format!(
         "{}{}{}",
-        request(instance, "req_later", "project.open"),
+        request(instance, "req_later", "chat.create"),
         request(instance, "req_quit", "app.prepareQuit"),
         request(instance, "req_status_after", "system.status")
     );

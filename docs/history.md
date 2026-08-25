@@ -91,6 +91,25 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 macOS kernel no-follow rename 보강)
+
+- **보강**: local macOS SDK와 pinned `libc`를 확인해 `renameatx_np`의 `RENAME_NOFOLLOW_ANY`를 최종 stable data-root rename에 적용했다. 두 경로는 이미 절대/`.`/`..`/NUL을 거부한 상대 경로이며 같은 보유 data-root FD에서 해석되고, 모든 symlink 추적은 커널 syscall 자체가 거부하므로 최종 사용자 공간 검증 뒤의 symlink 교체도 외부 쓰기로 이어지지 않는다. 함께 검토한 `RENAME_RESOLVE_BENEATH`는 이 런타임에서 정상 저장에도 `EINVAL`이어서 사용하지 않는다. `NOFOLLOW_ANY` 자체가 지원되지 않아 `EINVAL`이면 `renameat` fallback 없이 recovery-required로 실패하며, 비-macOS는 기존대로 ready 전에 fail-closed한다.
+- **회귀·검증**: 최종 재검증까지 끝난 실제 syscall 직전 hook에서 (1) 대상 부모를 외부로 이동하고 (2) 대상 부모를 외부 symlink로 바꾸는 두 경우를 각각 주입했다. 둘 다 macOS syscall이 실패하고 외부 byte는 그대로이며 recovery blocker가 남는다. 동일 byte 새 부모 교체는 별도 pre-revalidation hook에서 parent device/inode 불일치로 거부한다. 정상 저장을 포함한 sidecar unit 43개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
+- **다음 할 일**: 후속 hardening commit까지 포함한 head를 독립 재리뷰하고 G4 통합 여부를 판단한다. 의존성·protocol·플랫폼 gate와 push/`main` 미병합 정책은 바꾸지 않았다.
+
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 stable-root save rename P1 수정)
+
+- **수정**: 독립 리뷰에서 cap-std `Dir::rename`이 대상 부모 FD를 연 뒤 `renameat`을 호출하는 사이 그 부모가 관리 영역 밖으로 이동하면 외부의 같은 파일을 덮을 수 있음을 확인했다. 최종 저장 교체를 이동 가능한 하위 부모 FD가 아니라 시작 때 보유한 data-root FD 양쪽과 정규화한 상대 경로를 한 macOS/Unix `renameat` syscall에 직접 전달하도록 바꿨다. syscall 직전에는 stable data-root device/inode, 저장 시작 때 잡은 대상 부모 device/inode, 모든 중간 컴포넌트의 no-follow 상태와 대상 version을 재검증하며 계층 변화는 이미 저장한 recovery lock을 유지한 채 실패한다.
+- **회귀·검증**: 실제 syscall 인자와 root FD를 준비하고 최종 검증까지 끝낸 뒤 실행되는 test hook에서 `src` 부모를 외부로 이동하고 동일 byte의 새 부모로 교체하는 경우와 외부 디렉터리 symlink로 교체하는 경우를 재현했다. 두 경우 모두 외부·교체 대상 byte가 그대로이고 저장은 실패하며 recovery blocker가 남았다. sidecar unit 42개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
+- **다음 할 일**: 새 원자 fix commit을 독립 재리뷰한 뒤에만 G4 통합을 진행한다. Windows/비-macOS ready gate, push와 `main` 미병합 정책은 그대로다.
+
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot Rust 안전 코어)
+
+- **한 일**: 기존 linked-worktree 구현에서 SQLite project/lock 수명주기, bounded tree/read/save/diff, capability-rooted atomic save, watcher overflow, abandon-without-delete와 stdio stream framing만 보존하고 생성 경로를 `standaloneSnapshot`/`gitBundle` 계약으로 교체했다. sidecar는 no-follow로 잡은 source root·`.git` capability에서 고정 `/usr/bin/git`과 정리된 환경으로 self-contained HEAD bundle을 제한 스트리밍하고, 앱 data의 staging capability에서 standalone repo를 만든 뒤 `ls-tree -rz`와 `cat-file --batch`의 raw committed blob/mode를 직접 materialize한다. checkout/filter/EOL/encoding/ident/LFS 변환, source remote/ref/alternate 연결과 source-dependent diff는 사용하지 않는다.
+- **안전·복구**: export 전에 DB recovery marker를 저장하고 source `HEAD/index/refs/config/objects/packed-refs/entry set` digest와 lock 수를 전후 비교한다. corrupt/truncated/oversize/shallow bundle, 2 GiB bundle·4 GiB materialized·200,000 entry·1 GiB blob·512 MiB reserve 위반, non-UTF-8/`.git`/case collision/abnormal mode를 fail-closed한다. 스트리밍 Git 자식의 stderr는 계속 배출하면서 마지막 8 KiB만 보존하고 모든 조기 반환에서 자식을 종료·회수한다. 외부 manifest·`.git` marker·workspace invariant·DB identity를 다시 읽어 composite activation evidence와 일치한 경우에만 active로 전환한다. 활성화 뒤 source가 사라져도 target object DB만으로 재시작·diff가 동작하며 Windows와 비-macOS G4 ready는 별도 게이트 전까지 차단한다.
+- **검증**: exact-pin capability 의존성과 lock을 기존 검토 버전으로 갱신했다. `cargo test -p hello-agent-sidecar --locked --offline`에서 sidecar unit 42개와 stdio integration 3개가 통과하고 sentinel child 1개만 의도대로 ignored였다. SHA-1/SHA-256, source/managed target swap, 읽기 전용 source, hook/filter/pager/diff/LFS sentinel 비실행, raw attribute bytes, executable/symlink/submodule, case collision·non-UTF-8·abnormal mode, 손상/절단/상한 bundle, source 제거 후 restart/diff, 저장 parent 이동·ambiguous recovery를 포함한다. sidecar `clippy --no-deps -D warnings`, protocol Rust 15개, TypeScript G4 6개·protocol 4개와 `git diff --check`도 통과했다. workspace 전체 clippy는 이번 변경 밖 `hello-agent-core/proctree.rs`의 기존 최신-Clippy finding 2건 때문에 별도 확인이 필요하다.
+- **다음 할 일**: 정확한 기능 commit을 독립 Rust 안전 리뷰하고, 승인되면 통합 담당이 Electron/UI 호환 변경 뒤 최신 통합 commit에서 G4 누적 하네스와 macOS QA를 수행한다. 실제 사용자 프로젝트, push, `main` 병합은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 snapshot composite activation 계약)
 
 - **리뷰 수정**: 독립 리뷰에서 개별 manifest·source trace·workspace invariant·activation 기록이 각각 유효해도 서로 다른 작업 복사본의 증거를 섞을 수 있음을 확인했다. proposed active manifest의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree를 기준으로 source, workspace, activation trace, DB, 외부 manifest, `.git` marker를 한 composite evidence validator가 모두 교차 검증한 뒤에만 active 전이를 허용하도록 Rust/TypeScript 공통 fixture를 추가했다.
