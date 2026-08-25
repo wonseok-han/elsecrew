@@ -87,6 +87,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Terra (M5 G2 통합 QA)
+
+- **판정**: 최신 통합 `cd1a9e7`은 `G2_READY`다. TypeScript protocol 4개와 Rust protocol 3개, 프런트 전체 33개, Tauri 회귀 105개/기존 13 ignored를 확인했고, 기존 macOS arm64 패키지에서 ASAR 내용과 V1 Fuse 9개가 모두 통과했다. G2는 `READY`, 아직 구현하지 않은 G3는 성공이나 skip 대신 exit 2 `NOT_READY`로 닫힌다.
+- **증거·잔여 위험**: QA 기록은 `.artifacts/m5-qa/g2-integration-cd1a9e7.md`, 누적 하네스는 `.artifacts/m5-harness/g2-contracts-2026-08-25T04-28-46-065Z.json`이다. QA sandbox의 새 Forge package 재생성은 Electron 다운로드 `fetch failed`에서 멈췄지만, 직전 동일 코드 `f3f41df`의 승인 네트워크 누적 실행과 QA의 기존 package 직접 smoke가 통과했다. Forge 8 alpha, Windows/Linux package, macOS plist hardening은 계속 후속 위험이다.
+- **다음 할 일**: G3 sidecar transport·SQLite migration/replay·preload 경계를 계약 fixture를 바꾸지 않는 별도 worktree에서 착수한다. push와 `main` 병합은 하지 않는다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G2 계약 통합·누적 하네스)
 
 - **한 일**: protocol v1 구현 `bff9b47`과 독립 리뷰 수정 `f949cca`를 재리뷰 승인 뒤 `m5/coding-agent-ide`의 `f3f41df`로 병합했다. 현재 구조를 `architecture.md`에 반영하고, 작업 중 생성될 수 있는 저장소-local `.pnpm-store/`를 Git 추적에서 제외했다. 작업자의 격리 worktree 의존성 재사용 시도가 루트 `node_modules`를 부분 재생성한 사실을 확인해 즉시 중단시켰고, 추적 파일 손상 없이 기존 디렉터리를 `/private/tmp`에 보존한 뒤 frozen install로 깨끗하게 복구했다.
