@@ -2,6 +2,11 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export default {
   packagerConfig: {
@@ -30,4 +35,16 @@ export default {
       [FuseV1Options.WasmTrapHandlers]: true,
     }),
   ],
+  hooks: {
+    packageAfterCopy: async (_config: unknown, buildPath: string) => {
+      const resourcesDirectory = resolve(buildPath, "..");
+      const stage = spawnSync(process.execPath, ["scripts/m5-stage-sidecar.mjs", resourcesDirectory], {
+        cwd: root,
+        stdio: "inherit",
+      });
+      if (stage.status !== 0 || stage.error) {
+        throw stage.error ?? new Error(`sidecar staging failed with exit ${String(stage.status)}`);
+      }
+    },
+  },
 };

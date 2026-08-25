@@ -1,9 +1,9 @@
-export {};
+import type { M5BridgeV1 } from "./contracts/bridge-v1.ts";
 
 declare global {
   interface Window {
-    m5: Readonly<{
-      version: 1;
-    }>;
+    readonly m5: Readonly<M5BridgeV1>;
   }
 }
+
+export {};

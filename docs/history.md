@@ -88,6 +88,26 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C partial-pipe 종료 수정)
+
+- **한 일**: spawn이 성공했지만 stdin/stdout/stderr pipe 중 하나가 없는 partial child를 검증 전에 main-owned client가 즉시 소유하도록 순서를 고쳤다. 따라서 pipe 검증 실패도 `terminate()` 한 번, pending fail-closed, 재시작 없음으로 같은 수명주기 규칙을 따른다. pipe listener를 붙이기 전 종료하므로 partial child에 listener가 남지 않는다.
+- **검증**: missing stderr fake child가 start reject·terminate 1회·spawn 1회·stdout/stderr data listener 0개를 보장하는 회귀를 추가했다. Electron test 11개, TypeScript no-emit, `git diff --check`를 통과했다.
+- **다음 할 일**: 이 작은 fix를 독립 재리뷰한 뒤 G3-D 실제 sidecar/package handshake를 최신 통합에서 확인한다.
+
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron bridge 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단점 3건을 닫았다. sidecar transport는 timeout, oversized/invalid stdout, session·identity corruption에서 child `terminate()`를 한 번만 호출하고 모든 pending 요청을 fail-closed로 거부한다. `system.status`의 ready identity·version·capability는 처음 `system.ready`와 정확히 같아야 하며 불일치는 연결 손상이다. stderr는 마지막 32 KiB만 유지하고 제어 문자를 정규화해 unavailable의 기술 detail에만 붙인다. 이는 token/secret redaction이 아니며 기본 UI 문구나 안전 보장으로 쓰지 않는다.
+- **종료 결정**: main-owned coordinator는 safe sidecar 응답 뒤에만 clean exit을 허용한다. 반대로 ready 전 sidecar startup이 실패한 경우에는 clean marker나 재시도를 시도하지 않고, 다음 시작의 unclean recovery 의미를 보존한 채 before-quit 재진입 없이 한 번만 unclean exit을 허용한다. ready 뒤 손상/종료는 이 예외에 포함하지 않는다.
+- **검증**: fake child timeout/oversize/unknown response/identity mismatch 종료 1회, pending reject, stderr tail truncation·control normalization, pre-ready unclean close single-flight를 포함한 Electron test 10개와 TypeScript no-emit, `git diff --check`를 통과했다. 최종 packaged handshake는 G3-D 통합 QA에서 실제 sidecar와 다시 확인한다.
+- **다음 할 일**: 이 fix commit을 독립 재리뷰하고, 승인되면 G3-D sidecar와 함께 package smoke·storage harness를 최신 통합에서 실행한다.
+
+### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron sidecar bridge)
+
+- **한 일**: Electron main/preload에 G2의 세 내부 channel만 연결했다. main은 `system.ready` first JSONL 세션, 3초 ready 제한, 1 MiB bounded stdout framing, request/response 상관관계와 method별 결과 검증을 가진 단일 sidecar client를 소유한다. 알 수 없거나 중복·불일치인 response와 sidecar 종료는 모든 pending 요청을 fail-closed로 거부하며 재시작·자동 재시도를 하지 않는다. renderer에는 versioned `M5BridgeV1`만 노출하고 정확한 listener wrapper를 해제한다.
+- **수명주기·경로 결정**: 내부 IPC는 현재 M5 main window의 top-level frame 및 production `app://m5` 또는 정확한 dev origin만 허용한다. 실제 종료는 main single-flight로 sidecar의 `app.prepareQuit`이 safe 응답을 낸 뒤에만 허용하며 error/unsafe는 앱을 유지한다. production sidecar는 환경 변수 override 없이 `process.resourcesPath/sidecar/hello-agent-sidecar[.exe]`와 `shell:false`, fixed `--stdio`만 사용한다. SQLite path 모호성을 피하기 위해 main이 `app.getPath('userData')/com.wonseokhan.helloagent/m5`를 만들고 정규화한 exact directory를 sidecar `cwd`로 고정한다. Rust sidecar는 이 cwd의 `hello-agent.sqlite3`를 사용한다.
+- **패키징·검증**: Forge package-after-copy 단계가 release sidecar를 app.asar 밖의 fixed `Resources/sidecar` 위치에 넣고 smoke가 존재와 ASAR 외부 위치를 확인한다. fake sidecar 실패 주입으로 chunked/oversized JSONL, ready timeout, pre-ready exit, unknown response, pending rejection, no retry, event unsubscribe와 source-level sender/IPC/quit/package 경계를 검사했다. `node --test --experimental-strip-types tests/m5-electron*.test.mts` 8 PASS, `npx tsc --noEmit --pretty false`, `git diff --check`를 통과했다. shared dependency runtime으로 Forge package를 실행해 main/preload/renderer Vite bundle은 성공했지만 Electron arm64 fetch가 격리 네트워크에서 실패해 sidecar 포함 최종 package smoke는 통합 worktree에서 재실행한다.
+- **다음 할 일**: 독립 코드 리뷰 후 G3 sidecar 구현과 함께 최신 통합에서 storage harness·실제 packaged sidecar smoke를 실행한다. Forge 8 alpha, Windows/Linux package와 macOS plist hardening은 계속 후속 위험이다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G3-B Rust sidecar·SQLite 구현)
 
 - **한 일**: `hello-agent-sidecar`에 bundled SQLite 단일 owner와 실제 bounded JSONL stdio 서버를 구현했다. 매 연결에서 FK를 켜고 확인한 뒤 migration·integrity·ledger replay를 수행하며, event append와 projection 갱신은 `BEGIN IMMEDIATE` 한 transaction 안에서 처리한다. 같은 operation의 immutable ledger record가 `requestId`만 다르면 no-op, 그 밖의 차이는 conflict다. projection 변조와 손상은 ready 전에 fail-closed한다.

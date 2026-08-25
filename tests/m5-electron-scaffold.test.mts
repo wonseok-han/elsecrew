@@ -79,7 +79,9 @@ test("preload, renderer, Forge 설정은 좁은 bridge와 로컬 자산만 허�
   const rendererVite = source("electron/vite.renderer.config.ts");
 
   assert.match(preload, /contextBridge\.exposeInMainWorld\("m5", bridge\)/);
-  assert.doesNotMatch(preload, /ipcRenderer|\binvoke\s*\(/);
+  assert.match(preload, /import \{ contextBridge, ipcRenderer \} from "electron"/);
+  assert.doesNotMatch(preload, /exposeInMainWorld\([^\n]+ipcRenderer/);
+  assert.doesNotMatch(preload, /\b(send|sendSync|sendTo|postMessage)\s*\(/);
   assert.doesNotMatch(html, /https?:\/\/|unsafe-eval|<script(?![^>]+src="\/bootstrap\.tsx")/);
   for (const directive of ["default-src 'self'", "script-src 'self'", "connect-src 'self'", "object-src 'none'"]) {
     assert.ok(html.includes(directive), `missing CSP directive: ${directive}`);

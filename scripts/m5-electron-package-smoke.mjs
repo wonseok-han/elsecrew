@@ -15,9 +15,13 @@ const executable = process.platform === "darwin"
 const asar = process.platform === "darwin"
   ? resolve(appBundle, "Contents", "Resources", "app.asar")
   : resolve(packageDirectory, "resources", "app.asar");
+const sidecar = process.platform === "darwin"
+  ? resolve(appBundle, "Contents", "Resources", "sidecar", "hello-agent-sidecar")
+  : resolve(packageDirectory, "resources", "sidecar", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`);
 
 await access(executable);
 await access(asar);
+await access(sidecar);
 
 const fuses = await getCurrentFuseWire(executable);
 assert.equal(fuses.version, FuseVersion.V1, "packaged executable must expose a V1 fuse wire");
@@ -41,5 +45,6 @@ for (const file of ["/.vite/build/main.js", "/.vite/build/preload.js", "/.vite/r
 }
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.js$/.test(file)), "missing packaged renderer JavaScript");
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.css$/.test(file)), "missing packaged renderer CSS");
+assert.ok(!files.some((file) => file.includes("hello-agent-sidecar")), "sidecar must remain outside app.asar");
 
 console.log(`PASS M5 Electron package smoke: ${process.platform}-${process.arch}`);
