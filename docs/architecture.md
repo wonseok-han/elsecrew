@@ -168,7 +168,7 @@ M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 방향의 첫 기반
 - 패키지는 ASAR와 V1 Fuse 9개를 명시적으로 고정한다. 실제 macOS arm64 실행 파일의 Fuse 상태와 ASAR 안 main/preload/renderer 자산을 `m5:test:electron`에서 검사한다
 - pnpm은 Forge의 패키징 요구 때문에 hoisted `node_modules`를 사용하지만, 전이 Git/tarball 차단 정책은 완화하지 않는다. Forge 7의 exotic dependency 문제를 피하려고 Forge 8 alpha와 registry-only `@electron/rebuild 4.2.0`을 exact pin했다
 
-Forge 8은 prerelease이고 실제 패키지 smoke는 현재 macOS arm64만 통과했다. Electron을 기본 실행·배포 경로로 바꾸는 결정, sidecar protocol/SQLite, Windows 패키징과 종료 계약은 후속 게이트다.
+Forge 8은 prerelease이고 실제 패키지 smoke는 현재 macOS arm64만 통과했다. 생성된 macOS `Info.plist`의 Electron 기본 ATS·미디어 권한 문자열과 자동화 환경에서 확인하지 못한 정상 Quit 경로는 출시 전 hardening 대상이다. Electron을 기본 실행·배포 경로로 바꾸는 결정, sidecar protocol/SQLite, Windows 패키징과 종료 계약은 후속 게이트다.
 
 ## 10. 미해결 사항
 

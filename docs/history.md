@@ -88,8 +88,8 @@
 
 ### 2026-08-25 · by GPT-5 Codex (M5 G1 Electron Forge 8 scaffold)
 - **한 일**: 별도 `m5/electron-forge8-spike`에서 Forge 8 alpha scaffold, local-only M5 renderer, `app://m5` ASAR handler, navigation/webview 차단, narrow preload, Fuse/ASAR packaging과 G1 실제 harness 명령을 추가했다. 독립 리뷰 P1의 `file:` 추가 권한을 V1 9개 strict fuse와 실제 package API/ASAR smoke로 닫고 승인받아 `0b9f769`까지 `m5/coding-agent-ide`에 fast-forward 통합했으며 현행 구조를 `architecture.md`에 반영했다.
-- **검증**: frozen pnpm install(hoisted), `npm test` 29 PASS, `pnpm build`, `m5:test:electron`, `m5:test:core`(171 pass/13 ignored), baseline/G1 누적 harness, macOS arm64 package와 ASAR renderer assets/Fuses 검사가 모두 PASS했고 독립 재리뷰가 APPROVE했다.
-- **다음 할 일**: 최신 통합 commit QA를 통과한 뒤 G2 protocol/SQLite 계약을 시작한다. Windows/Linux package와 실제 사용자 프로젝트·유료 에이전트 smoke는 별도 승인 범위다.
+- **검증**: 최신 통합 `8374a2a` QA가 `G1_READY`로 판정됐다. frozen pnpm install(hoisted), `npm test` 29 PASS, Tauri 105 pass/13 ignored, core 66 PASS, macOS arm64 package·ASAR renderer·V1 fuse 9개·임시 user-data 기동이 통과했으며 증거는 `.artifacts/m5-harness/g1-foundation-2026-08-25T03-48-40-974Z.json`이다.
+- **다음 할 일**: G2 protocol/SQLite 계약을 시작한다. Forge alpha, Windows/Linux package, macOS 기본 plist의 광범위한 ATS/미디어 문자열 hardening, 정상 Quit 자동화 미검증, 실제 사용자 프로젝트·유료 에이전트 smoke는 후속 또는 별도 승인 범위다.
 
 ### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust 통합·Electron 공급망 차단)
 
