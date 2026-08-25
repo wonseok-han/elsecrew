@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 패키지 capability smoke 계약 수정)
+
+- **한 일**: Electron package smoke가 G3의 두 capability만 기대하던 오래된 검사를 제거하고, `tests/fixtures/m5/project-v1/manifest.json`의 canonical G4 누적 capability 순서를 exact 비교하도록 고쳤다. 향후 capability를 늘릴 때 fixture·Rust 계약과 함께 패키지 검증도 의도적으로 갱신되도록 scaffold 정적 검사를 추가했다.
+- **검증**: focused Electron scaffold/static test, macOS package smoke, build 및 `git diff --check`를 실행한다. 패키지·lockfile·product code는 변경하지 않는다.
+- **다음 할 일**: 독립 리뷰 후 최신 `m5/coding-agent-ide`에 이 원자 commit을 통합하고 G4 cumulative QA를 재실행한다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 통합 테스트 경계 회귀 수정)
 
 - **한 일**: G4 preload의 유일한 `ipcRenderer.send`인 고정 event ACK(`eventAck`, `{ streamId, seq }`)를 허용하되 raw IPC와 다른 send 계열 노출은 계속 금지하도록 scaffold 검사를 좁혔다. 하네스 자기 검사는 G4 `READY`와 다음 미구현 G5의 `NOT_READY`/exit 2를 검증해 누적 명령 재귀를 피한다. Chromium renderer mount smoke는 기본 순수 프런트 `npm test` glob에서 빼고 G4 editor gate에서만 명시 실행하게 이름과 script를 맞췄다.
