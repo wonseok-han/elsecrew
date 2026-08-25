@@ -19,13 +19,47 @@ import {
   type ResponseV1,
 } from "../src/m5/contracts/protocol-v1.ts";
 import {
-  G3_CAPABILITIES_V1,
-  parseSystemStatusV1,
+  parseG4SystemStatusV1,
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
+import {
+  G4_CAPABILITIES_V1,
+  validateProjectCloseResultV1,
+  validateG4SafetyErrorV1,
+  validateProjectIdentityV1,
+  validateTreePageV1,
+  validateWatchEventV1,
+  validateWorktreeManifestV1,
+  type ProjectCloseResultV1,
+  type ProjectIdentityV1,
+  type TreePageV1,
+  type WatchEventV1,
+  type WorktreeManifestV1,
+} from "../src/m5/contracts/project-v1.ts";
+import {
+  sha256FileVersionV1,
+  validateFileReadDescriptorV1,
+  validateFileVersionV1,
+  type FileReadDescriptorV1,
+  type FileVersionV1,
+  type SaveChunkV1,
+  type SaveBeginV1,
+  type SaveCommitV1,
+} from "../src/m5/contracts/file-v1.ts";
+import {
+  validateDiffFileDescriptorV1,
+  validateDiffSummaryV1,
+  type DiffFileDescriptorV1,
+  type DiffSummaryV1,
+} from "../src/m5/contracts/diff-v1.ts";
 
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
 export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
+const MAX_FILE_STREAM_BYTES = 5 * 1024 * 1024;
+const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
+const MAX_ACTIVE_STREAMS = 16;
+const MAX_ACTIVE_STREAM_BYTES = 160 * 1024 * 1024;
+const MAX_STREAM_EVENTS = 256;
 
 export interface SidecarLaunchV1 {
   command: string;
@@ -49,9 +83,18 @@ export type SidecarSpawnV1 = (
 ) => SidecarProcessV1;
 
 interface PendingRequestV1 {
-  method: "system.status" | "app.prepareQuit";
-  resolve: (value: SystemStatusV1 | PrepareQuitResultV1) => void;
+  method: MethodV1;
+  saveKind: "begin" | "chunk" | "commit" | undefined;
+  params: Record<string, unknown>;
+  resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+}
+
+interface TextStreamV1 {
+  byteLength: number;
+  expectedVersion: FileVersionV1 | null;
+  text: string;
+  events: number;
 }
 
 export class SidecarClientV1 {
@@ -61,6 +104,9 @@ export class SidecarClientV1 {
   readonly #session = new ProtocolSessionV1();
   readonly #pending = new Map<string, PendingRequestV1>();
   readonly #listeners = new Set<(event: EventV1) => void>();
+  readonly #projectListeners = new Set<(event: WatchEventV1, protocol: EventV1) => void>();
+  readonly #streams = new Map<string, TextStreamV1>();
+  #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
   #process: SidecarProcessV1 | undefined;
   #stdout = Buffer.alloc(0);
@@ -140,6 +186,9 @@ export class SidecarClientV1 {
     return this.#failure;
   }
 
+  failConsumerTooSlow(): void { this.#fail(new Error("consumerTooSlow: renderer event credit exhausted")); }
+  failRendererDisconnected(): void { this.#fail(new Error("rendererDisconnected: renderer delivery ended before acknowledgement")); }
+
   get failedBeforeReady(): boolean {
     return this.#failure !== undefined && this.#lastReady === null;
   }
@@ -158,19 +207,43 @@ export class SidecarClientV1 {
     return () => this.#listeners.delete(listener);
   }
 
+  onProjectEvent(listener: (event: WatchEventV1, protocol: EventV1) => void): () => void {
+    this.#projectListeners.add(listener);
+    return () => this.#projectListeners.delete(listener);
+  }
+
   async getSystemStatus(): Promise<SystemStatusV1> {
-    return this.#request("system.status") as Promise<SystemStatusV1>;
+    return this.#request("system.status", {}) as Promise<SystemStatusV1>;
   }
 
   async prepareQuit(): Promise<PrepareQuitResultV1> {
-    return this.#request("app.prepareQuit") as Promise<PrepareQuitResultV1>;
+    return this.#request("app.prepareQuit", {}) as Promise<PrepareQuitResultV1>;
   }
 
-  #request(method: "system.status" | "app.prepareQuit"): Promise<SystemStatusV1 | PrepareQuitResultV1> {
+  openProject(selectedPath: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath }) as Promise<ProjectIdentityV1>; }
+  getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
+  createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifestV1> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifestV1>; }
+  closeProject(input: { projectId: string }): Promise<ProjectCloseResultV1> { return this.#request("project.close", input) as Promise<ProjectCloseResultV1>; }
+  readFile(input: { projectId: string; path: string }): Promise<FileReadDescriptorV1> { return this.#request("file.read", input) as Promise<FileReadDescriptorV1>; }
+  beginFileSave(input: Omit<SaveBeginV1, "saveId" | "chunkBytes">): Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }> { return this.#request("file.save", input) as Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }>; }
+  appendFileSaveChunk(input: SaveChunkV1): Promise<{ acceptedSeq: number }> { return this.#request("file.save", input) as Promise<{ acceptedSeq: number }>; }
+  commitFileSave(input: SaveCommitV1): Promise<{ outcome: "committed"; version: FileVersionV1 } | { outcome: "dirtyConflict"; error: ReturnType<typeof validateG4SafetyErrorV1> }> { return this.#request("file.save", input) as Promise<{ outcome: "committed"; version: FileVersionV1 } | { outcome: "dirtyConflict"; error: ReturnType<typeof validateG4SafetyErrorV1> }>; }
+  watchProjectFiles(input: { projectId: string }): Promise<{ watching: true }> { return this.#request("file.watch", input) as Promise<{ watching: true }>; }
+  getDiffSummary(input: { projectId: string }): Promise<DiffSummaryV1> { return this.#request("diff.getSummary", input) as Promise<DiffSummaryV1>; }
+  getDiffFile(input: { projectId: string; path: string }): Promise<DiffFileDescriptorV1> { return this.#request("diff.getFile", input) as Promise<DiffFileDescriptorV1>; }
+
+  #request(method: MethodV1, params: object): Promise<unknown> {
     if (!this.#ready) return Promise.reject(this.#failure ?? new Error("sidecar is not ready"));
     if (this.#failure) return Promise.reject(this.#failure);
     const process = this.#process;
     if (!process?.stdin?.writable) return Promise.reject(new Error("sidecar stdin is unavailable"));
+
+    let requestParams: Record<string, unknown>;
+    try {
+      requestParams = asRequestParams(params);
+    } catch (error) {
+      return Promise.reject(asError(error, "invalid sidecar request params"));
+    }
 
     const requestId = `m5_${randomUUID()}`;
     const request: RequestV1 = {
@@ -178,20 +251,23 @@ export class SidecarClientV1 {
       kind: "request",
       sidecarInstanceId: this.#ready.sidecarInstanceId,
       requestId,
-      method: method as MethodV1,
-      params: {},
+      method,
+      params: requestParams,
     };
 
     try {
       this.#session.observe(request);
       const encoded = encodeJsonl(request);
-      return new Promise<SystemStatusV1 | PrepareQuitResultV1>((resolve, reject) => {
-        this.#pending.set(requestId, { method, resolve, reject });
+      return new Promise<unknown>((resolve, reject) => {
+        this.#pending.set(requestId, {
+          method,
+          saveKind: saveKindForRequest(method, requestParams),
+          params: requestParams,
+          resolve,
+          reject,
+        });
         process.stdin?.write(encoded, "utf8", (error) => {
-          if (error) {
-            this.#pending.delete(requestId);
-            reject(asError(error, "sidecar request write failed"));
-          }
+          if (error) this.#fail(asError(error, "sidecar request write failed"));
         });
       });
     } catch (error) {
@@ -241,8 +317,8 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const ready = parseReadyPayload(envelope);
-        if (!sameStrings(ready.capabilities, G3_CAPABILITIES_V1)) {
-          throw new Error("sidecar ready capabilities do not match G3");
+        if (!sameStrings(ready.capabilities, G4_CAPABILITIES_V1)) {
+          throw new Error("sidecar ready capabilities do not match G4");
         }
         this.#ready = ready;
         this.#lastReady = ready;
@@ -250,6 +326,11 @@ export class SidecarClientV1 {
         this.#resolveReady?.(ready);
         this.#resolveReady = undefined;
         this.#rejectReady = undefined;
+      }
+      if (envelope.event === "blob.chunk") this.#acceptChunk(envelope);
+      if (["file.changed", "file.conflict", "diff.changed"].includes(envelope.event)) {
+        const watch = validateWatchEventV1(envelope.payload);
+        for (const listener of this.#projectListeners) listener(watch, envelope);
       }
       for (const listener of this.#listeners) listener(envelope);
       return;
@@ -269,7 +350,7 @@ export class SidecarClientV1 {
       return;
     }
     if (pending.method === "system.status") {
-      const status = parseSystemStatusV1(response.result);
+      const status = parseG4SystemStatusV1(response.result);
       if (status.state === "ready" && !sameReady(status.sidecar, this.#ready)) {
         throw new Error("system.status identity does not match system.ready");
       }
@@ -277,9 +358,106 @@ export class SidecarClientV1 {
       pending.resolve(status);
       return;
     }
-    const result = parsePrepareQuitResult(response);
+    const result = this.#validateResult(pending, response);
     this.#pending.delete(response.requestId);
     pending.resolve(result);
+  }
+
+  #validateResult(pending: PendingRequestV1, response: ResponseV1): unknown {
+    switch (pending.method) {
+      case "app.prepareQuit": return parsePrepareQuitResult(response);
+      case "project.open": return validateProjectIdentityV1(response.result);
+      case "project.getTree": {
+        const value = validateTreePageV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        assertResponseField(value, pending.params, "parentPath");
+        return value;
+      }
+      case "project.createWorktree": {
+        const value = validateWorktreeManifestV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        return value;
+      }
+      case "project.close": {
+        const value = validateProjectCloseResultV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        return value;
+      }
+      case "file.read": {
+        const value = validateFileReadDescriptorV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        assertResponseField(value, pending.params, "path");
+        this.#registerStream(value.byteLength, value.stream, value.version, MAX_FILE_STREAM_BYTES);
+        return value;
+      }
+      case "diff.getSummary": {
+        const value = validateDiffSummaryV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        return value;
+      }
+      case "diff.getFile": {
+        const value = validateDiffFileDescriptorV1(response.result);
+        assertResponseField(value, pending.params, "projectId");
+        assertResponseField(value, pending.params, "path");
+        // The immutable G4 diff descriptor has no digest for its rendered patch
+        // stream. Its size and protocol sequence are still bounded and checked.
+        this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
+        return value;
+      }
+      case "file.watch": return isWatchResult(response.result) ? { watching: true } : failResult("file.watch result is invalid");
+      case "file.save": return this.#validateSaveResult(pending, response.result);
+      default: return failResult(`unsupported G4 response method: ${pending.method}`);
+    }
+  }
+
+  #validateSaveResult(pending: PendingRequestV1, value: unknown): unknown {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return failResult("file.save result is invalid");
+    const result = value as Record<string, unknown>;
+    if (pending.saveKind === "begin" && validId(result.saveId) && result.chunkBytes === 256 * 1024 && Object.keys(result).length === 2) return result;
+    if (pending.saveKind === "chunk" && Number.isSafeInteger(result.acceptedSeq) && Object.keys(result).length === 1) {
+      if (result.acceptedSeq !== pending.params.seq) return failResult("file.save acceptedSeq does not match request");
+      return result;
+    }
+    if (pending.saveKind === "commit" && result.outcome === "committed" && Object.keys(result).length === 2) return { outcome: "committed", version: validateFileVersionV1(result.version) };
+    if (pending.saveKind === "commit" && result.outcome === "dirtyConflict" && Object.keys(result).length === 2) return { outcome: "dirtyConflict", error: validateG4SafetyErrorV1(result.error) };
+    return failResult("file.save result is invalid");
+  }
+
+  #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number): void {
+    if (!stream) return;
+    if (byteLength > limit) throw new Error(`sidecar text stream exceeds ${limit / 1024 / 1024} MiB client bound`);
+    if (this.#streams.size >= MAX_ACTIVE_STREAMS || this.#streamBytes + byteLength > MAX_ACTIVE_STREAM_BYTES) {
+      throw new Error("sidecar active stream bound exceeded");
+    }
+    if (this.#streams.has(stream.streamId)) throw new Error("duplicate sidecar text stream");
+    const empty = new Uint8Array();
+    if (byteLength === 0 && expectedVersion && sha256FileVersionV1(empty) !== expectedVersion) {
+      throw new Error("empty text stream hash does not match declared version");
+    }
+    if (byteLength === 0) return;
+    this.#streams.set(stream.streamId, {
+      byteLength,
+      expectedVersion,
+      text: "",
+      events: 0,
+    });
+    this.#streamBytes += byteLength;
+  }
+
+  #acceptChunk(event: EventV1): void {
+    const stream = this.#streams.get(event.streamId);
+    if (!stream) throw new Error("blob.chunk references an unknown or completed stream");
+    const text = event.payload.text;
+    if (typeof text !== "string") throw new Error("blob.chunk text is invalid");
+    if (++stream.events > MAX_STREAM_EVENTS) throw new Error("blob.chunk exceeds 256 events per stream");
+    stream.text += text;
+    const bytes = new TextEncoder().encode(stream.text);
+    if (bytes.byteLength > stream.byteLength) throw new Error("blob.chunk exceeds declared stream size");
+    if (bytes.byteLength === stream.byteLength) {
+      if (stream.expectedVersion && sha256FileVersionV1(bytes) !== stream.expectedVersion) throw new Error("blob.chunk hash does not match declared version");
+      this.#streams.delete(event.streamId);
+      this.#streamBytes -= stream.byteLength;
+    }
   }
 
   #fail(error: Error): void {
@@ -291,6 +469,8 @@ export class SidecarClientV1 {
     this.#rejectReady = undefined;
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
+    this.#streams.clear();
+    this.#streamBytes = 0;
     this.#terminateOnce();
   }
 
@@ -328,4 +508,42 @@ function normalizeDiagnostic(value: Buffer): string {
 
 function asError(value: unknown, fallback: string): Error {
   return value instanceof Error ? value : new Error(`${fallback}: ${String(value)}`);
+}
+
+function failResult(detail: string): never {
+  throw new Error(detail);
+}
+
+function saveKindForRequest(
+  method: MethodV1,
+  params: Record<string, unknown>,
+): PendingRequestV1["saveKind"] {
+  if (method !== "file.save") return undefined;
+  if (typeof params.saveId !== "string") return "begin";
+  return typeof params.text === "string" ? "chunk" : "commit";
+}
+
+function asRequestParams(value: object): Record<string, unknown> {
+  if (value === null || Array.isArray(value)) throw new Error("sidecar request params must be an object");
+  return value as Record<string, unknown>;
+}
+
+function isWatchResult(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return Object.keys(result).length === 1 && result.watching === true;
+}
+
+function validId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 512;
+}
+
+function assertResponseField(
+  result: object,
+  request: Record<string, unknown>,
+  field: string,
+): void {
+  if ((result as Record<string, unknown>)[field] !== request[field]) {
+    throw new Error(`sidecar response ${field} does not match request`);
+  }
 }
