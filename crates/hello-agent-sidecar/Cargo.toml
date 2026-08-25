@@ -6,3 +6,11 @@ publish = false
 
 [dependencies]
 hello-agent-core = { path = "../hello-agent-core" }
+hello-agent-protocol = { path = "../hello-agent-protocol" }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+serde_json = "=1.0.150"
+uuid = { version = "=1.24.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"

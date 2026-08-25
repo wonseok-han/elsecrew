@@ -1,7 +1,8 @@
-//! M5 Rust sidecar 진입점 골격.
-//!
-//! 프로토콜과 영속성은 후속 게이트에서 추가한다.
+use hello_agent_sidecar::{run_cli, STARTUP_FAILURE_EXIT_CODE};
 
-use hello_agent_core as _;
-
-fn main() {}
+fn main() {
+    if let Err(error) = run_cli(std::env::args_os()) {
+        eprintln!("{}", error.detail());
+        std::process::exit(STARTUP_FAILURE_EXIT_CODE);
+    }
+}
