@@ -22,9 +22,9 @@
                                     ↑
                           [설치 레시피 (JSON 데이터)]
 
-[M5 React renderer] → [Electron main/preload]    [Rust sidecar 골격]
-       app://m5          sandboxed                   │
-                                                  [hello-agent-core]
+[M5 React renderer] → [typed preload] → [Electron main] ⇄ JSONL v1 ⇄ [Rust sidecar]
+       app://m5           sandboxed        │                              ├─ SQLite v1
+                                           └─ 앱 수명주기                 └─ hello-agent-core
 ```
 
 | 레이어 | 역할 | 기술 |
@@ -157,21 +157,24 @@
 
 파일럿은 macOS에서만 노출한다. Windows 자손 회수는 별도 게이트이며, §7.6B 품질·비용 비교와 재작업 루프·다역할 확장은 구현되지 않았다. 상세한 결정·철회·실측 근거는 `proposals/m4-orchestration.md`에 있다.
 
-## 9. M5 G1~G2 전환 골격과 protocol 계약
+## 9. M5 G1~G3 전환 골격·protocol·저장 수명주기
 
-M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 방향의 기반과 언어 중립 protocol v1 계약까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며, 새 기능은 다음 경계 위에 추가한다.
+M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 방향의 기반, 언어 중립 protocol v1, 실제 SQLite sidecar와 최소 Electron 수명주기 연결까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며, Electron이 아직 기본 실행·배포 경로를 대체하지는 않는다.
 
 - `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
-- `crates/hello-agent-sidecar`: 공용 코어만 링크하는 compile-only 실행 골격. protocol 구현과 SQLite·실제 IPC 연결은 아직 없다
+- `crates/hello-agent-sidecar`: `--stdio`만 받는 실제 Rust 프로세스. 번들 SQLite의 단일 owner로서 모든 연결에서 foreign key를 켜고 확인한 뒤 transactional migration, integrity check, 불변 event ledger 재생과 projection 복구를 수행하고서야 `system.ready`를 보낸다. 현재 공개 method는 `system.status`와 `app.prepareQuit`뿐이다
 - `crates/hello-agent-protocol` / `src/m5/contracts/protocol-v1.ts`: 같은 golden JSONL fixture를 읽는 Rust·TypeScript protocol v1 codec과 session validator. 첫 envelope `system.ready`, sidecar instance 고정, request/response 상관관계, stream sequence, 1 MiB control line과 256 KiB text chunk를 fail-closed로 검증한다
-- `src/m5/contracts/bridge-v1.ts`: system status·안전 종료 준비·sidecar event 구독만 선언한 최소 renderer bridge 타입. preload에는 아직 연결하지 않았다
-- `tests/fixtures/m5/protocol-v1`: canonical valid transcript와 malformed·unknown·handshake/sequence/크기 위반을 양 언어에서 함께 판정하는 계약 원본
-- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징. `app://m5`의 로컬 ASAR 자산만 로드하고 sandbox·context isolation·navigation 차단을 적용한다
-- `src/m5/`: 기존 Tauri renderer와 분리된 최소 Electron renderer. preload는 버전 표식만 노출하며 범용 IPC나 파일·셸 권한을 제공하지 않는다
-- 패키지는 ASAR와 V1 Fuse 9개를 명시적으로 고정한다. 실제 macOS arm64 실행 파일의 Fuse 상태와 ASAR 안 main/preload/renderer 자산을 `m5:test:electron`에서 검사한다
+- `src/m5/contracts/{storage,lifecycle,bridge}-v1.ts`: SQLite schema/replay/recovery, 고정 실행 경로와 capability, renderer에 공개하는 system status·안전 종료 준비·sidecar event 구독 계약을 선언한다
+- `tests/fixtures/m5/{protocol,storage,lifecycle}-v1`: JSONL session 위반, SQLite 7-table migration·operation idempotency·replay/recovery, 고정 capability·경로·startup/quit 실패를 Rust와 TypeScript가 함께 판정하는 계약 원본
+- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징과 main-owned sidecar supervisor. production은 `process.resourcesPath/sidecar/hello-agent-sidecar`를 `--stdio`, `shell: false`로 한 번만 실행하며 3초 ready 제한, bounded framing, identity·response 검증, pending 요청 fail-closed, 자동 재시도 금지를 적용한다
+- Electron main은 `userData/com.wonseokhan.helloagent/m5`를 생성·정규화해 sidecar cwd로 고정하고, sidecar는 그 안의 `hello-agent.sqlite3`만 연다. DB 경로나 실행 파일의 renderer/env override는 없다
+- `electron/preload.ts`는 현재 main window의 top-level 허용 origin에서만 세 개의 고정 내부 channel을 versioned `M5BridgeV1`로 노출한다. 범용 IPC·Node·파일·셸 API는 없다
+- 앱 종료는 single-flight coordinator가 `app.prepareQuit`의 안전 응답을 받은 뒤에만 정상 종료를 허용한다. ready 이후 sidecar 손상·종료는 앱을 열린 채 fail-closed하며, ready 전 시작 실패만 clean marker를 위조하지 않고 unclean 종료를 허용한다
+- `src/m5/`: 기존 Tauri renderer와 분리된 최소 Electron renderer. 아직 프로젝트·채팅·작업 실행 화면이나 Monaco 편집 기능은 연결하지 않았다
+- 패키지는 ASAR와 V1 Fuse 9개를 명시적으로 고정하고 release sidecar를 ASAR 밖 `Resources/sidecar`에 둔다. macOS arm64 smoke가 패키지의 실제 sidecar를 임시 cwd에서 실행해 ready → status → quit → exit 0과 같은 instance의 SQLite clean marker를 확인한다
 - pnpm은 Forge의 패키징 요구 때문에 hoisted `node_modules`를 사용하지만, 전이 Git/tarball 차단 정책은 완화하지 않는다. Forge 7의 exotic dependency 문제를 피하려고 Forge 8 alpha와 registry-only `@electron/rebuild 4.2.0`을 exact pin했다
 
-Forge 8은 prerelease이고 실제 패키지 smoke는 현재 macOS arm64만 통과했다. 생성된 macOS `Info.plist`의 Electron 기본 ATS·미디어 권한 문자열과 자동화 환경에서 확인하지 못한 정상 Quit 경로는 출시 전 hardening 대상이다. Electron을 기본 실행·배포 경로로 바꾸는 결정, protocol의 실제 sidecar 전송·SQLite replay·preload 연결, Windows 패키징과 종료 계약은 후속 게이트다.
+G3의 capability는 의도적으로 status와 quit에 한정된다. schema나 protocol 목록에 필드·method가 있어도 `project.*`, `chat.*`, `run.*`, 파일·diff·Monaco 기능이 구현됐다는 뜻은 아니며 G4 이후 게이트에서 추가한다. Forge 8은 prerelease이고 실제 package/runtime smoke는 현재 macOS arm64만 통과했다. Windows sidecar 경로·패키징·SQLite locking과 M4 동등 자손 회수 계약, packaged Electron 전체의 OS Quit E2E, 생성된 macOS `Info.plist`의 Electron 기본 ATS·미디어 권한 문자열은 후속 검증·hardening 대상이다.
 
 ## 10. 미해결 사항
 
