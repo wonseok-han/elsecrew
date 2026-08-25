@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 스냅샷 선택 recovery 경계 보완)
+
+- **한 일**: 새 프로젝트 스냅샷 생성의 unbounded renderer queue를 없애고 기본 60초의 명시적 timeout과 단일 in-flight 상태를 추가했다. timeout 뒤에도 원 요청을 계속 관찰해 늦은 성공은 `project.close`로 evidence-preserving abandon하며, close 확인 전에는 모든 새 선택을 막는다. stale snapshot close 실패와 timeout 뒤 거부는 최신 화면에 초보자용 복구 안내와 technical detail을 보이고 차단을 유지한다. close 성공 뒤에도 자동 재선택/재시도하지 않는다.
+- **UI 결정**: picker 취소는 open 결과가 없으므로 기존 project/tree/tabs/notice/error를 그대로 보존한다. 실제 identity가 돌아온 뒤에만 transient message를 비운다. 선택 차단 상태는 workbench의 프로젝트 선택 버튼에도 반영한다.
+- **검증**: stale A close failure가 B의 downstream create/tree/diff/watch를 모두 막고 증거를 표면화하는 회귀, unresolved timeout·late success close·late close failure·명시적 C 재선택, 기존 화면 보존 cancellation 회귀를 editor-state에 추가했다. `pnpm run m5:test:editor`는 editor-state 22개와 Chromium Monaco smoke 1개를, `pnpm run m5:test:project`는 Node 24개·Rust 28개(+의도한 ignored 1개)·stdio 1개를 통과했고 `npx tsc --noEmit --pretty false`, `pnpm build`, `git diff --check`도 통과했다.
+- **다음 할 일**: 이 recovery 보완 commit을 독립 검토하고 최신 통합 branch에서 G4 editor/project 누적 QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 새 프로젝트 스냅샷 선행 흐름)
 
 - **한 일**: renderer의 프로젝트 선택 흐름을 native picker/open identity → `createProjectWorktree({ projectId })` → 화면 publish → tree/diff/watch 순서로 고쳤다. 화면에는 선택한 canonical Git root를 프로젝트 이름·경로로 보이고, private snapshot path는 노출하지 않으며 모든 작업은 `projectId`로만 한다. picker 취소는 상태를 바꾸지 않고, 스냅샷 생성 실패는 원본을 건드리지 않았다는 쉬운 설명과 기술 증거만 남기며 자동 재시도하지 않는다.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS,
   MAX_DIFF_STREAM_BYTES,
   MAX_PENDING_STREAMS,
   MAX_RENDERED_TREE_ENTRIES,
@@ -71,6 +72,8 @@ class FakeBridge implements ProjectBridge {
   readonly calls: string[] = [];
   openError: Error | null = null;
   createError: Error | null = null;
+  closeError: Error | null = null;
+  readError: Error | null = null;
   classification: "utf8" | "binary" | "tooLarge" = "utf8";
   saveConflict = false;
   treeCount = 1;
@@ -116,10 +119,12 @@ class FakeBridge implements ProjectBridge {
 
   async closeProject({ projectId }: { projectId: string }) {
     this.calls.push(`closeProject:${projectId}`);
+    if (this.closeError) throw this.closeError;
     return { projectId, lifecycle: "abandoned" as const, physicallyDeleted: false as const };
   }
 
   async readFile({ path }: { projectId: string; path: string }) {
+    if (this.readError) throw this.readError;
     const current = this.classification === "utf8" ? this.fileText : "";
     const currentVersion = version(current);
     if (this.classification === "utf8" && this.autoReadChunks) this.emitChunk("stream_read", current);
@@ -722,11 +727,12 @@ test("A의 늦은 tree/read/diff 결과와 오류는 B 프로젝트 상태를 �
   controller.dispose();
 });
 
-test("A의 늦은 스냅샷 생성은 B를 덮지 않고 evidence-preserving abandon 뒤에만 B를 만든다", async () => {
+test("A의 늦은 스냅샷 생성은 B를 덮지 않고 닫은 뒤 명시적인 C 선택만 허용한다", async () => {
   class SnapshotRaceBridge extends FakeBridge {
     readonly projects: ProjectIdentityV1[] = [
       { schemaVersion: 1, projectId: "project_a", selectedPath: "/work/a", canonicalGitRoot: "/work/a" },
       { schemaVersion: 1, projectId: "project_b", selectedPath: "/work/b", canonicalGitRoot: "/work/b" },
+      { schemaVersion: 1, projectId: "project_c", selectedPath: "/work/c", canonicalGitRoot: "/work/c" },
     ];
     readonly creations: { projectId: string; deferred: Deferred<WorktreeManifestV1> }[] = [];
     projectIndex = 0;
@@ -777,18 +783,191 @@ test("A의 늦은 스냅샷 생성은 B를 덮지 않고 evidence-preserving aba
 
   bridge.creations[0]?.deferred.resolve(snapshotManifest("project_a", "/work/a"));
   await nextTurn();
-  assert.deepEqual(bridge.calls.slice(3), ["closeProject:project_a", "createProjectWorktree:project_b"]);
-
-  bridge.creations[1]?.deferred.resolve(snapshotManifest("project_b", "/work/b"));
+  assert.deepEqual(bridge.calls.slice(3), ["closeProject:project_a"]);
   await Promise.all([choosingA, choosingB]);
+  await nextTurn();
+  assert.equal(controller.snapshot().project, null);
+  assert.equal(bridge.calls.includes("createProjectWorktree:project_b"), false);
 
-  assert.equal(controller.snapshot().project?.id, "project_b");
-  assert.equal(controller.snapshot().project?.root, "/work/b");
+  const choosingC = controller.chooseProject();
+  await nextTurn();
+  assert.deepEqual(bridge.calls.slice(4), ["openProject:project_c", "createProjectWorktree:project_c"]);
+  bridge.creations[1]?.deferred.resolve(snapshotManifest("project_c", "/work/c"));
+  await choosingC;
+
+  assert.equal(controller.snapshot().project?.id, "project_c");
+  assert.equal(controller.snapshot().project?.root, "/work/c");
   assert.ok(bridge.calls.includes("closeProject:project_a"));
   assert.deepEqual(
     bridge.calls.filter((call) => /^(getProjectTree|getDiffSummary|watchProjectFiles):/.test(call)),
-    ["getProjectTree:project_b", "getDiffSummary:project_b", "watchProjectFiles:project_b"],
+    ["getProjectTree:project_c", "getDiffSummary:project_c", "watchProjectFiles:project_c"],
   );
+  controller.dispose();
+});
+
+test("stale A를 닫지 못하면 최신 B에 증거를 보이고 이후 선택을 모두 막는다", async () => {
+  class CloseFailureBridge extends FakeBridge {
+    readonly projects: ProjectIdentityV1[] = [
+      { schemaVersion: 1, projectId: "project_a", selectedPath: "/work/a", canonicalGitRoot: "/work/a" },
+      { schemaVersion: 1, projectId: "project_b", selectedPath: "/work/b", canonicalGitRoot: "/work/b" },
+    ];
+    readonly creations: Deferred<WorktreeManifestV1>[] = [];
+    projectIndex = 0;
+
+    async openProject(): Promise<ProjectIdentityV1> {
+      const project = this.projects[this.projectIndex++]!;
+      this.calls.push(`openProject:${project.projectId}`);
+      return project;
+    }
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      const creation = deferred<WorktreeManifestV1>();
+      this.creations.push(creation);
+      return creation.promise;
+    }
+  }
+
+  const bridge = new CloseFailureBridge();
+  bridge.closeError = new Error("E_CLOSE_EVIDENCE_PENDING project_a");
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  const choosingA = controller.chooseProject();
+  await nextTurn();
+  const choosingB = controller.chooseProject();
+  await nextTurn();
+  bridge.creations[0]?.resolve(snapshotManifest("project_a", "/work/a"));
+  await Promise.all([choosingA, choosingB]);
+
+  assert.equal(controller.snapshot().selectionBlocked, true);
+  assert.match(controller.snapshot().error?.message ?? "", /닫았는지 확인할 수 없어요/);
+  assert.match(controller.snapshot().error?.technicalDetail ?? "", /E_CLOSE_EVIDENCE_PENDING/);
+  assert.deepEqual(bridge.calls, [
+    "openProject:project_a",
+    "createProjectWorktree:project_a",
+    "openProject:project_b",
+    "closeProject:project_a",
+  ]);
+  await controller.chooseProject();
+  assert.deepEqual(bridge.calls, [
+    "openProject:project_a",
+    "createProjectWorktree:project_a",
+    "openProject:project_b",
+    "closeProject:project_a",
+  ]);
+  assert.equal(controller.snapshot().project, null);
+  controller.dispose();
+});
+
+test("시간 초과된 A는 B를 즉시 막고, 늦은 성공을 닫은 뒤에만 명시적인 C를 허용한다", async () => {
+  class TimeoutBridge extends FakeBridge {
+    readonly projects: ProjectIdentityV1[] = [
+      { schemaVersion: 1, projectId: "project_a", selectedPath: "/work/a", canonicalGitRoot: "/work/a" },
+      { schemaVersion: 1, projectId: "project_c", selectedPath: "/work/c", canonicalGitRoot: "/work/c" },
+    ];
+    readonly creations: Deferred<WorktreeManifestV1>[] = [];
+    projectIndex = 0;
+
+    async openProject(): Promise<ProjectIdentityV1> {
+      const project = this.projects[this.projectIndex++]!;
+      this.calls.push(`openProject:${project.projectId}`);
+      return project;
+    }
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      const creation = deferred<WorktreeManifestV1>();
+      this.creations.push(creation);
+      return creation.promise;
+    }
+
+    async getProjectTree({ projectId }: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> {
+      this.calls.push(`getProjectTree:${projectId}`);
+      return { projectId, parentPath: "", entries: [], nextCursor: null };
+    }
+
+    async getDiffSummary({ projectId }: { projectId: string }): Promise<DiffSummaryV1> {
+      this.calls.push(`getDiffSummary:${projectId}`);
+      return { projectId, baseCommit, entries: [] };
+    }
+
+    async watchProjectFiles({ projectId }: { projectId: string }): Promise<{ watching: true }> {
+      this.calls.push(`watchProjectFiles:${projectId}`);
+      return { watching: true };
+    }
+  }
+
+  assert.equal(DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS, 60_000);
+  const bridge = new TimeoutBridge();
+  const controller = new ProjectEditorController(bridge, { snapshotCreationTimeoutMs: 10 });
+  controller.start();
+  const started = Date.now();
+  await controller.chooseProject();
+  assert.ok(Date.now() - started < 500, "timeout must return control without waiting for the unresolved create");
+  assert.equal(controller.snapshot().selectionBlocked, true);
+  assert.match(controller.snapshot().error?.technicalDetail ?? "", /10ms/);
+
+  await controller.chooseProject();
+  assert.deepEqual(bridge.calls, ["openProject:project_a", "createProjectWorktree:project_a"]);
+  bridge.creations[0]?.resolve(snapshotManifest("project_a", "/work/a"));
+  await nextTurn();
+  assert.equal(controller.snapshot().project, null);
+  assert.equal(controller.snapshot().selectionBlocked, false);
+  assert.ok(bridge.calls.includes("closeProject:project_a"));
+
+  const choosingC = controller.chooseProject();
+  await nextTurn();
+  bridge.creations[1]?.resolve(snapshotManifest("project_c", "/work/c"));
+  await choosingC;
+  assert.equal(controller.snapshot().project?.id, "project_c");
+  assert.deepEqual(
+    bridge.calls.filter((call) => /^(getProjectTree|getDiffSummary|watchProjectFiles):/.test(call)),
+    ["getProjectTree:project_c", "getDiffSummary:project_c", "watchProjectFiles:project_c"],
+  );
+  controller.dispose();
+});
+
+test("시간 초과 뒤 늦은 A를 닫지 못하면 차단과 기술 증거를 유지한다", async () => {
+  class LateCloseFailureBridge extends FakeBridge {
+    readonly creation = deferred<WorktreeManifestV1>();
+
+    async createProjectWorktree({ projectId }: { projectId: string }): Promise<WorktreeManifestV1> {
+      this.calls.push(`createProjectWorktree:${projectId}`);
+      return this.creation.promise;
+    }
+  }
+
+  const bridge = new LateCloseFailureBridge();
+  bridge.closeError = new Error("E_LATE_CLOSE_FAILED evidence retained");
+  const controller = new ProjectEditorController(bridge, { snapshotCreationTimeoutMs: 10 });
+  controller.start();
+  await controller.chooseProject();
+  bridge.creation.resolve(snapshotManifest("project_01", "/work/example"));
+  await nextTurn();
+
+  assert.equal(controller.snapshot().selectionBlocked, true);
+  assert.match(controller.snapshot().error?.technicalDetail ?? "", /E_LATE_CLOSE_FAILED/);
+  const calls = [...bridge.calls];
+  await controller.chooseProject();
+  assert.deepEqual(bridge.calls, calls);
+  controller.dispose();
+});
+
+test("picker 취소는 기존 프로젝트의 tree·tabs·notice·error를 그대로 보존한다", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  await controller.openFile("src/file-000.ts");
+  bridge.readError = new Error("E_READ_EVIDENCE");
+  await controller.openFile("src/other.ts");
+  bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  const before = controller.snapshot();
+  bridge.openError = Object.assign(new Error("native picker cancelled"), { name: "AbortError" });
+
+  await controller.chooseProject();
+
+  assert.deepEqual(controller.snapshot(), before);
   controller.dispose();
 });
 
