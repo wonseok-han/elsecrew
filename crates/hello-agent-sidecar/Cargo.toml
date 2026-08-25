@@ -1,0 +1,8 @@
+[package]
+name = "hello-agent-sidecar"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+hello-agent-core = { path = "../hello-agent-core" }
