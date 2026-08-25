@@ -15,10 +15,16 @@
 
 ## 2. 시스템 구성
 
+현재 배포 앱은 Tauri이고, M5 전환 골격은 같은 저장소에서 별도 Electron 진입점과 공용 Rust 안전 코어로 구성된다. 아직 Electron이 기본 실행·배포 경로를 대체하지는 않았다.
+
 ```
 [React 위저드 UI (WebView)] ←invoke/이벤트→ [Tauri Core (Rust)] → [OS 셸·파일시스템·PATH]
                                     ↑
                           [설치 레시피 (JSON 데이터)]
+
+[M5 React renderer] → [Electron main/preload]    [Rust sidecar 골격]
+       app://m5          sandboxed                   │
+                                                  [hello-agent-core]
 ```
 
 | 레이어 | 역할 | 기술 |
@@ -151,7 +157,20 @@
 
 파일럿은 macOS에서만 노출한다. Windows 자손 회수는 별도 게이트이며, §7.6B 품질·비용 비교와 재작업 루프·다역할 확장은 구현되지 않았다. 상세한 결정·철회·실측 근거는 `proposals/m4-orchestration.md`에 있다.
 
-## 9. 미해결 사항
+## 9. M5 G1 전환 골격
+
+M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 방향의 첫 기반만 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며, 새 기능은 다음 경계 위에 추가한다.
+
+- `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
+- `crates/hello-agent-sidecar`: 공용 코어만 링크하는 compile-only 실행 골격. protocol·SQLite·실제 IPC는 아직 없다
+- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징. `app://m5`의 로컬 ASAR 자산만 로드하고 sandbox·context isolation·navigation 차단을 적용한다
+- `src/m5/`: 기존 Tauri renderer와 분리된 최소 Electron renderer. preload는 버전 표식만 노출하며 범용 IPC나 파일·셸 권한을 제공하지 않는다
+- 패키지는 ASAR와 V1 Fuse 9개를 명시적으로 고정한다. 실제 macOS arm64 실행 파일의 Fuse 상태와 ASAR 안 main/preload/renderer 자산을 `m5:test:electron`에서 검사한다
+- pnpm은 Forge의 패키징 요구 때문에 hoisted `node_modules`를 사용하지만, 전이 Git/tarball 차단 정책은 완화하지 않는다. Forge 7의 exotic dependency 문제를 피하려고 Forge 8 alpha와 registry-only `@electron/rebuild 4.2.0`을 exact pin했다
+
+Forge 8은 prerelease이고 실제 패키지 smoke는 현재 macOS arm64만 통과했다. Electron을 기본 실행·배포 경로로 바꾸는 결정, sidecar protocol/SQLite, Windows 패키징과 종료 계약은 후속 게이트다.
+
+## 10. 미해결 사항
 
 - **코드 서명**: 미서명 배포 시 SmartScreen/Gatekeeper 경고. 베타는 미서명 + 통과 안내 이미지로 진행, 정식 릴리즈 전 비용(연 $250~400) 결정 — 기획 문서 참고.
 - **실기기 출시 검증**: 깨끗한 macOS 계정과 Windows 기기에서 설치·로그인·오프라인·권한 오류·한글 경로 시나리오 확인.
