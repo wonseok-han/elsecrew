@@ -138,6 +138,12 @@ G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 standalone snapshot 작업대 통합 완료)
+
+- **통합 결과**: standalone snapshot Rust 안전 코어 `0bf04f7`, Electron project/file/diff bridge `76f7eea`, Monaco 작업대 `45c33e4`, 실제 프로젝트 선택 흐름 `9ddac9b`, G4 하네스와 통합 회귀 수정을 모두 독립 리뷰 뒤 `m5/coding-agent-ide`에 병합했다. linked Git worktree 대신 held source capability에서 self-contained bundle을 만들고, 필터 없이 raw blob을 독립 저장소에 materialize하며, 저장 최종 교체는 stable data-root FD와 macOS `RENAME_NOFOLLOW_ANY`로 symlink/path swap을 fail-closed한다. 프로젝트 선택은 snapshot 게시 뒤에만 완료되고 timeout·취소·늦은 결과·화면 폐기 경합은 기존 선택과 새 화면을 오염시키지 않는다.
+- **통합 QA**: exact 통합 commit `8eff5f556d399c863e7fe18d7706c8aa3136b3ee`의 누적 증거 `.artifacts/m5-harness/g4-project-editor-2026-08-25T12-07-13-799Z.json`은 baseline~G4 11개 명령이 모두 exit 0이고 `dirtyBefore=false`다. 별도 QA도 project Node 24개·Rust 28개(+sentinel 1 ignored)·stdio 1개, editor 상태·경합 25개와 Chromium smoke 1개(총 26개), Electron 22개와 darwin-arm64 package smoke를 재검증해 `G4_READY`로 판정했으며 기록은 `.artifacts/m5-qa/g4-final-8eff5f5-fresh-project.md`다.
+- **경계·다음 할 일**: Windows/비-macOS G4는 native handle·durability·watcher 증명 전까지 ready 이전 fail-closed다. 이미 보유한 source directory 내부를 같은 사용자 권한의 악성 프로세스가 export 중 계속 바꾸는 공격은 승인된 위협 경계 밖이며, source Git metadata/object의 감지 가능한 동시 변경은 export 전후 digest와 기존 lock-file 검사로 거부한다. 커밋되지 않은 working-tree 편집은 snapshot 입력이 아니다. 다음 구현은 G5 영속 채팅·역할별 agent run·중단/복구 계약이며 실제 사용자 프로젝트, 유료 agent, push, `main` 병합은 수행하지 않았다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 Monaco 작업대 standalone snapshot 포트)
 
 - **한 일**: 독립 승인된 Monaco renderer 최종 상태를 standalone snapshot 계약 기준선으로 다시 포팅했다. 파일 탐색·Monaco 편집·hash 기반 dirty/conflict 보호·변경 diff와 로컬 worker, descriptor 전 chunk buffer, project epoch를 유지했다. protocol 호환 `worktree` API 식별자는 바꾸지 않았고, 사용자에게 보이는 작업 공간 표현은 모두 `원본과 분리된 작업 복사본`으로 명확히 했다.
