@@ -87,6 +87,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G2 계약 통합·누적 하네스)
+
+- **한 일**: protocol v1 구현 `bff9b47`과 독립 리뷰 수정 `f949cca`를 재리뷰 승인 뒤 `m5/coding-agent-ide`의 `f3f41df`로 병합했다. 현재 구조를 `architecture.md`에 반영하고, 작업 중 생성될 수 있는 저장소-local `.pnpm-store/`를 Git 추적에서 제외했다. 작업자의 격리 worktree 의존성 재사용 시도가 루트 `node_modules`를 부분 재생성한 사실을 확인해 즉시 중단시켰고, 추적 파일 손상 없이 기존 디렉터리를 `/private/tmp`에 보존한 뒤 frozen install로 깨끗하게 복구했다.
+- **검증**: 독립 재리뷰가 `f949cca`를 승인했다. 최신 통합에서 `node scripts/m5-harness.mjs --gate g2-contracts`가 PASS했고 프런트 33개, Tauri 105개/기존 13 ignored, core 66개, protocol Rust 3개·TypeScript 4개, macOS arm64 Electron package·ASAR·Fuse smoke를 누적 통과했다. 증거는 `.artifacts/m5-harness/g2-contracts-2026-08-25T04-25-54-493Z.json`이다. 일반 sandbox의 두 선행 실행은 의존성/Electron 다운로드 `ENOTFOUND`로 실패했으며 승인된 네트워크 실행에서 같은 게이트가 통과했다.
+- **다음 할 일**: 이 기록 commit의 최신 통합 SHA에서 독립 G2 QA를 수행한다. 통과하면 G3 sidecar transport·SQLite migration/replay·좁은 preload 연결을 새 작업 계약과 별도 worktree로 시작한다. 실제 유료 에이전트·사용자 프로젝트, push와 `main` 병합은 계속 하지 않는다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G2 독립 리뷰 수정)
 
 - **한 일**: 독립 리뷰의 차단 finding 3건을 별도 수정했다. `ProtocolSessionV1` 양쪽 구현은 첫 envelope 전체를 `system.ready`로 고정해 ready 전 request/response/event와 중복 ready를 거부하고, 그 ready의 `sidecarInstanceId`로 세션 신원을 bootstrap한다. Rust `seq`도 JavaScript safe integer 상한 `2^53-1`을 적용했으며, `blob.chunk` payload는 우회 필드 없이 `{ text: string }` 하나만 허용한다. 공통 fixture에 ready 전 세 방향, 중복 ready, 최대 seq/초과 seq, `data` 추가 chunk를 각각 추가하고 기존 valid transcript를 ready-first로 정렬했다.
