@@ -133,7 +133,7 @@ export function validateTreePageV1(value: unknown): TreePageV1 {
   const object = requireObject(value, "tree page");
   exactKeys(object, ["projectId", "parentPath", "entries", "nextCursor"]);
   requireId(object.projectId, "projectId");
-  requireRelativePath(object.parentPath, "parentPath", true);
+  const parentPath = requireRelativePath(object.parentPath, "parentPath", true);
   if (!Array.isArray(object.entries) || object.entries.length > TREE_PAGE_MAX_ENTRIES_V1) {
     fail("tree page exceeds 500 entries");
   }
@@ -142,6 +142,10 @@ export function validateTreePageV1(value: unknown): TreePageV1 {
     const entry = requireObject(entryValue, "tree entry");
     exactKeys(entry, ["path", "name", "kind"]);
     const path = requireRelativePath(entry.path, "tree entry path", false);
+    const childName = parentPath === "" ? path : path.startsWith(`${parentPath}/`) ? path.slice(parentPath.length + 1) : "";
+    if (childName.length === 0 || childName.includes("/")) {
+      fail("tree entry must be a direct child of parentPath");
+    }
     requireId(entry.name, "tree entry name");
     const segments = path.split("/");
     if (segments[segments.length - 1] !== entry.name) fail("tree entry name must match its path");

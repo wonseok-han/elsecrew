@@ -90,6 +90,13 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 계약 독립 리뷰 수정)
+
+- **한 일**: 독립 계약 리뷰의 차단점 3개를 닫았다. 기존 G3 lifecycle fixture·상수·validator 의미는 유지하고, G4 전용 ready/status validator가 `G4_CAPABILITIES_V1`의 누적 11개 capability를 정확한 순서와 집합으로 검사하도록 추가했다. 공통 project fixture에는 G4 ready와 ready/unavailable status의 정상·누락·초과 capability 사례를 넣었다.
+- **파일·트리 계약 강화**: `hello`의 exact bytes(`68656c6c6f`)가 실제 SHA-256 파일 버전으로 계산되는 언어 중립 golden vector를 추가했고, Rust/TypeScript가 의존성 추가 없이 digest를 직접 계산해 stale/변조 digest를 거부한다. tree page는 root와 하위 `parentPath` 모두 직계 자식 한 단계만 반환하며 nested descendant나 다른 parent의 entry를 fail-closed한다.
+- **검증**: G4 양 언어 fixture와 생성 경계, 기존 G2/G3 계약, Rust fmt/test/clippy, TypeScript no-emit, 변경 금지 fixture·`M5BridgeV1` byte 불변, `git diff --check`를 다시 확인했다.
+- **다음 할 일**: 이 fix commit을 독립 재리뷰하고 승인된 exact commit에서만 G4 Rust/Electron/renderer 구현 파동을 분기한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 계약 구현)
 
 - **한 일**: 기존 protocol/schema v1과 `M5BridgeV1`을 바꾸지 않고 G4 project/file/diff 공통 fixture, Rust payload parser, TypeScript runtime validator와 좁은 `M5BridgeV2` 타입을 추가했다. 실제 Git·파일시스템·Electron·renderer 구현은 넣지 않았다.

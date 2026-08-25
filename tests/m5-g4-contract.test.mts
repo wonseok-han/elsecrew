@@ -25,7 +25,9 @@ import {
   WORKTREE_LIFECYCLES_V1,
 } from "../src/m5/contracts/project-v1.ts";
 import {
+  sha256FileVersionV1,
   validateFileClassificationV1,
+  validateFileDigestVectorV1,
   validateFileReadDescriptorV1,
   validateSaveTranscriptV1,
 } from "../src/m5/contracts/file-v1.ts";
@@ -34,19 +36,26 @@ import {
   validateDiffSummaryV1,
 } from "../src/m5/contracts/diff-v1.ts";
 import { MAX_TEXT_CHUNK_BYTES, METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
+import {
+  parseG4ReadyPayloadV1,
+  parseG4SystemStatusV1,
+} from "../src/m5/contracts/lifecycle-v1.ts";
 
 type ValidatorName =
   | "projectIdentity"
   | "worktreeManifest"
   | "treePage"
   | "fileClassification"
+  | "fileDigest"
   | "fileRead"
   | "saveTranscript"
   | "diffSummary"
   | "diffFile"
   | "watchEvent"
   | "projectClose"
-  | "safetyError";
+  | "safetyError"
+  | "g4Ready"
+  | "g4Status";
 
 interface FixtureCase {
   name: string;
@@ -168,6 +177,8 @@ function validate(name: ValidatorName, value: unknown): unknown {
       return validateTreePageV1(value);
     case "fileClassification":
       return validateFileClassificationV1(value);
+    case "fileDigest":
+      return validateFileDigestVectorV1(value);
     case "fileRead":
       return validateFileReadDescriptorV1(value);
     case "saveTranscript":
@@ -182,6 +193,10 @@ function validate(name: ValidatorName, value: unknown): unknown {
       return validateProjectCloseResultV1(value);
     case "safetyError":
       return validateG4SafetyErrorV1(value);
+    case "g4Ready":
+      return parseG4ReadyPayloadV1(value);
+    case "g4Status":
+      return parseG4SystemStatusV1(value);
   }
 }
 
@@ -199,12 +214,13 @@ function materialize(fixture: GeneratedCase): unknown {
   }
   if (fixture.validator === "saveTranscript") {
     const text = "a".repeat(fixture.textBytes ?? 0);
+    const version = sha256FileVersionV1(new TextEncoder().encode(text));
     return {
       begin: {
         saveId: "save_generated",
         projectId: "project_generated",
         path: "src/generated.ts",
-        expectedVersion: `sha256:${"a".repeat(64)}`,
+        expectedVersion: version,
         totalBytes: fixture.textBytes,
         encoding: "utf8",
         chunkBytes: manifest.contract.textChunkMaxBytes,
@@ -212,11 +228,11 @@ function materialize(fixture: GeneratedCase): unknown {
       chunks: [{ saveId: "save_generated", seq: 1, text }],
       commit: {
         saveId: "save_generated",
-        expectedVersion: `sha256:${"a".repeat(64)}`,
+        expectedVersion: version,
         lastSeq: 1,
         totalBytes: fixture.textBytes,
       },
-      currentVersion: `sha256:${"a".repeat(64)}`,
+      currentVersion: version,
       outcome: "committed",
     };
   }

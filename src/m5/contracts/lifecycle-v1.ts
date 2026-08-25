@@ -8,6 +8,7 @@ import {
   type PrepareQuitResultV1,
   type ReadyPayloadV1,
 } from "./protocol-v1.ts";
+import { G4_CAPABILITIES_V1 } from "./project-v1.ts";
 
 export const G3_CAPABILITIES_V1 = ["system.status", "app.prepareQuit"] as const;
 
@@ -110,6 +111,22 @@ export interface PrepareQuitTraceV1 {
 }
 
 export function parseSystemStatusV1(value: unknown): SystemStatusV1 {
+  return parseSystemStatusWithCapabilitiesV1(value, G3_CAPABILITIES_V1, "G3");
+}
+
+export function parseG4SystemStatusV1(value: unknown): SystemStatusV1 {
+  return parseSystemStatusWithCapabilitiesV1(value, G4_CAPABILITIES_V1, "G4");
+}
+
+export function parseG4ReadyPayloadV1(value: unknown): ReadyPayloadV1 {
+  return validateReadyIdentityWithCapabilities(value, G4_CAPABILITIES_V1, "G4");
+}
+
+function parseSystemStatusWithCapabilitiesV1(
+  value: unknown,
+  expectedCapabilities: readonly string[],
+  generation: "G3" | "G4",
+): SystemStatusV1 {
   const status = requireObject(value, "system status");
   requireExactKeys(status, [
     "state",
@@ -129,7 +146,7 @@ export function parseSystemStatusV1(value: unknown): SystemStatusV1 {
     if (!("sidecar" in status) || "lastReadySidecar" in status || "error" in status) {
       fail("ready status must contain only current sidecar identity");
     }
-    validateReadyIdentity(status.sidecar);
+    validateReadyIdentityWithCapabilities(status.sidecar, expectedCapabilities, generation);
     const database = requireObject(status.database, "ready database status");
     requireExactKeys(database, ["health", "schemaVersion"]);
     if (database.health !== "healthy" || database.schemaVersion !== APP_SCHEMA_VERSION) {
@@ -142,7 +159,13 @@ export function parseSystemStatusV1(value: unknown): SystemStatusV1 {
     if (!("lastReadySidecar" in status) || !("error" in status) || "sidecar" in status) {
       fail("unavailable status requires last identity and structured error");
     }
-    if (status.lastReadySidecar !== null) validateReadyIdentity(status.lastReadySidecar);
+    if (status.lastReadySidecar !== null) {
+      validateReadyIdentityWithCapabilities(
+        status.lastReadySidecar,
+        expectedCapabilities,
+        generation,
+      );
+    }
     validateError(status.error);
     const database = requireObject(status.database, "unavailable database status");
     requireExactKeys(database, ["health", "schemaVersion"]);
@@ -206,6 +229,14 @@ export function validatePrepareQuitTraceV1(value: PrepareQuitTraceV1): void {
 }
 
 function validateReadyIdentity(value: unknown): ReadyPayloadV1 {
+  return validateReadyIdentityWithCapabilities(value, G3_CAPABILITIES_V1, "G3");
+}
+
+function validateReadyIdentityWithCapabilities(
+  value: unknown,
+  expectedCapabilities: readonly string[],
+  generation: "G3" | "G4",
+): ReadyPayloadV1 {
   const ready = value as ReadyPayloadV1;
   const event: EventV1 = {
     protocolVersion: PROTOCOL_VERSION,
@@ -217,8 +248,8 @@ function validateReadyIdentity(value: unknown): ReadyPayloadV1 {
     payload: value as Record<string, unknown>,
   };
   const parsed = parseReadyPayload(event);
-  if (!sameStrings(parsed.capabilities, G3_CAPABILITIES_V1)) {
-    fail("G3 ready capabilities must contain only system.status and app.prepareQuit");
+  if (!sameStrings(parsed.capabilities, expectedCapabilities)) {
+    fail(`${generation} ready capabilities do not match the exact supported method set`);
   }
   if (
     parsed.protocolVersion !== PROTOCOL_VERSION ||

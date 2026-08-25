@@ -178,7 +178,8 @@ fn materialize(fixture: &GeneratedCase) -> Value {
         }
         "saveTranscript" => {
             let text_bytes = fixture.text_bytes.unwrap_or_default();
-            let version = format!("sha256:{}", "a".repeat(64));
+            let text = "a".repeat(text_bytes);
+            let version = sha256_file_version_v1(text.as_bytes());
             json!({
                 "begin": {
                     "saveId": "save_generated",
@@ -189,7 +190,7 @@ fn materialize(fixture: &GeneratedCase) -> Value {
                     "encoding": "utf8",
                     "chunkBytes": super::super::MAX_TEXT_CHUNK_BYTES
                 },
-                "chunks": [{"saveId":"save_generated", "seq":1, "text":"a".repeat(text_bytes)}],
+                "chunks": [{"saveId":"save_generated", "seq":1, "text":text}],
                 "commit": {
                     "saveId": "save_generated",
                     "expectedVersion": version,
