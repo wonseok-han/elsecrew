@@ -9,6 +9,14 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5.6 Terra
+
+G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로 포팅했다. 호환 API 이름(`project.createWorktree`, `createProjectWorktree`, `worktreeId/path`)은 유지하되, renderer에는 고정된 V2 capability만 노출한다. native 폴더 선택, 엄격한 IPC 입력 검증, 파일 5 MiB·diff 10 MiB·동시 stream 16개·stream당 최대 256 chunk 경계, renderer ACK 기반 이벤트 credit/backpressure, 창 종료 시 미확인 전달 fail-closed, sidecar startup/quit 수명주기를 적용했다. manifest 검증은 `workspaceKind: standaloneSnapshot`을 포함한 G4 계약 validator를 그대로 사용한다.
+
+검증: G4 Electron/G3/G4/protocol focused Node tests 37/37 통과, `npx tsc --noEmit --pretty false`, `git diff --check`, darwin-arm64 Electron package 및 package smoke 통과. 첫 package 시도는 sandbox 네트워크 차단으로 실패했으며, 승인된 재시도에서 고정 Electron artifact를 내려받아 통과했다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 수행하지 않았다.
+
+**다음 할 일**: 이 feature commit의 독립 코드 리뷰 후 `m5/coding-agent-ide` 최신 통합 commit에서 G4 Rust snapshot 구현과 함께 QA한다.
+
 ---
 
 ## 프로젝트 요약 (고정)

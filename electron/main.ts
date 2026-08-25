@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, net, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
 import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,10 @@ import {
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { EventV1, PrepareQuitResultV1 } from "../src/m5/contracts/protocol-v1.ts";
+import type { WatchEventV1 } from "../src/m5/contracts/project-v1.ts";
+import type { SaveBeginV1 } from "../src/m5/contracts/file-v1.ts";
+import { M5_BRIDGE_V2_CHANNELS } from "./ipc-channels.ts";
+import { EventCreditV1 } from "./event-credit.ts";
 import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
 
@@ -22,6 +26,7 @@ const DEV_FIXTURE_SIDECAR = resolve(__dirname, "..", "..", "scripts", "m5-sideca
 
 let mainWindow: BrowserWindow | undefined;
 let sidecar: SidecarClientV1 | undefined;
+const eventCredit = new EventCreditV1((error) => sidecar?.failConsumerTooSlow());
 const quitCoordinator = new QuitCoordinatorV1({
   prepareSidecarQuit: () => {
     if (!sidecar) return Promise.reject(new Error("sidecar was not started"));
@@ -112,7 +117,7 @@ function secureWindow(window: BrowserWindow) {
   });
 }
 
-function assertCurrentMainFrame(event: Electron.IpcMainInvokeEvent): void {
+function assertCurrentMainFrame(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
   const window = mainWindow;
   if (!window || window.isDestroyed() || event.sender !== window.webContents) {
     throw new Error("M5 IPC sender is not the current main window");
@@ -147,14 +152,22 @@ function unavailableStatus(error: unknown): SystemStatusV1 {
 }
 
 function forwardSidecarEvent(event: EventV1): void {
+  if (["file.changed", "file.conflict", "diff.changed"].includes(event.event)) return;
   const window = mainWindow;
-  if (!window || window.isDestroyed()) return;
-  window.webContents.send(M5_INTERNAL_CHANNELS_V1.sidecarEvent, event);
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(event, () => window.webContents.send(M5_INTERNAL_CHANNELS_V1.sidecarEvent, event));
+}
+
+function forwardProjectEvent(event: WatchEventV1, protocolEvent: EventV1): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(protocolEvent, () => window.webContents.send(M5_BRIDGE_V2_CHANNELS.projectEvent, { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq }));
 }
 
 function startSidecar(): SidecarClientV1 {
   const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()));
   client.onEvent(forwardSidecarEvent);
+  client.onProjectEvent(forwardProjectEvent);
   void client.start().catch(() => {
     // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
   });
@@ -184,6 +197,33 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     return prepareQuit();
   });
+  ipcMain.on(M5_BRIDGE_V2_CHANNELS.eventAck, (event, ack) => {
+    assertCurrentMainFrame(event);
+    eventCredit.acknowledge(ack);
+  });
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectOpen, async (event) => {
+    assertCurrentMainFrame(event);
+    const result = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory"] });
+    if (result.canceled || result.filePaths.length !== 1) return { outcome: "cancelled" };
+    if (!sidecar) throw new Error("sidecar was not started");
+    return sidecar.openProject(result.filePaths[0]!);
+  });
+  const invoke = <T>(action: (client: SidecarClientV1, input: T) => Promise<unknown>) =>
+    async (event: Electron.IpcMainInvokeEvent, input: T) => {
+      assertCurrentMainFrame(event);
+      if (!sidecar) throw new Error("sidecar was not started");
+      return action(sidecar, input);
+    };
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectGetTree, invoke((client, input: { projectId: string; parentPath: string; cursor: string | null }) => client.getProjectTree(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectCreateWorktree, invoke((client, input: { projectId: string }) => client.createProjectWorktree(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.projectClose, invoke((client, input: { projectId: string }) => client.closeProject(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileRead, invoke((client, input: { projectId: string; path: string }) => client.readFile(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileSaveBegin, invoke((client, input: Omit<SaveBeginV1, "saveId" | "chunkBytes">) => client.beginFileSave(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileSaveChunk, invoke((client, input: { saveId: string; seq: number; text: string }) => client.appendFileSaveChunk(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileSaveCommit, invoke((client, input: { saveId: string; expectedVersion: `sha256:${string}`; lastSeq: number; totalBytes: number }) => client.commitFileSave(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileWatch, invoke((client, input: { projectId: string }) => client.watchProjectFiles(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.diffGetSummary, invoke((client, input: { projectId: string }) => client.getDiffSummary(input)));
+  ipcMain.handle(M5_BRIDGE_V2_CHANNELS.diffGetFile, invoke((client, input: { projectId: string; path: string }) => client.getDiffFile(input)));
 }
 
 async function createMainWindow() {
@@ -204,7 +244,11 @@ async function createMainWindow() {
   mainWindow = window;
   secureWindow(window);
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = undefined;
+    if (mainWindow !== window) return;
+    mainWindow = undefined;
+    if (quitCoordinator.exitAllowed) return;
+    if (eventCredit.outstanding !== 0) sidecar?.failRendererDisconnected();
+    else eventCredit.resetIfEmpty();
   });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
@@ -215,9 +259,9 @@ async function createMainWindow() {
 
 app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
-  sidecar = startSidecar();
   registerIpcHandlers();
   await createMainWindow();
+  sidecar = startSidecar();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();

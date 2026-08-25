@@ -1,0 +1,15 @@
+export const M5_BRIDGE_V2_CHANNELS = {
+  projectOpen: "m5:v2:project:open",
+  projectGetTree: "m5:v2:project:get-tree",
+  projectCreateWorktree: "m5:v2:project:create-worktree",
+  projectClose: "m5:v2:project:close",
+  fileRead: "m5:v2:file:read",
+  fileSaveBegin: "m5:v2:file:save-begin",
+  fileSaveChunk: "m5:v2:file:save-chunk",
+  fileSaveCommit: "m5:v2:file:save-commit",
+  fileWatch: "m5:v2:file:watch",
+  diffGetSummary: "m5:v2:diff:get-summary",
+  diffGetFile: "m5:v2:diff:get-file",
+  projectEvent: "m5:v2:project:event",
+  eventAck: "m5:v2:internal:event-ack",
+} as const;
