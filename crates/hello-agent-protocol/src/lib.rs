@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fmt::{self, Display};
 
 pub mod lifecycle_v1;
+pub mod project_v1;
 pub mod storage_v1;
 
 pub const PROTOCOL_VERSION: u32 = 1;

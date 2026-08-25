@@ -122,6 +122,22 @@ pub struct PrepareQuitTraceV1 {
 }
 
 pub fn validate_system_status_v1(status: &SystemStatusV1) -> Result<(), LifecycleContractError> {
+    validate_system_status_with_capabilities_v1(status, G3_CAPABILITIES_V1, "G3")
+}
+
+pub fn validate_g4_system_status_v1(status: &SystemStatusV1) -> Result<(), LifecycleContractError> {
+    validate_system_status_with_capabilities_v1(status, super::project_v1::G4_CAPABILITIES_V1, "G4")
+}
+
+pub fn validate_g4_ready_identity_v1(ready: &ReadyPayloadV1) -> Result<(), LifecycleContractError> {
+    validate_ready_identity_with_capabilities(ready, super::project_v1::G4_CAPABILITIES_V1, "G4")
+}
+
+fn validate_system_status_with_capabilities_v1(
+    status: &SystemStatusV1,
+    expected_capabilities: &[&str],
+    generation: &str,
+) -> Result<(), LifecycleContractError> {
     let (database, recovery_required, blocker_ids) = match status {
         SystemStatusV1::Ready {
             sidecar,
@@ -129,7 +145,7 @@ pub fn validate_system_status_v1(status: &SystemStatusV1) -> Result<(), Lifecycl
             recovery_required,
             blocker_ids,
         } => {
-            validate_ready_identity(sidecar)?;
+            validate_ready_identity_with_capabilities(sidecar, expected_capabilities, generation)?;
             if !matches!(
                 database,
                 DatabaseStatusV1::Healthy { schema_version }
@@ -149,7 +165,11 @@ pub fn validate_system_status_v1(status: &SystemStatusV1) -> Result<(), Lifecycl
             error,
         } => {
             if let Some(sidecar) = last_ready_sidecar {
-                validate_ready_identity(sidecar)?;
+                validate_ready_identity_with_capabilities(
+                    sidecar,
+                    expected_capabilities,
+                    generation,
+                )?;
             }
             if !matches!(database, DatabaseStatusV1::Unavailable { schema_version } if schema_version.is_none() || *schema_version == Some(super::APP_SCHEMA_VERSION))
             {
@@ -240,6 +260,14 @@ pub fn validate_prepare_quit_trace_v1(
 }
 
 fn validate_ready_identity(ready: &ReadyPayloadV1) -> Result<(), LifecycleContractError> {
+    validate_ready_identity_with_capabilities(ready, G3_CAPABILITIES_V1, "G3")
+}
+
+fn validate_ready_identity_with_capabilities(
+    ready: &ReadyPayloadV1,
+    expected_capabilities: &[&str],
+    generation: &str,
+) -> Result<(), LifecycleContractError> {
     let event = EventV1 {
         protocol_version: super::PROTOCOL_VERSION,
         kind: "event".to_string(),
@@ -256,10 +284,10 @@ fn validate_ready_identity(ready: &ReadyPayloadV1) -> Result<(), LifecycleContra
     };
     ready_payload(&event)
         .map_err(|error| LifecycleContractError::new(format!("invalid ready identity: {error}")))?;
-    if !same_strings(&ready.capabilities, G3_CAPABILITIES_V1) {
-        return Err(LifecycleContractError::new(
-            "G3 ready capabilities must contain only system.status and app.prepareQuit",
-        ));
+    if !same_strings(&ready.capabilities, expected_capabilities) {
+        return Err(LifecycleContractError::new(format!(
+            "{generation} ready capabilities do not match the exact supported method set"
+        )));
     }
     Ok(())
 }
