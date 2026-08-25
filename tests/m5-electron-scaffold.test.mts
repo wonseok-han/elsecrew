@@ -9,6 +9,15 @@ function source(path: string) {
   return readFileSync(resolve(root, path), "utf8");
 }
 
+test("패키지 smoke는 canonical G4 fixture의 누적 capability 순서를 exact 검증한다", () => {
+  const smoke = source("scripts/m5-electron-package-smoke.mjs");
+
+  assert.match(smoke, /tests\/fixtures\/m5\/project-v1\/manifest\.json/);
+  assert.match(smoke, /const expectedG4Capabilities = g4Manifest\.contract\?\.capabilities/);
+  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedG4Capabilities\)/);
+  assert.doesNotMatch(smoke, /ready\.payload\.capabilities, \["system\.status", "app\.prepareQuit"\]\)/);
+});
+
 test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명령으로 고정한다", () => {
   const manifest = JSON.parse(source("package.json"));
   const dependencies = manifest.devDependencies;

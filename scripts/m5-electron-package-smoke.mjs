@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -23,6 +23,12 @@ const asar = process.platform === "darwin"
 const sidecar = process.platform === "darwin"
   ? resolve(appBundle, "Contents", "Resources", "sidecar", "hello-agent-sidecar")
   : resolve(packageDirectory, "resources", "sidecar", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`);
+const g4Manifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/project-v1/manifest.json"), "utf8"));
+const expectedG4Capabilities = g4Manifest.contract?.capabilities;
+assert.ok(
+  Array.isArray(expectedG4Capabilities) && expectedG4Capabilities.length > 0,
+  "canonical G4 fixture must expose an ordered capability contract",
+);
 
 await access(executable);
 await access(asar);
@@ -88,7 +94,7 @@ async function smokePackagedSidecar(binary) {
     assert.ok(Number.isSafeInteger(ready.payload.pid) && ready.payload.pid > 0);
     assert.equal(typeof ready.payload.platform, "string");
     assert.ok(ready.payload.platform.length > 0);
-    assert.deepEqual(ready.payload.capabilities, ["system.status", "app.prepareQuit"]);
+    assert.deepEqual(ready.payload.capabilities, expectedG4Capabilities);
     assert.equal(ready.payload.sidecarInstanceId, ready.sidecarInstanceId);
 
     const status = await request(lines, child, ready.sidecarInstanceId, "package_status", "system.status");
