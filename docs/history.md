@@ -99,6 +99,12 @@ G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 Monaco 작업대 standalone snapshot 포트)
+
+- **한 일**: 독립 승인된 Monaco renderer 최종 상태를 standalone snapshot 계약 기준선으로 다시 포팅했다. 파일 탐색·Monaco 편집·hash 기반 dirty/conflict 보호·변경 diff와 로컬 worker, descriptor 전 chunk buffer, project epoch를 유지했다. protocol 호환 `worktree` API 식별자는 바꾸지 않았고, 사용자에게 보이는 작업 공간 표현은 모두 `원본과 분리된 작업 복사본`으로 명확히 했다.
+- **경계**: renderer는 이미 검증된 `M5BridgeV2`와 project contract만 소비하며 standalone snapshot manifest를 자체 재검증하거나 Electron bridge/Rust/protocol을 수정하지 않는다. 파일 5 MiB, diff 10 MiB, stream 256 chunk 상한과 Chromium local-worker smoke를 유지한다.
+- **검증·다음 할 일**: `pnpm run m5:test:editor`(Vite/Monaco build, state 15개와 Chromium smoke 1개), `pnpm build`, G4/Electron contract 14개, `git diff --check`를 통과했다. 이 기능 commit을 독립 리뷰한 뒤 Rust snapshot/Electron bridge와 최신 통합 commit에서 QA한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 macOS kernel no-follow rename 보강)
 
 - **보강**: local macOS SDK와 pinned `libc`를 확인해 `renameatx_np`의 `RENAME_NOFOLLOW_ANY`를 최종 stable data-root rename에 적용했다. 두 경로는 이미 절대/`.`/`..`/NUL을 거부한 상대 경로이며 같은 보유 data-root FD에서 해석되고, 모든 symlink 추적은 커널 syscall 자체가 거부하므로 최종 사용자 공간 검증 뒤의 symlink 교체도 외부 쓰기로 이어지지 않는다. 함께 검토한 `RENAME_RESOLVE_BENEATH`는 이 런타임에서 정상 저장에도 `EINVAL`이어서 사용하지 않는다. `NOFOLLOW_ANY` 자체가 지원되지 않아 `EINVAL`이면 `renameat` fallback 없이 recovery-required로 실패하며, 비-macOS는 기존대로 ready 전에 fail-closed한다.

@@ -13,5 +13,6 @@ export default defineConfig({
     // Forge packages only the project-root .vite directory. `root` is the
     // isolated M5 renderer source directory, so this must remain absolute.
     outDir: outputDirectory,
+    emptyOutDir: true,
   },
 });
