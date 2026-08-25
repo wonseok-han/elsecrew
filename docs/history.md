@@ -42,6 +42,7 @@
 - **M4 파일럿 완료(2026-08-24)**: S1·S2·§7.10 구현과 교차 검토를 마쳤고, §7.6A 사용자 실사용을 통과해 **가설 A(사용자가 에이전트 사이를 직접 중계하지 않아도 된다)가 성립**했다. §7.6B 품질·비용 비교, Windows 자손 회수, 재작업 루프·다역할 같은 고비용 확장은 보류/후속이며 M4 완료 조건이 아니다. `main`에는 미병합
 - **M5 설계 방향(2026-08-24)**: 기존 M0~M4는 최초 설정·튜토리얼로 유지하고, 이후 여러 영속 채팅, 프로젝트별 역할·에이전트·모델, Git worktree, 명확한 diff와 실제 코드 편집을 갖춘 초보자용 agent-first IDE로 확장한다. 한 채팅은 변경 목표·worktree 하나를 소유하고 역할 왕복을 한 팀 대화에 기록한다. **M5 기술 기준선은 Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar**이며 Tauri와 동시 구현하지 않는다. SQLite 이벤트 원장+projection, 앱 종료 시 안전 중단, 첫 적용은 전체 worktree+복원 지점, macOS 우선 실행을 기준으로 한다. 새 이름은 개발과 분리해 보류한다. 통합 브랜치는 `m5/coding-agent-ide`; `main` 병합은 전체 완료 뒤 사용자 승인 사항
 - **M5 직접 유사 제품 Cebus 발견(2026-08-24)**: `cebus-ai/cebus`는 여러 AI 모델의 단일 대화, 역할별 모델 배정, 채널·스레드, CLI·웹·VS Code 표면을 이미 제공해 M5 구상과 직접 겹친다. M5 벤치마크에 포함하고, 초보자 안전·격리 worktree·명시적 diff 검토와 복구 루프를 차별점으로 검증한다
+- **멀티 에이전트 저장소 운영(2026-08-25)**: 큰 구현은 오케스트레이터 1명이 통합 브랜치를 소유하고, 최대 3명의 쓰기 구현 담당이 별도 branch/worktree와 겹치지 않는 파일 소유권으로 작업한다. 계약을 먼저 고정한 뒤 파동식으로 병렬화하며, 독립 코드 리뷰와 최신 통합 commit QA를 통과한 변경만 통합한다. Codex 프로젝트 역할·모델·sandbox는 `.codex/config.toml`과 `.codex/agents/*.toml`, 상세 실행 절차는 `docs/procedures/multi-agent-orchestration.md`가 기준이다
 - **M4 Claude 실행 계약(2026-08-19 실측, CLI `2.1.235`)**: 읽기 전용을 강제하는 것은 **`--tools` 허용목록**뿐이다. `--disallowed-tools`는 거부목록이라 `Task`·`ToolSearch` 등 23개를 남기고 **거부 증거도 안 남긴다**. `--setting-sources project`는 **대상 프로젝트 설정을 로드해** 권한을 `bypassPermissions`로 승격시키고 훅·MCP를 실행시키므로 안전 정책이 아니다 → **`--setting-sources ''`** 를 쓴다. `--safe-mode`는 훅·MCP·스킬만 끄고 **권한 승격은 못 막는다**. `--permission-mode dontAsk`는 자동 승인이 아니라 거부 게이트이며 `permission_denials`로 기계 판독 가능한 증거를 남긴다. **작업 폴더 경계와 사후 빈 diff는 예방책이 아니라 사후 확인 수단**이다(경계는 복제본 *안* 쓰기를 허용한다). 실행 형식은 **`--output-format stream-json --verbose` 고정**이고 `system:init`을 fail-closed로 검증한다(`tools` 집합 일치·`permissionMode`·`mcp_servers`·`plugins`·`model`·`cwd`·`session_id`). ⚠️ **`--json-schema`는 요청하지 않은 `StructuredOutput` 도구를 주입**하므로 기대 도구 집합은 4개다. §7.10 파일럿은 **macOS 전용**(Windows 종료 계약 미실측). 상세는 `proposals/m4-orchestration.md` §7.10.1.2
 - **Claude CLI 프로세스 트리·종료(2026-08-19 실측, Codex 2차 검토 반영)**: Bash 도구 자식은 **부모 프로세스 그룹에 없고 별도 세션 리더**(`Ss`)다. 그룹 `TERM`으로 죽는 것은 Claude 자체 정리 동작일 뿐이라, **루트에 `SIGKILL`을 보내면 자손이 남는다**(15초까지 생존 확인). **종료 성공은 신호 결과가 아니라 관측으로만 판정한다** — 한 번이라도 관측한 **`(pid, 시작 시각)` 신원을 누적 추적**하고 **누적 집합 전체의 소멸을 확인**해야 성공이다. ⚠️ **루트 기준 ppid 트리 순회는 오판한다** — 부모가 먼저 죽으면 자손이 `ppid=1`로 재부모화돼 트리에서 사라지고, 살아 있는데 빈 집합으로 보인다(C6로 재현). 열거는 **살아 있는 모든 추적 대상**에서 출발한다. **PID 재사용(신원 불일치)과 조회 실패는 `poisoned`**. `killpg`의 **`EPERM`은 성공도 소멸 증거도 아니다**(좀비만 남은 그룹에서도 난다). **확인 불가는 곧 `poisoned`** — 실행과 복제본을 함께 표시하고 자동 인계·재사용을 차단하며 해소는 명시적 복구/폐기뿐. `run_in_background` 때문에 **정상 종료 경로에서도** 회수가 필요하다. 상세는 `proposals/m4-orchestration.md` §7.10.1.2 ⑤
 - **M4 §7.10 최소 자동 인계 — 구현·검토·실사용 완료**: `proctree.rs`(종료 계약, F1~F8), `claude_pilot.rs`(실행 계약 + `system:init` fail-closed), `handoff.rs`(사용자 1회 입력 → 계획 → **앱이 인계** → 구현), `App.tsx`의 macOS 전용 `HandoffPilot`으로 구성된다. 신원 조회는 `libc::proc_pidinfo(PROC_PIDTBSDINFO)`를 쓴다. 통합 테스트는 `#[ignore]`이며 **`env -i`로 돌리면 인증이 사라져 실패**한다
@@ -79,6 +80,36 @@
 ---
 
 ## 워크로그 (최신이 위)
+
+### 2026-08-25 · by GPT-5 Codex (M5.0 명세·멀티에이전트 기준선 커밋 승인)
+
+사용자가 M5 구현 전에 준비한 Electron/Rust 수직 스파이크 명세와 멀티에이전트 운영·역할 설정 묶음의 커밋을 승인했다. 커밋 범위는 `m5-electron-spike.md`, `.codex/config.toml`과 M5 역할 8개, 공통 오케스트레이션 절차, `.worktrees/` 제외 규칙, 연결된 루트 작업 규칙·문서 색인·워크로그로 한정한다. `m5/coding-agent-ide`에 M5.0 착수 기준선으로 기록하며 `main` 병합과 push는 하지 않는다.
+
+**다음 할 일**: 이 기준 commit에서 Gate 0 기준선 검증을 수행하고, 확정된 작업 계약에 따라 첫 기능 branch/worktree를 분기한다.
+
+### 2026-08-25 · by GPT-5 Codex (M5 프로젝트 서브에이전트 역할 설정)
+
+사용자 요청에 따라 문서 절차에 그치지 않고 Codex가 실제로 읽는 프로젝트 설정을 추가했다. 공식 Codex 문서에서 신뢰된 프로젝트의 `.codex/config.toml`, `.codex/agents/*.toml`, 역할별 `model`·`model_reasoning_effort`·`sandbox_mode`, 동시 thread 상한을 확인했다. 기본 동시 상한은 3개로 두고, M5 설계·계약·Electron·Rust 안전 코어·UI·독립 코드 리뷰·통합 QA·최종 게이트의 8개 역할을 책임과 권한별로 분리했다. 설계·리뷰·게이트는 읽기 전용이고, 구현 역할도 매 작업의 별도 worktree·소유 파일 계약 없이는 범위를 얻지 않는다. 직전 엔트리의 “공식 근거가 없는 임의 `.codex` 설정 키는 만들지 않았다”는 당시 조사 상태였으며, 이번에 확인한 공식 프로젝트 역할 형식으로 보완·정정한다. 아직 커밋하거나 push하지 않았다.
+
+**다음 할 일**: 설정과 M5.0 구현 명세를 함께 사용자 검토·승인한 뒤 기준 commit으로 만들고, 그 commit에서 `m5_architect`의 Gate 0 분석과 역할별 기능 worktree를 시작한다.
+
+### 2026-08-25 · by GPT-5 Codex (멀티 에이전트 저장소 설정 추가)
+
+사용자 지적대로 M5 구현 지시보다 먼저 멀티 에이전트 운영 기반을 저장소에 추가했다. 공식 OpenAI 문서가 권장하는 명시적 위임 범위·테스트 기대치·합격/중단 조건을 반영하되, 공식 근거가 없는 임의 `.codex` 설정 키는 만들지 않았다. 대신 `docs/procedures/multi-agent-orchestration.md`에 통합 담당·작업 계약·branch/worktree 격리·단일 파일 소유·파동식 실행·독립 리뷰/QA·중단 게이트를 고정하고, `AGENTS.md`/`CLAUDE.md`에 필수 규칙을 동일하게 반영했다. `.worktrees/`를 Git에서 제외하고 M5.0 명세와 문서 색인을 새 절차에 연결했다. 변경은 아직 커밋하지 않았다.
+
+**다음 할 일**: 설정 변경과 M5.0 구현 명세를 사용자 검토 뒤 기준 commit으로 만들고, 그 commit에서 Gate 0 검증과 첫 기능 worktree를 시작한다.
+
+### 2026-08-25 · by GPT-5 Codex (M5.0 멀티 에이전트 오케스트레이션 제안)
+
+M5.0 구현을 여러 에이전트에게 맡길 운영 방식을 저장소 경계·코드 리뷰·QA 관점에서 독립 검토했다. `m5/coding-agent-ide`는 통합 전용으로 두고 실제 별도 Git worktree/기능 브랜치에서 파일 소유권을 나누며, 한 명의 오케스트레이터만 통합·공유 manifest/lockfile·최종 워크로그를 관리하는 구조가 적합하다. 구현자는 동시에 2~3명으로 제한하고 `명세 커밋 → Electron scaffold/Rust core → protocol fixture 고정 → sidecar와 renderer 병렬 → 통합 hardening`의 파동식 순서를 권장한다. 각 기능은 독립 코드 리뷰와 최신 통합 브랜치 QA를 통과한 뒤에만 병합하며, 실제 macOS 에이전트 smoke는 비용·로그인·사용자 프로젝트 영향 때문에 별도 사용자 승인 게이트로 둔다. 이번에는 운영 방안만 분석했고 구현·커밋·push는 하지 않았다.
+
+**다음 할 일**: 사용자가 현재 미커밋 M5.0 명세 커밋과 기능 브랜치 커밋/통합 권한의 범위를 승인하면, 기준 커밋에서 worktree를 만들고 G0 기준선 검증부터 시작한다.
+
+### 2026-08-24 · by GPT-5 Codex (M5.0 Electron/Rust 구현 명세 초안)
+
+M5 개발의 첫 단위를 바로 착수할 수 있도록 `proposals/m5-electron-spike.md` 검토용 초안을 작성했다. Electron Forge+정확한 Vite plugin 버전 고정, sandboxed renderer와 typed preload, Rust sidecar JSONL v1, SQLite 원장/복구, 단계적 Rust core 추출을 구현 계약으로 구체화했다. 10,000개 파일·5 MiB 파일·500파일/10 MiB diff·4개 동시 chat stream의 수치 합격선과 종료/충돌/강제 종료 실패 주입도 고정했다. 현재 Rust의 `orchestration.rs`·`handoff.rs`는 Tauri 결합도가 높으므로 통째 복사하지 않고 순수 core를 점진 추출한다. 명세·색인·이 워크로그는 사용자 검토 전까지 커밋하지 않는다.
+
+**다음 할 일**: 사용자가 명세의 범위와 수치를 검토한 뒤 승인하면 `m5/coding-agent-ide`에서 첫 Electron scaffold 커밋부터 순서대로 구현한다. `main` 병합과 push는 여전히 하지 않는다.
 
 ### 2026-08-24 · by GPT-5 Codex (M5 Electron 착수 기준과 디자인 시안 확정)
 

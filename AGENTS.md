@@ -76,6 +76,7 @@
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
+- `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
 - `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
@@ -90,6 +91,20 @@
 - OpenAI 앱 번들 경로는 바뀔 수 있다. Codex CLI 감지는 `/Applications/{ChatGPT,Codex}.app/...` 후보 방식을 유지한다.
 - 프로젝트 스캔은 현재 기준 폴더의 바로 아래 하위 폴더만 검사한다.
 - `scm_breeze`의 `_safe_eval` 오류가 나면 `/usr/bin/git`, `/bin/ls`, `/usr/bin/find`처럼 절대경로를 사용한다.
+
+## 멀티 에이전트 작업 규칙
+
+여러 구현·검토 에이전트를 사용하는 작업은 `docs/procedures/multi-agent-orchestration.md`를 따른다.
+
+- M5 작업은 `.codex/agents/`의 프로젝트 전용 역할(`m5_architect`, `m5_contract_engineer`, `m5_electron_engineer`, `m5_rust_safety_engineer`, `m5_ui_engineer`, `m5_code_reviewer`, `m5_qa_executor`, `m5_gate_reviewer`) 중 책임에 맞는 것을 우선 사용한다.
+- 한 명의 오케스트레이터/통합 담당만 통합 브랜치를 수정한다.
+- 쓰기 구현 담당은 동시에 최대 3명이며, 각자 별도 Git branch와 `.worktrees/` 아래 실제 worktree를 사용한다. 같은 working directory에서 병렬 수정하지 않는다.
+- 작업 시작 전에 base commit, 소유 파일/디렉터리, 변경 금지 영역, 의존 계약, 합격 기준, 검증 명령, 중단 조건을 작업 계약으로 고정한다.
+- `package.json`/lockfile, Cargo workspace/lockfile, protocol/schema fixture, CI, `AGENTS.md`/`CLAUDE.md`는 한 파동에서 단일 소유자만 수정한다.
+- 구현 담당은 merge/rebase/cherry-pick/push하지 않는다. 통합 담당만 사용자 승인 범위 안에서 통합한다.
+- 각 기능은 다른 실행의 읽기 전용 코드 리뷰와 최신 통합 commit의 QA를 통과해야 한다. 구현자의 자체 테스트만으로 완료 처리하지 않는다.
+- 실제 유료 에이전트, 사용자 인증·프로젝트, 강제 종료, 파괴적 시험은 하위 작업자가 임의 실행하지 않고 별도 사용자 승인을 받는다.
+- 각 branch의 `docs/history.md` 기록은 통합 시 삭제하지 않고 모두 보존한다.
 
 ## 검증 명령
 
