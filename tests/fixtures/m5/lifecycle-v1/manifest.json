@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "channels": {
+    "systemGetStatus": "m5:v1:system:get-status",
+    "appPrepareQuit": "m5:v1:app:prepare-quit",
+    "sidecarEvent": "m5:v1:sidecar:event"
+  },
+  "capabilities": ["system.status", "app.prepareQuit"],
+  "dataDirectory": {
+    "base": "userData",
+    "segments": ["com.wonseokhan.helloagent", "m5"],
+    "sqliteFile": "hello-agent.sqlite3",
+    "separateFromLegacyTauriStore": true
+  },
+  "productionSidecar": {
+    "base": "process.resourcesPath",
+    "relativeSegments": ["sidecar", "hello-agent-sidecar"],
+    "windowsSuffix": ".exe",
+    "argv": ["--stdio"],
+    "shell": false,
+    "allowEnvironmentOverride": false,
+    "stdout": "pipe",
+    "stderr": "pipe"
+  },
+  "systemStatusCases": [
+    {
+      "name": "ready with healthy database and no recovery blockers",
+      "expectedValid": true,
+      "value": {
+        "state": "ready",
+        "sidecar": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        },
+        "database": { "health": "healthy", "schemaVersion": 1 },
+        "recoveryRequired": false,
+        "blockerIds": []
+      }
+    },
+    {
+      "name": "unavailable retains last ready identity and structured error",
+      "expectedValid": true,
+      "value": {
+        "state": "unavailable",
+        "lastReadySidecar": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        },
+        "database": { "health": "unavailable", "schemaVersion": 1 },
+        "recoveryRequired": true,
+        "blockerIds": ["run:run_fixture_01"],
+        "error": {
+          "code": "sidecarExited",
+          "kind": "sidecarUnavailable",
+          "detail": "sidecar exited before responding",
+          "retryable": false,
+          "outcomeUnknown": true
+        }
+      }
+    },
+    {
+      "name": "unavailable before any ready identity",
+      "expectedValid": true,
+      "value": {
+        "state": "unavailable",
+        "lastReadySidecar": null,
+        "database": { "health": "unavailable", "schemaVersion": null },
+        "recoveryRequired": false,
+        "blockerIds": [],
+        "error": {
+          "code": "startupFailed",
+          "kind": "sidecarUnavailable",
+          "detail": "migration failed before ready",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "ready cannot advertise later-wave capabilities",
+      "expectedValid": false,
+      "value": {
+        "state": "ready",
+        "sidecar": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit", "project.open"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        },
+        "database": { "health": "healthy", "schemaVersion": 1 },
+        "recoveryRequired": false,
+        "blockerIds": []
+      }
+    },
+    {
+      "name": "recovery flag and blockers cannot disagree",
+      "expectedValid": false,
+      "value": {
+        "state": "unavailable",
+        "lastReadySidecar": null,
+        "database": { "health": "unavailable", "schemaVersion": null },
+        "recoveryRequired": true,
+        "blockerIds": [],
+        "error": {
+          "code": "recoveryBlocked",
+          "kind": "recoveryRequired",
+          "detail": "recovery blocker identity was not persisted",
+          "retryable": false
+        }
+      }
+    }
+  ],
+  "startupCases": [
+    {
+      "name": "ready follows migration integrity replay and recovery",
+      "expectedValid": true,
+      "value": {
+        "outcome": "ready",
+        "steps": [
+          "sidecarStarted",
+          "migrationComplete",
+          "integrityCheckComplete",
+          "projectionReplayComplete",
+          "recoveryComplete",
+          "readyEmitted"
+        ],
+        "ready": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        }
+      }
+    },
+    {
+      "name": "pre-ready migration failure uses stderr and nonzero exit",
+      "expectedValid": true,
+      "value": {
+        "outcome": "failedBeforeReady",
+        "steps": ["sidecarStarted"],
+        "stdoutLines": [],
+        "stderr": "migration v1 failed: fixture write error",
+        "exitCode": 70
+      }
+    },
+    {
+      "name": "ready before recovery is rejected",
+      "expectedValid": false,
+      "value": {
+        "outcome": "ready",
+        "steps": [
+          "sidecarStarted",
+          "migrationComplete",
+          "integrityCheckComplete",
+          "projectionReplayComplete",
+          "readyEmitted"
+        ],
+        "ready": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        }
+      }
+    },
+    {
+      "name": "pre-ready failure cannot exit successfully",
+      "expectedValid": false,
+      "value": {
+        "outcome": "failedBeforeReady",
+        "steps": ["sidecarStarted", "migrationComplete"],
+        "stdoutLines": [],
+        "stderr": "integrity check failed",
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "pre-ready failure cannot emit stdout protocol",
+      "expectedValid": false,
+      "value": {
+        "outcome": "failedBeforeReady",
+        "steps": ["sidecarStarted"],
+        "stdoutLines": ["{\"event\":\"system.ready\"}"],
+        "stderr": "migration v1 failed",
+        "exitCode": 70
+      }
+    }
+  ],
+  "prepareQuitCases": [
+    {
+      "name": "duplicate renderer calls share one main-owned coordination",
+      "expectedValid": true,
+      "value": {
+        "rendererCallCount": 2,
+        "sidecarRequestCount": 1,
+        "steps": [
+          "mainQuitRequested",
+          "mainQuitRequestCoalesced",
+          "sidecarNewRequestsBlocked",
+          "sidecarWorkStopped",
+          "databaseCheckpointed",
+          "cleanShutdownMarked",
+          "sidecarSafeResponse",
+          "mainExitAllowed"
+        ],
+        "response": { "safeToQuit": true, "blockers": [] }
+      }
+    },
+    {
+      "name": "single renderer call still performs actual quit coordination",
+      "expectedValid": true,
+      "value": {
+        "rendererCallCount": 1,
+        "sidecarRequestCount": 1,
+        "steps": [
+          "mainQuitRequested",
+          "sidecarNewRequestsBlocked",
+          "sidecarWorkStopped",
+          "databaseCheckpointed",
+          "cleanShutdownMarked",
+          "sidecarSafeResponse",
+          "mainExitAllowed"
+        ],
+        "response": { "safeToQuit": true, "blockers": [] }
+      }
+    },
+    {
+      "name": "two sidecar requests violate single-flight",
+      "expectedValid": false,
+      "value": {
+        "rendererCallCount": 2,
+        "sidecarRequestCount": 2,
+        "steps": [
+          "mainQuitRequested",
+          "mainQuitRequestCoalesced",
+          "sidecarNewRequestsBlocked",
+          "sidecarWorkStopped",
+          "databaseCheckpointed",
+          "cleanShutdownMarked",
+          "sidecarSafeResponse",
+          "mainExitAllowed"
+        ],
+        "response": { "safeToQuit": true, "blockers": [] }
+      }
+    },
+    {
+      "name": "safe response before checkpoint and clean marker is rejected",
+      "expectedValid": false,
+      "value": {
+        "rendererCallCount": 1,
+        "sidecarRequestCount": 1,
+        "steps": [
+          "mainQuitRequested",
+          "sidecarNewRequestsBlocked",
+          "sidecarWorkStopped",
+          "sidecarSafeResponse",
+          "mainExitAllowed"
+        ],
+        "response": { "safeToQuit": true, "blockers": [] }
+      }
+    }
+  ]
+}

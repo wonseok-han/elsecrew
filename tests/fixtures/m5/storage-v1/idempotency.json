@@ -1,0 +1,38 @@
+{
+  "existing": [
+    {
+      "operation_id": "op_durable_01",
+      "request_id": "req_first_process_01",
+      "content_hash": "sha256:same-content"
+    }
+  ],
+  "cases": [
+    {
+      "name": "new operation appends",
+      "incoming": {
+        "operation_id": "op_durable_02",
+        "request_id": "req_second_process_01",
+        "content_hash": "sha256:new-content"
+      },
+      "expected": "append"
+    },
+    {
+      "name": "same operation and content is a no-op across request IDs",
+      "incoming": {
+        "operation_id": "op_durable_01",
+        "request_id": "req_after_restart_99",
+        "content_hash": "sha256:same-content"
+      },
+      "expected": "duplicateNoOp"
+    },
+    {
+      "name": "same operation with different content fails closed",
+      "incoming": {
+        "operation_id": "op_durable_01",
+        "request_id": "req_after_restart_100",
+        "content_hash": "sha256:different-content"
+      },
+      "expected": "conflict"
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "name": "unclean active run requires recovery",
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_01",
+          "clean_shutdown_at": null
+        },
+        "runs": [
+          {
+            "run_id": "run_active_01",
+            "state": "running",
+            "worktree_path": "/fixture/worktree-a"
+          },
+          {
+            "run_id": "run_done_01",
+            "state": "completed",
+            "worktree_path": "/fixture/worktree-b"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_active_01",
+            "writer_run_id": "run_active_01",
+            "poisoned": false,
+            "recovery_required": false
+          },
+          {
+            "lock_id": "lock_done_01",
+            "writer_run_id": "run_done_01",
+            "poisoned": false,
+            "recovery_required": false
+          }
+        ]
+      },
+      "expected": {
+        "recovery_required": true,
+        "blocker_ids": ["lock:lock_active_01", "run:run_active_01"],
+        "runs": [
+          {
+            "run_id": "run_active_01",
+            "state": "recoveryRequired",
+            "worktree_path": "/fixture/worktree-a"
+          },
+          {
+            "run_id": "run_done_01",
+            "state": "completed",
+            "worktree_path": "/fixture/worktree-b"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_active_01",
+            "writer_run_id": "run_active_01",
+            "poisoned": false,
+            "recovery_required": true
+          },
+          {
+            "lock_id": "lock_done_01",
+            "writer_run_id": "run_done_01",
+            "poisoned": false,
+            "recovery_required": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "clean shutdown leaves projections unchanged",
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_02",
+          "clean_shutdown_at": "2026-08-25T01:00:00Z"
+        },
+        "runs": [
+          {
+            "run_id": "run_clean_01",
+            "state": "running",
+            "worktree_path": "/fixture/worktree-c"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_clean_01",
+            "writer_run_id": "run_clean_01",
+            "poisoned": false,
+            "recovery_required": false
+          }
+        ]
+      },
+      "expected": {
+        "recovery_required": false,
+        "blocker_ids": [],
+        "runs": [
+          {
+            "run_id": "run_clean_01",
+            "state": "running",
+            "worktree_path": "/fixture/worktree-c"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_clean_01",
+            "writer_run_id": "run_clean_01",
+            "poisoned": false,
+            "recovery_required": false
+          }
+        ]
+      }
+    }
+  ]
+}
