@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
@@ -152,27 +153,52 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
 });
 
 test("모든 SQLite connection이 foreign_keys를 직접 켜고 1을 검증한 뒤에만 저장한다", () => {
-  const first = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
-  const second = new DatabaseSync(":memory:", { enableForeignKeyConstraints: false });
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g3-fk-"));
+  const databasePath = join(temporaryRoot, "storage.sqlite3");
   try {
-    const firstDefault = foreignKeysValue(first);
-    const secondDefault = foreignKeysValue(second);
-    assert.equal(firstDefault, 0);
-    assert.equal(secondDefault, 0, "another connection must not inherit migration connection state");
-    assert.throws(() => validateForeignKeysEnabledV1(firstDefault));
+    const migrationConnection = new DatabaseSync(databasePath, {
+      enableForeignKeyConstraints: false,
+    });
+    try {
+      assert.equal(foreignKeysValue(migrationConnection), 0);
+      migrationConnection.exec(
+        readFileSync(resolve(storageRoot, storageManifest.migration.file), "utf8"),
+      );
+      assert.equal(foreignKeysValue(migrationConnection), 1);
+    } finally {
+      migrationConnection.close();
+    }
 
-    first.exec(SQLITE_CONNECTION_V1.enableStatement);
-    const verified = foreignKeysValue(first);
-    validateForeignKeysEnabledV1(verified);
-    assert.equal(verified, SQLITE_CONNECTION_V1.requiredValue);
-    first.exec(
-      "CREATE TABLE parent(id TEXT PRIMARY KEY);" +
-        "CREATE TABLE child(parent_id TEXT REFERENCES parent(id));",
-    );
-    assert.throws(() => first.exec("INSERT INTO child(parent_id) VALUES ('orphan');"));
+    const runtimeConnection = new DatabaseSync(databasePath, {
+      enableForeignKeyConstraints: false,
+    });
+    try {
+      const runtimeDefault = foreignKeysValue(runtimeConnection);
+      assert.equal(runtimeDefault, 0, "migration connection state must not persist globally");
+      assert.throws(() => validateForeignKeysEnabledV1(runtimeDefault));
+
+      runtimeConnection.exec(SQLITE_CONNECTION_V1.enableStatement);
+      const verified = foreignKeysValue(runtimeConnection);
+      validateForeignKeysEnabledV1(verified);
+      assert.equal(verified, SQLITE_CONNECTION_V1.requiredValue);
+      assert.throws(() =>
+        runtimeConnection.exec(
+          "INSERT INTO runs(" +
+            "run_id, chat_id, state, worktree_path, projection_json, last_event_sequence" +
+            ") VALUES (" +
+            "'run_orphan_01', 'chat_missing_01', 'running', NULL, '{}', 1" +
+            ");",
+        ),
+      );
+      const count = runtimeConnection.prepare("SELECT count(*) AS count FROM runs;").get() as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(Number(count?.count), 0);
+    } finally {
+      runtimeConnection.close();
+    }
   } finally {
-    first.close();
-    second.close();
+    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
