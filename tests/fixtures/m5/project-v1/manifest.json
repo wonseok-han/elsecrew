@@ -96,6 +96,7 @@
     ]
   },
   "casesFile": "cases.json",
+  "activationEvidenceFile": "activation-evidence.json",
   "generatedCases": [
     {"name":"tree-page-at-limit","validator":"treePage","entryCount":500,"expectedValid":true},
     {"name":"tree-page-over-limit","validator":"treePage","entryCount":501,"expectedValid":false},

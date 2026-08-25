@@ -91,6 +91,12 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 snapshot composite activation 계약)
+
+- **리뷰 수정**: 독립 리뷰에서 개별 manifest·source trace·workspace invariant·activation 기록이 각각 유효해도 서로 다른 작업 복사본의 증거를 섞을 수 있음을 확인했다. proposed active manifest의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree를 기준으로 source, workspace, activation trace, DB, 외부 manifest, `.git` marker를 한 composite evidence validator가 모두 교차 검증한 뒤에만 active 전이를 허용하도록 Rust/TypeScript 공통 fixture를 추가했다.
+- **수치 경계**: snapshot 계약의 모든 JSON 정수는 음수가 아닌 JavaScript safe integer(`0..2^53-1`)로 제한한다. 특히 materialization 뒤 disk bytes는 `2^53-1`을 승인하고 `2^53`을 양 언어에서 거부하는 공통 경계 fixture로 고정했다.
+- **검증·다음 할 일**: protocol Rust fmt/clippy/test 15개, TypeScript G2·G3·G4 계약 19개, `tsc --noEmit`, 변경 금지 파일 byte 불변, AGENTS/CLAUDE 동일성, `git diff --check`를 통과했다. 원자 fix commit을 독립 재리뷰한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot 계약 개정)
 
 - **결정·한 일**: 사용자가 linked Git worktree 대신 capability-protected standalone snapshot을 선택했다. protocol v1 호환 method/type 이름은 유지하되 `WorktreeManifestV1`에 snapshot kind·Git bundle transport·source mutation 금지·object format·commit/tree OID·workspace identity를 고정하고, Rust/TypeScript 공통 fixture와 validator가 source read-only·전후 digest, detached HEAD/index tree, remote/alternates/source 참조 0, object connectivity와 DB/manifest/`.git` marker identity를 fail-closed 검증하도록 개정했다.

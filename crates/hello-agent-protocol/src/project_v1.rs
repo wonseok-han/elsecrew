@@ -111,6 +111,7 @@ pub fn validate_project_payload_v1(
         "snapshotMaterialization" => validate_snapshot_materialization(value),
         "snapshotLifecycle" => validate_snapshot_lifecycle(value),
         "snapshotFailure" => validate_snapshot_failure(value),
+        "snapshotActivationEvidence" => validate_snapshot_activation_evidence(value),
         "treePage" => validate_tree_page(value),
         "fileClassification" => validate_file_classification(value),
         "fileDigest" => validate_file_digest(value),
@@ -186,6 +187,7 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
             "objectFormat",
             "baseCommit",
             "baseTree",
+            "sourceIdentity",
             "workspaceIdentity",
             "headMode",
             "lifecycle",
@@ -197,6 +199,7 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
     }
     id(object.get("projectId"), "projectId")?;
     id(object.get("worktreeId"), "worktreeId")?;
+    id(object.get("sourceIdentity"), "sourceIdentity")?;
     id(object.get("workspaceIdentity"), "workspaceIdentity")?;
     let root = absolute_path(object.get("canonicalGitRoot"), "canonicalGitRoot")?;
     let worktree = absolute_path(object.get("worktreePath"), "worktreePath")?;
@@ -507,6 +510,226 @@ fn validate_snapshot_failure(value: &Value) -> Result<(), ProjectContractError> 
         return fail(
             "failed snapshot creation must activate nothing and retain its recovery marker",
         );
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SnapshotEvidenceIdentity<'a> {
+    project_id: &'a str,
+    worktree_id: &'a str,
+    workspace_identity: &'a str,
+    canonical_git_root: &'a str,
+    source_identity: &'a str,
+    object_format: &'a str,
+    base_commit: &'a str,
+    base_tree: &'a str,
+}
+
+fn validate_snapshot_activation_evidence(value: &Value) -> Result<(), ProjectContractError> {
+    let object = object(value, "snapshot activation evidence")?;
+    exact_keys(object, &["manifest", "source", "workspace", "activation"])?;
+
+    let manifest_value = object.get("manifest").ok_or_else(|| missing("manifest"))?;
+    validate_worktree_manifest(manifest_value)?;
+    let manifest = self::object(manifest_value, "worktree manifest")?;
+    if string(manifest.get("lifecycle"), "manifest lifecycle")? != "active" {
+        return fail("activation evidence must describe the proposed active manifest");
+    }
+    let canonical = snapshot_identity_from_manifest(manifest)?;
+
+    let source = self::object(
+        object.get("source").ok_or_else(|| missing("source"))?,
+        "source activation evidence",
+    )?;
+    exact_keys(source, &["identity", "trace"])?;
+    assert_same_snapshot_identity(
+        canonical,
+        validate_snapshot_evidence_identity(source.get("identity"), "source evidence identity")?,
+        "source evidence",
+    )?;
+    validate_source_mutation_trace(source.get("trace").ok_or_else(|| missing("source trace"))?)?;
+
+    let workspace = self::object(
+        object
+            .get("workspace")
+            .ok_or_else(|| missing("workspace"))?,
+        "workspace activation evidence",
+    )?;
+    exact_keys(workspace, &["identity", "invariant"])?;
+    assert_same_snapshot_identity(
+        canonical,
+        validate_snapshot_evidence_identity(
+            workspace.get("identity"),
+            "workspace evidence identity",
+        )?,
+        "workspace evidence",
+    )?;
+    let invariant_value = workspace
+        .get("invariant")
+        .ok_or_else(|| missing("workspace invariant"))?;
+    validate_standalone_snapshot_invariant(invariant_value)?;
+    let invariant = self::object(invariant_value, "standalone snapshot invariant")?;
+    for (field, expected) in [
+        ("workspaceIdentity", canonical.workspace_identity),
+        ("objectFormat", canonical.object_format),
+        ("baseCommit", canonical.base_commit),
+        ("baseTree", canonical.base_tree),
+    ] {
+        if string(invariant.get(field), field)? != expected {
+            return fail(format!(
+                "workspace invariant {field} must match the proposed manifest"
+            ));
+        }
+    }
+
+    let activation = self::object(
+        object
+            .get("activation")
+            .ok_or_else(|| missing("activation"))?,
+        "pre-activation trace",
+    )?;
+    exact_keys(
+        activation,
+        &[
+            "identity",
+            "completedPhases",
+            "activeWorkspaceCount",
+            "proposedLifecycle",
+            "database",
+            "externalManifest",
+            "gitMarker",
+        ],
+    )?;
+    assert_same_snapshot_identity(
+        canonical,
+        validate_snapshot_evidence_identity(
+            activation.get("identity"),
+            "activation trace identity",
+        )?,
+        "activation trace",
+    )?;
+    let completed_phases = array(activation.get("completedPhases"), "completedPhases")?;
+    let pre_activation_phases =
+        &SNAPSHOT_CREATION_PHASES_V1[..SNAPSHOT_CREATION_PHASES_V1.len() - 1];
+    if completed_phases.len() != pre_activation_phases.len()
+        || completed_phases
+            .iter()
+            .zip(pre_activation_phases)
+            .any(|(actual, expected)| actual.as_str() != Some(expected))
+    {
+        return fail("pre-activation phases must be complete and ordered without activated");
+    }
+    if unsigned(
+        activation.get("activeWorkspaceCount"),
+        "activeWorkspaceCount",
+    )? != 0
+        || string(activation.get("proposedLifecycle"), "proposedLifecycle")? != "active"
+    {
+        return fail(
+            "activation evidence must prove zero active workspaces before the active transition",
+        );
+    }
+    for field in ["database", "externalManifest", "gitMarker"] {
+        assert_same_snapshot_identity(
+            canonical,
+            validate_snapshot_evidence_identity(activation.get(field), field)?,
+            field,
+        )?;
+    }
+    Ok(())
+}
+
+fn snapshot_identity_from_manifest<'a>(
+    manifest: &'a Map<String, Value>,
+) -> Result<SnapshotEvidenceIdentity<'a>, ProjectContractError> {
+    let object_format = string(manifest.get("objectFormat"), "manifest objectFormat")?;
+    Ok(SnapshotEvidenceIdentity {
+        project_id: id(manifest.get("projectId"), "manifest projectId")?,
+        worktree_id: id(manifest.get("worktreeId"), "manifest worktreeId")?,
+        workspace_identity: id(
+            manifest.get("workspaceIdentity"),
+            "manifest workspaceIdentity",
+        )?,
+        canonical_git_root: absolute_path(
+            manifest.get("canonicalGitRoot"),
+            "manifest canonicalGitRoot",
+        )?,
+        source_identity: id(manifest.get("sourceIdentity"), "manifest sourceIdentity")?,
+        object_format,
+        base_commit: git_oid(
+            manifest.get("baseCommit"),
+            object_format,
+            "manifest baseCommit",
+        )?,
+        base_tree: git_oid(manifest.get("baseTree"), object_format, "manifest baseTree")?,
+    })
+}
+
+fn validate_snapshot_evidence_identity<'a>(
+    value: Option<&'a Value>,
+    name: &str,
+) -> Result<SnapshotEvidenceIdentity<'a>, ProjectContractError> {
+    let object = self::object(value.ok_or_else(|| missing(name))?, name)?;
+    exact_keys(
+        object,
+        &[
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "canonicalGitRoot",
+            "sourceIdentity",
+            "objectFormat",
+            "baseCommit",
+            "baseTree",
+        ],
+    )?;
+    let object_format = string(object.get("objectFormat"), "objectFormat")?;
+    if !matches!(object_format, "sha1" | "sha256") {
+        return fail(format!("{name} has an unsupported Git object format"));
+    }
+    Ok(SnapshotEvidenceIdentity {
+        project_id: id(object.get("projectId"), "projectId")?,
+        worktree_id: id(object.get("worktreeId"), "worktreeId")?,
+        workspace_identity: id(object.get("workspaceIdentity"), "workspaceIdentity")?,
+        canonical_git_root: absolute_path(object.get("canonicalGitRoot"), "canonicalGitRoot")?,
+        source_identity: id(object.get("sourceIdentity"), "sourceIdentity")?,
+        object_format,
+        base_commit: git_oid(object.get("baseCommit"), object_format, "baseCommit")?,
+        base_tree: git_oid(object.get("baseTree"), object_format, "baseTree")?,
+    })
+}
+
+fn assert_same_snapshot_identity(
+    expected: SnapshotEvidenceIdentity<'_>,
+    actual: SnapshotEvidenceIdentity<'_>,
+    name: &str,
+) -> Result<(), ProjectContractError> {
+    for (field, expected_value, actual_value) in [
+        ("projectId", expected.project_id, actual.project_id),
+        ("worktreeId", expected.worktree_id, actual.worktree_id),
+        (
+            "workspaceIdentity",
+            expected.workspace_identity,
+            actual.workspace_identity,
+        ),
+        (
+            "canonicalGitRoot",
+            expected.canonical_git_root,
+            actual.canonical_git_root,
+        ),
+        (
+            "sourceIdentity",
+            expected.source_identity,
+            actual.source_identity,
+        ),
+        ("objectFormat", expected.object_format, actual.object_format),
+        ("baseCommit", expected.base_commit, actual.base_commit),
+        ("baseTree", expected.base_tree, actual.base_tree),
+    ] {
+        if actual_value != expected_value {
+            return fail(format!("{name} {field} must match the proposed manifest"));
+        }
     }
     Ok(())
 }
@@ -1089,9 +1312,15 @@ fn string<'a>(value: Option<&'a Value>, name: &str) -> Result<&'a str, ProjectCo
 }
 
 fn unsigned(value: Option<&Value>, name: &str) -> Result<u64, ProjectContractError> {
-    value
-        .and_then(Value::as_u64)
-        .ok_or_else(|| ProjectContractError::new(format!("{name} must be a non-negative integer")))
+    let value = value.and_then(Value::as_u64).ok_or_else(|| {
+        ProjectContractError::new(format!("{name} must be a non-negative integer"))
+    })?;
+    if value > super::MAX_SEQUENCE {
+        return fail(format!(
+            "{name} must be a non-negative JavaScript safe integer"
+        ));
+    }
+    Ok(value)
 }
 
 fn boolean(value: Option<&Value>, name: &str) -> Result<bool, ProjectContractError> {

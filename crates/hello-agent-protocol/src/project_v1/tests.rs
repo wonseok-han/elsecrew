@@ -11,6 +11,7 @@ struct FixtureManifest {
     protocol_version: u64,
     contract: ContractFixture,
     cases_file: String,
+    activation_evidence_file: String,
     generated_cases: Vec<GeneratedCase>,
 }
 
@@ -67,6 +68,27 @@ struct FixtureCases {
 struct FixtureCase {
     name: String,
     validator: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivationEvidenceFixture {
+    schema_version: u64,
+    validator: String,
+    valid: Value,
+    invalid_cases: Vec<ActivationEvidenceInvalidCase>,
+}
+
+#[derive(Deserialize)]
+struct ActivationEvidenceInvalidCase {
+    name: String,
+    changes: Vec<ActivationEvidenceChange>,
+}
+
+#[derive(Deserialize)]
+struct ActivationEvidenceChange {
+    pointer: String,
     value: Value,
 }
 
@@ -227,6 +249,34 @@ fn rust_rejects_every_canonical_invalid_g4_payload_fail_closed() {
             parse_project_payload_v1(&fixture.validator, &fixture.value).is_err(),
             "fixture unexpectedly passed: {}",
             fixture.name
+        );
+    }
+}
+
+#[test]
+fn rust_requires_one_composite_pre_activation_identity_evidence() {
+    let (root, manifest) = fixture_manifest();
+    let source = fs::read(root.join(manifest.activation_evidence_file))
+        .expect("read activation evidence fixture");
+    let fixture: ActivationEvidenceFixture =
+        serde_json::from_slice(&source).expect("decode activation evidence fixture");
+    assert_eq!(fixture.schema_version, PROJECT_SCHEMA_VERSION_V1);
+    assert_eq!(fixture.validator, "snapshotActivationEvidence");
+    validate_project_payload_v1(&fixture.validator, &fixture.valid)
+        .expect("canonical composite activation evidence must pass");
+
+    for invalid in fixture.invalid_cases {
+        let mut value = fixture.valid.clone();
+        for change in invalid.changes {
+            let target = value.pointer_mut(&change.pointer).unwrap_or_else(|| {
+                panic!("{} has an unknown pointer {}", invalid.name, change.pointer)
+            });
+            *target = change.value;
+        }
+        assert!(
+            validate_project_payload_v1(&fixture.validator, &value).is_err(),
+            "composite activation mismatch unexpectedly passed: {}",
+            invalid.name
         );
     }
 }

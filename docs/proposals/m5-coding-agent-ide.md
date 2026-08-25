@@ -439,9 +439,9 @@ G4 작업 복사본은 linked worktree나 source repository의 alternates·remot
 1. object format(`sha1` 또는 `sha256`)과 길이가 맞는 `baseCommit`·`baseTree`를 bundle에서 다시 검증한다.
 2. detached `HEAD == baseCommit`, index tree `== baseTree`, object connectivity를 확인한다.
 3. 작업 복사본 내부의 remote·alternates·source ref·source absolute path는 0개다.
-4. DB, 외부 manifest, `.git` marker의 `workspaceIdentity`가 정확히 같다.
+4. proposed active manifest, source trace, workspace invariant, activation trace, DB, 외부 manifest, `.git` marker의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree가 정확히 같다.
 5. source의 `HEAD/index/refs/config/objects/packed-refs/entry set` 전후 SHA-256 digest가 같고 source lock·write가 0개다.
-6. recovery marker를 export 전에 저장하고, marker·manifest·rename·identity·DB commit 뒤에만 한 작업 복사본을 active로 전환한다. corrupt/truncated/oversize bundle과 shallow missing object는 active 0개로 끝난다.
+6. recovery marker를 export 전에 저장하고, marker·manifest·rename·identity·DB commit 뒤 activation 직전의 단일 composite evidence가 위 신원 전체를 교차 검증한 경우에만 한 작업 복사본을 active로 전환한다. 서로 따로 유효한 manifest와 다른 workspace 증거를 섞으면 fail-closed한다. corrupt/truncated/oversize bundle과 shallow missing object는 active 0개로 끝난다.
 
 상한은 bundle 2 GiB, materialized total 4 GiB, 200,000 entries, single blob 1 GiB이며 materialization 뒤에도 disk reserve 512 MiB가 남아야 한다. 전체 bundle/blob을 한 번에 메모리에 올리지 않는다. 이 경계는 선택 root와 관리 target의 path/symlink swap 및 일반적인 동시 변경을 방어한다. 이미 잡은 source directory 내부 entry를 같은 사용자 권한의 악성 프로세스가 export 도중 계속 바꾸는 공격은 경계 밖이다. 그래도 export 결과의 commit/tree/object format과 source 전후 digest는 반드시 재검증한다. G4 Windows 안전성은 별도 실기기 게이트 전까지 지원으로 표시하지 않는다.
 

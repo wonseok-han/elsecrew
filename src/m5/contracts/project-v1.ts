@@ -86,6 +86,7 @@ export interface WorktreeManifestV1 {
   objectFormat: "sha1" | "sha256";
   baseCommit: string;
   baseTree: string;
+  sourceIdentity: string;
   workspaceIdentity: string;
   headMode: typeof WORKTREE_HEAD_MODE_V1;
   lifecycle: (typeof WORKTREE_LIFECYCLES_V1)[number];
@@ -130,7 +131,7 @@ export interface G4SafetyErrorV1 {
 export function validateProjectIdentityV1(value: unknown): ProjectIdentityV1 {
   const object = requireObject(value, "project identity");
   exactKeys(object, ["schemaVersion", "projectId", "selectedPath", "canonicalGitRoot"]);
-  if (object.schemaVersion !== PROJECT_SCHEMA_VERSION_V1) fail("project schemaVersion must be 1");
+  if (requireSafeUnsigned(object.schemaVersion, "project schemaVersion") !== PROJECT_SCHEMA_VERSION_V1) fail("project schemaVersion must be 1");
   requireId(object.projectId, "projectId");
   const selectedPath = requireAbsolutePath(object.selectedPath, "selectedPath");
   const canonicalGitRoot = requireAbsolutePath(object.canonicalGitRoot, "canonicalGitRoot");
@@ -154,13 +155,15 @@ export function validateWorktreeManifestV1(value: unknown): WorktreeManifestV1 {
     "objectFormat",
     "baseCommit",
     "baseTree",
+    "sourceIdentity",
     "workspaceIdentity",
     "headMode",
     "lifecycle",
   ]);
-  if (object.schemaVersion !== PROJECT_SCHEMA_VERSION_V1) fail("manifest schemaVersion must be 1");
+  if (requireSafeUnsigned(object.schemaVersion, "manifest schemaVersion") !== PROJECT_SCHEMA_VERSION_V1) fail("manifest schemaVersion must be 1");
   requireId(object.projectId, "projectId");
   requireId(object.worktreeId, "worktreeId");
+  requireId(object.sourceIdentity, "sourceIdentity");
   requireId(object.workspaceIdentity, "workspaceIdentity");
   const root = requireAbsolutePath(object.canonicalGitRoot, "canonicalGitRoot");
   const worktree = requireAbsolutePath(object.worktreePath, "worktreePath");
@@ -194,7 +197,7 @@ export function validateStandaloneSnapshotInvariantV1(value: unknown): void {
     fail("detached HEAD and index tree must match the snapshot base");
   }
   for (const field of ["remoteCount", "alternatesCount", "sourceRefCount", "sourceAbsolutePathCount"] as const) {
-    if (object[field] !== 0) fail(`${field} must be zero in a standalone snapshot`);
+    if (requireSafeUnsigned(object[field], field) !== 0) fail(`${field} must be zero in a standalone snapshot`);
   }
   if (object.objectConnectivity !== true) fail("snapshot object connectivity must be verified");
   for (const field of ["externalManifestIdentity", "gitMarkerIdentity", "databaseIdentity"] as const) {
@@ -205,7 +208,11 @@ export function validateStandaloneSnapshotInvariantV1(value: unknown): void {
 export function validateSourceMutationTraceV1(value: unknown): void {
   const object = requireObject(value, "source mutation trace");
   exactKeys(object, ["sourceCapability", "sourceLockCount", "sourceWriteCount", "before", "after"]);
-  if (object.sourceCapability !== "readOnly" || object.sourceLockCount !== 0 || object.sourceWriteCount !== 0) {
+  if (
+    object.sourceCapability !== "readOnly" ||
+    requireSafeUnsigned(object.sourceLockCount, "sourceLockCount") !== 0 ||
+    requireSafeUnsigned(object.sourceWriteCount, "sourceWriteCount") !== 0
+  ) {
     fail("snapshot export must hold only a read-only source capability without locks or writes");
   }
   const before = sourceDigestSet(object.before, "before source digest");
@@ -228,11 +235,11 @@ export function validateSnapshotSizingV1(value: unknown): void {
     ["singleBlobBytes", SNAPSHOT_LIMITS_V1.singleBlobMaxBytes],
   ] as const;
   for (const [field, limit] of checks) {
-    if (typeof object[field] !== "number" || !Number.isSafeInteger(object[field]) || object[field] < 0 || object[field] > limit) {
+    if (requireSafeUnsigned(object[field], field) > limit) {
       fail(`${field} exceeds the standalone snapshot limit`);
     }
   }
-  if (typeof object.diskBytesAfterMaterialization !== "number" || !Number.isSafeInteger(object.diskBytesAfterMaterialization) || object.diskBytesAfterMaterialization < SNAPSHOT_LIMITS_V1.diskReserveBytes) {
+  if (requireSafeUnsigned(object.diskBytesAfterMaterialization, "diskBytesAfterMaterialization") < SNAPSHOT_LIMITS_V1.diskReserveBytes) {
     fail("diskBytesAfterMaterialization must preserve the required disk reserve");
   }
   if (object.streaming !== true || object.fullAllocation !== false) {
@@ -284,15 +291,66 @@ export function validateSnapshotLifecycleV1(value: unknown): void {
   for (const field of ["externalManifestIdentity", "gitMarkerIdentity", "databaseIdentity"] as const) {
     if (object[field] !== object.workspaceIdentity) fail(`${field} must match before activation`);
   }
-  if (object.activatedWorkspaceCount !== 1) fail("exactly one workspace may activate after all durable identity records");
+  if (requireSafeUnsigned(object.activatedWorkspaceCount, "activatedWorkspaceCount") !== 1) fail("exactly one workspace may activate after all durable identity records");
 }
 
 export function validateSnapshotFailureV1(value: unknown): void {
   const object = requireObject(value, "snapshot failure");
   exactKeys(object, ["failureKind", "activeWorkspaceCount", "recoveryMarkerPresent"]);
   if (!SNAPSHOT_FAILURE_KINDS_V1.includes(object.failureKind as never)) fail("unknown snapshot failure kind");
-  if (object.activeWorkspaceCount !== 0 || object.recoveryMarkerPresent !== true) {
+  if (requireSafeUnsigned(object.activeWorkspaceCount, "activeWorkspaceCount") !== 0 || object.recoveryMarkerPresent !== true) {
     fail("failed snapshot creation must activate nothing and retain its recovery marker");
+  }
+}
+
+export function validateSnapshotActivationEvidenceV1(value: unknown): void {
+  const object = requireObject(value, "snapshot activation evidence");
+  exactKeys(object, ["manifest", "source", "workspace", "activation"]);
+
+  const manifest = validateWorktreeManifestV1(object.manifest);
+  if (manifest.lifecycle !== "active") fail("activation evidence must describe the proposed active manifest");
+  const canonical = identityFromManifest(manifest);
+
+  const source = requireObject(object.source, "source activation evidence");
+  exactKeys(source, ["identity", "trace"]);
+  assertSameSnapshotIdentity(canonical, validateSnapshotEvidenceIdentity(source.identity, "source evidence identity"), "source evidence");
+  validateSourceMutationTraceV1(source.trace);
+
+  const workspace = requireObject(object.workspace, "workspace activation evidence");
+  exactKeys(workspace, ["identity", "invariant"]);
+  assertSameSnapshotIdentity(canonical, validateSnapshotEvidenceIdentity(workspace.identity, "workspace evidence identity"), "workspace evidence");
+  validateStandaloneSnapshotInvariantV1(workspace.invariant);
+  const invariant = requireObject(workspace.invariant, "standalone snapshot invariant");
+  for (const field of ["workspaceIdentity", "objectFormat", "baseCommit", "baseTree"] as const) {
+    if (invariant[field] !== canonical[field]) fail(`workspace invariant ${field} must match the proposed manifest`);
+  }
+
+  const activation = requireObject(object.activation, "pre-activation trace");
+  exactKeys(activation, [
+    "identity", "completedPhases", "activeWorkspaceCount", "proposedLifecycle",
+    "database", "externalManifest", "gitMarker",
+  ]);
+  assertSameSnapshotIdentity(canonical, validateSnapshotEvidenceIdentity(activation.identity, "activation trace identity"), "activation trace");
+  const preActivationPhases = SNAPSHOT_CREATION_PHASES_V1.slice(0, -1);
+  if (
+    !Array.isArray(activation.completedPhases) ||
+    activation.completedPhases.length !== preActivationPhases.length ||
+    activation.completedPhases.some((phase, index) => phase !== preActivationPhases[index])
+  ) {
+    fail("pre-activation phases must be complete and ordered without activated");
+  }
+  if (
+    requireSafeUnsigned(activation.activeWorkspaceCount, "activeWorkspaceCount") !== 0 ||
+    activation.proposedLifecycle !== "active"
+  ) {
+    fail("activation evidence must prove zero active workspaces before the active transition");
+  }
+  for (const field of ["database", "externalManifest", "gitMarker"] as const) {
+    assertSameSnapshotIdentity(
+      canonical,
+      validateSnapshotEvidenceIdentity(activation[field], `${field} identity`),
+      field,
+    );
   }
 }
 
@@ -387,6 +445,59 @@ export function exactKeys(object: Record<string, unknown>, expected: readonly st
 
 export function requireId(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512) fail(`${name} is required`);
+}
+
+export function requireSafeUnsigned(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    fail(`${name} must be a non-negative JavaScript safe integer`);
+  }
+  return value;
+}
+
+const SNAPSHOT_EVIDENCE_IDENTITY_FIELDS_V1 = [
+  "projectId", "worktreeId", "workspaceIdentity", "canonicalGitRoot", "sourceIdentity",
+  "objectFormat", "baseCommit", "baseTree",
+] as const;
+
+type SnapshotEvidenceIdentityV1 = {
+  [Field in (typeof SNAPSHOT_EVIDENCE_IDENTITY_FIELDS_V1)[number]]: string;
+};
+
+function identityFromManifest(manifest: WorktreeManifestV1): SnapshotEvidenceIdentityV1 {
+  return {
+    projectId: manifest.projectId,
+    worktreeId: manifest.worktreeId,
+    workspaceIdentity: manifest.workspaceIdentity,
+    canonicalGitRoot: manifest.canonicalGitRoot,
+    sourceIdentity: manifest.sourceIdentity,
+    objectFormat: manifest.objectFormat,
+    baseCommit: manifest.baseCommit,
+    baseTree: manifest.baseTree,
+  };
+}
+
+function validateSnapshotEvidenceIdentity(value: unknown, name: string): SnapshotEvidenceIdentityV1 {
+  const object = requireObject(value, name);
+  exactKeys(object, SNAPSHOT_EVIDENCE_IDENTITY_FIELDS_V1);
+  requireId(object.projectId, `${name} projectId`);
+  requireId(object.worktreeId, `${name} worktreeId`);
+  requireId(object.workspaceIdentity, `${name} workspaceIdentity`);
+  requireAbsolutePath(object.canonicalGitRoot, `${name} canonicalGitRoot`);
+  requireId(object.sourceIdentity, `${name} sourceIdentity`);
+  if (object.objectFormat !== "sha1" && object.objectFormat !== "sha256") fail(`${name} has an unsupported Git object format`);
+  requireGitOid(object.baseCommit, object.objectFormat, `${name} baseCommit`);
+  requireGitOid(object.baseTree, object.objectFormat, `${name} baseTree`);
+  return object as SnapshotEvidenceIdentityV1;
+}
+
+function assertSameSnapshotIdentity(
+  expected: SnapshotEvidenceIdentityV1,
+  actual: SnapshotEvidenceIdentityV1,
+  name: string,
+): void {
+  for (const field of SNAPSHOT_EVIDENCE_IDENTITY_FIELDS_V1) {
+    if (actual[field] !== expected[field]) fail(`${name} ${field} must match the proposed manifest`);
+  }
 }
 
 export function requireRelativePath(value: unknown, name: string, allowEmpty: boolean): string {

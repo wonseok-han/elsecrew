@@ -24,6 +24,7 @@ import {
   validateProjectCloseResultV1,
   validateProjectIdentityV1,
   validateSnapshotFailureV1,
+  validateSnapshotActivationEvidenceV1,
   validateSnapshotLifecycleV1,
   validateSnapshotMaterializationV1,
   validateSnapshotSizingV1,
@@ -62,6 +63,7 @@ type ValidatorName =
   | "snapshotMaterialization"
   | "snapshotLifecycle"
   | "snapshotFailure"
+  | "snapshotActivationEvidence"
   | "treePage"
   | "fileClassification"
   | "fileDigest"
@@ -124,6 +126,7 @@ interface Manifest {
     safetyErrorKinds: string[];
   };
   casesFile: string;
+  activationEvidenceFile: string;
   generatedCases: GeneratedCase[];
 }
 
@@ -132,9 +135,22 @@ interface Cases {
   invalid: FixtureCase[];
 }
 
+interface ActivationEvidenceFixture {
+  schemaVersion: number;
+  validator: "snapshotActivationEvidence";
+  valid: unknown;
+  invalidCases: Array<{
+    name: string;
+    changes: Array<{ pointer: string; value: unknown }>;
+  }>;
+}
+
 const fixtureRoot = resolve("tests/fixtures/m5/project-v1");
 const manifest = readJson<Manifest>(resolve(fixtureRoot, "manifest.json"));
 const cases = readJson<Cases>(resolve(fixtureRoot, manifest.casesFile));
+const activationEvidence = readJson<ActivationEvidenceFixture>(
+  resolve(fixtureRoot, manifest.activationEvidenceFile),
+);
 
 test("G4 manifest 한 곳이 capability, page/chunk/size/hash/lifecycle 계약을 고정한다", () => {
   assert.equal(manifest.schemaVersion, PROJECT_SCHEMA_VERSION_V1);
@@ -209,6 +225,16 @@ test("TypeScript가 모든 canonical invalid G4 payload를 fail-closed 거부한
   }
 });
 
+test("TypeScript가 active 전 composite evidence의 모든 identity를 교차 검증한다", () => {
+  assert.equal(activationEvidence.schemaVersion, PROJECT_SCHEMA_VERSION_V1);
+  assert.doesNotThrow(() => validateSnapshotActivationEvidenceV1(activationEvidence.valid));
+  for (const fixture of activationEvidence.invalidCases) {
+    const value = structuredClone(activationEvidence.valid);
+    for (const change of fixture.changes) applyJsonPointer(value, change.pointer, change.value);
+    assert.throws(() => validateSnapshotActivationEvidenceV1(value), fixture.name);
+  }
+});
+
 test("TypeScript가 manifest로 생성한 page/chunk/size 경계를 정확히 판정한다", () => {
   for (const fixture of manifest.generatedCases) {
     const value = materialize(fixture);
@@ -238,6 +264,8 @@ function validate(name: ValidatorName, value: unknown): unknown {
       return validateSnapshotLifecycleV1(value);
     case "snapshotFailure":
       return validateSnapshotFailureV1(value);
+    case "snapshotActivationEvidence":
+      return validateSnapshotActivationEvidenceV1(value);
     case "treePage":
       return validateTreePageV1(value);
     case "fileClassification":
@@ -310,4 +338,20 @@ function materialize(fixture: GeneratedCase): unknown {
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+function applyJsonPointer(root: unknown, pointer: string, value: unknown): void {
+  const segments = pointer.split("/").slice(1).map((segment) =>
+    segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let current = root;
+  for (const segment of segments.slice(0, -1)) {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) {
+      throw new Error(`invalid fixture pointer ${pointer}`);
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  if (typeof current !== "object" || current === null || Array.isArray(current)) {
+    throw new Error(`invalid fixture pointer ${pointer}`);
+  }
+  (current as Record<string, unknown>)[segments.at(-1) ?? ""] = value;
 }
