@@ -55,7 +55,7 @@ export function M5Workbench({ bridge = window.m5 }: { bridge?: typeof window.m5 
           </p>
         </div>
         <div className="m5-toolbar-actions">
-          <button type="button" onClick={() => void controller.chooseProject()} disabled={!controller.canLeaveProject()}>
+          <button type="button" onClick={() => void controller.chooseProject()} disabled={!controller.canLeaveProject() || snapshot.selectionBlocked}>
             {snapshot.project ? "프로젝트 바꾸기" : "프로젝트 선택"}
           </button>
           {snapshot.project && (

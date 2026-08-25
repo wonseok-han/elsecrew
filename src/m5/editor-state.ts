@@ -9,6 +9,7 @@ export const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
 export const STREAM_TIMEOUT_MS = 3_000;
 export const MAX_PENDING_STREAMS = 16;
 export const MAX_PENDING_STREAM_BYTES = 20 * 1024 * 1024;
+export const DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS = 60_000;
 export const WORKBENCH_PANELS = ["files", "editor", "changes"] as const;
 
 export type WorkbenchPanel = (typeof WORKBENCH_PANELS)[number];
@@ -36,6 +37,7 @@ export interface EditorSnapshot {
   diffFile: DiffFileDescriptorV1 | null;
   diffText: string;
   rescanRequired: boolean;
+  selectionBlocked: boolean;
   notice: string | null;
   error: { message: string; technicalDetail: string } | null;
 }
@@ -44,6 +46,7 @@ export type ProjectBridge = Pick<
   M5BridgeV2,
   | "openProject"
   | "getProjectTree"
+  | "createProjectWorktree"
   | "closeProject"
   | "readFile"
   | "beginFileSave"
@@ -78,18 +81,35 @@ interface PendingStream {
   expiry: ReturnType<typeof setTimeout>;
 }
 
+interface SnapshotCreationOperation {
+  project: { projectId: string; canonicalGitRoot: string };
+  selection: number;
+  controllerGeneration: number;
+  timedOut: boolean;
+  resolve: (value: { epoch: number } | null) => void;
+}
+
+export interface ProjectEditorControllerOptions {
+  snapshotCreationTimeoutMs?: number;
+}
+
 export class ProjectEditorController {
   readonly #bridge: ProjectBridge;
   readonly #listeners = new Set<() => void>();
   readonly #streams = new Map<string, StreamAssembly>();
   readonly #pendingStreams = new Map<string, PendingStream>();
   readonly #saveGenerations = new Map<string, number>();
+  readonly #snapshotCreationTimeoutMs: number;
   #pendingStreamBytes = 0;
   #pendingOverflowUntil = 0;
   #unsubscribers: (() => void)[] = [];
   #started = false;
+  #disposed = false;
+  #controllerGeneration = 0;
   #projectEpoch = 0;
   #selectionGeneration = 0;
+  #snapshotCreation: SnapshotCreationOperation | null = null;
+  #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
   #state: EditorSnapshot = {
     project: null,
     tree: [],
@@ -101,16 +121,21 @@ export class ProjectEditorController {
     diffFile: null,
     diffText: "",
     rescanRequired: false,
+    selectionBlocked: false,
     notice: null,
     error: null,
   };
 
-  constructor(bridge: ProjectBridge) {
+  constructor(bridge: ProjectBridge, options: ProjectEditorControllerOptions = {}) {
     this.#bridge = bridge;
+    const timeout = options.snapshotCreationTimeoutMs ?? DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS;
+    if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new Error("snapshot creation timeout must be a positive safe integer");
+    this.#snapshotCreationTimeoutMs = timeout;
   }
 
   start(): void {
     if (this.#started) return;
+    this.#disposed = false;
     this.#started = true;
     this.#unsubscribers = [
       this.#bridge.onSidecarEvent((event) => this.#observeSidecarEvent(event)),
@@ -128,6 +153,12 @@ export class ProjectEditorController {
   }
 
   dispose(): void {
+    this.#disposed = true;
+    this.#controllerGeneration += 1;
+    this.#selectionGeneration += 1;
+    this.#projectEpoch += 1;
+    this.#snapshotCreationBlocked = null;
+    this.#snapshotCreation?.resolve(null);
     for (const unsubscribe of this.#unsubscribers) unsubscribe();
     this.#unsubscribers = [];
     this.#started = false;
@@ -143,21 +174,96 @@ export class ProjectEditorController {
   }
 
   async chooseProject(): Promise<void> {
+    if (this.#disposed) return;
     if (!this.canLeaveProject()) {
       this.#setNotice("저장하지 않은 변경이 있어 프로젝트를 바꿀 수 없어요.");
       return;
     }
+    if (this.#snapshotCreationBlocked) return;
     const selection = ++this.#selectionGeneration;
-    this.#set({ error: null, notice: null });
+    const controllerGeneration = this.#controllerGeneration;
     try {
       const project = await this.#bridge.openProject();
-      if (selection !== this.#selectionGeneration) return;
+      if (!this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
+      if (this.#snapshotCreationBlocked) return;
+      // Picker cancellation must leave the existing project surface untouched. Clear transient
+      // messages only after the native picker returned a real project identity.
+      this.#set({ error: null, notice: null });
+      if (this.#snapshotCreation) {
+        this.#setNotice("이전 프로젝트 선택을 안전하게 마무리하는 중이에요. 끝나면 다시 선택해 주세요.");
+        return;
+      }
+      const active = await this.#createSnapshot(project, selection, controllerGeneration);
+      if (!active || !this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
+      await Promise.all([
+        this.#loadTree(project.projectId, active.epoch, ""),
+        this.#refreshChanges(project.projectId, active.epoch),
+        this.#bridge.watchProjectFiles({ projectId: project.projectId }),
+      ]);
+    } catch (error) {
+      if (!this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
+      if (isPickerCancelled(error)) {
+        return;
+      }
+      this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+    }
+  }
+
+  async #createSnapshot(
+    project: { projectId: string; canonicalGitRoot: string },
+    selection: number,
+    controllerGeneration: number,
+  ): Promise<{ epoch: number } | null> {
+    let resolve!: (value: { epoch: number } | null) => void;
+    const completion = new Promise<{ epoch: number } | null>((nextResolve) => { resolve = nextResolve; });
+    const operation: SnapshotCreationOperation = { project, selection, controllerGeneration, timedOut: false, resolve };
+    this.#snapshotCreation = operation;
+    void this.#observeSnapshotCreation(operation);
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const timedOut = new Promise<null>((nextResolve) => {
+      timeout = setTimeout(() => {
+        if (!this.#isLiveOperation(operation)) {
+          operation.resolve(null);
+          nextResolve(null);
+          return;
+        }
+        operation.timedOut = true;
+        this.#blockSnapshotCreation(
+          operation,
+          "작업 복사본 준비가 오래 걸려 안전하게 멈췄어요. 앱을 다시 열어 상태를 확인한 뒤 다시 선택해 주세요.",
+          new Error(`snapshot creation did not settle within ${this.#snapshotCreationTimeoutMs}ms`),
+        );
+        nextResolve(null);
+      }, this.#snapshotCreationTimeoutMs);
+    });
+    const result = await Promise.race([completion, timedOut]);
+    if (timeout) clearTimeout(timeout);
+    return result;
+  }
+
+  async #observeSnapshotCreation(operation: SnapshotCreationOperation): Promise<void> {
+    try {
+      const manifest = await this.#bridge.createProjectWorktree({ projectId: operation.project.projectId });
+      const valid = manifest.projectId === operation.project.projectId
+        && manifest.workspaceKind === "standaloneSnapshot"
+        && manifest.lifecycle === "active";
+      if (!valid) {
+        await this.#abandonCreatedSnapshot(operation, new Error("snapshot manifest does not match the selected project"));
+        return;
+      }
+      if (!this.#isLiveOperation(operation) || operation.timedOut || operation.selection !== this.#selectionGeneration) {
+        await this.#abandonCreatedSnapshot(operation, new Error("snapshot creation completed after its selection was no longer current"));
+        return;
+      }
       const epoch = ++this.#projectEpoch;
       this.#set({
         project: {
-          id: project.projectId,
-          name: basename(project.canonicalGitRoot),
-          root: project.canonicalGitRoot,
+          id: operation.project.projectId,
+          // Keep the picker-approved source root as the visible project identity. The private
+          // snapshot path is never rendered; all workspace operations use this project ID.
+          name: basename(operation.project.canonicalGitRoot),
+          root: operation.project.canonicalGitRoot,
         },
         tree: [],
         treeParent: "",
@@ -168,19 +274,63 @@ export class ProjectEditorController {
         diffText: "",
         rescanRequired: false,
       });
-      await Promise.all([
-        this.#loadTree(project.projectId, epoch, ""),
-        this.#refreshChanges(project.projectId, epoch),
-        this.#bridge.watchProjectFiles({ projectId: project.projectId }),
-      ]);
+      operation.resolve({ epoch });
     } catch (error) {
-      if (selection !== this.#selectionGeneration) return;
-      if (isPickerCancelled(error)) {
-        this.#setNotice("프로젝트 선택을 취소했어요.");
+      if (operation.timedOut) {
+        this.#blockSnapshotCreation(
+          operation,
+          "작업 복사본 준비 결과를 확인할 수 없어요. 앱을 다시 열어 복구 상태를 확인해 주세요.",
+          error,
+        );
+      } else if (this.#isLiveOperation(operation) && operation.selection === this.#selectionGeneration) {
+        this.#setError("작업 복사본을 준비하지 못했어요. 원본 프로젝트는 건드리지 않았어요.", error);
+      } else {
+        this.#setError("이전 프로젝트 선택이 안전하게 끝났는지 확인할 수 없어요. 상태를 확인해 주세요.", error);
+      }
+      operation.resolve(null);
+    } finally {
+      if (this.#snapshotCreation === operation) this.#snapshotCreation = null;
+    }
+  }
+
+  async #abandonCreatedSnapshot(operation: SnapshotCreationOperation, reason: Error): Promise<void> {
+    try {
+      // project.close is an evidence-preserving abandon operation, not deletion.
+      await this.#bridge.closeProject({ projectId: operation.project.projectId });
+      if (!this.#isLiveOperation(operation)) {
         return;
       }
-      this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+      if (operation.timedOut) {
+        this.#clearSnapshotCreationBlock(operation);
+        this.#setNotice("늦게 끝난 작업 복사본을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.");
+      } else if (operation.selection !== this.#selectionGeneration) {
+        this.#setNotice("이전 프로젝트 선택을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.");
+      } else {
+        this.#setError("작업 복사본 결과를 확인하지 못했어요. 원본 프로젝트는 건드리지 않았어요.", reason);
+      }
+    } catch (error) {
+      if (!this.#isLiveOperation(operation)) return;
+      this.#blockSnapshotCreation(
+        operation,
+        "이전 작업 복사본을 안전하게 닫았는지 확인할 수 없어요. 앱을 다시 열어 복구 상태를 확인해 주세요.",
+        error,
+      );
+    } finally {
+      operation.resolve(null);
     }
+  }
+
+  #blockSnapshotCreation(operation: SnapshotCreationOperation, message: string, error: unknown): void {
+    if (!this.#isLiveOperation(operation)) return;
+    this.#snapshotCreationBlocked = operation;
+    this.#set({ selectionBlocked: true, error: errorDetail(message, error) });
+  }
+
+  #clearSnapshotCreationBlock(operation: SnapshotCreationOperation): void {
+    if (!this.#isLiveOperation(operation)) return;
+    if (this.#snapshotCreationBlocked !== operation) return;
+    this.#snapshotCreationBlocked = null;
+    this.#set({ selectionBlocked: false });
   }
 
   async loadTree(parentPath = ""): Promise<void> {
@@ -537,7 +687,15 @@ export class ProjectEditorController {
   }
 
   #isCurrent(projectId: string, epoch: number): boolean {
-    return this.#state.project?.id === projectId && this.#projectEpoch === epoch;
+    return !this.#disposed && this.#state.project?.id === projectId && this.#projectEpoch === epoch;
+  }
+
+  #isLiveGeneration(generation: number): boolean {
+    return !this.#disposed && this.#controllerGeneration === generation;
+  }
+
+  #isLiveOperation(operation: SnapshotCreationOperation): boolean {
+    return this.#isLiveGeneration(operation.controllerGeneration);
   }
 
   #tab(path: string): EditorTab | undefined {
@@ -553,11 +711,11 @@ export class ProjectEditorController {
   }
 
   #setError(message: string, error: unknown): void {
-    const technicalDetail = error instanceof Error ? error.message : String(error);
-    this.#set({ error: { message, technicalDetail: technicalDetail.slice(0, 2048) } });
+    this.#set({ error: errorDetail(message, error) });
   }
 
   #set(update: Partial<EditorSnapshot>): void {
+    if (this.#disposed) return;
     this.#state = { ...this.#state, ...update };
     for (const listener of this.#listeners) listener();
   }
@@ -591,6 +749,11 @@ function basename(path: string): string {
 
 function isPickerCancelled(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function errorDetail(message: string, error: unknown): { message: string; technicalDetail: string } {
+  const technicalDetail = error instanceof Error ? error.message : String(error);
+  return { message, technicalDetail: technicalDetail.slice(0, 2048) };
 }
 
 function isBlobChunkEvent(event: EventV1): event is EventV1 & { event: "blob.chunk"; payload: { text: string } } {

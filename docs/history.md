@@ -9,6 +9,27 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-25 · by GPT-5 Codex (M5 G4 dispose 뒤 snapshot 결과 격리)
+
+- **한 일**: controller dispose가 selection·project·controller 세대를 무효화하고 모든 비동기 상태 쓰기를 막도록 고쳤다. 늦게 성공한 create는 화면 publish/tree/diff/watch 없이 `project.close`를 정확히 한 번 호출해 evidence-preserving abandon으로 소비하며, 늦은 reject도 unhandled rejection 없이 소비한다. dispose 뒤 close 실패는 화면에 다시 쓰지 않고 sidecar evidence/recovery를 그대로 둔다.
+- **수명주기 결정**: Rust `project.close`는 `validate_active_project`를 먼저 요구하므로, native open만 끝나고 create 전 dispose된 opened identity에는 invalid close를 보내지 않는다. 해당 opened record의 후속 lifecycle은 sidecar의 영속 계약에 맡긴다.
+- **검증**: dispose 중 late create success(close 1/downstream 0), late create reject(close 0/downstream 0/no unhandled), late open(create 0/close 0) 결정적 회귀를 추가했다. 기존 timeout·stale·cancel 경계는 유지한다. `pnpm run m5:test:editor`는 editor-state 25개와 Chromium Monaco smoke 1개를, `pnpm run m5:test:project`는 Node 24개·Rust 28개(+의도한 ignored 1개)·stdio 1개를 통과했고 `npx tsc --noEmit --pretty false`, `pnpm build`, `git diff --check`도 통과했다.
+- **다음 할 일**: 이 dispose 경계 commit을 독립 검토하고 최신 통합 branch에서 G4 editor/project 누적 QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
+### 2026-08-25 · by GPT-5 Codex (M5 G4 스냅샷 선택 recovery 경계 보완)
+
+- **한 일**: 새 프로젝트 스냅샷 생성의 unbounded renderer queue를 없애고 기본 60초의 명시적 timeout과 단일 in-flight 상태를 추가했다. timeout 뒤에도 원 요청을 계속 관찰해 늦은 성공은 `project.close`로 evidence-preserving abandon하며, close 확인 전에는 모든 새 선택을 막는다. stale snapshot close 실패와 timeout 뒤 거부는 최신 화면에 초보자용 복구 안내와 technical detail을 보이고 차단을 유지한다. close 성공 뒤에도 자동 재선택/재시도하지 않는다.
+- **UI 결정**: picker 취소는 open 결과가 없으므로 기존 project/tree/tabs/notice/error를 그대로 보존한다. 실제 identity가 돌아온 뒤에만 transient message를 비운다. 선택 차단 상태는 workbench의 프로젝트 선택 버튼에도 반영한다.
+- **검증**: stale A close failure가 B의 downstream create/tree/diff/watch를 모두 막고 증거를 표면화하는 회귀, unresolved timeout·late success close·late close failure·명시적 C 재선택, 기존 화면 보존 cancellation 회귀를 editor-state에 추가했다. `pnpm run m5:test:editor`는 editor-state 22개와 Chromium Monaco smoke 1개를, `pnpm run m5:test:project`는 Node 24개·Rust 28개(+의도한 ignored 1개)·stdio 1개를 통과했고 `npx tsc --noEmit --pretty false`, `pnpm build`, `git diff --check`도 통과했다.
+- **다음 할 일**: 이 recovery 보완 commit을 독립 검토하고 최신 통합 branch에서 G4 editor/project 누적 QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
+### 2026-08-25 · by GPT-5 Codex (M5 G4 새 프로젝트 스냅샷 선행 흐름)
+
+- **한 일**: renderer의 프로젝트 선택 흐름을 native picker/open identity → `createProjectWorktree({ projectId })` → 화면 publish → tree/diff/watch 순서로 고쳤다. 화면에는 선택한 canonical Git root를 프로젝트 이름·경로로 보이고, private snapshot path는 노출하지 않으며 모든 작업은 `projectId`로만 한다. picker 취소는 상태를 바꾸지 않고, 스냅샷 생성 실패는 원본을 건드리지 않았다는 쉬운 설명과 기술 증거만 남기며 자동 재시도하지 않는다.
+- **안전 결정**: `project.close`는 active standalone snapshot을 물리 삭제 없이 `abandoned`로 기록하는 계약이므로, 새 선택으로 stale해진 생성 완료만 순서대로 close한다. 같은 project ID의 동시 create/close 경합을 막기 위해 snapshot 생성 구간을 renderer에서 직렬화했다. close 실패의 recovery/evidence는 sidecar가 보존하며 renderer가 삭제하거나 재시도하지 않는다.
+- **검증**: editor-state 회귀에서 call order, 생성 실패의 downstream 차단, stale A snapshot의 abandon 뒤 B 활성화, 기존 dirty/conflict/stream 경계를 확인했다. Chromium smoke는 유효한 standalone snapshot manifest를 반환하고, 생성 전 tree/diff/watch가 호출되면 실패하도록 고쳤다.
+- **다음 할 일**: 이 원자 commit을 독립 리뷰하고 최신 통합 branch의 G4 project/editor 누적 QA에서 sidecar·Electron bridge와 함께 확인한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 패키지 capability smoke 계약 수정)
 
 - **한 일**: Electron package smoke가 G3의 두 capability만 기대하던 오래된 검사를 제거하고, `tests/fixtures/m5/project-v1/manifest.json`의 canonical G4 누적 capability 순서를 exact 비교하도록 고쳤다. 향후 capability를 늘릴 때 fixture·Rust 계약과 함께 패키지 검증도 의도적으로 갱신되도록 scaffold 정적 검사를 추가했다.
