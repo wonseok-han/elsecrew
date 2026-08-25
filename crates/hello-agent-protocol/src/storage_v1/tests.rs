@@ -11,6 +11,9 @@ struct Manifest {
     replay_file: String,
     idempotency_file: String,
     recovery_file: String,
+    transaction_file: String,
+    idempotency_comparison: String,
+    recovery_validation_failure_status: String,
 }
 
 #[derive(Deserialize)]
@@ -51,8 +54,32 @@ struct RecoveryFixture {
 #[derive(Deserialize)]
 struct RecoveryCase {
     name: String,
+    expected_valid: bool,
     input: RecoveryInputV1,
-    expected: RecoveryResultV1,
+    expected: Option<RecoveryResultV1>,
+}
+
+#[derive(Deserialize)]
+struct TransactionFixture {
+    before: StorageStateV1,
+    cases: Vec<TransactionCase>,
+}
+
+#[derive(Deserialize)]
+struct TransactionCase {
+    name: String,
+    failure_point: Option<TransactionFailurePointV1>,
+    incoming: LedgerEventV1,
+    expected: TransactionExpected,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+struct TransactionExpected {
+    outcome: TransactionOutcomeV1,
+    steps: Vec<String>,
+    event_ids: Vec<String>,
+    projection: ProjectionStateV1,
+    risky_operation_started: bool,
 }
 
 #[test]
@@ -72,6 +99,14 @@ fn sqlite_v1_migration_matches_the_language_neutral_schema_contract() {
     assert!(manifest.migration.operation_id_unique);
     assert!(!manifest.migration.request_id_durable_key);
     assert!(manifest.migration.events_append_only);
+    assert_eq!(
+        manifest.idempotency_comparison,
+        "fullImmutableLedgerRecordExceptRequestId"
+    );
+    assert_eq!(
+        manifest.recovery_validation_failure_status,
+        RECOVERY_VALIDATION_FAILURE_STATUS_V1
+    );
 
     let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read migration");
     let created_tables = sql.matches("CREATE TABLE ").count();
@@ -84,6 +119,7 @@ fn sqlite_v1_migration_matches_the_language_neutral_schema_contract() {
     }
     assert!(events_definition(&sql).contains("operation_id TEXT NOT NULL UNIQUE"));
     assert!(!events_definition(&sql).contains("request_id TEXT NOT NULL UNIQUE"));
+    assert!(!events_definition(&sql).contains("content_hash"));
     assert!(sql.contains("BEFORE UPDATE ON events"));
     assert!(sql.contains("BEFORE DELETE ON events"));
 }
@@ -113,12 +149,38 @@ fn rust_unclean_recovery_matches_canonical_storage_fixtures() {
     let (root, manifest) = manifest();
     let fixture: RecoveryFixture = read_json(root.join(manifest.recovery_file));
     for case in fixture.cases {
-        assert_eq!(
-            recover_unclean_shutdown_v1(case.input).expect(&case.name),
-            case.expected,
-            "{}",
-            case.name
-        );
+        let result = recover_unclean_shutdown_v1(case.input);
+        assert_eq!(result.is_ok(), case.expected_valid, "{}", case.name);
+        if let Some(expected) = case.expected {
+            assert_eq!(result.expect(&case.name), expected, "{}", case.name);
+        }
+    }
+}
+
+#[test]
+fn rust_transaction_rolls_back_partial_writes_and_commits_before_risky_work() {
+    let (root, manifest) = manifest();
+    let fixture: TransactionFixture = read_json(root.join(manifest.transaction_file));
+    for case in fixture.cases {
+        let result = apply_pre_risky_storage_transaction_v1(
+            &fixture.before,
+            &case.incoming,
+            case.failure_point,
+        )
+        .expect(&case.name);
+        let actual = TransactionExpected {
+            outcome: result.outcome,
+            steps: result.steps,
+            event_ids: result
+                .state
+                .events
+                .iter()
+                .map(|event| event.event_id.clone())
+                .collect(),
+            projection: result.state.projection,
+            risky_operation_started: result.risky_operation_started,
+        };
+        assert_eq!(actual, case.expected, "{}", case.name);
     }
 }
 

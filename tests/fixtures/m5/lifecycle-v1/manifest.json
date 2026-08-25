@@ -69,6 +69,25 @@
       }
     },
     {
+      "name": "ready status still surfaces a persisted poisoned lock blocker",
+      "expectedValid": true,
+      "value": {
+        "state": "ready",
+        "sidecar": {
+          "protocolVersion": 1,
+          "sidecarSchemaVersion": 1,
+          "appSchemaVersion": 1,
+          "pid": 4242,
+          "platform": "darwin",
+          "capabilities": ["system.status", "app.prepareQuit"],
+          "sidecarInstanceId": "sidecar_fixture_01"
+        },
+        "database": { "health": "healthy", "schemaVersion": 1 },
+        "recoveryRequired": true,
+        "blockerIds": ["lock:lock_poisoned_01"]
+      }
+    },
+    {
       "name": "unavailable before any ready identity",
       "expectedValid": true,
       "value": {

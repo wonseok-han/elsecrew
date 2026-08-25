@@ -2,9 +2,15 @@
   "cases": [
     {
       "name": "unclean active run requires recovery",
+      "expected_valid": true,
       "input": {
         "previous_app_instance": {
           "sidecar_instance_id": "sidecar_previous_01",
+          "pid": 4101,
+          "platform": "darwin",
+          "started_at": "2026-08-25T00:00:00Z",
+          "heartbeat_at": "2026-08-25T00:00:05Z",
+          "last_event_sequence": 1,
           "clean_shutdown_at": null
         },
         "runs": [
@@ -67,9 +73,15 @@
     },
     {
       "name": "clean shutdown leaves projections unchanged",
+      "expected_valid": true,
       "input": {
         "previous_app_instance": {
           "sidecar_instance_id": "sidecar_previous_02",
+          "pid": 4102,
+          "platform": "darwin",
+          "started_at": "2026-08-25T00:30:00Z",
+          "heartbeat_at": "2026-08-25T00:59:59Z",
+          "last_event_sequence": 2,
           "clean_shutdown_at": "2026-08-25T01:00:00Z"
         },
         "runs": [
@@ -106,6 +118,140 @@
             "recovery_required": false
           }
         ]
+      }
+    },
+    {
+      "name": "null predecessor is a clean first launch",
+      "expected_valid": true,
+      "input": {
+        "previous_app_instance": null,
+        "runs": [],
+        "locks": []
+      },
+      "expected": {
+        "recovery_required": false,
+        "blocker_ids": [],
+        "runs": [],
+        "locks": []
+      }
+    },
+    {
+      "name": "clean predecessor never clears a poisoned lock",
+      "expected_valid": true,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_03",
+          "pid": 4103,
+          "platform": "darwin",
+          "started_at": "2026-08-25T01:00:00Z",
+          "heartbeat_at": "2026-08-25T01:29:59Z",
+          "clean_shutdown_at": "2026-08-25T01:30:00Z",
+          "last_event_sequence": 3
+        },
+        "runs": [
+          {
+            "run_id": "run_poisoned_01",
+            "state": "completed",
+            "worktree_path": "/fixture/worktree-poisoned"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_poisoned_01",
+            "writer_run_id": "run_poisoned_01",
+            "poisoned": true,
+            "recovery_required": false
+          }
+        ]
+      },
+      "expected": {
+        "recovery_required": true,
+        "blocker_ids": ["lock:lock_poisoned_01"],
+        "runs": [
+          {
+            "run_id": "run_poisoned_01",
+            "state": "completed",
+            "worktree_path": "/fixture/worktree-poisoned"
+          }
+        ],
+        "locks": [
+          {
+            "lock_id": "lock_poisoned_01",
+            "writer_run_id": "run_poisoned_01",
+            "poisoned": true,
+            "recovery_required": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "existing recovery lock remains a blocker after clean shutdown",
+      "expected_valid": true,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_04",
+          "pid": 4104,
+          "platform": "win32",
+          "started_at": "2026-08-25T02:00:00Z",
+          "heartbeat_at": "2026-08-25T02:29:59Z",
+          "clean_shutdown_at": "2026-08-25T02:30:00Z",
+          "last_event_sequence": 4
+        },
+        "runs": [],
+        "locks": [
+          {
+            "lock_id": "lock_recovery_01",
+            "writer_run_id": null,
+            "poisoned": false,
+            "recovery_required": true
+          }
+        ]
+      },
+      "expected": {
+        "recovery_required": true,
+        "blocker_ids": ["lock:lock_recovery_01"],
+        "runs": [],
+        "locks": [
+          {
+            "lock_id": "lock_recovery_01",
+            "writer_run_id": null,
+            "poisoned": false,
+            "recovery_required": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "persisted predecessor missing clean marker fails closed",
+      "expected_valid": false,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_bad_01",
+          "pid": 4190,
+          "platform": "darwin",
+          "started_at": "2026-08-25T03:00:00Z",
+          "heartbeat_at": "2026-08-25T03:00:01Z",
+          "last_event_sequence": 5
+        },
+        "runs": [],
+        "locks": []
+      }
+    },
+    {
+      "name": "persisted predecessor invalid clean marker fails closed",
+      "expected_valid": false,
+      "input": {
+        "previous_app_instance": {
+          "sidecar_instance_id": "sidecar_previous_bad_02",
+          "pid": 4191,
+          "platform": "darwin",
+          "started_at": "2026-08-25T03:10:00Z",
+          "heartbeat_at": "2026-08-25T03:10:01Z",
+          "clean_shutdown_at": "not-a-timestamp",
+          "last_event_sequence": 6
+        },
+        "runs": [],
+        "locks": []
       }
     }
   ]

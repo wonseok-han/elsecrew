@@ -1,4 +1,5 @@
 export const SQLITE_SCHEMA_VERSION = 1 as const;
+export const RECOVERY_VALIDATION_FAILURE_STATUS_V1 = "unavailable" as const;
 
 export const SQLITE_TABLES_V1 = [
   "schema_meta",
@@ -20,7 +21,6 @@ export const LEDGER_FIELDS_V1 = [
   "event_type",
   "payload_schema_version",
   "canonical_json_payload",
-  "content_hash",
   "timestamp",
 ] as const;
 
@@ -37,17 +37,12 @@ export interface LedgerEventV1 {
   event_type: string;
   payload_schema_version: typeof SQLITE_SCHEMA_VERSION;
   canonical_json_payload: string;
-  content_hash: string;
   timestamp: string;
 }
 
 export type OperationDecisionV1 = "append" | "duplicateNoOp" | "conflict";
 
-export interface OperationRecordV1 {
-  operation_id: string;
-  request_id: string | null;
-  content_hash: string;
-}
+export type OperationRecordV1 = LedgerEventV1;
 
 export interface ProjectionStateV1 {
   app_instances: Record<string, Record<string, unknown>>;
@@ -58,9 +53,24 @@ export interface ProjectionStateV1 {
 }
 
 export interface RecoveryInputV1 {
-  previous_app_instance: Record<string, unknown>;
+  previous_app_instance: Record<string, unknown> | null;
   runs: Record<string, unknown>[];
   locks: Record<string, unknown>[];
+}
+
+export interface StorageStateV1 {
+  events: LedgerEventV1[];
+  projection: ProjectionStateV1;
+}
+
+export type TransactionFailurePointV1 = "afterEventInsertBeforeProjection" | null;
+export type TransactionOutcomeV1 = "committed" | "duplicateNoOp" | "conflict" | "rolledBack";
+
+export interface StorageTransactionResultV1 {
+  outcome: TransactionOutcomeV1;
+  steps: string[];
+  state: StorageStateV1;
+  risky_operation_started: boolean;
 }
 
 export interface RecoveryResultV1 {
@@ -87,16 +97,25 @@ const AGGREGATE_IDS: Record<AggregateTypeV1, string> = {
 };
 
 const ACTIVE_RECOVERY_STATES = new Set(["preparing", "running", "cancelling"]);
+const APP_INSTANCE_FIELDS = [
+  "sidecar_instance_id",
+  "pid",
+  "platform",
+  "started_at",
+  "heartbeat_at",
+  "clean_shutdown_at",
+  "last_event_sequence",
+] as const;
 
 export function classifyOperationV1(
   existing: readonly OperationRecordV1[],
   incoming: OperationRecordV1,
 ): OperationDecisionV1 {
-  requireId(incoming.operation_id, "operation_id");
-  requireId(incoming.content_hash, "content_hash");
+  validateLedgerEvent(incoming);
   const previous = existing.find((entry) => entry.operation_id === incoming.operation_id);
   if (previous === undefined) return "append";
-  return previous.content_hash === incoming.content_hash ? "duplicateNoOp" : "conflict";
+  validateLedgerEvent(previous);
+  return immutableOperationContentEqual(previous, incoming) ? "duplicateNoOp" : "conflict";
 }
 
 export function replayLedgerV1(events: readonly LedgerEventV1[]): ProjectionStateV1 {
@@ -137,36 +156,86 @@ export function replayLedgerV1(events: readonly LedgerEventV1[]): ProjectionStat
 }
 
 export function recoverUncleanShutdownV1(input: RecoveryInputV1): RecoveryResultV1 {
-  const previous = cloneRecord(input.previous_app_instance);
+  const previous = validatePreviousAppInstance(input.previous_app_instance);
   const runs = input.runs.map(cloneRecord);
   const locks = input.locks.map(cloneRecord);
-  if (previous.clean_shutdown_at !== null) {
-    return { recovery_required: false, blocker_ids: [], runs, locks };
-  }
 
   const affectedRuns = new Set<string>();
-  for (const run of runs) {
-    const runId = requireRecordId(run, "run_id");
-    if (typeof run.state === "string" && ACTIVE_RECOVERY_STATES.has(run.state)) {
-      run.state = "recoveryRequired";
-      affectedRuns.add(runId);
+  if (previous !== null && previous.clean_shutdown_at === null) {
+    for (const run of runs) {
+      const runId = requireRecordId(run, "run_id");
+      if (typeof run.state === "string" && ACTIVE_RECOVERY_STATES.has(run.state)) {
+        run.state = "recoveryRequired";
+        affectedRuns.add(runId);
+      }
     }
   }
 
-  const blockerIds = [...affectedRuns].map((runId) => `run:${runId}`);
+  const blockerIds = new Set([...affectedRuns].map((runId) => `run:${runId}`));
   for (const lock of locks) {
     const lockId = requireRecordId(lock, "lock_id");
+    if (typeof lock.poisoned !== "boolean" || typeof lock.recovery_required !== "boolean") {
+      fail("persisted lock safety flags must be explicit booleans");
+    }
     if (typeof lock.writer_run_id === "string" && affectedRuns.has(lock.writer_run_id)) {
       lock.recovery_required = true;
-      blockerIds.push(`lock:${lockId}`);
     }
+    if (lock.poisoned || lock.recovery_required) blockerIds.add(`lock:${lockId}`);
   }
-  blockerIds.sort();
+  const sortedBlockers = [...blockerIds].sort();
   return {
-    recovery_required: blockerIds.length > 0,
-    blocker_ids: blockerIds,
+    recovery_required: sortedBlockers.length > 0,
+    blocker_ids: sortedBlockers,
     runs,
     locks,
+  };
+}
+
+export function applyPreRiskyStorageTransactionV1(
+  before: StorageStateV1,
+  incoming: LedgerEventV1,
+  failurePoint: TransactionFailurePointV1,
+): StorageTransactionResultV1 {
+  const initial = structuredClone(before);
+  if (canonicalJsonV1(replayLedgerV1(initial.events)) !== canonicalJsonV1(initial.projection)) {
+    fail("stored projection does not match deterministic replay");
+  }
+  const steps = ["beginImmediate", "operationLookup"];
+  const decision = classifyOperationV1(initial.events, incoming);
+  if (decision === "duplicateNoOp") {
+    return {
+      outcome: "duplicateNoOp",
+      steps: [...steps, "duplicateNoOp", "commit"],
+      state: initial,
+      risky_operation_started: false,
+    };
+  }
+  if (decision === "conflict") {
+    return {
+      outcome: "conflict",
+      steps: [...steps, "operationConflict", "rollback"],
+      state: initial,
+      risky_operation_started: false,
+    };
+  }
+
+  const events = [...initial.events, structuredClone(incoming)];
+  steps.push("eventInserted");
+  if (failurePoint === "afterEventInsertBeforeProjection") {
+    return {
+      outcome: "rolledBack",
+      steps: [...steps, "failureInjected", "rollback"],
+      state: initial,
+      risky_operation_started: false,
+    };
+  }
+  const projection = replayLedgerV1(events);
+  steps.push("projectionUpdated", "commit", "riskyOperationStarted");
+  return {
+    outcome: "committed",
+    steps,
+    state: { events, projection },
+    risky_operation_started: true,
   };
 }
 
@@ -180,7 +249,6 @@ function validateLedgerEvent(event: LedgerEventV1): void {
     "operation_id",
     "aggregate_id",
     "event_type",
-    "content_hash",
     "timestamp",
   ] as const) {
     requireId(event[field], field);
@@ -196,6 +264,50 @@ function validateLedgerEvent(event: LedgerEventV1): void {
   if (event.event_type !== `${event.aggregate_type}.upserted`) {
     fail("G3 reducer accepts only aggregate upsert events");
   }
+}
+
+function immutableOperationContentEqual(left: LedgerEventV1, right: LedgerEventV1): boolean {
+  return (
+    left.event_id === right.event_id &&
+    left.aggregate_type === right.aggregate_type &&
+    left.aggregate_id === right.aggregate_id &&
+    left.aggregate_sequence === right.aggregate_sequence &&
+    left.event_type === right.event_type &&
+    left.payload_schema_version === right.payload_schema_version &&
+    left.canonical_json_payload === right.canonical_json_payload &&
+    left.timestamp === right.timestamp
+  );
+}
+
+function validatePreviousAppInstance(
+  value: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (value === null) return null;
+  const fields = Object.keys(value).sort();
+  if (
+    fields.length !== APP_INSTANCE_FIELDS.length ||
+    APP_INSTANCE_FIELDS.some((field) => !fields.includes(field))
+  ) {
+    fail("previous app instance must contain the exact persisted fields");
+  }
+  requireId(value.sidecar_instance_id, "sidecar_instance_id");
+  if (
+    !Number.isSafeInteger(value.pid) ||
+    (value.pid as number) < 1 ||
+    (value.pid as number) > 0xffff_ffff
+  ) {
+    fail("previous pid is invalid");
+  }
+  requireId(value.platform, "platform");
+  requireTimestamp(value.started_at, "started_at");
+  requireTimestamp(value.heartbeat_at, "heartbeat_at");
+  if (value.clean_shutdown_at !== null) {
+    requireTimestamp(value.clean_shutdown_at, "clean_shutdown_at");
+  }
+  if (!Number.isSafeInteger(value.last_event_sequence) || (value.last_event_sequence as number) < 1) {
+    fail("previous last_event_sequence is invalid");
+  }
+  return cloneRecord(value);
 }
 
 function parseCanonicalObject(source: string): Record<string, unknown> {
@@ -240,6 +352,12 @@ function requireRecordId(value: Record<string, unknown>, field: string): string 
 
 function requireId(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) fail(`${name} is required`);
+}
+
+function requireTimestamp(value: unknown, name: string): asserts value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) {
+    fail(`${name} must be an RFC 3339 UTC second timestamp`);
+  }
 }
 
 function fail(message: string): never {

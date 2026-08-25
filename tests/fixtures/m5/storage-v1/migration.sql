@@ -1,4 +1,8 @@
 PRAGMA foreign_keys = ON;
+
+-- Writer contract: BEGIN IMMEDIATE, look up operation_id, insert the event,
+-- update its projection, then COMMIT before the risky external operation starts.
+-- Any failure between insert and projection update must ROLLBACK both writes.
 BEGIN IMMEDIATE;
 
 CREATE TABLE schema_meta (
@@ -29,7 +33,6 @@ CREATE TABLE events (
     event_type TEXT NOT NULL,
     payload_schema_version INTEGER NOT NULL CHECK (payload_schema_version = 1),
     canonical_json_payload TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
     timestamp TEXT NOT NULL,
     UNIQUE (aggregate_type, aggregate_id, aggregate_sequence)
 ) STRICT;

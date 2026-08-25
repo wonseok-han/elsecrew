@@ -87,6 +87,14 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 독립 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단점 4개를 공통 Rust/TypeScript 계약과 language-neutral fixture에서 닫았다. 직전 계약의 claimed `content_hash` 비교는 신뢰 경계가 아니어서 제거하고, 같은 `operation_id`의 재시도는 `request_id`만 제외한 영속 event 레코드 전체가 같을 때만 no-op으로 인정한다. payload·aggregate·event identity 중 하나라도 달라지면 conflict다.
+- **복구 안전**: `previous_app_instance: null`만 이전 실행이 없는 정상 첫 시작이다. 이전 row가 있으면 sidecar identity·pid/platform·시작/heartbeat·event sequence와 explicit nullable `clean_shutdown_at`을 정확히 검증하고 missing/malformed row는 `unavailable`로 fail-closed한다. 정상 종료 row가 있어도 이미 저장된 `poisoned` 또는 `recovery_required` lock은 항상 blocker와 status에 남으며 조용히 정상화하지 않는다.
+- **transaction 계약**: writer는 `BEGIN IMMEDIATE` 안에서 operation lookup → event insert → projection update를 수행하고 commit 뒤에만 위험한 외부 작업을 시작한다. event insert 뒤 projection 전 실패 주입은 두 쓰기를 모두 rollback하며 위험 작업을 시작하지 않는다. duplicate no-op과 conflict 판정도 같은 transaction 안에서 이뤄진다.
+- **검증**: G2+G3 TypeScript contract 12개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite 7-table migration과 `integrity_check=ok`, G2 fixture 불변과 diff check를 통과했다.
+- **다음 할 일**: 이 fix commit을 독립 재리뷰한 뒤에만 sidecar SQLite writer와 Electron status/quit consumer 구현을 시작한다. 실제 DB writer는 renderer가 제공한 hash나 operation 판정을 신뢰하지 않고 이 transaction/record-equality 계약을 내부에서 수행해야 한다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 저장·수명주기 계약)
 
 - **한 일**: G2 protocol fixture와 공개 bridge 메서드 목록을 그대로 둔 채 G3 구현 착수용 저장·수명주기 계약을 추가했다. SQLite v1은 별도 `userData/com.wonseokhan.helloagent/m5/hello-agent.sqlite3`에 7개 테이블(`schema_meta/app_instances/events/projects/chats/runs/locks`)을 만들며, append-only event 원장은 `request_id`와 별개인 unique `operation_id`·canonical payload·content hash를 영속 키로 쓴다. 같은 operation/content는 재시작 뒤에도 no-op이고 같은 operation의 다른 content는 conflict다. 양 언어 reducer가 공통 replay/projection·unclean recovery fixture를 같은 결과로 만든다.

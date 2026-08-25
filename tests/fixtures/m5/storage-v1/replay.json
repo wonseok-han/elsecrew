@@ -10,7 +10,6 @@
       "event_type": "app_instance.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"clean_shutdown_at\":null,\"heartbeat_at\":\"2026-08-25T00:00:00Z\",\"pid\":4242,\"platform\":\"darwin\",\"sidecar_instance_id\":\"sidecar_fixture_01\",\"started_at\":\"2026-08-25T00:00:00Z\"}",
-      "content_hash": "sha256:instance-01",
       "timestamp": "2026-08-25T00:00:00Z"
     },
     {
@@ -23,7 +22,6 @@
       "event_type": "run.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"run_id\":\"run_fixture_01\",\"state\":\"preparing\",\"worktree_path\":\"/fixture/worktree\"}",
-      "content_hash": "sha256:run-01",
       "timestamp": "2026-08-25T00:00:01Z"
     },
     {
@@ -36,7 +34,6 @@
       "event_type": "run.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"run_id\":\"run_fixture_01\",\"state\":\"preparing\",\"worktree_path\":\"/fixture/worktree\"}",
-      "content_hash": "sha256:run-01",
       "timestamp": "2026-08-25T00:00:01Z"
     },
     {
@@ -49,7 +46,6 @@
       "event_type": "lock.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"lock_id\":\"lock_fixture_01\",\"poisoned\":false,\"recovery_required\":false,\"writer_run_id\":\"run_fixture_01\"}",
-      "content_hash": "sha256:lock-01",
       "timestamp": "2026-08-25T00:00:02Z"
     },
     {
@@ -62,7 +58,6 @@
       "event_type": "run.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"run_id\":\"run_fixture_01\",\"state\":\"recoveryRequired\",\"worktree_path\":\"/fixture/worktree\"}",
-      "content_hash": "sha256:run-02",
       "timestamp": "2026-08-25T00:00:03Z"
     },
     {
@@ -75,7 +70,6 @@
       "event_type": "lock.upserted",
       "payload_schema_version": 1,
       "canonical_json_payload": "{\"lock_id\":\"lock_fixture_01\",\"poisoned\":false,\"recovery_required\":true,\"writer_run_id\":\"run_fixture_01\"}",
-      "content_hash": "sha256:lock-02",
       "timestamp": "2026-08-25T00:00:04Z"
     }
   ],

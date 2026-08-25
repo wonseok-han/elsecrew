@@ -15,9 +15,11 @@ import {
   type StartupTraceV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
 import {
+  applyPreRiskyStorageTransactionV1,
   classifyOperationV1,
   LEDGER_FIELDS_V1,
   recoverUncleanShutdownV1,
+  RECOVERY_VALIDATION_FAILURE_STATUS_V1,
   replayLedgerV1,
   SQLITE_SCHEMA_VERSION,
   SQLITE_TABLES_V1,
@@ -27,6 +29,9 @@ import {
   type ProjectionStateV1,
   type RecoveryInputV1,
   type RecoveryResultV1,
+  type StorageStateV1,
+  type TransactionFailurePointV1,
+  type TransactionOutcomeV1,
 } from "../src/m5/contracts/storage-v1.ts";
 
 interface StorageManifest {
@@ -42,6 +47,9 @@ interface StorageManifest {
   replayFile: string;
   idempotencyFile: string;
   recoveryFile: string;
+  transactionFile: string;
+  idempotencyComparison: string;
+  recoveryValidationFailureStatus: string;
 }
 
 interface LifecycleCase<T> {
@@ -78,8 +86,25 @@ interface IdempotencyFixture {
 interface RecoveryFixture {
   cases: Array<{
     name: string;
+    expected_valid: boolean;
     input: RecoveryInputV1;
-    expected: RecoveryResultV1;
+    expected?: RecoveryResultV1;
+  }>;
+}
+
+interface TransactionFixture {
+  before: StorageStateV1;
+  cases: Array<{
+    name: string;
+    failure_point: TransactionFailurePointV1;
+    incoming: LedgerEventV1;
+    expected: {
+      outcome: TransactionOutcomeV1;
+      steps: string[];
+      event_ids: string[];
+      projection: ProjectionStateV1;
+      risky_operation_started: boolean;
+    };
   }>;
 }
 
@@ -95,6 +120,14 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
   assert.equal(storageManifest.migration.operationIdUnique, true);
   assert.equal(storageManifest.migration.requestIdDurableKey, false);
   assert.equal(storageManifest.migration.eventsAppendOnly, true);
+  assert.equal(
+    storageManifest.idempotencyComparison,
+    "fullImmutableLedgerRecordExceptRequestId",
+  );
+  assert.equal(
+    storageManifest.recoveryValidationFailureStatus,
+    RECOVERY_VALIDATION_FAILURE_STATUS_V1,
+  );
 
   const sql = readFileSync(resolve(storageRoot, storageManifest.migration.file), "utf8");
   assert.equal(sql.match(/CREATE TABLE /g)?.length, SQLITE_TABLES_V1.length);
@@ -105,6 +138,7 @@ test("SQLite v1 migration이 7개 테이블과 durable operation ledger를 고�
   for (const field of LEDGER_FIELDS_V1) assert.match(events, new RegExp(`\\b${field}\\b`));
   assert.match(events, /operation_id TEXT NOT NULL UNIQUE/);
   assert.doesNotMatch(events, /request_id TEXT NOT NULL UNIQUE/);
+  assert.doesNotMatch(events, /content_hash/);
   assert.match(sql, /BEFORE UPDATE ON events/);
   assert.match(sql, /BEFORE DELETE ON events/);
 });
@@ -130,7 +164,35 @@ test("TypeScript unclean recovery가 canonical storage fixture와 일치한다",
     resolve(storageRoot, storageManifest.recoveryFile),
   );
   for (const fixture of recovery.cases) {
-    assert.deepEqual(recoverUncleanShutdownV1(fixture.input), fixture.expected, fixture.name);
+    if (fixture.expected_valid) {
+      assert.deepEqual(recoverUncleanShutdownV1(fixture.input), fixture.expected, fixture.name);
+    } else {
+      assert.throws(() => recoverUncleanShutdownV1(fixture.input), fixture.name);
+    }
+  }
+});
+
+test("event append와 projection은 한 transaction이며 commit 뒤에만 위험 작업을 시작한다", () => {
+  const fixture = readJson<TransactionFixture>(
+    resolve(storageRoot, storageManifest.transactionFile),
+  );
+  for (const transaction of fixture.cases) {
+    const result = applyPreRiskyStorageTransactionV1(
+      fixture.before,
+      transaction.incoming,
+      transaction.failure_point,
+    );
+    assert.deepEqual(
+      {
+        outcome: result.outcome,
+        steps: result.steps,
+        event_ids: result.state.events.map((event) => event.event_id),
+        projection: result.state.projection,
+        risky_operation_started: result.risky_operation_started,
+      },
+      transaction.expected,
+      transaction.name,
+    );
   }
 });
 

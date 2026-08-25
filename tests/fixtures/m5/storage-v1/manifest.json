@@ -21,7 +21,6 @@
       "event_type",
       "payload_schema_version",
       "canonical_json_payload",
-      "content_hash",
       "timestamp"
     ],
     "operationIdUnique": true,
@@ -30,5 +29,8 @@
   },
   "replayFile": "replay.json",
   "idempotencyFile": "idempotency.json",
-  "recoveryFile": "recovery.json"
+  "recoveryFile": "recovery.json",
+  "transactionFile": "transaction.json",
+  "idempotencyComparison": "fullImmutableLedgerRecordExceptRequestId",
+  "recoveryValidationFailureStatus": "unavailable"
 }

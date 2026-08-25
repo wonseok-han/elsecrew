@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fmt::{self, Display};
 
 pub const SQLITE_SCHEMA_VERSION: u32 = 1;
+pub const RECOVERY_VALIDATION_FAILURE_STATUS_V1: &str = "unavailable";
 pub const SQLITE_TABLES_V1: &[&str] = &[
     "schema_meta",
     "app_instances",
@@ -24,7 +25,6 @@ pub const LEDGER_FIELDS_V1: &[&str] = &[
     "event_type",
     "payload_schema_version",
     "canonical_json_payload",
-    "content_hash",
     "timestamp",
 ];
 
@@ -59,14 +59,6 @@ pub enum OperationDecisionV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OperationRecordV1 {
-    pub operation_id: String,
-    pub request_id: Option<String>,
-    pub content_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LedgerEventV1 {
     pub event_id: String,
     pub operation_id: String,
@@ -77,19 +69,10 @@ pub struct LedgerEventV1 {
     pub event_type: String,
     pub payload_schema_version: u32,
     pub canonical_json_payload: String,
-    pub content_hash: String,
     pub timestamp: String,
 }
 
-impl From<&LedgerEventV1> for OperationRecordV1 {
-    fn from(value: &LedgerEventV1) -> Self {
-        Self {
-            operation_id: value.operation_id.clone(),
-            request_id: value.request_id.clone(),
-            content_hash: value.content_hash.clone(),
-        }
-    }
-}
+pub type OperationRecordV1 = LedgerEventV1;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,7 +87,7 @@ pub struct ProjectionStateV1 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecoveryInputV1 {
-    pub previous_app_instance: Map<String, Value>,
+    pub previous_app_instance: Option<Map<String, Value>>,
     pub runs: Vec<Map<String, Value>>,
     pub locks: Vec<Map<String, Value>>,
 }
@@ -118,19 +101,50 @@ pub struct RecoveryResultV1 {
     pub locks: Vec<Map<String, Value>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StorageStateV1 {
+    pub events: Vec<LedgerEventV1>,
+    pub projection: ProjectionStateV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransactionFailurePointV1 {
+    AfterEventInsertBeforeProjection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransactionOutcomeV1 {
+    Committed,
+    DuplicateNoOp,
+    Conflict,
+    RolledBack,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StorageTransactionResultV1 {
+    pub outcome: TransactionOutcomeV1,
+    pub steps: Vec<String>,
+    pub state: StorageStateV1,
+    pub risky_operation_started: bool,
+}
+
 pub fn classify_operation_v1(
     existing: &[OperationRecordV1],
     incoming: &OperationRecordV1,
 ) -> Result<OperationDecisionV1, StorageContractError> {
-    require_id(&incoming.operation_id, "operation_id")?;
-    require_id(&incoming.content_hash, "content_hash")?;
+    validate_ledger_event(incoming)?;
     let Some(previous) = existing
         .iter()
         .find(|entry| entry.operation_id == incoming.operation_id)
     else {
         return Ok(OperationDecisionV1::Append);
     };
-    Ok(if previous.content_hash == incoming.content_hash {
+    validate_ledger_event(previous)?;
+    Ok(if immutable_operation_content_equal(previous, incoming) {
         OperationDecisionV1::DuplicateNoOp
     } else {
         OperationDecisionV1::Conflict
@@ -147,7 +161,7 @@ pub fn replay_ledger_v1(
 
     for event in events {
         validate_ledger_event(event)?;
-        match classify_operation_v1(&operations, &OperationRecordV1::from(event))? {
+        match classify_operation_v1(&operations, event)? {
             OperationDecisionV1::DuplicateNoOp => continue,
             OperationDecisionV1::Conflict => {
                 return Err(StorageContractError::new(format!(
@@ -155,7 +169,7 @@ pub fn replay_ledger_v1(
                     event.operation_id
                 )))
             }
-            OperationDecisionV1::Append => operations.push(OperationRecordV1::from(event)),
+            OperationDecisionV1::Append => operations.push(event.clone()),
         }
         if !event_ids.insert(event.event_id.clone()) {
             return Err(StorageContractError::new(format!(
@@ -197,55 +211,124 @@ pub fn replay_ledger_v1(
 pub fn recover_unclean_shutdown_v1(
     mut input: RecoveryInputV1,
 ) -> Result<RecoveryResultV1, StorageContractError> {
-    if input
-        .previous_app_instance
-        .get("clean_shutdown_at")
-        .is_some_and(|value| !value.is_null())
-    {
-        return Ok(RecoveryResultV1 {
-            recovery_required: false,
-            blocker_ids: Vec::new(),
-            runs: input.runs,
-            locks: input.locks,
-        });
-    }
+    let previous = validate_previous_app_instance(input.previous_app_instance.as_ref())?;
 
     let mut affected_runs = HashSet::new();
-    for run in &mut input.runs {
-        let run_id = record_id(run, "run_id")?.to_string();
-        if matches!(
-            run.get("state").and_then(Value::as_str),
-            Some("preparing" | "running" | "cancelling")
-        ) {
-            run.insert(
-                "state".to_string(),
-                Value::String("recoveryRequired".to_string()),
-            );
-            affected_runs.insert(run_id);
+    if previous.is_some_and(|row| row.get("clean_shutdown_at") == Some(&Value::Null)) {
+        for run in &mut input.runs {
+            let run_id = record_id(run, "run_id")?.to_string();
+            if matches!(
+                run.get("state").and_then(Value::as_str),
+                Some("preparing" | "running" | "cancelling")
+            ) {
+                run.insert(
+                    "state".to_string(),
+                    Value::String("recoveryRequired".to_string()),
+                );
+                affected_runs.insert(run_id);
+            }
         }
     }
 
-    let mut blocker_ids: Vec<String> = affected_runs
+    let mut blocker_ids: HashSet<String> = affected_runs
         .iter()
         .map(|run_id| format!("run:{run_id}"))
         .collect();
     for lock in &mut input.locks {
         let lock_id = record_id(lock, "lock_id")?.to_string();
+        let poisoned = lock
+            .get("poisoned")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                StorageContractError::new("persisted lock poisoned must be an explicit boolean")
+            })?;
+        let mut recovery_required = lock
+            .get("recovery_required")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                StorageContractError::new(
+                    "persisted lock recovery_required must be an explicit boolean",
+                )
+            })?;
         if lock
             .get("writer_run_id")
             .and_then(Value::as_str)
             .is_some_and(|run_id| affected_runs.contains(run_id))
         {
             lock.insert("recovery_required".to_string(), Value::Bool(true));
-            blocker_ids.push(format!("lock:{lock_id}"));
+            recovery_required = true;
+        }
+        if poisoned || recovery_required {
+            blocker_ids.insert(format!("lock:{lock_id}"));
         }
     }
+    let mut blocker_ids: Vec<_> = blocker_ids.into_iter().collect();
     blocker_ids.sort();
     Ok(RecoveryResultV1 {
         recovery_required: !blocker_ids.is_empty(),
         blocker_ids,
         runs: input.runs,
         locks: input.locks,
+    })
+}
+
+pub fn apply_pre_risky_storage_transaction_v1(
+    before: &StorageStateV1,
+    incoming: &LedgerEventV1,
+    failure_point: Option<TransactionFailurePointV1>,
+) -> Result<StorageTransactionResultV1, StorageContractError> {
+    let initial = before.clone();
+    if replay_ledger_v1(&initial.events)? != initial.projection {
+        return Err(StorageContractError::new(
+            "stored projection does not match deterministic replay",
+        ));
+    }
+    let mut steps = vec!["beginImmediate".to_string(), "operationLookup".to_string()];
+    match classify_operation_v1(&initial.events, incoming)? {
+        OperationDecisionV1::DuplicateNoOp => {
+            steps.extend(["duplicateNoOp".to_string(), "commit".to_string()]);
+            return Ok(StorageTransactionResultV1 {
+                outcome: TransactionOutcomeV1::DuplicateNoOp,
+                steps,
+                state: initial,
+                risky_operation_started: false,
+            });
+        }
+        OperationDecisionV1::Conflict => {
+            steps.extend(["operationConflict".to_string(), "rollback".to_string()]);
+            return Ok(StorageTransactionResultV1 {
+                outcome: TransactionOutcomeV1::Conflict,
+                steps,
+                state: initial,
+                risky_operation_started: false,
+            });
+        }
+        OperationDecisionV1::Append => {}
+    }
+
+    let mut events = initial.events.clone();
+    events.push(incoming.clone());
+    steps.push("eventInserted".to_string());
+    if failure_point == Some(TransactionFailurePointV1::AfterEventInsertBeforeProjection) {
+        steps.extend(["failureInjected".to_string(), "rollback".to_string()]);
+        return Ok(StorageTransactionResultV1 {
+            outcome: TransactionOutcomeV1::RolledBack,
+            steps,
+            state: initial,
+            risky_operation_started: false,
+        });
+    }
+    let projection = replay_ledger_v1(&events)?;
+    steps.extend([
+        "projectionUpdated".to_string(),
+        "commit".to_string(),
+        "riskyOperationStarted".to_string(),
+    ]);
+    Ok(StorageTransactionResultV1 {
+        outcome: TransactionOutcomeV1::Committed,
+        steps,
+        state: StorageStateV1 { events, projection },
+        risky_operation_started: true,
     })
 }
 
@@ -260,7 +343,6 @@ fn validate_ledger_event(event: &LedgerEventV1) -> Result<(), StorageContractErr
         ("operation_id", event.operation_id.as_str()),
         ("aggregate_id", event.aggregate_id.as_str()),
         ("event_type", event.event_type.as_str()),
-        ("content_hash", event.content_hash.as_str()),
         ("timestamp", event.timestamp.as_str()),
     ] {
         require_id(value, name)?;
@@ -285,6 +367,82 @@ fn validate_ledger_event(event: &LedgerEventV1) -> Result<(), StorageContractErr
         ));
     }
     Ok(())
+}
+
+fn immutable_operation_content_equal(left: &LedgerEventV1, right: &LedgerEventV1) -> bool {
+    left.event_id == right.event_id
+        && left.aggregate_type == right.aggregate_type
+        && left.aggregate_id == right.aggregate_id
+        && left.aggregate_sequence == right.aggregate_sequence
+        && left.event_type == right.event_type
+        && left.payload_schema_version == right.payload_schema_version
+        && left.canonical_json_payload == right.canonical_json_payload
+        && left.timestamp == right.timestamp
+}
+
+fn validate_previous_app_instance(
+    value: Option<&Map<String, Value>>,
+) -> Result<Option<&Map<String, Value>>, StorageContractError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    const FIELDS: &[&str] = &[
+        "sidecar_instance_id",
+        "pid",
+        "platform",
+        "started_at",
+        "heartbeat_at",
+        "clean_shutdown_at",
+        "last_event_sequence",
+    ];
+    if value.len() != FIELDS.len() || FIELDS.iter().any(|field| !value.contains_key(*field)) {
+        return Err(StorageContractError::new(
+            "previous app instance must contain the exact persisted fields",
+        ));
+    }
+    require_id(
+        value
+            .get("sidecar_instance_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "sidecar_instance_id",
+    )?;
+    if value
+        .get("pid")
+        .and_then(Value::as_u64)
+        .is_none_or(|pid| pid == 0 || pid > u64::from(u32::MAX))
+    {
+        return Err(StorageContractError::new("previous pid is invalid"));
+    }
+    require_id(
+        value
+            .get("platform")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "platform",
+    )?;
+    for field in ["started_at", "heartbeat_at"] {
+        require_timestamp(value.get(field).and_then(Value::as_str), field)?;
+    }
+    match value.get("clean_shutdown_at") {
+        Some(Value::Null) => {}
+        Some(Value::String(timestamp)) => require_timestamp(Some(timestamp), "clean_shutdown_at")?,
+        _ => {
+            return Err(StorageContractError::new(
+                "clean_shutdown_at must be an explicit nullable timestamp",
+            ))
+        }
+    }
+    if value
+        .get("last_event_sequence")
+        .and_then(Value::as_u64)
+        .is_none_or(|sequence| sequence == 0 || sequence > super::MAX_SEQUENCE)
+    {
+        return Err(StorageContractError::new(
+            "previous last_event_sequence is invalid",
+        ));
+    }
+    Ok(Some(value))
 }
 
 fn parse_canonical_object(source: &str) -> Result<Map<String, Value>, StorageContractError> {
@@ -378,6 +536,37 @@ fn require_id(value: &str, name: &str) -> Result<(), StorageContractError> {
         Err(StorageContractError::new(format!("{name} is required")))
     } else {
         Ok(())
+    }
+}
+
+fn require_timestamp(value: Option<&str>, name: &str) -> Result<(), StorageContractError> {
+    let Some(value) = value else {
+        return Err(StorageContractError::new(format!(
+            "{name} must be an RFC 3339 UTC second timestamp"
+        )));
+    };
+    let bytes = value.as_bytes();
+    let separators = [
+        (4, b'-'),
+        (7, b'-'),
+        (10, b'T'),
+        (13, b':'),
+        (16, b':'),
+        (19, b'Z'),
+    ];
+    let valid = bytes.len() == 20
+        && separators
+            .iter()
+            .all(|(index, expected)| bytes.get(*index) == Some(expected))
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            separators.iter().any(|(separator, _)| *separator == index) || byte.is_ascii_digit()
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(StorageContractError::new(format!(
+            "{name} must be an RFC 3339 UTC second timestamp"
+        )))
     }
 }
 
