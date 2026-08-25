@@ -1,2 +1,3 @@
+{"event":"system.ready","kind":"event","payload":{"appSchemaVersion":1,"capabilities":["system.status"],"pid":4242,"platform":"darwin","protocolVersion":1,"sidecarInstanceId":"sidecar_fixture_01","sidecarSchemaVersion":1},"protocolVersion":1,"seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"system"}
 {"event":"blob.chunk","kind":"event","payload":{"text":"one"},"protocolVersion":1,"seq":1,"sidecarInstanceId":"sidecar_fixture_01","streamId":"stream_01"}
 {"event":"blob.chunk","kind":"event","payload":{"text":"three"},"protocolVersion":1,"seq":3,"sidecarInstanceId":"sidecar_fixture_01","streamId":"stream_01"}

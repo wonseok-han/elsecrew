@@ -9,6 +9,7 @@ pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
 pub const APP_SCHEMA_VERSION: u32 = 1;
 pub const MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 pub const MAX_TEXT_CHUNK_BYTES: usize = 256 * 1024;
+pub const MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
 
 pub const METHODS_V1: &[&str] = &[
     "system.status",
@@ -158,6 +159,7 @@ pub struct PrepareQuitResultV1 {
 
 #[derive(Debug, Default)]
 pub struct ProtocolSessionV1 {
+    ready_received: bool,
     sidecar_instance_id: Option<String>,
     request_ids: HashSet<String>,
     response_ids: HashSet<String>,
@@ -166,6 +168,25 @@ pub struct ProtocolSessionV1 {
 
 impl ProtocolSessionV1 {
     pub fn observe(&mut self, envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
+        if !self.ready_received {
+            let EnvelopeV1::Event(event) = envelope else {
+                return Err(ProtocolError::new(
+                    "the first protocol envelope must be system.ready",
+                ));
+            };
+            if event.event != "system.ready" {
+                return Err(ProtocolError::new(
+                    "the first protocol envelope must be system.ready",
+                ));
+            }
+            self.ready_received = true;
+            self.sidecar_instance_id = Some(event.sidecar_instance_id.clone());
+        } else if matches!(envelope, EnvelopeV1::Event(event) if event.event == "system.ready") {
+            return Err(ProtocolError::new(
+                "system.ready can appear only once per session",
+            ));
+        }
+
         let instance_id = envelope.sidecar_instance_id();
         if let Some(expected) = &self.sidecar_instance_id {
             if expected != instance_id {
@@ -173,8 +194,6 @@ impl ProtocolSessionV1 {
                     "sidecarInstanceId changed within a session",
                 ));
             }
-        } else {
-            self.sidecar_instance_id = Some(instance_id.to_owned());
         }
 
         match envelope {
@@ -377,8 +396,8 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
         EnvelopeV1::Event(event) => {
             require_kind_and_version(&event.kind, event.protocol_version, "event")?;
             require_id(&event.stream_id, "streamId")?;
-            if event.seq == 0 {
-                return Err(ProtocolError::new("event seq starts at 1"));
+            if event.seq == 0 || event.seq > MAX_SEQUENCE {
+                return Err(ProtocolError::new("event seq must be between 1 and 2^53-1"));
             }
             if !EVENTS_V1.contains(&event.event.as_str()) {
                 return Err(ProtocolError::new(format!(
@@ -409,6 +428,17 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             }
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
+            }
+            if event.event == "blob.chunk" {
+                let payload = event
+                    .payload
+                    .as_object()
+                    .expect("payload was checked above");
+                if payload.len() != 1 || !matches!(payload.get("text"), Some(Value::String(_))) {
+                    return Err(ProtocolError::new(
+                        "blob.chunk payload must contain exactly one text field",
+                    ));
+                }
             }
             if let Some(text) = event.payload.get("text").and_then(Value::as_str) {
                 if text.len() > MAX_TEXT_CHUNK_BYTES {

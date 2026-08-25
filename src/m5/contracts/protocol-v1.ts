@@ -3,6 +3,7 @@ export const SIDECAR_SCHEMA_VERSION = 1 as const;
 export const APP_SCHEMA_VERSION = 1 as const;
 export const MAX_CONTROL_LINE_BYTES = 1024 * 1024;
 export const MAX_TEXT_CHUNK_BYTES = 256 * 1024;
+export const MAX_SEQUENCE = Number.MAX_SAFE_INTEGER;
 
 export const METHODS_V1 = [
   "system.status",
@@ -100,20 +101,29 @@ export interface PrepareQuitResultV1 {
 }
 
 export class ProtocolSessionV1 {
+  #readyReceived = false;
   #sidecarInstanceId: string | undefined;
   readonly #requestIds = new Set<string>();
   readonly #responseIds = new Set<string>();
   readonly #streamSequences = new Map<string, number>();
 
   observe(envelope: EnvelopeV1): void {
+    if (!this.#readyReceived) {
+      if (envelope.kind !== "event" || envelope.event !== "system.ready") {
+        fail("the first protocol envelope must be system.ready");
+      }
+      this.#readyReceived = true;
+      this.#sidecarInstanceId = envelope.sidecarInstanceId;
+    } else if (envelope.kind === "event" && envelope.event === "system.ready") {
+      fail("system.ready can appear only once per session");
+    }
+
     if (
       this.#sidecarInstanceId !== undefined &&
       this.#sidecarInstanceId !== envelope.sidecarInstanceId
     ) {
       fail("sidecarInstanceId changed within a session");
     }
-    this.#sidecarInstanceId ??= envelope.sidecarInstanceId;
-
     if (envelope.kind === "request") {
       if (this.#requestIds.has(envelope.requestId)) {
         fail("requestId must be unique within a session");
@@ -337,6 +347,12 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     fail("chat.eventAppended requires explicit chatId");
   }
   const payload = requireJsonObject(object.payload, "event payload");
+  if (object.event === "blob.chunk") {
+    exactKeys(payload, ["text"]);
+    if (typeof payload.text !== "string") {
+      fail("blob.chunk payload must contain exactly one text field");
+    }
+  }
   if (typeof payload.text === "string" && utf8Bytes(payload.text) > MAX_TEXT_CHUNK_BYTES) {
     fail("text chunk exceeds 256 KiB");
   }
@@ -391,7 +407,9 @@ function requireId(value: unknown, name: string): asserts value is string {
 }
 
 function requirePositiveInteger(value: unknown, name: string): asserts value is number {
-  if (!Number.isSafeInteger(value) || Number(value) < 1) fail(`${name} must start at 1`);
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > MAX_SEQUENCE) {
+    fail(`${name} must be between 1 and 2^53-1`);
+  }
 }
 
 function stripDelimiter(input: string): string {

@@ -10,6 +10,7 @@ import {
   encodeJsonl,
   EVENTS_V1,
   MAX_CONTROL_LINE_BYTES,
+  MAX_SEQUENCE,
   MAX_TEXT_CHUNK_BYTES,
   METHODS_V1,
   parsePrepareQuitResult,
@@ -23,6 +24,7 @@ import {
 
 interface ValidCase {
   file: string;
+  observeSession?: boolean;
   readyEnvelope?: number;
   prepareQuitEnvelope?: number;
 }
@@ -50,6 +52,7 @@ interface FixtureManifest {
     appSchemaVersion: number;
     maxControlLineBytes: number;
     maxTextChunkBytes: number;
+    maxSequence: number;
     methods: string[];
     events: string[];
     bridgeMethods: string[];
@@ -73,6 +76,7 @@ test("TypeScript가 canonical protocol v1 transcript를 decode하고 동일 byte
       appSchemaVersion: APP_SCHEMA_VERSION,
       maxControlLineBytes: MAX_CONTROL_LINE_BYTES,
       maxTextChunkBytes: MAX_TEXT_CHUNK_BYTES,
+      maxSequence: MAX_SEQUENCE,
       methods: [...METHODS_V1],
       events: [...EVENTS_V1],
       bridgeMethods: [...M5_BRIDGE_V1_METHODS],
@@ -85,7 +89,7 @@ test("TypeScript가 canonical protocol v1 transcript를 decode하고 동일 byte
     const session = new ProtocolSessionV1();
     const envelopes = lines.map((line) => {
       const envelope = decodeJsonl(line);
-      session.observe(envelope);
+      if (fixture.observeSession !== false) session.observe(envelope);
       assert.equal(encodeJsonl(envelope), line, fixture.file);
       return envelope;
     });

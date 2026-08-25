@@ -21,6 +21,7 @@ struct ContractFixture {
     app_schema_version: u32,
     max_control_line_bytes: usize,
     max_text_chunk_bytes: usize,
+    max_sequence: u64,
     methods: Vec<String>,
     events: Vec<String>,
     bridge_methods: Vec<String>,
@@ -30,6 +31,7 @@ struct ContractFixture {
 #[serde(rename_all = "camelCase")]
 struct ValidCase {
     file: String,
+    observe_session: Option<bool>,
     ready_envelope: Option<usize>,
     prepare_quit_envelope: Option<usize>,
 }
@@ -68,6 +70,7 @@ fn rust_decodes_and_byte_matches_canonical_protocol_v1_transcripts() {
         MAX_CONTROL_LINE_BYTES
     );
     assert_eq!(manifest.contract.max_text_chunk_bytes, MAX_TEXT_CHUNK_BYTES);
+    assert_eq!(manifest.contract.max_sequence, MAX_SEQUENCE);
     assert!(METHODS_V1
         .iter()
         .copied()
@@ -88,7 +91,9 @@ fn rust_decodes_and_byte_matches_canonical_protocol_v1_transcripts() {
         let mut envelopes = Vec::new();
         for line in lines {
             let envelope = decode_jsonl(line).expect(&fixture.file);
-            session.observe(&envelope).expect(&fixture.file);
+            if fixture.observe_session != Some(false) {
+                session.observe(&envelope).expect(&fixture.file);
+            }
             assert_eq!(encode_jsonl(&envelope).expect("encode"), as_utf8(line));
             envelopes.push(envelope);
         }

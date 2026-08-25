@@ -6,6 +6,7 @@
     "appSchemaVersion": 1,
     "maxControlLineBytes": 1048576,
     "maxTextChunkBytes": 262144,
+    "maxSequence": 9007199254740991,
     "methods": [
       "system.status",
       "app.prepareQuit",
@@ -44,11 +45,16 @@
   "valid": [
     {
       "file": "valid/session.jsonl",
-      "readyEnvelope": 2,
+      "readyEnvelope": 0,
       "prepareQuitEnvelope": 4
     },
     {
-      "file": "valid/unknown-outcome-not-retryable.jsonl"
+      "file": "valid/unknown-outcome-not-retryable.jsonl",
+      "readyEnvelope": 0
+    },
+    {
+      "file": "valid/sequence-max.jsonl",
+      "observeSession": false
     }
   ],
   "invalid": [
@@ -62,8 +68,14 @@
     { "file": "invalid/event-payload-array.jsonl", "validator": "transcript" },
     { "file": "invalid/run-event-missing-ids.jsonl", "validator": "transcript" },
     { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
+    { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/response-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/event-before-ready.jsonl", "validator": "transcript" },
+    { "file": "invalid/duplicate-ready.jsonl", "validator": "transcript" },
     { "file": "invalid/stream-starts-at-two.jsonl", "validator": "transcript" },
     { "file": "invalid/stream-sequence-gap.jsonl", "validator": "transcript" },
+    { "file": "invalid/sequence-over-js-safe-integer.jsonl", "validator": "transcript" },
+    { "file": "invalid/blob-chunk-extra-data.jsonl", "validator": "transcript" },
     { "file": "invalid/sidecar-instance-changed.jsonl", "validator": "transcript" },
     { "file": "invalid/ambiguous-error-retryable.jsonl", "validator": "transcript" },
     {
@@ -73,7 +85,7 @@
     {
       "file": "invalid/prepare-quit-safe-with-blockers.jsonl",
       "validator": "prepareQuit",
-      "envelope": 1
+      "envelope": 2
     }
   ],
   "generated": [
