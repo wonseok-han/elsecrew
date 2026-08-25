@@ -15,7 +15,7 @@ M5.0의 목적은 Electron 채택을 다시 비교하는 것이 아니라, 이�
 완료 시 다음 산출물이 있어야 한다.
 
 1. Electron main/preload/sandboxed renderer와 Rust sidecar가 패키징된 앱에서 함께 시작하고 종료된다.
-2. 사용자가 명시적으로 고른 Git 프로젝트를 읽고, 앱이 만든 격리 worktree에서 파일 탐색·편집·저장·외부 변경 감지·diff 검토를 수행한다.
+2. 사용자가 명시적으로 고른 Git 프로젝트를 읽고, 앱이 만든 원본과 분리된 작업 복사본(standalone snapshot)에서 파일 탐색·편집·저장·외부 변경 감지·diff 검토를 수행한다.
 3. 서로 다른 `chatId`/`runId`의 모의 스트림과 한 번의 실제 macOS 에이전트 실행이 같은 채팅 원장에 섞이지 않고 기록된다.
 4. 실행 중 정상 종료, sidecar 충돌, 앱 강제 종료 뒤의 복구 상태가 SQLite에서 재현된다.
 5. 아래 fixture와 성능·메모리·패키지·보안 게이트의 측정 결과가 증거 문서로 남는다.
@@ -32,7 +32,7 @@ M5.0은 사용자에게 배포하는 완성 IDE가 아니다. 합격 뒤에도 M
 - 버전이 붙은 stdio JSONL 프로토콜과 스트림 격리
 - Rust 순수 안전 코어의 최소 추출과 기존 M4 종료 테스트 재사용
 - SQLite 스키마 v1: 이벤트 원장, projection, 앱/sidecar 실행 세대
-- 프로젝트 명시 선택과 정규화, 격리 worktree 생성·검증
+- 프로젝트 명시 선택과 정규화, standalone snapshot 생성·검증
 - 가상화된 파일 트리, Monaco 일반 편집기와 diff 편집기, 저장·외부 변경 충돌 보호
 - 파일별 diff 요약과 텍스트 diff 열기
 - 모의 다중 채팅 스트림, macOS 실제 에이전트 한 경로의 입력·출력·중단 smoke
@@ -61,9 +61,17 @@ M5.0은 사용자에게 배포하는 완성 IDE가 아니다. 합격 뒤에도 M
 | 시스템 코어 | Rust workspace의 library + sidecar binary | 안전 판단과 에이전트 argv는 Rust가 소유한다 |
 | sidecar 전송 | stdin/stdout JSON Lines v1 | stdout은 프로토콜 전용, 진단 로그는 stderr 전용이다 |
 | 영속 저장 | SQLite, Rust 소유 | bundled SQLite를 사용해 사용자 기기의 외부 런타임에 의존하지 않는다 |
-| 프로젝트 격리 | Git worktree | 한 `Chat`은 한 worktree를 소유하며 M5.0에서는 writer 1개만 허용한다 |
+| 프로젝트 격리 | capability-protected standalone snapshot | 한 `Chat`은 한 작업 복사본을 소유하며 M5.0에서는 writer 1개만 허용한다 |
 
 `pnpm-lock.yaml`과 `Cargo.lock`은 함께 버전 관리한다. `package.json`의 Electron·Forge·Vite·Monaco 관련 새 의존성에는 `^`나 `~`를 쓰지 않는다. 판올림은 패키징, CSP, preload API, sidecar handshake, fixture를 다시 통과한 독립 커밋으로만 한다.
+
+### 3.1 standalone snapshot 계약
+
+protocol v1 호환을 위해 `project.createWorktree`, `createProjectWorktree`, `WorktreeManifestV1`, `worktreeId/path` 이름은 유지하지만 실제 linked worktree를 만들지 않는다. source는 읽기 전용 capability로만 열고 lock·write를 만들지 않는다. `HEAD`를 포함하며 prerequisite가 없는 self-contained Git bundle을 최대 2 GiB까지 스트리밍하고, raw committed blob bytes와 tree mode를 최대 4 GiB·200,000 entries·single blob 1 GiB 안에서 새 독립 저장소에 materialize한다. materialization 뒤에도 512 MiB disk reserve를 남기며 bundle/blob 전체 할당은 금지한다.
+
+manifest는 `workspaceKind=standaloneSnapshot`, `snapshotTransport=gitBundle`, `sourceMutationPolicy=forbidden`, `objectFormat`, `baseCommit`, `baseTree`, `sourceIdentity`, `workspaceIdentity`를 포함한다. object ID 길이는 SHA-1/SHA-256 format과 맞아야 한다. 활성화 전 detached `HEAD == baseCommit`, index tree `== baseTree`, object connectivity, remote·alternates·source ref·source absolute path 0개를 확인한다. proposed active manifest, source trace, workspace invariant, activation trace, DB, 외부 manifest, `.git` marker는 `projectId`·호환 `worktreeId`·workspace/source identity·canonical root·object format·base commit/tree 전체를 단일 composite evidence에서 교차 검증한다. recovery marker는 export 전에 저장하고 manifest·marker·rename·identity·DB commit 뒤에만 active로 전환한다. 서로 따로 유효한 다른 workspace 증거를 섞거나 corrupt/truncated/oversize bundle·shallow missing object가 발생하면 active 0개다.
+
+materialization에는 checkout/filter/EOL/encoding/ident/export attribute/LFS 변환을 적용하지 않는다. symlink는 따라가지 않고 submodule은 초기화하지 않는다. case collision, non-UTF-8 path, `.git` entry, 비정상 mode는 fail-closed다. source의 `HEAD/index/refs/config/objects/packed-refs/entry set` 전후 digest가 같아야 한다. 선택 root·관리 target의 path/symlink swap과 일반적인 동시 변경은 방어하지만, 이미 잡은 source directory 내부 entry를 같은 사용자 권한의 악성 프로세스가 export 중 계속 바꾸는 공격은 경계 밖이다. 그래도 export된 commit/tree/object format과 source 전후 digest는 재검증한다. Windows G4는 별도 게이트 전까지 unsupported다.
 
 ## 4. 저장소 구조와 전환 순서
 
@@ -114,12 +122,12 @@ Sandboxed Renderer ── typed window.m5 API ──▶ Preload
                                                    ▼
                                              Rust Sidecar
                                              ├─ SQLite
-                                             ├─ Git/worktree/files
+                                             ├─ Git/standalone snapshot/files
                                              └─ agent process tree
 ```
 
 - renderer는 Node, Electron IPC, 파일시스템, 셸, child process를 직접 볼 수 없다.
-- main은 창과 sidecar의 **생존**을 감독하지만, worktree가 안전한지·종료가 확인됐는지·적용 가능한지를 판정하지 않는다.
+- main은 창과 sidecar의 **생존**을 감독하지만, 작업 복사본이 안전한지·종료가 확인됐는지·적용 가능한지를 판정하지 않는다.
 - sidecar는 renderer/main이 준 경로와 상태를 신뢰하지 않고 canonical path, manifest, 시작 commit, 실행 세대, 현재 잠금을 다시 검증한다.
 - renderer가 렌더링하는 에이전트 출력은 일반 문자열이다. HTML로 삽입하지 않으며 링크·외부 열기는 별도 허용 정책을 거친다.
 
@@ -222,13 +230,13 @@ DB는 OS의 앱 데이터 디렉터리 아래 기존 제품 데이터와 충돌�
 | `app_instances` | sidecar 실행 세대, 시작·정상 종료·마지막 heartbeat |
 | `events` | append-only 원장. event ID, aggregate ID/type, seq, payload, 시각 |
 | `projects` | 검증된 프로젝트 신원과 현재 projection |
-| `chats` | 목표, 역할 snapshot, worktree, 현재 상태 projection |
+| `chats` | 목표, 역할 snapshot, 작업 복사본, 현재 상태 projection |
 | `runs` | adapter, 모델, 실행/종료/회수 판정 projection |
 | `locks` | writer, poisoned, recoveryRequired와 근거 |
 
 위험 동작은 **원장 append와 projection 갱신을 한 transaction으로 저장한 뒤** 시작한다. 이벤트 payload에는 schema version을 둔다. projection은 원장에서 다시 만들 수 있어야 하며, replay 결과가 저장된 projection과 다른 테스트 fixture를 실패시킨다.
 
-sidecar 시작 시 직전 `app_instances`가 정상 종료되지 않았고 running/preparing/cancelling run이 있으면 해당 run과 worktree를 `recoveryRequired`로 복원한다. 새 실행·적용은 차단한다. 실제 자손과 worktree를 조사해 해결하기 전 단순 `정상` 표시는 허용하지 않는다.
+sidecar 시작 시 직전 `app_instances`가 정상 종료되지 않았고 running/preparing/cancelling run이 있으면 해당 run과 작업 복사본을 `recoveryRequired`로 복원한다. 새 실행·적용은 차단한다. 실제 자손과 작업 복사본을 조사해 해결하기 전 단순 `정상` 표시는 허용하지 않는다.
 
 ## 9. 구현할 수직 시나리오
 
@@ -236,7 +244,7 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 
 1. 패키징된 Electron 앱을 시작하고 sidecar handshake를 확인한다.
 2. 사용자가 native dialog에서 fixture Git 프로젝트를 명시적으로 고른다.
-3. sidecar가 프로젝트를 검증하고 앱 manifest와 격리 worktree를 만든다.
+3. sidecar가 프로젝트를 검증하고 앱 manifest와 standalone snapshot을 만든다.
 4. renderer가 10,000개 파일 fixture를 가상화된 트리로 보여 준다.
 5. 5 MiB 파일을 Monaco에서 열어 한국어 IME로 수정하고 저장한다.
 6. fixture agent가 다른 파일을 외부 수정한다. watcher가 이를 감지하고 파일 목록과 diff를 갱신한다.
@@ -289,7 +297,7 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 2. sidecar ready 전 종료, 응답 중 crash, stderr 폭주
 3. renderer consumer 정지와 bounded queue 초과
 4. DB 쓰기 실패, migration 중단, projection 불일치
-5. worktree manifest 변조, symlink 경계 이탈, 원본 시작 commit 변경
+5. snapshot manifest/identity 변조, symlink 경계 이탈, 원본 시작 commit/tree 변경, bundle 손상·절단·크기 초과·shallow missing object
 6. file save 직전 외부 변경, binary/삭제/rename diff
 7. agent가 stdout을 닫지 않음, 별도 세션 자손 생성, TERM 무시, PID 재사용 fixture
 8. 준비 중/실행 중/취소 중 Electron 정상 종료 요청
@@ -307,7 +315,7 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 1. **Scaffold**: Electron Forge/Vite, app://, 보안 BrowserWindow, 빈 typed preload, 패키징 smoke.
 2. **Core extraction**: Cargo workspace, Tauri-free core, 기존 M4 테스트를 양 adapter 아래서 통과.
 3. **Protocol/storage**: sidecar handshake, JSONL parser, SQLite v1, replay/recovery fixture.
-4. **Project/worktree**: 명시 선택, manifest, tree/read/save/watch/diff API와 실패 주입.
+4. **Project/standalone snapshot**: 명시 선택, bundle·manifest·identity, tree/read/save/watch/diff API와 실패 주입.
 5. **Renderer slice**: 승인 시안의 최소 셸, Monaco, 파일·변경 탭, dirty/conflict 보호.
 6. **Chat/run slice**: 다중 stream fixture, macOS agent smoke, cancel/termination/recovery.
 7. **Hardening/evidence**: CSP/fuses/ASAR, package/make, 수치 fixture, macOS/Windows UI smoke, 증거 문서.
@@ -341,7 +349,7 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 - SQLite 원장 payload 보존 기간과 원시 로그 자동 정리 정책
 - 저장하지 않은 편집 내용을 DB에 복구용으로 중복 저장할지
 - Windows 자손 신원·종료 계약 구현 방식
-- 전체 worktree 적용 뒤 파일/줄 단위 적용을 어느 마일스톤에 넣을지
+- 전체 작업 복사본 적용 뒤 파일/줄 단위 적용을 어느 마일스톤에 넣을지
 - 앱 기본 역할 프리셋과 공급자별 모델 capability 조회 규격
 - Electron auto-update 공급자, 코드 서명·공증, sidecar 서명 CI
 - 최종 제품 이름과 번들 ID/데이터 경로 마이그레이션

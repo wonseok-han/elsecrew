@@ -62,7 +62,7 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 방향: Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar 위에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·worktree·코드 편집/diff를 갖춘 agent-first IDE를 만든다. 아직 현행 구현이 아니며 `docs/proposals/m5-coding-agent-ide.md`가 착수 기준
+- M5 방향: Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar 위에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·원본과 분리된 작업 복사본(standalone snapshot)·코드 편집/diff를 갖춘 agent-first IDE를 만든다. 아직 현행 구현이 아니며 `docs/proposals/m5-coding-agent-ide.md`가 착수 기준
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
 - 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5.0 착수 준비와 실기기 출시 후보 검증·서명/배포 결정이 남음
 
