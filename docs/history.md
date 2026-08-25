@@ -91,6 +91,13 @@
 
 ## 워크로그 (최신이 위)
 
+### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot Rust 안전 코어)
+
+- **한 일**: 기존 linked-worktree 구현에서 SQLite project/lock 수명주기, bounded tree/read/save/diff, capability-rooted atomic save, watcher overflow, abandon-without-delete와 stdio stream framing만 보존하고 생성 경로를 `standaloneSnapshot`/`gitBundle` 계약으로 교체했다. sidecar는 no-follow로 잡은 source root·`.git` capability에서 고정 `/usr/bin/git`과 정리된 환경으로 self-contained HEAD bundle을 제한 스트리밍하고, 앱 data의 staging capability에서 standalone repo를 만든 뒤 `ls-tree -rz`와 `cat-file --batch`의 raw committed blob/mode를 직접 materialize한다. checkout/filter/EOL/encoding/ident/LFS 변환, source remote/ref/alternate 연결과 source-dependent diff는 사용하지 않는다.
+- **안전·복구**: export 전에 DB recovery marker를 저장하고 source `HEAD/index/refs/config/objects/packed-refs/entry set` digest와 lock 수를 전후 비교한다. corrupt/truncated/oversize/shallow bundle, 2 GiB bundle·4 GiB materialized·200,000 entry·1 GiB blob·512 MiB reserve 위반, non-UTF-8/`.git`/case collision/abnormal mode를 fail-closed한다. 스트리밍 Git 자식의 stderr는 계속 배출하면서 마지막 8 KiB만 보존하고 모든 조기 반환에서 자식을 종료·회수한다. 외부 manifest·`.git` marker·workspace invariant·DB identity를 다시 읽어 composite activation evidence와 일치한 경우에만 active로 전환한다. 활성화 뒤 source가 사라져도 target object DB만으로 재시작·diff가 동작하며 Windows와 비-macOS G4 ready는 별도 게이트 전까지 차단한다.
+- **검증**: exact-pin capability 의존성과 lock을 기존 검토 버전으로 갱신했다. `cargo test -p hello-agent-sidecar --locked --offline`에서 sidecar unit 42개와 stdio integration 3개가 통과하고 sentinel child 1개만 의도대로 ignored였다. SHA-1/SHA-256, source/managed target swap, 읽기 전용 source, hook/filter/pager/diff/LFS sentinel 비실행, raw attribute bytes, executable/symlink/submodule, case collision·non-UTF-8·abnormal mode, 손상/절단/상한 bundle, source 제거 후 restart/diff, 저장 parent 이동·ambiguous recovery를 포함한다. sidecar `clippy --no-deps -D warnings`, protocol Rust 15개, TypeScript G4 6개·protocol 4개와 `git diff --check`도 통과했다. workspace 전체 clippy는 이번 변경 밖 `hello-agent-core/proctree.rs`의 기존 최신-Clippy finding 2건 때문에 별도 확인이 필요하다.
+- **다음 할 일**: 정확한 기능 commit을 독립 Rust 안전 리뷰하고, 승인되면 통합 담당이 Electron/UI 호환 변경 뒤 최신 통합 commit에서 G4 누적 하네스와 macOS QA를 수행한다. 실제 사용자 프로젝트, push, `main` 병합은 하지 않았다.
+
 ### 2026-08-25 · by GPT-5.6-Sol (M5 G4 snapshot composite activation 계약)
 
 - **리뷰 수정**: 독립 리뷰에서 개별 manifest·source trace·workspace invariant·activation 기록이 각각 유효해도 서로 다른 작업 복사본의 증거를 섞을 수 있음을 확인했다. proposed active manifest의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree를 기준으로 source, workspace, activation trace, DB, 외부 manifest, `.git` marker를 한 composite evidence validator가 모두 교차 검증한 뒤에만 active 전이를 허용하도록 Rust/TypeScript 공통 fixture를 추가했다.

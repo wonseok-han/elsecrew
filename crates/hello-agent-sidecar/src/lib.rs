@@ -1,26 +1,31 @@
-//! M5 Rust sidecar의 G3 저장소와 bounded JSONL 전송 구현.
+//! M5 Rust sidecar의 G4 프로젝트·파일 안전 경계와 bounded JSONL 전송 구현.
 //!
-//! 이 단계는 `system.status`와 `app.prepareQuit`만 제공한다. 프로젝트,
-//! worktree, 에이전트 실행은 후속 게이트에서 추가한다.
+//! 실제 agent/chat/run과 원본 적용은 후속 게이트에서 추가한다.
 
+mod project;
 mod storage;
 
 use hello_agent_core as _;
-use hello_agent_protocol::lifecycle_v1::{
-    DatabaseStatusV1, SystemStatusV1, G3_CAPABILITIES_V1, SQLITE_FILE_V1,
-};
+use hello_agent_protocol::lifecycle_v1::{DatabaseStatusV1, SystemStatusV1, SQLITE_FILE_V1};
+use hello_agent_protocol::project_v1::G4_CAPABILITIES_V1;
 use hello_agent_protocol::{
     decode_jsonl, encode_jsonl, EnvelopeV1, ErrorV1, EventV1, PrepareQuitResultV1,
     ProtocolSessionV1, ReadyPayloadV1, RequestV1, ResponseV1, APP_SCHEMA_VERSION,
     MAX_CONTROL_LINE_BYTES, PROTOCOL_VERSION, SIDECAR_SCHEMA_VERSION,
 };
+use serde_json::{Map, Value};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 use uuid::Uuid;
 
+pub use project::{ProjectFailure, ProjectManager, SaveFailurePoint, WorktreeFailurePoint};
 pub use storage::{AppendFailurePoint, AppendOutcome, Storage};
 
 pub const STARTUP_FAILURE_EXIT_CODE: i32 = 70;
@@ -90,10 +95,10 @@ where
     let database_path = canonical.join(SQLITE_FILE_V1);
     let stdin = io::stdin();
     let stdout = io::stdout();
-    run_stdio(&database_path, stdin.lock(), stdout.lock())
+    run_stdio(&database_path, stdin, stdout.lock())
 }
 
-pub fn run_stdio<R: Read, W: Write>(
+pub fn run_stdio<R: Read + Send + 'static, W: Write>(
     database_path: &Path,
     input: R,
     output: W,
@@ -101,7 +106,7 @@ pub fn run_stdio<R: Read, W: Write>(
     serve_stdio_with_identity(database_path, input, output, new_sidecar_instance_id())
 }
 
-fn serve_stdio_with_identity<R: Read, W: Write>(
+fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
     database_path: &Path,
     input: R,
     mut output: W,
@@ -113,16 +118,45 @@ fn serve_stdio_with_identity<R: Read, W: Write>(
     session.observe(&ready).map_err(protocol_error)?;
     write_envelope(&mut output, &ready)?;
 
-    let mut input = BufReader::with_capacity(8 * 1024, input);
-    loop {
-        let Some(line) = read_bounded_jsonl(&mut input)? else {
-            if sidecar.prepared_to_quit {
-                return Ok(());
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut input = BufReader::with_capacity(8 * 1024, input);
+        loop {
+            let message = match read_bounded_jsonl(&mut input) {
+                Ok(Some(line)) => InputMessage::Line(line),
+                Ok(None) => InputMessage::Eof,
+                Err(error) => InputMessage::Error(error),
+            };
+            let finished = !matches!(message, InputMessage::Line(_));
+            if sender.send(message).is_err() || finished {
+                break;
             }
-            return Err(SidecarError::new(
-                "unexpectedEof",
-                "stdin closed before app.prepareQuit; clean shutdown was not marked",
-            ));
+        }
+    });
+    loop {
+        let line = match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(InputMessage::Line(line)) => line,
+            Ok(InputMessage::Eof) => {
+                if sidecar.prepared_to_quit {
+                    return Ok(());
+                }
+                return Err(SidecarError::new(
+                    "unexpectedEof",
+                    "stdin closed before app.prepareQuit; clean shutdown was not marked",
+                ));
+            }
+            Ok(InputMessage::Error(error)) => return Err(error),
+            Err(RecvTimeoutError::Timeout) => {
+                let events = sidecar.poll_watch_events();
+                write_events(&mut session, &mut output, events)?;
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(SidecarError::new(
+                    "stdioFailure",
+                    "stdin reader stopped without a terminal message",
+                ))
+            }
         };
         let envelope = decode_jsonl(&line).map_err(protocol_error)?;
         session.observe(&envelope).map_err(protocol_error)?;
@@ -132,10 +166,31 @@ fn serve_stdio_with_identity<R: Read, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
-        let response = EnvelopeV1::Response(sidecar.handle_request(request)?);
+        let handled = sidecar.handle_request(request)?;
+        let response = EnvelopeV1::Response(handled.response);
         session.observe(&response).map_err(protocol_error)?;
         write_envelope(&mut output, &response)?;
+        write_events(&mut session, &mut output, handled.events)?;
     }
+}
+
+enum InputMessage {
+    Line(Vec<u8>),
+    Eof,
+    Error(SidecarError),
+}
+
+fn write_events<W: Write>(
+    session: &mut ProtocolSessionV1,
+    output: &mut W,
+    events: Vec<EventV1>,
+) -> Result<(), SidecarError> {
+    for event in events {
+        let envelope = EnvelopeV1::Event(event);
+        session.observe(&envelope).map_err(protocol_error)?;
+        write_envelope(output, &envelope)?;
+    }
+    Ok(())
 }
 
 fn read_bounded_jsonl<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>, SidecarError> {
@@ -177,21 +232,24 @@ fn write_envelope<W: Write>(output: &mut W, envelope: &EnvelopeV1) -> Result<(),
 
 struct Sidecar {
     storage: Storage,
+    projects: ProjectManager,
     ready: ReadyPayloadV1,
     prepared_to_quit: bool,
 }
 
 impl Sidecar {
     fn start(database_path: &Path, sidecar_instance_id: String) -> Result<Self, SidecarError> {
+        g4_platform_gate()?;
         let mut storage = Storage::open(database_path)?;
         storage.recover_unclean_shutdown()?;
+        let projects = ProjectManager::new(database_path)?;
         let ready = ReadyPayloadV1 {
             protocol_version: PROTOCOL_VERSION,
             sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
             app_schema_version: APP_SCHEMA_VERSION,
             pid: std::process::id(),
             platform: protocol_platform().to_string(),
-            capabilities: G3_CAPABILITIES_V1
+            capabilities: G4_CAPABILITIES_V1
                 .iter()
                 .map(|value| (*value).to_string())
                 .collect(),
@@ -200,6 +258,7 @@ impl Sidecar {
         storage.register_app_instance(&ready)?;
         Ok(Self {
             storage,
+            projects,
             ready,
             prepared_to_quit: false,
         })
@@ -220,61 +279,254 @@ impl Sidecar {
         })
     }
 
-    fn handle_request(&mut self, request: RequestV1) -> Result<ResponseV1, SidecarError> {
-        if request
-            .params
-            .as_object()
-            .is_none_or(|params| !params.is_empty())
-        {
-            return Ok(error_response(
-                &request,
-                "invalidParams",
-                "invalidRequest",
-                "G3 methods accept an empty params object",
-            ));
+    fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+        match self.handle_validated_request(request.clone()) {
+            Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
+                error_response(&request, "invalidParams", "invalidRequest", error.detail()),
+            )),
+            other => other,
         }
+    }
+
+    fn handle_validated_request(
+        &mut self,
+        request: RequestV1,
+    ) -> Result<HandledRequest, SidecarError> {
         if self.prepared_to_quit && request.method != "app.prepareQuit" {
-            return Ok(error_response(
+            return Ok(HandledRequest::response(error_response(
                 &request,
                 "quitting",
                 "requestBlocked",
                 "sidecar is prepared to quit and blocks new requests",
-            ));
+            )));
         }
 
-        let result = match request.method.as_str() {
-            "system.status" => serde_json::to_value(self.system_status()).map_err(json_error)?,
-            "app.prepareQuit" => {
+        let action = match request.method.as_str() {
+            "system.status" => Ok({
+                require_exact_params(&request.params, &[]).map_err(invalid_params)?;
+                project::ProjectAction {
+                    result: serde_json::to_value(self.system_status()).map_err(json_error)?,
+                    ..project::ProjectAction::default()
+                }
+            }),
+            "app.prepareQuit" => Ok({
+                require_exact_params(&request.params, &[]).map_err(invalid_params)?;
                 if !self.prepared_to_quit {
+                    self.projects.stop_watchers();
                     self.storage.checkpoint()?;
                     self.storage
                         .mark_app_instance_clean(&self.ready.sidecar_instance_id)?;
                     self.prepared_to_quit = true;
                 }
-                serde_json::to_value(PrepareQuitResultV1 {
-                    safe_to_quit: true,
-                    blockers: Vec::new(),
-                })
-                .map_err(json_error)?
+                project::ProjectAction {
+                    result: serde_json::to_value(PrepareQuitResultV1 {
+                        safe_to_quit: true,
+                        blockers: Vec::new(),
+                    })
+                    .map_err(json_error)?,
+                    ..project::ProjectAction::default()
+                }
+            }),
+            "project.open" => {
+                let params = require_exact_params(&request.params, &["selectedPath"])
+                    .map_err(invalid_params)?;
+                self.projects.open_project(
+                    &mut self.storage,
+                    param_string(params, "selectedPath").map_err(invalid_params)?,
+                    &request.request_id,
+                )
+            }
+            "project.getTree" => {
+                let params =
+                    require_exact_params(&request.params, &["projectId", "parentPath", "cursor"])
+                        .map_err(invalid_params)?;
+                self.projects.get_tree(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "parentPath").map_err(invalid_params)?,
+                    param_nullable_string(params, "cursor").map_err(invalid_params)?,
+                )
+            }
+            "project.createWorktree" => {
+                let params = require_exact_params(&request.params, &["projectId"])
+                    .map_err(invalid_params)?;
+                self.projects.create_worktree(
+                    &mut self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    &request.request_id,
+                )
+            }
+            "project.close" => {
+                let params = require_exact_params(&request.params, &["projectId"])
+                    .map_err(invalid_params)?;
+                self.projects.close_project(
+                    &mut self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    &request.request_id,
+                )
+            }
+            "file.read" => {
+                let params = require_exact_params(&request.params, &["projectId", "path"])
+                    .map_err(invalid_params)?;
+                self.projects.read_file(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "path").map_err(invalid_params)?,
+                )
+            }
+            "file.save" => self.handle_file_save(&request)?,
+            "file.watch" => {
+                let params = require_exact_params(&request.params, &["projectId"])
+                    .map_err(invalid_params)?;
+                self.projects.watch_project(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                )
+            }
+            "diff.getSummary" => {
+                let params = require_exact_params(&request.params, &["projectId"])
+                    .map_err(invalid_params)?;
+                self.projects.diff_summary(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                )
+            }
+            "diff.getFile" => {
+                let params = require_exact_params(&request.params, &["projectId", "path"])
+                    .map_err(invalid_params)?;
+                self.projects.diff_file(
+                    &self.storage,
+                    param_string(params, "projectId").map_err(invalid_params)?,
+                    param_string(params, "path").map_err(invalid_params)?,
+                )
             }
             _ => {
-                return Ok(error_response(
+                return Ok(HandledRequest::response(error_response(
                     &request,
                     "methodUnavailable",
                     "unsupportedCapability",
-                    "G3 sidecar exposes only system.status and app.prepareQuit",
-                ))
+                    "method is not exposed by the G4 sidecar",
+                )))
             }
         };
-        Ok(ResponseV1 {
-            protocol_version: PROTOCOL_VERSION,
-            kind: "response".to_string(),
-            sidecar_instance_id: request.sidecar_instance_id,
-            request_id: request.request_id,
-            ok: true,
-            result: Some(result),
-            error: None,
+
+        let mut action = match action {
+            Ok(action) => action,
+            Err(failure) => {
+                return Ok(HandledRequest::response(project_error_response(
+                    &request, &failure,
+                )))
+            }
+        };
+        action
+            .watch_events
+            .extend(self.projects.poll_watchers(&self.storage));
+        let events = self.action_events(&action);
+        Ok(HandledRequest {
+            response: ResponseV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "response".to_string(),
+                sidecar_instance_id: request.sidecar_instance_id,
+                request_id: request.request_id,
+                ok: true,
+                result: Some(action.result),
+                error: None,
+            },
+            events,
         })
+    }
+
+    fn handle_file_save(
+        &mut self,
+        request: &RequestV1,
+    ) -> Result<Result<project::ProjectAction, ProjectFailure>, SidecarError> {
+        let object = request
+            .params
+            .as_object()
+            .ok_or_else(|| invalid_params("file.save params must be an object".to_string()))?;
+        let keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        if keys
+            == BTreeSet::from([
+                "projectId",
+                "path",
+                "expectedVersion",
+                "totalBytes",
+                "encoding",
+            ])
+        {
+            return Ok(self.projects.begin_save(
+                &self.storage,
+                param_string(object, "projectId").map_err(invalid_params)?,
+                param_string(object, "path").map_err(invalid_params)?,
+                param_string(object, "expectedVersion").map_err(invalid_params)?,
+                param_u64(object, "totalBytes").map_err(invalid_params)?,
+                param_string(object, "encoding").map_err(invalid_params)?,
+            ));
+        }
+        if keys == BTreeSet::from(["saveId", "seq", "text"]) {
+            return Ok(self.projects.append_save_chunk(
+                param_string(object, "saveId").map_err(invalid_params)?,
+                param_u64(object, "seq").map_err(invalid_params)?,
+                param_string(object, "text").map_err(invalid_params)?,
+            ));
+        }
+        if keys == BTreeSet::from(["saveId", "expectedVersion", "lastSeq", "totalBytes"]) {
+            return Ok(self.projects.commit_save(
+                &mut self.storage,
+                param_string(object, "saveId").map_err(invalid_params)?,
+                param_string(object, "expectedVersion").map_err(invalid_params)?,
+                param_u64(object, "lastSeq").map_err(invalid_params)?,
+                param_u64(object, "totalBytes").map_err(invalid_params)?,
+                &request.request_id,
+            ));
+        }
+        Err(invalid_params(
+            "file.save params do not match begin, chunk, or commit".to_string(),
+        ))
+    }
+
+    fn action_events(&self, action: &project::ProjectAction) -> Vec<EventV1> {
+        let mut events = Vec::new();
+        for stream in &action.streams {
+            for (index, text) in stream.chunks.iter().enumerate() {
+                events.push(EventV1 {
+                    protocol_version: PROTOCOL_VERSION,
+                    kind: "event".to_string(),
+                    sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                    stream_id: stream.stream_id.clone(),
+                    seq: (index + 1) as u64,
+                    event: "blob.chunk".to_string(),
+                    chat_id: None,
+                    task_id: None,
+                    run_id: None,
+                    payload: serde_json::json!({"text":text}),
+                });
+            }
+        }
+        for emission in &action.watch_events {
+            events.push(EventV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "event".to_string(),
+                sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                stream_id: emission.stream_id.clone(),
+                seq: emission.seq,
+                event: emission.event.to_string(),
+                chat_id: None,
+                task_id: None,
+                run_id: None,
+                payload: emission.payload.clone(),
+            });
+        }
+        events
+    }
+
+    fn poll_watch_events(&mut self) -> Vec<EventV1> {
+        let action = project::ProjectAction {
+            result: Value::Null,
+            streams: Vec::new(),
+            watch_events: self.projects.poll_watchers(&self.storage),
+        };
+        self.action_events(&action)
     }
 
     fn system_status(&self) -> SystemStatusV1 {
@@ -303,6 +555,96 @@ impl Sidecar {
                 },
             },
         }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn g4_platform_gate() -> Result<(), SidecarError> {
+    Err(SidecarError::new(
+        "unsupportedPlatform",
+        "G4 project safety is gated to macOS/Unix until Windows handle-bound Git creation, directory durability, replace, and watcher behavior are verified",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn g4_platform_gate() -> Result<(), SidecarError> {
+    Ok(())
+}
+
+struct HandledRequest {
+    response: ResponseV1,
+    events: Vec<EventV1>,
+}
+
+impl HandledRequest {
+    fn response(response: ResponseV1) -> Self {
+        Self {
+            response,
+            events: Vec::new(),
+        }
+    }
+}
+
+fn require_exact_params<'a>(
+    value: &'a Value,
+    expected: &[&str],
+) -> Result<&'a Map<String, Value>, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "params must be an object".to_string())?;
+    let actual = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    let expected = expected.iter().copied().collect::<BTreeSet<_>>();
+    if actual != expected {
+        return Err("params contain missing or unknown fields".to_string());
+    }
+    Ok(object)
+}
+
+fn param_string<'a>(object: &'a Map<String, Value>, name: &str) -> Result<&'a str, String> {
+    object
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{name} must be a non-empty string"))
+}
+
+fn param_nullable_string<'a>(
+    object: &'a Map<String, Value>,
+    name: &str,
+) -> Result<Option<&'a str>, String> {
+    match object.get(name) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.is_empty() => Ok(Some(value)),
+        _ => Err(format!("{name} must be a non-empty string or null")),
+    }
+}
+
+fn param_u64(object: &Map<String, Value>, name: &str) -> Result<u64, String> {
+    object
+        .get(name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{name} must be a non-negative integer"))
+}
+
+fn invalid_params(detail: String) -> SidecarError {
+    SidecarError::new("invalidParams", detail)
+}
+
+fn project_error_response(request: &RequestV1, failure: &ProjectFailure) -> ResponseV1 {
+    ResponseV1 {
+        protocol_version: PROTOCOL_VERSION,
+        kind: "response".to_string(),
+        sidecar_instance_id: request.sidecar_instance_id.clone(),
+        request_id: request.request_id.clone(),
+        ok: false,
+        result: None,
+        error: Some(ErrorV1 {
+            code: failure.code.to_string(),
+            kind: failure.kind.to_string(),
+            detail: failure.detail.clone(),
+            retryable: false,
+            outcome_unknown: Some(failure.outcome_unknown),
+        }),
     }
 }
 
@@ -348,5 +690,28 @@ fn json_error(error: serde_json::Error) -> SidecarError {
     SidecarError::new("jsonFailure", error.to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests;
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod unsupported_platform_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn unsupported_platform_fails_before_database_or_ready_advertisement() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join(SQLITE_FILE_V1);
+        let mut output = Vec::new();
+        let error = serve_stdio_with_identity(
+            &database,
+            Cursor::new(Vec::<u8>::new()),
+            &mut output,
+            "sidecar_windows_gate".to_string(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), "unsupportedPlatform");
+        assert!(output.is_empty());
+        assert!(!database.exists());
+    }
+}

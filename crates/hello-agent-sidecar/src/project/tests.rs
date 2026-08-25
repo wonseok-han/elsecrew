@@ -1,0 +1,1538 @@
+use super::*;
+use hello_agent_protocol::project_v1::validate_project_payload_v1;
+use tempfile::TempDir;
+
+struct Fixture {
+    _root: TempDir,
+    source: PathBuf,
+    storage: Storage,
+    manager: ProjectManager,
+    project_id: String,
+}
+
+impl Fixture {
+    fn open() -> Self {
+        let root = tempfile::tempdir().expect("temporary fixture");
+        let source = root.path().join("source");
+        let data = root.path().join("app-data");
+        fs::create_dir_all(source.join("packages/app")).unwrap();
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::create_dir_all(source.join("assets")).unwrap();
+        fs::write(source.join("src/edit.txt"), b"hello").unwrap();
+        fs::write(source.join("src/run.sh"), b"#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(source.join("src/run.sh"), fs::Permissions::from_mode(0o755))
+                .unwrap();
+            std::os::unix::fs::symlink("edit.txt", source.join("src/edit-link")).unwrap();
+        }
+        fs::write(source.join("src/old-name.txt"), b"rename me\n").unwrap();
+        fs::write(source.join("src/delete.txt"), b"delete me\n").unwrap();
+        fs::write(source.join("packages/app/keep.txt"), b"nested\n").unwrap();
+        fs::write(source.join("assets/data.bin"), [0, 159, 146, 150]).unwrap();
+        git_raw(&source, ["init", "-q"]);
+        git_raw(&source, ["add", "."]);
+        git_raw(
+            &source,
+            [
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ],
+        );
+        let head = git_text(&source, ["rev-parse", "HEAD"]);
+        let cache_info = format!("160000,{head},vendor/sub");
+        let output = Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&source)
+            .args(["update-index", "--add", "--cacheinfo", &cache_info])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        git_raw(
+            &source,
+            [
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "gitlink fixture",
+            ],
+        );
+        fs::create_dir_all(&data).unwrap();
+        let database = data.join("hello-agent.sqlite3");
+        let mut storage = Storage::open(&database).unwrap();
+        let mut manager = ProjectManager::new(&database).unwrap();
+        let selected = source.join("packages/app");
+        let action = manager
+            .open_project(&mut storage, selected.to_str().unwrap(), "req_open_fixture")
+            .unwrap();
+        validate_project_payload_v1("projectIdentity", &action.result).unwrap();
+        let project_id = action.result["projectId"].as_str().unwrap().to_string();
+        Self {
+            _root: root,
+            source,
+            storage,
+            manager,
+            project_id,
+        }
+    }
+
+    fn create(&mut self) -> ActiveProject {
+        let action = self
+            .manager
+            .create_worktree(&mut self.storage, &self.project_id, "req_create_fixture")
+            .unwrap();
+        validate_project_payload_v1("worktreeManifest", &action.result).unwrap();
+        self.manager
+            .validate_active_project(&self.storage, &self.project_id)
+            .unwrap()
+    }
+}
+
+#[test]
+fn detached_worktree_preserves_original_and_surfaces_tree_read_and_diff() {
+    let mut fixture = Fixture::open();
+    let before_head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
+    let before_status = git_bytes_raw(&fixture.source, ["status", "--porcelain=v1", "-z"]);
+    let before_refs = git_bytes_raw(
+        &fixture.source,
+        ["for-each-ref", "--format=%(refname) %(objectname)"],
+    );
+    let before_bytes = fs::read(fixture.source.join("src/edit.txt")).unwrap();
+    let active = fixture.create();
+
+    assert_eq!(
+        git_text(&active.worktree_path, ["rev-parse", "HEAD"]),
+        before_head
+    );
+    assert!(git_raw_status(&active.worktree_path, ["symbolic-ref", "-q", "HEAD"]) != 0);
+    assert_eq!(
+        git_text(&fixture.source, ["rev-parse", "HEAD"]),
+        before_head
+    );
+    assert_eq!(
+        git_bytes_raw(&fixture.source, ["status", "--porcelain=v1", "-z"]),
+        before_status
+    );
+    assert_eq!(
+        git_bytes_raw(
+            &fixture.source,
+            ["for-each-ref", "--format=%(refname) %(objectname)"]
+        ),
+        before_refs
+    );
+    assert_eq!(
+        fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+        before_bytes
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_ne!(
+            fs::metadata(active.worktree_path.join("src/run.sh"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+        assert_eq!(
+            fs::read_link(active.worktree_path.join("src/edit-link")).unwrap(),
+            PathBuf::from("edit.txt")
+        );
+        let submodule = active.worktree_path.join("vendor/sub");
+        assert!(submodule.is_dir());
+        assert!(!submodule.join(".git").exists());
+    }
+
+    let read = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/edit.txt")
+        .unwrap();
+    assert_eq!(read.result["classification"], "utf8");
+    validate_project_payload_v1("fileRead", &read.result).unwrap();
+    assert_eq!(read.streams[0].chunks, vec!["hello"]);
+    let tree = fixture
+        .manager
+        .get_tree(&fixture.storage, &fixture.project_id, "src", None)
+        .unwrap();
+    validate_project_payload_v1("treePage", &tree.result).unwrap();
+    assert!(tree.result["entries"].as_array().unwrap().len() >= 3);
+
+    fs::rename(
+        active.worktree_path.join("src/old-name.txt"),
+        active.worktree_path.join("src/new-name.txt"),
+    )
+    .unwrap();
+    fs::remove_file(active.worktree_path.join("src/delete.txt")).unwrap();
+    fs::write(active.worktree_path.join("assets/data.bin"), [0, 255, 1]).unwrap();
+    fs::write(active.worktree_path.join("src/new.txt"), b"new\n").unwrap();
+    let summary = fixture
+        .manager
+        .diff_summary(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    validate_project_payload_v1("diffSummary", &summary.result).unwrap();
+    let entries = summary.result["entries"].as_array().unwrap();
+    for expected in ["renamed", "deleted", "binary", "added"] {
+        assert!(
+            entries.iter().any(|entry| entry["kind"] == expected),
+            "{expected}"
+        );
+    }
+    let renamed = fixture
+        .manager
+        .diff_file(&fixture.storage, &fixture.project_id, "src/new-name.txt")
+        .unwrap();
+    assert_eq!(renamed.result["kind"], "renamed");
+    validate_project_payload_v1("diffFile", &renamed.result).unwrap();
+    assert!(!renamed.streams[0].chunks.is_empty());
+}
+
+#[test]
+fn restart_and_diff_do_not_depend_on_the_source_repository() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fs::write(
+        active.worktree_path.join("src/edit.txt"),
+        b"changed after snapshot",
+    )
+    .unwrap();
+    let moved_source = fixture.source.with_file_name("source-moved-away");
+    fs::rename(&fixture.source, &moved_source).unwrap();
+
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.manager);
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let reopened = manager
+        .validate_active_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert_eq!(reopened.base_commit, active.base_commit);
+    let summary = manager
+        .diff_summary(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert!(summary.result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == "src/edit.txt" && entry["kind"] == "modified"));
+    assert!(!reopened
+        .worktree_path
+        .join(".git/objects/info/alternates")
+        .exists());
+    assert!(git_bytes_raw(&reopened.worktree_path, ["remote"]).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn snapshot_export_succeeds_with_read_only_source_git_directory() {
+    let mut fixture = Fixture::open();
+    let before_status = git_bytes_raw(&fixture.source, ["status", "--porcelain=v1"]);
+    set_tree_writable(&fixture.source.join(".git"), false);
+    let result = fixture.create();
+    set_tree_writable(&fixture.source.join(".git"), true);
+    assert_eq!(
+        fs::read(result.worktree_path.join("src/edit.txt")).unwrap(),
+        b"hello"
+    );
+    assert_eq!(
+        git_bytes_raw(&fixture.source, ["status", "--porcelain=v1"]),
+        before_status
+    );
+}
+
+#[test]
+fn sha256_repository_is_snapshotted_when_system_git_supports_it() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let init = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(&source)
+        .args(["init", "-q", "--object-format=sha256"])
+        .output()
+        .unwrap();
+    if !init.status.success() {
+        let stderr = String::from_utf8_lossy(&init.stderr);
+        assert!(stderr.contains("unknown") || stderr.contains("unsupported"));
+        return;
+    }
+    fs::write(source.join("raw.txt"), b"sha256 raw bytes\n").unwrap();
+    git_raw(&source, ["add", "."]);
+    git_raw(
+        &source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let opened = manager
+        .open_project(&mut storage, source.to_str().unwrap(), "req_sha256_open")
+        .unwrap();
+    let project_id = opened.result["projectId"].as_str().unwrap();
+    let created = manager
+        .create_worktree(&mut storage, project_id, "req_sha256_create")
+        .unwrap();
+    assert_eq!(created.result["objectFormat"], "sha256");
+    assert_eq!(created.result["baseCommit"].as_str().unwrap().len(), 64);
+    assert_eq!(created.result["baseTree"].as_str().unwrap().len(), 64);
+    let snapshot = PathBuf::from(created.result["worktreePath"].as_str().unwrap());
+    assert_eq!(
+        fs::read(snapshot.join("raw.txt")).unwrap(),
+        b"sha256 raw bytes\n"
+    );
+}
+
+#[test]
+fn case_colliding_committed_paths_fail_closed_before_activation() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    git_raw(&source, ["init", "-q"]);
+    fs::write(source.join("blob"), b"same").unwrap();
+    let oid = git_text(&source, ["hash-object", "-w", "blob"]);
+    let tree_input = format!("100644 blob {oid}\tCase.txt\n100644 blob {oid}\tcase.txt\n");
+    let tree = git_with_stdin(&source, &["mktree"], tree_input.as_bytes());
+    let commit = git_with_stdin(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit-tree",
+            tree.trim(),
+        ],
+        b"case collision\n",
+    );
+    git_raw(&source, ["update-ref", "HEAD", commit.trim()]);
+
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let opened = manager
+        .open_project(&mut storage, source.to_str().unwrap(), "req_case_open")
+        .unwrap();
+    let project_id = opened.result["projectId"].as_str().unwrap();
+    let failure = manager
+        .create_worktree(&mut storage, project_id, "req_case_create")
+        .unwrap_err();
+    assert_eq!(failure.kind, "manifestMismatch");
+    assert!(failure.detail.contains("case-colliding"));
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    assert!(fs::read_dir(data.join(WORKTREE_DIRECTORY))
+        .unwrap()
+        .all(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with('.')));
+}
+
+#[test]
+fn corrupt_truncated_and_oversized_bundles_fail_closed() {
+    assert_eq!(
+        checked_bundle_size(SNAPSHOT_BUNDLE_MAX_BYTES_V1 - 1, 1).unwrap(),
+        SNAPSHOT_BUNDLE_MAX_BYTES_V1
+    );
+    assert!(checked_bundle_size(SNAPSHOT_BUNDLE_MAX_BYTES_V1, 1).is_err());
+
+    let fixture = Fixture::open();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    for (name, replacement) in [
+        (".corrupt-bundle", b"not a git bundle".as_slice()),
+        (".truncated-bundle", b"# v2 git bundle\n".as_slice()),
+    ] {
+        fixture.manager.worktrees_dir.create_dir(name).unwrap();
+        let staging = open_real_child_dir(&fixture.manager.worktrees_dir, name).unwrap();
+        fixture
+            .manager
+            .export_bundle(&source.git_dir, &staging)
+            .unwrap();
+        fs::write(
+            fixture
+                .manager
+                .worktrees_root
+                .join(name)
+                .join(SNAPSHOT_BUNDLE),
+            replacement,
+        )
+        .unwrap();
+        let failure = fixture
+            .manager
+            .initialize_snapshot_repository(&staging, &source)
+            .unwrap_err();
+        assert_eq!(failure.kind, "manifestMismatch");
+    }
+}
+
+#[test]
+fn materialization_parser_rejects_non_utf8_paths_and_abnormal_modes() {
+    let oid = "0".repeat(40);
+    let mut non_utf8 = format!("100644 blob {oid}\t").into_bytes();
+    non_utf8.push(0xff);
+    assert!(parse_tree_record(&non_utf8, "sha1").is_err());
+    assert!(parse_tree_record(format!("100664 blob {oid}\tfile.txt").as_bytes(), "sha1").is_err());
+}
+
+#[test]
+fn optimistic_save_conflict_and_symlink_or_manifest_mismatch_write_zero_target_bytes() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let target = active.worktree_path.join("src/edit.txt");
+    let original = fs::read(&target).unwrap();
+    let expected = sha256_file_version_v1(&original);
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .manager
+        .append_save_chunk(save_id, 1, "world")
+        .unwrap();
+    fs::write(&target, b"external").unwrap();
+    let conflict = fixture
+        .manager
+        .commit_save(
+            &mut fixture.storage,
+            save_id,
+            &expected,
+            1,
+            5,
+            "req_save_conflict",
+        )
+        .unwrap();
+    assert_eq!(conflict.result["outcome"], "dirtyConflict");
+    assert_eq!(fs::read(&target).unwrap(), b"external");
+
+    let expected = sha256_file_version_v1(b"external");
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .manager
+        .append_save_chunk(save_id, 1, "saved")
+        .unwrap();
+    let committed = fixture
+        .manager
+        .commit_save(
+            &mut fixture.storage,
+            save_id,
+            &expected,
+            1,
+            5,
+            "req_save_committed",
+        )
+        .unwrap();
+    assert_eq!(committed.result["outcome"], "committed");
+    assert_eq!(fs::read(&target).unwrap(), b"saved");
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+
+    let outside = fixture.source.parent().unwrap().join("outside.txt");
+    fs::write(&outside, b"outside").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&outside, active.worktree_path.join("src/escape.txt")).unwrap();
+        let failure = fixture
+            .manager
+            .read_file(&fixture.storage, &fixture.project_id, "src/escape.txt")
+            .unwrap_err();
+        assert_eq!(failure.kind, "symlinkEscape");
+        assert_eq!(fs::read(&outside).unwrap(), b"outside");
+    }
+
+    fs::write(&active.manifest_path, b"{}").unwrap();
+    let before = fs::read(&target).unwrap();
+    let failure = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &sha256_file_version_v1(&before),
+            1,
+            "utf8",
+        )
+        .unwrap_err();
+    assert_eq!(failure.kind, "manifestMismatch");
+    assert_eq!(fs::read(&target).unwrap(), before);
+}
+
+#[test]
+fn read_hashes_exact_large_bytes_without_exposing_text_and_chunks_utf8_safely() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let exact = vec![b'x'; FILE_MAX_BYTES_V1 as usize];
+    fs::write(active.worktree_path.join("src/exact.txt"), &exact).unwrap();
+    let read = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/exact.txt")
+        .unwrap();
+    assert_eq!(read.result["classification"], "utf8");
+    assert_eq!(read.result["byteLength"], FILE_MAX_BYTES_V1);
+    assert_eq!(read.streams[0].chunks.concat().as_bytes(), exact);
+
+    let large = vec![b'x'; (FILE_MAX_BYTES_V1 + 1) as usize];
+    fs::write(active.worktree_path.join("src/large.txt"), &large).unwrap();
+    let read = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/large.txt")
+        .unwrap();
+    validate_project_payload_v1("fileRead", &read.result).unwrap();
+    assert_eq!(read.result["classification"], "tooLarge");
+    assert_eq!(read.result["version"], sha256_file_version_v1(&large));
+    assert!(read.streams.is_empty());
+
+    let unicode = "가".repeat(MAX_TEXT_CHUNK_BYTES / 3 + 2);
+    fs::write(active.worktree_path.join("src/unicode.txt"), &unicode).unwrap();
+    let read = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/unicode.txt")
+        .unwrap();
+    assert!(read.streams[0]
+        .chunks
+        .iter()
+        .all(|chunk| chunk.len() <= MAX_TEXT_CHUNK_BYTES));
+    assert_eq!(read.streams[0].chunks.concat(), unicode);
+}
+
+#[test]
+fn diff_text_accepts_exactly_ten_mib_and_rejects_one_byte_more() {
+    let exact = bounded_diff_text(vec![b'x'; DIFF_MAX_BYTES]).unwrap();
+    let exact_text = std::str::from_utf8(&exact).unwrap();
+    let chunks = chunk_utf8(exact_text, MAX_TEXT_CHUNK_BYTES);
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.len() <= MAX_TEXT_CHUNK_BYTES));
+    assert_eq!(
+        chunks.iter().map(String::len).sum::<usize>(),
+        DIFF_MAX_BYTES
+    );
+
+    let error = bounded_diff_text(vec![b'x'; DIFF_MAX_BYTES + 1]).unwrap_err();
+    assert_eq!(error.kind, "manifestMismatch");
+}
+
+#[test]
+fn nul_and_sparse_over_limit_diff_content_are_binary_without_large_allocation() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"hello\0world").unwrap();
+    let nul_read = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/edit.txt")
+        .unwrap();
+    assert_eq!(nul_read.result["classification"], "binary");
+    let nul_summary = fixture
+        .manager
+        .diff_summary(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    let nul = nul_summary.result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["path"] == "src/edit.txt")
+        .unwrap();
+    assert_eq!(nul["kind"], "binary");
+
+    let tracked = active.worktree_path.join("src/delete.txt");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&tracked)
+        .unwrap()
+        .set_len(1024 * 1024 * 1024)
+        .unwrap();
+    let untracked = active.worktree_path.join("sparse-untracked.bin");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&untracked)
+        .unwrap()
+        .set_len(1024 * 1024 * 1024)
+        .unwrap();
+    let summary = fixture
+        .manager
+        .diff_summary(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    for path in ["src/delete.txt", "sparse-untracked.bin"] {
+        let entry = summary.result["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["path"] == path)
+            .unwrap();
+        assert_eq!(entry["kind"], "binary");
+        let file = fixture
+            .manager
+            .diff_file(&fixture.storage, &fixture.project_id, path)
+            .unwrap();
+        assert_eq!(file.result["kind"], "binary");
+        assert_eq!(file.result["byteLength"], 1024_u64 * 1024 * 1024);
+        assert!(file.streams.is_empty());
+    }
+}
+
+#[test]
+fn sparse_base_over_diff_limit_is_classified_without_loading_blob() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let base = source.join("large-base.bin");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&base)
+        .unwrap()
+        .set_len(DIFF_MAX_BYTES as u64 + 1)
+        .unwrap();
+    git_raw(&source, ["init", "-q"]);
+    git_raw(&source, ["add", "."]);
+    git_raw(
+        &source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let opened = manager
+        .open_project(&mut storage, source.to_str().unwrap(), "req_large_base")
+        .unwrap();
+    let project_id = opened.result["projectId"].as_str().unwrap();
+    let created = manager
+        .create_worktree(&mut storage, project_id, "req_large_base_worktree")
+        .unwrap();
+    let worktree = PathBuf::from(created.result["worktreePath"].as_str().unwrap());
+    fs::remove_file(worktree.join("large-base.bin")).unwrap();
+    let summary = manager.diff_summary(&storage, project_id).unwrap();
+    let entry = &summary.result["entries"].as_array().unwrap()[0];
+    assert_eq!(entry["kind"], "binary");
+    let file = manager
+        .diff_file(&storage, project_id, "large-base.bin")
+        .unwrap();
+    assert_eq!(file.result["kind"], "binary");
+    assert_eq!(file.result["byteLength"], DIFF_MAX_BYTES as u64 + 1);
+}
+
+#[test]
+fn git_registration_drift_blocks_file_access_before_any_write() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let target = active.worktree_path.join("src/edit.txt");
+    let before = fs::read(&target).unwrap();
+    fs::write(active.worktree_path.join("drift.txt"), b"drift").unwrap();
+    git_raw(&active.worktree_path, ["add", "drift.txt"]);
+    git_raw(
+        &active.worktree_path,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "drift",
+        ],
+    );
+    let failure = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &sha256_file_version_v1(&before),
+            1,
+            "utf8",
+        )
+        .unwrap_err();
+    assert_eq!(failure.kind, "manifestMismatch");
+    assert_eq!(fs::read(&target).unwrap(), before);
+}
+
+#[test]
+fn crash_boundaries_persist_recovery_and_never_auto_retry() {
+    for point in [
+        WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport,
+        WorktreeFailurePoint::AfterBundleBeforeMaterialization,
+        WorktreeFailurePoint::AfterWorkspaceRenameBeforeActivation,
+    ] {
+        let mut fixture = Fixture::open();
+        let failure = fixture
+            .manager
+            .create_worktree_with_failure(
+                &mut fixture.storage,
+                &fixture.project_id,
+                "req_crash",
+                Some(point),
+            )
+            .unwrap_err();
+        assert_eq!(failure.kind, "recoveryRequired");
+        assert!(fixture
+            .storage
+            .blocker_ids()
+            .unwrap()
+            .iter()
+            .any(|id| id.starts_with("lock:")));
+        let retry = fixture
+            .manager
+            .create_worktree(&mut fixture.storage, &fixture.project_id, "req_retry")
+            .unwrap_err();
+        assert_eq!(retry.kind, "recoveryRequired");
+    }
+}
+
+#[test]
+fn post_rename_failures_keep_recovery_blocker_and_report_unknown_outcome() {
+    for point in [
+        SaveFailurePoint::AfterRenameBeforeDirectorySync,
+        SaveFailurePoint::AfterReopenBeforeLedgerClear,
+    ] {
+        let mut fixture = Fixture::open();
+        let active = fixture.create();
+        let target = active.worktree_path.join("src/edit.txt");
+        let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
+        let begin = fixture
+            .manager
+            .begin_save(
+                &fixture.storage,
+                &fixture.project_id,
+                "src/edit.txt",
+                &expected,
+                5,
+                "utf8",
+            )
+            .unwrap();
+        let save_id = begin.result["saveId"].as_str().unwrap();
+        fixture
+            .manager
+            .append_save_chunk(save_id, 1, "world")
+            .unwrap();
+        let error = fixture
+            .manager
+            .commit_save_with_failure(
+                &mut fixture.storage,
+                save_id,
+                &expected,
+                1,
+                5,
+                "req_save_fault",
+                Some(point),
+            )
+            .unwrap_err();
+        assert!(error.outcome_unknown, "{error:?}");
+        assert_eq!(fs::read(&target).unwrap(), b"world");
+        assert!(fixture
+            .storage
+            .blocker_ids()
+            .unwrap()
+            .iter()
+            .any(|id| id.starts_with("lock:")));
+        let blocked = fixture
+            .manager
+            .begin_save(
+                &fixture.storage,
+                &fixture.project_id,
+                "src/edit.txt",
+                &sha256_file_version_v1(b"world"),
+                1,
+                "utf8",
+            )
+            .unwrap_err();
+        assert_eq!(blocked.kind, "recoveryRequired");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn parent_move_before_root_relative_save_rename_never_writes_external_target() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let parent = active.worktree_path.join("src");
+    let external_parent = fixture._root.path().join("external-parent");
+    let target = parent.join("edit.txt");
+    let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap().to_string();
+    fixture
+        .manager
+        .append_save_chunk(&save_id, 1, "world")
+        .unwrap();
+    let error = fixture
+        .manager
+        .commit_save_with_pre_rename_hook(
+            &mut fixture.storage,
+            &save_id,
+            &expected,
+            1,
+            5,
+            "req_parent_move",
+            || fs::rename(&parent, &external_parent).unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert!(!error.outcome_unknown);
+    assert_eq!(
+        fs::read(external_parent.join("edit.txt")).unwrap(),
+        b"hello"
+    );
+    assert!(fixture
+        .storage
+        .blocker_ids()
+        .unwrap()
+        .iter()
+        .any(|id| id.starts_with("lock:")));
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_worktree_child_swap_before_save_rename_never_writes_symlink_target() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let managed_child = active.worktree_path.clone();
+    let held_child = fixture._root.path().join("held-managed-child");
+    let external_child = fixture._root.path().join("external-managed-child");
+    fs::create_dir_all(external_child.join("src")).unwrap();
+    fs::write(external_child.join("src/edit.txt"), b"external").unwrap();
+    let target = managed_child.join("src/edit.txt");
+    let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap().to_string();
+    fixture
+        .manager
+        .append_save_chunk(&save_id, 1, "world")
+        .unwrap();
+    let error = fixture
+        .manager
+        .commit_save_with_pre_rename_hook(
+            &mut fixture.storage,
+            &save_id,
+            &expected,
+            1,
+            5,
+            "req_child_swap",
+            || {
+                fs::rename(&managed_child, &held_child).unwrap();
+                std::os::unix::fs::symlink(&external_child, &managed_child).unwrap();
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert!(!error.outcome_unknown);
+    assert_eq!(
+        fs::read(external_child.join("src/edit.txt")).unwrap(),
+        b"external"
+    );
+    assert!(fixture
+        .storage
+        .blocker_ids()
+        .unwrap()
+        .iter()
+        .any(|id| id.starts_with("lock:")));
+    fs::remove_file(&managed_child).unwrap();
+    fs::rename(&held_child, &managed_child).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_root_swap_before_bound_git_never_touches_external_or_registers_worktree() {
+    let mut fixture = Fixture::open();
+    let before_registration = git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]);
+    let managed = fixture.manager.worktrees_root.clone();
+    let moved = managed.with_extension("held-root");
+    let external = fixture
+        .source
+        .parent()
+        .unwrap()
+        .join("external-managed-root");
+    fs::create_dir_all(&external).unwrap();
+    fs::write(external.join("sentinel"), b"external").unwrap();
+    let result = fixture.manager.create_worktree_with_pre_export_hook(
+        &mut fixture.storage,
+        &fixture.project_id,
+        "req_root_swap",
+        || {
+            fs::rename(&managed, &moved).unwrap();
+            std::os::unix::fs::symlink(&external, &managed).unwrap();
+        },
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert_eq!(fs::read(external.join("sentinel")).unwrap(), b"external");
+    assert_eq!(fs::read_dir(&external).unwrap().count(), 1);
+    assert_eq!(
+        git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]),
+        before_registration
+    );
+    fs::remove_file(&managed).unwrap();
+    fs::rename(&moved, &managed).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn source_root_swap_after_capability_open_cannot_redirect_bundle_export() {
+    let mut fixture = Fixture::open();
+    let held = fixture.source.with_file_name("source-held");
+    let external = fixture.source.with_file_name("source-external");
+    fs::create_dir_all(&external).unwrap();
+    fs::write(external.join("sentinel.txt"), b"external").unwrap();
+    git_raw(&external, ["init", "-q"]);
+    git_raw(&external, ["add", "."]);
+    git_raw(
+        &external,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "external",
+        ],
+    );
+    let external_head = git_text(&external, ["rev-parse", "HEAD"]);
+    let source_path = fixture.source.clone();
+    let action = fixture
+        .manager
+        .create_worktree_with_pre_export_hook(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_source_swap",
+            || {
+                fs::rename(&source_path, &held).unwrap();
+                std::os::unix::fs::symlink(&external, &source_path).unwrap();
+            },
+        )
+        .unwrap();
+    let snapshot = PathBuf::from(action.result["worktreePath"].as_str().unwrap());
+    assert_eq!(fs::read(snapshot.join("src/edit.txt")).unwrap(), b"hello");
+    assert_eq!(
+        fs::read(external.join("sentinel.txt")).unwrap(),
+        b"external"
+    );
+    assert_eq!(git_text(&external, ["rev-parse", "HEAD"]), external_head);
+    fs::remove_file(&fixture.source).unwrap();
+    fs::rename(&held, &fixture.source).unwrap();
+}
+
+#[test]
+fn executable_git_configuration_is_ignored_without_running_sentinels() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    let sentinel = root.path().join("sentinel");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("file.txt"), b"safe").unwrap();
+    fs::write(
+        source.join(".gitattributes"),
+        b"file.txt filter=evil diff=evil\n",
+    )
+    .unwrap();
+    git_raw(&source, ["init", "-q"]);
+    git_raw(&source, ["add", "."]);
+    git_raw(
+        &source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    git_raw(
+        &source,
+        [
+            "config",
+            "filter.evil.process",
+            &format!("sh -c 'printf process > {}'", sentinel.display()),
+        ],
+    );
+    git_raw(
+        &source,
+        [
+            "config",
+            "core.pager",
+            &format!("sh -c 'printf pager > {}'", sentinel.display()),
+        ],
+    );
+    git_raw(
+        &source,
+        [
+            "config",
+            "diff.external",
+            &format!("sh -c 'printf external > {}'", sentinel.display()),
+        ],
+    );
+    git_raw(
+        &source,
+        [
+            "config",
+            "diff.evil.textconv",
+            &format!("sh -c 'printf textconv > {}'", sentinel.display()),
+        ],
+    );
+    let hooks = root.path().join("hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    fs::write(
+        hooks.join("post-checkout"),
+        format!("#!/bin/sh\nprintf hook > '{}'\n", sentinel.display()),
+    )
+    .unwrap();
+    git_raw(
+        &source,
+        ["config", "core.hooksPath", hooks.to_str().unwrap()],
+    );
+    git_raw(
+        &source,
+        [
+            "config",
+            "filter.evil.smudge",
+            &format!("sh -c 'printf filter > {}'", sentinel.display()),
+        ],
+    );
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let opened = manager
+        .open_project(&mut storage, source.to_str().unwrap(), "req_danger")
+        .unwrap();
+    let project_id = opened.result["projectId"].as_str().unwrap();
+    let created = manager
+        .create_worktree(&mut storage, project_id, "req_snapshot")
+        .unwrap();
+    let snapshot = PathBuf::from(created.result["worktreePath"].as_str().unwrap());
+    assert_eq!(fs::read(snapshot.join("file.txt")).unwrap(), b"safe");
+    assert!(!sentinel.exists());
+}
+
+#[test]
+fn inherited_required_filter_configuration_cannot_execute() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    let sentinel = root.path().join("inherited-filter-sentinel");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("file.txt"), b"safe").unwrap();
+    fs::write(source.join(".gitattributes"), b"file.txt filter=evil\n").unwrap();
+    git_raw(&source, ["init", "-q"]);
+    git_raw(&source, ["add", "."]);
+    git_raw(
+        &source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let command = format!("sh -c 'printf inherited > {}'", sentinel.display());
+    let output = Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("project::tests::inherited_required_filter_configuration_child")
+        .arg("--ignored")
+        .arg("--nocapture")
+        .env("HELLO_AGENT_INHERITED_FILTER_CHILD", "1")
+        .env("HELLO_AGENT_INHERITED_FILTER_SOURCE", &source)
+        .env("HELLO_AGENT_INHERITED_FILTER_DATA", &data)
+        .env("HELLO_AGENT_INHERITED_FILTER_SENTINEL", &sentinel)
+        .env("GIT_CONFIG_COUNT", "3")
+        .env("GIT_CONFIG_KEY_0", "filter.evil.required")
+        .env("GIT_CONFIG_VALUE_0", "true")
+        .env("GIT_CONFIG_KEY_1", "filter.evil.smudge")
+        .env("GIT_CONFIG_VALUE_1", &command)
+        .env("GIT_CONFIG_KEY_2", "filter.evil.process")
+        .env("GIT_CONFIG_VALUE_2", &command)
+        .env("GIT_CONFIG_PARAMETERS", "'filter.evil.required=true'")
+        .env("GIT_EXEC_PATH", root.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!sentinel.exists());
+}
+
+#[test]
+#[ignore = "spawned by inherited_required_filter_configuration_cannot_execute"]
+fn inherited_required_filter_configuration_child() {
+    if std::env::var_os("HELLO_AGENT_INHERITED_FILTER_CHILD").is_none() {
+        return;
+    }
+    let source = PathBuf::from(std::env::var_os("HELLO_AGENT_INHERITED_FILTER_SOURCE").unwrap());
+    let data = PathBuf::from(std::env::var_os("HELLO_AGENT_INHERITED_FILTER_DATA").unwrap());
+    let sentinel =
+        PathBuf::from(std::env::var_os("HELLO_AGENT_INHERITED_FILTER_SENTINEL").unwrap());
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let opened = manager
+        .open_project(
+            &mut storage,
+            source.to_str().unwrap(),
+            "req_inherited_filter",
+        )
+        .unwrap();
+    manager
+        .create_worktree(
+            &mut storage,
+            opened.result["projectId"].as_str().unwrap(),
+            "req_inherited_filter_worktree",
+        )
+        .unwrap();
+    assert!(!sentinel.exists());
+}
+
+#[test]
+fn non_git_bare_headless_and_external_linked_worktree_are_rejected() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    fs::create_dir_all(&data).unwrap();
+    let database = data.join("hello-agent.sqlite3");
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+
+    let plain = root.path().join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    assert!(manager
+        .open_project(&mut storage, plain.to_str().unwrap(), "req_plain")
+        .is_err());
+
+    let bare = root.path().join("bare.git");
+    fs::create_dir_all(&bare).unwrap();
+    git_raw(&bare, ["init", "--bare", "-q"]);
+    assert!(manager
+        .open_project(&mut storage, bare.to_str().unwrap(), "req_bare")
+        .is_err());
+
+    let headless = root.path().join("headless");
+    fs::create_dir_all(&headless).unwrap();
+    git_raw(&headless, ["init", "-q"]);
+    assert!(manager
+        .open_project(&mut storage, headless.to_str().unwrap(), "req_headless")
+        .is_err());
+
+    let source = root.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), b"fixture").unwrap();
+    git_raw(&source, ["init", "-q"]);
+    git_raw(&source, ["add", "."]);
+    git_raw(
+        &source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let linked = root.path().join("external-linked");
+    git_raw(
+        &source,
+        [
+            "worktree",
+            "add",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    let failure = manager
+        .open_project(&mut storage, linked.to_str().unwrap(), "req_linked")
+        .unwrap_err();
+    assert_eq!(failure.kind, "manifestMismatch");
+}
+
+#[test]
+fn close_abandons_without_deletion_and_new_open_never_reuses_path() {
+    let mut fixture = Fixture::open();
+    let first = fixture.create();
+    let closed = fixture
+        .manager
+        .close_project(&mut fixture.storage, &fixture.project_id, "req_close")
+        .unwrap();
+    validate_project_payload_v1("projectClose", &closed.result).unwrap();
+    assert!(first.worktree_path.exists());
+    let blocked = fixture
+        .manager
+        .read_file(&fixture.storage, &fixture.project_id, "src/edit.txt")
+        .unwrap_err();
+    assert_eq!(blocked.kind, "recoveryRequired");
+
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_reopen",
+        )
+        .unwrap();
+    let second = fixture
+        .manager
+        .create_worktree(&mut fixture.storage, &fixture.project_id, "req_second")
+        .unwrap();
+    assert_ne!(
+        second.result["worktreePath"].as_str().unwrap(),
+        first.worktree_path.to_str().unwrap()
+    );
+    assert!(first.worktree_path.exists());
+}
+
+#[test]
+fn watcher_coalesces_paths_and_overflow_requires_rescan() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"changed").unwrap();
+    fs::write(active.worktree_path.join("src/another.txt"), b"changed").unwrap();
+    let events = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(events.len(), 1);
+    assert!(!events[0].payload["rescanRequired"].as_bool().unwrap());
+    let paths = events[0].payload["paths"].as_array().unwrap();
+    assert!(paths.iter().any(|path| path == "src/edit.txt"));
+    assert!(paths.iter().any(|path| path == "src/another.txt"));
+    validate_project_payload_v1("watchEvent", &events[0].payload).unwrap();
+    let first_stream = events[0].stream_id.clone();
+
+    fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"changed again").unwrap();
+    let restarted = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(restarted.len(), 1);
+    assert_ne!(restarted[0].stream_id, first_stream);
+    assert_eq!(restarted[0].seq, 1);
+
+    for index in 0..=WATCH_MAX_CHANGED_PATHS {
+        fs::write(
+            active
+                .worktree_path
+                .join(format!("overflow-{index:04}.txt")),
+            b"x",
+        )
+        .unwrap();
+    }
+    let events = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(events.len(), 1);
+    assert!(events[0].payload["rescanRequired"].as_bool().unwrap());
+    assert!(events[0].payload["paths"].as_array().unwrap().is_empty());
+    validate_project_payload_v1("watchEvent", &events[0].payload).unwrap();
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+
+    let resumed = fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert!(resumed.result["watching"].as_bool().unwrap());
+    fs::write(active.worktree_path.join("resumed.txt"), b"x").unwrap();
+    let resumed_events = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(resumed_events.len(), 1);
+    assert!(!resumed_events[0].payload["rescanRequired"]
+        .as_bool()
+        .unwrap());
+}
+
+#[test]
+fn watcher_initial_scan_over_capacity_emits_once_and_stays_suspended() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let overflow = active.worktree_path.join("watch-overflow");
+    fs::create_dir(&overflow).unwrap();
+    for index in 0..=WATCH_MAX_ENTRIES {
+        fs::write(overflow.join(format!("{index:05}")), b"").unwrap();
+    }
+    let action = fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert!(!action.result["watching"].as_bool().unwrap());
+    assert!(action.result["rescanRequired"].as_bool().unwrap());
+    assert_eq!(action.watch_events.len(), 1);
+    assert!(action.watch_events[0].payload["rescanRequired"]
+        .as_bool()
+        .unwrap());
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+
+    fs::remove_dir_all(&overflow).unwrap();
+    let resumed = fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert!(resumed.result["watching"].as_bool().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn watcher_scan_unavailable_emits_rescan_once_then_suspends() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    let unavailable = active
+        .worktree_path
+        .with_extension("temporarily-unavailable");
+    fs::rename(&active.worktree_path, &unavailable).unwrap();
+    let events = fixture.manager.poll_watchers(&fixture.storage);
+    assert_eq!(events.len(), 1);
+    assert!(events[0].payload["rescanRequired"].as_bool().unwrap());
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+    fs::rename(&unavailable, &active.worktree_path).unwrap();
+    let resumed = fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert!(resumed.result["watching"].as_bool().unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_swap_after_validation_cannot_read_or_write_external_directory() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let src = active.worktree_path.join("src");
+    let held = active.worktree_path.join("src-held");
+    let outside = fixture.source.parent().unwrap().join("external-swap");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("edit.txt"), b"external-secret").unwrap();
+    let error = fixture
+        .manager
+        .read_file_with_post_validation_hook(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            || {
+                fs::rename(&src, &held).unwrap();
+                std::os::unix::fs::symlink(&outside, &src).unwrap();
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "symlinkEscape");
+    assert!(!error.detail.contains("external-secret"));
+    assert_eq!(
+        fs::read(outside.join("edit.txt")).unwrap(),
+        b"external-secret"
+    );
+
+    fs::remove_file(&src).unwrap();
+    fs::rename(&held, &src).unwrap();
+    let target = src.join("edit.txt");
+    let expected = sha256_file_version_v1(&fs::read(&target).unwrap());
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            4,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .manager
+        .append_save_chunk(save_id, 1, "safe")
+        .unwrap();
+    fs::rename(&src, outside.join("moved-src")).unwrap();
+    let error = fixture
+        .manager
+        .commit_save(
+            &mut fixture.storage,
+            save_id,
+            &expected,
+            1,
+            4,
+            "req_external_move",
+        )
+        .unwrap_err();
+    assert!(!error.outcome_unknown);
+    assert_eq!(
+        fs::read(outside.join("moved-src/edit.txt")).unwrap(),
+        b"hello"
+    );
+    assert_eq!(
+        fs::read(outside.join("edit.txt")).unwrap(),
+        b"external-secret"
+    );
+}
+
+#[cfg(unix)]
+fn set_tree_writable(path: &Path, writable: bool) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let metadata = fs::symlink_metadata(path).unwrap();
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).unwrap() {
+            set_tree_writable(&entry.unwrap().path(), writable);
+        }
+    }
+    let mode = metadata.permissions().mode();
+    let next = if writable {
+        mode | 0o200
+    } else {
+        mode & !0o222
+    };
+    fs::set_permissions(path, fs::Permissions::from_mode(next)).unwrap();
+}
+
+fn git_raw<const N: usize>(directory: &Path, args: [&str; N]) {
+    let output = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_raw_status<const N: usize>(directory: &Path, args: [&str; N]) -> i32 {
+    Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .status()
+        .unwrap()
+        .code()
+        .unwrap_or(-1)
+}
+
+fn git_bytes_raw<const N: usize>(directory: &Path, args: [&str; N]) -> Vec<u8> {
+    let output = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    output.stdout
+}
+
+fn git_with_stdin(directory: &Path, args: &[&str], input: &[u8]) -> String {
+    let mut child = Command::new("/usr/bin/git")
+        .arg("-C")
+        .arg(directory)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn git_text<const N: usize>(directory: &Path, args: [&str; N]) -> String {
+    String::from_utf8(git_bytes_raw(directory, args))
+        .unwrap()
+        .trim()
+        .to_string()
+}
