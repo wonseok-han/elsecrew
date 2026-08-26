@@ -48,21 +48,21 @@ export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { b
     return () => { controller.dispose(); chatController.dispose(); };
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
-  useEffect(() => { controller.setActionBlocked(chat.switching || chatController.isRecoveryBlocked(), chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "복구가 필요한 작업 복사본에서는 파일 작업을 할 수 없어요."); }, [controller, chat.switching, chat.recoveries, chat.activeChat?.chatId]);
+  useEffect(() => { controller.setActionBlocked(chat.switching || chatController.isActionBlocked(), chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [controller, chat.switching, chat.recoveries, chat.activeChat?.state]);
   const switchChat = async (chatId: string) => {
     controller.setActionBlocked(true, "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요.");
     const candidate = await chatController.prepareSwitch(chatId, controller.canLeaveProject());
-    if (!candidate) { controller.setActionBlocked(chatController.isRecoveryBlocked()); return; }
+    if (!candidate) { controller.setActionBlocked(chatController.isActionBlocked()); return; }
     const bound = await controller.bindChat(candidate);
     await chatController.commitPrepared(candidate.chatId, bound);
-    controller.setActionBlocked(chatController.isRecoveryBlocked());
+    controller.setActionBlocked(chatController.isActionBlocked());
   };
   const createChat = async () => {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, "새 채팅 작업 복사본을 준비하는 동안 파일 작업을 잠시 멈췄어요.");
     const created = await chatController.createChat({ projectId: snapshot.project.id }, goal);
     if (created) { setGoal(""); await switchChat(created.chatId); }
-    else controller.setActionBlocked(chatController.isRecoveryBlocked());
+    else controller.setActionBlocked(chatController.isActionBlocked());
   };
 
   const activeTab = snapshot.activePath
@@ -194,7 +194,7 @@ function RoleSettings({ settings, onSave, onClose }: { settings: NonNullable<Ret
 
 function TeamTimeline({ controller, chat }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]> }) {
   const active = Boolean(chat.activeRunId);
-  const blocked = controller.isRecoveryBlocked();
+  const blocked = controller.isActionBlocked();
   return <section className="m5-timeline" aria-label="팀 대화"><header><div><p className="m5-eyebrow">팀 대화 · {stateLabel(chat.activeChat!.state)}</p><h2>{chat.activeChat!.goal}</h2></div>{active && <button type="button" className="m5-secondary" onClick={() => void controller.cancelRun()}>실행 취소</button>}</header>{blocked && <section className="m5-error"><strong>복구가 필요한 작업 복사본이에요.</strong><p>실행·저장·닫기 같은 위험한 동작을 막았어요. 종료 증거를 확인한 뒤 이 복사본을 버릴 수 있습니다.</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" onClick={() => void controller.abandonRecovery(item)}>확인 후 작업 복사본 버리기</button>)}</section>}<div className="m5-timeline-list">{chat.messages.map((message) => <article key={message.messageId} className={`m5-message m5-message-${message.kind}`}><div><strong>{message.kind === "user" ? "나" : message.roleId ? ({ planning: "기획", coding: "코딩", review: "검토" })[message.roleId] : "상태"}</strong>{message.roleId && <span> · {profileLabel(chat.activeChat!, message.roleId)}</span>}<time>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p>{message.runId && <small>실행 ID: {message.runId}</small>}</article>)}</div><footer><span>가짜 에이전트 데모 · 실제 모델은 실행하지 않음</span>{(["planning", "coding", "review"] as const).map((role) => <button key={role} type="button" disabled={active || blocked} onClick={() => void controller.startDemo(role)}>데모 실행 · {({ planning: "기획", coding: "코딩", review: "검토" })[role]}</button>)}</footer></section>;
 }
 

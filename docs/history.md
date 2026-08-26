@@ -23,6 +23,12 @@
 - **검증**: 공통 fixture가 bound A가 있어도 B를 새 identity로 준비하고, B 생성 실패 뒤 B만 폐기하며 A는 active인 흐름, 반복 prepare identity 충돌, cross-project/triple/preparation mismatch, bound/late/unknown/duplicate abandon을 TypeScript와 Rust에서 같은 결과로 판정한다. focused Node 18개, 전체 `npm test` 106개, `cargo test -p hello-agent-protocol --locked` 22개, `tsc --noEmit`, `cargo check -p hello-agent-sidecar --locked`, owned Rust rustfmt와 `git diff --check`를 통과했다.
 - **다음 할 일**: 이 계약 commit을 독립 리뷰한 뒤 통합하고, sidecar가 새 snapshot 생성과 준비 레코드 저장, chat/settings/message binding, 정확한 준비 abandon을 각각 fail-closed transaction으로 구현한다.
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer bind·폐기 review 수정)
+
+- **한 일**: B chat workspace bind를 tree → diff → watch 순차 준비로 바꿔, 세 단계가 모두 성공하기 전 B editor ref/tree/tabs를 publish하지 않도록 했다. 어느 단계든 실패하면 epoch을 무효화하고 A editor snapshot/ref를 복원한 채 action gate를 유지한다. discarded chat도 recovery와 같은 위험 동작 차단 대상으로 두며, pending switch event는 detail hydration 전 raw buffer에 보관해 detail과 merge할 때만 event sequence를 판정한다.
+- **검증**: B tree bind 실패가 A ref/tabs를 보존하고 B diff/watch RPC를 시작하지 않는 focused regression을 추가했다. focused chat/workspace editor Node와 TypeScript `tsc --noEmit`, `git diff --check`를 통과했다.
+- **다음 할 일**: independent reviewer가 deferred detail/event hydration과 watch-failure restore 경로를 재확인하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 새 채팅 준비 API renderer 연결)
 
 - **한 일**: 승인된 `workspace.prepareChat` → `chat.create(preparationId, projectId, worktreeId, workspaceIdentity, goal, expectedSettingsRevision)` 계약을 renderer에 연결했다. 매 새 chat은 bridge가 만든 독립 prepared workspace의 exact ID를 쓰며, `chat.create` 실패 시에만 그 준비 작업의 exact four-ID를 `workspace.abandonPrepared`에 전달한다. 기존 V2 `createProjectWorktree`/`project.close`는 새 chat 흐름에서 호출하지 않는다.

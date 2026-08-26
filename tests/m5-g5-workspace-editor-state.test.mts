@@ -11,6 +11,7 @@ const b: ChatWorkspaceRefV1 = { chatId: "chat_b", projectId: "project_01", workt
 
 class Bridge {
   calls: string[] = []; workspaceListeners = new Set<(event: WorkspaceEventV1) => void>(); sidecarListeners = new Set<(event: never) => void>(); projectListeners = new Set<(event: never) => void>();
+  failTree = false; failWatch = false;
   async openProject() { return { schemaVersion: 1 as const, projectId: "project_01", selectedPath: "/safe/project", canonicalGitRoot: "/safe/project" }; }
   async createProjectWorktree() { return { projectId: "project_01", worktreeId: "pre_chat", worktreePath: "/private/pre", workspaceKind: "standaloneSnapshot", snapshotTransport: "gitBundle", sourceMutationPolicy: "forbidden", objectFormat: "sha1", baseCommit: "a".repeat(40), baseTree: "b".repeat(40), sourceIdentity: "source", workspaceIdentity: "pre", headMode: "detached", lifecycle: "active", schemaVersion: 1, canonicalGitRoot: "/safe/project" }; }
   async closeProject() { return { projectId: "project_01", lifecycle: "abandoned" as const, physicallyDeleted: false as const }; }
@@ -23,12 +24,12 @@ class Bridge {
   async getDiffSummary() { this.calls.push("v2.diff"); return { projectId: "project_01", baseCommit: "a".repeat(40), entries: [] }; }
   async getDiffFile() { this.calls.push("v2.diffFile"); throw new Error("V2 must not be called after binding"); }
   onSidecarEvent() { return () => {}; } onProjectEvent() { return () => {}; }
-  async getWorkspaceTree(input: ChatWorkspaceRefV1 & { parentPath: string }) { this.calls.push(`v3.tree:${input.chatId}`); return { ...input, entries: [{ path: "src/a.ts", name: "a.ts", kind: "file" as const }], nextCursor: null }; }
+  async getWorkspaceTree(input: ChatWorkspaceRefV1 & { parentPath: string }) { this.calls.push(`v3.tree:${input.chatId}`); if (this.failTree && input.chatId === "chat_b") throw new Error("B tree failed"); return { ...input, entries: [{ path: "src/a.ts", name: "a.ts", kind: "file" as const }], nextCursor: null }; }
   async readWorkspaceFile(input: ChatWorkspaceRefV1 & { path: string }) { this.calls.push(`v3.read:${input.chatId}`); queueMicrotask(() => this.emit({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar", streamId: `read_${input.chatId}`, seq: 1, event: "workspace.blob.chunk", payload: { ...input, text: "one\n" } })); return { ...input, path: input.path, classification: "utf8" as const, byteLength: 4, version, stream: { streamId: `read_${input.chatId}`, chunkBytes: 262144 as const } }; }
   async beginWorkspaceFileSave(input: ChatWorkspaceRefV1) { this.calls.push(`v3.begin:${input.chatId}`); return { ...input, saveId: `save_${input.chatId}`, chunkBytes: 262144 as const }; }
   async appendWorkspaceFileSaveChunk(input: ChatWorkspaceRefV1 & { saveId: string; seq: number }) { this.calls.push(`v3.append:${input.chatId}:${input.saveId}`); return { ...input, acceptedSeq: input.seq }; }
   async commitWorkspaceFileSave(input: ChatWorkspaceRefV1 & { saveId: string }) { this.calls.push(`v3.commit:${input.chatId}:${input.saveId}`); return { ...input, saveId: input.saveId, outcome: "committed" as const, version }; }
-  async watchWorkspaceFiles(input: ChatWorkspaceRefV1) { this.calls.push(`v3.watch:${input.chatId}`); return { ...input, watching: true as const }; }
+  async watchWorkspaceFiles(input: ChatWorkspaceRefV1) { this.calls.push(`v3.watch:${input.chatId}`); if (this.failWatch && input.chatId === "chat_b") throw new Error("B watch failed"); return { ...input, watching: true as const }; }
   async getWorkspaceDiffSummary(input: ChatWorkspaceRefV1) { this.calls.push(`v3.diff:${input.chatId}`); return { ...input, baseCommit: "a".repeat(40), entries: [] }; }
   async getWorkspaceDiffFile(input: ChatWorkspaceRefV1 & { path: string }) { this.calls.push(`v3.diffFile:${input.chatId}`); return { ...input, kind: "modified" as const, path: input.path, oldPath: null, baseVersion: version, worktreeVersion: version, byteLength: 0, stream: null }; }
   async closeWorkspace(input: ChatWorkspaceRefV1) { this.calls.push(`v3.close:${input.chatId}`); return { ...input, lifecycle: "abandoned" as const, physicallyDeleted: false as const }; }
@@ -56,4 +57,11 @@ test("복구 또는 switching gate는 save·close·diff·file RPC를 시작하�
   await controller.openFile("src/a.ts"); await controller.openDiff("src/a.ts"); await controller.saveActive(); await controller.abandonProject();
   assert.equal(controller.closeTab("src/a.ts"), false);
   assert.equal(bridge.calls.length, before); controller.dispose();
+});
+
+test("B tree/watch bind 실패는 A ref와 tabs를 복원하고 이후 B diff/watch RPC를 시작하지 않는다", async () => {
+  const { bridge, controller } = await bound(); await controller.openFile("src/a.ts"); const before = controller.snapshot(); bridge.calls = []; bridge.failTree = true;
+  assert.equal(await controller.bindChat(b), false);
+  assert.equal(controller.snapshot().workspace?.chatId, "chat_a"); assert.deepEqual(controller.snapshot().tabs, before.tabs);
+  assert.deepEqual(bridge.calls, ["v3.tree:chat_b"]); controller.dispose();
 });

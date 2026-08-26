@@ -88,7 +88,7 @@ export class ChatUiController {
 
   async prepareSwitch(chatId: string, canLeaveWorkspace: boolean): Promise<ChatRecordV1 | null> {
     if (this.#state.switching) return null;
-    if (this.isRecoveryBlocked()) { this.#set({ notice: "복구가 필요한 작업 복사본은 먼저 확인하거나 버려야 해요." }); return null; }
+    if (this.isActionBlocked()) { this.#set({ notice: "이 채팅 작업 복사본은 안전 상태를 확인할 때까지 바꿀 수 없어요." }); return null; }
     if (!canLeaveWorkspace) { this.#set({ notice: "저장하지 않은 편집이 있어 채팅을 바꿀 수 없어요." }); return null; }
     const chat = this.#state.chats.find((item) => item.chatId === chatId);
     if (!chat) return null;
@@ -117,7 +117,7 @@ export class ChatUiController {
 
   async startDemo(roleId: RoleIdV1): Promise<void> {
     const chat = this.#state.activeChat;
-    if (!chat || this.#state.switching || this.#state.activeRunId || this.isRecoveryBlocked()) return;
+    if (!chat || this.#state.switching || this.#state.activeRunId || this.isActionBlocked()) return;
     const scenario = ({ planning: "planning-success", coding: "coding-success", review: "review-success" } as const)[roleId];
     this.#set({ activeRunId: "starting", error: null, notice: "가짜 에이전트 데모를 시작하는 중이에요. 실제 모델을 설치·확인·실행하지 않습니다." });
     try {
@@ -139,6 +139,7 @@ export class ChatUiController {
   }
 
   isRecoveryBlocked(): boolean { return this.#state.activeChat?.state === "recoveryRequired" || this.#state.recoveries.some((item) => item.state === "unresolved"); }
+  isActionBlocked(): boolean { return this.isRecoveryBlocked() || this.#state.activeChat?.state === "discarded"; }
   async abandonRecovery(recovery: RecoveryRecordV1): Promise<void> {
     if (!window.confirm("종료 증거를 다시 확인한 뒤 이 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
     try { await this.#bridge.markRecoveryResolved({ recoveryId: recovery.recoveryId, expectedRevision: recovery.revision, resolution: "abandon" }); await this.#loadRecoveries(recovery.chatId, this.#generation); this.#set({ notice: "복구가 필요한 작업 복사본을 버렸어요." }); }
@@ -148,7 +149,11 @@ export class ChatUiController {
   async #loadRecoveries(chatId: string, generation: number): Promise<void> { const page = await this.#bridge.listRecoveries({ cursor: null, limit: 100 }); if (this.#live(generation) && this.#state.activeChat?.chatId === chatId) this.#set({ recoveries: page.items.filter((item) => item.chatId === chatId) }); }
   #onEvent(event: TeamMessageV1): void {
     const pending = this.#pending;
-    if (pending && matchesChat(event, pending.chat)) { pending.messages = mergeMessages(pending.messages, [event]); return; }
+    if (pending && matchesChat(event, pending.chat)) {
+      // Detail hydration owns ordering; a seq2 event may legitimately arrive before detail seq1.
+      if (!pending.messages.some((message) => message.messageId === event.messageId)) pending.messages.push(event);
+      return;
+    }
     const chat = this.#state.activeChat;
     if (!chat || !matchesChat(event, chat)) return;
     try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("대화 기록 순서를 안전하게 확인하지 못했어요. 다시 열어 주세요.", error); }

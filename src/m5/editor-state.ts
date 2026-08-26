@@ -234,12 +234,22 @@ export class ProjectEditorController {
     if (!this.#workspaceMethods()) { this.#setError("이 채팅의 작업 복사본을 열 수 없어요.", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }
     const project = this.#state.project;
     if (!project || project.id !== workspace.projectId) { this.#setError("선택한 프로젝트와 채팅 작업 복사본이 맞지 않아요.", new Error("chat project identity mismatch")); return false; }
+    const previous = this.#state;
     const epoch = ++this.#projectEpoch;
     this.#set({ workspace, tree: [], treeParent: "", tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
     try {
-      await Promise.all([this.#loadTree(project.id, epoch, ""), this.#refreshChanges(project.id, epoch), this.#bridge.watchWorkspaceFiles!(workspace)]);
+      // Bind in order. A failed tree must not start later diff/watch operations for B.
+      await this.#loadTree(project.id, epoch, "", true);
+      await this.#refreshChanges(project.id, epoch, true);
+      await this.#bridge.watchWorkspaceFiles!(workspace);
       return this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace);
-    } catch (error) { if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) this.#setError("채팅 작업 복사본을 열지 못했어요.", error); return false; }
+    } catch (error) {
+      if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
+        this.#projectEpoch += 1;
+        this.#set({ ...previous, actionBlocked: true, notice: "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.", error: errorDetail("채팅 작업 복사본을 열지 못했어요.", error) });
+      }
+      return false;
+    }
   }
 
   async #createSnapshot(
@@ -374,7 +384,7 @@ export class ProjectEditorController {
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
   }
 
-  async #loadTree(projectId: string, epoch: number, parentPath: string): Promise<void> {
+  async #loadTree(projectId: string, epoch: number, parentPath: string, propagate = false): Promise<void> {
     try {
       const workspace = this.#state.workspace;
       const page = workspace ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor: null }) : await this.#bridge.getProjectTree({ projectId, parentPath, cursor: null });
@@ -385,6 +395,7 @@ export class ProjectEditorController {
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch)) return;
       this.#setError("파일 목록을 불러오지 못했어요.", error);
+      if (propagate) throw error;
     }
   }
 
@@ -531,7 +542,7 @@ export class ProjectEditorController {
     await this.#refreshChanges(project.id, this.#projectEpoch);
   }
 
-  async #refreshChanges(projectId: string, epoch: number): Promise<void> {
+  async #refreshChanges(projectId: string, epoch: number, propagate = false): Promise<void> {
     try {
       const workspace = this.#state.workspace;
       const diffSummary = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffSummary(workspace) : await this.#bridge.getDiffSummary({ projectId });
@@ -540,6 +551,7 @@ export class ProjectEditorController {
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch)) return;
       this.#setError("변경 목록을 불러오지 못했어요.", error);
+      if (propagate) throw error;
     }
   }
 
