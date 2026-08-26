@@ -5,7 +5,10 @@
     "capabilities": [
       "system.status", "app.prepareQuit", "project.open", "project.getTree",
       "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
-      "diff.getSummary", "diff.getFile", "project.getRoleSettings", "project.updateRoleSettings",
+      "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+      "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+      "workspace.diff.getSummary", "workspace.diff.getFile",
+      "project.getRoleSettings", "project.updateRoleSettings",
       "chat.create", "chat.list", "chat.get", "run.startFixture", "run.cancel",
       "recovery.list", "recovery.inspect", "recovery.markResolved"
     ],
@@ -13,7 +16,11 @@
       "getSystemStatus", "prepareQuit", "onSidecarEvent", "openProject", "getProjectTree",
       "createProjectWorktree", "closeProject", "readFile", "beginFileSave",
       "appendFileSaveChunk", "commitFileSave", "watchProjectFiles", "getDiffSummary",
-      "getDiffFile", "onProjectEvent", "getProjectRoleSettings", "updateProjectRoleSettings",
+      "getDiffFile", "onProjectEvent", "getWorkspaceTree", "closeWorkspace",
+      "readWorkspaceFile", "beginWorkspaceFileSave",
+      "appendWorkspaceFileSaveChunk", "commitWorkspaceFileSave", "watchWorkspaceFiles",
+      "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent",
+      "getProjectRoleSettings", "updateProjectRoleSettings",
       "createChat", "listChats", "getChat", "startFixtureRun", "cancelRun", "listRecoveries",
       "inspectRecovery", "markRecoveryResolved", "onChatEvent"
     ],

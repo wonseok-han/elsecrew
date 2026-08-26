@@ -8,6 +8,7 @@ pub mod lifecycle_v1;
 pub mod project_v1;
 pub mod run_recovery_v1;
 pub mod storage_v1;
+pub mod workspace_v1;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
@@ -28,6 +29,13 @@ pub const METHODS_V1: &[&str] = &[
     "file.watch",
     "diff.getSummary",
     "diff.getFile",
+    "workspace.getTree",
+    "workspace.close",
+    "workspace.file.read",
+    "workspace.file.save",
+    "workspace.file.watch",
+    "workspace.diff.getSummary",
+    "workspace.diff.getFile",
     "project.getRoleSettings",
     "project.updateRoleSettings",
     "chat.create",
@@ -51,6 +59,8 @@ pub const EVENTS_V1: &[&str] = &[
     "run.event",
     "run.finished",
     "blob.chunk",
+    "workspace.changed",
+    "workspace.blob.chunk",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +135,12 @@ pub struct EventV1 {
     pub task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_identity: Option<String>,
     pub payload: Value,
 }
 
@@ -416,10 +432,35 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                 ("chatId", &event.chat_id),
                 ("taskId", &event.task_id),
                 ("runId", &event.run_id),
+                ("projectId", &event.project_id),
+                ("worktreeId", &event.worktree_id),
+                ("workspaceIdentity", &event.workspace_identity),
             ] {
                 if let Some(value) = value {
                     require_id(value, name)?;
                 }
+            }
+            let workspace_id_count = [
+                event.project_id.as_ref(),
+                event.worktree_id.as_ref(),
+                event.workspace_identity.as_ref(),
+            ]
+            .iter()
+            .filter(|value| value.is_some())
+            .count();
+            if workspace_id_count != 0 && workspace_id_count != 3 {
+                return Err(ProtocolError::new(
+                    "workspace event identity must include projectId, worktreeId, and workspaceIdentity together",
+                ));
+            }
+            if matches!(
+                event.event.as_str(),
+                "workspace.changed" | "workspace.blob.chunk"
+            ) && workspace_id_count != 3
+            {
+                return Err(ProtocolError::new(
+                    "workspace events require the exact workspace identity triple",
+                ));
             }
             if matches!(event.event.as_str(), "run.event" | "run.finished")
                 && (event.chat_id.is_none() || event.task_id.is_none() || event.run_id.is_none())
@@ -436,7 +477,7 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
             }
-            if event.event == "blob.chunk" {
+            if matches!(event.event.as_str(), "blob.chunk" | "workspace.blob.chunk") {
                 let payload = event
                     .payload
                     .as_object()

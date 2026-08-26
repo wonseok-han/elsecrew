@@ -278,6 +278,9 @@ fn validate_ready_identity_with_capabilities(
         chat_id: None,
         task_id: None,
         run_id: None,
+        project_id: None,
+        worktree_id: None,
+        workspace_identity: None,
         payload: to_value(ready).map_err(|error| {
             LifecycleContractError::new(format!("could not encode ready identity: {error}"))
         })?,

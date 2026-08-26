@@ -43,6 +43,13 @@ export const G5_EXECUTION_PLATFORMS_V1 = ["darwin", "win32"] as const;
 
 export const G5_CAPABILITIES_V1 = [
   ...G4_CAPABILITIES_V1,
+  "workspace.getTree",
+  "workspace.close",
+  "workspace.file.read",
+  "workspace.file.save",
+  "workspace.file.watch",
+  "workspace.diff.getSummary",
+  "workspace.diff.getFile",
   "project.getRoleSettings",
   "project.updateRoleSettings",
   "chat.create",

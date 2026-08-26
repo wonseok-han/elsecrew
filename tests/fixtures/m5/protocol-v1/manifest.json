@@ -19,6 +19,13 @@
       "file.watch",
       "diff.getSummary",
       "diff.getFile",
+      "workspace.getTree",
+      "workspace.close",
+      "workspace.file.read",
+      "workspace.file.save",
+      "workspace.file.watch",
+      "workspace.diff.getSummary",
+      "workspace.diff.getFile",
       "project.getRoleSettings",
       "project.updateRoleSettings",
       "chat.create",
@@ -40,7 +47,9 @@
       "chat.eventAppended",
       "run.event",
       "run.finished",
-      "blob.chunk"
+      "blob.chunk",
+      "workspace.changed",
+      "workspace.blob.chunk"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"]
   },

@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 workspace 명시 주소 계약)
+
+- **한 일**: 기존 projectId-only `M5BridgeV2`를 변경하지 않고 `M5BridgeV3`에 workspace 전용 tree/close/file read·save·watch/diff/event API를 별도 추가했다. 모든 요청과 상관관계가 있는 응답·descriptor·event는 `WorkspaceRefV1 { projectId, worktreeId, workspaceIdentity }`를 명시적으로 전달하고 exact echo하며, save chunk·commit은 begin에서 서버에 결합된 `saveId`로만 이어지도록 TypeScript/Rust validator를 고정했다.
+- **호환·안전 결정**: protocol framing/schema는 v1을 유지하고 G5 capability/event allowlist만 additive 확장했다. 기존 V2 메서드 순서·타입과 canonical project.getTree JSONL bytes는 공통 fixture에서 그대로 보존한다. chat·verified active standalone snapshot·workspace API와 event route는 같은 triple이어야 하며 cross-chat worktree, workspace alias, 잘못된 response/path/event/save 상관관계를 fail-closed 거부한다. 선택된 프로젝트·채팅 같은 암시적 전역 상태는 V3 계약에 두지 않는다.
+- **검증**: 공통 `g5-workspace-v1` fixture를 TypeScript와 Rust가 같은 결과로 판정한다. focused Node 4개, 전체 `npm test` 102개, `cargo test -p hello-agent-protocol` 21개, root 설치를 재사용한 `tsc --noEmit`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제 sidecar/Electron/UI 소비자와 사용자 프로젝트·유료 에이전트는 실행하지 않았다.
+- **다음 할 일**: 이 계약 commit을 독립 리뷰한 뒤 통합하고, sidecar와 Electron/preload 구현이 모든 workspace 응답·stream·event에서 같은 triple/saveId 상관관계를 검증하도록 소비한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 상태·단일 run 직렬화 계약)
 
 - **한 일**: 마지막 독립 재검토 P1을 반영해 `stopping`을 포함한 명시적 `ChatTransitionV1`을 Rust/TypeScript 양쪽에 추가했다. 전이는 identity·goal·settings revision·role snapshot·createdAt을 보존하고 updatedAt이 단조 증가하며, 완료·취소·폐기·복구 필요 상태는 일반 전이에서 terminal이다. 취소 transcript도 같은 전이 계약을 통과해야 하며 복구 abandon만 전용 transcript로 terminal chat/workspace를 바꾼다.

@@ -61,6 +61,13 @@ pub const G5_CAPABILITIES_V1: &[&str] = &[
     "file.watch",
     "diff.getSummary",
     "diff.getFile",
+    "workspace.getTree",
+    "workspace.close",
+    "workspace.file.read",
+    "workspace.file.save",
+    "workspace.file.watch",
+    "workspace.diff.getSummary",
+    "workspace.diff.getFile",
     "project.getRoleSettings",
     "project.updateRoleSettings",
     "chat.create",
@@ -155,6 +162,9 @@ pub fn validate_g5_ready_payload_v1(value: &Value) -> Result<(), G5ContractError
         chat_id: None,
         task_id: None,
         run_id: None,
+        project_id: None,
+        worktree_id: None,
+        workspace_identity: None,
         payload: value.clone(),
     };
     super::ready_payload(&event)
