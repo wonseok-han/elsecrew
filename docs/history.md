@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅·역할 설정 renderer)
+
+- **한 일**: V3 bridge만 소비하는 renderer 채팅 상태 컨트롤러와 작업대 UI를 추가했다. 프로젝트별 기획·코딩·검토 역할의 runtime/model/reasoning/CAS 설정, 기존 채팅의 불변 role snapshot 안내, 영속 채팅 목록·전환, 새 채팅마다 별도 standalone snapshot triple을 만든 뒤 exact revision으로 `chat.create` 하는 흐름, 공개 팀 타임라인과 명시적 `가짜 에이전트 데모` 시작·취소 UI를 구현했다. 교차 채팅 triple event는 renderer에서 다시 거부하고, recoverable 상태는 실행과 위험 동작을 막고 명시적 abandon confirmation만 보인다.
+- **중요한 경계**: 이 UI는 실제 모델을 설치·로그인·실행하거나 chain-of-thought/raw stderr를 표시하지 않는다. 모델을 사용할 수 없을 때는 자동 fallback하지 않으며, 런타임 V3 workspace-addressed 파일 저장/닫기 연결은 Electron bridge 포트와 함께 완성해야 한다.
+- **검증**: `node --test --experimental-strip-types tests/m5-g5-chat-ui-state.test.mts` 3 PASS, 루트 설치 TypeScript를 이용한 `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. worktree에 `node_modules`가 없어 `pnpm build`는 network DNS `ENOTFOUND` 의존성 다운로드에서 중단됐다.
+- **다음 할 일**: 독립 UI 리뷰에서 V3-only action·recovery/dirty-switch 경계를 확인하고, Electron V3 bridge와 workspace-addressed Monaco controller를 통합한 뒤 renderer Chromium smoke와 G5 누적 harness를 실행한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
 
 - **한 일**: 최종 리뷰 P1에 따라 protocol v1 `EventV1`의 Rust/TypeScript 상위 필드를 기존 `chatId`·`taskId`·`runId`까지만 유지하고, G5 workspace event의 `ChatWorkspaceRefV1` 네 ID는 전부 event `payload` 안으로 이동했다. canonical JSONL이 payload 주소를 byte-match하고, 기존 G4 sidecar의 `EventV1` 초기화 코드를 수정하지 않은 채 소비자 빌드 호환을 증명한다.

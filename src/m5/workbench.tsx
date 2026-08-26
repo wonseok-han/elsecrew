@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
 
 import {
@@ -7,6 +7,9 @@ import {
   type WorkbenchPanel,
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
+import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
+import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
+import { ChatUiController, stateLabel } from "./chat-state.ts";
 
 type MonacoApi = typeof Monaco;
 
@@ -28,17 +31,23 @@ function loadMonaco(): Promise<MonacoApi> {
   return monacoLoader;
 }
 
-export function M5Workbench({ bridge = window.m5 }: { bridge?: typeof window.m5 }) {
+export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { bridge?: M5BridgeV3 }) {
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
+  const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
+  const [goal, setGoal] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const snapshot = useSyncExternalStore(
     (listener) => controller.subscribe(listener),
     () => controller.snapshot(),
     () => controller.snapshot(),
   );
+  const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   useEffect(() => {
     controller.start();
-    return () => controller.dispose();
-  }, [controller]);
+    chatController.start();
+    return () => { controller.dispose(); chatController.dispose(); };
+  }, [controller, chatController]);
+  useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
 
   const activeTab = snapshot.activePath
     ? snapshot.tabs.find((tab) => tab.path === snapshot.activePath) ?? null
@@ -63,6 +72,7 @@ export function M5Workbench({ bridge = window.m5 }: { bridge?: typeof window.m5 
               작업 복사본 닫기
             </button>
           )}
+          {snapshot.project && <button className="m5-secondary" type="button" onClick={() => setSettingsOpen((open) => !open)}>역할과 모델</button>}
         </div>
       </header>
 
@@ -73,12 +83,23 @@ export function M5Workbench({ bridge = window.m5 }: { bridge?: typeof window.m5 
           <details><summary>자세히 보기</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}
+      {chat.error && <section className="m5-error" role="alert"><strong>{chat.error.message}</strong><details><summary>자세히 보기</summary><pre>{chat.error.detail}</pre></details></section>}
       {snapshot.rescanRequired && (
         <section className="m5-rescan" role="status">
           <span>파일 변경이 많아 목록이 최신이 아닐 수 있어요.</span>
           <button type="button" onClick={() => void Promise.all([controller.loadTree(), controller.refreshChanges()])}>다시 확인</button>
         </section>
       )}
+
+      {snapshot.project && <section className="m5-chat-strip" aria-label="프로젝트 채팅">
+        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void chatController.switchChat(item.chatId, controller.canLeaveProject())}>{item.goal}</button>)}</div>
+        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (snapshot.project) void chatController.createChat({ projectId: snapshot.project.id }, goal).then((created) => { if (created) setGoal(""); }); }}>
+          <input aria-label="새 채팅 목표" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="이 프로젝트에서 이루고 싶은 일을 적어주세요" disabled={chat.preparing} />
+          <button type="submit" disabled={!goal.trim() || chat.preparing}>새 채팅</button>
+        </form>
+      </section>}
+
+      {settingsOpen && chat.settings && <RoleSettings settings={chat.settings} onSave={(roles) => void chatController.updateSettings(roles)} onClose={() => setSettingsOpen(false)} />}
 
       <section className="m5-panels" aria-label="파일, 편집기, 변경 패널">
         <aside className="m5-panel m5-files" aria-label="파일">
@@ -143,9 +164,25 @@ export function M5Workbench({ bridge = window.m5 }: { bridge?: typeof window.m5 
           ) : <Empty text="변경 내용은 프로젝트를 선택한 뒤 보여요." />}
         </aside>
       </section>
+      {chat.activeChat && <TeamTimeline controller={chatController} chat={chat} />}
     </main>
   );
 }
+
+function RoleSettings({ settings, onSave, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; onSave: (roles: readonly RoleProfileV1[]) => void; onClose: () => void }) {
+  const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
+  useEffect(() => setRoles(settings.roles), [settings]);
+  const change = (index: number, field: keyof RoleProfileV1, value: string | null) => setRoles((old) => old.map((role, current) => current === index ? { ...role, [field]: value } : role));
+  return <section className="m5-settings" aria-label="프로젝트 역할과 모델 설정"><header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" onClick={onClose}>작업대로 돌아가기</button></header><p>모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.</p><div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card"><strong>{({ planning: "기획", coding: "코딩", review: "검토" })[role.roleId]}</strong><label>실행 환경<select value={role.runtime} onChange={(event) => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label><label>정확한 모델 이름<input value={role.modelSelector} onChange={(event) => change(index, "modelSelector", event.target.value)} /></label><label>추론 수준<select value={role.reasoningEffort ?? ""} onChange={(event) => change(index, "reasoningEffort", event.target.value || null)}><option value="">기본값</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><span>권한: {role.permission === "readOnly" ? "읽기 전용" : "격리된 작업 복사본에만 쓰기"}</span></article>)}</div><button type="button" onClick={() => onSave(roles)}>새 채팅 설정 저장</button></section>;
+}
+
+function TeamTimeline({ controller, chat }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]> }) {
+  const active = Boolean(chat.activeRunId);
+  const blocked = controller.isRecoveryBlocked();
+  return <section className="m5-timeline" aria-label="팀 대화"><header><div><p className="m5-eyebrow">팀 대화 · {stateLabel(chat.activeChat!.state)}</p><h2>{chat.activeChat!.goal}</h2></div>{active && <button type="button" className="m5-secondary" onClick={() => void controller.cancelRun()}>실행 취소</button>}</header>{blocked && <section className="m5-error"><strong>복구가 필요한 작업 복사본이에요.</strong><p>실행·저장·닫기 같은 위험한 동작을 막았어요. 종료 증거를 확인한 뒤 이 복사본을 버릴 수 있습니다.</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" onClick={() => void controller.abandonRecovery(item)}>확인 후 작업 복사본 버리기</button>)}</section>}<div className="m5-timeline-list">{chat.messages.map((message) => <article key={message.messageId} className={`m5-message m5-message-${message.kind}`}><div><strong>{message.kind === "user" ? "나" : message.roleId ? ({ planning: "기획", coding: "코딩", review: "검토" })[message.roleId] : "상태"}</strong>{message.roleId && <span> · {profileLabel(chat.activeChat!, message.roleId)}</span>}<time>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p>{message.runId && <small>실행 ID: {message.runId}</small>}</article>)}</div><footer><span>가짜 에이전트 데모 · 실제 모델은 실행하지 않음</span>{(["planning", "coding", "review"] as const).map((role) => <button key={role} type="button" disabled={active || blocked} onClick={() => void controller.startDemo(role)}>데모 실행 · {({ planning: "기획", coding: "코딩", review: "검토" })[role]}</button>)}</footer></section>;
+}
+
+function profileLabel(chat: NonNullable<ReturnType<ChatUiController["snapshot"]>["activeChat"]>, roleId: RoleProfileV1["roleId"]): string { const profile = chat.roleSnapshots.find((item) => item.roleId === roleId); return profile ? `${profile.runtime === "codex" ? "Codex" : "Claude Code"} · ${profile.modelSelector}${profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : ""}` : ""; }
 
 function PanelTitle({ active, panel, onSelect, children }: { active: boolean; panel: WorkbenchPanel; onSelect: (panel: WorkbenchPanel) => void; children: ReactNode }) {
   return <button type="button" className="m5-panel-title" aria-pressed={active} onClick={() => onSelect(panel)}>{children}</button>;
