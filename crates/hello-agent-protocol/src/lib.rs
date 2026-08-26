@@ -135,12 +135,6 @@ pub struct EventV1 {
     pub task_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worktree_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace_identity: Option<String>,
     pub payload: Value,
 }
 
@@ -432,44 +426,10 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                 ("chatId", &event.chat_id),
                 ("taskId", &event.task_id),
                 ("runId", &event.run_id),
-                ("projectId", &event.project_id),
-                ("worktreeId", &event.worktree_id),
-                ("workspaceIdentity", &event.workspace_identity),
             ] {
                 if let Some(value) = value {
                     require_id(value, name)?;
                 }
-            }
-            let workspace_id_count = [
-                event.project_id.as_ref(),
-                event.worktree_id.as_ref(),
-                event.workspace_identity.as_ref(),
-            ]
-            .iter()
-            .filter(|value| value.is_some())
-            .count();
-            if workspace_id_count != 0 && workspace_id_count != 3 {
-                return Err(ProtocolError::new(
-                    "workspace event identity must include projectId, worktreeId, and workspaceIdentity together",
-                ));
-            }
-            if matches!(
-                event.event.as_str(),
-                "workspace.changed" | "workspace.blob.chunk"
-            ) && workspace_id_count != 3
-            {
-                return Err(ProtocolError::new(
-                    "workspace events require the exact workspace identity triple",
-                ));
-            }
-            if matches!(
-                event.event.as_str(),
-                "workspace.changed" | "workspace.blob.chunk"
-            ) && event.chat_id.is_none()
-            {
-                return Err(ProtocolError::new(
-                    "workspace events require explicit chatId",
-                ));
             }
             if matches!(event.event.as_str(), "run.event" | "run.finished")
                 && (event.chat_id.is_none() || event.task_id.is_none() || event.run_id.is_none())
@@ -486,11 +446,63 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
             }
-            if matches!(event.event.as_str(), "blob.chunk" | "workspace.blob.chunk") {
-                let payload = event
-                    .payload
-                    .as_object()
-                    .expect("payload was checked above");
+            let payload = event
+                .payload
+                .as_object()
+                .expect("payload was checked above");
+            if event.event == "workspace.changed" {
+                let expected = [
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "event",
+                    "paths",
+                    "rescanRequired",
+                ];
+                if payload.len() != expected.len()
+                    || payload.keys().any(|key| !expected.contains(&key.as_str()))
+                {
+                    return Err(ProtocolError::new(
+                        "workspace.changed payload must contain the exact chat workspace reference and change fields",
+                    ));
+                }
+                for name in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+                    require_id(
+                        payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        &format!("workspace event payload {name}"),
+                    )?;
+                }
+            }
+            if event.event == "workspace.blob.chunk" {
+                let expected = [
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "text",
+                ];
+                if payload.len() != expected.len()
+                    || payload.keys().any(|key| !expected.contains(&key.as_str()))
+                    || !matches!(payload.get("text"), Some(Value::String(_)))
+                {
+                    return Err(ProtocolError::new(
+                        "workspace.blob.chunk payload must contain the exact chat workspace reference and text",
+                    ));
+                }
+                for name in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+                    require_id(
+                        payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        &format!("workspace event payload {name}"),
+                    )?;
+                }
+            } else if event.event == "blob.chunk" {
                 if payload.len() != 1 || !matches!(payload.get("text"), Some(Value::String(_))) {
                     return Err(ProtocolError::new(
                         "blob.chunk payload must contain exactly one text field",

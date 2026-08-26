@@ -86,7 +86,7 @@ fn rust_decodes_and_byte_matches_canonical_protocol_v1_transcripts() {
     );
     assert_eq!(
         manifest.contract.workspace_event_addressing,
-        "chatId+projectId+worktreeId+workspaceIdentity"
+        "payload.chatId+projectId+worktreeId+workspaceIdentity"
     );
 
     for fixture in manifest.valid {

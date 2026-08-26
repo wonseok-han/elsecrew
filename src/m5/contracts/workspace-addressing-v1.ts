@@ -111,14 +111,14 @@ export interface WorkspaceDiffFileDescriptorV1 extends ChatWorkspaceRefV1 {
   baseVersion: FileVersionV1 | null; worktreeVersion: FileVersionV1 | null;
   byteLength: number; stream: TextStreamDescriptorV1 | null;
 }
-export interface WorkspaceChangedEventV1 extends ChatWorkspaceRefV1 {
+export interface WorkspaceChangedEventV1 {
   protocolVersion: typeof PROTOCOL_VERSION; kind: "event"; sidecarInstanceId: string;
   streamId: string; seq: number; event: "workspace.changed";
-  payload: { event: "file.changed" | "file.conflict" | "diff.changed"; paths: string[]; rescanRequired: boolean };
+  payload: ChatWorkspaceRefV1 & { event: "file.changed" | "file.conflict" | "diff.changed"; paths: string[]; rescanRequired: boolean };
 }
-export interface WorkspaceBlobChunkEventV1 extends ChatWorkspaceRefV1 {
+export interface WorkspaceBlobChunkEventV1 {
   protocolVersion: typeof PROTOCOL_VERSION; kind: "event"; sidecarInstanceId: string;
-  streamId: string; seq: number; event: "workspace.blob.chunk"; payload: { text: string };
+  streamId: string; seq: number; event: "workspace.blob.chunk"; payload: ChatWorkspaceRefV1 & { text: string };
 }
 export type WorkspaceEventV1 = WorkspaceChangedEventV1 | WorkspaceBlobChunkEventV1;
 export interface WorkspaceChatBindingTranscriptV1 {
@@ -127,7 +127,7 @@ export interface WorkspaceChatBindingTranscriptV1 {
   workspace: ChatWorkspaceRefV1;
 }
 export interface WorkspaceResolvedBindingV1 {
-  storedBinding: ChatWorkspaceRefV1;
+  storedChat: ChatRecordV1;
   verifiedSnapshot: WorktreeManifestV1;
 }
 export interface WorkspaceEventRouteTranscriptV1 {
@@ -201,7 +201,7 @@ export function validateWorkspaceSaveTranscriptV1(value: unknown): WorkspaceSave
   const beginRequest = requireObject(object.beginRequest, "workspace save begin request");
   exactKeys(beginRequest, [...CHAT_WORKSPACE_REF_FIELDS_V1, "path", "expectedVersion", "totalBytes", "encoding"]);
   const workspace = validateChatWorkspaceRefFields(beginRequest);
-  assertChatWorkspaceEcho(binding.storedBinding, workspace, "save binding");
+  assertChatWorkspaceEcho(binding.storedChat, workspace, "save binding");
   requireRelativePath(beginRequest.path, "save path", false); validateFileVersionV1(beginRequest.expectedVersion);
   const totalBytes = requireSafeUnsigned(beginRequest.totalBytes, "save totalBytes");
   if (beginRequest.encoding !== "utf8") fail("workspace save encoding must be utf8");
@@ -311,13 +311,17 @@ export function validateWorkspaceDiffFileDescriptorV1(value: unknown): Workspace
 
 export function validateWorkspaceEventV1(value: unknown): WorkspaceEventV1 {
   const object = requireObject(value, "workspace event");
-  exactKeys(object, ["protocolVersion", "kind", "sidecarInstanceId", "streamId", "seq", "event", ...CHAT_WORKSPACE_REF_FIELDS_V1, "payload"]);
-  validateChatWorkspaceRefFields(object); encodeJsonl(object as unknown as EventV1);
+  exactKeys(object, ["protocolVersion", "kind", "sidecarInstanceId", "streamId", "seq", "event", "payload"]);
+  encodeJsonl(object as unknown as EventV1);
+  const payload = requireObject(object.payload, "workspace event payload");
   if (object.event === "workspace.changed") {
-    const payload = requireObject(object.payload, "workspace changed payload");
-    exactKeys(payload, ["event", "paths", "rescanRequired"]);
-    validateWatchEventV1({ projectId: object.projectId, event: payload.event, paths: payload.paths, rescanRequired: payload.rescanRequired });
-  } else if (object.event !== "workspace.blob.chunk") fail("unknown workspace event");
+    exactKeys(payload, [...CHAT_WORKSPACE_REF_FIELDS_V1, "event", "paths", "rescanRequired"]);
+    const workspace = validateChatWorkspaceRefFields(payload);
+    validateWatchEventV1({ projectId: workspace.projectId, event: payload.event, paths: payload.paths, rescanRequired: payload.rescanRequired });
+  } else if (object.event === "workspace.blob.chunk") {
+    exactKeys(payload, [...CHAT_WORKSPACE_REF_FIELDS_V1, "text"]);
+    validateChatWorkspaceRefFields(payload);
+  } else fail("unknown workspace event");
   return object as unknown as WorkspaceEventV1;
 }
 
@@ -335,12 +339,12 @@ export function validateWorkspaceChatBindingTranscriptV1(value: unknown): Worksp
 
 export function validateWorkspaceResolvedBindingV1(value: unknown): WorkspaceResolvedBindingV1 {
   const object = requireObject(value, "resolved chat workspace binding");
-  exactKeys(object, ["storedBinding", "verifiedSnapshot"]);
-  const storedBinding = validateChatWorkspaceRefV1(object.storedBinding);
+  exactKeys(object, ["storedChat", "verifiedSnapshot"]);
+  const storedChat = validateChatRecordV1(object.storedChat);
   const verifiedSnapshot = validateWorktreeManifestV1(object.verifiedSnapshot);
   if (verifiedSnapshot.lifecycle !== "active") fail("workspace operation requires an active snapshot");
-  assertWorkspaceEcho(storedBinding, verifiedSnapshot, "resolved active snapshot");
-  return { storedBinding, verifiedSnapshot };
+  assertWorkspaceEcho(storedChat, verifiedSnapshot, "stored chat active snapshot");
+  return { storedChat, verifiedSnapshot };
 }
 
 export function validateWorkspaceEventRouteTranscriptV1(value: unknown): WorkspaceEventRouteTranscriptV1 {
@@ -348,7 +352,7 @@ export function validateWorkspaceEventRouteTranscriptV1(value: unknown): Workspa
   exactKeys(object, ["binding", "event"]);
   const binding = validateWorkspaceResolvedBindingV1(object.binding);
   const event = validateWorkspaceEventV1(object.event);
-  assertChatWorkspaceEcho(binding.storedBinding, event, "workspace event route");
+  assertChatWorkspaceEcho(binding.storedChat, event.payload, "workspace event route");
   return { binding, event };
 }
 
@@ -391,7 +395,7 @@ export function validateWorkspaceOperationTranscriptV1(value: unknown): Workspac
     }
     default: fail("unknown workspace operation");
   }
-  assertChatWorkspaceEcho(binding.storedBinding, request, `${String(object.operation)} active chat binding`);
+  assertChatWorkspaceEcho(binding.storedChat, request, `${String(object.operation)} active chat binding`);
   assertChatWorkspaceEcho(request, response, `${String(object.operation)} response`);
   return object as unknown as WorkspaceOperationTranscriptV1;
 }

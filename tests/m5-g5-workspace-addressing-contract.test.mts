@@ -58,7 +58,7 @@ test("workspace-addressed V3 API는 V2를 그대로 보존하고 별도 메서�
   assert.equal(G5_CAPABILITIES_V1.includes("run.startAgentSmoke" as never), false);
   assert.equal(manifest.contract.idMaxBytes, G5_ID_MAX_BYTES_V1);
   assert.equal(manifest.contract.addressing, "explicitChatProjectWorktreeWorkspaceIdentity");
-  assert.equal(manifest.contract.operationResolution, "chatStoredBindingAndActiveSnapshotBeforeOperation");
+  assert.equal(manifest.contract.operationResolution, "persistedChatRecordAndActiveSnapshotBeforeOperation");
   assert.equal(manifest.contract.saveStreamBinding, "everyPhaseEchoesChatWorkspaceAndMatchesPersistedSaveSession");
   const v2Request = decodeJsonl(manifest.contract.v2ProjectTreeRequestLine);
   assert.equal(v2Request.kind, "request");

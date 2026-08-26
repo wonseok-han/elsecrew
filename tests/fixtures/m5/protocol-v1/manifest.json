@@ -52,7 +52,7 @@
       "workspace.blob.chunk"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
-    "workspaceEventAddressing": "chatId+projectId+worktreeId+workspaceIdentity"
+    "workspaceEventAddressing": "payload.chatId+projectId+worktreeId+workspaceIdentity"
   },
   "valid": [
     {
@@ -66,6 +66,10 @@
     },
     {
       "file": "valid/sequence-max.jsonl",
+      "observeSession": false
+    },
+    {
+      "file": "valid/workspace-event-payload-addressed.jsonl",
       "observeSession": false
     }
   ],

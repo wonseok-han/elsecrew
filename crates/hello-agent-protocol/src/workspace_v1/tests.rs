@@ -84,7 +84,7 @@ fn rust_matches_the_canonical_workspace_manifest() {
     );
     assert_eq!(
         manifest.contract.operation_resolution,
-        "chatStoredBindingAndActiveSnapshotBeforeOperation"
+        "persistedChatRecordAndActiveSnapshotBeforeOperation"
     );
     assert_eq!(
         manifest.contract.save_stream_binding,

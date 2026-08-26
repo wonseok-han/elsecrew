@@ -568,14 +568,9 @@ fn validate_workspace_event(value: &Value) -> Result<(), WorkspaceContractError>
             "streamId",
             "seq",
             "event",
-            "chatId",
-            "projectId",
-            "worktreeId",
-            "workspaceIdentity",
             "payload",
         ],
     )?;
-    chat_workspace_ref_fields(event)?;
     let encoded = serde_json::to_vec(value)
         .map_err(|error| WorkspaceContractError(format!("encode workspace event: {error}")))?;
     super::decode_jsonl(&encoded)
@@ -583,16 +578,41 @@ fn validate_workspace_event(value: &Value) -> Result<(), WorkspaceContractError>
     match string(event.get("event"), "workspace event name")? {
         "workspace.changed" => {
             let payload = object(required(event, "payload")?, "workspace changed payload")?;
-            exact_keys(payload, &["event", "paths", "rescanRequired"])?;
+            exact_keys(
+                payload,
+                &[
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "event",
+                    "paths",
+                    "rescanRequired",
+                ],
+            )?;
+            let workspace = chat_workspace_ref_fields(payload)?;
             delegate_project(
                 "watchEvent",
                 &json!({
-                    "projectId": event.get("projectId"), "event": payload.get("event"),
+                    "projectId": workspace.project_id, "event": payload.get("event"),
                     "paths": payload.get("paths"), "rescanRequired": payload.get("rescanRequired")
                 }),
             )
         }
-        "workspace.blob.chunk" => Ok(()),
+        "workspace.blob.chunk" => {
+            let payload = object(required(event, "payload")?, "workspace blob payload")?;
+            exact_keys(
+                payload,
+                &[
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "text",
+                ],
+            )?;
+            chat_workspace_ref_fields(payload).map(|_| ())
+        }
         _ => fail("unknown workspace event"),
     }
 }
@@ -628,8 +648,11 @@ fn validate_workspace_resolved_binding(
     value: &Value,
 ) -> Result<ChatWorkspaceRefV1, WorkspaceContractError> {
     let binding = object(value, "resolved chat workspace binding")?;
-    exact_keys(binding, &["storedBinding", "verifiedSnapshot"])?;
-    let stored = validate_chat_workspace_ref(required(binding, "storedBinding")?)?;
+    exact_keys(binding, &["storedChat", "verifiedSnapshot"])?;
+    let stored_chat_value = required(binding, "storedChat")?;
+    super::run_recovery_v1::validate_g5_payload_v1("chatRecord", stored_chat_value)
+        .map_err(|error| WorkspaceContractError(format!("invalid stored chat: {error}")))?;
+    let stored = chat_workspace_ref_fields(object(stored_chat_value, "stored chat")?)?;
     let snapshot = object(required(binding, "verifiedSnapshot")?, "snapshot")?;
     delegate_project("worktreeManifest", required(binding, "verifiedSnapshot")?)?;
     if snapshot.get("lifecycle").and_then(Value::as_str) != Some("active") {
@@ -649,9 +672,10 @@ fn validate_workspace_event_route(value: &Value) -> Result<(), WorkspaceContract
     let binding = validate_workspace_resolved_binding(required(transcript, "binding")?)?;
     validate_workspace_event(required(transcript, "event")?)?;
     let event = object(required(transcript, "event")?, "workspace event")?;
+    let payload = object(required(event, "payload")?, "workspace event payload")?;
     exact_chat_workspace_echo(
         &binding,
-        &chat_workspace_ref_fields(event)?,
+        &chat_workspace_ref_fields(payload)?,
         "workspace event route",
     )
 }

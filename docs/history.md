@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
+
+- **한 일**: 최종 리뷰 P1에 따라 protocol v1 `EventV1`의 Rust/TypeScript 상위 필드를 기존 `chatId`·`taskId`·`runId`까지만 유지하고, G5 workspace event의 `ChatWorkspaceRefV1` 네 ID는 전부 event `payload` 안으로 이동했다. canonical JSONL이 payload 주소를 byte-match하고, 기존 G4 sidecar의 `EventV1` 초기화 코드를 수정하지 않은 채 소비자 빌드 호환을 증명한다.
+- **binding 결정**: `WorkspaceResolvedBindingV1`의 요청 유래 `storedBinding` echo를 제거하고, run/recovery validator를 통과한 전체 persisted `ChatRecordV1`과 verified active standalone snapshot을 증거로 요구한다. 모든 operation/save/event route는 저장 chat의 `chatId/projectId/worktreeId/workspaceIdentity`와 요청·snapshot을 exact 비교하며, 다른 저장 chat을 가짜 binding으로 제시하는 공통 TS/Rust fixture를 거부한다.
+- **검증**: focused G5/workspace/protocol Node 14개, 전체 `npm test` 102개, `cargo test -p hello-agent-protocol --locked` 21개, `tsc --noEmit`, owned Rust rustfmt/diff 검사를 통과했다. 또한 `cargo check -p hello-agent-sidecar --locked`와 `cargo test -p hello-agent-sidecar --locked`(unit 43 통과·1 ignored, stdio 3 통과)로 기존 소비자 호환을 확인했다.
+- **다음 할 일**: 수정 exact SHA를 독립 재검토한 뒤 통합하고, 이후 sidecar G5 소비자는 DB에서 읽은 immutable chat record와 active manifest를 workspace 작업 시작 전에 결합해 같은 validator 순서를 구현한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 workspace chat/save 상관관계 리뷰 수정)
 
 - **한 일**: 독립 리뷰 P1 두 건을 반영해 V3 workspace 요청·응답·descriptor·event의 주소를 `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`로 강화했다. 각 tree/close/read/watch/diff 작업은 sidecar에 저장된 chat binding과 verified active standalone snapshot을 정확히 resolve한 뒤에만 허용하며, createChat으로 고정된 chat/workspace 결합과 같은 네 ID를 사용한다. V2 메서드·타입은 변경하지 않았다.

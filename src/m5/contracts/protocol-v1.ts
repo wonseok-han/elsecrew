@@ -91,9 +91,6 @@ export interface EventV1 {
   chatId?: string;
   taskId?: string;
   runId?: string;
-  projectId?: string;
-  worktreeId?: string;
-  workspaceIdentity?: string;
   payload: Record<string, unknown>;
 }
 
@@ -341,9 +338,6 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     "chatId",
     "taskId",
     "runId",
-    "projectId",
-    "worktreeId",
-    "workspaceIdentity",
     "payload",
   ]);
   requireId(object.streamId, "streamId");
@@ -353,16 +347,6 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
   }
   for (const name of ["chatId", "taskId", "runId"] as const) {
     if (name in object) requireId(object[name], name);
-  }
-  const workspaceIds = ["projectId", "worktreeId", "workspaceIdentity"] as const;
-  const workspaceIdCount = workspaceIds.filter((name) => name in object).length;
-  if (workspaceIdCount !== 0 && workspaceIdCount !== workspaceIds.length) {
-    fail("workspace event identity must include projectId, worktreeId, and workspaceIdentity together");
-  }
-  for (const name of workspaceIds) if (name in object) requireId(object[name], name);
-  if (object.event === "workspace.changed" || object.event === "workspace.blob.chunk") {
-    if (workspaceIdCount !== workspaceIds.length) fail("workspace events require the exact workspace identity triple");
-    if (!("chatId" in object)) fail("workspace events require explicit chatId");
   }
   if (
     (object.event === "run.event" || object.event === "run.finished") &&
@@ -374,7 +358,29 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     fail("chat.eventAppended requires explicit chatId");
   }
   const payload = requireJsonObject(object.payload, "event payload");
-  if (object.event === "blob.chunk" || object.event === "workspace.blob.chunk") {
+  if (object.event === "workspace.changed") {
+    exactKeys(payload, [
+      "chatId",
+      "projectId",
+      "worktreeId",
+      "workspaceIdentity",
+      "event",
+      "paths",
+      "rescanRequired",
+    ]);
+    for (const name of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+      requireId(payload[name], `workspace event payload ${name}`);
+    }
+  }
+  if (object.event === "workspace.blob.chunk") {
+    exactKeys(payload, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "text"]);
+    for (const name of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+      requireId(payload[name], `workspace event payload ${name}`);
+    }
+    if (typeof payload.text !== "string") {
+      fail("workspace.blob.chunk payload must contain text");
+    }
+  } else if (object.event === "blob.chunk") {
     exactKeys(payload, ["text"]);
     if (typeof payload.text !== "string") {
       fail("blob.chunk payload must contain exactly one text field");
