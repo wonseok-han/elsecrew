@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅별 독립 작업공간 준비 계약)
+
+- **한 일**: 기존 V2와 workspace-addressed V3 API를 변경하지 않고 `workspace.prepareChat`·`workspace.abandonPrepared`와 bridge 메서드를 additive하게 추가했다. prepare는 같은 프로젝트의 active/bound snapshot 존재 여부와 무관하게 전역적으로 고유한 `preparationId/worktreeId/workspaceIdentity`를 가진 새 standalone snapshot을 `unbound`로 저장하며, chat.create는 그 정확한 준비 레코드를 settings·최초 사용자 메시지와 한 transaction에서 `bound(chatId)`로 바꾼다.
+- **안전 결정**: abandon은 preparation/project/worktree/workspace 네 ID와 저장 증거가 정확히 일치하는 아직 unbound인 준비만 `abandoned`로 표시하고 물리 삭제하지 않는다. bound·unknown·이미 abandoned·cross-identity 요청은 다른 준비를 변경하지 않는 no-op이며, settings/binding 실패도 해당 준비를 그대로 cleanup-eligible 상태로 남긴다. `ChatRecordV1`에는 preparationId를 중복 저장하지 않고 persisted preparation의 `boundChatId`를 immutable 생성 증거로 사용한다.
+- **검증**: 공통 fixture가 bound A가 있어도 B를 새 identity로 준비하고, B 생성 실패 뒤 B만 폐기하며 A는 active인 흐름, 반복 prepare identity 충돌, cross-project/triple/preparation mismatch, bound/late/unknown/duplicate abandon을 TypeScript와 Rust에서 같은 결과로 판정한다. focused Node 18개, 전체 `npm test` 106개, `cargo test -p hello-agent-protocol --locked` 22개, `tsc --noEmit`, `cargo check -p hello-agent-sidecar --locked`, owned Rust rustfmt와 `git diff --check`를 통과했다.
+- **다음 할 일**: 이 계약 commit을 독립 리뷰한 뒤 통합하고, sidecar가 새 snapshot 생성과 준비 레코드 저장, chat/settings/message binding, 정확한 준비 abandon을 각각 fail-closed transaction으로 구현한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
 
 - **한 일**: 최종 리뷰 P1에 따라 protocol v1 `EventV1`의 Rust/TypeScript 상위 필드를 기존 `chatId`·`taskId`·`runId`까지만 유지하고, G5 workspace event의 `ChatWorkspaceRefV1` 네 ID는 전부 event `payload` 안으로 이동했다. canonical JSONL이 payload 주소를 byte-match하고, 기존 G4 sidecar의 `EventV1` 초기화 코드를 수정하지 않은 채 소비자 빌드 호환을 증명한다.

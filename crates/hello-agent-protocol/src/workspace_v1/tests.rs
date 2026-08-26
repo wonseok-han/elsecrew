@@ -98,7 +98,7 @@ fn rust_matches_the_canonical_workspace_manifest() {
         manifest.contract.v2_project_tree_request_line
     );
     assert_eq!(manifest.contract.bridge_v2_methods.len(), 15);
-    assert_eq!(manifest.contract.bridge_v3_workspace_methods.len(), 10);
+    assert_eq!(manifest.contract.bridge_v3_workspace_methods.len(), 12);
     assert_eq!(
         manifest.contract.id_max_bytes,
         super::super::run_recovery_v1::G5_ID_MAX_BYTES_V1

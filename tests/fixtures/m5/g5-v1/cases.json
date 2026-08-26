@@ -23,7 +23,7 @@
       "validator":"projectRoleSettingsUpdate",
       "value":{"projectId":"project_01","expectedRevision":3,"roles":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}]}
     },
-    {"name":"chat-create-request","validator":"chatCreateRequest","value":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","expectedSettingsRevision":3}},
+    {"name":"chat-create-request","validator":"chatCreateRequest","value":{"preparationId":"preparation_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","expectedSettingsRevision":3}},
     {
       "name": "chat-record",
       "validator": "chatRecord",
@@ -98,7 +98,7 @@
       "name": "chat-created-with-exact-settings-snapshot",
       "validator": "chatCreation",
       "value": {
-        "request":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","expectedSettingsRevision":3},
+        "request":{"preparationId":"preparation_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","expectedSettingsRevision":3},
         "currentSettings":{
           "schemaVersion":1,"projectId":"project_01","revision":3,
           "roles":[
@@ -107,8 +107,9 @@
             {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
           ],"updatedAt":"2026-08-26T01:00:00Z"
         },
-        "verifiedSnapshot":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},
+        "preparedBefore":{"schemaVersion":1,"preparationId":"preparation_01","manifest":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},"bindingState":"unbound","boundChatId":null,"createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},
         "existingGlobalChatBindingPages":[{"cursor":null,"items":[],"nextCursor":null}],
+        "preparedAfter":{"schemaVersion":1,"preparationId":"preparation_01","manifest":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},"bindingState":"bound","boundChatId":"chat_01","createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:01:00Z"},
         "createdChat":{
           "schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,
           "roleSnapshots":[
@@ -117,6 +118,8 @@
             {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
           ],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:01:00Z"
         },
+        "createdUserMessage":{"schemaVersion":1,"messageId":"message_initial_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":1,"kind":"user","roleId":null,"runId":null,"text":"사용자 설정 화면을 만든다.","createdAt":"2026-08-26T01:01:00Z"},
+        "transactionCommitted":true,
         "outcome":"created"
       }
     },

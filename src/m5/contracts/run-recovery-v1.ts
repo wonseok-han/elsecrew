@@ -50,6 +50,8 @@ export const G5_CAPABILITIES_V1 = [
   "workspace.file.watch",
   "workspace.diff.getSummary",
   "workspace.diff.getFile",
+  "workspace.prepareChat",
+  "workspace.abandonPrepared",
   "project.getRoleSettings",
   "project.updateRoleSettings",
   "chat.create",
@@ -146,11 +148,55 @@ export interface RunRecordV1 {
 
 export interface PageRequestV1 { cursor: string | null; limit: number }
 export interface ChatCreateRequestV1 {
+  preparationId: string;
   projectId: string;
   worktreeId: string;
   workspaceIdentity: string;
   goal: string;
   expectedSettingsRevision: number;
+}
+export interface PrepareChatWorkspaceRequestV1 { projectId: string }
+export interface PreparedChatWorkspaceV1 {
+  schemaVersion: typeof G5_SCHEMA_VERSION_V1;
+  preparationId: string;
+  manifest: WorktreeManifestV1;
+  bindingState: "unbound" | "bound" | "abandoned";
+  boundChatId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface PreparedChatWorkspacePageV1 {
+  cursor: string | null;
+  items: readonly PreparedChatWorkspaceV1[];
+  nextCursor: string | null;
+}
+export interface PrepareChatWorkspaceTranscriptV1 {
+  request: PrepareChatWorkspaceRequestV1;
+  existingPreparationPages: readonly PreparedChatWorkspacePageV1[];
+  candidate: PreparedChatWorkspaceV1;
+  persisted: PreparedChatWorkspaceV1 | null;
+  transactionCommitted: boolean;
+  outcome: "prepared" | "identityCollision";
+}
+export interface AbandonPreparedWorkspaceRequestV1 {
+  preparationId: string;
+  projectId: string;
+  worktreeId: string;
+  workspaceIdentity: string;
+}
+export interface AbandonPreparedWorkspaceResultV1 extends AbandonPreparedWorkspaceRequestV1 {
+  bindingState: "abandoned";
+  physicallyDeleted: false;
+}
+export interface AbandonPreparedWorkspaceTranscriptV1 {
+  request: AbandonPreparedWorkspaceRequestV1;
+  persistedBefore: PreparedChatWorkspaceV1 | null;
+  unrelatedBefore: readonly PreparedChatWorkspaceV1[];
+  persistedAfter: PreparedChatWorkspaceV1 | null;
+  unrelatedAfter: readonly PreparedChatWorkspaceV1[];
+  result: AbandonPreparedWorkspaceResultV1 | null;
+  transactionCommitted: boolean;
+  outcome: "abandoned" | "unknownPreparation" | "identityMismatch" | "alreadyBound" | "alreadyAbandoned";
 }
 export interface ChatListRequestV1 extends PageRequestV1 { projectId: string }
 export interface ChatGetRequestV1 extends PageRequestV1 { chatId: string; afterEventSequence: number }
@@ -195,10 +241,13 @@ export interface ChatTransitionV1 { before: ChatRecordV1; after: ChatRecordV1 }
 export interface ChatCreationTranscriptV1 {
   request: ChatCreateRequestV1;
   currentSettings: ProjectRoleSettingsV1;
-  verifiedSnapshot: WorktreeManifestV1;
+  preparedBefore: PreparedChatWorkspaceV1 | null;
   existingGlobalChatBindingPages: readonly ChatBindingPageV1[];
+  preparedAfter: PreparedChatWorkspaceV1 | null;
   createdChat: ChatRecordV1 | null;
-  outcome: "created" | "settingsDrift" | "identityMismatch" | "bindingConflict" | "snapshotNotActive";
+  createdUserMessage: TeamMessageV1 | null;
+  transactionCommitted: boolean;
+  outcome: "created" | "preparationUnknown" | "settingsDrift" | "preparationNotUnbound" | "preparationMismatch" | "identityMismatch" | "bindingConflict";
 }
 
 export interface ChatBindingV1 {
@@ -314,10 +363,128 @@ export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): Proj
   return object as unknown as ProjectRoleSettingsUpdateRequestV1;
 }
 
+export function validatePrepareChatWorkspaceRequestV1(value: unknown): PrepareChatWorkspaceRequestV1 {
+  const object = requireObject(value, "prepare chat workspace request");
+  exactKeys(object, ["projectId"]);
+  requireId(object.projectId, "projectId");
+  return object as unknown as PrepareChatWorkspaceRequestV1;
+}
+
+export function validatePreparedChatWorkspaceV1(value: unknown): PreparedChatWorkspaceV1 {
+  const object = requireObject(value, "prepared chat workspace");
+  exactKeys(object, [
+    "schemaVersion", "preparationId", "manifest", "bindingState", "boundChatId", "createdAt", "updatedAt",
+  ]);
+  schema(object.schemaVersion);
+  requireId(object.preparationId, "preparationId");
+  const manifest = validateWorktreeManifestV1(object.manifest);
+  const bindingState = oneOf(object.bindingState, ["unbound", "bound", "abandoned"] as const, "prepared binding state");
+  if (bindingState === "bound") requireId(object.boundChatId, "boundChatId");
+  else if (object.boundChatId !== null) fail(`${bindingState} preparation cannot have boundChatId`);
+  if (bindingState === "abandoned") {
+    if (manifest.lifecycle !== "abandoned") fail("abandoned preparation requires abandoned manifest");
+  } else if (manifest.lifecycle !== "active") {
+    fail(`${bindingState} preparation requires active manifest`);
+  }
+  timestamp(object.createdAt, "createdAt");
+  timestamp(object.updatedAt, "updatedAt");
+  if ((object.updatedAt as string) < (object.createdAt as string)) fail("prepared workspace updatedAt must be monotonic");
+  return object as unknown as PreparedChatWorkspaceV1;
+}
+
+export function validatePrepareChatWorkspaceTranscriptV1(value: unknown): PrepareChatWorkspaceTranscriptV1 {
+  const object = requireObject(value, "prepare chat workspace transcript");
+  exactKeys(object, ["request", "existingPreparationPages", "candidate", "persisted", "transactionCommitted", "outcome"]);
+  const request = validatePrepareChatWorkspaceRequestV1(object.request);
+  const existing = validatePreparedWorkspacePages(object.existingPreparationPages);
+  const candidate = validatePreparedChatWorkspaceV1(object.candidate);
+  if (candidate.bindingState !== "unbound" || candidate.manifest.projectId !== request.projectId) {
+    fail("prepare candidate must be a new unbound active snapshot for the requested project");
+  }
+  const collision = existing.some((prepared) => prepared.preparationId === candidate.preparationId
+    || prepared.manifest.worktreeId === candidate.manifest.worktreeId
+    || prepared.manifest.workspaceIdentity === candidate.manifest.workspaceIdentity);
+  const expected = collision ? "identityCollision" : "prepared";
+  const outcome = oneOf(object.outcome, ["prepared", "identityCollision"] as const, "prepare outcome");
+  if (outcome !== expected) fail(`prepare outcome must be ${expected}`);
+  if (outcome === "prepared") {
+    const persisted = validatePreparedChatWorkspaceV1(object.persisted);
+    if (!sameJson(persisted, candidate) || object.transactionCommitted !== true) {
+      fail("successful preparation must atomically persist the exact new snapshot");
+    }
+  } else if (object.persisted !== null || object.transactionCommitted !== false) {
+    fail("identity collision cannot persist or publish a preparation");
+  }
+  return object as unknown as PrepareChatWorkspaceTranscriptV1;
+}
+
+export function validateAbandonPreparedWorkspaceRequestV1(value: unknown): AbandonPreparedWorkspaceRequestV1 {
+  const object = requireObject(value, "abandon prepared workspace request");
+  exactKeys(object, ["preparationId", "projectId", "worktreeId", "workspaceIdentity"]);
+  for (const field of ["preparationId", "projectId", "worktreeId", "workspaceIdentity"] as const) requireId(object[field], field);
+  return object as unknown as AbandonPreparedWorkspaceRequestV1;
+}
+
+export function validateAbandonPreparedWorkspaceResultV1(value: unknown): AbandonPreparedWorkspaceResultV1 {
+  const object = requireObject(value, "abandon prepared workspace result");
+  exactKeys(object, ["preparationId", "projectId", "worktreeId", "workspaceIdentity", "bindingState", "physicallyDeleted"]);
+  validateAbandonPreparedWorkspaceRequestV1({
+    preparationId: object.preparationId, projectId: object.projectId,
+    worktreeId: object.worktreeId, workspaceIdentity: object.workspaceIdentity,
+  });
+  if (object.bindingState !== "abandoned" || object.physicallyDeleted !== false) {
+    fail("prepared workspace abandon must preserve evidence without physical deletion");
+  }
+  return object as unknown as AbandonPreparedWorkspaceResultV1;
+}
+
+export function validateAbandonPreparedWorkspaceTranscriptV1(value: unknown): AbandonPreparedWorkspaceTranscriptV1 {
+  const object = requireObject(value, "abandon prepared workspace transcript");
+  exactKeys(object, [
+    "request", "persistedBefore", "unrelatedBefore", "persistedAfter", "unrelatedAfter",
+    "result", "transactionCommitted", "outcome",
+  ]);
+  const request = validateAbandonPreparedWorkspaceRequestV1(object.request);
+  const before = object.persistedBefore === null ? null : validatePreparedChatWorkspaceV1(object.persistedBefore);
+  const unrelatedBefore = validatePreparedWorkspaceArray(object.unrelatedBefore, "unrelated preparations before");
+  const unrelatedAfter = validatePreparedWorkspaceArray(object.unrelatedAfter, "unrelated preparations after");
+  if (!sameJson(unrelatedBefore, unrelatedAfter)) fail("abandon prepared cannot mutate another workspace");
+  if (unrelatedBefore.some((prepared) => prepared.preparationId === request.preparationId
+    || prepared.manifest.worktreeId === request.worktreeId
+    || prepared.manifest.workspaceIdentity === request.workspaceIdentity)) {
+    fail("target preparation cannot appear in unrelated evidence");
+  }
+  const mismatch = before !== null && (before.preparationId !== request.preparationId
+    || before.manifest.projectId !== request.projectId || before.manifest.worktreeId !== request.worktreeId
+    || before.manifest.workspaceIdentity !== request.workspaceIdentity);
+  const expected = before === null ? "unknownPreparation"
+    : mismatch ? "identityMismatch"
+      : before.bindingState === "bound" ? "alreadyBound"
+        : before.bindingState === "abandoned" ? "alreadyAbandoned"
+          : "abandoned";
+  const outcome = oneOf(object.outcome, [
+    "abandoned", "unknownPreparation", "identityMismatch", "alreadyBound", "alreadyAbandoned",
+  ] as const, "abandon prepared outcome");
+  if (outcome !== expected) fail(`abandon prepared outcome must be ${expected}`);
+  if (outcome === "abandoned") {
+    const after = validatePreparedChatWorkspaceV1(object.persistedAfter);
+    const result = validateAbandonPreparedWorkspaceResultV1(object.result);
+    assertSamePreparedIdentity(before!, after, "abandon transition");
+    assertSamePreparedIdentity(before!, result, "abandon result");
+    if (after.bindingState !== "abandoned" || !sameManifestExceptLifecycle(before!.manifest, after.manifest)
+      || after.createdAt !== before!.createdAt || after.updatedAt < before!.updatedAt
+      || object.transactionCommitted !== true) fail("abandon must atomically terminally mark only the unbound preparation");
+  } else if (!sameJson(object.persistedAfter, object.persistedBefore)
+    || object.result !== null || object.transactionCommitted !== false) {
+    fail("failed or duplicate abandon must be a fail-closed no-op");
+  }
+  return object as unknown as AbandonPreparedWorkspaceTranscriptV1;
+}
+
 export function validateChatCreateRequestV1(value: unknown): ChatCreateRequestV1 {
   const object = requireObject(value, "chat create request");
-  exactKeys(object, ["projectId", "worktreeId", "workspaceIdentity", "goal", "expectedSettingsRevision"]);
-  for (const field of ["projectId", "worktreeId", "workspaceIdentity"] as const) requireId(object[field], field);
+  exactKeys(object, ["preparationId", "projectId", "worktreeId", "workspaceIdentity", "goal", "expectedSettingsRevision"]);
+  for (const field of ["preparationId", "projectId", "worktreeId", "workspaceIdentity"] as const) requireId(object[field], field);
   boundedText(object.goal, "goal", G5_GOAL_MAX_BYTES_V1);
   positiveSequence(object.expectedSettingsRevision, "expectedSettingsRevision");
   return object as unknown as ChatCreateRequestV1;
@@ -438,38 +605,58 @@ export function validateRunTransitionV1(value: unknown): { before: RunRecordV1; 
 
 export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTranscriptV1 {
   const object = requireObject(value, "chat creation transcript");
-  exactKeys(object, ["request", "currentSettings", "verifiedSnapshot", "existingGlobalChatBindingPages", "createdChat", "outcome"]);
+  exactKeys(object, [
+    "request", "currentSettings", "preparedBefore", "existingGlobalChatBindingPages", "preparedAfter",
+    "createdChat", "createdUserMessage", "transactionCommitted", "outcome",
+  ]);
   const request = validateChatCreateRequestV1(object.request);
   const settings = validateProjectRoleSettingsV1(object.currentSettings);
-  const snapshot = validateWorktreeManifestV1(object.verifiedSnapshot);
+  const prepared = object.preparedBefore === null ? null : validatePreparedChatWorkspaceV1(object.preparedBefore);
   const bindings = validateChatBindingPagesV1(object.existingGlobalChatBindingPages);
   const bindingConflict = bindings.some((binding) =>
     binding.worktreeId === request.worktreeId || binding.workspaceIdentity === request.workspaceIdentity);
-  const identityMismatch = request.projectId !== settings.projectId
-    || snapshot.projectId !== request.projectId
-    || snapshot.worktreeId !== request.worktreeId
-    || snapshot.workspaceIdentity !== request.workspaceIdentity;
-  const expectedOutcome = request.expectedSettingsRevision !== settings.revision
-    ? "settingsDrift"
-    : identityMismatch
-      ? "identityMismatch"
-      : snapshot.lifecycle !== "active"
-        ? "snapshotNotActive"
-        : bindingConflict
-          ? "bindingConflict"
-          : "created";
-  const outcome = oneOf(object.outcome, ["created", "settingsDrift", "identityMismatch", "bindingConflict", "snapshotNotActive"] as const, "chat create outcome");
+  const preparationMismatch = prepared !== null && (prepared.preparationId !== request.preparationId
+    || prepared.manifest.projectId !== request.projectId || prepared.manifest.worktreeId !== request.worktreeId
+    || prepared.manifest.workspaceIdentity !== request.workspaceIdentity);
+  const expectedOutcome = prepared === null ? "preparationUnknown"
+    : request.expectedSettingsRevision !== settings.revision ? "settingsDrift"
+      : prepared.bindingState !== "unbound" ? "preparationNotUnbound"
+        : preparationMismatch ? "preparationMismatch"
+          : request.projectId !== settings.projectId ? "identityMismatch"
+            : bindingConflict ? "bindingConflict"
+              : "created";
+  const outcome = oneOf(object.outcome, [
+    "created", "preparationUnknown", "settingsDrift", "preparationNotUnbound",
+    "preparationMismatch", "identityMismatch", "bindingConflict",
+  ] as const, "chat create outcome");
   if (outcome !== expectedOutcome) fail(`chat create outcome must be ${expectedOutcome}`);
   if (outcome === "created") {
     const chat = validateChatRecordV1(object.createdChat);
-    if (chat.projectId !== request.projectId
+    const message = validateTeamMessageV1(object.createdUserMessage);
+    const preparedAfter = validatePreparedChatWorkspaceV1(object.preparedAfter);
+    if (chat.state !== "draft" || chat.projectId !== request.projectId
       || chat.worktreeId !== request.worktreeId || chat.workspaceIdentity !== request.workspaceIdentity) {
       fail("created chat identity mismatch");
     }
+    if (chat.goal !== request.goal) fail("created chat goal mismatch");
     if (request.expectedSettingsRevision !== settings.revision || chat.settingsRevision !== settings.revision) fail("created chat settings revision drift");
     if (JSON.stringify(chat.roleSnapshots) !== JSON.stringify(settings.roles)) fail("created chat did not snapshot exact roles");
+    if (message.chatId !== chat.chatId || message.taskId !== chat.taskId || message.worktreeId !== chat.worktreeId
+      || message.kind !== "user" || message.eventSequence !== 1 || message.text !== request.goal
+      || message.roleId !== null || message.runId !== null) fail("chat creation must atomically snapshot the initial user message");
+    assertSamePreparedIdentity(prepared!, preparedAfter, "chat preparation bind");
+    if (!sameJson(prepared!.manifest, preparedAfter.manifest) || preparedAfter.bindingState !== "bound"
+      || preparedAfter.boundChatId !== chat.chatId || preparedAfter.createdAt !== prepared!.createdAt
+      || preparedAfter.updatedAt < prepared!.updatedAt || object.transactionCommitted !== true) {
+      fail("chat creation must atomically bind the exact prepared snapshot");
+    }
   } else {
-    if (object.createdChat !== null) fail("failed chat creation cannot return a chat");
+    if (object.createdChat !== null || object.createdUserMessage !== null || object.transactionCommitted !== false) {
+      fail("failed chat creation cannot persist a chat or user message");
+    }
+    if (!sameJson(object.preparedAfter, object.preparedBefore)) {
+      fail("failed chat creation must leave the exact preparation cleanup-eligible");
+    }
   }
   return object as unknown as ChatCreationTranscriptV1;
 }
@@ -507,6 +694,59 @@ export function validateChatBindingPagesV1(value: unknown): readonly ChatBinding
     workspaces.add(binding.workspaceIdentity);
   }
   return bindings;
+}
+
+function validatePreparedWorkspacePages(value: unknown): PreparedChatWorkspaceV1[] {
+  const pages = array(value, "prepared workspace pages", G5_PAGE_MAX_ITEMS_V1);
+  if (pages.length === 0) fail("prepared workspace scan requires at least one complete page");
+  const prepared: PreparedChatWorkspaceV1[] = [];
+  let expectedCursor: string | null = null;
+  for (const [index, entry] of pages.entries()) {
+    const page = requireObject(entry, "prepared workspace page");
+    exactKeys(page, ["cursor", "items", "nextCursor"]);
+    if (page.cursor !== expectedCursor) fail("prepared workspace pages must form one cursor chain");
+    for (const item of array(page.items, "prepared workspace items", G5_PAGE_MAX_ITEMS_V1)) {
+      prepared.push(validatePreparedChatWorkspaceV1(item));
+    }
+    if (page.nextCursor !== null) requireId(page.nextCursor, "prepared nextCursor");
+    expectedCursor = page.nextCursor as string | null;
+    if (index < pages.length - 1 && expectedCursor === null) fail("prepared workspace scan ended before its last page");
+  }
+  if (expectedCursor !== null) fail("prepared workspace scan must end with nextCursor null");
+  const preparationIds = new Set<string>();
+  const worktreeIds = new Set<string>();
+  const workspaceIdentities = new Set<string>();
+  for (const item of prepared) {
+    if (!preparationIds.add(item.preparationId) || !worktreeIds.add(item.manifest.worktreeId)
+      || !workspaceIdentities.add(item.manifest.workspaceIdentity)) {
+      fail("prepared workspace identities must remain globally unique");
+    }
+  }
+  return prepared;
+}
+
+function validatePreparedWorkspaceArray(value: unknown, name: string): PreparedChatWorkspaceV1[] {
+  return array(value, name, G5_PAGE_MAX_ITEMS_V1).map(validatePreparedChatWorkspaceV1);
+}
+
+function assertSamePreparedIdentity(
+  expected: PreparedChatWorkspaceV1,
+  actual: PreparedChatWorkspaceV1 | AbandonPreparedWorkspaceResultV1,
+  name: string,
+): void {
+  const projectId = "manifest" in actual ? actual.manifest.projectId : actual.projectId;
+  const worktreeId = "manifest" in actual ? actual.manifest.worktreeId : actual.worktreeId;
+  const workspaceIdentity = "manifest" in actual ? actual.manifest.workspaceIdentity : actual.workspaceIdentity;
+  if (actual.preparationId !== expected.preparationId || projectId !== expected.manifest.projectId
+    || worktreeId !== expected.manifest.worktreeId || workspaceIdentity !== expected.manifest.workspaceIdentity) {
+    fail(`${name} changed preparation/project/worktree/workspace identity`);
+  }
+}
+
+function sameManifestExceptLifecycle(before: WorktreeManifestV1, after: WorktreeManifestV1): boolean {
+  const { lifecycle: _beforeLifecycle, ...beforeIdentity } = before;
+  const { lifecycle: _afterLifecycle, ...afterIdentity } = after;
+  return sameJson(beforeIdentity, afterIdentity);
 }
 
 export function validateChatDetailPageV1(value: unknown): ChatDetailPageV1 {
