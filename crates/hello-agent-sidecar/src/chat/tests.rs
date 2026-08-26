@@ -54,10 +54,19 @@ impl Fixture {
     }
 
     fn snapshot(&mut self, request: &str) -> Value {
-        self.projects
-            .prepare_chat_workspace(&mut self.storage, &self.project_id, request)
+        let prepared = self
+            .chats
+            .prepare_chat_workspace(
+                &mut self.storage,
+                &mut self.projects,
+                &self.project_id,
+                request,
+            )
             .unwrap()
-            .result
+            .result;
+        let mut snapshot = prepared["manifest"].clone();
+        snapshot["preparationId"] = prepared["preparationId"].clone();
+        snapshot
     }
 
     fn create_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
@@ -68,6 +77,7 @@ impl Fixture {
             .create_chat(
                 &mut self.storage,
                 &self.projects,
+                snapshot["preparationId"].as_str().unwrap(),
                 &self.project_id,
                 snapshot["worktreeId"].as_str().unwrap(),
                 snapshot["workspaceIdentity"].as_str().unwrap(),
@@ -230,6 +240,7 @@ fn settings_are_snapshotted_and_global_workspace_aliases_are_rejected() {
         .create_chat(
             &mut fixture.storage,
             &fixture.projects,
+            first["preparationId"].as_str().unwrap(),
             &fixture.project_id,
             first["worktreeId"].as_str().unwrap(),
             first["workspaceIdentity"].as_str().unwrap(),
@@ -289,6 +300,7 @@ fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
         .create_chat(
             &mut fixture.storage,
             &fixture.projects,
+            snapshot["preparationId"].as_str().unwrap(),
             &fixture.project_id,
             snapshot["worktreeId"].as_str().unwrap(),
             snapshot["workspaceIdentity"].as_str().unwrap(),
@@ -314,6 +326,229 @@ fn unavailable_exact_profile_never_persists_or_spawns_a_run() {
     assert_eq!(
         fixture.storage.projection_records("run").unwrap().len(),
         before
+    );
+}
+
+#[test]
+fn failed_b_creation_and_exact_abandon_leave_bound_a_fully_active() {
+    let mut fixture = Fixture::new();
+    let snapshot_a = fixture.snapshot("req_cleanup_snapshot_a");
+    let chat_a = fixture.create_chat(&snapshot_a, "bound a", "req_cleanup_chat_a");
+    let address_a = address_from_chat(&chat_a).unwrap();
+    let snapshot_b = fixture.snapshot("req_cleanup_snapshot_b");
+    let failed = fixture
+        .chats
+        .create_chat(
+            &mut fixture.storage,
+            &fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "must not bind",
+            99,
+            "req_cleanup_chat_b_failed",
+        )
+        .unwrap_err();
+    assert_eq!(failed.kind, "dirtyConflict");
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            "workspace_wrong_alias",
+            "req_cleanup_wrong_abandon_b",
+        )
+        .is_err());
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+    let abandoned = fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_abandon_b",
+        )
+        .unwrap();
+    assert_eq!(abandoned.result["bindingState"], "abandoned");
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_duplicate_abandon_b",
+        )
+        .is_err());
+    fixture
+        .projects
+        .workspace_get_tree(&fixture.storage, &address_a, "", None)
+        .unwrap();
+    let expected = sha256_file_version_v1(b"base");
+    let begin = fixture
+        .projects
+        .workspace_begin_save(
+            &mut fixture.storage,
+            &address_a,
+            "src/value.txt",
+            &expected,
+            4,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .projects
+        .workspace_append_save_chunk(&fixture.storage, &address_a, save_id, 1, "kept")
+        .unwrap();
+    fixture
+        .projects
+        .workspace_commit_save(
+            &mut fixture.storage,
+            &address_a,
+            save_id,
+            &expected,
+            1,
+            4,
+            "req_cleanup_save_a",
+        )
+        .unwrap();
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+            .unwrap()
+            .streams[0]
+            .chunks,
+        vec!["kept"]
+    );
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+    assert!(fixture
+        .chats
+        .abandon_prepared_workspace(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            snapshot_a["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_a["worktreeId"].as_str().unwrap(),
+            snapshot_a["workspaceIdentity"].as_str().unwrap(),
+            "req_cleanup_late_abandon_a",
+        )
+        .is_err());
+    fixture
+        .projects
+        .workspace_read_file(&fixture.storage, &address_a, "src/value.txt")
+        .unwrap();
+}
+
+#[test]
+fn duplicate_chat_identity_rolls_back_and_keeps_new_preparation_unbound() {
+    let mut fixture = Fixture::new();
+    let snapshot_a = fixture.snapshot("req_duplicate_snapshot_a");
+    let chat_a = fixture.create_chat(&snapshot_a, "chat a", "req_duplicate_chat_a");
+    let snapshot_b = fixture.snapshot("req_duplicate_snapshot_b");
+    let before = fixture.storage.projection_records("chat").unwrap().len();
+    let error = fixture
+        .chats
+        .create_chat_inner(
+            &mut fixture.storage,
+            &fixture.projects,
+            snapshot_b["preparationId"].as_str().unwrap(),
+            &fixture.project_id,
+            snapshot_b["worktreeId"].as_str().unwrap(),
+            snapshot_b["workspaceIdentity"].as_str().unwrap(),
+            "duplicate id",
+            1,
+            "req_duplicate_chat_b",
+            chat_a["chatId"].as_str(),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "manifestMismatch");
+    assert_eq!(
+        fixture.storage.projection_records("chat").unwrap().len(),
+        before
+    );
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot_b["preparationId"].as_str().unwrap()]
+            ["bindingState"],
+        "unbound"
+    );
+}
+
+#[test]
+fn injected_bind_crash_rolls_back_preparation_and_initial_message_together() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_crash_snapshot");
+    fixture
+        .chats
+        .default_role_settings(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_crash_settings",
+        )
+        .unwrap();
+    let settings =
+        project_record(&fixture.storage, &fixture.project_id).unwrap()["role_settings"].clone();
+    let created = now();
+    let chat = json!({
+        "schemaVersion":1,"chatId":"chat_injected_crash","taskId":"task_injected_crash",
+        "projectId":fixture.project_id,"worktreeId":snapshot["worktreeId"],
+        "workspaceIdentity":snapshot["workspaceIdentity"],"goal":"rollback together",
+        "settingsRevision":1,"roleSnapshots":settings["roles"],"state":"draft",
+        "createdAt":created,"updatedAt":created,
+    });
+    let message = team_message(&chat, 1, "user", None, None, "rollback together").unwrap();
+    let payload = chat_projection(&chat, Some(message), 1).unwrap();
+    let error = fixture
+        .storage
+        .bind_prepared_chat_atomic_with_failure(
+            ChatBindInput {
+                preparation_id: snapshot["preparationId"].as_str().unwrap().to_string(),
+                project_id: fixture.project_id.clone(),
+                worktree_id: snapshot["worktreeId"].as_str().unwrap().to_string(),
+                workspace_identity: snapshot["workspaceIdentity"].as_str().unwrap().to_string(),
+                expected_settings_revision: 1,
+                chat_id: "chat_injected_crash".to_string(),
+                request_id: "req_crash_bind".to_string(),
+                chat_payload: payload,
+            },
+            crate::storage::ChatBindFailurePoint::AfterPreparationBindBeforeChat,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), "injectedFailure");
+    assert!(fixture
+        .storage
+        .projection_record("chat", "chat_injected_crash")
+        .unwrap()
+        .is_none());
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        project["prepared_workspaces"][snapshot["preparationId"].as_str().unwrap()]["bindingState"],
+        "unbound"
     );
 }
 

@@ -347,6 +347,8 @@ impl Sidecar {
             request.method.as_str(),
             "project.getRoleSettings"
                 | "project.updateRoleSettings"
+                | "workspace.prepareChat"
+                | "workspace.abandonPrepared"
                 | "chat.create"
                 | "chat.list"
                 | "chat.get"
@@ -409,7 +411,7 @@ impl Sidecar {
                 self.projects.get_tree(
                     &self.storage,
                     param_string(params, "projectId").map_err(invalid_params)?,
-                    param_string(params, "parentPath").map_err(invalid_params)?,
+                    param_string_allow_empty(params, "parentPath").map_err(invalid_params)?,
                     param_nullable_string(params, "cursor").map_err(invalid_params)?,
                 )
             }
@@ -484,7 +486,7 @@ impl Sidecar {
                     .workspace_get_tree(
                         &self.storage,
                         &address,
-                        param_string(params, "parentPath").map_err(invalid_params)?,
+                        param_string_allow_empty(params, "parentPath").map_err(invalid_params)?,
                         param_nullable_string(params, "cursor").map_err(invalid_params)?,
                     )
                     .map(|action| addressed_action(action, &address))
@@ -752,10 +754,43 @@ impl Sidecar {
                         ..chat::G5Action::default()
                     }
                 }
+                "workspace.prepareChat" => {
+                    let params = require_exact_params(&request.params, &["projectId"])
+                        .map_err(ProjectFailure::manifest)?;
+                    self.g5.prepare_chat_workspace(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
+                "workspace.abandonPrepared" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &[
+                            "preparationId",
+                            "projectId",
+                            "worktreeId",
+                            "workspaceIdentity",
+                        ],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    self.g5.abandon_prepared_workspace(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "preparationId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "worktreeId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "workspaceIdentity")
+                            .map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
                 "chat.create" => {
                     let params = require_exact_params(
                         &request.params,
                         &[
+                            "preparationId",
                             "projectId",
                             "worktreeId",
                             "workspaceIdentity",
@@ -767,6 +802,7 @@ impl Sidecar {
                     self.g5.create_chat(
                         &mut self.storage,
                         &self.projects,
+                        param_string(params, "preparationId").map_err(ProjectFailure::manifest)?,
                         param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
                         param_string(params, "worktreeId").map_err(ProjectFailure::manifest)?,
                         param_string(params, "workspaceIdentity")
@@ -1102,6 +1138,16 @@ fn param_string<'a>(object: &'a Map<String, Value>, name: &str) -> Result<&'a st
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{name} must be a non-empty string"))
+}
+
+fn param_string_allow_empty<'a>(
+    object: &'a Map<String, Value>,
+    name: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{name} must be a string"))
 }
 
 fn param_nullable_string<'a>(

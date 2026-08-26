@@ -1,5 +1,5 @@
 use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
-use crate::storage::{ProjectionUpsert, Storage};
+use crate::storage::{ChatBindInput, ChatBindOutcome, ProjectionUpsert, Storage};
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_core::proctree::{
@@ -205,11 +205,174 @@ impl G5Manager {
         Ok(updated)
     }
 
+    pub fn prepare_chat_workspace(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        project_id: &str,
+        request_id: &str,
+    ) -> Result<G5Action, ProjectFailure> {
+        let before = project_record(storage, project_id)?;
+        let action = projects.prepare_chat_workspace(storage, project_id, request_id)?;
+        let manifest = action.result;
+        let existing = prepared_workspace_records(storage)?;
+        let worktree_id = manifest["worktreeId"].as_str().unwrap_or_default();
+        let workspace_identity = manifest["workspaceIdentity"].as_str().unwrap_or_default();
+        let chat_bindings = storage.projection_records("chat")?;
+        if existing.iter().any(|prepared| {
+            prepared["manifest"]["worktreeId"] == worktree_id
+                || prepared["manifest"]["workspaceIdentity"] == workspace_identity
+        }) || chat_bindings.iter().any(|chat| {
+            chat.get("worktree_id").and_then(Value::as_str) == Some(worktree_id)
+                || chat.get("workspace_identity").and_then(Value::as_str)
+                    == Some(workspace_identity)
+        }) {
+            projects.abandon_unbound_workspace(
+                storage,
+                project_id,
+                worktree_id,
+                workspace_identity,
+            )?;
+            return Err(ProjectFailure::recovery(
+                "fresh workspace identity collided with durable binding history",
+            ));
+        }
+        let preparation_id = unique_preparation_id(&existing)?;
+        let created = now();
+        let prepared = json!({
+            "schemaVersion":1,"preparationId":preparation_id,"manifest":manifest,
+            "bindingState":"unbound","boundChatId":null,
+            "createdAt":created,"updatedAt":created,
+        });
+        validate_g5_payload_v1("preparedChatWorkspace", &prepared).map_err(|error| {
+            ProjectFailure::manifest(format!("prepared workspace is invalid: {error}"))
+        })?;
+        let mut project = project_record(storage, project_id)?;
+        for field in ["role_settings", "prepared_workspaces"] {
+            if !project.contains_key(field) {
+                if let Some(value) = before.get(field).cloned() {
+                    project.insert(field.to_string(), value);
+                }
+            }
+        }
+        let mut preparations = project
+            .remove("prepared_workspaces")
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        preparations.insert(preparation_id.clone(), prepared.clone());
+        project.insert(
+            "prepared_workspaces".to_string(),
+            Value::Object(preparations),
+        );
+        if let Err(error) = storage.upsert_projection_record(
+            "project",
+            project_id,
+            &format!("op_workspace_prepare_chat_{request_id}"),
+            Some(request_id),
+            project,
+        ) {
+            return match projects.abandon_unbound_workspace(
+                storage,
+                project_id,
+                worktree_id,
+                workspace_identity,
+            ) {
+                Ok(()) => Err(ProjectFailure::recovery(format!(
+                    "prepared workspace persistence failed and its snapshot was abandoned: {error}"
+                ))),
+                Err(cleanup) => Err(ProjectFailure::ambiguous(format!(
+                    "prepared workspace persistence failed and terminal abandonment could not be proven: {error}; cleanup: {}",
+                    cleanup.detail
+                ))),
+            };
+        }
+        Ok(G5Action {
+            result: prepared,
+            ..G5Action::default()
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn abandon_prepared_workspace(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        preparation_id: &str,
+        project_id: &str,
+        worktree_id: &str,
+        workspace_identity: &str,
+        request_id: &str,
+    ) -> Result<G5Action, ProjectFailure> {
+        let request = json!({
+            "preparationId":preparation_id,"projectId":project_id,
+            "worktreeId":worktree_id,"workspaceIdentity":workspace_identity,
+        });
+        validate_g5_payload_v1("abandonPreparedWorkspaceRequest", &request).map_err(|error| {
+            ProjectFailure::manifest(format!("invalid prepared abandon request: {error}"))
+        })?;
+        let mut project = project_record(storage, project_id)?;
+        let mut preparations = project
+            .remove("prepared_workspaces")
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        let prepared = preparations
+            .get(preparation_id)
+            .cloned()
+            .ok_or_else(|| ProjectFailure::manifest("prepared workspace is unknown"))?;
+        let exact = prepared["manifest"]["projectId"] == project_id
+            && prepared["manifest"]["worktreeId"] == worktree_id
+            && prepared["manifest"]["workspaceIdentity"] == workspace_identity;
+        if !exact {
+            return Err(ProjectFailure::manifest(
+                "prepared workspace abandon identity differs",
+            ));
+        }
+        if prepared["bindingState"] != "unbound" {
+            return Err(ProjectFailure::manifest(
+                "only an unbound prepared workspace can be abandoned",
+            ));
+        }
+        // Make the filesystem identity terminal before the durable projection. If SQLite fails,
+        // the exact request can safely resume because the project method accepts only this same
+        // already-abandoned identity; chat.create will reject its non-active manifest meanwhile.
+        projects.abandon_unbound_workspace(storage, project_id, worktree_id, workspace_identity)?;
+        let mut abandoned = prepared;
+        abandoned["bindingState"] = Value::String("abandoned".to_string());
+        abandoned["boundChatId"] = Value::Null;
+        abandoned["manifest"]["lifecycle"] = Value::String("abandoned".to_string());
+        abandoned["updatedAt"] = Value::String(now());
+        validate_g5_payload_v1("preparedChatWorkspace", &abandoned).map_err(|error| {
+            ProjectFailure::manifest(format!("abandoned preparation is invalid: {error}"))
+        })?;
+        preparations.insert(preparation_id.to_string(), abandoned);
+        project.insert(
+            "prepared_workspaces".to_string(),
+            Value::Object(preparations),
+        );
+        storage.upsert_projection_record(
+            "project",
+            project_id,
+            &format!("op_workspace_abandon_prepared_{request_id}"),
+            Some(request_id),
+            project,
+        )?;
+        let result = json!({
+            "preparationId":preparation_id,"projectId":project_id,
+            "worktreeId":worktree_id,"workspaceIdentity":workspace_identity,
+            "bindingState":"abandoned","physicallyDeleted":false,
+        });
+        Ok(G5Action {
+            result,
+            ..G5Action::default()
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn create_chat(
         &self,
         storage: &mut Storage,
         projects: &ProjectManager,
+        preparation_id: &str,
         project_id: &str,
         worktree_id: &str,
         workspace_identity: &str,
@@ -217,8 +380,36 @@ impl G5Manager {
         expected_settings_revision: u64,
         request_id: &str,
     ) -> Result<G5Action, ProjectFailure> {
+        self.create_chat_inner(
+            storage,
+            projects,
+            preparation_id,
+            project_id,
+            worktree_id,
+            workspace_identity,
+            goal,
+            expected_settings_revision,
+            request_id,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_chat_inner(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        preparation_id: &str,
+        project_id: &str,
+        worktree_id: &str,
+        workspace_identity: &str,
+        goal: &str,
+        expected_settings_revision: u64,
+        request_id: &str,
+        forced_chat_id: Option<&str>,
+    ) -> Result<G5Action, ProjectFailure> {
         let request = json!({
-            "projectId":project_id,"worktreeId":worktree_id,
+            "preparationId":preparation_id,"projectId":project_id,"worktreeId":worktree_id,
             "workspaceIdentity":workspace_identity,"goal":goal,
             "expectedSettingsRevision":expected_settings_revision,
         });
@@ -234,17 +425,10 @@ impl G5Manager {
                 "project role settings changed before chat creation",
             ));
         }
-        for chat in storage.projection_records("chat")? {
-            if chat.get("worktree_id").and_then(Value::as_str) == Some(worktree_id)
-                || chat.get("workspace_identity").and_then(Value::as_str)
-                    == Some(workspace_identity)
-            {
-                return Err(ProjectFailure::manifest(
-                    "worktree and workspace identities can belong to only one chat globally",
-                ));
-            }
-        }
-        let chat_id = format!("chat_{}", Uuid::new_v4().simple());
+        let chat_id = match forced_chat_id {
+            Some(chat_id) => chat_id.to_string(),
+            None => unique_chat_id(storage)?,
+        };
         let task_id = format!("task_{}", Uuid::new_v4().simple());
         let address = WorkspaceAddress {
             chat_id: chat_id.clone(),
@@ -271,13 +455,42 @@ impl G5Manager {
             .map_err(|error| ProjectFailure::manifest(format!("invalid created chat: {error}")))?;
         let message = team_message(&chat, 1, "user", None, None, goal)?;
         let payload = chat_projection(&chat, Some(message.clone()), 1)?;
-        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
-            aggregate_type: "chat",
-            aggregate_id: address.chat_id.clone(),
-            operation_id: format!("op_chat_create_{request_id}"),
-            request_id: Some(request_id.to_string()),
-            payload,
-        }])?;
+        let outcome = storage.bind_prepared_chat_atomic(ChatBindInput {
+            preparation_id: preparation_id.to_string(),
+            project_id: project_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            workspace_identity: workspace_identity.to_string(),
+            expected_settings_revision,
+            chat_id: address.chat_id.clone(),
+            request_id: request_id.to_string(),
+            chat_payload: payload,
+        })?;
+        match outcome {
+            ChatBindOutcome::Committed => {}
+            ChatBindOutcome::SettingsDrift => {
+                return Err(ProjectFailure::dirty(
+                    "project role settings changed before binding",
+                ))
+            }
+            ChatBindOutcome::PreparationUnknown => {
+                return Err(ProjectFailure::manifest("prepared workspace is unknown"))
+            }
+            ChatBindOutcome::PreparationNotUnbound => {
+                return Err(ProjectFailure::manifest(
+                    "prepared workspace is no longer unbound",
+                ))
+            }
+            ChatBindOutcome::PreparationMismatch => {
+                return Err(ProjectFailure::manifest(
+                    "prepared workspace identity differs",
+                ))
+            }
+            ChatBindOutcome::BindingConflict => {
+                return Err(ProjectFailure::manifest(
+                    "global chat/workspace binding conflicts",
+                ))
+            }
+        }
         Ok(G5Action {
             result: chat.clone(),
             events: vec![chat_event(&chat, 1, message)],
@@ -1156,6 +1369,50 @@ fn project_record(
     storage
         .projection_record("project", project_id)?
         .ok_or_else(|| ProjectFailure::manifest("project projection is missing"))
+}
+
+fn prepared_workspace_records(storage: &Storage) -> Result<Vec<Value>, ProjectFailure> {
+    Ok(storage
+        .projection_records("project")?
+        .into_iter()
+        .filter_map(|project| project.get("prepared_workspaces").cloned())
+        .filter_map(|value| value.as_object().cloned())
+        .flat_map(|preparations| preparations.into_values())
+        .collect())
+}
+
+fn unique_preparation_id(existing: &[Value]) -> Result<String, ProjectFailure> {
+    for _ in 0..8 {
+        let candidate = format!("preparation_{}", Uuid::new_v4().simple());
+        if existing.iter().all(|prepared| {
+            prepared.get("preparationId").and_then(Value::as_str) != Some(candidate.as_str())
+        }) {
+            return Ok(candidate);
+        }
+    }
+    Err(ProjectFailure::recovery(
+        "could not allocate a globally unique preparation identity",
+    ))
+}
+
+fn unique_chat_id(storage: &Storage) -> Result<String, ProjectFailure> {
+    let chats = storage.projection_records("chat")?;
+    let prepared = prepared_workspace_records(storage)?;
+    for _ in 0..8 {
+        let candidate = format!("chat_{}", Uuid::new_v4().simple());
+        let existing_chat = chats
+            .iter()
+            .any(|chat| chat.get("chat_id").and_then(Value::as_str) == Some(candidate.as_str()));
+        let existing_binding = prepared.iter().any(|record| {
+            record.get("boundChatId").and_then(Value::as_str) == Some(candidate.as_str())
+        });
+        if !existing_chat && !existing_binding {
+            return Ok(candidate);
+        }
+    }
+    Err(ProjectFailure::recovery(
+        "could not allocate a globally unique chat identity",
+    ))
 }
 
 fn chat_projection_record(

@@ -553,21 +553,24 @@ impl ProjectManager {
             project_id,
             &format!("op_snapshot_prepare_project_{worktree_id}"),
             request_id,
-            json!({
-                "project_id": project_id,
-                "canonical_path": root_text,
-                "selected_path": value_string(&project, "selected_path")?,
-                "base_commit": source.base_commit,
-                "base_tree": source.base_tree,
-                "object_format": source.object_format,
-                "source_identity": source.source_identity,
-                "workspace_identity": workspace_identity,
-                "lifecycle": "recoveryRequired",
-                "worktree_id": worktree_id,
-                "worktree_path": worktree_text,
-                "manifest_path": manifest_text,
-                "lock_id": lock_id,
-            }),
+            preserve_project_extensions(
+                json!({
+                    "project_id": project_id,
+                    "canonical_path": root_text,
+                    "selected_path": value_string(&project, "selected_path")?,
+                    "base_commit": source.base_commit,
+                    "base_tree": source.base_tree,
+                    "object_format": source.object_format,
+                    "source_identity": source.source_identity,
+                    "workspace_identity": workspace_identity,
+                    "lifecycle": "recoveryRequired",
+                    "worktree_id": worktree_id,
+                    "worktree_path": worktree_text,
+                    "manifest_path": manifest_text,
+                    "lock_id": lock_id,
+                }),
+                &project,
+            )?,
         )?;
         if failure == Some(WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport) {
             return Err(ProjectFailure::recovery(
@@ -649,7 +652,7 @@ impl ProjectManager {
             ));
         }
 
-        self.persist_pre_activation(storage, &active, request_id)?;
+        self.persist_pre_activation(storage, &active, &project, request_id)?;
         let final_dir = self.worktree_capability(&active)?;
         let durable = required_project(storage, &active.project_id)?;
         let canonical_root_text =
@@ -702,7 +705,7 @@ impl ProjectManager {
         )
         .map_err(|error| ProjectFailure::manifest(format!("snapshot sizing failed: {error}")))?;
 
-        self.persist_active(storage, &active, request_id)?;
+        self.persist_active(storage, &active, &project, request_id)?;
         Ok(ProjectAction {
             result: manifest,
             ..ProjectAction::default()
@@ -2130,6 +2133,7 @@ impl ProjectManager {
         &self,
         storage: &mut Storage,
         active: &ActiveProject,
+        previous: &Map<String, Value>,
         request_id: &str,
     ) -> Result<(), ProjectFailure> {
         append_object(
@@ -2138,21 +2142,24 @@ impl ProjectManager {
             &active.project_id,
             &format!("op_snapshot_database_committed_{}", active.worktree_id),
             request_id,
-            json!({
-                "project_id":active.project_id,
-                "canonical_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
-                "selected_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
-                "base_commit":active.base_commit,
-                "base_tree":active.base_tree,
-                "object_format":active.object_format,
-                "source_identity":active.source_identity,
-                "workspace_identity":active.workspace_identity,
-                "lifecycle":"recoveryRequired",
-                "worktree_id":active.worktree_id,
-                "worktree_path":canonical_protocol_path(&active.worktree_path)?,
-                "manifest_path":canonical_protocol_path_without_existing(&active.manifest_path)?,
-                "lock_id":active.lock_id,
-            }),
+            preserve_project_extensions(
+                json!({
+                    "project_id":active.project_id,
+                    "canonical_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
+                    "selected_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
+                    "base_commit":active.base_commit,
+                    "base_tree":active.base_tree,
+                    "object_format":active.object_format,
+                    "source_identity":active.source_identity,
+                    "workspace_identity":active.workspace_identity,
+                    "lifecycle":"recoveryRequired",
+                    "worktree_id":active.worktree_id,
+                    "worktree_path":canonical_protocol_path(&active.worktree_path)?,
+                    "manifest_path":canonical_protocol_path_without_existing(&active.manifest_path)?,
+                    "lock_id":active.lock_id,
+                }),
+                previous,
+            )?,
         )
     }
 
@@ -2160,6 +2167,7 @@ impl ProjectManager {
         &self,
         storage: &mut Storage,
         active: &ActiveProject,
+        previous: &Map<String, Value>,
         request_id: &str,
     ) -> Result<(), ProjectFailure> {
         append_object(
@@ -2168,21 +2176,24 @@ impl ProjectManager {
             &active.project_id,
             &format!("op_worktree_active_project_{}", active.worktree_id),
             request_id,
-            json!({
-                "project_id":active.project_id,
-                "canonical_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
-                "selected_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
-                "base_commit":active.base_commit,
-                "base_tree":active.base_tree,
-                "object_format":active.object_format,
-                "source_identity":active.source_identity,
-                "workspace_identity":active.workspace_identity,
-                "lifecycle":"active",
-                "worktree_id":active.worktree_id,
-                "worktree_path":canonical_protocol_path(&active.worktree_path)?,
-                "manifest_path":canonical_protocol_path_without_existing(&active.manifest_path)?,
-                "lock_id":active.lock_id,
-            }),
+            preserve_project_extensions(
+                json!({
+                    "project_id":active.project_id,
+                    "canonical_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
+                    "selected_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
+                    "base_commit":active.base_commit,
+                    "base_tree":active.base_tree,
+                    "object_format":active.object_format,
+                    "source_identity":active.source_identity,
+                    "workspace_identity":active.workspace_identity,
+                    "lifecycle":"active",
+                    "worktree_id":active.worktree_id,
+                    "worktree_path":canonical_protocol_path(&active.worktree_path)?,
+                    "manifest_path":canonical_protocol_path_without_existing(&active.manifest_path)?,
+                    "lock_id":active.lock_id,
+                }),
+                previous,
+            )?,
         )?;
         append_object(
             storage,
@@ -2491,6 +2502,61 @@ impl ProjectManager {
             ));
         }
         Ok(())
+    }
+
+    pub fn abandon_unbound_workspace(
+        &mut self,
+        storage: &Storage,
+        project_id: &str,
+        worktree_id: &str,
+        workspace_identity: &str,
+    ) -> Result<(), ProjectFailure> {
+        let manifest_name = format!("{worktree_id}.json");
+        let mut manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        for (field, expected) in [
+            ("projectId", project_id),
+            ("worktreeId", worktree_id),
+            ("workspaceIdentity", workspace_identity),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "prepared workspace identity differs from its manifest",
+                ));
+            }
+        }
+        let lifecycle = manifest.get("lifecycle").and_then(Value::as_str);
+        if !matches!(lifecycle, Some("active" | "abandoned")) {
+            return Err(ProjectFailure::manifest(
+                "prepared workspace lifecycle cannot be abandoned",
+            ));
+        }
+        let project = required_project(storage, project_id)?;
+        if project.get("canonical_path").and_then(Value::as_str)
+            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+        {
+            return Err(ProjectFailure::manifest(
+                "prepared workspace canonical root differs from its project",
+            ));
+        }
+        let lock_id = format!("lock_{worktree_id}");
+        let lock = storage
+            .projection_record("lock", &lock_id)?
+            .ok_or_else(|| ProjectFailure::manifest("prepared workspace lock is missing"))?;
+        if lock.get("project_id").and_then(Value::as_str) != Some(project_id)
+            || lock.get("worktree_path").and_then(Value::as_str)
+                != Some(canonical_protocol_path(&self.worktrees_root.join(worktree_id))?.as_str())
+            || lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+            || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
+        {
+            return Err(ProjectFailure::recovery(
+                "prepared workspace lock is poisoned, recovery-required, or mismatched",
+            ));
+        }
+        if lifecycle == Some("abandoned") {
+            return Ok(());
+        }
+        manifest["lifecycle"] = Value::String("abandoned".to_string());
+        write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
     }
 
     fn worktree_capability(&self, active: &ActiveProject) -> Result<Dir, ProjectFailure> {
@@ -4100,6 +4166,22 @@ fn append_object(
             "durable operation identity conflicted and cannot be retried automatically",
         )),
     }
+}
+
+fn preserve_project_extensions(
+    value: Value,
+    previous: &Map<String, Value>,
+) -> Result<Value, ProjectFailure> {
+    let mut object = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
+    for field in ["role_settings", "prepared_workspaces"] {
+        if let Some(extension) = previous.get(field).cloned() {
+            object.insert(field.to_string(), extension);
+        }
+    }
+    Ok(Value::Object(object))
 }
 
 fn required_project(

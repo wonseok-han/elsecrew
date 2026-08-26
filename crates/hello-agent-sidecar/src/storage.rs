@@ -42,6 +42,33 @@ pub struct ProjectionUpsert {
     pub payload: Map<String, Value>,
 }
 
+#[derive(Debug)]
+pub struct ChatBindInput {
+    pub preparation_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub expected_settings_revision: u64,
+    pub chat_id: String,
+    pub request_id: String,
+    pub chat_payload: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatBindOutcome {
+    Committed,
+    PreparationUnknown,
+    SettingsDrift,
+    PreparationNotUnbound,
+    PreparationMismatch,
+    BindingConflict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatBindFailurePoint {
+    AfterPreparationBindBeforeChat,
+}
+
 impl Storage {
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
         let path = safe_database_path(path)?;
@@ -452,6 +479,185 @@ impl Storage {
         }
         transaction.commit().map_err(sqlite_error)?;
         Ok(outcomes)
+    }
+
+    pub fn bind_prepared_chat_atomic(
+        &mut self,
+        input: ChatBindInput,
+    ) -> Result<ChatBindOutcome, SidecarError> {
+        self.bind_prepared_chat_atomic_inner(input, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bind_prepared_chat_atomic_with_failure(
+        &mut self,
+        input: ChatBindInput,
+        failure: ChatBindFailurePoint,
+    ) -> Result<ChatBindOutcome, SidecarError> {
+        self.bind_prepared_chat_atomic_inner(input, Some(failure))
+    }
+
+    fn bind_prepared_chat_atomic_inner(
+        &mut self,
+        input: ChatBindInput,
+        failure: Option<ChatBindFailurePoint>,
+    ) -> Result<ChatBindOutcome, SidecarError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        let mut events = load_events(&transaction)?;
+        let projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let Some(project) = projection.projects.get(&input.project_id) else {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::PreparationUnknown);
+        };
+        let settings_revision = project
+            .get("role_settings")
+            .and_then(Value::as_object)
+            .and_then(|settings| settings.get("revision"))
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
+        if settings_revision != input.expected_settings_revision {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::SettingsDrift);
+        }
+        let Some(preparations) = project
+            .get("prepared_workspaces")
+            .and_then(Value::as_object)
+        else {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::PreparationUnknown);
+        };
+        let Some(prepared) = preparations.get(&input.preparation_id) else {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::PreparationUnknown);
+        };
+        if prepared.get("bindingState").and_then(Value::as_str) != Some("unbound") {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::PreparationNotUnbound);
+        }
+        let manifest = prepared.get("manifest").and_then(Value::as_object);
+        let matches = prepared.get("preparationId").and_then(Value::as_str)
+            == Some(input.preparation_id.as_str())
+            && manifest.and_then(|value| value.get("projectId"))
+                == Some(&Value::String(input.project_id.clone()))
+            && manifest.and_then(|value| value.get("worktreeId"))
+                == Some(&Value::String(input.worktree_id.clone()))
+            && manifest.and_then(|value| value.get("workspaceIdentity"))
+                == Some(&Value::String(input.workspace_identity.clone()))
+            && manifest
+                .and_then(|value| value.get("lifecycle"))
+                .and_then(Value::as_str)
+                == Some("active");
+        if !matches {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::PreparationMismatch);
+        }
+        if projection.chats.iter().any(|(chat_id, chat)| {
+            chat_id == &input.chat_id
+                || chat.get("chat_id").and_then(Value::as_str) == Some(input.chat_id.as_str())
+                || chat.get("worktree_id").and_then(Value::as_str)
+                    == Some(input.worktree_id.as_str())
+                || chat.get("workspace_identity").and_then(Value::as_str)
+                    == Some(input.workspace_identity.as_str())
+        }) {
+            transaction.rollback().map_err(sqlite_error)?;
+            return Ok(ChatBindOutcome::BindingConflict);
+        }
+
+        let mut bound = prepared.clone();
+        bound["bindingState"] = Value::String("bound".to_string());
+        bound["boundChatId"] = Value::String(input.chat_id.clone());
+        bound["updatedAt"] = input
+            .chat_payload
+            .get("record")
+            .and_then(|chat| chat.get("updatedAt"))
+            .cloned()
+            .ok_or_else(|| SidecarError::new("projectionInvalid", "chat updatedAt is missing"))?;
+        hello_agent_protocol::run_recovery_v1::validate_g5_payload_v1(
+            "preparedChatWorkspace",
+            &bound,
+        )
+        .map_err(|error| SidecarError::new("projectionInvalid", error.to_string()))?;
+        let mut project_payload = project.clone();
+        project_payload.remove("last_event_sequence");
+        let mut updated_preparations = preparations.clone();
+        updated_preparations.insert(input.preparation_id.clone(), bound);
+        project_payload.insert(
+            "prepared_workspaces".to_string(),
+            Value::Object(updated_preparations),
+        );
+        let upserts = vec![
+            ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: input.project_id,
+                operation_id: format!("op_chat_bind_{}", input.request_id),
+                request_id: Some(input.request_id.clone()),
+                payload: project_payload,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: input.chat_id,
+                operation_id: format!("op_chat_create_{}", input.request_id),
+                request_id: Some(input.request_id),
+                payload: input.chat_payload,
+            },
+        ];
+        let mut appended = Vec::new();
+        for (index, mut upsert) in upserts.into_iter().enumerate() {
+            upsert.payload.remove("last_event_sequence");
+            let current = match upsert.aggregate_type {
+                "project" => projection.projects.get(&upsert.aggregate_id),
+                "chat" => projection.chats.get(&upsert.aggregate_id),
+                _ => unreachable!("fixed chat binding aggregates"),
+            };
+            let sequence = current
+                .map(|record| required_u64(record, "last_event_sequence"))
+                .transpose()?
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| SidecarError::new("sequenceOverflow", "event sequence overflow"))?;
+            let event = LedgerEventV1 {
+                event_id: format!("evt_{}", Uuid::new_v4().simple()),
+                operation_id: upsert.operation_id,
+                request_id: upsert.request_id,
+                aggregate_type: upsert.aggregate_type.to_string(),
+                aggregate_id: upsert.aggregate_id,
+                aggregate_sequence: sequence,
+                event_type: format!("{}.upserted", upsert.aggregate_type),
+                payload_schema_version: SQLITE_SCHEMA_VERSION,
+                canonical_json_payload: canonical_json_v1(Value::Object(upsert.payload))
+                    .map_err(storage_contract_error)?,
+                timestamp: now_utc(),
+            };
+            match classify_operation_v1(&events, &event).map_err(storage_contract_error)? {
+                OperationDecisionV1::Append => {
+                    insert_event(&transaction, &event)?;
+                    events.push(event.clone());
+                    appended.push(event);
+                    if index == 0
+                        && failure == Some(ChatBindFailurePoint::AfterPreparationBindBeforeChat)
+                    {
+                        return Err(SidecarError::new(
+                            "injectedFailure",
+                            "failure injected after preparation bind before chat projection",
+                        ));
+                    }
+                }
+                OperationDecisionV1::DuplicateNoOp => {}
+                OperationDecisionV1::Conflict => {
+                    transaction.rollback().map_err(sqlite_error)?;
+                    return Ok(ChatBindOutcome::BindingConflict);
+                }
+            }
+        }
+        let final_projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        for event in &appended {
+            write_projection(&transaction, event, &final_projection)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(ChatBindOutcome::Committed)
     }
 
     fn append_recovery_events(&mut self, incoming: &[LedgerEventV1]) -> Result<(), SidecarError> {

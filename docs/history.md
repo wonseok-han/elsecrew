@@ -9,6 +9,14 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 채팅 준비 workspace Rust 소비)
+
+- **한 일**: 승인된 additive `workspace.prepareChat`·`workspace.abandonPrepared`와 `preparationId`가 추가된 `chat.create` 계약을 Rust sidecar에 소비했다. prepare는 기존 active/bound snapshot과 무관하게 새 standalone snapshot과 전역 고유 preparation/worktree/workspace identity를 만들고 `unbound`로 저장한다. create는 exact preparation·active manifest·settings revision·전역 chat/workspace binding을 SQLite `BEGIN IMMEDIATE` 안에서 다시 확인한 뒤 preparation `bound(chatId)`·draft chat·최초 사용자 메시지를 함께 commit한다. G4 `project.createWorktree`의 기존 idempotent 경로는 유지했다.
+- **안전 결정**: exact 네 ID가 다른 abandon, bound·unknown·이미 abandoned preparation은 다른 workspace를 바꾸지 않고 거부한다. 성공 abandon은 물리 삭제 없이 manifest와 preparation을 terminal `abandoned`로 만들며, filesystem 전이를 먼저 수행해 이후 SQLite 저장이 실패해도 chat binding이나 G4 작업에 재사용되지 않게 했다. 저장 전후 실패를 위한 exact 재개는 같은 abandoned filesystem identity만 허용한다. prepare 저장 실패도 새 snapshot을 terminal 처리하고, terminal 상태를 증명하지 못하면 outcome-unknown recovery로 승격한다. chat ID 충돌과 binding 도중 crash 주입은 transaction 전체를 rollback해 preparation을 cleanup 가능한 `unbound`로 유지한다.
+- **호환·발견**: G5 workspace 작업은 chat/project/worktree/workspace 네 ID와 외부 manifest·marker·lock을 계속 매번 검증한다. 실제 stdio A/B 격리 시험 중 root tree의 유효한 빈 `parentPath`를 공용 파서가 거부하던 오류를 발견해 G4/G5 tree route에서만 빈 문자열을 허용했다. bound A를 유지하면서 fresh B 생성 실패·mismatch 거부·exact/duplicate abandon 뒤 A tree/read/save가 계속 동작하고 원본 Git 저장소는 변하지 않음을 임시 저장소로 검증했다.
+- **검증**: `cargo test -p hello-agent-sidecar --locked`는 unit 51 통과·의도한 1 ignored와 실제 stdio 7 통과, `cargo test -p hello-agent-protocol --locked` 22 통과, M4 process-tree F1~F8 회귀 17 통과, Tauri handoff 53 통과·실제 유료 agent 3 ignored를 확인했다. `cargo clippy -p hello-agent-sidecar --locked --no-deps -- -D warnings`, owned Rust 2021 rustfmt, `git diff --check`도 통과했다. Windows/비 macOS spawn은 계약대로 차단 경로만 유지했으며 실제 Windows·유료 agent·사용자 프로젝트는 실행하지 않았다.
+- **다음 할 일**: 이 Rust 후속 commit을 독립 코드 리뷰하고 최신 통합 commit에서 G5 누적 하네스와 실제 stdio QA를 재실행한다. Electron/UI는 exact preparation 결과를 받은 뒤에만 chat.create를 호출하고 실패한 unbound preparation을 정확한 네 ID로 명시 폐기해야 한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 ID 전역 충돌 리뷰 수정)
 
 - **한 일**: 독립 리뷰 P1을 반영해 chat 생성 후보의 `chatId`도 완료된 전역 binding scan의 모든 기존 chat ID와 비교하도록 TypeScript/Rust `ChatCreationTranscriptV1` validator를 강화했다. fresh preparation이 별도 worktree/workspace를 사용해도 후보 chat ID가 기존 A와 같으면 `bindingConflict`다.

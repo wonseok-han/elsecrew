@@ -278,6 +278,177 @@ fn binary_cancel_uncertain_blocks_then_abandon_resolution_clears_quit() {
 }
 
 #[cfg(target_os = "macos")]
+#[test]
+fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(source.join("src")).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("src/file.txt"), "fixture").unwrap();
+    git(&source, &["init", "-q"]);
+    git(&source, &["add", "."]);
+    git(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .arg("--stdio")
+        .current_dir(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_open",
+        "project.open",
+        serde_json::json!({"selectedPath":source}),
+    );
+    let EnvelopeV1::Response(open) = receive_envelope(&envelopes) else {
+        panic!("open")
+    };
+    let project_id = open.result.unwrap()["projectId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_settings",
+        "project.getRoleSettings",
+        serde_json::json!({"projectId":project_id}),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
+    let prepared_a = prepare_workspace(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        &project_id,
+        "req_ab_prepare_a",
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_chat_a",
+        "chat.create",
+        serde_json::json!({
+            "preparationId":prepared_a["preparationId"],"projectId":project_id,
+            "worktreeId":prepared_a["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared_a["manifest"]["workspaceIdentity"],
+            "goal":"bound a","expectedSettingsRevision":1,
+        }),
+    );
+    let EnvelopeV1::Response(chat_a) = receive_envelope(&envelopes) else {
+        panic!("chat a")
+    };
+    assert!(chat_a.ok, "{:?}", chat_a.error);
+    let chat_a = chat_a.result.unwrap();
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Event(event) if event.event == "chat.eventAppended")
+    );
+    let prepared_b = prepare_workspace(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        &project_id,
+        "req_ab_prepare_b",
+    );
+    assert_ne!(prepared_a["preparationId"], prepared_b["preparationId"]);
+    assert_ne!(
+        prepared_a["manifest"]["worktreeId"],
+        prepared_b["manifest"]["worktreeId"]
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_chat_b_fail",
+        "chat.create",
+        serde_json::json!({
+            "preparationId":prepared_b["preparationId"],"projectId":project_id,
+            "worktreeId":prepared_b["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared_b["manifest"]["workspaceIdentity"],
+            "goal":"must fail","expectedSettingsRevision":99,
+        }),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if !response.ok));
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_abandon_b",
+        "workspace.abandonPrepared",
+        serde_json::json!({
+            "preparationId":prepared_b["preparationId"],"projectId":project_id,
+            "worktreeId":prepared_b["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared_b["manifest"]["workspaceIdentity"],
+        }),
+    );
+    let abandon_response = receive_envelope(&envelopes);
+    assert!(
+        matches!(&abandon_response, EnvelopeV1::Response(response) if response.ok),
+        "fresh workspace B abandon failed: {abandon_response:?}"
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_tree_a",
+        "workspace.getTree",
+        serde_json::json!({
+            "chatId":chat_a["chatId"],"projectId":project_id,
+            "worktreeId":prepared_a["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared_a["manifest"]["workspaceIdentity"],
+            "parentPath":"","cursor":null,
+        }),
+    );
+    let tree_response = receive_envelope(&envelopes);
+    assert!(
+        matches!(&tree_response, EnvelopeV1::Response(response) if response.ok),
+        "bound workspace A tree response failed: {tree_response:?}"
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_late_abandon_a",
+        "workspace.abandonPrepared",
+        serde_json::json!({
+            "preparationId":prepared_a["preparationId"],"projectId":project_id,
+            "worktreeId":prepared_a["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared_a["manifest"]["workspaceIdentity"],
+        }),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if !response.ok));
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_ab_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[cfg(target_os = "macos")]
 fn binary_cancel_scenario(scenario: &str, clean: bool) {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source");
@@ -333,7 +504,7 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         &mut stdin,
         &ready.sidecar_instance_id,
         "req_g5_snapshot",
-        "project.createWorktree",
+        "workspace.prepareChat",
         serde_json::json!({"projectId":project_id}),
     );
     let EnvelopeV1::Response(snapshot) = receive_envelope(&envelopes) else {
@@ -357,8 +528,9 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         "req_g5_chat",
         "chat.create",
         serde_json::json!({
-            "projectId":project_id,"worktreeId":snapshot["worktreeId"],
-            "workspaceIdentity":snapshot["workspaceIdentity"],"goal":"cancel fixture",
+            "preparationId":snapshot["preparationId"],"projectId":project_id,
+            "worktreeId":snapshot["manifest"]["worktreeId"],
+            "workspaceIdentity":snapshot["manifest"]["workspaceIdentity"],"goal":"cancel fixture",
             "expectedSettingsRevision":1,
         }),
     );
@@ -503,6 +675,27 @@ fn write_request(
         .write_all(encode_jsonl(&request).unwrap().as_bytes())
         .unwrap();
     stdin.flush().unwrap();
+}
+
+fn prepare_workspace(
+    stdin: &mut impl Write,
+    envelopes: &Receiver<EnvelopeV1>,
+    instance: &str,
+    project_id: &str,
+    request_id: &str,
+) -> serde_json::Value {
+    write_request(
+        stdin,
+        instance,
+        request_id,
+        "workspace.prepareChat",
+        serde_json::json!({"projectId":project_id}),
+    );
+    let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+        panic!("prepare")
+    };
+    assert!(response.ok, "{:?}", response.error);
+    response.result.unwrap()
 }
 
 fn spawn_envelope_reader(stdout: impl Read + Send + 'static) -> Receiver<EnvelopeV1> {
