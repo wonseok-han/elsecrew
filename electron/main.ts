@@ -21,7 +21,8 @@ import type {
 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import type {
   ChatCreateRequestV1, ChatGetRequestV1, ChatListRequestV1, FixtureRunStartRequestV1,
-  PageRequestV1, ProjectRoleSettingsUpdateRequestV1, RecoveryMarkResolvedRequestV1,
+  PageRequestV1, ProjectRoleSettingsUpdateRequestV1, PrepareChatWorkspaceRequestV1,
+  AbandonPreparedWorkspaceRequestV1, RecoveryMarkResolvedRequestV1,
   RunCancelRequestV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS } from "./ipc-channels.ts";
@@ -261,6 +262,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileWatch, invoke((client, input: ChatWorkspaceRefV1) => client.watchWorkspaceFiles(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetSummary, invoke((client, input: ChatWorkspaceRefV1) => client.getWorkspaceDiffSummary(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetFile, invoke((client, input: WorkspaceDiffFileRequestV1) => client.getWorkspaceDiffFile(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspacePrepareChat, invoke((client, input: PrepareChatWorkspaceRequestV1) => client.prepareChatWorkspace(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceAbandonPrepared, invoke((client, input: AbandonPreparedWorkspaceRequestV1) => client.abandonPreparedWorkspace(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.projectGetRoleSettings, invoke((client, input: { projectId: string }) => client.getProjectRoleSettings(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.projectUpdateRoleSettings, invoke((client, input: ProjectRoleSettingsUpdateRequestV1) => client.updateProjectRoleSettings(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatCreate, invoke((client, input: ChatCreateRequestV1) => client.createChat(input)));

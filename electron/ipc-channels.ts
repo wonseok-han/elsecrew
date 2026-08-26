@@ -26,6 +26,8 @@ export const M5_BRIDGE_V3_CHANNELS = {
   workspaceDiffGetSummary: "m5:v3:workspace:diff:get-summary",
   workspaceDiffGetFile: "m5:v3:workspace:diff:get-file",
   workspaceEvent: "m5:v3:workspace:event",
+  workspacePrepareChat: "m5:v3:workspace:prepare-chat",
+  workspaceAbandonPrepared: "m5:v3:workspace:abandon-prepared",
   projectGetRoleSettings: "m5:v3:project:get-role-settings",
   projectUpdateRoleSettings: "m5:v3:project:update-role-settings",
   chatCreate: "m5:v3:chat:create",

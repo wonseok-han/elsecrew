@@ -10,7 +10,8 @@ import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { QuitCoordinatorV1 } from "../electron/quit-coordinator.ts";
 import { SidecarClientV1, type SidecarProcessV1 } from "../electron/sidecar-client.ts";
 import {
-  validatePathInput, validateRecoveryInspectInput, validateRoleSettingsGetInput, validateSaveBeginInput,
+  validateAbandonPreparedWorkspaceInput, validatePathInput, validatePrepareChatWorkspaceInput,
+  validateRecoveryInspectInput, validateRoleSettingsGetInput, validateSaveBeginInput,
   validateSaveChunkInput, validateSaveCommitInput, validateTreeInput,
 } from "../electron/bridge-input.ts";
 import { EventCreditV1, MAX_IN_FLIGHT_EVENTS } from "../electron/event-credit.ts";
@@ -568,6 +569,7 @@ test("G5 V3 bridge keeps every workspace/chat action fixed, typed, and isolated"
     "workspaceGetTree", "workspaceClose", "workspaceFileRead", "workspaceFileSaveBegin",
     "workspaceFileSaveChunk", "workspaceFileSaveCommit", "workspaceFileWatch",
     "workspaceDiffGetSummary", "workspaceDiffGetFile", "projectGetRoleSettings",
+    "workspacePrepareChat", "workspaceAbandonPrepared",
     "projectUpdateRoleSettings", "chatCreate", "chatList", "chatGet", "runStartFixture",
     "runCancel", "recoveryList", "recoveryInspect", "recoveryMarkResolved",
   ]) {
@@ -584,6 +586,44 @@ test("G5 V3 bridge keeps every workspace/chat action fixed, typed, and isolated"
   assert.throws(() => validateWorkspaceTreeInput({ projectId: "p", parentPath: "../escape", cursor: null, chatId: "c", worktreeId: "w", workspaceIdentity: "i" }));
   assert.throws(() => validateWorkspaceSaveChunkInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", seq: 1, text: "x", extra: true }));
   assert.throws(() => validateWorkspaceSaveCommitInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", expectedVersion: "sha256:bad", lastSeq: 1, totalBytes: 1 }));
+});
+
+test("G5 preparation uses exact IDs, binds chat creation to a known preparation, and never falls back", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const prepared = client.prepareChatWorkspace({ projectId: "project_01" });
+  const prepareRequest = JSON.parse(child.writes[0] ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(prepareRequest.method, "workspace.prepareChat");
+  assert.deepEqual(prepareRequest.params, { projectId: "project_01" });
+  child.stdout.write(responseLine(prepareRequest.requestId, preparedWorkspace("preparation_a")));
+  await prepared;
+
+  await assert.rejects(client.abandonPreparedWorkspace({
+    preparationId: "preparation_a", projectId: "project_01", worktreeId: "worktree_other", workspaceIdentity: "workspace_a",
+  }), /prepared workspace worktreeId does not match request/);
+  await assert.rejects(client.createChat({
+    preparationId: "preparation_other", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", goal: "create", expectedSettingsRevision: 1,
+  }), /unknown or no longer unbound/);
+  assert.equal(child.writes.length, 1, "cross-preparation cleanup or chat creation must not reach the sidecar");
+
+  const abandon = client.abandonPreparedWorkspace({
+    preparationId: "preparation_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a",
+  });
+  const abandonRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(abandonRequest.requestId, {
+    preparationId: "preparation_a", projectId: "project_01", worktreeId: "worktree_b", workspaceIdentity: "workspace_a", bindingState: "abandoned", physicallyDeleted: false,
+  }));
+  await assert.rejects(abandon, /prepared workspace worktreeId does not match request/);
+  assert.equal(child.terminations, 1, "a mismatched abandon response corrupts without retry");
+});
+
+test("G5 preparation validators reject project-only abandon, extra IDs, and UTF-8 overflow before IPC", () => {
+  assert.throws(() => validatePrepareChatWorkspaceInput({ projectId: "project_01", extra: true }));
+  assert.throws(() => validateAbandonPreparedWorkspaceInput({ projectId: "project_01" }));
+  for (const id of ["a".repeat(513), "😀".repeat(129)]) {
+    assert.throws(() => validatePrepareChatWorkspaceInput({ projectId: id }));
+    assert.throws(() => validateAbandonPreparedWorkspaceInput({ preparationId: id, projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a" }));
+  }
 });
 
 test("G5 rejects cross-chat workspace save continuation before it reaches the sidecar", async () => {
@@ -675,5 +715,21 @@ function saveBeginInput() {
     expectedVersion: "sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881" as const,
     totalBytes: 1,
     encoding: "utf8" as const,
+  };
+}
+
+function preparedWorkspace(preparationId: string) {
+  return {
+    schemaVersion: 1,
+    preparationId,
+    manifest: {
+      schemaVersion: 1, projectId: "project_01", canonicalGitRoot: "/fixtures/repository",
+      worktreeId: "worktree_a", worktreePath: "/fixtures/workspaces/worktree_a",
+      workspaceKind: "standaloneSnapshot", snapshotTransport: "gitBundle", sourceMutationPolicy: "forbidden",
+      objectFormat: "sha1", baseCommit: "0123456789abcdef0123456789abcdef01234567",
+      baseTree: "89abcdef0123456789abcdef0123456789abcdef", sourceIdentity: "source_repository_01",
+      workspaceIdentity: "workspace_a", headMode: "detached", lifecycle: "active",
+    },
+    bindingState: "unbound", boundChatId: null, createdAt: "2026-08-26T01:00:00Z", updatedAt: "2026-08-26T01:00:00Z",
   };
 }

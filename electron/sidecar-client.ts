@@ -54,6 +54,8 @@ import {
 import {
   G5_CAPABILITIES_V1,
   parseG5ReadyPayloadV1,
+  validateAbandonPreparedWorkspaceRequestV1,
+  validateAbandonPreparedWorkspaceResultV1,
   validateChatCreateRequestV1,
   validateChatDetailPageV1,
   validateChatGetRequestV1,
@@ -64,6 +66,8 @@ import {
   validatePageRequestV1,
   validateProjectRoleSettingsUpdateRequestV1,
   validateProjectRoleSettingsV1,
+  validatePrepareChatWorkspaceRequestV1,
+  validatePreparedChatWorkspaceV1,
   validateRecoveryMarkResolvedRequestV1,
   validateRecoveryPageV1,
   validateRecoveryRecordV1,
@@ -71,6 +75,8 @@ import {
   validateRunRecordV1,
   validateTeamMessageV1,
   type ChatCreateRequestV1,
+  type AbandonPreparedWorkspaceRequestV1,
+  type AbandonPreparedWorkspaceResultV1,
   type ChatDetailPageV1,
   type ChatGetRequestV1,
   type ChatListPageV1,
@@ -80,6 +86,8 @@ import {
   type PageRequestV1,
   type ProjectRoleSettingsUpdateRequestV1,
   type ProjectRoleSettingsV1,
+  type PrepareChatWorkspaceRequestV1,
+  type PreparedChatWorkspaceV1,
   type RecoveryMarkResolvedRequestV1,
   type RecoveryPageV1,
   type RecoveryRecordV1,
@@ -158,6 +166,13 @@ interface WorkspaceSaveSessionV1 {
   saveId: string;
 }
 
+interface PreparedWorkspaceSessionV1 {
+  preparationId: string;
+  projectId: string;
+  worktreeId: string;
+  workspaceIdentity: string;
+}
+
 interface TextStreamV1 {
   byteLength: number;
   expectedVersion: FileVersionV1 | null;
@@ -176,6 +191,7 @@ export class SidecarClientV1 {
   readonly #workspaceListeners = new Set<(event: WorkspaceEventV1) => void>();
   readonly #chatListeners = new Set<(event: TeamMessageV1, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
+  readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #streams = new Map<string, TextStreamV1>();
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
@@ -348,13 +364,29 @@ export class SidecarClientV1 {
   getWorkspaceDiffFile(input: WorkspaceDiffFileRequestV1): Promise<WorkspaceDiffFileDescriptorV1> {
     return this.#request("workspace.diff.getFile", validateWorkspaceDiffFileRequestV1(input)) as Promise<WorkspaceDiffFileDescriptorV1>;
   }
+  prepareChatWorkspace(input: PrepareChatWorkspaceRequestV1): Promise<PreparedChatWorkspaceV1> {
+    return this.#request("workspace.prepareChat", validatePrepareChatWorkspaceRequestV1(input)) as Promise<PreparedChatWorkspaceV1>;
+  }
+  abandonPreparedWorkspace(input: AbandonPreparedWorkspaceRequestV1): Promise<AbandonPreparedWorkspaceResultV1> {
+    try {
+      const request = validateAbandonPreparedWorkspaceRequestV1(input);
+      this.#assertKnownPrepared(request);
+      return this.#request("workspace.abandonPrepared", request) as Promise<AbandonPreparedWorkspaceResultV1>;
+    } catch (error) { return Promise.reject(asError(error, "invalid prepared workspace abandon")); }
+  }
   getProjectRoleSettings(input: { projectId: string }): Promise<ProjectRoleSettingsV1> {
     return this.#request("project.getRoleSettings", validateProjectId(input)) as Promise<ProjectRoleSettingsV1>;
   }
   updateProjectRoleSettings(input: ProjectRoleSettingsUpdateRequestV1): Promise<ProjectRoleSettingsV1> {
     return this.#request("project.updateRoleSettings", validateProjectRoleSettingsUpdateRequestV1(input)) as Promise<ProjectRoleSettingsV1>;
   }
-  createChat(input: ChatCreateRequestV1): Promise<ChatRecordV1> { return this.#request("chat.create", validateChatCreateRequestV1(input)) as Promise<ChatRecordV1>; }
+  createChat(input: ChatCreateRequestV1): Promise<ChatRecordV1> {
+    try {
+      const request = validateChatCreateRequestV1(input);
+      this.#assertKnownPrepared(request);
+      return this.#request("chat.create", request) as Promise<ChatRecordV1>;
+    } catch (error) { return Promise.reject(asError(error, "invalid chat preparation binding")); }
+  }
   listChats(input: ChatListRequestV1): Promise<ChatListPageV1> { return this.#request("chat.list", validateChatListRequestV1(input)) as Promise<ChatListPageV1>; }
   getChat(input: ChatGetRequestV1): Promise<ChatDetailPageV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<ChatDetailPageV1>; }
   startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> { return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>; }
@@ -577,6 +609,23 @@ export class SidecarClientV1 {
         return value;
       }
       case "workspace.file.save": return this.#validateWorkspaceSaveResult(pending, response.result);
+      case "workspace.prepareChat": {
+        const value = validatePreparedChatWorkspaceV1(response.result);
+        assertResponseField(value.manifest, pending.params, "projectId");
+        if (value.bindingState !== "unbound" || value.boundChatId !== null) {
+          return failResult("prepared chat workspace must be a new unbound snapshot");
+        }
+        const session = preparedSessionFrom(value);
+        if (this.#preparedWorkspaces.has(session.preparationId)) return failResult("prepared workspace preparationId was reused");
+        this.#preparedWorkspaces.set(session.preparationId, session);
+        return value;
+      }
+      case "workspace.abandonPrepared": {
+        const value = validateAbandonPreparedWorkspaceResultV1(response.result);
+        assertPreparedResponse(value, pending.params);
+        this.#preparedWorkspaces.delete(value.preparationId);
+        return value;
+      }
       case "project.getRoleSettings": {
         const value = validateProjectRoleSettingsV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;
       }
@@ -587,6 +636,12 @@ export class SidecarClientV1 {
         const value = validateChatRecordV1(response.result);
         for (const field of ["projectId", "worktreeId", "workspaceIdentity"] as const) assertResponseField(value, pending.params, field);
         if (value.settingsRevision !== pending.params.expectedSettingsRevision) throw new Error("created chat settings revision does not match request");
+        const preparationId = pending.params.preparationId;
+        if (typeof preparationId !== "string") return failResult("chat create request is missing preparationId");
+        const prepared = this.#preparedWorkspaces.get(preparationId);
+        if (!prepared) return failResult("chat create references an unknown or late preparation");
+        assertPreparedChatBinding(value, prepared);
+        this.#preparedWorkspaces.delete(preparationId);
         return value;
       }
       case "chat.list": {
@@ -669,6 +724,12 @@ export class SidecarClientV1 {
     if (pending.method === "workspace.file.save" && typeof pending.params.saveId === "string") this.#workspaceSaves.delete(pending.params.saveId);
   }
 
+  #assertKnownPrepared(input: { preparationId: string; projectId: string; worktreeId: string; workspaceIdentity: string }): void {
+    const prepared = this.#preparedWorkspaces.get(input.preparationId);
+    if (!prepared) throw new Error("prepared workspace is unknown or no longer unbound");
+    assertPreparedResponse(prepared, input);
+  }
+
   #registerStream(byteLength: number, stream: { streamId: string } | null, expectedVersion: FileVersionV1 | null, limit: number): void {
     if (!stream) return;
     if (byteLength > limit) throw new Error(`sidecar text stream exceeds ${limit / 1024 / 1024} MiB client bound`);
@@ -716,6 +777,7 @@ export class SidecarClientV1 {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
     this.#workspaceSaves.clear();
+    this.#preparedWorkspaces.clear();
     this.#streams.clear();
     this.#streamBytes = 0;
     this.#terminateOnce();
@@ -809,6 +871,30 @@ function assertWorkspaceResponse(result: object, request: object): void {
   const expected = workspaceRefFrom(request as Record<string, unknown>);
   for (const field of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
     if (actual[field] !== expected[field]) throw new Error(`sidecar workspace response ${field} does not match request`);
+  }
+}
+
+function preparedSessionFrom(value: PreparedChatWorkspaceV1): PreparedWorkspaceSessionV1 {
+  return {
+    preparationId: value.preparationId,
+    projectId: value.manifest.projectId,
+    worktreeId: value.manifest.worktreeId,
+    workspaceIdentity: value.manifest.workspaceIdentity,
+  };
+}
+
+function assertPreparedResponse(
+  actual: { preparationId: string; projectId: string; worktreeId: string; workspaceIdentity: string },
+  expected: { preparationId: string; projectId: string; worktreeId: string; workspaceIdentity: string },
+): void {
+  for (const field of ["preparationId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+    if (actual[field] !== expected[field]) throw new Error(`sidecar prepared workspace ${field} does not match request`);
+  }
+}
+
+function assertPreparedChatBinding(chat: ChatRecordV1, preparation: PreparedWorkspaceSessionV1): void {
+  for (const field of ["projectId", "worktreeId", "workspaceIdentity"] as const) {
+    if (chat[field] !== preparation[field]) throw new Error(`created chat ${field} does not match preparation`);
   }
 }
 

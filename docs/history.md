@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 workspace preparation Electron 소비자)
+
+- **한 일**: 새 `workspace.prepareChat`/`workspace.abandonPrepared` capability를 고정 V3 IPC channel, preload exact validator, main handler, SidecarClient response validator에 연결했다. `createChat`은 이제 `preparationId`와 project/worktree/workspace 세 필드를 모두 포함하고, 현재 client가 정확히 알고 있는 unbound preparation에만 결합한다.
+- **안전 결정**: prepare 응답은 새 unbound standalone snapshot 전체 레코드여야 하며 project ID를 exact echo한다. abandon은 준비 ID와 세 workspace ID를 모두 정확히 echo하고 known unbound preparation에만 보낸다. cross-preparation·unknown·late·bound mismatch에는 재시도·projectId close·fallback이 없다. main/window 종료는 명시적 UI 요청 없이 자동 abandon하지 않아 sidecar의 증거를 보존한다.
+- **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 29개, `git diff --check`를 통과했다. extra/project-only·UTF-8 ID overflow, preparation A/B 교차, abandon response mismatch, createChat preparation mismatch를 회귀로 추가했다.
+- **다음 할 일**: 이 bridge consumer commit을 독립 재검토하고, Rust sidecar 및 renderer 준비 흐름과 통합해 실제 preparation→chat bind→명시적 abandon QA를 수행한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 ID 전역 충돌 리뷰 수정)
 
 - **한 일**: 독립 리뷰 P1을 반영해 chat 생성 후보의 `chatId`도 완료된 전역 binding scan의 모든 기존 chat ID와 비교하도록 TypeScript/Rust `ChatCreationTranscriptV1` validator를 강화했다. fresh preparation이 별도 worktree/workspace를 사용해도 후보 chat ID가 기존 A와 같으면 `bindingConflict`다.

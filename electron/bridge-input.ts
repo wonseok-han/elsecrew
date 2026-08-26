@@ -8,6 +8,8 @@ import {
   validateFixtureRunStartRequestV1,
   validatePageRequestV1,
   validateProjectRoleSettingsUpdateRequestV1,
+  validatePrepareChatWorkspaceRequestV1,
+  validateAbandonPreparedWorkspaceRequestV1,
   validateRecoveryMarkResolvedRequestV1,
   validateRunCancelRequestV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
@@ -83,6 +85,8 @@ export function validateWorkspaceSaveCommitInput(value: unknown) {
   };
 }
 export const validateRoleSettingsUpdateInput = validateProjectRoleSettingsUpdateRequestV1;
+export const validatePrepareChatWorkspaceInput = validatePrepareChatWorkspaceRequestV1;
+export const validateAbandonPreparedWorkspaceInput = validateAbandonPreparedWorkspaceRequestV1;
 export function validateRoleSettingsGetInput(value: unknown): { projectId: string } { return validateProjectInput(value); }
 export const validateChatCreateInput = validateChatCreateRequestV1;
 export const validateChatListInput = validateChatListRequestV1;

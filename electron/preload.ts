@@ -9,6 +9,7 @@ import { validateWorkspaceEventV1 } from "../src/m5/contracts/workspace-addressi
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS } from "./ipc-channels.ts";
 import {
   validateChatCreateInput, validateChatGetInput, validateChatListInput, validateFixtureRunStartInput,
+  validateAbandonPreparedWorkspaceInput, validatePrepareChatWorkspaceInput,
   validatePathInput, validateProjectInput, validateRecoveryInspectInput, validateRecoveryListInput,
   validateRecoveryMarkResolvedInput, validateRoleSettingsGetInput, validateRoleSettingsUpdateInput,
   validateRunCancelInput, validateSaveBeginInput, validateSaveChunkInput, validateSaveCommitInput,
@@ -48,6 +49,8 @@ const bridge: M5BridgeV3 = Object.freeze({
   getWorkspaceDiffSummary: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetSummary, validateWorkspaceRefInput(input)),
   getWorkspaceDiffFile: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetFile, validateWorkspaceDiffFileInput(input)),
   onWorkspaceEvent: (listener) => subscribe(workspaceListeners, listener),
+  prepareChatWorkspace: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.workspacePrepareChat, validatePrepareChatWorkspaceInput(input)),
+  abandonPreparedWorkspace: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.workspaceAbandonPrepared, validateAbandonPreparedWorkspaceInput(input)),
   getProjectRoleSettings: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.projectGetRoleSettings, validateRoleSettingsGetInput(input)),
   updateProjectRoleSettings: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.projectUpdateRoleSettings, validateRoleSettingsUpdateInput(input)),
   createChat: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.chatCreate, validateChatCreateInput(input)),
