@@ -1,5 +1,6 @@
 use super::*;
-use hello_agent_protocol::lifecycle_v1::{validate_g4_system_status_v1, SystemStatusV1};
+use hello_agent_protocol::lifecycle_v1::SystemStatusV1;
+use hello_agent_protocol::run_recovery_v1::validate_g5_ready_payload_v1;
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 use std::ffi::OsString;
@@ -110,7 +111,10 @@ fn ready_status_and_idempotent_prepare_quit_mark_clean_before_safe_response() {
     let status: SystemStatusV1 =
         serde_json::from_value(status_response.result.clone().expect("status result"))
             .expect("decode status");
-    validate_g4_system_status_v1(&status).expect("valid status");
+    let SystemStatusV1::Ready { sidecar, .. } = &status else {
+        panic!("ready status")
+    };
+    validate_g5_ready_payload_v1(&serde_json::to_value(sidecar).unwrap()).expect("valid status");
     for envelope in &envelopes[2..] {
         let EnvelopeV1::Response(response) = envelope else {
             panic!("quit response")
@@ -211,12 +215,12 @@ fn startup_failure_emits_no_ready_or_other_stdout() {
 }
 
 #[test]
-fn later_wave_method_is_structured_error_and_new_status_is_blocked_after_quit() {
+fn later_wave_method_is_structured_error_and_read_only_status_remains_available_after_quit() {
     let (_root, path) = database();
     let instance = "sidecar_capabilities";
     let input = format!(
         "{}{}{}",
-        request(instance, "req_later", "chat.create"),
+        request(instance, "req_later", "run.startAgentSmoke"),
         request(instance, "req_quit", "app.prepareQuit"),
         request(instance, "req_status_after", "system.status")
     );
@@ -224,13 +228,18 @@ fn later_wave_method_is_structured_error_and_new_status_is_blocked_after_quit() 
     serve_stdio_with_identity(&path, Cursor::new(input), &mut output, instance.to_string())
         .expect("stdio session");
     let envelopes = output_envelopes(&output);
-    for (index, code) in [(1, "methodUnavailable"), (3, "quitting")] {
-        let EnvelopeV1::Response(response) = &envelopes[index] else {
-            panic!("error response")
-        };
-        assert!(!response.ok);
-        assert_eq!(response.error.as_ref().unwrap().code, code);
-    }
+    let EnvelopeV1::Response(unavailable) = &envelopes[1] else {
+        panic!("unavailable response")
+    };
+    assert!(!unavailable.ok);
+    assert_eq!(
+        unavailable.error.as_ref().unwrap().code,
+        "methodUnavailable"
+    );
+    let EnvelopeV1::Response(status) = &envelopes[3] else {
+        panic!("status response")
+    };
+    assert!(status.ok);
 }
 
 #[test]

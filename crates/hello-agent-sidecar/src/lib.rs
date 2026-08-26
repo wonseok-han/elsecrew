@@ -1,13 +1,14 @@
 //! M5 Rust sidecar의 G4 프로젝트·파일 안전 경계와 bounded JSONL 전송 구현.
 //!
-//! 실제 agent/chat/run과 원본 적용은 후속 게이트에서 추가한다.
+//! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
+mod chat;
 mod project;
 mod storage;
 
 use hello_agent_core as _;
 use hello_agent_protocol::lifecycle_v1::{DatabaseStatusV1, SystemStatusV1, SQLITE_FILE_V1};
-use hello_agent_protocol::project_v1::G4_CAPABILITIES_V1;
+use hello_agent_protocol::run_recovery_v1::G5_CAPABILITIES_V1;
 use hello_agent_protocol::{
     decode_jsonl, encode_jsonl, EnvelopeV1, ErrorV1, EventV1, PrepareQuitResultV1,
     ProtocolSessionV1, ReadyPayloadV1, RequestV1, ResponseV1, APP_SCHEMA_VERSION,
@@ -25,8 +26,10 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
-pub use project::{ProjectFailure, ProjectManager, SaveFailurePoint, WorktreeFailurePoint};
-pub use storage::{AppendFailurePoint, AppendOutcome, Storage};
+pub use project::{
+    ProjectFailure, ProjectManager, SaveFailurePoint, WorkspaceAddress, WorktreeFailurePoint,
+};
+pub use storage::{AppendFailurePoint, AppendOutcome, ProjectionUpsert, Storage};
 
 pub const STARTUP_FAILURE_EXIT_CODE: i32 = 70;
 
@@ -67,7 +70,30 @@ where
 {
     let mut args = args.into_iter();
     let _program = args.next();
-    if args.next().as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
+    let mode = args.next();
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--fixture-child")) {
+        let scenario = args.next().ok_or_else(|| {
+            SidecarError::new("invalidArguments", "fixture child scenario is required")
+        })?;
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "fixture child has extra arguments",
+            ));
+        }
+        return chat::run_fixture_child(&scenario.to_string_lossy());
+    }
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--fixture-leaf")) {
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "fixture leaf has extra arguments",
+            ));
+        }
+        chat::run_fixture_leaf();
+        return Ok(());
+    }
+    if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
         return Err(SidecarError::new(
             "invalidArguments",
             "sidecar requires exactly one argument: --stdio",
@@ -137,7 +163,7 @@ fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
         let line = match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(InputMessage::Line(line)) => line,
             Ok(InputMessage::Eof) => {
-                if sidecar.prepared_to_quit {
+                if sidecar.safe_to_quit {
                     return Ok(());
                 }
                 return Err(SidecarError::new(
@@ -147,7 +173,8 @@ fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
             }
             Ok(InputMessage::Error(error)) => return Err(error),
             Err(RecvTimeoutError::Timeout) => {
-                let events = sidecar.poll_watch_events();
+                let mut events = sidecar.poll_watch_events();
+                events.extend(sidecar.poll_runtime_events());
                 write_events(&mut session, &mut output, events)?;
                 continue;
             }
@@ -235,6 +262,8 @@ struct Sidecar {
     projects: ProjectManager,
     ready: ReadyPayloadV1,
     prepared_to_quit: bool,
+    safe_to_quit: bool,
+    g5: chat::G5Manager,
 }
 
 impl Sidecar {
@@ -242,14 +271,16 @@ impl Sidecar {
         g4_platform_gate()?;
         let mut storage = Storage::open(database_path)?;
         storage.recover_unclean_shutdown()?;
-        let projects = ProjectManager::new(database_path)?;
+        let g5 = chat::G5Manager::default();
+        let mut projects = ProjectManager::new(database_path)?;
+        g5.recover_unclean_runs(&mut storage, &mut projects)?;
         let ready = ReadyPayloadV1 {
             protocol_version: PROTOCOL_VERSION,
             sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
             app_schema_version: APP_SCHEMA_VERSION,
             pid: std::process::id(),
             platform: protocol_platform().to_string(),
-            capabilities: G4_CAPABILITIES_V1
+            capabilities: G5_CAPABILITIES_V1
                 .iter()
                 .map(|value| (*value).to_string())
                 .collect(),
@@ -261,6 +292,8 @@ impl Sidecar {
             projects,
             ready,
             prepared_to_quit: false,
+            safe_to_quit: false,
+            g5,
         })
     }
 
@@ -292,13 +325,40 @@ impl Sidecar {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
-        if self.prepared_to_quit && request.method != "app.prepareQuit" {
+        if self.prepared_to_quit
+            && !matches!(
+                request.method.as_str(),
+                "app.prepareQuit"
+                    | "system.status"
+                    | "recovery.list"
+                    | "recovery.inspect"
+                    | "recovery.markResolved"
+            )
+        {
             return Ok(HandledRequest::response(error_response(
                 &request,
                 "quitting",
                 "requestBlocked",
                 "sidecar is prepared to quit and blocks new requests",
             )));
+        }
+
+        if matches!(
+            request.method.as_str(),
+            "project.getRoleSettings"
+                | "project.updateRoleSettings"
+                | "workspace.prepareChat"
+                | "workspace.abandonPrepared"
+                | "chat.create"
+                | "chat.list"
+                | "chat.get"
+                | "run.startFixture"
+                | "run.cancel"
+                | "recovery.list"
+                | "recovery.inspect"
+                | "recovery.markResolved"
+        ) {
+            return self.handle_g5_request(request);
         }
 
         let action = match request.method.as_str() {
@@ -313,15 +373,23 @@ impl Sidecar {
                 require_exact_params(&request.params, &[]).map_err(invalid_params)?;
                 if !self.prepared_to_quit {
                     self.projects.stop_watchers();
+                    self.prepared_to_quit = true;
+                }
+                let blockers = self
+                    .g5
+                    .prepare_quit(&mut self.storage, &mut self.projects)
+                    .map_err(|failure| SidecarError::new(failure.kind, failure.detail))?;
+                if blockers.is_empty() && !self.safe_to_quit {
                     self.storage.checkpoint()?;
                     self.storage
                         .mark_app_instance_clean(&self.ready.sidecar_instance_id)?;
-                    self.prepared_to_quit = true;
+                    self.safe_to_quit = true;
                 }
+                let blockers = self.storage.blocker_ids()?;
                 project::ProjectAction {
                     result: serde_json::to_value(PrepareQuitResultV1 {
-                        safe_to_quit: true,
-                        blockers: Vec::new(),
+                        safe_to_quit: self.safe_to_quit && blockers.is_empty(),
+                        blockers,
                     })
                     .map_err(json_error)?,
                     ..project::ProjectAction::default()
@@ -343,7 +411,7 @@ impl Sidecar {
                 self.projects.get_tree(
                     &self.storage,
                     param_string(params, "projectId").map_err(invalid_params)?,
-                    param_string(params, "parentPath").map_err(invalid_params)?,
+                    param_string_allow_empty(params, "parentPath").map_err(invalid_params)?,
                     param_nullable_string(params, "cursor").map_err(invalid_params)?,
                 )
             }
@@ -399,6 +467,105 @@ impl Sidecar {
                     param_string(params, "projectId").map_err(invalid_params)?,
                     param_string(params, "path").map_err(invalid_params)?,
                 )
+            }
+            "workspace.getTree" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &[
+                        "chatId",
+                        "projectId",
+                        "worktreeId",
+                        "workspaceIdentity",
+                        "parentPath",
+                        "cursor",
+                    ],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_get_tree(
+                        &self.storage,
+                        &address,
+                        param_string_allow_empty(params, "parentPath").map_err(invalid_params)?,
+                        param_nullable_string(params, "cursor").map_err(invalid_params)?,
+                    )
+                    .map(|action| addressed_action(action, &address))
+            }
+            "workspace.close" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity"],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_close(&self.storage, &address)
+                    .map(|action| addressed_action(action, &address))
+            }
+            "workspace.file.read" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &[
+                        "chatId",
+                        "projectId",
+                        "worktreeId",
+                        "workspaceIdentity",
+                        "path",
+                    ],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_read_file(
+                        &self.storage,
+                        &address,
+                        param_string(params, "path").map_err(invalid_params)?,
+                    )
+                    .map(|action| addressed_action(action, &address))
+            }
+            "workspace.file.save" => self.handle_workspace_file_save(&request)?,
+            "workspace.file.watch" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity"],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_watch(&self.storage, &address)
+                    .map(|action| addressed_action(action, &address))
+            }
+            "workspace.diff.getSummary" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &["chatId", "projectId", "worktreeId", "workspaceIdentity"],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_diff_summary(&self.storage, &address)
+                    .map(|action| addressed_action(action, &address))
+            }
+            "workspace.diff.getFile" => {
+                let params = require_exact_params(
+                    &request.params,
+                    &[
+                        "chatId",
+                        "projectId",
+                        "worktreeId",
+                        "workspaceIdentity",
+                        "path",
+                    ],
+                )
+                .map_err(invalid_params)?;
+                let address = workspace_address(params).map_err(invalid_params)?;
+                self.projects
+                    .workspace_diff_file(
+                        &self.storage,
+                        &address,
+                        param_string(params, "path").map_err(invalid_params)?,
+                    )
+                    .map(|action| addressed_action(action, &address))
             }
             _ => {
                 return Ok(HandledRequest::response(error_response(
@@ -485,8 +652,303 @@ impl Sidecar {
         ))
     }
 
+    fn handle_workspace_file_save(
+        &mut self,
+        request: &RequestV1,
+    ) -> Result<Result<project::ProjectAction, ProjectFailure>, SidecarError> {
+        let object = request.params.as_object().ok_or_else(|| {
+            invalid_params("workspace.file.save params must be an object".to_string())
+        })?;
+        let address = workspace_address(object).map_err(invalid_params)?;
+        let keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        let reference = ["chatId", "projectId", "worktreeId", "workspaceIdentity"];
+        if keys
+            == reference
+                .into_iter()
+                .chain(["path", "expectedVersion", "totalBytes", "encoding"])
+                .collect()
+        {
+            return Ok(self
+                .projects
+                .workspace_begin_save(
+                    &mut self.storage,
+                    &address,
+                    param_string(object, "path").map_err(invalid_params)?,
+                    param_string(object, "expectedVersion").map_err(invalid_params)?,
+                    param_u64(object, "totalBytes").map_err(invalid_params)?,
+                    param_string(object, "encoding").map_err(invalid_params)?,
+                )
+                .map(|action| addressed_action(action, &address)));
+        }
+        if keys
+            == reference
+                .into_iter()
+                .chain(["saveId", "seq", "text"])
+                .collect()
+        {
+            return Ok(self
+                .projects
+                .workspace_append_save_chunk(
+                    &self.storage,
+                    &address,
+                    param_string(object, "saveId").map_err(invalid_params)?,
+                    param_u64(object, "seq").map_err(invalid_params)?,
+                    param_string(object, "text").map_err(invalid_params)?,
+                )
+                .map(|action| addressed_action(action, &address)));
+        }
+        if keys
+            == reference
+                .into_iter()
+                .chain(["saveId", "expectedVersion", "lastSeq", "totalBytes"])
+                .collect()
+        {
+            return Ok(self
+                .projects
+                .workspace_commit_save(
+                    &mut self.storage,
+                    &address,
+                    param_string(object, "saveId").map_err(invalid_params)?,
+                    param_string(object, "expectedVersion").map_err(invalid_params)?,
+                    param_u64(object, "lastSeq").map_err(invalid_params)?,
+                    param_u64(object, "totalBytes").map_err(invalid_params)?,
+                    &request.request_id,
+                )
+                .map(|action| addressed_action(action, &address)));
+        }
+        Err(invalid_params(
+            "workspace.file.save params do not match begin, chunk, or commit".to_string(),
+        ))
+    }
+
+    fn handle_g5_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+        let result = (|| -> Result<chat::G5Action, ProjectFailure> {
+            let action = match request.method.as_str() {
+                "project.getRoleSettings" => {
+                    let params = require_exact_params(&request.params, &["projectId"])
+                        .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.default_role_settings(
+                            &mut self.storage,
+                            param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                            &request.request_id,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "project.updateRoleSettings" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &["projectId", "expectedRevision", "roles"],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.update_role_settings(
+                            &mut self.storage,
+                            param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "expectedRevision")
+                                .map_err(ProjectFailure::manifest)?,
+                            params.get("roles").cloned().unwrap_or(Value::Null),
+                            &request.request_id,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "workspace.prepareChat" => {
+                    let params = require_exact_params(&request.params, &["projectId"])
+                        .map_err(ProjectFailure::manifest)?;
+                    self.g5.prepare_chat_workspace(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
+                "workspace.abandonPrepared" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &[
+                            "preparationId",
+                            "projectId",
+                            "worktreeId",
+                            "workspaceIdentity",
+                        ],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    self.g5.abandon_prepared_workspace(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "preparationId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "worktreeId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "workspaceIdentity")
+                            .map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
+                "chat.create" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &[
+                            "preparationId",
+                            "projectId",
+                            "worktreeId",
+                            "workspaceIdentity",
+                            "goal",
+                            "expectedSettingsRevision",
+                        ],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    self.g5.create_chat(
+                        &mut self.storage,
+                        &self.projects,
+                        param_string(params, "preparationId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "worktreeId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "workspaceIdentity")
+                            .map_err(ProjectFailure::manifest)?,
+                        param_string(params, "goal").map_err(ProjectFailure::manifest)?,
+                        param_u64(params, "expectedSettingsRevision")
+                            .map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
+                "chat.list" => {
+                    let params =
+                        require_exact_params(&request.params, &["projectId", "cursor", "limit"])
+                            .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.list_chats(
+                            &self.storage,
+                            param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
+                            param_nullable_string(params, "cursor")
+                                .map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "limit").map_err(ProjectFailure::manifest)?,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "chat.get" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &["chatId", "afterEventSequence", "cursor", "limit"],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.get_chat(
+                            &self.storage,
+                            param_string(params, "chatId").map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "afterEventSequence")
+                                .map_err(ProjectFailure::manifest)?,
+                            param_nullable_string(params, "cursor")
+                                .map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "limit").map_err(ProjectFailure::manifest)?,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "run.startFixture" => {
+                    let params =
+                        require_exact_params(&request.params, &["chatId", "roleId", "scenario"])
+                            .map_err(ProjectFailure::manifest)?;
+                    self.g5.start_fixture(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "chatId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "roleId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "scenario").map_err(ProjectFailure::manifest)?,
+                        &request.request_id,
+                    )?
+                }
+                "run.cancel" => {
+                    let params = require_exact_params(&request.params, &["chatId", "runId"])
+                        .map_err(ProjectFailure::manifest)?;
+                    self.g5.cancel_run(
+                        &mut self.storage,
+                        &mut self.projects,
+                        param_string(params, "chatId").map_err(ProjectFailure::manifest)?,
+                        param_string(params, "runId").map_err(ProjectFailure::manifest)?,
+                    )?
+                }
+                "recovery.list" => {
+                    let params = require_exact_params(&request.params, &["cursor", "limit"])
+                        .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.list_recoveries(
+                            &self.storage,
+                            param_nullable_string(params, "cursor")
+                                .map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "limit").map_err(ProjectFailure::manifest)?,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "recovery.inspect" => {
+                    let params = require_exact_params(&request.params, &["recoveryId"])
+                        .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.inspect_recovery(
+                            &self.storage,
+                            param_string(params, "recoveryId").map_err(ProjectFailure::manifest)?,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                "recovery.markResolved" => {
+                    let params = require_exact_params(
+                        &request.params,
+                        &["recoveryId", "expectedRevision", "resolution"],
+                    )
+                    .map_err(ProjectFailure::manifest)?;
+                    chat::G5Action {
+                        result: self.g5.mark_recovery_resolved(
+                            &mut self.storage,
+                            &mut self.projects,
+                            param_string(params, "recoveryId").map_err(ProjectFailure::manifest)?,
+                            param_u64(params, "expectedRevision")
+                                .map_err(ProjectFailure::manifest)?,
+                            param_string(params, "resolution").map_err(ProjectFailure::manifest)?,
+                            &request.request_id,
+                        )?,
+                        ..chat::G5Action::default()
+                    }
+                }
+                _ => unreachable!("G5 dispatcher called for non-G5 method"),
+            };
+            Ok(action)
+        })();
+        let action = match result {
+            Ok(action) => action,
+            Err(failure) => {
+                return Ok(HandledRequest::response(project_error_response(
+                    &request, &failure,
+                )))
+            }
+        };
+        Ok(HandledRequest {
+            response: ResponseV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "response".to_string(),
+                sidecar_instance_id: request.sidecar_instance_id,
+                request_id: request.request_id,
+                ok: true,
+                result: Some(action.result),
+                error: None,
+            },
+            events: self.g5_events(action.events),
+        })
+    }
+
     fn action_events(&self, action: &project::ProjectAction) -> Vec<EventV1> {
         let mut events = Vec::new();
+        let workspace = action.result.as_object().and_then(|result| {
+            Some((
+                result.get("chatId")?.as_str()?.to_string(),
+                result.get("projectId")?.as_str()?.to_string(),
+                result.get("worktreeId")?.as_str()?.to_string(),
+                result.get("workspaceIdentity")?.as_str()?.to_string(),
+            ))
+        });
         for stream in &action.streams {
             for (index, text) in stream.chunks.iter().enumerate() {
                 events.push(EventV1 {
@@ -495,11 +957,23 @@ impl Sidecar {
                     sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
                     stream_id: stream.stream_id.clone(),
                     seq: (index + 1) as u64,
-                    event: "blob.chunk".to_string(),
+                    event: if workspace.is_some() {
+                        "workspace.blob.chunk".to_string()
+                    } else {
+                        "blob.chunk".to_string()
+                    },
                     chat_id: None,
                     task_id: None,
                     run_id: None,
-                    payload: serde_json::json!({"text":text}),
+                    payload: match &workspace {
+                        Some((chat_id, project_id, worktree_id, workspace_identity)) => {
+                            serde_json::json!({
+                                "chatId":chat_id,"projectId":project_id,"worktreeId":worktree_id,
+                                "workspaceIdentity":workspace_identity,"text":text,
+                            })
+                        }
+                        None => serde_json::json!({"text":text}),
+                    },
                 });
             }
         }
@@ -510,7 +984,11 @@ impl Sidecar {
                 sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
                 stream_id: emission.stream_id.clone(),
                 seq: emission.seq,
-                event: emission.event.to_string(),
+                event: if emission.payload.get("chatId").is_some() {
+                    "workspace.changed".to_string()
+                } else {
+                    emission.event.to_string()
+                },
                 chat_id: None,
                 task_id: None,
                 run_id: None,
@@ -527,6 +1005,29 @@ impl Sidecar {
             watch_events: self.projects.poll_watchers(&self.storage),
         };
         self.action_events(&action)
+    }
+
+    fn poll_runtime_events(&mut self) -> Vec<EventV1> {
+        let events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
+        self.g5_events(events)
+    }
+
+    fn g5_events(&self, events: Vec<chat::G5Event>) -> Vec<EventV1> {
+        events
+            .into_iter()
+            .map(|event| EventV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "event".to_string(),
+                sidecar_instance_id: self.ready.sidecar_instance_id.clone(),
+                stream_id: event.stream_id,
+                seq: event.seq,
+                event: event.event.to_string(),
+                chat_id: event.chat_id,
+                task_id: event.task_id,
+                run_id: event.run_id,
+                payload: event.payload,
+            })
+            .collect()
     }
 
     fn system_status(&self) -> SystemStatusV1 {
@@ -600,12 +1101,53 @@ fn require_exact_params<'a>(
     Ok(object)
 }
 
+fn workspace_address(object: &Map<String, Value>) -> Result<WorkspaceAddress, String> {
+    Ok(WorkspaceAddress {
+        chat_id: param_string(object, "chatId")?.to_string(),
+        project_id: param_string(object, "projectId")?.to_string(),
+        worktree_id: param_string(object, "worktreeId")?.to_string(),
+        workspace_identity: param_string(object, "workspaceIdentity")?.to_string(),
+    })
+}
+
+fn addressed_action(
+    mut action: project::ProjectAction,
+    address: &WorkspaceAddress,
+) -> project::ProjectAction {
+    if let Some(result) = action.result.as_object_mut() {
+        result.insert("chatId".to_string(), Value::String(address.chat_id.clone()));
+        result.insert(
+            "projectId".to_string(),
+            Value::String(address.project_id.clone()),
+        );
+        result.insert(
+            "worktreeId".to_string(),
+            Value::String(address.worktree_id.clone()),
+        );
+        result.insert(
+            "workspaceIdentity".to_string(),
+            Value::String(address.workspace_identity.clone()),
+        );
+    }
+    action
+}
+
 fn param_string<'a>(object: &'a Map<String, Value>, name: &str) -> Result<&'a str, String> {
     object
         .get(name)
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("{name} must be a non-empty string"))
+}
+
+fn param_string_allow_empty<'a>(
+    object: &'a Map<String, Value>,
+    name: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{name} must be a string"))
 }
 
 fn param_nullable_string<'a>(
