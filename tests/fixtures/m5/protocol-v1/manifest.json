@@ -19,6 +19,13 @@
       "file.watch",
       "diff.getSummary",
       "diff.getFile",
+      "workspace.getTree",
+      "workspace.close",
+      "workspace.file.read",
+      "workspace.file.save",
+      "workspace.file.watch",
+      "workspace.diff.getSummary",
+      "workspace.diff.getFile",
       "project.getRoleSettings",
       "project.updateRoleSettings",
       "chat.create",
@@ -40,9 +47,12 @@
       "chat.eventAppended",
       "run.event",
       "run.finished",
-      "blob.chunk"
+      "blob.chunk",
+      "workspace.changed",
+      "workspace.blob.chunk"
     ],
-    "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"]
+    "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
+    "workspaceEventAddressing": "payload.chatId+projectId+worktreeId+workspaceIdentity"
   },
   "valid": [
     {
@@ -57,6 +67,10 @@
     {
       "file": "valid/sequence-max.jsonl",
       "observeSession": false
+    },
+    {
+      "file": "valid/workspace-event-payload-addressed.jsonl",
+      "observeSession": false
     }
   ],
   "invalid": [
@@ -69,6 +83,7 @@
     { "file": "invalid/unknown-event.jsonl", "validator": "transcript" },
     { "file": "invalid/event-payload-array.jsonl", "validator": "transcript" },
     { "file": "invalid/run-event-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/workspace-event-missing-chat-id.jsonl", "validator": "transcript" },
     { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
     { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },
     { "file": "invalid/response-before-ready.jsonl", "validator": "transcript" },

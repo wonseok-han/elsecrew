@@ -18,6 +18,24 @@ import type {
   RunCancelRequestV1,
   TeamMessageV1,
 } from "./run-recovery-v1.ts";
+import type {
+  WorkspaceCloseResultV1,
+  WorkspaceDiffFileDescriptorV1,
+  WorkspaceDiffFileRequestV1,
+  WorkspaceDiffSummaryV1,
+  WorkspaceEventV1,
+  WorkspaceFileReadDescriptorV1,
+  WorkspaceFileReadRequestV1,
+  ChatWorkspaceRefV1,
+  WorkspaceSaveBeginRequestV1,
+  WorkspaceSaveBeginResultV1,
+  WorkspaceSaveChunkRequestV1,
+  WorkspaceSaveCommitRequestV1,
+  WorkspaceSaveCommitResultV1,
+  WorkspaceTreePageV1,
+  WorkspaceTreeRequestV1,
+  WorkspaceWatchResultV1,
+} from "./workspace-addressing-v1.ts";
 
 export const M5_BRIDGE_V3_METHODS = [
   "getSystemStatus",
@@ -35,6 +53,16 @@ export const M5_BRIDGE_V3_METHODS = [
   "getDiffSummary",
   "getDiffFile",
   "onProjectEvent",
+  "getWorkspaceTree",
+  "closeWorkspace",
+  "readWorkspaceFile",
+  "beginWorkspaceFileSave",
+  "appendWorkspaceFileSaveChunk",
+  "commitWorkspaceFileSave",
+  "watchWorkspaceFiles",
+  "getWorkspaceDiffSummary",
+  "getWorkspaceDiffFile",
+  "onWorkspaceEvent",
   "getProjectRoleSettings",
   "updateProjectRoleSettings",
   "createChat",
@@ -50,6 +78,16 @@ export const M5_BRIDGE_V3_METHODS = [
 
 export type M5BridgeV3 = Omit<M5BridgeV2, "version"> & {
   readonly version: 3;
+  getWorkspaceTree(input: WorkspaceTreeRequestV1): Promise<WorkspaceTreePageV1>;
+  closeWorkspace(input: ChatWorkspaceRefV1): Promise<WorkspaceCloseResultV1>;
+  readWorkspaceFile(input: WorkspaceFileReadRequestV1): Promise<WorkspaceFileReadDescriptorV1>;
+  beginWorkspaceFileSave(input: WorkspaceSaveBeginRequestV1): Promise<WorkspaceSaveBeginResultV1>;
+  appendWorkspaceFileSaveChunk(input: WorkspaceSaveChunkRequestV1): Promise<ChatWorkspaceRefV1 & { saveId: string; acceptedSeq: number }>;
+  commitWorkspaceFileSave(input: WorkspaceSaveCommitRequestV1): Promise<WorkspaceSaveCommitResultV1>;
+  watchWorkspaceFiles(input: ChatWorkspaceRefV1): Promise<WorkspaceWatchResultV1>;
+  getWorkspaceDiffSummary(input: ChatWorkspaceRefV1): Promise<WorkspaceDiffSummaryV1>;
+  getWorkspaceDiffFile(input: WorkspaceDiffFileRequestV1): Promise<WorkspaceDiffFileDescriptorV1>;
+  onWorkspaceEvent(listener: (event: WorkspaceEventV1) => void): UnsubscribeV1;
   getProjectRoleSettings(input: { projectId: string }): Promise<ProjectRoleSettingsV1>;
   updateProjectRoleSettings(input: ProjectRoleSettingsUpdateRequestV1): Promise<ProjectRoleSettingsV1>;
   createChat(input: ChatCreateRequestV1): Promise<ChatRecordV1>;

@@ -8,6 +8,7 @@ pub mod lifecycle_v1;
 pub mod project_v1;
 pub mod run_recovery_v1;
 pub mod storage_v1;
+pub mod workspace_v1;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
@@ -28,6 +29,13 @@ pub const METHODS_V1: &[&str] = &[
     "file.watch",
     "diff.getSummary",
     "diff.getFile",
+    "workspace.getTree",
+    "workspace.close",
+    "workspace.file.read",
+    "workspace.file.save",
+    "workspace.file.watch",
+    "workspace.diff.getSummary",
+    "workspace.diff.getFile",
     "project.getRoleSettings",
     "project.updateRoleSettings",
     "chat.create",
@@ -51,6 +59,8 @@ pub const EVENTS_V1: &[&str] = &[
     "run.event",
     "run.finished",
     "blob.chunk",
+    "workspace.changed",
+    "workspace.blob.chunk",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,11 +446,63 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
             }
-            if event.event == "blob.chunk" {
-                let payload = event
-                    .payload
-                    .as_object()
-                    .expect("payload was checked above");
+            let payload = event
+                .payload
+                .as_object()
+                .expect("payload was checked above");
+            if event.event == "workspace.changed" {
+                let expected = [
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "event",
+                    "paths",
+                    "rescanRequired",
+                ];
+                if payload.len() != expected.len()
+                    || payload.keys().any(|key| !expected.contains(&key.as_str()))
+                {
+                    return Err(ProtocolError::new(
+                        "workspace.changed payload must contain the exact chat workspace reference and change fields",
+                    ));
+                }
+                for name in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+                    require_id(
+                        payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        &format!("workspace event payload {name}"),
+                    )?;
+                }
+            }
+            if event.event == "workspace.blob.chunk" {
+                let expected = [
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "text",
+                ];
+                if payload.len() != expected.len()
+                    || payload.keys().any(|key| !expected.contains(&key.as_str()))
+                    || !matches!(payload.get("text"), Some(Value::String(_)))
+                {
+                    return Err(ProtocolError::new(
+                        "workspace.blob.chunk payload must contain the exact chat workspace reference and text",
+                    ));
+                }
+                for name in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+                    require_id(
+                        payload
+                            .get(name)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        &format!("workspace event payload {name}"),
+                    )?;
+                }
+            } else if event.event == "blob.chunk" {
                 if payload.len() != 1 || !matches!(payload.get("text"), Some(Value::String(_))) {
                     return Err(ProtocolError::new(
                         "blob.chunk payload must contain exactly one text field",

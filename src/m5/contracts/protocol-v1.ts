@@ -17,6 +17,13 @@ export const METHODS_V1 = [
   "file.watch",
   "diff.getSummary",
   "diff.getFile",
+  "workspace.getTree",
+  "workspace.close",
+  "workspace.file.read",
+  "workspace.file.save",
+  "workspace.file.watch",
+  "workspace.diff.getSummary",
+  "workspace.diff.getFile",
   "project.getRoleSettings",
   "project.updateRoleSettings",
   "chat.create",
@@ -40,6 +47,8 @@ export const EVENTS_V1 = [
   "run.event",
   "run.finished",
   "blob.chunk",
+  "workspace.changed",
+  "workspace.blob.chunk",
 ] as const;
 
 export type MethodV1 = (typeof METHODS_V1)[number];
@@ -349,7 +358,29 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     fail("chat.eventAppended requires explicit chatId");
   }
   const payload = requireJsonObject(object.payload, "event payload");
-  if (object.event === "blob.chunk") {
+  if (object.event === "workspace.changed") {
+    exactKeys(payload, [
+      "chatId",
+      "projectId",
+      "worktreeId",
+      "workspaceIdentity",
+      "event",
+      "paths",
+      "rescanRequired",
+    ]);
+    for (const name of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+      requireId(payload[name], `workspace event payload ${name}`);
+    }
+  }
+  if (object.event === "workspace.blob.chunk") {
+    exactKeys(payload, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "text"]);
+    for (const name of ["chatId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+      requireId(payload[name], `workspace event payload ${name}`);
+    }
+    if (typeof payload.text !== "string") {
+      fail("workspace.blob.chunk payload must contain text");
+    }
+  } else if (object.event === "blob.chunk") {
     exactKeys(payload, ["text"]);
     if (typeof payload.text !== "string") {
       fail("blob.chunk payload must contain exactly one text field");
