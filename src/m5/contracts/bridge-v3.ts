@@ -7,8 +7,12 @@ import type {
   ChatListRequestV1,
   ChatRecordV1,
   ChatCreateRequestV1,
+  AbandonPreparedWorkspaceRequestV1,
+  AbandonPreparedWorkspaceResultV1,
   FixtureRunStartRequestV1,
   PageRequestV1,
+  PreparedChatWorkspaceV1,
+  PrepareChatWorkspaceRequestV1,
   ProjectRoleSettingsV1,
   ProjectRoleSettingsUpdateRequestV1,
   RecoveryMarkResolvedRequestV1,
@@ -63,6 +67,8 @@ export const M5_BRIDGE_V3_METHODS = [
   "getWorkspaceDiffSummary",
   "getWorkspaceDiffFile",
   "onWorkspaceEvent",
+  "prepareChatWorkspace",
+  "abandonPreparedWorkspace",
   "getProjectRoleSettings",
   "updateProjectRoleSettings",
   "createChat",
@@ -88,6 +94,8 @@ export type M5BridgeV3 = Omit<M5BridgeV2, "version"> & {
   getWorkspaceDiffSummary(input: ChatWorkspaceRefV1): Promise<WorkspaceDiffSummaryV1>;
   getWorkspaceDiffFile(input: WorkspaceDiffFileRequestV1): Promise<WorkspaceDiffFileDescriptorV1>;
   onWorkspaceEvent(listener: (event: WorkspaceEventV1) => void): UnsubscribeV1;
+  prepareChatWorkspace(input: PrepareChatWorkspaceRequestV1): Promise<PreparedChatWorkspaceV1>;
+  abandonPreparedWorkspace(input: AbandonPreparedWorkspaceRequestV1): Promise<AbandonPreparedWorkspaceResultV1>;
   getProjectRoleSettings(input: { projectId: string }): Promise<ProjectRoleSettingsV1>;
   updateProjectRoleSettings(input: ProjectRoleSettingsUpdateRequestV1): Promise<ProjectRoleSettingsV1>;
   createChat(input: ChatCreateRequestV1): Promise<ChatRecordV1>;

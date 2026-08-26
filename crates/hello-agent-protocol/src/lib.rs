@@ -36,6 +36,8 @@ pub const METHODS_V1: &[&str] = &[
     "workspace.file.watch",
     "workspace.diff.getSummary",
     "workspace.diff.getFile",
+    "workspace.prepareChat",
+    "workspace.abandonPrepared",
     "project.getRoleSettings",
     "project.updateRoleSettings",
     "chat.create",
