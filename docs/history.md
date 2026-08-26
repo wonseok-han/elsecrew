@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 최종 게이트)
+
+- **판정**: 구현·문서 통합 commit `33f16a009065813bc575b1f528756f661c2ccdeb`을 독립 최종 게이트가 `PASS — APPROVE / G5_READY`로 승인했다. 계약, Rust, Electron, UI, 하네스와 문서의 독립 승인 commit이 모두 해당 통합 commit의 조상임을 확인했다.
+- **최종 증거**: exact-head 누적 하네스 `.artifacts/m5-harness/g5-run-recovery-2026-08-26T04-01-24-084Z.json`은 clean 시작과 baseline~G5 명령 12개 전부 exit 0을 기록한다. 독립 QA `.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json` 이후 변경은 독립 승인된 문서뿐이다.
+- **경계·다음 할 일**: G6는 security/package/performance script가 없어 의도대로 `NOT_READY`다. 실제 Claude Code/Codex adapter·인증 smoke, Windows snapshot/process-tree, 전체 OS Quit E2E, Forge prerelease와 macOS 권한 강화는 G5 완료에 포함하지 않았고 후속 게이트로 남긴다. `main` 병합과 push는 하지 않았다.
+
 ### 2026-08-26 · by GPT-5.6-Sol (M5 문서 생애주기 경계 재정렬)
 
 - **수정**: 독립 문서 리뷰 지적에 따라 `m5-coding-agent-ide.md`에서 G1~G6 현재 상태표, exact 검증 판정과 구현 완료 서술을 제거하고 제품 방향·설계 계약·계획된 완료 기준·열린 결정만 남겼다. 현행 G5 구조와 게이트 사실은 `architecture.md`와 이 워크로그만 소유한다.
