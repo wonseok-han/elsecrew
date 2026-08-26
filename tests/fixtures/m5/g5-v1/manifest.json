@@ -18,6 +18,9 @@
       "inspectRecovery", "markRecoveryResolved", "onChatEvent"
     ],
     "roles": ["planning", "coding", "review"],
+    "chatStates": ["draft", "preparing", "running", "waitingForUser", "reviewReady", "applying", "stopping", "completed", "needsAttention", "recoveryRequired", "canceled", "discarded"],
+    "runStartChatStates": ["draft", "running", "waitingForUser", "needsAttention"],
+    "runStartOutcomePriority": ["platformUnsupported", "workspaceAbandoned", "recoveryBlocked", "chatStateBlocked", "runActive", "profileUnavailable", "writerLocked", "started"],
     "runtimes": ["codex", "claude-code"],
     "permissions": ["readOnly", "workspaceWrite"],
     "fixtureScenarios": ["planning-success", "coding-success", "review-success", "cancel-clean", "cancel-uncertain"],

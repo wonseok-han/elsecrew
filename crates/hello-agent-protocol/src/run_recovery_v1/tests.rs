@@ -18,6 +18,9 @@ struct Manifest {
 struct Contract {
     capabilities: Vec<String>,
     roles: Vec<String>,
+    chat_states: Vec<String>,
+    run_start_chat_states: Vec<String>,
+    run_start_outcome_priority: Vec<String>,
     runtimes: Vec<String>,
     permissions: Vec<String>,
     fixture_scenarios: Vec<String>,
@@ -82,6 +85,29 @@ fn rust_matches_the_canonical_g5_manifest() {
         .iter()
         .copied()
         .eq(manifest.contract.roles.iter().map(String::as_str)));
+    assert!(G5_CHAT_STATES_V1.iter().copied().eq(manifest
+        .contract
+        .chat_states
+        .iter()
+        .map(String::as_str)));
+    assert!(G5_RUN_START_CHAT_STATES_V1.iter().copied().eq(manifest
+        .contract
+        .run_start_chat_states
+        .iter()
+        .map(String::as_str)));
+    assert_eq!(
+        manifest.contract.run_start_outcome_priority,
+        [
+            "platformUnsupported",
+            "workspaceAbandoned",
+            "recoveryBlocked",
+            "chatStateBlocked",
+            "runActive",
+            "profileUnavailable",
+            "writerLocked",
+            "started",
+        ]
+    );
     assert!(G5_RUNTIMES_V1.iter().copied().eq(manifest
         .contract
         .runtimes

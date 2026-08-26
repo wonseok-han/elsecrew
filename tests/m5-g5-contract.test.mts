@@ -11,6 +11,7 @@ import { SQLITE_SCHEMA_VERSION, SQLITE_TABLES_V1 } from "../src/m5/contracts/sto
 import {
   assertG5CapabilitiesV1,
   G5_CAPABILITIES_V1,
+  G5_CHAT_STATES_V1,
   G5_EVENT_PAGE_MAX_ITEMS_V1,
   G5_FIXTURE_SCENARIOS_V1,
   G5_GOAL_MAX_BYTES_V1,
@@ -21,6 +22,7 @@ import {
   G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
   G5_ROLE_IDS_V1,
+  G5_RUN_START_CHAT_STATES_V1,
   G5_RUNTIMES_V1,
   G5_SCHEMA_VERSION_V1,
   parseG5ReadyPayloadV1,
@@ -28,6 +30,7 @@ import {
   validateChatBindingPagesV1,
   validateCancelTerminationRecoveryTranscriptV1,
   validateChatCreateRequestV1,
+  validateChatTransitionV1,
   validateChatDetailPageV1,
   validateChatGetRequestV1,
   validateChatListPageV1,
@@ -52,7 +55,7 @@ import {
 
 type ValidatorName =
   | "roleProfile" | "projectRoleSettings" | "projectRoleSettingsUpdate" | "chatCreateRequest"
-  | "chatRecord" | "teamMessage" | "runRecord" | "runTransition" | "chatCreation"
+  | "chatRecord" | "chatTransition" | "teamMessage" | "runRecord" | "runTransition" | "chatCreation"
   | "chatDetailPage" | "chatListPage" | "chatListRequest" | "chatGetRequest" | "pageRequest"
   | "fixtureRunStart" | "runCancelRequest" | "writerStart" | "recoveryRecord" | "recoveryPage" | "recoveryMarkResolved"
   | "recoveryResolution" | "runStart" | "cancelTerminationRecovery";
@@ -66,7 +69,8 @@ interface Manifest {
   schemaVersion: number;
   protocolVersion: number;
   contract: {
-    capabilities: string[]; bridgeMethods: string[]; roles: string[]; runtimes: string[];
+    capabilities: string[]; bridgeMethods: string[]; roles: string[]; chatStates: string[];
+    runStartChatStates: string[]; runStartOutcomePriority: string[]; runtimes: string[];
     permissions: string[]; fixtureScenarios: string[]; pageMaxItems: number;
     eventPageMaxItems: number; idMaxBytes: number; modelSelectorMaxBytes: number; reasoningEffortMaxBytes: number;
     goalMaxBytes: number; publicMessageMaxBytes: number; protocolStreamSequence: string;
@@ -88,6 +92,12 @@ test("G5 manifest가 additive V3 bridge, exact capability와 안전 경계를 �
   assert.deepEqual(manifest.contract.bridgeMethods, [...M5_BRIDGE_V3_METHODS]);
   assert.deepEqual(M5_BRIDGE_V3_METHODS.slice(0, M5_BRIDGE_V2_METHODS.length), M5_BRIDGE_V2_METHODS);
   assert.deepEqual(manifest.contract.roles, [...G5_ROLE_IDS_V1]);
+  assert.deepEqual(manifest.contract.chatStates, [...G5_CHAT_STATES_V1]);
+  assert.deepEqual(manifest.contract.runStartChatStates, [...G5_RUN_START_CHAT_STATES_V1]);
+  assert.deepEqual(manifest.contract.runStartOutcomePriority, [
+    "platformUnsupported", "workspaceAbandoned", "recoveryBlocked", "chatStateBlocked",
+    "runActive", "profileUnavailable", "writerLocked", "started",
+  ]);
   assert.deepEqual(manifest.contract.runtimes, [...G5_RUNTIMES_V1]);
   assert.deepEqual(manifest.contract.permissions, [...G5_PERMISSIONS_V1]);
   assert.deepEqual(manifest.contract.fixtureScenarios, [...G5_FIXTURE_SCENARIOS_V1]);
@@ -178,6 +188,7 @@ function validate(fixture: FixtureCase): unknown {
     case "projectRoleSettingsUpdate": return validateProjectRoleSettingsUpdateRequestV1(fixture.value);
     case "chatCreateRequest": return validateChatCreateRequestV1(fixture.value);
     case "chatRecord": return validateChatRecordV1(fixture.value);
+    case "chatTransition": return validateChatTransitionV1(fixture.value);
     case "teamMessage": return validateTeamMessageV1(fixture.value);
     case "runRecord": return validateRunRecordV1(fixture.value);
     case "runTransition": return validateRunTransitionV1(fixture.value);

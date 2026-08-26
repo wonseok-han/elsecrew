@@ -14,12 +14,15 @@ pub const G5_CHAT_STATES_V1: &[&str] = &[
     "waitingForUser",
     "reviewReady",
     "applying",
+    "stopping",
     "completed",
     "needsAttention",
     "recoveryRequired",
     "canceled",
     "discarded",
 ];
+pub const G5_RUN_START_CHAT_STATES_V1: &[&str] =
+    &["draft", "running", "waitingForUser", "needsAttention"];
 pub const G5_RUN_STATES_V1: &[&str] = &[
     "preparing",
     "running",
@@ -98,6 +101,7 @@ pub fn validate_g5_payload_v1(validator: &str, value: &Value) -> Result<(), G5Co
         "projectRoleSettingsUpdate" => validate_project_role_settings_update(value),
         "chatCreateRequest" => validate_chat_create_request(value).map(|_| ()),
         "chatRecord" => validate_chat_record(value).map(|_| ()),
+        "chatTransition" => validate_chat_transition(value),
         "teamMessage" => validate_team_message(value).map(|_| ()),
         "runRecord" => validate_run_record(value).map(|_| ()),
         "runTransition" => validate_run_transition(value),
@@ -301,6 +305,62 @@ fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5Contract
     timestamp(object.get("createdAt"), "createdAt")?;
     timestamp(object.get("updatedAt"), "updatedAt")?;
     Ok(object)
+}
+
+fn validate_chat_transition(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat transition")?;
+    exact_keys(object, &["before", "after"])?;
+    let before = validate_chat_record(required(object, "before")?)?;
+    let after = validate_chat_record(required(object, "after")?)?;
+    for field in [
+        "schemaVersion",
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+        "goal",
+        "settingsRevision",
+        "createdAt",
+    ] {
+        if before.get(field) != after.get(field) {
+            return fail(format!("chat transition changed {field}"));
+        }
+    }
+    if before.get("roleSnapshots") != after.get("roleSnapshots") {
+        return fail("chat transition changed roleSnapshots");
+    }
+    let before_state = string(before.get("state"), "before chat state")?;
+    let after_state = string(after.get("state"), "after chat state")?;
+    let allowed: &[&str] = match before_state {
+        "draft" => &["preparing"],
+        "preparing" => &["running", "stopping", "needsAttention", "recoveryRequired"],
+        "running" => &[
+            "waitingForUser",
+            "reviewReady",
+            "stopping",
+            "needsAttention",
+            "recoveryRequired",
+        ],
+        "waitingForUser" => &["running", "stopping", "needsAttention", "recoveryRequired"],
+        "reviewReady" => &["applying", "discarded", "needsAttention"],
+        "applying" => &["completed", "needsAttention", "recoveryRequired"],
+        "stopping" => &["canceled", "recoveryRequired"],
+        "needsAttention" => &["preparing", "discarded", "recoveryRequired"],
+        "completed" | "canceled" | "discarded" | "recoveryRequired" => &[],
+        _ => return fail("unknown before chat state"),
+    };
+    if !allowed.contains(&after_state) {
+        return fail(format!(
+            "invalid chat transition {before_state} -> {after_state}"
+        ));
+    }
+    let before_updated = string(before.get("updatedAt"), "before updatedAt")?;
+    let after_updated = string(after.get("updatedAt"), "after updatedAt")?;
+    if after_updated < before_updated {
+        return fail("chat transition updatedAt must be monotonic");
+    }
+    Ok(())
 }
 
 fn validate_team_message(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
@@ -792,6 +852,18 @@ fn validate_writer_start(value: &Value) -> Result<(), G5ContractError> {
                 || recovery.get("worktreeId") == chat.get("worktreeId")
                 || recovery.get("workspaceIdentity") == chat.get("workspaceIdentity")
         });
+    let chat_state_blocked = !chat
+        .get("state")
+        .and_then(Value::as_str)
+        .is_some_and(|state| G5_RUN_START_CHAT_STATES_V1.contains(&state));
+    let run_active = runs.iter().any(|run| {
+        run.get("state")
+            .and_then(Value::as_str)
+            .is_some_and(|state| ["preparing", "running", "cancelling"].contains(&state))
+            && run.get("chatId") == chat.get("chatId")
+            && run.get("worktreeId") == chat.get("worktreeId")
+            && run.get("workspaceIdentity") == chat.get("workspaceIdentity")
+    });
     let writer_locked = locks.iter().any(|lock| {
         lock.get("state").and_then(Value::as_str) == Some("held")
             && (lock.get("worktreeId") == chat.get("worktreeId")
@@ -804,6 +876,8 @@ fn validate_writer_start(value: &Value) -> Result<(), G5ContractError> {
             "writerLocked",
             "recoveryBlocked",
             "workspaceAbandoned",
+            "chatStateBlocked",
+            "runActive",
         ],
         "writer outcome",
     )?;
@@ -812,6 +886,10 @@ fn validate_writer_start(value: &Value) -> Result<(), G5ContractError> {
             "workspaceAbandoned"
         } else if recovery_blocked {
             "recoveryBlocked"
+        } else if chat_state_blocked {
+            "chatStateBlocked"
+        } else if run_active {
+            "runActive"
         } else if writer_locked {
             "writerLocked"
         } else {
@@ -954,6 +1032,18 @@ fn validate_run_start(value: &Value) -> Result<(), G5ContractError> {
                 || recovery.get("worktreeId") == chat.get("worktreeId")
                 || recovery.get("workspaceIdentity") == chat.get("workspaceIdentity")
         });
+    let chat_state_blocked = !chat
+        .get("state")
+        .and_then(Value::as_str)
+        .is_some_and(|state| G5_RUN_START_CHAT_STATES_V1.contains(&state));
+    let run_active = runs.iter().any(|run| {
+        run.get("state")
+            .and_then(Value::as_str)
+            .is_some_and(|state| ["preparing", "running", "cancelling"].contains(&state))
+            && run.get("chatId") == chat.get("chatId")
+            && run.get("worktreeId") == chat.get("worktreeId")
+            && run.get("workspaceIdentity") == chat.get("workspaceIdentity")
+    });
     let writer_locked = snapshot_profile.get("permission").and_then(Value::as_str)
         == Some("workspaceWrite")
         && locks.iter().any(|lock| {
@@ -966,6 +1056,10 @@ fn validate_run_start(value: &Value) -> Result<(), G5ContractError> {
         "workspaceAbandoned"
     } else if recovery_blocked {
         "recoveryBlocked"
+    } else if chat_state_blocked {
+        "chatStateBlocked"
+    } else if run_active {
+        "runActive"
     } else if resolution.get("outcome").and_then(Value::as_str) == Some("unavailable") {
         "profileUnavailable"
     } else if writer_locked {
@@ -980,6 +1074,8 @@ fn validate_run_start(value: &Value) -> Result<(), G5ContractError> {
             "platformUnsupported",
             "recoveryBlocked",
             "workspaceAbandoned",
+            "chatStateBlocked",
+            "runActive",
             "profileUnavailable",
             "writerLocked",
         ],
@@ -1051,6 +1147,11 @@ fn validate_cancel_termination_recovery(value: &Value) -> Result<(), G5ContractE
     let after_run = validate_run_record(required(object, "afterRun")?)?;
     same_chat_identity(before_chat, before_run)?;
     same_chat_identity(after_chat, after_run)?;
+    let chat_transition = serde_json::json!({
+        "before": Value::Object(before_chat.clone()),
+        "after": Value::Object(after_chat.clone())
+    });
+    validate_chat_transition(&chat_transition)?;
     if before_run.get("state").and_then(Value::as_str) != Some("cancelling") {
         return fail("cancel transcript must begin with a cancelling run");
     }

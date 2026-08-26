@@ -22,8 +22,9 @@ export const G5_RUNTIMES_V1 = ["codex", "claude-code"] as const;
 export const G5_PERMISSIONS_V1 = ["readOnly", "workspaceWrite"] as const;
 export const G5_CHAT_STATES_V1 = [
   "draft", "preparing", "running", "waitingForUser", "reviewReady", "applying",
-  "completed", "needsAttention", "recoveryRequired", "canceled", "discarded",
+  "stopping", "completed", "needsAttention", "recoveryRequired", "canceled", "discarded",
 ] as const;
+export const G5_RUN_START_CHAT_STATES_V1 = ["draft", "running", "waitingForUser", "needsAttention"] as const;
 export const G5_RUN_STATES_V1 = [
   "preparing", "running", "cancelling", "succeeded", "failed", "canceled", "recoveryRequired",
 ] as const;
@@ -182,6 +183,7 @@ export interface RecoveryRecordV1 {
 }
 export interface RecoveryPageV1 { items: readonly RecoveryRecordV1[]; nextCursor: string | null }
 export interface RecoveryMarkResolvedRequestV1 { recoveryId: string; expectedRevision: number; resolution: "abandon" }
+export interface ChatTransitionV1 { before: ChatRecordV1; after: ChatRecordV1 }
 
 export interface ChatCreationTranscriptV1 {
   request: ChatCreateRequestV1;
@@ -232,7 +234,7 @@ export interface WriterStartTranscriptV1 {
   persistedLock: WriterLockV1 | null;
   transactionCommitted: boolean;
   spawnAttempted: boolean;
-  outcome: "started" | "writerLocked" | "recoveryBlocked" | "workspaceAbandoned";
+  outcome: "started" | "writerLocked" | "recoveryBlocked" | "workspaceAbandoned" | "chatStateBlocked" | "runActive";
 }
 
 export interface RunStartTranscriptV1 {
@@ -248,7 +250,7 @@ export interface RunStartTranscriptV1 {
   persistedLock: WriterLockV1 | null;
   transactionCommitted: boolean;
   spawnAttempted: boolean;
-  outcome: "started" | "platformUnsupported" | "recoveryBlocked" | "workspaceAbandoned" | "profileUnavailable" | "writerLocked";
+  outcome: "started" | "platformUnsupported" | "recoveryBlocked" | "workspaceAbandoned" | "chatStateBlocked" | "runActive" | "profileUnavailable" | "writerLocked";
 }
 
 export interface CancelTerminationRecoveryTranscriptV1 {
@@ -331,6 +333,34 @@ export function validateChatRecordV1(value: unknown): ChatRecordV1 {
   timestamp(object.createdAt, "createdAt");
   timestamp(object.updatedAt, "updatedAt");
   return object as unknown as ChatRecordV1;
+}
+
+export function validateChatTransitionV1(value: unknown): ChatTransitionV1 {
+  const object = requireObject(value, "chat transition");
+  exactKeys(object, ["before", "after"]);
+  const before = validateChatRecordV1(object.before);
+  const after = validateChatRecordV1(object.after);
+  for (const field of [
+    "schemaVersion", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
+    "goal", "settingsRevision", "createdAt",
+  ] as const) {
+    if (before[field] !== after[field]) fail(`chat transition changed ${field}`);
+  }
+  if (!sameJson(before.roleSnapshots, after.roleSnapshots)) fail("chat transition changed roleSnapshots");
+  const allowed: Record<ChatStateV1, readonly ChatStateV1[]> = {
+    draft: ["preparing"],
+    preparing: ["running", "stopping", "needsAttention", "recoveryRequired"],
+    running: ["waitingForUser", "reviewReady", "stopping", "needsAttention", "recoveryRequired"],
+    waitingForUser: ["running", "stopping", "needsAttention", "recoveryRequired"],
+    reviewReady: ["applying", "discarded", "needsAttention"],
+    applying: ["completed", "needsAttention", "recoveryRequired"],
+    stopping: ["canceled", "recoveryRequired"],
+    needsAttention: ["preparing", "discarded", "recoveryRequired"],
+    completed: [], canceled: [], discarded: [], recoveryRequired: [],
+  };
+  if (!allowed[before.state].includes(after.state)) fail(`invalid chat transition ${before.state} -> ${after.state}`);
+  if (after.updatedAt < before.updatedAt) fail("chat transition updatedAt must be monotonic");
+  return { before, after };
 }
 
 export function validateTeamMessageV1(value: unknown): TeamMessageV1 {
@@ -578,11 +608,20 @@ export function validateWriterStartTranscriptV1(value: unknown): WriterStartTran
       && (lock.worktreeId === chat.worktreeId || lock.workspaceIdentity === chat.workspaceIdentity))
     || recoveries.some((recovery) => recovery.chatId === chat.chatId
       || recovery.worktreeId === chat.worktreeId || recovery.workspaceIdentity === chat.workspaceIdentity);
+  const chatStateBlocked = !G5_RUN_START_CHAT_STATES_V1.includes(chat.state as (typeof G5_RUN_START_CHAT_STATES_V1)[number]);
+  const runActive = runs.some((run) => ["preparing", "running", "cancelling"].includes(run.state)
+    && run.chatId === chat.chatId && run.worktreeId === chat.worktreeId
+    && run.workspaceIdentity === chat.workspaceIdentity);
   const writerLocked = locks.some((lock) => lock.state === "held"
     && (lock.worktreeId === chat.worktreeId || lock.workspaceIdentity === chat.workspaceIdentity));
   const expectedOutcome = workspace.lifecycle === "abandoned" ? "workspaceAbandoned"
-    : recoveryBlocked ? "recoveryBlocked" : writerLocked ? "writerLocked" : "started";
-  const outcome = oneOf(object.outcome, ["started", "writerLocked", "recoveryBlocked", "workspaceAbandoned"] as const, "writer outcome");
+    : recoveryBlocked ? "recoveryBlocked"
+      : chatStateBlocked ? "chatStateBlocked"
+        : runActive ? "runActive"
+          : writerLocked ? "writerLocked" : "started";
+  const outcome = oneOf(object.outcome, [
+    "started", "writerLocked", "recoveryBlocked", "workspaceAbandoned", "chatStateBlocked", "runActive",
+  ] as const, "writer outcome");
   if (outcome !== expectedOutcome) fail(`writer outcome must be ${expectedOutcome}`);
   if (outcome === "started") {
     const run = validateRunRecordV1(object.persistedRun);
@@ -628,6 +667,10 @@ export function validateRunStartTranscriptV1(value: unknown): RunStartTranscript
       && (lock.worktreeId === chat.worktreeId || lock.workspaceIdentity === chat.workspaceIdentity))
     || recoveries.some((recovery) => recovery.chatId === chat.chatId
       || recovery.worktreeId === chat.worktreeId || recovery.workspaceIdentity === chat.workspaceIdentity);
+  const chatStateBlocked = !G5_RUN_START_CHAT_STATES_V1.includes(chat.state as (typeof G5_RUN_START_CHAT_STATES_V1)[number]);
+  const runActive = existingRuns.some((run) => ["preparing", "running", "cancelling"].includes(run.state)
+    && run.chatId === chat.chatId && run.worktreeId === chat.worktreeId
+    && run.workspaceIdentity === chat.workspaceIdentity);
   const writerLocked = snapshotProfile.permission === "workspaceWrite" && locks.some((lock) =>
     lock.worktreeId === chat.worktreeId || lock.workspaceIdentity === chat.workspaceIdentity);
   const expectedOutcome = platform === "win32"
@@ -636,13 +679,18 @@ export function validateRunStartTranscriptV1(value: unknown): RunStartTranscript
       ? "workspaceAbandoned"
       : recoveryBlocked
         ? "recoveryBlocked"
-        : resolution.outcome === "unavailable"
-          ? "profileUnavailable"
-          : writerLocked
-            ? "writerLocked"
-            : "started";
+        : chatStateBlocked
+          ? "chatStateBlocked"
+          : runActive
+            ? "runActive"
+            : resolution.outcome === "unavailable"
+              ? "profileUnavailable"
+              : writerLocked
+                ? "writerLocked"
+                : "started";
   const outcome = oneOf(object.outcome, [
-    "started", "platformUnsupported", "recoveryBlocked", "workspaceAbandoned", "profileUnavailable", "writerLocked",
+    "started", "platformUnsupported", "recoveryBlocked", "workspaceAbandoned", "chatStateBlocked", "runActive",
+    "profileUnavailable", "writerLocked",
   ] as const, "run start outcome");
   if (outcome !== expectedOutcome) fail(`run start outcome must be ${expectedOutcome}`);
   if (outcome === "started") {
@@ -676,6 +724,7 @@ export function validateCancelTerminationRecoveryTranscriptV1(value: unknown): C
   const afterChat = validateChatRecordV1(object.afterChat);
   const afterRun = validateRunRecordV1(object.afterRun);
   sameChatIdentity(beforeChat, beforeRun); sameChatIdentity(afterChat, afterRun);
+  validateChatTransitionV1({ before: beforeChat, after: afterChat });
   if (beforeRun.state !== "cancelling") fail("cancel transcript must begin with a cancelling run");
   for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "settingsRevision"] as const) {
     if (beforeChat[field] !== afterChat[field]) fail(`cancel transcript changed chat ${field}`);
