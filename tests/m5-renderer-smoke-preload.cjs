@@ -1,8 +1,10 @@
 const listeners = new Set();
+const workspaceListeners = new Set();
+const chatListeners = new Set();
 let snapshotCreated = false;
 
 window.m5 = {
-  version: 2,
+  version: 3,
   getSystemStatus: async () => ({ state: "unavailable" }),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
   onSidecarEvent: (listener) => {
@@ -80,4 +82,20 @@ window.m5 = {
   },
   getDiffFile: async () => { throw new Error("not used by renderer smoke"); },
   onProjectEvent: () => () => {},
+  onWorkspaceEvent: (listener) => {
+    workspaceListeners.add(listener);
+    return () => workspaceListeners.delete(listener);
+  },
+  getProjectRoleSettings: async ({ projectId }) => ({
+    schemaVersion: 1,
+    projectId,
+    revision: 1,
+    roles: [],
+    updatedAt: "2026-08-26T00:00:00Z",
+  }),
+  listChats: async ({ projectId }) => ({ projectId, items: [], nextCursor: null }),
+  onChatEvent: (listener) => {
+    chatListeners.add(listener);
+    return () => chatListeners.delete(listener);
+  },
 };
