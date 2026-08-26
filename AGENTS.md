@@ -62,9 +62,9 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 방향: Electron + React/TypeScript + Monaco 셸과 기존 Rust 안전 코어 sidecar 위에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·원본과 분리된 작업 복사본(standalone snapshot)·코드 편집/diff를 갖춘 agent-first IDE를 만든다. 아직 현행 구현이 아니며 `docs/proposals/m5-coding-agent-ide.md`가 착수 기준
+- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·가짜 agent 실행/복구 수직 흐름을 구현했다. Electron은 아직 기본 배포 앱이 아니며 실제 Claude Code/Codex adapter도 연결되지 않았다
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5.0 착수 준비와 실기기 출시 후보 검증·서명/배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY` 완료. 실제 agent adapter·G6 보안/패키징/성능·Windows 안전 게이트·출시 후보 검증과 서명/배포 결정이 남음
 
 ## 코드 지도
 
@@ -74,6 +74,9 @@
 - `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
 - `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
+- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture 실행/복구 sidecar
+- `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
+- `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V3 bridge·프로젝트/채팅/실행/복구 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
 - `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정
@@ -81,7 +84,7 @@
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
 - `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
-- `docs/proposals/m5-coding-agent-ide.md`: M5.0 제품·상태·안전·기술 착수 기준. **제안 경계이며 현행 구현으로 인용하지 않는다**
+- `docs/proposals/m5-coding-agent-ide.md`: M5 제품·안전 기준과 G1~G5 구현 상태·후속 범위. 제안 절의 미구현 내용을 현행으로 인용하지 않고 현재 구조는 `docs/architecture.md`에서 확인한다
 - `docs/proposals/m5-{agent-ide,guided-start}-concept.html`: 작업대와 처음 시작하기 인터랙티브 검토 시안
 
 ## 구현 원칙과 함정

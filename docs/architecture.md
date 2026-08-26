@@ -158,24 +158,22 @@
 
 파일럿은 macOS에서만 노출한다. Windows 자손 회수는 별도 게이트이며, §7.6B 품질·비용 비교와 재작업 루프·다역할 확장은 구현되지 않았다. 상세한 결정·철회·실측 근거는 `proposals/m4-orchestration.md`에 있다.
 
-## 9. M5 G1~G4 전환 골격·프로젝트 작업대
+## 9. M5 G1~G5 전환 골격·채팅 작업대
 
-M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 기반, 언어 중립 protocol v1, SQLite 수명주기와 macOS 프로젝트 작업대까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며, Electron이 아직 기본 실행·배포 경로를 대체하지는 않는다.
+M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대와 **결정적 가짜 에이전트(fixture) 기반** 채팅·실행·복구 수직 흐름까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
 
 - `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
-- `crates/hello-agent-sidecar`: `--stdio`만 받는 실제 Rust 프로세스. 번들 SQLite의 단일 owner이며 저장·복구 검증 뒤 `system.ready`를 보낸다. G4에서는 project/tree/file/save/watch/diff method도 제공하고, source Git의 self-contained bundle을 원본과 연결되지 않은 standalone snapshot으로 materialize한다
-- `crates/hello-agent-protocol` / `src/m5/contracts/protocol-v1.ts`: 같은 golden JSONL fixture를 읽는 Rust·TypeScript protocol v1 codec과 session validator. 첫 envelope `system.ready`, sidecar instance 고정, request/response 상관관계, stream sequence, 1 MiB control line과 256 KiB text chunk를 fail-closed로 검증한다
-- `src/m5/contracts/`: SQLite schema/replay/recovery, 고정 실행 경로와 capability, `M5BridgeV1/V2`, standalone snapshot manifest·활성화 증거와 file/diff 한계를 선언한다
-- `tests/fixtures/m5/`: protocol·storage·lifecycle과 project v1의 언어 중립 계약 원본. Rust와 TypeScript가 같은 정상/오류 payload, 누적 capability, snapshot 신원과 경계를 함께 판정한다
-- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징과 main-owned sidecar supervisor. production은 `process.resourcesPath/sidecar/hello-agent-sidecar`를 `--stdio`, `shell: false`로 한 번만 실행하며 3초 ready 제한, bounded framing, identity·response 검증, pending 요청 fail-closed, 자동 재시도 금지를 적용한다
-- Electron main은 `userData/com.wonseokhan.helloagent/m5`를 생성·정규화해 sidecar cwd로 고정하고, sidecar는 그 안의 `hello-agent.sqlite3`만 연다. DB 경로나 실행 파일의 renderer/env override는 없다
-- `electron/preload.ts`는 현재 main window의 top-level 허용 origin에서만 고정 channel의 `M5BridgeV2`를 노출한다. project/file/diff 입력은 호출 전 검증하며 renderer event ACK는 단일 고정 channel로만 보낸다. 범용 IPC·Node·셸 API는 없다
-- 앱 종료는 single-flight coordinator가 `app.prepareQuit`의 안전 응답을 받은 뒤에만 정상 종료를 허용한다. ready 이후 sidecar 손상·종료는 앱을 열린 채 fail-closed하며, ready 전 시작 실패만 clean marker를 위조하지 않고 unclean 종료를 허용한다
-- `src/m5/`: 기존 Tauri renderer와 분리된 Electron 작업대. native picker로 고른 프로젝트는 snapshot 생성·게시가 성공한 뒤에만 선택 상태가 되고, tree 탐색, Monaco 편집, optimistic save conflict, watcher rescan, 변경 diff를 제공한다. snapshot 생성 대기는 60초로 제한하며 취소·실패·늦게 도착한 결과가 이전 선택이나 폐기된 화면을 덮지 못하게 격리한다. 채팅·agent run은 아직 연결하지 않았다
-- 패키지는 ASAR와 V1 Fuse 9개를 명시적으로 고정하고 release sidecar를 ASAR 밖 `Resources/sidecar`에 둔다. macOS arm64 smoke가 패키지의 실제 sidecar를 임시 cwd에서 실행해 정확한 G4 capability, ready → status → quit → exit 0과 같은 instance의 SQLite clean marker를 확인한다
-- pnpm은 Forge의 패키징 요구 때문에 hoisted `node_modules`를 사용하지만, 전이 Git/tarball 차단 정책은 완화하지 않는다. Forge 7의 exotic dependency 문제를 피하려고 Forge 8 alpha와 registry-only `@electron/rebuild 4.2.0`을 exact pin했다
+- `crates/hello-agent-sidecar`: 번들 SQLite의 단일 owner인 `--stdio` Rust 프로세스. G5는 프로젝트별 역할 설정을 revision CAS로 저장하고, 채팅 생성 시 역할·런타임·모델·추론 수준·권한 snapshot을 불변 기록으로 고정한다. 여러 채팅과 공개 `TeamMessage`·실행·복구 원장은 재시작 가능한 projection으로 남는다
+- 채팅 준비는 기존 active/bound snapshot을 재사용하지 않는다. `workspace.prepareChat`은 매번 새 `preparationId/worktreeId/workspaceIdentity`의 unbound standalone snapshot을 만들고, `chat.create`가 설정 revision·최초 사용자 메시지와 함께 한 transaction에서 exact preparation을 bind한다. 실패 정리는 그 준비의 네 ID가 모두 맞을 때만 `workspace.abandonPrepared`로 terminal 표시하며 물리 삭제하지 않는다
+- 채팅이 소유한 tree/read/save/watch/diff/close는 V3의 `chatId/projectId/worktreeId/workspaceIdentity` 네 ID를 매 요청·응답·event에서 교차 검증한다. save continuation은 같은 네 ID와 `saveId`가 모두 일치해야 하며, 현재 선택을 추론하거나 다른 채팅의 작업 복사본으로 fallback하지 않는다. G4 project-only V2 경로는 호환용으로 유지한다
+- G5 실행은 macOS에서 sidecar가 띄우는 결정적 fixture만 허용한다. 역할별 공개 결과는 bounded `TeamMessage` 타임라인으로 저장·전달하고 원시 `run.event`는 renderer에 노출하지 않는다. coding writer lock과 run 저장은 spawn 전에 원자적으로 이뤄지며 한 채팅의 active run은 직렬화된다
+- 취소는 `(pid, 시작 시각)`의 부모·자손 전체 소멸을 증명한 때만 clean이다. 불확실하면 chat/run/workspace/writer lock을 `recoveryRequired`·`poisoned`로 유지하고 `recovery.list/inspect/markResolved` 뒤 exact abandon만 허용한다. `app.prepareQuit`은 active run과 unresolved recovery를 blocker로 반환하며 안전하지 않으면 종료하지 않는다
+- `crates/hello-agent-protocol`과 `src/m5/contracts/`는 같은 golden fixture로 protocol/session, SQLite, snapshot, G5 역할·채팅·실행·복구, preparation, V3 workspace 주소를 Rust·TypeScript 양쪽에서 검증한다. `M5BridgeV3`는 V1/V2에 additive하며 범용 IPC를 열지 않는다
+- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징과 main-owned sidecar supervisor. production sidecar는 `process.resourcesPath/sidecar/hello-agent-sidecar --stdio`, `shell: false`, 고정 cwd로 한 번만 실행한다. main-frame/app origin과 고정 channel을 검사하고 preload는 exact input/output validator를 통과한 V3 메서드·bounded event 구독만 노출한다
+- `src/m5/`: 여러 영속 채팅, 프로젝트별 역할/모델 설정, 공개 팀 타임라인, 실행 중단·복구 gate와 채팅별 Monaco tree/edit/save/diff를 결합한다. 채팅 전환은 detail과 작업 복사본 bind가 모두 성공한 뒤 원자 publish하며 dirty 편집·복구·늦은 결과가 다른 채팅을 덮지 못하게 막는다. UI는 fixture 실행을 **가짜 에이전트 데모**로 명시한다
+- 패키지는 ASAR와 V1 Fuse 9개를 고정하고 release sidecar를 ASAR 밖 `Resources/sidecar`에 둔다. pnpm은 Forge 요구에 맞춘 hoisted `node_modules`를 쓰되 전이 Git/tarball 차단 정책은 완화하지 않는다
 
-G4의 프로젝트·파일·diff·Monaco 경로는 macOS에서 누적 하네스와 독립 QA를 통과했다. snapshot 생성은 bundle 2 GiB, materialized 4 GiB, 200,000 entries, single blob 1 GiB, disk reserve 512 MiB 한계를 적용하고 checkout/filter 없이 raw committed blob을 쓴다. 활성화 뒤 diff는 target object DB만 사용하며 source가 사라져도 재시작할 수 있다. 저장의 최종 교체는 held data-root FD와 macOS `RENAME_NOFOLLOW_ANY`를 사용하고, 불명확한 결과는 durable recovery blocker로 남긴다. Windows와 비-macOS G4는 별도 native 안전 게이트 전까지 ready 이전 fail-closed다. `chat.*`, `run.*`, 역할별 agent 실행·복구는 G5 이후 범위다. Forge 8은 prerelease이고 packaged Electron 전체의 OS Quit E2E, 생성된 macOS `Info.plist`의 Electron 기본 ATS·미디어 권한 문자열은 후속 hardening 대상이다.
+G5 누적 하네스는 exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`에서 macOS PASS했고(`.artifacts/m5-harness/g5-run-recovery-2026-08-26T03-40-31-061Z.json`), 같은 commit의 독립 QA도 `G5_READY`로 판정했다(`.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json`). 이 결과는 계약·SQLite·실제 sidecar stdio 프로세스·Electron package/Chromium·fixture 실행과 clean/uncertain 취소·복구를 검증하지만 **실제 Claude Code/Codex adapter, 인증 세션, 실제 모델 출력은 검증하지 않는다**. G6 보안·패키징·성능, Windows snapshot/자손 회수, 전체 OS Quit E2E, Forge prerelease와 macOS 권한 문자열 hardening, 실제 에이전트 smoke는 후속 게이트다.
 
 ## 10. 미해결 사항
 

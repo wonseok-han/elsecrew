@@ -32,10 +32,10 @@
 이 주제는 워크로그가 아니라 **이 문서가 단일 기준점**이다. 논의·결정·철회를 전부 여기 쌓는다. **손대기 전 §9 `철회된 주장`을 먼저 읽을 것** — 이미 틀린 것으로 판명된 결론에 다시 도달하는 것을 막는다.
 
 **M5(코딩 에이전트 IDE)를 검토할 때 → [`proposals/m5-coding-agent-ide.md`](proposals/m5-coding-agent-ide.md)**
-여러 영속 채팅, 역할별 에이전트·모델, Git worktree, 코드 편집·diff를 포함한 agent-first IDE의 M5.0 착수 기준. Electron + React/TypeScript + Monaco 셸과 Rust sidecar, 상태·저장·안전 계약을 정의하며 **아직 구현된 현행 사실이 아니다.** 새 제품 이름은 개발과 분리해 보류한다.
+여러 영속 채팅, 역할별 에이전트·모델, standalone snapshot, 코드 편집·diff를 포함한 agent-first IDE의 승인된 제품 기준과 구현 상태. G1~G5 fixture 수직 흐름과 남은 실제 agent/G6/Windows 경계를 구분한다. **현행 구조의 단일 기준은 `architecture.md`**이며 제안 절의 미구현 내용을 현재 동작으로 인용하지 않는다. 새 제품 이름은 개발과 분리해 보류한다.
 
-**M5.0 첫 구현 단위를 착수할 때 → [`proposals/m5-electron-spike.md`](proposals/m5-electron-spike.md)**
-Electron/Rust sidecar 수직 스파이크의 저장소 구조, typed IPC·JSONL protocol, SQLite 복구 계약, 보안 경계, 큰 파일·diff·다중 채팅 fixture와 수치 합격선을 고정한 구현 전 명세. **아직 구현된 현행 사실이 아니다.**
+**M5 기반 스파이크의 원래 구현 계약을 확인할 때 → [`proposals/m5-electron-spike.md`](proposals/m5-electron-spike.md)**
+Electron/Rust sidecar 수직 스파이크의 저장소 구조, typed IPC·JSONL protocol, SQLite 복구 계약, 보안 경계, 큰 파일·diff·다중 채팅 fixture와 수치 합격선을 고정한 구현 명세. G1~G5의 출발 계약이지만 **현행 구조는 `architecture.md`, 현재 게이트는 M5 제품 제안서를 우선**한다.
 
 **M5 작업대 화면을 직접 조작해 볼 때 → [`proposals/m5-agent-ide-concept.html`](proposals/m5-agent-ide-concept.html)**
 여러 프로젝트, 재배치 가능한 패널, 파일·변경 탐색, 프로젝트별 역할/모델 설정과 역할 간 팀 대화를 담은 독립 실행형 인터랙티브 시안. 제안서의 동반 검토 자료이며 제품 구현이 아니다.

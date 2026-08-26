@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 누적 하네스·독립 QA와 현행 문서 반영)
+
+- **판정**: exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`의 G5 누적 하네스가 PASS했고 독립 QA도 `G5_READY`로 판정했다. 하네스는 `.artifacts/m5-harness/g5-run-recovery-2026-08-26T03-40-31-061Z.json`, QA는 `.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json`에 있다.
+- **현행 반영**: 프로젝트 역할 설정 CAS와 채팅별 불변 role snapshot, 여러 영속 채팅, 항상 새로 만드는 채팅별 standalone snapshot과 exact prepare/bind/abandon, V3 네 ID workspace/save, 공개 팀 타임라인, fixture 실행의 clean/uncertain 취소·프로세스 트리 복구·poisoned lock·prepareQuit blocker, Electron/preload/UI 경계를 `architecture.md`와 M5 제안서·색인·루트 작업 규칙에 반영했다.
+- **검증 범위**: 독립 QA는 계약/UI 22개, 임시 Git 저장소를 쓴 sidecar stdio 7개, Rust 회귀 20개, Electron 29개, Chromium Monaco와 macOS arm64 package smoke를 통과했다. 실제 Claude Code/Codex·인증·사용자 프로젝트와 Windows는 실행하지 않았다.
+- **다음 할 일**: 문서 독립 검토와 최종 게이트 뒤 실제 agent adapter 계약, G6 보안·패키징·성능, Windows 안전 게이트를 순서대로 진행한다. push와 `main` 병합은 하지 않는다.
+
 ### 2026-08-26 · by GPT-5.6-Sol (M5 G5 하네스 연결)
 
 - **한 일**: `m5:test:run-recovery`를 추가해 G5 계약, chat-bound workspace preparation/addressing, Electron bridge/scaffold, renderer chat/editor 상태와 Rust sidecar unit·실제 stdio process 검증을 한 명령으로 연결했다. 기존 누적 게이트가 같은 현재 코드의 TypeScript/renderer build·Chromium smoke·Electron package smoke를 이미 실행하므로 G5 명령은 고유 검증을 중복 없이 조합한다. Chromium smoke의 가짜 preload bridge도 V3로 올리고 workspace/chat 구독과 프로젝트 역할·빈 채팅 조회를 제공해 실제 renderer mount 흐름과 맞췄다.
@@ -138,63 +145,14 @@
 - **검증**: `npm test` 98개(그중 focused G4/G5/protocol 계약 16개)와 `cargo test -p hello-agent-protocol` 19개, `npx tsc --noEmit --pretty false`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 수행하지 않았다.
 - **다음 할 일**: 독립 계약 리뷰 뒤 이 기준선을 통합하고, Rust sidecar와 Electron/preload·renderer 구현을 서로 다른 worktree에서 고정된 V3 계약에 맞춰 진행한다.
 
-### 2026-08-25 · by GPT-5 Codex (M5 G4 dispose 뒤 snapshot 결과 격리)
-
-- **한 일**: controller dispose가 selection·project·controller 세대를 무효화하고 모든 비동기 상태 쓰기를 막도록 고쳤다. 늦게 성공한 create는 화면 publish/tree/diff/watch 없이 `project.close`를 정확히 한 번 호출해 evidence-preserving abandon으로 소비하며, 늦은 reject도 unhandled rejection 없이 소비한다. dispose 뒤 close 실패는 화면에 다시 쓰지 않고 sidecar evidence/recovery를 그대로 둔다.
-- **수명주기 결정**: Rust `project.close`는 `validate_active_project`를 먼저 요구하므로, native open만 끝나고 create 전 dispose된 opened identity에는 invalid close를 보내지 않는다. 해당 opened record의 후속 lifecycle은 sidecar의 영속 계약에 맡긴다.
-- **검증**: dispose 중 late create success(close 1/downstream 0), late create reject(close 0/downstream 0/no unhandled), late open(create 0/close 0) 결정적 회귀를 추가했다. 기존 timeout·stale·cancel 경계는 유지한다. `pnpm run m5:test:editor`는 editor-state 25개와 Chromium Monaco smoke 1개를, `pnpm run m5:test:project`는 Node 24개·Rust 28개(+의도한 ignored 1개)·stdio 1개를 통과했고 `npx tsc --noEmit --pretty false`, `pnpm build`, `git diff --check`도 통과했다.
-- **다음 할 일**: 이 dispose 경계 commit을 독립 검토하고 최신 통합 branch에서 G4 editor/project 누적 QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 스냅샷 선택 recovery 경계 보완)
-
-- **한 일**: 새 프로젝트 스냅샷 생성의 unbounded renderer queue를 없애고 기본 60초의 명시적 timeout과 단일 in-flight 상태를 추가했다. timeout 뒤에도 원 요청을 계속 관찰해 늦은 성공은 `project.close`로 evidence-preserving abandon하며, close 확인 전에는 모든 새 선택을 막는다. stale snapshot close 실패와 timeout 뒤 거부는 최신 화면에 초보자용 복구 안내와 technical detail을 보이고 차단을 유지한다. close 성공 뒤에도 자동 재선택/재시도하지 않는다.
-- **UI 결정**: picker 취소는 open 결과가 없으므로 기존 project/tree/tabs/notice/error를 그대로 보존한다. 실제 identity가 돌아온 뒤에만 transient message를 비운다. 선택 차단 상태는 workbench의 프로젝트 선택 버튼에도 반영한다.
-- **검증**: stale A close failure가 B의 downstream create/tree/diff/watch를 모두 막고 증거를 표면화하는 회귀, unresolved timeout·late success close·late close failure·명시적 C 재선택, 기존 화면 보존 cancellation 회귀를 editor-state에 추가했다. `pnpm run m5:test:editor`는 editor-state 22개와 Chromium Monaco smoke 1개를, `pnpm run m5:test:project`는 Node 24개·Rust 28개(+의도한 ignored 1개)·stdio 1개를 통과했고 `npx tsc --noEmit --pretty false`, `pnpm build`, `git diff --check`도 통과했다.
-- **다음 할 일**: 이 recovery 보완 commit을 독립 검토하고 최신 통합 branch에서 G4 editor/project 누적 QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 새 프로젝트 스냅샷 선행 흐름)
-
-- **한 일**: renderer의 프로젝트 선택 흐름을 native picker/open identity → `createProjectWorktree({ projectId })` → 화면 publish → tree/diff/watch 순서로 고쳤다. 화면에는 선택한 canonical Git root를 프로젝트 이름·경로로 보이고, private snapshot path는 노출하지 않으며 모든 작업은 `projectId`로만 한다. picker 취소는 상태를 바꾸지 않고, 스냅샷 생성 실패는 원본을 건드리지 않았다는 쉬운 설명과 기술 증거만 남기며 자동 재시도하지 않는다.
-- **안전 결정**: `project.close`는 active standalone snapshot을 물리 삭제 없이 `abandoned`로 기록하는 계약이므로, 새 선택으로 stale해진 생성 완료만 순서대로 close한다. 같은 project ID의 동시 create/close 경합을 막기 위해 snapshot 생성 구간을 renderer에서 직렬화했다. close 실패의 recovery/evidence는 sidecar가 보존하며 renderer가 삭제하거나 재시도하지 않는다.
-- **검증**: editor-state 회귀에서 call order, 생성 실패의 downstream 차단, stale A snapshot의 abandon 뒤 B 활성화, 기존 dirty/conflict/stream 경계를 확인했다. Chromium smoke는 유효한 standalone snapshot manifest를 반환하고, 생성 전 tree/diff/watch가 호출되면 실패하도록 고쳤다.
-- **다음 할 일**: 이 원자 commit을 독립 리뷰하고 최신 통합 branch의 G4 project/editor 누적 QA에서 sidecar·Electron bridge와 함께 확인한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 패키지 capability smoke 계약 수정)
-
-- **한 일**: Electron package smoke가 G3의 두 capability만 기대하던 오래된 검사를 제거하고, `tests/fixtures/m5/project-v1/manifest.json`의 canonical G4 누적 capability 순서를 exact 비교하도록 고쳤다. 향후 capability를 늘릴 때 fixture·Rust 계약과 함께 패키지 검증도 의도적으로 갱신되도록 scaffold 정적 검사를 추가했다.
-- **검증**: focused Electron scaffold/static test, macOS package smoke, build 및 `git diff --check`를 실행한다. 패키지·lockfile·product code는 변경하지 않는다.
-- **다음 할 일**: 독립 리뷰 후 최신 `m5/coding-agent-ide`에 이 원자 commit을 통합하고 G4 cumulative QA를 재실행한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 통합 테스트 경계 회귀 수정)
-
-- **한 일**: G4 preload의 유일한 `ipcRenderer.send`인 고정 event ACK(`eventAck`, `{ streamId, seq }`)를 허용하되 raw IPC와 다른 send 계열 노출은 계속 금지하도록 scaffold 검사를 좁혔다. 하네스 자기 검사는 G4 `READY`와 다음 미구현 G5의 `NOT_READY`/exit 2를 검증해 누적 명령 재귀를 피한다. Chromium renderer mount smoke는 기본 순수 프런트 `npm test` glob에서 빼고 G4 editor gate에서만 명시 실행하게 이름과 script를 맞췄다.
-- **검증**: `npm test` 81 PASS, `npm run m5:test:project` Node 24 PASS·Rust project 28 PASS(+의도한 ignored 1개)·stdio 1 PASS, 승인된 GUI 실행의 `npm run m5:test:editor` editor-state 15 PASS·Chromium Monaco worker 1 PASS, `npm run harness:list` G4 READY/G5 NOT_READY, `npm run build`, `npx tsc --noEmit --pretty false`, `git diff --check`를 통과했다. `pnpm-lock.yaml` Git blob은 전후 `072de6c88fe06530ab922486494cb3524db692e9`로 동일하다.
-- **다음 할 일**: 이 좁은 회귀 수정 commit을 독립 리뷰한 뒤 최신 통합 branch에서 G4 누적 하네스·QA를 재실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 하네스 연결)
-
-- **한 일**: `m5:test:project`를 추가해 G4 TypeScript 계약·Electron bridge, Rust `project::` 단위 테스트와 G4 stdio process 시나리오를 `--locked`로 한 번에 실행하도록 연결했다. G4 하네스 설명은 linked worktree가 아닌 `standalone snapshot` 프로젝트 안전 API를 가리키도록 정리했다. `m5:test:editor`는 그대로 유지했다.
-- **검증**: `CI=true pnpm run m5:test:project`에서 Node 24개, Rust project 28개(+의도한 ignored 1개), G4 stdio 1개가 통과했다. `CI=true pnpm run m5:test:editor`에서 Vite build와 editor-state 15개 및 Chromium smoke 1개가 통과했다. `CI=true pnpm harness:list`는 G4 `READY`, `git diff --check`도 통과했다. `pnpm-lock.yaml` SHA-256은 설치 전후 `a88b2ac7f4ac3afe4644b0766f96e3a7099b0b5eec1a64a64632962ca0bb3bb5`로 동일하다.
-- **다음 할 일**: 이 기능 commit을 독립 리뷰한 뒤 최신 `m5/coding-agent-ide`에서 Rust snapshot·Electron·Monaco 변경과 함께 G4 누적 하네스/QA를 실행한다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 하지 않았다.
-
-### 2026-08-25 · by GPT-5.6 Terra
-
-G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로 포팅했다. 호환 API 이름(`project.createWorktree`, `createProjectWorktree`, `worktreeId/path`)은 유지하되, renderer에는 고정된 V2 capability만 노출한다. native 폴더 선택, 엄격한 IPC 입력 검증, 파일 5 MiB·diff 10 MiB·동시 stream 16개·stream당 최대 256 chunk 경계, renderer ACK 기반 이벤트 credit/backpressure, 창 종료 시 미확인 전달 fail-closed, sidecar startup/quit 수명주기를 적용했다. manifest 검증은 `workspaceKind: standaloneSnapshot`을 포함한 G4 계약 validator를 그대로 사용한다.
-
-검증: G4 Electron/G3/G4/protocol focused Node tests 37/37 통과, `npx tsc --noEmit --pretty false`, `git diff --check`, darwin-arm64 Electron package 및 package smoke 통과. 첫 package 시도는 sandbox 네트워크 차단으로 실패했으며, 승인된 재시도에서 고정 Electron artifact를 내려받아 통과했다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 수행하지 않았다.
-
-**다음 할 일**: 이 feature commit의 독립 코드 리뷰 후 `m5/coding-agent-ide` 최신 통합 commit에서 G4 Rust snapshot 구현과 함께 QA한다.
-
----
-
 ## 프로젝트 요약 (고정)
 
-터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. Tauri 2 + React 19 + TypeScript + pnpm, Rust는 최소한(설치·감지·로그인·실행)만.
+터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
 
 - 기획 원본: `~/Library/CloudStorage/OneDrive-개인/ObsidianVault/오픈소스/아이디어/후보/에이전트-스타터.md`
 - 레포: https://github.com/wonseok-han/hello-agent (로컬 폴더도 `~/projects/hello-agent`로 변경 완료 — 2026-08-12 확인)
 - 위저드 6단계: 에이전트 선택 → 진단 → 설치 → 로그인 → 첫 프로젝트 → 졸업식
-- 주요 모듈: `agent.rs`(에이전트 레시피) · `detect.rs` · `install.rs` · `login.rs` · `project.rs` · `editor.rs`
+- 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
@@ -230,6 +188,7 @@ G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로
 - **M5 G3 Electron-sidecar 수명주기(2026-08-25)**: Electron main은 packaged sidecar를 ASAR 밖 고정 경로에서 한 번만 실행하고 3초 ready, bounded framing, instance/response identity, pending 요청을 fail-closed로 관리하며 자동 restart/retry하지 않는다. preload는 `system.status`·`app.prepareQuit`·sidecar event의 고정 channel만 top-level 허용 origin에 노출한다. 정상 종료는 single-flight `app.prepareQuit` 안전 응답 뒤에만 허용하고, G3 capability는 이 두 method뿐이다. 프로젝트·채팅·실행·파일 API는 G4 이후다
 - **M5 G4 계약 경계(2026-08-25, standalone snapshot으로 갱신)**: protocol v1의 예약 project/file/diff method·event와 SQLite schema v1은 유지하고, G2 golden fixture와 `M5BridgeV1`은 불변으로 둔 채 project lifecycle fixture와 `M5BridgeV2`를 사용한다. 명시적 canonical Git root, 읽기 전용 source capability, self-contained Git bundle과 raw committed bytes로 만드는 앱 data 아래 detached standalone snapshot+manifest, hash 기반 optimistic save, chunked file/diff, watcher overflow의 `rescanRequired`, dirty draft 보존을 계약으로 고정한다. `project.createWorktree`·`createProjectWorktree`·`worktreeId/path`는 protocol v1 호환 이름일 뿐 linked worktree를 뜻하지 않는다. G4 `project.close`는 물리 삭제가 아니라 watcher 중단+영속 `abandoned`이며 실제 agent/chat/run과 원본 적용은 범위 밖이다. Windows G4는 별도 안전 게이트 전까지 지원하지 않는다
 - **M5 G5 계약 경계(2026-08-26)**: protocol framing·SQLite schema v1과 G4 `M5BridgeV2`는 유지하고 additive `M5BridgeV3`를 사용한다. 한 Chat은 명시적 `projectId`·`worktreeId`·`workspaceIdentity`와 1:1이며 생성 시 프로젝트 역할 설정 revision과 `planning/coding/review`의 runtime·정확한 model selector·nullable reasoning·고정 permission을 snapshot한다. public TeamMessage는 hidden reasoning을 저장하지 않고 durable chat event sequence를 protocol stream seq와 분리한다. fixture writer는 run+workspace lock commit 뒤 spawn하며 동일 worktree writer를 직렬화하고, 불확실한 종료는 lock을 유지한 `recoveryRequired`, 해결 v1은 자손 소멸 증명 뒤 abandon-only다. `run.startAgentSmoke`는 예약만 유지하고 capability에 광고하지 않으며 Windows/실제 유료 실행은 별도 게이트 전까지 비활성이다
+- **M5 G5 fixture 수직 흐름 완료(2026-08-26)**: 프로젝트 역할 설정은 revision CAS, 기존 채팅은 생성 당시 role snapshot 불변이다. `workspace.prepareChat`은 매번 새 unbound standalone snapshot을 만들고 `chat.create`가 settings·최초 메시지와 exact preparation을 원자 bind하며, 실패 정리는 네 ID가 모두 맞는 준비만 terminal abandon한다. 모든 채팅 workspace/save는 `chatId/projectId/worktreeId/workspaceIdentity`와 `saveId`를 교차 검증한다. macOS 결정적 fixture의 공개 팀 타임라인, clean/uncertain 취소, process-tree 복구, poisoned lock과 `prepareQuit` blocker가 Electron/preload/UI까지 연결돼 exact `014bd987`의 누적 하네스 PASS·독립 QA `G5_READY`를 받았다. 실제 Claude Code/Codex adapter·인증·사용자 프로젝트·Windows는 검증하지 않았다
 - **M5 G4 CLI worktree capability 차단(2026-08-25)**: macOS Git CLI의 `worktree add`는 target이 존재하면 거부하고, held directory의 `/dev/fd/N/.git` 하위 탐색도 `ENOENT`라 검증 뒤 교체 가능한 source·target 경로 문자열 없이 두 filesystem capability를 동시에 묶을 수 없었다. source Git root나 managed target을 ambient path로 넘기면 실행 직전 symlink swap으로 외부 repo filter 실행·admin write 또는 외부 worktree 생성이 가능하다. 이 경계를 수용하거나 사후 검사로 덮지 않는다. 실제 linked worktree를 유지할 native Git 구현과 안전한 detached local clone/snapshot은 제품·안전 계약이 다른 대안이므로 사용자 결정 전 G4 Rust 통합을 중단한다
 - **M4 Claude 실행 계약(2026-08-19 실측, CLI `2.1.235`)**: 읽기 전용을 강제하는 것은 **`--tools` 허용목록**뿐이다. `--disallowed-tools`는 거부목록이라 `Task`·`ToolSearch` 등 23개를 남기고 **거부 증거도 안 남긴다**. `--setting-sources project`는 **대상 프로젝트 설정을 로드해** 권한을 `bypassPermissions`로 승격시키고 훅·MCP를 실행시키므로 안전 정책이 아니다 → **`--setting-sources ''`** 를 쓴다. `--safe-mode`는 훅·MCP·스킬만 끄고 **권한 승격은 못 막는다**. `--permission-mode dontAsk`는 자동 승인이 아니라 거부 게이트이며 `permission_denials`로 기계 판독 가능한 증거를 남긴다. **작업 폴더 경계와 사후 빈 diff는 예방책이 아니라 사후 확인 수단**이다(경계는 복제본 *안* 쓰기를 허용한다). 실행 형식은 **`--output-format stream-json --verbose` 고정**이고 `system:init`을 fail-closed로 검증한다(`tools` 집합 일치·`permissionMode`·`mcp_servers`·`plugins`·`model`·`cwd`·`session_id`). ⚠️ **`--json-schema`는 요청하지 않은 `StructuredOutput` 도구를 주입**하므로 기대 도구 집합은 4개다. §7.10 파일럿은 **macOS 전용**(Windows 종료 계약 미실측). 상세는 `proposals/m4-orchestration.md` §7.10.1.2
 - **Claude CLI 프로세스 트리·종료(2026-08-19 실측, Codex 2차 검토 반영)**: Bash 도구 자식은 **부모 프로세스 그룹에 없고 별도 세션 리더**(`Ss`)다. 그룹 `TERM`으로 죽는 것은 Claude 자체 정리 동작일 뿐이라, **루트에 `SIGKILL`을 보내면 자손이 남는다**(15초까지 생존 확인). **종료 성공은 신호 결과가 아니라 관측으로만 판정한다** — 한 번이라도 관측한 **`(pid, 시작 시각)` 신원을 누적 추적**하고 **누적 집합 전체의 소멸을 확인**해야 성공이다. ⚠️ **루트 기준 ppid 트리 순회는 오판한다** — 부모가 먼저 죽으면 자손이 `ppid=1`로 재부모화돼 트리에서 사라지고, 살아 있는데 빈 집합으로 보인다(C6로 재현). 열거는 **살아 있는 모든 추적 대상**에서 출발한다. **PID 재사용(신원 불일치)과 조회 실패는 `poisoned`**. `killpg`의 **`EPERM`은 성공도 소멸 증거도 아니다**(좀비만 남은 그룹에서도 난다). **확인 불가는 곧 `poisoned`** — 실행과 복제본을 함께 표시하고 자동 인계·재사용을 차단하며 해소는 명시적 복구/폐기뿐. `run_in_background` 때문에 **정상 종료 경로에서도** 회수가 필요하다. 상세는 `proposals/m4-orchestration.md` §7.10.1.2 ⑤
@@ -269,257 +228,9 @@ G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로
 
 ## 워크로그 (최신이 위)
 
-### 2026-08-25 · by GPT-5 Codex (M5 G4 standalone snapshot 작업대 통합 완료)
+### 2026-08-25 및 그 이전 → `docs/archive/history-2026-08.md`
 
-- **통합 결과**: standalone snapshot Rust 안전 코어 `0bf04f7`, Electron project/file/diff bridge `76f7eea`, Monaco 작업대 `45c33e4`, 실제 프로젝트 선택 흐름 `9ddac9b`, G4 하네스와 통합 회귀 수정을 모두 독립 리뷰 뒤 `m5/coding-agent-ide`에 병합했다. linked Git worktree 대신 held source capability에서 self-contained bundle을 만들고, 필터 없이 raw blob을 독립 저장소에 materialize하며, 저장 최종 교체는 stable data-root FD와 macOS `RENAME_NOFOLLOW_ANY`로 symlink/path swap을 fail-closed한다. 프로젝트 선택은 snapshot 게시 뒤에만 완료되고 timeout·취소·늦은 결과·화면 폐기 경합은 기존 선택과 새 화면을 오염시키지 않는다.
-- **통합 QA**: exact 통합 commit `8eff5f556d399c863e7fe18d7706c8aa3136b3ee`의 누적 증거 `.artifacts/m5-harness/g4-project-editor-2026-08-25T12-07-13-799Z.json`은 baseline~G4 11개 명령이 모두 exit 0이고 `dirtyBefore=false`다. 별도 QA도 project Node 24개·Rust 28개(+sentinel 1 ignored)·stdio 1개, editor 상태·경합 25개와 Chromium smoke 1개(총 26개), Electron 22개와 darwin-arm64 package smoke를 재검증해 `G4_READY`로 판정했으며 기록은 `.artifacts/m5-qa/g4-final-8eff5f5-fresh-project.md`다.
-- **경계·다음 할 일**: Windows/비-macOS G4는 native handle·durability·watcher 증명 전까지 ready 이전 fail-closed다. 이미 보유한 source directory 내부를 같은 사용자 권한의 악성 프로세스가 export 중 계속 바꾸는 공격은 승인된 위협 경계 밖이며, source Git metadata/object의 감지 가능한 동시 변경은 export 전후 digest와 기존 lock-file 검사로 거부한다. 커밋되지 않은 working-tree 편집은 snapshot 입력이 아니다. 다음 구현은 G5 영속 채팅·역할별 agent run·중단/복구 계약이며 실제 사용자 프로젝트, 유료 agent, push, `main` 병합은 수행하지 않았다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G4 Monaco 작업대 standalone snapshot 포트)
-
-- **한 일**: 독립 승인된 Monaco renderer 최종 상태를 standalone snapshot 계약 기준선으로 다시 포팅했다. 파일 탐색·Monaco 편집·hash 기반 dirty/conflict 보호·변경 diff와 로컬 worker, descriptor 전 chunk buffer, project epoch를 유지했다. protocol 호환 `worktree` API 식별자는 바꾸지 않았고, 사용자에게 보이는 작업 공간 표현은 모두 `원본과 분리된 작업 복사본`으로 명확히 했다.
-- **경계**: renderer는 이미 검증된 `M5BridgeV2`와 project contract만 소비하며 standalone snapshot manifest를 자체 재검증하거나 Electron bridge/Rust/protocol을 수정하지 않는다. 파일 5 MiB, diff 10 MiB, stream 256 chunk 상한과 Chromium local-worker smoke를 유지한다.
-- **검증·다음 할 일**: `pnpm run m5:test:editor`(Vite/Monaco build, state 15개와 Chromium smoke 1개), `pnpm build`, G4/Electron contract 14개, `git diff --check`를 통과했다. 이 기능 commit을 독립 리뷰한 뒤 Rust snapshot/Electron bridge와 최신 통합 commit에서 QA한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 macOS kernel no-follow rename 보강)
-
-- **보강**: local macOS SDK와 pinned `libc`를 확인해 `renameatx_np`의 `RENAME_NOFOLLOW_ANY`를 최종 stable data-root rename에 적용했다. 두 경로는 이미 절대/`.`/`..`/NUL을 거부한 상대 경로이며 같은 보유 data-root FD에서 해석되고, 모든 symlink 추적은 커널 syscall 자체가 거부하므로 최종 사용자 공간 검증 뒤의 symlink 교체도 외부 쓰기로 이어지지 않는다. 함께 검토한 `RENAME_RESOLVE_BENEATH`는 이 런타임에서 정상 저장에도 `EINVAL`이어서 사용하지 않는다. `NOFOLLOW_ANY` 자체가 지원되지 않아 `EINVAL`이면 `renameat` fallback 없이 recovery-required로 실패하며, 비-macOS는 기존대로 ready 전에 fail-closed한다.
-- **회귀·검증**: 최종 재검증까지 끝난 실제 syscall 직전 hook에서 (1) 대상 부모를 외부로 이동하고 (2) 대상 부모를 외부 symlink로 바꾸는 두 경우를 각각 주입했다. 둘 다 macOS syscall이 실패하고 외부 byte는 그대로이며 recovery blocker가 남는다. 동일 byte 새 부모 교체는 별도 pre-revalidation hook에서 parent device/inode 불일치로 거부한다. 정상 저장을 포함한 sidecar unit 43개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
-- **다음 할 일**: 후속 hardening commit까지 포함한 head를 독립 재리뷰하고 G4 통합 여부를 판단한다. 의존성·protocol·플랫폼 gate와 push/`main` 미병합 정책은 바꾸지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 stable-root save rename P1 수정)
-
-- **수정**: 독립 리뷰에서 cap-std `Dir::rename`이 대상 부모 FD를 연 뒤 `renameat`을 호출하는 사이 그 부모가 관리 영역 밖으로 이동하면 외부의 같은 파일을 덮을 수 있음을 확인했다. 최종 저장 교체를 이동 가능한 하위 부모 FD가 아니라 시작 때 보유한 data-root FD 양쪽과 정규화한 상대 경로를 한 macOS/Unix `renameat` syscall에 직접 전달하도록 바꿨다. syscall 직전에는 stable data-root device/inode, 저장 시작 때 잡은 대상 부모 device/inode, 모든 중간 컴포넌트의 no-follow 상태와 대상 version을 재검증하며 계층 변화는 이미 저장한 recovery lock을 유지한 채 실패한다.
-- **회귀·검증**: 실제 syscall 인자와 root FD를 준비하고 최종 검증까지 끝낸 뒤 실행되는 test hook에서 `src` 부모를 외부로 이동하고 동일 byte의 새 부모로 교체하는 경우와 외부 디렉터리 symlink로 교체하는 경우를 재현했다. 두 경우 모두 외부·교체 대상 byte가 그대로이고 저장은 실패하며 recovery blocker가 남았다. sidecar unit 42개·stdio 3개(의도한 sentinel child 1개 ignored), protocol Rust 15개, TypeScript G4/protocol 10개, fmt, sidecar `clippy --no-deps -D warnings`, `git diff --check`를 모두 통과했다.
-- **다음 할 일**: 새 원자 fix commit을 독립 재리뷰한 뒤에만 G4 통합을 진행한다. Windows/비-macOS ready gate, push와 `main` 미병합 정책은 그대로다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot Rust 안전 코어)
-
-- **한 일**: 기존 linked-worktree 구현에서 SQLite project/lock 수명주기, bounded tree/read/save/diff, capability-rooted atomic save, watcher overflow, abandon-without-delete와 stdio stream framing만 보존하고 생성 경로를 `standaloneSnapshot`/`gitBundle` 계약으로 교체했다. sidecar는 no-follow로 잡은 source root·`.git` capability에서 고정 `/usr/bin/git`과 정리된 환경으로 self-contained HEAD bundle을 제한 스트리밍하고, 앱 data의 staging capability에서 standalone repo를 만든 뒤 `ls-tree -rz`와 `cat-file --batch`의 raw committed blob/mode를 직접 materialize한다. checkout/filter/EOL/encoding/ident/LFS 변환, source remote/ref/alternate 연결과 source-dependent diff는 사용하지 않는다.
-- **안전·복구**: export 전에 DB recovery marker를 저장하고 source `HEAD/index/refs/config/objects/packed-refs/entry set` digest와 lock 수를 전후 비교한다. corrupt/truncated/oversize/shallow bundle, 2 GiB bundle·4 GiB materialized·200,000 entry·1 GiB blob·512 MiB reserve 위반, non-UTF-8/`.git`/case collision/abnormal mode를 fail-closed한다. 스트리밍 Git 자식의 stderr는 계속 배출하면서 마지막 8 KiB만 보존하고 모든 조기 반환에서 자식을 종료·회수한다. 외부 manifest·`.git` marker·workspace invariant·DB identity를 다시 읽어 composite activation evidence와 일치한 경우에만 active로 전환한다. 활성화 뒤 source가 사라져도 target object DB만으로 재시작·diff가 동작하며 Windows와 비-macOS G4 ready는 별도 게이트 전까지 차단한다.
-- **검증**: exact-pin capability 의존성과 lock을 기존 검토 버전으로 갱신했다. `cargo test -p hello-agent-sidecar --locked --offline`에서 sidecar unit 42개와 stdio integration 3개가 통과하고 sentinel child 1개만 의도대로 ignored였다. SHA-1/SHA-256, source/managed target swap, 읽기 전용 source, hook/filter/pager/diff/LFS sentinel 비실행, raw attribute bytes, executable/symlink/submodule, case collision·non-UTF-8·abnormal mode, 손상/절단/상한 bundle, source 제거 후 restart/diff, 저장 parent 이동·ambiguous recovery를 포함한다. sidecar `clippy --no-deps -D warnings`, protocol Rust 15개, TypeScript G4 6개·protocol 4개와 `git diff --check`도 통과했다. workspace 전체 clippy는 이번 변경 밖 `hello-agent-core/proctree.rs`의 기존 최신-Clippy finding 2건 때문에 별도 확인이 필요하다.
-- **다음 할 일**: 정확한 기능 commit을 독립 Rust 안전 리뷰하고, 승인되면 통합 담당이 Electron/UI 호환 변경 뒤 최신 통합 commit에서 G4 누적 하네스와 macOS QA를 수행한다. 실제 사용자 프로젝트, push, `main` 병합은 하지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 snapshot composite activation 계약)
-
-- **리뷰 수정**: 독립 리뷰에서 개별 manifest·source trace·workspace invariant·activation 기록이 각각 유효해도 서로 다른 작업 복사본의 증거를 섞을 수 있음을 확인했다. proposed active manifest의 `projectId`·호환 `worktreeId`·`workspaceIdentity`·canonical Git root·`sourceIdentity`·object format·base commit/tree를 기준으로 source, workspace, activation trace, DB, 외부 manifest, `.git` marker를 한 composite evidence validator가 모두 교차 검증한 뒤에만 active 전이를 허용하도록 Rust/TypeScript 공통 fixture를 추가했다.
-- **수치 경계**: snapshot 계약의 모든 JSON 정수는 음수가 아닌 JavaScript safe integer(`0..2^53-1`)로 제한한다. 특히 materialization 뒤 disk bytes는 `2^53-1`을 승인하고 `2^53`을 양 언어에서 거부하는 공통 경계 fixture로 고정했다.
-- **검증·다음 할 일**: protocol Rust fmt/clippy/test 15개, TypeScript G2·G3·G4 계약 19개, `tsc --noEmit`, 변경 금지 파일 byte 불변, AGENTS/CLAUDE 동일성, `git diff --check`를 통과했다. 원자 fix commit을 독립 재리뷰한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 standalone snapshot 계약 개정)
-
-- **결정·한 일**: 사용자가 linked Git worktree 대신 capability-protected standalone snapshot을 선택했다. protocol v1 호환 method/type 이름은 유지하되 `WorktreeManifestV1`에 snapshot kind·Git bundle transport·source mutation 금지·object format·commit/tree OID·workspace identity를 고정하고, Rust/TypeScript 공통 fixture와 validator가 source read-only·전후 digest, detached HEAD/index tree, remote/alternates/source 참조 0, object connectivity와 DB/manifest/`.git` marker identity를 fail-closed 검증하도록 개정했다.
-- **안전·자원 계약**: bundle 2 GiB, materialized total 4 GiB, 200,000 entries, single blob 1 GiB, materialization 뒤 disk reserve 512 MiB를 한 manifest에 고정하고 streaming만 허용한다. raw committed blob bytes와 Git mode만 materialize하며 checkout/filter/EOL/encoding/ident/export attribute/LFS 변환, symlink follow, submodule init을 금지하고 case collision·non-UTF-8 path·`.git` entry·비정상 mode를 거부한다. recovery marker부터 identity·DB commit 뒤 activation까지 순서를 고정했고 corrupt/truncated/oversize/shallow missing object는 active 0개다.
-- **검증**: protocol Rust fmt/test 14개/clippy, TypeScript G2·G3·G4 계약 18개, `tsc --noEmit`, `AGENTS.md`=`CLAUDE.md`, 변경 금지 G2 fixture·bridge·SQLite/dependency/runtime 파일 byte 불변과 `git diff --check`를 통과했다.
-- **위협 경계·다음 할 일**: 선택 root·managed target의 path/symlink swap과 일반 동시 변경은 방어하지만, 이미 잡은 source directory 내부 entry를 같은 사용자 권한의 악성 프로세스가 export 중 계속 바꾸는 공격은 경계 밖이다. Windows G4는 별도 게이트 전까지 unsupported다. 이 계약 commit을 독립 리뷰한 뒤 승인된 exact commit에서만 새 Rust standalone snapshot 구현 branch를 분기하고 Electron/Monaco 소비자와 다시 맞춘다. push·merge·rebase와 실제 사용자 프로젝트 시험은 수행하지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 구현 파동·linked worktree 안전 차단)
-
-- **진행 결과**: G4 계약 commit `e054f0d`를 독립 리뷰 승인 뒤 통합 `a1b53a5`로 병합하고, 같은 exact SHA에서 Rust·Electron·Monaco 세 worktree를 분기했다. Electron `d8f9f9f`는 native picker, V2 runtime validation, bounded stream/ACK backpressure, window lifecycle, file 5 MiB·diff 10 MiB를 독립 리뷰 승인받았다. Monaco `f7e47b3`은 local worker, dirty/conflict·project epoch, async cross-IPC stream과 bounded pre-descriptor buffer를 Chromium smoke 포함 독립 승인받았다. 둘은 Rust 선행 순서 때문에 아직 통합하지 않았다.
-- **Rust 리뷰와 차단**: Rust `042bcb1`은 11 capability, SQLite project/worktree 상태, file/diff/watch와 durable save를 구현했지만 반복 독립 리뷰에서 inherited Git config, symlink/rename TOCTOU, unbounded diff, ambiguous post-rename outcome을 발견해 수정했다. 마지막에는 target parent FD를 외부로 이동한 뒤 save하는 race와, 검증한 source Git root를 외부 repo symlink로 바꾼 뒤 `worktree add`가 외부 filter/admin을 건드리는 race가 남았다. held source `.git` cwd와 held target `/dev/fd`를 함께 쓰는 macOS 실험은 Git이 existing target을 거부해 exit 128이었고 registration 0·target empty를 확인했다. ambient path나 F_GETPATH 사후 검사는 안전 증거가 아니므로 사용하지 않는다.
-- **현재 상태·다음 결정**: 통합 branch는 G4 계약까지만 포함해 clean이며 G4는 계속 `NOT_READY`다. Rust worktree에는 stable-root save rename 실험의 미커밋 `project.rs`·tests 2파일이 보존돼 있고, 안전 경계 결론 전 통합·커밋하지 않았다. 다음 선택은 (A) linked worktree 대신 capability로 만들 수 있는 detached local clone/snapshot으로 계약 변경, (B) native Git library/직접 worktree 구현으로 범위 확대, (C) 같은 사용자 path-swap 위험을 명시적으로 수용하는 것인데 C는 권장하지 않는다. push와 `main` 병합, 실제 사용자 프로젝트·유료 agent·물리 삭제는 수행하지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 계약 독립 리뷰 수정)
-
-- **한 일**: 독립 계약 리뷰의 차단점 3개를 닫았다. 기존 G3 lifecycle fixture·상수·validator 의미는 유지하고, G4 전용 ready/status validator가 `G4_CAPABILITIES_V1`의 누적 11개 capability를 정확한 순서와 집합으로 검사하도록 추가했다. 공통 project fixture에는 G4 ready와 ready/unavailable status의 정상·누락·초과 capability 사례를 넣었다.
-- **파일·트리 계약 강화**: `hello`의 exact bytes(`68656c6c6f`)가 실제 SHA-256 파일 버전으로 계산되는 언어 중립 golden vector를 추가했고, Rust/TypeScript가 의존성 추가 없이 digest를 직접 계산해 stale/변조 digest를 거부한다. tree page는 root와 하위 `parentPath` 모두 직계 자식 한 단계만 반환하며 nested descendant나 다른 parent의 entry를 fail-closed한다.
-- **검증**: G4 양 언어 fixture와 생성 경계, 기존 G2/G3 계약, Rust fmt/test/clippy, TypeScript no-emit, 변경 금지 fixture·`M5BridgeV1` byte 불변, `git diff --check`를 다시 확인했다.
-- **다음 할 일**: 이 fix commit을 독립 재리뷰하고 승인된 exact commit에서만 G4 Rust/Electron/renderer 구현 파동을 분기한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 계약 구현)
-
-- **한 일**: 기존 protocol/schema v1과 `M5BridgeV1`을 바꾸지 않고 G4 project/file/diff 공통 fixture, Rust payload parser, TypeScript runtime validator와 좁은 `M5BridgeV2` 타입을 추가했다. 실제 Git·파일시스템·Electron·renderer 구현은 넣지 않았다.
-- **고정한 계약**: G4 ready capability는 G3의 `system.status`·`app.prepareQuit`와 예약된 project/file/diff 9개를 합친 누적 11개다. 프로젝트 신원은 정규화된 실제 Git root에 묶이고, 작업 공간은 원본 밖 detached worktree와 full base commit 매니페스트를 사용한다. tree 500개 page/opaque cursor, 정확한 파일 byte의 SHA-256 버전, UTF-8·binary·5 MiB 초과 판정, 256 KiB read/save/diff chunk, expected/current version 충돌, rename/delete/binary diff, watcher overflow 재스캔, manifest/symlink/dirty/recovery 차단, `project.close → abandoned`와 물리 삭제 금지를 fail-closed fixture로 고정했다. POSIX와 정규화된 Windows drive 경로를 함께 다룬다.
-- **검증**: `cargo fmt -p hello-agent-protocol -- --check`, `cargo test -p hello-agent-protocol --locked`(14 PASS), `cargo clippy -p hello-agent-protocol --locked -- -D warnings`, G4 Node contract(5 PASS), 기존 G2 Node contract(4 PASS), G3 Node contract(9 PASS), `npx tsc --noEmit --pretty false`, `git diff --check`를 통과했다.
-- **다음 할 일**: 독립 계약 리뷰에서 fixture가 구현 시작에 충분한지 승인받은 뒤에만 Rust project/worktree, Electron bridge, renderer 구현 파동을 같은 exact 계약 commit에서 분기한다. 실제 agent/chat/run, 원본 적용과 물리 worktree 삭제는 G5 이후다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G4 프로젝트·편집기 착수 계약 분석)
-
-- **한 일**: G3 독립 QA 뒤 G4를 계약 선행 파동과 최대 3개 독립 구현 파동으로 분해했다. 계약 담당은 project/file/diff payload, `M5BridgeV2`, project lifecycle fixture만 소유하고 기존 protocol fixture·SQLite migration·dependency manifest를 건드리지 않는다. 계약 승인 뒤 같은 exact commit에서 Rust project/worktree 안전 코어, Electron bridge, Monaco UI를 겹치지 않는 별도 branch/worktree로 나눈다.
-- **안전·합격선**: native picker로 고른 canonical Git root만 허용하고 non-Git/bare/외부 worktree/HEAD 없음, hook·filter 실행 가능성, symlink 탈출, manifest·DB·Git registration 불일치를 fail-closed한다. tree는 페이지당 500개, Monaco 대상은 UTF-8 5 MiB 이하, file save는 hash 기반 optimistic concurrency와 256 KiB chunk를 사용한다. dirty/conflicted draft는 전환·폐기에서 보존하고 watcher overflow는 조용히 유실하지 않는다. 실제 사용자 프로젝트·agent/chat/run·원본 적용·물리 worktree 삭제는 G4 자동 작업에서 금지한다.
-- **다음 할 일**: 이 계약 분석 기록 commit에서 `m5/g4-contracts` worktree를 분기해 단일 계약 담당이 fixture와 양 언어 validator를 구현한다. 독립 계약 리뷰 승인 전 Rust/Electron/UI 구현은 시작하지 않는다.
-
-### 2026-08-25 · by GPT-5.6-Terra (M5 G3 독립 통합 QA)
-
-- **판정**: exact 통합 `3c3799d7978313dcc15b3c6d137dd19e496eb72c`는 `G3_READY`다. 부모 `79d3375` 대비 `architecture.md`와 `history.md`만 바뀐 문서 커밋임을 확인했고 QA 시작·종료 워킹 트리는 clean이었다.
-- **검증**: `CI=true pnpm install --frozen-lockfile`, `pnpm run m5:test:storage`(Node 17개, sidecar unit 13개·stdio process 2개), `node scripts/m5-electron-package-smoke.mjs`, `git diff --check`가 통과했다. `node scripts/m5-harness.mjs --list`는 G3 `READY`, 아직 `m5:test:project`·`m5:test:editor`가 없는 G4 `NOT_READY`를 보고했다. 누적 증거는 `.artifacts/m5-harness/g3-storage-2026-08-25T06-13-24-654Z.json`이다.
-- **잔여 위험·다음 할 일**: Forge 8 alpha, Windows sidecar/SQLite 종료, packaged Electron의 OS Quit 전체 E2E, macOS plist hardening은 후속이다. 이제 G4 프로젝트 선택·worktree·파일/diff 계약을 먼저 고정하고 독립 계약 리뷰 뒤 구현을 분리 착수한다. push와 `main` 병합은 하지 않는다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3 누적 하네스 통과·현행 문서 반영)
-
-- **한 일**: 최신 통합 `79d3375`에서 G3 누적 게이트를 실행해 Electron 셸, protocol, storage/lifecycle 계약, 실제 Rust sidecar·SQLite, preload와 package smoke를 한 번에 검증했다. `architecture.md`의 G2 시점 설명을 실제 G3 구조로 올리고, 아직 구현되지 않은 project/chat/run·Monaco·diff와 Windows 경계를 현행 사실에서 분리했다.
-- **검증**: 승인된 네트워크 환경에서 `CI=1 node scripts/m5-harness.mjs --gate g3-storage`가 PASS했다. 프런트 50개, 기존 Tauri 105개/13 ignored, core 66개, protocol 10개, sidecar 15개, Electron 11개와 storage 집중 Node 17개가 통과했고 macOS arm64 package의 ASAR/Fuse, 실제 sidecar ready→status→quit→SQLite clean marker를 확인했다. 증거는 `.artifacts/m5-harness/g3-storage-2026-08-25T06-13-24-654Z.json`이며 G3는 `READY`, G4는 `NOT_READY`다.
-- **다음 할 일**: 이 문서 정합성 변경을 원자적으로 커밋한 뒤 그 exact commit에서 독립 G3 통합 QA를 수행한다. QA가 통과해야 G4 프로젝트 수명주기 계약·구현을 시작한다. push와 `main` 병합은 하지 않는다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-D 실제 package·storage 게이트 연결)
-
-- **한 일**: 독립 승인된 Rust sidecar와 Electron bridge를 순서대로 `m5/coding-agent-ide`에 통합하고, `m5:test:storage`를 G3 계약·Electron failure injection·실제 Rust sidecar 테스트에 연결했다. package smoke는 ASAR/Fuse/sidecar 파일 존재뿐 아니라 외부 sidecar binary를 고유 임시 cwd에서 실행해 v1 `system.ready` 전체 identity, `system.status`, `app.prepareQuit`, exit 0과 실제 SQLite clean marker를 확인한다.
-- **리뷰 수정**: 실패 smoke는 child 종료를 요청한 뒤 bounded `exit`을 기다리고 나서만 임시 cwd를 지우며, cleanup 오류가 원래 protocol/assertion 실패를 덮지 않는다. packaged response는 protocol/schema/stream/instance/capability와 status의 ready identity·DB schema·recovery blocker를 모두 확인한다. 독립 재리뷰가 이 wiring을 승인했다.
-- **검증**: `m5:test:storage`에서 Node 17개와 Rust sidecar 15개가 통과했다. 승인된 네트워크 환경의 macOS arm64 `m5:package:smoke`가 release sidecar build, ASAR/Fuse, ready→status→quit→clean marker를 통과했다. 일반 sandbox의 최초 package 시도는 Electron 다운로드 `fetch failed`였으며 같은 코드의 승인 실행에서 통과했다. 첫 누적 G3 하네스는 자기 테스트가 아직 G3 `NOT_READY`를 기대해 실패했으므로 기대를 G3 `READY`·G4 `NOT_READY`로 전진시키고, 미구현 게이트 검사를 명령 실행 전 exit 2가 나는 G4로 옮겼다. 독립 재리뷰와 하네스 자기 테스트 2개가 통과했다.
-- **다음 할 일**: G3 누적 하네스를 최신 통합 commit에서 실행하고 현행 아키텍처·QA 증거를 기록한다. G4는 그 뒤에만 착수한다.
-
-### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C partial-pipe 종료 수정)
-
-- **한 일**: spawn이 성공했지만 stdin/stdout/stderr pipe 중 하나가 없는 partial child를 검증 전에 main-owned client가 즉시 소유하도록 순서를 고쳤다. 따라서 pipe 검증 실패도 `terminate()` 한 번, pending fail-closed, 재시작 없음으로 같은 수명주기 규칙을 따른다. pipe listener를 붙이기 전 종료하므로 partial child에 listener가 남지 않는다.
-- **검증**: missing stderr fake child가 start reject·terminate 1회·spawn 1회·stdout/stderr data listener 0개를 보장하는 회귀를 추가했다. Electron test 11개, TypeScript no-emit, `git diff --check`를 통과했다.
-- **다음 할 일**: 이 작은 fix를 독립 재리뷰한 뒤 G3-D 실제 sidecar/package handshake를 최신 통합에서 확인한다.
-
-### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron bridge 리뷰 수정)
-
-- **한 일**: 독립 리뷰의 차단점 3건을 닫았다. sidecar transport는 timeout, oversized/invalid stdout, session·identity corruption에서 child `terminate()`를 한 번만 호출하고 모든 pending 요청을 fail-closed로 거부한다. `system.status`의 ready identity·version·capability는 처음 `system.ready`와 정확히 같아야 하며 불일치는 연결 손상이다. stderr는 마지막 32 KiB만 유지하고 제어 문자를 정규화해 unavailable의 기술 detail에만 붙인다. 이는 token/secret redaction이 아니며 기본 UI 문구나 안전 보장으로 쓰지 않는다.
-- **종료 결정**: main-owned coordinator는 safe sidecar 응답 뒤에만 clean exit을 허용한다. 반대로 ready 전 sidecar startup이 실패한 경우에는 clean marker나 재시도를 시도하지 않고, 다음 시작의 unclean recovery 의미를 보존한 채 before-quit 재진입 없이 한 번만 unclean exit을 허용한다. ready 뒤 손상/종료는 이 예외에 포함하지 않는다.
-- **검증**: fake child timeout/oversize/unknown response/identity mismatch 종료 1회, pending reject, stderr tail truncation·control normalization, pre-ready unclean close single-flight를 포함한 Electron test 10개와 TypeScript no-emit, `git diff --check`를 통과했다. 최종 packaged handshake는 G3-D 통합 QA에서 실제 sidecar와 다시 확인한다.
-- **다음 할 일**: 이 fix commit을 독립 재리뷰하고, 승인되면 G3-D sidecar와 함께 package smoke·storage harness를 최신 통합에서 실행한다.
-
-### 2026-08-25 · by GPT-5.6-Terra (M5 G3-C Electron sidecar bridge)
-
-- **한 일**: Electron main/preload에 G2의 세 내부 channel만 연결했다. main은 `system.ready` first JSONL 세션, 3초 ready 제한, 1 MiB bounded stdout framing, request/response 상관관계와 method별 결과 검증을 가진 단일 sidecar client를 소유한다. 알 수 없거나 중복·불일치인 response와 sidecar 종료는 모든 pending 요청을 fail-closed로 거부하며 재시작·자동 재시도를 하지 않는다. renderer에는 versioned `M5BridgeV1`만 노출하고 정확한 listener wrapper를 해제한다.
-- **수명주기·경로 결정**: 내부 IPC는 현재 M5 main window의 top-level frame 및 production `app://m5` 또는 정확한 dev origin만 허용한다. 실제 종료는 main single-flight로 sidecar의 `app.prepareQuit`이 safe 응답을 낸 뒤에만 허용하며 error/unsafe는 앱을 유지한다. production sidecar는 환경 변수 override 없이 `process.resourcesPath/sidecar/hello-agent-sidecar[.exe]`와 `shell:false`, fixed `--stdio`만 사용한다. SQLite path 모호성을 피하기 위해 main이 `app.getPath('userData')/com.wonseokhan.helloagent/m5`를 만들고 정규화한 exact directory를 sidecar `cwd`로 고정한다. Rust sidecar는 이 cwd의 `hello-agent.sqlite3`를 사용한다.
-- **패키징·검증**: Forge package-after-copy 단계가 release sidecar를 app.asar 밖의 fixed `Resources/sidecar` 위치에 넣고 smoke가 존재와 ASAR 외부 위치를 확인한다. fake sidecar 실패 주입으로 chunked/oversized JSONL, ready timeout, pre-ready exit, unknown response, pending rejection, no retry, event unsubscribe와 source-level sender/IPC/quit/package 경계를 검사했다. `node --test --experimental-strip-types tests/m5-electron*.test.mts` 8 PASS, `npx tsc --noEmit --pretty false`, `git diff --check`를 통과했다. shared dependency runtime으로 Forge package를 실행해 main/preload/renderer Vite bundle은 성공했지만 Electron arm64 fetch가 격리 네트워크에서 실패해 sidecar 포함 최종 package smoke는 통합 worktree에서 재실행한다.
-- **다음 할 일**: 독립 코드 리뷰 후 G3 sidecar 구현과 함께 최신 통합에서 storage harness·실제 packaged sidecar smoke를 실행한다. Forge 8 alpha, Windows/Linux package와 macOS plist hardening은 계속 후속 위험이다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-B Rust sidecar·SQLite 구현)
-
-- **한 일**: `hello-agent-sidecar`에 bundled SQLite 단일 owner와 실제 bounded JSONL stdio 서버를 구현했다. 매 연결에서 FK를 켜고 확인한 뒤 migration·integrity·ledger replay를 수행하며, event append와 projection 갱신은 `BEGIN IMMEDIATE` 한 transaction 안에서 처리한다. 같은 operation의 immutable ledger record가 `requestId`만 다르면 no-op, 그 밖의 차이는 conflict다. projection 변조와 손상은 ready 전에 fail-closed한다.
-- **복구·수명주기**: 직전 unclean app instance의 active run/lock 복구를 원장에 한 번만 남기고, persisted `poisoned`/`recovery_required` lock을 항상 status blocker로 유지한다. production은 `--stdio`만 받고 canonical cwd 아래 고정 `hello-agent.sqlite3`만 연다. stdout에는 protocol envelope만 쓰며 1 MiB 전 newline 제한, malformed/partial EOF 거부, pre-ready 오류 stderr+exit 70, `system.status`/`app.prepareQuit`만 제공한다. 정상 종료는 checkpoint와 clean marker 저장 뒤에만 safe 응답하며 stdin EOF만으로는 clean 처리하지 않는다.
-- **검증**: sidecar 포맷·`clippy --no-deps -D warnings`와 locked 테스트 15개(단위 13+실제 binary 2), locked Cargo workspace(Tauri 105 pass/기존 13 ignored, core 66, protocol 10, sidecar 15), `git diff --check`를 통과했다. migration 중간 실패 rollback/retry, event insert 뒤 projection 전 rollback, idempotency conflict, projection tamper, unclean recovery 1회성, poisoned lock 지속, DB symlink, malformed/oversize/partial JSONL, no-ready startup 실패, 실제 ready→status→quit→clean 흐름을 모두 임시 DB에서 주입·검증했다. 저장소 전체 fmt는 소유 밖 기존 `src-tauri/src/detect.rs`·`login.rs` 차이, 의존성 포함 전체 clippy는 소유 밖 기존 `hello-agent-core/src/proctree.rs`의 최신 Rust lint 2건 때문에 각각 실패하며 해당 파일은 건드리지 않았다.
-- **다음 할 일**: 독립 코드 리뷰 뒤 Electron main의 고정 cwd/stdio supervisor 구현과 함께 통합하고 최신 통합 commit에서 G3 하네스·QA를 실행한다. 실제 Windows 번들/경로/locking 동작과 process supervision·강제 종료는 아직 검증하지 않았다. 실제 유료 에이전트·사용자 프로젝트, merge/rebase/push는 수행하지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A FK 실제 migration 검증)
-
-- **한 일**: foreign-key connection-local 계약 테스트를 서로 다른 in-memory DB의 generic parent/child 테이블에서, 하나의 고유 OS 임시 SQLite 파일과 실제 `storage-v1/migration.sql`을 쓰는 시나리오로 교체했다. 연결 A가 실제 migration을 적용해 `foreign_keys=1`을 확인하고 닫은 뒤, 같은 파일을 여는 연결 B는 다시 0으로 시작하며 계약 validator가 저장을 거부한다. B에서 ON→1을 검증한 뒤 실제 `runs.chat_id → chats.chat_id`에 필수 열을 모두 채운 orphan insert가 FK 오류로 거부되고 `runs`에 행이 남지 않음을 확인했다.
-- **안전·검증**: 테스트 DB와 부속 파일은 `mkdtemp`가 만든 고유 OS temp 디렉터리에만 두고 두 연결을 닫은 뒤 `finally`에서 정리해 저장소 산출물을 남기지 않는다. G2+G3 TypeScript contract 13개, Rust 10개, TypeScript no-emit, fmt/check/clippy, G2 fixture 불변과 diff check를 통과했다.
-- **다음 할 일**: 이 최종 P1 fix를 재리뷰하고, sidecar 실제 opener 구현에서도 migration 연결 성공을 후속 runtime 연결의 FK 활성화 증거로 재사용하지 않는지 확인한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 2차 리뷰 수정)
-
-- **한 일**: 모양만 RFC3339인 불가능한 시각을 통과시키던 predecessor 검증을 양 언어에서 실제 Gregorian UTC 달력 검증으로 교체했다. 계약은 `YYYY-MM-DDTHH:mm:ssZ`, 0001~9999년, 실제 월별 일수와 윤년, 00~23시·00~59분·00~59초만 허용한다. `2026-99-99T99:99:99Z`, 숫자 offset, missing/malformed marker는 공통 fixture에서 `unavailable`로 fail-closed한다.
-- **연결별 불변식**: migration 파일 첫 줄의 pragma가 다른 연결에 전파된다고 가정하지 않는다. 모든 sidecar SQLite connection은 open 직후 `PRAGMA foreign_keys = ON;`을 실행하고 `PRAGMA foreign_keys; == 1`을 검증한 뒤에만 migration/read/write와 ready로 진행한다. 실패는 stderr+nonzero exit의 pre-ready `unavailable`이다. lifecycle 시작 순서에도 `storageConnectionVerified`를 migration 앞에 고정했다.
-- **실제 SQLite 검증**: 새 in-memory 연결 두 개를 raw foreign-key default로 열어 각각 0임을 확인하고, 한 연결에서만 ON→1 검증 뒤 FK orphan insert가 거부되는 것을 확인했다. 이는 설정이 connection-local이며 migration pragma만으로 충분하지 않음을 실제 엔진으로 증명한다.
-- **검증**: G2+G3 TypeScript contract 13개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite migration/integrity, G2 fixture 불변과 diff check를 통과했다. 새 crate/npm 의존성과 lockfile 변경은 없다.
-- **다음 할 일**: 이 2차 fix commit을 재리뷰한 뒤 sidecar의 모든 SQLite open 경로가 공통 opener를 강제하고 ready gate와 실제 failure injection을 통과하는지 구현 단계에서 확인한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 독립 리뷰 수정)
-
-- **한 일**: 독립 리뷰의 차단점 4개를 공통 Rust/TypeScript 계약과 language-neutral fixture에서 닫았다. 직전 계약의 claimed `content_hash` 비교는 신뢰 경계가 아니어서 제거하고, 같은 `operation_id`의 재시도는 `request_id`만 제외한 영속 event 레코드 전체가 같을 때만 no-op으로 인정한다. payload·aggregate·event identity 중 하나라도 달라지면 conflict다.
-- **복구 안전**: `previous_app_instance: null`만 이전 실행이 없는 정상 첫 시작이다. 이전 row가 있으면 sidecar identity·pid/platform·시작/heartbeat·event sequence와 explicit nullable `clean_shutdown_at`을 정확히 검증하고 missing/malformed row는 `unavailable`로 fail-closed한다. 정상 종료 row가 있어도 이미 저장된 `poisoned` 또는 `recovery_required` lock은 항상 blocker와 status에 남으며 조용히 정상화하지 않는다.
-- **transaction 계약**: writer는 `BEGIN IMMEDIATE` 안에서 operation lookup → event insert → projection update를 수행하고 commit 뒤에만 위험한 외부 작업을 시작한다. event insert 뒤 projection 전 실패 주입은 두 쓰기를 모두 rollback하며 위험 작업을 시작하지 않는다. duplicate no-op과 conflict 판정도 같은 transaction 안에서 이뤄진다.
-- **검증**: G2+G3 TypeScript contract 12개, Rust protocol/storage/lifecycle 10개, TypeScript no-emit, protocol fmt/check, clippy `-D warnings`, SQLite 7-table migration과 `integrity_check=ok`, G2 fixture 불변과 diff check를 통과했다.
-- **다음 할 일**: 이 fix commit을 독립 재리뷰한 뒤에만 sidecar SQLite writer와 Electron status/quit consumer 구현을 시작한다. 실제 DB writer는 renderer가 제공한 hash나 operation 판정을 신뢰하지 않고 이 transaction/record-equality 계약을 내부에서 수행해야 한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G3-A 저장·수명주기 계약)
-
-- **한 일**: G2 protocol fixture와 공개 bridge 메서드 목록을 그대로 둔 채 G3 구현 착수용 저장·수명주기 계약을 추가했다. SQLite v1은 별도 `userData/com.wonseokhan.helloagent/m5/hello-agent.sqlite3`에 7개 테이블(`schema_meta/app_instances/events/projects/chats/runs/locks`)을 만들며, append-only event 원장은 `request_id`와 별개인 unique `operation_id`·canonical payload·content hash를 영속 키로 쓴다. 같은 operation/content는 재시작 뒤에도 no-op이고 같은 operation의 다른 content는 conflict다. 양 언어 reducer가 공통 replay/projection·unclean recovery fixture를 같은 결과로 만든다.
-- **수명주기 결정**: 내부 channel은 `m5:v1:system:get-status`, `m5:v1:app:prepare-quit`, `m5:v1:sidecar:event`로 고정했다. G3 ready capability는 `system.status/app.prepareQuit` 둘뿐이며 migration·DB integrity·projection replay·unclean recovery가 모두 끝나기 전 `system.ready`를 금지한다. pre-ready 실패는 stderr 증거와 nonzero exit로 끝난다. renderer의 `prepareQuit()`은 상태 조회가 아니라 main 소유 single-flight 실제 종료 조정이며, sidecar는 새 요청 차단·작업 중단·DB checkpoint·clean marker 뒤에만 `safeToQuit: true`를 답한다. production 실행은 `process.resourcesPath/sidecar/hello-agent-sidecar[.exe]`, fixed argv, `shell:false`, stdout protocol/stderr log 분리, 환경 override 금지다.
-- **검증**: 공통 fixture를 읽는 TypeScript G2+G3 contract test 11개와 Rust protocol/storage/lifecycle test 9개, protocol crate check, TypeScript no-emit 검사를 통과했다. SQLite CLI가 migration으로 정확히 7개 테이블을 만들고 `integrity_check=ok`를 냈으며, G2 fixture 경로는 기준 commit과 byte diff가 없고 protocol fmt·`git diff --check`도 통과했다.
-- **다음 할 일**: 독립 계약 리뷰 뒤 sidecar SQLite/stdio 구현과 Electron main/preload 소비자를 각각 별도 소유 worktree에서 구현하고, 최신 통합 commit에서 G3 누적 하네스를 실행한다. G4/G5 project/chat/run 제품 동작은 이 계약에 포함하지 않았다.
-
-### 2026-08-25 · by GPT-5.6-Terra (M5 G2 통합 QA)
-
-- **판정**: 최신 통합 `cd1a9e7`은 `G2_READY`다. TypeScript protocol 4개와 Rust protocol 3개, 프런트 전체 33개, Tauri 회귀 105개/기존 13 ignored를 확인했고, 기존 macOS arm64 패키지에서 ASAR 내용과 V1 Fuse 9개가 모두 통과했다. G2는 `READY`, 아직 구현하지 않은 G3는 성공이나 skip 대신 exit 2 `NOT_READY`로 닫힌다.
-- **증거·잔여 위험**: QA 기록은 `.artifacts/m5-qa/g2-integration-cd1a9e7.md`, 누적 하네스는 `.artifacts/m5-harness/g2-contracts-2026-08-25T04-28-46-065Z.json`이다. QA sandbox의 새 Forge package 재생성은 Electron 다운로드 `fetch failed`에서 멈췄지만, 직전 동일 코드 `f3f41df`의 승인 네트워크 누적 실행과 QA의 기존 package 직접 smoke가 통과했다. Forge 8 alpha, Windows/Linux package, macOS plist hardening은 계속 후속 위험이다.
-- **다음 할 일**: G3 sidecar transport·SQLite migration/replay·preload 경계를 계약 fixture를 바꾸지 않는 별도 worktree에서 착수한다. push와 `main` 병합은 하지 않는다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G2 계약 통합·누적 하네스)
-
-- **한 일**: protocol v1 구현 `bff9b47`과 독립 리뷰 수정 `f949cca`를 재리뷰 승인 뒤 `m5/coding-agent-ide`의 `f3f41df`로 병합했다. 현재 구조를 `architecture.md`에 반영하고, 작업 중 생성될 수 있는 저장소-local `.pnpm-store/`를 Git 추적에서 제외했다. 작업자의 격리 worktree 의존성 재사용 시도가 루트 `node_modules`를 부분 재생성한 사실을 확인해 즉시 중단시켰고, 추적 파일 손상 없이 기존 디렉터리를 `/private/tmp`에 보존한 뒤 frozen install로 깨끗하게 복구했다.
-- **검증**: 독립 재리뷰가 `f949cca`를 승인했다. 최신 통합에서 `node scripts/m5-harness.mjs --gate g2-contracts`가 PASS했고 프런트 33개, Tauri 105개/기존 13 ignored, core 66개, protocol Rust 3개·TypeScript 4개, macOS arm64 Electron package·ASAR·Fuse smoke를 누적 통과했다. 증거는 `.artifacts/m5-harness/g2-contracts-2026-08-25T04-25-54-493Z.json`이다. 일반 sandbox의 두 선행 실행은 의존성/Electron 다운로드 `ENOTFOUND`로 실패했으며 승인된 네트워크 실행에서 같은 게이트가 통과했다.
-- **다음 할 일**: 이 기록 commit의 최신 통합 SHA에서 독립 G2 QA를 수행한다. 통과하면 G3 sidecar transport·SQLite migration/replay·좁은 preload 연결을 새 작업 계약과 별도 worktree로 시작한다. 실제 유료 에이전트·사용자 프로젝트, push와 `main` 병합은 계속 하지 않는다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G2 독립 리뷰 수정)
-
-- **한 일**: 독립 리뷰의 차단 finding 3건을 별도 수정했다. `ProtocolSessionV1` 양쪽 구현은 첫 envelope 전체를 `system.ready`로 고정해 ready 전 request/response/event와 중복 ready를 거부하고, 그 ready의 `sidecarInstanceId`로 세션 신원을 bootstrap한다. Rust `seq`도 JavaScript safe integer 상한 `2^53-1`을 적용했으며, `blob.chunk` payload는 우회 필드 없이 `{ text: string }` 하나만 허용한다. 공통 fixture에 ready 전 세 방향, 중복 ready, 최대 seq/초과 seq, `data` 추가 chunk를 각각 추가하고 기존 valid transcript를 ready-first로 정렬했다.
-- **검증**: `cargo fmt -p hello-agent-protocol -- --check`, locked protocol check/test(3 PASS), `npm run m5:test:contracts`(TypeScript 4 PASS + Rust 3 PASS), 전체 Node unit(33 PASS), locked Cargo workspace(Tauri 105 PASS/13 기존 ignored, core 66 PASS, protocol 3 PASS), `git diff --check`를 통과했다. 공유 `node_modules`와 `.pnpm-store`는 건드리지 않았다.
-- **다음 할 일**: 새 fix commit을 독립 재리뷰하고, 통합 담당이 dependency 복구 뒤 최신 통합 commit에서 G2 누적 harness를 실행한다.
-
-### 2026-08-25 · by GPT-5.6-Sol (M5 G2 protocol·typed bridge 계약)
-
-- **한 일**: Tauri/Electron/SQLite 비의존 `hello-agent-protocol` crate와 동형 TypeScript runtime validator를 추가했다. 언어 중립 manifest와 JSONL fixture가 protocol/schema 버전, method/event 목록, 한계값, canonical encoding, valid/invalid transcript를 단일 기준으로 소유한다. 요청 ID 중복, 응답 상관관계, sidecar instance 변경, stream seq 누락·역전, 필수 run ID 누락, unknown kind/method/event/version, malformed JSON, outcome 불명 오류의 retryable 설정을 fail-closed로 거부한다. `system.ready` identity/capability와 `app.prepareQuit`의 `safeToQuit`/blocker 계약을 고정하고, renderer 공개 타입은 versioned system status·prepare quit·event 구독만 선언했다. 실제 preload wiring, sidecar I/O, SQLite/migration은 만들지 않았다.
-- **검증**: `cargo fmt -p hello-agent-protocol -- --check`, `cargo check -p hello-agent-protocol`, `cargo test -p hello-agent-protocol`(3 PASS), `node --test --experimental-strip-types tests/m5-protocol-contract.test.mts`(4 PASS), 전체 Node unit(33 PASS), `cargo test --workspace --manifest-path Cargo.toml`(Tauri 105 PASS/13 기존 ignored, core 66 PASS, protocol 3 PASS), direct `tsc`+`vite build`, `git diff --check`를 통과했다. `node scripts/m5-harness.mjs --list`는 G2 READY/G3 NOT_READY를 보고했다. 별도 worktree의 `pnpm build`와 누적 G2 harness는 로컬 `node_modules` 부재 뒤 registry `ENOTFOUND`로 자동 설치가 막혀 완료하지 못했으며, 통합 worktree에서 frozen install 복구 후 다시 실행해야 한다.
-- **다음 할 일**: 이 commit의 독립 계약 리뷰 뒤 통합 branch에서 frozen dependency 설치와 G2 누적 harness를 통과시키고, fixture를 바꾸지 않는 G3 sidecar transport/SQLite/preload 구현을 분리 착수한다.
-
-### 2026-08-25 · by GPT-5 Codex (G1 마감·G2 착수 준비)
-
-최신 통합 `9487934`에서 G1 Electron/Rust 기반과 독립 QA의 `G1_READY` 기록을 마쳤다. 새 G2 기록을 추가하기 전에 500줄이 된 워크로그의 2026-08-24 엔트리 전체를 날짜 경계대로 `archive/history-2026-08.md`로 이동해 현재 파일을 300줄 이하로 줄였다. 다음 작업은 protocol v1·SQLite schema·golden recovery fixture를 한 계약 담당이 먼저 고정하는 것이며, sidecar/Electron 구현은 그 fixture 승인 전 시작하지 않는다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G1 Electron Forge 8 scaffold)
-- **한 일**: 별도 `m5/electron-forge8-spike`에서 Forge 8 alpha scaffold, local-only M5 renderer, `app://m5` ASAR handler, navigation/webview 차단, narrow preload, Fuse/ASAR packaging과 G1 실제 harness 명령을 추가했다. 독립 리뷰 P1의 `file:` 추가 권한을 V1 9개 strict fuse와 실제 package API/ASAR smoke로 닫고 승인받아 `0b9f769`까지 `m5/coding-agent-ide`에 fast-forward 통합했으며 현행 구조를 `architecture.md`에 반영했다.
-- **검증**: 최신 통합 `8374a2a` QA가 `G1_READY`로 판정됐다. frozen pnpm install(hoisted), `npm test` 29 PASS, Tauri 105 pass/13 ignored, core 66 PASS, macOS arm64 package·ASAR renderer·V1 fuse 9개·임시 user-data 기동이 통과했으며 증거는 `.artifacts/m5-harness/g1-foundation-2026-08-25T03-48-40-974Z.json`이다.
-- **다음 할 일**: G2 protocol/SQLite 계약을 시작한다. Forge alpha, Windows/Linux package, macOS 기본 plist의 광범위한 ATS/미디어 문자열 hardening, 정상 Quit 자동화 미검증, 실제 사용자 프로젝트·유료 에이전트 smoke는 후속 또는 별도 승인 범위다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust 통합·Electron 공급망 차단)
-
-- **한 일**: G0 계약을 고정하고 Rust/Electron worktree를 병렬 착수했다. Rust core 추출 `a8ca909`와 리뷰 수정 `bacf273`을 독립 리뷰 승인 뒤 `m5/coding-agent-ide`에 fast-forward 통합했다
-- **검증**: fresh baseline과 통합 후 `pnpm test:harness` PASS, workspace 171개 통과·13개 기존 ignored, sidecar check와 diff check 통과
-- **차단**: Forge `7.11.2` 설치가 pnpm `ERR_PNPM_EXOTIC_SUBDEP`로 실패했다. `blockExoticSubdeps: false`는 전이 Git/tarball 전체를 허용하므로 적용·커밋하지 않았다
-- **다음 할 일**: 사용자가 Forge 8 prerelease 실험, 공급망 예외 승인, 또는 Forge stable 대기/패키징 기준 변경 중 하나를 결정하면 Electron scaffold 검증·리뷰·통합을 재개한다
-
-### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust core 리뷰 P1 수정)
-
-독립 리뷰에서 루트 Cargo workspace가 기본 `target/`을 만들지만 저장소 ignore가 `src-tauri/target/`만 전제로 해 생성물이 추적 후보가 된 P1을 확인했다. `.gitignore`에 저장소 루트만 가리키는 `/target/` 한 줄을 추가했으며 다른 ignore 규칙은 바꾸지 않았다. `cargo test --workspace --locked -q`에서 Tauri 105개와 core 66개가 통과하고 기존 13개 승인 필요 테스트만 무시됐으며, 이후 `git status --short`에 `target/`이 나타나지 않고 `git diff --check`가 통과했다.
-
-**다음 할 일**: 이 수정 commit을 포함해 독립 재리뷰와 통합 branch 하네스를 수행한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 G1 Rust 안전 코어 추출)
-
-`m5/rust-core-extraction` worktree에서 루트 Cargo workspace와 canonical `Cargo.lock`을 만들고, 기존 Tauri crate의 `Agent`·`AppError`·프로세스 트리 종료 계약(F1~F8)·Claude/Codex 실행 계약 및 66개 직접 테스트를 `crates/hello-agent-core`로 옮겼다. Tauri 쪽 기존 모듈은 core를 다시 내보내는 한 줄 shim이라 `handoff.rs`와 `orchestration.rs`는 수정하지 않았다. `hello-agent-sidecar`는 core를 링크하는 빈 실행 골격뿐이며 protocol·SQLite·Electron 계약은 추가하지 않았다. core 직접 의존성은 `serde`·`serde_json`·macOS 프로세스 조회용 `libc`뿐임을 `cargo tree`로 확인했다.
-
-검증은 `cargo test --workspace --offline`에서 Tauri 105개와 core 66개가 통과하고 기존 13개 승인 필요 테스트만 무시됐으며, `cargo test --manifest-path src-tauri/Cargo.toml --offline`, `cargo check -p hello-agent-sidecar --offline`, 소유 파일별 rustfmt, `git diff --check`가 통과했다. F1 재부모화, F2 유예 중 자손, F3 별도 그룹, F4 신호 실패, F5/F7 PID 재사용, F6 정상 종료 뒤 배경 자손, F8 일시적 조회 무결성 실패를 포함한 기존 실패 주입을 core에서 그대로 실행했다. 정확한 `cargo fmt --all -- --check`는 이번 변경 전부터 있던 소유 밖 `src-tauri/src/detect.rs`와 `src-tauri/src/login.rs` 포맷 차이를 보고해 실패하며 두 파일은 계약대로 건드리지 않았다. 별도 worktree의 `pnpm test:harness`는 `node_modules`가 없어 네트워크 설치 단계에서 중단했고, 통합 담당이 의존성이 준비된 통합 branch에서 실행하기로 했다.
-
-**다음 할 일**: 독립 코드 리뷰에서 추출 경계와 기존 M4 의미 보존을 확인하고, 통합 branch에서 하네스·macOS/Windows QA를 통과한 뒤 G2 protocol/SQLite 계약을 별도 작업으로 시작한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 구현 착수 승인)
-
-사용자가 M5 기능 커밋·통합 상시 승인 규칙을 커밋하고 실제 구현을 시작하라고 승인했다. 이 규칙 변경을 `m5/coding-agent-ide`의 새 기준 commit으로 만든 뒤, 같은 commit에서 G0 baseline 하네스와 `m5_architect`의 경계·의존성 분석을 병렬 실행한다. 둘 다 통과하면 G1 Electron scaffold와 Rust core 추출을 겹치지 않는 기능 branch/worktree로 분기하며, 이후 작업 계약 범위의 기능 커밋과 검증된 통합은 재승인 없이 진행한다. push와 `main` 병합은 하지 않는다.
-
-**다음 할 일**: 자동 승인 기준 commit 생성 → G0 baseline/아키텍처 분석 → G1 작업 계약과 worktree 분기.
-
-### 2026-08-25 · by GPT-5 Codex (M5 기능 커밋·통합 상시 승인 명시)
-
-사용자가 M5 작업 중 기능 커밋과 통합 승인 여부를 매번 묻지 않도록 상시 승인 범위를 명시해 달라고 요청했다. 작업 계약에 지정된 기능 worktree의 원자적 구현·테스트·리뷰 수정 커밋과, 독립 리뷰 및 해당 하네스·QA를 통과한 commit의 `m5/coding-agent-ide` 통합은 M5 전체 완료까지 자동 승인된 것으로 루트 작업 규칙과 오케스트레이션 절차에 고정했다. 구현 담당의 merge/rebase/cherry-pick/push 금지와 통합 담당 단일 소유는 유지한다. push, `main` 병합, 범위 밖 변경, 안전·제품 확정 결정 변경, 실제 유료 에이전트·사용자 프로젝트·파괴적 시험, 외부 게시는 계속 별도 승인을 받는다. 아직 이 규칙 변경 자체는 커밋하지 않았다.
-
-**다음 할 일**: 이 규칙 변경을 기준 commit으로 만든 뒤, 별도 재승인 없이 Gate 0와 G1 기능 branch/worktree 작업을 시작한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 기계 검증 하네스 커밋 승인)
-
-사용자가 M5 기계 검증 하네스와 CI 연결 변경의 커밋을 승인했다. `baseline` 실제 통과 증거, G1~G6의 누적 `NOT_READY` 게이트, 하네스 자기 테스트, macOS/Windows artifact 업로드와 연결 문서를 하나의 독립 기준선으로 `m5/coding-agent-ide`에 기록한다. `main` 병합과 push는 하지 않는다.
-
-**다음 할 일**: 이 기준 commit에서 G1 기능 branch/worktree를 분기하고 `m5:test:electron`·`m5:test:core`를 실제 scaffold/core 검증에 연결한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 기계 검증 하네스 선설정)
-
-사용자 요청에 따라 M5 구현 전에 모든 작업자와 통합 담당이 같은 검증을 실행하도록 `scripts/m5-harness.mjs`를 추가했다. 현재 `baseline`은 diff check, 프런트 빌드·unit, 기존 Rust 회귀를 실제 실행하며, G1~G6는 명세의 단계별 검증 script 이름을 예약하고 앞 단계를 누적 실행한다. 구현되지 않은 script는 성공이나 skip이 아니라 `NOT_READY`와 exit code 2로 판정한다. 실행 결과는 branch·commit·dirty 상태·명령·exit code·소요 시간·stdout/stderr를 담은 versioned JSON으로 `.artifacts/m5-harness/`에 남긴다. macOS/Windows CI도 같은 명령을 쓰고 결과 artifact를 보존하도록 연결했다. 하네스 목록과 미준비 판정 회귀 2개를 포함한 프런트 26개, Rust 171개, 빌드와 diff check가 `baseline`에서 통과했으며 증거는 `.artifacts/m5-harness/baseline-2026-08-25T02-11-08-072Z.json`이다. 아직 커밋하거나 push하지 않았다.
-
-**다음 할 일**: 이 하네스 설정을 기준 commit으로 만들고, G1 담당이 `m5:test:electron`과 `m5:test:core`를 실제 검증 명령에 연결한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5.0 명세·멀티에이전트 기준선 커밋 승인)
-
-사용자가 M5 구현 전에 준비한 Electron/Rust 수직 스파이크 명세와 멀티에이전트 운영·역할 설정 묶음의 커밋을 승인했다. 커밋 범위는 `m5-electron-spike.md`, `.codex/config.toml`과 M5 역할 8개, 공통 오케스트레이션 절차, `.worktrees/` 제외 규칙, 연결된 루트 작업 규칙·문서 색인·워크로그로 한정한다. `m5/coding-agent-ide`에 M5.0 착수 기준선으로 기록하며 `main` 병합과 push는 하지 않는다.
-
-**다음 할 일**: 이 기준 commit에서 Gate 0 기준선 검증을 수행하고, 확정된 작업 계약에 따라 첫 기능 branch/worktree를 분기한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5 프로젝트 서브에이전트 역할 설정)
-
-사용자 요청에 따라 문서 절차에 그치지 않고 Codex가 실제로 읽는 프로젝트 설정을 추가했다. 공식 Codex 문서에서 신뢰된 프로젝트의 `.codex/config.toml`, `.codex/agents/*.toml`, 역할별 `model`·`model_reasoning_effort`·`sandbox_mode`, 동시 thread 상한을 확인했다. 기본 동시 상한은 3개로 두고, M5 설계·계약·Electron·Rust 안전 코어·UI·독립 코드 리뷰·통합 QA·최종 게이트의 8개 역할을 책임과 권한별로 분리했다. 설계·리뷰·게이트는 읽기 전용이고, 구현 역할도 매 작업의 별도 worktree·소유 파일 계약 없이는 범위를 얻지 않는다. 직전 엔트리의 “공식 근거가 없는 임의 `.codex` 설정 키는 만들지 않았다”는 당시 조사 상태였으며, 이번에 확인한 공식 프로젝트 역할 형식으로 보완·정정한다. 아직 커밋하거나 push하지 않았다.
-
-**다음 할 일**: 설정과 M5.0 구현 명세를 함께 사용자 검토·승인한 뒤 기준 commit으로 만들고, 그 commit에서 `m5_architect`의 Gate 0 분석과 역할별 기능 worktree를 시작한다.
-
-### 2026-08-25 · by GPT-5 Codex (멀티 에이전트 저장소 설정 추가)
-
-사용자 지적대로 M5 구현 지시보다 먼저 멀티 에이전트 운영 기반을 저장소에 추가했다. 공식 OpenAI 문서가 권장하는 명시적 위임 범위·테스트 기대치·합격/중단 조건을 반영하되, 공식 근거가 없는 임의 `.codex` 설정 키는 만들지 않았다. 대신 `docs/procedures/multi-agent-orchestration.md`에 통합 담당·작업 계약·branch/worktree 격리·단일 파일 소유·파동식 실행·독립 리뷰/QA·중단 게이트를 고정하고, `AGENTS.md`/`CLAUDE.md`에 필수 규칙을 동일하게 반영했다. `.worktrees/`를 Git에서 제외하고 M5.0 명세와 문서 색인을 새 절차에 연결했다. 변경은 아직 커밋하지 않았다.
-
-**다음 할 일**: 설정 변경과 M5.0 구현 명세를 사용자 검토 뒤 기준 commit으로 만들고, 그 commit에서 Gate 0 검증과 첫 기능 worktree를 시작한다.
-
-### 2026-08-25 · by GPT-5 Codex (M5.0 멀티 에이전트 오케스트레이션 제안)
-
-M5.0 구현을 여러 에이전트에게 맡길 운영 방식을 저장소 경계·코드 리뷰·QA 관점에서 독립 검토했다. `m5/coding-agent-ide`는 통합 전용으로 두고 실제 별도 Git worktree/기능 브랜치에서 파일 소유권을 나누며, 한 명의 오케스트레이터만 통합·공유 manifest/lockfile·최종 워크로그를 관리하는 구조가 적합하다. 구현자는 동시에 2~3명으로 제한하고 `명세 커밋 → Electron scaffold/Rust core → protocol fixture 고정 → sidecar와 renderer 병렬 → 통합 hardening`의 파동식 순서를 권장한다. 각 기능은 독립 코드 리뷰와 최신 통합 브랜치 QA를 통과한 뒤에만 병합하며, 실제 macOS 에이전트 smoke는 비용·로그인·사용자 프로젝트 영향 때문에 별도 사용자 승인 게이트로 둔다. 이번에는 운영 방안만 분석했고 구현·커밋·push는 하지 않았다.
-
-**다음 할 일**: 사용자가 현재 미커밋 M5.0 명세 커밋과 기능 브랜치 커밋/통합 권한의 범위를 승인하면, 기준 커밋에서 worktree를 만들고 G0 기준선 검증부터 시작한다.
-
-
-### 2026-08-24 및 그 이전 → `docs/archive/history-2026-08.md`
-
-2026-08-12 ~ 2026-08-24 엔트리를 날짜 경계로 아카이브했다. M4의 현재 결론은 `docs/proposals/m4-orchestration.md`에 있으므로 통상 아카이브를 열 필요는 없다.
+2026-08-12 ~ 2026-08-25 엔트리를 날짜 경계로 아카이브했다. M4의 현재 결론은 `docs/proposals/m4-orchestration.md`에 있으므로 통상 아카이브를 열 필요는 없다.
 
 ### 2026-07-23 및 그 이전 → `docs/archive/history-2026-07.md`
 
