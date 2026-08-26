@@ -6,6 +6,7 @@ use std::fmt::{self, Display};
 
 pub mod lifecycle_v1;
 pub mod project_v1;
+pub mod run_recovery_v1;
 pub mod storage_v1;
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -27,6 +28,8 @@ pub const METHODS_V1: &[&str] = &[
     "file.watch",
     "diff.getSummary",
     "diff.getFile",
+    "project.getRoleSettings",
+    "project.updateRoleSettings",
     "chat.create",
     "chat.list",
     "chat.get",

@@ -1,0 +1,1137 @@
+use serde_json::{Map, Value};
+use std::collections::HashSet;
+use std::error::Error;
+use std::fmt::{self, Display};
+
+pub const G5_SCHEMA_VERSION_V1: u64 = 1;
+pub const G5_ROLE_IDS_V1: &[&str] = &["planning", "coding", "review"];
+pub const G5_RUNTIMES_V1: &[&str] = &["codex", "claude-code"];
+pub const G5_PERMISSIONS_V1: &[&str] = &["readOnly", "workspaceWrite"];
+pub const G5_CHAT_STATES_V1: &[&str] = &[
+    "draft",
+    "preparing",
+    "running",
+    "waitingForUser",
+    "reviewReady",
+    "applying",
+    "completed",
+    "needsAttention",
+    "recoveryRequired",
+    "canceled",
+    "discarded",
+];
+pub const G5_RUN_STATES_V1: &[&str] = &[
+    "preparing",
+    "running",
+    "cancelling",
+    "succeeded",
+    "failed",
+    "canceled",
+    "recoveryRequired",
+];
+pub const G5_RUN_STAGES_V1: &[&str] = &["planning", "implementing", "verifying"];
+pub const G5_FIXTURE_SCENARIOS_V1: &[&str] = &[
+    "planning-success",
+    "coding-success",
+    "review-success",
+    "cancel-clean",
+    "cancel-uncertain",
+];
+pub const G5_PAGE_MAX_ITEMS_V1: usize = 100;
+pub const G5_EVENT_PAGE_MAX_ITEMS_V1: usize = 50;
+pub const G5_MODEL_SELECTOR_MAX_BYTES_V1: usize = 256;
+pub const G5_REASONING_EFFORT_MAX_BYTES_V1: usize = 64;
+pub const G5_GOAL_MAX_BYTES_V1: usize = 16 * 1024;
+pub const G5_PUBLIC_MESSAGE_MAX_BYTES_V1: usize = 64 * 1024;
+
+pub const G5_CAPABILITIES_V1: &[&str] = &[
+    "system.status",
+    "app.prepareQuit",
+    "project.open",
+    "project.getTree",
+    "project.createWorktree",
+    "project.close",
+    "file.read",
+    "file.save",
+    "file.watch",
+    "diff.getSummary",
+    "diff.getFile",
+    "project.getRoleSettings",
+    "project.updateRoleSettings",
+    "chat.create",
+    "chat.list",
+    "chat.get",
+    "run.startFixture",
+    "run.cancel",
+    "recovery.list",
+    "recovery.inspect",
+    "recovery.markResolved",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct G5ContractError {
+    detail: String,
+}
+
+impl G5ContractError {
+    fn new(detail: impl Into<String>) -> Self {
+        Self {
+            detail: detail.into(),
+        }
+    }
+}
+
+impl Display for G5ContractError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl Error for G5ContractError {}
+
+pub fn validate_g5_payload_v1(validator: &str, value: &Value) -> Result<(), G5ContractError> {
+    match validator {
+        "roleProfile" => validate_role_profile(value).map(|_| ()),
+        "projectRoleSettings" => validate_project_role_settings(value).map(|_| ()),
+        "projectRoleSettingsUpdate" => validate_project_role_settings_update(value),
+        "chatCreateRequest" => validate_chat_create_request(value).map(|_| ()),
+        "chatRecord" => validate_chat_record(value).map(|_| ()),
+        "teamMessage" => validate_team_message(value).map(|_| ()),
+        "runRecord" => validate_run_record(value).map(|_| ()),
+        "runTransition" => validate_run_transition(value),
+        "chatCreation" => validate_chat_creation(value),
+        "chatDetailPage" => validate_chat_detail_page(value),
+        "chatListPage" => validate_chat_list_page(value),
+        "chatListRequest" => validate_chat_list_request(value),
+        "chatGetRequest" => validate_chat_get_request(value),
+        "pageRequest" => validate_page_request(value, G5_PAGE_MAX_ITEMS_V1),
+        "fixtureRunStart" => validate_fixture_run_start(value).map(|_| ()),
+        "runCancelRequest" => validate_run_cancel_request(value),
+        "writerStart" => validate_writer_start(value),
+        "recoveryRecord" => validate_recovery_record(value).map(|_| ()),
+        "recoveryPage" => validate_recovery_page(value),
+        "recoveryMarkResolved" => validate_recovery_mark_resolved(value).map(|_| ()),
+        "recoveryResolution" => validate_recovery_resolution(value),
+        "g5Ready" => validate_g5_ready(value),
+        other => fail(format!("unknown G5 payload validator: {other}")),
+    }
+}
+
+pub fn assert_g5_capabilities_v1() -> Result<(), G5ContractError> {
+    if G5_CAPABILITIES_V1
+        .iter()
+        .any(|capability| !super::METHODS_V1.contains(capability))
+    {
+        return fail("G5 capability is not reserved by protocol v1");
+    }
+    if G5_CAPABILITIES_V1.contains(&"run.startAgentSmoke") {
+        return fail("agent smoke must remain unadvertised");
+    }
+    let unique: HashSet<_> = G5_CAPABILITIES_V1.iter().collect();
+    if unique.len() != G5_CAPABILITIES_V1.len() {
+        return fail("G5 capabilities must be unique");
+    }
+    Ok(())
+}
+
+pub fn validate_g5_ready_payload_v1(value: &Value) -> Result<(), G5ContractError> {
+    let ready: super::ReadyPayloadV1 = serde_json::from_value(value.clone())
+        .map_err(|error| G5ContractError::new(format!("invalid G5 ready payload: {error}")))?;
+    let event = super::EventV1 {
+        protocol_version: super::PROTOCOL_VERSION,
+        kind: "event".to_string(),
+        sidecar_instance_id: ready.sidecar_instance_id.clone(),
+        stream_id: "system".to_string(),
+        seq: 1,
+        event: "system.ready".to_string(),
+        chat_id: None,
+        task_id: None,
+        run_id: None,
+        payload: value.clone(),
+    };
+    super::ready_payload(&event)
+        .map_err(|error| G5ContractError::new(format!("invalid G5 ready identity: {error}")))?;
+    if ready.protocol_version != super::PROTOCOL_VERSION
+        || ready.sidecar_schema_version != super::SIDECAR_SCHEMA_VERSION
+        || ready.app_schema_version != super::APP_SCHEMA_VERSION
+    {
+        return fail("G5 ready identity versions do not match v1");
+    }
+    if !ready
+        .capabilities
+        .iter()
+        .map(String::as_str)
+        .eq(G5_CAPABILITIES_V1.iter().copied())
+    {
+        return fail("G5 ready capabilities do not match the exact supported method set");
+    }
+    Ok(())
+}
+
+fn validate_g5_ready(value: &Value) -> Result<(), G5ContractError> {
+    validate_g5_ready_payload_v1(value)
+}
+
+fn validate_role_profile(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "role profile")?;
+    exact_keys(
+        object,
+        &[
+            "roleId",
+            "runtime",
+            "modelSelector",
+            "reasoningEffort",
+            "permission",
+        ],
+    )?;
+    let role = one_of(object.get("roleId"), G5_ROLE_IDS_V1, "roleId")?;
+    one_of(object.get("runtime"), G5_RUNTIMES_V1, "runtime")?;
+    bounded_text(
+        object.get("modelSelector"),
+        "modelSelector",
+        G5_MODEL_SELECTOR_MAX_BYTES_V1,
+    )?;
+    if !object.get("reasoningEffort").is_some_and(Value::is_null) {
+        bounded_text(
+            object.get("reasoningEffort"),
+            "reasoningEffort",
+            G5_REASONING_EFFORT_MAX_BYTES_V1,
+        )?;
+    }
+    let permission = one_of(object.get("permission"), G5_PERMISSIONS_V1, "permission")?;
+    let expected = if role == "coding" {
+        "workspaceWrite"
+    } else {
+        "readOnly"
+    };
+    if permission != expected {
+        return fail(format!("{role} permission must be {expected}"));
+    }
+    Ok(object)
+}
+
+fn validate_project_role_settings(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "project role settings")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "projectId",
+            "revision",
+            "roles",
+            "updatedAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    id(object.get("projectId"), "projectId")?;
+    positive(object.get("revision"), "settings revision")?;
+    validate_role_set(object.get("roles"), "roles")?;
+    timestamp(object.get("updatedAt"), "updatedAt")?;
+    Ok(object)
+}
+
+fn validate_project_role_settings_update(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "project role settings update")?;
+    exact_keys(object, &["projectId", "expectedRevision", "roles"])?;
+    id(object.get("projectId"), "projectId")?;
+    positive(object.get("expectedRevision"), "expectedRevision")?;
+    validate_role_set(object.get("roles"), "roles")
+}
+
+fn validate_chat_create_request(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "chat create request")?;
+    exact_keys(
+        object,
+        &[
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "goal",
+            "expectedSettingsRevision",
+        ],
+    )?;
+    for field in ["projectId", "worktreeId", "workspaceIdentity"] {
+        id(object.get(field), field)?;
+    }
+    bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
+    positive(
+        object.get("expectedSettingsRevision"),
+        "expectedSettingsRevision",
+    )?;
+    Ok(object)
+}
+
+fn validate_chat_record(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "chat record")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "chatId",
+            "taskId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "goal",
+            "settingsRevision",
+            "roleSnapshots",
+            "state",
+            "createdAt",
+            "updatedAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    for field in [
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(object.get(field), field)?;
+    }
+    bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
+    positive(object.get("settingsRevision"), "settingsRevision")?;
+    validate_role_set(object.get("roleSnapshots"), "roleSnapshots")?;
+    one_of(object.get("state"), G5_CHAT_STATES_V1, "chat state")?;
+    timestamp(object.get("createdAt"), "createdAt")?;
+    timestamp(object.get("updatedAt"), "updatedAt")?;
+    Ok(object)
+}
+
+fn validate_team_message(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "team message")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "messageId",
+            "chatId",
+            "taskId",
+            "worktreeId",
+            "eventSequence",
+            "kind",
+            "roleId",
+            "runId",
+            "text",
+            "createdAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    for field in ["messageId", "chatId", "taskId", "worktreeId"] {
+        id(object.get(field), field)?;
+    }
+    positive(object.get("eventSequence"), "eventSequence")?;
+    let kind = one_of(
+        object.get("kind"),
+        &["user", "role", "system", "status"],
+        "message kind",
+    )?;
+    bounded_text(
+        object.get("text"),
+        "public message text",
+        G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
+    )?;
+    timestamp(object.get("createdAt"), "createdAt")?;
+    if kind == "role" {
+        one_of(object.get("roleId"), G5_ROLE_IDS_V1, "roleId")?;
+        id(object.get("runId"), "runId")?;
+    } else {
+        if !object.get("roleId").is_some_and(Value::is_null) {
+            return fail("non-role message roleId must be null");
+        }
+        if kind == "user" && !object.get("runId").is_some_and(Value::is_null) {
+            return fail("user message runId must be null");
+        }
+        if !object.get("runId").is_some_and(Value::is_null) {
+            id(object.get("runId"), "runId")?;
+        }
+    }
+    Ok(object)
+}
+
+fn validate_run_record(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "run record")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "runId",
+            "chatId",
+            "taskId",
+            "worktreeId",
+            "workspaceIdentity",
+            "selectedProfile",
+            "fixtureScenario",
+            "state",
+            "stage",
+            "terminationEvidence",
+            "createdAt",
+            "updatedAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    for field in [
+        "runId",
+        "chatId",
+        "taskId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(object.get(field), field)?;
+    }
+    let profile = validate_role_profile(required(object, "selectedProfile")?)?;
+    one_of(
+        object.get("fixtureScenario"),
+        G5_FIXTURE_SCENARIOS_V1,
+        "fixture scenario",
+    )?;
+    let state = one_of(object.get("state"), G5_RUN_STATES_V1, "run state")?;
+    let stage = one_of(object.get("stage"), G5_RUN_STAGES_V1, "run stage")?;
+    let expected_stage = match profile.get("roleId").and_then(Value::as_str) {
+        Some("planning") => "planning",
+        Some("coding") => "implementing",
+        Some("review") => "verifying",
+        _ => return fail("unknown selected role snapshot"),
+    };
+    if stage != expected_stage {
+        return fail("run stage does not match selected role snapshot");
+    }
+    if ["preparing", "running", "cancelling"].contains(&state) {
+        if !object
+            .get("terminationEvidence")
+            .is_some_and(Value::is_null)
+        {
+            return fail("active run cannot have termination evidence");
+        }
+    } else {
+        validate_termination_evidence(required(object, "terminationEvidence")?, state)?;
+    }
+    timestamp(object.get("createdAt"), "createdAt")?;
+    timestamp(object.get("updatedAt"), "updatedAt")?;
+    Ok(object)
+}
+
+fn validate_run_transition(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "run transition")?;
+    exact_keys(object, &["before", "after"])?;
+    let before = validate_run_record(required(object, "before")?)?;
+    let after = validate_run_record(required(object, "after")?)?;
+    for field in [
+        "runId",
+        "chatId",
+        "taskId",
+        "worktreeId",
+        "workspaceIdentity",
+        "fixtureScenario",
+    ] {
+        if before.get(field) != after.get(field) {
+            return fail(format!("run transition changed {field}"));
+        }
+    }
+    if before.get("selectedProfile") != after.get("selectedProfile") {
+        return fail("run transition changed selectedProfile");
+    }
+    let from = string(before.get("state"), "before state")?;
+    let to = string(after.get("state"), "after state")?;
+    let allowed: &[&str] = match from {
+        "preparing" => &["running", "cancelling", "failed", "recoveryRequired"],
+        "running" => &["cancelling", "succeeded", "failed", "recoveryRequired"],
+        "cancelling" => &["canceled", "recoveryRequired"],
+        _ => &[],
+    };
+    if !allowed.contains(&to) {
+        return fail(format!("invalid run transition {from} -> {to}"));
+    }
+    Ok(())
+}
+
+fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat creation transcript")?;
+    exact_keys(
+        object,
+        &["request", "currentSettings", "createdChat", "outcome"],
+    )?;
+    let request = self::object(required(object, "request")?, "chat create request")?;
+    exact_keys(
+        request,
+        &[
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "goal",
+            "expectedSettingsRevision",
+        ],
+    )?;
+    for field in ["projectId", "worktreeId", "workspaceIdentity"] {
+        id(request.get(field), field)?;
+    }
+    bounded_text(request.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
+    positive(
+        request.get("expectedSettingsRevision"),
+        "expectedSettingsRevision",
+    )?;
+    let settings = validate_project_role_settings(required(object, "currentSettings")?)?;
+    let outcome = one_of(
+        object.get("outcome"),
+        &["created", "settingsDrift", "identityMismatch"],
+        "chat create outcome",
+    )?;
+    if outcome == "created" {
+        let chat = validate_chat_record(required(object, "createdChat")?)?;
+        if request.get("projectId") != settings.get("projectId")
+            || chat.get("projectId") != request.get("projectId")
+            || chat.get("worktreeId") != request.get("worktreeId")
+            || chat.get("workspaceIdentity") != request.get("workspaceIdentity")
+        {
+            return fail("created chat identity mismatch");
+        }
+        if request.get("expectedSettingsRevision") != settings.get("revision")
+            || chat.get("settingsRevision") != settings.get("revision")
+        {
+            return fail("created chat settings revision drift");
+        }
+        if chat.get("roleSnapshots") != settings.get("roles") {
+            return fail("created chat did not snapshot exact roles");
+        }
+    } else {
+        if !object.get("createdChat").is_some_and(Value::is_null) {
+            return fail("failed chat creation cannot return a chat");
+        }
+        if outcome == "settingsDrift"
+            && request.get("expectedSettingsRevision") == settings.get("revision")
+        {
+            return fail("settingsDrift requires a revision mismatch");
+        }
+        if outcome == "identityMismatch" && request.get("projectId") == settings.get("projectId") {
+            return fail("identityMismatch requires a project mismatch");
+        }
+    }
+    Ok(())
+}
+
+fn validate_chat_detail_page(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat detail page")?;
+    exact_keys(
+        object,
+        &[
+            "chat",
+            "afterEventSequence",
+            "messages",
+            "runs",
+            "nextEventSequence",
+        ],
+    )?;
+    let chat = validate_chat_record(required(object, "chat")?)?;
+    let after = unsigned(object.get("afterEventSequence"), "afterEventSequence")?;
+    let messages = array(
+        object.get("messages"),
+        "messages",
+        G5_EVENT_PAGE_MAX_ITEMS_V1,
+    )?;
+    let runs = array(object.get("runs"), "runs", G5_EVENT_PAGE_MAX_ITEMS_V1)?;
+    let mut previous = after;
+    for message in messages {
+        let message = validate_team_message(message)?;
+        same_chat_identity(chat, message)?;
+        let sequence = positive(message.get("eventSequence"), "eventSequence")?;
+        if sequence != previous + 1 {
+            return fail("durable eventSequence must be contiguous and ordered");
+        }
+        previous = sequence;
+    }
+    for run in runs {
+        same_chat_identity(chat, validate_run_record(run)?)?;
+    }
+    if !object.get("nextEventSequence").is_some_and(Value::is_null) {
+        let next = positive(object.get("nextEventSequence"), "nextEventSequence")?;
+        if next != previous {
+            return fail("nextEventSequence must equal the last returned durable event sequence");
+        }
+    }
+    Ok(())
+}
+
+fn validate_chat_list_page(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat list page")?;
+    exact_keys(object, &["projectId", "items", "nextCursor"])?;
+    let project_id = id(object.get("projectId"), "projectId")?;
+    let chats = array(object.get("items"), "chat items", G5_PAGE_MAX_ITEMS_V1)?;
+    let mut worktrees = HashSet::new();
+    let mut workspaces = HashSet::new();
+    for chat in chats {
+        let chat = validate_chat_record(chat)?;
+        if chat.get("projectId").and_then(Value::as_str) != Some(project_id) {
+            return fail("chat list project mismatch");
+        }
+        let worktree = string(chat.get("worktreeId"), "worktreeId")?;
+        let workspace = string(chat.get("workspaceIdentity"), "workspaceIdentity")?;
+        if !worktrees.insert(worktree) || !workspaces.insert(workspace) {
+            return fail("chat/worktree/workspace binding must be 1:1");
+        }
+    }
+    if !object.get("nextCursor").is_some_and(Value::is_null) {
+        bounded_text(object.get("nextCursor"), "nextCursor", 512)?;
+    }
+    Ok(())
+}
+
+fn validate_chat_list_request(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat list request")?;
+    exact_keys(object, &["projectId", "cursor", "limit"])?;
+    id(object.get("projectId"), "projectId")?;
+    validate_page_fields(object, G5_PAGE_MAX_ITEMS_V1)
+}
+
+fn validate_chat_get_request(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "chat get request")?;
+    exact_keys(object, &["chatId", "afterEventSequence", "cursor", "limit"])?;
+    id(object.get("chatId"), "chatId")?;
+    unsigned(object.get("afterEventSequence"), "afterEventSequence")?;
+    validate_page_fields(object, G5_EVENT_PAGE_MAX_ITEMS_V1)
+}
+
+fn validate_page_request(value: &Value, maximum: usize) -> Result<(), G5ContractError> {
+    let object = object(value, "page request")?;
+    exact_keys(object, &["cursor", "limit"])?;
+    if !object.get("cursor").is_some_and(Value::is_null) {
+        bounded_text(object.get("cursor"), "cursor", 512)?;
+    }
+    let limit = positive(object.get("limit"), "page limit")?;
+    if limit > maximum as u64 {
+        return fail(format!("page limit exceeds {maximum}"));
+    }
+    Ok(())
+}
+
+fn validate_fixture_run_start(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "fixture run request")?;
+    exact_keys(object, &["chatId", "roleId", "scenario"])?;
+    id(object.get("chatId"), "chatId")?;
+    one_of(object.get("roleId"), G5_ROLE_IDS_V1, "roleId")?;
+    one_of(
+        object.get("scenario"),
+        G5_FIXTURE_SCENARIOS_V1,
+        "fixture scenario",
+    )?;
+    Ok(object)
+}
+
+fn validate_run_cancel_request(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "run cancel request")?;
+    exact_keys(object, &["chatId", "runId"])?;
+    id(object.get("chatId"), "chatId")?;
+    id(object.get("runId"), "runId")?;
+    Ok(())
+}
+
+fn validate_writer_start(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "writer start transcript")?;
+    exact_keys(
+        object,
+        &[
+            "chat",
+            "request",
+            "existingWriterLocks",
+            "persistedRun",
+            "persistedLock",
+            "transactionCommitted",
+            "spawnAttempted",
+            "outcome",
+        ],
+    )?;
+    let chat = validate_chat_record(required(object, "chat")?)?;
+    let request = validate_fixture_run_start(required(object, "request")?)?;
+    if request.get("chatId") != chat.get("chatId") {
+        return fail("run request chatId mismatch");
+    }
+    let requested_role = request.get("roleId");
+    let profile = chat
+        .get("roleSnapshots")
+        .and_then(Value::as_array)
+        .and_then(|roles| {
+            roles
+                .iter()
+                .find(|role| role.get("roleId") == requested_role)
+        })
+        .ok_or_else(|| G5ContractError::new("role snapshot is missing"))?;
+    let profile = validate_role_profile(profile)?;
+    let locks = array(
+        object.get("existingWriterLocks"),
+        "existingWriterLocks",
+        G5_PAGE_MAX_ITEMS_V1,
+    )?;
+    let mut writer_locked = false;
+    for lock in locks {
+        let lock = self::object(lock, "writer lock")?;
+        exact_keys(lock, &["worktreeId", "writerRunId", "state"])?;
+        id(lock.get("worktreeId"), "worktreeId")?;
+        id(lock.get("writerRunId"), "writerRunId")?;
+        one_of(
+            lock.get("state"),
+            &["held", "recoveryRequired"],
+            "writer lock state",
+        )?;
+        writer_locked |= lock.get("worktreeId") == chat.get("worktreeId");
+    }
+    let outcome = one_of(
+        object.get("outcome"),
+        &["started", "writerLocked", "readOnlyRole"],
+        "writer outcome",
+    )?;
+    let permission = string(profile.get("permission"), "permission")?;
+    if permission != "workspaceWrite" {
+        if outcome != "readOnlyRole" {
+            return fail("read-only role cannot start a writer run");
+        }
+    } else if writer_locked {
+        if outcome != "writerLocked" {
+            return fail("second writer for a worktree must be rejected");
+        }
+    } else if outcome != "started" {
+        return fail(
+            "eligible writer must start or report a storage failure outside this transcript",
+        );
+    }
+    if outcome == "started" {
+        let run = validate_run_record(required(object, "persistedRun")?)?;
+        let lock = self::object(required(object, "persistedLock")?, "persisted writer lock")?;
+        exact_keys(lock, &["worktreeId", "writerRunId", "state"])?;
+        if lock.get("worktreeId") != chat.get("worktreeId")
+            || lock.get("writerRunId") != run.get("runId")
+            || lock.get("state").and_then(Value::as_str) != Some("held")
+        {
+            return fail("persisted run/lock identity mismatch");
+        }
+        same_chat_identity(chat, run)?;
+        if run.get("selectedProfile") != Some(&Value::Object(profile.clone())) {
+            return fail("run profile must resolve from chat snapshot");
+        }
+        if object.get("transactionCommitted").and_then(Value::as_bool) != Some(true)
+            || object.get("spawnAttempted").and_then(Value::as_bool) != Some(true)
+        {
+            return fail("run and lock must commit atomically before spawn");
+        }
+    } else if !object.get("persistedRun").is_some_and(Value::is_null)
+        || !object.get("persistedLock").is_some_and(Value::is_null)
+        || object.get("transactionCommitted").and_then(Value::as_bool) != Some(false)
+        || object.get("spawnAttempted").and_then(Value::as_bool) != Some(false)
+    {
+        return fail("rejected writer start cannot persist or spawn");
+    }
+    Ok(())
+}
+
+fn validate_recovery_record(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "recovery record")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "recoveryId",
+            "chatId",
+            "taskId",
+            "runId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "reason",
+            "state",
+            "processIdentities",
+            "revision",
+            "createdAt",
+            "resolvedAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    for field in [
+        "recoveryId",
+        "chatId",
+        "taskId",
+        "runId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(object.get(field), field)?;
+    }
+    one_of(
+        object.get("reason"),
+        &[
+            "uncleanShutdown",
+            "cancelUncertain",
+            "processIdentityUncertain",
+        ],
+        "recovery reason",
+    )?;
+    let state = one_of(
+        object.get("state"),
+        &["unresolved", "resolvedAbandoned"],
+        "recovery state",
+    )?;
+    let processes = array(
+        object.get("processIdentities"),
+        "process identities",
+        G5_PAGE_MAX_ITEMS_V1,
+    )?;
+    if processes.is_empty() {
+        return fail("recovery requires tracked process identities");
+    }
+    for process in processes {
+        validate_process_identity(process)?;
+    }
+    positive(object.get("revision"), "recovery revision")?;
+    timestamp(object.get("createdAt"), "createdAt")?;
+    if state == "resolvedAbandoned" {
+        if processes
+            .iter()
+            .any(|process| process.get("observedGone").and_then(Value::as_bool) != Some(true))
+        {
+            return fail("recovery cannot resolve while a process identity remains");
+        }
+        timestamp(object.get("resolvedAt"), "resolvedAt")?;
+    } else if !object.get("resolvedAt").is_some_and(Value::is_null) {
+        return fail("unresolved recovery resolvedAt must be null");
+    }
+    Ok(object)
+}
+
+fn validate_recovery_mark_resolved(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "recovery resolution request")?;
+    exact_keys(object, &["recoveryId", "expectedRevision", "resolution"])?;
+    id(object.get("recoveryId"), "recoveryId")?;
+    positive(object.get("expectedRevision"), "expectedRevision")?;
+    if object.get("resolution").and_then(Value::as_str) != Some("abandon") {
+        return fail("G5 recovery resolution is abandon-only");
+    }
+    Ok(object)
+}
+
+fn validate_recovery_page(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "recovery page")?;
+    exact_keys(object, &["items", "nextCursor"])?;
+    let records = array(object.get("items"), "recovery items", G5_PAGE_MAX_ITEMS_V1)?;
+    let mut identities = HashSet::new();
+    for record in records {
+        let record = validate_recovery_record(record)?;
+        let recovery_id = string(record.get("recoveryId"), "recoveryId")?;
+        if !identities.insert(recovery_id) {
+            return fail("recovery page contains duplicate identities");
+        }
+    }
+    if !object.get("nextCursor").is_some_and(Value::is_null) {
+        bounded_text(object.get("nextCursor"), "nextCursor", 512)?;
+    }
+    Ok(())
+}
+
+fn validate_recovery_resolution(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "recovery resolution transcript")?;
+    exact_keys(object, &["before", "request", "after", "outcome"])?;
+    let before = validate_recovery_record(required(object, "before")?)?;
+    let request = validate_recovery_mark_resolved(required(object, "request")?)?;
+    let outcome = one_of(
+        object.get("outcome"),
+        &["resolvedAbandoned", "processesRemain", "revisionConflict"],
+        "recovery outcome",
+    )?;
+    if request.get("recoveryId") != before.get("recoveryId") {
+        return fail("recovery request identity mismatch");
+    }
+    let all_gone = before
+        .get("processIdentities")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values
+                .iter()
+                .all(|value| value.get("observedGone").and_then(Value::as_bool) == Some(true))
+        });
+    if outcome == "resolvedAbandoned" {
+        let after = validate_recovery_record(required(object, "after")?)?;
+        if !all_gone
+            || request.get("expectedRevision") != before.get("revision")
+            || after.get("state").and_then(Value::as_str) != Some("resolvedAbandoned")
+            || after.get("revision").and_then(Value::as_u64)
+                != before
+                    .get("revision")
+                    .and_then(Value::as_u64)
+                    .map(|value| value + 1)
+        {
+            return fail("invalid abandon resolution");
+        }
+        for field in [
+            "recoveryId",
+            "chatId",
+            "taskId",
+            "runId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+        ] {
+            if before.get(field) != after.get(field) {
+                return fail(format!("recovery resolution changed {field}"));
+            }
+        }
+    } else {
+        if !object.get("after").is_some_and(Value::is_null) {
+            return fail("failed recovery resolution cannot return an updated record");
+        }
+        if outcome == "processesRemain" && all_gone {
+            return fail("processesRemain requires a live or uncertain identity");
+        }
+        if outcome == "revisionConflict"
+            && request.get("expectedRevision") == before.get("revision")
+        {
+            return fail("revisionConflict requires revision drift");
+        }
+    }
+    Ok(())
+}
+
+fn validate_role_set(value: Option<&Value>, name: &str) -> Result<(), G5ContractError> {
+    let roles = array(value, name, G5_ROLE_IDS_V1.len())?;
+    if roles.len() != G5_ROLE_IDS_V1.len() {
+        return fail(format!("{name} must contain exactly three roles"));
+    }
+    for (index, role) in roles.iter().enumerate() {
+        let role = validate_role_profile(role)?;
+        if role.get("roleId").and_then(Value::as_str) != Some(G5_ROLE_IDS_V1[index]) {
+            return fail(format!(
+                "{name} must use canonical planning/coding/review order"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_page_fields(
+    object: &Map<String, Value>,
+    maximum: usize,
+) -> Result<(), G5ContractError> {
+    if !object.get("cursor").is_some_and(Value::is_null) {
+        bounded_text(object.get("cursor"), "cursor", 512)?;
+    }
+    let limit = positive(object.get("limit"), "page limit")?;
+    if limit > maximum as u64 {
+        return fail(format!("page limit exceeds {maximum}"));
+    }
+    Ok(())
+}
+
+fn validate_termination_evidence(value: &Value, state: &str) -> Result<(), G5ContractError> {
+    let object = object(value, "termination evidence")?;
+    exact_keys(
+        object,
+        &[
+            "outcome",
+            "processesProvenGone",
+            "exitCode",
+            "signal",
+            "observedAt",
+        ],
+    )?;
+    let outcome = one_of(
+        object.get("outcome"),
+        &["cleanExit", "failed", "canceled", "uncertain"],
+        "termination outcome",
+    )?;
+    let gone = object
+        .get("processesProvenGone")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| G5ContractError::new("processesProvenGone must be boolean"))?;
+    if !object.get("exitCode").is_some_and(Value::is_null)
+        && !object.get("exitCode").is_some_and(Value::is_i64)
+        && !object.get("exitCode").is_some_and(Value::is_u64)
+    {
+        return fail("exitCode must be an integer or null");
+    }
+    if !object.get("signal").is_some_and(Value::is_null) {
+        bounded_text(object.get("signal"), "signal", 64)?;
+    }
+    timestamp(object.get("observedAt"), "observedAt")?;
+    let expected = match state {
+        "succeeded" => "cleanExit",
+        "failed" => "failed",
+        "canceled" => "canceled",
+        "recoveryRequired" => "uncertain",
+        _ => return fail("active run cannot have termination evidence"),
+    };
+    if outcome != expected {
+        return fail("termination outcome does not match run state");
+    }
+    if state == "recoveryRequired" && gone {
+        return fail("recoveryRequired must retain uncertain process evidence");
+    }
+    if state != "recoveryRequired" && !gone {
+        return fail("terminal run requires proven process disappearance");
+    }
+    Ok(())
+}
+
+fn validate_process_identity(value: &Value) -> Result<(), G5ContractError> {
+    let object = object(value, "process identity")?;
+    exact_keys(
+        object,
+        &["pid", "startTime", "executablePathDigest", "observedGone"],
+    )?;
+    let pid = positive(object.get("pid"), "pid")?;
+    if pid > u64::from(u32::MAX) {
+        return fail("pid exceeds u32");
+    }
+    timestamp(object.get("startTime"), "process startTime")?;
+    bounded_text(
+        object.get("executablePathDigest"),
+        "executablePathDigest",
+        256,
+    )?;
+    if !object.get("observedGone").is_some_and(Value::is_boolean) {
+        return fail("observedGone must be boolean");
+    }
+    Ok(())
+}
+
+fn same_chat_identity(
+    chat: &Map<String, Value>,
+    child: &Map<String, Value>,
+) -> Result<(), G5ContractError> {
+    for field in ["chatId", "taskId", "worktreeId"] {
+        if child.get(field) != chat.get(field) {
+            return fail("cross-chat/task/worktree record");
+        }
+    }
+    if child.contains_key("workspaceIdentity")
+        && child.get("workspaceIdentity") != chat.get("workspaceIdentity")
+    {
+        return fail("workspace identity mismatch");
+    }
+    Ok(())
+}
+
+fn object<'a>(value: &'a Value, name: &str) -> Result<&'a Map<String, Value>, G5ContractError> {
+    value
+        .as_object()
+        .ok_or_else(|| G5ContractError::new(format!("{name} must be an object")))
+}
+
+fn required<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a Value, G5ContractError> {
+    object
+        .get(key)
+        .ok_or_else(|| G5ContractError::new(format!("{key} is required")))
+}
+
+fn exact_keys(object: &Map<String, Value>, expected: &[&str]) -> Result<(), G5ContractError> {
+    let actual: HashSet<_> = object.keys().map(String::as_str).collect();
+    let wanted: HashSet<_> = expected.iter().copied().collect();
+    if actual != wanted {
+        return fail("unexpected fields");
+    }
+    Ok(())
+}
+
+fn array<'a>(
+    value: Option<&'a Value>,
+    name: &str,
+    maximum: usize,
+) -> Result<&'a Vec<Value>, G5ContractError> {
+    let values = value
+        .and_then(Value::as_array)
+        .ok_or_else(|| G5ContractError::new(format!("{name} must be a bounded array")))?;
+    if values.len() > maximum {
+        return fail(format!("{name} must be a bounded array"));
+    }
+    Ok(values)
+}
+
+fn schema(value: Option<&Value>) -> Result<(), G5ContractError> {
+    if value.and_then(Value::as_u64) != Some(G5_SCHEMA_VERSION_V1) {
+        return fail("schemaVersion must be 1");
+    }
+    Ok(())
+}
+
+fn id<'a>(value: Option<&'a Value>, name: &str) -> Result<&'a str, G5ContractError> {
+    let value = string(value, name)?;
+    if value.is_empty() || value.len() > 512 {
+        return fail(format!("{name} is required"));
+    }
+    Ok(value)
+}
+
+fn string<'a>(value: Option<&'a Value>, name: &str) -> Result<&'a str, G5ContractError> {
+    value
+        .and_then(Value::as_str)
+        .ok_or_else(|| G5ContractError::new(format!("{name} must be a string")))
+}
+
+fn bounded_text<'a>(
+    value: Option<&'a Value>,
+    name: &str,
+    maximum: usize,
+) -> Result<&'a str, G5ContractError> {
+    let value = string(value, name)?;
+    if value.trim().is_empty() || value.len() > maximum {
+        return fail(format!("{name} must be nonempty and bounded"));
+    }
+    Ok(value)
+}
+
+fn unsigned(value: Option<&Value>, name: &str) -> Result<u64, G5ContractError> {
+    let value = value.and_then(Value::as_u64).ok_or_else(|| {
+        G5ContractError::new(format!("{name} must be a non-negative safe integer"))
+    })?;
+    if value > super::MAX_SEQUENCE {
+        return fail(format!("{name} must be a non-negative safe integer"));
+    }
+    Ok(value)
+}
+
+fn positive(value: Option<&Value>, name: &str) -> Result<u64, G5ContractError> {
+    let value = unsigned(value, name)?;
+    if value == 0 {
+        return fail(format!("{name} must be positive"));
+    }
+    Ok(value)
+}
+
+fn one_of<'a>(
+    value: Option<&'a Value>,
+    values: &[&str],
+    name: &str,
+) -> Result<&'a str, G5ContractError> {
+    let value = string(value, name)?;
+    if !values.contains(&value) {
+        return fail(format!("invalid {name}"));
+    }
+    Ok(value)
+}
+
+fn timestamp(value: Option<&Value>, name: &str) -> Result<(), G5ContractError> {
+    let value = string(value, name)?;
+    let bytes = value.as_bytes();
+    let separators = [
+        (4, b'-'),
+        (7, b'-'),
+        (10, b'T'),
+        (13, b':'),
+        (16, b':'),
+        (19, b'Z'),
+    ];
+    let valid = bytes.len() == 20
+        && separators
+            .iter()
+            .all(|(index, expected)| bytes.get(*index) == Some(expected))
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            separators.iter().any(|(separator, _)| *separator == index) || byte.is_ascii_digit()
+        });
+    if !valid {
+        return fail(format!("{name} must be an RFC 3339 UTC second timestamp"));
+    }
+    Ok(())
+}
+
+fn fail<T>(detail: impl Into<String>) -> Result<T, G5ContractError> {
+    Err(G5ContractError::new(detail))
+}
+
+#[cfg(test)]
+mod tests;

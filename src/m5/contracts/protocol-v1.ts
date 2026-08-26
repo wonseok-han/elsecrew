@@ -17,6 +17,8 @@ export const METHODS_V1 = [
   "file.watch",
   "diff.getSummary",
   "diff.getFile",
+  "project.getRoleSettings",
+  "project.updateRoleSettings",
   "chat.create",
   "chat.list",
   "chat.get",
