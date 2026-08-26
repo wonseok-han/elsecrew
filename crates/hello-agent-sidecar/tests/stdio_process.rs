@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5_CAPABILITIES_V1};
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 
@@ -141,7 +142,13 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
         panic!("ready event")
     };
     let ready = ready_payload(&ready_event).unwrap();
-    assert_eq!(ready.capabilities.len(), 11);
+    assert_eq!(
+        ready.capabilities,
+        G5_CAPABILITIES_V1
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>()
+    );
 
     write_request(
         &mut stdin,
@@ -235,6 +242,244 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
         panic!("quit response")
     };
     assert!(quit.ok);
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_cancel_clean_proves_fixture_parent_and_descendant_gone() {
+    binary_cancel_scenario("cancel-clean", true);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fixture_child_never_spawns_descendants_before_release_barrier() {
+    let started = std::time::Instant::now();
+    let status = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .args(["--fixture-child", "cancel-clean"])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("spawn unreleased fixture child");
+    assert!(status.success());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "an unreleased fixture must exit on EOF instead of spawning the 30-second leaf"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_cancel_uncertain_blocks_then_abandon_resolution_clears_quit() {
+    binary_cancel_scenario("cancel-uncertain", false);
+}
+
+#[cfg(target_os = "macos")]
+fn binary_cancel_scenario(scenario: &str, clean: bool) {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(source.join("src")).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("src/file.txt"), "fixture").unwrap();
+    git(&source, &["init", "-q"]);
+    git(&source, &["add", "."]);
+    git(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .arg("--stdio")
+        .current_dir(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_open",
+        "project.open",
+        serde_json::json!({"selectedPath":source}),
+    );
+    let EnvelopeV1::Response(open) = receive_envelope(&envelopes) else {
+        panic!("open")
+    };
+    let project_id = open.result.unwrap()["projectId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_snapshot",
+        "project.createWorktree",
+        serde_json::json!({"projectId":project_id}),
+    );
+    let EnvelopeV1::Response(snapshot) = receive_envelope(&envelopes) else {
+        panic!("snapshot")
+    };
+    let snapshot = snapshot.result.unwrap();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_settings",
+        "project.getRoleSettings",
+        serde_json::json!({"projectId":project_id}),
+    );
+    let EnvelopeV1::Response(settings) = receive_envelope(&envelopes) else {
+        panic!("settings")
+    };
+    assert_eq!(settings.result.unwrap()["revision"], 1);
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_chat",
+        "chat.create",
+        serde_json::json!({
+            "projectId":project_id,"worktreeId":snapshot["worktreeId"],
+            "workspaceIdentity":snapshot["workspaceIdentity"],"goal":"cancel fixture",
+            "expectedSettingsRevision":1,
+        }),
+    );
+    let EnvelopeV1::Response(chat) = receive_envelope(&envelopes) else {
+        panic!("chat")
+    };
+    let chat = chat.result.unwrap();
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let EnvelopeV1::Event(created) = receive_envelope(&envelopes) else {
+        panic!("chat event")
+    };
+    assert_eq!(created.event, "chat.eventAppended");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_run",
+        "run.startFixture",
+        serde_json::json!({"chatId":chat_id,"roleId":"coding","scenario":scenario}),
+    );
+    let EnvelopeV1::Response(start) = receive_envelope(&envelopes) else {
+        panic!("run start")
+    };
+    assert!(start.ok, "{:?}", start.error);
+    let run_id = start.result.unwrap()["run"]["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let EnvelopeV1::Event(started) = receive_envelope(&envelopes) else {
+        panic!("run event")
+    };
+    assert_eq!(started.event, "run.event");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_cancel",
+        "run.cancel",
+        serde_json::json!({"chatId":chat_id,"runId":run_id}),
+    );
+    let EnvelopeV1::Response(cancel) = receive_envelope(&envelopes) else {
+        panic!("cancel")
+    };
+    assert_eq!(
+        cancel.result.unwrap()["outcome"],
+        if clean {
+            "canceled"
+        } else {
+            "recoveryRequired"
+        }
+    );
+    let EnvelopeV1::Event(finished) = receive_envelope(&envelopes) else {
+        panic!("finished")
+    };
+    assert_eq!(finished.event, "run.finished");
+    assert_eq!(
+        finished.payload["run"]["terminationEvidence"]["processesProvenGone"],
+        clean
+    );
+    if !clean {
+        assert!(
+            finished.payload["recovery"]["processIdentities"]
+                .as_array()
+                .is_some_and(|identities| identities.len() >= 2),
+            "recovery must retain both the fixture parent and its observed descendant"
+        );
+        let recovery_id = finished.payload["recovery"]["recoveryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            "req_g5_recovery_list",
+            "recovery.list",
+            serde_json::json!({"cursor":null,"limit":100}),
+        );
+        let EnvelopeV1::Response(recoveries) = receive_envelope(&envelopes) else {
+            panic!("recoveries")
+        };
+        let recovery_page = recoveries.result.unwrap();
+        validate_g5_payload_v1("recoveryPage", &recovery_page).unwrap();
+        assert_eq!(recovery_page["items"][0]["state"], "unresolved");
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            "req_g5_quit_blocked",
+            "app.prepareQuit",
+            serde_json::json!({}),
+        );
+        let EnvelopeV1::Response(blocked_quit) = receive_envelope(&envelopes) else {
+            panic!("blocked quit")
+        };
+        assert_eq!(blocked_quit.result.unwrap()["safeToQuit"], false);
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            "req_g5_recovery_resolve",
+            "recovery.markResolved",
+            serde_json::json!({
+                "recoveryId":recovery_id,"expectedRevision":1,"resolution":"abandon"
+            }),
+        );
+        let EnvelopeV1::Response(resolved) = receive_envelope(&envelopes) else {
+            panic!("resolved recovery")
+        };
+        assert!(resolved.ok, "{:?}", resolved.error);
+        assert_eq!(resolved.result.unwrap()["state"], "resolvedAbandoned");
+    }
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_g5_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(quit) = receive_envelope(&envelopes) else {
+        panic!("quit")
+    };
+    assert_eq!(quit.result.unwrap()["safeToQuit"], true);
     drop(stdin);
     assert!(child.wait().unwrap().success());
 }

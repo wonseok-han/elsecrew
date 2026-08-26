@@ -145,6 +145,9 @@ pub enum SaveFailurePoint {
 }
 
 struct PendingSave {
+    chat_id: Option<String>,
+    worktree_id: String,
+    workspace_identity: String,
     project_id: String,
     relative_path: String,
     expected_version: String,
@@ -187,6 +190,7 @@ struct WatchState {
     stream_id: String,
     snapshot: BTreeMap<String, WatchFingerprint>,
     next_seq: u64,
+    workspace: Option<WorkspaceAddress>,
 }
 
 struct ActiveProject {
@@ -306,6 +310,14 @@ pub struct ProjectManager {
     watchers: HashMap<String, WatchState>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceAddress {
+    pub chat_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+}
+
 impl ProjectManager {
     pub fn new(database_path: &Path) -> Result<Self, SidecarError> {
         let data_root = database_path.parent().ok_or_else(|| {
@@ -420,7 +432,16 @@ impl ProjectManager {
         request_id: &str,
         failure: Option<WorktreeFailurePoint>,
     ) -> Result<ProjectAction, ProjectFailure> {
-        self.create_worktree_inner(storage, project_id, request_id, failure, None)
+        self.create_worktree_inner(storage, project_id, request_id, failure, None, false)
+    }
+
+    pub fn prepare_chat_workspace(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        self.create_worktree_inner(storage, project_id, request_id, None, None, true)
     }
 
     #[cfg(test)]
@@ -434,7 +455,14 @@ impl ProjectManager {
     where
         F: FnMut(),
     {
-        self.create_worktree_inner(storage, project_id, request_id, None, Some(&mut hook))
+        self.create_worktree_inner(
+            storage,
+            project_id,
+            request_id,
+            None,
+            Some(&mut hook),
+            false,
+        )
     }
 
     fn create_worktree_inner(
@@ -444,6 +472,7 @@ impl ProjectManager {
         request_id: &str,
         failure: Option<WorktreeFailurePoint>,
         mut pre_export_hook: Option<&mut dyn FnMut()>,
+        fresh_for_chat: bool,
     ) -> Result<ProjectAction, ProjectFailure> {
         let project = required_project(storage, project_id)?;
         if !storage.blocker_ids()?.is_empty() {
@@ -452,7 +481,7 @@ impl ProjectManager {
             ));
         }
         let lifecycle = value_string(&project, "lifecycle")?;
-        if lifecycle == "active" {
+        if lifecycle == "active" && !fresh_for_chat {
             let active = self.validate_active_project(storage, project_id)?;
             return Ok(ProjectAction {
                 result: manifest_value(&active, "active")?,
@@ -464,7 +493,7 @@ impl ProjectManager {
                 "snapshot creation was interrupted and cannot be retried automatically",
             ));
         }
-        if !matches!(lifecycle, "opened" | "abandoned") {
+        if !matches!(lifecycle, "opened" | "active" | "abandoned") {
             return Err(ProjectFailure::manifest(
                 "project lifecycle cannot create a standalone snapshot",
             ));
@@ -688,8 +717,18 @@ impl ProjectManager {
         cursor: Option<&str>,
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_active_project(storage, project_id)?;
+        self.get_tree_from_active(&active, project_id, parent_path, cursor)
+    }
+
+    fn get_tree_from_active(
+        &self,
+        active: &ActiveProject,
+        project_id: &str,
+        parent_path: &str,
+        cursor: Option<&str>,
+    ) -> Result<ProjectAction, ProjectFailure> {
         validate_relative_path(parent_path, true)?;
-        let worktree = self.worktree_capability(&active)?;
+        let worktree = self.worktree_capability(active)?;
         let directory = open_relative_dir(&worktree, parent_path)?;
         let cursor_key = tree_cursor_key(project_id, parent_path);
         let offset = match cursor {
@@ -770,6 +809,27 @@ impl ProjectManager {
         self.read_file_from_active(&active, project_id, relative_path)
     }
 
+    pub fn workspace_get_tree(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        parent_path: &str,
+        cursor: Option<&str>,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        self.get_tree_from_active(&active, &address.project_id, parent_path, cursor)
+    }
+
+    pub fn workspace_read_file(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        relative_path: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        self.read_file_from_active(&active, &address.project_id, relative_path)
+    }
+
     #[cfg(test)]
     fn read_file_with_post_validation_hook<F>(
         &mut self,
@@ -848,6 +908,59 @@ impl ProjectManager {
         encoding: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_active_project(storage, project_id)?;
+        self.begin_save_from_active(
+            None,
+            &active,
+            relative_path,
+            expected_version,
+            total_bytes,
+            encoding,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn workspace_begin_save(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        relative_path: &str,
+        expected_version: &str,
+        total_bytes: u64,
+        encoding: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        let action = self.begin_save_from_active(
+            Some(address.chat_id.as_str()),
+            &active,
+            relative_path,
+            expected_version,
+            total_bytes,
+            encoding,
+        )?;
+        let save_id = action.result["saveId"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("save begin omitted its identity"))?
+            .to_string();
+        if let Err(error) = self.persist_workspace_save_session(storage, address, &save_id, true) {
+            if let Some(pending) = self.pending_saves.remove(&save_id) {
+                remove_capability_temp(&self.save_staging_dir, pending.staging_name);
+            }
+            return Err(error);
+        }
+        Ok(action)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn begin_save_from_active(
+        &mut self,
+        chat_id: Option<&str>,
+        active: &ActiveProject,
+        relative_path: &str,
+        expected_version: &str,
+        total_bytes: u64,
+        encoding: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let project_id = active.project_id.as_str();
         validate_file_version(expected_version)?;
         validate_relative_path(relative_path, false)?;
         if encoding != "utf8" || total_bytes > FILE_MAX_BYTES_V1 {
@@ -855,7 +968,7 @@ impl ProjectManager {
                 "file.save begin requires UTF-8 content no larger than 5 MiB",
             ));
         }
-        let worktree = self.worktree_capability(&active)?;
+        let worktree = self.worktree_capability(active)?;
         let (parent, target_name) = open_parent_capability(&worktree, relative_path)?;
         open_real_file_at(&parent, &target_name)?;
         let save_id = format!("save_{}", Uuid::new_v4().simple());
@@ -877,6 +990,9 @@ impl ProjectManager {
         self.pending_saves.insert(
             save_id.clone(),
             PendingSave {
+                chat_id: chat_id.map(str::to_string),
+                worktree_id: active.worktree_id.clone(),
+                workspace_identity: active.workspace_identity.clone(),
                 project_id: project_id.to_string(),
                 relative_path: relative_path.to_string(),
                 expected_version: expected_version.to_string(),
@@ -928,6 +1044,40 @@ impl ProjectManager {
         })
     }
 
+    pub fn workspace_append_save_chunk(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+        seq: u64,
+        text: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        self.validate_workspace_address(storage, address)?;
+        self.verify_pending_save_address(address, save_id)?;
+        self.verify_durable_save_session(storage, address, save_id)?;
+        self.append_save_chunk(save_id, seq, text)
+    }
+
+    fn verify_pending_save_address(
+        &self,
+        address: &WorkspaceAddress,
+        save_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let pending = self.pending_saves.get(save_id).ok_or_else(|| {
+            ProjectFailure::recovery("save identity is missing and cannot be retried automatically")
+        })?;
+        if pending.chat_id.as_deref() != Some(address.chat_id.as_str())
+            || pending.project_id != address.project_id
+            || pending.worktree_id != address.worktree_id
+            || pending.workspace_identity != address.workspace_identity
+        {
+            return Err(ProjectFailure::manifest(
+                "save continuation differs from its durable chat workspace binding",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn commit_save(
         &mut self,
         storage: &mut Storage,
@@ -946,6 +1096,130 @@ impl ProjectManager {
             request_id,
             None,
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn workspace_commit_save(
+        &mut self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+        expected_version: &str,
+        last_seq: u64,
+        total_bytes: u64,
+        request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        self.validate_workspace_address(storage, address)?;
+        self.verify_pending_save_address(address, save_id)?;
+        self.verify_durable_save_session(storage, address, save_id)?;
+        let result = self.commit_save(
+            storage,
+            save_id,
+            expected_version,
+            last_seq,
+            total_bytes,
+            request_id,
+        );
+        let preserve = result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.outcome_unknown);
+        if !preserve {
+            if let Err(error) =
+                self.persist_workspace_save_session(storage, address, save_id, false)
+            {
+                if result.is_ok() {
+                    return Err(ProjectFailure::ambiguous(format!(
+                        "file replacement completed but durable save-session cleanup failed: {}",
+                        error.detail
+                    )));
+                }
+            }
+        }
+        result
+    }
+
+    fn verify_durable_save_session(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+    ) -> Result<(), ProjectFailure> {
+        let chat = storage
+            .projection_record("chat", &address.chat_id)?
+            .ok_or_else(|| ProjectFailure::manifest("save chat projection is missing"))?;
+        let session = chat
+            .get("save_sessions")
+            .and_then(Value::as_object)
+            .and_then(|sessions| sessions.get(save_id))
+            .ok_or_else(|| ProjectFailure::recovery("save session is no longer durable"))?;
+        for (field, expected) in [
+            ("chatId", address.chat_id.as_str()),
+            ("projectId", address.project_id.as_str()),
+            ("worktreeId", address.worktree_id.as_str()),
+            ("workspaceIdentity", address.workspace_identity.as_str()),
+            ("saveId", save_id),
+        ] {
+            if session.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "durable save session differs from its continuation",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn persist_workspace_save_session(
+        &self,
+        storage: &mut Storage,
+        address: &WorkspaceAddress,
+        save_id: &str,
+        insert: bool,
+    ) -> Result<(), ProjectFailure> {
+        let mut chat = storage
+            .projection_record("chat", &address.chat_id)?
+            .ok_or_else(|| ProjectFailure::manifest("save chat projection is missing"))?;
+        let mut sessions = chat
+            .remove("save_sessions")
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        if insert {
+            let pending = self.pending_saves.get(save_id).ok_or_else(|| {
+                ProjectFailure::recovery("in-memory save session disappeared before persistence")
+            })?;
+            if sessions.len() >= 100 {
+                return Err(ProjectFailure::recovery(
+                    "durable save session limit has been reached",
+                ));
+            }
+            sessions.insert(
+                save_id.to_string(),
+                json!({
+                    "chatId":address.chat_id,"projectId":address.project_id,
+                    "worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,
+                    "saveId":save_id,"path":pending.relative_path,
+                    "expectedVersion":pending.expected_version,"totalBytes":pending.total_bytes,
+                    "encoding":"utf8","chunkBytes":MAX_TEXT_CHUNK_BYTES,
+                }),
+            );
+        } else if sessions.remove(save_id).is_none() {
+            return Err(ProjectFailure::recovery(
+                "durable save session disappeared before completion",
+            ));
+        }
+        chat.insert("save_sessions".to_string(), Value::Object(sessions));
+        storage.upsert_projection_record(
+            "chat",
+            &address.chat_id,
+            &format!(
+                "op_workspace_save_session_{}_{}",
+                if insert { "begin" } else { "finish" },
+                save_id
+            ),
+            None,
+            chat,
+        )?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1102,7 +1376,19 @@ impl ProjectManager {
             ))
         })?;
 
-        let active = self.validate_active_project(storage, &pending.project_id)?;
+        let active = if let Some(chat_id) = &pending.chat_id {
+            self.validate_workspace_address(
+                storage,
+                &WorkspaceAddress {
+                    chat_id: chat_id.clone(),
+                    project_id: pending.project_id.clone(),
+                    worktree_id: pending.worktree_id.clone(),
+                    workspace_identity: pending.workspace_identity.clone(),
+                },
+            )?
+        } else {
+            self.validate_active_project(storage, &pending.project_id)?
+        };
         let worktree = self.worktree_capability(&active)?;
         let (parent, target_name) = open_parent_capability(&worktree, &pending.relative_path)?;
         let mut target = open_real_file_at(&parent, &target_name)?;
@@ -1425,6 +1711,7 @@ impl ProjectManager {
                     stream_id: format!("watch_{}", Uuid::new_v4().simple()),
                     snapshot: BTreeMap::new(),
                     next_seq: 1,
+                    workspace: None,
                 };
                 return Ok(ProjectAction {
                     result: json!({"watching":false,"rescanRequired":true}),
@@ -1444,6 +1731,30 @@ impl ProjectManager {
                 stream_id: format!("watch_{}", Uuid::new_v4().simple()),
                 snapshot,
                 next_seq: 1,
+                workspace: None,
+            },
+        );
+        Ok(ProjectAction {
+            result: json!({"watching":true}),
+            ..ProjectAction::default()
+        })
+    }
+
+    pub fn workspace_watch(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        let worktree = self.worktree_capability(&active)?;
+        let snapshot = snapshot_tree(&worktree)?;
+        self.watchers.insert(
+            format!("workspace:{}", address.chat_id),
+            WatchState {
+                stream_id: format!("workspace_watch_{}", Uuid::new_v4().simple()),
+                snapshot,
+                next_seq: 1,
+                workspace: Some(address.clone()),
             },
         );
         Ok(ProjectAction {
@@ -1456,11 +1767,27 @@ impl ProjectManager {
         let project_ids = self.watchers.keys().cloned().collect::<Vec<_>>();
         let mut emitted = Vec::new();
         for project_id in project_ids {
-            let active = match self.validate_active_project(storage, &project_id) {
+            let workspace = self
+                .watchers
+                .get(&project_id)
+                .and_then(|state| state.workspace.clone());
+            let resolved = match workspace.as_ref() {
+                Some(address) => self.validate_workspace_address(storage, address),
+                None => self.validate_active_project(storage, &project_id),
+            };
+            let emission_project_id = workspace
+                .as_ref()
+                .map_or(project_id.as_str(), |address| address.project_id.as_str());
+            let active = match resolved {
                 Ok(active) => active,
                 Err(_) => {
                     if let Some(mut state) = self.watchers.remove(&project_id) {
-                        emitted.push(watch_emission(&mut state, &project_id, Vec::new(), true));
+                        emitted.push(watch_emission(
+                            &mut state,
+                            emission_project_id,
+                            Vec::new(),
+                            true,
+                        ));
                     }
                     continue;
                 }
@@ -1469,7 +1796,12 @@ impl ProjectManager {
                 Ok(worktree) => worktree,
                 Err(_) => {
                     if let Some(mut state) = self.watchers.remove(&project_id) {
-                        emitted.push(watch_emission(&mut state, &project_id, Vec::new(), true));
+                        emitted.push(watch_emission(
+                            &mut state,
+                            emission_project_id,
+                            Vec::new(),
+                            true,
+                        ));
                     }
                     continue;
                 }
@@ -1478,7 +1810,12 @@ impl ProjectManager {
                 Ok(snapshot) => snapshot,
                 Err(_) => {
                     if let Some(mut state) = self.watchers.remove(&project_id) {
-                        emitted.push(watch_emission(&mut state, &project_id, Vec::new(), true));
+                        emitted.push(watch_emission(
+                            &mut state,
+                            emission_project_id,
+                            Vec::new(),
+                            true,
+                        ));
                     }
                     continue;
                 }
@@ -1502,7 +1839,7 @@ impl ProjectManager {
                 changed.into_iter().collect()
             };
             state.snapshot = fresh;
-            emitted.push(watch_emission(state, &project_id, paths, overflow));
+            emitted.push(watch_emission(state, emission_project_id, paths, overflow));
             if overflow {
                 self.watchers.remove(&project_id);
             }
@@ -1520,7 +1857,15 @@ impl ProjectManager {
         project_id: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_active_project(storage, project_id)?;
-        let entries = self.diff_entries(&active)?;
+        self.diff_summary_from_active(&active, project_id)
+    }
+
+    fn diff_summary_from_active(
+        &self,
+        active: &ActiveProject,
+        project_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let entries = self.diff_entries(active)?;
         Ok(ProjectAction {
             result: json!({
                 "projectId":project_id,
@@ -1539,17 +1884,46 @@ impl ProjectManager {
     ) -> Result<ProjectAction, ProjectFailure> {
         validate_relative_path(relative_path, false)?;
         let active = self.validate_active_project(storage, project_id)?;
+        self.diff_file_from_active(&active, project_id, relative_path)
+    }
+
+    pub fn workspace_diff_summary(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        self.diff_summary_from_active(&active, &address.project_id)
+    }
+
+    pub fn workspace_diff_file(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+        relative_path: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        validate_relative_path(relative_path, false)?;
+        let active = self.validate_workspace_address(storage, address)?;
+        self.diff_file_from_active(&active, &address.project_id, relative_path)
+    }
+
+    fn diff_file_from_active(
+        &self,
+        active: &ActiveProject,
+        project_id: &str,
+        relative_path: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
         let entry = self
-            .diff_entries(&active)?
+            .diff_entries(active)?
             .into_iter()
             .find(|entry| entry.path == relative_path)
             .ok_or_else(|| ProjectFailure::manifest("requested file has no worktree diff"))?;
-        let worktree = self.worktree_capability(&active)?;
+        let worktree = self.worktree_capability(active)?;
         let base_path = entry.old_path.as_deref().unwrap_or(&entry.path);
         let base = if !entry.base_exists {
             None
         } else {
-            Some(self.base_content(&active, base_path)?)
+            Some(self.base_content(active, base_path)?)
         };
         let current = if !entry.current_exists {
             None
@@ -1649,6 +2023,107 @@ impl ProjectManager {
             }),
             ..ProjectAction::default()
         })
+    }
+
+    pub fn workspace_close(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        self.watchers
+            .remove(&format!("workspace:{}", address.chat_id));
+        let abandoned = self
+            .pending_saves
+            .iter()
+            .filter(|(_, save)| {
+                save.chat_id.as_deref() == Some(address.chat_id.as_str())
+                    && save.worktree_id == address.worktree_id
+                    && save.workspace_identity == address.workspace_identity
+            })
+            .map(|(save_id, save)| (save_id.clone(), save.staging_name.clone()))
+            .collect::<Vec<_>>();
+        for (save_id, staging_name) in abandoned {
+            self.pending_saves.remove(&save_id);
+            remove_capability_temp(&self.save_staging_dir, staging_name);
+        }
+        write_json_atomic(
+            &self.manifests_dir,
+            &format!("{}.json", active.worktree_id),
+            &manifest_value(&active, "abandoned")?,
+        )?;
+        Ok(ProjectAction {
+            result: json!({"lifecycle":"abandoned","physicallyDeleted":false}),
+            ..ProjectAction::default()
+        })
+    }
+
+    pub fn workspace_mark_recovery_required(
+        &mut self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<(), ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        write_json_atomic(
+            &self.manifests_dir,
+            &format!("{}.json", active.worktree_id),
+            &manifest_value(&active, "recoveryRequired")?,
+        )
+    }
+
+    pub fn workspace_abandon_recovery(
+        &mut self,
+        address: &WorkspaceAddress,
+    ) -> Result<(), ProjectFailure> {
+        let manifest_name = format!("{}.json", address.worktree_id);
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        for (field, expected) in [
+            ("projectId", address.project_id.as_str()),
+            ("worktreeId", address.worktree_id.as_str()),
+            ("workspaceIdentity", address.workspace_identity.as_str()),
+            ("lifecycle", "recoveryRequired"),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "recovery workspace identity or lifecycle differs",
+                ));
+            }
+        }
+        let mut abandoned = manifest;
+        abandoned["lifecycle"] = Value::String("abandoned".to_string());
+        write_json_atomic(&self.manifests_dir, &manifest_name, &abandoned)?;
+        self.watchers
+            .remove(&format!("workspace:{}", address.chat_id));
+        Ok(())
+    }
+
+    pub fn workspace_restore_recovery_required(
+        &mut self,
+        address: &WorkspaceAddress,
+    ) -> Result<(), ProjectFailure> {
+        let manifest_name = format!("{}.json", address.worktree_id);
+        let mut manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        for (field, expected) in [
+            ("projectId", address.project_id.as_str()),
+            ("worktreeId", address.worktree_id.as_str()),
+            ("workspaceIdentity", address.workspace_identity.as_str()),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "unclean recovery workspace identity differs from its manifest",
+                ));
+            }
+        }
+        if !matches!(
+            manifest.get("lifecycle").and_then(Value::as_str),
+            Some("active" | "recoveryRequired")
+        ) {
+            return Err(ProjectFailure::manifest(
+                "unclean recovery workspace is already terminal",
+            ));
+        }
+        manifest["lifecycle"] = Value::String("recoveryRequired".to_string());
+        write_json_atomic(&self.manifests_dir, &manifest_name, &manifest)
     }
 
     fn persist_pre_activation(
@@ -1852,6 +2327,170 @@ impl ProjectManager {
         }
         self.verify_snapshot_repository(&worktree, &active)?;
         Ok(active)
+    }
+
+    fn validate_workspace_address(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<ActiveProject, ProjectFailure> {
+        let chat = storage
+            .projection_record("chat", &address.chat_id)?
+            .ok_or_else(|| ProjectFailure::manifest("chat workspace binding is missing"))?;
+        for (field, expected) in [
+            ("chat_id", address.chat_id.as_str()),
+            ("project_id", address.project_id.as_str()),
+            ("worktree_id", address.worktree_id.as_str()),
+            ("workspace_identity", address.workspace_identity.as_str()),
+        ] {
+            if chat.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "chat workspace reference differs from the durable chat binding",
+                ));
+            }
+        }
+        if chat.get("state").and_then(Value::as_str) == Some("discarded") {
+            return Err(ProjectFailure::recovery(
+                "discarded chat workspace cannot be reused",
+            ));
+        }
+
+        let project = required_project(storage, &address.project_id)?;
+        let manifest_name = format!("{}.json", address.worktree_id);
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        validate_project_payload_v1("worktreeManifest", &manifest).map_err(|error| {
+            ProjectFailure::manifest(format!("persisted snapshot manifest is invalid: {error}"))
+        })?;
+        for (field, expected) in [
+            ("projectId", address.project_id.as_str()),
+            ("worktreeId", address.worktree_id.as_str()),
+            ("workspaceIdentity", address.workspace_identity.as_str()),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "workspace manifest differs from the durable chat binding",
+                ));
+            }
+        }
+        if manifest.get("lifecycle").and_then(Value::as_str) != Some("active") {
+            return Err(ProjectFailure::recovery(
+                "chat workspace snapshot is not active",
+            ));
+        }
+        let canonical_git_root = PathBuf::from(value_string(&project, "canonical_path")?);
+        if manifest.get("canonicalGitRoot").and_then(Value::as_str)
+            != Some(canonical_protocol_path_without_existing(&canonical_git_root)?.as_str())
+        {
+            return Err(ProjectFailure::manifest(
+                "workspace canonical root differs from the durable project",
+            ));
+        }
+        let active = ActiveProject {
+            project_id: address.project_id.clone(),
+            canonical_git_root,
+            worktree_id: address.worktree_id.clone(),
+            worktree_path: self.worktrees_root.join(&address.worktree_id),
+            base_commit: value_string(
+                manifest.as_object().ok_or_else(|| {
+                    ProjectFailure::manifest("workspace manifest is not an object")
+                })?,
+                "baseCommit",
+            )?
+            .to_string(),
+            base_tree: manifest["baseTree"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            object_format: manifest["objectFormat"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            source_identity: manifest["sourceIdentity"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            workspace_identity: address.workspace_identity.clone(),
+            manifest_path: self.manifests_root.join(&manifest_name),
+            lock_id: format!("lock_{}", address.worktree_id),
+        };
+        if manifest != manifest_value(&active, "active")? {
+            return Err(ProjectFailure::manifest(
+                "workspace manifest is not the canonical snapshot identity",
+            ));
+        }
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::manifest("workspace lock projection is missing"))?;
+        if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+            || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
+        {
+            return Err(ProjectFailure::recovery(
+                "workspace is locked, poisoned, or recovery-required",
+            ));
+        }
+        let worktree = self.worktree_capability(&active)?;
+        let marker = read_bounded_json(&open_real_child_dir(&worktree, ".git")?, SNAPSHOT_MARKER)?;
+        if marker != snapshot_identity(&active)? {
+            return Err(ProjectFailure::manifest(
+                "workspace Git marker differs from the durable chat binding",
+            ));
+        }
+        self.verify_snapshot_repository(&worktree, &active)?;
+        Ok(active)
+    }
+
+    pub fn verify_workspace(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<Value, ProjectFailure> {
+        let active = self.validate_workspace_address(storage, address)?;
+        manifest_value(&active, "active")
+    }
+
+    pub fn verify_unbound_workspace(
+        &self,
+        storage: &Storage,
+        project_id: &str,
+        worktree_id: &str,
+        workspace_identity: &str,
+    ) -> Result<(), ProjectFailure> {
+        let project = required_project(storage, project_id)?;
+        let manifest_name = format!("{worktree_id}.json");
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        validate_project_payload_v1("worktreeManifest", &manifest).map_err(|error| {
+            ProjectFailure::manifest(format!("persisted snapshot manifest is invalid: {error}"))
+        })?;
+        for (field, expected) in [
+            ("projectId", project_id),
+            ("worktreeId", worktree_id),
+            ("workspaceIdentity", workspace_identity),
+            ("lifecycle", "active"),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "requested chat identity does not name an active standalone snapshot",
+                ));
+            }
+        }
+        if project.get("canonical_path").and_then(Value::as_str)
+            != manifest.get("canonicalGitRoot").and_then(Value::as_str)
+        {
+            return Err(ProjectFailure::manifest(
+                "snapshot and project canonical roots differ",
+            ));
+        }
+        let lock = storage
+            .projection_record("lock", &format!("lock_{worktree_id}"))?
+            .ok_or_else(|| ProjectFailure::manifest("snapshot lock projection is missing"))?;
+        if lock.get("poisoned").and_then(Value::as_bool) != Some(false)
+            || lock.get("recovery_required").and_then(Value::as_bool) != Some(false)
+        {
+            return Err(ProjectFailure::recovery(
+                "snapshot is poisoned or recovery-required",
+            ));
+        }
+        Ok(())
     }
 
     fn worktree_capability(&self, active: &ActiveProject) -> Result<Dir, ProjectFailure> {
@@ -3991,16 +4630,32 @@ fn watch_emission(
 ) -> WatchEmission {
     let seq = state.next_seq;
     state.next_seq += 1;
+    let mut payload = json!({
+        "projectId":project_id,
+        "event":"file.changed",
+        "paths":paths,
+        "rescanRequired":overflow,
+    });
+    if let Some(workspace) = &state.workspace {
+        let object = payload.as_object_mut().expect("watch payload object");
+        object.insert(
+            "chatId".to_string(),
+            Value::String(workspace.chat_id.clone()),
+        );
+        object.insert(
+            "worktreeId".to_string(),
+            Value::String(workspace.worktree_id.clone()),
+        );
+        object.insert(
+            "workspaceIdentity".to_string(),
+            Value::String(workspace.workspace_identity.clone()),
+        );
+    }
     WatchEmission {
         stream_id: state.stream_id.clone(),
         seq,
         event: "file.changed",
-        payload: json!({
-            "projectId":project_id,
-            "event":"file.changed",
-            "paths":paths,
-            "rescanRequired":overflow,
-        }),
+        payload,
     }
 }
 

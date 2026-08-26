@@ -9,6 +9,14 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 Rust 실행·복구 및 다중 workspace 내부)
+
+- **한 일**: 승인된 G5 run/recovery·workspace 계약을 Rust sidecar에 소비해 프로젝트별 revision CAS 역할 설정과 채팅 생성 시 역할 snapshot, bounded 영속 chat ledger, chat-bound workspace tree/read/save/watch/diff/close를 구현했다. G4 projectId-only 경로는 호환 경로로 유지하고 G5 작업은 저장된 전체 chat binding과 외부 active manifest·marker·lock을 매 요청마다 exact 검증한다. 여러 standalone snapshot과 chat이 동시에 살아 있어도 현재 선택을 추론하지 않으며 cross-chat ref와 saveId continuation은 원본 쓰기 전에 거부한다.
+- **실행·복구 결정**: macOS 결정적 self-fixture만 허용하고 실제 Claude/Codex·인증·사용자 프로젝트는 실행하지 않았다. 역할 실행은 chat/workspace별 직렬화하며 coding은 run+writer lock을 spawn 전에 SQLite `BEGIN IMMEDIATE`로 함께 저장하고 planning/review는 writer lock 없이 실행한다. fixture child는 부모가 process identity를 저장하기 전 자손을 만들지 못하도록 stdin release barrier를 두고, 취소는 M4 `TreeTracker`가 관찰한 부모·자손 전체 소멸을 증명한 경우만 clean 처리한다. 불확실하면 chat/run/manifest/writer lock/recovery를 fail-closed로 남기고, 모든 영속 identity가 Gone인 abandon만 허용한다. `prepareQuit`은 active run과 recovery blocker를 정리·보고하며 unsafe 상태에서는 복구 조회/abandon 뒤 재시도할 수 있고, clean checkpoint 전에는 EOF 종료를 성공으로 보지 않는다.
+- **저장 안전**: 상수 크기 projection event와 durable event sequence를 wire stream sequence와 분리했다. workspace save begin은 전체 chat/workspace ref를 durable session에 고정하고, commit 결과 뒤 session cleanup 저장이 실패하면 outcome-unknown으로 승격해 자동 재시도를 막는다. 복구 wire payload에서는 내부 마이크로초 process identity 증거를 제거하되 durable projection에는 정확한 probe 값을 보존한다.
+- **검증**: 임시 Git 저장소만 사용했다. `cargo test -p hello-agent-sidecar --locked`는 unit 48 통과·의도한 1 ignored와 stdio 6 통과, `cargo test -p hello-agent-protocol --locked`는 21 통과, `cargo clippy -p hello-agent-sidecar --locked --no-deps -- -D warnings`, scoped Rust 2021 format, `git diff --check`를 통과했다. M4 process-tree F1~F8 회귀 17개와 Tauri handoff 53개 통과·실제 유료 agent 3개 ignored도 통과했다.
+- **다음 할 일**: 새 chat 전용 preparation 계약 commit을 통합 기준선에 먼저 반영한 뒤 이 branch를 그 exact base로 전진하고, `workspace.prepareChat`·exact `workspace.abandonPrepared`와 preparation을 원자 소비하는 amended `chat.create`를 별도 후속 단위로 구현·검토한다. 이 커밋은 그 미통합 wire를 광고하거나 구현하지 않는다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
 
 - **한 일**: 최종 리뷰 P1에 따라 protocol v1 `EventV1`의 Rust/TypeScript 상위 필드를 기존 `chatId`·`taskId`·`runId`까지만 유지하고, G5 workspace event의 `ChatWorkspaceRefV1` 네 ID는 전부 event `payload` 안으로 이동했다. canonical JSONL이 payload 주소를 byte-match하고, 기존 G4 sidecar의 `EventV1` 초기화 코드를 수정하지 않은 채 소비자 빌드 호환을 증명한다.
