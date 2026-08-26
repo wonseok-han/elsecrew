@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 ID 전역 충돌 리뷰 수정)
+
+- **한 일**: 독립 리뷰 P1을 반영해 chat 생성 후보의 `chatId`도 완료된 전역 binding scan의 모든 기존 chat ID와 비교하도록 TypeScript/Rust `ChatCreationTranscriptV1` validator를 강화했다. fresh preparation이 별도 worktree/workspace를 사용해도 후보 chat ID가 기존 A와 같으면 `bindingConflict`다.
+- **안전 결정**: 충돌한 `createdChat`은 커밋 전 후보 증거로만 transcript에 남을 수 있다. 이 경우 transaction은 반드시 미커밋, 최초 사용자 메시지는 없음, preparation은 exact unbound 상태 그대로여야 하며, 성공 또는 binding/write를 주장하면 fail-closed 거부한다.
+- **검증**: 공용 fixture가 기존 chat A + fresh preparation B + 생성 후보 chat ID A를 성공으로 주장하는 경우를 거부하고, 같은 충돌을 no-write/no-bind/cleanup-eligible `bindingConflict`로 판정하는 경우만 승인한다. focused Node 10개, focused Rust 5개, 전체 `npm test` 106개, `cargo test -p hello-agent-protocol --locked` 22개, `tsc --noEmit`, `cargo check -p hello-agent-sidecar --locked`, rustfmt/diff 검사를 통과했다.
+- **다음 할 일**: 수정 commit을 재검토한 뒤 통합하고, sidecar의 chat ID 생성·전역 uniqueness 확인·insert를 한 transaction 안에서 수행해 같은 판정을 구현한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅별 독립 작업공간 준비 계약)
 
 - **한 일**: 기존 V2와 workspace-addressed V3 API를 변경하지 않고 `workspace.prepareChat`·`workspace.abandonPrepared`와 bridge 메서드를 additive하게 추가했다. prepare는 같은 프로젝트의 active/bound snapshot 존재 여부와 무관하게 전역적으로 고유한 `preparationId/worktreeId/workspaceIdentity`를 가진 새 standalone snapshot을 `unbound`로 저장하며, chat.create는 그 정확한 준비 레코드를 settings·최초 사용자 메시지와 한 transaction에서 `bound(chatId)`로 바꾼다.

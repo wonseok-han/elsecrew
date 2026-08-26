@@ -613,8 +613,21 @@ export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTr
   const settings = validateProjectRoleSettingsV1(object.currentSettings);
   const prepared = object.preparedBefore === null ? null : validatePreparedChatWorkspaceV1(object.preparedBefore);
   const bindings = validateChatBindingPagesV1(object.existingGlobalChatBindingPages);
+  const createdChat = object.createdChat === null ? null : validateChatRecordV1(object.createdChat);
+  if (createdChat !== null) {
+    if (createdChat.state !== "draft" || createdChat.projectId !== request.projectId
+      || createdChat.worktreeId !== request.worktreeId || createdChat.workspaceIdentity !== request.workspaceIdentity) {
+      fail("created chat identity mismatch");
+    }
+    if (createdChat.goal !== request.goal) fail("created chat goal mismatch");
+    if (createdChat.settingsRevision !== settings.revision) fail("created chat settings revision drift");
+    if (!sameJson(createdChat.roleSnapshots, settings.roles)) fail("created chat did not snapshot exact roles");
+  }
+  const chatIdConflict = createdChat !== null
+    && bindings.some((binding) => binding.chatId === createdChat.chatId);
   const bindingConflict = bindings.some((binding) =>
-    binding.worktreeId === request.worktreeId || binding.workspaceIdentity === request.workspaceIdentity);
+    binding.worktreeId === request.worktreeId || binding.workspaceIdentity === request.workspaceIdentity
+    || (createdChat !== null && binding.chatId === createdChat.chatId));
   const preparationMismatch = prepared !== null && (prepared.preparationId !== request.preparationId
     || prepared.manifest.projectId !== request.projectId || prepared.manifest.worktreeId !== request.worktreeId
     || prepared.manifest.workspaceIdentity !== request.workspaceIdentity);
@@ -631,16 +644,11 @@ export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTr
   ] as const, "chat create outcome");
   if (outcome !== expectedOutcome) fail(`chat create outcome must be ${expectedOutcome}`);
   if (outcome === "created") {
-    const chat = validateChatRecordV1(object.createdChat);
+    if (createdChat === null) fail("created outcome requires a chat candidate");
+    const chat = createdChat;
     const message = validateTeamMessageV1(object.createdUserMessage);
     const preparedAfter = validatePreparedChatWorkspaceV1(object.preparedAfter);
-    if (chat.state !== "draft" || chat.projectId !== request.projectId
-      || chat.worktreeId !== request.worktreeId || chat.workspaceIdentity !== request.workspaceIdentity) {
-      fail("created chat identity mismatch");
-    }
-    if (chat.goal !== request.goal) fail("created chat goal mismatch");
     if (request.expectedSettingsRevision !== settings.revision || chat.settingsRevision !== settings.revision) fail("created chat settings revision drift");
-    if (JSON.stringify(chat.roleSnapshots) !== JSON.stringify(settings.roles)) fail("created chat did not snapshot exact roles");
     if (message.chatId !== chat.chatId || message.taskId !== chat.taskId || message.worktreeId !== chat.worktreeId
       || message.kind !== "user" || message.eventSequence !== 1 || message.text !== request.goal
       || message.roleId !== null || message.runId !== null) fail("chat creation must atomically snapshot the initial user message");
@@ -651,7 +659,9 @@ export function validateChatCreationTranscriptV1(value: unknown): ChatCreationTr
       fail("chat creation must atomically bind the exact prepared snapshot");
     }
   } else {
-    if (object.createdChat !== null || object.createdUserMessage !== null || object.transactionCommitted !== false) {
+    const rejectedChatIdCandidate = outcome === "bindingConflict" && chatIdConflict;
+    if ((!rejectedChatIdCandidate && object.createdChat !== null)
+      || object.createdUserMessage !== null || object.transactionCommitted !== false) {
       fail("failed chat creation cannot persist a chat or user message");
     }
     if (!sameJson(object.preparedAfter, object.preparedBefore)) {

@@ -829,9 +829,38 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
     };
     let bindings =
         validate_chat_binding_pages(required(object, "existingGlobalChatBindingPages")?)?;
+    let created_chat = if object.get("createdChat").is_some_and(Value::is_null) {
+        None
+    } else {
+        Some(validate_chat_record(required(object, "createdChat")?)?)
+    };
+    if let Some(chat) = created_chat {
+        if chat.get("state").and_then(Value::as_str) != Some("draft")
+            || chat.get("projectId") != request.get("projectId")
+            || chat.get("worktreeId") != request.get("worktreeId")
+            || chat.get("workspaceIdentity") != request.get("workspaceIdentity")
+        {
+            return fail("created chat identity mismatch");
+        }
+        if chat.get("goal") != request.get("goal") {
+            return fail("created chat goal mismatch");
+        }
+        if chat.get("settingsRevision") != settings.get("revision") {
+            return fail("created chat settings revision drift");
+        }
+        if chat.get("roleSnapshots") != settings.get("roles") {
+            return fail("created chat did not snapshot exact roles");
+        }
+    }
+    let chat_id_conflict = created_chat.is_some_and(|chat| {
+        bindings
+            .iter()
+            .any(|binding| binding.get("chatId") == chat.get("chatId"))
+    });
     let binding_conflict = bindings.iter().any(|binding| {
         binding.get("worktreeId") == request.get("worktreeId")
             || binding.get("workspaceIdentity") == request.get("workspaceIdentity")
+            || created_chat.is_some_and(|chat| binding.get("chatId") == chat.get("chatId"))
     });
     let preparation_mismatch = prepared.is_some_and(|prepared| {
         let manifest = prepared_manifest(prepared).expect("validated prepared manifest");
@@ -876,26 +905,14 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
         return fail(format!("chat create outcome must be {expected_outcome}"));
     }
     if outcome == "created" {
-        let chat = validate_chat_record(required(object, "createdChat")?)?;
+        let chat = created_chat
+            .ok_or_else(|| G5ContractError::new("created outcome requires a chat candidate"))?;
         let message = validate_team_message(required(object, "createdUserMessage")?)?;
         let prepared_after = validate_prepared_chat_workspace(required(object, "preparedAfter")?)?;
-        if chat.get("state").and_then(Value::as_str) != Some("draft")
-            || chat.get("projectId") != request.get("projectId")
-            || chat.get("worktreeId") != request.get("worktreeId")
-            || chat.get("workspaceIdentity") != request.get("workspaceIdentity")
-        {
-            return fail("created chat identity mismatch");
-        }
-        if chat.get("goal") != request.get("goal") {
-            return fail("created chat goal mismatch");
-        }
         if request.get("expectedSettingsRevision") != settings.get("revision")
             || chat.get("settingsRevision") != settings.get("revision")
         {
             return fail("created chat settings revision drift");
-        }
-        if chat.get("roleSnapshots") != settings.get("roles") {
-            return fail("created chat did not snapshot exact roles");
         }
         if message.get("chatId") != chat.get("chatId")
             || message.get("taskId") != chat.get("taskId")
@@ -921,7 +938,8 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
             return fail("chat creation must atomically bind the exact prepared snapshot");
         }
     } else {
-        if !object.get("createdChat").is_some_and(Value::is_null)
+        let rejected_chat_id_candidate = outcome == "bindingConflict" && chat_id_conflict;
+        if (!rejected_chat_id_candidate && !object.get("createdChat").is_some_and(Value::is_null))
             || !object.get("createdUserMessage").is_some_and(Value::is_null)
             || object.get("transactionCommitted") != Some(&Value::Bool(false))
         {
