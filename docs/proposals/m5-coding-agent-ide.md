@@ -1,8 +1,8 @@
-# M5 — 코딩 에이전트 IDE (제품 기준·구현 상태)
+# M5 — 코딩 에이전트 IDE (제품·설계 제안)
 
-> **상태: 승인된 제품·설계 기준. G1~G5 fixture 수직 흐름은 구현됐고, 실제 Claude Code/Codex 연결과 G6·Windows·출시 게이트는 남아 있다.**
+> **상태: 승인된 제품 방향과 설계 계약, 열린 결정을 관리하는 제안 문서.**
 >
-> 최초 작성 2026-08-24, 구현 상태 갱신 2026-08-26. 현행 구조의 단일 기준은 [`../architecture.md`](../architecture.md)이며, 이 문서는 채택된 제품 방향과 아직 남은 제안을 함께 관리한다.
+> 최초 작성 2026-08-24. 현재 구현 구조와 검증 상태는 [`../architecture.md`](../architecture.md), 작업 경과와 최신 게이트 판정은 [`../history.md`](../history.md)를 본다. 이 문서의 제안·완료 기준을 현재 동작으로 인용하지 않는다.
 >
 > 인터랙티브 시안: [`m5-guided-start-concept.html`](m5-guided-start-concept.html)은 설치·로그인부터 실제 프로젝트의 첫 변경 검토까지, [`m5-agent-ide-concept.html`](m5-agent-ide-concept.html)은 이후 여러 프로젝트 작업대를 직접 조작해 보는 동반 검토 자료다.
 
@@ -15,15 +15,6 @@
 - **열린 질문**: 답에 따라 범위나 구조가 달라져 사용자 결정이 필요하다.
 
 M5의 목적은 기능 목록을 한꺼번에 확정하는 것이 아니라, **여러 영속 채팅·역할별 실행 구성·원본과 분리된 작업 복사본(standalone snapshot)·편집/diff·안전한 검토 루프**를 IDE의 필수 골격으로 정의하고 단계적으로 구현하는 것이다.
-
-### 0.1 현재 구현 상태 (2026-08-26)
-
-- **구현됨**: Electron/main/preload/Rust sidecar 골격, protocol·SQLite, standalone snapshot과 Monaco 파일·diff, 프로젝트별 revision CAS 역할 설정과 채팅 생성 시 불변 role snapshot, 여러 영속 채팅, 채팅별 always-fresh 작업 복사본, V3 네 ID 주소, 공개 팀 타임라인, fixture 실행과 clean/uncertain 취소·복구·종료 blocker.
-- **검증됨**: exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`의 macOS 누적 G5 하네스가 PASS했고, 독립 QA도 `G5_READY`로 판정했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-26T03-40-31-061Z.json`과 `.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json`이다.
-- **fixture 경계**: 화면의 실행은 sidecar가 띄우는 결정적 가짜 에이전트다. 공개 `TeamMessage`·프로세스 트리·취소·복구 경로를 검증하지만 실제 Claude Code/Codex adapter, 로그인 세션, 모델 응답이나 역할 간 실제 왕복을 검증한 결과는 아니다.
-- **남음**: 실제 agent adapter와 별도 승인 smoke, G6 보안·패키징·성능, Windows snapshot/자손 회수, 적용·복원 제품 루프, 출시 후보 검증. Electron은 아직 기본 배포 앱이 아니다.
-
-아래에서 **확정된 사용자 결정**은 계속 구현 계약이고, **현재 제안**과 열린 질문은 미구현 범위다. 이미 구현된 사실을 확인할 때는 이 상태 절과 `architecture.md`를 우선한다.
 
 ---
 
@@ -456,7 +447,7 @@ G4 작업 복사본은 linked worktree나 source repository의 alternates·remot
 
 `project.createWorktree`, `createProjectWorktree`, `WorktreeManifestV1`, `worktreeId/path`는 protocol v1 호환 이름이라 유지하지만 실제 linked worktree를 뜻하지 않는다.
 
-### 8.3 Electron 수직 흐름 합격 기준
+### 8.3 Electron 기준선 스파이크 합격 기준
 
 1. macOS에서 한국어 IME, 복사/붙여넣기, 단축키, 접근성이 정상 동작하고 Windows UI에서도 같은 시나리오를 재현할 fixture가 있다.
 2. sandbox·context isolation·Node integration 비활성화 상태에서 Monaco와 필요한 preload API가 동작한다.
@@ -468,7 +459,7 @@ G4 작업 복사본은 linked worktree나 source repository의 alternates·remot
 8. 앱 번들 크기·메모리·sidecar 서명·업데이트 경로의 기준값을 측정해 이후 회귀를 비교할 수 있다.
 9. macOS 에이전트 실행의 출력·입력·중단과 M4 자손 회수 계약이 Electron 수명주기에서도 유지된다. Windows 에이전트 실행은 별도 종료 게이트 전까지 비활성화한다.
 
-fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 고정했다. G5는 실제 sidecar 프로세스와 결정적 가짜 agent child로 IPC·수명주기·취소·복구를 검증했고, 실제 Claude Code/Codex adapter와 G6 성능·출시 게이트는 아직 이 기준을 통과하지 않았다.
+fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정한다. 이 스파이크는 Electron 채택 여부를 다시 비교하는 단계가 아니라, 선택한 구조의 IPC·수명주기·성능·안전 계약을 구현 전에 고정하는 단계다.
 
 ### 8.4 레이어 경계
 
@@ -491,17 +482,6 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 
 ## 9. 단계별 마일스톤
 
-구현 게이트와 제품 마일스톤은 같은 번호 체계가 아니다. 현재 기계 게이트는 다음과 같다.
-
-| 구현 게이트 | 상태 | 범위 |
-| --- | --- | --- |
-| G1~G3 | 완료 | Electron/Rust 골격, protocol/SQLite, sidecar 수명주기·typed preload |
-| G4 | 완료 | macOS standalone snapshot, Monaco 파일 편집·diff |
-| G5 | **fixture 게이트 완료** | 여러 영속 채팅, 프로젝트 역할 설정·불변 snapshot, 채팅별 작업 복사본, 공개 팀 타임라인, 가짜 실행·취소·복구 |
-| G6 | 미구현 | 보안·패키징·성능과 출시 hardening |
-
-따라서 아래 M5.0~M5.5 제품 마일스톤은 일부가 세로로 구현됐지만 아직 전부 완료된 것이 아니다. 특히 G5 PASS를 실제 모델 실행이나 적용·복원 루프 완료로 해석하지 않는다.
-
 ### M5.0 — 정보 구조와 상태 계약 확정
 
 - Electron main/preload/sandboxed renderer와 Rust sidecar 골격 구현
@@ -512,7 +492,7 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 - SQLite 이벤트 원장·현재 projection·앱 종료 안전 중단 계약 확정
 - 저장 중단·앱 재시작·원본 변경 경합 시나리오를 테스트 명세로 작성
 
-**현재 판정**: fixture 수직 흐름은 §8.2의 macOS 경계와 계약·테스트를 통과했다. 실제 agent adapter, G6와 출시 hardening이 남았으므로 전체 M5.0 제품 완료를 선언하지 않는다. 이름 확정과 Windows 에이전트 실행은 완료 조건이 아니다.
+**완료 기준**: Electron + Rust sidecar 스파이크가 §8.2를 통과하고, 승인된 화면·핵심 루프와 모든 위험 행동의 사전 조건·실패 상태가 구현 가능한 계약과 테스트로 정의됨. 이름 확정과 Windows 에이전트 실행은 완료 조건이 아니다.
 
 ### M5.1 — 작업 복사본과 여러 영속 채팅
 
@@ -525,7 +505,7 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 - 앱 종료 시 안전 중단과 확인 불가 상태의 `recoveryRequired` 복원
 - `waitingForUser`, `needsAttention`, `recoveryRequired` 표시
 
-**현재 판정**: 여러 채팅·역할 snapshot·작업 복사본·fixture run/recovery 영속 계약과 UI 전환은 구현됐다. 실제 Claude Code/Codex 실행 구성 검증과 실제 모델 재시작 smoke가 남아 있어 M5.1 전체 완료는 아니다.
+**완료 기준**: 여러 채팅을 오가고 앱을 닫았다 열어도 각 대화·실행 구성·안전 상태·다음 행동이 복원되며, 한 작업 복사본에서 writer 실행이 겹치지 않고 모델 fallback이 조용히 일어나지 않음.
 
 ### M5.2 — 코드 편집기와 작업 복사본 diff
 
@@ -534,7 +514,7 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 - 일반 편집 탭과 diff 탭 연결, 외부 변경 감지
 - 저장되지 않은 편집 보호
 
-**현재 판정**: standalone snapshot의 Monaco 편집·파일/줄 diff·dirty/conflict 보호와 채팅별 전환은 구현됐다. 실제 agent가 만든 변경과의 통합 smoke와 후속 검색 범위는 남아 있다.
+**완료 기준**: 사용자가 작업 복사본 코드를 직접 편집하고, 에이전트 변경과 자신의 편집을 파일/줄 diff로 확인하며, 저장되지 않은 편집이 어떤 전이에서도 조용히 사라지지 않음.
 
 ### M5.3 — 검토·적용·폐기·복구 루프
 
@@ -614,11 +594,11 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 
 ---
 
-## 12. 남은 질문 (G5 완료를 되돌리지 않음)
+## 12. 남은 질문
 
-아래 항목은 확정된 기준선 안에서 실제 adapter·G6 또는 후속 마일스톤의 구현·측정 결과로 결정한다. G5 fixture 수직 흐름의 완료를 되돌리는 질문은 아니다.
+아래 항목은 확정된 기준선 안에서 후속 구현·측정 결과로 결정하거나 다음 마일스톤에서 다룬다. 확정된 사용자 제품 방향을 다시 묻기 위한 게이트가 아니다.
 
-### 실제 adapter·G6에서 수치화
+### 후속 구현에서 수치화
 
 1. 이미 고정한 파일·diff·snapshot 상한 안에서 실제 agent와 package의 지연·메모리·번들 회귀 기준을 얼마로 고정할 것인가?
 2. 후속 지시를 즉시 주입할 수 없는 adapter에서 `다음 안전한 단계에 반영`과 `중단 후 다시 시작`을 어떤 이벤트 계약으로 구분할 것인가?
@@ -643,12 +623,12 @@ fixture 크기와 허용 지연은 `m5-electron-spike.md`와 G1~G5 계약에서 
 - Claude·Codex의 기능/실험 브랜치는 이 브랜치에서 분기하고 이 브랜치로만 병합한다.
 - M5 작업 중 `main`에 직접 커밋·병합·push하지 않는다.
 - `main` 병합은 M5 전체 완료·검증 뒤 사용자의 명시적 승인 게이트다.
-- 이 문서의 **확정된 사용자 결정**과 M5 안전 기준선은 구현 계약이다. **현재 제안**과 §12 후속 질문은 해당 마일스톤에서 검토하되 검증된 이전 게이트를 사실 없이 되돌리지 않는다.
+- 이 문서의 **확정된 사용자 결정**과 M5 안전 기준선은 구현 계약이다. **현재 제안**과 §12 후속 질문은 해당 마일스톤에서 검토하며, 변경 시 사용자 결정과 안전 불변식을 명시적으로 갱신한다.
 
 ## 14. 다음 실행 순서
 
-1. `G5_READY` 독립 QA가 끝난 exact G5 통합 commit에서 문서 검토와 최종 게이트를 마감한다.
-2. 실제 Claude Code/Codex adapter의 argv·모델 가용성·공개 이벤트 정규화·세션/취소 계약을 fixture와 분리해 먼저 고정한다. 실제 유료 실행과 사용자 인증은 별도 승인을 받은 smoke에서만 수행한다.
-3. G6 보안·패키징·성능 하네스와 macOS 전체 OS Quit·서명/권한 문자열 hardening을 구현한다.
+1. 실제 Claude Code/Codex adapter의 argv·모델 가용성·공개 이벤트 정규화·세션/취소 계약을 fixture와 분리해 먼저 고정한다.
+2. 실제 유료 실행과 사용자 인증은 별도 승인을 받은 smoke에서만 검증한다.
+3. 보안·패키징·성능 하네스와 macOS 전체 OS Quit·서명/권한 문자열 hardening을 구현한다.
 4. Windows standalone snapshot과 프로세스 자손 회수·소멸 확인 게이트를 통과하기 전에는 Windows agent 실행을 노출하지 않는다.
-5. 실제 adapter가 G5 안전 불변식을 유지한 뒤 M5.3 적용·폐기·복원 루프를 다음 제품 단위로 연다.
+5. 실제 adapter가 기존 안전 불변식을 유지한 뒤 적용·폐기·복원 루프를 다음 제품 단위로 연다.

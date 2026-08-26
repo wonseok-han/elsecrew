@@ -84,7 +84,7 @@
 - `docs/architecture.md`: 기술 설계
 - `docs/history.md`: 현재 상태와 작업 인계의 기준
 - `docs/proposals/m4-orchestration.md`: 완료된 M4 파일럿의 설계·검토·철회 기록. M4를 다룰 때 §9 `철회된 주장`을 먼저 확인한다
-- `docs/proposals/m5-coding-agent-ide.md`: M5 제품·안전 기준과 G1~G5 구현 상태·후속 범위. 제안 절의 미구현 내용을 현행으로 인용하지 않고 현재 구조는 `docs/architecture.md`에서 확인한다
+- `docs/proposals/m5-coding-agent-ide.md`: M5 제품 방향·안전 계약·열린 결정의 제안 문서. 현재 구현과 게이트는 `docs/architecture.md`·`docs/history.md`에서 확인한다
 - `docs/proposals/m5-{agent-ide,guided-start}-concept.html`: 작업대와 처음 시작하기 인터랙티브 검토 시안
 
 ## 구현 원칙과 함정
