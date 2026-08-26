@@ -48,6 +48,15 @@ export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { b
     return () => { controller.dispose(); chatController.dispose(); };
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
+  useEffect(() => { controller.setActionBlocked(chat.switching || chatController.isRecoveryBlocked(), chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "복구가 필요한 작업 복사본에서는 파일 작업을 할 수 없어요."); }, [controller, chat.switching, chat.recoveries, chat.activeChat?.chatId]);
+  const switchChat = async (chatId: string) => {
+    controller.setActionBlocked(true, "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요.");
+    const candidate = await chatController.prepareSwitch(chatId, controller.canLeaveProject());
+    if (!candidate) { controller.setActionBlocked(chatController.isRecoveryBlocked()); return; }
+    const bound = await controller.bindChat(candidate);
+    await chatController.commitPrepared(candidate.chatId, bound);
+    controller.setActionBlocked(chatController.isRecoveryBlocked());
+  };
 
   const activeTab = snapshot.activePath
     ? snapshot.tabs.find((tab) => tab.path === snapshot.activePath) ?? null
@@ -92,10 +101,10 @@ export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { b
       )}
 
       {snapshot.project && <section className="m5-chat-strip" aria-label="프로젝트 채팅">
-        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void chatController.switchChat(item.chatId, controller.canLeaveProject()).then((selected) => { if (selected) void controller.bindChat(selected); })}>{item.goal}</button>)}</div>
-        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (snapshot.project) void chatController.createChat({ projectId: snapshot.project.id }, goal).then((created) => { if (created) { setGoal(""); void controller.bindChat(created); } }); }}>
+        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}</button>)}</div>
+        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (snapshot.project) void chatController.createChat({ projectId: snapshot.project.id }, goal); }}>
           <input aria-label="새 채팅 목표" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="이 프로젝트에서 이루고 싶은 일을 적어주세요" disabled={chat.preparing} />
-          <button type="submit" disabled={!goal.trim() || chat.preparing || Boolean(snapshot.workspace && !controller.canLeaveProject())}>새 채팅</button>
+          <button type="submit" disabled={!goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>새 채팅</button>
         </form>
       </section>}
 

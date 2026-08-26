@@ -41,6 +41,7 @@ export interface EditorSnapshot {
   diffText: string;
   rescanRequired: boolean;
   selectionBlocked: boolean;
+  actionBlocked: boolean;
   notice: string | null;
   error: { message: string; technicalDetail: string } | null;
 }
@@ -118,6 +119,7 @@ export class ProjectEditorController {
   #selectionGeneration = 0;
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
+  #actionBlocked = false;
   #state: EditorSnapshot = {
     project: null,
     workspace: null,
@@ -131,6 +133,7 @@ export class ProjectEditorController {
     diffText: "",
     rescanRequired: false,
     selectionBlocked: false,
+    actionBlocked: false,
     notice: null,
     error: null,
   };
@@ -156,6 +159,7 @@ export class ProjectEditorController {
   snapshot(): EditorSnapshot {
     return this.#state;
   }
+  setActionBlocked(blocked: boolean, notice?: string): void { this.#actionBlocked = blocked; this.#set({ actionBlocked: blocked, notice: blocked && notice ? notice : this.#state.notice }); }
 
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener);
@@ -364,6 +368,7 @@ export class ProjectEditorController {
   }
 
   async loadTree(parentPath = ""): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
@@ -384,6 +389,7 @@ export class ProjectEditorController {
   }
 
   async openFile(path: string): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
@@ -422,6 +428,7 @@ export class ProjectEditorController {
   }
 
   async saveActive(): Promise<void> {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 저장할 수 없어요."); return; }
     const project = this.#state.project;
     const epoch = this.#projectEpoch;
     const activePath = this.#state.activePath;
@@ -470,6 +477,7 @@ export class ProjectEditorController {
   }
 
   closeTab(path: string): boolean {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 탭을 닫을 수 없어요."); return false; }
     const tab = this.#tab(path);
     if (!tab) return true;
     if (tab.saveState !== "clean") {
@@ -483,6 +491,7 @@ export class ProjectEditorController {
   }
 
   async abandonProject(): Promise<void> {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 작업 복사본을 닫을 수 없어요."); return; }
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
@@ -516,6 +525,7 @@ export class ProjectEditorController {
   }
 
   async refreshChanges(): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     await this.#refreshChanges(project.id, this.#projectEpoch);
@@ -534,6 +544,7 @@ export class ProjectEditorController {
   }
 
   async openDiff(path: string): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;

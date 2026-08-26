@@ -49,3 +49,11 @@ test("A에서 B로 clean switch하면 V3만 다시 로드하고, dirty A는 전�
   bridge.emit({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar", streamId: "wrong", seq: 1, event: "workspace.changed", payload: { ...b, event: "file.changed", paths: ["src/a.ts"], rescanRequired: true } });
   assert.equal(controller.snapshot().rescanRequired, false); controller.dispose(); assert.equal(bridge.workspaceListeners.size, 0);
 });
+
+test("복구 또는 switching gate는 save·close·diff·file RPC를 시작하지 않는다", async () => {
+  const { bridge, controller } = await bound(); const before = bridge.calls.length;
+  controller.setActionBlocked(true, "복구가 필요해요.");
+  await controller.openFile("src/a.ts"); await controller.openDiff("src/a.ts"); await controller.saveActive(); await controller.abandonProject();
+  assert.equal(controller.closeTab("src/a.ts"), false);
+  assert.equal(bridge.calls.length, before); controller.dispose();
+});

@@ -29,19 +29,17 @@ class FakeBridge {
   emit(event: TeamMessageV1) { for (const listener of this.listeners) listener(event); }
 }
 
-test("새 채팅은 매번 새 standalone snapshot triple과 당시 settings revision을 사용한다", async () => {
+test("새 채팅 준비 API가 통합되기 전에는 V2 snapshot을 재사용하거나 호출하지 않는다", async () => {
   const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); controller.start();
   await controller.openProject("project_a");
   await controller.createChat({ projectId: "project_a" }, "첫 목표");
-  await controller.createChat({ projectId: "project_a" }, "둘째 목표");
-  assert.deepEqual(bridge.created.map((item) => item.worktreeId), ["fresh_1", "fresh_2"]);
-  assert.equal(new Set(bridge.created.map((item) => item.workspaceIdentity)).size, 2);
-  assert.deepEqual(bridge.created.map((item) => item.revision), [1, 1]);
+  assert.equal(bridge.created.length, 0);
+  assert.equal(controller.snapshot().preparationApiUnavailable, true);
   controller.dispose();
 });
 
 test("A 채팅 이벤트는 A triple에서만 보이고 B와 섞이지 않으며 구독은 정리된다", async () => {
-  const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); controller.start(); await controller.openProject("project_a"); await controller.switchChat("chat_a", true);
+  const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); controller.start(); await controller.openProject("project_a"); const prepared = await controller.prepareSwitch("chat_a", true); await controller.commitPrepared(prepared!.chatId, true);
   bridge.emit({ schemaVersion: 1, messageId: "m_b", chatId: "chat_b", taskId: "task_chat_b", worktreeId: "worktree_chat_b", eventSequence: 1, kind: "status", roleId: null, runId: null, text: "B", createdAt: "2026-08-26T00:00:00Z" });
   bridge.emit({ schemaVersion: 1, messageId: "m_a", chatId: "chat_a", taskId: "task_chat_a", worktreeId: "worktree_chat_a", eventSequence: 1, kind: "status", roleId: null, runId: null, text: "A", createdAt: "2026-08-26T00:00:00Z" });
   assert.deepEqual(controller.snapshot().messages.map((item) => item.text), ["A"]);

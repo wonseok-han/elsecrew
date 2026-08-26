@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer review 수정)
+
+- **한 일**: 독립 UI review의 P1을 반영했다. chat hydration/bind 동안 `switching`을 먼저 공개하고, 기존 A 화면은 유지한 채 모든 editor/run action을 막으며 B의 detail·timeline은 exact editor bind가 성공한 뒤에만 한 번에 publish한다. hydration 중 수신한 event는 durable `eventSequence`로 merge/dedupe하며 충돌·gap은 fail-closed 오류가 된다. cancel 늦은 결과도 chatId/runId/generation/switching을 재검증해 다른 활성 chat을 바꾸지 않는다. recovery 상태는 editor save/close/abandon과 run/switch를 UI/controller 수준에서 RPC 전 차단한다.
+- **새 채팅 결정**: 안전한 새 snapshot 준비 API가 아직 통합되지 않았으므로 renderer는 기존 V2 project snapshot 재사용 또는 `project.close` cleanup을 하지 않고 `preparationApiUnavailable` 안내와 비활성화 버튼을 표시한다.
+- **검증**: focused chat/workspace editor Node 5 PASS, TypeScript `tsc --noEmit` PASS. 다음은 deferred switch/cancel/hydration/recovery regression을 보강하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 V3 채팅 작업 복사본 Monaco 포트)
 
 - **한 일**: `ProjectEditorController`가 채팅 binding 뒤 immutable `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`만 사용하도록 포트했다. tree/read/save begin·append·commit/watch/diff/close와 blob/watch event는 각각의 V3 workspace API로 전환되며, V2 project API는 채팅 생성 전 picker·snapshot 준비에만 남는다. clean chat switch는 새 workspace를 다시 load하고, dirty/conflicted 탭은 switch·새 chat을 막으며, late response/event는 epoch과 exact four-ID 비교를 통과해야만 surface에 반영된다.
