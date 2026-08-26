@@ -1,4 +1,6 @@
 import type { M5BridgeV2 } from "./contracts/bridge-v2.ts";
+import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
+import type { ChatWorkspaceRefV1, WorkspaceEventV1 } from "./contracts/workspace-addressing-v1.ts";
 import { FILE_MAX_BYTES_V1, TREE_PAGE_MAX_ENTRIES_V1, type TreeEntryV1, type WatchEventV1 } from "./contracts/project-v1.ts";
 import type { DiffFileDescriptorV1, DiffSummaryV1 } from "./contracts/diff-v1.ts";
 import type { FileVersionV1 } from "./contracts/file-v1.ts";
@@ -28,6 +30,7 @@ export interface EditorTab {
 
 export interface EditorSnapshot {
   project: { id: string; name: string; root: string } | null;
+  workspace: ChatWorkspaceRefV1 | null;
   tree: readonly TreeEntryV1[];
   treeParent: string;
   tabs: readonly EditorTab[];
@@ -38,6 +41,7 @@ export interface EditorSnapshot {
   diffText: string;
   rescanRequired: boolean;
   selectionBlocked: boolean;
+  actionBlocked: boolean;
   notice: string | null;
   error: { message: string; technicalDetail: string } | null;
 }
@@ -58,6 +62,11 @@ export type ProjectBridge = Pick<
   | "onSidecarEvent"
   | "onProjectEvent"
 >;
+export type ChatProjectBridge = ProjectBridge & Partial<Pick<M5BridgeV3,
+  "getWorkspaceTree" | "closeWorkspace" | "readWorkspaceFile" | "beginWorkspaceFileSave"
+  | "appendWorkspaceFileSaveChunk" | "commitWorkspaceFileSave" | "watchWorkspaceFiles"
+  | "getWorkspaceDiffSummary" | "getWorkspaceDiffFile" | "onWorkspaceEvent"
+>>;
 
 interface StreamAssembly {
   chunks: string[];
@@ -94,7 +103,7 @@ export interface ProjectEditorControllerOptions {
 }
 
 export class ProjectEditorController {
-  readonly #bridge: ProjectBridge;
+  readonly #bridge: ChatProjectBridge;
   readonly #listeners = new Set<() => void>();
   readonly #streams = new Map<string, StreamAssembly>();
   readonly #pendingStreams = new Map<string, PendingStream>();
@@ -110,8 +119,10 @@ export class ProjectEditorController {
   #selectionGeneration = 0;
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
+  #actionBlocked = false;
   #state: EditorSnapshot = {
     project: null,
+    workspace: null,
     tree: [],
     treeParent: "",
     tabs: [],
@@ -122,11 +133,12 @@ export class ProjectEditorController {
     diffText: "",
     rescanRequired: false,
     selectionBlocked: false,
+    actionBlocked: false,
     notice: null,
     error: null,
   };
 
-  constructor(bridge: ProjectBridge, options: ProjectEditorControllerOptions = {}) {
+  constructor(bridge: ChatProjectBridge, options: ProjectEditorControllerOptions = {}) {
     this.#bridge = bridge;
     const timeout = options.snapshotCreationTimeoutMs ?? DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS;
     if (!Number.isSafeInteger(timeout) || timeout <= 0) throw new Error("snapshot creation timeout must be a positive safe integer");
@@ -141,11 +153,13 @@ export class ProjectEditorController {
       this.#bridge.onSidecarEvent((event) => this.#observeSidecarEvent(event)),
       this.#bridge.onProjectEvent((event) => this.#observeProjectEvent(event)),
     ];
+    if (this.#bridge.onWorkspaceEvent) this.#unsubscribers.push(this.#bridge.onWorkspaceEvent((event) => this.#observeWorkspaceEvent(event)));
   }
 
   snapshot(): EditorSnapshot {
     return this.#state;
   }
+  setActionBlocked(blocked: boolean, notice?: string): void { this.#actionBlocked = blocked; this.#set({ actionBlocked: blocked, notice: blocked && notice ? notice : this.#state.notice }); }
 
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener);
@@ -175,6 +189,10 @@ export class ProjectEditorController {
 
   async chooseProject(): Promise<void> {
     if (this.#disposed) return;
+    if (this.#state.workspace) {
+      this.#setNotice("열어 둔 채팅 작업 복사본이 있어 프로젝트를 바꿀 수 없어요. 먼저 명시적으로 닫아 주세요.");
+      return;
+    }
     if (!this.canLeaveProject()) {
       this.#setNotice("저장하지 않은 변경이 있어 프로젝트를 바꿀 수 없어요.");
       return;
@@ -206,6 +224,31 @@ export class ProjectEditorController {
         return;
       }
       this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+    }
+  }
+
+  /** Binds the editor only after chat.create persisted its immutable workspace triple. */
+  async bindChat(workspace: ChatWorkspaceRefV1): Promise<boolean> {
+    if (this.#disposed) return false;
+    if (!this.canLeaveProject()) { this.#setNotice("저장하지 않은 변경이 있어 채팅을 바꿀 수 없어요."); return false; }
+    if (!this.#workspaceMethods()) { this.#setError("이 채팅의 작업 복사본을 열 수 없어요.", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }
+    const project = this.#state.project;
+    if (!project || project.id !== workspace.projectId) { this.#setError("선택한 프로젝트와 채팅 작업 복사본이 맞지 않아요.", new Error("chat project identity mismatch")); return false; }
+    const previous = this.#state;
+    const epoch = ++this.#projectEpoch;
+    this.#set({ workspace, tree: [], treeParent: "", tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
+    try {
+      // Bind in order. A failed tree must not start later diff/watch operations for B.
+      await this.#loadTree(project.id, epoch, "", true);
+      await this.#refreshChanges(project.id, epoch, true);
+      await this.#bridge.watchWorkspaceFiles!(workspace);
+      return this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace);
+    } catch (error) {
+      if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
+        this.#projectEpoch += 1;
+        this.#set({ ...previous, actionBlocked: true, notice: "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.", error: errorDetail("채팅 작업 복사본을 열지 못했어요.", error) });
+      }
+      return false;
     }
   }
 
@@ -265,6 +308,7 @@ export class ProjectEditorController {
           name: basename(operation.project.canonicalGitRoot),
           root: operation.project.canonicalGitRoot,
         },
+        workspace: null,
         tree: [],
         treeParent: "",
         tabs: [],
@@ -334,25 +378,29 @@ export class ProjectEditorController {
   }
 
   async loadTree(parentPath = ""): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
   }
 
-  async #loadTree(projectId: string, epoch: number, parentPath: string): Promise<void> {
+  async #loadTree(projectId: string, epoch: number, parentPath: string, propagate = false): Promise<void> {
     try {
-      const page = await this.#bridge.getProjectTree({ projectId, parentPath, cursor: null });
-      if (!this.#isCurrent(projectId, epoch)) return;
+      const workspace = this.#state.workspace;
+      const page = workspace ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor: null }) : await this.#bridge.getProjectTree({ projectId, parentPath, cursor: null });
+      if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       // The sidecar contract already caps a page at 500. Keep the renderer bounded too.
       const entries = page.entries.slice(0, MAX_RENDERED_TREE_ENTRIES);
       this.#set({ tree: entries, treeParent: page.parentPath, rescanRequired: false });
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch)) return;
       this.#setError("파일 목록을 불러오지 못했어요.", error);
+      if (propagate) throw error;
     }
   }
 
   async openFile(path: string): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
@@ -363,11 +411,12 @@ export class ProjectEditorController {
     }
     this.#set({ error: null, notice: null });
     try {
-      const descriptor = await this.#bridge.readFile({ projectId: project.id, path });
+      const workspace = this.#state.workspace;
+      const descriptor = workspace ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path }) : await this.#bridge.readFile({ projectId: project.id, path });
       const text = descriptor.classification === "utf8" && descriptor.stream
         ? await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1)
         : "";
-      if (!this.#isCurrent(project.id, epoch)) return;
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       const tab: EditorTab = {
         path,
         mode: descriptor.classification === "utf8" ? "text" : descriptor.classification,
@@ -390,6 +439,7 @@ export class ProjectEditorController {
   }
 
   async saveActive(): Promise<void> {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 저장할 수 없어요."); return; }
     const project = this.#state.project;
     const epoch = this.#projectEpoch;
     const activePath = this.#state.activePath;
@@ -406,24 +456,17 @@ export class ProjectEditorController {
     this.#saveGenerations.set(path, saveGeneration);
     this.#replaceTab(path, { ...tab, saveState: "saving" });
     try {
-      const begin = await this.#bridge.beginFileSave({
-        projectId: project.id,
-        path,
-        expectedVersion: tab.baseVersion,
-        totalBytes,
-        encoding: "utf8",
-      });
+      const workspace = this.#state.workspace;
+      const begin = workspace ? await this.#workspaceMethods()!.beginWorkspaceFileSave({ ...workspace, path, expectedVersion: tab.baseVersion, totalBytes, encoding: "utf8" }) : await this.#bridge.beginFileSave({ projectId: project.id, path, expectedVersion: tab.baseVersion, totalBytes, encoding: "utf8" });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       const chunks = splitUtf8(tab.text, begin.chunkBytes);
       for (const [index, text] of chunks.entries()) {
-        await this.#bridge.appendFileSaveChunk({ saveId: begin.saveId, seq: index + 1, text });
+        if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
+        if (workspace) await this.#workspaceMethods()!.appendWorkspaceFileSaveChunk({ ...workspace, saveId: begin.saveId, seq: index + 1, text });
+        else await this.#bridge.appendFileSaveChunk({ saveId: begin.saveId, seq: index + 1, text });
       }
-      const committed = await this.#bridge.commitFileSave({
-        saveId: begin.saveId,
-        expectedVersion: tab.baseVersion,
-        lastSeq: chunks.length,
-        totalBytes,
-      });
-      if (!this.#isCurrent(project.id, epoch)) return;
+      const committed = workspace ? await this.#workspaceMethods()!.commitWorkspaceFileSave({ ...workspace, saveId: begin.saveId, expectedVersion: tab.baseVersion, lastSeq: chunks.length, totalBytes }) : await this.#bridge.commitFileSave({ saveId: begin.saveId, expectedVersion: tab.baseVersion, lastSeq: chunks.length, totalBytes });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       const latest = this.#tab(path);
       if (!latest || latest.saveState !== "saving" || this.#saveGenerations.get(path) !== saveGeneration) return;
       if (committed.outcome === "dirtyConflict") {
@@ -445,6 +488,7 @@ export class ProjectEditorController {
   }
 
   closeTab(path: string): boolean {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 탭을 닫을 수 없어요."); return false; }
     const tab = this.#tab(path);
     if (!tab) return true;
     if (tab.saveState !== "clean") {
@@ -458,6 +502,7 @@ export class ProjectEditorController {
   }
 
   async abandonProject(): Promise<void> {
+    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 작업 복사본을 닫을 수 없어요."); return; }
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
@@ -466,11 +511,14 @@ export class ProjectEditorController {
       return;
     }
     try {
-      await this.#bridge.closeProject({ projectId: project.id });
+      const workspace = this.#state.workspace;
+      if (workspace) await this.#workspaceMethods()!.closeWorkspace(workspace);
+      else await this.#bridge.closeProject({ projectId: project.id });
       if (!this.#isCurrent(project.id, epoch)) return;
       this.#projectEpoch += 1;
       this.#set({
         project: null,
+        workspace: null,
         tree: [],
         treeParent: "",
         tabs: [],
@@ -488,32 +536,37 @@ export class ProjectEditorController {
   }
 
   async refreshChanges(): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     await this.#refreshChanges(project.id, this.#projectEpoch);
   }
 
-  async #refreshChanges(projectId: string, epoch: number): Promise<void> {
+  async #refreshChanges(projectId: string, epoch: number, propagate = false): Promise<void> {
     try {
-      const diffSummary = await this.#bridge.getDiffSummary({ projectId });
-      if (!this.#isCurrent(projectId, epoch)) return;
+      const workspace = this.#state.workspace;
+      const diffSummary = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffSummary(workspace) : await this.#bridge.getDiffSummary({ projectId });
+      if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       this.#set({ diffSummary, rescanRequired: false });
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch)) return;
       this.#setError("변경 목록을 불러오지 못했어요.", error);
+      if (propagate) throw error;
     }
   }
 
   async openDiff(path: string): Promise<void> {
+    if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
     try {
-      const diffFile = await this.#bridge.getDiffFile({ projectId: project.id, path });
+      const workspace = this.#state.workspace;
+      const diffFile = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffFile({ ...workspace, path }) : await this.#bridge.getDiffFile({ projectId: project.id, path });
       const diffText = diffFile.stream
         ? await this.#awaitStream(diffFile.stream.streamId, diffFile.byteLength, MAX_DIFF_STREAM_BYTES)
         : "";
-      if (!this.#isCurrent(project.id, epoch)) return;
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       this.#set({ diffFile, diffText, panel: "changes", error: null });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
@@ -613,6 +666,11 @@ export class ProjectEditorController {
   }
 
   #observeProjectEvent(event: WatchEventV1): void {
+    if (this.#state.workspace) return;
+    this.#applyWatchEvent(event);
+  }
+
+  #applyWatchEvent(event: WatchEventV1): void {
     const project = this.#state.project;
     if (!project || event.projectId !== project.id) return;
     if (event.rescanRequired) {
@@ -630,6 +688,39 @@ export class ProjectEditorController {
       }
     }
     if (event.event === "diff.changed") void this.refreshChanges();
+  }
+
+  #observeWorkspaceEvent(event: WorkspaceEventV1): void {
+    const workspace = this.#state.workspace;
+    if (!workspace || !sameWorkspace(event.payload, workspace)) return;
+    if (event.event === "workspace.blob.chunk") {
+      const stream = this.#streams.get(event.streamId);
+      if (!stream) this.#bufferPendingChunk(event.streamId, event.seq, event.payload.text);
+      else { this.#appendChunk(stream, event.streamId, event.seq, event.payload.text, stream.maxBytes ?? FILE_MAX_BYTES_V1); this.#settleStream(event.streamId); }
+      return;
+    }
+    this.#applyWatchEvent({
+      projectId: event.payload.projectId,
+      event: event.payload.event,
+      paths: event.payload.paths,
+      rescanRequired: event.payload.rescanRequired,
+    });
+  }
+
+  #workspaceMethods(): Required<Pick<M5BridgeV3,
+    "getWorkspaceTree" | "closeWorkspace" | "readWorkspaceFile" | "beginWorkspaceFileSave"
+    | "appendWorkspaceFileSaveChunk" | "commitWorkspaceFileSave" | "watchWorkspaceFiles"
+    | "getWorkspaceDiffSummary" | "getWorkspaceDiffFile"
+  >> | null {
+    const bridge = this.#bridge;
+    if (!bridge.getWorkspaceTree || !bridge.closeWorkspace || !bridge.readWorkspaceFile || !bridge.beginWorkspaceFileSave
+      || !bridge.appendWorkspaceFileSaveChunk || !bridge.commitWorkspaceFileSave || !bridge.watchWorkspaceFiles
+      || !bridge.getWorkspaceDiffSummary || !bridge.getWorkspaceDiffFile) return null;
+    return bridge as Required<Pick<M5BridgeV3,
+      "getWorkspaceTree" | "closeWorkspace" | "readWorkspaceFile" | "beginWorkspaceFileSave"
+      | "appendWorkspaceFileSaveChunk" | "commitWorkspaceFileSave" | "watchWorkspaceFiles"
+      | "getWorkspaceDiffSummary" | "getWorkspaceDiffFile"
+    >>;
   }
 
   #awaitStream(streamId: string, expectedBytes: number, maxBytes: number): Promise<string> {
@@ -749,6 +840,11 @@ function basename(path: string): string {
 
 function isPickerCancelled(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function sameWorkspace(left: ChatWorkspaceRefV1 | null | undefined, right: ChatWorkspaceRefV1 | null | undefined): boolean {
+  if (left === null || left === undefined || right === null || right === undefined) return left === right;
+  return left.chatId === right.chatId && left.projectId === right.projectId && left.worktreeId === right.worktreeId && left.workspaceIdentity === right.workspaceIdentity;
 }
 
 function errorDetail(message: string, error: unknown): { message: string; technicalDetail: string } {

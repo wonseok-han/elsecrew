@@ -16,6 +16,7 @@
 - **호환·발견**: G5 workspace 작업은 chat/project/worktree/workspace 네 ID와 외부 manifest·marker·lock을 계속 매번 검증한다. 실제 stdio A/B 격리 시험 중 root tree의 유효한 빈 `parentPath`를 공용 파서가 거부하던 오류를 발견해 G4/G5 tree route에서만 빈 문자열을 허용했다. bound A를 유지하면서 fresh B 생성 실패·mismatch 거부·exact/duplicate abandon 뒤 A tree/read/save가 계속 동작하고 원본 Git 저장소는 변하지 않음을 임시 저장소로 검증했다.
 - **검증**: `cargo test -p hello-agent-sidecar --locked`는 unit 51 통과·의도한 1 ignored와 실제 stdio 7 통과, `cargo test -p hello-agent-protocol --locked` 22 통과, M4 process-tree F1~F8 회귀 17 통과, Tauri handoff 53 통과·실제 유료 agent 3 ignored를 확인했다. `cargo clippy -p hello-agent-sidecar --locked --no-deps -- -D warnings`, owned Rust 2021 rustfmt, `git diff --check`도 통과했다. Windows/비 macOS spawn은 계약대로 차단 경로만 유지했으며 실제 Windows·유료 agent·사용자 프로젝트는 실행하지 않았다.
 - **다음 할 일**: 이 Rust 후속 commit을 독립 코드 리뷰하고 최신 통합 commit에서 G5 누적 하네스와 실제 stdio QA를 재실행한다. Electron/UI는 exact preparation 결과를 받은 뒤에만 chat.create를 호출하고 실패한 unbound preparation을 정확한 네 ID로 명시 폐기해야 한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 workspace preparation Electron 소비자)
 
 - **한 일**: 새 `workspace.prepareChat`/`workspace.abandonPrepared` capability를 고정 V3 IPC channel, preload exact validator, main handler, SidecarClient response validator에 연결했다. `createChat`은 이제 `preparationId`와 project/worktree/workspace 세 필드를 모두 포함하고, 현재 client가 정확히 알고 있는 unbound preparation에만 결합한다.
@@ -57,6 +58,36 @@
 - **안전 결정**: G5 ready capability는 canonical 순서를 정확히 비교한다. workspace 응답·event·save continuation은 `chatId/projectId/worktreeId/workspaceIdentity`를 매번 echo하고, begin 뒤 `saveId`를 그 네 ID에 등록한다. cross-chat/unknown/late save와 잘못된 response는 sidecar에 재전송하지 않고 거부한다. 공개 chat stream은 구조화된 `TeamMessage`만 전달하며 workspace/chat event는 별도 bounded-credit stream으로 ACK한다.
 - **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 25개, `git diff --check`를 통과했다. G5 package smoke expectation도 canonical fixture로 올렸지만 이 branch에는 G5 Rust sidecar가 아직 없으므로 실제 package smoke는 통합 뒤 실행해야 한다.
 - **다음 할 일**: Rust G5 sidecar와 renderer 소비자를 같은 V3 계약으로 통합하고, 최신 통합 commit에서 run/recovery 및 package smoke QA를 실행한다. 실제/유료 agent 실행은 하지 않았다.
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer bind·폐기 review 수정)
+
+- **한 일**: B chat workspace bind를 tree → diff → watch 순차 준비로 바꿔, 세 단계가 모두 성공하기 전 B editor ref/tree/tabs를 publish하지 않도록 했다. 어느 단계든 실패하면 epoch을 무효화하고 A editor snapshot/ref를 복원한 채 action gate를 유지한다. discarded chat도 recovery와 같은 위험 동작 차단 대상으로 두며, pending switch event는 detail hydration 전 raw buffer에 보관해 detail과 merge할 때만 event sequence를 판정한다.
+- **검증**: B tree bind 실패가 A ref/tabs를 보존하고 B diff/watch RPC를 시작하지 않는 focused regression을 추가했다. focused chat/workspace editor Node와 TypeScript `tsc --noEmit`, `git diff --check`를 통과했다.
+- **다음 할 일**: independent reviewer가 deferred detail/event hydration과 watch-failure restore 경로를 재확인하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 새 채팅 준비 API renderer 연결)
+
+- **한 일**: 승인된 `workspace.prepareChat` → `chat.create(preparationId, projectId, worktreeId, workspaceIdentity, goal, expectedSettingsRevision)` 계약을 renderer에 연결했다. 매 새 chat은 bridge가 만든 독립 prepared workspace의 exact ID를 쓰며, `chat.create` 실패 시에만 그 준비 작업의 exact four-ID를 `workspace.abandonPrepared`에 전달한다. 기존 V2 `createProjectWorktree`/`project.close`는 새 chat 흐름에서 호출하지 않는다.
+- **검증**: focused chat/workspace editor Node 7 PASS에서 A/B의 서로 다른 workspace identity·preparationId, B create 실패의 B-only abandon과 A 지속 사용을 확인했다. TypeScript `tsc --noEmit`과 `git diff --check`도 통과했다.
+- **다음 할 일**: 독립 renderer review와 Electron V3 preparation bridge 통합 후 Chromium smoke·G5 누적 harness를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer review 수정)
+
+- **한 일**: 독립 UI review의 P1을 반영했다. chat hydration/bind 동안 `switching`을 먼저 공개하고, 기존 A 화면은 유지한 채 모든 editor/run action을 막으며 B의 detail·timeline은 exact editor bind가 성공한 뒤에만 한 번에 publish한다. hydration 중 수신한 event는 durable `eventSequence`로 merge/dedupe하며 충돌·gap은 fail-closed 오류가 된다. cancel 늦은 결과도 chatId/runId/generation/switching을 재검증해 다른 활성 chat을 바꾸지 않는다. recovery 상태는 editor save/close/abandon과 run/switch를 UI/controller 수준에서 RPC 전 차단한다.
+- **새 채팅 결정**: 안전한 새 snapshot 준비 API가 아직 통합되지 않았으므로 renderer는 기존 V2 project snapshot 재사용 또는 `project.close` cleanup을 하지 않고 `preparationApiUnavailable` 안내와 비활성화 버튼을 표시한다.
+- **검증**: focused chat/workspace editor Node 5 PASS, TypeScript `tsc --noEmit` PASS. 다음은 deferred switch/cancel/hydration/recovery regression을 보강하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 V3 채팅 작업 복사본 Monaco 포트)
+
+- **한 일**: `ProjectEditorController`가 채팅 binding 뒤 immutable `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`만 사용하도록 포트했다. tree/read/save begin·append·commit/watch/diff/close와 blob/watch event는 각각의 V3 workspace API로 전환되며, V2 project API는 채팅 생성 전 picker·snapshot 준비에만 남는다. clean chat switch는 새 workspace를 다시 load하고, dirty/conflicted 탭은 switch·새 chat을 막으며, late response/event는 epoch과 exact four-ID 비교를 통과해야만 surface에 반영된다.
+- **검증**: V3 editor/chat focused Node 5 PASS, 기존 editor 포함 focused Node 30 PASS, root 설치 TypeScript `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. Chromium smoke와 worktree `pnpm build`는 로컬 의존성 부재 및 network DNS `ENOTFOUND` 때문에 이 worktree에서 실행하지 못했다.
+- **다음 할 일**: Electron preload/main V3 port와 통합해 실제 renderer Chromium smoke·G5 cumulative harness를 실행하고, 독립 UI review에서 save session와 dispose/race 경계를 재확인한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅·역할 설정 renderer)
+
+- **한 일**: V3 bridge만 소비하는 renderer 채팅 상태 컨트롤러와 작업대 UI를 추가했다. 프로젝트별 기획·코딩·검토 역할의 runtime/model/reasoning/CAS 설정, 기존 채팅의 불변 role snapshot 안내, 영속 채팅 목록·전환, 새 채팅마다 별도 standalone snapshot triple을 만든 뒤 exact revision으로 `chat.create` 하는 흐름, 공개 팀 타임라인과 명시적 `가짜 에이전트 데모` 시작·취소 UI를 구현했다. 교차 채팅 triple event는 renderer에서 다시 거부하고, recoverable 상태는 실행과 위험 동작을 막고 명시적 abandon confirmation만 보인다.
+- **중요한 경계**: 이 UI는 실제 모델을 설치·로그인·실행하거나 chain-of-thought/raw stderr를 표시하지 않는다. 모델을 사용할 수 없을 때는 자동 fallback하지 않으며, 런타임 V3 workspace-addressed 파일 저장/닫기 연결은 Electron bridge 포트와 함께 완성해야 한다.
+- **검증**: `node --test --experimental-strip-types tests/m5-g5-chat-ui-state.test.mts` 3 PASS, 루트 설치 TypeScript를 이용한 `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. worktree에 `node_modules`가 없어 `pnpm build`는 network DNS `ENOTFOUND` 의존성 다운로드에서 중단됐다.
+- **다음 할 일**: 독립 UI 리뷰에서 V3-only action·recovery/dirty-switch 경계를 확인하고, Electron V3 bridge와 workspace-addressed Monaco controller를 통합한 뒤 renderer Chromium smoke와 G5 누적 harness를 실행한다.
 
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
 
