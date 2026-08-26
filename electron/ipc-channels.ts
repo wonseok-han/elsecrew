@@ -13,3 +13,30 @@ export const M5_BRIDGE_V2_CHANNELS = {
   projectEvent: "m5:v2:project:event",
   eventAck: "m5:v2:internal:event-ack",
 } as const;
+
+/** V3 is additive: every renderer capability has one fixed, named channel. */
+export const M5_BRIDGE_V3_CHANNELS = {
+  workspaceGetTree: "m5:v3:workspace:get-tree",
+  workspaceClose: "m5:v3:workspace:close",
+  workspaceFileRead: "m5:v3:workspace:file:read",
+  workspaceFileSaveBegin: "m5:v3:workspace:file:save-begin",
+  workspaceFileSaveChunk: "m5:v3:workspace:file:save-chunk",
+  workspaceFileSaveCommit: "m5:v3:workspace:file:save-commit",
+  workspaceFileWatch: "m5:v3:workspace:file:watch",
+  workspaceDiffGetSummary: "m5:v3:workspace:diff:get-summary",
+  workspaceDiffGetFile: "m5:v3:workspace:diff:get-file",
+  workspaceEvent: "m5:v3:workspace:event",
+  workspacePrepareChat: "m5:v3:workspace:prepare-chat",
+  workspaceAbandonPrepared: "m5:v3:workspace:abandon-prepared",
+  projectGetRoleSettings: "m5:v3:project:get-role-settings",
+  projectUpdateRoleSettings: "m5:v3:project:update-role-settings",
+  chatCreate: "m5:v3:chat:create",
+  chatList: "m5:v3:chat:list",
+  chatGet: "m5:v3:chat:get",
+  runStartFixture: "m5:v3:run:start-fixture",
+  runCancel: "m5:v3:run:cancel",
+  recoveryList: "m5:v3:recovery:list",
+  recoveryInspect: "m5:v3:recovery:inspect",
+  recoveryMarkResolved: "m5:v3:recovery:mark-resolved",
+  chatEvent: "m5:v3:chat:event",
+} as const;
