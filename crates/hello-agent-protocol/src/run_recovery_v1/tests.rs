@@ -31,6 +31,7 @@ struct Contract {
     reasoning_effort_max_bytes: usize,
     goal_max_bytes: usize,
     public_message_max_bytes: usize,
+    chat_workspace_preparation: String,
     platform_execution: PlatformExecution,
     agent_smoke_advertised: bool,
 }
@@ -39,6 +40,26 @@ struct Contract {
 struct PlatformExecution {
     macos: String,
     windows: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparationManifest {
+    schema_version: u64,
+    protocol_version: u32,
+    contract: PreparationContract,
+    cases_file: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparationContract {
+    methods: Vec<String>,
+    prepare_semantics: String,
+    chat_bind_semantics: String,
+    cleanup_semantics: String,
+    physical_deletion: bool,
+    idempotency: String,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +128,10 @@ fn rust_matches_the_canonical_g5_manifest() {
             "writerLocked",
             "started",
         ]
+    );
+    assert_eq!(
+        manifest.contract.chat_workspace_preparation,
+        "newUnboundSnapshotThenAtomicBind"
     );
     assert!(G5_RUNTIMES_V1.iter().copied().eq(manifest
         .contract
@@ -180,6 +205,74 @@ fn rust_accepts_and_rejects_the_same_canonical_g5_cases() {
         assert!(
             validate_g5_payload_v1(&fixture.validator, &fixture.value).is_err(),
             "invalid fixture unexpectedly passed: {}",
+            fixture.name
+        );
+    }
+}
+
+#[test]
+fn rust_matches_canonical_chat_workspace_preparation_cases() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/g5-preparation-v1");
+    let manifest: PreparationManifest = read_json(root.join("manifest.json"));
+    assert_eq!(manifest.schema_version, G5_SCHEMA_VERSION_V1);
+    assert_eq!(manifest.protocol_version, super::super::PROTOCOL_VERSION);
+    assert_eq!(
+        manifest.contract.methods,
+        [
+            "workspace.prepareChat",
+            "workspace.abandonPrepared",
+            "chat.create"
+        ]
+    );
+    assert_eq!(
+        manifest.contract.prepare_semantics,
+        "alwaysNewStandaloneSnapshot"
+    );
+    assert_eq!(
+        manifest.contract.chat_bind_semantics,
+        "unboundToBoundWithChatAndInitialMessageAtomically"
+    );
+    assert_eq!(
+        manifest.contract.cleanup_semantics,
+        "exactUnboundPreparationOnlyEvidencePreserving"
+    );
+    assert!(!manifest.contract.physical_deletion);
+    assert_eq!(
+        manifest.contract.idempotency,
+        "duplicateOrLateMutationIsFailClosedNoOp"
+    );
+    let cases: Cases = read_json(root.join(manifest.cases_file));
+    let valid: HashMap<_, _> = cases
+        .valid
+        .iter()
+        .map(|fixture| (fixture.name.clone(), fixture.value.clone()))
+        .collect();
+    for fixture in &cases.valid {
+        validate_g5_payload_v1(&fixture.validator, &fixture.value).unwrap_or_else(|error| {
+            panic!("valid preparation fixture {} failed: {error}", fixture.name)
+        });
+    }
+    for fixture in &cases.invalid {
+        assert!(
+            validate_g5_payload_v1(&fixture.validator, &fixture.value).is_err(),
+            "invalid preparation fixture unexpectedly passed: {}",
+            fixture.name
+        );
+    }
+    for fixture in cases.derived {
+        let mut value = valid
+            .get(&fixture.base_valid_name)
+            .unwrap_or_else(|| panic!("missing preparation base for {}", fixture.name))
+            .clone();
+        for change in fixture.changes {
+            apply_json_pointer(&mut value, &change.pointer, change.value);
+        }
+        assert_eq!(
+            validate_g5_payload_v1(&fixture.validator, &value).is_ok(),
+            fixture.expected_valid,
+            "{}",
             fixture.name
         );
     }

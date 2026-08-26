@@ -75,6 +75,7 @@ interface Manifest {
     eventPageMaxItems: number; idMaxBytes: number; modelSelectorMaxBytes: number; reasoningEffortMaxBytes: number;
     goalMaxBytes: number; publicMessageMaxBytes: number; protocolStreamSequence: string;
     durableEventSequence: string; workspaceBinding: string; writerStartOrdering: string[];
+    chatWorkspacePreparation: string;
     recoveryResolution: string; platformExecution: Record<string, string>; agentSmokeAdvertised: boolean;
   };
   casesFile: string;
@@ -111,6 +112,7 @@ test("G5 manifest가 additive V3 bridge, exact capability와 안전 경계를 �
   assert.equal(manifest.contract.protocolStreamSequence, "connectionScopedPerStream");
   assert.equal(manifest.contract.durableEventSequence, "chatLedgerScopedContiguous");
   assert.equal(manifest.contract.workspaceBinding, "explicitChatProjectWorktreeWorkspaceIdentity");
+  assert.equal(manifest.contract.chatWorkspacePreparation, "newUnboundSnapshotThenAtomicBind");
   assert.deepEqual(manifest.contract.writerStartOrdering, ["beginImmediate", "persistRun", "persistWorkspaceLock", "commit", "spawn"]);
   assert.equal(manifest.contract.recoveryResolution, "abandonOnlyAfterAllTrackedProcessIdentitiesProvenGone");
   assert.deepEqual(manifest.contract.platformExecution, { macos: "fakeFixtureOnly", windows: "disabled" });

@@ -23,7 +23,7 @@
       "validator":"projectRoleSettingsUpdate",
       "value":{"projectId":"project_01","expectedRevision":3,"roles":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}]}
     },
-    {"name":"chat-create-request","validator":"chatCreateRequest","value":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","expectedSettingsRevision":3}},
+    {"name":"chat-create-request","validator":"chatCreateRequest","value":{"preparationId":"preparation_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","expectedSettingsRevision":3}},
     {
       "name": "chat-record",
       "validator": "chatRecord",
@@ -98,7 +98,7 @@
       "name": "chat-created-with-exact-settings-snapshot",
       "validator": "chatCreation",
       "value": {
-        "request":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","expectedSettingsRevision":3},
+        "request":{"preparationId":"preparation_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","expectedSettingsRevision":3},
         "currentSettings":{
           "schemaVersion":1,"projectId":"project_01","revision":3,
           "roles":[
@@ -107,8 +107,9 @@
             {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
           ],"updatedAt":"2026-08-26T01:00:00Z"
         },
-        "verifiedSnapshot":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},
+        "preparedBefore":{"schemaVersion":1,"preparationId":"preparation_01","manifest":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},"bindingState":"unbound","boundChatId":null,"createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},
         "existingGlobalChatBindingPages":[{"cursor":null,"items":[],"nextCursor":null}],
+        "preparedAfter":{"schemaVersion":1,"preparationId":"preparation_01","manifest":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},"bindingState":"bound","boundChatId":"chat_01","createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:01:00Z"},
         "createdChat":{
           "schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,
           "roleSnapshots":[
@@ -117,6 +118,8 @@
             {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
           ],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:01:00Z"
         },
+        "createdUserMessage":{"schemaVersion":1,"messageId":"message_initial_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":1,"kind":"user","roleId":null,"runId":null,"text":"사용자 설정 화면을 만든다.","createdAt":"2026-08-26T01:01:00Z"},
+        "transactionCommitted":true,
         "outcome":"created"
       }
     },
@@ -303,6 +306,8 @@
     {"name":"writer-start-is-rejected-while-chat-needs-recovery","baseValidName":"atomic-writer-start","validator":"writerStart","changes":[{"pointer":"/chat/state","value":"recoveryRequired"},{"pointer":"/persistedRun","value":null},{"pointer":"/persistedLock","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"recoveryBlocked"}],"expectedValid":true},
     {"name":"chat-binding-rejects-same-workspace-different-worktree","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_01","worktreeId":"worktree_other","workspaceIdentity":"workspace_01"}],"nextCursor":null}]}],"expectedValid":false},
     {"name":"chat-binding-rejects-same-worktree-aliased-workspace","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_other"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"chat-id-collision-cannot-claim-created","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_01","projectId":"project_01","worktreeId":"worktree_a","workspaceIdentity":"workspace_a"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"chat-id-collision-leaves-fresh-preparation-cleanup-eligible","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_01","projectId":"project_01","worktreeId":"worktree_a","workspaceIdentity":"workspace_a"}],"nextCursor":null}]},{"pointer":"/preparedAfter/bindingState","value":"unbound"},{"pointer":"/preparedAfter/boundChatId","value":null},{"pointer":"/preparedAfter/updatedAt","value":"2026-08-26T01:00:00Z"},{"pointer":"/createdUserMessage","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/outcome","value":"bindingConflict"}],"expectedValid":true},
     {"name":"global-chat-bindings-reject-workspace-alias-across-pages","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing_a","projectId":"project_other","worktreeId":"worktree_a","workspaceIdentity":"workspace_shared"}],"nextCursor":"page_2"},{"cursor":"page_2","items":[{"chatId":"chat_existing_b","projectId":"project_other","worktreeId":"worktree_b","workspaceIdentity":"workspace_shared"}],"nextCursor":null}]}],"expectedValid":false},
     {"name":"global-chat-bindings-reject-chat-remap-across-pages","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_other","worktreeId":"worktree_a","workspaceIdentity":"workspace_a"}],"nextCursor":"page_2"},{"cursor":"page_2","items":[{"chatId":"chat_existing","projectId":"project_other","worktreeId":"worktree_b","workspaceIdentity":"workspace_b"}],"nextCursor":null}]}],"expectedValid":false},
     {"name":"chat-binding-pages-require-complete-cursor-chain","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[],"nextCursor":"page_2"},{"cursor":"wrong_page","items":[],"nextCursor":null}]}],"expectedValid":false},

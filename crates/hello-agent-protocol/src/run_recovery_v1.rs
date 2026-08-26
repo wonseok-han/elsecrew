@@ -68,6 +68,8 @@ pub const G5_CAPABILITIES_V1: &[&str] = &[
     "workspace.file.watch",
     "workspace.diff.getSummary",
     "workspace.diff.getFile",
+    "workspace.prepareChat",
+    "workspace.abandonPrepared",
     "project.getRoleSettings",
     "project.updateRoleSettings",
     "chat.create",
@@ -106,6 +108,11 @@ pub fn validate_g5_payload_v1(validator: &str, value: &Value) -> Result<(), G5Co
         "roleProfile" => validate_role_profile(value).map(|_| ()),
         "projectRoleSettings" => validate_project_role_settings(value).map(|_| ()),
         "projectRoleSettingsUpdate" => validate_project_role_settings_update(value),
+        "prepareChatWorkspaceRequest" => validate_prepare_chat_workspace_request(value).map(|_| ()),
+        "preparedChatWorkspace" => validate_prepared_chat_workspace(value).map(|_| ()),
+        "prepareChatWorkspace" => validate_prepare_chat_workspace(value),
+        "abandonPreparedWorkspaceRequest" => validate_abandon_prepared_request(value).map(|_| ()),
+        "abandonPreparedWorkspace" => validate_abandon_prepared_workspace(value),
         "chatCreateRequest" => validate_chat_create_request(value).map(|_| ()),
         "chatRecord" => validate_chat_record(value).map(|_| ()),
         "chatTransition" => validate_chat_transition(value),
@@ -253,11 +260,283 @@ fn validate_project_role_settings_update(value: &Value) -> Result<(), G5Contract
     validate_role_set(object.get("roles"), "roles")
 }
 
+fn validate_prepare_chat_workspace_request(
+    value: &Value,
+) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "prepare chat workspace request")?;
+    exact_keys(object, &["projectId"])?;
+    id(object.get("projectId"), "projectId")?;
+    Ok(object)
+}
+
+fn validate_prepared_chat_workspace(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "prepared chat workspace")?;
+    exact_keys(
+        object,
+        &[
+            "schemaVersion",
+            "preparationId",
+            "manifest",
+            "bindingState",
+            "boundChatId",
+            "createdAt",
+            "updatedAt",
+        ],
+    )?;
+    schema(object.get("schemaVersion"))?;
+    id(object.get("preparationId"), "preparationId")?;
+    let manifest_value = required(object, "manifest")?;
+    super::project_v1::validate_project_payload_v1("worktreeManifest", manifest_value)
+        .map_err(|error| G5ContractError::new(format!("invalid prepared manifest: {error}")))?;
+    let manifest = self::object(manifest_value, "prepared manifest")?;
+    let state = one_of(
+        object.get("bindingState"),
+        &["unbound", "bound", "abandoned"],
+        "prepared binding state",
+    )?;
+    if state == "bound" {
+        id(object.get("boundChatId"), "boundChatId")?;
+    } else if !object.get("boundChatId").is_some_and(Value::is_null) {
+        return fail(format!("{state} preparation cannot have boundChatId"));
+    }
+    let lifecycle = string(manifest.get("lifecycle"), "prepared manifest lifecycle")?;
+    if (state == "abandoned" && lifecycle != "abandoned")
+        || (state != "abandoned" && lifecycle != "active")
+    {
+        return fail("prepared binding state does not match manifest lifecycle");
+    }
+    timestamp(object.get("createdAt"), "createdAt")?;
+    timestamp(object.get("updatedAt"), "updatedAt")?;
+    if string(object.get("updatedAt"), "updatedAt")? < string(object.get("createdAt"), "createdAt")?
+    {
+        return fail("prepared workspace updatedAt must be monotonic");
+    }
+    Ok(object)
+}
+
+fn validate_prepare_chat_workspace(value: &Value) -> Result<(), G5ContractError> {
+    let transcript = object(value, "prepare chat workspace transcript")?;
+    exact_keys(
+        transcript,
+        &[
+            "request",
+            "existingPreparationPages",
+            "candidate",
+            "persisted",
+            "transactionCommitted",
+            "outcome",
+        ],
+    )?;
+    let request = validate_prepare_chat_workspace_request(required(transcript, "request")?)?;
+    let existing =
+        validate_prepared_workspace_pages(required(transcript, "existingPreparationPages")?)?;
+    let candidate = validate_prepared_chat_workspace(required(transcript, "candidate")?)?;
+    let candidate_manifest = prepared_manifest(candidate)?;
+    if candidate.get("bindingState").and_then(Value::as_str) != Some("unbound")
+        || candidate_manifest.get("projectId") != request.get("projectId")
+    {
+        return fail(
+            "prepare candidate must be a new unbound active snapshot for the requested project",
+        );
+    }
+    let collision = existing.iter().any(|prepared| {
+        let manifest = prepared_manifest(prepared).expect("validated prepared manifest");
+        prepared.get("preparationId") == candidate.get("preparationId")
+            || manifest.get("worktreeId") == candidate_manifest.get("worktreeId")
+            || manifest.get("workspaceIdentity") == candidate_manifest.get("workspaceIdentity")
+    });
+    let expected = if collision {
+        "identityCollision"
+    } else {
+        "prepared"
+    };
+    let outcome = one_of(
+        transcript.get("outcome"),
+        &["prepared", "identityCollision"],
+        "prepare outcome",
+    )?;
+    if outcome != expected {
+        return fail(format!("prepare outcome must be {expected}"));
+    }
+    if outcome == "prepared" {
+        validate_prepared_chat_workspace(required(transcript, "persisted")?)?;
+        if transcript.get("persisted") != transcript.get("candidate")
+            || transcript.get("transactionCommitted") != Some(&Value::Bool(true))
+        {
+            return fail("successful preparation must atomically persist the exact new snapshot");
+        }
+    } else if !transcript.get("persisted").is_some_and(Value::is_null)
+        || transcript.get("transactionCommitted") != Some(&Value::Bool(false))
+    {
+        return fail("identity collision cannot persist or publish a preparation");
+    }
+    Ok(())
+}
+
+fn validate_abandon_prepared_request(
+    value: &Value,
+) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "abandon prepared workspace request")?;
+    exact_keys(
+        object,
+        &[
+            "preparationId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+        ],
+    )?;
+    for field in [
+        "preparationId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(object.get(field), field)?;
+    }
+    Ok(object)
+}
+
+fn validate_abandon_prepared_result(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
+    let object = object(value, "abandon prepared workspace result")?;
+    exact_keys(
+        object,
+        &[
+            "preparationId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "bindingState",
+            "physicallyDeleted",
+        ],
+    )?;
+    for field in [
+        "preparationId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(object.get(field), field)?;
+    }
+    if object.get("bindingState").and_then(Value::as_str) != Some("abandoned")
+        || object.get("physicallyDeleted") != Some(&Value::Bool(false))
+    {
+        return fail("prepared workspace abandon must preserve evidence without physical deletion");
+    }
+    Ok(object)
+}
+
+fn validate_abandon_prepared_workspace(value: &Value) -> Result<(), G5ContractError> {
+    let transcript = object(value, "abandon prepared workspace transcript")?;
+    exact_keys(
+        transcript,
+        &[
+            "request",
+            "persistedBefore",
+            "unrelatedBefore",
+            "persistedAfter",
+            "unrelatedAfter",
+            "result",
+            "transactionCommitted",
+            "outcome",
+        ],
+    )?;
+    let request = validate_abandon_prepared_request(required(transcript, "request")?)?;
+    let before = if transcript
+        .get("persistedBefore")
+        .is_some_and(Value::is_null)
+    {
+        None
+    } else {
+        Some(validate_prepared_chat_workspace(required(
+            transcript,
+            "persistedBefore",
+        )?)?)
+    };
+    let unrelated_before = validate_prepared_workspace_array(
+        required(transcript, "unrelatedBefore")?,
+        "unrelated preparations before",
+    )?;
+    let unrelated_after = validate_prepared_workspace_array(
+        required(transcript, "unrelatedAfter")?,
+        "unrelated preparations after",
+    )?;
+    if transcript.get("unrelatedBefore") != transcript.get("unrelatedAfter") {
+        return fail("abandon prepared cannot mutate another workspace");
+    }
+    if unrelated_before.iter().any(|prepared| {
+        let manifest = prepared_manifest(prepared).expect("validated prepared manifest");
+        prepared.get("preparationId") == request.get("preparationId")
+            || manifest.get("worktreeId") == request.get("worktreeId")
+            || manifest.get("workspaceIdentity") == request.get("workspaceIdentity")
+    }) || unrelated_after.len() != unrelated_before.len()
+    {
+        return fail("target preparation cannot appear in unrelated evidence");
+    }
+    let mismatch = before.is_some_and(|prepared| {
+        let manifest = prepared_manifest(prepared).expect("validated prepared manifest");
+        prepared.get("preparationId") != request.get("preparationId")
+            || manifest.get("projectId") != request.get("projectId")
+            || manifest.get("worktreeId") != request.get("worktreeId")
+            || manifest.get("workspaceIdentity") != request.get("workspaceIdentity")
+    });
+    let expected = match before {
+        None => "unknownPreparation",
+        Some(_) if mismatch => "identityMismatch",
+        Some(prepared) => match prepared.get("bindingState").and_then(Value::as_str) {
+            Some("bound") => "alreadyBound",
+            Some("abandoned") => "alreadyAbandoned",
+            Some("unbound") => "abandoned",
+            _ => return fail("unknown prepared binding state"),
+        },
+    };
+    let outcome = one_of(
+        transcript.get("outcome"),
+        &[
+            "abandoned",
+            "unknownPreparation",
+            "identityMismatch",
+            "alreadyBound",
+            "alreadyAbandoned",
+        ],
+        "abandon prepared outcome",
+    )?;
+    if outcome != expected {
+        return fail(format!("abandon prepared outcome must be {expected}"));
+    }
+    if outcome == "abandoned" {
+        let before = before.expect("abandon outcome requires preparation");
+        let after = validate_prepared_chat_workspace(required(transcript, "persistedAfter")?)?;
+        let result = validate_abandon_prepared_result(required(transcript, "result")?)?;
+        same_prepared_identity(before, after, "abandon transition")?;
+        same_prepared_identity(before, result, "abandon result")?;
+        if after.get("bindingState").and_then(Value::as_str) != Some("abandoned")
+            || !same_manifest_except_lifecycle(
+                prepared_manifest(before)?,
+                prepared_manifest(after)?,
+            )
+            || after.get("createdAt") != before.get("createdAt")
+            || string(after.get("updatedAt"), "after updatedAt")?
+                < string(before.get("updatedAt"), "before updatedAt")?
+            || transcript.get("transactionCommitted") != Some(&Value::Bool(true))
+        {
+            return fail("abandon must atomically terminally mark only the unbound preparation");
+        }
+    } else if transcript.get("persistedAfter") != transcript.get("persistedBefore")
+        || !transcript.get("result").is_some_and(Value::is_null)
+        || transcript.get("transactionCommitted") != Some(&Value::Bool(false))
+    {
+        return fail("failed or duplicate abandon must be a fail-closed no-op");
+    }
+    Ok(())
+}
+
 fn validate_chat_create_request(value: &Value) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "chat create request")?;
     exact_keys(
         object,
         &[
+            "preparationId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
@@ -265,7 +544,12 @@ fn validate_chat_create_request(value: &Value) -> Result<&Map<String, Value>, G5
             "expectedSettingsRevision",
         ],
     )?;
-    for field in ["projectId", "worktreeId", "workspaceIdentity"] {
+    for field in [
+        "preparationId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
         id(object.get(field), field)?;
     }
     bounded_text(object.get("goal"), "goal", G5_GOAL_MAX_BYTES_V1)?;
@@ -524,34 +808,81 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
         &[
             "request",
             "currentSettings",
-            "verifiedSnapshot",
+            "preparedBefore",
             "existingGlobalChatBindingPages",
+            "preparedAfter",
             "createdChat",
+            "createdUserMessage",
+            "transactionCommitted",
             "outcome",
         ],
     )?;
     let request = validate_chat_create_request(required(object, "request")?)?;
     let settings = validate_project_role_settings(required(object, "currentSettings")?)?;
-    let snapshot_value = required(object, "verifiedSnapshot")?;
-    super::project_v1::validate_project_payload_v1("worktreeManifest", snapshot_value)
-        .map_err(|error| G5ContractError::new(format!("invalid verified snapshot: {error}")))?;
-    let snapshot = self::object(snapshot_value, "verified snapshot")?;
+    let prepared = if object.get("preparedBefore").is_some_and(Value::is_null) {
+        None
+    } else {
+        Some(validate_prepared_chat_workspace(required(
+            object,
+            "preparedBefore",
+        )?)?)
+    };
     let bindings =
         validate_chat_binding_pages(required(object, "existingGlobalChatBindingPages")?)?;
+    let created_chat = if object.get("createdChat").is_some_and(Value::is_null) {
+        None
+    } else {
+        Some(validate_chat_record(required(object, "createdChat")?)?)
+    };
+    if let Some(chat) = created_chat {
+        if chat.get("state").and_then(Value::as_str) != Some("draft")
+            || chat.get("projectId") != request.get("projectId")
+            || chat.get("worktreeId") != request.get("worktreeId")
+            || chat.get("workspaceIdentity") != request.get("workspaceIdentity")
+        {
+            return fail("created chat identity mismatch");
+        }
+        if chat.get("goal") != request.get("goal") {
+            return fail("created chat goal mismatch");
+        }
+        if chat.get("settingsRevision") != settings.get("revision") {
+            return fail("created chat settings revision drift");
+        }
+        if chat.get("roleSnapshots") != settings.get("roles") {
+            return fail("created chat did not snapshot exact roles");
+        }
+    }
+    let chat_id_conflict = created_chat.is_some_and(|chat| {
+        bindings
+            .iter()
+            .any(|binding| binding.get("chatId") == chat.get("chatId"))
+    });
     let binding_conflict = bindings.iter().any(|binding| {
         binding.get("worktreeId") == request.get("worktreeId")
             || binding.get("workspaceIdentity") == request.get("workspaceIdentity")
+            || created_chat.is_some_and(|chat| binding.get("chatId") == chat.get("chatId"))
     });
-    let identity_mismatch = request.get("projectId") != settings.get("projectId")
-        || snapshot.get("projectId") != request.get("projectId")
-        || snapshot.get("worktreeId") != request.get("worktreeId")
-        || snapshot.get("workspaceIdentity") != request.get("workspaceIdentity");
-    let expected_outcome = if request.get("expectedSettingsRevision") != settings.get("revision") {
+    let preparation_mismatch = prepared.is_some_and(|prepared| {
+        let manifest = prepared_manifest(prepared).expect("validated prepared manifest");
+        prepared.get("preparationId") != request.get("preparationId")
+            || manifest.get("projectId") != request.get("projectId")
+            || manifest.get("worktreeId") != request.get("worktreeId")
+            || manifest.get("workspaceIdentity") != request.get("workspaceIdentity")
+    });
+    let expected_outcome = if prepared.is_none() {
+        "preparationUnknown"
+    } else if request.get("expectedSettingsRevision") != settings.get("revision") {
         "settingsDrift"
-    } else if identity_mismatch {
+    } else if prepared
+        .and_then(|value| value.get("bindingState"))
+        .and_then(Value::as_str)
+        != Some("unbound")
+    {
+        "preparationNotUnbound"
+    } else if preparation_mismatch {
+        "preparationMismatch"
+    } else if request.get("projectId") != settings.get("projectId") {
         "identityMismatch"
-    } else if snapshot.get("lifecycle").and_then(Value::as_str) != Some("active") {
-        "snapshotNotActive"
     } else if binding_conflict {
         "bindingConflict"
     } else {
@@ -561,10 +892,12 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
         object.get("outcome"),
         &[
             "created",
+            "preparationUnknown",
             "settingsDrift",
+            "preparationNotUnbound",
+            "preparationMismatch",
             "identityMismatch",
             "bindingConflict",
-            "snapshotNotActive",
         ],
         "chat create outcome",
     )?;
@@ -572,24 +905,48 @@ fn validate_chat_creation(value: &Value) -> Result<(), G5ContractError> {
         return fail(format!("chat create outcome must be {expected_outcome}"));
     }
     if outcome == "created" {
-        let chat = validate_chat_record(required(object, "createdChat")?)?;
-        if chat.get("projectId") != request.get("projectId")
-            || chat.get("worktreeId") != request.get("worktreeId")
-            || chat.get("workspaceIdentity") != request.get("workspaceIdentity")
-        {
-            return fail("created chat identity mismatch");
-        }
+        let chat = created_chat
+            .ok_or_else(|| G5ContractError::new("created outcome requires a chat candidate"))?;
+        let message = validate_team_message(required(object, "createdUserMessage")?)?;
+        let prepared_after = validate_prepared_chat_workspace(required(object, "preparedAfter")?)?;
         if request.get("expectedSettingsRevision") != settings.get("revision")
             || chat.get("settingsRevision") != settings.get("revision")
         {
             return fail("created chat settings revision drift");
         }
-        if chat.get("roleSnapshots") != settings.get("roles") {
-            return fail("created chat did not snapshot exact roles");
+        if message.get("chatId") != chat.get("chatId")
+            || message.get("taskId") != chat.get("taskId")
+            || message.get("worktreeId") != chat.get("worktreeId")
+            || message.get("kind").and_then(Value::as_str) != Some("user")
+            || message.get("eventSequence").and_then(Value::as_u64) != Some(1)
+            || message.get("text") != request.get("goal")
+            || !message.get("roleId").is_some_and(Value::is_null)
+            || !message.get("runId").is_some_and(Value::is_null)
+        {
+            return fail("chat creation must atomically snapshot the initial user message");
+        }
+        let prepared = prepared.expect("created chat requires preparation");
+        same_prepared_identity(prepared, prepared_after, "chat preparation bind")?;
+        if prepared.get("manifest") != prepared_after.get("manifest")
+            || prepared_after.get("bindingState").and_then(Value::as_str) != Some("bound")
+            || prepared_after.get("boundChatId") != chat.get("chatId")
+            || prepared_after.get("createdAt") != prepared.get("createdAt")
+            || string(prepared_after.get("updatedAt"), "prepared after updatedAt")?
+                < string(prepared.get("updatedAt"), "prepared before updatedAt")?
+            || object.get("transactionCommitted") != Some(&Value::Bool(true))
+        {
+            return fail("chat creation must atomically bind the exact prepared snapshot");
         }
     } else {
-        if !object.get("createdChat").is_some_and(Value::is_null) {
-            return fail("failed chat creation cannot return a chat");
+        let rejected_chat_id_candidate = outcome == "bindingConflict" && chat_id_conflict;
+        if (!rejected_chat_id_candidate && !object.get("createdChat").is_some_and(Value::is_null))
+            || !object.get("createdUserMessage").is_some_and(Value::is_null)
+            || object.get("transactionCommitted") != Some(&Value::Bool(false))
+        {
+            return fail("failed chat creation cannot persist a chat or user message");
+        }
+        if object.get("preparedAfter") != object.get("preparedBefore") {
+            return fail("failed chat creation must leave the exact preparation cleanup-eligible");
         }
     }
     Ok(())
@@ -648,6 +1005,107 @@ fn validate_chat_binding_pages(value: &Value) -> Result<Vec<&Map<String, Value>>
         }
     }
     Ok(bindings)
+}
+
+fn validate_prepared_workspace_pages(
+    value: &Value,
+) -> Result<Vec<&Map<String, Value>>, G5ContractError> {
+    let pages = array(
+        Some(value),
+        "prepared workspace pages",
+        G5_PAGE_MAX_ITEMS_V1,
+    )?;
+    if pages.is_empty() {
+        return fail("prepared workspace scan requires at least one complete page");
+    }
+    let mut prepared = Vec::new();
+    let mut expected_cursor: Option<&str> = None;
+    for (index, page) in pages.iter().enumerate() {
+        let page = object(page, "prepared workspace page")?;
+        exact_keys(page, &["cursor", "items", "nextCursor"])?;
+        let cursor = nullable_id(page.get("cursor"), "prepared cursor")?;
+        if cursor != expected_cursor {
+            return fail("prepared workspace pages must form one cursor chain");
+        }
+        for item in array(
+            page.get("items"),
+            "prepared workspace items",
+            G5_PAGE_MAX_ITEMS_V1,
+        )? {
+            prepared.push(validate_prepared_chat_workspace(item)?);
+        }
+        expected_cursor = nullable_id(page.get("nextCursor"), "prepared nextCursor")?;
+        if index < pages.len() - 1 && expected_cursor.is_none() {
+            return fail("prepared workspace scan ended before its last page");
+        }
+    }
+    if expected_cursor.is_some() {
+        return fail("prepared workspace scan must end with nextCursor null");
+    }
+    let mut preparation_ids = HashSet::new();
+    let mut worktree_ids = HashSet::new();
+    let mut workspace_identities = HashSet::new();
+    for item in &prepared {
+        let manifest = prepared_manifest(item)?;
+        if !preparation_ids.insert(string(item.get("preparationId"), "preparationId")?)
+            || !worktree_ids.insert(string(manifest.get("worktreeId"), "worktreeId")?)
+            || !workspace_identities.insert(string(
+                manifest.get("workspaceIdentity"),
+                "workspaceIdentity",
+            )?)
+        {
+            return fail("prepared workspace identities must remain globally unique");
+        }
+    }
+    Ok(prepared)
+}
+
+fn validate_prepared_workspace_array<'a>(
+    value: &'a Value,
+    name: &str,
+) -> Result<Vec<&'a Map<String, Value>>, G5ContractError> {
+    array(Some(value), name, G5_PAGE_MAX_ITEMS_V1)?
+        .iter()
+        .map(validate_prepared_chat_workspace)
+        .collect()
+}
+
+fn prepared_manifest<'a>(
+    prepared: &'a Map<String, Value>,
+) -> Result<&'a Map<String, Value>, G5ContractError> {
+    object(required(prepared, "manifest")?, "prepared manifest")
+}
+
+fn same_prepared_identity(
+    expected: &Map<String, Value>,
+    actual: &Map<String, Value>,
+    name: &str,
+) -> Result<(), G5ContractError> {
+    let expected_manifest = prepared_manifest(expected)?;
+    let actual_manifest = actual.get("manifest").map_or(Ok(actual), |manifest| {
+        object(manifest, "actual prepared manifest")
+    })?;
+    for field in ["preparationId"] {
+        if expected.get(field) != actual.get(field) {
+            return fail(format!("{name} changed preparation identity"));
+        }
+    }
+    for field in ["projectId", "worktreeId", "workspaceIdentity"] {
+        if expected_manifest.get(field) != actual_manifest.get(field) {
+            return fail(format!(
+                "{name} changed project/worktree/workspace identity"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn same_manifest_except_lifecycle(before: &Map<String, Value>, after: &Map<String, Value>) -> bool {
+    let mut before = before.clone();
+    let mut after = after.clone();
+    before.remove("lifecycle");
+    after.remove("lifecycle");
+    before == after
 }
 
 fn validate_chat_detail_page(value: &Value) -> Result<(), G5ContractError> {

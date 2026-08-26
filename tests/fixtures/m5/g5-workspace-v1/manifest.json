@@ -4,7 +4,8 @@
   "contract": {
     "capabilities": [
       "workspace.getTree", "workspace.close", "workspace.file.read", "workspace.file.save",
-      "workspace.file.watch", "workspace.diff.getSummary", "workspace.diff.getFile"
+      "workspace.file.watch", "workspace.diff.getSummary", "workspace.diff.getFile",
+      "workspace.prepareChat", "workspace.abandonPrepared"
     ],
     "events": ["workspace.changed", "workspace.blob.chunk"],
     "bridgeV2Methods": [
@@ -16,7 +17,8 @@
     "bridgeV3WorkspaceMethods": [
       "getWorkspaceTree", "closeWorkspace", "readWorkspaceFile", "beginWorkspaceFileSave",
       "appendWorkspaceFileSaveChunk", "commitWorkspaceFileSave", "watchWorkspaceFiles",
-      "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent"
+      "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent",
+      "prepareChatWorkspace", "abandonPreparedWorkspace"
     ],
     "idMaxBytes": 512,
     "addressing": "explicitChatProjectWorktreeWorkspaceIdentity",
