@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 V3 채팅 작업 복사본 Monaco 포트)
+
+- **한 일**: `ProjectEditorController`가 채팅 binding 뒤 immutable `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`만 사용하도록 포트했다. tree/read/save begin·append·commit/watch/diff/close와 blob/watch event는 각각의 V3 workspace API로 전환되며, V2 project API는 채팅 생성 전 picker·snapshot 준비에만 남는다. clean chat switch는 새 workspace를 다시 load하고, dirty/conflicted 탭은 switch·새 chat을 막으며, late response/event는 epoch과 exact four-ID 비교를 통과해야만 surface에 반영된다.
+- **검증**: V3 editor/chat focused Node 5 PASS, 기존 editor 포함 focused Node 30 PASS, root 설치 TypeScript `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. Chromium smoke와 worktree `pnpm build`는 로컬 의존성 부재 및 network DNS `ENOTFOUND` 때문에 이 worktree에서 실행하지 못했다.
+- **다음 할 일**: Electron preload/main V3 port와 통합해 실제 renderer Chromium smoke·G5 cumulative harness를 실행하고, 독립 UI review에서 save session와 dispose/race 경계를 재확인한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅·역할 설정 renderer)
 
 - **한 일**: V3 bridge만 소비하는 renderer 채팅 상태 컨트롤러와 작업대 UI를 추가했다. 프로젝트별 기획·코딩·검토 역할의 runtime/model/reasoning/CAS 설정, 기존 채팅의 불변 role snapshot 안내, 영속 채팅 목록·전환, 새 채팅마다 별도 standalone snapshot triple을 만든 뒤 exact revision으로 `chat.create` 하는 흐름, 공개 팀 타임라인과 명시적 `가짜 에이전트 데모` 시작·취소 UI를 구현했다. 교차 채팅 triple event는 renderer에서 다시 거부하고, recoverable 상태는 실행과 위험 동작을 막고 명시적 abandon confirmation만 보인다.

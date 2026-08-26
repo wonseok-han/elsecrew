@@ -92,10 +92,10 @@ export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { b
       )}
 
       {snapshot.project && <section className="m5-chat-strip" aria-label="프로젝트 채팅">
-        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void chatController.switchChat(item.chatId, controller.canLeaveProject())}>{item.goal}</button>)}</div>
-        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (snapshot.project) void chatController.createChat({ projectId: snapshot.project.id }, goal).then((created) => { if (created) setGoal(""); }); }}>
+        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void chatController.switchChat(item.chatId, controller.canLeaveProject()).then((selected) => { if (selected) void controller.bindChat(selected); })}>{item.goal}</button>)}</div>
+        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (snapshot.project) void chatController.createChat({ projectId: snapshot.project.id }, goal).then((created) => { if (created) { setGoal(""); void controller.bindChat(created); } }); }}>
           <input aria-label="새 채팅 목표" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="이 프로젝트에서 이루고 싶은 일을 적어주세요" disabled={chat.preparing} />
-          <button type="submit" disabled={!goal.trim() || chat.preparing}>새 채팅</button>
+          <button type="submit" disabled={!goal.trim() || chat.preparing || Boolean(snapshot.workspace && !controller.canLeaveProject())}>새 채팅</button>
         </form>
       </section>}
 

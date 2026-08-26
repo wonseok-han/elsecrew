@@ -82,6 +82,11 @@ export class ChatUiController {
       this.#set({ chats: [chat, ...this.#state.chats.filter((item) => item.chatId !== chat.chatId)], notice: "새 채팅을 시작했어요. 이 채팅만의 작업 복사본을 사용해요." });
       return chat;
     } catch (error) {
+      if (snapshot) {
+        // A failed createChat never leaves its newly prepared, unbound snapshot selectable.
+        // This V2 close is only the pre-chat preparation evidence path; bound chats close via V3.
+        try { await this.#bridge.closeProject({ projectId: source.projectId }); } catch { /* retain the original error as evidence */ }
+      }
       if (this.#live(generation)) this.#error("새 채팅을 준비하지 못했어요. 원본 프로젝트는 바꾸지 않았어요.", error);
       return null;
     } finally { if (this.#live(generation)) this.#set({ preparing: false }); }
