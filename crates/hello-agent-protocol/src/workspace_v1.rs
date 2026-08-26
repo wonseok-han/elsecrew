@@ -11,6 +11,8 @@ pub const WORKSPACE_CAPABILITIES_V1: &[&str] = &[
     "workspace.file.watch",
     "workspace.diff.getSummary",
     "workspace.diff.getFile",
+    "workspace.prepareChat",
+    "workspace.abandonPrepared",
 ];
 pub const WORKSPACE_EVENTS_V1: &[&str] = &["workspace.changed", "workspace.blob.chunk"];
 

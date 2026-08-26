@@ -8,6 +8,7 @@
       "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
       "workspace.file.read", "workspace.file.save", "workspace.file.watch",
       "workspace.diff.getSummary", "workspace.diff.getFile",
+      "workspace.prepareChat", "workspace.abandonPrepared",
       "project.getRoleSettings", "project.updateRoleSettings",
       "chat.create", "chat.list", "chat.get", "run.startFixture", "run.cancel",
       "recovery.list", "recovery.inspect", "recovery.markResolved"
@@ -20,6 +21,7 @@
       "readWorkspaceFile", "beginWorkspaceFileSave",
       "appendWorkspaceFileSaveChunk", "commitWorkspaceFileSave", "watchWorkspaceFiles",
       "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent",
+      "prepareChatWorkspace", "abandonPreparedWorkspace",
       "getProjectRoleSettings", "updateProjectRoleSettings",
       "createChat", "listChats", "getChat", "startFixtureRun", "cancelRun", "listRecoveries",
       "inspectRecovery", "markRecoveryResolved", "onChatEvent"
@@ -41,6 +43,7 @@
     "protocolStreamSequence": "connectionScopedPerStream",
     "durableEventSequence": "chatLedgerScopedContiguous",
     "workspaceBinding": "explicitChatProjectWorktreeWorkspaceIdentity",
+    "chatWorkspacePreparation": "newUnboundSnapshotThenAtomicBind",
     "writerStartOrdering": ["beginImmediate", "persistRun", "persistWorkspaceLock", "commit", "spawn"],
     "recoveryResolution": "abandonOnlyAfterAllTrackedProcessIdentitiesProvenGone",
     "platformExecution": {"macos":"fakeFixtureOnly","windows":"disabled"},

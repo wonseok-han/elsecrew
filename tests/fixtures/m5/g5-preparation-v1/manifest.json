@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "contract": {
+    "methods": ["workspace.prepareChat", "workspace.abandonPrepared", "chat.create"],
+    "bridgeMethods": ["prepareChatWorkspace", "abandonPreparedWorkspace", "createChat"],
+    "prepareSemantics": "alwaysNewStandaloneSnapshot",
+    "chatBindSemantics": "unboundToBoundWithChatAndInitialMessageAtomically",
+    "cleanupSemantics": "exactUnboundPreparationOnlyEvidencePreserving",
+    "physicalDeletion": false,
+    "idempotency": "duplicateOrLateMutationIsFailClosedNoOp"
+  },
+  "casesFile": "cases.json"
+}
