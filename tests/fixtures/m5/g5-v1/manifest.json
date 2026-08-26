@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "contract": {
+    "capabilities": [
+      "system.status", "app.prepareQuit", "project.open", "project.getTree",
+      "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
+      "diff.getSummary", "diff.getFile", "project.getRoleSettings", "project.updateRoleSettings",
+      "chat.create", "chat.list", "chat.get", "run.startFixture", "run.cancel",
+      "recovery.list", "recovery.inspect", "recovery.markResolved"
+    ],
+    "bridgeMethods": [
+      "getSystemStatus", "prepareQuit", "onSidecarEvent", "openProject", "getProjectTree",
+      "createProjectWorktree", "closeProject", "readFile", "beginFileSave",
+      "appendFileSaveChunk", "commitFileSave", "watchProjectFiles", "getDiffSummary",
+      "getDiffFile", "onProjectEvent", "getProjectRoleSettings", "updateProjectRoleSettings",
+      "createChat", "listChats", "getChat", "startFixtureRun", "cancelRun", "listRecoveries",
+      "inspectRecovery", "markRecoveryResolved", "onChatEvent"
+    ],
+    "roles": ["planning", "coding", "review"],
+    "chatStates": ["draft", "preparing", "running", "waitingForUser", "reviewReady", "applying", "stopping", "completed", "needsAttention", "recoveryRequired", "canceled", "discarded"],
+    "runStartChatStates": ["draft", "running", "waitingForUser", "needsAttention"],
+    "runStartOutcomePriority": ["platformUnsupported", "workspaceAbandoned", "recoveryBlocked", "chatStateBlocked", "runActive", "profileUnavailable", "writerLocked", "started"],
+    "runtimes": ["codex", "claude-code"],
+    "permissions": ["readOnly", "workspaceWrite"],
+    "fixtureScenarios": ["planning-success", "coding-success", "review-success", "cancel-clean", "cancel-uncertain"],
+    "pageMaxItems": 100,
+    "eventPageMaxItems": 50,
+    "idMaxBytes": 512,
+    "modelSelectorMaxBytes": 256,
+    "reasoningEffortMaxBytes": 64,
+    "goalMaxBytes": 16384,
+    "publicMessageMaxBytes": 65536,
+    "protocolStreamSequence": "connectionScopedPerStream",
+    "durableEventSequence": "chatLedgerScopedContiguous",
+    "workspaceBinding": "explicitProjectWorktreeWorkspaceIdentity",
+    "writerStartOrdering": ["beginImmediate", "persistRun", "persistWorkspaceLock", "commit", "spawn"],
+    "recoveryResolution": "abandonOnlyAfterAllTrackedProcessIdentitiesProvenGone",
+    "platformExecution": {"macos":"fakeFixtureOnly","windows":"disabled"},
+    "agentSmokeAdvertised": false
+  },
+  "casesFile": "cases.json"
+}

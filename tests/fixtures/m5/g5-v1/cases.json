@@ -1,0 +1,328 @@
+{
+  "valid": [
+    {
+      "name": "planning-profile",
+      "validator": "roleProfile",
+      "value": {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"}
+    },
+    {
+      "name": "project-settings",
+      "validator": "projectRoleSettings",
+      "value": {
+        "schemaVersion":1,"projectId":"project_01","revision":3,
+        "roles":[
+          {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+          {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+          {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
+        ],
+        "updatedAt":"2026-08-26T01:00:00Z"
+      }
+    },
+    {
+      "name":"project-settings-update-request",
+      "validator":"projectRoleSettingsUpdate",
+      "value":{"projectId":"project_01","expectedRevision":3,"roles":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}]}
+    },
+    {"name":"chat-create-request","validator":"chatCreateRequest","value":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","expectedSettingsRevision":3}},
+    {
+      "name": "chat-record",
+      "validator": "chatRecord",
+      "value": {
+        "schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01",
+        "worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.",
+        "settingsRevision":3,
+        "roleSnapshots":[
+          {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+          {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+          {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
+        ],
+        "state":"running","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:02:00Z"
+      }
+    },
+    {
+      "name":"allowed-retry-chat-transition",
+      "validator":"chatTransition",
+      "value":{
+        "before":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"needsAttention","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:07:00Z"},
+        "after":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"preparing","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:08:00Z"}
+      }
+    },
+    {
+      "name":"allowed-serialized-stop-transition",
+      "validator":"chatTransition",
+      "value":{
+        "before":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"running","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:07:00Z"},
+        "after":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"stopping","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:08:00Z"}
+      }
+    },
+    {
+      "name": "public-role-message",
+      "validator": "teamMessage",
+      "value": {
+        "schemaVersion":1,"messageId":"message_01","chatId":"chat_01","taskId":"task_01",
+        "worktreeId":"worktree_01","eventSequence":1,"kind":"role","roleId":"planning",
+        "runId":"run_plan_01","text":"설정 화면의 필수 상태를 정리했습니다.","createdAt":"2026-08-26T01:02:00Z"
+      }
+    },
+    {
+      "name": "active-run",
+      "validator": "runRecord",
+      "value": {
+        "schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01",
+        "worktreeId":"worktree_01","workspaceIdentity":"workspace_01",
+        "selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+        "fixtureScenario":"coding-success","state":"running","stage":"implementing","terminationEvidence":null,
+        "createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:04:00Z"
+      }
+    },
+    {
+      "name": "valid-cancel-transition",
+      "validator": "runTransition",
+      "value": {
+        "before": {
+          "schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01",
+          "selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+          "fixtureScenario":"cancel-clean","state":"cancelling","stage":"implementing","terminationEvidence":null,
+          "createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:05:00Z"
+        },
+        "after": {
+          "schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01",
+          "selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+          "fixtureScenario":"cancel-clean","state":"canceled","stage":"implementing",
+          "terminationEvidence":{"outcome":"canceled","processesProvenGone":true,"exitCode":null,"signal":"SIGTERM","observedAt":"2026-08-26T01:06:00Z"},
+          "createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:06:00Z"
+        }
+      }
+    },
+    {
+      "name": "chat-created-with-exact-settings-snapshot",
+      "validator": "chatCreation",
+      "value": {
+        "request":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","expectedSettingsRevision":3},
+        "currentSettings":{
+          "schemaVersion":1,"projectId":"project_01","revision":3,
+          "roles":[
+            {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+            {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+            {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
+          ],"updatedAt":"2026-08-26T01:00:00Z"
+        },
+        "verifiedSnapshot":{"schemaVersion":1,"projectId":"project_01","canonicalGitRoot":"/fixtures/repository","worktreeId":"worktree_01","worktreePath":"/fixtures/workspaces/worktree_01","workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":"workspace_01","headMode":"detached","lifecycle":"active"},
+        "existingGlobalChatBindingPages":[{"cursor":null,"items":[],"nextCursor":null}],
+        "createdChat":{
+          "schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,
+          "roleSnapshots":[
+            {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+            {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+            {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
+          ],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:01:00Z"
+        },
+        "outcome":"created"
+      }
+    },
+    {
+      "name": "chat-page-explicit-identity-and-sequence",
+      "validator": "chatDetailPage",
+      "value": {
+        "chat":{
+          "schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"사용자 설정 화면을 만든다.","settingsRevision":3,
+          "roleSnapshots":[
+            {"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+            {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+            {"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}
+          ],"state":"running","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:04:00Z"
+        },
+        "afterEventSequence":0,
+        "messages":[
+          {"schemaVersion":1,"messageId":"message_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":1,"kind":"user","roleId":null,"runId":null,"text":"설정 화면을 만들어줘.","createdAt":"2026-08-26T01:01:00Z"},
+          {"schemaVersion":1,"messageId":"message_02","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":2,"kind":"role","roleId":"planning","runId":"run_plan_01","text":"필수 상태를 정리했습니다.","createdAt":"2026-08-26T01:02:00Z"}
+        ],
+        "runs":[{
+          "schemaVersion":1,"runId":"run_plan_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01",
+          "selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},
+          "fixtureScenario":"planning-success","state":"succeeded","stage":"planning",
+          "terminationEvidence":{"outcome":"cleanExit","processesProvenGone":true,"exitCode":0,"signal":null,"observedAt":"2026-08-26T01:02:00Z"},
+          "createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:02:00Z"
+        }],
+        "nextEventSequence":2
+      }
+    },
+    {"name":"bounded-page-request","validator":"pageRequest","value":{"cursor":null,"limit":100}},
+    {"name":"chat-list-request","validator":"chatListRequest","value":{"projectId":"project_01","cursor":null,"limit":100}},
+    {"name":"chat-get-request","validator":"chatGetRequest","value":{"chatId":"chat_01","afterEventSequence":0,"cursor":null,"limit":50}},
+    {"name":"empty-chat-list-page","validator":"chatListPage","value":{"projectId":"project_01","items":[],"nextCursor":null}},
+    {"name":"minimal-fixture-run-request","validator":"fixtureRunStart","value":{"chatId":"chat_01","roleId":"coding","scenario":"coding-success"}},
+    {"name":"explicit-run-cancel-request","validator":"runCancelRequest","value":{"chatId":"chat_01","runId":"run_code_01"}},
+    {
+      "name":"atomic-writer-start",
+      "validator":"writerStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "request":{"chatId":"chat_01","roleId":"coding","scenario":"coding-success"},
+        "workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"active"},
+        "existingRuns":[],
+        "existingWriterLocks":[],
+        "unresolvedRecoveries":[],
+        "persistedRun":{"schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"fixtureScenario":"coding-success","state":"preparing","stage":"implementing","terminationEvidence":null,"createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "persistedLock":{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_code_01","state":"held"},
+        "transactionCommitted":true,"spawnAttempted":true,"outcome":"started"
+      }
+    },
+    {
+      "name":"planning-read-only-run-starts-without-writer-lock",
+      "validator":"runStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 기획","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "request":{"chatId":"chat_01","roleId":"planning","scenario":"planning-success"},"platform":"darwin",
+        "workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"active"},
+        "existingRuns":[],"existingWriterLocks":[],"unresolvedRecoveries":[],
+        "profileResolution":{"outcome":"exactAvailable","snapshotProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"resolvedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"}},
+        "persistedRun":{"schemaVersion":1,"runId":"run_plan_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"fixtureScenario":"planning-success","state":"preparing","stage":"planning","terminationEvidence":null,"createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "persistedLock":null,"transactionCommitted":true,"spawnAttempted":true,"outcome":"started"
+      }
+    },
+    {
+      "name":"windows-fails-before-persist-or-spawn",
+      "validator":"runStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 기획","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "request":{"chatId":"chat_01","roleId":"planning","scenario":"planning-success"},"platform":"win32","workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"active"},"existingRuns":[],"existingWriterLocks":[],"unresolvedRecoveries":[],"profileResolution":{"outcome":"exactAvailable","snapshotProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"resolvedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"}},"persistedRun":null,"persistedLock":null,"transactionCommitted":false,"spawnAttempted":false,"outcome":"platformUnsupported"
+      }
+    },
+    {
+      "name":"unavailable-profile-fails-without-fallback",
+      "validator":"runStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 기획","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"draft","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:03:00Z"},
+        "request":{"chatId":"chat_01","roleId":"planning","scenario":"planning-success"},"platform":"darwin","workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"active"},"existingRuns":[],"existingWriterLocks":[],"unresolvedRecoveries":[],"profileResolution":{"outcome":"unavailable","snapshotProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"resolvedProfile":null},"persistedRun":null,"persistedLock":null,"transactionCommitted":false,"spawnAttempted":false,"outcome":"profileUnavailable"
+      }
+    },
+    {
+      "name":"cancel-uncertain-atomically-enters-recovery",
+      "validator":"cancelTerminationRecovery",
+      "value":{
+        "beforeChat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"running","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:05:00Z"},
+        "beforeRun":{"schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"fixtureScenario":"cancel-uncertain","state":"cancelling","stage":"implementing","terminationEvidence":null,"createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:05:00Z"},
+        "beforeWriterLock":{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_code_01","state":"held"},
+        "afterChat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"recoveryRequired","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:06:00Z"},
+        "afterRun":{"schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"fixtureScenario":"cancel-uncertain","state":"recoveryRequired","stage":"implementing","terminationEvidence":{"outcome":"uncertain","processesProvenGone":false,"exitCode":null,"signal":"SIGTERM","observedAt":"2026-08-26T01:06:00Z"},"createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:06:00Z"},
+        "afterWriterLock":{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_code_01","state":"recoveryRequired"},
+        "recovery":{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_code_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"unresolved","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:03:00Z","executablePathDigest":"sha256:agent-one","observedGone":false}],"revision":1,"createdAt":"2026-08-26T01:06:00Z","resolvedAt":null},"outcome":"recoveryRequired"
+      }
+    },
+    {
+      "name":"recovery-blocks-read-only-run-start",
+      "validator":"runStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"recoveryRequired","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:06:00Z"},
+        "request":{"chatId":"chat_01","roleId":"planning","scenario":"planning-success"},"platform":"darwin","workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"recoveryRequired"},
+        "existingRuns":[{"schemaVersion":1,"runId":"run_code_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"fixtureScenario":"cancel-uncertain","state":"recoveryRequired","stage":"implementing","terminationEvidence":{"outcome":"uncertain","processesProvenGone":false,"exitCode":null,"signal":"SIGTERM","observedAt":"2026-08-26T01:06:00Z"},"createdAt":"2026-08-26T01:03:00Z","updatedAt":"2026-08-26T01:06:00Z"}],
+        "existingWriterLocks":[{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_code_01","state":"recoveryRequired"}],
+        "unresolvedRecoveries":[{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_code_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"unresolved","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:03:00Z","executablePathDigest":"sha256:agent-one","observedGone":false}],"revision":1,"createdAt":"2026-08-26T01:06:00Z","resolvedAt":null}],
+        "profileResolution":{"outcome":"exactAvailable","snapshotProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"resolvedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"}},"persistedRun":null,"persistedLock":null,"transactionCommitted":false,"spawnAttempted":false,"outcome":"recoveryBlocked"
+      }
+    },
+    {
+      "name":"abandoned-workspace-cannot-be-reused",
+      "validator":"runStart",
+      "value":{
+        "chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"discarded","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:08:00Z"},
+        "request":{"chatId":"chat_01","roleId":"planning","scenario":"planning-success"},"platform":"darwin","workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"abandoned"},"existingRuns":[],"existingWriterLocks":[],"unresolvedRecoveries":[],"profileResolution":{"outcome":"exactAvailable","snapshotProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"resolvedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"}},"persistedRun":null,"persistedLock":null,"transactionCommitted":false,"spawnAttempted":false,"outcome":"workspaceAbandoned"
+      }
+    },
+    {
+      "name":"uncertain-recovery-record",
+      "validator":"recoveryRecord",
+      "value":{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_code_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"unresolved","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:03:00Z","executablePathDigest":"sha256:agent-one","observedGone":false}],"revision":1,"createdAt":"2026-08-26T01:06:00Z","resolvedAt":null}
+    },
+    {"name":"empty-recovery-page","validator":"recoveryPage","value":{"items":[],"nextCursor":null}},
+    {
+      "name":"abandon-after-process-gone",
+      "validator":"recoveryResolution",
+      "value":{
+        "before":{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_code_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"unresolved","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:03:00Z","executablePathDigest":"sha256:agent-one","observedGone":true}],"revision":1,"createdAt":"2026-08-26T01:06:00Z","resolvedAt":null},
+        "request":{"recoveryId":"recovery_01","expectedRevision":1,"resolution":"abandon"},
+        "after":{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_code_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"resolvedAbandoned","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:03:00Z","executablePathDigest":"sha256:agent-one","observedGone":true}],"revision":2,"createdAt":"2026-08-26T01:06:00Z","resolvedAt":"2026-08-26T01:08:00Z"},
+        "workspaceBefore":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"recoveryRequired"},
+        "workspaceAfter":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"abandoned"},
+        "chatAfter":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면 구현","settingsRevision":3,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"codex-sol-high","reasoningEffort":"high","permission":"readOnly"}],"state":"discarded","createdAt":"2026-08-26T01:01:00Z","updatedAt":"2026-08-26T01:08:00Z"},
+        "outcome":"resolvedAbandoned"
+      }
+    }
+  ],
+  "invalid": [
+    {"name":"unknown-role-profile-field","validator":"roleProfile","value":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly","fallbackModel":"other"}},
+    {"name":"planning-cannot-write","validator":"roleProfile","value":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"workspaceWrite"}},
+    {"name":"blank-model-selector","validator":"roleProfile","value":{"roleId":"coding","runtime":"claude-code","modelSelector":" ","reasoningEffort":null,"permission":"workspaceWrite"}},
+    {"name":"page-limit-zero","validator":"pageRequest","value":{"cursor":null,"limit":0}},
+    {"name":"page-limit-over-bound","validator":"pageRequest","value":{"cursor":null,"limit":101}},
+    {"name":"run-request-cannot-select-runtime","validator":"fixtureRunStart","value":{"chatId":"chat_01","roleId":"coding","scenario":"coding-success","runtime":"codex"}},
+    {"name":"agent-smoke-is-not-a-fixture","validator":"fixtureRunStart","value":{"chatId":"chat_01","roleId":"coding","scenario":"run.startAgentSmoke"}},
+    {
+      "name":"message-cannot-store-hidden-reasoning",
+      "validator":"teamMessage",
+      "value":{"schemaVersion":1,"messageId":"message_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":1,"kind":"role","roleId":"planning","runId":"run_plan_01","text":"공개 결과","hiddenReasoning":"비공개 추론","createdAt":"2026-08-26T01:02:00Z"}
+    },
+    {
+      "name":"chat-page-sequence-gap",
+      "validator":"chatDetailPage",
+      "value":{"chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"}],"state":"running","createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},"afterEventSequence":0,"messages":[{"schemaVersion":1,"messageId":"message_02","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","eventSequence":2,"kind":"user","roleId":null,"runId":null,"text":"hello","createdAt":"2026-08-26T01:00:00Z"}],"runs":[],"nextEventSequence":2}
+    },
+    {
+      "name":"chat-page-cross-worktree-message",
+      "validator":"chatDetailPage",
+      "value":{"chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"}],"state":"running","createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},"afterEventSequence":0,"messages":[{"schemaVersion":1,"messageId":"message_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_other","eventSequence":1,"kind":"user","roleId":null,"runId":null,"text":"hello","createdAt":"2026-08-26T01:00:00Z"}],"runs":[],"nextEventSequence":1}
+    },
+    {
+      "name":"terminal-state-cannot-transition",
+      "validator":"runTransition",
+      "value":{"before":{"schemaVersion":1,"runId":"run_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"},"fixtureScenario":"planning-success","state":"succeeded","stage":"planning","terminationEvidence":{"outcome":"cleanExit","processesProvenGone":true,"exitCode":0,"signal":null,"observedAt":"2026-08-26T01:00:00Z"},"createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},"after":{"schemaVersion":1,"runId":"run_01","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"},"fixtureScenario":"planning-success","state":"running","stage":"planning","terminationEvidence":null,"createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:01:00Z"}}
+    },
+    {
+      "name":"second-writer-cannot-start",
+      "validator":"writerStart",
+      "value":{"chat":{"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"opus","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":null,"permission":"readOnly"}],"state":"draft","createdAt":"2026-08-26T01:00:00Z","updatedAt":"2026-08-26T01:00:00Z"},"request":{"chatId":"chat_01","roleId":"coding","scenario":"coding-success"},"workspace":{"projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","lifecycle":"active"},"existingRuns":[],"existingWriterLocks":[{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_existing","state":"held"}],"unresolvedRecoveries":[],"persistedRun":null,"persistedLock":null,"transactionCommitted":false,"spawnAttempted":true,"outcome":"writerLocked"}
+    },
+    {
+      "name":"resolved-recovery-needs-process-proof",
+      "validator":"recoveryRecord",
+      "value":{"schemaVersion":1,"recoveryId":"recovery_01","chatId":"chat_01","taskId":"task_01","runId":"run_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","reason":"cancelUncertain","state":"resolvedAbandoned","processIdentities":[{"pid":4321,"startTime":"2026-08-26T01:00:00Z","executablePathDigest":"sha256:agent","observedGone":false}],"revision":2,"createdAt":"2026-08-26T01:00:00Z","resolvedAt":"2026-08-26T01:02:00Z"}
+    },
+    {"name":"recovery-v1-is-abandon-only","validator":"recoveryMarkResolved","value":{"recoveryId":"recovery_01","expectedRevision":1,"resolution":"resume"}}
+  ],
+  "derived": [
+    {"name":"terminal-completed-chat-cannot-transition","baseValidName":"allowed-retry-chat-transition","validator":"chatTransition","changes":[{"pointer":"/before/state","value":"completed"}],"expectedValid":false},
+    {"name":"chat-transition-cannot-change-settings","baseValidName":"allowed-retry-chat-transition","validator":"chatTransition","changes":[{"pointer":"/after/settingsRevision","value":4}],"expectedValid":false},
+    {"name":"chat-transition-timestamp-cannot-go-backward","baseValidName":"allowed-retry-chat-transition","validator":"chatTransition","changes":[{"pointer":"/after/updatedAt","value":"2026-08-26T01:06:00Z"}],"expectedValid":false},
+    {"name":"settings-drift-cannot-create-chat","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/request/expectedSettingsRevision","value":2}],"expectedValid":false},
+    {"name":"workspace-mismatch-cannot-create-chat","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/request/workspaceIdentity","value":"workspace_other"}],"expectedValid":false},
+    {"name":"project-settings-requires-exact-role-set","baseValidName":"project-settings","validator":"projectRoleSettings","changes":[{"pointer":"/roles/2/roleId","value":"planning"}],"expectedValid":false},
+    {"name":"chat-page-rejects-cross-chat-run","baseValidName":"chat-page-explicit-identity-and-sequence","validator":"chatDetailPage","changes":[{"pointer":"/runs/0/chatId","value":"chat_other"}],"expectedValid":false},
+    {"name":"writer-run-profile-cannot-drift-from-chat-snapshot","baseValidName":"atomic-writer-start","validator":"writerStart","changes":[{"pointer":"/persistedRun/selectedProfile/modelSelector","value":"different-model"}],"expectedValid":false},
+    {"name":"writer-lock-aliases-workspace-across-worktree","baseValidName":"atomic-writer-start","validator":"writerStart","changes":[{"pointer":"/existingWriterLocks","value":[{"worktreeId":"worktree_other","workspaceIdentity":"workspace_01","writerRunId":"run_existing","state":"held"}]}],"expectedValid":false},
+    {"name":"writer-start-is-rejected-while-chat-needs-recovery","baseValidName":"atomic-writer-start","validator":"writerStart","changes":[{"pointer":"/chat/state","value":"recoveryRequired"},{"pointer":"/persistedRun","value":null},{"pointer":"/persistedLock","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"recoveryBlocked"}],"expectedValid":true},
+    {"name":"chat-binding-rejects-same-workspace-different-worktree","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_01","worktreeId":"worktree_other","workspaceIdentity":"workspace_01"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"chat-binding-rejects-same-worktree-aliased-workspace","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_other"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"global-chat-bindings-reject-workspace-alias-across-pages","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing_a","projectId":"project_other","worktreeId":"worktree_a","workspaceIdentity":"workspace_shared"}],"nextCursor":"page_2"},{"cursor":"page_2","items":[{"chatId":"chat_existing_b","projectId":"project_other","worktreeId":"worktree_b","workspaceIdentity":"workspace_shared"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"global-chat-bindings-reject-chat-remap-across-pages","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[{"chatId":"chat_existing","projectId":"project_other","worktreeId":"worktree_a","workspaceIdentity":"workspace_a"}],"nextCursor":"page_2"},{"cursor":"page_2","items":[{"chatId":"chat_existing","projectId":"project_other","worktreeId":"worktree_b","workspaceIdentity":"workspace_b"}],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"chat-binding-pages-require-complete-cursor-chain","baseValidName":"chat-created-with-exact-settings-snapshot","validator":"chatCreation","changes":[{"pointer":"/existingGlobalChatBindingPages","value":[{"cursor":null,"items":[],"nextCursor":"page_2"},{"cursor":"wrong_page","items":[],"nextCursor":null}]}],"expectedValid":false},
+    {"name":"windows-cannot-persist-before-rejection","baseValidName":"windows-fails-before-persist-or-spawn","validator":"runStart","changes":[{"pointer":"/spawnAttempted","value":true}],"expectedValid":false},
+    {"name":"unavailable-profile-cannot-fallback","baseValidName":"unavailable-profile-fails-without-fallback","validator":"runStart","changes":[{"pointer":"/profileResolution/resolvedProfile","value":{"roleId":"planning","runtime":"codex","modelSelector":"default","reasoningEffort":null,"permission":"readOnly"}}],"expectedValid":false},
+    {"name":"resolved-profile-cannot-drift-from-chat-snapshot","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/profileResolution/resolvedProfile/modelSelector","value":"different-model"}],"expectedValid":false},
+    {"name":"discarded-chat-blocks-run-start","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"discarded"},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"chatStateBlocked"}],"expectedValid":true},
+    {"name":"canceled-chat-blocks-run-start","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"canceled"},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"chatStateBlocked"}],"expectedValid":true},
+    {"name":"completed-chat-blocks-run-start","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"completed"},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"chatStateBlocked"}],"expectedValid":true},
+    {"name":"review-ready-chat-blocks-run-start","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"reviewReady"},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"chatStateBlocked"}],"expectedValid":true},
+    {"name":"active-read-only-run-serializes-next-run","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/existingRuns","value":[{"schemaVersion":1,"runId":"run_existing_plan","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"fixtureScenario":"planning-success","state":"running","stage":"planning","terminationEvidence":null,"createdAt":"2026-08-26T01:02:00Z","updatedAt":"2026-08-26T01:03:00Z"}]},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"runActive"}],"expectedValid":true},
+    {"name":"active-writer-run-serializes-next-read-only-run","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"running"},{"pointer":"/existingRuns","value":[{"schemaVersion":1,"runId":"run_existing_code","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"fixtureScenario":"coding-success","state":"running","stage":"implementing","terminationEvidence":null,"createdAt":"2026-08-26T01:02:00Z","updatedAt":"2026-08-26T01:03:00Z"}]},{"pointer":"/existingWriterLocks","value":[{"worktreeId":"worktree_01","workspaceIdentity":"workspace_01","writerRunId":"run_existing_code","state":"held"}]},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"runActive"}],"expectedValid":true},
+    {"name":"active-read-only-run-blocks-new-writer","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"running"},{"pointer":"/request/roleId","value":"coding"},{"pointer":"/request/scenario","value":"coding-success"},{"pointer":"/existingRuns","value":[{"schemaVersion":1,"runId":"run_existing_plan","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"fixtureScenario":"planning-success","state":"running","stage":"planning","terminationEvidence":null,"createdAt":"2026-08-26T01:02:00Z","updatedAt":"2026-08-26T01:03:00Z"}]},{"pointer":"/profileResolution","value":{"outcome":"exactAvailable","snapshotProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"resolvedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"}}},{"pointer":"/persistedRun","value":null},{"pointer":"/transactionCommitted","value":false},{"pointer":"/spawnAttempted","value":false},{"pointer":"/outcome","value":"runActive"}],"expectedValid":true},
+    {"name":"terminal-prior-run-allows-explicit-retry","baseValidName":"planning-read-only-run-starts-without-writer-lock","validator":"runStart","changes":[{"pointer":"/chat/state","value":"needsAttention"},{"pointer":"/existingRuns","value":[{"schemaVersion":1,"runId":"run_failed_plan","chatId":"chat_01","taskId":"task_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"codex","modelSelector":"codex-sol-medium","reasoningEffort":"medium","permission":"readOnly"},"fixtureScenario":"planning-success","state":"failed","stage":"planning","terminationEvidence":{"outcome":"failed","processesProvenGone":true,"exitCode":1,"signal":null,"observedAt":"2026-08-26T01:03:00Z"},"createdAt":"2026-08-26T01:02:00Z","updatedAt":"2026-08-26T01:03:00Z"}]}],"expectedValid":true},
+    {"name":"recovery-blocked-run-cannot-persist-or-spawn","baseValidName":"recovery-blocks-read-only-run-start","validator":"runStart","changes":[{"pointer":"/spawnAttempted","value":true}],"expectedValid":false},
+    {"name":"abandoned-workspace-cannot-start-again","baseValidName":"abandoned-workspace-cannot-be-reused","validator":"runStart","changes":[{"pointer":"/outcome","value":"started"}],"expectedValid":false},
+    {"name":"uncertain-cancel-cannot-release-writer-lock","baseValidName":"cancel-uncertain-atomically-enters-recovery","validator":"cancelTerminationRecovery","changes":[{"pointer":"/afterWriterLock","value":null}],"expectedValid":false},
+    {"name":"clean-cancel-transitions-stopping-to-canceled","baseValidName":"cancel-uncertain-atomically-enters-recovery","validator":"cancelTerminationRecovery","changes":[{"pointer":"/beforeChat/state","value":"stopping"},{"pointer":"/beforeRun/fixtureScenario","value":"cancel-clean"},{"pointer":"/afterChat/state","value":"canceled"},{"pointer":"/afterRun/fixtureScenario","value":"cancel-clean"},{"pointer":"/afterRun/state","value":"canceled"},{"pointer":"/afterRun/terminationEvidence","value":{"outcome":"canceled","processesProvenGone":true,"exitCode":null,"signal":"SIGTERM","observedAt":"2026-08-26T01:06:00Z"}},{"pointer":"/afterWriterLock","value":null},{"pointer":"/recovery","value":null},{"pointer":"/outcome","value":"canceled"}],"expectedValid":true},
+    {"name":"recovery-reports-processes-remain","baseValidName":"abandon-after-process-gone","validator":"recoveryResolution","changes":[{"pointer":"/before/processIdentities/0/observedGone","value":false},{"pointer":"/after","value":null},{"pointer":"/workspaceAfter","value":null},{"pointer":"/chatAfter","value":null},{"pointer":"/outcome","value":"processesRemain"}],"expectedValid":true},
+    {"name":"recovery-reports-revision-conflict","baseValidName":"abandon-after-process-gone","validator":"recoveryResolution","changes":[{"pointer":"/request/expectedRevision","value":2},{"pointer":"/after","value":null},{"pointer":"/workspaceAfter","value":null},{"pointer":"/chatAfter","value":null},{"pointer":"/outcome","value":"revisionConflict"}],"expectedValid":true},
+    {"name":"recovery-cannot-resolve-with-processes-present","baseValidName":"abandon-after-process-gone","validator":"recoveryResolution","changes":[{"pointer":"/before/processIdentities/0/observedGone","value":false}],"expectedValid":false}
+  ]
+}
