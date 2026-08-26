@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 계약 독립 리뷰 수정)
+
+- **한 일**: G5 독립 리뷰의 P1 4건·P2 1건을 반영해 chat 생성의 verified active standalone snapshot과 전역 1:1 binding scan, 일반 run 시작의 platform·exact profile resolution·recovery 차단, cancel/termination/recovery 원자 transcript, abandon 뒤 terminal workspace/chat 상태를 Rust와 TypeScript 계약 및 공통 fixture에 추가했다. `planning`·`review` read-only fixture 실행은 writer lock 없이 허용하고 coding writer만 worktree ID와 workspace identity를 함께 잠근다.
+- **안전 결정**: Windows fixture 실행은 persist·lock·spawn 전에 거부하며 이 게이트의 결정적 fake 실행은 macOS만 허용한다. unavailable profile·default fallback·chat snapshot drift는 어떤 실행 기록도 만들지 않는다. 불확실한 취소는 chat/run/workspace lock/unresolved recovery를 함께 `recoveryRequired`로 남기고 이후 읽기/쓰기 역할의 모든 run을 막는다. 모든 process identity 소멸을 증명한 abandon 뒤 기존 snapshot/workspace/chat은 재사용할 수 없다. G5 ID 상한은 양 언어 모두 문자열 문자 수가 아니라 UTF-8 512 bytes다.
+- **검증**: 공통 valid/invalid/derived fixture에 Windows 선행 거부, exact profile drift/fallback, 전역 binding cursor·alias·page 경계, cancel-uncertain → recoveryRequired → read-only start 거부 → process proof 뒤 abandon, abandoned workspace 재사용 거부를 추가했다. `npm test` 98개, `cargo test -p hello-agent-protocol` 19개, `npx tsc --noEmit`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제/유료 에이전트·사용자 프로젝트·Windows 실행은 수행하지 않았다.
+- **다음 할 일**: 수정 commit을 독립 재검토한 뒤 통합 담당이 승인된 G5 계약을 `m5/coding-agent-ide`에 통합하고, sidecar/Electron/UI 소비자는 이 fail-closed transcript를 그대로 구현한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 실행·복구 계약 기준선)
 
 - **한 일**: protocol framing·schema v1과 G4 `M5BridgeV2`를 깨지 않고 프로젝트 역할 설정, 영속 채팅, 결정적 fixture 실행·취소, 복구 조회·폐기를 더한 additive `M5BridgeV3`와 Rust/TypeScript runtime validator를 작성했다. 같은 `g5-v1` fixture가 역할/모델 snapshot, 명시적 project/worktree/workspace 신원, 공개 팀 메시지, run 상태·종료 증거, durable event 순서, page 상한을 양쪽에서 검증한다.
@@ -98,6 +105,7 @@ G4 Electron main/preload 브리지를 standalone snapshot 계약 기준선으로
 - **M5 직접 유사 제품 Cebus 발견(2026-08-24)**: `cebus-ai/cebus`는 여러 AI 모델의 단일 대화, 역할별 모델 배정, 채널·스레드, CLI·웹·VS Code 표면을 이미 제공해 M5 구상과 직접 겹친다. M5 벤치마크에 포함하고, 초보자 안전·원본과 분리된 standalone snapshot·명시적 diff 검토와 복구 루프를 차별점으로 검증한다
 - **멀티 에이전트 저장소 운영(2026-08-25)**: 큰 구현은 오케스트레이터 1명이 통합 브랜치를 소유하고, 최대 3명의 쓰기 구현 담당이 별도 branch/worktree와 겹치지 않는 파일 소유권으로 작업한다. 계약을 먼저 고정한 뒤 파동식으로 병렬화하며, 독립 코드 리뷰와 최신 통합 commit QA를 통과한 변경만 통합한다. Codex 프로젝트 역할·모델·sandbox는 `.codex/config.toml`과 `.codex/agents/*.toml`, 상세 실행 절차는 `docs/procedures/multi-agent-orchestration.md`가 기준이다
 - **M5 기계 검증 하네스(2026-08-25)**: `scripts/m5-harness.mjs`가 로컬과 macOS/Windows CI의 단일 검증 진입점이다. `baseline`은 기존 회귀를 실제 실행하고 G1~G6는 앞 단계를 누적한다. 필수 script가 없으면 `NOT_READY`/exit 2로 실패하며, versioned JSON 증거를 `.artifacts/m5-harness/`에 남긴다. 예약 script와 판정 규칙은 `docs/procedures/multi-agent-orchestration.md` §13이 기준이다
+- **M5 G5 실행·복구 계약(2026-08-26)**: chat 생성은 verified active standalone snapshot과 전역 1:1 worktree/workspace binding을 요구한다. fixture run은 macOS에서만 exact chat role snapshot으로 시작하며 planning/review는 read-only, coding만 writer lock을 갖는다. `recoveryRequired`인 chat/run/workspace lock/unresolved recovery는 모든 새 run을 막고, process identity 소멸 증명 뒤 abandon한 snapshot/workspace/chat은 terminal이라 재사용하지 않는다. protocol framing은 v1을 유지하고 공개 bridge는 additive `M5BridgeV3`다
 - **M5 G1 Rust core 추출(2026-08-25)**: 루트 Cargo workspace와 단일 `Cargo.lock`을 기준으로 삼고, `crates/hello-agent-core`에 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약을 Tauri/Electron/Node/SQLite/UI 의존 없이 옮겼다. 기존 Tauri 모듈 경로는 좁은 re-export shim으로 유지해 `handoff.rs`·`orchestration.rs` 동작을 바꾸지 않는다. `crates/hello-agent-sidecar`는 후속 protocol/SQLite 게이트 전까지 compile-only 골격이다
 - **M5 커밋·통합 자동 승인(2026-08-25)**: 작업 계약 범위 안의 기능 worktree 원자적 구현·테스트·리뷰 수정 커밋과, 독립 리뷰 및 해당 하네스·QA를 통과한 commit의 `m5/coding-agent-ide` 통합은 사용자에게 매번 다시 묻지 않는다. push, `main` 병합, 범위 밖 변경, 안전 불변식·확정 결정 변경, 실제 유료 에이전트·사용자 프로젝트·파괴적 시험과 외부 게시는 계속 별도 승인 사항이다
 - **M5 G1 공급망 차단(2026-08-25)**: Electron Forge stable `7.11.2`가 Git SHA 기반 `@electron/node-gyp`을 전이 의존성으로 요구해 pnpm 11의 기본 `blockExoticSubdeps`에 차단된다. 전역 예외는 안전 계약 변경이므로 자동 적용하지 않았고, Electron scaffold는 별도 worktree의 미커밋 상태로 보존했다

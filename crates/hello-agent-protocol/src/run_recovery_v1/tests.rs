@@ -23,11 +23,19 @@ struct Contract {
     fixture_scenarios: Vec<String>,
     page_max_items: usize,
     event_page_max_items: usize,
+    id_max_bytes: usize,
     model_selector_max_bytes: usize,
     reasoning_effort_max_bytes: usize,
     goal_max_bytes: usize,
     public_message_max_bytes: usize,
+    platform_execution: PlatformExecution,
     agent_smoke_advertised: bool,
+}
+
+#[derive(Deserialize)]
+struct PlatformExecution {
+    macos: String,
+    windows: String,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +102,7 @@ fn rust_matches_the_canonical_g5_manifest() {
         manifest.contract.event_page_max_items,
         G5_EVENT_PAGE_MAX_ITEMS_V1
     );
+    assert_eq!(manifest.contract.id_max_bytes, G5_ID_MAX_BYTES_V1);
     assert_eq!(
         manifest.contract.model_selector_max_bytes,
         G5_MODEL_SELECTOR_MAX_BYTES_V1
@@ -107,6 +116,11 @@ fn rust_matches_the_canonical_g5_manifest() {
         manifest.contract.public_message_max_bytes,
         G5_PUBLIC_MESSAGE_MAX_BYTES_V1
     );
+    assert_eq!(
+        manifest.contract.platform_execution.macos,
+        "fakeFixtureOnly"
+    );
+    assert_eq!(manifest.contract.platform_execution.windows, "disabled");
     assert!(!manifest.contract.agent_smoke_advertised);
     assert_g5_capabilities_v1().expect("G5 capabilities");
     let ready = serde_json::json!({
@@ -208,6 +222,39 @@ fn rust_enforces_exact_role_text_and_page_bounds() {
         )
     )
     .is_err());
+    let boundary_id = format!("{}aa", "가".repeat(170));
+    assert_eq!(boundary_id.len(), G5_ID_MAX_BYTES_V1);
+    assert!(validate_g5_payload_v1(
+        "fixtureRunStart",
+        &serde_json::json!({"chatId": boundary_id, "roleId": "planning", "scenario": "planning-success"})
+    )
+    .is_ok());
+    assert!(validate_g5_payload_v1(
+        "fixtureRunStart",
+        &serde_json::json!({"chatId": format!("{boundary_id}a"), "roleId": "planning", "scenario": "planning-success"})
+    )
+    .is_err());
+    let bindings: Vec<_> = (0..G5_PAGE_MAX_ITEMS_V1)
+        .map(|index| {
+            serde_json::json!({
+                "chatId": format!("chat_{index}"),
+                "projectId": "project_boundary",
+                "worktreeId": format!("worktree_{index}"),
+                "workspaceIdentity": format!("workspace_{index}")
+            })
+        })
+        .collect();
+    let boundary_page =
+        serde_json::json!([{"cursor": null, "items": bindings.clone(), "nextCursor": null}]);
+    assert!(validate_chat_binding_pages(&boundary_page).is_ok());
+    let mut over_bound = bindings;
+    over_bound.push(serde_json::json!({
+        "chatId": "chat_over", "projectId": "project_boundary",
+        "worktreeId": "worktree_over", "workspaceIdentity": "workspace_over"
+    }));
+    let over_bound_page =
+        serde_json::json!([{"cursor": null, "items": over_bound, "nextCursor": null}]);
+    assert!(validate_chat_binding_pages(&over_bound_page).is_err());
 }
 
 fn manifest() -> (PathBuf, Manifest) {

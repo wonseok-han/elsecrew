@@ -14,6 +14,7 @@ import {
   G5_EVENT_PAGE_MAX_ITEMS_V1,
   G5_FIXTURE_SCENARIOS_V1,
   G5_GOAL_MAX_BYTES_V1,
+  G5_ID_MAX_BYTES_V1,
   G5_MODEL_SELECTOR_MAX_BYTES_V1,
   G5_PAGE_MAX_ITEMS_V1,
   G5_PERMISSIONS_V1,
@@ -24,6 +25,8 @@ import {
   G5_SCHEMA_VERSION_V1,
   parseG5ReadyPayloadV1,
   validateChatCreationTranscriptV1,
+  validateChatBindingPagesV1,
+  validateCancelTerminationRecoveryTranscriptV1,
   validateChatCreateRequestV1,
   validateChatDetailPageV1,
   validateChatGetRequestV1,
@@ -40,6 +43,7 @@ import {
   validateRecoveryResolutionTranscriptV1,
   validateRoleProfileV1,
   validateRunRecordV1,
+  validateRunStartTranscriptV1,
   validateRunCancelRequestV1,
   validateRunTransitionV1,
   validateTeamMessageV1,
@@ -51,7 +55,7 @@ type ValidatorName =
   | "chatRecord" | "teamMessage" | "runRecord" | "runTransition" | "chatCreation"
   | "chatDetailPage" | "chatListPage" | "chatListRequest" | "chatGetRequest" | "pageRequest"
   | "fixtureRunStart" | "runCancelRequest" | "writerStart" | "recoveryRecord" | "recoveryPage" | "recoveryMarkResolved"
-  | "recoveryResolution";
+  | "recoveryResolution" | "runStart" | "cancelTerminationRecovery";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
 interface DerivedCase {
   name: string; baseValidName: string; validator: ValidatorName;
@@ -64,7 +68,7 @@ interface Manifest {
   contract: {
     capabilities: string[]; bridgeMethods: string[]; roles: string[]; runtimes: string[];
     permissions: string[]; fixtureScenarios: string[]; pageMaxItems: number;
-    eventPageMaxItems: number; modelSelectorMaxBytes: number; reasoningEffortMaxBytes: number;
+    eventPageMaxItems: number; idMaxBytes: number; modelSelectorMaxBytes: number; reasoningEffortMaxBytes: number;
     goalMaxBytes: number; publicMessageMaxBytes: number; protocolStreamSequence: string;
     durableEventSequence: string; workspaceBinding: string; writerStartOrdering: string[];
     recoveryResolution: string; platformExecution: Record<string, string>; agentSmokeAdvertised: boolean;
@@ -89,6 +93,7 @@ test("G5 manifest가 additive V3 bridge, exact capability와 안전 경계를 �
   assert.deepEqual(manifest.contract.fixtureScenarios, [...G5_FIXTURE_SCENARIOS_V1]);
   assert.equal(manifest.contract.pageMaxItems, G5_PAGE_MAX_ITEMS_V1);
   assert.equal(manifest.contract.eventPageMaxItems, G5_EVENT_PAGE_MAX_ITEMS_V1);
+  assert.equal(manifest.contract.idMaxBytes, G5_ID_MAX_BYTES_V1);
   assert.equal(manifest.contract.modelSelectorMaxBytes, G5_MODEL_SELECTOR_MAX_BYTES_V1);
   assert.equal(manifest.contract.reasoningEffortMaxBytes, G5_REASONING_EFFORT_MAX_BYTES_V1);
   assert.equal(manifest.contract.goalMaxBytes, G5_GOAL_MAX_BYTES_V1);
@@ -148,6 +153,20 @@ test("설정·텍스트·페이지 경계와 SQLite v1 migration 호환을 고�
   const effort = "e".repeat(G5_REASONING_EFFORT_MAX_BYTES_V1);
   assert.doesNotThrow(() => validateRoleProfileV1({ roleId: "planning", runtime: "codex", modelSelector: "sol", reasoningEffort: effort, permission: "readOnly" }));
   assert.throws(() => validateRoleProfileV1({ roleId: "planning", runtime: "codex", modelSelector: "sol", reasoningEffort: `${effort}x`, permission: "readOnly" }));
+  const boundaryId = `${"가".repeat(170)}aa`;
+  assert.equal(new TextEncoder().encode(boundaryId).length, G5_ID_MAX_BYTES_V1);
+  assert.doesNotThrow(() => validateFixtureRunStartRequestV1({ chatId: boundaryId, roleId: "planning", scenario: "planning-success" }));
+  assert.throws(() => validateFixtureRunStartRequestV1({ chatId: `${boundaryId}a`, roleId: "planning", scenario: "planning-success" }));
+  const bindings = Array.from({ length: G5_PAGE_MAX_ITEMS_V1 }, (_, index) => ({
+    chatId: `chat_${index}`, projectId: "project_boundary",
+    worktreeId: `worktree_${index}`, workspaceIdentity: `workspace_${index}`,
+  }));
+  assert.doesNotThrow(() => validateChatBindingPagesV1([{ cursor: null, items: bindings, nextCursor: null }]));
+  assert.throws(() => validateChatBindingPagesV1([{
+    cursor: null,
+    items: [...bindings, { chatId: "chat_over", projectId: "project_boundary", worktreeId: "worktree_over", workspaceIdentity: "workspace_over" }],
+    nextCursor: null,
+  }]));
   assert.equal(SQLITE_SCHEMA_VERSION, 1);
   assert.ok(["chats", "runs", "locks"].every((table) => SQLITE_TABLES_V1.includes(table as never)));
 });
@@ -175,6 +194,8 @@ function validate(fixture: FixtureCase): unknown {
     case "recoveryPage": return validateRecoveryPageV1(fixture.value);
     case "recoveryMarkResolved": return validateRecoveryMarkResolvedRequestV1(fixture.value);
     case "recoveryResolution": return validateRecoveryResolutionTranscriptV1(fixture.value);
+    case "runStart": return validateRunStartTranscriptV1(fixture.value);
+    case "cancelTerminationRecovery": return validateCancelTerminationRecoveryTranscriptV1(fixture.value);
   }
 }
 

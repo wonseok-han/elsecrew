@@ -23,6 +23,7 @@
     "fixtureScenarios": ["planning-success", "coding-success", "review-success", "cancel-clean", "cancel-uncertain"],
     "pageMaxItems": 100,
     "eventPageMaxItems": 50,
+    "idMaxBytes": 512,
     "modelSelectorMaxBytes": 256,
     "reasoningEffortMaxBytes": 64,
     "goalMaxBytes": 16384,
