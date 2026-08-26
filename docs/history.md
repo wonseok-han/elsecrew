@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5 Codex (M5 G5 Electron Bridge V3 독립 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단 사항을 반영했다. recovery blocker가 있는 `ready` status를 유효한 live 상태로 유지해 recovery API 호출을 허용하고, `safeToQuit: false`는 종료 허용으로 바꾸지 않는다.
+- **이벤트·ID 결정**: workspace/chat/run protocol event는 generic V2 route에서 제외해 renderer credit가 한 실제 event에 한 번만 소비된다. raw `run.event`·`run.finished` payload는 renderer로 전달하지 않으며, G5 public chat은 검증된 `TeamMessage` 전용 route만 쓴다. bridge-local project/recovery ID 검증도 문자열 길이가 아니라 UTF-8 512 bytes를 적용한다.
+- **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 27개, `git diff --check`를 통과했다. recovery-ready 연결성, unsafe quit, four-stream 단일 route, hidden raw run filtering, ASCII/emoji byte-limit pre-IPC 거부를 추가로 검증했다.
+- **다음 할 일**: 이 수정 commit을 같은 exact SHA로 재검토하고, G5 Rust sidecar/renderer와 통합한 뒤 package smoke와 누적 QA를 실행한다.
+
 ### 2026-08-26 · by GPT-5 Codex (M5 G5 Electron Bridge V3)
 
 - **한 일**: Electron main/preload와 `SidecarClientV1`이 additive `M5BridgeV3`를 소비하도록 구현했다. workspace tree/close/read/save/watch/diff, 프로젝트 역할 설정, 채팅 페이지, fixture run/cancel, recovery API는 모두 고정 IPC channel·main-frame/app origin 검사·preload exact input validator를 거친다. V2 API와 raw sidecar restart 정책은 유지했다.

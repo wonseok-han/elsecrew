@@ -9,7 +9,10 @@ import { MAX_CONTROL_LINE_BYTES, type EventV1 } from "../src/m5/contracts/protoc
 import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { QuitCoordinatorV1 } from "../electron/quit-coordinator.ts";
 import { SidecarClientV1, type SidecarProcessV1 } from "../electron/sidecar-client.ts";
-import { validatePathInput, validateSaveBeginInput, validateSaveChunkInput, validateSaveCommitInput, validateTreeInput } from "../electron/bridge-input.ts";
+import {
+  validatePathInput, validateRecoveryInspectInput, validateRoleSettingsGetInput, validateSaveBeginInput,
+  validateSaveChunkInput, validateSaveCommitInput, validateTreeInput,
+} from "../electron/bridge-input.ts";
 import { EventCreditV1, MAX_IN_FLIGHT_EVENTS } from "../electron/event-credit.ts";
 import {
   validateWorkspaceSaveChunkInput, validateWorkspaceSaveCommitInput, validateWorkspaceTreeInput,
@@ -88,29 +91,23 @@ test("sidecar waits for ready, accepts chunked JSONL, and exposes only ordered e
     protocolVersion: 1,
     kind: "event",
     sidecarInstanceId: "sidecar_test_01",
-    streamId: "run_stream_01",
-    seq: 1,
-    event: "run.event",
-    chatId: "chat_01",
-    taskId: "task_01",
-    runId: "run_01",
-    payload: { text: "first" },
+    streamId: "system",
+    seq: 2,
+    event: "system.fatal",
+    payload: { code: "diagnostic" },
   }));
   unsubscribe();
   child.stdout.write(eventLine({
     protocolVersion: 1,
     kind: "event",
     sidecarInstanceId: "sidecar_test_01",
-    streamId: "run_stream_01",
-    seq: 2,
-    event: "run.finished",
-    chatId: "chat_01",
-    taskId: "task_01",
-    runId: "run_01",
-    payload: { status: "completed" },
+    streamId: "system",
+    seq: 3,
+    event: "system.fatal",
+    payload: { code: "later" },
   }));
   assert.equal(received.length, 1);
-  assert.equal(received[0]?.event, "run.event");
+  assert.equal(received[0]?.event, "system.fatal");
 });
 
 test("ready timeout, pre-ready stderr exit, and oversized partial output fail closed", async () => {
@@ -248,6 +245,34 @@ test("system.status identity mismatch and stderr tails corrupt the session witho
   assert.ok(diagnostics.client.technicalDetail.endsWith("\nmigration tail"));
   assert.ok(!diagnostics.client.technicalDetail.includes("\u0001"));
   assert.ok(Buffer.byteLength(diagnostics.client.technicalDetail) <= 32 * 1024 + 2);
+});
+
+test("G5 recovery-ready status stays connected for recovery APIs and unsafe quit remains blocked", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const status = client.getSystemStatus();
+  const statusRequest = JSON.parse(child.writes[0] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(statusRequest.requestId, {
+    state: "ready",
+    sidecar: { protocolVersion: 1, sidecarSchemaVersion: 1, appSchemaVersion: 1, pid: 42, platform: "darwin", capabilities: [...G5_CAPABILITIES_V1], sidecarInstanceId: "sidecar_test_01" },
+    database: { health: "healthy", schemaVersion: 1 }, recoveryRequired: true, blockerIds: ["recovery_01"],
+  }));
+  assert.deepEqual((await status).blockerIds, ["recovery_01"]);
+  const recoveries = client.listRecoveries({ cursor: null, limit: 1 });
+  const recoveryRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string; method: string };
+  assert.equal(recoveryRequest.method, "recovery.list");
+  child.stdout.write(responseLine(recoveryRequest.requestId, { items: [], nextCursor: null }));
+  await recoveries;
+
+  const exits: string[] = [];
+  const coordinator = new QuitCoordinatorV1({
+    prepareSidecarQuit: async () => ({ safeToQuit: false, blockers: ["recovery_01"] }),
+    failedBeforeReady: () => false,
+    allowProcessExit: (kind) => exits.push(kind),
+  });
+  assert.deepEqual(await coordinator.prepareQuit(), { safeToQuit: false, blockers: ["recovery_01"] });
+  assert.equal(coordinator.exitAllowed, false);
+  assert.deepEqual(exits, []);
 });
 
 test("pre-ready startup failure permits one explicitly unclean app close without re-entering quit", () => {
@@ -595,9 +620,10 @@ test("G5 rejects cross-chat workspace save continuation before it reaches the si
 test("G5 keeps four independent chat/workspace streams ordered and explicitly addressed", async () => {
   const { child, client } = createClient();
   const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
-  const chats: unknown[] = []; const workspaces: unknown[] = [];
+  const chats: unknown[] = []; const workspaces: unknown[] = []; const generic: unknown[] = [];
   client.onChatEvent((event) => chats.push(event));
   client.onWorkspaceEvent((event) => workspaces.push(event));
+  client.onEvent((event) => generic.push(event));
   const message = (chatId: string, sequence: number) => eventLine({
     protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `chat_stream_${chatId}`, seq: 1,
     event: "chat.eventAppended", chatId,
@@ -611,9 +637,27 @@ test("G5 keeps four independent chat/workspace streams ordered and explicitly ad
   } as EventV1);
   child.stdout.write(message("chat_a", 1)); child.stdout.write(workspace("chat_a"));
   child.stdout.write(message("chat_b", 1)); child.stdout.write(workspace("chat_b"));
+  child.stdout.write(eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "run_raw", seq: 1,
+    event: "run.event", chatId: "chat_a", taskId: "task_chat_a", runId: "run_a", payload: { hiddenReasoning: "must not reach renderer" },
+  }));
   assert.equal(client.failure, undefined);
   assert.deepEqual(chats.map((event) => (event as { chatId: string }).chatId), ["chat_a", "chat_b"]);
   assert.deepEqual(workspaces.map((event) => (event as { payload: { chatId: string } }).payload.chatId), ["chat_a", "chat_b"]);
+  assert.deepEqual(generic, [], "workspace, public chat, and raw run events have no generic duplicate route");
+});
+
+test("G5 V3 IDs use the canonical UTF-8 byte limit before IPC", async () => {
+  const tooLongAscii = "a".repeat(513); const tooLongEmoji = "😀".repeat(129);
+  for (const id of [tooLongAscii, tooLongEmoji]) {
+    assert.throws(() => validateRoleSettingsGetInput({ projectId: id }));
+    assert.throws(() => validateRecoveryInspectInput({ recoveryId: id }));
+  }
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  assert.throws(() => client.getProjectRoleSettings({ projectId: tooLongEmoji }));
+  assert.throws(() => client.inspectRecovery({ recoveryId: tooLongAscii }));
+  assert.equal(child.writes.length, 0, "invalid V3 IDs must not reach the sidecar");
 });
 
 function source(path: string) {

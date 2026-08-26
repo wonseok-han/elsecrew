@@ -469,7 +469,12 @@ export class SidecarClientV1 {
         if (envelope.chatId !== message.chatId) throw new Error("chat event chatId does not match public message");
         for (const listener of this.#chatListeners) listener(message, envelope);
       }
-      for (const listener of this.#listeners) listener(envelope);
+      // V2's generic renderer event path is intentionally narrow. G5 workspace,
+      // chat, and run protocol events must never be delivered twice (or expose
+      // a raw run payload) through this compatibility path.
+      if (isLegacyRendererEvent(envelope.event)) {
+        for (const listener of this.#listeners) listener(envelope);
+      }
       return;
     }
     if (envelope.kind !== "response") {
@@ -777,7 +782,7 @@ function isWatchResult(value: unknown): boolean {
 }
 
 function validId(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 512;
+  return typeof value === "string" && value.length > 0 && new TextEncoder().encode(value).byteLength <= 512;
 }
 
 function assertResponseField(
@@ -905,7 +910,19 @@ function parseG5SystemStatus(value: unknown): SystemStatusV1 {
   if (object.state !== "ready") throw new Error("G5 system.status must be ready");
   const sidecar = parseG5ReadyPayloadV1(object.sidecar);
   const database = strictObject(object.database, ["health", "schemaVersion"], "G5 system.status database");
-  if (database.health !== "healthy" || database.schemaVersion !== 1 || object.recoveryRequired !== false
-    || !Array.isArray(object.blockerIds) || object.blockerIds.length !== 0) throw new Error("G5 system.status is invalid");
-  return { state: "ready", sidecar, database: { health: "healthy", schemaVersion: 1 }, recoveryRequired: false, blockerIds: [] };
+  if (database.health !== "healthy" || database.schemaVersion !== 1 || typeof object.recoveryRequired !== "boolean"
+    || !Array.isArray(object.blockerIds)) throw new Error("G5 system.status is invalid");
+  const blockerIds = object.blockerIds;
+  if (blockerIds.some((id) => !validId(id)) || new Set(blockerIds).size !== blockerIds.length
+    || (object.recoveryRequired && blockerIds.length === 0) || (!object.recoveryRequired && blockerIds.length !== 0)) {
+    throw new Error("G5 system.status recovery blockers are invalid");
+  }
+  return {
+    state: "ready", sidecar, database: { health: "healthy", schemaVersion: 1 },
+    recoveryRequired: object.recoveryRequired, blockerIds,
+  };
+}
+
+function isLegacyRendererEvent(event: EventV1["event"]): boolean {
+  return ["system.ready", "system.fatal", "file.changed", "file.conflict", "diff.changed", "blob.chunk"].includes(event);
 }
