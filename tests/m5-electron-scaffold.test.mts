@@ -9,12 +9,12 @@ function source(path: string) {
   return readFileSync(resolve(root, path), "utf8");
 }
 
-test("패키지 smoke는 canonical G4 fixture의 누적 capability 순서를 exact 검증한다", () => {
+test("패키지 smoke는 canonical G5 fixture의 누적 capability 순서를 exact 검증한다", () => {
   const smoke = source("scripts/m5-electron-package-smoke.mjs");
 
-  assert.match(smoke, /tests\/fixtures\/m5\/project-v1\/manifest\.json/);
-  assert.match(smoke, /const expectedG4Capabilities = g4Manifest\.contract\?\.capabilities/);
-  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedG4Capabilities\)/);
+  assert.match(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
+  assert.match(smoke, /const expectedG5Capabilities = g5Manifest\.contract\?\.capabilities/);
+  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedG5Capabilities\)/);
   assert.doesNotMatch(smoke, /ready\.payload\.capabilities, \["system\.status", "app\.prepareQuit"\]\)/);
 });
 

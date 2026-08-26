@@ -6,11 +6,14 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { MAX_CONTROL_LINE_BYTES, type EventV1 } from "../src/m5/contracts/protocol-v1.ts";
-import { G4_CAPABILITIES_V1 } from "../src/m5/contracts/project-v1.ts";
+import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { QuitCoordinatorV1 } from "../electron/quit-coordinator.ts";
 import { SidecarClientV1, type SidecarProcessV1 } from "../electron/sidecar-client.ts";
 import { validatePathInput, validateSaveBeginInput, validateSaveChunkInput, validateSaveCommitInput, validateTreeInput } from "../electron/bridge-input.ts";
 import { EventCreditV1, MAX_IN_FLIGHT_EVENTS } from "../electron/event-credit.ts";
+import {
+  validateWorkspaceSaveChunkInput, validateWorkspaceSaveCommitInput, validateWorkspaceTreeInput,
+} from "../electron/bridge-input.ts";
 
 class FixtureSidecar extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -61,7 +64,7 @@ function readyLine() {
       appSchemaVersion: 1,
       pid: 42,
       platform: "darwin",
-      capabilities: [...G4_CAPABILITIES_V1],
+      capabilities: [...G5_CAPABILITIES_V1],
       sidecarInstanceId: "sidecar_test_01",
     },
   });
@@ -134,13 +137,13 @@ test("ready timeout, pre-ready stderr exit, and oversized partial output fail cl
   assert.equal(malformed.child.terminations, 1);
 });
 
-test("G4 rejects a ready handshake without the exact cumulative capabilities", async () => {
+test("G5 rejects a ready handshake without the exact cumulative capabilities", async () => {
   const { child, client } = createClient();
   const starting = client.start();
   const ready = JSON.parse(readyLine()) as { payload: { capabilities: string[] } };
   ready.payload.capabilities.pop();
   child.stdout.write(`${JSON.stringify(ready)}\n`);
-  await assert.rejects(starting, /capabilities do not match G4/);
+  await assert.rejects(starting, /capabilities do not match/);
   assert.equal(child.terminations, 1);
 });
 
@@ -226,7 +229,7 @@ test("system.status identity mismatch and stderr tails corrupt the session witho
         appSchemaVersion: 1,
         pid: 99,
         platform: "darwin",
-        capabilities: [...G4_CAPABILITIES_V1],
+        capabilities: [...G5_CAPABILITIES_V1],
         sidecarInstanceId: "sidecar_test_02",
       },
       database: { health: "healthy", schemaVersion: 1 },
@@ -529,6 +532,88 @@ test("main, preload, and package boundary retain fixed channels, origin checks, 
   assert.match(smoke, /assertCleanMarker\(dataDirectory, ready\.sidecarInstanceId\)/);
   assert.match(smoke, /await stopChild\(child\)/);
   assert.match(smoke, /await withDeadline\(exited, 3_000, "failed packaged sidecar cleanup"\)/);
+});
+
+test("G5 V3 bridge keeps every workspace/chat action fixed, typed, and isolated", () => {
+  const main = source("electron/main.ts");
+  const preload = source("electron/preload.ts");
+  const channels = source("electron/ipc-channels.ts");
+  const client = source("electron/sidecar-client.ts");
+  for (const name of [
+    "workspaceGetTree", "workspaceClose", "workspaceFileRead", "workspaceFileSaveBegin",
+    "workspaceFileSaveChunk", "workspaceFileSaveCommit", "workspaceFileWatch",
+    "workspaceDiffGetSummary", "workspaceDiffGetFile", "projectGetRoleSettings",
+    "projectUpdateRoleSettings", "chatCreate", "chatList", "chatGet", "runStartFixture",
+    "runCancel", "recoveryList", "recoveryInspect", "recoveryMarkResolved",
+  ]) {
+    assert.match(channels, new RegExp(`${name}: "m5:v3:`));
+    assert.match(main, new RegExp(`M5_BRIDGE_V3_CHANNELS\\.${name}`));
+    assert.match(preload, new RegExp(`M5_BRIDGE_V3_CHANNELS\\.${name}`));
+  }
+  assert.match(client, /parseG5ReadyPayloadV1/);
+  assert.match(client, /workspace save references an unknown or late saveId/);
+  assert.match(client, /assertWorkspaceResponse/);
+  assert.match(client, /validateTeamMessageV1/);
+  assert.doesNotMatch(preload, /run\.startAgentSmoke|ipcRenderer\.sendSync|ipcRenderer\.invoke\([^M]/);
+  assert.doesNotMatch(channels, /generic|invokeAll|startAgentSmoke/);
+  assert.throws(() => validateWorkspaceTreeInput({ projectId: "p", parentPath: "../escape", cursor: null, chatId: "c", worktreeId: "w", workspaceIdentity: "i" }));
+  assert.throws(() => validateWorkspaceSaveChunkInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", seq: 1, text: "x", extra: true }));
+  assert.throws(() => validateWorkspaceSaveCommitInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", expectedVersion: "sha256:bad", lastSeq: 1, totalBytes: 1 }));
+});
+
+test("G5 rejects cross-chat workspace save continuation before it reaches the sidecar", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const begin = client.beginWorkspaceFileSave({
+    chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a",
+    path: "src/App.tsx", expectedVersion: "sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881", totalBytes: 1, encoding: "utf8",
+  });
+  const request = JSON.parse(child.writes[0] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(request.requestId, {
+    chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", saveId: "save_a", chunkBytes: 262144,
+  }));
+  await begin;
+  await assert.rejects(client.appendWorkspaceFileSaveChunk({
+    chatId: "chat_b", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", saveId: "save_a", seq: 1, text: "x",
+  }), /workspace response chatId does not match request/);
+  assert.equal(child.writes.length, 1, "cross-chat continuation must not be sent");
+  const commit = client.commitWorkspaceFileSave({
+    chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", saveId: "save_a",
+    expectedVersion: "sha256:2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881", lastSeq: 1, totalBytes: 1,
+  });
+  const commitRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(commitRequest.requestId, {
+    chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", saveId: "save_a", outcome: "dirtyConflict",
+    error: { code: "E_DIRTY", kind: "dirtyConflict", detail: "changed", retryable: false, outcomeUnknown: false },
+  }));
+  await commit;
+  await assert.rejects(client.appendWorkspaceFileSaveChunk({
+    chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", saveId: "save_a", seq: 2, text: "x",
+  }), /unknown or late saveId/);
+});
+
+test("G5 keeps four independent chat/workspace streams ordered and explicitly addressed", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+  const chats: unknown[] = []; const workspaces: unknown[] = [];
+  client.onChatEvent((event) => chats.push(event));
+  client.onWorkspaceEvent((event) => workspaces.push(event));
+  const message = (chatId: string, sequence: number) => eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `chat_stream_${chatId}`, seq: 1,
+    event: "chat.eventAppended", chatId,
+    payload: { schemaVersion: 1, messageId: `message_${chatId}`, chatId, taskId: `task_${chatId}`, worktreeId: `worktree_${chatId}`,
+      eventSequence: sequence, kind: "status", roleId: null, runId: null, text: "safe public status", createdAt: "2026-08-26T00:00:00Z" },
+  } as EventV1);
+  const workspace = (chatId: string) => eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `workspace_stream_${chatId}`, seq: 1,
+    event: "workspace.changed", payload: { chatId, projectId: "project_01", worktreeId: `worktree_${chatId}`,
+      workspaceIdentity: `workspace_${chatId}`, event: "diff.changed", paths: ["src/App.tsx"], rescanRequired: false },
+  } as EventV1);
+  child.stdout.write(message("chat_a", 1)); child.stdout.write(workspace("chat_a"));
+  child.stdout.write(message("chat_b", 1)); child.stdout.write(workspace("chat_b"));
+  assert.equal(client.failure, undefined);
+  assert.deepEqual(chats.map((event) => (event as { chatId: string }).chatId), ["chat_a", "chat_b"]);
+  assert.deepEqual(workspaces.map((event) => (event as { payload: { chatId: string } }).payload.chatId), ["chat_a", "chat_b"]);
 });
 
 function source(path: string) {

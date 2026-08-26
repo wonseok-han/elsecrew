@@ -10,7 +10,21 @@ import {
 import type { EventV1, PrepareQuitResultV1 } from "../src/m5/contracts/protocol-v1.ts";
 import type { WatchEventV1 } from "../src/m5/contracts/project-v1.ts";
 import type { SaveBeginV1 } from "../src/m5/contracts/file-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS } from "./ipc-channels.ts";
+import type {
+  ChatWorkspaceRefV1,
+  WorkspaceDiffFileRequestV1,
+  WorkspaceFileReadRequestV1,
+  WorkspaceSaveBeginRequestV1,
+  WorkspaceSaveChunkRequestV1,
+  WorkspaceSaveCommitRequestV1,
+  WorkspaceTreeRequestV1,
+} from "../src/m5/contracts/workspace-addressing-v1.ts";
+import type {
+  ChatCreateRequestV1, ChatGetRequestV1, ChatListRequestV1, FixtureRunStartRequestV1,
+  PageRequestV1, ProjectRoleSettingsUpdateRequestV1, RecoveryMarkResolvedRequestV1,
+  RunCancelRequestV1,
+} from "../src/m5/contracts/run-recovery-v1.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS } from "./ipc-channels.ts";
 import { EventCreditV1 } from "./event-credit.ts";
 import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
@@ -164,10 +178,24 @@ function forwardProjectEvent(event: WatchEventV1, protocolEvent: EventV1): void 
   eventCredit.deliver(protocolEvent, () => window.webContents.send(M5_BRIDGE_V2_CHANNELS.projectEvent, { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq }));
 }
 
+function forwardWorkspaceEvent(event: Parameters<SidecarClientV1["onWorkspaceEvent"]>[0] extends (event: infer T) => unknown ? T : never): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(event, () => window.webContents.send(M5_BRIDGE_V3_CHANNELS.workspaceEvent, { event, streamId: event.streamId, seq: event.seq }));
+}
+
+function forwardChatEvent(event: Parameters<SidecarClientV1["onChatEvent"]>[0] extends (event: infer T, protocol: infer P) => unknown ? T : never, protocolEvent: EventV1): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(protocolEvent, () => window.webContents.send(M5_BRIDGE_V3_CHANNELS.chatEvent, { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq }));
+}
+
 function startSidecar(): SidecarClientV1 {
   const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()));
   client.onEvent(forwardSidecarEvent);
   client.onProjectEvent(forwardProjectEvent);
+  client.onWorkspaceEvent(forwardWorkspaceEvent);
+  client.onChatEvent(forwardChatEvent);
   void client.start().catch(() => {
     // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
   });
@@ -224,6 +252,25 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.fileWatch, invoke((client, input: { projectId: string }) => client.watchProjectFiles(input)));
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.diffGetSummary, invoke((client, input: { projectId: string }) => client.getDiffSummary(input)));
   ipcMain.handle(M5_BRIDGE_V2_CHANNELS.diffGetFile, invoke((client, input: { projectId: string; path: string }) => client.getDiffFile(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceGetTree, invoke((client, input: WorkspaceTreeRequestV1) => client.getWorkspaceTree(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceClose, invoke((client, input: ChatWorkspaceRefV1) => client.closeWorkspace(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileRead, invoke((client, input: WorkspaceFileReadRequestV1) => client.readWorkspaceFile(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileSaveBegin, invoke((client, input: WorkspaceSaveBeginRequestV1) => client.beginWorkspaceFileSave(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileSaveChunk, invoke((client, input: WorkspaceSaveChunkRequestV1) => client.appendWorkspaceFileSaveChunk(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileSaveCommit, invoke((client, input: WorkspaceSaveCommitRequestV1) => client.commitWorkspaceFileSave(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceFileWatch, invoke((client, input: ChatWorkspaceRefV1) => client.watchWorkspaceFiles(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetSummary, invoke((client, input: ChatWorkspaceRefV1) => client.getWorkspaceDiffSummary(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.workspaceDiffGetFile, invoke((client, input: WorkspaceDiffFileRequestV1) => client.getWorkspaceDiffFile(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.projectGetRoleSettings, invoke((client, input: { projectId: string }) => client.getProjectRoleSettings(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.projectUpdateRoleSettings, invoke((client, input: ProjectRoleSettingsUpdateRequestV1) => client.updateProjectRoleSettings(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatCreate, invoke((client, input: ChatCreateRequestV1) => client.createChat(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatList, invoke((client, input: ChatListRequestV1) => client.listChats(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatGet, invoke((client, input: ChatGetRequestV1) => client.getChat(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runStartFixture, invoke((client, input: FixtureRunStartRequestV1) => client.startFixtureRun(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runCancel, invoke((client, input: RunCancelRequestV1) => client.cancelRun(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryList, invoke((client, input: PageRequestV1) => client.listRecoveries(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryInspect, invoke((client, input: { recoveryId: string }) => client.inspectRecovery(input)));
+  ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryMarkResolved, invoke((client, input: RecoveryMarkResolvedRequestV1) => client.markRecoveryResolved(input)));
 }
 
 async function createMainWindow() {
