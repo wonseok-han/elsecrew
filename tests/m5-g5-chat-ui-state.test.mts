@@ -15,26 +15,42 @@ const chat = (id: string, worktreeId = `worktree_${id}`): ChatRecordV1 => ({ sch
 
 class FakeBridge {
   readonly listeners = new Set<(event: TeamMessageV1) => void>();
-  readonly created: Array<{ worktreeId: string; workspaceIdentity: string; revision: number }> = [];
+  readonly created: Array<{ preparationId: string; worktreeId: string; workspaceIdentity: string; revision: number }> = [];
   revision = 1;
+  failCreate = false;
+  readonly prepared: Array<{ preparationId: string; worktreeId: string; workspaceIdentity: string }> = [];
+  readonly abandoned: Array<{ preparationId: string; projectId: string; worktreeId: string; workspaceIdentity: string }> = [];
   chats: ChatRecordV1[] = [chat("chat_a"), chat("chat_b")];
   async getProjectRoleSettings() { return { ...settings(), revision: this.revision }; }
   async updateProjectRoleSettings(input: { expectedRevision: number; roles: readonly RoleProfileV1[] }) { if (input.expectedRevision !== this.revision) throw new Error("revision conflict"); this.revision++; return { ...settings(), revision: this.revision, roles: input.roles }; }
   async listChats() { return { projectId: "project_a", items: this.chats, nextCursor: null }; }
-  async createProjectWorktree() { const number = this.created.length + 1; return { projectId: "project_a", worktreeId: `fresh_${number}`, workspaceIdentity: `fresh_identity_${number}`, workspaceKind: "standaloneSnapshot", lifecycle: "active" }; }
-  async createChat(input: { worktreeId: string; workspaceIdentity: string; expectedSettingsRevision: number; goal: string }) { this.created.push({ worktreeId: input.worktreeId, workspaceIdentity: input.workspaceIdentity, revision: input.expectedSettingsRevision }); const next = { ...chat(`chat_new_${this.created.length}`, input.worktreeId), workspaceIdentity: input.workspaceIdentity, goal: input.goal }; this.chats = [next, ...this.chats]; return next; }
+  async prepareChatWorkspace() { const number = this.prepared.length + 1; const prepared = { preparationId: `prep_${number}`, worktreeId: `fresh_${number}`, workspaceIdentity: `fresh_identity_${number}` }; this.prepared.push(prepared); return { schemaVersion: 1 as const, preparationId: prepared.preparationId, manifest: { schemaVersion: 1 as const, projectId: "project_a", canonicalGitRoot: "/safe/project", worktreeId: prepared.worktreeId, worktreePath: `/private/${prepared.worktreeId}`, workspaceKind: "standaloneSnapshot" as const, snapshotTransport: "gitBundle" as const, sourceMutationPolicy: "forbidden" as const, objectFormat: "sha1" as const, baseCommit: "a".repeat(40), baseTree: "b".repeat(40), sourceIdentity: "source", workspaceIdentity: prepared.workspaceIdentity, headMode: "detached" as const, lifecycle: "active" as const }, bindingState: "unbound" as const, boundChatId: null, createdAt: "2026-08-26T00:00:00Z", updatedAt: "2026-08-26T00:00:00Z" }; }
+  async abandonPreparedWorkspace(input: { preparationId: string; projectId: string; worktreeId: string; workspaceIdentity: string }) { this.abandoned.push(input); return { ...input, bindingState: "abandoned" as const, physicallyDeleted: false as const }; }
+  async createChat(input: { preparationId: string; worktreeId: string; workspaceIdentity: string; expectedSettingsRevision: number; goal: string }) { if (this.failCreate) throw new Error("create failed"); this.created.push({ preparationId: input.preparationId, worktreeId: input.worktreeId, workspaceIdentity: input.workspaceIdentity, revision: input.expectedSettingsRevision }); const next = { ...chat(`chat_new_${this.created.length}`, input.worktreeId), workspaceIdentity: input.workspaceIdentity, goal: input.goal }; this.chats = [next, ...this.chats]; return next; }
   async getChat({ chatId }: { chatId: string }) { const current = this.chats.find((item) => item.chatId === chatId)!; return { chat: current, afterEventSequence: 0, messages: [], runs: [], nextEventSequence: null }; }
   async listRecoveries() { return { items: [], nextCursor: null }; }
   onChatEvent(listener: (event: TeamMessageV1) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit(event: TeamMessageV1) { for (const listener of this.listeners) listener(event); }
 }
 
-test("새 채팅 준비 API가 통합되기 전에는 V2 snapshot을 재사용하거나 호출하지 않는다", async () => {
+test("새 채팅은 prepareChatWorkspace의 서로 다른 identity와 exact preparationId를 사용한다", async () => {
   const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); controller.start();
   await controller.openProject("project_a");
   await controller.createChat({ projectId: "project_a" }, "첫 목표");
-  assert.equal(bridge.created.length, 0);
-  assert.equal(controller.snapshot().preparationApiUnavailable, true);
+  await controller.createChat({ projectId: "project_a" }, "둘째 목표");
+  assert.deepEqual(bridge.created.map((item) => item.worktreeId), ["fresh_1", "fresh_2"]);
+  assert.deepEqual(bridge.created.map((item) => item.preparationId), ["prep_1", "prep_2"]);
+  assert.equal(new Set(bridge.created.map((item) => item.workspaceIdentity)).size, 2);
+  assert.equal(bridge.abandoned.length, 0);
+  controller.dispose();
+});
+
+test("B chat.create 실패는 B preparation만 exact abandon하고 기존 A 기록은 그대로 둔다", async () => {
+  const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); await controller.openProject("project_a");
+  await controller.createChat({ projectId: "project_a" }, "A"); const a = controller.snapshot().chats[0]!;
+  bridge.failCreate = true; await controller.createChat({ projectId: "project_a" }, "B");
+  assert.equal(controller.snapshot().chats.some((item) => item.chatId === a.chatId), true);
+  assert.deepEqual(bridge.abandoned, [{ preparationId: "prep_2", projectId: "project_a", worktreeId: "fresh_2", workspaceIdentity: "fresh_identity_2" }]);
   controller.dispose();
 });
 

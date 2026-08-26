@@ -1,7 +1,7 @@
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type {
   ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleIdV1, RoleProfileV1,
-  RunRecordV1, TeamMessageV1,
+  RunRecordV1, TeamMessageV1, PreparedChatWorkspaceV1,
 } from "./contracts/run-recovery-v1.ts";
 
 export interface ChatUiSnapshot {
@@ -28,7 +28,7 @@ export class ChatUiController {
   #disposed = false;
   #generation = 0;
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: Awaited<ReturnType<M5BridgeV3["getChat"]>> | null } | null = null;
-  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], recoveries: [], preparing: false, switching: false, preparationApiUnavailable: true, activeRunId: null, notice: null, error: null };
+  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], recoveries: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
 
   constructor(bridge: M5BridgeV3) { this.#bridge = bridge; }
   snapshot(): ChatUiSnapshot { return this.#state; }
@@ -62,10 +62,28 @@ export class ChatUiController {
     }
   }
 
-  async createChat(_source: { projectId: string }, _goal: string): Promise<ChatRecordV1 | null> {
-    // Do not reuse the V2 project snapshot: a dedicated preparation API is required for every new chat.
-    this.#set({ preparationApiUnavailable: true, notice: "새 채팅 준비 연결을 추가하는 중이에요. 기존 작업 복사본은 재사용하지 않아요." });
-    return null;
+  async createChat(source: { projectId: string }, goal: string): Promise<ChatRecordV1 | null> {
+    const settings = this.#state.settings;
+    if (!settings || this.#state.switching || this.isRecoveryBlocked() || settings.projectId !== source.projectId || !goal.trim() || this.#state.preparing) return null;
+    const generation = this.#generation;
+    let prepared: PreparedChatWorkspaceV1 | null = null;
+    this.#set({ preparing: true, preparationApiUnavailable: false, error: null, notice: "새 채팅 전용 작업 복사본을 준비하고 있어요." });
+    try {
+      prepared = await this.#bridge.prepareChatWorkspace({ projectId: source.projectId });
+      const manifest = prepared.manifest;
+      if (prepared.bindingState !== "unbound" || manifest.projectId !== source.projectId) throw new Error("prepared workspace identity mismatch");
+      const created = await this.#bridge.createChat({ preparationId: prepared.preparationId, projectId: source.projectId, worktreeId: manifest.worktreeId, workspaceIdentity: manifest.workspaceIdentity, goal: goal.trim(), expectedSettingsRevision: settings.revision });
+      if (!this.#live(generation) || this.#state.projectId !== source.projectId) return created;
+      this.#set({ chats: [created, ...this.#state.chats.filter((item) => item.chatId !== created.chatId)], notice: "새 채팅을 준비했어요. 이 채팅만의 작업 복사본을 사용해요." });
+      return created;
+    } catch (error) {
+      if (prepared?.bindingState === "unbound") {
+        const manifest = prepared.manifest;
+        try { await this.#bridge.abandonPreparedWorkspace({ preparationId: prepared.preparationId, projectId: manifest.projectId, worktreeId: manifest.worktreeId, workspaceIdentity: manifest.workspaceIdentity }); } catch { /* original create error remains the user-facing evidence */ }
+      }
+      if (this.#live(generation)) this.#error("새 채팅을 준비하지 못했어요. 원본 프로젝트는 바꾸지 않았어요.", error);
+      return null;
+    } finally { if (this.#live(generation)) this.#set({ preparing: false }); }
   }
 
   async prepareSwitch(chatId: string, canLeaveWorkspace: boolean): Promise<ChatRecordV1 | null> {
