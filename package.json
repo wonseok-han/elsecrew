@@ -22,7 +22,8 @@
     "m5:test:contracts": "node --test --experimental-strip-types tests/m5-protocol-contract.test.mts && cargo test -p hello-agent-protocol",
     "m5:test:storage": "node --test --experimental-strip-types tests/m5-g3-contract.test.mts tests/m5-electron-bridge.test.mts && cargo test -p hello-agent-sidecar --locked",
     "m5:test:project": "node --test --experimental-strip-types tests/m5-g4-contract.test.mts tests/m5-electron-bridge.test.mts && cargo test -p hello-agent-sidecar --locked project:: && cargo test -p hello-agent-sidecar --locked --test stdio_process binary_project_worktree_read_stream_and_quit_follow_g4_order",
-    "m5:test:editor": "vite build --config electron/vite.renderer.config.ts && node --test --experimental-strip-types tests/m5-editor-state.test.mts tests/m5-renderer-mount-smoke.mts"
+    "m5:test:editor": "vite build --config electron/vite.renderer.config.ts && node --test --experimental-strip-types tests/m5-editor-state.test.mts tests/m5-renderer-mount-smoke.mts",
+    "m5:test:run-recovery": "node --test --experimental-strip-types tests/m5-g5-contract.test.mts tests/m5-g5-workspace-addressing-contract.test.mts tests/m5-g5-chat-workspace-preparation-contract.test.mts tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts tests/m5-g5-chat-ui-state.test.mts tests/m5-g5-workspace-editor-state.test.mts && cargo test -p hello-agent-sidecar --locked"
   },
   "config": {
     "forge": "./electron/forge.config.ts"

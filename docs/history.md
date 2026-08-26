@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 하네스 연결)
+
+- **한 일**: `m5:test:run-recovery`를 추가해 G5 계약, chat-bound workspace preparation/addressing, Electron bridge/scaffold, renderer chat/editor 상태와 Rust sidecar unit·실제 stdio process 검증을 한 명령으로 연결했다. 기존 누적 게이트가 같은 현재 코드의 TypeScript/renderer build·Chromium smoke·Electron package smoke를 이미 실행하므로 G5 명령은 고유 검증을 중복 없이 조합한다. Chromium smoke의 가짜 preload bridge도 V3로 올리고 workspace/chat 구독과 프로젝트 역할·빈 채팅 조회를 제공해 실제 renderer mount 흐름과 맞췄다.
+- **하네스 결정**: `pnpm harness:list`에서 G5는 `READY`, 아직 구현되지 않은 G6는 `NOT_READY`로 표시한다. 하네스 자기 검사는 G5 누적 실행 중 재귀하지 않도록 다음 미구현 G6의 exit 2와 세 누락 script를 검증한다.
+- **검증**: 의존성 설치를 선행하지 않는 동등한 `CI=true npm run m5:test:run-recovery`에서 Node 51개, sidecar unit 51개 통과·1개 의도한 ignored, 실제 stdio 7개가 통과했다. root의 고정 Vite binary로 renderer 605 module build를 통과한 뒤 승인된 Electron 실행에서 수정된 Chromium Monaco mount/worker smoke 1개도 통과했다. `node scripts/m5-harness.mjs --list`는 G5 `READY`·G6 `NOT_READY`, focused 하네스 자기 테스트 2개와 staged/unstaged `git diff --check`도 통과했다. 실제 유료 agent·사용자 프로젝트·Windows·파괴적 시험은 실행하지 않았다.
+- **다음 할 일**: 최신 통합 commit에서 G5 누적 하네스와 package smoke를 실행하고 독립 QA한다. G6 security/package/performance script는 해당 구현 파동에서 별도로 추가한다.
+
 ### 2026-08-26 · by GPT-5.6-Sol (M5 G5 채팅 준비 workspace Rust 소비)
 
 - **한 일**: 승인된 additive `workspace.prepareChat`·`workspace.abandonPrepared`와 `preparationId`가 추가된 `chat.create` 계약을 Rust sidecar에 소비했다. prepare는 기존 active/bound snapshot과 무관하게 새 standalone snapshot과 전역 고유 preparation/worktree/workspace identity를 만들고 `unbound`로 저장한다. create는 exact preparation·active manifest·settings revision·전역 chat/workspace binding을 SQLite `BEGIN IMMEDIATE` 안에서 다시 확인한 뒤 preparation `bound(chatId)`·draft chat·최초 사용자 메시지를 함께 commit한다. G4 `project.createWorktree`의 기존 idempotent 경로는 유지했다.
