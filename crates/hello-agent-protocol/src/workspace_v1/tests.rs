@@ -22,6 +22,7 @@ struct Contract {
     bridge_v3_workspace_methods: Vec<String>,
     id_max_bytes: usize,
     addressing: String,
+    operation_resolution: String,
     save_stream_binding: String,
     v2_project_tree_request_line: String,
 }
@@ -79,11 +80,15 @@ fn rust_matches_the_canonical_workspace_manifest() {
         .all(|event| super::super::EVENTS_V1.contains(event)));
     assert_eq!(
         manifest.contract.addressing,
-        "explicitProjectWorktreeWorkspaceIdentity"
+        "explicitChatProjectWorktreeWorkspaceIdentity"
+    );
+    assert_eq!(
+        manifest.contract.operation_resolution,
+        "chatStoredBindingAndActiveSnapshotBeforeOperation"
     );
     assert_eq!(
         manifest.contract.save_stream_binding,
-        "beginAndCommitEchoTripleChunksBoundBySaveId"
+        "everyPhaseEchoesChatWorkspaceAndMatchesPersistedSaveSession"
     );
     let v2_request =
         super::super::decode_jsonl(manifest.contract.v2_project_tree_request_line.as_bytes())

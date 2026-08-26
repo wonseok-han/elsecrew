@@ -56,6 +56,7 @@ interface FixtureManifest {
     methods: string[];
     events: string[];
     bridgeMethods: string[];
+    workspaceEventAddressing: string;
   };
   valid: ValidCase[];
   invalid: InvalidCase[];
@@ -80,6 +81,7 @@ test("TypeScript가 canonical protocol v1 transcript를 decode하고 동일 byte
       methods: [...METHODS_V1],
       events: [...EVENTS_V1],
       bridgeMethods: [...M5_BRIDGE_V1_METHODS],
+      workspaceEventAddressing: "chatId+projectId+worktreeId+workspaceIdentity",
     },
     manifest.contract,
   );

@@ -362,6 +362,7 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
   for (const name of workspaceIds) if (name in object) requireId(object[name], name);
   if (object.event === "workspace.changed" || object.event === "workspace.blob.chunk") {
     if (workspaceIdCount !== workspaceIds.length) fail("workspace events require the exact workspace identity triple");
+    if (!("chatId" in object)) fail("workspace events require explicit chatId");
   }
   if (
     (object.event === "run.event" || object.event === "run.finished") &&

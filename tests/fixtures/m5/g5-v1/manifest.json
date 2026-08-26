@@ -40,7 +40,7 @@
     "publicMessageMaxBytes": 65536,
     "protocolStreamSequence": "connectionScopedPerStream",
     "durableEventSequence": "chatLedgerScopedContiguous",
-    "workspaceBinding": "explicitProjectWorktreeWorkspaceIdentity",
+    "workspaceBinding": "explicitChatProjectWorktreeWorkspaceIdentity",
     "writerStartOrdering": ["beginImmediate", "persistRun", "persistWorkspaceLock", "commit", "spawn"],
     "recoveryResolution": "abandonOnlyAfterAllTrackedProcessIdentitiesProvenGone",
     "platformExecution": {"macos":"fakeFixtureOnly","windows":"disabled"},

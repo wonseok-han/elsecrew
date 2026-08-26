@@ -10,6 +10,7 @@ import { G5_CAPABILITIES_V1, G5_ID_MAX_BYTES_V1 } from "../src/m5/contracts/run-
 import {
   WORKSPACE_CAPABILITIES_V1,
   WORKSPACE_EVENTS_V1,
+  validateChatWorkspaceRefV1,
   validateWorkspaceChatBindingTranscriptV1,
   validateWorkspaceEventRouteTranscriptV1,
   validateWorkspaceEventV1,
@@ -18,7 +19,7 @@ import {
   validateWorkspaceSaveTranscriptV1,
 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 
-type ValidatorName = "workspaceRef" | "workspaceOperation" | "workspaceSave"
+type ValidatorName = "workspaceRef" | "chatWorkspaceRef" | "workspaceOperation" | "workspaceSave"
   | "workspaceEvent" | "workspaceEventRoute" | "workspaceChatBinding";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
 interface DerivedCase {
@@ -30,7 +31,8 @@ interface Manifest {
   schemaVersion: number; protocolVersion: number; casesFile: string;
   contract: {
     capabilities: string[]; events: string[]; bridgeV2Methods: string[];
-    bridgeV3WorkspaceMethods: string[]; idMaxBytes: number; addressing: string; saveStreamBinding: string;
+    bridgeV3WorkspaceMethods: string[]; idMaxBytes: number; addressing: string;
+    operationResolution: string; saveStreamBinding: string;
     v2ProjectTreeRequestLine: string;
   };
 }
@@ -55,8 +57,9 @@ test("workspace-addressed V3 API는 V2를 그대로 보존하고 별도 메서�
   assert.ok(WORKSPACE_EVENTS_V1.every((event) => EVENTS_V1.includes(event)));
   assert.equal(G5_CAPABILITIES_V1.includes("run.startAgentSmoke" as never), false);
   assert.equal(manifest.contract.idMaxBytes, G5_ID_MAX_BYTES_V1);
-  assert.equal(manifest.contract.addressing, "explicitProjectWorktreeWorkspaceIdentity");
-  assert.equal(manifest.contract.saveStreamBinding, "beginAndCommitEchoTripleChunksBoundBySaveId");
+  assert.equal(manifest.contract.addressing, "explicitChatProjectWorktreeWorkspaceIdentity");
+  assert.equal(manifest.contract.operationResolution, "chatStoredBindingAndActiveSnapshotBeforeOperation");
+  assert.equal(manifest.contract.saveStreamBinding, "everyPhaseEchoesChatWorkspaceAndMatchesPersistedSaveSession");
   const v2Request = decodeJsonl(manifest.contract.v2ProjectTreeRequestLine);
   assert.equal(v2Request.kind, "request");
   assert.equal(v2Request.kind === "request" && v2Request.method, "project.getTree");
@@ -65,6 +68,8 @@ test("workspace-addressed V3 API는 V2를 그대로 보존하고 별도 메서�
   const v2Source = readFileSync(resolve("src/m5/contracts/bridge-v2.ts"), "utf8");
   const v3Source = readFileSync(resolve("src/m5/contracts/bridge-v3.ts"), "utf8");
   assert.match(v3Source, /Omit<M5BridgeV2, "version">/);
+  assert.match(v3Source, /ChatWorkspaceRefV1/);
+  assert.doesNotMatch(v3Source, /appendWorkspaceFileSaveChunk\(input: SaveChunkV1\)|commitWorkspaceFileSave\(input: SaveCommitV1\)/);
   assert.doesNotMatch(v2Source, /WorkspaceRefV1|getWorkspace|workspaceIdentity|worktreeId/);
   assert.doesNotMatch(v3Source, /selected(?:Chat|Project)|current(?:Chat|Project)/i);
 
@@ -99,6 +104,7 @@ function isValid(fixture: FixtureCase): boolean {
 function validate(fixture: FixtureCase): void {
   const validators: Record<ValidatorName, (value: unknown) => unknown> = {
     workspaceRef: validateWorkspaceRefV1,
+    chatWorkspaceRef: validateChatWorkspaceRefV1,
     workspaceOperation: validateWorkspaceOperationTranscriptV1,
     workspaceSave: validateWorkspaceSaveTranscriptV1,
     workspaceEvent: validateWorkspaceEventV1,

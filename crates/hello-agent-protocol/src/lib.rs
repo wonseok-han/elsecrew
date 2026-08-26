@@ -462,6 +462,15 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                     "workspace events require the exact workspace identity triple",
                 ));
             }
+            if matches!(
+                event.event.as_str(),
+                "workspace.changed" | "workspace.blob.chunk"
+            ) && event.chat_id.is_none()
+            {
+                return Err(ProtocolError::new(
+                    "workspace events require explicit chatId",
+                ));
+            }
             if matches!(event.event.as_str(), "run.event" | "run.finished")
                 && (event.chat_id.is_none() || event.task_id.is_none() || event.run_id.is_none())
             {

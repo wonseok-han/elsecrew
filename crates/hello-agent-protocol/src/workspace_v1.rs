@@ -22,6 +22,15 @@ pub struct WorkspaceRefV1 {
     pub workspace_identity: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatWorkspaceRefV1 {
+    pub chat_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceContractError(String);
 impl Display for WorkspaceContractError {
@@ -37,11 +46,12 @@ pub fn validate_workspace_payload_v1(
 ) -> Result<(), WorkspaceContractError> {
     match validator {
         "workspaceRef" => validate_workspace_ref(value).map(|_| ()),
+        "chatWorkspaceRef" => validate_chat_workspace_ref(value).map(|_| ()),
         "workspaceOperation" => validate_workspace_operation(value),
         "workspaceSave" => validate_workspace_save(value),
         "workspaceEvent" => validate_workspace_event(value),
         "workspaceEventRoute" => validate_workspace_event_route(value),
-        "workspaceChatBinding" => validate_workspace_chat_binding(value),
+        "workspaceChatBinding" => validate_workspace_chat_binding(value).map(|_| ()),
         other => fail(format!("unknown workspace validator: {other}")),
     }
 }
@@ -52,9 +62,21 @@ fn validate_workspace_ref(value: &Value) -> Result<WorkspaceRefV1, WorkspaceCont
     workspace_ref_fields(object)
 }
 
+fn validate_chat_workspace_ref(
+    value: &Value,
+) -> Result<ChatWorkspaceRefV1, WorkspaceContractError> {
+    let object = object(value, "chat workspace reference")?;
+    exact_keys(
+        object,
+        &["chatId", "projectId", "worktreeId", "workspaceIdentity"],
+    )?;
+    chat_workspace_ref_fields(object)
+}
+
 fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractError> {
     let transcript = object(value, "workspace operation transcript")?;
-    exact_keys(transcript, &["operation", "request", "response"])?;
+    exact_keys(transcript, &["binding", "operation", "request", "response"])?;
+    let binding = validate_workspace_resolved_binding(required(transcript, "binding")?)?;
     let operation = string(transcript.get("operation"), "operation")?;
     let request = object(required(transcript, "request")?, "workspace request")?;
     let response = object(required(transcript, "response")?, "workspace response")?;
@@ -68,11 +90,12 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "parentPath",
                     "cursor",
                 ],
             )?;
-            request_ref = workspace_ref_fields(request)?;
+            request_ref = chat_workspace_ref_fields(request)?;
             relative_path(request.get("parentPath"), "parentPath", true)?;
             nullable_id(request.get("cursor"), "cursor")?;
             exact_keys(
@@ -81,6 +104,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "parentPath",
                     "entries",
                     "nextCursor",
@@ -89,7 +113,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
             if request.get("parentPath") != response.get("parentPath") {
                 return fail("tree response parentPath must match the request");
             }
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             delegate_project(
                 "treePage",
                 &json!({
@@ -101,18 +125,19 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
             )?;
         }
         "close" => {
-            request_ref = validate_workspace_ref(required(transcript, "request")?)?;
+            request_ref = validate_chat_workspace_ref(required(transcript, "request")?)?;
             exact_keys(
                 response,
                 &[
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "lifecycle",
                     "physicallyDeleted",
                 ],
             )?;
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             delegate_project(
                 "projectClose",
                 &json!({
@@ -125,9 +150,15 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
         "fileRead" => {
             exact_keys(
                 request,
-                &["projectId", "worktreeId", "workspaceIdentity", "path"],
+                &[
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "path",
+                ],
             )?;
-            request_ref = workspace_ref_fields(request)?;
+            request_ref = chat_workspace_ref_fields(request)?;
             relative_path(request.get("path"), "file path", false)?;
             exact_keys(
                 response,
@@ -135,6 +166,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "path",
                     "classification",
                     "byteLength",
@@ -145,7 +177,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
             if request.get("path") != response.get("path") {
                 return fail("file read response path must match the request");
             }
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             delegate_project(
                 "fileRead",
                 &json!({
@@ -156,29 +188,36 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
             )?;
         }
         "fileWatch" => {
-            request_ref = validate_workspace_ref(required(transcript, "request")?)?;
+            request_ref = validate_chat_workspace_ref(required(transcript, "request")?)?;
             exact_keys(
                 response,
-                &["projectId", "worktreeId", "workspaceIdentity", "watching"],
+                &[
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "watching",
+                ],
             )?;
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             if response.get("watching") != Some(&Value::Bool(true)) {
                 return fail("workspace watch response must confirm watching");
             }
         }
         "diffSummary" => {
-            request_ref = validate_workspace_ref(required(transcript, "request")?)?;
+            request_ref = validate_chat_workspace_ref(required(transcript, "request")?)?;
             exact_keys(
                 response,
                 &[
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "baseCommit",
                     "entries",
                 ],
             )?;
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             delegate_project(
                 "diffSummary",
                 &json!({
@@ -191,9 +230,15 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
         "diffFile" => {
             exact_keys(
                 request,
-                &["projectId", "worktreeId", "workspaceIdentity", "path"],
+                &[
+                    "chatId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "path",
+                ],
             )?;
-            request_ref = workspace_ref_fields(request)?;
+            request_ref = chat_workspace_ref_fields(request)?;
             relative_path(request.get("path"), "diff path", false)?;
             exact_keys(
                 response,
@@ -201,6 +246,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
                     "projectId",
                     "worktreeId",
                     "workspaceIdentity",
+                    "chatId",
                     "kind",
                     "path",
                     "oldPath",
@@ -213,7 +259,7 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
             if request.get("path") != response.get("path") {
                 return fail("diff file response path must match the request");
             }
-            response_ref = workspace_ref_fields(response)?;
+            response_ref = chat_workspace_ref_fields(response)?;
             delegate_project(
                 "diffFile",
                 &json!({
@@ -226,7 +272,12 @@ fn validate_workspace_operation(value: &Value) -> Result<(), WorkspaceContractEr
         }
         _ => return fail("unknown workspace operation"),
     }
-    exact_echo(&request_ref, &response_ref, "workspace operation response")
+    exact_chat_workspace_echo(
+        &binding,
+        &request_ref,
+        "workspace operation active chat binding",
+    )?;
+    exact_chat_workspace_echo(&request_ref, &response_ref, "workspace operation response")
 }
 
 fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> {
@@ -234,18 +285,22 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
     exact_keys(
         transcript,
         &[
+            "binding",
             "beginRequest",
             "beginResult",
+            "activeSessions",
             "chunks",
             "commitRequest",
             "commitResult",
             "currentVersionBefore",
         ],
     )?;
+    let binding = validate_workspace_resolved_binding(required(transcript, "binding")?)?;
     let begin_request = object(required(transcript, "beginRequest")?, "save begin request")?;
     exact_keys(
         begin_request,
         &[
+            "chatId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
@@ -255,11 +310,13 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
             "encoding",
         ],
     )?;
-    let workspace = workspace_ref_fields(begin_request)?;
+    let workspace = chat_workspace_ref_fields(begin_request)?;
+    exact_chat_workspace_echo(&binding, &workspace, "save binding")?;
     let begin_result = object(required(transcript, "beginResult")?, "save begin result")?;
     exact_keys(
         begin_result,
         &[
+            "chatId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
@@ -267,12 +324,53 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
             "chunkBytes",
         ],
     )?;
-    exact_echo(
+    exact_chat_workspace_echo(
         &workspace,
-        &workspace_ref_fields(begin_result)?,
+        &chat_workspace_ref_fields(begin_result)?,
         "save begin result",
     )?;
     let save_id = string(begin_result.get("saveId"), "saveId")?;
+    let session_values = array(transcript.get("activeSessions"), "active save sessions")?;
+    if session_values.is_empty() || session_values.len() > 100 {
+        return fail("workspace save activeSessions must be a nonempty bounded array");
+    }
+    let mut session_ids = std::collections::HashSet::new();
+    let mut sessions = Vec::new();
+    for session in session_values {
+        let session = validate_workspace_save_session(session)?;
+        let session_id = string(session.get("saveId"), "saveId")?;
+        if !session_ids.insert(session_id.to_string()) {
+            return fail("workspace save sessions require unique saveId values");
+        }
+        sessions.push(session);
+    }
+    let begin_session = sessions
+        .iter()
+        .copied()
+        .find(|session| session.get("saveId").and_then(Value::as_str) == Some(save_id))
+        .ok_or_else(|| {
+            WorkspaceContractError(
+                "workspace save begin result must have a persisted session".to_string(),
+            )
+        })?;
+    exact_chat_workspace_echo(
+        &workspace,
+        &chat_workspace_ref_fields(begin_session)?,
+        "persisted save session",
+    )?;
+    for (session_field, begin_field) in [
+        ("path", "path"),
+        ("expectedVersion", "expectedVersion"),
+        ("totalBytes", "totalBytes"),
+        ("encoding", "encoding"),
+    ] {
+        if begin_session.get(session_field) != begin_request.get(begin_field) {
+            return fail("persisted save session must exactly match begin");
+        }
+    }
+    if begin_session.get("chunkBytes") != begin_result.get("chunkBytes") {
+        return fail("persisted save session must exactly match begin");
+    }
     let exchanges = array(transcript.get("chunks"), "save chunks")?;
     let mut chunks = Vec::new();
     for (index, exchange) in exchanges.iter().enumerate() {
@@ -280,8 +378,49 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
         exact_keys(exchange, &["request", "response"])?;
         let request = object(required(exchange, "request")?, "save chunk request")?;
         let response = object(required(exchange, "response")?, "save chunk response")?;
-        exact_keys(request, &["saveId", "seq", "text"])?;
-        exact_keys(response, &["saveId", "acceptedSeq"])?;
+        exact_keys(
+            request,
+            &[
+                "chatId",
+                "projectId",
+                "worktreeId",
+                "workspaceIdentity",
+                "saveId",
+                "seq",
+                "text",
+            ],
+        )?;
+        exact_keys(
+            response,
+            &[
+                "chatId",
+                "projectId",
+                "worktreeId",
+                "workspaceIdentity",
+                "saveId",
+                "acceptedSeq",
+            ],
+        )?;
+        let request_save_id = string(request.get("saveId"), "saveId")?;
+        let request_session = sessions
+            .iter()
+            .copied()
+            .find(|session| session.get("saveId").and_then(Value::as_str) == Some(request_save_id))
+            .ok_or_else(|| {
+                WorkspaceContractError(
+                    "workspace save chunk references an unknown or late save session".to_string(),
+                )
+            })?;
+        exact_chat_workspace_echo(
+            &chat_workspace_ref_fields(request_session)?,
+            &chat_workspace_ref_fields(request)?,
+            "save chunk request session",
+        )?;
+        exact_chat_workspace_echo(
+            &chat_workspace_ref_fields(request_session)?,
+            &chat_workspace_ref_fields(response)?,
+            "save chunk response session",
+        )?;
         let expected_seq = u64::try_from(index + 1).expect("bounded fixture sequence");
         if request.get("saveId").and_then(Value::as_str) != Some(save_id)
             || response.get("saveId").and_then(Value::as_str) != Some(save_id)
@@ -290,13 +429,39 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
         {
             return fail("saveId/sequence must stay bound after begin");
         }
-        chunks.push(Value::Object(request.clone()));
+        chunks.push(json!({
+            "saveId": request.get("saveId"), "seq": request.get("seq"), "text": request.get("text")
+        }));
     }
     let commit = required(transcript, "commitRequest")?;
     let commit_object = object(commit, "save commit request")?;
     exact_keys(
         commit_object,
-        &["saveId", "expectedVersion", "lastSeq", "totalBytes"],
+        &[
+            "chatId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "saveId",
+            "expectedVersion",
+            "lastSeq",
+            "totalBytes",
+        ],
+    )?;
+    let commit_save_id = string(commit_object.get("saveId"), "saveId")?;
+    let commit_session = sessions
+        .iter()
+        .copied()
+        .find(|session| session.get("saveId").and_then(Value::as_str) == Some(commit_save_id))
+        .ok_or_else(|| {
+            WorkspaceContractError(
+                "workspace save commit references an unknown or late save session".to_string(),
+            )
+        })?;
+    exact_chat_workspace_echo(
+        &chat_workspace_ref_fields(commit_session)?,
+        &chat_workspace_ref_fields(commit_object)?,
+        "save commit request session",
     )?;
     if commit_object.get("saveId").and_then(Value::as_str) != Some(save_id) {
         return fail("workspace save commit saveId mismatch");
@@ -305,6 +470,7 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
     let outcome = string(result.get("outcome"), "save outcome")?;
     let expected_keys = if outcome == "committed" {
         &[
+            "chatId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
@@ -314,6 +480,7 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
         ][..]
     } else {
         &[
+            "chatId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
@@ -323,9 +490,9 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
         ][..]
     };
     exact_keys(result, expected_keys)?;
-    exact_echo(
-        &workspace,
-        &workspace_ref_fields(result)?,
+    exact_chat_workspace_echo(
+        &chat_workspace_ref_fields(commit_session)?,
+        &chat_workspace_ref_fields(result)?,
         "save commit result",
     )?;
     if result.get("saveId").and_then(Value::as_str) != Some(save_id) {
@@ -347,11 +514,47 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
                 "encoding": begin_request.get("encoding"), "chunkBytes": begin_result.get("chunkBytes")
             },
             "chunks": chunks,
-            "commit": commit,
+            "commit": {
+                "saveId": commit_object.get("saveId"), "expectedVersion": commit_object.get("expectedVersion"),
+                "lastSeq": commit_object.get("lastSeq"), "totalBytes": commit_object.get("totalBytes")
+            },
             "currentVersion": transcript.get("currentVersionBefore"),
             "outcome": outcome
         }),
     )
+}
+
+fn validate_workspace_save_session<'a>(
+    value: &'a Value,
+) -> Result<&'a Map<String, Value>, WorkspaceContractError> {
+    let session = object(value, "workspace save session")?;
+    exact_keys(
+        session,
+        &[
+            "chatId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "saveId",
+            "path",
+            "expectedVersion",
+            "totalBytes",
+            "encoding",
+            "chunkBytes",
+        ],
+    )?;
+    chat_workspace_ref_fields(session)?;
+    id(session.get("saveId"), "saveId")?;
+    relative_path(session.get("path"), "save session path", false)?;
+    validate_version(session.get("expectedVersion"))?;
+    safe_unsigned(session.get("totalBytes"), "save session totalBytes")?;
+    if session.get("encoding").and_then(Value::as_str) != Some("utf8")
+        || session.get("chunkBytes").and_then(Value::as_u64)
+            != Some(super::MAX_TEXT_CHUNK_BYTES as u64)
+    {
+        return fail("save session must use UTF-8 and 256 KiB chunks");
+    }
+    Ok(session)
 }
 
 fn validate_workspace_event(value: &Value) -> Result<(), WorkspaceContractError> {
@@ -365,13 +568,14 @@ fn validate_workspace_event(value: &Value) -> Result<(), WorkspaceContractError>
             "streamId",
             "seq",
             "event",
+            "chatId",
             "projectId",
             "worktreeId",
             "workspaceIdentity",
             "payload",
         ],
     )?;
-    workspace_ref_fields(event)?;
+    chat_workspace_ref_fields(event)?;
     let encoded = serde_json::to_vec(value)
         .map_err(|error| WorkspaceContractError(format!("encode workspace event: {error}")))?;
     super::decode_jsonl(&encoded)
@@ -393,7 +597,9 @@ fn validate_workspace_event(value: &Value) -> Result<(), WorkspaceContractError>
     }
 }
 
-fn validate_workspace_chat_binding(value: &Value) -> Result<(), WorkspaceContractError> {
+fn validate_workspace_chat_binding(
+    value: &Value,
+) -> Result<ChatWorkspaceRefV1, WorkspaceContractError> {
     let transcript = object(value, "workspace chat binding transcript")?;
     exact_keys(transcript, &["chat", "verifiedSnapshot", "workspace"])?;
     let chat = object(required(transcript, "chat")?, "chat")?;
@@ -407,26 +613,45 @@ fn validate_workspace_chat_binding(value: &Value) -> Result<(), WorkspaceContrac
     if snapshot.get("lifecycle").and_then(Value::as_str) != Some("active") {
         return fail("chat workspace addressing requires an active snapshot");
     }
-    let chat_ref = workspace_ref_fields(chat)?;
-    exact_echo(&chat_ref, &workspace_ref_fields(snapshot)?, "chat snapshot")?;
+    let chat_ref = chat_workspace_ref_fields(chat)?;
     exact_echo(
-        &chat_ref,
-        &validate_workspace_ref(required(transcript, "workspace")?)?,
-        "chat workspace request",
-    )
+        &workspace_ref_from_chat(&chat_ref),
+        &workspace_ref_fields(snapshot)?,
+        "chat snapshot",
+    )?;
+    let workspace = validate_chat_workspace_ref(required(transcript, "workspace")?)?;
+    exact_chat_workspace_echo(&chat_ref, &workspace, "chat workspace request")?;
+    Ok(workspace)
+}
+
+fn validate_workspace_resolved_binding(
+    value: &Value,
+) -> Result<ChatWorkspaceRefV1, WorkspaceContractError> {
+    let binding = object(value, "resolved chat workspace binding")?;
+    exact_keys(binding, &["storedBinding", "verifiedSnapshot"])?;
+    let stored = validate_chat_workspace_ref(required(binding, "storedBinding")?)?;
+    let snapshot = object(required(binding, "verifiedSnapshot")?, "snapshot")?;
+    delegate_project("worktreeManifest", required(binding, "verifiedSnapshot")?)?;
+    if snapshot.get("lifecycle").and_then(Value::as_str) != Some("active") {
+        return fail("workspace operation requires an active snapshot");
+    }
+    exact_echo(
+        &workspace_ref_from_chat(&stored),
+        &workspace_ref_fields(snapshot)?,
+        "resolved active snapshot",
+    )?;
+    Ok(stored)
 }
 
 fn validate_workspace_event_route(value: &Value) -> Result<(), WorkspaceContractError> {
     let transcript = object(value, "workspace event route transcript")?;
-    exact_keys(transcript, &["chat", "event"])?;
-    let chat = object(required(transcript, "chat")?, "chat")?;
-    super::run_recovery_v1::validate_g5_payload_v1("chatRecord", required(transcript, "chat")?)
-        .map_err(|error| WorkspaceContractError(format!("invalid chat: {error}")))?;
+    exact_keys(transcript, &["binding", "event"])?;
+    let binding = validate_workspace_resolved_binding(required(transcript, "binding")?)?;
     validate_workspace_event(required(transcript, "event")?)?;
     let event = object(required(transcript, "event")?, "workspace event")?;
-    exact_echo(
-        &workspace_ref_fields(chat)?,
-        &workspace_ref_fields(event)?,
+    exact_chat_workspace_echo(
+        &binding,
+        &chat_workspace_ref_fields(event)?,
         "workspace event route",
     )
 }
@@ -460,6 +685,35 @@ fn exact_echo(
         ));
     }
     Ok(())
+}
+fn exact_chat_workspace_echo(
+    expected: &ChatWorkspaceRefV1,
+    actual: &ChatWorkspaceRefV1,
+    name: &str,
+) -> Result<(), WorkspaceContractError> {
+    if expected != actual {
+        return fail(format!(
+            "{name} must exactly echo chatId/projectId/worktreeId/workspaceIdentity"
+        ));
+    }
+    Ok(())
+}
+fn workspace_ref_from_chat(value: &ChatWorkspaceRefV1) -> WorkspaceRefV1 {
+    WorkspaceRefV1 {
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+    }
+}
+fn chat_workspace_ref_fields(
+    object: &Map<String, Value>,
+) -> Result<ChatWorkspaceRefV1, WorkspaceContractError> {
+    Ok(ChatWorkspaceRefV1 {
+        chat_id: id(object.get("chatId"), "chatId")?.to_string(),
+        project_id: id(object.get("projectId"), "projectId")?.to_string(),
+        worktree_id: id(object.get("worktreeId"), "worktreeId")?.to_string(),
+        workspace_identity: id(object.get("workspaceIdentity"), "workspaceIdentity")?.to_string(),
+    })
 }
 fn workspace_ref_fields(
     object: &Map<String, Value>,
@@ -514,6 +768,15 @@ fn nullable_id(value: Option<&Value>, name: &str) -> Result<(), WorkspaceContrac
         id(value, name)?;
     }
     Ok(())
+}
+fn safe_unsigned(value: Option<&Value>, name: &str) -> Result<u64, WorkspaceContractError> {
+    let value = value
+        .and_then(Value::as_u64)
+        .ok_or_else(|| WorkspaceContractError(format!("{name} must be a non-negative integer")))?;
+    if value > super::MAX_SEQUENCE {
+        return fail(format!("{name} exceeds the JavaScript safe integer limit"));
+    }
+    Ok(value)
 }
 fn relative_path<'a>(
     value: Option<&'a Value>,

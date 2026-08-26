@@ -19,8 +19,9 @@
       "getWorkspaceDiffSummary", "getWorkspaceDiffFile", "onWorkspaceEvent"
     ],
     "idMaxBytes": 512,
-    "addressing": "explicitProjectWorktreeWorkspaceIdentity",
-    "saveStreamBinding": "beginAndCommitEchoTripleChunksBoundBySaveId",
+    "addressing": "explicitChatProjectWorktreeWorkspaceIdentity",
+    "operationResolution": "chatStoredBindingAndActiveSnapshotBeforeOperation",
+    "saveStreamBinding": "everyPhaseEchoesChatWorkspaceAndMatchesPersistedSaveSession",
     "v2ProjectTreeRequestLine": "{\"kind\":\"request\",\"method\":\"project.getTree\",\"params\":{\"cursor\":null,\"parentPath\":\"src\",\"projectId\":\"project_01\"},\"protocolVersion\":1,\"requestId\":\"req_v2_compat\",\"sidecarInstanceId\":\"sidecar_v2_compat\"}\n"
   },
   "casesFile": "cases.json"

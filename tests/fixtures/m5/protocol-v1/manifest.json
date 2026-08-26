@@ -51,7 +51,8 @@
       "workspace.changed",
       "workspace.blob.chunk"
     ],
-    "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"]
+    "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
+    "workspaceEventAddressing": "chatId+projectId+worktreeId+workspaceIdentity"
   },
   "valid": [
     {
@@ -78,6 +79,7 @@
     { "file": "invalid/unknown-event.jsonl", "validator": "transcript" },
     { "file": "invalid/event-payload-array.jsonl", "validator": "transcript" },
     { "file": "invalid/run-event-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/workspace-event-missing-chat-id.jsonl", "validator": "transcript" },
     { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
     { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },
     { "file": "invalid/response-before-ready.jsonl", "validator": "transcript" },
