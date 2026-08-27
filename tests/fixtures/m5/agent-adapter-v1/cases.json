@@ -1,0 +1,247 @@
+{
+  "valid": [
+    {
+      "name": "codex-capability-refresh-request",
+      "validator": "capabilitiesRequest",
+      "value": {"runtime": "codex", "refresh": true}
+    },
+    {
+      "name": "claude-exact-version-measured-capability",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+        "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly", "workspaceWrite"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:claude-capability", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "codex-argv-only-cannot-start",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.149.1"},
+        "models": [{"modelSelector": "gpt-5.6-sol", "reasoningEfforts": ["medium"], "permissions": ["readOnly", "workspaceWrite"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "0.149.1", "effectiveModelEvidence": "argvOnly"},
+        "canStart": false, "blockedReason": "exactModelUnavailable", "fingerprint": "sha256:codex-argv-only", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "unknown-catalog-cannot-start",
+      "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin",
+        "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.150.0"},
+        "models": [],
+        "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "blockedReason": "capabilityUnknown", "fingerprint": "sha256:codex-unknown", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "minimal-server-resolved-start-request",
+      "validator": "runStartRequest",
+      "value": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:claude-capability"}
+    },
+    {
+      "name": "accepted-run-has-no-fixture-scenario",
+      "validator": "runAccepted",
+      "value": {"schemaVersion": 1, "runId": "run_01", "chatId": "chat_01", "roleId": "planning", "state": "preparing"}
+    },
+    {
+      "name": "actual-run-persists-without-fixture-scenario",
+      "validator": "runRecord",
+      "value": {
+        "schemaVersion": 1, "runId": "run_01", "chatId": "chat_01", "taskId": "task_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+        "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "source": "actualAgent", "capabilityFingerprint": "sha256:claude-capability", "state": "running", "stage": "planning",
+        "terminationOutcome": null, "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:02:00Z"
+      }
+    },
+    {
+      "name": "verified-one-shot-start-with-identity-barrier",
+      "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:claude-capability"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin",
+          "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly", "workspaceWrite"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:claude-capability", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "run_01", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0,
+        "barrier": {
+          "launcherIdentity": {"pid": 4300, "startIdentityDigest": "sha256:launcher-start", "executablePathDigest": "sha256:launcher-path", "observedGone": false},
+          "agentIdentity": {"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": false},
+          "trackedProcesses": [
+            {"pid": 4300, "startIdentityDigest": "sha256:launcher-start", "executablePathDigest": "sha256:launcher-path", "observedGone": false},
+            {"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": false}
+          ],
+          "treeIdentityDigest": "sha256:tree", "launchSpecDigest": "sha256:launch-spec", "evidenceDigest": "sha256:barrier-evidence",
+          "treeTrackerAttached": true, "runAndLockPersistedBeforeRelease": true, "identityPersistedBeforeRelease": true, "releaseGranted": true,
+          "capturedAt": "2026-08-27T01:01:00Z"
+        }
+      }
+    },
+    {
+      "name": "fingerprint-change-is-preflight-only",
+      "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:stale-capability"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:current-capability", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": null, "preflightOutcome": "profileChanged", "persistedRunCount": 0, "spawnCount": 0, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "bounded-public-status-event",
+      "validator": "publicEvent",
+      "value": {"schemaVersion": 1, "eventId": "event_01", "chatId": "chat_01", "runId": "run_01", "roleId": "planning", "kind": "status", "text": "프로젝트 구조를 확인하고 있습니다.", "createdAt": "2026-08-27T01:02:00Z"}
+    },
+    {
+      "name": "clean-process-tree-termination",
+      "validator": "terminationTranscript",
+      "value": {
+        "schemaVersion": 1, "runId": "run_01", "outcome": "cleanExit", "processesProvenGone": true, "poisoned": false,
+        "writerLockState": "released", "chatState": "succeeded",
+        "trackedProcesses": [{"pid": 4301, "startIdentityDigest": "sha256:agent-start", "executablePathDigest": "sha256:claude-path", "observedGone": true}],
+        "evidenceDigest": "sha256:termination", "observedAt": "2026-08-27T01:03:00Z"
+      }
+    },
+    {
+      "name": "uncertain-termination-stays-poisoned",
+      "validator": "terminationTranscript",
+      "value": {
+        "schemaVersion": 1, "runId": "run_02", "outcome": "recoveryRequired", "processesProvenGone": false, "poisoned": true,
+        "writerLockState": "recoveryRequired", "chatState": "recoveryRequired",
+        "trackedProcesses": [{"pid": 4401, "startIdentityDigest": "sha256:agent-start-2", "executablePathDigest": "sha256:claude-path", "observedGone": false}],
+        "evidenceDigest": "sha256:termination-uncertain", "observedAt": "2026-08-27T01:03:00Z"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "actual-run-cannot-use-fixture-scenario", "validator": "runRecord",
+      "value": {
+        "schemaVersion": 1, "runId": "run_01", "chatId": "chat_01", "taskId": "task_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+        "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "source": "actualAgent", "capabilityFingerprint": "sha256:claude-capability", "state": "running", "stage": "planning", "fixtureScenario": "planning-success",
+        "terminationOutcome": null, "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:02:00Z"
+      }
+    },
+    {
+      "name": "optional-wire-fields-must-be-explicit", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null,
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "fingerprint": "sha256:none", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "renderer-cannot-supply-launch-fields", "validator": "runStartRequest",
+      "value": {"chatId": "chat_01", "roleId": "coding", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:cap", "argv": ["--model", "other"], "cwd": "/tmp", "env": {"TOKEN": "secret"}}
+    },
+    {
+      "name": "argv-only-cannot-claim-startable", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.149.1"},
+        "models": [{"modelSelector": "gpt-5.6-sol", "reasoningEfforts": ["medium"], "permissions": ["readOnly"]}],
+        "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "0.149.1", "effectiveModelEvidence": "argvOnly"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:bad", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "unknown-catalog-cannot-claim-startable", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+        "executable": {"pathDigest": "sha256:codex-path", "fileIdentityDigest": "sha256:codex-file", "cliVersion": "0.150.0"},
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": true, "blockedReason": null, "fingerprint": "sha256:bad", "observedAt": "2026-08-27T01:00:00Z"
+      }
+    },
+    {
+      "name": "fingerprint-mismatch-cannot-start", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:stale"},
+        "capability": {
+          "schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated",
+          "executable": {"pathDigest": "sha256:claude-path", "fileIdentityDigest": "sha256:claude-file", "cliVersion": "2.1.241"},
+          "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}],
+          "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"},
+          "canStart": true, "blockedReason": null, "fingerprint": "sha256:current", "observedAt": "2026-08-27T01:00:00Z"
+        },
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "run_bad", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0,
+        "barrier": null
+      }
+    },
+    {
+      "name": "capability-cannot-contain-secret-or-raw-field", "validator": "capabilitySnapshot",
+      "value": {
+        "schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null,
+        "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"},
+        "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:none", "observedAt": "2026-08-27T01:00:00Z", "authToken": "secret", "rawStderr": "debug"
+      }
+    },
+    {
+      "name": "active-stdin-and-resume-forbidden", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:unknown"},
+        "capability": {"schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null, "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"}, "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:unknown", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "codex", "modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "activeStdin", "resume": "vendorSession", "activeStdin": true},
+        "runId": null, "preflightOutcome": "notInstalled", "persistedRunCount": 0, "spawnCount": 0, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "public-reasoning-and-raw-output-forbidden", "validator": "publicEvent",
+      "value": {"schemaVersion": 1, "eventId": "event_02", "chatId": "chat_01", "runId": "run_01", "roleId": "planning", "kind": "status", "text": "진행 중", "reasoning": "private chain", "rawJson": {"toolArgs": []}, "createdAt": "2026-08-27T01:02:00Z"}
+    },
+    {
+      "name": "preflight-rejection-cannot-spawn-or-lock", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:unknown"},
+        "capability": {"schemaVersion": 1, "runtime": "codex", "platform": "darwin", "installationState": "notInstalled", "authState": "unknown", "executable": null, "models": [], "discovery": {"source": "unavailable", "verificationLevel": "unknown", "exactCliVersion": null, "effectiveModelEvidence": "unknown"}, "canStart": false, "blockedReason": "notInstalled", "fingerprint": "sha256:unknown", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "codex", "modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": null, "preflightOutcome": "notInstalled", "persistedRunCount": 0, "spawnCount": 1, "lockCount": 1, "barrier": null
+      }
+    },
+    {
+      "name": "started-run-requires-identity-barrier", "validator": "runStartTranscript",
+      "value": {
+        "schemaVersion": 1,
+        "request": {"chatId": "chat_01", "roleId": "planning", "inputMessageIds": ["message_01"], "expectedCapabilityFingerprint": "sha256:cap"},
+        "capability": {"schemaVersion": 1, "runtime": "claude-code", "platform": "darwin", "installationState": "installed", "authState": "authenticated", "executable": {"pathDigest": "sha256:path", "fileIdentityDigest": "sha256:file", "cliVersion": "2.1.241"}, "models": [{"modelSelector": "claude-opus-5", "reasoningEfforts": [], "permissions": ["readOnly"]}], "discovery": {"source": "exactVersionManifest", "verificationLevel": "measuredExactVersion", "exactCliVersion": "2.1.241", "effectiveModelEvidence": "measuredExactVersion"}, "canStart": true, "blockedReason": null, "fingerprint": "sha256:cap", "observedAt": "2026-08-27T01:00:00Z"},
+        "resolvedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+        "executionMode": {"invocation": "oneShot", "promptTransport": "serverResolvedMessages", "followUp": "nextRun", "resume": "disabled", "activeStdin": false},
+        "runId": "run_01", "preflightOutcome": "started", "persistedRunCount": 1, "spawnCount": 1, "lockCount": 0, "barrier": null
+      }
+    },
+    {
+      "name": "uncertain-termination-cannot-release-poison", "validator": "terminationTranscript",
+      "value": {"schemaVersion": 1, "runId": "run_02", "outcome": "recoveryRequired", "processesProvenGone": false, "poisoned": false, "writerLockState": "released", "chatState": "failed", "trackedProcesses": [{"pid": 4401, "startIdentityDigest": "sha256:start", "executablePathDigest": "sha256:path", "observedGone": false}], "evidenceDigest": "sha256:evidence", "observedAt": "2026-08-27T01:03:00Z"}
+    }
+  ]
+}

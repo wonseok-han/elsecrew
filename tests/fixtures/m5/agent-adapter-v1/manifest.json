@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "contract": {
+    "capabilities": [
+      "system.status", "app.prepareQuit", "project.open", "project.getTree", "project.createWorktree",
+      "project.close", "file.read", "file.save", "file.watch", "diff.getSummary", "diff.getFile",
+      "workspace.getTree", "workspace.close", "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+      "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat", "workspace.abandonPrepared",
+      "project.getRoleSettings", "project.updateRoleSettings", "chat.create", "chat.list", "chat.get",
+      "run.startFixture", "run.cancel", "recovery.list", "recovery.inspect", "recovery.markResolved",
+      "agent.getCapabilities", "run.startAgent"
+    ],
+    "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun"],
+    "actualAgentAdvertisedByCurrentG5": false,
+    "agentSmokeAdvertised": false,
+    "fixtureRunSemantics": "fakeOnly",
+    "actualRunPersistence": "separateAgentRunsLedger",
+    "executionMode": "oneShot",
+    "followUpMode": "nextRun",
+    "rendererLaunchFields": "forbidden",
+    "fingerprint": "sha256CanonicalCapabilitySnapshotWithoutFingerprintOrObservedAt",
+    "modelStartEvidence": ["runtimeVerified", "measuredExactVersion"],
+    "startOutcomes": [
+      "started", "platformUnsupported", "notInstalled", "installationIncomplete", "unsupportedVersion",
+      "notAuthenticated", "authExpired", "capabilityUnknown", "exactModelUnavailable",
+      "reasoningUnsupported", "permissionUnsupported", "profileChanged", "profileUnavailable",
+      "workspaceAbandoned", "recoveryBlocked", "chatStateBlocked", "runActive", "writerLocked"
+    ],
+    "capabilityBlockReasons": [
+      "platformUnsupported", "notInstalled", "installationIncomplete", "unsupportedVersion",
+      "notAuthenticated", "authExpired", "capabilityUnknown", "exactModelUnavailable"
+    ],
+    "argvOnlyCanStart": false,
+    "publicEvents": ["status", "question", "final"],
+    "preflightFailure": {"spawnCount": 0, "lockCount": 0},
+    "launcherBarrier": ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"],
+    "uncertainTermination": "recoveryRequiredAndPoisoned"
+  },
+  "casesFile": "cases.json"
+}

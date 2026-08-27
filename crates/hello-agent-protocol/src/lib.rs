@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{self, Display};
 
+pub mod agent_adapter_v1;
 pub mod lifecycle_v1;
 pub mod project_v1;
 pub mod run_recovery_v1;
@@ -43,7 +44,9 @@ pub const METHODS_V1: &[&str] = &[
     "chat.create",
     "chat.list",
     "chat.get",
+    "agent.getCapabilities",
     "run.startFixture",
+    "run.startAgent",
     "run.startAgentSmoke",
     "run.cancel",
     "recovery.list",
