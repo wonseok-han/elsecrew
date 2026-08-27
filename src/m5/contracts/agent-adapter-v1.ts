@@ -2,6 +2,7 @@ import { sha256FileVersionV1 } from "./file-v1.ts";
 import {
   METHODS_V1,
   validateAgentPublicEventPayloadV1,
+  validateAgentRunStateChangedPayloadV1,
   type ReadyPayloadV1,
 } from "./protocol-v1.ts";
 import {
@@ -64,6 +65,9 @@ export const AGENT_CAPABILITY_BLOCK_REASONS_V1 = [
   "notAuthenticated", "authExpired", "capabilityUnknown", "exactModelUnavailable",
 ] as const;
 export const AGENT_PUBLIC_EVENT_KINDS_V1 = ["status", "question", "final"] as const;
+export const AGENT_RUN_STATE_EVENT_STATES_V1 = [
+  "running", "succeeded", "failed", "canceled", "recoveryRequired",
+] as const;
 
 export type AgentInstallationStateV1 = (typeof AGENT_INSTALLATION_STATES_V1)[number];
 export type AgentAuthStateV1 = (typeof AGENT_AUTH_STATES_V1)[number];
@@ -221,6 +225,14 @@ export interface AgentPublicEventV1 extends AgentRunBindingV1 {
   kind: (typeof AGENT_PUBLIC_EVENT_KINDS_V1)[number];
   text: string;
   createdAt: string;
+}
+
+export interface AgentRunStateChangedV1 {
+  schemaVersion: 1;
+  eventId: string;
+  run: AgentRunRecordV1 & {
+    state: (typeof AGENT_RUN_STATE_EVENT_STATES_V1)[number];
+  };
 }
 
 export interface AgentTerminationTranscriptV1 {
@@ -441,6 +453,12 @@ export function validateAgentPublicEventV1(value: unknown): AgentPublicEventV1 {
   return validateAgentPublicEventPayloadV1(value) as AgentPublicEventV1;
 }
 
+/** Canonical immutable-ledger amplification unit: sorted compact JSON UTF-8 bytes. */
+export function agentPublicLedgerRecordBytesV1(value: unknown): number {
+  const event = validateAgentPublicEventV1(value);
+  return new TextEncoder().encode(JSON.stringify(canonicalizeFingerprintValue(event))).length;
+}
+
 export function validateAgentPublicEventAgainstRunV1(
   value: unknown,
   expectedValue: unknown,
@@ -448,6 +466,29 @@ export function validateAgentPublicEventAgainstRunV1(
   const event = validateAgentPublicEventV1(value);
   const expected = validateAgentRunBindingV1(expectedValue);
   assertSameAgentRunBinding(expected, event, "agent public event");
+  return event;
+}
+
+export function validateAgentRunStateChangedV1(value: unknown): AgentRunStateChangedV1 {
+  return validateAgentRunStateChangedPayloadV1(value) as unknown as AgentRunStateChangedV1;
+}
+
+export function validateAgentRunStateChangedAgainstAcceptedV1(
+  value: unknown,
+  expectedValue: unknown,
+): AgentRunStateChangedV1 {
+  const event = validateAgentRunStateChangedV1(value);
+  const expected = validateAgentRunAcceptedV1(expectedValue);
+  assertSameAgentRunBinding(expected, {
+    chatId: event.run.chatId,
+    taskId: event.run.taskId,
+    projectId: event.run.projectId,
+    worktreeId: event.run.worktreeId,
+    workspaceIdentity: event.run.workspaceIdentity,
+    runId: event.run.runId,
+    roleId: event.run.selectedProfile.roleId,
+    capabilityFingerprint: event.run.capabilityFingerprint,
+  }, "agent run state event");
   return event;
 }
 

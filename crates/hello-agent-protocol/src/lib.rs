@@ -17,6 +17,14 @@ pub const APP_SCHEMA_VERSION: u32 = 1;
 pub const MAX_CONTROL_LINE_BYTES: usize = 1024 * 1024;
 pub const MAX_TEXT_CHUNK_BYTES: usize = 256 * 1024;
 pub const MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
+pub const AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1: usize = 256;
+pub const AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1: usize = 1024 * 1024;
+pub const AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1: usize = 16 * 1024 * 1024;
+pub const AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1: usize = 32;
+pub const AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1: usize = 1024;
+pub const AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1: usize = 8192;
+pub const AGENT_STREAM_IDS_PER_SESSION_MAX_V1: usize = 1024;
+pub const PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1: usize = 4096;
 
 pub const METHODS_V1: &[&str] = &[
     "system.status",
@@ -70,6 +78,7 @@ pub const EVENTS_V1: &[&str] = &[
     "workspace.changed",
     "workspace.blob.chunk",
     "agent.publicEvent",
+    "agent.runStateChanged",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +199,9 @@ pub struct ProtocolSessionV1 {
     request_ids: HashSet<String>,
     response_ids: HashSet<String>,
     stream_sequences: HashMap<String, u64>,
+    agent_run_streams: HashMap<String, String>,
+    agent_stream_runs: HashMap<String, String>,
+    agent_event_ids: HashSet<String>,
 }
 
 impl ProtocolSessionV1 {
@@ -254,6 +266,74 @@ impl ProtocolSessionV1 {
                         "stream {} expected seq {expected}, got {}",
                         event.stream_id, event.seq
                     )));
+                }
+                if !self.stream_sequences.contains_key(&event.stream_id)
+                    && self.stream_sequences.len() >= PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1
+                {
+                    return Err(ProtocolError::new(
+                        "protocol streamId session budget exceeded",
+                    ));
+                }
+                if matches!(
+                    event.event.as_str(),
+                    "agent.publicEvent" | "agent.runStateChanged"
+                ) {
+                    let run_id = event.run_id.as_ref().ok_or_else(|| {
+                        ProtocolError::new(
+                            "actual-agent session event requires validated runId and eventId",
+                        )
+                    })?;
+                    let event_id = event
+                        .payload
+                        .get("eventId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            ProtocolError::new(
+                                "actual-agent session event requires validated runId and eventId",
+                            )
+                        })?;
+                    if self
+                        .agent_run_streams
+                        .get(run_id)
+                        .is_some_and(|known| known != &event.stream_id)
+                        || self
+                            .agent_stream_runs
+                            .get(&event.stream_id)
+                            .is_some_and(|known| known != run_id)
+                    {
+                        return Err(ProtocolError::new(
+                            "stream changed actual-agent run binding; one run must share one exclusive streamId",
+                        ));
+                    }
+                    if !self.agent_run_streams.contains_key(run_id)
+                        && self.agent_run_streams.len() >= AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1
+                    {
+                        return Err(ProtocolError::new(
+                            "actual-agent runId session budget exceeded",
+                        ));
+                    }
+                    if !self.agent_stream_runs.contains_key(&event.stream_id)
+                        && self.agent_stream_runs.len() >= AGENT_STREAM_IDS_PER_SESSION_MAX_V1
+                    {
+                        return Err(ProtocolError::new(
+                            "actual-agent streamId session budget exceeded",
+                        ));
+                    }
+                    if self.agent_event_ids.contains(event_id) {
+                        return Err(ProtocolError::new(
+                            "actual-agent eventId was reused within a session",
+                        ));
+                    }
+                    if self.agent_event_ids.len() >= AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1 {
+                        return Err(ProtocolError::new(
+                            "actual-agent eventId session budget exceeded",
+                        ));
+                    }
+                    self.agent_run_streams
+                        .insert(run_id.clone(), event.stream_id.clone());
+                    self.agent_stream_runs
+                        .insert(event.stream_id.clone(), run_id.clone());
+                    self.agent_event_ids.insert(event_id.to_string());
                 }
                 self.stream_sequences
                     .insert(event.stream_id.clone(), event.seq);
@@ -471,6 +551,26 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                 {
                     return Err(ProtocolError::new(
                         "agent.publicEvent envelope identity does not match its payload",
+                    ));
+                }
+            }
+            if event.event == "agent.runStateChanged" {
+                let (Some(chat_id), Some(task_id), Some(run_id)) =
+                    (&event.chat_id, &event.task_id, &event.run_id)
+                else {
+                    return Err(ProtocolError::new(
+                        "agent.runStateChanged requires explicit chatId, taskId, and runId",
+                    ));
+                };
+                let state_event =
+                    agent_adapter_v1::validate_agent_run_state_changed_v1(&event.payload)
+                        .map_err(|error| ProtocolError::new(error.to_string()))?;
+                if state_event.run.chat_id != *chat_id
+                    || state_event.run.task_id != *task_id
+                    || state_event.run.run_id != *run_id
+                {
+                    return Err(ProtocolError::new(
+                        "agent.runStateChanged envelope identity does not match its payload",
                     ));
                 }
             }

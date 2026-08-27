@@ -22,6 +22,7 @@ struct ContractFixture {
     max_control_line_bytes: usize,
     max_text_chunk_bytes: usize,
     max_sequence: u64,
+    protocol_stream_ids_per_session: usize,
     methods: Vec<String>,
     events: Vec<String>,
     bridge_methods: Vec<String>,
@@ -72,6 +73,10 @@ fn rust_decodes_and_byte_matches_canonical_protocol_v1_transcripts() {
     );
     assert_eq!(manifest.contract.max_text_chunk_bytes, MAX_TEXT_CHUNK_BYTES);
     assert_eq!(manifest.contract.max_sequence, MAX_SEQUENCE);
+    assert_eq!(
+        manifest.contract.protocol_stream_ids_per_session,
+        PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1
+    );
     assert!(METHODS_V1
         .iter()
         .copied()
@@ -148,6 +153,38 @@ fn rust_enforces_generated_control_and_text_boundaries() {
             fixture.name
         );
     }
+}
+
+#[test]
+fn rust_requires_one_exclusive_stream_and_unique_event_ids_per_actual_run() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/m5/protocol-v1/valid/agent-run-state-changed.jsonl");
+    let source = fs::read(root).expect("read state event fixture");
+    let envelopes: Vec<_> = jsonl_lines(&source)
+        .into_iter()
+        .map(|line| decode_jsonl(line).expect("decode fixture"))
+        .collect();
+    let mut valid = ProtocolSessionV1::default();
+    for envelope in &envelopes {
+        valid.observe(envelope).expect("valid shared stream");
+    }
+
+    let mut mismatched = ProtocolSessionV1::default();
+    mismatched.observe(&envelopes[0]).expect("ready");
+    mismatched.observe(&envelopes[1]).expect("public event");
+    let EnvelopeV1::Event(state) = &envelopes[2] else {
+        panic!("state fixture must be an event")
+    };
+    let mut wrong_stream = state.clone();
+    wrong_stream.stream_id = "stream_agent_run_other".to_string();
+    wrong_stream.seq = 1;
+    assert!(mismatched
+        .observe(&EnvelopeV1::Event(wrong_stream))
+        .is_err());
+
+    let mut replay = state.clone();
+    replay.seq = 3;
+    assert!(valid.observe(&EnvelopeV1::Event(replay)).is_err());
 }
 
 fn validate_invalid_fixture(root: &Path, fixture: &InvalidCase) -> Result<(), ProtocolError> {

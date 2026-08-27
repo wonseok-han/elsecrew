@@ -12,6 +12,7 @@
       "agent.getCapabilities", "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent"
     ],
     "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun", "cancelAgentRun", "inspectAgentRecovery", "resolveAgentRecovery", "onAgentPublicEvent"],
+    "g5bBridgeMethodsAdded": ["onAgentRunStateChanged"],
     "actualAgentAdvertisedByCurrentG5": false,
     "agentSmokeAdvertised": false,
     "fixtureRunSemantics": "fakeOnly",
@@ -32,6 +33,7 @@
     "actualRunIdNamespace": "agent_run_",
     "actualRecoveryIdNamespace": "agent_recovery_",
     "actualEventIdNamespace": "agent_event_",
+    "agentStateEventIdNamespace": "agent_state_event_",
     "modelStartEvidence": ["runtimeVerified", "measuredExactVersion"],
     "startOutcomes": [
       "started", "platformUnsupported", "notInstalled", "installationIncomplete", "unsupportedVersion",
@@ -49,10 +51,32 @@
     "publicEventEnvelopeBindingFields": ["chatId", "taskId", "runId"],
     "acceptedBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint"],
     "publicEventBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"],
+    "runStateProtocolEvent": "agent.runStateChanged",
+    "runStatePayloadFields": ["schemaVersion", "eventId", "run"],
+    "runStateWireStates": ["running", "succeeded", "failed", "canceled", "recoveryRequired"],
+    "runStateEnvelopeBindingFields": ["chatId", "taskId", "runId"],
+    "runStateAcceptedBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"],
+    "runStateStreamSemantics": "sameExclusivePerRunStreamAsAgentPublicEvent",
+    "rendererRunStateSemantics": "hydrationTriggerOnly",
+    "resourceLimits": {
+      "publicEventsPerRun": 256,
+      "publicTextBytesPerRun": 1048576,
+      "immutablePublicLedgerBytesPerRun": 16777216,
+      "activeActualRunsPerSession": 32,
+      "seenActualRunIdsPerSession": 1024,
+      "seenActualEventIdsPerSession": 8192,
+      "actualStreamIdsPerSession": 1024,
+      "protocolStreamIdsPerSession": 4096,
+      "publicTextBytesDefinition": "sumUtf8BytesOfAgentPublicEventTextPerRun",
+      "immutablePublicLedgerBytesDefinition": "sumUtf8BytesOfRecursiveAsciiKeySortedCompactJsonAgentPublicEventRecordsPerRun;arrayOrderPreserved;explicitNullIncluded",
+      "canonicalPublicLedgerFixture": "bounded-public-status-event",
+      "canonicalPublicLedgerRecordBytes": 422
+    },
     "chatDetailCapabilityDiscriminator": "agentRunsPresence",
     "preflightFailure": {"spawnCount": 0, "lockCount": 0},
     "launcherBarrier": ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"],
     "uncertainTermination": "recoveryRequiredAndPoisoned"
   },
-  "casesFile": "cases.json"
+  "casesFile": "cases.json",
+  "g5bCasesFile": "g5b-terminal-budget-cases.json"
 }

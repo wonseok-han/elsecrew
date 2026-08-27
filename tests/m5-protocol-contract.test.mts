@@ -13,6 +13,7 @@ import {
   MAX_SEQUENCE,
   MAX_TEXT_CHUNK_BYTES,
   METHODS_V1,
+  PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1,
   parsePrepareQuitResult,
   parseReadyPayload,
   PROTOCOL_VERSION,
@@ -53,6 +54,7 @@ interface FixtureManifest {
     maxControlLineBytes: number;
     maxTextChunkBytes: number;
     maxSequence: number;
+    protocolStreamIdsPerSession: number;
     methods: string[];
     events: string[];
     bridgeMethods: string[];
@@ -78,6 +80,7 @@ test("TypeScript가 canonical protocol v1 transcript를 decode하고 동일 byte
       maxControlLineBytes: MAX_CONTROL_LINE_BYTES,
       maxTextChunkBytes: MAX_TEXT_CHUNK_BYTES,
       maxSequence: MAX_SEQUENCE,
+      protocolStreamIdsPerSession: PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1,
       methods: [...METHODS_V1],
       events: [...EVENTS_V1],
       bridgeMethods: [...M5_BRIDGE_V1_METHODS],

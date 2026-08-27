@@ -4,6 +4,14 @@ export const APP_SCHEMA_VERSION = 1 as const;
 export const MAX_CONTROL_LINE_BYTES = 1024 * 1024;
 export const MAX_TEXT_CHUNK_BYTES = 256 * 1024;
 export const MAX_SEQUENCE = Number.MAX_SAFE_INTEGER;
+export const AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 = 256 as const;
+export const AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 = 1024 * 1024;
+export const AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1 = 16 * 1024 * 1024;
+export const AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1 = 32 as const;
+export const AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1 = 1024 as const;
+export const AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1 = 8192 as const;
+export const AGENT_STREAM_IDS_PER_SESSION_MAX_V1 = 1024 as const;
+export const PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1 = 4096 as const;
 
 export const METHODS_V1 = [
   "system.status",
@@ -57,6 +65,7 @@ export const EVENTS_V1 = [
   "workspace.changed",
   "workspace.blob.chunk",
   "agent.publicEvent",
+  "agent.runStateChanged",
 ] as const;
 
 export type MethodV1 = (typeof METHODS_V1)[number];
@@ -125,6 +134,9 @@ export class ProtocolSessionV1 {
   readonly #requestIds = new Set<string>();
   readonly #responseIds = new Set<string>();
   readonly #streamSequences = new Map<string, number>();
+  readonly #agentRunStreams = new Map<string, string>();
+  readonly #agentStreamRuns = new Map<string, string>();
+  readonly #agentEventIds = new Set<string>();
 
   observe(envelope: EnvelopeV1): void {
     if (!this.#readyReceived) {
@@ -164,6 +176,34 @@ export class ProtocolSessionV1 {
     const expected = (this.#streamSequences.get(envelope.streamId) ?? 0) + 1;
     if (envelope.seq !== expected) {
       fail(`stream ${envelope.streamId} expected seq ${expected}, got ${envelope.seq}`);
+    }
+    if (!this.#streamSequences.has(envelope.streamId) && this.#streamSequences.size >= PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1) {
+      fail("protocol streamId session budget exceeded");
+    }
+    if (envelope.event === "agent.publicEvent" || envelope.event === "agent.runStateChanged") {
+      const runId = envelope.runId;
+      const eventId = envelope.payload.eventId;
+      if (typeof runId !== "string" || typeof eventId !== "string") {
+        fail("actual-agent session event requires validated runId and eventId");
+      }
+      const knownStream = this.#agentRunStreams.get(runId);
+      const knownRun = this.#agentStreamRuns.get(envelope.streamId);
+      if ((knownStream !== undefined && knownStream !== envelope.streamId) || (knownRun !== undefined && knownRun !== runId)) {
+        fail("stream changed actual-agent run binding; one run must share one exclusive streamId");
+      }
+      if (knownStream === undefined && this.#agentRunStreams.size >= AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1) {
+        fail("actual-agent runId session budget exceeded");
+      }
+      if (knownRun === undefined && this.#agentStreamRuns.size >= AGENT_STREAM_IDS_PER_SESSION_MAX_V1) {
+        fail("actual-agent streamId session budget exceeded");
+      }
+      if (this.#agentEventIds.has(eventId)) fail("actual-agent eventId was reused within a session");
+      if (this.#agentEventIds.size >= AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1) {
+        fail("actual-agent eventId session budget exceeded");
+      }
+      this.#agentRunStreams.set(runId, envelope.streamId);
+      this.#agentStreamRuns.set(envelope.streamId, runId);
+      this.#agentEventIds.add(eventId);
     }
     this.#streamSequences.set(envelope.streamId, envelope.seq);
   }
@@ -379,6 +419,19 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
       fail("agent.publicEvent envelope identity does not match its payload");
     }
   }
+  if (object.event === "agent.runStateChanged") {
+    if (!("chatId" in object) || !("taskId" in object) || !("runId" in object)) {
+      fail("agent.runStateChanged requires explicit chatId, taskId, and runId");
+    }
+    const stateEvent = validateAgentRunStateChangedPayloadV1(payload);
+    if (
+      stateEvent.run.chatId !== object.chatId ||
+      stateEvent.run.taskId !== object.taskId ||
+      stateEvent.run.runId !== object.runId
+    ) {
+      fail("agent.runStateChanged envelope identity does not match its payload");
+    }
+  }
   if (object.event === "workspace.changed") {
     exactKeys(payload, [
       "chatId",
@@ -455,6 +508,67 @@ export function validateAgentPublicEventPayloadV1(
     fail("agent public event createdAt must be an RFC 3339 UTC second timestamp");
   }
   return payload as unknown as { chatId: string; taskId: string; runId: string };
+}
+
+export function validateAgentRunStateChangedPayloadV1(
+  value: unknown,
+): { eventId: string; run: Record<string, unknown> & { chatId: string; taskId: string; runId: string; selectedProfile: Record<string, unknown> & { roleId: string }; capabilityFingerprint: string } } {
+  const payload = requireJsonObject(value, "agent run state event payload");
+  exactKeys(payload, ["schemaVersion", "eventId", "run"]);
+  if (payload.schemaVersion !== 1) fail("agent run state event schemaVersion must be 1");
+  requireBoundedId(payload.eventId, "agent run state event eventId");
+  if (!(payload.eventId as string).startsWith("agent_state_event_")) {
+    fail("agent run state event eventId must use the state-event namespace");
+  }
+  const run = requireJsonObject(payload.run, "agent run state event run");
+  exactKeys(run, [
+    "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
+    "selectedProfile", "source", "capabilityFingerprint", "state", "stage", "terminationOutcome",
+    "createdAt", "updatedAt",
+  ]);
+  if (run.schemaVersion !== 1) fail("agent run record schemaVersion must be 1");
+  for (const name of ["runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) {
+    requireBoundedId(run[name], `agent run state event run.${name}`);
+  }
+  if (!(run.runId as string).startsWith("agent_run_")) {
+    fail("agent run state event runId must use the actual-agent run namespace");
+  }
+  const profile = requireJsonObject(run.selectedProfile, "agent run state event selectedProfile");
+  exactKeys(profile, ["roleId", "runtime", "modelSelector", "reasoningEffort", "permission"]);
+  if (!( ["planning", "coding", "review"] as const).includes(profile.roleId as never)) fail("agent run state event roleId is invalid");
+  if (!( ["codex", "claude-code"] as const).includes(profile.runtime as never)) fail("agent run state event runtime is invalid");
+  if (typeof profile.modelSelector !== "string" || profile.modelSelector.trim() === "" || utf8Bytes(profile.modelSelector) > 256) {
+    fail("agent run state event modelSelector must be nonempty and bounded");
+  }
+  if (profile.reasoningEffort !== null && (typeof profile.reasoningEffort !== "string" || profile.reasoningEffort.trim() === "" || utf8Bytes(profile.reasoningEffort) > 64)) {
+    fail("agent run state event reasoningEffort must be null or bounded");
+  }
+  if (!( ["readOnly", "workspaceWrite"] as const).includes(profile.permission as never)) fail("agent run state event permission is invalid");
+  if (run.source !== "actualAgent") fail("agent run state event source must be actualAgent");
+  if (typeof run.capabilityFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(run.capabilityFingerprint)) {
+    fail("agent run state event capabilityFingerprint must be an exact lowercase SHA-256 digest");
+  }
+  const wireStates = ["running", "succeeded", "failed", "canceled", "recoveryRequired"] as const;
+  if (!wireStates.includes(run.state as never)) fail("agent run state event state is not wire-visible");
+  const stages = ["planning", "implementing", "verifying"] as const;
+  if (!stages.includes(run.stage as never)) fail("agent run state event stage is invalid");
+  const expectedStage = { planning: "planning", coding: "implementing", review: "verifying" } as const;
+  if (run.stage !== expectedStage[profile.roleId as keyof typeof expectedStage]) fail("agent run state event stage does not match selected role snapshot");
+  const active = run.state === "running";
+  if (active) {
+    if (run.terminationOutcome !== null) fail("active and terminal run evidence must agree");
+  } else if (!( ["cleanExit", "recoveryRequired"] as const).includes(run.terminationOutcome as never)) {
+    fail("active and terminal run evidence must agree");
+  }
+  if ((run.state === "recoveryRequired") !== (run.terminationOutcome === "recoveryRequired")) {
+    fail("recoveryRequired run must keep recovery termination evidence");
+  }
+  for (const name of ["createdAt", "updatedAt"] as const) {
+    if (typeof run[name] !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(run[name] as string)) {
+      fail(`agent run state event ${name} must be an RFC 3339 UTC second timestamp`);
+    }
+  }
+  return payload as unknown as { eventId: string; run: Record<string, unknown> & { chatId: string; taskId: string; runId: string; selectedProfile: Record<string, unknown> & { roleId: string }; capabilityFingerprint: string } };
 }
 
 function exactKeys(object: Record<string, unknown>, allowed: readonly string[]): void {

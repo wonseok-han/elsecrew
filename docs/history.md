@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal notification·resource budget 계약)
+
+- **additive terminal 통지**: protocol v1에 `agent.runStateChanged`를 예약하고 payload를 exact `{schemaVersion,eventId,run}`으로 고정했다. event ID는 `agent_state_event_`, run은 전체 `AgentRunRecordV1`이며 envelope chat/task/run과 accepted의 project/worktree/workspace/role/fingerprint까지 exact 결속한다. wire state는 `running|succeeded|failed|canceled|recoveryRequired`만 허용하고 `preparing|cancelling`, active/terminal evidence 불일치, extra/private/raw field를 양언어에서 거부한다. V5 bridge listener는 직접 표시 데이터가 아니라 durable `chat.get` 재수화 trigger다.
+- **한도·계측 단위**: run당 공개 event 256개·공개 text UTF-8 합계 1 MiB·immutable public ledger 16 MiB, session당 active actual run 32·seen run ID 1024·seen event ID 8192·actual stream ID 1024·전체 protocol stream ID 4096을 Rust/TypeScript/golden에 같은 수치로 고정했다. ledger bytes는 검증된 `AgentPublicEventV1` 각각을 재귀 ASCII key 정렬·compact JSON·UTF-8로 잰 합계이며 canonical fixture는 422 bytes다. protocol session은 actual public/state event가 한 run당 같은 전용 stream을 쓰고 event ID를 재사용하지 못하게 한다.
+- **호환·검증**: 기존 exact G5/G5A capability/method 배열과 일반 `--stdio` 의미는 변경하지 않았다. focused Node 17개, 전체 Node 154개, TypeScript no-emit, Rust protocol 29개, owned Rust rustfmt, 기존 lint 세 종류만 명시적으로 제외한 scoped protocol clippy, `git diff --check`를 통과했다. strict clippy 원문은 변경 전부터 있던 `run_recovery_v1.rs`·`workspace_v1.rs` needless lifetime 2건과 `lib.rs` collapsible-if 1건 때문에 실패하며 범위 밖 정리는 하지 않았다.
+- **다음 할 일**: 계약 commit을 독립 리뷰한 뒤 Rust sidecar가 terminal persistence commit 이후 같은 stream으로 event를 방출하고 예산 초과를 fail-closed 처리하며, Electron이 session registry 한도를 적용하고 renderer는 event를 hydration trigger로만 소비해야 한다. 실제 CLI·인증·model·사용자 프로젝트는 실행하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 수직 통합 게이트)
 
 - **통합 경계**: contract·Rust fake runtime·Electron V4·renderer 변경을 독립 리뷰 뒤 통합했다. 테스트 전용 `--stdio-agent-fixture`만 exact G5A를 광고하고 제품 Electron이 실행하는 일반 `--stdio`는 exact G5를 유지한다. fake actual-agent의 full-identity `agent.publicEvent`만 고정 IPC로 전달하며 raw/private carrier와 legacy/actual recovery 원장은 renderer 전에 fail-closed 분리한다.

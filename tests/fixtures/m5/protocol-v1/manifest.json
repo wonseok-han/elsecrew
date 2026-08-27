@@ -7,6 +7,7 @@
     "maxControlLineBytes": 1048576,
     "maxTextChunkBytes": 262144,
     "maxSequence": 9007199254740991,
+    "protocolStreamIdsPerSession": 4096,
     "methods": [
       "system.status",
       "app.prepareQuit",
@@ -57,7 +58,8 @@
       "blob.chunk",
       "workspace.changed",
       "workspace.blob.chunk",
-      "agent.publicEvent"
+      "agent.publicEvent",
+      "agent.runStateChanged"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
     "workspaceEventAddressing": "payload.chatId+projectId+worktreeId+workspaceIdentity"
@@ -83,6 +85,9 @@
     {
       "file": "valid/agent-public-event.jsonl",
       "observeSession": false
+    },
+    {
+      "file": "valid/agent-run-state-changed.jsonl"
     }
   ],
   "invalid": [
@@ -99,6 +104,10 @@
     { "file": "invalid/agent-public-event-envelope-chat-mismatch.jsonl", "validator": "transcript" },
     { "file": "invalid/agent-public-event-envelope-task-mismatch.jsonl", "validator": "transcript" },
     { "file": "invalid/agent-public-event-envelope-run-mismatch.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-run-state-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-run-state-envelope-chat-mismatch.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-run-state-envelope-task-mismatch.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-run-state-envelope-run-mismatch.jsonl", "validator": "transcript" },
     { "file": "invalid/workspace-event-missing-chat-id.jsonl", "validator": "transcript" },
     { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
     { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },

@@ -10,6 +10,7 @@ struct Manifest {
     protocol_version: u32,
     contract: Contract,
     cases_file: String,
+    g5b_cases_file: String,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +85,39 @@ struct BindingCase {
     kind: String,
     valid: bool,
     expected: Value,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+struct G5BCases {
+    accepted: Value,
+    valid: Vec<StateEventCase>,
+    invalid: Vec<MutationCase>,
+    bindings: Vec<MutationCase>,
+}
+
+#[derive(Deserialize)]
+struct StateEventCase {
+    name: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MutationCase {
+    name: String,
+    base_valid_name: String,
+    pointer: Option<String>,
+    #[serde(default)]
+    value: Value,
+    #[serde(default)]
+    changes: Vec<MutationChange>,
+    valid: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct MutationChange {
+    pointer: String,
     value: Value,
 }
 
@@ -289,6 +323,125 @@ fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
     );
 }
 
+#[test]
+fn rust_accepts_every_wire_state_and_rejects_g5b_fail_closed_cases() {
+    let (root, manifest) = manifest();
+    let cases: G5BCases = read_json(root.join(&manifest.g5b_cases_file));
+    let accepted: AgentRunAcceptedV1 =
+        serde_json::from_value(cases.accepted.clone()).expect("decode accepted run");
+    let states: Vec<_> = cases
+        .valid
+        .iter()
+        .map(|entry| {
+            validate_agent_run_state_changed_against_accepted_v1(&entry.value, &accepted)
+                .unwrap_or_else(|error| panic!("valid fixture {} failed: {error}", entry.name))
+                .run
+                .state
+        })
+        .collect();
+    assert_eq!(states, AGENT_RUN_STATE_EVENT_STATES_V1);
+    for entry in &cases.invalid {
+        assert!(
+            validate_agent_run_state_changed_v1(&materialize_g5b(&cases, entry)).is_err(),
+            "invalid fixture passed: {}",
+            entry.name
+        );
+    }
+    for entry in &cases.bindings {
+        let result = validate_agent_run_state_changed_against_accepted_v1(
+            &materialize_g5b(&cases, entry),
+            &accepted,
+        );
+        assert_eq!(result.is_ok(), entry.valid == Some(true), "{}", entry.name);
+    }
+}
+
+#[test]
+fn rust_matches_g5b_resource_limits_and_canonical_public_ledger_bytes() {
+    let (root, manifest) = manifest();
+    let raw: Value = read_json(root.join("manifest.json"));
+    let contract = &raw["contract"];
+    assert_eq!(contract["agentStateEventIdNamespace"], "agent_state_event_");
+    assert_eq!(
+        contract["runStatePayloadFields"],
+        serde_json::json!(["schemaVersion", "eventId", "run"])
+    );
+    assert_eq!(
+        contract["runStateWireStates"],
+        serde_json::json!(AGENT_RUN_STATE_EVENT_STATES_V1)
+    );
+    assert_eq!(
+        contract["runStateEnvelopeBindingFields"],
+        serde_json::json!(["chatId", "taskId", "runId"])
+    );
+    assert_eq!(
+        contract["runStateAcceptedBindingFields"],
+        serde_json::json!([
+            "chatId",
+            "taskId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "runId",
+            "roleId",
+            "capabilityFingerprint"
+        ])
+    );
+    assert_eq!(
+        contract["rendererRunStateSemantics"],
+        "hydrationTriggerOnly"
+    );
+    let limits = &raw["contract"]["resourceLimits"];
+    assert_eq!(
+        limits["publicEventsPerRun"],
+        crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1
+    );
+    assert_eq!(
+        limits["publicTextBytesPerRun"],
+        crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1
+    );
+    assert_eq!(
+        limits["immutablePublicLedgerBytesPerRun"],
+        crate::AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1
+    );
+    assert_eq!(
+        limits["activeActualRunsPerSession"],
+        crate::AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1
+    );
+    assert_eq!(
+        limits["seenActualRunIdsPerSession"],
+        crate::AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1
+    );
+    assert_eq!(
+        limits["seenActualEventIdsPerSession"],
+        crate::AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1
+    );
+    assert_eq!(
+        limits["actualStreamIdsPerSession"],
+        crate::AGENT_STREAM_IDS_PER_SESSION_MAX_V1
+    );
+    assert_eq!(
+        limits["protocolStreamIdsPerSession"],
+        crate::PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1
+    );
+    assert_eq!(
+        limits["immutablePublicLedgerBytesDefinition"],
+        "sumUtf8BytesOfRecursiveAsciiKeySortedCompactJsonAgentPublicEventRecordsPerRun;arrayOrderPreserved;explicitNullIncluded"
+    );
+    let cases: Cases = read_json(root.join(&manifest.cases_file));
+    let public_event = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == limits["canonicalPublicLedgerFixture"])
+        .expect("canonical public ledger fixture");
+    assert_eq!(
+        agent_public_ledger_record_bytes_v1(&public_event.value).expect("ledger bytes"),
+        limits["canonicalPublicLedgerRecordBytes"]
+            .as_u64()
+            .expect("ledger bytes") as usize
+    );
+}
+
 fn manifest() -> (PathBuf, Manifest) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -312,4 +465,37 @@ fn ready(capabilities: &[&str]) -> Value {
         "capabilities": capabilities,
         "sidecarInstanceId": "sidecar_g5a_fixture"
     })
+}
+
+fn materialize_g5b(cases: &G5BCases, mutation: &MutationCase) -> Value {
+    let mut value = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == mutation.base_valid_name)
+        .unwrap_or_else(|| panic!("missing base fixture {}", mutation.base_valid_name))
+        .value
+        .clone();
+    if let Some(pointer) = &mutation.pointer {
+        set_json_pointer(&mut value, pointer, mutation.value.clone());
+    }
+    for change in &mutation.changes {
+        set_json_pointer(&mut value, &change.pointer, change.value.clone());
+    }
+    value
+}
+
+fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) {
+    let (parent, key) = pointer
+        .rsplit_once('/')
+        .unwrap_or_else(|| panic!("invalid JSON pointer {pointer}"));
+    let target = if parent.is_empty() {
+        root
+    } else {
+        root.pointer_mut(parent)
+            .unwrap_or_else(|| panic!("invalid JSON pointer parent {parent}"))
+    };
+    target
+        .as_object_mut()
+        .unwrap_or_else(|| panic!("JSON pointer parent must be an object: {parent}"))
+        .insert(key.to_string(), value);
 }

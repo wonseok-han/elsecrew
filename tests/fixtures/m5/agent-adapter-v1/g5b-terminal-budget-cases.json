@@ -1,0 +1,97 @@
+{
+  "accepted": {
+    "schemaVersion": 1,
+    "runId": "agent_run_01",
+    "chatId": "chat_01",
+    "taskId": "task_01",
+    "projectId": "project_01",
+    "worktreeId": "worktree_01",
+    "workspaceIdentity": "workspace_01",
+    "roleId": "planning",
+    "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3",
+    "state": "preparing"
+  },
+  "valid": [
+    {
+      "name": "running-state-notifies-hydration",
+      "value": {
+        "schemaVersion": 1,
+        "eventId": "agent_state_event_running_01",
+        "run": {
+          "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+          "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+          "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "running", "stage": "planning",
+          "terminationOutcome": null, "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:02:00Z"
+        }
+      }
+    },
+    {
+      "name": "succeeded-state-notifies-hydration",
+      "value": {
+        "schemaVersion": 1, "eventId": "agent_state_event_succeeded_01",
+        "run": {
+          "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+          "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+          "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "succeeded", "stage": "planning",
+          "terminationOutcome": "cleanExit", "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:03:00Z"
+        }
+      }
+    },
+    {
+      "name": "failed-state-notifies-hydration",
+      "value": {
+        "schemaVersion": 1, "eventId": "agent_state_event_failed_01",
+        "run": {
+          "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+          "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+          "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "failed", "stage": "planning",
+          "terminationOutcome": "cleanExit", "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:03:00Z"
+        }
+      }
+    },
+    {
+      "name": "canceled-state-notifies-hydration",
+      "value": {
+        "schemaVersion": 1, "eventId": "agent_state_event_canceled_01",
+        "run": {
+          "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+          "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+          "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "canceled", "stage": "planning",
+          "terminationOutcome": "cleanExit", "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:03:00Z"
+        }
+      }
+    },
+    {
+      "name": "recovery-required-state-notifies-hydration",
+      "value": {
+        "schemaVersion": 1, "eventId": "agent_state_event_recovery_01",
+        "run": {
+          "schemaVersion": 1, "runId": "agent_run_01", "chatId": "chat_01", "taskId": "task_01", "projectId": "project_01", "worktreeId": "worktree_01", "workspaceIdentity": "workspace_01",
+          "selectedProfile": {"roleId": "planning", "runtime": "claude-code", "modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+          "source": "actualAgent", "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3", "state": "recoveryRequired", "stage": "planning",
+          "terminationOutcome": "recoveryRequired", "createdAt": "2026-08-27T01:01:00Z", "updatedAt": "2026-08-27T01:03:00Z"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {"name": "wrong-state-event-namespace", "baseValidName": "running-state-notifies-hydration", "pointer": "/eventId", "value": "agent_event_legacy_01"},
+    {"name": "preparing-is-not-wire-visible", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/state", "value": "preparing"},
+    {"name": "cancelling-is-not-wire-visible", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/state", "value": "cancelling"},
+    {"name": "active-run-cannot-have-terminal-evidence", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/terminationOutcome", "value": "cleanExit"},
+    {"name": "terminal-run-requires-terminal-evidence", "baseValidName": "succeeded-state-notifies-hydration", "pointer": "/run/terminationOutcome", "value": null},
+    {"name": "run-state-event-rejects-raw-output", "baseValidName": "running-state-notifies-hydration", "pointer": "/rawOutput", "value": "secret"},
+    {"name": "run-state-event-rejects-private-run-field", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/processIds", "value": [4300]}
+  ],
+  "bindings": [
+    {"name": "state-event-exact-accepted-binding", "baseValidName": "running-state-notifies-hydration", "valid": true},
+    {"name": "state-event-cross-chat-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/chatId", "value": "chat_other", "valid": false},
+    {"name": "state-event-cross-task-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/taskId", "value": "task_other", "valid": false},
+    {"name": "state-event-cross-project-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/projectId", "value": "project_other", "valid": false},
+    {"name": "state-event-cross-worktree-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/worktreeId", "value": "worktree_other", "valid": false},
+    {"name": "state-event-cross-workspace-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/workspaceIdentity", "value": "workspace_other", "valid": false},
+    {"name": "state-event-cross-run-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/runId", "value": "agent_run_other", "valid": false},
+    {"name": "state-event-cross-role-invalid", "baseValidName": "running-state-notifies-hydration", "changes": [{"pointer": "/run/selectedProfile/roleId", "value": "review"}, {"pointer": "/run/stage", "value": "verifying"}], "valid": false},
+    {"name": "state-event-cross-fingerprint-invalid", "baseValidName": "running-state-notifies-hydration", "pointer": "/run/capabilityFingerprint", "value": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "valid": false}
+  ]
+}

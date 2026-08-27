@@ -95,6 +95,13 @@ pub const AGENT_CAPABILITY_BLOCK_REASONS_V1: &[&str] = &[
     "exactModelUnavailable",
 ];
 pub const AGENT_PUBLIC_EVENT_KINDS_V1: &[&str] = &["status", "question", "final"];
+pub const AGENT_RUN_STATE_EVENT_STATES_V1: &[&str] = &[
+    "running",
+    "succeeded",
+    "failed",
+    "canceled",
+    "recoveryRequired",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentAdapterContractError {
@@ -317,6 +324,14 @@ pub struct AgentPublicEventV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunStateChangedV1 {
+    pub schema_version: u64,
+    pub event_id: String,
+    pub run: AgentRunRecordV1,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AgentTerminationTranscriptV1 {
     pub schema_version: u64,
     pub run_id: String,
@@ -431,6 +446,7 @@ pub fn validate_agent_adapter_payload_v1(
         "runRecord" => validate_run_record(value).map(|_| ()),
         "runStartTranscript" => validate_run_start_transcript(value),
         "publicEvent" => validate_agent_public_event_v1(value).map(|_| ()),
+        "runStateChanged" => validate_agent_run_state_changed_v1(value).map(|_| ()),
         "terminationTranscript" => validate_termination_transcript(value),
         "agentChatDetailPage" => validate_agent_chat_detail_page(value),
         "runCancelRequest" => validate_agent_run_cancel_request(value).map(|_| ()),
@@ -807,6 +823,18 @@ pub fn validate_agent_public_event_v1(
     Ok(event)
 }
 
+/// Canonical immutable-ledger amplification unit: sorted compact JSON UTF-8 bytes.
+pub fn agent_public_ledger_record_bytes_v1(
+    value: &Value,
+) -> Result<usize, AgentAdapterContractError> {
+    let event = validate_agent_public_event_v1(value)?;
+    let canonical =
+        canonicalize_fingerprint_value(serde_json::to_value(event).map_err(contract_json)?);
+    serde_json::to_vec(&canonical)
+        .map(|encoded| encoded.len())
+        .map_err(contract_json)
+}
+
 pub fn validate_agent_public_event_against_run_v1(
     value: &Value,
     expected: &AgentRunBindingV1,
@@ -814,6 +842,35 @@ pub fn validate_agent_public_event_against_run_v1(
     validate_run_binding(expected)?;
     let event = validate_agent_public_event_v1(value)?;
     assert_same_run_binding(expected, &binding_from_event(&event), "agent public event")?;
+    Ok(event)
+}
+
+pub fn validate_agent_run_state_changed_v1(
+    value: &Value,
+) -> Result<AgentRunStateChangedV1, AgentAdapterContractError> {
+    let event: AgentRunStateChangedV1 = from_value(value, "agent run state event")?;
+    schema(event.schema_version)?;
+    agent_state_event_id(&event.event_id, "eventId")?;
+    let run = validate_run_record(&serde_json::to_value(&event.run).map_err(contract_json)?)?;
+    one_of(
+        &run.state,
+        AGENT_RUN_STATE_EVENT_STATES_V1,
+        "wire run state",
+    )?;
+    Ok(event)
+}
+
+pub fn validate_agent_run_state_changed_against_accepted_v1(
+    value: &Value,
+    expected: &AgentRunAcceptedV1,
+) -> Result<AgentRunStateChangedV1, AgentAdapterContractError> {
+    let expected = validate_run_accepted(&serde_json::to_value(expected).map_err(contract_json)?)?;
+    let event = validate_agent_run_state_changed_v1(value)?;
+    assert_same_run_binding(
+        &binding_from_accepted(&expected),
+        &binding_from_run(&event.run),
+        "agent run state event",
+    )?;
     Ok(event)
 }
 
@@ -1422,6 +1479,32 @@ fn binding_from_event(value: &AgentPublicEventV1) -> AgentRunBindingV1 {
     }
 }
 
+fn binding_from_accepted(value: &AgentRunAcceptedV1) -> AgentRunBindingV1 {
+    AgentRunBindingV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        run_id: value.run_id.clone(),
+        role_id: value.role_id.clone(),
+        capability_fingerprint: value.capability_fingerprint.clone(),
+    }
+}
+
+fn binding_from_run(value: &AgentRunRecordV1) -> AgentRunBindingV1 {
+    AgentRunBindingV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        run_id: value.run_id.clone(),
+        role_id: value.selected_profile.role_id.clone(),
+        capability_fingerprint: value.capability_fingerprint.clone(),
+    }
+}
+
 fn assert_same_run_context(
     expected: &AgentRunContextV1,
     actual: &AgentRunContextV1,
@@ -1700,6 +1783,14 @@ fn agent_event_id(value: &str, name: &str) -> Result<(), AgentAdapterContractErr
     id(value, name)?;
     if !value.starts_with("agent_event_") {
         return fail(format!("{name} must use the actual-agent event namespace"));
+    }
+    Ok(())
+}
+
+fn agent_state_event_id(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
+    id(value, name)?;
+    if !value.starts_with("agent_state_event_") {
+        return fail(format!("{name} must use the agent state-event namespace"));
     }
     Ok(())
 }
