@@ -38,12 +38,16 @@ import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 import { M5_BRIDGE_V3_METHODS } from "../src/m5/contracts/bridge-v3.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { decodeJsonl, EVENTS_V1, METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
-import { G5_CAPABILITIES_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/run-recovery-v1.ts";
+import { G5_CAPABILITIES_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1, parseG5ReadyPayloadV1, validateRecoveryPageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "runTerminationPersistence" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
 interface BindingCase { name: string; kind: "accepted" | "publicEvent"; valid: boolean; expected: unknown; value: unknown }
 interface Cases { valid: FixtureCase[]; invalid: FixtureCase[]; bindings: BindingCase[] }
+interface RecoveryDiscoveryCases {
+  valid: { name: string; value: unknown }[];
+  invalid: { name: string; baseValidName: string; removals: string[]; changes: { pointer: string; value: unknown }[] }[];
+}
 interface Manifest {
   schemaVersion: number;
   protocolVersion: number;
@@ -79,11 +83,15 @@ interface Manifest {
     chatDetailCapabilityDiscriminator: string;
   };
   casesFile: string;
+  g5cRecoveryDiscoveryCasesFile: string;
 }
 
 const root = resolve("tests/fixtures/m5/agent-adapter-v1");
 const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8")) as Manifest;
 const cases = JSON.parse(readFileSync(resolve(root, manifest.casesFile), "utf8")) as Cases;
+const recoveryDiscoveryCases = JSON.parse(
+  readFileSync(resolve(root, manifest.g5cRecoveryDiscoveryCasesFile), "utf8"),
+) as RecoveryDiscoveryCases;
 
 test("G5A manifest는 기존 G5 handshake를 보존한 planned V4 계약만 고정한다", () => {
   assert.equal(manifest.schemaVersion, 1);
@@ -116,10 +124,32 @@ test("M5BridgeV4는 V3를 보존하고 actual-agent typed 메서드만 추가한
 
   const planned = cases.valid.find((entry) => entry.validator === "agentChatDetailPage")?.value;
   assert.ok(planned && typeof planned === "object");
-  const { agentRuns: _agentRuns, ...current } = planned as Record<string, unknown>;
+  const { agentRuns: _agentRuns, agentRecovery: _agentRecovery, ...current } = planned as Record<string, unknown>;
   assert.equal(countAgentRuns(validateAgentChatGetResultV1(current)), 0);
   assert.equal(countAgentRuns(validateAgentChatGetResultV1(planned)), 1);
   assert.equal(manifest.contract.chatDetailCapabilityDiscriminator, "agentRunsPresence");
+});
+
+test("agent chat detail은 unresolved actual recovery를 ID와 full identity로 발견하게 한다", () => {
+  for (const fixture of recoveryDiscoveryCases.valid) {
+    assert.doesNotThrow(() => validateAgentChatDetailPageV1(fixture.value), fixture.name);
+  }
+  for (const fixture of recoveryDiscoveryCases.invalid) {
+    assert.throws(() => validateAgentChatDetailPageV1(materializeRecoveryDiscovery(fixture)), fixture.name);
+  }
+
+  const recovered = recoveryDiscoveryCases.valid.find(
+    (fixture) => fixture.name === "agent-chat-recovery-required-with-discoverable-recovery",
+  )?.value as Record<string, unknown> | undefined;
+  assert.ok(recovered?.agentRecovery);
+  assert.throws(() => validateRecoveryPageV1({ items: [recovered.agentRecovery], nextCursor: null }));
+
+  const durable = structuredClone(cases.valid.find(
+    (fixture) => fixture.name === "actual-agent-recovery-resolves-only-after-process-proof",
+  )?.value) as Record<string, unknown>;
+  assert.ok(durable);
+  (durable.request as Record<string, unknown>).recoveryId = "agent_recovery_random_substitute";
+  assert.throws(() => validateAgentRecoveryResolveResultV1(durable));
 });
 
 test("TypeScript는 canonical actual-agent valid cases를 모두 승인한다", () => {
@@ -248,4 +278,50 @@ function ready(capabilities: string[]): unknown {
 function countAgentRuns(detail: AgentChatGetResultV1): number {
   if (!isAgentChatDetailPageV1(detail)) return 0;
   return detail.agentRuns.length;
+}
+
+function materializeRecoveryDiscovery(
+  fixture: RecoveryDiscoveryCases["invalid"][number],
+): unknown {
+  const base = recoveryDiscoveryCases.valid.find((entry) => entry.name === fixture.baseValidName);
+  assert.ok(base, `missing recovery discovery base ${fixture.baseValidName}`);
+  const value = structuredClone(base.value);
+  for (const pointer of fixture.removals) removeJsonPointer(value, pointer);
+  for (const change of fixture.changes) setJsonPointer(value, change.pointer, change.value);
+  return value;
+}
+
+function setJsonPointer(rootValue: unknown, pointer: string, value: unknown): void {
+  const [parentPointer, key] = splitPointer(pointer);
+  const parent = resolveJsonPointer(rootValue, parentPointer);
+  if (Array.isArray(parent)) {
+    const index = Number(key);
+    assert.ok(Number.isInteger(index) && index >= 0 && index <= parent.length);
+    if (index === parent.length) parent.push(value);
+    else parent[index] = value;
+    return;
+  }
+  assert.ok(parent && typeof parent === "object");
+  (parent as Record<string, unknown>)[key] = value;
+}
+
+function removeJsonPointer(rootValue: unknown, pointer: string): void {
+  const [parentPointer, key] = splitPointer(pointer);
+  const parent = resolveJsonPointer(rootValue, parentPointer);
+  assert.ok(parent && typeof parent === "object" && !Array.isArray(parent));
+  delete (parent as Record<string, unknown>)[key];
+}
+
+function splitPointer(pointer: string): [string, string] {
+  const separator = pointer.lastIndexOf("/");
+  assert.ok(separator >= 0, `invalid JSON pointer ${pointer}`);
+  return [pointer.slice(0, separator), pointer.slice(separator + 1)];
+}
+
+function resolveJsonPointer(rootValue: unknown, pointer: string): unknown {
+  if (pointer === "") return rootValue;
+  return pointer.split("/").slice(1).reduce<unknown>((value, key) => {
+    assert.ok(value && typeof value === "object");
+    return (value as Record<string, unknown>)[key];
+  }, rootValue);
 }

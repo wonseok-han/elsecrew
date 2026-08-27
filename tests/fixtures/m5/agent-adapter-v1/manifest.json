@@ -78,5 +78,6 @@
   },
   "casesFile": "cases.json",
   "g5bCasesFile": "g5b-terminal-budget-cases.json",
-  "g5cCasesFile": "g5c-provider-attestation-cases.json"
+  "g5cCasesFile": "g5c-provider-attestation-cases.json",
+  "g5cRecoveryDiscoveryCasesFile": "g5c-recovery-discovery-cases.json"
 }

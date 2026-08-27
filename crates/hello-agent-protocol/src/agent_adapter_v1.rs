@@ -1548,6 +1548,7 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
             "runs",
             "nextEventSequence",
             "agentRuns",
+            "agentRecovery",
         ],
         "agent chat detail page",
     )?;
@@ -1556,6 +1557,13 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
         .remove("agentRuns")
         .and_then(|entry| entry.as_array().cloned())
         .ok_or_else(|| AgentAdapterContractError::new("agentRuns must be an array"))?;
+    let agent_recovery = match base
+        .remove("agentRecovery")
+        .ok_or_else(|| AgentAdapterContractError::new("agentRecovery is required"))?
+    {
+        Value::Null => None,
+        value => Some(validate_agent_recovery_record(&value)?),
+    };
     if agent_runs.len() > G5_EVENT_PAGE_MAX_ITEMS_V1 {
         return fail("agentRuns must be bounded");
     }
@@ -1577,6 +1585,7 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
         }
     }
     let mut agent_ids = HashSet::new();
+    let mut recovery_runs = Vec::new();
     for run in &agent_runs {
         let run = validate_run_record(run)?;
         for (expected, actual, name) in [
@@ -1605,6 +1614,9 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
         if !agent_ids.insert(run.run_id.clone()) || fixture_ids.contains(run.run_id.as_str()) {
             return fail("fixture and actual run ledgers must have distinct unique run ids");
         }
+        if run.state == "recoveryRequired" {
+            recovery_runs.push(run);
+        }
     }
     let messages = base
         .get("messages")
@@ -1617,6 +1629,29 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
         if fixture_ids.contains(run_id) == agent_ids.contains(run_id) {
             return fail("message runId must resolve to exactly one fixture or actual run ledger");
         }
+    }
+    match agent_recovery {
+        None if !recovery_runs.is_empty() => {
+            return fail("recoveryRequired agent run requires one discoverable recovery")
+        }
+        Some(_) if recovery_runs.len() != 1 => {
+            return fail(
+                "agent chat detail must expose exactly one recoveryRequired run for its recovery",
+            )
+        }
+        Some(recovery) => {
+            let run = &recovery_runs[0];
+            let identity = AgentRunIdentityV1 {
+                chat_id: run.chat_id.clone(),
+                task_id: run.task_id.clone(),
+                project_id: run.project_id.clone(),
+                worktree_id: run.worktree_id.clone(),
+                workspace_identity: run.workspace_identity.clone(),
+                run_id: run.run_id.clone(),
+            };
+            assert_same_recovery_identity(&identity, None, &recovery, "agent chat recovery")?;
+        }
+        None => {}
     }
     Ok(())
 }

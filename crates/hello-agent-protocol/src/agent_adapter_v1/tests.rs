@@ -12,6 +12,7 @@ struct Manifest {
     cases_file: String,
     g5b_cases_file: String,
     g5c_cases_file: String,
+    g5c_recovery_discovery_cases_file: String,
 }
 
 #[derive(Deserialize)]
@@ -153,6 +154,21 @@ struct G5CCases {
 }
 
 #[derive(Deserialize)]
+struct RecoveryDiscoveryCases {
+    valid: Vec<StateEventCase>,
+    invalid: Vec<RecoveryDiscoveryMutationCase>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryDiscoveryMutationCase {
+    name: String,
+    base_valid_name: String,
+    removals: Vec<String>,
+    changes: Vec<MutationChange>,
+}
+
+#[derive(Deserialize)]
 struct G5CMutationCase {
     name: String,
     target: String,
@@ -248,6 +264,51 @@ fn rust_accepts_and_rejects_the_same_agent_adapter_golden_cases() {
             fixture.name
         );
     }
+}
+
+#[test]
+fn rust_discovers_one_unresolved_actual_recovery_without_legacy_leakage() {
+    let (root, manifest) = manifest();
+    let cases: RecoveryDiscoveryCases =
+        read_json(root.join(&manifest.g5c_recovery_discovery_cases_file));
+    for fixture in &cases.valid {
+        validate_agent_adapter_payload_v1("agentChatDetailPage", &fixture.value)
+            .unwrap_or_else(|error| panic!("valid fixture {} failed: {error}", fixture.name));
+    }
+    for fixture in &cases.invalid {
+        assert!(
+            validate_agent_adapter_payload_v1(
+                "agentChatDetailPage",
+                &materialize_recovery_discovery(&cases, fixture),
+            )
+            .is_err(),
+            "invalid fixture {} passed",
+            fixture.name
+        );
+    }
+
+    let recovery = &cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == "agent-chat-recovery-required-with-discoverable-recovery")
+        .expect("recovery detail fixture")
+        .value["agentRecovery"];
+    assert!(crate::run_recovery_v1::validate_g5_payload_v1(
+        "recoveryPage",
+        &serde_json::json!({"items": [recovery], "nextCursor": null}),
+    )
+    .is_err());
+
+    let base_cases: Cases = read_json(root.join(&manifest.cases_file));
+    let mut durable = base_cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == "actual-agent-recovery-resolves-only-after-process-proof")
+        .expect("durable recovery result fixture")
+        .value
+        .clone();
+    durable["request"]["recoveryId"] = Value::String("agent_recovery_random_substitute".into());
+    assert!(validate_agent_adapter_payload_v1("recoveryResolveResult", &durable).is_err());
 }
 
 #[test]
@@ -780,6 +841,69 @@ fn materialize_g5b(cases: &G5BCases, mutation: &MutationCase) -> Value {
         set_json_pointer(&mut value, &change.pointer, change.value.clone());
     }
     value
+}
+
+fn materialize_recovery_discovery(
+    cases: &RecoveryDiscoveryCases,
+    mutation: &RecoveryDiscoveryMutationCase,
+) -> Value {
+    let mut value = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == mutation.base_valid_name)
+        .unwrap_or_else(|| panic!("missing base fixture {}", mutation.base_valid_name))
+        .value
+        .clone();
+    for pointer in &mutation.removals {
+        remove_json_pointer(&mut value, pointer);
+    }
+    for change in &mutation.changes {
+        set_recovery_json_pointer(&mut value, &change.pointer, change.value.clone());
+    }
+    value
+}
+
+fn set_recovery_json_pointer(root: &mut Value, pointer: &str, value: Value) {
+    let (parent, key) = pointer
+        .rsplit_once('/')
+        .unwrap_or_else(|| panic!("invalid JSON pointer {pointer}"));
+    let target = if parent.is_empty() {
+        root
+    } else {
+        root.pointer_mut(parent)
+            .unwrap_or_else(|| panic!("invalid JSON pointer parent {parent}"))
+    };
+    if let Some(object) = target.as_object_mut() {
+        object.insert(key.to_string(), value);
+    } else if let Some(array) = target.as_array_mut() {
+        let index: usize = key
+            .parse()
+            .unwrap_or_else(|_| panic!("JSON pointer array index must be numeric: {key}"));
+        if index == array.len() {
+            array.push(value);
+        } else {
+            array[index] = value;
+        }
+    } else {
+        panic!("JSON pointer parent must be an object or array: {parent}");
+    }
+}
+
+fn remove_json_pointer(root: &mut Value, pointer: &str) {
+    let (parent, key) = pointer
+        .rsplit_once('/')
+        .unwrap_or_else(|| panic!("invalid JSON pointer {pointer}"));
+    let target = if parent.is_empty() {
+        root
+    } else {
+        root.pointer_mut(parent)
+            .unwrap_or_else(|| panic!("invalid JSON pointer parent {parent}"))
+    };
+    target
+        .as_object_mut()
+        .unwrap_or_else(|| panic!("JSON pointer parent must be an object: {parent}"))
+        .remove(key)
+        .unwrap_or_else(|| panic!("missing JSON pointer field {pointer}"));
 }
 
 fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) {

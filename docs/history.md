@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C actual recovery 발견 계약)
+
+- **발견 가능한 복구 ID**: exact G5A+ `chat.get` detail의 기존 `agentRuns` presence discriminator 안에 required nullable `agentRecovery`를 추가했다. `recoveryRequired` actual run은 같은 chat/task/project/worktree/workspace/run에 결속된 unresolved·poisoned·`actualAgent` recovery 하나를 반드시 노출하고, 그 외 상태는 null만 허용한다. recoveryRequired run이 없거나 둘 이상인데 recovery를 실으면 fail-closed라 chat당 unresolved actual recovery 하나만 표현된다.
+- **ID·원장 경계**: chat detail은 random recovery ID를 재현할 수 없으므로 `agent_recovery_` namespace와 full identity만 검증한다. 반면 durable request/before record가 함께 있는 resolve 결과는 임의 대체 ID를 계속 거부한다. actual recovery를 legacy recovery page에 넣거나 agent detail에 legacy `recovery` member를 추가하는 공용 양언어 회귀도 거부하며, `agentRuns`/`agentRecovery`가 없는 current G5 detail은 그대로 유효하다.
+- **골든·검증**: null/non-null valid와 missing field, recovery 누락·orphan, 모든 identity/run/source/reason/state/poison/namespace mismatch, non-recovery+recovery, 복수 recoveryRequired ambiguity, legacy member를 고정한 공용 fixture를 추가했다. focused Node 9개, 전체 Node 170개, focused protocol 8개와 전체 protocol 31개, TypeScript no-emit, Rust fmt, owned 변경 경고를 포함한 protocol clippy와 `git diff --check`를 통과했다. strict protocol clippy는 변경 전 범위 밖 needless lifetime 2건과 collapsible-if 1건만 보고해 해당 세 lint를 허용한 동일 명령으로 변경 범위를 확인했다.
+- **다음 할 일·경계**: 이 계약 commit을 독립 리뷰한 뒤 sidecar가 agent detail에 durable actual recovery를 채우고 Electron/UI가 그 ID로 inspect/resolve하도록 별도 소비자 작업을 연다. 새 method/channel/capability/event는 없으며 실제 provider·인증·사용자 프로젝트·Windows는 실행하지 않았고 merge·push도 하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C pure Rust provider core)
 
 - **순수 provider 경계**: host 탐색·process 실행 없이 주입된 bounded 관찰과 경로/파일 identity digest만 소비하는 core provider 정의를 추가했다. Claude `2.1.241`+`node`, Codex `0.150.0`+`rg` closure와 exact profile/parser/launch policy를 canonical SHA-256 manifest로 만들며 공용 G5C golden digest와 일치한다. 설치·인증·버전·closure·catalog·tuple·verification이 하나라도 불확실하면 startable로 만들지 않고, Codex `argvOnly`/unknown catalog/effective profile은 계속 차단한다.

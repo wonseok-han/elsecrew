@@ -273,12 +273,16 @@ export interface AgentRunRecordV1 {
   updatedAt: string;
 }
 
-/** V4 preserves G5 fixture runs and adds actual-agent runs in a separate ledger. */
+/** G5A+ preserves G5 fixture runs and adds actual-agent runs and recovery discovery in separate ledgers. */
 export type AgentChatDetailPageV1 = ChatDetailPageV1 & {
   agentRuns: readonly AgentRunRecordV1[];
+  agentRecovery: AgentRecoveryRecordV1 | null;
 };
 
-export type G5ChatDetailPageV1 = ChatDetailPageV1 & { readonly agentRuns?: never };
+export type G5ChatDetailPageV1 = ChatDetailPageV1 & {
+  readonly agentRuns?: never;
+  readonly agentRecovery?: never;
+};
 export type AgentChatGetResultV1 = G5ChatDetailPageV1 | AgentChatDetailPageV1;
 
 export interface AgentResolvedProfileV1 {
@@ -642,7 +646,9 @@ export function validateAgentTerminationTranscriptV1(value: unknown): AgentTermi
 }
 
 export function validateAgentChatDetailPageV1(value: unknown): AgentChatDetailPageV1 {
-  const object = exactObject(value, ["chat", "afterEventSequence", "messages", "runs", "nextEventSequence", "agentRuns"], "agent chat detail page");
+  const object = exactObject(value, [
+    "chat", "afterEventSequence", "messages", "runs", "nextEventSequence", "agentRuns", "agentRecovery",
+  ], "agent chat detail page");
   const base = {
     chat: object.chat, afterEventSequence: object.afterEventSequence, messages: object.messages,
     runs: object.runs, nextEventSequence: object.nextEventSequence,
@@ -662,6 +668,14 @@ export function validateAgentChatDetailPageV1(value: unknown): AgentChatDetailPa
     const inFixture = fixtureRunIds.has(message.runId);
     const inAgent = agentRunIds.has(message.runId);
     if (inFixture === inAgent) fail("message runId must resolve to exactly one fixture or actual run ledger");
+  }
+  const recovery = object.agentRecovery === null ? null : validateAgentRecoveryRecordV1(object.agentRecovery);
+  const recoveryRuns = agentRuns.filter((run) => run.state === "recoveryRequired");
+  if (recovery === null) {
+    if (recoveryRuns.length !== 0) fail("recoveryRequired agent run requires one discoverable recovery");
+  } else {
+    if (recoveryRuns.length !== 1) fail("agent chat detail must expose exactly one recoveryRequired run for its recovery");
+    assertSameAgentRunIdentity(recoveryRuns[0]!, recovery, "agent chat recovery");
   }
   return object as unknown as AgentChatDetailPageV1;
 }
