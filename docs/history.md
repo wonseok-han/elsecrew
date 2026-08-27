@@ -15,6 +15,12 @@
 - **조회·채팅 wire**: 협상된 G5A의 `chat.get`은 run이 없어도 `agentRuns: []`를 항상 포함하고, current G5는 해당 멤버를 생략한다. sidecar의 `chat.eventAppended` payload를 계약·Electron이 요구하는 direct `TeamMessageV1`로 바로잡아 기존 G5 공개 메시지 의미와 durable ledger는 유지했다.
 - **검증·경계**: 실제 sidecar process 회귀에서 ready exact G5A, pre-run 빈 agent ledger, accepted-before-event, `status→question→final` seq 1~3 full identity/fingerprint, raw actual event 0건, durable TeamMessage와 terminal agent run을 확인했다. sidecar 59 passed·1 ignored와 stdio 8 passed, protocol 26 passed, owned Rust format, strict no-deps sidecar clippy, `git diff --check`를 통과했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron normalized public-event 소비)
+
+- **한 일**: exact G5A ready 협상에서만 `agent.publicEvent`를 fixed `m5:v4:agent:public-event` IPC와 `onAgentPublicEvent` typed preload listener로 전달했다. Sidecar client는 start accepted와 `chat.get.agentRuns` hydration의 full chat/task/project/worktree/workspace/run/role/fingerprint binding을 한 원장으로 결합한 뒤, known run에 exact 결속된 공개 payload만 listener 전에 통과시킨다.
+- **안전 결정**: public `eventId` 재사용, stream의 다른 run 재사용, unknown/unnegotiated run, full binding 변조, envelope 변조, extra/private field와 oversize는 session을 poison하며 listener에 전달하지 않는다. actual raw `run.event`/`run.finished`와 actual `chat.eventAppended`는 계속 poison이고, preload도 event payload를 독립 exact validate한 뒤 기존 credit/ACK 경로로만 renderer에 전달한다. current G5/V3 표면과 generic/raw IPC는 넓히지 않았다.
+- **검증·다음**: Electron bridge/scaffold focused Node 39개와 전체 Node 139개, root의 고정 도구로 TypeScript no-emit 및 Vite production build, `git diff --check`를 통과했다. worktree 자체 의존성이 없어 `pnpm exec`는 격리 네트워크 DNS에서 패키지를 받지 못했으며 package/lockfile은 바꾸지 않았다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 Electron commit의 독립 리뷰와 최신 통합 기준 QA다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 계약)
 
 - **공용 wire**: protocol v1에 `agent.publicEvent`를 additive 예약했다. envelope는 `chatId`·`taskId`·`runId`를 모두 요구하고, exact `AgentPublicEventV1` payload의 같은 세 identity와 일치해야 한다. payload는 `status|question|final`, bounded text와 전체 run identity/fingerprint만 허용하고 extra·reasoning·raw/private 필드는 계속 fail-closed다.

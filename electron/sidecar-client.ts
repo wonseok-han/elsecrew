@@ -100,6 +100,7 @@ import {
   validateAgentCapabilitiesRequestV1,
   validateAgentCapabilitySnapshotV1,
   validateAgentChatDetailPageV1,
+  validateAgentPublicEventAgainstRunV1,
   validateAgentRecoveryInspectRequestV1,
   validateAgentRecoveryRecordV1,
   validateAgentRecoveryResolveRequestV1,
@@ -118,6 +119,9 @@ import {
   type AgentRecoveryResolveRequestV1,
   type AgentRecoveryResolveResultV1,
   type AgentRunAcceptedV1,
+  type AgentRunBindingV1,
+  type AgentRunRecordV1,
+  type AgentPublicEventV1,
   type AgentRunCancelRequestV1,
   type AgentRunCancelResultV1,
   type AgentRunStartRequestV1,
@@ -219,11 +223,13 @@ export class SidecarClientV1 {
   readonly #projectListeners = new Set<(event: WatchEventV1, protocol: EventV1) => void>();
   readonly #workspaceListeners = new Set<(event: WorkspaceEventV1) => void>();
   readonly #chatListeners = new Set<(event: TeamMessageV1, protocol: EventV1) => void>();
+  readonly #agentPublicEventListeners = new Set<(event: AgentPublicEventV1, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
-  /** Reserved for a future normalized AgentPublicEventV1 route; never sent to the renderer today. */
-  readonly #acceptedAgentRuns = new Map<string, AgentRunAcceptedV1>();
+  readonly #acceptedAgentRuns = new Map<string, AgentRunBindingV1>();
+  readonly #agentPublicEventIds = new Set<string>();
+  readonly #agentPublicStreamRuns = new Map<string, string>();
   readonly #streams = new Map<string, TextStreamV1>();
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
@@ -340,6 +346,11 @@ export class SidecarClientV1 {
   onChatEvent(listener: (event: TeamMessageV1, protocol: EventV1) => void): () => void {
     this.#chatListeners.add(listener);
     return () => this.#chatListeners.delete(listener);
+  }
+
+  onAgentPublicEvent(listener: (event: AgentPublicEventV1, protocol: EventV1) => void): () => void {
+    this.#agentPublicEventListeners.add(listener);
+    return () => this.#agentPublicEventListeners.delete(listener);
   }
 
   async getSystemStatus(): Promise<SystemStatusV1> {
@@ -573,13 +584,34 @@ export class SidecarClientV1 {
             throw new Error("chat event runId does not match public message");
           }
           if (message.runId?.startsWith("agent_run_") || envelope.runId?.startsWith("agent_run_")) {
-            throw new Error("actual-agent chat events are forbidden until a normalized public event route is negotiated");
+            throw new Error("actual-agent chat events are forbidden outside the normalized public event route");
           }
         }
         for (const listener of this.#chatListeners) listener(message, envelope);
       }
+      if (envelope.event === "agent.publicEvent") {
+        if (!this.#agentAdapterNegotiated) {
+          throw new Error("actual-agent public events require the exact planned G5A capability set");
+        }
+        const runId = envelope.runId;
+        const knownRun = runId === undefined ? undefined : this.#acceptedAgentRuns.get(runId);
+        if (!knownRun) throw new Error("agent public event references an unknown actual-agent run");
+        const event = validateAgentPublicEventAgainstRunV1(envelope.payload, knownRun);
+        if (event.chatId !== envelope.chatId || event.taskId !== envelope.taskId || event.runId !== envelope.runId) {
+          throw new Error("agent public event envelope identity does not match the validated payload");
+        }
+        if (this.#agentPublicEventIds.has(event.eventId)) throw new Error("agent public eventId was reused");
+        const streamRunId = this.#agentPublicStreamRuns.get(envelope.streamId);
+        if (streamRunId !== undefined && streamRunId !== event.runId) {
+          throw new Error("agent public event stream changed actual-agent run binding");
+        }
+        this.#agentPublicEventIds.add(event.eventId);
+        this.#agentPublicStreamRuns.set(envelope.streamId, event.runId);
+        for (const listener of this.#agentPublicEventListeners) listener(event, envelope);
+        return;
+      }
       if (this.#agentAdapterNegotiated && (envelope.event === "run.event" || envelope.event === "run.finished")) {
-        throw new Error("actual-agent raw run events are forbidden until a normalized public event route is negotiated");
+        throw new Error("actual-agent raw run events are forbidden outside the normalized public event route");
       }
       // V2's generic renderer event path is intentionally narrow. G5 workspace,
       // chat, and run protocol events must never be delivered twice (or expose
@@ -731,6 +763,7 @@ export class SidecarClientV1 {
         if (this.#agentAdapterNegotiated) {
           const value = validateAgentChatDetailPageV1(response.result);
           this.#agentChatContexts.set(value.chat.chatId, agentChatContextFromDetail(value));
+          for (const run of value.agentRuns) this.#registerHydratedAgentRun(run);
           assertResponseField(value.chat, pending.params, "chatId");
           return value;
         }
@@ -769,7 +802,7 @@ export class SidecarClientV1 {
           capabilityFingerprint: request.expectedCapabilityFingerprint,
         });
         if (this.#acceptedAgentRuns.has(value.runId)) return failResult("accepted actual-agent runId was reused");
-        this.#acceptedAgentRuns.set(value.runId, value);
+        this.#acceptedAgentRuns.set(value.runId, agentRunBindingFromAccepted(value));
         return value;
       }
       case "run.cancelAgent": {
@@ -903,6 +936,8 @@ export class SidecarClientV1 {
     this.#preparedWorkspaces.clear();
     this.#agentChatContexts.clear();
     this.#acceptedAgentRuns.clear();
+    this.#agentPublicEventIds.clear();
+    this.#agentPublicStreamRuns.clear();
     this.#streams.clear();
     this.#streamBytes = 0;
     this.#terminateOnce();
@@ -916,6 +951,15 @@ export class SidecarClientV1 {
     } catch {
       // The original protocol failure remains the error reported to callers.
     }
+  }
+
+  #registerHydratedAgentRun(run: AgentRunRecordV1): void {
+    const binding = agentRunBindingFromRecord(run);
+    const existing = this.#acceptedAgentRuns.get(binding.runId);
+    if (existing !== undefined && !sameAgentRunBinding(existing, binding)) {
+      throw new Error("hydrated actual-agent run changed binding");
+    }
+    this.#acceptedAgentRuns.set(binding.runId, binding);
   }
 }
 
@@ -991,6 +1035,37 @@ function agentChatContextFromDetail(detail: AgentChatDetailPageV1): AgentChatCon
     worktreeId: chat.worktreeId,
     workspaceIdentity: chat.workspaceIdentity,
   };
+}
+
+function agentRunBindingFromRecord(run: AgentRunRecordV1): AgentRunBindingV1 {
+  return {
+    chatId: run.chatId,
+    taskId: run.taskId,
+    projectId: run.projectId,
+    worktreeId: run.worktreeId,
+    workspaceIdentity: run.workspaceIdentity,
+    runId: run.runId,
+    roleId: run.selectedProfile.roleId,
+    capabilityFingerprint: run.capabilityFingerprint,
+  };
+}
+
+function agentRunBindingFromAccepted(run: AgentRunAcceptedV1): AgentRunBindingV1 {
+  return {
+    chatId: run.chatId,
+    taskId: run.taskId,
+    projectId: run.projectId,
+    worktreeId: run.worktreeId,
+    workspaceIdentity: run.workspaceIdentity,
+    runId: run.runId,
+    roleId: run.roleId,
+    capabilityFingerprint: run.capabilityFingerprint,
+  };
+}
+
+function sameAgentRunBinding(left: AgentRunBindingV1, right: AgentRunBindingV1): boolean {
+  return ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"]
+    .every((field) => left[field as keyof AgentRunBindingV1] === right[field as keyof AgentRunBindingV1]);
 }
 
 function assertSameAgentRunIdentity(

@@ -27,6 +27,7 @@ import type {
 } from "../src/m5/contracts/run-recovery-v1.ts";
 import type {
   AgentCapabilitiesRequestV1,
+  AgentPublicEventV1,
   AgentRecoveryInspectRequestV1,
   AgentRecoveryResolveRequestV1,
   AgentRunCancelRequestV1,
@@ -198,12 +199,22 @@ function forwardChatEvent(event: Parameters<SidecarClientV1["onChatEvent"]>[0] e
   eventCredit.deliver(protocolEvent, () => window.webContents.send(M5_BRIDGE_V3_CHANNELS.chatEvent, { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq }));
 }
 
+function forwardAgentPublicEvent(event: AgentPublicEventV1, protocolEvent: EventV1): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(protocolEvent, () => window.webContents.send(
+    M5_BRIDGE_V4_CHANNELS.agentPublicEvent,
+    { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq },
+  ));
+}
+
 function startSidecar(): SidecarClientV1 {
   const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()));
   client.onEvent(forwardSidecarEvent);
   client.onProjectEvent(forwardProjectEvent);
   client.onWorkspaceEvent(forwardWorkspaceEvent);
   client.onChatEvent(forwardChatEvent);
+  client.onAgentPublicEvent(forwardAgentPublicEvent);
   void client.start().catch(() => {
     // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
   });

@@ -161,6 +161,47 @@ function acceptedAgentRun(fingerprint: string, overrides: Record<string, unknown
   };
 }
 
+function agentPublicEvent(fingerprint: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    eventId: "agent_event_accepted",
+    chatId: "chat_01",
+    taskId: "task_01",
+    projectId: "project_01",
+    worktreeId: "worktree_01",
+    workspaceIdentity: "workspace_01",
+    runId: "agent_run_accepted",
+    roleId: "planning",
+    capabilityFingerprint: fingerprint,
+    kind: "status",
+    text: "작업을 준비하고 있습니다.",
+    createdAt: "2026-08-27T01:02:00Z",
+    ...overrides,
+  };
+}
+
+function agentPublicEventLine(payload: Record<string, unknown>, streamId = "agent_public", seq = 1): string {
+  return eventLine({
+    protocolVersion: 1,
+    kind: "event",
+    sidecarInstanceId: "sidecar_test_01",
+    streamId,
+    seq,
+    event: "agent.publicEvent",
+    chatId: payload.chatId as string,
+    taskId: payload.taskId as string,
+    runId: payload.runId as string,
+    payload,
+  });
+}
+
+async function hydrateActualAgentRun(client: SidecarClientV1, child: FixtureSidecar) {
+  const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(request.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+  await detail;
+}
+
 function eventLine(event: EventV1) {
   return `${JSON.stringify(event)}\n`;
 }
@@ -337,6 +378,97 @@ test("G5A accepted run registry rejects a reused run ID before any future public
   child.stdout.write(responseLine(duplicateRequest.requestId, acceptedAgentRun(fingerprint)));
   await assert.rejects(duplicate, /accepted actual-agent runId was reused/);
   assert.equal(child.terminations, 1);
+});
+
+test("G5A emits normalized public events only after exact hydrated or accepted run binding", async () => {
+  const hydrated = createClient();
+  const hydratedStart = hydrated.client.start(); hydrated.child.stdout.write(`${g5aReadyLine()}\n`); await hydratedStart;
+  await hydrateActualAgentRun(hydrated.client, hydrated.child);
+  const hydratedEvents: Record<string, unknown>[] = [];
+  hydrated.client.onAgentPublicEvent((event) => hydratedEvents.push(event));
+  const hydratedEvent = g5aFixture("bounded-public-status-event");
+  hydrated.child.stdout.write(agentPublicEventLine(hydratedEvent));
+  assert.equal(hydratedEvents.length, 1);
+  assert.equal(hydratedEvents[0]?.eventId, "agent_event_01");
+  assert.equal(hydrated.child.terminations, 0);
+
+  const accepted = createClient();
+  const acceptedStart = accepted.client.start(); accepted.child.stdout.write(`${g5aReadyLine()}\n`); await acceptedStart;
+  await hydrateActualAgentRun(accepted.client, accepted.child);
+  const start = accepted.client.startAgentRun({
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: measuredCapability().fingerprint,
+  });
+  const request = JSON.parse(accepted.child.writes.at(-1) ?? "{}") as { requestId: string };
+  accepted.child.stdout.write(responseLine(request.requestId, acceptedAgentRun(measuredCapability().fingerprint)));
+  await start;
+  const acceptedEvents: Record<string, unknown>[] = [];
+  accepted.client.onAgentPublicEvent((event) => acceptedEvents.push(event));
+  accepted.child.stdout.write(agentPublicEventLine(agentPublicEvent(measuredCapability().fingerprint)));
+  assert.equal(acceptedEvents.length, 1);
+  assert.equal(acceptedEvents[0]?.runId, "agent_run_accepted");
+  assert.equal(accepted.child.terminations, 0);
+});
+
+test("G5A public events fail closed on unnegotiated, identity, event, stream, and payload violations", async () => {
+  const unnegotiated = createClient();
+  const unnegotiatedStart = unnegotiated.client.start(); unnegotiated.child.stdout.write(`${readyLine()}\n`); await unnegotiatedStart;
+  unnegotiated.child.stdout.write(agentPublicEventLine(g5aFixture("bounded-public-status-event")));
+  assert.match(unnegotiated.client.failure?.message ?? "", /require the exact planned G5A/);
+
+  const mutations: Array<[string, string]> = [
+    ["chatId", "chat_other"], ["taskId", "task_other"], ["projectId", "project_other"],
+    ["worktreeId", "worktree_other"], ["workspaceIdentity", "workspace_other"], ["roleId", "review"],
+    ["capabilityFingerprint", `sha256:${"1".repeat(64)}`],
+  ];
+  for (const [field, replacement] of mutations) {
+    const invalid = createClient();
+    const starting = invalid.client.start(); invalid.child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    await hydrateActualAgentRun(invalid.client, invalid.child);
+    const payload = { ...g5aFixture("bounded-public-status-event"), [field]: replacement };
+    invalid.child.stdout.write(agentPublicEventLine(payload, `agent_public_${field}`));
+    assert.match(invalid.client.failure?.message ?? "", new RegExp(`agent public event changed ${field}`));
+    assert.equal(invalid.child.terminations, 1);
+  }
+
+  const unknown = createClient();
+  const unknownStart = unknown.client.start(); unknown.child.stdout.write(`${g5aReadyLine()}\n`); await unknownStart;
+  await hydrateActualAgentRun(unknown.client, unknown.child);
+  unknown.child.stdout.write(agentPublicEventLine({ ...g5aFixture("bounded-public-status-event"), runId: "agent_run_unknown" }));
+  assert.match(unknown.client.failure?.message ?? "", /unknown actual-agent run/);
+
+  const duplicate = createClient();
+  const duplicateStart = duplicate.client.start(); duplicate.child.stdout.write(`${g5aReadyLine()}\n`); await duplicateStart;
+  await hydrateActualAgentRun(duplicate.client, duplicate.child);
+  const first = g5aFixture("bounded-public-status-event");
+  duplicate.child.stdout.write(agentPublicEventLine(first));
+  duplicate.child.stdout.write(agentPublicEventLine(first, "agent_public", 2));
+  assert.match(duplicate.client.failure?.message ?? "", /eventId was reused/);
+
+  const streamReuse = createClient();
+  const streamReuseStart = streamReuse.client.start(); streamReuse.child.stdout.write(`${g5aReadyLine()}\n`); await streamReuseStart;
+  await hydrateActualAgentRun(streamReuse.client, streamReuse.child);
+  const start = streamReuse.client.startAgentRun({
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: measuredCapability().fingerprint,
+  });
+  const startRequest = JSON.parse(streamReuse.child.writes.at(-1) ?? "{}") as { requestId: string };
+  streamReuse.child.stdout.write(responseLine(startRequest.requestId, acceptedAgentRun(measuredCapability().fingerprint)));
+  await start;
+  streamReuse.child.stdout.write(agentPublicEventLine(agentPublicEvent(measuredCapability().fingerprint), "agent_public"));
+  streamReuse.child.stdout.write(agentPublicEventLine(g5aFixture("bounded-public-status-event"), "agent_public", 2));
+  assert.match(streamReuse.client.failure?.message ?? "", /stream changed actual-agent run binding/);
+
+  for (const payload of [
+    { ...g5aFixture("bounded-public-status-event"), reasoning: "private" },
+    { ...g5aFixture("bounded-public-status-event"), text: "x".repeat(64 * 1024 + 1) },
+  ]) {
+    const malformed = createClient();
+    const malformedStart = malformed.client.start(); malformed.child.stdout.write(`${g5aReadyLine()}\n`); await malformedStart;
+    let delivered = 0;
+    malformed.client.onAgentPublicEvent(() => { delivered += 1; });
+    malformed.child.stdout.write(agentPublicEventLine(payload));
+    assert.equal(delivered, 0);
+    assert.equal(malformed.child.terminations, 1);
+  }
 });
 
 test("G5A keeps actual and fixture ledgers separate and fails closed on raw agent events", async () => {
@@ -876,14 +1008,17 @@ test("G5A bridge exposes only fixed adapter channels with the existing main-fram
   const main = source("electron/main.ts");
   const preload = source("electron/preload.ts");
   const channels = source("electron/ipc-channels.ts");
-  for (const name of ["agentGetCapabilities", "agentStartRun", "agentCancelRun", "agentRecoveryInspect", "agentRecoveryResolve"]) {
+  for (const name of ["agentGetCapabilities", "agentStartRun", "agentCancelRun", "agentRecoveryInspect", "agentRecoveryResolve", "agentPublicEvent"]) {
     assert.match(channels, new RegExp(`${name}: "m5:v4:`));
     assert.match(main, new RegExp(`M5_BRIDGE_V4_CHANNELS\\.${name}`));
     assert.match(preload, new RegExp(`M5_BRIDGE_V4_CHANNELS\\.${name}`));
   }
   assert.match(preload, /validateAgentRunStartRequestV1\(input\)/);
   assert.match(preload, /validateAgentRunCancelRequestV1\(input\)/);
+  assert.match(preload, /validateAgentPublicEventV1\(payload\.event\)/);
   assert.match(main, /assertCurrentMainFrame\(event\)/);
+  assert.match(main, /forwardAgentPublicEvent/);
+  assert.match(main, /eventCredit\.deliver\(protocolEvent/);
   assert.doesNotMatch(channels, /generic|invokeAll|startAgentSmoke/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\([^M]/);
 });

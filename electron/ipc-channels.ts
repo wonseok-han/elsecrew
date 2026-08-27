@@ -48,4 +48,5 @@ export const M5_BRIDGE_V4_CHANNELS = {
   agentCancelRun: "m5:v4:agent:cancel-run",
   agentRecoveryInspect: "m5:v4:agent:recovery:inspect",
   agentRecoveryResolve: "m5:v4:agent:recovery:resolve",
+  agentPublicEvent: "m5:v4:agent:public-event",
 } as const;

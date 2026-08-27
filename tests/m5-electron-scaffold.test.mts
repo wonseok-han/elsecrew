@@ -57,6 +57,9 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
     manifest.scripts["m5:test:electron"],
     "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
   );
+  assert.match(source("electron/preload.ts"), /onAgentPublicEvent: \(listener\) => subscribe\(agentPublicEventListeners, listener\)/);
+  assert.match(source("electron/preload.ts"), /ipcRenderer\.on\(M5_BRIDGE_V4_CHANNELS\.agentPublicEvent/);
+  assert.match(source("electron/preload.ts"), /validateAgentPublicEventV1\(payload\.event\)/);
   assert.match(source("pnpm-workspace.yaml"), /^nodeLinker: hoisted$/m);
 });
 
