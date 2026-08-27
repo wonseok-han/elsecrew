@@ -40,3 +40,12 @@ export const M5_BRIDGE_V3_CHANNELS = {
   recoveryMarkResolved: "m5:v3:recovery:mark-resolved",
   chatEvent: "m5:v3:chat:event",
 } as const;
+
+/** G5A is additive and remains unavailable until the exact planned ready set is negotiated. */
+export const M5_BRIDGE_V4_CHANNELS = {
+  agentGetCapabilities: "m5:v4:agent:get-capabilities",
+  agentStartRun: "m5:v4:agent:start-run",
+  agentCancelRun: "m5:v4:agent:cancel-run",
+  agentRecoveryInspect: "m5:v4:agent:recovery:inspect",
+  agentRecoveryResolve: "m5:v4:agent:recovery:resolve",
+} as const;

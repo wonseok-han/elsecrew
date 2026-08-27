@@ -7,6 +7,11 @@ import test from "node:test";
 
 import { MAX_CONTROL_LINE_BYTES, type EventV1 } from "../src/m5/contracts/protocol-v1.ts";
 import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
+import {
+  G5A_CAPABILITIES_V1,
+  computeAgentCapabilityFingerprintV1,
+  type AgentCapabilitySnapshotV1,
+} from "../src/m5/contracts/agent-adapter-v1.ts";
 import { QuitCoordinatorV1 } from "../electron/quit-coordinator.ts";
 import { SidecarClientV1, type SidecarProcessV1 } from "../electron/sidecar-client.ts";
 import {
@@ -72,6 +77,63 @@ function readyLine() {
       sidecarInstanceId: "sidecar_test_01",
     },
   });
+}
+
+function g5aReadyLine() {
+  return JSON.stringify({
+    protocolVersion: 1,
+    kind: "event",
+    sidecarInstanceId: "sidecar_test_01",
+    streamId: "system",
+    seq: 1,
+    event: "system.ready",
+    payload: {
+      protocolVersion: 1,
+      sidecarSchemaVersion: 1,
+      appSchemaVersion: 1,
+      pid: 42,
+      platform: "darwin",
+      capabilities: [...G5A_CAPABILITIES_V1],
+      sidecarInstanceId: "sidecar_test_01",
+    },
+  });
+}
+
+function g5aFixture(name: string, valid = true): Record<string, unknown> {
+  const cases = JSON.parse(readFileSync(resolve("tests/fixtures/m5/agent-adapter-v1/cases.json"), "utf8")) as {
+    valid: Array<{ name: string; value: Record<string, unknown> }>;
+    invalid: Array<{ name: string; value: Record<string, unknown> }>;
+  };
+  const entry = (valid ? cases.valid : cases.invalid).find((candidate) => candidate.name === name);
+  assert.ok(entry, `missing G5A fixture ${name}`);
+  return entry.value;
+}
+
+function measuredCapability(): AgentCapabilitySnapshotV1 {
+  const snapshot = {
+    schemaVersion: 1 as const,
+    runtime: "claude-code" as const,
+    platform: "darwin" as const,
+    installationState: "installed" as const,
+    authState: "authenticated" as const,
+    executable: {
+      pathDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      fileIdentityDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      cliVersion: "2.1.241",
+    },
+    models: [{ modelSelector: "claude-opus-5", reasoningEfforts: ["high"], permissions: ["readOnly", "workspaceWrite"] }],
+    discovery: {
+      source: "exactVersionManifest" as const,
+      verificationLevel: "measuredExactVersion" as const,
+      exactCliVersion: "2.1.241",
+      effectiveModelEvidence: "measuredExactVersion" as const,
+    },
+    canStart: true,
+    blockedReason: null,
+    fingerprint: "",
+    observedAt: "2026-08-27T00:00:00Z",
+  };
+  return { ...snapshot, fingerprint: computeAgentCapabilityFingerprintV1(snapshot as AgentCapabilitySnapshotV1) };
 }
 
 function eventLine(event: EventV1) {
@@ -143,6 +205,114 @@ test("G5 rejects a ready handshake without the exact cumulative capabilities", a
   child.stdout.write(`${JSON.stringify(ready)}\n`);
   await assert.rejects(starting, /capabilities do not match/);
   assert.equal(child.terminations, 1);
+});
+
+test("G5A agent IPC rejects launch extras before IPC and remains unavailable on the current G5 handshake", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${readyLine()}\n`); await starting;
+  const start = {
+    chatId: "chat_01",
+    roleId: "coding" as const,
+    inputMessageIds: ["message_01"],
+    expectedCapabilityFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  };
+  for (const forbidden of ["executablePath", "argv", "model", "env", "cwd", "prompt", "userConfig", "addDir"]) {
+    assert.throws(() => client.startAgentRun({ ...start, [forbidden]: "forbidden" } as unknown as typeof start), /fields/);
+  }
+  assert.equal(child.writes.length, 0, "invalid renderer launch input must not reach sidecar IPC");
+  await assert.rejects(client.getAgentCapabilities({ runtime: "claude-code", refresh: false }), /agentAdapterUnavailable/);
+  await assert.rejects(client.startAgentRun(start), /agentAdapterUnavailable/);
+  assert.equal(child.writes.length, 0, "current G5 handshake must not advertise or invoke G5A calls");
+});
+
+test("G5A only wires exact negotiated capabilities and validates actual-agent response identity", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+
+  const status = client.getSystemStatus();
+  const statusRequest = JSON.parse(child.writes[0] ?? "{}") as { requestId: string; method: string };
+  assert.equal(statusRequest.method, "system.status");
+  child.stdout.write(responseLine(statusRequest.requestId, {
+    state: "ready",
+    sidecar: {
+      protocolVersion: 1, sidecarSchemaVersion: 1, appSchemaVersion: 1, pid: 42, platform: "darwin",
+      capabilities: [...G5A_CAPABILITIES_V1], sidecarInstanceId: "sidecar_test_01",
+    },
+    database: { health: "healthy", schemaVersion: 1 }, recoveryRequired: false, blockerIds: [],
+  }));
+  assert.equal((await status).state, "ready");
+
+  const capabilities = client.getAgentCapabilities({ runtime: "claude-code", refresh: true });
+  const capabilityRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(capabilityRequest.method, "agent.getCapabilities");
+  assert.deepEqual(capabilityRequest.params, { runtime: "claude-code", refresh: true });
+  child.stdout.write(responseLine(capabilityRequest.requestId, measuredCapability()));
+  assert.equal((await capabilities).canStart, true);
+
+  const start = client.startAgentRun({
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"],
+    expectedCapabilityFingerprint: measuredCapability().fingerprint,
+  });
+  const startRequest = JSON.parse(child.writes[2] ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(startRequest.method, "run.startAgent");
+  assert.deepEqual(startRequest.params, {
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"],
+    expectedCapabilityFingerprint: measuredCapability().fingerprint,
+  });
+  child.stdout.write(responseLine(startRequest.requestId, { schemaVersion: 1, runId: "agent_run_01", chatId: "chat_other", roleId: "planning", state: "preparing" }));
+  await assert.rejects(start, /chatId does not match request/);
+  assert.equal(child.terminations, 1, "cross-chat actual-run response must poison the session");
+});
+
+test("G5A keeps actual and fixture ledgers separate and fails closed on raw agent events", async () => {
+  const valid = createClient();
+  const validStart = valid.client.start(); valid.child.stdout.write(`${g5aReadyLine()}\n`); await validStart;
+  const detail = valid.client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const detailRequest = JSON.parse(valid.child.writes[0] ?? "{}") as { requestId: string };
+  valid.child.stdout.write(responseLine(detailRequest.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+  assert.equal((await detail).chat.chatId, "chat_01");
+
+  const crossed = createClient();
+  const crossedStart = crossed.client.start(); crossed.child.stdout.write(`${g5aReadyLine()}\n`); await crossedStart;
+  const badDetail = crossed.client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const badRequest = JSON.parse(crossed.child.writes[0] ?? "{}") as { requestId: string };
+  crossed.child.stdout.write(responseLine(badRequest.requestId, g5aFixture("agent-chat-page-rejects-cross-project-run", false)));
+  await assert.rejects(badDetail, /identity/);
+  assert.equal(crossed.child.terminations, 1);
+
+  const raw = createClient();
+  const rawStart = raw.client.start(); raw.child.stdout.write(`${g5aReadyLine()}\n`); await rawStart;
+  let delivered = 0;
+  raw.client.onChatEvent(() => { delivered += 1; });
+  raw.child.stdout.write(eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "agent_raw", seq: 1,
+    event: "run.event", chatId: "chat_01", taskId: "task_01", runId: "agent_run_01", payload: { reasoning: "must never reach renderer" },
+  }));
+  assert.match(raw.client.failure?.message ?? "", /actual-agent raw run events are forbidden/);
+  assert.equal(raw.child.terminations, 1);
+  assert.equal(delivered, 0, "raw/reasoning payload must not be published through chat events");
+});
+
+test("G5A cancel and recovery responses retain the exact actual-agent namespace", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+  const cancelFixture = g5aFixture("actual-agent-clean-cancel-result");
+  const cancelRequest = cancelFixture.request as Record<string, unknown>;
+  const cancel = client.cancelAgentRun(cancelRequest as never);
+  const cancelEnvelope = JSON.parse(child.writes[0] ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(cancelEnvelope.method, "run.cancelAgent");
+  assert.deepEqual(cancelEnvelope.params, cancelRequest);
+  child.stdout.write(responseLine(cancelEnvelope.requestId, cancelFixture));
+  assert.equal((await cancel).outcome, "canceled");
+
+  const recoveryFixture = g5aFixture("actual-agent-recovery-resolves-only-after-process-proof");
+  const recoveryRequest = recoveryFixture.request as Record<string, unknown>;
+  const recovery = client.resolveAgentRecovery(recoveryRequest as never);
+  const recoveryEnvelope = JSON.parse(child.writes[1] ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(recoveryEnvelope.method, "recovery.resolveAgent");
+  assert.deepEqual(recoveryEnvelope.params, recoveryRequest);
+  child.stdout.write(responseLine(recoveryEnvelope.requestId, recoveryFixture));
+  assert.equal((await recovery).outcome, "resolvedAbandoned");
 });
 
 test("a partial spawned process is terminated before any pipe listener can leak", async () => {
@@ -586,6 +756,22 @@ test("G5 V3 bridge keeps every workspace/chat action fixed, typed, and isolated"
   assert.throws(() => validateWorkspaceTreeInput({ projectId: "p", parentPath: "../escape", cursor: null, chatId: "c", worktreeId: "w", workspaceIdentity: "i" }));
   assert.throws(() => validateWorkspaceSaveChunkInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", seq: 1, text: "x", extra: true }));
   assert.throws(() => validateWorkspaceSaveCommitInput({ chatId: "c", projectId: "p", worktreeId: "w", workspaceIdentity: "i", saveId: "s", expectedVersion: "sha256:bad", lastSeq: 1, totalBytes: 1 }));
+});
+
+test("G5A bridge exposes only fixed adapter channels with the existing main-frame boundary", () => {
+  const main = source("electron/main.ts");
+  const preload = source("electron/preload.ts");
+  const channels = source("electron/ipc-channels.ts");
+  for (const name of ["agentGetCapabilities", "agentStartRun", "agentCancelRun", "agentRecoveryInspect", "agentRecoveryResolve"]) {
+    assert.match(channels, new RegExp(`${name}: "m5:v4:`));
+    assert.match(main, new RegExp(`M5_BRIDGE_V4_CHANNELS\\.${name}`));
+    assert.match(preload, new RegExp(`M5_BRIDGE_V4_CHANNELS\\.${name}`));
+  }
+  assert.match(preload, /validateAgentRunStartRequestV1\(input\)/);
+  assert.match(preload, /validateAgentRunCancelRequestV1\(input\)/);
+  assert.match(main, /assertCurrentMainFrame\(event\)/);
+  assert.doesNotMatch(channels, /generic|invokeAll|startAgentSmoke/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\([^M]/);
 });
 
 test("G5 preparation uses exact IDs, binds chat creation to a known preparation, and never falls back", async () => {

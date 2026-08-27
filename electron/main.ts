@@ -25,7 +25,14 @@ import type {
   AbandonPreparedWorkspaceRequestV1, RecoveryMarkResolvedRequestV1,
   RunCancelRequestV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS } from "./ipc-channels.ts";
+import type {
+  AgentCapabilitiesRequestV1,
+  AgentRecoveryInspectRequestV1,
+  AgentRecoveryResolveRequestV1,
+  AgentRunCancelRequestV1,
+  AgentRunStartRequestV1,
+} from "../src/m5/contracts/agent-adapter-v1.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS } from "./ipc-channels.ts";
 import { EventCreditV1 } from "./event-credit.ts";
 import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
@@ -274,6 +281,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryList, invoke((client, input: PageRequestV1) => client.listRecoveries(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryInspect, invoke((client, input: { recoveryId: string }) => client.inspectRecovery(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryMarkResolved, invoke((client, input: RecoveryMarkResolvedRequestV1) => client.markRecoveryResolved(input)));
+  ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentGetCapabilities, invoke((client, input: AgentCapabilitiesRequestV1) => client.getAgentCapabilities(input)));
+  ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentStartRun, invoke((client, input: AgentRunStartRequestV1) => client.startAgentRun(input)));
+  ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentCancelRun, invoke((client, input: AgentRunCancelRequestV1) => client.cancelAgentRun(input)));
+  ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentRecoveryInspect, invoke((client, input: AgentRecoveryInspectRequestV1) => client.inspectAgentRecovery(input)));
+  ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentRecoveryResolve, invoke((client, input: AgentRecoveryResolveRequestV1) => client.resolveAgentRecovery(input)));
 }
 
 async function createMainWindow() {

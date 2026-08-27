@@ -16,6 +16,13 @@
 - **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
 - **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron V4 소비 경계)
+
+- **한 일**: additive V4의 다섯 actual-agent IPC channel(capability 조회, 시작, cancel, recovery inspect/resolve)을 main-frame/origin 검사가 있는 고정 handler와 좁은 preload bridge에 연결했다. renderer 요청은 계약 validator를 preload와 `SidecarClientV1` 양쪽에서 exact 검사하며 executable path·argv·model·env·cwd·prompt·user config·추가 경로가 포함되면 sidecar IPC 전 거부한다. raw `ipcRenderer`나 generic invoke는 노출하지 않았고 context isolation·sandbox·기존 G5 V3 표면은 유지했다.
+- **협상·응답 결정**: 현 G5 exact ready set에서는 V4 호출이 `agentAdapterUnavailable`로 끝나며 sidecar에 request를 보내지 않는다. planned G5A exact capability set이 협상된 경우만 V4 request를 허용하고 capability fingerprint/runtime, start chat/role, actual cancel/recovery의 full chat/task/project/worktree/workspace/run identity, V4 `agentRuns` 별도 ledger를 contract validator로 fail-closed 확인한다. fixture `runs`와 actual `agentRuns`는 섞지 않는다.
+- **공개 이벤트 경계**: 아직 normalized actual-agent public-event IPC가 계약되어 있지 않으므로 G5A 중 raw `run.event`/`run.finished`를 받으면 session을 poison한다. 따라서 reasoning·raw stdout/stderr·tool args/output·debug·env·auth·prompt·token·evidence body는 renderer로 전달되지 않는다. status/question/final의 normalized event route는 Rust adapter와 renderer 소비자가 추가될 다음 계약/구현 단위에서 함께 열어야 한다.
+- **검증·경계**: root 의존성을 재사용한 TypeScript `tsc --noEmit`, Electron bridge/scaffold Node 34개, 전체 Node 132개, direct Vite production build, `git diff --check`를 통과했다. 현 fixture G5 handshake에서 V4 무전송, launch extra pre-IPC 거부, exact G5A handshake, cross-identity response poison, actual-vs-fixture ledger 분리, raw event non-exposure, cancel/recovery namespace를 fake transcript만으로 검증했다. worktree에 자체 `node_modules`가 없어 `pnpm build`는 격리된 네트워크에서 의존성 fetch를 시도하다 중단됐으며, package/lockfile 변경은 없다. 실제 sidecar adapter, Claude/Codex CLI·인증·model 조회·사용자 프로젝트·유료 모델은 호출하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 통합·누적 게이트)
 
 - **통합**: actual-agent adapter 계약 기능·리뷰 수정 세 커밋을 독립 최종 `APPROVE` 뒤 `m5/coding-agent-ide`에 `9008b92`·`aaf614f`·`7903d75`로 순서대로 통합했다. 기존 G5 handshake와 fake-only V3는 그대로이며, planned V4 actual-agent 메서드는 protocol 예약·계약일 뿐 sidecar/Electron이 아직 광고하거나 소비하지 않는다.

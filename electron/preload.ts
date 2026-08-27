@@ -1,12 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
-import type { M5BridgeV3 } from "../src/m5/contracts/bridge-v3.ts";
+import type { M5BridgeV4 } from "../src/m5/contracts/bridge-v4.ts";
 import type { EventV1 } from "../src/m5/contracts/protocol-v1.ts";
+import {
+  validateAgentCapabilitiesRequestV1,
+  validateAgentRecoveryInspectRequestV1,
+  validateAgentRecoveryResolveRequestV1,
+  validateAgentRunCancelRequestV1,
+  validateAgentRunStartRequestV1,
+} from "../src/m5/contracts/agent-adapter-v1.ts";
 import { validateProjectIdentityV1 } from "../src/m5/contracts/project-v1.ts";
 import { validateTeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import { validateWorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS } from "./ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS } from "./ipc-channels.ts";
 import {
   validateChatCreateInput, validateChatGetInput, validateChatListInput, validateFixtureRunStartInput,
   validateAbandonPreparedWorkspaceInput, validatePrepareChatWorkspaceInput,
@@ -18,8 +25,8 @@ import {
   validateWorkspaceSaveCommitInput, validateWorkspaceTreeInput,
 } from "./bridge-input.ts";
 
-const bridge: M5BridgeV3 = Object.freeze({
-  version: 3,
+const bridge: M5BridgeV4 = Object.freeze({
+  version: 4,
   getSystemStatus: () => ipcRenderer.invoke(M5_INTERNAL_CHANNELS_V1.systemGetStatus),
   prepareQuit: () => ipcRenderer.invoke(M5_INTERNAL_CHANNELS_V1.appPrepareQuit),
   onSidecarEvent: (listener) => subscribe(sidecarListeners, listener),
@@ -62,16 +69,21 @@ const bridge: M5BridgeV3 = Object.freeze({
   inspectRecovery: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.recoveryInspect, validateRecoveryInspectInput(input)),
   markRecoveryResolved: (input) => ipcRenderer.invoke(M5_BRIDGE_V3_CHANNELS.recoveryMarkResolved, validateRecoveryMarkResolvedInput(input)),
   onChatEvent: (listener) => subscribe(chatListeners, listener),
+  getAgentCapabilities: (input) => ipcRenderer.invoke(M5_BRIDGE_V4_CHANNELS.agentGetCapabilities, validateAgentCapabilitiesRequestV1(input)),
+  startAgentRun: (input) => ipcRenderer.invoke(M5_BRIDGE_V4_CHANNELS.agentStartRun, validateAgentRunStartRequestV1(input)),
+  cancelAgentRun: (input) => ipcRenderer.invoke(M5_BRIDGE_V4_CHANNELS.agentCancelRun, validateAgentRunCancelRequestV1(input)),
+  inspectAgentRecovery: (input) => ipcRenderer.invoke(M5_BRIDGE_V4_CHANNELS.agentRecoveryInspect, validateAgentRecoveryInspectRequestV1(input)),
+  resolveAgentRecovery: (input) => ipcRenderer.invoke(M5_BRIDGE_V4_CHANNELS.agentRecoveryResolve, validateAgentRecoveryResolveRequestV1(input)),
 });
 
 contextBridge.exposeInMainWorld("m5", bridge);
 
 const sidecarListeners = new Set<(event: EventV1) => void>();
-const projectListeners = new Set<Parameters<M5BridgeV3["onProjectEvent"]>[0]>();
-const workspaceListeners = new Set<Parameters<M5BridgeV3["onWorkspaceEvent"]>[0]>();
-const chatListeners = new Set<Parameters<M5BridgeV3["onChatEvent"]>[0]>();
+const projectListeners = new Set<Parameters<M5BridgeV4["onProjectEvent"]>[0]>();
+const workspaceListeners = new Set<Parameters<M5BridgeV4["onWorkspaceEvent"]>[0]>();
+const chatListeners = new Set<Parameters<M5BridgeV4["onChatEvent"]>[0]>();
 ipcRenderer.on(M5_INTERNAL_CHANNELS_V1.sidecarEvent, (_event, payload: EventV1) => { for (const listener of sidecarListeners) listener(payload); acknowledge(payload); });
-ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV3["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => { for (const listener of projectListeners) listener(payload.event); acknowledge(payload); });
+ipcRenderer.on(M5_BRIDGE_V2_CHANNELS.projectEvent, (_event, payload: { event: Parameters<M5BridgeV4["onProjectEvent"]>[0] extends (event: infer T) => unknown ? T : never; streamId: string; seq: number }) => { for (const listener of projectListeners) listener(payload.event); acknowledge(payload); });
 ipcRenderer.on(M5_BRIDGE_V3_CHANNELS.workspaceEvent, (_event, payload: { event: unknown; streamId: string; seq: number }) => {
   const workspaceEvent = validateWorkspaceEventV1(payload.event);
   for (const listener of workspaceListeners) listener(workspaceEvent);

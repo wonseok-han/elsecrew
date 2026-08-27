@@ -96,6 +96,32 @@ import {
   type TeamMessageV1,
 } from "../src/m5/contracts/run-recovery-v1.ts";
 import {
+  G5A_CAPABILITIES_V1,
+  parsePlannedG5AReadyPayloadV1,
+  validateAgentCapabilitiesRequestV1,
+  validateAgentCapabilitySnapshotV1,
+  validateAgentChatDetailPageV1,
+  validateAgentRecoveryInspectRequestV1,
+  validateAgentRecoveryRecordV1,
+  validateAgentRecoveryResolveRequestV1,
+  validateAgentRecoveryResolveResultV1,
+  validateAgentRunAcceptedV1,
+  validateAgentRunCancelRequestV1,
+  validateAgentRunCancelResultV1,
+  validateAgentRunStartRequestV1,
+  type AgentCapabilitiesRequestV1,
+  type AgentCapabilitySnapshotV1,
+  type AgentChatDetailPageV1,
+  type AgentRecoveryInspectRequestV1,
+  type AgentRecoveryRecordV1,
+  type AgentRecoveryResolveRequestV1,
+  type AgentRecoveryResolveResultV1,
+  type AgentRunAcceptedV1,
+  type AgentRunCancelRequestV1,
+  type AgentRunCancelResultV1,
+  type AgentRunStartRequestV1,
+} from "../src/m5/contracts/agent-adapter-v1.ts";
+import {
   validateChatWorkspaceRefV1,
   validateWorkspaceCloseResultV1,
   validateWorkspaceDiffFileDescriptorV1,
@@ -198,6 +224,7 @@ export class SidecarClientV1 {
   #process: SidecarProcessV1 | undefined;
   #stdout = Buffer.alloc(0);
   #ready: ReadyPayloadV1 | undefined;
+  #agentAdapterNegotiated = false;
   #lastReady: ReadyPayloadV1 | null = null;
   #readyPromise: Promise<ReadyPayloadV1> | undefined;
   #resolveReady: ((ready: ReadyPayloadV1) => void) | undefined;
@@ -388,12 +415,43 @@ export class SidecarClientV1 {
     } catch (error) { return Promise.reject(asError(error, "invalid chat preparation binding")); }
   }
   listChats(input: ChatListRequestV1): Promise<ChatListPageV1> { return this.#request("chat.list", validateChatListRequestV1(input)) as Promise<ChatListPageV1>; }
-  getChat(input: ChatGetRequestV1): Promise<ChatDetailPageV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<ChatDetailPageV1>; }
+  getChat(input: ChatGetRequestV1): Promise<ChatDetailPageV1 | AgentChatDetailPageV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<ChatDetailPageV1 | AgentChatDetailPageV1>; }
   startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> { return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>; }
   cancelRun(input: RunCancelRequestV1): Promise<RunRecordV1> { return this.#request("run.cancel", validateRunCancelRequestV1(input)) as Promise<RunRecordV1>; }
   listRecoveries(input: PageRequestV1): Promise<RecoveryPageV1> { return this.#request("recovery.list", validatePageRequestV1(input)) as Promise<RecoveryPageV1>; }
   inspectRecovery(input: { recoveryId: string }): Promise<RecoveryRecordV1> { return this.#request("recovery.inspect", validateRecoveryId(input)) as Promise<RecoveryRecordV1>; }
   markRecoveryResolved(input: RecoveryMarkResolvedRequestV1): Promise<RecoveryRecordV1> { return this.#request("recovery.markResolved", validateRecoveryMarkResolvedRequestV1(input)) as Promise<RecoveryRecordV1>; }
+
+  getAgentCapabilities(input: AgentCapabilitiesRequestV1): Promise<AgentCapabilitySnapshotV1> {
+    return this.#requestAgent("agent.getCapabilities", validateAgentCapabilitiesRequestV1(input)) as Promise<AgentCapabilitySnapshotV1>;
+  }
+  startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {
+    return this.#requestAgent("run.startAgent", validateAgentRunStartRequestV1(input)) as Promise<AgentRunAcceptedV1>;
+  }
+  cancelAgentRun(input: AgentRunCancelRequestV1): Promise<AgentRunCancelResultV1> {
+    return this.#requestAgent("run.cancelAgent", validateAgentRunCancelRequestV1(input)) as Promise<AgentRunCancelResultV1>;
+  }
+  inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1> {
+    return this.#requestAgent("recovery.inspectAgent", validateAgentRecoveryInspectRequestV1(input)) as Promise<AgentRecoveryRecordV1>;
+  }
+  resolveAgentRecovery(input: AgentRecoveryResolveRequestV1): Promise<AgentRecoveryResolveResultV1> {
+    return this.#requestAgent("recovery.resolveAgent", validateAgentRecoveryResolveRequestV1(input)) as Promise<AgentRecoveryResolveResultV1>;
+  }
+
+  #requestAgent(method: Extract<MethodV1, "agent.getCapabilities" | "run.startAgent" | "run.cancelAgent" | "recovery.inspectAgent" | "recovery.resolveAgent">, params: Record<string, unknown>): Promise<unknown> {
+    try {
+      this.#requireAgentAdapter();
+      return this.#request(method, params);
+    } catch (error) {
+      return Promise.reject(asError(error, "agent adapter is unavailable"));
+    }
+  }
+
+  #requireAgentAdapter(): void {
+    if (!this.#agentAdapterNegotiated) {
+      throw new Error("agentAdapterUnavailable: sidecar did not negotiate the exact planned G5A capability set");
+    }
+  }
 
   #request(method: MethodV1, params: object): Promise<unknown> {
     if (!this.#ready) return Promise.reject(this.#failure ?? new Error("sidecar is not ready"));
@@ -479,8 +537,13 @@ export class SidecarClientV1 {
     this.#session.observe(envelope);
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
-        const ready = parseG5ReadyPayloadV1(parseReadyPayload(envelope));
+        const rawReady = parseReadyPayload(envelope);
+        const negotiatedG5A = sameStrings(rawReady.capabilities, G5A_CAPABILITIES_V1);
+        const ready = negotiatedG5A
+          ? parsePlannedG5AReadyPayloadV1(rawReady)
+          : parseG5ReadyPayloadV1(rawReady);
         this.#ready = ready;
+        this.#agentAdapterNegotiated = negotiatedG5A;
         this.#lastReady = ready;
         clearTimeout(this.#readyTimer);
         this.#resolveReady?.(ready);
@@ -500,6 +563,9 @@ export class SidecarClientV1 {
         const message = validateTeamMessageV1(envelope.payload);
         if (envelope.chatId !== message.chatId) throw new Error("chat event chatId does not match public message");
         for (const listener of this.#chatListeners) listener(message, envelope);
+      }
+      if (this.#agentAdapterNegotiated && (envelope.event === "run.event" || envelope.event === "run.finished")) {
+        throw new Error("actual-agent raw run events are forbidden until a normalized public event route is negotiated");
       }
       // V2's generic renderer event path is intentionally narrow. G5 workspace,
       // chat, and run protocol events must never be delivered twice (or expose
@@ -525,7 +591,7 @@ export class SidecarClientV1 {
       return;
     }
     if (pending.method === "system.status") {
-      const status = parseG5SystemStatus(response.result);
+      const status = parseG5SystemStatus(response.result, this.#agentAdapterNegotiated);
       if (status.state === "ready" && !sameReady(status.sidecar, this.#ready)) {
         throw new Error("system.status identity does not match system.ready");
       }
@@ -648,7 +714,10 @@ export class SidecarClientV1 {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;
       }
       case "chat.get": {
-        const value = validateChatDetailPageV1(response.result); assertResponseField(value.chat, pending.params, "chatId"); return value;
+        const value = this.#agentAdapterNegotiated
+          ? validateAgentChatDetailPageV1(response.result)
+          : validateChatDetailPageV1(response.result);
+        assertResponseField(value.chat, pending.params, "chatId"); return value;
       }
       case "run.startFixture": {
         const value = validateRunRecordV1(response.result);
@@ -666,6 +735,35 @@ export class SidecarClientV1 {
       }
       case "recovery.markResolved": {
         const value = validateRecoveryRecordV1(response.result); assertResponseField(value, pending.params, "recoveryId"); return value;
+      }
+      case "agent.getCapabilities": {
+        const value = validateAgentCapabilitySnapshotV1(response.result);
+        assertResponseField(value, pending.params, "runtime");
+        return value;
+      }
+      case "run.startAgent": {
+        const value = validateAgentRunAcceptedV1(response.result);
+        assertResponseField(value, pending.params, "chatId");
+        assertResponseField(value, pending.params, "roleId");
+        return value;
+      }
+      case "run.cancelAgent": {
+        const request = validateAgentRunCancelRequestV1(pending.params);
+        const value = validateAgentRunCancelResultV1(response.result);
+        assertSameAgentRunIdentity(request, value.request, "agent cancel response");
+        return value;
+      }
+      case "recovery.inspectAgent": {
+        const request = validateAgentRecoveryInspectRequestV1(pending.params);
+        const value = validateAgentRecoveryRecordV1(response.result);
+        assertSameAgentRecoveryIdentity(request, value, "agent recovery response");
+        return value;
+      }
+      case "recovery.resolveAgent": {
+        const request = validateAgentRecoveryResolveRequestV1(pending.params);
+        const value = validateAgentRecoveryResolveResultV1(response.result);
+        assertSameAgentRecoveryIdentity(request, value.request, "agent recovery resolution response");
+        return value;
       }
       default: return failResult(`unsupported G4 response method: ${pending.method}`);
     }
@@ -857,6 +955,27 @@ function assertResponseField(
   }
 }
 
+function assertSameAgentRunIdentity(
+  expected: AgentRunCancelRequestV1,
+  actual: AgentRunCancelRequestV1,
+  name: string,
+): void {
+  for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"] as const) {
+    if (expected[field] !== actual[field]) throw new Error(`${name} ${field} does not match request`);
+  }
+}
+
+function assertSameAgentRecoveryIdentity(
+  expected: AgentRecoveryInspectRequestV1 | AgentRecoveryResolveRequestV1,
+  actual: AgentRecoveryInspectRequestV1 | AgentRecoveryResolveRequestV1 | AgentRecoveryRecordV1,
+  name: string,
+): void {
+  if (expected.recoveryId !== actual.recoveryId) throw new Error(`${name} recoveryId does not match request`);
+  for (const field of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"] as const) {
+    if (expected[field] !== actual[field]) throw new Error(`${name} ${field} does not match request`);
+  }
+}
+
 function workspaceRefFrom(value: Record<string, unknown>): ChatWorkspaceRefV1 {
   return validateChatWorkspaceRefV1({
     chatId: value.chatId,
@@ -991,17 +1110,20 @@ function strictObject(value: unknown, keys: readonly string[], name: string): Re
   return object;
 }
 
-function parseG5SystemStatus(value: unknown): SystemStatusV1 {
-  const object = strictObject(value, ["state", "sidecar", "database", "recoveryRequired", "blockerIds"], "G5 system.status");
-  if (object.state !== "ready") throw new Error("G5 system.status must be ready");
-  const sidecar = parseG5ReadyPayloadV1(object.sidecar);
-  const database = strictObject(object.database, ["health", "schemaVersion"], "G5 system.status database");
+function parseG5SystemStatus(value: unknown, agentAdapterNegotiated = false): SystemStatusV1 {
+  const generation = agentAdapterNegotiated ? "G5A" : "G5";
+  const object = strictObject(value, ["state", "sidecar", "database", "recoveryRequired", "blockerIds"], `${generation} system.status`);
+  if (object.state !== "ready") throw new Error(`${generation} system.status must be ready`);
+  const sidecar = agentAdapterNegotiated
+    ? parsePlannedG5AReadyPayloadV1(object.sidecar)
+    : parseG5ReadyPayloadV1(object.sidecar);
+  const database = strictObject(object.database, ["health", "schemaVersion"], `${generation} system.status database`);
   if (database.health !== "healthy" || database.schemaVersion !== 1 || typeof object.recoveryRequired !== "boolean"
-    || !Array.isArray(object.blockerIds)) throw new Error("G5 system.status is invalid");
+    || !Array.isArray(object.blockerIds)) throw new Error(`${generation} system.status is invalid`);
   const blockerIds = object.blockerIds;
   if (blockerIds.some((id) => !validId(id)) || new Set(blockerIds).size !== blockerIds.length
     || (object.recoveryRequired && blockerIds.length === 0) || (!object.recoveryRequired && blockerIds.length !== 0)) {
-    throw new Error("G5 system.status recovery blockers are invalid");
+    throw new Error(`${generation} system.status recovery blockers are invalid`);
   }
   return {
     state: "ready", sidecar, database: { health: "healthy", schemaVersion: 1 },
