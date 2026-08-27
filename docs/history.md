@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 누적 하네스·독립 QA)
+
+- **누적 게이트**: exact 통합 commit `022b79517462a1f9339c8cabb68b5fafd65eae0b`에서 G5 run/recovery 누적 하네스와 macOS arm64 Electron package smoke를 통과했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-27T06-03-46-910Z.json`이다. 첫 시도는 격리 환경의 Electron binary 다운로드 차단만으로 실패했고, 네트워크 허용 환경에서 같은 명령을 재실행해 코드 실패와 분리했다.
+- **독립 QA**: 별도 QA가 같은 exact commit에서 focused G5B 계약·Electron·renderer, 전체 Node 163개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript no-emit, macOS arm64 package smoke를 다시 실행했다. zero-output·지연 종료, terminal 저장 실패 뒤 재시작 recovery/poison, event/text/full-array-prefix budget, counter drift, Electron registry 한도·terminal replay, durable hydration을 확인해 `G5B_QA_PASS`로 판정했다. 증거는 `.artifacts/m5-qa/g5b-integration-022b79517462a1f9339c8cabb68b5fafd65eae0b-2026-08-27T06-07-43Z.json`이다.
+- **문서·경계**: 현행 구조 문서를 V5 terminal notification과 run/session 예산까지 갱신했다. 일반 `--stdio`의 실제 Claude Code/Codex provider·인증·모델 출력, 사용자 프로젝트, Windows는 실행하지 않았고, 여러 세션·채팅에 걸친 SQLite 전체 용량·보존·compaction은 G6 미해결 사항이다. 다음은 이 문서 commit을 포함한 독립 G5B 최종 gate이며 `main` 병합·push는 하지 않는다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal·resource budget 통합)
 
 - **통합**: 독립 승인된 G5B 계약·원장 증폭 교정·renderer·Electron·Rust terminal/budget 커밋을 `m5/coding-agent-ide`에 순서대로 통합했다. `agent.runStateChanged`는 terminal 영속 commit 뒤 같은 actual-run stream으로 발행되고 renderer는 그 payload를 직접 상태로 쓰지 않고 durable `chat.get` hydration trigger로만 사용한다.
