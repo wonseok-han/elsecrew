@@ -7,7 +7,7 @@ import {
   type WorkbenchPanel,
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
-import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
+import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
 import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { ChatUiController, stateLabel } from "./chat-state.ts";
 
@@ -31,7 +31,7 @@ function loadMonaco(): Promise<MonacoApi> {
   return monacoLoader;
 }
 
-export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { bridge?: M5BridgeV3 }) {
+export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV4 }: { bridge?: M5BridgeV4 }) {
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const [goal, setGoal] = useState("");
@@ -108,7 +108,7 @@ export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV3 }: { b
       )}
 
       {snapshot.project && <section className="m5-chat-strip" aria-label="프로젝트 채팅">
-        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}</button>)}</div>
+        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}{chat.refreshNeededChatIds.includes(item.chatId) && <span className="m5-chat-update">새 상태</span>}</button>)}</div>
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
           <input aria-label="새 채팅 목표" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="이 프로젝트에서 이루고 싶은 일을 적어주세요" disabled={chat.preparing} />
           <button type="submit" disabled={!goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>새 채팅</button>
@@ -193,9 +193,16 @@ function RoleSettings({ settings, onSave, onClose }: { settings: NonNullable<Ret
 }
 
 function TeamTimeline({ controller, chat }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]> }) {
-  const active = Boolean(chat.activeRunId);
+  const fixtureActive = Boolean(chat.activeRunId);
+  const actualActive = chat.agentRuns.find((run) => run.state === "preparing" || run.state === "running" || run.state === "cancelling") ?? null;
+  const startingActual = chat.agentStartingRoleId !== null;
   const blocked = controller.isActionBlocked();
-  return <section className="m5-timeline" aria-label="팀 대화"><header><div><p className="m5-eyebrow">팀 대화 · {stateLabel(chat.activeChat!.state)}</p><h2>{chat.activeChat!.goal}</h2></div>{active && <button type="button" className="m5-secondary" onClick={() => void controller.cancelRun()}>실행 취소</button>}</header>{blocked && <section className="m5-error"><strong>복구가 필요한 작업 복사본이에요.</strong><p>실행·저장·닫기 같은 위험한 동작을 막았어요. 종료 증거를 확인한 뒤 이 복사본을 버릴 수 있습니다.</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" onClick={() => void controller.abandonRecovery(item)}>확인 후 작업 복사본 버리기</button>)}</section>}<div className="m5-timeline-list">{chat.messages.map((message) => <article key={message.messageId} className={`m5-message m5-message-${message.kind}`}><div><strong>{message.kind === "user" ? "나" : message.roleId ? ({ planning: "기획", coding: "코딩", review: "검토" })[message.roleId] : "상태"}</strong>{message.roleId && <span> · {profileLabel(chat.activeChat!, message.roleId)}</span>}<time>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p>{message.runId && <small>실행 ID: {message.runId}</small>}</article>)}</div><footer><span>가짜 에이전트 데모 · 실제 모델은 실행하지 않음</span>{(["planning", "coding", "review"] as const).map((role) => <button key={role} type="button" disabled={active || blocked} onClick={() => void controller.startDemo(role)}>데모 실행 · {({ planning: "기획", coding: "코딩", review: "검토" })[role]}</button>)}</footer></section>;
+  return <section className="m5-timeline" aria-label="팀 대화"><header><div><p className="m5-eyebrow">팀 대화 · {stateLabel(chat.activeChat!.state)}</p><h2>{chat.activeChat!.goal}</h2></div><div className="m5-run-actions">{fixtureActive && <button type="button" className="m5-secondary" onClick={() => void controller.cancelRun()}>데모 실행 취소</button>}{actualActive && <button type="button" className="m5-secondary" onClick={() => void controller.cancelAgentRun(actualActive)}>실제 실행 취소</button>}</div></header>{blocked && <section className="m5-error"><strong>복구가 필요한 작업 복사본이에요.</strong><p>실행·저장·닫기 같은 위험한 동작을 막았어요. 종료 증거를 확인한 뒤 이 복사본을 버릴 수 있습니다.</p>{chat.recoveries.filter((item) => item.state === "unresolved").map((item) => <button key={item.recoveryId} type="button" onClick={() => void controller.abandonRecovery(item)}>확인 후 작업 복사본 버리기</button>)}</section>}{chat.agentRecovery && <section className="m5-error"><strong>실제 에이전트 실행의 종료 확인이 필요해요.</strong><p>이 실행은 복구가 필요한 상태로 남아 있어요. 임의로 버리거나 다시 실행하지 않았어요.</p></section>}<AgentRuns runs={chat.agentRuns} /><div className="m5-timeline-list">{chat.messages.map((message) => <article key={message.messageId} className={`m5-message m5-message-${message.kind}`}><div><strong>{message.kind === "user" ? "나" : message.roleId ? ({ planning: "기획", coding: "코딩", review: "검토" })[message.roleId] : "상태"}</strong>{message.roleId && <span> · {profileLabel(chat.activeChat!, message.roleId)}</span>}<time>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p>{message.runId && <small>실행 ID: {message.runId}</small>}</article>)}</div><footer><span>데모는 실제 모델을 실행하지 않아요. 실제 실행은 설치·로그인·정확한 역할 설정을 확인한 뒤에만 시작해요.</span>{(["planning", "coding", "review"] as const).map((role) => <button key={`demo-${role}`} type="button" disabled={fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startDemo(role)}>데모 실행 · {({ planning: "기획", coding: "코딩", review: "검토" })[role]}</button>)}{(["planning", "coding", "review"] as const).map((role) => <button key={`actual-${role}`} type="button" className="m5-secondary" disabled={fixtureActive || Boolean(actualActive) || startingActual || blocked} onClick={() => void controller.startAgent(role)}>{chat.agentStartingRoleId === role ? "실제 연결 확인 중…" : `실제 실행 준비 · ${({ planning: "기획", coding: "코딩", review: "검토" })[role]}`}</button>)}</footer></section>;
+}
+
+function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
+  if (runs.length === 0) return null;
+  return <section className="m5-agent-runs" aria-label="실제 에이전트 실행 상태"><strong>실제 에이전트 실행</strong>{runs.map((run) => <article key={run.runId}><span>{({ planning: "기획", coding: "코딩", review: "검토" })[run.selectedProfile.roleId]}</span><span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span><span> · {run.state}</span></article>)}</section>;
 }
 
 function profileLabel(chat: NonNullable<ReturnType<ChatUiController["snapshot"]>["activeChat"]>, roleId: RoleProfileV1["roleId"]): string { const profile = chat.roleSnapshots.find((item) => item.roleId === roleId); return profile ? `${profile.runtime === "codex" ? "Codex" : "Claude Code"} · ${profile.modelSelector}${profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : ""}` : ""; }

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A renderer public-event 소비)
+
+- **영속 기록 우선**: renderer는 V4 `onAgentPublicEvent`를 V3 legacy chat listener와 함께 구독하되, public event의 text를 채팅에 직접 넣지 않는다. active/pending chat은 현재 연속 sequence 뒤의 bounded `chat.get` 페이지를 끝까지 다시 읽고 그 durable `TeamMessage`만 합치며, `agentRuns` ledger도 같은 detail에서 새로 고친다. inactive chat은 내용 대신 refresh 표시만 남긴다.
+- **실제 실행 UI**: 채팅 생성 시 고정된 role snapshot의 runtime/model을 그대로 사용해 capability를 확인하고, unavailable이면 이유를 알려 주며 다른 모델로 fallback하지 않는다. start에는 현재 durable message ID와 capability fingerprint만 넣고, cancel은 chat/task/project/worktree/workspace/run 전체 identity를 보낸다. `final` public event는 process 종료로 취급하지 않으며, cancel의 `recoveryRequired`는 legacy abandon으로 바꾸지 않고 안전한 복구 알림으로만 보인다.
+- **검증·경계**: public raw text 미노출, burst coalescing, page 순서, pending/inactive event, current G5 compatibility, no-fallback start, exact start/cancel payload, recovery notice 및 양쪽 listener dispose를 state test로 고정했다. root pinned TypeScript no-emit, Vite build, 전체 Node 146개, `git diff --check`를 통과했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 기능 branch의 독립 리뷰와 최신 통합 기준 QA다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust normalized public-event 소비)
 
 - **협상·순서**: 결정적 `--stdio-agent-fixture`만 exact G5A capability를 광고하고 일반 `--stdio`는 exact G5를 유지한다. actual start는 event 없는 accepted response를 먼저 반환하며, 이후 영속 `AgentPublicEventV1` 전체를 `agent.publicEvent` seq 1부터 연속 발행한다. actual start/finish의 raw `run.event`·`run.finished` carrier는 제거했고 기존 G5 fixture run event는 변경하지 않았다.
