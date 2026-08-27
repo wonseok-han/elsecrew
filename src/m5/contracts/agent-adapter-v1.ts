@@ -1,6 +1,8 @@
+import { sha256FileVersionV1 } from "./file-v1.ts";
 import { METHODS_V1, type ReadyPayloadV1 } from "./protocol-v1.ts";
 import {
   G5_CAPABILITIES_V1,
+  G5_EVENT_PAGE_MAX_ITEMS_V1,
   G5_ID_MAX_BYTES_V1,
   G5_MODEL_SELECTOR_MAX_BYTES_V1,
   G5_PERMISSIONS_V1,
@@ -11,6 +13,7 @@ import {
   G5_RUN_STATES_V1,
   G5_RUNTIMES_V1,
   parseG5ReadyPayloadV1,
+  validateChatDetailPageV1,
   type ChatDetailPageV1,
   type PermissionV1,
   type RoleIdV1,
@@ -24,6 +27,9 @@ export const G5A_CAPABILITIES_V1 = [
   ...G5_CAPABILITIES_V1,
   "agent.getCapabilities",
   "run.startAgent",
+  "run.cancelAgent",
+  "recovery.inspectAgent",
+  "recovery.resolveAgent",
 ] as const;
 export const AGENT_INSTALLATION_STATES_V1 = ["installed", "notInstalled", "incomplete"] as const;
 export const AGENT_AUTH_STATES_V1 = ["authenticated", "notAuthenticated", "expired", "unknown"] as const;
@@ -98,7 +104,7 @@ export interface AgentCapabilitySnapshotV1 {
   discovery: AgentDiscoveryEvidenceV1;
   canStart: boolean;
   blockedReason: (typeof AGENT_CAPABILITY_BLOCK_REASONS_V1)[number] | null;
-  /** sha256 of canonical snapshot fields except fingerprint and observedAt. */
+  /** SHA-256 of canonical snapshot fields except fingerprint and observedAt. */
   fingerprint: string;
   observedAt: string;
 }
@@ -123,6 +129,7 @@ export interface AgentRunRecordV1 {
   runId: string;
   chatId: string;
   taskId: string;
+  projectId: string;
   worktreeId: string;
   workspaceIdentity: string;
   selectedProfile: AgentResolvedProfileV1;
@@ -215,6 +222,56 @@ export interface AgentTerminationTranscriptV1 {
   observedAt: string;
 }
 
+export interface AgentRunIdentityV1 {
+  chatId: string;
+  taskId: string;
+  projectId: string;
+  worktreeId: string;
+  workspaceIdentity: string;
+  runId: string;
+}
+
+export type AgentRunCancelRequestV1 = AgentRunIdentityV1;
+
+export interface AgentRecoveryRecordV1 extends AgentRunIdentityV1 {
+  schemaVersion: 1;
+  recoveryId: string;
+  source: "actualAgent";
+  reason: "uncleanShutdown" | "cancelUncertain" | "processIdentityUncertain";
+  state: "unresolved" | "resolvedAbandoned";
+  trackedProcesses: readonly AgentProcessIdentityV1[];
+  poisoned: boolean;
+  revision: number;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface AgentRunCancelResultV1 {
+  schemaVersion: 1;
+  request: AgentRunCancelRequestV1;
+  run: AgentRunRecordV1;
+  termination: AgentTerminationTranscriptV1;
+  recovery: AgentRecoveryRecordV1 | null;
+  outcome: "canceled" | "recoveryRequired";
+}
+
+export interface AgentRecoveryInspectRequestV1 extends AgentRunIdentityV1 {
+  recoveryId: string;
+}
+
+export interface AgentRecoveryResolveRequestV1 extends AgentRecoveryInspectRequestV1 {
+  expectedRevision: number;
+  resolution: "abandon";
+}
+
+export interface AgentRecoveryResolveResultV1 {
+  schemaVersion: 1;
+  before: AgentRecoveryRecordV1;
+  request: AgentRecoveryResolveRequestV1;
+  after: AgentRecoveryRecordV1 | null;
+  outcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict";
+}
+
 export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabilitiesRequestV1 {
   const object = exactObject(value, ["runtime", "refresh"], "agent capabilities request");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
@@ -240,7 +297,7 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   const blockedReason = object.blockedReason === null
     ? null
     : oneOf(object.blockedReason, AGENT_CAPABILITY_BLOCK_REASONS_V1, "blockedReason");
-  digest(object.fingerprint, "fingerprint");
+  fingerprintDigest(object.fingerprint, "fingerprint");
   timestamp(object.observedAt, "observedAt");
 
   if ((installation === "installed") !== (executable !== null)) fail("installed state and executable identity must agree");
@@ -253,7 +310,19 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   const expected = capabilityBlocker(object.platform as string, installation, auth, discovery, executable, models);
   if (object.canStart !== (expected === null) || blockedReason !== expected) fail("canStart and blockedReason must match verified capability evidence");
   if (object.canStart && models.length === 0) fail("startable capability must have an exact model set");
-  return object as unknown as AgentCapabilitySnapshotV1;
+  const snapshot = object as unknown as AgentCapabilitySnapshotV1;
+  if (snapshot.fingerprint !== computeAgentCapabilityFingerprintV1(snapshot)) fail("fingerprint must bind the canonical capability snapshot");
+  return snapshot;
+}
+
+/** UTF-8 compact JSON; recursively sorted ASCII keys; array order preserved; null explicit. */
+export function canonicalAgentCapabilitySnapshotV1(snapshot: AgentCapabilitySnapshotV1): string {
+  const { fingerprint: _fingerprint, observedAt: _observedAt, ...input } = snapshot;
+  return JSON.stringify(canonicalizeFingerprintValue(input));
+}
+
+export function computeAgentCapabilityFingerprintV1(snapshot: AgentCapabilitySnapshotV1): string {
+  return sha256FileVersionV1(new TextEncoder().encode(canonicalAgentCapabilitySnapshotV1(snapshot)));
 }
 
 export function validateAgentRunStartRequestV1(value: unknown): AgentRunStartRequestV1 {
@@ -264,14 +333,14 @@ export function validateAgentRunStartRequestV1(value: unknown): AgentRunStartReq
   if (messageIds.length === 0) fail("inputMessageIds must not be empty");
   for (const [index, messageId] of messageIds.entries()) id(messageId, `inputMessageIds[${index}]`);
   unique(messageIds as string[], "inputMessageIds");
-  digest(object.expectedCapabilityFingerprint, "expectedCapabilityFingerprint");
+  fingerprintDigest(object.expectedCapabilityFingerprint, "expectedCapabilityFingerprint");
   return object as unknown as AgentRunStartRequestV1;
 }
 
 export function validateAgentRunAcceptedV1(value: unknown): AgentRunAcceptedV1 {
   const object = exactObject(value, ["schemaVersion", "runId", "chatId", "roleId", "state"], "agent run accepted result");
   schema(object.schemaVersion);
-  id(object.runId, "runId");
+  agentRunId(object.runId, "runId");
   id(object.chatId, "chatId");
   oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
   if (object.state !== "preparing") fail("accepted agent run state must be preparing");
@@ -280,16 +349,19 @@ export function validateAgentRunAcceptedV1(value: unknown): AgentRunAcceptedV1 {
 
 export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
   const object = exactObject(value, [
-    "schemaVersion", "runId", "chatId", "taskId", "worktreeId", "workspaceIdentity", "selectedProfile",
+    "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "selectedProfile",
     "source", "capabilityFingerprint", "state", "stage", "terminationOutcome", "createdAt", "updatedAt",
   ], "agent run record");
   schema(object.schemaVersion);
-  for (const key of ["runId", "chatId", "taskId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
-  validateProfile(object.selectedProfile);
+  agentRunId(object.runId, "runId");
+  for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
+  const profile = validateProfile(object.selectedProfile);
   if (object.source !== "actualAgent") fail("agent run source must be actualAgent");
-  digest(object.capabilityFingerprint, "capabilityFingerprint");
+  fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
   const state = oneOf(object.state, G5_RUN_STATES_V1, "state");
-  oneOf(object.stage, G5_RUN_STAGES_V1, "stage");
+  const stage = oneOf(object.stage, G5_RUN_STAGES_V1, "stage");
+  const expectedStage: Record<RoleIdV1, RunStageV1> = { planning: "planning", coding: "implementing", review: "verifying" };
+  if (stage !== expectedStage[profile.roleId]) fail("agent run stage does not match selected role snapshot");
   const termination = object.terminationOutcome === null
     ? null
     : oneOf(object.terminationOutcome, ["cleanExit", "recoveryRequired"] as const, "terminationOutcome");
@@ -310,7 +382,7 @@ export function validateAgentRunStartTranscriptV1(value: unknown): AgentRunStart
   const capability = validateAgentCapabilitySnapshotV1(object.capability);
   const profile = validateProfile(object.resolvedProfile);
   validateExecutionMode(object.executionMode);
-  if (object.runId !== null) id(object.runId, "runId");
+  if (object.runId !== null) agentRunId(object.runId, "runId");
   const outcome = oneOf(object.preflightOutcome, AGENT_START_OUTCOMES_V1, "preflightOutcome");
   const persisted = smallCount(object.persistedRunCount, "persistedRunCount");
   const spawned = smallCount(object.spawnCount, "spawnCount");
@@ -337,7 +409,8 @@ export function validateAgentRunStartTranscriptV1(value: unknown): AgentRunStart
 export function validateAgentPublicEventV1(value: unknown): AgentPublicEventV1 {
   const object = exactObject(value, ["schemaVersion", "eventId", "chatId", "runId", "roleId", "kind", "text", "createdAt"], "agent public event");
   schema(object.schemaVersion);
-  for (const key of ["eventId", "chatId", "runId"] as const) id(object[key], key);
+  for (const key of ["eventId", "chatId"] as const) id(object[key], key);
+  agentRunId(object.runId, "runId");
   oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
   oneOf(object.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind");
   bounded(object.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
@@ -351,23 +424,135 @@ export function validateAgentTerminationTranscriptV1(value: unknown): AgentTermi
     "chatState", "trackedProcesses", "evidenceDigest", "observedAt",
   ], "agent termination transcript");
   schema(object.schemaVersion);
-  id(object.runId, "runId");
+  agentRunId(object.runId, "runId");
   const outcome = oneOf(object.outcome, ["cleanExit", "recoveryRequired"] as const, "outcome");
   if (typeof object.processesProvenGone !== "boolean" || typeof object.poisoned !== "boolean") fail("termination booleans are required");
   const lock = oneOf(object.writerLockState, ["none", "released", "recoveryRequired"] as const, "writerLockState");
   const chat = oneOf(object.chatState, ["succeeded", "failed", "canceled", "recoveryRequired"] as const, "chatState");
   const tracked = array(object.trackedProcesses, "trackedProcesses", 256).map(validateProcessIdentity);
   if (tracked.length === 0) fail("trackedProcesses must not be empty");
+  uniqueProcessIdentities(tracked);
   digest(object.evidenceDigest, "evidenceDigest");
   timestamp(object.observedAt, "observedAt");
   if (outcome === "recoveryRequired") {
     if (object.processesProvenGone !== false || object.poisoned !== true || lock !== "recoveryRequired" || chat !== "recoveryRequired") {
       fail("uncertain termination must remain poisoned and recoveryRequired");
     }
-  } else if (object.processesProvenGone !== true || object.poisoned !== false || lock === "recoveryRequired" || chat === "recoveryRequired") {
-    fail("clean termination must prove the process tree gone and release any writer lock");
+  } else if (object.processesProvenGone !== true || tracked.some((process) => !process.observedGone)
+    || object.poisoned !== false || lock === "recoveryRequired" || chat === "recoveryRequired") {
+    fail("clean termination must prove every tracked process gone and release any writer lock");
   }
   return object as unknown as AgentTerminationTranscriptV1;
+}
+
+export function validateAgentChatDetailPageV1(value: unknown): AgentChatDetailPageV1 {
+  const object = exactObject(value, ["chat", "afterEventSequence", "messages", "runs", "nextEventSequence", "agentRuns"], "agent chat detail page");
+  const base = {
+    chat: object.chat, afterEventSequence: object.afterEventSequence, messages: object.messages,
+    runs: object.runs, nextEventSequence: object.nextEventSequence,
+  };
+  const page = validateChatDetailPageV1(base);
+  const agentRuns = array(object.agentRuns, "agentRuns", G5_EVENT_PAGE_MAX_ITEMS_V1).map(validateAgentRunRecordV1);
+  const fixtureRunIds = new Set(page.runs.map((run) => run.runId));
+  const agentRunIds = new Set<string>();
+  for (const run of agentRuns) {
+    if (run.chatId !== page.chat.chatId || run.taskId !== page.chat.taskId || run.projectId !== page.chat.projectId || run.worktreeId !== page.chat.worktreeId
+      || run.workspaceIdentity !== page.chat.workspaceIdentity) fail("agent run changed exact chat/workspace identity");
+    if (!agentRunIds.add(run.runId) || fixtureRunIds.has(run.runId)) fail("fixture and actual run ledgers must have distinct unique run ids");
+  }
+  for (const run of page.runs) if (run.runId.startsWith("agent_run_")) fail("fixture run ledger cannot use the actual-agent run namespace");
+  for (const message of page.messages) {
+    if (message.runId === null) continue;
+    const inFixture = fixtureRunIds.has(message.runId);
+    const inAgent = agentRunIds.has(message.runId);
+    if (inFixture === inAgent) fail("message runId must resolve to exactly one fixture or actual run ledger");
+  }
+  return object as unknown as AgentChatDetailPageV1;
+}
+
+export function validateAgentRunCancelRequestV1(value: unknown): AgentRunCancelRequestV1 {
+  return validateAgentRunIdentityV1(value, "agent run cancel request") as AgentRunCancelRequestV1;
+}
+
+export function validateAgentRecoveryRecordV1(value: unknown): AgentRecoveryRecordV1 {
+  const object = exactObject(value, [
+    "schemaVersion", "recoveryId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId",
+    "source", "reason", "state", "trackedProcesses", "poisoned", "revision", "createdAt", "resolvedAt",
+  ], "agent recovery record");
+  schema(object.schemaVersion);
+  agentRecoveryId(object.recoveryId, "recoveryId");
+  validateAgentRunIdentityFieldsV1(object);
+  if (object.source !== "actualAgent") fail("agent recovery source must be actualAgent");
+  oneOf(object.reason, ["uncleanShutdown", "cancelUncertain", "processIdentityUncertain"] as const, "reason");
+  const state = oneOf(object.state, ["unresolved", "resolvedAbandoned"] as const, "state");
+  const tracked = array(object.trackedProcesses, "trackedProcesses", 256).map(validateProcessIdentity);
+  if (tracked.length === 0) fail("agent recovery trackedProcesses must not be empty");
+  uniqueProcessIdentities(tracked);
+  if (typeof object.poisoned !== "boolean" || object.poisoned !== (state === "unresolved")) fail("only unresolved recovery remains poisoned");
+  revision(object.revision, "revision");
+  timestamp(object.createdAt, "createdAt");
+  if (state === "unresolved") {
+    if (object.resolvedAt !== null) fail("unresolved recovery cannot have resolvedAt");
+  } else {
+    timestamp(object.resolvedAt, "resolvedAt");
+    if (tracked.some((process) => !process.observedGone)) fail("resolved recovery must prove every tracked process gone");
+  }
+  return object as unknown as AgentRecoveryRecordV1;
+}
+
+export function validateAgentRunCancelResultV1(value: unknown): AgentRunCancelResultV1 {
+  const object = exactObject(value, ["schemaVersion", "request", "run", "termination", "recovery", "outcome"], "agent run cancel result");
+  schema(object.schemaVersion);
+  const request = validateAgentRunCancelRequestV1(object.request);
+  const run = validateAgentRunRecordV1(object.run);
+  const termination = validateAgentTerminationTranscriptV1(object.termination);
+  const recovery = object.recovery === null ? null : validateAgentRecoveryRecordV1(object.recovery);
+  const outcome = oneOf(object.outcome, ["canceled", "recoveryRequired"] as const, "outcome");
+  assertSameAgentRunIdentity(request, run, "cancel result run");
+  if (termination.runId !== request.runId) fail("cancel termination changed run identity");
+  if (outcome === "canceled") {
+    if (run.state !== "canceled" || run.terminationOutcome !== "cleanExit" || termination.outcome !== "cleanExit" || recovery !== null) fail("canceled outcome requires clean terminal run without recovery");
+  } else {
+    if (run.state !== "recoveryRequired" || run.terminationOutcome !== "recoveryRequired" || termination.outcome !== "recoveryRequired" || recovery === null || recovery.state !== "unresolved") fail("recoveryRequired outcome must keep run and recovery poisoned");
+    assertSameAgentRunIdentity(request, recovery, "cancel recovery");
+    if (JSON.stringify(recovery.trackedProcesses) !== JSON.stringify(termination.trackedProcesses)) fail("cancel recovery must persist the exact termination process evidence");
+  }
+  return object as unknown as AgentRunCancelResultV1;
+}
+
+export function validateAgentRecoveryInspectRequestV1(value: unknown): AgentRecoveryInspectRequestV1 {
+  const object = exactObject(value, ["recoveryId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"], "agent recovery inspect request");
+  agentRecoveryId(object.recoveryId, "recoveryId");
+  validateAgentRunIdentityFieldsV1(object);
+  return object as unknown as AgentRecoveryInspectRequestV1;
+}
+
+export function validateAgentRecoveryResolveRequestV1(value: unknown): AgentRecoveryResolveRequestV1 {
+  const object = exactObject(value, ["recoveryId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "expectedRevision", "resolution"], "agent recovery resolve request");
+  agentRecoveryId(object.recoveryId, "recoveryId");
+  validateAgentRunIdentityFieldsV1(object);
+  revision(object.expectedRevision, "expectedRevision");
+  if (object.resolution !== "abandon") fail("agent recovery resolution must be abandon");
+  return object as unknown as AgentRecoveryResolveRequestV1;
+}
+
+export function validateAgentRecoveryResolveResultV1(value: unknown): AgentRecoveryResolveResultV1 {
+  const object = exactObject(value, ["schemaVersion", "before", "request", "after", "outcome"], "agent recovery resolve result");
+  schema(object.schemaVersion);
+  const before = validateAgentRecoveryRecordV1(object.before);
+  const request = validateAgentRecoveryResolveRequestV1(object.request);
+  const after = object.after === null ? null : validateAgentRecoveryRecordV1(object.after);
+  const outcome = oneOf(object.outcome, ["resolvedAbandoned", "processesRemain", "revisionConflict"] as const, "outcome");
+  assertSameRecoveryIdentity(request, before, "recovery before");
+  if (before.state !== "unresolved") fail("only unresolved recovery can be resolved");
+  const allGone = before.trackedProcesses.every((process) => process.observedGone);
+  const expected = request.expectedRevision !== before.revision ? "revisionConflict" : !allGone ? "processesRemain" : "resolvedAbandoned";
+  if (outcome !== expected) fail("recovery resolution outcome must match revision and process evidence");
+  if (outcome === "resolvedAbandoned") {
+    if (after === null || after.state !== "resolvedAbandoned" || after.revision !== before.revision + 1) fail("resolved recovery must persist the next revision");
+    assertSameRecoveryIdentity(before, after, "recovery after");
+  } else if (after !== null) fail("failed recovery resolution cannot persist an after record");
+  return object as unknown as AgentRecoveryResolveResultV1;
 }
 
 export function assertG5AContractV1(): void {
@@ -491,6 +676,32 @@ function validateBarrier(value: unknown): AgentLaunchBarrierEvidenceV1 {
   return object as unknown as AgentLaunchBarrierEvidenceV1;
 }
 
+function validateAgentRunIdentityV1(value: unknown, name: string): AgentRunIdentityV1 {
+  const object = exactObject(value, ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"], name);
+  validateAgentRunIdentityFieldsV1(object);
+  return object as unknown as AgentRunIdentityV1;
+}
+
+function validateAgentRunIdentityFieldsV1(object: Record<string, unknown>): void {
+  for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
+  agentRunId(object.runId, "runId");
+}
+
+function assertSameAgentRunIdentity(expected: AgentRunIdentityV1, actual: AgentRunIdentityV1, name: string): void {
+  for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"] as const) {
+    if (expected[key] !== actual[key]) fail(`${name} changed ${key}`);
+  }
+}
+
+function assertSameRecoveryIdentity(
+  expected: AgentRecoveryInspectRequestV1 | AgentRecoveryRecordV1,
+  actual: AgentRecoveryRecordV1,
+  name: string,
+): void {
+  assertSameAgentRunIdentity(expected, actual, name);
+  if (expected.recoveryId !== actual.recoveryId) fail(`${name} changed recoveryId`);
+}
+
 function exactObject(value: unknown, keys: readonly string[], name: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) fail(`${name} must be an object`);
   const object = value as Record<string, unknown>;
@@ -515,13 +726,39 @@ function bounded(value: unknown, name: string, maximum: number): asserts value i
 }
 
 function id(value: unknown, name: string): asserts value is string { bounded(value, name, G5_ID_MAX_BYTES_V1); }
+function agentRunId(value: unknown, name: string): asserts value is string {
+  id(value, name);
+  if (!(value as string).startsWith("agent_run_")) fail(`${name} must use the actual-agent run namespace`);
+}
+function agentRecoveryId(value: unknown, name: string): asserts value is string {
+  id(value, name);
+  if (!(value as string).startsWith("agent_recovery_")) fail(`${name} must use the actual-agent recovery namespace`);
+}
 function digest(value: unknown, name: string): asserts value is string {
   bounded(value, name, G5_ID_MAX_BYTES_V1);
   if (!(value as string).startsWith("sha256:")) fail(`${name} must be a redacted sha256 digest`);
 }
+function fingerprintDigest(value: unknown, name: string): asserts value is string {
+  if (typeof value !== "string" || !/^sha256:[0-9a-f]{64}$/.test(value)) fail(`${name} must be an exact lowercase SHA-256 digest`);
+}
+function canonicalizeFingerprintValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeFingerprintValue);
+  if (typeof value === "object" && value !== null) {
+    const output: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) output[key] = canonicalizeFingerprintValue((value as Record<string, unknown>)[key]);
+    return output;
+  }
+  return value;
+}
 function schema(value: unknown): void { if (value !== G5A_SCHEMA_VERSION_V1) fail("schemaVersion must be 1"); }
 function timestamp(value: unknown, name: string): void {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) fail(`${name} must be an RFC 3339 UTC second timestamp`);
+}
+function revision(value: unknown, name: string): asserts value is number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) fail(`${name} must be a positive safe integer`);
+}
+function uniqueProcessIdentities(processes: readonly AgentProcessIdentityV1[]): void {
+  unique(processes.map((process) => `${process.pid}:${process.startIdentityDigest}`), "tracked process identities");
 }
 function unique(values: readonly string[], name: string): void { if (new Set(values).size !== values.length) fail(`${name} must be unique`); }
 function smallCount(value: unknown, name: string): number {

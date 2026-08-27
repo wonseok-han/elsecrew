@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -7,23 +8,33 @@ import {
   assertG5AContractV1,
   AGENT_CAPABILITY_BLOCK_REASONS_V1,
   AGENT_START_OUTCOMES_V1,
+  canonicalAgentCapabilitySnapshotV1,
+  computeAgentCapabilityFingerprintV1,
   G5A_CAPABILITIES_V1,
   parsePlannedG5AReadyPayloadV1,
   validateAgentCapabilitiesRequestV1,
   validateAgentCapabilitySnapshotV1,
+  validateAgentChatDetailPageV1,
   validateAgentPublicEventV1,
+  validateAgentRecoveryInspectRequestV1,
+  validateAgentRecoveryRecordV1,
+  validateAgentRecoveryResolveRequestV1,
+  validateAgentRecoveryResolveResultV1,
+  validateAgentRunCancelRequestV1,
+  validateAgentRunCancelResultV1,
   validateAgentRunStartRequestV1,
   validateAgentRunAcceptedV1,
   validateAgentRunRecordV1,
   validateAgentRunStartTranscriptV1,
   validateAgentTerminationTranscriptV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 import { M5_BRIDGE_V3_METHODS } from "../src/m5/contracts/bridge-v3.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
 import { G5_CAPABILITIES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
-type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript";
+type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
 interface Cases { valid: FixtureCase[]; invalid: FixtureCase[] }
 interface Manifest {
@@ -39,7 +50,12 @@ interface Manifest {
     executionMode: string;
     followUpMode: string;
     rendererLaunchFields: string;
-    fingerprint: string;
+    fingerprint: {
+      algorithm: string; encoding: string; objectKeys: string; arrayOrder: string; explicitNull: string;
+      excludedFields: string[]; canonicalFixture: string; canonicalDigest: string;
+    };
+    actualRunIdNamespace: string;
+    actualRecoveryIdNamespace: string;
     modelStartEvidence: string[];
     startOutcomes: string[];
     capabilityBlockReasons: string[];
@@ -61,7 +77,7 @@ test("G5A manifest는 기존 G5 handshake를 보존한 planned V4 계약만 고�
   assert.equal(manifest.protocolVersion, PROTOCOL_VERSION);
   assert.deepEqual(manifest.contract.capabilities, [...G5A_CAPABILITIES_V1]);
   assert.deepEqual(G5A_CAPABILITIES_V1.slice(0, G5_CAPABILITIES_V1.length), G5_CAPABILITIES_V1);
-  assert.deepEqual(G5A_CAPABILITIES_V1.slice(-2), ["agent.getCapabilities", "run.startAgent"]);
+  assert.deepEqual(G5A_CAPABILITIES_V1.slice(-5), ["agent.getCapabilities", "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent"]);
   assert.ok(G5A_CAPABILITIES_V1.every((method) => METHODS_V1.includes(method)));
   assert.equal(manifest.contract.actualAgentAdvertisedByCurrentG5, false);
   assert.equal(manifest.contract.agentSmokeAdvertised, false);
@@ -76,12 +92,12 @@ test("G5A manifest는 기존 G5 handshake를 보존한 planned V4 계약만 고�
   assert.doesNotThrow(() => parsePlannedG5AReadyPayloadV1(ready([...G5A_CAPABILITIES_V1])));
 });
 
-test("M5BridgeV4는 V3를 보존하고 두 typed 메서드만 추가한다", () => {
+test("M5BridgeV4는 V3를 보존하고 actual-agent typed 메서드만 추가한다", () => {
   assert.deepEqual(M5_BRIDGE_V4_METHODS.slice(0, M5_BRIDGE_V3_METHODS.length), M5_BRIDGE_V3_METHODS);
   assert.deepEqual(M5_BRIDGE_V4_METHODS.slice(M5_BRIDGE_V3_METHODS.length), manifest.contract.bridgeMethodsAdded);
   const source = readFileSync(resolve("src/m5/contracts/bridge-v4.ts"), "utf8");
   assert.match(source, /Omit<M5BridgeV3, "version" \| "getChat">/);
-  assert.doesNotMatch(source, /startAgentSmoke|RunRecordV1|fixtureScenario|ipcRenderer|genericInvoke/);
+  assert.doesNotMatch(source, /startAgentSmoke|\bRunRecordV1\b|fixtureScenario|ipcRenderer|genericInvoke/);
 });
 
 test("TypeScript는 canonical actual-agent valid cases를 모두 승인한다", () => {
@@ -96,7 +112,14 @@ test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를
   assert.equal(manifest.contract.executionMode, "oneShot");
   assert.equal(manifest.contract.followUpMode, "nextRun");
   assert.equal(manifest.contract.rendererLaunchFields, "forbidden");
-  assert.equal(manifest.contract.fingerprint, "sha256CanonicalCapabilitySnapshotWithoutFingerprintOrObservedAt");
+  assert.deepEqual(manifest.contract.fingerprint, {
+    algorithm: "sha256", encoding: "utf8CompactJson", objectKeys: "recursiveAsciiAscending",
+    arrayOrder: "preserved", explicitNull: "included", excludedFields: ["fingerprint", "observedAt"],
+    canonicalFixture: "claude-exact-version-measured-capability",
+    canonicalDigest: "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3",
+  });
+  assert.equal(manifest.contract.actualRunIdNamespace, "agent_run_");
+  assert.equal(manifest.contract.actualRecoveryIdNamespace, "agent_recovery_");
   assert.deepEqual(manifest.contract.modelStartEvidence, ["runtimeVerified", "measuredExactVersion"]);
   assert.deepEqual(manifest.contract.startOutcomes, [...AGENT_START_OUTCOMES_V1]);
   assert.deepEqual(manifest.contract.capabilityBlockReasons, [...AGENT_CAPABILITY_BLOCK_REASONS_V1]);
@@ -105,6 +128,20 @@ test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를
   assert.deepEqual(manifest.contract.preflightFailure, { spawnCount: 0, lockCount: 0 });
   assert.deepEqual(manifest.contract.launcherBarrier, ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"]);
   assert.equal(manifest.contract.uncertainTermination, "recoveryRequiredAndPoisoned");
+});
+
+test("browser-safe SHA-256와 canonical capability digest가 Node oracle과 일치한다", () => {
+  for (const vector of ["", "abc", "한글 capability"]) {
+    const expected = `sha256:${createHash("sha256").update(vector, "utf8").digest("hex")}`;
+    assert.equal(sha256FileVersionV1(new TextEncoder().encode(vector)), expected);
+  }
+  const fixture = cases.valid.find((entry) => entry.name === manifest.contract.fingerprint.canonicalFixture);
+  assert.ok(fixture);
+  const snapshot = fixture.value as Parameters<typeof computeAgentCapabilityFingerprintV1>[0];
+  const canonical = canonicalAgentCapabilitySnapshotV1(snapshot);
+  const oracle = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+  assert.equal(computeAgentCapabilityFingerprintV1(snapshot), oracle);
+  assert.equal(oracle, manifest.contract.fingerprint.canonicalDigest);
 });
 
 function validate(fixture: FixtureCase): unknown {
@@ -117,6 +154,13 @@ function validate(fixture: FixtureCase): unknown {
     case "runStartTranscript": return validateAgentRunStartTranscriptV1(fixture.value);
     case "publicEvent": return validateAgentPublicEventV1(fixture.value);
     case "terminationTranscript": return validateAgentTerminationTranscriptV1(fixture.value);
+    case "agentChatDetailPage": return validateAgentChatDetailPageV1(fixture.value);
+    case "runCancelRequest": return validateAgentRunCancelRequestV1(fixture.value);
+    case "runCancelResult": return validateAgentRunCancelResultV1(fixture.value);
+    case "recoveryRecord": return validateAgentRecoveryRecordV1(fixture.value);
+    case "recoveryInspectRequest": return validateAgentRecoveryInspectRequestV1(fixture.value);
+    case "recoveryResolveRequest": return validateAgentRecoveryResolveRequestV1(fixture.value);
+    case "recoveryResolveResult": return validateAgentRecoveryResolveResultV1(fixture.value);
   }
 }
 

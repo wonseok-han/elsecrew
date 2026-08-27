@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{self, Display};
 
 use crate::run_recovery_v1::{
-    G5_CAPABILITIES_V1, G5_ID_MAX_BYTES_V1, G5_MODEL_SELECTOR_MAX_BYTES_V1, G5_PERMISSIONS_V1,
-    G5_PUBLIC_MESSAGE_MAX_BYTES_V1, G5_REASONING_EFFORT_MAX_BYTES_V1, G5_ROLE_IDS_V1,
-    G5_RUNTIMES_V1,
+    G5_CAPABILITIES_V1, G5_EVENT_PAGE_MAX_ITEMS_V1, G5_ID_MAX_BYTES_V1,
+    G5_MODEL_SELECTOR_MAX_BYTES_V1, G5_PERMISSIONS_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
+    G5_REASONING_EFFORT_MAX_BYTES_V1, G5_ROLE_IDS_V1, G5_RUNTIMES_V1,
 };
 
 pub const G5A_SCHEMA_VERSION_V1: u64 = 1;
@@ -44,6 +44,9 @@ pub const G5A_CAPABILITIES_V1: &[&str] = &[
     "recovery.markResolved",
     "agent.getCapabilities",
     "run.startAgent",
+    "run.cancelAgent",
+    "recovery.inspectAgent",
+    "recovery.resolveAgent",
 ];
 pub const AGENT_INSTALLATION_STATES_V1: &[&str] = &["installed", "notInstalled", "incomplete"];
 pub const AGENT_AUTH_STATES_V1: &[&str] =
@@ -159,7 +162,7 @@ pub struct AgentCapabilitySnapshotV1 {
     pub discovery: AgentDiscoveryEvidenceV1,
     pub can_start: bool,
     pub blocked_reason: Option<String>,
-    /// sha256 of canonical snapshot fields except fingerprint and observedAt.
+    /// SHA-256 of canonical snapshot fields except fingerprint and observedAt.
     pub fingerprint: String,
     pub observed_at: String,
 }
@@ -190,6 +193,7 @@ pub struct AgentRunRecordV1 {
     pub run_id: String,
     pub chat_id: String,
     pub task_id: String,
+    pub project_id: String,
     pub worktree_id: String,
     pub workspace_identity: String,
     pub selected_profile: AgentResolvedProfileV1,
@@ -291,6 +295,87 @@ pub struct AgentTerminationTranscriptV1 {
     pub observed_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunIdentityV1 {
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub run_id: String,
+}
+
+pub type AgentRunCancelRequestV1 = AgentRunIdentityV1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRecoveryRecordV1 {
+    pub schema_version: u64,
+    pub recovery_id: String,
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub run_id: String,
+    pub source: String,
+    pub reason: String,
+    pub state: String,
+    pub tracked_processes: Vec<AgentProcessIdentityV1>,
+    pub poisoned: bool,
+    pub revision: u64,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunCancelResultV1 {
+    pub schema_version: u64,
+    pub request: AgentRunCancelRequestV1,
+    pub run: AgentRunRecordV1,
+    pub termination: AgentTerminationTranscriptV1,
+    pub recovery: Option<AgentRecoveryRecordV1>,
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRecoveryInspectRequestV1 {
+    pub recovery_id: String,
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRecoveryResolveRequestV1 {
+    pub recovery_id: String,
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub run_id: String,
+    pub expected_revision: u64,
+    pub resolution: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRecoveryResolveResultV1 {
+    pub schema_version: u64,
+    pub before: AgentRecoveryRecordV1,
+    pub request: AgentRecoveryResolveRequestV1,
+    pub after: Option<AgentRecoveryRecordV1>,
+    pub outcome: String,
+}
+
 pub fn validate_agent_adapter_payload_v1(
     validator: &str,
     value: &Value,
@@ -304,13 +389,27 @@ pub fn validate_agent_adapter_payload_v1(
         "runStartTranscript" => validate_run_start_transcript(value),
         "publicEvent" => validate_public_event(value).map(|_| ()),
         "terminationTranscript" => validate_termination_transcript(value),
+        "agentChatDetailPage" => validate_agent_chat_detail_page(value),
+        "runCancelRequest" => validate_agent_run_cancel_request(value).map(|_| ()),
+        "runCancelResult" => validate_agent_run_cancel_result(value),
+        "recoveryRecord" => validate_agent_recovery_record(value).map(|_| ()),
+        "recoveryInspectRequest" => validate_agent_recovery_inspect_request(value).map(|_| ()),
+        "recoveryResolveRequest" => validate_agent_recovery_resolve_request(value).map(|_| ()),
+        "recoveryResolveResult" => validate_agent_recovery_resolve_result(value),
         other => fail(format!("unknown agent adapter payload validator: {other}")),
     }
 }
 
 pub fn assert_g5a_contract_v1() -> Result<(), AgentAdapterContractError> {
-    if !G5A_CAPABILITIES_V1.contains(&"agent.getCapabilities")
-        || !G5A_CAPABILITIES_V1.contains(&"run.startAgent")
+    if ![
+        "agent.getCapabilities",
+        "run.startAgent",
+        "run.cancelAgent",
+        "recovery.inspectAgent",
+        "recovery.resolveAgent",
+    ]
+    .iter()
+    .all(|method| G5A_CAPABILITIES_V1.contains(method))
     {
         return fail("G5A actual-agent capabilities are missing");
     }
@@ -412,7 +511,7 @@ fn validate_capability_snapshot(
     if let Some(reason) = &snapshot.blocked_reason {
         one_of(reason, AGENT_CAPABILITY_BLOCK_REASONS_V1, "blockedReason")?;
     }
-    digest(&snapshot.fingerprint, "fingerprint")?;
+    fingerprint_digest(&snapshot.fingerprint, "fingerprint")?;
     timestamp(&snapshot.observed_at, "observedAt")?;
     let expected = capability_blocker(&snapshot);
     if snapshot.can_start != expected.is_none() || snapshot.blocked_reason.as_deref() != expected {
@@ -421,7 +520,31 @@ fn validate_capability_snapshot(
     if snapshot.can_start && snapshot.models.is_empty() {
         return fail("startable capability must have an exact model set");
     }
+    if snapshot.fingerprint != compute_agent_capability_fingerprint_v1(&snapshot)? {
+        return fail("fingerprint must bind the canonical capability snapshot");
+    }
     Ok(snapshot)
+}
+
+pub fn canonical_agent_capability_snapshot_v1(
+    snapshot: &AgentCapabilitySnapshotV1,
+) -> Result<String, AgentAdapterContractError> {
+    let mut value = serde_json::to_value(snapshot).map_err(contract_json)?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        AgentAdapterContractError::new("capability snapshot must serialize as object")
+    })?;
+    object.remove("fingerprint");
+    object.remove("observedAt");
+    serde_json::to_string(&canonicalize_fingerprint_value(value)).map_err(contract_json)
+}
+
+pub fn compute_agent_capability_fingerprint_v1(
+    snapshot: &AgentCapabilitySnapshotV1,
+) -> Result<String, AgentAdapterContractError> {
+    let canonical = canonical_agent_capability_snapshot_v1(snapshot)?;
+    Ok(crate::project_v1::sha256_file_version_v1(
+        canonical.as_bytes(),
+    ))
 }
 
 fn validate_run_start_request(
@@ -440,7 +563,7 @@ fn validate_run_start_request(
             return fail("inputMessageIds must be unique");
         }
     }
-    digest(
+    fingerprint_digest(
         &request.expected_capability_fingerprint,
         "expectedCapabilityFingerprint",
     )?;
@@ -450,7 +573,7 @@ fn validate_run_start_request(
 fn validate_run_accepted(value: &Value) -> Result<AgentRunAcceptedV1, AgentAdapterContractError> {
     let accepted: AgentRunAcceptedV1 = from_value(value, "agent run accepted result")?;
     schema(accepted.schema_version)?;
-    id(&accepted.run_id, "runId")?;
+    agent_run_id(&accepted.run_id, "runId")?;
     id(&accepted.chat_id, "chatId")?;
     one_of(&accepted.role_id, G5_ROLE_IDS_V1, "roleId")?;
     if accepted.state != "preparing" {
@@ -466,16 +589,21 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
         (&record.run_id, "runId"),
         (&record.chat_id, "chatId"),
         (&record.task_id, "taskId"),
+        (&record.project_id, "projectId"),
         (&record.worktree_id, "worktreeId"),
         (&record.workspace_identity, "workspaceIdentity"),
     ] {
-        id(value, name)?;
+        if name == "runId" {
+            agent_run_id(value, name)?;
+        } else {
+            id(value, name)?;
+        }
     }
     validate_profile(&record.selected_profile)?;
     if record.source != "actualAgent" {
         return fail("agent run source must be actualAgent");
     }
-    digest(&record.capability_fingerprint, "capabilityFingerprint")?;
+    fingerprint_digest(&record.capability_fingerprint, "capabilityFingerprint")?;
     one_of(
         &record.state,
         crate::run_recovery_v1::G5_RUN_STATES_V1,
@@ -486,6 +614,15 @@ fn validate_run_record(value: &Value) -> Result<AgentRunRecordV1, AgentAdapterCo
         crate::run_recovery_v1::G5_RUN_STAGES_V1,
         "stage",
     )?;
+    let expected_stage = match record.selected_profile.role_id.as_str() {
+        "planning" => "planning",
+        "coding" => "implementing",
+        "review" => "verifying",
+        _ => return fail("invalid roleId"),
+    };
+    if record.stage != expected_stage {
+        return fail("agent run stage does not match selected role snapshot");
+    }
     if let Some(outcome) = &record.termination_outcome {
         one_of(
             outcome,
@@ -520,7 +657,7 @@ fn validate_run_start_transcript(value: &Value) -> Result<(), AgentAdapterContra
     validate_profile(&transcript.resolved_profile)?;
     validate_execution_mode(&transcript.execution_mode)?;
     if let Some(run_id) = &transcript.run_id {
-        id(run_id, "runId")?;
+        agent_run_id(run_id, "runId")?;
     }
     one_of(
         &transcript.preflight_outcome,
@@ -605,7 +742,7 @@ fn validate_public_event(value: &Value) -> Result<AgentPublicEventV1, AgentAdapt
     schema(event.schema_version)?;
     id(&event.event_id, "eventId")?;
     id(&event.chat_id, "chatId")?;
-    id(&event.run_id, "runId")?;
+    agent_run_id(&event.run_id, "runId")?;
     one_of(&event.role_id, G5_ROLE_IDS_V1, "roleId")?;
     one_of(&event.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind")?;
     bounded(&event.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
@@ -617,7 +754,7 @@ fn validate_termination_transcript(value: &Value) -> Result<(), AgentAdapterCont
     let transcript: AgentTerminationTranscriptV1 =
         from_value(value, "agent termination transcript")?;
     schema(transcript.schema_version)?;
-    id(&transcript.run_id, "runId")?;
+    agent_run_id(&transcript.run_id, "runId")?;
     one_of(
         &transcript.outcome,
         &["cleanExit", "recoveryRequired"],
@@ -636,8 +773,12 @@ fn validate_termination_transcript(value: &Value) -> Result<(), AgentAdapterCont
     if transcript.tracked_processes.is_empty() || transcript.tracked_processes.len() > 256 {
         return fail("trackedProcesses must be nonempty and bounded");
     }
+    let mut identities = HashSet::new();
     for process in &transcript.tracked_processes {
         validate_process(process)?;
+        if !identities.insert((process.pid, process.start_identity_digest.as_str())) {
+            return fail("tracked process identities must be unique");
+        }
     }
     digest(&transcript.evidence_digest, "evidenceDigest")?;
     timestamp(&transcript.observed_at, "observedAt")?;
@@ -650,11 +791,299 @@ fn validate_termination_transcript(value: &Value) -> Result<(), AgentAdapterCont
             return fail("uncertain termination must remain poisoned and recoveryRequired");
         }
     } else if !transcript.processes_proven_gone
+        || transcript
+            .tracked_processes
+            .iter()
+            .any(|process| !process.observed_gone)
         || transcript.poisoned
         || transcript.writer_lock_state == "recoveryRequired"
         || transcript.chat_state == "recoveryRequired"
     {
-        return fail("clean termination must prove tree gone and release any writer lock");
+        return fail(
+            "clean termination must prove every tracked process gone and release any writer lock",
+        );
+    }
+    Ok(())
+}
+
+fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterContractError> {
+    let object = value.as_object().ok_or_else(|| {
+        AgentAdapterContractError::new("agent chat detail page must be an object")
+    })?;
+    exact_value_keys(
+        object,
+        &[
+            "chat",
+            "afterEventSequence",
+            "messages",
+            "runs",
+            "nextEventSequence",
+            "agentRuns",
+        ],
+        "agent chat detail page",
+    )?;
+    let mut base = object.clone();
+    let agent_runs = base
+        .remove("agentRuns")
+        .and_then(|entry| entry.as_array().cloned())
+        .ok_or_else(|| AgentAdapterContractError::new("agentRuns must be an array"))?;
+    if agent_runs.len() > G5_EVENT_PAGE_MAX_ITEMS_V1 {
+        return fail("agentRuns must be bounded");
+    }
+    crate::run_recovery_v1::validate_g5_payload_v1("chatDetailPage", &Value::Object(base.clone()))
+        .map_err(|error| AgentAdapterContractError::new(error.to_string()))?;
+    let chat = base
+        .get("chat")
+        .and_then(Value::as_object)
+        .ok_or_else(|| AgentAdapterContractError::new("chat detail chat must be an object"))?;
+    let fixture_runs = base
+        .get("runs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AgentAdapterContractError::new("fixture runs must be an array"))?;
+    let mut fixture_ids = HashSet::new();
+    for run in fixture_runs {
+        let run_id = value_string(run, "runId", "fixture run")?;
+        if run_id.starts_with("agent_run_") || !fixture_ids.insert(run_id.to_string()) {
+            return fail("fixture run ledger cannot use actual-agent or duplicate run ids");
+        }
+    }
+    let mut agent_ids = HashSet::new();
+    for run in &agent_runs {
+        let run = validate_run_record(run)?;
+        for (expected, actual, name) in [
+            (chat_string(chat, "chatId")?, run.chat_id.as_str(), "chatId"),
+            (chat_string(chat, "taskId")?, run.task_id.as_str(), "taskId"),
+            (
+                chat_string(chat, "projectId")?,
+                run.project_id.as_str(),
+                "projectId",
+            ),
+            (
+                chat_string(chat, "worktreeId")?,
+                run.worktree_id.as_str(),
+                "worktreeId",
+            ),
+            (
+                chat_string(chat, "workspaceIdentity")?,
+                run.workspace_identity.as_str(),
+                "workspaceIdentity",
+            ),
+        ] {
+            if expected != actual {
+                return fail(format!("agent run changed exact chat/workspace {name}"));
+            }
+        }
+        if !agent_ids.insert(run.run_id.clone()) || fixture_ids.contains(run.run_id.as_str()) {
+            return fail("fixture and actual run ledgers must have distinct unique run ids");
+        }
+    }
+    let messages = base
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AgentAdapterContractError::new("messages must be an array"))?;
+    for message in messages {
+        let Some(run_id) = message.get("runId").and_then(Value::as_str) else {
+            continue;
+        };
+        if fixture_ids.contains(run_id) == agent_ids.contains(run_id) {
+            return fail("message runId must resolve to exactly one fixture or actual run ledger");
+        }
+    }
+    Ok(())
+}
+
+fn validate_agent_run_cancel_request(
+    value: &Value,
+) -> Result<AgentRunCancelRequestV1, AgentAdapterContractError> {
+    let request: AgentRunCancelRequestV1 = from_value(value, "agent run cancel request")?;
+    validate_agent_run_identity(&request)?;
+    Ok(request)
+}
+
+fn validate_agent_recovery_record(
+    value: &Value,
+) -> Result<AgentRecoveryRecordV1, AgentAdapterContractError> {
+    let recovery: AgentRecoveryRecordV1 = from_value(value, "agent recovery record")?;
+    schema(recovery.schema_version)?;
+    agent_recovery_id(&recovery.recovery_id, "recoveryId")?;
+    validate_agent_run_identity(&AgentRunIdentityV1 {
+        chat_id: recovery.chat_id.clone(),
+        task_id: recovery.task_id.clone(),
+        project_id: recovery.project_id.clone(),
+        worktree_id: recovery.worktree_id.clone(),
+        workspace_identity: recovery.workspace_identity.clone(),
+        run_id: recovery.run_id.clone(),
+    })?;
+    if recovery.source != "actualAgent" {
+        return fail("agent recovery source must be actualAgent");
+    }
+    one_of(
+        &recovery.reason,
+        &[
+            "uncleanShutdown",
+            "cancelUncertain",
+            "processIdentityUncertain",
+        ],
+        "reason",
+    )?;
+    one_of(
+        &recovery.state,
+        &["unresolved", "resolvedAbandoned"],
+        "state",
+    )?;
+    if recovery.tracked_processes.is_empty() || recovery.tracked_processes.len() > 256 {
+        return fail("agent recovery trackedProcesses must be nonempty and bounded");
+    }
+    validate_unique_processes(&recovery.tracked_processes)?;
+    if recovery.poisoned != (recovery.state == "unresolved") || recovery.revision == 0 {
+        return fail("only unresolved positive-revision recovery remains poisoned");
+    }
+    timestamp(&recovery.created_at, "createdAt")?;
+    if recovery.state == "unresolved" {
+        if recovery.resolved_at.is_some() {
+            return fail("unresolved recovery cannot have resolvedAt");
+        }
+    } else {
+        timestamp(
+            recovery.resolved_at.as_deref().ok_or_else(|| {
+                AgentAdapterContractError::new("resolved recovery requires resolvedAt")
+            })?,
+            "resolvedAt",
+        )?;
+        if recovery
+            .tracked_processes
+            .iter()
+            .any(|process| !process.observed_gone)
+        {
+            return fail("resolved recovery must prove every tracked process gone");
+        }
+    }
+    Ok(recovery)
+}
+
+fn validate_agent_run_cancel_result(value: &Value) -> Result<(), AgentAdapterContractError> {
+    let result: AgentRunCancelResultV1 = from_value(value, "agent run cancel result")?;
+    schema(result.schema_version)?;
+    validate_agent_run_identity(&result.request)?;
+    validate_run_record(&serde_json::to_value(&result.run).map_err(contract_json)?)?;
+    validate_termination_transcript(
+        &serde_json::to_value(&result.termination).map_err(contract_json)?,
+    )?;
+    let recovery = result
+        .recovery
+        .as_ref()
+        .map(|entry| {
+            validate_agent_recovery_record(&serde_json::to_value(entry).map_err(contract_json)?)
+        })
+        .transpose()?;
+    one_of(
+        &result.outcome,
+        &["canceled", "recoveryRequired"],
+        "outcome",
+    )?;
+    assert_same_record_identity(&result.request, &result.run, "cancel result run")?;
+    if result.termination.run_id != result.request.run_id {
+        return fail("cancel termination changed run identity");
+    }
+    if result.outcome == "canceled" {
+        if result.run.state != "canceled"
+            || result.run.termination_outcome.as_deref() != Some("cleanExit")
+            || result.termination.outcome != "cleanExit"
+            || recovery.is_some()
+        {
+            return fail("canceled outcome requires clean terminal run without recovery");
+        }
+    } else {
+        let recovery = recovery.ok_or_else(|| {
+            AgentAdapterContractError::new("recoveryRequired outcome must persist recovery")
+        })?;
+        if result.run.state != "recoveryRequired"
+            || result.run.termination_outcome.as_deref() != Some("recoveryRequired")
+            || result.termination.outcome != "recoveryRequired"
+            || recovery.state != "unresolved"
+        {
+            return fail("recoveryRequired outcome must keep run and recovery poisoned");
+        }
+        assert_same_recovery_identity(&result.request, None, &recovery, "cancel recovery")?;
+        if recovery.tracked_processes != result.termination.tracked_processes {
+            return fail("cancel recovery must persist the exact termination process evidence");
+        }
+    }
+    Ok(())
+}
+
+fn validate_agent_recovery_inspect_request(
+    value: &Value,
+) -> Result<AgentRecoveryInspectRequestV1, AgentAdapterContractError> {
+    let request: AgentRecoveryInspectRequestV1 =
+        from_value(value, "agent recovery inspect request")?;
+    agent_recovery_id(&request.recovery_id, "recoveryId")?;
+    validate_inspect_run_identity(&request)?;
+    Ok(request)
+}
+
+fn validate_agent_recovery_resolve_request(
+    value: &Value,
+) -> Result<AgentRecoveryResolveRequestV1, AgentAdapterContractError> {
+    let request: AgentRecoveryResolveRequestV1 =
+        from_value(value, "agent recovery resolve request")?;
+    agent_recovery_id(&request.recovery_id, "recoveryId")?;
+    validate_resolve_run_identity(&request)?;
+    if request.expected_revision == 0 || request.resolution != "abandon" {
+        return fail("agent recovery resolution requires positive revision and abandon");
+    }
+    Ok(request)
+}
+
+fn validate_agent_recovery_resolve_result(value: &Value) -> Result<(), AgentAdapterContractError> {
+    let result: AgentRecoveryResolveResultV1 = from_value(value, "agent recovery resolve result")?;
+    schema(result.schema_version)?;
+    let before = validate_agent_recovery_record(
+        &serde_json::to_value(&result.before).map_err(contract_json)?,
+    )?;
+    validate_agent_recovery_resolve_request(
+        &serde_json::to_value(&result.request).map_err(contract_json)?,
+    )?;
+    let after = result
+        .after
+        .as_ref()
+        .map(|entry| {
+            validate_agent_recovery_record(&serde_json::to_value(entry).map_err(contract_json)?)
+        })
+        .transpose()?;
+    one_of(
+        &result.outcome,
+        &["resolvedAbandoned", "processesRemain", "revisionConflict"],
+        "outcome",
+    )?;
+    assert_same_recovery_identity_from_resolve(&result.request, &before, "recovery before")?;
+    if before.state != "unresolved" {
+        return fail("only unresolved recovery can be resolved");
+    }
+    let all_gone = before
+        .tracked_processes
+        .iter()
+        .all(|process| process.observed_gone);
+    let expected = if result.request.expected_revision != before.revision {
+        "revisionConflict"
+    } else if !all_gone {
+        "processesRemain"
+    } else {
+        "resolvedAbandoned"
+    };
+    if result.outcome != expected {
+        return fail("recovery resolution outcome must match revision and process evidence");
+    }
+    if result.outcome == "resolvedAbandoned" {
+        let after = after.ok_or_else(|| {
+            AgentAdapterContractError::new("resolved recovery must persist an after record")
+        })?;
+        if after.state != "resolvedAbandoned" || after.revision != before.revision + 1 {
+            return fail("resolved recovery must persist the next revision");
+        }
+        assert_same_recovery_records(&before, &after, "recovery after")?;
+    } else if after.is_some() {
+        return fail("failed recovery resolution cannot persist an after record");
     }
     Ok(())
 }
@@ -834,6 +1263,194 @@ fn same_process(left: &AgentProcessIdentityV1, right: &AgentProcessIdentityV1) -
         && left.executable_path_digest == right.executable_path_digest
 }
 
+fn validate_agent_run_identity(
+    value: &AgentRunIdentityV1,
+) -> Result<(), AgentAdapterContractError> {
+    for (entry, name) in [
+        (&value.chat_id, "chatId"),
+        (&value.task_id, "taskId"),
+        (&value.project_id, "projectId"),
+        (&value.worktree_id, "worktreeId"),
+        (&value.workspace_identity, "workspaceIdentity"),
+    ] {
+        id(entry, name)?;
+    }
+    agent_run_id(&value.run_id, "runId")
+}
+
+fn validate_inspect_run_identity(
+    value: &AgentRecoveryInspectRequestV1,
+) -> Result<(), AgentAdapterContractError> {
+    validate_agent_run_identity(&AgentRunIdentityV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        run_id: value.run_id.clone(),
+    })
+}
+
+fn validate_resolve_run_identity(
+    value: &AgentRecoveryResolveRequestV1,
+) -> Result<(), AgentAdapterContractError> {
+    validate_agent_run_identity(&AgentRunIdentityV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        run_id: value.run_id.clone(),
+    })
+}
+
+fn assert_same_record_identity(
+    expected: &AgentRunIdentityV1,
+    actual: &AgentRunRecordV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    for (left, right, field) in [
+        (expected.chat_id.as_str(), actual.chat_id.as_str(), "chatId"),
+        (expected.task_id.as_str(), actual.task_id.as_str(), "taskId"),
+        (
+            expected.project_id.as_str(),
+            actual.project_id.as_str(),
+            "projectId",
+        ),
+        (
+            expected.worktree_id.as_str(),
+            actual.worktree_id.as_str(),
+            "worktreeId",
+        ),
+        (
+            expected.workspace_identity.as_str(),
+            actual.workspace_identity.as_str(),
+            "workspaceIdentity",
+        ),
+        (expected.run_id.as_str(), actual.run_id.as_str(), "runId"),
+    ] {
+        if left != right {
+            return fail(format!("{name} changed {field}"));
+        }
+    }
+    Ok(())
+}
+
+fn assert_same_recovery_identity(
+    expected: &AgentRunIdentityV1,
+    expected_recovery_id: Option<&str>,
+    actual: &AgentRecoveryRecordV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    for (left, right, field) in [
+        (expected.chat_id.as_str(), actual.chat_id.as_str(), "chatId"),
+        (expected.task_id.as_str(), actual.task_id.as_str(), "taskId"),
+        (
+            expected.project_id.as_str(),
+            actual.project_id.as_str(),
+            "projectId",
+        ),
+        (
+            expected.worktree_id.as_str(),
+            actual.worktree_id.as_str(),
+            "worktreeId",
+        ),
+        (
+            expected.workspace_identity.as_str(),
+            actual.workspace_identity.as_str(),
+            "workspaceIdentity",
+        ),
+        (expected.run_id.as_str(), actual.run_id.as_str(), "runId"),
+    ] {
+        if left != right {
+            return fail(format!("{name} changed {field}"));
+        }
+    }
+    if expected_recovery_id.is_some_and(|id| id != actual.recovery_id) {
+        return fail(format!("{name} changed recoveryId"));
+    }
+    Ok(())
+}
+
+fn assert_same_recovery_identity_from_resolve(
+    expected: &AgentRecoveryResolveRequestV1,
+    actual: &AgentRecoveryRecordV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    let identity = AgentRunIdentityV1 {
+        chat_id: expected.chat_id.clone(),
+        task_id: expected.task_id.clone(),
+        project_id: expected.project_id.clone(),
+        worktree_id: expected.worktree_id.clone(),
+        workspace_identity: expected.workspace_identity.clone(),
+        run_id: expected.run_id.clone(),
+    };
+    assert_same_recovery_identity(&identity, Some(&expected.recovery_id), actual, name)
+}
+
+fn assert_same_recovery_records(
+    expected: &AgentRecoveryRecordV1,
+    actual: &AgentRecoveryRecordV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    let identity = AgentRunIdentityV1 {
+        chat_id: expected.chat_id.clone(),
+        task_id: expected.task_id.clone(),
+        project_id: expected.project_id.clone(),
+        worktree_id: expected.worktree_id.clone(),
+        workspace_identity: expected.workspace_identity.clone(),
+        run_id: expected.run_id.clone(),
+    };
+    assert_same_recovery_identity(&identity, Some(&expected.recovery_id), actual, name)
+}
+
+fn validate_unique_processes(
+    processes: &[AgentProcessIdentityV1],
+) -> Result<(), AgentAdapterContractError> {
+    let mut identities = HashSet::new();
+    for process in processes {
+        validate_process(process)?;
+        if !identities.insert((process.pid, process.start_identity_digest.as_str())) {
+            return fail("tracked process identities must be unique");
+        }
+    }
+    Ok(())
+}
+
+fn exact_value_keys(
+    object: &Map<String, Value>,
+    expected: &[&str],
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    if object.len() != expected.len() || !object.keys().all(|key| expected.contains(&key.as_str()))
+    {
+        return fail(format!("{name} has unknown or missing fields"));
+    }
+    Ok(())
+}
+
+fn chat_string<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+) -> Result<&'a str, AgentAdapterContractError> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| AgentAdapterContractError::new(format!("chat {key} must be a string")))
+}
+
+fn value_string<'a>(
+    value: &'a Value,
+    key: &str,
+    name: &str,
+) -> Result<&'a str, AgentAdapterContractError> {
+    value
+        .as_object()
+        .and_then(|object| object.get(key))
+        .and_then(Value::as_str)
+        .ok_or_else(|| AgentAdapterContractError::new(format!("{name} {key} must be a string")))
+}
+
 fn from_value<T: for<'de> Deserialize<'de> + Serialize>(
     value: &Value,
     name: &str,
@@ -880,12 +1497,64 @@ fn id(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
     bounded(value, name, G5_ID_MAX_BYTES_V1)
 }
 
+fn agent_run_id(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
+    id(value, name)?;
+    if !value.starts_with("agent_run_") {
+        return fail(format!("{name} must use the actual-agent run namespace"));
+    }
+    Ok(())
+}
+
+fn agent_recovery_id(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
+    id(value, name)?;
+    if !value.starts_with("agent_recovery_") {
+        return fail(format!(
+            "{name} must use the actual-agent recovery namespace"
+        ));
+    }
+    Ok(())
+}
+
 fn digest(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
     id(value, name)?;
     if !value.starts_with("sha256:") {
         return fail(format!("{name} must be a redacted sha256 digest"));
     }
     Ok(())
+}
+
+fn fingerprint_digest(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
+    let valid = value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    });
+    if !valid {
+        return fail(format!("{name} must be an exact lowercase SHA-256 digest"));
+    }
+    Ok(())
+}
+
+fn canonicalize_fingerprint_value(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(canonicalize_fingerprint_value)
+                .collect(),
+        ),
+        Value::Object(values) => {
+            let mut entries: Vec<_> = values.into_iter().collect();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut canonical = Map::new();
+            for (key, value) in entries {
+                canonical.insert(key, canonicalize_fingerprint_value(value));
+            }
+            Value::Object(canonical)
+        }
+        scalar => scalar,
+    }
 }
 
 fn timestamp(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {

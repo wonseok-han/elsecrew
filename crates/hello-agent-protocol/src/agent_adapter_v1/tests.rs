@@ -24,7 +24,9 @@ struct Contract {
     execution_mode: String,
     follow_up_mode: String,
     renderer_launch_fields: String,
-    fingerprint: String,
+    fingerprint: FingerprintContract,
+    actual_run_id_namespace: String,
+    actual_recovery_id_namespace: String,
     model_start_evidence: Vec<String>,
     start_outcomes: Vec<String>,
     capability_block_reasons: Vec<String>,
@@ -40,6 +42,19 @@ struct Contract {
 struct PreflightFailure {
     spawn_count: u64,
     lock_count: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FingerprintContract {
+    algorithm: String,
+    encoding: String,
+    object_keys: String,
+    array_order: String,
+    explicit_null: String,
+    excluded_fields: Vec<String>,
+    canonical_fixture: String,
+    canonical_digest: String,
 }
 
 #[derive(Deserialize)]
@@ -67,7 +82,13 @@ fn rust_matches_the_planned_g5a_manifest_without_changing_g5_ready() {
         .map(String::as_str)));
     assert_eq!(
         manifest.contract.bridge_methods_added,
-        ["getAgentCapabilities", "startAgentRun"]
+        [
+            "getAgentCapabilities",
+            "startAgentRun",
+            "cancelAgentRun",
+            "inspectAgentRecovery",
+            "resolveAgentRecovery"
+        ]
     );
     assert!(!manifest.contract.actual_agent_advertised_by_current_g5);
     assert!(!manifest.contract.agent_smoke_advertised);
@@ -106,13 +127,21 @@ fn rust_accepts_and_rejects_the_same_agent_adapter_golden_cases() {
 
 #[test]
 fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
-    let (_, manifest) = manifest();
+    let (root, manifest) = manifest();
     assert_eq!(manifest.contract.execution_mode, "oneShot");
     assert_eq!(manifest.contract.follow_up_mode, "nextRun");
     assert_eq!(manifest.contract.renderer_launch_fields, "forbidden");
+    let fingerprint = &manifest.contract.fingerprint;
+    assert_eq!(fingerprint.algorithm, "sha256");
+    assert_eq!(fingerprint.encoding, "utf8CompactJson");
+    assert_eq!(fingerprint.object_keys, "recursiveAsciiAscending");
+    assert_eq!(fingerprint.array_order, "preserved");
+    assert_eq!(fingerprint.explicit_null, "included");
+    assert_eq!(fingerprint.excluded_fields, ["fingerprint", "observedAt"]);
+    assert_eq!(manifest.contract.actual_run_id_namespace, "agent_run_");
     assert_eq!(
-        manifest.contract.fingerprint,
-        "sha256CanonicalCapabilitySnapshotWithoutFingerprintOrObservedAt"
+        manifest.contract.actual_recovery_id_namespace,
+        "agent_recovery_"
     );
     assert_eq!(
         manifest.contract.model_start_evidence,
@@ -151,6 +180,19 @@ fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
     assert_eq!(
         manifest.contract.uncertain_termination,
         "recoveryRequiredAndPoisoned"
+    );
+
+    let cases: Cases = read_json(root.join("cases.json"));
+    let fixture = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == fingerprint.canonical_fixture)
+        .expect("canonical capability fixture");
+    let snapshot: AgentCapabilitySnapshotV1 =
+        serde_json::from_value(fixture.value.clone()).expect("decode capability snapshot");
+    assert_eq!(
+        compute_agent_capability_fingerprint_v1(&snapshot).expect("fingerprint"),
+        fingerprint.canonical_digest
     );
 }
 

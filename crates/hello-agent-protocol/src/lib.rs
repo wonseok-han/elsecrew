@@ -48,10 +48,13 @@ pub const METHODS_V1: &[&str] = &[
     "run.startFixture",
     "run.startAgent",
     "run.startAgentSmoke",
+    "run.cancelAgent",
     "run.cancel",
     "recovery.list",
     "recovery.inspect",
+    "recovery.inspectAgent",
     "recovery.markResolved",
+    "recovery.resolveAgent",
 ];
 
 pub const EVENTS_V1: &[&str] = &[

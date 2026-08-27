@@ -37,10 +37,13 @@
       "run.startFixture",
       "run.startAgent",
       "run.startAgentSmoke",
+      "run.cancelAgent",
       "run.cancel",
       "recovery.list",
       "recovery.inspect",
-      "recovery.markResolved"
+      "recovery.inspectAgent",
+      "recovery.markResolved",
+      "recovery.resolveAgent"
     ],
     "events": [
       "system.ready",

@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 독립 리뷰 수정)
+
+- **리뷰 수정**: 독립 리뷰의 네 차단 사항을 TypeScript/Rust 공용 계약과 같은 golden fixture로 고쳤다. clean exit는 모든 `(pid,startIdentityDigest)`가 중복 없이 `observedGone=true`여야 하며, actual run도 G5와 같은 `planning→planning`, `coding→implementing`, `review→verifying` 역할-stage 결속을 지킨다.
+- **fingerprint 결정**: capability fingerprint는 top-level `fingerprint`와 관찰 시각 `observedAt`을 제외한 snapshot을 재귀 ASCII key 순서의 compact JSON으로 직렬화한다. 배열 순서는 보존하고 explicit null은 포함한 UTF-8 bytes의 SHA-256에 실제 결속한다. renderer/Vite 계약에는 Node 전용 모듈을 넣지 않고 기존 순수 TypeScript SHA-256을 사용하며, Node crypto는 테스트 oracle로만 비교한다. 정확한 snapshot이 바뀌었는데 이전 fingerprint를 재사용하면 양 언어가 거부한다.
+- **V4 wire 경계**: 기존 G5 handshake·fixture-only V3를 바꾸지 않고 planned V4에 actual-agent 전용 `run.cancelAgent`, `recovery.inspectAgent`, `recovery.resolveAgent`만 예약했다. actual run/recovery는 `agent_run_`·`agent_recovery_` namespace와 별도 `agentRuns` ledger를 사용하고 chat/task/project/worktree/workspace identity를 exact 결속한다. clean cancel과 poisoned recovery/명시적 abandon resolution은 typed response와 validator만 정의했으며 Electron·sidecar 소비자는 아직 구현·광고하지 않는다.
+- **검증·경계**: 공용 golden의 clean-exit process proof·중복 identity·fingerprint 재사용·cancel/recovery/chat identity·역할-stage 회귀를 양 언어가 함께 읽는다. focused Node 6개, 전체 Node 127개, focused Rust 3개·전체 protocol 25개, renderer production build와 `git diff --check`가 통과했다. 실제 Claude Code/Codex 실행·인증·model 조회·사용자 프로젝트 접근은 하지 않았다. 다음은 이 fix commit을 같은 독립 리뷰에 다시 제출하는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 실제 agent adapter 계약)
 
 - **한 일**: 현재 G5 handshake와 `run.startFixture`의 fake-only 의미를 바꾸지 않고, protocol v1에 `agent.getCapabilities`·`run.startAgent`를 예약하고 별도 planned `M5BridgeV4`와 TypeScript/Rust 공용 agent adapter v1 계약·golden fixture를 추가했다. 실제 run은 `fixtureScenario`가 있는 G5 fixture run과 섞지 않고 V4 chat detail의 별도 `agentRuns` ledger로 정의했다. renderer start 요청은 `chatId/roleId/inputMessageIds/expectedCapabilityFingerprint`만 허용하며 실행 경로·argv·model·env·cwd·prompt는 서버가 채팅의 프로젝트별 역할 snapshot에서 해석한다.

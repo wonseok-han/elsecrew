@@ -9,9 +9,9 @@
       "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat", "workspace.abandonPrepared",
       "project.getRoleSettings", "project.updateRoleSettings", "chat.create", "chat.list", "chat.get",
       "run.startFixture", "run.cancel", "recovery.list", "recovery.inspect", "recovery.markResolved",
-      "agent.getCapabilities", "run.startAgent"
+      "agent.getCapabilities", "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent"
     ],
-    "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun"],
+    "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun", "cancelAgentRun", "inspectAgentRecovery", "resolveAgentRecovery"],
     "actualAgentAdvertisedByCurrentG5": false,
     "agentSmokeAdvertised": false,
     "fixtureRunSemantics": "fakeOnly",
@@ -19,7 +19,18 @@
     "executionMode": "oneShot",
     "followUpMode": "nextRun",
     "rendererLaunchFields": "forbidden",
-    "fingerprint": "sha256CanonicalCapabilitySnapshotWithoutFingerprintOrObservedAt",
+    "fingerprint": {
+      "algorithm": "sha256",
+      "encoding": "utf8CompactJson",
+      "objectKeys": "recursiveAsciiAscending",
+      "arrayOrder": "preserved",
+      "explicitNull": "included",
+      "excludedFields": ["fingerprint", "observedAt"],
+      "canonicalFixture": "claude-exact-version-measured-capability",
+      "canonicalDigest": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3"
+    },
+    "actualRunIdNamespace": "agent_run_",
+    "actualRecoveryIdNamespace": "agent_recovery_",
     "modelStartEvidence": ["runtimeVerified", "measuredExactVersion"],
     "startOutcomes": [
       "started", "platformUnsupported", "notInstalled", "installationIncomplete", "unsupportedVersion",
