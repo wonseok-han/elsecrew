@@ -141,12 +141,15 @@ struct LedgerSnapshot {
 struct G5CCases {
     claude_manifest: Value,
     claude_observation: Value,
+    accepted_run: Value,
+    resolved_profile: Value,
     claude_attestation: Value,
     claude_events: Value,
     codex_manifest: Value,
     codex_argv_only_observation: Value,
     codex_unknown_catalog_observation: Value,
     invalid_mutations: Vec<G5CMutationCase>,
+    invalid_generated_events: Vec<G5CGeneratedEventCase>,
 }
 
 #[derive(Deserialize)]
@@ -154,6 +157,16 @@ struct G5CMutationCase {
     name: String,
     target: String,
     changes: Vec<MutationChange>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct G5CGeneratedEventCase {
+    name: String,
+    generator: String,
+    public_event_count: Option<usize>,
+    public_text_bytes_each: Option<usize>,
+    public_text_byte_lengths: Option<Vec<usize>>,
 }
 
 #[test]
@@ -536,12 +549,15 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
             Some("modelCatalogUnverified")
         );
     }
-    validate_agent_runtime_attestation_v1(
+    let attestation = validate_agent_runtime_attestation_against_accepted_v1(
         &cases.claude_attestation,
         &cases.claude_manifest,
         &cases.claude_observation,
+        &cases.accepted_run,
+        &cases.resolved_profile,
     )
     .expect("valid runtime attestation");
+    assert_eq!(attestation.workspace_identity, "workspace_01");
     validate_internal_provider_event_sequence_v1(&cases.claude_events, &cases.claude_manifest)
         .expect("valid internal provider events");
 
@@ -559,6 +575,8 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
             "claudeManifest" => cases.claude_manifest.clone(),
             "claudeObservation" => cases.claude_observation.clone(),
             "claudeAttestation" => cases.claude_attestation.clone(),
+            "acceptedRun" => cases.accepted_run.clone(),
+            "resolvedProfile" => cases.resolved_profile.clone(),
             "claudeEvents" => cases.claude_events.clone(),
             other => panic!("unknown G5C mutation target {other}"),
         };
@@ -576,10 +594,28 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
                 validate_sanitized_discovery_observation_v1(&value, &cases.claude_manifest)
                     .map(|_| ())
             }
-            "claudeAttestation" => validate_agent_runtime_attestation_v1(
+            "claudeAttestation" => validate_agent_runtime_attestation_against_accepted_v1(
                 &value,
                 &cases.claude_manifest,
                 &cases.claude_observation,
+                &cases.accepted_run,
+                &cases.resolved_profile,
+            )
+            .map(|_| ()),
+            "acceptedRun" => validate_agent_runtime_attestation_against_accepted_v1(
+                &cases.claude_attestation,
+                &cases.claude_manifest,
+                &cases.claude_observation,
+                &value,
+                &cases.resolved_profile,
+            )
+            .map(|_| ()),
+            "resolvedProfile" => validate_agent_runtime_attestation_against_accepted_v1(
+                &cases.claude_attestation,
+                &cases.claude_manifest,
+                &cases.claude_observation,
+                &cases.accepted_run,
+                &value,
             )
             .map(|_| ()),
             "claudeEvents" => {
@@ -593,6 +629,32 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
             "invalid G5C mutation passed: {}",
             mutation.name
         );
+    }
+
+    for generated in &cases.invalid_generated_events {
+        let events = generate_g5c_provider_events(generated);
+        assert!(
+            validate_internal_provider_event_sequence_v1(&events, &cases.claude_manifest).is_err(),
+            "invalid generated G5C events passed: {}",
+            generated.name
+        );
+        let public = events
+            .as_array()
+            .expect("generated event array")
+            .iter()
+            .filter(|event| event["classification"] == "Public")
+            .collect::<Vec<_>>();
+        if generated.generator == "uniformPublicEvents" {
+            assert_eq!(public.len(), crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 + 1);
+        } else {
+            assert_eq!(
+                public
+                    .iter()
+                    .map(|event| event["text"].as_str().expect("public text").len())
+                    .sum::<usize>(),
+                crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 + 1
+            );
+        }
     }
 }
 
@@ -624,6 +686,43 @@ fn set_g5c_json_pointer(root: &mut Value, pointer: &str, value: Value) {
     } else {
         panic!("JSON pointer parent must be an object or array: {parent}");
     }
+}
+
+fn generate_g5c_provider_events(case: &G5CGeneratedEventCase) -> Value {
+    let lengths = match case.generator.as_str() {
+        "uniformPublicEvents" => vec![
+            case.public_text_bytes_each
+                .expect("uniform public text bytes");
+            case.public_event_count.expect("uniform public event count")
+        ],
+        "publicTextByteLengths" => case
+            .public_text_byte_lengths
+            .clone()
+            .expect("public text byte lengths"),
+        other => panic!("unknown G5C event generator {other}"),
+    };
+    let mut events = vec![serde_json::json!({
+        "schemaVersion": 1,
+        "sequence": 1,
+        "classification": "Handshake",
+        "verifiedRuntimeEvidence": G5C_CLAUDE_RUNTIME_VERIFICATION_V1,
+    })];
+    for (index, length) in lengths.iter().enumerate() {
+        events.push(serde_json::json!({
+            "schemaVersion": 1,
+            "sequence": index + 2,
+            "classification": "Public",
+            "kind": "status",
+            "text": "a".repeat(*length),
+        }));
+    }
+    events.push(serde_json::json!({
+        "schemaVersion": 1,
+        "sequence": lengths.len() + 2,
+        "classification": "Terminal",
+        "outcome": "succeeded",
+    }));
+    Value::Array(events)
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: PathBuf) -> T {

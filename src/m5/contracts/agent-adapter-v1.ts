@@ -1,6 +1,7 @@
 import { sha256FileVersionV1 } from "./file-v1.ts";
 import {
   AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
+  AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
   METHODS_V1,
   validateAgentPublicEventPayloadV1,
   validateAgentRunStateChangedPayloadV1,
@@ -174,10 +175,10 @@ export interface AgentRuntimeAttestationV1 {
   manifestDigest: string;
   executableClosureDigest: string;
   effectiveProfile: ProviderProfileTupleV1;
+  workspaceIdentity: string;
   managedCwdIdentity: string;
   eventParserId: string;
   verifiedRuntimeEvidence: readonly G5CRuntimeVerificationIdV1[];
-  sessionDigest: string | null;
   verifiedAt: string;
 }
 
@@ -917,8 +918,8 @@ export function validateAgentRuntimeAttestationV1(
   }
   const object = exactObject(value, [
     "schemaVersion", "runId", "providerId", "runtime", "capabilityFingerprint", "manifestDigest",
-    "executableClosureDigest", "effectiveProfile", "managedCwdIdentity", "eventParserId",
-    "verifiedRuntimeEvidence", "sessionDigest", "verifiedAt",
+    "executableClosureDigest", "effectiveProfile", "workspaceIdentity", "managedCwdIdentity",
+    "eventParserId", "verifiedRuntimeEvidence", "verifiedAt",
   ], "agent runtime attestation");
   schema(object.schemaVersion);
   agentRunId(object.runId, "runId");
@@ -936,6 +937,7 @@ export function validateAgentRuntimeAttestationV1(
   if (!manifest.exactProfiles.some((profile) => sameProviderProfileV1(profile, effectiveProfile))) {
     fail("runtime attestation effective profile is not an exact supported tuple");
   }
+  id(object.workspaceIdentity, "workspaceIdentity");
   fingerprintDigest(object.managedCwdIdentity, "managedCwdIdentity");
   if (object.eventParserId !== manifest.eventParserId) fail("runtime attestation parser mismatch");
   const verifiedRuntimeEvidence = validateRuntimeVerificationListV1(
@@ -946,7 +948,6 @@ export function validateAgentRuntimeAttestationV1(
   if (!sameStringsV1(verifiedRuntimeEvidence, manifest.launchPolicy.requiredRuntimeVerification)) {
     fail("runtime attestation must bind every required verification in canonical order");
   }
-  if (object.sessionDigest !== null) fingerprintDigest(object.sessionDigest, "sessionDigest");
   timestamp(object.verifiedAt, "verifiedAt");
   return {
     ...object,
@@ -955,6 +956,33 @@ export function validateAgentRuntimeAttestationV1(
     effectiveProfile,
     verifiedRuntimeEvidence,
   } as unknown as AgentRuntimeAttestationV1;
+}
+
+export function validateAgentRuntimeAttestationAgainstAcceptedV1(
+  value: unknown,
+  manifestValue: unknown,
+  observationValue: unknown,
+  acceptedValue: unknown,
+  profileValue: unknown,
+): AgentRuntimeAttestationV1 {
+  const attestation = validateAgentRuntimeAttestationV1(value, manifestValue, observationValue);
+  const accepted = validateAgentRunAcceptedV1(acceptedValue);
+  const profile = validateProfile(profileValue);
+  if (accepted.roleId !== profile.roleId) fail("accepted run and resolved profile role mismatch");
+  if (attestation.runId !== accepted.runId) fail("runtime attestation changed accepted runId");
+  if (attestation.capabilityFingerprint !== accepted.capabilityFingerprint) {
+    fail("runtime attestation changed accepted capabilityFingerprint");
+  }
+  if (attestation.workspaceIdentity !== accepted.workspaceIdentity) {
+    fail("runtime attestation changed accepted workspaceIdentity");
+  }
+  if (attestation.runtime !== profile.runtime
+    || attestation.effectiveProfile.modelSelector !== profile.modelSelector
+    || attestation.effectiveProfile.reasoningEffort !== profile.reasoningEffort
+    || attestation.effectiveProfile.permission !== profile.permission) {
+    fail("runtime attestation changed the exact resolved provider profile");
+  }
+  return attestation;
 }
 
 export function validateInternalProviderEventV1(value: unknown): InternalProviderEventV1 {
@@ -1004,6 +1032,8 @@ export function validateInternalProviderEventSequenceV1(
   let handshakeSeen = false;
   let finalSeen = false;
   let terminalSeen = false;
+  let publicEventCount = 0;
+  let publicTextBytes = 0;
   for (const [index, entry] of entries.entries()) {
     if (entry.sequence !== index + 1) fail("internal provider event sequence must be contiguous from one");
     if (terminalSeen) fail("terminal or auth failure must be the last provider event");
@@ -1020,6 +1050,14 @@ export function validateInternalProviderEventSequenceV1(
     } else {
       if (!handshakeSeen) fail("provider handshake must precede public, private, and terminal events");
       if (entry.classification === "Public") {
+        publicEventCount += 1;
+        publicTextBytes += new TextEncoder().encode(entry.text).length;
+        if (publicEventCount > AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1) {
+          fail("internal provider public event count exceeds the G5B run budget");
+        }
+        if (publicTextBytes > AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1) {
+          fail("internal provider public text exceeds the G5B run budget");
+        }
         if (finalSeen) fail("no public event may follow final");
         if (entry.kind === "final") finalSeen = true;
       }

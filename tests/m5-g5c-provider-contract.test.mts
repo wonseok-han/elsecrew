@@ -13,31 +13,45 @@ import {
   canonicalProviderManifestV1,
   computeProviderExecutableClosureDigestV1,
   computeProviderManifestDigestV1,
-  validateAgentRuntimeAttestationV1,
+  validateAgentRuntimeAttestationAgainstAcceptedV1,
   validateInternalProviderEventSequenceV1,
   validateProviderManifestV1,
   validateSanitizedDiscoveryObservationV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
-import { EVENTS_V1 } from "../src/m5/contracts/protocol-v1.ts";
+import {
+  AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
+  AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
+  EVENTS_V1,
+} from "../src/m5/contracts/protocol-v1.ts";
 import { G5_CAPABILITIES_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 interface MutationChange { pointer: string; value: unknown }
 interface MutationCase {
   name: string;
-  target: "claudeManifest" | "claudeObservation" | "claudeAttestation" | "claudeEvents";
+  target: "claudeManifest" | "claudeObservation" | "claudeAttestation" | "acceptedRun" | "resolvedProfile" | "claudeEvents";
   changes: MutationChange[];
+}
+interface GeneratedEventCase {
+  name: string;
+  generator: "uniformPublicEvents" | "publicTextByteLengths";
+  publicEventCount?: number;
+  publicTextBytesEach?: number;
+  publicTextByteLengths?: number[];
 }
 interface G5CCases {
   claudeManifest: unknown;
   claudeObservation: unknown;
+  acceptedRun: unknown;
+  resolvedProfile: unknown;
   claudeAttestation: unknown;
   claudeEvents: unknown;
   codexManifest: unknown;
   codexArgvOnlyObservation: unknown;
   codexUnknownCatalogObservation: unknown;
   invalidMutations: MutationCase[];
+  invalidGeneratedEvents: GeneratedEventCase[];
 }
 
 const root = resolve("tests/fixtures/m5/agent-adapter-v1");
@@ -75,14 +89,18 @@ test("G5C sanitized discovery requires all Claude runtime evidence and keeps Cod
 });
 
 test("G5C attestation binds launch identity and internal events expose only handshake, existing public kinds, private classes, and terminal state", () => {
-  const attestation = validateAgentRuntimeAttestationV1(
+  const attestation = validateAgentRuntimeAttestationAgainstAcceptedV1(
     cases.claudeAttestation,
     cases.claudeManifest,
     cases.claudeObservation,
+    cases.acceptedRun,
+    cases.resolvedProfile,
   );
   const events = validateInternalProviderEventSequenceV1(cases.claudeEvents, cases.claudeManifest);
 
   assert.equal(attestation.runId, "agent_run_g5c_claude_01");
+  assert.equal(attestation.workspaceIdentity, "workspace_01");
+  assert.equal(Object.hasOwn(attestation, "sessionDigest"), false);
   assert.match(attestation.managedCwdIdentity, /^sha256:[0-9a-f]{64}$/);
   assert.deepEqual([...new Set(events.map((event) => event.classification))], G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1.slice(0, 4));
   assert.ok(events.filter((event) => event.classification === "Public")
@@ -92,16 +110,49 @@ test("G5C attestation binds launch identity and internal events expose only hand
 
 test("G5C exact invalid mutations reject raw/private/auth identity leaks, incomplete closure, mismatched digests, unsupported tuples, and event ordering", () => {
   for (const mutation of cases.invalidMutations) {
-    const value = structuredClone(cases[mutation.target]);
+    const values = {
+      claudeManifest: structuredClone(cases.claudeManifest),
+      claudeObservation: structuredClone(cases.claudeObservation),
+      claudeAttestation: structuredClone(cases.claudeAttestation),
+      acceptedRun: structuredClone(cases.acceptedRun),
+      resolvedProfile: structuredClone(cases.resolvedProfile),
+      claudeEvents: structuredClone(cases.claudeEvents),
+    };
+    const value = values[mutation.target];
     for (const change of mutation.changes) setJsonPointer(value, change.pointer, materializeValue(change.value));
     const validate = () => {
       if (mutation.target === "claudeManifest") validateProviderManifestV1(value);
       else if (mutation.target === "claudeObservation") validateSanitizedDiscoveryObservationV1(value, cases.claudeManifest);
-      else if (mutation.target === "claudeAttestation") {
-        validateAgentRuntimeAttestationV1(value, cases.claudeManifest, cases.claudeObservation);
-      } else validateInternalProviderEventSequenceV1(value, cases.claudeManifest);
+      else if (mutation.target === "claudeEvents") validateInternalProviderEventSequenceV1(value, cases.claudeManifest);
+      else validateAgentRuntimeAttestationAgainstAcceptedV1(
+        values.claudeAttestation,
+        cases.claudeManifest,
+        cases.claudeObservation,
+        values.acceptedRun,
+        values.resolvedProfile,
+      );
     };
     assert.throws(validate, undefined, mutation.name);
+  }
+});
+
+test("G5C internal provider events enforce the existing G5B 256-event and 1 MiB aggregate public-text budgets", () => {
+  for (const entry of cases.invalidGeneratedEvents) {
+    const events = generateProviderEvents(entry);
+    assert.throws(
+      () => validateInternalProviderEventSequenceV1(events, cases.claudeManifest),
+      undefined,
+      entry.name,
+    );
+    const publicEvents = events.filter((event) => event.classification === "Public");
+    if (entry.generator === "uniformPublicEvents") {
+      assert.equal(publicEvents.length, AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 + 1);
+    } else {
+      assert.equal(
+        publicEvents.reduce((total, event) => total + new TextEncoder().encode(event.text as string).length, 0),
+        AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 + 1,
+      );
+    }
   }
 });
 
@@ -128,4 +179,32 @@ function setJsonPointer(rootValue: unknown, pointer: string, value: unknown): vo
   }
   const last = segments.at(-1)!;
   (cursor as Record<string, unknown>)[last] = value;
+}
+
+function generateProviderEvents(entry: GeneratedEventCase): Record<string, unknown>[] {
+  const lengths = entry.generator === "uniformPublicEvents"
+    ? Array.from({ length: entry.publicEventCount! }, () => entry.publicTextBytesEach!)
+    : entry.publicTextByteLengths!;
+  const events: Record<string, unknown>[] = [{
+    schemaVersion: 1,
+    sequence: 1,
+    classification: "Handshake",
+    verifiedRuntimeEvidence: [...G5C_CLAUDE_RUNTIME_VERIFICATION_V1],
+  }];
+  for (const [index, length] of lengths.entries()) {
+    events.push({
+      schemaVersion: 1,
+      sequence: index + 2,
+      classification: "Public",
+      kind: "status",
+      text: "a".repeat(length),
+    });
+  }
+  events.push({
+    schemaVersion: 1,
+    sequence: lengths.length + 2,
+    classification: "Terminal",
+    outcome: "succeeded",
+  });
+  return events;
 }

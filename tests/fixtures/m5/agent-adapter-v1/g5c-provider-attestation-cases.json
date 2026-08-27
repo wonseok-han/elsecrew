@@ -72,6 +72,25 @@
     "blockedReason": null,
     "observedAt": "2026-08-27T08:00:00Z"
   },
+  "acceptedRun": {
+    "schemaVersion": 1,
+    "runId": "agent_run_g5c_claude_01",
+    "chatId": "chat_01",
+    "taskId": "task_01",
+    "projectId": "project_01",
+    "worktreeId": "worktree_01",
+    "workspaceIdentity": "workspace_01",
+    "roleId": "coding",
+    "capabilityFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "state": "preparing"
+  },
+  "resolvedProfile": {
+    "roleId": "coding",
+    "runtime": "claude-code",
+    "modelSelector": "claude-opus-5",
+    "reasoningEffort": null,
+    "permission": "workspaceWrite"
+  },
   "claudeAttestation": {
     "schemaVersion": 1,
     "runId": "agent_run_g5c_claude_01",
@@ -81,10 +100,10 @@
     "manifestDigest": "sha256:8df06be9cf9e1774021a714595e6ae964f0a26d1fbf04cdbb775572b726515e2",
     "executableClosureDigest": "sha256:3d2f1e123e5bcae5be55245df865f6ce6d21388b365fa078a7de85faa64efba0",
     "effectiveProfile": {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "workspaceWrite"},
+    "workspaceIdentity": "workspace_01",
     "managedCwdIdentity": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "eventParserId": "claude-code.stream-json.v1",
     "verifiedRuntimeEvidence": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"],
-    "sessionDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "verifiedAt": "2026-08-27T08:00:01Z"
   },
   "claudeEvents": [
@@ -216,6 +235,14 @@
     {"name": "observation-unsupported-tuple", "target": "claudeObservation", "changes": [{"pointer": "/exactProfiles/0/modelSelector", "value": "claude-unknown"}]},
     {"name": "attestation-unsupported-tuple", "target": "claudeAttestation", "changes": [{"pointer": "/effectiveProfile/modelSelector", "value": "claude-unknown"}]},
     {"name": "attestation-digest-mismatch", "target": "claudeAttestation", "changes": [{"pointer": "/manifestDigest", "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}]},
+    {"name": "attestation-session-digest-forbidden", "target": "claudeAttestation", "changes": [{"pointer": "/sessionDigest", "value": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}]},
+    {"name": "attestation-accepted-run-id-drift", "target": "acceptedRun", "changes": [{"pointer": "/runId", "value": "agent_run_drift"}]},
+    {"name": "attestation-accepted-fingerprint-drift", "target": "acceptedRun", "changes": [{"pointer": "/capabilityFingerprint", "value": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}]},
+    {"name": "attestation-accepted-workspace-drift", "target": "acceptedRun", "changes": [{"pointer": "/workspaceIdentity", "value": "workspace_drift"}]},
+    {"name": "attestation-runtime-drift", "target": "resolvedProfile", "changes": [{"pointer": "/runtime", "value": "codex"}]},
+    {"name": "attestation-model-drift", "target": "resolvedProfile", "changes": [{"pointer": "/modelSelector", "value": "claude-sonnet-5"}]},
+    {"name": "attestation-reasoning-drift", "target": "resolvedProfile", "changes": [{"pointer": "/reasoningEffort", "value": "high"}]},
+    {"name": "attestation-permission-drift", "target": "resolvedProfile", "changes": [{"pointer": "/permission", "value": "readOnly"}]},
     {"name": "events-handshake-after-public", "target": "claudeEvents", "changes": [
       {"pointer": "/0", "value": {"schemaVersion": 1, "sequence": 1, "classification": "Public", "kind": "status", "text": "too early"}},
       {"pointer": "/1", "value": {"schemaVersion": 1, "sequence": 2, "classification": "Handshake", "verifiedRuntimeEvidence": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"]}}
@@ -224,5 +251,9 @@
     {"name": "events-public-private-kind", "target": "claudeEvents", "changes": [{"pointer": "/1/kind", "value": "thinking"}]},
     {"name": "events-oversize-public-text", "target": "claudeEvents", "changes": [{"pointer": "/1/text", "value": "__G5C_OVERSIZE_PUBLIC_TEXT__"}]},
     {"name": "events-malformed-classification", "target": "claudeEvents", "changes": [{"pointer": "/1/classification", "value": "Unknown"}]}
+  ],
+  "invalidGeneratedEvents": [
+    {"name": "events-public-count-257", "generator": "uniformPublicEvents", "publicEventCount": 257, "publicTextBytesEach": 1},
+    {"name": "events-public-text-aggregate-1mib-plus-one", "generator": "publicTextByteLengths", "publicTextByteLengths": [262144, 262144, 262144, 262144, 1]}
   ]
 }

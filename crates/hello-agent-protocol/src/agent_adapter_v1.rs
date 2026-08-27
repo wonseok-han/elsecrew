@@ -268,10 +268,10 @@ pub struct AgentRuntimeAttestationV1 {
     pub manifest_digest: String,
     pub executable_closure_digest: String,
     pub effective_profile: ProviderProfileTupleV1,
+    pub workspace_identity: String,
     pub managed_cwd_identity: String,
     pub event_parser_id: String,
     pub verified_runtime_evidence: Vec<String>,
-    pub session_digest: Option<String>,
     pub verified_at: String,
 }
 
@@ -842,6 +842,7 @@ pub fn validate_agent_runtime_attestation_v1(
     {
         return fail("runtime attestation effective profile is not an exact supported tuple");
     }
+    id(&attestation.workspace_identity, "workspaceIdentity")?;
     fingerprint_digest(&attestation.managed_cwd_identity, "managedCwdIdentity")?;
     if attestation.event_parser_id != manifest.event_parser_id {
         return fail("runtime attestation parser mismatch");
@@ -857,10 +858,41 @@ pub fn validate_agent_runtime_attestation_v1(
             "runtime attestation must bind every required verification in canonical order",
         );
     }
-    if let Some(session_digest) = &attestation.session_digest {
-        fingerprint_digest(session_digest, "sessionDigest")?;
-    }
     timestamp(&attestation.verified_at, "verifiedAt")?;
+    Ok(attestation)
+}
+
+pub fn validate_agent_runtime_attestation_against_accepted_v1(
+    value: &Value,
+    manifest_value: &Value,
+    observation_value: &Value,
+    accepted_value: &Value,
+    profile_value: &Value,
+) -> Result<AgentRuntimeAttestationV1, AgentAdapterContractError> {
+    let attestation =
+        validate_agent_runtime_attestation_v1(value, manifest_value, observation_value)?;
+    let accepted = validate_run_accepted(accepted_value)?;
+    let profile: AgentResolvedProfileV1 = from_value(profile_value, "resolved provider profile")?;
+    validate_profile(&profile)?;
+    if accepted.role_id != profile.role_id {
+        return fail("accepted run and resolved profile role mismatch");
+    }
+    if attestation.run_id != accepted.run_id {
+        return fail("runtime attestation changed accepted runId");
+    }
+    if attestation.capability_fingerprint != accepted.capability_fingerprint {
+        return fail("runtime attestation changed accepted capabilityFingerprint");
+    }
+    if attestation.workspace_identity != accepted.workspace_identity {
+        return fail("runtime attestation changed accepted workspaceIdentity");
+    }
+    if attestation.runtime != profile.runtime
+        || attestation.effective_profile.model_selector != profile.model_selector
+        || attestation.effective_profile.reasoning_effort != profile.reasoning_effort
+        || attestation.effective_profile.permission != profile.permission
+    {
+        return fail("runtime attestation changed the exact resolved provider profile");
+    }
     Ok(attestation)
 }
 
@@ -878,6 +910,8 @@ pub fn validate_internal_provider_event_sequence_v1(
     let mut handshake_seen = false;
     let mut final_seen = false;
     let mut terminal_seen = false;
+    let mut public_event_count = 0_usize;
+    let mut public_text_bytes = 0_usize;
     let mut validated = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
         let object = entry.as_object().ok_or_else(|| {
@@ -969,6 +1003,16 @@ pub fn validate_internal_provider_event_sequence_v1(
                     AgentAdapterContractError::new("public text must be a string")
                 })?;
                 bounded(text, "public text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
+                public_event_count += 1;
+                public_text_bytes = public_text_bytes
+                    .checked_add(text.len())
+                    .ok_or_else(|| AgentAdapterContractError::new("public text bytes overflow"))?;
+                if public_event_count > crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 {
+                    return fail("internal provider public event count exceeds the G5B run budget");
+                }
+                if public_text_bytes > crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 {
+                    return fail("internal provider public text exceeds the G5B run budget");
+                }
                 if final_seen {
                     return fail("no public event may follow final");
                 }

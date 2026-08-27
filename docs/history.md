@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C 계약 독립 리뷰 수정)
+
+- **P1 event 예산**: internal provider sequence가 normalization/persistence 전 existing G5B run budget인 Public 최대 256개와 Public text UTF-8 누적 1 MiB를 양언어에서 검사한다. 공용 golden의 결정적 generator로 257개와 1 MiB+1 byte를 fixture 팽창 없이 동일하게 거부한다.
+- **P1 attestation 결속**: `validateAgentRuntimeAttestationAgainstAcceptedV1`/Rust 대응 함수가 기존 accepted run과 resolved profile에 run ID·capability fingerprint·workspace identity·runtime·model·reasoning·permission을 exact 결속한다. 각 차원을 독립 drift한 golden은 기본 attestation이 유효한 상태에서 context 비교로만 거부된다.
+- **P2 session 정보 제거·검증**: 비인증성 deterministic derivation이 없으므로 persisted attestation에서 `sessionDigest`를 제거하고 extra field 회귀로 금지했다. Focused Node 6개, 전체 Node 169개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, 기존 범위 밖 lint만 제외한 protocol clippy, `git diff --check`를 통과했다. 실제 CLI·인증·사용자 프로젝트·Windows는 실행하지 않았고 공개 wire는 변경하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C provider discovery·launch attestation 계약)
 
 - **내부 계약**: 공개 G5/G5A/G5B method·capability·event와 Electron V4/V5를 바꾸지 않고 `ProviderManifestV1`·`SanitizedDiscoveryObservationV1`·`AgentRuntimeAttestationV1`을 Rust/TypeScript에 같은 canonical JSON·SHA-256 규칙으로 고정했다. 매니페스트는 binary와 필수 helper 전체 closure, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·allowlisted no-secret env·no-fallback launch policy를 묶는다.
@@ -357,7 +363,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **M5 G5C provider 활성화 전 계약(2026-08-27)**: provider manifest는 executable binary만이 아니라 필수 helper까지 포함한 closure digest, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·no-secret env·no-fallback policy를 canonical digest로 묶는다. persisted discovery에는 raw stdout/stderr·token·prompt·email·org·raw auth hash를 넣지 않으며, Claude는 `system:init`의 version/model/cwd/permission/tools/MCP/plugins/config를 전부 handshake·runtime attestation으로 검증한 뒤에만 public event를 허용한다. Codex가 argv 또는 unknown catalog만 제공하면 `canStart=false`다. 이 계약은 fake-only internal boundary이고 공개 G5/G5A/G5B wire·V4/V5를 바꾸지 않는다. SQLite 전체 lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition이다
+- **M5 G5C provider 활성화 전 계약(2026-08-27)**: provider manifest는 executable binary만이 아니라 필수 helper까지 포함한 closure digest, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·no-secret env·no-fallback policy를 canonical digest로 묶는다. persisted discovery에는 raw stdout/stderr·token·prompt·email·org·raw auth hash를 넣지 않으며, attestation은 accepted run/profile의 run·fingerprint·workspace·runtime·model·reasoning·permission을 exact 결속하고 derivation이 정의되지 않은 session digest는 저장하지 않는다. Claude는 `system:init`의 version/model/cwd/permission/tools/MCP/plugins/config를 전부 handshake·runtime attestation으로 검증한 뒤에만 public event를 허용하고, internal Public도 기존 G5B 256-event·1 MiB text budget 안에서만 허용한다. Codex가 argv 또는 unknown catalog만 제공하면 `canStart=false`다. 이 계약은 fake-only internal boundary이고 공개 G5/G5A/G5B wire·V4/V5를 바꾸지 않는다. SQLite 전체 lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition이다
 - **마일스톤**: M0~M3, 홈베이스·프로젝트 디스크 스캔·에이전트 상태/업데이트, 주요 실패 경로 닥터, 한·영 콘텐츠까지 구현. 남음: 실제 실패 경로와 macOS/Windows 출시 후보 실기기 검증, 정식 배포(코드 서명)
 - **PATH**: macOS/Windows 인스톨러 둘 다 PATH를 스스로 등록 안 함 → `ensure_path`가 직접(`~/.zshrc` / Windows 사용자 PATH 레지스트리). 위저드는 절대경로 실행이라 PATH 비의존
 - **로그인 자동 감지**: 브라우저 세션이 있으면 확인 코드 없이 자동 승인으로 끝나는 경로가 있어, 대기 중 `auth status` 폴링으로 완료를 잡는다
