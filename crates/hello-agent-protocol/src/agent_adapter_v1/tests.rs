@@ -149,7 +149,7 @@ struct G5CCases {
     codex_argv_only_observation: Value,
     codex_unknown_catalog_observation: Value,
     invalid_mutations: Vec<G5CMutationCase>,
-    invalid_generated_events: Vec<G5CGeneratedEventCase>,
+    generated_event_cases: Vec<G5CGeneratedEventCase>,
 }
 
 #[derive(Deserialize)]
@@ -163,10 +163,13 @@ struct G5CMutationCase {
 #[serde(rename_all = "camelCase")]
 struct G5CGeneratedEventCase {
     name: String,
+    valid: bool,
     generator: String,
     public_event_count: Option<usize>,
     public_text_bytes_each: Option<usize>,
     public_text_byte_lengths: Option<Vec<usize>>,
+    expected_public_event_count: usize,
+    expected_public_text_bytes: usize,
 }
 
 #[test]
@@ -631,12 +634,13 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
         );
     }
 
-    for generated in &cases.invalid_generated_events {
+    for generated in &cases.generated_event_cases {
         let events = generate_g5c_provider_events(generated);
-        assert!(
-            validate_internal_provider_event_sequence_v1(&events, &cases.claude_manifest).is_err(),
-            "invalid generated G5C events passed: {}",
-            generated.name
+        assert_eq!(
+            validate_internal_provider_event_sequence_v1(&events, &cases.claude_manifest).is_ok(),
+            generated.valid,
+            "generated G5C event validity mismatch: {}",
+            generated.name,
         );
         let public = events
             .as_array()
@@ -644,15 +648,34 @@ fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
             .iter()
             .filter(|event| event["classification"] == "Public")
             .collect::<Vec<_>>();
-        if generated.generator == "uniformPublicEvents" {
-            assert_eq!(public.len(), crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 + 1);
-        } else {
-            assert_eq!(
-                public
-                    .iter()
-                    .map(|event| event["text"].as_str().expect("public text").len())
-                    .sum::<usize>(),
-                crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 + 1
+        assert_eq!(
+            public.len(),
+            generated.expected_public_event_count,
+            "{}",
+            generated.name
+        );
+        assert_eq!(
+            public
+                .iter()
+                .map(|event| event["text"].as_str().expect("public text").len())
+                .sum::<usize>(),
+            generated.expected_public_text_bytes,
+            "{}",
+            generated.name
+        );
+        assert!(
+            public
+                .iter()
+                .all(|event| event["text"].as_str().expect("public text").len()
+                    <= G5_PUBLIC_MESSAGE_MAX_BYTES_V1),
+            "{}",
+            generated.name
+        );
+        if generated.expected_public_text_bytes >= crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 {
+            assert!(
+                public.len() < crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
+                "{}",
+                generated.name
             );
         }
     }

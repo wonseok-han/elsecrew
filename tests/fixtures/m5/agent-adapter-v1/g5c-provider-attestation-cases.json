@@ -252,8 +252,9 @@
     {"name": "events-oversize-public-text", "target": "claudeEvents", "changes": [{"pointer": "/1/text", "value": "__G5C_OVERSIZE_PUBLIC_TEXT__"}]},
     {"name": "events-malformed-classification", "target": "claudeEvents", "changes": [{"pointer": "/1/classification", "value": "Unknown"}]}
   ],
-  "invalidGeneratedEvents": [
-    {"name": "events-public-count-257", "generator": "uniformPublicEvents", "publicEventCount": 257, "publicTextBytesEach": 1},
-    {"name": "events-public-text-aggregate-1mib-plus-one", "generator": "publicTextByteLengths", "publicTextByteLengths": [262144, 262144, 262144, 262144, 1]}
+  "generatedEventCases": [
+    {"name": "events-public-count-257", "valid": false, "generator": "uniformPublicEvents", "publicEventCount": 257, "publicTextBytesEach": 1, "expectedPublicEventCount": 257, "expectedPublicTextBytes": 257},
+    {"name": "events-public-text-aggregate-exact-1mib", "valid": true, "generator": "uniformPublicEvents", "publicEventCount": 16, "publicTextBytesEach": 65536, "expectedPublicEventCount": 16, "expectedPublicTextBytes": 1048576},
+    {"name": "events-public-text-aggregate-1mib-plus-one", "valid": false, "generator": "publicTextByteLengths", "publicTextByteLengths": [65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536, 1], "expectedPublicEventCount": 17, "expectedPublicTextBytes": 1048577}
   ]
 }

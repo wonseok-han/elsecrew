@@ -35,10 +35,13 @@ interface MutationCase {
 }
 interface GeneratedEventCase {
   name: string;
+  valid: boolean;
   generator: "uniformPublicEvents" | "publicTextByteLengths";
   publicEventCount?: number;
   publicTextBytesEach?: number;
   publicTextByteLengths?: number[];
+  expectedPublicEventCount: number;
+  expectedPublicTextBytes: number;
 }
 interface G5CCases {
   claudeManifest: unknown;
@@ -51,7 +54,7 @@ interface G5CCases {
   codexArgvOnlyObservation: unknown;
   codexUnknownCatalogObservation: unknown;
   invalidMutations: MutationCase[];
-  invalidGeneratedEvents: GeneratedEventCase[];
+  generatedEventCases: GeneratedEventCase[];
 }
 
 const root = resolve("tests/fixtures/m5/agent-adapter-v1");
@@ -137,21 +140,24 @@ test("G5C exact invalid mutations reject raw/private/auth identity leaks, incomp
 });
 
 test("G5C internal provider events enforce the existing G5B 256-event and 1 MiB aggregate public-text budgets", () => {
-  for (const entry of cases.invalidGeneratedEvents) {
+  for (const entry of cases.generatedEventCases) {
     const events = generateProviderEvents(entry);
-    assert.throws(
-      () => validateInternalProviderEventSequenceV1(events, cases.claudeManifest),
-      undefined,
+    const validate = () => validateInternalProviderEventSequenceV1(events, cases.claudeManifest);
+    if (entry.valid) assert.doesNotThrow(validate, entry.name);
+    else assert.throws(validate, undefined, entry.name);
+    const publicEvents = events.filter((event) => event.classification === "Public");
+    assert.equal(publicEvents.length, entry.expectedPublicEventCount, entry.name);
+    assert.equal(
+      publicEvents.reduce((total, event) => total + new TextEncoder().encode(event.text as string).length, 0),
+      entry.expectedPublicTextBytes,
       entry.name,
     );
-    const publicEvents = events.filter((event) => event.classification === "Public");
-    if (entry.generator === "uniformPublicEvents") {
-      assert.equal(publicEvents.length, AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 + 1);
-    } else {
-      assert.equal(
-        publicEvents.reduce((total, event) => total + new TextEncoder().encode(event.text as string).length, 0),
-        AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 + 1,
-      );
+    assert.ok(
+      publicEvents.every((event) => new TextEncoder().encode(event.text as string).length <= G5_PUBLIC_MESSAGE_MAX_BYTES_V1),
+      entry.name,
+    );
+    if (entry.expectedPublicTextBytes >= AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1) {
+      assert.ok(publicEvents.length < AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1, entry.name);
     }
   }
 });

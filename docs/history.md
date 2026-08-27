@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C aggregate text 경계 증거 보정)
+
+- **공용 경계 fixture**: aggregate Public text 허용 경계를 16개 × 65,536 bytes = 정확히 1 MiB로 고정하고, 거부 경계는 같은 16개 뒤 1-byte 17번째 메시지를 붙인 1 MiB+1로 고정했다. 두 경우 모두 256-event 미만이고 각 메시지는 per-message 상한 이하임을 Rust/TypeScript가 fixture 기대값과 함께 검증한다.
+- **검증·경계**: exact 1 MiB는 양언어 validator가 허용하고 +1은 거부하며, 별도 257-event 사례도 유지했다. Focused Node 6개, 전체 Node 169개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, 기존 범위 밖 lint만 제외한 protocol clippy, `git diff --check`를 통과했다. 계약 구현·공개 wire·실제 provider 실행은 변경하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C 계약 독립 리뷰 수정)
 
 - **P1 event 예산**: internal provider sequence가 normalization/persistence 전 existing G5B run budget인 Public 최대 256개와 Public text UTF-8 누적 1 MiB를 양언어에서 검사한다. 공용 golden의 결정적 generator로 257개와 1 MiB+1 byte를 fixture 팽창 없이 동일하게 거부한다.
