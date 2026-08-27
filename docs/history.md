@@ -16,6 +16,12 @@
 - **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
 - **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron envelope runId 차단 보정)
+
+- **리뷰 수정**: planned G5A `chat.eventAppended`에서 public `TeamMessage.runId`뿐 아니라 protocol envelope의 optional `runId`도 검사한다. 둘 중 하나가 `agent_run_` namespace면 listener를 호출하기 전에 session을 poison한다. 둘 다 non-null인데 서로 다르면 또한 fail-closed로 identity mismatch를 보고한다. current G5에는 이 비교를 적용하지 않아 기존 fixture 채팅 의미는 바꾸지 않는다.
+- **회귀·경계**: fake transcript로 payload carrier와 envelope carrier(메시지 `runId=null` status) 각각이 listener 0회·termination 1회를 보장하고, non-agent envelope/payload runId 불일치도 공개 전에 막는 것을 확인했다. normalized actual-agent public-event wire는 여전히 sidecar event/IPC로 negotiated되지 않았으므로 추가하지 않았고 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+- **검증·다음**: TypeScript `tsc --noEmit`, Electron bridge/scaffold 37개, 전체 Node 136개, Vite production build와 `git diff --check`를 통과했다. 다음은 이 별도 surgical commit의 재리뷰다.
+
 ### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron accepted binding 소비 보정)
 
 - **수정**: approved Bridge V4 contract의 `AgentRunAcceptedV1` full identity를 Electron consumer에 적용했다. planned G5A에서 `chat.get`으로 검증해 보관한 현재 chat의 task/project/worktree/workspace identity, 시작 요청의 chat/role, 요청 capability fingerprint와 accepted response를 exact 비교한다. 어느 한 필드라도 변조되면 session을 poison하며, 정상 accepted binding은 이후 normalized public-event route가 계약될 때만 사용할 private registry에 보관한다.

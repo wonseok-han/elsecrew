@@ -355,22 +355,45 @@ test("G5A keeps actual and fixture ledgers separate and fails closed on raw agen
   await assert.rejects(badDetail, /identity/);
   assert.equal(crossed.child.terminations, 1);
 
-  const raw = createClient();
-  const rawStart = raw.client.start(); raw.child.stdout.write(`${g5aReadyLine()}\n`); await rawStart;
-  let delivered = 0;
-  raw.client.onChatEvent(() => { delivered += 1; });
-  raw.child.stdout.write(eventLine({
-    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "agent_raw", seq: 1,
-    event: "chat.eventAppended", chatId: "chat_01", taskId: "task_01", runId: "agent_run_01",
+  const actualRunCarriers: Array<{ name: string; envelopeRunId?: string; payloadRunId: string | null; kind: "role" | "status"; roleId: "planning" | null }> = [
+    { name: "payload", payloadRunId: "agent_run_payload", kind: "role", roleId: "planning" },
+    { name: "envelope", envelopeRunId: "agent_run_envelope", payloadRunId: null, kind: "status", roleId: null },
+  ];
+  for (const carrier of actualRunCarriers) {
+    const raw = createClient();
+    const rawStart = raw.client.start(); raw.child.stdout.write(`${g5aReadyLine()}\n`); await rawStart;
+    let delivered = 0;
+    raw.client.onChatEvent(() => { delivered += 1; });
+    raw.child.stdout.write(eventLine({
+      protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `agent_raw_${carrier.name}`, seq: 1,
+      event: "chat.eventAppended", chatId: "chat_01", taskId: "task_01", ...(carrier.envelopeRunId === undefined ? {} : { runId: carrier.envelopeRunId }),
+      payload: {
+        schemaVersion: 1, messageId: `message_${carrier.name}`, chatId: "chat_01", taskId: "task_01", worktreeId: "worktree_01",
+        eventSequence: 1, kind: carrier.kind, roleId: carrier.roleId, runId: carrier.payloadRunId,
+        text: "raw stdout and reasoning must never reach renderer", createdAt: "2026-08-27T00:00:00Z",
+      },
+    }));
+    assert.match(raw.client.failure?.message ?? "", /actual-agent chat events are forbidden/);
+    assert.equal(raw.child.terminations, 1, `${carrier.name} actual run carrier must poison the session`);
+    assert.equal(delivered, 0, `${carrier.name} raw text must not be published through chat events`);
+  }
+
+  const mismatch = createClient();
+  const mismatchStart = mismatch.client.start(); mismatch.child.stdout.write(`${g5aReadyLine()}\n`); await mismatchStart;
+  let mismatchDelivered = 0;
+  mismatch.client.onChatEvent(() => { mismatchDelivered += 1; });
+  mismatch.child.stdout.write(eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "chat_run_mismatch", seq: 1,
+    event: "chat.eventAppended", chatId: "chat_01", taskId: "task_01", runId: "run_envelope",
     payload: {
-      schemaVersion: 1, messageId: "message_01", chatId: "chat_01", taskId: "task_01", worktreeId: "worktree_01",
-      eventSequence: 1, kind: "role", roleId: "planning", runId: "agent_run_01",
-      text: "raw stdout and reasoning must never reach renderer", createdAt: "2026-08-27T00:00:00Z",
+      schemaVersion: 1, messageId: "message_mismatch", chatId: "chat_01", taskId: "task_01", worktreeId: "worktree_01",
+      eventSequence: 1, kind: "role", roleId: "planning", runId: "run_payload",
+      text: "mismatched raw run identity", createdAt: "2026-08-27T00:00:00Z",
     },
   }));
-  assert.match(raw.client.failure?.message ?? "", /actual-agent chat events are forbidden/);
-  assert.equal(raw.child.terminations, 1);
-  assert.equal(delivered, 0, "raw stdout/reasoning text must not be published through chat events");
+  assert.match(mismatch.client.failure?.message ?? "", /chat event runId does not match public message/);
+  assert.equal(mismatch.child.terminations, 1);
+  assert.equal(mismatchDelivered, 0, "mismatched run carriers must never be published");
 });
 
 test("current G5 chat detail remains valid without an actual-agent ledger", async () => {

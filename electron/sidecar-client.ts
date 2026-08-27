@@ -568,8 +568,13 @@ export class SidecarClientV1 {
       if (envelope.event === "chat.eventAppended") {
         const message = validateTeamMessageV1(envelope.payload);
         if (envelope.chatId !== message.chatId) throw new Error("chat event chatId does not match public message");
-        if (this.#agentAdapterNegotiated && message.runId?.startsWith("agent_run_")) {
-          throw new Error("actual-agent chat events are forbidden until a normalized public event route is negotiated");
+        if (this.#agentAdapterNegotiated) {
+          if (message.runId !== null && envelope.runId !== undefined && message.runId !== envelope.runId) {
+            throw new Error("chat event runId does not match public message");
+          }
+          if (message.runId?.startsWith("agent_run_") || envelope.runId?.startsWith("agent_run_")) {
+            throw new Error("actual-agent chat events are forbidden until a normalized public event route is negotiated");
+          }
         }
         for (const listener of this.#chatListeners) listener(message, envelope);
       }
