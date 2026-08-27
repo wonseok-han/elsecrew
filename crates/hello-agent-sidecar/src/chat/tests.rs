@@ -672,6 +672,78 @@ fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_an
 }
 
 #[test]
+fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reopen() {
+    for scenario in [
+        FakeScenario::SpawnFailure,
+        FakeScenario::IdentityFailure,
+        FakeScenario::ReleaseFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let database = fixture._root.path().join("data/hello-agent.sqlite3");
+        let snapshot = fixture.snapshot("req_pre_release_snapshot");
+        let chat = fixture.create_chat(&snapshot, "pre-release failure", "req_pre_release_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_pre_release_failure",
+            )
+            .unwrap_err();
+        assert!(error.detail.contains("failure"));
+        let actual = fixture
+            .storage
+            .projection_records("run")
+            .unwrap()
+            .into_iter()
+            .find(|run| run["source_kind"] == "actualAgent")
+            .unwrap();
+        assert_eq!(actual["record"]["state"], "failed");
+        assert_eq!(actual["pre_release_failure"]["processesProvenGone"], true);
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["poisoned"], false);
+        drop(runtime);
+        let Fixture {
+            _root: root_guard,
+            storage,
+            projects,
+            chats,
+            ..
+        } = fixture;
+        drop(storage);
+        drop(projects);
+        drop(chats);
+        let reopened = Storage::open(&database).unwrap();
+        let lock = reopened
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["recovery_required"], false);
+        drop(reopened);
+        drop(root_guard);
+    }
+}
+
+#[test]
 fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_distinct() {
     let executable = sidecar_binary();
     assert!(
@@ -801,6 +873,40 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
         "recoveryRequired"
     );
     let recovery = canceled.result["recovery"].clone();
+    assert!(fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(fixture
+        .chats
+        .inspect_recovery(&fixture.storage, recovery["recoveryId"].as_str().unwrap())
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert!(fixture
+        .chats
+        .mark_recovery_resolved(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            recovery["recoveryId"].as_str().unwrap(),
+            1,
+            "abandon",
+            "req_legacy_cross_ledger",
+        )
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap()["recovery"],
+        recovery
+    );
     let resolved = runtime.resolve_recovery(&mut fixture.storage,&mut fixture.projects,&json!({"recoveryId":recovery["recoveryId"],"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id,"expectedRevision":1,"resolution":"abandon"}),"req_agent_resolve").unwrap();
     assert_eq!(resolved["outcome"], "resolvedAbandoned");
     let lock = fixture
@@ -946,4 +1052,117 @@ fn control_launcher_child_has_no_descendant_before_release_and_tree_is_gone_afte
         SystemProcTable.probe(launcher_identity),
         ProbeResult::Gone
     ));
+}
+
+#[test]
+fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gone() {
+    use hello_agent_core::proctree::{
+        ProbeResult, ProcIdentity, ProcTable, SystemProcTable, TreeSignal,
+    };
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_descendant_snapshot");
+    let chat = fixture.create_chat(&snapshot, "durable descendant", "req_descendant_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Descendant);
+    let capability = runtime.get_capabilities("codex", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "planning".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_descendant_start",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut projection = Map::new();
+    for _ in 0..100 {
+        let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+        projection = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        if projection["process_identity_internal"]
+            .as_array()
+            .is_some_and(|items| items.len() >= 3)
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let internal = projection["process_identity_internal"]
+        .as_array()
+        .cloned()
+        .unwrap();
+    assert!(internal.len() >= 3, "grandchild identity must be durable");
+    projection["state"] = Value::String("recoveryRequired".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_test_descendant_crash".into(),
+            request_id: None,
+            payload: projection,
+        }])
+        .unwrap();
+    drop(runtime);
+    let recovered = AgentRuntime::blocked();
+    recovered
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let recovery = run["recovery"].clone();
+    assert!(recovery["trackedProcesses"].as_array().unwrap().len() >= 3);
+    let request = json!({"recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"expectedRevision":1,"resolution":"abandon"});
+    let mut recovered = recovered;
+    assert_eq!(
+        recovered
+            .resolve_recovery(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                &request,
+                "req_descendant_alive"
+            )
+            .unwrap()["outcome"],
+        "processesRemain"
+    );
+    for value in &internal {
+        let _ = SystemProcTable.signal(value["pid"].as_u64().unwrap() as u32, TreeSignal::Kill);
+    }
+    for _ in 0..100 {
+        if internal.iter().all(|value| {
+            matches!(
+                SystemProcTable.probe(ProcIdentity {
+                    pid: value["pid"].as_u64().unwrap() as u32,
+                    start_us: value["start_us"].as_i64().unwrap(),
+                }),
+                ProbeResult::Gone
+            )
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        recovered
+            .resolve_recovery(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                &request,
+                "req_descendant_gone"
+            )
+            .unwrap()["outcome"],
+        "resolvedAbandoned"
+    );
 }

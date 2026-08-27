@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust supervisor 안전 리뷰 수정)
+
+- **release 전 실패**: durable actual run/writer lock 뒤 spawn·identity·barrier·release 단계가 실패하면 모두 공통 종료 경로로 들어간다. 생성 process 전체 소멸이 확인되면 run `failed`·chat `needsAttention`·writer exact release를 원자 기록하고, 불확실하면 가능한 누적 identity/evidence와 run/chat/lock poisoned recovery를 남겨 preparing orphan을 금지했다.
+- **누적 자손·재시작**: 실행 중 `TreeTracker`가 새 자손 identity를 관측할 때 actual run의 redacted barrier와 private `(pid,start)` 집합을 durable 갱신하고 terminal transaction에도 최종 누적 집합을 다시 반영한다. fake grandchild를 release 뒤 만들고 crash/recovery를 모사해, 살아 있는 자손이 abandon을 막고 전체 소멸 뒤에만 resolution되는 회귀를 추가했다. 관측·영속 evidence 실패는 terminal success가 아닌 recoveryRequired로 접는다.
+- **원장 분리**: legacy G5 `recovery.list`·inspect·markResolved는 `source_kind=actualAgent`를 제외하고, actual 전용 API만 해당 source/full identity를 읽도록 양방향 경계를 고정했다. 공용 accepted/public identity wire commit이 직후 동기화되어 정상 start의 전체 검증은 별도 adaptation commit에서 새 필드로 맞춘 뒤 누적 실행한다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 공용 wire 결속 리뷰 수정)
 
 - **accepted 결속**: `AgentRunAcceptedV1`에 chat의 task/project/worktree/workspace identity와 capability fingerprint를 추가했다. 시작 요청·채팅에서 만든 exact context와 accepted 응답을 비교하는 TypeScript/Rust helper와 공용 golden을 두어 chat/task/project/worktree/workspace/role/fingerprint 변조를 모두 거부한다.

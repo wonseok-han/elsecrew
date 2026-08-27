@@ -52,6 +52,14 @@ pub(crate) enum FakeScenario {
     Malformed,
     #[cfg_attr(not(test), allow(dead_code))]
     Oversized,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Descendant,
+    #[cfg_attr(not(test), allow(dead_code))]
+    SpawnFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    IdentityFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    ReleaseFailure,
 }
 
 struct ActiveAgentRun {
@@ -63,6 +71,7 @@ struct ActiveAgentRun {
     stream_id: String,
     next_wire_seq: u64,
     scenario: FakeScenario,
+    evidence_failed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -323,6 +332,17 @@ impl AgentRuntime {
         }
         storage.upsert_projection_records_atomic(upserts)?;
 
+        if self.scenario == FakeScenario::SpawnFailure {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                None,
+                None,
+                "injected spawn failure",
+            ));
+        }
+
         let mut command = Command::new(launch_spec.executable());
         command
             .args(launch_spec.argv())
@@ -332,25 +352,96 @@ impl AgentRuntime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut launcher = command.spawn().map_err(|error| {
-            ProjectFailure::recovery(format!("fake agent control launcher failed: {error}"))
-        })?;
-        let launcher_identity = identity_of(launcher.id()).map_err(|error| {
-            ProjectFailure::recovery(format!("launcher identity unavailable: {error}"))
-        })?;
-        let stdout = launcher
-            .stdout
-            .take()
-            .ok_or_else(|| ProjectFailure::recovery("launcher stdout barrier is missing"))?;
-        let mut reader = BufReader::new(stdout);
-        let ready = read_bounded_line(&mut reader).map_err(ProjectFailure::recovery)?;
-        let agent_pid = parse_ready(&ready)?;
-        let agent_identity = identity_of(agent_pid).map_err(|error| {
-            ProjectFailure::recovery(format!(
-                "agent identity unavailable before release: {error}"
-            ))
-        })?;
+        let mut launcher = match command.spawn() {
+            Ok(launcher) => launcher,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    None,
+                    None,
+                    &format!("fake agent control launcher failed: {error}"),
+                ))
+            }
+        };
+        let launcher_identity = match identity_of(launcher.id()) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    None,
+                    &format!("launcher identity unavailable: {error}"),
+                ))
+            }
+        };
         let mut tracker = TreeTracker::new(launcher_identity);
+        if let Err(error) = tracker.observe(&SystemProcTable) {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("launcher tree unavailable: {error}"),
+            ));
+        }
+        let stdout = match launcher.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    "launcher stdout barrier is missing",
+                ))
+            }
+        };
+        let mut reader = BufReader::new(stdout);
+        let ready = match read_bounded_line(&mut reader) {
+            Ok(ready) => ready,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &error,
+                ))
+            }
+        };
+        let agent_pid = match parse_ready(&ready) {
+            Ok(pid) => pid,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &error.detail,
+                ))
+            }
+        };
+        let agent_identity = match identity_of(agent_pid) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("agent identity unavailable before release: {error}"),
+                ))
+            }
+        };
         for _ in 0..10 {
             tracker
                 .observe(&SystemProcTable)
@@ -361,8 +452,23 @@ impl AgentRuntime {
             thread::sleep(Duration::from_millis(10));
         }
         if tracker.tracked_len() < 2 {
-            return Err(ProjectFailure::recovery(
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
                 "agent child was not attached before release",
+            ));
+        }
+        if self.scenario == FakeScenario::IdentityFailure {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                "injected identity failure",
             ));
         }
         let public_launcher = process_value(launcher_identity, launch_spec.executable(), false);
@@ -397,7 +503,7 @@ impl AgentRuntime {
             Vec::new(),
         )?;
         let running_chat = updated_chat(&chat, "running")?;
-        storage.upsert_projection_records_atomic(vec![
+        if let Err(error) = storage.upsert_projection_records_atomic(vec![
             ProjectionUpsert {
                 aggregate_type: "run",
                 aggregate_id: run_id.clone(),
@@ -412,7 +518,27 @@ impl AgentRuntime {
                 request_id: None,
                 payload: chat_projection_with_record(&chat_projection, &running_chat, None)?,
             },
-        ])?;
+        ]) {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("identity barrier persistence failed: {error}"),
+            ));
+        }
+
+        if self.scenario == FakeScenario::ReleaseFailure {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                "injected release failure",
+            ));
+        }
 
         let (sender, receiver) = mpsc::sync_channel(32);
         thread::spawn(move || loop {
@@ -429,13 +555,29 @@ impl AgentRuntime {
                 }
             }
         });
-        let mut release = launcher
-            .stdin
-            .take()
-            .ok_or_else(|| ProjectFailure::recovery("launcher release pipe is missing"))?;
-        release.write_all(b"run\n").map_err(|error| {
-            ProjectFailure::recovery(format!("launcher release failed: {error}"))
-        })?;
+        let mut release = match launcher.stdin.take() {
+            Some(release) => release,
+            None => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    "launcher release pipe is missing",
+                ))
+            }
+        };
+        if let Err(error) = release.write_all(b"run\n") {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("launcher release failed: {error}"),
+            ));
+        }
         drop(release);
         let stream_id = format!("agent_stream_{}", Uuid::new_v4().simple());
         self.active.insert(
@@ -459,6 +601,7 @@ impl AgentRuntime {
                 stream_id: stream_id.clone(),
                 next_wire_seq: 0,
                 scenario: self.scenario,
+                evidence_failed: false,
             },
         );
         let accepted = json!({"schemaVersion":1,"runId":run_id,"chatId":request.chat_id,"roleId":request.role_id,"state":"preparing"});
@@ -487,8 +630,12 @@ impl AgentRuntime {
         for run_id in ids {
             let mut public = Vec::new();
             let mut parser_failed = false;
+            let mut observed_identities = None;
             if let Some(active) = self.active.get_mut(&run_id) {
-                let _ = active.tracker.observe(&SystemProcTable);
+                if active.tracker.observe(&SystemProcTable).is_err() {
+                    active.evidence_failed = true;
+                }
+                observed_identities = Some(active.tracker.tracked_identities());
                 loop {
                     match active.receiver.try_recv() {
                         Ok(Ok(line)) => match normalize_vendor_event(&line) {
@@ -506,6 +653,13 @@ impl AgentRuntime {
                             break;
                         }
                         Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                    }
+                }
+            }
+            if let Some(identities) = observed_identities {
+                if let Err(_error) = persist_tracker_snapshot(storage, &run_id, &identities) {
+                    if let Some(active) = self.active.get_mut(&run_id) {
+                        active.evidence_failed = true;
                     }
                 }
             }
@@ -890,7 +1044,8 @@ impl AgentRuntime {
             termination_config(),
         );
         let _ = active.launcher.wait();
-        let forced_uncertain = active.scenario == FakeScenario::CancelUncertain;
+        let forced_uncertain =
+            active.scenario == FakeScenario::CancelUncertain || active.evidence_failed;
         let clean = report.confirmed() && !forced_uncertain;
         let state = if clean {
             requested_state
@@ -959,6 +1114,16 @@ impl AgentRuntime {
                 "recoveryRequired"
             },
         )?;
+        let internal = report
+            .tracked
+            .iter()
+            .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
+            .collect::<Vec<_>>();
+        let mut barrier = projection.get("barrier").cloned().unwrap_or(Value::Null);
+        if let Some(object) = barrier.as_object_mut() {
+            object.insert("trackedProcesses".into(), Value::Array(tracked.clone()));
+            object.insert("capturedAt".into(), Value::String(now()));
+        }
         let mut upserts = vec![
             ProjectionUpsert {
                 aggregate_type: "run",
@@ -968,8 +1133,8 @@ impl AgentRuntime {
                 payload: agent_run_projection(
                     &run,
                     &projection["workspace_manifest"],
-                    projection.get("barrier").cloned(),
-                    projection.get("process_identity_internal").cloned(),
+                    Some(barrier),
+                    Some(Value::Array(internal)),
                     projection["public_events"]
                         .as_array()
                         .cloned()
@@ -1010,6 +1175,185 @@ impl AgentRuntime {
             run_id: Some(run_id.into()),
             payload: json!({"run":run,"termination":termination,"recovery":recovery}),
         })
+    }
+}
+
+fn persist_tracker_snapshot(
+    storage: &mut Storage,
+    run_id: &str,
+    identities: &[ProcIdentity],
+) -> Result<(), ProjectFailure> {
+    let mut projection = actual_run_projection(storage, run_id)?;
+    let existing = projection["process_identity_internal"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let internal = identities
+        .iter()
+        .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
+        .collect::<Vec<_>>();
+    if existing == internal {
+        return Ok(());
+    }
+    let public = identities
+        .iter()
+        .map(|identity| process_value(*identity, Path::new("/redacted/agent"), false))
+        .collect::<Vec<_>>();
+    let barrier = projection
+        .get_mut("barrier")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ProjectFailure::recovery("durable agent barrier is missing"))?;
+    barrier.insert("trackedProcesses".into(), Value::Array(public));
+    barrier.insert("capturedAt".into(), Value::String(now()));
+    projection.insert("process_identity_internal".into(), Value::Array(internal));
+    projection.remove("last_event_sequence");
+    storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run",
+        aggregate_id: run_id.into(),
+        operation_id: format!("op_agent_tree_{}_{}", run_id, Uuid::new_v4().simple()),
+        request_id: None,
+        payload: projection,
+    }])?;
+    Ok(())
+}
+
+fn fail_before_release(
+    storage: &mut Storage,
+    projects: &mut ProjectManager,
+    run_id: &str,
+    mut launcher: Option<Child>,
+    mut tracker: Option<TreeTracker>,
+    detail: &str,
+) -> ProjectFailure {
+    if let Some(child) = launcher.as_mut() {
+        drop(child.stdin.take());
+    }
+    let report = tracker.as_mut().map(|value| {
+        value.terminate(
+            &SystemProcTable,
+            &SystemClock::default(),
+            termination_config(),
+        )
+    });
+    if let Some(child) = launcher.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let clean = launcher.is_none() || report.as_ref().is_some_and(|value| value.confirmed());
+    let identities = report
+        .as_ref()
+        .map(|value| value.tracked.clone())
+        .or_else(|| tracker.as_ref().map(TreeTracker::tracked_identities))
+        .unwrap_or_default();
+
+    let persisted = (|| -> Result<(), ProjectFailure> {
+        let projection = actual_run_projection(storage, run_id)?;
+        let chat_id = identity_string(&projection["record"], "chatId")?;
+        let chat_projection = actual_chat_projection(storage, &chat_id)?;
+        let chat = chat_projection["record"].clone();
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(projection["record"]["selectedProfile"].clone())
+                .map_err(json_failure)?;
+        let outcome = if clean {
+            "cleanExit"
+        } else {
+            "recoveryRequired"
+        };
+        let state = if clean { "failed" } else { "recoveryRequired" };
+        let run = agent_run_record(
+            run_id,
+            &chat,
+            &profile,
+            projection["record"]["capabilityFingerprint"]
+                .as_str()
+                .unwrap_or_default(),
+            state,
+            Some(outcome),
+            projection["record"]["createdAt"]
+                .as_str()
+                .unwrap_or_default(),
+        )?;
+        let public = identities
+            .iter()
+            .map(|identity| process_value(*identity, Path::new("/redacted/agent"), clean))
+            .collect::<Vec<_>>();
+        let internal = identities
+            .iter()
+            .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
+            .collect::<Vec<_>>();
+        let mut payload = agent_run_projection(
+            &run,
+            &projection["workspace_manifest"],
+            projection.get("barrier").cloned(),
+            Some(Value::Array(internal)),
+            projection["public_events"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        )?;
+        payload.insert(
+            "pre_release_failure".into(),
+            json!({"stage":"beforeRelease","evidenceDigest":digest_text(detail),"processesProvenGone":clean,"observedAt":now()}),
+        );
+        let recovery = if public.is_empty() || clean {
+            None
+        } else {
+            Some(
+                json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_{}",Uuid::new_v4().simple()),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"processIdentityUncertain","state":"unresolved","trackedProcesses":public,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}),
+            )
+        };
+        if !public.is_empty() {
+            let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":clean,"poisoned":!clean,"writerLockState":if clean {if profile.permission == "workspaceWrite" {"released"} else {"none"}} else {"recoveryRequired"},"chatState":if clean {"failed"} else {"recoveryRequired"},"trackedProcesses":public,"evidenceDigest":digest_text("agent-pre-release-termination-v1"),"observedAt":now()});
+            validate_agent_adapter_payload_v1("terminationTranscript", &termination)
+                .map_err(contract_failure)?;
+            payload.insert("termination".into(), termination);
+        }
+        if let Some(value) = &recovery {
+            validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;
+            payload.insert("recovery".into(), value.clone());
+        }
+        let address = address_from_chat(&chat)?;
+        if !clean {
+            projects.workspace_mark_recovery_required(storage, &address)?;
+        }
+        let updated = updated_chat(
+            &chat,
+            if clean {
+                "needsAttention"
+            } else {
+                "recoveryRequired"
+            },
+        )?;
+        let mut upserts = vec![
+            ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.into(),
+                operation_id: format!("op_agent_pre_release_terminal_{run_id}"),
+                request_id: None,
+                payload,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: chat_id,
+                operation_id: format!("op_agent_pre_release_chat_{run_id}"),
+                request_id: None,
+                payload: chat_projection_with_record(&chat_projection, &updated, None)?,
+            },
+        ];
+        if profile.permission == "workspaceWrite" {
+            upserts.push(release_writer_lock(
+                storage, &address, run_id, run_id, !clean,
+            )?);
+        }
+        storage.upsert_projection_records_atomic(upserts)?;
+        Ok(())
+    })();
+    match persisted {
+        Ok(()) => ProjectFailure::recovery(detail),
+        Err(error) => ProjectFailure::recovery(format!(
+            "{detail}; fail-before-release persistence also failed: {}",
+            error.detail
+        )),
     }
 }
 
@@ -1285,6 +1629,10 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::CancelUncertain => "cancel-uncertain",
         FakeScenario::Malformed => "malformed",
         FakeScenario::Oversized => "oversized",
+        FakeScenario::Descendant => "descendant",
+        FakeScenario::SpawnFailure => "clean",
+        FakeScenario::IdentityFailure => "clean",
+        FakeScenario::ReleaseFailure => "clean",
     }
 }
 fn contract_failure(error: impl std::fmt::Display) -> ProjectFailure {
@@ -1341,6 +1689,7 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "cancel-uncertain",
         "malformed",
         "oversized",
+        "descendant",
     ]
     .contains(&scenario)
     {
@@ -1414,7 +1763,24 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         _ => {
             println!("{{\"type\":\"reasoning\",\"secret\":\"token-never-persist\"}}");
             println!("{{\"type\":\"status\",\"text\":\"Working\"}}");
-            if scenario.starts_with("cancel-") {
+            if scenario == "descendant" {
+                let executable = std::env::current_exe().map_err(|error| {
+                    SidecarError::new("fixtureFailure", format!("fixture executable: {error}"))
+                })?;
+                let mut grandchild = Command::new(executable)
+                    .arg("--agent-fixture-grandchild")
+                    .env_clear()
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|error| {
+                        SidecarError::new("fixtureFailure", format!("fixture grandchild: {error}"))
+                    })?;
+                thread::sleep(Duration::from_secs(30));
+                let _ = grandchild.kill();
+                let _ = grandchild.wait();
+            } else if scenario.starts_with("cancel-") {
                 thread::sleep(Duration::from_secs(30));
             } else {
                 println!("{{\"type\":\"final\",\"text\":\"Done\"}}");
@@ -1422,4 +1788,8 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         }
     }
     Ok(())
+}
+
+pub(crate) fn run_agent_fixture_grandchild() {
+    thread::sleep(Duration::from_secs(30));
 }

@@ -223,6 +223,12 @@ impl TreeTracker {
         self.tracked.len()
     }
 
+    /// Durable supervisors persist this cumulative identity set after every observation.
+    /// Returning identities only avoids exposing mutable tracker internals or process metadata.
+    pub fn tracked_identities(&self) -> Vec<ProcIdentity> {
+        self.identities()
+    }
+
     fn refresh<T: ProcTable>(&mut self, table: &T) -> Result<Refresh, (UnconfirmedReason, String)> {
         // ── 1) 누적 신원 전체를 개별 확인한다. 현재 부모가 누구든 상관없다 ──
         let mut live: Vec<ProcEntry> = Vec::new();

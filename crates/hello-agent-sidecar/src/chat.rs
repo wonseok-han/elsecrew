@@ -967,6 +967,7 @@ impl G5Manager {
         let mut records = storage
             .projection_records("run")?
             .into_iter()
+            .filter(|run| run.get("source_kind").and_then(Value::as_str) != Some("actualAgent"))
             .filter_map(|run| run.get("recovery").cloned())
             .filter(|recovery| !recovery.is_null())
             .map(|recovery| strip_internal_identity_fields(&recovery))
@@ -1649,6 +1650,7 @@ fn find_recovery(storage: &Storage, recovery_id: &str) -> Result<Value, ProjectF
     storage
         .projection_records("run")?
         .into_iter()
+        .filter(|run| run.get("source_kind").and_then(Value::as_str) != Some("actualAgent"))
         .filter_map(|run| run.get("recovery").cloned())
         .find(|recovery| recovery["recoveryId"] == recovery_id)
         .ok_or_else(|| ProjectFailure::manifest("recovery record is missing"))

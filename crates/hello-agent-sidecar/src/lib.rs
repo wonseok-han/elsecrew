@@ -124,6 +124,16 @@ where
         }
         return agent_runtime::run_agent_fixture_child(&scenario.to_string_lossy());
     }
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--agent-fixture-grandchild")) {
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "agent fixture grandchild has extra arguments",
+            ));
+        }
+        agent_runtime::run_agent_fixture_grandchild();
+        return Ok(());
+    }
     let fixture_runtime = if mode.as_deref() == Some(std::ffi::OsStr::new("--stdio-agent-fixture"))
     {
         let scenario = args.next().ok_or_else(|| {
@@ -144,6 +154,7 @@ where
             "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
             "malformed" => agent_runtime::FakeScenario::Malformed,
             "oversized" => agent_runtime::FakeScenario::Oversized,
+            "descendant" => agent_runtime::FakeScenario::Descendant,
             _ => {
                 return Err(SidecarError::new(
                     "invalidArguments",
