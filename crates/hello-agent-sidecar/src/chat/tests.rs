@@ -770,6 +770,20 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             "req_agent_clean",
         )
         .unwrap();
+    for field in [
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        assert_eq!(started.result[field], chat[field]);
+    }
+    assert_eq!(started.result["roleId"], "planning");
+    assert_eq!(
+        started.result["capabilityFingerprint"],
+        capability["fingerprint"]
+    );
     let run_id = started.result["runId"].as_str().unwrap().to_string();
     let preparing = fixture
         .storage
@@ -818,6 +832,20 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         .iter()
         .all(|event| {
             ["status", "final"].contains(&event["kind"].as_str().unwrap_or_default())
+        }));
+    assert!(terminal["public_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|event| {
+            event["chatId"] == chat["chatId"]
+                && event["taskId"] == chat["taskId"]
+                && event["projectId"] == chat["projectId"]
+                && event["worktreeId"] == chat["worktreeId"]
+                && event["workspaceIdentity"] == chat["workspaceIdentity"]
+                && event["runId"] == run_id
+                && event["roleId"] == "planning"
+                && event["capabilityFingerprint"] == capability["fingerprint"]
         }));
     assert!(fixture
         .chats
@@ -919,6 +947,60 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
         .unwrap();
     assert_eq!(lock["poisoned"], false);
     assert_eq!(lock["writer_run_id"], Value::Null);
+}
+
+#[test]
+fn actual_recovery_api_rejects_legacy_fixture_ledger() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_legacy_recovery_snapshot");
+    let chat = fixture.create_chat(&snapshot, "legacy recovery", "req_legacy_recovery_chat");
+    let run_id = "agent_run_legacy_cross_ledger".to_string();
+    let recovery = json!({"recoveryId":"agent_recovery_legacy_cross_ledger","chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"revision":1,"state":"unresolved"});
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_legacy_cross_ledger".into(),
+            request_id: None,
+            payload: json!({"run_id":run_id,"chat_id":chat["chatId"],"state":"recoveryRequired","worktree_path":snapshot["worktreePath"],"record":{"runId":run_id},"recovery":recovery})
+                .as_object()
+                .unwrap()
+                .clone(),
+        }])
+        .unwrap();
+    let listed = fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap();
+    let recovery = listed["items"][0].clone();
+    let request = json!({"recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id});
+    let mut actual = AgentRuntime::blocked();
+    assert!(actual
+        .inspect_recovery(&fixture.storage, &request)
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    let mut resolve = request;
+    resolve["expectedRevision"] = Value::from(1);
+    resolve["resolution"] = Value::String("abandon".into());
+    assert!(actual
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &resolve,
+            "req_actual_cross_ledger"
+        )
+        .unwrap_err()
+        .detail
+        .contains("missing"));
+    assert_eq!(
+        fixture
+            .chats
+            .inspect_recovery(&fixture.storage, recovery["recoveryId"].as_str().unwrap())
+            .unwrap()["runId"],
+        run_id
+    );
 }
 
 #[test]

@@ -604,7 +604,7 @@ impl AgentRuntime {
                 evidence_failed: false,
             },
         );
-        let accepted = json!({"schemaVersion":1,"runId":run_id,"chatId":request.chat_id,"roleId":request.role_id,"state":"preparing"});
+        let accepted = json!({"schemaVersion":1,"runId":run_id,"chatId":request.chat_id,"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"roleId":request.role_id,"capabilityFingerprint":capability.fingerprint,"state":"preparing"});
         validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(contract_failure)?;
         Ok(G5Action {
             result: accepted,
@@ -977,7 +977,7 @@ impl AgentRuntime {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let event = json!({"schemaVersion":1,"eventId":format!("agent_event_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"runId":run_id,"roleId":active.profile.role_id,"kind":kind,"text":text,"createdAt":now()});
+        let event = json!({"schemaVersion":1,"eventId":format!("agent_event_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"roleId":active.profile.role_id,"capabilityFingerprint":projection["record"]["capabilityFingerprint"],"kind":kind,"text":text,"createdAt":now()});
         validate_agent_adapter_payload_v1("publicEvent", &event).map_err(contract_failure)?;
         events.push(event.clone());
         let mut updated = projection;

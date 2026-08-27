@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A actual-agent wire identity 소비)
+
+- 공용 계약 wire 보강 commit을 소비해 `run.startAgent` accepted와 durable public event가 chat/task/project/worktree/workspace/run/role identity와 capability fingerprint를 내부 immutable `RunIdentity`·run record에서 exact echo하도록 바꿨다. 짧은 이전 payload는 더 이상 만들지 않으며 두 payload 모두 공용 Rust validator를 통과한 뒤에만 반환·영속화한다.
+- 정상 fake run에서 accepted/public event의 모든 identity와 fingerprint가 chat/profile/capability snapshot에 정확히 결속되고, private reasoning/raw secret은 여전히 남지 않는 회귀를 추가했다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust supervisor 안전 리뷰 수정)
 
 - **release 전 실패**: durable actual run/writer lock 뒤 spawn·identity·barrier·release 단계가 실패하면 모두 공통 종료 경로로 들어간다. 생성 process 전체 소멸이 확인되면 run `failed`·chat `needsAttention`·writer exact release를 원자 기록하고, 불확실하면 가능한 누적 identity/evidence와 run/chat/lock poisoned recovery를 남겨 preparing orphan을 금지했다.
