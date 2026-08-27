@@ -102,6 +102,57 @@ pub const AGENT_RUN_STATE_EVENT_STATES_V1: &[&str] = &[
     "canceled",
     "recoveryRequired",
 ];
+pub const G5C_PROVIDER_IDS_V1: &[&str] = &["claude-code", "codex"];
+pub const G5C_MODEL_CATALOG_EVIDENCE_V1: &[&str] = &[
+    "runtimeVerified",
+    "exactVersionManifest",
+    "argvOnly",
+    "unknown",
+];
+pub const G5C_RUNTIME_VERIFICATION_IDS_V1: &[&str] = &[
+    "version",
+    "model",
+    "cwd",
+    "permission",
+    "tools",
+    "mcp",
+    "plugins",
+    "config",
+    "sandbox",
+    "approvalPolicy",
+];
+pub const G5C_CLAUDE_RUNTIME_VERIFICATION_V1: &[&str] = &[
+    "version",
+    "model",
+    "cwd",
+    "permission",
+    "tools",
+    "mcp",
+    "plugins",
+    "config",
+];
+pub const G5C_CODEX_RUNTIME_VERIFICATION_V1: &[&str] = &[
+    "version",
+    "model",
+    "cwd",
+    "permission",
+    "sandbox",
+    "approvalPolicy",
+    "config",
+];
+pub const G5C_DISCOVERY_BLOCK_REASONS_V1: &[&str] = &[
+    "notInstalled",
+    "notAuthenticated",
+    "authExpired",
+    "closureMismatch",
+    "unsupportedVersion",
+    "modelCatalogUnverified",
+    "unsupportedProfile",
+    "runtimeVerificationIncomplete",
+];
+pub const G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1: &[&str] =
+    &["Handshake", "Public", "Private", "Terminal", "AuthFailure"];
+pub const G5C_INTERNAL_EVENTS_PER_RUN_MAX_V1: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentAdapterContractError {
@@ -123,6 +174,145 @@ impl Display for AgentAdapterContractError {
 }
 
 impl Error for AgentAdapterContractError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderExecutableFileIdentityV1 {
+    pub logical_name: String,
+    pub path_digest: String,
+    pub file_identity_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderExecutableBinaryIdentityV1 {
+    pub logical_name: String,
+    pub path_digest: String,
+    pub file_identity_digest: String,
+    pub cli_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderExecutableClosureV1 {
+    pub binary: ProviderExecutableBinaryIdentityV1,
+    pub required_helpers: Vec<ProviderExecutableFileIdentityV1>,
+    pub closure_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderProfileTupleV1 {
+    pub model_selector: String,
+    pub reasoning_effort: Option<String>,
+    pub permission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderLaunchPolicyV1 {
+    pub invocation: String,
+    pub prompt_transport: String,
+    pub cwd_policy: String,
+    pub environment_policy: String,
+    pub fallback_policy: String,
+    pub required_runtime_verification: Vec<String>,
+}
+
+/// Internal canonical provider definition. It is not a protocol-v1 request or event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderManifestV1 {
+    pub schema_version: u64,
+    pub provider_id: String,
+    pub runtime: String,
+    pub manifest_version: String,
+    pub executable_closure: ProviderExecutableClosureV1,
+    pub exact_profiles: Vec<ProviderProfileTupleV1>,
+    pub auth_parser_id: String,
+    pub event_parser_id: String,
+    pub launch_policy: ProviderLaunchPolicyV1,
+    pub manifest_digest: String,
+}
+
+/// Persistable discovery evidence with an exact redacted field set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SanitizedDiscoveryObservationV1 {
+    pub schema_version: u64,
+    pub provider_id: String,
+    pub runtime: String,
+    pub manifest_digest: String,
+    pub installation_state: String,
+    pub auth_state: String,
+    pub executable_closure: Option<ProviderExecutableClosureV1>,
+    pub exact_cli_version: Option<String>,
+    pub model_catalog_evidence: String,
+    pub exact_profiles: Vec<ProviderProfileTupleV1>,
+    pub auth_parser_id: String,
+    pub event_parser_id: String,
+    pub observed_runtime_verification: Vec<String>,
+    pub can_start: bool,
+    pub blocked_reason: Option<String>,
+    pub observed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRuntimeAttestationV1 {
+    pub schema_version: u64,
+    pub run_id: String,
+    pub provider_id: String,
+    pub runtime: String,
+    pub capability_fingerprint: String,
+    pub manifest_digest: String,
+    pub executable_closure_digest: String,
+    pub effective_profile: ProviderProfileTupleV1,
+    pub managed_cwd_identity: String,
+    pub event_parser_id: String,
+    pub verified_runtime_evidence: Vec<String>,
+    pub session_digest: Option<String>,
+    pub verified_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "classification", deny_unknown_fields)]
+pub enum InternalProviderEventV1 {
+    Handshake {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u64,
+        sequence: u64,
+        #[serde(rename = "verifiedRuntimeEvidence")]
+        verified_runtime_evidence: Vec<String>,
+    },
+    Public {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u64,
+        sequence: u64,
+        kind: String,
+        text: String,
+    },
+    Private {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u64,
+        sequence: u64,
+        #[serde(rename = "privateKind")]
+        private_kind: String,
+    },
+    Terminal {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u64,
+        sequence: u64,
+        outcome: String,
+    },
+    AuthFailure {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u64,
+        sequence: u64,
+        #[serde(rename = "authState")]
+        auth_state: String,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -458,6 +648,369 @@ pub fn validate_agent_adapter_payload_v1(
         "recoveryResolveResult" => validate_agent_recovery_resolve_result(value),
         other => fail(format!("unknown agent adapter payload validator: {other}")),
     }
+}
+
+pub fn validate_provider_manifest_v1(
+    value: &Value,
+) -> Result<ProviderManifestV1, AgentAdapterContractError> {
+    let manifest: ProviderManifestV1 = from_value(value, "provider manifest")?;
+    schema(manifest.schema_version)?;
+    one_of(&manifest.provider_id, G5C_PROVIDER_IDS_V1, "providerId")?;
+    one_of(&manifest.runtime, G5_RUNTIMES_V1, "runtime")?;
+    if manifest.provider_id != manifest.runtime {
+        return fail("providerId and runtime must match exactly");
+    }
+    bounded(&manifest.manifest_version, "manifestVersion", 64)?;
+    validate_provider_executable_closure_v1(&manifest.executable_closure)?;
+    validate_provider_profiles_v1(&manifest.exact_profiles, "exactProfiles", false)?;
+    let (auth_parser, event_parser) = provider_parser_ids_v1(&manifest.provider_id);
+    bounded(&manifest.auth_parser_id, "authParserId", 128)?;
+    bounded(&manifest.event_parser_id, "eventParserId", 128)?;
+    if manifest.auth_parser_id != auth_parser || manifest.event_parser_id != event_parser {
+        return fail("provider parser IDs must match the exact provider contract");
+    }
+    validate_provider_launch_policy_v1(&manifest.launch_policy, &manifest.provider_id)?;
+    fingerprint_digest(&manifest.manifest_digest, "manifestDigest")?;
+    if manifest.manifest_digest != compute_provider_manifest_digest_v1(&manifest)? {
+        return fail("manifestDigest must bind the canonical provider manifest");
+    }
+    Ok(manifest)
+}
+
+/// UTF-8 compact JSON with recursive ASCII key ordering and manifestDigest excluded.
+pub fn canonical_provider_manifest_v1(
+    manifest: &ProviderManifestV1,
+) -> Result<String, AgentAdapterContractError> {
+    let mut value = serde_json::to_value(manifest).map_err(contract_json)?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| {
+            AgentAdapterContractError::new("provider manifest must serialize as object")
+        })?
+        .remove("manifestDigest");
+    serde_json::to_string(&canonicalize_fingerprint_value(value)).map_err(contract_json)
+}
+
+pub fn compute_provider_manifest_digest_v1(
+    manifest: &ProviderManifestV1,
+) -> Result<String, AgentAdapterContractError> {
+    Ok(crate::project_v1::sha256_file_version_v1(
+        canonical_provider_manifest_v1(manifest)?.as_bytes(),
+    ))
+}
+
+/// UTF-8 compact JSON with recursive ASCII key ordering and closureDigest excluded.
+pub fn canonical_provider_executable_closure_v1(
+    closure: &ProviderExecutableClosureV1,
+) -> Result<String, AgentAdapterContractError> {
+    let mut value = serde_json::to_value(closure).map_err(contract_json)?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| AgentAdapterContractError::new("provider closure must serialize as object"))?
+        .remove("closureDigest");
+    serde_json::to_string(&canonicalize_fingerprint_value(value)).map_err(contract_json)
+}
+
+pub fn compute_provider_executable_closure_digest_v1(
+    closure: &ProviderExecutableClosureV1,
+) -> Result<String, AgentAdapterContractError> {
+    Ok(crate::project_v1::sha256_file_version_v1(
+        canonical_provider_executable_closure_v1(closure)?.as_bytes(),
+    ))
+}
+
+pub fn validate_sanitized_discovery_observation_v1(
+    value: &Value,
+    manifest_value: &Value,
+) -> Result<SanitizedDiscoveryObservationV1, AgentAdapterContractError> {
+    let manifest = validate_provider_manifest_v1(manifest_value)?;
+    let observation: SanitizedDiscoveryObservationV1 =
+        from_value(value, "sanitized discovery observation")?;
+    schema(observation.schema_version)?;
+    if observation.provider_id != manifest.provider_id || observation.runtime != manifest.runtime {
+        return fail("discovery provider identity must match the manifest");
+    }
+    fingerprint_digest(&observation.manifest_digest, "manifestDigest")?;
+    if observation.manifest_digest != manifest.manifest_digest {
+        return fail("discovery manifestDigest mismatch");
+    }
+    one_of(
+        &observation.installation_state,
+        AGENT_INSTALLATION_STATES_V1,
+        "installationState",
+    )?;
+    one_of(&observation.auth_state, AGENT_AUTH_STATES_V1, "authState")?;
+    if (observation.installation_state == "installed") != observation.executable_closure.is_some() {
+        return fail(
+            "installed discovery must include one executable closure and other states must not",
+        );
+    }
+    if let Some(closure) = &observation.executable_closure {
+        validate_provider_executable_closure_v1(closure)?;
+    }
+    if observation.executable_closure.is_none() != observation.exact_cli_version.is_none() {
+        return fail("exactCliVersion and executable closure must be observed together");
+    }
+    if let (Some(closure), Some(version)) = (
+        observation.executable_closure.as_ref(),
+        observation.exact_cli_version.as_deref(),
+    ) {
+        bounded(version, "exactCliVersion", 128)?;
+        if version != closure.binary.cli_version {
+            return fail("exactCliVersion must match the observed binary");
+        }
+    }
+    one_of(
+        &observation.model_catalog_evidence,
+        G5C_MODEL_CATALOG_EVIDENCE_V1,
+        "modelCatalogEvidence",
+    )?;
+    validate_provider_profiles_v1(&observation.exact_profiles, "exactProfiles", true)?;
+    if observation.auth_parser_id != manifest.auth_parser_id
+        || observation.event_parser_id != manifest.event_parser_id
+    {
+        return fail("discovery parser IDs must match the manifest without fallback");
+    }
+    validate_runtime_verification_list_v1(
+        &observation.observed_runtime_verification,
+        "observedRuntimeVerification",
+        true,
+    )?;
+    if observation
+        .observed_runtime_verification
+        .iter()
+        .any(|evidence| {
+            !manifest
+                .launch_policy
+                .required_runtime_verification
+                .contains(evidence)
+        })
+    {
+        return fail(
+            "discovery runtime verification must be an exact subset of manifest requirements",
+        );
+    }
+    if let Some(reason) = &observation.blocked_reason {
+        one_of(reason, G5C_DISCOVERY_BLOCK_REASONS_V1, "blockedReason")?;
+    }
+    timestamp(&observation.observed_at, "observedAt")?;
+    let expected = provider_discovery_blocker_v1(&observation, &manifest);
+    if observation.can_start != expected.is_none()
+        || observation.blocked_reason.as_deref() != expected
+    {
+        return fail("canStart and blockedReason must match exact sanitized discovery evidence");
+    }
+    Ok(observation)
+}
+
+pub fn validate_agent_runtime_attestation_v1(
+    value: &Value,
+    manifest_value: &Value,
+    observation_value: &Value,
+) -> Result<AgentRuntimeAttestationV1, AgentAdapterContractError> {
+    let manifest = validate_provider_manifest_v1(manifest_value)?;
+    let observation =
+        validate_sanitized_discovery_observation_v1(observation_value, manifest_value)?;
+    let closure = observation.executable_closure.as_ref().ok_or_else(|| {
+        AgentAdapterContractError::new("runtime attestation requires executable closure")
+    })?;
+    if !observation.can_start {
+        return fail("runtime attestation requires a startable sanitized observation");
+    }
+    let attestation: AgentRuntimeAttestationV1 = from_value(value, "agent runtime attestation")?;
+    schema(attestation.schema_version)?;
+    agent_run_id(&attestation.run_id, "runId")?;
+    if attestation.provider_id != manifest.provider_id || attestation.runtime != manifest.runtime {
+        return fail("runtime attestation provider identity must match the manifest");
+    }
+    fingerprint_digest(&attestation.capability_fingerprint, "capabilityFingerprint")?;
+    fingerprint_digest(&attestation.manifest_digest, "manifestDigest")?;
+    fingerprint_digest(
+        &attestation.executable_closure_digest,
+        "executableClosureDigest",
+    )?;
+    if attestation.manifest_digest != manifest.manifest_digest {
+        return fail("runtime attestation manifestDigest mismatch");
+    }
+    if attestation.executable_closure_digest != closure.closure_digest {
+        return fail("runtime attestation executable closure mismatch");
+    }
+    validate_provider_profile_tuple_v1(&attestation.effective_profile, "effectiveProfile")?;
+    if !manifest
+        .exact_profiles
+        .contains(&attestation.effective_profile)
+    {
+        return fail("runtime attestation effective profile is not an exact supported tuple");
+    }
+    fingerprint_digest(&attestation.managed_cwd_identity, "managedCwdIdentity")?;
+    if attestation.event_parser_id != manifest.event_parser_id {
+        return fail("runtime attestation parser mismatch");
+    }
+    validate_runtime_verification_list_v1(
+        &attestation.verified_runtime_evidence,
+        "verifiedRuntimeEvidence",
+        false,
+    )?;
+    if attestation.verified_runtime_evidence != manifest.launch_policy.required_runtime_verification
+    {
+        return fail(
+            "runtime attestation must bind every required verification in canonical order",
+        );
+    }
+    if let Some(session_digest) = &attestation.session_digest {
+        fingerprint_digest(session_digest, "sessionDigest")?;
+    }
+    timestamp(&attestation.verified_at, "verifiedAt")?;
+    Ok(attestation)
+}
+
+pub fn validate_internal_provider_event_sequence_v1(
+    value: &Value,
+    manifest_value: &Value,
+) -> Result<Vec<InternalProviderEventV1>, AgentAdapterContractError> {
+    let manifest = validate_provider_manifest_v1(manifest_value)?;
+    let entries = value.as_array().ok_or_else(|| {
+        AgentAdapterContractError::new("internal provider events must be a bounded array")
+    })?;
+    if entries.is_empty() || entries.len() > G5C_INTERNAL_EVENTS_PER_RUN_MAX_V1 {
+        return fail("internal provider events must be nonempty and bounded");
+    }
+    let mut handshake_seen = false;
+    let mut final_seen = false;
+    let mut terminal_seen = false;
+    let mut validated = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let object = entry.as_object().ok_or_else(|| {
+            AgentAdapterContractError::new("internal provider event must be an object")
+        })?;
+        let classification = object
+            .get("classification")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AgentAdapterContractError::new("invalid classification"))?;
+        one_of(
+            classification,
+            G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1,
+            "classification",
+        )?;
+        let keys: &[&str] = match classification {
+            "Handshake" => &[
+                "schemaVersion",
+                "sequence",
+                "classification",
+                "verifiedRuntimeEvidence",
+            ],
+            "Public" => &[
+                "schemaVersion",
+                "sequence",
+                "classification",
+                "kind",
+                "text",
+            ],
+            "Private" => &["schemaVersion", "sequence", "classification", "privateKind"],
+            "Terminal" => &["schemaVersion", "sequence", "classification", "outcome"],
+            _ => &["schemaVersion", "sequence", "classification", "authState"],
+        };
+        exact_value_keys(object, keys, "internal provider event")?;
+        schema(
+            object
+                .get("schemaVersion")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| AgentAdapterContractError::new("schemaVersion must be 1"))?,
+        )?;
+        let sequence = object
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                AgentAdapterContractError::new("provider event sequence must be positive")
+            })?;
+        if sequence != (index + 1) as u64 {
+            return fail("internal provider event sequence must be contiguous from one");
+        }
+        if terminal_seen {
+            return fail("terminal or auth failure must be the last provider event");
+        }
+        match classification {
+            "Handshake" => {
+                let evidence = value_string_array(object, "verifiedRuntimeEvidence")?;
+                validate_runtime_verification_list_v1(&evidence, "verifiedRuntimeEvidence", false)?;
+                if index != 0
+                    || handshake_seen
+                    || evidence != manifest.launch_policy.required_runtime_verification
+                {
+                    return fail("one exact provider handshake must be the first event");
+                }
+                handshake_seen = true;
+            }
+            "AuthFailure" => {
+                let auth_state = object
+                    .get("authState")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| AgentAdapterContractError::new("invalid auth failure state"))?;
+                one_of(
+                    auth_state,
+                    &["notAuthenticated", "expired"],
+                    "auth failure state",
+                )?;
+                if index != 0 || entries.len() != 1 || handshake_seen {
+                    return fail("pre-handshake auth failure must be the sole terminal event");
+                }
+                terminal_seen = true;
+            }
+            "Public" => {
+                if !handshake_seen {
+                    return fail("provider handshake must precede public events");
+                }
+                let kind = object
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| AgentAdapterContractError::new("invalid public kind"))?;
+                one_of(kind, AGENT_PUBLIC_EVENT_KINDS_V1, "public kind")?;
+                let text = object.get("text").and_then(Value::as_str).ok_or_else(|| {
+                    AgentAdapterContractError::new("public text must be a string")
+                })?;
+                bounded(text, "public text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
+                if final_seen {
+                    return fail("no public event may follow final");
+                }
+                final_seen = kind == "final";
+            }
+            "Private" => {
+                if !handshake_seen {
+                    return fail("provider handshake must precede private events");
+                }
+                let private_kind = object
+                    .get("privateKind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| AgentAdapterContractError::new("invalid privateKind"))?;
+                one_of(
+                    private_kind,
+                    &["reasoning", "toolCall", "toolResult", "transport"],
+                    "privateKind",
+                )?;
+            }
+            "Terminal" => {
+                if !handshake_seen {
+                    return fail("provider handshake must precede terminal events");
+                }
+                let outcome = object
+                    .get("outcome")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| AgentAdapterContractError::new("invalid terminal outcome"))?;
+                one_of(
+                    outcome,
+                    &["succeeded", "failed", "canceled", "recoveryRequired"],
+                    "terminal outcome",
+                )?;
+                if index + 1 != entries.len() {
+                    return fail("terminal provider event must be last");
+                }
+                terminal_seen = true;
+            }
+            _ => unreachable!("classification checked"),
+        }
+        validated.push(from_value(entry, "internal provider event")?);
+    }
+    Ok(validated)
 }
 
 pub fn assert_g5a_contract_v1() -> Result<(), AgentAdapterContractError> {
@@ -1257,6 +1810,209 @@ fn validate_agent_recovery_resolve_result(value: &Value) -> Result<(), AgentAdap
         return fail("failed recovery resolution cannot persist an after record");
     }
     Ok(())
+}
+
+fn validate_provider_executable_closure_v1(
+    closure: &ProviderExecutableClosureV1,
+) -> Result<(), AgentAdapterContractError> {
+    validate_provider_executable_binary_identity_v1(&closure.binary)?;
+    if closure.required_helpers.is_empty() || closure.required_helpers.len() > 16 {
+        return fail("provider executable closure must include bounded required helpers");
+    }
+    let mut logical_names = HashSet::new();
+    logical_names.insert(closure.binary.logical_name.as_str());
+    for helper in &closure.required_helpers {
+        validate_provider_executable_file_identity_v1(helper)?;
+        if !logical_names.insert(helper.logical_name.as_str()) {
+            return fail("executable closure logical names must be unique");
+        }
+    }
+    fingerprint_digest(&closure.closure_digest, "closureDigest")?;
+    if closure.closure_digest != compute_provider_executable_closure_digest_v1(closure)? {
+        return fail("closureDigest must bind the canonical executable closure");
+    }
+    Ok(())
+}
+
+fn validate_provider_executable_binary_identity_v1(
+    binary: &ProviderExecutableBinaryIdentityV1,
+) -> Result<(), AgentAdapterContractError> {
+    bounded(&binary.logical_name, "logicalName", 64)?;
+    fingerprint_digest(&binary.path_digest, "pathDigest")?;
+    fingerprint_digest(&binary.file_identity_digest, "fileIdentityDigest")?;
+    bounded(&binary.cli_version, "cliVersion", 128)
+}
+
+fn validate_provider_executable_file_identity_v1(
+    file: &ProviderExecutableFileIdentityV1,
+) -> Result<(), AgentAdapterContractError> {
+    bounded(&file.logical_name, "logicalName", 64)?;
+    fingerprint_digest(&file.path_digest, "pathDigest")?;
+    fingerprint_digest(&file.file_identity_digest, "fileIdentityDigest")
+}
+
+fn validate_provider_profiles_v1(
+    profiles: &[ProviderProfileTupleV1],
+    name: &str,
+    allow_empty: bool,
+) -> Result<(), AgentAdapterContractError> {
+    if profiles.len() > 128 || (!allow_empty && profiles.is_empty()) {
+        return fail(format!("{name} must be a bounded nonempty tuple set"));
+    }
+    let mut unique = HashSet::new();
+    for profile in profiles {
+        validate_provider_profile_tuple_v1(profile, "provider profile tuple")?;
+        if !unique.insert((
+            profile.model_selector.as_str(),
+            profile.reasoning_effort.as_deref(),
+            profile.permission.as_str(),
+        )) {
+            return fail(format!("{name} tuples must be unique"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_provider_profile_tuple_v1(
+    profile: &ProviderProfileTupleV1,
+    _name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    bounded(
+        &profile.model_selector,
+        "modelSelector",
+        G5_MODEL_SELECTOR_MAX_BYTES_V1,
+    )?;
+    if let Some(reasoning_effort) = &profile.reasoning_effort {
+        bounded(
+            reasoning_effort,
+            "reasoningEffort",
+            G5_REASONING_EFFORT_MAX_BYTES_V1,
+        )?;
+    }
+    one_of(&profile.permission, G5_PERMISSIONS_V1, "permission")?;
+    Ok(())
+}
+
+fn validate_provider_launch_policy_v1(
+    policy: &ProviderLaunchPolicyV1,
+    provider_id: &str,
+) -> Result<(), AgentAdapterContractError> {
+    if policy.invocation != "oneShot"
+        || policy.prompt_transport != "serverResolvedMessages"
+        || policy.cwd_policy != "managedWorkspaceExact"
+        || policy.environment_policy != "allowlistedNoSecrets"
+        || policy.fallback_policy != "forbidden"
+    {
+        return fail(
+            "provider launch policy must keep one-shot managed-cwd no-secret no-fallback safety",
+        );
+    }
+    validate_runtime_verification_list_v1(
+        &policy.required_runtime_verification,
+        "requiredRuntimeVerification",
+        false,
+    )?;
+    let expected = if provider_id == "claude-code" {
+        G5C_CLAUDE_RUNTIME_VERIFICATION_V1
+    } else {
+        G5C_CODEX_RUNTIME_VERIFICATION_V1
+    };
+    if !policy
+        .required_runtime_verification
+        .iter()
+        .map(String::as_str)
+        .eq(expected.iter().copied())
+    {
+        return fail("provider launch policy must use the exact provider verification set");
+    }
+    Ok(())
+}
+
+fn validate_runtime_verification_list_v1(
+    values: &[String],
+    name: &str,
+    allow_empty: bool,
+) -> Result<(), AgentAdapterContractError> {
+    if values.len() > G5C_RUNTIME_VERIFICATION_IDS_V1.len() || (!allow_empty && values.is_empty()) {
+        return fail(format!("{name} must be bounded and nonempty"));
+    }
+    let mut unique = HashSet::new();
+    for value in values {
+        one_of(value, G5C_RUNTIME_VERIFICATION_IDS_V1, name)?;
+        if !unique.insert(value.as_str()) {
+            return fail(format!("{name} must be unique"));
+        }
+    }
+    Ok(())
+}
+
+fn provider_parser_ids_v1(provider_id: &str) -> (&'static str, &'static str) {
+    if provider_id == "claude-code" {
+        ("claude-code.auth-status.v1", "claude-code.stream-json.v1")
+    } else {
+        ("codex.auth-status.v1", "codex.jsonl.v1")
+    }
+}
+
+fn provider_discovery_blocker_v1(
+    observation: &SanitizedDiscoveryObservationV1,
+    manifest: &ProviderManifestV1,
+) -> Option<&'static str> {
+    if observation.installation_state == "notInstalled" {
+        return Some("notInstalled");
+    }
+    let Some(closure) = observation.executable_closure.as_ref() else {
+        return Some("closureMismatch");
+    };
+    if observation.installation_state == "incomplete" {
+        return Some("closureMismatch");
+    }
+    if observation.auth_state == "expired" {
+        return Some("authExpired");
+    }
+    if observation.auth_state != "authenticated" {
+        return Some("notAuthenticated");
+    }
+    if closure.closure_digest != manifest.executable_closure.closure_digest {
+        return Some("closureMismatch");
+    }
+    if observation.exact_cli_version.as_deref()
+        != Some(manifest.executable_closure.binary.cli_version.as_str())
+    {
+        return Some("unsupportedVersion");
+    }
+    if matches!(
+        observation.model_catalog_evidence.as_str(),
+        "argvOnly" | "unknown"
+    ) {
+        return Some("modelCatalogUnverified");
+    }
+    if observation.exact_profiles != manifest.exact_profiles {
+        return Some("unsupportedProfile");
+    }
+    if observation.observed_runtime_verification
+        != manifest.launch_policy.required_runtime_verification
+    {
+        return Some("runtimeVerificationIncomplete");
+    }
+    None
+}
+
+fn value_string_array(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, AgentAdapterContractError> {
+    object
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| AgentAdapterContractError::new(format!("{key} must be an array")))?
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                AgentAdapterContractError::new(format!("{key} must contain strings"))
+            })
+        })
+        .collect()
 }
 
 fn capability_blocker(snapshot: &AgentCapabilitySnapshotV1) -> Option<&'static str> {

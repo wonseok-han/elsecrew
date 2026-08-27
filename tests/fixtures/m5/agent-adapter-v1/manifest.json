@@ -77,5 +77,6 @@
     "uncertainTermination": "recoveryRequiredAndPoisoned"
   },
   "casesFile": "cases.json",
-  "g5bCasesFile": "g5b-terminal-budget-cases.json"
+  "g5bCasesFile": "g5b-terminal-budget-cases.json",
+  "g5cCasesFile": "g5c-provider-attestation-cases.json"
 }

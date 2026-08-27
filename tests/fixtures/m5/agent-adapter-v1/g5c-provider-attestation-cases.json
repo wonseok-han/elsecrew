@@ -1,0 +1,228 @@
+{
+  "claudeManifest": {
+    "schemaVersion": 1,
+    "providerId": "claude-code",
+    "runtime": "claude-code",
+    "manifestVersion": "claude-code-2.1.241-v1",
+    "executableClosure": {
+      "binary": {
+        "logicalName": "claude",
+        "pathDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "fileIdentityDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "cliVersion": "2.1.241"
+      },
+      "requiredHelpers": [
+        {
+          "logicalName": "node",
+          "pathDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          "fileIdentityDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      ],
+      "closureDigest": "sha256:3d2f1e123e5bcae5be55245df865f6ce6d21388b365fa078a7de85faa64efba0"
+    },
+    "exactProfiles": [
+      {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+      {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "workspaceWrite"}
+    ],
+    "authParserId": "claude-code.auth-status.v1",
+    "eventParserId": "claude-code.stream-json.v1",
+    "launchPolicy": {
+      "invocation": "oneShot",
+      "promptTransport": "serverResolvedMessages",
+      "cwdPolicy": "managedWorkspaceExact",
+      "environmentPolicy": "allowlistedNoSecrets",
+      "fallbackPolicy": "forbidden",
+      "requiredRuntimeVerification": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"]
+    },
+    "manifestDigest": "sha256:8df06be9cf9e1774021a714595e6ae964f0a26d1fbf04cdbb775572b726515e2"
+  },
+  "claudeObservation": {
+    "schemaVersion": 1,
+    "providerId": "claude-code",
+    "runtime": "claude-code",
+    "manifestDigest": "sha256:8df06be9cf9e1774021a714595e6ae964f0a26d1fbf04cdbb775572b726515e2",
+    "installationState": "installed",
+    "authState": "authenticated",
+    "executableClosure": {
+      "binary": {
+        "logicalName": "claude",
+        "pathDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "fileIdentityDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "cliVersion": "2.1.241"
+      },
+      "requiredHelpers": [
+        {
+          "logicalName": "node",
+          "pathDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          "fileIdentityDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      ],
+      "closureDigest": "sha256:3d2f1e123e5bcae5be55245df865f6ce6d21388b365fa078a7de85faa64efba0"
+    },
+    "exactCliVersion": "2.1.241",
+    "modelCatalogEvidence": "runtimeVerified",
+    "exactProfiles": [
+      {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "readOnly"},
+      {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "workspaceWrite"}
+    ],
+    "authParserId": "claude-code.auth-status.v1",
+    "eventParserId": "claude-code.stream-json.v1",
+    "observedRuntimeVerification": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"],
+    "canStart": true,
+    "blockedReason": null,
+    "observedAt": "2026-08-27T08:00:00Z"
+  },
+  "claudeAttestation": {
+    "schemaVersion": 1,
+    "runId": "agent_run_g5c_claude_01",
+    "providerId": "claude-code",
+    "runtime": "claude-code",
+    "capabilityFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "manifestDigest": "sha256:8df06be9cf9e1774021a714595e6ae964f0a26d1fbf04cdbb775572b726515e2",
+    "executableClosureDigest": "sha256:3d2f1e123e5bcae5be55245df865f6ce6d21388b365fa078a7de85faa64efba0",
+    "effectiveProfile": {"modelSelector": "claude-opus-5", "reasoningEffort": null, "permission": "workspaceWrite"},
+    "managedCwdIdentity": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "eventParserId": "claude-code.stream-json.v1",
+    "verifiedRuntimeEvidence": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"],
+    "sessionDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verifiedAt": "2026-08-27T08:00:01Z"
+  },
+  "claudeEvents": [
+    {"schemaVersion": 1, "sequence": 1, "classification": "Handshake", "verifiedRuntimeEvidence": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"]},
+    {"schemaVersion": 1, "sequence": 2, "classification": "Public", "kind": "status", "text": "프로젝트 변경 범위를 확인하고 있습니다."},
+    {"schemaVersion": 1, "sequence": 3, "classification": "Private", "privateKind": "toolCall"},
+    {"schemaVersion": 1, "sequence": 4, "classification": "Public", "kind": "question", "text": "이 변경을 적용할까요?"},
+    {"schemaVersion": 1, "sequence": 5, "classification": "Public", "kind": "final", "text": "검토 가능한 변경안을 준비했습니다."},
+    {"schemaVersion": 1, "sequence": 6, "classification": "Terminal", "outcome": "succeeded"}
+  ],
+  "codexManifest": {
+    "schemaVersion": 1,
+    "providerId": "codex",
+    "runtime": "codex",
+    "manifestVersion": "codex-0.150.0-v1",
+    "executableClosure": {
+      "binary": {
+        "logicalName": "codex",
+        "pathDigest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "fileIdentityDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "cliVersion": "0.150.0"
+      },
+      "requiredHelpers": [
+        {
+          "logicalName": "rg",
+          "pathDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+          "fileIdentityDigest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+        }
+      ],
+      "closureDigest": "sha256:cf7e57d48dc720b24ab2d7f786c2612e26a45e2833df4a5bdafae666aa214af6"
+    },
+    "exactProfiles": [
+      {"modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+      {"modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "workspaceWrite"}
+    ],
+    "authParserId": "codex.auth-status.v1",
+    "eventParserId": "codex.jsonl.v1",
+    "launchPolicy": {
+      "invocation": "oneShot",
+      "promptTransport": "serverResolvedMessages",
+      "cwdPolicy": "managedWorkspaceExact",
+      "environmentPolicy": "allowlistedNoSecrets",
+      "fallbackPolicy": "forbidden",
+      "requiredRuntimeVerification": ["version", "model", "cwd", "permission", "sandbox", "approvalPolicy", "config"]
+    },
+    "manifestDigest": "sha256:c8043701e36e7b815f401e527afe3ba348565a644f75362c2fa10ae8d84e9c8c"
+  },
+  "codexArgvOnlyObservation": {
+    "schemaVersion": 1,
+    "providerId": "codex",
+    "runtime": "codex",
+    "manifestDigest": "sha256:c8043701e36e7b815f401e527afe3ba348565a644f75362c2fa10ae8d84e9c8c",
+    "installationState": "installed",
+    "authState": "authenticated",
+    "executableClosure": {
+      "binary": {
+        "logicalName": "codex",
+        "pathDigest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "fileIdentityDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "cliVersion": "0.150.0"
+      },
+      "requiredHelpers": [
+        {
+          "logicalName": "rg",
+          "pathDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+          "fileIdentityDigest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+        }
+      ],
+      "closureDigest": "sha256:cf7e57d48dc720b24ab2d7f786c2612e26a45e2833df4a5bdafae666aa214af6"
+    },
+    "exactCliVersion": "0.150.0",
+    "modelCatalogEvidence": "argvOnly",
+    "exactProfiles": [
+      {"modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "readOnly"},
+      {"modelSelector": "gpt-5.6-sol", "reasoningEffort": "medium", "permission": "workspaceWrite"}
+    ],
+    "authParserId": "codex.auth-status.v1",
+    "eventParserId": "codex.jsonl.v1",
+    "observedRuntimeVerification": ["version", "model", "cwd", "permission", "sandbox", "approvalPolicy", "config"],
+    "canStart": false,
+    "blockedReason": "modelCatalogUnverified",
+    "observedAt": "2026-08-27T08:00:00Z"
+  },
+  "codexUnknownCatalogObservation": {
+    "schemaVersion": 1,
+    "providerId": "codex",
+    "runtime": "codex",
+    "manifestDigest": "sha256:c8043701e36e7b815f401e527afe3ba348565a644f75362c2fa10ae8d84e9c8c",
+    "installationState": "installed",
+    "authState": "authenticated",
+    "executableClosure": {
+      "binary": {
+        "logicalName": "codex",
+        "pathDigest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "fileIdentityDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "cliVersion": "0.150.0"
+      },
+      "requiredHelpers": [
+        {
+          "logicalName": "rg",
+          "pathDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+          "fileIdentityDigest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+        }
+      ],
+      "closureDigest": "sha256:cf7e57d48dc720b24ab2d7f786c2612e26a45e2833df4a5bdafae666aa214af6"
+    },
+    "exactCliVersion": "0.150.0",
+    "modelCatalogEvidence": "unknown",
+    "exactProfiles": [],
+    "authParserId": "codex.auth-status.v1",
+    "eventParserId": "codex.jsonl.v1",
+    "observedRuntimeVerification": ["version", "cwd", "permission", "sandbox", "approvalPolicy", "config"],
+    "canStart": false,
+    "blockedReason": "modelCatalogUnverified",
+    "observedAt": "2026-08-27T08:00:00Z"
+  },
+  "invalidMutations": [
+    {"name": "manifest-extra-raw-command", "target": "claudeManifest", "changes": [{"pointer": "/rawCommand", "value": "claude --dangerously-skip-permissions"}]},
+    {"name": "closure-required-helper-missing", "target": "claudeManifest", "changes": [{"pointer": "/executableClosure/requiredHelpers", "value": []}]},
+    {"name": "manifest-digest-mismatch", "target": "claudeManifest", "changes": [{"pointer": "/manifestDigest", "value": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}]},
+    {"name": "observation-extra-private-field", "target": "claudeObservation", "changes": [{"pointer": "/privateTrace", "value": "hidden"}]},
+    {"name": "observation-raw-stdout", "target": "claudeObservation", "changes": [{"pointer": "/rawStdout", "value": "raw"}]},
+    {"name": "observation-raw-stderr", "target": "claudeObservation", "changes": [{"pointer": "/rawStderr", "value": "raw"}]},
+    {"name": "observation-auth-token-leak", "target": "claudeObservation", "changes": [{"pointer": "/token", "value": "secret"}]},
+    {"name": "observation-prompt-leak", "target": "claudeObservation", "changes": [{"pointer": "/prompt", "value": "secret prompt"}]},
+    {"name": "observation-account-email-leak", "target": "claudeObservation", "changes": [{"pointer": "/accountEmail", "value": "person@example.com"}]},
+    {"name": "observation-org-leak", "target": "claudeObservation", "changes": [{"pointer": "/organization", "value": "example"}]},
+    {"name": "observation-auth-hash-leak", "target": "claudeObservation", "changes": [{"pointer": "/rawAuthHash", "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]},
+    {"name": "observation-unsupported-tuple", "target": "claudeObservation", "changes": [{"pointer": "/exactProfiles/0/modelSelector", "value": "claude-unknown"}]},
+    {"name": "attestation-unsupported-tuple", "target": "claudeAttestation", "changes": [{"pointer": "/effectiveProfile/modelSelector", "value": "claude-unknown"}]},
+    {"name": "attestation-digest-mismatch", "target": "claudeAttestation", "changes": [{"pointer": "/manifestDigest", "value": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}]},
+    {"name": "events-handshake-after-public", "target": "claudeEvents", "changes": [
+      {"pointer": "/0", "value": {"schemaVersion": 1, "sequence": 1, "classification": "Public", "kind": "status", "text": "too early"}},
+      {"pointer": "/1", "value": {"schemaVersion": 1, "sequence": 2, "classification": "Handshake", "verifiedRuntimeEvidence": ["version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config"]}}
+    ]},
+    {"name": "events-public-raw-field", "target": "claudeEvents", "changes": [{"pointer": "/1/rawStdout", "value": "raw"}]},
+    {"name": "events-public-private-kind", "target": "claudeEvents", "changes": [{"pointer": "/1/kind", "value": "thinking"}]},
+    {"name": "events-oversize-public-text", "target": "claudeEvents", "changes": [{"pointer": "/1/text", "value": "__G5C_OVERSIZE_PUBLIC_TEXT__"}]},
+    {"name": "events-malformed-classification", "target": "claudeEvents", "changes": [{"pointer": "/1/classification", "value": "Unknown"}]}
+  ]
+}

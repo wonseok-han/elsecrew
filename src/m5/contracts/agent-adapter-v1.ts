@@ -12,6 +12,7 @@ import {
   G5_ID_MAX_BYTES_V1,
   G5_MODEL_SELECTOR_MAX_BYTES_V1,
   G5_PERMISSIONS_V1,
+  G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
   G5_ROLE_IDS_V1,
   G5_RUN_STAGES_V1,
@@ -69,6 +70,27 @@ export const AGENT_PUBLIC_EVENT_KINDS_V1 = ["status", "question", "final"] as co
 export const AGENT_RUN_STATE_EVENT_STATES_V1 = [
   "running", "succeeded", "failed", "canceled", "recoveryRequired",
 ] as const;
+export const G5C_PROVIDER_IDS_V1 = ["claude-code", "codex"] as const;
+export const G5C_MODEL_CATALOG_EVIDENCE_V1 = [
+  "runtimeVerified", "exactVersionManifest", "argvOnly", "unknown",
+] as const;
+export const G5C_RUNTIME_VERIFICATION_IDS_V1 = [
+  "version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config", "sandbox", "approvalPolicy",
+] as const;
+export const G5C_CLAUDE_RUNTIME_VERIFICATION_V1 = [
+  "version", "model", "cwd", "permission", "tools", "mcp", "plugins", "config",
+] as const;
+export const G5C_CODEX_RUNTIME_VERIFICATION_V1 = [
+  "version", "model", "cwd", "permission", "sandbox", "approvalPolicy", "config",
+] as const;
+export const G5C_DISCOVERY_BLOCK_REASONS_V1 = [
+  "notInstalled", "notAuthenticated", "authExpired", "closureMismatch", "unsupportedVersion",
+  "modelCatalogUnverified", "unsupportedProfile", "runtimeVerificationIncomplete",
+] as const;
+export const G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1 = [
+  "Handshake", "Public", "Private", "Terminal", "AuthFailure",
+] as const;
+export const G5C_INTERNAL_EVENTS_PER_RUN_MAX_V1 = 1024 as const;
 
 export type AgentInstallationStateV1 = (typeof AGENT_INSTALLATION_STATES_V1)[number];
 export type AgentAuthStateV1 = (typeof AGENT_AUTH_STATES_V1)[number];
@@ -76,6 +98,95 @@ export type AgentDiscoverySourceV1 = (typeof AGENT_DISCOVERY_SOURCES_V1)[number]
 export type AgentVerificationLevelV1 = (typeof AGENT_VERIFICATION_LEVELS_V1)[number];
 export type AgentModelEvidenceV1 = (typeof AGENT_MODEL_EVIDENCE_V1)[number];
 export type AgentStartOutcomeV1 = (typeof AGENT_START_OUTCOMES_V1)[number];
+export type G5CProviderIdV1 = (typeof G5C_PROVIDER_IDS_V1)[number];
+export type G5CRuntimeVerificationIdV1 = (typeof G5C_RUNTIME_VERIFICATION_IDS_V1)[number];
+
+export interface ProviderExecutableFileIdentityV1 {
+  logicalName: string;
+  pathDigest: string;
+  fileIdentityDigest: string;
+}
+
+export interface ProviderExecutableClosureV1 {
+  binary: ProviderExecutableFileIdentityV1 & { cliVersion: string };
+  requiredHelpers: readonly ProviderExecutableFileIdentityV1[];
+  /** SHA-256 of canonical closure fields except closureDigest. */
+  closureDigest: string;
+}
+
+export interface ProviderProfileTupleV1 {
+  modelSelector: string;
+  reasoningEffort: string | null;
+  permission: PermissionV1;
+}
+
+export interface ProviderLaunchPolicyV1 {
+  invocation: "oneShot";
+  promptTransport: "serverResolvedMessages";
+  cwdPolicy: "managedWorkspaceExact";
+  environmentPolicy: "allowlistedNoSecrets";
+  fallbackPolicy: "forbidden";
+  requiredRuntimeVerification: readonly G5CRuntimeVerificationIdV1[];
+}
+
+/** Internal canonical provider definition. It is not a protocol-v1 request or event. */
+export interface ProviderManifestV1 {
+  schemaVersion: 1;
+  providerId: G5CProviderIdV1;
+  runtime: RuntimeV1;
+  manifestVersion: string;
+  executableClosure: ProviderExecutableClosureV1;
+  exactProfiles: readonly ProviderProfileTupleV1[];
+  authParserId: string;
+  eventParserId: string;
+  launchPolicy: ProviderLaunchPolicyV1;
+  /** SHA-256 of canonical manifest fields except manifestDigest. */
+  manifestDigest: string;
+}
+
+/** Discovery evidence safe to persist. Raw output, credentials, and account identity are forbidden by exact keys. */
+export interface SanitizedDiscoveryObservationV1 {
+  schemaVersion: 1;
+  providerId: G5CProviderIdV1;
+  runtime: RuntimeV1;
+  manifestDigest: string;
+  installationState: AgentInstallationStateV1;
+  authState: AgentAuthStateV1;
+  executableClosure: ProviderExecutableClosureV1 | null;
+  exactCliVersion: string | null;
+  modelCatalogEvidence: (typeof G5C_MODEL_CATALOG_EVIDENCE_V1)[number];
+  exactProfiles: readonly ProviderProfileTupleV1[];
+  authParserId: string;
+  eventParserId: string;
+  observedRuntimeVerification: readonly G5CRuntimeVerificationIdV1[];
+  canStart: boolean;
+  blockedReason: (typeof G5C_DISCOVERY_BLOCK_REASONS_V1)[number] | null;
+  observedAt: string;
+}
+
+/** Post-spawn proof that the launched runtime still matches the preflight contract. */
+export interface AgentRuntimeAttestationV1 {
+  schemaVersion: 1;
+  runId: string;
+  providerId: G5CProviderIdV1;
+  runtime: RuntimeV1;
+  capabilityFingerprint: string;
+  manifestDigest: string;
+  executableClosureDigest: string;
+  effectiveProfile: ProviderProfileTupleV1;
+  managedCwdIdentity: string;
+  eventParserId: string;
+  verifiedRuntimeEvidence: readonly G5CRuntimeVerificationIdV1[];
+  sessionDigest: string | null;
+  verifiedAt: string;
+}
+
+export type InternalProviderEventV1 =
+  | { schemaVersion: 1; sequence: number; classification: "Handshake"; verifiedRuntimeEvidence: readonly G5CRuntimeVerificationIdV1[] }
+  | { schemaVersion: 1; sequence: number; classification: "Public"; kind: (typeof AGENT_PUBLIC_EVENT_KINDS_V1)[number]; text: string }
+  | { schemaVersion: 1; sequence: number; classification: "Private"; privateKind: "reasoning" | "toolCall" | "toolResult" | "transport" }
+  | { schemaVersion: 1; sequence: number; classification: "Terminal"; outcome: "succeeded" | "failed" | "canceled" | "recoveryRequired" }
+  | { schemaVersion: 1; sequence: number; classification: "AuthFailure"; authState: "notAuthenticated" | "expired" };
 
 export interface AgentCapabilitiesRequestV1 {
   runtime: RuntimeV1;
@@ -665,6 +776,262 @@ export function validateAgentRecoveryResolveResultV1(value: unknown): AgentRecov
   return object as unknown as AgentRecoveryResolveResultV1;
 }
 
+export function validateProviderManifestV1(value: unknown): ProviderManifestV1 {
+  const object = exactObject(value, [
+    "schemaVersion", "providerId", "runtime", "manifestVersion", "executableClosure", "exactProfiles",
+    "authParserId", "eventParserId", "launchPolicy", "manifestDigest",
+  ], "provider manifest");
+  schema(object.schemaVersion);
+  const providerId = oneOf(object.providerId, G5C_PROVIDER_IDS_V1, "providerId");
+  const runtime = oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
+  if (providerId !== runtime) fail("providerId and runtime must match exactly");
+  bounded(object.manifestVersion, "manifestVersion", 64);
+  const executableClosure = validateProviderExecutableClosureV1(object.executableClosure);
+  const exactProfiles = validateProviderProfilesV1(object.exactProfiles, "exactProfiles", false);
+  const expectedParserIds = providerParserIdsV1(providerId);
+  bounded(object.authParserId, "authParserId", 128);
+  bounded(object.eventParserId, "eventParserId", 128);
+  if (object.authParserId !== expectedParserIds.auth || object.eventParserId !== expectedParserIds.event) {
+    fail("provider parser IDs must match the exact provider contract");
+  }
+  const launchPolicy = validateProviderLaunchPolicyV1(object.launchPolicy, providerId);
+  fingerprintDigest(object.manifestDigest, "manifestDigest");
+  const manifest = {
+    ...object,
+    providerId,
+    runtime,
+    executableClosure,
+    exactProfiles,
+    launchPolicy,
+  } as unknown as ProviderManifestV1;
+  if (manifest.manifestDigest !== computeProviderManifestDigestV1(manifest)) {
+    fail("manifestDigest must bind the canonical provider manifest");
+  }
+  return manifest;
+}
+
+/** UTF-8 compact JSON; recursively sorted ASCII keys; array order preserved; manifestDigest excluded. */
+export function canonicalProviderManifestV1(manifest: ProviderManifestV1): string {
+  const { manifestDigest: _manifestDigest, ...input } = manifest;
+  return JSON.stringify(canonicalizeFingerprintValue(input));
+}
+
+export function computeProviderManifestDigestV1(manifest: ProviderManifestV1): string {
+  return sha256FileVersionV1(new TextEncoder().encode(canonicalProviderManifestV1(manifest)));
+}
+
+/** UTF-8 compact JSON; recursively sorted ASCII keys; array order preserved; closureDigest excluded. */
+export function canonicalProviderExecutableClosureV1(closure: ProviderExecutableClosureV1): string {
+  const { closureDigest: _closureDigest, ...input } = closure;
+  return JSON.stringify(canonicalizeFingerprintValue(input));
+}
+
+export function computeProviderExecutableClosureDigestV1(closure: ProviderExecutableClosureV1): string {
+  return sha256FileVersionV1(new TextEncoder().encode(canonicalProviderExecutableClosureV1(closure)));
+}
+
+export function validateSanitizedDiscoveryObservationV1(
+  value: unknown,
+  manifestValue: unknown,
+): SanitizedDiscoveryObservationV1 {
+  const manifest = validateProviderManifestV1(manifestValue);
+  const object = exactObject(value, [
+    "schemaVersion", "providerId", "runtime", "manifestDigest", "installationState", "authState",
+    "executableClosure", "exactCliVersion", "modelCatalogEvidence", "exactProfiles", "authParserId",
+    "eventParserId", "observedRuntimeVerification", "canStart", "blockedReason", "observedAt",
+  ], "sanitized discovery observation");
+  schema(object.schemaVersion);
+  if (object.providerId !== manifest.providerId || object.runtime !== manifest.runtime) {
+    fail("discovery provider identity must match the manifest");
+  }
+  fingerprintDigest(object.manifestDigest, "manifestDigest");
+  if (object.manifestDigest !== manifest.manifestDigest) fail("discovery manifestDigest mismatch");
+  const installationState = oneOf(object.installationState, AGENT_INSTALLATION_STATES_V1, "installationState");
+  const authState = oneOf(object.authState, AGENT_AUTH_STATES_V1, "authState");
+  const executableClosure = object.executableClosure === null
+    ? null
+    : validateProviderExecutableClosureV1(object.executableClosure);
+  if ((installationState === "installed") !== (executableClosure !== null)) {
+    fail("installed discovery must include one executable closure and other states must not");
+  }
+  if (object.exactCliVersion !== null) bounded(object.exactCliVersion, "exactCliVersion", 128);
+  if ((executableClosure === null) !== (object.exactCliVersion === null)) {
+    fail("exactCliVersion and executable closure must be observed together");
+  }
+  if (executableClosure !== null && object.exactCliVersion !== executableClosure.binary.cliVersion) {
+    fail("exactCliVersion must match the observed binary");
+  }
+  const modelCatalogEvidence = oneOf(object.modelCatalogEvidence, G5C_MODEL_CATALOG_EVIDENCE_V1, "modelCatalogEvidence");
+  const exactProfiles = validateProviderProfilesV1(object.exactProfiles, "exactProfiles", true);
+  if (object.authParserId !== manifest.authParserId || object.eventParserId !== manifest.eventParserId) {
+    fail("discovery parser IDs must match the manifest without fallback");
+  }
+  const observedRuntimeVerification = validateRuntimeVerificationListV1(
+    object.observedRuntimeVerification,
+    "observedRuntimeVerification",
+    true,
+  );
+  if (observedRuntimeVerification.some((evidence) => !manifest.launchPolicy.requiredRuntimeVerification.includes(evidence))) {
+    fail("discovery runtime verification must be an exact subset of manifest requirements");
+  }
+  if (typeof object.canStart !== "boolean") fail("canStart must be boolean");
+  const blockedReason = object.blockedReason === null
+    ? null
+    : oneOf(object.blockedReason, G5C_DISCOVERY_BLOCK_REASONS_V1, "blockedReason");
+  timestamp(object.observedAt, "observedAt");
+  const expectedBlocker = providerDiscoveryBlockerV1({
+    installationState,
+    authState,
+    executableClosure,
+    exactCliVersion: object.exactCliVersion as string | null,
+    modelCatalogEvidence,
+    exactProfiles,
+    observedRuntimeVerification,
+  }, manifest);
+  if (object.canStart !== (expectedBlocker === null) || blockedReason !== expectedBlocker) {
+    fail("canStart and blockedReason must match exact sanitized discovery evidence");
+  }
+  return {
+    ...object,
+    providerId: manifest.providerId,
+    runtime: manifest.runtime,
+    installationState,
+    authState,
+    executableClosure,
+    modelCatalogEvidence,
+    exactProfiles,
+    observedRuntimeVerification,
+    blockedReason,
+  } as unknown as SanitizedDiscoveryObservationV1;
+}
+
+export function validateAgentRuntimeAttestationV1(
+  value: unknown,
+  manifestValue: unknown,
+  observationValue: unknown,
+): AgentRuntimeAttestationV1 {
+  const manifest = validateProviderManifestV1(manifestValue);
+  const observation = validateSanitizedDiscoveryObservationV1(observationValue, manifest);
+  if (!observation.canStart || observation.executableClosure === null) {
+    fail("runtime attestation requires a startable sanitized observation");
+  }
+  const object = exactObject(value, [
+    "schemaVersion", "runId", "providerId", "runtime", "capabilityFingerprint", "manifestDigest",
+    "executableClosureDigest", "effectiveProfile", "managedCwdIdentity", "eventParserId",
+    "verifiedRuntimeEvidence", "sessionDigest", "verifiedAt",
+  ], "agent runtime attestation");
+  schema(object.schemaVersion);
+  agentRunId(object.runId, "runId");
+  if (object.providerId !== manifest.providerId || object.runtime !== manifest.runtime) {
+    fail("runtime attestation provider identity must match the manifest");
+  }
+  fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
+  fingerprintDigest(object.manifestDigest, "manifestDigest");
+  fingerprintDigest(object.executableClosureDigest, "executableClosureDigest");
+  if (object.manifestDigest !== manifest.manifestDigest) fail("runtime attestation manifestDigest mismatch");
+  if (object.executableClosureDigest !== observation.executableClosure.closureDigest) {
+    fail("runtime attestation executable closure mismatch");
+  }
+  const effectiveProfile = validateProviderProfileTupleV1(object.effectiveProfile, "effectiveProfile");
+  if (!manifest.exactProfiles.some((profile) => sameProviderProfileV1(profile, effectiveProfile))) {
+    fail("runtime attestation effective profile is not an exact supported tuple");
+  }
+  fingerprintDigest(object.managedCwdIdentity, "managedCwdIdentity");
+  if (object.eventParserId !== manifest.eventParserId) fail("runtime attestation parser mismatch");
+  const verifiedRuntimeEvidence = validateRuntimeVerificationListV1(
+    object.verifiedRuntimeEvidence,
+    "verifiedRuntimeEvidence",
+    false,
+  );
+  if (!sameStringsV1(verifiedRuntimeEvidence, manifest.launchPolicy.requiredRuntimeVerification)) {
+    fail("runtime attestation must bind every required verification in canonical order");
+  }
+  if (object.sessionDigest !== null) fingerprintDigest(object.sessionDigest, "sessionDigest");
+  timestamp(object.verifiedAt, "verifiedAt");
+  return {
+    ...object,
+    providerId: manifest.providerId,
+    runtime: manifest.runtime,
+    effectiveProfile,
+    verifiedRuntimeEvidence,
+  } as unknown as AgentRuntimeAttestationV1;
+}
+
+export function validateInternalProviderEventV1(value: unknown): InternalProviderEventV1 {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) fail("internal provider event must be an object");
+  const classification = oneOf(
+    (value as Record<string, unknown>).classification,
+    G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1,
+    "classification",
+  );
+  const keys = classification === "Handshake"
+    ? ["schemaVersion", "sequence", "classification", "verifiedRuntimeEvidence"]
+    : classification === "Public"
+      ? ["schemaVersion", "sequence", "classification", "kind", "text"]
+      : classification === "Private"
+        ? ["schemaVersion", "sequence", "classification", "privateKind"]
+        : classification === "Terminal"
+          ? ["schemaVersion", "sequence", "classification", "outcome"]
+          : ["schemaVersion", "sequence", "classification", "authState"];
+  const object = exactObject(value, keys, `internal ${classification} event`);
+  schema(object.schemaVersion);
+  if (!Number.isSafeInteger(object.sequence) || (object.sequence as number) < 1) {
+    fail("provider event sequence must be a positive safe integer");
+  }
+  if (classification === "Handshake") {
+    validateRuntimeVerificationListV1(object.verifiedRuntimeEvidence, "verifiedRuntimeEvidence", false);
+  } else if (classification === "Public") {
+    oneOf(object.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "public kind");
+    bounded(object.text, "public text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
+  } else if (classification === "Private") {
+    oneOf(object.privateKind, ["reasoning", "toolCall", "toolResult", "transport"] as const, "privateKind");
+  } else if (classification === "Terminal") {
+    oneOf(object.outcome, ["succeeded", "failed", "canceled", "recoveryRequired"] as const, "terminal outcome");
+  } else {
+    oneOf(object.authState, ["notAuthenticated", "expired"] as const, "auth failure state");
+  }
+  return object as unknown as InternalProviderEventV1;
+}
+
+export function validateInternalProviderEventSequenceV1(
+  value: unknown,
+  manifestValue: unknown,
+): readonly InternalProviderEventV1[] {
+  const manifest = validateProviderManifestV1(manifestValue);
+  const entries = array(value, "internal provider events", G5C_INTERNAL_EVENTS_PER_RUN_MAX_V1)
+    .map(validateInternalProviderEventV1);
+  if (entries.length === 0) fail("internal provider events must not be empty");
+  let handshakeSeen = false;
+  let finalSeen = false;
+  let terminalSeen = false;
+  for (const [index, entry] of entries.entries()) {
+    if (entry.sequence !== index + 1) fail("internal provider event sequence must be contiguous from one");
+    if (terminalSeen) fail("terminal or auth failure must be the last provider event");
+    if (entry.classification === "Handshake") {
+      if (index !== 0 || handshakeSeen || !sameStringsV1(entry.verifiedRuntimeEvidence, manifest.launchPolicy.requiredRuntimeVerification)) {
+        fail("one exact provider handshake must be the first event");
+      }
+      handshakeSeen = true;
+    } else if (entry.classification === "AuthFailure") {
+      if (index !== entries.length - 1 || handshakeSeen || index !== 0) {
+        fail("pre-handshake auth failure must be the sole terminal event");
+      }
+      terminalSeen = true;
+    } else {
+      if (!handshakeSeen) fail("provider handshake must precede public, private, and terminal events");
+      if (entry.classification === "Public") {
+        if (finalSeen) fail("no public event may follow final");
+        if (entry.kind === "final") finalSeen = true;
+      }
+      if (entry.classification === "Terminal") {
+        if (index !== entries.length - 1) fail("terminal provider event must be last");
+        terminalSeen = true;
+      }
+    }
+  }
+  return entries;
+}
+
 export function assertG5AContractV1(): void {
   if (!G5A_CAPABILITIES_V1.every((capability) => METHODS_V1.includes(capability))) fail("G5A capability is not reserved by protocol v1");
   if (G5A_CAPABILITIES_V1.includes("run.startAgentSmoke" as never)) fail("agent smoke must remain unadvertised");
@@ -784,6 +1151,127 @@ function validateBarrier(value: unknown): AgentLaunchBarrierEvidenceV1 {
   }
   timestamp(object.capturedAt, "capturedAt");
   return object as unknown as AgentLaunchBarrierEvidenceV1;
+}
+
+function validateProviderExecutableClosureV1(value: unknown): ProviderExecutableClosureV1 {
+  const object = exactObject(value, ["binary", "requiredHelpers", "closureDigest"], "provider executable closure");
+  const binaryObject = exactObject(object.binary, ["logicalName", "pathDigest", "fileIdentityDigest", "cliVersion"], "provider binary identity");
+  bounded(binaryObject.logicalName, "logicalName", 64);
+  fingerprintDigest(binaryObject.pathDigest, "pathDigest");
+  fingerprintDigest(binaryObject.fileIdentityDigest, "fileIdentityDigest");
+  bounded(binaryObject.cliVersion, "cliVersion", 128);
+  const binary = binaryObject as unknown as ProviderExecutableFileIdentityV1 & { cliVersion: string };
+  const requiredHelpers = array(object.requiredHelpers, "requiredHelpers", 16)
+    .map((helper) => validateProviderExecutableFileIdentityV1(helper, "provider helper identity"));
+  if (requiredHelpers.length === 0) fail("provider executable closure must include required helpers");
+  unique([binary.logicalName, ...requiredHelpers.map((helper) => helper.logicalName)], "executable closure logical names");
+  fingerprintDigest(object.closureDigest, "closureDigest");
+  const closure = { binary, requiredHelpers, closureDigest: object.closureDigest } as ProviderExecutableClosureV1;
+  if (closure.closureDigest !== computeProviderExecutableClosureDigestV1(closure)) {
+    fail("closureDigest must bind the canonical executable closure");
+  }
+  return closure;
+}
+
+function validateProviderExecutableFileIdentityV1(value: unknown, name: string): ProviderExecutableFileIdentityV1 {
+  const object = exactObject(value, ["logicalName", "pathDigest", "fileIdentityDigest"], name);
+  bounded(object.logicalName, "logicalName", 64);
+  fingerprintDigest(object.pathDigest, "pathDigest");
+  fingerprintDigest(object.fileIdentityDigest, "fileIdentityDigest");
+  return object as unknown as ProviderExecutableFileIdentityV1;
+}
+
+function validateProviderProfileTupleV1(value: unknown, name: string): ProviderProfileTupleV1 {
+  const object = exactObject(value, ["modelSelector", "reasoningEffort", "permission"], name);
+  bounded(object.modelSelector, "modelSelector", G5_MODEL_SELECTOR_MAX_BYTES_V1);
+  if (object.reasoningEffort !== null) bounded(object.reasoningEffort, "reasoningEffort", G5_REASONING_EFFORT_MAX_BYTES_V1);
+  oneOf(object.permission, G5_PERMISSIONS_V1, "permission");
+  return object as unknown as ProviderProfileTupleV1;
+}
+
+function validateProviderProfilesV1(value: unknown, name: string, allowEmpty: boolean): ProviderProfileTupleV1[] {
+  const profiles = array(value, name, 128).map((profile) => validateProviderProfileTupleV1(profile, "provider profile tuple"));
+  if (!allowEmpty && profiles.length === 0) fail(`${name} must not be empty`);
+  unique(profiles.map(providerProfileKeyV1), `${name} tuples`);
+  return profiles;
+}
+
+function validateProviderLaunchPolicyV1(value: unknown, providerId: G5CProviderIdV1): ProviderLaunchPolicyV1 {
+  const object = exactObject(value, [
+    "invocation", "promptTransport", "cwdPolicy", "environmentPolicy", "fallbackPolicy", "requiredRuntimeVerification",
+  ], "provider launch policy");
+  if (object.invocation !== "oneShot" || object.promptTransport !== "serverResolvedMessages"
+    || object.cwdPolicy !== "managedWorkspaceExact" || object.environmentPolicy !== "allowlistedNoSecrets"
+    || object.fallbackPolicy !== "forbidden") {
+    fail("provider launch policy must keep one-shot managed-cwd no-secret no-fallback safety");
+  }
+  const requiredRuntimeVerification = validateRuntimeVerificationListV1(
+    object.requiredRuntimeVerification,
+    "requiredRuntimeVerification",
+    false,
+  );
+  const expected = providerId === "claude-code"
+    ? G5C_CLAUDE_RUNTIME_VERIFICATION_V1
+    : G5C_CODEX_RUNTIME_VERIFICATION_V1;
+  if (!sameStringsV1(requiredRuntimeVerification, expected)) {
+    fail("provider launch policy must use the exact provider verification set");
+  }
+  return { ...object, requiredRuntimeVerification } as unknown as ProviderLaunchPolicyV1;
+}
+
+function validateRuntimeVerificationListV1(value: unknown, name: string, allowEmpty: boolean): G5CRuntimeVerificationIdV1[] {
+  const values = array(value, name, G5C_RUNTIME_VERIFICATION_IDS_V1.length);
+  if (!allowEmpty && values.length === 0) fail(`${name} must not be empty`);
+  const verified = values.map((entry) => oneOf(entry, G5C_RUNTIME_VERIFICATION_IDS_V1, name));
+  unique(verified, name);
+  return verified;
+}
+
+function providerParserIdsV1(providerId: G5CProviderIdV1): { auth: string; event: string } {
+  return providerId === "claude-code"
+    ? { auth: "claude-code.auth-status.v1", event: "claude-code.stream-json.v1" }
+    : { auth: "codex.auth-status.v1", event: "codex.jsonl.v1" };
+}
+
+function providerDiscoveryBlockerV1(
+  observation: Pick<SanitizedDiscoveryObservationV1,
+    "installationState" | "authState" | "executableClosure" | "exactCliVersion" | "modelCatalogEvidence"
+    | "exactProfiles" | "observedRuntimeVerification">,
+  manifest: ProviderManifestV1,
+): (typeof G5C_DISCOVERY_BLOCK_REASONS_V1)[number] | null {
+  if (observation.installationState === "notInstalled") return "notInstalled";
+  if (observation.installationState === "incomplete" || observation.executableClosure === null) return "closureMismatch";
+  if (observation.authState === "expired") return "authExpired";
+  if (observation.authState !== "authenticated") return "notAuthenticated";
+  if (observation.executableClosure.closureDigest !== manifest.executableClosure.closureDigest) return "closureMismatch";
+  if (observation.exactCliVersion !== manifest.executableClosure.binary.cliVersion) return "unsupportedVersion";
+  if (observation.modelCatalogEvidence === "argvOnly" || observation.modelCatalogEvidence === "unknown") {
+    return "modelCatalogUnverified";
+  }
+  if (!sameProviderProfilesV1(observation.exactProfiles, manifest.exactProfiles)) return "unsupportedProfile";
+  if (!sameStringsV1(observation.observedRuntimeVerification, manifest.launchPolicy.requiredRuntimeVerification)) {
+    return "runtimeVerificationIncomplete";
+  }
+  return null;
+}
+
+function providerProfileKeyV1(profile: ProviderProfileTupleV1): string {
+  return `${profile.modelSelector}\u0000${profile.reasoningEffort ?? "<null>"}\u0000${profile.permission}`;
+}
+
+function sameProviderProfileV1(left: ProviderProfileTupleV1, right: ProviderProfileTupleV1): boolean {
+  return providerProfileKeyV1(left) === providerProfileKeyV1(right);
+}
+
+function sameProviderProfilesV1(left: readonly ProviderProfileTupleV1[], right: readonly ProviderProfileTupleV1[]): boolean {
+  return left.length === right.length && left.every((profile, index) => {
+    const candidate = right[index];
+    return candidate !== undefined && sameProviderProfileV1(profile, candidate);
+  });
+}
+
+function sameStringsV1(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
 
 function validateAgentRunIdentityV1(value: unknown, name: string): AgentRunIdentityV1 {

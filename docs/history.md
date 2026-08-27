@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C provider discovery·launch attestation 계약)
+
+- **내부 계약**: 공개 G5/G5A/G5B method·capability·event와 Electron V4/V5를 바꾸지 않고 `ProviderManifestV1`·`SanitizedDiscoveryObservationV1`·`AgentRuntimeAttestationV1`을 Rust/TypeScript에 같은 canonical JSON·SHA-256 규칙으로 고정했다. 매니페스트는 binary와 필수 helper 전체 closure, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·allowlisted no-secret env·no-fallback launch policy를 묶는다.
+- **시작 증거·분류 경계**: Claude fake golden은 version/model/cwd/permission/tools/MCP/plugins/config를 handshake와 attestation에서 모두 확인해야 시작 가능하다. Codex `argvOnly`와 unknown catalog는 `modelCatalogUnverified`로 `canStart=false`이며 fallback하지 않는다. 내부 event는 `Handshake|Public|Private|Terminal|AuthFailure`만 허용하고 handshake 전 public, 기존 `status|question|final` 밖 공개 kind, raw stdout/stderr·token·prompt·email·org·raw auth hash와 extra/private 필드를 fail-closed 거부한다.
+- **검증·남은 경계**: focused Node 5개, 전체 Node 168개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, protocol clippy(기존 범위 밖 lint 3종만 명시적 제외), `git diff --check`를 통과했다. strict clippy 원문은 변경 전부터 있던 `run_recovery_v1.rs`·`workspace_v1.rs` needless lifetime 2건과 `lib.rs` collapsible-if 1건에서만 실패했다. 실제 Claude/Codex CLI·인증·사용자 프로젝트·Windows는 실행하지 않았고, SQLite lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition으로 남긴다. 다음은 독립 계약 리뷰 후 소비자 작업 계약을 여는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 최종 gate)
 
 - **최종 판정**: 독립 gate가 exact docs commit `3dcf75ab1c12cf4a21b05406f4fc814e42d485f7`에서 full-array-prefix 증폭 계약, terminal commit 순서와 실패 후 active/restart recovery, authoritative ledger counter, zero-output·지연 종료, Electron V5 binding·state·session 한도, renderer durable hydration, exact G5/G5A 호환, raw/private 차단과 legacy/actual recovery 분리를 교차검증했다. 차단 finding 없이 `G5B_READY`로 판정했다.
@@ -351,6 +357,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **M5 G5C provider 활성화 전 계약(2026-08-27)**: provider manifest는 executable binary만이 아니라 필수 helper까지 포함한 closure digest, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·no-secret env·no-fallback policy를 canonical digest로 묶는다. persisted discovery에는 raw stdout/stderr·token·prompt·email·org·raw auth hash를 넣지 않으며, Claude는 `system:init`의 version/model/cwd/permission/tools/MCP/plugins/config를 전부 handshake·runtime attestation으로 검증한 뒤에만 public event를 허용한다. Codex가 argv 또는 unknown catalog만 제공하면 `canStart=false`다. 이 계약은 fake-only internal boundary이고 공개 G5/G5A/G5B wire·V4/V5를 바꾸지 않는다. SQLite 전체 lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition이다
 - **마일스톤**: M0~M3, 홈베이스·프로젝트 디스크 스캔·에이전트 상태/업데이트, 주요 실패 경로 닥터, 한·영 콘텐츠까지 구현. 남음: 실제 실패 경로와 macOS/Windows 출시 후보 실기기 검증, 정식 배포(코드 서명)
 - **PATH**: macOS/Windows 인스톨러 둘 다 PATH를 스스로 등록 안 함 → `ensure_path`가 직접(`~/.zshrc` / Windows 사용자 PATH 레지스트리). 위저드는 절대경로 실행이라 PATH 비의존
 - **로그인 자동 감지**: 브라우저 세션이 있으면 확인 코드 없이 자동 승인으로 끝나는 경로가 있어, 대기 중 `auth status` 폴링으로 완료를 잡는다

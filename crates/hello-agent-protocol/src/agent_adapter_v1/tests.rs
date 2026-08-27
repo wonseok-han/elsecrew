@@ -11,6 +11,7 @@ struct Manifest {
     contract: Contract,
     cases_file: String,
     g5b_cases_file: String,
+    g5c_cases_file: String,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +134,26 @@ struct LedgerSnapshot {
     event_count: usize,
     snapshot_bytes: usize,
     cumulative_snapshot_bytes: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct G5CCases {
+    claude_manifest: Value,
+    claude_observation: Value,
+    claude_attestation: Value,
+    claude_events: Value,
+    codex_manifest: Value,
+    codex_argv_only_observation: Value,
+    codex_unknown_catalog_observation: Value,
+    invalid_mutations: Vec<G5CMutationCase>,
+}
+
+#[derive(Deserialize)]
+struct G5CMutationCase {
+    name: String,
+    target: String,
+    changes: Vec<MutationChange>,
 }
 
 #[test]
@@ -460,12 +481,149 @@ fn rust_matches_g5b_resource_limits_and_cumulative_public_ledger_snapshots() {
     }
 }
 
+#[test]
+fn rust_matches_g5c_provider_discovery_attestation_and_event_goldens() {
+    let (root, adapter_manifest) = manifest();
+    let cases: G5CCases = read_json(root.join(&adapter_manifest.g5c_cases_file));
+
+    let claude = validate_provider_manifest_v1(&cases.claude_manifest)
+        .expect("valid Claude provider manifest");
+    let codex = validate_provider_manifest_v1(&cases.codex_manifest)
+        .expect("valid Codex provider manifest");
+    assert_eq!(
+        compute_provider_executable_closure_digest_v1(&claude.executable_closure)
+            .expect("Claude closure digest"),
+        claude.executable_closure.closure_digest
+    );
+    assert_eq!(
+        compute_provider_manifest_digest_v1(&claude).expect("Claude manifest digest"),
+        claude.manifest_digest
+    );
+    assert_eq!(
+        compute_provider_executable_closure_digest_v1(&codex.executable_closure)
+            .expect("Codex closure digest"),
+        codex.executable_closure.closure_digest
+    );
+    assert_eq!(
+        compute_provider_manifest_digest_v1(&codex).expect("Codex manifest digest"),
+        codex.manifest_digest
+    );
+    assert_eq!(
+        claude.launch_policy.required_runtime_verification,
+        G5C_CLAUDE_RUNTIME_VERIFICATION_V1
+    );
+    assert_eq!(
+        codex.launch_policy.required_runtime_verification,
+        G5C_CODEX_RUNTIME_VERIFICATION_V1
+    );
+
+    let claude_observation = validate_sanitized_discovery_observation_v1(
+        &cases.claude_observation,
+        &cases.claude_manifest,
+    )
+    .expect("startable sanitized Claude observation");
+    assert!(claude_observation.can_start);
+    for codex_observation in [
+        &cases.codex_argv_only_observation,
+        &cases.codex_unknown_catalog_observation,
+    ] {
+        let observation =
+            validate_sanitized_discovery_observation_v1(codex_observation, &cases.codex_manifest)
+                .expect("blocked sanitized Codex observation");
+        assert!(!observation.can_start);
+        assert_eq!(
+            observation.blocked_reason.as_deref(),
+            Some("modelCatalogUnverified")
+        );
+    }
+    validate_agent_runtime_attestation_v1(
+        &cases.claude_attestation,
+        &cases.claude_manifest,
+        &cases.claude_observation,
+    )
+    .expect("valid runtime attestation");
+    validate_internal_provider_event_sequence_v1(&cases.claude_events, &cases.claude_manifest)
+        .expect("valid internal provider events");
+
+    assert!(G5A_CAPABILITIES_V1[..G5_CAPABILITIES_V1.len()] == *G5_CAPABILITIES_V1);
+    assert_eq!(
+        &crate::EVENTS_V1[crate::EVENTS_V1.len() - 2..],
+        ["agent.publicEvent", "agent.runStateChanged"]
+    );
+    assert!(!crate::EVENTS_V1
+        .iter()
+        .any(|event| event.contains("provider") || event.contains("attestation")));
+
+    for mutation in &cases.invalid_mutations {
+        let mut value = match mutation.target.as_str() {
+            "claudeManifest" => cases.claude_manifest.clone(),
+            "claudeObservation" => cases.claude_observation.clone(),
+            "claudeAttestation" => cases.claude_attestation.clone(),
+            "claudeEvents" => cases.claude_events.clone(),
+            other => panic!("unknown G5C mutation target {other}"),
+        };
+        for change in &mutation.changes {
+            let materialized = if change.value == "__G5C_OVERSIZE_PUBLIC_TEXT__" {
+                Value::String("a".repeat(G5_PUBLIC_MESSAGE_MAX_BYTES_V1 + 1))
+            } else {
+                change.value.clone()
+            };
+            set_g5c_json_pointer(&mut value, &change.pointer, materialized);
+        }
+        let result = match mutation.target.as_str() {
+            "claudeManifest" => validate_provider_manifest_v1(&value).map(|_| ()),
+            "claudeObservation" => {
+                validate_sanitized_discovery_observation_v1(&value, &cases.claude_manifest)
+                    .map(|_| ())
+            }
+            "claudeAttestation" => validate_agent_runtime_attestation_v1(
+                &value,
+                &cases.claude_manifest,
+                &cases.claude_observation,
+            )
+            .map(|_| ()),
+            "claudeEvents" => {
+                validate_internal_provider_event_sequence_v1(&value, &cases.claude_manifest)
+                    .map(|_| ())
+            }
+            _ => unreachable!(),
+        };
+        assert!(
+            result.is_err(),
+            "invalid G5C mutation passed: {}",
+            mutation.name
+        );
+    }
+}
+
 fn manifest() -> (PathBuf, Manifest) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("tests/fixtures/m5/agent-adapter-v1");
     let manifest = read_json(root.join("manifest.json"));
     (root, manifest)
+}
+
+fn set_g5c_json_pointer(root: &mut Value, pointer: &str, value: Value) {
+    let (parent, key) = pointer
+        .rsplit_once('/')
+        .unwrap_or_else(|| panic!("invalid JSON pointer {pointer}"));
+    let target = if parent.is_empty() {
+        root
+    } else {
+        root.pointer_mut(parent)
+            .unwrap_or_else(|| panic!("invalid JSON pointer parent {parent}"))
+    };
+    if let Some(object) = target.as_object_mut() {
+        object.insert(key.to_string(), value);
+    } else if let Some(array) = target.as_array_mut() {
+        let index: usize = key
+            .parse()
+            .unwrap_or_else(|_| panic!("JSON pointer array index must be numeric: {key}"));
+        array[index] = value;
+    } else {
+        panic!("JSON pointer parent must be an object or array: {parent}");
+    }
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: PathBuf) -> T {
