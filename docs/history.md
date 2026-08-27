@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 독립 리뷰 2차 수정)
+
+- **writer lock 결속**: actual-agent terminal run과 termination transcript를 함께 검증하는 공용 persistence 계약을 추가하고 cancel result도 반드시 이를 통과하게 했다. clean exit에서 `workspaceWrite` profile은 `writerLockState=released`, `readOnly` profile은 `none`만 허용한다. recoveryRequired는 기존처럼 lock/chat/process가 모두 poisoned `recoveryRequired`여야 하며 preflight failure의 zero run/spawn/lock 의미는 바꾸지 않았다.
+- **process parity**: cancel termination과 recovery가 보존하는 process evidence를 TypeScript의 JSON 문자열 순서가 아닌 `pid/startIdentityDigest/executablePathDigest/observedGone` 구조 값으로 비교해 Rust struct equality와 맞췄다. 같은 process object의 JSON member 순서만 다른 공용 valid fixture를 두 언어가 함께 승인하며, writer clean cancel·정상 성공·실행 실패의 잘못된 lock state는 공용 invalid fixture가 거부한다.
+- **검증·경계**: focused Node 6개, focused Rust 3개, 전체 Node 127개와 protocol 25개, renderer production build 및 `git diff --check`가 통과했다. 실제 CLI·인증·model 조회·사용자 프로젝트는 접근하지 않았다. 다음은 별도 2차 fix commit을 독립 재리뷰하는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 독립 리뷰 수정)
 
 - **리뷰 수정**: 독립 리뷰의 네 차단 사항을 TypeScript/Rust 공용 계약과 같은 golden fixture로 고쳤다. clean exit는 모든 `(pid,startIdentityDigest)`가 중복 없이 `observedGone=true`여야 하며, actual run도 G5와 같은 `planning→planning`, `coding→implementing`, `review→verifying` 역할-stage 결속을 지킨다.

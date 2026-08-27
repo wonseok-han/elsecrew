@@ -22,6 +22,7 @@ import {
   validateAgentRecoveryResolveResultV1,
   validateAgentRunCancelRequestV1,
   validateAgentRunCancelResultV1,
+  validateAgentRunTerminationPersistenceV1,
   validateAgentRunStartRequestV1,
   validateAgentRunAcceptedV1,
   validateAgentRunRecordV1,
@@ -34,7 +35,7 @@ import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
 import { G5_CAPABILITIES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
-type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
+type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "runTerminationPersistence" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
 interface Cases { valid: FixtureCase[]; invalid: FixtureCase[] }
 interface Manifest {
@@ -157,6 +158,7 @@ function validate(fixture: FixtureCase): unknown {
     case "agentChatDetailPage": return validateAgentChatDetailPageV1(fixture.value);
     case "runCancelRequest": return validateAgentRunCancelRequestV1(fixture.value);
     case "runCancelResult": return validateAgentRunCancelResultV1(fixture.value);
+    case "runTerminationPersistence": return validateAgentRunTerminationPersistenceV1(fixture.value);
     case "recoveryRecord": return validateAgentRecoveryRecordV1(fixture.value);
     case "recoveryInspectRequest": return validateAgentRecoveryInspectRequestV1(fixture.value);
     case "recoveryResolveRequest": return validateAgentRecoveryResolveRequestV1(fixture.value);

@@ -342,6 +342,14 @@ pub struct AgentRunCancelResultV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunTerminationPersistenceV1 {
+    pub schema_version: u64,
+    pub run: AgentRunRecordV1,
+    pub termination: AgentTerminationTranscriptV1,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AgentRecoveryInspectRequestV1 {
     pub recovery_id: String,
     pub chat_id: String,
@@ -392,6 +400,7 @@ pub fn validate_agent_adapter_payload_v1(
         "agentChatDetailPage" => validate_agent_chat_detail_page(value),
         "runCancelRequest" => validate_agent_run_cancel_request(value).map(|_| ()),
         "runCancelResult" => validate_agent_run_cancel_result(value),
+        "runTerminationPersistence" => validate_agent_run_termination_persistence(value),
         "recoveryRecord" => validate_agent_recovery_record(value).map(|_| ()),
         "recoveryInspectRequest" => validate_agent_recovery_inspect_request(value).map(|_| ()),
         "recoveryResolveRequest" => validate_agent_recovery_resolve_request(value).map(|_| ()),
@@ -969,6 +978,14 @@ fn validate_agent_run_cancel_result(value: &Value) -> Result<(), AgentAdapterCon
     validate_termination_transcript(
         &serde_json::to_value(&result.termination).map_err(contract_json)?,
     )?;
+    validate_agent_run_termination_persistence(
+        &serde_json::to_value(AgentRunTerminationPersistenceV1 {
+            schema_version: G5A_SCHEMA_VERSION_V1,
+            run: result.run.clone(),
+            termination: result.termination.clone(),
+        })
+        .map_err(contract_json)?,
+    )?;
     let recovery = result
         .recovery
         .as_ref()
@@ -1007,6 +1024,37 @@ fn validate_agent_run_cancel_result(value: &Value) -> Result<(), AgentAdapterCon
         assert_same_recovery_identity(&result.request, None, &recovery, "cancel recovery")?;
         if recovery.tracked_processes != result.termination.tracked_processes {
             return fail("cancel recovery must persist the exact termination process evidence");
+        }
+    }
+    Ok(())
+}
+
+fn validate_agent_run_termination_persistence(
+    value: &Value,
+) -> Result<(), AgentAdapterContractError> {
+    let persistence: AgentRunTerminationPersistenceV1 =
+        from_value(value, "agent run termination persistence")?;
+    schema(persistence.schema_version)?;
+    let run = validate_run_record(&serde_json::to_value(&persistence.run).map_err(contract_json)?)?;
+    validate_termination_transcript(
+        &serde_json::to_value(&persistence.termination).map_err(contract_json)?,
+    )?;
+    if run.run_id != persistence.termination.run_id
+        || run.termination_outcome.as_deref() != Some(persistence.termination.outcome.as_str())
+    {
+        return fail("persisted run and termination identity/outcome must agree");
+    }
+    if matches!(run.state.as_str(), "preparing" | "running" | "cancelling") {
+        return fail("termination persistence requires a terminal run");
+    }
+    if persistence.termination.outcome == "cleanExit" {
+        let expected_lock = if run.selected_profile.permission == "workspaceWrite" {
+            "released"
+        } else {
+            "none"
+        };
+        if persistence.termination.writer_lock_state != expected_lock {
+            return fail("clean termination writer lock state must match selected permission");
         }
     }
     Ok(())

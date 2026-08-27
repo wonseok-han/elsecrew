@@ -255,6 +255,12 @@ export interface AgentRunCancelResultV1 {
   outcome: "canceled" | "recoveryRequired";
 }
 
+export interface AgentRunTerminationPersistenceV1 {
+  schemaVersion: 1;
+  run: AgentRunRecordV1;
+  termination: AgentTerminationTranscriptV1;
+}
+
 export interface AgentRecoveryInspectRequestV1 extends AgentRunIdentityV1 {
   recoveryId: string;
 }
@@ -506,6 +512,7 @@ export function validateAgentRunCancelResultV1(value: unknown): AgentRunCancelRe
   const request = validateAgentRunCancelRequestV1(object.request);
   const run = validateAgentRunRecordV1(object.run);
   const termination = validateAgentTerminationTranscriptV1(object.termination);
+  validateAgentRunTerminationPersistenceV1({ schemaVersion: 1, run, termination });
   const recovery = object.recovery === null ? null : validateAgentRecoveryRecordV1(object.recovery);
   const outcome = oneOf(object.outcome, ["canceled", "recoveryRequired"] as const, "outcome");
   assertSameAgentRunIdentity(request, run, "cancel result run");
@@ -515,9 +522,23 @@ export function validateAgentRunCancelResultV1(value: unknown): AgentRunCancelRe
   } else {
     if (run.state !== "recoveryRequired" || run.terminationOutcome !== "recoveryRequired" || termination.outcome !== "recoveryRequired" || recovery === null || recovery.state !== "unresolved") fail("recoveryRequired outcome must keep run and recovery poisoned");
     assertSameAgentRunIdentity(request, recovery, "cancel recovery");
-    if (JSON.stringify(recovery.trackedProcesses) !== JSON.stringify(termination.trackedProcesses)) fail("cancel recovery must persist the exact termination process evidence");
+    if (!sameProcessEvidenceList(recovery.trackedProcesses, termination.trackedProcesses)) fail("cancel recovery must persist the exact termination process evidence");
   }
   return object as unknown as AgentRunCancelResultV1;
+}
+
+export function validateAgentRunTerminationPersistenceV1(value: unknown): AgentRunTerminationPersistenceV1 {
+  const object = exactObject(value, ["schemaVersion", "run", "termination"], "agent run termination persistence");
+  schema(object.schemaVersion);
+  const run = validateAgentRunRecordV1(object.run);
+  const termination = validateAgentTerminationTranscriptV1(object.termination);
+  if (run.runId !== termination.runId || run.terminationOutcome !== termination.outcome) fail("persisted run and termination identity/outcome must agree");
+  if (["preparing", "running", "cancelling"].includes(run.state)) fail("termination persistence requires a terminal run");
+  if (termination.outcome === "cleanExit") {
+    const expectedLock = run.selectedProfile.permission === "workspaceWrite" ? "released" : "none";
+    if (termination.writerLockState !== expectedLock) fail("clean termination writer lock state must match selected permission");
+  }
+  return object as unknown as AgentRunTerminationPersistenceV1;
 }
 
 export function validateAgentRecoveryInspectRequestV1(value: unknown): AgentRecoveryInspectRequestV1 {
@@ -767,5 +788,11 @@ function smallCount(value: unknown, name: string): number {
 }
 function sameProcess(left: AgentProcessIdentityV1, right: AgentProcessIdentityV1): boolean {
   return left.pid === right.pid && left.startIdentityDigest === right.startIdentityDigest && left.executablePathDigest === right.executablePathDigest;
+}
+function sameProcessEvidenceList(left: readonly AgentProcessIdentityV1[], right: readonly AgentProcessIdentityV1[]): boolean {
+  return left.length === right.length && left.every((process, index) => {
+    const candidate = right[index];
+    return candidate !== undefined && sameProcess(process, candidate) && process.observedGone === candidate.observedGone;
+  });
 }
 function fail(message: string): never { throw new Error(message); }
