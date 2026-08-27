@@ -380,7 +380,7 @@ export interface AgentRecoveryRecordV1 extends AgentRunIdentityV1 {
   schemaVersion: 1;
   recoveryId: string;
   source: "actualAgent";
-  reason: "uncleanShutdown" | "cancelUncertain" | "processIdentityUncertain";
+  reason: "uncleanShutdown" | "cancelUncertain" | "processIdentityUncertain" | "processIdentityUnavailable";
   state: "unresolved" | "resolvedAbandoned";
   trackedProcesses: readonly AgentProcessIdentityV1[];
   poisoned: boolean;
@@ -418,7 +418,7 @@ export interface AgentRecoveryResolveResultV1 {
   before: AgentRecoveryRecordV1;
   request: AgentRecoveryResolveRequestV1;
   after: AgentRecoveryRecordV1 | null;
-  outcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict";
+  outcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict" | "identityUnavailable";
 }
 
 export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabilitiesRequestV1 {
@@ -705,10 +705,14 @@ export function validateAgentRecoveryRecordV1(value: unknown): AgentRecoveryReco
   agentRecoveryId(object.recoveryId, "recoveryId");
   validateAgentRunIdentityFieldsV1(object);
   if (object.source !== "actualAgent") fail("agent recovery source must be actualAgent");
-  oneOf(object.reason, ["uncleanShutdown", "cancelUncertain", "processIdentityUncertain"] as const, "reason");
+  const reason = oneOf(object.reason, [
+    "uncleanShutdown", "cancelUncertain", "processIdentityUncertain", "processIdentityUnavailable",
+  ] as const, "reason");
   const state = oneOf(object.state, ["unresolved", "resolvedAbandoned"] as const, "state");
   const tracked = array(object.trackedProcesses, "trackedProcesses", 256).map(validateProcessIdentity);
-  if (tracked.length === 0) fail("agent recovery trackedProcesses must not be empty");
+  if ((reason === "processIdentityUnavailable") !== (tracked.length === 0)) {
+    fail("only processIdentityUnavailable recovery may omit process evidence");
+  }
   uniqueProcessIdentities(tracked);
   if (typeof object.poisoned !== "boolean" || object.poisoned !== (state === "unresolved")) fail("only unresolved recovery remains poisoned");
   revision(object.revision, "revision");
@@ -716,6 +720,7 @@ export function validateAgentRecoveryRecordV1(value: unknown): AgentRecoveryReco
   if (state === "unresolved") {
     if (object.resolvedAt !== null) fail("unresolved recovery cannot have resolvedAt");
   } else {
+    if (reason === "processIdentityUnavailable") fail("processIdentityUnavailable recovery cannot be resolvedAbandoned");
     timestamp(object.resolvedAt, "resolvedAt");
     if (tracked.some((process) => !process.observedGone)) fail("resolved recovery must prove every tracked process gone");
   }
@@ -779,11 +784,17 @@ export function validateAgentRecoveryResolveResultV1(value: unknown): AgentRecov
   const before = validateAgentRecoveryRecordV1(object.before);
   const request = validateAgentRecoveryResolveRequestV1(object.request);
   const after = object.after === null ? null : validateAgentRecoveryRecordV1(object.after);
-  const outcome = oneOf(object.outcome, ["resolvedAbandoned", "processesRemain", "revisionConflict"] as const, "outcome");
+  const outcome = oneOf(object.outcome, [
+    "resolvedAbandoned", "processesRemain", "revisionConflict", "identityUnavailable",
+  ] as const, "outcome");
   assertSameRecoveryIdentity(request, before, "recovery before");
   if (before.state !== "unresolved") fail("only unresolved recovery can be resolved");
   const allGone = before.trackedProcesses.every((process) => process.observedGone);
-  const expected = request.expectedRevision !== before.revision ? "revisionConflict" : !allGone ? "processesRemain" : "resolvedAbandoned";
+  const expected = request.expectedRevision !== before.revision
+    ? "revisionConflict"
+    : before.reason === "processIdentityUnavailable"
+      ? "identityUnavailable"
+      : !allGone ? "processesRemain" : "resolvedAbandoned";
   if (outcome !== expected) fail("recovery resolution outcome must match revision and process evidence");
   if (outcome === "resolvedAbandoned") {
     if (after === null || after.state !== "resolvedAbandoned" || after.revision !== before.revision + 1) fail("resolved recovery must persist the next revision");

@@ -1,0 +1,107 @@
+{
+  "valid": [
+    {
+      "name": "identityless-recovery-record",
+      "validator": "recoveryRecord",
+      "value": {"schemaVersion":1,"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null}
+    },
+    {
+      "name": "identityless-recovery-chat-detail",
+      "validator": "agentChatDetailPage",
+      "value": {
+        "chat": {"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"복구 확인","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"gpt-5.6-sol","reasoningEffort":"high","permission":"readOnly"}],"state":"recoveryRequired","createdAt":"2026-08-27T07:59:00Z","updatedAt":"2026-08-27T08:00:00Z"},
+        "afterEventSequence": 0,
+        "messages": [],
+        "runs": [],
+        "nextEventSequence": null,
+        "agentRuns": [{"schemaVersion":1,"runId":"agent_run_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"recoveryRequired","stage":"implementing","terminationOutcome":"recoveryRequired","createdAt":"2026-08-27T07:59:00Z","updatedAt":"2026-08-27T08:00:00Z"}],
+        "agentRecovery": {"schemaVersion":1,"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null}
+      }
+    },
+    {
+      "name": "identityless-matching-revision-is-non-mutating",
+      "validator": "recoveryResolveResult",
+      "value": {
+        "schemaVersion": 1,
+        "before": {"schemaVersion":1,"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null},
+        "request": {"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","expectedRevision":1,"resolution":"abandon"},
+        "after": null,
+        "outcome": "identityUnavailable"
+      }
+    },
+    {
+      "name": "identityless-stale-revision-keeps-conflict-priority",
+      "validator": "recoveryResolveResult",
+      "value": {
+        "schemaVersion": 1,
+        "before": {"schemaVersion":1,"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":2,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null},
+        "request": {"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","expectedRevision":1,"resolution":"abandon"},
+        "after": null,
+        "outcome": "revisionConflict"
+      }
+    },
+    {
+      "name": "normal-unresolved-recovery-still-requires-process-evidence",
+      "validator": "recoveryRecord",
+      "value": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":false}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null}
+    },
+    {
+      "name": "normal-resolved-recovery-remains-valid",
+      "validator": "recoveryRecord",
+      "value": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"resolvedAbandoned","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":true}],"poisoned":false,"revision":2,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":"2026-08-27T08:01:00Z"}
+    },
+    {
+      "name": "normal-recovery-still-resolves-abandoned",
+      "validator": "recoveryResolveResult",
+      "value": {
+        "schemaVersion": 1,
+        "before": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":true}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null},
+        "request": {"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","expectedRevision":1,"resolution":"abandon"},
+        "after": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"resolvedAbandoned","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":true}],"poisoned":false,"revision":2,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":"2026-08-27T08:01:00Z"},
+        "outcome": "resolvedAbandoned"
+      }
+    },
+    {
+      "name": "normal-recovery-still-reports-processes-remain",
+      "validator": "recoveryResolveResult",
+      "value": {
+        "schemaVersion": 1,
+        "before": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":false}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null},
+        "request": {"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","expectedRevision":1,"resolution":"abandon"},
+        "after": null,
+        "outcome": "processesRemain"
+      }
+    },
+    {
+      "name": "normal-recovery-still-reports-revision-conflict",
+      "validator": "recoveryResolveResult",
+      "value": {
+        "schemaVersion": 1,
+        "before": {"schemaVersion":1,"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":[{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":true}],"poisoned":true,"revision":2,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null},
+        "request": {"recoveryId":"agent_recovery_normal_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_normal_01","expectedRevision":1,"resolution":"abandon"},
+        "after": null,
+        "outcome": "revisionConflict"
+      }
+    }
+  ],
+  "invalid": [
+    {"name":"old-recovery-reason-cannot-omit-process-evidence","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/reason","value":"uncleanShutdown"}]},
+    {"name":"cancel-uncertain-recovery-cannot-omit-process-evidence","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/reason","value":"cancelUncertain"}]},
+    {"name":"process-identity-uncertain-recovery-cannot-omit-process-evidence","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/reason","value":"processIdentityUncertain"}]},
+    {"name":"normal-recovery-process-evidence-must-remain-unique","baseValidName":"normal-unresolved-recovery-still-requires-process-evidence","removals":[],"changes":[{"pointer":"/trackedProcesses/1","value":{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":false}}]},
+    {"name":"identityless-recovery-cannot-be-resolved-abandoned","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/state","value":"resolvedAbandoned"},{"pointer":"/poisoned","value":false},{"pointer":"/resolvedAt","value":"2026-08-27T08:01:00Z"}]},
+    {"name":"identityless-recovery-must-remain-poisoned","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/poisoned","value":false}]},
+    {"name":"identityless-recovery-cannot-have-resolved-at","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/resolvedAt","value":"2026-08-27T08:01:00Z"}]},
+    {"name":"identityless-recovery-cannot-claim-process-evidence","baseValidName":"identityless-recovery-record","removals":[],"changes":[{"pointer":"/trackedProcesses/0","value":{"pid":5101,"startIdentityDigest":"sha256:normal-start","executablePathDigest":"sha256:normal-path","observedGone":false}}]},
+    {"name":"normal-recovery-cannot-report-identity-unavailable","baseValidName":"normal-recovery-still-reports-processes-remain","removals":[],"changes":[{"pointer":"/outcome","value":"identityUnavailable"}]},
+    {"name":"identity-unavailable-outcome-cannot-persist-after","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/after","value":{"schemaVersion":1,"recoveryId":"agent_recovery_identityless_01","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_identityless_01","source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":1,"createdAt":"2026-08-27T08:00:00Z","resolvedAt":null}}]},
+    {"name":"identity-unavailable-cannot-outrank-stale-revision","baseValidName":"identityless-stale-revision-keeps-conflict-priority","removals":[],"changes":[{"pointer":"/outcome","value":"identityUnavailable"}]},
+    {"name":"identity-unavailable-request-cannot-change-recovery-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/recoveryId","value":"agent_recovery_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-chat-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/chatId","value":"chat_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-task-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/taskId","value":"task_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-project-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/projectId","value":"project_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-worktree-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/worktreeId","value":"worktree_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-workspace-identity","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/workspaceIdentity","value":"workspace_other"}]},
+    {"name":"identity-unavailable-request-cannot-change-run-id","baseValidName":"identityless-matching-revision-is-non-mutating","removals":[],"changes":[{"pointer":"/request/runId","value":"agent_run_other"}]}
+  ]
+}

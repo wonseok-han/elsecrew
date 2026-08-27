@@ -72,6 +72,17 @@
       "publicLedgerAmplificationGoldenFile": "g5b-public-ledger-amplification.json"
     },
     "chatDetailCapabilityDiscriminator": "agentRunsPresence",
+    "identitylessRecovery": {
+      "reason": "processIdentityUnavailable",
+      "trackedProcesses": "mustBeEmpty",
+      "state": "unresolved",
+      "poisoned": true,
+      "resolvedAt": null,
+      "matchingRevisionOutcome": "identityUnavailable",
+      "staleRevisionOutcome": "revisionConflict",
+      "after": null,
+      "resolutionPriority": ["revisionConflict", "identityUnavailable", "processesRemain", "resolvedAbandoned"]
+    },
     "preflightFailure": {"spawnCount": 0, "lockCount": 0},
     "launcherBarrier": ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"],
     "uncertainTermination": "recoveryRequiredAndPoisoned"
@@ -79,5 +90,6 @@
   "casesFile": "cases.json",
   "g5bCasesFile": "g5b-terminal-budget-cases.json",
   "g5cCasesFile": "g5c-provider-attestation-cases.json",
-  "g5cRecoveryDiscoveryCasesFile": "g5c-recovery-discovery-cases.json"
+  "g5cRecoveryDiscoveryCasesFile": "g5c-recovery-discovery-cases.json",
+  "g5cIdentitylessRecoveryCasesFile": "g5c-identityless-recovery-cases.json"
 }

@@ -1690,6 +1690,7 @@ fn validate_agent_recovery_record(
             "uncleanShutdown",
             "cancelUncertain",
             "processIdentityUncertain",
+            "processIdentityUnavailable",
         ],
         "reason",
     )?;
@@ -1698,8 +1699,11 @@ fn validate_agent_recovery_record(
         &["unresolved", "resolvedAbandoned"],
         "state",
     )?;
-    if recovery.tracked_processes.is_empty() || recovery.tracked_processes.len() > 256 {
-        return fail("agent recovery trackedProcesses must be nonempty and bounded");
+    if recovery.tracked_processes.len() > 256
+        || (recovery.reason == "processIdentityUnavailable")
+            != recovery.tracked_processes.is_empty()
+    {
+        return fail("only processIdentityUnavailable recovery may omit process evidence");
     }
     validate_unique_processes(&recovery.tracked_processes)?;
     if recovery.poisoned != (recovery.state == "unresolved") || recovery.revision == 0 {
@@ -1711,6 +1715,9 @@ fn validate_agent_recovery_record(
             return fail("unresolved recovery cannot have resolvedAt");
         }
     } else {
+        if recovery.reason == "processIdentityUnavailable" {
+            return fail("processIdentityUnavailable recovery cannot be resolvedAbandoned");
+        }
         timestamp(
             recovery.resolved_at.as_deref().ok_or_else(|| {
                 AgentAdapterContractError::new("resolved recovery requires resolvedAt")
@@ -1859,7 +1866,12 @@ fn validate_agent_recovery_resolve_result(value: &Value) -> Result<(), AgentAdap
         .transpose()?;
     one_of(
         &result.outcome,
-        &["resolvedAbandoned", "processesRemain", "revisionConflict"],
+        &[
+            "resolvedAbandoned",
+            "processesRemain",
+            "revisionConflict",
+            "identityUnavailable",
+        ],
         "outcome",
     )?;
     assert_same_recovery_identity_from_resolve(&result.request, &before, "recovery before")?;
@@ -1872,6 +1884,8 @@ fn validate_agent_recovery_resolve_result(value: &Value) -> Result<(), AgentAdap
         .all(|process| process.observed_gone);
     let expected = if result.request.expected_revision != before.revision {
         "revisionConflict"
+    } else if before.reason == "processIdentityUnavailable" {
+        "identityUnavailable"
     } else if !all_gone {
         "processesRemain"
     } else {

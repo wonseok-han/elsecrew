@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C process identity 없는 recovery 계약)
+
+- **좁은 예외**: actual recovery reason에 `processIdentityUnavailable`을 추가했다. 이 reason만 `trackedProcesses=[]`를 허용하며 반드시 unresolved·poisoned·`resolvedAt=null`로 남고 `resolvedAbandoned`로 바뀔 수 없다. 기존 세 reason은 nonempty·unique process identity 증거와 기존 resolve 규칙을 그대로 유지한다.
+- **비가변 resolve·우선순위**: matching revision의 identityless recovery는 `after=null`인 `identityUnavailable`을 반환하고 아무 record도 바꾸지 않는다. stale revision은 먼저 `revisionConflict`가 되며, request와 before의 recovery ID 및 chat/task/project/worktree/workspace/run identity는 exact 일치해야 한다. 새 method·channel·capability·event·force resolve는 추가하지 않았다.
+- **공용 골든·검증**: identityless record/chat detail/result와 상태·증거·identity drift, 기존 resolved/non-recovery/null chat 및 `resolvedAbandoned|processesRemain|revisionConflict` 회귀를 양 언어에서 고정했다. focused Node 13개, 전체 Node 174개, focused protocol 9개와 전체 protocol 32개, TypeScript no-emit, Rust 2021 format, 기존 범위 밖 lint 3건만 허용한 protocol clippy, `git diff --check`를 통과했다. strict clippy는 변경 전부터 있던 needless lifetime 2건과 collapsible-if 1건에서만 실패했다.
+- **다음 할 일·경계**: 독립 계약 리뷰 뒤 sidecar가 identity barrier 전에 process identity를 얻지 못한 실제 기록을 만들고 resolve 우선순위를 집행해야 한다. sidecar/core/Electron/UI와 실제 provider·인증·사용자 프로젝트·Windows는 건드리거나 실행하지 않았고 merge·push도 하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 발견 계약 리뷰 수정)
 
 - **P1 관계 규칙 명시**: 일반 recovery API가 과거 `resolvedAbandoned` record를 검증할 수 있는 것과 달리, 현재 agent chat detail의 non-null `agentRecovery`는 반드시 `state=unresolved`이면서 `poisoned=true`여야 한다. resolved/non-recovery detail은 `agentRecovery=null`만 허용하도록 TypeScript/Rust 관계 validator에 직접 고정했다.

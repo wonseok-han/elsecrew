@@ -13,6 +13,7 @@ struct Manifest {
     g5b_cases_file: String,
     g5c_cases_file: String,
     g5c_recovery_discovery_cases_file: String,
+    g5c_identityless_recovery_cases_file: String,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +157,12 @@ struct G5CCases {
 #[derive(Deserialize)]
 struct RecoveryDiscoveryCases {
     valid: Vec<StateEventCase>,
+    invalid: Vec<RecoveryDiscoveryMutationCase>,
+}
+
+#[derive(Deserialize)]
+struct IdentitylessRecoveryCases {
+    valid: Vec<FixtureCase>,
     invalid: Vec<RecoveryDiscoveryMutationCase>,
 }
 
@@ -318,6 +325,69 @@ fn rust_discovers_one_unresolved_actual_recovery_without_legacy_leakage() {
         .clone();
     durable["request"]["recoveryId"] = Value::String("agent_recovery_random_substitute".into());
     assert!(validate_agent_adapter_payload_v1("recoveryResolveResult", &durable).is_err());
+}
+
+#[test]
+fn rust_matches_identityless_recovery_and_resolution_priority_goldens() {
+    let (root, manifest) = manifest();
+    let cases: IdentitylessRecoveryCases =
+        read_json(root.join(&manifest.g5c_identityless_recovery_cases_file));
+    for fixture in &cases.valid {
+        validate_agent_adapter_payload_v1(&fixture.validator, &fixture.value)
+            .unwrap_or_else(|error| panic!("valid fixture {} failed: {error}", fixture.name));
+    }
+    for fixture in &cases.invalid {
+        let base = cases
+            .valid
+            .iter()
+            .find(|entry| entry.name == fixture.base_valid_name)
+            .unwrap_or_else(|| panic!("missing base fixture {}", fixture.base_valid_name));
+        assert!(
+            validate_agent_adapter_payload_v1(
+                &base.validator,
+                &materialize_identityless_recovery(&cases, fixture),
+            )
+            .is_err(),
+            "invalid fixture {} passed",
+            fixture.name
+        );
+    }
+
+    let raw: Value = read_json(root.join("manifest.json"));
+    assert_eq!(
+        raw["contract"]["identitylessRecovery"],
+        serde_json::json!({
+            "reason": "processIdentityUnavailable",
+            "trackedProcesses": "mustBeEmpty",
+            "state": "unresolved",
+            "poisoned": true,
+            "resolvedAt": null,
+            "matchingRevisionOutcome": "identityUnavailable",
+            "staleRevisionOutcome": "revisionConflict",
+            "after": null,
+            "resolutionPriority": [
+                "revisionConflict",
+                "identityUnavailable",
+                "processesRemain",
+                "resolvedAbandoned"
+            ]
+        })
+    );
+
+    let stale = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == "identityless-stale-revision-keeps-conflict-priority")
+        .expect("stale identityless fixture");
+    assert_eq!(stale.value["outcome"], "revisionConflict");
+    assert!(stale.value["after"].is_null());
+    let matching = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == "identityless-matching-revision-is-non-mutating")
+        .expect("matching identityless fixture");
+    assert_eq!(matching.value["outcome"], "identityUnavailable");
+    assert!(matching.value["after"].is_null());
 }
 
 #[test]
@@ -854,6 +924,26 @@ fn materialize_g5b(cases: &G5BCases, mutation: &MutationCase) -> Value {
 
 fn materialize_recovery_discovery(
     cases: &RecoveryDiscoveryCases,
+    mutation: &RecoveryDiscoveryMutationCase,
+) -> Value {
+    let mut value = cases
+        .valid
+        .iter()
+        .find(|entry| entry.name == mutation.base_valid_name)
+        .unwrap_or_else(|| panic!("missing base fixture {}", mutation.base_valid_name))
+        .value
+        .clone();
+    for pointer in &mutation.removals {
+        remove_json_pointer(&mut value, pointer);
+    }
+    for change in &mutation.changes {
+        set_recovery_json_pointer(&mut value, &change.pointer, change.value.clone());
+    }
+    value
+}
+
+fn materialize_identityless_recovery(
+    cases: &IdentitylessRecoveryCases,
     mutation: &RecoveryDiscoveryMutationCase,
 ) -> Value {
     let mut value = cases
