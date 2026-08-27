@@ -286,6 +286,15 @@ fn rust_discovers_one_unresolved_actual_recovery_without_legacy_leakage() {
             fixture.name
         );
     }
+    let resolved_case = cases
+        .invalid
+        .iter()
+        .find(|entry| entry.name == "fully-valid-resolved-recovery-cannot-remain-on-agent-chat")
+        .expect("resolved recovery detail fixture");
+    let resolved_detail = materialize_recovery_discovery(&cases, resolved_case);
+    validate_agent_recovery_record(&resolved_detail["agentRecovery"])
+        .expect("resolved recovery is internally valid outside chat detail");
+    assert!(validate_agent_chat_detail_page(&resolved_detail).is_err());
 
     let recovery = &cases
         .valid

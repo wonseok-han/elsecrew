@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 발견 계약 리뷰 수정)
+
+- **P1 관계 규칙 명시**: 일반 recovery API가 과거 `resolvedAbandoned` record를 검증할 수 있는 것과 달리, 현재 agent chat detail의 non-null `agentRecovery`는 반드시 `state=unresolved`이면서 `poisoned=true`여야 한다. resolved/non-recovery detail은 `agentRecovery=null`만 허용하도록 TypeScript/Rust 관계 validator에 직접 고정했다.
+- **마스킹 없는 골든**: resolvedAt·poison·모든 process gone을 서로 맞춰 단독 recovery validator에는 완전히 유효한 resolved record를 만들고, 같은 record가 chat detail에 들어갈 때만 양 언어가 거부함을 확인했다. completed/succeeded run과 null recovery의 valid detail도 추가했다.
+- **검증·경계**: focused Node 9개, 전체 Node 170개, focused protocol 8개와 전체 protocol 31개, TypeScript no-emit, Rust fmt, 기존 범위 밖 lint만 허용한 protocol clippy, `git diff --check`를 통과했다. 별도 원자 수정 commit으로 남기며 sidecar/Electron/UI나 새 API는 변경하지 않는다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C actual recovery 발견 계약)
 
 - **발견 가능한 복구 ID**: exact G5A+ `chat.get` detail의 기존 `agentRuns` presence discriminator 안에 required nullable `agentRecovery`를 추가했다. `recoveryRequired` actual run은 같은 chat/task/project/worktree/workspace/run에 결속된 unresolved·poisoned·`actualAgent` recovery 하나를 반드시 노출하고, 그 외 상태는 null만 허용한다. recoveryRequired run이 없거나 둘 이상인데 recovery를 실으면 fail-closed라 chat당 unresolved actual recovery 하나만 표현된다.

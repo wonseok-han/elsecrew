@@ -137,6 +137,13 @@ test("agent chat detail은 unresolved actual recovery를 ID와 full identity로 
   for (const fixture of recoveryDiscoveryCases.invalid) {
     assert.throws(() => validateAgentChatDetailPageV1(materializeRecoveryDiscovery(fixture)), fixture.name);
   }
+  const resolvedCase = recoveryDiscoveryCases.invalid.find(
+    (fixture) => fixture.name === "fully-valid-resolved-recovery-cannot-remain-on-agent-chat",
+  );
+  assert.ok(resolvedCase);
+  const resolvedDetail = materializeRecoveryDiscovery(resolvedCase) as Record<string, unknown>;
+  assert.doesNotThrow(() => validateAgentRecoveryRecordV1(resolvedDetail.agentRecovery));
+  assert.throws(() => validateAgentChatDetailPageV1(resolvedDetail));
 
   const recovered = recoveryDiscoveryCases.valid.find(
     (fixture) => fixture.name === "agent-chat-recovery-required-with-discoverable-recovery",

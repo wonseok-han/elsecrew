@@ -1640,6 +1640,9 @@ fn validate_agent_chat_detail_page(value: &Value) -> Result<(), AgentAdapterCont
             )
         }
         Some(recovery) => {
+            if recovery.state != "unresolved" || !recovery.poisoned {
+                return fail("agent chat detail recovery must remain unresolved and poisoned");
+            }
             let run = &recovery_runs[0];
             let identity = AgentRunIdentityV1 {
                 chat_id: run.chat_id.clone(),

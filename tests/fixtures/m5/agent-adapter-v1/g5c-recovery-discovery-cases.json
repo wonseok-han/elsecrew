@@ -23,6 +23,18 @@
         "agentRuns": [{"schemaVersion":1,"runId":"agent_run_02","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"recoveryRequired","stage":"implementing","terminationOutcome":"recoveryRequired","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"}],
         "agentRecovery": {"schemaVersion":1,"recoveryId":"agent_recovery_random_7f4c","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_02","source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":[{"pid":4401,"startIdentityDigest":"sha256:agent-start-2","executablePathDigest":"sha256:claude-path","observedGone":false}],"poisoned":true,"revision":1,"createdAt":"2026-08-27T01:03:00Z","resolvedAt":null}
       }
+    },
+    {
+      "name": "agent-chat-resolved-run-keeps-null-recovery",
+      "value": {
+        "chat": {"schemaVersion":1,"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","goal":"설정 화면","settingsRevision":1,"roleSnapshots":[{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},{"roleId":"review","runtime":"codex","modelSelector":"gpt-5.6-sol","reasoningEffort":"high","permission":"readOnly"}],"state":"completed","createdAt":"2026-08-27T01:00:00Z","updatedAt":"2026-08-27T01:05:00Z"},
+        "afterEventSequence": 0,
+        "messages": [],
+        "runs": [],
+        "nextEventSequence": null,
+        "agentRuns": [{"schemaVersion":1,"runId":"agent_run_02","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"succeeded","stage":"implementing","terminationOutcome":"cleanExit","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:05:00Z"}],
+        "agentRecovery": null
+      }
     }
   ],
   "invalid": [
@@ -37,7 +49,7 @@
     {"name":"recovery-id-cannot-use-legacy-namespace","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/recoveryId","value":"recovery_legacy"}]},
     {"name":"recovery-source-must-be-actual-agent","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/source","value":"fixture"}]},
     {"name":"recovery-reason-must-use-actual-agent-enum","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/reason","value":"legacyReason"}]},
-    {"name":"resolved-recovery-cannot-remain-on-agent-chat","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/state","value":"resolvedAbandoned"}]},
+    {"name":"fully-valid-resolved-recovery-cannot-remain-on-agent-chat","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/state","value":"resolvedAbandoned"},{"pointer":"/agentRecovery/poisoned","value":false},{"pointer":"/agentRecovery/resolvedAt","value":"2026-08-27T01:05:00Z"},{"pointer":"/agentRecovery/trackedProcesses/0/observedGone","value":true}]},
     {"name":"unresolved-recovery-must-remain-poisoned","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRecovery/poisoned","value":false}]},
     {"name":"non-recovery-run-cannot-carry-recovery","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRuns/0/state","value":"failed"},{"pointer":"/agentRuns/0/terminationOutcome","value":"cleanExit"}]},
     {"name":"multiple-recovery-required-runs-are-ambiguous","baseValidName":"agent-chat-recovery-required-with-discoverable-recovery","removals":[],"changes":[{"pointer":"/agentRuns/1","value":{"schemaVersion":1,"runId":"agent_run_03","chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","selectedProfile":{"roleId":"planning","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"readOnly"},"source":"actualAgent","capabilityFingerprint":"sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3","state":"recoveryRequired","stage":"planning","terminationOutcome":"recoveryRequired","createdAt":"2026-08-27T01:01:00Z","updatedAt":"2026-08-27T01:03:00Z"}}]},

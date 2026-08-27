@@ -674,6 +674,7 @@ export function validateAgentChatDetailPageV1(value: unknown): AgentChatDetailPa
   if (recovery === null) {
     if (recoveryRuns.length !== 0) fail("recoveryRequired agent run requires one discoverable recovery");
   } else {
+    if (recovery.state !== "unresolved" || recovery.poisoned !== true) fail("agent chat detail recovery must remain unresolved and poisoned");
     if (recoveryRuns.length !== 1) fail("agent chat detail must expose exactly one recoveryRequired run for its recovery");
     assertSameAgentRunIdentity(recoveryRuns[0]!, recovery, "agent chat recovery");
   }
