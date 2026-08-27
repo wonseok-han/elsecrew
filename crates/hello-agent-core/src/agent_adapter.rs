@@ -143,6 +143,14 @@ impl LaunchSpec {
         &self.prompt
     }
 
+    pub fn expected_handshake(&self) -> &str {
+        self.expected_handshake
+    }
+
+    pub fn parser(&self) -> &str {
+        self.parser
+    }
+
     /// Hash input for the owning runtime. The prompt is deliberately absent.
     pub fn redacted_digest_material(&self) -> Vec<u8> {
         let mut material = Vec::new();

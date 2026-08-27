@@ -6,3 +6,4 @@ pub mod claude_pilot;
 pub mod codex_pilot;
 pub mod error;
 pub mod proctree;
+pub mod provider;

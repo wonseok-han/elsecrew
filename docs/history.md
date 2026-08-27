@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C pure Rust provider core)
+
+- **순수 provider 경계**: host 탐색·process 실행 없이 주입된 bounded 관찰과 경로/파일 identity digest만 소비하는 core provider 정의를 추가했다. Claude `2.1.241`+`node`, Codex `0.150.0`+`rg` closure와 exact profile/parser/launch policy를 canonical SHA-256 manifest로 만들며 공용 G5C golden digest와 일치한다. 설치·인증·버전·closure·catalog·tuple·verification이 하나라도 불확실하면 startable로 만들지 않고, Codex `argvOnly`/unknown catalog/effective profile은 계속 차단한다.
+- **handshake·비밀 경계**: Claude fake `system:init`의 exact version/model/managed cwd/permission/tools/MCP/plugins/config isolation을 모두 확인한 뒤에만 attestation과 첫 Handshake event를 만든다. forged discovery도 attestation 직전에 전체 manifest와 재결속한다. auth/version/vendor 원문과 token/prompt/email/org는 결과·Debug에 남지 않고, 미지원 profile 문자열도 빈 sanitized tuple로 접는다. 이후 event는 handshake 전 공개를 거부하고 `status|question|final`만 G5B 256-event·1 MiB text 안에서 공개하며 private/auth/terminal은 raw body 없이 분류한다.
+- **검증·경계**: core 82개와 workspace 전체 Rust 테스트(Tauri 105 passed·13 ignored, protocol 30, sidecar 68 passed·1 ignored+stdio 8 포함), Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. strict workspace clippy는 변경 전부터 있던 core/protocol/Tauri lint 11건만 보고했고 해당 lint를 명시적으로 허용한 `--workspace --all-targets --no-deps -D warnings`는 통과했다. 실제 Claude/Codex CLI·인증·사용자 프로젝트·network·Windows는 실행하지 않았으며 public wire·sidecar·Electron은 변경하지 않았다. 다음은 독립 core 리뷰 후 승인된 commit만 sidecar 소비 작업의 기준으로 쓰는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C aggregate text 경계 증거 보정)
 
 - **공용 경계 fixture**: aggregate Public text 허용 경계를 16개 × 65,536 bytes = 정확히 1 MiB로 고정하고, 거부 경계는 같은 16개 뒤 1-byte 17번째 메시지를 붙인 1 MiB+1로 고정했다. 두 경우 모두 256-event 미만이고 각 메시지는 per-message 상한 이하임을 Rust/TypeScript가 fixture 기대값과 함께 검증한다.
