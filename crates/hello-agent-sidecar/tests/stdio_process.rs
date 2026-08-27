@@ -7,6 +7,9 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use hello_agent_protocol::agent_adapter_v1::{
+    validate_agent_adapter_payload_v1, G5A_CAPABILITIES_V1,
+};
 use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5_CAPABILITIES_V1};
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
@@ -101,6 +104,246 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         )
         .expect("clean marker");
     assert!(clean.is_some());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
+    let root = tempfile::tempdir().expect("temporary directory");
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(source.join("src")).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("src/file.txt"), "fixture").unwrap();
+    git(&source, &["init", "-q"]);
+    git(&source, &["add", "."]);
+    git(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .args(["--stdio-agent-fixture", "clean"])
+        .current_dir(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn G5A fixture sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("ready event")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+    assert_eq!(
+        ready.capabilities,
+        G5A_CAPABILITIES_V1
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>()
+    );
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_open",
+        "project.open",
+        serde_json::json!({"selectedPath":source}),
+    );
+    let EnvelopeV1::Response(open) = receive_envelope(&envelopes) else {
+        panic!("open response")
+    };
+    assert!(open.ok, "{:?}", open.error);
+    let project_id = open.result.unwrap()["projectId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_settings",
+        "project.getRoleSettings",
+        serde_json::json!({"projectId":project_id}),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
+    let prepared = prepare_workspace(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        &project_id,
+        "req_agent_prepare",
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_chat",
+        "chat.create",
+        serde_json::json!({
+            "preparationId":prepared["preparationId"],"projectId":project_id,
+            "worktreeId":prepared["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared["manifest"]["workspaceIdentity"],
+            "goal":"normalized public event fixture","expectedSettingsRevision":1,
+        }),
+    );
+    let EnvelopeV1::Response(chat_response) = receive_envelope(&envelopes) else {
+        panic!("chat response")
+    };
+    assert!(chat_response.ok, "{:?}", chat_response.error);
+    let chat = chat_response.result.unwrap();
+    let chat_id = chat["chatId"].as_str().unwrap().to_string();
+    let EnvelopeV1::Event(created) = receive_envelope(&envelopes) else {
+        panic!("direct chat event")
+    };
+    assert_eq!(created.event, "chat.eventAppended");
+    validate_g5_payload_v1("teamMessage", &created.payload).unwrap();
+    let message_id = created.payload["messageId"].as_str().unwrap().to_string();
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_empty_detail",
+        "chat.get",
+        serde_json::json!({"chatId":chat_id,"afterEventSequence":0,"cursor":null,"limit":50}),
+    );
+    let EnvelopeV1::Response(empty_detail) = receive_envelope(&envelopes) else {
+        panic!("empty detail response")
+    };
+    assert!(empty_detail.ok, "{:?}", empty_detail.error);
+    let empty_detail = empty_detail.result.unwrap();
+    assert_eq!(empty_detail["agentRuns"], serde_json::json!([]));
+    validate_agent_adapter_payload_v1("agentChatDetailPage", &empty_detail).unwrap();
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_capability",
+        "agent.getCapabilities",
+        serde_json::json!({"runtime":"codex","refresh":true}),
+    );
+    let EnvelopeV1::Response(capability) = receive_envelope(&envelopes) else {
+        panic!("capability response")
+    };
+    let capability = capability.result.unwrap();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_start",
+        "run.startAgent",
+        serde_json::json!({
+            "chatId":chat_id,"roleId":"planning","inputMessageIds":[message_id],
+            "expectedCapabilityFingerprint":capability["fingerprint"],
+        }),
+    );
+    let EnvelopeV1::Response(accepted) = receive_envelope(&envelopes) else {
+        panic!("accepted must be emitted before events")
+    };
+    assert!(accepted.ok, "{:?}", accepted.error);
+    let accepted = accepted.result.unwrap();
+    validate_agent_adapter_payload_v1("runAccepted", &accepted).unwrap();
+    let run_id = accepted["runId"].as_str().unwrap().to_string();
+
+    let mut public_events = Vec::new();
+    for expected_seq in 1..=3 {
+        let EnvelopeV1::Event(event) = receive_envelope(&envelopes) else {
+            panic!("public event")
+        };
+        assert_eq!(event.event, "agent.publicEvent");
+        assert_eq!(event.seq, expected_seq);
+        assert_eq!(event.chat_id.as_deref(), Some(chat_id.as_str()));
+        assert_eq!(event.task_id.as_deref(), chat["taskId"].as_str());
+        assert_eq!(event.run_id.as_deref(), Some(run_id.as_str()));
+        validate_agent_adapter_payload_v1("publicEvent", &event.payload).unwrap();
+        for field in [
+            "chatId",
+            "taskId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+        ] {
+            assert_eq!(event.payload[field], chat[field]);
+        }
+        assert_eq!(event.payload["runId"], run_id);
+        assert_eq!(event.payload["roleId"], "planning");
+        assert_eq!(
+            event.payload["capabilityFingerprint"],
+            capability["fingerprint"]
+        );
+        public_events.push(event.payload);
+    }
+    assert_eq!(
+        public_events
+            .iter()
+            .map(|event| event["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["status", "question", "final"]
+    );
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_terminal_detail",
+        "chat.get",
+        serde_json::json!({"chatId":chat_id,"afterEventSequence":0,"cursor":null,"limit":50}),
+    );
+    let EnvelopeV1::Response(detail) = receive_envelope(&envelopes) else {
+        panic!("terminal detail response; an unexpected raw event was emitted")
+    };
+    assert!(detail.ok, "{:?}", detail.error);
+    let detail = detail.result.unwrap();
+    validate_agent_adapter_payload_v1("agentChatDetailPage", &detail).unwrap();
+    assert_eq!(detail["agentRuns"][0]["runId"], run_id);
+    assert_eq!(detail["agentRuns"][0]["state"], "succeeded");
+    assert_eq!(detail["messages"].as_array().unwrap().len(), 4);
+    let mut public_text = public_events
+        .iter()
+        .filter_map(|event| event["text"].as_str())
+        .collect::<Vec<_>>();
+    public_text.extend(
+        detail["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|message| message["text"].as_str()),
+    );
+    let public_text = public_text.join("\n").to_lowercase();
+    for forbidden in [
+        "token-never-persist",
+        "reasoning",
+        "stderr",
+        "tool",
+        "env",
+        "auth",
+        "prompt",
+        "usage",
+    ] {
+        assert!(
+            !public_text.contains(forbidden),
+            "public surface contains forbidden carrier: {forbidden}"
+        );
+    }
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
 }
 
 #[test]

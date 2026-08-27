@@ -536,6 +536,7 @@ impl G5Manager {
         after_event_sequence: u64,
         cursor: Option<&str>,
         limit: u64,
+        include_agent_runs: bool,
     ) -> Result<Value, ProjectFailure> {
         let limit = bounded_limit(limit, G5_EVENT_PAGE_MAX_ITEMS_V1)?;
         let offset = parse_cursor(cursor)?;
@@ -582,7 +583,7 @@ impl G5Manager {
             "chat":chat,"afterEventSequence":after_event_sequence,"messages":slice,
             "runs":runs,"nextEventSequence":next_event,
         });
-        if !agent_runs.is_empty() {
+        if include_agent_runs {
             result["agentRuns"] = Value::Array(agent_runs);
             hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
                 "agentChatDetailPage",
@@ -1557,7 +1558,7 @@ fn chat_event(chat: &Value, seq: u64, message: Value) -> G5Event {
         chat_id: chat["chatId"].as_str().map(str::to_string),
         task_id: chat["taskId"].as_str().map(str::to_string),
         run_id: None,
-        payload: json!({"message":message}),
+        payload: message,
     }
 }
 

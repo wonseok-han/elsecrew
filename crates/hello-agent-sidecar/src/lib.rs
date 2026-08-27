@@ -8,6 +8,7 @@ mod project;
 mod storage;
 
 use hello_agent_core as _;
+use hello_agent_protocol::agent_adapter_v1::G5A_CAPABILITIES_V1;
 use hello_agent_protocol::lifecycle_v1::{DatabaseStatusV1, SystemStatusV1, SQLITE_FILE_V1};
 use hello_agent_protocol::run_recovery_v1::G5_CAPABILITIES_V1;
 use hello_agent_protocol::{
@@ -383,13 +384,18 @@ impl Sidecar {
         let mut projects = ProjectManager::new(database_path)?;
         agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
+        let capabilities = if agent_runtime.advertises_g5a() {
+            G5A_CAPABILITIES_V1
+        } else {
+            G5_CAPABILITIES_V1
+        };
         let ready = ReadyPayloadV1 {
             protocol_version: PROTOCOL_VERSION,
             sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
             app_schema_version: APP_SCHEMA_VERSION,
             pid: std::process::id(),
             platform: protocol_platform().to_string(),
-            capabilities: G5_CAPABILITIES_V1
+            capabilities: capabilities
                 .iter()
                 .map(|value| (*value).to_string())
                 .collect(),
@@ -973,6 +979,7 @@ impl Sidecar {
                             param_nullable_string(params, "cursor")
                                 .map_err(ProjectFailure::manifest)?,
                             param_u64(params, "limit").map_err(ProjectFailure::manifest)?,
+                            self.agent_runtime.advertises_g5a(),
                         )?,
                         ..chat::G5Action::default()
                     }

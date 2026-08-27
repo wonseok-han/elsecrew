@@ -221,6 +221,10 @@ impl AgentRuntime {
         }
     }
 
+    pub(crate) fn advertises_g5a(&self) -> bool {
+        self.provider == ProviderMode::FakeExact
+    }
+
     pub(crate) fn get_capabilities(
         &self,
         runtime: &str,
@@ -688,15 +692,7 @@ impl AgentRuntime {
         );
         Ok(G5Action {
             result: accepted,
-            events: vec![G5Event {
-                stream_id,
-                seq: 1,
-                event: "run.event",
-                chat_id: Some(request.chat_id),
-                task_id: chat["taskId"].as_str().map(str::to_string),
-                run_id: Some(run_id),
-                payload: json!({"kind":"status","text":"Agent run started"}),
-            }],
+            events: Vec::new(),
         })
     }
 
@@ -785,9 +781,7 @@ impl AgentRuntime {
                 } else {
                     "succeeded"
                 };
-                if let Ok(event) = self.finish(storage, projects, &run_id, state, false) {
-                    events.push(event);
-                }
+                let _ = self.finish(storage, projects, &run_id, state, false);
             }
         }
         events
@@ -806,7 +800,7 @@ impl AgentRuntime {
         if !same_identity(&active.identity, identity) {
             return Err(ProjectFailure::manifest("agent run identity differs"));
         }
-        let event = self.finish(storage, projects, &identity.run_id, "canceled", true)?;
+        self.finish(storage, projects, &identity.run_id, "canceled", true)?;
         let projection = actual_run_projection(storage, &identity.run_id)?;
         let run = projection["record"].clone();
         let termination = projection["termination"].clone();
@@ -820,7 +814,7 @@ impl AgentRuntime {
         validate_agent_adapter_payload_v1("runCancelResult", &result).map_err(contract_failure)?;
         Ok(G5Action {
             result,
-            events: vec![event],
+            events: Vec::new(),
         })
     }
 
@@ -1098,11 +1092,11 @@ impl AgentRuntime {
         Ok(G5Event {
             stream_id: active.stream_id.clone(),
             seq: active.next_wire_seq,
-            event: "run.event",
+            event: "agent.publicEvent",
             chat_id: Some(active.identity.chat_id.clone()),
             task_id: Some(active.identity.task_id.clone()),
             run_id: Some(run_id.into()),
-            payload: json!({"kind":kind,"text":text}),
+            payload: event,
         })
     }
 
@@ -1113,7 +1107,7 @@ impl AgentRuntime {
         run_id: &str,
         requested_state: &str,
         cancelling: bool,
-    ) -> Result<G5Event, ProjectFailure> {
+    ) -> Result<(), ProjectFailure> {
         let mut active = self
             .active
             .remove(run_id)
@@ -1245,16 +1239,7 @@ impl AgentRuntime {
             )?);
         }
         storage.upsert_projection_records_atomic(upserts)?;
-        active.next_wire_seq += 1;
-        Ok(G5Event {
-            stream_id: active.stream_id,
-            seq: active.next_wire_seq,
-            event: "run.finished",
-            chat_id: Some(active.identity.chat_id),
-            task_id: Some(active.identity.task_id),
-            run_id: Some(run_id.into()),
-            payload: json!({"run":run,"termination":termination,"recovery":recovery}),
-        })
+        Ok(())
     }
 }
 
@@ -1844,6 +1829,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         _ => {
             println!("{{\"type\":\"reasoning\",\"secret\":\"token-never-persist\"}}");
             println!("{{\"type\":\"status\",\"text\":\"Working\"}}");
+            println!("{{\"type\":\"question\",\"text\":\"Continue with the reviewed change?\"}}");
             if scenario == "descendant" {
                 let executable = std::env::current_exe().map_err(|error| {
                     SidecarError::new("fixtureFailure", format!("fixture executable: {error}"))

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust normalized public-event 소비)
+
+- **협상·순서**: 결정적 `--stdio-agent-fixture`만 exact G5A capability를 광고하고 일반 `--stdio`는 exact G5를 유지한다. actual start는 event 없는 accepted response를 먼저 반환하며, 이후 영속 `AgentPublicEventV1` 전체를 `agent.publicEvent` seq 1부터 연속 발행한다. actual start/finish의 raw `run.event`·`run.finished` carrier는 제거했고 기존 G5 fixture run event는 변경하지 않았다.
+- **조회·채팅 wire**: 협상된 G5A의 `chat.get`은 run이 없어도 `agentRuns: []`를 항상 포함하고, current G5는 해당 멤버를 생략한다. sidecar의 `chat.eventAppended` payload를 계약·Electron이 요구하는 direct `TeamMessageV1`로 바로잡아 기존 G5 공개 메시지 의미와 durable ledger는 유지했다.
+- **검증·경계**: 실제 sidecar process 회귀에서 ready exact G5A, pre-run 빈 agent ledger, accepted-before-event, `status→question→final` seq 1~3 full identity/fingerprint, raw actual event 0건, durable TeamMessage와 terminal agent run을 확인했다. sidecar 59 passed·1 ignored와 stdio 8 passed, protocol 26 passed, owned Rust format, strict no-deps sidecar clippy, `git diff --check`를 통과했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 계약)
 
 - **공용 wire**: protocol v1에 `agent.publicEvent`를 additive 예약했다. envelope는 `chatId`·`taskId`·`runId`를 모두 요구하고, exact `AgentPublicEventV1` payload의 같은 세 identity와 일치해야 한다. payload는 `status|question|final`, bounded text와 전체 run identity/fingerprint만 허용하고 extra·reasoning·raw/private 필드는 계속 fail-closed다.

@@ -267,6 +267,7 @@ fn chat_ledger_pages_keep_durable_sequence_separate_from_wire_streams() {
             0,
             None,
             50,
+            false,
         )
         .unwrap();
     assert_eq!(detail["messages"][0]["eventSequence"], 1);
@@ -577,7 +578,7 @@ fn sidecar_binary() -> std::path::PathBuf {
 fn initial_message_id(fixture: &Fixture, chat_id: &str) -> String {
     fixture
         .chats
-        .get_chat(&fixture.storage, chat_id, 0, None, 10)
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, false)
         .unwrap()["messages"][0]["messageId"]
         .as_str()
         .unwrap()
@@ -795,6 +796,10 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             "req_agent_clean",
         )
         .unwrap();
+    assert!(
+        started.events.is_empty(),
+        "accepted response must precede all public events"
+    );
     for field in [
         "chatId",
         "taskId",
@@ -829,8 +834,9 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             .len(),
         2
     );
+    let mut wire_events = Vec::new();
     for _ in 0..100 {
-        let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+        wire_events.extend(runtime.poll(&mut fixture.storage, &mut fixture.projects));
         if fixture
             .storage
             .projection_record("run", &run_id)
@@ -842,6 +848,37 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    assert_eq!(wire_events.len(), 3);
+    for (index, event) in wire_events.iter().enumerate() {
+        assert_eq!(event.event, "agent.publicEvent");
+        assert_eq!(event.seq, (index + 1) as u64);
+        assert_eq!(event.payload["chatId"], chat["chatId"]);
+        assert_eq!(event.payload["taskId"], chat["taskId"]);
+        assert_eq!(event.payload["projectId"], chat["projectId"]);
+        assert_eq!(event.payload["worktreeId"], chat["worktreeId"]);
+        assert_eq!(
+            event.payload["workspaceIdentity"],
+            chat["workspaceIdentity"]
+        );
+        assert_eq!(event.payload["runId"], run_id);
+        assert_eq!(event.payload["roleId"], "planning");
+        assert_eq!(
+            event.payload["capabilityFingerprint"],
+            capability["fingerprint"]
+        );
+        hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+            "publicEvent",
+            &event.payload,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        wire_events
+            .iter()
+            .map(|event| event.payload["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["status", "question", "final"]
+    );
     let terminal = fixture
         .storage
         .projection_record("run", &run_id)
@@ -857,7 +894,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         .unwrap()
         .iter()
         .all(|event| {
-            ["status", "final"].contains(&event["kind"].as_str().unwrap_or_default())
+            ["status", "question", "final"].contains(&event["kind"].as_str().unwrap_or_default())
         }));
     assert!(terminal["public_events"]
         .as_array()
@@ -873,13 +910,23 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
                 && event["roleId"] == "planning"
                 && event["capabilityFingerprint"] == capability["fingerprint"]
         }));
-    assert!(fixture
+    let current_g5_detail = fixture
         .chats
-        .get_chat(&fixture.storage, chat_id, 0, None, 10)
-        .unwrap()["runs"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, false)
+        .unwrap();
+    assert!(current_g5_detail.get("agentRuns").is_none());
+    assert!(current_g5_detail["runs"].as_array().unwrap().is_empty());
+    let g5a_detail = fixture
+        .chats
+        .get_chat(&fixture.storage, chat_id, 0, None, 10, true)
+        .unwrap();
+    assert_eq!(g5a_detail["agentRuns"][0]["state"], "succeeded");
+    assert_eq!(g5a_detail["messages"].as_array().unwrap().len(), 4);
+    hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &g5a_detail,
+    )
+    .unwrap();
 }
 
 #[test]
