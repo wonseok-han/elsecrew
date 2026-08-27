@@ -59,6 +59,8 @@ pub(crate) enum FakeScenario {
     #[cfg_attr(not(test), allow(dead_code))]
     IdentityFailure,
     #[cfg_attr(not(test), allow(dead_code))]
+    ObserveFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
     ReleaseFailure,
 }
 
@@ -442,10 +444,23 @@ impl AgentRuntime {
                 ))
             }
         };
+        tracker.track_identity(agent_identity);
         for _ in 0..10 {
-            tracker
-                .observe(&SystemProcTable)
-                .map_err(ProjectFailure::recovery)?;
+            let observed = if self.scenario == FakeScenario::ObserveFailure {
+                Err("injected attach observation failure".to_string())
+            } else {
+                tracker.observe(&SystemProcTable)
+            };
+            if let Err(error) = observed {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("agent attach observation failed: {error}"),
+                ));
+            }
             if tracker.tracked_len() >= 2 {
                 break;
             }
@@ -471,38 +486,56 @@ impl AgentRuntime {
                 "injected identity failure",
             ));
         }
-        let public_launcher = process_value(launcher_identity, launch_spec.executable(), false);
-        let public_agent = process_value(agent_identity, launch_spec.executable(), false);
-        let barrier = json!({
-            "launcherIdentity":public_launcher,"agentIdentity":public_agent,
-            "trackedProcesses":[public_launcher,public_agent],
-            "treeIdentityDigest":digest_text(&format!("{}:{}:{}:{}",launcher_identity.pid,launcher_identity.start_us,agent_identity.pid,agent_identity.start_us)),
-            "launchSpecDigest":digest_bytes(&launch_spec.redacted_digest_material()),
-            "evidenceDigest":digest_text("agent-fixture-barrier-v1"),
-            "treeTrackerAttached":true,"runAndLockPersistedBeforeRelease":true,
-            "identityPersistedBeforeRelease":true,"releaseGranted":true,"capturedAt":now(),
-        });
-        let running = agent_run_record(
-            &run_id,
-            &chat,
-            &profile,
-            &capability.fingerprint,
-            "running",
-            None,
-            &created,
-        )?;
-        let internal = json!([
-            {"pid":launcher_identity.pid,"start_us":launcher_identity.start_us},
-            {"pid":agent_identity.pid,"start_us":agent_identity.start_us}
-        ]);
-        let running_payload = agent_run_projection(
-            &running,
-            &manifest,
-            Some(barrier.clone()),
-            Some(internal),
-            Vec::new(),
-        )?;
-        let running_chat = updated_chat(&chat, "running")?;
+        let configured = (|| -> Result<_, ProjectFailure> {
+            let public_launcher = process_value(launcher_identity, launch_spec.executable(), false);
+            let public_agent = process_value(agent_identity, launch_spec.executable(), false);
+            let barrier = json!({
+                "launcherIdentity":public_launcher,"agentIdentity":public_agent,
+                "trackedProcesses":[public_launcher,public_agent],
+                "treeIdentityDigest":digest_text(&format!("{}:{}:{}:{}",launcher_identity.pid,launcher_identity.start_us,agent_identity.pid,agent_identity.start_us)),
+                "launchSpecDigest":digest_bytes(&launch_spec.redacted_digest_material()),
+                "evidenceDigest":digest_text("agent-fixture-barrier-v1"),
+                "treeTrackerAttached":true,"runAndLockPersistedBeforeRelease":true,
+                "identityPersistedBeforeRelease":true,"releaseGranted":false,"capturedAt":now(),
+            });
+            let running = agent_run_record(
+                &run_id,
+                &chat,
+                &profile,
+                &capability.fingerprint,
+                "running",
+                None,
+                &created,
+            )?;
+            let internal = json!([
+                {"pid":launcher_identity.pid,"start_us":launcher_identity.start_us},
+                {"pid":agent_identity.pid,"start_us":agent_identity.start_us}
+            ]);
+            let running_payload = agent_run_projection(
+                &running,
+                &manifest,
+                Some(barrier.clone()),
+                Some(internal),
+                Vec::new(),
+            )?;
+            let running_chat = updated_chat(&chat, "running")?;
+            let running_chat_payload =
+                chat_projection_with_record(&chat_projection, &running_chat, None)?;
+            Ok((barrier, running_payload, running_chat_payload))
+        })();
+        let (barrier, running_payload, running_chat_payload) = match configured {
+            Ok(configured) => configured,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("pre-release evidence construction failed: {}", error.detail),
+                ))
+            }
+        };
         if let Err(error) = storage.upsert_projection_records_atomic(vec![
             ProjectionUpsert {
                 aggregate_type: "run",
@@ -516,7 +549,7 @@ impl AgentRuntime {
                 aggregate_id: request.chat_id.clone(),
                 operation_id: format!("op_agent_chat_running_{run_id}"),
                 request_id: None,
-                payload: chat_projection_with_record(&chat_projection, &running_chat, None)?,
+                payload: running_chat_payload,
             },
         ]) {
             return Err(fail_before_release(
@@ -541,20 +574,32 @@ impl AgentRuntime {
         }
 
         let (sender, receiver) = mpsc::sync_channel(32);
-        thread::spawn(move || loop {
-            match read_bounded_line(&mut reader) {
-                Ok(line) if line.is_empty() => break,
-                Ok(line) => {
-                    if sender.send(Ok(line)).is_err() {
+        if let Err(error) = thread::Builder::new()
+            .name("agent-fixture-drain".into())
+            .spawn(move || loop {
+                match read_bounded_line(&mut reader) {
+                    Ok(line) if line.is_empty() => break,
+                    Ok(line) => {
+                        if sender.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
                         break;
                     }
                 }
-                Err(error) => {
-                    let _ = sender.send(Err(error));
-                    break;
-                }
-            }
-        });
+            })
+        {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("agent drain thread failed: {error}"),
+            ));
+        }
         let mut release = match launcher.stdin.take() {
             Some(release) => release,
             None => {
@@ -579,6 +624,43 @@ impl AgentRuntime {
             ));
         }
         drop(release);
+        let released = (|| -> Result<(), ProjectFailure> {
+            let mut projection = actual_run_projection(storage, &run_id)?;
+            let mut released_barrier = barrier;
+            released_barrier["releaseGranted"] = Value::Bool(true);
+            released_barrier["capturedAt"] = Value::String(now());
+            projection.insert("barrier".into(), released_barrier);
+            projection.remove("last_event_sequence");
+            storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.clone(),
+                operation_id: format!("op_agent_release_{run_id}"),
+                request_id: None,
+                payload: projection,
+            }])?;
+            Ok(())
+        })();
+        if let Err(error) = released {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("release evidence persistence failed: {}", error.detail),
+            ));
+        }
+        let accepted = json!({"schemaVersion":1,"runId":run_id,"chatId":request.chat_id,"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"roleId":request.role_id,"capabilityFingerprint":capability.fingerprint,"state":"preparing"});
+        if let Err(error) = validate_agent_adapter_payload_v1("runAccepted", &accepted) {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("run accepted evidence failed: {error}"),
+            ));
+        }
         let stream_id = format!("agent_stream_{}", Uuid::new_v4().simple());
         self.active.insert(
             run_id.clone(),
@@ -604,8 +686,6 @@ impl AgentRuntime {
                 evidence_failed: false,
             },
         );
-        let accepted = json!({"schemaVersion":1,"runId":run_id,"chatId":request.chat_id,"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"roleId":request.role_id,"capabilityFingerprint":capability.fingerprint,"state":"preparing"});
-        validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(contract_failure)?;
         Ok(G5Action {
             result: accepted,
             events: vec![G5Event {
@@ -1632,6 +1712,7 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::Descendant => "descendant",
         FakeScenario::SpawnFailure => "clean",
         FakeScenario::IdentityFailure => "clean",
+        FakeScenario::ObserveFailure => "clean",
         FakeScenario::ReleaseFailure => "clean",
     }
 }

@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A release barrier 재리뷰 수정)
+
+- active 등록 전 attach `TreeTracker::observe`와 evidence/chat projection 구성, drain thread 생성, release evidence 저장, accepted 검증의 모든 fallible 경로를 공통 fail-before-release 종료로 연결했다. 직접 handshake한 child identity를 열거 전에 tracker에 넣어 observe 실패 주입에서도 launcher와 child 모두의 소멸을 증명하거나 불확실 recovery로 접는다.
+- durable pre-release barrier는 `releaseGranted=false`로 먼저 기록하고 release pipe write가 성공한 뒤 별도 atomic projection 전이에서만 true가 된다. injected release failure는 false barrier, terminal failed, clean writer release와 DB reopen 뒤 동일 상태를 검증하며 정상 run만 true barrier로 진행한다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A actual-agent wire identity 소비)
 
 - 공용 계약 wire 보강 commit을 소비해 `run.startAgent` accepted와 durable public event가 chat/task/project/worktree/workspace/run/role identity와 capability fingerprint를 내부 immutable `RunIdentity`·run record에서 exact echo하도록 바꿨다. 짧은 이전 payload는 더 이상 만들지 않으며 두 payload 모두 공용 Rust validator를 통과한 뒤에만 반환·영속화한다.

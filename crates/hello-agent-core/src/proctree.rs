@@ -229,6 +229,15 @@ impl TreeTracker {
         self.identities()
     }
 
+    /// Add a directly handshaken identity before descendant enumeration begins.
+    pub fn track_identity(&mut self, identity: ProcIdentity) {
+        self.tracked.entry(identity).or_insert(TrackedProc {
+            identity,
+            state: TrackedState::Live,
+            comm: String::new(),
+        });
+    }
+
     fn refresh<T: ProcTable>(&mut self, table: &T) -> Result<Refresh, (UnconfirmedReason, String)> {
         // ── 1) 누적 신원 전체를 개별 확인한다. 현재 부모가 누구든 상관없다 ──
         let mut live: Vec<ProcEntry> = Vec::new();

@@ -673,9 +673,11 @@ fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_an
 
 #[test]
 fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reopen() {
+    use hello_agent_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
     for scenario in [
         FakeScenario::SpawnFailure,
         FakeScenario::IdentityFailure,
+        FakeScenario::ObserveFailure,
         FakeScenario::ReleaseFailure,
     ] {
         let mut fixture = Fixture::new();
@@ -710,8 +712,23 @@ fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reope
             .into_iter()
             .find(|run| run["source_kind"] == "actualAgent")
             .unwrap();
+        let actual_run_id = actual["run_id"].as_str().unwrap().to_string();
         assert_eq!(actual["record"]["state"], "failed");
         assert_eq!(actual["pre_release_failure"]["processesProvenGone"], true);
+        if scenario == FakeScenario::ReleaseFailure {
+            assert_eq!(actual["barrier"]["releaseGranted"], false);
+        }
+        assert!(actual["process_identity_internal"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| matches!(
+                SystemProcTable.probe(ProcIdentity {
+                    pid: value["pid"].as_u64().unwrap() as u32,
+                    start_us: value["start_us"].as_i64().unwrap(),
+                }),
+                ProbeResult::Gone
+            )));
         let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
         let lock = fixture
             .storage
@@ -738,6 +755,14 @@ fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reope
             .unwrap();
         assert_eq!(lock["writer_run_id"], Value::Null);
         assert_eq!(lock["recovery_required"], false);
+        let run = reopened
+            .projection_record("run", &actual_run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(run["record"]["state"], "failed");
+        if scenario == FakeScenario::ReleaseFailure {
+            assert_eq!(run["barrier"]["releaseGranted"], false);
+        }
         drop(reopened);
         drop(root_guard);
     }
@@ -796,6 +821,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         true
     );
     assert_eq!(preparing["barrier"]["identityPersistedBeforeRelease"], true);
+    assert_eq!(preparing["barrier"]["releaseGranted"], true);
     assert_eq!(
         preparing["barrier"]["trackedProcesses"]
             .as_array()
