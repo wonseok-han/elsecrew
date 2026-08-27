@@ -2,6 +2,7 @@
 //!
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
+mod agent_runtime;
 mod chat;
 mod project;
 mod storage;
@@ -93,12 +94,78 @@ where
         chat::run_fixture_leaf();
         return Ok(());
     }
-    if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
-        return Err(SidecarError::new(
-            "invalidArguments",
-            "sidecar requires exactly one argument: --stdio",
-        ));
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--agent-fixture-launcher")) {
+        let scenario = args.next().ok_or_else(|| {
+            SidecarError::new(
+                "invalidArguments",
+                "agent fixture launcher scenario is required",
+            )
+        })?;
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "agent fixture launcher has extra arguments",
+            ));
+        }
+        return agent_runtime::run_agent_fixture_launcher(&scenario.to_string_lossy());
     }
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--agent-fixture-child")) {
+        let scenario = args.next().ok_or_else(|| {
+            SidecarError::new(
+                "invalidArguments",
+                "agent fixture child scenario is required",
+            )
+        })?;
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "agent fixture child has extra arguments",
+            ));
+        }
+        return agent_runtime::run_agent_fixture_child(&scenario.to_string_lossy());
+    }
+    let fixture_runtime = if mode.as_deref() == Some(std::ffi::OsStr::new("--stdio-agent-fixture"))
+    {
+        let scenario = args.next().ok_or_else(|| {
+            SidecarError::new(
+                "invalidArguments",
+                "stdio agent fixture scenario is required",
+            )
+        })?;
+        if args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "stdio agent fixture has extra arguments",
+            ));
+        }
+        let scenario = match scenario.to_string_lossy().as_ref() {
+            "clean" => agent_runtime::FakeScenario::Clean,
+            "cancel-clean" => agent_runtime::FakeScenario::CancelClean,
+            "cancel-uncertain" => agent_runtime::FakeScenario::CancelUncertain,
+            "malformed" => agent_runtime::FakeScenario::Malformed,
+            "oversized" => agent_runtime::FakeScenario::Oversized,
+            _ => {
+                return Err(SidecarError::new(
+                    "invalidArguments",
+                    "unknown stdio agent fixture scenario",
+                ))
+            }
+        };
+        Some(agent_runtime::AgentRuntime::fake(
+            std::env::current_exe().map_err(|error| {
+                SidecarError::new("fixtureFailure", format!("fixture executable: {error}"))
+            })?,
+            scenario,
+        ))
+    } else {
+        if mode.as_deref() != Some(std::ffi::OsStr::new("--stdio")) || args.next().is_some() {
+            return Err(SidecarError::new(
+                "invalidArguments",
+                "sidecar requires exactly one argument: --stdio",
+            ));
+        }
+        None
+    };
 
     let current = std::env::current_dir().map_err(|error| {
         SidecarError::new(
@@ -121,7 +188,16 @@ where
     let database_path = canonical.join(SQLITE_FILE_V1);
     let stdin = io::stdin();
     let stdout = io::stdout();
-    run_stdio(&database_path, stdin, stdout.lock())
+    match fixture_runtime {
+        Some(runtime) => serve_stdio_with_identity_and_runtime(
+            &database_path,
+            stdin,
+            stdout.lock(),
+            new_sidecar_instance_id(),
+            runtime,
+        ),
+        None => run_stdio(&database_path, stdin, stdout.lock()),
+    }
 }
 
 pub fn run_stdio<R: Read + Send + 'static, W: Write>(
@@ -135,10 +211,26 @@ pub fn run_stdio<R: Read + Send + 'static, W: Write>(
 fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
     database_path: &Path,
     input: R,
-    mut output: W,
+    output: W,
     sidecar_instance_id: String,
 ) -> Result<(), SidecarError> {
-    let mut sidecar = Sidecar::start(database_path, sidecar_instance_id)?;
+    serve_stdio_with_identity_and_runtime(
+        database_path,
+        input,
+        output,
+        sidecar_instance_id,
+        agent_runtime::AgentRuntime::blocked(),
+    )
+}
+
+fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
+    database_path: &Path,
+    input: R,
+    mut output: W,
+    sidecar_instance_id: String,
+    runtime: agent_runtime::AgentRuntime,
+) -> Result<(), SidecarError> {
+    let mut sidecar = Sidecar::start_with_runtime(database_path, sidecar_instance_id, runtime)?;
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
     let mut session = ProtocolSessionV1::default();
     session.observe(&ready).map_err(protocol_error)?;
@@ -264,15 +356,21 @@ struct Sidecar {
     prepared_to_quit: bool,
     safe_to_quit: bool,
     g5: chat::G5Manager,
+    agent_runtime: agent_runtime::AgentRuntime,
 }
 
 impl Sidecar {
-    fn start(database_path: &Path, sidecar_instance_id: String) -> Result<Self, SidecarError> {
+    fn start_with_runtime(
+        database_path: &Path,
+        sidecar_instance_id: String,
+        agent_runtime: agent_runtime::AgentRuntime,
+    ) -> Result<Self, SidecarError> {
         g4_platform_gate()?;
         let mut storage = Storage::open(database_path)?;
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
         let mut projects = ProjectManager::new(database_path)?;
+        agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         let ready = ReadyPayloadV1 {
             protocol_version: PROTOCOL_VERSION,
@@ -294,6 +392,7 @@ impl Sidecar {
             prepared_to_quit: false,
             safe_to_quit: false,
             g5,
+            agent_runtime,
         })
     }
 
@@ -333,6 +432,8 @@ impl Sidecar {
                     | "recovery.list"
                     | "recovery.inspect"
                     | "recovery.markResolved"
+                    | "recovery.inspectAgent"
+                    | "recovery.resolveAgent"
             )
         {
             return Ok(HandledRequest::response(error_response(
@@ -357,8 +458,24 @@ impl Sidecar {
                 | "recovery.list"
                 | "recovery.inspect"
                 | "recovery.markResolved"
+                | "agent.getCapabilities"
+                | "run.startAgent"
+                | "run.cancelAgent"
+                | "recovery.inspectAgent"
+                | "recovery.resolveAgent"
         ) {
-            return self.handle_g5_request(request);
+            return if matches!(
+                request.method.as_str(),
+                "agent.getCapabilities"
+                    | "run.startAgent"
+                    | "run.cancelAgent"
+                    | "recovery.inspectAgent"
+                    | "recovery.resolveAgent"
+            ) {
+                self.handle_agent_request(request)
+            } else {
+                self.handle_g5_request(request)
+            };
         }
 
         let action = match request.method.as_str() {
@@ -375,6 +492,8 @@ impl Sidecar {
                     self.projects.stop_watchers();
                     self.prepared_to_quit = true;
                 }
+                self.agent_runtime
+                    .prepare_quit(&mut self.storage, &mut self.projects);
                 let blockers = self
                     .g5
                     .prepare_quit(&mut self.storage, &mut self.projects)
@@ -939,6 +1058,115 @@ impl Sidecar {
         })
     }
 
+    fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+        use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        let result =
+            (|| -> Result<chat::G5Action, ProjectFailure> {
+                match request.method.as_str() {
+                    "agent.getCapabilities" => {
+                        let params = require_exact_params(&request.params, &["runtime", "refresh"])
+                            .map_err(ProjectFailure::manifest)?;
+                        Ok(chat::G5Action {
+                            result: self.agent_runtime.get_capabilities(
+                                param_string(params, "runtime")
+                                    .map_err(ProjectFailure::manifest)?,
+                                params.get("refresh").and_then(Value::as_bool).ok_or_else(
+                                    || ProjectFailure::manifest("refresh must be a boolean"),
+                                )?,
+                            )?,
+                            ..chat::G5Action::default()
+                        })
+                    }
+                    "run.startAgent" => {
+                        let parsed: AgentRunStartRequestV1 =
+                            serde_json::from_value(request.params.clone()).map_err(|error| {
+                                ProjectFailure::manifest(format!(
+                                    "invalid agent start request: {error}"
+                                ))
+                            })?;
+                        self.agent_runtime.start_agent(
+                            &mut self.storage,
+                            &mut self.projects,
+                            parsed,
+                            &request.request_id,
+                        )
+                    }
+                    "run.cancelAgent" => {
+                        let params = require_exact_params(
+                            &request.params,
+                            &[
+                                "chatId",
+                                "taskId",
+                                "projectId",
+                                "worktreeId",
+                                "workspaceIdentity",
+                                "runId",
+                            ],
+                        )
+                        .map_err(ProjectFailure::manifest)?;
+                        let identity = agent_runtime::RunIdentity {
+                            chat_id: param_string(params, "chatId")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                            task_id: param_string(params, "taskId")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                            project_id: param_string(params, "projectId")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                            worktree_id: param_string(params, "worktreeId")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                            workspace_identity: param_string(params, "workspaceIdentity")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                            run_id: param_string(params, "runId")
+                                .map_err(ProjectFailure::manifest)?
+                                .into(),
+                        };
+                        self.agent_runtime
+                            .cancel(&mut self.storage, &mut self.projects, &identity)
+                    }
+                    "recovery.inspectAgent" => Ok(chat::G5Action {
+                        result: self
+                            .agent_runtime
+                            .inspect_recovery(&self.storage, &request.params)?,
+                        ..chat::G5Action::default()
+                    }),
+                    "recovery.resolveAgent" => Ok(chat::G5Action {
+                        result: self.agent_runtime.resolve_recovery(
+                            &mut self.storage,
+                            &mut self.projects,
+                            &request.params,
+                            &request.request_id,
+                        )?,
+                        ..chat::G5Action::default()
+                    }),
+                    _ => unreachable!("agent dispatcher called for non-agent method"),
+                }
+            })();
+        let action = match result {
+            Ok(action) => action,
+            Err(failure) => {
+                return Ok(HandledRequest::response(project_error_response(
+                    &request, &failure,
+                )))
+            }
+        };
+        Ok(HandledRequest {
+            response: ResponseV1 {
+                protocol_version: PROTOCOL_VERSION,
+                kind: "response".into(),
+                sidecar_instance_id: request.sidecar_instance_id,
+                request_id: request.request_id,
+                ok: true,
+                result: Some(action.result),
+                error: None,
+            },
+            events: self.g5_events(action.events),
+        })
+    }
+
     fn action_events(&self, action: &project::ProjectAction) -> Vec<EventV1> {
         let mut events = Vec::new();
         let workspace = action.result.as_object().and_then(|result| {
@@ -1008,7 +1236,11 @@ impl Sidecar {
     }
 
     fn poll_runtime_events(&mut self) -> Vec<EventV1> {
-        let events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
+        let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
+        events.extend(
+            self.agent_runtime
+                .poll(&mut self.storage, &mut self.projects),
+        );
         self.g5_events(events)
     }
 

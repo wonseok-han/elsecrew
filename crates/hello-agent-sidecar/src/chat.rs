@@ -70,6 +70,9 @@ impl G5Manager {
         projects: &mut ProjectManager,
     ) -> Result<(), SidecarError> {
         for projection in storage.projection_records("run")? {
+            if projection.get("source_kind").and_then(Value::as_str) == Some("actualAgent") {
+                continue;
+            }
             if projection.get("state").and_then(Value::as_str) != Some("recoveryRequired")
                 || projection
                     .get("recovery")
@@ -563,13 +566,33 @@ impl G5Manager {
             .projection_records("run")?
             .into_iter()
             .filter(|run| run.get("chat_id").and_then(Value::as_str) == Some(chat_id))
+            .filter(|run| run.get("source_kind").and_then(Value::as_str) != Some("actualAgent"))
             .filter_map(|run| run.get("record").cloned())
             .take(G5_EVENT_PAGE_MAX_ITEMS_V1)
             .collect::<Vec<_>>();
-        Ok(json!({
+        let agent_runs = storage
+            .projection_records("run")?
+            .into_iter()
+            .filter(|run| run.get("chat_id").and_then(Value::as_str) == Some(chat_id))
+            .filter(|run| run.get("source_kind").and_then(Value::as_str) == Some("actualAgent"))
+            .filter_map(|run| run.get("record").cloned())
+            .take(G5_EVENT_PAGE_MAX_ITEMS_V1)
+            .collect::<Vec<_>>();
+        let mut result = json!({
             "chat":chat,"afterEventSequence":after_event_sequence,"messages":slice,
             "runs":runs,"nextEventSequence":next_event,
-        }))
+        });
+        if !agent_runs.is_empty() {
+            result["agentRuns"] = Value::Array(agent_runs);
+            hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+                "agentChatDetailPage",
+                &result,
+            )
+            .map_err(|error| {
+                ProjectFailure::manifest(format!("invalid actual-agent chat detail: {error}"))
+            })?;
+        }
+        Ok(result)
     }
 
     pub fn start_fixture(
