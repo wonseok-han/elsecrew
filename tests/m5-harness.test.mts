@@ -25,13 +25,14 @@ test("하네스가 M5 게이트와 준비 상태를 기계적으로 나열한다
   assert.match(result.stdout, /g6-release\s+NOT_READY/);
 });
 
-test("G5 누적 게이트는 G5A public-event 계약과 renderer 회귀를 포함한다", () => {
+test("G5 누적 게이트는 G5A public-event와 G5B terminal-budget 회귀를 포함한다", () => {
   const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
   const command = packageJson.scripts["m5:test:run-recovery"] ?? "";
 
   assert.match(command, /tests\/m5-g5a-agent-adapter-contract\.test\.mts/);
+  assert.match(command, /tests\/m5-g5b-terminal-budget-contract\.test\.mts/);
   assert.match(command, /tests\/m5-g5a-public-event-ui\.test\.mts/);
 });
 

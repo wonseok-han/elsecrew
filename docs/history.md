@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal·resource budget 통합)
+
+- **통합**: 독립 승인된 G5B 계약·원장 증폭 교정·renderer·Electron·Rust terminal/budget 커밋을 `m5/coding-agent-ide`에 순서대로 통합했다. `agent.runStateChanged`는 terminal 영속 commit 뒤 같은 actual-run stream으로 발행되고 renderer는 그 payload를 직접 상태로 쓰지 않고 durable `chat.get` hydration trigger로만 사용한다.
+- **안전 리뷰 수정**: 최초 계약의 개별 event byte 합이 SQLite full-projection 반복 저장의 O(n²) 증폭을 제한하지 못해 full-array prefix snapshot 누적으로 교정했다. Rust 독립 리뷰가 terminal 저장 전 active ownership 제거와 live text/cumulative counter drift 검증 누락을 차단했고, terminal commit 뒤에만 remove·재시작 nonterminal recovery/poison·매 append canonical ledger 재계산으로 수정한 뒤 재승인했다.
+- **예산·회귀**: run당 public event 256·text 1 MiB·immutable ledger amplification 16 MiB, session당 active run 32·seen run 1,024·event ID 8,192·agent stream 1,024·protocol stream 4,096을 양언어/Electron/Rust에서 fail-closed 적용했다. 통합 기준 전체 Node 163개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript no-emit, Vite build, strict sidecar no-deps clippy, rustfmt, diff check를 통과했다. `m5:test:run-recovery`에 G5B contract 회귀를 추가했으며 다음은 누적 G5 하네스·통합 QA·최종 gate다. 실제 CLI·인증·모델·사용자 프로젝트·Windows는 실행하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust 독립 리뷰 P1·P2 수정)
 
 - **P1 ownership/restart 수정**: terminal run·chat·lock/recovery payload와 state event를 모두 구성·검증하고 atomic upsert가 commit될 때까지 `AgentRuntime.active` ownership을 유지한다. Construction/upsert 실패는 terminal event를 만들지 않고 active evidence를 남기며, 다음 sidecar 시작은 actual `preparing|running|cancelling|recoveryRequired` durable run을 모두 run/chat/lock 하나의 SQLite transaction으로 poisoned `recoveryRequired`에 수렴시킨다. 이미 terminal run은 그대로 두고, identity barrier 전에 죽은 preparing run은 process identity를 꾸며내지 않은 영구 blocker로 표시한다.
