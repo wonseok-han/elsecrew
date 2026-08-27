@@ -44,6 +44,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
+const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
+const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
@@ -129,6 +131,15 @@ enum PublicEventPersistError {
     Fault(ProjectFailure),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryResolutionFailurePoint {
+    BeforeIntentCommit,
+    AfterIntentBeforeFilesystem,
+    AfterFilesystemBeforeFinalize,
+    BeforeFinalizeCommit,
+    AfterFinalizeBeforeResponse,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RunIdentity {
     pub(crate) chat_id: String,
@@ -179,10 +190,6 @@ impl AgentRuntime {
                 || projection
                     .get("recovery")
                     .is_some_and(|value| !value.is_null())
-                || projection
-                    .get("unclean_recovery_without_identity")
-                    .and_then(Value::as_bool)
-                    == Some(true)
                 || !projection
                     .get("state")
                     .and_then(Value::as_str)
@@ -192,6 +199,10 @@ impl AgentRuntime {
             {
                 continue;
             }
+            let projection = ensure_recovery_reservation(storage, &projection)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            let recovery_id = reserved_recovery_id(&projection)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let public_events =
                 projection["public_events"]
                     .as_array()
@@ -235,14 +246,15 @@ impl AgentRuntime {
             .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let identity_missing = tracked.is_empty();
             let (termination, recovery) = if identity_missing {
-                // A crash can happen after durable preparing/lock and before process identity
-                // persistence. Keep an unreleasable poisoned blocker without inventing identity.
-                (Value::Null, Value::Null)
+                let recovery = json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"processIdentityUnavailable","state":"unresolved","trackedProcesses":[],"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null});
+                validate_agent_adapter_payload_v1("recoveryRecord", &recovery)
+                    .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+                (Value::Null, recovery)
             } else {
                 let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":"recoveryRequired","processesProvenGone":false,"poisoned":true,"writerLockState":"recoveryRequired","chatState":"recoveryRequired","trackedProcesses":tracked,"evidenceDigest":digest_text("unclean-agent-recovery-v1"),"observedAt":now()});
                 validate_agent_adapter_payload_v1("terminationTranscript", &termination)
                     .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
-                let recovery = json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_unclean_{run_id}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null});
+                let recovery = json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null});
                 validate_agent_adapter_payload_v1("recoveryRecord", &recovery)
                     .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
                 (termination, recovery)
@@ -263,14 +275,9 @@ impl AgentRuntime {
             )
             .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             preserve_provider_evidence(&projection, &mut run_payload);
+            preserve_recovery_internal(&projection, &mut run_payload);
             run_payload.insert("termination".into(), termination);
             run_payload.insert("recovery".into(), recovery);
-            if identity_missing {
-                run_payload.insert(
-                    "unclean_recovery_without_identity".into(),
-                    Value::Bool(true),
-                );
-            }
             let mut upserts = vec![
                 ProjectionUpsert {
                     aggregate_type: "run",
@@ -296,6 +303,44 @@ impl AgentRuntime {
             }
             storage.upsert_projection_records_atomic(upserts)?;
         }
+        self.reconcile_recovery_intents(storage, projects)
+    }
+
+    fn reconcile_recovery_intents(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+    ) -> Result<(), SidecarError> {
+        let pending = storage
+            .projection_records("run")?
+            .into_iter()
+            .filter(|projection| {
+                projection.get("source_kind").and_then(Value::as_str) == Some(SOURCE_KIND)
+                    && projection
+                        .get(RECOVERY_INTENT_FIELD)
+                        .is_some_and(|value| !value.is_null())
+            })
+            .collect::<Vec<_>>();
+        for projection in pending {
+            let intent = projection[RECOVERY_INTENT_FIELD].clone();
+            validate_recovery_intent(&projection, &intent)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            let address = address_from_recovery_intent(&intent)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            let run_id = identity_string(&intent, "runId")
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            projects
+                .workspace_ensure_recovery_abandoned(
+                    &address,
+                    &intent["expectedManifest"],
+                    intent["expectedManifestDigest"]
+                        .as_str()
+                        .unwrap_or_default(),
+                )
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            finalize_recovery_intent(storage, projects, &address, &run_id, "startup", false)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+        }
         Ok(())
     }
 
@@ -306,6 +351,26 @@ impl AgentRuntime {
                     .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
                 validate_provider_projection(&projection)
                     .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                if projection
+                    .get("recovery")
+                    .is_some_and(|value| !value.is_null())
+                {
+                    let reserved = reserved_recovery_id(&projection)
+                        .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                    if projection["recovery"]["recoveryId"] != reserved {
+                        return Err(SidecarError::new(
+                            "projectionInvalid",
+                            "actual-agent recovery differs from its reserved ID",
+                        ));
+                    }
+                }
+                if let Some(intent) = projection
+                    .get(RECOVERY_INTENT_FIELD)
+                    .filter(|value| !value.is_null())
+                {
+                    validate_recovery_intent(&projection, intent)
+                        .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                }
             }
         }
         Ok(())
@@ -314,6 +379,17 @@ impl AgentRuntime {
     #[cfg(test)]
     pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
         self.active.contains_key(run_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reserve_legacy_recovery_for_test(
+        &self,
+        storage: &mut Storage,
+        run_id: &str,
+        fail_before_commit: bool,
+    ) -> Result<Map<String, Value>, ProjectFailure> {
+        let projection = actual_run_projection(storage, run_id)?;
+        ensure_recovery_reservation_inner(storage, &projection, fail_before_commit)
     }
 
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
@@ -450,6 +526,7 @@ impl AgentRuntime {
         .map_err(adapter_failure)?;
 
         let run_id = format!("agent_run_{}", Uuid::new_v4().simple());
+        let recovery_id = new_recovery_id();
         let created = now();
         let run = agent_run_record(
             &run_id,
@@ -460,12 +537,18 @@ impl AgentRuntime {
             None,
             &created,
         )?;
+        let mut preparing_projection =
+            agent_run_projection(&run, &manifest, None, None, Vec::new())?;
+        preparing_projection.insert(
+            RECOVERY_RESERVATION_FIELD.into(),
+            Value::String(recovery_id),
+        );
         let mut upserts = vec![ProjectionUpsert {
             aggregate_type: "run",
             aggregate_id: run_id.clone(),
             operation_id: format!("op_agent_run_prepare_{request_id}"),
             request_id: Some(request_id.to_string()),
-            payload: agent_run_projection(&run, &manifest, None, None, Vec::new())?,
+            payload: preparing_projection,
         }];
         if profile.permission == "workspaceWrite" {
             upserts.push(acquire_writer_lock(storage, &chat, &run_id, request_id)?);
@@ -640,13 +723,17 @@ impl AgentRuntime {
                 {"pid":launcher_identity.pid,"start_us":launcher_identity.start_us},
                 {"pid":agent_identity.pid,"start_us":agent_identity.start_us}
             ]);
-            let preparing_payload = agent_run_projection(
+            let mut preparing_payload = agent_run_projection(
                 &run,
                 &manifest,
                 Some(barrier.clone()),
                 Some(internal),
                 Vec::new(),
             )?;
+            preserve_recovery_internal(
+                &actual_run_projection(storage, &run_id)?,
+                &mut preparing_payload,
+            );
             Ok((barrier, preparing_payload))
         })();
         let (barrier, preparing_payload) = match configured {
@@ -1252,6 +1339,29 @@ impl AgentRuntime {
         request: &Value,
         request_id: &str,
     ) -> Result<Value, ProjectFailure> {
+        self.resolve_recovery_inner(storage, projects, request, request_id, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resolve_recovery_with_failure(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        request: &Value,
+        request_id: &str,
+        failure: RecoveryResolutionFailurePoint,
+    ) -> Result<Value, ProjectFailure> {
+        self.resolve_recovery_inner(storage, projects, request, request_id, Some(failure))
+    }
+
+    fn resolve_recovery_inner(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        request: &Value,
+        request_id: &str,
+        failure: Option<RecoveryResolutionFailurePoint>,
+    ) -> Result<Value, ProjectFailure> {
         validate_agent_adapter_payload_v1("recoveryResolveRequest", request)
             .map_err(contract_failure)?;
         let before = self.inspect_recovery(storage, &json!({
@@ -1265,8 +1375,15 @@ impl AgentRuntime {
                 .map_err(contract_failure)?;
             return Ok(result);
         }
+        if before["reason"] == "processIdentityUnavailable" {
+            let result = json!({"schemaVersion":1,"before":before,"request":request,"after":null,"outcome":"identityUnavailable"});
+            validate_agent_adapter_payload_v1("recoveryResolveResult", &result)
+                .map_err(contract_failure)?;
+            return Ok(result);
+        }
         let projection =
             actual_run_projection(storage, request["runId"].as_str().unwrap_or_default())?;
+        let projection = ensure_recovery_reservation(storage, &projection)?;
         let mut tracked = before["trackedProcesses"]
             .as_array()
             .cloned()
@@ -1304,73 +1421,54 @@ impl AgentRuntime {
                 .unwrap_or_default()
                 .into(),
         };
-        projects.workspace_abandon_recovery(&address)?;
-        let mut after = observed_before.clone();
-        after["trackedProcesses"] = Value::Array(tracked);
-        after["poisoned"] = Value::Bool(false);
-        after["state"] = Value::String("resolvedAbandoned".into());
-        after["revision"] = Value::from(before["revision"].as_u64().unwrap_or(0) + 1);
-        after["resolvedAt"] = Value::String(now());
-        let chat_projection = actual_chat_projection(storage, &address.chat_id)?;
-        let chat = chat_projection["record"].clone();
-        let profile: AgentResolvedProfileV1 =
-            serde_json::from_value(projection["record"]["selectedProfile"].clone())
-                .map_err(json_failure)?;
-        let resolved_run = agent_run_record(
-            request["runId"].as_str().unwrap_or_default(),
-            &chat,
-            &profile,
-            projection["record"]["capabilityFingerprint"]
-                .as_str()
-                .unwrap_or_default(),
-            "canceled",
-            Some("cleanExit"),
-            projection["record"]["createdAt"]
+        let mut expected_manifest = projection["workspace_manifest"].clone();
+        expected_manifest["lifecycle"] = Value::String("recoveryRequired".into());
+        let expected_manifest_digest = recovery_manifest_digest(&expected_manifest)?;
+        let intent = json!({
+            "schemaVersion":1,"recoveryId":before["recoveryId"],
+            "chatId":before["chatId"],"taskId":before["taskId"],
+            "projectId":before["projectId"],"worktreeId":before["worktreeId"],
+            "workspaceIdentity":before["workspaceIdentity"],"runId":before["runId"],
+            "expectedRevision":before["revision"],"resolution":"abandon",
+            "trackedProcesses":tracked,"expectedManifest":expected_manifest,
+            "expectedManifestDigest":expected_manifest_digest,
+        });
+        if failure == Some(RecoveryResolutionFailurePoint::BeforeIntentCommit) {
+            return Err(ProjectFailure::recovery(
+                "injected failure before recovery intent commit",
+            ));
+        }
+        persist_recovery_intent(storage, &projection, &intent)?;
+        if failure == Some(RecoveryResolutionFailurePoint::AfterIntentBeforeFilesystem) {
+            return Err(ProjectFailure::recovery(
+                "injected failure after recovery intent before filesystem",
+            ));
+        }
+        projects.workspace_ensure_recovery_abandoned(
+            &address,
+            &intent["expectedManifest"],
+            intent["expectedManifestDigest"]
                 .as_str()
                 .unwrap_or_default(),
         )?;
-        let termination = json!({
-            "schemaVersion":1,"runId":request["runId"],"outcome":"cleanExit",
-            "processesProvenGone":true,"poisoned":false,
-            "writerLockState":if profile.permission == "workspaceWrite" {"released"} else {"none"},
-            "chatState":"canceled","trackedProcesses":after["trackedProcesses"],
-            "evidenceDigest":digest_text("agent-recovery-abandoned-v1"),"observedAt":now()
-        });
-        validate_agent_adapter_payload_v1("terminationTranscript", &termination)
-            .map_err(contract_failure)?;
-        let discarded_chat = updated_chat(&chat, "discarded")?;
-        let mut updated_projection = projection.clone();
-        updated_projection.remove("last_event_sequence");
-        updated_projection.insert("record".into(), resolved_run);
-        updated_projection.insert("state".into(), Value::String("canceled".into()));
-        updated_projection.insert("termination".into(), termination);
-        updated_projection.insert("recovery".into(), after.clone());
-        let mut upserts = vec![
-            ProjectionUpsert {
-                aggregate_type: "run",
-                aggregate_id: identity_string(request, "runId")?,
-                operation_id: format!("op_agent_recovery_resolve_{request_id}"),
-                request_id: Some(request_id.into()),
-                payload: updated_projection,
-            },
-            ProjectionUpsert {
-                aggregate_type: "chat",
-                aggregate_id: address.chat_id.clone(),
-                operation_id: format!("op_agent_recovery_chat_{request_id}"),
-                request_id: Some(request_id.into()),
-                payload: chat_projection_with_record(&chat_projection, &discarded_chat, None)?,
-            },
-        ];
-        if projection["record"]["selectedProfile"]["permission"] == "workspaceWrite" {
-            upserts.push(release_writer_lock(
-                storage,
-                &address,
-                request["runId"].as_str().unwrap_or_default(),
-                request_id,
-                false,
-            )?);
+        if failure == Some(RecoveryResolutionFailurePoint::AfterFilesystemBeforeFinalize) {
+            return Err(ProjectFailure::recovery(
+                "injected failure after filesystem before recovery finalize",
+            ));
         }
-        storage.upsert_projection_records_atomic(upserts)?;
+        let after = finalize_recovery_intent(
+            storage,
+            projects,
+            &address,
+            request["runId"].as_str().unwrap_or_default(),
+            request_id,
+            failure == Some(RecoveryResolutionFailurePoint::BeforeFinalizeCommit),
+        )?;
+        if failure == Some(RecoveryResolutionFailurePoint::AfterFinalizeBeforeResponse) {
+            return Err(ProjectFailure::recovery(
+                "injected failure after recovery finalize before response",
+            ));
+        }
         let result = json!({"schemaVersion":1,"before":observed_before,"request":request,"after":after,"outcome":"resolvedAbandoned"});
         validate_agent_adapter_payload_v1("recoveryResolveResult", &result)
             .map_err(contract_failure)?;
@@ -1699,6 +1797,7 @@ impl AgentRuntime {
             "cleanExit"
         };
         let projection = actual_run_projection(storage, run_id)?;
+        let recovery_id = reserved_recovery_id(&projection)?;
         let created = projection["record"]["createdAt"]
             .as_str()
             .unwrap_or_default();
@@ -1743,7 +1842,6 @@ impl AgentRuntime {
         let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":processes_proven_gone,"poisoned":recovery_required,"writerLockState":lock_state,"chatState":if recovery_required {"recoveryRequired"} else {requested_state},"trackedProcesses":tracked,"evidenceDigest":digest_text("agent-fixture-termination-v1"),"observedAt":now()});
         validate_agent_adapter_payload_v1("terminationTranscript", &termination)
             .map_err(contract_failure)?;
-        let recovery_id = format!("agent_recovery_{}", Uuid::new_v4().simple());
         let recovery = recovery_required.then(||json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"source":"actualAgent","reason":if cancelling {"cancelUncertain"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}));
         if let Some(value) = &recovery {
             validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;
@@ -1809,6 +1907,7 @@ impl AgentRuntime {
             .payload
             .insert("recovery".into(), recovery.clone().unwrap_or(Value::Null));
         preserve_provider_evidence(&projection, &mut upserts[0].payload);
+        preserve_recovery_internal(&projection, &mut upserts[0].payload);
         if active.profile.permission == "workspaceWrite" {
             upserts.push(release_writer_lock(
                 storage,
@@ -1953,6 +2052,7 @@ fn fail_before_release(
 
     let persisted = (|| -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, run_id)?;
+        let recovery_id = reserved_recovery_id(&projection)?;
         let chat_id = identity_string(&projection["record"], "chatId")?;
         let chat_projection = actual_chat_projection(storage, &chat_id)?;
         let chat = chat_projection["record"].clone();
@@ -1997,15 +2097,16 @@ fn fail_before_release(
                 .unwrap_or_default(),
         )?;
         preserve_provider_evidence(&projection, &mut payload);
+        preserve_recovery_internal(&projection, &mut payload);
         payload.insert(
             "pre_release_failure".into(),
             json!({"stage":"beforeRelease","evidenceDigest":digest_text(detail),"processesProvenGone":clean,"observedAt":now()}),
         );
-        let recovery = if public.is_empty() || clean {
+        let recovery = if clean {
             None
         } else {
             Some(
-                json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_{}",Uuid::new_v4().simple()),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"processIdentityUncertain","state":"unresolved","trackedProcesses":public,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}),
+                json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":if public.is_empty() {"processIdentityUnavailable"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":public,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}),
             )
         };
         if !public.is_empty() {
@@ -2368,6 +2469,81 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
     }
 }
 
+fn new_recovery_id() -> String {
+    format!("agent_recovery_{}", Uuid::new_v4().simple())
+}
+
+fn reserved_recovery_id(projection: &Map<String, Value>) -> Result<String, ProjectFailure> {
+    let recovery_id = projection
+        .get(RECOVERY_RESERVATION_FIELD)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            ProjectFailure::recovery("actual-agent recovery ID reservation is missing")
+        })?;
+    if !recovery_id.starts_with("agent_recovery_") || recovery_id.len() <= "agent_recovery_".len() {
+        return Err(ProjectFailure::recovery(
+            "actual-agent recovery ID reservation is invalid",
+        ));
+    }
+    Ok(recovery_id.to_string())
+}
+
+fn ensure_recovery_reservation(
+    storage: &mut Storage,
+    projection: &Map<String, Value>,
+) -> Result<Map<String, Value>, ProjectFailure> {
+    ensure_recovery_reservation_inner(storage, projection, false)
+}
+
+fn ensure_recovery_reservation_inner(
+    storage: &mut Storage,
+    projection: &Map<String, Value>,
+    fail_before_commit: bool,
+) -> Result<Map<String, Value>, ProjectFailure> {
+    if projection
+        .get(RECOVERY_RESERVATION_FIELD)
+        .is_some_and(Value::is_string)
+    {
+        reserved_recovery_id(projection)?;
+        return Ok(projection.clone());
+    }
+    let run_id = identity_string(&projection["record"], "runId")?;
+    let recovery_id = projection
+        .get("recovery")
+        .filter(|value| !value.is_null())
+        .and_then(|value| value.get("recoveryId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(new_recovery_id);
+    let mut reserved = projection.clone();
+    reserved.remove("last_event_sequence");
+    reserved.insert(
+        RECOVERY_RESERVATION_FIELD.into(),
+        Value::String(recovery_id),
+    );
+    if fail_before_commit {
+        return Err(ProjectFailure::recovery(
+            "injected recovery reservation persistence failure",
+        ));
+    }
+    storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run",
+        aggregate_id: run_id.clone(),
+        operation_id: format!("op_agent_recovery_reserve_{}", Uuid::new_v4().simple()),
+        request_id: None,
+        payload: reserved,
+    }])?;
+    actual_run_projection(storage, &run_id)
+}
+
+fn preserve_recovery_internal(source: &Map<String, Value>, target: &mut Map<String, Value>) {
+    for field in [RECOVERY_RESERVATION_FIELD, RECOVERY_INTENT_FIELD] {
+        if let Some(value) = source.get(field) {
+            target.insert(field.into(), value.clone());
+        }
+    }
+}
+
 fn validate_provider_projection(projection: &Map<String, Value>) -> Result<(), ProjectFailure> {
     let discovery = projection.get("provider_discovery");
     let attestation = projection.get("runtime_attestation");
@@ -2634,6 +2810,210 @@ fn actual_chat_projection(
     storage
         .projection_record("chat", chat_id)?
         .ok_or_else(|| ProjectFailure::manifest("chat projection is missing"))
+}
+
+fn recovery_manifest_digest(manifest: &Value) -> Result<String, ProjectFailure> {
+    let bytes = serde_json::to_vec(manifest).map_err(json_failure)?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
+fn address_from_recovery_intent(intent: &Value) -> Result<WorkspaceAddress, ProjectFailure> {
+    Ok(WorkspaceAddress {
+        chat_id: identity_string(intent, "chatId")?,
+        project_id: identity_string(intent, "projectId")?,
+        worktree_id: identity_string(intent, "worktreeId")?,
+        workspace_identity: identity_string(intent, "workspaceIdentity")?,
+    })
+}
+
+fn validate_recovery_intent(
+    projection: &Map<String, Value>,
+    intent: &Value,
+) -> Result<(), ProjectFailure> {
+    let recovery = projection
+        .get("recovery")
+        .filter(|value| !value.is_null())
+        .ok_or_else(|| ProjectFailure::recovery("recovery intent has no unresolved recovery"))?;
+    for field in [
+        "recoveryId",
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+        "runId",
+    ] {
+        if intent.get(field) != recovery.get(field) {
+            return Err(ProjectFailure::recovery(
+                "recovery resolution intent identity differs",
+            ));
+        }
+    }
+    if intent["expectedRevision"] != recovery["revision"]
+        || intent["resolution"] != "abandon"
+        || recovery["state"] != "unresolved"
+        || recovery["poisoned"] != true
+        || intent["recoveryId"]
+            != projection
+                .get(RECOVERY_RESERVATION_FIELD)
+                .cloned()
+                .unwrap_or(Value::Null)
+    {
+        return Err(ProjectFailure::recovery(
+            "recovery resolution intent state differs",
+        ));
+    }
+    let digest = identity_string(intent, "expectedManifestDigest")?;
+    if recovery_manifest_digest(&intent["expectedManifest"])? != digest {
+        return Err(ProjectFailure::recovery(
+            "recovery resolution intent manifest digest differs",
+        ));
+    }
+    Ok(())
+}
+
+fn persist_recovery_intent(
+    storage: &mut Storage,
+    projection: &Map<String, Value>,
+    intent: &Value,
+) -> Result<(), ProjectFailure> {
+    validate_recovery_intent(projection, intent)?;
+    if let Some(existing) = projection
+        .get(RECOVERY_INTENT_FIELD)
+        .filter(|value| !value.is_null())
+    {
+        return if existing == intent {
+            Ok(())
+        } else {
+            Err(ProjectFailure::recovery(
+                "another recovery resolution intent is already pending",
+            ))
+        };
+    }
+    let run_id = identity_string(intent, "runId")?;
+    let recovery_id = identity_string(intent, "recoveryId")?;
+    let mut payload = projection.clone();
+    payload.remove("last_event_sequence");
+    payload.insert(RECOVERY_INTENT_FIELD.into(), intent.clone());
+    storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+        aggregate_type: "run",
+        aggregate_id: run_id,
+        operation_id: format!("op_agent_recovery_intent_{recovery_id}"),
+        request_id: None,
+        payload,
+    }])?;
+    Ok(())
+}
+
+fn finalize_recovery_intent(
+    storage: &mut Storage,
+    projects: &ProjectManager,
+    address: &WorkspaceAddress,
+    run_id: &str,
+    operation: &str,
+    fail_before_commit: bool,
+) -> Result<Value, ProjectFailure> {
+    let projection = actual_run_projection(storage, run_id)?;
+    if projection
+        .get(RECOVERY_INTENT_FIELD)
+        .is_none_or(Value::is_null)
+    {
+        return Err(ProjectFailure::recovery(
+            "recovery resolution intent is missing",
+        ));
+    }
+    let intent = projection[RECOVERY_INTENT_FIELD].clone();
+    validate_recovery_intent(&projection, &intent)?;
+    if address_from_recovery_intent(&intent)? != *address {
+        return Err(ProjectFailure::recovery(
+            "recovery resolution address differs",
+        ));
+    }
+    projects.workspace_verify_recovery_abandoned(
+        address,
+        &intent["expectedManifest"],
+        intent["expectedManifestDigest"]
+            .as_str()
+            .unwrap_or_default(),
+    )?;
+    let before = projection["recovery"].clone();
+    let mut after = before.clone();
+    after["trackedProcesses"] = intent["trackedProcesses"].clone();
+    after["poisoned"] = Value::Bool(false);
+    after["state"] = Value::String("resolvedAbandoned".into());
+    after["revision"] = Value::from(before["revision"].as_u64().unwrap_or(0) + 1);
+    after["resolvedAt"] = Value::String(now());
+    validate_agent_adapter_payload_v1("recoveryRecord", &after).map_err(contract_failure)?;
+
+    let run_id = identity_string(&intent, "runId")?;
+    let chat_projection = actual_chat_projection(storage, &address.chat_id)?;
+    let chat = chat_projection["record"].clone();
+    let profile: AgentResolvedProfileV1 =
+        serde_json::from_value(projection["record"]["selectedProfile"].clone())
+            .map_err(json_failure)?;
+    let resolved_run = agent_run_record(
+        &run_id,
+        &chat,
+        &profile,
+        projection["record"]["capabilityFingerprint"]
+            .as_str()
+            .unwrap_or_default(),
+        "canceled",
+        Some("cleanExit"),
+        projection["record"]["createdAt"]
+            .as_str()
+            .unwrap_or_default(),
+    )?;
+    let termination = json!({
+        "schemaVersion":1,"runId":run_id,"outcome":"cleanExit",
+        "processesProvenGone":true,"poisoned":false,
+        "writerLockState":if profile.permission == "workspaceWrite" {"released"} else {"none"},
+        "chatState":"canceled","trackedProcesses":after["trackedProcesses"],
+        "evidenceDigest":digest_text("agent-recovery-abandoned-v1"),"observedAt":now()
+    });
+    validate_agent_adapter_payload_v1("terminationTranscript", &termination)
+        .map_err(contract_failure)?;
+    let discarded_chat = updated_chat(&chat, "discarded")?;
+    let mut updated_projection = projection.clone();
+    updated_projection.remove("last_event_sequence");
+    updated_projection.remove(RECOVERY_INTENT_FIELD);
+    updated_projection.insert("record".into(), resolved_run);
+    updated_projection.insert("state".into(), Value::String("canceled".into()));
+    updated_projection.insert("termination".into(), termination);
+    updated_projection.insert("recovery".into(), after.clone());
+    let recovery_id = identity_string(&intent, "recoveryId")?;
+    let mut upserts = vec![
+        ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: format!("op_agent_recovery_finalize_{recovery_id}"),
+            request_id: None,
+            payload: updated_projection,
+        },
+        ProjectionUpsert {
+            aggregate_type: "chat",
+            aggregate_id: address.chat_id.clone(),
+            operation_id: format!("op_agent_recovery_chat_finalize_{recovery_id}"),
+            request_id: None,
+            payload: chat_projection_with_record(&chat_projection, &discarded_chat, None)?,
+        },
+    ];
+    if profile.permission == "workspaceWrite" {
+        upserts.push(release_writer_lock(
+            storage,
+            address,
+            &run_id,
+            &format!("recovery_finalize_{recovery_id}_{operation}"),
+            false,
+        )?);
+    }
+    if fail_before_commit {
+        return Err(ProjectFailure::recovery(
+            "injected failure before recovery finalize commit",
+        ));
+    }
+    storage.upsert_projection_records_atomic(upserts)?;
+    Ok(after)
 }
 fn address_from_chat(chat: &Value) -> Result<WorkspaceAddress, ProjectFailure> {
     Ok(WorkspaceAddress {

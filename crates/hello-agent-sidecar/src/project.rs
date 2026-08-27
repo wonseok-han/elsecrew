@@ -2074,6 +2074,90 @@ impl ProjectManager {
         )
     }
 
+    pub fn workspace_ensure_recovery_abandoned(
+        &mut self,
+        address: &WorkspaceAddress,
+        expected_recovery_manifest: &Value,
+        expected_manifest_digest: &str,
+    ) -> Result<(), ProjectFailure> {
+        if manifest_identity_digest(expected_recovery_manifest)? != expected_manifest_digest {
+            return Err(ProjectFailure::manifest(
+                "recovery intent manifest digest differs",
+            ));
+        }
+        let manifest_name = format!("{}.json", address.worktree_id);
+        let manifest = read_bounded_json(&self.manifests_dir, &manifest_name)?;
+        for (field, expected) in [
+            ("projectId", address.project_id.as_str()),
+            ("worktreeId", address.worktree_id.as_str()),
+            ("workspaceIdentity", address.workspace_identity.as_str()),
+        ] {
+            if manifest.get(field).and_then(Value::as_str) != Some(expected) {
+                return Err(ProjectFailure::manifest(
+                    "recovery workspace identity or lifecycle differs",
+                ));
+            }
+        }
+        let lifecycle = manifest.get("lifecycle").and_then(Value::as_str);
+        if !matches!(lifecycle, Some("recoveryRequired" | "abandoned")) {
+            return Err(ProjectFailure::manifest(
+                "recovery workspace lifecycle is not reconcilable",
+            ));
+        }
+        let mut comparable = manifest.clone();
+        comparable["lifecycle"] = Value::String("recoveryRequired".to_string());
+        if comparable != *expected_recovery_manifest
+            || manifest_identity_digest(&comparable)? != expected_manifest_digest
+        {
+            return Err(ProjectFailure::manifest(
+                "recovery workspace manifest differs from its resolution intent",
+            ));
+        }
+        if lifecycle == Some("abandoned") {
+            self.watchers
+                .remove(&format!("workspace:{}", address.chat_id));
+            return Ok(());
+        }
+        let mut abandoned = manifest;
+        abandoned["lifecycle"] = Value::String("abandoned".to_string());
+        write_json_atomic(&self.manifests_dir, &manifest_name, &abandoned)?;
+        self.watchers
+            .remove(&format!("workspace:{}", address.chat_id));
+        Ok(())
+    }
+
+    pub fn workspace_verify_recovery_abandoned(
+        &self,
+        address: &WorkspaceAddress,
+        expected_recovery_manifest: &Value,
+        expected_manifest_digest: &str,
+    ) -> Result<(), ProjectFailure> {
+        if manifest_identity_digest(expected_recovery_manifest)? != expected_manifest_digest {
+            return Err(ProjectFailure::manifest(
+                "recovery intent manifest digest differs",
+            ));
+        }
+        let manifest = read_bounded_json(
+            &self.manifests_dir,
+            &format!("{}.json", address.worktree_id),
+        )?;
+        let mut comparable = manifest.clone();
+        if comparable.get("lifecycle").and_then(Value::as_str) != Some("abandoned") {
+            return Err(ProjectFailure::manifest(
+                "recovery workspace is not durably abandoned",
+            ));
+        }
+        comparable["lifecycle"] = Value::String("recoveryRequired".to_string());
+        if comparable != *expected_recovery_manifest
+            || manifest_identity_digest(&comparable)? != expected_manifest_digest
+        {
+            return Err(ProjectFailure::manifest(
+                "abandoned recovery workspace differs from its resolution intent",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn workspace_abandon_recovery(
         &mut self,
         address: &WorkspaceAddress,
@@ -4091,6 +4175,15 @@ fn manifest_value(active: &ActiveProject, lifecycle: &str) -> Result<Value, Proj
         "headMode":WORKTREE_HEAD_MODE_V1,
         "lifecycle":lifecycle,
     }))
+}
+
+fn manifest_identity_digest(manifest: &Value) -> Result<String, ProjectFailure> {
+    let bytes = serde_json::to_vec(manifest).map_err(|error| {
+        ProjectFailure::manifest(format!(
+            "could not encode recovery manifest identity: {error}"
+        ))
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
 fn snapshot_identity(active: &ActiveProject) -> Result<Value, ProjectFailure> {

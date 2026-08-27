@@ -10,7 +10,406 @@
 
 ---
 
-## 워크로그 (최신이 위) — 2026-08-25 및 그 이전
+## 워크로그 (최신이 위) — 2026-08-27 및 그 이전
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C process identity 없는 recovery 계약)
+
+- **좁은 예외**: actual recovery reason에 `processIdentityUnavailable`을 추가했다. 이 reason만 `trackedProcesses=[]`를 허용하며 반드시 unresolved·poisoned·`resolvedAt=null`로 남고 `resolvedAbandoned`로 바뀔 수 없다. 기존 세 reason은 nonempty·unique process identity 증거와 기존 resolve 규칙을 그대로 유지한다.
+- **비가변 resolve·우선순위**: matching revision의 identityless recovery는 `after=null`인 `identityUnavailable`을 반환하고 아무 record도 바꾸지 않는다. stale revision은 먼저 `revisionConflict`가 되며, request와 before의 recovery ID 및 chat/task/project/worktree/workspace/run identity는 exact 일치해야 한다. 새 method·channel·capability·event·force resolve는 추가하지 않았다.
+- **공용 골든·검증**: identityless record/chat detail/result와 상태·증거·identity drift, 기존 resolved/non-recovery/null chat 및 `resolvedAbandoned|processesRemain|revisionConflict` 회귀를 양 언어에서 고정했다. focused Node 13개, 전체 Node 174개, focused protocol 9개와 전체 protocol 32개, TypeScript no-emit, Rust 2021 format, 기존 범위 밖 lint 3건만 허용한 protocol clippy, `git diff --check`를 통과했다. strict clippy는 변경 전부터 있던 needless lifetime 2건과 collapsible-if 1건에서만 실패했다.
+- **다음 할 일·경계**: 독립 계약 리뷰 뒤 sidecar가 identity barrier 전에 process identity를 얻지 못한 실제 기록을 만들고 resolve 우선순위를 집행해야 한다. sidecar/core/Electron/UI와 실제 provider·인증·사용자 프로젝트·Windows는 건드리거나 실행하지 않았고 merge·push도 하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C sidecar recovery 발견 계약 소비)
+
+- **durable recovery 발견**: exact G5A+ `chat.get`이 `agentRuns`와 함께 required nullable `agentRecovery`를 항상 반환한다. 같은 chat의 durable actualAgent projection에서 unresolved recovery를 찾고 chat/task/project/worktree/workspace/run identity를 run·chat과 exact 대조하며, 정상·resolved detail은 null이다. 일반 exact G5 detail에는 두 field를 모두 추가하지 않고 legacy recovery page의 actual-free 경계도 유지한다.
+- **fail-closed cardinality**: actual run record/projection identity 누락·불일치, 복수 unresolved actual recovery, recoveryRequired run과 unresolved recovery 수 불일치를 detail 구성 단계에서 거부하고 full 공용 `agentChatDetailPage` validator를 마지막에 다시 통과시킨다. production-shaped random recovery ID를 그대로 발견해 inspect/resolve에 사용하며 이전 deterministic fixture ID 재구성 seam은 제거했다.
+- **검증·흐름**: terminal notification 직후 stdio hydration이 full identity/revision의 recovery를 읽고 actual inspect와 explicit abandon에 사용한다. poison/quit blocker와 legacy namespace 분리는 유지되며 resolve 뒤 unit hydration은 `agentRecovery=null`, run canceled, chat discarded를 확인한다. 모호성·identity·cardinality drift 실패 주입을 포함해 sidecar 75 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 31 passed, strict sidecar clippy, Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. 실제 provider·인증·사용자 프로젝트·network·Windows와 공개 계약/Electron/UI는 변경하거나 실행하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C actual recovery renderer)
+
+- **durable 발견·차단**: G5A+ `chat.get`의 required nullable `agentRecovery`를 initial/switch commit과 모든 durable hydration에 반영했다. current G5 detail처럼 `agentRuns`/`agentRecovery`가 없는 경우는 null로 호환하며, terminal notification의 run payload는 여전히 화면 상태가 아니라 hydration trigger일 뿐이다. unresolved actual recovery는 재개방·재조회 뒤에도 실행·파일 동작을 fail-closed로 막는다.
+- **안전한 abandon**: 초보자용 확인 뒤 exact V4 `inspectAgentRecovery` full identity를 보내고, inspect가 돌려준 동일 record의 full identity·revision으로만 `resolveAgentRecovery(abandon)`을 호출한다. legacy inspect/mark API와 재구성한 recovery ID는 사용하지 않는다. resolved/processesRemain/revisionConflict 모두 durable detail을 다시 읽고, null ledger가 같은 active chat에 확인될 때만 차단을 푼다. 원본 프로젝트에는 적용하지 않는다는 UI 안내와 action을 추가했다.
+- **검증·경계**: focused renderer Node 18개, TypeScript no-emit, Vite production build와 `git diff --check`를 통과했다. opaque recovery, cancel 뒤 hydration, inactive/pending event, stale chat response, G5 compatibility, processesRemain/revisionConflict 및 legacy API 0 호출을 회귀로 고정했다. 실제 provider·인증·사용자 프로젝트·Windows는 호출하지 않았고, 다음은 기능 branch 독립 리뷰와 최신 통합 기준 QA다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 발견 계약 리뷰 수정)
+
+- **P1 관계 규칙 명시**: 일반 recovery API가 과거 `resolvedAbandoned` record를 검증할 수 있는 것과 달리, 현재 agent chat detail의 non-null `agentRecovery`는 반드시 `state=unresolved`이면서 `poisoned=true`여야 한다. resolved/non-recovery detail은 `agentRecovery=null`만 허용하도록 TypeScript/Rust 관계 validator에 직접 고정했다.
+- **마스킹 없는 골든**: resolvedAt·poison·모든 process gone을 서로 맞춰 단독 recovery validator에는 완전히 유효한 resolved record를 만들고, 같은 record가 chat detail에 들어갈 때만 양 언어가 거부함을 확인했다. completed/succeeded run과 null recovery의 valid detail도 추가했다.
+- **검증·경계**: focused Node 9개, 전체 Node 170개, focused protocol 8개와 전체 protocol 31개, TypeScript no-emit, Rust fmt, 기존 범위 밖 lint만 허용한 protocol clippy, `git diff --check`를 통과했다. 별도 원자 수정 commit으로 남기며 sidecar/Electron/UI나 새 API는 변경하지 않는다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C actual recovery 발견 계약)
+
+- **발견 가능한 복구 ID**: exact G5A+ `chat.get` detail의 기존 `agentRuns` presence discriminator 안에 required nullable `agentRecovery`를 추가했다. `recoveryRequired` actual run은 같은 chat/task/project/worktree/workspace/run에 결속된 unresolved·poisoned·`actualAgent` recovery 하나를 반드시 노출하고, 그 외 상태는 null만 허용한다. recoveryRequired run이 없거나 둘 이상인데 recovery를 실으면 fail-closed라 chat당 unresolved actual recovery 하나만 표현된다.
+- **ID·원장 경계**: chat detail은 random recovery ID를 재현할 수 없으므로 `agent_recovery_` namespace와 full identity만 검증한다. 반면 durable request/before record가 함께 있는 resolve 결과는 임의 대체 ID를 계속 거부한다. actual recovery를 legacy recovery page에 넣거나 agent detail에 legacy `recovery` member를 추가하는 공용 양언어 회귀도 거부하며, `agentRuns`/`agentRecovery`가 없는 current G5 detail은 그대로 유효하다.
+- **골든·검증**: null/non-null valid와 missing field, recovery 누락·orphan, 모든 identity/run/source/reason/state/poison/namespace mismatch, non-recovery+recovery, 복수 recoveryRequired ambiguity, legacy member를 고정한 공용 fixture를 추가했다. focused Node 9개, 전체 Node 170개, focused protocol 8개와 전체 protocol 31개, TypeScript no-emit, Rust fmt, owned 변경 경고를 포함한 protocol clippy와 `git diff --check`를 통과했다. strict protocol clippy는 변경 전 범위 밖 needless lifetime 2건과 collapsible-if 1건만 보고해 해당 세 lint를 허용한 동일 명령으로 변경 범위를 확인했다.
+- **다음 할 일·경계**: 이 계약 commit을 독립 리뷰한 뒤 sidecar가 agent detail에 durable actual recovery를 채우고 Electron/UI가 그 ID로 inspect/resolve하도록 별도 소비자 작업을 연다. 새 method/channel/capability/event는 없으며 실제 provider·인증·사용자 프로젝트·Windows는 실행하지 않았고 merge·push도 하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C sidecar 독립 리뷰 P1 수정)
+
+- **raw framing과 공개 text 한도 분리**: provider JSONL read는 core의 framing 포함 128 KiB observation line ceiling을 사용하고, normalized public text는 계속 event당 64 KiB로 제한한다. 실제 launcher→drain→core classifier→SQLite/TeamMessage 경로에서 64 KiB 한 건과 16×64 KiB=1 MiB를 허용하고 aggregate +1 byte는 raw framing에 가려지지 않은 채 fail-closed 거부한다. newline 포함 exact/+1 framing 회귀와 기존 core total observation 한도도 유지했다.
+- **provider recovery terminal 보존**: explicit `recoveryRequired` terminal은 child exit 0과 OS tree gone 관찰이 있어도 `failed`로 낮추거나 writer lock을 해제하지 않는다. 개별 gone 증거는 abandon 재확인용으로 보존하되 public termination proof는 불확실로 두고 run/chat/workspace/writer lock과 actual recovery를 함께 poisoned 상태로 저장한 뒤에만 terminal state event를 보낸다. 실제 stdio fixture에서 legacy recovery namespace 비노출, actual inspect, run/lock quit blocker, exact abandon 뒤 run canceled·chat discarded·lock release와 quit 허용을 확인했다. 명시적 provider `failed`와 auth/malformed 경로는 기존 non-poisoned failed/fail-closed 동작을 유지한다.
+- **검증·경계**: sidecar 전체 74 passed·1 ignored와 stdio process 10 passed, core 82 passed, protocol 30 passed, strict sidecar clippy, Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. 일반 `--stdio`의 exact G5, 공개 wire, 실제 Claude/Codex CLI·인증·사용자 프로젝트·network·Windows는 변경하거나 실행하지 않았다. 다음은 수정 commit의 독립 재리뷰와 최신 통합 게이트다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C fake provider sidecar 소비)
+
+- **test-only provider 소비**: 일반 제품 `--stdio`의 exact G5/no-provider 표면은 그대로 두고 `--stdio-agent-fixture`만 순수 core provider API를 소비한다. capability는 bounded 주입 관찰을 cache/refresh하고 start마다 executable closure·version·auth·catalog·immutable role profile을 새로 관찰한다. Claude `claude-opus-5` exact selector만 fake positive이며 Codex `argvOnly`와 기존 `opus`/`sol` alias는 silent fallback 없이 `exactModelUnavailable`로 run·spawn·writer lock 0에서 차단한다.
+- **handshake·attestation 순서**: 기존 launcher barrier와 `TreeTracker`를 유지하고 release 뒤 Claude version/model/cwd/permission/tools/MCP/plugins/config handshake를 exact 검증한다. accepted run·capability·role profile·managed workspace에 결속한 sanitized discovery/attestation을 원자 저장한 뒤에만 `running`과 public event를 허용한다. 사전 공개, 각 handshake drift, auth/terminal/malformed/oversize, attestation 저장 실패는 raw provider carrier를 공개하지 않고 full tree 종료로 fail-closed 처리하며, 불확실 종료의 poisoned actual recovery와 legacy/actual recovery namespace는 유지한다.
+- **내구·비밀 경계**: G5B 256 event·1 MiB text·16 MiB projection 예산과 terminal transaction/cancel/recovery/quit 순서를 재사용했다. restart 시 discovery/attestation을 재검증하고 recovery 전환에도 보존한다. SQLite projection·JSONL public surface·stderr-facing 오류에서 raw auth/version/vendor output, token, prompt, email, org, reasoning carrier가 남지 않는 회귀를 추가했다.
+- **검증·경계**: sidecar 전체 70 passed·1 ignored와 stdio process 9 passed, core 82 passed, protocol 30 passed, strict sidecar `clippy --all-targets --no-deps -D warnings`, Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. missing helper/unknown version·auth, cache refresh/stale closure/profile·fingerprint drift, Claude handshake 8차원과 pre-public/attestation failure, Codex/legacy alias 차단, clean/no-output/delayed/cancel/uncertain/restart recovery와 ledger namespace를 포함했다. 실제 Claude/Codex CLI·인증·사용자 프로젝트·network·Windows는 실행하지 않았으며 다음은 독립 리뷰와 통합 게이트다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C pure Rust provider core)
+
+- **순수 provider 경계**: host 탐색·process 실행 없이 주입된 bounded 관찰과 경로/파일 identity digest만 소비하는 core provider 정의를 추가했다. Claude `2.1.241`+`node`, Codex `0.150.0`+`rg` closure와 exact profile/parser/launch policy를 canonical SHA-256 manifest로 만들며 공용 G5C golden digest와 일치한다. 설치·인증·버전·closure·catalog·tuple·verification이 하나라도 불확실하면 startable로 만들지 않고, Codex `argvOnly`/unknown catalog/effective profile은 계속 차단한다.
+- **handshake·비밀 경계**: Claude fake `system:init`의 exact version/model/managed cwd/permission/tools/MCP/plugins/config isolation을 모두 확인한 뒤에만 attestation과 첫 Handshake event를 만든다. forged discovery도 attestation 직전에 전체 manifest와 재결속한다. auth/version/vendor 원문과 token/prompt/email/org는 결과·Debug에 남지 않고, 미지원 profile 문자열도 빈 sanitized tuple로 접는다. 이후 event는 handshake 전 공개를 거부하고 `status|question|final`만 G5B 256-event·1 MiB text 안에서 공개하며 private/auth/terminal은 raw body 없이 분류한다.
+- **검증·경계**: core 82개와 workspace 전체 Rust 테스트(Tauri 105 passed·13 ignored, protocol 30, sidecar 68 passed·1 ignored+stdio 8 포함), Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. strict workspace clippy는 변경 전부터 있던 core/protocol/Tauri lint 11건만 보고했고 해당 lint를 명시적으로 허용한 `--workspace --all-targets --no-deps -D warnings`는 통과했다. 실제 Claude/Codex CLI·인증·사용자 프로젝트·network·Windows는 실행하지 않았으며 public wire·sidecar·Electron은 변경하지 않았다. 다음은 독립 core 리뷰 후 승인된 commit만 sidecar 소비 작업의 기준으로 쓰는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C aggregate text 경계 증거 보정)
+
+- **공용 경계 fixture**: aggregate Public text 허용 경계를 16개 × 65,536 bytes = 정확히 1 MiB로 고정하고, 거부 경계는 같은 16개 뒤 1-byte 17번째 메시지를 붙인 1 MiB+1로 고정했다. 두 경우 모두 256-event 미만이고 각 메시지는 per-message 상한 이하임을 Rust/TypeScript가 fixture 기대값과 함께 검증한다.
+- **검증·경계**: exact 1 MiB는 양언어 validator가 허용하고 +1은 거부하며, 별도 257-event 사례도 유지했다. Focused Node 6개, 전체 Node 169개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, 기존 범위 밖 lint만 제외한 protocol clippy, `git diff --check`를 통과했다. 계약 구현·공개 wire·실제 provider 실행은 변경하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C 계약 독립 리뷰 수정)
+
+- **P1 event 예산**: internal provider sequence가 normalization/persistence 전 existing G5B run budget인 Public 최대 256개와 Public text UTF-8 누적 1 MiB를 양언어에서 검사한다. 공용 golden의 결정적 generator로 257개와 1 MiB+1 byte를 fixture 팽창 없이 동일하게 거부한다.
+- **P1 attestation 결속**: `validateAgentRuntimeAttestationAgainstAcceptedV1`/Rust 대응 함수가 기존 accepted run과 resolved profile에 run ID·capability fingerprint·workspace identity·runtime·model·reasoning·permission을 exact 결속한다. 각 차원을 독립 drift한 golden은 기본 attestation이 유효한 상태에서 context 비교로만 거부된다.
+- **P2 session 정보 제거·검증**: 비인증성 deterministic derivation이 없으므로 persisted attestation에서 `sessionDigest`를 제거하고 extra field 회귀로 금지했다. Focused Node 6개, 전체 Node 169개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, 기존 범위 밖 lint만 제외한 protocol clippy, `git diff --check`를 통과했다. 실제 CLI·인증·사용자 프로젝트·Windows는 실행하지 않았고 공개 wire는 변경하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C provider discovery·launch attestation 계약)
+
+- **내부 계약**: 공개 G5/G5A/G5B method·capability·event와 Electron V4/V5를 바꾸지 않고 `ProviderManifestV1`·`SanitizedDiscoveryObservationV1`·`AgentRuntimeAttestationV1`을 Rust/TypeScript에 같은 canonical JSON·SHA-256 규칙으로 고정했다. 매니페스트는 binary와 필수 helper 전체 closure, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·allowlisted no-secret env·no-fallback launch policy를 묶는다.
+- **시작 증거·분류 경계**: Claude fake golden은 version/model/cwd/permission/tools/MCP/plugins/config를 handshake와 attestation에서 모두 확인해야 시작 가능하다. Codex `argvOnly`와 unknown catalog는 `modelCatalogUnverified`로 `canStart=false`이며 fallback하지 않는다. 내부 event는 `Handshake|Public|Private|Terminal|AuthFailure`만 허용하고 handshake 전 public, 기존 `status|question|final` 밖 공개 kind, raw stdout/stderr·token·prompt·email·org·raw auth hash와 extra/private 필드를 fail-closed 거부한다.
+- **검증·남은 경계**: focused Node 5개, 전체 Node 168개, protocol Rust 30개, TypeScript no-emit, scoped Rust 2021 rustfmt, protocol clippy(기존 범위 밖 lint 3종만 명시적 제외), `git diff --check`를 통과했다. strict clippy 원문은 변경 전부터 있던 `run_recovery_v1.rs`·`workspace_v1.rs` needless lifetime 2건과 `lib.rs` collapsible-if 1건에서만 실패했다. 실제 Claude/Codex CLI·인증·사용자 프로젝트·Windows는 실행하지 않았고, SQLite lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition으로 남긴다. 다음은 독립 계약 리뷰 후 소비자 작업 계약을 여는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 최종 gate)
+
+- **최종 판정**: 독립 gate가 exact docs commit `3dcf75ab1c12cf4a21b05406f4fc814e42d485f7`에서 full-array-prefix 증폭 계약, terminal commit 순서와 실패 후 active/restart recovery, authoritative ledger counter, zero-output·지연 종료, Electron V5 binding·state·session 한도, renderer durable hydration, exact G5/G5A 호환, raw/private 차단과 legacy/actual recovery 분리를 교차검증했다. 차단 finding 없이 `G5B_READY`로 판정했다.
+- **재검증·경계**: gate가 전체 Node 163개, focused G5B/Electron/UI 62개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript, Vite build, strict sidecar clippy, G5B Rust scoped rustfmt와 diff check를 다시 통과했다. workspace 전체 fmt는 G5B와 무관한 기존 `src-tauri` 포맷 차이만 보고했다. 실제 provider·인증·사용자 프로젝트·Windows와 SQLite cross-session 보존/compaction은 후속이며 `main` 병합·push는 하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 누적 하네스·독립 QA)
+
+- **누적 게이트**: exact 통합 commit `022b79517462a1f9339c8cabb68b5fafd65eae0b`에서 G5 run/recovery 누적 하네스와 macOS arm64 Electron package smoke를 통과했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-27T06-03-46-910Z.json`이다. 첫 시도는 격리 환경의 Electron binary 다운로드 차단만으로 실패했고, 네트워크 허용 환경에서 같은 명령을 재실행해 코드 실패와 분리했다.
+- **독립 QA**: 별도 QA가 같은 exact commit에서 focused G5B 계약·Electron·renderer, 전체 Node 163개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript no-emit, macOS arm64 package smoke를 다시 실행했다. zero-output·지연 종료, terminal 저장 실패 뒤 재시작 recovery/poison, event/text/full-array-prefix budget, counter drift, Electron registry 한도·terminal replay, durable hydration을 확인해 `G5B_QA_PASS`로 판정했다. 증거는 `.artifacts/m5-qa/g5b-integration-022b79517462a1f9339c8cabb68b5fafd65eae0b-2026-08-27T06-07-43Z.json`이다.
+- **문서·경계**: 현행 구조 문서를 V5 terminal notification과 run/session 예산까지 갱신했다. 일반 `--stdio`의 실제 Claude Code/Codex provider·인증·모델 출력, 사용자 프로젝트, Windows는 실행하지 않았고, 여러 세션·채팅에 걸친 SQLite 전체 용량·보존·compaction은 G6 미해결 사항이다. 다음은 이 문서 commit을 포함한 독립 G5B 최종 gate이며 `main` 병합·push는 하지 않는다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal·resource budget 통합)
+
+- **통합**: 독립 승인된 G5B 계약·원장 증폭 교정·renderer·Electron·Rust terminal/budget 커밋을 `m5/coding-agent-ide`에 순서대로 통합했다. `agent.runStateChanged`는 terminal 영속 commit 뒤 같은 actual-run stream으로 발행되고 renderer는 그 payload를 직접 상태로 쓰지 않고 durable `chat.get` hydration trigger로만 사용한다.
+- **안전 리뷰 수정**: 최초 계약의 개별 event byte 합이 SQLite full-projection 반복 저장의 O(n²) 증폭을 제한하지 못해 full-array prefix snapshot 누적으로 교정했다. Rust 독립 리뷰가 terminal 저장 전 active ownership 제거와 live text/cumulative counter drift 검증 누락을 차단했고, terminal commit 뒤에만 remove·재시작 nonterminal recovery/poison·매 append canonical ledger 재계산으로 수정한 뒤 재승인했다.
+- **예산·회귀**: run당 public event 256·text 1 MiB·immutable ledger amplification 16 MiB, session당 active run 32·seen run 1,024·event ID 8,192·agent stream 1,024·protocol stream 4,096을 양언어/Electron/Rust에서 fail-closed 적용했다. 통합 기준 전체 Node 163개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript no-emit, Vite build, strict sidecar no-deps clippy, rustfmt, diff check를 통과했다. `m5:test:run-recovery`에 G5B contract 회귀를 추가했으며 다음은 누적 G5 하네스·통합 QA·최종 gate다. 실제 CLI·인증·모델·사용자 프로젝트·Windows는 실행하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust 독립 리뷰 P1·P2 수정)
+
+- **P1 ownership/restart 수정**: terminal run·chat·lock/recovery payload와 state event를 모두 구성·검증하고 atomic upsert가 commit될 때까지 `AgentRuntime.active` ownership을 유지한다. Construction/upsert 실패는 terminal event를 만들지 않고 active evidence를 남기며, 다음 sidecar 시작은 actual `preparing|running|cancelling|recoveryRequired` durable run을 모두 run/chat/lock 하나의 SQLite transaction으로 poisoned `recoveryRequired`에 수렴시킨다. 이미 terminal run은 그대로 두고, identity barrier 전에 죽은 preparing run은 process identity를 꾸며내지 않은 영구 blocker로 표시한다.
+- **P2 live counter 수정**: live poll과 append admission마다 `public_events` 전체에서 count, text UTF-8 합, canonical full-array prefix 누적 bytes를 다시 계산해 세 durable counter와 exact 대조한 뒤 ceiling을 검사한다. text/cumulative undercount 변조는 다음 event 저장·전달 전에 session failure가 되고, restart recovery가 authoritative ledger로 counter를 복원하면서 writer lock을 poison한다.
+- **실패 주입·검증**: terminal construction과 terminal projection upsert 실패에서 active ownership·durable running·terminal event 0을 확인하고, runtime drop 뒤 recovery record와 writer lock poison을 확인했다. Text/cumulative live undercount도 event count 불변·재시작 recovery를 검증했다. sidecar unit 68 passed·1 ignored와 stdio process 8개, protocol 29개, strict sidecar clippy, Rust 2021 rustfmt, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트·Windows는 실행하지 않았다.
+- **다음 할 일**: 수정 commit을 같은 exact SHA로 독립 재리뷰한 뒤 승인된 Rust commit만 G5B 통합 후보로 사용한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust terminal event·resource budget 소비)
+
+- **상태 통지 순서**: fake actual-agent accepted response는 계속 event 없이 먼저 반환하고, 첫 poll이 같은 run 전용 stream의 seq 1 `running` `agent.runStateChanged`를 내보낸다. normalized public event가 이후 연속 seq를 사용하고, process-tree 종료·run/chat/lock/recovery 원자 저장이 성공한 뒤 전체 durable run을 담은 terminal state event가 마지막 seq로 나간다. zero-output도 `running→terminal`이며 `final` 뒤 process가 살아 있는 동안 run은 계속 `running`이다. cancel은 terminal transaction을 먼저 commit하고 response 뒤 running/terminal event를 전달한다.
+- **내구 예산·fail-closed**: actual run projection에 public event count·text UTF-8 bytes·full-array prefix snapshot 누적 bytes를 저장하고 sidecar 재시작 전 전체 ledger와 exact 대조한다. append는 기존 내구 counter와 다음 canonical full-array snapshot을 먼저 계산해 256 event·1 MiB text·16 MiB cumulative amplification 초과 event를 저장·공개하지 않는다. collector도 세 한도를 넘겨 성장하지 않으며, session active actual run 32개는 spawn·writer lock 전에 차단한다. proven 종료는 `failed/cleanExit`, 관찰·wait 불확실은 poisoned `recoveryRequired`다.
+- **오류 전파·검증**: `AgentRuntime::poll`이 process-tree observe, `try_wait`, tracker/public/terminal persistence와 state-event construction 오류를 stdio owner에 반환하도록 바꾸고, 오류 시 process-tree를 먼저 종료한 뒤 가능한 recovery evidence를 저장한다. 실패 주입은 poll observe·wait, durable counter 변조, terminal binding 변조, text +1 초과를 포함한다. sidecar unit 66 passed·1 ignored와 stdio process 8개, protocol 29개, Rust 2021 rustfmt, strict sidecar clippy, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트·Windows는 실행하지 않았다.
+- **다음 할 일**: 이 기능 commit을 독립 Rust 안전 리뷰한 뒤 Electron V5 registry budget/state listener와 renderer hydration trigger 소비자와 통합하고 최신 누적 하네스·QA를 실행한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Electron V5 terminal notification·session budget)
+
+- **V5 알림 경계**: exact G5A negotiated session에서만 normalized `agent.runStateChanged`를 fixed `m5:v5:agent:run-state-changed`와 typed preload `onAgentRunStateChanged`로 전달했다. 이 표면은 새 renderer state source가 아니라 `chat.get`의 durable chat/run ledger를 다시 읽게 하는 hydration trigger뿐이며, V3/V4 channel과 raw/generic IPC 금지는 유지했다.
+- **fail-closed 원장**: Electron은 accepted/hydrated full binding과 fingerprint를 session tombstone으로 보존하고 `preparing → running(선택) → terminal`만 허용한다. terminal 뒤 public event, terminal/active regression, unknown/mutated binding·envelope, reused event ID, 같은 run의 다른 stream 및 같은 stream의 다른 run은 listener 전 poison한다. terminal listener를 보낸 뒤 active binding만 제거하고 replay/mutation tombstone은 session 종료까지 남긴다.
+- **한도·검증**: shared constants로 active actual run 32, seen run 1,024, seen event ID 8,192, actual stream 1,024, protocol stream 4,096을 Electron에도 적용했다. focused Electron 43개와 전체 Node 158개, root pinned `tsc --noEmit`, Vite build, `git diff --check`를 통과했다. worktree `pnpm exec`는 격리 DNS 의존성 fetch에서 실행할 수 없어서 root pinned binary로 typecheck/build를 재실행했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+- **다음 할 일**: 이 Electron feature commit의 독립 리뷰 뒤 Rust terminal persistence/event/budget 구현 및 renderer hydration subscription을 통합 기준에서 QA한다.
+
+### 2026-08-27 · by GPT-5.6-Terra (M5 G5B renderer terminal durable hydration)
+
+- **V5는 trigger만**: `agent.runStateChanged` listener는 event의 `run`을 화면 상태에 직접 쓰지 않고 기존 chat/generation별 hydration latch로만 `chat.get` tail 재조회를 요청한다. zero-public-output terminal도 durable `agentRuns`가 `succeeded` 같은 terminal을 반환한 뒤에만 action lock이 풀리고, durable ledger가 아직 `running`이면 event의 terminal 주장만으로 바뀌지 않는다. `final` public event의 nonterminal 의미는 유지했다.
+- **동시성·호환**: public/state burst는 같은 in-flight hydration에 합치고 empty-tail response와 같은 turn의 state 통지는 한 번 더 durable tail을 확인한다. pending 채팅은 동일 재수화에 합치며 inactive 채팅은 raw state를 붙이지 않고 refresh 표시만 남긴다. dispose는 V3 chat·V4 public·V5 state listener를 모두 해제하고 V3/V4 bridge에 V5 listener가 없으면 기존 fixture UI를 유지한다.
+- **검증·경계**: focused renderer 14개, full Node 159개, TypeScript no-emit, Vite build, `git diff --check`를 통과했다. 실제 CLI·인증·모델·사용자 프로젝트는 호출하지 않았고, Electron/Rust/protocol/manifest는 수정하지 않았다. 다음은 이 renderer commit의 독립 리뷰와 Rust/Electron V5 producer 통합이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B ledger write amplification 계약 교정)
+
+- **감사 결함 교정**: 최초 G5B 계약의 개별 public event byte 합은 sidecar가 append마다 커지는 `public_events` 전체 배열 projection을 immutable ledger event로 저장하는 실제 쓰기 증폭을 반영하지 못했다. 16 MiB 한도를 run의 각 append 직후 전체 배열 snapshot canonical UTF-8 byte 길이를 누적한 값으로 다시 고정해 O(n²) storage amplification을 계측 대상으로 포함했다.
+- **결정적 단위·골든**: canonicalization은 재귀 ASCII key 정렬·compact JSON, 배열 순서 보존, explicit null 포함이다. 양언어 helper를 prospective full-array snapshot과 prefix snapshot 누적 API로 교체했고, 한글 text를 포함한 같은 run의 1-event snapshot `431` bytes와 2-event snapshot `837` bytes·누적 `1268` bytes를 공용 golden으로 고정했다.
+- **호환·검증**: event count·text·session 예산, `agent.runStateChanged`, exact G5/G5A capability/method 배열은 변경하지 않았다. focused Node 17개, 전체 Node 154개, TypeScript no-emit, Rust protocol 29개, owned Rust rustfmt, scoped protocol clippy, `git diff --check`를 통과했다. sidecar·Electron·renderer 소비자는 변경하지 않았으며 다음 단계에서 이 누적 단위를 append 전 fail-closed admission에 사용해야 한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal notification·resource budget 계약)
+
+- **additive terminal 통지**: protocol v1에 `agent.runStateChanged`를 예약하고 payload를 exact `{schemaVersion,eventId,run}`으로 고정했다. event ID는 `agent_state_event_`, run은 전체 `AgentRunRecordV1`이며 envelope chat/task/run과 accepted의 project/worktree/workspace/role/fingerprint까지 exact 결속한다. wire state는 `running|succeeded|failed|canceled|recoveryRequired`만 허용하고 `preparing|cancelling`, active/terminal evidence 불일치, extra/private/raw field를 양언어에서 거부한다. V5 bridge listener는 직접 표시 데이터가 아니라 durable `chat.get` 재수화 trigger다.
+- **한도·계측 단위**: run당 공개 event 256개·공개 text UTF-8 합계 1 MiB·immutable public ledger 16 MiB, session당 active actual run 32·seen run ID 1024·seen event ID 8192·actual stream ID 1024·전체 protocol stream ID 4096을 Rust/TypeScript/golden에 같은 수치로 고정했다. ledger bytes는 검증된 `AgentPublicEventV1` 각각을 재귀 ASCII key 정렬·compact JSON·UTF-8로 잰 합계이며 canonical fixture는 422 bytes다. protocol session은 actual public/state event가 한 run당 같은 전용 stream을 쓰고 event ID를 재사용하지 못하게 한다.
+- **호환·검증**: 기존 exact G5/G5A capability/method 배열과 일반 `--stdio` 의미는 변경하지 않았다. focused Node 17개, 전체 Node 154개, TypeScript no-emit, Rust protocol 29개, owned Rust rustfmt, 기존 lint 세 종류만 명시적으로 제외한 scoped protocol clippy, `git diff --check`를 통과했다. strict clippy 원문은 변경 전부터 있던 `run_recovery_v1.rs`·`workspace_v1.rs` needless lifetime 2건과 `lib.rs` collapsible-if 1건 때문에 실패하며 범위 밖 정리는 하지 않았다.
+- **다음 할 일**: 계약 commit을 독립 리뷰한 뒤 Rust sidecar가 terminal persistence commit 이후 같은 stream으로 event를 방출하고 예산 초과를 fail-closed 처리하며, Electron이 session registry 한도를 적용하고 renderer는 event를 hydration trigger로만 소비해야 한다. 실제 CLI·인증·model·사용자 프로젝트는 실행하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 수직 통합 게이트)
+
+- **통합 경계**: contract·Rust fake runtime·Electron V4·renderer 변경을 독립 리뷰 뒤 통합했다. 테스트 전용 `--stdio-agent-fixture`만 exact G5A를 광고하고 제품 Electron이 실행하는 일반 `--stdio`는 exact G5를 유지한다. fake actual-agent의 full-identity `agent.publicEvent`만 고정 IPC로 전달하며 raw/private carrier와 legacy/actual recovery 원장은 renderer 전에 fail-closed 분리한다.
+- **renderer·호환**: renderer는 public event text를 직접 붙이지 않고 durable `chat.get` 페이지와 별도 `agentRuns` 원장을 재수화한다. current G5의 `agentRuns` 없는 detail과 legacy fixture 흐름은 그대로 동작하고, actual cancel의 `recoveryRequired`는 hydration 중에도 새 fixture/actual 시작을 즉시 막으며 `final`을 terminal 증거로 추론하지 않는다.
+- **게이트 수정**: 최초 final gate가 진행 중 hydration의 마지막 empty page 응답 결정 뒤 같은 turn에 public event가 오면 trigger가 기존 Promise에 흡수되는 P1을 재현해 `ITERATE`했다. 채팅·generation별 trigger latch가 미소비 신호에만 empty-tail 재조회를 한 번 더 수행하도록 수정하고, exact interleaving에서 sequence 3 자동 수화·중복 없음·replay 1회를 고정했다. 독립 UI 재리뷰는 `APPROVE`했다.
+- **재게이트·QA**: 수정 exact `24a8c712e6b5a57e69c9e852333c46bfab536dc7`에서 누적 G5 하네스가 PASS했다(`.artifacts/m5-harness/g5-run-recovery-2026-08-27T04-39-02-052Z.json`; Node run/recovery 78개·sidecar 59개 통과/1 ignored·stdio 8개 및 macOS arm64 package smoke 포함). 독립 재QA도 focused renderer 9개, 계약/Electron 47개, fake stdio 8개와 tail calls `[1,2,3]`·durable sequence `[1,2,3]`을 확인해 `G5A_QA_PASS`로 판정했다(`.artifacts/m5-qa/g5a-hydration-tail-24a8c712e6b5a57e69c9e852333c46bfab536dc7-2026-08-27T04-43-00Z.json`). 두 격리 실행의 Electron fetch 실패는 네트워크 허용 환경에서 같은 명령을 재실행해 코드 실패와 분리했다.
+- **최종 판정**: 독립 gate가 exact `4cae73e6`에서 이전 P1 재현, latch 소비·generation 정리, G5/G5A 분리, raw/private 차단, recovery namespace·action gate, current G5 호환과 위 증거를 교차검증해 차단 finding 없이 `G5A_READY`로 판정했다. 이는 테스트 전용 fake normalized public-event vertical의 완료이며 M5 전체 완료나 실제 provider 준비 판정이 아니다.
+- **남은 일**: 실제 CLI·인증·모델·사용자 프로젝트·Windows는 실행하지 않았다. 실제 provider 전에 terminal 상태 통지 또는 bounded polling, public-event cardinality/disk/dedupe 예산을 고정해야 하며 G6 보안·패키징·성능, Windows 자손 회수, RC·서명 검증이 남았다. `main` 병합·push는 하지 않았다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A renderer cancel recovery gate 보정)
+
+- **P2 수정**: actual cancel이 `recoveryRequired`를 반환하면 `chat.get` 재수화가 끝나기 전에도 non-null `agentRecovery`를 recovery gate로 즉시 취급한다. 따라서 fixture demo·actual start·연결된 버튼은 같은 fail-closed 상태를 보며 새 실행 요청을 만들지 않는다. unresolved actual recovery는 재수화 뒤에도 별도 해소 전까지 안전하게 차단한다.
+- **회귀·검증**: cancel 뒤 durable hydration을 의도적으로 지연한 상태에서 fixture/actual start RPC가 각각 0회임을 고정했다. focused state 12개, TypeScript no-emit, Vite build, 전체 Node 147개, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A renderer public-event 소비)
+
+- **영속 기록 우선**: renderer는 V4 `onAgentPublicEvent`를 V3 legacy chat listener와 함께 구독하되, public event의 text를 채팅에 직접 넣지 않는다. active/pending chat은 현재 연속 sequence 뒤의 bounded `chat.get` 페이지를 끝까지 다시 읽고 그 durable `TeamMessage`만 합치며, `agentRuns` ledger도 같은 detail에서 새로 고친다. inactive chat은 내용 대신 refresh 표시만 남긴다.
+- **실제 실행 UI**: 채팅 생성 시 고정된 role snapshot의 runtime/model을 그대로 사용해 capability를 확인하고, unavailable이면 이유를 알려 주며 다른 모델로 fallback하지 않는다. start에는 현재 durable message ID와 capability fingerprint만 넣고, cancel은 chat/task/project/worktree/workspace/run 전체 identity를 보낸다. `final` public event는 process 종료로 취급하지 않으며, cancel의 `recoveryRequired`는 legacy abandon으로 바꾸지 않고 안전한 복구 알림으로만 보인다.
+- **검증·경계**: public raw text 미노출, burst coalescing, page 순서, pending/inactive event, current G5 compatibility, no-fallback start, exact start/cancel payload, recovery notice 및 양쪽 listener dispose를 state test로 고정했다. root pinned TypeScript no-emit, Vite build, 전체 Node 146개, `git diff --check`를 통과했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 기능 branch의 독립 리뷰와 최신 통합 기준 QA다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust normalized public-event 소비)
+
+- **협상·순서**: 결정적 `--stdio-agent-fixture`만 exact G5A capability를 광고하고 일반 `--stdio`는 exact G5를 유지한다. actual start는 event 없는 accepted response를 먼저 반환하며, 이후 영속 `AgentPublicEventV1` 전체를 `agent.publicEvent` seq 1부터 연속 발행한다. actual start/finish의 raw `run.event`·`run.finished` carrier는 제거했고 기존 G5 fixture run event는 변경하지 않았다.
+- **조회·채팅 wire**: 협상된 G5A의 `chat.get`은 run이 없어도 `agentRuns: []`를 항상 포함하고, current G5는 해당 멤버를 생략한다. sidecar의 `chat.eventAppended` payload를 계약·Electron이 요구하는 direct `TeamMessageV1`로 바로잡아 기존 G5 공개 메시지 의미와 durable ledger는 유지했다.
+- **검증·경계**: 실제 sidecar process 회귀에서 ready exact G5A, pre-run 빈 agent ledger, accepted-before-event, `status→question→final` seq 1~3 full identity/fingerprint, raw actual event 0건, durable TeamMessage와 terminal agent run을 확인했다. sidecar 59 passed·1 ignored와 stdio 8 passed, protocol 26 passed, owned Rust format, strict no-deps sidecar clippy, `git diff --check`를 통과했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron normalized public-event 소비)
+
+- **한 일**: exact G5A ready 협상에서만 `agent.publicEvent`를 fixed `m5:v4:agent:public-event` IPC와 `onAgentPublicEvent` typed preload listener로 전달했다. Sidecar client는 start accepted와 `chat.get.agentRuns` hydration의 full chat/task/project/worktree/workspace/run/role/fingerprint binding을 한 원장으로 결합한 뒤, known run에 exact 결속된 공개 payload만 listener 전에 통과시킨다.
+- **안전 결정**: public `eventId` 재사용, stream의 다른 run 재사용, unknown/unnegotiated run, full binding 변조, envelope 변조, extra/private field와 oversize는 session을 poison하며 listener에 전달하지 않는다. actual raw `run.event`/`run.finished`와 actual `chat.eventAppended`는 계속 poison이고, preload도 event payload를 독립 exact validate한 뒤 기존 credit/ACK 경로로만 renderer에 전달한다. current G5/V3 표면과 generic/raw IPC는 넓히지 않았다.
+- **검증·다음**: Electron bridge/scaffold focused Node 39개와 전체 Node 139개, root의 고정 도구로 TypeScript no-emit 및 Vite production build, `git diff --check`를 통과했다. worktree 자체 의존성이 없어 `pnpm exec`는 격리 네트워크 DNS에서 패키지를 받지 못했으며 package/lockfile은 바꾸지 않았다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 Electron commit의 독립 리뷰와 최신 통합 기준 QA다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 계약)
+
+- **공용 wire**: protocol v1에 `agent.publicEvent`를 additive 예약했다. envelope는 `chatId`·`taskId`·`runId`를 모두 요구하고, exact `AgentPublicEventV1` payload의 같은 세 identity와 일치해야 한다. payload는 `status|question|final`, bounded text와 전체 run identity/fingerprint만 허용하고 extra·reasoning·raw/private 필드는 계속 fail-closed다.
+- **namespace·bridge**: 공개 event ID를 `agent_event_` namespace로 고정하고 TypeScript/Rust validator와 골든을 함께 올렸다. V4는 generic bus나 request를 추가하지 않고 `onAgentPublicEvent(listener) -> unsubscribe` 전용 listener만 더했다. G5A capability/method 집합과 current G5 handshake는 변경하지 않았다.
+- **검증·경계**: envelope identity 누락/변조, public full binding/fingerprint 변조, legacy event ID, private/raw extra와 oversize를 양언어에서 거부했다. 전체 Node 137개, Rust protocol 26개, TypeScript no-emit, 변경 Rust format, scoped protocol clippy와 `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 sidecar가 이 event만 방출하고 Electron이 협상된 G5A에서만 전용 listener로 전달하도록 별도 소비자 파동에서 구현하는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust·Electron 통합과 recovery namespace 감사 종결)
+
+- **통합**: 독립 승인된 Electron V4 소비 경계 네 커밋을 `ba8eae2`·`6cfe094`·`2436498`·`ca6deaa`로, Rust fake adapter와 안전 수정 네 커밋을 `1040dc2`·`f3f6685`·`337d580`·`8d2cd6c`로 `m5/coding-agent-ide`에 통합했다. 기능 worktree의 공용 계약 동기화 중복 커밋은 제외했고, 충돌한 워크로그는 각 구현·리뷰 기록을 보존했다.
+- **namespace 감사 종결**: legacy G5 recovery 조회는 `source_kind=actualAgent`만 제외하고 discriminator가 없거나 다른 기존 기록은 계속 허용한다. actual recovery는 legacy list·inspect·markResolved에서 보이지 않고 변경되지 않으며, actual 전용 API는 같은 기록을 계속 처리하고 반대로 fixture recovery를 거부하는 양방향 회귀가 통과했다.
+- **추가 안전 수정**: 독립 Rust 리뷰에서 발견한 active 등록 전 observe/구성 실패의 preparing orphan과 실제 pipe release 전 `releaseGranted=true` 기록을 공통 fail-before-release·사후 atomic transition으로 닫았다. 동적 자손 identity의 durable 복구, accepted/public full identity·fingerprint 결속도 유지됐고 재리뷰는 최종 `APPROVE`했다.
+- **통합 검증·경계**: namespace focused Rust 2개, sidecar lib 59개(1 ignored)와 stdio 7개, Electron bridge/scaffold 37개, TypeScript no-emit, 변경 Rust `rustfmt --check`, strict sidecar clippy, `git diff --check`를 통과했다. workspace 전체 fmt는 변경 범위 밖 Tauri 기존 포맷 차이가 있어 변경 파일 기준으로 확인했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 실행하지 않았고 `main` 병합·push도 하지 않았다. 다음은 normalized public-event wire와 UI 소비를 별도 계약·구현 파동으로 여는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A release barrier 재리뷰 수정)
+
+- active 등록 전 attach `TreeTracker::observe`와 evidence/chat projection 구성, drain thread 생성, release evidence 저장, accepted 검증의 모든 fallible 경로를 공통 fail-before-release 종료로 연결했다. 직접 handshake한 child identity를 열거 전에 tracker에 넣어 observe 실패 주입에서도 launcher와 child 모두의 소멸을 증명하거나 불확실 recovery로 접는다.
+- durable pre-release barrier는 `releaseGranted=false`로 먼저 기록하고 release pipe write가 성공한 뒤 별도 atomic projection 전이에서만 true가 된다. injected release failure는 false barrier, terminal failed, clean writer release와 DB reopen 뒤 동일 상태를 검증하며 정상 run만 true barrier로 진행한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A actual-agent wire identity 소비)
+
+- 공용 계약 wire 보강 commit을 소비해 `run.startAgent` accepted와 durable public event가 chat/task/project/worktree/workspace/run/role identity와 capability fingerprint를 내부 immutable `RunIdentity`·run record에서 exact echo하도록 바꿨다. 짧은 이전 payload는 더 이상 만들지 않으며 두 payload 모두 공용 Rust validator를 통과한 뒤에만 반환·영속화한다.
+- 정상 fake run에서 accepted/public event의 모든 identity와 fingerprint가 chat/profile/capability snapshot에 정확히 결속되고, private reasoning/raw secret은 여전히 남지 않는 회귀를 추가했다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust supervisor 안전 리뷰 수정)
+
+- **release 전 실패**: durable actual run/writer lock 뒤 spawn·identity·barrier·release 단계가 실패하면 모두 공통 종료 경로로 들어간다. 생성 process 전체 소멸이 확인되면 run `failed`·chat `needsAttention`·writer exact release를 원자 기록하고, 불확실하면 가능한 누적 identity/evidence와 run/chat/lock poisoned recovery를 남겨 preparing orphan을 금지했다.
+- **누적 자손·재시작**: 실행 중 `TreeTracker`가 새 자손 identity를 관측할 때 actual run의 redacted barrier와 private `(pid,start)` 집합을 durable 갱신하고 terminal transaction에도 최종 누적 집합을 다시 반영한다. fake grandchild를 release 뒤 만들고 crash/recovery를 모사해, 살아 있는 자손이 abandon을 막고 전체 소멸 뒤에만 resolution되는 회귀를 추가했다. 관측·영속 evidence 실패는 terminal success가 아닌 recoveryRequired로 접는다.
+- **원장 분리**: legacy G5 `recovery.list`·inspect·markResolved는 `source_kind=actualAgent`를 제외하고, actual 전용 API만 해당 source/full identity를 읽도록 양방향 경계를 고정했다. 공용 accepted/public identity wire commit이 직후 동기화되어 정상 start의 전체 검증은 별도 adaptation commit에서 새 필드로 맞춘 뒤 누적 실행한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 공용 wire 결속 리뷰 수정)
+
+- **accepted 결속**: `AgentRunAcceptedV1`에 chat의 task/project/worktree/workspace identity와 capability fingerprint를 추가했다. 시작 요청·채팅에서 만든 exact context와 accepted 응답을 비교하는 TypeScript/Rust helper와 공용 golden을 두어 chat/task/project/worktree/workspace/role/fingerprint 변조를 모두 거부한다.
+- **공개 event 결속**: normalized `AgentPublicEventV1`도 actual run의 full identity와 capability fingerprint를 포함한다. event는 `status/question/final`과 bounded text만 허용하고 reasoning/raw/tool/stderr/debug/env/auth/prompt/token extra를 거부하며, 공용 golden이 chat/task/project/worktree/workspace/run/role/fingerprint 교차 결속을 양언어에서 확인한다.
+- **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
+- **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron envelope runId 차단 보정)
+
+- **리뷰 수정**: planned G5A `chat.eventAppended`에서 public `TeamMessage.runId`뿐 아니라 protocol envelope의 optional `runId`도 검사한다. 둘 중 하나가 `agent_run_` namespace면 listener를 호출하기 전에 session을 poison한다. 둘 다 non-null인데 서로 다르면 또한 fail-closed로 identity mismatch를 보고한다. current G5에는 이 비교를 적용하지 않아 기존 fixture 채팅 의미는 바꾸지 않는다.
+- **회귀·경계**: fake transcript로 payload carrier와 envelope carrier(메시지 `runId=null` status) 각각이 listener 0회·termination 1회를 보장하고, non-agent envelope/payload runId 불일치도 공개 전에 막는 것을 확인했다. normalized actual-agent public-event wire는 여전히 sidecar event/IPC로 negotiated되지 않았으므로 추가하지 않았고 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+- **검증·다음**: TypeScript `tsc --noEmit`, Electron bridge/scaffold 37개, 전체 Node 136개, Vite production build와 `git diff --check`를 통과했다. 다음은 이 별도 surgical commit의 재리뷰다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron accepted binding 소비 보정)
+
+- **수정**: approved Bridge V4 contract의 `AgentRunAcceptedV1` full identity를 Electron consumer에 적용했다. planned G5A에서 `chat.get`으로 검증해 보관한 현재 chat의 task/project/worktree/workspace identity, 시작 요청의 chat/role, 요청 capability fingerprint와 accepted response를 exact 비교한다. 어느 한 필드라도 변조되면 session을 poison하며, 정상 accepted binding은 이후 normalized public-event route가 계약될 때만 사용할 private registry에 보관한다.
+- **공개 경계·호환**: 아직 sidecar protocol event/IPC 이름으로 negotiated되지 않은 normalized `AgentPublicEventV1` route는 임의로 추가하지 않았다. `agent_run_` raw chat event 및 raw run event의 listener 비노출/poison 경계를 유지했다. V4 `getChat`은 current G5의 `agentRuns` 없는 detail과 planned G5A ledger detail의 union을 반환하며, current G5가 actual ledger를 전제하지 않는 회귀를 추가했다.
+- **검증·다음**: fake transcript로 chat/task/project/worktree/workspace/role/fingerprint 각각의 accepted response 변조와 duplicate runId를 모두 fail-closed 확인했다. `tsc --noEmit`, Electron bridge/scaffold 37개를 통과했고 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 Electron adaptation commit의 독립 재리뷰이며, normalized public-event wire는 protocol/sidecar/IPC 계약이 함께 준비된 별도 작업에서만 열 수 있다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron raw chat event 리뷰 수정)
+
+- **수정**: planned G5A 협상 상태에서 `chat.eventAppended`의 검증된 `TeamMessage`라도 `runId`가 `agent_run_` namespace면 listener 호출 전에 session을 poison하도록 보강했다. 아직 normalized actual-agent public event wire가 없으므로 raw stdout/reasoning text가 status/chat timeline으로 우회하는 길은 허용하지 않는다. 기존 raw `run.event`/`run.finished` poison도 유지한다.
+- **G5 호환**: current G5 ready handshake의 `chat.get`은 `agentRuns` 없이 기존 detail validator로 계속 통과하는 회귀를 추가했다. V4 bridge getChat의 최종 TypeScript exact shape와 start accepted full identity/fingerprint는 공용 contract owner의 후속 fix를 기다리며 이 커밋에서 임의로 바꾸지 않는다.
+- **검증·경계**: root 의존성으로 TypeScript `tsc --noEmit`, Electron bridge/scaffold Node 35개, `git diff --check`를 통과했다. fake G5A sidecar가 `agent_run_` role message에 raw stdout/reasoning text를 넣어도 renderer listener 0회와 client corruption을 확인했다. 실제 CLI/auth/model/user project는 호출하지 않았다.
+
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron V4 소비 경계)
+
+- **한 일**: additive V4의 다섯 actual-agent IPC channel(capability 조회, 시작, cancel, recovery inspect/resolve)을 main-frame/origin 검사가 있는 고정 handler와 좁은 preload bridge에 연결했다. renderer 요청은 계약 validator를 preload와 `SidecarClientV1` 양쪽에서 exact 검사하며 executable path·argv·model·env·cwd·prompt·user config·추가 경로가 포함되면 sidecar IPC 전 거부한다. raw `ipcRenderer`나 generic invoke는 노출하지 않았고 context isolation·sandbox·기존 G5 V3 표면은 유지했다.
+- **협상·응답 결정**: 현 G5 exact ready set에서는 V4 호출이 `agentAdapterUnavailable`로 끝나며 sidecar에 request를 보내지 않는다. planned G5A exact capability set이 협상된 경우만 V4 request를 허용하고 capability fingerprint/runtime, start chat/role, actual cancel/recovery의 full chat/task/project/worktree/workspace/run identity, V4 `agentRuns` 별도 ledger를 contract validator로 fail-closed 확인한다. fixture `runs`와 actual `agentRuns`는 섞지 않는다.
+- **공개 이벤트 경계**: 아직 normalized actual-agent public-event IPC가 계약되어 있지 않으므로 G5A 중 raw `run.event`/`run.finished`를 받으면 session을 poison한다. 따라서 reasoning·raw stdout/stderr·tool args/output·debug·env·auth·prompt·token·evidence body는 renderer로 전달되지 않는다. status/question/final의 normalized event route는 Rust adapter와 renderer 소비자가 추가될 다음 계약/구현 단위에서 함께 열어야 한다.
+- **검증·경계**: root 의존성을 재사용한 TypeScript `tsc --noEmit`, Electron bridge/scaffold Node 34개, 전체 Node 132개, direct Vite production build, `git diff --check`를 통과했다. 현 fixture G5 handshake에서 V4 무전송, launch extra pre-IPC 거부, exact G5A handshake, cross-identity response poison, actual-vs-fixture ledger 분리, raw event non-exposure, cancel/recovery namespace를 fake transcript만으로 검증했다. worktree에 자체 `node_modules`가 없어 `pnpm build`는 격리된 네트워크에서 의존성 fetch를 시도하다 중단됐으며, package/lockfile 변경은 없다. 실제 sidecar adapter, Claude/Codex CLI·인증·model 조회·사용자 프로젝트·유료 모델은 호출하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust fake adapter 안전 흐름)
+
+- **안전 코어·capability**: renderer가 executable·argv·cwd·env·prompt를 넘길 수 없는 Rust 내부 `LaunchSpec`을 추가했다. 절대 executable/관리 snapshot cwd, token argv, 최소 env, bounded prompt와 handshake/parser를 검증하고 prompt를 `Debug`·영속 digest에서 제외한다. product provider는 설치·catalog 검증이 없으므로 `canStart=false`이고 spawn 경로가 닫히며, exact fake manifest만 별도 fixture stdio 모드에서 실행된다.
+- **barrier·영속화**: SQLite v1 schema/table을 바꾸지 않고 기존 `runs` 원장에 `source_kind=actualAgent` discriminator와 `agent_run_` record를 넣어 fixture run과 조회·복구 의미를 분리했다. run+writer lock을 먼저 durable commit한 뒤 control launcher가 대기 child를 만들고, launcher/agent `(pid,start identity)`·누적 `TreeTracker`·redacted barrier를 다시 영속화한 후에만 release한다. release 전 child가 자손을 만들지 않는 실제 process test와 clean/cancel/uncertain parent-child 종료를 통과했다.
+- **공개 이벤트·복구**: fake vendor의 `status/question/final`만 bounded public event와 기존 chat timeline message로 원자 영속화하고 reasoning/tool/usage·raw JSON·stderr·prompt/token/env/auth는 DB/IPC/log에 남기지 않는다. malformed/oversize는 fail-closed 종료하며, clean 종료는 모든 추적 신원 소멸 뒤 read-only `none`/writer `released`, 불확실 종료와 unclean restart는 run/chat/lock을 poisoned `recoveryRequired`로 보존한다. 실제 프로세스 소멸을 다시 관측한 명시적 `abandon`만 lock을 해제한다.
+- **검증·잔여 경계**: core 68, protocol 25, sidecar 57개(1 ignored) 회귀와 exact fake/unknown·fingerprint drift preflight spawn0-lock0, ledger 분리, 공개 secret 부재, writer clean/uncertain, launcher no-descendant 테스트를 통과했다. strict clippy는 owned code가 통과했지만 전체 core에는 기존 `proctree.rs`의 두 lint가 남아 허용 후 재실행했다. 실제 Claude/Codex·auth/model/user project·Windows는 실행하지 않았고 current G5 ready capability도 그대로다. 공용 계약의 accepted/public event full identity wire 보강이 별도 진행 중이므로 통합 때 해당 새 필드를 이 소비자에 맞춰야 한다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 통합·누적 게이트)
+
+- **통합**: actual-agent adapter 계약 기능·리뷰 수정 세 커밋을 독립 최종 `APPROVE` 뒤 `m5/coding-agent-ide`에 `9008b92`·`aaf614f`·`7903d75`로 순서대로 통합했다. 기존 G5 handshake와 fake-only V3는 그대로이며, planned V4 actual-agent 메서드는 protocol 예약·계약일 뿐 sidecar/Electron이 아직 광고하거나 소비하지 않는다.
+- **독립 리뷰 결과**: 최초 리뷰의 process 소멸 증거·capability fingerprint 결속·actual-run 취소/복구 wire·role-stage 결속과 재리뷰의 writer-lock 종료 결속·JSON member-order 양언어 parity 지적을 모두 공용 golden 회귀로 닫았다. 최종 재리뷰는 누적 head `dd92e1f`를 `APPROVE`했고 실제 CLI·인증·model·사용자 프로젝트 호출이 없음을 확인했다.
+- **통합 검증**: 통합 HEAD에서 focused G5A Node 6개, Rust protocol 25개, 전체 Node 127개와 production build가 통과했다. G5 누적 하네스도 macOS Electron package/Chromium Monaco, Tauri·core·protocol·sidecar, 실제 sidecar stdio fixture와 clean/uncertain 취소·복구를 포함해 PASS했고 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-27T02-04-16-861Z.json`이다. 최초 sandbox 실행은 Electron artifact 네트워크 fetch가 막혀 실패했으나 네트워크 허용 재실행은 전 단계 exit 0이었다.
+- **다음 할 일·경계**: 별도 worktree에서 Rust fake adapter/supervisor와 Electron V4 소비자를 구현·독립 리뷰한 뒤 UI와 G5A fixture QA를 연결한다. 실제 CLI capability/auth smoke, 유료 모델, 사용자 프로젝트, Windows 자손 회수는 계속 별도 승인·후속 게이트이며 G6 release는 의도대로 `NOT_READY`다. `main` 병합과 push는 하지 않았다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 독립 리뷰 2차 수정)
+
+- **writer lock 결속**: actual-agent terminal run과 termination transcript를 함께 검증하는 공용 persistence 계약을 추가하고 cancel result도 반드시 이를 통과하게 했다. clean exit에서 `workspaceWrite` profile은 `writerLockState=released`, `readOnly` profile은 `none`만 허용한다. recoveryRequired는 기존처럼 lock/chat/process가 모두 poisoned `recoveryRequired`여야 하며 preflight failure의 zero run/spawn/lock 의미는 바꾸지 않았다.
+- **process parity**: cancel termination과 recovery가 보존하는 process evidence를 TypeScript의 JSON 문자열 순서가 아닌 `pid/startIdentityDigest/executablePathDigest/observedGone` 구조 값으로 비교해 Rust struct equality와 맞췄다. 같은 process object의 JSON member 순서만 다른 공용 valid fixture를 두 언어가 함께 승인하며, writer clean cancel·정상 성공·실행 실패의 잘못된 lock state는 공용 invalid fixture가 거부한다.
+- **검증·경계**: focused Node 6개, focused Rust 3개, 전체 Node 127개와 protocol 25개, renderer production build 및 `git diff --check`가 통과했다. 실제 CLI·인증·model 조회·사용자 프로젝트는 접근하지 않았다. 다음은 별도 2차 fix commit을 독립 재리뷰하는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 독립 리뷰 수정)
+
+- **리뷰 수정**: 독립 리뷰의 네 차단 사항을 TypeScript/Rust 공용 계약과 같은 golden fixture로 고쳤다. clean exit는 모든 `(pid,startIdentityDigest)`가 중복 없이 `observedGone=true`여야 하며, actual run도 G5와 같은 `planning→planning`, `coding→implementing`, `review→verifying` 역할-stage 결속을 지킨다.
+- **fingerprint 결정**: capability fingerprint는 top-level `fingerprint`와 관찰 시각 `observedAt`을 제외한 snapshot을 재귀 ASCII key 순서의 compact JSON으로 직렬화한다. 배열 순서는 보존하고 explicit null은 포함한 UTF-8 bytes의 SHA-256에 실제 결속한다. renderer/Vite 계약에는 Node 전용 모듈을 넣지 않고 기존 순수 TypeScript SHA-256을 사용하며, Node crypto는 테스트 oracle로만 비교한다. 정확한 snapshot이 바뀌었는데 이전 fingerprint를 재사용하면 양 언어가 거부한다.
+- **V4 wire 경계**: 기존 G5 handshake·fixture-only V3를 바꾸지 않고 planned V4에 actual-agent 전용 `run.cancelAgent`, `recovery.inspectAgent`, `recovery.resolveAgent`만 예약했다. actual run/recovery는 `agent_run_`·`agent_recovery_` namespace와 별도 `agentRuns` ledger를 사용하고 chat/task/project/worktree/workspace identity를 exact 결속한다. clean cancel과 poisoned recovery/명시적 abandon resolution은 typed response와 validator만 정의했으며 Electron·sidecar 소비자는 아직 구현·광고하지 않는다.
+- **검증·경계**: 공용 golden의 clean-exit process proof·중복 identity·fingerprint 재사용·cancel/recovery/chat identity·역할-stage 회귀를 양 언어가 함께 읽는다. focused Node 6개, 전체 Node 127개, focused Rust 3개·전체 protocol 25개, renderer production build와 `git diff --check`가 통과했다. 실제 Claude Code/Codex 실행·인증·model 조회·사용자 프로젝트 접근은 하지 않았다. 다음은 이 fix commit을 같은 독립 리뷰에 다시 제출하는 것이다.
+
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 실제 agent adapter 계약)
+
+- **한 일**: 현재 G5 handshake와 `run.startFixture`의 fake-only 의미를 바꾸지 않고, protocol v1에 `agent.getCapabilities`·`run.startAgent`를 예약하고 별도 planned `M5BridgeV4`와 TypeScript/Rust 공용 agent adapter v1 계약·golden fixture를 추가했다. 실제 run은 `fixtureScenario`가 있는 G5 fixture run과 섞지 않고 V4 chat detail의 별도 `agentRuns` ledger로 정의했다. renderer start 요청은 `chatId/roleId/inputMessageIds/expectedCapabilityFingerprint`만 허용하며 실행 경로·argv·model·env·cwd·prompt는 서버가 채팅의 프로젝트별 역할 snapshot에서 해석한다.
+- **안전 결정**: 실제 실행은 machine-readable runtime 검증 또는 정확한 CLI 버전에서 실측한 manifest만 허용한다. effective model 증거가 `argvOnly`이거나 catalog가 불명확하면 `canStart=false`이며 silent fallback은 없다. v1은 one-shot과 `nextRun` follow-up만 허용하고 active stdin/resume은 금지한다. launcher와 agent identity·process tree를 run/lock과 함께 release 전에 영속화하는 barrier, preflight `spawnCount=0/lockCount=0`, 공개 `status/question/final`만, redacted bounded evidence, 불확실 종료의 poisoned `recoveryRequired`를 양 언어 validator로 고정했다.
+- **검증·경계**: Node 전체 126개, TypeScript/Vite build, Rust protocol 25개, scoped clippy와 `git diff --check`를 통과했다. 실제 Claude Code/Codex 실행·인증·model 조회·사용자 프로젝트 접근은 하지 않았다. 다음은 이 계약 commit의 독립 리뷰 후 Rust adapter와 Electron/UI 소비자를 별도 worktree에서 구현하고, 통합 fixture QA를 거치는 것이다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 최종 게이트)
+
+- **판정**: 구현·문서 통합 commit `33f16a009065813bc575b1f528756f661c2ccdeb`을 독립 최종 게이트가 `PASS — APPROVE / G5_READY`로 승인했다. 계약, Rust, Electron, UI, 하네스와 문서의 독립 승인 commit이 모두 해당 통합 commit의 조상임을 확인했다.
+- **최종 증거**: exact-head 누적 하네스 `.artifacts/m5-harness/g5-run-recovery-2026-08-26T04-01-24-084Z.json`은 clean 시작과 baseline~G5 명령 12개 전부 exit 0을 기록한다. 독립 QA `.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json` 이후 변경은 독립 승인된 문서뿐이다.
+- **경계·다음 할 일**: G6는 security/package/performance script가 없어 의도대로 `NOT_READY`다. 실제 Claude Code/Codex adapter·인증 smoke, Windows snapshot/process-tree, 전체 OS Quit E2E, Forge prerelease와 macOS 권한 강화는 G5 완료에 포함하지 않았고 후속 게이트로 남긴다. `main` 병합과 push는 하지 않았다.
+
+### 2026-08-26 · by GPT-5.6-Sol (M5 문서 생애주기 경계 재정렬)
+
+- **수정**: 독립 문서 리뷰 지적에 따라 `m5-coding-agent-ide.md`에서 G1~G6 현재 상태표, exact 검증 판정과 구현 완료 서술을 제거하고 제품 방향·설계 계약·계획된 완료 기준·열린 결정만 남겼다. 현행 G5 구조와 게이트 사실은 `architecture.md`와 이 워크로그만 소유한다.
+- **색인·규칙**: `docs/README.md`와 byte-identical `AGENTS.md`/`CLAUDE.md`도 제안서를 현재 상태 출처로 안내하지 않도록 고쳤다. 이전 역사적 검토·결정 기록과 2026-08-25 아카이브 내용은 바꾸지 않았다.
+- **다음 할 일**: 수정 commit을 독립 재검토한 뒤 G5 최종 게이트에서 문서 생애주기 경계를 확인한다.
+
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 누적 하네스·독립 QA와 현행 문서 반영)
+
+- **판정**: exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`의 G5 누적 하네스가 PASS했고 독립 QA도 `G5_READY`로 판정했다. 하네스는 `.artifacts/m5-harness/g5-run-recovery-2026-08-26T03-40-31-061Z.json`, QA는 `.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json`에 있다.
+- **현행 반영**: 프로젝트 역할 설정 CAS와 채팅별 불변 role snapshot, 여러 영속 채팅, 항상 새로 만드는 채팅별 standalone snapshot과 exact prepare/bind/abandon, V3 네 ID workspace/save, 공개 팀 타임라인, fixture 실행의 clean/uncertain 취소·프로세스 트리 복구·poisoned lock·prepareQuit blocker, Electron/preload/UI 경계를 `architecture.md`와 M5 제안서·색인·루트 작업 규칙에 반영했다.
+- **검증 범위**: 독립 QA는 계약/UI 22개, 임시 Git 저장소를 쓴 sidecar stdio 7개, Rust 회귀 20개, Electron 29개, Chromium Monaco와 macOS arm64 package smoke를 통과했다. 실제 Claude Code/Codex·인증·사용자 프로젝트와 Windows는 실행하지 않았다.
+- **다음 할 일**: 문서 독립 검토와 최종 게이트 뒤 실제 agent adapter 계약, G6 보안·패키징·성능, Windows 안전 게이트를 순서대로 진행한다. push와 `main` 병합은 하지 않는다.
+
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 하네스 연결)
+
+- **한 일**: `m5:test:run-recovery`를 추가해 G5 계약, chat-bound workspace preparation/addressing, Electron bridge/scaffold, renderer chat/editor 상태와 Rust sidecar unit·실제 stdio process 검증을 한 명령으로 연결했다. 기존 누적 게이트가 같은 현재 코드의 TypeScript/renderer build·Chromium smoke·Electron package smoke를 이미 실행하므로 G5 명령은 고유 검증을 중복 없이 조합한다. Chromium smoke의 가짜 preload bridge도 V3로 올리고 workspace/chat 구독과 프로젝트 역할·빈 채팅 조회를 제공해 실제 renderer mount 흐름과 맞췄다.
+- **하네스 결정**: `pnpm harness:list`에서 G5는 `READY`, 아직 구현되지 않은 G6는 `NOT_READY`로 표시한다. 하네스 자기 검사는 G5 누적 실행 중 재귀하지 않도록 다음 미구현 G6의 exit 2와 세 누락 script를 검증한다.
+- **검증**: 의존성 설치를 선행하지 않는 동등한 `CI=true npm run m5:test:run-recovery`에서 Node 51개, sidecar unit 51개 통과·1개 의도한 ignored, 실제 stdio 7개가 통과했다. root의 고정 Vite binary로 renderer 605 module build를 통과한 뒤 승인된 Electron 실행에서 수정된 Chromium Monaco mount/worker smoke 1개도 통과했다. `node scripts/m5-harness.mjs --list`는 G5 `READY`·G6 `NOT_READY`, focused 하네스 자기 테스트 2개와 staged/unstaged `git diff --check`도 통과했다. 실제 유료 agent·사용자 프로젝트·Windows·파괴적 시험은 실행하지 않았다.
+- **다음 할 일**: 최신 통합 commit에서 G5 누적 하네스와 package smoke를 실행하고 독립 QA한다. G6 security/package/performance script는 해당 구현 파동에서 별도로 추가한다.
+
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 채팅 준비 workspace Rust 소비)
+
+- **한 일**: 승인된 additive `workspace.prepareChat`·`workspace.abandonPrepared`와 `preparationId`가 추가된 `chat.create` 계약을 Rust sidecar에 소비했다. prepare는 기존 active/bound snapshot과 무관하게 새 standalone snapshot과 전역 고유 preparation/worktree/workspace identity를 만들고 `unbound`로 저장한다. create는 exact preparation·active manifest·settings revision·전역 chat/workspace binding을 SQLite `BEGIN IMMEDIATE` 안에서 다시 확인한 뒤 preparation `bound(chatId)`·draft chat·최초 사용자 메시지를 함께 commit한다. G4 `project.createWorktree`의 기존 idempotent 경로는 유지했다.
+- **안전 결정**: exact 네 ID가 다른 abandon, bound·unknown·이미 abandoned preparation은 다른 workspace를 바꾸지 않고 거부한다. 성공 abandon은 물리 삭제 없이 manifest와 preparation을 terminal `abandoned`로 만들며, filesystem 전이를 먼저 수행해 이후 SQLite 저장이 실패해도 chat binding이나 G4 작업에 재사용되지 않게 했다. 저장 전후 실패를 위한 exact 재개는 같은 abandoned filesystem identity만 허용한다. prepare 저장 실패도 새 snapshot을 terminal 처리하고, terminal 상태를 증명하지 못하면 outcome-unknown recovery로 승격한다. chat ID 충돌과 binding 도중 crash 주입은 transaction 전체를 rollback해 preparation을 cleanup 가능한 `unbound`로 유지한다.
+- **호환·발견**: G5 workspace 작업은 chat/project/worktree/workspace 네 ID와 외부 manifest·marker·lock을 계속 매번 검증한다. 실제 stdio A/B 격리 시험 중 root tree의 유효한 빈 `parentPath`를 공용 파서가 거부하던 오류를 발견해 G4/G5 tree route에서만 빈 문자열을 허용했다. bound A를 유지하면서 fresh B 생성 실패·mismatch 거부·exact/duplicate abandon 뒤 A tree/read/save가 계속 동작하고 원본 Git 저장소는 변하지 않음을 임시 저장소로 검증했다.
+- **검증**: `cargo test -p hello-agent-sidecar --locked`는 unit 51 통과·의도한 1 ignored와 실제 stdio 7 통과, `cargo test -p hello-agent-protocol --locked` 22 통과, M4 process-tree F1~F8 회귀 17 통과, Tauri handoff 53 통과·실제 유료 agent 3 ignored를 확인했다. `cargo clippy -p hello-agent-sidecar --locked --no-deps -- -D warnings`, owned Rust 2021 rustfmt, `git diff --check`도 통과했다. Windows/비 macOS spawn은 계약대로 차단 경로만 유지했으며 실제 Windows·유료 agent·사용자 프로젝트는 실행하지 않았다.
+- **다음 할 일**: 이 Rust 후속 commit을 독립 코드 리뷰하고 최신 통합 commit에서 G5 누적 하네스와 실제 stdio QA를 재실행한다. Electron/UI는 exact preparation 결과를 받은 뒤에만 chat.create를 호출하고 실패한 unbound preparation을 정확한 네 ID로 명시 폐기해야 한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 workspace preparation Electron 소비자)
+
+- **한 일**: 새 `workspace.prepareChat`/`workspace.abandonPrepared` capability를 고정 V3 IPC channel, preload exact validator, main handler, SidecarClient response validator에 연결했다. `createChat`은 이제 `preparationId`와 project/worktree/workspace 세 필드를 모두 포함하고, 현재 client가 정확히 알고 있는 unbound preparation에만 결합한다.
+- **안전 결정**: prepare 응답은 새 unbound standalone snapshot 전체 레코드여야 하며 project ID를 exact echo한다. abandon은 준비 ID와 세 workspace ID를 모두 정확히 echo하고 known unbound preparation에만 보낸다. cross-preparation·unknown·late·bound mismatch에는 재시도·projectId close·fallback이 없다. main/window 종료는 명시적 UI 요청 없이 자동 abandon하지 않아 sidecar의 증거를 보존한다.
+- **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 29개, `git diff --check`를 통과했다. extra/project-only·UTF-8 ID overflow, preparation A/B 교차, abandon response mismatch, createChat preparation mismatch를 회귀로 추가했다.
+- **다음 할 일**: 이 bridge consumer commit을 독립 재검토하고, Rust sidecar 및 renderer 준비 흐름과 통합해 실제 preparation→chat bind→명시적 abandon QA를 수행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 ID 전역 충돌 리뷰 수정)
+
+- **한 일**: 독립 리뷰 P1을 반영해 chat 생성 후보의 `chatId`도 완료된 전역 binding scan의 모든 기존 chat ID와 비교하도록 TypeScript/Rust `ChatCreationTranscriptV1` validator를 강화했다. fresh preparation이 별도 worktree/workspace를 사용해도 후보 chat ID가 기존 A와 같으면 `bindingConflict`다.
+- **안전 결정**: 충돌한 `createdChat`은 커밋 전 후보 증거로만 transcript에 남을 수 있다. 이 경우 transaction은 반드시 미커밋, 최초 사용자 메시지는 없음, preparation은 exact unbound 상태 그대로여야 하며, 성공 또는 binding/write를 주장하면 fail-closed 거부한다.
+- **검증**: 공용 fixture가 기존 chat A + fresh preparation B + 생성 후보 chat ID A를 성공으로 주장하는 경우를 거부하고, 같은 충돌을 no-write/no-bind/cleanup-eligible `bindingConflict`로 판정하는 경우만 승인한다. focused Node 10개, focused Rust 5개, 전체 `npm test` 106개, `cargo test -p hello-agent-protocol --locked` 22개, `tsc --noEmit`, `cargo check -p hello-agent-sidecar --locked`, rustfmt/diff 검사를 통과했다.
+- **다음 할 일**: 수정 commit을 재검토한 뒤 통합하고, sidecar의 chat ID 생성·전역 uniqueness 확인·insert를 한 transaction 안에서 수행해 같은 판정을 구현한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅별 독립 작업공간 준비 계약)
+
+- **한 일**: 기존 V2와 workspace-addressed V3 API를 변경하지 않고 `workspace.prepareChat`·`workspace.abandonPrepared`와 bridge 메서드를 additive하게 추가했다. prepare는 같은 프로젝트의 active/bound snapshot 존재 여부와 무관하게 전역적으로 고유한 `preparationId/worktreeId/workspaceIdentity`를 가진 새 standalone snapshot을 `unbound`로 저장하며, chat.create는 그 정확한 준비 레코드를 settings·최초 사용자 메시지와 한 transaction에서 `bound(chatId)`로 바꾼다.
+- **안전 결정**: abandon은 preparation/project/worktree/workspace 네 ID와 저장 증거가 정확히 일치하는 아직 unbound인 준비만 `abandoned`로 표시하고 물리 삭제하지 않는다. bound·unknown·이미 abandoned·cross-identity 요청은 다른 준비를 변경하지 않는 no-op이며, settings/binding 실패도 해당 준비를 그대로 cleanup-eligible 상태로 남긴다. `ChatRecordV1`에는 preparationId를 중복 저장하지 않고 persisted preparation의 `boundChatId`를 immutable 생성 증거로 사용한다.
+- **검증**: 공통 fixture가 bound A가 있어도 B를 새 identity로 준비하고, B 생성 실패 뒤 B만 폐기하며 A는 active인 흐름, 반복 prepare identity 충돌, cross-project/triple/preparation mismatch, bound/late/unknown/duplicate abandon을 TypeScript와 Rust에서 같은 결과로 판정한다. focused Node 18개, 전체 `npm test` 106개, `cargo test -p hello-agent-protocol --locked` 22개, `tsc --noEmit`, `cargo check -p hello-agent-sidecar --locked`, owned Rust rustfmt와 `git diff --check`를 통과했다.
+- **다음 할 일**: 이 계약 commit을 독립 리뷰한 뒤 통합하고, sidecar가 새 snapshot 생성과 준비 레코드 저장, chat/settings/message binding, 정확한 준비 abandon을 각각 fail-closed transaction으로 구현한다.
+
+### 2026-08-26 · by GPT-5.6-Sol (M5 G5 Rust 실행·복구 및 다중 workspace 내부)
+
+- **한 일**: 승인된 G5 run/recovery·workspace 계약을 Rust sidecar에 소비해 프로젝트별 revision CAS 역할 설정과 채팅 생성 시 역할 snapshot, bounded 영속 chat ledger, chat-bound workspace tree/read/save/watch/diff/close를 구현했다. G4 projectId-only 경로는 호환 경로로 유지하고 G5 작업은 저장된 전체 chat binding과 외부 active manifest·marker·lock을 매 요청마다 exact 검증한다. 여러 standalone snapshot과 chat이 동시에 살아 있어도 현재 선택을 추론하지 않으며 cross-chat ref와 saveId continuation은 원본 쓰기 전에 거부한다.
+- **실행·복구 결정**: macOS 결정적 self-fixture만 허용하고 실제 Claude/Codex·인증·사용자 프로젝트는 실행하지 않았다. 역할 실행은 chat/workspace별 직렬화하며 coding은 run+writer lock을 spawn 전에 SQLite `BEGIN IMMEDIATE`로 함께 저장하고 planning/review는 writer lock 없이 실행한다. fixture child는 부모가 process identity를 저장하기 전 자손을 만들지 못하도록 stdin release barrier를 두고, 취소는 M4 `TreeTracker`가 관찰한 부모·자손 전체 소멸을 증명한 경우만 clean 처리한다. 불확실하면 chat/run/manifest/writer lock/recovery를 fail-closed로 남기고, 모든 영속 identity가 Gone인 abandon만 허용한다. `prepareQuit`은 active run과 recovery blocker를 정리·보고하며 unsafe 상태에서는 복구 조회/abandon 뒤 재시도할 수 있고, clean checkpoint 전에는 EOF 종료를 성공으로 보지 않는다.
+- **저장 안전**: 상수 크기 projection event와 durable event sequence를 wire stream sequence와 분리했다. workspace save begin은 전체 chat/workspace ref를 durable session에 고정하고, commit 결과 뒤 session cleanup 저장이 실패하면 outcome-unknown으로 승격해 자동 재시도를 막는다. 복구 wire payload에서는 내부 마이크로초 process identity 증거를 제거하되 durable projection에는 정확한 probe 값을 보존한다.
+- **검증**: 임시 Git 저장소만 사용했다. `cargo test -p hello-agent-sidecar --locked`는 unit 48 통과·의도한 1 ignored와 stdio 6 통과, `cargo test -p hello-agent-protocol --locked`는 21 통과, `cargo clippy -p hello-agent-sidecar --locked --no-deps -- -D warnings`, scoped Rust 2021 format, `git diff --check`를 통과했다. M4 process-tree F1~F8 회귀 17개와 Tauri handoff 53개 통과·실제 유료 agent 3개 ignored도 통과했다.
+- **다음 할 일**: 새 chat 전용 preparation 계약 commit을 통합 기준선에 먼저 반영한 뒤 이 branch를 그 exact base로 전진하고, `workspace.prepareChat`·exact `workspace.abandonPrepared`와 preparation을 원자 소비하는 amended `chat.create`를 별도 후속 단위로 구현·검토한다. 이 커밋은 그 미통합 wire를 광고하거나 구현하지 않는다.
+### 2026-08-26 · by GPT-5 Codex (M5 G5 Electron Bridge V3 독립 리뷰 수정)
+
+- **한 일**: 독립 리뷰의 차단 사항을 반영했다. recovery blocker가 있는 `ready` status를 유효한 live 상태로 유지해 recovery API 호출을 허용하고, `safeToQuit: false`는 종료 허용으로 바꾸지 않는다.
+- **이벤트·ID 결정**: workspace/chat/run protocol event는 generic V2 route에서 제외해 renderer credit가 한 실제 event에 한 번만 소비된다. raw `run.event`·`run.finished` payload는 renderer로 전달하지 않으며, G5 public chat은 검증된 `TeamMessage` 전용 route만 쓴다. bridge-local project/recovery ID 검증도 문자열 길이가 아니라 UTF-8 512 bytes를 적용한다.
+- **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 27개, `git diff --check`를 통과했다. recovery-ready 연결성, unsafe quit, four-stream 단일 route, hidden raw run filtering, ASCII/emoji byte-limit pre-IPC 거부를 추가로 검증했다.
+- **다음 할 일**: 이 수정 commit을 같은 exact SHA로 재검토하고, G5 Rust sidecar/renderer와 통합한 뒤 package smoke와 누적 QA를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 Electron Bridge V3)
+
+- **한 일**: Electron main/preload와 `SidecarClientV1`이 additive `M5BridgeV3`를 소비하도록 구현했다. workspace tree/close/read/save/watch/diff, 프로젝트 역할 설정, 채팅 페이지, fixture run/cancel, recovery API는 모두 고정 IPC channel·main-frame/app origin 검사·preload exact input validator를 거친다. V2 API와 raw sidecar restart 정책은 유지했다.
+- **안전 결정**: G5 ready capability는 canonical 순서를 정확히 비교한다. workspace 응답·event·save continuation은 `chatId/projectId/worktreeId/workspaceIdentity`를 매번 echo하고, begin 뒤 `saveId`를 그 네 ID에 등록한다. cross-chat/unknown/late save와 잘못된 response는 sidecar에 재전송하지 않고 거부한다. 공개 chat stream은 구조화된 `TeamMessage`만 전달하며 workspace/chat event는 별도 bounded-credit stream으로 ACK한다.
+- **검증**: root 의존성을 재사용한 `tsc --noEmit`, `node --test --experimental-strip-types tests/m5-electron-bridge.test.mts tests/m5-electron-scaffold.test.mts` 25개, `git diff --check`를 통과했다. G5 package smoke expectation도 canonical fixture로 올렸지만 이 branch에는 G5 Rust sidecar가 아직 없으므로 실제 package smoke는 통합 뒤 실행해야 한다.
+- **다음 할 일**: Rust G5 sidecar와 renderer 소비자를 같은 V3 계약으로 통합하고, 최신 통합 commit에서 run/recovery 및 package smoke QA를 실행한다. 실제/유료 agent 실행은 하지 않았다.
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer bind·폐기 review 수정)
+
+- **한 일**: B chat workspace bind를 tree → diff → watch 순차 준비로 바꿔, 세 단계가 모두 성공하기 전 B editor ref/tree/tabs를 publish하지 않도록 했다. 어느 단계든 실패하면 epoch을 무효화하고 A editor snapshot/ref를 복원한 채 action gate를 유지한다. discarded chat도 recovery와 같은 위험 동작 차단 대상으로 두며, pending switch event는 detail hydration 전 raw buffer에 보관해 detail과 merge할 때만 event sequence를 판정한다.
+- **검증**: B tree bind 실패가 A ref/tabs를 보존하고 B diff/watch RPC를 시작하지 않는 focused regression을 추가했다. focused chat/workspace editor Node와 TypeScript `tsc --noEmit`, `git diff --check`를 통과했다.
+- **다음 할 일**: independent reviewer가 deferred detail/event hydration과 watch-failure restore 경로를 재확인하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 새 채팅 준비 API renderer 연결)
+
+- **한 일**: 승인된 `workspace.prepareChat` → `chat.create(preparationId, projectId, worktreeId, workspaceIdentity, goal, expectedSettingsRevision)` 계약을 renderer에 연결했다. 매 새 chat은 bridge가 만든 독립 prepared workspace의 exact ID를 쓰며, `chat.create` 실패 시에만 그 준비 작업의 exact four-ID를 `workspace.abandonPrepared`에 전달한다. 기존 V2 `createProjectWorktree`/`project.close`는 새 chat 흐름에서 호출하지 않는다.
+- **검증**: focused chat/workspace editor Node 7 PASS에서 A/B의 서로 다른 workspace identity·preparationId, B create 실패의 B-only abandon과 A 지속 사용을 확인했다. TypeScript `tsc --noEmit`과 `git diff --check`도 통과했다.
+- **다음 할 일**: 독립 renderer review와 Electron V3 preparation bridge 통합 후 Chromium smoke·G5 누적 harness를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 renderer review 수정)
+
+- **한 일**: 독립 UI review의 P1을 반영했다. chat hydration/bind 동안 `switching`을 먼저 공개하고, 기존 A 화면은 유지한 채 모든 editor/run action을 막으며 B의 detail·timeline은 exact editor bind가 성공한 뒤에만 한 번에 publish한다. hydration 중 수신한 event는 durable `eventSequence`로 merge/dedupe하며 충돌·gap은 fail-closed 오류가 된다. cancel 늦은 결과도 chatId/runId/generation/switching을 재검증해 다른 활성 chat을 바꾸지 않는다. recovery 상태는 editor save/close/abandon과 run/switch를 UI/controller 수준에서 RPC 전 차단한다.
+- **새 채팅 결정**: 안전한 새 snapshot 준비 API가 아직 통합되지 않았으므로 renderer는 기존 V2 project snapshot 재사용 또는 `project.close` cleanup을 하지 않고 `preparationApiUnavailable` 안내와 비활성화 버튼을 표시한다.
+- **검증**: focused chat/workspace editor Node 5 PASS, TypeScript `tsc --noEmit` PASS. 다음은 deferred switch/cancel/hydration/recovery regression을 보강하고 Electron 통합 뒤 Chromium smoke를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 V3 채팅 작업 복사본 Monaco 포트)
+
+- **한 일**: `ProjectEditorController`가 채팅 binding 뒤 immutable `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`만 사용하도록 포트했다. tree/read/save begin·append·commit/watch/diff/close와 blob/watch event는 각각의 V3 workspace API로 전환되며, V2 project API는 채팅 생성 전 picker·snapshot 준비에만 남는다. clean chat switch는 새 workspace를 다시 load하고, dirty/conflicted 탭은 switch·새 chat을 막으며, late response/event는 epoch과 exact four-ID 비교를 통과해야만 surface에 반영된다.
+- **검증**: V3 editor/chat focused Node 5 PASS, 기존 editor 포함 focused Node 30 PASS, root 설치 TypeScript `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. Chromium smoke와 worktree `pnpm build`는 로컬 의존성 부재 및 network DNS `ENOTFOUND` 때문에 이 worktree에서 실행하지 못했다.
+- **다음 할 일**: Electron preload/main V3 port와 통합해 실제 renderer Chromium smoke·G5 cumulative harness를 실행하고, 독립 UI review에서 save session와 dispose/race 경계를 재확인한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅·역할 설정 renderer)
+
+- **한 일**: V3 bridge만 소비하는 renderer 채팅 상태 컨트롤러와 작업대 UI를 추가했다. 프로젝트별 기획·코딩·검토 역할의 runtime/model/reasoning/CAS 설정, 기존 채팅의 불변 role snapshot 안내, 영속 채팅 목록·전환, 새 채팅마다 별도 standalone snapshot triple을 만든 뒤 exact revision으로 `chat.create` 하는 흐름, 공개 팀 타임라인과 명시적 `가짜 에이전트 데모` 시작·취소 UI를 구현했다. 교차 채팅 triple event는 renderer에서 다시 거부하고, recoverable 상태는 실행과 위험 동작을 막고 명시적 abandon confirmation만 보인다.
+- **중요한 경계**: 이 UI는 실제 모델을 설치·로그인·실행하거나 chain-of-thought/raw stderr를 표시하지 않는다. 모델을 사용할 수 없을 때는 자동 fallback하지 않으며, 런타임 V3 workspace-addressed 파일 저장/닫기 연결은 Electron bridge 포트와 함께 완성해야 한다.
+- **검증**: `node --test --experimental-strip-types tests/m5-g5-chat-ui-state.test.mts` 3 PASS, 루트 설치 TypeScript를 이용한 `tsc --noEmit -p tsconfig.json` PASS, `git diff --check` PASS. worktree에 `node_modules`가 없어 `pnpm build`는 network DNS `ENOTFOUND` 의존성 다운로드에서 중단됐다.
+- **다음 할 일**: 독립 UI 리뷰에서 V3-only action·recovery/dirty-switch 경계를 확인하고, Electron V3 bridge와 workspace-addressed Monaco controller를 통합한 뒤 renderer Chromium smoke와 G5 누적 harness를 실행한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 protocol envelope 호환·binding 증거 강화)
+
+- **한 일**: 최종 리뷰 P1에 따라 protocol v1 `EventV1`의 Rust/TypeScript 상위 필드를 기존 `chatId`·`taskId`·`runId`까지만 유지하고, G5 workspace event의 `ChatWorkspaceRefV1` 네 ID는 전부 event `payload` 안으로 이동했다. canonical JSONL이 payload 주소를 byte-match하고, 기존 G4 sidecar의 `EventV1` 초기화 코드를 수정하지 않은 채 소비자 빌드 호환을 증명한다.
+- **binding 결정**: `WorkspaceResolvedBindingV1`의 요청 유래 `storedBinding` echo를 제거하고, run/recovery validator를 통과한 전체 persisted `ChatRecordV1`과 verified active standalone snapshot을 증거로 요구한다. 모든 operation/save/event route는 저장 chat의 `chatId/projectId/worktreeId/workspaceIdentity`와 요청·snapshot을 exact 비교하며, 다른 저장 chat을 가짜 binding으로 제시하는 공통 TS/Rust fixture를 거부한다.
+- **검증**: focused G5/workspace/protocol Node 14개, 전체 `npm test` 102개, `cargo test -p hello-agent-protocol --locked` 21개, `tsc --noEmit`, owned Rust rustfmt/diff 검사를 통과했다. 또한 `cargo check -p hello-agent-sidecar --locked`와 `cargo test -p hello-agent-sidecar --locked`(unit 43 통과·1 ignored, stdio 3 통과)로 기존 소비자 호환을 확인했다.
+- **다음 할 일**: 수정 exact SHA를 독립 재검토한 뒤 통합하고, 이후 sidecar G5 소비자는 DB에서 읽은 immutable chat record와 active manifest를 workspace 작업 시작 전에 결합해 같은 validator 순서를 구현한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 workspace chat/save 상관관계 리뷰 수정)
+
+- **한 일**: 독립 리뷰 P1 두 건을 반영해 V3 workspace 요청·응답·descriptor·event의 주소를 `ChatWorkspaceRefV1 { chatId, projectId, worktreeId, workspaceIdentity }`로 강화했다. 각 tree/close/read/watch/diff 작업은 sidecar에 저장된 chat binding과 verified active standalone snapshot을 정확히 resolve한 뒤에만 허용하며, createChat으로 고정된 chat/workspace 결합과 같은 네 ID를 사용한다. V2 메서드·타입은 변경하지 않았다.
+- **save 결정**: begin 시 persisted save session에 네 ID와 `saveId`·path·expected version·byte/chunk 조건을 함께 고정한다. append와 commit 요청·응답도 네 ID를 반복하고 `saveId`로 찾은 정확한 persisted session과 일치해야 한다. `saveId`만 있는 V3 continuation은 허용하지 않으며 unknown/종료된 session의 늦은 결과도 fail-closed다.
+- **검증**: 공통 fixture가 chat A + workspace B triple을 tree/close/read/watch/diff에서 거부하고, 동시 save A/B에서 A `saveId` + B ref append·commit, unknown/late response·event를 양언어에서 같은 결과로 거부한다. focused Node 14개, 전체 `npm test` 102개, `cargo test -p hello-agent-protocol` 21개, `tsc --noEmit`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다.
+- **다음 할 일**: 수정 commit을 동일 exact SHA로 독립 재검토한 뒤 통합하며, sidecar/Electron 소비자는 stored chat binding·active snapshot·persisted save session 조회를 IPC 처리 전에 같은 순서로 구현한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 workspace 명시 주소 계약)
+
+- **한 일**: 기존 projectId-only `M5BridgeV2`를 변경하지 않고 `M5BridgeV3`에 workspace 전용 tree/close/file read·save·watch/diff/event API를 별도 추가했다. 모든 요청과 상관관계가 있는 응답·descriptor·event는 `WorkspaceRefV1 { projectId, worktreeId, workspaceIdentity }`를 명시적으로 전달하고 exact echo하며, save chunk·commit은 begin에서 서버에 결합된 `saveId`로만 이어지도록 TypeScript/Rust validator를 고정했다.
+- **호환·안전 결정**: protocol framing/schema는 v1을 유지하고 G5 capability/event allowlist만 additive 확장했다. 기존 V2 메서드 순서·타입과 canonical project.getTree JSONL bytes는 공통 fixture에서 그대로 보존한다. chat·verified active standalone snapshot·workspace API와 event route는 같은 triple이어야 하며 cross-chat worktree, workspace alias, 잘못된 response/path/event/save 상관관계를 fail-closed 거부한다. 선택된 프로젝트·채팅 같은 암시적 전역 상태는 V3 계약에 두지 않는다.
+- **검증**: 공통 `g5-workspace-v1` fixture를 TypeScript와 Rust가 같은 결과로 판정한다. focused Node 4개, 전체 `npm test` 102개, `cargo test -p hello-agent-protocol` 21개, root 설치를 재사용한 `tsc --noEmit`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제 sidecar/Electron/UI 소비자와 사용자 프로젝트·유료 에이전트는 실행하지 않았다.
+- **다음 할 일**: 이 계약 commit을 독립 리뷰한 뒤 통합하고, sidecar와 Electron/preload 구현이 모든 workspace 응답·stream·event에서 같은 triple/saveId 상관관계를 검증하도록 소비한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 채팅 상태·단일 run 직렬화 계약)
+
+- **한 일**: 마지막 독립 재검토 P1을 반영해 `stopping`을 포함한 명시적 `ChatTransitionV1`을 Rust/TypeScript 양쪽에 추가했다. 전이는 identity·goal·settings revision·role snapshot·createdAt을 보존하고 updatedAt이 단조 증가하며, 완료·취소·폐기·복구 필요 상태는 일반 전이에서 terminal이다. 취소 transcript도 같은 전이 계약을 통과해야 하며 복구 abandon만 전용 transcript로 terminal chat/workspace를 바꾼다.
+- **실행 결정**: G5 run 시작 source chat은 `draft|running|waitingForUser|needsAttention`만 허용한다. 그 외 상태는 `chatStateBlocked`, 동일 chat/worktree/workspace의 `preparing|running|cancelling` run이 있으면 역할과 writer 여부에 관계없이 `runActive`이며 persist·lock·spawn 전에 거부한다. 판정 우선순위는 platform → abandoned workspace → recovery → chat state → active run → profile → writer lock → started로 manifest에 고정했다.
+- **검증**: 공통 fixture가 completed/canceled/discarded/reviewReady 시작 거부, active read-only와 active writer 직렬화, terminal 이전 run 뒤 needsAttention 재시도, stopping을 거친 clean cancel, 불변 identity/settings와 timestamp 역행 거부를 양언어에서 같은 결과로 판정한다. focused G5 Node 6개, 전체 `npm test` 98개, Rust protocol 19개, `npx tsc --noEmit`, owned Rust rustfmt check와 `git diff --check`를 통과했다.
+- **다음 할 일**: 이 상태 계약 수정 commit을 독립 재검토한 뒤 통합하고, sidecar가 start transaction에서 같은 우선순위와 단일 active run 검사를 구현한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 계약 독립 리뷰 수정)
+
+- **한 일**: G5 독립 리뷰의 P1 4건·P2 1건을 반영해 chat 생성의 verified active standalone snapshot과 전역 1:1 binding scan, 일반 run 시작의 platform·exact profile resolution·recovery 차단, cancel/termination/recovery 원자 transcript, abandon 뒤 terminal workspace/chat 상태를 Rust와 TypeScript 계약 및 공통 fixture에 추가했다. `planning`·`review` read-only fixture 실행은 writer lock 없이 허용하고 coding writer만 worktree ID와 workspace identity를 함께 잠근다.
+- **안전 결정**: Windows fixture 실행은 persist·lock·spawn 전에 거부하며 이 게이트의 결정적 fake 실행은 macOS만 허용한다. unavailable profile·default fallback·chat snapshot drift는 어떤 실행 기록도 만들지 않는다. 불확실한 취소는 chat/run/workspace lock/unresolved recovery를 함께 `recoveryRequired`로 남기고 이후 읽기/쓰기 역할의 모든 run을 막는다. 모든 process identity 소멸을 증명한 abandon 뒤 기존 snapshot/workspace/chat은 재사용할 수 없다. G5 ID 상한은 양 언어 모두 문자열 문자 수가 아니라 UTF-8 512 bytes다.
+- **검증**: 공통 valid/invalid/derived fixture에 Windows 선행 거부, exact profile drift/fallback, 전역 binding cursor·alias·page 경계, cancel-uncertain → recoveryRequired → read-only start 거부 → process proof 뒤 abandon, abandoned workspace 재사용 거부를 추가했다. `npm test` 98개, `cargo test -p hello-agent-protocol` 19개, `npx tsc --noEmit`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제/유료 에이전트·사용자 프로젝트·Windows 실행은 수행하지 않았다.
+- **다음 할 일**: 수정 commit을 독립 재검토한 뒤 통합 담당이 승인된 G5 계약을 `m5/coding-agent-ide`에 통합하고, sidecar/Electron/UI 소비자는 이 fail-closed transcript를 그대로 구현한다.
+
+### 2026-08-26 · by GPT-5 Codex (M5 G5 실행·복구 계약 기준선)
+
+- **한 일**: protocol framing·schema v1과 G4 `M5BridgeV2`를 깨지 않고 프로젝트 역할 설정, 영속 채팅, 결정적 fixture 실행·취소, 복구 조회·폐기를 더한 additive `M5BridgeV3`와 Rust/TypeScript runtime validator를 작성했다. 같은 `g5-v1` fixture가 역할/모델 snapshot, 명시적 project/worktree/workspace 신원, 공개 팀 메시지, run 상태·종료 증거, durable event 순서, page 상한을 양쪽에서 검증한다.
+- **안전 결정**: 새 채팅은 프로젝트 설정 revision과 정확한 세 역할 profile을 생성 시 고정하며 채팅별 override·silent model fallback을 허용하지 않는다. writer 시작은 run과 workspace lock을 한 transaction으로 commit한 뒤에만 spawn하고 동일 worktree의 두 번째 writer를 거부한다. 취소·종료가 불확실하면 lock을 유지한 `recoveryRequired`이며, G5 복구 해결은 모든 추적 process identity의 소멸이 증명된 뒤 `abandon`만 허용한다. 공개 `TeamMessage`는 결과·요청·상태만 저장하고 hidden reasoning field는 fail-closed다. `run.startAgentSmoke`는 protocol 예약만 유지하고 G5 capability와 bridge에는 광고하지 않으며 Windows 실행과 실제/유료 에이전트 실행은 비활성이다.
+- **검증**: `npm test` 98개(그중 focused G4/G5/protocol 계약 16개)와 `cargo test -p hello-agent-protocol` 19개, `npx tsc --noEmit --pretty false`, owned Rust `rustfmt --edition 2021 --check`, `git diff --check`를 통과했다. 실제 사용자 프로젝트·유료 에이전트·Windows 실행은 수행하지 않았다.
+- **다음 할 일**: 독립 계약 리뷰 뒤 이 기준선을 통합하고, Rust sidecar와 Electron/preload·renderer 구현을 서로 다른 worktree에서 고정된 V3 계약에 맞춰 진행한다.
 
 ### 2026-08-25 · by GPT-5 Codex (M5 G4 dispose 뒤 snapshot 결과 격리)
 
