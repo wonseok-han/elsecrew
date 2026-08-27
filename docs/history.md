@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Terra (M5 G5B renderer terminal durable hydration)
+
+- **V5는 trigger만**: `agent.runStateChanged` listener는 event의 `run`을 화면 상태에 직접 쓰지 않고 기존 chat/generation별 hydration latch로만 `chat.get` tail 재조회를 요청한다. zero-public-output terminal도 durable `agentRuns`가 `succeeded` 같은 terminal을 반환한 뒤에만 action lock이 풀리고, durable ledger가 아직 `running`이면 event의 terminal 주장만으로 바뀌지 않는다. `final` public event의 nonterminal 의미는 유지했다.
+- **동시성·호환**: public/state burst는 같은 in-flight hydration에 합치고 empty-tail response와 같은 turn의 state 통지는 한 번 더 durable tail을 확인한다. pending 채팅은 동일 재수화에 합치며 inactive 채팅은 raw state를 붙이지 않고 refresh 표시만 남긴다. dispose는 V3 chat·V4 public·V5 state listener를 모두 해제하고 V3/V4 bridge에 V5 listener가 없으면 기존 fixture UI를 유지한다.
+- **검증·경계**: focused renderer 14개, full Node 159개, TypeScript no-emit, Vite build, `git diff --check`를 통과했다. 실제 CLI·인증·모델·사용자 프로젝트는 호출하지 않았고, Electron/Rust/protocol/manifest는 수정하지 않았다. 다음은 이 renderer commit의 독립 리뷰와 Rust/Electron V5 producer 통합이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B ledger write amplification 계약 교정)
 
 - **감사 결함 교정**: 최초 G5B 계약의 개별 public event byte 합은 sidecar가 append마다 커지는 `public_events` 전체 배열 projection을 immutable ledger event로 저장하는 실제 쓰기 증폭을 반영하지 못했다. 16 MiB 한도를 run의 각 append 직후 전체 배열 snapshot canonical UTF-8 byte 길이를 누적한 값으로 다시 고정해 O(n²) storage amplification을 계측 대상으로 포함했다.

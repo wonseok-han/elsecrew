@@ -8,6 +8,7 @@ import {
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
+import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { ChatUiController, stateLabel } from "./chat-state.ts";
 
@@ -31,7 +32,7 @@ function loadMonaco(): Promise<MonacoApi> {
   return monacoLoader;
 }
 
-export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV4 }: { bridge?: M5BridgeV4 }) {
+export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV4 | M5BridgeV5 }: { bridge?: M5BridgeV4 | M5BridgeV5 }) {
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const [goal, setGoal] = useState("");

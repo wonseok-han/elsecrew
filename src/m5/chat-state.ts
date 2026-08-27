@@ -1,6 +1,7 @@
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
-import { isAgentChatDetailPageV1, type AgentRecoveryRecordV1, type AgentRunRecordV1, type AgentPublicEventV1 } from "./contracts/agent-adapter-v1.ts";
+import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
+import { isAgentChatDetailPageV1, type AgentRecoveryRecordV1, type AgentRunRecordV1, type AgentPublicEventV1, type AgentRunStateChangedV1 } from "./contracts/agent-adapter-v1.ts";
 import type {
   ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleIdV1, RoleProfileV1,
   RunRecordV1, TeamMessageV1, PreparedChatWorkspaceV1,
@@ -26,7 +27,7 @@ export interface ChatUiSnapshot {
   error: { message: string; detail: string } | null;
 }
 
-type M5ChatBridge = M5BridgeV3 | M5BridgeV4;
+type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5;
 type ChatDetail = Awaited<ReturnType<M5BridgeV4["getChat"]>>;
 
 /** Renderer-only projection. The sidecar owns all durable identity, state transitions and CAS. */
@@ -35,6 +36,7 @@ export class ChatUiController {
   readonly #listeners = new Set<() => void>();
   #unsubscribe: (() => void) | null = null;
   #agentUnsubscribe: (() => void) | null = null;
+  #agentStateUnsubscribe: (() => void) | null = null;
   #disposed = false;
   #generation = 0;
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: ChatDetail | null } | null = null;
@@ -50,10 +52,12 @@ export class ChatUiController {
     this.#unsubscribe = this.#bridge.onChatEvent((event) => this.#onEvent(event));
     const bridge = this.#agentBridge();
     if (bridge) this.#agentUnsubscribe = bridge.onAgentPublicEvent((event) => this.#onAgentPublicEvent(event));
+    const stateBridge = this.#agentStateBridge();
+    if (stateBridge) this.#agentStateUnsubscribe = stateBridge.onAgentRunStateChanged((event) => this.#onAgentRunStateChanged(event));
   }
   dispose(): void {
-    this.#disposed = true; this.#generation++; this.#unsubscribe?.(); this.#agentUnsubscribe?.();
-    this.#unsubscribe = null; this.#agentUnsubscribe = null; this.#hydrations.clear(); this.#hydrationTriggers.clear(); this.#listeners.clear();
+    this.#disposed = true; this.#generation++; this.#unsubscribe?.(); this.#agentUnsubscribe?.(); this.#agentStateUnsubscribe?.();
+    this.#unsubscribe = null; this.#agentUnsubscribe = null; this.#agentStateUnsubscribe = null; this.#hydrations.clear(); this.#hydrationTriggers.clear(); this.#listeners.clear();
   }
 
   async openProject(projectId: string): Promise<void> {
@@ -220,11 +224,18 @@ export class ChatUiController {
     try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("대화 기록 순서를 안전하게 확인하지 못했어요. 다시 열어 주세요.", error); }
   }
   #onAgentPublicEvent(event: AgentPublicEventV1): void {
+    this.#hydrateForAgentRun(event);
+  }
+  #onAgentRunStateChanged(event: AgentRunStateChangedV1): void {
+    // This notification only schedules durable chat.get hydration. Never render its run record directly.
+    this.#hydrateForAgentRun(event.run);
+  }
+  #hydrateForAgentRun(run: Pick<AgentRunRecordV1, "chatId" | "taskId" | "projectId" | "worktreeId" | "workspaceIdentity">): void {
     const pending = this.#pending;
-    if (pending && matchesAgentRun(event, pending.chat)) { void this.#hydrateChat(pending.chat, pending.generation); return; }
+    if (pending && matchesAgentRun(run, pending.chat)) { void this.#hydrateChat(pending.chat, pending.generation); return; }
     const chat = this.#state.activeChat;
-    if (chat && matchesAgentRun(event, chat)) { void this.#hydrateChat(chat, this.#generation); return; }
-    const inactive = this.#state.chats.find((candidate) => matchesAgentRun(event, candidate));
+    if (chat && matchesAgentRun(run, chat)) { void this.#hydrateChat(chat, this.#generation); return; }
+    const inactive = this.#state.chats.find((candidate) => matchesAgentRun(run, candidate));
     if (inactive) {
       this.#set({ refreshNeededChatIds: this.#state.refreshNeededChatIds.includes(inactive.chatId) ? this.#state.refreshNeededChatIds : [...this.#state.refreshNeededChatIds, inactive.chatId], notice: "다른 채팅에 새 에이전트 상태가 있어요. 그 채팅을 열면 저장된 기록을 안전하게 다시 확인해요." });
     }
@@ -272,9 +283,13 @@ export class ChatUiController {
     const agentRuns = isAgentChatDetailPageV1(detail) ? detail.agentRuns : [];
     this.#set({ activeChat: detail.chat, chats: this.#state.chats.map((item) => item.chatId === detail.chat.chatId ? detail.chat : item), messages, runs: detail.runs, agentRuns, activeRunId: detail.runs.find(isActive)?.runId ?? null });
   }
-  #agentBridge(): M5BridgeV4 | null {
+  #agentBridge(): M5BridgeV4 | M5BridgeV5 | null {
     const bridge = this.#bridge as Partial<M5BridgeV4>;
-    return typeof bridge.onAgentPublicEvent === "function" && typeof bridge.getAgentCapabilities === "function" && typeof bridge.startAgentRun === "function" && typeof bridge.cancelAgentRun === "function" ? bridge as M5BridgeV4 : null;
+    return typeof bridge.onAgentPublicEvent === "function" && typeof bridge.getAgentCapabilities === "function" && typeof bridge.startAgentRun === "function" && typeof bridge.cancelAgentRun === "function" ? bridge as M5BridgeV4 | M5BridgeV5 : null;
+  }
+  #agentStateBridge(): M5BridgeV5 | null {
+    const bridge = this.#bridge as Partial<M5BridgeV5>;
+    return typeof bridge.onAgentRunStateChanged === "function" ? bridge as M5BridgeV5 : null;
   }
   #endSwitch(message: string, error?: unknown): void { this.#pending = null; this.#set({ switching: false, notice: message, error: error ? { message, detail: error instanceof Error ? error.message : String(error) } : this.#state.error }); }
   #live(generation: number): boolean { return !this.#disposed && this.#generation === generation; }

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { ChatUiController } from "../src/m5/chat-state.ts";
 import type { M5BridgeV4 } from "../src/m5/contracts/bridge-v4.ts";
-import type { AgentPublicEventV1, AgentRunRecordV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import type { AgentPublicEventV1, AgentRunRecordV1, AgentRunStateChangedV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { ChatRecordV1, ProjectRoleSettingsV1, RoleProfileV1, TeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 const fingerprint = `sha256:${"a".repeat(64)}`;
@@ -25,10 +25,14 @@ function agentRun(record: ChatRecordV1, state: AgentRunRecordV1["state"] = "runn
 function publicEvent(record: ChatRecordV1, text = "raw text must never render"): AgentPublicEventV1 {
   return { schemaVersion: 1, eventId: "agent_event_01", chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", roleId: "coding", capabilityFingerprint: fingerprint, kind: "final", text, createdAt: "2026-08-27T00:00:01Z" };
 }
+function stateEvent(record: ChatRecordV1, state: AgentRunRecordV1["state"] = "succeeded", eventId = "agent_state_event_01"): AgentRunStateChangedV1 {
+  return { schemaVersion: 1, eventId, run: agentRun(record, state) as AgentRunStateChangedV1["run"] };
+}
 
 class AgentBridge {
   readonly chatListeners = new Set<(event: TeamMessageV1) => void>();
   readonly agentListeners = new Set<(event: AgentPublicEventV1) => void>();
+  readonly agentStateListeners = new Set<(event: AgentRunStateChangedV1) => void>();
   readonly chatA = chat("chat_a");
   readonly chatB = chat("chat_b");
   readonly calls: number[] = [];
@@ -50,6 +54,7 @@ class AgentBridge {
   async listRecoveries() { return { items: [], nextCursor: null }; }
   onChatEvent(listener: (event: TeamMessageV1) => void) { this.chatListeners.add(listener); return () => this.chatListeners.delete(listener); }
   onAgentPublicEvent(listener: (event: AgentPublicEventV1) => void) { this.agentListeners.add(listener); return () => this.agentListeners.delete(listener); }
+  onAgentRunStateChanged(listener: (event: AgentRunStateChangedV1) => void) { this.agentStateListeners.add(listener); return () => this.agentStateListeners.delete(listener); }
   async getAgentCapabilities() {
     return { canStart: !this.unavailable, blockedReason: this.unavailable ? "notAuthenticated" : null, fingerprint };
   }
@@ -69,6 +74,7 @@ class AgentBridge {
     return { outcome: "recoveryRequired", recovery: { recoveryId: "agent_recovery_01", ...run, source: "actualAgent" } };
   }
   emitAgent(event: AgentPublicEventV1) { for (const listener of this.agentListeners) listener(event); }
+  emitState(event: AgentRunStateChangedV1) { for (const listener of this.agentStateListeners) listener(event); }
 }
 
 async function open(bridge: AgentBridge): Promise<ChatUiController> {
@@ -91,6 +97,25 @@ test("actual public event는 원문을 붙이지 않고 durable chat.get 페이�
   controller.dispose();
 });
 
+test("zero-public-output terminal state notification rehydrates the durable ledger and releases the running lock", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.agentRuns = [agentRun(bridge.chatA, "running")]; bridge.calls.length = 0;
+  bridge.agentRuns = [agentRun(bridge.chatA, "succeeded")]; bridge.emitState(stateEvent(bridge.chatA, "succeeded")); await flush(); await flush();
+  assert.deepEqual(bridge.calls, [1]);
+  assert.equal(controller.snapshot().messages.length, 1, "the terminal notification carried no public output");
+  assert.equal(controller.snapshot().agentRuns[0]?.state, "succeeded");
+  await controller.startAgent("planning");
+  assert.equal(bridge.starts.length, 1, "the durable terminal state releases the actual-run action lock");
+  controller.dispose();
+});
+
+test("terminal notification record is ignored until the durable chat.get ledger agrees", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.agentRuns = [agentRun(bridge.chatA, "running")]; bridge.emitState(stateEvent(bridge.chatA, "succeeded")); await flush(); await flush();
+  assert.equal(controller.snapshot().agentRuns[0]?.state, "running");
+  controller.dispose();
+});
+
 test("public event burst는 하나의 hydration으로 합치고 durable sequence를 끝까지 연속 조회한다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.messages.push(message(bridge.chatA, 2, "second"), message(bridge.chatA, 3, "third"));
@@ -101,7 +126,16 @@ test("public event burst는 하나의 hydration으로 합치고 durable sequence
   controller.dispose();
 });
 
-test("last empty hydration response와 같은 turn의 public event는 durable tail을 자동 재조회한다", async () => {
+test("public and state notification burst coalesces through the same durable tail hydration latch", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.agentRuns = [agentRun(bridge.chatA, "succeeded")]; bridge.calls.length = 0;
+  bridge.emitState(stateEvent(bridge.chatA, "succeeded")); bridge.emitAgent(publicEvent(bridge.chatA)); await flush(); await flush();
+  assert.deepEqual(bridge.calls, [1, 1], "a burst consumes one extra empty-tail check, not a second concurrent hydration");
+  assert.equal(controller.snapshot().agentRuns[0]?.state, "succeeded");
+  controller.dispose();
+});
+
+test("last empty hydration response와 같은 turn의 terminal notification는 durable tail을 자동 재조회한다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.messages.push(message(bridge.chatA, 2, "second")); bridge.calls.length = 0;
   let releaseEmpty: (() => void) | undefined; let requestedEmpty: (() => void) | undefined;
@@ -112,7 +146,7 @@ test("last empty hydration response와 같은 turn의 public event는 durable ta
     if (input.afterEventSequence === 2 && !held) {
       held = true; requestedEmpty!();
       return new Promise((resolve) => { releaseEmpty = () => {
-        bridge.messages.push(message(bridge.chatA, 3, "tail after empty")); bridge.emitAgent(publicEvent(bridge.chatA));
+        bridge.messages.push(message(bridge.chatA, 3, "tail after empty")); bridge.agentRuns = [agentRun(bridge.chatA, "succeeded")]; bridge.emitState(stateEvent(bridge.chatA, "succeeded"));
         resolve({ chat: bridge.chatA, afterEventSequence: 2, messages: [], runs: [], nextEventSequence: null, agentRuns: bridge.agentRuns });
       }; });
     }
@@ -136,6 +170,15 @@ test("pending 및 inactive actual event는 텍스트를 보이지 않고 해당 
   controller.dispose();
 });
 
+test("inactive terminal notification only marks the chat for durable refresh", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.emitState(stateEvent(bridge.chatB, "succeeded")); await flush();
+  assert.deepEqual(controller.snapshot().messages.map((entry) => entry.text), ["durable goal"]);
+  assert.deepEqual(controller.snapshot().refreshNeededChatIds, ["chat_b"]);
+  assert.equal(controller.snapshot().agentRuns.length, 0);
+  controller.dispose();
+});
+
 test("switch pending 중 public event도 durable hydration에 합쳐지고 raw text를 pending 메시지로 넣지 않는다", async () => {
   const bridge = new AgentBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV4); controller.start(); await controller.openProject("project_a");
   let release: (() => void) | undefined;
@@ -153,12 +196,23 @@ test("switch pending 중 public event도 durable hydration에 합쳐지고 raw t
 test("current G5 bridge는 agent listener 없이 legacy fixture chat을 계속 연다", async () => {
   const bridge = new AgentBridge();
   const g5 = bridge as unknown as Record<string, unknown>;
-  g5.onAgentPublicEvent = undefined; g5.getAgentCapabilities = undefined; g5.startAgentRun = undefined; g5.cancelAgentRun = undefined;
+  g5.onAgentPublicEvent = undefined; g5.onAgentRunStateChanged = undefined; g5.getAgentCapabilities = undefined; g5.startAgentRun = undefined; g5.cancelAgentRun = undefined;
   const controller = new ChatUiController(g5 as unknown as M5BridgeV4);
   controller.start(); await controller.openProject("project_a"); const pending = await controller.prepareSwitch("chat_a", true); await controller.commitPrepared(pending!.chatId, true);
   assert.equal(controller.snapshot().agentRuns.length, 0);
   await controller.startAgent("coding");
   assert.match(controller.snapshot().notice ?? "", /실제 에이전트 실행/);
+  controller.dispose();
+});
+
+test("V4 bridge without the V5 state listener keeps the existing public-event fixture flow", async () => {
+  const bridge = new AgentBridge();
+  (bridge as unknown as Record<string, unknown>).onAgentRunStateChanged = undefined;
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV4); controller.start(); await controller.openProject("project_a");
+  const pending = await controller.prepareSwitch("chat_a", true); await controller.commitPrepared(pending!.chatId, true);
+  bridge.messages.push(message(bridge.chatA, 2, "durable V4 result")); bridge.agentRuns = [agentRun(bridge.chatA, "running")]; bridge.emitAgent(publicEvent(bridge.chatA)); await flush(); await flush();
+  assert.deepEqual(controller.snapshot().messages.map((entry) => entry.text), ["durable goal", "durable V4 result"]);
+  assert.equal(controller.snapshot().agentRuns[0]?.state, "running");
   controller.dispose();
 });
 
@@ -172,7 +226,7 @@ test("unavailable capability는 fallback 없이 막고 start는 immutable role s
   controller.dispose();
 });
 
-test("actual cancel은 full identity만 보내고 recoveryRequired를 legacy abandon으로 바꾸지 않으며 dispose가 두 listener를 정리한다", async () => {
+test("actual cancel은 full identity만 보내고 recoveryRequired를 legacy abandon으로 바꾸지 않으며 dispose가 모든 listener를 정리한다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.agentRuns = [agentRun(bridge.chatA)]; bridge.messages.push(message(bridge.chatA, 2, "ready")); bridge.emitAgent(publicEvent(bridge.chatA)); await flush();
   await controller.cancelAgentRun(controller.snapshot().agentRuns[0]!);
@@ -180,7 +234,7 @@ test("actual cancel은 full identity만 보내고 recoveryRequired를 legacy aba
   assert.equal(controller.snapshot().agentRecovery?.recoveryId, "agent_recovery_01");
   assert.match(controller.snapshot().notice ?? "", /복구가 필요/);
   controller.dispose();
-  assert.equal(bridge.chatListeners.size, 0); assert.equal(bridge.agentListeners.size, 0);
+  assert.equal(bridge.chatListeners.size, 0); assert.equal(bridge.agentListeners.size, 0); assert.equal(bridge.agentStateListeners.size, 0);
 });
 
 test("actual cancel recoveryRequired는 durable hydration 대기 중에도 새 fixture·actual 시작을 즉시 막는다", async () => {
