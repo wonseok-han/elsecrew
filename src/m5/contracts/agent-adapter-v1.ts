@@ -1,12 +1,15 @@
 import { sha256FileVersionV1 } from "./file-v1.ts";
-import { METHODS_V1, type ReadyPayloadV1 } from "./protocol-v1.ts";
+import {
+  METHODS_V1,
+  validateAgentPublicEventPayloadV1,
+  type ReadyPayloadV1,
+} from "./protocol-v1.ts";
 import {
   G5_CAPABILITIES_V1,
   G5_EVENT_PAGE_MAX_ITEMS_V1,
   G5_ID_MAX_BYTES_V1,
   G5_MODEL_SELECTOR_MAX_BYTES_V1,
   G5_PERMISSIONS_V1,
-  G5_PUBLIC_MESSAGE_MAX_BYTES_V1,
   G5_REASONING_EFFORT_MAX_BYTES_V1,
   G5_ROLE_IDS_V1,
   G5_RUN_STAGES_V1,
@@ -435,17 +438,7 @@ export function validateAgentRunStartTranscriptV1(value: unknown): AgentRunStart
 }
 
 export function validateAgentPublicEventV1(value: unknown): AgentPublicEventV1 {
-  const object = exactObject(value, [
-    "schemaVersion", "eventId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
-    "runId", "roleId", "capabilityFingerprint", "kind", "text", "createdAt",
-  ], "agent public event");
-  schema(object.schemaVersion);
-  id(object.eventId, "eventId");
-  validateAgentRunBindingFieldsV1(object);
-  oneOf(object.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind");
-  bounded(object.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
-  timestamp(object.createdAt, "createdAt");
-  return object as unknown as AgentPublicEventV1;
+  return validateAgentPublicEventPayloadV1(value) as AgentPublicEventV1;
 }
 
 export function validateAgentPublicEventAgainstRunV1(

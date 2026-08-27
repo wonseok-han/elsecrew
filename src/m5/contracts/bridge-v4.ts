@@ -9,6 +9,7 @@ import type {
   AgentRunAcceptedV1,
   AgentRunCancelRequestV1,
   AgentRunCancelResultV1,
+  AgentPublicEventV1,
   AgentRunStartRequestV1,
 } from "./agent-adapter-v1.ts";
 import type { M5BridgeV3 } from "./bridge-v3.ts";
@@ -59,6 +60,7 @@ export const M5_BRIDGE_V4_METHODS = [
   "cancelAgentRun",
   "inspectAgentRecovery",
   "resolveAgentRecovery",
+  "onAgentPublicEvent",
 ] as const;
 
 export type M5BridgeV4 = Omit<M5BridgeV3, "version" | "getChat"> & {
@@ -68,6 +70,7 @@ export type M5BridgeV4 = Omit<M5BridgeV3, "version" | "getChat"> & {
   cancelAgentRun(input: AgentRunCancelRequestV1): Promise<AgentRunCancelResultV1>;
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1>;
   resolveAgentRecovery(input: AgentRecoveryResolveRequestV1): Promise<AgentRecoveryResolveResultV1>;
+  onAgentPublicEvent(listener: (event: AgentPublicEventV1) => void): () => void;
   /** Current G5 has no agentRuns member; planned G5A adds it after capability negotiation. */
   getChat(input: ChatGetRequestV1): Promise<AgentChatGetResultV1>;
 };

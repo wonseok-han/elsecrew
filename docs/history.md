@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A normalized public-event 계약)
+
+- **공용 wire**: protocol v1에 `agent.publicEvent`를 additive 예약했다. envelope는 `chatId`·`taskId`·`runId`를 모두 요구하고, exact `AgentPublicEventV1` payload의 같은 세 identity와 일치해야 한다. payload는 `status|question|final`, bounded text와 전체 run identity/fingerprint만 허용하고 extra·reasoning·raw/private 필드는 계속 fail-closed다.
+- **namespace·bridge**: 공개 event ID를 `agent_event_` namespace로 고정하고 TypeScript/Rust validator와 골든을 함께 올렸다. V4는 generic bus나 request를 추가하지 않고 `onAgentPublicEvent(listener) -> unsubscribe` 전용 listener만 더했다. G5A capability/method 집합과 current G5 handshake는 변경하지 않았다.
+- **검증·경계**: envelope identity 누락/변조, public full binding/fingerprint 변조, legacy event ID, private/raw extra와 oversize를 양언어에서 거부했다. 전체 Node 137개, Rust protocol 26개, TypeScript no-emit, 변경 Rust format, scoped protocol clippy와 `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 sidecar가 이 event만 방출하고 Electron이 협상된 G5A에서만 전용 listener로 전달하도록 별도 소비자 파동에서 구현하는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust·Electron 통합과 recovery namespace 감사 종결)
 
 - **통합**: 독립 승인된 Electron V4 소비 경계 네 커밋을 `ba8eae2`·`6cfe094`·`2436498`·`ca6deaa`로, Rust fake adapter와 안전 수정 네 커밋을 `1040dc2`·`f3f6685`·`337d580`·`8d2cd6c`로 `m5/coding-agent-ide`에 통합했다. 기능 worktree의 공용 계약 동기화 중복 커밋은 제외했고, 충돌한 워크로그는 각 구현·리뷰 기록을 보존했다.

@@ -27,11 +27,14 @@ struct Contract {
     fingerprint: FingerprintContract,
     actual_run_id_namespace: String,
     actual_recovery_id_namespace: String,
+    actual_event_id_namespace: String,
     model_start_evidence: Vec<String>,
     start_outcomes: Vec<String>,
     capability_block_reasons: Vec<String>,
     argv_only_can_start: bool,
     public_events: Vec<String>,
+    public_event_protocol_event: String,
+    public_event_envelope_binding_fields: Vec<String>,
     accepted_binding_fields: Vec<String>,
     public_event_binding_fields: Vec<String>,
     chat_detail_capability_discriminator: String,
@@ -101,7 +104,8 @@ fn rust_matches_the_planned_g5a_manifest_without_changing_g5_ready() {
             "startAgentRun",
             "cancelAgentRun",
             "inspectAgentRecovery",
-            "resolveAgentRecovery"
+            "resolveAgentRecovery",
+            "onAgentPublicEvent"
         ]
     );
     assert!(!manifest.contract.actual_agent_advertised_by_current_g5);
@@ -162,6 +166,20 @@ fn rust_accepts_and_rejects_the_same_agent_adapter_golden_cases() {
 }
 
 #[test]
+fn rust_rejects_oversize_public_event_text() {
+    let (root, manifest) = manifest();
+    let cases: Cases = read_json(root.join(manifest.cases_file));
+    let mut event = cases
+        .valid
+        .into_iter()
+        .find(|entry| entry.name == "bounded-public-status-event")
+        .expect("bounded public event")
+        .value;
+    event["text"] = Value::String("a".repeat(G5_PUBLIC_MESSAGE_MAX_BYTES_V1 + 1));
+    assert!(validate_agent_public_event_v1(&event).is_err());
+}
+
+#[test]
 fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
     let (root, manifest) = manifest();
     assert_eq!(manifest.contract.execution_mode, "oneShot");
@@ -179,6 +197,7 @@ fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
         manifest.contract.actual_recovery_id_namespace,
         "agent_recovery_"
     );
+    assert_eq!(manifest.contract.actual_event_id_namespace, "agent_event_");
     assert_eq!(
         manifest.contract.model_start_evidence,
         ["runtimeVerified", "measuredExactVersion"]
@@ -200,6 +219,15 @@ fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
     assert_eq!(
         manifest.contract.public_events,
         ["status", "question", "final"]
+    );
+    assert_eq!(
+        manifest.contract.public_event_protocol_event,
+        "agent.publicEvent"
+    );
+    assert!(crate::EVENTS_V1.contains(&"agent.publicEvent"));
+    assert_eq!(
+        manifest.contract.public_event_envelope_binding_fields,
+        ["chatId", "taskId", "runId"]
     );
     assert_eq!(
         manifest.contract.accepted_binding_fields,

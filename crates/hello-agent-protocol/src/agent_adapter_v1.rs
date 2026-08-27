@@ -430,7 +430,7 @@ pub fn validate_agent_adapter_payload_v1(
         "runAccepted" => validate_run_accepted(value).map(|_| ()),
         "runRecord" => validate_run_record(value).map(|_| ()),
         "runStartTranscript" => validate_run_start_transcript(value),
-        "publicEvent" => validate_public_event(value).map(|_| ()),
+        "publicEvent" => validate_agent_public_event_v1(value).map(|_| ()),
         "terminationTranscript" => validate_termination_transcript(value),
         "agentChatDetailPage" => validate_agent_chat_detail_page(value),
         "runCancelRequest" => validate_agent_run_cancel_request(value).map(|_| ()),
@@ -794,10 +794,12 @@ fn validate_run_start_transcript(value: &Value) -> Result<(), AgentAdapterContra
     Ok(())
 }
 
-fn validate_public_event(value: &Value) -> Result<AgentPublicEventV1, AgentAdapterContractError> {
+pub fn validate_agent_public_event_v1(
+    value: &Value,
+) -> Result<AgentPublicEventV1, AgentAdapterContractError> {
     let event: AgentPublicEventV1 = from_value(value, "agent public event")?;
     schema(event.schema_version)?;
-    id(&event.event_id, "eventId")?;
+    agent_event_id(&event.event_id, "eventId")?;
     validate_run_binding(&binding_from_event(&event))?;
     one_of(&event.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind")?;
     bounded(&event.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
@@ -810,7 +812,7 @@ pub fn validate_agent_public_event_against_run_v1(
     expected: &AgentRunBindingV1,
 ) -> Result<AgentPublicEventV1, AgentAdapterContractError> {
     validate_run_binding(expected)?;
-    let event = validate_public_event(value)?;
+    let event = validate_agent_public_event_v1(value)?;
     assert_same_run_binding(expected, &binding_from_event(&event), "agent public event")?;
     Ok(event)
 }
@@ -1690,6 +1692,14 @@ fn agent_recovery_id(value: &str, name: &str) -> Result<(), AgentAdapterContract
         return fail(format!(
             "{name} must use the actual-agent recovery namespace"
         ));
+    }
+    Ok(())
+}
+
+fn agent_event_id(value: &str, name: &str) -> Result<(), AgentAdapterContractError> {
+    id(value, name)?;
+    if !value.starts_with("agent_event_") {
+        return fail(format!("{name} must use the actual-agent event namespace"));
     }
     Ok(())
 }

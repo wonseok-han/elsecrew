@@ -56,7 +56,8 @@
       "run.finished",
       "blob.chunk",
       "workspace.changed",
-      "workspace.blob.chunk"
+      "workspace.blob.chunk",
+      "agent.publicEvent"
     ],
     "bridgeMethods": ["getSystemStatus", "prepareQuit", "onSidecarEvent"],
     "workspaceEventAddressing": "payload.chatId+projectId+worktreeId+workspaceIdentity"
@@ -78,6 +79,10 @@
     {
       "file": "valid/workspace-event-payload-addressed.jsonl",
       "observeSession": false
+    },
+    {
+      "file": "valid/agent-public-event.jsonl",
+      "observeSession": false
     }
   ],
   "invalid": [
@@ -90,6 +95,10 @@
     { "file": "invalid/unknown-event.jsonl", "validator": "transcript" },
     { "file": "invalid/event-payload-array.jsonl", "validator": "transcript" },
     { "file": "invalid/run-event-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-public-event-missing-ids.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-public-event-envelope-chat-mismatch.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-public-event-envelope-task-mismatch.jsonl", "validator": "transcript" },
+    { "file": "invalid/agent-public-event-envelope-run-mismatch.jsonl", "validator": "transcript" },
     { "file": "invalid/workspace-event-missing-chat-id.jsonl", "validator": "transcript" },
     { "file": "invalid/duplicate-request-id.jsonl", "validator": "transcript" },
     { "file": "invalid/request-before-ready.jsonl", "validator": "transcript" },

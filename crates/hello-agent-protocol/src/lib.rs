@@ -69,6 +69,7 @@ pub const EVENTS_V1: &[&str] = &[
     "blob.chunk",
     "workspace.changed",
     "workspace.blob.chunk",
+    "agent.publicEvent",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,6 +454,25 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
             }
             if !event.payload.is_object() {
                 return Err(ProtocolError::new("event payload must be an object"));
+            }
+            if event.event == "agent.publicEvent" {
+                let (Some(chat_id), Some(task_id), Some(run_id)) =
+                    (&event.chat_id, &event.task_id, &event.run_id)
+                else {
+                    return Err(ProtocolError::new(
+                        "agent.publicEvent requires explicit chatId, taskId, and runId",
+                    ));
+                };
+                let public_event = agent_adapter_v1::validate_agent_public_event_v1(&event.payload)
+                    .map_err(|error| ProtocolError::new(error.to_string()))?;
+                if public_event.chat_id != *chat_id
+                    || public_event.task_id != *task_id
+                    || public_event.run_id != *run_id
+                {
+                    return Err(ProtocolError::new(
+                        "agent.publicEvent envelope identity does not match its payload",
+                    ));
+                }
             }
             let payload = event
                 .payload

@@ -56,6 +56,7 @@ export const EVENTS_V1 = [
   "blob.chunk",
   "workspace.changed",
   "workspace.blob.chunk",
+  "agent.publicEvent",
 ] as const;
 
 export type MethodV1 = (typeof METHODS_V1)[number];
@@ -365,6 +366,19 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
     fail("chat.eventAppended requires explicit chatId");
   }
   const payload = requireJsonObject(object.payload, "event payload");
+  if (object.event === "agent.publicEvent") {
+    if (!("chatId" in object) || !("taskId" in object) || !("runId" in object)) {
+      fail("agent.publicEvent requires explicit chatId, taskId, and runId");
+    }
+    const publicEvent = validateAgentPublicEventPayloadV1(payload);
+    if (
+      publicEvent.chatId !== object.chatId ||
+      publicEvent.taskId !== object.taskId ||
+      publicEvent.runId !== object.runId
+    ) {
+      fail("agent.publicEvent envelope identity does not match its payload");
+    }
+  }
   if (object.event === "workspace.changed") {
     exactKeys(payload, [
       "chatId",
@@ -399,6 +413,48 @@ function validateEvent(object: Record<string, unknown>): EventV1 {
   const event = object as unknown as EventV1;
   if (event.event === "system.ready") parseReadyPayload(event);
   return event;
+}
+
+export function validateAgentPublicEventPayloadV1(
+  value: unknown,
+): { chatId: string; taskId: string; runId: string } {
+  const payload = requireJsonObject(value, "agent public event payload");
+  exactKeys(payload, [
+    "schemaVersion", "eventId", "chatId", "taskId", "projectId", "worktreeId",
+    "workspaceIdentity", "runId", "roleId", "capabilityFingerprint", "kind", "text",
+    "createdAt",
+  ]);
+  if (payload.schemaVersion !== 1) fail("agent public event schemaVersion must be 1");
+  for (const name of [
+    "eventId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId",
+  ] as const) {
+    requireBoundedId(payload[name], `agent public event ${name}`);
+  }
+  if (!(payload.eventId as string).startsWith("agent_event_")) {
+    fail("agent public event eventId must use the actual-agent event namespace");
+  }
+  if (!(payload.runId as string).startsWith("agent_run_")) {
+    fail("agent public event runId must use the actual-agent run namespace");
+  }
+  if (!(["planning", "coding", "review"] as const).includes(payload.roleId as never)) {
+    fail("agent public event roleId is invalid");
+  }
+  if (typeof payload.capabilityFingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(payload.capabilityFingerprint)) {
+    fail("agent public event capabilityFingerprint must be an exact lowercase SHA-256 digest");
+  }
+  if (!(["status", "question", "final"] as const).includes(payload.kind as never)) {
+    fail("agent public event kind is invalid");
+  }
+  if (
+    typeof payload.text !== "string" || payload.text.trim() === "" ||
+    utf8Bytes(payload.text) > 64 * 1024
+  ) {
+    fail("agent public event text must be nonempty and bounded");
+  }
+  if (typeof payload.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(payload.createdAt)) {
+    fail("agent public event createdAt must be an RFC 3339 UTC second timestamp");
+  }
+  return payload as unknown as { chatId: string; taskId: string; runId: string };
 }
 
 function exactKeys(object: Record<string, unknown>, allowed: readonly string[]): void {
@@ -444,6 +500,12 @@ function requireJsonValue(value: unknown, name: string): void {
 
 function requireId(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) fail(`${name} is required`);
+}
+
+function requireBoundedId(value: unknown, name: string): asserts value is string {
+  if (typeof value !== "string" || value.trim() === "" || utf8Bytes(value) > 512) {
+    fail(`${name} must be nonempty and bounded`);
+  }
 }
 
 function requirePositiveInteger(value: unknown, name: string): asserts value is number {

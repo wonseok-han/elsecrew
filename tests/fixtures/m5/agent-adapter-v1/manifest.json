@@ -11,7 +11,7 @@
       "run.startFixture", "run.cancel", "recovery.list", "recovery.inspect", "recovery.markResolved",
       "agent.getCapabilities", "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent"
     ],
-    "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun", "cancelAgentRun", "inspectAgentRecovery", "resolveAgentRecovery"],
+    "bridgeMethodsAdded": ["getAgentCapabilities", "startAgentRun", "cancelAgentRun", "inspectAgentRecovery", "resolveAgentRecovery", "onAgentPublicEvent"],
     "actualAgentAdvertisedByCurrentG5": false,
     "agentSmokeAdvertised": false,
     "fixtureRunSemantics": "fakeOnly",
@@ -31,6 +31,7 @@
     },
     "actualRunIdNamespace": "agent_run_",
     "actualRecoveryIdNamespace": "agent_recovery_",
+    "actualEventIdNamespace": "agent_event_",
     "modelStartEvidence": ["runtimeVerified", "measuredExactVersion"],
     "startOutcomes": [
       "started", "platformUnsupported", "notInstalled", "installationIncomplete", "unsupportedVersion",
@@ -44,6 +45,8 @@
     ],
     "argvOnlyCanStart": false,
     "publicEvents": ["status", "question", "final"],
+    "publicEventProtocolEvent": "agent.publicEvent",
+    "publicEventEnvelopeBindingFields": ["chatId", "taskId", "runId"],
     "acceptedBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint"],
     "publicEventBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"],
     "chatDetailCapabilityDiscriminator": "agentRunsPresence",

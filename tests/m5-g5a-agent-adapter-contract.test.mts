@@ -37,8 +37,8 @@ import type { AgentChatGetResultV1 } from "../src/m5/contracts/agent-adapter-v1.
 import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 import { M5_BRIDGE_V3_METHODS } from "../src/m5/contracts/bridge-v3.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
-import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
-import { G5_CAPABILITIES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/run-recovery-v1.ts";
+import { decodeJsonl, EVENTS_V1, METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
+import { G5_CAPABILITIES_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "runTerminationPersistence" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
@@ -63,11 +63,14 @@ interface Manifest {
     };
     actualRunIdNamespace: string;
     actualRecoveryIdNamespace: string;
+    actualEventIdNamespace: string;
     modelStartEvidence: string[];
     startOutcomes: string[];
     capabilityBlockReasons: string[];
     argvOnlyCanStart: boolean;
     publicEvents: string[];
+    publicEventProtocolEvent: string;
+    publicEventEnvelopeBindingFields: string[];
     acceptedBindingFields: string[];
     publicEventBindingFields: string[];
     preflightFailure: { spawnCount: number; lockCount: number };
@@ -108,6 +111,7 @@ test("M5BridgeV4는 V3를 보존하고 actual-agent typed 메서드만 추가한
   const source = readFileSync(resolve("src/m5/contracts/bridge-v4.ts"), "utf8");
   assert.match(source, /Omit<M5BridgeV3, "version" \| "getChat">/);
   assert.match(source, /getChat\(input: ChatGetRequestV1\): Promise<AgentChatGetResultV1>/);
+  assert.match(source, /onAgentPublicEvent\(listener: \(event: AgentPublicEventV1\) => void\): \(\) => void/);
   assert.doesNotMatch(source, /startAgentSmoke|\bRunRecordV1\b|fixtureScenario|ipcRenderer|genericInvoke/);
 
   const planned = cases.valid.find((entry) => entry.validator === "agentChatDetailPage")?.value;
@@ -136,6 +140,37 @@ test("accepted와 public event는 golden full identity와 capability fingerprint
   }
 });
 
+test("agent.publicEvent envelope는 공개 payload와 chat/task/run identity를 exact 결속한다", () => {
+  const payload = cases.valid.find((entry) => entry.name === "bounded-public-status-event")?.value;
+  assert.ok(payload && typeof payload === "object");
+  const envelope = {
+    protocolVersion: 1,
+    kind: "event",
+    sidecarInstanceId: "sidecar_fixture_01",
+    streamId: "stream_agent_public_01",
+    seq: 1,
+    event: "agent.publicEvent",
+    chatId: "chat_01",
+    taskId: "task_01",
+    runId: "agent_run_01",
+    payload,
+  };
+  assert.doesNotThrow(() => decodeJsonl(JSON.stringify(envelope)));
+  assert.throws(() => validateAgentPublicEventV1({
+    ...(payload as Record<string, unknown>),
+    text: "a".repeat(G5_PUBLIC_MESSAGE_MAX_BYTES_V1 + 1),
+  }));
+  for (const field of ["chatId", "taskId", "runId"] as const) {
+    const missing = { ...envelope } as Record<string, unknown>;
+    delete missing[field];
+    assert.throws(() => decodeJsonl(JSON.stringify(missing)), `missing ${field}`);
+    assert.throws(
+      () => decodeJsonl(JSON.stringify({ ...envelope, [field]: `${field}_other` })),
+      `mismatched ${field}`,
+    );
+  }
+});
+
 test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를 명시한다", () => {
   assert.equal(manifest.contract.executionMode, "oneShot");
   assert.equal(manifest.contract.followUpMode, "nextRun");
@@ -148,11 +183,15 @@ test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를
   });
   assert.equal(manifest.contract.actualRunIdNamespace, "agent_run_");
   assert.equal(manifest.contract.actualRecoveryIdNamespace, "agent_recovery_");
+  assert.equal(manifest.contract.actualEventIdNamespace, "agent_event_");
   assert.deepEqual(manifest.contract.modelStartEvidence, ["runtimeVerified", "measuredExactVersion"]);
   assert.deepEqual(manifest.contract.startOutcomes, [...AGENT_START_OUTCOMES_V1]);
   assert.deepEqual(manifest.contract.capabilityBlockReasons, [...AGENT_CAPABILITY_BLOCK_REASONS_V1]);
   assert.equal(manifest.contract.argvOnlyCanStart, false);
   assert.deepEqual(manifest.contract.publicEvents, ["status", "question", "final"]);
+  assert.equal(manifest.contract.publicEventProtocolEvent, "agent.publicEvent");
+  assert.ok(EVENTS_V1.includes("agent.publicEvent"));
+  assert.deepEqual(manifest.contract.publicEventEnvelopeBindingFields, ["chatId", "taskId", "runId"]);
   assert.deepEqual(manifest.contract.acceptedBindingFields, [
     "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint",
   ]);
