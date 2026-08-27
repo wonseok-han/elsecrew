@@ -278,7 +278,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             Ok(InputMessage::Error(error)) => return Err(error),
             Err(RecvTimeoutError::Timeout) => {
                 let mut events = sidecar.poll_watch_events();
-                events.extend(sidecar.poll_runtime_events());
+                events.extend(sidecar.poll_runtime_events()?);
                 write_events(&mut session, &mut output, events)?;
                 continue;
             }
@@ -382,6 +382,7 @@ impl Sidecar {
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
         let mut projects = ProjectManager::new(database_path)?;
+        agent_runtime.validate_persisted_runs(&storage)?;
         agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         let capabilities = if agent_runtime.advertises_g5a() {
@@ -1253,13 +1254,13 @@ impl Sidecar {
         self.action_events(&action)
     }
 
-    fn poll_runtime_events(&mut self) -> Vec<EventV1> {
+    fn poll_runtime_events(&mut self) -> Result<Vec<EventV1>, SidecarError> {
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
         events.extend(
             self.agent_runtime
-                .poll(&mut self.storage, &mut self.projects),
+                .poll(&mut self.storage, &mut self.projects)?,
         );
-        self.g5_events(events)
+        Ok(self.g5_events(events))
     }
 
     fn g5_events(&self, events: Vec<chat::G5Event>) -> Vec<EventV1> {

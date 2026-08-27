@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust terminal event·resource budget 소비)
+
+- **상태 통지 순서**: fake actual-agent accepted response는 계속 event 없이 먼저 반환하고, 첫 poll이 같은 run 전용 stream의 seq 1 `running` `agent.runStateChanged`를 내보낸다. normalized public event가 이후 연속 seq를 사용하고, process-tree 종료·run/chat/lock/recovery 원자 저장이 성공한 뒤 전체 durable run을 담은 terminal state event가 마지막 seq로 나간다. zero-output도 `running→terminal`이며 `final` 뒤 process가 살아 있는 동안 run은 계속 `running`이다. cancel은 terminal transaction을 먼저 commit하고 response 뒤 running/terminal event를 전달한다.
+- **내구 예산·fail-closed**: actual run projection에 public event count·text UTF-8 bytes·full-array prefix snapshot 누적 bytes를 저장하고 sidecar 재시작 전 전체 ledger와 exact 대조한다. append는 기존 내구 counter와 다음 canonical full-array snapshot을 먼저 계산해 256 event·1 MiB text·16 MiB cumulative amplification 초과 event를 저장·공개하지 않는다. collector도 세 한도를 넘겨 성장하지 않으며, session active actual run 32개는 spawn·writer lock 전에 차단한다. proven 종료는 `failed/cleanExit`, 관찰·wait 불확실은 poisoned `recoveryRequired`다.
+- **오류 전파·검증**: `AgentRuntime::poll`이 process-tree observe, `try_wait`, tracker/public/terminal persistence와 state-event construction 오류를 stdio owner에 반환하도록 바꾸고, 오류 시 process-tree를 먼저 종료한 뒤 가능한 recovery evidence를 저장한다. 실패 주입은 poll observe·wait, durable counter 변조, terminal binding 변조, text +1 초과를 포함한다. sidecar unit 66 passed·1 ignored와 stdio process 8개, protocol 29개, Rust 2021 rustfmt, strict sidecar clippy, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트·Windows는 실행하지 않았다.
+- **다음 할 일**: 이 기능 commit을 독립 Rust 안전 리뷰한 뒤 Electron V5 registry budget/state listener와 renderer hydration trigger 소비자와 통합하고 최신 누적 하네스·QA를 실행한다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Electron V5 terminal notification·session budget)
 
 - **V5 알림 경계**: exact G5A negotiated session에서만 normalized `agent.runStateChanged`를 fixed `m5:v5:agent:run-state-changed`와 typed preload `onAgentRunStateChanged`로 전달했다. 이 표면은 새 renderer state source가 아니라 `chat.get`의 durable chat/run ledger를 다시 읽게 하는 hydration trigger뿐이며, V3/V4 channel과 raw/generic IPC 금지는 유지했다.

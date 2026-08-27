@@ -252,8 +252,16 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     validate_agent_adapter_payload_v1("runAccepted", &accepted).unwrap();
     let run_id = accepted["runId"].as_str().unwrap().to_string();
 
+    let EnvelopeV1::Event(running) = receive_envelope(&envelopes) else {
+        panic!("running state event")
+    };
+    assert_eq!(running.event, "agent.runStateChanged");
+    assert_eq!(running.seq, 1);
+    assert_eq!(running.payload["run"]["state"], "running");
+    validate_agent_adapter_payload_v1("runStateChanged", &running.payload).unwrap();
+
     let mut public_events = Vec::new();
-    for expected_seq in 1..=3 {
+    for expected_seq in 2..=4 {
         let EnvelopeV1::Event(event) = receive_envelope(&envelopes) else {
             panic!("public event")
         };
@@ -287,6 +295,13 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
             .collect::<Vec<_>>(),
         ["status", "question", "final"]
     );
+    let EnvelopeV1::Event(terminal) = receive_envelope(&envelopes) else {
+        panic!("terminal state event")
+    };
+    assert_eq!(terminal.event, "agent.runStateChanged");
+    assert_eq!(terminal.seq, 5);
+    assert_eq!(terminal.payload["run"]["state"], "succeeded");
+    validate_agent_adapter_payload_v1("runStateChanged", &terminal.payload).unwrap();
 
     write_request(
         &mut stdin,

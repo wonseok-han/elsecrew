@@ -777,6 +777,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         "build the sidecar binary for process gate"
     );
     let mut fixture = Fixture::new();
+    let database = fixture._root.path().join("data/hello-agent.sqlite3");
     let snapshot = fixture.snapshot("req_agent_clean_snapshot");
     let chat = fixture.create_chat(&snapshot, "clean agent", "req_agent_clean_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
@@ -836,7 +837,11 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
     );
     let mut wire_events = Vec::new();
     for _ in 0..100 {
-        wire_events.extend(runtime.poll(&mut fixture.storage, &mut fixture.projects));
+        wire_events.extend(
+            runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap(),
+        );
         if fixture
             .storage
             .projection_record("run", &run_id)
@@ -848,10 +853,19 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(wire_events.len(), 3);
+    assert_eq!(wire_events.len(), 5);
     for (index, event) in wire_events.iter().enumerate() {
-        assert_eq!(event.event, "agent.publicEvent");
         assert_eq!(event.seq, (index + 1) as u64);
+        assert_eq!(event.chat_id.as_deref(), Some(chat_id));
+        assert_eq!(event.task_id.as_deref(), chat["taskId"].as_str());
+        assert_eq!(event.run_id.as_deref(), Some(run_id.as_str()));
+    }
+    assert_eq!(wire_events[0].event, "agent.runStateChanged");
+    assert_eq!(wire_events[0].payload["run"]["state"], "running");
+    assert_eq!(wire_events[4].event, "agent.runStateChanged");
+    assert_eq!(wire_events[4].payload["run"]["state"], "succeeded");
+    for event in &wire_events[1..4] {
+        assert_eq!(event.event, "agent.publicEvent");
         assert_eq!(event.payload["chatId"], chat["chatId"]);
         assert_eq!(event.payload["taskId"], chat["taskId"]);
         assert_eq!(event.payload["projectId"], chat["projectId"]);
@@ -873,7 +887,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         .unwrap();
     }
     assert_eq!(
-        wire_events
+        wire_events[1..4]
             .iter()
             .map(|event| event.payload["kind"].as_str().unwrap())
             .collect::<Vec<_>>(),
@@ -886,6 +900,25 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         .unwrap();
     assert_eq!(terminal["record"]["state"], "succeeded");
     assert_eq!(terminal["termination"]["processesProvenGone"], true);
+    let public_events = terminal["public_events"].as_array().unwrap();
+    assert_eq!(terminal["public_event_count"], public_events.len() as u64);
+    assert_eq!(
+        terminal["public_text_bytes"],
+        public_events
+            .iter()
+            .map(|event| event["text"].as_str().unwrap().len() as u64)
+            .sum::<u64>()
+    );
+    assert_eq!(
+        terminal["public_ledger_cumulative_snapshot_bytes"],
+        hello_agent_protocol::agent_adapter_v1::agent_public_ledger_cumulative_snapshot_bytes_v1(
+            public_events
+        )
+        .unwrap() as u64
+    );
+    runtime
+        .validate_persisted_runs(&fixture.storage)
+        .expect("durable counters validate after run completion");
     let serialized = serde_json::to_string(&terminal).unwrap();
     assert!(!serialized.contains("token-never-persist"));
     assert!(!serialized.contains("\"type\":\"reasoning\""));
@@ -927,6 +960,314 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         &g5a_detail,
     )
     .unwrap();
+    drop(runtime);
+    let Fixture {
+        _root: root_guard,
+        storage,
+        projects,
+        chats,
+        ..
+    } = fixture;
+    drop(storage);
+    drop(projects);
+    drop(chats);
+    let reopened = Storage::open(&database).expect("reopen durable agent ledger");
+    AgentRuntime::blocked()
+        .validate_persisted_runs(&reopened)
+        .expect("reopened durable counters validate");
+    drop(reopened);
+    drop(root_guard);
+}
+
+#[test]
+fn no_output_and_delayed_final_emit_running_then_terminal_from_durable_state() {
+    for scenario in [FakeScenario::NoOutput, FakeScenario::FinalDelayed] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_terminal_snapshot");
+        let chat = fixture.create_chat(
+            &snapshot,
+            "terminal notification",
+            "req_agent_terminal_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "planning".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_terminal",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let mut wire = Vec::new();
+        let mut saw_final_while_running = false;
+        for _ in 0..150 {
+            let polled = runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            if polled.iter().any(|event| event.payload["kind"] == "final") {
+                saw_final_while_running = fixture
+                    .storage
+                    .projection_record("run", &run_id)
+                    .unwrap()
+                    .unwrap()["record"]["state"]
+                    == "running";
+            }
+            wire.extend(polled);
+            if fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap()["record"]["state"]
+                != "running"
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(wire.first().unwrap().event, "agent.runStateChanged");
+        assert_eq!(wire.first().unwrap().payload["run"]["state"], "running");
+        assert_eq!(wire.last().unwrap().event, "agent.runStateChanged");
+        assert_eq!(wire.last().unwrap().payload["run"]["state"], "succeeded");
+        assert_eq!(
+            wire.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            (1..=wire.len() as u64).collect::<Vec<_>>()
+        );
+        if scenario == FakeScenario::NoOutput {
+            assert_eq!(wire.len(), 2, "zero output still has both state events");
+        } else {
+            assert!(saw_final_while_running, "final is not terminal evidence");
+        }
+    }
+}
+
+#[test]
+fn public_text_plus_one_is_not_stored_or_emitted_and_cleanly_fails_run() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_agent_budget_snapshot");
+    let chat = fixture.create_chat(&snapshot, "event budget", "req_agent_budget_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("codex", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "planning".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            "req_agent_budget",
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    let mut projection = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    let events = (0..16)
+        .map(|index| {
+            json!({"schemaVersion":1,"eventId":format!("agent_event_budget_{index}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"roleId":"planning","capabilityFingerprint":capability["fingerprint"],"kind":"status","text":"x".repeat(64 * 1024),"createdAt":projection["record"]["updatedAt"]})
+        })
+        .collect::<Vec<_>>();
+    let cumulative =
+        hello_agent_protocol::agent_adapter_v1::agent_public_ledger_cumulative_snapshot_bytes_v1(
+            &events,
+        )
+        .unwrap();
+    assert!(
+        cumulative
+            <= hello_agent_protocol::AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1
+    );
+    let event_count = events.len();
+    projection.insert("public_events".into(), Value::Array(events));
+    projection.insert("public_event_count".into(), Value::from(event_count as u64));
+    projection.insert(
+        "public_text_bytes".into(),
+        Value::from(hello_agent_protocol::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 as u64),
+    );
+    projection.insert(
+        "public_ledger_cumulative_snapshot_bytes".into(),
+        Value::from(cumulative as u64),
+    );
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_test_agent_budget_boundary".into(),
+            request_id: None,
+            payload: projection,
+        }])
+        .unwrap();
+    let emitted = runtime
+        .poll(&mut fixture.storage, &mut fixture.projects)
+        .unwrap();
+    assert_eq!(
+        emitted
+            .iter()
+            .filter(|event| event.event == "agent.publicEvent")
+            .count(),
+        0
+    );
+    assert_eq!(emitted[0].payload["run"]["state"], "running");
+    assert_eq!(emitted.last().unwrap().payload["run"]["state"], "failed");
+    let terminal = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        terminal["public_text_bytes"],
+        hello_agent_protocol::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 as u64
+    );
+    assert_eq!(terminal["record"]["state"], "failed");
+    assert_eq!(terminal["termination"]["outcome"], "cleanExit");
+    assert_eq!(terminal["termination"]["processesProvenGone"], true);
+}
+
+#[test]
+fn poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persistence() {
+    for scenario in [
+        FakeScenario::PollObserveFailure,
+        FakeScenario::PollWaitFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_poll_failure_snapshot");
+        let chat = fixture.create_chat(&snapshot, "poll failure", "req_agent_poll_failure_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "planning".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_poll_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap();
+        let error = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect_err("poll failure must reach the stdio owner");
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        let terminal = fixture
+            .storage
+            .projection_record("run", run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal["record"]["state"], "recoveryRequired");
+        assert_eq!(terminal["termination"]["processesProvenGone"], false);
+        assert_eq!(terminal["recovery"]["state"], "unresolved");
+    }
+}
+
+#[test]
+fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() {
+    for corrupt_counter in [true, false] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_persist_failure_snapshot");
+        let chat = fixture.create_chat(
+            &snapshot,
+            "persistence failure",
+            "req_agent_persist_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::NoOutput);
+        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "planning".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_persist_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        if corrupt_counter {
+            let mut projection = fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap();
+            projection.insert("public_event_count".into(), Value::from(1));
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "run",
+                    aggregate_id: run_id.clone(),
+                    operation_id: "op_test_agent_counter_corrupt".into(),
+                    request_id: None,
+                    payload: projection,
+                }])
+                .unwrap();
+            assert!(runtime.validate_persisted_runs(&fixture.storage).is_err());
+        } else {
+            let mut projection = fixture
+                .storage
+                .projection_record("chat", chat_id)
+                .unwrap()
+                .unwrap();
+            projection["record"]["chatId"] = Value::String(String::new());
+            fixture
+                .storage
+                .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                    aggregate_type: "chat",
+                    aggregate_id: chat_id.into(),
+                    operation_id: "op_test_agent_chat_corrupt".into(),
+                    request_id: None,
+                    payload: projection,
+                }])
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let error = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect_err("poll persistence/construction failure must propagate");
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(
+            error.detail().contains("counter")
+                || error.detail().contains("count does not match")
+                || error.detail().contains("agent run record")
+                || error.detail().contains("identity differs")
+                || error.detail().contains("chatId"),
+            "{}",
+            error.detail()
+        );
+    }
 }
 
 #[test]
@@ -968,6 +1309,14 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     let canceled = runtime
         .cancel(&mut fixture.storage, &mut fixture.projects, &identity)
         .unwrap();
+    assert_eq!(canceled.events.len(), 2);
+    assert_eq!(canceled.events[0].event, "agent.runStateChanged");
+    assert_eq!(canceled.events[0].payload["run"]["state"], "running");
+    assert_eq!(canceled.events[1].event, "agent.runStateChanged");
+    assert_eq!(
+        canceled.events[1].payload["run"]["state"],
+        "recoveryRequired"
+    );
     assert_eq!(canceled.result["outcome"], "recoveryRequired");
     assert_eq!(
         canceled.result["termination"]["writerLockState"],
@@ -1126,6 +1475,9 @@ fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed
                 .cancel(&mut fixture.storage, &mut fixture.projects, &identity)
                 .unwrap();
             assert_eq!(result.result["outcome"], "canceled");
+            assert_eq!(result.events.len(), 2);
+            assert_eq!(result.events[0].payload["run"]["state"], "running");
+            assert_eq!(result.events[1].payload["run"]["state"], "canceled");
             let lock = fixture
                 .storage
                 .projection_record(
@@ -1138,7 +1490,9 @@ fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed
             assert_eq!(lock["poisoned"], false);
         } else {
             for _ in 0..100 {
-                let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+                let _ = runtime
+                    .poll(&mut fixture.storage, &mut fixture.projects)
+                    .unwrap();
                 if fixture
                     .storage
                     .projection_record("run", &run_id)
@@ -1237,7 +1591,9 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
     let run_id = started.result["runId"].as_str().unwrap().to_string();
     let mut projection = Map::new();
     for _ in 0..100 {
-        let _ = runtime.poll(&mut fixture.storage, &mut fixture.projects);
+        let _ = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
         projection = fixture
             .storage
             .projection_record("run", &run_id)

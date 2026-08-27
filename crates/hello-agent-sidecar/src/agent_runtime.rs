@@ -17,11 +17,17 @@ use hello_agent_core::proctree::{
     TerminationConfig, TreeTracker,
 };
 use hello_agent_protocol::agent_adapter_v1::{
-    compute_agent_capability_fingerprint_v1, validate_agent_adapter_payload_v1,
-    AgentCapabilitySnapshotV1, AgentDiscoveryEvidenceV1, AgentExecutableIdentityV1,
-    AgentModelCapabilityV1, AgentResolvedProfileV1, AgentRunStartRequestV1,
+    agent_public_events_snapshot_bytes_v1, compute_agent_capability_fingerprint_v1,
+    validate_agent_adapter_payload_v1, AgentCapabilitySnapshotV1, AgentDiscoveryEvidenceV1,
+    AgentExecutableIdentityV1, AgentModelCapabilityV1, AgentResolvedProfileV1,
+    AgentRunStartRequestV1,
 };
 use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5_RUN_START_CHAT_STATES_V1};
+use hello_agent_protocol::{
+    AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1, AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
+    AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1,
+    AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
+};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -46,6 +52,10 @@ enum ProviderMode {
 pub(crate) enum FakeScenario {
     Clean,
     #[cfg_attr(not(test), allow(dead_code))]
+    NoOutput,
+    #[cfg_attr(not(test), allow(dead_code))]
+    FinalDelayed,
+    #[cfg_attr(not(test), allow(dead_code))]
     CancelClean,
     CancelUncertain,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -62,6 +72,10 @@ pub(crate) enum FakeScenario {
     ObserveFailure,
     #[cfg_attr(not(test), allow(dead_code))]
     ReleaseFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    PollObserveFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    PollWaitFailure,
 }
 
 struct ActiveAgentRun {
@@ -70,10 +84,17 @@ struct ActiveAgentRun {
     receiver: Receiver<Result<Vec<u8>, String>>,
     identity: RunIdentity,
     profile: AgentResolvedProfileV1,
+    capability_fingerprint: String,
     stream_id: String,
     next_wire_seq: u64,
+    running_event_pending: bool,
     scenario: FakeScenario,
     evidence_failed: bool,
+}
+
+enum PublicEventPersistError {
+    BudgetExceeded,
+    Fault(ProjectFailure),
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +140,8 @@ impl AgentRuntime {
             {
                 continue;
             }
+            validate_projection_public_budget(&projection)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let run_id = projection["run_id"].as_str().unwrap_or_default();
             let chat_id = projection["chat_id"].as_str().unwrap_or_default();
             let chat_projection = actual_chat_projection(storage, chat_id)
@@ -211,6 +234,16 @@ impl AgentRuntime {
         Ok(())
     }
 
+    pub(crate) fn validate_persisted_runs(&self, storage: &Storage) -> Result<(), SidecarError> {
+        for projection in storage.projection_records("run")? {
+            if projection.get("source_kind").and_then(Value::as_str) == Some(SOURCE_KIND) {
+                validate_projection_public_budget(&projection)
+                    .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
         Self {
             provider: ProviderMode::FakeExact,
@@ -254,6 +287,11 @@ impl AgentRuntime {
         .map_err(contract_failure)?;
         if self.preparing_to_quit {
             return Err(ProjectFailure::recovery("sidecar is preparing to quit"));
+        }
+        if active_run_limit_reached(self.active.len()) {
+            return Err(ProjectFailure::recovery(
+                "actual-agent session active-run limit reached before spawn or lock",
+            ));
         }
         let chat_projection = actual_chat_projection(storage, &request.chat_id)?;
         let chat = chat_projection["record"].clone();
@@ -684,8 +722,10 @@ impl AgentRuntime {
                     run_id: run_id.clone(),
                 },
                 profile: profile.clone(),
+                capability_fingerprint: capability.fingerprint.clone(),
                 stream_id: stream_id.clone(),
                 next_wire_seq: 0,
+                running_event_pending: true,
                 scenario: self.scenario,
                 evidence_failed: false,
             },
@@ -700,23 +740,67 @@ impl AgentRuntime {
         &mut self,
         storage: &mut Storage,
         projects: &mut ProjectManager,
-    ) -> Vec<G5Event> {
+    ) -> Result<Vec<G5Event>, SidecarError> {
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
         let mut events = Vec::new();
         for run_id in ids {
-            let mut public = Vec::new();
+            if self
+                .active
+                .get(&run_id)
+                .is_some_and(|active| active.running_event_pending)
+            {
+                let event = self
+                    .state_event(storage, &run_id)
+                    .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
+                events.push(event);
+            }
+            let projection = actual_run_projection(storage, &run_id)
+                .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
+            let persisted_budget = stored_public_budget(&projection)
+                .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
+            let persisted_events = projection["public_events"].as_array().ok_or_else(|| {
+                self.fail_poll(
+                    storage,
+                    projects,
+                    &run_id,
+                    ProjectFailure::recovery("actual-agent public event ledger is missing"),
+                )
+            })?;
+            let mut public =
+                PublicEventCollector::new(&projection, persisted_events, persisted_budget);
             let mut parser_failed = false;
+            let mut budget_exceeded = false;
             let mut observed_identities = None;
+            let mut observation_failure = None;
+            let mut collection_failure = None;
             if let Some(active) = self.active.get_mut(&run_id) {
-                if active.tracker.observe(&SystemProcTable).is_err() {
+                let observed = if active.scenario == FakeScenario::PollObserveFailure {
+                    Err("injected poll observation failure".to_string())
+                } else {
+                    active.tracker.observe(&SystemProcTable)
+                };
+                if let Err(error) = observed {
                     active.evidence_failed = true;
+                    observation_failure = Some(ProjectFailure::recovery(format!(
+                        "agent process-tree observation failed: {error}"
+                    )));
                 }
                 observed_identities = Some(active.tracker.tracked_identities());
                 loop {
                     match active.receiver.try_recv() {
                         Ok(Ok(line)) => match normalize_vendor_event(&line) {
                             Ok(NormalizedVendorEvent::Public { kind, text }) => {
-                                public.push((kind, text))
+                                match public.push(active, kind, text) {
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        budget_exceeded = true;
+                                        break;
+                                    }
+                                    Err(error) => {
+                                        collection_failure = Some(error);
+                                        break;
+                                    }
+                                }
                             }
                             Ok(NormalizedVendorEvent::Private) => {}
                             Err(_) => {
@@ -732,25 +816,58 @@ impl AgentRuntime {
                     }
                 }
             }
-            if let Some(identities) = observed_identities {
-                if let Err(_error) = persist_tracker_snapshot(storage, &run_id, &identities) {
-                    if let Some(active) = self.active.get_mut(&run_id) {
-                        active.evidence_failed = true;
-                    }
-                }
+            if let Some(error) = observation_failure {
+                return Err(self.fail_poll(storage, projects, &run_id, error));
             }
-            let finished = self
-                .active
-                .get_mut(&run_id)
-                .and_then(|active| active.launcher.try_wait().ok())
-                .flatten();
+            if let Some(error) = collection_failure.take() {
+                return Err(self.fail_poll(storage, projects, &run_id, error));
+            }
+            if let Some(identities) = observed_identities {
+                persist_tracker_snapshot(storage, &run_id, &identities)
+                    .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
+            }
+            let finished = match self.active.get_mut(&run_id) {
+                Some(active) => match if active.scenario == FakeScenario::PollWaitFailure {
+                    Err(std::io::Error::other("injected poll wait failure"))
+                } else {
+                    active.launcher.try_wait()
+                } {
+                    Ok(status) => status,
+                    Err(error) => {
+                        return Err(self.fail_poll(
+                            storage,
+                            projects,
+                            &run_id,
+                            ProjectFailure::recovery(format!(
+                                "agent launcher wait failed: {error}"
+                            )),
+                        ))
+                    }
+                },
+                None => {
+                    return Err(SidecarError::new(
+                        "agentRuntimeFailure",
+                        "active agent run disappeared",
+                    ))
+                }
+            };
             if finished.is_some() {
                 if let Some(active) = self.active.get_mut(&run_id) {
                     loop {
                         match active.receiver.recv_timeout(Duration::from_millis(100)) {
                             Ok(Ok(line)) => match normalize_vendor_event(&line) {
                                 Ok(NormalizedVendorEvent::Public { kind, text }) => {
-                                    public.push((kind, text))
+                                    match public.push(active, kind, text) {
+                                        Ok(true) => {}
+                                        Ok(false) => {
+                                            budget_exceeded = true;
+                                            break;
+                                        }
+                                        Err(error) => {
+                                            collection_failure = Some(error);
+                                            break;
+                                        }
+                                    }
                                 }
                                 Ok(NormalizedVendorEvent::Private) => {}
                                 Err(_) => {
@@ -767,24 +884,42 @@ impl AgentRuntime {
                     }
                 }
             }
-            for (kind, text) in public {
-                if let Ok(event) = self.persist_public_event(storage, &run_id, kind, &text) {
-                    events.push(event);
-                } else {
-                    parser_failed = true;
-                    break;
+            if let Some(error) = collection_failure {
+                return Err(self.fail_poll(storage, projects, &run_id, error));
+            }
+            for event in public.into_events() {
+                match self.persist_public_event(storage, &run_id, event) {
+                    Ok(event) => events.push(event),
+                    Err(PublicEventPersistError::BudgetExceeded) => {
+                        budget_exceeded = true;
+                        break;
+                    }
+                    Err(PublicEventPersistError::Fault(error)) => {
+                        return Err(self.fail_poll(storage, projects, &run_id, error));
+                    }
                 }
             }
-            if parser_failed || finished.is_some() {
-                let state = if parser_failed || finished.is_some_and(|status| !status.success()) {
+            if parser_failed || budget_exceeded || finished.is_some() {
+                let state = if parser_failed
+                    || budget_exceeded
+                    || finished.is_some_and(|status| !status.success())
+                {
                     "failed"
                 } else {
                     "succeeded"
                 };
-                let _ = self.finish(storage, projects, &run_id, state, false);
+                let terminal = self
+                    .finish(storage, projects, &run_id, state, false)
+                    .map_err(|error| {
+                        SidecarError::new(
+                            "agentRuntimeFailure",
+                            format!("agent terminal persistence failed: {}", error.detail),
+                        )
+                    })?;
+                events.push(terminal);
             }
         }
-        events
+        Ok(events)
     }
 
     pub(crate) fn cancel(
@@ -800,7 +935,12 @@ impl AgentRuntime {
         if !same_identity(&active.identity, identity) {
             return Err(ProjectFailure::manifest("agent run identity differs"));
         }
-        self.finish(storage, projects, &identity.run_id, "canceled", true)?;
+        let mut events = Vec::new();
+        if active.running_event_pending {
+            events.push(self.state_event(storage, &identity.run_id)?);
+        }
+        let terminal_event = self.finish(storage, projects, &identity.run_id, "canceled", true)?;
+        events.push(terminal_event);
         let projection = actual_run_projection(storage, &identity.run_id)?;
         let run = projection["record"].clone();
         let termination = projection["termination"].clone();
@@ -812,10 +952,7 @@ impl AgentRuntime {
         };
         let result = json!({"schemaVersion":1,"request":identity_value(identity),"run":run,"termination":termination,"recovery":recovery,"outcome":outcome});
         validate_agent_adapter_payload_v1("runCancelResult", &result).map_err(contract_failure)?;
-        Ok(G5Action {
-            result,
-            events: Vec::new(),
-        })
+        Ok(G5Action { result, events })
     }
 
     pub(crate) fn inspect_recovery(
@@ -1039,60 +1176,141 @@ impl AgentRuntime {
         &mut self,
         storage: &mut Storage,
         run_id: &str,
-        kind: &str,
-        text: &str,
-    ) -> Result<G5Event, ProjectFailure> {
-        let active = self
-            .active
-            .get_mut(run_id)
-            .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
-        let projection = actual_run_projection(storage, run_id)?;
+        event: Value,
+    ) -> Result<G5Event, PublicEventPersistError> {
+        let active = self.active.get_mut(run_id).ok_or_else(|| {
+            PublicEventPersistError::Fault(ProjectFailure::manifest("active agent run is missing"))
+        })?;
+        let projection =
+            actual_run_projection(storage, run_id).map_err(PublicEventPersistError::Fault)?;
+        let current = stored_public_budget(&projection).map_err(PublicEventPersistError::Fault)?;
         let mut events = projection["public_events"]
             .as_array()
             .cloned()
-            .unwrap_or_default();
-        let event = json!({"schemaVersion":1,"eventId":format!("agent_event_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"roleId":active.profile.role_id,"capabilityFingerprint":projection["record"]["capabilityFingerprint"],"kind":kind,"text":text,"createdAt":now()});
-        validate_agent_adapter_payload_v1("publicEvent", &event).map_err(contract_failure)?;
+            .ok_or_else(|| {
+                PublicEventPersistError::Fault(ProjectFailure::recovery(
+                    "actual-agent public event ledger is missing",
+                ))
+            })?;
+        validate_agent_adapter_payload_v1("publicEvent", &event)
+            .map_err(contract_failure)
+            .map_err(PublicEventPersistError::Fault)?;
+        validate_public_event_binding(&event, active).map_err(PublicEventPersistError::Fault)?;
+        if projection["record"]["capabilityFingerprint"] != active.capability_fingerprint {
+            return Err(PublicEventPersistError::Fault(ProjectFailure::recovery(
+                "durable agent run fingerprint differs from the accepted run",
+            )));
+        }
+        let event_text_bytes = event["text"]
+            .as_str()
+            .ok_or_else(|| {
+                PublicEventPersistError::Fault(ProjectFailure::recovery(
+                    "validated public event text is missing",
+                ))
+            })?
+            .len();
+        let event_count = current
+            .event_count
+            .checked_add(1)
+            .ok_or(PublicEventPersistError::BudgetExceeded)?;
+        let text_bytes = current
+            .text_bytes
+            .checked_add(event_text_bytes)
+            .ok_or(PublicEventPersistError::BudgetExceeded)?;
         events.push(event.clone());
+        let next_snapshot_bytes = agent_public_events_snapshot_bytes_v1(&events)
+            .map_err(contract_failure)
+            .map_err(PublicEventPersistError::Fault)?;
+        let cumulative_snapshot_bytes = current
+            .cumulative_snapshot_bytes
+            .checked_add(next_snapshot_bytes)
+            .ok_or(PublicEventPersistError::BudgetExceeded)?;
+        let next_budget = PublicBudgetMetrics {
+            event_count,
+            text_bytes,
+            cumulative_snapshot_bytes,
+        };
+        if enforce_public_budget(next_budget).is_err() {
+            return Err(PublicEventPersistError::BudgetExceeded);
+        }
         let mut updated = projection;
         updated.remove("last_event_sequence");
         updated.insert("public_events".into(), Value::Array(events));
-        let mut chat_projection = actual_chat_projection(storage, &active.identity.chat_id)?;
+        apply_public_budget(&mut updated, next_budget);
+        let mut chat_projection = actual_chat_projection(storage, &active.identity.chat_id)
+            .map_err(PublicEventPersistError::Fault)?;
         let sequence = chat_projection["durable_event_sequence"]
             .as_u64()
             .unwrap_or(0)
             + 1;
+        let kind = event["kind"].as_str().unwrap_or_default();
+        let text = event["text"].as_str().unwrap_or_default();
         let message_kind = if kind == "final" { "role" } else { "status" };
         let role_id = (kind == "final").then(|| active.profile.role_id.clone());
         let message = json!({"schemaVersion":1,"messageId":format!("message_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"worktreeId":active.identity.worktree_id,"eventSequence":sequence,"kind":message_kind,"roleId":role_id,"runId":run_id,"text":text,"createdAt":now()});
-        validate_g5_payload_v1("teamMessage", &message).map_err(|error| {
-            ProjectFailure::manifest(format!("invalid actual-agent public message: {error}"))
-        })?;
+        validate_g5_payload_v1("teamMessage", &message)
+            .map_err(|error| {
+                ProjectFailure::manifest(format!("invalid actual-agent public message: {error}"))
+            })
+            .map_err(PublicEventPersistError::Fault)?;
         chat_projection.remove("last_event_sequence");
         chat_projection.insert("last_message".into(), message);
         chat_projection.insert("durable_event_sequence".into(), Value::from(sequence));
         let operation = event["eventId"].as_str().unwrap_or_default();
-        storage.upsert_projection_records_atomic(vec![
-            ProjectionUpsert {
-                aggregate_type: "run",
-                aggregate_id: run_id.into(),
-                operation_id: format!("op_agent_public_{operation}"),
-                request_id: None,
-                payload: updated,
-            },
-            ProjectionUpsert {
-                aggregate_type: "chat",
-                aggregate_id: active.identity.chat_id.clone(),
-                operation_id: format!("op_agent_public_chat_{operation}"),
-                request_id: None,
-                payload: chat_projection,
-            },
-        ])?;
+        storage
+            .upsert_projection_records_atomic(vec![
+                ProjectionUpsert {
+                    aggregate_type: "run",
+                    aggregate_id: run_id.into(),
+                    operation_id: format!("op_agent_public_{operation}"),
+                    request_id: None,
+                    payload: updated,
+                },
+                ProjectionUpsert {
+                    aggregate_type: "chat",
+                    aggregate_id: active.identity.chat_id.clone(),
+                    operation_id: format!("op_agent_public_chat_{operation}"),
+                    request_id: None,
+                    payload: chat_projection,
+                },
+            ])
+            .map_err(ProjectFailure::from)
+            .map_err(PublicEventPersistError::Fault)?;
         active.next_wire_seq += 1;
         Ok(G5Event {
             stream_id: active.stream_id.clone(),
             seq: active.next_wire_seq,
             event: "agent.publicEvent",
+            chat_id: Some(active.identity.chat_id.clone()),
+            task_id: Some(active.identity.task_id.clone()),
+            run_id: Some(run_id.into()),
+            payload: event,
+        })
+    }
+
+    fn state_event(&mut self, storage: &Storage, run_id: &str) -> Result<G5Event, ProjectFailure> {
+        let active = self
+            .active
+            .get_mut(run_id)
+            .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
+        let projection = actual_run_projection(storage, run_id)?;
+        let run = projection["record"].clone();
+        let event = json!({
+            "schemaVersion":1,
+            "eventId":format!("agent_state_event_{}",Uuid::new_v4().simple()),
+            "run":run,
+        });
+        validate_agent_adapter_payload_v1("runStateChanged", &event).map_err(contract_failure)?;
+        validate_state_event_binding(&event, active)?;
+        active.next_wire_seq = active
+            .next_wire_seq
+            .checked_add(1)
+            .ok_or_else(|| ProjectFailure::recovery("agent wire sequence overflow"))?;
+        active.running_event_pending = false;
+        Ok(G5Event {
+            stream_id: active.stream_id.clone(),
+            seq: active.next_wire_seq,
+            event: "agent.runStateChanged",
             chat_id: Some(active.identity.chat_id.clone()),
             task_id: Some(active.identity.task_id.clone()),
             run_id: Some(run_id.into()),
@@ -1107,7 +1325,7 @@ impl AgentRuntime {
         run_id: &str,
         requested_state: &str,
         cancelling: bool,
-    ) -> Result<(), ProjectFailure> {
+    ) -> Result<G5Event, ProjectFailure> {
         let mut active = self
             .active
             .remove(run_id)
@@ -1239,7 +1457,56 @@ impl AgentRuntime {
             )?);
         }
         storage.upsert_projection_records_atomic(upserts)?;
-        Ok(())
+        let state_event = json!({
+            "schemaVersion":1,
+            "eventId":format!("agent_state_event_{}",Uuid::new_v4().simple()),
+            "run":run,
+        });
+        validate_agent_adapter_payload_v1("runStateChanged", &state_event)
+            .map_err(contract_failure)?;
+        validate_state_event_binding(&state_event, &active)?;
+        let seq = active
+            .next_wire_seq
+            .checked_add(1)
+            .ok_or_else(|| ProjectFailure::recovery("agent wire sequence overflow"))?;
+        Ok(G5Event {
+            stream_id: active.stream_id,
+            seq,
+            event: "agent.runStateChanged",
+            chat_id: Some(active.identity.chat_id),
+            task_id: Some(active.identity.task_id),
+            run_id: Some(run_id.into()),
+            payload: state_event,
+        })
+    }
+
+    fn fail_poll(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        run_id: &str,
+        failure: ProjectFailure,
+    ) -> SidecarError {
+        if let Some(active) = self.active.get_mut(run_id) {
+            active.evidence_failed = true;
+        }
+        let cleanup = if self.active.contains_key(run_id) {
+            self.finish(storage, projects, run_id, "failed", false)
+                .err()
+                .map(|error| error.detail)
+        } else {
+            None
+        };
+        SidecarError::new(
+            "agentRuntimeFailure",
+            match cleanup {
+                Some(cleanup) => format!(
+                    "{}; fail-closed terminal persistence also failed: {cleanup}",
+                    failure.detail
+                ),
+                None => failure.detail,
+            },
+        )
     }
 }
 
@@ -1465,6 +1732,10 @@ fn preflight_outcome(
     "started"
 }
 
+fn active_run_limit_reached(active_runs: usize) -> bool {
+    active_runs >= AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1
+}
+
 fn resolve_prompt(
     storage: &Storage,
     chat_id: &str,
@@ -1528,7 +1799,8 @@ fn agent_run_projection(
     internal: Option<Value>,
     events: Vec<Value>,
 ) -> Result<Map<String, Value>, ProjectFailure> {
-    Ok(json!({"run_id":run["runId"],"chat_id":run["chatId"],"state":run["state"],"worktree_path":manifest["worktreePath"],"source_kind":SOURCE_KIND,"record":run,"workspace_manifest":manifest,"barrier":barrier,"process_identity_internal":internal,"public_events":events,"termination":null,"recovery":null}).as_object().expect("agent projection").clone())
+    let budget = public_budget_metrics(&events)?;
+    Ok(json!({"run_id":run["runId"],"chat_id":run["chatId"],"state":run["state"],"worktree_path":manifest["worktreePath"],"source_kind":SOURCE_KIND,"record":run,"workspace_manifest":manifest,"barrier":barrier,"process_identity_internal":internal,"public_events":events,"public_event_count":budget.event_count,"public_text_bytes":budget.text_bytes,"public_ledger_cumulative_snapshot_bytes":budget.cumulative_snapshot_bytes,"termination":null,"recovery":null}).as_object().expect("agent projection").clone())
 }
 fn actual_run_projection(
     storage: &Storage,
@@ -1542,7 +1814,241 @@ fn actual_run_projection(
             "run is not an actual-agent ledger record",
         ));
     }
+    stored_public_budget(&value)?;
     Ok(value)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PublicBudgetMetrics {
+    event_count: usize,
+    text_bytes: usize,
+    cumulative_snapshot_bytes: usize,
+}
+
+struct PublicEventCollector<'a> {
+    projection: &'a Map<String, Value>,
+    persisted_events: &'a [Value],
+    persisted_budget: PublicBudgetMetrics,
+    events: Vec<Value>,
+    text_bytes: usize,
+    snapshot_bytes: usize,
+}
+
+impl<'a> PublicEventCollector<'a> {
+    fn new(
+        projection: &'a Map<String, Value>,
+        persisted_events: &'a [Value],
+        persisted_budget: PublicBudgetMetrics,
+    ) -> Self {
+        Self {
+            projection,
+            persisted_events,
+            persisted_budget,
+            events: Vec::new(),
+            text_bytes: 0,
+            snapshot_bytes: 0,
+        }
+    }
+
+    fn push(
+        &mut self,
+        active: &ActiveAgentRun,
+        kind: &str,
+        text: String,
+    ) -> Result<bool, ProjectFailure> {
+        let event_count = self
+            .persisted_budget
+            .event_count
+            .checked_add(self.events.len())
+            .and_then(|value| value.checked_add(1));
+        let text_bytes = self
+            .persisted_budget
+            .text_bytes
+            .checked_add(self.text_bytes)
+            .and_then(|value| value.checked_add(text.len()));
+        if event_count.is_none_or(|value| value > AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1)
+            || text_bytes.is_none_or(|value| value > AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1)
+        {
+            return Ok(false);
+        }
+        let event_text_bytes = text.len();
+        let event = json!({"schemaVersion":1,"eventId":format!("agent_event_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":active.identity.run_id,"roleId":active.profile.role_id,"capabilityFingerprint":active.capability_fingerprint,"kind":kind,"text":text,"createdAt":now()});
+        validate_agent_adapter_payload_v1("publicEvent", &event).map_err(contract_failure)?;
+        validate_public_event_binding(&event, active)?;
+        if self.projection["record"]["capabilityFingerprint"] != active.capability_fingerprint {
+            return Err(ProjectFailure::recovery(
+                "durable agent run fingerprint differs from the accepted run",
+            ));
+        }
+        let mut prospective =
+            Vec::with_capacity(self.persisted_events.len() + self.events.len() + 1);
+        prospective.extend_from_slice(self.persisted_events);
+        prospective.extend_from_slice(&self.events);
+        prospective.push(event.clone());
+        let next_snapshot =
+            agent_public_events_snapshot_bytes_v1(&prospective).map_err(contract_failure)?;
+        let cumulative = self
+            .persisted_budget
+            .cumulative_snapshot_bytes
+            .checked_add(self.snapshot_bytes)
+            .and_then(|value| value.checked_add(next_snapshot));
+        if cumulative.is_none_or(|value| {
+            value > AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1
+        }) {
+            return Ok(false);
+        }
+        self.text_bytes = self
+            .text_bytes
+            .checked_add(event_text_bytes)
+            .ok_or_else(|| ProjectFailure::recovery("public event text byte counter overflow"))?;
+        self.snapshot_bytes = self
+            .snapshot_bytes
+            .checked_add(next_snapshot)
+            .ok_or_else(|| ProjectFailure::recovery("public event snapshot counter overflow"))?;
+        self.events.push(event);
+        Ok(true)
+    }
+
+    fn into_events(self) -> Vec<Value> {
+        self.events
+    }
+}
+
+fn public_budget_metrics(events: &[Value]) -> Result<PublicBudgetMetrics, ProjectFailure> {
+    let event_count = events.len();
+    let text_bytes = events.iter().try_fold(0_usize, |total, event| {
+        validate_agent_adapter_payload_v1("publicEvent", event).map_err(contract_failure)?;
+        let text = event["text"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::manifest("public event text is missing"))?;
+        total
+            .checked_add(text.len())
+            .ok_or_else(|| ProjectFailure::recovery("public event text byte counter overflow"))
+    })?;
+    let cumulative_snapshot_bytes =
+        hello_agent_protocol::agent_adapter_v1::agent_public_ledger_cumulative_snapshot_bytes_v1(
+            events,
+        )
+        .map_err(contract_failure)?;
+    let metrics = PublicBudgetMetrics {
+        event_count,
+        text_bytes,
+        cumulative_snapshot_bytes,
+    };
+    enforce_public_budget(metrics)?;
+    Ok(metrics)
+}
+
+fn enforce_public_budget(metrics: PublicBudgetMetrics) -> Result<(), ProjectFailure> {
+    if metrics.event_count > AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1
+        || metrics.text_bytes > AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1
+        || metrics.cumulative_snapshot_bytes
+            > AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1
+    {
+        return Err(ProjectFailure::recovery(
+            "actual-agent public event resource budget exceeded",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_projection_public_budget(
+    projection: &Map<String, Value>,
+) -> Result<PublicBudgetMetrics, ProjectFailure> {
+    let events = projection["public_events"]
+        .as_array()
+        .ok_or_else(|| ProjectFailure::recovery("actual-agent public event ledger is missing"))?;
+    let metrics = public_budget_metrics(events)?;
+    let stored = [
+        ("public_event_count", metrics.event_count),
+        ("public_text_bytes", metrics.text_bytes),
+        (
+            "public_ledger_cumulative_snapshot_bytes",
+            metrics.cumulative_snapshot_bytes,
+        ),
+    ];
+    let present = stored
+        .iter()
+        .filter(|(name, _)| projection.get(*name).is_some())
+        .count();
+    if present == 0 {
+        // G5A projections created before the G5B counters remain readable and are upgraded on
+        // their next write. A partially present or mismatched counter set is never accepted.
+        return Ok(metrics);
+    }
+    if present != stored.len()
+        || stored.iter().any(|(name, expected)| {
+            projection.get(*name).and_then(Value::as_u64) != Some(*expected as u64)
+        })
+    {
+        return Err(ProjectFailure::recovery(
+            "actual-agent public event durable counters do not match the ledger",
+        ));
+    }
+    Ok(metrics)
+}
+
+fn stored_public_budget(
+    projection: &Map<String, Value>,
+) -> Result<PublicBudgetMetrics, ProjectFailure> {
+    let events = projection["public_events"]
+        .as_array()
+        .ok_or_else(|| ProjectFailure::recovery("actual-agent public event ledger is missing"))?;
+    let names = [
+        "public_event_count",
+        "public_text_bytes",
+        "public_ledger_cumulative_snapshot_bytes",
+    ];
+    let present = names
+        .iter()
+        .filter(|name| projection.get(**name).is_some())
+        .count();
+    if present == 0 {
+        return public_budget_metrics(events);
+    }
+    if present != names.len() {
+        return Err(ProjectFailure::recovery(
+            "actual-agent public event durable counters are incomplete",
+        ));
+    }
+    let read = |name: &str| {
+        projection
+            .get(name)
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                ProjectFailure::recovery(format!(
+                    "actual-agent public event durable counter {name} is invalid"
+                ))
+            })
+    };
+    let metrics = PublicBudgetMetrics {
+        event_count: read("public_event_count")?,
+        text_bytes: read("public_text_bytes")?,
+        cumulative_snapshot_bytes: read("public_ledger_cumulative_snapshot_bytes")?,
+    };
+    if metrics.event_count != events.len() {
+        return Err(ProjectFailure::recovery(
+            "actual-agent public event count does not match the ledger",
+        ));
+    }
+    enforce_public_budget(metrics)?;
+    Ok(metrics)
+}
+
+fn apply_public_budget(projection: &mut Map<String, Value>, metrics: PublicBudgetMetrics) {
+    projection.insert(
+        "public_event_count".into(),
+        Value::from(metrics.event_count as u64),
+    );
+    projection.insert(
+        "public_text_bytes".into(),
+        Value::from(metrics.text_bytes as u64),
+    );
+    projection.insert(
+        "public_ledger_cumulative_snapshot_bytes".into(),
+        Value::from(metrics.cumulative_snapshot_bytes as u64),
+    );
 }
 fn actual_chat_projection(
     storage: &Storage,
@@ -1663,6 +2169,45 @@ fn process_value(identity: ProcIdentity, path: &Path, gone: bool) -> Value {
 fn identity_value(identity: &RunIdentity) -> Value {
     json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id})
 }
+fn validate_state_event_binding(
+    event: &Value,
+    active: &ActiveAgentRun,
+) -> Result<(), ProjectFailure> {
+    let run = &event["run"];
+    if run["runId"] != active.identity.run_id
+        || run["chatId"] != active.identity.chat_id
+        || run["taskId"] != active.identity.task_id
+        || run["projectId"] != active.identity.project_id
+        || run["worktreeId"] != active.identity.worktree_id
+        || run["workspaceIdentity"] != active.identity.workspace_identity
+        || run["selectedProfile"]["roleId"] != active.profile.role_id
+        || run["capabilityFingerprint"] != active.capability_fingerprint
+    {
+        return Err(ProjectFailure::recovery(
+            "agent run state event identity differs from the accepted run",
+        ));
+    }
+    Ok(())
+}
+fn validate_public_event_binding(
+    event: &Value,
+    active: &ActiveAgentRun,
+) -> Result<(), ProjectFailure> {
+    if event["runId"] != active.identity.run_id
+        || event["chatId"] != active.identity.chat_id
+        || event["taskId"] != active.identity.task_id
+        || event["projectId"] != active.identity.project_id
+        || event["worktreeId"] != active.identity.worktree_id
+        || event["workspaceIdentity"] != active.identity.workspace_identity
+        || event["roleId"] != active.profile.role_id
+        || event["capabilityFingerprint"] != active.capability_fingerprint
+    {
+        return Err(ProjectFailure::recovery(
+            "agent public event identity differs from the accepted run",
+        ));
+    }
+    Ok(())
+}
 fn same_identity(left: &RunIdentity, right: &RunIdentity) -> bool {
     left.chat_id == right.chat_id
         && left.task_id == right.task_id
@@ -1690,6 +2235,8 @@ fn now() -> String {
 fn scenario_name(value: FakeScenario) -> &'static str {
     match value {
         FakeScenario::Clean => "clean",
+        FakeScenario::NoOutput => "no-output",
+        FakeScenario::FinalDelayed => "final-delayed",
         FakeScenario::CancelClean => "cancel-clean",
         FakeScenario::CancelUncertain => "cancel-uncertain",
         FakeScenario::Malformed => "malformed",
@@ -1699,6 +2246,8 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::IdentityFailure => "clean",
         FakeScenario::ObserveFailure => "clean",
         FakeScenario::ReleaseFailure => "clean",
+        FakeScenario::PollObserveFailure => "cancel-clean",
+        FakeScenario::PollWaitFailure => "cancel-clean",
     }
 }
 fn contract_failure(error: impl std::fmt::Display) -> ProjectFailure {
@@ -1751,6 +2300,8 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String> {
 pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarError> {
     if ![
         "clean",
+        "no-output",
+        "final-delayed",
         "cancel-clean",
         "cancel-uncertain",
         "malformed",
@@ -1821,6 +2372,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         return Ok(());
     }
     match scenario {
+        "no-output" => {}
         "malformed" => println!("not-json"),
         "oversized" => println!(
             "{{\"type\":\"status\",\"text\":\"{}\"}}",
@@ -1847,6 +2399,12 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
                 thread::sleep(Duration::from_secs(30));
                 let _ = grandchild.kill();
                 let _ = grandchild.wait();
+            } else if scenario == "final-delayed" {
+                println!("{{\"type\":\"final\",\"text\":\"Done\"}}");
+                std::io::stdout().flush().map_err(|error| {
+                    SidecarError::new("fixtureFailure", format!("fixture flush: {error}"))
+                })?;
+                thread::sleep(Duration::from_millis(500));
             } else if scenario.starts_with("cancel-") {
                 thread::sleep(Duration::from_secs(30));
             } else {
@@ -1859,4 +2417,109 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
 
 pub(crate) fn run_agent_fixture_grandchild() {
     thread::sleep(Duration::from_secs(30));
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn public_event(index: usize, text: String) -> Value {
+        json!({
+            "schemaVersion":1,
+            "eventId":format!("agent_event_{index}"),
+            "chatId":"chat_a",
+            "taskId":"task_a",
+            "projectId":"project_a",
+            "worktreeId":"worktree_a",
+            "workspaceIdentity":"workspace_a",
+            "runId":"agent_run_a",
+            "roleId":"planning",
+            "capabilityFingerprint":format!("sha256:{}", "0".repeat(64)),
+            "kind":"status",
+            "text":text,
+            "createdAt":"2026-08-27T00:00:00Z",
+        })
+    }
+
+    #[test]
+    fn exact_resource_boundaries_pass_and_plus_one_fails() {
+        for (exact, over) in [
+            (
+                PublicBudgetMetrics {
+                    event_count: AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
+                    text_bytes: 0,
+                    cumulative_snapshot_bytes: 0,
+                },
+                PublicBudgetMetrics {
+                    event_count: AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 + 1,
+                    text_bytes: 0,
+                    cumulative_snapshot_bytes: 0,
+                },
+            ),
+            (
+                PublicBudgetMetrics {
+                    event_count: 0,
+                    text_bytes: AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
+                    cumulative_snapshot_bytes: 0,
+                },
+                PublicBudgetMetrics {
+                    event_count: 0,
+                    text_bytes: AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1 + 1,
+                    cumulative_snapshot_bytes: 0,
+                },
+            ),
+            (
+                PublicBudgetMetrics {
+                    event_count: 0,
+                    text_bytes: 0,
+                    cumulative_snapshot_bytes:
+                        AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1,
+                },
+                PublicBudgetMetrics {
+                    event_count: 0,
+                    text_bytes: 0,
+                    cumulative_snapshot_bytes:
+                        AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1 + 1,
+                },
+            ),
+        ] {
+            enforce_public_budget(exact).expect("exact boundary");
+            assert!(enforce_public_budget(over).is_err(), "+1 must fail");
+        }
+    }
+
+    #[test]
+    fn active_actual_run_limit_is_checked_at_exact_boundary() {
+        assert!(!active_run_limit_reached(
+            AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1 - 1
+        ));
+        assert!(active_run_limit_reached(
+            AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1
+        ));
+    }
+
+    #[test]
+    fn valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one() {
+        let mut count_events = (0..AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1)
+            .map(|index| public_event(index, "x".into()))
+            .collect::<Vec<_>>();
+        let count_metrics = public_budget_metrics(&count_events).expect("exact count boundary");
+        assert_eq!(
+            count_metrics.event_count,
+            AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1
+        );
+        count_events.push(public_event(count_events.len(), "x".into()));
+        assert!(public_budget_metrics(&count_events).is_err());
+
+        let mut text_events = (0..16)
+            .map(|index| public_event(index, "x".repeat(64 * 1024)))
+            .collect::<Vec<_>>();
+        let text_metrics = public_budget_metrics(&text_events).expect("exact text boundary");
+        assert_eq!(
+            text_metrics.text_bytes,
+            AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1
+        );
+        text_events.push(public_event(text_events.len(), "x".into()));
+        assert!(public_budget_metrics(&text_events).is_err());
+    }
 }
