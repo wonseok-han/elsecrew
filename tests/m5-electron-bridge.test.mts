@@ -145,6 +145,22 @@ function measuredCapability(): AgentCapabilitySnapshotV1 {
   return { ...snapshot, fingerprint: computeAgentCapabilityFingerprintV1(snapshot as AgentCapabilitySnapshotV1) };
 }
 
+function acceptedAgentRun(fingerprint: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    runId: "agent_run_accepted",
+    chatId: "chat_01",
+    taskId: "task_01",
+    projectId: "project_01",
+    worktreeId: "worktree_01",
+    workspaceIdentity: "workspace_01",
+    roleId: "planning",
+    capabilityFingerprint: fingerprint,
+    state: "preparing",
+    ...overrides,
+  };
+}
+
 function eventLine(event: EventV1) {
   return `${JSON.stringify(event)}\n`;
 }
@@ -258,19 +274,69 @@ test("G5A only wires exact negotiated capabilities and validates actual-agent re
   child.stdout.write(responseLine(capabilityRequest.requestId, measuredCapability()));
   assert.equal((await capabilities).canStart, true);
 
+  const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const detailRequest = JSON.parse(child.writes[2] ?? "{}") as { requestId: string; method: string };
+  assert.equal(detailRequest.method, "chat.get");
+  child.stdout.write(responseLine(detailRequest.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+  assert.equal((await detail).chat.taskId, "task_01");
+
   const start = client.startAgentRun({
     chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"],
     expectedCapabilityFingerprint: measuredCapability().fingerprint,
   });
-  const startRequest = JSON.parse(child.writes[2] ?? "{}") as { requestId: string; method: string; params: unknown };
+  const startRequest = JSON.parse(child.writes[3] ?? "{}") as { requestId: string; method: string; params: unknown };
   assert.equal(startRequest.method, "run.startAgent");
   assert.deepEqual(startRequest.params, {
     chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"],
     expectedCapabilityFingerprint: measuredCapability().fingerprint,
   });
-  child.stdout.write(responseLine(startRequest.requestId, { schemaVersion: 1, runId: "agent_run_01", chatId: "chat_other", roleId: "planning", state: "preparing" }));
-  await assert.rejects(start, /chatId does not match request/);
+  child.stdout.write(responseLine(startRequest.requestId, acceptedAgentRun(measuredCapability().fingerprint, { chatId: "chat_other" })));
+  await assert.rejects(start, /accepted agent run changed chatId/);
   assert.equal(child.terminations, 1, "cross-chat actual-run response must poison the session");
+});
+
+test("G5A accepted agent runs bind every chat context field and the requested fingerprint", async () => {
+  const fingerprint = measuredCapability().fingerprint;
+  const mutated: Array<[string, string]> = [
+    ["chatId", "chat_other"], ["taskId", "task_other"], ["projectId", "project_other"],
+    ["worktreeId", "worktree_other"], ["workspaceIdentity", "workspace_other"],
+    ["roleId", "review"], ["capabilityFingerprint", `sha256:${"1".repeat(64)}`],
+  ];
+  for (const [field, replacement] of mutated) {
+    const { child, client } = createClient();
+    const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+    const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+    const detailRequest = JSON.parse(child.writes[0] ?? "{}") as { requestId: string };
+    child.stdout.write(responseLine(detailRequest.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+    await detail;
+    const start = client.startAgentRun({
+      chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fingerprint,
+    });
+    const startRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string };
+    child.stdout.write(responseLine(startRequest.requestId, acceptedAgentRun(fingerprint, { [field]: replacement })));
+    await assert.rejects(start, new RegExp(`accepted agent run changed ${field}`));
+    assert.equal(child.terminations, 1, `${field} mutation must poison the planned G5A session`);
+  }
+});
+
+test("G5A accepted run registry rejects a reused run ID before any future public event route", async () => {
+  const { child, client } = createClient();
+  const fingerprint = measuredCapability().fingerprint;
+  const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+  const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const detailRequest = JSON.parse(child.writes[0] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(detailRequest.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
+  await detail;
+  const input = { chatId: "chat_01", roleId: "planning" as const, inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fingerprint };
+  const first = client.startAgentRun(input);
+  const firstRequest = JSON.parse(child.writes[1] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(firstRequest.requestId, acceptedAgentRun(fingerprint)));
+  assert.equal((await first).runId, "agent_run_accepted");
+  const duplicate = client.startAgentRun(input);
+  const duplicateRequest = JSON.parse(child.writes[2] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(duplicateRequest.requestId, acceptedAgentRun(fingerprint)));
+  await assert.rejects(duplicate, /accepted actual-agent runId was reused/);
+  assert.equal(child.terminations, 1);
 });
 
 test("G5A keeps actual and fixture ledgers separate and fails closed on raw agent events", async () => {

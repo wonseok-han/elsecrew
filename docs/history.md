@@ -16,6 +16,12 @@
 - **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
 - **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron accepted binding 소비 보정)
+
+- **수정**: approved Bridge V4 contract의 `AgentRunAcceptedV1` full identity를 Electron consumer에 적용했다. planned G5A에서 `chat.get`으로 검증해 보관한 현재 chat의 task/project/worktree/workspace identity, 시작 요청의 chat/role, 요청 capability fingerprint와 accepted response를 exact 비교한다. 어느 한 필드라도 변조되면 session을 poison하며, 정상 accepted binding은 이후 normalized public-event route가 계약될 때만 사용할 private registry에 보관한다.
+- **공개 경계·호환**: 아직 sidecar protocol event/IPC 이름으로 negotiated되지 않은 normalized `AgentPublicEventV1` route는 임의로 추가하지 않았다. `agent_run_` raw chat event 및 raw run event의 listener 비노출/poison 경계를 유지했다. V4 `getChat`은 current G5의 `agentRuns` 없는 detail과 planned G5A ledger detail의 union을 반환하며, current G5가 actual ledger를 전제하지 않는 회귀를 추가했다.
+- **검증·다음**: fake transcript로 chat/task/project/worktree/workspace/role/fingerprint 각각의 accepted response 변조와 duplicate runId를 모두 fail-closed 확인했다. `tsc --noEmit`, Electron bridge/scaffold 37개를 통과했고 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다. 다음은 이 Electron adaptation commit의 독립 재리뷰이며, normalized public-event wire는 protocol/sidecar/IPC 계약이 함께 준비된 별도 작업에서만 열 수 있다.
+
 ### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron raw chat event 리뷰 수정)
 
 - **수정**: planned G5A 협상 상태에서 `chat.eventAppended`의 검증된 `TeamMessage`라도 `runId`가 `agent_run_` namespace면 listener 호출 전에 session을 poison하도록 보강했다. 아직 normalized actual-agent public event wire가 없으므로 raw stdout/reasoning text가 status/chat timeline으로 우회하는 길은 허용하지 않는다. 기존 raw `run.event`/`run.finished` poison도 유지한다.

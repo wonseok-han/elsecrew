@@ -77,7 +77,6 @@ import {
   type ChatCreateRequestV1,
   type AbandonPreparedWorkspaceRequestV1,
   type AbandonPreparedWorkspaceResultV1,
-  type ChatDetailPageV1,
   type ChatGetRequestV1,
   type ChatListPageV1,
   type ChatListRequestV1,
@@ -105,13 +104,15 @@ import {
   validateAgentRecoveryRecordV1,
   validateAgentRecoveryResolveRequestV1,
   validateAgentRecoveryResolveResultV1,
-  validateAgentRunAcceptedV1,
+  validateAgentRunAcceptedAgainstContextV1,
   validateAgentRunCancelRequestV1,
   validateAgentRunCancelResultV1,
   validateAgentRunStartRequestV1,
   type AgentCapabilitiesRequestV1,
   type AgentCapabilitySnapshotV1,
   type AgentChatDetailPageV1,
+  type AgentChatGetResultV1,
+  type AgentRunContextV1,
   type AgentRecoveryInspectRequestV1,
   type AgentRecoveryRecordV1,
   type AgentRecoveryResolveRequestV1,
@@ -199,6 +200,8 @@ interface PreparedWorkspaceSessionV1 {
   workspaceIdentity: string;
 }
 
+interface AgentChatContextV1 extends Omit<AgentRunContextV1, "roleId" | "capabilityFingerprint"> {}
+
 interface TextStreamV1 {
   byteLength: number;
   expectedVersion: FileVersionV1 | null;
@@ -218,6 +221,9 @@ export class SidecarClientV1 {
   readonly #chatListeners = new Set<(event: TeamMessageV1, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
+  readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
+  /** Reserved for a future normalized AgentPublicEventV1 route; never sent to the renderer today. */
+  readonly #acceptedAgentRuns = new Map<string, AgentRunAcceptedV1>();
   readonly #streams = new Map<string, TextStreamV1>();
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
@@ -415,7 +421,7 @@ export class SidecarClientV1 {
     } catch (error) { return Promise.reject(asError(error, "invalid chat preparation binding")); }
   }
   listChats(input: ChatListRequestV1): Promise<ChatListPageV1> { return this.#request("chat.list", validateChatListRequestV1(input)) as Promise<ChatListPageV1>; }
-  getChat(input: ChatGetRequestV1): Promise<ChatDetailPageV1 | AgentChatDetailPageV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<ChatDetailPageV1 | AgentChatDetailPageV1>; }
+  getChat(input: ChatGetRequestV1): Promise<AgentChatGetResultV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<AgentChatGetResultV1>; }
   startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> { return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>; }
   cancelRun(input: RunCancelRequestV1): Promise<RunRecordV1> { return this.#request("run.cancel", validateRunCancelRequestV1(input)) as Promise<RunRecordV1>; }
   listRecoveries(input: PageRequestV1): Promise<RecoveryPageV1> { return this.#request("recovery.list", validatePageRequestV1(input)) as Promise<RecoveryPageV1>; }
@@ -717,9 +723,13 @@ export class SidecarClientV1 {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;
       }
       case "chat.get": {
-        const value = this.#agentAdapterNegotiated
-          ? validateAgentChatDetailPageV1(response.result)
-          : validateChatDetailPageV1(response.result);
+        if (this.#agentAdapterNegotiated) {
+          const value = validateAgentChatDetailPageV1(response.result);
+          this.#agentChatContexts.set(value.chat.chatId, agentChatContextFromDetail(value));
+          assertResponseField(value.chat, pending.params, "chatId");
+          return value;
+        }
+        const value = validateChatDetailPageV1(response.result);
         assertResponseField(value.chat, pending.params, "chatId"); return value;
       }
       case "run.startFixture": {
@@ -745,9 +755,16 @@ export class SidecarClientV1 {
         return value;
       }
       case "run.startAgent": {
-        const value = validateAgentRunAcceptedV1(response.result);
-        assertResponseField(value, pending.params, "chatId");
-        assertResponseField(value, pending.params, "roleId");
+        const request = validateAgentRunStartRequestV1(pending.params);
+        const chat = this.#agentChatContexts.get(request.chatId);
+        if (!chat) return failResult("agent start requires the current planned G5A chat detail");
+        const value = validateAgentRunAcceptedAgainstContextV1(response.result, {
+          ...chat,
+          roleId: request.roleId,
+          capabilityFingerprint: request.expectedCapabilityFingerprint,
+        });
+        if (this.#acceptedAgentRuns.has(value.runId)) return failResult("accepted actual-agent runId was reused");
+        this.#acceptedAgentRuns.set(value.runId, value);
         return value;
       }
       case "run.cancelAgent": {
@@ -879,6 +896,8 @@ export class SidecarClientV1 {
     this.#pending.clear();
     this.#workspaceSaves.clear();
     this.#preparedWorkspaces.clear();
+    this.#agentChatContexts.clear();
+    this.#acceptedAgentRuns.clear();
     this.#streams.clear();
     this.#streamBytes = 0;
     this.#terminateOnce();
@@ -956,6 +975,17 @@ function assertResponseField(
   if ((result as Record<string, unknown>)[field] !== request[field]) {
     throw new Error(`sidecar response ${field} does not match request`);
   }
+}
+
+function agentChatContextFromDetail(detail: AgentChatDetailPageV1): AgentChatContextV1 {
+  const { chat } = detail;
+  return {
+    chatId: chat.chatId,
+    taskId: chat.taskId,
+    projectId: chat.projectId,
+    worktreeId: chat.worktreeId,
+    workspaceIdentity: chat.workspaceIdentity,
+  };
 }
 
 function assertSameAgentRunIdentity(
