@@ -1,6 +1,6 @@
 # Hello, Agent
 
-터미널을 한 번도 열어보지 않은 비개발자가 Claude Code·Codex를 설치하고, 안전한 첫 프로젝트를 시작한 뒤 계속 관리하도록 돕는 Tauri 데스크톱 앱.
+터미널을 한 번도 열어보지 않은 비개발자가 Claude Code·Codex를 설치하고, 안전한 첫 프로젝트를 시작한 뒤 계속 관리하도록 돕는 데스크톱 앱. 현재 기본 배포 경로는 Tauri이고, M5는 Electron + React/TypeScript + Monaco renderer와 Rust safety sidecar 전환 골격을 같은 저장소에서 개발한다.
 
 ## 가장 먼저 지킬 인계 규칙
 
@@ -62,9 +62,9 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·가짜 agent 실행/복구 수직 흐름을 구현했다. Electron은 아직 기본 배포 앱이 아니며 실제 Claude Code/Codex adapter도 연결되지 않았다
+- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상해 normalized public event를 Electron V4와 renderer의 영속 채팅 재조회까지 전달한다. 제품 Electron이 실행하는 일반 `--stdio`는 exact G5이며 실제 Claude Code/Codex CLI provider·인증·모델 출력은 아직 연결되지 않았다
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY` 완료. 실제 agent adapter·G6 보안/패키징/성능·Windows 안전 게이트·출시 후보 검증과 서명/배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY`, G5A fake adapter normalized public-event 누적 게이트와 독립 QA `G5A_QA_PASS`를 완료했다. 실제 Claude Code/Codex adapter·G6 보안/패키징/성능·Windows 안전 게이트·출시 후보 검증과 서명/배포 결정이 남음
 
 ## 코드 지도
 
@@ -74,9 +74,9 @@
 - `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
 - `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
-- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture 실행/복구 sidecar
+- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture 및 G5A fake actual-agent 실행/복구 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
-- `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V3 bridge·프로젝트/채팅/실행/복구 계약
+- `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V4 bridge·프로젝트/채팅/실행/복구·정규화 공개 event 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트
 - `docs/README.md`: 문서 색인과 분류 규칙. 어느 문서를 언제 여는지
 - `.codex/config.toml`, `.codex/agents/`: 프로젝트 전용 서브에이전트 동시 실행 상한과 M5 역할·모델·권한 설정

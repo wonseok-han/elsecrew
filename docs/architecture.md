@@ -158,25 +158,27 @@
 
 파일럿은 macOS에서만 노출한다. Windows 자손 회수는 별도 게이트이며, §7.6B 품질·비용 비교와 재작업 루프·다역할 확장은 구현되지 않았다. 상세한 결정·철회·실측 근거는 `proposals/m4-orchestration.md`에 있다.
 
-## 9. M5 G1~G5 전환 골격·채팅 작업대
+## 9. M5 G1~G5A 전환 골격·채팅 작업대
 
-M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대와 **결정적 가짜 에이전트(fixture) 기반** 채팅·실행·복구 수직 흐름까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
+M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대, 기존 G5 fixture 실행·복구와 테스트 전용 G5A fake actual-agent normalized public-event 수직 흐름까지 구현됐다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
 
 - `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
 - `crates/hello-agent-sidecar`: 번들 SQLite의 단일 owner인 `--stdio` Rust 프로세스. G5는 프로젝트별 역할 설정을 revision CAS로 저장하고, 채팅 생성 시 역할·런타임·모델·추론 수준·권한 snapshot을 불변 기록으로 고정한다. 여러 채팅과 공개 `TeamMessage`·실행·복구 원장은 재시작 가능한 projection으로 남는다
 - 채팅 준비는 기존 active/bound snapshot을 재사용하지 않는다. `workspace.prepareChat`은 매번 새 `preparationId/worktreeId/workspaceIdentity`의 unbound standalone snapshot을 만들고, `chat.create`가 설정 revision·최초 사용자 메시지와 함께 한 transaction에서 exact preparation을 bind한다. 실패 정리는 그 준비의 네 ID가 모두 맞을 때만 `workspace.abandonPrepared`로 terminal 표시하며 물리 삭제하지 않는다
 - 채팅이 소유한 tree/read/save/watch/diff/close는 V3의 `chatId/projectId/worktreeId/workspaceIdentity` 네 ID를 매 요청·응답·event에서 교차 검증한다. save continuation은 같은 네 ID와 `saveId`가 모두 일치해야 하며, 현재 선택을 추론하거나 다른 채팅의 작업 복사본으로 fallback하지 않는다. G4 project-only V2 경로는 호환용으로 유지한다
-- G5 실행은 macOS에서 sidecar가 띄우는 결정적 fixture만 허용한다. 역할별 공개 결과는 bounded `TeamMessage` 타임라인으로 저장·전달하고 원시 `run.event`는 renderer에 노출하지 않는다. coding writer lock과 run 저장은 spawn 전에 원자적으로 이뤄지며 한 채팅의 active run은 직렬화된다
+- G5 legacy 실행은 macOS 결정적 fixture와 `M5BridgeV3`를 유지한다. 별도 G5A fake actual-agent 실행은 accepted response를 event보다 먼저 반환하고, full chat/task/project/worktree/workspace/run/role/fingerprint에 결속된 `status|question|final`만 `agent.publicEvent`로 발행한다. private vendor event는 sidecar에서 버리고 actual-agent raw `run.event`·`run.finished`·`chat.eventAppended` carrier는 Electron에서 fail-closed 차단한다. 두 실행 원장과 recovery namespace는 서로 섞지 않는다
 - 취소는 `(pid, 시작 시각)`의 부모·자손 전체 소멸을 증명한 때만 clean이다. 불확실하면 chat/run/workspace/writer lock을 `recoveryRequired`·`poisoned`로 유지하고 `recovery.list/inspect/markResolved` 뒤 exact abandon만 허용한다. `app.prepareQuit`은 active run과 unresolved recovery를 blocker로 반환하며 안전하지 않으면 종료하지 않는다
-- `crates/hello-agent-protocol`과 `src/m5/contracts/`는 같은 golden fixture로 protocol/session, SQLite, snapshot, G5 역할·채팅·실행·복구, preparation, V3 workspace 주소를 Rust·TypeScript 양쪽에서 검증한다. `M5BridgeV3`는 V1/V2에 additive하며 범용 IPC를 열지 않는다
-- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징과 main-owned sidecar supervisor. production sidecar는 `process.resourcesPath/sidecar/hello-agent-sidecar --stdio`, `shell: false`, 고정 cwd로 한 번만 실행한다. main-frame/app origin과 고정 channel을 검사하고 preload는 exact input/output validator를 통과한 V3 메서드·bounded event 구독만 노출한다
-- `src/m5/`: 여러 영속 채팅, 프로젝트별 역할/모델 설정, 공개 팀 타임라인, 실행 중단·복구 gate와 채팅별 Monaco tree/edit/save/diff를 결합한다. 채팅 전환은 detail과 작업 복사본 bind가 모두 성공한 뒤 원자 publish하며 dirty 편집·복구·늦은 결과가 다른 채팅을 덮지 못하게 막는다. UI는 fixture 실행을 **가짜 에이전트 데모**로 명시한다
+- `crates/hello-agent-protocol`과 `src/m5/contracts/`는 같은 golden fixture로 protocol/session, SQLite, snapshot, G5 역할·채팅·실행·복구, preparation, V3 workspace 주소와 G5A actual-agent/public-event 경계를 Rust·TypeScript 양쪽에서 검증한다. `M5BridgeV4`는 V1~V3에 additive하며 범용 IPC를 열지 않는다
+- `electron/`: Forge `8.0.0-alpha.10` 기반 main/preload/Vite 패키징과 main-owned sidecar supervisor. production sidecar는 `process.resourcesPath/sidecar/hello-agent-sidecar --stdio`, `shell: false`, 고정 cwd로 한 번만 실행한다. main-frame/app origin과 고정 channel을 검사하고 preload는 exact input/output validator를 통과한 V1~V4 메서드·bounded event 구독만 노출한다. exact G5A 협상 전에는 V4 actual 메서드와 public-event listener를 활성화하지 않는다
+- `src/m5/`: 여러 영속 채팅, 프로젝트별 역할/모델 설정, 공개 팀 타임라인, fixture/actual 실행 중단·분리된 복구 gate와 채팅별 Monaco tree/edit/save/diff를 결합한다. 채팅 전환은 detail과 작업 복사본 bind가 모두 성공한 뒤 원자 publish하며 dirty 편집·복구·늦은 결과가 다른 채팅을 덮지 못하게 막는다. UI는 fixture 실행을 **가짜 에이전트 데모**로 명시하고 exact G5에서는 actual 동작을 unavailable로 유지한다. renderer는 normalized public event의 text를 직접 타임라인에 넣지 않고 bounded `chat.get` 페이지를 durable sequence 끝까지 다시 읽어 `TeamMessage`와 별도 `agentRuns` 원장만 반영하며, `final` 내용 event를 process terminal 증거로 해석하지 않는다
 - 패키지는 ASAR와 V1 Fuse 9개를 고정하고 release sidecar를 ASAR 밖 `Resources/sidecar`에 둔다. pnpm은 Forge 요구에 맞춘 hoisted `node_modules`를 쓰되 전이 Git/tarball 차단 정책은 완화하지 않는다
 
-G5 누적 하네스는 exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`에서 macOS PASS했고(`.artifacts/m5-harness/g5-run-recovery-2026-08-26T03-40-31-061Z.json`), 같은 commit의 독립 QA도 `G5_READY`로 판정했다(`.artifacts/m5-qa/g5-integration-014bd987464d39674a5f531765051f60e63b5ecb-2026-08-26T03-45-43Z.json`). 이 결과는 계약·SQLite·실제 sidecar stdio 프로세스·Electron package/Chromium·fixture 실행과 clean/uncertain 취소·복구를 검증하지만 **실제 Claude Code/Codex adapter, 인증 세션, 실제 모델 출력은 검증하지 않는다**. G6 보안·패키징·성능, Windows snapshot/자손 회수, 전체 OS Quit E2E, Forge prerelease와 macOS 권한 문자열 hardening, 실제 에이전트 smoke는 후속 게이트다.
+G5 기준선은 exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`에서 누적 하네스 PASS와 독립 QA `G5_READY`를 받았다. G5A fake adapter/public-event 추가 뒤 exact commit `8a23c651b3a58f79c1bc07f5280342496d12ab08`의 같은 누적 게이트도 macOS PASS했다(`.artifacts/m5-harness/g5-run-recovery-2026-08-27T04-21-30-616Z.json`). 같은 commit의 독립 QA는 focused 계약/UI, Electron bridge/scaffold, 실제 fake sidecar stdio, 누적 run/recovery와 macOS arm64 package smoke를 다시 실행해 `G5A_QA_PASS`로 판정했다(`.artifacts/m5-qa/g5a-integration-8a23c651b3a58f79c1bc07f5280342496d12ab08-2026-08-27T04-27-30Z.json`). 이 결과는 계약·SQLite·실제 sidecar stdio 프로세스·Electron package/Chromium·fixture 실행과 clean/uncertain 취소·복구·정규화 event 수화를 검증하지만 **일반 `--stdio` 제품 경로의 실제 Claude Code/Codex adapter, 인증 세션, 실제 모델 출력은 검증하지 않는다**. G6 보안·패키징·성능, Windows snapshot/자손 회수, 전체 OS Quit E2E, Forge prerelease와 macOS 권한 문자열 hardening, 실제 에이전트 smoke는 후속 게이트다.
 
 ## 10. 미해결 사항
 
+- **actual-agent 완료 관찰**: 현재 renderer 재수화는 normalized public event를 계기로 일어난다. sidecar의 run terminal 전이는 별도 public lifecycle event를 내지 않고 `final`도 terminal 증거가 아니므로, 출력 없는 종료나 마지막 public event 뒤 종료는 화면이 stale해질 수 있다. 실제 CLI 연결 전 explicit terminal run-state event 또는 bounded polling 계약이 필요하다.
+- **actual-agent 자원 예산**: pipe drain channel은 bounded지만 종료 시 drain하는 public vector, run projection의 `public_events`, Electron의 event-ID/stream dedupe set·map에는 run/session별 총 cardinality·disk budget·회수 정책이 없다. 실제 provider 활성화 전 G6 게이트에서 상한을 고정해야 한다.
 - **코드 서명**: 미서명 배포 시 SmartScreen/Gatekeeper 경고. 베타는 미서명 + 통과 안내 이미지로 진행, 정식 릴리즈 전 비용(연 $250~400) 결정 — 기획 문서 참고.
 - **실기기 출시 검증**: 깨끗한 macOS 계정과 Windows 기기에서 설치·로그인·오프라인·권한 오류·한글 경로 시나리오 확인.
 - **업데이트 채널**: 현재 앱은 에이전트 최신 버전만 확인한다. Hello, Agent 자체 업데이트와 레시피 원격 갱신 방식은 첫 베타 이후 결정.
