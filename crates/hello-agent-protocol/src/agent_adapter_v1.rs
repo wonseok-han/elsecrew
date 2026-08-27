@@ -178,11 +178,41 @@ pub struct AgentRunStartRequestV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunContextV1 {
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub role_id: String,
+    pub capability_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentRunBindingV1 {
+    pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
+    pub run_id: String,
+    pub role_id: String,
+    pub capability_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AgentRunAcceptedV1 {
     pub schema_version: u64,
     pub run_id: String,
     pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
     pub role_id: String,
+    pub capability_fingerprint: String,
     pub state: String,
 }
 
@@ -273,8 +303,13 @@ pub struct AgentPublicEventV1 {
     pub schema_version: u64,
     pub event_id: String,
     pub chat_id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
     pub run_id: String,
     pub role_id: String,
+    pub capability_fingerprint: String,
     pub kind: String,
     pub text: String,
     pub created_at: String,
@@ -582,12 +617,25 @@ fn validate_run_start_request(
 fn validate_run_accepted(value: &Value) -> Result<AgentRunAcceptedV1, AgentAdapterContractError> {
     let accepted: AgentRunAcceptedV1 = from_value(value, "agent run accepted result")?;
     schema(accepted.schema_version)?;
+    validate_run_context(&context_from_accepted(&accepted))?;
     agent_run_id(&accepted.run_id, "runId")?;
-    id(&accepted.chat_id, "chatId")?;
-    one_of(&accepted.role_id, G5_ROLE_IDS_V1, "roleId")?;
     if accepted.state != "preparing" {
         return fail("accepted agent run state must be preparing");
     }
+    Ok(accepted)
+}
+
+pub fn validate_agent_run_accepted_against_context_v1(
+    value: &Value,
+    expected: &AgentRunContextV1,
+) -> Result<AgentRunAcceptedV1, AgentAdapterContractError> {
+    validate_run_context(expected)?;
+    let accepted = validate_run_accepted(value)?;
+    assert_same_run_context(
+        expected,
+        &context_from_accepted(&accepted),
+        "accepted agent run",
+    )?;
     Ok(accepted)
 }
 
@@ -750,12 +798,20 @@ fn validate_public_event(value: &Value) -> Result<AgentPublicEventV1, AgentAdapt
     let event: AgentPublicEventV1 = from_value(value, "agent public event")?;
     schema(event.schema_version)?;
     id(&event.event_id, "eventId")?;
-    id(&event.chat_id, "chatId")?;
-    agent_run_id(&event.run_id, "runId")?;
-    one_of(&event.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    validate_run_binding(&binding_from_event(&event))?;
     one_of(&event.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind")?;
     bounded(&event.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1)?;
     timestamp(&event.created_at, "createdAt")?;
+    Ok(event)
+}
+
+pub fn validate_agent_public_event_against_run_v1(
+    value: &Value,
+    expected: &AgentRunBindingV1,
+) -> Result<AgentPublicEventV1, AgentAdapterContractError> {
+    validate_run_binding(expected)?;
+    let event = validate_public_event(value)?;
+    assert_same_run_binding(expected, &binding_from_event(&event), "agent public event")?;
     Ok(event)
 }
 
@@ -1309,6 +1365,81 @@ fn same_process(left: &AgentProcessIdentityV1, right: &AgentProcessIdentityV1) -
     left.pid == right.pid
         && left.start_identity_digest == right.start_identity_digest
         && left.executable_path_digest == right.executable_path_digest
+}
+
+fn validate_run_context(value: &AgentRunContextV1) -> Result<(), AgentAdapterContractError> {
+    for (entry, name) in [
+        (&value.chat_id, "chatId"),
+        (&value.task_id, "taskId"),
+        (&value.project_id, "projectId"),
+        (&value.worktree_id, "worktreeId"),
+        (&value.workspace_identity, "workspaceIdentity"),
+    ] {
+        id(entry, name)?;
+    }
+    one_of(&value.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    fingerprint_digest(&value.capability_fingerprint, "capabilityFingerprint")
+}
+
+fn validate_run_binding(value: &AgentRunBindingV1) -> Result<(), AgentAdapterContractError> {
+    let context = AgentRunContextV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        role_id: value.role_id.clone(),
+        capability_fingerprint: value.capability_fingerprint.clone(),
+    };
+    validate_run_context(&context)?;
+    agent_run_id(&value.run_id, "runId")
+}
+
+fn context_from_accepted(value: &AgentRunAcceptedV1) -> AgentRunContextV1 {
+    AgentRunContextV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        role_id: value.role_id.clone(),
+        capability_fingerprint: value.capability_fingerprint.clone(),
+    }
+}
+
+fn binding_from_event(value: &AgentPublicEventV1) -> AgentRunBindingV1 {
+    AgentRunBindingV1 {
+        chat_id: value.chat_id.clone(),
+        task_id: value.task_id.clone(),
+        project_id: value.project_id.clone(),
+        worktree_id: value.worktree_id.clone(),
+        workspace_identity: value.workspace_identity.clone(),
+        run_id: value.run_id.clone(),
+        role_id: value.role_id.clone(),
+        capability_fingerprint: value.capability_fingerprint.clone(),
+    }
+}
+
+fn assert_same_run_context(
+    expected: &AgentRunContextV1,
+    actual: &AgentRunContextV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    if expected != actual {
+        return fail(format!("{name} changed run context"));
+    }
+    Ok(())
+}
+
+fn assert_same_run_binding(
+    expected: &AgentRunBindingV1,
+    actual: &AgentRunBindingV1,
+    name: &str,
+) -> Result<(), AgentAdapterContractError> {
+    if expected != actual {
+        return fail(format!("{name} changed run binding"));
+    }
+    Ok(())
 }
 
 fn validate_agent_run_identity(

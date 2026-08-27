@@ -44,6 +44,9 @@
     ],
     "argvOnlyCanStart": false,
     "publicEvents": ["status", "question", "final"],
+    "acceptedBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint"],
+    "publicEventBindingFields": ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint"],
+    "chatDetailCapabilityDiscriminator": "agentRunsPresence",
     "preflightFailure": {"spawnCount": 0, "lockCount": 0},
     "launcherBarrier": ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"],
     "uncertainTermination": "recoveryRequiredAndPoisoned"

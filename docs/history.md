@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 공용 wire 결속 리뷰 수정)
+
+- **accepted 결속**: `AgentRunAcceptedV1`에 chat의 task/project/worktree/workspace identity와 capability fingerprint를 추가했다. 시작 요청·채팅에서 만든 exact context와 accepted 응답을 비교하는 TypeScript/Rust helper와 공용 golden을 두어 chat/task/project/worktree/workspace/role/fingerprint 변조를 모두 거부한다.
+- **공개 event 결속**: normalized `AgentPublicEventV1`도 actual run의 full identity와 capability fingerprint를 포함한다. event는 `status/question/final`과 bounded text만 허용하고 reasoning/raw/tool/stderr/debug/env/auth/prompt/token extra를 거부하며, 공용 golden이 chat/task/project/worktree/workspace/run/role/fingerprint 교차 결속을 양언어에서 확인한다.
+- **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
+- **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A 계약 통합·누적 게이트)
 
 - **통합**: actual-agent adapter 계약 기능·리뷰 수정 세 커밋을 독립 최종 `APPROVE` 뒤 `m5/coding-agent-ide`에 `9008b92`·`aaf614f`·`7903d75`로 순서대로 통합했다. 기존 G5 handshake와 fake-only V3는 그대로이며, planned V4 actual-agent 메서드는 protocol 예약·계약일 뿐 sidecar/Electron이 아직 광고하거나 소비하지 않는다.

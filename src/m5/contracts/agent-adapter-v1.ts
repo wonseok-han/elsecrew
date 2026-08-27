@@ -116,11 +116,22 @@ export interface AgentRunStartRequestV1 {
   expectedCapabilityFingerprint: string;
 }
 
-export interface AgentRunAcceptedV1 {
-  schemaVersion: 1;
-  runId: string;
+export interface AgentRunContextV1 {
   chatId: string;
+  taskId: string;
+  projectId: string;
+  worktreeId: string;
+  workspaceIdentity: string;
   roleId: RoleIdV1;
+  capabilityFingerprint: string;
+}
+
+export interface AgentRunBindingV1 extends AgentRunContextV1 {
+  runId: string;
+}
+
+export interface AgentRunAcceptedV1 extends AgentRunBindingV1 {
+  schemaVersion: 1;
   state: "preparing";
 }
 
@@ -146,6 +157,9 @@ export interface AgentRunRecordV1 {
 export type AgentChatDetailPageV1 = ChatDetailPageV1 & {
   agentRuns: readonly AgentRunRecordV1[];
 };
+
+export type G5ChatDetailPageV1 = ChatDetailPageV1 & { readonly agentRuns?: never };
+export type AgentChatGetResultV1 = G5ChatDetailPageV1 | AgentChatDetailPageV1;
 
 export interface AgentResolvedProfileV1 {
   roleId: RoleIdV1;
@@ -198,12 +212,9 @@ export interface AgentRunStartTranscriptV1 {
   barrier: AgentLaunchBarrierEvidenceV1 | null;
 }
 
-export interface AgentPublicEventV1 {
+export interface AgentPublicEventV1 extends AgentRunBindingV1 {
   schemaVersion: 1;
   eventId: string;
-  chatId: string;
-  runId: string;
-  roleId: RoleIdV1;
   kind: (typeof AGENT_PUBLIC_EVENT_KINDS_V1)[number];
   text: string;
   createdAt: string;
@@ -344,13 +355,24 @@ export function validateAgentRunStartRequestV1(value: unknown): AgentRunStartReq
 }
 
 export function validateAgentRunAcceptedV1(value: unknown): AgentRunAcceptedV1 {
-  const object = exactObject(value, ["schemaVersion", "runId", "chatId", "roleId", "state"], "agent run accepted result");
+  const object = exactObject(value, [
+    "schemaVersion", "runId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
+    "roleId", "capabilityFingerprint", "state",
+  ], "agent run accepted result");
   schema(object.schemaVersion);
-  agentRunId(object.runId, "runId");
-  id(object.chatId, "chatId");
-  oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+  validateAgentRunBindingFieldsV1(object);
   if (object.state !== "preparing") fail("accepted agent run state must be preparing");
   return object as unknown as AgentRunAcceptedV1;
+}
+
+export function validateAgentRunAcceptedAgainstContextV1(
+  value: unknown,
+  expectedValue: unknown,
+): AgentRunAcceptedV1 {
+  const accepted = validateAgentRunAcceptedV1(value);
+  const expected = validateAgentRunContextV1(expectedValue);
+  assertSameAgentRunContext(expected, accepted, "accepted agent run");
+  return accepted;
 }
 
 export function validateAgentRunRecordV1(value: unknown): AgentRunRecordV1 {
@@ -413,15 +435,27 @@ export function validateAgentRunStartTranscriptV1(value: unknown): AgentRunStart
 }
 
 export function validateAgentPublicEventV1(value: unknown): AgentPublicEventV1 {
-  const object = exactObject(value, ["schemaVersion", "eventId", "chatId", "runId", "roleId", "kind", "text", "createdAt"], "agent public event");
+  const object = exactObject(value, [
+    "schemaVersion", "eventId", "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity",
+    "runId", "roleId", "capabilityFingerprint", "kind", "text", "createdAt",
+  ], "agent public event");
   schema(object.schemaVersion);
-  for (const key of ["eventId", "chatId"] as const) id(object[key], key);
-  agentRunId(object.runId, "runId");
-  oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+  id(object.eventId, "eventId");
+  validateAgentRunBindingFieldsV1(object);
   oneOf(object.kind, AGENT_PUBLIC_EVENT_KINDS_V1, "kind");
   bounded(object.text, "text", G5_PUBLIC_MESSAGE_MAX_BYTES_V1);
   timestamp(object.createdAt, "createdAt");
   return object as unknown as AgentPublicEventV1;
+}
+
+export function validateAgentPublicEventAgainstRunV1(
+  value: unknown,
+  expectedValue: unknown,
+): AgentPublicEventV1 {
+  const event = validateAgentPublicEventV1(value);
+  const expected = validateAgentRunBindingV1(expectedValue);
+  assertSameAgentRunBinding(expected, event, "agent public event");
+  return event;
 }
 
 export function validateAgentTerminationTranscriptV1(value: unknown): AgentTerminationTranscriptV1 {
@@ -474,6 +508,17 @@ export function validateAgentChatDetailPageV1(value: unknown): AgentChatDetailPa
     if (inFixture === inAgent) fail("message runId must resolve to exactly one fixture or actual run ledger");
   }
   return object as unknown as AgentChatDetailPageV1;
+}
+
+export function isAgentChatDetailPageV1(value: AgentChatGetResultV1): value is AgentChatDetailPageV1 {
+  return Object.prototype.hasOwnProperty.call(value, "agentRuns");
+}
+
+export function validateAgentChatGetResultV1(value: unknown): AgentChatGetResultV1 {
+  if (typeof value === "object" && value !== null && Object.prototype.hasOwnProperty.call(value, "agentRuns")) {
+    return validateAgentChatDetailPageV1(value);
+  }
+  return validateChatDetailPageV1(value);
 }
 
 export function validateAgentRunCancelRequestV1(value: unknown): AgentRunCancelRequestV1 {
@@ -703,6 +748,33 @@ function validateAgentRunIdentityV1(value: unknown, name: string): AgentRunIdent
   return object as unknown as AgentRunIdentityV1;
 }
 
+export function validateAgentRunContextV1(value: unknown): AgentRunContextV1 {
+  const object = exactObject(value, [
+    "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint",
+  ], "agent run context");
+  validateAgentRunContextFieldsV1(object);
+  return object as unknown as AgentRunContextV1;
+}
+
+export function validateAgentRunBindingV1(value: unknown): AgentRunBindingV1 {
+  const object = exactObject(value, [
+    "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint",
+  ], "agent run binding");
+  validateAgentRunBindingFieldsV1(object);
+  return object as unknown as AgentRunBindingV1;
+}
+
+function validateAgentRunContextFieldsV1(object: Record<string, unknown>): void {
+  for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
+  oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+  fingerprintDigest(object.capabilityFingerprint, "capabilityFingerprint");
+}
+
+function validateAgentRunBindingFieldsV1(object: Record<string, unknown>): void {
+  validateAgentRunContextFieldsV1(object);
+  agentRunId(object.runId, "runId");
+}
+
 function validateAgentRunIdentityFieldsV1(object: Record<string, unknown>): void {
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
   agentRunId(object.runId, "runId");
@@ -712,6 +784,19 @@ function assertSameAgentRunIdentity(expected: AgentRunIdentityV1, actual: AgentR
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId"] as const) {
     if (expected[key] !== actual[key]) fail(`${name} changed ${key}`);
   }
+}
+
+function assertSameAgentRunContext(expected: AgentRunContextV1, actual: AgentRunContextV1, name: string): void {
+  for (const key of [
+    "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint",
+  ] as const) {
+    if (expected[key] !== actual[key]) fail(`${name} changed ${key}`);
+  }
+}
+
+function assertSameAgentRunBinding(expected: AgentRunBindingV1, actual: AgentRunBindingV1, name: string): void {
+  assertSameAgentRunContext(expected, actual, name);
+  if (expected.runId !== actual.runId) fail(`${name} changed runId`);
 }
 
 function assertSameRecoveryIdentity(

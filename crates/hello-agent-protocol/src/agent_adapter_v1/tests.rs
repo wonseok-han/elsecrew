@@ -32,6 +32,9 @@ struct Contract {
     capability_block_reasons: Vec<String>,
     argv_only_can_start: bool,
     public_events: Vec<String>,
+    accepted_binding_fields: Vec<String>,
+    public_event_binding_fields: Vec<String>,
+    chat_detail_capability_discriminator: String,
     preflight_failure: PreflightFailure,
     launcher_barrier: Vec<String>,
     uncertain_termination: String,
@@ -61,12 +64,23 @@ struct FingerprintContract {
 struct Cases {
     valid: Vec<FixtureCase>,
     invalid: Vec<FixtureCase>,
+    bindings: Vec<BindingCase>,
 }
 
 #[derive(Deserialize)]
 struct FixtureCase {
     name: String,
     validator: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BindingCase {
+    name: String,
+    kind: String,
+    valid: bool,
+    expected: Value,
     value: Value,
 }
 
@@ -123,6 +137,28 @@ fn rust_accepts_and_rejects_the_same_agent_adapter_golden_cases() {
             fixture.name
         );
     }
+    for fixture in cases.bindings {
+        let result = match fixture.kind.as_str() {
+            "accepted" => {
+                let expected: AgentRunContextV1 =
+                    serde_json::from_value(fixture.expected).expect("accepted expected context");
+                validate_agent_run_accepted_against_context_v1(&fixture.value, &expected)
+                    .map(|_| ())
+            }
+            "publicEvent" => {
+                let expected: AgentRunBindingV1 = serde_json::from_value(fixture.expected)
+                    .expect("public event expected binding");
+                validate_agent_public_event_against_run_v1(&fixture.value, &expected).map(|_| ())
+            }
+            other => panic!("unknown binding kind {other}"),
+        };
+        assert_eq!(
+            result.is_ok(),
+            fixture.valid,
+            "binding fixture {}",
+            fixture.name
+        );
+    }
 }
 
 #[test]
@@ -164,6 +200,35 @@ fn rust_manifest_freezes_one_shot_redacted_fail_closed_semantics() {
     assert_eq!(
         manifest.contract.public_events,
         ["status", "question", "final"]
+    );
+    assert_eq!(
+        manifest.contract.accepted_binding_fields,
+        [
+            "chatId",
+            "taskId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "roleId",
+            "capabilityFingerprint"
+        ]
+    );
+    assert_eq!(
+        manifest.contract.public_event_binding_fields,
+        [
+            "chatId",
+            "taskId",
+            "projectId",
+            "worktreeId",
+            "workspaceIdentity",
+            "runId",
+            "roleId",
+            "capabilityFingerprint"
+        ]
+    );
+    assert_eq!(
+        manifest.contract.chat_detail_capability_discriminator,
+        "agentRunsPresence"
     );
     assert_eq!(manifest.contract.preflight_failure.spawn_count, 0);
     assert_eq!(manifest.contract.preflight_failure.lock_count, 0);

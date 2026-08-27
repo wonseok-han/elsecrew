@@ -11,11 +11,14 @@ import {
   canonicalAgentCapabilitySnapshotV1,
   computeAgentCapabilityFingerprintV1,
   G5A_CAPABILITIES_V1,
+  isAgentChatDetailPageV1,
   parsePlannedG5AReadyPayloadV1,
   validateAgentCapabilitiesRequestV1,
   validateAgentCapabilitySnapshotV1,
   validateAgentChatDetailPageV1,
+  validateAgentChatGetResultV1,
   validateAgentPublicEventV1,
+  validateAgentPublicEventAgainstRunV1,
   validateAgentRecoveryInspectRequestV1,
   validateAgentRecoveryRecordV1,
   validateAgentRecoveryResolveRequestV1,
@@ -25,10 +28,12 @@ import {
   validateAgentRunTerminationPersistenceV1,
   validateAgentRunStartRequestV1,
   validateAgentRunAcceptedV1,
+  validateAgentRunAcceptedAgainstContextV1,
   validateAgentRunRecordV1,
   validateAgentRunStartTranscriptV1,
   validateAgentTerminationTranscriptV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import type { AgentChatGetResultV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 import { M5_BRIDGE_V3_METHODS } from "../src/m5/contracts/bridge-v3.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
@@ -37,7 +42,8 @@ import { G5_CAPABILITIES_V1, parseG5ReadyPayloadV1 } from "../src/m5/contracts/r
 
 type ValidatorName = "capabilitiesRequest" | "capabilitySnapshot" | "runStartRequest" | "runAccepted" | "runRecord" | "runStartTranscript" | "publicEvent" | "terminationTranscript" | "agentChatDetailPage" | "runCancelRequest" | "runCancelResult" | "runTerminationPersistence" | "recoveryRecord" | "recoveryInspectRequest" | "recoveryResolveRequest" | "recoveryResolveResult";
 interface FixtureCase { name: string; validator: ValidatorName; value: unknown }
-interface Cases { valid: FixtureCase[]; invalid: FixtureCase[] }
+interface BindingCase { name: string; kind: "accepted" | "publicEvent"; valid: boolean; expected: unknown; value: unknown }
+interface Cases { valid: FixtureCase[]; invalid: FixtureCase[]; bindings: BindingCase[] }
 interface Manifest {
   schemaVersion: number;
   protocolVersion: number;
@@ -62,9 +68,12 @@ interface Manifest {
     capabilityBlockReasons: string[];
     argvOnlyCanStart: boolean;
     publicEvents: string[];
+    acceptedBindingFields: string[];
+    publicEventBindingFields: string[];
     preflightFailure: { spawnCount: number; lockCount: number };
     launcherBarrier: string[];
     uncertainTermination: string;
+    chatDetailCapabilityDiscriminator: string;
   };
   casesFile: string;
 }
@@ -98,7 +107,15 @@ test("M5BridgeV4는 V3를 보존하고 actual-agent typed 메서드만 추가한
   assert.deepEqual(M5_BRIDGE_V4_METHODS.slice(M5_BRIDGE_V3_METHODS.length), manifest.contract.bridgeMethodsAdded);
   const source = readFileSync(resolve("src/m5/contracts/bridge-v4.ts"), "utf8");
   assert.match(source, /Omit<M5BridgeV3, "version" \| "getChat">/);
+  assert.match(source, /getChat\(input: ChatGetRequestV1\): Promise<AgentChatGetResultV1>/);
   assert.doesNotMatch(source, /startAgentSmoke|\bRunRecordV1\b|fixtureScenario|ipcRenderer|genericInvoke/);
+
+  const planned = cases.valid.find((entry) => entry.validator === "agentChatDetailPage")?.value;
+  assert.ok(planned && typeof planned === "object");
+  const { agentRuns: _agentRuns, ...current } = planned as Record<string, unknown>;
+  assert.equal(countAgentRuns(validateAgentChatGetResultV1(current)), 0);
+  assert.equal(countAgentRuns(validateAgentChatGetResultV1(planned)), 1);
+  assert.equal(manifest.contract.chatDetailCapabilityDiscriminator, "agentRunsPresence");
 });
 
 test("TypeScript는 canonical actual-agent valid cases를 모두 승인한다", () => {
@@ -107,6 +124,16 @@ test("TypeScript는 canonical actual-agent valid cases를 모두 승인한다", 
 
 test("TypeScript는 launch injection, 불확실 model, raw event, barrier 위반을 모두 거부한다", () => {
   for (const fixture of cases.invalid) assert.throws(() => validate(fixture), fixture.name);
+});
+
+test("accepted와 public event는 golden full identity와 capability fingerprint에 exact 결속된다", () => {
+  for (const fixture of cases.bindings) {
+    const validateBinding = () => fixture.kind === "accepted"
+      ? validateAgentRunAcceptedAgainstContextV1(fixture.value, fixture.expected)
+      : validateAgentPublicEventAgainstRunV1(fixture.value, fixture.expected);
+    if (fixture.valid) assert.doesNotThrow(validateBinding, fixture.name);
+    else assert.throws(validateBinding, fixture.name);
+  }
 });
 
 test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를 명시한다", () => {
@@ -126,6 +153,12 @@ test("manifest는 one-shot, next-run, redacted evidence와 fail-closed 종료를
   assert.deepEqual(manifest.contract.capabilityBlockReasons, [...AGENT_CAPABILITY_BLOCK_REASONS_V1]);
   assert.equal(manifest.contract.argvOnlyCanStart, false);
   assert.deepEqual(manifest.contract.publicEvents, ["status", "question", "final"]);
+  assert.deepEqual(manifest.contract.acceptedBindingFields, [
+    "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "roleId", "capabilityFingerprint",
+  ]);
+  assert.deepEqual(manifest.contract.publicEventBindingFields, [
+    "chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity", "runId", "roleId", "capabilityFingerprint",
+  ]);
   assert.deepEqual(manifest.contract.preflightFailure, { spawnCount: 0, lockCount: 0 });
   assert.deepEqual(manifest.contract.launcherBarrier, ["persistRunAndLock", "captureLauncherAndAgentIdentity", "attachTreeTracker", "persistIdentity", "release"]);
   assert.equal(manifest.contract.uncertainTermination, "recoveryRequiredAndPoisoned");
@@ -171,4 +204,9 @@ function ready(capabilities: string[]): unknown {
     protocolVersion: 1, sidecarSchemaVersion: 1, appSchemaVersion: 1, pid: 4321,
     platform: "darwin", capabilities, sidecarInstanceId: "sidecar_g5a_fixture",
   };
+}
+
+function countAgentRuns(detail: AgentChatGetResultV1): number {
+  if (!isAgentChatDetailPageV1(detail)) return 0;
+  return detail.agentRuns.length;
 }

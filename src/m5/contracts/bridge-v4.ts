@@ -1,7 +1,7 @@
 import type {
   AgentCapabilitiesRequestV1,
   AgentCapabilitySnapshotV1,
-  AgentChatDetailPageV1,
+  AgentChatGetResultV1,
   AgentRecoveryInspectRequestV1,
   AgentRecoveryRecordV1,
   AgentRecoveryResolveRequestV1,
@@ -68,5 +68,6 @@ export type M5BridgeV4 = Omit<M5BridgeV3, "version" | "getChat"> & {
   cancelAgentRun(input: AgentRunCancelRequestV1): Promise<AgentRunCancelResultV1>;
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1>;
   resolveAgentRecovery(input: AgentRecoveryResolveRequestV1): Promise<AgentRecoveryResolveResultV1>;
-  getChat(input: ChatGetRequestV1): Promise<AgentChatDetailPageV1>;
+  /** Current G5 has no agentRuns member; planned G5A adds it after capability negotiation. */
+  getChat(input: ChatGetRequestV1): Promise<AgentChatGetResultV1>;
 };
