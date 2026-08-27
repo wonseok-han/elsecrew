@@ -1743,14 +1743,7 @@ impl AgentRuntime {
         let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":processes_proven_gone,"poisoned":recovery_required,"writerLockState":lock_state,"chatState":if recovery_required {"recoveryRequired"} else {requested_state},"trackedProcesses":tracked,"evidenceDigest":digest_text("agent-fixture-termination-v1"),"observedAt":now()});
         validate_agent_adapter_payload_v1("terminationTranscript", &termination)
             .map_err(contract_failure)?;
-        let recovery_id = if active.scenario == FakeScenario::ProviderTerminalRecoveryRequired {
-            format!(
-                "agent_recovery_{}",
-                run_id.strip_prefix("agent_run_").unwrap_or(run_id)
-            )
-        } else {
-            format!("agent_recovery_{}", Uuid::new_v4().simple())
-        };
+        let recovery_id = format!("agent_recovery_{}", Uuid::new_v4().simple());
         let recovery = recovery_required.then(||json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"source":"actualAgent","reason":if cancelling {"cancelUncertain"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}));
         if let Some(value) = &recovery {
             validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;

@@ -317,6 +317,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     assert!(empty_detail.ok, "{:?}", empty_detail.error);
     let empty_detail = empty_detail.result.unwrap();
     assert_eq!(empty_detail["agentRuns"], serde_json::json!([]));
+    assert_eq!(empty_detail["agentRecovery"], serde_json::Value::Null);
     validate_agent_adapter_payload_v1("agentChatDetailPage", &empty_detail).unwrap();
 
     write_request(
@@ -414,6 +415,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     validate_agent_adapter_payload_v1("agentChatDetailPage", &detail).unwrap();
     assert_eq!(detail["agentRuns"][0]["runId"], run_id);
     assert_eq!(detail["agentRuns"][0]["state"], "succeeded");
+    assert_eq!(detail["agentRecovery"], serde_json::Value::Null);
     assert_eq!(detail["messages"].as_array().unwrap().len(), 4);
     let mut public_text = public_events
         .iter()
@@ -678,17 +680,18 @@ fn binary_provider_recovery_terminal_blocks_quit_until_exact_agent_abandon() {
             .as_str()
             .is_some_and(|value| value.starts_with("lock:"))));
 
-    let recovery_id = detail["agentRuns"][0]["recovery"]["recoveryId"]
-        .as_str()
-        .map(str::to_string);
-    assert!(
-        recovery_id.is_none(),
-        "chat.get must not widen the run record"
-    );
-    let recovery_id = format!(
-        "agent_recovery_{}",
-        run_id.strip_prefix("agent_run_").unwrap()
-    );
+    validate_agent_adapter_payload_v1("agentChatDetailPage", &detail).unwrap();
+    let recovery = detail["agentRecovery"].clone();
+    let recovery_id = recovery["recoveryId"].as_str().unwrap().to_string();
+    assert_eq!(recovery["chatId"], chat["chatId"]);
+    assert_eq!(recovery["taskId"], chat["taskId"]);
+    assert_eq!(recovery["projectId"], chat["projectId"]);
+    assert_eq!(recovery["worktreeId"], chat["worktreeId"]);
+    assert_eq!(recovery["workspaceIdentity"], chat["workspaceIdentity"]);
+    assert_eq!(recovery["runId"], run_id);
+    assert_eq!(recovery["revision"], 1);
+    assert_eq!(recovery["state"], "unresolved");
+    assert_eq!(recovery["poisoned"], true);
     write_request(
         &mut stdin,
         &ready.sidecar_instance_id,
@@ -704,6 +707,7 @@ fn binary_provider_recovery_terminal_blocks_quit_until_exact_agent_abandon() {
         panic!("actual recovery inspect")
     };
     let inspected = inspected.result.unwrap();
+    assert_eq!(inspected, recovery);
     assert_eq!(inspected["state"], "unresolved");
     assert_eq!(inspected["poisoned"], true);
 

@@ -571,20 +571,89 @@ impl G5Manager {
             .filter_map(|run| run.get("record").cloned())
             .take(G5_EVENT_PAGE_MAX_ITEMS_V1)
             .collect::<Vec<_>>();
-        let agent_runs = storage
+        let actual_run_projections = storage
             .projection_records("run")?
             .into_iter()
             .filter(|run| run.get("chat_id").and_then(Value::as_str) == Some(chat_id))
             .filter(|run| run.get("source_kind").and_then(Value::as_str) == Some("actualAgent"))
-            .filter_map(|run| run.get("record").cloned())
-            .take(G5_EVENT_PAGE_MAX_ITEMS_V1)
             .collect::<Vec<_>>();
         let mut result = json!({
             "chat":chat,"afterEventSequence":after_event_sequence,"messages":slice,
             "runs":runs,"nextEventSequence":next_event,
         });
         if include_agent_runs {
+            if actual_run_projections.len() > G5_EVENT_PAGE_MAX_ITEMS_V1 {
+                return Err(ProjectFailure::recovery(
+                    "actual-agent chat run ledger exceeds the bounded detail page",
+                ));
+            }
+            let mut agent_runs = Vec::with_capacity(actual_run_projections.len());
+            let mut unresolved_recoveries = Vec::new();
+            let mut recovery_required_runs = 0_usize;
+            for projection in actual_run_projections {
+                let run = projection.get("record").cloned().ok_or_else(|| {
+                    ProjectFailure::recovery("actual-agent run record is missing")
+                })?;
+                if projection.get("run_id") != run.get("runId")
+                    || projection.get("chat_id") != run.get("chatId")
+                    || run.get("chatId") != result["chat"].get("chatId")
+                {
+                    return Err(ProjectFailure::recovery(
+                        "actual-agent run projection identity differs from its chat",
+                    ));
+                }
+                if run.get("state").and_then(Value::as_str) == Some("recoveryRequired") {
+                    recovery_required_runs += 1;
+                }
+                if let Some(recovery) = projection.get("recovery").filter(|value| !value.is_null())
+                {
+                    hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+                        "recoveryRecord",
+                        recovery,
+                    )
+                    .map_err(|error| {
+                        ProjectFailure::recovery(format!(
+                            "invalid durable actual-agent recovery: {error}"
+                        ))
+                    })?;
+                    for field in [
+                        "chatId",
+                        "taskId",
+                        "projectId",
+                        "worktreeId",
+                        "workspaceIdentity",
+                    ] {
+                        if recovery.get(field) != result["chat"].get(field)
+                            || recovery.get(field) != run.get(field)
+                        {
+                            return Err(ProjectFailure::recovery(
+                                "actual-agent recovery identity differs from its chat or run",
+                            ));
+                        }
+                    }
+                    if recovery.get("runId") != run.get("runId") {
+                        return Err(ProjectFailure::recovery(
+                            "actual-agent recovery run identity differs",
+                        ));
+                    }
+                    if recovery.get("state").and_then(Value::as_str) == Some("unresolved") {
+                        unresolved_recoveries.push(recovery.clone());
+                    }
+                }
+                agent_runs.push(run);
+            }
+            if unresolved_recoveries.len() > 1 {
+                return Err(ProjectFailure::recovery(
+                    "actual-agent chat has multiple unresolved recoveries",
+                ));
+            }
+            if recovery_required_runs != unresolved_recoveries.len() {
+                return Err(ProjectFailure::recovery(
+                    "actual-agent recoveryRequired run and unresolved recovery cardinality differ",
+                ));
+            }
             result["agentRuns"] = Value::Array(agent_runs);
+            result["agentRecovery"] = unresolved_recoveries.pop().unwrap_or(Value::Null);
             hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
                 "agentChatDetailPage",
                 &result,

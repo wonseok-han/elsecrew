@@ -16,6 +16,12 @@
 - **공용 골든·검증**: identityless record/chat detail/result와 상태·증거·identity drift, 기존 resolved/non-recovery/null chat 및 `resolvedAbandoned|processesRemain|revisionConflict` 회귀를 양 언어에서 고정했다. focused Node 13개, 전체 Node 174개, focused protocol 9개와 전체 protocol 32개, TypeScript no-emit, Rust 2021 format, 기존 범위 밖 lint 3건만 허용한 protocol clippy, `git diff --check`를 통과했다. strict clippy는 변경 전부터 있던 needless lifetime 2건과 collapsible-if 1건에서만 실패했다.
 - **다음 할 일·경계**: 독립 계약 리뷰 뒤 sidecar가 identity barrier 전에 process identity를 얻지 못한 실제 기록을 만들고 resolve 우선순위를 집행해야 한다. sidecar/core/Electron/UI와 실제 provider·인증·사용자 프로젝트·Windows는 건드리거나 실행하지 않았고 merge·push도 하지 않았다.
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C sidecar recovery 발견 계약 소비)
+
+- **durable recovery 발견**: exact G5A+ `chat.get`이 `agentRuns`와 함께 required nullable `agentRecovery`를 항상 반환한다. 같은 chat의 durable actualAgent projection에서 unresolved recovery를 찾고 chat/task/project/worktree/workspace/run identity를 run·chat과 exact 대조하며, 정상·resolved detail은 null이다. 일반 exact G5 detail에는 두 field를 모두 추가하지 않고 legacy recovery page의 actual-free 경계도 유지한다.
+- **fail-closed cardinality**: actual run record/projection identity 누락·불일치, 복수 unresolved actual recovery, recoveryRequired run과 unresolved recovery 수 불일치를 detail 구성 단계에서 거부하고 full 공용 `agentChatDetailPage` validator를 마지막에 다시 통과시킨다. production-shaped random recovery ID를 그대로 발견해 inspect/resolve에 사용하며 이전 deterministic fixture ID 재구성 seam은 제거했다.
+- **검증·흐름**: terminal notification 직후 stdio hydration이 full identity/revision의 recovery를 읽고 actual inspect와 explicit abandon에 사용한다. poison/quit blocker와 legacy namespace 분리는 유지되며 resolve 뒤 unit hydration은 `agentRecovery=null`, run canceled, chat discarded를 확인한다. 모호성·identity·cardinality drift 실패 주입을 포함해 sidecar 75 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 31 passed, strict sidecar clippy, Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. 실제 provider·인증·사용자 프로젝트·network·Windows와 공개 계약/Electron/UI는 변경하거나 실행하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 발견 계약 리뷰 수정)
 
 - **P1 관계 규칙 명시**: 일반 recovery API가 과거 `resolvedAbandoned` record를 검증할 수 있는 것과 달리, 현재 agent chat detail의 non-null `agentRecovery`는 반드시 `state=unresolved`이면서 `poisoned=true`여야 한다. resolved/non-recovery detail은 `agentRecovery=null`만 허용하도록 TypeScript/Rust 관계 validator에 직접 고정했다.

@@ -677,6 +677,17 @@ fn drain_actual_scenario(
     panic!("actual provider fixture did not reach a durable terminal state")
 }
 
+fn durable_provider_recovery_fixture(request: &str) -> (Fixture, Value, String) {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalRecoveryRequired,
+        request,
+    );
+    drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    (fixture, chat, run_id)
+}
+
 #[test]
 fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_and_lock() {
     let mut fixture = Fixture::new();
@@ -1279,12 +1290,14 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
         .get_chat(&fixture.storage, chat_id, 0, None, 10, false)
         .unwrap();
     assert!(current_g5_detail.get("agentRuns").is_none());
+    assert!(current_g5_detail.get("agentRecovery").is_none());
     assert!(current_g5_detail["runs"].as_array().unwrap().is_empty());
     let g5a_detail = fixture
         .chats
         .get_chat(&fixture.storage, chat_id, 0, None, 10, true)
         .unwrap();
     assert_eq!(g5a_detail["agentRuns"][0]["state"], "succeeded");
+    assert_eq!(g5a_detail["agentRecovery"], Value::Null);
     assert_eq!(g5a_detail["messages"].as_array().unwrap().len(), 4);
     hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
         "agentChatDetailPage",
@@ -1581,7 +1594,31 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
         .unwrap()
         .is_empty());
 
-    let recovery = run["recovery"].clone();
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap();
+    hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &detail,
+    )
+    .unwrap();
+    let recovery = detail["agentRecovery"].clone();
+    assert_eq!(recovery, run["recovery"]);
+    assert_eq!(recovery["chatId"], chat["chatId"]);
+    assert_eq!(recovery["taskId"], chat["taskId"]);
+    assert_eq!(recovery["projectId"], chat["projectId"]);
+    assert_eq!(recovery["worktreeId"], chat["worktreeId"]);
+    assert_eq!(recovery["workspaceIdentity"], chat["workspaceIdentity"]);
+    assert_eq!(recovery["runId"], run_id);
+    assert_eq!(recovery["revision"], 1);
     let request = json!({
         "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
         "taskId":chat["taskId"],"projectId":chat["projectId"],
@@ -1620,6 +1657,128 @@ fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_aband
     assert_eq!(lock["writer_run_id"], Value::Null);
     assert_eq!(lock["poisoned"], false);
     assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+    let resolved_detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap();
+    assert_eq!(resolved_detail["agentRecovery"], Value::Null);
+    assert_eq!(resolved_detail["agentRuns"][0]["state"], "canceled");
+    assert_eq!(resolved_detail["chat"]["state"], "discarded");
+    hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+        "agentChatDetailPage",
+        &resolved_detail,
+    )
+    .unwrap();
+}
+
+#[test]
+fn agent_recovery_discovery_rejects_ambiguity_identity_and_cardinality_drift() {
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_ambiguous");
+    let mut duplicate = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    duplicate.remove("last_event_sequence");
+    let duplicate_run_id = "agent_run_duplicate_recovery";
+    duplicate["run_id"] = Value::String(duplicate_run_id.into());
+    duplicate["record"]["runId"] = Value::String(duplicate_run_id.into());
+    duplicate["recovery"]["runId"] = Value::String(duplicate_run_id.into());
+    duplicate["recovery"]["recoveryId"] = Value::String("agent_recovery_duplicate_recovery".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: duplicate_run_id.into(),
+            operation_id: "op_duplicate_actual_recovery".into(),
+            request_id: None,
+            payload: duplicate,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("multiple unresolved"));
+
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_identity");
+    let mut mismatch = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    mismatch.remove("last_event_sequence");
+    mismatch["recovery"]["workspaceIdentity"] = Value::String("workspace_mismatch".into());
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: "op_mismatched_actual_recovery".into(),
+            request_id: None,
+            payload: mismatch,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("identity differs"));
+
+    let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_recovery_cardinality");
+    let mut missing = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    missing.remove("last_event_sequence");
+    missing["recovery"] = Value::Null;
+    fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id,
+            operation_id: "op_missing_actual_recovery".into(),
+            request_id: None,
+            payload: missing,
+        }])
+        .unwrap();
+    assert!(fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            true,
+        )
+        .unwrap_err()
+        .detail
+        .contains("cardinality differ"));
 }
 
 #[test]
