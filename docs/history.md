@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Electron V5 terminal notification·session budget)
+
+- **V5 알림 경계**: exact G5A negotiated session에서만 normalized `agent.runStateChanged`를 fixed `m5:v5:agent:run-state-changed`와 typed preload `onAgentRunStateChanged`로 전달했다. 이 표면은 새 renderer state source가 아니라 `chat.get`의 durable chat/run ledger를 다시 읽게 하는 hydration trigger뿐이며, V3/V4 channel과 raw/generic IPC 금지는 유지했다.
+- **fail-closed 원장**: Electron은 accepted/hydrated full binding과 fingerprint를 session tombstone으로 보존하고 `preparing → running(선택) → terminal`만 허용한다. terminal 뒤 public event, terminal/active regression, unknown/mutated binding·envelope, reused event ID, 같은 run의 다른 stream 및 같은 stream의 다른 run은 listener 전 poison한다. terminal listener를 보낸 뒤 active binding만 제거하고 replay/mutation tombstone은 session 종료까지 남긴다.
+- **한도·검증**: shared constants로 active actual run 32, seen run 1,024, seen event ID 8,192, actual stream 1,024, protocol stream 4,096을 Electron에도 적용했다. focused Electron 43개와 전체 Node 158개, root pinned `tsc --noEmit`, Vite build, `git diff --check`를 통과했다. worktree `pnpm exec`는 격리 DNS 의존성 fetch에서 실행할 수 없어서 root pinned binary로 typecheck/build를 재실행했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+- **다음 할 일**: 이 Electron feature commit의 독립 리뷰 뒤 Rust terminal persistence/event/budget 구현 및 renderer hydration subscription을 통합 기준에서 QA한다.
+
 ### 2026-08-27 · by GPT-5.6-Terra (M5 G5B renderer terminal durable hydration)
 
 - **V5는 trigger만**: `agent.runStateChanged` listener는 event의 `run`을 화면 상태에 직접 쓰지 않고 기존 chat/generation별 hydration latch로만 `chat.get` tail 재조회를 요청한다. zero-public-output terminal도 durable `agentRuns`가 `succeeded` 같은 terminal을 반환한 뒤에만 action lock이 풀리고, durable ledger가 아직 `running`이면 event의 terminal 주장만으로 바뀌지 않는다. `final` public event의 nonterminal 의미는 유지했다.

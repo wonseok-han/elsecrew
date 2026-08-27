@@ -28,12 +28,13 @@ import type {
 import type {
   AgentCapabilitiesRequestV1,
   AgentPublicEventV1,
+  AgentRunStateChangedV1,
   AgentRecoveryInspectRequestV1,
   AgentRecoveryResolveRequestV1,
   AgentRunCancelRequestV1,
   AgentRunStartRequestV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS } from "./ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS } from "./ipc-channels.ts";
 import { EventCreditV1 } from "./event-credit.ts";
 import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
@@ -208,6 +209,15 @@ function forwardAgentPublicEvent(event: AgentPublicEventV1, protocolEvent: Event
   ));
 }
 
+function forwardAgentRunStateChanged(event: AgentRunStateChangedV1, protocolEvent: EventV1): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) { sidecar?.failRendererDisconnected(); return; }
+  eventCredit.deliver(protocolEvent, () => window.webContents.send(
+    M5_BRIDGE_V5_CHANNELS.agentRunStateChanged,
+    { event, streamId: protocolEvent.streamId, seq: protocolEvent.seq },
+  ));
+}
+
 function startSidecar(): SidecarClientV1 {
   const client = new SidecarClientV1(sidecarLaunch(m5DataDirectory()));
   client.onEvent(forwardSidecarEvent);
@@ -215,6 +225,7 @@ function startSidecar(): SidecarClientV1 {
   client.onWorkspaceEvent(forwardWorkspaceEvent);
   client.onChatEvent(forwardChatEvent);
   client.onAgentPublicEvent(forwardAgentPublicEvent);
+  client.onAgentRunStateChanged(forwardAgentRunStateChanged);
   void client.start().catch(() => {
     // getSystemStatus exposes a structured unavailable state. There is no restart or retry.
   });

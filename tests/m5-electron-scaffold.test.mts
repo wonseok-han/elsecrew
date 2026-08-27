@@ -59,6 +59,9 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   );
   assert.match(source("electron/preload.ts"), /onAgentPublicEvent: \(listener\) => subscribe\(agentPublicEventListeners, listener\)/);
   assert.match(source("electron/preload.ts"), /ipcRenderer\.on\(M5_BRIDGE_V4_CHANNELS\.agentPublicEvent/);
+  assert.match(source("electron/preload.ts"), /onAgentRunStateChanged: \(listener\) => subscribe\(agentRunStateChangedListeners, listener\)/);
+  assert.match(source("electron/preload.ts"), /ipcRenderer\.on\(M5_BRIDGE_V5_CHANNELS\.agentRunStateChanged/);
+  assert.match(source("electron/preload.ts"), /validateAgentRunStateChangedV1\(payload\.event\)/);
   assert.match(source("electron/preload.ts"), /validateAgentPublicEventV1\(payload\.event\)/);
   assert.match(source("pnpm-workspace.yaml"), /^nodeLinker: hoisted$/m);
 });

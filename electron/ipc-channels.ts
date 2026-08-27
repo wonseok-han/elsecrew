@@ -50,3 +50,8 @@ export const M5_BRIDGE_V4_CHANNELS = {
   agentRecoveryResolve: "m5:v4:agent:recovery:resolve",
   agentPublicEvent: "m5:v4:agent:public-event",
 } as const;
+
+/** G5B adds a notification-only hydration trigger; V3/V4 channels stay stable. */
+export const M5_BRIDGE_V5_CHANNELS = {
+  agentRunStateChanged: "m5:v5:agent:run-state-changed",
+} as const;

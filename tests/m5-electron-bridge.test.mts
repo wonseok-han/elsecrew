@@ -5,7 +5,14 @@ import { PassThrough } from "node:stream";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { MAX_CONTROL_LINE_BYTES, type EventV1 } from "../src/m5/contracts/protocol-v1.ts";
+import {
+  AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1,
+  AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1,
+  AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1,
+  MAX_CONTROL_LINE_BYTES,
+  PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1,
+  type EventV1,
+} from "../src/m5/contracts/protocol-v1.ts";
 import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import {
   G5A_CAPABILITIES_V1,
@@ -109,6 +116,15 @@ function g5aFixture(name: string, valid = true): Record<string, unknown> {
   return entry.value;
 }
 
+function g5bFixture(name: string): Record<string, unknown> {
+  const cases = JSON.parse(readFileSync(resolve("tests/fixtures/m5/agent-adapter-v1/g5b-terminal-budget-cases.json"), "utf8")) as {
+    valid: Array<{ name: string; value: Record<string, unknown> }>;
+  };
+  const entry = cases.valid.find((candidate) => candidate.name === name);
+  assert.ok(entry, `missing G5B fixture ${name}`);
+  return entry.value;
+}
+
 function g5Fixture(name: string): Record<string, unknown> {
   const cases = JSON.parse(readFileSync(resolve("tests/fixtures/m5/g5-v1/cases.json"), "utf8")) as {
     valid: Array<{ name: string; value: Record<string, unknown> }>;
@@ -195,11 +211,90 @@ function agentPublicEventLine(payload: Record<string, unknown>, streamId = "agen
   });
 }
 
+function agentRunStateChanged(fingerprint: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    eventId: "agent_state_event_accepted",
+    run: {
+      schemaVersion: 1,
+      runId: "agent_run_accepted",
+      chatId: "chat_01",
+      taskId: "task_01",
+      projectId: "project_01",
+      worktreeId: "worktree_01",
+      workspaceIdentity: "workspace_01",
+      selectedProfile: {
+        roleId: "planning",
+        runtime: "claude-code",
+        modelSelector: "claude-opus-5",
+        reasoningEffort: null,
+        permission: "readOnly",
+      },
+      source: "actualAgent",
+      capabilityFingerprint: fingerprint,
+      state: "running",
+      stage: "planning",
+      terminationOutcome: null,
+      createdAt: "2026-08-27T01:01:00Z",
+      updatedAt: "2026-08-27T01:02:00Z",
+    },
+    ...overrides,
+  };
+}
+
+function agentRunStateChangedLine(payload: Record<string, unknown>, streamId = "agent_state", seq = 1): string {
+  const run = payload.run as Record<string, unknown>;
+  return eventLine({
+    protocolVersion: 1,
+    kind: "event",
+    sidecarInstanceId: "sidecar_test_01",
+    streamId,
+    seq,
+    event: "agent.runStateChanged",
+    chatId: run.chatId as string,
+    taskId: run.taskId as string,
+    runId: run.runId as string,
+    payload,
+  });
+}
+
 async function hydrateActualAgentRun(client: SidecarClientV1, child: FixtureSidecar) {
   const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
   const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
   child.stdout.write(responseLine(request.requestId, g5aFixture("actual-agent-chat-page-keeps-distinct-ledger")));
   await detail;
+}
+
+function plannedEmptyAgentDetail(): Record<string, unknown> {
+  const page = structuredClone(g5aFixture("actual-agent-chat-page-keeps-distinct-ledger"));
+  page.agentRuns = [];
+  (page.messages as Record<string, unknown>[])[0]!.kind = "status";
+  (page.messages as Record<string, unknown>[])[0]!.roleId = null;
+  (page.messages as Record<string, unknown>[])[0]!.runId = null;
+  return page;
+}
+
+function terminalHydrationPage(offset: number, count: number): Record<string, unknown> {
+  const base = structuredClone(g5aFixture("actual-agent-chat-page-keeps-distinct-ledger"));
+  (base.messages as Record<string, unknown>[])[0]!.runId = `agent_run_tombstone_${offset}`;
+  base.agentRuns = Array.from({ length: count }, (_, index) => {
+    const run = structuredClone((g5aFixture("actual-agent-chat-page-keeps-distinct-ledger").agentRuns as Record<string, unknown>[])[0]!);
+    run.runId = `agent_run_tombstone_${offset + index}`;
+    run.state = "succeeded";
+    run.terminationOutcome = "cleanExit";
+    run.updatedAt = "2026-08-27T01:03:00Z";
+    return run;
+  });
+  return base;
+}
+
+async function hydrateTerminalRuns(client: SidecarClientV1, child: FixtureSidecar, count: number): Promise<void> {
+  for (let offset = 0; offset < count; offset += 50) {
+    const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+    const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+    child.stdout.write(responseLine(request.requestId, terminalHydrationPage(offset, Math.min(50, count - offset))));
+    await detail;
+  }
 }
 
 function eventLine(event: EventV1) {
@@ -469,6 +564,179 @@ test("G5A public events fail closed on unnegotiated, identity, event, stream, an
     assert.equal(delivered, 0);
     assert.equal(malformed.child.terminations, 1);
   }
+});
+
+test("G5B forwards only validated state-change hydration triggers and closes the active run after terminal delivery", async () => {
+  const { child, client } = createClient();
+  const fingerprint = measuredCapability().fingerprint;
+  const starting = client.start(); child.stdout.write(`${g5aReadyLine()}\n`); await starting;
+  await hydrateActualAgentRun(client, child);
+  const start = client.startAgentRun({
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: fingerprint,
+  });
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(request.requestId, acceptedAgentRun(fingerprint)));
+  await start;
+
+  const publicEvents: unknown[] = [];
+  const stateEvents: unknown[] = [];
+  client.onAgentPublicEvent((event) => publicEvents.push(event));
+  client.onAgentRunStateChanged((event) => stateEvents.push(event));
+  child.stdout.write(agentPublicEventLine(agentPublicEvent(fingerprint), "agent_run_accepted_stream", 1));
+  child.stdout.write(agentRunStateChangedLine(agentRunStateChanged(fingerprint), "agent_run_accepted_stream", 2));
+  const terminal = agentRunStateChanged(fingerprint, {
+    eventId: "agent_state_event_terminal",
+    run: { ...agentRunStateChanged(fingerprint).run as Record<string, unknown>, state: "succeeded", terminationOutcome: "cleanExit", updatedAt: "2026-08-27T01:03:00Z" },
+  });
+  child.stdout.write(agentRunStateChangedLine(terminal, "agent_run_accepted_stream", 3));
+
+  assert.equal(publicEvents.length, 1);
+  assert.deepEqual(stateEvents.map((event) => (event as { run: { state: string } }).run.state), ["running", "succeeded"]);
+  assert.equal(child.terminations, 0);
+
+  child.stdout.write(agentPublicEventLine(agentPublicEvent(fingerprint, { eventId: "agent_event_after_terminal" }), "agent_run_accepted_stream", 4));
+  assert.match(client.failure?.message ?? "", /after terminal/);
+  assert.equal(child.terminations, 1, "post-terminal public output must terminate exactly once before a listener receives it");
+  assert.equal(publicEvents.length, 1);
+});
+
+test("G5B permits a zero-public terminal notification but rejects mutation, invalid transition, replay, and cross-run streams before listeners", async () => {
+  const zeroPublic = createClient();
+  const zeroStart = zeroPublic.client.start(); zeroPublic.child.stdout.write(`${g5aReadyLine()}\n`); await zeroStart;
+  await hydrateActualAgentRun(zeroPublic.client, zeroPublic.child);
+  const delivered: unknown[] = [];
+  zeroPublic.client.onAgentRunStateChanged((event) => delivered.push(event));
+  const terminal = structuredClone(g5bFixture("succeeded-state-notifies-hydration"));
+  zeroPublic.child.stdout.write(agentRunStateChangedLine(terminal, "agent_run_01_stream", 1));
+  assert.equal(delivered.length, 1, "terminal notification must not require public text first");
+  zeroPublic.child.stdout.write(agentPublicEventLine({ ...g5aFixture("bounded-public-status-event"), eventId: "agent_event_after_zero_public_terminal" }, "agent_run_01_stream", 2));
+  assert.match(zeroPublic.client.failure?.message ?? "", /after terminal/);
+  assert.equal(zeroPublic.child.terminations, 1);
+
+  const mutations: Array<{ name: string; payload?: Record<string, unknown>; envelope?: Partial<EventV1> }> = [
+    { name: "fingerprint", payload: { ...agentRunStateChanged(measuredCapability().fingerprint), run: { ...agentRunStateChanged(measuredCapability().fingerprint).run as Record<string, unknown>, capabilityFingerprint: `sha256:${"1".repeat(64)}` } } },
+    { name: "envelope", envelope: { chatId: "chat_other" } },
+  ];
+  for (const mutation of mutations) {
+    const invalid = createClient();
+    const started = invalid.client.start(); invalid.child.stdout.write(`${g5aReadyLine()}\n`); await started;
+    await hydrateActualAgentRun(invalid.client, invalid.child);
+    let stateDelivered = 0;
+    invalid.client.onAgentRunStateChanged(() => { stateDelivered += 1; });
+    const payload = mutation.payload ?? structuredClone(g5bFixture("running-state-notifies-hydration"));
+    const line = JSON.parse(agentRunStateChangedLine(payload)) as EventV1;
+    invalid.child.stdout.write(eventLine({ ...line, ...mutation.envelope }));
+    assert.equal(stateDelivered, 0, `${mutation.name} must fail before state listener delivery`);
+    assert.equal(invalid.child.terminations, 1, `${mutation.name} must terminate once`);
+  }
+
+  const transition = createClient();
+  const transitionStart = transition.client.start(); transition.child.stdout.write(`${g5aReadyLine()}\n`); await transitionStart;
+  await hydrateActualAgentRun(transition.client, transition.child);
+  transition.child.stdout.write(agentRunStateChangedLine(g5bFixture("running-state-notifies-hydration"), "agent_run_01_stream", 1));
+  transition.child.stdout.write(agentRunStateChangedLine({ ...g5bFixture("running-state-notifies-hydration"), eventId: "agent_state_event_running_twice" }, "agent_run_01_stream", 2));
+  assert.match(transition.client.failure?.message ?? "", /transition is invalid/);
+  assert.equal(transition.child.terminations, 1);
+
+  const replay = createClient();
+  const replayStart = replay.client.start(); replay.child.stdout.write(`${g5aReadyLine()}\n`); await replayStart;
+  await hydrateActualAgentRun(replay.client, replay.child);
+  const running = g5bFixture("running-state-notifies-hydration");
+  replay.child.stdout.write(agentRunStateChangedLine(running, "agent_run_01_stream", 1));
+  replay.child.stdout.write(agentRunStateChangedLine(running, "agent_run_01_stream", 2));
+  assert.equal(replay.child.terminations, 1, "eventId replay must poison once");
+
+  const crossRun = createClient();
+  const crossStart = crossRun.client.start(); crossRun.child.stdout.write(`${g5aReadyLine()}\n`); await crossStart;
+  await hydrateActualAgentRun(crossRun.client, crossRun.child);
+  const start = crossRun.client.startAgentRun({
+    chatId: "chat_01", roleId: "planning", inputMessageIds: ["message_01"], expectedCapabilityFingerprint: measuredCapability().fingerprint,
+  });
+  const request = JSON.parse(crossRun.child.writes.at(-1) ?? "{}") as { requestId: string };
+  crossRun.child.stdout.write(responseLine(request.requestId, acceptedAgentRun(measuredCapability().fingerprint)));
+  await start;
+  crossRun.child.stdout.write(agentRunStateChangedLine(g5bFixture("running-state-notifies-hydration"), "agent_cross_run_stream", 1));
+  crossRun.child.stdout.write(agentRunStateChangedLine(agentRunStateChanged(measuredCapability().fingerprint), "agent_cross_run_stream", 2));
+  assert.equal(crossRun.child.terminations, 1, "one actual-agent stream cannot change run binding");
+});
+
+test("G5B Electron registries enforce each shared session limit at the exact bound and poison at plus one", async () => {
+  const active = createClient();
+  const activeStart = active.client.start(); active.child.stdout.write(`${g5aReadyLine()}\n`); await activeStart;
+  await hydrateActualAgentRun(active.client, active.child);
+  const input = { chatId: "chat_01", roleId: "planning" as const, inputMessageIds: ["message_01"], expectedCapabilityFingerprint: measuredCapability().fingerprint };
+  for (let index = 0; index < AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1 - 1; index += 1) {
+    const pending = active.client.startAgentRun(input);
+    const request = JSON.parse(active.child.writes.at(-1) ?? "{}") as { requestId: string };
+    active.child.stdout.write(responseLine(request.requestId, acceptedAgentRun(input.expectedCapabilityFingerprint, { runId: `agent_run_active_${index}` })));
+    await pending;
+  }
+  const overflow = active.client.startAgentRun(input);
+  const overflowRequest = JSON.parse(active.child.writes.at(-1) ?? "{}") as { requestId: string };
+  active.child.stdout.write(responseLine(overflowRequest.requestId, acceptedAgentRun(input.expectedCapabilityFingerprint, { runId: "agent_run_active_overflow" })));
+  await assert.rejects(overflow, /active run session budget exceeded/);
+  assert.equal(active.child.terminations, 1);
+
+  const tombstones = createClient();
+  const tombstoneStart = tombstones.client.start(); tombstones.child.stdout.write(`${g5aReadyLine()}\n`); await tombstoneStart;
+  await hydrateTerminalRuns(tombstones.client, tombstones.child, AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1);
+  const extra = tombstones.client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const extraRequest = JSON.parse(tombstones.child.writes.at(-1) ?? "{}") as { requestId: string };
+  tombstones.child.stdout.write(responseLine(extraRequest.requestId, terminalHydrationPage(AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1, 1)));
+  await assert.rejects(extra, /seen runId session budget exceeded/);
+  assert.equal(tombstones.child.terminations, 1, "terminal hydration remains tombstoned but cannot grow without bound");
+
+  const eventIds = createClient();
+  const eventStart = eventIds.client.start(); eventIds.child.stdout.write(`${g5aReadyLine()}\n`); await eventStart;
+  await hydrateActualAgentRun(eventIds.client, eventIds.child);
+  let delivered = 0;
+  eventIds.client.onAgentPublicEvent(() => { delivered += 1; });
+  for (let sequence = 1; sequence <= AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1; sequence += 1) {
+    eventIds.child.stdout.write(agentPublicEventLine({ ...g5aFixture("bounded-public-status-event"), eventId: `agent_event_budget_${sequence}` }, "agent_event_budget_stream", sequence));
+  }
+  assert.equal(delivered, AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1);
+  eventIds.child.stdout.write(agentPublicEventLine({ ...g5aFixture("bounded-public-status-event"), eventId: "agent_event_budget_overflow" }, "agent_event_budget_stream", AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1 + 1));
+  assert.equal(eventIds.child.terminations, 1, "seen eventId plus one must poison once");
+
+  const agentStreams = createClient();
+  const agentStreamStart = agentStreams.client.start(); agentStreams.child.stdout.write(`${g5aReadyLine()}\n`); await agentStreamStart;
+  const detail = agentStreams.client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const detailRequest = JSON.parse(agentStreams.child.writes.at(-1) ?? "{}") as { requestId: string };
+  agentStreams.child.stdout.write(responseLine(detailRequest.requestId, plannedEmptyAgentDetail()));
+  await detail;
+  for (let index = 0; index < AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1; index += 1) {
+    const pending = agentStreams.client.startAgentRun(input);
+    const request = JSON.parse(agentStreams.child.writes.at(-1) ?? "{}") as { requestId: string };
+    const runId = `agent_run_stream_budget_${index}`;
+    agentStreams.child.stdout.write(responseLine(request.requestId, acceptedAgentRun(input.expectedCapabilityFingerprint, { runId })));
+    await pending;
+    const terminal = agentRunStateChanged(input.expectedCapabilityFingerprint, {
+      eventId: `agent_state_event_stream_budget_${index}`,
+      run: { ...agentRunStateChanged(input.expectedCapabilityFingerprint).run as Record<string, unknown>, runId, state: "succeeded", terminationOutcome: "cleanExit", updatedAt: "2026-08-27T01:03:00Z" },
+    });
+    agentStreams.child.stdout.write(agentRunStateChangedLine(terminal, `agent_stream_budget_${index}`, 1));
+  }
+  assert.equal(agentStreams.client.failure, undefined, "terminal tombstones retain exact stream bindings through the shared bound");
+  const agentStreamOverflow = agentStreams.client.startAgentRun(input);
+  const agentStreamOverflowRequest = JSON.parse(agentStreams.child.writes.at(-1) ?? "{}") as { requestId: string };
+  agentStreams.child.stdout.write(responseLine(agentStreamOverflowRequest.requestId, acceptedAgentRun(input.expectedCapabilityFingerprint, { runId: "agent_run_stream_budget_overflow" })));
+  await assert.rejects(agentStreamOverflow, /seen runId session budget exceeded/);
+  assert.equal(agentStreams.child.terminations, 1, "the stream/tombstone shared plus-one boundary must poison once");
+
+  const protocolStreams = createClient();
+  const streamStart = protocolStreams.client.start(); protocolStreams.child.stdout.write(`${g5aReadyLine()}\n`); await streamStart;
+  for (let index = 0; index < PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1 - 1; index += 1) {
+    protocolStreams.child.stdout.write(eventLine({
+      protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: `budget_stream_${index}`, seq: 1,
+      event: "system.fatal", payload: { code: "bounded" },
+    }));
+  }
+  assert.equal(protocolStreams.client.failure, undefined);
+  protocolStreams.child.stdout.write(eventLine({
+    protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "budget_stream_overflow", seq: 1,
+    event: "system.fatal", payload: { code: "overflow" },
+  }));
+  assert.equal(protocolStreams.child.terminations, 1, "protocol streamId plus one must poison once");
 });
 
 test("G5A keeps actual and fixture ledgers separate and fails closed on raw agent events", async () => {
@@ -1019,6 +1287,27 @@ test("G5A bridge exposes only fixed adapter channels with the existing main-fram
   assert.match(main, /assertCurrentMainFrame\(event\)/);
   assert.match(main, /forwardAgentPublicEvent/);
   assert.match(main, /eventCredit\.deliver\(protocolEvent/);
+  assert.doesNotMatch(channels, /generic|invokeAll|startAgentSmoke/);
+  assert.doesNotMatch(preload, /ipcRenderer\.invoke\([^M]/);
+});
+
+test("G5B bridge adds only the fixed state hydration trigger and preserves V3/V4 channels and credit", () => {
+  const main = source("electron/main.ts");
+  const preload = source("electron/preload.ts");
+  const channels = source("electron/ipc-channels.ts");
+  const client = source("electron/sidecar-client.ts");
+  assert.match(channels, /agentRunStateChanged: "m5:v5:agent:run-state-changed"/);
+  assert.match(main, /M5_BRIDGE_V5_CHANNELS\.agentRunStateChanged/);
+  assert.match(main, /forwardAgentRunStateChanged/);
+  assert.match(main, /eventCredit\.deliver\(protocolEvent/);
+  assert.match(preload, /onAgentRunStateChanged: \(listener\) => subscribe\(agentRunStateChangedListeners, listener\)/);
+  assert.match(preload, /validateAgentRunStateChangedV1\(payload\.event\)/);
+  assert.match(client, /AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1/);
+  assert.match(client, /AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1/);
+  assert.match(client, /AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1/);
+  assert.match(client, /AGENT_STREAM_IDS_PER_SESSION_MAX_V1/);
+  assert.match(client, /#agentRunStreams/);
+  assert.match(client, /agent public event arrived after terminal actual-agent state/);
   assert.doesNotMatch(channels, /generic|invokeAll|startAgentSmoke/);
   assert.doesNotMatch(preload, /ipcRenderer\.invoke\([^M]/);
 });

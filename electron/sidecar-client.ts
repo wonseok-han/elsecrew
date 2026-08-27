@@ -5,6 +5,10 @@ import { TextDecoder } from "node:util";
 
 import {
   MAX_CONTROL_LINE_BYTES,
+  AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1,
+  AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1,
+  AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1,
+  AGENT_STREAM_IDS_PER_SESSION_MAX_V1,
   ProtocolSessionV1,
   decodeJsonl,
   encodeJsonl,
@@ -101,6 +105,7 @@ import {
   validateAgentCapabilitySnapshotV1,
   validateAgentChatDetailPageV1,
   validateAgentPublicEventAgainstRunV1,
+  validateAgentRunStateChangedAgainstAcceptedV1,
   validateAgentRecoveryInspectRequestV1,
   validateAgentRecoveryRecordV1,
   validateAgentRecoveryResolveRequestV1,
@@ -122,6 +127,7 @@ import {
   type AgentRunBindingV1,
   type AgentRunRecordV1,
   type AgentPublicEventV1,
+  type AgentRunStateChangedV1,
   type AgentRunCancelRequestV1,
   type AgentRunCancelResultV1,
   type AgentRunStartRequestV1,
@@ -213,6 +219,13 @@ interface TextStreamV1 {
   events: number;
 }
 
+type AgentRunObservedStateV1 = "preparing" | "running" | "cancelling" | "terminal";
+
+interface SeenAgentRunV1 {
+  binding: AgentRunBindingV1;
+  state: AgentRunObservedStateV1;
+}
+
 export class SidecarClientV1 {
   readonly #launch: SidecarLaunchV1;
   readonly #spawn: SidecarSpawnV1;
@@ -224,12 +237,15 @@ export class SidecarClientV1 {
   readonly #workspaceListeners = new Set<(event: WorkspaceEventV1) => void>();
   readonly #chatListeners = new Set<(event: TeamMessageV1, protocol: EventV1) => void>();
   readonly #agentPublicEventListeners = new Set<(event: AgentPublicEventV1, protocol: EventV1) => void>();
+  readonly #agentRunStateChangedListeners = new Set<(event: AgentRunStateChangedV1, protocol: EventV1) => void>();
   readonly #workspaceSaves = new Map<string, WorkspaceSaveSessionV1>();
   readonly #preparedWorkspaces = new Map<string, PreparedWorkspaceSessionV1>();
   readonly #agentChatContexts = new Map<string, AgentChatContextV1>();
-  readonly #acceptedAgentRuns = new Map<string, AgentRunBindingV1>();
-  readonly #agentPublicEventIds = new Set<string>();
-  readonly #agentPublicStreamRuns = new Map<string, string>();
+  readonly #activeAgentRuns = new Map<string, AgentRunBindingV1>();
+  readonly #seenAgentRuns = new Map<string, SeenAgentRunV1>();
+  readonly #agentEventIds = new Set<string>();
+  readonly #agentRunStreams = new Map<string, string>();
+  readonly #agentStreamRuns = new Map<string, string>();
   readonly #streams = new Map<string, TextStreamV1>();
   #streamBytes = 0;
   readonly #decoder = new TextDecoder("utf-8", { fatal: true });
@@ -351,6 +367,11 @@ export class SidecarClientV1 {
   onAgentPublicEvent(listener: (event: AgentPublicEventV1, protocol: EventV1) => void): () => void {
     this.#agentPublicEventListeners.add(listener);
     return () => this.#agentPublicEventListeners.delete(listener);
+  }
+
+  onAgentRunStateChanged(listener: (event: AgentRunStateChangedV1, protocol: EventV1) => void): () => void {
+    this.#agentRunStateChangedListeners.add(listener);
+    return () => this.#agentRunStateChangedListeners.delete(listener);
   }
 
   async getSystemStatus(): Promise<SystemStatusV1> {
@@ -594,20 +615,49 @@ export class SidecarClientV1 {
           throw new Error("actual-agent public events require the exact planned G5A capability set");
         }
         const runId = envelope.runId;
-        const knownRun = runId === undefined ? undefined : this.#acceptedAgentRuns.get(runId);
+        const knownRun = runId === undefined ? undefined : this.#seenAgentRuns.get(runId);
         if (!knownRun) throw new Error("agent public event references an unknown actual-agent run");
-        const event = validateAgentPublicEventAgainstRunV1(envelope.payload, knownRun);
+        if (knownRun.state === "terminal") throw new Error("agent public event arrived after terminal actual-agent state");
+        const event = validateAgentPublicEventAgainstRunV1(envelope.payload, knownRun.binding);
         if (event.chatId !== envelope.chatId || event.taskId !== envelope.taskId || event.runId !== envelope.runId) {
           throw new Error("agent public event envelope identity does not match the validated payload");
         }
-        if (this.#agentPublicEventIds.has(event.eventId)) throw new Error("agent public eventId was reused");
-        const streamRunId = this.#agentPublicStreamRuns.get(envelope.streamId);
+        this.#acceptAgentEventId(event.eventId);
+        const streamRunId = this.#agentStreamRuns.get(envelope.streamId);
         if (streamRunId !== undefined && streamRunId !== event.runId) {
           throw new Error("agent public event stream changed actual-agent run binding");
         }
-        this.#agentPublicEventIds.add(event.eventId);
-        this.#agentPublicStreamRuns.set(envelope.streamId, event.runId);
+        this.#bindAgentStream(envelope.streamId, event.runId);
         for (const listener of this.#agentPublicEventListeners) listener(event, envelope);
+        return;
+      }
+      if (envelope.event === "agent.runStateChanged") {
+        if (!this.#agentAdapterNegotiated) {
+          throw new Error("actual-agent state events require the exact planned G5A capability set");
+        }
+        const runId = envelope.runId;
+        const knownRun = runId === undefined ? undefined : this.#seenAgentRuns.get(runId);
+        if (!knownRun) throw new Error("agent state event references an unknown actual-agent run");
+        const event = validateAgentRunStateChangedAgainstAcceptedV1(envelope.payload, {
+          schemaVersion: 1,
+          ...knownRun.binding,
+          state: "preparing",
+        });
+        if (event.run.chatId !== envelope.chatId || event.run.taskId !== envelope.taskId || event.run.runId !== envelope.runId) {
+          throw new Error("agent state event envelope identity does not match the validated payload");
+        }
+        this.#acceptAgentEventId(event.eventId);
+        this.#bindAgentStream(envelope.streamId, event.run.runId);
+        const terminal = event.run.state !== "running";
+        if (event.run.state === "running") {
+          if (knownRun.state !== "preparing") throw new Error("actual-agent state transition is invalid");
+          knownRun.state = "running";
+        } else {
+          if (knownRun.state === "terminal") throw new Error("actual-agent terminal state was repeated");
+          knownRun.state = "terminal";
+        }
+        for (const listener of this.#agentRunStateChangedListeners) listener(event, envelope);
+        if (terminal) this.#activeAgentRuns.delete(event.run.runId);
         return;
       }
       if (this.#agentAdapterNegotiated && (envelope.event === "run.event" || envelope.event === "run.finished")) {
@@ -801,8 +851,7 @@ export class SidecarClientV1 {
           roleId: request.roleId,
           capabilityFingerprint: request.expectedCapabilityFingerprint,
         });
-        if (this.#acceptedAgentRuns.has(value.runId)) return failResult("accepted actual-agent runId was reused");
-        this.#acceptedAgentRuns.set(value.runId, agentRunBindingFromAccepted(value));
+        this.#registerAcceptedAgentRun(value);
         return value;
       }
       case "run.cancelAgent": {
@@ -935,9 +984,11 @@ export class SidecarClientV1 {
     this.#workspaceSaves.clear();
     this.#preparedWorkspaces.clear();
     this.#agentChatContexts.clear();
-    this.#acceptedAgentRuns.clear();
-    this.#agentPublicEventIds.clear();
-    this.#agentPublicStreamRuns.clear();
+    this.#activeAgentRuns.clear();
+    this.#seenAgentRuns.clear();
+    this.#agentEventIds.clear();
+    this.#agentRunStreams.clear();
+    this.#agentStreamRuns.clear();
     this.#streams.clear();
     this.#streamBytes = 0;
     this.#terminateOnce();
@@ -955,11 +1006,73 @@ export class SidecarClientV1 {
 
   #registerHydratedAgentRun(run: AgentRunRecordV1): void {
     const binding = agentRunBindingFromRecord(run);
-    const existing = this.#acceptedAgentRuns.get(binding.runId);
-    if (existing !== undefined && !sameAgentRunBinding(existing, binding)) {
+    const existing = this.#seenAgentRuns.get(binding.runId);
+    if (existing !== undefined && !sameAgentRunBinding(existing.binding, binding)) {
       throw new Error("hydrated actual-agent run changed binding");
     }
-    this.#acceptedAgentRuns.set(binding.runId, binding);
+    const state = observedAgentRunState(run.state);
+    if (existing !== undefined) {
+      if (existing.state === "terminal" && state !== "terminal") {
+        throw new Error("hydrated actual-agent run regressed from terminal state");
+      }
+      if (existing.state === "running" && state === "preparing") {
+        throw new Error("hydrated actual-agent run regressed from running state");
+      }
+      if (existing.state === "cancelling" && (state === "preparing" || state === "running")) {
+        throw new Error("hydrated actual-agent run regressed from cancelling state");
+      }
+      existing.state = state;
+    } else {
+      if (this.#seenAgentRuns.size >= AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1) {
+        throw new Error("actual-agent seen runId session budget exceeded");
+      }
+      this.#seenAgentRuns.set(binding.runId, { binding, state });
+    }
+    if (state === "terminal") {
+      this.#activeAgentRuns.delete(binding.runId);
+    } else if (!this.#activeAgentRuns.has(binding.runId)) {
+      if (this.#activeAgentRuns.size >= AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1) {
+        throw new Error("actual-agent active run session budget exceeded");
+      }
+      this.#activeAgentRuns.set(binding.runId, binding);
+    }
+  }
+
+  #registerAcceptedAgentRun(run: AgentRunAcceptedV1): void {
+    if (this.#seenAgentRuns.has(run.runId)) return failResult("accepted actual-agent runId was reused");
+    if (this.#seenAgentRuns.size >= AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1) {
+      return failResult("actual-agent seen runId session budget exceeded");
+    }
+    if (this.#activeAgentRuns.size >= AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1) {
+      return failResult("actual-agent active run session budget exceeded");
+    }
+    const binding = agentRunBindingFromAccepted(run);
+    this.#seenAgentRuns.set(run.runId, { binding, state: "preparing" });
+    this.#activeAgentRuns.set(run.runId, binding);
+  }
+
+  #acceptAgentEventId(eventId: string): void {
+    if (this.#agentEventIds.has(eventId)) throw new Error("actual-agent eventId was reused");
+    if (this.#agentEventIds.size >= AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1) {
+      throw new Error("actual-agent eventId session budget exceeded");
+    }
+    this.#agentEventIds.add(eventId);
+  }
+
+  #bindAgentStream(streamId: string, runId: string): void {
+    const runStreamId = this.#agentRunStreams.get(runId);
+    if (runStreamId !== undefined && runStreamId !== streamId) {
+      throw new Error("agent event run changed exclusive actual-agent stream binding");
+    }
+    const streamRunId = this.#agentStreamRuns.get(streamId);
+    if (streamRunId !== undefined && streamRunId !== runId) {
+      throw new Error("agent event stream changed actual-agent run binding");
+    }
+    if (streamRunId === undefined && this.#agentStreamRuns.size >= AGENT_STREAM_IDS_PER_SESSION_MAX_V1) {
+      throw new Error("actual-agent streamId session budget exceeded");
+    }
+    this.#agentRunStreams.set(runId, streamId);
+    this.#agentStreamRuns.set(streamId, runId);
   }
 }
 
@@ -1061,6 +1174,11 @@ function agentRunBindingFromAccepted(run: AgentRunAcceptedV1): AgentRunBindingV1
     roleId: run.roleId,
     capabilityFingerprint: run.capabilityFingerprint,
   };
+}
+
+function observedAgentRunState(state: AgentRunRecordV1["state"]): AgentRunObservedStateV1 {
+  if (["succeeded", "failed", "canceled", "recoveryRequired"].includes(state)) return "terminal";
+  return state;
 }
 
 function sameAgentRunBinding(left: AgentRunBindingV1, right: AgentRunBindingV1): boolean {
