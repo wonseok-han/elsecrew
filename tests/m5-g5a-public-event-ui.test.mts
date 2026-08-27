@@ -101,6 +101,33 @@ test("public event burst는 하나의 hydration으로 합치고 durable sequence
   controller.dispose();
 });
 
+test("last empty hydration response와 같은 turn의 public event는 durable tail을 자동 재조회한다", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.messages.push(message(bridge.chatA, 2, "second")); bridge.calls.length = 0;
+  let releaseEmpty: (() => void) | undefined; let requestedEmpty: (() => void) | undefined;
+  const emptyRequested = new Promise<void>((resolve) => { requestedEmpty = resolve; });
+  const original = bridge.getChat.bind(bridge); let held = false; let tailRequests = 0;
+  bridge.getChat = async (input) => {
+    if (input.afterEventSequence === 2) tailRequests++;
+    if (input.afterEventSequence === 2 && !held) {
+      held = true; requestedEmpty!();
+      return new Promise((resolve) => { releaseEmpty = () => {
+        bridge.messages.push(message(bridge.chatA, 3, "tail after empty")); bridge.emitAgent(publicEvent(bridge.chatA));
+        resolve({ chat: bridge.chatA, afterEventSequence: 2, messages: [], runs: [], nextEventSequence: null, agentRuns: bridge.agentRuns });
+      }; });
+    }
+    return original(input);
+  };
+  bridge.emitAgent(publicEvent(bridge.chatA)); await emptyRequested;
+  releaseEmpty!();
+  await flush(); await flush();
+  assert.equal(tailRequests, 2, "the empty tail is replayed once after the same-turn event");
+  assert.deepEqual(bridge.calls, [1, 2, 3]);
+  assert.deepEqual(controller.snapshot().messages.map((entry) => entry.eventSequence), [1, 2, 3]);
+  assert.equal(controller.snapshot().messages[2]?.text, "tail after empty");
+  controller.dispose();
+});
+
 test("pending 및 inactive actual event는 텍스트를 보이지 않고 해당 채팅의 hydration 또는 refresh notice만 남긴다", async () => {
   const bridge = new AgentBridge(); const controller = await open(bridge);
   bridge.emitAgent(publicEvent(bridge.chatB, "inactive raw")); await flush();

@@ -39,6 +39,7 @@ export class ChatUiController {
   #generation = 0;
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: ChatDetail | null } | null = null;
   #hydrations = new Map<string, Promise<void>>();
+  #hydrationTriggers = new Map<string, number>();
   #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, recoveries: [], refreshNeededChatIds: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
 
   constructor(bridge: M5ChatBridge) { this.#bridge = bridge; }
@@ -52,7 +53,7 @@ export class ChatUiController {
   }
   dispose(): void {
     this.#disposed = true; this.#generation++; this.#unsubscribe?.(); this.#agentUnsubscribe?.();
-    this.#unsubscribe = null; this.#agentUnsubscribe = null; this.#hydrations.clear(); this.#listeners.clear();
+    this.#unsubscribe = null; this.#agentUnsubscribe = null; this.#hydrations.clear(); this.#hydrationTriggers.clear(); this.#listeners.clear();
   }
 
   async openProject(projectId: string): Promise<void> {
@@ -231,20 +232,31 @@ export class ChatUiController {
   async #hydrateChat(chat: ChatRecordV1, generation: number): Promise<void> {
     const key = `${generation}:${chat.chatId}`;
     const existing = this.#hydrations.get(key);
-    if (existing) return existing;
-    const task = this.#hydrateChatPages(chat, generation).finally(() => this.#hydrations.delete(key));
+    if (existing) {
+      this.#hydrationTriggers.set(key, (this.#hydrationTriggers.get(key) ?? 0) + 1);
+      return existing;
+    }
+    this.#hydrationTriggers.set(key, 0);
+    const task = this.#hydrateChatPages(chat, generation, key).finally(() => { this.#hydrations.delete(key); this.#hydrationTriggers.delete(key); });
     this.#hydrations.set(key, task);
     return task;
   }
-  async #hydrateChatPages(chat: ChatRecordV1, generation: number): Promise<void> {
+  async #hydrateChatPages(chat: ChatRecordV1, generation: number, key: string): Promise<void> {
     const initialMessages = this.#messagesFor(chat);
     let after = initialMessages.length > 0 ? initialMessages[initialMessages.length - 1]!.eventSequence : 0;
+    let consumedTriggers = 0;
     for (;;) {
       const detail = await this.#bridge.getChat({ chatId: chat.chatId, afterEventSequence: after, cursor: null, limit: 50 }) as ChatDetail;
       if (!this.#live(generation) || !matchesChatRecord(detail.chat, chat)) return;
       const messages = mergeMessages(this.#messagesFor(chat), detail.messages);
       this.#applyHydratedDetail(detail, messages);
-      if (detail.nextEventSequence === null) return;
+      if (detail.nextEventSequence === null) {
+        const triggers = this.#hydrationTriggers.get(key) ?? 0;
+        if (triggers <= consumedTriggers) return;
+        consumedTriggers = triggers;
+        continue;
+      }
+      consumedTriggers = this.#hydrationTriggers.get(key) ?? 0;
       after = detail.nextEventSequence;
     }
   }
