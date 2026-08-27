@@ -1,0 +1,38 @@
+{
+  "events": [
+    {
+      "schemaVersion": 1,
+      "eventId": "agent_event_ledger_01",
+      "chatId": "chat_01",
+      "taskId": "task_01",
+      "projectId": "project_01",
+      "worktreeId": "worktree_01",
+      "workspaceIdentity": "workspace_01",
+      "runId": "agent_run_01",
+      "roleId": "planning",
+      "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3",
+      "kind": "status",
+      "text": "프로젝트 구조를 확인하고 있습니다.",
+      "createdAt": "2026-08-27T01:02:00Z"
+    },
+    {
+      "schemaVersion": 1,
+      "eventId": "agent_event_ledger_02",
+      "chatId": "chat_01",
+      "taskId": "task_01",
+      "projectId": "project_01",
+      "worktreeId": "worktree_01",
+      "workspaceIdentity": "workspace_01",
+      "runId": "agent_run_01",
+      "roleId": "planning",
+      "capabilityFingerprint": "sha256:93058dadc9163dcfbf9b8019ad1d980f017624e7c149b5f020085d2b22795fa3",
+      "kind": "final",
+      "text": "검토를 마쳤습니다.",
+      "createdAt": "2026-08-27T01:03:00Z"
+    }
+  ],
+  "snapshots": [
+    {"eventCount": 1, "snapshotBytes": 431, "cumulativeSnapshotBytes": 431},
+    {"eventCount": 2, "snapshotBytes": 837, "cumulativeSnapshotBytes": 1268}
+  ]
+}

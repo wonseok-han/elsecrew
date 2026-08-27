@@ -61,16 +61,15 @@
     "resourceLimits": {
       "publicEventsPerRun": 256,
       "publicTextBytesPerRun": 1048576,
-      "immutablePublicLedgerBytesPerRun": 16777216,
+      "immutablePublicLedgerCumulativeSnapshotBytesPerRun": 16777216,
       "activeActualRunsPerSession": 32,
       "seenActualRunIdsPerSession": 1024,
       "seenActualEventIdsPerSession": 8192,
       "actualStreamIdsPerSession": 1024,
       "protocolStreamIdsPerSession": 4096,
       "publicTextBytesDefinition": "sumUtf8BytesOfAgentPublicEventTextPerRun",
-      "immutablePublicLedgerBytesDefinition": "sumUtf8BytesOfRecursiveAsciiKeySortedCompactJsonAgentPublicEventRecordsPerRun;arrayOrderPreserved;explicitNullIncluded",
-      "canonicalPublicLedgerFixture": "bounded-public-status-event",
-      "canonicalPublicLedgerRecordBytes": 422
+      "immutablePublicLedgerCumulativeSnapshotBytesDefinition": "sumAfterEachAppendUtf8BytesOfRecursiveAsciiKeySortedCompactJsonFullPublicEventsArraySnapshotsPerRun;arrayOrderPreserved;explicitNullIncluded",
+      "publicLedgerAmplificationGoldenFile": "g5b-public-ledger-amplification.json"
     },
     "chatDetailCapabilityDiscriminator": "agentRunsPresence",
     "preflightFailure": {"spawnCount": 0, "lockCount": 0},

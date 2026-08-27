@@ -121,6 +121,20 @@ struct MutationChange {
     value: Value,
 }
 
+#[derive(Deserialize)]
+struct LedgerAmplificationGolden {
+    events: Vec<Value>,
+    snapshots: Vec<LedgerSnapshot>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LedgerSnapshot {
+    event_count: usize,
+    snapshot_bytes: usize,
+    cumulative_snapshot_bytes: usize,
+}
+
 #[test]
 fn rust_matches_the_planned_g5a_manifest_without_changing_g5_ready() {
     let (root, manifest) = manifest();
@@ -357,8 +371,8 @@ fn rust_accepts_every_wire_state_and_rejects_g5b_fail_closed_cases() {
 }
 
 #[test]
-fn rust_matches_g5b_resource_limits_and_canonical_public_ledger_bytes() {
-    let (root, manifest) = manifest();
+fn rust_matches_g5b_resource_limits_and_cumulative_public_ledger_snapshots() {
+    let (root, _) = manifest();
     let raw: Value = read_json(root.join("manifest.json"));
     let contract = &raw["contract"];
     assert_eq!(contract["agentStateEventIdNamespace"], "agent_state_event_");
@@ -401,8 +415,8 @@ fn rust_matches_g5b_resource_limits_and_canonical_public_ledger_bytes() {
         crate::AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1
     );
     assert_eq!(
-        limits["immutablePublicLedgerBytesPerRun"],
-        crate::AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1
+        limits["immutablePublicLedgerCumulativeSnapshotBytesPerRun"],
+        crate::AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1
     );
     assert_eq!(
         limits["activeActualRunsPerSession"],
@@ -425,21 +439,25 @@ fn rust_matches_g5b_resource_limits_and_canonical_public_ledger_bytes() {
         crate::PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1
     );
     assert_eq!(
-        limits["immutablePublicLedgerBytesDefinition"],
-        "sumUtf8BytesOfRecursiveAsciiKeySortedCompactJsonAgentPublicEventRecordsPerRun;arrayOrderPreserved;explicitNullIncluded"
+        limits["immutablePublicLedgerCumulativeSnapshotBytesDefinition"],
+        "sumAfterEachAppendUtf8BytesOfRecursiveAsciiKeySortedCompactJsonFullPublicEventsArraySnapshotsPerRun;arrayOrderPreserved;explicitNullIncluded"
     );
-    let cases: Cases = read_json(root.join(&manifest.cases_file));
-    let public_event = cases
-        .valid
-        .iter()
-        .find(|entry| entry.name == limits["canonicalPublicLedgerFixture"])
-        .expect("canonical public ledger fixture");
-    assert_eq!(
-        agent_public_ledger_record_bytes_v1(&public_event.value).expect("ledger bytes"),
-        limits["canonicalPublicLedgerRecordBytes"]
-            .as_u64()
-            .expect("ledger bytes") as usize
-    );
+    let golden_file = limits["publicLedgerAmplificationGoldenFile"]
+        .as_str()
+        .expect("ledger golden file");
+    let golden: LedgerAmplificationGolden = read_json(root.join(golden_file));
+    for snapshot in golden.snapshots {
+        let events = &golden.events[..snapshot.event_count];
+        assert_eq!(
+            agent_public_events_snapshot_bytes_v1(events).expect("snapshot bytes"),
+            snapshot.snapshot_bytes
+        );
+        assert_eq!(
+            agent_public_ledger_cumulative_snapshot_bytes_v1(events)
+                .expect("cumulative snapshot bytes"),
+            snapshot.cumulative_snapshot_bytes
+        );
+    }
 }
 
 fn manifest() -> (PathBuf, Manifest) {

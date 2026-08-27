@@ -5,7 +5,8 @@ import test from "node:test";
 
 import {
   AGENT_RUN_STATE_EVENT_STATES_V1,
-  agentPublicLedgerRecordBytesV1,
+  agentPublicEventsSnapshotBytesV1,
+  agentPublicLedgerCumulativeSnapshotBytesV1,
   validateAgentRunStateChangedAgainstAcceptedV1,
   validateAgentRunStateChangedV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
@@ -14,7 +15,7 @@ import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
 import {
   AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1,
   AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
-  AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1,
+  AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1,
   AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
   AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1,
   AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1,
@@ -42,28 +43,38 @@ interface G5BCases {
   bindings: MutationCase[];
 }
 
+interface LedgerAmplificationGolden {
+  events: unknown[];
+  snapshots: { eventCount: number; snapshotBytes: number; cumulativeSnapshotBytes: number }[];
+}
+
 const fixtureRoot = resolve("tests/fixtures/m5/agent-adapter-v1");
 const manifest = JSON.parse(readFileSync(resolve(fixtureRoot, "manifest.json"), "utf8"));
 const cases = JSON.parse(readFileSync(resolve(fixtureRoot, manifest.g5bCasesFile), "utf8")) as G5BCases;
 
-test("G5B shared resource budgets and deterministic ledger-byte unit match the manifest", () => {
+test("G5B shared resource budgets and cumulative ledger snapshots match the manifest", () => {
   assert.deepEqual(manifest.contract.resourceLimits, {
     publicEventsPerRun: AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
     publicTextBytesPerRun: AGENT_PUBLIC_TEXT_BYTES_PER_RUN_MAX_V1,
-    immutablePublicLedgerBytesPerRun: AGENT_PUBLIC_LEDGER_BYTES_PER_RUN_MAX_V1,
+    immutablePublicLedgerCumulativeSnapshotBytesPerRun: AGENT_PUBLIC_LEDGER_CUMULATIVE_SNAPSHOT_BYTES_PER_RUN_MAX_V1,
     activeActualRunsPerSession: AGENT_ACTIVE_RUNS_PER_SESSION_MAX_V1,
     seenActualRunIdsPerSession: AGENT_SEEN_RUN_IDS_PER_SESSION_MAX_V1,
     seenActualEventIdsPerSession: AGENT_SEEN_EVENT_IDS_PER_SESSION_MAX_V1,
     actualStreamIdsPerSession: AGENT_STREAM_IDS_PER_SESSION_MAX_V1,
     protocolStreamIdsPerSession: PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1,
     publicTextBytesDefinition: "sumUtf8BytesOfAgentPublicEventTextPerRun",
-    immutablePublicLedgerBytesDefinition: "sumUtf8BytesOfRecursiveAsciiKeySortedCompactJsonAgentPublicEventRecordsPerRun;arrayOrderPreserved;explicitNullIncluded",
-    canonicalPublicLedgerFixture: "bounded-public-status-event",
-    canonicalPublicLedgerRecordBytes: 422,
+    immutablePublicLedgerCumulativeSnapshotBytesDefinition: "sumAfterEachAppendUtf8BytesOfRecursiveAsciiKeySortedCompactJsonFullPublicEventsArraySnapshotsPerRun;arrayOrderPreserved;explicitNullIncluded",
+    publicLedgerAmplificationGoldenFile: "g5b-public-ledger-amplification.json",
   });
-  const publicEvent = JSON.parse(readFileSync(resolve(fixtureRoot, manifest.casesFile), "utf8"))
-    .valid.find((entry: { name: string }) => entry.name === manifest.contract.resourceLimits.canonicalPublicLedgerFixture).value;
-  assert.equal(agentPublicLedgerRecordBytesV1(publicEvent), manifest.contract.resourceLimits.canonicalPublicLedgerRecordBytes);
+  const golden = JSON.parse(readFileSync(
+    resolve(fixtureRoot, manifest.contract.resourceLimits.publicLedgerAmplificationGoldenFile),
+    "utf8",
+  )) as LedgerAmplificationGolden;
+  for (const snapshot of golden.snapshots) {
+    const events = golden.events.slice(0, snapshot.eventCount);
+    assert.equal(agentPublicEventsSnapshotBytesV1(events), snapshot.snapshotBytes);
+    assert.equal(agentPublicLedgerCumulativeSnapshotBytesV1(events), snapshot.cumulativeSnapshotBytes);
+  }
 });
 
 test("runStateChanged accepts running and every terminal wire state", () => {

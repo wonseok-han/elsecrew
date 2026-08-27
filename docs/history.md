@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B ledger write amplification 계약 교정)
+
+- **감사 결함 교정**: 최초 G5B 계약의 개별 public event byte 합은 sidecar가 append마다 커지는 `public_events` 전체 배열 projection을 immutable ledger event로 저장하는 실제 쓰기 증폭을 반영하지 못했다. 16 MiB 한도를 run의 각 append 직후 전체 배열 snapshot canonical UTF-8 byte 길이를 누적한 값으로 다시 고정해 O(n²) storage amplification을 계측 대상으로 포함했다.
+- **결정적 단위·골든**: canonicalization은 재귀 ASCII key 정렬·compact JSON, 배열 순서 보존, explicit null 포함이다. 양언어 helper를 prospective full-array snapshot과 prefix snapshot 누적 API로 교체했고, 한글 text를 포함한 같은 run의 1-event snapshot `431` bytes와 2-event snapshot `837` bytes·누적 `1268` bytes를 공용 golden으로 고정했다.
+- **호환·검증**: event count·text·session 예산, `agent.runStateChanged`, exact G5/G5A capability/method 배열은 변경하지 않았다. focused Node 17개, 전체 Node 154개, TypeScript no-emit, Rust protocol 29개, owned Rust rustfmt, scoped protocol clippy, `git diff --check`를 통과했다. sidecar·Electron·renderer 소비자는 변경하지 않았으며 다음 단계에서 이 누적 단위를 append 전 fail-closed admission에 사용해야 한다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B terminal notification·resource budget 계약)
 
 - **additive terminal 통지**: protocol v1에 `agent.runStateChanged`를 예약하고 payload를 exact `{schemaVersion,eventId,run}`으로 고정했다. event ID는 `agent_state_event_`, run은 전체 `AgentRunRecordV1`이며 envelope chat/task/run과 accepted의 project/worktree/workspace/role/fingerprint까지 exact 결속한다. wire state는 `running|succeeded|failed|canceled|recoveryRequired`만 허용하고 `preparing|cancelling`, active/terminal evidence 불일치, extra/private/raw field를 양언어에서 거부한다. V5 bridge listener는 직접 표시 데이터가 아니라 durable `chat.get` 재수화 trigger다.

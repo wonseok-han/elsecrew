@@ -823,16 +823,24 @@ pub fn validate_agent_public_event_v1(
     Ok(event)
 }
 
-/// Canonical immutable-ledger amplification unit: sorted compact JSON UTF-8 bytes.
-pub fn agent_public_ledger_record_bytes_v1(
-    value: &Value,
+/// Canonical UTF-8 bytes of the prospective full public_events array snapshot.
+pub fn agent_public_events_snapshot_bytes_v1(
+    values: &[Value],
 ) -> Result<usize, AgentAdapterContractError> {
-    let event = validate_agent_public_event_v1(value)?;
-    let canonical =
-        canonicalize_fingerprint_value(serde_json::to_value(event).map_err(contract_json)?);
-    serde_json::to_vec(&canonical)
-        .map(|encoded| encoded.len())
-        .map_err(contract_json)
+    canonical_public_events_snapshot_bytes_v1(&validate_public_ledger_events_v1(values)?)
+}
+
+/// Sum of the full public_events array snapshot bytes persisted after each append.
+pub fn agent_public_ledger_cumulative_snapshot_bytes_v1(
+    values: &[Value],
+) -> Result<usize, AgentAdapterContractError> {
+    let events = validate_public_ledger_events_v1(values)?;
+    (1..=events.len()).try_fold(0_usize, |cumulative, length| {
+        let snapshot = canonical_public_events_snapshot_bytes_v1(&events[..length])?;
+        cumulative.checked_add(snapshot).ok_or_else(|| {
+            AgentAdapterContractError::new("public event ledger cumulative bytes overflow")
+        })
+    })
 }
 
 pub fn validate_agent_public_event_against_run_v1(
@@ -1477,6 +1485,40 @@ fn binding_from_event(value: &AgentPublicEventV1) -> AgentRunBindingV1 {
         role_id: value.role_id.clone(),
         capability_fingerprint: value.capability_fingerprint.clone(),
     }
+}
+
+fn validate_public_ledger_events_v1(
+    values: &[Value],
+) -> Result<Vec<Value>, AgentAdapterContractError> {
+    if values.len() > crate::AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1 {
+        return fail("public event ledger must be a bounded array");
+    }
+    let mut event_ids = HashSet::new();
+    let mut expected_binding = None;
+    let mut events = Vec::with_capacity(values.len());
+    for value in values {
+        let event = validate_agent_public_event_v1(value)?;
+        if !event_ids.insert(event.event_id.clone()) {
+            return fail("public event ledger eventIds must be unique");
+        }
+        let binding = binding_from_event(&event);
+        if let Some(expected) = &expected_binding {
+            assert_same_run_binding(expected, &binding, "public event ledger")?;
+        } else {
+            expected_binding = Some(binding);
+        }
+        events.push(serde_json::to_value(event).map_err(contract_json)?);
+    }
+    Ok(events)
+}
+
+fn canonical_public_events_snapshot_bytes_v1(
+    events: &[Value],
+) -> Result<usize, AgentAdapterContractError> {
+    let canonical = canonicalize_fingerprint_value(Value::Array(events.to_vec()));
+    serde_json::to_vec(&canonical)
+        .map(|encoded| encoded.len())
+        .map_err(contract_json)
 }
 
 fn binding_from_accepted(value: &AgentRunAcceptedV1) -> AgentRunBindingV1 {

@@ -1,5 +1,6 @@
 import { sha256FileVersionV1 } from "./file-v1.ts";
 import {
+  AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1,
   METHODS_V1,
   validateAgentPublicEventPayloadV1,
   validateAgentRunStateChangedPayloadV1,
@@ -453,10 +454,19 @@ export function validateAgentPublicEventV1(value: unknown): AgentPublicEventV1 {
   return validateAgentPublicEventPayloadV1(value) as AgentPublicEventV1;
 }
 
-/** Canonical immutable-ledger amplification unit: sorted compact JSON UTF-8 bytes. */
-export function agentPublicLedgerRecordBytesV1(value: unknown): number {
-  const event = validateAgentPublicEventV1(value);
-  return new TextEncoder().encode(JSON.stringify(canonicalizeFingerprintValue(event))).length;
+/** Canonical UTF-8 bytes of the prospective full public_events array snapshot. */
+export function agentPublicEventsSnapshotBytesV1(values: readonly unknown[]): number {
+  return canonicalPublicEventsSnapshotBytesV1(validatePublicLedgerEventsV1(values));
+}
+
+/** Sum of the full public_events array snapshot bytes persisted after each append. */
+export function agentPublicLedgerCumulativeSnapshotBytesV1(values: readonly unknown[]): number {
+  const events = validatePublicLedgerEventsV1(values);
+  let cumulative = 0;
+  for (let length = 1; length <= events.length; length += 1) {
+    cumulative += canonicalPublicEventsSnapshotBytesV1(events.slice(0, length));
+  }
+  return cumulative;
 }
 
 export function validateAgentPublicEventAgainstRunV1(
@@ -812,6 +822,22 @@ function validateAgentRunBindingFieldsV1(object: Record<string, unknown>): void 
 function validateAgentRunIdentityFieldsV1(object: Record<string, unknown>): void {
   for (const key of ["chatId", "taskId", "projectId", "worktreeId", "workspaceIdentity"] as const) id(object[key], key);
   agentRunId(object.runId, "runId");
+}
+
+function validatePublicLedgerEventsV1(values: readonly unknown[]): AgentPublicEventV1[] {
+  if (!Array.isArray(values) || values.length > AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1) fail("public event ledger must be a bounded array");
+  const events = values.map(validateAgentPublicEventV1);
+  const eventIds = new Set<string>();
+  const first = events[0];
+  for (const event of events) {
+    if (!eventIds.add(event.eventId)) fail("public event ledger eventIds must be unique");
+    if (first !== undefined) assertSameAgentRunBinding(first, event, "public event ledger");
+  }
+  return events;
+}
+
+function canonicalPublicEventsSnapshotBytesV1(events: readonly AgentPublicEventV1[]): number {
+  return new TextEncoder().encode(JSON.stringify(canonicalizeFingerprintValue(events))).length;
 }
 
 function assertSameAgentRunIdentity(expected: AgentRunIdentityV1, actual: AgentRunIdentityV1, name: string): void {
