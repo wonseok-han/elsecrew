@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust 독립 리뷰 P1·P2 수정)
+
+- **P1 ownership/restart 수정**: terminal run·chat·lock/recovery payload와 state event를 모두 구성·검증하고 atomic upsert가 commit될 때까지 `AgentRuntime.active` ownership을 유지한다. Construction/upsert 실패는 terminal event를 만들지 않고 active evidence를 남기며, 다음 sidecar 시작은 actual `preparing|running|cancelling|recoveryRequired` durable run을 모두 run/chat/lock 하나의 SQLite transaction으로 poisoned `recoveryRequired`에 수렴시킨다. 이미 terminal run은 그대로 두고, identity barrier 전에 죽은 preparing run은 process identity를 꾸며내지 않은 영구 blocker로 표시한다.
+- **P2 live counter 수정**: live poll과 append admission마다 `public_events` 전체에서 count, text UTF-8 합, canonical full-array prefix 누적 bytes를 다시 계산해 세 durable counter와 exact 대조한 뒤 ceiling을 검사한다. text/cumulative undercount 변조는 다음 event 저장·전달 전에 session failure가 되고, restart recovery가 authoritative ledger로 counter를 복원하면서 writer lock을 poison한다.
+- **실패 주입·검증**: terminal construction과 terminal projection upsert 실패에서 active ownership·durable running·terminal event 0을 확인하고, runtime drop 뒤 recovery record와 writer lock poison을 확인했다. Text/cumulative live undercount도 event count 불변·재시작 recovery를 검증했다. sidecar unit 68 passed·1 ignored와 stdio process 8개, protocol 29개, strict sidecar clippy, Rust 2021 rustfmt, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트·Windows는 실행하지 않았다.
+- **다음 할 일**: 수정 commit을 같은 exact SHA로 독립 재리뷰한 뒤 승인된 Rust commit만 G5B 통합 후보로 사용한다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B Rust terminal event·resource budget 소비)
 
 - **상태 통지 순서**: fake actual-agent accepted response는 계속 event 없이 먼저 반환하고, 첫 poll이 같은 run 전용 stream의 seq 1 `running` `agent.runStateChanged`를 내보낸다. normalized public event가 이후 연속 seq를 사용하고, process-tree 종료·run/chat/lock/recovery 원자 저장이 성공한 뒤 전체 durable run을 담은 terminal state event가 마지막 seq로 나간다. zero-output도 `running→terminal`이며 `final` 뒤 process가 살아 있는 동안 run은 계속 `running`이다. cancel은 terminal transaction을 먼저 commit하고 response 뒤 running/terminal event를 전달한다.

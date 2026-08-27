@@ -76,6 +76,10 @@ pub(crate) enum FakeScenario {
     PollObserveFailure,
     #[cfg_attr(not(test), allow(dead_code))]
     PollWaitFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    TerminalConstructionFailure,
+    #[cfg_attr(not(test), allow(dead_code))]
+    TerminalUpsertFailure,
 }
 
 struct ActiveAgentRun {
@@ -133,14 +137,30 @@ impl AgentRuntime {
     ) -> Result<(), SidecarError> {
         for projection in storage.projection_records("run")? {
             if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND)
-                || projection.get("state").and_then(Value::as_str) != Some("recoveryRequired")
                 || projection
                     .get("recovery")
                     .is_some_and(|value| !value.is_null())
+                || projection
+                    .get("unclean_recovery_without_identity")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                || !projection
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .is_some_and(|state| {
+                        ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
+                    })
             {
                 continue;
             }
-            validate_projection_public_budget(&projection)
+            let public_events =
+                projection["public_events"]
+                    .as_array()
+                    .cloned()
+                    .ok_or_else(|| {
+                        SidecarError::new("recoveryInvalid", "public event ledger is missing")
+                    })?;
+            public_budget_metrics(&public_events)
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let run_id = projection["run_id"].as_str().unwrap_or_default();
             let chat_id = projection["chat_id"].as_str().unwrap_or_default();
@@ -160,12 +180,6 @@ impl AgentRuntime {
                     value
                 })
                 .collect::<Vec<_>>();
-            if tracked.is_empty() {
-                return Err(SidecarError::new(
-                    "recoveryInvalid",
-                    "unclean agent run has no durable process identity barrier",
-                ));
-            }
             let run = agent_run_record(
                 run_id,
                 &chat,
@@ -180,16 +194,24 @@ impl AgentRuntime {
                     .unwrap_or_default(),
             )
             .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
-            let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":"recoveryRequired","processesProvenGone":false,"poisoned":true,"writerLockState":"recoveryRequired","chatState":"recoveryRequired","trackedProcesses":tracked,"evidenceDigest":digest_text("unclean-agent-recovery-v1"),"observedAt":now()});
-            validate_agent_adapter_payload_v1("terminationTranscript", &termination)
-                .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
-            let recovery = json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_unclean_{run_id}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null});
-            validate_agent_adapter_payload_v1("recoveryRecord", &recovery)
-                .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+            let identity_missing = tracked.is_empty();
+            let (termination, recovery) = if identity_missing {
+                // A crash can happen after durable preparing/lock and before process identity
+                // persistence. Keep an unreleasable poisoned blocker without inventing identity.
+                (Value::Null, Value::Null)
+            } else {
+                let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":"recoveryRequired","processesProvenGone":false,"poisoned":true,"writerLockState":"recoveryRequired","chatState":"recoveryRequired","trackedProcesses":tracked,"evidenceDigest":digest_text("unclean-agent-recovery-v1"),"observedAt":now()});
+                validate_agent_adapter_payload_v1("terminationTranscript", &termination)
+                    .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+                let recovery = json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_unclean_{run_id}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":"uncleanShutdown","state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null});
+                validate_agent_adapter_payload_v1("recoveryRecord", &recovery)
+                    .map_err(|error| SidecarError::new("recoveryInvalid", error.to_string()))?;
+                (termination, recovery)
+            };
             let address = address_from_chat(&chat)
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             projects
-                .workspace_mark_recovery_required(storage, &address)
+                .workspace_restore_recovery_required(&address)
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let recovered_chat = updated_chat(&chat, "recoveryRequired")
                 .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
@@ -198,14 +220,17 @@ impl AgentRuntime {
                 &projection["workspace_manifest"],
                 projection.get("barrier").cloned(),
                 projection.get("process_identity_internal").cloned(),
-                projection["public_events"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default(),
+                public_events,
             )
             .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             run_payload.insert("termination".into(), termination);
             run_payload.insert("recovery".into(), recovery);
+            if identity_missing {
+                run_payload.insert(
+                    "unclean_recovery_without_identity".into(),
+                    Value::Bool(true),
+                );
+            }
             let mut upserts = vec![
                 ProjectionUpsert {
                     aggregate_type: "run",
@@ -242,6 +267,11 @@ impl AgentRuntime {
             }
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
+        self.active.contains_key(run_id)
     }
 
     pub(crate) fn fake(executable: PathBuf, scenario: FakeScenario) -> Self {
@@ -1326,9 +1356,9 @@ impl AgentRuntime {
         requested_state: &str,
         cancelling: bool,
     ) -> Result<G5Event, ProjectFailure> {
-        let mut active = self
+        let active = self
             .active
-            .remove(run_id)
+            .get_mut(run_id)
             .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
         let report = active.tracker.terminate(
             &SystemProcTable,
@@ -1366,6 +1396,11 @@ impl AgentRuntime {
             Some(outcome),
             created,
         )?;
+        if active.scenario == FakeScenario::TerminalConstructionFailure {
+            return Err(ProjectFailure::recovery(
+                "injected terminal construction failure",
+            ));
+        }
         let tracked = report
             .tracked
             .iter()
@@ -1456,7 +1491,6 @@ impl AgentRuntime {
                 !clean,
             )?);
         }
-        storage.upsert_projection_records_atomic(upserts)?;
         let state_event = json!({
             "schemaVersion":1,
             "eventId":format!("agent_state_event_{}",Uuid::new_v4().simple()),
@@ -1464,20 +1498,32 @@ impl AgentRuntime {
         });
         validate_agent_adapter_payload_v1("runStateChanged", &state_event)
             .map_err(contract_failure)?;
-        validate_state_event_binding(&state_event, &active)?;
+        validate_state_event_binding(&state_event, active)?;
         let seq = active
             .next_wire_seq
             .checked_add(1)
             .ok_or_else(|| ProjectFailure::recovery("agent wire sequence overflow"))?;
-        Ok(G5Event {
-            stream_id: active.stream_id,
+        let event = G5Event {
+            stream_id: active.stream_id.clone(),
             seq,
             event: "agent.runStateChanged",
-            chat_id: Some(active.identity.chat_id),
-            task_id: Some(active.identity.task_id),
+            chat_id: Some(active.identity.chat_id.clone()),
+            task_id: Some(active.identity.task_id.clone()),
             run_id: Some(run_id.into()),
             payload: state_event,
-        })
+        };
+        if active.scenario == FakeScenario::TerminalUpsertFailure {
+            return Err(ProjectFailure::recovery(
+                "injected terminal projection upsert failure",
+            ));
+        }
+        storage.upsert_projection_records_atomic(upserts)?;
+        let removed = self.active.remove(run_id);
+        debug_assert!(
+            removed.is_some(),
+            "committed active run must still be owned"
+        );
+        Ok(event)
     }
 
     fn fail_poll(
@@ -1991,49 +2037,7 @@ fn validate_projection_public_budget(
 fn stored_public_budget(
     projection: &Map<String, Value>,
 ) -> Result<PublicBudgetMetrics, ProjectFailure> {
-    let events = projection["public_events"]
-        .as_array()
-        .ok_or_else(|| ProjectFailure::recovery("actual-agent public event ledger is missing"))?;
-    let names = [
-        "public_event_count",
-        "public_text_bytes",
-        "public_ledger_cumulative_snapshot_bytes",
-    ];
-    let present = names
-        .iter()
-        .filter(|name| projection.get(**name).is_some())
-        .count();
-    if present == 0 {
-        return public_budget_metrics(events);
-    }
-    if present != names.len() {
-        return Err(ProjectFailure::recovery(
-            "actual-agent public event durable counters are incomplete",
-        ));
-    }
-    let read = |name: &str| {
-        projection
-            .get(name)
-            .and_then(Value::as_u64)
-            .and_then(|value| usize::try_from(value).ok())
-            .ok_or_else(|| {
-                ProjectFailure::recovery(format!(
-                    "actual-agent public event durable counter {name} is invalid"
-                ))
-            })
-    };
-    let metrics = PublicBudgetMetrics {
-        event_count: read("public_event_count")?,
-        text_bytes: read("public_text_bytes")?,
-        cumulative_snapshot_bytes: read("public_ledger_cumulative_snapshot_bytes")?,
-    };
-    if metrics.event_count != events.len() {
-        return Err(ProjectFailure::recovery(
-            "actual-agent public event count does not match the ledger",
-        ));
-    }
-    enforce_public_budget(metrics)?;
-    Ok(metrics)
+    validate_projection_public_budget(projection)
 }
 
 fn apply_public_budget(projection: &mut Map<String, Value>, metrics: PublicBudgetMetrics) {
@@ -2248,6 +2252,8 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::ReleaseFailure => "clean",
         FakeScenario::PollObserveFailure => "cancel-clean",
         FakeScenario::PollWaitFailure => "cancel-clean",
+        FakeScenario::TerminalConstructionFailure => "no-output",
+        FakeScenario::TerminalUpsertFailure => "no-output",
     }
 }
 fn contract_failure(error: impl std::fmt::Display) -> ProjectFailure {

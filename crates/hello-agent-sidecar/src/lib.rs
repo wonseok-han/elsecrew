@@ -382,8 +382,8 @@ impl Sidecar {
         storage.recover_unclean_shutdown()?;
         let g5 = chat::G5Manager::default();
         let mut projects = ProjectManager::new(database_path)?;
-        agent_runtime.validate_persisted_runs(&storage)?;
         agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
+        agent_runtime.validate_persisted_runs(&storage)?;
         g5.recover_unclean_runs(&mut storage, &mut projects)?;
         let capabilities = if agent_runtime.advertises_g5a() {
             G5A_CAPABILITIES_V1

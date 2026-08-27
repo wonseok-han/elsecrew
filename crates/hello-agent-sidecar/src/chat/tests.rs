@@ -919,6 +919,18 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
     runtime
         .validate_persisted_runs(&fixture.storage)
         .expect("durable counters validate after run completion");
+    AgentRuntime::blocked()
+        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+        .expect("terminal run recovery scan is a no-op");
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap(),
+        terminal,
+        "already terminal actual run must not be rewritten"
+    );
     let serialized = serde_json::to_string(&terminal).unwrap();
     assert!(!serialized.contains("token-never-persist"));
     assert!(!serialized.contains("\"type\":\"reasoning\""));
@@ -1267,6 +1279,192 @@ fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() 
             "{}",
             error.detail()
         );
+    }
+}
+
+#[test]
+fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_recovery() {
+    for scenario in [
+        FakeScenario::TerminalConstructionFailure,
+        FakeScenario::TerminalUpsertFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_terminal_failure_snapshot");
+        let chat = fixture.create_chat(
+            &snapshot,
+            "terminal failure ownership",
+            "req_agent_terminal_failure_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_terminal_failure",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let error = loop {
+            match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(runtime.has_active_run(&run_id));
+        let durable = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable["record"]["state"], "running");
+        assert_eq!(durable["termination"], Value::Null);
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], run_id);
+        assert_eq!(lock["poisoned"], false);
+        drop(runtime);
+
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let recovered = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered["record"]["state"], "recoveryRequired");
+        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        let lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], run_id);
+        assert_eq!(lock["poisoned"], true);
+        assert_eq!(lock["recovery_required"], true);
+    }
+}
+
+#[test]
+fn live_text_and_cumulative_counter_undercounts_block_append_and_recover_poisoned() {
+    for counter in [
+        "public_text_bytes",
+        "public_ledger_cumulative_snapshot_bytes",
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_agent_live_counter_snapshot");
+        let chat = fixture.create_chat(
+            &snapshot,
+            "live counter drift",
+            "req_agent_live_counter_chat",
+        );
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::FinalDelayed);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let started = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_agent_live_counter",
+            )
+            .unwrap();
+        let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let before = loop {
+            let emitted = runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap();
+            let projection = fixture
+                .storage
+                .projection_record("run", &run_id)
+                .unwrap()
+                .unwrap();
+            if projection["public_event_count"].as_u64().unwrap_or(0) > 0 {
+                assert!(emitted
+                    .iter()
+                    .any(|event| event.event == "agent.publicEvent"));
+                break projection;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let durable_event_count = before["public_event_count"].as_u64().unwrap();
+        let mut drifted = before;
+        let exact = drifted[counter].as_u64().unwrap();
+        assert!(exact > 0);
+        drifted.insert(counter.into(), Value::from(exact - 1));
+        fixture
+            .storage
+            .upsert_projection_records_atomic(vec![ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.clone(),
+                operation_id: format!("op_test_agent_{counter}_drift"),
+                request_id: None,
+                payload: drifted,
+            }])
+            .unwrap();
+        let error = runtime
+            .poll(&mut fixture.storage, &mut fixture.projects)
+            .expect_err("live durable counter drift must fail before append");
+        assert_eq!(error.kind(), "agentRuntimeFailure");
+        assert!(runtime.has_active_run(&run_id));
+        let unchanged = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged["public_event_count"], durable_event_count);
+        drop(runtime);
+
+        AgentRuntime::blocked()
+            .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+            .unwrap();
+        let recovered = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered["record"]["state"], "recoveryRequired");
+        assert_eq!(recovered["recovery"]["state"], "unresolved");
+        assert_eq!(recovered["public_event_count"], durable_event_count);
+        AgentRuntime::blocked()
+            .validate_persisted_runs(&fixture.storage)
+            .unwrap();
+        let lock = fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["poisoned"], true);
+        assert_eq!(lock["recovery_required"], true);
     }
 }
 
