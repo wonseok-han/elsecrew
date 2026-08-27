@@ -198,7 +198,7 @@ export class ChatUiController {
     } catch (error) { this.#error("실제 에이전트의 종료를 확인하지 못했어요. 복구 상태를 확인해 주세요.", error); }
   }
 
-  isRecoveryBlocked(): boolean { return this.#state.activeChat?.state === "recoveryRequired" || this.#state.recoveries.some((item) => item.state === "unresolved"); }
+  isRecoveryBlocked(): boolean { return this.#state.agentRecovery !== null || this.#state.activeChat?.state === "recoveryRequired" || this.#state.recoveries.some((item) => item.state === "unresolved"); }
   isActionBlocked(): boolean { return this.isRecoveryBlocked() || this.#state.activeChat?.state === "discarded"; }
   async abandonRecovery(recovery: RecoveryRecordV1): Promise<void> {
     if (!window.confirm("종료 증거를 다시 확인한 뒤 이 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;

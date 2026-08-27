@@ -33,6 +33,7 @@ class AgentBridge {
   readonly chatB = chat("chat_b");
   readonly calls: number[] = [];
   readonly starts: unknown[] = [];
+  readonly fixtureStarts: unknown[] = [];
   readonly cancels: unknown[] = [];
   messages = [message(this.chatA, 1, "durable goal")];
   agentRuns: AgentRunRecordV1[] = [];
@@ -56,6 +57,10 @@ class AgentBridge {
     this.starts.push(input);
     this.agentRuns = [agentRun(this.chatA, "preparing")];
     return { schemaVersion: 1, runId: "agent_run_01", chatId: this.chatA.chatId, taskId: this.chatA.taskId, projectId: this.chatA.projectId, worktreeId: this.chatA.worktreeId, workspaceIdentity: this.chatA.workspaceIdentity, roleId: "coding", capabilityFingerprint: fingerprint, state: "preparing" };
+  }
+  async startFixtureRun(input: unknown) {
+    this.fixtureStarts.push(input);
+    return { runId: "run_fixture_01" };
   }
   async cancelAgentRun(input: unknown) {
     this.cancels.push(input);
@@ -149,4 +154,21 @@ test("actual cancel은 full identity만 보내고 recoveryRequired를 legacy aba
   assert.match(controller.snapshot().notice ?? "", /복구가 필요/);
   controller.dispose();
   assert.equal(bridge.chatListeners.size, 0); assert.equal(bridge.agentListeners.size, 0);
+});
+
+test("actual cancel recoveryRequired는 durable hydration 대기 중에도 새 fixture·actual 시작을 즉시 막는다", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.agentRuns = [agentRun(bridge.chatA)]; bridge.messages.push(message(bridge.chatA, 2, "running")); bridge.emitAgent(publicEvent(bridge.chatA)); await flush();
+  let release: (() => void) | undefined;
+  const pendingHydration = new Promise<void>((resolve) => { release = resolve; });
+  const original = bridge.getChat.bind(bridge); let hold = true;
+  bridge.getChat = async (input) => { if (hold) await pendingHydration; return original(input); };
+  const cancel = controller.cancelAgentRun(controller.snapshot().agentRuns[0]!); await flush();
+  assert.equal(controller.isRecoveryBlocked(), true);
+  await controller.startDemo("planning"); await controller.startAgent("planning");
+  assert.equal(bridge.fixtureStarts.length, 0);
+  assert.equal(bridge.starts.length, 0);
+  hold = false; release!(); await cancel;
+  assert.equal(controller.isRecoveryBlocked(), true, "unresolved actual recovery stays fail-closed after hydration");
+  controller.dispose();
 });

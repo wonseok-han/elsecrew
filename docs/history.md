@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A renderer cancel recovery gate 보정)
+
+- **P2 수정**: actual cancel이 `recoveryRequired`를 반환하면 `chat.get` 재수화가 끝나기 전에도 non-null `agentRecovery`를 recovery gate로 즉시 취급한다. 따라서 fixture demo·actual start·연결된 버튼은 같은 fail-closed 상태를 보며 새 실행 요청을 만들지 않는다. unresolved actual recovery는 재수화 뒤에도 별도 해소 전까지 안전하게 차단한다.
+- **회귀·검증**: cancel 뒤 durable hydration을 의도적으로 지연한 상태에서 fixture/actual start RPC가 각각 0회임을 고정했다. focused state 12개, TypeScript no-emit, Vite build, 전체 Node 147개, `git diff --check`를 통과했다. 실제 CLI·인증·model·사용자 프로젝트는 호출하지 않았다.
+
 ### 2026-08-27 · by GPT-5 Codex (M5 G5A renderer public-event 소비)
 
 - **영속 기록 우선**: renderer는 V4 `onAgentPublicEvent`를 V3 legacy chat listener와 함께 구독하되, public event의 text를 채팅에 직접 넣지 않는다. active/pending chat은 현재 연속 sequence 뒤의 bounded `chat.get` 페이지를 끝까지 다시 읽고 그 durable `TeamMessage`만 합치며, `agentRuns` ledger도 같은 detail에서 새로 고친다. inactive chat은 내용 대신 refresh 표시만 남긴다.
