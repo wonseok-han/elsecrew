@@ -109,6 +109,15 @@ function g5aFixture(name: string, valid = true): Record<string, unknown> {
   return entry.value;
 }
 
+function g5Fixture(name: string): Record<string, unknown> {
+  const cases = JSON.parse(readFileSync(resolve("tests/fixtures/m5/g5-v1/cases.json"), "utf8")) as {
+    valid: Array<{ name: string; value: Record<string, unknown> }>;
+  };
+  const entry = cases.valid.find((candidate) => candidate.name === name);
+  assert.ok(entry, `missing G5 fixture ${name}`);
+  return entry.value;
+}
+
 function measuredCapability(): AgentCapabilitySnapshotV1 {
   const snapshot = {
     schemaVersion: 1 as const,
@@ -286,11 +295,27 @@ test("G5A keeps actual and fixture ledgers separate and fails closed on raw agen
   raw.client.onChatEvent(() => { delivered += 1; });
   raw.child.stdout.write(eventLine({
     protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar_test_01", streamId: "agent_raw", seq: 1,
-    event: "run.event", chatId: "chat_01", taskId: "task_01", runId: "agent_run_01", payload: { reasoning: "must never reach renderer" },
+    event: "chat.eventAppended", chatId: "chat_01", taskId: "task_01", runId: "agent_run_01",
+    payload: {
+      schemaVersion: 1, messageId: "message_01", chatId: "chat_01", taskId: "task_01", worktreeId: "worktree_01",
+      eventSequence: 1, kind: "role", roleId: "planning", runId: "agent_run_01",
+      text: "raw stdout and reasoning must never reach renderer", createdAt: "2026-08-27T00:00:00Z",
+    },
   }));
-  assert.match(raw.client.failure?.message ?? "", /actual-agent raw run events are forbidden/);
+  assert.match(raw.client.failure?.message ?? "", /actual-agent chat events are forbidden/);
   assert.equal(raw.child.terminations, 1);
-  assert.equal(delivered, 0, "raw/reasoning payload must not be published through chat events");
+  assert.equal(delivered, 0, "raw stdout/reasoning text must not be published through chat events");
+});
+
+test("current G5 chat detail remains valid without an actual-agent ledger", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${readyLine()}\n`); await starting;
+  const detail = client.getChat({ chatId: "chat_01", afterEventSequence: 0, cursor: null, limit: 50 });
+  const request = JSON.parse(child.writes[0] ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(request.requestId, g5Fixture("chat-page-explicit-identity-and-sequence")));
+  const result = await detail;
+  assert.equal(result.chat.chatId, "chat_01");
+  assert.equal("agentRuns" in result, false, "G5 detail must not require planned G5A agentRuns");
 });
 
 test("G5A cancel and recovery responses retain the exact actual-agent namespace", async () => {

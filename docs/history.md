@@ -16,6 +16,12 @@
 - **G5/V4 호환 결정**: wire method나 현재 G5 capability 광고는 늘리지 않았다. V4 `getChat`은 기존 G5 detail과 `agentRuns`가 있는 planned G5A detail의 presence-discriminated union을 반환하므로 renderer는 `agentRuns` 존재를 좁힌 뒤에만 actual ledger를 읽는다.
 - **검증·경계**: focused G5A Node 7개, 전체 Node, Rust protocol 25개, TypeScript no-emit, production Vite build, scoped clippy와 `git diff --check`가 통과했다. worktree에 의존성이 없어 일반 `pnpm build`는 격리 네트워크 fetch에서 막혔지만 루트의 고정 설치로 동일 `tsc && vite build`는 exit 0이었다. 실제 CLI·인증·model·사용자 프로젝트는 접근하지 않았다. 다음은 이 원자 commit의 독립 재리뷰와 Electron 소비자의 full-identity route 구현이다.
 
+### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron raw chat event 리뷰 수정)
+
+- **수정**: planned G5A 협상 상태에서 `chat.eventAppended`의 검증된 `TeamMessage`라도 `runId`가 `agent_run_` namespace면 listener 호출 전에 session을 poison하도록 보강했다. 아직 normalized actual-agent public event wire가 없으므로 raw stdout/reasoning text가 status/chat timeline으로 우회하는 길은 허용하지 않는다. 기존 raw `run.event`/`run.finished` poison도 유지한다.
+- **G5 호환**: current G5 ready handshake의 `chat.get`은 `agentRuns` 없이 기존 detail validator로 계속 통과하는 회귀를 추가했다. V4 bridge getChat의 최종 TypeScript exact shape와 start accepted full identity/fingerprint는 공용 contract owner의 후속 fix를 기다리며 이 커밋에서 임의로 바꾸지 않는다.
+- **검증·경계**: root 의존성으로 TypeScript `tsc --noEmit`, Electron bridge/scaffold Node 35개, `git diff --check`를 통과했다. fake G5A sidecar가 `agent_run_` role message에 raw stdout/reasoning text를 넣어도 renderer listener 0회와 client corruption을 확인했다. 실제 CLI/auth/model/user project는 호출하지 않았다.
+
 ### 2026-08-27 · by GPT-5 Codex (M5 G5A Electron V4 소비 경계)
 
 - **한 일**: additive V4의 다섯 actual-agent IPC channel(capability 조회, 시작, cancel, recovery inspect/resolve)을 main-frame/origin 검사가 있는 고정 handler와 좁은 preload bridge에 연결했다. renderer 요청은 계약 validator를 preload와 `SidecarClientV1` 양쪽에서 exact 검사하며 executable path·argv·model·env·cwd·prompt·user config·추가 경로가 포함되면 sidecar IPC 전 거부한다. raw `ipcRenderer`나 generic invoke는 노출하지 않았고 context isolation·sandbox·기존 G5 V3 표면은 유지했다.
