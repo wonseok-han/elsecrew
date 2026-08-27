@@ -17,6 +17,7 @@ export interface ChatUiSnapshot {
   agentRuns: readonly AgentRunRecordV1[];
   agentStartingRoleId: RoleIdV1 | null;
   agentRecovery: AgentRecoveryRecordV1 | null;
+  agentRecoveryResolving: boolean;
   recoveries: readonly RecoveryRecordV1[];
   refreshNeededChatIds: readonly string[];
   preparing: boolean;
@@ -42,7 +43,7 @@ export class ChatUiController {
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: ChatDetail | null } | null = null;
   #hydrations = new Map<string, Promise<void>>();
   #hydrationTriggers = new Map<string, number>();
-  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, recoveries: [], refreshNeededChatIds: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
+  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
 
   constructor(bridge: M5ChatBridge) { this.#bridge = bridge; }
   snapshot(): ChatUiSnapshot { return this.#state; }
@@ -62,7 +63,7 @@ export class ChatUiController {
 
   async openProject(projectId: string): Promise<void> {
     const generation = ++this.#generation;
-    this.#set({ projectId, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
+    this.#set({ projectId, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
     try {
       const [settings, page] = await Promise.all([
         this.#bridge.getProjectRoleSettings({ projectId }),
@@ -132,7 +133,7 @@ export class ChatUiController {
     if (!bound || !pending.detail) { this.#endSwitch("채팅 작업 복사본을 열지 못했어요."); return; }
     const detail = pending.detail;
     this.#pending = null;
-    this.#set({ activeChat: detail.chat, messages: pending.messages, runs: detail.runs, agentRuns: isAgentChatDetailPageV1(detail) ? detail.agentRuns : [], agentStartingRoleId: null, agentRecovery: null, recoveries: [], refreshNeededChatIds: this.#state.refreshNeededChatIds.filter((item) => item !== detail.chat.chatId), activeRunId: detail.runs.find(isActive)?.runId ?? null, switching: false, notice: null });
+    this.#set({ activeChat: detail.chat, messages: pending.messages, runs: detail.runs, agentRuns: isAgentChatDetailPageV1(detail) ? detail.agentRuns : [], agentStartingRoleId: null, agentRecovery: agentRecoveryFor(detail), agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: this.#state.refreshNeededChatIds.filter((item) => item !== detail.chat.chatId), activeRunId: detail.runs.find(isActive)?.runId ?? null, switching: false, notice: null });
     await this.#loadRecoveries(detail.chat.chatId, pending.generation);
   }
 
@@ -211,6 +212,28 @@ export class ChatUiController {
     catch (error) { this.#error("아직 종료를 확인할 수 없어요. 자세한 정보를 확인해 주세요.", error); }
   }
 
+  async abandonAgentRecovery(): Promise<void> {
+    const chat = this.#state.activeChat; const recovery = this.#state.agentRecovery; const bridge = this.#agentBridge(); const generation = this.#generation;
+    if (!chat || !recovery || !bridge || this.#state.switching || this.#state.agentRecoveryResolving || !matchesAgentRun(recovery, chat)) return;
+    if (!globalThis.confirm("종료 증거를 다시 확인한 뒤 이 실제 에이전트 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
+    this.#set({ agentRecoveryResolving: true, error: null });
+    try {
+      const inspected = await bridge.inspectAgentRecovery(agentRecoveryIdentity(recovery));
+      if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId || this.#state.agentRecovery?.recoveryId !== recovery.recoveryId) return;
+      if (!matchesAgentRun(inspected, chat) || inspected.recoveryId !== recovery.recoveryId || inspected.state !== "unresolved" || !inspected.poisoned) throw new Error("agent recovery inspect identity mismatch");
+      const result = await bridge.resolveAgentRecovery({ ...agentRecoveryIdentity(inspected), expectedRevision: inspected.revision, resolution: "abandon" });
+      if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId || this.#state.agentRecovery?.recoveryId !== recovery.recoveryId) return;
+      const notice = result.outcome === "resolvedAbandoned"
+        ? "작업 복사본을 버리도록 기록했어요. 저장된 상태를 다시 확인하고 있어요."
+        : result.outcome === "processesRemain"
+          ? "아직 종료를 확인할 수 없어 이 작업 복사본을 계속 막고 있어요."
+          : "복구 기록이 다른 곳에서 바뀌었어요. 최신 상태를 다시 확인하고 있어요.";
+      this.#set({ notice });
+      await this.#hydrateChat(chat, generation);
+    } catch (error) { this.#error("실제 에이전트의 종료 상태를 확인하지 못했어요. 이 작업 복사본은 계속 보호하고 있어요.", error); }
+    finally { if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#set({ agentRecoveryResolving: false }); }
+  }
+
   async #loadRecoveries(chatId: string, generation: number): Promise<void> { const page = await this.#bridge.listRecoveries({ cursor: null, limit: 100 }); if (this.#live(generation) && this.#state.activeChat?.chatId === chatId) this.#set({ recoveries: page.items.filter((item) => item.chatId === chatId) }); }
   #onEvent(event: TeamMessageV1): void {
     const pending = this.#pending;
@@ -281,7 +304,7 @@ export class ChatUiController {
     if (pending && matchesChatRecord(pending.chat, detail.chat)) { pending.messages = messages; pending.detail = detail; return; }
     if (!this.#state.activeChat || !matchesChatRecord(this.#state.activeChat, detail.chat)) return;
     const agentRuns = isAgentChatDetailPageV1(detail) ? detail.agentRuns : [];
-    this.#set({ activeChat: detail.chat, chats: this.#state.chats.map((item) => item.chatId === detail.chat.chatId ? detail.chat : item), messages, runs: detail.runs, agentRuns, activeRunId: detail.runs.find(isActive)?.runId ?? null });
+    this.#set({ activeChat: detail.chat, chats: this.#state.chats.map((item) => item.chatId === detail.chat.chatId ? detail.chat : item), messages, runs: detail.runs, agentRuns, agentRecovery: agentRecoveryFor(detail), activeRunId: detail.runs.find(isActive)?.runId ?? null });
   }
   #agentBridge(): M5BridgeV4 | M5BridgeV5 | null {
     const bridge = this.#bridge as Partial<M5BridgeV4>;
@@ -304,6 +327,8 @@ export function stateLabel(state: ChatRecordV1["state"]): string { return ({ dra
 function matchesChat(event: TeamMessageV1, chat: ChatRecordV1): boolean { return event.chatId === chat.chatId && event.taskId === chat.taskId && event.worktreeId === chat.worktreeId; }
 function matchesChatRecord(left: ChatRecordV1, right: ChatRecordV1): boolean { return left.chatId === right.chatId && left.taskId === right.taskId && left.projectId === right.projectId && left.worktreeId === right.worktreeId && left.workspaceIdentity === right.workspaceIdentity; }
 function matchesAgentRun(run: Pick<AgentRunRecordV1, "chatId" | "taskId" | "projectId" | "worktreeId" | "workspaceIdentity"> | AgentPublicEventV1, chat: ChatRecordV1): boolean { return run.chatId === chat.chatId && run.taskId === chat.taskId && run.projectId === chat.projectId && run.worktreeId === chat.worktreeId && run.workspaceIdentity === chat.workspaceIdentity; }
+function agentRecoveryFor(detail: ChatDetail): AgentRecoveryRecordV1 | null { return isAgentChatDetailPageV1(detail) ? detail.agentRecovery : null; }
+function agentRecoveryIdentity(recovery: AgentRecoveryRecordV1) { return { chatId: recovery.chatId, taskId: recovery.taskId, projectId: recovery.projectId, worktreeId: recovery.worktreeId, workspaceIdentity: recovery.workspaceIdentity, runId: recovery.runId, recoveryId: recovery.recoveryId }; }
 function roleLabel(roleId: RoleIdV1): string { return ({ planning: "기획", coding: "코딩", review: "검토" })[roleId]; }
 function runtimeLabel(runtime: RoleProfileV1["runtime"]): string { return runtime === "codex" ? "Codex" : "Claude Code"; }
 function unavailableCapabilityNotice(profile: RoleProfileV1, reason: string | null): string {

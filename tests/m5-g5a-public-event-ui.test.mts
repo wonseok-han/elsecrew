@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { ChatUiController } from "../src/m5/chat-state.ts";
 import type { M5BridgeV4 } from "../src/m5/contracts/bridge-v4.ts";
-import type { AgentPublicEventV1, AgentRunRecordV1, AgentRunStateChangedV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
+import type { AgentPublicEventV1, AgentRecoveryRecordV1, AgentRunRecordV1, AgentRunStateChangedV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { ChatRecordV1, ProjectRoleSettingsV1, RoleProfileV1, TeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 const fingerprint = `sha256:${"a".repeat(64)}`;
@@ -22,6 +22,9 @@ function message(record: ChatRecordV1, sequence: number, text: string): TeamMess
 function agentRun(record: ChatRecordV1, state: AgentRunRecordV1["state"] = "running"): AgentRunRecordV1 {
   return { schemaVersion: 1, runId: "agent_run_01", chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, selectedProfile: roles[1]!, source: "actualAgent", capabilityFingerprint: fingerprint, state, stage: "implementing", terminationOutcome: state === "recoveryRequired" ? "recoveryRequired" : ["preparing", "running", "cancelling"].includes(state) ? null : "cleanExit", createdAt: "2026-08-27T00:00:00Z", updatedAt: "2026-08-27T00:00:01Z" };
 }
+function agentRecovery(record: ChatRecordV1, recoveryId = "agent_recovery_random_7f4c"): AgentRecoveryRecordV1 {
+  return { schemaVersion: 1, recoveryId, chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", source: "actualAgent", reason: "uncleanShutdown", state: "unresolved", trackedProcesses: [{ pid: 4401, startIdentityDigest: "sha256:agent-start-1", executablePathDigest: "sha256:agent-path-1", observedGone: false }], poisoned: true, revision: 7, createdAt: "2026-08-27T00:00:01Z", resolvedAt: null };
+}
 function publicEvent(record: ChatRecordV1, text = "raw text must never render"): AgentPublicEventV1 {
   return { schemaVersion: 1, eventId: "agent_event_01", chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", roleId: "coding", capabilityFingerprint: fingerprint, kind: "final", text, createdAt: "2026-08-27T00:00:01Z" };
 }
@@ -39,8 +42,15 @@ class AgentBridge {
   readonly starts: unknown[] = [];
   readonly fixtureStarts: unknown[] = [];
   readonly cancels: unknown[] = [];
+  readonly agentRecoveryInspects: unknown[] = [];
+  readonly agentRecoveryResolves: unknown[] = [];
+  readonly legacyRecoveryInspects: unknown[] = [];
+  readonly legacyRecoveryResolves: unknown[] = [];
   messages = [message(this.chatA, 1, "durable goal")];
   agentRuns: AgentRunRecordV1[] = [];
+  agentRecovery: AgentRecoveryRecordV1 | null = null;
+  agentDetail = true;
+  recoveryResolveOutcome: "resolvedAbandoned" | "processesRemain" | "revisionConflict" = "resolvedAbandoned";
   unavailable = false;
 
   async getProjectRoleSettings(): Promise<ProjectRoleSettingsV1> { return { schemaVersion: 1, projectId: "project_a", revision: 1, roles, updatedAt: "2026-08-27T00:00:00Z" }; }
@@ -49,9 +59,13 @@ class AgentBridge {
     this.calls.push(input.afterEventSequence);
     const current = input.chatId === this.chatB.chatId ? this.chatB : this.chatA;
     const messages = input.chatId === this.chatB.chatId ? [] : this.messages.filter((entry) => entry.eventSequence > input.afterEventSequence).slice(0, 50);
-    return { chat: current, afterEventSequence: input.afterEventSequence, messages, runs: [], nextEventSequence: messages.length === 0 ? null : messages[messages.length - 1]!.eventSequence, agentRuns: input.chatId === this.chatB.chatId ? [] : this.agentRuns };
+    const detail = { chat: current, afterEventSequence: input.afterEventSequence, messages, runs: [], nextEventSequence: messages.length === 0 ? null : messages[messages.length - 1]!.eventSequence };
+    if (!this.agentDetail) return detail;
+    return { ...detail, agentRuns: input.chatId === this.chatB.chatId ? [] : this.agentRuns, agentRecovery: input.chatId === this.chatA.chatId ? this.agentRecovery : null };
   }
   async listRecoveries() { return { items: [], nextCursor: null }; }
+  async inspectRecovery(input: unknown) { this.legacyRecoveryInspects.push(input); throw new Error("legacy recovery must not handle actual agents"); }
+  async markRecoveryResolved(input: unknown) { this.legacyRecoveryResolves.push(input); throw new Error("legacy recovery must not handle actual agents"); }
   onChatEvent(listener: (event: TeamMessageV1) => void) { this.chatListeners.add(listener); return () => this.chatListeners.delete(listener); }
   onAgentPublicEvent(listener: (event: AgentPublicEventV1) => void) { this.agentListeners.add(listener); return () => this.agentListeners.delete(listener); }
   onAgentRunStateChanged(listener: (event: AgentRunStateChangedV1) => void) { this.agentStateListeners.add(listener); return () => this.agentStateListeners.delete(listener); }
@@ -70,8 +84,16 @@ class AgentBridge {
   async cancelAgentRun(input: unknown) {
     this.cancels.push(input);
     this.agentRuns = [agentRun(this.chatA, "recoveryRequired")];
-    const run = this.agentRuns[0]!;
-    return { outcome: "recoveryRequired", recovery: { recoveryId: "agent_recovery_01", ...run, source: "actualAgent" } };
+    this.agentRecovery = agentRecovery(this.chatA, "agent_recovery_01");
+    return { outcome: "recoveryRequired", recovery: this.agentRecovery };
+  }
+  async inspectAgentRecovery(input: unknown) { this.agentRecoveryInspects.push(input); if (!this.agentRecovery) throw new Error("agent recovery missing"); return this.agentRecovery; }
+  async resolveAgentRecovery(input: unknown) {
+    this.agentRecoveryResolves.push(input);
+    if (!this.agentRecovery) throw new Error("agent recovery missing");
+    const before = this.agentRecovery;
+    if (this.recoveryResolveOutcome === "resolvedAbandoned") this.agentRecovery = null;
+    return { schemaVersion: 1, before, request: input, after: this.agentRecovery, outcome: this.recoveryResolveOutcome };
   }
   emitAgent(event: AgentPublicEventV1) { for (const listener of this.agentListeners) listener(event); }
   emitState(event: AgentRunStateChangedV1) { for (const listener of this.agentStateListeners) listener(event); }
@@ -195,6 +217,7 @@ test("switch pending 중 public event도 durable hydration에 합쳐지고 raw t
 
 test("current G5 bridge는 agent listener 없이 legacy fixture chat을 계속 연다", async () => {
   const bridge = new AgentBridge();
+  bridge.agentDetail = false;
   const g5 = bridge as unknown as Record<string, unknown>;
   g5.onAgentPublicEvent = undefined; g5.onAgentRunStateChanged = undefined; g5.getAgentCapabilities = undefined; g5.startAgentRun = undefined; g5.cancelAgentRun = undefined;
   const controller = new ChatUiController(g5 as unknown as M5BridgeV4);
@@ -251,5 +274,67 @@ test("actual cancel recoveryRequired는 durable hydration 대기 중에도 새 f
   assert.equal(bridge.starts.length, 0);
   hold = false; release!(); await cancel;
   assert.equal(controller.isRecoveryBlocked(), true, "unresolved actual recovery stays fail-closed after hydration");
+  controller.dispose();
+});
+
+test("random agent recovery는 terminal durable hydration과 재개방 뒤에도 표시되고 모든 동작을 막는다", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, "agent_recovery_opaque_8db9");
+  bridge.emitState(stateEvent(bridge.chatA, "recoveryRequired")); await flush(); await flush();
+  assert.equal(controller.snapshot().agentRecovery?.recoveryId, "agent_recovery_opaque_8db9");
+  assert.equal(controller.isActionBlocked(), true);
+  await controller.startDemo("planning"); await controller.startAgent("planning");
+  assert.equal(bridge.fixtureStarts.length, 0); assert.equal(bridge.starts.length, 0);
+  controller.dispose();
+  const reopened = await open(bridge);
+  assert.equal(reopened.snapshot().agentRecovery?.recoveryId, "agent_recovery_opaque_8db9");
+  assert.equal(reopened.isRecoveryBlocked(), true);
+  reopened.dispose();
+});
+
+test("actual recovery abandon은 inspect 기록의 full identity와 revision만 resolve로 보내며 durable null 뒤에만 푼다", async () => {
+  const bridge = new AgentBridge(); bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, "agent_recovery_opaque_9a6e");
+  const controller = await open(bridge);
+  const previousConfirm = globalThis.confirm; globalThis.confirm = () => true;
+  try { await controller.abandonAgentRecovery(); }
+  finally { globalThis.confirm = previousConfirm; }
+  const identity = { chatId: "chat_a", taskId: "task_chat_a", projectId: "project_a", worktreeId: "worktree_chat_a", workspaceIdentity: "workspace_chat_a", runId: "agent_run_01", recoveryId: "agent_recovery_opaque_9a6e" };
+  assert.deepEqual(bridge.agentRecoveryInspects, [identity]);
+  assert.deepEqual(bridge.agentRecoveryResolves, [{ ...identity, expectedRevision: 7, resolution: "abandon" }]);
+  assert.deepEqual(bridge.legacyRecoveryInspects, []);
+  assert.deepEqual(bridge.legacyRecoveryResolves, []);
+  assert.equal(controller.snapshot().agentRecovery, null, "only durable chat.get null clears the gate");
+  assert.equal(controller.isRecoveryBlocked(), false);
+  controller.dispose();
+});
+
+test("actual recovery resolve가 processesRemain 또는 revisionConflict면 durable 재조회 뒤에도 계속 막는다", async () => {
+  for (const outcome of ["processesRemain", "revisionConflict"] as const) {
+    const bridge = new AgentBridge(); bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, `agent_recovery_${outcome}`); bridge.recoveryResolveOutcome = outcome;
+    const controller = await open(bridge);
+    const previousConfirm = globalThis.confirm; globalThis.confirm = () => true;
+    try { await controller.abandonAgentRecovery(); }
+    finally { globalThis.confirm = previousConfirm; }
+    assert.equal(controller.snapshot().agentRecovery?.recoveryId, `agent_recovery_${outcome}`);
+    assert.equal(controller.isRecoveryBlocked(), true);
+    assert.equal(bridge.agentRecoveryResolves.length, 1);
+    controller.dispose();
+  }
+});
+
+test("stale terminal hydration은 나중에 연 다른 채팅의 recovery 상태를 바꾸지 않는다", async () => {
+  const bridge = new AgentBridge(); const controller = await open(bridge);
+  const original = bridge.getChat.bind(bridge); let release: (() => void) | undefined; let held = false;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  bridge.getChat = async (input) => {
+    if (input.chatId === bridge.chatA.chatId && !held) { held = true; await gate; }
+    return original(input);
+  };
+  bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, "agent_recovery_stale_1");
+  bridge.emitState(stateEvent(bridge.chatA, "recoveryRequired")); await flush();
+  const pending = await controller.prepareSwitch("chat_b", true); await controller.commitPrepared(pending!.chatId, true);
+  release!(); await flush(); await flush();
+  assert.equal(controller.snapshot().activeChat?.chatId, "chat_b");
+  assert.equal(controller.snapshot().agentRecovery, null);
   controller.dispose();
 });
