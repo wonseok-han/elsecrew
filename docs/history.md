@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5A Rust·Electron 통합과 recovery namespace 감사 종결)
+
+- **통합**: 독립 승인된 Electron V4 소비 경계 네 커밋을 `ba8eae2`·`6cfe094`·`2436498`·`ca6deaa`로, Rust fake adapter와 안전 수정 네 커밋을 `1040dc2`·`f3f6685`·`337d580`·`8d2cd6c`로 `m5/coding-agent-ide`에 통합했다. 기능 worktree의 공용 계약 동기화 중복 커밋은 제외했고, 충돌한 워크로그는 각 구현·리뷰 기록을 보존했다.
+- **namespace 감사 종결**: legacy G5 recovery 조회는 `source_kind=actualAgent`만 제외하고 discriminator가 없거나 다른 기존 기록은 계속 허용한다. actual recovery는 legacy list·inspect·markResolved에서 보이지 않고 변경되지 않으며, actual 전용 API는 같은 기록을 계속 처리하고 반대로 fixture recovery를 거부하는 양방향 회귀가 통과했다.
+- **추가 안전 수정**: 독립 Rust 리뷰에서 발견한 active 등록 전 observe/구성 실패의 preparing orphan과 실제 pipe release 전 `releaseGranted=true` 기록을 공통 fail-before-release·사후 atomic transition으로 닫았다. 동적 자손 identity의 durable 복구, accepted/public full identity·fingerprint 결속도 유지됐고 재리뷰는 최종 `APPROVE`했다.
+- **통합 검증·경계**: namespace focused Rust 2개, sidecar lib 59개(1 ignored)와 stdio 7개, Electron bridge/scaffold 37개, TypeScript no-emit, 변경 Rust `rustfmt --check`, strict sidecar clippy, `git diff --check`를 통과했다. workspace 전체 fmt는 변경 범위 밖 Tauri 기존 포맷 차이가 있어 변경 파일 기준으로 확인했다. 실제 Claude/Codex CLI·인증·model·사용자 프로젝트는 실행하지 않았고 `main` 병합·push도 하지 않았다. 다음은 normalized public-event wire와 UI 소비를 별도 계약·구현 파동으로 여는 것이다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5A release barrier 재리뷰 수정)
 
 - active 등록 전 attach `TreeTracker::observe`와 evidence/chat projection 구성, drain thread 생성, release evidence 저장, accepted 검증의 모든 fallible 경로를 공통 fail-before-release 종료로 연결했다. 직접 handshake한 child identity를 열거 전에 tracker에 넣어 observe 실패 주입에서도 launcher와 child 모두의 소멸을 증명하거나 불확실 recovery로 접는다.
