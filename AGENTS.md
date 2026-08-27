@@ -64,7 +64,7 @@
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
 - M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B가 normalized public/terminal event를 Electron V5와 renderer의 영속 채팅 재조회까지 전달하고 run/session 자원 예산을 적용한다. 제품 Electron이 실행하는 일반 `--stdio`는 exact G5이며 실제 Claude Code/Codex CLI provider·인증·모델 출력은 아직 연결되지 않았다
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY`, G5A fake adapter normalized public-event 최종 gate `G5A_READY`, G5B terminal notification·resource budget 누적 게이트와 독립 QA `G5B_QA_PASS`를 완료했다. G5B 최종 gate, 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY`, G5A fake adapter normalized public-event 최종 gate `G5A_READY`, G5B terminal notification·resource budget 최종 gate `G5B_READY`를 완료했다. 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
 
 ## 코드 지도
 

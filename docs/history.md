@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 최종 gate)
+
+- **최종 판정**: 독립 gate가 exact docs commit `3dcf75ab1c12cf4a21b05406f4fc814e42d485f7`에서 full-array-prefix 증폭 계약, terminal commit 순서와 실패 후 active/restart recovery, authoritative ledger counter, zero-output·지연 종료, Electron V5 binding·state·session 한도, renderer durable hydration, exact G5/G5A 호환, raw/private 차단과 legacy/actual recovery 분리를 교차검증했다. 차단 finding 없이 `G5B_READY`로 판정했다.
+- **재검증·경계**: gate가 전체 Node 163개, focused G5B/Electron/UI 62개, sidecar 68개 통과·1 ignored와 stdio 8개, protocol 29개, TypeScript, Vite build, strict sidecar clippy, G5B Rust scoped rustfmt와 diff check를 다시 통과했다. workspace 전체 fmt는 G5B와 무관한 기존 `src-tauri` 포맷 차이만 보고했다. 실제 provider·인증·사용자 프로젝트·Windows와 SQLite cross-session 보존/compaction은 후속이며 `main` 병합·push는 하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5B 누적 하네스·독립 QA)
 
 - **누적 게이트**: exact 통합 commit `022b79517462a1f9339c8cabb68b5fafd65eae0b`에서 G5 run/recovery 누적 하네스와 macOS arm64 Electron package smoke를 통과했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-27T06-03-46-910Z.json`이다. 첫 시도는 격리 환경의 Electron binary 다운로드 차단만으로 실패했고, 네트워크 허용 환경에서 같은 명령을 재실행해 코드 실패와 분리했다.
