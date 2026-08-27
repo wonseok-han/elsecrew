@@ -90,6 +90,39 @@ impl Fixture {
             .unwrap()
             .result
     }
+
+    fn create_exact_claude_chat(&mut self, snapshot: &Value, goal: &str, request: &str) -> Value {
+        self.chats
+            .default_role_settings(&mut self.storage, &self.project_id, request)
+            .unwrap();
+        self.chats
+            .update_role_settings(
+                &mut self.storage,
+                &self.project_id,
+                1,
+                json!([
+                    {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+                    {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+                    {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+                ]),
+                &format!("{request}_exact_roles"),
+            )
+            .unwrap();
+        self.chats
+            .create_chat(
+                &mut self.storage,
+                &self.projects,
+                snapshot["preparationId"].as_str().unwrap(),
+                &self.project_id,
+                snapshot["worktreeId"].as_str().unwrap(),
+                snapshot["workspaceIdentity"].as_str().unwrap(),
+                goal,
+                2,
+                request,
+            )
+            .unwrap()
+            .result
+    }
 }
 
 #[test]
@@ -634,27 +667,22 @@ fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_an
     );
 
     let mut fake = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
-    let exact = fake.get_capabilities("codex", true).unwrap();
+    let exact = fake.get_capabilities("claude-code", true).unwrap();
     assert_eq!(exact["canStart"], cfg!(target_os = "macos"));
-    let drifted = format!("sha256:{}", "0".repeat(64));
-    assert_ne!(
-        exact["fingerprint"].as_str().expect("fake fingerprint"),
-        drifted
-    );
     let error = fake
         .start_agent(
             &mut fixture.storage,
             &mut fixture.projects,
             AgentRunStartRequestV1 {
                 chat_id: chat_id.to_string(),
-                role_id: "planning".into(),
+                role_id: "coding".into(),
                 input_message_ids: vec![message_id],
-                expected_capability_fingerprint: drifted,
+                expected_capability_fingerprint: exact["fingerprint"].as_str().unwrap().into(),
             },
             "req_agent_drifted",
         )
         .unwrap_err();
-    assert!(error.detail.contains("profileChanged"));
+    assert!(error.detail.contains("exactModelUnavailable"));
     assert_eq!(
         fixture.storage.projection_records("run").unwrap().len(),
         before_runs
@@ -673,6 +701,202 @@ fn actual_agent_preflight_rejects_unknown_or_drifted_capability_with_zero_run_an
 }
 
 #[test]
+fn g5c_capability_cache_refresh_and_fresh_start_observation_fail_closed() {
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let cached = runtime.get_capabilities("claude-code", false).unwrap();
+    assert_eq!(runtime.observation_count("claude-code"), 1);
+    assert_eq!(
+        runtime.get_capabilities("claude-code", false).unwrap(),
+        cached
+    );
+    assert_eq!(runtime.observation_count("claude-code"), 1);
+    assert_eq!(
+        runtime.get_capabilities("claude-code", true).unwrap()["canStart"],
+        cfg!(target_os = "macos")
+    );
+    assert_eq!(runtime.observation_count("claude-code"), 2);
+
+    for (scenario, expected) in [
+        (
+            FakeScenario::DiscoveryMissingHelper,
+            "installationIncomplete",
+        ),
+        (
+            FakeScenario::DiscoveryUnknownVersion,
+            "installationIncomplete",
+        ),
+        (FakeScenario::DiscoveryUnknownAuth, "notAuthenticated"),
+    ] {
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        assert_eq!(capability["canStart"], false);
+        assert_eq!(capability["blockedReason"], expected);
+    }
+
+    let mut codex = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = codex.get_capabilities("codex", true).unwrap();
+    assert_eq!(capability["canStart"], false);
+    assert_eq!(capability["blockedReason"], "exactModelUnavailable");
+
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_g5c_fingerprint_snapshot");
+    let chat = fixture.create_exact_claude_chat(
+        &snapshot,
+        "fingerprint drift",
+        "req_g5c_fingerprint_chat",
+    );
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(&fixture, chat_id);
+    let before_runs = fixture.storage.projection_records("run").unwrap().len();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let error = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: format!("sha256:{}", "0".repeat(64)),
+            },
+            "req_g5c_fingerprint_start",
+        )
+        .unwrap_err();
+    assert!(error.detail.contains("profileChanged"));
+    assert_eq!(
+        fixture.storage.projection_records("run").unwrap().len(),
+        before_runs
+    );
+
+    for scenario in [
+        FakeScenario::DiscoveryStaleClosure,
+        FakeScenario::DiscoveryProfileDrift,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_g5c_drift_snapshot");
+        let chat =
+            fixture.create_exact_claude_chat(&snapshot, "fresh discovery", "req_g5c_drift_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let before_runs = fixture.storage.projection_records("run").unwrap().len();
+        let lock_id = format!("lock_{}", chat["worktreeId"].as_str().unwrap());
+        let before_lock = fixture
+            .storage
+            .projection_record("lock", &lock_id)
+            .unwrap()
+            .unwrap();
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let cached = runtime.get_capabilities("claude-code", false).unwrap();
+        assert_eq!(cached["canStart"], cfg!(target_os = "macos"));
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: cached["fingerprint"].as_str().unwrap().into(),
+                },
+                "req_g5c_drift_start",
+            )
+            .unwrap_err();
+        assert!(error.detail.contains("before run, spawn, or lock"));
+        assert_eq!(runtime.observation_count("claude-code"), 2);
+        assert_eq!(
+            fixture.storage.projection_records("run").unwrap().len(),
+            before_runs
+        );
+        assert_eq!(
+            fixture
+                .storage
+                .projection_record("lock", &lock_id)
+                .unwrap()
+                .unwrap(),
+            before_lock
+        );
+    }
+}
+
+#[test]
+fn g5c_each_claude_handshake_mismatch_and_attestation_failure_emit_nothing() {
+    for scenario in [
+        FakeScenario::HandshakeBeforePublic,
+        FakeScenario::HandshakeVersionMismatch,
+        FakeScenario::HandshakeModelMismatch,
+        FakeScenario::HandshakeCwdMismatch,
+        FakeScenario::HandshakePermissionMismatch,
+        FakeScenario::HandshakeToolsMismatch,
+        FakeScenario::HandshakeMcpMismatch,
+        FakeScenario::HandshakePluginsMismatch,
+        FakeScenario::HandshakeConfigMismatch,
+        FakeScenario::AttestationPersistenceFailure,
+        FakeScenario::ProviderAuthFailure,
+    ] {
+        let mut fixture = Fixture::new();
+        let snapshot = fixture.snapshot("req_g5c_handshake_snapshot");
+        let chat =
+            fixture.create_exact_claude_chat(&snapshot, "handshake gate", "req_g5c_handshake_chat");
+        let chat_id = chat["chatId"].as_str().unwrap();
+        let message_id = initial_message_id(&fixture, chat_id);
+        let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
+        let error = runtime
+            .start_agent(
+                &mut fixture.storage,
+                &mut fixture.projects,
+                AgentRunStartRequestV1 {
+                    chat_id: chat_id.into(),
+                    role_id: "coding".into(),
+                    input_message_ids: vec![message_id],
+                    expected_capability_fingerprint: capability["fingerprint"]
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                },
+                "req_g5c_handshake_start",
+            )
+            .unwrap_err();
+        assert!(
+            error.detail.contains("handshake") || error.detail.contains("attestation"),
+            "{}",
+            error.detail
+        );
+        let run = fixture
+            .storage
+            .projection_records("run")
+            .unwrap()
+            .into_iter()
+            .find(|run| run["source_kind"] == "actualAgent")
+            .unwrap();
+        assert_eq!(run["record"]["state"], "failed");
+        assert!(run.get("runtime_attestation").is_none());
+        assert!(run["public_events"].as_array().unwrap().is_empty());
+        assert!(!runtime.has_active_run(run["run_id"].as_str().unwrap()));
+        let lock = fixture
+            .storage
+            .projection_record(
+                "lock",
+                &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(lock["writer_run_id"], Value::Null);
+        assert_eq!(lock["poisoned"], false);
+        let serialized = serde_json::to_string(&run).unwrap().to_lowercase();
+        for forbidden in [
+            "private@example.invalid",
+            "private-org",
+            "private-token",
+            "must-not-escape",
+        ] {
+            assert!(!serialized.contains(forbidden));
+            assert!(!error.detail.to_lowercase().contains(forbidden));
+        }
+    }
+}
+
+#[test]
 fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reopen() {
     use hello_agent_core::proctree::{ProbeResult, ProcIdentity, ProcTable, SystemProcTable};
     for scenario in [
@@ -684,7 +908,11 @@ fn actual_agent_pre_release_failures_are_terminal_and_release_writer_after_reope
         let mut fixture = Fixture::new();
         let database = fixture._root.path().join("data/hello-agent.sqlite3");
         let snapshot = fixture.snapshot("req_pre_release_snapshot");
-        let chat = fixture.create_chat(&snapshot, "pre-release failure", "req_pre_release_chat");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "pre-release failure",
+            "req_pre_release_chat",
+        );
         let chat_id = chat["chatId"].as_str().unwrap();
         let message_id = initial_message_id(&fixture, chat_id);
         let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
@@ -779,18 +1007,18 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
     let mut fixture = Fixture::new();
     let database = fixture._root.path().join("data/hello-agent.sqlite3");
     let snapshot = fixture.snapshot("req_agent_clean_snapshot");
-    let chat = fixture.create_chat(&snapshot, "clean agent", "req_agent_clean_chat");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "clean agent", "req_agent_clean_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
     let message_id = initial_message_id(&fixture, chat_id);
     let mut runtime = AgentRuntime::fake(executable, FakeScenario::Clean);
-    let capability = runtime.get_capabilities("codex", true).unwrap();
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
     let started = runtime
         .start_agent(
             &mut fixture.storage,
             &mut fixture.projects,
             AgentRunStartRequestV1 {
                 chat_id: chat_id.into(),
-                role_id: "planning".into(),
+                role_id: "coding".into(),
                 input_message_ids: vec![message_id],
                 expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
             },
@@ -810,7 +1038,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
     ] {
         assert_eq!(started.result[field], chat[field]);
     }
-    assert_eq!(started.result["roleId"], "planning");
+    assert_eq!(started.result["roleId"], "coding");
     assert_eq!(
         started.result["capabilityFingerprint"],
         capability["fingerprint"]
@@ -835,6 +1063,38 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             .len(),
         2
     );
+    assert_eq!(preparing["provider_discovery"]["providerId"], "claude-code");
+    assert_eq!(preparing["provider_discovery"]["canStart"], true);
+    assert_eq!(preparing["runtime_attestation"]["runId"], run_id);
+    assert_eq!(
+        preparing["runtime_attestation"]["capabilityFingerprint"],
+        capability["fingerprint"]
+    );
+    assert_eq!(
+        preparing["runtime_attestation"]["workspaceIdentity"],
+        chat["workspaceIdentity"]
+    );
+    assert_eq!(
+        preparing["runtime_attestation"]["effectiveProfile"]["modelSelector"],
+        "claude-opus-5"
+    );
+    let provider_evidence = serde_json::to_string(&json!({
+        "discovery":preparing["provider_discovery"],
+        "attestation":preparing["runtime_attestation"]
+    }))
+    .unwrap()
+    .to_lowercase();
+    for forbidden in [
+        "private@example.invalid",
+        "private-org",
+        "private-token",
+        "token-never-persist",
+        "prompt",
+        "email",
+        "organization",
+    ] {
+        assert!(!provider_evidence.contains(forbidden));
+    }
     let mut wire_events = Vec::new();
     for _ in 0..100 {
         wire_events.extend(
@@ -875,7 +1135,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             chat["workspaceIdentity"]
         );
         assert_eq!(event.payload["runId"], run_id);
-        assert_eq!(event.payload["roleId"], "planning");
+        assert_eq!(event.payload["roleId"], "coding");
         assert_eq!(
             event.payload["capabilityFingerprint"],
             capability["fingerprint"]
@@ -952,7 +1212,7 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
                 && event["worktreeId"] == chat["worktreeId"]
                 && event["workspaceIdentity"] == chat["workspaceIdentity"]
                 && event["runId"] == run_id
-                && event["roleId"] == "planning"
+                && event["roleId"] == "coding"
                 && event["capabilityFingerprint"] == capability["fingerprint"]
         }));
     let current_g5_detail = fixture
@@ -996,7 +1256,7 @@ fn no_output_and_delayed_final_emit_running_then_terminal_from_durable_state() {
     for scenario in [FakeScenario::NoOutput, FakeScenario::FinalDelayed] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_terminal_snapshot");
-        let chat = fixture.create_chat(
+        let chat = fixture.create_exact_claude_chat(
             &snapshot,
             "terminal notification",
             "req_agent_terminal_chat",
@@ -1004,14 +1264,14 @@ fn no_output_and_delayed_final_emit_running_then_terminal_from_durable_state() {
         let chat_id = chat["chatId"].as_str().unwrap();
         let message_id = initial_message_id(&fixture, chat_id);
         let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
-        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
         let started = runtime
             .start_agent(
                 &mut fixture.storage,
                 &mut fixture.projects,
                 AgentRunStartRequestV1 {
                     chat_id: chat_id.into(),
-                    role_id: "planning".into(),
+                    role_id: "coding".into(),
                     input_message_ids: vec![message_id],
                     expected_capability_fingerprint: capability["fingerprint"]
                         .as_str()
@@ -1068,18 +1328,18 @@ fn no_output_and_delayed_final_emit_running_then_terminal_from_durable_state() {
 fn public_text_plus_one_is_not_stored_or_emitted_and_cleanly_fails_run() {
     let mut fixture = Fixture::new();
     let snapshot = fixture.snapshot("req_agent_budget_snapshot");
-    let chat = fixture.create_chat(&snapshot, "event budget", "req_agent_budget_chat");
+    let chat = fixture.create_exact_claude_chat(&snapshot, "event budget", "req_agent_budget_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
     let message_id = initial_message_id(&fixture, chat_id);
     let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
-    let capability = runtime.get_capabilities("codex", true).unwrap();
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
     let started = runtime
         .start_agent(
             &mut fixture.storage,
             &mut fixture.projects,
             AgentRunStartRequestV1 {
                 chat_id: chat_id.into(),
-                role_id: "planning".into(),
+                role_id: "coding".into(),
                 input_message_ids: vec![message_id],
                 expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
             },
@@ -1094,7 +1354,7 @@ fn public_text_plus_one_is_not_stored_or_emitted_and_cleanly_fails_run() {
         .unwrap();
     let events = (0..16)
         .map(|index| {
-            json!({"schemaVersion":1,"eventId":format!("agent_event_budget_{index}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"roleId":"planning","capabilityFingerprint":capability["fingerprint"],"kind":"status","text":"x".repeat(64 * 1024),"createdAt":projection["record"]["updatedAt"]})
+            json!({"schemaVersion":1,"eventId":format!("agent_event_budget_{index}"),"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"roleId":"coding","capabilityFingerprint":capability["fingerprint"],"kind":"status","text":"x".repeat(64 * 1024),"createdAt":projection["record"]["updatedAt"]})
         })
         .collect::<Vec<_>>();
     let cumulative =
@@ -1161,18 +1421,22 @@ fn poll_observe_and_wait_failures_propagate_after_fail_closed_recovery_persisten
     ] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_poll_failure_snapshot");
-        let chat = fixture.create_chat(&snapshot, "poll failure", "req_agent_poll_failure_chat");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "poll failure",
+            "req_agent_poll_failure_chat",
+        );
         let chat_id = chat["chatId"].as_str().unwrap();
         let message_id = initial_message_id(&fixture, chat_id);
         let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
-        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
         let started = runtime
             .start_agent(
                 &mut fixture.storage,
                 &mut fixture.projects,
                 AgentRunStartRequestV1 {
                     chat_id: chat_id.into(),
-                    role_id: "planning".into(),
+                    role_id: "coding".into(),
                     input_message_ids: vec![message_id],
                     expected_capability_fingerprint: capability["fingerprint"]
                         .as_str()
@@ -1203,7 +1467,7 @@ fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() 
     for corrupt_counter in [true, false] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_persist_failure_snapshot");
-        let chat = fixture.create_chat(
+        let chat = fixture.create_exact_claude_chat(
             &snapshot,
             "persistence failure",
             "req_agent_persist_failure_chat",
@@ -1211,14 +1475,14 @@ fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() 
         let chat_id = chat["chatId"].as_str().unwrap();
         let message_id = initial_message_id(&fixture, chat_id);
         let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::NoOutput);
-        let capability = runtime.get_capabilities("codex", true).unwrap();
+        let capability = runtime.get_capabilities("claude-code", true).unwrap();
         let started = runtime
             .start_agent(
                 &mut fixture.storage,
                 &mut fixture.projects,
                 AgentRunStartRequestV1 {
                     chat_id: chat_id.into(),
-                    role_id: "planning".into(),
+                    role_id: "coding".into(),
                     input_message_ids: vec![message_id],
                     expected_capability_fingerprint: capability["fingerprint"]
                         .as_str()
@@ -1290,7 +1554,7 @@ fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_re
     ] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_terminal_failure_snapshot");
-        let chat = fixture.create_chat(
+        let chat = fixture.create_exact_claude_chat(
             &snapshot,
             "terminal failure ownership",
             "req_agent_terminal_failure_chat",
@@ -1370,7 +1634,7 @@ fn live_text_and_cumulative_counter_undercounts_block_append_and_recover_poisone
     ] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_live_counter_snapshot");
-        let chat = fixture.create_chat(
+        let chat = fixture.create_exact_claude_chat(
             &snapshot,
             "live counter drift",
             "req_agent_live_counter_chat",
@@ -1477,7 +1741,8 @@ fn fake_agent_cancel_uncertain_poison_survives_and_is_abandon_only() {
     );
     let mut fixture = Fixture::new();
     let snapshot = fixture.snapshot("req_agent_uncertain_snapshot");
-    let chat = fixture.create_chat(&snapshot, "uncertain agent", "req_agent_uncertain_chat");
+    let chat =
+        fixture.create_exact_claude_chat(&snapshot, "uncertain agent", "req_agent_uncertain_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
     let message_id = initial_message_id(&fixture, chat_id);
     let mut runtime = AgentRuntime::fake(executable, FakeScenario::CancelUncertain);
@@ -1630,17 +1895,18 @@ fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed
         FakeScenario::CancelClean,
         FakeScenario::Malformed,
         FakeScenario::Oversized,
+        FakeScenario::ProviderTerminalMalformed,
     ] {
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_agent_failure_snapshot");
-        let chat = fixture.create_chat(&snapshot, "agent failure gate", "req_agent_failure_chat");
+        let chat = fixture.create_exact_claude_chat(
+            &snapshot,
+            "agent failure gate",
+            "req_agent_failure_chat",
+        );
         let chat_id = chat["chatId"].as_str().unwrap();
         let message_id = initial_message_id(&fixture, chat_id);
-        let (runtime_name, role_id) = if scenario == FakeScenario::CancelClean {
-            ("claude-code", "coding")
-        } else {
-            ("codex", "planning")
-        };
+        let (runtime_name, role_id) = ("claude-code", "coding");
         let mut runtime = AgentRuntime::fake(executable.clone(), scenario);
         let capability = runtime.get_capabilities(runtime_name, true).unwrap();
         let started = runtime
@@ -1768,18 +2034,19 @@ fn dynamic_grandchild_is_durable_and_blocks_recovery_until_every_identity_is_gon
     };
     let mut fixture = Fixture::new();
     let snapshot = fixture.snapshot("req_descendant_snapshot");
-    let chat = fixture.create_chat(&snapshot, "durable descendant", "req_descendant_chat");
+    let chat =
+        fixture.create_exact_claude_chat(&snapshot, "durable descendant", "req_descendant_chat");
     let chat_id = chat["chatId"].as_str().unwrap();
     let message_id = initial_message_id(&fixture, chat_id);
     let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Descendant);
-    let capability = runtime.get_capabilities("codex", true).unwrap();
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
     let started = runtime
         .start_agent(
             &mut fixture.storage,
             &mut fixture.projects,
             AgentRunStartRequestV1 {
                 chat_id: chat_id.into(),
-                role_id: "planning".into(),
+                role_id: "coding".into(),
                 input_message_ids: vec![message_id],
                 expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
             },

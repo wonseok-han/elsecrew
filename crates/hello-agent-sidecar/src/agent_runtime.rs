@@ -8,19 +8,23 @@ use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
 use crate::storage::{ProjectionUpsert, Storage};
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
-use hello_agent_core::agent_adapter::{
-    normalize_vendor_event, AgentAdapterError, LaunchSpec, NormalizedVendorEvent,
-    MAX_AGENT_EVENT_BYTES,
-};
+use hello_agent_core::agent_adapter::{AgentAdapterError, LaunchSpec, MAX_AGENT_EVENT_BYTES};
 use hello_agent_core::proctree::{
     identity_of, ProbeResult, ProcIdentity, ProcTable, SystemClock, SystemProcTable,
     TerminationConfig, TreeTracker,
 };
+use hello_agent_core::provider::{
+    BoundedObservation, ClaudeHandshakeContextV1, DiscoveryInputV1, InternalProviderEventV1,
+    ModelCatalogEvidenceV1, ObservedExecutableClosureV1, ProviderDefinitionV1,
+    ProviderEventClassifierV1, ProviderExecutableFileIdentityV1, ProviderId,
+    ProviderProfileTupleV1, SanitizedDiscoveryObservationV1,
+};
 use hello_agent_protocol::agent_adapter_v1::{
     agent_public_events_snapshot_bytes_v1, compute_agent_capability_fingerprint_v1,
-    validate_agent_adapter_payload_v1, AgentCapabilitySnapshotV1, AgentDiscoveryEvidenceV1,
-    AgentExecutableIdentityV1, AgentModelCapabilityV1, AgentResolvedProfileV1,
-    AgentRunStartRequestV1,
+    validate_agent_adapter_payload_v1, validate_agent_runtime_attestation_against_accepted_v1,
+    validate_provider_manifest_v1, validate_sanitized_discovery_observation_v1,
+    AgentCapabilitySnapshotV1, AgentDiscoveryEvidenceV1, AgentExecutableIdentityV1,
+    AgentModelCapabilityV1, AgentResolvedProfileV1, AgentRunStartRequestV1,
 };
 use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5_RUN_START_CHAT_STATES_V1};
 use hello_agent_protocol::{
@@ -30,7 +34,7 @@ use hello_agent_protocol::{
 };
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -80,6 +84,23 @@ pub(crate) enum FakeScenario {
     TerminalConstructionFailure,
     #[cfg_attr(not(test), allow(dead_code))]
     TerminalUpsertFailure,
+    DiscoveryMissingHelper,
+    DiscoveryUnknownVersion,
+    DiscoveryUnknownAuth,
+    DiscoveryStaleClosure,
+    DiscoveryProfileDrift,
+    HandshakeBeforePublic,
+    HandshakeVersionMismatch,
+    HandshakeModelMismatch,
+    HandshakeCwdMismatch,
+    HandshakePermissionMismatch,
+    HandshakeToolsMismatch,
+    HandshakeMcpMismatch,
+    HandshakePluginsMismatch,
+    HandshakeConfigMismatch,
+    AttestationPersistenceFailure,
+    ProviderAuthFailure,
+    ProviderTerminalMalformed,
 }
 
 struct ActiveAgentRun {
@@ -94,6 +115,8 @@ struct ActiveAgentRun {
     running_event_pending: bool,
     scenario: FakeScenario,
     evidence_failed: bool,
+    provider_classifier: ProviderEventClassifierV1,
+    provider_terminal_outcome: Option<String>,
 }
 
 enum PublicEventPersistError {
@@ -117,6 +140,15 @@ pub(crate) struct AgentRuntime {
     scenario: FakeScenario,
     active: HashMap<String, ActiveAgentRun>,
     preparing_to_quit: bool,
+    discovery_cache: HashMap<String, ObservedProvider>,
+    observation_counts: HashMap<String, usize>,
+}
+
+#[derive(Clone)]
+struct ObservedProvider {
+    definition: ProviderDefinitionV1,
+    discovery: SanitizedDiscoveryObservationV1,
+    capability: AgentCapabilitySnapshotV1,
 }
 
 impl AgentRuntime {
@@ -127,6 +159,8 @@ impl AgentRuntime {
             scenario: FakeScenario::Clean,
             active: HashMap::new(),
             preparing_to_quit: false,
+            discovery_cache: HashMap::new(),
+            observation_counts: HashMap::new(),
         }
     }
 
@@ -223,6 +257,7 @@ impl AgentRuntime {
                 public_events,
             )
             .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
+            preserve_provider_evidence(&projection, &mut run_payload);
             run_payload.insert("termination".into(), termination);
             run_payload.insert("recovery".into(), recovery);
             if identity_missing {
@@ -264,6 +299,8 @@ impl AgentRuntime {
             if projection.get("source_kind").and_then(Value::as_str) == Some(SOURCE_KIND) {
                 validate_projection_public_budget(&projection)
                     .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
+                validate_provider_projection(&projection)
+                    .map_err(|error| SidecarError::new("projectionInvalid", error.detail))?;
             }
         }
         Ok(())
@@ -281,6 +318,8 @@ impl AgentRuntime {
             scenario,
             active: HashMap::new(),
             preparing_to_quit: false,
+            discovery_cache: HashMap::new(),
+            observation_counts: HashMap::new(),
         }
     }
 
@@ -289,14 +328,23 @@ impl AgentRuntime {
     }
 
     pub(crate) fn get_capabilities(
-        &self,
+        &mut self,
         runtime: &str,
         refresh: bool,
     ) -> Result<Value, ProjectFailure> {
         let request = json!({"runtime":runtime,"refresh":refresh});
         validate_agent_adapter_payload_v1("capabilitiesRequest", &request)
             .map_err(contract_failure)?;
-        let snapshot = self.capability(runtime)?;
+        let snapshot = if self.provider == ProviderMode::Blocked {
+            self.blocked_capability(runtime)?
+        } else if !refresh {
+            match self.discovery_cache.get(runtime) {
+                Some(observed) => observed.capability.clone(),
+                None => self.observe_provider(runtime)?.capability,
+            }
+        } else {
+            self.observe_provider(runtime)?.capability
+        };
         let value = serde_json::to_value(snapshot).map_err(json_failure)?;
         validate_agent_adapter_payload_v1("capabilitySnapshot", &value)
             .map_err(contract_failure)?;
@@ -333,13 +381,26 @@ impl AgentRuntime {
                 .ok_or_else(|| ProjectFailure::manifest("chat role snapshot is missing"))?,
         )
         .map_err(json_failure)?;
-        let capability = self.capability(&profile.runtime)?;
+        // Every start bypasses the UI cache. The exact executable closure, version, auth state,
+        // catalog and immutable role tuple are re-observed before a run or writer lock exists.
+        let observed_provider = if self.provider == ProviderMode::FakeExact {
+            Some(self.observe_provider(&profile.runtime)?)
+        } else {
+            None
+        };
+        let capability = match observed_provider.as_ref() {
+            Some(observed) => observed.capability.clone(),
+            None => self.blocked_capability(&profile.runtime)?,
+        };
         let outcome = preflight_outcome(&request, &profile, &capability);
         if outcome != "started" {
             return Err(ProjectFailure::manifest(format!(
                 "agent preflight rejected before run, spawn, or lock: {outcome}"
             )));
         }
+        let observed_provider = observed_provider.ok_or_else(|| {
+            ProjectFailure::recovery("startable provider evidence is unavailable after preflight")
+        })?;
         if !G5_RUN_START_CHAT_STATES_V1.contains(&chat["state"].as_str().unwrap_or_default()) {
             return Err(ProjectFailure::recovery(
                 "chat state does not allow a new agent run",
@@ -378,8 +439,8 @@ impl AgentRuntime {
             ),
             BTreeMap::new(),
             prompt,
-            "agent-fixture-ready-v1",
-            "agent-fixture-jsonl-v1",
+            "claude-code.system-init.v1",
+            "claude-code.stream-json.v1",
         )
         .map_err(adapter_failure)?;
 
@@ -570,32 +631,20 @@ impl AgentRuntime {
                 "treeTrackerAttached":true,"runAndLockPersistedBeforeRelease":true,
                 "identityPersistedBeforeRelease":true,"releaseGranted":false,"capturedAt":now(),
             });
-            let running = agent_run_record(
-                &run_id,
-                &chat,
-                &profile,
-                &capability.fingerprint,
-                "running",
-                None,
-                &created,
-            )?;
             let internal = json!([
                 {"pid":launcher_identity.pid,"start_us":launcher_identity.start_us},
                 {"pid":agent_identity.pid,"start_us":agent_identity.start_us}
             ]);
-            let running_payload = agent_run_projection(
-                &running,
+            let preparing_payload = agent_run_projection(
+                &run,
                 &manifest,
                 Some(barrier.clone()),
                 Some(internal),
                 Vec::new(),
             )?;
-            let running_chat = updated_chat(&chat, "running")?;
-            let running_chat_payload =
-                chat_projection_with_record(&chat_projection, &running_chat, None)?;
-            Ok((barrier, running_payload, running_chat_payload))
+            Ok((barrier, preparing_payload))
         })();
-        let (barrier, running_payload, running_chat_payload) = match configured {
+        let (barrier, preparing_payload) = match configured {
             Ok(configured) => configured,
             Err(error) => {
                 return Err(fail_before_release(
@@ -608,22 +657,13 @@ impl AgentRuntime {
                 ))
             }
         };
-        if let Err(error) = storage.upsert_projection_records_atomic(vec![
-            ProjectionUpsert {
-                aggregate_type: "run",
-                aggregate_id: run_id.clone(),
-                operation_id: format!("op_agent_identity_{run_id}"),
-                request_id: None,
-                payload: running_payload,
-            },
-            ProjectionUpsert {
-                aggregate_type: "chat",
-                aggregate_id: request.chat_id.clone(),
-                operation_id: format!("op_agent_chat_running_{run_id}"),
-                request_id: None,
-                payload: running_chat_payload,
-            },
-        ]) {
+        if let Err(error) = storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.clone(),
+            operation_id: format!("op_agent_identity_{run_id}"),
+            request_id: None,
+            payload: preparing_payload,
+        }]) {
             return Err(fail_before_release(
                 storage,
                 projects,
@@ -645,33 +685,6 @@ impl AgentRuntime {
             ));
         }
 
-        let (sender, receiver) = mpsc::sync_channel(32);
-        if let Err(error) = thread::Builder::new()
-            .name("agent-fixture-drain".into())
-            .spawn(move || loop {
-                match read_bounded_line(&mut reader) {
-                    Ok(line) if line.is_empty() => break,
-                    Ok(line) => {
-                        if sender.send(Ok(line)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.send(Err(error));
-                        break;
-                    }
-                }
-            })
-        {
-            return Err(fail_before_release(
-                storage,
-                projects,
-                &run_id,
-                Some(launcher),
-                Some(tracker),
-                &format!("agent drain thread failed: {error}"),
-            ));
-        }
         let mut release = match launcher.stdin.take() {
             Some(release) => release,
             None => {
@@ -733,6 +746,203 @@ impl AgentRuntime {
                 &format!("run accepted evidence failed: {error}"),
             ));
         }
+        let handshake = match read_bounded_line(&mut reader) {
+            Ok(line) if !line.is_empty() => line,
+            Ok(_) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    "provider handshake is missing after release",
+                ))
+            }
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &error,
+                ))
+            }
+        };
+        let mut provider_classifier = observed_provider.definition.event_classifier();
+        let provider_profile = ProviderProfileTupleV1 {
+            model_selector: profile.model_selector.clone(),
+            reasoning_effort: profile.reasoning_effort.clone(),
+            permission: profile.permission.clone(),
+        };
+        let managed_cwd_identity = digest_path(launch_spec.cwd());
+        let handshake_observation = match BoundedObservation::new(handshake) {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("provider handshake observation rejected: {error}"),
+                ))
+            }
+        };
+        let attested = provider_classifier.accept_claude_handshake(
+            &observed_provider.discovery,
+            handshake_observation,
+            ClaudeHandshakeContextV1 {
+                launch_spec: &launch_spec,
+                run_id: run_id.clone(),
+                capability_fingerprint: capability.fingerprint.clone(),
+                effective_profile: provider_profile,
+                workspace_identity: chat["workspaceIdentity"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .into(),
+                managed_cwd_identity,
+                expected_tools: vec!["Read".into(), "Edit".into()],
+                expected_mcp_servers: Vec::new(),
+                expected_plugins: Vec::new(),
+                verified_at: now(),
+            },
+        );
+        let (attestation, handshake_event) = match attested {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("provider handshake rejected: {error}"),
+                ))
+            }
+        };
+        if !matches!(
+            handshake_event,
+            InternalProviderEventV1::Handshake { sequence: 1, .. }
+        ) {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                "provider handshake classifier did not start at sequence one",
+            ));
+        }
+        let attestation_projection = (|| -> Result<_, ProjectFailure> {
+            let manifest_value = serde_json::to_value(observed_provider.definition.manifest())
+                .map_err(json_failure)?;
+            let discovery_value =
+                serde_json::to_value(&observed_provider.discovery).map_err(json_failure)?;
+            let attestation_value = serde_json::to_value(&attestation).map_err(json_failure)?;
+            validate_agent_runtime_attestation_against_accepted_v1(
+                &attestation_value,
+                &manifest_value,
+                &discovery_value,
+                &accepted,
+                &serde_json::to_value(&profile).map_err(json_failure)?,
+            )
+            .map_err(contract_failure)?;
+            let running = agent_run_record(
+                &run_id,
+                &chat,
+                &profile,
+                &capability.fingerprint,
+                "running",
+                None,
+                &created,
+            )?;
+            let mut running_payload = actual_run_projection(storage, &run_id)?;
+            running_payload.remove("last_event_sequence");
+            running_payload.insert("record".into(), running);
+            running_payload.insert("state".into(), Value::String("running".into()));
+            running_payload.insert("provider_discovery".into(), discovery_value);
+            running_payload.insert("runtime_attestation".into(), attestation_value);
+            let running_chat = updated_chat(&chat, "running")?;
+            let running_chat_payload =
+                chat_projection_with_record(&chat_projection, &running_chat, None)?;
+            Ok((running_payload, running_chat_payload))
+        })();
+        let (running_payload, running_chat_payload) = match attestation_projection {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(fail_before_release(
+                    storage,
+                    projects,
+                    &run_id,
+                    Some(launcher),
+                    Some(tracker),
+                    &format!("runtime attestation construction failed: {}", error.detail),
+                ))
+            }
+        };
+        if self.scenario == FakeScenario::AttestationPersistenceFailure {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                "injected runtime attestation persistence failure",
+            ));
+        }
+        if let Err(error) = storage.upsert_projection_records_atomic(vec![
+            ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.clone(),
+                operation_id: format!("op_agent_attested_running_{run_id}"),
+                request_id: None,
+                payload: running_payload,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: request.chat_id.clone(),
+                operation_id: format!("op_agent_chat_running_{run_id}"),
+                request_id: None,
+                payload: running_chat_payload,
+            },
+        ]) {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("runtime attestation persistence failed: {error}"),
+            ));
+        }
+        let (sender, receiver) = mpsc::sync_channel(32);
+        if let Err(error) = thread::Builder::new()
+            .name("agent-fixture-drain".into())
+            .spawn(move || loop {
+                match read_bounded_line(&mut reader) {
+                    Ok(line) if line.is_empty() => break,
+                    Ok(line) => {
+                        if sender.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        break;
+                    }
+                }
+            })
+        {
+            return Err(fail_before_release(
+                storage,
+                projects,
+                &run_id,
+                Some(launcher),
+                Some(tracker),
+                &format!("agent drain thread failed: {error}"),
+            ));
+        }
         let stream_id = format!("agent_stream_{}", Uuid::new_v4().simple());
         self.active.insert(
             run_id.clone(),
@@ -758,6 +968,8 @@ impl AgentRuntime {
                 running_event_pending: true,
                 scenario: self.scenario,
                 evidence_failed: false,
+                provider_classifier,
+                provider_terminal_outcome: None,
             },
         );
         Ok(G5Action {
@@ -818,9 +1030,9 @@ impl AgentRuntime {
                 observed_identities = Some(active.tracker.tracked_identities());
                 loop {
                     match active.receiver.try_recv() {
-                        Ok(Ok(line)) => match normalize_vendor_event(&line) {
-                            Ok(NormalizedVendorEvent::Public { kind, text }) => {
-                                match public.push(active, kind, text) {
+                        Ok(Ok(line)) => match classify_provider_line(active, line) {
+                            Ok(ProviderLine::Public { kind, text }) => {
+                                match public.push(active, &kind, text) {
                                     Ok(true) => {}
                                     Ok(false) => {
                                         budget_exceeded = true;
@@ -832,7 +1044,7 @@ impl AgentRuntime {
                                     }
                                 }
                             }
-                            Ok(NormalizedVendorEvent::Private) => {}
+                            Ok(ProviderLine::Private | ProviderLine::Terminal) => {}
                             Err(_) => {
                                 parser_failed = true;
                                 break;
@@ -885,9 +1097,9 @@ impl AgentRuntime {
                 if let Some(active) = self.active.get_mut(&run_id) {
                     loop {
                         match active.receiver.recv_timeout(Duration::from_millis(100)) {
-                            Ok(Ok(line)) => match normalize_vendor_event(&line) {
-                                Ok(NormalizedVendorEvent::Public { kind, text }) => {
-                                    match public.push(active, kind, text) {
+                            Ok(Ok(line)) => match classify_provider_line(active, line) {
+                                Ok(ProviderLine::Public { kind, text }) => {
+                                    match public.push(active, &kind, text) {
                                         Ok(true) => {}
                                         Ok(false) => {
                                             budget_exceeded = true;
@@ -899,7 +1111,7 @@ impl AgentRuntime {
                                         }
                                     }
                                 }
-                                Ok(NormalizedVendorEvent::Private) => {}
+                                Ok(ProviderLine::Private | ProviderLine::Terminal) => {}
                                 Err(_) => {
                                     parser_failed = true;
                                     break;
@@ -930,13 +1142,21 @@ impl AgentRuntime {
                 }
             }
             if parser_failed || budget_exceeded || finished.is_some() {
+                let provider_outcome = self
+                    .active
+                    .get(&run_id)
+                    .and_then(|active| active.provider_terminal_outcome.as_deref());
                 let state = if parser_failed
                     || budget_exceeded
                     || finished.is_some_and(|status| !status.success())
                 {
                     "failed"
                 } else {
-                    "succeeded"
+                    match provider_outcome {
+                        Some("failed" | "recoveryRequired") => "failed",
+                        Some("canceled") => "canceled",
+                        _ => "succeeded",
+                    }
                 };
                 let terminal = self
                     .finish(storage, projects, &run_id, state, false)
@@ -1121,85 +1341,131 @@ impl AgentRuntime {
         }
     }
 
-    fn capability(&self, runtime: &str) -> Result<AgentCapabilitySnapshotV1, ProjectFailure> {
+    fn blocked_capability(
+        &self,
+        runtime: &str,
+    ) -> Result<AgentCapabilitySnapshotV1, ProjectFailure> {
         let platform = if cfg!(target_os = "macos") {
             "darwin"
         } else {
             "win32"
         };
-        let mut snapshot = match self.provider {
-            ProviderMode::Blocked => AgentCapabilitySnapshotV1 {
-                schema_version: 1,
-                runtime: runtime.into(),
-                platform: platform.into(),
-                installation_state: "notInstalled".into(),
-                auth_state: "unknown".into(),
-                executable: None,
-                models: Vec::new(),
-                discovery: AgentDiscoveryEvidenceV1 {
-                    source: "unavailable".into(),
-                    verification_level: "unknown".into(),
-                    exact_cli_version: None,
-                    effective_model_evidence: "unknown".into(),
-                },
-                can_start: false,
-                blocked_reason: Some(
-                    if platform == "darwin" {
-                        "notInstalled"
-                    } else {
-                        "platformUnsupported"
-                    }
-                    .into(),
-                ),
-                fingerprint: String::new(),
-                observed_at: now(),
+        let mut snapshot = AgentCapabilitySnapshotV1 {
+            schema_version: 1,
+            runtime: runtime.into(),
+            platform: platform.into(),
+            installation_state: "notInstalled".into(),
+            auth_state: "unknown".into(),
+            executable: None,
+            models: Vec::new(),
+            discovery: AgentDiscoveryEvidenceV1 {
+                source: "unavailable".into(),
+                verification_level: "unknown".into(),
+                exact_cli_version: None,
+                effective_model_evidence: "unknown".into(),
             },
-            ProviderMode::FakeExact => {
-                let executable = self
-                    .fake_executable
-                    .as_ref()
-                    .ok_or_else(|| ProjectFailure::manifest("fake executable missing"))?;
-                let models = if runtime == "codex" {
-                    vec![AgentModelCapabilityV1 {
-                        model_selector: "sol".into(),
-                        reasoning_efforts: vec!["medium".into(), "high".into()],
-                        permissions: vec!["readOnly".into()],
-                    }]
+            can_start: false,
+            blocked_reason: Some(
+                if platform == "darwin" {
+                    "notInstalled"
                 } else {
-                    vec![AgentModelCapabilityV1 {
-                        model_selector: "opus".into(),
-                        reasoning_efforts: Vec::new(),
-                        permissions: vec!["workspaceWrite".into()],
-                    }]
-                };
-                AgentCapabilitySnapshotV1 {
-                    schema_version: 1,
-                    runtime: runtime.into(),
-                    platform: platform.into(),
-                    installation_state: "installed".into(),
-                    auth_state: "authenticated".into(),
-                    executable: Some(AgentExecutableIdentityV1 {
-                        path_digest: digest_path(executable),
-                        file_identity_digest: digest_text("agent-fixture-binary-v1"),
-                        cli_version: "fixture-1".into(),
-                    }),
-                    models,
-                    discovery: AgentDiscoveryEvidenceV1 {
-                        source: "exactVersionManifest".into(),
-                        verification_level: "measuredExactVersion".into(),
-                        exact_cli_version: Some("fixture-1".into()),
-                        effective_model_evidence: "measuredExactVersion".into(),
-                    },
-                    can_start: platform == "darwin",
-                    blocked_reason: (platform != "darwin").then(|| "platformUnsupported".into()),
-                    fingerprint: String::new(),
-                    observed_at: now(),
+                    "platformUnsupported"
                 }
-            }
+                .into(),
+            ),
+            fingerprint: String::new(),
+            observed_at: now(),
         };
         snapshot.fingerprint =
             compute_agent_capability_fingerprint_v1(&snapshot).map_err(contract_failure)?;
         Ok(snapshot)
+    }
+
+    fn observe_provider(&mut self, runtime: &str) -> Result<ObservedProvider, ProjectFailure> {
+        let provider = provider_id(runtime)?;
+        let executable = self
+            .fake_executable
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::manifest("fake executable missing"))?;
+        let approved_closure = fake_observed_closure(provider, executable);
+        let definition = ProviderDefinitionV1::new(provider, approved_closure.clone())
+            .map_err(provider_failure)?;
+        let observation_index = self
+            .observation_counts
+            .entry(runtime.to_string())
+            .or_default();
+        *observation_index += 1;
+        let mut observed_closure = approved_closure;
+        let mut version = match provider {
+            ProviderId::ClaudeCode => b"Claude Code 2.1.241".to_vec(),
+            ProviderId::Codex => b"codex-cli 0.150.0".to_vec(),
+        };
+        let mut auth = match provider {
+            ProviderId::ClaudeCode => br#"{"loggedIn":true,"email":"private@example.invalid","organization":"private-org","token":"private-token"}"#.to_vec(),
+            ProviderId::Codex => b"Logged in using ChatGPT".to_vec(),
+        };
+        let mut profiles = definition.manifest().exact_profiles.clone();
+        if self.scenario == FakeScenario::DiscoveryMissingHelper {
+            observed_closure.required_helpers.clear();
+        }
+        if self.scenario == FakeScenario::DiscoveryUnknownVersion {
+            version = match provider {
+                ProviderId::ClaudeCode => b"Claude Code 9.9.9".to_vec(),
+                ProviderId::Codex => b"codex-cli 9.9.9".to_vec(),
+            };
+        }
+        if self.scenario == FakeScenario::DiscoveryUnknownAuth {
+            auth = match provider {
+                ProviderId::ClaudeCode => {
+                    br#"{"loggedIn":false,"email":"private@example.invalid"}"#.to_vec()
+                }
+                ProviderId::Codex => b"Account: private@example.invalid".to_vec(),
+            };
+        }
+        if self.scenario == FakeScenario::DiscoveryStaleClosure && *observation_index > 1 {
+            observed_closure.binary.file_identity_digest = digest_text("stale-fixture-binary");
+        }
+        if self.scenario == FakeScenario::DiscoveryProfileDrift && *observation_index > 1 {
+            profiles[0].model_selector = "unapproved-model".into();
+        }
+        let evidence = match provider {
+            ProviderId::ClaudeCode => ModelCatalogEvidenceV1::RuntimeVerified,
+            ProviderId::Codex => ModelCatalogEvidenceV1::ArgvOnly,
+        };
+        let discovery = definition
+            .discover(DiscoveryInputV1 {
+                executable: Some(observed_closure),
+                version: Some(BoundedObservation::new(version).map_err(provider_failure)?),
+                auth: Some(BoundedObservation::new(auth).map_err(provider_failure)?),
+                model_catalog_evidence: evidence,
+                exact_profiles: profiles,
+                observed_runtime_verification: definition
+                    .manifest()
+                    .launch_policy
+                    .required_runtime_verification
+                    .clone(),
+                observed_at: now(),
+            })
+            .map_err(provider_failure)?;
+        let manifest_value = serde_json::to_value(definition.manifest()).map_err(json_failure)?;
+        let discovery_value = serde_json::to_value(&discovery).map_err(json_failure)?;
+        validate_provider_manifest_v1(&manifest_value).map_err(contract_failure)?;
+        validate_sanitized_discovery_observation_v1(&discovery_value, &manifest_value)
+            .map_err(contract_failure)?;
+        let capability = capability_from_discovery(&discovery)?;
+        let observed = ObservedProvider {
+            definition,
+            discovery,
+            capability,
+        };
+        self.discovery_cache
+            .insert(runtime.to_string(), observed.clone());
+        Ok(observed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observation_count(&self, runtime: &str) -> usize {
+        self.observation_counts.get(runtime).copied().unwrap_or(0)
     }
 
     fn persist_public_event(
@@ -1482,6 +1748,7 @@ impl AgentRuntime {
         upserts[0]
             .payload
             .insert("recovery".into(), recovery.clone().unwrap_or(Value::Null));
+        preserve_provider_evidence(&projection, &mut upserts[0].payload);
         if active.profile.permission == "workspaceWrite" {
             upserts.push(release_writer_lock(
                 storage,
@@ -1669,6 +1936,7 @@ fn fail_before_release(
                 .cloned()
                 .unwrap_or_default(),
         )?;
+        preserve_provider_evidence(&projection, &mut payload);
         payload.insert(
             "pre_release_failure".into(),
             json!({"stage":"beforeRelease","evidenceDigest":digest_text(detail),"processesProvenGone":clean,"observedAt":now()}),
@@ -1733,6 +2001,174 @@ fn fail_before_release(
             error.detail
         )),
     }
+}
+
+enum ProviderLine {
+    Public { kind: String, text: String },
+    Private,
+    Terminal,
+}
+
+fn classify_provider_line(
+    active: &mut ActiveAgentRun,
+    line: Vec<u8>,
+) -> Result<ProviderLine, ProjectFailure> {
+    let observation = BoundedObservation::new(line).map_err(provider_failure)?;
+    match active
+        .provider_classifier
+        .classify(observation)
+        .map_err(provider_failure)?
+    {
+        InternalProviderEventV1::Public { kind, text, .. } => {
+            Ok(ProviderLine::Public { kind, text })
+        }
+        InternalProviderEventV1::Private { .. } => Ok(ProviderLine::Private),
+        InternalProviderEventV1::Terminal { outcome, .. } => {
+            active.provider_terminal_outcome = Some(outcome);
+            Ok(ProviderLine::Terminal)
+        }
+        InternalProviderEventV1::AuthFailure { .. } | InternalProviderEventV1::Handshake { .. } => {
+            Err(ProjectFailure::recovery(
+                "provider emitted a forbidden runtime event",
+            ))
+        }
+    }
+}
+
+fn provider_id(runtime: &str) -> Result<ProviderId, ProjectFailure> {
+    match runtime {
+        "claude-code" => Ok(ProviderId::ClaudeCode),
+        "codex" => Ok(ProviderId::Codex),
+        _ => Err(ProjectFailure::manifest("unsupported provider runtime")),
+    }
+}
+
+fn fake_observed_closure(provider: ProviderId, executable: &Path) -> ObservedExecutableClosureV1 {
+    let (binary, helper) = match provider {
+        ProviderId::ClaudeCode => ("claude", "node"),
+        ProviderId::Codex => ("codex", "rg"),
+    };
+    ObservedExecutableClosureV1 {
+        binary: ProviderExecutableFileIdentityV1 {
+            logical_name: binary.into(),
+            path_digest: digest_path(executable),
+            file_identity_digest: digest_text("g5c-fixture-provider-binary-v1"),
+        },
+        required_helpers: vec![ProviderExecutableFileIdentityV1 {
+            logical_name: helper.into(),
+            path_digest: digest_text(&format!("g5c-fixture-helper-path-{helper}-v1")),
+            file_identity_digest: digest_text(&format!("g5c-fixture-helper-file-{helper}-v1")),
+        }],
+    }
+}
+
+fn capability_from_discovery(
+    observation: &SanitizedDiscoveryObservationV1,
+) -> Result<AgentCapabilitySnapshotV1, ProjectFailure> {
+    let platform = if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "win32"
+    };
+    let mut grouped: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
+    for profile in &observation.exact_profiles {
+        let entry = grouped.entry(profile.model_selector.clone()).or_default();
+        if let Some(reasoning) = &profile.reasoning_effort {
+            entry.0.insert(reasoning.clone());
+        }
+        entry.1.insert(profile.permission.clone());
+    }
+    let models = grouped
+        .into_iter()
+        .map(
+            |(model_selector, (reasoning_efforts, permissions))| AgentModelCapabilityV1 {
+                model_selector,
+                reasoning_efforts: reasoning_efforts.into_iter().collect(),
+                permissions: permissions.into_iter().collect(),
+            },
+        )
+        .collect();
+    let provider_blocker = observation.blocked_reason.as_deref();
+    let mut blocked_reason = provider_blocker
+        .map(|reason| match reason {
+            "notInstalled" => "notInstalled",
+            "notAuthenticated" => "notAuthenticated",
+            "authExpired" => "authExpired",
+            "closureMismatch" => "installationIncomplete",
+            "unsupportedVersion" => "unsupportedVersion",
+            "unsupportedProfile" | "modelCatalogUnverified" => "exactModelUnavailable",
+            "runtimeVerificationIncomplete" => "capabilityUnknown",
+            _ => "capabilityUnknown",
+        })
+        .map(str::to_string);
+    if platform != "darwin" {
+        blocked_reason = Some("platformUnsupported".into());
+    }
+    let evidence = if matches!(
+        provider_blocker,
+        Some("unsupportedProfile" | "modelCatalogUnverified")
+    ) {
+        ("exactVersionManifest", "measuredExactVersion", "argvOnly")
+    } else {
+        match observation.model_catalog_evidence.as_str() {
+            "runtimeVerified" => (
+                "machineReadableCatalog",
+                "runtimeVerified",
+                "runtimeVerified",
+            ),
+            "exactVersionManifest" => (
+                "exactVersionManifest",
+                "measuredExactVersion",
+                "measuredExactVersion",
+            ),
+            "argvOnly" => ("exactVersionManifest", "measuredExactVersion", "argvOnly"),
+            _ => ("unavailable", "unknown", "unknown"),
+        }
+    };
+    let public_incomplete = provider_blocker == Some("closureMismatch");
+    let executable = (!public_incomplete)
+        .then_some(observation.executable_closure.as_ref())
+        .flatten()
+        .map(|closure| AgentExecutableIdentityV1 {
+            path_digest: closure.binary.path_digest.clone(),
+            file_identity_digest: closure.binary.file_identity_digest.clone(),
+            cli_version: closure.binary.cli_version.clone(),
+        });
+    let mut snapshot = AgentCapabilitySnapshotV1 {
+        schema_version: 1,
+        runtime: observation.runtime.clone(),
+        platform: platform.into(),
+        installation_state: if public_incomplete {
+            "incomplete".into()
+        } else {
+            observation.installation_state.clone()
+        },
+        auth_state: observation.auth_state.clone(),
+        executable,
+        models,
+        discovery: AgentDiscoveryEvidenceV1 {
+            source: evidence.0.into(),
+            verification_level: evidence.1.into(),
+            exact_cli_version: if public_incomplete {
+                None
+            } else {
+                observation.exact_cli_version.clone()
+            },
+            effective_model_evidence: evidence.2.into(),
+        },
+        can_start: blocked_reason.is_none(),
+        blocked_reason,
+        fingerprint: String::new(),
+        observed_at: observation.observed_at.clone(),
+    };
+    snapshot.fingerprint =
+        compute_agent_capability_fingerprint_v1(&snapshot).map_err(contract_failure)?;
+    validate_agent_adapter_payload_v1(
+        "capabilitySnapshot",
+        &serde_json::to_value(&snapshot).map_err(json_failure)?,
+    )
+    .map_err(contract_failure)?;
+    Ok(snapshot)
 }
 
 fn preflight_outcome(
@@ -1862,6 +2298,83 @@ fn actual_run_projection(
     }
     stored_public_budget(&value)?;
     Ok(value)
+}
+
+fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<String, Value>) {
+    for field in ["provider_discovery", "runtime_attestation"] {
+        if let Some(value) = source.get(field) {
+            target.insert(field.into(), value.clone());
+        }
+    }
+}
+
+fn validate_provider_projection(projection: &Map<String, Value>) -> Result<(), ProjectFailure> {
+    let discovery = projection.get("provider_discovery");
+    let attestation = projection.get("runtime_attestation");
+    if discovery.is_none() && attestation.is_none() {
+        // Pre-G5C actual-agent fixture projections remain readable.
+        return Ok(());
+    }
+    let (Some(discovery), Some(attestation)) = (discovery, attestation) else {
+        return Err(ProjectFailure::recovery(
+            "provider discovery and runtime attestation must persist together",
+        ));
+    };
+    let closure = discovery["executableClosure"]
+        .as_object()
+        .ok_or_else(|| ProjectFailure::recovery("provider executable closure is missing"))?;
+    let provider = provider_id(
+        discovery["providerId"]
+            .as_str()
+            .ok_or_else(|| ProjectFailure::recovery("provider identity is missing"))?,
+    )?;
+    let binary = &closure["binary"];
+    let helpers = closure["requiredHelpers"]
+        .as_array()
+        .ok_or_else(|| ProjectFailure::recovery("provider helper closure is missing"))?;
+    let observed = ObservedExecutableClosureV1 {
+        binary: provider_file_identity_from_value(binary)?,
+        required_helpers: helpers
+            .iter()
+            .map(provider_file_identity_from_value)
+            .collect::<Result<Vec<_>, _>>()?,
+    };
+    let definition = ProviderDefinitionV1::new(provider, observed).map_err(provider_failure)?;
+    let manifest = serde_json::to_value(definition.manifest()).map_err(json_failure)?;
+    let record = projection
+        .get("record")
+        .ok_or_else(|| ProjectFailure::recovery("actual-agent run record is missing"))?;
+    let accepted = json!({
+        "schemaVersion":1,
+        "runId":record["runId"],
+        "chatId":record["chatId"],
+        "taskId":record["taskId"],
+        "projectId":record["projectId"],
+        "worktreeId":record["worktreeId"],
+        "workspaceIdentity":record["workspaceIdentity"],
+        "roleId":record["selectedProfile"]["roleId"],
+        "capabilityFingerprint":record["capabilityFingerprint"],
+        "state":"preparing"
+    });
+    validate_agent_runtime_attestation_against_accepted_v1(
+        attestation,
+        &manifest,
+        discovery,
+        &accepted,
+        &record["selectedProfile"],
+    )
+    .map_err(contract_failure)?;
+    Ok(())
+}
+
+fn provider_file_identity_from_value(
+    value: &Value,
+) -> Result<ProviderExecutableFileIdentityV1, ProjectFailure> {
+    Ok(ProviderExecutableFileIdentityV1 {
+        logical_name: identity_string(value, "logicalName")?,
+        path_digest: identity_string(value, "pathDigest")?,
+        file_identity_digest: identity_string(value, "fileIdentityDigest")?,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2254,10 +2767,30 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::PollWaitFailure => "cancel-clean",
         FakeScenario::TerminalConstructionFailure => "no-output",
         FakeScenario::TerminalUpsertFailure => "no-output",
+        FakeScenario::DiscoveryMissingHelper
+        | FakeScenario::DiscoveryUnknownVersion
+        | FakeScenario::DiscoveryUnknownAuth
+        | FakeScenario::DiscoveryStaleClosure
+        | FakeScenario::DiscoveryProfileDrift => "clean",
+        FakeScenario::HandshakeBeforePublic => "handshake-before-public",
+        FakeScenario::HandshakeVersionMismatch => "handshake-version-mismatch",
+        FakeScenario::HandshakeModelMismatch => "handshake-model-mismatch",
+        FakeScenario::HandshakeCwdMismatch => "handshake-cwd-mismatch",
+        FakeScenario::HandshakePermissionMismatch => "handshake-permission-mismatch",
+        FakeScenario::HandshakeToolsMismatch => "handshake-tools-mismatch",
+        FakeScenario::HandshakeMcpMismatch => "handshake-mcp-mismatch",
+        FakeScenario::HandshakePluginsMismatch => "handshake-plugins-mismatch",
+        FakeScenario::HandshakeConfigMismatch => "handshake-config-mismatch",
+        FakeScenario::AttestationPersistenceFailure => "clean",
+        FakeScenario::ProviderAuthFailure => "provider-auth-failure",
+        FakeScenario::ProviderTerminalMalformed => "provider-terminal-malformed",
     }
 }
 fn contract_failure(error: impl std::fmt::Display) -> ProjectFailure {
     ProjectFailure::manifest(format!("agent adapter contract: {error}"))
+}
+fn provider_failure(_error: impl std::fmt::Display) -> ProjectFailure {
+    ProjectFailure::manifest("provider verification failed closed")
 }
 fn adapter_failure(error: AgentAdapterError) -> ProjectFailure {
     ProjectFailure::manifest(error.to_string())
@@ -2313,6 +2846,17 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "malformed",
         "oversized",
         "descendant",
+        "handshake-before-public",
+        "handshake-version-mismatch",
+        "handshake-model-mismatch",
+        "handshake-cwd-mismatch",
+        "handshake-permission-mismatch",
+        "handshake-tools-mismatch",
+        "handshake-mcp-mismatch",
+        "handshake-plugins-mismatch",
+        "handshake-config-mismatch",
+        "provider-auth-failure",
+        "provider-terminal-malformed",
     ]
     .contains(&scenario)
     {
@@ -2377,6 +2921,48 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
     if release.trim() != "run" {
         return Ok(());
     }
+    if scenario == "handshake-before-public" {
+        println!("{{\"type\":\"status\",\"text\":\"must-not-escape\"}}");
+        return Ok(());
+    }
+    if scenario == "provider-auth-failure" {
+        println!("{{\"type\":\"authFailure\",\"authState\":\"expired\"}}");
+        return Ok(());
+    }
+    let cwd = std::env::current_dir()
+        .map_err(|error| SidecarError::new("fixtureFailure", format!("fixture cwd: {error}")))?;
+    let mut handshake = json!({
+        "type":"system",
+        "subtype":"init",
+        "claude_code_version":"2.1.241",
+        "model":"claude-opus-5",
+        "cwd":cwd.to_string_lossy(),
+        "permissionMode":"workspaceWrite",
+        "tools":["Edit","Read"],
+        "mcp_servers":[],
+        "plugins":[],
+        "configIsolation":"managedOnly"
+    });
+    match scenario {
+        "handshake-version-mismatch" => handshake["claude_code_version"] = json!("2.1.242"),
+        "handshake-model-mismatch" => handshake["model"] = json!("claude-unknown"),
+        "handshake-cwd-mismatch" => handshake["cwd"] = json!("/not/managed"),
+        "handshake-permission-mismatch" => handshake["permissionMode"] = json!("readOnly"),
+        "handshake-tools-mismatch" => handshake["tools"] = json!(["Read"]),
+        "handshake-mcp-mismatch" => handshake["mcp_servers"] = json!(["unsafe"]),
+        "handshake-plugins-mismatch" => handshake["plugins"] = json!(["unsafe"]),
+        "handshake-config-mismatch" => handshake["configIsolation"] = json!("userAndProject"),
+        _ => {}
+    }
+    println!(
+        "{}",
+        serde_json::to_string(&handshake).map_err(|error| {
+            SidecarError::new("fixtureFailure", format!("fixture handshake: {error}"))
+        })?
+    );
+    if scenario.starts_with("handshake-") {
+        return Ok(());
+    }
     match scenario {
         "no-output" => {}
         "malformed" => println!("not-json"),
@@ -2384,6 +2970,9 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
             "{{\"type\":\"status\",\"text\":\"{}\"}}",
             "x".repeat(MAX_AGENT_EVENT_BYTES)
         ),
+        "provider-terminal-malformed" => {
+            println!("{{\"type\":\"terminal\",\"outcome\":\"unknown\"}}")
+        }
         _ => {
             println!("{{\"type\":\"reasoning\",\"secret\":\"token-never-persist\"}}");
             println!("{{\"type\":\"status\",\"text\":\"Working\"}}");
@@ -2415,6 +3004,7 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
                 thread::sleep(Duration::from_secs(30));
             } else {
                 println!("{{\"type\":\"final\",\"text\":\"Done\"}}");
+                println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}");
             }
         }
     }

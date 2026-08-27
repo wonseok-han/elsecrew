@@ -51,6 +51,13 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         panic!("first envelope must be ready")
     };
     let ready = ready_payload(&ready_event).expect("ready payload");
+    assert_eq!(
+        ready.capabilities,
+        G5_CAPABILITIES_V1
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>()
+    );
 
     for (request_id, method) in [
         ("req_process_status", "system.status"),
@@ -104,6 +111,79 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         )
         .expect("clean marker");
     assert!(clean.is_some());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_g5c_capability_cache_refreshes_only_when_requested_and_codex_stays_blocked() {
+    let root = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .args(["--stdio-agent-fixture", "discovery-stale-closure"])
+        .current_dir(root.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+    for (request_id, refresh) in [("req_cache_1", false), ("req_cache_2", false)] {
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            request_id,
+            "agent.getCapabilities",
+            serde_json::json!({"runtime":"claude-code","refresh":refresh}),
+        );
+        let EnvelopeV1::Response(response) = receive_envelope(&envelopes) else {
+            panic!("capability")
+        };
+        assert_eq!(response.result.unwrap()["canStart"], true);
+    }
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_cache_refresh",
+        "agent.getCapabilities",
+        serde_json::json!({"runtime":"claude-code","refresh":true}),
+    );
+    let EnvelopeV1::Response(refreshed) = receive_envelope(&envelopes) else {
+        panic!("refreshed")
+    };
+    let refreshed = refreshed.result.unwrap();
+    assert_eq!(refreshed["canStart"], false);
+    assert_eq!(refreshed["blockedReason"], "installationIncomplete");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_codex_blocked",
+        "agent.getCapabilities",
+        serde_json::json!({"runtime":"codex","refresh":true}),
+    );
+    let EnvelopeV1::Response(codex) = receive_envelope(&envelopes) else {
+        panic!("codex")
+    };
+    let codex = codex.result.unwrap();
+    assert_eq!(codex["canStart"], false);
+    assert_eq!(codex["blockedReason"], "exactModelUnavailable");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_cache_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
 }
 
 #[cfg(target_os = "macos")]
@@ -176,6 +256,22 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
         serde_json::json!({"projectId":project_id}),
     );
     assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_agent_settings_exact",
+        "project.updateRoleSettings",
+        serde_json::json!({
+            "projectId":project_id,
+            "expectedRevision":1,
+            "roles":[
+                {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+                {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+                {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+            ]
+        }),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
     let prepared = prepare_workspace(
         &mut stdin,
         &envelopes,
@@ -192,7 +288,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
             "preparationId":prepared["preparationId"],"projectId":project_id,
             "worktreeId":prepared["manifest"]["worktreeId"],
             "workspaceIdentity":prepared["manifest"]["workspaceIdentity"],
-            "goal":"normalized public event fixture","expectedSettingsRevision":1,
+            "goal":"normalized public event fixture","expectedSettingsRevision":2,
         }),
     );
     let EnvelopeV1::Response(chat_response) = receive_envelope(&envelopes) else {
@@ -228,7 +324,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
         &ready.sidecar_instance_id,
         "req_agent_capability",
         "agent.getCapabilities",
-        serde_json::json!({"runtime":"codex","refresh":true}),
+        serde_json::json!({"runtime":"claude-code","refresh":true}),
     );
     let EnvelopeV1::Response(capability) = receive_envelope(&envelopes) else {
         panic!("capability response")
@@ -240,7 +336,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
         "req_agent_start",
         "run.startAgent",
         serde_json::json!({
-            "chatId":chat_id,"roleId":"planning","inputMessageIds":[message_id],
+            "chatId":chat_id,"roleId":"coding","inputMessageIds":[message_id],
             "expectedCapabilityFingerprint":capability["fingerprint"],
         }),
     );
@@ -281,7 +377,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
             assert_eq!(event.payload[field], chat[field]);
         }
         assert_eq!(event.payload["runId"], run_id);
-        assert_eq!(event.payload["roleId"], "planning");
+        assert_eq!(event.payload["roleId"], "coding");
         assert_eq!(
             event.payload["capabilityFingerprint"],
             capability["fingerprint"]
@@ -346,7 +442,6 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
             "public surface contains forbidden carrier: {forbidden}"
         );
     }
-
     write_request(
         &mut stdin,
         &ready.sidecar_instance_id,
@@ -359,6 +454,46 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     );
     drop(stdin);
     assert!(child.wait().unwrap().success());
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    for forbidden in [
+        "private@example.invalid",
+        "private-org",
+        "private-token",
+        "token-never-persist",
+    ] {
+        assert!(!stderr.to_lowercase().contains(forbidden));
+    }
+
+    let connection = Connection::open(data.join("hello-agent.sqlite3")).unwrap();
+    let mut statement = connection
+        .prepare(
+            "SELECT canonical_json_payload FROM events WHERE aggregate_type='run' \
+             UNION ALL SELECT projection_json FROM runs",
+        )
+        .unwrap();
+    let persisted = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n")
+        .to_lowercase();
+    assert!(persisted.contains("runtime_attestation"));
+    assert!(persisted.contains("provider_discovery"));
+    for forbidden in [
+        "private@example.invalid",
+        "private-org",
+        "private-token",
+        "token-never-persist",
+    ] {
+        assert!(!persisted.contains(forbidden));
+    }
 }
 
 #[test]

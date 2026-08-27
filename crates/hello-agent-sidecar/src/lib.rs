@@ -156,6 +156,27 @@ where
             "malformed" => agent_runtime::FakeScenario::Malformed,
             "oversized" => agent_runtime::FakeScenario::Oversized,
             "descendant" => agent_runtime::FakeScenario::Descendant,
+            "discovery-missing-helper" => agent_runtime::FakeScenario::DiscoveryMissingHelper,
+            "discovery-unknown-version" => agent_runtime::FakeScenario::DiscoveryUnknownVersion,
+            "discovery-unknown-auth" => agent_runtime::FakeScenario::DiscoveryUnknownAuth,
+            "discovery-stale-closure" => agent_runtime::FakeScenario::DiscoveryStaleClosure,
+            "discovery-profile-drift" => agent_runtime::FakeScenario::DiscoveryProfileDrift,
+            "handshake-before-public" => agent_runtime::FakeScenario::HandshakeBeforePublic,
+            "handshake-version-mismatch" => agent_runtime::FakeScenario::HandshakeVersionMismatch,
+            "handshake-model-mismatch" => agent_runtime::FakeScenario::HandshakeModelMismatch,
+            "handshake-cwd-mismatch" => agent_runtime::FakeScenario::HandshakeCwdMismatch,
+            "handshake-permission-mismatch" => {
+                agent_runtime::FakeScenario::HandshakePermissionMismatch
+            }
+            "handshake-tools-mismatch" => agent_runtime::FakeScenario::HandshakeToolsMismatch,
+            "handshake-mcp-mismatch" => agent_runtime::FakeScenario::HandshakeMcpMismatch,
+            "handshake-plugins-mismatch" => agent_runtime::FakeScenario::HandshakePluginsMismatch,
+            "handshake-config-mismatch" => agent_runtime::FakeScenario::HandshakeConfigMismatch,
+            "attestation-persistence-failure" => {
+                agent_runtime::FakeScenario::AttestationPersistenceFailure
+            }
+            "provider-auth-failure" => agent_runtime::FakeScenario::ProviderAuthFailure,
+            "provider-terminal-malformed" => agent_runtime::FakeScenario::ProviderTerminalMalformed,
             _ => {
                 return Err(SidecarError::new(
                     "invalidArguments",
