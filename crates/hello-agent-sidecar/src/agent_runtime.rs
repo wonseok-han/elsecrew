@@ -17,7 +17,7 @@ use hello_agent_core::provider::{
     BoundedObservation, ClaudeHandshakeContextV1, DiscoveryInputV1, InternalProviderEventV1,
     ModelCatalogEvidenceV1, ObservedExecutableClosureV1, ProviderDefinitionV1,
     ProviderEventClassifierV1, ProviderExecutableFileIdentityV1, ProviderId,
-    ProviderProfileTupleV1, SanitizedDiscoveryObservationV1,
+    ProviderProfileTupleV1, SanitizedDiscoveryObservationV1, PROVIDER_OBSERVATION_LINE_MAX_BYTES,
 };
 use hello_agent_protocol::agent_adapter_v1::{
     agent_public_events_snapshot_bytes_v1, compute_agent_capability_fingerprint_v1,
@@ -101,6 +101,11 @@ pub(crate) enum FakeScenario {
     AttestationPersistenceFailure,
     ProviderAuthFailure,
     ProviderTerminalMalformed,
+    PublicTextExact,
+    PublicAggregateExact,
+    PublicAggregatePlusOne,
+    ProviderTerminalFailed,
+    ProviderTerminalRecoveryRequired,
 }
 
 struct ActiveAgentRun {
@@ -1146,14 +1151,16 @@ impl AgentRuntime {
                     .active
                     .get(&run_id)
                     .and_then(|active| active.provider_terminal_outcome.as_deref());
-                let state = if parser_failed
+                let state = if provider_outcome == Some("recoveryRequired") {
+                    "recoveryRequired"
+                } else if parser_failed
                     || budget_exceeded
                     || finished.is_some_and(|status| !status.success())
                 {
                     "failed"
                 } else {
                     match provider_outcome {
-                        Some("failed" | "recoveryRequired") => "failed",
+                        Some("failed") => "failed",
                         Some("canceled") => "canceled",
                         _ => "succeeded",
                     }
@@ -1304,16 +1311,56 @@ impl AgentRuntime {
         after["state"] = Value::String("resolvedAbandoned".into());
         after["revision"] = Value::from(before["revision"].as_u64().unwrap_or(0) + 1);
         after["resolvedAt"] = Value::String(now());
+        let chat_projection = actual_chat_projection(storage, &address.chat_id)?;
+        let chat = chat_projection["record"].clone();
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(projection["record"]["selectedProfile"].clone())
+                .map_err(json_failure)?;
+        let resolved_run = agent_run_record(
+            request["runId"].as_str().unwrap_or_default(),
+            &chat,
+            &profile,
+            projection["record"]["capabilityFingerprint"]
+                .as_str()
+                .unwrap_or_default(),
+            "canceled",
+            Some("cleanExit"),
+            projection["record"]["createdAt"]
+                .as_str()
+                .unwrap_or_default(),
+        )?;
+        let termination = json!({
+            "schemaVersion":1,"runId":request["runId"],"outcome":"cleanExit",
+            "processesProvenGone":true,"poisoned":false,
+            "writerLockState":if profile.permission == "workspaceWrite" {"released"} else {"none"},
+            "chatState":"canceled","trackedProcesses":after["trackedProcesses"],
+            "evidenceDigest":digest_text("agent-recovery-abandoned-v1"),"observedAt":now()
+        });
+        validate_agent_adapter_payload_v1("terminationTranscript", &termination)
+            .map_err(contract_failure)?;
+        let discarded_chat = updated_chat(&chat, "discarded")?;
         let mut updated_projection = projection.clone();
         updated_projection.remove("last_event_sequence");
+        updated_projection.insert("record".into(), resolved_run);
+        updated_projection.insert("state".into(), Value::String("canceled".into()));
+        updated_projection.insert("termination".into(), termination);
         updated_projection.insert("recovery".into(), after.clone());
-        let mut upserts = vec![ProjectionUpsert {
-            aggregate_type: "run",
-            aggregate_id: identity_string(request, "runId")?,
-            operation_id: format!("op_agent_recovery_resolve_{request_id}"),
-            request_id: Some(request_id.into()),
-            payload: updated_projection,
-        }];
+        let mut upserts = vec![
+            ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: identity_string(request, "runId")?,
+                operation_id: format!("op_agent_recovery_resolve_{request_id}"),
+                request_id: Some(request_id.into()),
+                payload: updated_projection,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: address.chat_id.clone(),
+                operation_id: format!("op_agent_recovery_chat_{request_id}"),
+                request_id: Some(request_id.into()),
+                payload: chat_projection_with_record(&chat_projection, &discarded_chat, None)?,
+            },
+        ];
         if projection["record"]["selectedProfile"]["permission"] == "workspaceWrite" {
             upserts.push(release_writer_lock(
                 storage,
@@ -1634,16 +1681,22 @@ impl AgentRuntime {
         let _ = active.launcher.wait();
         let forced_uncertain =
             active.scenario == FakeScenario::CancelUncertain || active.evidence_failed;
-        let clean = report.confirmed() && !forced_uncertain;
-        let state = if clean {
+        let observed_processes_gone = report.confirmed() && !forced_uncertain;
+        let provider_requested_recovery = requested_state == "recoveryRequired";
+        let recovery_required = provider_requested_recovery || !observed_processes_gone;
+        // An explicit provider recovery verdict invalidates the public termination proof even
+        // when the OS tree observation says every tracked identity is gone. The per-process
+        // observations remain available so an explicit abandon resolution can re-probe them.
+        let processes_proven_gone = observed_processes_gone && !provider_requested_recovery;
+        let state = if recovery_required {
+            "recoveryRequired"
+        } else {
             requested_state
-        } else {
-            "recoveryRequired"
         };
-        let outcome = if clean {
-            "cleanExit"
-        } else {
+        let outcome = if recovery_required {
             "recoveryRequired"
+        } else {
+            "cleanExit"
         };
         let projection = actual_run_projection(storage, run_id)?;
         let created = projection["record"]["createdAt"]
@@ -1670,28 +1723,44 @@ impl AgentRuntime {
         let tracked = report
             .tracked
             .iter()
-            .map(|identity| process_value(*identity, Path::new("/redacted/agent"), clean))
+            .map(|identity| {
+                process_value(
+                    *identity,
+                    Path::new("/redacted/agent"),
+                    observed_processes_gone,
+                )
+            })
             .collect::<Vec<_>>();
-        let lock_state = if clean {
+        let lock_state = if recovery_required {
+            "recoveryRequired"
+        } else {
             if active.profile.permission == "workspaceWrite" {
                 "released"
             } else {
                 "none"
             }
-        } else {
-            "recoveryRequired"
         };
-        let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":clean,"poisoned":!clean,"writerLockState":lock_state,"chatState":if clean {requested_state} else {"recoveryRequired"},"trackedProcesses":tracked,"evidenceDigest":digest_text("agent-fixture-termination-v1"),"observedAt":now()});
+        let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":processes_proven_gone,"poisoned":recovery_required,"writerLockState":lock_state,"chatState":if recovery_required {"recoveryRequired"} else {requested_state},"trackedProcesses":tracked,"evidenceDigest":digest_text("agent-fixture-termination-v1"),"observedAt":now()});
         validate_agent_adapter_payload_v1("terminationTranscript", &termination)
             .map_err(contract_failure)?;
-        let recovery = (!clean).then(||json!({"schemaVersion":1,"recoveryId":format!("agent_recovery_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"source":"actualAgent","reason":if cancelling {"cancelUncertain"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}));
+        let recovery_id = if active.scenario == FakeScenario::ProviderTerminalRecoveryRequired {
+            format!(
+                "agent_recovery_{}",
+                run_id.strip_prefix("agent_run_").unwrap_or(run_id)
+            )
+        } else {
+            format!("agent_recovery_{}", Uuid::new_v4().simple())
+        };
+        let recovery = recovery_required.then(||json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"projectId":active.identity.project_id,"worktreeId":active.identity.worktree_id,"workspaceIdentity":active.identity.workspace_identity,"runId":run_id,"source":"actualAgent","reason":if cancelling {"cancelUncertain"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":tracked,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}));
         if let Some(value) = &recovery {
             validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;
             projects.workspace_mark_recovery_required(storage, &address_from_chat(&chat)?)?;
         }
         let updated_chat = updated_chat(
             &chat,
-            if clean {
+            if recovery_required {
+                "recoveryRequired"
+            } else {
                 match requested_state {
                     "succeeded" => {
                         if active.profile.role_id == "planning" {
@@ -1703,8 +1772,6 @@ impl AgentRuntime {
                     "canceled" => "canceled",
                     _ => "needsAttention",
                 }
-            } else {
-                "recoveryRequired"
             },
         )?;
         let internal = report
@@ -1755,7 +1822,7 @@ impl AgentRuntime {
                 &address_from_chat(&chat)?,
                 run_id,
                 run_id,
-                !clean,
+                recovery_required,
             )?);
         }
         let state_event = json!({
@@ -2784,6 +2851,11 @@ fn scenario_name(value: FakeScenario) -> &'static str {
         FakeScenario::AttestationPersistenceFailure => "clean",
         FakeScenario::ProviderAuthFailure => "provider-auth-failure",
         FakeScenario::ProviderTerminalMalformed => "provider-terminal-malformed",
+        FakeScenario::PublicTextExact => "public-text-exact",
+        FakeScenario::PublicAggregateExact => "public-aggregate-exact",
+        FakeScenario::PublicAggregatePlusOne => "public-aggregate-plus-one",
+        FakeScenario::ProviderTerminalFailed => "provider-terminal-failed",
+        FakeScenario::ProviderTerminalRecoveryRequired => "provider-terminal-recovery-required",
     }
 }
 fn contract_failure(error: impl std::fmt::Display) -> ProjectFailure {
@@ -2825,7 +2897,11 @@ fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Vec<u8>, String> {
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let take = newline.unwrap_or(available.len());
-        if line.len().saturating_add(take) > MAX_AGENT_EVENT_BYTES {
+        let framed = line
+            .len()
+            .saturating_add(take)
+            .saturating_add(usize::from(newline.is_some()));
+        if framed > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
             return Err("agent event exceeds the bounded line size".into());
         }
         line.extend_from_slice(&available[..take]);
@@ -2857,6 +2933,11 @@ pub(crate) fn run_agent_fixture_launcher(scenario: &str) -> Result<(), SidecarEr
         "handshake-config-mismatch",
         "provider-auth-failure",
         "provider-terminal-malformed",
+        "public-text-exact",
+        "public-aggregate-exact",
+        "public-aggregate-plus-one",
+        "provider-terminal-failed",
+        "provider-terminal-recovery-required",
     ]
     .contains(&scenario)
     {
@@ -2968,10 +3049,35 @@ pub(crate) fn run_agent_fixture_child(scenario: &str) -> Result<(), SidecarError
         "malformed" => println!("not-json"),
         "oversized" => println!(
             "{{\"type\":\"status\",\"text\":\"{}\"}}",
-            "x".repeat(MAX_AGENT_EVENT_BYTES)
+            "x".repeat(MAX_AGENT_EVENT_BYTES + 1)
         ),
         "provider-terminal-malformed" => {
             println!("{{\"type\":\"terminal\",\"outcome\":\"unknown\"}}")
+        }
+        "public-text-exact" => {
+            println!(
+                "{}",
+                json!({"type":"status","text":"x".repeat(MAX_AGENT_EVENT_BYTES)})
+            );
+            println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
+        }
+        "public-aggregate-exact" | "public-aggregate-plus-one" => {
+            for _ in 0..16 {
+                println!(
+                    "{}",
+                    json!({"type":"status","text":"x".repeat(MAX_AGENT_EVENT_BYTES)})
+                );
+            }
+            if scenario == "public-aggregate-plus-one" {
+                println!("{{\"type\":\"status\",\"text\":\"x\"}}")
+            }
+            println!("{{\"type\":\"terminal\",\"outcome\":\"succeeded\"}}")
+        }
+        "provider-terminal-recovery-required" => {
+            println!("{{\"type\":\"terminal\",\"outcome\":\"recoveryRequired\"}}")
+        }
+        "provider-terminal-failed" => {
+            println!("{{\"type\":\"terminal\",\"outcome\":\"failed\"}}")
         }
         _ => {
             println!("{{\"type\":\"reasoning\",\"secret\":\"token-never-persist\"}}");
@@ -3035,6 +3141,31 @@ mod budget_tests {
             "text":text,
             "createdAt":"2026-08-27T00:00:00Z",
         })
+    }
+
+    #[test]
+    fn provider_raw_line_limit_counts_the_newline_framing_byte() {
+        let mut exact = vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES - 1];
+        exact.push(b'\n');
+        assert_eq!(
+            read_bounded_line(&mut std::io::Cursor::new(exact))
+                .unwrap()
+                .len(),
+            PROVIDER_OBSERVATION_LINE_MAX_BYTES - 1
+        );
+
+        let mut over = vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES];
+        over.push(b'\n');
+        assert!(read_bounded_line(&mut std::io::Cursor::new(over)).is_err());
+        assert_eq!(
+            read_bounded_line(&mut std::io::Cursor::new(vec![
+                b'x';
+                PROVIDER_OBSERVATION_LINE_MAX_BYTES
+            ]))
+            .unwrap()
+            .len(),
+            PROVIDER_OBSERVATION_LINE_MAX_BYTES
+        );
     }
 
     #[test]

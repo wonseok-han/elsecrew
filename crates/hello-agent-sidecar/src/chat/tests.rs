@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent_runtime::{AgentRuntime, FakeScenario, RunIdentity};
+use hello_agent_core::agent_adapter::MAX_AGENT_EVENT_BYTES;
 use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
 use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use std::fs;
@@ -616,6 +617,64 @@ fn initial_message_id(fixture: &Fixture, chat_id: &str) -> String {
         .as_str()
         .unwrap()
         .to_string()
+}
+
+fn start_exact_actual_scenario(
+    fixture: &mut Fixture,
+    scenario: FakeScenario,
+    request: &str,
+) -> (AgentRuntime, Value, String) {
+    let snapshot = fixture.snapshot(&format!("{request}_snapshot"));
+    let chat = fixture.create_exact_claude_chat(
+        &snapshot,
+        "provider boundary fixture",
+        &format!("{request}_chat"),
+    );
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let message_id = initial_message_id(fixture, chat_id);
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), scenario);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let started = runtime
+        .start_agent(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            AgentRunStartRequestV1 {
+                chat_id: chat_id.into(),
+                role_id: "coding".into(),
+                input_message_ids: vec![message_id],
+                expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+            },
+            &format!("{request}_start"),
+        )
+        .unwrap();
+    let run_id = started.result["runId"].as_str().unwrap().to_string();
+    (runtime, chat, run_id)
+}
+
+fn drain_actual_scenario(
+    fixture: &mut Fixture,
+    runtime: &mut AgentRuntime,
+    run_id: &str,
+) -> Vec<G5Event> {
+    let mut events = Vec::new();
+    for _ in 0..300 {
+        events.extend(
+            runtime
+                .poll(&mut fixture.storage, &mut fixture.projects)
+                .unwrap(),
+        );
+        if fixture
+            .storage
+            .projection_record("run", run_id)
+            .unwrap()
+            .unwrap()["record"]["state"]
+            != "running"
+        {
+            return events;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("actual provider fixture did not reach a durable terminal state")
 }
 
 #[test]
@@ -1411,6 +1470,188 @@ fn public_text_plus_one_is_not_stored_or_emitted_and_cleanly_fails_run() {
     assert_eq!(terminal["record"]["state"], "failed");
     assert_eq!(terminal["termination"]["outcome"], "cleanExit");
     assert_eq!(terminal["termination"]["processesProvenGone"], true);
+}
+
+#[test]
+fn real_provider_drain_accepts_exact_public_text_boundaries_before_rejecting_plus_one() {
+    for (scenario, expected_events, expected_state) in [
+        (FakeScenario::PublicTextExact, 1_u64, "succeeded"),
+        (FakeScenario::PublicAggregateExact, 16_u64, "succeeded"),
+        (FakeScenario::PublicAggregatePlusOne, 16_u64, "failed"),
+    ] {
+        let mut fixture = Fixture::new();
+        let (mut runtime, _chat, run_id) =
+            start_exact_actual_scenario(&mut fixture, scenario, "req_raw_boundary");
+        let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+        let terminal = fixture
+            .storage
+            .projection_record("run", &run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal["record"]["state"], expected_state);
+        assert_eq!(terminal["public_event_count"], expected_events);
+        assert_eq!(
+            terminal["public_text_bytes"],
+            expected_events * MAX_AGENT_EVENT_BYTES as u64
+        );
+        assert_eq!(
+            terminal["public_events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|event| event["text"].as_str().unwrap().len())
+                .collect::<Vec<_>>(),
+            vec![MAX_AGENT_EVENT_BYTES; expected_events as usize]
+        );
+        assert_eq!(
+            wire.iter()
+                .filter(|event| event.event == "agent.publicEvent")
+                .count(),
+            expected_events as usize
+        );
+        assert_eq!(wire.last().unwrap().payload["run"]["state"], expected_state);
+    }
+}
+
+#[test]
+fn provider_terminal_recovery_required_poisons_even_after_clean_exit_until_abandon() {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalRecoveryRequired,
+        "req_provider_recovery",
+    );
+    let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    assert_eq!(
+        wire.last().unwrap().payload["run"]["state"],
+        "recoveryRequired"
+    );
+
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run["record"]["state"], "recoveryRequired");
+    assert_eq!(run["termination"]["outcome"], "recoveryRequired");
+    assert_eq!(run["termination"]["processesProvenGone"], false);
+    assert!(run["termination"]["trackedProcesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|process| process["observedGone"] == true));
+    assert_eq!(run["termination"]["poisoned"], true);
+    assert_eq!(run["recovery"]["state"], "unresolved");
+    assert_eq!(run["recovery"]["source"], "actualAgent");
+    let durable_chat = fixture
+        .storage
+        .projection_record("chat", chat["chatId"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_chat["record"]["state"], "recoveryRequired");
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], run_id);
+    assert_eq!(lock["poisoned"], true);
+    assert_eq!(lock["recovery_required"], true);
+    assert_eq!(
+        fixture
+            .projects
+            .workspace_read_file(
+                &fixture.storage,
+                &address_from_chat(&chat).unwrap(),
+                "src/value.txt",
+            )
+            .unwrap_err()
+            .kind,
+        "recoveryRequired"
+    );
+    assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    assert!(fixture
+        .chats
+        .list_recoveries(&fixture.storage, None, 10)
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let recovery = run["recovery"].clone();
+    let request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id,"expectedRevision":1,"resolution":"abandon"
+    });
+    let inspect_request = json!({
+        "recoveryId":recovery["recoveryId"],"chatId":chat["chatId"],
+        "taskId":chat["taskId"],"projectId":chat["projectId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "runId":run_id
+    });
+    assert_eq!(
+        runtime
+            .inspect_recovery(&fixture.storage, &inspect_request)
+            .unwrap()["state"],
+        "unresolved"
+    );
+    let resolved = runtime
+        .resolve_recovery(
+            &mut fixture.storage,
+            &mut fixture.projects,
+            &request,
+            "req_provider_recovery_resolve",
+        )
+        .unwrap();
+    assert_eq!(resolved["outcome"], "resolvedAbandoned");
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], Value::Null);
+    assert_eq!(lock["poisoned"], false);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
+}
+
+#[test]
+fn provider_terminal_failed_stays_non_poisoned_failed() {
+    let mut fixture = Fixture::new();
+    let (mut runtime, chat, run_id) = start_exact_actual_scenario(
+        &mut fixture,
+        FakeScenario::ProviderTerminalFailed,
+        "req_provider_failed",
+    );
+    let wire = drain_actual_scenario(&mut fixture, &mut runtime, &run_id);
+    assert_eq!(wire.last().unwrap().payload["run"]["state"], "failed");
+    let run = fixture
+        .storage
+        .projection_record("run", &run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run["record"]["state"], "failed");
+    assert_eq!(run["termination"]["outcome"], "cleanExit");
+    assert_eq!(run["termination"]["poisoned"], false);
+    assert_eq!(run["recovery"], Value::Null);
+    let lock = fixture
+        .storage
+        .projection_record(
+            "lock",
+            &format!("lock_{}", chat["worktreeId"].as_str().unwrap()),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(lock["writer_run_id"], Value::Null);
+    assert_eq!(lock["poisoned"], false);
+    assert!(fixture.storage.blocker_ids().unwrap().is_empty());
 }
 
 #[test]

@@ -29,6 +29,12 @@
 - **골든·검증**: null/non-null valid와 missing field, recovery 누락·orphan, 모든 identity/run/source/reason/state/poison/namespace mismatch, non-recovery+recovery, 복수 recoveryRequired ambiguity, legacy member를 고정한 공용 fixture를 추가했다. focused Node 9개, 전체 Node 170개, focused protocol 8개와 전체 protocol 31개, TypeScript no-emit, Rust fmt, owned 변경 경고를 포함한 protocol clippy와 `git diff --check`를 통과했다. strict protocol clippy는 변경 전 범위 밖 needless lifetime 2건과 collapsible-if 1건만 보고해 해당 세 lint를 허용한 동일 명령으로 변경 범위를 확인했다.
 - **다음 할 일·경계**: 이 계약 commit을 독립 리뷰한 뒤 sidecar가 agent detail에 durable actual recovery를 채우고 Electron/UI가 그 ID로 inspect/resolve하도록 별도 소비자 작업을 연다. 새 method/channel/capability/event는 없으며 실제 provider·인증·사용자 프로젝트·Windows는 실행하지 않았고 merge·push도 하지 않았다.
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C sidecar 독립 리뷰 P1 수정)
+
+- **raw framing과 공개 text 한도 분리**: provider JSONL read는 core의 framing 포함 128 KiB observation line ceiling을 사용하고, normalized public text는 계속 event당 64 KiB로 제한한다. 실제 launcher→drain→core classifier→SQLite/TeamMessage 경로에서 64 KiB 한 건과 16×64 KiB=1 MiB를 허용하고 aggregate +1 byte는 raw framing에 가려지지 않은 채 fail-closed 거부한다. newline 포함 exact/+1 framing 회귀와 기존 core total observation 한도도 유지했다.
+- **provider recovery terminal 보존**: explicit `recoveryRequired` terminal은 child exit 0과 OS tree gone 관찰이 있어도 `failed`로 낮추거나 writer lock을 해제하지 않는다. 개별 gone 증거는 abandon 재확인용으로 보존하되 public termination proof는 불확실로 두고 run/chat/workspace/writer lock과 actual recovery를 함께 poisoned 상태로 저장한 뒤에만 terminal state event를 보낸다. 실제 stdio fixture에서 legacy recovery namespace 비노출, actual inspect, run/lock quit blocker, exact abandon 뒤 run canceled·chat discarded·lock release와 quit 허용을 확인했다. 명시적 provider `failed`와 auth/malformed 경로는 기존 non-poisoned failed/fail-closed 동작을 유지한다.
+- **검증·경계**: sidecar 전체 74 passed·1 ignored와 stdio process 10 passed, core 82 passed, protocol 30 passed, strict sidecar clippy, Rust 2021 scoped rustfmt, `git diff --check`를 통과했다. 일반 `--stdio`의 exact G5, 공개 wire, 실제 Claude/Codex CLI·인증·사용자 프로젝트·network·Windows는 변경하거나 실행하지 않았다. 다음은 수정 commit의 독립 재리뷰와 최신 통합 게이트다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C fake provider sidecar 소비)
 
 - **test-only provider 소비**: 일반 제품 `--stdio`의 exact G5/no-provider 표면은 그대로 두고 `--stdio-agent-fixture`만 순수 core provider API를 소비한다. capability는 bounded 주입 관찰을 cache/refresh하고 start마다 executable closure·version·auth·catalog·immutable role profile을 새로 관찰한다. Claude `claude-opus-5` exact selector만 fake positive이며 Codex `argvOnly`와 기존 `opus`/`sol` alias는 silent fallback 없이 `exactModelUnavailable`로 run·spawn·writer lock 0에서 차단한다.

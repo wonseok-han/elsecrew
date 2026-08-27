@@ -177,6 +177,13 @@ where
             }
             "provider-auth-failure" => agent_runtime::FakeScenario::ProviderAuthFailure,
             "provider-terminal-malformed" => agent_runtime::FakeScenario::ProviderTerminalMalformed,
+            "public-text-exact" => agent_runtime::FakeScenario::PublicTextExact,
+            "public-aggregate-exact" => agent_runtime::FakeScenario::PublicAggregateExact,
+            "public-aggregate-plus-one" => agent_runtime::FakeScenario::PublicAggregatePlusOne,
+            "provider-terminal-failed" => agent_runtime::FakeScenario::ProviderTerminalFailed,
+            "provider-terminal-recovery-required" => {
+                agent_runtime::FakeScenario::ProviderTerminalRecoveryRequired
+            }
             _ => {
                 return Err(SidecarError::new(
                     "invalidArguments",

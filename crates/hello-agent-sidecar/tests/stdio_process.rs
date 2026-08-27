@@ -496,6 +496,262 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_provider_recovery_terminal_blocks_quit_until_exact_agent_abandon() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let data = root.path().join("data");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("file.txt"), "fixture").unwrap();
+    git(&source, &["init", "-q"]);
+    git(&source, &["add", "."]);
+    git(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .args([
+            "--stdio-agent-fixture",
+            "provider-terminal-recovery-required",
+        ])
+        .current_dir(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_open",
+        "project.open",
+        serde_json::json!({"selectedPath":source}),
+    );
+    let EnvelopeV1::Response(open) = receive_envelope(&envelopes) else {
+        panic!("open")
+    };
+    let project_id = open.result.unwrap()["projectId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_defaults",
+        "project.getRoleSettings",
+        serde_json::json!({"projectId":project_id}),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_settings",
+        "project.updateRoleSettings",
+        serde_json::json!({
+            "projectId":project_id,"expectedRevision":1,
+            "roles":[
+                {"roleId":"planning","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"},
+                {"roleId":"coding","runtime":"claude-code","modelSelector":"claude-opus-5","reasoningEffort":null,"permission":"workspaceWrite"},
+                {"roleId":"review","runtime":"codex","modelSelector":"sol","reasoningEffort":"medium","permission":"readOnly"}
+            ]
+        }),
+    );
+    assert!(matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.ok));
+    let prepared = prepare_workspace(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        &project_id,
+        "req_recovery_prepare",
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_chat",
+        "chat.create",
+        serde_json::json!({
+            "preparationId":prepared["preparationId"],"projectId":project_id,
+            "worktreeId":prepared["manifest"]["worktreeId"],
+            "workspaceIdentity":prepared["manifest"]["workspaceIdentity"],
+            "goal":"provider recovery terminal","expectedSettingsRevision":2
+        }),
+    );
+    let EnvelopeV1::Response(chat_response) = receive_envelope(&envelopes) else {
+        panic!("chat")
+    };
+    let chat = chat_response.result.unwrap();
+    let EnvelopeV1::Event(initial) = receive_envelope(&envelopes) else {
+        panic!("initial message")
+    };
+    let message_id = initial.payload["messageId"].as_str().unwrap().to_string();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_capability",
+        "agent.getCapabilities",
+        serde_json::json!({"runtime":"claude-code","refresh":true}),
+    );
+    let EnvelopeV1::Response(capability) = receive_envelope(&envelopes) else {
+        panic!("capability")
+    };
+    let capability = capability.result.unwrap();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_start",
+        "run.startAgent",
+        serde_json::json!({
+            "chatId":chat["chatId"],"roleId":"coding","inputMessageIds":[message_id],
+            "expectedCapabilityFingerprint":capability["fingerprint"]
+        }),
+    );
+    let EnvelopeV1::Response(accepted) = receive_envelope(&envelopes) else {
+        panic!("accepted")
+    };
+    let run_id = accepted.result.unwrap()["runId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let EnvelopeV1::Event(running) = receive_envelope(&envelopes) else {
+        panic!("running")
+    };
+    assert_eq!(running.payload["run"]["state"], "running");
+    let EnvelopeV1::Event(terminal) = receive_envelope(&envelopes) else {
+        panic!("terminal")
+    };
+    assert_eq!(terminal.payload["run"]["state"], "recoveryRequired");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_detail",
+        "chat.get",
+        serde_json::json!({"chatId":chat["chatId"],"afterEventSequence":0,"cursor":null,"limit":50}),
+    );
+    let EnvelopeV1::Response(detail) = receive_envelope(&envelopes) else {
+        panic!("detail")
+    };
+    let detail = detail.result.unwrap();
+    assert_eq!(detail["agentRuns"][0]["state"], "recoveryRequired");
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_quit_blocked",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(blocked) = receive_envelope(&envelopes) else {
+        panic!("blocked quit")
+    };
+    let blocked = blocked.result.unwrap();
+    assert_eq!(blocked["safeToQuit"], false);
+    assert!(blocked["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|blocker| blocker.as_str() == Some(&format!("run:{run_id}"))));
+    assert!(blocked["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|blocker| blocker
+            .as_str()
+            .is_some_and(|value| value.starts_with("lock:"))));
+
+    let recovery_id = detail["agentRuns"][0]["recovery"]["recoveryId"]
+        .as_str()
+        .map(str::to_string);
+    assert!(
+        recovery_id.is_none(),
+        "chat.get must not widen the run record"
+    );
+    let recovery_id = format!(
+        "agent_recovery_{}",
+        run_id.strip_prefix("agent_run_").unwrap()
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_inspect",
+        "recovery.inspectAgent",
+        serde_json::json!({
+            "recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],
+            "projectId":chat["projectId"],"worktreeId":chat["worktreeId"],
+            "workspaceIdentity":chat["workspaceIdentity"],"runId":run_id
+        }),
+    );
+    let EnvelopeV1::Response(inspected) = receive_envelope(&envelopes) else {
+        panic!("actual recovery inspect")
+    };
+    let inspected = inspected.result.unwrap();
+    assert_eq!(inspected["state"], "unresolved");
+    assert_eq!(inspected["poisoned"], true);
+
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_legacy_list",
+        "recovery.list",
+        serde_json::json!({"cursor":null,"limit":10}),
+    );
+    let EnvelopeV1::Response(legacy) = receive_envelope(&envelopes) else {
+        panic!("legacy list")
+    };
+    assert!(legacy.result.unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_resolve",
+        "recovery.resolveAgent",
+        serde_json::json!({
+            "recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],
+            "projectId":chat["projectId"],"worktreeId":chat["worktreeId"],
+            "workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,
+            "expectedRevision":1,"resolution":"abandon"
+        }),
+    );
+    let EnvelopeV1::Response(resolved) = receive_envelope(&envelopes) else {
+        panic!("resolved")
+    };
+    assert_eq!(resolved.result.unwrap()["outcome"], "resolvedAbandoned");
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_recovery_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(quit) = receive_envelope(&envelopes) else {
+        panic!("quit")
+    };
+    assert_eq!(quit.result.unwrap()["safeToQuit"], true);
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
 #[test]
 fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
     let root = tempfile::tempdir().expect("temporary directory");
