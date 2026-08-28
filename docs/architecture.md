@@ -160,10 +160,10 @@
 
 ## 9. M5 G1~G5C 전환 골격·채팅 작업대
 
-M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대, 기존 G5 fixture 실행·복구와 테스트 전용 G5A~G5C fake actual-agent의 normalized public/terminal event·자원 예산·provider 발견/실행 전 검증·재시작 안전 복구 수직 흐름까지 구현됐다. G5D D1A는 기존 v1 원장을 보존하는 additive SQLite storage schema v2와 개인정보 없는 내부 사용량 상태 코어를 추가했다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
+M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대, 기존 G5 fixture 실행·복구와 테스트 전용 G5A~G5C fake actual-agent의 normalized public/terminal event·자원 예산·provider 발견/실행 전 검증·재시작 안전 복구 수직 흐름까지 구현됐다. G5D D1A·D1B는 기존 v1 원장을 보존하는 additive SQLite storage schema v2, 개인정보 없는 내부 사용량 상태, 명시적으로만 호출하는 무삭제 lifetime materialization을 추가했다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
 
 - `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다
-- `crates/hello-agent-sidecar`: 번들 SQLite의 단일 owner인 `--stdio` Rust 프로세스. G5는 프로젝트별 역할 설정을 revision CAS로 저장하고, 채팅 생성 시 역할·런타임·모델·추론 수준·권한 snapshot을 불변 기록으로 고정한다. 여러 채팅과 공개 `TeamMessage`·실행·복구 원장은 재시작 가능한 projection으로 남는다. 시작 시 exact v1 schema에서만 additive storage v2 DDL을 transaction 적용하며 v1 행·append-only trigger를 그대로 보존한다. 내부 상태는 DB/page/WAL·ledger·projection 집계만 계산하고 raw 대화·provider 출력·인증·경로를 싣지 않는다
+- `crates/hello-agent-sidecar`: 번들 SQLite의 단일 owner인 `--stdio` Rust 프로세스. G5는 프로젝트별 역할 설정을 revision CAS로 저장하고, 채팅 생성 시 역할·런타임·모델·추론 수준·권한 snapshot을 불변 기록으로 고정한다. 여러 채팅과 공개 `TeamMessage`·실행·복구 원장은 재시작 가능한 projection으로 남는다. 시작 시 exact v1 schema에서만 additive storage v2 DDL을 transaction 적용하며 v1 행·append-only trigger를 그대로 보존한다. 내부 상태는 DB/page/WAL·ledger·projection 집계만 계산하고 raw 대화·provider 출력·인증·경로를 싣지 않는다. 명시적 lifetime materialization은 한 transaction에서 operation receipt, 공개 chat message, prepared workspace와 aggregate baseline을 만들고 replay·namespace·recovery 동등성을 확인한 뒤에만 ready로 바꾸며 event를 삭제하지 않는다. 아직 startup/background/wire에는 연결하지 않는다
 - 채팅 준비는 기존 active/bound snapshot을 재사용하지 않는다. `workspace.prepareChat`은 매번 새 `preparationId/worktreeId/workspaceIdentity`의 unbound standalone snapshot을 만들고, `chat.create`가 설정 revision·최초 사용자 메시지와 함께 한 transaction에서 exact preparation을 bind한다. 실패 정리는 그 준비의 네 ID가 모두 맞을 때만 `workspace.abandonPrepared`로 terminal 표시하며 물리 삭제하지 않는다
 - 채팅이 소유한 tree/read/save/watch/diff/close는 V3의 `chatId/projectId/worktreeId/workspaceIdentity` 네 ID를 매 요청·응답·event에서 교차 검증한다. save continuation은 같은 네 ID와 `saveId`가 모두 일치해야 하며, 현재 선택을 추론하거나 다른 채팅의 작업 복사본으로 fallback하지 않는다. G4 project-only V2 경로는 호환용으로 유지한다
 - G5 legacy 실행은 macOS 결정적 fixture와 `M5BridgeV3`를 유지한다. 별도 G5A fake actual-agent 실행은 accepted response를 event보다 먼저 반환하고, full chat/task/project/worktree/workspace/run/role/fingerprint에 결속된 `status|question|final`만 `agent.publicEvent`로 발행한다. private vendor event는 sidecar에서 버리고 actual-agent raw `run.event`·`run.finished`·`chat.eventAppended` carrier는 Electron에서 fail-closed 차단한다. 두 실행 원장과 recovery namespace는 서로 섞지 않는다
@@ -180,7 +180,7 @@ G5 기준선은 exact 통합 commit `014bd987464d39674a5f531765051f60e63b5ecb`�
 
 ## 10. 미해결 사항
 
-- **actual-agent 전체 수명 보존**: G5D D0A·D1A가 additive storage v2 계약·마이그레이션과 내부 사용량 관찰 코어는 구현했지만, ready 이후 materialization·무손실 compaction·제품 `storage.status` 노출과 여러 세션·채팅에 걸친 용량 threshold는 아직 없다. 보존 기간과 physical cleanup/삭제 정책은 사용자 결정 전 비활성이며, 실제 provider 활성화 전에 후속 G5D gate로 닫아야 한다.
+- **actual-agent 전체 수명 보존**: G5D D0A~D1B가 additive storage v2 계약·마이그레이션, 내부 사용량 관찰과 호출형 무삭제 materialization까지 구현했지만, 전체 원장을 메모리에 읽는 현재 구현의 배치·상한·취소 계약, 실제 무손실 compaction, 제품 `storage.status` 노출과 여러 세션·채팅에 걸친 용량 threshold는 아직 없다. 보존 기간과 physical cleanup/삭제 정책은 사용자 결정 전 비활성이며, 실제 provider 활성화 전에 후속 G5D gate로 닫아야 한다.
 - **코드 서명**: 미서명 배포 시 SmartScreen/Gatekeeper 경고. 베타는 미서명 + 통과 안내 이미지로 진행, 정식 릴리즈 전 비용(연 $250~400) 결정 — 기획 문서 참고.
 - **실기기 출시 검증**: 깨끗한 macOS 계정과 Windows 기기에서 설치·로그인·오프라인·권한 오류·한글 경로 시나리오 확인.
 - **업데이트 채널**: 현재 앱은 에이전트 최신 버전만 확인한다. Hello, Agent 자체 업데이트와 레시피 원격 갱신 방식은 첫 베타 이후 결정.
