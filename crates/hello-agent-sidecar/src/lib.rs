@@ -6,6 +6,8 @@ mod agent_runtime;
 mod chat;
 mod project;
 mod storage;
+#[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
+mod storage_lifetime;
 
 use hello_agent_core as _;
 use hello_agent_protocol::agent_adapter_v1::G5A_CAPABILITIES_V1;

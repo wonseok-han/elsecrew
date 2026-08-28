@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D1A schema migration·내부 status)
+
+- **additive schema v2**: `Storage::open`이 exact v1 schema를 먼저 확인한 뒤 storage-v2 golden DDL을 한 transaction으로 적용하고, v1 `schema_meta=1`·모든 원장/projection/append-only trigger를 그대로 둔 채 v2 table/index/metadata 전체를 exact 검증한다. 재시작은 idempotent하며 부분·추가·index·metadata 변조는 fail-closed다. 시작 중 record backfill/materialization/deletion은 하지 않는다.
+- **privacy-safe 내부 status**: 아직 wire에 광고·dispatch하지 않는 `Storage` 내부 상태 계산을 추가했다. SQLite page/file/WAL bytes, events count/canonical payload UTF-8 bytes, `projects/chats/runs/locks` projection snapshot row count/UTF-8 bytes, 완료된 maintenance job 상태만 durable DB 사실에서 집계한다. volume capacity는 새 의존성 없이 `unavailable/null`, physical cleanup은 `false/userPolicyNotConfigured`이며 raw chat/provider text·token/auth·absolute path를 반환하거나 오류에 싣지 않는다. app instance, filesystem worktree inventory, materialization 전 v2 row는 snapshot 집계에서 제외한다.
+- **검증·경계**: focused storage 15개와 sidecar 전체 86개+stdio 10개(1 ignored), 소유 파일 rustfmt, known baseline lint 4종을 제외한 sidecar strict clippy, `git diff --check`를 통과했다. exact strict clippy는 이번 범위 밖 core `proctree.rs` 2건과 protocol `run_recovery_v1.rs`·`workspace_v1.rs`·`lib.rs` 3건에서 실패했고, workspace fmt도 기존 `src-tauri/src/detect.rs`·`login.rs` drift만 보고했다. `storage.status` wire/V6, materialization, compaction, threshold/admission, cleanup/삭제는 D1A에 포함하지 않았으며 다음 독립 리뷰와 후속 wave가 필요하다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D receipt 무결성 재리뷰 수정)
 
 - **canonical payload 직접 검증**: Rust와 TypeScript operation receipt validator가 `canonicalPayloadJson`을 직접 parse·canonicalize하고 기존 v1 canonical JSON과 byte-exact인지 확인한다. 같은 원문 bytes의 SHA-256도 직접 재계산해 metadata 형식만 맞는 손상 digest를 거부한다.

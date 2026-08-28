@@ -1,5 +1,6 @@
 use super::*;
 use hello_agent_protocol::storage_v1::canonical_json_v1;
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -65,6 +66,196 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 
     migrate(&mut connection, MIGRATION_V1).expect("retry migration");
     verify_schema(&connection).expect("schema ready");
+}
+
+#[test]
+fn fresh_database_applies_exact_additive_v2_and_reopens_idempotently() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).expect("fresh storage");
+    verify_schema(&storage.connection).expect("v1 schema");
+    verify_schema_v2(&storage.connection).expect("v2 schema");
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT schema_version FROM schema_meta WHERE singleton=1;",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT storage_schema_version, materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                [],
+                |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap(),
+        (2, "pending".to_string())
+    );
+    drop(storage);
+
+    let reopened = Storage::open(&path).expect("idempotent reopen");
+    verify_schema_v2(&reopened.connection).expect("reopened v2 schema");
+}
+
+#[test]
+fn populated_v1_migrates_without_changing_rows_triggers_or_materializing() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("storage");
+    storage
+        .append_event(&event(
+            "evt_project_v1",
+            "op_project_v1",
+            "project",
+            "project_v1",
+            1,
+            json!({"canonical_path":"/fixture/project","project_id":"project_v1"}),
+            "2026-08-28T02:00:00Z",
+        ))
+        .unwrap();
+    storage
+        .register_app_instance(&ready("sidecar_v1"))
+        .expect("app instance");
+    drop_v2_schema(&storage.connection);
+    let tables = [
+        "schema_meta",
+        "app_instances",
+        "events",
+        "projects",
+        "chats",
+        "runs",
+        "locks",
+    ];
+    let before = tables
+        .iter()
+        .map(|table| (*table, table_rows(&storage.connection, table)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert!(storage
+        .connection
+        .execute("DELETE FROM events;", [])
+        .is_err());
+    drop(storage);
+
+    let mut storage = Storage::open(&path).expect("migrate populated v1");
+    for table in tables {
+        assert_eq!(
+            table_rows(&storage.connection, table),
+            before[table],
+            "{table}"
+        );
+    }
+    assert!(storage
+        .connection
+        .execute("UPDATE events SET request_id='tamper';", [])
+        .is_err());
+    assert_eq!(
+        storage
+            .append_event(&event(
+                "evt_project_v1_second",
+                "op_project_v1_second",
+                "project",
+                "project_v1",
+                2,
+                json!({"canonical_path":"/fixture/project","project_id":"project_v1"}),
+                "2026-08-28T02:00:02Z",
+            ))
+            .unwrap(),
+        AppendOutcome::Committed
+    );
+    let empty_v2: u32 = storage
+        .connection
+        .query_row(
+            "SELECT (SELECT count(*) FROM ledger_baselines) + \
+                    (SELECT count(*) FROM operation_receipts) + \
+                    (SELECT count(*) FROM chat_messages) + \
+                    (SELECT count(*) FROM prepared_workspaces) + \
+                    (SELECT count(*) FROM maintenance_jobs);",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(empty_v2, 0, "startup must not backfill or materialize");
+}
+
+#[test]
+fn v2_migration_failure_rolls_back_and_partial_or_tampered_schema_fails_closed() {
+    let (_root, path) = database();
+    let mut connection = Connection::open(&path).unwrap();
+    configure_connection(&connection).unwrap();
+    migrate(&mut connection, MIGRATION_V1).unwrap();
+    let invalid = MIGRATION_V2.replacen("COMMIT;", "INVALID SQL;\nCOMMIT;", 1);
+    let error = execute_migration(&mut connection, &invalid, "v2")
+        .expect_err("invalid v2 migration must fail");
+    assert_eq!(error.kind(), "migrationFailed");
+    let v2_objects: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('storage_schema_meta','ledger_baselines','operation_receipts','chat_messages','prepared_workspaces','maintenance_jobs');",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(v2_objects, 0);
+    drop(connection);
+
+    let storage = Storage::open(&path).expect("retry valid migration");
+    storage
+        .connection
+        .execute_batch("DROP TABLE storage_schema_meta;")
+        .unwrap();
+    drop(storage);
+    let error = Storage::open(&path).err().expect("partial v2 must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+
+    let (_root, path) = database();
+    let mut connection = Connection::open(&path).unwrap();
+    configure_connection(&connection).unwrap();
+    migrate(&mut connection, MIGRATION_V1).unwrap();
+    connection
+        .execute("CREATE TABLE unexpected_partial_v2(value TEXT);", [])
+        .unwrap();
+    drop(connection);
+    let error = Storage::open(&path)
+        .err()
+        .expect("unexpected base object must fail before v2 mutation");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let connection = Connection::open(&path).unwrap();
+    let storage_meta_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='storage_schema_meta');",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!storage_meta_exists);
+
+    let (_root, path) = database();
+    let storage = Storage::open(&path).expect("fresh storage");
+    storage
+        .connection
+        .execute("DROP INDEX maintenance_jobs_status_created;", [])
+        .unwrap();
+    drop(storage);
+    let error = Storage::open(&path).err().expect("tampered v2 must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+
+    let (_root, path) = database();
+    let storage = Storage::open(&path).expect("fresh storage");
+    storage
+        .connection
+        .execute(
+            "UPDATE storage_schema_meta SET migrated_at='not-a-timestamp' WHERE singleton=1;",
+            [],
+        )
+        .unwrap();
+    drop(storage);
+    let error = Storage::open(&path)
+        .err()
+        .expect("tampered v2 metadata must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
 }
 
 #[test]
@@ -313,4 +504,34 @@ fn database_symlink_is_rejected_without_touching_target() {
     let error = Storage::open(&link).err().expect("symlink rejected");
     assert_eq!(error.kind(), "databasePathInvalid");
     assert_eq!(fs::read(&target).unwrap(), b"not a database");
+}
+
+fn drop_v2_schema(connection: &Connection) {
+    connection
+        .execute_batch(
+            "DROP TABLE maintenance_jobs;\
+             DROP TABLE prepared_workspaces;\
+             DROP TABLE chat_messages;\
+             DROP TABLE operation_receipts;\
+             DROP TABLE ledger_baselines;\
+             DROP TABLE storage_schema_meta;\
+             DROP INDEX chats_identity_project;",
+        )
+        .expect("remove additive v2 objects for v1 migration fixture");
+}
+
+fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {
+    let mut statement = connection
+        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid;"))
+        .expect("prepare table read");
+    let column_count = statement.column_count();
+    statement
+        .query_map([], |row| {
+            (0..column_count)
+                .map(|index| row.get(index))
+                .collect::<rusqlite::Result<Vec<SqlValue>>>()
+        })
+        .expect("query table")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("read table")
 }
