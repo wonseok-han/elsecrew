@@ -1,5 +1,6 @@
 -- G5D contract fixture only. The sidecar must verify the exact storage-v2
--- schema before executing this transaction and treat an exact storage-v3
+-- schema with materialization_state pending or ready before executing this
+-- transaction and treat an exact storage-v3
 -- schema as an idempotent no-op before this SQL is reached.
 -- This migration preserves every v1/v2 ledger, projection, materialized,
 -- maintenance, index, and trigger object. Only storage_schema_meta is rebuilt

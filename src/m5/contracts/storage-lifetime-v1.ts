@@ -53,6 +53,11 @@ export const STORAGE_MATERIALIZATION_STATES_V1 = [
   "ready",
   "failed",
 ] as const;
+export const STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1 = ["pending", "ready"] as const;
+export const STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1 = [
+  "materializing",
+  "failed",
+] as const;
 export const LOSSLESS_COMPACTION_STEPS_V1 = [
   "beginImmediate",
   "freezeCutoff",
@@ -124,6 +129,13 @@ export interface StorageLifetimeMaterializationJobV1 {
 export interface StorageLifetimeMaterializationSnapshotV1 {
   materializationState: StorageMaterializationStateV1;
   job: StorageLifetimeMaterializationJobV1 | null;
+}
+
+export interface StorageLifetimeV3PreflightPolicyV1 {
+  schema: "exactStorageV2";
+  allowedMaterializationStates: readonly ["pending", "ready"];
+  rejectedMaterializationStates: readonly ["materializing", "failed"];
+  timing: "beforeAnyDdlOrMutation";
 }
 
 export interface StorageLifetimeBatchPolicyV1 {
@@ -306,6 +318,28 @@ export interface OperationCandidateV1 {
 }
 
 export type ReceiptOperationDecisionV2 = "append" | "duplicateNoOp" | "conflict";
+
+export function validateStorageLifetimeV3PreflightPolicyV1(
+  value: unknown,
+): StorageLifetimeV3PreflightPolicyV1 {
+  const policy = requireObject(value, "storage lifetime v3 preflight policy");
+  exactKeys(policy, [
+    "schema", "allowedMaterializationStates", "rejectedMaterializationStates", "timing",
+  ]);
+  if (policy.schema !== "exactStorageV2"
+    || !exactStringArray(
+      policy.allowedMaterializationStates,
+      STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1,
+    )
+    || !exactStringArray(
+      policy.rejectedMaterializationStates,
+      STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1,
+    )
+    || policy.timing !== "beforeAnyDdlOrMutation") {
+    fail("storage lifetime v3 preflight policy is not fail-closed");
+  }
+  return policy as unknown as StorageLifetimeV3PreflightPolicyV1;
+}
 
 export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetimeCursorV1 {
   const cursor = requireObject(value, "storage lifetime cursor");

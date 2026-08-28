@@ -27,6 +27,8 @@ import {
   STORAGE_LIFETIME_SCHEMA_VERSION_V3,
   STORAGE_LIFETIME_TABLES_V2,
   STORAGE_LIFETIME_TABLES_V3,
+  STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1,
+  STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1,
   STORAGE_STATUS_BRIDGE_METHOD_V1,
   STORAGE_STATUS_BRIDGE_VERSION_V1,
   STORAGE_STATUS_METHOD_V1,
@@ -39,6 +41,7 @@ import {
   validateStorageLifetimeLifecycleTransitionV1,
   validateStorageLifetimeMaterializationJobV1,
   validateStorageLifetimeMaterializationPairV1,
+  validateStorageLifetimeV3PreflightPolicyV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
@@ -124,7 +127,12 @@ interface ManifestV3 {
     fromVersion: number;
     toVersion: number;
     mode: string;
-    preflight: string;
+    preflight: {
+      schema: string;
+      allowedMaterializationStates: string[];
+      rejectedMaterializationStates: string[];
+      timing: string;
+    };
     idempotency: string;
     partialOrExtraSchema: string;
     tablesAdded: string[];
@@ -132,7 +140,7 @@ interface ManifestV3 {
     preservedTables: string[];
     preservedIndexes: string[];
     preservedTriggers: string[];
-    freshState: string;
+    preservedMaterializationPairs: string[];
     downgradePolicy: string;
   };
   batching: Record<string, unknown> & { casesFile: string };
@@ -180,6 +188,11 @@ interface BatchingCases {
   invalidPairs: Array<{ name: string; value: unknown }>;
   invalidLifecycleTransitions: LifecycleTransitionCase[];
   futureSidecarRegression: { name: string; steps: string[] };
+  invalidPreflightMutations: Array<{
+    name: string;
+    path: string[];
+    replacement: unknown;
+  }>;
   invalidPolicyMutations: Array<{
     name: string;
     path: string[];
@@ -358,10 +371,24 @@ test("storage-v3 adds a dedicated singleton without aliasing compaction history"
   assert.equal(manifestV3.migration.predecessorMigrationFile, "../storage-v2/migration-v1-to-v2.sql");
   assert.equal(manifestV3.migration.predecessorMigrationMutationAllowed, false);
   assert.deepEqual(manifestV3.migration.tablesRebuilt, ["storage_schema_meta"]);
-  assert.equal(manifestV3.migration.preflight, "exactStorageV2RequiredBeforeBeginImmediate");
+  assert.deepEqual(
+    validateStorageLifetimeV3PreflightPolicyV1(manifestV3.migration.preflight),
+    manifestV3.migration.preflight,
+  );
+  assert.deepEqual(
+    manifestV3.migration.preflight.allowedMaterializationStates,
+    [...STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1],
+  );
+  assert.deepEqual(
+    manifestV3.migration.preflight.rejectedMaterializationStates,
+    [...STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1],
+  );
   assert.equal(manifestV3.migration.idempotency, "exactStorageV3NoOpBeforeMigrationSql");
   assert.equal(manifestV3.migration.partialOrExtraSchema, "failClosedBeforeMutation");
-  assert.equal(manifestV3.migration.freshState, "pendingWithAbsentJob");
+  assert.deepEqual(manifestV3.migration.preservedMaterializationPairs, [
+    "pending->pending+absent",
+    "ready->ready+absent",
+  ]);
   assert.equal(manifestV3.migration.downgradePolicy, "openQuestion");
   assert.equal(manifestV3.compactionBoundary.maintenanceJobsUnchanged, true);
   assert.equal(manifestV3.compactionBoundary.maintenanceJobKind, "losslessCompaction");
@@ -411,6 +438,10 @@ test("storage-v3 adds a dedicated singleton without aliasing compaction history"
     assert.deepEqual(normalizedRows(database, "storage_schema_meta"), [
       { ...metaBefore[0] as Record<string, unknown>, storage_schema_version: 3 },
     ]);
+    assert.deepEqual(
+      validateStorageLifetimeMaterializationPairV1({ materializationState: "pending", job: null }),
+      { materializationState: "pending", job: null },
+    );
     assert.deepEqual(
       namedSchemaSql(database, "table", manifestV3.migration.preservedTables),
       preservedTableSqlBefore,
@@ -478,6 +509,52 @@ test("storage-v3 adds a dedicated singleton without aliasing compaction history"
       database.prepare("SELECT storage_schema_version FROM storage_schema_meta").get()?.storage_schema_version,
       3,
     );
+
+    const readyPath = new DatabaseSync(join(temporaryRoot, "ready.sqlite3"), {
+      enableForeignKeyConstraints: false,
+    });
+    try {
+      readyPath.exec(readFileSync(resolve("tests/fixtures/m5/storage-v1/migration.sql"), "utf8"));
+      readyPath.exec(readFileSync(resolve(rootV3, manifestV3.migration.predecessorMigrationFile), "utf8"));
+      readyPath.exec("UPDATE storage_schema_meta SET materialization_state = 'ready';");
+      applyExactStorageV3Migration(readyPath, migrationSql, expectedV2Schema, expectedV3Schema);
+      assert.deepEqual(
+        { ...readyPath.prepare(`
+          SELECT materialization_state FROM storage_schema_meta WHERE singleton = 1
+        `).get() },
+        { materialization_state: "ready" },
+      );
+      assert.equal(
+        readyPath.prepare("SELECT count(*) AS count FROM lifetime_materialization_job").get()?.count,
+        0,
+      );
+    } finally {
+      readyPath.close();
+    }
+
+    for (const unsafeState of ["materializing", "failed"] as const) {
+      const unsafe = new DatabaseSync(join(temporaryRoot, `${unsafeState}.sqlite3`), {
+        enableForeignKeyConstraints: false,
+      });
+      try {
+        unsafe.exec(readFileSync(resolve("tests/fixtures/m5/storage-v1/migration.sql"), "utf8"));
+        unsafe.exec(readFileSync(resolve(rootV3, manifestV3.migration.predecessorMigrationFile), "utf8"));
+        unsafe.exec(`UPDATE storage_schema_meta SET materialization_state = '${unsafeState}';`);
+        const schemaBefore = schemaSignature(unsafe);
+        const dataBefore = databaseRowsSnapshot(unsafe);
+        assert.throws(() => {
+          applyExactStorageV3Migration(unsafe, migrationSql, expectedV2Schema, expectedV3Schema);
+        });
+        assert.equal(schemaSignature(unsafe), schemaBefore, unsafeState);
+        assert.equal(databaseRowsSnapshot(unsafe), dataBefore, unsafeState);
+        assert.equal(
+          unsafe.prepare("SELECT storage_schema_version FROM storage_schema_meta").get()?.storage_schema_version,
+          2,
+        );
+      } finally {
+        unsafe.close();
+      }
+    }
 
     for (const mutation of ["partial", "extra"] as const) {
       const path = join(temporaryRoot, `${mutation}.sqlite3`);
@@ -650,6 +727,15 @@ test("G5D batching fixes bounded keyset progress, cancellation, and atomic rollb
       fixture.name,
     );
   }
+  for (const fixture of batchingCases.invalidPreflightMutations) {
+    const invalid = structuredClone(manifestV3.migration.preflight);
+    setPath(invalid as Record<string, unknown>, fixture.path, fixture.replacement);
+    assert.throws(
+      () => validateStorageLifetimeV3PreflightPolicyV1(invalid),
+      undefined,
+      fixture.name,
+    );
+  }
   for (const fixture of batchingCases.invalidPolicyMutations) {
     const invalid = structuredClone(manifestV3.batching);
     setPath(invalid, fixture.path, fixture.replacement);
@@ -774,7 +860,7 @@ function applyExactStorageV3Migration(
   expectedV3Schema: string | null,
 ): void {
   const row = database.prepare(`
-    SELECT storage_schema_version
+    SELECT storage_schema_version, materialization_state
     FROM storage_schema_meta
     WHERE singleton = 1
   `).get();
@@ -784,10 +870,21 @@ function applyExactStorageV3Migration(
     }
     return;
   }
-  if (row?.storage_schema_version !== 2 || schemaSignature(database) !== expectedV2Schema) {
+  if (row?.storage_schema_version !== 2
+    || (row.materialization_state !== "pending" && row.materialization_state !== "ready")
+    || schemaSignature(database) !== expectedV2Schema) {
     throw new Error("storage-v2 schema is not exact");
   }
   database.exec(migrationSql);
+}
+
+function databaseRowsSnapshot(database: DatabaseSync): string {
+  const tables = database.prepare(`
+    SELECT name FROM sqlite_schema
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `).all().map((row) => row.name as string);
+  return JSON.stringify(tables.map((table) => ({ table, rows: normalizedRows(database, table) })));
 }
 
 function terminalMaintenanceRows(database: DatabaseSync): unknown[] {

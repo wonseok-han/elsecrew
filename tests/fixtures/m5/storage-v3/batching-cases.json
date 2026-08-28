@@ -428,6 +428,12 @@
       "publishReady"
     ]
   },
+  "invalidPreflightMutations": [
+    { "name": "preflight requires exact v2", "path": ["schema"], "replacement": "storageV2Compatible" },
+    { "name": "materializing cannot migrate", "path": ["allowedMaterializationStates"], "replacement": ["pending", "ready", "materializing"] },
+    { "name": "failed cannot migrate", "path": ["rejectedMaterializationStates"], "replacement": ["materializing"] },
+    { "name": "preflight runs before every mutation", "path": ["timing"], "replacement": "insideMigrationTransactionAfterRename" }
+  ],
   "invalidPolicyMutations": [
     { "name": "row guard cannot change", "path": ["guards", "maxSourceRowsPerBatch"], "replacement": 101 },
     { "name": "limits are not caller configurable", "path": ["guards", "callerConfigurable"], "replacement": true },

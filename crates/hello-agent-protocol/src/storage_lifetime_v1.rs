@@ -54,6 +54,8 @@ pub const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1: &str = "rowid";
 pub const STORAGE_LIFETIME_PHASES_V1: &[&str] =
     &["receipts", "messages", "workspaces", "baselines", "verify"];
 pub const STORAGE_LIFETIME_JOB_STATES_V1: &[&str] = &["pending", "failed"];
+pub const STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1: &[&str] = &["pending", "ready"];
+pub const STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1: &[&str] = &["materializing", "failed"];
 pub const LOSSLESS_COMPACTION_STEPS_V1: &[&str] = &[
     "beginImmediate",
     "freezeCutoff",
@@ -268,6 +270,15 @@ pub struct StorageLifetimeMaterializationSnapshotV1 {
     pub job: Option<StorageLifetimeMaterializationJobV1>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeV3PreflightPolicyV1 {
+    pub schema: String,
+    pub allowed_materialization_states: Vec<String>,
+    pub rejected_materialization_states: Vec<String>,
+    pub timing: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StorageLifetimeLifecycleOperationV1 {
@@ -279,6 +290,29 @@ pub enum StorageLifetimeLifecycleOperationV1 {
     Complete,
     Append,
     CatchUpReset,
+}
+
+pub fn validate_storage_lifetime_v3_preflight_policy_v1(
+    value: &Value,
+) -> Result<StorageLifetimeV3PreflightPolicyV1, StorageLifetimeContractError> {
+    let policy: StorageLifetimeV3PreflightPolicyV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let exact = policy.schema == "exactStorageV2"
+        && strings_equal(
+            &policy.allowed_materialization_states,
+            STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1,
+        )
+        && strings_equal(
+            &policy.rejected_materialization_states,
+            STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1,
+        )
+        && policy.timing == "beforeAnyDdlOrMutation";
+    if !exact {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v3 preflight policy is not fail-closed",
+        ));
+    }
+    Ok(policy)
 }
 
 #[derive(Deserialize)]

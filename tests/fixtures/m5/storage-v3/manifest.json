@@ -10,7 +10,18 @@
     "fromVersion": 2,
     "toVersion": 3,
     "mode": "exactV2PreflightThenTransactionalMetaRebuildAndDedicatedJobTable",
-    "preflight": "exactStorageV2RequiredBeforeBeginImmediate",
+    "preflight": {
+      "schema": "exactStorageV2",
+      "allowedMaterializationStates": [
+        "pending",
+        "ready"
+      ],
+      "rejectedMaterializationStates": [
+        "materializing",
+        "failed"
+      ],
+      "timing": "beforeAnyDdlOrMutation"
+    },
     "idempotency": "exactStorageV3NoOpBeforeMigrationSql",
     "partialOrExtraSchema": "failClosedBeforeMutation",
     "tablesAdded": [
@@ -45,7 +56,10 @@
       "events_are_append_only_update",
       "events_are_append_only_delete"
     ],
-    "freshState": "pendingWithAbsentJob",
+    "preservedMaterializationPairs": [
+      "pending->pending+absent",
+      "ready->ready+absent"
+    ],
     "downgradePolicy": "openQuestion"
   },
   "batching": {

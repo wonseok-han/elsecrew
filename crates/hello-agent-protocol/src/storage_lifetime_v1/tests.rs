@@ -36,7 +36,7 @@ struct MigrationContractV3 {
     from_version: u32,
     to_version: u32,
     mode: String,
-    preflight: String,
+    preflight: Value,
     idempotency: String,
     partial_or_extra_schema: String,
     tables_added: Vec<String>,
@@ -44,7 +44,7 @@ struct MigrationContractV3 {
     preserved_tables: Vec<String>,
     preserved_indexes: Vec<String>,
     preserved_triggers: Vec<String>,
-    fresh_state: String,
+    preserved_materialization_pairs: Vec<String>,
     downgrade_policy: String,
 }
 
@@ -204,6 +204,7 @@ struct BatchingCases {
     invalid_pairs: Vec<NamedValue>,
     invalid_lifecycle_transitions: Vec<LifecycleTransitionCase>,
     future_sidecar_regression: FutureSidecarRegression,
+    invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
     invalid_policy_mutations: Vec<InvalidPolicyMutation>,
 }
 
@@ -447,6 +448,17 @@ fn rust_validates_bounded_keyset_progress_cancellation_and_atomic_rollback() {
             case.name
         );
     }
+    validate_storage_lifetime_v3_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("fixed v3 preflight");
+    for case in cases.invalid_preflight_mutations {
+        let mut invalid = manifest.migration.preflight.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_v3_preflight_policy_v1(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
     for case in cases.invalid_policy_mutations {
         let mut invalid = manifest.batching.clone();
         set_value_path(&mut invalid, &case.path, case.replacement);
@@ -492,10 +504,8 @@ fn storage_v3_contract_separates_materialization_from_compaction_history() {
         manifest.migration.mode,
         "exactV2PreflightThenTransactionalMetaRebuildAndDedicatedJobTable"
     );
-    assert_eq!(
-        manifest.migration.preflight,
-        "exactStorageV2RequiredBeforeBeginImmediate"
-    );
+    validate_storage_lifetime_v3_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("exact v3 preflight policy");
     assert_eq!(
         manifest.migration.idempotency,
         "exactStorageV3NoOpBeforeMigrationSql"
@@ -538,7 +548,10 @@ fn storage_v3_contract_separates_materialization_from_compaction_history() {
             "events_are_append_only_delete"
         ]
     );
-    assert_eq!(manifest.migration.fresh_state, "pendingWithAbsentJob");
+    assert_eq!(
+        manifest.migration.preserved_materialization_pairs,
+        ["pending->pending+absent", "ready->ready+absent"]
+    );
     assert_eq!(manifest.migration.downgrade_policy, "openQuestion");
     assert!(manifest.compaction_boundary.maintenance_jobs_unchanged);
     assert_eq!(
