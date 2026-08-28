@@ -1920,6 +1920,188 @@ fn recovery_reservations_are_random_per_run_and_identityless_restart_is_immutabl
 }
 
 #[test]
+fn startup_backfills_pre_g5c_recovery_ids_without_replacing_public_records() {
+    let (mut unresolved_fixture, unresolved_chat, unresolved_run_id) =
+        durable_provider_recovery_fixture("req_legacy_unresolved_recovery");
+    let mut unresolved_projection = unresolved_fixture
+        .storage
+        .projection_record("run", &unresolved_run_id)
+        .unwrap()
+        .unwrap();
+    let unresolved_recovery = unresolved_projection["recovery"].clone();
+    let unresolved_recovery_id = unresolved_recovery["recoveryId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    unresolved_projection.remove("last_event_sequence");
+    unresolved_projection.remove("recovery_id_reservation");
+    unresolved_fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: unresolved_run_id.clone(),
+            operation_id: "op_test_pre_g5c_unresolved_recovery".into(),
+            request_id: None,
+            payload: unresolved_projection,
+        }])
+        .unwrap();
+
+    let mut unresolved_runtime = AgentRuntime::blocked();
+    unresolved_runtime
+        .recover_unclean_runs(
+            &mut unresolved_fixture.storage,
+            &mut unresolved_fixture.projects,
+        )
+        .unwrap();
+    unresolved_runtime
+        .validate_persisted_runs(&unresolved_fixture.storage)
+        .unwrap();
+    let backfilled_unresolved = unresolved_fixture
+        .storage
+        .projection_record("run", &unresolved_run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        backfilled_unresolved["recovery_id_reservation"],
+        unresolved_recovery_id
+    );
+    assert_eq!(backfilled_unresolved["recovery"], unresolved_recovery);
+    let unresolved_inspect = json!({
+        "recoveryId":unresolved_recovery_id,"chatId":unresolved_chat["chatId"],
+        "taskId":unresolved_chat["taskId"],"projectId":unresolved_chat["projectId"],
+        "worktreeId":unresolved_chat["worktreeId"],
+        "workspaceIdentity":unresolved_chat["workspaceIdentity"],"runId":unresolved_run_id
+    });
+    assert_eq!(
+        unresolved_runtime
+            .inspect_recovery(&unresolved_fixture.storage, &unresolved_inspect)
+            .unwrap(),
+        unresolved_recovery
+    );
+    let mut unresolved_resolve = unresolved_inspect;
+    unresolved_resolve["expectedRevision"] = Value::from(1);
+    unresolved_resolve["resolution"] = Value::String("abandon".into());
+    let resolved_from_legacy = unresolved_runtime
+        .resolve_recovery(
+            &mut unresolved_fixture.storage,
+            &mut unresolved_fixture.projects,
+            &unresolved_resolve,
+            "req_resolve_pre_g5c_unresolved",
+        )
+        .unwrap();
+    assert_eq!(resolved_from_legacy["outcome"], "resolvedAbandoned");
+    assert_eq!(
+        resolved_from_legacy["after"]["recoveryId"],
+        unresolved_recovery_id
+    );
+
+    let (mut resolved_fixture, resolved_chat, resolved_run_id) =
+        durable_provider_recovery_fixture("req_legacy_resolved_recovery");
+    let mut resolved_runtime = AgentRuntime::blocked();
+    let unresolved = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap()["recovery"]
+        .clone();
+    let resolved_recovery_id = unresolved["recoveryId"].as_str().unwrap().to_string();
+    let resolve_request = json!({
+        "recoveryId":resolved_recovery_id,"chatId":resolved_chat["chatId"],
+        "taskId":resolved_chat["taskId"],"projectId":resolved_chat["projectId"],
+        "worktreeId":resolved_chat["worktreeId"],
+        "workspaceIdentity":resolved_chat["workspaceIdentity"],"runId":resolved_run_id,
+        "expectedRevision":1,"resolution":"abandon"
+    });
+    let resolved_result = resolved_runtime
+        .resolve_recovery(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+            &resolve_request,
+            "req_prepare_pre_g5c_resolved",
+        )
+        .unwrap();
+    assert_eq!(resolved_result["outcome"], "resolvedAbandoned");
+    let resolved_recovery = resolved_result["after"].clone();
+    let mut resolved_projection = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    resolved_projection.remove("last_event_sequence");
+    resolved_projection.remove("recovery_id_reservation");
+    resolved_fixture
+        .storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: resolved_run_id.clone(),
+            operation_id: "op_test_pre_g5c_resolved_recovery".into(),
+            request_id: None,
+            payload: resolved_projection,
+        }])
+        .unwrap();
+
+    resolved_runtime
+        .recover_unclean_runs(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+        )
+        .unwrap();
+    resolved_runtime
+        .validate_persisted_runs(&resolved_fixture.storage)
+        .unwrap();
+    let backfilled_resolved = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        backfilled_resolved["recovery_id_reservation"],
+        resolved_recovery_id
+    );
+    assert_eq!(backfilled_resolved["recovery"], resolved_recovery);
+    let resolved_inspect = json!({
+        "recoveryId":resolved_recovery_id,"chatId":resolved_chat["chatId"],
+        "taskId":resolved_chat["taskId"],"projectId":resolved_chat["projectId"],
+        "worktreeId":resolved_chat["worktreeId"],
+        "workspaceIdentity":resolved_chat["workspaceIdentity"],"runId":resolved_run_id
+    });
+    assert_eq!(
+        resolved_runtime
+            .inspect_recovery(&resolved_fixture.storage, &resolved_inspect)
+            .unwrap(),
+        resolved_recovery
+    );
+    let mut repeat_resolve = resolved_inspect;
+    repeat_resolve["expectedRevision"] = Value::from(1);
+    repeat_resolve["resolution"] = Value::String("abandon".into());
+    let before_repeat = resolved_fixture
+        .storage
+        .projection_record("run", &resolved_run_id)
+        .unwrap()
+        .unwrap();
+    let repeat_error = resolved_runtime
+        .resolve_recovery(
+            &mut resolved_fixture.storage,
+            &mut resolved_fixture.projects,
+            &repeat_resolve,
+            "req_repeat_pre_g5c_resolved",
+        )
+        .unwrap_err();
+    assert_eq!(repeat_error.kind, "manifestMismatch");
+    assert!(repeat_error
+        .detail
+        .contains("only unresolved recovery can be resolved"));
+    assert_eq!(
+        resolved_fixture
+            .storage
+            .projection_record("run", &resolved_run_id)
+            .unwrap()
+            .unwrap(),
+        before_repeat
+    );
+}
+
+#[test]
 fn recovery_abandon_saga_reconciles_each_crash_boundary_and_mismatch_stays_poisoned() {
     let (mut fixture, chat, run_id) = durable_provider_recovery_fixture("req_saga_intent_fail");
     let run = fixture

@@ -186,10 +186,21 @@ impl AgentRuntime {
         projects: &mut ProjectManager,
     ) -> Result<(), SidecarError> {
         for projection in storage.projection_records("run")? {
-            if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND)
-                || projection
-                    .get("recovery")
-                    .is_some_and(|value| !value.is_null())
+            if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
+                continue;
+            }
+            let projection = if projection
+                .get("recovery")
+                .is_some_and(|value| !value.is_null())
+            {
+                ensure_recovery_reservation(storage, &projection)
+                    .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?
+            } else {
+                projection
+            };
+            if projection
+                .get("recovery")
+                .is_some_and(|value| !value.is_null())
                 || !projection
                     .get("state")
                     .and_then(Value::as_str)

@@ -9,11 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
-### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 원자성·재시작 조정)
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5C legacy recovery 예약 리뷰 수정)
 
-- **복구 ID·identityless 경계**: actual run 준비와 writer lock의 최초 SQLite transaction에 random `agent_recovery_<UUIDv4>` 예약을 함께 저장하고, 정상 불확실 종료·pre-release 실패·provider recovery·재시작 변환이 그 ID만 재사용한다. 구형 actual projection은 기존 recovery ID를 바꾸지 않으며, 예약이 없으면 별도 atomic reservation을 먼저 commit·재조회한 뒤 변환한다. 추적 process identity 없이 재시작한 run은 PID를 만들거나 EOF를 소멸 증거로 삼지 않고 `processIdentityUnavailable` unresolved recovery와 poisoned run/chat/workspace/lock을 남긴다. stale revision은 먼저 `revisionConflict`, matching 요청은 `identityUnavailable`·`after=null`이며 DB와 manifest를 바꾸지 않는다.
-- **restart-reconcilable abandon saga**: actual recovery 폐기는 더 이상 filesystem-first가 아니다. Phase A가 full run/workspace/recovery identity·expected revision·정확한 recoveryRequired manifest+SHA-256 digest를 내부 intent로 원자 저장하고 public ledger/lock은 계속 poisoned다. Phase B는 recoveryRequired→abandoned만 exact·idempotent하게 atomic write하며 active/missing/corrupt/symlink/identity/digest mismatch를 거부한다. Phase C는 abandoned manifest를 다시 확인한 뒤 run canceled·chat discarded·recovery resolved·writer release·intent 제거를 한 SQLite transaction으로 commit한다. startup은 unclean-run 변환 뒤 pending intent를 재개하고 mismatch면 잠금을 풀지 않는다.
-- **실패 주입·검증**: run별 예약 ID 차이/재시작 동일성/비파생, legacy reservation 저장 실패 후 retry, identityless chat hydration·revision 우선순위·byte-zero resolve, intent 전/후·filesystem 후·final commit 전/응답 전 crash, abandoned idempotence, manifest mismatch no-release를 회귀로 고정했다. sidecar 전체 77 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 32 passed, strict sidecar clippy, Rust 2021 rustfmt, `git diff --check`를 통과했다. 다음은 기능 commit의 독립 리뷰이며 실제 provider·인증·사용자 프로젝트·network·Windows는 실행하지 않았다.
+- **startup 보강 순서**: `source_kind=actualAgent` projection에 기존 non-null recovery가 있지만 내부 `recovery_id_reservation`이 없는 pre-G5C 상태를 skip·validation 전에 먼저 보강한다. 새 ID를 만들거나 기존 ID를 바꾸지 않고 public `recoveryId`를 같은 SQLite transaction에 저장한 뒤 persisted projection을 재조회하며, 이후 unresolved·resolved 상태의 기존 startup 분기를 그대로 따른다.
+- **회귀·롤오버**: pre-G5C unresolved recovery는 exact ID를 유지한 채 inspect와 abandon이 계속 동작하고, resolved recovery는 exact ID/public record를 유지한 채 inspect 가능·재해결 거부·byte-zero DB mutation임을 고정했다. 현재 파일에 홀로 남았던 2026-08-27 recovery 원자성 엔트리는 같은 날짜의 나머지 엔트리가 있는 `archive/history-2026-08.md`로 원문 그대로 이동해 날짜 경계를 복구했다.
+- **검증·경계**: focused startup 회귀 1 passed, sidecar 전체 78 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 32 passed, strict sidecar clippy `--no-deps`, Rust 2021 rustfmt, `git diff --check`를 통과했다. 실제 provider·인증·사용자 프로젝트·network·Windows는 실행하지 않았고 public wire·Electron·UI는 변경하지 않았다.
 
 ## 프로젝트 요약 (고정)
 

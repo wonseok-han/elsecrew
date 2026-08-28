@@ -12,6 +12,12 @@
 
 ## 워크로그 (최신이 위) — 2026-08-27 및 그 이전
 
+### 2026-08-27 · by GPT-5.6-Sol (M5 G5C recovery 원자성·재시작 조정)
+
+- **복구 ID·identityless 경계**: actual run 준비와 writer lock의 최초 SQLite transaction에 random `agent_recovery_<UUIDv4>` 예약을 함께 저장하고, 정상 불확실 종료·pre-release 실패·provider recovery·재시작 변환이 그 ID만 재사용한다. 구형 actual projection은 기존 recovery ID를 바꾸지 않으며, 예약이 없으면 별도 atomic reservation을 먼저 commit·재조회한 뒤 변환한다. 추적 process identity 없이 재시작한 run은 PID를 만들거나 EOF를 소멸 증거로 삼지 않고 `processIdentityUnavailable` unresolved recovery와 poisoned run/chat/workspace/lock을 남긴다. stale revision은 먼저 `revisionConflict`, matching 요청은 `identityUnavailable`·`after=null`이며 DB와 manifest를 바꾸지 않는다.
+- **restart-reconcilable abandon saga**: actual recovery 폐기는 더 이상 filesystem-first가 아니다. Phase A가 full run/workspace/recovery identity·expected revision·정확한 recoveryRequired manifest+SHA-256 digest를 내부 intent로 원자 저장하고 public ledger/lock은 계속 poisoned다. Phase B는 recoveryRequired→abandoned만 exact·idempotent하게 atomic write하며 active/missing/corrupt/symlink/identity/digest mismatch를 거부한다. Phase C는 abandoned manifest를 다시 확인한 뒤 run canceled·chat discarded·recovery resolved·writer release·intent 제거를 한 SQLite transaction으로 commit한다. startup은 unclean-run 변환 뒤 pending intent를 재개하고 mismatch면 잠금을 풀지 않는다.
+- **실패 주입·검증**: run별 예약 ID 차이/재시작 동일성/비파생, legacy reservation 저장 실패 후 retry, identityless chat hydration·revision 우선순위·byte-zero resolve, intent 전/후·filesystem 후·final commit 전/응답 전 crash, abandoned idempotence, manifest mismatch no-release를 회귀로 고정했다. sidecar 전체 77 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 32 passed, strict sidecar clippy, Rust 2021 rustfmt, `git diff --check`를 통과했다. 다음은 기능 commit의 독립 리뷰이며 실제 provider·인증·사용자 프로젝트·network·Windows는 실행하지 않았다.
+
 ### 2026-08-27 · by GPT-5.6-Sol (M5 G5C process identity 없는 recovery 계약)
 
 - **좁은 예외**: actual recovery reason에 `processIdentityUnavailable`을 추가했다. 이 reason만 `trackedProcesses=[]`를 허용하며 반드시 unresolved·poisoned·`resolvedAt=null`로 남고 `resolvedAbandoned`로 바뀔 수 없다. 기존 세 reason은 nonempty·unique process identity 증거와 기존 resolve 규칙을 그대로 유지한다.
