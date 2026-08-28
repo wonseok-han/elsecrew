@@ -179,6 +179,20 @@
         "compaction": { "lastAttemptStatus": "neverRun", "lastAttemptedAt": null, "lastSuccessfulAt": null },
         "physicalCleanup": { "enabled": true, "reason": "userPolicyNotConfigured" }
       }
+    },
+    {
+      "name": "response rejects failed compaction whose last success is in the future",
+      "target": "response",
+      "value": {
+        "schemaVersion": 1,
+        "collectedAt": "2026-08-28T04:00:00Z",
+        "database": { "logicalBytes": 1, "physicalBytes": 1, "walBytes": 0 },
+        "ledgerTail": { "eventCount": 1, "payloadBytes": 1 },
+        "snapshotAggregates": { "count": 0, "payloadBytes": 0 },
+        "pressureFacts": { "collectionStatus": "unavailable", "volumeCapacityBytes": null, "volumeAvailableBytes": null },
+        "compaction": { "lastAttemptStatus": "failed", "lastAttemptedAt": "2026-08-28T03:00:00Z", "lastSuccessfulAt": "2026-08-28T03:00:01Z" },
+        "physicalCleanup": { "enabled": false, "reason": "userPolicyNotConfigured" }
+      }
     }
   ]
 }

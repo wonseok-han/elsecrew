@@ -36,7 +36,20 @@ CREATE TABLE operation_receipts (
     aggregate_sequence INTEGER NOT NULL CHECK (aggregate_sequence >= 1),
     event_type TEXT NOT NULL,
     payload_schema_version INTEGER NOT NULL CHECK (payload_schema_version = 1),
-    canonical_payload_digest TEXT NOT NULL,
+    canonical_payload_json TEXT NOT NULL,
+    canonical_payload_digest_algorithm TEXT NOT NULL CHECK (
+        canonical_payload_digest_algorithm = 'sha256'
+    ),
+    canonical_payload_digest_version INTEGER NOT NULL CHECK (
+        canonical_payload_digest_version = 1
+    ),
+    canonical_payload_digest_format TEXT NOT NULL CHECK (
+        canonical_payload_digest_format = 'lowercaseHex64'
+    ),
+    canonical_payload_digest TEXT NOT NULL CHECK (
+        length(canonical_payload_digest) = 64
+        AND canonical_payload_digest NOT GLOB '*[^0-9a-f]*'
+    ),
     event_timestamp TEXT NOT NULL,
     materialized_at TEXT NOT NULL,
     UNIQUE (aggregate_type, aggregate_id, aggregate_sequence)
@@ -59,12 +72,17 @@ CREATE TABLE prepared_workspaces (
     worktree_id TEXT NOT NULL UNIQUE,
     workspace_identity TEXT NOT NULL UNIQUE,
     binding_state TEXT NOT NULL CHECK (binding_state IN ('unbound', 'bound', 'abandoned')),
-    bound_chat_id TEXT REFERENCES chats(chat_id),
+    bound_chat_id TEXT,
     canonical_record_json TEXT NOT NULL,
     record_digest TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    materialized_at TEXT NOT NULL
+    materialized_at TEXT NOT NULL,
+    CHECK (
+        (binding_state = 'bound' AND bound_chat_id IS NOT NULL)
+        OR (binding_state IN ('unbound', 'abandoned') AND bound_chat_id IS NULL)
+    ),
+    FOREIGN KEY (bound_chat_id, project_id) REFERENCES chats(chat_id, project_id)
 ) STRICT;
 
 CREATE TABLE maintenance_jobs (
@@ -79,6 +97,9 @@ CREATE TABLE maintenance_jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 ) STRICT;
+
+CREATE UNIQUE INDEX chats_identity_project
+ON chats(chat_id, project_id);
 
 CREATE INDEX ledger_baselines_cutoff
 ON ledger_baselines(aggregate_type, aggregate_id, cutoff_aggregate_sequence);

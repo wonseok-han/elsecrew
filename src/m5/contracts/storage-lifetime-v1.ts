@@ -14,12 +14,16 @@ export const STORAGE_LIFETIME_TABLES_V2 = [
   "maintenance_jobs",
 ] as const;
 export const STORAGE_LIFETIME_INDEXES_V2 = [
+  "chats_identity_project",
   "ledger_baselines_cutoff",
   "operation_receipts_aggregate_sequence",
   "chat_messages_chat_sequence",
   "prepared_workspaces_project_state",
   "maintenance_jobs_status_created",
 ] as const;
+export const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2 = "sha256" as const;
+export const OPERATION_RECEIPT_DIGEST_VERSION_V2 = 1 as const;
+export const OPERATION_RECEIPT_DIGEST_FORMAT_V2 = "lowercaseHex64" as const;
 export const LOSSLESS_COMPACTION_STEPS_V1 = [
   "beginImmediate",
   "freezeCutoff",
@@ -92,6 +96,37 @@ export interface StorageStatusV1 {
   };
 }
 
+export interface OperationReceiptV2 {
+  operationId: string;
+  eventId: string;
+  aggregateType: string;
+  aggregateId: string;
+  aggregateSequence: number;
+  eventType: string;
+  payloadSchemaVersion: 1;
+  canonicalPayloadJson: string;
+  canonicalPayloadDigestAlgorithm: typeof OPERATION_RECEIPT_DIGEST_ALGORITHM_V2;
+  canonicalPayloadDigestVersion: typeof OPERATION_RECEIPT_DIGEST_VERSION_V2;
+  canonicalPayloadDigestFormat: typeof OPERATION_RECEIPT_DIGEST_FORMAT_V2;
+  canonicalPayloadDigest: string;
+  eventTimestamp: string;
+}
+
+export interface OperationCandidateV1 {
+  event_id: string;
+  operation_id: string;
+  request_id: string | null;
+  aggregate_type: string;
+  aggregate_id: string;
+  aggregate_sequence: number;
+  event_type: string;
+  payload_schema_version: 1;
+  canonical_json_payload: string;
+  timestamp: string;
+}
+
+export type ReceiptOperationDecisionV2 = "append" | "duplicateNoOp" | "conflict";
+
 export function validateStorageStatusRequestV1(value: unknown): StorageStatusRequestV1 {
   const request = requireObject(value, "storage status request");
   exactKeys(request, ["schemaVersion"]);
@@ -145,6 +180,76 @@ export function validateStorageStatusV1(value: unknown): StorageStatusV1 {
   return status as unknown as StorageStatusV1;
 }
 
+export function classifyOperationAgainstReceiptV2(
+  receiptValue: unknown,
+  incomingValue: unknown,
+): ReceiptOperationDecisionV2 {
+  const receipt = validateOperationReceiptV2(receiptValue);
+  const incoming = validateOperationCandidateV1(incomingValue);
+  if (receipt.operationId !== incoming.operation_id) return "append";
+  return receipt.eventId === incoming.event_id
+    && receipt.aggregateType === incoming.aggregate_type
+    && receipt.aggregateId === incoming.aggregate_id
+    && receipt.aggregateSequence === incoming.aggregate_sequence
+    && receipt.eventType === incoming.event_type
+    && receipt.payloadSchemaVersion === incoming.payload_schema_version
+    && receipt.canonicalPayloadJson === incoming.canonical_json_payload
+    && receipt.eventTimestamp === incoming.timestamp
+    ? "duplicateNoOp"
+    : "conflict";
+}
+
+function validateOperationReceiptV2(value: unknown): OperationReceiptV2 {
+  const receipt = requireObject(value, "operation receipt");
+  exactKeys(receipt, [
+    "operationId", "eventId", "aggregateType", "aggregateId", "aggregateSequence",
+    "eventType", "payloadSchemaVersion", "canonicalPayloadJson",
+    "canonicalPayloadDigestAlgorithm", "canonicalPayloadDigestVersion",
+    "canonicalPayloadDigestFormat", "canonicalPayloadDigest", "eventTimestamp",
+  ]);
+  for (const field of ["operationId", "eventId", "aggregateType", "aggregateId", "eventType", "canonicalPayloadJson"] as const) {
+    if (typeof receipt[field] !== "string" || receipt[field].length === 0) {
+      fail(`operation receipt ${field} is required`);
+    }
+  }
+  if (requireSafeUnsigned(receipt.aggregateSequence, "operation receipt aggregateSequence") === 0) {
+    fail("operation receipt aggregateSequence must be positive");
+  }
+  if (receipt.payloadSchemaVersion !== 1
+    || receipt.canonicalPayloadDigestAlgorithm !== OPERATION_RECEIPT_DIGEST_ALGORITHM_V2
+    || receipt.canonicalPayloadDigestVersion !== OPERATION_RECEIPT_DIGEST_VERSION_V2
+    || receipt.canonicalPayloadDigestFormat !== OPERATION_RECEIPT_DIGEST_FORMAT_V2
+    || typeof receipt.canonicalPayloadDigest !== "string"
+    || !/^[0-9a-f]{64}$/.test(receipt.canonicalPayloadDigest)) {
+    fail("operation receipt digest metadata must be sha256 v1 lowercaseHex64");
+  }
+  requireTimestamp(receipt.eventTimestamp, "operation receipt eventTimestamp");
+  return receipt as unknown as OperationReceiptV2;
+}
+
+function validateOperationCandidateV1(value: unknown): OperationCandidateV1 {
+  const event = requireObject(value, "operation candidate");
+  exactKeys(event, [
+    "event_id", "operation_id", "request_id", "aggregate_type", "aggregate_id",
+    "aggregate_sequence", "event_type", "payload_schema_version",
+    "canonical_json_payload", "timestamp",
+  ]);
+  for (const field of ["event_id", "operation_id", "aggregate_type", "aggregate_id", "event_type", "canonical_json_payload"] as const) {
+    if (typeof event[field] !== "string" || event[field].length === 0) {
+      fail(`operation candidate ${field} is required`);
+    }
+  }
+  if (event.request_id !== null && (typeof event.request_id !== "string" || event.request_id.length === 0)) {
+    fail("operation candidate request_id must be null or non-empty");
+  }
+  if (requireSafeUnsigned(event.aggregate_sequence, "operation candidate aggregate_sequence") === 0) {
+    fail("operation candidate aggregate_sequence must be positive");
+  }
+  if (event.payload_schema_version !== 1) fail("operation candidate payload_schema_version must be 1");
+  requireTimestamp(event.timestamp, "operation candidate timestamp");
+  return event as unknown as OperationCandidateV1;
+}
+
 function validatePressureFacts(value: unknown): void {
   const facts = requireObject(value, "storage pressure facts");
   exactKeys(facts, ["collectionStatus", "volumeCapacityBytes", "volumeAvailableBytes"]);
@@ -184,6 +289,9 @@ function validateCompactionStatus(value: unknown): void {
     requireTimestamp(status.lastAttemptedAt, "compaction.lastAttemptedAt");
     if (status.lastSuccessfulAt !== null) {
       requireTimestamp(status.lastSuccessfulAt, "compaction.lastSuccessfulAt");
+      if (status.lastSuccessfulAt > status.lastAttemptedAt) {
+        fail("failed compaction lastSuccessfulAt cannot be later than lastAttemptedAt");
+      }
     }
     return;
   }

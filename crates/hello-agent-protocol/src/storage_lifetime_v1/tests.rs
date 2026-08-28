@@ -60,7 +60,28 @@ struct CompactionContract {
     cleanup_action_api_enabled: bool,
     operation_receipts_immutable: bool,
     chat_messages_immutable: bool,
+    operation_receipt: OperationReceiptContract,
     never_cleanup_states: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationReceiptContract {
+    cases_file: String,
+    immutable_fields: Vec<String>,
+    request_id_comparison: String,
+    payload_comparison: String,
+    digest: OperationReceiptDigestContract,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationReceiptDigestContract {
+    algorithm: String,
+    version: u32,
+    format: String,
+    role: String,
+    writer_must_recompute: bool,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +109,20 @@ struct InvalidStatusCase {
     name: String,
     target: String,
     value: Value,
+}
+
+#[derive(Deserialize)]
+struct OperationReceiptCases {
+    cases: Vec<OperationReceiptCase>,
+}
+
+#[derive(Deserialize)]
+struct OperationReceiptCase {
+    name: String,
+    namespace: String,
+    receipt: OperationReceiptV2,
+    incoming: LedgerEventV1,
+    expected: OperationDecisionV1,
 }
 
 #[test]
@@ -135,7 +170,11 @@ fn storage_v2_golden_is_additive_and_keeps_d0a_non_destructive() {
         assert!(sql.contains(&format!("CREATE TABLE {table} (")), "{table}");
     }
     for index in STORAGE_LIFETIME_INDEXES_V2 {
-        assert!(sql.contains(&format!("CREATE INDEX {index}")), "{index}");
+        assert!(
+            sql.contains(&format!("CREATE INDEX {index}"))
+                || sql.contains(&format!("CREATE UNIQUE INDEX {index}")),
+            "{index}"
+        );
     }
     let normalized = sql.to_ascii_uppercase();
     for forbidden in [
@@ -205,7 +244,7 @@ fn rust_validates_exact_privacy_safe_storage_status_cases() {
 
 #[test]
 fn lossless_compaction_boundary_preserves_history_and_namespaces() {
-    let (_, manifest) = manifest();
+    let (root, manifest) = manifest();
     assert_eq!(manifest.compaction.mode, "losslessInternalOnly");
     assert!(LOSSLESS_COMPACTION_STEPS_V1.iter().copied().eq(manifest
         .compaction
@@ -232,6 +271,70 @@ fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     assert!(!manifest.compaction.cleanup_action_api_enabled);
     assert!(manifest.compaction.operation_receipts_immutable);
     assert!(manifest.compaction.chat_messages_immutable);
+    assert_eq!(
+        manifest.compaction.operation_receipt.immutable_fields,
+        [
+            "operationId",
+            "eventId",
+            "aggregateType",
+            "aggregateId",
+            "aggregateSequence",
+            "eventType",
+            "payloadSchemaVersion",
+            "canonicalPayloadJson",
+            "canonicalPayloadDigestAlgorithm",
+            "canonicalPayloadDigestVersion",
+            "canonicalPayloadDigestFormat",
+            "canonicalPayloadDigest",
+            "eventTimestamp",
+        ]
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.request_id_comparison,
+        "ignoredLikeStorageV1"
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.payload_comparison,
+        "exactCanonicalJson"
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.digest.algorithm,
+        OPERATION_RECEIPT_DIGEST_ALGORITHM_V2
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.digest.version,
+        OPERATION_RECEIPT_DIGEST_VERSION_V2
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.digest.format,
+        OPERATION_RECEIPT_DIGEST_FORMAT_V2
+    );
+    assert_eq!(
+        manifest.compaction.operation_receipt.digest.role,
+        "integrityCheckNotEqualitySubstitute"
+    );
+    assert!(
+        manifest
+            .compaction
+            .operation_receipt
+            .digest
+            .writer_must_recompute
+    );
+    let receipts: OperationReceiptCases =
+        read_json(root.join(&manifest.compaction.operation_receipt.cases_file));
+    let mut namespaces = Vec::new();
+    for case in receipts.cases {
+        namespaces.push(case.namespace);
+        assert_eq!(
+            classify_operation_against_receipt_v2(&case.receipt, &case.incoming).expect(&case.name),
+            case.expected,
+            "{}",
+            case.name
+        );
+    }
+    assert!(namespaces.contains(&"legacy".to_string()));
+    assert!(namespaces.contains(&"actualAgent".to_string()));
+    assert!(namespaces.contains(&"recovery".to_string()));
     assert!(!crate::METHODS_V1.contains(&STORAGE_STATUS_METHOD_V1));
 }
 

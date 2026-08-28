@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,6 +12,9 @@ import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts
 import {
   LOSSLESS_COMPACTION_STEPS_V1,
   NEVER_CLEANUP_STATES_V1,
+  OPERATION_RECEIPT_DIGEST_ALGORITHM_V2,
+  OPERATION_RECEIPT_DIGEST_FORMAT_V2,
+  OPERATION_RECEIPT_DIGEST_VERSION_V2,
   STORAGE_LIFETIME_INDEXES_V2,
   STORAGE_LIFETIME_SCHEMA_VERSION_V1,
   STORAGE_LIFETIME_TABLES_V2,
@@ -18,6 +22,7 @@ import {
   STORAGE_STATUS_BRIDGE_VERSION_V1,
   STORAGE_STATUS_METHOD_V1,
   STORAGE_STATUS_SCHEMA_VERSION_V1,
+  classifyOperationAgainstReceiptV2,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
@@ -63,6 +68,19 @@ interface Manifest {
     cleanupActionApiEnabled: boolean;
     operationReceiptsImmutable: boolean;
     chatMessagesImmutable: boolean;
+    operationReceipt: {
+      casesFile: string;
+      immutableFields: string[];
+      requestIdComparison: string;
+      payloadComparison: string;
+      digest: {
+        algorithm: string;
+        version: number;
+        format: string;
+        role: string;
+        writerMustRecompute: boolean;
+      };
+    };
     neverCleanupStates: string[];
   };
   publicStatusPrivacy: {
@@ -76,9 +94,22 @@ interface StatusCases {
   invalid: Array<{ name: string; target: "request" | "response"; value: unknown }>;
 }
 
+interface OperationReceiptCases {
+  cases: Array<{
+    name: string;
+    namespace: string;
+    receipt: { canonicalPayloadJson: string; canonicalPayloadDigest: string };
+    incoming: unknown;
+    expected: "append" | "duplicateNoOp" | "conflict";
+  }>;
+}
+
 const root = resolve("tests/fixtures/m5/storage-v2");
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
+const receiptCases = readJson<OperationReceiptCases>(
+  resolve(root, manifest.compaction.operationReceipt.casesFile),
+);
 
 test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byte", () => {
   assert.equal(manifest.schemaVersion, 1);
@@ -100,6 +131,13 @@ test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byt
   try {
     database.exec(readFileSync(resolve("tests/fixtures/m5/storage-v1/migration.sql"), "utf8"));
     database.exec(`
+      INSERT INTO app_instances (
+        sidecar_instance_id, pid, platform, started_at, heartbeat_at,
+        clean_shutdown_at, last_event_sequence
+      ) VALUES (
+        'sidecar_before_v2', 123, 'darwin', '2026-08-28T00:59:00Z',
+        '2026-08-28T01:00:00Z', NULL, 1
+      );
       INSERT INTO events (
         event_id, operation_id, request_id, aggregate_type, aggregate_id,
         aggregate_sequence, event_type, payload_schema_version,
@@ -113,21 +151,40 @@ test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byt
         project_id, canonical_path, projection_json, last_event_sequence
       ) VALUES (
         'project_before_v2', '/fixture/project', '{"project_id":"project_before_v2"}', 1
+      ), (
+        'project_other', '/fixture/other', '{"project_id":"project_other"}', 1
+      );
+      INSERT INTO chats (
+        chat_id, project_id, projection_json, last_event_sequence
+      ) VALUES (
+        'chat_before_v2', 'project_before_v2', '{"chat_id":"chat_before_v2"}', 1
+      ), (
+        'chat_other_project', 'project_other', '{"chat_id":"chat_other_project"}', 1
+      );
+      INSERT INTO runs (
+        run_id, chat_id, state, worktree_path, projection_json, last_event_sequence
+      ) VALUES (
+        'run_before_v2', 'chat_before_v2', 'recoveryRequired', '/fixture/worktree',
+        '{"run_id":"run_before_v2"}', 1
+      );
+      INSERT INTO locks (
+        lock_id, project_id, writer_run_id, worktree_path, poisoned,
+        recovery_required, evidence_json, projection_json, last_event_sequence
+      ) VALUES (
+        'lock_before_v2', 'project_before_v2', 'run_before_v2', '/fixture/worktree',
+        1, 1, '{}', '{"lock_id":"lock_before_v2"}', 1
       );
     `);
-    const beforeEvent = database.prepare("SELECT * FROM events WHERE event_id = ?").get("evt_before_v2");
-    const beforeProject = database.prepare("SELECT * FROM projects WHERE project_id = ?").get("project_before_v2");
+    const preservedTables = manifest.migration.existingTablesPreserved;
+    const before = Object.fromEntries(
+      preservedTables.map((table) => [table, normalizedRows(database, table)]),
+    );
 
     database.exec(readFileSync(resolve(root, manifest.migration.file), "utf8"));
 
-    assert.deepEqual(
-      database.prepare("SELECT * FROM events WHERE event_id = ?").get("evt_before_v2"),
-      beforeEvent,
-    );
-    assert.deepEqual(
-      database.prepare("SELECT * FROM projects WHERE project_id = ?").get("project_before_v2"),
-      beforeProject,
-    );
+    for (const table of preservedTables) {
+      assert.deepEqual(normalizedRows(database, table), before[table], table);
+    }
     assert.deepEqual(
       { ...database.prepare("SELECT schema_version, protocol_version, migration_state FROM schema_meta").get() },
       { schema_version: 1, protocol_version: 1, migration_state: "ready" },
@@ -150,6 +207,42 @@ test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byt
         index,
       );
     }
+    assert.throws(() => database.exec("UPDATE events SET event_type = 'changed' WHERE event_id = 'evt_before_v2';"));
+    assert.throws(() => database.exec("DELETE FROM events WHERE event_id = 'evt_before_v2';"));
+    database.exec(`
+      INSERT INTO events (
+        event_id, operation_id, request_id, aggregate_type, aggregate_id,
+        aggregate_sequence, event_type, payload_schema_version,
+        canonical_json_payload, timestamp
+      ) VALUES (
+        'evt_after_v2', 'op_after_v2', NULL, 'project', 'project_before_v2',
+        2, 'project.upserted', 1,
+        '{"project_id":"project_before_v2"}', '2026-08-28T01:01:00Z'
+      );
+    `);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM events").get()?.count, 2);
+
+    database.exec(`
+      INSERT INTO prepared_workspaces (
+        preparation_id, project_id, worktree_id, workspace_identity, binding_state,
+        bound_chat_id, canonical_record_json, record_digest,
+        created_at, updated_at, materialized_at
+      ) VALUES
+        ('prep_unbound', 'project_before_v2', 'worktree_unbound', 'workspace_unbound',
+         'unbound', NULL, '{}', 'digest-unbound',
+         '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z'),
+        ('prep_abandoned', 'project_before_v2', 'worktree_abandoned', 'workspace_abandoned',
+         'abandoned', NULL, '{}', 'digest-abandoned',
+         '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z'),
+        ('prep_bound', 'project_before_v2', 'worktree_bound', 'workspace_bound',
+         'bound', 'chat_before_v2', '{}', 'digest-bound',
+         '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z');
+    `);
+    assert.equal(database.prepare("SELECT count(*) AS count FROM prepared_workspaces").get()?.count, 3);
+    assert.throws(() => insertPreparedWorkspace(database, "invalid_bound_null", "bound", null, "project_before_v2"));
+    assert.throws(() => insertPreparedWorkspace(database, "invalid_unbound_chat", "unbound", "chat_before_v2", "project_before_v2"));
+    assert.throws(() => insertPreparedWorkspace(database, "invalid_abandoned_chat", "abandoned", "chat_before_v2", "project_before_v2"));
+    assert.throws(() => insertPreparedWorkspace(database, "invalid_cross_project", "bound", "chat_other_project", "project_before_v2"));
   } finally {
     database.close();
     rmSync(temporaryRoot, { recursive: true, force: true });
@@ -199,8 +292,41 @@ test("D0A freezes lossless compaction invariants without enabling cleanup or thr
   assert.equal(manifest.compaction.cleanupActionApiEnabled, false);
   assert.equal(manifest.compaction.operationReceiptsImmutable, true);
   assert.equal(manifest.compaction.chatMessagesImmutable, true);
+  assert.equal(manifest.compaction.operationReceipt.payloadComparison, "exactCanonicalJson");
+  assert.equal(manifest.compaction.operationReceipt.requestIdComparison, "ignoredLikeStorageV1");
+  assert.deepEqual(manifest.compaction.operationReceipt.immutableFields, [
+    "operationId", "eventId", "aggregateType", "aggregateId", "aggregateSequence",
+    "eventType", "payloadSchemaVersion", "canonicalPayloadJson",
+    "canonicalPayloadDigestAlgorithm", "canonicalPayloadDigestVersion",
+    "canonicalPayloadDigestFormat", "canonicalPayloadDigest", "eventTimestamp",
+  ]);
+  assert.deepEqual(manifest.compaction.operationReceipt.digest, {
+    algorithm: OPERATION_RECEIPT_DIGEST_ALGORITHM_V2,
+    version: OPERATION_RECEIPT_DIGEST_VERSION_V2,
+    format: OPERATION_RECEIPT_DIGEST_FORMAT_V2,
+    role: "integrityCheckNotEqualitySubstitute",
+    writerMustRecompute: true,
+  });
   assert.equal(JSON.stringify(manifest).includes("warningThreshold"), false);
   assert.equal(JSON.stringify(manifest).includes("hardThreshold"), false);
+});
+
+test("operation receipts preserve exact v1 duplicate/conflict decisions across legacy, actual, and recovery namespaces", () => {
+  const namespaces = new Set<string>();
+  for (const fixture of receiptCases.cases) {
+    namespaces.add(fixture.namespace);
+    assert.equal(
+      createHash("sha256").update(fixture.receipt.canonicalPayloadJson).digest("hex"),
+      fixture.receipt.canonicalPayloadDigest,
+      `${fixture.name} digest integrity`,
+    );
+    assert.equal(
+      classifyOperationAgainstReceiptV2(fixture.receipt, fixture.incoming),
+      fixture.expected,
+      fixture.name,
+    );
+  }
+  assert.deepEqual([...namespaces].sort(), ["actualAgent", "legacy", "recovery"]);
 });
 
 test("planned bridge V6 is additive but storage.status remains unadvertised and undispatchable before D1", () => {
@@ -214,4 +340,25 @@ test("planned bridge V6 is additive but storage.status remains unadvertised and 
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+function normalizedRows(database: DatabaseSync, table: string): unknown[] {
+  return JSON.parse(JSON.stringify(database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())) as unknown[];
+}
+
+function insertPreparedWorkspace(
+  database: DatabaseSync,
+  id: string,
+  state: "unbound" | "bound" | "abandoned",
+  chatId: string | null,
+  projectId: string,
+): void {
+  database.prepare(`
+    INSERT INTO prepared_workspaces (
+      preparation_id, project_id, worktree_id, workspace_identity, binding_state,
+      bound_chat_id, canonical_record_json, record_digest,
+      created_at, updated_at, materialized_at
+    ) VALUES (?, ?, ?, ?, ?, ?, '{}', ?,
+      '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z', '2026-08-28T01:00:00Z')
+  `).run(id, projectId, `worktree_${id}`, `workspace_${id}`, state, chatId, `digest-${id}`);
 }

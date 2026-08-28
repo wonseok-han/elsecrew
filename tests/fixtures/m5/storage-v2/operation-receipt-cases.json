@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "name": "legacy recovery exact duplicate ignores request id",
+      "namespace": "legacy",
+      "receipt": {
+        "operationId": "op_legacy_recovery_01",
+        "eventId": "evt_legacy_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_legacy_01",
+        "aggregateSequence": 2,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"run_id\":\"run_legacy_01\",\"source_kind\":\"fixture\",\"state\":\"recoveryRequired\"}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "6d855cd13ae9ce831d8a31c13acc57d9552ff6700dc9a564aaad09c9cf6229d1",
+        "eventTimestamp": "2026-08-28T04:00:00Z"
+      },
+      "incoming": {
+        "event_id": "evt_legacy_recovery_01",
+        "operation_id": "op_legacy_recovery_01",
+        "request_id": "different_retry_request",
+        "aggregate_type": "run",
+        "aggregate_id": "run_legacy_01",
+        "aggregate_sequence": 2,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_legacy_01\",\"source_kind\":\"fixture\",\"state\":\"recoveryRequired\"}",
+        "timestamp": "2026-08-28T04:00:00Z"
+      },
+      "expected": "duplicateNoOp"
+    },
+    {
+      "name": "actual-agent recovery exact duplicate remains in its namespace",
+      "namespace": "actualAgent",
+      "receipt": {
+        "operationId": "op_actual_recovery_01",
+        "eventId": "evt_actual_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_actual_01",
+        "aggregateSequence": 3,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\",\"state\":\"recoveryRequired\"}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "41a874e9394a1565de826a7b21353351d30f5ce93a3037b978cdde9ea873bcbd",
+        "eventTimestamp": "2026-08-28T04:01:00Z"
+      },
+      "incoming": {
+        "event_id": "evt_actual_recovery_01",
+        "operation_id": "op_actual_recovery_01",
+        "request_id": null,
+        "aggregate_type": "run",
+        "aggregate_id": "run_actual_01",
+        "aggregate_sequence": 3,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\",\"state\":\"recoveryRequired\"}",
+        "timestamp": "2026-08-28T04:01:00Z"
+      },
+      "expected": "duplicateNoOp"
+    },
+    {
+      "name": "actual-agent same operation with changed canonical payload conflicts even with receipt digest unchanged",
+      "namespace": "actualAgent",
+      "receipt": {
+        "operationId": "op_actual_recovery_01",
+        "eventId": "evt_actual_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_actual_01",
+        "aggregateSequence": 3,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\",\"state\":\"recoveryRequired\"}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "41a874e9394a1565de826a7b21353351d30f5ce93a3037b978cdde9ea873bcbd",
+        "eventTimestamp": "2026-08-28T04:01:00Z"
+      },
+      "incoming": {
+        "event_id": "evt_actual_recovery_01",
+        "operation_id": "op_actual_recovery_01",
+        "request_id": "req_changed_payload",
+        "aggregate_type": "run",
+        "aggregate_id": "run_actual_01",
+        "aggregate_sequence": 3,
+        "event_type": "run.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\",\"state\":\"completed\"}",
+        "timestamp": "2026-08-28T04:01:00Z"
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "poisoned recovery lock exact duplicate remains stable",
+      "namespace": "recovery",
+      "receipt": {
+        "operationId": "op_lock_recovery_01",
+        "eventId": "evt_lock_recovery_01",
+        "aggregateType": "lock",
+        "aggregateId": "lock_recovery_01",
+        "aggregateSequence": 4,
+        "eventType": "lock.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"lock_id\":\"lock_recovery_01\",\"poisoned\":true,\"recovery_required\":true}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "620574774535e93dad318c18f43e709086edf1d76e1e4c17a1129f7cca7afcd4",
+        "eventTimestamp": "2026-08-28T04:02:00Z"
+      },
+      "incoming": {
+        "event_id": "evt_lock_recovery_01",
+        "operation_id": "op_lock_recovery_01",
+        "request_id": null,
+        "aggregate_type": "lock",
+        "aggregate_id": "lock_recovery_01",
+        "aggregate_sequence": 4,
+        "event_type": "lock.upserted",
+        "payload_schema_version": 1,
+        "canonical_json_payload": "{\"lock_id\":\"lock_recovery_01\",\"poisoned\":true,\"recovery_required\":true}",
+        "timestamp": "2026-08-28T04:02:00Z"
+      },
+      "expected": "duplicateNoOp"
+    }
+  ]
+}

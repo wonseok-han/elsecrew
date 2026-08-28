@@ -25,6 +25,7 @@
       "maintenance_jobs"
     ],
     "indexes": [
+      "chats_identity_project",
       "ledger_baselines_cutoff",
       "operation_receipts_aggregate_sequence",
       "chat_messages_chat_sequence",
@@ -73,6 +74,33 @@
     "cleanupActionApiEnabled": false,
     "operationReceiptsImmutable": true,
     "chatMessagesImmutable": true,
+    "operationReceipt": {
+      "casesFile": "operation-receipt-cases.json",
+      "immutableFields": [
+        "operationId",
+        "eventId",
+        "aggregateType",
+        "aggregateId",
+        "aggregateSequence",
+        "eventType",
+        "payloadSchemaVersion",
+        "canonicalPayloadJson",
+        "canonicalPayloadDigestAlgorithm",
+        "canonicalPayloadDigestVersion",
+        "canonicalPayloadDigestFormat",
+        "canonicalPayloadDigest",
+        "eventTimestamp"
+      ],
+      "requestIdComparison": "ignoredLikeStorageV1",
+      "payloadComparison": "exactCanonicalJson",
+      "digest": {
+        "algorithm": "sha256",
+        "version": 1,
+        "format": "lowercaseHex64",
+        "role": "integrityCheckNotEqualitySubstitute",
+        "writerMustRecompute": true
+      }
+    },
     "neverCleanupStates": [
       "activeRun",
       "cancellingRun",

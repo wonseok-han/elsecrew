@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A 독립 리뷰 수정)
+
+- **operation receipt 정확성**: digest만 보존하던 초안을 고쳐 canonical payload 원문과 SHA-256/version/format metadata를 함께 보존한다. duplicate/conflict는 digest가 아니라 v1 immutable record의 exact canonical JSON과 나머지 불변 필드를 비교하며 request ID만 기존처럼 제외한다. legacy·actual-agent·poisoned recovery fixture가 exact duplicate와 changed-payload conflict를 교차 검증한다.
+- **prepared workspace 결속**: `bound ↔ boundChatId non-null`, `unbound/abandoned ↔ null`을 SQL CHECK로 고정하고, 기존 `chats(chat_id, project_id)`에 additive unique index를 둔 composite FK로 bound chat과 project가 같음을 SQLite가 직접 거부하게 했다. 세 valid 상태와 null/state 모순·cross-project insert를 실제 SQLite에서 검증한다.
+- **나머지 회귀**: failed compaction의 `lastSuccessfulAt`이 `lastAttemptedAt`보다 늦으면 Rust/TypeScript 모두 거부한다. v1의 7개 테이블 전체 행과 events append-only update/delete trigger·후속 append가 v2 DDL 전후 보존되는지 확장 검증했다.
+- **검증**: G5D Node contract 5개, protocol Rust 35개, TypeScript no-emit, 소유 Rust focused rustfmt와 `git diff --check`를 통과했다. sidecar/Electron/runtime method는 D0A 범위대로 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A 저장 수명 계약)
 
 - **무삭제 계약**: 실제 provider 활성화 전 stop condition인 SQLite 전체 수명을 G6에서 분리해 G5D로 열었다. D0A는 채팅·메시지·run·recovery·evidence·snapshot을 삭제하지 않고 임의 보존 기간·용량 threshold·자동 정리를 정하지 않는다. physical cleanup과 cleanup candidate/action API는 비활성이다.
@@ -50,7 +57,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **M5 G5D D0A storage lifetime(2026-08-28)**: 실제 provider 활성화 전 SQLite 전체 수명 stop condition을 G6에서 분리해 G5D로 진행한다. D0A는 무삭제이며 physical cleanup, cleanup 후보/action, 보존 기간·전체 용량 threshold·자동 정리를 열지 않는다. planned `storage.status`/Bridge V6와 additive storage schema v2 golden만 고정하고 D1 sidecar 전에는 protocol/ready/dispatcher에 광고하지 않는다. lossless compaction은 receipt/message/workspace/baseline materialize와 baseline+tail replay·operation idempotency·actual/legacy namespace·recovery 동등성을 모두 검증한 뒤에만 ledger cutoff를 논리 삭제하고, 실패는 rollback하며 `VACUUM`은 논리 성공 조건이 아니다
+- **M5 G5D D0A storage lifetime(2026-08-28)**: 실제 provider 활성화 전 SQLite 전체 수명 stop condition을 G6에서 분리해 G5D로 진행한다. D0A는 무삭제이며 physical cleanup, cleanup 후보/action, 보존 기간·전체 용량 threshold·자동 정리를 열지 않는다. planned `storage.status`/Bridge V6와 additive storage schema v2 golden만 고정하고 D1 sidecar 전에는 protocol/ready/dispatcher에 광고하지 않는다. lossless compaction은 canonical payload 원문을 가진 immutable receipt와 message/workspace/baseline을 materialize하고 baseline+tail replay·v1 exact operation idempotency·actual/legacy namespace·recovery 동등성을 모두 검증한 뒤에만 ledger cutoff를 논리 삭제한다. 실패는 rollback하며 `VACUUM`은 논리 성공 조건이 아니다
 - **M5 G5C actual recovery 원자성(2026-08-27)**: recovery ID는 run 준비 시 writer lock과 같은 transaction에 random UUIDv4로 예약해 모든 후속 recovery가 재사용하며 run ID에서 파생하지 않는다. process identity 없는 재시작은 `processIdentityUnavailable` unresolved recovery와 poisoned lock을 공개하되 resolve로 폐기할 수 없다. actual abandon은 SQLite intent → exact/idempotent manifest abandon → manifest 재검증 뒤 atomic DB finalize의 restart-reconcilable saga이고, 어느 단계든 identity/digest가 다르거나 상태가 불명확하면 writer를 해제하지 않는다. SQLite와 filesystem의 원자성을 주장하지 않는다
 - **M5 G5C provider 활성화 전 계약(2026-08-27)**: provider manifest는 executable binary만이 아니라 필수 helper까지 포함한 closure digest, exact model/reasoning/permission tuple, provider별 auth/event parser ID, managed cwd·no-secret env·no-fallback policy를 canonical digest로 묶는다. persisted discovery에는 raw stdout/stderr·token·prompt·email·org·raw auth hash를 넣지 않으며, attestation은 accepted run/profile의 run·fingerprint·workspace·runtime·model·reasoning·permission을 exact 결속하고 derivation이 정의되지 않은 session digest는 저장하지 않는다. Claude는 `system:init`의 version/model/cwd/permission/tools/MCP/plugins/config를 전부 handshake·runtime attestation으로 검증한 뒤에만 public event를 허용하고, internal Public도 기존 G5B 256-event·1 MiB text budget 안에서만 허용한다. Codex가 argv 또는 unknown catalog만 제공하면 `canStart=false`다. 이 계약은 fake-only internal boundary이고 공개 G5/G5A/G5B wire·V4/V5를 바꾸지 않는다. SQLite 전체 lifetime/retention/compaction은 실제 provider 활성화 전 별도 stop condition이다
 - **마일스톤**: M0~M3, 홈베이스·프로젝트 디스크 스캔·에이전트 상태/업데이트, 주요 실패 경로 닥터, 한·영 콘텐츠까지 구현. 남음: 실제 실패 경로와 macOS/Windows 출시 후보 실기기 검증, 정식 배포(코드 서명)
