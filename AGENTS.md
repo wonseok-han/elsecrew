@@ -62,9 +62,9 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B가 normalized public/terminal event를 Electron V5와 renderer의 영속 채팅 재조회까지 전달하고 run/session 자원 예산을 적용한다. 제품 Electron이 실행하는 일반 `--stdio`는 exact G5이며 실제 Claude Code/Codex CLI provider·인증·모델 출력은 아직 연결되지 않았다
+- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B의 normalized public/terminal event·자원 예산과 G5C의 provider 발견/실행 전 검증·restart-atomic recovery까지 Electron V5와 renderer에 연결한다. 제품 Electron이 실행하는 일반 `--stdio`는 exact G5이며 실제 Claude Code/Codex CLI provider·인증·모델 출력은 아직 연결되지 않았다
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
-- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture 게이트와 독립 QA `G5_READY`, G5A fake adapter normalized public-event 최종 gate `G5A_READY`, G5B terminal notification·resource budget 최종 gate `G5B_READY`를 완료했다. 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
+- 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`와 G5C provider discovery·launch attestation/recovery 독립 QA `G5C_QA_PASS`를 완료했다. G5C 최종 gate, 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
 
 ## 코드 지도
 
@@ -74,7 +74,7 @@
 - `src/store.ts`: 기준 폴더와 프로젝트 최근 사용 시각 저장
 - `src-tauri/src/agent.rs`: 에이전트별 설치·감지·로그인 레시피
 - `src-tauri/src/{detect,install,login,project,status,editor,error}.rs`: 시스템 기능
-- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture와 G5A/G5B fake actual-agent 실행·terminal·예산·복구 sidecar
+- `crates/hello-agent-{core,protocol,sidecar}`: 공용 Rust 안전 코어, 언어 중립 계약, SQLite·snapshot·채팅·fixture와 G5A~G5C fake actual-agent 실행·terminal·예산·provider 검증·원자 복구 sidecar
 - `electron/`: Electron main/preload, 고정 typed IPC와 sidecar 수명주기·패키징
 - `src/m5/`, `src/m5/contracts/`: Monaco 채팅 작업대와 V1~V5 bridge·프로젝트/채팅/실행/복구·정규화 공개/terminal event·자원 예산 계약
 - `website/`: 별도 Vinext/OpenAI Sites 소개 웹사이트

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5C 통합·누적 하네스·독립 QA)
+
+- **통합·리뷰**: provider sidecar, text/recovery 경계, durable recovery 발견, renderer recovery controls, restart-atomic saga, pre-G5C ID 백필과 identityless UI 보강을 독립 Rust·UI·combined 재리뷰 승인 뒤 `m5/coding-agent-ide`에 통합했다. G5C provider/identityless 계약 테스트도 `m5:test:run-recovery` 누적 게이트에 추가했다.
+- **누적 증거**: exact integration `42dcbfad2444eebbebaeef4e4f64f614a6de6264`의 G5 누적 하네스가 macOS arm64 Electron package smoke, Chromium Monaco, 기존 Tauri와 Rust workspace, G5A~G5C fake-only 실행·복구를 모두 PASS했다. 최초 sandbox package는 Electron artifact fetch 차단으로 실패했고 네트워크 허용 재실행은 PASS했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-28T01-03-49-390Z.json`이다.
+- **독립 QA·경계**: 같은 exact commit의 독립 QA가 no-fallback 발견, handshake 비공개, exact text/event 경계, provider recoveryRequired exit 0, random recovery와 legacy namespace, restart saga, pre-G5C recovery ID 보존, identityless zero-RPC 보호를 재검증해 `G5C_QA_PASS`로 판정했다. 증거는 `.artifacts/m5-qa/g5c-integration-42dcbfad2444eebbebaeef4e4f64f614a6de6264-2026-08-28T01-09-53Z.json`이다. 일반 `--stdio`의 실제 Claude/Codex·인증·모델·사용자 프로젝트·Windows는 실행하지 않았으며, 다음은 문서 commit의 독립 최종 gate다. push와 `main` 병합도 하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5C identityless recovery renderer boundary)
 
 - **보호 상태**: durable actual recovery의 process identity가 없으면 renderer가 실행·저장·닫기 차단을 계속 유지하고, 초보자 화면에는 종료 상태를 안전하게 확인할 수 없어 보호 중이라는 안내만 보인다. 이 경우 recovery abandon button은 렌더하지 않으며 programmatic `abandonAgentRecovery`도 confirm·inspect·resolve 전에 반환한다.
