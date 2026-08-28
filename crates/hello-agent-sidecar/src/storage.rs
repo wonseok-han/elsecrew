@@ -111,6 +111,14 @@ impl Storage {
         crate::storage_lifetime::collect_status(&self.connection, &self.path)
     }
 
+    #[allow(dead_code)] // D1B is internal until a later wire/idle-scheduler wave.
+    pub(crate) fn materialize_lifetime_records(
+        &mut self,
+        failure: Option<crate::storage_lifetime::MaterializationFailurePoint>,
+    ) -> Result<crate::storage_lifetime::LifetimeMaterializationResult, SidecarError> {
+        crate::storage_lifetime::materialize_lifetime_records(&mut self.connection, failure)
+    }
+
     #[cfg(test)]
     pub(crate) fn connection_for_test(&self) -> &Connection {
         &self.connection
@@ -919,7 +927,7 @@ fn verify_schema_v2(connection: &Connection) -> Result<(), SidecarError> {
     if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V1
         || metadata.1 != PROTOCOL_VERSION
         || metadata.2 != "ready"
-        || metadata.3 != "pending"
+        || !matches!(metadata.3.as_str(), "pending" | "ready")
         || metadata_count != 1
         || migrated_at_valid != Some(true)
     {
@@ -996,7 +1004,7 @@ fn verify_integrity(connection: &Connection) -> Result<(), SidecarError> {
     Ok(())
 }
 
-fn verify_projection_replay(connection: &Connection) -> Result<(), SidecarError> {
+pub(crate) fn verify_projection_replay(connection: &Connection) -> Result<(), SidecarError> {
     let events = load_events(connection)?;
     let replayed = replay_ledger_v1(&events).map_err(storage_contract_error)?;
     let stored = load_projection(connection)?;
@@ -1047,7 +1055,7 @@ fn verify_projection_columns(connection: &Connection) -> Result<(), SidecarError
     Ok(())
 }
 
-fn load_events(connection: &Connection) -> Result<Vec<LedgerEventV1>, SidecarError> {
+pub(crate) fn load_events(connection: &Connection) -> Result<Vec<LedgerEventV1>, SidecarError> {
     let mut statement = connection
         .prepare(
             "SELECT event_id, operation_id, request_id, aggregate_type, aggregate_id, \
@@ -1074,7 +1082,7 @@ fn load_events(connection: &Connection) -> Result<Vec<LedgerEventV1>, SidecarErr
     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
 }
 
-fn load_projection(connection: &Connection) -> Result<ProjectionStateV1, SidecarError> {
+pub(crate) fn load_projection(connection: &Connection) -> Result<ProjectionStateV1, SidecarError> {
     let mut projection = ProjectionStateV1::default();
     let mut statement = connection
         .prepare(
