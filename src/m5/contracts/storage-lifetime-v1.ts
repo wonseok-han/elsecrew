@@ -1749,6 +1749,16 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     columns: STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1,
     identity: "eventRowidEventIdOperationIdAndAggregateTupleExact",
     messageId: "nullableExactLastMessageIdFromCanonicalChatPayload",
+    foreignKeys: [
+      "event_id->events.event_id",
+      "operation_id->events.operation_id",
+      "aggregateTuple->events.aggregateTuple",
+    ],
+    foreignKeyEnforcement: "PRAGMA foreign_keys=ONOnEveryConnection",
+    insertGuard: "event_source_index_requires_exact_event",
+    sameEventBinding:
+      "eventRowidAndEveryMirroredFieldAndMessageProvenanceMustMatchOneEventsRow",
+    separateForeignKeyCrossEventMix: "rejectedByInsertGuard",
     historyBackfillByMigration: false,
     historyBackfillPhase: "indexSource",
     indexSourceWrite: "insertOrExactExistingNoOpOtherwiseConflict",
@@ -1756,6 +1766,7 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     aggregateLatestIndex: "event_source_index_aggregate_latest",
     messageUniqueIndex: "event_source_index_message_unique",
     mutationGuards: [
+      "event_source_index_requires_exact_event",
       "event_source_index_append_only_update",
       "event_source_index_append_only_delete",
     ],
@@ -1931,6 +1942,40 @@ export function validateStorageEventSourceIndexEntryV1(
     fail("event source index identity and aggregate tuple must be non-empty and positive");
   }
   return entry as unknown as StorageEventSourceIndexEntryV1;
+}
+
+export function validateStorageEventSourceIndexBindingV1(
+  eventRowid: number,
+  entryValue: unknown,
+  source: OperationCandidateV1,
+): StorageEventSourceIndexEntryV1 {
+  const entry = validateStorageEventSourceIndexEntryV1(entryValue);
+  let payload: unknown;
+  try {
+    payload = JSON.parse(source.canonical_json_payload);
+  } catch {
+    fail("source index event payload must be valid JSON");
+  }
+  const object = requireObject(payload, "source index event payload");
+  let expectedMessageId: string | null = null;
+  if (source.aggregate_type === "chat" && object.last_message !== undefined
+    && object.last_message !== null) {
+    const message = requireObject(object.last_message, "chat source last_message");
+    if (typeof message.messageId !== "string" || message.messageId.length === 0) {
+      fail("chat source index requires exact non-empty last_message.messageId");
+    }
+    expectedMessageId = message.messageId;
+  }
+  if (entry.eventRowid !== eventRowid
+    || entry.eventId !== source.event_id
+    || entry.operationId !== source.operation_id
+    || entry.aggregateType !== source.aggregate_type
+    || entry.aggregateId !== source.aggregate_id
+    || entry.aggregateSequence !== source.aggregate_sequence
+    || entry.messageId !== expectedMessageId) {
+    fail("event source index must match one exact source event and message provenance");
+  }
+  return entry;
 }
 
 export function validateStorageLifetimeWorkspaceProjectSourceV1(

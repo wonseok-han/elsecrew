@@ -461,9 +461,19 @@ struct V6MigrationMatrix {
 #[serde(rename_all = "camelCase")]
 struct V6SourceIndexCases {
     columns: Vec<String>,
+    source_events: Vec<V6SourceEvent>,
     valid_rows: Vec<NamedValue>,
+    invalid_binding_fields: Vec<String>,
     duplicate_conflicts: Vec<String>,
     mutation_guards: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V6SourceEvent {
+    name: String,
+    event_rowid: u64,
+    event: LedgerEventV1,
 }
 
 #[derive(Deserialize)]
@@ -1465,6 +1475,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert_eq!(
         manifest.migration.triggers_added,
         [
+            "event_source_index_requires_exact_event",
             "event_source_index_append_only_update",
             "event_source_index_append_only_delete"
         ]
@@ -1511,11 +1522,12 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1
     );
     assert_eq!(cases.source_index.valid_rows.len(), 2);
+    assert_eq!(cases.source_index.source_events.len(), 3);
     for row in &cases.source_index.valid_rows {
         assert!(!row.name.is_empty());
         let tuple = row.value.as_array().expect("source row tuple");
         assert_eq!(tuple.len(), 7);
-        validate_storage_event_source_index_entry_v1(&serde_json::json!({
+        let entry = serde_json::json!({
             "eventRowid": tuple[0],
             "eventId": tuple[1],
             "operationId": tuple[2],
@@ -1523,8 +1535,90 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
             "aggregateId": tuple[4],
             "aggregateSequence": tuple[5],
             "messageId": tuple[6],
-        }))
-        .expect(&row.name);
+        });
+        validate_storage_event_source_index_entry_v1(&entry).expect(&row.name);
+        let event_rowid = tuple[0].as_u64().expect("event rowid");
+        let source = cases
+            .source_index
+            .source_events
+            .iter()
+            .find(|source| source.event_rowid == event_rowid)
+            .expect("exact source event");
+        assert!(!source.name.is_empty());
+        validate_storage_event_source_index_binding_v1(event_rowid, &entry, &source.event)
+            .expect(&row.name);
+    }
+    let project_source = &cases.source_index.source_events[0];
+    let chat_source = &cases.source_index.source_events[1];
+    let project_revision = &cases.source_index.source_events[2];
+    let project_tuple = cases.source_index.valid_rows[0]
+        .value
+        .as_array()
+        .expect("project source tuple");
+    let project_entry = serde_json::json!({
+        "eventRowid": project_tuple[0],
+        "eventId": project_tuple[1],
+        "operationId": project_tuple[2],
+        "aggregateType": project_tuple[3],
+        "aggregateId": project_tuple[4],
+        "aggregateSequence": project_tuple[5],
+        "messageId": project_tuple[6],
+    });
+    let mut invalid_bindings = Vec::new();
+    for (field, replacement) in [
+        ("eventRowid", Value::from(chat_source.event_rowid)),
+        ("eventId", Value::from(chat_source.event.event_id.clone())),
+        (
+            "operationId",
+            Value::from(chat_source.event.operation_id.clone()),
+        ),
+        (
+            "aggregateType",
+            Value::from(chat_source.event.aggregate_type.clone()),
+        ),
+        (
+            "aggregateId",
+            Value::from(chat_source.event.aggregate_id.clone()),
+        ),
+        (
+            "aggregateSequence",
+            Value::from(project_revision.event.aggregate_sequence),
+        ),
+        ("messageId", Value::from("message_1")),
+    ] {
+        let mut invalid = project_entry.clone();
+        invalid
+            .as_object_mut()
+            .expect("entry object")
+            .insert(field.to_string(), replacement);
+        invalid_bindings.push(invalid);
+    }
+    let mut cross_event_mix = project_entry.clone();
+    let cross_event_object = cross_event_mix.as_object_mut().expect("cross event entry");
+    cross_event_object.insert(
+        "eventId".to_string(),
+        Value::from(chat_source.event.event_id.clone()),
+    );
+    cross_event_object.insert(
+        "operationId".to_string(),
+        Value::from(project_revision.event.operation_id.clone()),
+    );
+    invalid_bindings.push(cross_event_mix);
+    assert_eq!(
+        invalid_bindings.len(),
+        cases.source_index.invalid_binding_fields.len()
+    );
+    for (index, invalid) in invalid_bindings.iter().enumerate() {
+        assert!(
+            validate_storage_event_source_index_binding_v1(
+                project_source.event_rowid,
+                invalid,
+                &project_source.event,
+            )
+            .is_err(),
+            "{}",
+            cases.source_index.invalid_binding_fields[index]
+        );
     }
     assert_eq!(
         cases.source_index.duplicate_conflicts,
@@ -1536,7 +1630,10 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
             "message_id"
         ]
     );
-    assert_eq!(cases.source_index.mutation_guards, ["update", "delete"]);
+    assert_eq!(
+        cases.source_index.mutation_guards,
+        ["insert", "update", "delete"]
+    );
     assert_eq!(cases.query_plans.len(), 5);
     for plan in &cases.query_plans {
         assert!(
@@ -1717,6 +1814,12 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert!(sql.contains("CREATE INDEX event_source_index_aggregate_latest"));
     assert!(sql.contains("CREATE UNIQUE INDEX event_source_index_message_unique"));
     assert!(sql.contains("WHERE message_id IS NOT NULL"));
+    assert!(sql.contains("FOREIGN KEY (event_id) REFERENCES events(event_id)"));
+    assert!(sql.contains("FOREIGN KEY (operation_id) REFERENCES events(operation_id)"));
+    assert!(sql.contains("FOREIGN KEY (aggregate_type, aggregate_id, aggregate_sequence)"));
+    assert!(sql.contains("CREATE TRIGGER event_source_index_requires_exact_event"));
+    assert!(sql.contains("source.rowid = NEW.event_rowid"));
+    assert!(sql.contains("'$.last_message.messageId'"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_update"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_delete"));
     assert!(sql.contains("'indexSource', 'verifySourceIndex'"));

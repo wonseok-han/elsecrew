@@ -2363,6 +2363,16 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             "columns": STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1,
             "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
             "messageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
+            "foreignKeys": [
+                "event_id->events.event_id",
+                "operation_id->events.operation_id",
+                "aggregateTuple->events.aggregateTuple",
+            ],
+            "foreignKeyEnforcement": "PRAGMA foreign_keys=ONOnEveryConnection",
+            "insertGuard": "event_source_index_requires_exact_event",
+            "sameEventBinding":
+                "eventRowidAndEveryMirroredFieldAndMessageProvenanceMustMatchOneEventsRow",
+            "separateForeignKeyCrossEventMix": "rejectedByInsertGuard",
             "historyBackfillByMigration": false,
             "historyBackfillPhase": "indexSource",
             "indexSourceWrite": "insertOrExactExistingNoOpOtherwiseConflict",
@@ -2370,6 +2380,7 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             "aggregateLatestIndex": "event_source_index_aggregate_latest",
             "messageUniqueIndex": "event_source_index_message_unique",
             "mutationGuards": [
+                "event_source_index_requires_exact_event",
                 "event_source_index_append_only_update",
                 "event_source_index_append_only_delete",
             ],
@@ -2543,6 +2554,55 @@ pub fn validate_storage_event_source_index_entry_v1(
     {
         return Err(StorageLifetimeContractError::new(
             "event source index identity and aggregate tuple must be non-empty and positive",
+        ));
+    }
+    Ok(entry)
+}
+
+pub fn validate_storage_event_source_index_binding_v1(
+    event_rowid: u64,
+    entry_value: &Value,
+    source: &LedgerEventV1,
+) -> Result<StorageEventSourceIndexEntryV1, StorageLifetimeContractError> {
+    let entry = validate_storage_event_source_index_entry_v1(entry_value)?;
+    let payload: Value = serde_json::from_str(&source.canonical_json_payload).map_err(|error| {
+        StorageLifetimeContractError::new(format!(
+            "source index event payload must be valid JSON: {error}"
+        ))
+    })?;
+    let expected_message_id = if source.aggregate_type == "chat" {
+        match payload.get("last_message") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(message)) => Some(
+                message
+                    .get("messageId")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        StorageLifetimeContractError::new(
+                            "chat source index requires exact non-empty last_message.messageId",
+                        )
+                    })?,
+            ),
+            Some(_) => {
+                return Err(StorageLifetimeContractError::new(
+                    "chat source index last_message must be object, null, or absent",
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    if entry.event_rowid != event_rowid
+        || entry.event_id != source.event_id
+        || entry.operation_id != source.operation_id
+        || entry.aggregate_type != source.aggregate_type
+        || entry.aggregate_id != source.aggregate_id
+        || entry.aggregate_sequence != source.aggregate_sequence
+        || entry.message_id.as_deref() != expected_message_id
+    {
+        return Err(StorageLifetimeContractError::new(
+            "event source index must match one exact source event and message provenance",
         ));
     }
     Ok(entry)

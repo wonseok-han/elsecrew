@@ -25,6 +25,56 @@
       "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
       "aggregate_sequence", "message_id"
     ],
+    "sourceEvents": [
+      {
+        "name": "project source",
+        "eventRowid": 1,
+        "event": {
+          "event_id": "evt_project_1",
+          "operation_id": "op_project_1",
+          "request_id": null,
+          "aggregate_type": "project",
+          "aggregate_id": "project_1",
+          "aggregate_sequence": 1,
+          "event_type": "project.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+          "timestamp": "2026-08-28T13:00:00Z"
+        }
+      },
+      {
+        "name": "chat source with public message",
+        "eventRowid": 2,
+        "event": {
+          "event_id": "evt_chat_1",
+          "operation_id": "op_chat_1",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 1,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"last_message\":{\"messageId\":\"message_1\"}}",
+          "timestamp": "2026-08-28T13:00:01Z"
+        }
+      },
+      {
+        "name": "project source revision",
+        "eventRowid": 3,
+        "event": {
+          "event_id": "evt_project_2",
+          "operation_id": "op_project_2",
+          "request_id": null,
+          "aggregate_type": "project",
+          "aggregate_id": "project_1",
+          "aggregate_sequence": 2,
+          "event_type": "project.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+          "timestamp": "2026-08-28T13:00:02Z"
+        }
+      }
+    ],
     "validRows": [
       {
         "name": "project source without message",
@@ -35,8 +85,12 @@
         "value": [2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_1"]
       }
     ],
+    "invalidBindingFields": [
+      "eventRowid", "eventId", "operationId", "aggregateType", "aggregateId",
+      "aggregateSequence", "messageId", "crossEventMix"
+    ],
     "duplicateConflicts": ["event_rowid", "event_id", "operation_id", "aggregateTuple", "message_id"],
-    "mutationGuards": ["update", "delete"]
+    "mutationGuards": ["insert", "update", "delete"]
   },
   "queryPlans": [
     {
@@ -121,6 +175,16 @@
       "name": "history backfilled during migration",
       "path": ["sourceIndex", "historyBackfillByMigration"],
       "replacement": true
+    },
+    {
+      "name": "source event foreign keys omitted",
+      "path": ["sourceIndex", "foreignKeys", "0"],
+      "replacement": "none"
+    },
+    {
+      "name": "cross-event mix accepted",
+      "path": ["sourceIndex", "separateForeignKeyCrossEventMix"],
+      "replacement": "allowed"
     },
     {
       "name": "message uniqueness relaxed",

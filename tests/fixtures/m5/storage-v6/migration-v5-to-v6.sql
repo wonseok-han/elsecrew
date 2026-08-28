@@ -44,7 +44,12 @@ CREATE TABLE event_source_index (
         aggregate_sequence >= 1 AND aggregate_sequence <= 9007199254740991
     ),
     message_id TEXT CHECK (message_id IS NULL OR length(message_id) > 0),
-    UNIQUE (aggregate_type, aggregate_id, aggregate_sequence)
+    UNIQUE (aggregate_type, aggregate_id, aggregate_sequence),
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    FOREIGN KEY (operation_id) REFERENCES events(operation_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    FOREIGN KEY (aggregate_type, aggregate_id, aggregate_sequence)
+        REFERENCES events(aggregate_type, aggregate_id, aggregate_sequence)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
 ) STRICT;
 
 CREATE INDEX event_source_index_aggregate_latest
@@ -53,6 +58,48 @@ ON event_source_index (aggregate_type, aggregate_id, event_rowid DESC);
 CREATE UNIQUE INDEX event_source_index_message_unique
 ON event_source_index (message_id)
 WHERE message_id IS NOT NULL;
+
+CREATE TRIGGER event_source_index_requires_exact_event
+BEFORE INSERT ON event_source_index
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM events AS source
+    WHERE source.rowid = NEW.event_rowid
+      AND source.event_id = NEW.event_id
+      AND source.operation_id = NEW.operation_id
+      AND source.aggregate_type = NEW.aggregate_type
+      AND source.aggregate_id = NEW.aggregate_id
+      AND source.aggregate_sequence = NEW.aggregate_sequence
+      AND (
+          (
+              NEW.message_id IS NULL
+              AND (
+                  source.aggregate_type <> 'chat'
+                  OR json_type(source.canonical_json_payload, '$.last_message') IS NULL
+                  OR json_type(source.canonical_json_payload, '$.last_message') = 'null'
+              )
+          )
+          OR (
+              source.aggregate_type = 'chat'
+              AND json_type(source.canonical_json_payload, '$.last_message') = 'object'
+              AND json_type(
+                  source.canonical_json_payload,
+                  '$.last_message.messageId'
+              ) = 'text'
+              AND length(json_extract(
+                  source.canonical_json_payload,
+                  '$.last_message.messageId'
+              )) > 0
+              AND NEW.message_id = json_extract(
+                  source.canonical_json_payload,
+                  '$.last_message.messageId'
+              )
+          )
+      )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'event source index does not match one exact source event');
+END;
 
 CREATE TRIGGER event_source_index_append_only_update
 BEFORE UPDATE ON event_source_index

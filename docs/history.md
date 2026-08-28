@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index P1 수정)
+
+- **source event exact 결속**: `event_source_index` INSERT가 존재하는 한 `events` row의 rowid·event/operation identity·aggregate tuple을 모두 동시에 일치시키도록 외래 키와 same-row trigger를 추가했다. chat message provenance는 canonical payload의 `last_message.messageId`와 exact 일치하고 non-chat 또는 message가 없는 chat만 NULL을 허용한다. 서로 다른 event에서 개별 FK 값만 섞는 cross-event 조합도 trigger가 거부한다.
+- **실행 회귀 검증**: source-less index 삽입을 허용하던 golden을 실제 source event를 먼저 넣는 형태로 교체했다. exact pair 성공, nonexistent source 거부, mirrored field 7개와 message identity 각각의 불일치 거부, cross-event mix 거부, foreign-key integrity를 Rust·TypeScript validator와 실제 Node SQLite에서 함께 확인했다. protocol 40개, focused Rust storage-v6 1개, Node lifetime 15개, TypeScript no-emit, scoped strict clippy, rustfmt, `git diff --check`가 통과했다. migration은 계속 과거 history를 backfill하지 않으며 sidecar consumer는 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index contract)
 
 - **append-only source index 계약**: exact storage-v5에서 empty `event_source_index`만 추가하는 schema-only v6 migration을 고정했다. index row는 event rowid·event/operation identity·aggregate tuple·nullable public message identity를 exact하게 담고, aggregate 최신 source와 partial unique message lookup index 및 UPDATE/DELETE 거부 trigger를 둔다. migration은 기존 event를 backfill하지 않으며 ready+absent는 pending+absent로 무효화하고 모든 present job은 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed는 reopen fail-closed다.

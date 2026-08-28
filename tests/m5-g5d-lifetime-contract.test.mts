@@ -71,6 +71,7 @@ import {
   validateStorageLifetimeReopenPairV4,
   validateStorageLifetimeV6PreflightPolicyV1,
   validateStorageEventSourceIndexEntryV1,
+  validateStorageEventSourceIndexBindingV1,
   validateStorageLifetimeWorkspaceProjectSourceV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
@@ -314,7 +315,24 @@ interface V6Cases {
   phaseOrder: string[];
   sourceIndex: {
     columns: string[];
+    sourceEvents: Array<{
+      name: string;
+      eventRowid: number;
+      event: {
+        event_id: string;
+        operation_id: string;
+        request_id: string | null;
+        aggregate_type: string;
+        aggregate_id: string;
+        aggregate_sequence: number;
+        event_type: string;
+        payload_schema_version: 1;
+        canonical_json_payload: string;
+        timestamp: string;
+      };
+    }>;
     validRows: Array<{ name: string; value: [number, string, string, string, string, number, string | null] }>;
+    invalidBindingFields: string[];
     duplicateConflicts: string[];
     mutationGuards: string[];
   };
@@ -1358,6 +1376,7 @@ test("storage-v6 migration creates an empty guarded source index and resets ever
     "event_source_index_aggregate_latest", "event_source_index_message_unique",
   ]);
   assert.deepEqual(manifestV6.migration.triggersAdded, [
+    "event_source_index_requires_exact_event",
     "event_source_index_append_only_update", "event_source_index_append_only_delete",
   ]);
   assert.deepEqual(
@@ -1475,18 +1494,89 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
         event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,message_id
       ) VALUES(?,?,?,?,?,?,?)
     `);
+    assert.equal(database.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
+    const foreignKeys = database.prepare("PRAGMA foreign_key_list(event_source_index)").all()
+      .map((row) => `${row.from}->${row.table}.${row.to}`)
+      .sort();
+    assert.deepEqual(foreignKeys, [
+      "aggregate_id->events.aggregate_id",
+      "aggregate_sequence->events.aggregate_sequence",
+      "aggregate_type->events.aggregate_type",
+      "event_id->events.event_id",
+      "operation_id->events.operation_id",
+    ]);
+    const insertEvent = database.prepare(`
+      INSERT INTO events(
+        event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+        event_type,payload_schema_version,canonical_json_payload,timestamp
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)
+    `);
+    for (const fixture of v6Cases.sourceIndex.sourceEvents) {
+      const event = fixture.event;
+      const result = insertEvent.run(
+        event.event_id, event.operation_id, event.request_id, event.aggregate_type,
+        event.aggregate_id, event.aggregate_sequence, event.event_type,
+        event.payload_schema_version, event.canonical_json_payload, event.timestamp,
+      );
+      assert.equal(Number(result.lastInsertRowid), fixture.eventRowid, fixture.name);
+    }
+    const entryFromRow = (row: V6Cases["sourceIndex"]["validRows"][number]["value"]) => ({
+      eventRowid: row[0],
+      eventId: row[1],
+      operationId: row[2],
+      aggregateType: row[3],
+      aggregateId: row[4],
+      aggregateSequence: row[5],
+      messageId: row[6],
+    });
+    const projectEntry = entryFromRow(v6Cases.sourceIndex.validRows[0]!.value);
+    const projectSource = v6Cases.sourceIndex.sourceEvents[0]!;
+    const chatSource = v6Cases.sourceIndex.sourceEvents[1]!;
+    const projectRevision = v6Cases.sourceIndex.sourceEvents[2]!;
+    const invalidBindings = [
+      { ...projectEntry, eventRowid: chatSource.eventRowid },
+      { ...projectEntry, eventId: chatSource.event.event_id },
+      { ...projectEntry, operationId: chatSource.event.operation_id },
+      { ...projectEntry, aggregateType: chatSource.event.aggregate_type },
+      { ...projectEntry, aggregateId: chatSource.event.aggregate_id },
+      { ...projectEntry, aggregateSequence: projectRevision.event.aggregate_sequence },
+      { ...projectEntry, messageId: "message_1" },
+      {
+        ...projectEntry,
+        eventId: chatSource.event.event_id,
+        operationId: projectRevision.event.operation_id,
+      },
+    ];
+    assert.equal(invalidBindings.length, v6Cases.sourceIndex.invalidBindingFields.length);
+    assert.throws(() => insert.run(99, "evt_missing", "op_missing", "run", "run_missing", 1, null));
+    for (const [index, invalid] of invalidBindings.entries()) {
+      assert.throws(
+        () => validateStorageEventSourceIndexBindingV1(
+          projectSource.eventRowid, invalid, projectSource.event,
+        ),
+        undefined,
+        v6Cases.sourceIndex.invalidBindingFields[index],
+      );
+      assert.throws(
+        () => insert.run(
+          invalid.eventRowid, invalid.eventId, invalid.operationId, invalid.aggregateType,
+          invalid.aggregateId, invalid.aggregateSequence, invalid.messageId,
+        ),
+        undefined,
+        v6Cases.sourceIndex.invalidBindingFields[index],
+      );
+    }
     for (const fixture of v6Cases.sourceIndex.validRows) {
-      validateStorageEventSourceIndexEntryV1({
-        eventRowid: fixture.value[0],
-        eventId: fixture.value[1],
-        operationId: fixture.value[2],
-        aggregateType: fixture.value[3],
-        aggregateId: fixture.value[4],
-        aggregateSequence: fixture.value[5],
-        messageId: fixture.value[6],
-      });
+      const entry = entryFromRow(fixture.value);
+      const source = v6Cases.sourceIndex.sourceEvents.find(
+        (candidate) => candidate.eventRowid === entry.eventRowid,
+      );
+      assert.notEqual(source, undefined, fixture.name);
+      validateStorageEventSourceIndexEntryV1(entry);
+      validateStorageEventSourceIndexBindingV1(entry.eventRowid, entry, source!.event);
       insert.run(...fixture.value);
     }
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     for (const invalid of [
       { eventRowid: 0, eventId: "evt", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
       { eventRowid: 1, eventId: "", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
@@ -1498,10 +1588,10 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
     assert.throws(() => database.prepare("DELETE FROM event_source_index WHERE event_rowid=1").run());
     for (const conflict of [
       [1, "evt_unique", "op_unique", "run", "run_1", 1, null],
-      [3, "evt_project_1", "op_unique", "run", "run_2", 1, null],
-      [3, "evt_unique", "op_project_1", "run", "run_3", 1, null],
-      [3, "evt_unique", "op_unique", "project", "project_1", 1, null],
-      [3, "evt_unique", "op_unique", "run", "run_4", 1, "message_1"],
+      [3, "evt_project_1", "op_project_2", "project", "project_1", 2, null],
+      [3, "evt_project_2", "op_project_1", "project", "project_1", 2, null],
+      [3, "evt_project_2", "op_project_2", "project", "project_1", 1, null],
+      [3, "evt_project_2", "op_project_2", "project", "project_1", 2, "message_1"],
     ] as const) assert.throws(() => insert.run(...conflict));
 
     database.exec("BEGIN IMMEDIATE");
