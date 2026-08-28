@@ -278,6 +278,7 @@ struct InvalidPolicyMutation {
 struct V4Cases {
     v3_migration_cases: Vec<V3MigrationCase>,
     v3_absent_migration_cases: Vec<V3AbsentMigrationCase>,
+    removed_lifecycle_operations: Vec<String>,
     valid_cursors: Vec<NamedValue>,
     invalid_cursors: Vec<NamedValue>,
     valid_cursor_transitions: Vec<CursorTransitionCase>,
@@ -323,7 +324,6 @@ struct V3AbsentMigrationCase {
 struct LifecycleTransitionCaseV2 {
     name: String,
     operation: StorageLifetimeLifecycleOperationV2,
-    witness: Option<Value>,
     previous: Value,
     next: Value,
 }
@@ -803,6 +803,15 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
         .v3_absent_migration_cases
         .iter()
         .any(|case| { case.name == "ready absent" && case.materialization_state == "ready" }));
+    assert_eq!(cases.removed_lifecycle_operations, ["markScanExhausted"]);
+    for operation in &cases.removed_lifecycle_operations {
+        assert!(
+            serde_json::from_value::<StorageLifetimeLifecycleOperationV2>(Value::String(
+                operation.clone(),
+            ))
+            .is_err()
+        );
+    }
     for case in &cases.valid_cursors {
         validate_storage_lifetime_cursor_v2(&case.value).expect(&case.name);
     }
@@ -873,7 +882,6 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
             case.operation,
             &case.previous,
             &case.next,
-            case.witness.as_ref(),
         )
         .expect(&case.name);
     }
@@ -883,11 +891,37 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
                 case.operation,
                 &case.previous,
                 &case.next,
-                case.witness.as_ref(),
             )
             .is_err(),
             "{}",
             case.name
+        );
+    }
+    let direct_forge = cases
+        .invalid_lifecycle_transitions
+        .iter()
+        .find(|case| case.name == "direct lifecycle input cannot set exhaustion")
+        .expect("direct exhaustion forge case");
+    for operation in [
+        StorageLifetimeLifecycleOperationV2::Create,
+        StorageLifetimeLifecycleOperationV2::Arm,
+        StorageLifetimeLifecycleOperationV2::BatchSuccess,
+        StorageLifetimeLifecycleOperationV2::PhaseAdvance,
+        StorageLifetimeLifecycleOperationV2::Cancel,
+        StorageLifetimeLifecycleOperationV2::Fail,
+        StorageLifetimeLifecycleOperationV2::FailureRecordUnavailable,
+        StorageLifetimeLifecycleOperationV2::FinalPublish,
+        StorageLifetimeLifecycleOperationV2::FinalReset,
+        StorageLifetimeLifecycleOperationV2::Append,
+    ] {
+        assert!(
+            validate_storage_lifetime_lifecycle_transition_v2(
+                operation,
+                &direct_forge.previous,
+                &direct_forge.next,
+            )
+            .is_err(),
+            "public operation {operation:?} must not set scanExhausted false to true"
         );
     }
     for case in &cases.valid_verification_evidence {

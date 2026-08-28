@@ -195,6 +195,7 @@ interface V4Cases {
     v4State: string; v4Phase: string; afterScanRowid: number; scanExhausted: boolean;
   }>;
   v3AbsentMigrationCases: Array<{ name: string; materializationState: "pending" | "ready" }>;
+  removedLifecycleOperations: string[];
   validCursors: NamedValue[];
   invalidCursors: NamedValue[];
   validCursorTransitions: CursorTransitionCase[];
@@ -209,11 +210,11 @@ interface V4Cases {
   failClosedReopenPairs: number[];
   validLifecycleTransitions: Array<{
     name: string; operation: Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0];
-    witness: unknown | null; previous: unknown; next: unknown;
+    previous: unknown; next: unknown;
   }>;
   invalidLifecycleTransitions: Array<{
     name: string; operation: Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0];
-    witness: unknown | null; previous: unknown; next: unknown;
+    previous: unknown; next: unknown;
   }>;
   validVerificationEvidence: NamedValue[];
   invalidVerificationEvidence: NamedValue[];
@@ -878,22 +879,47 @@ test("storage-v4 freezes bounded arm, verification, cancellation, and final publ
   for (const index of v4Cases.failClosedReopenPairs) {
     assert.throws(() => validateStorageLifetimeReopenPairV2(v4Cases.validPairs[index].value));
   }
+  assert.deepEqual(v4Cases.removedLifecycleOperations, ["markScanExhausted"]);
+  for (const operation of v4Cases.removedLifecycleOperations) {
+    assert.throws(
+      () => validateStorageLifetimeLifecycleTransitionV2(
+        operation as Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0],
+        v4Cases.validPairs[2]?.value,
+        v4Cases.validPairs[2]?.value,
+      ),
+      undefined,
+      `${operation} must not be representable as a public lifecycle operation`,
+    );
+  }
   for (const fixture of v4Cases.validLifecycleTransitions) {
     assert.deepEqual(
-      validateStorageLifetimeLifecycleTransitionV2(
-        fixture.operation, fixture.previous, fixture.next, fixture.witness,
-      ),
+      validateStorageLifetimeLifecycleTransitionV2(fixture.operation, fixture.previous, fixture.next),
       fixture.next,
       fixture.name,
     );
   }
   for (const fixture of v4Cases.invalidLifecycleTransitions) {
     assert.throws(
-      () => validateStorageLifetimeLifecycleTransitionV2(
-        fixture.operation, fixture.previous, fixture.next, fixture.witness,
-      ),
+      () => validateStorageLifetimeLifecycleTransitionV2(fixture.operation, fixture.previous, fixture.next),
       undefined,
       fixture.name,
+    );
+  }
+  const directForge = v4Cases.invalidLifecycleTransitions.find(
+    (fixture) => fixture.name === "direct lifecycle input cannot set exhaustion",
+  );
+  assert.ok(directForge);
+  const publicOperations: Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0][] = [
+    "create", "arm", "batchSuccess", "phaseAdvance", "cancel", "fail",
+    "failureRecordUnavailable", "finalPublish", "finalReset", "append",
+  ];
+  for (const operation of publicOperations) {
+    assert.throws(
+      () => validateStorageLifetimeLifecycleTransitionV2(
+        operation, directForge.previous, directForge.next,
+      ),
+      undefined,
+      `${operation} must not set scanExhausted false to true`,
     );
   }
   for (const fixture of v4Cases.validVerificationEvidence) {

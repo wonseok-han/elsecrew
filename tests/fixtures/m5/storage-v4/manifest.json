@@ -122,7 +122,8 @@
       "phaseStartScanExhausted": false,
       "eventRowidBound": "afterScanRowidLessThanOrEqualToCutoff",
       "derivedRowidBound": "jsSafeUnsignedIndependentOfCutoff",
-      "markExhausted": "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+      "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "scanExhaustedProofBoundary": "implementationOwnedAndTestedInSidecarNotRepresentableAsPublicJson",
       "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse"
     },
     "scan": {
@@ -143,7 +144,7 @@
       "arm": "pendingToAttemptingCommittedBeforeBatch",
       "success": "derivedRowsCursorAndAttemptingToPendingAtomic",
       "nonemptyBatchScanExhausted": false,
-      "emptyBatchScanExhausted": "markScanExhaustedAtomicWithWitnessOnly",
+      "emptyBatchScanExhausted": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
       "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
       "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
       "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",

@@ -133,7 +133,6 @@ export type StorageLifetimeLifecycleOperationV2 =
   | "create"
   | "arm"
   | "batchSuccess"
-  | "markScanExhausted"
   | "phaseAdvance"
   | "cancel"
   | "fail"
@@ -834,7 +833,8 @@ const STORAGE_LIFETIME_BATCH_POLICY_V2 = {
     phaseStartScanExhausted: false,
     eventRowidBound: "afterScanRowidLessThanOrEqualToCutoff",
     derivedRowidBound: "jsSafeUnsignedIndependentOfCutoff",
-    markExhausted: "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+    scanExhaustedMutationAuthority: "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+    scanExhaustedProofBoundary: "implementationOwnedAndTestedInSidecarNotRepresentableAsPublicJson",
     phaseTransition: "scanExhaustedTrueThenExactNextAtZeroAndFalse",
   },
   scan: {
@@ -849,7 +849,7 @@ const STORAGE_LIFETIME_BATCH_POLICY_V2 = {
     arm: "pendingToAttemptingCommittedBeforeBatch",
     success: "derivedRowsCursorAndAttemptingToPendingAtomic",
     nonemptyBatchScanExhausted: false,
-    emptyBatchScanExhausted: "markScanExhaustedAtomicWithWitnessOnly",
+    emptyBatchScanExhausted: "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
     cancellation: "rollbackBatchOrSavepointThenCommitAttemptingToPending",
     terminalValidationFailure: "rollbackBatchThenCommitAttemptingToFailed",
     failureRecordUnavailable: "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
@@ -1029,9 +1029,7 @@ export function validateStorageLifetimeLifecycleTransitionV2(
   operation: StorageLifetimeLifecycleOperationV2,
   previousValue: unknown,
   nextValue: unknown,
-  witnessValue: unknown | null,
 ): StorageLifetimeMaterializationSnapshotV2 {
-  const emptyBatchObserved = validateStorageLifetimeLifecycleWitnessV2(operation, witnessValue);
   const previous = validateStorageLifetimeMaterializationPairV2(previousValue);
   const next = validateStorageLifetimeMaterializationPairV2(nextValue);
   const previousJob = previous.job;
@@ -1083,14 +1081,6 @@ export function validateStorageLifetimeLifecycleTransitionV2(
       fail("storage lifetime v4 batch success must commit attempting to pending");
     }
     validateStorageLifetimeCursorTransitionV2(jobCursorV2(previousJob), jobCursorV2(nextJob));
-  } else if (operation === "markScanExhausted") {
-    if (!emptyBatchObserved || previousJob.state !== "pending" || nextJob.state !== "pending"
-      || previousJob.scanExhausted || !nextJob.scanExhausted
-      || previousJob.cutoffEventRowid !== nextJob.cutoffEventRowid
-      || previousJob.phase !== nextJob.phase
-      || previousJob.afterScanRowid !== nextJob.afterScanRowid) {
-      fail("storage lifetime v4 scan exhaustion requires explicit exact empty-batch witness");
-    }
   } else if (operation === "phaseAdvance") {
     if (previousJob.state !== "pending" || nextJob.state !== "pending") {
       fail("storage lifetime v4 phase advance requires pending jobs");
@@ -1169,22 +1159,6 @@ function jobCursorV2(job: StorageLifetimeMaterializationJobV2): StorageLifetimeC
     afterScanRowid: job.afterScanRowid,
     scanExhausted: job.scanExhausted,
   };
-}
-
-function validateStorageLifetimeLifecycleWitnessV2(
-  operation: StorageLifetimeLifecycleOperationV2,
-  value: unknown | null,
-): boolean {
-  if (operation !== "markScanExhausted") {
-    if (value !== null) fail("storage lifetime v4 witness is allowed only for markScanExhausted");
-    return false;
-  }
-  const witness = requireObject(value, "storage lifetime v4 empty-batch witness");
-  exactKeys(witness, ["emptyBatchObserved"]);
-  if (witness.emptyBatchObserved !== true) {
-    fail("storage lifetime v4 exhaustion witness must prove an exact empty batch");
-  }
-  return true;
 }
 
 function requireSameJobIdentityV2(

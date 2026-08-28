@@ -393,7 +393,6 @@ pub enum StorageLifetimeLifecycleOperationV2 {
     Create,
     Arm,
     BatchSuccess,
-    MarkScanExhausted,
     PhaseAdvance,
     Cancel,
     Fail,
@@ -401,12 +400,6 @@ pub enum StorageLifetimeLifecycleOperationV2 {
     FinalPublish,
     FinalReset,
     Append,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct StorageLifetimeLifecycleWitnessV2 {
-    pub empty_batch_observed: bool,
 }
 
 pub fn validate_storage_lifetime_v3_preflight_policy_v1(
@@ -1070,7 +1063,8 @@ pub fn validate_storage_lifetime_batch_policy_v2(
             "phaseStartScanExhausted": false,
             "eventRowidBound": "afterScanRowidLessThanOrEqualToCutoff",
             "derivedRowidBound": "jsSafeUnsignedIndependentOfCutoff",
-            "markExhausted": "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+            "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+            "scanExhaustedProofBoundary": "implementationOwnedAndTestedInSidecarNotRepresentableAsPublicJson",
             "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse",
         },
         "scan": {
@@ -1085,7 +1079,7 @@ pub fn validate_storage_lifetime_batch_policy_v2(
             "arm": "pendingToAttemptingCommittedBeforeBatch",
             "success": "derivedRowsCursorAndAttemptingToPendingAtomic",
             "nonemptyBatchScanExhausted": false,
-            "emptyBatchScanExhausted": "markScanExhaustedAtomicWithWitnessOnly",
+            "emptyBatchScanExhausted": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
             "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
             "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
             "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
@@ -1282,9 +1276,7 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
     operation: StorageLifetimeLifecycleOperationV2,
     previous: &Value,
     next: &Value,
-    witness: Option<&Value>,
 ) -> Result<StorageLifetimeMaterializationSnapshotV2, StorageLifetimeContractError> {
-    let empty_batch_observed = validate_storage_lifetime_lifecycle_witness_v2(operation, witness)?;
     let previous = validate_storage_lifetime_materialization_pair_v2(previous)?;
     let next = validate_storage_lifetime_materialization_pair_v2(next)?;
     let previous_job = previous.job.as_ref();
@@ -1391,21 +1383,6 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
                             StorageLifetimeContractError::new(error.to_string())
                         })?,
                     )?;
-                }
-                StorageLifetimeLifecycleOperationV2::MarkScanExhausted => {
-                    if !empty_batch_observed
-                        || previous_job.state != StorageLifetimeJobStateV2::Pending
-                        || next_job.state != StorageLifetimeJobStateV2::Pending
-                        || previous_job.scan_exhausted
-                        || !next_job.scan_exhausted
-                        || previous_job.cutoff_event_rowid != next_job.cutoff_event_rowid
-                        || previous_job.phase != next_job.phase
-                        || previous_job.after_scan_rowid != next_job.after_scan_rowid
-                    {
-                        return lifecycle_error(
-                            "storage lifetime v4 scan exhaustion requires explicit exact empty-batch witness",
-                        );
-                    }
                 }
                 StorageLifetimeLifecycleOperationV2::PhaseAdvance => {
                     if previous_job.state != StorageLifetimeJobStateV2::Pending
@@ -1616,33 +1593,6 @@ fn job_cursor_v2(job: &StorageLifetimeMaterializationJobV2) -> StorageLifetimeCu
         after_scan_rowid: job.after_scan_rowid,
         scan_exhausted: job.scan_exhausted,
     }
-}
-
-fn validate_storage_lifetime_lifecycle_witness_v2(
-    operation: StorageLifetimeLifecycleOperationV2,
-    value: Option<&Value>,
-) -> Result<bool, StorageLifetimeContractError> {
-    if operation != StorageLifetimeLifecycleOperationV2::MarkScanExhausted {
-        if value.is_some() {
-            return Err(StorageLifetimeContractError::new(
-                "storage lifetime v4 witness is allowed only for markScanExhausted",
-            ));
-        }
-        return Ok(false);
-    }
-    let witness: StorageLifetimeLifecycleWitnessV2 =
-        serde_json::from_value(value.cloned().ok_or_else(|| {
-            StorageLifetimeContractError::new(
-                "storage lifetime v4 exhaustion requires empty-batch witness",
-            )
-        })?)
-        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
-    if !witness.empty_batch_observed {
-        return Err(StorageLifetimeContractError::new(
-            "storage lifetime v4 exhaustion witness must prove an exact empty batch",
-        ));
-    }
-    Ok(true)
 }
 
 fn require_same_job_identity_v2(

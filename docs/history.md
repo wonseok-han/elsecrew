@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D private exhaustion authority 수정)
+
+- **위조 가능한 공개 proof 제거**: 직전 검토 수정의 `markScanExhausted`/`emptyBatchObserved` JSON lifecycle 입력은 caller가 빈 keyset 조회 사실을 스스로 주장할 수 있어 증명이 아니었다. Rust·TypeScript 공개 operation과 witness 타입·validator·fixture에서 이를 전부 제거하고, 제거된 literal도 fail-closed로 거부한다. 어떤 공개 lifecycle transition도 `scanExhausted` false→true를 만들 수 없다.
+- **구현 소유 경계**: durable `scan_exhausted`와 v3→v4 false migration은 유지한다. false→true mutation authority는 `sidecarPrivateExactEmptyKeysetQuerySameTransaction`으로 고정하고, 증명은 public JSON으로 표현하지 않으며 sidecar 구현 테스트가 책임진다고 Rust·TypeScript·manifest에 exact 합의했다. protocol lifecycle은 sidecar가 이미 저장한 true state에서 `phaseAdvance`/final publication을 검증할 뿐 그 state를 만들었다고 주장하지 않는다.
+- **검증 범위**: 제거 operation literal과 직접 false→true lifecycle 입력 회귀를 Rust·TypeScript golden에 추가했다. sidecar 구현은 이 contract branch의 소유 범위 밖이므로 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 exhaustion review 수정)
 
 - **P1 durable exhaustion proof**: `afterScanRowid=0`만으로 빈 derived table과 아직 검사하지 않은 table을 구분할 수 없어 phase chain을 건너뛰고 ready를 게시할 수 있던 결함을 수정했다. v4 job에 `scan_exhausted`를 추가하고 migration은 모든 v3 job을 보수적으로 false로 옮긴다. nonempty batch·arm·cancel·failure는 false/current proof를 보존하며, pending current phase에서 `emptyBatchObserved=true` witness를 받은 `markScanExhausted`만 false→true를 허용한다. 별도 `phaseAdvance`는 true인 exact 직전 phase만 다음 phase/rowid 0/false로 옮기고, final publish와 max-rowid reset도 exhausted `verifyBaselines`만 받는다.
