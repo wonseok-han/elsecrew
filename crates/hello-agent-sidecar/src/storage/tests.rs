@@ -4,6 +4,8 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
+
 fn database() -> (TempDir, PathBuf) {
     let root = tempfile::tempdir().expect("temporary directory");
     let path = root.path().join("hello-agent.sqlite3");
@@ -69,11 +71,11 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 }
 
 #[test]
-fn fresh_database_applies_exact_additive_v2_and_reopens_idempotently() {
+fn fresh_database_applies_exact_v3_and_reopens_idempotently() {
     let (_root, path) = database();
     let storage = Storage::open(&path).expect("fresh storage");
     verify_schema(&storage.connection).expect("v1 schema");
-    verify_schema_v2(&storage.connection).expect("v2 schema");
+    verify_schema_v3(&storage.connection).expect("v3 schema");
     assert_eq!(
         storage
             .connection
@@ -94,12 +96,23 @@ fn fresh_database_applies_exact_additive_v2_and_reopens_idempotently() {
                 |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
-        (2, "pending".to_string())
+        (3, "pending".to_string())
+    );
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT count(*) FROM lifetime_materialization_job;",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        0
     );
     drop(storage);
 
     let reopened = Storage::open(&path).expect("idempotent reopen");
-    verify_schema_v2(&reopened.connection).expect("reopened v2 schema");
+    verify_schema_v3(&reopened.connection).expect("reopened v3 schema");
 }
 
 #[test]
@@ -120,7 +133,7 @@ fn populated_v1_migrates_without_changing_rows_triggers_or_materializing() {
     storage
         .register_app_instance(&ready("sidecar_v1"))
         .expect("app instance");
-    drop_v2_schema(&storage.connection);
+    drop_lifetime_schema(&storage.connection);
     let tables = [
         "schema_meta",
         "app_instances",
@@ -166,19 +179,23 @@ fn populated_v1_migrates_without_changing_rows_triggers_or_materializing() {
             .unwrap(),
         AppendOutcome::Committed
     );
-    let empty_v2: u32 = storage
+    let empty_lifetime: u32 = storage
         .connection
         .query_row(
             "SELECT (SELECT count(*) FROM ledger_baselines) + \
                     (SELECT count(*) FROM operation_receipts) + \
                     (SELECT count(*) FROM chat_messages) + \
                     (SELECT count(*) FROM prepared_workspaces) + \
-                    (SELECT count(*) FROM maintenance_jobs);",
+                    (SELECT count(*) FROM maintenance_jobs) + \
+                    (SELECT count(*) FROM lifetime_materialization_job);",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(empty_v2, 0, "startup must not backfill or materialize");
+    assert_eq!(
+        empty_lifetime, 0,
+        "startup must not backfill, create a job, or materialize"
+    );
 }
 
 #[test]
@@ -256,6 +273,194 @@ fn v2_migration_failure_rolls_back_and_partial_or_tampered_schema_fails_closed()
         .err()
         .expect("tampered v2 metadata must fail");
     assert_eq!(error.kind(), "storageSchemaMismatch");
+}
+
+#[test]
+fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status() {
+    for state in ["pending", "ready"] {
+        let (_root, path) = database();
+        let storage = populated_v2_storage(&path, state);
+        let preserved_tables = [
+            "schema_meta",
+            "app_instances",
+            "events",
+            "projects",
+            "chats",
+            "runs",
+            "locks",
+            "ledger_baselines",
+            "operation_receipts",
+            "chat_messages",
+            "prepared_workspaces",
+            "maintenance_jobs",
+        ];
+        let rows_before = preserved_tables
+            .iter()
+            .map(|table| (*table, table_rows(&storage.connection, table)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let guarded_schema_before = guarded_schema_objects(&storage.connection);
+        let compaction_before = storage.lifetime_status().unwrap().compaction;
+        drop(storage);
+
+        let mut upgraded = Storage::open(&path).expect("upgrade exact populated v2");
+        verify_schema_v3(&upgraded.connection).expect("exact v3");
+        assert_eq!(
+            upgraded
+                .connection
+                .query_row(
+                    "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            state
+        );
+        assert_eq!(
+            upgraded
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM lifetime_materialization_job;",
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .unwrap(),
+            0,
+            "migration must not create a materialization job"
+        );
+        for table in preserved_tables {
+            assert_eq!(
+                table_rows(&upgraded.connection, table),
+                rows_before[table],
+                "{state}: {table}"
+            );
+        }
+        assert_eq!(
+            guarded_schema_objects(&upgraded.connection),
+            guarded_schema_before
+        );
+        assert_eq!(
+            upgraded.lifetime_status().unwrap().compaction,
+            compaction_before
+        );
+        if state == "pending" {
+            upgraded
+                .connection
+                .execute_batch(
+                    "INSERT INTO lifetime_materialization_job(\
+                       singleton,job_id,state,cutoff_event_rowid,phase,after_event_rowid,\
+                       failure_kind,created_at,updated_at,completed_at\
+                     ) VALUES (1,'lifetime_status_isolation','pending',2,'receipts',0,NULL,\
+                       '2026-08-28T06:03:00Z','2026-08-28T06:03:00Z',NULL);",
+                )
+                .unwrap();
+            assert_eq!(
+                upgraded.lifetime_status().unwrap().compaction,
+                compaction_before,
+                "dedicated materialization state must not affect compaction status"
+            );
+            upgraded
+                .connection
+                .execute_batch("DELETE FROM lifetime_materialization_job;")
+                .unwrap();
+        }
+        assert!(upgraded
+            .connection
+            .execute("DELETE FROM events;", [])
+            .is_err());
+        assert_eq!(
+            upgraded
+                .append_event(&event(
+                    "evt_project_v2_second",
+                    &format!("op_project_v2_second_{state}"),
+                    "project",
+                    "project_v2",
+                    2,
+                    json!({"canonical_path":"/fixture/project-v2","project_id":"project_v2","revision":2}),
+                    "2026-08-28T06:10:00Z",
+                ))
+                .unwrap(),
+            AppendOutcome::Committed
+        );
+    }
+}
+
+#[test]
+fn unsafe_v2_materialization_states_fail_before_schema_or_data_mutation() {
+    for state in ["materializing", "failed"] {
+        let (_root, path) = database();
+        let storage = populated_v2_storage(&path, state);
+        let snapshot_before = database_snapshot(&storage.connection);
+        drop(storage);
+        let bytes_before = fs::read(&path).unwrap();
+
+        let error = Storage::open(&path)
+            .err()
+            .expect("unsafe v2 state must fail closed");
+        assert_eq!(error.kind(), "storageSchemaMismatch");
+
+        let reopened = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&reopened), snapshot_before, "{state}");
+        drop(reopened);
+        assert_eq!(fs::read(&path).unwrap(), bytes_before, "{state}");
+    }
+}
+
+#[test]
+fn v3_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
+    let (_root, partial_path) = database();
+    let partial = Storage::open(&partial_path).unwrap();
+    partial
+        .connection
+        .execute_batch("DROP TABLE lifetime_materialization_job;")
+        .unwrap();
+    drop(partial);
+    let error = Storage::open(&partial_path)
+        .err()
+        .expect("partial v3 must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+
+    let (_root, extra_path) = database();
+    let extra = Storage::open(&extra_path).unwrap();
+    extra
+        .connection
+        .execute_batch("CREATE TABLE unexpected_v3(value TEXT) STRICT;")
+        .unwrap();
+    drop(extra);
+    let error = Storage::open(&extra_path)
+        .err()
+        .expect("extra v3 must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+
+    let (_root, mismatch_path) = database();
+    let mismatch = populated_v2_storage(&mismatch_path, "pending");
+    mismatch
+        .connection
+        .execute_batch(v3_job_table_statement())
+        .unwrap();
+    drop(mismatch);
+    let error = Storage::open(&mismatch_path)
+        .err()
+        .expect("v3 job table with v2 metadata must fail");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+}
+
+#[test]
+fn v3_migration_failure_rolls_back_to_exact_populated_v2() {
+    let (_root, path) = database();
+    let mut storage = populated_v2_storage(&path, "ready");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let invalid = MIGRATION_V3.replacen(
+        "CREATE TABLE lifetime_materialization_job",
+        "INVALID SQL;\nCREATE TABLE lifetime_materialization_job",
+        1,
+    );
+
+    let error = execute_migration(&mut storage.connection, &invalid, "v3 injected")
+        .expect_err("injected v3 migration must fail");
+    assert_eq!(error.kind(), "migrationFailed");
+    assert!(storage.connection.is_autocommit());
+    verify_schema_v2(&storage.connection).expect("rollback restored exact v2");
+    assert_eq!(database_snapshot(&storage.connection), snapshot_before);
 }
 
 #[test]
@@ -506,10 +711,11 @@ fn database_symlink_is_rejected_without_touching_target() {
     assert_eq!(fs::read(&target).unwrap(), b"not a database");
 }
 
-fn drop_v2_schema(connection: &Connection) {
+fn drop_lifetime_schema(connection: &Connection) {
     connection
         .execute_batch(
-            "DROP TABLE maintenance_jobs;\
+            "DROP TABLE lifetime_materialization_job;\
+             DROP TABLE maintenance_jobs;\
              DROP TABLE prepared_workspaces;\
              DROP TABLE chat_messages;\
              DROP TABLE operation_receipts;\
@@ -518,6 +724,111 @@ fn drop_v2_schema(connection: &Connection) {
              DROP INDEX chats_identity_project;",
         )
         .expect("remove additive v2 objects for v1 migration fixture");
+}
+
+fn populated_v2_storage(path: &Path, state: &str) -> Storage {
+    let mut connection = Connection::open(path).expect("open v2 fixture database");
+    configure_connection(&connection).expect("configure v2 fixture database");
+    migrate(&mut connection, MIGRATION_V1).expect("apply v1 fixture");
+    let mut storage = Storage {
+        connection,
+        path: path.to_path_buf(),
+    };
+    storage
+        .append_event(&event(
+            "evt_project_v2",
+            "op_project_v2",
+            "project",
+            "project_v2",
+            1,
+            json!({"canonical_path":"/fixture/project-v2","project_id":"project_v2"}),
+            "2026-08-28T06:00:00Z",
+        ))
+        .unwrap();
+    storage
+        .append_event(&event(
+            "evt_chat_v2",
+            "op_chat_v2",
+            "chat",
+            "chat_v2",
+            1,
+            json!({"chat_id":"chat_v2","messages":[],"project_id":"project_v2"}),
+            "2026-08-28T06:00:01Z",
+        ))
+        .unwrap();
+    storage.connection.execute_batch(MIGRATION_V2).unwrap();
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO ledger_baselines(\
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,\
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at\
+             ) VALUES ('baseline_v2','project','project_v2',1,1,'{}','baseline-digest','2026-08-28T06:01:00Z','2026-08-28T06:01:00Z');\
+             INSERT INTO operation_receipts(\
+               operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,\
+               payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,\
+               canonical_payload_digest_version,canonical_payload_digest_format,canonical_payload_digest,\
+               event_timestamp,materialized_at\
+             ) VALUES ('receipt_op_v2','receipt_evt_v2','project','receipt_project_v2',1,\
+               'project.upserted',1,'{}','sha256',1,'lowercaseHex64',\
+               '0000000000000000000000000000000000000000000000000000000000000000',\
+               '2026-08-28T06:01:00Z','2026-08-28T06:01:00Z');\
+             INSERT INTO chat_messages(\
+               message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at\
+             ) VALUES ('message_v2','chat_v2',1,'{}','message-digest','2026-08-28T06:01:00Z','2026-08-28T06:01:00Z');\
+             INSERT INTO prepared_workspaces(\
+               preparation_id,project_id,worktree_id,workspace_identity,binding_state,bound_chat_id,\
+               canonical_record_json,record_digest,created_at,updated_at,materialized_at\
+             ) VALUES ('preparation_v2','project_v2','worktree_v2','workspace_v2','bound','chat_v2',\
+               '{}','workspace-digest','2026-08-28T06:01:00Z','2026-08-28T06:01:00Z','2026-08-28T06:01:00Z');\
+             INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,completed_at,last_successful_at,created_at,updated_at\
+             ) VALUES ('compaction_v2','losslessCompaction','failed','2026-08-28T06:02:00Z',\
+               '2026-08-28T06:01:30Z','2026-08-28T06:01:00Z','2026-08-28T06:02:00Z');",
+        )
+        .unwrap();
+    storage
+        .connection
+        .execute(
+            "UPDATE storage_schema_meta SET materialization_state=?1 WHERE singleton=1;",
+            [state],
+        )
+        .unwrap();
+    if matches!(state, "pending" | "ready") {
+        verify_schema_v2(&storage.connection).expect("exact populated v2 fixture");
+    }
+    storage
+}
+
+fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
+    schema_objects(connection)
+        .unwrap()
+        .into_iter()
+        .filter(|(_, name, _, _)| {
+            name != "storage_schema_meta" && name != "lifetime_materialization_job"
+        })
+        .collect()
+}
+
+fn database_snapshot(connection: &Connection) -> DatabaseSnapshot {
+    let schemas = schema_objects(connection).unwrap();
+    let tables = schemas
+        .iter()
+        .filter(|(kind, _, _, _)| kind == "table")
+        .map(|(_, name, _, _)| (name.clone(), table_rows(connection, name)))
+        .collect();
+    (schemas, tables)
+}
+
+fn v3_job_table_statement() -> &'static str {
+    let start = MIGRATION_V3
+        .find("CREATE TABLE lifetime_materialization_job")
+        .expect("canonical v3 job table start");
+    let remaining = &MIGRATION_V3[start..];
+    let end = remaining
+        .find("\n\nCOMMIT;")
+        .expect("canonical v3 job table end");
+    &remaining[..end]
 }
 
 fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {

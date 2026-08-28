@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage schema v3 sidecar migration)
+
+- **exact v3 소비 구현**: `Storage::open`이 새 DB는 v1→exact v2 검증→v3 순서로 올리고, 기존 exact v2는 `pending|ready` 상태만 byte/schema mutation 전에 허용한 뒤 canonical v3 SQL을 원자 적용한다. exact v3 재시작은 no-op이며 부분·추가 object, index/table drift, v3 table과 metadata version 불일치는 fail-closed한다. `materializing|failed` v2는 DB bytes·schema·rows가 바뀌지 않은 채 거부한다.
+- **보존·격리 회귀**: pending/ready populated v2의 모든 v1/v2 원장·projection·receipt·public message·prepared workspace·baseline·maintenance 행과 기존 table/index/append-only trigger SQL을 그대로 보존하고 job을 만들지 않으며, 이후 ledger append가 계속 동작한다. migration 중간 실패 주입은 exact populated v2로 rollback한다. 전용 `lifetime_materialization_job` 행은 기존 `maintenance_jobs` 기반 compaction status에 영향을 주지 않는다.
+- **검증·경계**: focused storage 14개, sidecar 전체 95개+stdio 10개(1 ignored), protocol lifetime 5개, focused rustfmt와 strict sidecar clippy, `git diff --check`를 통과했다. batch worker·startup/idle scheduling·wire/UI·compaction/삭제·provider는 변경하지 않았고 기존 unbounded internal materialization도 그대로다. 다음은 이 v3 cursor를 소비하는 bounded batch/cancel 구현과 독립 리뷰다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D schema v3 preflight 검토 수정)
 
 - **P2 preflight 보강**: exact storage-v2 DDL만 확인하면 schema-valid `materializing/failed`를 v3로 그대로 복사해 시작부터 fail-closed 상태를 영속할 수 있었다. 어떤 DDL·data mutation보다 먼저 exact v2와 `materialization_state IN (pending, ready)`를 함께 검증하고, 그 밖의 상태는 schema/data byte-zero mutation으로 거부하도록 계약을 좁혔다.

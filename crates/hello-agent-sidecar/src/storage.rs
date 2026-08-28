@@ -1,7 +1,7 @@
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_protocol::storage_lifetime_v1::{
-    StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1,
+    StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, recover_unclean_shutdown_v1, replay_ledger_v1,
@@ -20,6 +20,8 @@ use uuid::Uuid;
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
     include_str!("../../../tests/fixtures/m5/storage-v2/migration-v1-to-v2.sql");
+const MIGRATION_V3: &str =
+    include_str!("../../../tests/fixtures/m5/storage-v3/migration-v2-to-v3.sql");
 type SchemaObject = (String, String, String, Option<String>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,8 +91,14 @@ impl Storage {
         configure_connection(&connection)?;
         migrate(&mut connection, MIGRATION_V1)?;
         verify_schema(&connection)?;
-        migrate_v2(&mut connection)?;
-        verify_schema_v2(&connection)?;
+        if is_storage_v3_candidate(&connection)? {
+            verify_schema_v3(&connection)?;
+        } else {
+            migrate_v2(&mut connection)?;
+            verify_schema_v2(&connection)?;
+            migrate_v3(&mut connection)?;
+            verify_schema_v3(&connection)?;
+        }
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(sqlite_error)?;
@@ -816,6 +824,54 @@ fn migrate_v2(connection: &mut Connection) -> Result<(), SidecarError> {
     execute_migration(connection, MIGRATION_V2, "v2")
 }
 
+fn is_storage_v3_candidate(connection: &Connection) -> Result<bool, SidecarError> {
+    let job_table_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='lifetime_materialization_job');",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    if job_table_exists {
+        return Ok(true);
+    }
+    let metadata_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_schema_meta');",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    if !metadata_exists {
+        return Ok(false);
+    }
+    let storage_version: Option<u32> = connection
+        .query_row(
+            "SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema metadata version is unreadable",
+            )
+        })?;
+    Ok(storage_version == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3))
+}
+
+fn migrate_v3(connection: &mut Connection) -> Result<(), SidecarError> {
+    if schema_objects(connection)? != reference_schema_v2()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema is not the exact storage v2 migration base",
+        ));
+    }
+    verify_schema_v2(connection)?;
+    execute_migration(connection, MIGRATION_V3, "v3")
+}
+
 fn execute_migration(
     connection: &mut Connection,
     migration: &str,
@@ -948,6 +1004,65 @@ fn verify_schema_v2(connection: &Connection) -> Result<(), SidecarError> {
     Ok(())
 }
 
+fn verify_schema_v3(connection: &Connection) -> Result<(), SidecarError> {
+    let metadata: (u32, u32, String, String, String) = connection
+        .query_row(
+            "SELECT storage_schema_version, protocol_version, migration_state, materialization_state, migrated_at FROM storage_schema_meta WHERE singleton = 1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v3 metadata is missing or unreadable",
+            )
+        })?;
+    let metadata_count: u32 = connection
+        .query_row("SELECT count(*) FROM storage_schema_meta;", [], |row| {
+            row.get(0)
+        })
+        .map_err(sqlite_error)?;
+    let migrated_at_valid: Option<bool> = connection
+        .query_row(
+            "SELECT migrated_at = strftime('%Y-%m-%d %H:%M:%S', migrated_at) FROM storage_schema_meta WHERE singleton = 1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v3 migration timestamp is unreadable",
+            )
+        })?;
+    if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V3
+        || metadata.1 != PROTOCOL_VERSION
+        || metadata.2 != "ready"
+        || !matches!(metadata.3.as_str(), "pending" | "ready")
+        || metadata_count != 1
+        || migrated_at_valid != Some(true)
+    {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "storage schema v3 metadata does not match the supported migration",
+        ));
+    }
+    if schema_objects(connection)? != reference_schema_v3()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema does not exactly match the storage v3 golden schema",
+        ));
+    }
+    Ok(())
+}
+
 fn reference_schema_v2() -> Result<Vec<SchemaObject>, SidecarError> {
     let connection = Connection::open_in_memory().map_err(sqlite_error)?;
     connection
@@ -956,6 +1071,18 @@ fn reference_schema_v2() -> Result<Vec<SchemaObject>, SidecarError> {
     connection
         .execute_batch(MIGRATION_V2)
         .map_err(sqlite_error)?;
+    schema_objects(&connection)
+}
+
+fn reference_schema_v3() -> Result<Vec<SchemaObject>, SidecarError> {
+    let mut connection = Connection::open_in_memory().map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V1)
+        .map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V2)
+        .map_err(sqlite_error)?;
+    execute_migration(&mut connection, MIGRATION_V3, "reference v3")?;
     schema_objects(&connection)
 }
 
