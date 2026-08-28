@@ -44,8 +44,81 @@
     "existingEventsDeleted": false,
     "existingProjectionColumnsChanged": false,
     "startupReadyBeforeMaterialization": true,
-    "materializationTrigger": "idleAfterReady",
+    "materializationTrigger": "idleAfterSidecarHandshakeReady",
+    "materializationStateReadyRequired": false,
     "downgradePolicy": "openQuestion"
+  },
+  "batching": {
+    "schemaVersion": 1,
+    "casesFile": "batching-cases.json",
+    "guards": {
+      "maxSourceRowsPerBatch": 100,
+      "maxCanonicalSourcePayloadBytesPerBatch": 1048576,
+      "singleSourcePayloadOversize": "contractError",
+      "callerConfigurable": false
+    },
+    "cursor": {
+      "schemaVersion": 1,
+      "phases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify",
+        "compact"
+      ],
+      "terminalPhasesRequireAfterAtCutoff": [
+        "verify",
+        "compact"
+      ]
+    },
+    "scan": {
+      "predicate": "rowid > afterEventRowid AND rowid <= cutoffEventRowid",
+      "orderBy": "rowid",
+      "offsetAllowed": false
+    },
+    "transaction": {
+      "cadence": "oneBatchOneBeginImmediatePerIdleTurn",
+      "sourceAuthority": "v1EventsAndProjections",
+      "committedDerivedRowsMayPersist": true,
+      "committedProgressState": "pending",
+      "implementationMayCommitRunning": false
+    },
+    "cancellation": {
+      "beforeBegin": "noMutation",
+      "checks": [
+        "beforeEachSourceRow",
+        "afterEachSourceRow",
+        "immediatelyPrecommit"
+      ],
+      "duringTransaction": "rollbackCurrentBatch",
+      "outcome": "suspended",
+      "crash": "rollbackCurrentBatchResumePrecedingCommittedPendingCursor",
+      "committedBatchWinsAfterFinalPrecommitCheck": true
+    },
+    "job": {
+      "maximumPendingOrRunning": 1,
+      "persistedFailClosedStates": [
+        "running",
+        "materializing",
+        "failed"
+      ]
+    },
+    "append": {
+      "readyInvalidation": "pendingInSameAppendTransaction",
+      "readyPublication": "separateAtomicCatchUpVerificationTransaction"
+    },
+    "rollback": {
+      "derivedPreparationBatchesMayPersist": true,
+      "sourceLedgerMutationAtomicRollbackRequired": true,
+      "compactionTriggerChangeAtomicRollbackRequired": true
+    },
+    "activation": {
+      "ledgerDeletionEnabled": false,
+      "automaticSchedulingEnabled": false,
+      "compactionImplementationEnabled": false,
+      "statusWireEnabled": false
+    }
   },
   "compaction": {
     "mode": "losslessInternalOnly",
@@ -67,6 +140,11 @@
     "oldOperationDuplicateConflictPreserved": true,
     "actualLegacyNamespacePreserved": true,
     "failureRollbackRequired": true,
+    "failureRollbackScope": {
+      "derivedPreparationBatchesMayPersist": true,
+      "sourceLedgerMutationAtomicRollbackRequired": true,
+      "compactionTriggerChangeAtomicRollbackRequired": true
+    },
     "logicalDeleteBeforeVerification": false,
     "vacuumIsLogicalSuccessCriterion": false,
     "physicalCleanupEnabled": false,

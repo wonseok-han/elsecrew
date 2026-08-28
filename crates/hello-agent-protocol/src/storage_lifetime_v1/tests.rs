@@ -11,6 +11,7 @@ struct Manifest {
     protocol_version: u32,
     wire: WireContract,
     migration: MigrationContract,
+    batching: Value,
     compaction: CompactionContract,
     public_status_privacy: PrivacyContract,
 }
@@ -41,6 +42,7 @@ struct MigrationContract {
     existing_projection_columns_changed: bool,
     startup_ready_before_materialization: bool,
     materialization_trigger: String,
+    materialization_state_ready_required: bool,
     downgrade_policy: String,
 }
 
@@ -53,6 +55,7 @@ struct CompactionContract {
     old_operation_duplicate_conflict_preserved: bool,
     actual_legacy_namespace_preserved: bool,
     failure_rollback_required: bool,
+    failure_rollback_scope: FailureRollbackScope,
     logical_delete_before_verification: bool,
     vacuum_is_logical_success_criterion: bool,
     physical_cleanup_enabled: bool,
@@ -62,6 +65,14 @@ struct CompactionContract {
     chat_messages_immutable: bool,
     operation_receipt: OperationReceiptContract,
     never_cleanup_states: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FailureRollbackScope {
+    derived_preparation_batches_may_persist: bool,
+    source_ledger_mutation_atomic_rollback_required: bool,
+    compaction_trigger_change_atomic_rollback_required: bool,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +145,29 @@ struct InvalidOperationReceiptCase {
     receipt: OperationReceiptV2,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchingCases {
+    valid_cursors: Vec<NamedValue>,
+    valid_payload_batches: Vec<NamedValue>,
+    invalid_cursors: Vec<NamedValue>,
+    invalid_payload_batches: Vec<NamedValue>,
+    invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+struct NamedValue {
+    name: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+struct InvalidPolicyMutation {
+    name: String,
+    path: Vec<String>,
+    replacement: Value,
+}
+
 #[test]
 fn storage_v2_golden_is_additive_and_keeps_d0a_non_destructive() {
     let (root, manifest) = manifest();
@@ -171,7 +205,11 @@ fn storage_v2_golden_is_additive_and_keeps_d0a_non_destructive() {
     assert!(!manifest.migration.existing_events_deleted);
     assert!(!manifest.migration.existing_projection_columns_changed);
     assert!(manifest.migration.startup_ready_before_materialization);
-    assert_eq!(manifest.migration.materialization_trigger, "idleAfterReady");
+    assert_eq!(
+        manifest.migration.materialization_trigger,
+        "idleAfterSidecarHandshakeReady"
+    );
+    assert!(!manifest.migration.materialization_state_ready_required);
     assert_eq!(manifest.migration.downgrade_policy, "openQuestion");
 
     let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read migration");
@@ -252,6 +290,50 @@ fn rust_validates_exact_privacy_safe_storage_status_cases() {
 }
 
 #[test]
+fn rust_validates_bounded_keyset_progress_cancellation_and_atomic_rollback() {
+    let (root, manifest) = manifest();
+    validate_storage_lifetime_batch_policy_v1(&manifest.batching).expect("fixed batch policy");
+    let cases_file = manifest
+        .batching
+        .get("casesFile")
+        .and_then(Value::as_str)
+        .expect("batching cases file");
+    let cases: BatchingCases = read_json(root.join(cases_file));
+
+    for case in cases.valid_cursors {
+        validate_storage_lifetime_cursor_v1(&case.value).expect(&case.name);
+    }
+    for case in cases.valid_payload_batches {
+        let payloads: Vec<u64> = serde_json::from_value(case.value).expect(&case.name);
+        validate_storage_lifetime_batch_source_payloads_v1(&payloads).expect(&case.name);
+    }
+    for case in cases.invalid_cursors {
+        assert!(
+            validate_storage_lifetime_cursor_v1(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_payload_batches {
+        let payloads: Vec<u64> = serde_json::from_value(case.value).expect(&case.name);
+        assert!(
+            validate_storage_lifetime_batch_source_payloads_v1(&payloads).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_policy_mutations {
+        let mut invalid = manifest.batching.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_batch_policy_v1(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+}
+
+#[test]
 fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     let (root, manifest) = manifest();
     assert_eq!(manifest.compaction.mode, "losslessInternalOnly");
@@ -273,6 +355,24 @@ fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     );
     assert!(manifest.compaction.actual_legacy_namespace_preserved);
     assert!(manifest.compaction.failure_rollback_required);
+    assert!(
+        manifest
+            .compaction
+            .failure_rollback_scope
+            .derived_preparation_batches_may_persist
+    );
+    assert!(
+        manifest
+            .compaction
+            .failure_rollback_scope
+            .source_ledger_mutation_atomic_rollback_required
+    );
+    assert!(
+        manifest
+            .compaction
+            .failure_rollback_scope
+            .compaction_trigger_change_atomic_rollback_required
+    );
     assert!(!manifest.compaction.logical_delete_before_verification);
     assert!(!manifest.compaction.vacuum_is_logical_success_criterion);
     assert!(!manifest.compaction.physical_cleanup_enabled);
@@ -369,4 +469,19 @@ fn manifest() -> (PathBuf, Manifest) {
 fn read_json<T: for<'de> Deserialize<'de>>(path: PathBuf) -> T {
     let source = fs::read(path).expect("read fixture");
     serde_json::from_slice(&source).expect("decode fixture")
+}
+
+fn set_value_path(target: &mut Value, path: &[String], replacement: Value) {
+    let (last, parents) = path.split_last().expect("non-empty mutation path");
+    let mut current = target;
+    for segment in parents {
+        current = current
+            .as_object_mut()
+            .and_then(|object| object.get_mut(segment))
+            .expect("policy mutation parent");
+    }
+    current
+        .as_object_mut()
+        .expect("policy mutation object")
+        .insert(last.clone(), replacement);
 }

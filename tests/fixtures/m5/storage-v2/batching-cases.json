@@ -1,0 +1,233 @@
+{
+  "validCursors": [
+    {
+      "name": "initial empty receipts scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 0,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "resumable workspaces scan",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "workspaces",
+        "afterEventRowid": 100
+      }
+    },
+    {
+      "name": "verify begins only at cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "verify",
+        "afterEventRowid": 250
+      }
+    },
+    {
+      "name": "compact begins only at cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 250,
+        "phase": "compact",
+        "afterEventRowid": 250
+      }
+    }
+  ],
+  "validPayloadBatches": [
+    {
+      "name": "empty batch",
+      "value": []
+    },
+    {
+      "name": "one source at exact byte limit",
+      "value": [1048576]
+    },
+    {
+      "name": "multiple sources at exact summed byte limit",
+      "value": [524288, 262144, 262144]
+    }
+  ],
+  "invalidCursors": [
+    {
+      "name": "malformed cursor has unknown field",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "offset": 0
+      }
+    },
+    {
+      "name": "invalid phase",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "cleanup",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "after rowid exceeds cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "messages",
+        "afterEventRowid": 11
+      }
+    },
+    {
+      "name": "verify before cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "verify",
+        "afterEventRowid": 9
+      }
+    },
+    {
+      "name": "compact before cutoff",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "compact",
+        "afterEventRowid": 9
+      }
+    },
+    {
+      "name": "unsafe cutoff rowid",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 9007199254740992,
+        "phase": "receipts",
+        "afterEventRowid": 0
+      }
+    },
+    {
+      "name": "unsafe after rowid",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 9007199254740991,
+        "phase": "receipts",
+        "afterEventRowid": 9007199254740992
+      }
+    },
+    {
+      "name": "caller cannot override row limit",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "maxSourceRowsPerBatch": 10
+      }
+    },
+    {
+      "name": "caller cannot override payload limit",
+      "value": {
+        "schemaVersion": 1,
+        "cutoffEventRowid": 10,
+        "phase": "receipts",
+        "afterEventRowid": 0,
+        "maxCanonicalSourcePayloadBytesPerBatch": 2048
+      }
+    }
+  ],
+  "invalidPayloadBatches": [
+    {
+      "name": "more than 100 source rows",
+      "value": [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0
+      ]
+    },
+    {
+      "name": "single source exceeds 1 MiB",
+      "value": [1048577]
+    },
+    {
+      "name": "summed source payload exceeds 1 MiB",
+      "value": [524289, 524288]
+    }
+  ],
+  "invalidPolicyMutations": [
+    {
+      "name": "row guard cannot be overridden",
+      "path": ["guards", "maxSourceRowsPerBatch"],
+      "replacement": 101
+    },
+    {
+      "name": "limits are not caller configurable",
+      "path": ["guards", "callerConfigurable"],
+      "replacement": true
+    },
+    {
+      "name": "offset scan is forbidden",
+      "path": ["scan", "offsetAllowed"],
+      "replacement": true
+    },
+    {
+      "name": "committed progress cannot be running",
+      "path": ["transaction", "committedProgressState"],
+      "replacement": "running"
+    },
+    {
+      "name": "implementation cannot commit running",
+      "path": ["transaction", "implementationMayCommitRunning"],
+      "replacement": true
+    },
+    {
+      "name": "cancellation is not success",
+      "path": ["cancellation", "outcome"],
+      "replacement": "succeeded"
+    },
+    {
+      "name": "only one active lifetime job",
+      "path": ["job", "maximumPendingOrRunning"],
+      "replacement": 2
+    },
+    {
+      "name": "derived preparation batches may persist",
+      "path": ["rollback", "derivedPreparationBatchesMayPersist"],
+      "replacement": false
+    },
+    {
+      "name": "source mutation requires atomic rollback",
+      "path": ["rollback", "sourceLedgerMutationAtomicRollbackRequired"],
+      "replacement": false
+    },
+    {
+      "name": "compaction trigger change requires atomic rollback",
+      "path": ["rollback", "compactionTriggerChangeAtomicRollbackRequired"],
+      "replacement": false
+    },
+    {
+      "name": "ready invalidation stays in append transaction",
+      "path": ["append", "readyInvalidation"],
+      "replacement": "separateTransaction"
+    },
+    {
+      "name": "ready publication stays separate",
+      "path": ["append", "readyPublication"],
+      "replacement": "sameAppendTransaction"
+    },
+    {
+      "name": "materialization cannot delete ledger rows",
+      "path": ["activation", "ledgerDeletionEnabled"],
+      "replacement": true
+    }
+  ]
+}

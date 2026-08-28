@@ -26,6 +26,21 @@ export const STORAGE_LIFETIME_INDEXES_V2 = [
 export const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2 = "sha256" as const;
 export const OPERATION_RECEIPT_DIGEST_VERSION_V2 = 1 as const;
 export const OPERATION_RECEIPT_DIGEST_FORMAT_V2 = "lowercaseHex64" as const;
+export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
+export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1 = 1 as const;
+export const STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1 = 100 as const;
+export const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1 = 1_048_576 as const;
+export const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1 =
+  "rowid > afterEventRowid AND rowid <= cutoffEventRowid" as const;
+export const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1 = "rowid" as const;
+export const STORAGE_LIFETIME_PHASES_V1 = [
+  "receipts",
+  "messages",
+  "workspaces",
+  "baselines",
+  "verify",
+  "compact",
+] as const;
 export const LOSSLESS_COMPACTION_STEPS_V1 = [
   "beginImmediate",
   "freezeCutoff",
@@ -61,6 +76,70 @@ export const NEVER_CLEANUP_STATES_V1 = [
 
 export type StoragePressureCollectionStatusV1 = "available" | "unavailable";
 export type StorageCompactionAttemptStatusV1 = "neverRun" | "succeeded" | "failed";
+export type StorageLifetimePhaseV1 = typeof STORAGE_LIFETIME_PHASES_V1[number];
+
+export interface StorageLifetimeCursorV1 {
+  schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1;
+  cutoffEventRowid: number;
+  phase: StorageLifetimePhaseV1;
+  afterEventRowid: number;
+}
+
+export interface StorageLifetimeBatchPolicyV1 {
+  schemaVersion: typeof STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1;
+  casesFile: "batching-cases.json";
+  guards: {
+    maxSourceRowsPerBatch: typeof STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1;
+    maxCanonicalSourcePayloadBytesPerBatch:
+      typeof STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1;
+    singleSourcePayloadOversize: "contractError";
+    callerConfigurable: false;
+  };
+  cursor: {
+    schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1;
+    phases: readonly StorageLifetimePhaseV1[];
+    terminalPhasesRequireAfterAtCutoff: readonly ["verify", "compact"];
+  };
+  scan: {
+    predicate: typeof STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1;
+    orderBy: typeof STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1;
+    offsetAllowed: false;
+  };
+  transaction: {
+    cadence: "oneBatchOneBeginImmediatePerIdleTurn";
+    sourceAuthority: "v1EventsAndProjections";
+    committedDerivedRowsMayPersist: true;
+    committedProgressState: "pending";
+    implementationMayCommitRunning: false;
+  };
+  cancellation: {
+    beforeBegin: "noMutation";
+    checks: readonly ["beforeEachSourceRow", "afterEachSourceRow", "immediatelyPrecommit"];
+    duringTransaction: "rollbackCurrentBatch";
+    outcome: "suspended";
+    crash: "rollbackCurrentBatchResumePrecedingCommittedPendingCursor";
+    committedBatchWinsAfterFinalPrecommitCheck: true;
+  };
+  job: {
+    maximumPendingOrRunning: 1;
+    persistedFailClosedStates: readonly ["running", "materializing", "failed"];
+  };
+  append: {
+    readyInvalidation: "pendingInSameAppendTransaction";
+    readyPublication: "separateAtomicCatchUpVerificationTransaction";
+  };
+  rollback: {
+    derivedPreparationBatchesMayPersist: true;
+    sourceLedgerMutationAtomicRollbackRequired: true;
+    compactionTriggerChangeAtomicRollbackRequired: true;
+  };
+  activation: {
+    ledgerDeletionEnabled: false;
+    automaticSchedulingEnabled: false;
+    compactionImplementationEnabled: false;
+    statusWireEnabled: false;
+  };
+}
 
 export interface StorageStatusRequestV1 {
   schemaVersion: typeof STORAGE_STATUS_SCHEMA_VERSION_V1;
@@ -128,6 +207,126 @@ export interface OperationCandidateV1 {
 }
 
 export type ReceiptOperationDecisionV2 = "append" | "duplicateNoOp" | "conflict";
+
+export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetimeCursorV1 {
+  const cursor = requireObject(value, "storage lifetime cursor");
+  exactKeys(cursor, ["schemaVersion", "cutoffEventRowid", "phase", "afterEventRowid"]);
+  if (cursor.schemaVersion !== STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1) {
+    fail("storage lifetime cursor schemaVersion must be 1");
+  }
+  const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "cursor.cutoffEventRowid");
+  const after = requireSafeUnsigned(cursor.afterEventRowid, "cursor.afterEventRowid");
+  if (!STORAGE_LIFETIME_PHASES_V1.includes(cursor.phase as StorageLifetimePhaseV1)) {
+    fail("storage lifetime cursor phase is invalid");
+  }
+  if (after > cutoff) {
+    fail("storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid");
+  }
+  if ((cursor.phase === "verify" || cursor.phase === "compact") && after !== cutoff) {
+    fail("storage lifetime verify and compact cursors require afterEventRowid at cutoffEventRowid");
+  }
+  return cursor as unknown as StorageLifetimeCursorV1;
+}
+
+export function validateStorageLifetimeBatchSourcePayloadsV1(value: unknown): readonly number[] {
+  if (!Array.isArray(value)) fail("storage lifetime batch source payload sizes must be an array");
+  if (value.length > STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1) {
+    fail("storage lifetime batch exceeds the fixed 100 source row limit");
+  }
+  let total = 0;
+  for (const payloadValue of value) {
+    const payloadBytes = requireSafeUnsigned(payloadValue, "storage lifetime source payload bytes");
+    if (payloadBytes > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1) {
+      fail("storage lifetime source payload exceeds the fixed 1 MiB contract limit");
+    }
+    total += payloadBytes;
+    if (total > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1) {
+      fail("storage lifetime batch exceeds the fixed 1 MiB source payload limit");
+    }
+  }
+  return value as readonly number[];
+}
+
+export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLifetimeBatchPolicyV1 {
+  const policy = requireObject(value, "storage lifetime batch policy");
+  exactKeys(policy, [
+    "schemaVersion", "casesFile", "guards", "cursor", "scan", "transaction",
+    "cancellation", "job", "append", "rollback", "activation",
+  ]);
+  const guards = requireObject(policy.guards, "storage lifetime batch guards");
+  exactKeys(guards, [
+    "maxSourceRowsPerBatch", "maxCanonicalSourcePayloadBytesPerBatch",
+    "singleSourcePayloadOversize", "callerConfigurable",
+  ]);
+  const cursor = requireObject(policy.cursor, "storage lifetime cursor policy");
+  exactKeys(cursor, ["schemaVersion", "phases", "terminalPhasesRequireAfterAtCutoff"]);
+  const scan = requireObject(policy.scan, "storage lifetime scan policy");
+  exactKeys(scan, ["predicate", "orderBy", "offsetAllowed"]);
+  const transaction = requireObject(policy.transaction, "storage lifetime transaction policy");
+  exactKeys(transaction, [
+    "cadence", "sourceAuthority", "committedDerivedRowsMayPersist",
+    "committedProgressState", "implementationMayCommitRunning",
+  ]);
+  const cancellation = requireObject(policy.cancellation, "storage lifetime cancellation policy");
+  exactKeys(cancellation, [
+    "beforeBegin", "checks", "duringTransaction", "outcome", "crash",
+    "committedBatchWinsAfterFinalPrecommitCheck",
+  ]);
+  const job = requireObject(policy.job, "storage lifetime job policy");
+  exactKeys(job, ["maximumPendingOrRunning", "persistedFailClosedStates"]);
+  const append = requireObject(policy.append, "storage lifetime append policy");
+  exactKeys(append, ["readyInvalidation", "readyPublication"]);
+  const rollback = requireObject(policy.rollback, "storage lifetime rollback policy");
+  exactKeys(rollback, [
+    "derivedPreparationBatchesMayPersist", "sourceLedgerMutationAtomicRollbackRequired",
+    "compactionTriggerChangeAtomicRollbackRequired",
+  ]);
+  const activation = requireObject(policy.activation, "storage lifetime activation policy");
+  exactKeys(activation, [
+    "ledgerDeletionEnabled", "automaticSchedulingEnabled", "compactionImplementationEnabled",
+    "statusWireEnabled",
+  ]);
+
+  const exact = policy.schemaVersion === STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1
+    && policy.casesFile === "batching-cases.json"
+    && guards.maxSourceRowsPerBatch === STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1
+    && guards.maxCanonicalSourcePayloadBytesPerBatch
+      === STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
+    && guards.singleSourcePayloadOversize === "contractError"
+    && guards.callerConfigurable === false
+    && cursor.schemaVersion === STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1
+    && exactStringArray(cursor.phases, STORAGE_LIFETIME_PHASES_V1)
+    && exactStringArray(cursor.terminalPhasesRequireAfterAtCutoff, ["verify", "compact"])
+    && scan.predicate === STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
+    && scan.orderBy === STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
+    && scan.offsetAllowed === false
+    && transaction.cadence === "oneBatchOneBeginImmediatePerIdleTurn"
+    && transaction.sourceAuthority === "v1EventsAndProjections"
+    && transaction.committedDerivedRowsMayPersist === true
+    && transaction.committedProgressState === "pending"
+    && transaction.implementationMayCommitRunning === false
+    && cancellation.beforeBegin === "noMutation"
+    && exactStringArray(cancellation.checks, [
+      "beforeEachSourceRow", "afterEachSourceRow", "immediatelyPrecommit",
+    ])
+    && cancellation.duringTransaction === "rollbackCurrentBatch"
+    && cancellation.outcome === "suspended"
+    && cancellation.crash === "rollbackCurrentBatchResumePrecedingCommittedPendingCursor"
+    && cancellation.committedBatchWinsAfterFinalPrecommitCheck === true
+    && job.maximumPendingOrRunning === 1
+    && exactStringArray(job.persistedFailClosedStates, ["running", "materializing", "failed"])
+    && append.readyInvalidation === "pendingInSameAppendTransaction"
+    && append.readyPublication === "separateAtomicCatchUpVerificationTransaction"
+    && rollback.derivedPreparationBatchesMayPersist === true
+    && rollback.sourceLedgerMutationAtomicRollbackRequired === true
+    && rollback.compactionTriggerChangeAtomicRollbackRequired === true
+    && activation.ledgerDeletionEnabled === false
+    && activation.automaticSchedulingEnabled === false
+    && activation.compactionImplementationEnabled === false
+    && activation.statusWireEnabled === false;
+  if (!exact) fail("storage lifetime batch policy contradicts the fixed v1 safety contract");
+  return policy as unknown as StorageLifetimeBatchPolicyV1;
+}
 
 export function validateStorageStatusRequestV1(value: unknown): StorageStatusRequestV1 {
   const request = requireObject(value, "storage status request");
@@ -334,6 +533,12 @@ function requireTimestamp(value: unknown, name: string): asserts value is string
     || hour > 23 || minute > 59 || second > 59) {
     fail(`${name} must be a real RFC 3339 UTC calendar timestamp`);
   }
+}
+
+function exactStringArray(value: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((entry, index) => entry === expected[index]);
 }
 
 function fail(message: string): never {

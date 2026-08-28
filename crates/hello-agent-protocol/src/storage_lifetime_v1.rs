@@ -33,6 +33,21 @@ pub const STORAGE_LIFETIME_INDEXES_V2: &[&str] = &[
 pub const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2: &str = "sha256";
 pub const OPERATION_RECEIPT_DIGEST_VERSION_V2: u32 = 1;
 pub const OPERATION_RECEIPT_DIGEST_FORMAT_V2: &str = "lowercaseHex64";
+pub const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1: u32 = 1;
+pub const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1: u32 = 1;
+pub const STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1: usize = 100;
+pub const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1: u64 = 1_048_576;
+pub const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1: &str =
+    "rowid > afterEventRowid AND rowid <= cutoffEventRowid";
+pub const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1: &str = "rowid";
+pub const STORAGE_LIFETIME_PHASES_V1: &[&str] = &[
+    "receipts",
+    "messages",
+    "workspaces",
+    "baselines",
+    "verify",
+    "compact",
+];
 pub const LOSSLESS_COMPACTION_STEPS_V1: &[&str] = &[
     "beginImmediate",
     "freezeCutoff",
@@ -188,6 +203,259 @@ pub struct OperationReceiptV2 {
     pub canonical_payload_digest_format: String,
     pub canonical_payload_digest: String,
     pub event_timestamp: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageLifetimePhaseV1 {
+    Receipts,
+    Messages,
+    Workspaces,
+    Baselines,
+    Verify,
+    Compact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeCursorV1 {
+    pub schema_version: u32,
+    pub cutoff_event_rowid: u64,
+    pub phase: StorageLifetimePhaseV1,
+    pub after_event_rowid: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeBatchPolicyV1 {
+    schema_version: u32,
+    cases_file: String,
+    guards: StorageLifetimeBatchGuardsV1,
+    cursor: StorageLifetimeCursorPolicyV1,
+    scan: StorageLifetimeScanPolicyV1,
+    transaction: StorageLifetimeTransactionPolicyV1,
+    cancellation: StorageLifetimeCancellationPolicyV1,
+    job: StorageLifetimeJobPolicyV1,
+    append: StorageLifetimeAppendPolicyV1,
+    rollback: StorageLifetimeRollbackPolicyV1,
+    activation: StorageLifetimeActivationPolicyV1,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeBatchGuardsV1 {
+    max_source_rows_per_batch: u64,
+    max_canonical_source_payload_bytes_per_batch: u64,
+    single_source_payload_oversize: String,
+    caller_configurable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeCursorPolicyV1 {
+    schema_version: u32,
+    phases: Vec<String>,
+    terminal_phases_require_after_at_cutoff: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeScanPolicyV1 {
+    predicate: String,
+    order_by: String,
+    offset_allowed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeTransactionPolicyV1 {
+    cadence: String,
+    source_authority: String,
+    committed_derived_rows_may_persist: bool,
+    committed_progress_state: String,
+    implementation_may_commit_running: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeCancellationPolicyV1 {
+    before_begin: String,
+    checks: Vec<String>,
+    during_transaction: String,
+    outcome: String,
+    crash: String,
+    committed_batch_wins_after_final_precommit_check: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeJobPolicyV1 {
+    maximum_pending_or_running: u64,
+    persisted_fail_closed_states: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeAppendPolicyV1 {
+    ready_invalidation: String,
+    ready_publication: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeRollbackPolicyV1 {
+    derived_preparation_batches_may_persist: bool,
+    source_ledger_mutation_atomic_rollback_required: bool,
+    compaction_trigger_change_atomic_rollback_required: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeActivationPolicyV1 {
+    ledger_deletion_enabled: bool,
+    automatic_scheduling_enabled: bool,
+    compaction_implementation_enabled: bool,
+    status_wire_enabled: bool,
+}
+
+pub fn validate_storage_lifetime_cursor_v1(
+    value: &Value,
+) -> Result<StorageLifetimeCursorV1, StorageLifetimeContractError> {
+    let cursor: StorageLifetimeCursorV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    validate_storage_lifetime_cursor_fields_v1(&cursor)?;
+    Ok(cursor)
+}
+
+pub fn validate_storage_lifetime_batch_source_payloads_v1(
+    source_payload_bytes: &[u64],
+) -> Result<(), StorageLifetimeContractError> {
+    if source_payload_bytes.len() > STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1 {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime batch exceeds the fixed 100 source row limit",
+        ));
+    }
+    let mut total = 0_u64;
+    for payload_bytes in source_payload_bytes {
+        if *payload_bytes > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1 {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime source payload exceeds the fixed 1 MiB contract limit",
+            ));
+        }
+        total = total.checked_add(*payload_bytes).ok_or_else(|| {
+            StorageLifetimeContractError::new(
+                "storage lifetime batch source payload byte sum overflowed",
+            )
+        })?;
+        if total > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1 {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime batch exceeds the fixed 1 MiB source payload limit",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_storage_lifetime_batch_policy_v1(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    let policy: StorageLifetimeBatchPolicyV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let exact = policy.schema_version == STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1
+        && policy.cases_file == "batching-cases.json"
+        && policy.guards.max_source_rows_per_batch
+            == STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1 as u64
+        && policy.guards.max_canonical_source_payload_bytes_per_batch
+            == STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
+        && policy.guards.single_source_payload_oversize == "contractError"
+        && !policy.guards.caller_configurable
+        && policy.cursor.schema_version == STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1
+        && strings_equal(&policy.cursor.phases, STORAGE_LIFETIME_PHASES_V1)
+        && strings_equal(
+            &policy.cursor.terminal_phases_require_after_at_cutoff,
+            &["verify", "compact"],
+        )
+        && policy.scan.predicate == STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
+        && policy.scan.order_by == STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
+        && !policy.scan.offset_allowed
+        && policy.transaction.cadence == "oneBatchOneBeginImmediatePerIdleTurn"
+        && policy.transaction.source_authority == "v1EventsAndProjections"
+        && policy.transaction.committed_derived_rows_may_persist
+        && policy.transaction.committed_progress_state == "pending"
+        && !policy.transaction.implementation_may_commit_running
+        && policy.cancellation.before_begin == "noMutation"
+        && strings_equal(
+            &policy.cancellation.checks,
+            &[
+                "beforeEachSourceRow",
+                "afterEachSourceRow",
+                "immediatelyPrecommit",
+            ],
+        )
+        && policy.cancellation.during_transaction == "rollbackCurrentBatch"
+        && policy.cancellation.outcome == "suspended"
+        && policy.cancellation.crash == "rollbackCurrentBatchResumePrecedingCommittedPendingCursor"
+        && policy
+            .cancellation
+            .committed_batch_wins_after_final_precommit_check
+        && policy.job.maximum_pending_or_running == 1
+        && strings_equal(
+            &policy.job.persisted_fail_closed_states,
+            &["running", "materializing", "failed"],
+        )
+        && policy.append.ready_invalidation == "pendingInSameAppendTransaction"
+        && policy.append.ready_publication == "separateAtomicCatchUpVerificationTransaction"
+        && policy.rollback.derived_preparation_batches_may_persist
+        && policy
+            .rollback
+            .source_ledger_mutation_atomic_rollback_required
+        && policy
+            .rollback
+            .compaction_trigger_change_atomic_rollback_required
+        && !policy.activation.ledger_deletion_enabled
+        && !policy.activation.automatic_scheduling_enabled
+        && !policy.activation.compaction_implementation_enabled
+        && !policy.activation.status_wire_enabled;
+    if !exact {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime batch policy contradicts the fixed v1 safety contract",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_storage_lifetime_cursor_fields_v1(
+    cursor: &StorageLifetimeCursorV1,
+) -> Result<(), StorageLifetimeContractError> {
+    if cursor.schema_version != STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1 {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime cursor schemaVersion must be 1",
+        ));
+    }
+    require_js_safe_unsigned(cursor.cutoff_event_rowid, "cursor.cutoffEventRowid")?;
+    require_js_safe_unsigned(cursor.after_event_rowid, "cursor.afterEventRowid")?;
+    if cursor.after_event_rowid > cursor.cutoff_event_rowid {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid",
+        ));
+    }
+    if matches!(
+        cursor.phase,
+        StorageLifetimePhaseV1::Verify | StorageLifetimePhaseV1::Compact
+    ) && cursor.after_event_rowid != cursor.cutoff_event_rowid
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime verify and compact cursors require afterEventRowid at cutoffEventRowid",
+        ));
+    }
+    Ok(())
+}
+
+fn strings_equal(actual: &[String], expected: &[&str]) -> bool {
+    actual
+        .iter()
+        .map(String::as_str)
+        .eq(expected.iter().copied())
 }
 
 pub fn validate_storage_status_request_v1(

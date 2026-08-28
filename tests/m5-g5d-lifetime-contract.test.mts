@@ -15,7 +15,14 @@ import {
   OPERATION_RECEIPT_DIGEST_ALGORITHM_V2,
   OPERATION_RECEIPT_DIGEST_FORMAT_V2,
   OPERATION_RECEIPT_DIGEST_VERSION_V2,
+  STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1,
+  STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1,
   STORAGE_LIFETIME_INDEXES_V2,
+  STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1,
+  STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1,
+  STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+  STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+  STORAGE_LIFETIME_PHASES_V1,
   STORAGE_LIFETIME_SCHEMA_VERSION_V1,
   STORAGE_LIFETIME_TABLES_V2,
   STORAGE_STATUS_BRIDGE_METHOD_V1,
@@ -23,6 +30,9 @@ import {
   STORAGE_STATUS_METHOD_V1,
   STORAGE_STATUS_SCHEMA_VERSION_V1,
   classifyOperationAgainstReceiptV2,
+  validateStorageLifetimeBatchPolicyV1,
+  validateStorageLifetimeBatchSourcePayloadsV1,
+  validateStorageLifetimeCursorV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
@@ -52,8 +62,10 @@ interface Manifest {
     existingProjectionColumnsChanged: boolean;
     startupReadyBeforeMaterialization: boolean;
     materializationTrigger: string;
+    materializationStateReadyRequired: boolean;
     downgradePolicy: string;
   };
+  batching: Record<string, unknown> & { casesFile: string };
   compaction: {
     mode: string;
     steps: string[];
@@ -61,6 +73,11 @@ interface Manifest {
     oldOperationDuplicateConflictPreserved: boolean;
     actualLegacyNamespacePreserved: boolean;
     failureRollbackRequired: boolean;
+    failureRollbackScope: {
+      derivedPreparationBatchesMayPersist: boolean;
+      sourceLedgerMutationAtomicRollbackRequired: boolean;
+      compactionTriggerChangeAtomicRollbackRequired: boolean;
+    };
     logicalDeleteBeforeVerification: boolean;
     vacuumIsLogicalSuccessCriterion: boolean;
     physicalCleanupEnabled: boolean;
@@ -109,12 +126,25 @@ interface OperationReceiptCases {
   }>;
 }
 
+interface BatchingCases {
+  validCursors: Array<{ name: string; value: unknown }>;
+  validPayloadBatches: Array<{ name: string; value: unknown }>;
+  invalidCursors: Array<{ name: string; value: unknown }>;
+  invalidPayloadBatches: Array<{ name: string; value: unknown }>;
+  invalidPolicyMutations: Array<{
+    name: string;
+    path: string[];
+    replacement: unknown;
+  }>;
+}
+
 const root = resolve("tests/fixtures/m5/storage-v2");
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
 const receiptCases = readJson<OperationReceiptCases>(
   resolve(root, manifest.compaction.operationReceipt.casesFile),
 );
+const batchingCases = readJson<BatchingCases>(resolve(root, manifest.batching.casesFile));
 
 test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byte", () => {
   assert.equal(manifest.schemaVersion, 1);
@@ -126,7 +156,8 @@ test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byt
   assert.equal(manifest.migration.existingEventsDeleted, false);
   assert.equal(manifest.migration.existingProjectionColumnsChanged, false);
   assert.equal(manifest.migration.startupReadyBeforeMaterialization, true);
-  assert.equal(manifest.migration.materializationTrigger, "idleAfterReady");
+  assert.equal(manifest.migration.materializationTrigger, "idleAfterSidecarHandshakeReady");
+  assert.equal(manifest.migration.materializationStateReadyRequired, false);
   assert.equal(manifest.migration.downgradePolicy, "openQuestion");
 
   const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-g5d-contract-"));
@@ -282,6 +313,54 @@ test("TypeScript and Rust share exact privacy-safe storage.status cases", () => 
   }
 });
 
+test("G5D batching fixes bounded keyset progress, cancellation, and atomic rollback semantics", () => {
+  const policy = validateStorageLifetimeBatchPolicyV1(manifest.batching);
+  assert.equal(policy.schemaVersion, STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1);
+  assert.equal(policy.guards.maxSourceRowsPerBatch, STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1);
+  assert.equal(
+    policy.guards.maxCanonicalSourcePayloadBytesPerBatch,
+    STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+  );
+  assert.equal(policy.cursor.schemaVersion, STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1);
+  assert.deepEqual(policy.cursor.phases, [...STORAGE_LIFETIME_PHASES_V1]);
+  assert.equal(policy.scan.predicate, STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1);
+  assert.equal(policy.scan.orderBy, STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1);
+  assert.equal(policy.scan.offsetAllowed, false);
+  assert.equal(policy.transaction.committedDerivedRowsMayPersist, true);
+  assert.equal(policy.transaction.committedProgressState, "pending");
+  assert.equal(policy.transaction.implementationMayCommitRunning, false);
+  assert.equal(policy.cancellation.outcome, "suspended");
+  assert.equal(policy.job.maximumPendingOrRunning, 1);
+  assert.equal(policy.append.readyInvalidation, "pendingInSameAppendTransaction");
+  assert.equal(policy.append.readyPublication, "separateAtomicCatchUpVerificationTransaction");
+  assert.equal(policy.activation.ledgerDeletionEnabled, false);
+  assert.equal(policy.activation.automaticSchedulingEnabled, false);
+  assert.equal(policy.activation.compactionImplementationEnabled, false);
+  assert.equal(policy.activation.statusWireEnabled, false);
+
+  for (const fixture of batchingCases.validCursors) {
+    assert.deepEqual(validateStorageLifetimeCursorV1(fixture.value), fixture.value, fixture.name);
+  }
+  for (const fixture of batchingCases.validPayloadBatches) {
+    assert.deepEqual(validateStorageLifetimeBatchSourcePayloadsV1(fixture.value), fixture.value, fixture.name);
+  }
+  for (const fixture of batchingCases.invalidCursors) {
+    assert.throws(() => validateStorageLifetimeCursorV1(fixture.value), undefined, fixture.name);
+  }
+  for (const fixture of batchingCases.invalidPayloadBatches) {
+    assert.throws(
+      () => validateStorageLifetimeBatchSourcePayloadsV1(fixture.value),
+      undefined,
+      fixture.name,
+    );
+  }
+  for (const fixture of batchingCases.invalidPolicyMutations) {
+    const invalid = structuredClone(manifest.batching);
+    setPath(invalid, fixture.path, fixture.replacement);
+    assert.throws(() => validateStorageLifetimeBatchPolicyV1(invalid), undefined, fixture.name);
+  }
+});
+
 test("D0A freezes lossless compaction invariants without enabling cleanup or thresholds", () => {
   assert.equal(manifest.compaction.mode, "losslessInternalOnly");
   assert.deepEqual(manifest.compaction.steps, [...LOSSLESS_COMPACTION_STEPS_V1]);
@@ -290,6 +369,11 @@ test("D0A freezes lossless compaction invariants without enabling cleanup or thr
   assert.equal(manifest.compaction.oldOperationDuplicateConflictPreserved, true);
   assert.equal(manifest.compaction.actualLegacyNamespacePreserved, true);
   assert.equal(manifest.compaction.failureRollbackRequired, true);
+  assert.deepEqual(manifest.compaction.failureRollbackScope, {
+    derivedPreparationBatchesMayPersist: true,
+    sourceLedgerMutationAtomicRollbackRequired: true,
+    compactionTriggerChangeAtomicRollbackRequired: true,
+  });
   assert.equal(manifest.compaction.logicalDeleteBeforeVerification, false);
   assert.equal(manifest.compaction.vacuumIsLogicalSuccessCriterion, false);
   assert.equal(manifest.compaction.physicalCleanupEnabled, false);
@@ -356,6 +440,18 @@ function readJson<T>(path: string): T {
 
 function normalizedRows(database: DatabaseSync, table: string): unknown[] {
   return JSON.parse(JSON.stringify(database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())) as unknown[];
+}
+
+function setPath(target: Record<string, unknown>, path: string[], replacement: unknown): void {
+  let current: Record<string, unknown> = target;
+  for (const segment of path.slice(0, -1)) {
+    const next = current[segment];
+    assert.equal(typeof next, "object");
+    assert.notEqual(next, null);
+    assert.equal(Array.isArray(next), false);
+    current = next as Record<string, unknown>;
+  }
+  current[path.at(-1) as string] = replacement;
 }
 
 function insertPreparedWorkspace(
