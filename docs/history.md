@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5C 최종 gate)
+
+- **판정**: exact docs/integration commit `cdb3e1b49de5f0c6541ff007f007bcb65b7db122`을 독립 최종 gate가 `PASS — APPROVE / G5C_READY`로 승인했다. G5C 기능 계보와 원자성·UI·combined 독립 리뷰, exact-head 누적 하네스 12단계, 독립 QA artifact, 현행 문서와 byte-identical `AGENTS.md`/`CLAUDE.md`를 다시 대조했다.
+- **재검증·경계**: gate가 G5C 계약·UI Node 30개, protocol 32개, sidecar recovery 14개, fake provider recovery stdio 1개, 일반 `--stdio` ready/status/quit 1개와 diff check를 통과했다. G6는 의도대로 `NOT_READY`다. 실제 Claude/Codex adapter·인증 smoke, SQLite 전체 lifetime/retention/compaction, G6, Windows, 전체 OS Quit와 출시 후보 검증이 남으며 push와 `main` 병합은 하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5C 통합·누적 하네스·독립 QA)
 
 - **통합·리뷰**: provider sidecar, text/recovery 경계, durable recovery 발견, renderer recovery controls, restart-atomic saga, pre-G5C ID 백필과 identityless UI 보강을 독립 Rust·UI·combined 재리뷰 승인 뒤 `m5/coding-agent-ide`에 통합했다. G5C provider/identityless 계약 테스트도 `m5:test:run-recovery` 누적 게이트에 추가했다.
