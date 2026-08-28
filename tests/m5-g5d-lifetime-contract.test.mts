@@ -59,6 +59,7 @@ import {
   validateStorageLifetimeCursorV3,
   validateStorageLifetimeLifecycleTransitionV3,
   validateStorageLifetimeMaterializationPairV3,
+  validateStorageLifetimeReopenPairV3,
   validateStorageLifetimeV5PreflightPolicyV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
@@ -256,6 +257,7 @@ interface V5Cases {
   phaseOrder: string[];
   validCatchUpResets: V5CatchUpCase[];
   invalidCatchUpResets: V5CatchUpCase[];
+  reopenPairs: { valid: NamedValue[]; failClosed: NamedValue[] };
   validLifecycleOperations: string[];
   invalidPreflightMutations: PolicyMutation[];
   invalidPolicyMutations: PolicyMutation[];
@@ -1081,6 +1083,16 @@ test("storage-v5 migrates every v4 state and phase without mutating preserved st
           failure_kind: state === "failed" ? "contractValidation" : null,
           completed_at: state === "failed" ? "2026-08-28T12:02:00Z" : null,
         }, `${state}:${phase}`);
+        const migratedPair = readV5Pair(database);
+        if (state === "pending") {
+          assert.deepEqual(validateStorageLifetimeReopenPairV3(migratedPair), migratedPair);
+        } else {
+          assert.throws(
+            () => validateStorageLifetimeReopenPairV3(migratedPair),
+            undefined,
+            `${state}:${phase} must remain fail-closed after migration`,
+          );
+        }
         database.close();
       }
     }
@@ -1132,6 +1144,12 @@ test("storage-v5 freezes projection order, lifecycle catch-up, and bounded query
     manifestV5.boundedProjectionVerification,
   );
   assert.deepEqual(v5Cases.phaseOrder, [...STORAGE_LIFETIME_PHASES_V3]);
+  for (const fixture of v5Cases.reopenPairs.valid) {
+    assert.deepEqual(validateStorageLifetimeReopenPairV3(fixture.value), fixture.value, fixture.name);
+  }
+  for (const fixture of v5Cases.reopenPairs.failClosed) {
+    assert.throws(() => validateStorageLifetimeReopenPairV3(fixture.value), undefined, fixture.name);
+  }
   for (const [index, phase] of v5Cases.phaseOrder.entries()) {
     const cursor = {
       schemaVersion: 3,
@@ -1711,6 +1729,33 @@ function insertV4LifetimeJob(
     state === "failed" ? "2026-08-28T12:02:00Z" : "2026-08-28T12:01:00Z",
     state === "failed" ? "2026-08-28T12:02:00Z" : null,
   );
+}
+
+function readV5Pair(database: DatabaseSync): unknown {
+  const meta = database.prepare(`
+    SELECT materialization_state FROM storage_schema_meta WHERE singleton = 1
+  `).get();
+  const row = database.prepare(`
+    SELECT singleton, job_id, state, cutoff_event_rowid, phase, after_scan_rowid,
+           scan_exhausted, failure_kind, created_at, updated_at, completed_at
+    FROM lifetime_materialization_job WHERE singleton = 1
+  `).get();
+  return {
+    materializationState: meta?.materialization_state,
+    job: row === undefined ? null : {
+      singleton: row.singleton,
+      jobId: row.job_id,
+      state: row.state,
+      cutoffEventRowid: row.cutoff_event_rowid,
+      phase: row.phase,
+      afterScanRowid: row.after_scan_rowid,
+      scanExhausted: row.scan_exhausted === 1,
+      failureKind: row.failure_kind,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+    },
+  };
 }
 
 function v5SnapshotForCase(fixture: V5CatchUpCase, next: boolean): unknown {

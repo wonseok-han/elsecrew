@@ -1295,6 +1295,10 @@ const STORAGE_LIFETIME_BATCH_POLICY_V3 = {
     greater: "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure",
     frozenMaterializationPhases: "mayContinueAtExistingCutoff",
     appendSerialization: "BEGIN IMMEDIATESerializesAppendDuringBatch",
+    normalWorkerCheckState: "pendingBeforeArm",
+    armToBatch: "sameSynchronousSidecarOwnerImmediatelyEntersBatch",
+    attemptingCatchUpReset: "forbidden",
+    attemptingOnReopen: "failClosed",
   },
   verification: {
     verifySource: {
@@ -1492,6 +1496,16 @@ export function validateStorageLifetimeMaterializationPairV3(
     StorageLifetimeMaterializationSnapshotV3;
 }
 
+export function validateStorageLifetimeReopenPairV3(
+  value: unknown,
+): StorageLifetimeMaterializationSnapshotV3 {
+  const snapshot = validateStorageLifetimeMaterializationPairV3(value);
+  if (snapshot.job?.state === "attempting" || snapshot.job?.state === "failed") {
+    fail("storage lifetime v5 reopen refuses attempting or failed job");
+  }
+  return snapshot;
+}
+
 export function validateStorageLifetimeLifecycleTransitionV3(
   operation: StorageLifetimeLifecycleOperationV3,
   previousValue: unknown,
@@ -1561,8 +1575,7 @@ export function validateStorageLifetimeLifecycleTransitionV3(
       fail("storage lifetime v5 terminal failure must preserve the cursor");
     }
   } else if (operation === "catchUpReset") {
-    if ((previousJob.state !== "pending" && previousJob.state !== "attempting")
-      || !isVerificationPhaseV3(previousJob.phase)
+    if (previousJob.state !== "pending" || !isVerificationPhaseV3(previousJob.phase)
       || nextJob.state !== "pending" || nextJob.cutoffEventRowid <= previousJob.cutoffEventRowid
       || nextJob.phase !== "receipts" || nextJob.afterScanRowid !== 0
       || nextJob.scanExhausted) {

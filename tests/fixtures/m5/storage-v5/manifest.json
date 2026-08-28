@@ -97,7 +97,11 @@
       "less": "contractError",
       "greater": "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure",
       "frozenMaterializationPhases": "mayContinueAtExistingCutoff",
-      "appendSerialization": "BEGIN IMMEDIATESerializesAppendDuringBatch"
+      "appendSerialization": "BEGIN IMMEDIATESerializesAppendDuringBatch",
+      "normalWorkerCheckState": "pendingBeforeArm",
+      "armToBatch": "sameSynchronousSidecarOwnerImmediatelyEntersBatch",
+      "attemptingCatchUpReset": "forbidden",
+      "attemptingOnReopen": "failClosed"
     },
     "verification": {
       "verifySource": {

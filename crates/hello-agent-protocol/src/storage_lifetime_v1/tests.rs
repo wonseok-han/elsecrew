@@ -361,9 +361,17 @@ struct V5Cases {
     phase_order: Vec<String>,
     valid_catch_up_resets: Vec<V5CatchUpCase>,
     invalid_catch_up_resets: Vec<V5CatchUpCase>,
+    reopen_pairs: V5ReopenPairs,
     valid_lifecycle_operations: Vec<String>,
     invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
     invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V5ReopenPairs {
+    valid: Vec<NamedValue>,
+    fail_closed: Vec<NamedValue>,
 }
 
 #[derive(Deserialize)]
@@ -1128,6 +1136,16 @@ fn storage_v5_freezes_bounded_projection_verification_and_catch_up() {
         cases.migration_matrix.projection_restart_mapping,
         "verifySourceZeroUnexhausted"
     );
+    for case in &cases.reopen_pairs.valid {
+        validate_storage_lifetime_reopen_pair_v3(&case.value).expect(&case.name);
+    }
+    for case in &cases.reopen_pairs.fail_closed {
+        assert!(
+            validate_storage_lifetime_reopen_pair_v3(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
 
     for (index, phase) in STORAGE_LIFETIME_PHASES_V3.iter().enumerate() {
         let cursor = serde_json::json!({

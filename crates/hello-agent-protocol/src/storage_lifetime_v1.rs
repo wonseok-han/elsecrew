@@ -1749,6 +1749,10 @@ pub fn validate_storage_lifetime_batch_policy_v3(
             "greater": "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure",
             "frozenMaterializationPhases": "mayContinueAtExistingCutoff",
             "appendSerialization": "BEGIN IMMEDIATESerializesAppendDuringBatch",
+            "normalWorkerCheckState": "pendingBeforeArm",
+            "armToBatch": "sameSynchronousSidecarOwnerImmediatelyEntersBatch",
+            "attemptingCatchUpReset": "forbidden",
+            "attemptingOnReopen": "failClosed",
         },
         "verification": {
             "verifySource": {
@@ -1960,6 +1964,23 @@ pub fn validate_storage_lifetime_materialization_pair_v3(
     })
 }
 
+pub fn validate_storage_lifetime_reopen_pair_v3(
+    value: &Value,
+) -> Result<StorageLifetimeMaterializationSnapshotV3, StorageLifetimeContractError> {
+    let snapshot = validate_storage_lifetime_materialization_pair_v3(value)?;
+    if snapshot.job.as_ref().is_some_and(|job| {
+        matches!(
+            job.state,
+            StorageLifetimeJobStateV2::Attempting | StorageLifetimeJobStateV2::Failed
+        )
+    }) {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 reopen refuses attempting or failed job",
+        ));
+    }
+    Ok(snapshot)
+}
+
 pub fn validate_storage_lifetime_lifecycle_transition_v3(
     operation: StorageLifetimeLifecycleOperationV3,
     previous: &Value,
@@ -2102,10 +2123,8 @@ pub fn validate_storage_lifetime_lifecycle_transition_v3(
                     }
                 }
                 StorageLifetimeLifecycleOperationV3::CatchUpReset => {
-                    if !matches!(
-                        previous_job.state,
-                        StorageLifetimeJobStateV2::Pending | StorageLifetimeJobStateV2::Attempting
-                    ) || !is_verification_phase_v3(previous_job.phase)
+                    if previous_job.state != StorageLifetimeJobStateV2::Pending
+                        || !is_verification_phase_v3(previous_job.phase)
                         || next_job.state != StorageLifetimeJobStateV2::Pending
                         || next_job.cutoff_event_rowid <= previous_job.cutoff_event_rowid
                         || next_job.phase != StorageLifetimePhaseV3::Receipts

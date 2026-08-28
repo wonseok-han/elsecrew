@@ -28,8 +28,8 @@
       "observedCutoff": 21
     },
     {
-      "name": "before projection batch after arm",
-      "previousState": "attempting",
+      "name": "before projection batch while pending",
+      "previousState": "pending",
       "previousPhase": "verifyProjects",
       "previousAfterScanRowid": 100,
       "previousScanExhausted": false,
@@ -37,8 +37,8 @@
       "observedCutoff": 22
     },
     {
-      "name": "before derived verification batch",
-      "previousState": "attempting",
+      "name": "before derived verification batch while pending",
+      "previousState": "pending",
       "previousPhase": "verifyReceipts",
       "previousAfterScanRowid": 900,
       "previousScanExhausted": false,
@@ -56,6 +56,15 @@
     }
   ],
   "invalidCatchUpResets": [
+    {
+      "name": "attempting sentinel cannot catch up",
+      "previousState": "attempting",
+      "previousPhase": "verifyProjects",
+      "previousAfterScanRowid": 10,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 21
+    },
     {
       "name": "frozen materialization does not reset",
       "previousState": "pending",
@@ -84,6 +93,22 @@
       "observedCutoff": 21
     }
   ],
+  "reopenPairs": {
+    "valid": [
+      { "name": "ready absent", "value": { "materializationState": "ready", "job": null } },
+      { "name": "pending absent", "value": { "materializationState": "pending", "job": null } },
+      { "name": "pending runnable", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:01:00Z", "completedAt": null } } }
+    ],
+    "failClosed": [
+      { "name": "attempting sentinel", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:01:00Z", "completedAt": null } } },
+      { "name": "failed terminal", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "failed", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:02:00Z", "completedAt": "2026-08-28T12:02:00Z" } } },
+      { "name": "ready with pending job", "value": { "materializationState": "ready", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "pending", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:01:00Z", "completedAt": null } } },
+      { "name": "ready with attempting job", "value": { "materializationState": "ready", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "attempting", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:01:00Z", "completedAt": null } } },
+      { "name": "ready with failed job", "value": { "materializationState": "ready", "job": { "singleton": 1, "jobId": "lifetime-v5", "state": "failed", "cutoffEventRowid": 20, "phase": "verifyProjects", "afterScanRowid": 10, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T12:00:00Z", "updatedAt": "2026-08-28T12:02:00Z", "completedAt": "2026-08-28T12:02:00Z" } } },
+      { "name": "materializing absent", "value": { "materializationState": "materializing", "job": null } },
+      { "name": "failed absent", "value": { "materializationState": "failed", "job": null } }
+    ]
+  },
   "validLifecycleOperations": [
     "create", "arm", "batchSuccess", "phaseAdvance", "cancel", "fail",
     "failureRecordUnavailable", "finalPublish", "catchUpReset", "append"

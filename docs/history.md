@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 reopen/catch-up P1 수정)
+
+- **pending-before-arm으로 catch-up 한정**: 최초 v5 계약이 max-rowid 증가 시 `attempting` job도 public `catchUpReset`으로 pending에 되돌릴 수 있게 해, durable attempting sentinel은 reopen에서 절대 자동 성공·재시도하지 않는다는 v4 불변식과 충돌했다. 정상 worker는 각 projection/derived batch를 arm하기 전 pending 상태에서 max rowid를 검사하며, arm을 commit한 같은 synchronous sidecar owner는 즉시 batch로 들어간다. 따라서 public catch-up은 pending verification job만 허용하고 attempting/failed는 모두 거부한다.
+- **v5 reopen fail-closed validator**: Rust·TypeScript 양쪽에 v5 reopen pair validator를 추가해 `ready+absent`, `pending+absent`, `pending+pending`만 허용하고 `pending+attempting|failed` 및 구조적으로 잘못된 pair를 거부한다. v4→v5 migration은 attempting/failed 상태와 증거를 보존하지만, 전 3 state×9 phase 실행 migration 뒤 reopen 판정에서 attempting/failed가 계속 fail-closed임을 확인한다. sidecar consumer는 아직 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 projection verification 계약)
 
 - **v5 migration·보수적 재검증**: exact storage-v4 schema와 `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 어떤 mutation보다 먼저 확인하고 metadata/job 두 표만 transaction 재구축하는 storage v5 계약을 추가했다. v4 `receipts`~`verifySource`의 state/phase/cursor/private exhaustion은 보존하되, 새 projection phase를 건너뛸 수 있는 기존 `verifyReceipts`~`verifyBaselines`는 state·실패 증거를 보존한 채 `verifySource/0/unexhausted`로 되돌린다. v1~v4 golden 파일은 고정 digest로 불변을 확인한다.
