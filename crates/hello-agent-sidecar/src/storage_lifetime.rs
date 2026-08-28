@@ -88,6 +88,18 @@ fn materialize_in_transaction(
     transaction: &Transaction<'_>,
     failure: Option<MaterializationFailurePoint>,
 ) -> Result<LifetimeMaterializationResult, SidecarError> {
+    let lifetime_job_present: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_materialization_job WHERE singleton=1);",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    if lifetime_job_present {
+        return Err(materialization_error(
+            "legacy storage materialization cannot run while bounded materialization state exists",
+        ));
+    }
     let state: String = transaction
         .query_row(
             "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",

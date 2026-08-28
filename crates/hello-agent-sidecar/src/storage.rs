@@ -1,7 +1,9 @@
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_protocol::storage_lifetime_v1::{
-    StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
+    validate_storage_lifetime_materialization_job_v1,
+    validate_storage_lifetime_materialization_pair_v1, StorageStatusV1,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, recover_unclean_shutdown_v1, replay_ledger_v1,
@@ -23,6 +25,18 @@ const MIGRATION_V2: &str =
 const MIGRATION_V3: &str =
     include_str!("../../../tests/fixtures/m5/storage-v3/migration-v2-to-v3.sql");
 type SchemaObject = (String, String, String, Option<String>);
+type LifetimeJobRow = (
+    u32,
+    String,
+    String,
+    i64,
+    String,
+    i64,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppendFailurePoint {
@@ -1045,7 +1059,6 @@ fn verify_schema_v3(connection: &Connection) -> Result<(), SidecarError> {
     if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V3
         || metadata.1 != PROTOCOL_VERSION
         || metadata.2 != "ready"
-        || !matches!(metadata.3.as_str(), "pending" | "ready")
         || metadata_count != 1
         || migrated_at_valid != Some(true)
     {
@@ -1060,7 +1073,81 @@ fn verify_schema_v3(connection: &Connection) -> Result<(), SidecarError> {
             "SQLite schema does not exactly match the storage v3 golden schema",
         ));
     }
+    verify_v3_materialization_snapshot(connection, &metadata.3)?;
     Ok(())
+}
+
+fn verify_v3_materialization_snapshot(
+    connection: &Connection,
+    materialization_state: &str,
+) -> Result<(), SidecarError> {
+    let row: Option<LifetimeJobRow> = connection
+        .query_row(
+            "SELECT singleton,job_id,state,cutoff_event_rowid,phase,after_event_rowid,\
+                    failure_kind,created_at,updated_at,completed_at \
+             FROM lifetime_materialization_job WHERE singleton=1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    let job = row.map(
+        |(
+            singleton,
+            job_id,
+            state,
+            cutoff_event_rowid,
+            phase,
+            after_event_rowid,
+            failure_kind,
+            created_at,
+            updated_at,
+            completed_at,
+        )| {
+            json!({
+                "singleton": singleton,
+                "jobId": job_id,
+                "state": state,
+                "cutoffEventRowid": cutoff_event_rowid,
+                "phase": phase,
+                "afterEventRowid": after_event_rowid,
+                "failureKind": failure_kind,
+                "createdAt": created_at,
+                "updatedAt": updated_at,
+                "completedAt": completed_at,
+            })
+        },
+    );
+    if let Some(job) = job.as_ref() {
+        validate_storage_lifetime_materialization_job_v1(job)
+            .map_err(|_| storage_materialization_snapshot_error())?;
+    }
+    validate_storage_lifetime_materialization_pair_v1(&json!({
+        "materializationState": materialization_state,
+        "job": job,
+    }))
+    .map_err(|_| storage_materialization_snapshot_error())?;
+    Ok(())
+}
+
+fn storage_materialization_snapshot_error() -> SidecarError {
+    SidecarError::new(
+        "storageSchemaMismatch",
+        "storage lifetime materialization state is invalid",
+    )
 }
 
 fn reference_schema_v2() -> Result<Vec<SchemaObject>, SidecarError> {

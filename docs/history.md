@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v3 review P1 수정)
+
+- **재시작 pair 검증**: exact v3 open이 metadata와 optional `lifetime_materialization_job`을 protocol canonical 값으로 구성해 job validator와 meta/job pair validator를 모두 통과시킨다. `pending+absent|pending|failed`와 `ready+absent`만 재시작하며 `ready+present`, malformed timestamp/job은 cursor·content·path를 싣지 않는 동일 오류로 fail-closed한다. terminal failed job은 계약상 유효하지만 자동 retry 대상은 아니다.
+- **레거시 D1B 격리**: 기존 unbounded `materialize_lifetime_records`는 bounded v3 cursor가 하나라도 있으면 첫 metadata mutation 전에 거부한다. 직접 회귀가 DB bytes·materialization meta·job row·derived row count 보존을 확인해 레거시 경로가 cursor를 둔 채 ready를 게시할 수 없도록 고정했다.
+- **검증·경계**: 직접 회귀 2개, sidecar 전체 97개+stdio 10개(1 ignored), protocol lifetime 5개, focused rustfmt와 strict sidecar clippy를 통과했다. worker·scheduling·wire/UI·compaction/삭제는 여전히 구현하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage schema v3 sidecar migration)
 
 - **exact v3 소비 구현**: `Storage::open`이 새 DB는 v1→exact v2 검증→v3 순서로 올리고, 기존 exact v2는 `pending|ready` 상태만 byte/schema mutation 전에 허용한 뒤 canonical v3 SQL을 원자 적용한다. exact v3 재시작은 no-op이며 부분·추가 object, index/table drift, v3 table과 metadata version 불일치는 fail-closed한다. `materializing|failed` v2는 DB bytes·schema·rows가 바뀌지 않은 채 거부한다.

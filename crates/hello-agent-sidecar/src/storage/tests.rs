@@ -445,6 +445,111 @@ fn v3_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
 }
 
 #[test]
+fn v3_reopen_enforces_canonical_meta_job_pairs_and_job_validation() {
+    let cases = [
+        ("pending_absent", "pending", None, None, None, true),
+        ("ready_absent", "ready", None, None, None, true),
+        (
+            "pending_pending",
+            "pending",
+            Some("pending"),
+            None,
+            None,
+            true,
+        ),
+        (
+            "pending_failed",
+            "pending",
+            Some("failed"),
+            Some("database"),
+            Some("2026-08-28T07:02:00Z"),
+            true,
+        ),
+        ("ready_pending", "ready", Some("pending"), None, None, false),
+        (
+            "pending_bad_created",
+            "pending",
+            Some("pending"),
+            None,
+            None,
+            false,
+        ),
+        (
+            "failed_bad_completed",
+            "pending",
+            Some("failed"),
+            Some("database"),
+            Some("not-a-timestamp"),
+            false,
+        ),
+        (
+            "failed_bad_failure_kind",
+            "pending",
+            Some("failed"),
+            Some("database/private/path"),
+            Some("2026-08-28T07:02:00Z"),
+            false,
+        ),
+    ];
+
+    for (name, materialization_state, job_state, failure_kind, completed_at, valid) in cases {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v3");
+        storage
+            .connection
+            .execute(
+                "UPDATE storage_schema_meta SET materialization_state=?1 WHERE singleton=1;",
+                [materialization_state],
+            )
+            .unwrap();
+        if let Some(job_state) = job_state {
+            let created_at = if name == "pending_bad_created" {
+                "not-a-timestamp"
+            } else {
+                "2026-08-28T07:00:00Z"
+            };
+            if name == "failed_bad_failure_kind" {
+                storage
+                    .connection
+                    .execute_batch("PRAGMA ignore_check_constraints=ON;")
+                    .unwrap();
+            }
+            insert_lifetime_job(
+                &storage.connection,
+                name,
+                job_state,
+                failure_kind,
+                created_at,
+                completed_at,
+            );
+            if name == "failed_bad_failure_kind" {
+                storage
+                    .connection
+                    .execute_batch("PRAGMA ignore_check_constraints=OFF;")
+                    .unwrap();
+            }
+        }
+        drop(storage);
+
+        match Storage::open(&path) {
+            Ok(_) if valid => {}
+            Ok(_) => panic!("{name} must fail closed"),
+            Err(error) if valid => panic!("{name} must reopen: {error:?}"),
+            Err(error) => {
+                assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+                assert_eq!(
+                    error.detail(),
+                    "storage lifetime materialization state is invalid",
+                    "{name}"
+                );
+                assert!(!error.detail().contains(name));
+                assert!(!error.detail().contains(path.to_string_lossy().as_ref()));
+            }
+        }
+    }
+}
+
+#[test]
 fn v3_migration_failure_rolls_back_to_exact_populated_v2() {
     let (_root, path) = database();
     let mut storage = populated_v2_storage(&path, "ready");
@@ -829,6 +934,25 @@ fn v3_job_table_statement() -> &'static str {
         .find("\n\nCOMMIT;")
         .expect("canonical v3 job table end");
     &remaining[..end]
+}
+
+fn insert_lifetime_job(
+    connection: &Connection,
+    job_id: &str,
+    state: &str,
+    failure_kind: Option<&str>,
+    created_at: &str,
+    completed_at: Option<&str>,
+) {
+    connection
+        .execute(
+            "INSERT INTO lifetime_materialization_job(\
+               singleton,job_id,state,cutoff_event_rowid,phase,after_event_rowid,\
+               failure_kind,created_at,updated_at,completed_at\
+             ) VALUES (1,?1,?2,0,'receipts',0,?3,?4,'2026-08-28T07:01:00Z',?5);",
+            params![job_id, state, failure_kind, created_at, completed_at],
+        )
+        .unwrap();
 }
 
 fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {

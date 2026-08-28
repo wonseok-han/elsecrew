@@ -322,6 +322,80 @@ fn empty_materialization_is_atomic_ready_idempotent_and_reopens() {
 }
 
 #[test]
+fn legacy_materialization_refuses_existing_v3_cursor_without_mutation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("storage");
+    storage
+        .connection_for_test()
+        .execute(
+            "INSERT INTO lifetime_materialization_job(\
+               singleton,job_id,state,cutoff_event_rowid,phase,after_event_rowid,\
+               failure_kind,created_at,updated_at,completed_at\
+             ) VALUES (1,'bounded_cursor','pending',0,'receipts',0,NULL,\
+               '2026-08-28T07:00:00Z','2026-08-28T07:00:00Z',NULL);",
+            [],
+        )
+        .unwrap();
+    let meta_before: String = storage
+        .connection_for_test()
+        .query_row(
+            "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let job_before: String = storage
+        .connection_for_test()
+        .query_row(
+            "SELECT json_object(\
+               'singleton',singleton,'job_id',job_id,'state',state,\
+               'cutoff_event_rowid',cutoff_event_rowid,'phase',phase,\
+               'after_event_rowid',after_event_rowid,'failure_kind',failure_kind,\
+               'created_at',created_at,'updated_at',updated_at,'completed_at',completed_at\
+             ) FROM lifetime_materialization_job WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let rows_before = materialized_row_count(&storage);
+    let bytes_before = fs::read(&path).unwrap();
+
+    let error = storage
+        .materialize_lifetime_records(None)
+        .expect_err("legacy materialization must not race the bounded cursor");
+    assert_eq!(error.kind(), "storageMaterializationFailed");
+    assert_eq!(
+        storage
+            .connection_for_test()
+            .query_row(
+                "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        meta_before
+    );
+    assert_eq!(
+        storage
+            .connection_for_test()
+            .query_row(
+                "SELECT json_object(\
+                   'singleton',singleton,'job_id',job_id,'state',state,\
+                   'cutoff_event_rowid',cutoff_event_rowid,'phase',phase,\
+                   'after_event_rowid',after_event_rowid,'failure_kind',failure_kind,\
+                   'created_at',created_at,'updated_at',updated_at,'completed_at',completed_at\
+                 ) FROM lifetime_materialization_job WHERE singleton=1;",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        job_before
+    );
+    assert_eq!(materialized_row_count(&storage), rows_before);
+    assert_eq!(fs::read(&path).unwrap(), bytes_before);
+}
+
+#[test]
 fn populated_materialization_preserves_receipts_messages_workspaces_and_baseline_tail() {
     let (_root, path) = database();
     let mut storage = Storage::open(&path).expect("storage");
