@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 bounded verification 계약)
+
+- **additive v4 migration 계약**: exact storage-v3 schema와 `ready+absent` 또는 구조적으로 유효한 `pending+absent|pending|failed` pair를 어떤 mutation보다 먼저 확인하고, transaction 안에서 `storage_schema_meta` version CHECK와 `lifetime_materialization_job`만 재구축한다. v3 `verify`는 `verifySource`, `after_event_rowid`는 `after_scan_rowid`로 옮기며 failed는 보존한다. 나머지 원장·projection·materialized data·compaction history·named index·append-only trigger는 그대로 보존하고 unsafe pair/partial/extra schema는 DB byte-zero mutation으로 거부한다.
+- **arm·batch·검증·취소 경계**: job은 `pending|attempting|failed`, cursor는 source phases와 `verifySource`에서는 cutoff 이하 event rowid, 네 derived verification phase에서는 각 table rowid를 쓴다. caller가 바꿀 수 없는 exact `LIMIT 100`·1 MiB와 keyset scan만 허용한다. 짧은 arm transaction이 attempting을 먼저 영속하고, bounded batch success는 derived row+cursor+pending을 원자 commit한다. cancel은 batch rollback 뒤 pending을 commit하고 terminal validation은 rollback 뒤 failed를 commit한다. 두 번째 기록 transaction이 불가능하면 attempting sentinel이 남으며 reopen은 자동 retry/success를 거부한다.
+- **최종 publication·비활성 경계**: verify batch commit 뒤 cancel은 그 호출에서 즉시 `Suspended`로 끝나 final publication으로 이어지지 않는다. 별도 짧은 final transaction은 exact pair/cursor·max event rowid·두 cancel point만 검사해 job 삭제+ready를 게시하며 artifact/table scan/count는 하지 않는다. max가 늘면 receipts/새 cutoff/0으로 reset한다. cleanup·삭제·compaction·wire·scheduler와 보존/downgrade 제품 결정은 계속 비활성·열린 상태다.
+- **검증**: 공용 storage-v4 golden이 v3의 모든 pending phase·verify/failed mapping·ready absent, exact data/trigger/maintenance 보존, unsafe preflight 무변경, arm/batch/cancel/fail/attempting sentinel, source-less derived extra 거부, historical baseline 허용, final cancel/max-rowid 및 policy mutation을 Rust·TypeScript 양쪽에서 판정한다. focused Node·protocol Rust·TypeScript no-emit·rustfmt·diff check를 통과했다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v3 review P1 수정)
 
 - **재시작 pair 검증**: exact v3 open이 metadata와 optional `lifetime_materialization_job`을 protocol canonical 값으로 구성해 job validator와 meta/job pair validator를 모두 통과시킨다. `pending+absent|pending|failed`와 `ready+absent`만 재시작하며 `ready+present`, malformed timestamp/job은 cursor·content·path를 싣지 않는 동일 오류로 fail-closed한다. terminal failed job은 계약상 유효하지만 자동 retry 대상은 아니다.

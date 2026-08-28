@@ -29,6 +29,37 @@ struct ManifestV3 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ManifestV4 {
+    schema_version: u32,
+    storage_schema_version: u32,
+    protocol_version: u32,
+    payload_schema_version: u32,
+    migration: MigrationContractV4,
+    bounded_verification: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MigrationContractV4 {
+    file: String,
+    predecessor_migration_file: String,
+    predecessor_migration_mutation_allowed: bool,
+    from_version: u32,
+    to_version: u32,
+    mode: String,
+    preflight: Value,
+    idempotency: String,
+    partial_extra_or_unsafe_pair: String,
+    tables_added: Vec<String>,
+    tables_rebuilt: Vec<String>,
+    preserved_tables: Vec<String>,
+    preserved_indexes: Vec<String>,
+    preserved_triggers: Vec<String>,
+    downgrade_policy: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MigrationContractV3 {
     file: String,
     predecessor_migration_file: String,
@@ -240,6 +271,66 @@ struct InvalidPolicyMutation {
     name: String,
     path: Vec<String>,
     replacement: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V4Cases {
+    v3_migration_cases: Vec<V3MigrationCase>,
+    valid_cursors: Vec<NamedValue>,
+    invalid_cursors: Vec<NamedValue>,
+    valid_cursor_transitions: Vec<CursorTransitionCase>,
+    invalid_cursor_transitions: Vec<CursorTransitionCase>,
+    valid_payload_batches: Vec<NamedValue>,
+    invalid_payload_batches: Vec<NamedValue>,
+    valid_jobs: Vec<NamedValue>,
+    invalid_jobs: Vec<NamedValue>,
+    valid_pairs: Vec<NamedValue>,
+    invalid_pairs: Vec<NamedValue>,
+    runnable_reopen_pairs: Vec<usize>,
+    fail_closed_reopen_pairs: Vec<usize>,
+    valid_lifecycle_transitions: Vec<LifecycleTransitionCaseV2>,
+    invalid_lifecycle_transitions: Vec<LifecycleTransitionCaseV2>,
+    valid_verification_evidence: Vec<NamedValue>,
+    invalid_verification_evidence: Vec<NamedValue>,
+    execution_models: ExecutionModels,
+    invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
+    invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V3MigrationCase {
+    name: String,
+    v3_state: String,
+    v3_phase: String,
+    after_event_rowid: u64,
+    v4_state: String,
+    v4_phase: String,
+    after_scan_rowid: u64,
+}
+
+#[derive(Deserialize)]
+struct LifecycleTransitionCaseV2 {
+    name: String,
+    operation: StorageLifetimeLifecycleOperationV2,
+    previous: Value,
+    next: Value,
+}
+
+#[derive(Deserialize)]
+struct ExecutionModels {
+    valid: Vec<ExecutionModel>,
+    invalid: Vec<ExecutionModel>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionModel {
+    name: String,
+    verify_batch_committed: bool,
+    outcome: String,
+    final_publication_same_call: bool,
 }
 
 #[test]
@@ -584,6 +675,237 @@ fn storage_v3_contract_separates_materialization_from_compaction_history() {
 }
 
 #[test]
+fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
+    let (root, manifest) = manifest_v4();
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(
+        manifest.storage_schema_version,
+        STORAGE_LIFETIME_SCHEMA_VERSION_V4
+    );
+    assert_eq!(manifest.protocol_version, crate::PROTOCOL_VERSION);
+    assert_eq!(manifest.payload_schema_version, 1);
+    assert_eq!(manifest.migration.from_version, 3);
+    assert_eq!(manifest.migration.to_version, 4);
+    assert_eq!(
+        manifest.migration.predecessor_migration_file,
+        "../storage-v3/migration-v2-to-v3.sql"
+    );
+    assert!(!manifest.migration.predecessor_migration_mutation_allowed);
+    assert_eq!(
+        manifest.migration.mode,
+        "exactV3AndAdmissiblePairPreflightThenTransactionalMetaAndJobRebuild"
+    );
+    assert_eq!(
+        manifest.migration.idempotency,
+        "exactStorageV4NoOpBeforeMigrationSql"
+    );
+    assert_eq!(
+        manifest.migration.partial_extra_or_unsafe_pair,
+        "failClosedBeforeMutation"
+    );
+    assert!(manifest.migration.tables_added.is_empty());
+    assert_eq!(
+        manifest.migration.tables_rebuilt,
+        ["storage_schema_meta", "lifetime_materialization_job"]
+    );
+    assert_eq!(
+        manifest.migration.preserved_tables,
+        [
+            "schema_meta",
+            "app_instances",
+            "events",
+            "projects",
+            "chats",
+            "runs",
+            "locks",
+            "ledger_baselines",
+            "operation_receipts",
+            "chat_messages",
+            "prepared_workspaces",
+            "maintenance_jobs",
+        ]
+    );
+    assert!(STORAGE_LIFETIME_INDEXES_V2.iter().copied().eq(manifest
+        .migration
+        .preserved_indexes
+        .iter()
+        .map(String::as_str)));
+    assert_eq!(
+        manifest.migration.preserved_triggers,
+        [
+            "events_are_append_only_update",
+            "events_are_append_only_delete"
+        ]
+    );
+    assert_eq!(manifest.migration.downgrade_policy, "openQuestion");
+    validate_storage_lifetime_v4_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("exact v4 preflight");
+    validate_storage_lifetime_batch_policy_v2(&manifest.bounded_verification)
+        .expect("exact v4 bounded verification policy");
+
+    let cases_file = manifest
+        .bounded_verification
+        .get("casesFile")
+        .and_then(Value::as_str)
+        .expect("v4 cases file");
+    let cases: V4Cases = read_json(root.join(cases_file));
+    for case in &cases.v3_migration_cases {
+        let mapped_phase = if case.v3_phase == "verify" {
+            "verifySource"
+        } else {
+            case.v3_phase.as_str()
+        };
+        assert_eq!(case.v4_phase, mapped_phase, "{}", case.name);
+        assert_eq!(case.v4_state, case.v3_state, "{}", case.name);
+        assert_eq!(
+            case.after_scan_rowid, case.after_event_rowid,
+            "{}",
+            case.name
+        );
+        assert_ne!(case.v3_state, "attempting", "{}", case.name);
+    }
+    for case in &cases.valid_cursors {
+        validate_storage_lifetime_cursor_v2(&case.value).expect(&case.name);
+    }
+    for case in &cases.invalid_cursors {
+        assert!(
+            validate_storage_lifetime_cursor_v2(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_cursor_transitions {
+        validate_storage_lifetime_cursor_transition_v2(case.previous.as_ref(), &case.next)
+            .expect(&case.name);
+    }
+    for case in &cases.invalid_cursor_transitions {
+        assert!(
+            validate_storage_lifetime_cursor_transition_v2(case.previous.as_ref(), &case.next)
+                .is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_payload_batches {
+        let payloads: Vec<u64> = serde_json::from_value(case.value.clone()).expect(&case.name);
+        validate_storage_lifetime_batch_source_payloads_v1(&payloads).expect(&case.name);
+    }
+    for case in &cases.invalid_payload_batches {
+        let payloads: Vec<u64> = serde_json::from_value(case.value.clone()).expect(&case.name);
+        assert!(
+            validate_storage_lifetime_batch_source_payloads_v1(&payloads).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_jobs {
+        validate_storage_lifetime_materialization_job_v2(&case.value).expect(&case.name);
+    }
+    for case in &cases.invalid_jobs {
+        assert!(
+            validate_storage_lifetime_materialization_job_v2(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_pairs {
+        validate_storage_lifetime_materialization_pair_v2(&case.value).expect(&case.name);
+    }
+    for case in &cases.invalid_pairs {
+        assert!(
+            validate_storage_lifetime_materialization_pair_v2(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for index in &cases.runnable_reopen_pairs {
+        validate_storage_lifetime_reopen_pair_v2(&cases.valid_pairs[*index].value)
+            .expect(&cases.valid_pairs[*index].name);
+    }
+    for index in &cases.fail_closed_reopen_pairs {
+        assert!(
+            validate_storage_lifetime_reopen_pair_v2(&cases.valid_pairs[*index].value).is_err(),
+            "{}",
+            cases.valid_pairs[*index].name
+        );
+    }
+    for case in &cases.valid_lifecycle_transitions {
+        validate_storage_lifetime_lifecycle_transition_v2(
+            case.operation,
+            &case.previous,
+            &case.next,
+        )
+        .expect(&case.name);
+    }
+    for case in &cases.invalid_lifecycle_transitions {
+        assert!(
+            validate_storage_lifetime_lifecycle_transition_v2(
+                case.operation,
+                &case.previous,
+                &case.next,
+            )
+            .is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_verification_evidence {
+        validate_storage_lifetime_verification_evidence_v2(&case.value).expect(&case.name);
+    }
+    for case in &cases.invalid_verification_evidence {
+        assert!(
+            validate_storage_lifetime_verification_evidence_v2(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.execution_models.valid {
+        assert_eq!(case.outcome, "Suspended", "{}", case.name);
+        assert!(!case.final_publication_same_call, "{}", case.name);
+        let _ = case.verify_batch_committed;
+    }
+    for case in &cases.execution_models.invalid {
+        assert!(
+            case.verify_batch_committed
+                && case.outcome == "Suspended"
+                && case.final_publication_same_call,
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_preflight_mutations {
+        let mut invalid = manifest.migration.preflight.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_v4_preflight_policy_v1(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_policy_mutations {
+        let mut invalid = manifest.bounded_verification.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_batch_policy_v2(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+
+    let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read v4 migration");
+    let normalized = sql.to_ascii_uppercase();
+    assert!(
+        sql.contains("state TEXT NOT NULL CHECK (state IN ('pending', 'attempting', 'failed'))")
+    );
+    assert!(sql.contains("WHEN 'verify' THEN 'verifySource'"));
+    assert!(sql.contains("after_scan_rowid"));
+    assert!(!normalized.contains("ALTER TABLE MAINTENANCE_JOBS"));
+    assert!(!normalized.contains("DROP TABLE MAINTENANCE_JOBS"));
+    assert!(!normalized.contains("DELETE FROM EVENTS"));
+    assert!(!normalized.contains("DROP TRIGGER"));
+}
+
+#[test]
 fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     let (root, manifest) = manifest();
     assert_eq!(manifest.compaction.mode, "losslessInternalOnly");
@@ -724,6 +1046,14 @@ fn manifest_v3() -> (PathBuf, ManifestV3) {
     (root, manifest)
 }
 
+fn manifest_v4() -> (PathBuf, ManifestV4) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-v4");
+    let manifest = read_json(root.join("manifest.json"));
+    (root, manifest)
+}
+
 fn read_json<T: for<'de> Deserialize<'de>>(path: PathBuf) -> T {
     let source = fs::read(path).expect("read fixture");
     serde_json::from_slice(&source).expect("decode fixture")
@@ -733,13 +1063,23 @@ fn set_value_path(target: &mut Value, path: &[String], replacement: Value) {
     let (last, parents) = path.split_last().expect("non-empty mutation path");
     let mut current = target;
     for segment in parents {
-        current = current
-            .as_object_mut()
-            .and_then(|object| object.get_mut(segment))
-            .expect("policy mutation parent");
+        if current.is_object() {
+            current = current
+                .as_object_mut()
+                .and_then(|object| object.get_mut(segment))
+                .expect("policy mutation parent");
+        } else {
+            current = current
+                .as_array_mut()
+                .and_then(|array| array.get_mut(segment.parse::<usize>().expect("array index")))
+                .expect("policy mutation array parent");
+        }
     }
-    current
-        .as_object_mut()
-        .expect("policy mutation object")
-        .insert(last.clone(), replacement);
+    if let Some(object) = current.as_object_mut() {
+        object.insert(last.clone(), replacement);
+    } else if let Some(array) = current.as_array_mut() {
+        array[last.parse::<usize>().expect("array index")] = replacement;
+    } else {
+        panic!("policy mutation target");
+    }
 }
