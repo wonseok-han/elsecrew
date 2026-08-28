@@ -41,7 +41,6 @@ import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from 
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
-declare const MAIN_WINDOW_PRELOAD_VITE_PATH: string;
 
 const APP_SCHEME = "app";
 const APP_HOST = "m5";
@@ -317,7 +316,7 @@ async function createMainWindow() {
     minWidth: 960,
     minHeight: 640,
     webPreferences: {
-      preload: MAIN_WINDOW_PRELOAD_VITE_PATH,
+      preload: join(__dirname, "preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,

@@ -51,7 +51,7 @@ for (const [option, expected] of [
 }
 
 const files = listPackage(asar, { isPack: false });
-for (const file of ["/.vite/build/main.js", "/.vite/build/preload.js", "/.vite/renderer/main_window/index.html"]) {
+for (const file of ["/.vite/build/main.cjs", "/.vite/build/preload.cjs", "/.vite/renderer/main_window/index.html"]) {
   assert.ok(files.includes(file), `missing packaged asset: ${file}`);
 }
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.js$/.test(file)), "missing packaged renderer JavaScript");

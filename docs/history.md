@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 Electron 개발 실행 복구)
+
+- **원인·수정**: `pnpm m5:dev`가 만든 `.vite/build/main.js`는 CommonJS인데 루트 `package.json`의 `type=module` 때문에 Electron이 ESM으로 해석해 `exports is not defined`로 창 생성 전에 중단됐다. 루트 ESM은 유지하고 Electron main/preload 산출물만 명시적 `main.cjs`/`preload.cjs`로 고정했다. preload 경로도 Forge가 제공하지 않는 선언형 상수가 아니라 main bundle 옆의 exact 파일을 사용한다.
+- **회귀 경계**: package main, Vite CJS 산출물 이름, BrowserWindow preload 경로와 ASAR smoke 기대 파일을 한 계약으로 묶었다. M5 작업대 화면은 존재하며 개발 모드는 fixture sidecar, 패키지 모드는 Rust sidecar를 사용한다. 실제 Claude/Codex provider는 계속 비활성이다.
+- **검증·경계**: Electron scaffold 4개와 TypeScript no-emit, Forge 개발 실행을 통과했고 main/preload가 `.cjs`로 빌드된 뒤 `app://m5/index.html`의 프로젝트 선택·파일·코드 편집기·변경 3열 작업대가 실제 창에 렌더링됨을 확인했다. darwin-arm64 package와 Rust sidecar 포함 ASAR smoke도 통과했다. 개발 실행은 fixture sidecar이며 패키지 실행도 실제 Claude/Codex provider는 아직 비활성이다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D1B 무삭제 materialization)
 
 - **호출형 단일 transaction materialization**: 아직 wire·startup·background에 연결하지 않은 내부 `materialize_lifetime_records`가 stable event rowid cutoff를 잡고 모든 v1 event를 immutable operation receipt로 옮긴다. canonical payload 원문과 재계산 SHA-256 metadata를 exact 비교하며 legacy·actual-agent·recovery duplicate/conflict 의미가 기존 v1과 같음을 검증한다.
