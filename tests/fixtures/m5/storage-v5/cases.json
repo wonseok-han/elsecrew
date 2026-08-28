@@ -1,0 +1,160 @@
+{
+  "migrationMatrix": {
+    "jobStates": ["pending", "attempting", "failed"],
+    "positionPreservedPhases": [
+      "receipts", "messages", "workspaces", "baselines", "verifySource"
+    ],
+    "projectionRestartPhases": [
+      "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+    ],
+    "absentMaterializationStates": ["pending", "ready"],
+    "stateMapping": "preserve",
+    "positionPreservedMapping": "preservePhaseCursorAndExhaustion",
+    "projectionRestartMapping": "verifySourceZeroUnexhausted"
+  },
+  "phaseOrder": [
+    "receipts", "messages", "workspaces", "baselines", "verifySource",
+    "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+    "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+  ],
+  "validCatchUpResets": [
+    {
+      "name": "before entering projection verification",
+      "previousState": "pending",
+      "previousPhase": "verifySource",
+      "previousAfterScanRowid": 20,
+      "previousScanExhausted": true,
+      "previousCutoff": 20,
+      "observedCutoff": 21
+    },
+    {
+      "name": "before projection batch after arm",
+      "previousState": "attempting",
+      "previousPhase": "verifyProjects",
+      "previousAfterScanRowid": 100,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 22
+    },
+    {
+      "name": "before derived verification batch",
+      "previousState": "attempting",
+      "previousPhase": "verifyReceipts",
+      "previousAfterScanRowid": 900,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 23
+    },
+    {
+      "name": "before final publication",
+      "previousState": "pending",
+      "previousPhase": "verifyBaselines",
+      "previousAfterScanRowid": 901,
+      "previousScanExhausted": true,
+      "previousCutoff": 20,
+      "observedCutoff": 24
+    }
+  ],
+  "invalidCatchUpResets": [
+    {
+      "name": "frozen materialization does not reset",
+      "previousState": "pending",
+      "previousPhase": "receipts",
+      "previousAfterScanRowid": 10,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 21
+    },
+    {
+      "name": "cutoff must increase",
+      "previousState": "attempting",
+      "previousPhase": "verifyProjects",
+      "previousAfterScanRowid": 10,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 20
+    },
+    {
+      "name": "failed job never resets",
+      "previousState": "failed",
+      "previousPhase": "verifyProjects",
+      "previousAfterScanRowid": 10,
+      "previousScanExhausted": false,
+      "previousCutoff": 20,
+      "observedCutoff": 21
+    }
+  ],
+  "validLifecycleOperations": [
+    "create", "arm", "batchSuccess", "phaseAdvance", "cancel", "fail",
+    "failureRecordUnavailable", "finalPublish", "catchUpReset", "append"
+  ],
+  "invalidPreflightMutations": [
+    {
+      "name": "attempting omitted from admissible pairs",
+      "path": ["admissiblePairs", "3"],
+      "replacement": "pending+pending"
+    },
+    {
+      "name": "legacy projection progress trusted",
+      "path": ["migrationMappings", "2"],
+      "replacement": "legacyDerivedVerificationPreserved"
+    },
+    {
+      "name": "attempting made runnable",
+      "path": ["reopenRunnablePairs", "2"],
+      "replacement": "pending+attempting"
+    },
+    {
+      "name": "preflight after mutation",
+      "path": ["timing"],
+      "replacement": "afterDdl"
+    }
+  ],
+  "invalidPolicyMutations": [
+    {
+      "name": "projection phase skipped",
+      "path": ["cursor", "phases", "5"],
+      "replacement": "verifyChats"
+    },
+    {
+      "name": "unbounded namespace query allowed",
+      "path": ["scan", "forbidden", "6"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "source anti join allowed",
+      "path": ["verification", "verifySource", "forbidden", "1"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "projection fence omitted",
+      "path": ["maxEventRowidFence", "requiredBefore", "1"],
+      "replacement": "finalPublication"
+    },
+    {
+      "name": "catch up becomes failure",
+      "path": ["maxEventRowidFence", "greater"],
+      "replacement": "failed"
+    },
+    {
+      "name": "cutoff regression accepted",
+      "path": ["maxEventRowidFence", "less"],
+      "replacement": "continue"
+    },
+    {
+      "name": "app instances counted as snapshot aggregate",
+      "path": ["snapshotAggregates", "excludedProjectionTables", "0"],
+      "replacement": "none"
+    },
+    {
+      "name": "lock evidence omitted",
+      "path": ["verification", "projectionColumns", "locks", "6"],
+      "replacement": "projection_json"
+    },
+    {
+      "name": "cleanup enabled",
+      "path": ["activation", "cleanupEnabled"],
+      "replacement": true
+    }
+  ]
+}

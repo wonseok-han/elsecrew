@@ -40,6 +40,17 @@ struct ManifestV4 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ManifestV5 {
+    schema_version: u32,
+    storage_schema_version: u32,
+    protocol_version: u32,
+    payload_schema_version: u32,
+    migration: MigrationContractV4,
+    bounded_projection_verification: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MigrationContractV4 {
     file: String,
     predecessor_migration_file: String,
@@ -341,6 +352,42 @@ struct ExecutionModel {
     verify_batch_committed: bool,
     outcome: String,
     final_publication_same_call: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V5Cases {
+    migration_matrix: V5MigrationMatrix,
+    phase_order: Vec<String>,
+    valid_catch_up_resets: Vec<V5CatchUpCase>,
+    invalid_catch_up_resets: Vec<V5CatchUpCase>,
+    valid_lifecycle_operations: Vec<String>,
+    invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
+    invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V5MigrationMatrix {
+    job_states: Vec<String>,
+    position_preserved_phases: Vec<String>,
+    projection_restart_phases: Vec<String>,
+    absent_materialization_states: Vec<String>,
+    state_mapping: String,
+    position_preserved_mapping: String,
+    projection_restart_mapping: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V5CatchUpCase {
+    name: String,
+    previous_state: String,
+    previous_phase: String,
+    previous_after_scan_rowid: u64,
+    previous_scan_exhausted: bool,
+    previous_cutoff: u64,
+    observed_cutoff: u64,
 }
 
 #[test]
@@ -980,6 +1027,333 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
     assert!(!normalized.contains("DROP TABLE MAINTENANCE_JOBS"));
     assert!(!normalized.contains("DELETE FROM EVENTS"));
     assert!(!normalized.contains("DROP TRIGGER"));
+}
+
+#[test]
+fn storage_v5_freezes_bounded_projection_verification_and_catch_up() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-v5");
+    let manifest: ManifestV5 = read_json(root.join("manifest.json"));
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(
+        manifest.storage_schema_version,
+        STORAGE_LIFETIME_SCHEMA_VERSION_V5
+    );
+    assert_eq!(manifest.protocol_version, crate::PROTOCOL_VERSION);
+    assert_eq!(manifest.payload_schema_version, 1);
+    assert_eq!(manifest.migration.from_version, 4);
+    assert_eq!(manifest.migration.to_version, 5);
+    assert!(!manifest.migration.predecessor_migration_mutation_allowed);
+    assert_eq!(
+        manifest.migration.predecessor_migration_file,
+        "../storage-v4/migration-v3-to-v4.sql"
+    );
+    assert_eq!(
+        manifest.migration.mode,
+        "exactV4AndAdmissiblePairPreflightThenTransactionalMetaAndJobRebuild"
+    );
+    assert_eq!(
+        manifest.migration.idempotency,
+        "exactStorageV5NoOpBeforeMigrationSql"
+    );
+    assert_eq!(
+        manifest.migration.partial_extra_or_unsafe_pair,
+        "failClosedBeforeMutation"
+    );
+    assert!(manifest.migration.tables_added.is_empty());
+    assert_eq!(
+        manifest.migration.tables_rebuilt,
+        ["storage_schema_meta", "lifetime_materialization_job"]
+    );
+    assert_eq!(
+        manifest.migration.preserved_tables,
+        [
+            "schema_meta",
+            "app_instances",
+            "events",
+            "projects",
+            "chats",
+            "runs",
+            "locks",
+            "ledger_baselines",
+            "operation_receipts",
+            "chat_messages",
+            "prepared_workspaces",
+            "maintenance_jobs",
+        ]
+    );
+    assert!(STORAGE_LIFETIME_INDEXES_V2.iter().copied().eq(manifest
+        .migration
+        .preserved_indexes
+        .iter()
+        .map(String::as_str)));
+    assert_eq!(
+        manifest.migration.preserved_triggers,
+        [
+            "events_are_append_only_update",
+            "events_are_append_only_delete"
+        ]
+    );
+    assert_eq!(manifest.migration.downgrade_policy, "openQuestion");
+    validate_storage_lifetime_v5_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("exact v5 preflight");
+    validate_storage_lifetime_batch_policy_v3(&manifest.bounded_projection_verification)
+        .expect("exact v5 bounded projection policy");
+
+    let cases: V5Cases = read_json(root.join("cases.json"));
+    assert_eq!(cases.phase_order, STORAGE_LIFETIME_PHASES_V3);
+    assert_eq!(
+        cases.migration_matrix.job_states,
+        STORAGE_LIFETIME_JOB_STATES_V2
+    );
+    assert_eq!(
+        cases.migration_matrix.position_preserved_phases,
+        STORAGE_LIFETIME_EVENT_ROWID_PHASES_V3
+    );
+    assert_eq!(
+        cases.migration_matrix.projection_restart_phases,
+        STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V2
+    );
+    assert_eq!(
+        cases.migration_matrix.absent_materialization_states,
+        ["pending", "ready"]
+    );
+    assert_eq!(cases.migration_matrix.state_mapping, "preserve");
+    assert_eq!(
+        cases.migration_matrix.position_preserved_mapping,
+        "preservePhaseCursorAndExhaustion"
+    );
+    assert_eq!(
+        cases.migration_matrix.projection_restart_mapping,
+        "verifySourceZeroUnexhausted"
+    );
+
+    for (index, phase) in STORAGE_LIFETIME_PHASES_V3.iter().enumerate() {
+        let cursor = serde_json::json!({
+            "schemaVersion": 3,
+            "cutoffEventRowid": 20,
+            "phase": phase,
+            "afterScanRowid": if index < STORAGE_LIFETIME_EVENT_ROWID_PHASES_V3.len() { 20 } else { 900 },
+            "scanExhausted": true,
+        });
+        validate_storage_lifetime_cursor_v3(&cursor).expect(phase);
+        if let Some(next_phase) = STORAGE_LIFETIME_PHASES_V3.get(index + 1) {
+            let next = serde_json::json!({
+                "schemaVersion": 3,
+                "cutoffEventRowid": 20,
+                "phase": next_phase,
+                "afterScanRowid": 0,
+                "scanExhausted": false,
+            });
+            validate_storage_lifetime_cursor_transition_v3(Some(&cursor), &next)
+                .expect("exact phase order");
+        }
+    }
+
+    let expected_operations = [
+        "create",
+        "arm",
+        "batchSuccess",
+        "phaseAdvance",
+        "cancel",
+        "fail",
+        "failureRecordUnavailable",
+        "finalPublish",
+        "catchUpReset",
+        "append",
+    ];
+    assert_eq!(cases.valid_lifecycle_operations, expected_operations);
+    let pending_absent = serde_json::json!({"materializationState":"pending","job":null});
+    let ready_absent = serde_json::json!({"materializationState":"ready","job":null});
+    let created = v5_snapshot("pending", "receipts", 0, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::Create,
+        &pending_absent,
+        &created,
+    )
+    .expect("create");
+    let armed = v5_snapshot("attempting", "receipts", 0, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::Arm,
+        &created,
+        &armed,
+    )
+    .expect("arm");
+    let batch = v5_snapshot("pending", "receipts", 1, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::BatchSuccess,
+        &armed,
+        &batch,
+    )
+    .expect("batch success");
+    let exhausted_project = v5_snapshot("pending", "verifyProjects", 900, true, 20);
+    let entered_chats = v5_snapshot("pending", "verifyChats", 0, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::PhaseAdvance,
+        &exhausted_project,
+        &entered_chats,
+    )
+    .expect("phase advance");
+    let attempting_project = v5_snapshot("attempting", "verifyProjects", 900, false, 20);
+    let pending_project = v5_snapshot("pending", "verifyProjects", 900, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::Cancel,
+        &attempting_project,
+        &pending_project,
+    )
+    .expect("cancel");
+    let failed_project = v5_snapshot("failed", "verifyProjects", 900, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::Fail,
+        &attempting_project,
+        &failed_project,
+    )
+    .expect("fail");
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::FailureRecordUnavailable,
+        &attempting_project,
+        &attempting_project,
+    )
+    .expect("attempting sentinel");
+    let final_cursor = v5_snapshot("pending", "verifyBaselines", 901, true, 20);
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::FinalPublish,
+        &final_cursor,
+        &ready_absent,
+    )
+    .expect("final publish");
+    validate_storage_lifetime_lifecycle_transition_v3(
+        StorageLifetimeLifecycleOperationV3::Append,
+        &ready_absent,
+        &pending_absent,
+    )
+    .expect("append invalidates ready");
+    for case in &cases.valid_catch_up_resets {
+        let previous =
+            v5_snapshot_for_case(case, case.previous_cutoff, case.previous_phase.as_str());
+        let next = v5_snapshot_for_case(case, case.observed_cutoff, "receipts");
+        validate_storage_lifetime_lifecycle_transition_v3(
+            StorageLifetimeLifecycleOperationV3::CatchUpReset,
+            &previous,
+            &next,
+        )
+        .expect(&case.name);
+    }
+    for case in &cases.invalid_catch_up_resets {
+        let previous =
+            v5_snapshot_for_case(case, case.previous_cutoff, case.previous_phase.as_str());
+        let next = v5_snapshot_for_case(case, case.observed_cutoff, "receipts");
+        assert!(
+            validate_storage_lifetime_lifecycle_transition_v3(
+                StorageLifetimeLifecycleOperationV3::CatchUpReset,
+                &previous,
+                &next,
+            )
+            .is_err(),
+            "{}",
+            case.name
+        );
+    }
+    let direct_exhaustion_previous = v5_snapshot("pending", "verifyProjects", 0, false, 20);
+    let direct_exhaustion_next = v5_snapshot("pending", "verifyProjects", 0, true, 20);
+    for operation in [
+        StorageLifetimeLifecycleOperationV3::Create,
+        StorageLifetimeLifecycleOperationV3::Arm,
+        StorageLifetimeLifecycleOperationV3::BatchSuccess,
+        StorageLifetimeLifecycleOperationV3::PhaseAdvance,
+        StorageLifetimeLifecycleOperationV3::Cancel,
+        StorageLifetimeLifecycleOperationV3::Fail,
+        StorageLifetimeLifecycleOperationV3::FailureRecordUnavailable,
+        StorageLifetimeLifecycleOperationV3::FinalPublish,
+        StorageLifetimeLifecycleOperationV3::CatchUpReset,
+        StorageLifetimeLifecycleOperationV3::Append,
+    ] {
+        assert!(
+            validate_storage_lifetime_lifecycle_transition_v3(
+                operation,
+                &direct_exhaustion_previous,
+                &direct_exhaustion_next,
+            )
+            .is_err(),
+            "{operation:?} cannot forge private exhaustion"
+        );
+    }
+    for case in cases.invalid_preflight_mutations {
+        let mut invalid = manifest.migration.preflight.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_v5_preflight_policy_v1(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_policy_mutations {
+        let mut invalid = manifest.bounded_projection_verification.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_batch_policy_v3(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+
+    let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read v5 migration");
+    let normalized = sql.to_ascii_uppercase();
+    assert!(
+        sql.contains("storage_schema_version INTEGER NOT NULL CHECK (storage_schema_version = 5)")
+    );
+    assert!(sql.contains("'verifyProjects', 'verifyChats', 'verifyRuns', 'verifyLocks'"));
+    assert!(sql.contains("WHEN 'verifyReceipts' THEN 'verifySource'"));
+    assert!(sql.contains("ELSE after_scan_rowid"));
+    assert!(sql.contains("ELSE scan_exhausted"));
+    assert!(!normalized.contains("DELETE FROM EVENTS"));
+    assert!(!normalized.contains("ALTER TABLE PROJECTS"));
+    assert!(!normalized.contains("DROP TRIGGER"));
+}
+
+fn v5_snapshot_for_case(case: &V5CatchUpCase, cutoff: u64, phase: &str) -> Value {
+    let is_next = phase == "receipts" && cutoff == case.observed_cutoff;
+    let state = if is_next {
+        "pending"
+    } else {
+        case.previous_state.as_str()
+    };
+    serde_json::json!({
+        "materializationState": "pending",
+        "job": {
+            "singleton": 1,
+            "jobId": "lifetime-v5",
+            "state": state,
+            "cutoffEventRowid": cutoff,
+            "phase": phase,
+            "afterScanRowid": if is_next { 0 } else { case.previous_after_scan_rowid },
+            "scanExhausted": if is_next { false } else { case.previous_scan_exhausted },
+            "failureKind": if state == "failed" { Value::String("contractValidation".to_string()) } else { Value::Null },
+            "createdAt": "2026-08-28T12:00:00Z",
+            "updatedAt": if state == "failed" { "2026-08-28T12:02:00Z" } else { "2026-08-28T12:01:00Z" },
+            "completedAt": if state == "failed" { Value::String("2026-08-28T12:02:00Z".to_string()) } else { Value::Null },
+        }
+    })
+}
+
+fn v5_snapshot(state: &str, phase: &str, after: u64, exhausted: bool, cutoff: u64) -> Value {
+    serde_json::json!({
+        "materializationState": "pending",
+        "job": {
+            "singleton": 1,
+            "jobId": "lifetime-v5",
+            "state": state,
+            "cutoffEventRowid": cutoff,
+            "phase": phase,
+            "afterScanRowid": after,
+            "scanExhausted": exhausted,
+            "failureKind": if state == "failed" { Value::String("contractValidation".to_string()) } else { Value::Null },
+            "createdAt": "2026-08-28T12:00:00Z",
+            "updatedAt": if state == "failed" { "2026-08-28T12:02:00Z" } else { "2026-08-28T12:01:00Z" },
+            "completedAt": if state == "failed" { Value::String("2026-08-28T12:02:00Z".to_string()) } else { Value::Null },
+        }
+    })
 }
 
 #[test]

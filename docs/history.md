@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 projection verification 계약)
+
+- **v5 migration·보수적 재검증**: exact storage-v4 schema와 `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 어떤 mutation보다 먼저 확인하고 metadata/job 두 표만 transaction 재구축하는 storage v5 계약을 추가했다. v4 `receipts`~`verifySource`의 state/phase/cursor/private exhaustion은 보존하되, 새 projection phase를 건너뛸 수 있는 기존 `verifyReceipts`~`verifyBaselines`는 state·실패 증거를 보존한 채 `verifySource/0/unexhausted`로 되돌린다. v1~v4 golden 파일은 고정 digest로 불변을 확인한다.
+- **14단계 bounded projection 검증**: materialization 뒤 `verifySource → projects → chats → runs → locks → app_instances → receipts → messages → workspaces → baselines`를 각 table `rowid` keyset `LIMIT 100`으로 검사한다. source phase는 cutoff 이하 sequence/predecessor·필수 derived 존재·최신 projection 존재를 확인하고, table phase는 최신 exact source event와 projection JSON·mirrored/indexed column 전체를 비교한다. missing은 source phase, extra/source-less는 table phase가 맡으며 `COUNT`·window·`GROUP BY`·anti-join·full scan·unbounded namespace query는 금지한다. `app_instances`는 검증하지만 materialized snapshot aggregate에서는 계속 제외한다.
+- **append fence·lifecycle**: projection 검증 진입 전, 모든 projection/derived batch 전, scan-free final publication 전에 `BEGIN IMMEDIATE` 안의 exact max event rowid가 cutoff와 같은지 확인한다. 더 크면 실패시키지 않고 같은 singleton을 새 cutoff의 `pending/receipts/0/unexhausted`로 reset하며, frozen materialization phase는 기존 cutoff로 계속 진행할 수 있다. pending/attempting/failed·cancel·terminal failure·private empty-query exhaustion 의미는 v4와 동일하다. 다음은 독립 계약 검토 뒤 별도 sidecar worker가 exact v5 migration과 bounded verification을 소비하는 구현이다.
+- **검증·소유 경계**: 실제 SQLite migration으로 v4 3개 job state×9개 phase와 pending/ready absent, unsafe pair·extra schema의 DB byte-zero 거부를 확인했다. Node lifetime 12개, protocol 전체 39개, TypeScript no-emit, Rust 2021 rustfmt와 `git diff --check`를 통과했다. sidecar consumer·wire/scheduler/UI·삭제/compaction·제품 보존 정책은 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 sidecar migration)
 
 - **exact v4 소비 구현**: `Storage::open`이 fresh/v2/v3 상태를 exact v1→v2→v3→v4 순서로 검증·이전하고, 현재 exact v4는 migration SQL 없이 재검증한다. v3→v4 DDL 전에 exact v3 schema와 canonical v3 job/meta pair를 모두 검사하며, canonical transaction 뒤 exact v4 schema·metadata·optional job과 phase별 cursor를 protocol v2 validator로 재검증한다. partial/extra/version/table mismatch와 unsafe v3/v4 pair는 fail-closed다.

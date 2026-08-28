@@ -13,6 +13,7 @@ use crate::MAX_SEQUENCE;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V1: u32 = 2;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V3: u32 = 3;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V4: u32 = 4;
+pub const STORAGE_LIFETIME_SCHEMA_VERSION_V5: u32 = 5;
 pub const STORAGE_STATUS_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_STATUS_METHOD_V1: &str = "storage.status";
 pub const STORAGE_STATUS_BRIDGE_VERSION_V1: u32 = 6;
@@ -83,6 +84,44 @@ pub const STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V2: &[&str] = &[
 ];
 pub const STORAGE_LIFETIME_JOB_STATES_V2: &[&str] = &["pending", "attempting", "failed"];
 pub const STORAGE_LIFETIME_KEYSET_LIMIT_SQL_V2: &str = "LIMIT 100";
+pub const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V3: u32 = 3;
+pub const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V3: u32 = 3;
+pub const STORAGE_LIFETIME_PHASES_V3: &[&str] = &[
+    "receipts",
+    "messages",
+    "workspaces",
+    "baselines",
+    "verifySource",
+    "verifyProjects",
+    "verifyChats",
+    "verifyRuns",
+    "verifyLocks",
+    "verifyAppInstances",
+    "verifyReceipts",
+    "verifyMessages",
+    "verifyWorkspaces",
+    "verifyBaselines",
+];
+pub const STORAGE_LIFETIME_EVENT_ROWID_PHASES_V3: &[&str] = &[
+    "receipts",
+    "messages",
+    "workspaces",
+    "baselines",
+    "verifySource",
+];
+pub const STORAGE_LIFETIME_PROJECTION_ROWID_PHASES_V3: &[&str] = &[
+    "verifyProjects",
+    "verifyChats",
+    "verifyRuns",
+    "verifyLocks",
+    "verifyAppInstances",
+];
+pub const STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V3: &[&str] = &[
+    "verifyReceipts",
+    "verifyMessages",
+    "verifyWorkspaces",
+    "verifyBaselines",
+];
 pub const STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1: &[&str] = &["pending", "ready"];
 pub const STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1: &[&str] = &["materializing", "failed"];
 pub const LOSSLESS_COMPACTION_STEPS_V1: &[&str] = &[
@@ -319,6 +358,17 @@ pub struct StorageLifetimeV4PreflightPolicyV1 {
     pub timing: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeV5PreflightPolicyV1 {
+    pub schema: String,
+    pub admissible_pairs: Vec<String>,
+    pub migration_mappings: Vec<String>,
+    pub reopen_runnable_pairs: Vec<String>,
+    pub reopen_fail_closed_pairs: Vec<String>,
+    pub timing: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StorageLifetimeLifecycleOperationV1 {
@@ -402,6 +452,73 @@ pub enum StorageLifetimeLifecycleOperationV2 {
     Append,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageLifetimePhaseV3 {
+    Receipts,
+    Messages,
+    Workspaces,
+    Baselines,
+    VerifySource,
+    VerifyProjects,
+    VerifyChats,
+    VerifyRuns,
+    VerifyLocks,
+    VerifyAppInstances,
+    VerifyReceipts,
+    VerifyMessages,
+    VerifyWorkspaces,
+    VerifyBaselines,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeCursorV3 {
+    pub schema_version: u32,
+    pub cutoff_event_rowid: u64,
+    pub phase: StorageLifetimePhaseV3,
+    pub after_scan_rowid: u64,
+    pub scan_exhausted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeMaterializationJobV3 {
+    pub singleton: u32,
+    pub job_id: String,
+    pub state: StorageLifetimeJobStateV2,
+    pub cutoff_event_rowid: u64,
+    pub phase: StorageLifetimePhaseV3,
+    pub after_scan_rowid: u64,
+    pub scan_exhausted: bool,
+    pub failure_kind: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeMaterializationSnapshotV3 {
+    pub materialization_state: StorageMaterializationStateV1,
+    pub job: Option<StorageLifetimeMaterializationJobV3>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageLifetimeLifecycleOperationV3 {
+    Create,
+    Arm,
+    BatchSuccess,
+    PhaseAdvance,
+    Cancel,
+    Fail,
+    FailureRecordUnavailable,
+    FinalPublish,
+    CatchUpReset,
+    Append,
+}
+
 pub fn validate_storage_lifetime_v3_preflight_policy_v1(
     value: &Value,
 ) -> Result<StorageLifetimeV3PreflightPolicyV1, StorageLifetimeContractError> {
@@ -463,6 +580,49 @@ pub fn validate_storage_lifetime_v4_preflight_policy_v1(
     if !exact {
         return Err(StorageLifetimeContractError::new(
             "storage lifetime v4 preflight policy is not fail-closed",
+        ));
+    }
+    Ok(policy)
+}
+
+pub fn validate_storage_lifetime_v5_preflight_policy_v1(
+    value: &Value,
+) -> Result<StorageLifetimeV5PreflightPolicyV1, StorageLifetimeContractError> {
+    let policy: StorageLifetimeV5PreflightPolicyV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let exact = policy.schema == "exactStorageV4"
+        && strings_equal(
+            &policy.admissible_pairs,
+            &[
+                "ready+absent",
+                "pending+absent",
+                "pending+pending",
+                "pending+attempting",
+                "pending+failed",
+            ],
+        )
+        && strings_equal(
+            &policy.migration_mappings,
+            &[
+                "materializationStateAndAbsentJobPreserved",
+                "receiptsThroughVerifySourcePositionPreserved",
+                "legacyDerivedVerificationRestartsVerifySourceAtZeroUnexhausted",
+                "pendingAttemptingFailedStatePreserved",
+                "failureEvidencePreserved",
+            ],
+        )
+        && strings_equal(
+            &policy.reopen_runnable_pairs,
+            &["ready+absent", "pending+absent", "pending+pending"],
+        )
+        && strings_equal(
+            &policy.reopen_fail_closed_pairs,
+            &["pending+attempting", "pending+failed"],
+        )
+        && policy.timing == "beforeAnyDdlOrMutation";
+    if !exact {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 preflight policy is not fail-closed",
         ));
     }
     Ok(policy)
@@ -1536,6 +1696,513 @@ pub fn validate_storage_lifetime_verification_evidence_v2(
     {
         return Err(StorageLifetimeContractError::new(
             "baseline verification requires deterministic digest-valid source-backed history and newest baseline",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_storage_lifetime_batch_policy_v3(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    let expected = serde_json::json!({
+        "schemaVersion": STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V3,
+        "casesFile": "cases.json",
+        "guards": {
+            "maxRowsPerBatch": STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+            "maxCanonicalPayloadBytesPerBatch":
+                STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+            "callerConfigurable": false,
+            "appliesToPhases": STORAGE_LIFETIME_PHASES_V3,
+        },
+        "cursor": {
+            "schemaVersion": STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V3,
+            "column": "after_scan_rowid",
+            "phases": STORAGE_LIFETIME_PHASES_V3,
+            "eventRowidPhases": STORAGE_LIFETIME_EVENT_ROWID_PHASES_V3,
+            "projectionRowidPhases": STORAGE_LIFETIME_PROJECTION_ROWID_PHASES_V3,
+            "derivedRowidPhases": STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V3,
+            "phaseStartAfterScanRowid": 0,
+            "phaseStartScanExhausted": false,
+            "scanExhaustedMutationAuthority":
+                "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+            "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse",
+        },
+        "scan": {
+            "sourcePredicate": "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
+            "tablePredicate": "rowid > afterScanRowid",
+            "orderBy": "rowid",
+            "limitSql": STORAGE_LIFETIME_KEYSET_LIMIT_SQL_V2,
+            "privateEmptyWitness": "sameBeginImmediateTransaction",
+            "forbidden": [
+                "OFFSET", "COUNT", "window", "GROUP BY", "antiJoin",
+                "unboundedFullTableScan", "unboundedNamespaceQuery",
+            ],
+        },
+        "maxEventRowidFence": {
+            "transaction": "BEGIN IMMEDIATE",
+            "requiredBefore": [
+                "enterVerifySource", "everyProjectionOrDerivedVerificationBatch",
+                "finalPublication",
+            ],
+            "equal": "continue",
+            "less": "contractError",
+            "greater": "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure",
+            "frozenMaterializationPhases": "mayContinueAtExistingCutoff",
+            "appendSerialization": "BEGIN IMMEDIATESerializesAppendDuringBatch",
+        },
+        "verification": {
+            "verifySource": {
+                "boundedBy": "eventsRowidAtOrBelowCutoff",
+                "requires": [
+                    "exactAggregateSequenceAndPredecessor", "requiredDerivedPresence",
+                    "latestEventHasProjectionRow", "appInstanceSourceHasAppInstancesRow",
+                ],
+                "forbidden": ["liveProjectionTableFullScan", "antiJoin"],
+            },
+            "projectionPhaseTables": {
+                "verifyProjects": "projects",
+                "verifyChats": "chats",
+                "verifyRuns": "runs",
+                "verifyLocks": "locks",
+                "verifyAppInstances": "app_instances",
+            },
+            "projectionRule":
+                "eachRowMatchesLatestExactSourceEventAtOrBelowCutoffIncludingMirroredAndIndexedColumns",
+            "projectionColumns": {
+                "projects": ["project_id", "canonical_path", "projection_json", "last_event_sequence"],
+                "chats": ["chat_id", "project_id", "projection_json", "last_event_sequence"],
+                "runs": [
+                    "run_id", "chat_id", "state", "worktree_path", "projection_json",
+                    "last_event_sequence",
+                ],
+                "locks": [
+                    "lock_id", "project_id", "writer_run_id", "worktree_path", "poisoned",
+                    "recovery_required", "evidence_json", "projection_json",
+                    "last_event_sequence",
+                ],
+                "app_instances": [
+                    "sidecar_instance_id", "pid", "platform", "started_at", "heartbeat_at",
+                    "clean_shutdown_at", "last_event_sequence",
+                ],
+            },
+            "derivedPhaseTables": {
+                "verifyReceipts": "operation_receipts",
+                "verifyMessages": "chat_messages",
+                "verifyWorkspaces": "prepared_workspaces",
+                "verifyBaselines": "ledger_baselines",
+            },
+            "missingProjectionDetection": "verifySourceLatestSourcePresence",
+            "extraOrSourceLessDetection": "exactProjectionTablePhase",
+            "historicalBaseline": "allowedWhenDeterministicDigestValidAndSourceBacked",
+            "newestBaseline": "requiredForEveryCompactableAggregate",
+        },
+        "snapshotAggregates": {
+            "includedProjectionTables": ["projects", "chats", "runs", "locks"],
+            "excludedProjectionTables": ["app_instances"],
+            "appInstancesExclusionReason": "lifecycleProjectionNotMaterializedSnapshotAggregate",
+        },
+        "transaction": {
+            "arm": "pendingToAttemptingCommittedBeforeBatch",
+            "success": "verifiedRowsCursorAndAttemptingToPendingAtomic",
+            "nonemptyBatchScanExhausted": false,
+            "emptyBatchScanExhausted": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+            "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
+            "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
+            "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
+            "reopenAttempting": "failClosedNonRunnable",
+            "reopenFailed": "failClosedNonRunnable",
+        },
+        "finalPublication": {
+            "transaction": "shortBeginImmediateOnly",
+            "preconditions": [
+                "exactMetaJobPairAndCursor",
+                "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+                "scanExhaustedTrue", "maxEventRowidEqualsCutoff", "cancelBeforeMutation",
+                "precommitCancel",
+            ],
+            "mutation": "deleteJobAndSetMetaReady",
+            "forbiddenWork": ["artifactScan", "tableScan", "count"],
+        },
+        "activation": {
+            "cleanupEnabled": false,
+            "deletionEnabled": false,
+            "compactionEnabled": false,
+            "wireEnabled": false,
+            "schedulerEnabled": false,
+        },
+    });
+    if value != &expected {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 policy contradicts bounded projection verification",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_storage_lifetime_cursor_v3(
+    value: &Value,
+) -> Result<StorageLifetimeCursorV3, StorageLifetimeContractError> {
+    let cursor: StorageLifetimeCursorV3 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    validate_storage_lifetime_cursor_fields_v3(&cursor)?;
+    Ok(cursor)
+}
+
+pub fn validate_storage_lifetime_cursor_transition_v3(
+    previous: Option<&Value>,
+    next: &Value,
+) -> Result<StorageLifetimeCursorV3, StorageLifetimeContractError> {
+    let next = validate_storage_lifetime_cursor_v3(next)?;
+    let Some(previous) = previous else {
+        if next.phase != StorageLifetimePhaseV3::Receipts
+            || next.after_scan_rowid != 0
+            || next.scan_exhausted
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime v5 initial cursor must start unexhausted receipts at zero",
+            ));
+        }
+        return Ok(next);
+    };
+    let previous = validate_storage_lifetime_cursor_v3(previous)?;
+    if next.cutoff_event_rowid != previous.cutoff_event_rowid {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 batch transition cannot change the frozen cutoff",
+        ));
+    }
+    if next.phase == previous.phase {
+        if previous.scan_exhausted
+            || next.scan_exhausted
+            || next.after_scan_rowid <= previous.after_scan_rowid
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime v5 same-phase cursor must advance afterScanRowid",
+            ));
+        }
+        return Ok(next);
+    }
+    if !previous.scan_exhausted
+        || next.scan_exhausted
+        || next_phase_v3(previous.phase) != Some(next.phase)
+        || next.after_scan_rowid != 0
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 phase transition requires exhausted current phase and unexhausted exact next phase at zero",
+        ));
+    }
+    Ok(next)
+}
+
+pub fn validate_storage_lifetime_materialization_job_v3(
+    value: &Value,
+) -> Result<StorageLifetimeMaterializationJobV3, StorageLifetimeContractError> {
+    let job: StorageLifetimeMaterializationJobV3 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if job.singleton != 1 || job.job_id.is_empty() {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 job requires singleton 1 and non-empty jobId",
+        ));
+    }
+    validate_storage_lifetime_cursor_fields_v3(&job_cursor_v3(&job))?;
+    require_timestamp(&job.created_at, "job.createdAt")?;
+    require_timestamp(&job.updated_at, "job.updatedAt")?;
+    match job.state {
+        StorageLifetimeJobStateV2::Failed => {
+            if job
+                .failure_kind
+                .as_deref()
+                .is_none_or(|kind| !is_sanitized_failure_kind(kind))
+            {
+                return Err(StorageLifetimeContractError::new(
+                    "failed storage lifetime v5 job requires sanitized failureKind",
+                ));
+            }
+            require_timestamp(
+                job.completed_at.as_deref().unwrap_or_default(),
+                "job.completedAt",
+            )?;
+        }
+        StorageLifetimeJobStateV2::Pending | StorageLifetimeJobStateV2::Attempting => {
+            if job.failure_kind.is_some() || job.completed_at.is_some() {
+                return Err(StorageLifetimeContractError::new(
+                    "pending or attempting storage lifetime v5 job cannot carry terminal evidence",
+                ));
+            }
+        }
+    }
+    Ok(job)
+}
+
+pub fn validate_storage_lifetime_materialization_pair_v3(
+    value: &Value,
+) -> Result<StorageLifetimeMaterializationSnapshotV3, StorageLifetimeContractError> {
+    let raw: StorageLifetimeMaterializationSnapshotV3 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let job = raw
+        .job
+        .as_ref()
+        .map(|job| {
+            serde_json::to_value(job)
+                .map_err(|error| StorageLifetimeContractError::new(error.to_string()))
+                .and_then(|value| validate_storage_lifetime_materialization_job_v3(&value))
+        })
+        .transpose()?;
+    if raw.materialization_state != StorageMaterializationStateV1::Pending
+        && !(raw.materialization_state == StorageMaterializationStateV1::Ready && job.is_none())
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 meta/job pairing is fail-closed",
+        ));
+    }
+    Ok(StorageLifetimeMaterializationSnapshotV3 {
+        materialization_state: raw.materialization_state,
+        job,
+    })
+}
+
+pub fn validate_storage_lifetime_lifecycle_transition_v3(
+    operation: StorageLifetimeLifecycleOperationV3,
+    previous: &Value,
+    next: &Value,
+) -> Result<StorageLifetimeMaterializationSnapshotV3, StorageLifetimeContractError> {
+    let previous = validate_storage_lifetime_materialization_pair_v3(previous)?;
+    let next = validate_storage_lifetime_materialization_pair_v3(next)?;
+    let previous_job = previous.job.as_ref();
+    let next_job = next.job.as_ref();
+    match operation {
+        StorageLifetimeLifecycleOperationV3::Create => {
+            if previous.materialization_state != StorageMaterializationStateV1::Pending
+                || previous_job.is_some()
+                || next.materialization_state != StorageMaterializationStateV1::Pending
+                || next_job.map(|job| job.state) != Some(StorageLifetimeJobStateV2::Pending)
+            {
+                return lifecycle_error(
+                    "storage lifetime v5 create requires pending absent to pending job",
+                );
+            }
+            validate_storage_lifetime_cursor_transition_v3(
+                None,
+                &serde_json::to_value(job_cursor_v3(next_job.expect("checked")))
+                    .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
+            )?;
+        }
+        StorageLifetimeLifecycleOperationV3::Append => {
+            let invalidate_ready = previous.materialization_state
+                == StorageMaterializationStateV1::Ready
+                && previous_job.is_none()
+                && next.materialization_state == StorageMaterializationStateV1::Pending
+                && next_job.is_none();
+            if !invalidate_ready && previous != next {
+                return lifecycle_error(
+                    "storage lifetime v5 append must invalidate ready or preserve pending exactly",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV3::FailureRecordUnavailable => {
+            if previous_job.map(|job| job.state) != Some(StorageLifetimeJobStateV2::Attempting)
+                || previous != next
+            {
+                return lifecycle_error(
+                    "failure record unavailable must leave the durable attempting sentinel unchanged",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV3::FinalPublish => {
+            if previous_job.map(|job| (job.state, job.phase, job.scan_exhausted))
+                != Some((
+                    StorageLifetimeJobStateV2::Pending,
+                    StorageLifetimePhaseV3::VerifyBaselines,
+                    true,
+                ))
+                || next.materialization_state != StorageMaterializationStateV1::Ready
+                || next_job.is_some()
+            {
+                return lifecycle_error(
+                    "storage lifetime v5 final publication requires exhausted verifyBaselines",
+                );
+            }
+        }
+        operation => {
+            let previous_job = previous_job.ok_or_else(|| {
+                StorageLifetimeContractError::new(
+                    "storage lifetime v5 transition requires a previous job",
+                )
+            })?;
+            let next_job = next_job.ok_or_else(|| {
+                StorageLifetimeContractError::new(
+                    "storage lifetime v5 transition requires a next job",
+                )
+            })?;
+            require_same_job_identity_v3(previous_job, next_job)?;
+            match operation {
+                StorageLifetimeLifecycleOperationV3::Arm => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Pending
+                        || next_job.state != StorageLifetimeJobStateV2::Attempting
+                        || previous_job.scan_exhausted
+                        || next_job.scan_exhausted
+                        || job_cursor_v3(previous_job) != job_cursor_v3(next_job)
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 arm must preserve an unexhausted cursor",
+                        );
+                    }
+                }
+                StorageLifetimeLifecycleOperationV3::BatchSuccess => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Attempting
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 batch success must commit attempting to pending",
+                        );
+                    }
+                    validate_storage_lifetime_cursor_transition_v3(
+                        Some(&serde_json::to_value(job_cursor_v3(previous_job)).map_err(
+                            |error| StorageLifetimeContractError::new(error.to_string()),
+                        )?),
+                        &serde_json::to_value(job_cursor_v3(next_job)).map_err(|error| {
+                            StorageLifetimeContractError::new(error.to_string())
+                        })?,
+                    )?;
+                }
+                StorageLifetimeLifecycleOperationV3::PhaseAdvance => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Pending
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 phase advance requires pending jobs",
+                        );
+                    }
+                    validate_storage_lifetime_cursor_transition_v3(
+                        Some(&serde_json::to_value(job_cursor_v3(previous_job)).map_err(
+                            |error| StorageLifetimeContractError::new(error.to_string()),
+                        )?),
+                        &serde_json::to_value(job_cursor_v3(next_job)).map_err(|error| {
+                            StorageLifetimeContractError::new(error.to_string())
+                        })?,
+                    )?;
+                }
+                StorageLifetimeLifecycleOperationV3::Cancel => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Attempting
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                        || job_cursor_v3(previous_job) != job_cursor_v3(next_job)
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 cancellation must restore the same cursor",
+                        );
+                    }
+                }
+                StorageLifetimeLifecycleOperationV3::Fail => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Attempting
+                        || next_job.state != StorageLifetimeJobStateV2::Failed
+                        || job_cursor_v3(previous_job) != job_cursor_v3(next_job)
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 terminal failure must preserve the cursor",
+                        );
+                    }
+                }
+                StorageLifetimeLifecycleOperationV3::CatchUpReset => {
+                    if !matches!(
+                        previous_job.state,
+                        StorageLifetimeJobStateV2::Pending | StorageLifetimeJobStateV2::Attempting
+                    ) || !is_verification_phase_v3(previous_job.phase)
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                        || next_job.cutoff_event_rowid <= previous_job.cutoff_event_rowid
+                        || next_job.phase != StorageLifetimePhaseV3::Receipts
+                        || next_job.after_scan_rowid != 0
+                        || next_job.scan_exhausted
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v5 catch-up reset requires verification drift and a larger cutoff",
+                        );
+                    }
+                }
+                _ => return lifecycle_error("storage lifetime v5 lifecycle operation is invalid"),
+            }
+        }
+    }
+    Ok(next)
+}
+
+fn validate_storage_lifetime_cursor_fields_v3(
+    cursor: &StorageLifetimeCursorV3,
+) -> Result<(), StorageLifetimeContractError> {
+    if cursor.schema_version != STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V3 {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 cursor schemaVersion must be 3",
+        ));
+    }
+    require_js_safe_unsigned(cursor.cutoff_event_rowid, "cursor.cutoffEventRowid")?;
+    require_js_safe_unsigned(cursor.after_scan_rowid, "cursor.afterScanRowid")?;
+    if is_event_rowid_phase_v3(cursor.phase) && cursor.after_scan_rowid > cursor.cutoff_event_rowid
+    {
+        return Err(StorageLifetimeContractError::new(
+            "event-derived storage lifetime v5 cursor cannot exceed cutoffEventRowid",
+        ));
+    }
+    Ok(())
+}
+
+fn is_event_rowid_phase_v3(phase: StorageLifetimePhaseV3) -> bool {
+    matches!(
+        phase,
+        StorageLifetimePhaseV3::Receipts
+            | StorageLifetimePhaseV3::Messages
+            | StorageLifetimePhaseV3::Workspaces
+            | StorageLifetimePhaseV3::Baselines
+            | StorageLifetimePhaseV3::VerifySource
+    )
+}
+
+fn is_verification_phase_v3(phase: StorageLifetimePhaseV3) -> bool {
+    !matches!(
+        phase,
+        StorageLifetimePhaseV3::Receipts
+            | StorageLifetimePhaseV3::Messages
+            | StorageLifetimePhaseV3::Workspaces
+            | StorageLifetimePhaseV3::Baselines
+    )
+}
+
+fn next_phase_v3(phase: StorageLifetimePhaseV3) -> Option<StorageLifetimePhaseV3> {
+    match phase {
+        StorageLifetimePhaseV3::Receipts => Some(StorageLifetimePhaseV3::Messages),
+        StorageLifetimePhaseV3::Messages => Some(StorageLifetimePhaseV3::Workspaces),
+        StorageLifetimePhaseV3::Workspaces => Some(StorageLifetimePhaseV3::Baselines),
+        StorageLifetimePhaseV3::Baselines => Some(StorageLifetimePhaseV3::VerifySource),
+        StorageLifetimePhaseV3::VerifySource => Some(StorageLifetimePhaseV3::VerifyProjects),
+        StorageLifetimePhaseV3::VerifyProjects => Some(StorageLifetimePhaseV3::VerifyChats),
+        StorageLifetimePhaseV3::VerifyChats => Some(StorageLifetimePhaseV3::VerifyRuns),
+        StorageLifetimePhaseV3::VerifyRuns => Some(StorageLifetimePhaseV3::VerifyLocks),
+        StorageLifetimePhaseV3::VerifyLocks => Some(StorageLifetimePhaseV3::VerifyAppInstances),
+        StorageLifetimePhaseV3::VerifyAppInstances => Some(StorageLifetimePhaseV3::VerifyReceipts),
+        StorageLifetimePhaseV3::VerifyReceipts => Some(StorageLifetimePhaseV3::VerifyMessages),
+        StorageLifetimePhaseV3::VerifyMessages => Some(StorageLifetimePhaseV3::VerifyWorkspaces),
+        StorageLifetimePhaseV3::VerifyWorkspaces => Some(StorageLifetimePhaseV3::VerifyBaselines),
+        StorageLifetimePhaseV3::VerifyBaselines => None,
+    }
+}
+
+fn job_cursor_v3(job: &StorageLifetimeMaterializationJobV3) -> StorageLifetimeCursorV3 {
+    StorageLifetimeCursorV3 {
+        schema_version: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V3,
+        cutoff_event_rowid: job.cutoff_event_rowid,
+        phase: job.phase,
+        after_scan_rowid: job.after_scan_rowid,
+        scan_exhausted: job.scan_exhausted,
+    }
+}
+
+fn require_same_job_identity_v3(
+    previous: &StorageLifetimeMaterializationJobV3,
+    next: &StorageLifetimeMaterializationJobV3,
+) -> Result<(), StorageLifetimeContractError> {
+    if previous.singleton != next.singleton
+        || previous.job_id != next.job_id
+        || previous.created_at != next.created_at
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v5 transition cannot replace job identity",
         ));
     }
     Ok(())
