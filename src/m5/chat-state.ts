@@ -214,7 +214,7 @@ export class ChatUiController {
 
   async abandonAgentRecovery(): Promise<void> {
     const chat = this.#state.activeChat; const recovery = this.#state.agentRecovery; const bridge = this.#agentBridge(); const generation = this.#generation;
-    if (!chat || !recovery || !bridge || this.#state.switching || this.#state.agentRecoveryResolving || !matchesAgentRun(recovery, chat)) return;
+    if (!chat || !recovery || !bridge || !canAbandonAgentRecovery(recovery) || this.#state.switching || this.#state.agentRecoveryResolving || !matchesAgentRun(recovery, chat)) return;
     if (!globalThis.confirm("종료 증거를 다시 확인한 뒤 이 실제 에이전트 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
     this.#set({ agentRecoveryResolving: true, error: null });
     try {
@@ -322,6 +322,8 @@ export class ChatUiController {
 
 export function isActive(run: RunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
 export function isAgentActive(run: AgentRunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
+/** An identityless recovery has no process evidence that can make abandon safe. */
+export function canAbandonAgentRecovery(recovery: AgentRecoveryRecordV1 | null): boolean { return recovery !== null && recovery.reason !== "processIdentityUnavailable"; }
 export function stateLabel(state: ChatRecordV1["state"]): string { return ({ draft: "초안", preparing: "준비 중", running: "진행 중", waitingForUser: "사용자 확인 대기", reviewReady: "검토 준비", applying: "적용 중", stopping: "중지 중", completed: "완료", needsAttention: "확인 필요", recoveryRequired: "복구 필요", canceled: "취소됨", discarded: "버림" })[state]; }
 
 function matchesChat(event: TeamMessageV1, chat: ChatRecordV1): boolean { return event.chatId === chat.chatId && event.taskId === chat.taskId && event.worktreeId === chat.worktreeId; }

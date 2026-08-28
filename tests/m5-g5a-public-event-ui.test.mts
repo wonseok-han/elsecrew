@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ChatUiController } from "../src/m5/chat-state.ts";
+import { canAbandonAgentRecovery, ChatUiController } from "../src/m5/chat-state.ts";
 import type { M5BridgeV4 } from "../src/m5/contracts/bridge-v4.ts";
 import type { AgentPublicEventV1, AgentRecoveryRecordV1, AgentRunRecordV1, AgentRunStateChangedV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { ChatRecordV1, ProjectRoleSettingsV1, RoleProfileV1, TeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
@@ -22,8 +22,8 @@ function message(record: ChatRecordV1, sequence: number, text: string): TeamMess
 function agentRun(record: ChatRecordV1, state: AgentRunRecordV1["state"] = "running"): AgentRunRecordV1 {
   return { schemaVersion: 1, runId: "agent_run_01", chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, selectedProfile: roles[1]!, source: "actualAgent", capabilityFingerprint: fingerprint, state, stage: "implementing", terminationOutcome: state === "recoveryRequired" ? "recoveryRequired" : ["preparing", "running", "cancelling"].includes(state) ? null : "cleanExit", createdAt: "2026-08-27T00:00:00Z", updatedAt: "2026-08-27T00:00:01Z" };
 }
-function agentRecovery(record: ChatRecordV1, recoveryId = "agent_recovery_random_7f4c"): AgentRecoveryRecordV1 {
-  return { schemaVersion: 1, recoveryId, chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", source: "actualAgent", reason: "uncleanShutdown", state: "unresolved", trackedProcesses: [{ pid: 4401, startIdentityDigest: "sha256:agent-start-1", executablePathDigest: "sha256:agent-path-1", observedGone: false }], poisoned: true, revision: 7, createdAt: "2026-08-27T00:00:01Z", resolvedAt: null };
+function agentRecovery(record: ChatRecordV1, recoveryId = "agent_recovery_random_7f4c", reason: AgentRecoveryRecordV1["reason"] = "uncleanShutdown"): AgentRecoveryRecordV1 {
+  return { schemaVersion: 1, recoveryId, chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", source: "actualAgent", reason, state: "unresolved", trackedProcesses: reason === "processIdentityUnavailable" ? [] : [{ pid: 4401, startIdentityDigest: "sha256:agent-start-1", executablePathDigest: "sha256:agent-path-1", observedGone: false }], poisoned: true, revision: 7, createdAt: "2026-08-27T00:00:01Z", resolvedAt: null };
 }
 function publicEvent(record: ChatRecordV1, text = "raw text must never render"): AgentPublicEventV1 {
   return { schemaVersion: 1, eventId: "agent_event_01", chatId: record.chatId, taskId: record.taskId, projectId: record.projectId, worktreeId: record.worktreeId, workspaceIdentity: record.workspaceIdentity, runId: "agent_run_01", roleId: "coding", capabilityFingerprint: fingerprint, kind: "final", text, createdAt: "2026-08-27T00:00:01Z" };
@@ -306,6 +306,34 @@ test("actual recovery abandon은 inspect 기록의 full identity와 revision만 
   assert.equal(controller.snapshot().agentRecovery, null, "only durable chat.get null clears the gate");
   assert.equal(controller.isRecoveryBlocked(), false);
   controller.dispose();
+});
+
+test("process identity가 없는 actual recovery는 재수화·재개방 뒤에도 보호 상태를 유지하고 abandon API를 호출하지 않는다", async () => {
+  const bridge = new AgentBridge(); bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, "agent_recovery_identityless", "processIdentityUnavailable");
+  const controller = await open(bridge);
+  assert.equal(controller.snapshot().agentRecovery?.reason, "processIdentityUnavailable");
+  assert.equal(controller.isActionBlocked(), true);
+  let confirms = 0; const previousConfirm = globalThis.confirm; globalThis.confirm = () => { confirms += 1; return true; };
+  try { await controller.abandonAgentRecovery(); }
+  finally { globalThis.confirm = previousConfirm; }
+  assert.equal(confirms, 0);
+  assert.deepEqual(bridge.agentRecoveryInspects, []);
+  assert.deepEqual(bridge.agentRecoveryResolves, []);
+  bridge.emitState(stateEvent(bridge.chatA, "recoveryRequired")); await flush(); await flush();
+  assert.equal(controller.snapshot().agentRecovery?.recoveryId, "agent_recovery_identityless");
+  assert.equal(controller.isRecoveryBlocked(), true);
+  controller.dispose();
+  const reopened = await open(bridge);
+  assert.equal(reopened.snapshot().agentRecovery?.reason, "processIdentityUnavailable");
+  assert.equal(reopened.isActionBlocked(), true);
+  reopened.dispose();
+});
+
+test("identityless recovery UI와 controller는 같은 abandon 가능 경계를 사용한다", () => {
+  const record = agentRecovery(chat(), "agent_recovery_identityless_policy", "processIdentityUnavailable");
+  assert.equal(canAbandonAgentRecovery(record), false);
+  assert.equal(canAbandonAgentRecovery(agentRecovery(chat())), true);
+  assert.equal(canAbandonAgentRecovery(null), false);
 });
 
 test("actual recovery resolve가 processesRemain 또는 revisionConflict면 durable 재조회 뒤에도 계속 막는다", async () => {

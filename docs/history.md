@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5C identityless recovery renderer boundary)
+
+- **보호 상태**: durable actual recovery의 process identity가 없으면 renderer가 실행·저장·닫기 차단을 계속 유지하고, 초보자 화면에는 종료 상태를 안전하게 확인할 수 없어 보호 중이라는 안내만 보인다. 이 경우 recovery abandon button은 렌더하지 않으며 programmatic `abandonAgentRecovery`도 confirm·inspect·resolve 전에 반환한다.
+- **공유 경계·호환**: UI와 controller는 하나의 `canAbandonAgentRecovery` 판정을 사용해 한쪽만 완화되는 drift를 막는다. process identity가 있는 기존 actual recovery의 inspect → exact revision resolve → durable rehydrate 흐름은 바꾸지 않았다.
+- **검증·경계**: focused renderer Node 20개와 full Node 180개, TypeScript no-emit, Vite production build와 `git diff --check`를 통과했다. identityless recovery의 zero inspect/resolve, terminal hydration·reopen 뒤 차단 유지, normal recovery 허용을 회귀로 고정했다. 실제 provider·인증·사용자 프로젝트·Windows는 호출하지 않았고 다음은 기능 branch 독립 리뷰와 최신 통합 기준 QA다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5C legacy recovery 예약 리뷰 수정)
 
 - **startup 보강 순서**: `source_kind=actualAgent` projection에 기존 non-null recovery가 있지만 내부 `recovery_id_reservation`이 없는 pre-G5C 상태를 skip·validation 전에 먼저 보강한다. 새 ID를 만들거나 기존 ID를 바꾸지 않고 public `recoveryId`를 같은 SQLite transaction에 저장한 뒤 persisted projection을 재조회하며, 이후 unresolved·resolved 상태의 기존 startup 분기를 그대로 따른다.
