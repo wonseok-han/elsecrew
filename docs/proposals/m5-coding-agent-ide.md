@@ -393,6 +393,29 @@ reviewReady → discarded
 9. 한 작업 복사본에서 두 writer 실행이 동시에 파일을 바꾸지 않는다.
 10. 저장되지 않은 사용자 편집을 실행·적용·폐기가 조용히 덮지 않는다.
 
+### 6.6 G5D 저장 수명 D0A 계약
+
+#### 확정된 범위
+
+- 실제 Claude Code/Codex provider를 제품 경로에 활성화하기 전에 여러 채팅·세션에 걸친 SQLite 전체 수명을 측정하고, 기록을 잃지 않는 내부 정리 경계를 검증한다.
+- D0A는 **무삭제 계약**이다. 채팅·메시지·실행·복구·증거·standalone snapshot을 자동 또는 물리 삭제하지 않고, cleanup 후보 조회나 purge action도 공개하지 않는다.
+- 보존 기간, 전체 용량 상한, 경고/차단 임계값, 자동 정리, 폐기된 작업 복사본 정리와 downgrade 지원은 D0A가 임의로 정하지 않는다.
+
+#### 현재 제안
+
+- protocol v1과 payload `schemaVersion: 1`을 유지하면서 DB logical/physical bytes, WAL bytes, ledger tail event count/payload bytes, snapshot aggregate count/payload bytes와 볼륨 capacity/available 사실값만 돌려주는 exact `storage.status`를 추가한다. raw chat/provider text, 비공개 추론, prompt, token/auth, absolute path는 응답에 넣지 않는다.
+- public bridge는 additive `M5BridgeV6.getStorageStatus`로 계획한다. D0A에는 sidecar 구현이 없으므로 protocol method 목록·ready capability·dispatcher에는 아직 예약하거나 광고하지 않는다. D1에서 Rust 구현과 양쪽 dispatcher 검증이 함께 준비된 뒤에만 활성화한다.
+- 내부 SQLite schema v2는 v1 원장과 projection을 변경·삭제하지 않는 additive table/index/metadata migration으로 `ledger_baselines`, immutable operation receipt, normalized chat message/prepared workspace, maintenance job을 수용한다. 앱은 DDL을 확인한 뒤 ready가 될 수 있지만 기존 record materialization은 ready 이후 idle 작업으로 수행한다.
+- lossless compaction은 `BEGIN IMMEDIATE → cutoff 고정 → receipt/message/workspace/baseline materialize → baseline+tail replay·projection·old operation duplicate/conflict·actual/legacy namespace·recovery 동등성 검증 → 검증된 cutoff만 논리 삭제 → append-only guard 복원 확인 → COMMIT` 순서다. 어느 검증도 실패하면 전체 rollback하며, checkpoint와 `VACUUM` 성공은 논리 성공 조건이 아니다.
+- active/cancelling/recoveryRequired run, unresolved recovery, poisoned/writer lock, pending intent/save, incomplete operation, active/bound workspace, 역할 설정, 사용자 chat/history/evidence, identity mismatch, orphan/symlink 불명 상태는 정리 대상으로 분류하지 않는다.
+
+#### 열린 질문
+
+- 폐기된 standalone snapshot을 사용자가 직접 정리할지, 안전 조건을 통과한 항목만 자동 정리할지 결정하지 않았다.
+- 사용자 대화·증거·snapshot의 보존 기간과 전체 용량 상한, 압박 상태에서 새 작업을 막을 기준과 사용자 정리 UI를 결정하지 않았다.
+- 채팅 삭제 요청이 들어올 때 message/run/recovery/evidence/workspace를 어떤 순서와 확인 단계로 처리할지 결정하지 않았다.
+- 파일 삭제가 secure erase라는 약속을 할 수 있는지와 schema v2 이후 downgrade를 지원할지 결정하지 않았다.
+
 ---
 
 ## 7. 안전 경계
@@ -608,7 +631,7 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 ### 후속 마일스톤에서 결정
 
 5. 새 제품 이름과 저장소·번들 ID·데이터 경로·웹사이트의 이전 범위는 무엇인가?
-6. 증거와 폐기된 작업 복사본의 보존 기간·용량 상한·사용자 정리 UI는 무엇인가?
+6. G5D §6.6의 증거·snapshot 보존 기간, 전체 용량 상한, abandoned snapshot 자동/수동 정리, 채팅 삭제 graph와 사용자 정리 UI를 어떻게 결정할 것인가?
 7. Monaco 필수 범위 뒤 LSP를 붙일 때 언어 서버 수명과 작업 복사본별 진단을 어디서 관리할 것인가?
 8. 터미널은 문제 해결 전용인가, 일상 실행 action의 기반인가?
 9. 파일별·줄 단위 반영을 언제 열 것인가?
@@ -627,8 +650,9 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ## 14. 다음 실행 순서
 
-1. 실제 Claude Code/Codex adapter의 argv·모델 가용성·공개 이벤트 정규화·세션/취소 계약을 fixture와 분리해 먼저 고정한다.
-2. 실제 유료 실행과 사용자 인증은 별도 승인을 받은 smoke에서만 검증한다.
-3. 보안·패키징·성능 하네스와 macOS 전체 OS Quit·서명/권한 문자열 hardening을 구현한다.
-4. Windows standalone snapshot과 프로세스 자손 회수·소멸 확인 게이트를 통과하기 전에는 Windows agent 실행을 노출하지 않는다.
-5. 실제 adapter가 기존 안전 불변식을 유지한 뒤 적용·폐기·복원 루프를 다음 제품 단위로 연다.
+1. G5D D1에서 additive schema v2 startup migration, idle materialization, privacy-safe `storage.status`와 lossless compaction을 Rust sidecar에 구현하고 protocol/bridge를 end-to-end로 활성화한다. 물리 삭제는 계속 열지 않는다.
+2. 실제 Claude Code/Codex adapter의 argv·모델 가용성·공개 이벤트 정규화·세션/취소 계약을 fixture와 분리해 고정한다.
+3. 실제 유료 실행과 사용자 인증은 별도 승인을 받은 smoke에서만 검증한다.
+4. 보안·패키징·성능 하네스와 macOS 전체 OS Quit·서명/권한 문자열 hardening을 구현한다.
+5. Windows standalone snapshot과 프로세스 자손 회수·소멸 확인 게이트를 통과하기 전에는 Windows agent 실행을 노출하지 않는다.
+6. 실제 adapter가 기존 안전 불변식을 유지한 뒤 적용·폐기·복원 루프를 다음 제품 단위로 연다.
