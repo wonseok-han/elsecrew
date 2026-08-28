@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 sidecar migration)
+
+- **exact v5 소비 구현**: `Storage::open`이 fresh/v2/v3/v4/v5를 exact predecessor schema와 canonical meta/job pair로 검증하고 v4→v5 fixture SQL을 원자 적용한다. v4는 어떤 target DDL보다 먼저 exact schema와 admissible `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 확인하며, current exact v5는 migration SQL 없이 schema와 reopen pair를 재검증한다.
+- **보수적 mapping·재시작 경계**: v4의 `receipts`~`verifySource` phase/cursor/private exhaustion은 보존하고, 이미 진행한 `verifyReceipts`~`verifyBaselines`는 state·job identity·timestamps·실패 증거를 그대로 둔 채 `verifySource/0/unexhausted`로 되돌린다. v5 reopen은 `ready+absent`, `pending+absent`, `pending+pending`만 허용하며 attempting/failed sentinel은 자동 retry/success 없이 fail-closed한다. 기존 unbounded D1B helper는 v5 job을 소비하지 않고 mutation 전에 거부한다.
+- **보존·실패 주입·검증**: 3개 v4 job state×9개 phase와 absent pair를 실행 migration해 모든 원장·projection·materialized row, append-only trigger, named index, compaction history/status 보존을 확인했다. malformed phase/cursor/exhaustion, unsafe meta/pair, partial/extra v4는 checkpoint 뒤 DB bytes와 전체 schema/row snapshot이 하나도 바뀌지 않았고, v5 rebuild 중간 SQL 실패는 exact v4로 rollback했다. storage focused 23개, sidecar 전체 106개+stdio 10개(1 ignored), protocol 전체 39개, sidecar `--no-deps -D warnings` clippy, rustfmt와 `git diff --check`를 통과했다. dependency 포함 strict clippy는 변경 범위 밖의 기존 core/protocol 경고 5건 때문에 실패했다. worker·scheduler·wire/UI·cleanup/삭제·compaction은 변경하지 않았으며 다음은 별도 bounded v5 projection verification worker다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 reopen/catch-up P1 수정)
 
 - **pending-before-arm으로 catch-up 한정**: 최초 v5 계약이 max-rowid 증가 시 `attempting` job도 public `catchUpReset`으로 pending에 되돌릴 수 있게 해, durable attempting sentinel은 reopen에서 절대 자동 성공·재시도하지 않는다는 v4 불변식과 충돌했다. 정상 worker는 각 projection/derived batch를 arm하기 전 pending 상태에서 max rowid를 검사하며, arm을 commit한 같은 synchronous sidecar owner는 즉시 batch로 들어간다. 따라서 public catch-up은 pending verification job만 허용하고 attempting/failed는 모두 거부한다.

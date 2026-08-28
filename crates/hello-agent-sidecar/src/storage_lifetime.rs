@@ -98,7 +98,7 @@ fn materialize_in_transaction(
         .map_err(sqlite_error)?;
     if storage_schema_version >= STORAGE_LIFETIME_SCHEMA_VERSION_V4 {
         return Err(materialization_error(
-            "legacy storage materialization is disabled for bounded v4 storage",
+            "legacy storage materialization is disabled for bounded storage v4 or later",
         ));
     }
     let lifetime_job_present: bool = transaction

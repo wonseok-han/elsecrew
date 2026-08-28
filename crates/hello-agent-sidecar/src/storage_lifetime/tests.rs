@@ -396,16 +396,16 @@ fn legacy_materialization_refuses_existing_v3_cursor_without_mutation() {
 }
 
 #[test]
-fn legacy_materialization_refuses_existing_v4_cursor_without_mutation() {
+fn legacy_materialization_refuses_existing_v5_job_without_mutation() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("v4 storage");
+    let mut storage = Storage::open(&path).expect("v5 storage");
     storage
         .connection_for_test()
         .execute(
             "INSERT INTO lifetime_materialization_job(\
                singleton,job_id,state,cutoff_event_rowid,phase,after_scan_rowid,scan_exhausted,\
                failure_kind,created_at,updated_at,completed_at\
-             ) VALUES (1,'bounded_v4_cursor','pending',0,'receipts',0,0,NULL,\
+             ) VALUES (1,'bounded_v5_job','pending',0,'verifyProjects',0,0,NULL,\
                '2026-08-28T08:00:00Z','2026-08-28T08:00:00Z',NULL);",
             [],
         )
@@ -426,7 +426,7 @@ fn legacy_materialization_refuses_existing_v4_cursor_without_mutation() {
 
     let error = storage
         .materialize_lifetime_records(None)
-        .expect_err("legacy materialization must not consume a v4 cursor");
+        .expect_err("legacy materialization must not consume a v5 job");
     assert_eq!(error.kind(), "storageMaterializationFailed");
     assert_eq!(
         storage

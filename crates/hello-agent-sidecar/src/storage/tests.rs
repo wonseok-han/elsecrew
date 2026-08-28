@@ -71,11 +71,11 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 }
 
 #[test]
-fn fresh_database_applies_exact_v4_and_reopens_idempotently() {
+fn fresh_database_applies_exact_v5_and_reopens_idempotently() {
     let (_root, path) = database();
     let storage = Storage::open(&path).expect("fresh storage");
     verify_schema(&storage.connection).expect("v1 schema");
-    verify_schema_v4_for_open(&storage.connection).expect("v4 schema");
+    verify_schema_v5_for_open(&storage.connection).expect("v5 schema");
     assert_eq!(
         storage
             .connection
@@ -96,7 +96,7 @@ fn fresh_database_applies_exact_v4_and_reopens_idempotently() {
                 |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
-        (4, "pending".to_string())
+        (STORAGE_LIFETIME_SCHEMA_VERSION_V5, "pending".to_string())
     );
     assert_eq!(
         storage
@@ -112,7 +112,7 @@ fn fresh_database_applies_exact_v4_and_reopens_idempotently() {
     drop(storage);
 
     let reopened = Storage::open(&path).expect("idempotent reopen");
-    verify_schema_v4_for_open(&reopened.connection).expect("reopened v4 schema");
+    verify_schema_v5_for_open(&reopened.connection).expect("reopened v5 schema");
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status()
         drop(storage);
 
         let mut upgraded = Storage::open(&path).expect("upgrade exact populated v2");
-        verify_schema_v4_for_open(&upgraded.connection).expect("exact v4");
+        verify_schema_v5_for_open(&upgraded.connection).expect("exact v5");
         assert_eq!(
             upgraded
                 .connection
@@ -406,7 +406,7 @@ fn unsafe_v2_materialization_states_fail_before_schema_or_data_mutation() {
 }
 
 #[test]
-fn v4_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
+fn current_schema_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
     let (_root, partial_path) = database();
     let partial = Storage::open(&partial_path).unwrap();
     partial
@@ -416,7 +416,7 @@ fn v4_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
     drop(partial);
     let error = Storage::open(&partial_path)
         .err()
-        .expect("partial v4 must fail");
+        .expect("partial v5 must fail");
     assert_eq!(error.kind(), "storageSchemaMismatch");
 
     let (_root, extra_path) = database();
@@ -428,7 +428,7 @@ fn v4_partial_extra_and_metadata_table_version_mismatch_fail_closed() {
     drop(extra);
     let error = Storage::open(&extra_path)
         .err()
-        .expect("extra v4 must fail");
+        .expect("extra v5 must fail");
     assert_eq!(error.kind(), "storageSchemaMismatch");
 
     let (_root, mismatch_path) = database();
@@ -720,7 +720,7 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
     ];
     for (name, materialization_state, job_state) in valid_cases {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v4");
+        let storage = Storage::open_v4_for_test(&path).expect("fresh v4");
         storage
             .connection
             .execute(
@@ -741,12 +741,12 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
                 None,
             );
         }
-        drop(storage);
-        Storage::open(&path).unwrap_or_else(|error| panic!("{name} must reopen: {error:?}"));
+        verify_schema_v4_for_open(&storage.connection)
+            .unwrap_or_else(|error| panic!("{name} must reopen: {error:?}"));
     }
 
     let (_root, path) = database();
-    let storage = Storage::open(&path).expect("fresh v4");
+    let storage = Storage::open_v4_for_test(&path).expect("fresh v4");
     insert_v4_job(
         &storage.connection,
         "pending_exhausted",
@@ -758,12 +758,12 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
         None,
         None,
     );
-    drop(storage);
-    Storage::open(&path).expect("persisted private exhaustion proof may reopen");
+    verify_schema_v4_for_open(&storage.connection)
+        .expect("persisted private exhaustion proof may reopen");
 
     for state in ["attempting", "failed"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v4");
+        let storage = Storage::open_v4_for_test(&path).expect("fresh v4");
         let (failure_kind, completed_at) = if state == "failed" {
             (Some("database"), Some("2026-08-28T09:02:00Z"))
         } else {
@@ -781,10 +781,8 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
             completed_at,
         );
         verify_schema_v4(&storage.connection).expect("non-runnable evidence is structural v4");
-        drop(storage);
-        let error = Storage::open(&path)
-            .err()
-            .expect("non-runnable v4 job rejected");
+        let error = verify_schema_v4_for_open(&storage.connection)
+            .expect_err("non-runnable v4 job rejected");
         assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");
         assert_eq!(
             error.detail(),
@@ -794,7 +792,7 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
 
     for materialization_state in ["materializing", "failed"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v4");
+        let storage = Storage::open_v4_for_test(&path).expect("fresh v4");
         storage
             .connection
             .execute(
@@ -828,7 +826,7 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
     ];
     for (name, phase, cutoff, after, exhausted) in malformed_cases {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v4");
+        let storage = Storage::open_v4_for_test(&path).expect("fresh v4");
         storage
             .connection
             .execute_batch("PRAGMA ignore_check_constraints=ON;")
@@ -859,6 +857,331 @@ fn v4_reopen_validates_pair_state_cursor_and_scan_exhaustion_fail_closed() {
             .unwrap();
         drop(storage);
         let error = Storage::open(&path).err().expect("malformed v4 must fail");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    }
+}
+
+#[test]
+fn every_admissible_v4_job_migrates_to_exact_v5_with_conservative_projection_restart() {
+    let phases = [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verifySource",
+        "verifyReceipts",
+        "verifyMessages",
+        "verifyWorkspaces",
+        "verifyBaselines",
+    ];
+    for state in ["pending", "attempting", "failed"] {
+        for phase in phases {
+            let (_root, path) = database();
+            let mut storage = populated_v4_storage(&path, "pending");
+            let failure_kind = (state == "failed").then_some("database");
+            let completed_at = (state == "failed").then_some("2026-08-28T10:02:00Z");
+            insert_v4_job(
+                &storage.connection,
+                &format!("v5_{state}_{phase}"),
+                state,
+                phase,
+                20,
+                3,
+                1,
+                failure_kind,
+                completed_at,
+            );
+            verify_schema_v4(&storage.connection).expect("admissible exact v4 pair");
+            let preserved_tables = preserved_table_rows(&storage.connection);
+            let guarded_schema = guarded_schema_objects(&storage.connection);
+            let compaction = storage.lifetime_status().unwrap().compaction;
+
+            migrate_v5(&mut storage.connection).expect("canonical v4 to v5 migration");
+            assert_eq!(
+                verify_schema_v5(&storage.connection).expect("exact structural v5"),
+                "pending"
+            );
+            let migrated: (
+                String,
+                String,
+                i64,
+                i64,
+                Option<String>,
+                String,
+                String,
+                Option<String>,
+            ) = storage
+                .connection
+                .query_row(
+                    "SELECT state,phase,after_scan_rowid,scan_exhausted,failure_kind,created_at,updated_at,completed_at FROM lifetime_materialization_job WHERE singleton=1;",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            let progressed_derived = matches!(
+                phase,
+                "verifyReceipts" | "verifyMessages" | "verifyWorkspaces" | "verifyBaselines"
+            );
+            assert_eq!(migrated.0, state, "{state} {phase}: state");
+            assert_eq!(
+                migrated.1,
+                if progressed_derived {
+                    "verifySource"
+                } else {
+                    phase
+                },
+                "{state} {phase}: phase"
+            );
+            assert_eq!(
+                (migrated.2, migrated.3),
+                if progressed_derived { (0, 0) } else { (3, 1) },
+                "{state} {phase}: cursor"
+            );
+            assert_eq!(migrated.4.as_deref(), failure_kind, "{state} {phase}");
+            assert_eq!(migrated.5, "2026-08-28T09:00:00Z", "{state} {phase}");
+            assert_eq!(migrated.6, "2026-08-28T09:01:00Z", "{state} {phase}");
+            assert_eq!(migrated.7.as_deref(), completed_at, "{state} {phase}");
+            assert_eq!(preserved_table_rows(&storage.connection), preserved_tables);
+            assert_eq!(guarded_schema_objects(&storage.connection), guarded_schema);
+            assert_eq!(storage.lifetime_status().unwrap().compaction, compaction);
+
+            match verify_schema_v5_for_open(&storage.connection) {
+                Ok(()) if state == "pending" => {}
+                Ok(()) => panic!("{state} {phase}: non-runnable job reopened"),
+                Err(error) if state != "pending" => {
+                    assert_eq!(error.kind(), "storageSchemaMismatch")
+                }
+                Err(error) => panic!("{state} {phase}: pending job must reopen: {error:?}"),
+            }
+            drop(storage);
+
+            match Storage::open(&path) {
+                Ok(_) if state == "pending" => {}
+                Ok(_) => panic!("{state} {phase}: persisted non-runnable job reopened"),
+                Err(error) if state != "pending" => {
+                    assert_eq!(error.kind(), "storageSchemaMismatch")
+                }
+                Err(error) => panic!("{state} {phase}: persisted pending job failed: {error:?}"),
+            }
+        }
+    }
+
+    for materialization_state in ["pending", "ready"] {
+        let (_root, path) = database();
+        let mut storage = populated_v4_storage(&path, materialization_state);
+        let preserved_tables = preserved_table_rows(&storage.connection);
+        let guarded_schema = guarded_schema_objects(&storage.connection);
+        migrate_v5(&mut storage.connection).expect("migrate absent v4 pair");
+        verify_schema_v5_for_open(&storage.connection).expect("absent v5 pair reopens");
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT storage_schema_version,materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                    [],
+                    |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            (
+                STORAGE_LIFETIME_SCHEMA_VERSION_V5,
+                materialization_state.to_string()
+            )
+        );
+        assert_eq!(preserved_table_rows(&storage.connection), preserved_tables);
+        assert_eq!(guarded_schema_objects(&storage.connection), guarded_schema);
+    }
+}
+
+#[test]
+fn v5_rebuild_failure_rolls_back_to_exact_v4() {
+    let (_root, path) = database();
+    let mut storage = populated_v4_storage(&path, "pending");
+    insert_v4_job(
+        &storage.connection,
+        "rollback_v5",
+        "failed",
+        "verifyReceipts",
+        20,
+        3,
+        1,
+        Some("database"),
+        Some("2026-08-28T10:02:00Z"),
+    );
+    let snapshot_before = database_snapshot(&storage.connection);
+    let invalid = MIGRATION_V5.replacen(
+        "DROP TABLE lifetime_materialization_job_v4;",
+        "INVALID SQL;\nDROP TABLE lifetime_materialization_job_v4;",
+        1,
+    );
+
+    let error = execute_migration(&mut storage.connection, &invalid, "v5 injected")
+        .expect_err("mid-rebuild failure must roll back");
+    assert_eq!(error.kind(), "migrationFailed");
+    assert!(storage.connection.is_autocommit());
+    verify_schema_v4(&storage.connection).expect("rollback restored exact v4");
+    assert_eq!(database_snapshot(&storage.connection), snapshot_before);
+}
+
+#[test]
+fn v5_preflight_rejects_unsafe_v4_without_mutating_a_byte() {
+    for (name, materialization_state, job) in [
+        ("materializing_meta", "materializing", None),
+        ("failed_meta", "failed", None),
+        (
+            "ready_with_job",
+            "ready",
+            Some(("pending", "receipts", 20_i64, 0_i64, 0_i64)),
+        ),
+        (
+            "bad_phase",
+            "pending",
+            Some(("pending", "verify", 20, 0, 0)),
+        ),
+        (
+            "cursor_past_cutoff",
+            "pending",
+            Some(("pending", "verifySource", 20, 21, 0)),
+        ),
+        (
+            "bad_exhaustion",
+            "pending",
+            Some(("pending", "verifyReceipts", 20, 3, 2)),
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v4_storage(&path, "pending");
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        storage
+            .connection
+            .execute(
+                "UPDATE storage_schema_meta SET materialization_state=?1 WHERE singleton=1;",
+                [materialization_state],
+            )
+            .unwrap();
+        if let Some((state, phase, cutoff, after, exhausted)) = job {
+            insert_v4_job(
+                &storage.connection,
+                name,
+                state,
+                phase,
+                cutoff,
+                after,
+                exhausted,
+                None,
+                None,
+            );
+        }
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
+        assert_v5_migration_rejected_without_mutation(&mut storage, name);
+    }
+
+    for (name, mutation) in [
+        ("partial", "DROP TABLE lifetime_materialization_job;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v4(value TEXT) STRICT;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v4_storage(&path, "pending");
+        storage.connection.execute_batch(mutation).unwrap();
+        assert_v5_migration_rejected_without_mutation(&mut storage, name);
+    }
+}
+
+#[test]
+fn exact_v5_reopen_rejects_partial_extra_and_non_runnable_jobs() {
+    for (name, mutation) in [
+        ("partial", "DROP TABLE lifetime_materialization_job;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v5(value TEXT) STRICT;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v5");
+        storage.connection.execute_batch(mutation).unwrap();
+        drop(storage);
+        let error = Storage::open(&path).err().expect("non-exact v5 must fail");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    }
+
+    for state in ["attempting", "failed"] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v5");
+        let (failure_kind, completed_at) = if state == "failed" {
+            (Some("database"), Some("2026-08-28T10:02:00Z"))
+        } else {
+            (None, None)
+        };
+        insert_v4_job(
+            &storage.connection,
+            state,
+            state,
+            "verifyProjects",
+            20,
+            3,
+            1,
+            failure_kind,
+            completed_at,
+        );
+        verify_schema_v5(&storage.connection).expect("structural v5 retains evidence");
+        drop(storage);
+        let error = Storage::open(&path)
+            .err()
+            .expect("non-runnable v5 must fail open");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");
+        assert_eq!(
+            error.detail(),
+            "storage lifetime materialization state is invalid"
+        );
+    }
+
+    for (name, phase, cutoff, after, exhausted) in [
+        ("legacy_phase", "verify", 20_i64, 0_i64, 0_i64),
+        ("event_cursor_past_cutoff", "verifySource", 20, 21, 0),
+        ("invalid_scan_exhausted", "verifyProjects", 20, 3, 2),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v5");
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        insert_v4_job(
+            &storage.connection,
+            name,
+            "pending",
+            phase,
+            cutoff,
+            after,
+            exhausted,
+            None,
+            None,
+        );
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
+        drop(storage);
+        let error = Storage::open(&path).err().expect("malformed v5 must fail");
         assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
     }
 }
@@ -1205,6 +1528,32 @@ fn populated_v3_storage(path: &Path, state: &str) -> Storage {
     migrate_v3(&mut storage.connection).expect("migrate populated fixture to v3");
     verify_schema_v3(&storage.connection).expect("exact populated v3 fixture");
     storage
+}
+
+fn populated_v4_storage(path: &Path, state: &str) -> Storage {
+    let mut storage = populated_v3_storage(path, state);
+    migrate_v4(&mut storage.connection).expect("migrate populated fixture to v4");
+    verify_schema_v4(&storage.connection).expect("exact populated v4 fixture");
+    storage
+}
+
+fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
+    storage.checkpoint().expect("checkpoint unsafe v4 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read unsafe v4 fixture");
+
+    let error = migrate_v5(&mut storage.connection).expect_err("unsafe v4 must fail preflight");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(
+        database_snapshot(&storage.connection),
+        snapshot_before,
+        "{name}"
+    );
+    assert_eq!(
+        fs::read(storage.path()).expect("reread unsafe v4 fixture"),
+        bytes_before,
+        "{name}"
+    );
 }
 
 fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
