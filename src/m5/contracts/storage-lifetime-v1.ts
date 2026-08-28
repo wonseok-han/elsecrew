@@ -1,4 +1,6 @@
 import { requireObject, exactKeys, requireSafeUnsigned } from "./project-v1.ts";
+import { sha256FileVersionV1 } from "./file-v1.ts";
+import { canonicalJsonV1 } from "./storage-v1.ts";
 
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V1 = 2 as const;
 export const STORAGE_STATUS_SCHEMA_VERSION_V1 = 1 as const;
@@ -222,6 +224,22 @@ function validateOperationReceiptV2(value: unknown): OperationReceiptV2 {
     || typeof receipt.canonicalPayloadDigest !== "string"
     || !/^[0-9a-f]{64}$/.test(receipt.canonicalPayloadDigest)) {
     fail("operation receipt digest metadata must be sha256 v1 lowercaseHex64");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(receipt.canonicalPayloadJson as string);
+  } catch {
+    fail("operation receipt canonicalPayloadJson must be valid JSON");
+  }
+  if (canonicalJsonV1(payload) !== receipt.canonicalPayloadJson) {
+    fail("operation receipt canonicalPayloadJson must be canonical JSON");
+  }
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    fail("operation receipt canonicalPayloadJson must be an object");
+  }
+  const digest = sha256FileVersionV1(new TextEncoder().encode(receipt.canonicalPayloadJson as string));
+  if (digest !== `sha256:${receipt.canonicalPayloadDigest as string}`) {
+    fail("operation receipt canonicalPayloadDigest does not match canonicalPayloadJson");
   }
   requireTimestamp(receipt.eventTimestamp, "operation receipt eventTimestamp");
   return receipt as unknown as OperationReceiptV2;

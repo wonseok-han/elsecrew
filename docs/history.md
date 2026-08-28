@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D receipt 무결성 재리뷰 수정)
+
+- **canonical payload 직접 검증**: Rust와 TypeScript operation receipt validator가 `canonicalPayloadJson`을 직접 parse·canonicalize하고 기존 v1 canonical JSON과 byte-exact인지 확인한다. 같은 원문 bytes의 SHA-256도 직접 재계산해 metadata 형식만 맞는 손상 digest를 거부한다.
+- **손상 회귀**: 정상 legacy·actual-agent·recovery duplicate/conflict 사례를 유지하면서, 64자리 lowercase hex지만 원문과 불일치하는 digest, 원문 digest는 일치하지만 key 순서가 canonical이 아닌 JSON, parse할 수 없는 JSON을 공용 golden fixture에서 양쪽 validator가 거부하도록 고정했다.
+- **검증**: focused G5D Node contract 5개, protocol Rust 35개, TypeScript no-emit, 소유 Rust focused rustfmt와 diff check를 통과했다. sidecar·Electron·manifest와 활성 wire는 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A 독립 리뷰 수정)
 
 - **operation receipt 정확성**: digest만 보존하던 초안을 고쳐 canonical payload 원문과 SHA-256/version/format metadata를 함께 보존한다. duplicate/conflict는 digest가 아니라 v1 immutable record의 exact canonical JSON과 나머지 불변 필드를 비교하며 request ID만 기존처럼 제외한다. legacy·actual-agent·poisoned recovery fixture가 exact duplicate와 changed-payload conflict를 교차 검증한다.

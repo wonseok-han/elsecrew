@@ -102,6 +102,11 @@ interface OperationReceiptCases {
     incoming: unknown;
     expected: "append" | "duplicateNoOp" | "conflict";
   }>;
+  invalid: Array<{
+    name: string;
+    expectedError: string;
+    receipt: { canonicalPayloadJson: string; canonicalPayloadDigest: string };
+  }>;
 }
 
 const root = resolve("tests/fixtures/m5/storage-v2");
@@ -327,6 +332,13 @@ test("operation receipts preserve exact v1 duplicate/conflict decisions across l
     );
   }
   assert.deepEqual([...namespaces].sort(), ["actualAgent", "legacy", "recovery"]);
+  for (const fixture of receiptCases.invalid) {
+    assert.throws(
+      () => classifyOperationAgainstReceiptV2(fixture.receipt, receiptCases.cases[0].incoming),
+      new RegExp(fixture.expectedError),
+      fixture.name,
+    );
+  }
 });
 
 test("planned bridge V6 is additive but storage.status remains unadvertised and undispatchable before D1", () => {

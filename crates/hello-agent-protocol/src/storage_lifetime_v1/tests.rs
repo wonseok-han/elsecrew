@@ -114,6 +114,7 @@ struct InvalidStatusCase {
 #[derive(Deserialize)]
 struct OperationReceiptCases {
     cases: Vec<OperationReceiptCase>,
+    invalid: Vec<InvalidOperationReceiptCase>,
 }
 
 #[derive(Deserialize)]
@@ -123,6 +124,14 @@ struct OperationReceiptCase {
     receipt: OperationReceiptV2,
     incoming: LedgerEventV1,
     expected: OperationDecisionV1,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InvalidOperationReceiptCase {
+    name: String,
+    expected_error: String,
+    receipt: OperationReceiptV2,
 }
 
 #[test]
@@ -323,8 +332,8 @@ fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     let receipts: OperationReceiptCases =
         read_json(root.join(&manifest.compaction.operation_receipt.cases_file));
     let mut namespaces = Vec::new();
-    for case in receipts.cases {
-        namespaces.push(case.namespace);
+    for case in &receipts.cases {
+        namespaces.push(case.namespace.clone());
         assert_eq!(
             classify_operation_against_receipt_v2(&case.receipt, &case.incoming).expect(&case.name),
             case.expected,
@@ -335,6 +344,17 @@ fn lossless_compaction_boundary_preserves_history_and_namespaces() {
     assert!(namespaces.contains(&"legacy".to_string()));
     assert!(namespaces.contains(&"actualAgent".to_string()));
     assert!(namespaces.contains(&"recovery".to_string()));
+    let incoming = &receipts.cases[0].incoming;
+    for case in &receipts.invalid {
+        let error = classify_operation_against_receipt_v2(&case.receipt, incoming)
+            .expect_err(&case.name)
+            .to_string();
+        assert!(
+            error.contains(&case.expected_error),
+            "{}: {error}",
+            case.name
+        );
+    }
     assert!(!crate::METHODS_V1.contains(&STORAGE_STATUS_METHOD_V1));
 }
 

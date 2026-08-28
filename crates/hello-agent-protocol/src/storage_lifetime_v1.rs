@@ -3,7 +3,10 @@ use serde_json::Value;
 use std::error::Error;
 use std::fmt::{self, Display};
 
-use crate::storage_v1::{classify_operation_v1, LedgerEventV1, OperationDecisionV1};
+use crate::project_v1::sha256_file_version_v1;
+use crate::storage_v1::{
+    canonical_json_v1, classify_operation_v1, LedgerEventV1, OperationDecisionV1,
+};
 use crate::MAX_SEQUENCE;
 
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V1: u32 = 2;
@@ -301,6 +304,30 @@ fn validate_operation_receipt_v2(
     {
         return Err(StorageLifetimeContractError::new(
             "operation receipt digest metadata must be sha256 v1 lowercaseHex64",
+        ));
+    }
+    let payload: Value =
+        serde_json::from_str(&receipt.canonical_payload_json).map_err(|error| {
+            StorageLifetimeContractError::new(format!(
+                "operation receipt canonicalPayloadJson must be valid JSON: {error}"
+            ))
+        })?;
+    let canonical = canonical_json_v1(payload.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if canonical != receipt.canonical_payload_json {
+        return Err(StorageLifetimeContractError::new(
+            "operation receipt canonicalPayloadJson must be canonical JSON",
+        ));
+    }
+    if !payload.is_object() {
+        return Err(StorageLifetimeContractError::new(
+            "operation receipt canonicalPayloadJson must be an object",
+        ));
+    }
+    let computed = sha256_file_version_v1(receipt.canonical_payload_json.as_bytes());
+    if computed.strip_prefix("sha256:") != Some(receipt.canonical_payload_digest.as_str()) {
+        return Err(StorageLifetimeContractError::new(
+            "operation receipt canonicalPayloadDigest does not match canonicalPayloadJson",
         ));
     }
     require_timestamp(&receipt.event_timestamp, "operation receipt eventTimestamp")

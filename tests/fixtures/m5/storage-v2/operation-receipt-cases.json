@@ -128,5 +128,64 @@
       },
       "expected": "duplicateNoOp"
     }
+  ],
+  "invalid": [
+    {
+      "name": "valid lowercase digest with corrupt payload hash is rejected",
+      "expectedError": "does not match canonicalPayloadJson",
+      "receipt": {
+        "operationId": "op_actual_recovery_01",
+        "eventId": "evt_actual_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_actual_01",
+        "aggregateSequence": 3,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\",\"state\":\"recoveryRequired\"}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "eventTimestamp": "2026-08-28T04:01:00Z"
+      }
+    },
+    {
+      "name": "noncanonical payload with matching digest is rejected",
+      "expectedError": "must be canonical JSON",
+      "receipt": {
+        "operationId": "op_actual_recovery_01",
+        "eventId": "evt_actual_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_actual_01",
+        "aggregateSequence": 3,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"state\":\"recoveryRequired\",\"run_id\":\"run_actual_01\",\"source_kind\":\"actualAgent\"}",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "9788fd24ef0e1dcebd5160b0b1e76bc65eb07b4f87f1c583189775cdb9d3ae81",
+        "eventTimestamp": "2026-08-28T04:01:00Z"
+      }
+    },
+    {
+      "name": "invalid JSON payload with matching digest is rejected",
+      "expectedError": "must be valid JSON",
+      "receipt": {
+        "operationId": "op_actual_recovery_01",
+        "eventId": "evt_actual_recovery_01",
+        "aggregateType": "run",
+        "aggregateId": "run_actual_01",
+        "aggregateSequence": 3,
+        "eventType": "run.upserted",
+        "payloadSchemaVersion": 1,
+        "canonicalPayloadJson": "{\"run_id\":",
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": "fa3072c4baa6821021d040858f4c54266f5ac29385116abe96c50fc08981e7b2",
+        "eventTimestamp": "2026-08-28T04:01:00Z"
+      }
+    }
   ]
 }
