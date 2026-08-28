@@ -192,8 +192,9 @@ interface ManifestV4 {
 interface V4Cases {
   v3MigrationCases: Array<{
     name: string; v3State: "pending" | "failed"; v3Phase: string; afterEventRowid: number;
-    v4State: string; v4Phase: string; afterScanRowid: number;
+    v4State: string; v4Phase: string; afterScanRowid: number; scanExhausted: boolean;
   }>;
+  v3AbsentMigrationCases: Array<{ name: string; materializationState: "pending" | "ready" }>;
   validCursors: NamedValue[];
   invalidCursors: NamedValue[];
   validCursorTransitions: CursorTransitionCase[];
@@ -208,11 +209,11 @@ interface V4Cases {
   failClosedReopenPairs: number[];
   validLifecycleTransitions: Array<{
     name: string; operation: Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0];
-    previous: unknown; next: unknown;
+    witness: unknown | null; previous: unknown; next: unknown;
   }>;
   invalidLifecycleTransitions: Array<{
     name: string; operation: Parameters<typeof validateStorageLifetimeLifecycleTransitionV2>[0];
-    previous: unknown; next: unknown;
+    witness: unknown | null; previous: unknown; next: unknown;
   }>;
   validVerificationEvidence: NamedValue[];
   invalidVerificationEvidence: NamedValue[];
@@ -708,10 +709,12 @@ test("storage-v4 rebuilds only lifetime metadata and maps every admissible v3 st
       4,
     );
     assert.deepEqual({ ...preservation.prepare(`
-      SELECT state, cutoff_event_rowid, phase, after_scan_rowid, failure_kind, completed_at
+      SELECT state, cutoff_event_rowid, phase, after_scan_rowid, scan_exhausted,
+             failure_kind, completed_at
       FROM lifetime_materialization_job
     `).get() }, {
       state: "pending", cutoff_event_rowid: 20, phase: "verifySource", after_scan_rowid: 1,
+      scan_exhausted: 0,
       failure_kind: null, completed_at: null,
     });
     for (const table of manifestV4.migration.preservedTables) {
@@ -725,6 +728,14 @@ test("storage-v4 rebuilds only lifetime metadata and maps every admissible v3 st
     assert.throws(() => preservation.exec("DELETE FROM events;"));
     preservation.close();
 
+    assert.deepEqual(
+      v4Cases.v3MigrationCases.map((fixture) => `${fixture.v3State}:${fixture.v3Phase}`),
+      [
+        "pending:receipts", "pending:messages", "pending:workspaces", "pending:baselines",
+        "pending:verify", "failed:receipts", "failed:messages", "failed:workspaces",
+        "failed:baselines", "failed:verify",
+      ],
+    );
     for (const fixture of v4Cases.v3MigrationCases) {
       const database = createExactStorageV3Database(
         join(temporaryRoot, `${fixture.v3State}-${fixture.v3Phase}.sqlite3`),
@@ -739,28 +750,45 @@ test("storage-v4 rebuilds only lifetime metadata and maps every admissible v3 st
         );
         applyExactStorageV4Migration(database, migrationV4, exactV3, exactV4);
         assert.deepEqual({ ...database.prepare(`
-          SELECT state, phase, after_scan_rowid FROM lifetime_materialization_job
+          SELECT state, phase, after_scan_rowid, scan_exhausted
+          FROM lifetime_materialization_job
         `).get() }, {
           state: fixture.v4State,
           phase: fixture.v4Phase,
           after_scan_rowid: fixture.afterScanRowid,
+          scan_exhausted: fixture.scanExhausted ? 1 : 0,
         }, fixture.name);
       } finally {
         database.close();
       }
     }
 
-    const ready = createExactStorageV3Database(join(temporaryRoot, "ready.sqlite3"), migrationV3);
-    try {
-      ready.exec("UPDATE storage_schema_meta SET materialization_state = 'ready';");
-      applyExactStorageV4Migration(ready, migrationV4, exactV3, exactV4);
-      assert.deepEqual({ ...ready.prepare(`
-        SELECT storage_schema_version, materialization_state FROM storage_schema_meta
-      `).get() }, { storage_schema_version: 4, materialization_state: "ready" });
-      assert.equal(ready.prepare("SELECT count(*) AS count FROM lifetime_materialization_job").get()?.count, 0);
-      applyExactStorageV4Migration(ready, migrationV4, exactV3, exactV4);
-    } finally {
-      ready.close();
+    for (const fixture of v4Cases.v3AbsentMigrationCases) {
+      const database = createExactStorageV3Database(
+        join(temporaryRoot, `${fixture.materializationState}-absent.sqlite3`),
+        migrationV3,
+      );
+      try {
+        database.exec(`
+          UPDATE storage_schema_meta
+          SET materialization_state = '${fixture.materializationState}'
+        `);
+        applyExactStorageV4Migration(database, migrationV4, exactV3, exactV4);
+        assert.deepEqual({ ...database.prepare(`
+          SELECT storage_schema_version, materialization_state FROM storage_schema_meta
+        `).get() }, {
+          storage_schema_version: 4,
+          materialization_state: fixture.materializationState,
+        }, fixture.name);
+        assert.equal(
+          database.prepare("SELECT count(*) AS count FROM lifetime_materialization_job").get()?.count,
+          0,
+          fixture.name,
+        );
+        applyExactStorageV4Migration(database, migrationV4, exactV3, exactV4);
+      } finally {
+        database.close();
+      }
     }
 
     const invalidSetups: Array<[string, (database: DatabaseSync) => void]> = [
@@ -852,14 +880,18 @@ test("storage-v4 freezes bounded arm, verification, cancellation, and final publ
   }
   for (const fixture of v4Cases.validLifecycleTransitions) {
     assert.deepEqual(
-      validateStorageLifetimeLifecycleTransitionV2(fixture.operation, fixture.previous, fixture.next),
+      validateStorageLifetimeLifecycleTransitionV2(
+        fixture.operation, fixture.previous, fixture.next, fixture.witness,
+      ),
       fixture.next,
       fixture.name,
     );
   }
   for (const fixture of v4Cases.invalidLifecycleTransitions) {
     assert.throws(
-      () => validateStorageLifetimeLifecycleTransitionV2(fixture.operation, fixture.previous, fixture.next),
+      () => validateStorageLifetimeLifecycleTransitionV2(
+        fixture.operation, fixture.previous, fixture.next, fixture.witness,
+      ),
       undefined,
       fixture.name,
     );

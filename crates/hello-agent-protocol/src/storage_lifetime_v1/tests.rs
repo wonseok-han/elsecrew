@@ -277,6 +277,7 @@ struct InvalidPolicyMutation {
 #[serde(rename_all = "camelCase")]
 struct V4Cases {
     v3_migration_cases: Vec<V3MigrationCase>,
+    v3_absent_migration_cases: Vec<V3AbsentMigrationCase>,
     valid_cursors: Vec<NamedValue>,
     invalid_cursors: Vec<NamedValue>,
     valid_cursor_transitions: Vec<CursorTransitionCase>,
@@ -308,12 +309,21 @@ struct V3MigrationCase {
     v4_state: String,
     v4_phase: String,
     after_scan_rowid: u64,
+    scan_exhausted: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V3AbsentMigrationCase {
+    name: String,
+    materialization_state: String,
 }
 
 #[derive(Deserialize)]
 struct LifecycleTransitionCaseV2 {
     name: String,
     operation: StorageLifetimeLifecycleOperationV2,
+    witness: Option<Value>,
     previous: Value,
     next: Value,
 }
@@ -749,6 +759,25 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
         .and_then(Value::as_str)
         .expect("v4 cases file");
     let cases: V4Cases = read_json(root.join(cases_file));
+    assert_eq!(
+        cases
+            .v3_migration_cases
+            .iter()
+            .map(|case| format!("{}:{}", case.v3_state, case.v3_phase))
+            .collect::<Vec<_>>(),
+        [
+            "pending:receipts",
+            "pending:messages",
+            "pending:workspaces",
+            "pending:baselines",
+            "pending:verify",
+            "failed:receipts",
+            "failed:messages",
+            "failed:workspaces",
+            "failed:baselines",
+            "failed:verify",
+        ]
+    );
     for case in &cases.v3_migration_cases {
         let mapped_phase = if case.v3_phase == "verify" {
             "verifySource"
@@ -762,8 +791,18 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
             "{}",
             case.name
         );
+        assert!(!case.scan_exhausted, "{}", case.name);
         assert_ne!(case.v3_state, "attempting", "{}", case.name);
     }
+    assert_eq!(cases.v3_absent_migration_cases.len(), 2);
+    assert!(cases
+        .v3_absent_migration_cases
+        .iter()
+        .any(|case| { case.name == "pending absent" && case.materialization_state == "pending" }));
+    assert!(cases
+        .v3_absent_migration_cases
+        .iter()
+        .any(|case| { case.name == "ready absent" && case.materialization_state == "ready" }));
     for case in &cases.valid_cursors {
         validate_storage_lifetime_cursor_v2(&case.value).expect(&case.name);
     }
@@ -834,6 +873,7 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
             case.operation,
             &case.previous,
             &case.next,
+            case.witness.as_ref(),
         )
         .expect(&case.name);
     }
@@ -843,6 +883,7 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
                 case.operation,
                 &case.previous,
                 &case.next,
+                case.witness.as_ref(),
             )
             .is_err(),
             "{}",
@@ -899,6 +940,8 @@ fn storage_v4_contract_freezes_bounded_verification_and_exact_v3_mapping() {
     );
     assert!(sql.contains("WHEN 'verify' THEN 'verifySource'"));
     assert!(sql.contains("after_scan_rowid"));
+    assert!(sql.contains("scan_exhausted INTEGER NOT NULL CHECK (scan_exhausted IN (0, 1))"));
+    assert!(sql.contains("after_event_rowid,\n    0,\n    failure_kind"));
     assert!(!normalized.contains("ALTER TABLE MAINTENANCE_JOBS"));
     assert!(!normalized.contains("DROP TABLE MAINTENANCE_JOBS"));
     assert!(!normalized.contains("DELETE FROM EVENTS"));

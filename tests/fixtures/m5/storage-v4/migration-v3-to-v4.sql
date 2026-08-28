@@ -53,6 +53,7 @@ CREATE TABLE lifetime_materialization_job (
     after_scan_rowid INTEGER NOT NULL CHECK (
         after_scan_rowid >= 0 AND after_scan_rowid <= 9007199254740991
     ),
+    scan_exhausted INTEGER NOT NULL CHECK (scan_exhausted IN (0, 1)),
     failure_kind TEXT,
     created_at TEXT NOT NULL CHECK (length(created_at) > 0),
     updated_at TEXT NOT NULL CHECK (length(updated_at) > 0),
@@ -86,6 +87,7 @@ INSERT INTO lifetime_materialization_job (
     cutoff_event_rowid,
     phase,
     after_scan_rowid,
+    scan_exhausted,
     failure_kind,
     created_at,
     updated_at,
@@ -101,6 +103,7 @@ SELECT
         ELSE phase
     END,
     after_event_rowid,
+    0,
     failure_kind,
     created_at,
     updated_at,

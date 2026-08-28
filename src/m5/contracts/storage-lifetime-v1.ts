@@ -133,6 +133,8 @@ export type StorageLifetimeLifecycleOperationV2 =
   | "create"
   | "arm"
   | "batchSuccess"
+  | "markScanExhausted"
+  | "phaseAdvance"
   | "cancel"
   | "fail"
   | "failureRecordUnavailable"
@@ -170,6 +172,7 @@ export interface StorageLifetimeCursorV2 {
   cutoffEventRowid: number;
   phase: StorageLifetimePhaseV2;
   afterScanRowid: number;
+  scanExhausted: boolean;
 }
 
 export interface StorageLifetimeMaterializationJobV2 {
@@ -179,6 +182,7 @@ export interface StorageLifetimeMaterializationJobV2 {
   cutoffEventRowid: number;
   phase: StorageLifetimePhaseV2;
   afterScanRowid: number;
+  scanExhausted: boolean;
   failureKind: string | null;
   createdAt: string;
   updatedAt: string;
@@ -204,7 +208,7 @@ export interface StorageLifetimeV4PreflightPolicyV1 {
   ];
   migrationMappings: readonly [
     "pendingPhasesSameName", "verifyToVerifySource", "afterEventRowidToAfterScanRowid",
-    "failedPreserved", "attemptingImpossibleInV3",
+    "scanExhaustedFalse", "failedPreserved", "attemptingImpossibleInV3",
   ];
   reopenRunnablePairs: readonly ["ready+absent", "pending+absent", "pending+pending"];
   reopenFailClosedPairs: readonly ["pending+attempting", "pending+failed"];
@@ -423,7 +427,7 @@ export function validateStorageLifetimeV4PreflightPolicyV1(
     admissiblePairs: ["ready+absent", "pending+absent", "pending+pending", "pending+failed"],
     migrationMappings: [
       "pendingPhasesSameName", "verifyToVerifySource", "afterEventRowidToAfterScanRowid",
-      "failedPreserved", "attemptingImpossibleInV3",
+      "scanExhaustedFalse", "failedPreserved", "attemptingImpossibleInV3",
     ],
     reopenRunnablePairs: ["ready+absent", "pending+absent", "pending+pending"],
     reopenFailClosedPairs: ["pending+attempting", "pending+failed"],
@@ -827,10 +831,11 @@ const STORAGE_LIFETIME_BATCH_POLICY_V2 = {
     eventRowidPhases: STORAGE_LIFETIME_EVENT_ROWID_PHASES_V2,
     derivedTableRowidPhases: STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V2,
     phaseStartAfterScanRowid: 0,
+    phaseStartScanExhausted: false,
     eventRowidBound: "afterScanRowidLessThanOrEqualToCutoff",
     derivedRowidBound: "jsSafeUnsignedIndependentOfCutoff",
-    eventPhaseTransition: "afterScanRowidEqualsCutoffThenNextAtZero",
-    derivedPhaseTransition: "exactEmptyKeysetBatchThenNextAtZero",
+    markExhausted: "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+    phaseTransition: "scanExhaustedTrueThenExactNextAtZeroAndFalse",
   },
   scan: {
     sourcePredicate: "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
@@ -843,6 +848,8 @@ const STORAGE_LIFETIME_BATCH_POLICY_V2 = {
     wordingRevision: "shortArmTransactionThenOneBoundedBatchTransaction",
     arm: "pendingToAttemptingCommittedBeforeBatch",
     success: "derivedRowsCursorAndAttemptingToPendingAtomic",
+    nonemptyBatchScanExhausted: false,
+    emptyBatchScanExhausted: "markScanExhaustedAtomicWithWitnessOnly",
     cancellation: "rollbackBatchOrSavepointThenCommitAttemptingToPending",
     terminalValidationFailure: "rollbackBatchThenCommitAttemptingToFailed",
     failureRecordUnavailable: "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
@@ -872,6 +879,7 @@ const STORAGE_LIFETIME_BATCH_POLICY_V2 = {
     preconditions: [
       "exactMetaJobPairAndCursor",
       "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+      "scanExhaustedTrue",
       "maxEventRowidEqualsCutoff",
       "cancelBeforeMutation",
       "precommitCancel",
@@ -899,12 +907,17 @@ export function validateStorageLifetimeBatchPolicyV2(value: unknown): Record<str
 
 export function validateStorageLifetimeCursorV2(value: unknown): StorageLifetimeCursorV2 {
   const cursor = requireObject(value, "storage lifetime v4 cursor");
-  exactKeys(cursor, ["schemaVersion", "cutoffEventRowid", "phase", "afterScanRowid"]);
+  exactKeys(cursor, [
+    "schemaVersion", "cutoffEventRowid", "phase", "afterScanRowid", "scanExhausted",
+  ]);
   if (cursor.schemaVersion !== STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V2) {
     fail("storage lifetime v4 cursor schemaVersion must be 2");
   }
   const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "cursor.cutoffEventRowid");
   const after = requireSafeUnsigned(cursor.afterScanRowid, "cursor.afterScanRowid");
+  if (typeof cursor.scanExhausted !== "boolean") {
+    fail("storage lifetime v4 cursor scanExhausted must be boolean");
+  }
   if (!STORAGE_LIFETIME_PHASES_V2.includes(cursor.phase as StorageLifetimePhaseV2)) {
     fail("storage lifetime v4 cursor phase is invalid");
   }
@@ -922,8 +935,8 @@ export function validateStorageLifetimeCursorTransitionV2(
 ): StorageLifetimeCursorV2 {
   const next = validateStorageLifetimeCursorV2(nextValue);
   if (previousValue === null) {
-    if (next.phase !== "receipts" || next.afterScanRowid !== 0) {
-      fail("storage lifetime v4 initial cursor must start receipts at afterScanRowid 0");
+    if (next.phase !== "receipts" || next.afterScanRowid !== 0 || next.scanExhausted) {
+      fail("storage lifetime v4 initial cursor must start unexhausted receipts at zero");
     }
     return next;
   }
@@ -932,19 +945,17 @@ export function validateStorageLifetimeCursorTransitionV2(
     fail("storage lifetime v4 batch transition cannot change the frozen cutoff");
   }
   if (next.phase === previous.phase) {
-    if (next.afterScanRowid <= previous.afterScanRowid) {
+    if (previous.scanExhausted || next.scanExhausted
+      || next.afterScanRowid <= previous.afterScanRowid) {
       fail("storage lifetime v4 same-phase cursor must advance afterScanRowid");
     }
     return next;
   }
   const previousIndex = STORAGE_LIFETIME_PHASES_V2.indexOf(previous.phase);
-  if (STORAGE_LIFETIME_PHASES_V2[previousIndex + 1] !== next.phase || next.afterScanRowid !== 0) {
-    fail("storage lifetime v4 phase transition must enter the exact next phase at zero");
-  }
-  if (STORAGE_LIFETIME_EVENT_ROWID_PHASES_V2.includes(
-    previous.phase as typeof STORAGE_LIFETIME_EVENT_ROWID_PHASES_V2[number],
-  ) && previous.afterScanRowid !== previous.cutoffEventRowid) {
-    fail("event-derived storage lifetime phase must reach cutoff before transition");
+  if (!previous.scanExhausted || next.scanExhausted
+    || STORAGE_LIFETIME_PHASES_V2[previousIndex + 1] !== next.phase
+    || next.afterScanRowid !== 0) {
+    fail("storage lifetime v4 phase transition requires exhausted current phase and unexhausted exact next phase at zero");
   }
   return next;
 }
@@ -955,6 +966,7 @@ export function validateStorageLifetimeMaterializationJobV2(
   const job = requireObject(value, "storage lifetime v4 materialization job");
   exactKeys(job, [
     "singleton", "jobId", "state", "cutoffEventRowid", "phase", "afterScanRowid",
+    "scanExhausted",
     "failureKind", "createdAt", "updatedAt", "completedAt",
   ]);
   if (job.singleton !== 1 || typeof job.jobId !== "string" || job.jobId.length === 0) {
@@ -968,6 +980,7 @@ export function validateStorageLifetimeMaterializationJobV2(
     cutoffEventRowid: job.cutoffEventRowid,
     phase: job.phase,
     afterScanRowid: job.afterScanRowid,
+    scanExhausted: job.scanExhausted,
   });
   requireTimestamp(job.createdAt, "job.createdAt");
   requireTimestamp(job.updatedAt, "job.updatedAt");
@@ -1016,7 +1029,9 @@ export function validateStorageLifetimeLifecycleTransitionV2(
   operation: StorageLifetimeLifecycleOperationV2,
   previousValue: unknown,
   nextValue: unknown,
+  witnessValue: unknown | null,
 ): StorageLifetimeMaterializationSnapshotV2 {
+  const emptyBatchObserved = validateStorageLifetimeLifecycleWitnessV2(operation, witnessValue);
   const previous = validateStorageLifetimeMaterializationPairV2(previousValue);
   const next = validateStorageLifetimeMaterializationPairV2(nextValue);
   const previousJob = previous.job;
@@ -1039,7 +1054,7 @@ export function validateStorageLifetimeLifecycleTransitionV2(
   }
   if (operation === "finalPublish") {
     if (previous.materializationState !== "pending" || previousJob?.state !== "pending"
-      || previousJob.phase !== "verifyBaselines"
+      || previousJob.phase !== "verifyBaselines" || !previousJob.scanExhausted
       || next.materializationState !== "ready" || nextJob !== null) {
       fail("final publication requires pending verifyBaselines and atomically publishes ready");
     }
@@ -1059,12 +1074,26 @@ export function validateStorageLifetimeLifecycleTransitionV2(
   requireSameJobIdentityV2(previousJob, nextJob);
   if (operation === "arm") {
     if (previousJob.state !== "pending" || nextJob.state !== "attempting"
+      || previousJob.scanExhausted || nextJob.scanExhausted
       || !sameContractValue(jobCursorV2(previousJob), jobCursorV2(nextJob))) {
       fail("storage lifetime v4 arm must commit pending to attempting at the same cursor");
     }
   } else if (operation === "batchSuccess") {
     if (previousJob.state !== "attempting" || nextJob.state !== "pending") {
       fail("storage lifetime v4 batch success must commit attempting to pending");
+    }
+    validateStorageLifetimeCursorTransitionV2(jobCursorV2(previousJob), jobCursorV2(nextJob));
+  } else if (operation === "markScanExhausted") {
+    if (!emptyBatchObserved || previousJob.state !== "pending" || nextJob.state !== "pending"
+      || previousJob.scanExhausted || !nextJob.scanExhausted
+      || previousJob.cutoffEventRowid !== nextJob.cutoffEventRowid
+      || previousJob.phase !== nextJob.phase
+      || previousJob.afterScanRowid !== nextJob.afterScanRowid) {
+      fail("storage lifetime v4 scan exhaustion requires explicit exact empty-batch witness");
+    }
+  } else if (operation === "phaseAdvance") {
+    if (previousJob.state !== "pending" || nextJob.state !== "pending") {
+      fail("storage lifetime v4 phase advance requires pending jobs");
     }
     validateStorageLifetimeCursorTransitionV2(jobCursorV2(previousJob), jobCursorV2(nextJob));
   } else if (operation === "cancel") {
@@ -1079,8 +1108,10 @@ export function validateStorageLifetimeLifecycleTransitionV2(
     }
   } else if (operation === "finalReset") {
     if (previousJob.state !== "pending" || previousJob.phase !== "verifyBaselines"
+      || !previousJob.scanExhausted
       || nextJob.state !== "pending" || nextJob.cutoffEventRowid <= previousJob.cutoffEventRowid
-      || nextJob.phase !== "receipts" || nextJob.afterScanRowid !== 0) {
+      || nextJob.phase !== "receipts" || nextJob.afterScanRowid !== 0
+      || nextJob.scanExhausted) {
       fail("storage lifetime v4 final reset requires a larger cutoff and receipts at zero");
     }
   } else {
@@ -1136,7 +1167,24 @@ function jobCursorV2(job: StorageLifetimeMaterializationJobV2): StorageLifetimeC
     cutoffEventRowid: job.cutoffEventRowid,
     phase: job.phase,
     afterScanRowid: job.afterScanRowid,
+    scanExhausted: job.scanExhausted,
   };
+}
+
+function validateStorageLifetimeLifecycleWitnessV2(
+  operation: StorageLifetimeLifecycleOperationV2,
+  value: unknown | null,
+): boolean {
+  if (operation !== "markScanExhausted") {
+    if (value !== null) fail("storage lifetime v4 witness is allowed only for markScanExhausted");
+    return false;
+  }
+  const witness = requireObject(value, "storage lifetime v4 empty-batch witness");
+  exactKeys(witness, ["emptyBatchObserved"]);
+  if (witness.emptyBatchObserved !== true) {
+    fail("storage lifetime v4 exhaustion witness must prove an exact empty batch");
+  }
+  return true;
 }
 
 function requireSameJobIdentityV2(

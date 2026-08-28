@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 exhaustion review 수정)
+
+- **P1 durable exhaustion proof**: `afterScanRowid=0`만으로 빈 derived table과 아직 검사하지 않은 table을 구분할 수 없어 phase chain을 건너뛰고 ready를 게시할 수 있던 결함을 수정했다. v4 job에 `scan_exhausted`를 추가하고 migration은 모든 v3 job을 보수적으로 false로 옮긴다. nonempty batch·arm·cancel·failure는 false/current proof를 보존하며, pending current phase에서 `emptyBatchObserved=true` witness를 받은 `markScanExhausted`만 false→true를 허용한다. 별도 `phaseAdvance`는 true인 exact 직전 phase만 다음 phase/rowid 0/false로 옮기고, final publish와 max-rowid reset도 exhausted `verifyBaselines`만 받는다.
+- **P2 migration matrix**: 실제 Node SQLite golden이 pending/failed의 v3 다섯 phase를 모두 실행 migration하고 `verify→verifySource`, cursor rename, `scan_exhausted=0`, failed 보존을 확인한다. job 없는 pending·ready도 각각 실행해 exact v4와 absent singleton을 확인하므로 preflight가 허용하는 모든 v3 pair가 실행 사례를 갖는다.
+- **경계·검증**: Rust·TypeScript 공용 lifecycle fixture가 witness 없는/false witness exhaustion, nonempty batch의 forged true, unexhausted cursor-0 derived skip, unexhausted final publication을 거부한다. sidecar·wire·scheduler·cleanup/삭제·compaction·제품 정책은 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 bounded verification 계약)
 
 - **additive v4 migration 계약**: exact storage-v3 schema와 `ready+absent` 또는 구조적으로 유효한 `pending+absent|pending|failed` pair를 어떤 mutation보다 먼저 확인하고, transaction 안에서 `storage_schema_meta` version CHECK와 `lifetime_materialization_job`만 재구축한다. v3 `verify`는 `verifySource`, `after_event_rowid`는 `after_scan_rowid`로 옮기며 failed는 보존한다. 나머지 원장·projection·materialized data·compaction history·named index·append-only trigger는 그대로 보존하고 unsafe pair/partial/extra schema는 DB byte-zero mutation으로 거부한다.

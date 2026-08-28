@@ -353,6 +353,7 @@ pub struct StorageLifetimeCursorV2 {
     pub cutoff_event_rowid: u64,
     pub phase: StorageLifetimePhaseV2,
     pub after_scan_rowid: u64,
+    pub scan_exhausted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -372,6 +373,7 @@ pub struct StorageLifetimeMaterializationJobV2 {
     pub cutoff_event_rowid: u64,
     pub phase: StorageLifetimePhaseV2,
     pub after_scan_rowid: u64,
+    pub scan_exhausted: bool,
     pub failure_kind: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -391,12 +393,20 @@ pub enum StorageLifetimeLifecycleOperationV2 {
     Create,
     Arm,
     BatchSuccess,
+    MarkScanExhausted,
+    PhaseAdvance,
     Cancel,
     Fail,
     FailureRecordUnavailable,
     FinalPublish,
     FinalReset,
     Append,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeLifecycleWitnessV2 {
+    pub empty_batch_observed: bool,
 }
 
 pub fn validate_storage_lifetime_v3_preflight_policy_v1(
@@ -443,6 +453,7 @@ pub fn validate_storage_lifetime_v4_preflight_policy_v1(
                 "pendingPhasesSameName",
                 "verifyToVerifySource",
                 "afterEventRowidToAfterScanRowid",
+                "scanExhaustedFalse",
                 "failedPreserved",
                 "attemptingImpossibleInV3",
             ],
@@ -1056,10 +1067,11 @@ pub fn validate_storage_lifetime_batch_policy_v2(
             "eventRowidPhases": STORAGE_LIFETIME_EVENT_ROWID_PHASES_V2,
             "derivedTableRowidPhases": STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V2,
             "phaseStartAfterScanRowid": 0,
+            "phaseStartScanExhausted": false,
             "eventRowidBound": "afterScanRowidLessThanOrEqualToCutoff",
             "derivedRowidBound": "jsSafeUnsignedIndependentOfCutoff",
-            "eventPhaseTransition": "afterScanRowidEqualsCutoffThenNextAtZero",
-            "derivedPhaseTransition": "exactEmptyKeysetBatchThenNextAtZero",
+            "markExhausted": "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+            "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse",
         },
         "scan": {
             "sourcePredicate": "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
@@ -1072,6 +1084,8 @@ pub fn validate_storage_lifetime_batch_policy_v2(
             "wordingRevision": "shortArmTransactionThenOneBoundedBatchTransaction",
             "arm": "pendingToAttemptingCommittedBeforeBatch",
             "success": "derivedRowsCursorAndAttemptingToPendingAtomic",
+            "nonemptyBatchScanExhausted": false,
+            "emptyBatchScanExhausted": "markScanExhaustedAtomicWithWitnessOnly",
             "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
             "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
             "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
@@ -1101,6 +1115,7 @@ pub fn validate_storage_lifetime_batch_policy_v2(
             "preconditions": [
                 "exactMetaJobPairAndCursor",
                 "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+                "scanExhaustedTrue",
                 "maxEventRowidEqualsCutoff",
                 "cancelBeforeMutation",
                 "precommitCancel",
@@ -1140,9 +1155,12 @@ pub fn validate_storage_lifetime_cursor_transition_v2(
 ) -> Result<StorageLifetimeCursorV2, StorageLifetimeContractError> {
     let next = validate_storage_lifetime_cursor_v2(next)?;
     let Some(previous) = previous else {
-        if next.phase != StorageLifetimePhaseV2::Receipts || next.after_scan_rowid != 0 {
+        if next.phase != StorageLifetimePhaseV2::Receipts
+            || next.after_scan_rowid != 0
+            || next.scan_exhausted
+        {
             return Err(StorageLifetimeContractError::new(
-                "storage lifetime v4 initial cursor must start receipts at afterScanRowid 0",
+                "storage lifetime v4 initial cursor must start unexhausted receipts at zero",
             ));
         }
         return Ok(next);
@@ -1154,23 +1172,23 @@ pub fn validate_storage_lifetime_cursor_transition_v2(
         ));
     }
     if next.phase == previous.phase {
-        if next.after_scan_rowid <= previous.after_scan_rowid {
+        if previous.scan_exhausted
+            || next.scan_exhausted
+            || next.after_scan_rowid <= previous.after_scan_rowid
+        {
             return Err(StorageLifetimeContractError::new(
                 "storage lifetime v4 same-phase cursor must advance afterScanRowid",
             ));
         }
         return Ok(next);
     }
-    if next_phase_v2(previous.phase) != Some(next.phase) || next.after_scan_rowid != 0 {
-        return Err(StorageLifetimeContractError::new(
-            "storage lifetime v4 phase transition must enter the exact next phase at zero",
-        ));
-    }
-    if is_event_rowid_phase_v2(previous.phase)
-        && previous.after_scan_rowid != previous.cutoff_event_rowid
+    if !previous.scan_exhausted
+        || next.scan_exhausted
+        || next_phase_v2(previous.phase) != Some(next.phase)
+        || next.after_scan_rowid != 0
     {
         return Err(StorageLifetimeContractError::new(
-            "event-derived storage lifetime phase must reach cutoff before transition",
+            "storage lifetime v4 phase transition requires exhausted current phase and unexhausted exact next phase at zero",
         ));
     }
     Ok(next)
@@ -1264,7 +1282,9 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
     operation: StorageLifetimeLifecycleOperationV2,
     previous: &Value,
     next: &Value,
+    witness: Option<&Value>,
 ) -> Result<StorageLifetimeMaterializationSnapshotV2, StorageLifetimeContractError> {
+    let empty_batch_observed = validate_storage_lifetime_lifecycle_witness_v2(operation, witness)?;
     let previous = validate_storage_lifetime_materialization_pair_v2(previous)?;
     let next = validate_storage_lifetime_materialization_pair_v2(next)?;
     let previous_job = previous.job.as_ref();
@@ -1314,6 +1334,7 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
                         StorageLifetimeJobStateV2::Pending,
                         StorageLifetimePhaseV2::VerifyBaselines,
                     ))
+                || !previous_job.is_some_and(|job| job.scan_exhausted)
                 || next.materialization_state != StorageMaterializationStateV1::Ready
                 || next_job.is_some()
             {
@@ -1345,6 +1366,8 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
                 StorageLifetimeLifecycleOperationV2::Arm => {
                     if previous_job.state != StorageLifetimeJobStateV2::Pending
                         || next_job.state != StorageLifetimeJobStateV2::Attempting
+                        || previous_job.scan_exhausted
+                        || next_job.scan_exhausted
                         || job_cursor_v2(previous_job) != job_cursor_v2(next_job)
                     {
                         return lifecycle_error(
@@ -1358,6 +1381,38 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
                     {
                         return lifecycle_error(
                             "storage lifetime v4 batch success must commit attempting to pending",
+                        );
+                    }
+                    validate_storage_lifetime_cursor_transition_v2(
+                        Some(&serde_json::to_value(job_cursor_v2(previous_job)).map_err(
+                            |error| StorageLifetimeContractError::new(error.to_string()),
+                        )?),
+                        &serde_json::to_value(job_cursor_v2(next_job)).map_err(|error| {
+                            StorageLifetimeContractError::new(error.to_string())
+                        })?,
+                    )?;
+                }
+                StorageLifetimeLifecycleOperationV2::MarkScanExhausted => {
+                    if !empty_batch_observed
+                        || previous_job.state != StorageLifetimeJobStateV2::Pending
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                        || previous_job.scan_exhausted
+                        || !next_job.scan_exhausted
+                        || previous_job.cutoff_event_rowid != next_job.cutoff_event_rowid
+                        || previous_job.phase != next_job.phase
+                        || previous_job.after_scan_rowid != next_job.after_scan_rowid
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v4 scan exhaustion requires explicit exact empty-batch witness",
+                        );
+                    }
+                }
+                StorageLifetimeLifecycleOperationV2::PhaseAdvance => {
+                    if previous_job.state != StorageLifetimeJobStateV2::Pending
+                        || next_job.state != StorageLifetimeJobStateV2::Pending
+                    {
+                        return lifecycle_error(
+                            "storage lifetime v4 phase advance requires pending jobs",
                         );
                     }
                     validate_storage_lifetime_cursor_transition_v2(
@@ -1392,10 +1447,12 @@ pub fn validate_storage_lifetime_lifecycle_transition_v2(
                 StorageLifetimeLifecycleOperationV2::FinalReset => {
                     if previous_job.state != StorageLifetimeJobStateV2::Pending
                         || previous_job.phase != StorageLifetimePhaseV2::VerifyBaselines
+                        || !previous_job.scan_exhausted
                         || next_job.state != StorageLifetimeJobStateV2::Pending
                         || next_job.cutoff_event_rowid <= previous_job.cutoff_event_rowid
                         || next_job.phase != StorageLifetimePhaseV2::Receipts
                         || next_job.after_scan_rowid != 0
+                        || next_job.scan_exhausted
                     {
                         return lifecycle_error(
                             "storage lifetime v4 final reset requires a larger cutoff and receipts at zero",
@@ -1557,7 +1614,35 @@ fn job_cursor_v2(job: &StorageLifetimeMaterializationJobV2) -> StorageLifetimeCu
         cutoff_event_rowid: job.cutoff_event_rowid,
         phase: job.phase,
         after_scan_rowid: job.after_scan_rowid,
+        scan_exhausted: job.scan_exhausted,
     }
+}
+
+fn validate_storage_lifetime_lifecycle_witness_v2(
+    operation: StorageLifetimeLifecycleOperationV2,
+    value: Option<&Value>,
+) -> Result<bool, StorageLifetimeContractError> {
+    if operation != StorageLifetimeLifecycleOperationV2::MarkScanExhausted {
+        if value.is_some() {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime v4 witness is allowed only for markScanExhausted",
+            ));
+        }
+        return Ok(false);
+    }
+    let witness: StorageLifetimeLifecycleWitnessV2 =
+        serde_json::from_value(value.cloned().ok_or_else(|| {
+            StorageLifetimeContractError::new(
+                "storage lifetime v4 exhaustion requires empty-batch witness",
+            )
+        })?)
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if !witness.empty_batch_observed {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v4 exhaustion witness must prove an exact empty batch",
+        ));
+    }
+    Ok(true)
 }
 
 fn require_same_job_identity_v2(

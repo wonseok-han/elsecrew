@@ -22,6 +22,7 @@
         "pendingPhasesSameName",
         "verifyToVerifySource",
         "afterEventRowidToAfterScanRowid",
+        "scanExhaustedFalse",
         "failedPreserved",
         "attemptingImpossibleInV3"
       ],
@@ -118,10 +119,11 @@
         "verifyBaselines"
       ],
       "phaseStartAfterScanRowid": 0,
+      "phaseStartScanExhausted": false,
       "eventRowidBound": "afterScanRowidLessThanOrEqualToCutoff",
       "derivedRowidBound": "jsSafeUnsignedIndependentOfCutoff",
-      "eventPhaseTransition": "afterScanRowidEqualsCutoffThenNextAtZero",
-      "derivedPhaseTransition": "exactEmptyKeysetBatchThenNextAtZero"
+      "markExhausted": "pendingSamePhaseSameCursorAtomicRequiresExplicitEmptyBatchWitness",
+      "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse"
     },
     "scan": {
       "sourcePredicate": "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
@@ -140,6 +142,8 @@
       "wordingRevision": "shortArmTransactionThenOneBoundedBatchTransaction",
       "arm": "pendingToAttemptingCommittedBeforeBatch",
       "success": "derivedRowsCursorAndAttemptingToPendingAtomic",
+      "nonemptyBatchScanExhausted": false,
+      "emptyBatchScanExhausted": "markScanExhaustedAtomicWithWitnessOnly",
       "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
       "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
       "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
@@ -169,6 +173,7 @@
       "preconditions": [
         "exactMetaJobPairAndCursor",
         "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+        "scanExhaustedTrue",
         "maxEventRowidEqualsCutoff",
         "cancelBeforeMutation",
         "precommitCancel"
