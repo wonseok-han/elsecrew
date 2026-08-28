@@ -2,7 +2,9 @@ import { requireObject, exactKeys, requireSafeUnsigned } from "./project-v1.ts";
 import { sha256FileVersionV1 } from "./file-v1.ts";
 import { canonicalJsonV1 } from "./storage-v1.ts";
 
+// Kept at v2 until the sidecar consumer implements the contract-only v3 migration.
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V1 = 2 as const;
+export const STORAGE_LIFETIME_SCHEMA_VERSION_V3 = 3 as const;
 export const STORAGE_STATUS_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_STATUS_METHOD_V1 = "storage.status" as const;
 export const STORAGE_STATUS_BRIDGE_VERSION_V1 = 6 as const;
@@ -23,6 +25,10 @@ export const STORAGE_LIFETIME_INDEXES_V2 = [
   "prepared_workspaces_project_state",
   "maintenance_jobs_status_created",
 ] as const;
+export const STORAGE_LIFETIME_TABLES_V3 = [
+  ...STORAGE_LIFETIME_TABLES_V2,
+  "lifetime_materialization_job",
+] as const;
 export const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2 = "sha256" as const;
 export const OPERATION_RECEIPT_DIGEST_VERSION_V2 = 1 as const;
 export const OPERATION_RECEIPT_DIGEST_FORMAT_V2 = "lowercaseHex64" as const;
@@ -39,7 +45,13 @@ export const STORAGE_LIFETIME_PHASES_V1 = [
   "workspaces",
   "baselines",
   "verify",
-  "compact",
+] as const;
+export const STORAGE_LIFETIME_JOB_STATES_V1 = ["pending", "failed"] as const;
+export const STORAGE_MATERIALIZATION_STATES_V1 = [
+  "pending",
+  "materializing",
+  "ready",
+  "failed",
 ] as const;
 export const LOSSLESS_COMPACTION_STEPS_V1 = [
   "beginImmediate",
@@ -77,12 +89,41 @@ export const NEVER_CLEANUP_STATES_V1 = [
 export type StoragePressureCollectionStatusV1 = "available" | "unavailable";
 export type StorageCompactionAttemptStatusV1 = "neverRun" | "succeeded" | "failed";
 export type StorageLifetimePhaseV1 = typeof STORAGE_LIFETIME_PHASES_V1[number];
+export type StorageLifetimeJobStateV1 = typeof STORAGE_LIFETIME_JOB_STATES_V1[number];
+export type StorageMaterializationStateV1 = typeof STORAGE_MATERIALIZATION_STATES_V1[number];
+export type StorageLifetimeLifecycleOperationV1 =
+  | "create"
+  | "commitBatch"
+  | "cancel"
+  | "resume"
+  | "fail"
+  | "complete"
+  | "append"
+  | "catchUpReset";
 
 export interface StorageLifetimeCursorV1 {
   schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1;
   cutoffEventRowid: number;
   phase: StorageLifetimePhaseV1;
   afterEventRowid: number;
+}
+
+export interface StorageLifetimeMaterializationJobV1 {
+  singleton: 1;
+  jobId: string;
+  state: StorageLifetimeJobStateV1;
+  cutoffEventRowid: number;
+  phase: StorageLifetimePhaseV1;
+  afterEventRowid: number;
+  failureKind: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface StorageLifetimeMaterializationSnapshotV1 {
+  materializationState: StorageMaterializationStateV1;
+  job: StorageLifetimeMaterializationJobV1 | null;
 }
 
 export interface StorageLifetimeBatchPolicyV1 {
@@ -103,7 +144,6 @@ export interface StorageLifetimeBatchPolicyV1 {
     phaseStartAfterEventRowid: 0;
     samePhaseProgress: "strictlyIncreasingWithinFrozenCutoff";
     phaseTransition: "currentAtCutoffThenNextPhaseAfterZero";
-    compact: "reservedDisabledAfterVerifyCompletionOnly";
   };
   scan: {
     predicate: typeof STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1;
@@ -132,31 +172,38 @@ export interface StorageLifetimeBatchPolicyV1 {
     committedBatchWinsAfterFinalPrecommitCheck: true;
   };
   job: {
-    table: "maintenance_jobs";
-    jobKind: "losslessCompaction";
-    cursorColumn: "cutoff_json";
-    cursorEncoding: "canonicalJsonCursorSchemaVersion1";
-    maximumActiveJobs: 1;
-    activeStates: readonly ["pending", "running"];
-    resumableState: "pending";
-    inMemoryOnlyOutcome: "Suspended";
-    persistedMaintenanceJobFailClosedStates: readonly ["running"];
-    terminalMaintenanceJobStates: readonly ["succeeded", "failed"];
-    failedMaintenanceJobRole: "terminalHistoryNoAutomaticRetry";
-    storageMetaFailClosedStates: readonly ["materializing", "failed"];
-    materializingLocation: "storage_schema_meta.materialization_state";
-    sqlUniqueConstraintPresent: false;
+    table: "lifetime_materialization_job";
+    maximumRows: 1;
+    singletonValue: 1;
+    uniqueJobId: true;
+    states: readonly ["pending", "failed"];
+    cursorColumns: readonly ["cutoff_event_rowid", "phase", "after_event_rowid"];
+    maintenanceJobsRole: "losslessCompactionOnlyUnchanged";
     singleSqliteOwnerRequired: true;
     transactionSerialization: "beginImmediate";
-    transactionBoundaryValidation: "zeroOrOneActiveExactPendingJobIdentityAndValidCursor";
-    secondJobCreationAllowedWhenAnyLifetimeJobExists: false;
-    initialTransition: "absentToPendingCursor";
-    appendReactivation: "succeededToPendingSameJobCursorInAppendTransaction";
-    batchCommit: "derivedRowsAndAdvancedPendingCursorAtomic";
-    cancellationOrCurrentFailure: "rollbackLeavesPriorPendingCursor";
-    finalPublicationTransition: "pendingToSucceeded";
-    postRollbackFailureRecord: "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction";
+    transactionBoundaryValidation: "exactMetaJobPairAndValidSingletonCursor";
+    batchCommit: "derivedRowsAndAdvancedPendingSingletonAtomic";
+    cancellation: "rollbackLeavesSamePendingSingletonAndCursor";
+    terminalFailure: "sameSingletonPendingToFailedPreserveCursorAfterRollback";
+    terminalFailureMetaState: "pending";
+    failureRecordUnavailable: "failClosedRestartRevalidatesBeforeMutationNeverSuccess";
     automaticRetryEnabled: false;
+    completion: "deleteSingletonAndSetMetaReadySameTransaction";
+    appendAfterReady: "setMetaPendingKeepJobAbsentSameAppendTransaction";
+    appendDuringPending: "doNotAlterFrozenSingletonCursor";
+    catchUp: "samePendingSingletonResetToNewCutoffReceiptsZero";
+    schedulerCreationImplemented: false;
+    forbiddenCommittedStates: readonly ["running", "succeeded", "cancelled"];
+  };
+  pairing: {
+    canonicalReadinessAuthority: "storage_schema_meta.materialization_state";
+    validPairs: readonly [
+      "pending+absent",
+      "pending+pending",
+      "pending+failed",
+      "ready+absent",
+    ];
+    failClosedPairs: readonly ["materializing+any", "failed+any", "ready+present"];
   };
   append: {
     readyInvalidation: "pendingInSameAppendTransaction";
@@ -177,7 +224,7 @@ export interface StorageLifetimeBatchPolicyV1 {
       "liveProjectionEqualsCutoffReconstruction",
       "boundedSqlKeysetEvidence",
     ];
-    maxRowidChanged: "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady";
+    maxRowidChanged: "remainPendingResetSameSingletonAtObservedCutoffNeverPublishReady";
     unboundedCollectionAllowed: false;
   };
   rollback: {
@@ -274,9 +321,6 @@ export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetime
   if (after > cutoff) {
     fail("storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid");
   }
-  if (cursor.phase === "compact" && after !== 0) {
-    fail("storage lifetime reserved compact cursor must use afterEventRowid 0");
-  }
   return cursor as unknown as StorageLifetimeCursorV1;
 }
 
@@ -292,9 +336,6 @@ export function validateStorageLifetimeCursorTransitionV1(
     return next;
   }
   const previous = validateStorageLifetimeCursorV1(previousValue);
-  if (previous.phase === "compact") {
-    fail("storage lifetime compact is reserved and cannot advance");
-  }
   if (next.cutoffEventRowid === previous.cutoffEventRowid) {
     if (next.phase === previous.phase) {
       if (next.afterEventRowid <= previous.afterEventRowid) {
@@ -317,6 +358,142 @@ export function validateStorageLifetimeCursorTransitionV1(
     return next;
   }
   fail("storage lifetime cutoff can change only after completed verify when catch-up restarts receipts at 0");
+}
+
+export function validateStorageLifetimeMaterializationJobV1(
+  value: unknown,
+): StorageLifetimeMaterializationJobV1 {
+  const job = requireObject(value, "storage lifetime materialization job");
+  exactKeys(job, [
+    "singleton", "jobId", "state", "cutoffEventRowid", "phase", "afterEventRowid",
+    "failureKind", "createdAt", "updatedAt", "completedAt",
+  ]);
+  if (job.singleton !== 1) fail("storage lifetime job singleton must be 1");
+  if (typeof job.jobId !== "string" || job.jobId.length === 0) {
+    fail("storage lifetime jobId must be non-empty");
+  }
+  if (!STORAGE_LIFETIME_JOB_STATES_V1.includes(job.state as StorageLifetimeJobStateV1)) {
+    fail("storage lifetime job state is invalid");
+  }
+  const cursor = validateStorageLifetimeCursorV1({
+    schemaVersion: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1,
+    cutoffEventRowid: job.cutoffEventRowid,
+    phase: job.phase,
+    afterEventRowid: job.afterEventRowid,
+  });
+  requireTimestamp(job.createdAt, "job.createdAt");
+  requireTimestamp(job.updatedAt, "job.updatedAt");
+  if (job.state === "pending") {
+    if (job.failureKind !== null || job.completedAt !== null) {
+      fail("pending storage lifetime job cannot carry failure or completion evidence");
+    }
+  } else {
+    if (typeof job.failureKind !== "string"
+      || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(job.failureKind)) {
+      fail("failed storage lifetime job requires sanitized failureKind");
+    }
+    requireTimestamp(job.completedAt, "job.completedAt");
+  }
+  void cursor;
+  return job as unknown as StorageLifetimeMaterializationJobV1;
+}
+
+export function validateStorageLifetimeMaterializationPairV1(
+  value: unknown,
+): StorageLifetimeMaterializationSnapshotV1 {
+  const snapshot = requireObject(value, "storage lifetime materialization pair");
+  exactKeys(snapshot, ["materializationState", "job"]);
+  if (!STORAGE_MATERIALIZATION_STATES_V1.includes(
+    snapshot.materializationState as StorageMaterializationStateV1,
+  )) {
+    fail("storage materialization state is invalid");
+  }
+  const job = snapshot.job === null
+    ? null
+    : validateStorageLifetimeMaterializationJobV1(snapshot.job);
+  const valid = snapshot.materializationState === "pending"
+    || (snapshot.materializationState === "ready" && job === null);
+  if (!valid || (snapshot.materializationState === "ready" && job !== null)) {
+    fail("storage materialization meta/job pairing is fail-closed");
+  }
+  return {
+    materializationState: snapshot.materializationState,
+    job,
+  } as StorageLifetimeMaterializationSnapshotV1;
+}
+
+export function validateStorageLifetimeLifecycleTransitionV1(
+  operation: StorageLifetimeLifecycleOperationV1,
+  previousValue: unknown,
+  nextValue: unknown,
+): StorageLifetimeMaterializationSnapshotV1 {
+  const previous = validateStorageLifetimeMaterializationPairV1(previousValue);
+  const next = validateStorageLifetimeMaterializationPairV1(nextValue);
+  if (operation === "create") {
+    if (previous.materializationState !== "pending" || previous.job !== null
+      || next.materializationState !== "pending" || next.job?.state !== "pending") {
+      fail("storage lifetime create requires pending+absent to pending+pending");
+    }
+    validateStorageLifetimeCursorTransitionV1(null, jobCursor(next.job));
+    return next;
+  }
+  if (operation === "cancel" || operation === "resume") {
+    if (previous.job?.state !== "pending" || !sameContractValue(previous, next)) {
+      fail(`storage lifetime ${operation} must preserve the exact pending snapshot`);
+    }
+    return next;
+  }
+  if (operation === "commitBatch") {
+    const [previousJob, nextJob] = requireSamePendingJob(previous, next, operation);
+    requireSameJobIdentity(previousJob, nextJob);
+    if (previousJob.cutoffEventRowid !== nextJob.cutoffEventRowid) {
+      fail("storage lifetime batch commit cannot change the frozen cutoff");
+    }
+    validateStorageLifetimeCursorTransitionV1(jobCursor(previousJob), jobCursor(nextJob));
+    return next;
+  }
+  if (operation === "fail") {
+    if (previous.materializationState !== "pending" || next.materializationState !== "pending"
+      || previous.job?.state !== "pending" || next.job?.state !== "failed") {
+      fail("storage lifetime failure must transition the same pending singleton to failed");
+    }
+    requireSameJobIdentity(previous.job, next.job);
+    if (!sameContractValue(jobCursor(previous.job), jobCursor(next.job))) {
+      fail("storage lifetime failure must preserve the canonical cursor");
+    }
+    return next;
+  }
+  if (operation === "complete") {
+    if (previous.materializationState !== "pending" || previous.job?.state !== "pending"
+      || previous.job.phase !== "verify"
+      || previous.job.afterEventRowid !== previous.job.cutoffEventRowid
+      || next.materializationState !== "ready" || next.job !== null) {
+      fail("storage lifetime completion requires completed verify and atomically removes the job");
+    }
+    return next;
+  }
+  if (operation === "append") {
+    const readyInvalidation = previous.materializationState === "ready" && previous.job === null
+      && next.materializationState === "pending" && next.job === null;
+    const pendingPreserved = previous.materializationState === "pending"
+      && sameContractValue(previous, next);
+    if (!readyInvalidation && !pendingPreserved) {
+      fail("storage lifetime append must invalidate ready or preserve the frozen pending snapshot");
+    }
+    return next;
+  }
+  if (operation === "catchUpReset") {
+    const [previousJob, nextJob] = requireSamePendingJob(previous, next, operation);
+    requireSameJobIdentity(previousJob, nextJob);
+    if (previousJob.phase !== "verify"
+      || previousJob.afterEventRowid !== previousJob.cutoffEventRowid
+      || nextJob.cutoffEventRowid <= previousJob.cutoffEventRowid
+      || nextJob.phase !== "receipts" || nextJob.afterEventRowid !== 0) {
+      fail("storage lifetime catch-up reset requires completed verify and a larger cutoff");
+    }
+    return next;
+  }
+  fail("storage lifetime lifecycle operation is invalid");
 }
 
 export function validateStorageLifetimeBatchSourcePayloadsV1(value: unknown): readonly number[] {
@@ -342,7 +519,7 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
   const policy = requireObject(value, "storage lifetime batch policy");
   exactKeys(policy, [
     "schemaVersion", "casesFile", "guards", "cursor", "scan", "source",
-    "transaction", "cancellation", "job", "append", "finalPublication", "rollback",
+    "transaction", "cancellation", "job", "pairing", "append", "finalPublication", "rollback",
     "activation",
   ]);
   const guards = requireObject(policy.guards, "storage lifetime batch guards");
@@ -353,7 +530,7 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
   const cursor = requireObject(policy.cursor, "storage lifetime cursor policy");
   exactKeys(cursor, [
     "schemaVersion", "phases", "scanPhases", "phaseStartAfterEventRowid",
-    "samePhaseProgress", "phaseTransition", "compact",
+    "samePhaseProgress", "phaseTransition",
   ]);
   const scan = requireObject(policy.scan, "storage lifetime scan policy");
   exactKeys(scan, ["predicate", "orderBy", "offsetAllowed"]);
@@ -374,15 +551,15 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
   ]);
   const job = requireObject(policy.job, "storage lifetime job policy");
   exactKeys(job, [
-    "table", "jobKind", "cursorColumn", "cursorEncoding", "maximumActiveJobs",
-    "activeStates", "resumableState", "inMemoryOnlyOutcome",
-    "persistedMaintenanceJobFailClosedStates", "terminalMaintenanceJobStates",
-    "failedMaintenanceJobRole", "storageMetaFailClosedStates", "materializingLocation",
-    "sqlUniqueConstraintPresent", "singleSqliteOwnerRequired", "transactionSerialization",
-    "transactionBoundaryValidation", "secondJobCreationAllowedWhenAnyLifetimeJobExists",
-    "initialTransition", "appendReactivation", "batchCommit", "cancellationOrCurrentFailure",
-    "finalPublicationTransition", "postRollbackFailureRecord", "automaticRetryEnabled",
+    "table", "maximumRows", "singletonValue", "uniqueJobId", "states", "cursorColumns",
+    "maintenanceJobsRole", "singleSqliteOwnerRequired", "transactionSerialization",
+    "transactionBoundaryValidation", "batchCommit", "cancellation", "terminalFailure",
+    "terminalFailureMetaState", "failureRecordUnavailable", "automaticRetryEnabled", "completion", "appendAfterReady",
+    "appendDuringPending", "catchUp", "schedulerCreationImplemented",
+    "forbiddenCommittedStates",
   ]);
+  const pairing = requireObject(policy.pairing, "storage lifetime pairing policy");
+  exactKeys(pairing, ["canonicalReadinessAuthority", "validPairs", "failClosedPairs"]);
   const append = requireObject(policy.append, "storage lifetime append policy");
   exactKeys(append, [
     "readyInvalidation", "readyPublication", "appendDuringMaterialization",
@@ -424,7 +601,6 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
     && cursor.phaseStartAfterEventRowid === 0
     && cursor.samePhaseProgress === "strictlyIncreasingWithinFrozenCutoff"
     && cursor.phaseTransition === "currentAtCutoffThenNextPhaseAfterZero"
-    && cursor.compact === "reservedDisabledAfterVerifyCompletionOnly"
     && scan.predicate === STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
     && scan.orderBy === STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
     && scan.offsetAllowed === false
@@ -445,32 +621,37 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
     && cancellation.outcome === "Suspended"
     && cancellation.crash === "rollbackCurrentBatchResumePrecedingCommittedPendingCursor"
     && cancellation.committedBatchWinsAfterFinalPrecommitCheck === true
-    && job.table === "maintenance_jobs"
-    && job.jobKind === "losslessCompaction"
-    && job.cursorColumn === "cutoff_json"
-    && job.cursorEncoding === "canonicalJsonCursorSchemaVersion1"
-    && job.maximumActiveJobs === 1
-    && exactStringArray(job.activeStates, ["pending", "running"])
-    && job.resumableState === "pending"
-    && job.inMemoryOnlyOutcome === "Suspended"
-    && exactStringArray(job.persistedMaintenanceJobFailClosedStates, ["running"])
-    && exactStringArray(job.terminalMaintenanceJobStates, ["succeeded", "failed"])
-    && job.failedMaintenanceJobRole === "terminalHistoryNoAutomaticRetry"
-    && exactStringArray(job.storageMetaFailClosedStates, ["materializing", "failed"])
-    && job.materializingLocation === "storage_schema_meta.materialization_state"
-    && job.sqlUniqueConstraintPresent === false
+    && job.table === "lifetime_materialization_job"
+    && job.maximumRows === 1
+    && job.singletonValue === 1
+    && job.uniqueJobId === true
+    && exactStringArray(job.states, STORAGE_LIFETIME_JOB_STATES_V1)
+    && exactStringArray(job.cursorColumns, [
+      "cutoff_event_rowid", "phase", "after_event_rowid",
+    ])
+    && job.maintenanceJobsRole === "losslessCompactionOnlyUnchanged"
     && job.singleSqliteOwnerRequired === true
     && job.transactionSerialization === "beginImmediate"
-    && job.transactionBoundaryValidation === "zeroOrOneActiveExactPendingJobIdentityAndValidCursor"
-    && job.secondJobCreationAllowedWhenAnyLifetimeJobExists === false
-    && job.initialTransition === "absentToPendingCursor"
-    && job.appendReactivation === "succeededToPendingSameJobCursorInAppendTransaction"
-    && job.batchCommit === "derivedRowsAndAdvancedPendingCursorAtomic"
-    && job.cancellationOrCurrentFailure === "rollbackLeavesPriorPendingCursor"
-    && job.finalPublicationTransition === "pendingToSucceeded"
-    && job.postRollbackFailureRecord
-      === "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction"
+    && job.transactionBoundaryValidation === "exactMetaJobPairAndValidSingletonCursor"
+    && job.batchCommit === "derivedRowsAndAdvancedPendingSingletonAtomic"
+    && job.cancellation === "rollbackLeavesSamePendingSingletonAndCursor"
+    && job.terminalFailure === "sameSingletonPendingToFailedPreserveCursorAfterRollback"
+    && job.terminalFailureMetaState === "pending"
+    && job.failureRecordUnavailable === "failClosedRestartRevalidatesBeforeMutationNeverSuccess"
     && job.automaticRetryEnabled === false
+    && job.completion === "deleteSingletonAndSetMetaReadySameTransaction"
+    && job.appendAfterReady === "setMetaPendingKeepJobAbsentSameAppendTransaction"
+    && job.appendDuringPending === "doNotAlterFrozenSingletonCursor"
+    && job.catchUp === "samePendingSingletonResetToNewCutoffReceiptsZero"
+    && job.schedulerCreationImplemented === false
+    && exactStringArray(job.forbiddenCommittedStates, ["running", "succeeded", "cancelled"])
+    && pairing.canonicalReadinessAuthority === "storage_schema_meta.materialization_state"
+    && exactStringArray(pairing.validPairs, [
+      "pending+absent", "pending+pending", "pending+failed", "ready+absent",
+    ])
+    && exactStringArray(pairing.failClosedPairs, [
+      "materializing+any", "failed+any", "ready+present",
+    ])
     && append.readyInvalidation === "pendingInSameAppendTransaction"
     && append.readyPublication === "separateAtomicCatchUpVerificationTransaction"
     && append.appendDuringMaterialization === "frozenCutoffUnchangedUntilFinalCatchUp"
@@ -488,7 +669,7 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
       "boundedSqlKeysetEvidence",
     ])
     && finalPublication.maxRowidChanged
-      === "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady"
+      === "remainPendingResetSameSingletonAtObservedCutoffNeverPublishReady"
     && finalPublication.unboundedCollectionAllowed === false
     && rollback.derivedPreparationBatchesMayPersist === true
     && rollback.sourceLedgerMutationAtomicRollbackRequired === true
@@ -712,6 +893,41 @@ function exactStringArray(value: unknown, expected: readonly string[]): boolean 
   return Array.isArray(value)
     && value.length === expected.length
     && value.every((entry, index) => entry === expected[index]);
+}
+
+function jobCursor(job: StorageLifetimeMaterializationJobV1): StorageLifetimeCursorV1 {
+  return {
+    schemaVersion: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1,
+    cutoffEventRowid: job.cutoffEventRowid,
+    phase: job.phase,
+    afterEventRowid: job.afterEventRowid,
+  };
+}
+
+function requireSamePendingJob(
+  previous: StorageLifetimeMaterializationSnapshotV1,
+  next: StorageLifetimeMaterializationSnapshotV1,
+  operation: string,
+): [StorageLifetimeMaterializationJobV1, StorageLifetimeMaterializationJobV1] {
+  if (previous.materializationState !== "pending" || next.materializationState !== "pending"
+    || previous.job?.state !== "pending" || next.job?.state !== "pending") {
+    fail(`storage lifetime ${operation} requires pending meta and pending singleton`);
+  }
+  return [previous.job, next.job];
+}
+
+function requireSameJobIdentity(
+  previous: StorageLifetimeMaterializationJobV1,
+  next: StorageLifetimeMaterializationJobV1,
+): void {
+  if (previous.singleton !== next.singleton || previous.jobId !== next.jobId
+    || previous.createdAt !== next.createdAt) {
+    fail("storage lifetime transition must preserve singleton job identity");
+  }
+}
+
+function sameContractValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function nextPhase(phase: StorageLifetimePhaseV1): StorageLifetimePhaseV1 | null {

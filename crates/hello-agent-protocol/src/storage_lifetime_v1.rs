@@ -9,7 +9,9 @@ use crate::storage_v1::{
 };
 use crate::MAX_SEQUENCE;
 
+// Kept at v2 until the sidecar consumer implements the contract-only v3 migration.
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V1: u32 = 2;
+pub const STORAGE_LIFETIME_SCHEMA_VERSION_V3: u32 = 3;
 pub const STORAGE_STATUS_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_STATUS_METHOD_V1: &str = "storage.status";
 pub const STORAGE_STATUS_BRIDGE_VERSION_V1: u32 = 6;
@@ -30,6 +32,15 @@ pub const STORAGE_LIFETIME_INDEXES_V2: &[&str] = &[
     "prepared_workspaces_project_state",
     "maintenance_jobs_status_created",
 ];
+pub const STORAGE_LIFETIME_TABLES_V3: &[&str] = &[
+    "storage_schema_meta",
+    "ledger_baselines",
+    "operation_receipts",
+    "chat_messages",
+    "prepared_workspaces",
+    "maintenance_jobs",
+    "lifetime_materialization_job",
+];
 pub const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2: &str = "sha256";
 pub const OPERATION_RECEIPT_DIGEST_VERSION_V2: u32 = 1;
 pub const OPERATION_RECEIPT_DIGEST_FORMAT_V2: &str = "lowercaseHex64";
@@ -40,14 +51,9 @@ pub const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1: u64 
 pub const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1: &str =
     "rowid > afterEventRowid AND rowid <= cutoffEventRowid";
 pub const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1: &str = "rowid";
-pub const STORAGE_LIFETIME_PHASES_V1: &[&str] = &[
-    "receipts",
-    "messages",
-    "workspaces",
-    "baselines",
-    "verify",
-    "compact",
-];
+pub const STORAGE_LIFETIME_PHASES_V1: &[&str] =
+    &["receipts", "messages", "workspaces", "baselines", "verify"];
+pub const STORAGE_LIFETIME_JOB_STATES_V1: &[&str] = &["pending", "failed"];
 pub const LOSSLESS_COMPACTION_STEPS_V1: &[&str] = &[
     "beginImmediate",
     "freezeCutoff",
@@ -213,7 +219,6 @@ pub enum StorageLifetimePhaseV1 {
     Workspaces,
     Baselines,
     Verify,
-    Compact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +228,57 @@ pub struct StorageLifetimeCursorV1 {
     pub cutoff_event_rowid: u64,
     pub phase: StorageLifetimePhaseV1,
     pub after_event_rowid: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageLifetimeJobStateV1 {
+    Pending,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageMaterializationStateV1 {
+    Pending,
+    Materializing,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeMaterializationJobV1 {
+    pub singleton: u32,
+    pub job_id: String,
+    pub state: StorageLifetimeJobStateV1,
+    pub cutoff_event_rowid: u64,
+    pub phase: StorageLifetimePhaseV1,
+    pub after_event_rowid: u64,
+    pub failure_kind: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeMaterializationSnapshotV1 {
+    pub materialization_state: StorageMaterializationStateV1,
+    pub job: Option<StorageLifetimeMaterializationJobV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageLifetimeLifecycleOperationV1 {
+    Create,
+    CommitBatch,
+    Cancel,
+    Resume,
+    Fail,
+    Complete,
+    Append,
+    CatchUpReset,
 }
 
 #[derive(Deserialize)]
@@ -237,6 +293,7 @@ struct StorageLifetimeBatchPolicyV1 {
     transaction: StorageLifetimeTransactionPolicyV1,
     cancellation: StorageLifetimeCancellationPolicyV1,
     job: StorageLifetimeJobPolicyV1,
+    pairing: StorageLifetimePairingPolicyV1,
     append: StorageLifetimeAppendPolicyV1,
     final_publication: StorageLifetimeFinalPublicationPolicyV1,
     rollback: StorageLifetimeRollbackPolicyV1,
@@ -262,7 +319,6 @@ struct StorageLifetimeCursorPolicyV1 {
     phase_start_after_event_rowid: u64,
     same_phase_progress: String,
     phase_transition: String,
-    compact: String,
 }
 
 #[derive(Deserialize)]
@@ -307,30 +363,35 @@ struct StorageLifetimeCancellationPolicyV1 {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct StorageLifetimeJobPolicyV1 {
     table: String,
-    job_kind: String,
-    cursor_column: String,
-    cursor_encoding: String,
-    maximum_active_jobs: u64,
-    active_states: Vec<String>,
-    resumable_state: String,
-    in_memory_only_outcome: String,
-    persisted_maintenance_job_fail_closed_states: Vec<String>,
-    terminal_maintenance_job_states: Vec<String>,
-    failed_maintenance_job_role: String,
-    storage_meta_fail_closed_states: Vec<String>,
-    materializing_location: String,
-    sql_unique_constraint_present: bool,
+    maximum_rows: u64,
+    singleton_value: u64,
+    unique_job_id: bool,
+    states: Vec<String>,
+    cursor_columns: Vec<String>,
+    maintenance_jobs_role: String,
     single_sqlite_owner_required: bool,
     transaction_serialization: String,
     transaction_boundary_validation: String,
-    second_job_creation_allowed_when_any_lifetime_job_exists: bool,
-    initial_transition: String,
-    append_reactivation: String,
     batch_commit: String,
-    cancellation_or_current_failure: String,
-    final_publication_transition: String,
-    post_rollback_failure_record: String,
+    cancellation: String,
+    terminal_failure: String,
+    terminal_failure_meta_state: String,
+    failure_record_unavailable: String,
     automatic_retry_enabled: bool,
+    completion: String,
+    append_after_ready: String,
+    append_during_pending: String,
+    catch_up: String,
+    scheduler_creation_implemented: bool,
+    forbidden_committed_states: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimePairingPolicyV1 {
+    canonical_readiness_authority: String,
+    valid_pairs: Vec<String>,
+    fail_closed_pairs: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -392,11 +453,6 @@ pub fn validate_storage_lifetime_cursor_transition_v1(
     };
     let previous = validate_storage_lifetime_cursor_v1(previous)?;
 
-    if previous.phase == StorageLifetimePhaseV1::Compact {
-        return Err(StorageLifetimeContractError::new(
-            "storage lifetime compact is reserved and cannot advance",
-        ));
-    }
     if next.cutoff_event_rowid == previous.cutoff_event_rowid {
         if next.phase == previous.phase {
             if next.after_event_rowid <= previous.after_event_rowid {
@@ -427,6 +483,202 @@ pub fn validate_storage_lifetime_cursor_transition_v1(
     Err(StorageLifetimeContractError::new(
         "storage lifetime cutoff can change only after completed verify when catch-up restarts receipts at 0",
     ))
+}
+
+pub fn validate_storage_lifetime_materialization_job_v1(
+    value: &Value,
+) -> Result<StorageLifetimeMaterializationJobV1, StorageLifetimeContractError> {
+    let job: StorageLifetimeMaterializationJobV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if job.singleton != 1 || job.job_id.is_empty() {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime job requires singleton 1 and non-empty jobId",
+        ));
+    }
+    validate_storage_lifetime_cursor_fields_v1(&job_cursor(&job))?;
+    require_timestamp(&job.created_at, "job.createdAt")?;
+    require_timestamp(&job.updated_at, "job.updatedAt")?;
+    match job.state {
+        StorageLifetimeJobStateV1::Pending => {
+            if job.failure_kind.is_some() || job.completed_at.is_some() {
+                return Err(StorageLifetimeContractError::new(
+                    "pending storage lifetime job cannot carry failure or completion evidence",
+                ));
+            }
+        }
+        StorageLifetimeJobStateV1::Failed => {
+            if job
+                .failure_kind
+                .as_deref()
+                .is_none_or(|kind| !is_sanitized_failure_kind(kind))
+            {
+                return Err(StorageLifetimeContractError::new(
+                    "failed storage lifetime job requires sanitized failureKind",
+                ));
+            }
+            require_timestamp(
+                job.completed_at.as_deref().unwrap_or_default(),
+                "job.completedAt",
+            )?;
+        }
+    }
+    Ok(job)
+}
+
+pub fn validate_storage_lifetime_materialization_pair_v1(
+    value: &Value,
+) -> Result<StorageLifetimeMaterializationSnapshotV1, StorageLifetimeContractError> {
+    let raw: StorageLifetimeMaterializationSnapshotV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let job = raw
+        .job
+        .as_ref()
+        .map(|job| {
+            serde_json::to_value(job)
+                .map_err(|error| StorageLifetimeContractError::new(error.to_string()))
+                .and_then(|value| validate_storage_lifetime_materialization_job_v1(&value))
+        })
+        .transpose()?;
+    let valid = matches!(
+        raw.materialization_state,
+        StorageMaterializationStateV1::Pending
+    ) || (raw.materialization_state == StorageMaterializationStateV1::Ready
+        && job.is_none());
+    if !valid {
+        return Err(StorageLifetimeContractError::new(
+            "storage materialization meta/job pairing is fail-closed",
+        ));
+    }
+    Ok(StorageLifetimeMaterializationSnapshotV1 {
+        materialization_state: raw.materialization_state,
+        job,
+    })
+}
+
+pub fn validate_storage_lifetime_lifecycle_transition_v1(
+    operation: StorageLifetimeLifecycleOperationV1,
+    previous: &Value,
+    next: &Value,
+) -> Result<StorageLifetimeMaterializationSnapshotV1, StorageLifetimeContractError> {
+    let previous = validate_storage_lifetime_materialization_pair_v1(previous)?;
+    let next = validate_storage_lifetime_materialization_pair_v1(next)?;
+    match operation {
+        StorageLifetimeLifecycleOperationV1::Create => {
+            let next_job = next
+                .job
+                .as_ref()
+                .filter(|job| job.state == StorageLifetimeJobStateV1::Pending);
+            if previous.materialization_state != StorageMaterializationStateV1::Pending
+                || previous.job.is_some()
+                || next.materialization_state != StorageMaterializationStateV1::Pending
+                || next_job.is_none()
+            {
+                return lifecycle_error(
+                    "storage lifetime create requires pending+absent to pending+pending",
+                );
+            }
+            validate_storage_lifetime_cursor_transition_v1(
+                None,
+                &serde_json::to_value(job_cursor(next_job.expect("checked")))
+                    .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
+            )?;
+        }
+        StorageLifetimeLifecycleOperationV1::Cancel
+        | StorageLifetimeLifecycleOperationV1::Resume => {
+            if previous.job.as_ref().map(|job| job.state)
+                != Some(StorageLifetimeJobStateV1::Pending)
+                || previous != next
+            {
+                return lifecycle_error(
+                    "storage lifetime cancel/resume must preserve the exact pending snapshot",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV1::CommitBatch => {
+            let (previous_job, next_job) = same_pending_jobs(&previous, &next, "commitBatch")?;
+            require_same_job_identity(previous_job, next_job)?;
+            if previous_job.cutoff_event_rowid != next_job.cutoff_event_rowid {
+                return lifecycle_error(
+                    "storage lifetime batch commit cannot change the frozen cutoff",
+                );
+            }
+            validate_storage_lifetime_cursor_transition_v1(
+                Some(
+                    &serde_json::to_value(job_cursor(previous_job))
+                        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
+                ),
+                &serde_json::to_value(job_cursor(next_job))
+                    .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
+            )?;
+        }
+        StorageLifetimeLifecycleOperationV1::Fail => {
+            let previous_job = previous.job.as_ref();
+            let next_job = next.job.as_ref();
+            if previous.materialization_state != StorageMaterializationStateV1::Pending
+                || next.materialization_state != StorageMaterializationStateV1::Pending
+                || previous_job.map(|job| job.state) != Some(StorageLifetimeJobStateV1::Pending)
+                || next_job.map(|job| job.state) != Some(StorageLifetimeJobStateV1::Failed)
+            {
+                return lifecycle_error(
+                    "storage lifetime failure must transition the same pending singleton to failed",
+                );
+            }
+            let previous_job = previous_job.expect("checked");
+            let next_job = next_job.expect("checked");
+            require_same_job_identity(previous_job, next_job)?;
+            if job_cursor(previous_job) != job_cursor(next_job) {
+                return lifecycle_error(
+                    "storage lifetime failure must preserve the canonical cursor",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV1::Complete => {
+            let completed = previous.job.as_ref().is_some_and(|job| {
+                job.state == StorageLifetimeJobStateV1::Pending
+                    && job.phase == StorageLifetimePhaseV1::Verify
+                    && job.after_event_rowid == job.cutoff_event_rowid
+            });
+            if previous.materialization_state != StorageMaterializationStateV1::Pending
+                || !completed
+                || next.materialization_state != StorageMaterializationStateV1::Ready
+                || next.job.is_some()
+            {
+                return lifecycle_error(
+                    "storage lifetime completion requires completed verify and atomically removes the job",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV1::Append => {
+            let ready_invalidation = previous.materialization_state
+                == StorageMaterializationStateV1::Ready
+                && previous.job.is_none()
+                && next.materialization_state == StorageMaterializationStateV1::Pending
+                && next.job.is_none();
+            let pending_preserved = previous.materialization_state
+                == StorageMaterializationStateV1::Pending
+                && previous == next;
+            if !ready_invalidation && !pending_preserved {
+                return lifecycle_error(
+                    "storage lifetime append must invalidate ready or preserve the frozen pending snapshot",
+                );
+            }
+        }
+        StorageLifetimeLifecycleOperationV1::CatchUpReset => {
+            let (previous_job, next_job) = same_pending_jobs(&previous, &next, "catchUpReset")?;
+            require_same_job_identity(previous_job, next_job)?;
+            if previous_job.phase != StorageLifetimePhaseV1::Verify
+                || previous_job.after_event_rowid != previous_job.cutoff_event_rowid
+                || next_job.cutoff_event_rowid <= previous_job.cutoff_event_rowid
+                || next_job.phase != StorageLifetimePhaseV1::Receipts
+                || next_job.after_event_rowid != 0
+            {
+                return lifecycle_error(
+                    "storage lifetime catch-up reset requires completed verify and a larger cutoff",
+                );
+            }
+        }
+    }
+    Ok(next)
 }
 
 pub fn validate_storage_lifetime_batch_source_payloads_v1(
@@ -484,7 +736,6 @@ pub fn validate_storage_lifetime_batch_policy_v1(
         && policy.cursor.phase_start_after_event_rowid == 0
         && policy.cursor.same_phase_progress == "strictlyIncreasingWithinFrozenCutoff"
         && policy.cursor.phase_transition == "currentAtCutoffThenNextPhaseAfterZero"
-        && policy.cursor.compact == "reservedDisabledAfterVerifyCompletionOnly"
         && policy.scan.predicate == STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
         && policy.scan.order_by == STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
         && !policy.scan.offset_allowed
@@ -514,44 +765,50 @@ pub fn validate_storage_lifetime_batch_policy_v1(
         && policy
             .cancellation
             .committed_batch_wins_after_final_precommit_check
-        && policy.job.table == "maintenance_jobs"
-        && policy.job.job_kind == "losslessCompaction"
-        && policy.job.cursor_column == "cutoff_json"
-        && policy.job.cursor_encoding == "canonicalJsonCursorSchemaVersion1"
-        && policy.job.maximum_active_jobs == 1
-        && strings_equal(&policy.job.active_states, &["pending", "running"])
-        && policy.job.resumable_state == "pending"
-        && policy.job.in_memory_only_outcome == "Suspended"
+        && policy.job.table == "lifetime_materialization_job"
+        && policy.job.maximum_rows == 1
+        && policy.job.singleton_value == 1
+        && policy.job.unique_job_id
+        && strings_equal(&policy.job.states, STORAGE_LIFETIME_JOB_STATES_V1)
         && strings_equal(
-            &policy.job.persisted_maintenance_job_fail_closed_states,
-            &["running"],
+            &policy.job.cursor_columns,
+            &["cutoff_event_rowid", "phase", "after_event_rowid"],
         )
-        && strings_equal(
-            &policy.job.terminal_maintenance_job_states,
-            &["succeeded", "failed"],
-        )
-        && policy.job.failed_maintenance_job_role == "terminalHistoryNoAutomaticRetry"
-        && strings_equal(
-            &policy.job.storage_meta_fail_closed_states,
-            &["materializing", "failed"],
-        )
-        && policy.job.materializing_location == "storage_schema_meta.materialization_state"
-        && !policy.job.sql_unique_constraint_present
+        && policy.job.maintenance_jobs_role == "losslessCompactionOnlyUnchanged"
         && policy.job.single_sqlite_owner_required
         && policy.job.transaction_serialization == "beginImmediate"
-        && policy.job.transaction_boundary_validation
-            == "zeroOrOneActiveExactPendingJobIdentityAndValidCursor"
-        && !policy
-            .job
-            .second_job_creation_allowed_when_any_lifetime_job_exists
-        && policy.job.initial_transition == "absentToPendingCursor"
-        && policy.job.append_reactivation == "succeededToPendingSameJobCursorInAppendTransaction"
-        && policy.job.batch_commit == "derivedRowsAndAdvancedPendingCursorAtomic"
-        && policy.job.cancellation_or_current_failure == "rollbackLeavesPriorPendingCursor"
-        && policy.job.final_publication_transition == "pendingToSucceeded"
-        && policy.job.post_rollback_failure_record
-            == "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction"
+        && policy.job.transaction_boundary_validation == "exactMetaJobPairAndValidSingletonCursor"
+        && policy.job.batch_commit == "derivedRowsAndAdvancedPendingSingletonAtomic"
+        && policy.job.cancellation == "rollbackLeavesSamePendingSingletonAndCursor"
+        && policy.job.terminal_failure == "sameSingletonPendingToFailedPreserveCursorAfterRollback"
+        && policy.job.terminal_failure_meta_state == "pending"
+        && policy.job.failure_record_unavailable
+            == "failClosedRestartRevalidatesBeforeMutationNeverSuccess"
         && !policy.job.automatic_retry_enabled
+        && policy.job.completion == "deleteSingletonAndSetMetaReadySameTransaction"
+        && policy.job.append_after_ready == "setMetaPendingKeepJobAbsentSameAppendTransaction"
+        && policy.job.append_during_pending == "doNotAlterFrozenSingletonCursor"
+        && policy.job.catch_up == "samePendingSingletonResetToNewCutoffReceiptsZero"
+        && !policy.job.scheduler_creation_implemented
+        && strings_equal(
+            &policy.job.forbidden_committed_states,
+            &["running", "succeeded", "cancelled"],
+        )
+        && policy.pairing.canonical_readiness_authority
+            == "storage_schema_meta.materialization_state"
+        && strings_equal(
+            &policy.pairing.valid_pairs,
+            &[
+                "pending+absent",
+                "pending+pending",
+                "pending+failed",
+                "ready+absent",
+            ],
+        )
+        && strings_equal(
+            &policy.pairing.fail_closed_pairs,
+            &["materializing+any", "failed+any", "ready+present"],
+        )
         && policy.append.ready_invalidation == "pendingInSameAppendTransaction"
         && policy.append.ready_publication == "separateAtomicCatchUpVerificationTransaction"
         && policy.append.append_during_materialization == "frozenCutoffUnchangedUntilFinalCatchUp"
@@ -575,7 +832,7 @@ pub fn validate_storage_lifetime_batch_policy_v1(
             ],
         )
         && policy.final_publication.max_rowid_changed
-            == "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady"
+            == "remainPendingResetSameSingletonAtObservedCutoffNeverPublishReady"
         && !policy.final_publication.unbounded_collection_allowed
         && policy.rollback.derived_preparation_batches_may_persist
         && policy
@@ -611,11 +868,6 @@ fn validate_storage_lifetime_cursor_fields_v1(
             "storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid",
         ));
     }
-    if cursor.phase == StorageLifetimePhaseV1::Compact && cursor.after_event_rowid != 0 {
-        return Err(StorageLifetimeContractError::new(
-            "storage lifetime reserved compact cursor must use afterEventRowid 0",
-        ));
-    }
     Ok(())
 }
 
@@ -625,9 +877,69 @@ fn next_phase(phase: StorageLifetimePhaseV1) -> Option<StorageLifetimePhaseV1> {
         StorageLifetimePhaseV1::Messages => Some(StorageLifetimePhaseV1::Workspaces),
         StorageLifetimePhaseV1::Workspaces => Some(StorageLifetimePhaseV1::Baselines),
         StorageLifetimePhaseV1::Baselines => Some(StorageLifetimePhaseV1::Verify),
-        StorageLifetimePhaseV1::Verify => Some(StorageLifetimePhaseV1::Compact),
-        StorageLifetimePhaseV1::Compact => None,
+        StorageLifetimePhaseV1::Verify => None,
     }
+}
+
+fn job_cursor(job: &StorageLifetimeMaterializationJobV1) -> StorageLifetimeCursorV1 {
+    StorageLifetimeCursorV1 {
+        schema_version: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1,
+        cutoff_event_rowid: job.cutoff_event_rowid,
+        phase: job.phase,
+        after_event_rowid: job.after_event_rowid,
+    }
+}
+
+fn same_pending_jobs<'a>(
+    previous: &'a StorageLifetimeMaterializationSnapshotV1,
+    next: &'a StorageLifetimeMaterializationSnapshotV1,
+    operation: &str,
+) -> Result<
+    (
+        &'a StorageLifetimeMaterializationJobV1,
+        &'a StorageLifetimeMaterializationJobV1,
+    ),
+    StorageLifetimeContractError,
+> {
+    let previous_job = previous.job.as_ref();
+    let next_job = next.job.as_ref();
+    if previous.materialization_state != StorageMaterializationStateV1::Pending
+        || next.materialization_state != StorageMaterializationStateV1::Pending
+        || previous_job.map(|job| job.state) != Some(StorageLifetimeJobStateV1::Pending)
+        || next_job.map(|job| job.state) != Some(StorageLifetimeJobStateV1::Pending)
+    {
+        return lifecycle_error(format!(
+            "storage lifetime {operation} requires pending meta and pending singleton"
+        ));
+    }
+    Ok((previous_job.expect("checked"), next_job.expect("checked")))
+}
+
+fn require_same_job_identity(
+    previous: &StorageLifetimeMaterializationJobV1,
+    next: &StorageLifetimeMaterializationJobV1,
+) -> Result<(), StorageLifetimeContractError> {
+    if previous.singleton != next.singleton
+        || previous.job_id != next.job_id
+        || previous.created_at != next.created_at
+    {
+        return lifecycle_error("storage lifetime transition must preserve singleton job identity");
+    }
+    Ok(())
+}
+
+fn lifecycle_error<T>(detail: impl Into<String>) -> Result<T, StorageLifetimeContractError> {
+    Err(StorageLifetimeContractError::new(detail))
+}
+
+fn is_sanitized_failure_kind(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic()
+        && value.len() <= 64
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn strings_equal(actual: &[String], expected: &[&str]) -> bool {

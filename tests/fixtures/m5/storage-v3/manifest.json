@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 3,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v2-to-v3.sql",
+    "predecessorMigrationFile": "../storage-v2/migration-v1-to-v2.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 2,
+    "toVersion": 3,
+    "mode": "exactV2PreflightThenTransactionalMetaRebuildAndDedicatedJobTable",
+    "preflight": "exactStorageV2RequiredBeforeBeginImmediate",
+    "idempotency": "exactStorageV3NoOpBeforeMigrationSql",
+    "partialOrExtraSchema": "failClosedBeforeMutation",
+    "tablesAdded": [
+      "lifetime_materialization_job"
+    ],
+    "tablesRebuilt": [
+      "storage_schema_meta"
+    ],
+    "preservedTables": [
+      "schema_meta",
+      "app_instances",
+      "events",
+      "projects",
+      "chats",
+      "runs",
+      "locks",
+      "ledger_baselines",
+      "operation_receipts",
+      "chat_messages",
+      "prepared_workspaces",
+      "maintenance_jobs"
+    ],
+    "preservedIndexes": [
+      "chats_identity_project",
+      "ledger_baselines_cutoff",
+      "operation_receipts_aggregate_sequence",
+      "chat_messages_chat_sequence",
+      "prepared_workspaces_project_state",
+      "maintenance_jobs_status_created"
+    ],
+    "preservedTriggers": [
+      "events_are_append_only_update",
+      "events_are_append_only_delete"
+    ],
+    "freshState": "pendingWithAbsentJob",
+    "downgradePolicy": "openQuestion"
+  },
+  "batching": {
+    "schemaVersion": 1,
+    "casesFile": "batching-cases.json",
+    "guards": {
+      "maxSourceRowsPerBatch": 100,
+      "maxCanonicalSourcePayloadBytesPerBatch": 1048576,
+      "singleSourcePayloadOversize": "contractError",
+      "callerConfigurable": false,
+      "appliesToPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ]
+    },
+    "cursor": {
+      "schemaVersion": 1,
+      "phases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ],
+      "scanPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ],
+      "phaseStartAfterEventRowid": 0,
+      "samePhaseProgress": "strictlyIncreasingWithinFrozenCutoff",
+      "phaseTransition": "currentAtCutoffThenNextPhaseAfterZero"
+    },
+    "scan": {
+      "predicate": "rowid > afterEventRowid AND rowid <= cutoffEventRowid",
+      "orderBy": "rowid",
+      "offsetAllowed": false
+    },
+    "source": {
+      "artifactAuthority": "eventsAtOrBelowFrozenCutoffOnly",
+      "workspaceAndBaselineSource": "eventProjectionSnapshotsAtOrBelowFrozenCutoff",
+      "repeatedProjectionSnapshots": "idempotent",
+      "liveProjectionUse": "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff",
+      "unboundedCollectionAllowed": false
+    },
+    "transaction": {
+      "cadence": "oneBatchOneBeginImmediatePerIdleTurn",
+      "committedDerivedRowsMayPersist": true,
+      "committedProgressState": "pending",
+      "implementationMayCommitRunning": false
+    },
+    "cancellation": {
+      "beforeBegin": "noMutation",
+      "checks": [
+        "beforeEachSourceRow",
+        "afterEachSourceRow",
+        "immediatelyPrecommit"
+      ],
+      "duringTransaction": "rollbackCurrentBatch",
+      "outcome": "Suspended",
+      "crash": "rollbackCurrentBatchResumePrecedingCommittedPendingCursor",
+      "committedBatchWinsAfterFinalPrecommitCheck": true
+    },
+    "job": {
+      "table": "lifetime_materialization_job",
+      "maximumRows": 1,
+      "singletonValue": 1,
+      "uniqueJobId": true,
+      "states": [
+        "pending",
+        "failed"
+      ],
+      "cursorColumns": [
+        "cutoff_event_rowid",
+        "phase",
+        "after_event_rowid"
+      ],
+      "maintenanceJobsRole": "losslessCompactionOnlyUnchanged",
+      "singleSqliteOwnerRequired": true,
+      "transactionSerialization": "beginImmediate",
+      "transactionBoundaryValidation": "exactMetaJobPairAndValidSingletonCursor",
+      "batchCommit": "derivedRowsAndAdvancedPendingSingletonAtomic",
+      "cancellation": "rollbackLeavesSamePendingSingletonAndCursor",
+      "terminalFailure": "sameSingletonPendingToFailedPreserveCursorAfterRollback",
+      "terminalFailureMetaState": "pending",
+      "failureRecordUnavailable": "failClosedRestartRevalidatesBeforeMutationNeverSuccess",
+      "automaticRetryEnabled": false,
+      "completion": "deleteSingletonAndSetMetaReadySameTransaction",
+      "appendAfterReady": "setMetaPendingKeepJobAbsentSameAppendTransaction",
+      "appendDuringPending": "doNotAlterFrozenSingletonCursor",
+      "catchUp": "samePendingSingletonResetToNewCutoffReceiptsZero",
+      "schedulerCreationImplemented": false,
+      "forbiddenCommittedStates": [
+        "running",
+        "succeeded",
+        "cancelled"
+      ]
+    },
+    "pairing": {
+      "canonicalReadinessAuthority": "storage_schema_meta.materialization_state",
+      "validPairs": [
+        "pending+absent",
+        "pending+pending",
+        "pending+failed",
+        "ready+absent"
+      ],
+      "failClosedPairs": [
+        "materializing+any",
+        "failed+any",
+        "ready+present"
+      ]
+    },
+    "append": {
+      "readyInvalidation": "pendingInSameAppendTransaction",
+      "readyPublication": "separateAtomicCatchUpVerificationTransaction",
+      "appendDuringMaterialization": "frozenCutoffUnchangedUntilFinalCatchUp",
+      "readyRegressionSequence": [
+        "materializeReady",
+        "appendAndInvalidateReadyToPendingSameTransaction",
+        "separateCatchUpVerification",
+        "publishReady"
+      ]
+    },
+    "finalPublication": {
+      "transaction": "separateBeginImmediate",
+      "prerequisites": [
+        "maxEventRowidEqualsCutoff",
+        "exactDerivedCompletenessAndEquivalence",
+        "liveProjectionEqualsCutoffReconstruction",
+        "boundedSqlKeysetEvidence"
+      ],
+      "maxRowidChanged": "remainPendingResetSameSingletonAtObservedCutoffNeverPublishReady",
+      "unboundedCollectionAllowed": false
+    },
+    "rollback": {
+      "derivedPreparationBatchesMayPersist": true,
+      "sourceLedgerMutationAtomicRollbackRequired": true,
+      "compactionTriggerChangeAtomicRollbackRequired": true
+    },
+    "activation": {
+      "ledgerDeletionEnabled": false,
+      "automaticSchedulingEnabled": false,
+      "compactionImplementationEnabled": false,
+      "statusWireEnabled": false
+    }
+  },
+  "compactionBoundary": {
+    "maintenanceJobsUnchanged": true,
+    "maintenanceJobKind": "losslessCompaction",
+    "materializationJobVisibleToCompactionStatus": false,
+    "physicalCleanupEnabled": false,
+    "ledgerDeletionEnabled": false,
+    "downgradePolicy": "openQuestion"
+  }
+}
