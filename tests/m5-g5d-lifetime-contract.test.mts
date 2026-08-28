@@ -27,7 +27,9 @@ import {
   STORAGE_LIFETIME_SCHEMA_VERSION_V3,
   STORAGE_LIFETIME_SCHEMA_VERSION_V4,
   STORAGE_LIFETIME_SCHEMA_VERSION_V5,
+  STORAGE_LIFETIME_SCHEMA_VERSION_V6,
   STORAGE_LIFETIME_PHASES_V3,
+  STORAGE_LIFETIME_PHASES_V4,
   STORAGE_LIFETIME_TABLES_V2,
   STORAGE_LIFETIME_TABLES_V3,
   STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1,
@@ -61,6 +63,15 @@ import {
   validateStorageLifetimeMaterializationPairV3,
   validateStorageLifetimeReopenPairV3,
   validateStorageLifetimeV5PreflightPolicyV1,
+  validateStorageLifetimeBatchPolicyV4,
+  validateStorageLifetimeCursorTransitionV4,
+  validateStorageLifetimeCursorV4,
+  validateStorageLifetimeLifecycleTransitionV4,
+  validateStorageLifetimeMaterializationPairV4,
+  validateStorageLifetimeReopenPairV4,
+  validateStorageLifetimeV6PreflightPolicyV1,
+  validateStorageEventSourceIndexEntryV1,
+  validateStorageLifetimeWorkspaceProjectSourceV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
@@ -263,6 +274,66 @@ interface V5Cases {
   invalidPolicyMutations: PolicyMutation[];
 }
 
+interface ManifestV6 {
+  schemaVersion: number;
+  storageSchemaVersion: number;
+  protocolVersion: number;
+  payloadSchemaVersion: number;
+  migration: {
+    file: string;
+    predecessorMigrationFile: string;
+    predecessorMigrationMutationAllowed: boolean;
+    fromVersion: number;
+    toVersion: number;
+    mode: string;
+    preflight: unknown;
+    idempotency: string;
+    partialExtraOrUnsafePair: string;
+    historyBackfill: string;
+    tablesAdded: string[];
+    tablesRebuilt: string[];
+    indexesAdded: string[];
+    triggersAdded: string[];
+    preservedTables: string[];
+    preservedIndexes: string[];
+    preservedTriggers: string[];
+    downgradePolicy: string;
+  };
+  indexedBoundedVerification: Record<string, unknown> & { casesFile: string };
+}
+
+interface V6Cases {
+  migrationMatrix: {
+    jobStates: Array<"pending" | "attempting" | "failed">;
+    v5Phases: string[];
+    presentJobMapping: string;
+    stateIdentityTimestampsFailureEvidence: string;
+    absentMappings: Array<{ from: string; to: string }>;
+    historyBackfillRows: number;
+  };
+  phaseOrder: string[];
+  sourceIndex: {
+    columns: string[];
+    validRows: Array<{ name: string; value: [number, string, string, string, string, number, string | null] }>;
+    duplicateConflicts: string[];
+    mutationGuards: string[];
+  };
+  queryPlans: Array<{ name: string; sql: string; detail: string }>;
+  workspaceProvenance: {
+    projectId: string;
+    canonicalPayload: string;
+    payloadBytes: number;
+    maxPayloadBytes: number;
+    comparison: string;
+    removalsLegal: boolean;
+    stopWhen: string;
+  };
+  reopenPairs: { valid: NamedValue[]; failClosed: NamedValue[] };
+  validLifecycleOperations: string[];
+  invalidPreflightMutations: PolicyMutation[];
+  invalidPolicyMutations: PolicyMutation[];
+}
+
 interface V5CatchUpCase {
   name: string;
   previousState: "pending" | "attempting" | "failed";
@@ -339,6 +410,7 @@ const root = resolve("tests/fixtures/m5/storage-v2");
 const rootV3 = resolve("tests/fixtures/m5/storage-v3");
 const rootV4 = resolve("tests/fixtures/m5/storage-v4");
 const rootV5 = resolve("tests/fixtures/m5/storage-v5");
+const rootV6 = resolve("tests/fixtures/m5/storage-v6");
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const manifestV3 = readJson<ManifestV3>(resolve(rootV3, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
@@ -351,6 +423,10 @@ const v4Cases = readJson<V4Cases>(resolve(rootV4, manifestV4.boundedVerification
 const manifestV5 = readJson<ManifestV5>(resolve(rootV5, "manifest.json"));
 const v5Cases = readJson<V5Cases>(
   resolve(rootV5, manifestV5.boundedProjectionVerification.casesFile),
+);
+const manifestV6 = readJson<ManifestV6>(resolve(rootV6, "manifest.json"));
+const v6Cases = readJson<V6Cases>(
+  resolve(rootV6, manifestV6.indexedBoundedVerification.casesFile),
 );
 
 test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byte", () => {
@@ -1269,7 +1345,310 @@ test("storage-v5 freezes projection order, lifecycle catch-up, and bounded query
   );
 });
 
-test("storage-v1 through storage-v4 golden files remain immutable", () => {
+test("storage-v6 migration creates an empty guarded source index and resets every job", () => {
+  assert.equal(manifestV6.schemaVersion, 1);
+  assert.equal(manifestV6.storageSchemaVersion, STORAGE_LIFETIME_SCHEMA_VERSION_V6);
+  assert.equal(manifestV6.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(manifestV6.payloadSchemaVersion, 1);
+  assert.equal(manifestV6.migration.fromVersion, 5);
+  assert.equal(manifestV6.migration.toVersion, 6);
+  assert.equal(manifestV6.migration.historyBackfill, "none");
+  assert.deepEqual(manifestV6.migration.tablesAdded, ["event_source_index"]);
+  assert.deepEqual(manifestV6.migration.indexesAdded, [
+    "event_source_index_aggregate_latest", "event_source_index_message_unique",
+  ]);
+  assert.deepEqual(manifestV6.migration.triggersAdded, [
+    "event_source_index_append_only_update", "event_source_index_append_only_delete",
+  ]);
+  assert.deepEqual(
+    validateStorageLifetimeV6PreflightPolicyV1(manifestV6.migration.preflight),
+    manifestV6.migration.preflight,
+  );
+  assert.deepEqual(
+    validateStorageLifetimeBatchPolicyV4(manifestV6.indexedBoundedVerification),
+    manifestV6.indexedBoundedVerification,
+  );
+  assert.deepEqual(v6Cases.phaseOrder, [...STORAGE_LIFETIME_PHASES_V4]);
+
+  const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-"));
+  try {
+    const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
+    const exactV5 = schemaSignature(reference);
+    applyExactStorageV6Migration(reference, migrationV6, exactV5, null);
+    const exactV6 = schemaSignature(reference);
+    assert.equal(reference.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count, 0);
+    assert.deepEqual(readV6Pair(reference), { materializationState: "pending", job: null });
+    reference.close();
+
+    const preservation = createExactStorageV5Database(join(temporaryRoot, "preservation.db"), true);
+    const beforeRows = new Map(
+      manifestV6.migration.preservedTables.map((table) => [table, normalizedRows(preservation, table)]),
+    );
+    const beforeTriggers = schemaObjects(preservation, "trigger");
+    applyExactStorageV6Migration(preservation, migrationV6, exactV5, exactV6);
+    for (const table of manifestV6.migration.preservedTables) {
+      assert.deepEqual(normalizedRows(preservation, table), beforeRows.get(table), table);
+    }
+    assert.deepEqual(
+      schemaObjects(preservation, "trigger").filter((row) => String(row.name).startsWith("events_")),
+      beforeTriggers.filter((row) => String(row.name).startsWith("events_")),
+    );
+    assert.equal(preservation.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count, 0);
+    assert.deepEqual(readV6Pair(preservation), { materializationState: "pending", job: null });
+    applyExactStorageV6Migration(preservation, migrationV6, exactV5, exactV6);
+    assert.equal(schemaSignature(preservation), exactV6);
+    preservation.close();
+
+    for (const state of v6Cases.migrationMatrix.jobStates) {
+      for (const phase of v6Cases.migrationMatrix.v5Phases) {
+        const database = createExactStorageV5Database(
+          join(temporaryRoot, `${state}-${phase}.db`),
+          false,
+        );
+        database.prepare(`
+          UPDATE storage_schema_meta SET materialization_state='pending' WHERE singleton=1
+        `).run();
+        insertV5LifetimeJob(database, state, phase, 7, true);
+        const before = readV5Pair(database) as { job: Record<string, unknown> };
+        applyExactStorageV6Migration(database, migrationV6, exactV5, exactV6);
+        const after = readV6Pair(database) as { materializationState: string; job: Record<string, unknown> };
+        assert.equal(after.materializationState, "pending", `${state}:${phase}`);
+        assert.equal(after.job.state, state, `${state}:${phase}`);
+        assert.equal(after.job.phase, "indexSource", `${state}:${phase}`);
+        assert.equal(after.job.afterScanRowid, 0, `${state}:${phase}`);
+        assert.equal(after.job.scanExhausted, false, `${state}:${phase}`);
+        for (const field of [
+          "jobId", "cutoffEventRowid", "failureKind", "createdAt", "updatedAt", "completedAt",
+        ]) assert.equal(after.job[field], before.job[field], `${state}:${phase}:${field}`);
+        const validate = state === "pending"
+          ? () => validateStorageLifetimeReopenPairV4(after)
+          : () => assert.throws(() => validateStorageLifetimeReopenPairV4(after));
+        validate();
+        database.close();
+      }
+    }
+
+    for (const materializationState of ["pending", "ready"] as const) {
+      const database = createExactStorageV5Database(
+        join(temporaryRoot, `absent-${materializationState}.db`),
+        false,
+      );
+      database.prepare(`
+        UPDATE storage_schema_meta SET materialization_state=? WHERE singleton=1
+      `).run(materializationState);
+      applyExactStorageV6Migration(database, migrationV6, exactV5, exactV6);
+      assert.deepEqual(readV6Pair(database), { materializationState: "pending", job: null });
+      database.close();
+    }
+
+    const unsafe = createExactStorageV5Database(join(temporaryRoot, "unsafe.db"), false);
+    unsafe.prepare("UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1").run();
+    insertV5LifetimeJob(unsafe, "pending", "verifyProjects", 1, false);
+    const unsafeBefore = `${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`;
+    assert.throws(() => applyExactStorageV6Migration(unsafe, migrationV6, exactV5, exactV6));
+    assert.equal(`${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`, unsafeBefore);
+    unsafe.close();
+
+    const extraSchema = createExactStorageV5Database(join(temporaryRoot, "extra-schema.db"), false);
+    extraSchema.exec("CREATE TABLE unexpected_v6_preflight_object(value TEXT) STRICT");
+    const extraBefore = `${schemaSignature(extraSchema)}\n${databaseRowsSnapshot(extraSchema)}`;
+    assert.throws(() => applyExactStorageV6Migration(
+      extraSchema, migrationV6, exactV5, exactV6,
+    ));
+    assert.equal(`${schemaSignature(extraSchema)}\n${databaseRowsSnapshot(extraSchema)}`, extraBefore);
+    extraSchema.close();
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("storage-v6 source index enforces exact identity, append-only guards, and atomic rollback", () => {
+  const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-index-"));
+  try {
+    const database = createExactStorageV5Database(join(temporaryRoot, "index.db"), false);
+    const exactV5 = schemaSignature(database);
+    applyExactStorageV6Migration(database, migrationV6, exactV5, null);
+    const insert = database.prepare(`
+      INSERT INTO event_source_index(
+        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,message_id
+      ) VALUES(?,?,?,?,?,?,?)
+    `);
+    for (const fixture of v6Cases.sourceIndex.validRows) {
+      validateStorageEventSourceIndexEntryV1({
+        eventRowid: fixture.value[0],
+        eventId: fixture.value[1],
+        operationId: fixture.value[2],
+        aggregateType: fixture.value[3],
+        aggregateId: fixture.value[4],
+        aggregateSequence: fixture.value[5],
+        messageId: fixture.value[6],
+      });
+      insert.run(...fixture.value);
+    }
+    for (const invalid of [
+      { eventRowid: 0, eventId: "evt", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
+      { eventRowid: 1, eventId: "", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
+      { eventRowid: 1, eventId: "evt", operationId: "op", aggregateType: "chat", aggregateId: "c", aggregateSequence: 1, messageId: "" },
+    ]) assert.throws(() => validateStorageEventSourceIndexEntryV1(invalid));
+    assert.throws(() => database.prepare(`
+      UPDATE event_source_index SET aggregate_id='changed' WHERE event_rowid=1
+    `).run());
+    assert.throws(() => database.prepare("DELETE FROM event_source_index WHERE event_rowid=1").run());
+    for (const conflict of [
+      [1, "evt_unique", "op_unique", "run", "run_1", 1, null],
+      [3, "evt_project_1", "op_unique", "run", "run_2", 1, null],
+      [3, "evt_unique", "op_project_1", "run", "run_3", 1, null],
+      [3, "evt_unique", "op_unique", "project", "project_1", 1, null],
+      [3, "evt_unique", "op_unique", "run", "run_4", 1, "message_1"],
+    ] as const) assert.throws(() => insert.run(...conflict));
+
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.prepare(`
+        INSERT INTO events(
+          event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+          event_type,payload_schema_version,canonical_json_payload,timestamp
+        ) VALUES('evt_atomic','op_atomic',NULL,'chat','chat_atomic',1,'chat.upserted',1,
+          '{"last_message":{"messageId":"message_1"}}','2026-08-28T13:00:00Z')
+      `).run();
+      const eventRowid = database.prepare(`
+        SELECT rowid FROM events WHERE event_id='evt_atomic'
+      `).get()?.rowid as number;
+      insert.run(eventRowid, "evt_atomic", "op_atomic", "chat", "chat_atomic", 1, "message_1");
+      assert.fail("duplicate message_id must reject the append transaction");
+    } catch {
+      database.exec("ROLLBACK");
+    }
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM events WHERE event_id='evt_atomic'").get()?.count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count, 2);
+    database.close();
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("storage-v6 freezes 16 bounded phases, indexed provenance, and exact query plans", () => {
+  for (const fixture of v6Cases.reopenPairs.valid) {
+    validateStorageLifetimeReopenPairV4(fixture.value);
+  }
+  for (const fixture of v6Cases.reopenPairs.failClosed) {
+    assert.throws(() => validateStorageLifetimeReopenPairV4(fixture.value), undefined, fixture.name);
+  }
+  for (const [index, phase] of STORAGE_LIFETIME_PHASES_V4.entries()) {
+    const current = {
+      schemaVersion: 4,
+      cutoffEventRowid: 20,
+      phase,
+      afterScanRowid: index < 7 ? 20 : 900,
+      scanExhausted: true,
+    };
+    validateStorageLifetimeCursorV4(current);
+    const nextPhase = STORAGE_LIFETIME_PHASES_V4[index + 1];
+    if (nextPhase !== undefined) {
+      validateStorageLifetimeCursorTransitionV4(current, {
+        ...current, phase: nextPhase, afterScanRowid: 0, scanExhausted: false,
+      });
+    }
+  }
+  const pendingAbsent = { materializationState: "pending", job: null };
+  const readyAbsent = { materializationState: "ready", job: null };
+  const created = v6Snapshot("pending", "indexSource", 0, false);
+  validateStorageLifetimeLifecycleTransitionV4("create", pendingAbsent, created);
+  const armed = v6Snapshot("attempting", "indexSource", 0, false);
+  validateStorageLifetimeLifecycleTransitionV4("arm", created, armed);
+  validateStorageLifetimeLifecycleTransitionV4(
+    "batchSuccess", armed, v6Snapshot("pending", "indexSource", 1, false),
+  );
+  validateStorageLifetimeLifecycleTransitionV4(
+    "phaseAdvance",
+    v6Snapshot("pending", "indexSource", 20, true),
+    v6Snapshot("pending", "verifySourceIndex", 0, false),
+  );
+  validateStorageLifetimeLifecycleTransitionV4(
+    "catchUpReset",
+    v6Snapshot("pending", "verifySourceIndex", 20, true),
+    v6Snapshot("pending", "indexSource", 0, false, 21),
+  );
+  validateStorageLifetimeLifecycleTransitionV4(
+    "finalPublish", v6Snapshot("pending", "verifyBaselines", 900, true), readyAbsent,
+  );
+  validateStorageLifetimeLifecycleTransitionV4("append", readyAbsent, pendingAbsent);
+  assert.throws(() => validateStorageLifetimeLifecycleTransitionV4(
+    "catchUpReset",
+    v6Snapshot("attempting", "verifySourceIndex", 20, false),
+    v6Snapshot("pending", "indexSource", 0, false, 21),
+  ));
+
+  for (const fixture of v6Cases.invalidPreflightMutations) {
+    const invalid = structuredClone(manifestV6.migration.preflight) as Record<string, unknown>;
+    setPath(invalid, fixture.path, fixture.replacement);
+    assert.throws(() => validateStorageLifetimeV6PreflightPolicyV1(invalid), undefined, fixture.name);
+  }
+  for (const fixture of v6Cases.invalidPolicyMutations) {
+    const invalid = structuredClone(manifestV6.indexedBoundedVerification);
+    setPath(invalid, fixture.path, fixture.replacement);
+    assert.throws(() => validateStorageLifetimeBatchPolicyV4(invalid), undefined, fixture.name);
+  }
+
+  assert.equal(
+    Buffer.byteLength(v6Cases.workspaceProvenance.canonicalPayload),
+    v6Cases.workspaceProvenance.payloadBytes,
+  );
+  assert.ok(v6Cases.workspaceProvenance.payloadBytes <= v6Cases.workspaceProvenance.maxPayloadBytes);
+  const projectPayload = JSON.parse(v6Cases.workspaceProvenance.canonicalPayload) as Record<string, unknown>;
+  assert.equal(projectPayload.project_id, v6Cases.workspaceProvenance.projectId);
+  assert.deepEqual(
+    validateStorageLifetimeWorkspaceProjectSourceV1(
+      v6Cases.workspaceProvenance.projectId,
+      "project",
+      v6Cases.workspaceProvenance.projectId,
+      v6Cases.workspaceProvenance.canonicalPayload,
+    ),
+    projectPayload,
+  );
+  assert.throws(() => validateStorageLifetimeWorkspaceProjectSourceV1(
+    v6Cases.workspaceProvenance.projectId,
+    "chat",
+    v6Cases.workspaceProvenance.projectId,
+    v6Cases.workspaceProvenance.canonicalPayload,
+  ));
+  assert.throws(() => validateStorageLifetimeWorkspaceProjectSourceV1(
+    v6Cases.workspaceProvenance.projectId,
+    "project",
+    v6Cases.workspaceProvenance.projectId,
+    `{"project_id":"${v6Cases.workspaceProvenance.projectId}"}`,
+  ));
+  assert.throws(() => validateStorageLifetimeWorkspaceProjectSourceV1(
+    v6Cases.workspaceProvenance.projectId,
+    "project",
+    v6Cases.workspaceProvenance.projectId,
+    `{"canonical_path":"/${"x".repeat(1_048_576)}","project_id":"${v6Cases.workspaceProvenance.projectId}"}`,
+  ));
+  assert.equal(v6Cases.workspaceProvenance.removalsLegal, false);
+  assert.equal(
+    v6Cases.workspaceProvenance.stopWhen,
+    "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned",
+  );
+
+  const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-plan-"));
+  try {
+    const database = createExactStorageV5Database(join(temporaryRoot, "plan.db"), false);
+    applyExactStorageV6Migration(database, migrationV6, schemaSignature(database), null);
+    for (const fixture of v6Cases.queryPlans) {
+      const plans = database.prepare(fixture.sql).all();
+      assert.equal(plans.length, 1, fixture.name);
+      assert.equal(plans[0]?.detail, fixture.detail, fixture.name);
+    }
+    database.close();
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("storage-v1 through storage-v5 golden files remain immutable", () => {
   const digests = new Map<string, string>([
     ["tests/fixtures/m5/storage-v1/idempotency.json", "a0c9d347a5005af0980c35d8e55de2ee1cdfaa47dc1c35959582da667ae0b641"],
     ["tests/fixtures/m5/storage-v1/migration.sql", "9734d16cca9cf5cd18188f4e75cde6bbedaff2eda14ab5bd8981fdc45ae82d12"],
@@ -1288,6 +1667,9 @@ test("storage-v1 through storage-v4 golden files remain immutable", () => {
     ["tests/fixtures/m5/storage-v4/manifest.json", "f484c1adfefe9515d0d2d5aa16e0398a0051e77ca5f59bd7d2bc2a274fd8eb28"],
     ["tests/fixtures/m5/storage-v4/migration-v3-to-v4.sql", "e8711c4e8aa214c7cb4ecb2dd9962e5622bcd2844221ecccca998db24cc1b1c6"],
     ["tests/fixtures/m5/storage-v4/cases.json", "ea71b933225c77190ef87838037eeaa8c61293bd158adbfc80b7dd2df6aa3841"],
+    ["tests/fixtures/m5/storage-v5/manifest.json", "58c7efcacbf1e9fe7f325520e78033c3ef93ba7fd806f27fdd0a6b3da1c1fceb"],
+    ["tests/fixtures/m5/storage-v5/migration-v4-to-v5.sql", "22f9cc9cef5766369ccf5fb9c11262aaa33a05b51a8ccfc03ee3a6a73478889a"],
+    ["tests/fixtures/m5/storage-v5/cases.json", "1dca57e669ff782bae856ab29fd00581ff2509ec811e5616754da579125e100d"],
   ]);
   for (const [path, expected] of digests) {
     assert.equal(createHash("sha256").update(readFileSync(path)).digest("hex"), expected, path);
@@ -1704,6 +2086,120 @@ function applyExactStorageV5Migration(
   if (expectedV5Schema !== null && schemaSignature(database) !== expectedV5Schema) {
     throw new Error("storage-v5 migration did not produce exact schema");
   }
+}
+
+function createExactStorageV5Database(path: string, populated: boolean): DatabaseSync {
+  const database = new DatabaseSync(path, { enableForeignKeyConstraints: false });
+  database.exec(readFileSync(resolve("tests/fixtures/m5/storage-v1/migration.sql"), "utf8"));
+  database.exec(readFileSync(resolve(rootV3, manifestV3.migration.predecessorMigrationFile), "utf8"));
+  if (populated) seedPopulatedStorageV2(database);
+  database.exec(readFileSync(resolve(rootV3, manifestV3.migration.file), "utf8"));
+  database.exec(readFileSync(resolve(rootV4, manifestV4.migration.file), "utf8"));
+  database.exec(readFileSync(resolve(rootV5, manifestV5.migration.file), "utf8"));
+  return database;
+}
+
+function applyExactStorageV6Migration(
+  database: DatabaseSync,
+  migrationSql: string,
+  expectedV5Schema: string,
+  expectedV6Schema: string | null,
+): void {
+  const meta = database.prepare(`
+    SELECT storage_schema_version, materialization_state
+    FROM storage_schema_meta WHERE singleton = 1
+  `).get();
+  if (meta?.storage_schema_version === 6) {
+    if (expectedV6Schema === null || schemaSignature(database) !== expectedV6Schema) {
+      throw new Error("storage-v6 schema is not exact");
+    }
+    return;
+  }
+  if (meta?.storage_schema_version !== 5 || schemaSignature(database) !== expectedV5Schema) {
+    throw new Error("storage-v5 schema is not exact");
+  }
+  validateStorageLifetimeMaterializationPairV3(readV5Pair(database));
+  database.exec(migrationSql);
+  if (expectedV6Schema !== null && schemaSignature(database) !== expectedV6Schema) {
+    throw new Error("storage-v6 migration did not produce exact schema");
+  }
+}
+
+function insertV5LifetimeJob(
+  database: DatabaseSync,
+  state: "pending" | "attempting" | "failed",
+  phase: string,
+  afterScanRowid: number,
+  scanExhausted: boolean,
+): void {
+  database.prepare(`
+    INSERT INTO lifetime_materialization_job (
+      singleton, job_id, state, cutoff_event_rowid, phase, after_scan_rowid,
+      scan_exhausted, failure_kind, created_at, updated_at, completed_at
+    ) VALUES (1, ?, ?, 20, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    `lifetime-v5-${state}-${phase}`,
+    state,
+    phase,
+    afterScanRowid,
+    scanExhausted ? 1 : 0,
+    state === "failed" ? "contractValidation" : null,
+    "2026-08-28T13:00:00Z",
+    state === "failed" ? "2026-08-28T13:02:00Z" : "2026-08-28T13:01:00Z",
+    state === "failed" ? "2026-08-28T13:02:00Z" : null,
+  );
+}
+
+function readV6Pair(database: DatabaseSync): unknown {
+  const meta = database.prepare(`
+    SELECT materialization_state FROM storage_schema_meta WHERE singleton = 1
+  `).get();
+  const row = database.prepare(`
+    SELECT singleton, job_id, state, cutoff_event_rowid, phase, after_scan_rowid,
+           scan_exhausted, failure_kind, created_at, updated_at, completed_at
+    FROM lifetime_materialization_job WHERE singleton = 1
+  `).get();
+  return {
+    materializationState: meta?.materialization_state,
+    job: row === undefined ? null : {
+      singleton: row.singleton,
+      jobId: row.job_id,
+      state: row.state,
+      cutoffEventRowid: row.cutoff_event_rowid,
+      phase: row.phase,
+      afterScanRowid: row.after_scan_rowid,
+      scanExhausted: row.scan_exhausted === 1,
+      failureKind: row.failure_kind,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+    },
+  };
+}
+
+function v6Snapshot(
+  state: "pending" | "attempting" | "failed",
+  phase: string,
+  afterScanRowid: number,
+  scanExhausted: boolean,
+  cutoffEventRowid = 20,
+): unknown {
+  return {
+    materializationState: "pending",
+    job: {
+      singleton: 1,
+      jobId: "lifetime-v6",
+      state,
+      cutoffEventRowid,
+      phase,
+      afterScanRowid,
+      scanExhausted,
+      failureKind: state === "failed" ? "contractValidation" : null,
+      createdAt: "2026-08-28T13:00:00Z",
+      updatedAt: state === "failed" ? "2026-08-28T13:02:00Z" : "2026-08-28T13:01:00Z",
+      completedAt: state === "failed" ? "2026-08-28T13:02:00Z" : null,
+    },
+  };
 }
 
 function insertV4LifetimeJob(

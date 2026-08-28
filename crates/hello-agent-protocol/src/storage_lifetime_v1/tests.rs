@@ -51,6 +51,40 @@ struct ManifestV5 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ManifestV6 {
+    schema_version: u32,
+    storage_schema_version: u32,
+    protocol_version: u32,
+    payload_schema_version: u32,
+    migration: MigrationContractV6,
+    indexed_bounded_verification: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MigrationContractV6 {
+    file: String,
+    predecessor_migration_file: String,
+    predecessor_migration_mutation_allowed: bool,
+    from_version: u32,
+    to_version: u32,
+    mode: String,
+    preflight: Value,
+    idempotency: String,
+    partial_extra_or_unsafe_pair: String,
+    history_backfill: String,
+    tables_added: Vec<String>,
+    tables_rebuilt: Vec<String>,
+    indexes_added: Vec<String>,
+    triggers_added: Vec<String>,
+    preserved_tables: Vec<String>,
+    preserved_indexes: Vec<String>,
+    preserved_triggers: Vec<String>,
+    downgrade_policy: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MigrationContractV4 {
     file: String,
     predecessor_migration_file: String,
@@ -396,6 +430,59 @@ struct V5CatchUpCase {
     previous_scan_exhausted: bool,
     previous_cutoff: u64,
     observed_cutoff: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V6Cases {
+    migration_matrix: V6MigrationMatrix,
+    phase_order: Vec<String>,
+    source_index: V6SourceIndexCases,
+    query_plans: Vec<V6QueryPlan>,
+    workspace_provenance: V6WorkspaceProvenance,
+    reopen_pairs: V5ReopenPairs,
+    valid_lifecycle_operations: Vec<String>,
+    invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
+    invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V6MigrationMatrix {
+    job_states: Vec<String>,
+    v5_phases: Vec<String>,
+    present_job_mapping: String,
+    state_identity_timestamps_failure_evidence: String,
+    absent_mappings: Vec<Value>,
+    history_backfill_rows: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V6SourceIndexCases {
+    columns: Vec<String>,
+    valid_rows: Vec<NamedValue>,
+    duplicate_conflicts: Vec<String>,
+    mutation_guards: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct V6QueryPlan {
+    name: String,
+    sql: String,
+    detail: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V6WorkspaceProvenance {
+    project_id: String,
+    canonical_payload: String,
+    payload_bytes: usize,
+    max_payload_bytes: u64,
+    comparison: String,
+    removals_legal: bool,
+    stop_when: String,
 }
 
 #[test]
@@ -1328,6 +1415,335 @@ fn storage_v5_freezes_bounded_projection_verification_and_catch_up() {
     assert!(!normalized.contains("DELETE FROM EVENTS"));
     assert!(!normalized.contains("ALTER TABLE PROJECTS"));
     assert!(!normalized.contains("DROP TRIGGER"));
+}
+
+#[test]
+fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-v6");
+    let manifest: ManifestV6 = read_json(root.join("manifest.json"));
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(
+        manifest.storage_schema_version,
+        STORAGE_LIFETIME_SCHEMA_VERSION_V6
+    );
+    assert_eq!(manifest.protocol_version, crate::PROTOCOL_VERSION);
+    assert_eq!(manifest.payload_schema_version, 1);
+    assert_eq!(manifest.migration.from_version, 5);
+    assert_eq!(manifest.migration.to_version, 6);
+    assert!(!manifest.migration.predecessor_migration_mutation_allowed);
+    assert_eq!(
+        manifest.migration.predecessor_migration_file,
+        "../storage-v5/migration-v4-to-v5.sql"
+    );
+    assert_eq!(
+        manifest.migration.mode,
+        "exactV5AndAdmissiblePairPreflightThenSchemaOnlySourceIndexAndJobReset"
+    );
+    assert_eq!(
+        manifest.migration.idempotency,
+        "exactStorageV6NoOpBeforeMigrationSql"
+    );
+    assert_eq!(
+        manifest.migration.partial_extra_or_unsafe_pair,
+        "failClosedBeforeMutation"
+    );
+    assert_eq!(manifest.migration.history_backfill, "none");
+    assert_eq!(manifest.migration.tables_added, ["event_source_index"]);
+    assert_eq!(
+        manifest.migration.tables_rebuilt,
+        ["storage_schema_meta", "lifetime_materialization_job"]
+    );
+    assert_eq!(
+        manifest.migration.indexes_added,
+        [
+            "event_source_index_aggregate_latest",
+            "event_source_index_message_unique"
+        ]
+    );
+    assert_eq!(
+        manifest.migration.triggers_added,
+        [
+            "event_source_index_append_only_update",
+            "event_source_index_append_only_delete"
+        ]
+    );
+    assert_eq!(manifest.migration.preserved_tables.len(), 12);
+    assert_eq!(
+        manifest.migration.preserved_indexes,
+        STORAGE_LIFETIME_INDEXES_V2
+    );
+    assert_eq!(
+        manifest.migration.preserved_triggers,
+        [
+            "events_are_append_only_update",
+            "events_are_append_only_delete"
+        ]
+    );
+    assert_eq!(manifest.migration.downgrade_policy, "openQuestion");
+    validate_storage_lifetime_v6_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("exact v6 preflight");
+    validate_storage_lifetime_batch_policy_v4(&manifest.indexed_bounded_verification)
+        .expect("exact v6 indexed bounded policy");
+
+    let cases: V6Cases = read_json(root.join("cases.json"));
+    assert_eq!(cases.phase_order, STORAGE_LIFETIME_PHASES_V4);
+    assert_eq!(
+        cases.migration_matrix.job_states,
+        STORAGE_LIFETIME_JOB_STATES_V2
+    );
+    assert_eq!(cases.migration_matrix.v5_phases, STORAGE_LIFETIME_PHASES_V3);
+    assert_eq!(
+        cases.migration_matrix.present_job_mapping,
+        "indexSourceZeroUnexhausted"
+    );
+    assert_eq!(
+        cases
+            .migration_matrix
+            .state_identity_timestamps_failure_evidence,
+        "preserve"
+    );
+    assert_eq!(cases.migration_matrix.absent_mappings.len(), 2);
+    assert_eq!(cases.migration_matrix.history_backfill_rows, 0);
+    assert_eq!(
+        cases.source_index.columns,
+        STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1
+    );
+    assert_eq!(cases.source_index.valid_rows.len(), 2);
+    for row in &cases.source_index.valid_rows {
+        assert!(!row.name.is_empty());
+        let tuple = row.value.as_array().expect("source row tuple");
+        assert_eq!(tuple.len(), 7);
+        validate_storage_event_source_index_entry_v1(&serde_json::json!({
+            "eventRowid": tuple[0],
+            "eventId": tuple[1],
+            "operationId": tuple[2],
+            "aggregateType": tuple[3],
+            "aggregateId": tuple[4],
+            "aggregateSequence": tuple[5],
+            "messageId": tuple[6],
+        }))
+        .expect(&row.name);
+    }
+    assert_eq!(
+        cases.source_index.duplicate_conflicts,
+        [
+            "event_rowid",
+            "event_id",
+            "operation_id",
+            "aggregateTuple",
+            "message_id"
+        ]
+    );
+    assert_eq!(cases.source_index.mutation_guards, ["update", "delete"]);
+    assert_eq!(cases.query_plans.len(), 5);
+    for plan in &cases.query_plans {
+        assert!(
+            plan.sql.starts_with("EXPLAIN QUERY PLAN SELECT "),
+            "{}",
+            plan.name
+        );
+        assert!(plan.detail.starts_with("SEARCH "), "{}", plan.name);
+        assert!(!plan.detail.starts_with("SCAN "), "{}", plan.name);
+    }
+    assert_eq!(
+        cases.workspace_provenance.canonical_payload.len(),
+        cases.workspace_provenance.payload_bytes
+    );
+    assert_eq!(
+        cases.workspace_provenance.max_payload_bytes,
+        STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
+    );
+    assert!(
+        cases.workspace_provenance.payload_bytes as u64
+            <= cases.workspace_provenance.max_payload_bytes
+    );
+    let project: Value = serde_json::from_str(&cases.workspace_provenance.canonical_payload)
+        .expect("project payload");
+    assert_eq!(
+        project.get("project_id").and_then(Value::as_str),
+        Some(cases.workspace_provenance.project_id.as_str())
+    );
+    assert_eq!(
+        cases.workspace_provenance.comparison,
+        "rustExactCanonicalProjectPayloadAndWorkspaceProjectId"
+    );
+    assert_eq!(
+        validate_storage_lifetime_workspace_project_source_v1(
+            &cases.workspace_provenance.project_id,
+            "project",
+            &cases.workspace_provenance.project_id,
+            &cases.workspace_provenance.canonical_payload,
+        )
+        .expect("exact workspace provenance"),
+        project
+    );
+    assert!(validate_storage_lifetime_workspace_project_source_v1(
+        &cases.workspace_provenance.project_id,
+        "chat",
+        &cases.workspace_provenance.project_id,
+        &cases.workspace_provenance.canonical_payload,
+    )
+    .is_err());
+    let oversized = format!(
+        "{{\"canonical_path\":\"/{}\",\"project_id\":\"{}\"}}",
+        "x".repeat(1_048_576),
+        cases.workspace_provenance.project_id
+    );
+    assert!(validate_storage_lifetime_workspace_project_source_v1(
+        &cases.workspace_provenance.project_id,
+        "project",
+        &cases.workspace_provenance.project_id,
+        &oversized,
+    )
+    .is_err());
+    assert!(!cases.workspace_provenance.removals_legal);
+    assert_eq!(
+        cases.workspace_provenance.stop_when,
+        "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned"
+    );
+
+    for case in &cases.reopen_pairs.valid {
+        validate_storage_lifetime_reopen_pair_v4(&case.value).expect(&case.name);
+    }
+    for case in &cases.reopen_pairs.fail_closed {
+        assert!(
+            validate_storage_lifetime_reopen_pair_v4(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    assert_eq!(
+        cases.valid_lifecycle_operations,
+        [
+            "create",
+            "arm",
+            "batchSuccess",
+            "phaseAdvance",
+            "cancel",
+            "fail",
+            "failureRecordUnavailable",
+            "finalPublish",
+            "catchUpReset",
+            "append",
+        ]
+    );
+    for (index, phase) in STORAGE_LIFETIME_PHASES_V4.iter().enumerate() {
+        let cursor = serde_json::json!({
+            "schemaVersion": 4,
+            "cutoffEventRowid": 20,
+            "phase": phase,
+            "afterScanRowid": if index < STORAGE_LIFETIME_EVENT_ROWID_PHASES_V4.len() { 20 } else { 900 },
+            "scanExhausted": true,
+        });
+        validate_storage_lifetime_cursor_v4(&cursor).expect(phase);
+        if let Some(next_phase) = STORAGE_LIFETIME_PHASES_V4.get(index + 1) {
+            let next = serde_json::json!({
+                "schemaVersion": 4,
+                "cutoffEventRowid": 20,
+                "phase": next_phase,
+                "afterScanRowid": 0,
+                "scanExhausted": false,
+            });
+            validate_storage_lifetime_cursor_transition_v4(Some(&cursor), &next)
+                .expect("exact v6 phase order");
+        }
+    }
+
+    let pending_absent = serde_json::json!({"materializationState":"pending","job":null});
+    let ready_absent = serde_json::json!({"materializationState":"ready","job":null});
+    let created = v6_snapshot("pending", "indexSource", 0, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::Create,
+        &pending_absent,
+        &created,
+    )
+    .expect("create v6 job");
+    let armed = v6_snapshot("attempting", "indexSource", 0, false, 20);
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::Arm,
+        &created,
+        &armed,
+    )
+    .expect("arm v6 batch");
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::BatchSuccess,
+        &armed,
+        &v6_snapshot("pending", "indexSource", 1, false, 20),
+    )
+    .expect("commit source index batch");
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::CatchUpReset,
+        &v6_snapshot("pending", "verifySourceIndex", 20, true, 20),
+        &v6_snapshot("pending", "indexSource", 0, false, 21),
+    )
+    .expect("catch up restarts source index");
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::FinalPublish,
+        &v6_snapshot("pending", "verifyBaselines", 900, true, 20),
+        &ready_absent,
+    )
+    .expect("final publish");
+    validate_storage_lifetime_lifecycle_transition_v4(
+        StorageLifetimeLifecycleOperationV4::Append,
+        &ready_absent,
+        &pending_absent,
+    )
+    .expect("append invalidates ready");
+
+    for case in cases.invalid_preflight_mutations {
+        let mut invalid = manifest.migration.preflight.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_v6_preflight_policy_v1(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_policy_mutations {
+        let mut invalid = manifest.indexed_bounded_verification.clone();
+        set_value_path(&mut invalid, &case.path, case.replacement);
+        assert!(
+            validate_storage_lifetime_batch_policy_v4(&invalid).is_err(),
+            "{}",
+            case.name
+        );
+    }
+
+    let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read v6 migration");
+    let normalized = sql.to_ascii_uppercase();
+    assert!(sql.contains("CREATE TABLE event_source_index"));
+    assert!(sql.contains("CREATE INDEX event_source_index_aggregate_latest"));
+    assert!(sql.contains("CREATE UNIQUE INDEX event_source_index_message_unique"));
+    assert!(sql.contains("WHERE message_id IS NOT NULL"));
+    assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_update"));
+    assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_delete"));
+    assert!(sql.contains("'indexSource', 'verifySourceIndex'"));
+    assert!(sql.contains("CASE materialization_state WHEN 'ready' THEN 'pending'"));
+    assert!(!normalized.contains("INSERT INTO EVENT_SOURCE_INDEX"));
+    assert!(!normalized.contains("DELETE FROM EVENTS"));
+    assert!(!normalized.contains("ALTER TABLE PROJECTS"));
+    assert!(!normalized.contains("DROP TRIGGER EVENTS_"));
+}
+
+fn v6_snapshot(state: &str, phase: &str, after: u64, exhausted: bool, cutoff: u64) -> Value {
+    serde_json::json!({
+        "materializationState": "pending",
+        "job": {
+            "singleton": 1,
+            "jobId": "lifetime-v6",
+            "state": state,
+            "cutoffEventRowid": cutoff,
+            "phase": phase,
+            "afterScanRowid": after,
+            "scanExhausted": exhausted,
+            "failureKind": if state == "failed" { Value::String("contractValidation".to_string()) } else { Value::Null },
+            "createdAt": "2026-08-28T13:00:00Z",
+            "updatedAt": if state == "failed" { "2026-08-28T13:02:00Z" } else { "2026-08-28T13:01:00Z" },
+            "completedAt": if state == "failed" { Value::String("2026-08-28T13:02:00Z".to_string()) } else { Value::Null },
+        }
+    })
 }
 
 fn v5_snapshot_for_case(case: &V5CatchUpCase, cutoff: u64, phase: &str) -> Value {

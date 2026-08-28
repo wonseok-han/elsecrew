@@ -31,6 +31,7 @@ export const STORAGE_LIFETIME_TABLES_V3 = [
 ] as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V4 = 4 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V5 = 5 as const;
+export const STORAGE_LIFETIME_SCHEMA_VERSION_V6 = 6 as const;
 export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_LIFETIME_PHASES_V2 = [
@@ -67,6 +68,28 @@ export const STORAGE_LIFETIME_PROJECTION_ROWID_PHASES_V3 = [
 ] as const;
 export const STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V3 = [
   "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines",
+] as const;
+export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4 = 4 as const;
+export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V4 = 4 as const;
+export const STORAGE_LIFETIME_PHASES_V4 = [
+  "indexSource", "verifySourceIndex",
+  "receipts", "messages", "workspaces", "baselines", "verifySource",
+  "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+  "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines",
+] as const;
+export const STORAGE_LIFETIME_EVENT_ROWID_PHASES_V4 = [
+  "indexSource", "verifySourceIndex",
+  "receipts", "messages", "workspaces", "baselines", "verifySource",
+] as const;
+export const STORAGE_LIFETIME_PROJECTION_ROWID_PHASES_V4 = [
+  "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+] as const;
+export const STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V4 = [
+  "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines",
+] as const;
+export const STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1 = [
+  "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
+  "aggregate_sequence", "message_id",
 ] as const;
 export const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2 = "sha256" as const;
 export const OPERATION_RECEIPT_DIGEST_VERSION_V2 = 1 as const;
@@ -137,6 +160,7 @@ export type StorageLifetimeJobStateV1 = typeof STORAGE_LIFETIME_JOB_STATES_V1[nu
 export type StorageLifetimePhaseV2 = typeof STORAGE_LIFETIME_PHASES_V2[number];
 export type StorageLifetimeJobStateV2 = typeof STORAGE_LIFETIME_JOB_STATES_V2[number];
 export type StorageLifetimePhaseV3 = typeof STORAGE_LIFETIME_PHASES_V3[number];
+export type StorageLifetimePhaseV4 = typeof STORAGE_LIFETIME_PHASES_V4[number];
 export type StorageMaterializationStateV1 = typeof STORAGE_MATERIALIZATION_STATES_V1[number];
 export type StorageLifetimeLifecycleOperationV1 =
   | "create"
@@ -169,6 +193,7 @@ export type StorageLifetimeLifecycleOperationV3 =
   | "finalPublish"
   | "catchUpReset"
   | "append";
+export type StorageLifetimeLifecycleOperationV4 = StorageLifetimeLifecycleOperationV3;
 
 export interface StorageLifetimeCursorV1 {
   schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1;
@@ -249,6 +274,43 @@ export interface StorageLifetimeMaterializationSnapshotV3 {
   job: StorageLifetimeMaterializationJobV3 | null;
 }
 
+export interface StorageLifetimeCursorV4 {
+  schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4;
+  cutoffEventRowid: number;
+  phase: StorageLifetimePhaseV4;
+  afterScanRowid: number;
+  scanExhausted: boolean;
+}
+
+export interface StorageLifetimeMaterializationJobV4 {
+  singleton: 1;
+  jobId: string;
+  state: StorageLifetimeJobStateV2;
+  cutoffEventRowid: number;
+  phase: StorageLifetimePhaseV4;
+  afterScanRowid: number;
+  scanExhausted: boolean;
+  failureKind: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface StorageLifetimeMaterializationSnapshotV4 {
+  materializationState: StorageMaterializationStateV1;
+  job: StorageLifetimeMaterializationJobV4 | null;
+}
+
+export interface StorageEventSourceIndexEntryV1 {
+  eventRowid: number;
+  eventId: string;
+  operationId: string;
+  aggregateType: string;
+  aggregateId: string;
+  aggregateSequence: number;
+  messageId: string | null;
+}
+
 export interface StorageLifetimeV3PreflightPolicyV1 {
   schema: "exactStorageV2";
   allowedMaterializationStates: readonly ["pending", "ready"];
@@ -282,6 +344,26 @@ export interface StorageLifetimeV5PreflightPolicyV1 {
     "legacyDerivedVerificationRestartsVerifySourceAtZeroUnexhausted",
     "pendingAttemptingFailedStatePreserved",
     "failureEvidencePreserved",
+  ];
+  reopenRunnablePairs: readonly ["ready+absent", "pending+absent", "pending+pending"];
+  reopenFailClosedPairs: readonly ["pending+attempting", "pending+failed"];
+  timing: "beforeAnyDdlOrMutation";
+}
+
+export interface StorageLifetimeV6PreflightPolicyV1 {
+  schema: "exactStorageV5";
+  admissiblePairs: readonly [
+    "ready+absent", "pending+absent", "pending+pending", "pending+attempting",
+    "pending+failed",
+  ];
+  migrationMappings: readonly [
+    "readyAbsentBecomesPendingAbsent",
+    "pendingAbsentPreserved",
+    "everyPresentJobRestartsIndexSourceAtZeroUnexhausted",
+    "pendingAttemptingFailedStatePreserved",
+    "jobIdentityAndTimestampsPreserved",
+    "failureEvidencePreserved",
+    "existingEventHistoryNotBackfilledByMigration",
   ];
   reopenRunnablePairs: readonly ["ready+absent", "pending+absent", "pending+pending"];
   reopenFailClosedPairs: readonly ["pending+attempting", "pending+failed"];
@@ -537,6 +619,35 @@ export function validateStorageLifetimeV5PreflightPolicyV1(
     fail("storage lifetime v5 preflight policy is not fail-closed");
   }
   return policy as unknown as StorageLifetimeV5PreflightPolicyV1;
+}
+
+export function validateStorageLifetimeV6PreflightPolicyV1(
+  value: unknown,
+): StorageLifetimeV6PreflightPolicyV1 {
+  const policy = requireObject(value, "storage lifetime v6 preflight policy");
+  const expected = {
+    schema: "exactStorageV5",
+    admissiblePairs: [
+      "ready+absent", "pending+absent", "pending+pending", "pending+attempting",
+      "pending+failed",
+    ],
+    migrationMappings: [
+      "readyAbsentBecomesPendingAbsent",
+      "pendingAbsentPreserved",
+      "everyPresentJobRestartsIndexSourceAtZeroUnexhausted",
+      "pendingAttemptingFailedStatePreserved",
+      "jobIdentityAndTimestampsPreserved",
+      "failureEvidencePreserved",
+      "existingEventHistoryNotBackfilledByMigration",
+    ],
+    reopenRunnablePairs: ["ready+absent", "pending+absent", "pending+pending"],
+    reopenFailClosedPairs: ["pending+attempting", "pending+failed"],
+    timing: "beforeAnyDdlOrMutation",
+  };
+  if (!sameContractValue(policy, expected)) {
+    fail("storage lifetime v6 preflight policy is not fail-closed");
+  }
+  return policy as unknown as StorageLifetimeV6PreflightPolicyV1;
 }
 
 export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetimeCursorV1 {
@@ -1608,6 +1719,466 @@ function requireSameJobIdentityV3(
   if (previous.singleton !== next.singleton || previous.jobId !== next.jobId
     || previous.createdAt !== next.createdAt) {
     fail("storage lifetime v5 transition cannot replace job identity");
+  }
+}
+
+const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
+  schemaVersion: STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V4,
+  casesFile: "cases.json",
+  guards: {
+    maxRowsPerBatch: STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+    maxCanonicalPayloadBytesPerBatch:
+      STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+    callerConfigurable: false,
+    appliesToPhases: STORAGE_LIFETIME_PHASES_V4,
+  },
+  cursor: {
+    schemaVersion: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4,
+    column: "after_scan_rowid",
+    phases: STORAGE_LIFETIME_PHASES_V4,
+    eventRowidPhases: STORAGE_LIFETIME_EVENT_ROWID_PHASES_V4,
+    projectionRowidPhases: STORAGE_LIFETIME_PROJECTION_ROWID_PHASES_V4,
+    derivedRowidPhases: STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V4,
+    phaseStartAfterScanRowid: 0,
+    phaseStartScanExhausted: false,
+    scanExhaustedMutationAuthority: "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+    phaseTransition: "scanExhaustedTrueThenExactNextAtZeroAndFalse",
+  },
+  sourceIndex: {
+    table: "event_source_index",
+    columns: STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1,
+    identity: "eventRowidEventIdOperationIdAndAggregateTupleExact",
+    messageId: "nullableExactLastMessageIdFromCanonicalChatPayload",
+    historyBackfillByMigration: false,
+    historyBackfillPhase: "indexSource",
+    indexSourceWrite: "insertOrExactExistingNoOpOtherwiseConflict",
+    verificationPhase: "verifySourceIndex",
+    aggregateLatestIndex: "event_source_index_aggregate_latest",
+    messageUniqueIndex: "event_source_index_message_unique",
+    mutationGuards: [
+      "event_source_index_append_only_update",
+      "event_source_index_append_only_delete",
+    ],
+  },
+  scan: {
+    sourcePredicate: "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
+    sourceIndexPredicate: "event_rowid > afterScanRowid AND event_rowid <= cutoffEventRowid",
+    tablePredicate: "rowid > afterScanRowid",
+    orderBy: "rowid",
+    limitSql: STORAGE_LIFETIME_KEYSET_LIMIT_SQL_V2,
+    privateEmptyWitness: "sameBeginImmediateTransaction",
+    forbidden: [
+      "OFFSET", "COUNT", "window", "GROUP BY", "antiJoin",
+      "unboundedFullTableScan", "unboundedNamespaceQuery",
+    ],
+  },
+  appendAtomicity: {
+    transaction: "sameBeginImmediateAsEventProjectionAndReadyInvalidation",
+    eventInsert: "requiresExactSourceIndexInsertBeforeCommit",
+    duplicateNoOp: "noSourceIndexMutation",
+    conflict: "rollbackEventProjectionSourceIndexAndReadiness",
+    messageIdentityConflict: "rollbackWholeAppend",
+  },
+  workspaceProvenance: {
+    lookup: "latestProjectSourceByAggregateLatestIndex",
+    payloadFetch: "singleEventsRowidLookup",
+    payloadLimitBytes: STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+    comparison: "rustExactCanonicalProjectPayloadAndWorkspaceProjectId",
+    stopWhen: "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned",
+  },
+  queryPlanAcceptance: {
+    mode: "exactExplainQueryPlanDetail",
+    indexSource: "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+    verifySourceIndex:
+      "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+    latestAggregate:
+      "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)",
+    messageIdentity:
+      "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)",
+    payloadByRowid: "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
+    reject: ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"],
+  },
+  maxEventRowidFence: {
+    transaction: "BEGIN IMMEDIATE",
+    requiredBefore: [
+      "enterVerifySourceIndex", "enterVerifySource",
+      "everyProjectionOrDerivedVerificationBatch", "finalPublication",
+    ],
+    equal: "continue",
+    less: "contractError",
+    greater: "sameSingletonPendingIndexSourceNewCutoffZeroUnexhaustedNoFailure",
+    frozenMaterializationPhases: "mayContinueAtExistingCutoff",
+    appendSerialization: "BEGIN IMMEDIATESerializesAppendDuringBatch",
+    normalWorkerCheckState: "pendingBeforeArm",
+    armToBatch: "sameSynchronousSidecarOwnerImmediatelyEntersBatch",
+    attemptingCatchUpReset: "forbidden",
+    attemptingOnReopen: "failClosed",
+  },
+  verification: {
+    verifySourceIndex: {
+      boundedBy: "eventSourceIndexEventRowidAtOrBelowCutoff",
+      requires: [
+        "oneExactIndexRowPerEvent", "exactIdentityAndAggregateTuple",
+        "exactNullableMessageId", "noSourceLessIndexRow",
+      ],
+    },
+    verifySource: {
+      boundedBy: "eventsRowidAtOrBelowCutoff",
+      requires: [
+        "exactAggregateSequenceAndPredecessor", "requiredDerivedPresence",
+        "latestEventHasProjectionRow", "appInstanceSourceHasAppInstancesRow",
+      ],
+      forbidden: ["liveProjectionTableFullScan", "antiJoin"],
+    },
+    projectionPhaseTables: {
+      verifyProjects: "projects",
+      verifyChats: "chats",
+      verifyRuns: "runs",
+      verifyLocks: "locks",
+      verifyAppInstances: "app_instances",
+    },
+    projectionRule:
+      "eachRowMatchesLatestExactSourceEventAtOrBelowCutoffIncludingMirroredAndIndexedColumns",
+    projectionColumns: {
+      projects: ["project_id", "canonical_path", "projection_json", "last_event_sequence"],
+      chats: ["chat_id", "project_id", "projection_json", "last_event_sequence"],
+      runs: [
+        "run_id", "chat_id", "state", "worktree_path", "projection_json",
+        "last_event_sequence",
+      ],
+      locks: [
+        "lock_id", "project_id", "writer_run_id", "worktree_path", "poisoned",
+        "recovery_required", "evidence_json", "projection_json", "last_event_sequence",
+      ],
+      app_instances: [
+        "sidecar_instance_id", "pid", "platform", "started_at", "heartbeat_at",
+        "clean_shutdown_at", "last_event_sequence",
+      ],
+    },
+    derivedPhaseTables: {
+      verifyReceipts: "operation_receipts",
+      verifyMessages: "chat_messages",
+      verifyWorkspaces: "prepared_workspaces",
+      verifyBaselines: "ledger_baselines",
+    },
+    missingProjectionDetection: "verifySourceLatestSourcePresence",
+    extraOrSourceLessDetection: "exactProjectionTablePhase",
+    historicalBaseline: "allowedWhenDeterministicDigestValidAndSourceBacked",
+    newestBaseline: "requiredForEveryCompactableAggregate",
+  },
+  snapshotAggregates: {
+    includedProjectionTables: ["projects", "chats", "runs", "locks"],
+    excludedProjectionTables: ["app_instances", "event_source_index"],
+    exclusionReason: "lifecycleAndSourceIndexTablesAreNotMaterializedSnapshotAggregates",
+  },
+  transaction: {
+    arm: "pendingToAttemptingCommittedBeforeBatch",
+    success: "verifiedRowsCursorAndAttemptingToPendingAtomic",
+    nonemptyBatchScanExhausted: false,
+    emptyBatchScanExhausted: "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+    cancellation: "rollbackBatchOrSavepointThenCommitAttemptingToPending",
+    terminalValidationFailure: "rollbackBatchThenCommitAttemptingToFailed",
+    failureRecordUnavailable: "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
+    reopenAttempting: "failClosedNonRunnable",
+    reopenFailed: "failClosedNonRunnable",
+  },
+  finalPublication: {
+    transaction: "shortBeginImmediateOnly",
+    preconditions: [
+      "exactMetaJobPairAndCursor",
+      "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+      "scanExhaustedTrue", "maxEventRowidEqualsCutoff", "cancelBeforeMutation",
+      "precommitCancel",
+    ],
+    mutation: "deleteJobAndSetMetaReady",
+    forbiddenWork: ["artifactScan", "tableScan", "count"],
+  },
+  activation: {
+    cleanupEnabled: false,
+    deletionEnabled: false,
+    compactionEnabled: false,
+    wireEnabled: false,
+    schedulerEnabled: false,
+  },
+} as const;
+
+export function validateStorageLifetimeBatchPolicyV4(value: unknown): Record<string, unknown> {
+  const policy = requireObject(value, "storage lifetime v6 indexed bounded policy");
+  if (!sameContractValue(policy, STORAGE_LIFETIME_BATCH_POLICY_V4)) {
+    fail("storage lifetime v6 policy contradicts indexed bounded verification");
+  }
+  return policy;
+}
+
+export function validateStorageEventSourceIndexEntryV1(
+  value: unknown,
+): StorageEventSourceIndexEntryV1 {
+  const entry = requireObject(value, "event source index entry");
+  exactKeys(entry, [
+    "eventRowid", "eventId", "operationId", "aggregateType", "aggregateId",
+    "aggregateSequence", "messageId",
+  ]);
+  const eventRowid = requireSafeUnsigned(entry.eventRowid, "sourceIndex.eventRowid");
+  const aggregateSequence = requireSafeUnsigned(
+    entry.aggregateSequence,
+    "sourceIndex.aggregateSequence",
+  );
+  if (eventRowid === 0 || aggregateSequence === 0
+    || ![entry.eventId, entry.operationId, entry.aggregateType, entry.aggregateId]
+      .every((field) => typeof field === "string" && field.length > 0)
+    || !(entry.messageId === null
+      || (typeof entry.messageId === "string" && entry.messageId.length > 0))) {
+    fail("event source index identity and aggregate tuple must be non-empty and positive");
+  }
+  return entry as unknown as StorageEventSourceIndexEntryV1;
+}
+
+export function validateStorageLifetimeWorkspaceProjectSourceV1(
+  projectId: string,
+  sourceAggregateType: string,
+  sourceAggregateId: string,
+  canonicalPayload: string,
+): Record<string, unknown> {
+  if (projectId.length === 0 || sourceAggregateType !== "project" || sourceAggregateId !== projectId) {
+    fail("workspace provenance requires the indexed latest source for the exact project identity");
+  }
+  if (new TextEncoder().encode(canonicalPayload).byteLength
+    > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1) {
+    fail("workspace project source payload exceeds 1 MiB");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(canonicalPayload);
+  } catch {
+    fail("workspace project source payload must be valid JSON");
+  }
+  const object = requireObject(payload, "workspace project source payload");
+  if (canonicalJsonV1(payload) !== canonicalPayload || object.project_id !== projectId
+    || typeof object.canonical_path !== "string" || object.canonical_path.length === 0) {
+    fail("workspace provenance requires an exact canonical project payload");
+  }
+  return object;
+}
+
+export function validateStorageLifetimeCursorV4(value: unknown): StorageLifetimeCursorV4 {
+  const cursor = requireObject(value, "storage lifetime v6 cursor");
+  exactKeys(cursor, [
+    "schemaVersion", "cutoffEventRowid", "phase", "afterScanRowid", "scanExhausted",
+  ]);
+  if (cursor.schemaVersion !== STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4) {
+    fail("storage lifetime v6 cursor schemaVersion must be 4");
+  }
+  const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "cursor.cutoffEventRowid");
+  const after = requireSafeUnsigned(cursor.afterScanRowid, "cursor.afterScanRowid");
+  if (typeof cursor.scanExhausted !== "boolean") {
+    fail("storage lifetime v6 cursor scanExhausted must be boolean");
+  }
+  if (!STORAGE_LIFETIME_PHASES_V4.includes(cursor.phase as StorageLifetimePhaseV4)) {
+    fail("storage lifetime v6 cursor phase is invalid");
+  }
+  if (STORAGE_LIFETIME_EVENT_ROWID_PHASES_V4.includes(
+    cursor.phase as typeof STORAGE_LIFETIME_EVENT_ROWID_PHASES_V4[number],
+  ) && after > cutoff) {
+    fail("event-derived storage lifetime v6 cursor cannot exceed cutoffEventRowid");
+  }
+  return cursor as unknown as StorageLifetimeCursorV4;
+}
+
+export function validateStorageLifetimeCursorTransitionV4(
+  previousValue: unknown | null,
+  nextValue: unknown,
+): StorageLifetimeCursorV4 {
+  const next = validateStorageLifetimeCursorV4(nextValue);
+  if (previousValue === null) {
+    if (next.phase !== "indexSource" || next.afterScanRowid !== 0 || next.scanExhausted) {
+      fail("storage lifetime v6 initial cursor must start unexhausted indexSource at zero");
+    }
+    return next;
+  }
+  const previous = validateStorageLifetimeCursorV4(previousValue);
+  if (next.cutoffEventRowid !== previous.cutoffEventRowid) {
+    fail("storage lifetime v6 batch transition cannot change the frozen cutoff");
+  }
+  if (next.phase === previous.phase) {
+    if (previous.scanExhausted || next.scanExhausted
+      || next.afterScanRowid <= previous.afterScanRowid) {
+      fail("storage lifetime v6 same-phase cursor must advance afterScanRowid");
+    }
+    return next;
+  }
+  const previousIndex = STORAGE_LIFETIME_PHASES_V4.indexOf(previous.phase);
+  if (!previous.scanExhausted || next.scanExhausted
+    || STORAGE_LIFETIME_PHASES_V4[previousIndex + 1] !== next.phase
+    || next.afterScanRowid !== 0) {
+    fail("storage lifetime v6 phase transition requires exhausted current phase and unexhausted exact next phase at zero");
+  }
+  return next;
+}
+
+export function validateStorageLifetimeMaterializationJobV4(
+  value: unknown,
+): StorageLifetimeMaterializationJobV4 {
+  const job = requireObject(value, "storage lifetime v6 materialization job");
+  exactKeys(job, [
+    "singleton", "jobId", "state", "cutoffEventRowid", "phase", "afterScanRowid",
+    "scanExhausted", "failureKind", "createdAt", "updatedAt", "completedAt",
+  ]);
+  if (job.singleton !== 1 || typeof job.jobId !== "string" || job.jobId.length === 0) {
+    fail("storage lifetime v6 job requires singleton 1 and non-empty jobId");
+  }
+  if (!STORAGE_LIFETIME_JOB_STATES_V2.includes(job.state as StorageLifetimeJobStateV2)) {
+    fail("storage lifetime v6 job state is invalid");
+  }
+  validateStorageLifetimeCursorV4({
+    schemaVersion: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4,
+    cutoffEventRowid: job.cutoffEventRowid,
+    phase: job.phase,
+    afterScanRowid: job.afterScanRowid,
+    scanExhausted: job.scanExhausted,
+  });
+  requireTimestamp(job.createdAt, "job.createdAt");
+  requireTimestamp(job.updatedAt, "job.updatedAt");
+  if (job.state === "failed") {
+    if (typeof job.failureKind !== "string"
+      || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(job.failureKind)) {
+      fail("failed storage lifetime v6 job requires sanitized failureKind");
+    }
+    requireTimestamp(job.completedAt, "job.completedAt");
+  } else if (job.failureKind !== null || job.completedAt !== null) {
+    fail("pending or attempting storage lifetime v6 job cannot carry terminal evidence");
+  }
+  return job as unknown as StorageLifetimeMaterializationJobV4;
+}
+
+export function validateStorageLifetimeMaterializationPairV4(
+  value: unknown,
+): StorageLifetimeMaterializationSnapshotV4 {
+  const snapshot = requireObject(value, "storage lifetime v6 materialization pair");
+  exactKeys(snapshot, ["materializationState", "job"]);
+  if (!STORAGE_MATERIALIZATION_STATES_V1.includes(
+    snapshot.materializationState as StorageMaterializationStateV1,
+  )) fail("storage materialization state is invalid");
+  const job = snapshot.job === null ? null : validateStorageLifetimeMaterializationJobV4(snapshot.job);
+  if (!(snapshot.materializationState === "pending"
+    || (snapshot.materializationState === "ready" && job === null))) {
+    fail("storage lifetime v6 meta/job pairing is fail-closed");
+  }
+  return { materializationState: snapshot.materializationState, job } as
+    StorageLifetimeMaterializationSnapshotV4;
+}
+
+export function validateStorageLifetimeReopenPairV4(
+  value: unknown,
+): StorageLifetimeMaterializationSnapshotV4 {
+  const snapshot = validateStorageLifetimeMaterializationPairV4(value);
+  if (snapshot.job?.state === "attempting" || snapshot.job?.state === "failed") {
+    fail("storage lifetime v6 reopen refuses attempting or failed job");
+  }
+  return snapshot;
+}
+
+export function validateStorageLifetimeLifecycleTransitionV4(
+  operation: StorageLifetimeLifecycleOperationV4,
+  previousValue: unknown,
+  nextValue: unknown,
+): StorageLifetimeMaterializationSnapshotV4 {
+  const previous = validateStorageLifetimeMaterializationPairV4(previousValue);
+  const next = validateStorageLifetimeMaterializationPairV4(nextValue);
+  const previousJob = previous.job;
+  const nextJob = next.job;
+  if (operation === "create") {
+    if (previous.materializationState !== "pending" || previousJob !== null
+      || next.materializationState !== "pending" || nextJob?.state !== "pending") {
+      fail("storage lifetime v6 create requires pending absent to pending job");
+    }
+    validateStorageLifetimeCursorTransitionV4(null, jobCursorV4(nextJob));
+    return next;
+  }
+  if (operation === "append") {
+    const invalidateReady = previous.materializationState === "ready" && previousJob === null
+      && next.materializationState === "pending" && nextJob === null;
+    if (!invalidateReady && !sameContractValue(previous, next)) {
+      fail("storage lifetime v6 append must atomically index source and invalidate ready or preserve pending exactly");
+    }
+    return next;
+  }
+  if (operation === "failureRecordUnavailable") {
+    if (previousJob?.state !== "attempting" || !sameContractValue(previous, next)) {
+      fail("failure record unavailable must leave the durable attempting sentinel unchanged");
+    }
+    return next;
+  }
+  if (operation === "finalPublish") {
+    if (previousJob?.state !== "pending" || previousJob.phase !== "verifyBaselines"
+      || !previousJob.scanExhausted || next.materializationState !== "ready" || nextJob !== null) {
+      fail("storage lifetime v6 final publication requires exhausted verifyBaselines");
+    }
+    return next;
+  }
+  if (previousJob === null || nextJob === null) {
+    fail(`storage lifetime v6 ${operation} requires a pending meta/job pair`);
+  }
+  requireSameJobIdentityV4(previousJob, nextJob);
+  if (operation === "arm") {
+    if (previousJob.state !== "pending" || nextJob.state !== "attempting"
+      || previousJob.scanExhausted || nextJob.scanExhausted
+      || !sameContractValue(jobCursorV4(previousJob), jobCursorV4(nextJob))) {
+      fail("storage lifetime v6 arm must preserve an unexhausted cursor");
+    }
+  } else if (operation === "batchSuccess") {
+    if (previousJob.state !== "attempting" || nextJob.state !== "pending") {
+      fail("storage lifetime v6 batch success must commit attempting to pending");
+    }
+    validateStorageLifetimeCursorTransitionV4(jobCursorV4(previousJob), jobCursorV4(nextJob));
+  } else if (operation === "phaseAdvance") {
+    if (previousJob.state !== "pending" || nextJob.state !== "pending") {
+      fail("storage lifetime v6 phase advance requires pending jobs");
+    }
+    validateStorageLifetimeCursorTransitionV4(jobCursorV4(previousJob), jobCursorV4(nextJob));
+  } else if (operation === "cancel") {
+    if (previousJob.state !== "attempting" || nextJob.state !== "pending"
+      || !sameContractValue(jobCursorV4(previousJob), jobCursorV4(nextJob))) {
+      fail("storage lifetime v6 cancellation must restore the same cursor");
+    }
+  } else if (operation === "fail") {
+    if (previousJob.state !== "attempting" || nextJob.state !== "failed"
+      || !sameContractValue(jobCursorV4(previousJob), jobCursorV4(nextJob))) {
+      fail("storage lifetime v6 terminal failure must preserve the cursor");
+    }
+  } else if (operation === "catchUpReset") {
+    if (previousJob.state !== "pending" || !isVerificationPhaseV4(previousJob.phase)
+      || nextJob.state !== "pending" || nextJob.cutoffEventRowid <= previousJob.cutoffEventRowid
+      || nextJob.phase !== "indexSource" || nextJob.afterScanRowid !== 0
+      || nextJob.scanExhausted) {
+      fail("storage lifetime v6 catch-up reset requires verification drift and a larger cutoff");
+    }
+  } else {
+    fail("storage lifetime v6 lifecycle operation is invalid");
+  }
+  return next;
+}
+
+function isVerificationPhaseV4(phase: StorageLifetimePhaseV4): boolean {
+  return !["indexSource", "receipts", "messages", "workspaces", "baselines"].includes(phase);
+}
+
+function jobCursorV4(job: StorageLifetimeMaterializationJobV4): StorageLifetimeCursorV4 {
+  return {
+    schemaVersion: STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V4,
+    cutoffEventRowid: job.cutoffEventRowid,
+    phase: job.phase,
+    afterScanRowid: job.afterScanRowid,
+    scanExhausted: job.scanExhausted,
+  };
+}
+
+function requireSameJobIdentityV4(
+  previous: StorageLifetimeMaterializationJobV4,
+  next: StorageLifetimeMaterializationJobV4,
+): void {
+  if (previous.singleton !== next.singleton || previous.jobId !== next.jobId
+    || previous.createdAt !== next.createdAt) {
+    fail("storage lifetime v6 transition cannot replace job identity");
   }
 }
 

@@ -1,0 +1,171 @@
+{
+  "migrationMatrix": {
+    "jobStates": ["pending", "attempting", "failed"],
+    "v5Phases": [
+      "receipts", "messages", "workspaces", "baselines", "verifySource",
+      "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+      "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+    ],
+    "presentJobMapping": "indexSourceZeroUnexhausted",
+    "stateIdentityTimestampsFailureEvidence": "preserve",
+    "absentMappings": [
+      { "from": "ready+absent", "to": "pending+absent" },
+      { "from": "pending+absent", "to": "pending+absent" }
+    ],
+    "historyBackfillRows": 0
+  },
+  "phaseOrder": [
+    "indexSource", "verifySourceIndex",
+    "receipts", "messages", "workspaces", "baselines", "verifySource",
+    "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+    "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+  ],
+  "sourceIndex": {
+    "columns": [
+      "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
+      "aggregate_sequence", "message_id"
+    ],
+    "validRows": [
+      {
+        "name": "project source without message",
+        "value": [1, "evt_project_1", "op_project_1", "project", "project_1", 1, null]
+      },
+      {
+        "name": "chat source with exact message",
+        "value": [2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_1"]
+      }
+    ],
+    "duplicateConflicts": ["event_rowid", "event_id", "operation_id", "aggregateTuple", "message_id"],
+    "mutationGuards": ["update", "delete"]
+  },
+  "queryPlans": [
+    {
+      "name": "index source keyset",
+      "sql": "EXPLAIN QUERY PLAN SELECT rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,canonical_json_payload FROM events WHERE rowid>0 AND rowid<=20 ORDER BY rowid LIMIT 100",
+      "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
+    },
+    {
+      "name": "verify source index keyset",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,message_id FROM event_source_index WHERE event_rowid>0 AND event_rowid<=20 ORDER BY event_rowid LIMIT 100",
+      "detail": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
+    },
+    {
+      "name": "latest project source",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE aggregate_type='project' AND aggregate_id='project_1' ORDER BY event_rowid DESC LIMIT 1",
+      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)"
+    },
+    {
+      "name": "message identity",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE message_id='message_1'",
+      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)"
+    },
+    {
+      "name": "single payload by rowid",
+      "sql": "EXPLAIN QUERY PLAN SELECT canonical_json_payload FROM events WHERE rowid=1",
+      "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)"
+    }
+  ],
+  "workspaceProvenance": {
+    "projectId": "project_1",
+    "canonicalPayload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
+    "payloadBytes": 57,
+    "maxPayloadBytes": 1048576,
+    "comparison": "rustExactCanonicalProjectPayloadAndWorkspaceProjectId",
+    "removalsLegal": false,
+    "stopWhen": "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned"
+  },
+  "reopenPairs": {
+    "valid": [
+      { "name": "ready absent", "value": { "materializationState": "ready", "job": null } },
+      { "name": "pending absent", "value": { "materializationState": "pending", "job": null } },
+      { "name": "pending runnable", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "pending", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:01:00Z", "completedAt": null } } }
+    ],
+    "failClosed": [
+      { "name": "attempting sentinel", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "attempting", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": null, "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:01:00Z", "completedAt": null } } },
+      { "name": "failed terminal", "value": { "materializationState": "pending", "job": { "singleton": 1, "jobId": "lifetime-v6", "state": "failed", "cutoffEventRowid": 20, "phase": "indexSource", "afterScanRowid": 0, "scanExhausted": false, "failureKind": "contractValidation", "createdAt": "2026-08-28T13:00:00Z", "updatedAt": "2026-08-28T13:02:00Z", "completedAt": "2026-08-28T13:02:00Z" } } }
+    ]
+  },
+  "validLifecycleOperations": [
+    "create", "arm", "batchSuccess", "phaseAdvance", "cancel", "fail",
+    "failureRecordUnavailable", "finalPublish", "catchUpReset", "append"
+  ],
+  "invalidPreflightMutations": [
+    {
+      "name": "ready history trusted",
+      "path": ["migrationMappings", "0"],
+      "replacement": "readyAbsentPreserved"
+    },
+    {
+      "name": "present job progress trusted",
+      "path": ["migrationMappings", "2"],
+      "replacement": "presentJobPositionPreserved"
+    },
+    {
+      "name": "attempting made runnable",
+      "path": ["reopenRunnablePairs", "2"],
+      "replacement": "pending+attempting"
+    },
+    {
+      "name": "preflight after mutation",
+      "path": ["timing"],
+      "replacement": "afterDdl"
+    }
+  ],
+  "invalidPolicyMutations": [
+    {
+      "name": "source index phase skipped",
+      "path": ["cursor", "phases", "0"],
+      "replacement": "verifySourceIndex"
+    },
+    {
+      "name": "history backfilled during migration",
+      "path": ["sourceIndex", "historyBackfillByMigration"],
+      "replacement": true
+    },
+    {
+      "name": "message uniqueness relaxed",
+      "path": ["sourceIndex", "messageUniqueIndex"],
+      "replacement": "none"
+    },
+    {
+      "name": "indexed append cannot be replayed exactly",
+      "path": ["sourceIndex", "indexSourceWrite"],
+      "replacement": "insertOnly"
+    },
+    {
+      "name": "append index split transaction",
+      "path": ["appendAtomicity", "transaction"],
+      "replacement": "laterTransaction"
+    },
+    {
+      "name": "workspace provenance scans events",
+      "path": ["workspaceProvenance", "lookup"],
+      "replacement": "fullEventsScan"
+    },
+    {
+      "name": "removal stop condition omitted",
+      "path": ["workspaceProvenance", "stopWhen"],
+      "replacement": "continue"
+    },
+    {
+      "name": "query plan accepts scan",
+      "path": ["queryPlanAcceptance", "reject", "0"],
+      "replacement": "allowed"
+    },
+    {
+      "name": "catch up skips source indexing",
+      "path": ["maxEventRowidFence", "greater"],
+      "replacement": "sameSingletonPendingReceiptsNewCutoffZeroUnexhaustedNoFailure"
+    },
+    {
+      "name": "source index counted as snapshot aggregate",
+      "path": ["snapshotAggregates", "excludedProjectionTables", "1"],
+      "replacement": "none"
+    },
+    {
+      "name": "cleanup enabled",
+      "path": ["activation", "cleanupEnabled"],
+      "replacement": true
+    }
+  ]
+}

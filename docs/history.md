@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index contract)
+
+- **append-only source index 계약**: exact storage-v5에서 empty `event_source_index`만 추가하는 schema-only v6 migration을 고정했다. index row는 event rowid·event/operation identity·aggregate tuple·nullable public message identity를 exact하게 담고, aggregate 최신 source와 partial unique message lookup index 및 UPDATE/DELETE 거부 trigger를 둔다. migration은 기존 event를 backfill하지 않으며 ready+absent는 pending+absent로 무효화하고 모든 present job은 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed는 reopen fail-closed다.
+- **16단계·원자성·provenance 경계**: `indexSource → verifySourceIndex`를 기존 v5 14단계 앞에 추가했다. event append·projection·source-index insert·ready invalidation은 같은 `BEGIN IMMEDIATE`이고 exact 재처리는 no-op, identity/message conflict는 전체 rollback이다. prepared workspace는 aggregate latest index로 project source rowid 하나를 찾고, events PK로 최대 1 MiB canonical payload 하나만 읽어 Rust exact 비교한다. aggregate removal/tombstone이 합법화되면 source-index 의미를 versioning할 때까지 구현을 중단하도록 명시했다. 다섯 query는 exact `EXPLAIN QUERY PLAN` detail을 합격선으로 고정했다.
+- **golden 검증·범위**: Rust/TypeScript validator와 immutable storage-v6 manifest/migration/cases를 추가했다. 실제 SQLite에서 3 job state×14 v5 phase reset, pending/ready absent mapping, no-backfill, preserved rows/schema, unsafe pair/extra schema byte-zero 거부, append-only/unique guards, append rollback, exact query plans을 확인했고 v1~v5 fixture digest 불변도 고정했다. protocol 40개와 Node lifetime 15개, TypeScript no-emit, focused rustfmt·scoped strict clippy·`git diff --check`가 통과했다. unscoped `-D warnings` clippy는 변경 범위 밖 기존 lint 3건 때문에 실패했다. sidecar consumer·scheduler/wire/UI·cleanup/삭제/compaction은 변경하지 않았으며 다음은 독립 계약 리뷰 뒤 별도 v6 migration consumer다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 sidecar migration)
 
 - **exact v5 소비 구현**: `Storage::open`이 fresh/v2/v3/v4/v5를 exact predecessor schema와 canonical meta/job pair로 검증하고 v4→v5 fixture SQL을 원자 적용한다. v4는 어떤 target DDL보다 먼저 exact schema와 admissible `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 확인하며, current exact v5는 migration SQL 없이 schema와 reopen pair를 재검증한다.

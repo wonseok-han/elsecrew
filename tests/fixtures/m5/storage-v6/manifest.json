@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 6,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v5-to-v6.sql",
+    "predecessorMigrationFile": "../storage-v5/migration-v4-to-v5.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 5,
+    "toVersion": 6,
+    "mode": "exactV5AndAdmissiblePairPreflightThenSchemaOnlySourceIndexAndJobReset",
+    "preflight": {
+      "schema": "exactStorageV5",
+      "admissiblePairs": [
+        "ready+absent", "pending+absent", "pending+pending", "pending+attempting",
+        "pending+failed"
+      ],
+      "migrationMappings": [
+        "readyAbsentBecomesPendingAbsent",
+        "pendingAbsentPreserved",
+        "everyPresentJobRestartsIndexSourceAtZeroUnexhausted",
+        "pendingAttemptingFailedStatePreserved",
+        "jobIdentityAndTimestampsPreserved",
+        "failureEvidencePreserved",
+        "existingEventHistoryNotBackfilledByMigration"
+      ],
+      "reopenRunnablePairs": ["ready+absent", "pending+absent", "pending+pending"],
+      "reopenFailClosedPairs": ["pending+attempting", "pending+failed"],
+      "timing": "beforeAnyDdlOrMutation"
+    },
+    "idempotency": "exactStorageV6NoOpBeforeMigrationSql",
+    "partialExtraOrUnsafePair": "failClosedBeforeMutation",
+    "historyBackfill": "none",
+    "tablesAdded": ["event_source_index"],
+    "tablesRebuilt": ["storage_schema_meta", "lifetime_materialization_job"],
+    "indexesAdded": [
+      "event_source_index_aggregate_latest", "event_source_index_message_unique"
+    ],
+    "triggersAdded": [
+      "event_source_index_append_only_update", "event_source_index_append_only_delete"
+    ],
+    "preservedTables": [
+      "schema_meta", "app_instances", "events", "projects", "chats", "runs", "locks",
+      "ledger_baselines", "operation_receipts", "chat_messages", "prepared_workspaces",
+      "maintenance_jobs"
+    ],
+    "preservedIndexes": [
+      "chats_identity_project", "ledger_baselines_cutoff",
+      "operation_receipts_aggregate_sequence", "chat_messages_chat_sequence",
+      "prepared_workspaces_project_state", "maintenance_jobs_status_created"
+    ],
+    "preservedTriggers": ["events_are_append_only_update", "events_are_append_only_delete"],
+    "downgradePolicy": "openQuestion"
+  },
+  "indexedBoundedVerification": {
+    "schemaVersion": 4,
+    "casesFile": "cases.json",
+    "guards": {
+      "maxRowsPerBatch": 100,
+      "maxCanonicalPayloadBytesPerBatch": 1048576,
+      "callerConfigurable": false,
+      "appliesToPhases": [
+        "indexSource", "verifySourceIndex",
+        "receipts", "messages", "workspaces", "baselines", "verifySource",
+        "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+        "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+      ]
+    },
+    "cursor": {
+      "schemaVersion": 4,
+      "column": "after_scan_rowid",
+      "phases": [
+        "indexSource", "verifySourceIndex",
+        "receipts", "messages", "workspaces", "baselines", "verifySource",
+        "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances",
+        "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+      ],
+      "eventRowidPhases": [
+        "indexSource", "verifySourceIndex",
+        "receipts", "messages", "workspaces", "baselines", "verifySource"
+      ],
+      "projectionRowidPhases": [
+        "verifyProjects", "verifyChats", "verifyRuns", "verifyLocks", "verifyAppInstances"
+      ],
+      "derivedRowidPhases": [
+        "verifyReceipts", "verifyMessages", "verifyWorkspaces", "verifyBaselines"
+      ],
+      "phaseStartAfterScanRowid": 0,
+      "phaseStartScanExhausted": false,
+      "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "phaseTransition": "scanExhaustedTrueThenExactNextAtZeroAndFalse"
+    },
+    "sourceIndex": {
+      "table": "event_source_index",
+      "columns": [
+        "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
+        "aggregate_sequence", "message_id"
+      ],
+      "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
+      "messageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
+      "historyBackfillByMigration": false,
+      "historyBackfillPhase": "indexSource",
+      "indexSourceWrite": "insertOrExactExistingNoOpOtherwiseConflict",
+      "verificationPhase": "verifySourceIndex",
+      "aggregateLatestIndex": "event_source_index_aggregate_latest",
+      "messageUniqueIndex": "event_source_index_message_unique",
+      "mutationGuards": [
+        "event_source_index_append_only_update", "event_source_index_append_only_delete"
+      ]
+    },
+    "scan": {
+      "sourcePredicate": "rowid > afterScanRowid AND rowid <= cutoffEventRowid",
+      "sourceIndexPredicate": "event_rowid > afterScanRowid AND event_rowid <= cutoffEventRowid",
+      "tablePredicate": "rowid > afterScanRowid",
+      "orderBy": "rowid",
+      "limitSql": "LIMIT 100",
+      "privateEmptyWitness": "sameBeginImmediateTransaction",
+      "forbidden": [
+        "OFFSET", "COUNT", "window", "GROUP BY", "antiJoin",
+        "unboundedFullTableScan", "unboundedNamespaceQuery"
+      ]
+    },
+    "appendAtomicity": {
+      "transaction": "sameBeginImmediateAsEventProjectionAndReadyInvalidation",
+      "eventInsert": "requiresExactSourceIndexInsertBeforeCommit",
+      "duplicateNoOp": "noSourceIndexMutation",
+      "conflict": "rollbackEventProjectionSourceIndexAndReadiness",
+      "messageIdentityConflict": "rollbackWholeAppend"
+    },
+    "workspaceProvenance": {
+      "lookup": "latestProjectSourceByAggregateLatestIndex",
+      "payloadFetch": "singleEventsRowidLookup",
+      "payloadLimitBytes": 1048576,
+      "comparison": "rustExactCanonicalProjectPayloadAndWorkspaceProjectId",
+      "stopWhen": "aggregateRemovalOrTombstoneBecomesLegalUntilSourceIndexSemanticsAreVersioned"
+    },
+    "queryPlanAcceptance": {
+      "mode": "exactExplainQueryPlanDetail",
+      "indexSource": "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+      "verifySourceIndex": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+      "latestAggregate": "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)",
+      "messageIdentity": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)",
+      "payloadByRowid": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
+      "reject": ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"]
+    },
+    "maxEventRowidFence": {
+      "transaction": "BEGIN IMMEDIATE",
+      "requiredBefore": [
+        "enterVerifySourceIndex", "enterVerifySource",
+        "everyProjectionOrDerivedVerificationBatch", "finalPublication"
+      ],
+      "equal": "continue",
+      "less": "contractError",
+      "greater": "sameSingletonPendingIndexSourceNewCutoffZeroUnexhaustedNoFailure",
+      "frozenMaterializationPhases": "mayContinueAtExistingCutoff",
+      "appendSerialization": "BEGIN IMMEDIATESerializesAppendDuringBatch",
+      "normalWorkerCheckState": "pendingBeforeArm",
+      "armToBatch": "sameSynchronousSidecarOwnerImmediatelyEntersBatch",
+      "attemptingCatchUpReset": "forbidden",
+      "attemptingOnReopen": "failClosed"
+    },
+    "verification": {
+      "verifySourceIndex": {
+        "boundedBy": "eventSourceIndexEventRowidAtOrBelowCutoff",
+        "requires": [
+          "oneExactIndexRowPerEvent", "exactIdentityAndAggregateTuple",
+          "exactNullableMessageId", "noSourceLessIndexRow"
+        ]
+      },
+      "verifySource": {
+        "boundedBy": "eventsRowidAtOrBelowCutoff",
+        "requires": [
+          "exactAggregateSequenceAndPredecessor", "requiredDerivedPresence",
+          "latestEventHasProjectionRow", "appInstanceSourceHasAppInstancesRow"
+        ],
+        "forbidden": ["liveProjectionTableFullScan", "antiJoin"]
+      },
+      "projectionPhaseTables": {
+        "verifyProjects": "projects",
+        "verifyChats": "chats",
+        "verifyRuns": "runs",
+        "verifyLocks": "locks",
+        "verifyAppInstances": "app_instances"
+      },
+      "projectionRule": "eachRowMatchesLatestExactSourceEventAtOrBelowCutoffIncludingMirroredAndIndexedColumns",
+      "projectionColumns": {
+        "projects": ["project_id", "canonical_path", "projection_json", "last_event_sequence"],
+        "chats": ["chat_id", "project_id", "projection_json", "last_event_sequence"],
+        "runs": [
+          "run_id", "chat_id", "state", "worktree_path", "projection_json",
+          "last_event_sequence"
+        ],
+        "locks": [
+          "lock_id", "project_id", "writer_run_id", "worktree_path", "poisoned",
+          "recovery_required", "evidence_json", "projection_json", "last_event_sequence"
+        ],
+        "app_instances": [
+          "sidecar_instance_id", "pid", "platform", "started_at", "heartbeat_at",
+          "clean_shutdown_at", "last_event_sequence"
+        ]
+      },
+      "derivedPhaseTables": {
+        "verifyReceipts": "operation_receipts",
+        "verifyMessages": "chat_messages",
+        "verifyWorkspaces": "prepared_workspaces",
+        "verifyBaselines": "ledger_baselines"
+      },
+      "missingProjectionDetection": "verifySourceLatestSourcePresence",
+      "extraOrSourceLessDetection": "exactProjectionTablePhase",
+      "historicalBaseline": "allowedWhenDeterministicDigestValidAndSourceBacked",
+      "newestBaseline": "requiredForEveryCompactableAggregate"
+    },
+    "snapshotAggregates": {
+      "includedProjectionTables": ["projects", "chats", "runs", "locks"],
+      "excludedProjectionTables": ["app_instances", "event_source_index"],
+      "exclusionReason": "lifecycleAndSourceIndexTablesAreNotMaterializedSnapshotAggregates"
+    },
+    "transaction": {
+      "arm": "pendingToAttemptingCommittedBeforeBatch",
+      "success": "verifiedRowsCursorAndAttemptingToPendingAtomic",
+      "nonemptyBatchScanExhausted": false,
+      "emptyBatchScanExhausted": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "cancellation": "rollbackBatchOrSavepointThenCommitAttemptingToPending",
+      "terminalValidationFailure": "rollbackBatchThenCommitAttemptingToFailed",
+      "failureRecordUnavailable": "durableAttemptingSentinelReopenRefusesRetryOrSuccess",
+      "reopenAttempting": "failClosedNonRunnable",
+      "reopenFailed": "failClosedNonRunnable"
+    },
+    "finalPublication": {
+      "transaction": "shortBeginImmediateOnly",
+      "preconditions": [
+        "exactMetaJobPairAndCursor",
+        "verifyBaselinesTableEndProvedByExactEmptyKeysetBatch",
+        "scanExhaustedTrue", "maxEventRowidEqualsCutoff", "cancelBeforeMutation",
+        "precommitCancel"
+      ],
+      "mutation": "deleteJobAndSetMetaReady",
+      "forbiddenWork": ["artifactScan", "tableScan", "count"]
+    },
+    "activation": {
+      "cleanupEnabled": false,
+      "deletionEnabled": false,
+      "compactionEnabled": false,
+      "wireEnabled": false,
+      "schedulerEnabled": false
+    }
+  }
+}
