@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::{self, Display};
 
 use crate::project_v1::sha256_file_version_v1;
+use crate::run_recovery_v1::validate_g5_payload_v1;
 use crate::storage_v1::{
     canonical_json_v1, classify_operation_v1, LedgerEventV1, OperationDecisionV1,
 };
@@ -172,7 +173,9 @@ pub const STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1: &[&str] = &[
     "aggregate_type",
     "aggregate_id",
     "aggregate_sequence",
-    "message_id",
+    "introduced_message_id",
+    "chat_durable_sequence",
+    "chat_snapshot_message_id",
 ];
 pub const STORAGE_LIFETIME_V3_PREFLIGHT_ALLOWED_STATES_V1: &[&str] = &["pending", "ready"];
 pub const STORAGE_LIFETIME_V3_PREFLIGHT_REJECTED_STATES_V1: &[&str] = &["materializing", "failed"];
@@ -645,7 +648,9 @@ pub struct StorageEventSourceIndexEntryV1 {
     pub aggregate_type: String,
     pub aggregate_id: String,
     pub aggregate_sequence: u64,
-    pub message_id: Option<String>,
+    pub introduced_message_id: Option<String>,
+    pub chat_durable_sequence: Option<u64>,
+    pub chat_snapshot_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -2362,7 +2367,9 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             "table": "event_source_index",
             "columns": STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1,
             "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
-            "messageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
+            "introducedMessageId": "nullableOnlyWhenThisEventIntroducesExactTeamMessage",
+            "chatDurableSequence": "nullableExactDurableEventSequenceFromCanonicalChatPayload",
+            "chatSnapshotMessageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
             "foreignKeys": [
                 "event_id->events.event_id",
                 "operation_id->events.operation_id",
@@ -2371,14 +2378,29 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             "foreignKeyEnforcement": "PRAGMA foreign_keys=ONOnEveryConnection",
             "insertGuard": "event_source_index_requires_exact_event",
             "sameEventBinding":
-                "eventRowidAndEveryMirroredFieldAndMessageProvenanceMustMatchOneEventsRow",
+                "eventRowidIdentityAggregateAndChatSnapshotFieldsMustMatchOneEventsRow",
             "separateForeignKeyCrossEventMix": "rejectedByInsertGuard",
+            "introductionTransition": {
+                "firstPredecessor": "durableZeroAndSnapshotNull",
+                "message": "currentDurableEqualsPreviousPlusOneAndValidTeamMessageEventSequenceEqualsCurrentAndChatIdEqualsAggregateIdAndIntroducedEqualsSnapshotMessageId",
+                "nonMessage": "durableUnchangedAndIntroducedNullAndSnapshotNullOrSameAsPreviousSnapshot",
+                "reject": [
+                    "durableDecrease", "durableJump", "increaseWithoutValidMessage",
+                    "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
+                ],
+            },
+            "predecessorLookup": {
+                "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+                "missingDuringMigrationPendingAppend":
+                    "exactPredecessorEventsAggregateTupleLookupOnly",
+                "forbidden": ["scan", "sort", "latestLookup"],
+            },
             "historyBackfillByMigration": false,
             "historyBackfillPhase": "indexSource",
             "indexSourceWrite": "insertOrExactExistingNoOpOtherwiseConflict",
             "verificationPhase": "verifySourceIndex",
             "aggregateLatestIndex": "event_source_index_aggregate_latest",
-            "messageUniqueIndex": "event_source_index_message_unique",
+            "introducedMessageUniqueIndex": "event_source_index_message_unique",
             "mutationGuards": [
                 "event_source_index_requires_exact_event",
                 "event_source_index_append_only_update",
@@ -2403,7 +2425,7 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             "eventInsert": "requiresExactSourceIndexInsertBeforeCommit",
             "duplicateNoOp": "noSourceIndexMutation",
             "conflict": "rollbackEventProjectionSourceIndexAndReadiness",
-            "messageIdentityConflict": "rollbackWholeAppend",
+            "introducedMessageIdentityConflict": "rollbackWholeAppend",
         },
         "workspaceProvenance": {
             "lookup": "latestProjectSourceByAggregateLatestIndex",
@@ -2420,8 +2442,12 @@ pub fn validate_storage_lifetime_batch_policy_v4(
                 "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
             "latestAggregate":
                 "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)",
-            "messageIdentity":
-                "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)",
+            "introducedMessageIdentity":
+                "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)",
+            "indexedPredecessor":
+                "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
+            "missingIndexedPredecessorEvent":
+                "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
             "payloadByRowid": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
             "reject": ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"],
         },
@@ -2550,13 +2576,67 @@ pub fn validate_storage_event_source_index_entry_v1(
         || entry.operation_id.is_empty()
         || entry.aggregate_type.is_empty()
         || entry.aggregate_id.is_empty()
-        || entry.message_id.as_deref().is_some_and(str::is_empty)
+        || entry
+            .introduced_message_id
+            .as_deref()
+            .is_some_and(str::is_empty)
+        || entry
+            .chat_snapshot_message_id
+            .as_deref()
+            .is_some_and(str::is_empty)
     {
         return Err(StorageLifetimeContractError::new(
             "event source index identity and aggregate tuple must be non-empty and positive",
         ));
     }
+    if let Some(sequence) = entry.chat_durable_sequence {
+        require_js_safe_unsigned(sequence, "sourceIndex.chatDurableSequence")?;
+    }
     Ok(entry)
+}
+
+fn storage_chat_source_state_v1(
+    source: &LedgerEventV1,
+) -> Result<(u64, Option<String>, Option<Value>), StorageLifetimeContractError> {
+    let payload: Value = serde_json::from_str(&source.canonical_json_payload).map_err(|error| {
+        StorageLifetimeContractError::new(format!(
+            "source index event payload must be valid JSON: {error}"
+        ))
+    })?;
+    let object = payload.as_object().ok_or_else(|| {
+        StorageLifetimeContractError::new("chat source index payload must be an object")
+    })?;
+    let durable = object
+        .get("durable_event_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            StorageLifetimeContractError::new(
+                "chat source index requires a safe unsigned durable_event_sequence",
+            )
+        })?;
+    require_js_safe_unsigned(durable, "sourceIndex.chatDurableSequence")?;
+    let message = match object.get("last_message") {
+        Some(Value::Null) => None,
+        Some(message @ Value::Object(_)) => {
+            validate_g5_payload_v1("teamMessage", message).map_err(|_| {
+                StorageLifetimeContractError::new(
+                    "chat source index requires a valid last_message TeamMessage",
+                )
+            })?;
+            Some(message.clone())
+        }
+        _ => {
+            return Err(StorageLifetimeContractError::new(
+                "chat source index last_message must be an object or null",
+            ));
+        }
+    };
+    let snapshot_message_id = message
+        .as_ref()
+        .and_then(|value| value.get("messageId"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok((durable, snapshot_message_id, message))
 }
 
 pub fn validate_storage_event_source_index_binding_v1(
@@ -2565,33 +2645,11 @@ pub fn validate_storage_event_source_index_binding_v1(
     source: &LedgerEventV1,
 ) -> Result<StorageEventSourceIndexEntryV1, StorageLifetimeContractError> {
     let entry = validate_storage_event_source_index_entry_v1(entry_value)?;
-    let payload: Value = serde_json::from_str(&source.canonical_json_payload).map_err(|error| {
-        StorageLifetimeContractError::new(format!(
-            "source index event payload must be valid JSON: {error}"
-        ))
-    })?;
-    let expected_message_id = if source.aggregate_type == "chat" {
-        match payload.get("last_message") {
-            None | Some(Value::Null) => None,
-            Some(Value::Object(message)) => Some(
-                message
-                    .get("messageId")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        StorageLifetimeContractError::new(
-                            "chat source index requires exact non-empty last_message.messageId",
-                        )
-                    })?,
-            ),
-            Some(_) => {
-                return Err(StorageLifetimeContractError::new(
-                    "chat source index last_message must be object, null, or absent",
-                ));
-            }
-        }
+    let (expected_durable, expected_snapshot) = if source.aggregate_type == "chat" {
+        let (durable, snapshot, _) = storage_chat_source_state_v1(source)?;
+        (Some(durable), snapshot)
     } else {
-        None
+        (None, None)
     };
     if entry.event_rowid != event_rowid
         || entry.event_id != source.event_id
@@ -2599,10 +2657,106 @@ pub fn validate_storage_event_source_index_binding_v1(
         || entry.aggregate_type != source.aggregate_type
         || entry.aggregate_id != source.aggregate_id
         || entry.aggregate_sequence != source.aggregate_sequence
-        || entry.message_id.as_deref() != expected_message_id
+        || entry.chat_durable_sequence != expected_durable
+        || entry.chat_snapshot_message_id != expected_snapshot
+        || (source.aggregate_type != "chat" && entry.introduced_message_id.is_some())
     {
         return Err(StorageLifetimeContractError::new(
-            "event source index must match one exact source event and message provenance",
+            "event source index must match one exact source event and mirrored chat snapshot",
+        ));
+    }
+    Ok(entry)
+}
+
+pub fn validate_storage_event_source_index_transition_v1(
+    event_rowid: u64,
+    entry_value: &Value,
+    source: &LedgerEventV1,
+    predecessor_entry_value: Option<&Value>,
+    predecessor_source: Option<&LedgerEventV1>,
+) -> Result<StorageEventSourceIndexEntryV1, StorageLifetimeContractError> {
+    let entry = validate_storage_event_source_index_binding_v1(event_rowid, entry_value, source)?;
+    if source.aggregate_type != "chat" {
+        return Ok(entry);
+    }
+    let (current_durable, current_snapshot, current_message) =
+        storage_chat_source_state_v1(source)?;
+    let (previous_durable, previous_snapshot) = if source.aggregate_sequence == 1 {
+        if predecessor_entry_value.is_some() || predecessor_source.is_some() {
+            return Err(StorageLifetimeContractError::new(
+                "first chat source index row must use the synthetic zero predecessor",
+            ));
+        }
+        (0, None)
+    } else if let Some(predecessor_value) = predecessor_entry_value {
+        if predecessor_source.is_some() {
+            return Err(StorageLifetimeContractError::new(
+                "chat source index predecessor must use exactly one lookup path",
+            ));
+        }
+        let predecessor = validate_storage_event_source_index_entry_v1(predecessor_value)?;
+        if predecessor.aggregate_type != "chat"
+            || predecessor.aggregate_id != source.aggregate_id
+            || predecessor.aggregate_sequence + 1 != source.aggregate_sequence
+        {
+            return Err(StorageLifetimeContractError::new(
+                "indexed predecessor must be the exact aggregate sequence minus one",
+            ));
+        }
+        (
+            predecessor.chat_durable_sequence.ok_or_else(|| {
+                StorageLifetimeContractError::new(
+                    "indexed chat predecessor must mirror durable sequence",
+                )
+            })?,
+            predecessor.chat_snapshot_message_id,
+        )
+    } else if let Some(predecessor) = predecessor_source {
+        if predecessor.aggregate_type != "chat"
+            || predecessor.aggregate_id != source.aggregate_id
+            || predecessor.aggregate_sequence + 1 != source.aggregate_sequence
+        {
+            return Err(StorageLifetimeContractError::new(
+                "fallback predecessor event must be the exact aggregate sequence minus one",
+            ));
+        }
+        let (durable, snapshot, _) = storage_chat_source_state_v1(predecessor)?;
+        (durable, snapshot)
+    } else {
+        return Err(StorageLifetimeContractError::new(
+            "chat source index transition requires an exact predecessor lookup",
+        ));
+    };
+
+    if previous_durable < MAX_SEQUENCE && current_durable == previous_durable + 1 {
+        let message = current_message.as_ref().ok_or_else(|| {
+            StorageLifetimeContractError::new(
+                "durable sequence increase requires a valid introduced TeamMessage",
+            )
+        })?;
+        let message_sequence = message.get("eventSequence").and_then(Value::as_u64);
+        let message_chat_id = message.get("chatId").and_then(Value::as_str);
+        if message_sequence != Some(current_durable)
+            || message_chat_id != Some(source.aggregate_id.as_str())
+            || entry.introduced_message_id != current_snapshot
+        {
+            return Err(StorageLifetimeContractError::new(
+                "message introduction must match current durable sequence, chat, and snapshot",
+            ));
+        }
+    } else if current_durable == previous_durable {
+        if entry.introduced_message_id.is_some()
+            || current_snapshot
+                .as_ref()
+                .is_some_and(|message_id| Some(message_id) != previous_snapshot.as_ref())
+        {
+            return Err(StorageLifetimeContractError::new(
+                "non-message transition must keep durable sequence and null-or-same snapshot",
+            ));
+        }
+    } else {
+        return Err(StorageLifetimeContractError::new(
+            "chat durable sequence must stay unchanged or increase by exactly one",
         ));
     }
     Ok(entry)

@@ -23,7 +23,8 @@
   "sourceIndex": {
     "columns": [
       "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
-      "aggregate_sequence", "message_id"
+      "aggregate_sequence", "introduced_message_id", "chat_durable_sequence",
+      "chat_snapshot_message_id"
     ],
     "sourceEvents": [
       {
@@ -54,7 +55,7 @@
           "aggregate_sequence": 1,
           "event_type": "chat.upserted",
           "payload_schema_version": 1,
-          "canonical_json_payload": "{\"last_message\":{\"messageId\":\"message_1\"}}",
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_a\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":1,\"kind\":\"user\",\"roleId\":null,\"runId\":null,\"text\":\"A\",\"createdAt\":\"2026-08-28T13:00:01Z\"}}",
           "timestamp": "2026-08-28T13:00:01Z"
         }
       },
@@ -73,24 +74,100 @@
           "canonical_json_payload": "{\"canonical_path\":\"/fixture/v6\",\"project_id\":\"project_1\"}",
           "timestamp": "2026-08-28T13:00:02Z"
         }
+      },
+      {
+        "name": "chat source repeats message A",
+        "eventRowid": 4,
+        "event": {
+          "event_id": "evt_chat_2",
+          "operation_id": "op_chat_2",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 2,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_a\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":1,\"kind\":\"user\",\"roleId\":null,\"runId\":null,\"text\":\"A\",\"createdAt\":\"2026-08-28T13:00:01Z\"}}",
+          "timestamp": "2026-08-28T13:00:03Z"
+        }
+      },
+      {
+        "name": "chat source null snapshot",
+        "eventRowid": 5,
+        "event": {
+          "event_id": "evt_chat_3",
+          "operation_id": "op_chat_3",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 3,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":1,\"last_message\":null}",
+          "timestamp": "2026-08-28T13:00:04Z"
+        }
+      },
+      {
+        "name": "chat source introduces message B",
+        "eventRowid": 6,
+        "event": {
+          "event_id": "evt_chat_4",
+          "operation_id": "op_chat_4",
+          "request_id": null,
+          "aggregate_type": "chat",
+          "aggregate_id": "chat_1",
+          "aggregate_sequence": 4,
+          "event_type": "chat.upserted",
+          "payload_schema_version": 1,
+          "canonical_json_payload": "{\"durable_event_sequence\":2,\"last_message\":{\"schemaVersion\":1,\"messageId\":\"message_b\",\"chatId\":\"chat_1\",\"taskId\":\"task_1\",\"worktreeId\":\"worktree_1\",\"eventSequence\":2,\"kind\":\"role\",\"roleId\":\"coding\",\"runId\":\"run_1\",\"text\":\"B\",\"createdAt\":\"2026-08-28T13:00:05Z\"}}",
+          "timestamp": "2026-08-28T13:00:05Z"
+        }
       }
     ],
     "validRows": [
       {
         "name": "project source without message",
-        "value": [1, "evt_project_1", "op_project_1", "project", "project_1", 1, null]
+        "value": [1, "evt_project_1", "op_project_1", "project", "project_1", 1, null, null, null]
       },
       {
-        "name": "chat source with exact message",
-        "value": [2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_1"]
+        "name": "chat source introduces message A",
+        "value": [2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_a", 1, "message_a"]
+      },
+      {
+        "name": "chat source repeats message A without introducing it",
+        "value": [4, "evt_chat_2", "op_chat_2", "chat", "chat_1", 2, null, 1, "message_a"]
+      },
+      {
+        "name": "chat source keeps durable state with null snapshot",
+        "value": [5, "evt_chat_3", "op_chat_3", "chat", "chat_1", 3, null, 1, null]
+      },
+      {
+        "name": "chat source introduces message B",
+        "value": [6, "evt_chat_4", "op_chat_4", "chat", "chat_1", 4, "message_b", 2, "message_b"]
       }
     ],
     "invalidBindingFields": [
       "eventRowid", "eventId", "operationId", "aggregateType", "aggregateId",
-      "aggregateSequence", "messageId", "crossEventMix"
+      "aggregateSequence", "introducedMessageId", "chatDurableSequence",
+      "chatSnapshotMessageId", "crossEventMix"
     ],
-    "duplicateConflicts": ["event_rowid", "event_id", "operation_id", "aggregateTuple", "message_id"],
-    "mutationGuards": ["insert", "update", "delete"]
+    "duplicateConflicts": [
+      "event_rowid", "event_id", "operation_id", "aggregateTuple", "introduced_message_id"
+    ],
+    "mutationGuards": ["insert", "update", "delete"],
+    "validTransitions": [
+      { "name": "first message A from synthetic zero", "currentEventRowid": 2, "predecessorEventRowid": null, "lookup": "syntheticZero" },
+      { "name": "repeat message A", "currentEventRowid": 4, "predecessorEventRowid": 2, "lookup": "indexedExactPredecessor" },
+      { "name": "null snapshot keeps durable state", "currentEventRowid": 5, "predecessorEventRowid": 4, "lookup": "indexedExactPredecessor" },
+      { "name": "second message B after null snapshot", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "indexedExactPredecessor" },
+      { "name": "missing indexed predecessor during migration-pending append", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "exactPredecessorEventOnly" }
+    ],
+    "invalidTransitions": [
+      "durableDecrease", "durableJump", "increaseWithoutValidTeamMessage",
+      "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
+      "wrongMessageEventSequence", "wrongMessageChatId", "missingExactPredecessor",
+      "scanOrSortPredecessorLookup"
+    ]
   },
   "queryPlans": [
     {
@@ -100,7 +177,7 @@
     },
     {
       "name": "verify source index keyset",
-      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,message_id FROM event_source_index WHERE event_rowid>0 AND event_rowid<=20 ORDER BY event_rowid LIMIT 100",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,introduced_message_id,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE event_rowid>0 AND event_rowid<=20 ORDER BY event_rowid LIMIT 100",
       "detail": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
     },
     {
@@ -110,8 +187,18 @@
     },
     {
       "name": "message identity",
-      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE message_id='message_1'",
-      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)"
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE introduced_message_id='message_a'",
+      "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)"
+    },
+    {
+      "name": "exact indexed predecessor",
+      "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
+      "detail": "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
+    },
+    {
+      "name": "exact predecessor event fallback",
+      "sql": "EXPLAIN QUERY PLAN SELECT rowid,canonical_json_payload FROM events WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
+      "detail": "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
     },
     {
       "name": "single payload by rowid",
@@ -187,8 +274,18 @@
       "replacement": "allowed"
     },
     {
+      "name": "message introduction transition relaxed",
+      "path": ["sourceIndex", "introductionTransition", "message"],
+      "replacement": "snapshotMessageMeansIntroduced"
+    },
+    {
+      "name": "predecessor found by latest scan and sort",
+      "path": ["sourceIndex", "predecessorLookup", "indexed"],
+      "replacement": "latestAggregateScanAndSort"
+    },
+    {
       "name": "message uniqueness relaxed",
-      "path": ["sourceIndex", "messageUniqueIndex"],
+      "path": ["sourceIndex", "introducedMessageUniqueIndex"],
       "replacement": "none"
     },
     {

@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 메시지 도입 전이 정정)
+
+- **snapshot과 introduction 분리**: 모호한 `message_id`를 `introduced_message_id`로 바꾸고 chat의 `durable_event_sequence`와 현재 `last_message.messageId`를 각각 nullable `chat_durable_sequence`·`chat_snapshot_message_id`로 exact mirror한다. non-chat은 세 필드가 모두 NULL이다. 첫 chat predecessor는 durable 0/null이고, 새 메시지는 durable이 정확히 1 증가하면서 valid TeamMessage의 eventSequence·chatId·snapshot·introduced identity가 일치해야 한다. 비메시지 event는 durable을 유지하고 introduction은 NULL이며 snapshot은 NULL 또는 직전 snapshot과 같은 ID만 허용한다.
+- **bounded predecessor·golden 검증**: predecessor는 aggregate sequence-1 exact indexed lookup만 사용하고, migration-pending append에서 index row가 아직 없을 때만 같은 aggregate tuple의 exact event lookup으로 fallback한다. SQL trigger는 current-row mirror와 indexed predecessor가 있을 때의 방어 전이를 강제하고 partial unique index는 introduced identity만 대상으로 한다. 실제 V5 history `A → repeat A → null → B`의 no-backfill/indexSource, 첫·반복·NULL·두 번째 메시지, double introduction, 감소·jump·invalid message·snapshot 변경·missing-index fallback 및 exact query plan을 Rust·TypeScript·SQLite에서 확인했다. sidecar consumer는 아직 변경하지 않았으며 다음은 이 정정된 V6를 소비하는 별도 migration/append 구현이다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index P1 수정)
 
 - **source event exact 결속**: `event_source_index` INSERT가 존재하는 한 `events` row의 rowid·event/operation identity·aggregate tuple을 모두 동시에 일치시키도록 외래 키와 same-row trigger를 추가했다. chat message provenance는 canonical payload의 `last_message.messageId`와 exact 일치하고 non-chat 또는 message가 없는 chat만 NULL을 허용한다. 서로 다른 event에서 개별 FK 값만 섞는 cross-event 조합도 trigger가 거부한다.

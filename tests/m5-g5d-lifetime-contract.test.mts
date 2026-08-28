@@ -72,6 +72,7 @@ import {
   validateStorageLifetimeV6PreflightPolicyV1,
   validateStorageEventSourceIndexEntryV1,
   validateStorageEventSourceIndexBindingV1,
+  validateStorageEventSourceIndexTransitionV1,
   validateStorageLifetimeWorkspaceProjectSourceV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
@@ -331,10 +332,23 @@ interface V6Cases {
         timestamp: string;
       };
     }>;
-    validRows: Array<{ name: string; value: [number, string, string, string, string, number, string | null] }>;
+    validRows: Array<{
+      name: string;
+      value: [
+        number, string, string, string, string, number,
+        string | null, number | null, string | null,
+      ];
+    }>;
     invalidBindingFields: string[];
     duplicateConflicts: string[];
     mutationGuards: string[];
+    validTransitions: Array<{
+      name: string;
+      currentEventRowid: number;
+      predecessorEventRowid: number | null;
+      lookup: string;
+    }>;
+    invalidTransitions: string[];
   };
   queryPlans: Array<{ name: string; sql: string; detail: string }>;
   workspaceProvenance: {
@@ -1419,6 +1433,48 @@ test("storage-v6 migration creates an empty guarded source index and resets ever
     assert.equal(schemaSignature(preservation), exactV6);
     preservation.close();
 
+    const history = createExactStorageV5Database(join(temporaryRoot, "history.db"), false);
+    const insertHistoricalEvent = history.prepare(`
+      INSERT INTO events(
+        event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+        event_type,payload_schema_version,canonical_json_payload,timestamp
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)
+    `);
+    for (const fixture of v6Cases.sourceIndex.sourceEvents) {
+      const event = fixture.event;
+      assert.equal(Number(insertHistoricalEvent.run(
+        event.event_id, event.operation_id, event.request_id, event.aggregate_type,
+        event.aggregate_id, event.aggregate_sequence, event.event_type,
+        event.payload_schema_version, event.canonical_json_payload, event.timestamp,
+      ).lastInsertRowid), fixture.eventRowid, fixture.name);
+    }
+    applyExactStorageV6Migration(history, migrationV6, exactV5, exactV6);
+    assert.equal(history.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count, 0);
+    const indexHistoricalSource = history.prepare(`
+      INSERT INTO event_source_index(
+        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,
+        introduced_message_id,chat_durable_sequence,chat_snapshot_message_id
+      ) VALUES(?,?,?,?,?,?,?,?,?)
+    `);
+    for (const fixture of v6Cases.sourceIndex.validRows) indexHistoricalSource.run(...fixture.value);
+    const historicalChatIndex = history.prepare(`
+      SELECT aggregate_sequence,introduced_message_id,chat_durable_sequence,
+             chat_snapshot_message_id
+      FROM event_source_index WHERE aggregate_type='chat' ORDER BY aggregate_sequence
+    `).all().map((row) => ({
+      aggregate_sequence: row.aggregate_sequence,
+      introduced_message_id: row.introduced_message_id,
+      chat_durable_sequence: row.chat_durable_sequence,
+      chat_snapshot_message_id: row.chat_snapshot_message_id,
+    }));
+    assert.deepEqual(historicalChatIndex, [
+      { aggregate_sequence: 1, introduced_message_id: "message_a", chat_durable_sequence: 1, chat_snapshot_message_id: "message_a" },
+      { aggregate_sequence: 2, introduced_message_id: null, chat_durable_sequence: 1, chat_snapshot_message_id: "message_a" },
+      { aggregate_sequence: 3, introduced_message_id: null, chat_durable_sequence: 1, chat_snapshot_message_id: null },
+      { aggregate_sequence: 4, introduced_message_id: "message_b", chat_durable_sequence: 2, chat_snapshot_message_id: "message_b" },
+    ]);
+    history.close();
+
     for (const state of v6Cases.migrationMatrix.jobStates) {
       for (const phase of v6Cases.migrationMatrix.v5Phases) {
         const database = createExactStorageV5Database(
@@ -1491,8 +1547,9 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
     applyExactStorageV6Migration(database, migrationV6, exactV5, null);
     const insert = database.prepare(`
       INSERT INTO event_source_index(
-        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,message_id
-      ) VALUES(?,?,?,?,?,?,?)
+        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,
+        introduced_message_id,chat_durable_sequence,chat_snapshot_message_id
+      ) VALUES(?,?,?,?,?,?,?,?,?)
     `);
     assert.equal(database.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
     const foreignKeys = database.prepare("PRAGMA foreign_key_list(event_source_index)").all()
@@ -1527,7 +1584,9 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       aggregateType: row[3],
       aggregateId: row[4],
       aggregateSequence: row[5],
-      messageId: row[6],
+      introducedMessageId: row[6],
+      chatDurableSequence: row[7],
+      chatSnapshotMessageId: row[8],
     });
     const projectEntry = entryFromRow(v6Cases.sourceIndex.validRows[0]!.value);
     const projectSource = v6Cases.sourceIndex.sourceEvents[0]!;
@@ -1540,7 +1599,9 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       { ...projectEntry, aggregateType: chatSource.event.aggregate_type },
       { ...projectEntry, aggregateId: chatSource.event.aggregate_id },
       { ...projectEntry, aggregateSequence: projectRevision.event.aggregate_sequence },
-      { ...projectEntry, messageId: "message_1" },
+      { ...projectEntry, introducedMessageId: "message_a" },
+      { ...projectEntry, chatDurableSequence: 1 },
+      { ...projectEntry, chatSnapshotMessageId: "message_a" },
       {
         ...projectEntry,
         eventId: chatSource.event.event_id,
@@ -1548,7 +1609,9 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       },
     ];
     assert.equal(invalidBindings.length, v6Cases.sourceIndex.invalidBindingFields.length);
-    assert.throws(() => insert.run(99, "evt_missing", "op_missing", "run", "run_missing", 1, null));
+    assert.throws(() => insert.run(
+      99, "evt_missing", "op_missing", "run", "run_missing", 1, null, null, null,
+    ));
     for (const [index, invalid] of invalidBindings.entries()) {
       assert.throws(
         () => validateStorageEventSourceIndexBindingV1(
@@ -1560,12 +1623,14 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       assert.throws(
         () => insert.run(
           invalid.eventRowid, invalid.eventId, invalid.operationId, invalid.aggregateType,
-          invalid.aggregateId, invalid.aggregateSequence, invalid.messageId,
+          invalid.aggregateId, invalid.aggregateSequence, invalid.introducedMessageId,
+          invalid.chatDurableSequence, invalid.chatSnapshotMessageId,
         ),
         undefined,
         v6Cases.sourceIndex.invalidBindingFields[index],
       );
     }
+    const insertedEntries = new Map<number, ReturnType<typeof entryFromRow>>();
     for (const fixture of v6Cases.sourceIndex.validRows) {
       const entry = entryFromRow(fixture.value);
       const source = v6Cases.sourceIndex.sourceEvents.find(
@@ -1574,26 +1639,175 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       assert.notEqual(source, undefined, fixture.name);
       validateStorageEventSourceIndexEntryV1(entry);
       validateStorageEventSourceIndexBindingV1(entry.eventRowid, entry, source!.event);
+      const predecessor = source!.event.aggregate_type === "chat"
+        && source!.event.aggregate_sequence > 1
+        ? [...insertedEntries.values()].find((candidate) => (
+          candidate.aggregateType === "chat"
+          && candidate.aggregateId === entry.aggregateId
+          && candidate.aggregateSequence + 1 === entry.aggregateSequence
+        )) ?? null
+        : null;
+      validateStorageEventSourceIndexTransitionV1(
+        entry.eventRowid, entry, source!.event, predecessor, null,
+      );
       insert.run(...fixture.value);
+      insertedEntries.set(entry.eventRowid, entry);
     }
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+
+    const makeMessage = (
+      messageId: string,
+      chatId: string,
+      eventSequence: number,
+    ) => ({
+      schemaVersion: 1, messageId, chatId, taskId: `task_${chatId}`,
+      worktreeId: `worktree_${chatId}`, eventSequence, kind: "user",
+      roleId: null, runId: null, text: messageId, createdAt: "2026-08-28T14:00:00Z",
+    });
+    let syntheticOrdinal = 0;
+    const appendSyntheticChat = (
+      chatId: string,
+      aggregateSequence: number,
+      durable: number,
+      lastMessage: ReturnType<typeof makeMessage> | null,
+      introducedMessageId: string | null,
+    ) => {
+      syntheticOrdinal += 1;
+      const event = {
+        event_id: `evt_synthetic_${syntheticOrdinal}`,
+        operation_id: `op_synthetic_${syntheticOrdinal}`,
+        request_id: null,
+        aggregate_type: "chat",
+        aggregate_id: chatId,
+        aggregate_sequence: aggregateSequence,
+        event_type: "chat.upserted",
+        payload_schema_version: 1 as const,
+        canonical_json_payload: JSON.stringify({
+          durable_event_sequence: durable, last_message: lastMessage,
+        }),
+        timestamp: "2026-08-28T14:00:00Z",
+      };
+      const result = insertEvent.run(
+        event.event_id, event.operation_id, null, "chat", chatId, aggregateSequence,
+        event.event_type, 1, event.canonical_json_payload, event.timestamp,
+      );
+      const entry = {
+        eventRowid: Number(result.lastInsertRowid), eventId: event.event_id,
+        operationId: event.operation_id, aggregateType: "chat", aggregateId: chatId,
+        aggregateSequence, introducedMessageId, chatDurableSequence: durable,
+        chatSnapshotMessageId: lastMessage?.messageId ?? null,
+      };
+      return { event, entry };
+    };
+    const insertSyntheticIndex = (entry: ReturnType<typeof appendSyntheticChat>["entry"]) =>
+      insert.run(
+        entry.eventRowid, entry.eventId, entry.operationId, entry.aggregateType,
+        entry.aggregateId, entry.aggregateSequence, entry.introducedMessageId,
+        entry.chatDurableSequence, entry.chatSnapshotMessageId,
+      );
+    const seedSyntheticChat = (chatId: string) => {
+      const message = makeMessage(`${chatId}_a`, chatId, 1);
+      const first = appendSyntheticChat(chatId, 1, 1, message, message.messageId);
+      validateStorageEventSourceIndexTransitionV1(
+        first.entry.eventRowid, first.entry, first.event, null, null,
+      );
+      insertSyntheticIndex(first.entry);
+      return first;
+    };
+    const assertInvalidTransition = (
+      name: string,
+      previous: ReturnType<typeof appendSyntheticChat>,
+      current: ReturnType<typeof appendSyntheticChat>,
+    ) => {
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event, previous.entry, null,
+      ), undefined, name);
+      assert.throws(() => insertSyntheticIndex(current.entry), undefined, name);
+    };
+
+    {
+      const chatId = "chat_decrease";
+      const previous = seedSyntheticChat(chatId);
+      const current = appendSyntheticChat(chatId, 2, 0, null, null);
+      assertInvalidTransition("durable decrease", previous, current);
+    }
+    {
+      const chatId = "chat_jump";
+      const previous = seedSyntheticChat(chatId);
+      const message = makeMessage(`${chatId}_c`, chatId, 3);
+      const current = appendSyntheticChat(chatId, 2, 3, message, message.messageId);
+      assertInvalidTransition("durable jump", previous, current);
+    }
+    {
+      const chatId = "chat_missing_message";
+      const previous = seedSyntheticChat(chatId);
+      const current = appendSyntheticChat(chatId, 2, 2, null, null);
+      assertInvalidTransition("increase without valid message", previous, current);
+    }
+    {
+      const chatId = "chat_changed_snapshot";
+      const previous = seedSyntheticChat(chatId);
+      const message = makeMessage(`${chatId}_changed`, chatId, 1);
+      const current = appendSyntheticChat(chatId, 2, 1, message, null);
+      assertInvalidTransition("unchanged durable with changed snapshot", previous, current);
+    }
+    {
+      const chatId = "chat_double_introduction";
+      const previous = seedSyntheticChat(chatId);
+      const message = makeMessage(`${chatId}_a`, chatId, 1);
+      const current = appendSyntheticChat(chatId, 2, 1, message, message.messageId);
+      assertInvalidTransition("double introduction", previous, current);
+    }
+    {
+      const chatId = "chat_wrong_sequence";
+      const previous = seedSyntheticChat(chatId);
+      const message = makeMessage(`${chatId}_b`, chatId, 3);
+      const current = appendSyntheticChat(chatId, 2, 2, message, message.messageId);
+      assertInvalidTransition("wrong TeamMessage eventSequence", previous, current);
+    }
+    {
+      const chatId = "chat_wrong_identity";
+      const previous = seedSyntheticChat(chatId);
+      const message = makeMessage(`${chatId}_b`, "chat_other", 2);
+      const current = appendSyntheticChat(chatId, 2, 2, message, message.messageId);
+      assertInvalidTransition("wrong TeamMessage chatId", previous, current);
+    }
+    {
+      const chatId = "chat_migration_pending";
+      const firstMessage = makeMessage(`${chatId}_a`, chatId, 1);
+      const predecessor = appendSyntheticChat(chatId, 1, 1, firstMessage, firstMessage.messageId);
+      const secondMessage = makeMessage(`${chatId}_b`, chatId, 2);
+      const current = appendSyntheticChat(chatId, 2, 2, secondMessage, secondMessage.messageId);
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event, null, null,
+      ));
+      validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event, null, predecessor.event,
+      );
+      insertSyntheticIndex(current.entry);
+    }
+    assert.equal(v6Cases.sourceIndex.validTransitions.length, 5);
+    assert.equal(v6Cases.sourceIndex.invalidTransitions.length, 9);
     for (const invalid of [
-      { eventRowid: 0, eventId: "evt", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
-      { eventRowid: 1, eventId: "", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, messageId: null },
-      { eventRowid: 1, eventId: "evt", operationId: "op", aggregateType: "chat", aggregateId: "c", aggregateSequence: 1, messageId: "" },
+      { eventRowid: 0, eventId: "evt", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, introducedMessageId: null, chatDurableSequence: null, chatSnapshotMessageId: null },
+      { eventRowid: 1, eventId: "", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, introducedMessageId: null, chatDurableSequence: null, chatSnapshotMessageId: null },
+      { eventRowid: 1, eventId: "evt", operationId: "op", aggregateType: "chat", aggregateId: "c", aggregateSequence: 1, introducedMessageId: "", chatDurableSequence: 1, chatSnapshotMessageId: "m" },
     ]) assert.throws(() => validateStorageEventSourceIndexEntryV1(invalid));
     assert.throws(() => database.prepare(`
       UPDATE event_source_index SET aggregate_id='changed' WHERE event_rowid=1
     `).run());
     assert.throws(() => database.prepare("DELETE FROM event_source_index WHERE event_rowid=1").run());
     for (const conflict of [
-      [1, "evt_unique", "op_unique", "run", "run_1", 1, null],
-      [3, "evt_project_1", "op_project_2", "project", "project_1", 2, null],
-      [3, "evt_project_2", "op_project_1", "project", "project_1", 2, null],
-      [3, "evt_project_2", "op_project_2", "project", "project_1", 1, null],
-      [3, "evt_project_2", "op_project_2", "project", "project_1", 2, "message_1"],
+      [1, "evt_unique", "op_unique", "run", "run_1", 1, null, null, null],
+      [3, "evt_project_1", "op_project_2", "project", "project_1", 2, null, null, null],
+      [3, "evt_project_2", "op_project_1", "project", "project_1", 2, null, null, null],
+      [3, "evt_project_2", "op_project_2", "project", "project_1", 1, null, null, null],
+      [3, "evt_project_2", "op_project_2", "project", "project_1", 2, "message_a", null, null],
     ] as const) assert.throws(() => insert.run(...conflict));
 
+    const indexCountBeforeAtomic = database.prepare(
+      "SELECT COUNT(*) AS count FROM event_source_index",
+    ).get()?.count;
     database.exec("BEGIN IMMEDIATE");
     try {
       database.prepare(`
@@ -1601,18 +1815,24 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
           event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
           event_type,payload_schema_version,canonical_json_payload,timestamp
         ) VALUES('evt_atomic','op_atomic',NULL,'chat','chat_atomic',1,'chat.upserted',1,
-          '{"last_message":{"messageId":"message_1"}}','2026-08-28T13:00:00Z')
+          '{"durable_event_sequence":1,"last_message":{"schemaVersion":1,"messageId":"message_a","chatId":"chat_atomic","taskId":"task_atomic","worktreeId":"worktree_atomic","eventSequence":1,"kind":"user","roleId":null,"runId":null,"text":"atomic","createdAt":"2026-08-28T13:00:00Z"}}','2026-08-28T13:00:00Z')
       `).run();
       const eventRowid = database.prepare(`
         SELECT rowid FROM events WHERE event_id='evt_atomic'
       `).get()?.rowid as number;
-      insert.run(eventRowid, "evt_atomic", "op_atomic", "chat", "chat_atomic", 1, "message_1");
-      assert.fail("duplicate message_id must reject the append transaction");
+      insert.run(
+        eventRowid, "evt_atomic", "op_atomic", "chat", "chat_atomic", 1,
+        "message_a", 1, "message_a",
+      );
+      assert.fail("duplicate introduced_message_id must reject the append transaction");
     } catch {
       database.exec("ROLLBACK");
     }
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM events WHERE event_id='evt_atomic'").get()?.count, 0);
-    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count, 2);
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM event_source_index").get()?.count,
+      indexCountBeforeAtomic,
+    );
     database.close();
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });

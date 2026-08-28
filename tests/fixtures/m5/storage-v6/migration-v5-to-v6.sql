@@ -43,7 +43,17 @@ CREATE TABLE event_source_index (
     aggregate_sequence INTEGER NOT NULL CHECK (
         aggregate_sequence >= 1 AND aggregate_sequence <= 9007199254740991
     ),
-    message_id TEXT CHECK (message_id IS NULL OR length(message_id) > 0),
+    introduced_message_id TEXT CHECK (
+        introduced_message_id IS NULL OR length(introduced_message_id) > 0
+    ),
+    chat_durable_sequence INTEGER CHECK (
+        chat_durable_sequence IS NULL OR (
+            chat_durable_sequence >= 0 AND chat_durable_sequence <= 9007199254740991
+        )
+    ),
+    chat_snapshot_message_id TEXT CHECK (
+        chat_snapshot_message_id IS NULL OR length(chat_snapshot_message_id) > 0
+    ),
     UNIQUE (aggregate_type, aggregate_id, aggregate_sequence),
     FOREIGN KEY (event_id) REFERENCES events(event_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     FOREIGN KEY (operation_id) REFERENCES events(operation_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
@@ -56,8 +66,8 @@ CREATE INDEX event_source_index_aggregate_latest
 ON event_source_index (aggregate_type, aggregate_id, event_rowid DESC);
 
 CREATE UNIQUE INDEX event_source_index_message_unique
-ON event_source_index (message_id)
-WHERE message_id IS NOT NULL;
+ON event_source_index (introduced_message_id)
+WHERE introduced_message_id IS NOT NULL;
 
 CREATE TRIGGER event_source_index_requires_exact_event
 BEFORE INSERT ON event_source_index
@@ -72,27 +82,96 @@ WHEN NOT EXISTS (
       AND source.aggregate_sequence = NEW.aggregate_sequence
       AND (
           (
-              NEW.message_id IS NULL
-              AND (
-                  source.aggregate_type <> 'chat'
-                  OR json_type(source.canonical_json_payload, '$.last_message') IS NULL
-                  OR json_type(source.canonical_json_payload, '$.last_message') = 'null'
-              )
+              source.aggregate_type <> 'chat'
+              AND NEW.introduced_message_id IS NULL
+              AND NEW.chat_durable_sequence IS NULL
+              AND NEW.chat_snapshot_message_id IS NULL
           )
           OR (
               source.aggregate_type = 'chat'
-              AND json_type(source.canonical_json_payload, '$.last_message') = 'object'
-              AND json_type(
-                  source.canonical_json_payload,
-                  '$.last_message.messageId'
-              ) = 'text'
-              AND length(json_extract(
-                  source.canonical_json_payload,
-                  '$.last_message.messageId'
-              )) > 0
-              AND NEW.message_id = json_extract(
-                  source.canonical_json_payload,
-                  '$.last_message.messageId'
+              AND json_type(source.canonical_json_payload, '$.durable_event_sequence') = 'integer'
+              AND NEW.chat_durable_sequence = json_extract(
+                  source.canonical_json_payload, '$.durable_event_sequence'
+              )
+              AND NEW.chat_durable_sequence >= 0
+              AND NEW.chat_durable_sequence <= 9007199254740991
+              AND (
+                  (
+                      json_type(source.canonical_json_payload, '$.last_message') = 'null'
+                      AND NEW.chat_snapshot_message_id IS NULL
+                  )
+                  OR (
+                      json_type(source.canonical_json_payload, '$.last_message') = 'object'
+                      AND json_type(
+                          source.canonical_json_payload, '$.last_message.messageId'
+                      ) = 'text'
+                      AND length(json_extract(
+                          source.canonical_json_payload, '$.last_message.messageId'
+                      )) > 0
+                      AND NEW.chat_snapshot_message_id = json_extract(
+                          source.canonical_json_payload, '$.last_message.messageId'
+                      )
+                  )
+              )
+              AND (
+                  (
+                      NEW.aggregate_sequence > 1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM event_source_index AS predecessor
+                          WHERE predecessor.aggregate_type = NEW.aggregate_type
+                            AND predecessor.aggregate_id = NEW.aggregate_id
+                            AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                      )
+                  )
+                  OR (
+                      NEW.chat_durable_sequence = CASE
+                          WHEN NEW.aggregate_sequence = 1 THEN 1
+                          ELSE (
+                              SELECT predecessor.chat_durable_sequence + 1
+                              FROM event_source_index AS predecessor
+                              WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                AND predecessor.aggregate_id = NEW.aggregate_id
+                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          )
+                      END
+                      AND json_type(source.canonical_json_payload, '$.last_message') = 'object'
+                      AND json_type(
+                          source.canonical_json_payload, '$.last_message.eventSequence'
+                      ) = 'integer'
+                      AND json_extract(
+                          source.canonical_json_payload, '$.last_message.eventSequence'
+                      ) = NEW.chat_durable_sequence
+                      AND json_type(
+                          source.canonical_json_payload, '$.last_message.chatId'
+                      ) = 'text'
+                      AND json_extract(
+                          source.canonical_json_payload, '$.last_message.chatId'
+                      ) = NEW.aggregate_id
+                      AND NEW.introduced_message_id = NEW.chat_snapshot_message_id
+                  )
+                  OR (
+                      NEW.chat_durable_sequence = CASE
+                          WHEN NEW.aggregate_sequence = 1 THEN 0
+                          ELSE (
+                              SELECT predecessor.chat_durable_sequence
+                              FROM event_source_index AS predecessor
+                              WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                AND predecessor.aggregate_id = NEW.aggregate_id
+                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          )
+                      END
+                      AND NEW.introduced_message_id IS NULL
+                      AND (
+                          NEW.chat_snapshot_message_id IS NULL
+                          OR NEW.chat_snapshot_message_id = (
+                              SELECT predecessor.chat_snapshot_message_id
+                              FROM event_source_index AS predecessor
+                              WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                AND predecessor.aggregate_id = NEW.aggregate_id
+                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          )
+                      )
+                  )
               )
           )
       )

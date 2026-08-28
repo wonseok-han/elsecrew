@@ -466,6 +466,8 @@ struct V6SourceIndexCases {
     invalid_binding_fields: Vec<String>,
     duplicate_conflicts: Vec<String>,
     mutation_guards: Vec<String>,
+    valid_transitions: Vec<Value>,
+    invalid_transitions: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1521,12 +1523,12 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         cases.source_index.columns,
         STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1
     );
-    assert_eq!(cases.source_index.valid_rows.len(), 2);
-    assert_eq!(cases.source_index.source_events.len(), 3);
+    assert_eq!(cases.source_index.valid_rows.len(), 5);
+    assert_eq!(cases.source_index.source_events.len(), 6);
     for row in &cases.source_index.valid_rows {
         assert!(!row.name.is_empty());
         let tuple = row.value.as_array().expect("source row tuple");
-        assert_eq!(tuple.len(), 7);
+        assert_eq!(tuple.len(), 9);
         let entry = serde_json::json!({
             "eventRowid": tuple[0],
             "eventId": tuple[1],
@@ -1534,7 +1536,9 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
             "aggregateType": tuple[3],
             "aggregateId": tuple[4],
             "aggregateSequence": tuple[5],
-            "messageId": tuple[6],
+            "introducedMessageId": tuple[6],
+            "chatDurableSequence": tuple[7],
+            "chatSnapshotMessageId": tuple[8],
         });
         validate_storage_event_source_index_entry_v1(&entry).expect(&row.name);
         let event_rowid = tuple[0].as_u64().expect("event rowid");
@@ -1562,7 +1566,9 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         "aggregateType": project_tuple[3],
         "aggregateId": project_tuple[4],
         "aggregateSequence": project_tuple[5],
-        "messageId": project_tuple[6],
+        "introducedMessageId": project_tuple[6],
+        "chatDurableSequence": project_tuple[7],
+        "chatSnapshotMessageId": project_tuple[8],
     });
     let mut invalid_bindings = Vec::new();
     for (field, replacement) in [
@@ -1584,7 +1590,9 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
             "aggregateSequence",
             Value::from(project_revision.event.aggregate_sequence),
         ),
-        ("messageId", Value::from("message_1")),
+        ("introducedMessageId", Value::from("message_a")),
+        ("chatDurableSequence", Value::from(1)),
+        ("chatSnapshotMessageId", Value::from("message_a")),
     ] {
         let mut invalid = project_entry.clone();
         invalid
@@ -1627,14 +1635,198 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
             "event_id",
             "operation_id",
             "aggregateTuple",
-            "message_id"
+            "introduced_message_id"
         ]
     );
     assert_eq!(
         cases.source_index.mutation_guards,
         ["insert", "update", "delete"]
     );
-    assert_eq!(cases.query_plans.len(), 5);
+    let entry_for_rowid = |event_rowid: u64| {
+        let tuple = cases
+            .source_index
+            .valid_rows
+            .iter()
+            .find_map(|row| {
+                let tuple = row.value.as_array().expect("source row tuple");
+                (tuple[0].as_u64() == Some(event_rowid)).then_some(tuple)
+            })
+            .expect("indexed transition row");
+        serde_json::json!({
+            "eventRowid": tuple[0], "eventId": tuple[1], "operationId": tuple[2],
+            "aggregateType": tuple[3], "aggregateId": tuple[4],
+            "aggregateSequence": tuple[5], "introducedMessageId": tuple[6],
+            "chatDurableSequence": tuple[7], "chatSnapshotMessageId": tuple[8],
+        })
+    };
+    let source_for_rowid = |event_rowid: u64| {
+        &cases
+            .source_index
+            .source_events
+            .iter()
+            .find(|source| source.event_rowid == event_rowid)
+            .expect("transition source")
+            .event
+    };
+    let first = entry_for_rowid(2);
+    validate_storage_event_source_index_transition_v1(2, &first, source_for_rowid(2), None, None)
+        .expect("first message A");
+    let repeated = entry_for_rowid(4);
+    validate_storage_event_source_index_transition_v1(
+        4,
+        &repeated,
+        source_for_rowid(4),
+        Some(&first),
+        None,
+    )
+    .expect("repeat message A");
+    let null_snapshot = entry_for_rowid(5);
+    validate_storage_event_source_index_transition_v1(
+        5,
+        &null_snapshot,
+        source_for_rowid(5),
+        Some(&repeated),
+        None,
+    )
+    .expect("null snapshot");
+    let second = entry_for_rowid(6);
+    validate_storage_event_source_index_transition_v1(
+        6,
+        &second,
+        source_for_rowid(6),
+        Some(&null_snapshot),
+        None,
+    )
+    .expect("second message B");
+    validate_storage_event_source_index_transition_v1(
+        6,
+        &second,
+        source_for_rowid(6),
+        None,
+        Some(source_for_rowid(5)),
+    )
+    .expect("migration-pending exact predecessor event fallback");
+
+    let mut double_introduction = repeated.clone();
+    double_introduction
+        .as_object_mut()
+        .expect("repeat entry")
+        .insert("introducedMessageId".into(), Value::from("message_a"));
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &double_introduction,
+        source_for_rowid(4),
+        Some(&first),
+        None,
+    )
+    .is_err());
+    assert!(validate_storage_event_source_index_transition_v1(
+        6,
+        &second,
+        source_for_rowid(6),
+        None,
+        None,
+    )
+    .is_err());
+    let source_with_payload = |base: &LedgerEventV1, durable: u64, message: Value| {
+        let mut source = base.clone();
+        source.canonical_json_payload = serde_json::to_string(&serde_json::json!({
+            "durable_event_sequence": durable,
+            "last_message": message,
+        }))
+        .expect("synthetic chat source payload");
+        source
+    };
+    let entry_with_state = |base: &Value, durable: u64, introduced: Value, snapshot: Value| {
+        let mut entry = base.clone();
+        let object = entry.as_object_mut().expect("chat source entry");
+        object.insert("chatDurableSequence".into(), Value::from(durable));
+        object.insert("introducedMessageId".into(), introduced);
+        object.insert("chatSnapshotMessageId".into(), snapshot);
+        entry
+    };
+    let mut message_b = serde_json::from_str::<Value>(&source_for_rowid(6).canonical_json_payload)
+        .expect("message B payload")["last_message"]
+        .clone();
+
+    let decrease_source = source_with_payload(source_for_rowid(5), 0, Value::Null);
+    let decrease_entry = entry_with_state(&null_snapshot, 0, Value::Null, Value::Null);
+    assert!(validate_storage_event_source_index_transition_v1(
+        5,
+        &decrease_entry,
+        &decrease_source,
+        Some(&repeated),
+        None,
+    )
+    .is_err());
+
+    message_b["eventSequence"] = Value::from(3);
+    let jump_source = source_with_payload(source_for_rowid(6), 3, message_b.clone());
+    let jump_entry = entry_with_state(
+        &second,
+        3,
+        Value::from("message_b"),
+        Value::from("message_b"),
+    );
+    assert!(validate_storage_event_source_index_transition_v1(
+        6,
+        &jump_entry,
+        &jump_source,
+        Some(&null_snapshot),
+        None,
+    )
+    .is_err());
+
+    let missing_message_source = source_with_payload(source_for_rowid(6), 2, Value::Null);
+    let missing_message_entry = entry_with_state(&second, 2, Value::Null, Value::Null);
+    assert!(validate_storage_event_source_index_transition_v1(
+        6,
+        &missing_message_entry,
+        &missing_message_source,
+        Some(&null_snapshot),
+        None,
+    )
+    .is_err());
+
+    let mut changed_message =
+        serde_json::from_str::<Value>(&source_for_rowid(4).canonical_json_payload)
+            .expect("repeated message payload")["last_message"]
+            .clone();
+    changed_message["messageId"] = Value::from("message_changed");
+    let changed_source = source_with_payload(source_for_rowid(4), 1, changed_message);
+    let changed_entry = entry_with_state(&repeated, 1, Value::Null, Value::from("message_changed"));
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &changed_entry,
+        &changed_source,
+        Some(&first),
+        None,
+    )
+    .is_err());
+
+    let wrong_sequence_source = source_with_payload(source_for_rowid(6), 2, message_b.clone());
+    assert!(validate_storage_event_source_index_transition_v1(
+        6,
+        &second,
+        &wrong_sequence_source,
+        Some(&null_snapshot),
+        None,
+    )
+    .is_err());
+    message_b["eventSequence"] = Value::from(2);
+    message_b["chatId"] = Value::from("chat_other");
+    let wrong_chat_source = source_with_payload(source_for_rowid(6), 2, message_b);
+    assert!(validate_storage_event_source_index_transition_v1(
+        6,
+        &second,
+        &wrong_chat_source,
+        Some(&null_snapshot),
+        None,
+    )
+    .is_err());
+    assert_eq!(cases.source_index.valid_transitions.len(), 5);
+    assert_eq!(cases.source_index.invalid_transitions.len(), 9);
+    assert_eq!(cases.query_plans.len(), 7);
     for plan in &cases.query_plans {
         assert!(
             plan.sql.starts_with("EXPLAIN QUERY PLAN SELECT "),
@@ -1813,13 +2005,16 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert!(sql.contains("CREATE TABLE event_source_index"));
     assert!(sql.contains("CREATE INDEX event_source_index_aggregate_latest"));
     assert!(sql.contains("CREATE UNIQUE INDEX event_source_index_message_unique"));
-    assert!(sql.contains("WHERE message_id IS NOT NULL"));
+    assert!(sql.contains("WHERE introduced_message_id IS NOT NULL"));
     assert!(sql.contains("FOREIGN KEY (event_id) REFERENCES events(event_id)"));
     assert!(sql.contains("FOREIGN KEY (operation_id) REFERENCES events(operation_id)"));
     assert!(sql.contains("FOREIGN KEY (aggregate_type, aggregate_id, aggregate_sequence)"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_requires_exact_event"));
     assert!(sql.contains("source.rowid = NEW.event_rowid"));
+    assert!(sql.contains("'$.durable_event_sequence'"));
     assert!(sql.contains("'$.last_message.messageId'"));
+    assert!(sql.contains("'$.last_message.eventSequence'"));
+    assert!(sql.contains("'$.last_message.chatId'"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_update"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_delete"));
     assert!(sql.contains("'indexSource', 'verifySourceIndex'"));

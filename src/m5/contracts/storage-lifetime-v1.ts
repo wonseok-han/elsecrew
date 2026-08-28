@@ -1,6 +1,7 @@
 import { requireObject, exactKeys, requireSafeUnsigned } from "./project-v1.ts";
 import { sha256FileVersionV1 } from "./file-v1.ts";
 import { canonicalJsonV1 } from "./storage-v1.ts";
+import { validateTeamMessageV1 } from "./run-recovery-v1.ts";
 
 // Kept at v2 until the sidecar consumer implements the contract-only v3 migration.
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V1 = 2 as const;
@@ -89,7 +90,8 @@ export const STORAGE_LIFETIME_DERIVED_ROWID_PHASES_V4 = [
 ] as const;
 export const STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1 = [
   "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
-  "aggregate_sequence", "message_id",
+  "aggregate_sequence", "introduced_message_id", "chat_durable_sequence",
+  "chat_snapshot_message_id",
 ] as const;
 export const OPERATION_RECEIPT_DIGEST_ALGORITHM_V2 = "sha256" as const;
 export const OPERATION_RECEIPT_DIGEST_VERSION_V2 = 1 as const;
@@ -308,7 +310,9 @@ export interface StorageEventSourceIndexEntryV1 {
   aggregateType: string;
   aggregateId: string;
   aggregateSequence: number;
-  messageId: string | null;
+  introducedMessageId: string | null;
+  chatDurableSequence: number | null;
+  chatSnapshotMessageId: string | null;
 }
 
 export interface StorageLifetimeV3PreflightPolicyV1 {
@@ -1748,7 +1752,9 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     table: "event_source_index",
     columns: STORAGE_EVENT_SOURCE_INDEX_COLUMNS_V1,
     identity: "eventRowidEventIdOperationIdAndAggregateTupleExact",
-    messageId: "nullableExactLastMessageIdFromCanonicalChatPayload",
+    introducedMessageId: "nullableOnlyWhenThisEventIntroducesExactTeamMessage",
+    chatDurableSequence: "nullableExactDurableEventSequenceFromCanonicalChatPayload",
+    chatSnapshotMessageId: "nullableExactLastMessageIdFromCanonicalChatPayload",
     foreignKeys: [
       "event_id->events.event_id",
       "operation_id->events.operation_id",
@@ -1757,14 +1763,30 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     foreignKeyEnforcement: "PRAGMA foreign_keys=ONOnEveryConnection",
     insertGuard: "event_source_index_requires_exact_event",
     sameEventBinding:
-      "eventRowidAndEveryMirroredFieldAndMessageProvenanceMustMatchOneEventsRow",
+      "eventRowidIdentityAggregateAndChatSnapshotFieldsMustMatchOneEventsRow",
     separateForeignKeyCrossEventMix: "rejectedByInsertGuard",
+    introductionTransition: {
+      firstPredecessor: "durableZeroAndSnapshotNull",
+      message:
+        "currentDurableEqualsPreviousPlusOneAndValidTeamMessageEventSequenceEqualsCurrentAndChatIdEqualsAggregateIdAndIntroducedEqualsSnapshotMessageId",
+      nonMessage:
+        "durableUnchangedAndIntroducedNullAndSnapshotNullOrSameAsPreviousSnapshot",
+      reject: [
+        "durableDecrease", "durableJump", "increaseWithoutValidMessage",
+        "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
+      ],
+    },
+    predecessorLookup: {
+      indexed: "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+      missingDuringMigrationPendingAppend: "exactPredecessorEventsAggregateTupleLookupOnly",
+      forbidden: ["scan", "sort", "latestLookup"],
+    },
     historyBackfillByMigration: false,
     historyBackfillPhase: "indexSource",
     indexSourceWrite: "insertOrExactExistingNoOpOtherwiseConflict",
     verificationPhase: "verifySourceIndex",
     aggregateLatestIndex: "event_source_index_aggregate_latest",
-    messageUniqueIndex: "event_source_index_message_unique",
+    introducedMessageUniqueIndex: "event_source_index_message_unique",
     mutationGuards: [
       "event_source_index_requires_exact_event",
       "event_source_index_append_only_update",
@@ -1788,7 +1810,7 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     eventInsert: "requiresExactSourceIndexInsertBeforeCommit",
     duplicateNoOp: "noSourceIndexMutation",
     conflict: "rollbackEventProjectionSourceIndexAndReadiness",
-    messageIdentityConflict: "rollbackWholeAppend",
+    introducedMessageIdentityConflict: "rollbackWholeAppend",
   },
   workspaceProvenance: {
     lookup: "latestProjectSourceByAggregateLatestIndex",
@@ -1804,8 +1826,12 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
       "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
     latestAggregate:
       "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)",
-    messageIdentity:
-      "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)",
+    introducedMessageIdentity:
+      "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)",
+    indexedPredecessor:
+      "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
+    missingIndexedPredecessorEvent:
+      "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
     payloadByRowid: "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
     reject: ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"],
   },
@@ -1927,7 +1953,8 @@ export function validateStorageEventSourceIndexEntryV1(
   const entry = requireObject(value, "event source index entry");
   exactKeys(entry, [
     "eventRowid", "eventId", "operationId", "aggregateType", "aggregateId",
-    "aggregateSequence", "messageId",
+    "aggregateSequence", "introducedMessageId", "chatDurableSequence",
+    "chatSnapshotMessageId",
   ]);
   const eventRowid = requireSafeUnsigned(entry.eventRowid, "sourceIndex.eventRowid");
   const aggregateSequence = requireSafeUnsigned(
@@ -1937,11 +1964,42 @@ export function validateStorageEventSourceIndexEntryV1(
   if (eventRowid === 0 || aggregateSequence === 0
     || ![entry.eventId, entry.operationId, entry.aggregateType, entry.aggregateId]
       .every((field) => typeof field === "string" && field.length > 0)
-    || !(entry.messageId === null
-      || (typeof entry.messageId === "string" && entry.messageId.length > 0))) {
+    || !(entry.introducedMessageId === null
+      || (typeof entry.introducedMessageId === "string" && entry.introducedMessageId.length > 0))
+    || !(entry.chatSnapshotMessageId === null
+      || (typeof entry.chatSnapshotMessageId === "string"
+        && entry.chatSnapshotMessageId.length > 0))
+    || !(entry.chatDurableSequence === null
+      || (typeof entry.chatDurableSequence === "number"
+        && Number.isSafeInteger(entry.chatDurableSequence)
+        && entry.chatDurableSequence >= 0))) {
     fail("event source index identity and aggregate tuple must be non-empty and positive");
   }
   return entry as unknown as StorageEventSourceIndexEntryV1;
+}
+
+function storageChatSourceStateV1(source: OperationCandidateV1): {
+  durable: number;
+  snapshotMessageId: string | null;
+  message: ReturnType<typeof validateTeamMessageV1> | null;
+} {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(source.canonical_json_payload);
+  } catch {
+    fail("source index event payload must be valid JSON");
+  }
+  const object = requireObject(payload, "chat source index payload");
+  const durable = requireSafeUnsigned(
+    object.durable_event_sequence,
+    "sourceIndex.chatDurableSequence",
+  );
+  if (!("last_message" in object)
+    || !(object.last_message === null || typeof object.last_message === "object")) {
+    fail("chat source index last_message must be an object or null");
+  }
+  const message = object.last_message === null ? null : validateTeamMessageV1(object.last_message);
+  return { durable, snapshotMessageId: message?.messageId ?? null, message };
 }
 
 export function validateStorageEventSourceIndexBindingV1(
@@ -1950,30 +2008,82 @@ export function validateStorageEventSourceIndexBindingV1(
   source: OperationCandidateV1,
 ): StorageEventSourceIndexEntryV1 {
   const entry = validateStorageEventSourceIndexEntryV1(entryValue);
-  let payload: unknown;
-  try {
-    payload = JSON.parse(source.canonical_json_payload);
-  } catch {
-    fail("source index event payload must be valid JSON");
-  }
-  const object = requireObject(payload, "source index event payload");
-  let expectedMessageId: string | null = null;
-  if (source.aggregate_type === "chat" && object.last_message !== undefined
-    && object.last_message !== null) {
-    const message = requireObject(object.last_message, "chat source last_message");
-    if (typeof message.messageId !== "string" || message.messageId.length === 0) {
-      fail("chat source index requires exact non-empty last_message.messageId");
-    }
-    expectedMessageId = message.messageId;
-  }
+  const expected = source.aggregate_type === "chat"
+    ? storageChatSourceStateV1(source)
+    : { durable: null, snapshotMessageId: null };
   if (entry.eventRowid !== eventRowid
     || entry.eventId !== source.event_id
     || entry.operationId !== source.operation_id
     || entry.aggregateType !== source.aggregate_type
     || entry.aggregateId !== source.aggregate_id
     || entry.aggregateSequence !== source.aggregate_sequence
-    || entry.messageId !== expectedMessageId) {
-    fail("event source index must match one exact source event and message provenance");
+    || entry.chatDurableSequence !== expected.durable
+    || entry.chatSnapshotMessageId !== expected.snapshotMessageId
+    || (source.aggregate_type !== "chat" && entry.introducedMessageId !== null)) {
+    fail("event source index must match one exact source event and mirrored chat snapshot");
+  }
+  return entry;
+}
+
+export function validateStorageEventSourceIndexTransitionV1(
+  eventRowid: number,
+  entryValue: unknown,
+  source: OperationCandidateV1,
+  predecessorEntryValue: unknown | null,
+  predecessorSource: OperationCandidateV1 | null,
+): StorageEventSourceIndexEntryV1 {
+  const entry = validateStorageEventSourceIndexBindingV1(eventRowid, entryValue, source);
+  if (source.aggregate_type !== "chat") return entry;
+  const current = storageChatSourceStateV1(source);
+  let previousDurable: number;
+  let previousSnapshot: string | null;
+  if (source.aggregate_sequence === 1) {
+    if (predecessorEntryValue !== null || predecessorSource !== null) {
+      fail("first chat source index row must use the synthetic zero predecessor");
+    }
+    previousDurable = 0;
+    previousSnapshot = null;
+  } else if (predecessorEntryValue !== null) {
+    if (predecessorSource !== null) {
+      fail("chat source index predecessor must use exactly one lookup path");
+    }
+    const predecessor = validateStorageEventSourceIndexEntryV1(predecessorEntryValue);
+    if (predecessor.aggregateType !== "chat"
+      || predecessor.aggregateId !== source.aggregate_id
+      || predecessor.aggregateSequence + 1 !== source.aggregate_sequence
+      || predecessor.chatDurableSequence === null) {
+      fail("indexed predecessor must be the exact aggregate sequence minus one");
+    }
+    previousDurable = predecessor.chatDurableSequence;
+    previousSnapshot = predecessor.chatSnapshotMessageId;
+  } else if (predecessorSource !== null) {
+    if (predecessorSource.aggregate_type !== "chat"
+      || predecessorSource.aggregate_id !== source.aggregate_id
+      || predecessorSource.aggregate_sequence + 1 !== source.aggregate_sequence) {
+      fail("fallback predecessor event must be the exact aggregate sequence minus one");
+    }
+    const predecessor = storageChatSourceStateV1(predecessorSource);
+    previousDurable = predecessor.durable;
+    previousSnapshot = predecessor.snapshotMessageId;
+  } else {
+    fail("chat source index transition requires an exact predecessor lookup");
+  }
+
+  if (current.durable === previousDurable + 1) {
+    if (current.message === null
+      || current.message.eventSequence !== current.durable
+      || current.message.chatId !== source.aggregate_id
+      || entry.introducedMessageId !== current.snapshotMessageId) {
+      fail("message introduction must match current durable sequence, chat, and snapshot");
+    }
+  } else if (current.durable === previousDurable) {
+    if (entry.introducedMessageId !== null
+      || (current.snapshotMessageId !== null
+        && current.snapshotMessageId !== previousSnapshot)) {
+      fail("non-message transition must keep durable sequence and null-or-same snapshot");
+    }
+  } else {
+    fail("chat durable sequence must stay unchanged or increase by exactly one");
   }
   return entry;
 }

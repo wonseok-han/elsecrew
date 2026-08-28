@@ -96,10 +96,13 @@
       "table": "event_source_index",
       "columns": [
         "event_rowid", "event_id", "operation_id", "aggregate_type", "aggregate_id",
-        "aggregate_sequence", "message_id"
+        "aggregate_sequence", "introduced_message_id", "chat_durable_sequence",
+        "chat_snapshot_message_id"
       ],
       "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
-      "messageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
+      "introducedMessageId": "nullableOnlyWhenThisEventIntroducesExactTeamMessage",
+      "chatDurableSequence": "nullableExactDurableEventSequenceFromCanonicalChatPayload",
+      "chatSnapshotMessageId": "nullableExactLastMessageIdFromCanonicalChatPayload",
       "foreignKeys": [
         "event_id->events.event_id",
         "operation_id->events.operation_id",
@@ -107,14 +110,28 @@
       ],
       "foreignKeyEnforcement": "PRAGMA foreign_keys=ONOnEveryConnection",
       "insertGuard": "event_source_index_requires_exact_event",
-      "sameEventBinding": "eventRowidAndEveryMirroredFieldAndMessageProvenanceMustMatchOneEventsRow",
+      "sameEventBinding": "eventRowidIdentityAggregateAndChatSnapshotFieldsMustMatchOneEventsRow",
       "separateForeignKeyCrossEventMix": "rejectedByInsertGuard",
+      "introductionTransition": {
+        "firstPredecessor": "durableZeroAndSnapshotNull",
+        "message": "currentDurableEqualsPreviousPlusOneAndValidTeamMessageEventSequenceEqualsCurrentAndChatIdEqualsAggregateIdAndIntroducedEqualsSnapshotMessageId",
+        "nonMessage": "durableUnchangedAndIntroducedNullAndSnapshotNullOrSameAsPreviousSnapshot",
+        "reject": [
+          "durableDecrease", "durableJump", "increaseWithoutValidMessage",
+          "unchangedWithChangedSnapshotMessageId", "doubleIntroduction"
+        ]
+      },
+      "predecessorLookup": {
+        "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+        "missingDuringMigrationPendingAppend": "exactPredecessorEventsAggregateTupleLookupOnly",
+        "forbidden": ["scan", "sort", "latestLookup"]
+      },
       "historyBackfillByMigration": false,
       "historyBackfillPhase": "indexSource",
       "indexSourceWrite": "insertOrExactExistingNoOpOtherwiseConflict",
       "verificationPhase": "verifySourceIndex",
       "aggregateLatestIndex": "event_source_index_aggregate_latest",
-      "messageUniqueIndex": "event_source_index_message_unique",
+      "introducedMessageUniqueIndex": "event_source_index_message_unique",
       "mutationGuards": [
         "event_source_index_requires_exact_event",
         "event_source_index_append_only_update", "event_source_index_append_only_delete"
@@ -137,7 +154,7 @@
       "eventInsert": "requiresExactSourceIndexInsertBeforeCommit",
       "duplicateNoOp": "noSourceIndexMutation",
       "conflict": "rollbackEventProjectionSourceIndexAndReadiness",
-      "messageIdentityConflict": "rollbackWholeAppend"
+      "introducedMessageIdentityConflict": "rollbackWholeAppend"
     },
     "workspaceProvenance": {
       "lookup": "latestProjectSourceByAggregateLatestIndex",
@@ -151,7 +168,9 @@
       "indexSource": "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
       "verifySourceIndex": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
       "latestAggregate": "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)",
-      "messageIdentity": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (message_id=?)",
+      "introducedMessageIdentity": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)",
+      "indexedPredecessor": "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
+      "missingIndexedPredecessorEvent": "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
       "payloadByRowid": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
       "reject": ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"]
     },
