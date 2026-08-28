@@ -149,10 +149,26 @@ struct InvalidOperationReceiptCase {
 #[serde(rename_all = "camelCase")]
 struct BatchingCases {
     valid_cursors: Vec<NamedValue>,
+    valid_transitions: Vec<CursorTransitionCase>,
     valid_payload_batches: Vec<NamedValue>,
     invalid_cursors: Vec<NamedValue>,
+    invalid_transitions: Vec<CursorTransitionCase>,
     invalid_payload_batches: Vec<NamedValue>,
+    future_sidecar_regression: FutureSidecarRegression,
     invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+struct CursorTransitionCase {
+    name: String,
+    previous: Option<Value>,
+    next: Value,
+}
+
+#[derive(Deserialize)]
+struct FutureSidecarRegression {
+    name: String,
+    steps: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -303,6 +319,10 @@ fn rust_validates_bounded_keyset_progress_cancellation_and_atomic_rollback() {
     for case in cases.valid_cursors {
         validate_storage_lifetime_cursor_v1(&case.value).expect(&case.name);
     }
+    for case in cases.valid_transitions {
+        validate_storage_lifetime_cursor_transition_v1(case.previous.as_ref(), &case.next)
+            .expect(&case.name);
+    }
     for case in cases.valid_payload_batches {
         let payloads: Vec<u64> = serde_json::from_value(case.value).expect(&case.name);
         validate_storage_lifetime_batch_source_payloads_v1(&payloads).expect(&case.name);
@@ -310,6 +330,14 @@ fn rust_validates_bounded_keyset_progress_cancellation_and_atomic_rollback() {
     for case in cases.invalid_cursors {
         assert!(
             validate_storage_lifetime_cursor_v1(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in cases.invalid_transitions {
+        assert!(
+            validate_storage_lifetime_cursor_transition_v1(case.previous.as_ref(), &case.next)
+                .is_err(),
             "{}",
             case.name
         );
@@ -331,6 +359,19 @@ fn rust_validates_bounded_keyset_progress_cancellation_and_atomic_rollback() {
             case.name
         );
     }
+    assert_eq!(
+        cases.future_sidecar_regression.name,
+        "ready append catch-up ready"
+    );
+    assert_eq!(
+        cases.future_sidecar_regression.steps,
+        [
+            "materializeReady",
+            "appendAndInvalidateReadyToPendingSameTransaction",
+            "separateCatchUpVerification",
+            "publishReady",
+        ]
+    );
 }
 
 #[test]

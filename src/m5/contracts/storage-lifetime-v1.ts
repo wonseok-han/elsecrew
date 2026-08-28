@@ -94,20 +94,31 @@ export interface StorageLifetimeBatchPolicyV1 {
       typeof STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1;
     singleSourcePayloadOversize: "contractError";
     callerConfigurable: false;
+    appliesToPhases: readonly ["receipts", "messages", "workspaces", "baselines", "verify"];
   };
   cursor: {
     schemaVersion: typeof STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1;
     phases: readonly StorageLifetimePhaseV1[];
-    terminalPhasesRequireAfterAtCutoff: readonly ["verify", "compact"];
+    scanPhases: readonly ["receipts", "messages", "workspaces", "baselines", "verify"];
+    phaseStartAfterEventRowid: 0;
+    samePhaseProgress: "strictlyIncreasingWithinFrozenCutoff";
+    phaseTransition: "currentAtCutoffThenNextPhaseAfterZero";
+    compact: "reservedDisabledAfterVerifyCompletionOnly";
   };
   scan: {
     predicate: typeof STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1;
     orderBy: typeof STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1;
     offsetAllowed: false;
   };
+  source: {
+    artifactAuthority: "eventsAtOrBelowFrozenCutoffOnly";
+    workspaceAndBaselineSource: "eventProjectionSnapshotsAtOrBelowFrozenCutoff";
+    repeatedProjectionSnapshots: "idempotent";
+    liveProjectionUse: "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff";
+    unboundedCollectionAllowed: false;
+  };
   transaction: {
     cadence: "oneBatchOneBeginImmediatePerIdleTurn";
-    sourceAuthority: "v1EventsAndProjections";
     committedDerivedRowsMayPersist: true;
     committedProgressState: "pending";
     implementationMayCommitRunning: false;
@@ -116,17 +127,58 @@ export interface StorageLifetimeBatchPolicyV1 {
     beforeBegin: "noMutation";
     checks: readonly ["beforeEachSourceRow", "afterEachSourceRow", "immediatelyPrecommit"];
     duringTransaction: "rollbackCurrentBatch";
-    outcome: "suspended";
+    outcome: "Suspended";
     crash: "rollbackCurrentBatchResumePrecedingCommittedPendingCursor";
     committedBatchWinsAfterFinalPrecommitCheck: true;
   };
   job: {
-    maximumPendingOrRunning: 1;
-    persistedFailClosedStates: readonly ["running", "materializing", "failed"];
+    table: "maintenance_jobs";
+    jobKind: "losslessCompaction";
+    cursorColumn: "cutoff_json";
+    cursorEncoding: "canonicalJsonCursorSchemaVersion1";
+    maximumActiveJobs: 1;
+    activeStates: readonly ["pending", "running"];
+    resumableState: "pending";
+    inMemoryOnlyOutcome: "Suspended";
+    persistedMaintenanceJobFailClosedStates: readonly ["running"];
+    terminalMaintenanceJobStates: readonly ["succeeded", "failed"];
+    failedMaintenanceJobRole: "terminalHistoryNoAutomaticRetry";
+    storageMetaFailClosedStates: readonly ["materializing", "failed"];
+    materializingLocation: "storage_schema_meta.materialization_state";
+    sqlUniqueConstraintPresent: false;
+    singleSqliteOwnerRequired: true;
+    transactionSerialization: "beginImmediate";
+    transactionBoundaryValidation: "zeroOrOneActiveExactPendingJobIdentityAndValidCursor";
+    secondJobCreationAllowedWhenAnyLifetimeJobExists: false;
+    initialTransition: "absentToPendingCursor";
+    appendReactivation: "succeededToPendingSameJobCursorInAppendTransaction";
+    batchCommit: "derivedRowsAndAdvancedPendingCursorAtomic";
+    cancellationOrCurrentFailure: "rollbackLeavesPriorPendingCursor";
+    finalPublicationTransition: "pendingToSucceeded";
+    postRollbackFailureRecord: "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction";
+    automaticRetryEnabled: false;
   };
   append: {
     readyInvalidation: "pendingInSameAppendTransaction";
     readyPublication: "separateAtomicCatchUpVerificationTransaction";
+    appendDuringMaterialization: "frozenCutoffUnchangedUntilFinalCatchUp";
+    readyRegressionSequence: readonly [
+      "materializeReady",
+      "appendAndInvalidateReadyToPendingSameTransaction",
+      "separateCatchUpVerification",
+      "publishReady",
+    ];
+  };
+  finalPublication: {
+    transaction: "separateBeginImmediate";
+    prerequisites: readonly [
+      "maxEventRowidEqualsCutoff",
+      "exactDerivedCompletenessAndEquivalence",
+      "liveProjectionEqualsCutoffReconstruction",
+      "boundedSqlKeysetEvidence",
+    ];
+    maxRowidChanged: "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady";
+    unboundedCollectionAllowed: false;
   };
   rollback: {
     derivedPreparationBatchesMayPersist: true;
@@ -222,10 +274,49 @@ export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetime
   if (after > cutoff) {
     fail("storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid");
   }
-  if ((cursor.phase === "verify" || cursor.phase === "compact") && after !== cutoff) {
-    fail("storage lifetime verify and compact cursors require afterEventRowid at cutoffEventRowid");
+  if (cursor.phase === "compact" && after !== 0) {
+    fail("storage lifetime reserved compact cursor must use afterEventRowid 0");
   }
   return cursor as unknown as StorageLifetimeCursorV1;
+}
+
+export function validateStorageLifetimeCursorTransitionV1(
+  previousValue: unknown | null,
+  nextValue: unknown,
+): StorageLifetimeCursorV1 {
+  const next = validateStorageLifetimeCursorV1(nextValue);
+  if (previousValue === null) {
+    if (next.phase !== "receipts" || next.afterEventRowid !== 0) {
+      fail("storage lifetime initial cursor must start receipts at afterEventRowid 0");
+    }
+    return next;
+  }
+  const previous = validateStorageLifetimeCursorV1(previousValue);
+  if (previous.phase === "compact") {
+    fail("storage lifetime compact is reserved and cannot advance");
+  }
+  if (next.cutoffEventRowid === previous.cutoffEventRowid) {
+    if (next.phase === previous.phase) {
+      if (next.afterEventRowid <= previous.afterEventRowid) {
+        fail("storage lifetime same-phase cursor must advance afterEventRowid");
+      }
+      return next;
+    }
+    if (nextPhase(previous.phase) !== next.phase
+      || previous.afterEventRowid !== previous.cutoffEventRowid
+      || next.afterEventRowid !== 0) {
+      fail("storage lifetime phase transition requires completed current phase and next phase at afterEventRowid 0");
+    }
+    return next;
+  }
+  if (next.cutoffEventRowid > previous.cutoffEventRowid
+    && previous.phase === "verify"
+    && previous.afterEventRowid === previous.cutoffEventRowid
+    && next.phase === "receipts"
+    && next.afterEventRowid === 0) {
+    return next;
+  }
+  fail("storage lifetime cutoff can change only after completed verify when catch-up restarts receipts at 0");
 }
 
 export function validateStorageLifetimeBatchSourcePayloadsV1(value: unknown): readonly number[] {
@@ -250,22 +341,31 @@ export function validateStorageLifetimeBatchSourcePayloadsV1(value: unknown): re
 export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLifetimeBatchPolicyV1 {
   const policy = requireObject(value, "storage lifetime batch policy");
   exactKeys(policy, [
-    "schemaVersion", "casesFile", "guards", "cursor", "scan", "transaction",
-    "cancellation", "job", "append", "rollback", "activation",
+    "schemaVersion", "casesFile", "guards", "cursor", "scan", "source",
+    "transaction", "cancellation", "job", "append", "finalPublication", "rollback",
+    "activation",
   ]);
   const guards = requireObject(policy.guards, "storage lifetime batch guards");
   exactKeys(guards, [
     "maxSourceRowsPerBatch", "maxCanonicalSourcePayloadBytesPerBatch",
-    "singleSourcePayloadOversize", "callerConfigurable",
+    "singleSourcePayloadOversize", "callerConfigurable", "appliesToPhases",
   ]);
   const cursor = requireObject(policy.cursor, "storage lifetime cursor policy");
-  exactKeys(cursor, ["schemaVersion", "phases", "terminalPhasesRequireAfterAtCutoff"]);
+  exactKeys(cursor, [
+    "schemaVersion", "phases", "scanPhases", "phaseStartAfterEventRowid",
+    "samePhaseProgress", "phaseTransition", "compact",
+  ]);
   const scan = requireObject(policy.scan, "storage lifetime scan policy");
   exactKeys(scan, ["predicate", "orderBy", "offsetAllowed"]);
+  const source = requireObject(policy.source, "storage lifetime source policy");
+  exactKeys(source, [
+    "artifactAuthority", "workspaceAndBaselineSource", "repeatedProjectionSnapshots",
+    "liveProjectionUse", "unboundedCollectionAllowed",
+  ]);
   const transaction = requireObject(policy.transaction, "storage lifetime transaction policy");
   exactKeys(transaction, [
-    "cadence", "sourceAuthority", "committedDerivedRowsMayPersist",
-    "committedProgressState", "implementationMayCommitRunning",
+    "cadence", "committedDerivedRowsMayPersist", "committedProgressState",
+    "implementationMayCommitRunning",
   ]);
   const cancellation = requireObject(policy.cancellation, "storage lifetime cancellation policy");
   exactKeys(cancellation, [
@@ -273,9 +373,28 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
     "committedBatchWinsAfterFinalPrecommitCheck",
   ]);
   const job = requireObject(policy.job, "storage lifetime job policy");
-  exactKeys(job, ["maximumPendingOrRunning", "persistedFailClosedStates"]);
+  exactKeys(job, [
+    "table", "jobKind", "cursorColumn", "cursorEncoding", "maximumActiveJobs",
+    "activeStates", "resumableState", "inMemoryOnlyOutcome",
+    "persistedMaintenanceJobFailClosedStates", "terminalMaintenanceJobStates",
+    "failedMaintenanceJobRole", "storageMetaFailClosedStates", "materializingLocation",
+    "sqlUniqueConstraintPresent", "singleSqliteOwnerRequired", "transactionSerialization",
+    "transactionBoundaryValidation", "secondJobCreationAllowedWhenAnyLifetimeJobExists",
+    "initialTransition", "appendReactivation", "batchCommit", "cancellationOrCurrentFailure",
+    "finalPublicationTransition", "postRollbackFailureRecord", "automaticRetryEnabled",
+  ]);
   const append = requireObject(policy.append, "storage lifetime append policy");
-  exactKeys(append, ["readyInvalidation", "readyPublication"]);
+  exactKeys(append, [
+    "readyInvalidation", "readyPublication", "appendDuringMaterialization",
+    "readyRegressionSequence",
+  ]);
+  const finalPublication = requireObject(
+    policy.finalPublication,
+    "storage lifetime final publication policy",
+  );
+  exactKeys(finalPublication, [
+    "transaction", "prerequisites", "maxRowidChanged", "unboundedCollectionAllowed",
+  ]);
   const rollback = requireObject(policy.rollback, "storage lifetime rollback policy");
   exactKeys(rollback, [
     "derivedPreparationBatchesMayPersist", "sourceLedgerMutationAtomicRollbackRequired",
@@ -294,14 +413,27 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
       === STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
     && guards.singleSourcePayloadOversize === "contractError"
     && guards.callerConfigurable === false
+    && exactStringArray(guards.appliesToPhases, [
+      "receipts", "messages", "workspaces", "baselines", "verify",
+    ])
     && cursor.schemaVersion === STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1
     && exactStringArray(cursor.phases, STORAGE_LIFETIME_PHASES_V1)
-    && exactStringArray(cursor.terminalPhasesRequireAfterAtCutoff, ["verify", "compact"])
+    && exactStringArray(cursor.scanPhases, [
+      "receipts", "messages", "workspaces", "baselines", "verify",
+    ])
+    && cursor.phaseStartAfterEventRowid === 0
+    && cursor.samePhaseProgress === "strictlyIncreasingWithinFrozenCutoff"
+    && cursor.phaseTransition === "currentAtCutoffThenNextPhaseAfterZero"
+    && cursor.compact === "reservedDisabledAfterVerifyCompletionOnly"
     && scan.predicate === STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
     && scan.orderBy === STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
     && scan.offsetAllowed === false
+    && source.artifactAuthority === "eventsAtOrBelowFrozenCutoffOnly"
+    && source.workspaceAndBaselineSource === "eventProjectionSnapshotsAtOrBelowFrozenCutoff"
+    && source.repeatedProjectionSnapshots === "idempotent"
+    && source.liveProjectionUse === "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff"
+    && source.unboundedCollectionAllowed === false
     && transaction.cadence === "oneBatchOneBeginImmediatePerIdleTurn"
-    && transaction.sourceAuthority === "v1EventsAndProjections"
     && transaction.committedDerivedRowsMayPersist === true
     && transaction.committedProgressState === "pending"
     && transaction.implementationMayCommitRunning === false
@@ -310,13 +442,54 @@ export function validateStorageLifetimeBatchPolicyV1(value: unknown): StorageLif
       "beforeEachSourceRow", "afterEachSourceRow", "immediatelyPrecommit",
     ])
     && cancellation.duringTransaction === "rollbackCurrentBatch"
-    && cancellation.outcome === "suspended"
+    && cancellation.outcome === "Suspended"
     && cancellation.crash === "rollbackCurrentBatchResumePrecedingCommittedPendingCursor"
     && cancellation.committedBatchWinsAfterFinalPrecommitCheck === true
-    && job.maximumPendingOrRunning === 1
-    && exactStringArray(job.persistedFailClosedStates, ["running", "materializing", "failed"])
+    && job.table === "maintenance_jobs"
+    && job.jobKind === "losslessCompaction"
+    && job.cursorColumn === "cutoff_json"
+    && job.cursorEncoding === "canonicalJsonCursorSchemaVersion1"
+    && job.maximumActiveJobs === 1
+    && exactStringArray(job.activeStates, ["pending", "running"])
+    && job.resumableState === "pending"
+    && job.inMemoryOnlyOutcome === "Suspended"
+    && exactStringArray(job.persistedMaintenanceJobFailClosedStates, ["running"])
+    && exactStringArray(job.terminalMaintenanceJobStates, ["succeeded", "failed"])
+    && job.failedMaintenanceJobRole === "terminalHistoryNoAutomaticRetry"
+    && exactStringArray(job.storageMetaFailClosedStates, ["materializing", "failed"])
+    && job.materializingLocation === "storage_schema_meta.materialization_state"
+    && job.sqlUniqueConstraintPresent === false
+    && job.singleSqliteOwnerRequired === true
+    && job.transactionSerialization === "beginImmediate"
+    && job.transactionBoundaryValidation === "zeroOrOneActiveExactPendingJobIdentityAndValidCursor"
+    && job.secondJobCreationAllowedWhenAnyLifetimeJobExists === false
+    && job.initialTransition === "absentToPendingCursor"
+    && job.appendReactivation === "succeededToPendingSameJobCursorInAppendTransaction"
+    && job.batchCommit === "derivedRowsAndAdvancedPendingCursorAtomic"
+    && job.cancellationOrCurrentFailure === "rollbackLeavesPriorPendingCursor"
+    && job.finalPublicationTransition === "pendingToSucceeded"
+    && job.postRollbackFailureRecord
+      === "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction"
+    && job.automaticRetryEnabled === false
     && append.readyInvalidation === "pendingInSameAppendTransaction"
     && append.readyPublication === "separateAtomicCatchUpVerificationTransaction"
+    && append.appendDuringMaterialization === "frozenCutoffUnchangedUntilFinalCatchUp"
+    && exactStringArray(append.readyRegressionSequence, [
+      "materializeReady",
+      "appendAndInvalidateReadyToPendingSameTransaction",
+      "separateCatchUpVerification",
+      "publishReady",
+    ])
+    && finalPublication.transaction === "separateBeginImmediate"
+    && exactStringArray(finalPublication.prerequisites, [
+      "maxEventRowidEqualsCutoff",
+      "exactDerivedCompletenessAndEquivalence",
+      "liveProjectionEqualsCutoffReconstruction",
+      "boundedSqlKeysetEvidence",
+    ])
+    && finalPublication.maxRowidChanged
+      === "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady"
+    && finalPublication.unboundedCollectionAllowed === false
     && rollback.derivedPreparationBatchesMayPersist === true
     && rollback.sourceLedgerMutationAtomicRollbackRequired === true
     && rollback.compactionTriggerChangeAtomicRollbackRequired === true
@@ -539,6 +712,11 @@ function exactStringArray(value: unknown, expected: readonly string[]): boolean 
   return Array.isArray(value)
     && value.length === expected.length
     && value.every((entry, index) => entry === expected[index]);
+}
+
+function nextPhase(phase: StorageLifetimePhaseV1): StorageLifetimePhaseV1 | null {
+  const index = STORAGE_LIFETIME_PHASES_V1.indexOf(phase);
+  return STORAGE_LIFETIME_PHASES_V1[index + 1] ?? null;
 }
 
 function fail(message: string): never {

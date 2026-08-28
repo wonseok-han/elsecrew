@@ -233,10 +233,12 @@ struct StorageLifetimeBatchPolicyV1 {
     guards: StorageLifetimeBatchGuardsV1,
     cursor: StorageLifetimeCursorPolicyV1,
     scan: StorageLifetimeScanPolicyV1,
+    source: StorageLifetimeSourcePolicyV1,
     transaction: StorageLifetimeTransactionPolicyV1,
     cancellation: StorageLifetimeCancellationPolicyV1,
     job: StorageLifetimeJobPolicyV1,
     append: StorageLifetimeAppendPolicyV1,
+    final_publication: StorageLifetimeFinalPublicationPolicyV1,
     rollback: StorageLifetimeRollbackPolicyV1,
     activation: StorageLifetimeActivationPolicyV1,
 }
@@ -248,6 +250,7 @@ struct StorageLifetimeBatchGuardsV1 {
     max_canonical_source_payload_bytes_per_batch: u64,
     single_source_payload_oversize: String,
     caller_configurable: bool,
+    applies_to_phases: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -255,7 +258,11 @@ struct StorageLifetimeBatchGuardsV1 {
 struct StorageLifetimeCursorPolicyV1 {
     schema_version: u32,
     phases: Vec<String>,
-    terminal_phases_require_after_at_cutoff: Vec<String>,
+    scan_phases: Vec<String>,
+    phase_start_after_event_rowid: u64,
+    same_phase_progress: String,
+    phase_transition: String,
+    compact: String,
 }
 
 #[derive(Deserialize)]
@@ -268,9 +275,18 @@ struct StorageLifetimeScanPolicyV1 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeSourcePolicyV1 {
+    artifact_authority: String,
+    workspace_and_baseline_source: String,
+    repeated_projection_snapshots: String,
+    live_projection_use: String,
+    unbounded_collection_allowed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct StorageLifetimeTransactionPolicyV1 {
     cadence: String,
-    source_authority: String,
     committed_derived_rows_may_persist: bool,
     committed_progress_state: String,
     implementation_may_commit_running: bool,
@@ -290,8 +306,31 @@ struct StorageLifetimeCancellationPolicyV1 {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct StorageLifetimeJobPolicyV1 {
-    maximum_pending_or_running: u64,
-    persisted_fail_closed_states: Vec<String>,
+    table: String,
+    job_kind: String,
+    cursor_column: String,
+    cursor_encoding: String,
+    maximum_active_jobs: u64,
+    active_states: Vec<String>,
+    resumable_state: String,
+    in_memory_only_outcome: String,
+    persisted_maintenance_job_fail_closed_states: Vec<String>,
+    terminal_maintenance_job_states: Vec<String>,
+    failed_maintenance_job_role: String,
+    storage_meta_fail_closed_states: Vec<String>,
+    materializing_location: String,
+    sql_unique_constraint_present: bool,
+    single_sqlite_owner_required: bool,
+    transaction_serialization: String,
+    transaction_boundary_validation: String,
+    second_job_creation_allowed_when_any_lifetime_job_exists: bool,
+    initial_transition: String,
+    append_reactivation: String,
+    batch_commit: String,
+    cancellation_or_current_failure: String,
+    final_publication_transition: String,
+    post_rollback_failure_record: String,
+    automatic_retry_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -299,6 +338,17 @@ struct StorageLifetimeJobPolicyV1 {
 struct StorageLifetimeAppendPolicyV1 {
     ready_invalidation: String,
     ready_publication: String,
+    append_during_materialization: String,
+    ready_regression_sequence: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct StorageLifetimeFinalPublicationPolicyV1 {
+    transaction: String,
+    prerequisites: Vec<String>,
+    max_rowid_changed: String,
+    unbounded_collection_allowed: bool,
 }
 
 #[derive(Deserialize)]
@@ -325,6 +375,58 @@ pub fn validate_storage_lifetime_cursor_v1(
         .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
     validate_storage_lifetime_cursor_fields_v1(&cursor)?;
     Ok(cursor)
+}
+
+pub fn validate_storage_lifetime_cursor_transition_v1(
+    previous: Option<&Value>,
+    next: &Value,
+) -> Result<StorageLifetimeCursorV1, StorageLifetimeContractError> {
+    let next = validate_storage_lifetime_cursor_v1(next)?;
+    let Some(previous) = previous else {
+        if next.phase != StorageLifetimePhaseV1::Receipts || next.after_event_rowid != 0 {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime initial cursor must start receipts at afterEventRowid 0",
+            ));
+        }
+        return Ok(next);
+    };
+    let previous = validate_storage_lifetime_cursor_v1(previous)?;
+
+    if previous.phase == StorageLifetimePhaseV1::Compact {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime compact is reserved and cannot advance",
+        ));
+    }
+    if next.cutoff_event_rowid == previous.cutoff_event_rowid {
+        if next.phase == previous.phase {
+            if next.after_event_rowid <= previous.after_event_rowid {
+                return Err(StorageLifetimeContractError::new(
+                    "storage lifetime same-phase cursor must advance afterEventRowid",
+                ));
+            }
+            return Ok(next);
+        }
+        if next_phase(previous.phase) != Some(next.phase)
+            || previous.after_event_rowid != previous.cutoff_event_rowid
+            || next.after_event_rowid != 0
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage lifetime phase transition requires completed current phase and next phase at afterEventRowid 0",
+            ));
+        }
+        return Ok(next);
+    }
+    if next.cutoff_event_rowid > previous.cutoff_event_rowid
+        && previous.phase == StorageLifetimePhaseV1::Verify
+        && previous.after_event_rowid == previous.cutoff_event_rowid
+        && next.phase == StorageLifetimePhaseV1::Receipts
+        && next.after_event_rowid == 0
+    {
+        return Ok(next);
+    }
+    Err(StorageLifetimeContractError::new(
+        "storage lifetime cutoff can change only after completed verify when catch-up restarts receipts at 0",
+    ))
 }
 
 pub fn validate_storage_lifetime_batch_source_payloads_v1(
@@ -369,17 +471,31 @@ pub fn validate_storage_lifetime_batch_policy_v1(
             == STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
         && policy.guards.single_source_payload_oversize == "contractError"
         && !policy.guards.caller_configurable
+        && strings_equal(
+            &policy.guards.applies_to_phases,
+            &["receipts", "messages", "workspaces", "baselines", "verify"],
+        )
         && policy.cursor.schema_version == STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1
         && strings_equal(&policy.cursor.phases, STORAGE_LIFETIME_PHASES_V1)
         && strings_equal(
-            &policy.cursor.terminal_phases_require_after_at_cutoff,
-            &["verify", "compact"],
+            &policy.cursor.scan_phases,
+            &["receipts", "messages", "workspaces", "baselines", "verify"],
         )
+        && policy.cursor.phase_start_after_event_rowid == 0
+        && policy.cursor.same_phase_progress == "strictlyIncreasingWithinFrozenCutoff"
+        && policy.cursor.phase_transition == "currentAtCutoffThenNextPhaseAfterZero"
+        && policy.cursor.compact == "reservedDisabledAfterVerifyCompletionOnly"
         && policy.scan.predicate == STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1
         && policy.scan.order_by == STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1
         && !policy.scan.offset_allowed
+        && policy.source.artifact_authority == "eventsAtOrBelowFrozenCutoffOnly"
+        && policy.source.workspace_and_baseline_source
+            == "eventProjectionSnapshotsAtOrBelowFrozenCutoff"
+        && policy.source.repeated_projection_snapshots == "idempotent"
+        && policy.source.live_projection_use
+            == "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff"
+        && !policy.source.unbounded_collection_allowed
         && policy.transaction.cadence == "oneBatchOneBeginImmediatePerIdleTurn"
-        && policy.transaction.source_authority == "v1EventsAndProjections"
         && policy.transaction.committed_derived_rows_may_persist
         && policy.transaction.committed_progress_state == "pending"
         && !policy.transaction.implementation_may_commit_running
@@ -393,18 +509,74 @@ pub fn validate_storage_lifetime_batch_policy_v1(
             ],
         )
         && policy.cancellation.during_transaction == "rollbackCurrentBatch"
-        && policy.cancellation.outcome == "suspended"
+        && policy.cancellation.outcome == "Suspended"
         && policy.cancellation.crash == "rollbackCurrentBatchResumePrecedingCommittedPendingCursor"
         && policy
             .cancellation
             .committed_batch_wins_after_final_precommit_check
-        && policy.job.maximum_pending_or_running == 1
+        && policy.job.table == "maintenance_jobs"
+        && policy.job.job_kind == "losslessCompaction"
+        && policy.job.cursor_column == "cutoff_json"
+        && policy.job.cursor_encoding == "canonicalJsonCursorSchemaVersion1"
+        && policy.job.maximum_active_jobs == 1
+        && strings_equal(&policy.job.active_states, &["pending", "running"])
+        && policy.job.resumable_state == "pending"
+        && policy.job.in_memory_only_outcome == "Suspended"
         && strings_equal(
-            &policy.job.persisted_fail_closed_states,
-            &["running", "materializing", "failed"],
+            &policy.job.persisted_maintenance_job_fail_closed_states,
+            &["running"],
         )
+        && strings_equal(
+            &policy.job.terminal_maintenance_job_states,
+            &["succeeded", "failed"],
+        )
+        && policy.job.failed_maintenance_job_role == "terminalHistoryNoAutomaticRetry"
+        && strings_equal(
+            &policy.job.storage_meta_fail_closed_states,
+            &["materializing", "failed"],
+        )
+        && policy.job.materializing_location == "storage_schema_meta.materialization_state"
+        && !policy.job.sql_unique_constraint_present
+        && policy.job.single_sqlite_owner_required
+        && policy.job.transaction_serialization == "beginImmediate"
+        && policy.job.transaction_boundary_validation
+            == "zeroOrOneActiveExactPendingJobIdentityAndValidCursor"
+        && !policy
+            .job
+            .second_job_creation_allowed_when_any_lifetime_job_exists
+        && policy.job.initial_transition == "absentToPendingCursor"
+        && policy.job.append_reactivation == "succeededToPendingSameJobCursorInAppendTransaction"
+        && policy.job.batch_commit == "derivedRowsAndAdvancedPendingCursorAtomic"
+        && policy.job.cancellation_or_current_failure == "rollbackLeavesPriorPendingCursor"
+        && policy.job.final_publication_transition == "pendingToSucceeded"
+        && policy.job.post_rollback_failure_record
+            == "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction"
+        && !policy.job.automatic_retry_enabled
         && policy.append.ready_invalidation == "pendingInSameAppendTransaction"
         && policy.append.ready_publication == "separateAtomicCatchUpVerificationTransaction"
+        && policy.append.append_during_materialization == "frozenCutoffUnchangedUntilFinalCatchUp"
+        && strings_equal(
+            &policy.append.ready_regression_sequence,
+            &[
+                "materializeReady",
+                "appendAndInvalidateReadyToPendingSameTransaction",
+                "separateCatchUpVerification",
+                "publishReady",
+            ],
+        )
+        && policy.final_publication.transaction == "separateBeginImmediate"
+        && strings_equal(
+            &policy.final_publication.prerequisites,
+            &[
+                "maxEventRowidEqualsCutoff",
+                "exactDerivedCompletenessAndEquivalence",
+                "liveProjectionEqualsCutoffReconstruction",
+                "boundedSqlKeysetEvidence",
+            ],
+        )
+        && policy.final_publication.max_rowid_changed
+            == "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady"
+        && !policy.final_publication.unbounded_collection_allowed
         && policy.rollback.derived_preparation_batches_may_persist
         && policy
             .rollback
@@ -439,16 +611,23 @@ fn validate_storage_lifetime_cursor_fields_v1(
             "storage lifetime cursor afterEventRowid cannot exceed cutoffEventRowid",
         ));
     }
-    if matches!(
-        cursor.phase,
-        StorageLifetimePhaseV1::Verify | StorageLifetimePhaseV1::Compact
-    ) && cursor.after_event_rowid != cursor.cutoff_event_rowid
-    {
+    if cursor.phase == StorageLifetimePhaseV1::Compact && cursor.after_event_rowid != 0 {
         return Err(StorageLifetimeContractError::new(
-            "storage lifetime verify and compact cursors require afterEventRowid at cutoffEventRowid",
+            "storage lifetime reserved compact cursor must use afterEventRowid 0",
         ));
     }
     Ok(())
+}
+
+fn next_phase(phase: StorageLifetimePhaseV1) -> Option<StorageLifetimePhaseV1> {
+    match phase {
+        StorageLifetimePhaseV1::Receipts => Some(StorageLifetimePhaseV1::Messages),
+        StorageLifetimePhaseV1::Messages => Some(StorageLifetimePhaseV1::Workspaces),
+        StorageLifetimePhaseV1::Workspaces => Some(StorageLifetimePhaseV1::Baselines),
+        StorageLifetimePhaseV1::Baselines => Some(StorageLifetimePhaseV1::Verify),
+        StorageLifetimePhaseV1::Verify => Some(StorageLifetimePhaseV1::Compact),
+        StorageLifetimePhaseV1::Compact => None,
+    }
 }
 
 fn strings_equal(actual: &[String], expected: &[&str]) -> bool {

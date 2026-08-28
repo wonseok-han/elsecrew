@@ -33,6 +33,7 @@ import {
   validateStorageLifetimeBatchPolicyV1,
   validateStorageLifetimeBatchSourcePayloadsV1,
   validateStorageLifetimeCursorV1,
+  validateStorageLifetimeCursorTransitionV1,
   validateStorageStatusRequestV1,
   validateStorageStatusV1,
 } from "../src/m5/contracts/storage-lifetime-v1.ts";
@@ -128,14 +129,23 @@ interface OperationReceiptCases {
 
 interface BatchingCases {
   validCursors: Array<{ name: string; value: unknown }>;
+  validTransitions: CursorTransitionCase[];
   validPayloadBatches: Array<{ name: string; value: unknown }>;
   invalidCursors: Array<{ name: string; value: unknown }>;
+  invalidTransitions: CursorTransitionCase[];
   invalidPayloadBatches: Array<{ name: string; value: unknown }>;
+  futureSidecarRegression: { name: string; steps: string[] };
   invalidPolicyMutations: Array<{
     name: string;
     path: string[];
     replacement: unknown;
   }>;
+}
+
+interface CursorTransitionCase {
+  name: string;
+  previous: unknown | null;
+  next: unknown;
 }
 
 const root = resolve("tests/fixtures/m5/storage-v2");
@@ -321,18 +331,53 @@ test("G5D batching fixes bounded keyset progress, cancellation, and atomic rollb
     policy.guards.maxCanonicalSourcePayloadBytesPerBatch,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
   );
+  assert.deepEqual(policy.guards.appliesToPhases, [
+    "receipts", "messages", "workspaces", "baselines", "verify",
+  ]);
   assert.equal(policy.cursor.schemaVersion, STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1);
   assert.deepEqual(policy.cursor.phases, [...STORAGE_LIFETIME_PHASES_V1]);
+  assert.deepEqual(policy.cursor.scanPhases, [
+    "receipts", "messages", "workspaces", "baselines", "verify",
+  ]);
   assert.equal(policy.scan.predicate, STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1);
   assert.equal(policy.scan.orderBy, STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1);
   assert.equal(policy.scan.offsetAllowed, false);
+  assert.equal(policy.source.artifactAuthority, "eventsAtOrBelowFrozenCutoffOnly");
+  assert.equal(
+    policy.source.workspaceAndBaselineSource,
+    "eventProjectionSnapshotsAtOrBelowFrozenCutoff",
+  );
+  assert.equal(
+    policy.source.liveProjectionUse,
+    "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff",
+  );
   assert.equal(policy.transaction.committedDerivedRowsMayPersist, true);
   assert.equal(policy.transaction.committedProgressState, "pending");
   assert.equal(policy.transaction.implementationMayCommitRunning, false);
-  assert.equal(policy.cancellation.outcome, "suspended");
-  assert.equal(policy.job.maximumPendingOrRunning, 1);
+  assert.equal(policy.cancellation.outcome, "Suspended");
+  assert.equal(policy.job.cursorColumn, "cutoff_json");
+  assert.equal(policy.job.maximumActiveJobs, 1);
+  assert.deepEqual(policy.job.persistedMaintenanceJobFailClosedStates, ["running"]);
+  assert.deepEqual(policy.job.storageMetaFailClosedStates, ["materializing", "failed"]);
+  assert.equal(policy.job.failedMaintenanceJobRole, "terminalHistoryNoAutomaticRetry");
+  assert.equal(policy.job.sqlUniqueConstraintPresent, false);
+  assert.equal(policy.job.transactionBoundaryValidation, "zeroOrOneActiveExactPendingJobIdentityAndValidCursor");
+  assert.equal(policy.job.secondJobCreationAllowedWhenAnyLifetimeJobExists, false);
+  assert.equal(
+    policy.job.appendReactivation,
+    "succeededToPendingSameJobCursorInAppendTransaction",
+  );
+  assert.equal(policy.job.batchCommit, "derivedRowsAndAdvancedPendingCursorAtomic");
+  assert.equal(policy.job.automaticRetryEnabled, false);
   assert.equal(policy.append.readyInvalidation, "pendingInSameAppendTransaction");
   assert.equal(policy.append.readyPublication, "separateAtomicCatchUpVerificationTransaction");
+  assert.deepEqual(policy.append.readyRegressionSequence, batchingCases.futureSidecarRegression.steps);
+  assert.deepEqual(policy.finalPublication.prerequisites, [
+    "maxEventRowidEqualsCutoff",
+    "exactDerivedCompletenessAndEquivalence",
+    "liveProjectionEqualsCutoffReconstruction",
+    "boundedSqlKeysetEvidence",
+  ]);
   assert.equal(policy.activation.ledgerDeletionEnabled, false);
   assert.equal(policy.activation.automaticSchedulingEnabled, false);
   assert.equal(policy.activation.compactionImplementationEnabled, false);
@@ -341,11 +386,25 @@ test("G5D batching fixes bounded keyset progress, cancellation, and atomic rollb
   for (const fixture of batchingCases.validCursors) {
     assert.deepEqual(validateStorageLifetimeCursorV1(fixture.value), fixture.value, fixture.name);
   }
+  for (const fixture of batchingCases.validTransitions) {
+    assert.deepEqual(
+      validateStorageLifetimeCursorTransitionV1(fixture.previous, fixture.next),
+      fixture.next,
+      fixture.name,
+    );
+  }
   for (const fixture of batchingCases.validPayloadBatches) {
     assert.deepEqual(validateStorageLifetimeBatchSourcePayloadsV1(fixture.value), fixture.value, fixture.name);
   }
   for (const fixture of batchingCases.invalidCursors) {
     assert.throws(() => validateStorageLifetimeCursorV1(fixture.value), undefined, fixture.name);
+  }
+  for (const fixture of batchingCases.invalidTransitions) {
+    assert.throws(
+      () => validateStorageLifetimeCursorTransitionV1(fixture.previous, fixture.next),
+      undefined,
+      fixture.name,
+    );
   }
   for (const fixture of batchingCases.invalidPayloadBatches) {
     assert.throws(

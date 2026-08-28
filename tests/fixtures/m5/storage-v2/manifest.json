@@ -55,7 +55,14 @@
       "maxSourceRowsPerBatch": 100,
       "maxCanonicalSourcePayloadBytesPerBatch": 1048576,
       "singleSourcePayloadOversize": "contractError",
-      "callerConfigurable": false
+      "callerConfigurable": false,
+      "appliesToPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ]
     },
     "cursor": {
       "schemaVersion": 1,
@@ -67,19 +74,32 @@
         "verify",
         "compact"
       ],
-      "terminalPhasesRequireAfterAtCutoff": [
-        "verify",
-        "compact"
-      ]
+      "scanPhases": [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verify"
+      ],
+      "phaseStartAfterEventRowid": 0,
+      "samePhaseProgress": "strictlyIncreasingWithinFrozenCutoff",
+      "phaseTransition": "currentAtCutoffThenNextPhaseAfterZero",
+      "compact": "reservedDisabledAfterVerifyCompletionOnly"
     },
     "scan": {
       "predicate": "rowid > afterEventRowid AND rowid <= cutoffEventRowid",
       "orderBy": "rowid",
       "offsetAllowed": false
     },
+    "source": {
+      "artifactAuthority": "eventsAtOrBelowFrozenCutoffOnly",
+      "workspaceAndBaselineSource": "eventProjectionSnapshotsAtOrBelowFrozenCutoff",
+      "repeatedProjectionSnapshots": "idempotent",
+      "liveProjectionUse": "finalCatchUpEquivalenceOnlyAfterMaxEventRowidEqualsCutoff",
+      "unboundedCollectionAllowed": false
+    },
     "transaction": {
       "cadence": "oneBatchOneBeginImmediatePerIdleTurn",
-      "sourceAuthority": "v1EventsAndProjections",
       "committedDerivedRowsMayPersist": true,
       "committedProgressState": "pending",
       "implementationMayCommitRunning": false
@@ -92,21 +112,69 @@
         "immediatelyPrecommit"
       ],
       "duringTransaction": "rollbackCurrentBatch",
-      "outcome": "suspended",
+      "outcome": "Suspended",
       "crash": "rollbackCurrentBatchResumePrecedingCommittedPendingCursor",
       "committedBatchWinsAfterFinalPrecommitCheck": true
     },
     "job": {
-      "maximumPendingOrRunning": 1,
-      "persistedFailClosedStates": [
-        "running",
+      "table": "maintenance_jobs",
+      "jobKind": "losslessCompaction",
+      "cursorColumn": "cutoff_json",
+      "cursorEncoding": "canonicalJsonCursorSchemaVersion1",
+      "maximumActiveJobs": 1,
+      "activeStates": [
+        "pending",
+        "running"
+      ],
+      "resumableState": "pending",
+      "inMemoryOnlyOutcome": "Suspended",
+      "persistedMaintenanceJobFailClosedStates": [
+        "running"
+      ],
+      "terminalMaintenanceJobStates": [
+        "succeeded",
+        "failed"
+      ],
+      "failedMaintenanceJobRole": "terminalHistoryNoAutomaticRetry",
+      "storageMetaFailClosedStates": [
         "materializing",
         "failed"
-      ]
+      ],
+      "materializingLocation": "storage_schema_meta.materialization_state",
+      "sqlUniqueConstraintPresent": false,
+      "singleSqliteOwnerRequired": true,
+      "transactionSerialization": "beginImmediate",
+      "transactionBoundaryValidation": "zeroOrOneActiveExactPendingJobIdentityAndValidCursor",
+      "secondJobCreationAllowedWhenAnyLifetimeJobExists": false,
+      "initialTransition": "absentToPendingCursor",
+      "appendReactivation": "succeededToPendingSameJobCursorInAppendTransaction",
+      "batchCommit": "derivedRowsAndAdvancedPendingCursorAtomic",
+      "cancellationOrCurrentFailure": "rollbackLeavesPriorPendingCursor",
+      "finalPublicationTransition": "pendingToSucceeded",
+      "postRollbackFailureRecord": "optionalSeparateBestEffortCreateOrUpdateSanitizedFailedTransaction",
+      "automaticRetryEnabled": false
     },
     "append": {
       "readyInvalidation": "pendingInSameAppendTransaction",
-      "readyPublication": "separateAtomicCatchUpVerificationTransaction"
+      "readyPublication": "separateAtomicCatchUpVerificationTransaction",
+      "appendDuringMaterialization": "frozenCutoffUnchangedUntilFinalCatchUp",
+      "readyRegressionSequence": [
+        "materializeReady",
+        "appendAndInvalidateReadyToPendingSameTransaction",
+        "separateCatchUpVerification",
+        "publishReady"
+      ]
+    },
+    "finalPublication": {
+      "transaction": "separateBeginImmediate",
+      "prerequisites": [
+        "maxEventRowidEqualsCutoff",
+        "exactDerivedCompletenessAndEquivalence",
+        "liveProjectionEqualsCutoffReconstruction",
+        "boundedSqlKeysetEvidence"
+      ],
+      "maxRowidChanged": "remainPendingStartOrContinueCatchUpAtObservedCutoffNeverPublishReady",
+      "unboundedCollectionAllowed": false
     },
     "rollback": {
       "derivedPreparationBatchesMayPersist": true,
