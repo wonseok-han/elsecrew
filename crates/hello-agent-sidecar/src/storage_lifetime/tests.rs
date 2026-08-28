@@ -283,7 +283,7 @@ fn ready(id: &str) -> ReadyPayloadV1 {
 #[test]
 fn empty_materialization_is_atomic_ready_idempotent_and_reopens() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("storage");
+    let mut storage = Storage::open_v3_for_test(&path).expect("storage");
     let first = storage
         .materialize_lifetime_records(None)
         .expect("materialize empty storage");
@@ -312,7 +312,7 @@ fn empty_materialization_is_atomic_ready_idempotent_and_reopens() {
     );
     drop(storage);
 
-    let mut reopened = Storage::open(&path).expect("ready storage reopens");
+    let mut reopened = Storage::open_v3_for_test(&path).expect("ready storage reopens");
     assert_eq!(
         reopened
             .materialize_lifetime_records(None)
@@ -324,7 +324,7 @@ fn empty_materialization_is_atomic_ready_idempotent_and_reopens() {
 #[test]
 fn legacy_materialization_refuses_existing_v3_cursor_without_mutation() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("storage");
+    let mut storage = Storage::open_v3_for_test(&path).expect("storage");
     storage
         .connection_for_test()
         .execute(
@@ -396,9 +396,60 @@ fn legacy_materialization_refuses_existing_v3_cursor_without_mutation() {
 }
 
 #[test]
+fn legacy_materialization_refuses_existing_v4_cursor_without_mutation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("v4 storage");
+    storage
+        .connection_for_test()
+        .execute(
+            "INSERT INTO lifetime_materialization_job(\
+               singleton,job_id,state,cutoff_event_rowid,phase,after_scan_rowid,scan_exhausted,\
+               failure_kind,created_at,updated_at,completed_at\
+             ) VALUES (1,'bounded_v4_cursor','pending',0,'receipts',0,0,NULL,\
+               '2026-08-28T08:00:00Z','2026-08-28T08:00:00Z',NULL);",
+            [],
+        )
+        .unwrap();
+    let snapshot_before: (String, String) = storage
+        .connection_for_test()
+        .query_row(
+            "SELECT materialization_state,json_object(\
+               'job_id',job_id,'state',state,'phase',phase,\
+               'after_scan_rowid',after_scan_rowid,'scan_exhausted',scan_exhausted\
+             ) FROM storage_schema_meta,lifetime_materialization_job \
+             WHERE storage_schema_meta.singleton=1 AND lifetime_materialization_job.singleton=1;",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let rows_before = materialized_row_count(&storage);
+
+    let error = storage
+        .materialize_lifetime_records(None)
+        .expect_err("legacy materialization must not consume a v4 cursor");
+    assert_eq!(error.kind(), "storageMaterializationFailed");
+    assert_eq!(
+        storage
+            .connection_for_test()
+            .query_row(
+                "SELECT materialization_state,json_object(\
+                   'job_id',job_id,'state',state,'phase',phase,\
+                   'after_scan_rowid',after_scan_rowid,'scan_exhausted',scan_exhausted\
+                 ) FROM storage_schema_meta,lifetime_materialization_job \
+                 WHERE storage_schema_meta.singleton=1 AND lifetime_materialization_job.singleton=1;",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap(),
+        snapshot_before
+    );
+    assert_eq!(materialized_row_count(&storage), rows_before);
+}
+
+#[test]
 fn populated_materialization_preserves_receipts_messages_workspaces_and_baseline_tail() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("storage");
+    let mut storage = Storage::open_v3_for_test(&path).expect("storage");
     let events = populate_lifetime_fixture(&mut storage);
     let events_before = crate::storage::load_events(storage.connection_for_test()).unwrap();
     let projections_before =
@@ -561,7 +612,8 @@ fn populated_materialization_preserves_receipts_messages_workspaces_and_baseline
     );
     drop(storage);
 
-    let mut reopened = Storage::open(&path).expect("materialized ready storage reopens");
+    let mut reopened =
+        Storage::open_v3_for_test(&path).expect("materialized ready storage reopens");
     assert_eq!(
         reopened
             .materialize_lifetime_records(None)
@@ -578,7 +630,7 @@ fn every_materialization_failure_point_rolls_back_rows_metadata_and_source_facts
         MaterializationFailurePoint::BaselinesBeforeMetadata,
     ] {
         let (_root, path) = database();
-        let mut storage = Storage::open(&path).expect("storage");
+        let mut storage = Storage::open_v3_for_test(&path).expect("storage");
         populate_lifetime_fixture(&mut storage);
         let events_before = crate::storage::load_events(storage.connection_for_test()).unwrap();
         let projections_before =
@@ -624,7 +676,7 @@ fn materialization_rejects_corrupt_rows_without_overwriting_or_deleting() {
     ];
     for corruption in corruptions {
         let (_root, path) = database();
-        let mut storage = Storage::open(&path).expect("storage");
+        let mut storage = Storage::open_v3_for_test(&path).expect("storage");
         populate_lifetime_fixture(&mut storage);
         storage
             .materialize_lifetime_records(None)
@@ -663,7 +715,7 @@ fn materialization_rejects_corrupt_rows_without_overwriting_or_deleting() {
 fn persisted_materializing_or_failed_state_fails_closed_on_reopen() {
     for state in ["materializing", "failed"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("storage");
+        let storage = Storage::open_v3_for_test(&path).expect("storage");
         storage
             .connection_for_test()
             .execute(
@@ -672,7 +724,7 @@ fn persisted_materializing_or_failed_state_fails_closed_on_reopen() {
             )
             .unwrap();
         drop(storage);
-        let error = Storage::open(&path)
+        let error = Storage::open_v3_for_test(&path)
             .err()
             .expect("unsafe materialization restart must fail closed");
         assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");

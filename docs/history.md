@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 sidecar migration)
+
+- **exact v4 소비 구현**: `Storage::open`이 fresh/v2/v3 상태를 exact v1→v2→v3→v4 순서로 검증·이전하고, 현재 exact v4는 migration SQL 없이 재검증한다. v3→v4 DDL 전에 exact v3 schema와 canonical v3 job/meta pair를 모두 검사하며, canonical transaction 뒤 exact v4 schema·metadata·optional job과 phase별 cursor를 protocol v2 validator로 재검증한다. partial/extra/version/table mismatch와 unsafe v3/v4 pair는 fail-closed다.
+- **보존·재시작 경계**: v3 pending/failed의 다섯 phase와 pending/ready absent를 모두 실행 이전해 `verify→verifySource`, `after_event_rowid→after_scan_rowid`, `scan_exhausted=false`, failed 보존을 확인했다. 원장·projection·materialized data·append-only trigger·index·compaction history는 그대로 유지한다. v4 pending job과 sidecar-private exhaustion proof는 재시작 가능하지만 attempting/failed는 구조적으로 읽은 뒤 non-runnable으로 거부한다. 기존 unbounded D1B helper는 v3 회귀를 유지하되 v4에서는 어떤 materialization mutation 전 거부한다.
+- **실패 주입·검증·경계**: metadata/job rebuild 뒤 강제 SQL 실패가 exact v3 schema/data로 rollback함을 주입 검증했다. storage focused 19개, lifetime focused 12개, protocol lifetime 6개, sidecar 전체 102개+stdio 10개(1 ignored), strict sidecar clippy, Rust 2021 rustfmt와 `git diff --check`를 통과했다. worker·scheduler·wire/UI·compaction/삭제·provider는 변경하지 않았으며 다음은 bounded v4 batch worker의 별도 구현·검토다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D private exhaustion authority 수정)
 
 - **위조 가능한 공개 proof 제거**: 직전 검토 수정의 `markScanExhausted`/`emptyBatchObserved` JSON lifecycle 입력은 caller가 빈 keyset 조회 사실을 스스로 주장할 수 있어 증명이 아니었다. Rust·TypeScript 공개 operation과 witness 타입·validator·fixture에서 이를 전부 제거하고, 제거된 literal도 fail-closed로 거부한다. 어떤 공개 lifecycle transition도 `scanExhausted` false→true를 만들 수 없다.

@@ -8,7 +8,8 @@ use hello_agent_protocol::storage_lifetime_v1::{
     StorageCompactionStatusV1, StorageDatabaseFactsV1, StorageLedgerTailFactsV1,
     StoragePressureCollectionStatusV1, StoragePressureFactsV1, StorageSnapshotAggregateFactsV1,
     StorageStatusV1, OPERATION_RECEIPT_DIGEST_ALGORITHM_V2, OPERATION_RECEIPT_DIGEST_FORMAT_V2,
-    OPERATION_RECEIPT_DIGEST_VERSION_V2, STORAGE_STATUS_SCHEMA_VERSION_V1,
+    OPERATION_RECEIPT_DIGEST_VERSION_V2, STORAGE_LIFETIME_SCHEMA_VERSION_V4,
+    STORAGE_STATUS_SCHEMA_VERSION_V1,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, LedgerEventV1, OperationDecisionV1, ProjectionStateV1,
@@ -88,6 +89,18 @@ fn materialize_in_transaction(
     transaction: &Transaction<'_>,
     failure: Option<MaterializationFailurePoint>,
 ) -> Result<LifetimeMaterializationResult, SidecarError> {
+    let storage_schema_version: u32 = transaction
+        .query_row(
+            "SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    if storage_schema_version >= STORAGE_LIFETIME_SCHEMA_VERSION_V4 {
+        return Err(materialization_error(
+            "legacy storage materialization is disabled for bounded v4 storage",
+        ));
+    }
     let lifetime_job_present: bool = transaction
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM lifetime_materialization_job WHERE singleton=1);",
