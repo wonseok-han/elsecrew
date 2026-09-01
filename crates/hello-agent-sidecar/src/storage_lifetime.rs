@@ -16,7 +16,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     OPERATION_RECEIPT_DIGEST_VERSION_V2,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_LIFETIME_SCHEMA_VERSION_V7,
-    STORAGE_STATUS_SCHEMA_VERSION_V1,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V8, STORAGE_STATUS_SCHEMA_VERSION_V1,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, LedgerEventV1, OperationDecisionV1, ProjectionStateV1,
@@ -676,8 +676,11 @@ fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), S
         STORAGE_LIFETIME_SCHEMA_VERSION_V7 => {
             crate::storage::verify_v7_uncompacted_runtime_state(connection)
         }
+        STORAGE_LIFETIME_SCHEMA_VERSION_V8 => {
+            crate::storage::verify_v8_uncompacted_runtime_state(connection)
+        }
         _ => Err(materialization_error(
-            "bounded materialization requires exact storage v6 or v7",
+            "bounded materialization requires exact storage v6, v7, or v8",
         )),
     }
 }
@@ -687,7 +690,7 @@ pub(crate) fn materialize_lifetime_batch(
     cancellation: &mut dyn MaterializationCancellation,
     failure: Option<BatchMaterializationFailurePoint>,
 ) -> Result<LifetimeMaterializationBatchResult, SidecarError> {
-    // Cancellation is not an escape hatch from the V7 compaction fence. Keep
+    // Cancellation is not an escape hatch from the V7/V8 compaction fence. Keep
     // the transaction-local check below as well so state cannot race the arm.
     verify_bounded_storage_runtime_state(connection)?;
     if cancellation.cancelled(MaterializationCancellationPoint::BeforeBegin) {

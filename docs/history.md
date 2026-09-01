@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 sidecar consumer C1A)
+
+- **exact V8 open/migration 소비**: `Storage::open`이 fresh/V1~V7을 각 exact predecessor와 reopen policy로 검증한 뒤 immutable fixture V7→V8 migration을 원자 적용하고 V8 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V7 materialization state/job과 terminal maintenance history는 byte-exact 보존하며 history/frozen-operation backfill은 하지 않는다. attempting lifetime, active lossless-compaction, prefix/frozen-message/delete-authority, partial/extra/tamper는 migration mutation 전에 거부하고 injected failure는 exact V7 bytes로 rollback한다.
+- **C1B 전 frozen-operation fail-closed 경계**: V8 product path는 prefix·frozen message·delete authority·frozen operation·active compaction이 모두 없는 uncompacted DB만 reopen/append/bounded lifetime 실행을 허용한다. 예상 밖 frozen operation은 canonical payload SHA-256과 full canonical envelope SHA-256을 독립 재계산하고 live event·V6 source-index·immutable receipt authority를 교차 검증한 뒤에도 다음 reviewed wave 전까지 mutation 없이 거부한다. product frozen row/private writer, job/cutoff 변경, authority 생성, compaction/delete, runtime DDL, scheduler/wire/status는 구현하지 않았다.
+- **회귀·검증**: V7 admissible pair·terminal fact 보존, preflight mutation-zero, exact rollback/reopen/schema guards, append/materializer, frozen digest/source/receipt tamper를 추가했다. focused storage 43개와 lifetime 41개, sidecar 전체 155개+stdio 10개(1 ignored), protocol 전체 42개, Node lifetime golden 17개, sidecar scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. `pnpm run m5:test:bounded-storage`는 격리 네트워크 npm `ENOTFOUND`로 dependency install 중 중단했지만 스크립트의 exact Node/Rust 하위 명령은 직접 모두 통과했다. 다음은 독립 리뷰 뒤 C1B private compaction writer/deletion-aware replay이며 Windows와 실제 삭제 시험은 수행하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 private proof P1 수정)
 
 - **public proof minting 제거**: V2 공개 Rust·TypeScript cursor transition은 양수인 최대 100행·1 MiB progress만 받고 `scanExhausted` false→true를 항상 거부한다. 공개 lifecycle의 `complete`도 항상 거부하고 equivalence evidence validator/type은 공개 API에서 제거해 caller가 0행/0바이트/empty 주장이나 최종 boolean으로 exhaustion·성공을 만들 수 없게 했다. 성공 job shape의 읽기 검증은 유지하지만 상태 전이 권한으로 쓰지 않는다.

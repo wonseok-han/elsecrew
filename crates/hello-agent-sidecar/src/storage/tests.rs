@@ -1,4 +1,8 @@
 use super::*;
+use hello_agent_protocol::project_v1::sha256_file_version_v1;
+use hello_agent_protocol::storage_lifetime_v1::{
+    canonical_frozen_operation_record_v1, FrozenOperationSourceV1,
+};
 use hello_agent_protocol::storage_v1::canonical_json_v1;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
@@ -106,11 +110,11 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 }
 
 #[test]
-fn fresh_database_applies_exact_v7_and_reopens_idempotently() {
+fn fresh_database_applies_exact_v8_and_reopens_idempotently() {
     let (_root, path) = database();
     let storage = Storage::open(&path).expect("fresh storage");
     verify_schema(&storage.connection).expect("v1 schema");
-    verify_schema_v7_for_open(&storage.connection).expect("v7 schema");
+    verify_schema_v8_for_open(&storage.connection).expect("v8 schema");
     assert_eq!(
         storage
             .connection
@@ -131,7 +135,7 @@ fn fresh_database_applies_exact_v7_and_reopens_idempotently() {
                 |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
-        (STORAGE_LIFETIME_SCHEMA_VERSION_V7, "pending".to_string())
+        (STORAGE_LIFETIME_SCHEMA_VERSION_V8, "pending".to_string())
     );
     assert_eq!(
         storage
@@ -161,7 +165,8 @@ fn fresh_database_applies_exact_v7_and_reopens_idempotently() {
                 "SELECT \
                    (SELECT count(*) FROM ledger_compaction_prefixes) + \
                    (SELECT count(*) FROM frozen_message_sources) + \
-                   (SELECT count(*) FROM ledger_compaction_delete_authority);",
+                   (SELECT count(*) FROM ledger_compaction_delete_authority) + \
+                   (SELECT count(*) FROM frozen_operation_sources);",
                 [],
                 |row| row.get::<_, u32>(0),
             )
@@ -172,7 +177,7 @@ fn fresh_database_applies_exact_v7_and_reopens_idempotently() {
     drop(storage);
 
     let reopened = Storage::open(&path).expect("idempotent reopen");
-    verify_schema_v7_for_open(&reopened.connection).expect("reopened v7 schema");
+    verify_schema_v8_for_open(&reopened.connection).expect("reopened v8 schema");
 }
 
 #[test]
@@ -368,7 +373,7 @@ fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status()
         drop(storage);
 
         let mut upgraded = Storage::open(&path).expect("upgrade exact populated v2");
-        verify_schema_v7_for_open(&upgraded.connection).expect("exact v7");
+        verify_schema_v8_for_open(&upgraded.connection).expect("exact v8");
         assert_eq!(
             upgraded
                 .connection
@@ -1690,6 +1695,365 @@ fn v7_injected_migration_failure_restores_exact_v6() {
 }
 
 #[test]
+fn v8_migration_preserves_every_admissible_v7_pair_and_existing_fact() {
+    for (name, materialization_state, job_state) in [
+        ("ready_absent", "ready", None),
+        ("pending_absent", "pending", None),
+        ("pending_pending", "pending", Some("pending")),
+        ("pending_failed", "pending", Some("failed")),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v7_storage(&path, "pending");
+        if materialization_state == "ready" {
+            storage
+                .connection
+                .execute(
+                    "UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1;",
+                    [],
+                )
+                .unwrap();
+        }
+        if let Some(state) = job_state {
+            let (failure_kind, completed_at) = if state == "failed" {
+                (Some("database"), Some("2026-09-01T04:02:00Z"))
+            } else {
+                (None, None)
+            };
+            insert_v4_job(
+                &storage.connection,
+                &format!("v8_{name}"),
+                state,
+                "indexSource",
+                20,
+                0,
+                0,
+                failure_kind,
+                completed_at,
+            );
+        }
+        storage
+            .connection
+            .execute(
+                "INSERT INTO maintenance_jobs(\
+                   job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                   failure_kind,created_at,updated_at\
+                 ) VALUES (?1,'losslessCompaction','failed','{}',\
+                   '2026-09-01T04:00:00Z','2026-09-01T04:01:00Z',NULL,'database',\
+                   '2026-09-01T04:00:00Z','2026-09-01T04:01:00Z');",
+                [format!("v8_maintenance_{name}")],
+            )
+            .unwrap();
+        verify_schema_v7(&storage.connection).expect("admissible exact v7 pair");
+        let meta_before = table_rows(&storage.connection, "storage_schema_meta");
+        let job_before = table_rows(&storage.connection, "lifetime_materialization_job");
+        let maintenance_before = table_rows(&storage.connection, "maintenance_jobs");
+        let source_before = table_rows(&storage.connection, "event_source_index");
+        let preserved_before = preserved_table_rows(&storage.connection);
+
+        migrate_v8(&mut storage.connection).expect("exact v7 to v8 migration");
+        assert_eq!(
+            verify_schema_v8(&storage.connection).expect("exact structural v8"),
+            materialization_state,
+            "{name}"
+        );
+        let meta_after = table_rows(&storage.connection, "storage_schema_meta");
+        assert_eq!(
+            meta_after[0][3], meta_before[0][3],
+            "{name}: migration state"
+        );
+        assert_eq!(
+            meta_after[0][4], meta_before[0][4],
+            "{name}: materialization state"
+        );
+        assert_eq!(meta_after[0][5], meta_before[0][5], "{name}: migrated at");
+        assert_eq!(
+            table_rows(&storage.connection, "lifetime_materialization_job"),
+            job_before,
+            "{name}: lifetime job"
+        );
+        assert_eq!(
+            table_rows(&storage.connection, "maintenance_jobs"),
+            maintenance_before,
+            "{name}: terminal maintenance"
+        );
+        assert_eq!(
+            table_rows(&storage.connection, "event_source_index"),
+            source_before,
+            "{name}: source index"
+        );
+        assert_eq!(
+            preserved_table_rows(&storage.connection),
+            preserved_before,
+            "{name}: preserved facts"
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM frozen_operation_sources;",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            0,
+            "{name}: migration must not backfill frozen operations"
+        );
+        match verify_schema_v8_for_open(&storage.connection) {
+            Ok(()) if job_state != Some("failed") => {}
+            Err(error) if job_state == Some("failed") => {
+                assert_eq!(error.kind(), "storageSchemaMismatch")
+            }
+            result => panic!("{name}: unexpected V8 reopen result: {result:?}"),
+        }
+    }
+}
+
+#[test]
+fn v8_preflight_rejects_attempting_active_partial_and_extra_v7_without_mutation() {
+    for (name, lifetime_state, maintenance_state) in [
+        ("attempting_lifetime", Some("attempting"), None),
+        ("pending_compaction", None, Some("pending")),
+        ("running_compaction", None, Some("running")),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v7_storage(&path, "pending");
+        if let Some(state) = lifetime_state {
+            insert_v4_job(
+                &storage.connection,
+                name,
+                state,
+                "indexSource",
+                20,
+                0,
+                0,
+                None,
+                None,
+            );
+        }
+        if let Some(state) = maintenance_state {
+            storage
+                .connection
+                .execute(
+                    "INSERT INTO maintenance_jobs(\
+                       job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                       failure_kind,created_at,updated_at\
+                     ) VALUES (?1,'losslessCompaction',?2,NULL,NULL,NULL,NULL,NULL,\
+                       '2026-09-01T04:00:00Z','2026-09-01T04:00:00Z');",
+                    params![name, state],
+                )
+                .unwrap();
+        }
+        assert_v8_migration_rejected_without_mutation(&mut storage, name);
+    }
+
+    for (name, mutation) in [
+        ("partial", "DROP INDEX ledger_compaction_prefixes_latest;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v7_for_v8(value TEXT) STRICT;",
+        ),
+        (
+            "tamper",
+            "DROP TRIGGER ledger_compaction_prefixes_require_exact_anchor;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v7_storage(&path, "pending");
+        storage.connection.execute_batch(mutation).unwrap();
+        assert_v8_migration_rejected_without_mutation(&mut storage, name);
+    }
+}
+
+#[test]
+fn v8_preflight_rejects_every_nonempty_v7_compaction_table_without_mutation() {
+    let (_root, prefix_path) = database();
+    let mut prefix = populated_v7_storage(&prefix_path, "pending");
+    seed_v7_prefix_for_v8(&mut prefix);
+    assert_v8_migration_rejected_without_mutation(&mut prefix, "prefix");
+
+    let (_root, frozen_path) = database();
+    let mut frozen = populated_v7_storage(&frozen_path, "pending");
+    seed_v7_frozen_message_for_v8(&mut frozen);
+    assert_v8_migration_rejected_without_mutation(&mut frozen, "frozen_message");
+
+    let (_root, authority_path) = database();
+    let mut authority = populated_v7_storage(&authority_path, "pending");
+    seed_v7_prefix_for_v8(&mut authority);
+    authority
+        .connection
+        .execute_batch(
+            "INSERT INTO maintenance_jobs(
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+               failure_kind,created_at,updated_at
+             ) VALUES ('v8_authority_job','losslessCompaction','running','{}',
+               '2026-09-01T04:12:00Z',NULL,NULL,NULL,
+               '2026-09-01T04:12:00Z','2026-09-01T04:12:00Z');
+             INSERT INTO ledger_compaction_delete_authority(
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+               aggregate_id,aggregate_sequence,authorized_at
+             ) SELECT 'v8_authority_job',1,'prefix_v8',event_rowid,event_id,operation_id,
+               aggregate_type,aggregate_id,aggregate_sequence,'2026-09-01T04:12:00Z'
+               FROM event_source_index WHERE event_id='evt_v8_prefix_1';
+             UPDATE maintenance_jobs SET state='succeeded',
+               completed_at='2026-09-01T04:13:00Z',updated_at='2026-09-01T04:13:00Z'
+               WHERE job_id='v8_authority_job';",
+        )
+        .unwrap();
+    assert_v8_migration_rejected_without_mutation(&mut authority, "authority");
+}
+
+#[test]
+fn v8_injected_migration_failure_restores_exact_v7_bytes() {
+    let (_root, path) = database();
+    let mut storage = populated_v7_storage(&path, "pending");
+    storage.checkpoint().expect("checkpoint exact v7 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read exact v7 fixture");
+    let invalid = MIGRATION_V8.replacen(
+        "DROP TABLE storage_schema_meta_v7;",
+        "INVALID SQL;\nDROP TABLE storage_schema_meta_v7;",
+        1,
+    );
+
+    let error = execute_migration(&mut storage.connection, &invalid, "v8 injected")
+        .expect_err("mid-migration failure must roll back");
+    assert_eq!(error.kind(), "migrationFailed");
+    assert!(storage.connection.is_autocommit());
+    verify_schema_v7(&storage.connection).expect("rollback restored exact v7");
+    assert_eq!(database_snapshot(&storage.connection), snapshot_before);
+    storage
+        .checkpoint()
+        .expect("checkpoint rolled back v7 fixture");
+    assert_eq!(
+        fs::read(storage.path()).expect("read rolled back v7 fixture"),
+        bytes_before
+    );
+}
+
+#[test]
+fn exact_v8_reopen_rejects_schema_tamper_and_non_runnable_state() {
+    for (name, mutation) in [
+        ("partial", "DROP TABLE frozen_operation_sources;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v8(value TEXT) STRICT;",
+        ),
+        (
+            "trigger_tamper",
+            "DROP TRIGGER frozen_operation_sources_require_exact_live_source;",
+        ),
+        (
+            "index_tamper",
+            "DROP INDEX frozen_operation_sources_aggregate;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v8");
+        storage.connection.execute_batch(mutation).unwrap();
+        drop(storage);
+        let error = Storage::open(&path).err().expect("non-exact v8 must fail");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    }
+
+    for state in ["pending", "running"] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v8");
+        storage
+            .connection
+            .execute(
+                "INSERT INTO maintenance_jobs(
+                   job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+                   failure_kind,created_at,updated_at
+                 ) VALUES (?1,'losslessCompaction',?2,NULL,NULL,NULL,NULL,NULL,
+                   '2026-09-01T04:30:00Z','2026-09-01T04:30:00Z');",
+                params![format!("v8_active_{state}"), state],
+            )
+            .unwrap();
+        let before = database_snapshot(&storage.connection);
+        drop(storage);
+        let error = Storage::open(&path)
+            .err()
+            .expect("active V8 compaction must fail closed");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");
+        let connection = Connection::open(&path).unwrap();
+        configure_connection(&connection).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{state}");
+    }
+}
+
+#[test]
+fn v8_frozen_operation_validation_recomputes_digests_and_cross_checks_authority() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v8");
+    let operation_id = seed_exact_v8_frozen_operation(&mut storage);
+    validate_v8_frozen_operation_source(&storage.connection, &operation_id)
+        .expect("exact frozen operation validates");
+    let before = database_snapshot(&storage.connection);
+    let error = storage
+        .materialize_lifetime_batch_for_test(&mut crate::storage_lifetime::NeverCancel, None)
+        .expect_err("unexpected frozen operation must fence bounded lifetime work");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(database_snapshot(&storage.connection), before);
+    let error = storage
+        .append_event(&event(
+            "evt_after_frozen_operation",
+            "op_after_frozen_operation",
+            "project",
+            "project_after_frozen",
+            1,
+            json!({
+                "canonical_path":"/fixture/after-frozen",
+                "project_id":"project_after_frozen"
+            }),
+            "2026-09-01T04:32:00Z",
+        ))
+        .expect_err("unexpected frozen operation must fence append");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(database_snapshot(&storage.connection), before);
+    drop(storage);
+    assert_eq!(
+        Storage::open(&path)
+            .err()
+            .expect("unexpected frozen operation must fence reopen")
+            .kind(),
+        "storageSchemaMismatch"
+    );
+
+    for (name, mutation) in [
+        (
+            "payload_digest",
+            "DROP TRIGGER frozen_operation_sources_append_only_update;
+             UPDATE frozen_operation_sources SET canonical_payload_digest=
+               'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';",
+        ),
+        (
+            "record_digest",
+            "DROP TRIGGER frozen_operation_sources_append_only_update;
+             UPDATE frozen_operation_sources SET record_digest=
+               'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';",
+        ),
+        (
+            "receipt_binding",
+            "DROP TRIGGER operation_receipts_compaction_immutable_update;
+             UPDATE operation_receipts SET event_id='evt_receipt_tamper';",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("fresh tamper v8");
+        let operation_id = seed_exact_v8_frozen_operation(&mut storage);
+        storage.connection.execute_batch(mutation).unwrap();
+        let snapshot = database_snapshot(&storage.connection);
+        let error = validate_v8_frozen_operation_source(&storage.connection, &operation_id)
+            .expect_err("frozen operation tamper must fail closed");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+        let error = verify_v8_uncompacted_runtime_state(&storage.connection)
+            .expect_err("runtime authority must reject tamper");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+        assert_eq!(database_snapshot(&storage.connection), snapshot, "{name}");
+    }
+}
+
+#[test]
 fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
     for (name, mutation) in [
         ("partial", "DROP TABLE event_source_index;"),
@@ -1764,7 +2128,7 @@ fn exact_v7_reopen_rejects_schema_tamper_and_active_compaction_without_mutation(
         ),
     ] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v7");
+        let storage = Storage::open_v7_for_test(&path).expect("fresh v7");
         storage.connection.execute_batch(mutation).unwrap();
         drop(storage);
         let error = Storage::open(&path).err().expect("non-exact v7 must fail");
@@ -1773,7 +2137,7 @@ fn exact_v7_reopen_rejects_schema_tamper_and_active_compaction_without_mutation(
 
     for state in ["pending", "running"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v7");
+        let storage = Storage::open_v7_for_test(&path).expect("fresh v7");
         storage
             .connection
             .execute(
@@ -1800,7 +2164,7 @@ fn exact_v7_reopen_rejects_schema_tamper_and_active_compaction_without_mutation(
 #[test]
 fn v7_rejects_durable_compaction_authority_and_frozen_sources_before_c1b() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("fresh v7");
+    let mut storage = Storage::open_v7_for_test(&path).expect("fresh v7");
     for sequence in 1..=2 {
         storage
             .append_event(&event(
@@ -1883,7 +2247,7 @@ fn v7_rejects_durable_compaction_authority_and_frozen_sources_before_c1b() {
     );
 
     let (_root, frozen_path) = database();
-    let mut frozen = Storage::open(&frozen_path).expect("fresh v7");
+    let mut frozen = Storage::open_v7_for_test(&frozen_path).expect("fresh v7");
     frozen
         .append_event(&event(
             "evt_frozen_project",
@@ -2712,6 +3076,7 @@ fn drop_lifetime_schema(connection: &Connection) {
         .execute_batch(
             "DROP TRIGGER events_consume_exact_v7_delete_authority;
              DROP TRIGGER events_are_append_only_delete;
+             DROP TABLE frozen_operation_sources;
              DROP TABLE ledger_compaction_delete_authority;
              DROP TABLE frozen_message_sources;
              DROP TABLE ledger_compaction_prefixes;
@@ -2841,6 +3206,210 @@ fn populated_v6_storage(path: &Path, state: &str) -> Storage {
     storage
 }
 
+fn populated_v7_storage(path: &Path, state: &str) -> Storage {
+    let mut storage = populated_v6_storage(path, state);
+    migrate_v7(&mut storage.connection).expect("migrate populated fixture to v7");
+    verify_schema_v7(&storage.connection).expect("exact populated v7 fixture");
+    storage
+}
+
+fn seed_v7_prefix_for_v8(storage: &mut Storage) {
+    for sequence in 1..=2 {
+        storage
+            .append_event(&event(
+                &format!("evt_v8_prefix_{sequence}"),
+                &format!("op_v8_prefix_{sequence}"),
+                "project",
+                "project_v8_prefix",
+                sequence,
+                json!({
+                    "canonical_path":"/fixture/v8-prefix",
+                    "project_id":"project_v8_prefix"
+                }),
+                &format!("2026-09-01T04:10:0{sequence}Z"),
+            ))
+            .unwrap();
+    }
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO ledger_baselines(
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at
+             ) VALUES ('baseline_v8','project','project_v8_prefix',1,1,'{}','digest_v8',
+               '2026-09-01T04:11:00Z','2026-09-01T04:11:00Z');
+             INSERT INTO ledger_compaction_prefixes(
+               prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,
+               anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,
+               baseline_projection_digest,created_at,verified_at
+             ) SELECT 'prefix_v8','project','project_v8_prefix',1,event_rowid,event_id,
+               operation_id,aggregate_sequence,'baseline_v8','digest_v8',
+               '2026-09-01T04:11:00Z','2026-09-01T04:11:00Z'
+               FROM event_source_index WHERE event_id='evt_v8_prefix_2';",
+        )
+        .unwrap();
+}
+
+fn seed_v7_frozen_message_for_v8(storage: &mut Storage) {
+    storage
+        .append_event(&event(
+            "evt_v8_frozen_project",
+            "op_v8_frozen_project",
+            "project",
+            "project_v8_frozen",
+            1,
+            json!({
+                "canonical_path":"/fixture/v8-frozen",
+                "project_id":"project_v8_frozen"
+            }),
+            "2026-09-01T04:20:00Z",
+        ))
+        .unwrap();
+    storage
+        .append_event(&event(
+            "evt_v8_frozen_chat",
+            "op_v8_frozen_chat",
+            "chat",
+            "chat_v8_frozen",
+            1,
+            v6_chat_payload(
+                "chat_v8_frozen",
+                "project_v8_frozen",
+                1,
+                team_message("chat_v8_frozen", "message_v8_frozen", 1),
+            ),
+            "2026-09-01T04:20:01Z",
+        ))
+        .unwrap();
+    storage
+        .connection
+        .execute(
+            "INSERT INTO chat_messages(
+               message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at
+             ) VALUES ('message_v8_frozen','chat_v8_frozen',1,?1,'digest_v8_frozen',
+               '2026-09-01T04:20:01Z','2026-09-01T04:20:02Z');",
+            [canonical_json_v1(team_message(
+                "chat_v8_frozen",
+                "message_v8_frozen",
+                1,
+            ))
+            .unwrap()],
+        )
+        .unwrap();
+    assert_eq!(
+        storage
+            .connection
+            .execute(
+                "INSERT INTO frozen_message_sources(
+                   message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+                   source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+                 ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,
+                   message.chat_id,source.aggregate_sequence,message.event_sequence,
+                   message.canonical_message_json,message.message_digest,'2026-09-01T04:21:00Z'
+                   FROM event_source_index AS source
+                   JOIN chat_messages AS message ON message.message_id=source.introduced_message_id
+                   WHERE source.event_id='evt_v8_frozen_chat';",
+                [],
+            )
+            .unwrap(),
+        1
+    );
+}
+
+fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
+    let source = event(
+        "evt_v8_frozen_operation",
+        "op_v8_frozen_operation",
+        "project",
+        "project_v8_frozen_operation",
+        1,
+        json!({
+            "canonical_path":"/fixture/v8-frozen-operation",
+            "project_id":"project_v8_frozen_operation"
+        }),
+        "2026-09-01T04:31:00Z",
+    );
+    storage.append_event(&source).expect("append V8 source");
+    let mut completed = false;
+    for _ in 0..256 {
+        let result = storage
+            .materialize_lifetime_batch_for_test(&mut crate::storage_lifetime::NeverCancel, None)
+            .expect("materialize V8 source receipt");
+        if matches!(
+            result,
+            crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. }
+        ) {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed, "V8 receipt materialization must complete");
+    let source_event_rowid: i64 = storage
+        .connection
+        .query_row(
+            "SELECT rowid FROM events WHERE operation_id=?1;",
+            [&source.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let canonical_payload_digest = sha256_file_version_v1(source.canonical_json_payload.as_bytes())
+        .strip_prefix("sha256:")
+        .unwrap()
+        .to_string();
+    let mut frozen = FrozenOperationSourceV1 {
+        operation_id: source.operation_id.clone(),
+        source_event_rowid: u64::try_from(source_event_rowid).unwrap(),
+        source_event_id: source.event_id.clone(),
+        request_id: source.request_id.clone(),
+        aggregate_type: source.aggregate_type.clone(),
+        aggregate_id: source.aggregate_id.clone(),
+        aggregate_sequence: source.aggregate_sequence,
+        event_type: source.event_type.clone(),
+        payload_schema_version: source.payload_schema_version,
+        canonical_payload_json: source.canonical_json_payload.clone(),
+        canonical_payload_digest,
+        event_timestamp: source.timestamp.clone(),
+        canonical_record_json: String::new(),
+        record_digest: String::new(),
+        frozen_at: "2026-09-01T04:31:01Z".to_string(),
+    };
+    frozen.canonical_record_json =
+        canonical_frozen_operation_record_v1(&frozen).expect("canonical frozen operation record");
+    frozen.record_digest = sha256_file_version_v1(frozen.canonical_record_json.as_bytes())
+        .strip_prefix("sha256:")
+        .unwrap()
+        .to_string();
+    storage
+        .connection
+        .execute(
+            "INSERT INTO frozen_operation_sources(
+               operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,
+               aggregate_id,aggregate_sequence,event_type,payload_schema_version,
+               canonical_payload_json,canonical_payload_digest,event_timestamp,
+               canonical_record_json,record_digest,frozen_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15);",
+            params![
+                frozen.operation_id,
+                source_event_rowid,
+                frozen.source_event_id,
+                frozen.request_id,
+                frozen.aggregate_type,
+                frozen.aggregate_id,
+                sql_i64(frozen.aggregate_sequence).unwrap(),
+                frozen.event_type,
+                frozen.payload_schema_version,
+                frozen.canonical_payload_json,
+                frozen.canonical_payload_digest,
+                frozen.event_timestamp,
+                frozen.canonical_record_json,
+                frozen.record_digest,
+                frozen.frozen_at,
+            ],
+        )
+        .expect("insert exact frozen operation");
+    source.operation_id
+}
+
 fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
     storage.checkpoint().expect("checkpoint unsafe v4 fixture");
     let snapshot_before = database_snapshot(&storage.connection);
@@ -2898,6 +3467,25 @@ fn assert_v7_migration_rejected_without_mutation(storage: &mut Storage, name: &s
     );
 }
 
+fn assert_v8_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
+    storage.checkpoint().expect("checkpoint unsafe v7 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read unsafe v7 fixture");
+
+    let error = migrate_v8(&mut storage.connection).expect_err("unsafe v7 must fail preflight");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(
+        database_snapshot(&storage.connection),
+        snapshot_before,
+        "{name}"
+    );
+    assert_eq!(
+        fs::read(storage.path()).expect("reread unsafe v7 fixture"),
+        bytes_before,
+        "{name}"
+    );
+}
+
 fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
     schema_objects(connection)
         .unwrap()
@@ -2932,6 +3520,15 @@ fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
                 "events_consume_exact_v7_delete_authority",
                 "ledger_baselines_compaction_immutable_update",
                 "ledger_baselines_compaction_immutable_delete",
+                "frozen_operation_sources",
+                "frozen_operation_sources_source_rowid",
+                "frozen_operation_sources_source_event",
+                "frozen_operation_sources_aggregate",
+                "frozen_operation_sources_require_exact_live_source",
+                "frozen_operation_sources_append_only_update",
+                "frozen_operation_sources_append_only_delete",
+                "operation_receipts_compaction_immutable_update",
+                "operation_receipts_compaction_immutable_delete",
             ]
             .contains(&name.as_str())
         })
@@ -3045,8 +3642,13 @@ fn insert_v4_job(
 }
 
 fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {
+    let order = if table == "frozen_operation_sources" {
+        "operation_id"
+    } else {
+        "rowid"
+    };
     let mut statement = connection
-        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid;"))
+        .prepare(&format!("SELECT * FROM {table} ORDER BY {order};"))
         .expect("prepare table read");
     let column_count = statement.column_count();
     statement

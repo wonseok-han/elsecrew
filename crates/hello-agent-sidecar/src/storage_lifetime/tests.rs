@@ -1314,11 +1314,11 @@ fn bounded_v6_cancellation_before_begin_has_zero_mutation() {
 }
 
 #[test]
-fn bounded_v7_before_begin_cancel_remains_zero_mutation_when_uncompacted() {
+fn bounded_v8_before_begin_cancel_remains_zero_mutation_when_uncompacted() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("uncompacted v7 storage");
-    storage.checkpoint().expect("checkpoint uncompacted v7");
-    let bytes_before = fs::read(&path).expect("read uncompacted v7");
+    let mut storage = Storage::open(&path).expect("uncompacted v8 storage");
+    storage.checkpoint().expect("checkpoint uncompacted v8");
+    let bytes_before = fs::read(&path).expect("read uncompacted v8");
     let mut cancellation = |point| point == MaterializationCancellationPoint::BeforeBegin;
 
     let result = storage
@@ -1340,7 +1340,7 @@ fn bounded_v7_before_begin_cancel_remains_zero_mutation_when_uncompacted() {
         0
     );
     assert_eq!(
-        fs::read(&path).expect("reread uncompacted v7"),
+        fs::read(&path).expect("reread uncompacted v8"),
         bytes_before
     );
 }
@@ -1348,7 +1348,7 @@ fn bounded_v7_before_begin_cancel_remains_zero_mutation_when_uncompacted() {
 #[test]
 fn bounded_v7_before_begin_cancel_cannot_bypass_any_compaction_fence() {
     let (active_root, active_path) = database();
-    let active = Storage::open(&active_path).expect("active-job v7 storage");
+    let active = Storage::open_v7_for_test(&active_path).expect("active-job v7 storage");
     active
         .connection_for_test()
         .execute(
@@ -1364,13 +1364,13 @@ fn bounded_v7_before_begin_cancel_cannot_bypass_any_compaction_fence() {
     drop(active_root);
 
     let (prefix_root, prefix_path) = database();
-    let mut prefix = Storage::open(&prefix_path).expect("prefix v7 storage");
+    let mut prefix = Storage::open_v7_for_test(&prefix_path).expect("prefix v7 storage");
     seed_v7_prefix(&mut prefix);
     assert_before_begin_cancel_is_fenced("prefix", prefix);
     drop(prefix_root);
 
     let (frozen_root, frozen_path) = database();
-    let mut frozen = Storage::open(&frozen_path).expect("frozen v7 storage");
+    let mut frozen = Storage::open_v7_for_test(&frozen_path).expect("frozen v7 storage");
     populate_lifetime_fixture(&mut frozen);
     drive_bounded_v6(&mut frozen);
     assert_eq!(
@@ -1395,7 +1395,7 @@ fn bounded_v7_before_begin_cancel_cannot_bypass_any_compaction_fence() {
     drop(frozen_root);
 
     let (authority_root, authority_path) = database();
-    let mut authority = Storage::open(&authority_path).expect("authority v7 storage");
+    let mut authority = Storage::open_v7_for_test(&authority_path).expect("authority v7 storage");
     seed_v7_prefix(&mut authority);
     authority
         .connection_for_test()
