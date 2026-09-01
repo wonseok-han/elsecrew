@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 C1B1 bounded compacted replay)
+
+- **read/replay 전용 C1B1**: 제품에 delete·compaction job/authority writer를 추가하지 않고, exact terminal-success private proof와 empty authority/active-job fence를 통과한 V8 compacted state를 읽는다. frozen operation은 `source_event_rowid` keyset `LIMIT 100`과 canonical payload 합계 1 MiB 안에서 canonical record/digest를 재계산하고 immutable receipt에 교차 결속한다. live source는 exact event+9-field source index, deleted source는 exact frozen operation+receipt와 strict prefix/baseline coverage만 권위로 사용하며 receipt-only reconstruction은 거부한다.
+- **baseline+tail와 채팅 의미 보존**: latest immutable baseline으로 project/chat/run/lock projection을 seed하고 retained ledger tail을 연속 replay한다. 삭제된 operation의 duplicate/conflict는 frozen operation+receipt로 판정하며 request ID는 기존처럼 제외한다. 삭제된 chat predecessor는 frozen canonical payload에서만 복원하고 normalized frozen message reservation을 교차 검증한다. append와 16단계 bounded materializer는 retained anchor의 기존 source index를 exact no-op 검증하고, compacted predecessor·receipt·message·historical baseline을 frozen authority로 확인한다. app-instance와 actual/legacy/recovery의 상위 저장 경로, scheduler/wire/status는 변경하지 않았다.
+- **임시 지원 한계와 검증**: 재오픈 검증 cursor writer가 이번 읽기 전용 소유 범위에 없으므로 frozen operation은 최대 100개인 terminal compacted V8만 runnable이다. 첫 `LIMIT 100` 뒤 indexed successor `LIMIT 1`이 101번째를 찾으면 DB를 바꾸지 않고 `storageSchemaMismatch`로 거부한다. 정확히 1 MiB는 허용하고 단일 1 MiB+1은 거부하며 retained chat anchor semantic 3-field 변조도 bytes/rows 무변경으로 거부한다. sidecar 전체 162개+stdio 10개(1 ignored), protocol lifetime 10개, Node lifetime golden 17개, sidecar scoped strict clippy와 Rust 2021 rustfmt가 통과했다. dependency 포함 strict clippy는 소유 밖 core/protocol의 기존 Rust 1.97 lint 5건에서만 실패했다. C1B2 실제 writer/delete와 100개 초과 재오픈 지원에는 독립 리뷰와 추가 durable reopen-proof 계약이 먼저 필요하다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append materialization fence P2 수정)
 
 - **reopen pair 정책을 append에도 적용**: V7/V8 append entry와 INSERT 직전의 공통 runtime fence가 compaction evidence뿐 아니라 exact materialization meta/job pair를 현재 reopen validator로 함께 확인한다. `pending+attempting`, `pending+failed`, `ready+pending` 같은 비실행 pair는 ledger load·duplicate/conflict 분류·신규 INSERT 전에 fail-closed하고, ready+absent·pending+absent·pending+pending은 기존 append 의미를 유지한다.

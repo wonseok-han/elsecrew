@@ -74,6 +74,24 @@ fn v6_chat_payload(
     })
 }
 
+fn materializable_chat_payload(
+    chat_id: &str,
+    project_id: &str,
+    durable_sequence: u64,
+    last_message: Value,
+) -> Value {
+    json!({
+        "chat_id":chat_id,
+        "project_id":project_id,
+        "worktree_id":"worktree_v6",
+        "workspace_identity":"workspace_v6",
+        "state":"draft",
+        "record":{"chatId":chat_id,"taskId":"task_v6","worktreeId":"worktree_v6"},
+        "last_message":last_message,
+        "durable_event_sequence":durable_sequence,
+    })
+}
+
 fn ready(id: &str) -> ReadyPayloadV1 {
     ReadyPayloadV1 {
         protocol_version: PROTOCOL_VERSION,
@@ -2193,6 +2211,533 @@ fn v8_frozen_operation_validation_recomputes_digests_and_cross_checks_authority(
 }
 
 #[test]
+fn terminal_compacted_v8_reopens_replays_appends_and_classifies_deleted_operation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v8");
+    let first = event(
+        "evt_v8_c1b1_project_1",
+        "op_v8_c1b1_project_1",
+        "project",
+        "project_v8_c1b1",
+        1,
+        json!({"canonical_path":"/fixture/v8-c1b1-1","project_id":"project_v8_c1b1"}),
+        "2026-09-01T11:00:00Z",
+    );
+    let second = event(
+        "evt_v8_c1b1_project_2",
+        "op_v8_c1b1_project_2",
+        "project",
+        "project_v8_c1b1",
+        2,
+        json!({"canonical_path":"/fixture/v8-c1b1-2","project_id":"project_v8_c1b1"}),
+        "2026-09-01T11:00:01Z",
+    );
+    storage.append_event(&first).expect("append first");
+    storage.append_event(&second).expect("append second");
+    run_bounded_materializer_to_ready(&mut storage);
+    insert_exact_v8_frozen_operation(&mut storage, &first, "2026-09-01T11:01:00Z");
+    insert_exact_v8_frozen_operation(&mut storage, &second, "2026-09-01T11:01:01Z");
+    let baseline_identity = "project\0project_v8_c1b1\01";
+    let baseline_id = format!(
+        "baseline_{}",
+        sha256_file_version_v1(baseline_identity.as_bytes())
+            .strip_prefix("sha256:")
+            .unwrap()
+    );
+    let baseline_digest = sha256_file_version_v1(first.canonical_json_payload.as_bytes());
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_baselines(
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at
+             ) VALUES (?1,'project','project_v8_c1b1',1,1,?2,?3,?4,?4);",
+            params![
+                baseline_id,
+                first.canonical_json_payload,
+                baseline_digest,
+                "2026-09-01T11:01:02Z"
+            ],
+        )
+        .expect("insert historical baseline");
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_compaction_prefixes(
+               prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,
+               anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,
+               baseline_projection_digest,created_at,verified_at
+             ) SELECT 'prefix_v8_c1b1','project','project_v8_c1b1',1,event_rowid,event_id,
+               operation_id,aggregate_sequence,?1,?2,?3,?3
+               FROM event_source_index WHERE operation_id=?4;",
+            params![
+                baseline_id,
+                baseline_digest,
+                "2026-09-01T11:01:03Z",
+                second.operation_id
+            ],
+        )
+        .expect("insert exact prefix");
+    let cutoff: i64 = storage
+        .connection
+        .query_row(
+            "SELECT rowid FROM events WHERE operation_id=?1;",
+            [&second.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let proof = json!({
+        "storageCompactionV2PrivateState": {
+            "schemaVersion": 1,
+            "cursor": {
+                "schemaVersion": 2,
+                "cutoffEventRowid": cutoff,
+                "phase": "finalize",
+                "afterEventRowid": cutoff,
+                "scanExhausted": true
+            },
+            "operationsVerified": true,
+            "equivalenceVerified": true
+        }
+    });
+    storage
+        .connection
+        .execute(
+            "INSERT INTO maintenance_jobs(
+               job_id,job_kind,state,cutoff_json,started_at,created_at,updated_at
+             ) VALUES ('compact_v8_c1b1','losslessCompaction','running',?1,?2,?2,?2);",
+            params![proof.to_string(), "2026-09-01T11:01:04Z"],
+        )
+        .expect("insert fixture compaction job");
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_compaction_delete_authority(
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+               aggregate_id,aggregate_sequence,authorized_at
+             ) SELECT 'compact_v8_c1b1',1,'prefix_v8_c1b1',event_rowid,event_id,operation_id,
+               aggregate_type,aggregate_id,aggregate_sequence,?1
+               FROM event_source_index WHERE operation_id=?2;",
+            params!["2026-09-01T11:01:05Z", first.operation_id],
+        )
+        .expect("insert exact fixture authority");
+    storage
+        .connection
+        .execute(
+            "DELETE FROM event_source_index WHERE operation_id=?1;",
+            [&first.operation_id],
+        )
+        .expect("delete compacted source index");
+    storage
+        .connection
+        .execute(
+            "DELETE FROM events WHERE operation_id=?1;",
+            [&first.operation_id],
+        )
+        .expect("delete compacted source event");
+    storage
+        .connection
+        .execute(
+            "UPDATE maintenance_jobs SET state='succeeded',completed_at=?1,last_successful_at=?1,
+             updated_at=?1 WHERE job_id='compact_v8_c1b1';",
+            ["2026-09-01T11:01:06Z"],
+        )
+        .expect("publish terminal fixture proof");
+
+    verify_v8_compaction_runtime_state(&storage.connection).expect("valid compacted runtime");
+    verify_projection_replay(&storage.connection).expect("baseline plus tail replay");
+    drop(storage);
+    let mut reopened = Storage::open(&path).expect("terminal compacted v8 reopens");
+    let mut retried_with_new_request = first.clone();
+    retried_with_new_request.request_id = Some("request_v8_c1b1_retry".to_string());
+    assert_eq!(
+        reopened
+            .append_event(&retried_with_new_request)
+            .expect("deleted operation resubmit"),
+        AppendOutcome::DuplicateNoOp
+    );
+    let mut conflict = first.clone();
+    conflict.canonical_json_payload = canonical_json_v1(json!({
+        "canonical_path":"/fixture/v8-c1b1-conflict",
+        "project_id":"project_v8_c1b1"
+    }))
+    .unwrap();
+    assert_eq!(
+        reopened
+            .append_event(&conflict)
+            .expect("deleted operation conflict"),
+        AppendOutcome::Conflict
+    );
+    let third = event(
+        "evt_v8_c1b1_project_3",
+        "op_v8_c1b1_project_3",
+        "project",
+        "project_v8_c1b1",
+        3,
+        json!({"canonical_path":"/fixture/v8-c1b1-3","project_id":"project_v8_c1b1"}),
+        "2026-09-01T11:02:00Z",
+    );
+    assert_eq!(
+        reopened.append_event(&third).unwrap(),
+        AppendOutcome::Committed
+    );
+    run_bounded_materializer_to_ready(&mut reopened);
+    drop(reopened);
+    Storage::open(&path).expect("post-compaction append and materialization reopen");
+}
+
+#[test]
+fn terminal_compacted_v8_chat_uses_frozen_predecessor_and_reserves_message_identity() {
+    let (root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v8");
+    storage
+        .append_event(&event(
+            "evt_v8_c1b1_chat_project",
+            "op_v8_c1b1_chat_project",
+            "project",
+            "project_v8_c1b1",
+            1,
+            json!({"canonical_path":"/fixture/v8-c1b1-chat","project_id":"project_v8_c1b1"}),
+            "2026-09-01T11:09:59Z",
+        ))
+        .expect("append chat project");
+    let message_one = team_message("chat_v8_c1b1", "message_v8_c1b1_1", 1);
+    let first = event(
+        "evt_v8_c1b1_chat_1",
+        "op_v8_c1b1_chat_1",
+        "chat",
+        "chat_v8_c1b1",
+        1,
+        materializable_chat_payload("chat_v8_c1b1", "project_v8_c1b1", 1, message_one.clone()),
+        "2026-09-01T11:10:00Z",
+    );
+    let second = event(
+        "evt_v8_c1b1_chat_2",
+        "op_v8_c1b1_chat_2",
+        "chat",
+        "chat_v8_c1b1",
+        2,
+        materializable_chat_payload("chat_v8_c1b1", "project_v8_c1b1", 1, message_one.clone()),
+        "2026-09-01T11:10:01Z",
+    );
+    storage
+        .append_event(&first)
+        .expect("append chat introduction");
+    storage
+        .append_event(&second)
+        .expect("append repeated snapshot");
+    run_bounded_materializer_to_ready(&mut storage);
+    insert_exact_v8_frozen_operation(&mut storage, &first, "2026-09-01T11:11:00Z");
+    insert_exact_v8_frozen_operation(&mut storage, &second, "2026-09-01T11:11:01Z");
+    storage
+        .connection
+        .execute(
+            "INSERT INTO frozen_message_sources(
+               message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+               source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+             ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,
+               message.chat_id,source.aggregate_sequence,message.event_sequence,
+               message.canonical_message_json,message.message_digest,?1
+               FROM event_source_index AS source JOIN chat_messages AS message
+                 ON message.message_id=source.introduced_message_id
+               WHERE source.operation_id=?2;",
+            params!["2026-09-01T11:11:02Z", first.operation_id],
+        )
+        .expect("freeze introduced message");
+    let baseline_identity = "chat\0chat_v8_c1b1\01";
+    let baseline_id = format!(
+        "baseline_{}",
+        sha256_file_version_v1(baseline_identity.as_bytes())
+            .strip_prefix("sha256:")
+            .unwrap()
+    );
+    let baseline_digest = sha256_file_version_v1(first.canonical_json_payload.as_bytes());
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_baselines(
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at
+             ) VALUES (?1,'chat','chat_v8_c1b1',1,1,?2,?3,?4,?4);",
+            params![
+                baseline_id,
+                first.canonical_json_payload,
+                baseline_digest,
+                "2026-09-01T11:11:03Z"
+            ],
+        )
+        .expect("insert chat baseline");
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_compaction_prefixes(
+               prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,
+               anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,
+               baseline_projection_digest,created_at,verified_at
+             ) SELECT 'prefix_v8_c1b1_chat','chat','chat_v8_c1b1',1,event_rowid,event_id,
+               operation_id,aggregate_sequence,?1,?2,?3,?3
+               FROM event_source_index WHERE operation_id=?4;",
+            params![
+                baseline_id,
+                baseline_digest,
+                "2026-09-01T11:11:04Z",
+                second.operation_id
+            ],
+        )
+        .expect("insert chat prefix");
+    let cutoff: i64 = storage
+        .connection
+        .query_row(
+            "SELECT rowid FROM events WHERE operation_id=?1;",
+            [&second.operation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let proof = json!({"storageCompactionV2PrivateState": {
+        "schemaVersion":1,
+        "cursor":{"schemaVersion":2,"cutoffEventRowid":cutoff,"phase":"finalize",
+                  "afterEventRowid":cutoff,"scanExhausted":true},
+        "operationsVerified":true,"equivalenceVerified":true
+    }});
+    storage.connection.execute(
+        "INSERT INTO maintenance_jobs(job_id,job_kind,state,cutoff_json,started_at,created_at,updated_at)
+         VALUES ('compact_v8_c1b1_chat','losslessCompaction','running',?1,?2,?2,?2);",
+        params![proof.to_string(), "2026-09-01T11:11:05Z"],
+    ).unwrap();
+    storage
+        .connection
+        .execute(
+            "INSERT INTO ledger_compaction_delete_authority(
+           job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+           aggregate_id,aggregate_sequence,authorized_at)
+         SELECT 'compact_v8_c1b1_chat',1,'prefix_v8_c1b1_chat',event_rowid,event_id,operation_id,
+           aggregate_type,aggregate_id,aggregate_sequence,?1 FROM event_source_index
+           WHERE operation_id=?2;",
+            params!["2026-09-01T11:11:06Z", first.operation_id],
+        )
+        .unwrap();
+    storage
+        .connection
+        .execute(
+            "DELETE FROM event_source_index WHERE operation_id=?1;",
+            [&first.operation_id],
+        )
+        .unwrap();
+    storage
+        .connection
+        .execute(
+            "DELETE FROM events WHERE operation_id=?1;",
+            [&first.operation_id],
+        )
+        .unwrap();
+    storage
+        .connection
+        .execute(
+            "UPDATE maintenance_jobs SET state='succeeded',completed_at=?1,last_successful_at=?1,
+         updated_at=?1 WHERE job_id='compact_v8_c1b1_chat';",
+            ["2026-09-01T11:11:07Z"],
+        )
+        .unwrap();
+    drop(storage);
+
+    let mut reopened = Storage::open(&path).expect("compacted chat reopens");
+    let message_two = team_message("chat_v8_c1b1", "message_v8_c1b1_2", 2);
+    let third = event(
+        "evt_v8_c1b1_chat_3",
+        "op_v8_c1b1_chat_3",
+        "chat",
+        "chat_v8_c1b1",
+        3,
+        materializable_chat_payload("chat_v8_c1b1", "project_v8_c1b1", 2, message_two),
+        "2026-09-01T11:12:00Z",
+    );
+    assert_eq!(
+        reopened.append_event(&third).unwrap(),
+        AppendOutcome::Committed
+    );
+    let reuse = event(
+        "evt_v8_c1b1_chat_reuse",
+        "op_v8_c1b1_chat_reuse",
+        "chat",
+        "chat_v8_c1b1",
+        4,
+        materializable_chat_payload("chat_v8_c1b1", "project_v8_c1b1", 3, message_one),
+        "2026-09-01T11:12:01Z",
+    );
+    let before = database_snapshot(&reopened.connection);
+    reopened
+        .append_event(&reuse)
+        .expect_err("frozen message id reuse must fail");
+    assert_eq!(database_snapshot(&reopened.connection), before);
+    run_bounded_materializer_to_ready(&mut reopened);
+    drop(reopened);
+    let valid = Storage::open(&path).expect("compacted chat materializes and reopens");
+    valid.checkpoint().expect("checkpoint compacted chat");
+    drop(valid);
+    for (name, mutation) in [
+        (
+            "durable",
+            "UPDATE event_source_index SET chat_durable_sequence=2 \
+             WHERE operation_id='op_v8_c1b1_chat_2';",
+        ),
+        (
+            "snapshot",
+            "UPDATE event_source_index SET chat_snapshot_message_id='message_tampered' \
+             WHERE operation_id='op_v8_c1b1_chat_2';",
+        ),
+        (
+            "introduced",
+            "UPDATE event_source_index SET introduced_message_id='message_tampered' \
+             WHERE operation_id='op_v8_c1b1_chat_2';",
+        ),
+    ] {
+        let tampered_path = root.path().join(format!("v8-chat-anchor-{name}.sqlite3"));
+        fs::copy(&path, &tampered_path).expect("copy compacted chat");
+        let tampered = Storage::open(&tampered_path).expect("valid compacted chat copy");
+        let trigger: String = tampered
+            .connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' \
+                 AND name='event_source_index_append_only_update';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        tampered
+            .connection
+            .execute_batch("DROP TRIGGER event_source_index_append_only_update;")
+            .unwrap();
+        tampered.connection.execute_batch(mutation).unwrap();
+        tampered.connection.execute_batch(&trigger).unwrap();
+        tampered.checkpoint().unwrap();
+        let snapshot = database_snapshot(&tampered.connection);
+        let bytes = fs::read(&tampered_path).unwrap();
+        drop(tampered);
+        let error = match Storage::open(&tampered_path) {
+            Ok(_) => panic!("tampered compacted anchor must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+        assert_eq!(fs::read(&tampered_path).unwrap(), bytes, "{name}");
+        let connection = Connection::open(&tampered_path).unwrap();
+        configure_connection(&connection).unwrap();
+        assert_eq!(database_snapshot(&connection), snapshot, "{name}");
+    }
+}
+
+#[test]
+fn terminal_compacted_v8_over_one_hundred_frozen_operations_fails_closed_without_mutation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v8");
+    let mut events = Vec::new();
+    for ordinal in 0..=100 {
+        let event = event(
+            &format!("evt_v8_bound_{ordinal}"),
+            &format!("op_v8_bound_{ordinal}"),
+            "project",
+            &format!("project_v8_bound_{ordinal}"),
+            1,
+            json!({
+                "canonical_path":format!("/fixture/v8-bound-{ordinal}"),
+                "project_id":format!("project_v8_bound_{ordinal}")
+            }),
+            "2026-09-01T11:20:00Z",
+        );
+        storage
+            .append_event(&event)
+            .expect("append bounded fixture event");
+        events.push(event);
+    }
+    run_bounded_materializer_to_ready(&mut storage);
+    for event in &events {
+        insert_exact_v8_frozen_operation(&mut storage, event, "2026-09-01T11:21:00Z");
+    }
+    let cutoff: i64 = storage
+        .connection
+        .query_row("SELECT max(rowid) FROM events;", [], |row| row.get(0))
+        .unwrap();
+    let proof = json!({"storageCompactionV2PrivateState": {
+        "schemaVersion":1,
+        "cursor":{"schemaVersion":2,"cutoffEventRowid":cutoff,"phase":"finalize",
+                  "afterEventRowid":cutoff,"scanExhausted":true},
+        "operationsVerified":true,"equivalenceVerified":true
+    }});
+    storage.connection.execute(
+        "INSERT INTO maintenance_jobs(
+           job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,created_at,updated_at)
+         VALUES ('compact_v8_bound','losslessCompaction','succeeded',?1,?2,?2,?2,?2,?2);",
+        params![proof.to_string(), "2026-09-01T11:23:00Z"],
+    ).unwrap();
+    let snapshot = database_snapshot(&storage.connection);
+    let error = verify_v8_compaction_runtime_state(&storage.connection)
+        .expect_err("101st frozen operation must exceed temporary C1B1 reopen bound");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(database_snapshot(&storage.connection), snapshot);
+    storage.checkpoint().expect("checkpoint bounded fixture");
+    let bytes = fs::read(storage.path()).expect("read bounded fixture");
+    drop(storage);
+    let error = match Storage::open(&path) {
+        Ok(_) => panic!("over-bound compacted V8 must not reopen"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(fs::read(&path).expect("reread bounded fixture"), bytes);
+}
+
+#[test]
+fn v8_frozen_operation_reopen_budget_accepts_exact_mib_and_rejects_single_oversize() {
+    for (name, target, succeeds) in [
+        ("exact", COMPACTION_VERIFY_MAX_PAYLOAD_BYTES, true),
+        ("oversize", COMPACTION_VERIFY_MAX_PAYLOAD_BYTES + 1, false),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("fresh v8");
+        let project_id = format!("project_v8_payload_{name}");
+        let empty =
+            canonical_json_v1(json!({"canonical_path":"","project_id":project_id})).unwrap();
+        let padding = "x".repeat(target - empty.len());
+        let source = event(
+            &format!("evt_v8_payload_{name}"),
+            &format!("op_v8_payload_{name}"),
+            "project",
+            &project_id,
+            1,
+            json!({"canonical_path":padding,"project_id":project_id}),
+            "2026-09-01T11:30:00Z",
+        );
+        assert_eq!(source.canonical_json_payload.len(), target);
+        storage
+            .append_event(&source)
+            .expect("append payload boundary source");
+        insert_exact_v8_frozen_operation(&mut storage, &source, "2026-09-01T11:30:01Z");
+        let cutoff: u64 = storage
+            .connection
+            .query_row(
+                "SELECT rowid FROM events WHERE operation_id=?1;",
+                [&source.operation_id],
+                |row| row_u64(row, 0),
+            )
+            .unwrap();
+        let result = verify_frozen_operation_batch(&storage.connection, cutoff);
+        assert_eq!(result.is_ok(), succeeds, "{name}: {result:?}");
+    }
+}
+
+fn run_bounded_materializer_to_ready(storage: &mut Storage) {
+    for _ in 0..256 {
+        match storage
+            .materialize_lifetime_batch_for_test(&mut crate::storage_lifetime::NeverCancel, None)
+            .expect("bounded materialization batch")
+        {
+            crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. } => return,
+            crate::storage_lifetime::LifetimeMaterializationBatchResult::Progress { .. } => {}
+            other => panic!("unexpected materialization result: {other:?}"),
+        }
+    }
+    panic!("bounded materializer did not complete");
+}
+
+#[test]
 fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
     for (name, mutation) in [
         ("partial", "DROP TABLE event_source_index;"),
@@ -3689,7 +4234,7 @@ fn insert_exact_v8_frozen_operation(
     storage
         .connection
         .execute(
-            "INSERT INTO operation_receipts(
+            "INSERT OR IGNORE INTO operation_receipts(
                operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,
                payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,
                canonical_payload_digest_version,canonical_payload_digest_format,

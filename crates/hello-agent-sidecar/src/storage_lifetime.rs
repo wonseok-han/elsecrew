@@ -677,7 +677,7 @@ fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), S
             crate::storage::verify_v7_uncompacted_runtime_state(connection)
         }
         STORAGE_LIFETIME_SCHEMA_VERSION_V8 => {
-            crate::storage::verify_v8_uncompacted_runtime_state(connection)
+            crate::storage::verify_v8_compaction_runtime_state(connection)
         }
         _ => Err(materialization_error(
             "bounded materialization requires exact storage v6, v7, or v8",
@@ -1289,8 +1289,30 @@ fn source_index_predecessor(
         "chat",
         &source.aggregate_id,
         source.aggregate_sequence - 1,
-    )?
-    .ok_or_else(|| materialization_error("chat source index predecessor is missing"))?;
+    )?;
+    if predecessor.is_none() {
+        let (rowid, event) = crate::storage::load_v8_verified_frozen_event(
+            connection,
+            "chat",
+            &source.aggregate_id,
+            source.aggregate_sequence - 1,
+        )?
+        .ok_or_else(|| materialization_error("chat source index predecessor is missing"))?;
+        let (durable, snapshot) = chat_index_state(&event)?;
+        let synthetic = serde_json::json!({
+            "eventRowid": rowid,
+            "eventId": event.event_id,
+            "operationId": event.operation_id,
+            "aggregateType": event.aggregate_type,
+            "aggregateId": event.aggregate_id,
+            "aggregateSequence": event.aggregate_sequence,
+            "introducedMessageId": Value::Null,
+            "chatDurableSequence": durable,
+            "chatSnapshotMessageId": snapshot,
+        });
+        return Ok((Some(synthetic), Some(SourceEvent { rowid, event })));
+    }
+    let predecessor = predecessor.expect("checked some");
     let predecessor_rowid = predecessor
         .get("eventRowid")
         .and_then(Value::as_u64)
@@ -1341,6 +1363,14 @@ fn index_source_event(
     source: &SourceEvent,
 ) -> Result<(), SidecarError> {
     let expected = expected_source_index_entry(transaction, source)?;
+    if let Some(existing) = load_source_index_by_rowid(transaction, source.rowid)? {
+        if existing == expected {
+            return Ok(());
+        }
+        return Err(materialization_error(
+            "source index row differs from its event",
+        ));
+    }
     transaction
         .execute(
             "INSERT OR IGNORE INTO event_source_index(\
@@ -1648,8 +1678,19 @@ fn verify_derived_row(
             )?
             .map(|entry| indexed_source_event(connection, entry, cutoff))
             .transpose()?;
-            source.is_some_and(|event| {
-                classify_operation_against_receipt_v2(&receipt, &event.event)
+            let event = if let Some(source) = source {
+                Some(source.event)
+            } else {
+                crate::storage::load_v8_verified_frozen_event(
+                    connection,
+                    &receipt.aggregate_type,
+                    &receipt.aggregate_id,
+                    receipt.aggregate_sequence,
+                )?
+                .map(|(_, event)| event)
+            };
+            event.is_some_and(|event| {
+                classify_operation_against_receipt_v2(&receipt, &event)
                     .is_ok_and(|decision| decision == OperationDecisionV1::DuplicateNoOp)
             })
         }
@@ -1687,10 +1728,15 @@ fn source_message_matches(
     let source = load_source_index_by_introduced_message(connection, &message.message_id)?
         .map(|entry| indexed_source_event(connection, entry, cutoff))
         .transpose()?;
-    Ok(source
+    let event = if let Some(source) = source {
+        Some(source.event)
+    } else {
+        crate::storage::load_v8_verified_frozen_message_event(connection, &message.message_id)?
+    };
+    Ok(event
         .as_ref()
-        .and_then(|source| {
-            canonical_object(&source.event.canonical_json_payload, "chat projection")
+        .and_then(|event| {
+            canonical_object(&event.canonical_json_payload, "chat projection")
                 .ok()
                 .and_then(|object| object.get("last_message").cloned())
         })
@@ -1760,6 +1806,17 @@ fn source_baseline_matches(
     )?
     .map(|entry| indexed_source_event(connection, entry, cutoff))
     .transpose()?;
+    let source_json = if let Some(source) = source {
+        Some(source.event.canonical_json_payload)
+    } else {
+        crate::storage::load_v8_verified_frozen_event(
+            connection,
+            &baseline.aggregate_type,
+            &baseline.aggregate_id,
+            baseline.cutoff_sequence,
+        )?
+        .map(|(_, event)| event.canonical_json_payload)
+    };
     Ok(baseline.baseline_id
         == baseline_id(
             &baseline.aggregate_type,
@@ -1767,10 +1824,7 @@ fn source_baseline_matches(
             baseline.cutoff_sequence,
         )
         && baseline.digest == sha256_file_version_v1(baseline.canonical_json.as_bytes())
-        && source
-            .as_ref()
-            .map(|source| source.event.canonical_json_payload.as_str())
-            == Some(baseline.canonical_json.as_str()))
+        && source_json.as_deref() == Some(baseline.canonical_json.as_str()))
 }
 
 fn materialize_receipt_event(
@@ -2169,25 +2223,34 @@ fn verify_source_event(
             &source.event.aggregate_type,
             &source.event.aggregate_id,
             source.event.aggregate_sequence - 1,
-        )?
-        .ok_or_else(|| materialization_error("aggregate source predecessor is missing"))?;
-        let predecessor_rowid = predecessor
-            .get("eventRowid")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| materialization_error("aggregate source predecessor is invalid"))?;
-        if predecessor_rowid >= source.rowid {
-            return Err(materialization_error(
-                "aggregate source predecessor ordering is invalid",
-            ));
+        )?;
+        if let Some(predecessor) = predecessor {
+            let predecessor_rowid = predecessor
+                .get("eventRowid")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| materialization_error("aggregate source predecessor is invalid"))?;
+            if predecessor_rowid >= source.rowid {
+                return Err(materialization_error(
+                    "aggregate source predecessor ordering is invalid",
+                ));
+            }
+            let predecessor_source = load_exact_event_by_rowid(transaction, predecessor_rowid)?
+                .ok_or_else(|| materialization_error("aggregate predecessor source is missing"))?;
+            validate_storage_event_source_index_binding_v1(
+                predecessor_rowid,
+                &predecessor,
+                &predecessor_source.event,
+            )
+            .map_err(|_| materialization_error("aggregate predecessor source is invalid"))?;
+        } else if source.event.aggregate_type != "chat" {
+            crate::storage::load_v8_verified_frozen_event(
+                transaction,
+                &source.event.aggregate_type,
+                &source.event.aggregate_id,
+                source.event.aggregate_sequence - 1,
+            )?
+            .ok_or_else(|| materialization_error("aggregate source predecessor is missing"))?;
         }
-        let predecessor_source = load_exact_event_by_rowid(transaction, predecessor_rowid)?
-            .ok_or_else(|| materialization_error("aggregate predecessor source is missing"))?;
-        validate_storage_event_source_index_binding_v1(
-            predecessor_rowid,
-            &predecessor,
-            &predecessor_source.event,
-        )
-        .map_err(|_| materialization_error("aggregate predecessor source is invalid"))?;
     }
     let receipt = load_receipt(transaction, &source.event.operation_id)?
         .ok_or_else(|| materialization_error("operation receipt is missing"))?;

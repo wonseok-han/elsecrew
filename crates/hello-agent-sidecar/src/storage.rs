@@ -1,7 +1,12 @@
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
+use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use hello_agent_protocol::storage_lifetime_v1::{
-    validate_frozen_operation_source_binding_v1, validate_storage_event_source_index_transition_v1,
+    classify_operation_against_receipt_v2, validate_frozen_operation_receipt_binding_v1,
+    validate_frozen_operation_source_binding_v1, validate_frozen_operation_source_v1,
+    validate_storage_compaction_job_v2, validate_storage_compaction_prefix_v1,
+    validate_storage_event_source_index_binding_v1,
+    validate_storage_event_source_index_transition_v1,
     validate_storage_lifetime_materialization_job_v1,
     validate_storage_lifetime_materialization_job_v2,
     validate_storage_lifetime_materialization_job_v3,
@@ -11,7 +16,8 @@ use hello_agent_protocol::storage_lifetime_v1::{
     validate_storage_lifetime_materialization_pair_v3,
     validate_storage_lifetime_materialization_pair_v4, validate_storage_lifetime_reopen_pair_v2,
     validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
-    StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
+    FrozenOperationSourceV1, OperationReceiptV2, StorageStatusV1,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
     STORAGE_LIFETIME_SCHEMA_VERSION_V4, STORAGE_LIFETIME_SCHEMA_VERSION_V5,
     STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_LIFETIME_SCHEMA_VERSION_V7,
     STORAGE_LIFETIME_SCHEMA_VERSION_V8,
@@ -25,7 +31,7 @@ use rusqlite::{
     params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -361,7 +367,7 @@ impl Storage {
             .map_err(sqlite_error)?;
         verify_append_runtime_state(&transaction)?;
         let existing_events = load_events(&transaction)?;
-        match classify_operation_v1(&existing_events, event).map_err(storage_contract_error)? {
+        match classify_storage_operation(&transaction, &existing_events, event)? {
             OperationDecisionV1::DuplicateNoOp => {
                 transaction.commit().map_err(sqlite_error)?;
                 return Ok(AppendOutcome::DuplicateNoOp);
@@ -381,7 +387,7 @@ impl Storage {
             ));
         }
         let events = load_events(&transaction)?;
-        let projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let projection = replay_storage_ledger(&transaction, &events)?;
         write_projection(&transaction, event, &projection)?;
         transaction.commit().map_err(sqlite_error)?;
         Ok(AppendOutcome::Committed)
@@ -668,8 +674,9 @@ impl Storage {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
+        verify_append_runtime_state(&transaction)?;
         let mut events = load_events(&transaction)?;
-        let mut projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let mut projection = replay_storage_ledger(&transaction, &events)?;
         let mut outcomes = Vec::with_capacity(upserts.len());
         let mut appended = Vec::new();
 
@@ -706,11 +713,11 @@ impl Storage {
                     .map_err(storage_contract_error)?,
                 timestamp: now_utc(),
             };
-            match classify_operation_v1(&events, &event).map_err(storage_contract_error)? {
+            match classify_storage_operation(&transaction, &events, &event)? {
                 OperationDecisionV1::Append => {
                     insert_event(&transaction, &event)?;
                     events.push(event.clone());
-                    projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+                    projection = replay_storage_ledger(&transaction, &events)?;
                     appended.push(event);
                     outcomes.push(AppendOutcome::Committed);
                 }
@@ -755,8 +762,9 @@ impl Storage {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
+        verify_append_runtime_state(&transaction)?;
         let mut events = load_events(&transaction)?;
-        let projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let projection = replay_storage_ledger(&transaction, &events)?;
         let Some(project) = projection.projects.get(&input.project_id) else {
             transaction.rollback().map_err(sqlite_error)?;
             return Ok(ChatBindOutcome::PreparationUnknown);
@@ -880,7 +888,7 @@ impl Storage {
                     .map_err(storage_contract_error)?,
                 timestamp: now_utc(),
             };
-            match classify_operation_v1(&events, &event).map_err(storage_contract_error)? {
+            match classify_storage_operation(&transaction, &events, &event)? {
                 OperationDecisionV1::Append => {
                     insert_event(&transaction, &event)?;
                     events.push(event.clone());
@@ -901,7 +909,7 @@ impl Storage {
                 }
             }
         }
-        let final_projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let final_projection = replay_storage_ledger(&transaction, &events)?;
         for event in &appended {
             write_projection(&transaction, event, &final_projection)?;
         }
@@ -917,10 +925,11 @@ impl Storage {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
+        verify_append_runtime_state(&transaction)?;
         let mut events = load_events(&transaction)?;
         let mut appended = Vec::new();
         for event in incoming {
-            match classify_operation_v1(&events, event).map_err(storage_contract_error)? {
+            match classify_storage_operation(&transaction, &events, event)? {
                 OperationDecisionV1::Append => {
                     insert_event(&transaction, event)?;
                     events.push(event.clone());
@@ -935,7 +944,7 @@ impl Storage {
                 }
             }
         }
-        let projection = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+        let projection = replay_storage_ledger(&transaction, &events)?;
         for event in appended {
             write_projection(&transaction, event, &projection)?;
         }
@@ -1998,7 +2007,7 @@ pub(crate) fn verify_v7_uncompacted_runtime_state(
 fn verify_schema_v8_for_open(connection: &Connection) -> Result<(), SidecarError> {
     let materialization_state = verify_schema_v8(connection)?;
     verify_v6_materialization_snapshot(connection, &materialization_state, true)?;
-    verify_v8_uncompacted_runtime_state(connection)
+    verify_v8_compaction_runtime_state(connection)
 }
 
 fn verify_schema_v8(connection: &Connection) -> Result<String, SidecarError> {
@@ -2066,6 +2075,7 @@ fn verify_schema_v8(connection: &Connection) -> Result<String, SidecarError> {
     Ok(metadata.3)
 }
 
+#[cfg(test)]
 pub(crate) fn verify_v8_uncompacted_runtime_state(
     connection: &Connection,
 ) -> Result<(), SidecarError> {
@@ -2106,6 +2116,670 @@ pub(crate) fn verify_v8_uncompacted_runtime_state(
     Ok(())
 }
 
+const COMPACTION_VERIFY_MAX_ROWS: usize = 100;
+const COMPACTION_VERIFY_MAX_PAYLOAD_BYTES: usize = 1_048_576;
+
+#[derive(Debug, Clone)]
+struct VerifiedCompactionPrefix {
+    aggregate_type: String,
+    aggregate_id: String,
+    deleted_through: u64,
+    anchor_rowid: u64,
+    anchor_sequence: u64,
+    anchor_event_id: String,
+    anchor_operation_id: String,
+    baseline_json: String,
+}
+
+pub(crate) fn verify_v8_compaction_runtime_state(
+    connection: &Connection,
+) -> Result<(), SidecarError> {
+    if connection
+        .query_row(
+            "SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1;",
+            [],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .is_some()
+        || connection
+            .query_row(
+                "SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
+                 AND state IN ('pending','running') LIMIT 1;",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?
+            .is_some()
+    {
+        return Err(storage_v8_compaction_state_error());
+    }
+
+    let has_compacted_state = connection
+        .query_row(
+            "SELECT 1 FROM frozen_operation_sources WHERE source_event_rowid>0 \
+             ORDER BY source_event_rowid LIMIT 1;",
+            [],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .is_some()
+        || connection
+            .query_row(
+                "SELECT 1 FROM ledger_compaction_prefixes WHERE rowid>0 ORDER BY rowid LIMIT 1;",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?
+            .is_some()
+        || connection
+            .query_row(
+                "SELECT 1 FROM frozen_message_sources WHERE rowid>0 ORDER BY rowid LIMIT 1;",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?
+            .is_some();
+    if !has_compacted_state {
+        return Ok(());
+    }
+
+    let cutoff = verify_terminal_compaction_proof(connection)?;
+    verify_frozen_operation_batch(connection, cutoff)?;
+    let prefixes = verify_compacted_prefix_batch(connection)?;
+    verify_frozen_message_batch(connection, &prefixes)?;
+    Ok(())
+}
+
+fn verify_terminal_compaction_proof(connection: &Connection) -> Result<u64, SidecarError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT job_id,cutoff_json,completed_at FROM maintenance_jobs \
+             WHERE job_kind='losslessCompaction' AND state='succeeded' LIMIT 2;",
+        )
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let first = rows
+        .next()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    let job_id: String = first
+        .get(0)
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let cutoff_json: String = first
+        .get(1)
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let completed_at: String = first
+        .get(2)
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    if rows
+        .next()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .is_some()
+    {
+        return Err(storage_v8_compaction_unsupported_error());
+    }
+    let envelope: Value =
+        serde_json::from_str(&cutoff_json).map_err(|_| storage_v8_compaction_state_error())?;
+    let envelope_object = envelope
+        .as_object()
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    if envelope_object.len() != 1 {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let private = envelope_object
+        .get("storageCompactionV2PrivateState")
+        .and_then(Value::as_object)
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    if private.len() != 4 || private.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let cursor = private
+        .get("cursor")
+        .cloned()
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    let job = validate_storage_compaction_job_v2(&json!({
+        "jobId": job_id,
+        "state": "succeeded",
+        "cursor": cursor,
+        "authorityCount": 0,
+        "operationsVerified": private.get("operationsVerified").cloned().unwrap_or(Value::Null),
+        "equivalenceVerified": private.get("equivalenceVerified").cloned().unwrap_or(Value::Null),
+        "failureKind": null,
+        "completedAt": completed_at,
+    }))
+    .map_err(|_| storage_v8_compaction_state_error())?;
+    if job.cursor.after_event_rowid != job.cursor.cutoff_event_rowid {
+        return Err(storage_v8_compaction_state_error());
+    }
+    Ok(job.cursor.cutoff_event_rowid)
+}
+
+fn verify_frozen_operation_batch(
+    connection: &Connection,
+    cutoff_event_rowid: u64,
+) -> Result<(), SidecarError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,\
+                    aggregate_id,aggregate_sequence,event_type,payload_schema_version,\
+                    canonical_payload_json,canonical_payload_digest,event_timestamp,\
+                    canonical_record_json,record_digest,frozen_at \
+             FROM frozen_operation_sources WHERE source_event_rowid>0 \
+             ORDER BY source_event_rowid LIMIT 100;",
+        )
+        .map_err(|_| storage_frozen_operation_error())?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| storage_frozen_operation_error())?;
+    let mut processed = 0_usize;
+    let mut payload_bytes = 0_usize;
+    let mut after = 0_u64;
+    while let Some(row) = rows.next().map_err(|_| storage_frozen_operation_error())? {
+        let value = frozen_operation_value_from_row(row)?;
+        let frozen = validate_frozen_operation_source_v1(&value)
+            .map_err(|_| storage_frozen_operation_error())?;
+        payload_bytes = payload_bytes
+            .checked_add(frozen.canonical_payload_json.len())
+            .ok_or_else(storage_frozen_operation_error)?;
+        if payload_bytes > COMPACTION_VERIFY_MAX_PAYLOAD_BYTES
+            || frozen.source_event_rowid <= after
+            || frozen.source_event_rowid > cutoff_event_rowid
+        {
+            return Err(storage_frozen_operation_error());
+        }
+        verify_frozen_operation_authority(connection, &value, &frozen)?;
+        after = frozen.source_event_rowid;
+        processed += 1;
+    }
+    if processed == 0 {
+        return Err(storage_v8_compaction_state_error());
+    }
+    if processed > COMPACTION_VERIFY_MAX_ROWS {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let successor = connection
+        .query_row(
+            "SELECT source_event_rowid FROM frozen_operation_sources \
+             WHERE source_event_rowid>?1 ORDER BY source_event_rowid LIMIT 1;",
+            [sql_i64(after)?],
+            |row| row_u64(row, 0),
+        )
+        .optional()
+        .map_err(|_| storage_frozen_operation_error())?;
+    if successor.is_some() {
+        return Err(storage_v8_compaction_unsupported_error());
+    }
+    Ok(())
+}
+
+fn verify_frozen_operation_authority(
+    connection: &Connection,
+    value: &Value,
+    frozen: &FrozenOperationSourceV1,
+) -> Result<(), SidecarError> {
+    let receipt = load_operation_receipt_value(connection, &frozen.operation_id)?
+        .ok_or_else(storage_frozen_operation_error)?;
+    validate_frozen_operation_receipt_binding_v1(value, &receipt)
+        .map_err(|_| storage_frozen_operation_error())?;
+    let live = load_event_by_rowid(connection, frozen.source_event_rowid)?;
+    let source_index = load_source_index_by_rowid(connection, frozen.source_event_rowid)?;
+    match (live, source_index) {
+        (Some(event), Some(index)) => {
+            validate_frozen_operation_source_binding_v1(
+                value,
+                frozen.source_event_rowid,
+                &event,
+                &index,
+                &receipt,
+            )
+            .map_err(|_| storage_frozen_operation_error())?;
+        }
+        (None, None) => {
+            let covered = connection
+                .query_row(
+                    "SELECT 1 FROM ledger_compaction_prefixes WHERE aggregate_type=?1 \
+                     AND aggregate_id=?2 AND deleted_through_sequence>=?3 \
+                     ORDER BY deleted_through_sequence LIMIT 1;",
+                    params![
+                        frozen.aggregate_type,
+                        frozen.aggregate_id,
+                        sql_i64(frozen.aggregate_sequence)?
+                    ],
+                    |row| row.get::<_, u32>(0),
+                )
+                .optional()
+                .map_err(|_| storage_frozen_operation_error())?;
+            if covered.is_none() {
+                return Err(storage_frozen_operation_error());
+            }
+        }
+        _ => return Err(storage_frozen_operation_error()),
+    }
+    Ok(())
+}
+
+fn verify_compacted_prefix_batch(
+    connection: &Connection,
+) -> Result<Vec<VerifiedCompactionPrefix>, SidecarError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT rowid,prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,\
+                    anchor_event_rowid,anchor_event_id,anchor_operation_id,\
+                    anchor_aggregate_sequence,baseline_id,baseline_projection_digest,\
+                    created_at,verified_at \
+             FROM ledger_compaction_prefixes WHERE rowid>0 ORDER BY rowid LIMIT 100;",
+        )
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let mut prefixes = Vec::new();
+    let mut after = 0_u64;
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| storage_v8_compaction_state_error())?
+    {
+        after = row_u64(row, 0).map_err(|_| storage_v8_compaction_state_error())?;
+        let value = json!({
+            "prefixId": row.get::<_, String>(1).map_err(|_| storage_v8_compaction_state_error())?,
+            "aggregateType": row.get::<_, String>(2).map_err(|_| storage_v8_compaction_state_error())?,
+            "aggregateId": row.get::<_, String>(3).map_err(|_| storage_v8_compaction_state_error())?,
+            "deletedThroughSequence": row_u64(row, 4).map_err(|_| storage_v8_compaction_state_error())?,
+            "anchorEventRowid": row_u64(row, 5).map_err(|_| storage_v8_compaction_state_error())?,
+            "anchorEventId": row.get::<_, String>(6).map_err(|_| storage_v8_compaction_state_error())?,
+            "anchorOperationId": row.get::<_, String>(7).map_err(|_| storage_v8_compaction_state_error())?,
+            "anchorAggregateSequence": row_u64(row, 8).map_err(|_| storage_v8_compaction_state_error())?,
+            "baselineId": row.get::<_, String>(9).map_err(|_| storage_v8_compaction_state_error())?,
+            "baselineProjectionDigest": row.get::<_, String>(10).map_err(|_| storage_v8_compaction_state_error())?,
+            "createdAt": row.get::<_, String>(11).map_err(|_| storage_v8_compaction_state_error())?,
+            "verifiedAt": row.get::<_, String>(12).map_err(|_| storage_v8_compaction_state_error())?,
+        });
+        let prefix = validate_storage_compaction_prefix_v1(&value)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let baseline_json: String = connection
+            .query_row(
+                "SELECT canonical_projection_json FROM ledger_baselines \
+                 WHERE baseline_id=?1 AND aggregate_type=?2 AND aggregate_id=?3 \
+                 AND cutoff_aggregate_sequence=?4 AND projection_digest=?5;",
+                params![
+                    prefix.baseline_id,
+                    prefix.aggregate_type,
+                    prefix.aggregate_id,
+                    sql_i64(prefix.deleted_through_sequence)?,
+                    prefix.baseline_projection_digest,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        if sha256_file_version_v1(baseline_json.as_bytes()) != prefix.baseline_projection_digest {
+            return Err(storage_v8_compaction_state_error());
+        }
+        let deleted_frozen = load_frozen_operation_by_aggregate(
+            connection,
+            &prefix.aggregate_type,
+            &prefix.aggregate_id,
+            prefix.deleted_through_sequence,
+        )?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+        if deleted_frozen.canonical_payload_json != baseline_json
+            || load_event_by_rowid(connection, deleted_frozen.source_event_rowid)?.is_some()
+            || load_source_index_by_rowid(connection, deleted_frozen.source_event_rowid)?.is_some()
+        {
+            return Err(storage_v8_compaction_state_error());
+        }
+        if prefix.deleted_through_sequence > 1
+            && connection
+                .query_row(
+                    "SELECT 1 FROM ledger_compaction_prefixes WHERE aggregate_type=?1 \
+                     AND aggregate_id=?2 AND deleted_through_sequence=?3 LIMIT 1;",
+                    params![
+                        prefix.aggregate_type,
+                        prefix.aggregate_id,
+                        sql_i64(prefix.deleted_through_sequence - 1)?
+                    ],
+                    |row| row.get::<_, u32>(0),
+                )
+                .optional()
+                .map_err(|_| storage_v8_compaction_state_error())?
+                .is_none()
+        {
+            return Err(storage_v8_compaction_state_error());
+        }
+        if prefix.aggregate_type == "chat" {
+            verify_deleted_chat_introduction(connection, &deleted_frozen)?;
+        }
+        let verified = VerifiedCompactionPrefix {
+            aggregate_type: prefix.aggregate_type.clone(),
+            aggregate_id: prefix.aggregate_id.clone(),
+            deleted_through: prefix.deleted_through_sequence,
+            anchor_rowid: prefix.anchor_event_rowid,
+            anchor_sequence: prefix.anchor_aggregate_sequence,
+            anchor_event_id: prefix.anchor_event_id,
+            anchor_operation_id: prefix.anchor_operation_id,
+            baseline_json,
+        };
+        let newer = connection
+            .query_row(
+                "SELECT 1 FROM ledger_compaction_prefixes WHERE aggregate_type=?1 \
+                 AND aggregate_id=?2 AND deleted_through_sequence>?3 \
+                 ORDER BY deleted_through_sequence LIMIT 1;",
+                params![
+                    verified.aggregate_type,
+                    verified.aggregate_id,
+                    sql_i64(verified.deleted_through)?
+                ],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        if newer.is_none() {
+            verify_retained_anchor_v8(connection, &verified)?;
+        }
+        prefixes.push(verified);
+    }
+    if after > 0
+        && connection
+            .query_row(
+                "SELECT rowid FROM ledger_compaction_prefixes WHERE rowid>?1 ORDER BY rowid LIMIT 1;",
+                [sql_i64(after)?],
+                |row| row_u64(row, 0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?
+            .is_some()
+    {
+        return Err(storage_v8_compaction_unsupported_error());
+    }
+    if prefixes.is_empty() {
+        return Err(storage_v8_compaction_state_error());
+    }
+    Ok(prefixes)
+}
+
+fn verify_retained_anchor_v8(
+    connection: &Connection,
+    prefix: &VerifiedCompactionPrefix,
+) -> Result<(), SidecarError> {
+    let event = load_event_by_rowid(connection, prefix.anchor_rowid)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    let index = load_source_index_by_rowid(connection, prefix.anchor_rowid)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    if event.event_id != prefix.anchor_event_id
+        || event.operation_id != prefix.anchor_operation_id
+        || event.aggregate_type != prefix.aggregate_type
+        || event.aggregate_id != prefix.aggregate_id
+        || event.aggregate_sequence != prefix.anchor_sequence
+    {
+        return Err(storage_v8_compaction_state_error());
+    }
+    validate_storage_event_source_index_binding_v1(prefix.anchor_rowid, &index, &event)
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let anchor_frozen = load_frozen_operation_value(connection, &event.operation_id)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    let receipt = load_operation_receipt_value(connection, &event.operation_id)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    validate_frozen_operation_source_binding_v1(
+        &anchor_frozen,
+        prefix.anchor_rowid,
+        &event,
+        &index,
+        &receipt,
+    )
+    .map_err(|_| storage_v8_compaction_state_error())?;
+    if prefix.aggregate_type == "chat" {
+        let predecessor = load_frozen_operation_by_aggregate(
+            connection,
+            "chat",
+            &prefix.aggregate_id,
+            prefix.deleted_through,
+        )?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+        if predecessor.canonical_payload_json != prefix.baseline_json {
+            return Err(storage_v8_compaction_state_error());
+        }
+        let predecessor_event = ledger_event_from_frozen_operation(&predecessor);
+        let (durable, snapshot) = chat_source_state(&predecessor_event)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let predecessor_index = json!({
+            "eventRowid": predecessor.source_event_rowid,
+            "eventId": predecessor.source_event_id,
+            "operationId": predecessor.operation_id,
+            "aggregateType": predecessor.aggregate_type,
+            "aggregateId": predecessor.aggregate_id,
+            "aggregateSequence": predecessor.aggregate_sequence,
+            "introducedMessageId": Value::Null,
+            "chatDurableSequence": durable,
+            "chatSnapshotMessageId": snapshot,
+        });
+        validate_storage_event_source_index_transition_v1(
+            prefix.anchor_rowid,
+            &index,
+            &event,
+            Some(&predecessor_index),
+            Some(&predecessor_event),
+        )
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedFrozenMessage {
+    message_id: String,
+    source_event_rowid: u64,
+    source_event_id: String,
+    source_operation_id: String,
+    chat_id: String,
+    source_aggregate_sequence: u64,
+    durable_sequence: u64,
+    canonical_message_json: String,
+    message_digest: String,
+}
+
+fn expected_frozen_message(
+    connection: &Connection,
+    source: &FrozenOperationSourceV1,
+) -> Result<Option<ExpectedFrozenMessage>, SidecarError> {
+    if source.aggregate_type != "chat" {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let current = ledger_event_from_frozen_operation(source);
+    let (current_durable, current_snapshot) =
+        chat_source_state(&current).map_err(|_| storage_v8_compaction_state_error())?;
+    let current_durable = current_durable.ok_or_else(storage_v8_compaction_state_error)?;
+    let (previous_durable, previous_snapshot) = if source.aggregate_sequence == 1 {
+        (0, None)
+    } else {
+        let previous = load_frozen_operation_by_aggregate(
+            connection,
+            "chat",
+            &source.aggregate_id,
+            source.aggregate_sequence - 1,
+        )?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+        let previous_event = ledger_event_from_frozen_operation(&previous);
+        let (durable, snapshot) =
+            chat_source_state(&previous_event).map_err(|_| storage_v8_compaction_state_error())?;
+        (
+            durable.ok_or_else(storage_v8_compaction_state_error)?,
+            snapshot,
+        )
+    };
+    if current_durable == previous_durable && current_snapshot == previous_snapshot {
+        return Ok(None);
+    }
+    if current_durable != previous_durable + 1 {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let message_id = current_snapshot.ok_or_else(storage_v8_compaction_state_error)?;
+    let payload: Value = serde_json::from_str(&source.canonical_payload_json)
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let message = payload
+        .get("last_message")
+        .and_then(Value::as_object)
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    if message.get("messageId").and_then(Value::as_str) != Some(message_id.as_str()) {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let canonical_message_json = canonical_json_v1(Value::Object(message.clone()))
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    Ok(Some(ExpectedFrozenMessage {
+        message_id,
+        source_event_rowid: source.source_event_rowid,
+        source_event_id: source.source_event_id.clone(),
+        source_operation_id: source.operation_id.clone(),
+        chat_id: source.aggregate_id.clone(),
+        source_aggregate_sequence: source.aggregate_sequence,
+        durable_sequence: current_durable,
+        message_digest: sha256_file_version_v1(canonical_message_json.as_bytes()),
+        canonical_message_json,
+    }))
+}
+
+fn verify_deleted_chat_introduction(
+    connection: &Connection,
+    source: &FrozenOperationSourceV1,
+) -> Result<(), SidecarError> {
+    let expected = expected_frozen_message(connection, source)?;
+    let stored = load_frozen_message_by_operation(connection, &source.operation_id)?;
+    if stored != expected {
+        return Err(storage_v8_compaction_state_error());
+    }
+    Ok(())
+}
+
+fn verify_frozen_message_batch(
+    connection: &Connection,
+    prefixes: &[VerifiedCompactionPrefix],
+) -> Result<(), SidecarError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT rowid,message_id,source_event_rowid,source_event_id,source_operation_id,\
+                    chat_id,source_aggregate_sequence,durable_sequence,canonical_message_json,\
+                    message_digest FROM frozen_message_sources WHERE rowid>0 ORDER BY rowid LIMIT 100;",
+        )
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let mut rows = statement
+        .query([])
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let mut after = 0_u64;
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| storage_v8_compaction_state_error())?
+    {
+        after = row_u64(row, 0).map_err(|_| storage_v8_compaction_state_error())?;
+        let stored = ExpectedFrozenMessage {
+            message_id: row
+                .get(1)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            source_event_rowid: row_u64(row, 2).map_err(|_| storage_v8_compaction_state_error())?,
+            source_event_id: row
+                .get(3)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            source_operation_id: row
+                .get(4)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            chat_id: row
+                .get(5)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            source_aggregate_sequence: row_u64(row, 6)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            durable_sequence: row_u64(row, 7).map_err(|_| storage_v8_compaction_state_error())?,
+            canonical_message_json: row
+                .get(8)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+            message_digest: row
+                .get(9)
+                .map_err(|_| storage_v8_compaction_state_error())?,
+        };
+        let source_value = load_frozen_operation_value(connection, &stored.source_operation_id)?
+            .ok_or_else(storage_v8_compaction_state_error)?;
+        let source = validate_frozen_operation_source_v1(&source_value)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let expected = expected_frozen_message(connection, &source)?
+            .ok_or_else(storage_v8_compaction_state_error)?;
+        let normalized_exact = connection
+            .query_row(
+                "SELECT 1 FROM chat_messages WHERE message_id=?1 AND chat_id=?2 \
+                 AND event_sequence=?3 AND canonical_message_json=?4 AND message_digest=?5;",
+                params![
+                    stored.message_id,
+                    stored.chat_id,
+                    sql_i64(stored.durable_sequence)?,
+                    stored.canonical_message_json,
+                    stored.message_digest,
+                ],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let covered = prefixes.iter().any(|prefix| {
+            prefix.aggregate_type == "chat"
+                && prefix.aggregate_id == stored.chat_id
+                && prefix.deleted_through >= stored.source_aggregate_sequence
+        });
+        if stored != expected
+            || normalized_exact.is_none()
+            || !covered
+            || load_event_by_rowid(connection, stored.source_event_rowid)?.is_some()
+            || load_source_index_by_rowid(connection, stored.source_event_rowid)?.is_some()
+        {
+            return Err(storage_v8_compaction_state_error());
+        }
+    }
+    if after > 0
+        && connection
+            .query_row(
+                "SELECT rowid FROM frozen_message_sources WHERE rowid>?1 ORDER BY rowid LIMIT 1;",
+                [sql_i64(after)?],
+                |row| row_u64(row, 0),
+            )
+            .optional()
+            .map_err(|_| storage_v8_compaction_state_error())?
+            .is_some()
+    {
+        return Err(storage_v8_compaction_unsupported_error());
+    }
+    Ok(())
+}
+
+fn load_frozen_message_by_operation(
+    connection: &Connection,
+    operation_id: &str,
+) -> Result<Option<ExpectedFrozenMessage>, SidecarError> {
+    connection
+        .query_row(
+            "SELECT message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,\
+                    source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest \
+             FROM frozen_message_sources WHERE source_operation_id=?1;",
+            [operation_id],
+            |row| {
+                Ok(ExpectedFrozenMessage {
+                    message_id: row.get(0)?,
+                    source_event_rowid: row_u64(row, 1)?,
+                    source_event_id: row.get(2)?,
+                    source_operation_id: row.get(3)?,
+                    chat_id: row.get(4)?,
+                    source_aggregate_sequence: row_u64(row, 5)?,
+                    durable_sequence: row_u64(row, 6)?,
+                    canonical_message_json: row.get(7)?,
+                    message_digest: row.get(8)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())
+}
+
+#[cfg(test)]
 pub(crate) fn validate_v8_frozen_operation_source(
     connection: &Connection,
     operation_id: &str,
@@ -2236,6 +2910,246 @@ pub(crate) fn validate_v8_frozen_operation_source(
     Ok(())
 }
 
+fn frozen_operation_value_from_row(row: &rusqlite::Row<'_>) -> Result<Value, SidecarError> {
+    Ok(json!({
+        "operationId": row.get::<_, String>(0).map_err(|_| storage_frozen_operation_error())?,
+        "sourceEventRowid": row_u64(row, 1).map_err(|_| storage_frozen_operation_error())?,
+        "sourceEventId": row.get::<_, String>(2).map_err(|_| storage_frozen_operation_error())?,
+        "requestId": row.get::<_, Option<String>>(3).map_err(|_| storage_frozen_operation_error())?,
+        "aggregateType": row.get::<_, String>(4).map_err(|_| storage_frozen_operation_error())?,
+        "aggregateId": row.get::<_, String>(5).map_err(|_| storage_frozen_operation_error())?,
+        "aggregateSequence": row_u64(row, 6).map_err(|_| storage_frozen_operation_error())?,
+        "eventType": row.get::<_, String>(7).map_err(|_| storage_frozen_operation_error())?,
+        "payloadSchemaVersion": row.get::<_, u32>(8).map_err(|_| storage_frozen_operation_error())?,
+        "canonicalPayloadJson": row.get::<_, String>(9).map_err(|_| storage_frozen_operation_error())?,
+        "canonicalPayloadDigest": row.get::<_, String>(10).map_err(|_| storage_frozen_operation_error())?,
+        "eventTimestamp": row.get::<_, String>(11).map_err(|_| storage_frozen_operation_error())?,
+        "canonicalRecordJson": row.get::<_, String>(12).map_err(|_| storage_frozen_operation_error())?,
+        "recordDigest": row.get::<_, String>(13).map_err(|_| storage_frozen_operation_error())?,
+        "frozenAt": row.get::<_, String>(14).map_err(|_| storage_frozen_operation_error())?,
+    }))
+}
+
+fn load_frozen_operation_value(
+    connection: &Connection,
+    operation_id: &str,
+) -> Result<Option<Value>, SidecarError> {
+    connection
+        .query_row(
+            "SELECT operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,\
+                    aggregate_id,aggregate_sequence,event_type,payload_schema_version,\
+                    canonical_payload_json,canonical_payload_digest,event_timestamp,\
+                    canonical_record_json,record_digest,frozen_at \
+             FROM frozen_operation_sources WHERE operation_id=?1;",
+            [operation_id],
+            |row| frozen_operation_value_from_row(row).map_err(|_| rusqlite::Error::InvalidQuery),
+        )
+        .optional()
+        .map_err(|_| storage_frozen_operation_error())
+}
+
+fn load_frozen_operation_by_aggregate(
+    connection: &Connection,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    aggregate_sequence: u64,
+) -> Result<Option<FrozenOperationSourceV1>, SidecarError> {
+    let operation_id = connection
+        .query_row(
+            "SELECT operation_id FROM frozen_operation_sources WHERE aggregate_type=?1 \
+             AND aggregate_id=?2 AND aggregate_sequence=?3;",
+            params![aggregate_type, aggregate_id, sql_i64(aggregate_sequence)?],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|_| storage_frozen_operation_error())?;
+    operation_id
+        .map(|operation_id| {
+            let value = load_frozen_operation_value(connection, &operation_id)?
+                .ok_or_else(storage_frozen_operation_error)?;
+            validate_frozen_operation_source_v1(&value)
+                .map_err(|_| storage_frozen_operation_error())
+        })
+        .transpose()
+}
+
+pub(crate) fn load_v8_verified_frozen_event(
+    connection: &Connection,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    aggregate_sequence: u64,
+) -> Result<Option<(u64, LedgerEventV1)>, SidecarError> {
+    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+        return Ok(None);
+    }
+    let Some(source) = load_frozen_operation_by_aggregate(
+        connection,
+        aggregate_type,
+        aggregate_id,
+        aggregate_sequence,
+    )?
+    else {
+        return Ok(None);
+    };
+    let value = load_frozen_operation_value(connection, &source.operation_id)?
+        .ok_or_else(storage_frozen_operation_error)?;
+    let receipt = load_operation_receipt_value(connection, &source.operation_id)?
+        .ok_or_else(storage_frozen_operation_error)?;
+    validate_frozen_operation_receipt_binding_v1(&value, &receipt)
+        .map_err(|_| storage_frozen_operation_error())?;
+    if load_event_by_rowid(connection, source.source_event_rowid)?.is_some()
+        || load_source_index_by_rowid(connection, source.source_event_rowid)?.is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some((
+        source.source_event_rowid,
+        ledger_event_from_frozen_operation(&source),
+    )))
+}
+
+pub(crate) fn load_v8_verified_frozen_message_event(
+    connection: &Connection,
+    message_id: &str,
+) -> Result<Option<LedgerEventV1>, SidecarError> {
+    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+        return Ok(None);
+    }
+    let operation_id = connection
+        .query_row(
+            "SELECT source_operation_id FROM frozen_message_sources WHERE message_id=?1;",
+            [message_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    let Some(operation_id) = operation_id else {
+        return Ok(None);
+    };
+    let value = load_frozen_operation_value(connection, &operation_id)?
+        .ok_or_else(storage_frozen_operation_error)?;
+    let source = validate_frozen_operation_source_v1(&value)
+        .map_err(|_| storage_frozen_operation_error())?;
+    let expected = expected_frozen_message(connection, &source)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    let stored = load_frozen_message_by_operation(connection, &operation_id)?
+        .ok_or_else(storage_v8_compaction_state_error)?;
+    if stored != expected || stored.message_id != message_id {
+        return Err(storage_v8_compaction_state_error());
+    }
+    let receipt = load_operation_receipt_value(connection, &operation_id)?
+        .ok_or_else(storage_frozen_operation_error)?;
+    validate_frozen_operation_receipt_binding_v1(&value, &receipt)
+        .map_err(|_| storage_frozen_operation_error())?;
+    Ok(Some(ledger_event_from_frozen_operation(&source)))
+}
+
+fn load_operation_receipt_value(
+    connection: &Connection,
+    operation_id: &str,
+) -> Result<Option<Value>, SidecarError> {
+    connection
+        .query_row(
+            "SELECT operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,\
+                    payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,\
+                    canonical_payload_digest_version,canonical_payload_digest_format,\
+                    canonical_payload_digest,event_timestamp \
+             FROM operation_receipts WHERE operation_id=?1;",
+            [operation_id],
+            |row| {
+                Ok(json!({
+                    "operationId": row.get::<_, String>(0)?,
+                    "eventId": row.get::<_, String>(1)?,
+                    "aggregateType": row.get::<_, String>(2)?,
+                    "aggregateId": row.get::<_, String>(3)?,
+                    "aggregateSequence": row_u64(row, 4)?,
+                    "eventType": row.get::<_, String>(5)?,
+                    "payloadSchemaVersion": row.get::<_, u32>(6)?,
+                    "canonicalPayloadJson": row.get::<_, String>(7)?,
+                    "canonicalPayloadDigestAlgorithm": row.get::<_, String>(8)?,
+                    "canonicalPayloadDigestVersion": row.get::<_, u32>(9)?,
+                    "canonicalPayloadDigestFormat": row.get::<_, String>(10)?,
+                    "canonicalPayloadDigest": row.get::<_, String>(11)?,
+                    "eventTimestamp": row.get::<_, String>(12)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|_| storage_frozen_operation_error())
+}
+
+fn load_event_by_rowid(
+    connection: &Connection,
+    event_rowid: u64,
+) -> Result<Option<LedgerEventV1>, SidecarError> {
+    connection
+        .query_row(
+            "SELECT event_id,operation_id,request_id,aggregate_type,aggregate_id,\
+                    aggregate_sequence,event_type,payload_schema_version,canonical_json_payload,timestamp \
+             FROM events WHERE rowid=?1;",
+            [sql_i64(event_rowid)?],
+            |row| {
+                Ok(LedgerEventV1 {
+                    event_id: row.get(0)?,
+                    operation_id: row.get(1)?,
+                    request_id: row.get(2)?,
+                    aggregate_type: row.get(3)?,
+                    aggregate_id: row.get(4)?,
+                    aggregate_sequence: row_u64(row, 5)?,
+                    event_type: row.get(6)?,
+                    payload_schema_version: row.get(7)?,
+                    canonical_json_payload: row.get(8)?,
+                    timestamp: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)
+}
+
+fn load_source_index_by_rowid(
+    connection: &Connection,
+    event_rowid: u64,
+) -> Result<Option<Value>, SidecarError> {
+    connection
+        .query_row(
+            "SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,\
+                    aggregate_sequence,introduced_message_id,chat_durable_sequence,\
+                    chat_snapshot_message_id FROM event_source_index WHERE event_rowid=?1;",
+            [sql_i64(event_rowid)?],
+            |row| {
+                Ok(json!({
+                    "eventRowid": row_u64(row, 0)?,
+                    "eventId": row.get::<_, String>(1)?,
+                    "operationId": row.get::<_, String>(2)?,
+                    "aggregateType": row.get::<_, String>(3)?,
+                    "aggregateId": row.get::<_, String>(4)?,
+                    "aggregateSequence": row_u64(row, 5)?,
+                    "introducedMessageId": row.get::<_, Option<String>>(6)?,
+                    "chatDurableSequence": optional_row_u64(row, 7)?,
+                    "chatSnapshotMessageId": row.get::<_, Option<String>>(8)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)
+}
+
+fn ledger_event_from_frozen_operation(source: &FrozenOperationSourceV1) -> LedgerEventV1 {
+    LedgerEventV1 {
+        event_id: source.source_event_id.clone(),
+        operation_id: source.operation_id.clone(),
+        request_id: source.request_id.clone(),
+        aggregate_type: source.aggregate_type.clone(),
+        aggregate_id: source.aggregate_id.clone(),
+        aggregate_sequence: source.aggregate_sequence,
+        event_type: source.event_type.clone(),
+        payload_schema_version: source.payload_schema_version,
+        canonical_json_payload: source.canonical_payload_json.clone(),
+        timestamp: source.event_timestamp.clone(),
+    }
+}
+
 fn storage_materialization_snapshot_error() -> SidecarError {
     SidecarError::new(
         "storageSchemaMismatch",
@@ -2261,6 +3175,13 @@ fn storage_frozen_operation_error() -> SidecarError {
     SidecarError::new(
         "storageSchemaMismatch",
         "storage frozen operation evidence is invalid",
+    )
+}
+
+fn storage_v8_compaction_unsupported_error() -> SidecarError {
+    SidecarError::new(
+        "storageSchemaMismatch",
+        "storage v8 compacted verification exceeds the temporary C1B1 bounded reopen limit",
     )
 }
 
@@ -2409,7 +3330,7 @@ fn verify_integrity(connection: &Connection) -> Result<(), SidecarError> {
 
 pub(crate) fn verify_projection_replay(connection: &Connection) -> Result<(), SidecarError> {
     let events = load_events(connection)?;
-    let replayed = replay_ledger_v1(&events).map_err(storage_contract_error)?;
+    let replayed = replay_storage_ledger(connection, &events)?;
     let stored = load_projection(connection)?;
     verify_projection_columns(connection)?;
     if replayed != stored {
@@ -2419,6 +3340,211 @@ pub(crate) fn verify_projection_replay(connection: &Connection) -> Result<(), Si
         ));
     }
     Ok(())
+}
+
+fn replay_storage_ledger(
+    connection: &Connection,
+    events: &[LedgerEventV1],
+) -> Result<ProjectionStateV1, SidecarError> {
+    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+        return replay_ledger_v1(events).map_err(storage_contract_error);
+    }
+    let seeds = load_verified_compaction_seeds(connection)?;
+    if seeds.is_empty() {
+        return replay_ledger_v1(events).map_err(storage_contract_error);
+    }
+    let mut projection = ProjectionStateV1::default();
+    let mut sequences = BTreeMap::<(String, String), u64>::new();
+    for ((aggregate_type, aggregate_id), seed) in &seeds {
+        let mut record: Map<String, Value> = serde_json::from_str(&seed.baseline_json)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        record.insert(
+            "last_event_sequence".to_string(),
+            Value::from(seed.deleted_through),
+        );
+        projection_table_mut_local(&mut projection, aggregate_type)?
+            .insert(aggregate_id.clone(), record);
+        sequences.insert(
+            (aggregate_type.clone(), aggregate_id.clone()),
+            seed.deleted_through,
+        );
+    }
+    let mut event_ids = HashSet::new();
+    let mut operation_ids = HashSet::new();
+    for event in events {
+        classify_operation_v1(&[], event).map_err(storage_contract_error)?;
+        if !event_ids.insert(event.event_id.clone())
+            || !operation_ids.insert(event.operation_id.clone())
+        {
+            return Err(storage_v8_compaction_state_error());
+        }
+        let key = (event.aggregate_type.clone(), event.aggregate_id.clone());
+        let expected = sequences
+            .get(&key)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(storage_v8_compaction_state_error)?;
+        if event.aggregate_sequence != expected {
+            return Err(storage_v8_compaction_state_error());
+        }
+        let mut payload: Map<String, Value> = serde_json::from_str(&event.canonical_json_payload)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let id_field = aggregate_id_field_local(&event.aggregate_type)?;
+        if payload.get(id_field).and_then(Value::as_str) != Some(event.aggregate_id.as_str()) {
+            return Err(storage_v8_compaction_state_error());
+        }
+        payload.insert(
+            "last_event_sequence".to_string(),
+            Value::from(event.aggregate_sequence),
+        );
+        projection_table_mut_local(&mut projection, &event.aggregate_type)?
+            .insert(event.aggregate_id.clone(), payload);
+        sequences.insert(key, event.aggregate_sequence);
+    }
+    Ok(projection)
+}
+
+fn load_verified_compaction_seeds(
+    connection: &Connection,
+) -> Result<BTreeMap<(String, String), VerifiedCompactionPrefix>, SidecarError> {
+    if connection
+        .query_row(
+            "SELECT 1 FROM ledger_compaction_prefixes WHERE rowid>0 ORDER BY rowid LIMIT 1;",
+            [],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .is_none()
+    {
+        return Ok(BTreeMap::new());
+    }
+    let prefixes = verify_compacted_prefix_batch(connection)?;
+    let mut seeds = BTreeMap::new();
+    for prefix in prefixes {
+        let key = (prefix.aggregate_type.clone(), prefix.aggregate_id.clone());
+        if seeds
+            .get(&key)
+            .is_none_or(|existing: &VerifiedCompactionPrefix| {
+                existing.deleted_through < prefix.deleted_through
+            })
+        {
+            seeds.insert(key, prefix);
+        }
+    }
+    Ok(seeds)
+}
+
+fn projection_table_mut_local<'a>(
+    projection: &'a mut ProjectionStateV1,
+    aggregate_type: &str,
+) -> Result<&'a mut BTreeMap<String, Map<String, Value>>, SidecarError> {
+    match aggregate_type {
+        "app_instance" => Ok(&mut projection.app_instances),
+        "project" => Ok(&mut projection.projects),
+        "chat" => Ok(&mut projection.chats),
+        "run" => Ok(&mut projection.runs),
+        "lock" => Ok(&mut projection.locks),
+        _ => Err(storage_v8_compaction_state_error()),
+    }
+}
+
+fn aggregate_id_field_local(aggregate_type: &str) -> Result<&'static str, SidecarError> {
+    match aggregate_type {
+        "app_instance" => Ok("sidecar_instance_id"),
+        "project" => Ok("project_id"),
+        "chat" => Ok("chat_id"),
+        "run" => Ok("run_id"),
+        "lock" => Ok("lock_id"),
+        _ => Err(storage_v8_compaction_state_error()),
+    }
+}
+
+fn classify_storage_operation(
+    connection: &Connection,
+    existing_events: &[LedgerEventV1],
+    incoming: &LedgerEventV1,
+) -> Result<OperationDecisionV1, SidecarError> {
+    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+        return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
+    }
+    if connection
+        .query_row(
+            "SELECT 1 FROM ledger_compaction_prefixes WHERE rowid>0 ORDER BY rowid LIMIT 1;",
+            [],
+            |row| row.get::<_, u32>(0),
+        )
+        .optional()
+        .map_err(|_| storage_v8_compaction_state_error())?
+        .is_none()
+    {
+        return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
+    }
+    if let Some(live) = existing_events
+        .iter()
+        .find(|event| event.operation_id == incoming.operation_id)
+    {
+        let rowid = connection
+            .query_row(
+                "SELECT rowid FROM events WHERE operation_id=?1;",
+                [&incoming.operation_id],
+                |row| row_u64(row, 0),
+            )
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let index = load_source_index_by_rowid(connection, rowid)?
+            .ok_or_else(storage_v8_compaction_state_error)?;
+        validate_storage_event_source_index_binding_v1(rowid, &index, live)
+            .map_err(|_| storage_v8_compaction_state_error())?;
+        let receipt = load_operation_receipt_by_operation(connection, &incoming.operation_id)?
+            .ok_or_else(storage_v8_compaction_state_error)?;
+        if classify_operation_against_receipt_v2(&receipt, live).map_err(storage_contract_error)?
+            != OperationDecisionV1::DuplicateNoOp
+        {
+            return Err(storage_v8_compaction_state_error());
+        }
+        return classify_operation_against_receipt_v2(&receipt, incoming)
+            .map_err(storage_contract_error);
+    }
+    if let Some(frozen_value) = load_frozen_operation_value(connection, &incoming.operation_id)? {
+        let receipt_value = load_operation_receipt_value(connection, &incoming.operation_id)?
+            .ok_or_else(storage_frozen_operation_error)?;
+        let frozen = validate_frozen_operation_receipt_binding_v1(&frozen_value, &receipt_value)
+            .map_err(|_| storage_frozen_operation_error())?;
+        if load_event_by_rowid(connection, frozen.source_event_rowid)?.is_some()
+            || load_source_index_by_rowid(connection, frozen.source_event_rowid)?.is_some()
+        {
+            return Err(storage_frozen_operation_error());
+        }
+        let receipt: OperationReceiptV2 =
+            serde_json::from_value(receipt_value).map_err(|_| storage_frozen_operation_error())?;
+        return classify_operation_against_receipt_v2(&receipt, incoming)
+            .map_err(storage_contract_error);
+    }
+    if load_operation_receipt_by_operation(connection, &incoming.operation_id)?.is_some()
+        || connection
+            .query_row(
+                "SELECT 1 FROM frozen_operation_sources WHERE source_event_id=?1;",
+                [&incoming.event_id],
+                |row| row.get::<_, u32>(0),
+            )
+            .optional()
+            .map_err(|_| storage_frozen_operation_error())?
+            .is_some()
+    {
+        return Err(storage_frozen_operation_error());
+    }
+    classify_operation_v1(existing_events, incoming).map_err(storage_contract_error)
+}
+
+fn load_operation_receipt_by_operation(
+    connection: &Connection,
+    operation_id: &str,
+) -> Result<Option<OperationReceiptV2>, SidecarError> {
+    let value = load_operation_receipt_value(connection, operation_id)?;
+    value
+        .map(|value| serde_json::from_value(value).map_err(|_| storage_frozen_operation_error()))
+        .transpose()
 }
 
 fn verify_projection_columns(connection: &Connection) -> Result<(), SidecarError> {
@@ -2621,7 +3747,7 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
         }
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
             verify_append_materialization_pair(connection)?;
-            verify_v8_uncompacted_runtime_state(connection)
+            verify_v8_compaction_runtime_state(connection)
         }
         None
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
@@ -2669,22 +3795,53 @@ fn insert_v6_source_index_and_invalidate_ready(
         if event.aggregate_type != "chat" || event.aggregate_sequence == 1 {
             (None, None, 0)
         } else {
-            let predecessor =
-                load_exact_source_index_predecessor(transaction, event)?.ok_or_else(|| {
-                    SidecarError::new(
-                        "storageContractViolation",
-                        "chat append requires the exact indexed predecessor",
-                    )
-                })?;
-            let predecessor_rowid = predecessor
-                .get("eventRowid")
-                .and_then(Value::as_u64)
+            let (predecessor, source) = if let Some(predecessor) =
+                load_exact_source_index_predecessor(transaction, event)?
+            {
+                let predecessor_rowid = predecessor
+                    .get("eventRowid")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| {
+                        SidecarError::new(
+                            "storageSchemaMismatch",
+                            "indexed predecessor rowid is unreadable",
+                        )
+                    })?;
+                let source = load_exact_event_by_rowid(transaction, predecessor_rowid)?
+                    .ok_or_else(|| {
+                        SidecarError::new(
+                            "storageSchemaMismatch",
+                            "indexed predecessor source event is missing",
+                        )
+                    })?;
+                (predecessor, source)
+            } else {
+                let (predecessor_rowid, source) = load_v8_verified_frozen_event(
+                    transaction,
+                    "chat",
+                    &event.aggregate_id,
+                    event.aggregate_sequence - 1,
+                )?
                 .ok_or_else(|| {
                     SidecarError::new(
-                        "storageSchemaMismatch",
-                        "indexed predecessor rowid is unreadable",
+                        "storageContractViolation",
+                        "chat append requires the exact live or frozen predecessor",
                     )
                 })?;
+                let (durable, snapshot) = chat_source_state(&source)?;
+                let predecessor = json!({
+                    "eventRowid": predecessor_rowid,
+                    "eventId": source.event_id,
+                    "operationId": source.operation_id,
+                    "aggregateType": source.aggregate_type,
+                    "aggregateId": source.aggregate_id,
+                    "aggregateSequence": source.aggregate_sequence,
+                    "introducedMessageId": Value::Null,
+                    "chatDurableSequence": durable,
+                    "chatSnapshotMessageId": snapshot,
+                });
+                (predecessor, source)
+            };
             let predecessor_durable = predecessor
                 .get("chatDurableSequence")
                 .and_then(Value::as_u64)
@@ -2692,13 +3849,6 @@ fn insert_v6_source_index_and_invalidate_ready(
                     SidecarError::new(
                         "storageSchemaMismatch",
                         "indexed chat predecessor durable sequence is unreadable",
-                    )
-                })?;
-            let source =
-                load_exact_event_by_rowid(transaction, predecessor_rowid)?.ok_or_else(|| {
-                    SidecarError::new(
-                        "storageSchemaMismatch",
-                        "indexed predecessor source event is missing",
                     )
                 })?;
             (Some(predecessor), Some(source), predecessor_durable)
