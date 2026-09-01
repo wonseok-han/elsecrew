@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 재귀 predecessor 신뢰 제거)
+
+- **indexed predecessor만 신뢰**: chat aggregate sequence 2 이상의 source-index INSERT는 같은 aggregate의 sequence-1 source-index 행이 먼저 존재하고 exact source event에 결속된 경우만 허용한다. raw predecessor event를 재귀적으로 해석하던 fallback을 SQL trigger와 Rust·TypeScript validator에서 제거했으며, migration-pending append는 `indexSource`가 직전 행을 채울 때까지 fail-closed로 거부·중단한다. sequence 1만 durable 0/null의 synthetic predecessor를 사용한다.
+- **순차 backfill 회귀**: sequence 1에서 durable 2로 뛰는 입력, raw predecessor event만 있는 sequence 2를 직접 SQLite INSERT와 양 언어 validator가 거부한다. 유효한 sequence 1 index를 먼저 넣으면 sequence 2가 통과하고, fixture history의 `A → repeat A → null → B` 순차 indexSource도 통과하도록 고정했다. raw-event fallback query plan과 계약 주장을 제거했으며 migration no-backfill, non-chat 동작, V1~V5 fixture는 변경하지 않았다. sidecar consumer는 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 snapshot provenance P1 수정)
 
 - **반복 snapshot provenance 결속**: durable sequence가 증가하지 않는 event도 non-null `last_message`가 있으면 messageId 일치만으로는 부족하다. 현재 snapshot의 TeamMessage `chatId`가 aggregate id와, `eventSequence`가 mirrored durable sequence와 일치하도록 Rust·TypeScript·SQL을 강화했다. indexed predecessor의 non-null snapshot도 exact source event rowid 조회로 같은 provenance를 재검증하고, fallback predecessor event 역시 사용 전에 동일 결속을 요구한다.

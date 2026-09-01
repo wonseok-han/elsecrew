@@ -2394,10 +2394,9 @@ pub fn validate_storage_lifetime_batch_policy_v4(
                 "indexedNonNullSnapshotProvenance":
                     "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
                 "missingDuringMigrationPendingAppend":
-                    "exactPredecessorEventsAggregateTupleLookupOnly",
-                "insertGuardFallbackEnforcement":
-                    "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
-                "forbidden": ["scan", "sort", "latestLookup"],
+                    "rejectOrSuspendUntilExactPredecessorSourceIndexPresent",
+                "rawPredecessorEventFallback": "forbidden",
+                "forbidden": ["scan", "sort", "latestLookup", "rawEventFallback"],
             },
             "historyBackfillByMigration": false,
             "historyBackfillPhase": "indexSource",
@@ -2742,20 +2741,9 @@ pub fn validate_storage_event_source_index_transition_v1(
             })?,
             predecessor.chat_snapshot_message_id,
         )
-    } else if let Some(predecessor) = predecessor_source {
-        if predecessor.aggregate_type != "chat"
-            || predecessor.aggregate_id != source.aggregate_id
-            || predecessor.aggregate_sequence + 1 != source.aggregate_sequence
-        {
-            return Err(StorageLifetimeContractError::new(
-                "fallback predecessor event must be the exact aggregate sequence minus one",
-            ));
-        }
-        let (durable, snapshot, _) = storage_chat_source_state_v1(predecessor)?;
-        (durable, snapshot)
     } else {
         return Err(StorageLifetimeContractError::new(
-            "chat source index transition requires an exact predecessor lookup",
+            "chat source index transition requires the exact predecessor source index row",
         ));
     };
 

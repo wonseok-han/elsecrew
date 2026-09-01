@@ -124,9 +124,9 @@
       "predecessorLookup": {
         "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
         "indexedNonNullSnapshotProvenance": "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
-        "missingDuringMigrationPendingAppend": "exactPredecessorEventsAggregateTupleLookupOnly",
-        "insertGuardFallbackEnforcement": "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
-        "forbidden": ["scan", "sort", "latestLookup"]
+        "missingDuringMigrationPendingAppend": "rejectOrSuspendUntilExactPredecessorSourceIndexPresent",
+        "rawPredecessorEventFallback": "forbidden",
+        "forbidden": ["scan", "sort", "latestLookup", "rawEventFallback"]
       },
       "historyBackfillByMigration": false,
       "historyBackfillPhase": "indexSource",

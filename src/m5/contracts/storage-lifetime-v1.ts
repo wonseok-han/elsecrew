@@ -1780,10 +1780,10 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
       indexed: "exactAggregateTypeIdAndAggregateSequenceMinusOne",
       indexedNonNullSnapshotProvenance:
         "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
-      missingDuringMigrationPendingAppend: "exactPredecessorEventsAggregateTupleLookupOnly",
-      insertGuardFallbackEnforcement:
-        "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
-      forbidden: ["scan", "sort", "latestLookup"],
+      missingDuringMigrationPendingAppend:
+        "rejectOrSuspendUntilExactPredecessorSourceIndexPresent",
+      rawPredecessorEventFallback: "forbidden",
+      forbidden: ["scan", "sort", "latestLookup", "rawEventFallback"],
     },
     historyBackfillByMigration: false,
     historyBackfillPhase: "indexSource",
@@ -2073,17 +2073,8 @@ export function validateStorageEventSourceIndexTransitionV1(
     }
     previousDurable = predecessor.chatDurableSequence;
     previousSnapshot = predecessor.chatSnapshotMessageId;
-  } else if (predecessorSource !== null) {
-    if (predecessorSource.aggregate_type !== "chat"
-      || predecessorSource.aggregate_id !== source.aggregate_id
-      || predecessorSource.aggregate_sequence + 1 !== source.aggregate_sequence) {
-      fail("fallback predecessor event must be the exact aggregate sequence minus one");
-    }
-    const predecessor = storageChatSourceStateV1(predecessorSource);
-    previousDurable = predecessor.durable;
-    previousSnapshot = predecessor.snapshotMessageId;
   } else {
-    fail("chat source index transition requires an exact predecessor lookup");
+    fail("chat source index transition requires the exact predecessor source index row");
   }
 
   if (current.durable === previousDurable + 1) {

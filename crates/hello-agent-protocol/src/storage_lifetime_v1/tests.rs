@@ -1698,14 +1698,14 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         None,
     )
     .expect("second message B");
-    validate_storage_event_source_index_transition_v1(
+    assert!(validate_storage_event_source_index_transition_v1(
         6,
         &second,
         source_for_rowid(6),
         None,
         Some(source_for_rowid(5)),
     )
-    .expect("migration-pending exact predecessor event fallback");
+    .is_err());
 
     let mut double_introduction = repeated.clone();
     double_introduction
@@ -1745,6 +1745,26 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         object.insert("chatSnapshotMessageId".into(), snapshot);
         entry
     };
+    let mut first_message =
+        serde_json::from_str::<Value>(&source_for_rowid(2).canonical_json_payload)
+            .expect("first message payload")["last_message"]
+            .clone();
+    first_message["eventSequence"] = Value::from(2);
+    let illegal_first_source = source_with_payload(source_for_rowid(2), 2, first_message);
+    let illegal_first_entry = entry_with_state(
+        &first,
+        2,
+        Value::from("message_a"),
+        Value::from("message_a"),
+    );
+    assert!(validate_storage_event_source_index_transition_v1(
+        2,
+        &illegal_first_entry,
+        &illegal_first_source,
+        None,
+        None,
+    )
+    .is_err());
     let mut message_b = serde_json::from_str::<Value>(&source_for_rowid(6).canonical_json_payload)
         .expect("message B payload")["last_message"]
         .clone();
@@ -1878,13 +1898,13 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         4,
         &repeated,
         source_for_rowid(4),
-        None,
+        Some(&first),
         Some(&wrong_predecessor_sequence_source),
     )
     .is_err());
-    assert_eq!(cases.source_index.valid_transitions.len(), 5);
-    assert_eq!(cases.source_index.invalid_transitions.len(), 15);
-    assert_eq!(cases.query_plans.len(), 7);
+    assert_eq!(cases.source_index.valid_transitions.len(), 4);
+    assert_eq!(cases.source_index.invalid_transitions.len(), 16);
+    assert_eq!(cases.query_plans.len(), 6);
     for plan in &cases.query_plans {
         assert!(
             plan.sql.starts_with("EXPLAIN QUERY PLAN SELECT "),
@@ -2073,8 +2093,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert!(sql.contains("'$.last_message.messageId'"));
     assert!(sql.contains("'$.last_message.eventSequence'"));
     assert!(sql.contains("'$.last_message.chatId'"));
-    assert!(sql.contains("FROM events AS predecessor_event"));
-    assert!(sql.contains("predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1"));
+    assert!(!sql.contains("FROM events AS predecessor_event"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_update"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_delete"));
     assert!(sql.contains("'indexSource', 'verifySourceIndex'"));

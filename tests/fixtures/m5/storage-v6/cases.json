@@ -159,8 +159,7 @@
       { "name": "first message A from synthetic zero", "currentEventRowid": 2, "predecessorEventRowid": null, "lookup": "syntheticZero" },
       { "name": "repeat message A", "currentEventRowid": 4, "predecessorEventRowid": 2, "lookup": "indexedExactPredecessor" },
       { "name": "null snapshot keeps durable state", "currentEventRowid": 5, "predecessorEventRowid": 4, "lookup": "indexedExactPredecessor" },
-      { "name": "second message B after null snapshot", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "indexedExactPredecessor" },
-      { "name": "missing indexed predecessor during migration-pending append", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "exactPredecessorEventOnly" }
+      { "name": "second message B after null snapshot", "currentEventRowid": 6, "predecessorEventRowid": 5, "lookup": "indexedExactPredecessor" }
     ],
     "invalidTransitions": [
       "durableDecrease", "durableJump", "increaseWithoutValidTeamMessage",
@@ -168,8 +167,8 @@
       "wrongMessageEventSequence", "wrongMessageChatId", "wrongIntroducedMessageId",
       "unchangedSnapshotWrongChatId", "unchangedSnapshotWrongEventSequence",
       "predecessorSnapshotWrongChatId", "predecessorSnapshotWrongEventSequence",
-      "missingExactPredecessor", "malformedExactPredecessor",
-      "scanOrSortPredecessorLookup"
+      "missingExactPredecessorSourceIndex", "rawPredecessorEventFallback",
+      "illegalFirstDurableJump", "scanOrSortPredecessorLookup"
     ]
   },
   "queryPlans": [
@@ -197,11 +196,6 @@
       "name": "exact indexed predecessor",
       "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
       "detail": "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
-    },
-    {
-      "name": "exact predecessor event fallback",
-      "sql": "EXPLAIN QUERY PLAN SELECT rowid,canonical_json_payload FROM events WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
-      "detail": "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
     },
     {
       "name": "single payload by rowid",
@@ -292,9 +286,9 @@
       "replacement": "trustImmutableIndexRow"
     },
     {
-      "name": "missing indexed predecessor bypasses insert guard",
-      "path": ["sourceIndex", "predecessorLookup", "insertGuardFallbackEnforcement"],
-      "replacement": "consumerValidationOnly"
+      "name": "raw predecessor event fallback accepted",
+      "path": ["sourceIndex", "predecessorLookup", "rawPredecessorEventFallback"],
+      "replacement": "allowed"
     },
     {
       "name": "message uniqueness relaxed",
