@@ -53,9 +53,18 @@ const gates = [
     scripts: ["m5:test:run-recovery"],
   },
   {
+    id: "g5d-bounded-storage",
+    description: "내부 source index와 bounded materialization",
+    scripts: ["m5:test:bounded-storage"],
+  },
+  {
     id: "g5d-storage-lifetime",
-    description: "source-indexed 저장 수명과 bounded materialization",
-    scripts: ["m5:test:storage-lifetime"],
+    description: "scheduler, storage.status wire와 lossless compaction",
+    scripts: [
+      "m5:test:storage-scheduler",
+      "m5:test:storage-status",
+      "m5:test:storage-compaction",
+    ],
   },
   {
     id: "g6-release",

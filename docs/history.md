@@ -13,7 +13,7 @@
 
 - **독립 승인 뒤 통합**: exact storage v6 계약과 source-event 결속·message introduction·indexed predecessor·query-plan 보완, V5→V6 sidecar migration/append serialization, 명시 호출형 16단계 bounded worker를 각각 독립 리뷰 승인 뒤 `m5/coding-agent-ide`에 순서대로 통합했다. 거절된 V5 worker와 이전 미완성 migration worktree는 통합하지 않았다.
 - **현행 구조 문서화**: `docs/architecture.md`를 exact v1→v6 additive migration, append-only source provenance, rowid keyset `LIMIT 100`·1 MiB bounded materialization과 남은 비활성 경계로 갱신했다. `핵심 결정·발견`의 오래된 schema v3 설명도 현재 exact v6 계약으로 교체했다.
-- **기계 게이트**: `m5:test:storage-lifetime`과 누적 `g5d-storage-lifetime` 게이트를 추가해 Node G5D golden, protocol lifetime, sidecar V6 migration/append와 bounded worker를 한 번에 검증한다. 통합 branch에서 sidecar 142개+stdio 10개(1 ignored), protocol 40개, Node G5D 15개, TypeScript no-emit과 diff check가 통과했다. G5D 누적 하네스·독립 QA·gate 재판정이 다음이며 scheduler/wire/status·compaction·cleanup/deletion·실제 provider·Windows·push·main 병합은 수행하지 않았다.
+- **기계 게이트**: `m5:test:bounded-storage`와 누적 `g5d-bounded-storage` 하위 게이트는 Node G5D golden, protocol lifetime, sidecar V6 migration/append와 bounded worker를 한 번에 검증한다. full `g5d-storage-lifetime`은 scheduler·`storage.status` wire·lossless compaction 전까지 명시적으로 `NOT_READY`다. 통합 branch에서 sidecar 142개+stdio 10개(1 ignored), protocol 40개, Node G5D 15개, TypeScript no-emit과 diff check가 통과했다. bounded-storage 누적 하네스·독립 QA는 PASS했고 full G5D gate는 남은 범위 때문에 FAIL했다. cleanup/deletion·실제 provider·Windows·push·main 병합은 수행하지 않았다.
 
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D bounded storage v6 materialization worker)
 
