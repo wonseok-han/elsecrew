@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Display};
 
@@ -16,6 +17,17 @@ pub const STORAGE_LIFETIME_SCHEMA_VERSION_V3: u32 = 3;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V4: u32 = 4;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V5: u32 = 5;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V6: u32 = 6;
+pub const STORAGE_LIFETIME_SCHEMA_VERSION_V7: u32 = 7;
+pub const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1: u32 = 1;
+pub const STORAGE_COMPACTION_MAX_DELETE_ROWS_V1: usize = 100;
+pub const STORAGE_COMPACTION_PHASES_V1: &[&str] = &[
+    "freezeMessages",
+    "verifyPrefix",
+    "authorizeDelete",
+    "deletePrefix",
+    "verifyEquivalence",
+    "finalize",
+];
 pub const STORAGE_STATUS_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_STATUS_METHOD_V1: &str = "storage.status";
 pub const STORAGE_STATUS_BRIDGE_VERSION_V1: u32 = 6;
@@ -435,6 +447,135 @@ pub struct StorageLifetimeV6PreflightPolicyV1 {
     pub timing: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageLifetimeV7PreflightPolicyV1 {
+    pub schema: String,
+    pub admissible_materialization_pairs: Vec<String>,
+    pub rejected_materialization_pairs: Vec<String>,
+    pub maintenance_requirement: String,
+    pub delete_authority_requirement: String,
+    pub partial_extra_or_unknown_schema: String,
+    pub mapping: Vec<String>,
+    pub timing: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageCompactionPhaseV1 {
+    FreezeMessages,
+    VerifyPrefix,
+    AuthorizeDelete,
+    DeletePrefix,
+    VerifyEquivalence,
+    Finalize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageCompactionCursorV1 {
+    pub schema_version: u32,
+    pub cutoff_event_rowid: u64,
+    pub phase: StorageCompactionPhaseV1,
+    pub after_event_rowid: u64,
+    pub scan_exhausted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageCompactionPrefixV1 {
+    pub prefix_id: String,
+    pub aggregate_type: String,
+    pub aggregate_id: String,
+    pub deleted_through_sequence: u64,
+    pub anchor_event_rowid: u64,
+    pub anchor_event_id: String,
+    pub anchor_operation_id: String,
+    pub anchor_aggregate_sequence: u64,
+    pub baseline_id: String,
+    pub baseline_projection_digest: String,
+    pub created_at: String,
+    pub verified_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct FrozenMessageSourceV1 {
+    pub message_id: String,
+    pub source_event_rowid: u64,
+    pub source_event_id: String,
+    pub source_operation_id: String,
+    pub chat_id: String,
+    pub source_aggregate_sequence: u64,
+    pub durable_sequence: u64,
+    pub canonical_message_json: String,
+    pub message_digest: String,
+    pub frozen_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageCompactionDeleteAuthorityV1 {
+    pub job_id: String,
+    pub ordinal: u32,
+    pub prefix_id: String,
+    pub prefix_deleted_through_sequence: u64,
+    pub event_rowid: u64,
+    pub event_id: String,
+    pub operation_id: String,
+    pub aggregate_type: String,
+    pub aggregate_id: String,
+    pub aggregate_sequence: u64,
+    pub introduced_message_id: Option<String>,
+    pub frozen_message_id: Option<String>,
+    pub authorized_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageCompactionJobStateV1 {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageCompactionJobV1 {
+    pub job_id: String,
+    pub state: StorageCompactionJobStateV1,
+    pub cursor: StorageCompactionCursorV1,
+    pub authority_count: u32,
+    pub equivalence_verified: bool,
+    pub failure_kind: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageCompactionLifecycleOperationV1 {
+    Arm,
+    BatchSuccess,
+    CancelBeforeArm,
+    CancelAfterArm,
+    Fail,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StorageCompactionEquivalenceV1 {
+    pub baseline_tail_before: bool,
+    pub anchor_tail_after: bool,
+    pub preserved_artifacts_byte_exact: bool,
+    pub receipt_replay_equivalent: bool,
+    pub namespace_decisions_equivalent: bool,
+    pub frozen_message_ids_reserved: bool,
+    pub authority_empty: bool,
+    pub rows_in_batch: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StorageLifetimeLifecycleOperationV1 {
@@ -817,6 +958,47 @@ pub fn validate_storage_lifetime_v6_preflight_policy_v1(
     if !exact {
         return Err(StorageLifetimeContractError::new(
             "storage lifetime v6 preflight policy is not fail-closed",
+        ));
+    }
+    Ok(policy)
+}
+
+pub fn validate_storage_lifetime_v7_preflight_policy_v1(
+    value: &Value,
+) -> Result<StorageLifetimeV7PreflightPolicyV1, StorageLifetimeContractError> {
+    let policy: StorageLifetimeV7PreflightPolicyV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    let exact = policy.schema == "exactStorageV6"
+        && strings_equal(
+            &policy.admissible_materialization_pairs,
+            &[
+                "ready+absent",
+                "pending+absent",
+                "pending+pending",
+                "pending+failed",
+            ],
+        )
+        && strings_equal(
+            &policy.rejected_materialization_pairs,
+            &["pending+attempting"],
+        )
+        && policy.maintenance_requirement == "noPendingOrRunningLosslessCompaction"
+        && policy.delete_authority_requirement == "storageV7AuthorityObjectsAbsent"
+        && policy.partial_extra_or_unknown_schema == "failClosedBeforeMutation"
+        && strings_equal(
+            &policy.mapping,
+            &[
+                "materializationStatePreserved",
+                "materializationJobPreservedByteExact",
+                "completedAndFailedMaintenanceHistoryPreserved",
+                "existingRowsNotBackfilled",
+                "existingLedgerAndDerivedRowsNotDeleted",
+            ],
+        )
+        && policy.timing == "beforeAnyDdlOrMutation";
+    if !exact {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime v7 preflight policy is not fail-closed",
         ));
     }
     Ok(policy)
@@ -2562,6 +2744,486 @@ pub fn validate_storage_lifetime_batch_policy_v4(
         ));
     }
     Ok(())
+}
+
+pub fn validate_storage_compaction_cursor_v1(
+    value: &Value,
+) -> Result<StorageCompactionCursorV1, StorageLifetimeContractError> {
+    let cursor: StorageCompactionCursorV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if cursor.schema_version != STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1 {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction cursor schemaVersion must be 1",
+        ));
+    }
+    require_js_safe_unsigned(cursor.cutoff_event_rowid, "compaction.cutoffEventRowid")?;
+    require_js_safe_unsigned(cursor.after_event_rowid, "compaction.afterEventRowid")?;
+    if cursor.after_event_rowid > cursor.cutoff_event_rowid {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction cursor cannot exceed its frozen cutoff",
+        ));
+    }
+    Ok(cursor)
+}
+
+pub fn validate_storage_lossless_compaction_policy_v1(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    let expected = serde_json::json!({
+        "schemaVersion": 1,
+        "casesFile": "cases.json",
+        "activation": {
+            "productExecutionEnabled": false,
+            "automaticSchedulingEnabled": false,
+            "actualDeleteEnabledBeforeC1Consumer": false,
+            "wireStatusOrControlEnabled": false,
+        },
+        "guardVersioning": {
+            "schemaVersion": 7,
+            "migrationReplacement": "oneTimeExactV6ToV7Transaction",
+            "runtimeDropRecreate": "forbidden",
+            "deleteBatchDdl": "forbidden",
+            "deleteBatchMechanism": "durableRunningJobPlusEphemeralExactAuthorityRows",
+        },
+        "prefix": {
+            "table": "ledger_compaction_prefixes",
+            "identity": "appendOnlyPrefixIdAndAggregateDeletedThroughUnique",
+            "range": "aggregateSequenceOneThroughDeletedThroughContinuousOnly",
+            "anchor": "exactSameAggregateAtDeletedThroughPlusOneRemainsInEventsAndSourceIndex",
+            "baseline": "immutableSameAggregateAtDeletedThroughWithExactDigest",
+            "progression": "newPrefixStrictlyExtendsLatestVerifiedPrefix",
+            "appInstance": "forbidden",
+            "proof": "boundedPreDeleteAndPostDeleteEquivalenceBeforePrefixInsert",
+        },
+        "frozenMessageSource": {
+            "table": "frozen_message_sources",
+            "whenRequired": "beforeDeletingAnyEventThatIntroducedMessage",
+            "fields": [
+                "messageId", "sourceEventRowid", "sourceEventId", "sourceOperationId",
+                "chatId", "sourceAggregateSequence", "durableSequence",
+                "canonicalMessageJson", "messageDigest", "frozenAt",
+            ],
+            "binding": "exactEventSourceIndexIntroductionAndExactChatMessage",
+            "appendOnly": true,
+            "messageIdReuse": "forbiddenForeverWhileFrozenRecordExists",
+        },
+        "deleteAuthority": {
+            "table": "ledger_compaction_delete_authority",
+            "jobState": "running",
+            "maxExactTuples": STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+            "globalAuthorityOwner": "oneRunningJobAtATime",
+            "identity": "eventRowidEventIdOperationIdAndAggregateTupleExact",
+            "prefixBound": "sameAggregateSequenceAtOrBelowDeletedThrough",
+            "introducedMessage": "requiresExactFrozenMessageSource",
+            "appInstance": "forbidden",
+            "sourceIndexDeleteBeforeEventDelete": true,
+            "eventDeleteConsumesAuthority": true,
+            "mustBeEmptyBeforeCommit": true,
+            "mustBeEmptyOnOpen": true,
+            "updates": "forbidden",
+        },
+        "cursor": {
+            "schemaVersion": STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1,
+            "phases": STORAGE_COMPACTION_PHASES_V1,
+            "columns": ["cutoffEventRowid", "phase", "afterEventRowid", "scanExhausted"],
+            "keyset": "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
+            "phaseTransition": "exhaustedCurrentThenNextAtZeroUnexhausted",
+            "callerConfigurable": false,
+            "maxRowsPerBatch": STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+            "unboundedScanOrTransaction": "forbidden",
+        },
+        "lifecycle": {
+            "durableTable": "maintenance_jobs",
+            "jobKind": "losslessCompaction",
+            "arm": "pendingToRunningSentinelCommittedBeforeDeleteBatch",
+            "batchSuccess": "runningToPendingWithAdvancedCursorSameDeleteTransaction",
+            "cancelBeforeArm": "pendingUnchangedNoAuthority",
+            "cancelAfterArm": "rollbackDeleteBatchLeavesRunningSentinelFailClosed",
+            "commitUncertain": "reopenPendingAdvancedMeansCommittedRunningMeansManualRecoveryRequired",
+            "terminalSuccess": "authorityEmptyAndEquivalenceVerifiedThenSucceeded",
+            "terminalFailure": "rollbackBatchThenRunningToFailedWithSanitizedEvidence",
+            "automaticRetryRunning": false,
+        },
+        "deletion": {
+            "aggregateRule": "retainOneExactAnchorPerCompactedAggregate",
+            "eligible": "onlyContiguousVerifiedPrefixBeforeAnchor",
+            "appInstance": "never",
+            "unchangedTables": [
+                "operation_receipts", "chat_messages", "prepared_workspaces", "ledger_baselines",
+                "projects", "chats", "runs", "locks", "app_instances",
+            ],
+            "snapshotFiles": "neverMutated",
+            "checkpointOrVacuumRequiredForSuccess": false,
+        },
+        "equivalence": {
+            "maxRowsPerBatch": STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+            "before": [
+                "baselinePlusTailReplaysCurrentProjection",
+                "operationReceiptsClassifyEveryDeletedOperation",
+                "introducedMessagesHaveFrozenSources",
+                "namespaceDecisionsMatchLegacyActualRecovery",
+            ],
+            "after": [
+                "anchorPlusTailReplaysCurrentProjection",
+                "preservedArtifactsByteExact",
+                "deletedOperationsRemainDuplicateOrConflictByReceipt",
+                "deletedIntroducedMessageIdsRemainReserved",
+            ],
+            "failure": "rollbackWholeAtMost100RowDeleteBatch",
+            "finalization": "exactEmptyAuthorityQueryThenSucceededSameTransaction",
+        },
+        "replay": {
+            "deletedOperationAuthority": "operationReceiptsCanonicalPayloadAndIdentity",
+            "duplicate": "exactCanonicalReceiptMatchIsDuplicateNoOp",
+            "conflict": "sameOperationIdAnyImmutableDifferenceIsConflict",
+            "namespaces": ["legacy", "actualAgent", "recovery"],
+            "namespaceDecisionEquality": true,
+            "deletedMessageIntroduction": "frozenMessageSourceReservesMessageId",
+        },
+        "queryPlanAcceptance": {
+            "mode": "exactExplainQueryPlanDetail",
+            "prefixLatest": "SEARCH ledger_compaction_prefixes USING INDEX ledger_compaction_prefixes_latest (aggregate_type=? AND aggregate_id=?)",
+            "deleteBatch": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+            "authorityEmpty": "SCAN ledger_compaction_delete_authority USING COVERING INDEX sqlite_autoindex_ledger_compaction_delete_authority_1",
+            "frozenMessage": "SEARCH frozen_message_sources USING INDEX sqlite_autoindex_frozen_message_sources_1 (message_id=?)",
+            "reject": ["USE TEMP B-TREE", "SCAN events", "SCAN event_source_index"],
+        },
+    });
+    if value != &expected {
+        return Err(StorageLifetimeContractError::new(
+            "storage v7 lossless compaction policy is not exact",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_storage_compaction_cursor_transition_v1(
+    previous: Option<&Value>,
+    next: &Value,
+) -> Result<StorageCompactionCursorV1, StorageLifetimeContractError> {
+    let next = validate_storage_compaction_cursor_v1(next)?;
+    let Some(previous) = previous else {
+        if next.phase != StorageCompactionPhaseV1::FreezeMessages
+            || next.after_event_rowid != 0
+            || next.scan_exhausted
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage compaction must start freezeMessages at zero unexhausted",
+            ));
+        }
+        return Ok(next);
+    };
+    let previous = validate_storage_compaction_cursor_v1(previous)?;
+    if next.cutoff_event_rowid != previous.cutoff_event_rowid {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction cursor cannot change its frozen cutoff",
+        ));
+    }
+    if next.phase == previous.phase {
+        if previous.scan_exhausted
+            || next.scan_exhausted
+            || next.after_event_rowid <= previous.after_event_rowid
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage compaction same-phase progress must increase within one bounded batch",
+            ));
+        }
+        return Ok(next);
+    }
+    let previous_index = compaction_phase_index(previous.phase);
+    if !previous.scan_exhausted
+        || next.scan_exhausted
+        || STORAGE_COMPACTION_PHASES_V1.get(previous_index + 1)
+            != Some(&compaction_phase_name(next.phase))
+        || next.after_event_rowid != 0
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction phase advance requires exhausted exact predecessor",
+        ));
+    }
+    Ok(next)
+}
+
+pub fn validate_storage_compaction_prefix_v1(
+    value: &Value,
+) -> Result<StorageCompactionPrefixV1, StorageLifetimeContractError> {
+    let prefix: StorageCompactionPrefixV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    require_js_safe_unsigned(
+        prefix.deleted_through_sequence,
+        "prefix.deletedThroughSequence",
+    )?;
+    require_js_safe_unsigned(prefix.anchor_event_rowid, "prefix.anchorEventRowid")?;
+    require_js_safe_unsigned(
+        prefix.anchor_aggregate_sequence,
+        "prefix.anchorAggregateSequence",
+    )?;
+    if prefix.prefix_id.is_empty()
+        || prefix.aggregate_type.is_empty()
+        || prefix.aggregate_type == "app_instance"
+        || prefix.aggregate_id.is_empty()
+        || prefix.deleted_through_sequence == 0
+        || prefix.anchor_event_rowid == 0
+        || prefix.anchor_event_id.is_empty()
+        || prefix.anchor_operation_id.is_empty()
+        || prefix.anchor_aggregate_sequence != prefix.deleted_through_sequence + 1
+        || prefix.baseline_id.is_empty()
+        || prefix.baseline_projection_digest.is_empty()
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction prefix must bind an exact successor anchor and baseline",
+        ));
+    }
+    require_timestamp(&prefix.created_at, "prefix.createdAt")?;
+    require_timestamp(&prefix.verified_at, "prefix.verifiedAt")?;
+    Ok(prefix)
+}
+
+pub fn validate_frozen_message_source_v1(
+    value: &Value,
+) -> Result<FrozenMessageSourceV1, StorageLifetimeContractError> {
+    let source: FrozenMessageSourceV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    require_js_safe_unsigned(source.source_event_rowid, "frozen.sourceEventRowid")?;
+    require_js_safe_unsigned(
+        source.source_aggregate_sequence,
+        "frozen.sourceAggregateSequence",
+    )?;
+    require_js_safe_unsigned(source.durable_sequence, "frozen.durableSequence")?;
+    if source.message_id.is_empty()
+        || source.source_event_rowid == 0
+        || source.source_event_id.is_empty()
+        || source.source_operation_id.is_empty()
+        || source.chat_id.is_empty()
+        || source.source_aggregate_sequence == 0
+        || source.durable_sequence == 0
+        || source.canonical_message_json.is_empty()
+        || source.message_digest.is_empty()
+    {
+        return Err(StorageLifetimeContractError::new(
+            "frozen message source must preserve exact introduction provenance",
+        ));
+    }
+    require_timestamp(&source.frozen_at, "frozen.frozenAt")?;
+    Ok(source)
+}
+
+pub fn validate_storage_compaction_delete_authority_batch_v1(
+    value: &Value,
+) -> Result<Vec<StorageCompactionDeleteAuthorityV1>, StorageLifetimeContractError> {
+    let rows: Vec<StorageCompactionDeleteAuthorityV1> = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if rows.is_empty() || rows.len() > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1 {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction authority batch must contain one through one hundred rows",
+        ));
+    }
+    let expected_job = rows[0].job_id.clone();
+    let mut ordinals = BTreeSet::new();
+    let mut rowids = BTreeSet::new();
+    let mut event_ids = BTreeSet::new();
+    let mut operation_ids = BTreeSet::new();
+    let mut aggregate_tuples = BTreeSet::new();
+    for row in &rows {
+        require_js_safe_unsigned(row.prefix_deleted_through_sequence, "authority.prefix")?;
+        require_js_safe_unsigned(row.event_rowid, "authority.eventRowid")?;
+        require_js_safe_unsigned(row.aggregate_sequence, "authority.aggregateSequence")?;
+        if row.job_id.is_empty()
+            || row.job_id != expected_job
+            || row.ordinal == 0
+            || row.ordinal as usize > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+            || row.prefix_id.is_empty()
+            || row.prefix_deleted_through_sequence == 0
+            || row.event_rowid == 0
+            || row.event_id.is_empty()
+            || row.operation_id.is_empty()
+            || row.aggregate_type.is_empty()
+            || row.aggregate_type == "app_instance"
+            || row.aggregate_id.is_empty()
+            || row.aggregate_sequence == 0
+            || row.aggregate_sequence > row.prefix_deleted_through_sequence
+            || row.introduced_message_id != row.frozen_message_id
+            || !ordinals.insert(row.ordinal)
+            || !rowids.insert(row.event_rowid)
+            || !event_ids.insert(row.event_id.clone())
+            || !operation_ids.insert(row.operation_id.clone())
+            || !aggregate_tuples.insert((
+                row.aggregate_type.clone(),
+                row.aggregate_id.clone(),
+                row.aggregate_sequence,
+            ))
+        {
+            return Err(StorageLifetimeContractError::new(
+                "storage compaction authority must be one exact distinct prefix-bound tuple",
+            ));
+        }
+        require_timestamp(&row.authorized_at, "authority.authorizedAt")?;
+    }
+    Ok(rows)
+}
+
+pub fn validate_storage_compaction_job_v1(
+    value: &Value,
+) -> Result<StorageCompactionJobV1, StorageLifetimeContractError> {
+    let job: StorageCompactionJobV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    validate_storage_compaction_cursor_v1(
+        &serde_json::to_value(&job.cursor)
+            .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
+    )?;
+    if job.job_id.is_empty() || job.authority_count as usize > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction job identity or authority count is invalid",
+        ));
+    }
+    match job.state {
+        StorageCompactionJobStateV1::Pending | StorageCompactionJobStateV1::Running => {
+            if job.failure_kind.is_some() || job.completed_at.is_some() {
+                return Err(StorageLifetimeContractError::new(
+                    "nonterminal compaction job cannot carry terminal evidence",
+                ));
+            }
+        }
+        StorageCompactionJobStateV1::Succeeded => {
+            if job.authority_count != 0
+                || !job.equivalence_verified
+                || job.cursor.phase != StorageCompactionPhaseV1::Finalize
+                || !job.cursor.scan_exhausted
+                || job.failure_kind.is_some()
+            {
+                return Err(StorageLifetimeContractError::new(
+                    "successful compaction requires empty authority and verified finalization",
+                ));
+            }
+            require_timestamp(
+                job.completed_at.as_deref().unwrap_or_default(),
+                "compaction.completedAt",
+            )?;
+        }
+        StorageCompactionJobStateV1::Failed => {
+            if job.authority_count != 0
+                || job
+                    .failure_kind
+                    .as_deref()
+                    .is_none_or(|kind| !is_sanitized_failure_kind(kind))
+            {
+                return Err(StorageLifetimeContractError::new(
+                    "failed compaction requires empty authority and sanitized evidence",
+                ));
+            }
+            require_timestamp(
+                job.completed_at.as_deref().unwrap_or_default(),
+                "compaction.completedAt",
+            )?;
+        }
+    }
+    Ok(job)
+}
+
+pub fn validate_storage_compaction_lifecycle_transition_v1(
+    operation: StorageCompactionLifecycleOperationV1,
+    previous: &Value,
+    next: &Value,
+) -> Result<StorageCompactionJobV1, StorageLifetimeContractError> {
+    let previous = validate_storage_compaction_job_v1(previous)?;
+    let next = validate_storage_compaction_job_v1(next)?;
+    if previous.job_id != next.job_id {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction lifecycle cannot change job identity",
+        ));
+    }
+    let same_cursor = previous.cursor == next.cursor;
+    let valid = match operation {
+        StorageCompactionLifecycleOperationV1::Arm => {
+            previous.state == StorageCompactionJobStateV1::Pending
+                && next.state == StorageCompactionJobStateV1::Running
+                && previous.authority_count == 0
+                && next.authority_count == 0
+                && same_cursor
+                && previous.equivalence_verified == next.equivalence_verified
+        }
+        StorageCompactionLifecycleOperationV1::BatchSuccess => {
+            previous.state == StorageCompactionJobStateV1::Running
+                && previous.authority_count > 0
+                && next.state == StorageCompactionJobStateV1::Pending
+                && next.authority_count == 0
+                && validate_storage_compaction_cursor_transition_v1(
+                    Some(&serde_json::to_value(&previous.cursor).expect("serializable cursor")),
+                    &serde_json::to_value(&next.cursor).expect("serializable cursor"),
+                )
+                .is_ok()
+        }
+        StorageCompactionLifecycleOperationV1::CancelBeforeArm => {
+            previous.state == StorageCompactionJobStateV1::Pending
+                && previous.authority_count == 0
+                && previous == next
+        }
+        StorageCompactionLifecycleOperationV1::CancelAfterArm => {
+            previous.state == StorageCompactionJobStateV1::Running
+                && previous.authority_count == 0
+                && previous == next
+        }
+        StorageCompactionLifecycleOperationV1::Fail => {
+            previous.state == StorageCompactionJobStateV1::Running
+                && previous.authority_count == 0
+                && next.state == StorageCompactionJobStateV1::Failed
+                && next.authority_count == 0
+                && same_cursor
+        }
+        StorageCompactionLifecycleOperationV1::Complete => {
+            previous.state == StorageCompactionJobStateV1::Pending
+                && previous.authority_count == 0
+                && previous.equivalence_verified
+                && previous.cursor.phase == StorageCompactionPhaseV1::Finalize
+                && previous.cursor.scan_exhausted
+                && next.state == StorageCompactionJobStateV1::Succeeded
+                && same_cursor
+        }
+    };
+    if !valid {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction lifecycle transition is not fail-closed",
+        ));
+    }
+    Ok(next)
+}
+
+pub fn validate_storage_compaction_equivalence_v1(
+    value: &Value,
+) -> Result<StorageCompactionEquivalenceV1, StorageLifetimeContractError> {
+    let evidence: StorageCompactionEquivalenceV1 = serde_json::from_value(value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    if evidence.rows_in_batch == 0
+        || evidence.rows_in_batch as usize > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+        || !evidence.baseline_tail_before
+        || !evidence.anchor_tail_after
+        || !evidence.preserved_artifacts_byte_exact
+        || !evidence.receipt_replay_equivalent
+        || !evidence.namespace_decisions_equivalent
+        || !evidence.frozen_message_ids_reserved
+        || !evidence.authority_empty
+    {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction equivalence evidence is incomplete",
+        ));
+    }
+    Ok(evidence)
+}
+
+fn compaction_phase_index(phase: StorageCompactionPhaseV1) -> usize {
+    match phase {
+        StorageCompactionPhaseV1::FreezeMessages => 0,
+        StorageCompactionPhaseV1::VerifyPrefix => 1,
+        StorageCompactionPhaseV1::AuthorizeDelete => 2,
+        StorageCompactionPhaseV1::DeletePrefix => 3,
+        StorageCompactionPhaseV1::VerifyEquivalence => 4,
+        StorageCompactionPhaseV1::Finalize => 5,
+    }
+}
+
+fn compaction_phase_name(phase: StorageCompactionPhaseV1) -> &'static str {
+    STORAGE_COMPACTION_PHASES_V1[compaction_phase_index(phase)]
 }
 
 pub fn validate_storage_event_source_index_entry_v1(

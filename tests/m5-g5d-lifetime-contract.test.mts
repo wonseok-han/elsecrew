@@ -28,6 +28,8 @@ import {
   STORAGE_LIFETIME_SCHEMA_VERSION_V4,
   STORAGE_LIFETIME_SCHEMA_VERSION_V5,
   STORAGE_LIFETIME_SCHEMA_VERSION_V6,
+  STORAGE_LIFETIME_SCHEMA_VERSION_V7,
+  STORAGE_COMPACTION_PHASES_V1,
   STORAGE_LIFETIME_PHASES_V3,
   STORAGE_LIFETIME_PHASES_V4,
   STORAGE_LIFETIME_TABLES_V2,
@@ -70,6 +72,15 @@ import {
   validateStorageLifetimeMaterializationPairV4,
   validateStorageLifetimeReopenPairV4,
   validateStorageLifetimeV6PreflightPolicyV1,
+  validateStorageLifetimeV7PreflightPolicyV1,
+  validateStorageLosslessCompactionPolicyV1,
+  validateStorageCompactionCursorV1,
+  validateStorageCompactionCursorTransitionV1,
+  validateStorageCompactionPrefixV1,
+  validateFrozenMessageSourceV1,
+  validateStorageCompactionDeleteAuthorityBatchV1,
+  validateStorageCompactionLifecycleTransitionV1,
+  validateStorageCompactionEquivalenceV1,
   validateStorageEventSourceIndexEntryV1,
   validateStorageEventSourceIndexBindingV1,
   validateStorageEventSourceIndexTransitionV1,
@@ -371,6 +382,70 @@ interface V6Cases {
   invalidPolicyMutations: PolicyMutation[];
 }
 
+interface ManifestV7 {
+  schemaVersion: number;
+  storageSchemaVersion: number;
+  protocolVersion: number;
+  payloadSchemaVersion: number;
+  migration: {
+    file: string;
+    fromVersion: number;
+    toVersion: number;
+    mode: string;
+    preflight: unknown;
+    historyBackfill: string;
+    tablesAdded: string[];
+    indexesAdded: string[];
+    triggersAdded: string[];
+    triggersVersionReplaced: string[];
+    runtimeGuardDdlAllowed: boolean;
+    existingRowsDeleted: boolean;
+    preservedTables: string[];
+    preservedArtifacts: string[];
+  };
+  losslessCompaction: Record<string, unknown> & {
+    casesFile: string;
+    queryPlanAcceptance: Record<string, string | string[]>;
+  };
+}
+
+interface V7Cases {
+  migrationMatrix: {
+    admissiblePairs: string[];
+    rejectedPairs: string[];
+    allowedMaintenanceStates: string[];
+    rejectedMaintenanceStates: string[];
+    newTableInitialCounts: Record<string, number>;
+  };
+  validPrefixes: NamedValue[];
+  invalidPrefixMutations: PolicyMutation[];
+  validFrozenMessageSources: NamedValue[];
+  invalidFrozenMessageMutations: PolicyMutation[];
+  validAuthorityBatch: unknown[];
+  invalidAuthorityMutations: PolicyMutation[];
+  validCursorTransitions: CursorTransitionCase[];
+  invalidCursors: NamedValue[];
+  invalidCursorTransitions: CursorTransitionCase[];
+  validLifecycleTransitions: Array<{
+    name: string;
+    operation: "arm" | "batchSuccess" | "cancelBeforeArm" | "cancelAfterArm" | "complete";
+    previous: unknown;
+    next: unknown;
+  }>;
+  invalidLifecycleMutations: Array<{
+    name: string;
+    caseIndex: number;
+    path: string[];
+    replacement: unknown;
+  }>;
+  equivalenceCases: { valid: unknown; invalidFields: string[]; invalidRowsInBatch: number[] };
+  replayNamespaces: Array<{ namespace: string; duplicate: string; conflict: string }>;
+  messageReuse: Record<string, string>;
+  queryPlans: Array<{ name: string; sql: string; detail: string }>;
+  invalidPreflightMutations: PolicyMutation[];
+  invalidPolicyMutations: PolicyMutation[];
+}
+
 interface V5CatchUpCase {
   name: string;
   previousState: "pending" | "attempting" | "failed";
@@ -448,6 +523,7 @@ const rootV3 = resolve("tests/fixtures/m5/storage-v3");
 const rootV4 = resolve("tests/fixtures/m5/storage-v4");
 const rootV5 = resolve("tests/fixtures/m5/storage-v5");
 const rootV6 = resolve("tests/fixtures/m5/storage-v6");
+const rootV7 = resolve("tests/fixtures/m5/storage-v7");
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const manifestV3 = readJson<ManifestV3>(resolve(rootV3, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
@@ -464,6 +540,10 @@ const v5Cases = readJson<V5Cases>(
 const manifestV6 = readJson<ManifestV6>(resolve(rootV6, "manifest.json"));
 const v6Cases = readJson<V6Cases>(
   resolve(rootV6, manifestV6.indexedBoundedVerification.casesFile),
+);
+const manifestV7 = readJson<ManifestV7>(resolve(rootV7, "manifest.json"));
+const v7Cases = readJson<V7Cases>(
+  resolve(rootV7, manifestV7.losslessCompaction.casesFile),
 );
 
 test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byte", () => {
@@ -2018,7 +2098,356 @@ test("storage-v6 freezes 16 bounded phases, indexed provenance, and exact query 
   }
 });
 
-test("storage-v1 through storage-v5 golden files remain immutable", () => {
+test("storage-v7 freezes bounded lossless compaction without enabling product deletion", () => {
+  assert.equal(manifestV7.schemaVersion, 1);
+  assert.equal(manifestV7.storageSchemaVersion, STORAGE_LIFETIME_SCHEMA_VERSION_V7);
+  assert.equal(manifestV7.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(manifestV7.payloadSchemaVersion, 1);
+  assert.equal(manifestV7.migration.fromVersion, 6);
+  assert.equal(manifestV7.migration.toVersion, 7);
+  assert.equal(manifestV7.migration.historyBackfill, "none");
+  assert.equal(manifestV7.migration.runtimeGuardDdlAllowed, false);
+  assert.equal(manifestV7.migration.existingRowsDeleted, false);
+  assert.deepEqual(
+    validateStorageLifetimeV7PreflightPolicyV1(manifestV7.migration.preflight),
+    manifestV7.migration.preflight,
+  );
+  assert.deepEqual(
+    validateStorageLosslessCompactionPolicyV1(manifestV7.losslessCompaction),
+    manifestV7.losslessCompaction,
+  );
+  assert.deepEqual(STORAGE_COMPACTION_PHASES_V1, [
+    "freezeMessages", "verifyPrefix", "authorizeDelete", "deletePrefix",
+    "verifyEquivalence", "finalize",
+  ]);
+
+  for (const fixture of v7Cases.validPrefixes) {
+    validateStorageCompactionPrefixV1(fixture.value);
+    for (const mutation of v7Cases.invalidPrefixMutations) {
+      const invalid = structuredClone(fixture.value);
+      setPath(invalid, mutation.path, mutation.replacement);
+      assert.throws(() => validateStorageCompactionPrefixV1(invalid), undefined, mutation.name);
+    }
+  }
+  for (const fixture of v7Cases.validFrozenMessageSources) {
+    validateFrozenMessageSourceV1(fixture.value);
+    for (const mutation of v7Cases.invalidFrozenMessageMutations) {
+      const invalid = structuredClone(fixture.value);
+      setPath(invalid, mutation.path, mutation.replacement);
+      assert.throws(() => validateFrozenMessageSourceV1(invalid), undefined, mutation.name);
+    }
+  }
+  validateStorageCompactionDeleteAuthorityBatchV1(v7Cases.validAuthorityBatch);
+  for (const mutation of v7Cases.invalidAuthorityMutations) {
+    const invalid = structuredClone(v7Cases.validAuthorityBatch);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(
+      () => validateStorageCompactionDeleteAuthorityBatchV1(invalid),
+      undefined,
+      mutation.name,
+    );
+  }
+  for (const fixture of v7Cases.validCursorTransitions) {
+    validateStorageCompactionCursorTransitionV1(fixture.previous, fixture.next);
+  }
+  for (const fixture of v7Cases.invalidCursors) {
+    assert.throws(() => validateStorageCompactionCursorV1(fixture.value), undefined, fixture.name);
+  }
+  for (const fixture of v7Cases.invalidCursorTransitions) {
+    assert.throws(
+      () => validateStorageCompactionCursorTransitionV1(fixture.previous, fixture.next),
+      undefined,
+      fixture.name,
+    );
+  }
+  for (const fixture of v7Cases.validLifecycleTransitions) {
+    validateStorageCompactionLifecycleTransitionV1(
+      fixture.operation, fixture.previous, fixture.next,
+    );
+  }
+  for (const mutation of v7Cases.invalidLifecycleMutations) {
+    const invalid = structuredClone(v7Cases.validLifecycleTransitions[mutation.caseIndex]);
+    assert.ok(invalid);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => validateStorageCompactionLifecycleTransitionV1(
+      invalid.operation, invalid.previous, invalid.next,
+    ), undefined, mutation.name);
+  }
+  validateStorageCompactionEquivalenceV1(v7Cases.equivalenceCases.valid);
+  for (const field of v7Cases.equivalenceCases.invalidFields) {
+    const invalid = structuredClone(v7Cases.equivalenceCases.valid) as Record<string, unknown>;
+    invalid[field] = false;
+    assert.throws(() => validateStorageCompactionEquivalenceV1(invalid), undefined, field);
+  }
+  for (const rowsInBatch of v7Cases.equivalenceCases.invalidRowsInBatch) {
+    const invalid = structuredClone(v7Cases.equivalenceCases.valid) as Record<string, unknown>;
+    invalid.rowsInBatch = rowsInBatch;
+    assert.throws(() => validateStorageCompactionEquivalenceV1(invalid));
+  }
+  for (const mutation of v7Cases.invalidPreflightMutations) {
+    const invalid = structuredClone(manifestV7.migration.preflight);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => validateStorageLifetimeV7PreflightPolicyV1(invalid), undefined, mutation.name);
+  }
+  for (const mutation of v7Cases.invalidPolicyMutations) {
+    const invalid = structuredClone(manifestV7.losslessCompaction);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => validateStorageLosslessCompactionPolicyV1(invalid), undefined, mutation.name);
+  }
+  assert.deepEqual(v7Cases.replayNamespaces.map((entry) => [
+    entry.namespace, entry.duplicate, entry.conflict,
+  ]), [
+    ["legacy", "duplicateNoOp", "conflict"],
+    ["actualAgent", "duplicateNoOp", "conflict"],
+    ["recovery", "duplicateNoOp", "conflict"],
+  ]);
+
+  const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const migrationV7 = readFileSync(resolve(rootV7, manifestV7.migration.file), "utf8");
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v7-"));
+  try {
+    const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
+    applyExactStorageV6Migration(reference, migrationV6, schemaSignature(reference), null);
+    const exactV6 = schemaSignature(reference);
+    applyExactStorageV7Migration(reference, migrationV7, exactV6, null);
+    const exactV7 = schemaSignature(reference);
+    for (const [table, count] of Object.entries(v7Cases.migrationMatrix.newTableInitialCounts)) {
+      assert.equal(reference.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count, count);
+    }
+    applyExactStorageV7Migration(reference, migrationV7, exactV6, exactV7);
+    reference.close();
+
+    for (const mapping of [
+      { name: "ready-absent", materializationState: "ready", jobState: null },
+      { name: "pending-absent", materializationState: "pending", jobState: null },
+      { name: "pending-pending", materializationState: "pending", jobState: "pending" },
+      { name: "pending-failed", materializationState: "pending", jobState: "failed" },
+    ] as const) {
+      const mapped = createExactStorageV5Database(
+        join(temporaryRoot, `${mapping.name}.db`), false,
+      );
+      applyExactStorageV6Migration(mapped, migrationV6, schemaSignature(mapped), exactV6);
+      mapped.prepare("UPDATE storage_schema_meta SET materialization_state=?").run(
+        mapping.materializationState,
+      );
+      if (mapping.jobState !== null) {
+        insertV5LifetimeJob(mapped, mapping.jobState, "indexSource", 7, true);
+      }
+      mapped.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('historic-success','losslessCompaction','succeeded','{}','start','done','done',NULL,'created','done')
+      `).run();
+      mapped.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('historic-failure','losslessCompaction','failed','{}','start','done',NULL,'verification','created','done')
+      `).run();
+      const pairBefore = readV6Pair(mapped);
+      const maintenanceBefore = normalizedRows(mapped, "maintenance_jobs");
+      applyExactStorageV7Migration(mapped, migrationV7, exactV6, exactV7);
+      assert.deepEqual(readV6Pair(mapped), pairBefore, mapping.name);
+      assert.deepEqual(normalizedRows(mapped, "maintenance_jobs"), maintenanceBefore, mapping.name);
+      mapped.close();
+    }
+
+    const database = createExactStorageV5Database(join(temporaryRoot, "guarded.db"), false);
+    applyExactStorageV6Migration(database, migrationV6, schemaSignature(database), exactV6);
+    seedStorageV6CompactionFixture(database);
+    const preservedBefore = new Map(manifestV7.migration.preservedTables.map((table) => [
+      table, normalizedRows(database, table),
+    ]));
+    applyExactStorageV7Migration(database, migrationV7, exactV6, exactV7);
+    for (const table of manifestV7.migration.preservedTables) {
+      assert.deepEqual(normalizedRows(database, table), preservedBefore.get(table), table);
+    }
+    assert.equal(database.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
+
+    const insertPrefix = database.prepare(`
+      INSERT INTO ledger_compaction_prefixes(
+        prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,
+        anchor_event_rowid,anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,
+        baseline_id,baseline_projection_digest,created_at,verified_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    const chatPrefix = [
+      "prefix_chat_1_1", "chat", "chat_1", 1, 4, "evt_chat_2", "op_chat_2", 2,
+      "baseline_chat_1_1", "digest-chat-1", "2026-09-01T09:00:00Z",
+      "2026-09-01T09:00:01Z",
+    ] as const;
+    insertPrefix.run(...chatPrefix);
+    assert.throws(() => insertPrefix.run(
+      "prefix_bad_anchor", "chat", "chat_1", 1, 3, "evt_project_2", "op_project_2", 2,
+      "baseline_chat_1_1", "digest-chat-1", "2026-09-01T09:00:00Z",
+      "2026-09-01T09:00:01Z",
+    ));
+    assert.throws(() => insertPrefix.run(
+      "prefix_app", "app_instance", "instance_1", 1, 7, "evt_instance_1", "op_instance_1", 2,
+      "baseline_chat_1_1", "digest-chat-1", "2026-09-01T09:00:00Z",
+      "2026-09-01T09:00:01Z",
+    ));
+
+    const insertFrozen = database.prepare(`
+      INSERT INTO frozen_message_sources(
+        message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+        source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)
+    `);
+    const frozenA = [
+      "message_a", 2, "evt_chat_1", "op_chat_1", "chat_1", 1, 1,
+      '{"messageId":"message_a"}', "digest-message-a", "2026-09-01T09:00:00Z",
+    ] as const;
+    insertFrozen.run(...frozenA);
+    assert.throws(() => insertFrozen.run(
+      "message_b", 2, "evt_chat_1", "op_chat_1", "chat_1", 1, 2,
+      '{"messageId":"message_b"}', "digest-message-b", "2026-09-01T09:00:00Z",
+    ));
+    assert.throws(() => database.prepare(
+      "UPDATE frozen_message_sources SET message_digest='forged' WHERE message_id='message_a'",
+    ).run());
+    assert.throws(() => database.prepare(
+      "DELETE FROM frozen_message_sources WHERE message_id='message_a'",
+    ).run());
+
+    database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_1','losslessCompaction','running','{}','2026-09-01T09:01:00Z',NULL,NULL,NULL,
+               '2026-09-01T09:00:00Z','2026-09-01T09:01:00Z')
+    `).run();
+    const insertAuthority = database.prepare(`
+      INSERT INTO ledger_compaction_delete_authority(
+        job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,
+        aggregate_type,aggregate_id,aggregate_sequence,authorized_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)
+    `);
+    assert.throws(() => database.prepare("DELETE FROM event_source_index WHERE event_rowid=2").run());
+    assert.throws(() => database.prepare("DELETE FROM events WHERE rowid=2").run());
+    insertAuthority.run(
+      "compact_1", 1, "prefix_chat_1_1", 2, "evt_chat_1", "op_chat_1",
+      "chat", "chat_1", 1, "2026-09-01T09:01:00Z",
+    );
+    assert.throws(() => database.prepare(
+      "DELETE FROM ledger_compaction_delete_authority WHERE job_id='compact_1' AND ordinal=1",
+    ).run());
+    database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_2','losslessCompaction','running','{}','2026-09-01T09:01:00Z',NULL,NULL,NULL,
+               '2026-09-01T09:00:00Z','2026-09-01T09:01:00Z')
+    `).run();
+    insertPrefix.run(
+      "prefix_project_1_1", "project", "project_1", 1, 3, "evt_project_2", "op_project_2", 2,
+      "baseline_project_1_1", "digest-project-1", "2026-09-01T09:00:00Z",
+      "2026-09-01T09:00:01Z",
+    );
+    assert.throws(() => insertAuthority.run(
+      "compact_2", 1, "prefix_project_1_1", 1, "evt_project_1", "op_project_1",
+      "project", "project_1", 1, "2026-09-01T09:01:00Z",
+    ));
+    assert.throws(() => insertAuthority.run(
+      "compact_1", 101, "prefix_project_1_1", 1, "evt_project_1", "op_project_1",
+      "project", "project_1", 1, "2026-09-01T09:01:00Z",
+    ));
+
+    const preservedArtifacts = [
+      "operation_receipts", "chat_messages", "prepared_workspaces", "ledger_baselines",
+      "projects", "chats", "runs", "locks", "app_instances",
+    ];
+    const artifactsBefore = new Map(preservedArtifacts.map((table) => [
+      table, normalizedRows(database, table),
+    ]));
+    database.exec("BEGIN IMMEDIATE");
+    database.prepare("DELETE FROM event_source_index WHERE event_rowid=2").run();
+    database.prepare("DELETE FROM events WHERE rowid=2").run();
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM ledger_compaction_delete_authority",
+    ).get()?.count, 0);
+    database.exec("COMMIT");
+    for (const table of preservedArtifacts) {
+      assert.deepEqual(normalizedRows(database, table), artifactsBefore.get(table), table);
+    }
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM events WHERE rowid=4").get()?.count, 1);
+    assert.throws(() => database.prepare("DELETE FROM event_source_index WHERE event_rowid=7").run());
+    assert.throws(() => database.prepare("DELETE FROM events WHERE rowid=7").run());
+
+    database.prepare(`
+      INSERT INTO events(
+        event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+        event_type,payload_schema_version,canonical_json_payload,timestamp
+      ) VALUES('evt_chat_5','op_chat_5',NULL,'chat','chat_1',5,'chat.upserted',1,
+        '{"durable_event_sequence":3,"last_message":{"schemaVersion":1,"messageId":"message_a","chatId":"chat_1","taskId":"task_1","worktreeId":"worktree_1","eventSequence":3,"kind":"user","roleId":null,"runId":null,"text":"again","createdAt":"2026-09-01T09:02:00Z"}}',
+        '2026-09-01T09:02:00Z')
+    `).run();
+    assert.throws(() => database.prepare(`
+      INSERT INTO event_source_index(
+        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,
+        introduced_message_id,chat_durable_sequence,chat_snapshot_message_id
+      ) VALUES(8,'evt_chat_5','op_chat_5','chat','chat_1',5,'message_a',3,'message_a')
+    `).run());
+
+    insertAuthority.run(
+      "compact_1", 1, "prefix_project_1_1", 1, "evt_project_1", "op_project_1",
+      "project", "project_1", 1, "2026-09-01T09:03:00Z",
+    );
+    database.exec("BEGIN IMMEDIATE");
+    database.prepare("DELETE FROM event_source_index WHERE event_rowid=1").run();
+    database.prepare("DELETE FROM events WHERE rowid=1").run();
+    database.exec("ROLLBACK");
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM events WHERE rowid=1").get()?.count, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM event_source_index WHERE event_rowid=1").get()?.count, 1);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM ledger_compaction_delete_authority").get()?.count, 1);
+
+    const declaredPlans = Object.keys(manifestV7.losslessCompaction.queryPlanAcceptance)
+      .filter((key) => key !== "mode" && key !== "reject").sort();
+    assert.deepEqual(declaredPlans, v7Cases.queryPlans.map((plan) => plan.name).sort());
+    for (const fixture of v7Cases.queryPlans) {
+      const plans = database.prepare(fixture.sql).all();
+      assert.equal(plans.length, 1, fixture.name);
+      assert.equal(plans[0]?.detail, fixture.detail, fixture.name);
+    }
+    database.close();
+
+    for (const [name, prepareUnsafe] of [
+      ["attempting", (db: DatabaseSync) => {
+        db.prepare("UPDATE storage_schema_meta SET materialization_state='pending'").run();
+        insertV5LifetimeJob(db, "attempting", "indexSource", 0, false);
+      }],
+      ["pending-maintenance", (db: DatabaseSync) => db.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('active','losslessCompaction','pending',NULL,NULL,NULL,NULL,NULL,'now','now')
+      `).run()],
+      ["running-maintenance", (db: DatabaseSync) => db.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('active','losslessCompaction','running',NULL,'now',NULL,NULL,NULL,'now','now')
+      `).run()],
+      ["delete-authority-object", (db: DatabaseSync) => db.exec(`
+        CREATE TABLE ledger_compaction_delete_authority(job_id TEXT PRIMARY KEY) STRICT
+      `)],
+      ["extra-schema", (db: DatabaseSync) => db.exec("CREATE TABLE unexpected_v7(value TEXT) STRICT")],
+    ] as Array<[string, (database: DatabaseSync) => unknown]>) {
+      const unsafe = createExactStorageV5Database(join(temporaryRoot, `${name}.db`), false);
+      applyExactStorageV6Migration(unsafe, migrationV6, schemaSignature(unsafe), exactV6);
+      prepareUnsafe(unsafe);
+      const before = `${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`;
+      assert.throws(() => applyExactStorageV7Migration(unsafe, migrationV7, exactV6, exactV7), undefined, name);
+      assert.equal(`${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`, before, name);
+      unsafe.close();
+    }
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("storage-v1 through storage-v6 golden files remain immutable", () => {
   const digests = new Map<string, string>([
     ["tests/fixtures/m5/storage-v1/idempotency.json", "a0c9d347a5005af0980c35d8e55de2ee1cdfaa47dc1c35959582da667ae0b641"],
     ["tests/fixtures/m5/storage-v1/migration.sql", "9734d16cca9cf5cd18188f4e75cde6bbedaff2eda14ab5bd8981fdc45ae82d12"],
@@ -2040,6 +2469,9 @@ test("storage-v1 through storage-v5 golden files remain immutable", () => {
     ["tests/fixtures/m5/storage-v5/manifest.json", "58c7efcacbf1e9fe7f325520e78033c3ef93ba7fd806f27fdd0a6b3da1c1fceb"],
     ["tests/fixtures/m5/storage-v5/migration-v4-to-v5.sql", "22f9cc9cef5766369ccf5fb9c11262aaa33a05b51a8ccfc03ee3a6a73478889a"],
     ["tests/fixtures/m5/storage-v5/cases.json", "1dca57e669ff782bae856ab29fd00581ff2509ec811e5616754da579125e100d"],
+    ["tests/fixtures/m5/storage-v6/cases.json", "d02c817fc7152b5d133cfa675a56896f6faec78bc3d7ccea0a01ba7f98fccfb1"],
+    ["tests/fixtures/m5/storage-v6/manifest.json", "e9be63b3fe513eab97c378da8aab451dfbe19e1c7e9dc08928e60bffa02cf851"],
+    ["tests/fixtures/m5/storage-v6/migration-v5-to-v6.sql", "14f0ce749503b087296b91b5d27205dfd41aa5c24af26bf5ccd7dbbeeba86dc2"],
   ]);
   for (const [path, expected] of digests) {
     assert.equal(createHash("sha256").update(readFileSync(path)).digest("hex"), expected, path);
@@ -2493,6 +2925,136 @@ function applyExactStorageV6Migration(
   if (expectedV6Schema !== null && schemaSignature(database) !== expectedV6Schema) {
     throw new Error("storage-v6 migration did not produce exact schema");
   }
+}
+
+function applyExactStorageV7Migration(
+  database: DatabaseSync,
+  migrationSql: string,
+  expectedV6Schema: string,
+  expectedV7Schema: string | null,
+): void {
+  const meta = database.prepare(`
+    SELECT storage_schema_version FROM storage_schema_meta WHERE singleton = 1
+  `).get();
+  if (meta?.storage_schema_version === 7) {
+    if (expectedV7Schema === null || schemaSignature(database) !== expectedV7Schema) {
+      throw new Error("storage-v7 schema is not exact");
+    }
+    return;
+  }
+  if (meta?.storage_schema_version !== 6 || schemaSignature(database) !== expectedV6Schema) {
+    throw new Error("storage-v6 schema is not exact");
+  }
+  validateStorageLifetimeMaterializationPairV4(readV6Pair(database));
+  if (database.prepare(`
+    SELECT 1 FROM lifetime_materialization_job WHERE singleton=1 AND state='attempting'
+  `).get() !== undefined) {
+    throw new Error("storage-v7 migration refuses attempting materialization");
+  }
+  const activeMaintenance = database.prepare(`
+    SELECT 1 FROM maintenance_jobs
+    WHERE job_kind='losslessCompaction' AND state IN ('pending','running') LIMIT 1
+  `).get();
+  if (activeMaintenance !== undefined) {
+    throw new Error("storage-v7 migration refuses active maintenance");
+  }
+  database.exec(migrationSql);
+  if (expectedV7Schema !== null && schemaSignature(database) !== expectedV7Schema) {
+    throw new Error("storage-v7 migration did not produce exact schema");
+  }
+}
+
+function seedStorageV6CompactionFixture(database: DatabaseSync): void {
+  database.prepare(`
+    UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1
+  `).run();
+  database.prepare(`
+    INSERT INTO projects(project_id,canonical_path,projection_json,last_event_sequence)
+    VALUES('project_1','/fixture/v7','{"projectId":"project_1"}',2)
+  `).run();
+  database.prepare(`
+    INSERT INTO chats(chat_id,project_id,projection_json,last_event_sequence)
+    VALUES('chat_1','project_1','{"chatId":"chat_1"}',2)
+  `).run();
+  database.prepare(`
+    INSERT INTO app_instances(
+      sidecar_instance_id,pid,platform,started_at,heartbeat_at,clean_shutdown_at,last_event_sequence
+    ) VALUES('instance_1',123,'macos','2026-09-01T08:00:00Z','2026-09-01T08:01:00Z',NULL,1)
+  `).run();
+  const insertEvent = database.prepare(`
+    INSERT INTO events(
+      event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+      event_type,payload_schema_version,canonical_json_payload,timestamp
+    ) VALUES(?,?,?,?,?,?,?,?,?,?)
+  `);
+  for (const fixture of v6Cases.sourceIndex.sourceEvents) {
+    const event = fixture.event;
+    insertEvent.run(
+      event.event_id, event.operation_id, event.request_id, event.aggregate_type,
+      event.aggregate_id, event.aggregate_sequence, event.event_type,
+      event.payload_schema_version, event.canonical_json_payload, event.timestamp,
+    );
+  }
+  insertEvent.run(
+    "evt_instance_1", "op_instance_1", null, "app_instance", "instance_1", 1,
+    "app_instance.started", 1, "{\"sidecar_instance_id\":\"instance_1\"}",
+    "2026-09-01T08:00:00Z",
+  );
+  const insertIndex = database.prepare(`
+    INSERT INTO event_source_index(
+      event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,
+      introduced_message_id,chat_durable_sequence,chat_snapshot_message_id
+    ) VALUES(?,?,?,?,?,?,?,?,?)
+  `);
+  insertIndex.run(1, "evt_project_1", "op_project_1", "project", "project_1", 1, null, null, null);
+  insertIndex.run(2, "evt_chat_1", "op_chat_1", "chat", "chat_1", 1, "message_a", 1, "message_a");
+  insertIndex.run(3, "evt_project_2", "op_project_2", "project", "project_1", 2, null, null, null);
+  insertIndex.run(4, "evt_chat_2", "op_chat_2", "chat", "chat_1", 2, null, 1, "message_a");
+  insertIndex.run(5, "evt_chat_3", "op_chat_3", "chat", "chat_1", 3, null, 1, null);
+  insertIndex.run(6, "evt_chat_4", "op_chat_4", "chat", "chat_1", 4, "message_b", 2, "message_b");
+  insertIndex.run(7, "evt_instance_1", "op_instance_1", "app_instance", "instance_1", 1, null, null, null);
+  database.prepare(`
+    INSERT INTO chat_messages(
+      message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at
+    ) VALUES(?,?,?,?,?,?,?)
+  `).run(
+    "message_a", "chat_1", 1, '{"messageId":"message_a"}', "digest-message-a",
+    "2026-09-01T08:01:00Z", "2026-09-01T08:01:01Z",
+  );
+  database.prepare(`
+    INSERT INTO chat_messages(
+      message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at
+    ) VALUES(?,?,?,?,?,?,?)
+  `).run(
+    "message_b", "chat_1", 2, '{"messageId":"message_b"}', "digest-message-b",
+    "2026-09-01T08:02:00Z", "2026-09-01T08:02:01Z",
+  );
+  const insertBaseline = database.prepare(`
+    INSERT INTO ledger_baselines(
+      baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,
+      payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at
+    ) VALUES(?,?,?,?,1,?,?,?,?)
+  `);
+  insertBaseline.run(
+    "baseline_chat_1_1", "chat", "chat_1", 1, '{"chatId":"chat_1"}',
+    "digest-chat-1", "2026-09-01T08:03:00Z", "2026-09-01T08:03:01Z",
+  );
+  insertBaseline.run(
+    "baseline_project_1_1", "project", "project_1", 1, '{"projectId":"project_1"}',
+    "digest-project-1", "2026-09-01T08:03:00Z", "2026-09-01T08:03:01Z",
+  );
+  database.prepare(`
+    INSERT INTO operation_receipts(
+      operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,
+      payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,
+      canonical_payload_digest_version,canonical_payload_digest_format,canonical_payload_digest,
+      event_timestamp,materialized_at
+    ) VALUES(?,?,?,?,?,?,1,?,'sha256',1,'lowercaseHex64',?,?,?)
+  `).run(
+    "op_chat_1", "evt_chat_1", "chat", "chat_1", 1, "chat.upserted",
+    '{"operation":"chat-one"}', "0".repeat(64),
+    "2026-09-01T08:01:00Z", "2026-09-01T08:01:01Z",
+  );
 }
 
 function insertV5LifetimeJob(

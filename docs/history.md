@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 lossless-compaction 계약)
+
+- **삭제 비활성 V7 계약**: exact storage V6와 허용 meta/job pair, active maintenance 부재를 mutation 전에 검증하는 schema V7 golden을 추가했다. migration은 기존 history를 backfill하거나 삭제하지 않고 compaction prefix·frozen message source·최대 100개 exact delete-authority 표만 추가한다. 기존 두 DELETE guard는 V6→V7 schema transaction에서 한 번만 version 교체하며 runtime batch의 guard drop/recreate, 제품 자동 실행·wire·실제 삭제는 C1 consumer 전까지 모두 금지한다.
+- **lossless 불변식**: aggregate별 immutable baseline과 `deletedThrough+1` anchor, strict prefix progression, app-instance 삭제 금지, introducing-event 삭제 전 exact message provenance 동결과 message ID 영구 재사용 차단을 고정했다. delete batch는 한 running job의 exact authority만 전역 보유하고 source-index→event 순으로 같은 최대 100행 transaction에서 삭제하며 event delete가 authority를 소비한다. pending→running sentinel, commit uncertainty, cancel/rollback, authority-empty finalization, receipt 기반 deleted-operation duplicate/conflict와 legacy·actualAgent·recovery 판정 동등성을 Rust·TypeScript validator/cases로 일치시켰다.
+- **실행 검증·다음 경계**: Node SQLite golden 16개가 exact V6→V7 migration, 네 admissible pair/완료·실패 maintenance 보존, attempting·active/partial/extra schema byte-zero 거부, FK/append-only/anchor/frozen/authority/message-reuse/app-instance/commit·rollback/exact query-plan을 통과했다. protocol 전체 41개, TypeScript no-emit, focused rustfmt와 diff check가 통과했고, scoped clippy는 범위 밖 기존 lint 3개를 명시적으로 제외하면 `-D warnings`를 통과했다. C1은 이 계약을 소비하는 opener·bounded worker를 별도 구현·리뷰해야 하며, 그 전에는 어떤 실제 ledger delete도 활성화하지 않는다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 통합·하네스 등록)
 
 - **독립 승인 뒤 통합**: exact storage v6 계약과 source-event 결속·message introduction·indexed predecessor·query-plan 보완, V5→V6 sidecar migration/append serialization, 명시 호출형 16단계 bounded worker를 각각 독립 리뷰 승인 뒤 `m5/coding-agent-ide`에 순서대로 통합했다. 거절된 V5 worker와 이전 미완성 migration worktree는 통합하지 않았다.

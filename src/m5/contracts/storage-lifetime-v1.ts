@@ -33,6 +33,13 @@ export const STORAGE_LIFETIME_TABLES_V3 = [
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V4 = 4 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V5 = 5 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V6 = 6 as const;
+export const STORAGE_LIFETIME_SCHEMA_VERSION_V7 = 7 as const;
+export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
+export const STORAGE_COMPACTION_MAX_DELETE_ROWS_V1 = 100 as const;
+export const STORAGE_COMPACTION_PHASES_V1 = [
+  "freezeMessages", "verifyPrefix", "authorizeDelete", "deletePrefix",
+  "verifyEquivalence", "finalize",
+] as const;
 export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_LIFETIME_PHASES_V2 = [
@@ -374,6 +381,101 @@ export interface StorageLifetimeV6PreflightPolicyV1 {
   timing: "beforeAnyDdlOrMutation";
 }
 
+export interface StorageLifetimeV7PreflightPolicyV1 {
+  schema: "exactStorageV6";
+  admissibleMaterializationPairs: readonly [
+    "ready+absent", "pending+absent", "pending+pending", "pending+failed",
+  ];
+  rejectedMaterializationPairs: readonly ["pending+attempting"];
+  maintenanceRequirement: "noPendingOrRunningLosslessCompaction";
+  deleteAuthorityRequirement: "storageV7AuthorityObjectsAbsent";
+  partialExtraOrUnknownSchema: "failClosedBeforeMutation";
+  mapping: readonly [
+    "materializationStatePreserved", "materializationJobPreservedByteExact",
+    "completedAndFailedMaintenanceHistoryPreserved", "existingRowsNotBackfilled",
+    "existingLedgerAndDerivedRowsNotDeleted",
+  ];
+  timing: "beforeAnyDdlOrMutation";
+}
+
+export type StorageCompactionPhaseV1 = typeof STORAGE_COMPACTION_PHASES_V1[number];
+export type StorageCompactionJobStateV1 = "pending" | "running" | "succeeded" | "failed";
+export type StorageCompactionLifecycleOperationV1 =
+  | "arm" | "batchSuccess" | "cancelBeforeArm" | "cancelAfterArm" | "fail" | "complete";
+
+export interface StorageCompactionCursorV1 {
+  schemaVersion: typeof STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1;
+  cutoffEventRowid: number;
+  phase: StorageCompactionPhaseV1;
+  afterEventRowid: number;
+  scanExhausted: boolean;
+}
+
+export interface StorageCompactionPrefixV1 {
+  prefixId: string;
+  aggregateType: string;
+  aggregateId: string;
+  deletedThroughSequence: number;
+  anchorEventRowid: number;
+  anchorEventId: string;
+  anchorOperationId: string;
+  anchorAggregateSequence: number;
+  baselineId: string;
+  baselineProjectionDigest: string;
+  createdAt: string;
+  verifiedAt: string;
+}
+
+export interface FrozenMessageSourceV1 {
+  messageId: string;
+  sourceEventRowid: number;
+  sourceEventId: string;
+  sourceOperationId: string;
+  chatId: string;
+  sourceAggregateSequence: number;
+  durableSequence: number;
+  canonicalMessageJson: string;
+  messageDigest: string;
+  frozenAt: string;
+}
+
+export interface StorageCompactionDeleteAuthorityV1 {
+  jobId: string;
+  ordinal: number;
+  prefixId: string;
+  prefixDeletedThroughSequence: number;
+  eventRowid: number;
+  eventId: string;
+  operationId: string;
+  aggregateType: string;
+  aggregateId: string;
+  aggregateSequence: number;
+  introducedMessageId: string | null;
+  frozenMessageId: string | null;
+  authorizedAt: string;
+}
+
+export interface StorageCompactionJobV1 {
+  jobId: string;
+  state: StorageCompactionJobStateV1;
+  cursor: StorageCompactionCursorV1;
+  authorityCount: number;
+  equivalenceVerified: boolean;
+  failureKind: string | null;
+  completedAt: string | null;
+}
+
+export interface StorageCompactionEquivalenceV1 {
+  baselineTailBefore: boolean;
+  anchorTailAfter: boolean;
+  preservedArtifactsByteExact: boolean;
+  receiptReplayEquivalent: boolean;
+  namespaceDecisionsEquivalent: boolean;
+  frozenMessageIdsReserved: boolean;
+  authorityEmpty: boolean;
+  rowsInBatch: number;
+}
+
 export interface StorageLifetimeBatchPolicyV1 {
   schemaVersion: typeof STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1;
   casesFile: "batching-cases.json";
@@ -652,6 +754,32 @@ export function validateStorageLifetimeV6PreflightPolicyV1(
     fail("storage lifetime v6 preflight policy is not fail-closed");
   }
   return policy as unknown as StorageLifetimeV6PreflightPolicyV1;
+}
+
+export function validateStorageLifetimeV7PreflightPolicyV1(
+  value: unknown,
+): StorageLifetimeV7PreflightPolicyV1 {
+  const policy = requireObject(value, "storage lifetime v7 preflight policy");
+  const expected = {
+    schema: "exactStorageV6",
+    admissibleMaterializationPairs: [
+      "ready+absent", "pending+absent", "pending+pending", "pending+failed",
+    ],
+    rejectedMaterializationPairs: ["pending+attempting"],
+    maintenanceRequirement: "noPendingOrRunningLosslessCompaction",
+    deleteAuthorityRequirement: "storageV7AuthorityObjectsAbsent",
+    partialExtraOrUnknownSchema: "failClosedBeforeMutation",
+    mapping: [
+      "materializationStatePreserved", "materializationJobPreservedByteExact",
+      "completedAndFailedMaintenanceHistoryPreserved", "existingRowsNotBackfilled",
+      "existingLedgerAndDerivedRowsNotDeleted",
+    ],
+    timing: "beforeAnyDdlOrMutation",
+  };
+  if (!sameContractValue(policy, expected)) {
+    fail("storage lifetime v7 preflight policy is not fail-closed");
+  }
+  return policy as unknown as StorageLifetimeV7PreflightPolicyV1;
 }
 
 export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetimeCursorV1 {
@@ -1947,6 +2075,375 @@ export function validateStorageLifetimeBatchPolicyV4(value: unknown): Record<str
     fail("storage lifetime v6 policy contradicts indexed bounded verification");
   }
   return policy;
+}
+
+const STORAGE_LOSSLESS_COMPACTION_POLICY_V1 = {
+  schemaVersion: 1,
+  casesFile: "cases.json",
+  activation: {
+    productExecutionEnabled: false,
+    automaticSchedulingEnabled: false,
+    actualDeleteEnabledBeforeC1Consumer: false,
+    wireStatusOrControlEnabled: false,
+  },
+  guardVersioning: {
+    schemaVersion: 7,
+    migrationReplacement: "oneTimeExactV6ToV7Transaction",
+    runtimeDropRecreate: "forbidden",
+    deleteBatchDdl: "forbidden",
+    deleteBatchMechanism: "durableRunningJobPlusEphemeralExactAuthorityRows",
+  },
+  prefix: {
+    table: "ledger_compaction_prefixes",
+    identity: "appendOnlyPrefixIdAndAggregateDeletedThroughUnique",
+    range: "aggregateSequenceOneThroughDeletedThroughContinuousOnly",
+    anchor: "exactSameAggregateAtDeletedThroughPlusOneRemainsInEventsAndSourceIndex",
+    baseline: "immutableSameAggregateAtDeletedThroughWithExactDigest",
+    progression: "newPrefixStrictlyExtendsLatestVerifiedPrefix",
+    appInstance: "forbidden",
+    proof: "boundedPreDeleteAndPostDeleteEquivalenceBeforePrefixInsert",
+  },
+  frozenMessageSource: {
+    table: "frozen_message_sources",
+    whenRequired: "beforeDeletingAnyEventThatIntroducedMessage",
+    fields: [
+      "messageId", "sourceEventRowid", "sourceEventId", "sourceOperationId",
+      "chatId", "sourceAggregateSequence", "durableSequence",
+      "canonicalMessageJson", "messageDigest", "frozenAt",
+    ],
+    binding: "exactEventSourceIndexIntroductionAndExactChatMessage",
+    appendOnly: true,
+    messageIdReuse: "forbiddenForeverWhileFrozenRecordExists",
+  },
+  deleteAuthority: {
+    table: "ledger_compaction_delete_authority",
+    jobState: "running",
+    maxExactTuples: STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+    globalAuthorityOwner: "oneRunningJobAtATime",
+    identity: "eventRowidEventIdOperationIdAndAggregateTupleExact",
+    prefixBound: "sameAggregateSequenceAtOrBelowDeletedThrough",
+    introducedMessage: "requiresExactFrozenMessageSource",
+    appInstance: "forbidden",
+    sourceIndexDeleteBeforeEventDelete: true,
+    eventDeleteConsumesAuthority: true,
+    mustBeEmptyBeforeCommit: true,
+    mustBeEmptyOnOpen: true,
+    updates: "forbidden",
+  },
+  cursor: {
+    schemaVersion: STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1,
+    phases: STORAGE_COMPACTION_PHASES_V1,
+    columns: ["cutoffEventRowid", "phase", "afterEventRowid", "scanExhausted"],
+    keyset: "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
+    phaseTransition: "exhaustedCurrentThenNextAtZeroUnexhausted",
+    callerConfigurable: false,
+    maxRowsPerBatch: STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+    unboundedScanOrTransaction: "forbidden",
+  },
+  lifecycle: {
+    durableTable: "maintenance_jobs",
+    jobKind: "losslessCompaction",
+    arm: "pendingToRunningSentinelCommittedBeforeDeleteBatch",
+    batchSuccess: "runningToPendingWithAdvancedCursorSameDeleteTransaction",
+    cancelBeforeArm: "pendingUnchangedNoAuthority",
+    cancelAfterArm: "rollbackDeleteBatchLeavesRunningSentinelFailClosed",
+    commitUncertain: "reopenPendingAdvancedMeansCommittedRunningMeansManualRecoveryRequired",
+    terminalSuccess: "authorityEmptyAndEquivalenceVerifiedThenSucceeded",
+    terminalFailure: "rollbackBatchThenRunningToFailedWithSanitizedEvidence",
+    automaticRetryRunning: false,
+  },
+  deletion: {
+    aggregateRule: "retainOneExactAnchorPerCompactedAggregate",
+    eligible: "onlyContiguousVerifiedPrefixBeforeAnchor",
+    appInstance: "never",
+    unchangedTables: [
+      "operation_receipts", "chat_messages", "prepared_workspaces", "ledger_baselines",
+      "projects", "chats", "runs", "locks", "app_instances",
+    ],
+    snapshotFiles: "neverMutated",
+    checkpointOrVacuumRequiredForSuccess: false,
+  },
+  equivalence: {
+    maxRowsPerBatch: STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+    before: [
+      "baselinePlusTailReplaysCurrentProjection",
+      "operationReceiptsClassifyEveryDeletedOperation",
+      "introducedMessagesHaveFrozenSources",
+      "namespaceDecisionsMatchLegacyActualRecovery",
+    ],
+    after: [
+      "anchorPlusTailReplaysCurrentProjection",
+      "preservedArtifactsByteExact",
+      "deletedOperationsRemainDuplicateOrConflictByReceipt",
+      "deletedIntroducedMessageIdsRemainReserved",
+    ],
+    failure: "rollbackWholeAtMost100RowDeleteBatch",
+    finalization: "exactEmptyAuthorityQueryThenSucceededSameTransaction",
+  },
+  replay: {
+    deletedOperationAuthority: "operationReceiptsCanonicalPayloadAndIdentity",
+    duplicate: "exactCanonicalReceiptMatchIsDuplicateNoOp",
+    conflict: "sameOperationIdAnyImmutableDifferenceIsConflict",
+    namespaces: ["legacy", "actualAgent", "recovery"],
+    namespaceDecisionEquality: true,
+    deletedMessageIntroduction: "frozenMessageSourceReservesMessageId",
+  },
+  queryPlanAcceptance: {
+    mode: "exactExplainQueryPlanDetail",
+    prefixLatest:
+      "SEARCH ledger_compaction_prefixes USING INDEX ledger_compaction_prefixes_latest (aggregate_type=? AND aggregate_id=?)",
+    deleteBatch: "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)",
+    authorityEmpty:
+      "SCAN ledger_compaction_delete_authority USING COVERING INDEX sqlite_autoindex_ledger_compaction_delete_authority_1",
+    frozenMessage:
+      "SEARCH frozen_message_sources USING INDEX sqlite_autoindex_frozen_message_sources_1 (message_id=?)",
+    reject: ["USE TEMP B-TREE", "SCAN events", "SCAN event_source_index"],
+  },
+} as const;
+
+export function validateStorageLosslessCompactionPolicyV1(
+  value: unknown,
+): Record<string, unknown> {
+  const policy = requireObject(value, "storage v7 lossless compaction policy");
+  if (!sameContractValue(policy, STORAGE_LOSSLESS_COMPACTION_POLICY_V1)) {
+    fail("storage v7 lossless compaction policy is not exact");
+  }
+  return policy;
+}
+
+export function validateStorageCompactionCursorV1(value: unknown): StorageCompactionCursorV1 {
+  const cursor = requireObject(value, "storage compaction cursor");
+  exactKeys(cursor, [
+    "schemaVersion", "cutoffEventRowid", "phase", "afterEventRowid", "scanExhausted",
+  ]);
+  const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "compaction.cutoffEventRowid");
+  const after = requireSafeUnsigned(cursor.afterEventRowid, "compaction.afterEventRowid");
+  if (cursor.schemaVersion !== STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1
+    || !STORAGE_COMPACTION_PHASES_V1.includes(cursor.phase as StorageCompactionPhaseV1)
+    || typeof cursor.scanExhausted !== "boolean" || after > cutoff) {
+    fail("storage compaction cursor is invalid");
+  }
+  return cursor as unknown as StorageCompactionCursorV1;
+}
+
+export function validateStorageCompactionCursorTransitionV1(
+  previousValue: unknown | null,
+  nextValue: unknown,
+): StorageCompactionCursorV1 {
+  const next = validateStorageCompactionCursorV1(nextValue);
+  if (previousValue === null) {
+    if (next.phase !== "freezeMessages" || next.afterEventRowid !== 0 || next.scanExhausted) {
+      fail("storage compaction must start freezeMessages at zero unexhausted");
+    }
+    return next;
+  }
+  const previous = validateStorageCompactionCursorV1(previousValue);
+  if (next.cutoffEventRowid !== previous.cutoffEventRowid) {
+    fail("storage compaction cursor cannot change its frozen cutoff");
+  }
+  if (next.phase === previous.phase) {
+    if (previous.scanExhausted || next.scanExhausted
+      || next.afterEventRowid <= previous.afterEventRowid) {
+      fail("storage compaction same-phase progress must increase within one bounded batch");
+    }
+    return next;
+  }
+  const previousIndex = STORAGE_COMPACTION_PHASES_V1.indexOf(previous.phase);
+  if (!previous.scanExhausted || next.scanExhausted
+    || STORAGE_COMPACTION_PHASES_V1[previousIndex + 1] !== next.phase
+    || next.afterEventRowid !== 0) {
+    fail("storage compaction phase advance requires exhausted exact predecessor");
+  }
+  return next;
+}
+
+export function validateStorageCompactionPrefixV1(value: unknown): StorageCompactionPrefixV1 {
+  const prefix = requireObject(value, "storage compaction prefix");
+  exactKeys(prefix, [
+    "prefixId", "aggregateType", "aggregateId", "deletedThroughSequence",
+    "anchorEventRowid", "anchorEventId", "anchorOperationId", "anchorAggregateSequence",
+    "baselineId", "baselineProjectionDigest", "createdAt", "verifiedAt",
+  ]);
+  const deleted = requireSafeUnsigned(prefix.deletedThroughSequence, "prefix.deletedThroughSequence");
+  const anchorRowid = requireSafeUnsigned(prefix.anchorEventRowid, "prefix.anchorEventRowid");
+  const anchorSequence = requireSafeUnsigned(
+    prefix.anchorAggregateSequence, "prefix.anchorAggregateSequence",
+  );
+  if (!nonEmpty(prefix.prefixId) || !nonEmpty(prefix.aggregateType)
+    || prefix.aggregateType === "app_instance" || !nonEmpty(prefix.aggregateId)
+    || deleted === 0 || anchorRowid === 0 || !nonEmpty(prefix.anchorEventId)
+    || !nonEmpty(prefix.anchorOperationId) || anchorSequence !== deleted + 1
+    || !nonEmpty(prefix.baselineId) || !nonEmpty(prefix.baselineProjectionDigest)) {
+    fail("storage compaction prefix must bind an exact successor anchor and baseline");
+  }
+  requireTimestamp(prefix.createdAt, "prefix.createdAt");
+  requireTimestamp(prefix.verifiedAt, "prefix.verifiedAt");
+  return prefix as unknown as StorageCompactionPrefixV1;
+}
+
+export function validateFrozenMessageSourceV1(value: unknown): FrozenMessageSourceV1 {
+  const source = requireObject(value, "frozen message source");
+  exactKeys(source, [
+    "messageId", "sourceEventRowid", "sourceEventId", "sourceOperationId", "chatId",
+    "sourceAggregateSequence", "durableSequence", "canonicalMessageJson", "messageDigest",
+    "frozenAt",
+  ]);
+  if (!nonEmpty(source.messageId)
+    || requireSafeUnsigned(source.sourceEventRowid, "frozen.sourceEventRowid") === 0
+    || !nonEmpty(source.sourceEventId) || !nonEmpty(source.sourceOperationId)
+    || !nonEmpty(source.chatId)
+    || requireSafeUnsigned(source.sourceAggregateSequence, "frozen.sourceAggregateSequence") === 0
+    || requireSafeUnsigned(source.durableSequence, "frozen.durableSequence") === 0
+    || !nonEmpty(source.canonicalMessageJson) || !nonEmpty(source.messageDigest)) {
+    fail("frozen message source must preserve exact introduction provenance");
+  }
+  requireTimestamp(source.frozenAt, "frozen.frozenAt");
+  return source as unknown as FrozenMessageSourceV1;
+}
+
+export function validateStorageCompactionDeleteAuthorityBatchV1(
+  value: unknown,
+): StorageCompactionDeleteAuthorityV1[] {
+  if (!Array.isArray(value) || value.length === 0
+    || value.length > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1) {
+    fail("storage compaction authority batch must contain one through one hundred rows");
+  }
+  const rows = value.map((item) => requireObject(item, "storage compaction authority"));
+  const expectedJob = rows[0]?.jobId;
+  const ordinals = new Set<number>();
+  const rowids = new Set<number>();
+  const eventIds = new Set<string>();
+  const operationIds = new Set<string>();
+  const aggregateTuples = new Set<string>();
+  for (const row of rows) {
+    exactKeys(row, [
+      "jobId", "ordinal", "prefixId", "prefixDeletedThroughSequence", "eventRowid",
+      "eventId", "operationId", "aggregateType", "aggregateId", "aggregateSequence",
+      "introducedMessageId", "frozenMessageId", "authorizedAt",
+    ]);
+    const ordinal = requireSafeUnsigned(row.ordinal, "authority.ordinal");
+    const prefix = requireSafeUnsigned(
+      row.prefixDeletedThroughSequence, "authority.prefixDeletedThroughSequence",
+    );
+    const rowid = requireSafeUnsigned(row.eventRowid, "authority.eventRowid");
+    const sequence = requireSafeUnsigned(row.aggregateSequence, "authority.aggregateSequence");
+    const tuple = `${String(row.aggregateType)}\u0000${String(row.aggregateId)}\u0000${sequence}`;
+    if (!nonEmpty(row.jobId) || row.jobId !== expectedJob || ordinal === 0
+      || ordinal > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1 || !nonEmpty(row.prefixId)
+      || prefix === 0 || rowid === 0 || !nonEmpty(row.eventId) || !nonEmpty(row.operationId)
+      || !nonEmpty(row.aggregateType) || row.aggregateType === "app_instance"
+      || !nonEmpty(row.aggregateId) || sequence === 0 || sequence > prefix
+      || row.introducedMessageId !== row.frozenMessageId
+      || ordinals.has(ordinal) || rowids.has(rowid)
+      || eventIds.has(row.eventId as string) || operationIds.has(row.operationId as string)
+      || aggregateTuples.has(tuple)) {
+      fail("storage compaction authority must be one exact distinct prefix-bound tuple");
+    }
+    ordinals.add(ordinal); rowids.add(rowid); eventIds.add(row.eventId as string);
+    operationIds.add(row.operationId as string); aggregateTuples.add(tuple);
+    requireTimestamp(row.authorizedAt, "authority.authorizedAt");
+  }
+  return rows as unknown as StorageCompactionDeleteAuthorityV1[];
+}
+
+export function validateStorageCompactionJobV1(value: unknown): StorageCompactionJobV1 {
+  const job = requireObject(value, "storage compaction job");
+  exactKeys(job, [
+    "jobId", "state", "cursor", "authorityCount", "equivalenceVerified",
+    "failureKind", "completedAt",
+  ]);
+  const cursor = validateStorageCompactionCursorV1(job.cursor);
+  const authorityCount = requireSafeUnsigned(job.authorityCount, "compaction.authorityCount");
+  if (!nonEmpty(job.jobId) || authorityCount > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    || !["pending", "running", "succeeded", "failed"].includes(job.state as string)
+    || typeof job.equivalenceVerified !== "boolean") {
+    fail("storage compaction job identity or authority count is invalid");
+  }
+  if (job.state === "pending" || job.state === "running") {
+    if (job.failureKind !== null || job.completedAt !== null) {
+      fail("nonterminal compaction job cannot carry terminal evidence");
+    }
+  } else if (job.state === "succeeded") {
+    if (authorityCount !== 0 || !job.equivalenceVerified || cursor.phase !== "finalize"
+      || !cursor.scanExhausted || job.failureKind !== null) {
+      fail("successful compaction requires empty authority and verified finalization");
+    }
+    requireTimestamp(job.completedAt, "compaction.completedAt");
+  } else {
+    if (authorityCount !== 0 || typeof job.failureKind !== "string"
+      || !/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(job.failureKind)) {
+      fail("failed compaction requires empty authority and sanitized evidence");
+    }
+    requireTimestamp(job.completedAt, "compaction.completedAt");
+  }
+  return job as unknown as StorageCompactionJobV1;
+}
+
+export function validateStorageCompactionLifecycleTransitionV1(
+  operation: StorageCompactionLifecycleOperationV1,
+  previousValue: unknown,
+  nextValue: unknown,
+): StorageCompactionJobV1 {
+  const previous = validateStorageCompactionJobV1(previousValue);
+  const next = validateStorageCompactionJobV1(nextValue);
+  if (previous.jobId !== next.jobId) fail("storage compaction lifecycle cannot change job identity");
+  const sameCursor = sameContractValue(previous.cursor, next.cursor);
+  const valid = operation === "arm"
+    ? previous.state === "pending" && next.state === "running"
+      && previous.authorityCount === 0 && next.authorityCount === 0 && sameCursor
+      && previous.equivalenceVerified === next.equivalenceVerified
+    : operation === "batchSuccess"
+      ? previous.state === "running" && previous.authorityCount > 0
+        && next.state === "pending" && next.authorityCount === 0
+        && transitionAccepted(previous.cursor, next.cursor)
+      : operation === "cancelBeforeArm"
+        ? previous.state === "pending" && previous.authorityCount === 0
+          && sameContractValue(previous, next)
+        : operation === "cancelAfterArm"
+          ? previous.state === "running" && previous.authorityCount === 0
+            && sameContractValue(previous, next)
+          : operation === "fail"
+            ? previous.state === "running" && previous.authorityCount === 0
+              && next.state === "failed" && next.authorityCount === 0 && sameCursor
+            : previous.state === "pending" && previous.authorityCount === 0
+              && previous.equivalenceVerified && previous.cursor.phase === "finalize"
+              && previous.cursor.scanExhausted && next.state === "succeeded" && sameCursor;
+  if (!valid) fail("storage compaction lifecycle transition is not fail-closed");
+  return next;
+}
+
+export function validateStorageCompactionEquivalenceV1(
+  value: unknown,
+): StorageCompactionEquivalenceV1 {
+  const evidence = requireObject(value, "storage compaction equivalence");
+  exactKeys(evidence, [
+    "baselineTailBefore", "anchorTailAfter", "preservedArtifactsByteExact",
+    "receiptReplayEquivalent", "namespaceDecisionsEquivalent", "frozenMessageIdsReserved",
+    "authorityEmpty", "rowsInBatch",
+  ]);
+  const rows = requireSafeUnsigned(evidence.rowsInBatch, "equivalence.rowsInBatch");
+  if (rows === 0 || rows > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    || evidence.baselineTailBefore !== true || evidence.anchorTailAfter !== true
+    || evidence.preservedArtifactsByteExact !== true
+    || evidence.receiptReplayEquivalent !== true
+    || evidence.namespaceDecisionsEquivalent !== true
+    || evidence.frozenMessageIdsReserved !== true || evidence.authorityEmpty !== true) {
+    fail("storage compaction equivalence evidence is incomplete");
+  }
+  return evidence as unknown as StorageCompactionEquivalenceV1;
+}
+
+function transitionAccepted(previous: StorageCompactionCursorV1, next: StorageCompactionCursorV1) {
+  try {
+    validateStorageCompactionCursorTransitionV1(previous, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 export function validateStorageEventSourceIndexEntryV1(
