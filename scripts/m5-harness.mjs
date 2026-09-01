@@ -53,6 +53,11 @@ const gates = [
     scripts: ["m5:test:run-recovery"],
   },
   {
+    id: "g5d-storage-lifetime",
+    description: "source-indexed 저장 수명과 bounded materialization",
+    scripts: ["m5:test:storage-lifetime"],
+  },
+  {
     id: "g6-release",
     description: "보안, 패키징, 성능과 M5.0 완료 게이트",
     scripts: ["m5:test:security", "m5:test:package", "m5:test:performance"],

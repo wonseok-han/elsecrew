@@ -22,6 +22,7 @@ test("하네스가 M5 게이트와 준비 상태를 기계적으로 나열한다
   assert.match(result.stdout, /g3-storage\s+READY/);
   assert.match(result.stdout, /g4-project-editor\s+READY/);
   assert.match(result.stdout, /g5-run-recovery\s+READY/);
+  assert.match(result.stdout, /g5d-storage-lifetime\s+READY/);
   assert.match(result.stdout, /g6-release\s+NOT_READY/);
 });
 
@@ -36,6 +37,18 @@ test("G5 누적 게이트는 G5A~G5C actual-agent 회귀를 포함한다", () =>
   assert.match(command, /tests\/m5-g5c-provider-contract\.test\.mts/);
   assert.match(command, /tests\/m5-g5c-identityless-recovery-contract\.test\.mts/);
   assert.match(command, /tests\/m5-g5a-public-event-ui\.test\.mts/);
+});
+
+test("G5D 누적 게이트는 lifetime 계약과 V6 migration·bounded worker를 포함한다", () => {
+  const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  const command = packageJson.scripts["m5:test:storage-lifetime"] ?? "";
+
+  assert.match(command, /tests\/m5-g5d-lifetime-contract\.test\.mts/);
+  assert.match(command, /hello-agent-protocol --locked storage_lifetime_v1/);
+  assert.match(command, /hello-agent-sidecar --locked storage::tests/);
+  assert.match(command, /hello-agent-sidecar --locked bounded_v6/);
 });
 
 test("다음 미구현 게이트는 성공이나 skip 대신 NOT_READY로 끝난다", () => {
