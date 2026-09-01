@@ -9,6 +9,7 @@ import test from "node:test";
 import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
 import { M5_BRIDGE_V6_METHODS } from "../src/m5/contracts/bridge-v6.ts";
 import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
+import { canonicalJsonV1 } from "../src/m5/contracts/storage-v1.ts";
 import {
   LOSSLESS_COMPACTION_STEPS_V1,
   NEVER_CLEANUP_STATES_V1,
@@ -29,7 +30,9 @@ import {
   STORAGE_LIFETIME_SCHEMA_VERSION_V5,
   STORAGE_LIFETIME_SCHEMA_VERSION_V6,
   STORAGE_LIFETIME_SCHEMA_VERSION_V7,
+  STORAGE_LIFETIME_SCHEMA_VERSION_V8,
   STORAGE_COMPACTION_PHASES_V1,
+  STORAGE_COMPACTION_PHASES_V2,
   STORAGE_LIFETIME_PHASES_V3,
   STORAGE_LIFETIME_PHASES_V4,
   STORAGE_LIFETIME_TABLES_V2,
@@ -73,7 +76,20 @@ import {
   validateStorageLifetimeReopenPairV4,
   validateStorageLifetimeV6PreflightPolicyV1,
   validateStorageLifetimeV7PreflightPolicyV1,
+  validateStorageLifetimeV8PreflightPolicyV1,
   validateStorageLosslessCompactionPolicyV1,
+  canonicalFrozenOperationRecordV1,
+  validateFrozenOperationSourceV1,
+  validateFrozenOperationSourceBatchV1,
+  validateFrozenOperationSourceBindingV1,
+  validateFrozenOperationReceiptBindingV1,
+  validateStorageFrozenOperationSourcePolicyV1,
+  validateStorageRuntimeSourceAuthorityPolicyV1,
+  validateStorageRuntimeSourceAuthorityV1,
+  validateStorageCompactionPolicyV2,
+  validateStorageCompactionCursorTransitionV2 as validateStorageCompactionCursorTransitionV2Contract,
+  validateStorageCompactionLifecycleTransitionV2,
+  validateStorageCompactionEquivalenceV2,
   validateStorageCompactionCursorV1,
   validateStorageCompactionCursorTransitionV1,
   validateStorageCompactionPrefixV1,
@@ -454,6 +470,85 @@ interface V7Cases {
   invalidPolicyMutations: PolicyMutation[];
 }
 
+interface ManifestV8 {
+  schemaVersion: number;
+  storageSchemaVersion: number;
+  protocolVersion: number;
+  payloadSchemaVersion: number;
+  migration: {
+    file: string;
+    predecessorMigrationFile: string;
+    predecessorMigrationMutationAllowed: boolean;
+    fromVersion: number;
+    toVersion: number;
+    mode: string;
+    preflight: unknown;
+    idempotency: string;
+    historyBackfill: string;
+    tablesAdded: string[];
+    tablesRebuilt: string[];
+    indexesAdded: string[];
+    triggersAdded: string[];
+    triggersVersionReplaced: string[];
+    runtimeGuardDdlAllowed: boolean;
+    existingRowsDeleted: boolean;
+    preservedTables: string[];
+  };
+  frozenOperationSources: Record<string, unknown> & {
+    casesFile: string;
+    queryPlanAcceptance: Record<string, string | string[]>;
+  };
+  runtimeSourceAuthority: Record<string, unknown>;
+  compactionV2: Record<string, unknown>;
+}
+
+interface V8Cases {
+  migrationMatrix: {
+    admissiblePairs: string[];
+    rejectedPairs: string[];
+    allowedMaintenanceStates: string[];
+    rejectedMaintenanceStates: string[];
+    requiredEmptyV7Tables: string[];
+    newTableInitialCounts: Record<string, number>;
+    historyBackfillRows: number;
+  };
+  validFrozenOperationSources: NamedValue[];
+  invalidFrozenOperationMutations: PolicyMutation[];
+  bindingTamperCases: string[];
+  runtimeAuthorityCases: { valid: NamedValue[]; invalid: NamedValue[] };
+  validCursorTransitionsV2: Array<CursorTransitionCase & { evidence: unknown | null }>;
+  invalidCursorTransitionsV2: Array<CursorTransitionCase & { evidence: unknown | null }>;
+  validLifecycleTransitionsV2: Array<{
+    name: string;
+    operation: "arm" | "batchSuccess" | "cancelBeforeArm" | "cancelAfterArm"
+      | "commitUncertain" | "complete";
+    previous: unknown;
+    next: unknown;
+    evidence: unknown | null;
+  }>;
+  invalidLifecycleMutationsV2: Array<{
+    name: string;
+    caseIndex: number;
+    path: string[];
+    replacement: unknown;
+  }>;
+  equivalenceCasesV2: {
+    valid: unknown;
+    invalidFields: string[];
+    invalidRowsInBatch: number[];
+  };
+  namespaceReplay: Array<{ namespace: string; duplicate: string; conflict: string }>;
+  preservedV7MessageReuse: {
+    deletedIntroducingEvent: string;
+    newIntroduction: string;
+  };
+  queryPlans: Array<{ name: string; sql: string; detail: string }>;
+  invalidPreflightMutations: PolicyMutation[];
+  invalidPolicyMutations: Array<PolicyMutation & {
+    target: "frozenOperationSources" | "runtimeSourceAuthority" | "compactionV2";
+  }>;
+}
+
 interface V5CatchUpCase {
   name: string;
   previousState: "pending" | "attempting" | "failed";
@@ -532,6 +627,7 @@ const rootV4 = resolve("tests/fixtures/m5/storage-v4");
 const rootV5 = resolve("tests/fixtures/m5/storage-v5");
 const rootV6 = resolve("tests/fixtures/m5/storage-v6");
 const rootV7 = resolve("tests/fixtures/m5/storage-v7");
+const rootV8 = resolve("tests/fixtures/m5/storage-v8");
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const manifestV3 = readJson<ManifestV3>(resolve(rootV3, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
@@ -552,6 +648,10 @@ const v6Cases = readJson<V6Cases>(
 const manifestV7 = readJson<ManifestV7>(resolve(rootV7, "manifest.json"));
 const v7Cases = readJson<V7Cases>(
   resolve(rootV7, manifestV7.losslessCompaction.casesFile),
+);
+const manifestV8 = readJson<ManifestV8>(resolve(rootV8, "manifest.json"));
+const v8Cases = readJson<V8Cases>(
+  resolve(rootV8, manifestV8.frozenOperationSources.casesFile),
 );
 
 test("storage-v2 golden migration is additive and preserves v1 rows byte-for-byte", () => {
@@ -2479,7 +2579,479 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
   }
 });
 
-test("storage-v1 through storage-v6 golden files remain immutable", () => {
+test("storage-v8 freezes operation provenance without activating product deletion", () => {
+  assert.equal(manifestV8.schemaVersion, 1);
+  assert.equal(manifestV8.storageSchemaVersion, STORAGE_LIFETIME_SCHEMA_VERSION_V8);
+  assert.equal(manifestV8.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(manifestV8.payloadSchemaVersion, 1);
+  assert.equal(manifestV8.migration.fromVersion, 7);
+  assert.equal(manifestV8.migration.toVersion, 8);
+  assert.equal(manifestV8.migration.predecessorMigrationFile,
+    "../storage-v7/migration-v6-to-v7.sql");
+  assert.equal(manifestV8.migration.predecessorMigrationMutationAllowed, false);
+  assert.equal(manifestV8.migration.historyBackfill, "none");
+  assert.equal(manifestV8.migration.runtimeGuardDdlAllowed, false);
+  assert.equal(manifestV8.migration.existingRowsDeleted, false);
+  assert.deepEqual(manifestV8.migration.tablesAdded, ["frozen_operation_sources"]);
+  assert.deepEqual(validateStorageLifetimeV8PreflightPolicyV1(
+    manifestV8.migration.preflight,
+  ), manifestV8.migration.preflight);
+  assert.deepEqual(validateStorageFrozenOperationSourcePolicyV1(
+    manifestV8.frozenOperationSources,
+  ), manifestV8.frozenOperationSources);
+  assert.deepEqual(validateStorageRuntimeSourceAuthorityPolicyV1(
+    manifestV8.runtimeSourceAuthority,
+  ), manifestV8.runtimeSourceAuthority);
+  assert.deepEqual(validateStorageCompactionPolicyV2(
+    manifestV8.compactionV2,
+  ), manifestV8.compactionV2);
+  assert.deepEqual(STORAGE_COMPACTION_PHASES_V2, [
+    "freezeOperations", "freezeMessages", "verifyPrefix", "authorizeDelete",
+    "deletePrefix", "verifyOperations", "verifyEquivalence", "finalize",
+  ]);
+
+  const validFixture = v8Cases.validFrozenOperationSources[0]!.value;
+  assert.deepEqual(validateFrozenOperationSourceV1(validFixture), validFixture);
+  validateFrozenOperationSourceBatchV1([validFixture]);
+  assert.throws(() => validateFrozenOperationSourceBatchV1([]));
+  assert.throws(() => validateFrozenOperationSourceBatchV1(
+    Array.from({ length: 101 }, () => validFixture),
+  ));
+  for (const mutation of v8Cases.invalidFrozenOperationMutations) {
+    const invalid = structuredClone(validFixture);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => validateFrozenOperationSourceV1(invalid), undefined, mutation.name);
+  }
+
+  const projectEvent = v6Cases.sourceIndex.sourceEvents[0]!.event;
+  const projectEntryRow = v6Cases.sourceIndex.validRows[0]!.value;
+  const projectEntry = {
+    eventRowid: projectEntryRow[0], eventId: projectEntryRow[1],
+    operationId: projectEntryRow[2], aggregateType: projectEntryRow[3],
+    aggregateId: projectEntryRow[4], aggregateSequence: projectEntryRow[5],
+    introducedMessageId: projectEntryRow[6], chatDurableSequence: projectEntryRow[7],
+    chatSnapshotMessageId: projectEntryRow[8],
+  };
+  const projectReceipt = {
+    operationId: projectEvent.operation_id, eventId: projectEvent.event_id,
+    aggregateType: projectEvent.aggregate_type, aggregateId: projectEvent.aggregate_id,
+    aggregateSequence: projectEvent.aggregate_sequence, eventType: projectEvent.event_type,
+    payloadSchemaVersion: 1, canonicalPayloadJson: projectEvent.canonical_json_payload,
+    canonicalPayloadDigestAlgorithm: "sha256", canonicalPayloadDigestVersion: 1,
+    canonicalPayloadDigestFormat: "lowercaseHex64",
+    canonicalPayloadDigest: createHash("sha256")
+      .update(projectEvent.canonical_json_payload).digest("hex"),
+    eventTimestamp: projectEvent.timestamp,
+  };
+  validateFrozenOperationSourceBindingV1(
+    validFixture, 1, projectEvent, projectEntry, projectReceipt,
+  );
+  for (const [name, invalidReceipt] of [
+    ["receipt event id", { ...projectReceipt, eventId: "evt_other" }],
+    ["receipt event type", { ...projectReceipt, eventType: "project.deleted" }],
+    ["receipt timestamp", { ...projectReceipt, eventTimestamp: "2026-09-01T10:00:00Z" }],
+  ] as const) {
+    assert.throws(() => validateFrozenOperationSourceBindingV1(
+      validFixture, 1, projectEvent, projectEntry, invalidReceipt,
+    ), undefined, name);
+    assert.throws(() => validateFrozenOperationReceiptBindingV1(
+      validFixture, invalidReceipt,
+    ), undefined, `${name} after source deletion`);
+  }
+  validateFrozenOperationReceiptBindingV1(validFixture, projectReceipt);
+  assert.deepEqual(new Set(v8Cases.bindingTamperCases), new Set([
+    "receiptEventId", "receiptEventType", "receiptEventTimestamp",
+    "payloadAndDigestTogether", "aggregateAndOperationTogether",
+    "sourceIndexIdentity", "receiptOnly", "appInstance",
+  ]));
+
+  for (const fixture of v8Cases.runtimeAuthorityCases.valid) {
+    validateStorageRuntimeSourceAuthorityV1(fixture.value);
+  }
+  for (const fixture of v8Cases.runtimeAuthorityCases.invalid) {
+    assert.throws(() => validateStorageRuntimeSourceAuthorityV1(fixture.value), undefined,
+      fixture.name);
+  }
+  for (const fixture of v8Cases.validCursorTransitionsV2) {
+    validateStorageCompactionCursorTransitionV2Contract(
+      fixture.previous, fixture.next, fixture.evidence,
+    );
+  }
+  for (const fixture of v8Cases.invalidCursorTransitionsV2) {
+    assert.throws(() => validateStorageCompactionCursorTransitionV2Contract(
+      fixture.previous, fixture.next, fixture.evidence,
+    ), undefined, fixture.name);
+  }
+  for (const fixture of v8Cases.validLifecycleTransitionsV2) {
+    validateStorageCompactionLifecycleTransitionV2(
+      fixture.operation, fixture.previous, fixture.next, fixture.evidence,
+    );
+  }
+  for (const mutation of v8Cases.invalidLifecycleMutationsV2) {
+    const fixture = structuredClone(v8Cases.validLifecycleTransitionsV2[mutation.caseIndex]);
+    assert.ok(fixture);
+    setPath(fixture, mutation.path, mutation.replacement);
+    assert.throws(() => validateStorageCompactionLifecycleTransitionV2(
+      fixture.operation, fixture.previous, fixture.next, fixture.evidence,
+    ), undefined, mutation.name);
+  }
+  validateStorageCompactionEquivalenceV2(v8Cases.equivalenceCasesV2.valid);
+  for (const field of v8Cases.equivalenceCasesV2.invalidFields) {
+    const invalid = structuredClone(v8Cases.equivalenceCasesV2.valid) as Record<string, unknown>;
+    invalid[field] = false;
+    assert.throws(() => validateStorageCompactionEquivalenceV2(invalid), undefined, field);
+  }
+  for (const rowsInBatch of v8Cases.equivalenceCasesV2.invalidRowsInBatch) {
+    const invalid = structuredClone(v8Cases.equivalenceCasesV2.valid) as Record<string, unknown>;
+    invalid.rowsInBatch = rowsInBatch;
+    assert.throws(() => validateStorageCompactionEquivalenceV2(invalid));
+  }
+  assert.deepEqual(v8Cases.namespaceReplay.map((entry) => [
+    entry.namespace, entry.duplicate, entry.conflict,
+  ]), [
+    ["legacy", "duplicateNoOp", "conflict"],
+    ["actualAgent", "duplicateNoOp", "conflict"],
+    ["recovery", "duplicateNoOp", "conflict"],
+  ]);
+  assert.deepEqual(v8Cases.preservedV7MessageReuse, {
+    deletedIntroducingEvent: "frozenMessageIdentityRemainsReserved",
+    newIntroduction: "uniqueConstraintRejected",
+  });
+  for (const mutation of v8Cases.invalidPreflightMutations) {
+    const invalid = structuredClone(manifestV8.migration.preflight);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => validateStorageLifetimeV8PreflightPolicyV1(invalid), undefined,
+      mutation.name);
+  }
+  const policyValidators = {
+    frozenOperationSources: validateStorageFrozenOperationSourcePolicyV1,
+    runtimeSourceAuthority: validateStorageRuntimeSourceAuthorityPolicyV1,
+    compactionV2: validateStorageCompactionPolicyV2,
+  };
+  for (const mutation of v8Cases.invalidPolicyMutations) {
+    const invalid = structuredClone(manifestV8[mutation.target]);
+    setPath(invalid, mutation.path, mutation.replacement);
+    assert.throws(() => policyValidators[mutation.target](invalid), undefined, mutation.name);
+  }
+
+  const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const migrationV7 = readFileSync(resolve(rootV7, manifestV7.migration.file), "utf8");
+  const migrationV8 = readFileSync(resolve(rootV8, manifestV8.migration.file), "utf8");
+  assert.doesNotMatch(migrationV8, /sha3|load_extension|CREATE FUNCTION/i);
+  assert.match(migrationV8, /consumer must independently recompute/i);
+  assert.doesNotMatch(migrationV8, /DELETE FROM events\s*;/i);
+  assert.doesNotMatch(migrationV8, /VACUUM/i);
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v8-"));
+  try {
+    const reference = createExactStorageV5Database(join(temporaryRoot, "reference.db"), false);
+    applyExactStorageV6Migration(reference, migrationV6, schemaSignature(reference), null);
+    const exactV6 = schemaSignature(reference);
+    applyExactStorageV7Migration(reference, migrationV7, exactV6, null);
+    const exactV7 = schemaSignature(reference);
+    applyExactStorageV8Migration(reference, migrationV8, exactV7, null);
+    const exactV8 = schemaSignature(reference);
+    assert.equal(reference.prepare(
+      "SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1",
+    ).get()?.storage_schema_version, 8);
+    for (const [table, count] of Object.entries(v8Cases.migrationMatrix.newTableInitialCounts)) {
+      assert.equal(reference.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count, count);
+    }
+    applyExactStorageV8Migration(reference, migrationV8, exactV7, exactV8);
+    reference.close();
+
+    for (const mapping of [
+      { name: "ready-absent", materializationState: "ready", jobState: null },
+      { name: "pending-absent", materializationState: "pending", jobState: null },
+      { name: "pending-pending", materializationState: "pending", jobState: "pending" },
+      { name: "pending-failed", materializationState: "pending", jobState: "failed" },
+    ] as const) {
+      const mapped = createExactStorageV5Database(join(temporaryRoot, `${mapping.name}.db`), false);
+      applyExactStorageV6Migration(mapped, migrationV6, schemaSignature(mapped), exactV6);
+      mapped.prepare("UPDATE storage_schema_meta SET materialization_state=?")
+        .run(mapping.materializationState);
+      if (mapping.jobState !== null) {
+        insertV5LifetimeJob(mapped, mapping.jobState, "indexSource", 0, false);
+      }
+      mapped.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('historic','losslessCompaction','succeeded','{}','start','done','done',NULL,'created','done')
+      `).run();
+      const pairBefore = readV6Pair(mapped);
+      const rowsBefore = databaseRowsSnapshot(mapped);
+      applyExactStorageV7Migration(mapped, migrationV7, exactV6, exactV7);
+      const rowsBeforeV8 = databaseRowsSnapshot(mapped);
+      applyExactStorageV8Migration(mapped, migrationV8, exactV7, exactV8);
+      assert.deepEqual(readV6Pair(mapped), pairBefore, mapping.name);
+      assert.notEqual(rowsBefore, rowsBeforeV8, "v7 schema version transition is expected");
+      assert.equal(normalizedRows(mapped, "maintenance_jobs")[0]?.job_id, "historic");
+      assert.equal(mapped.prepare(
+        "SELECT COUNT(*) AS count FROM frozen_operation_sources",
+      ).get()?.count, 0);
+      mapped.close();
+    }
+
+    const database = createExactStorageV5Database(join(temporaryRoot, "guarded.db"), false);
+    applyExactStorageV6Migration(database, migrationV6, schemaSignature(database), exactV6);
+    seedStorageV6CompactionFixture(database, true);
+    seedV8OperationReceipts(database);
+    applyExactStorageV7Migration(database, migrationV7, exactV6, exactV7);
+    const preservedBefore = new Map(manifestV8.migration.preservedTables.map((table) => [
+      table, normalizedRows(database, table),
+    ]));
+    applyExactStorageV8Migration(database, migrationV8, exactV7, exactV8);
+    for (const table of manifestV8.migration.preservedTables) {
+      assert.deepEqual(normalizedRows(database, table), preservedBefore.get(table), table);
+    }
+    assert.equal(database.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
+
+    const project1 = frozenOperationForEvent(1, database);
+    const insertCandidate = (candidate: typeof project1) => database.prepare(`
+      INSERT INTO frozen_operation_sources(
+        operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,aggregate_id,
+        aggregate_sequence,event_type,payload_schema_version,canonical_payload_json,
+        canonical_payload_digest,event_timestamp,canonical_record_json,record_digest,frozen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      candidate.operationId, candidate.sourceEventRowid, candidate.sourceEventId,
+      candidate.requestId, candidate.aggregateType, candidate.aggregateId,
+      candidate.aggregateSequence, candidate.eventType, candidate.payloadSchemaVersion,
+      candidate.canonicalPayloadJson, candidate.canonicalPayloadDigest,
+      candidate.eventTimestamp, candidate.canonicalRecordJson, candidate.recordDigest,
+      candidate.frozenAt,
+    );
+    for (const [name, candidate] of [
+      ["nonexistent source", { ...project1, sourceEventRowid: 99 }],
+      ["source event identity", { ...project1, sourceEventId: "evt_other" }],
+      ["aggregate identity", { ...project1, aggregateId: "project_other" }],
+      ["payload and digest", {
+        ...project1, canonicalPayloadJson: "{}",
+        canonicalPayloadDigest: createHash("sha256").update("{}").digest("hex"),
+      }],
+      ["canonical envelope", { ...project1, canonicalRecordJson: "{}" }],
+    ] as const) {
+      assert.throws(() => insertCandidate(candidate as typeof project1), undefined, name);
+    }
+    const wrongRecordDigest = { ...project1, recordDigest: "b".repeat(64) };
+    assert.throws(() => validateFrozenOperationSourceV1(wrongRecordDigest), undefined,
+      "consumer must reject wrong full-record digest before SQL");
+    insertFrozenOperation(database, project1);
+    assert.throws(() => database.prepare(
+      "UPDATE frozen_operation_sources SET frozen_at='later' WHERE operation_id='op_project_1'",
+    ).run());
+    assert.throws(() => database.prepare(
+      "DELETE FROM frozen_operation_sources WHERE operation_id='op_project_1'",
+    ).run());
+    assert.throws(() => database.prepare(
+      "UPDATE operation_receipts SET event_type='tampered' WHERE operation_id='op_project_1'",
+    ).run());
+    assert.throws(() => database.prepare(
+      "DELETE FROM operation_receipts WHERE operation_id='op_project_1'",
+    ).run());
+
+    const insertPrefix = database.prepare(`
+      INSERT INTO ledger_compaction_prefixes(
+        prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,
+        anchor_event_rowid,anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,
+        baseline_id,baseline_projection_digest,created_at,verified_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    const prefixValues = [
+      "prefix_project_1_1", "project", "project_1", 1, 3, "evt_project_2", "op_project_2", 2,
+      "baseline_project_1_1", "digest-project-1", "2026-09-01T10:01:00Z",
+      "2026-09-01T10:01:01Z",
+    ] as const;
+    assert.throws(() => insertPrefix.run(...prefixValues));
+    insertFrozenOperation(database, frozenOperationForEvent(3, database));
+    insertPrefix.run(...prefixValues);
+
+    const insertFrozenMessage = database.prepare(`
+      INSERT INTO frozen_message_sources(
+        message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+        source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?)
+    `);
+    const messageValues = [
+      "message_a", 2, "evt_chat_1", "op_chat_1", "chat_1", 1, 1,
+      '{"messageId":"message_a"}', "digest-message-a", "2026-09-01T10:02:00Z",
+    ] as const;
+    assert.throws(() => insertFrozenMessage.run(...messageValues));
+    insertFrozenOperation(database, frozenOperationForEvent(2, database));
+    insertFrozenMessage.run(...messageValues);
+    database.prepare(`
+      INSERT INTO events(
+        event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+        event_type,payload_schema_version,canonical_json_payload,timestamp
+      ) VALUES('evt_chat_reuse','op_chat_reuse',NULL,'chat','chat_1',5,'chat.upserted',1,
+        '{"durable_event_sequence":3,"last_message":{"schemaVersion":1,"messageId":"message_a","chatId":"chat_1","taskId":"task_1","worktreeId":"worktree_1","eventSequence":3,"kind":"user","roleId":null,"runId":null,"text":"reuse","createdAt":"2026-09-01T10:02:01Z"}}',
+        '2026-09-01T10:02:01Z')
+    `).run();
+    assert.throws(() => database.prepare(`
+      INSERT INTO event_source_index(
+        event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,
+        introduced_message_id,chat_durable_sequence,chat_snapshot_message_id
+      ) VALUES(8,'evt_chat_reuse','op_chat_reuse','chat','chat_1',5,'message_a',3,'message_a')
+    `).run());
+
+    database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_v8','losslessCompaction','running','{}','now',NULL,NULL,NULL,'now','now')
+    `).run();
+    database.prepare(`
+      INSERT INTO ledger_compaction_delete_authority(
+        job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,
+        aggregate_type,aggregate_id,aggregate_sequence,authorized_at
+      ) VALUES('compact_v8',1,'prefix_project_1_1',1,'evt_project_1','op_project_1',
+        'project','project_1',1,'2026-09-01T10:03:00Z')
+    `).run();
+    assert.throws(() => insertCandidate({
+      ...project1, operationId: "op_instance_1", sourceEventRowid: 7,
+      sourceEventId: "evt_instance_1", aggregateType: "app_instance" as "project",
+      aggregateId: "instance_1", eventType: "app_instance.started",
+    }));
+
+    const declaredPlans = Object.keys(
+      manifestV8.frozenOperationSources.queryPlanAcceptance,
+    ).filter((key) => key !== "mode" && key !== "reject").sort();
+    assert.deepEqual(declaredPlans, v8Cases.queryPlans.map((plan) => plan.name).sort());
+    for (const fixture of v8Cases.queryPlans) {
+      const plans = database.prepare(fixture.sql).all();
+      assert.equal(plans.length, 1, fixture.name);
+      assert.equal(plans[0]?.detail, fixture.detail, fixture.name);
+      assert.doesNotMatch(String(plans[0]?.detail), /SCAN|USE TEMP B-TREE/, fixture.name);
+    }
+    database.close();
+
+    const receiptTamper = createExactStorageV5Database(
+      join(temporaryRoot, "receipt-tamper.db"), false,
+    );
+    applyExactStorageV6Migration(
+      receiptTamper, migrationV6, schemaSignature(receiptTamper), exactV6,
+    );
+    seedStorageV6CompactionFixture(receiptTamper, true);
+    seedV8OperationReceipts(receiptTamper);
+    receiptTamper.prepare(
+      "UPDATE operation_receipts SET event_id='evt_receipt_other' WHERE operation_id='op_project_1'",
+    ).run();
+    receiptTamper.prepare(
+      "UPDATE operation_receipts SET event_type='chat.deleted' WHERE operation_id='op_chat_1'",
+    ).run();
+    receiptTamper.prepare(
+      "UPDATE operation_receipts SET event_timestamp='2026-09-01T10:00:00Z' WHERE operation_id='op_project_2'",
+    ).run();
+    applyExactStorageV7Migration(receiptTamper, migrationV7, exactV6, exactV7);
+    applyExactStorageV8Migration(receiptTamper, migrationV8, exactV7, exactV8);
+    for (const [name, rowid] of [
+      ["receipt event id", 1], ["receipt event type", 2], ["receipt timestamp", 3],
+    ] as const) {
+      assert.throws(() => insertFrozenOperation(
+        receiptTamper, frozenOperationForEvent(rowid, receiptTamper),
+      ), undefined, name);
+    }
+    receiptTamper.close();
+
+    for (const [name, prepareUnsafe] of [
+      ["attempting", (db: DatabaseSync) => {
+        db.prepare("UPDATE storage_schema_meta SET materialization_state='pending'").run();
+        insertV5LifetimeJob(db, "attempting", "indexSource", 0, false);
+      }],
+      ["pending-maintenance", (db: DatabaseSync) => db.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('active','losslessCompaction','pending',NULL,NULL,NULL,NULL,NULL,'now','now')
+      `).run()],
+      ["running-maintenance", (db: DatabaseSync) => db.prepare(`
+        INSERT INTO maintenance_jobs(
+          job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+          failure_kind,created_at,updated_at
+        ) VALUES('active','losslessCompaction','running',NULL,'now',NULL,NULL,NULL,'now','now')
+      `).run()],
+      ["partial-target", (db: DatabaseSync) => db.exec(
+        "CREATE TABLE frozen_operation_sources(operation_id TEXT PRIMARY KEY) STRICT",
+      )],
+      ["extra-schema", (db: DatabaseSync) => db.exec(
+        "CREATE TABLE unexpected_v8(value TEXT) STRICT",
+      )],
+    ] as Array<[string, (database: DatabaseSync) => unknown]>) {
+      const unsafe = createExactStorageV5Database(join(temporaryRoot, `${name}.db`), false);
+      applyExactStorageV6Migration(unsafe, migrationV6, schemaSignature(unsafe), exactV6);
+      applyExactStorageV7Migration(unsafe, migrationV7, exactV6, exactV7);
+      prepareUnsafe(unsafe);
+      const before = `${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`;
+      assert.throws(() => applyExactStorageV8Migration(
+        unsafe, migrationV8, exactV7, exactV8,
+      ), undefined, name);
+      assert.equal(`${schemaSignature(unsafe)}\n${databaseRowsSnapshot(unsafe)}`, before, name);
+      unsafe.close();
+    }
+
+    const compacted = createExactStorageV5Database(join(temporaryRoot, "compacted.db"), false);
+    applyExactStorageV6Migration(compacted, migrationV6, schemaSignature(compacted), exactV6);
+    seedStorageV6CompactionFixture(compacted);
+    applyExactStorageV7Migration(compacted, migrationV7, exactV6, exactV7);
+    compacted.prepare(`
+      INSERT INTO ledger_compaction_prefixes(
+        prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,
+        anchor_event_rowid,anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,
+        baseline_id,baseline_projection_digest,created_at,verified_at
+      ) VALUES('existing-prefix','project','project_1',1,3,'evt_project_2','op_project_2',2,
+        'baseline_project_1_1','digest-project-1','now','now')
+    `).run();
+    compacted.prepare(`
+      INSERT INTO frozen_message_sources(
+        message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+        source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+      ) VALUES('message_a',2,'evt_chat_1','op_chat_1','chat_1',1,1,
+        '{"messageId":"message_a"}','digest-message-a','now')
+    `).run();
+    compacted.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compacted-job','losslessCompaction','running','{}','now',NULL,NULL,NULL,'now','now')
+    `).run();
+    compacted.prepare(`
+      INSERT INTO ledger_compaction_delete_authority(
+        job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,
+        aggregate_type,aggregate_id,aggregate_sequence,authorized_at
+      ) VALUES('compacted-job',1,'existing-prefix',1,'evt_project_1','op_project_1',
+        'project','project_1',1,'now')
+    `).run();
+    compacted.prepare(`
+      UPDATE maintenance_jobs SET state='succeeded',completed_at='done',updated_at='done'
+      WHERE job_id='compacted-job'
+    `).run();
+    const compactedBefore = `${schemaSignature(compacted)}\n${databaseRowsSnapshot(compacted)}`;
+    assert.throws(() => applyExactStorageV8Migration(
+      compacted, migrationV8, exactV7, exactV8,
+    ));
+    assert.equal(`${schemaSignature(compacted)}\n${databaseRowsSnapshot(compacted)}`,
+      compactedBefore);
+    compacted.close();
+
+    const rollback = createExactStorageV5Database(join(temporaryRoot, "rollback.db"), false);
+    applyExactStorageV6Migration(rollback, migrationV6, schemaSignature(rollback), exactV6);
+    applyExactStorageV7Migration(rollback, migrationV7, exactV6, exactV7);
+    const rollbackBefore = `${schemaSignature(rollback)}\n${databaseRowsSnapshot(rollback)}`;
+    const failingMigration = migrationV8.replace(
+      "DROP TABLE storage_schema_meta_v7;",
+      "SELECT * FROM missing_v8_failure;\nDROP TABLE storage_schema_meta_v7;",
+    );
+    assert.throws(() => rollback.exec(failingMigration));
+    rollback.exec("ROLLBACK");
+    assert.equal(`${schemaSignature(rollback)}\n${databaseRowsSnapshot(rollback)}`,
+      rollbackBefore);
+    rollback.close();
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("storage-v1 through storage-v7 golden files remain immutable", () => {
   const digests = new Map<string, string>([
     ["tests/fixtures/m5/storage-v1/idempotency.json", "a0c9d347a5005af0980c35d8e55de2ee1cdfaa47dc1c35959582da667ae0b641"],
     ["tests/fixtures/m5/storage-v1/migration.sql", "9734d16cca9cf5cd18188f4e75cde6bbedaff2eda14ab5bd8981fdc45ae82d12"],
@@ -2504,6 +3076,9 @@ test("storage-v1 through storage-v6 golden files remain immutable", () => {
     ["tests/fixtures/m5/storage-v6/cases.json", "d02c817fc7152b5d133cfa675a56896f6faec78bc3d7ccea0a01ba7f98fccfb1"],
     ["tests/fixtures/m5/storage-v6/manifest.json", "e9be63b3fe513eab97c378da8aab451dfbe19e1c7e9dc08928e60bffa02cf851"],
     ["tests/fixtures/m5/storage-v6/migration-v5-to-v6.sql", "14f0ce749503b087296b91b5d27205dfd41aa5c24af26bf5ccd7dbbeeba86dc2"],
+    ["tests/fixtures/m5/storage-v7/cases.json", "938f3ece77be6672ede9aa13a8554dcaa685045bcb0d060b0f6c4e38db8ba3f8"],
+    ["tests/fixtures/m5/storage-v7/manifest.json", "83774f4597ea9bf56979d995ac0d145b670bcd719152aa521e4a4b6d88dc463a"],
+    ["tests/fixtures/m5/storage-v7/migration-v6-to-v7.sql", "ff4ed9aaace2c45d3a4ff0718baf7c173fbd4bbb5a166f557c8bf6070025c33f"],
   ]);
   for (const [path, expected] of digests) {
     assert.equal(createHash("sha256").update(readFileSync(path)).digest("hex"), expected, path);
@@ -2996,7 +3571,127 @@ function applyExactStorageV7Migration(
   }
 }
 
-function seedStorageV6CompactionFixture(database: DatabaseSync): void {
+function applyExactStorageV8Migration(
+  database: DatabaseSync,
+  migrationSql: string,
+  expectedV7Schema: string,
+  expectedV8Schema: string | null,
+): void {
+  const meta = database.prepare(`
+    SELECT storage_schema_version FROM storage_schema_meta WHERE singleton = 1
+  `).get();
+  if (meta?.storage_schema_version === 8) {
+    if (expectedV8Schema === null || schemaSignature(database) !== expectedV8Schema) {
+      throw new Error("storage-v8 schema is not exact");
+    }
+    return;
+  }
+  if (meta?.storage_schema_version !== 7 || schemaSignature(database) !== expectedV7Schema) {
+    throw new Error("storage-v7 schema is not exact");
+  }
+  validateStorageLifetimeMaterializationPairV4(readV6Pair(database));
+  if (database.prepare(`
+    SELECT 1 FROM lifetime_materialization_job WHERE singleton=1 AND state='attempting'
+  `).get() !== undefined) {
+    throw new Error("storage-v8 migration refuses attempting materialization");
+  }
+  if (database.prepare(`
+    SELECT 1 FROM maintenance_jobs
+    WHERE job_kind='losslessCompaction' AND state IN ('pending','running') LIMIT 1
+  `).get() !== undefined) {
+    throw new Error("storage-v8 migration refuses active maintenance");
+  }
+  for (const table of v8Cases.migrationMatrix.requiredEmptyV7Tables) {
+    if (database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined) {
+      throw new Error(`storage-v8 migration refuses compacted predecessor table ${table}`);
+    }
+  }
+  database.exec(migrationSql);
+  if (expectedV8Schema !== null && schemaSignature(database) !== expectedV8Schema) {
+    throw new Error("storage-v8 migration did not produce exact schema");
+  }
+}
+
+function seedV8OperationReceipts(database: DatabaseSync): void {
+  const insertReceipt = database.prepare(`
+    INSERT OR REPLACE INTO operation_receipts(
+      operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,
+      payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,
+      canonical_payload_digest_version,canonical_payload_digest_format,canonical_payload_digest,
+      event_timestamp,materialized_at
+    ) VALUES(?,?,?,?,?,?,1,?,'sha256',1,'lowercaseHex64',?,?,?)
+  `);
+  for (const fixture of v6Cases.sourceIndex.sourceEvents) {
+    const event = database.prepare(`
+      SELECT event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+             event_type,payload_schema_version,canonical_json_payload,timestamp
+      FROM events WHERE rowid=?
+    `).get(fixture.eventRowid) as typeof fixture.event | undefined;
+    assert.ok(event, `missing receipt source ${fixture.eventRowid}`);
+    insertReceipt.run(
+      event.operation_id, event.event_id, event.aggregate_type, event.aggregate_id,
+      event.aggregate_sequence, event.event_type, event.canonical_json_payload,
+      createHash("sha256").update(event.canonical_json_payload).digest("hex"),
+      event.timestamp, "2026-09-01T09:59:59Z",
+    );
+  }
+}
+
+function frozenOperationForEvent(
+  eventRowid: number,
+  database?: DatabaseSync,
+  frozenAt = "2026-09-01T10:00:00Z",
+) {
+  const fixture = v6Cases.sourceIndex.sourceEvents.find((entry) => entry.eventRowid === eventRowid);
+  assert.ok(fixture, `missing source event ${eventRowid}`);
+  const event = (database?.prepare(`
+    SELECT event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,
+           event_type,payload_schema_version,canonical_json_payload,timestamp
+    FROM events WHERE rowid=?
+  `).get(eventRowid) ?? fixture.event) as typeof fixture.event;
+  const source = {
+    operationId: event.operation_id,
+    sourceEventRowid: eventRowid,
+    sourceEventId: event.event_id,
+    requestId: event.request_id,
+    aggregateType: event.aggregate_type as "project" | "chat" | "run" | "lock",
+    aggregateId: event.aggregate_id,
+    aggregateSequence: event.aggregate_sequence,
+    eventType: event.event_type,
+    payloadSchemaVersion: 1 as const,
+    canonicalPayloadJson: event.canonical_json_payload,
+    canonicalPayloadDigest: createHash("sha256")
+      .update(event.canonical_json_payload).digest("hex"),
+    eventTimestamp: event.timestamp,
+    canonicalRecordJson: "",
+    recordDigest: "",
+    frozenAt,
+  };
+  source.canonicalRecordJson = canonicalFrozenOperationRecordV1(source);
+  source.recordDigest = createHash("sha256").update(source.canonicalRecordJson).digest("hex");
+  return source;
+}
+
+function insertFrozenOperation(database: DatabaseSync, source: ReturnType<typeof frozenOperationForEvent>) {
+  validateFrozenOperationSourceV1(source);
+  database.prepare(`
+    INSERT INTO frozen_operation_sources(
+      operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,aggregate_id,
+      aggregate_sequence,event_type,payload_schema_version,canonical_payload_json,
+      canonical_payload_digest,event_timestamp,canonical_record_json,record_digest,frozen_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    source.operationId, source.sourceEventRowid, source.sourceEventId, source.requestId,
+    source.aggregateType, source.aggregateId, source.aggregateSequence, source.eventType,
+    source.payloadSchemaVersion, source.canonicalPayloadJson, source.canonicalPayloadDigest,
+    source.eventTimestamp, source.canonicalRecordJson, source.recordDigest, source.frozenAt,
+  );
+}
+
+function seedStorageV6CompactionFixture(
+  database: DatabaseSync,
+  canonicalizePayloads = false,
+): void {
   database.prepare(`
     UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1
   `).run();
@@ -3021,10 +3716,13 @@ function seedStorageV6CompactionFixture(database: DatabaseSync): void {
   `);
   for (const fixture of v6Cases.sourceIndex.sourceEvents) {
     const event = fixture.event;
+    const payload = canonicalizePayloads
+      ? canonicalJsonV1(JSON.parse(event.canonical_json_payload))
+      : event.canonical_json_payload;
     insertEvent.run(
       event.event_id, event.operation_id, event.request_id, event.aggregate_type,
       event.aggregate_id, event.aggregate_sequence, event.event_type,
-      event.payload_schema_version, event.canonical_json_payload, event.timestamp,
+      event.payload_schema_version, payload, event.timestamp,
     );
   }
   insertEvent.run(

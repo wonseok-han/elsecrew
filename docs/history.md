@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 frozen-operation source 계약)
+
+- **uncompacted V7 전용 additive migration**: exact V7 schema와 네 admissible materialization pair만 mutation 전에 허용하고 attempting·active lossless-compaction·prefix/frozen-message/delete-authority 존재·V8 partial/extra/tamper를 fail-closed하는 schema V8 golden을 추가했다. migration은 terminal maintenance/history와 기존 data·trigger를 보존하고 history backfill 없이 `frozen_operation_sources`와 versioned dependent guards만 만든다. 실패는 exact V7로 rollback하며 runtime DDL, scheduler/wire, 제품 실행과 실제 delete는 C1 consumer 전까지 모두 비활성이다.
+- **독립 operation provenance**: project/chat/run/lock의 live event·V6 source-index·immutable receipt에 exact 결속된 append-only frozen operation record를 고정했다. SQLite는 immutable field·canonical envelope text·SHA-256 lowercase-hex shape를 강제하지만 digest 계산 확장에는 의존하지 않는다. Rust·TypeScript consumer가 canonical payload와 full envelope를 독립 재구성·SHA-256 재계산하고, source가 삭제된 뒤에도 exact receipt와 재결속하며 bounded `verifyOperations` reopen 전 검증해야 한다. receipt-only 재구성, app-instance, request-id 기반 duplicate/conflict 판정과 deleted chat predecessor의 receipt self-reconstruction은 거부한다.
+- **V2 bounded compaction 경계·검증**: 기존 V7 cursor를 바꾸지 않고 `freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → finalize` V2 cursor, 최대 100행·1 MiB·exact-empty exhaustion, pending/running sentinel·cancel·commit uncertainty·authority-empty finalization을 양 언어 validator/cases로 고정했다. 실제 Node SQLite golden 17개가 migration mapping/rollback, source·receipt·digest tamper, dependent guards, frozen message ID reuse, exact query plan/no scan을 통과했고 protocol lifetime 10개와 protocol 전체 42개, TypeScript no-emit, Rust 2021 rustfmt·diff check가 통과했다. strict clippy는 범위 밖 기존 lint 3건에서만 실패했고 그 세 lint를 명시적으로 제외한 scoped `-D warnings`는 통과했다. V1~V7 fixture digest는 불변이며 다음은 독립 계약 리뷰 뒤 C1 consumer가 이 schema와 bounded reopen 검증을 소비하는 별도 파동이다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 BeforeBegin fence P2 수정)
 
 - **취소 우회 차단**: bounded lifetime worker가 `BeforeBegin` 취소를 반환하기 전에 V7 uncompacted-only runtime state를 먼저 확인하도록 순서를 수정했다. arm transaction 내부 재검증도 유지해 사전 확인과 arm 사이의 compaction-state 변경을 계속 fail-closed한다.

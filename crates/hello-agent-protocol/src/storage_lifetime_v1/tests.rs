@@ -74,6 +74,41 @@ struct ManifestV7 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ManifestV8 {
+    schema_version: u32,
+    storage_schema_version: u32,
+    protocol_version: u32,
+    payload_schema_version: u32,
+    migration: MigrationContractV8,
+    frozen_operation_sources: Value,
+    runtime_source_authority: Value,
+    compaction_v2: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MigrationContractV8 {
+    file: String,
+    predecessor_migration_file: String,
+    predecessor_migration_mutation_allowed: bool,
+    from_version: u32,
+    to_version: u32,
+    mode: String,
+    preflight: Value,
+    idempotency: String,
+    history_backfill: String,
+    tables_added: Vec<String>,
+    tables_rebuilt: Vec<String>,
+    indexes_added: Vec<String>,
+    triggers_added: Vec<String>,
+    triggers_version_replaced: Vec<String>,
+    runtime_guard_ddl_allowed: bool,
+    existing_rows_deleted: bool,
+    preserved_tables: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MigrationContractV7 {
     file: String,
     predecessor_migration_file: String,
@@ -598,6 +633,86 @@ struct V7ReplayNamespace {
     namespace: String,
     duplicate: String,
     conflict: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V8Cases {
+    migration_matrix: V8MigrationMatrix,
+    valid_frozen_operation_sources: Vec<NamedValue>,
+    invalid_frozen_operation_mutations: Vec<InvalidPolicyMutation>,
+    binding_tamper_cases: Vec<String>,
+    runtime_authority_cases: V8RuntimeAuthorityCases,
+    valid_cursor_transitions_v2: Vec<V8CursorTransition>,
+    invalid_cursor_transitions_v2: Vec<V8CursorTransition>,
+    valid_lifecycle_transitions_v2: Vec<V8LifecycleTransition>,
+    invalid_lifecycle_mutations_v2: Vec<V8LifecycleMutation>,
+    equivalence_cases_v2: V8EquivalenceCases,
+    namespace_replay: Vec<V7ReplayNamespace>,
+    preserved_v7_message_reuse: Value,
+    query_plans: Vec<V6QueryPlan>,
+    invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
+    invalid_policy_mutations: Vec<V8PolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V8MigrationMatrix {
+    admissible_pairs: Vec<String>,
+    rejected_pairs: Vec<String>,
+    allowed_maintenance_states: Vec<String>,
+    rejected_maintenance_states: Vec<String>,
+    required_empty_v7_tables: Vec<String>,
+    new_table_initial_counts: Value,
+    history_backfill_rows: u32,
+}
+
+#[derive(Deserialize)]
+struct V8RuntimeAuthorityCases {
+    valid: Vec<NamedValue>,
+    invalid: Vec<NamedValue>,
+}
+
+#[derive(Deserialize)]
+struct V8CursorTransition {
+    name: String,
+    previous: Option<Value>,
+    next: Value,
+    evidence: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct V8LifecycleTransition {
+    name: String,
+    operation: StorageCompactionLifecycleOperationV2,
+    previous: Value,
+    next: Value,
+    evidence: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V8LifecycleMutation {
+    name: String,
+    case_index: usize,
+    path: Vec<String>,
+    replacement: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V8EquivalenceCases {
+    valid: Value,
+    invalid_fields: Vec<String>,
+    invalid_rows_in_batch: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct V8PolicyMutation {
+    name: String,
+    target: String,
+    path: Vec<String>,
+    replacement: Value,
 }
 
 #[derive(Deserialize)]
@@ -2536,6 +2651,376 @@ fn storage_v7_freezes_lossless_compaction_without_enabling_product_deletion() {
     assert!(sql.contains("one-time storage-v7 schema change"));
     assert!(!sql.to_ascii_uppercase().contains("DELETE FROM EVENTS;"));
     assert!(!sql.to_ascii_uppercase().contains("VACUUM"));
+}
+
+#[test]
+fn storage_v8_freezes_operation_sources_without_enabling_product_deletion() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-v8");
+    let manifest: ManifestV8 = read_json(root.join("manifest.json"));
+    let cases: V8Cases = read_json(root.join("cases.json"));
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(
+        manifest.storage_schema_version,
+        STORAGE_LIFETIME_SCHEMA_VERSION_V8
+    );
+    assert_eq!(manifest.protocol_version, crate::PROTOCOL_VERSION);
+    assert_eq!(manifest.payload_schema_version, 1);
+    assert_eq!(manifest.migration.from_version, 7);
+    assert_eq!(manifest.migration.to_version, 8);
+    assert_eq!(
+        manifest.migration.predecessor_migration_file,
+        "../storage-v7/migration-v6-to-v7.sql"
+    );
+    assert!(!manifest.migration.predecessor_migration_mutation_allowed);
+    assert_eq!(
+        manifest.migration.mode,
+        "additiveFrozenOperationSourceAndVersionedDependentGuardsNoDataDeletion"
+    );
+    assert_eq!(
+        manifest.migration.idempotency,
+        "exactStorageV8NoOpBeforeMigrationSql"
+    );
+    assert_eq!(manifest.migration.history_backfill, "none");
+    assert_eq!(
+        manifest.migration.tables_added,
+        ["frozen_operation_sources"]
+    );
+    assert_eq!(manifest.migration.tables_rebuilt, ["storage_schema_meta"]);
+    assert_eq!(manifest.migration.indexes_added.len(), 3);
+    assert_eq!(manifest.migration.triggers_added.len(), 5);
+    assert_eq!(manifest.migration.triggers_version_replaced.len(), 3);
+    assert!(!manifest.migration.runtime_guard_ddl_allowed);
+    assert!(!manifest.migration.existing_rows_deleted);
+    assert_eq!(manifest.migration.preserved_tables.len(), 17);
+    validate_storage_lifetime_v8_preflight_policy_v1(&manifest.migration.preflight)
+        .expect("exact v8 preflight");
+    validate_storage_frozen_operation_source_policy_v1(&manifest.frozen_operation_sources)
+        .expect("exact frozen operation policy");
+    validate_storage_runtime_source_authority_policy_v1(&manifest.runtime_source_authority)
+        .expect("exact runtime source authority");
+    validate_storage_compaction_policy_v2(&manifest.compaction_v2)
+        .expect("exact compaction v2 policy");
+
+    assert_eq!(
+        cases.migration_matrix.admissible_pairs,
+        [
+            "ready+absent",
+            "pending+absent",
+            "pending+pending",
+            "pending+failed"
+        ]
+    );
+    assert_eq!(
+        cases.migration_matrix.rejected_pairs,
+        ["pending+attempting"]
+    );
+    assert_eq!(
+        cases.migration_matrix.allowed_maintenance_states,
+        ["succeeded", "failed"]
+    );
+    assert_eq!(
+        cases.migration_matrix.rejected_maintenance_states,
+        ["pending", "running"]
+    );
+    assert_eq!(
+        cases.migration_matrix.required_empty_v7_tables,
+        [
+            "ledger_compaction_prefixes",
+            "frozen_message_sources",
+            "ledger_compaction_delete_authority"
+        ]
+    );
+    assert_eq!(
+        cases.migration_matrix.new_table_initial_counts,
+        serde_json::json!({"frozen_operation_sources": 0})
+    );
+    assert_eq!(cases.migration_matrix.history_backfill_rows, 0);
+
+    let valid_value = &cases.valid_frozen_operation_sources[0].value;
+    let valid =
+        validate_frozen_operation_source_v1(valid_value).expect("valid frozen operation source");
+    assert_eq!(
+        canonical_frozen_operation_record_v1(&valid).expect("canonical record"),
+        valid.canonical_record_json
+    );
+    validate_frozen_operation_source_batch_v1(&Value::Array(vec![valid_value.clone()]))
+        .expect("bounded source batch");
+    let oversized = Value::Array(vec![valid_value.clone(); 101]);
+    assert!(validate_frozen_operation_source_batch_v1(&oversized).is_err());
+    for mutation in &cases.invalid_frozen_operation_mutations {
+        let mut invalid = valid_value.clone();
+        set_value_path(&mut invalid, &mutation.path, mutation.replacement.clone());
+        assert!(
+            validate_frozen_operation_source_v1(&invalid).is_err(),
+            "{}",
+            mutation.name
+        );
+    }
+
+    let event = LedgerEventV1 {
+        event_id: valid.source_event_id.clone(),
+        operation_id: valid.operation_id.clone(),
+        request_id: valid.request_id.clone(),
+        aggregate_type: valid.aggregate_type.clone(),
+        aggregate_id: valid.aggregate_id.clone(),
+        aggregate_sequence: valid.aggregate_sequence,
+        event_type: valid.event_type.clone(),
+        payload_schema_version: valid.payload_schema_version,
+        canonical_json_payload: valid.canonical_payload_json.clone(),
+        timestamp: valid.event_timestamp.clone(),
+    };
+    let source_index = serde_json::json!({
+        "eventRowid": valid.source_event_rowid,
+        "eventId": valid.source_event_id,
+        "operationId": valid.operation_id,
+        "aggregateType": valid.aggregate_type,
+        "aggregateId": valid.aggregate_id,
+        "aggregateSequence": valid.aggregate_sequence,
+        "introducedMessageId": null,
+        "chatDurableSequence": null,
+        "chatSnapshotMessageId": null,
+    });
+    let receipt = serde_json::json!({
+        "operationId": valid.operation_id,
+        "eventId": valid.source_event_id,
+        "aggregateType": valid.aggregate_type,
+        "aggregateId": valid.aggregate_id,
+        "aggregateSequence": valid.aggregate_sequence,
+        "eventType": valid.event_type,
+        "payloadSchemaVersion": valid.payload_schema_version,
+        "canonicalPayloadJson": valid.canonical_payload_json,
+        "canonicalPayloadDigestAlgorithm": "sha256",
+        "canonicalPayloadDigestVersion": 1,
+        "canonicalPayloadDigestFormat": "lowercaseHex64",
+        "canonicalPayloadDigest": valid.canonical_payload_digest,
+        "eventTimestamp": valid.event_timestamp,
+    });
+    validate_frozen_operation_source_binding_v1(
+        valid_value,
+        valid.source_event_rowid,
+        &event,
+        &source_index,
+        &receipt,
+    )
+    .expect("exact live event, source index, and receipt binding");
+    validate_frozen_operation_receipt_binding_v1(valid_value, &receipt)
+        .expect("deleted source still binds exact immutable receipt");
+    for (field, replacement) in [
+        ("eventId", Value::String("evt_other".to_string())),
+        ("eventType", Value::String("project.deleted".to_string())),
+        (
+            "eventTimestamp",
+            Value::String("2026-09-01T10:00:00Z".to_string()),
+        ),
+    ] {
+        let mut invalid_receipt = receipt.clone();
+        invalid_receipt[field] = replacement;
+        assert!(
+            validate_frozen_operation_receipt_binding_v1(valid_value, &invalid_receipt).is_err(),
+            "{field}"
+        );
+    }
+
+    let mut alternate = valid.clone();
+    alternate.canonical_payload_json = "{}".to_string();
+    alternate.canonical_payload_digest = sha256_file_version_v1(b"{}")
+        .strip_prefix("sha256:")
+        .expect("digest prefix")
+        .to_string();
+    alternate.canonical_record_json =
+        canonical_frozen_operation_record_v1(&alternate).expect("alternate record");
+    alternate.record_digest = sha256_file_version_v1(alternate.canonical_record_json.as_bytes())
+        .strip_prefix("sha256:")
+        .expect("digest prefix")
+        .to_string();
+    let alternate_value = serde_json::to_value(&alternate).expect("alternate source json");
+    validate_frozen_operation_source_v1(&alternate_value)
+        .expect("independently recomputed alternate source is structurally valid");
+    assert!(validate_frozen_operation_source_binding_v1(
+        &alternate_value,
+        valid.source_event_rowid,
+        &event,
+        &source_index,
+        &receipt,
+    )
+    .is_err());
+    assert_eq!(
+        cases
+            .binding_tamper_cases
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "aggregateAndOperationTogether".to_string(),
+            "appInstance".to_string(),
+            "payloadAndDigestTogether".to_string(),
+            "receiptEventId".to_string(),
+            "receiptEventTimestamp".to_string(),
+            "receiptEventType".to_string(),
+            "receiptOnly".to_string(),
+            "sourceIndexIdentity".to_string(),
+        ])
+    );
+
+    for case in &cases.runtime_authority_cases.valid {
+        validate_storage_runtime_source_authority_v1(&case.value).expect(&case.name);
+    }
+    for case in &cases.runtime_authority_cases.invalid {
+        assert!(
+            validate_storage_runtime_source_authority_v1(&case.value).is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_cursor_transitions_v2 {
+        validate_storage_compaction_cursor_transition_v2(
+            case.previous.as_ref(),
+            &case.next,
+            case.evidence.as_ref(),
+        )
+        .expect(&case.name);
+    }
+    for case in &cases.invalid_cursor_transitions_v2 {
+        assert!(
+            validate_storage_compaction_cursor_transition_v2(
+                case.previous.as_ref(),
+                &case.next,
+                case.evidence.as_ref(),
+            )
+            .is_err(),
+            "{}",
+            case.name
+        );
+    }
+    for case in &cases.valid_lifecycle_transitions_v2 {
+        validate_storage_compaction_lifecycle_transition_v2(
+            case.operation,
+            &case.previous,
+            &case.next,
+            case.evidence.as_ref(),
+        )
+        .expect(&case.name);
+    }
+    for mutation in &cases.invalid_lifecycle_mutations_v2 {
+        let case = &cases.valid_lifecycle_transitions_v2[mutation.case_index];
+        let mut invalid = serde_json::json!({
+            "previous": case.previous,
+            "next": case.next,
+        });
+        set_value_path(&mut invalid, &mutation.path, mutation.replacement.clone());
+        assert!(
+            validate_storage_compaction_lifecycle_transition_v2(
+                case.operation,
+                &invalid["previous"],
+                &invalid["next"],
+                case.evidence.as_ref(),
+            )
+            .is_err(),
+            "{}",
+            mutation.name
+        );
+    }
+    validate_storage_compaction_equivalence_v2(&cases.equivalence_cases_v2.valid)
+        .expect("complete v2 equivalence");
+    for field in &cases.equivalence_cases_v2.invalid_fields {
+        let mut invalid = cases.equivalence_cases_v2.valid.clone();
+        invalid[field] = Value::Bool(false);
+        assert!(
+            validate_storage_compaction_equivalence_v2(&invalid).is_err(),
+            "{field}"
+        );
+    }
+    for rows in &cases.equivalence_cases_v2.invalid_rows_in_batch {
+        let mut invalid = cases.equivalence_cases_v2.valid.clone();
+        invalid["rowsInBatch"] = Value::from(*rows);
+        assert!(validate_storage_compaction_equivalence_v2(&invalid).is_err());
+    }
+    assert!(cases
+        .namespace_replay
+        .iter()
+        .all(|case| { case.duplicate == "duplicateNoOp" && case.conflict == "conflict" }));
+    assert_eq!(
+        cases
+            .namespace_replay
+            .iter()
+            .map(|case| case.namespace.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["actualAgent", "legacy", "recovery"])
+    );
+    assert_eq!(
+        cases.preserved_v7_message_reuse,
+        serde_json::json!({
+            "deletedIntroducingEvent": "frozenMessageIdentityRemainsReserved",
+            "newIntroduction": "uniqueConstraintRejected",
+        })
+    );
+
+    for mutation in &cases.invalid_preflight_mutations {
+        let mut invalid = manifest.migration.preflight.clone();
+        set_value_path(&mut invalid, &mutation.path, mutation.replacement.clone());
+        assert!(
+            validate_storage_lifetime_v8_preflight_policy_v1(&invalid).is_err(),
+            "{}",
+            mutation.name
+        );
+    }
+    for mutation in &cases.invalid_policy_mutations {
+        let mut invalid = match mutation.target.as_str() {
+            "frozenOperationSources" => manifest.frozen_operation_sources.clone(),
+            "runtimeSourceAuthority" => manifest.runtime_source_authority.clone(),
+            "compactionV2" => manifest.compaction_v2.clone(),
+            target => panic!("unknown v8 policy target {target}"),
+        };
+        set_value_path(&mut invalid, &mutation.path, mutation.replacement.clone());
+        let rejected = match mutation.target.as_str() {
+            "frozenOperationSources" => {
+                validate_storage_frozen_operation_source_policy_v1(&invalid).is_err()
+            }
+            "runtimeSourceAuthority" => {
+                validate_storage_runtime_source_authority_policy_v1(&invalid).is_err()
+            }
+            "compactionV2" => validate_storage_compaction_policy_v2(&invalid).is_err(),
+            _ => unreachable!(),
+        };
+        assert!(rejected, "{}", mutation.name);
+    }
+    let declared_plan_keys = manifest.frozen_operation_sources["queryPlanAcceptance"]
+        .as_object()
+        .expect("query plan policy")
+        .keys()
+        .filter(|key| key.as_str() != "mode" && key.as_str() != "reject")
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let fixture_plan_keys = cases
+        .query_plans
+        .iter()
+        .map(|plan| plan.name.clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(declared_plan_keys, fixture_plan_keys);
+    assert!(cases.query_plans.iter().all(|plan| {
+        plan.sql.starts_with("EXPLAIN QUERY PLAN ")
+            && plan.detail.starts_with("SEARCH frozen_operation_sources ")
+            && !plan.detail.contains("SCAN")
+            && !plan.detail.contains("USE TEMP B-TREE")
+    }));
+
+    let sql = fs::read_to_string(root.join(&manifest.migration.file)).expect("read v8 migration");
+    let upper = sql.to_ascii_uppercase();
+    assert!(sql.contains("CREATE TABLE frozen_operation_sources"));
+    assert!(sql.contains("REFERENCES operation_receipts(operation_id)"));
+    assert!(sql.contains("CREATE TRIGGER frozen_operation_sources_require_exact_live_source"));
+    assert!(sql.contains("JOIN event_source_index AS source_index"));
+    assert!(sql.contains("JOIN operation_receipts AS receipt"));
+    assert!(sql.contains("consumer must independently recompute both"));
+    assert!(sql.contains("CREATE TRIGGER operation_receipts_compaction_immutable_update"));
+    assert!(sql.contains("CREATE TRIGGER operation_receipts_compaction_immutable_delete"));
+    assert!(sql.contains("JOIN frozen_operation_sources AS frozen"));
+    assert!(!upper.contains("LOAD_EXTENSION"));
+    assert!(!upper.contains("CREATE FUNCTION"));
+    assert!(!upper.contains("DELETE FROM EVENTS;"));
+    assert!(!upper.contains("VACUUM"));
 }
 
 fn v6_snapshot(state: &str, phase: &str, after: u64, exhausted: bool, cutoff: u64) -> Value {

@@ -34,11 +34,17 @@ export const STORAGE_LIFETIME_SCHEMA_VERSION_V4 = 4 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V5 = 5 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V6 = 6 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V7 = 7 as const;
+export const STORAGE_LIFETIME_SCHEMA_VERSION_V8 = 8 as const;
 export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
+export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_COMPACTION_MAX_DELETE_ROWS_V1 = 100 as const;
 export const STORAGE_COMPACTION_PHASES_V1 = [
   "freezeMessages", "verifyPrefix", "authorizeDelete", "deletePrefix",
   "verifyEquivalence", "finalize",
+] as const;
+export const STORAGE_COMPACTION_PHASES_V2 = [
+  "freezeOperations", "freezeMessages", "verifyPrefix", "authorizeDelete",
+  "deletePrefix", "verifyOperations", "verifyEquivalence", "finalize",
 ] as const;
 export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V2 = 2 as const;
@@ -398,6 +404,29 @@ export interface StorageLifetimeV7PreflightPolicyV1 {
   timing: "beforeAnyDdlOrMutation";
 }
 
+export interface StorageLifetimeV8PreflightPolicyV1 {
+  schema: "exactStorageV7";
+  requiredLedgerState: "uncompactedOnly";
+  admissibleMaterializationPairs: readonly [
+    "ready+absent", "pending+absent", "pending+pending", "pending+failed",
+  ];
+  rejectedMaterializationPairs: readonly ["pending+attempting"];
+  maintenanceRequirement: "noPendingOrRunningLosslessCompaction";
+  emptyTables: readonly [
+    "ledger_compaction_prefixes", "frozen_message_sources",
+    "ledger_compaction_delete_authority",
+  ];
+  targetObjectRequirement: "storageV8ObjectsAbsent";
+  partialExtraOrTamperedSchema: "failClosedBeforeMutation";
+  mapping: readonly [
+    "materializationPairPreservedByteExact",
+    "terminalMaintenanceHistoryPreservedByteExact",
+    "allExistingRowsAndTriggersPreservedExceptNamedVersionedGuards",
+    "existingHistoryNotBackfilled",
+  ];
+  timing: "beforeAnyDdlOrMutation";
+}
+
 export type StorageCompactionPhaseV1 = typeof STORAGE_COMPACTION_PHASES_V1[number];
 export type StorageCompactionJobStateV1 = "pending" | "running" | "succeeded" | "failed";
 export type StorageCompactionLifecycleOperationV1 =
@@ -409,6 +438,79 @@ export interface StorageCompactionCursorV1 {
   phase: StorageCompactionPhaseV1;
   afterEventRowid: number;
   scanExhausted: boolean;
+}
+
+export type StorageCompactionPhaseV2 = typeof STORAGE_COMPACTION_PHASES_V2[number];
+
+export interface StorageCompactionCursorV2 {
+  schemaVersion: typeof STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2;
+  cutoffEventRowid: number;
+  phase: StorageCompactionPhaseV2;
+  afterEventRowid: number;
+  scanExhausted: boolean;
+}
+
+export interface StorageCompactionBatchEvidenceV2 {
+  rowsInBatch: number;
+  canonicalPayloadBytes: number;
+  exactEmptyQuery: boolean;
+}
+
+export type StorageCompactionLifecycleOperationV2 =
+  | "arm" | "batchSuccess" | "cancelBeforeArm" | "cancelAfterArm"
+  | "commitUncertain" | "complete";
+
+export interface StorageCompactionJobV2 {
+  jobId: string;
+  state: "pending" | "running" | "succeeded" | "failed";
+  cursor: StorageCompactionCursorV2;
+  authorityCount: number;
+  operationsVerified: boolean;
+  equivalenceVerified: boolean;
+  failureKind: string | null;
+  completedAt: string | null;
+}
+
+export interface StorageCompactionEquivalenceEvidenceV2 {
+  rowsInBatch: number;
+  operationsVerified: boolean;
+  baselineTailBefore: boolean;
+  anchorTailAfter: boolean;
+  preservedArtifactsByteExact: boolean;
+  receiptReplayEquivalent: boolean;
+  namespaceDecisionsEquivalent: boolean;
+  frozenMessageIdsReserved: boolean;
+  authorityEmpty: boolean;
+}
+
+export interface FrozenOperationSourceV1 {
+  operationId: string;
+  sourceEventRowid: number;
+  sourceEventId: string;
+  requestId: string | null;
+  aggregateType: "project" | "chat" | "run" | "lock";
+  aggregateId: string;
+  aggregateSequence: number;
+  eventType: string;
+  payloadSchemaVersion: 1;
+  canonicalPayloadJson: string;
+  canonicalPayloadDigest: string;
+  eventTimestamp: string;
+  canonicalRecordJson: string;
+  recordDigest: string;
+  frozenAt: string;
+}
+
+export interface StorageRuntimeSourceAuthorityV1 {
+  aggregateType: "project" | "chat" | "run" | "lock";
+  eventPresent: boolean;
+  liveSourceIndexPresent: boolean;
+  frozenOperationPresent: boolean;
+  receiptPresent: boolean;
+  liveSourceMatches: boolean;
+  frozenOperationMatches: boolean;
+  receiptMatches: boolean;
+  chatPredecessorSource: "frozenOperationCanonicalPayload" | null;
 }
 
 export interface StorageCompactionPrefixV1 {
@@ -780,6 +882,38 @@ export function validateStorageLifetimeV7PreflightPolicyV1(
     fail("storage lifetime v7 preflight policy is not fail-closed");
   }
   return policy as unknown as StorageLifetimeV7PreflightPolicyV1;
+}
+
+export function validateStorageLifetimeV8PreflightPolicyV1(
+  value: unknown,
+): StorageLifetimeV8PreflightPolicyV1 {
+  const policy = requireObject(value, "storage lifetime v8 preflight policy");
+  const expected = {
+    schema: "exactStorageV7",
+    requiredLedgerState: "uncompactedOnly",
+    admissibleMaterializationPairs: [
+      "ready+absent", "pending+absent", "pending+pending", "pending+failed",
+    ],
+    rejectedMaterializationPairs: ["pending+attempting"],
+    maintenanceRequirement: "noPendingOrRunningLosslessCompaction",
+    emptyTables: [
+      "ledger_compaction_prefixes", "frozen_message_sources",
+      "ledger_compaction_delete_authority",
+    ],
+    targetObjectRequirement: "storageV8ObjectsAbsent",
+    partialExtraOrTamperedSchema: "failClosedBeforeMutation",
+    mapping: [
+      "materializationPairPreservedByteExact",
+      "terminalMaintenanceHistoryPreservedByteExact",
+      "allExistingRowsAndTriggersPreservedExceptNamedVersionedGuards",
+      "existingHistoryNotBackfilled",
+    ],
+    timing: "beforeAnyDdlOrMutation",
+  };
+  if (!sameContractValue(policy, expected)) {
+    fail("storage lifetime v8 preflight policy is not fail-closed");
+  }
+  return policy as unknown as StorageLifetimeV8PreflightPolicyV1;
 }
 
 export function validateStorageLifetimeCursorV1(value: unknown): StorageLifetimeCursorV1 {
@@ -2211,6 +2345,479 @@ export function validateStorageLosslessCompactionPolicyV1(
     fail("storage v7 lossless compaction policy is not exact");
   }
   return policy;
+}
+
+const STORAGE_FROZEN_OPERATION_SOURCE_POLICY_V1 = {
+  schemaVersion: 1,
+  casesFile: "cases.json",
+  table: "frozen_operation_sources",
+  identity: "operationIdPrimaryKey",
+  allowedAggregateTypes: ["project", "chat", "run", "lock"],
+  appInstance: "forbidden",
+  requestId: "nullableAndExcludedFromDuplicateConflictAuthority",
+  sourceAuthority: "exactLiveEventAndExactSourceIndex",
+  receiptRole: "immutableCrossCheckNeverSourceReconstruction",
+  consumerIntegration: "requiredBeforeAnyProductActivation",
+  immutableFields: [
+    "operationId", "sourceEventRowid", "sourceEventId", "requestId",
+    "aggregateType", "aggregateId", "aggregateSequence", "eventType",
+    "payloadSchemaVersion", "canonicalPayloadJson", "canonicalPayloadDigest",
+    "eventTimestamp", "canonicalRecordJson", "recordDigest", "frozenAt",
+  ],
+  payloadDigest: {
+    algorithm: "sha256",
+    format: "lowercaseHex64",
+    sqlAuthority: "exactImmutableReceiptCrossCheck",
+    consumerValidation: "recomputeBeforeInsert",
+  },
+  recordDigest: {
+    schemaVersion: 1,
+    algorithm: "sha256",
+    format: "lowercaseHex64",
+    canonicalEnvelope: "canonicalJsonV1AllFieldsExceptRecordDigest",
+    sqlAuthority: "exactCanonicalEnvelopeTextAndDigestShape",
+    consumerValidation: "recomputeBeforeInsertRequired",
+    reopenValidation: "boundedVerifyOperationsBeforeRunnable",
+  },
+  appendOnly: true,
+  receiptMutation: "updateAndDeleteForbidden",
+  dependentGuards: [
+    "prefixAnchorRequiresFrozenOperation",
+    "frozenMessageRequiresSameFrozenOperation",
+    "deleteAuthorityRequiresSameFrozenOperation",
+  ],
+  queryPlanAcceptance: {
+    mode: "exactExplainQueryPlanDetail",
+    sourceEventRowid:
+      "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_source_rowid (source_event_rowid=?)",
+    operationId: "SEARCH frozen_operation_sources USING PRIMARY KEY (operation_id=?)",
+    aggregateTuple:
+      "SEARCH frozen_operation_sources USING COVERING INDEX frozen_operation_sources_aggregate (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
+    reject: ["SCAN frozen_operation_sources", "USE TEMP B-TREE"],
+  },
+} as const;
+
+const STORAGE_RUNTIME_SOURCE_AUTHORITY_POLICY_V1 = {
+  schemaVersion: 1,
+  liveEvent: "exactLiveEventPlusSourceIndexPlusReceipt",
+  deletedEvent: "exactFrozenOperationPlusReceipt",
+  receiptOnly: "failClosed",
+  requestIdComparison: "excluded",
+  deletedIntroducingMessageIdReuse: "rejectedByPreservedV7FrozenMessageGuard",
+  deletedOperationDuplicateConflict: "frozenOperationPlusReceiptExactV1Semantics",
+  chatPredecessor: "frozenOperationCanonicalPayloadNeverReceiptSelfReconstruction",
+  namespaces: ["legacy", "actualAgent", "recovery"],
+  namespaceDecisionEquality: true,
+} as const;
+
+const STORAGE_COMPACTION_POLICY_V2 = {
+  schemaVersion: 2,
+  activation: {
+    productExecutionEnabled: false,
+    actualDeleteEnabled: false,
+    automaticSchedulingEnabled: false,
+    wireEnabled: false,
+  },
+  cursor: {
+    schemaVersion: 2,
+    phases: STORAGE_COMPACTION_PHASES_V2,
+    keyset: "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
+    maxRowsPerBatch: STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
+    maxCanonicalPayloadBytesPerBatch:
+      STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+    exhaustion: "exactEmptyBoundedQueryOnly",
+    callerConfigurable: false,
+  },
+  lifecycle: {
+    arm: "pendingToRunningSentinelCommittedBeforeBatch",
+    batchSuccess: "runningToPendingWithCursorAndEmptyAuthoritySameTransaction",
+    cancelBeforeArm: "pendingUnchanged",
+    cancelAfterArm: "rollbackLeavesRunningSentinel",
+    commitUncertain: "runningRequiresManualRecoveryPendingAdvancedMeansCommitted",
+    runtimeGuardDdl: "forbidden",
+    terminalSuccess: "finalizeExhaustedAuthorityEmptyAndOperationsVerified",
+  },
+  operationVerification: {
+    everyAuthorizedDeleteHasFrozenOperation: true,
+    deletedOperationReplayUsesFrozenOperationAndReceipt: true,
+    receiptOnlyRejected: true,
+    chatPredecessorUsesFrozenCanonicalPayload: true,
+  },
+} as const;
+
+export function validateStorageFrozenOperationSourcePolicyV1(
+  value: unknown,
+): Record<string, unknown> {
+  const policy = requireObject(value, "storage frozen operation source policy");
+  if (!sameContractValue(policy, STORAGE_FROZEN_OPERATION_SOURCE_POLICY_V1)) {
+    fail("storage frozen operation source policy is not exact");
+  }
+  return policy;
+}
+
+export function validateStorageRuntimeSourceAuthorityPolicyV1(
+  value: unknown,
+): Record<string, unknown> {
+  const policy = requireObject(value, "storage runtime source authority policy");
+  if (!sameContractValue(policy, STORAGE_RUNTIME_SOURCE_AUTHORITY_POLICY_V1)) {
+    fail("storage runtime source authority policy is not exact");
+  }
+  return policy;
+}
+
+export function validateStorageCompactionPolicyV2(value: unknown): Record<string, unknown> {
+  const policy = requireObject(value, "storage compaction v2 policy");
+  if (!sameContractValue(policy, STORAGE_COMPACTION_POLICY_V2)) {
+    fail("storage compaction v2 policy is not exact");
+  }
+  return policy;
+}
+
+export function canonicalFrozenOperationRecordV1(source: FrozenOperationSourceV1): string {
+  return canonicalJsonV1({
+    aggregateId: source.aggregateId,
+    aggregateSequence: source.aggregateSequence,
+    aggregateType: source.aggregateType,
+    canonicalPayloadDigest: source.canonicalPayloadDigest,
+    canonicalPayloadJson: source.canonicalPayloadJson,
+    eventTimestamp: source.eventTimestamp,
+    eventType: source.eventType,
+    frozenAt: source.frozenAt,
+    operationId: source.operationId,
+    payloadSchemaVersion: source.payloadSchemaVersion,
+    recordSchemaVersion: 1,
+    requestId: source.requestId,
+    sourceEventId: source.sourceEventId,
+    sourceEventRowid: source.sourceEventRowid,
+  });
+}
+
+export function validateFrozenOperationSourceV1(value: unknown): FrozenOperationSourceV1 {
+  const source = requireObject(value, "frozen operation source");
+  exactKeys(source, [
+    "operationId", "sourceEventRowid", "sourceEventId", "requestId", "aggregateType",
+    "aggregateId", "aggregateSequence", "eventType", "payloadSchemaVersion",
+    "canonicalPayloadJson", "canonicalPayloadDigest", "eventTimestamp",
+    "canonicalRecordJson", "recordDigest", "frozenAt",
+  ]);
+  const rowid = requireSafeUnsigned(source.sourceEventRowid, "frozen operation source rowid");
+  const sequence = requireSafeUnsigned(
+    source.aggregateSequence, "frozen operation aggregate sequence",
+  );
+  if (!nonEmpty(source.operationId) || rowid === 0 || !nonEmpty(source.sourceEventId)
+    || !(source.requestId === null || nonEmpty(source.requestId))
+    || !["project", "chat", "run", "lock"].includes(source.aggregateType as string)
+    || !nonEmpty(source.aggregateId) || sequence === 0 || !nonEmpty(source.eventType)
+    || source.payloadSchemaVersion !== 1 || !nonEmpty(source.canonicalPayloadJson)
+    || typeof source.canonicalPayloadDigest !== "string"
+    || !/^[0-9a-f]{64}$/.test(source.canonicalPayloadDigest)
+    || !nonEmpty(source.canonicalRecordJson) || typeof source.recordDigest !== "string"
+    || !/^[0-9a-f]{64}$/.test(source.recordDigest)) {
+    fail("frozen operation source fields are invalid");
+  }
+  requireTimestamp(source.eventTimestamp, "frozen operation eventTimestamp");
+  requireTimestamp(source.frozenAt, "frozen operation frozenAt");
+  const typed = source as unknown as FrozenOperationSourceV1;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(typed.canonicalPayloadJson);
+  } catch {
+    fail("frozen operation canonical payload must be valid JSON");
+  }
+  if (payload === null || Array.isArray(payload) || typeof payload !== "object"
+    || canonicalJsonV1(payload) !== typed.canonicalPayloadJson) {
+    fail("frozen operation canonical payload must be one canonical JSON object");
+  }
+  const payloadDigest = sha256FileVersionV1(
+    new TextEncoder().encode(typed.canonicalPayloadJson),
+  );
+  if (payloadDigest !== `sha256:${typed.canonicalPayloadDigest}`) {
+    fail("frozen operation payload digest does not match canonical payload");
+  }
+  const expectedRecord = canonicalFrozenOperationRecordV1(typed);
+  if (typed.canonicalRecordJson !== expectedRecord) {
+    fail("frozen operation canonical record is not exact");
+  }
+  const recordDigest = sha256FileVersionV1(new TextEncoder().encode(expectedRecord));
+  if (recordDigest !== `sha256:${typed.recordDigest}`) {
+    fail("frozen operation record digest does not match canonical envelope");
+  }
+  return typed;
+}
+
+export function validateFrozenOperationSourceBatchV1(
+  value: unknown,
+): FrozenOperationSourceV1[] {
+  if (!Array.isArray(value) || value.length === 0
+    || value.length > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1) {
+    fail("frozen operation batch must contain one through one hundred rows");
+  }
+  const operations = new Set<string>();
+  const rowids = new Set<number>();
+  let payloadBytes = 0;
+  const sources = value.map((item) => {
+    const source = validateFrozenOperationSourceV1(item);
+    payloadBytes += new TextEncoder().encode(source.canonicalPayloadJson).byteLength;
+    if (operations.has(source.operationId) || rowids.has(source.sourceEventRowid)) {
+      fail("frozen operation batch identities must be distinct");
+    }
+    operations.add(source.operationId);
+    rowids.add(source.sourceEventRowid);
+    return source;
+  });
+  if (payloadBytes > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1) {
+    fail("frozen operation batch canonical payload budget exceeded");
+  }
+  return sources;
+}
+
+export function validateFrozenOperationSourceBindingV1(
+  value: unknown,
+  eventRowid: number,
+  event: OperationCandidateV1,
+  sourceIndexValue: unknown,
+  receiptValue: unknown,
+): FrozenOperationSourceV1 {
+  const frozen = validateFrozenOperationReceiptBindingV1(value, receiptValue);
+  const sourceIndex = validateStorageEventSourceIndexBindingV1(
+    eventRowid, sourceIndexValue, event,
+  );
+  if (frozen.sourceEventRowid !== eventRowid || frozen.sourceEventId !== event.event_id
+    || frozen.operationId !== event.operation_id || frozen.requestId !== event.request_id
+    || frozen.aggregateType !== event.aggregate_type || frozen.aggregateId !== event.aggregate_id
+    || frozen.aggregateSequence !== event.aggregate_sequence
+    || frozen.eventType !== event.event_type
+    || frozen.payloadSchemaVersion !== event.payload_schema_version
+    || frozen.canonicalPayloadJson !== event.canonical_json_payload
+    || frozen.eventTimestamp !== event.timestamp
+    || sourceIndex.operationId !== frozen.operationId) {
+    fail("frozen operation must bind one exact live event, source index, and receipt cross-check");
+  }
+  return frozen;
+}
+
+export function validateFrozenOperationReceiptBindingV1(
+  value: unknown,
+  receiptValue: unknown,
+): FrozenOperationSourceV1 {
+  const frozen = validateFrozenOperationSourceV1(value);
+  const receipt = validateOperationReceiptV2(receiptValue);
+  if (receipt.operationId !== frozen.operationId || receipt.eventId !== frozen.sourceEventId
+    || receipt.aggregateType !== frozen.aggregateType
+    || receipt.aggregateId !== frozen.aggregateId
+    || receipt.aggregateSequence !== frozen.aggregateSequence
+    || receipt.eventType !== frozen.eventType
+    || receipt.payloadSchemaVersion !== frozen.payloadSchemaVersion
+    || receipt.canonicalPayloadJson !== frozen.canonicalPayloadJson
+    || receipt.canonicalPayloadDigest !== frozen.canonicalPayloadDigest
+    || receipt.eventTimestamp !== frozen.eventTimestamp) {
+    fail("frozen operation must bind one exact immutable receipt");
+  }
+  return frozen;
+}
+
+export function validateStorageRuntimeSourceAuthorityV1(
+  value: unknown,
+): StorageRuntimeSourceAuthorityV1 {
+  const authority = requireObject(value, "storage runtime source authority");
+  exactKeys(authority, [
+    "aggregateType", "eventPresent", "liveSourceIndexPresent", "frozenOperationPresent", "receiptPresent",
+    "liveSourceMatches", "frozenOperationMatches", "receiptMatches",
+    "chatPredecessorSource",
+  ]);
+  if (!["project", "chat", "run", "lock"].includes(authority.aggregateType as string)) {
+    fail("runtime authority aggregateType is invalid");
+  }
+  for (const field of [
+    "eventPresent", "liveSourceIndexPresent", "frozenOperationPresent", "receiptPresent",
+    "liveSourceMatches", "frozenOperationMatches", "receiptMatches",
+  ] as const) {
+    if (typeof authority[field] !== "boolean") fail(`runtime authority ${field} must be boolean`);
+  }
+  if (!(authority.chatPredecessorSource === null
+    || authority.chatPredecessorSource === "frozenOperationCanonicalPayload")) {
+    fail("chat predecessor cannot be reconstructed from a receipt");
+  }
+  if (authority.aggregateType === "chat" && authority.eventPresent === false
+    ? authority.chatPredecessorSource !== "frozenOperationCanonicalPayload"
+    : authority.chatPredecessorSource !== null) {
+    fail("deleted chat predecessor requires frozen operation canonical payload only");
+  }
+  const valid = authority.eventPresent === true
+    ? authority.liveSourceIndexPresent === true && authority.liveSourceMatches === true
+      && authority.receiptPresent === true && authority.receiptMatches === true
+    : authority.liveSourceIndexPresent === false && authority.frozenOperationPresent === true
+      && authority.frozenOperationMatches === true && authority.receiptPresent === true
+      && authority.receiptMatches === true;
+  if (!valid) fail("runtime source authority is incomplete");
+  return authority as unknown as StorageRuntimeSourceAuthorityV1;
+}
+
+export function validateStorageCompactionCursorV2(value: unknown): StorageCompactionCursorV2 {
+  const cursor = requireObject(value, "storage compaction cursor v2");
+  exactKeys(cursor, [
+    "schemaVersion", "cutoffEventRowid", "phase", "afterEventRowid", "scanExhausted",
+  ]);
+  const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "compaction v2 cutoff");
+  const after = requireSafeUnsigned(cursor.afterEventRowid, "compaction v2 after");
+  if (cursor.schemaVersion !== STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2
+    || !STORAGE_COMPACTION_PHASES_V2.includes(cursor.phase as StorageCompactionPhaseV2)
+    || typeof cursor.scanExhausted !== "boolean" || after > cutoff) {
+    fail("storage compaction cursor v2 is invalid");
+  }
+  return cursor as unknown as StorageCompactionCursorV2;
+}
+
+export function validateStorageCompactionCursorTransitionV2(
+  previousValue: unknown | null,
+  nextValue: unknown,
+  evidenceValue: unknown | null,
+): StorageCompactionCursorV2 {
+  const next = validateStorageCompactionCursorV2(nextValue);
+  if (previousValue === null) {
+    if (evidenceValue !== null || next.phase !== "freezeOperations"
+      || next.afterEventRowid !== 0 || next.scanExhausted) {
+      fail("storage compaction v2 must start freezeOperations without batch evidence");
+    }
+    return next;
+  }
+  const previous = validateStorageCompactionCursorV2(previousValue);
+  if (next.cutoffEventRowid !== previous.cutoffEventRowid) {
+    fail("storage compaction v2 cannot change frozen cutoff");
+  }
+  if (next.phase !== previous.phase) {
+    const previousIndex = STORAGE_COMPACTION_PHASES_V2.indexOf(previous.phase);
+    if (evidenceValue !== null || !previous.scanExhausted || next.scanExhausted
+      || STORAGE_COMPACTION_PHASES_V2[previousIndex + 1] !== next.phase
+      || next.afterEventRowid !== 0) {
+      fail("storage compaction v2 phase advance requires exact exhausted predecessor");
+    }
+    return next;
+  }
+  const evidence = requireObject(evidenceValue, "storage compaction v2 batch evidence");
+  exactKeys(evidence, ["rowsInBatch", "canonicalPayloadBytes", "exactEmptyQuery"]);
+  const rows = requireSafeUnsigned(evidence.rowsInBatch, "compaction v2 rows");
+  const bytes = requireSafeUnsigned(evidence.canonicalPayloadBytes, "compaction v2 bytes");
+  if (rows > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    || bytes > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
+    || typeof evidence.exactEmptyQuery !== "boolean" || previous.scanExhausted) {
+    fail("storage compaction v2 batch evidence exceeds bounded policy");
+  }
+  if (next.scanExhausted) {
+    if (rows !== 0 || bytes !== 0 || evidence.exactEmptyQuery !== true
+      || next.afterEventRowid !== previous.afterEventRowid) {
+      fail("storage compaction v2 exhaustion requires exact empty bounded query");
+    }
+  } else if (rows === 0 || evidence.exactEmptyQuery || next.afterEventRowid <= previous.afterEventRowid) {
+    fail("storage compaction v2 progress requires a nonempty bounded batch");
+  }
+  return next;
+}
+
+export function validateStorageCompactionJobV2(value: unknown): StorageCompactionJobV2 {
+  const job = requireObject(value, "storage compaction job v2");
+  exactKeys(job, [
+    "jobId", "state", "cursor", "authorityCount", "operationsVerified",
+    "equivalenceVerified", "failureKind", "completedAt",
+  ]);
+  const cursor = validateStorageCompactionCursorV2(job.cursor);
+  const authorityCount = requireSafeUnsigned(job.authorityCount, "compaction v2 authority");
+  if (!nonEmpty(job.jobId) || !["pending", "running", "succeeded", "failed"].includes(
+    job.state as string,
+  ) || authorityCount > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    || typeof job.operationsVerified !== "boolean"
+    || typeof job.equivalenceVerified !== "boolean"
+    || !(job.failureKind === null || nonEmpty(job.failureKind))
+    || !(job.completedAt === null || nonEmpty(job.completedAt))) {
+    fail("storage compaction job v2 fields are invalid");
+  }
+  if (job.state === "pending" || job.state === "running") {
+    if (job.failureKind !== null || job.completedAt !== null) {
+      fail("nonterminal compaction v2 job cannot carry terminal evidence");
+    }
+  } else if (job.state === "succeeded") {
+    if (authorityCount !== 0 || job.operationsVerified !== true
+      || job.equivalenceVerified !== true || cursor.phase !== "finalize"
+      || cursor.scanExhausted !== true || job.failureKind !== null
+      || job.completedAt === null) {
+      fail("successful compaction v2 requires verified authority-empty finalization");
+    }
+    requireTimestamp(job.completedAt, "compaction v2 completedAt");
+  } else {
+    if (authorityCount !== 0 || !nonEmpty(job.failureKind) || job.completedAt === null) {
+      fail("failed compaction v2 requires empty authority and failure evidence");
+    }
+    requireTimestamp(job.completedAt, "compaction v2 completedAt");
+  }
+  return job as unknown as StorageCompactionJobV2;
+}
+
+export function validateStorageCompactionLifecycleTransitionV2(
+  operation: StorageCompactionLifecycleOperationV2,
+  previousValue: unknown,
+  nextValue: unknown,
+  evidenceValue: unknown | null,
+): StorageCompactionJobV2 {
+  const previous = validateStorageCompactionJobV2(previousValue);
+  const next = validateStorageCompactionJobV2(nextValue);
+  if (previous.jobId !== next.jobId) fail("compaction v2 job identity cannot change");
+  const same = sameContractValue(previous, next);
+  const sameCursor = sameContractValue(previous.cursor, next.cursor);
+  const batchCommitted = () => {
+    validateStorageCompactionCursorTransitionV2(
+      previous.cursor, next.cursor, evidenceValue,
+    );
+    return previous.state === "running" && next.state === "pending"
+      && next.authorityCount === 0
+      && previous.operationsVerified === next.operationsVerified
+      && previous.equivalenceVerified === next.equivalenceVerified;
+  };
+  const valid = operation === "arm"
+    ? previous.state === "pending" && next.state === "running"
+      && previous.authorityCount === 0 && next.authorityCount === 0
+      && sameCursor && previous.operationsVerified === next.operationsVerified
+      && previous.equivalenceVerified === next.equivalenceVerified
+      && evidenceValue === null
+    : operation === "batchSuccess"
+      ? batchCommitted()
+      : operation === "cancelBeforeArm"
+        ? previous.state === "pending" && evidenceValue === null && same
+        : operation === "cancelAfterArm"
+          ? previous.state === "running" && evidenceValue === null && same
+          : operation === "commitUncertain"
+            ? (previous.state === "running" && evidenceValue === null && same)
+              || batchCommitted()
+            : operation === "complete"
+              ? previous.state === "pending" && next.state === "succeeded"
+                && previous.authorityCount === 0 && sameCursor
+                && previous.cursor.phase === "finalize" && previous.cursor.scanExhausted
+                && next.operationsVerified && next.equivalenceVerified
+                && evidenceValue === null
+              : false;
+  if (!valid) fail("storage compaction v2 lifecycle transition is invalid");
+  return next;
+}
+
+export function validateStorageCompactionEquivalenceV2(
+  value: unknown,
+): StorageCompactionEquivalenceEvidenceV2 {
+  const evidence = requireObject(value, "storage compaction equivalence v2");
+  exactKeys(evidence, [
+    "rowsInBatch", "operationsVerified", "baselineTailBefore", "anchorTailAfter",
+    "preservedArtifactsByteExact", "receiptReplayEquivalent",
+    "namespaceDecisionsEquivalent", "frozenMessageIdsReserved", "authorityEmpty",
+  ]);
+  const rows = requireSafeUnsigned(evidence.rowsInBatch, "compaction v2 equivalence rows");
+  if (rows === 0 || rows > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+    || [
+      evidence.operationsVerified, evidence.baselineTailBefore, evidence.anchorTailAfter,
+      evidence.preservedArtifactsByteExact, evidence.receiptReplayEquivalent,
+      evidence.namespaceDecisionsEquivalent, evidence.frozenMessageIdsReserved,
+      evidence.authorityEmpty,
+    ].some((fact) => fact !== true)) {
+    fail("storage compaction v2 equivalence evidence is incomplete");
+  }
+  return evidence as unknown as StorageCompactionEquivalenceEvidenceV2;
 }
 
 export function validateStorageCompactionCursorV1(value: unknown): StorageCompactionCursorV1 {
