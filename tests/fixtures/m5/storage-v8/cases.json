@@ -124,13 +124,7 @@
       "name": "bounded source progress",
       "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
       "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": false },
-      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 1024, "exactEmptyQuery": false }
-    },
-    {
-      "name": "exact empty marks exhaustion",
-      "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": false },
-      "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": true },
-      "evidence": { "rowsInBatch": 0, "canonicalPayloadBytes": 0, "exactEmptyQuery": true }
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 1024 }
     },
     {
       "name": "exhausted advances one phase",
@@ -141,22 +135,22 @@
   ],
   "invalidCursorTransitionsV2": [
     {
-      "name": "marks exhaustion without empty proof",
+      "name": "caller cannot forge exact-empty exhaustion",
       "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": false },
       "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 2, "scanExhausted": true },
-      "evidence": { "rowsInBatch": 1, "canonicalPayloadBytes": 10, "exactEmptyQuery": false }
+      "evidence": { "rowsInBatch": 0, "canonicalPayloadBytes": 0, "exactEmptyQuery": true }
     },
     {
       "name": "batch over one hundred",
       "previous": { "schemaVersion": 2, "cutoffEventRowid": 200, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
       "next": { "schemaVersion": 2, "cutoffEventRowid": 200, "phase": "freezeOperations", "afterEventRowid": 101, "scanExhausted": false },
-      "evidence": { "rowsInBatch": 101, "canonicalPayloadBytes": 1000, "exactEmptyQuery": false }
+      "evidence": { "rowsInBatch": 101, "canonicalPayloadBytes": 1000 }
     },
     {
       "name": "payload over one mebibyte",
       "previous": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 0, "scanExhausted": false },
       "next": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "freezeOperations", "afterEventRowid": 1, "scanExhausted": false },
-      "evidence": { "rowsInBatch": 1, "canonicalPayloadBytes": 1048577, "exactEmptyQuery": false }
+      "evidence": { "rowsInBatch": 1, "canonicalPayloadBytes": 1048577 }
     },
     {
       "name": "skips verify operations",
@@ -178,7 +172,7 @@
       "operation": "batchSuccess",
       "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 2, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
       "next": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 2, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
-      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0, "exactEmptyQuery": false }
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0 }
     },
     {
       "name": "cancel before arm leaves pending unchanged",
@@ -206,23 +200,24 @@
       "operation": "commitUncertain",
       "previous": { "jobId": "compact_v8", "state": "running", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 0, "scanExhausted": false }, "authorityCount": 2, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
       "next": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "deletePrefix", "afterEventRowid": 2, "scanExhausted": false }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
-      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0, "exactEmptyQuery": false }
-    },
+      "evidence": { "rowsInBatch": 2, "canonicalPayloadBytes": 0 }
+    }
+  ],
+  "invalidLifecycleMutationsV2": [
+    { "name": "arm creates authority", "caseIndex": 0, "path": ["next", "authorityCount"], "replacement": 1 },
+    { "name": "batch leaves authority", "caseIndex": 1, "path": ["next", "authorityCount"], "replacement": 1 },
+    { "name": "cancel after arm clears sentinel", "caseIndex": 3, "path": ["next", "state"], "replacement": "pending" }
+  ],
+  "invalidLifecycleTransitionsV2": [
     {
-      "name": "verified finalization empties authority",
+      "name": "caller cannot mint final verification booleans",
       "operation": "complete",
       "previous": { "jobId": "compact_v8", "state": "pending", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 6, "scanExhausted": true }, "authorityCount": 0, "operationsVerified": false, "equivalenceVerified": false, "failureKind": null, "completedAt": null },
       "next": { "jobId": "compact_v8", "state": "succeeded", "cursor": { "schemaVersion": 2, "cutoffEventRowid": 6, "phase": "finalize", "afterEventRowid": 6, "scanExhausted": true }, "authorityCount": 0, "operationsVerified": true, "equivalenceVerified": true, "failureKind": null, "completedAt": "2026-09-01T10:10:00Z" },
       "evidence": null
     }
   ],
-  "invalidLifecycleMutationsV2": [
-    { "name": "arm creates authority", "caseIndex": 0, "path": ["next", "authorityCount"], "replacement": 1 },
-    { "name": "batch leaves authority", "caseIndex": 1, "path": ["next", "authorityCount"], "replacement": 1 },
-    { "name": "cancel after arm clears sentinel", "caseIndex": 3, "path": ["next", "state"], "replacement": "pending" },
-    { "name": "finalize skips operation verification", "caseIndex": 6, "path": ["next", "operationsVerified"], "replacement": false }
-  ],
-  "equivalenceCasesV2": {
+  "privateEquivalenceCasesV2": {
     "valid": { "rowsInBatch": 100, "operationsVerified": true, "baselineTailBefore": true, "anchorTailAfter": true, "preservedArtifactsByteExact": true, "receiptReplayEquivalent": true, "namespaceDecisionsEquivalent": true, "frozenMessageIdsReserved": true, "authorityEmpty": true },
     "invalidFields": ["operationsVerified", "baselineTailBefore", "anchorTailAfter", "preservedArtifactsByteExact", "receiptReplayEquivalent", "namespaceDecisionsEquivalent", "frozenMessageIdsReserved", "authorityEmpty"],
     "invalidRowsInBatch": [0, 101]
@@ -264,6 +259,10 @@
     { "name": "request id compared", "target": "runtimeSourceAuthority", "path": ["requestIdComparison"], "replacement": "included" },
     { "name": "receipt predecessor", "target": "runtimeSourceAuthority", "path": ["chatPredecessor"], "replacement": "receipt" },
     { "name": "product delete enabled", "target": "compactionV2", "path": ["activation", "actualDeleteEnabled"], "replacement": true },
-    { "name": "unbounded batch", "target": "compactionV2", "path": ["cursor", "maxRowsPerBatch"], "replacement": 1000 }
+    { "name": "unbounded batch", "target": "compactionV2", "path": ["cursor", "maxRowsPerBatch"], "replacement": 1000 },
+    { "name": "caller receives exhaustion authority", "target": "compactionV2", "path": ["cursor", "scanExhaustedProofBoundary"], "replacement": "publicJsonWitness" },
+    { "name": "public complete may finalize", "target": "compactionV2", "path": ["lifecycle", "publicCompleteTransition"], "replacement": "allowed" },
+    { "name": "caller boolean becomes verification authority", "target": "compactionV2", "path": ["operationVerification", "publicBooleanAuthority"], "replacement": "allowed" },
+    { "name": "private durable state exposed as public input", "target": "compactionV2", "path": ["privateDurableState", "publicInput"], "replacement": "allowed" }
   ]
 }

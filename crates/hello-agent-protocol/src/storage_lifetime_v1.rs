@@ -533,10 +533,9 @@ pub struct StorageCompactionCursorV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct StorageCompactionBatchEvidenceV2 {
+pub struct StorageCompactionProgressV2 {
     pub rows_in_batch: u32,
     pub canonical_payload_bytes: u64,
-    pub exact_empty_query: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -565,7 +564,8 @@ pub struct StorageCompactionJobV2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct StorageCompactionEquivalenceEvidenceV2 {
+#[cfg(test)]
+struct StorageCompactionEquivalenceEvidenceV2 {
     pub rows_in_batch: u32,
     pub operations_verified: bool,
     pub baseline_tail_before: bool,
@@ -3170,13 +3170,24 @@ pub fn validate_storage_compaction_policy_v2(
             "automaticSchedulingEnabled": false,
             "wireEnabled": false,
         },
+        "privateDurableState": {
+            "location": "maintenance_jobs.cutoff_json.storageCompactionV2PrivateState",
+            "schemaVersion": 1,
+            "fields": ["schemaVersion", "cursor", "operationsVerified", "equivalenceVerified"],
+            "writer": "sidecarOnlySameTransaction",
+            "publicInput": "forbidden",
+        },
         "cursor": {
             "schemaVersion": STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2,
             "phases": STORAGE_COMPACTION_PHASES_V2,
             "keyset": "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
             "maxRowsPerBatch": STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
             "maxCanonicalPayloadBytesPerBatch": STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
-            "exhaustion": "exactEmptyBoundedQueryOnly",
+            "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+            "scanExhaustedProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+            "durablePrivateResult": "scanExhaustedPersistedInMaintenanceJobCutoffJsonOnlyAfterPrivateTransaction",
+            "publicProgressInput": "positiveBoundedRowsAndBytesNoExhaustionAuthority",
+            "phaseTransition": "durablePrivateExhaustionThenExactNextAtZeroAndFalse",
             "callerConfigurable": false,
         },
         "lifecycle": {
@@ -3186,13 +3197,18 @@ pub fn validate_storage_compaction_policy_v2(
             "cancelAfterArm": "rollbackLeavesRunningSentinel",
             "commitUncertain": "runningRequiresManualRecoveryPendingAdvancedMeansCommitted",
             "runtimeGuardDdl": "forbidden",
-            "terminalSuccess": "finalizeExhaustedAuthorityEmptyAndOperationsVerified",
+            "terminalSuccessMutationAuthority": "sidecarPrivateBoundedOperationsAndEquivalenceVerificationSameTransaction",
+            "terminalSuccessProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+            "durablePrivateResult": "verifiedBooleansAndSucceededPersistedInMaintenanceJobSamePrivateTransaction",
+            "publicCompleteTransition": "alwaysRejected",
         },
         "operationVerification": {
             "everyAuthorizedDeleteHasFrozenOperation": true,
             "deletedOperationReplayUsesFrozenOperationAndReceipt": true,
             "receiptOnlyRejected": true,
             "chatPredecessorUsesFrozenCanonicalPayload": true,
+            "publicBooleanAuthority": "forbidden",
+            "durablePrivateResult": "operationsVerifiedAndEquivalenceVerifiedPersistedOnlyBySidecarSameTransaction",
         },
     });
     if value != &expected {
@@ -3466,17 +3482,17 @@ pub fn validate_storage_compaction_cursor_v2(
 pub fn validate_storage_compaction_cursor_transition_v2(
     previous: Option<&Value>,
     next: &Value,
-    evidence: Option<&Value>,
+    progress: Option<&Value>,
 ) -> Result<StorageCompactionCursorV2, StorageLifetimeContractError> {
     let next = validate_storage_compaction_cursor_v2(next)?;
     let Some(previous) = previous else {
-        if evidence.is_some()
+        if progress.is_some()
             || next.phase != StorageCompactionPhaseV2::FreezeOperations
             || next.after_event_rowid != 0
             || next.scan_exhausted
         {
             return Err(StorageLifetimeContractError::new(
-                "storage compaction v2 must start freezeOperations without batch evidence",
+                "storage compaction v2 must start freezeOperations without public progress",
             ));
         }
         return Ok(next);
@@ -3488,7 +3504,7 @@ pub fn validate_storage_compaction_cursor_transition_v2(
         ));
     }
     if next.phase != previous.phase {
-        if evidence.is_some()
+        if progress.is_some()
             || !previous.scan_exhausted
             || next.scan_exhausted
             || compaction_phase_index_v2(next.phase)
@@ -3501,33 +3517,21 @@ pub fn validate_storage_compaction_cursor_transition_v2(
         }
         return Ok(next);
     }
-    let evidence_value = evidence.ok_or_else(|| {
-        StorageLifetimeContractError::new("storage compaction v2 batch evidence is required")
-    })?;
-    let evidence: StorageCompactionBatchEvidenceV2 = serde_json::from_value(evidence_value.clone())
-        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
-    require_js_safe_unsigned(evidence.canonical_payload_bytes, "compaction v2 bytes")?;
-    if evidence.rows_in_batch as usize > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
-        || evidence.canonical_payload_bytes
-            > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
-        || previous.scan_exhausted
-    {
+    if next.scan_exhausted != previous.scan_exhausted || previous.scan_exhausted {
         return Err(StorageLifetimeContractError::new(
-            "storage compaction v2 batch evidence exceeds bounded policy",
+            "public compaction v2 transition cannot mint private exhaustion authority",
         ));
     }
-    if next.scan_exhausted {
-        if evidence.rows_in_batch != 0
-            || evidence.canonical_payload_bytes != 0
-            || !evidence.exact_empty_query
-            || next.after_event_rowid != previous.after_event_rowid
-        {
-            return Err(StorageLifetimeContractError::new(
-                "storage compaction v2 exhaustion requires exact empty bounded query",
-            ));
-        }
-    } else if evidence.rows_in_batch == 0
-        || evidence.exact_empty_query
+    let progress_value = progress.ok_or_else(|| {
+        StorageLifetimeContractError::new("storage compaction v2 progress is required")
+    })?;
+    let progress: StorageCompactionProgressV2 = serde_json::from_value(progress_value.clone())
+        .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    require_js_safe_unsigned(progress.canonical_payload_bytes, "compaction v2 bytes")?;
+    if progress.rows_in_batch as usize > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
+        || progress.canonical_payload_bytes
+            > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
+        || progress.rows_in_batch == 0
         || next.after_event_rowid <= previous.after_event_rowid
     {
         return Err(StorageLifetimeContractError::new(
@@ -3601,7 +3605,7 @@ pub fn validate_storage_compaction_lifecycle_transition_v2(
     operation: StorageCompactionLifecycleOperationV2,
     previous: &Value,
     next: &Value,
-    evidence: Option<&Value>,
+    progress: Option<&Value>,
 ) -> Result<StorageCompactionJobV2, StorageLifetimeContractError> {
     let previous = validate_storage_compaction_job_v2(previous)?;
     let next = validate_storage_compaction_job_v2(next)?;
@@ -3620,7 +3624,7 @@ pub fn validate_storage_compaction_lifecycle_transition_v2(
             ),
             &serde_json::to_value(&next.cursor)
                 .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?,
-            evidence,
+            progress,
         )?;
         Ok(previous.state == StorageCompactionJobStateV1::Running
             && next.state == StorageCompactionJobStateV1::Pending
@@ -3637,30 +3641,20 @@ pub fn validate_storage_compaction_lifecycle_transition_v2(
                 && same_cursor
                 && previous.operations_verified == next.operations_verified
                 && previous.equivalence_verified == next.equivalence_verified
-                && evidence.is_none()
+                && progress.is_none()
         }
         StorageCompactionLifecycleOperationV2::BatchSuccess => batch_committed()?,
         StorageCompactionLifecycleOperationV2::CancelBeforeArm => {
-            previous.state == StorageCompactionJobStateV1::Pending && evidence.is_none() && same
+            previous.state == StorageCompactionJobStateV1::Pending && progress.is_none() && same
         }
         StorageCompactionLifecycleOperationV2::CancelAfterArm => {
-            previous.state == StorageCompactionJobStateV1::Running && evidence.is_none() && same
+            previous.state == StorageCompactionJobStateV1::Running && progress.is_none() && same
         }
         StorageCompactionLifecycleOperationV2::CommitUncertain => {
-            (previous.state == StorageCompactionJobStateV1::Running && evidence.is_none() && same)
+            (previous.state == StorageCompactionJobStateV1::Running && progress.is_none() && same)
                 || batch_committed()?
         }
-        StorageCompactionLifecycleOperationV2::Complete => {
-            previous.state == StorageCompactionJobStateV1::Pending
-                && next.state == StorageCompactionJobStateV1::Succeeded
-                && previous.authority_count == 0
-                && same_cursor
-                && previous.cursor.phase == StorageCompactionPhaseV2::Finalize
-                && previous.cursor.scan_exhausted
-                && next.operations_verified
-                && next.equivalence_verified
-                && evidence.is_none()
-        }
+        StorageCompactionLifecycleOperationV2::Complete => false,
     };
     if !valid {
         return Err(StorageLifetimeContractError::new(
@@ -3670,7 +3664,8 @@ pub fn validate_storage_compaction_lifecycle_transition_v2(
     Ok(next)
 }
 
-pub fn validate_storage_compaction_equivalence_v2(
+#[cfg(test)]
+fn validate_storage_compaction_equivalence_v2(
     value: &Value,
 ) -> Result<StorageCompactionEquivalenceEvidenceV2, StorageLifetimeContractError> {
     let evidence: StorageCompactionEquivalenceEvidenceV2 = serde_json::from_value(value.clone())

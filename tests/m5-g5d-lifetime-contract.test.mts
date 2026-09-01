@@ -89,7 +89,6 @@ import {
   validateStorageCompactionPolicyV2,
   validateStorageCompactionCursorTransitionV2 as validateStorageCompactionCursorTransitionV2Contract,
   validateStorageCompactionLifecycleTransitionV2,
-  validateStorageCompactionEquivalenceV2,
   validateStorageCompactionCursorV1,
   validateStorageCompactionCursorTransitionV1,
   validateStorageCompactionPrefixV1,
@@ -532,8 +531,15 @@ interface V8Cases {
     path: string[];
     replacement: unknown;
   }>;
-  equivalenceCasesV2: {
-    valid: unknown;
+  invalidLifecycleTransitionsV2: Array<{
+    name: string;
+    operation: "complete";
+    previous: unknown;
+    next: unknown;
+    evidence: unknown | null;
+  }>;
+  privateEquivalenceCasesV2: {
+    valid: Record<string, unknown>;
     invalidFields: string[];
     invalidRowsInBatch: number[];
   };
@@ -2695,17 +2701,18 @@ test("storage-v8 freezes operation provenance without activating product deletio
       fixture.operation, fixture.previous, fixture.next, fixture.evidence,
     ), undefined, mutation.name);
   }
-  validateStorageCompactionEquivalenceV2(v8Cases.equivalenceCasesV2.valid);
-  for (const field of v8Cases.equivalenceCasesV2.invalidFields) {
-    const invalid = structuredClone(v8Cases.equivalenceCasesV2.valid) as Record<string, unknown>;
-    invalid[field] = false;
-    assert.throws(() => validateStorageCompactionEquivalenceV2(invalid), undefined, field);
+  for (const fixture of v8Cases.invalidLifecycleTransitionsV2) {
+    assert.throws(() => validateStorageCompactionLifecycleTransitionV2(
+      fixture.operation, fixture.previous, fixture.next, fixture.evidence,
+    ), undefined, fixture.name);
   }
-  for (const rowsInBatch of v8Cases.equivalenceCasesV2.invalidRowsInBatch) {
-    const invalid = structuredClone(v8Cases.equivalenceCasesV2.valid) as Record<string, unknown>;
-    invalid.rowsInBatch = rowsInBatch;
-    assert.throws(() => validateStorageCompactionEquivalenceV2(invalid));
-  }
+  assert.equal(v8Cases.privateEquivalenceCasesV2.valid.operationsVerified, true);
+  assert.deepEqual(v8Cases.privateEquivalenceCasesV2.invalidFields, [
+    "operationsVerified", "baselineTailBefore", "anchorTailAfter",
+    "preservedArtifactsByteExact", "receiptReplayEquivalent",
+    "namespaceDecisionsEquivalent", "frozenMessageIdsReserved", "authorityEmpty",
+  ]);
+  assert.deepEqual(v8Cases.privateEquivalenceCasesV2.invalidRowsInBatch, [0, 101]);
   assert.deepEqual(v8Cases.namespaceReplay.map((entry) => [
     entry.namespace, entry.duplicate, entry.conflict,
   ]), [
@@ -2912,6 +2919,106 @@ test("storage-v8 freezes operation provenance without activating product deletio
       sourceEventId: "evt_instance_1", aggregateType: "app_instance" as "project",
       aggregateId: "instance_1", eventType: "app_instance.started",
     }));
+
+    database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_private_proof','losslessCompaction','pending','{}',NULL,NULL,NULL,NULL,
+               '2026-09-01T10:04:00Z','2026-09-01T10:04:00Z')
+    `).run();
+    const forgedExhaustion = v8Cases.invalidCursorTransitionsV2.find(
+      (fixture) => fixture.name === "caller cannot forge exact-empty exhaustion",
+    );
+    assert.ok(forgedExhaustion);
+    const durableJobsBeforeForgedExhaustion = JSON.stringify(
+      normalizedRows(database, "maintenance_jobs"),
+    );
+    assert.throws(() => validateStorageCompactionCursorTransitionV2Contract(
+      forgedExhaustion.previous, forgedExhaustion.next, forgedExhaustion.evidence,
+    ));
+    assert.equal(JSON.stringify(normalizedRows(database, "maintenance_jobs")),
+      durableJobsBeforeForgedExhaustion,
+      "public zero-row proof cannot mutate durable exhaustion");
+
+    database.exec("BEGIN IMMEDIATE");
+    const nonemptyKeyset = database.prepare(`
+      SELECT rowid AS event_rowid FROM events
+      WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT 100
+    `).all(0, 6);
+    assert.ok(nonemptyKeyset.length > 0);
+    database.exec("ROLLBACK");
+    assert.equal(JSON.stringify(normalizedRows(database, "maintenance_jobs")),
+      durableJobsBeforeForgedExhaustion,
+      "nonempty private keyset cannot persist exhaustion");
+
+    const privatelyExhaustedCursor = {
+      schemaVersion: 2, cutoffEventRowid: 6, phase: "freezeOperations",
+      afterEventRowid: 6, scanExhausted: true,
+    };
+    database.exec("BEGIN IMMEDIATE");
+    const exactEmptyKeyset = database.prepare(`
+      SELECT rowid AS event_rowid FROM events
+      WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT 100
+    `).all(6, 6);
+    assert.deepEqual(exactEmptyKeyset, []);
+    database.prepare("UPDATE maintenance_jobs SET cutoff_json=?,updated_at=? WHERE job_id=?").run(
+      JSON.stringify({ storageCompactionV2PrivateState: {
+        schemaVersion: 1, cursor: privatelyExhaustedCursor,
+        operationsVerified: false, equivalenceVerified: false,
+      } }),
+      "2026-09-01T10:04:01Z", "compact_private_proof",
+    );
+    database.exec("COMMIT");
+    assert.deepEqual(JSON.parse(String(database.prepare(
+      "SELECT cutoff_json FROM maintenance_jobs WHERE job_id='compact_private_proof'",
+    ).get()?.cutoff_json)).storageCompactionV2PrivateState.cursor, privatelyExhaustedCursor);
+
+    const forgedFinal = v8Cases.invalidLifecycleTransitionsV2[0]!;
+    const durableJobsBeforeForgedFinal = JSON.stringify(
+      normalizedRows(database, "maintenance_jobs"),
+    );
+    assert.throws(() => validateStorageCompactionLifecycleTransitionV2(
+      forgedFinal.operation, forgedFinal.previous, forgedFinal.next, forgedFinal.evidence,
+    ));
+    assert.equal(JSON.stringify(normalizedRows(database, "maintenance_jobs")),
+      durableJobsBeforeForgedFinal,
+      "public final booleans cannot mutate durable verification state");
+
+    const privateFinalCursor = {
+      schemaVersion: 2, cutoffEventRowid: 6, phase: "finalize",
+      afterEventRowid: 6, scanExhausted: true,
+    };
+    database.exec("BEGIN IMMEDIATE");
+    const boundedOperations = database.prepare(`
+      SELECT operation_id FROM frozen_operation_sources
+      WHERE source_event_rowid <= ? ORDER BY source_event_rowid LIMIT 100
+    `).all(6);
+    assert.ok(boundedOperations.length > 0 && boundedOperations.length <= 100);
+    assert.equal(database.prepare(`
+      SELECT COUNT(*) AS count FROM ledger_compaction_delete_authority WHERE job_id=?
+    `).get("compact_private_proof")?.count, 0);
+    database.prepare(`
+      UPDATE maintenance_jobs
+      SET state='succeeded',cutoff_json=?,started_at=?,completed_at=?,last_successful_at=?,updated_at=?
+      WHERE job_id=?
+    `).run(
+      JSON.stringify({ storageCompactionV2PrivateState: {
+        schemaVersion: 1, cursor: privateFinalCursor,
+        operationsVerified: true, equivalenceVerified: true,
+      } }),
+      "2026-09-01T10:04:02Z", "2026-09-01T10:04:03Z", "2026-09-01T10:04:03Z",
+      "2026-09-01T10:04:03Z", "compact_private_proof",
+    );
+    database.exec("COMMIT");
+    const privateFinal = database.prepare(`
+      SELECT state,cutoff_json FROM maintenance_jobs WHERE job_id='compact_private_proof'
+    `).get();
+    assert.equal(privateFinal?.state, "succeeded");
+    assert.deepEqual(JSON.parse(String(privateFinal?.cutoff_json)).storageCompactionV2PrivateState, {
+      schemaVersion: 1, cursor: privateFinalCursor,
+      operationsVerified: true, equivalenceVerified: true,
+    });
 
     const declaredPlans = Object.keys(
       manifestV8.frozenOperationSources.queryPlanAcceptance,

@@ -647,7 +647,8 @@ struct V8Cases {
     invalid_cursor_transitions_v2: Vec<V8CursorTransition>,
     valid_lifecycle_transitions_v2: Vec<V8LifecycleTransition>,
     invalid_lifecycle_mutations_v2: Vec<V8LifecycleMutation>,
-    equivalence_cases_v2: V8EquivalenceCases,
+    invalid_lifecycle_transitions_v2: Vec<V8LifecycleTransition>,
+    private_equivalence_cases_v2: V8EquivalenceCases,
     namespace_replay: Vec<V7ReplayNamespace>,
     preserved_v7_message_reuse: Value,
     query_plans: Vec<V6QueryPlan>,
@@ -2922,18 +2923,31 @@ fn storage_v8_freezes_operation_sources_without_enabling_product_deletion() {
             mutation.name
         );
     }
-    validate_storage_compaction_equivalence_v2(&cases.equivalence_cases_v2.valid)
+    for case in &cases.invalid_lifecycle_transitions_v2 {
+        assert!(
+            validate_storage_compaction_lifecycle_transition_v2(
+                case.operation,
+                &case.previous,
+                &case.next,
+                case.evidence.as_ref(),
+            )
+            .is_err(),
+            "{}",
+            case.name
+        );
+    }
+    validate_storage_compaction_equivalence_v2(&cases.private_equivalence_cases_v2.valid)
         .expect("complete v2 equivalence");
-    for field in &cases.equivalence_cases_v2.invalid_fields {
-        let mut invalid = cases.equivalence_cases_v2.valid.clone();
+    for field in &cases.private_equivalence_cases_v2.invalid_fields {
+        let mut invalid = cases.private_equivalence_cases_v2.valid.clone();
         invalid[field] = Value::Bool(false);
         assert!(
             validate_storage_compaction_equivalence_v2(&invalid).is_err(),
             "{field}"
         );
     }
-    for rows in &cases.equivalence_cases_v2.invalid_rows_in_batch {
-        let mut invalid = cases.equivalence_cases_v2.valid.clone();
+    for rows in &cases.private_equivalence_cases_v2.invalid_rows_in_batch {
+        let mut invalid = cases.private_equivalence_cases_v2.valid.clone();
         invalid["rowsInBatch"] = Value::from(*rows);
         assert!(validate_storage_compaction_equivalence_v2(&invalid).is_err());
     }

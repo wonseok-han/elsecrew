@@ -450,10 +450,9 @@ export interface StorageCompactionCursorV2 {
   scanExhausted: boolean;
 }
 
-export interface StorageCompactionBatchEvidenceV2 {
+export interface StorageCompactionProgressV2 {
   rowsInBatch: number;
   canonicalPayloadBytes: number;
-  exactEmptyQuery: boolean;
 }
 
 export type StorageCompactionLifecycleOperationV2 =
@@ -469,18 +468,6 @@ export interface StorageCompactionJobV2 {
   equivalenceVerified: boolean;
   failureKind: string | null;
   completedAt: string | null;
-}
-
-export interface StorageCompactionEquivalenceEvidenceV2 {
-  rowsInBatch: number;
-  operationsVerified: boolean;
-  baselineTailBefore: boolean;
-  anchorTailAfter: boolean;
-  preservedArtifactsByteExact: boolean;
-  receiptReplayEquivalent: boolean;
-  namespaceDecisionsEquivalent: boolean;
-  frozenMessageIdsReserved: boolean;
-  authorityEmpty: boolean;
 }
 
 export interface FrozenOperationSourceV1 {
@@ -2418,6 +2405,13 @@ const STORAGE_COMPACTION_POLICY_V2 = {
     automaticSchedulingEnabled: false,
     wireEnabled: false,
   },
+  privateDurableState: {
+    location: "maintenance_jobs.cutoff_json.storageCompactionV2PrivateState",
+    schemaVersion: 1,
+    fields: ["schemaVersion", "cursor", "operationsVerified", "equivalenceVerified"],
+    writer: "sidecarOnlySameTransaction",
+    publicInput: "forbidden",
+  },
   cursor: {
     schemaVersion: 2,
     phases: STORAGE_COMPACTION_PHASES_V2,
@@ -2425,7 +2419,12 @@ const STORAGE_COMPACTION_POLICY_V2 = {
     maxRowsPerBatch: STORAGE_COMPACTION_MAX_DELETE_ROWS_V1,
     maxCanonicalPayloadBytesPerBatch:
       STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
-    exhaustion: "exactEmptyBoundedQueryOnly",
+    scanExhaustedMutationAuthority: "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+    scanExhaustedProofBoundary: "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+    durablePrivateResult:
+      "scanExhaustedPersistedInMaintenanceJobCutoffJsonOnlyAfterPrivateTransaction",
+    publicProgressInput: "positiveBoundedRowsAndBytesNoExhaustionAuthority",
+    phaseTransition: "durablePrivateExhaustionThenExactNextAtZeroAndFalse",
     callerConfigurable: false,
   },
   lifecycle: {
@@ -2435,13 +2434,21 @@ const STORAGE_COMPACTION_POLICY_V2 = {
     cancelAfterArm: "rollbackLeavesRunningSentinel",
     commitUncertain: "runningRequiresManualRecoveryPendingAdvancedMeansCommitted",
     runtimeGuardDdl: "forbidden",
-    terminalSuccess: "finalizeExhaustedAuthorityEmptyAndOperationsVerified",
+    terminalSuccessMutationAuthority:
+      "sidecarPrivateBoundedOperationsAndEquivalenceVerificationSameTransaction",
+    terminalSuccessProofBoundary: "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+    durablePrivateResult:
+      "verifiedBooleansAndSucceededPersistedInMaintenanceJobSamePrivateTransaction",
+    publicCompleteTransition: "alwaysRejected",
   },
   operationVerification: {
     everyAuthorizedDeleteHasFrozenOperation: true,
     deletedOperationReplayUsesFrozenOperationAndReceipt: true,
     receiptOnlyRejected: true,
     chatPredecessorUsesFrozenCanonicalPayload: true,
+    publicBooleanAuthority: "forbidden",
+    durablePrivateResult:
+      "operationsVerifiedAndEquivalenceVerifiedPersistedOnlyBySidecarSameTransaction",
   },
 } as const;
 
@@ -2671,13 +2678,13 @@ export function validateStorageCompactionCursorV2(value: unknown): StorageCompac
 export function validateStorageCompactionCursorTransitionV2(
   previousValue: unknown | null,
   nextValue: unknown,
-  evidenceValue: unknown | null,
+  progressValue: unknown | null,
 ): StorageCompactionCursorV2 {
   const next = validateStorageCompactionCursorV2(nextValue);
   if (previousValue === null) {
-    if (evidenceValue !== null || next.phase !== "freezeOperations"
+    if (progressValue !== null || next.phase !== "freezeOperations"
       || next.afterEventRowid !== 0 || next.scanExhausted) {
-      fail("storage compaction v2 must start freezeOperations without batch evidence");
+      fail("storage compaction v2 must start freezeOperations without public progress");
     }
     return next;
   }
@@ -2687,28 +2694,23 @@ export function validateStorageCompactionCursorTransitionV2(
   }
   if (next.phase !== previous.phase) {
     const previousIndex = STORAGE_COMPACTION_PHASES_V2.indexOf(previous.phase);
-    if (evidenceValue !== null || !previous.scanExhausted || next.scanExhausted
+    if (progressValue !== null || !previous.scanExhausted || next.scanExhausted
       || STORAGE_COMPACTION_PHASES_V2[previousIndex + 1] !== next.phase
       || next.afterEventRowid !== 0) {
       fail("storage compaction v2 phase advance requires exact exhausted predecessor");
     }
     return next;
   }
-  const evidence = requireObject(evidenceValue, "storage compaction v2 batch evidence");
-  exactKeys(evidence, ["rowsInBatch", "canonicalPayloadBytes", "exactEmptyQuery"]);
-  const rows = requireSafeUnsigned(evidence.rowsInBatch, "compaction v2 rows");
-  const bytes = requireSafeUnsigned(evidence.canonicalPayloadBytes, "compaction v2 bytes");
+  if (next.scanExhausted !== previous.scanExhausted || previous.scanExhausted) {
+    fail("public compaction v2 transition cannot mint private exhaustion authority");
+  }
+  const progress = requireObject(progressValue, "storage compaction v2 progress");
+  exactKeys(progress, ["rowsInBatch", "canonicalPayloadBytes"]);
+  const rows = requireSafeUnsigned(progress.rowsInBatch, "compaction v2 rows");
+  const bytes = requireSafeUnsigned(progress.canonicalPayloadBytes, "compaction v2 bytes");
   if (rows > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
     || bytes > STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1
-    || typeof evidence.exactEmptyQuery !== "boolean" || previous.scanExhausted) {
-    fail("storage compaction v2 batch evidence exceeds bounded policy");
-  }
-  if (next.scanExhausted) {
-    if (rows !== 0 || bytes !== 0 || evidence.exactEmptyQuery !== true
-      || next.afterEventRowid !== previous.afterEventRowid) {
-      fail("storage compaction v2 exhaustion requires exact empty bounded query");
-    }
-  } else if (rows === 0 || evidence.exactEmptyQuery || next.afterEventRowid <= previous.afterEventRowid) {
+    || rows === 0 || next.afterEventRowid <= previous.afterEventRowid) {
     fail("storage compaction v2 progress requires a nonempty bounded batch");
   }
   return next;
@@ -2756,7 +2758,7 @@ export function validateStorageCompactionLifecycleTransitionV2(
   operation: StorageCompactionLifecycleOperationV2,
   previousValue: unknown,
   nextValue: unknown,
-  evidenceValue: unknown | null,
+  progressValue: unknown | null,
 ): StorageCompactionJobV2 {
   const previous = validateStorageCompactionJobV2(previousValue);
   const next = validateStorageCompactionJobV2(nextValue);
@@ -2765,7 +2767,7 @@ export function validateStorageCompactionLifecycleTransitionV2(
   const sameCursor = sameContractValue(previous.cursor, next.cursor);
   const batchCommitted = () => {
     validateStorageCompactionCursorTransitionV2(
-      previous.cursor, next.cursor, evidenceValue,
+      previous.cursor, next.cursor, progressValue,
     );
     return previous.state === "running" && next.state === "pending"
       && next.authorityCount === 0
@@ -2777,47 +2779,21 @@ export function validateStorageCompactionLifecycleTransitionV2(
       && previous.authorityCount === 0 && next.authorityCount === 0
       && sameCursor && previous.operationsVerified === next.operationsVerified
       && previous.equivalenceVerified === next.equivalenceVerified
-      && evidenceValue === null
+      && progressValue === null
     : operation === "batchSuccess"
       ? batchCommitted()
       : operation === "cancelBeforeArm"
-        ? previous.state === "pending" && evidenceValue === null && same
+        ? previous.state === "pending" && progressValue === null && same
         : operation === "cancelAfterArm"
-          ? previous.state === "running" && evidenceValue === null && same
+          ? previous.state === "running" && progressValue === null && same
           : operation === "commitUncertain"
-            ? (previous.state === "running" && evidenceValue === null && same)
+            ? (previous.state === "running" && progressValue === null && same)
               || batchCommitted()
             : operation === "complete"
-              ? previous.state === "pending" && next.state === "succeeded"
-                && previous.authorityCount === 0 && sameCursor
-                && previous.cursor.phase === "finalize" && previous.cursor.scanExhausted
-                && next.operationsVerified && next.equivalenceVerified
-                && evidenceValue === null
+              ? false
               : false;
   if (!valid) fail("storage compaction v2 lifecycle transition is invalid");
   return next;
-}
-
-export function validateStorageCompactionEquivalenceV2(
-  value: unknown,
-): StorageCompactionEquivalenceEvidenceV2 {
-  const evidence = requireObject(value, "storage compaction equivalence v2");
-  exactKeys(evidence, [
-    "rowsInBatch", "operationsVerified", "baselineTailBefore", "anchorTailAfter",
-    "preservedArtifactsByteExact", "receiptReplayEquivalent",
-    "namespaceDecisionsEquivalent", "frozenMessageIdsReserved", "authorityEmpty",
-  ]);
-  const rows = requireSafeUnsigned(evidence.rowsInBatch, "compaction v2 equivalence rows");
-  if (rows === 0 || rows > STORAGE_COMPACTION_MAX_DELETE_ROWS_V1
-    || [
-      evidence.operationsVerified, evidence.baselineTailBefore, evidence.anchorTailAfter,
-      evidence.preservedArtifactsByteExact, evidence.receiptReplayEquivalent,
-      evidence.namespaceDecisionsEquivalent, evidence.frozenMessageIdsReserved,
-      evidence.authorityEmpty,
-    ].some((fact) => fact !== true)) {
-    fail("storage compaction v2 equivalence evidence is incomplete");
-  }
-  return evidence as unknown as StorageCompactionEquivalenceEvidenceV2;
 }
 
 export function validateStorageCompactionCursorV1(value: unknown): StorageCompactionCursorV1 {

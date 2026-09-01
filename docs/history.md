@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 private proof P1 수정)
+
+- **public proof minting 제거**: V2 공개 Rust·TypeScript cursor transition은 양수인 최대 100행·1 MiB progress만 받고 `scanExhausted` false→true를 항상 거부한다. 공개 lifecycle의 `complete`도 항상 거부하고 equivalence evidence validator/type은 공개 API에서 제거해 caller가 0행/0바이트/empty 주장이나 최종 boolean으로 exhaustion·성공을 만들 수 없게 했다. 성공 job shape의 읽기 검증은 유지하지만 상태 전이 권한으로 쓰지 않는다.
+- **sidecar-private 경계 동결**: exact-empty bounded keyset 조회와 durable cursor 변경, bounded operations/equivalence 검증과 verified/succeeded 변경은 각각 sidecar 전용 동일 SQLite transaction에서만 가능하며 wire/public JSON으로 proof authority를 표현할 수 없다고 V8 manifest와 양 언어 exact policy에 고정했다. 제품 compaction/delete/wire는 계속 비활성이고 C1 consumer가 이 private writer 경계를 구현해야 한다.
+- **회귀·검증**: 실제 SQLite golden에서 nonempty keyset과 forged public exhaustion/final boolean이 maintenance state를 한 바이트도 바꾸지 않으며, 내부 exact-empty cursor commit과 bounded authority-empty final commit만 동일 transaction에서 영속화되는 것을 확인했다. Node lifetime 17개, protocol lifetime 10개·전체 42개, TypeScript no-emit, Rust 2021 rustfmt, 범위 밖 기존 clippy lint 두 종류를 제외한 scoped `-D warnings`, diff check가 모두 통과했고 V1~V7 fixture는 base와 byte-diff가 없다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 frozen-operation source 계약)
 
 - **uncompacted V7 전용 additive migration**: exact V7 schema와 네 admissible materialization pair만 mutation 전에 허용하고 attempting·active lossless-compaction·prefix/frozen-message/delete-authority 존재·V8 partial/extra/tamper를 fail-closed하는 schema V8 golden을 추가했다. migration은 terminal maintenance/history와 기존 data·trigger를 보존하고 history backfill 없이 `frozen_operation_sources`와 versioned dependent guards만 만든다. 실패는 exact V7로 rollback하며 runtime DDL, scheduler/wire, 제품 실행과 실제 delete는 C1 consumer 전까지 모두 비활성이다.

@@ -131,6 +131,13 @@
       "automaticSchedulingEnabled": false,
       "wireEnabled": false
     },
+    "privateDurableState": {
+      "location": "maintenance_jobs.cutoff_json.storageCompactionV2PrivateState",
+      "schemaVersion": 1,
+      "fields": ["schemaVersion", "cursor", "operationsVerified", "equivalenceVerified"],
+      "writer": "sidecarOnlySameTransaction",
+      "publicInput": "forbidden"
+    },
     "cursor": {
       "schemaVersion": 2,
       "phases": [
@@ -140,7 +147,11 @@
       "keyset": "eventRowidGreaterThanAfterAndAtOrBelowCutoffOrderByEventRowidLimit100",
       "maxRowsPerBatch": 100,
       "maxCanonicalPayloadBytesPerBatch": 1048576,
-      "exhaustion": "exactEmptyBoundedQueryOnly",
+      "scanExhaustedMutationAuthority": "sidecarPrivateExactEmptyKeysetQuerySameTransaction",
+      "scanExhaustedProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+      "durablePrivateResult": "scanExhaustedPersistedInMaintenanceJobCutoffJsonOnlyAfterPrivateTransaction",
+      "publicProgressInput": "positiveBoundedRowsAndBytesNoExhaustionAuthority",
+      "phaseTransition": "durablePrivateExhaustionThenExactNextAtZeroAndFalse",
       "callerConfigurable": false
     },
     "lifecycle": {
@@ -150,13 +161,18 @@
       "cancelAfterArm": "rollbackLeavesRunningSentinel",
       "commitUncertain": "runningRequiresManualRecoveryPendingAdvancedMeansCommitted",
       "runtimeGuardDdl": "forbidden",
-      "terminalSuccess": "finalizeExhaustedAuthorityEmptyAndOperationsVerified"
+      "terminalSuccessMutationAuthority": "sidecarPrivateBoundedOperationsAndEquivalenceVerificationSameTransaction",
+      "terminalSuccessProofBoundary": "implementationOwnedNotRepresentableAsPublicJsonOrWire",
+      "durablePrivateResult": "verifiedBooleansAndSucceededPersistedInMaintenanceJobSamePrivateTransaction",
+      "publicCompleteTransition": "alwaysRejected"
     },
     "operationVerification": {
       "everyAuthorizedDeleteHasFrozenOperation": true,
       "deletedOperationReplayUsesFrozenOperationAndReceipt": true,
       "receiptOnlyRejected": true,
-      "chatPredecessorUsesFrozenCanonicalPayload": true
+      "chatPredecessorUsesFrozenCanonicalPayload": true,
+      "publicBooleanAuthority": "forbidden",
+      "durablePrivateResult": "operationsVerifiedAndEquivalenceVerifiedPersistedOnlyBySidecarSameTransaction"
     }
   }
 }
