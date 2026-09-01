@@ -1,5 +1,6 @@
 use super::*;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -1905,6 +1906,40 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert_eq!(cases.source_index.valid_transitions.len(), 4);
     assert_eq!(cases.source_index.invalid_transitions.len(), 16);
     assert_eq!(cases.query_plans.len(), 6);
+    let declared_query_plan_keys = manifest.indexed_bounded_verification["queryPlanAcceptance"]
+        .as_object()
+        .expect("query plan acceptance object")
+        .keys()
+        .filter(|key| key.as_str() != "mode" && key.as_str() != "reject")
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let fixture_query_plan_keys = cases
+        .query_plans
+        .iter()
+        .map(|plan| plan.name.clone())
+        .collect::<BTreeSet<_>>();
+    let exact_query_plan_keys = |declared: &BTreeSet<String>, actual: &BTreeSet<String>| {
+        (declared == actual)
+            .then_some(())
+            .ok_or("query plan key drift")
+    };
+    exact_query_plan_keys(&declared_query_plan_keys, &fixture_query_plan_keys)
+        .expect("declared and executable query plan keys must match exactly");
+    let mut stale_declared_query_plan_keys = declared_query_plan_keys.clone();
+    stale_declared_query_plan_keys.insert("missingIndexedPredecessorEvent".into());
+    assert!(
+        exact_query_plan_keys(&stale_declared_query_plan_keys, &fixture_query_plan_keys).is_err()
+    );
+    let mut missing_declared_query_plan_keys = declared_query_plan_keys.clone();
+    missing_declared_query_plan_keys.remove("payloadByRowid");
+    assert!(
+        exact_query_plan_keys(&missing_declared_query_plan_keys, &fixture_query_plan_keys).is_err()
+    );
+    let mut extra_fixture_query_plan_keys = fixture_query_plan_keys.clone();
+    extra_fixture_query_plan_keys.insert("undeclaredPlan".into());
+    assert!(
+        exact_query_plan_keys(&declared_query_plan_keys, &extra_fixture_query_plan_keys).is_err()
+    );
     for plan in &cases.query_plans {
         assert!(
             plan.sql.starts_with("EXPLAIN QUERY PLAN SELECT "),

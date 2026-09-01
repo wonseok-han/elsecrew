@@ -2449,8 +2449,6 @@ pub fn validate_storage_lifetime_batch_policy_v4(
                 "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)",
             "indexedPredecessor":
                 "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
-            "missingIndexedPredecessorEvent":
-                "SEARCH events USING INDEX sqlite_autoindex_events_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)",
             "payloadByRowid": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)",
             "reject": ["SCAN events", "SCAN event_source_index", "USE TEMP B-TREE"],
         },

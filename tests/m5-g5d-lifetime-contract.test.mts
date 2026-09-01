@@ -350,7 +350,12 @@ interface V6Cases {
     }>;
     invalidTransitions: string[];
   };
-  queryPlans: Array<{ name: string; sql: string; detail: string }>;
+  queryPlans: Array<{
+    name: "indexSource" | "verifySourceIndex" | "latestAggregate"
+      | "introducedMessageIdentity" | "indexedPredecessor" | "payloadByRowid";
+    sql: string;
+    detail: string;
+  }>;
   workspaceProvenance: {
     projectId: string;
     canonicalPayload: string;
@@ -1979,6 +1984,25 @@ test("storage-v6 freezes 16 bounded phases, indexed provenance, and exact query 
   );
 
   const migrationV6 = readFileSync(resolve(rootV6, manifestV6.migration.file), "utf8");
+  const queryPlanAcceptance = manifestV6.indexedBoundedVerification
+    .queryPlanAcceptance as Record<string, unknown>;
+  const declaredQueryPlanKeys = Object.keys(queryPlanAcceptance)
+    .filter((key) => key !== "mode" && key !== "reject")
+    .sort();
+  const fixtureQueryPlanKeys = v6Cases.queryPlans.map((plan) => plan.name).sort();
+  const assertExactQueryPlanKeys = (declared: string[], actual: string[]) => {
+    assert.deepEqual([...declared].sort(), [...actual].sort());
+  };
+  assertExactQueryPlanKeys(declaredQueryPlanKeys, fixtureQueryPlanKeys);
+  assert.throws(() => assertExactQueryPlanKeys(
+    [...declaredQueryPlanKeys, "missingIndexedPredecessorEvent"], fixtureQueryPlanKeys,
+  ));
+  assert.throws(() => assertExactQueryPlanKeys(
+    declaredQueryPlanKeys.filter((key) => key !== "payloadByRowid"), fixtureQueryPlanKeys,
+  ));
+  assert.throws(() => assertExactQueryPlanKeys(
+    declaredQueryPlanKeys, [...fixtureQueryPlanKeys, "undeclaredPlan"],
+  ));
   const temporaryRoot = mkdtempSync(join(tmpdir(), "hello-agent-storage-v6-plan-"));
   try {
     const database = createExactStorageV5Database(join(temporaryRoot, "plan.db"), false);

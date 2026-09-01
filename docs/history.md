@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 query-plan 선언 정합성 수정)
+
+- **stale raw-event plan 제거**: 재귀 predecessor fallback 제거 뒤에도 `queryPlanAcceptance.missingIndexedPredecessorEvent`가 남아 raw events aggregate tuple 조회를 허용하는 것처럼 보이던 계약 불일치를 Rust·TypeScript·V6 manifest에서 제거했다.
+- **exact set 회귀**: 실행하는 EXPLAIN fixture 이름을 정책 키와 동일하게 만들고, `mode`·`reject`를 제외한 허용 query-plan 키 집합이 fixture 이름 집합과 정확히 같아야 통과하도록 Rust·TypeScript golden을 강화했다. stale 선언, 누락 선언, 미선언 fixture를 각각 거부하며 V1~V5 fixture와 저장 동작은 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 재귀 predecessor 신뢰 제거)
 
 - **indexed predecessor만 신뢰**: chat aggregate sequence 2 이상의 source-index INSERT는 같은 aggregate의 sequence-1 source-index 행이 먼저 존재하고 exact source event에 결속된 경우만 허용한다. raw predecessor event를 재귀적으로 해석하던 fallback을 SQL trigger와 Rust·TypeScript validator에서 제거했으며, migration-pending append는 `indexSource`가 직전 행을 채울 때까지 fail-closed로 거부·중단한다. sequence 1만 durable 0/null의 synthetic predecessor를 사용한다.

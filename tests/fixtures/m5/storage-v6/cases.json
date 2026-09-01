@@ -173,32 +173,32 @@
   },
   "queryPlans": [
     {
-      "name": "index source keyset",
+      "name": "indexSource",
       "sql": "EXPLAIN QUERY PLAN SELECT rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,canonical_json_payload FROM events WHERE rowid>0 AND rowid<=20 ORDER BY rowid LIMIT 100",
       "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
     },
     {
-      "name": "verify source index keyset",
+      "name": "verifySourceIndex",
       "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,introduced_message_id,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE event_rowid>0 AND event_rowid<=20 ORDER BY event_rowid LIMIT 100",
       "detail": "SEARCH event_source_index USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"
     },
     {
-      "name": "latest project source",
+      "name": "latestAggregate",
       "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE aggregate_type='project' AND aggregate_id='project_1' ORDER BY event_rowid DESC LIMIT 1",
       "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_aggregate_latest (aggregate_type=? AND aggregate_id=?)"
     },
     {
-      "name": "message identity",
+      "name": "introducedMessageIdentity",
       "sql": "EXPLAIN QUERY PLAN SELECT event_rowid FROM event_source_index WHERE introduced_message_id='message_a'",
       "detail": "SEARCH event_source_index USING COVERING INDEX event_source_index_message_unique (introduced_message_id=?)"
     },
     {
-      "name": "exact indexed predecessor",
+      "name": "indexedPredecessor",
       "sql": "EXPLAIN QUERY PLAN SELECT event_rowid,chat_durable_sequence,chat_snapshot_message_id FROM event_source_index WHERE aggregate_type='chat' AND aggregate_id='chat_1' AND aggregate_sequence=3",
       "detail": "SEARCH event_source_index USING INDEX sqlite_autoindex_event_source_index_3 (aggregate_type=? AND aggregate_id=? AND aggregate_sequence=?)"
     },
     {
-      "name": "single payload by rowid",
+      "name": "payloadByRowid",
       "sql": "EXPLAIN QUERY PLAN SELECT canonical_json_payload FROM events WHERE rowid=1",
       "detail": "SEARCH events USING INTEGER PRIMARY KEY (rowid=?)"
     }
