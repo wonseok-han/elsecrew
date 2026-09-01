@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 snapshot provenance P1 수정)
+
+- **반복 snapshot provenance 결속**: durable sequence가 증가하지 않는 event도 non-null `last_message`가 있으면 messageId 일치만으로는 부족하다. 현재 snapshot의 TeamMessage `chatId`가 aggregate id와, `eventSequence`가 mirrored durable sequence와 일치하도록 Rust·TypeScript·SQL을 강화했다. indexed predecessor의 non-null snapshot도 exact source event rowid 조회로 같은 provenance를 재검증하고, fallback predecessor event 역시 사용 전에 동일 결속을 요구한다.
+- **양 경로 회귀**: messageId는 그대로 둔 채 chatId 또는 eventSequence만 바꾼 반복 snapshot을 indexed-predecessor와 exact-events fallback 양쪽의 직접 SQLite INSERT에서 거부한다. Rust·TypeScript validator도 현재 및 predecessor provenance 위조를 거부하며 introduction 전이, exact query plan/no scan·sort, migration no-backfill과 V1~V5 fixture 불변은 유지했다. sidecar consumer는 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 fallback trigger P1 수정)
 
 - **fallback도 INSERT trigger가 fail-closed**: chat source-index predecessor가 아직 없으면 consumer 선검증만 믿던 우회 경로를 제거했다. 같은 aggregate type/id와 sequence-1의 `events` unique tuple을 exact 조회하고, predecessor payload의 durable/snapshot/TeamMessage가 유효할 때만 indexed predecessor와 동일한 증가·비메시지 전이를 허용한다. predecessor event 부재·malformed payload·durable 감소/jump·메시지 없는 증가·변경된 snapshot·잘못된 introduced identity·TeamMessage chatId/eventSequence 불일치를 모두 INSERT 전에 거부한다.

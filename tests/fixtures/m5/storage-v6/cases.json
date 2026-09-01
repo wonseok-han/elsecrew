@@ -166,6 +166,8 @@
       "durableDecrease", "durableJump", "increaseWithoutValidTeamMessage",
       "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
       "wrongMessageEventSequence", "wrongMessageChatId", "wrongIntroducedMessageId",
+      "unchangedSnapshotWrongChatId", "unchangedSnapshotWrongEventSequence",
+      "predecessorSnapshotWrongChatId", "predecessorSnapshotWrongEventSequence",
       "missingExactPredecessor", "malformedExactPredecessor",
       "scanOrSortPredecessorLookup"
     ]
@@ -283,6 +285,11 @@
       "name": "predecessor found by latest scan and sort",
       "path": ["sourceIndex", "predecessorLookup", "indexed"],
       "replacement": "latestAggregateScanAndSort"
+    },
+    {
+      "name": "indexed predecessor snapshot provenance trusted without source",
+      "path": ["sourceIndex", "predecessorLookup", "indexedNonNullSnapshotProvenance"],
+      "replacement": "trustImmutableIndexRow"
     },
     {
       "name": "missing indexed predecessor bypasses insert guard",

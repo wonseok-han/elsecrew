@@ -1647,8 +1647,11 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
           && candidate.aggregateSequence + 1 === entry.aggregateSequence
         )) ?? null
         : null;
+      const predecessorSource = predecessor === null ? null : v6Cases.sourceIndex.sourceEvents.find(
+        (candidate) => candidate.eventRowid === predecessor.eventRowid,
+      )?.event ?? null;
       validateStorageEventSourceIndexTransitionV1(
-        entry.eventRowid, entry, source!.event, predecessor, null,
+        entry.eventRowid, entry, source!.event, predecessor, predecessorSource,
       );
       insert.run(...fixture.value);
       insertedEntries.set(entry.eventRowid, entry);
@@ -1720,7 +1723,7 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       current: ReturnType<typeof appendSyntheticChat>,
     ) => {
       assert.throws(() => validateStorageEventSourceIndexTransitionV1(
-        current.entry.eventRowid, current.entry, current.event, previous.entry, null,
+        current.entry.eventRowid, current.entry, current.event, previous.entry, previous.event,
       ), undefined, name);
       assert.throws(() => insertSyntheticIndex(current.entry), undefined, name);
     };
@@ -1771,6 +1774,20 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
       const message = makeMessage(`${chatId}_b`, "chat_other", 2);
       const current = appendSyntheticChat(chatId, 2, 2, message, message.messageId);
       assertInvalidTransition("wrong TeamMessage chatId", previous, current);
+    }
+    {
+      const chatId = "chat_repeat_wrong_identity";
+      const previous = seedSyntheticChat(chatId);
+      const repeated = makeMessage(`${chatId}_a`, "chat_other", 1);
+      const current = appendSyntheticChat(chatId, 2, 1, repeated, null);
+      assertInvalidTransition("indexed repeat keeps ID but changes chatId", previous, current);
+    }
+    {
+      const chatId = "chat_repeat_wrong_sequence";
+      const previous = seedSyntheticChat(chatId);
+      const repeated = makeMessage(`${chatId}_a`, chatId, 2);
+      const current = appendSyntheticChat(chatId, 2, 1, repeated, null);
+      assertInvalidTransition("indexed repeat keeps ID but changes eventSequence", previous, current);
     }
     {
       const chatId = "chat_migration_pending";
@@ -1865,8 +1882,64 @@ test("storage-v6 source index enforces exact identity, append-only guards, and a
         appendSyntheticChat(chatId, 2, 2, secondMessage, secondMessage.messageId),
       );
     }
+    {
+      const chatId = "chat_fallback_repeat_wrong_chat";
+      const first = makeMessage(`${chatId}_a`, chatId, 1);
+      appendSyntheticChat(chatId, 1, 1, first, first.messageId);
+      const repeated = makeMessage(first.messageId, "chat_other", 1);
+      assertFallbackSqlRejects(
+        "fallback repeat keeps ID but changes chatId",
+        appendSyntheticChat(chatId, 2, 1, repeated, null),
+      );
+    }
+    {
+      const chatId = "chat_fallback_repeat_wrong_sequence";
+      const first = makeMessage(`${chatId}_a`, chatId, 1);
+      appendSyntheticChat(chatId, 1, 1, first, first.messageId);
+      const repeated = makeMessage(first.messageId, chatId, 2);
+      assertFallbackSqlRejects(
+        "fallback repeat keeps ID but changes eventSequence",
+        appendSyntheticChat(chatId, 2, 1, repeated, null),
+      );
+    }
+    {
+      const chatId = "chat_fallback_bad_predecessor_chat";
+      const malformed = makeMessage(`${chatId}_a`, "chat_other", 1);
+      const predecessor = appendSyntheticChat(chatId, 1, 1, malformed, malformed.messageId);
+      const repeated = makeMessage(malformed.messageId, chatId, 1);
+      const current = appendSyntheticChat(chatId, 2, 1, repeated, null);
+      assertFallbackSqlRejects(
+        "fallback predecessor snapshot chatId is not bound",
+        current,
+      );
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event, null, predecessor.event,
+      ));
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event,
+        predecessor.entry, predecessor.event,
+      ));
+    }
+    {
+      const chatId = "chat_fallback_bad_predecessor_sequence";
+      const malformed = makeMessage(`${chatId}_a`, chatId, 2);
+      const predecessor = appendSyntheticChat(chatId, 1, 1, malformed, malformed.messageId);
+      const repeated = makeMessage(malformed.messageId, chatId, 1);
+      const current = appendSyntheticChat(chatId, 2, 1, repeated, null);
+      assertFallbackSqlRejects(
+        "fallback predecessor snapshot eventSequence is not bound",
+        current,
+      );
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event, null, predecessor.event,
+      ));
+      assert.throws(() => validateStorageEventSourceIndexTransitionV1(
+        current.entry.eventRowid, current.entry, current.event,
+        predecessor.entry, predecessor.event,
+      ));
+    }
     assert.equal(v6Cases.sourceIndex.validTransitions.length, 5);
-    assert.equal(v6Cases.sourceIndex.invalidTransitions.length, 11);
+    assert.equal(v6Cases.sourceIndex.invalidTransitions.length, 15);
     for (const invalid of [
       { eventRowid: 0, eventId: "evt", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, introducedMessageId: null, chatDurableSequence: null, chatSnapshotMessageId: null },
       { eventRowid: 1, eventId: "", operationId: "op", aggregateType: "project", aggregateId: "p", aggregateSequence: 1, introducedMessageId: null, chatDurableSequence: null, chatSnapshotMessageId: null },

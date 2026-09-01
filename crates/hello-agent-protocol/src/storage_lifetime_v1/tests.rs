@@ -1677,7 +1677,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         &repeated,
         source_for_rowid(4),
         Some(&first),
-        None,
+        Some(source_for_rowid(2)),
     )
     .expect("repeat message A");
     let null_snapshot = entry_for_rowid(5);
@@ -1686,7 +1686,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         &null_snapshot,
         source_for_rowid(5),
         Some(&repeated),
-        None,
+        Some(source_for_rowid(4)),
     )
     .expect("null snapshot");
     let second = entry_for_rowid(6);
@@ -1717,7 +1717,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         &double_introduction,
         source_for_rowid(4),
         Some(&first),
-        None,
+        Some(source_for_rowid(2)),
     )
     .is_err());
     assert!(validate_storage_event_source_index_transition_v1(
@@ -1756,7 +1756,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         &decrease_entry,
         &decrease_source,
         Some(&repeated),
-        None,
+        Some(source_for_rowid(4)),
     )
     .is_err());
 
@@ -1800,7 +1800,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         &changed_entry,
         &changed_source,
         Some(&first),
-        None,
+        Some(source_for_rowid(2)),
     )
     .is_err());
 
@@ -1824,8 +1824,66 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
         None,
     )
     .is_err());
+
+    let repeated_message =
+        serde_json::from_str::<Value>(&source_for_rowid(4).canonical_json_payload)
+            .expect("repeated snapshot payload")["last_message"]
+            .clone();
+    let mut wrong_repeated_chat = repeated_message.clone();
+    wrong_repeated_chat["chatId"] = Value::from("chat_other");
+    let wrong_repeated_chat_source =
+        source_with_payload(source_for_rowid(4), 1, wrong_repeated_chat);
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &repeated,
+        &wrong_repeated_chat_source,
+        Some(&first),
+        Some(source_for_rowid(2)),
+    )
+    .is_err());
+    let mut wrong_repeated_sequence = repeated_message;
+    wrong_repeated_sequence["eventSequence"] = Value::from(2);
+    let wrong_repeated_sequence_source =
+        source_with_payload(source_for_rowid(4), 1, wrong_repeated_sequence);
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &repeated,
+        &wrong_repeated_sequence_source,
+        Some(&first),
+        Some(source_for_rowid(2)),
+    )
+    .is_err());
+
+    let predecessor_message =
+        serde_json::from_str::<Value>(&source_for_rowid(2).canonical_json_payload)
+            .expect("first snapshot payload")["last_message"]
+            .clone();
+    let mut wrong_predecessor_chat = predecessor_message.clone();
+    wrong_predecessor_chat["chatId"] = Value::from("chat_other");
+    let wrong_predecessor_chat_source =
+        source_with_payload(source_for_rowid(2), 1, wrong_predecessor_chat);
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &repeated,
+        source_for_rowid(4),
+        Some(&first),
+        Some(&wrong_predecessor_chat_source),
+    )
+    .is_err());
+    let mut wrong_predecessor_sequence = predecessor_message;
+    wrong_predecessor_sequence["eventSequence"] = Value::from(2);
+    let wrong_predecessor_sequence_source =
+        source_with_payload(source_for_rowid(2), 1, wrong_predecessor_sequence);
+    assert!(validate_storage_event_source_index_transition_v1(
+        4,
+        &repeated,
+        source_for_rowid(4),
+        None,
+        Some(&wrong_predecessor_sequence_source),
+    )
+    .is_err());
     assert_eq!(cases.source_index.valid_transitions.len(), 5);
-    assert_eq!(cases.source_index.invalid_transitions.len(), 11);
+    assert_eq!(cases.source_index.invalid_transitions.len(), 15);
     assert_eq!(cases.query_plans.len(), 7);
     for plan in &cases.query_plans {
         assert!(

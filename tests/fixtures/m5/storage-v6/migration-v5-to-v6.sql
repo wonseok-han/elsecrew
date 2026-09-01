@@ -119,6 +119,9 @@ WHEN NOT EXISTS (
                       )
                       AND json_type(source.canonical_json_payload, '$.last_message.chatId') = 'text'
                       AND length(json_extract(source.canonical_json_payload, '$.last_message.chatId')) > 0
+                      AND json_extract(
+                          source.canonical_json_payload, '$.last_message.chatId'
+                      ) = NEW.aggregate_id
                       AND json_type(source.canonical_json_payload, '$.last_message.taskId') = 'text'
                       AND length(json_extract(source.canonical_json_payload, '$.last_message.taskId')) > 0
                       AND json_type(source.canonical_json_payload, '$.last_message.worktreeId') = 'text'
@@ -126,6 +129,9 @@ WHEN NOT EXISTS (
                       AND json_type(source.canonical_json_payload, '$.last_message.eventSequence') = 'integer'
                       AND json_extract(source.canonical_json_payload, '$.last_message.eventSequence') >= 1
                       AND json_extract(source.canonical_json_payload, '$.last_message.eventSequence') <= 9007199254740991
+                      AND json_extract(
+                          source.canonical_json_payload, '$.last_message.eventSequence'
+                      ) = NEW.chat_durable_sequence
                       AND json_extract(source.canonical_json_payload, '$.last_message.kind')
                           IN ('user', 'role', 'system', 'status')
                       AND json_type(source.canonical_json_payload, '$.last_message.text') = 'text'
@@ -174,12 +180,43 @@ WHEN NOT EXISTS (
                   (
                       NEW.aggregate_sequence = 1
                       OR EXISTS (
-                          SELECT 1 FROM event_source_index AS predecessor
+                          SELECT 1
+                          FROM event_source_index AS predecessor
+                          JOIN events AS predecessor_source
+                            ON predecessor_source.rowid = predecessor.event_rowid
                           WHERE predecessor.aggregate_type = NEW.aggregate_type
                             AND predecessor.aggregate_id = NEW.aggregate_id
                             AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                            AND (
+                                predecessor.chat_snapshot_message_id IS NULL
+                                OR (
+                                    json_type(
+                                        predecessor_source.canonical_json_payload,
+                                        '$.last_message'
+                                    ) = 'object'
+                                    AND json_extract(
+                                        predecessor_source.canonical_json_payload,
+                                        '$.last_message.messageId'
+                                    ) = predecessor.chat_snapshot_message_id
+                                    AND json_extract(
+                                        predecessor_source.canonical_json_payload,
+                                        '$.last_message.chatId'
+                                    ) = predecessor.aggregate_id
+                                    AND json_extract(
+                                        predecessor_source.canonical_json_payload,
+                                        '$.last_message.eventSequence'
+                                    ) = predecessor.chat_durable_sequence
+                                )
+                            )
                       )
-                      OR EXISTS (
+                      OR (
+                        NOT EXISTS (
+                            SELECT 1 FROM event_source_index AS predecessor
+                            WHERE predecessor.aggregate_type = NEW.aggregate_type
+                              AND predecessor.aggregate_id = NEW.aggregate_id
+                              AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                        )
+                        AND EXISTS (
                           SELECT 1 FROM events AS predecessor_event
                           WHERE predecessor_event.aggregate_type = NEW.aggregate_type
                             AND predecessor_event.aggregate_id = NEW.aggregate_id
@@ -230,6 +267,10 @@ WHEN NOT EXISTS (
                                         predecessor_event.canonical_json_payload,
                                         '$.last_message.chatId'
                                     )) > 0
+                                    AND json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.chatId'
+                                    ) = predecessor_event.aggregate_id
                                     AND json_type(
                                         predecessor_event.canonical_json_payload,
                                         '$.last_message.taskId'
@@ -254,6 +295,13 @@ WHEN NOT EXISTS (
                                         predecessor_event.canonical_json_payload,
                                         '$.last_message.eventSequence'
                                     ) BETWEEN 1 AND 9007199254740991
+                                    AND json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.eventSequence'
+                                    ) = json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.durable_event_sequence'
+                                    )
                                     AND json_extract(
                                         predecessor_event.canonical_json_payload,
                                         '$.last_message.kind'
@@ -360,6 +408,7 @@ WHEN NOT EXISTS (
                                     )
                                 )
                             )
+                        )
                       )
                   )
                   AND (

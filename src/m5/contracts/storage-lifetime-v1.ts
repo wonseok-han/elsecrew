@@ -1778,6 +1778,8 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     },
     predecessorLookup: {
       indexed: "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+      indexedNonNullSnapshotProvenance:
+        "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
       missingDuringMigrationPendingAppend: "exactPredecessorEventsAggregateTupleLookupOnly",
       insertGuardFallbackEnforcement:
         "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
@@ -2001,6 +2003,10 @@ function storageChatSourceStateV1(source: OperationCandidateV1): {
     fail("chat source index last_message must be an object or null");
   }
   const message = object.last_message === null ? null : validateTeamMessageV1(object.last_message);
+  if (message !== null
+    && (message.chatId !== source.aggregate_id || message.eventSequence !== durable)) {
+    fail("chat snapshot message must match aggregate id and durable sequence");
+  }
   return { durable, snapshotMessageId: message?.messageId ?? null, message };
 }
 
@@ -2046,15 +2052,24 @@ export function validateStorageEventSourceIndexTransitionV1(
     previousDurable = 0;
     previousSnapshot = null;
   } else if (predecessorEntryValue !== null) {
-    if (predecessorSource !== null) {
-      fail("chat source index predecessor must use exactly one lookup path");
-    }
     const predecessor = validateStorageEventSourceIndexEntryV1(predecessorEntryValue);
     if (predecessor.aggregateType !== "chat"
       || predecessor.aggregateId !== source.aggregate_id
       || predecessor.aggregateSequence + 1 !== source.aggregate_sequence
       || predecessor.chatDurableSequence === null) {
       fail("indexed predecessor must be the exact aggregate sequence minus one");
+    }
+    if (predecessor.chatSnapshotMessageId !== null) {
+      if (predecessorSource === null) {
+        fail("indexed non-null snapshot predecessor requires exact source provenance");
+      }
+      validateStorageEventSourceIndexBindingV1(
+        predecessor.eventRowid, predecessor, predecessorSource,
+      );
+    } else if (predecessorSource !== null) {
+      validateStorageEventSourceIndexBindingV1(
+        predecessor.eventRowid, predecessor, predecessorSource,
+      );
     }
     previousDurable = predecessor.chatDurableSequence;
     previousSnapshot = predecessor.chatSnapshotMessageId;

@@ -123,6 +123,7 @@
       },
       "predecessorLookup": {
         "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+        "indexedNonNullSnapshotProvenance": "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
         "missingDuringMigrationPendingAppend": "exactPredecessorEventsAggregateTupleLookupOnly",
         "insertGuardFallbackEnforcement": "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
         "forbidden": ["scan", "sort", "latestLookup"]

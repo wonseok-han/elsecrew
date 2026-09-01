@@ -2391,6 +2391,8 @@ pub fn validate_storage_lifetime_batch_policy_v4(
             },
             "predecessorLookup": {
                 "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
+                "indexedNonNullSnapshotProvenance":
+                    "exactEventsRowidLookupMustBindSnapshotChatIdAndEventSequence",
                 "missingDuringMigrationPendingAppend":
                     "exactPredecessorEventsAggregateTupleLookupOnly",
                 "insertGuardFallbackEnforcement":
@@ -2638,6 +2640,15 @@ fn storage_chat_source_state_v1(
         .and_then(|value| value.get("messageId"))
         .and_then(Value::as_str)
         .map(str::to_string);
+    if let Some(message) = message.as_ref() {
+        if message.get("chatId").and_then(Value::as_str) != Some(source.aggregate_id.as_str())
+            || message.get("eventSequence").and_then(Value::as_u64) != Some(durable)
+        {
+            return Err(StorageLifetimeContractError::new(
+                "chat snapshot message must match aggregate id and durable sequence",
+            ));
+        }
+    }
     Ok((durable, snapshot_message_id, message))
 }
 
@@ -2691,11 +2702,6 @@ pub fn validate_storage_event_source_index_transition_v1(
         }
         (0, None)
     } else if let Some(predecessor_value) = predecessor_entry_value {
-        if predecessor_source.is_some() {
-            return Err(StorageLifetimeContractError::new(
-                "chat source index predecessor must use exactly one lookup path",
-            ));
-        }
         let predecessor = validate_storage_event_source_index_entry_v1(predecessor_value)?;
         if predecessor.aggregate_type != "chat"
             || predecessor.aggregate_id != source.aggregate_id
@@ -2704,6 +2710,29 @@ pub fn validate_storage_event_source_index_transition_v1(
             return Err(StorageLifetimeContractError::new(
                 "indexed predecessor must be the exact aggregate sequence minus one",
             ));
+        }
+        if predecessor.chat_snapshot_message_id.is_some() {
+            let predecessor_source = predecessor_source.ok_or_else(|| {
+                StorageLifetimeContractError::new(
+                    "indexed non-null snapshot predecessor requires exact source provenance",
+                )
+            })?;
+            let bound = validate_storage_event_source_index_binding_v1(
+                predecessor.event_rowid,
+                predecessor_value,
+                predecessor_source,
+            )?;
+            if bound != predecessor {
+                return Err(StorageLifetimeContractError::new(
+                    "indexed predecessor source provenance differs from the index row",
+                ));
+            }
+        } else if let Some(predecessor_source) = predecessor_source {
+            validate_storage_event_source_index_binding_v1(
+                predecessor.event_rowid,
+                predecessor_value,
+                predecessor_source,
+            )?;
         }
         (
             predecessor.chat_durable_sequence.ok_or_else(|| {
