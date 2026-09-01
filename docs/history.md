@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D bounded storage v6 materialization worker)
+
+- **명시 호출형 16단계 worker**: 아직 wire·startup·scheduler에 연결하지 않은 내부 batch 호출이 `indexSource → verifySourceIndex → receipts/messages/workspaces/baselines → source/projection/derived verify`를 처리한다. 모든 source/table scan은 rowid keyset `LIMIT 100`과 canonical payload 합계 1 MiB를 고정하고, exact-empty batch만 private exhaustion witness를 기록한 뒤 별도 transaction에서 다음 phase로 이동한다. `indexSource`는 events.rowid 순으로 append-only source index를 만들며 chat은 exact indexed sequence-1 predecessor만 허용하고 raw ledger history fallback을 사용하지 않는다.
+- **indexed provenance·fail-closed lifecycle**: source/current projection/receipt/message/workspace/baseline 검증은 V6가 허용한 rowid·aggregate latest·introduced message·exact predecessor index와 exact payload-rowid 조회만 사용한다. repeated chat snapshot은 새 message로 materialize하지 않고, prepared workspace는 최신 project source payload 하나로만 증명하며 app instance는 baseline에서 제외한다. pending→attempting arm, savepoint rollback cancellation, terminal failed evidence, commit-uncertain attempting sentinel, verification 전 append catch-up reset, scan-free final ready publication을 보존하며 failed/attempting 자동 retry와 legacy helper interleave를 거부한다.
+- **회귀·검증·남은 경계**: 251개 단일 chat aggregate와 100행 재개, exact/aggregate 1 MiB, oversize, 모든 cancel/failure boundary, source-index gap·변조·source-less row, projection/derived drift, repeated snapshot, historical/newest baseline, phase별 append catch-up, exact query plan·statement status를 추가했다. focused worker 27개, sidecar 전체 142개+stdio 10개(1 ignored), protocol lifetime 8개, Node G5D 15개, sidecar scoped strict clippy, focused rustfmt와 `git diff --check`가 통과했다. dependency 포함 strict clippy는 범위 밖 core/protocol 기존 경고 5건에서만 실패했다. worker 자동 호출, wire/status, cleanup·deletion·compaction·checkpoint/VACUUM은 계속 비활성이다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 sidecar migration)
 
 - **exact V6 소비 구현**: `Storage::open`이 fresh/V1~V5를 각 exact predecessor schema와 canonical meta/job pair로 검증한 뒤 fixture V5→V6 migration을 원자 적용하고, 현재 V6는 schema·index·trigger·foreign-key enforcement와 reopen pair를 재검증한다. migration은 history를 backfill하지 않고 ready+absent를 pending+absent로 바꾸며 모든 present V5 job의 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed V6는 계속 fail-closed다.

@@ -218,6 +218,19 @@ impl Storage {
     }
 
     #[cfg(test)]
+    pub(crate) fn materialize_lifetime_batch_for_test(
+        &mut self,
+        cancellation: &mut dyn crate::storage_lifetime::MaterializationCancellation,
+        failure: Option<crate::storage_lifetime::BatchMaterializationFailurePoint>,
+    ) -> Result<crate::storage_lifetime::LifetimeMaterializationBatchResult, SidecarError> {
+        crate::storage_lifetime::materialize_lifetime_batch(
+            &mut self.connection,
+            cancellation,
+            failure,
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn connection_for_test(&self) -> &Connection {
         &self.connection
     }
