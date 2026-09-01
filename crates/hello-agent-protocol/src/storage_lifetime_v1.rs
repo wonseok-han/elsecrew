@@ -2835,6 +2835,8 @@ pub fn validate_storage_lossless_compaction_policy_v1(
         "lifecycle": {
             "durableTable": "maintenance_jobs",
             "jobKind": "losslessCompaction",
+            "runningUniqueness": "schemaPartialUniqueBeforeAuthority",
+            "c1Consumer": "requiresExactSchemaGuardNeverApplicationOnlyCheck",
             "arm": "pendingToRunningSentinelCommittedBeforeDeleteBatch",
             "batchSuccess": "runningToPendingWithAdvancedCursorSameDeleteTransaction",
             "cancelBeforeArm": "pendingUnchangedNoAuthority",

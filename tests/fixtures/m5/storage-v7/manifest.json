@@ -35,7 +35,8 @@
     ],
     "tablesRebuilt": ["storage_schema_meta"],
     "indexesAdded": [
-      "ledger_compaction_prefixes_latest", "frozen_message_sources_chat_sequence"
+      "ledger_compaction_prefixes_latest", "frozen_message_sources_chat_sequence",
+      "maintenance_jobs_single_running_lossless_compaction"
     ],
     "triggersAdded": [
       "ledger_compaction_prefixes_require_exact_anchor",
@@ -139,6 +140,8 @@
     "lifecycle": {
       "durableTable": "maintenance_jobs",
       "jobKind": "losslessCompaction",
+      "runningUniqueness": "schemaPartialUniqueBeforeAuthority",
+      "c1Consumer": "requiresExactSchemaGuardNeverApplicationOnlyCheck",
       "arm": "pendingToRunningSentinelCommittedBeforeDeleteBatch",
       "batchSuccess": "runningToPendingWithAdvancedCursorSameDeleteTransaction",
       "cancelBeforeArm": "pendingUnchangedNoAuthority",

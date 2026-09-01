@@ -2143,6 +2143,8 @@ const STORAGE_LOSSLESS_COMPACTION_POLICY_V1 = {
   lifecycle: {
     durableTable: "maintenance_jobs",
     jobKind: "losslessCompaction",
+    runningUniqueness: "schemaPartialUniqueBeforeAuthority",
+    c1Consumer: "requiresExactSchemaGuardNeverApplicationOnlyCheck",
     arm: "pendingToRunningSentinelCommittedBeforeDeleteBatch",
     batchSuccess: "runningToPendingWithAdvancedCursorSameDeleteTransaction",
     cancelBeforeArm: "pendingUnchangedNoAuthority",

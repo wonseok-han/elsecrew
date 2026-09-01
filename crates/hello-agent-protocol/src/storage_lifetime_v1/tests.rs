@@ -526,6 +526,7 @@ struct V6QueryPlan {
 #[serde(rename_all = "camelCase")]
 struct V7Cases {
     migration_matrix: V7MigrationMatrix,
+    running_job_guard: V7RunningJobGuard,
     valid_prefixes: Vec<NamedValue>,
     invalid_prefix_mutations: Vec<InvalidPolicyMutation>,
     valid_frozen_message_sources: Vec<NamedValue>,
@@ -543,6 +544,17 @@ struct V7Cases {
     query_plans: Vec<V6QueryPlan>,
     invalid_preflight_mutations: Vec<InvalidPolicyMutation>,
     invalid_policy_mutations: Vec<InvalidPolicyMutation>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V7RunningJobGuard {
+    index: String,
+    predicate: String,
+    maximum_rows: u32,
+    insert_second_running: String,
+    update_second_pending_to_running: String,
+    c1_consumer: String,
 }
 
 #[derive(Deserialize)]
@@ -2284,7 +2296,14 @@ fn storage_v7_freezes_lossless_compaction_without_enabling_product_deletion() {
         ]
     );
     assert_eq!(manifest.migration.tables_rebuilt, ["storage_schema_meta"]);
-    assert_eq!(manifest.migration.indexes_added.len(), 2);
+    assert_eq!(
+        manifest.migration.indexes_added,
+        [
+            "ledger_compaction_prefixes_latest",
+            "frozen_message_sources_chat_sequence",
+            "maintenance_jobs_single_running_lossless_compaction"
+        ]
+    );
     assert_eq!(manifest.migration.triggers_added.len(), 13);
     assert_eq!(
         manifest.migration.triggers_version_replaced,
@@ -2331,6 +2350,27 @@ fn storage_v7_freezes_lossless_compaction_without_enabling_product_deletion() {
             "frozen_message_sources": 0,
             "ledger_compaction_delete_authority": 0,
         })
+    );
+    assert_eq!(
+        cases.running_job_guard.index,
+        "maintenance_jobs_single_running_lossless_compaction"
+    );
+    assert_eq!(
+        cases.running_job_guard.predicate,
+        "job_kind='losslessCompaction' AND state='running'"
+    );
+    assert_eq!(cases.running_job_guard.maximum_rows, 1);
+    assert_eq!(
+        cases.running_job_guard.insert_second_running,
+        "uniqueConstraintRejectedBeforeAuthority"
+    );
+    assert_eq!(
+        cases.running_job_guard.update_second_pending_to_running,
+        "uniqueConstraintRejectedBeforeAuthority"
+    );
+    assert_eq!(
+        cases.running_job_guard.c1_consumer,
+        "exactSchemaGuardRequiredNotApplicationOnly"
     );
 
     for case in &cases.valid_prefixes {
@@ -2485,6 +2525,8 @@ fn storage_v7_freezes_lossless_compaction_without_enabling_product_deletion() {
     assert!(sql.contains("CREATE TABLE ledger_compaction_prefixes"));
     assert!(sql.contains("CREATE TABLE frozen_message_sources"));
     assert!(sql.contains("CREATE TABLE ledger_compaction_delete_authority"));
+    assert!(sql.contains("CREATE UNIQUE INDEX maintenance_jobs_single_running_lossless_compaction"));
+    assert!(sql.contains("WHERE job_kind = 'losslessCompaction' AND state = 'running'"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_rejects_frozen_message_reuse"));
     assert!(sql.contains("existing.job_id <> NEW.job_id"));
     assert!(sql.contains("ordinal BETWEEN 1 AND 100"));

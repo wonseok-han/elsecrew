@@ -84,6 +84,10 @@ CREATE TABLE frozen_message_sources (
 CREATE INDEX frozen_message_sources_chat_sequence
 ON frozen_message_sources (chat_id, durable_sequence);
 
+CREATE UNIQUE INDEX maintenance_jobs_single_running_lossless_compaction
+ON maintenance_jobs (job_kind)
+WHERE job_kind = 'losslessCompaction' AND state = 'running';
+
 CREATE TABLE ledger_compaction_delete_authority (
     job_id TEXT NOT NULL REFERENCES maintenance_jobs(job_id)
         ON UPDATE RESTRICT ON DELETE RESTRICT,

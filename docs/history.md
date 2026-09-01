@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 single-running-job P1 수정)
+
+- **schema가 단일 running job 강제**: 최초 V7 계약은 delete-authority가 생긴 뒤에만 서로 다른 running job을 배제해 arm 직후 authority 0 상태에서는 여러 `losslessCompaction` running 행이 공존할 수 있었다. V7 one-time migration에 `job_kind='losslessCompaction' AND state='running'` partial unique index를 추가해 INSERT와 pending→running UPDATE 모두 authority 전에 SQLite가 거부하도록 고정했다.
+- **C1 소비 경계·검증**: manifest와 Rust·TypeScript exact policy/cases는 C1이 application-only 사전검사에 의존하지 않고 exact schema guard를 요구하도록 명시한다. 실제 SQLite migration/guard 회귀, Node lifetime 16개, focused/full protocol, TypeScript no-emit, focused rustfmt·scoped clippy·diff check와 V1~V6 digest 불변을 재검증했다. terminal maintenance history 보존과 V6 active-maintenance mutation-zero 거부, runtime DDL 금지는 그대로다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 lossless-compaction 계약)
 
 - **삭제 비활성 V7 계약**: exact storage V6와 허용 meta/job pair, active maintenance 부재를 mutation 전에 검증하는 schema V7 golden을 추가했다. migration은 기존 history를 backfill하거나 삭제하지 않고 compaction prefix·frozen message source·최대 100개 exact delete-authority 표만 추가한다. 기존 두 DELETE guard는 V6→V7 schema transaction에서 한 번만 version 교체하며 runtime batch의 guard drop/recreate, 제품 자동 실행·wire·실제 삭제는 C1 consumer 전까지 모두 금지한다.

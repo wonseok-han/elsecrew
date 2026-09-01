@@ -12,6 +12,14 @@
       "ledger_compaction_delete_authority": 0
     }
   },
+  "runningJobGuard": {
+    "index": "maintenance_jobs_single_running_lossless_compaction",
+    "predicate": "job_kind='losslessCompaction' AND state='running'",
+    "maximumRows": 1,
+    "insertSecondRunning": "uniqueConstraintRejectedBeforeAuthority",
+    "updateSecondPendingToRunning": "uniqueConstraintRejectedBeforeAuthority",
+    "c1Consumer": "exactSchemaGuardRequiredNotApplicationOnly"
+  },
   "validPrefixes": [
     {
       "name": "chat prefix one retains sequence two anchor",
@@ -260,6 +268,8 @@
   "invalidPolicyMutations": [
     { "name": "product delete enabled", "path": ["activation", "actualDeleteEnabledBeforeC1Consumer"], "replacement": true },
     { "name": "runtime guard ddl allowed", "path": ["guardVersioning", "runtimeDropRecreate"], "replacement": "allowed" },
+    { "name": "running uniqueness application only", "path": ["lifecycle", "runningUniqueness"], "replacement": "applicationOnly" },
+    { "name": "c1 ignores schema guard", "path": ["lifecycle", "c1Consumer"], "replacement": "applicationCheck" },
     { "name": "batch over one hundred", "path": ["deleteAuthority", "maxExactTuples"], "replacement": 101 },
     { "name": "app instance allowed", "path": ["deletion", "appInstance"], "replacement": "allowed" },
     { "name": "authority finalization not empty", "path": ["equivalence", "finalization"], "replacement": "commitWithRows" },

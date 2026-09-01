@@ -417,6 +417,14 @@ interface V7Cases {
     rejectedMaintenanceStates: string[];
     newTableInitialCounts: Record<string, number>;
   };
+  runningJobGuard: {
+    index: string;
+    predicate: string;
+    maximumRows: number;
+    insertSecondRunning: string;
+    updateSecondPendingToRunning: string;
+    c1Consumer: string;
+  };
   validPrefixes: NamedValue[];
   invalidPrefixMutations: PolicyMutation[];
   validFrozenMessageSources: NamedValue[];
@@ -2108,6 +2116,11 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
   assert.equal(manifestV7.migration.historyBackfill, "none");
   assert.equal(manifestV7.migration.runtimeGuardDdlAllowed, false);
   assert.equal(manifestV7.migration.existingRowsDeleted, false);
+  assert.deepEqual(manifestV7.migration.indexesAdded, [
+    "ledger_compaction_prefixes_latest",
+    "frozen_message_sources_chat_sequence",
+    "maintenance_jobs_single_running_lossless_compaction",
+  ]);
   assert.deepEqual(
     validateStorageLifetimeV7PreflightPolicyV1(manifestV7.migration.preflight),
     manifestV7.migration.preflight,
@@ -2120,6 +2133,14 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
     "freezeMessages", "verifyPrefix", "authorizeDelete", "deletePrefix",
     "verifyEquivalence", "finalize",
   ]);
+  assert.deepEqual(v7Cases.runningJobGuard, {
+    index: "maintenance_jobs_single_running_lossless_compaction",
+    predicate: "job_kind='losslessCompaction' AND state='running'",
+    maximumRows: 1,
+    insertSecondRunning: "uniqueConstraintRejectedBeforeAuthority",
+    updateSecondPendingToRunning: "uniqueConstraintRejectedBeforeAuthority",
+    c1Consumer: "exactSchemaGuardRequiredNotApplicationOnly",
+  });
 
   for (const fixture of v7Cases.validPrefixes) {
     validateStorageCompactionPrefixV1(fixture.value);
@@ -2318,6 +2339,24 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
       ) VALUES('compact_1','losslessCompaction','running','{}','2026-09-01T09:01:00Z',NULL,NULL,NULL,
                '2026-09-01T09:00:00Z','2026-09-01T09:01:00Z')
     `).run();
+    assert.throws(() => database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_2','losslessCompaction','running','{}','2026-09-01T09:01:00Z',NULL,NULL,NULL,
+               '2026-09-01T09:00:00Z','2026-09-01T09:01:00Z')
+    `).run());
+    database.prepare(`
+      INSERT INTO maintenance_jobs(
+        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+        failure_kind,created_at,updated_at
+      ) VALUES('compact_2','losslessCompaction','pending','{}',NULL,NULL,NULL,NULL,
+               '2026-09-01T09:00:00Z','2026-09-01T09:00:00Z')
+    `).run();
+    assert.throws(() => database.prepare(`
+      UPDATE maintenance_jobs SET state='running',started_at='2026-09-01T09:01:00Z'
+      WHERE job_id='compact_2'
+    `).run());
     const insertAuthority = database.prepare(`
       INSERT INTO ledger_compaction_delete_authority(
         job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,
@@ -2333,13 +2372,6 @@ test("storage-v7 freezes bounded lossless compaction without enabling product de
     assert.throws(() => database.prepare(
       "DELETE FROM ledger_compaction_delete_authority WHERE job_id='compact_1' AND ordinal=1",
     ).run());
-    database.prepare(`
-      INSERT INTO maintenance_jobs(
-        job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
-        failure_kind,created_at,updated_at
-      ) VALUES('compact_2','losslessCompaction','running','{}','2026-09-01T09:01:00Z',NULL,NULL,NULL,
-               '2026-09-01T09:00:00Z','2026-09-01T09:01:00Z')
-    `).run();
     insertPrefix.run(
       "prefix_project_1_1", "project", "project_1", 1, 3, "evt_project_2", "op_project_2", 2,
       "baseline_project_1_1", "digest-project-1", "2026-09-01T09:00:00Z",
