@@ -1995,6 +1995,60 @@ fn v8_forbidden_runtime_states_fence_duplicate_and_conflicting_resubmits_at_entr
 }
 
 #[test]
+fn v8_nonrunnable_materialization_pairs_fence_every_append_decision_at_entry() {
+    for pair in ["attempting", "failed", "noncanonical"] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("fresh v8");
+        let original = event(
+            &format!("evt_v8_materialization_{pair}"),
+            &format!("op_v8_materialization_{pair}"),
+            "project",
+            &format!("project_v8_materialization_{pair}"),
+            1,
+            json!({
+                "canonical_path":format!("/fixture/v8-materialization-{pair}"),
+                "project_id":format!("project_v8_materialization_{pair}")
+            }),
+            "2026-09-01T05:20:00Z",
+        );
+        assert_eq!(
+            storage.append_event(&original).expect("append original"),
+            AppendOutcome::Committed,
+            "{pair}"
+        );
+        if pair == "noncanonical" {
+            storage
+                .connection
+                .execute(
+                    "UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1;",
+                    [],
+                )
+                .unwrap();
+        }
+        let (state, failure_kind, completed_at) = match pair {
+            "attempting" => ("attempting", None, None),
+            "failed" => ("failed", Some("database"), Some("2026-09-01T05:20:02Z")),
+            "noncanonical" => ("pending", None, None),
+            _ => unreachable!(),
+        };
+        insert_v4_job(
+            &storage.connection,
+            &format!("v8_materialization_{pair}"),
+            state,
+            "indexSource",
+            1,
+            0,
+            0,
+            failure_kind,
+            completed_at,
+        );
+
+        assert_resubmits_rejected_without_mutation(&mut storage, &original, pair);
+        assert_fresh_append_rejected_without_mutation(&mut storage, pair);
+    }
+}
+
+#[test]
 fn uncompacted_v7_and_v8_keep_duplicate_and_conflict_semantics() {
     for version in ["v7", "v8"] {
         let (_root, path) = database();
@@ -3817,6 +3871,36 @@ fn assert_resubmits_rejected_without_mutation(
     assert_eq!(database_snapshot(&storage.connection), snapshot, "{name}");
     assert_eq!(
         fs::read(storage.path()).expect("reread conflict database"),
+        bytes,
+        "{name}"
+    );
+}
+
+fn assert_fresh_append_rejected_without_mutation(storage: &mut Storage, name: &str) {
+    storage
+        .checkpoint()
+        .expect("checkpoint nonrunnable materialization fixture");
+    let snapshot = database_snapshot(&storage.connection);
+    let bytes = fs::read(storage.path()).expect("read nonrunnable materialization database");
+    let fresh = event(
+        &format!("evt_v8_fresh_rejected_{name}"),
+        &format!("op_v8_fresh_rejected_{name}"),
+        "project",
+        &format!("project_v8_fresh_rejected_{name}"),
+        1,
+        json!({
+            "canonical_path":format!("/fixture/v8-fresh-rejected-{name}"),
+            "project_id":format!("project_v8_fresh_rejected_{name}")
+        }),
+        "2026-09-01T05:21:00Z",
+    );
+    let error = storage
+        .append_event(&fresh)
+        .expect_err("fresh append must hit the materialization fence");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(database_snapshot(&storage.connection), snapshot, "{name}");
+    assert_eq!(
+        fs::read(storage.path()).expect("reread fresh append database"),
         bytes,
         "{name}"
     );

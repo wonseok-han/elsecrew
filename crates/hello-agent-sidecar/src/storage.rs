@@ -2615,8 +2615,14 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
 
 fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarError> {
     match storage_schema_version(connection)? {
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => verify_v7_uncompacted_runtime_state(connection),
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => verify_v8_uncompacted_runtime_state(connection),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
+            verify_append_materialization_pair(connection)?;
+            verify_v7_uncompacted_runtime_state(connection)
+        }
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
+            verify_append_materialization_pair(connection)?;
+            verify_v8_uncompacted_runtime_state(connection)
+        }
         None
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3)
@@ -2628,6 +2634,17 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             "event append encountered an unsupported storage schema version",
         )),
     }
+}
+
+fn verify_append_materialization_pair(connection: &Connection) -> Result<(), SidecarError> {
+    let materialization_state: String = connection
+        .query_row(
+            "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    verify_v6_materialization_snapshot(connection, &materialization_state, true)
 }
 
 fn insert_v6_source_index_and_invalidate_ready(

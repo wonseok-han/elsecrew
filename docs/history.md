@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append materialization fence P2 수정)
+
+- **reopen pair 정책을 append에도 적용**: V7/V8 append entry와 INSERT 직전의 공통 runtime fence가 compaction evidence뿐 아니라 exact materialization meta/job pair를 현재 reopen validator로 함께 확인한다. `pending+attempting`, `pending+failed`, `ready+pending` 같은 비실행 pair는 ledger load·duplicate/conflict 분류·신규 INSERT 전에 fail-closed하고, ready+absent·pending+absent·pending+pending은 기존 append 의미를 유지한다.
+- **mutation-zero 회귀**: attempting·failed·noncanonical pair 각각에서 duplicate, conflict, fresh append가 모두 `storageSchemaMismatch`이며 exact schema·전체 table rows snapshot·DB file bytes가 변하지 않음을 고정했다. 앞선 prefix/frozen-message/delete-authority/frozen-operation/active-compaction 5×2 재제출 matrix와 정상 uncompacted V7/V8 `DuplicateNoOp`/`Conflict` 회귀도 유지한다.
+- **검증**: focused storage 46개와 lifetime 41개, sidecar 전체 158개+stdio 10개(1 ignored), protocol 전체 42개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B/private writer/backfill/compaction/delete/wire는 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append entry fence P2 수정)
 
 - **재제출 우회 차단**: append의 `BEGIN IMMEDIATE` 직후 V7/V8 runtime fence를 실행해 ledger load와 duplicate/conflict 분류보다 먼저 uncompacted-only 상태를 검증한다. 실제 INSERT 직전 동일 transaction 재검증도 공통 helper로 유지해 entry와 mutation 사이 TOCTOU 없이 기존 append 원자성을 보존한다.
