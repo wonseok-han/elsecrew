@@ -1291,7 +1291,7 @@ fn bounded_v6_cancellation_rolls_back_current_batch_and_restores_pending() {
 #[test]
 fn bounded_v6_cancellation_before_begin_has_zero_mutation() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("v4 storage");
+    let mut storage = Storage::open_v6_for_test(&path).expect("exact v6 storage");
     let mut cancellation = |point| point == MaterializationCancellationPoint::BeforeBegin;
     let result = storage
         .materialize_lifetime_batch_for_test(&mut cancellation, None)
@@ -1314,10 +1314,42 @@ fn bounded_v6_cancellation_before_begin_has_zero_mutation() {
 }
 
 #[test]
-fn bounded_v7_refuses_active_compaction_before_materialization_mutation() {
+fn bounded_v7_before_begin_cancel_remains_zero_mutation_when_uncompacted() {
     let (_root, path) = database();
-    let mut storage = Storage::open(&path).expect("v7 storage");
-    storage
+    let mut storage = Storage::open(&path).expect("uncompacted v7 storage");
+    storage.checkpoint().expect("checkpoint uncompacted v7");
+    let bytes_before = fs::read(&path).expect("read uncompacted v7");
+    let mut cancellation = |point| point == MaterializationCancellationPoint::BeforeBegin;
+
+    let result = storage
+        .materialize_lifetime_batch_for_test(&mut cancellation, None)
+        .expect("cancel before begin");
+    assert!(matches!(
+        result,
+        LifetimeMaterializationBatchResult::Suspended { cursor: None }
+    ));
+    assert_eq!(
+        storage
+            .connection_for_test()
+            .query_row(
+                "SELECT count(*) FROM lifetime_materialization_job;",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        fs::read(&path).expect("reread uncompacted v7"),
+        bytes_before
+    );
+}
+
+#[test]
+fn bounded_v7_before_begin_cancel_cannot_bypass_any_compaction_fence() {
+    let (active_root, active_path) = database();
+    let active = Storage::open(&active_path).expect("active-job v7 storage");
+    active
         .connection_for_test()
         .execute(
             "INSERT INTO maintenance_jobs(\
@@ -1328,32 +1360,184 @@ fn bounded_v7_refuses_active_compaction_before_materialization_mutation() {
             [],
         )
         .unwrap();
-    let facts_before: (i64, i64, String) = storage
+    assert_before_begin_cancel_is_fenced("active", active);
+    drop(active_root);
+
+    let (prefix_root, prefix_path) = database();
+    let mut prefix = Storage::open(&prefix_path).expect("prefix v7 storage");
+    seed_v7_prefix(&mut prefix);
+    assert_before_begin_cancel_is_fenced("prefix", prefix);
+    drop(prefix_root);
+
+    let (frozen_root, frozen_path) = database();
+    let mut frozen = Storage::open(&frozen_path).expect("frozen v7 storage");
+    populate_lifetime_fixture(&mut frozen);
+    drive_bounded_v6(&mut frozen);
+    assert_eq!(
+        frozen
+            .connection_for_test()
+            .execute(
+                "INSERT INTO frozen_message_sources(
+                   message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+                   source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+                 ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,
+                   message.chat_id,source.aggregate_sequence,message.event_sequence,
+                   message.canonical_message_json,message.message_digest,'2026-08-28T12:01:00Z'
+                   FROM event_source_index AS source
+                   JOIN chat_messages AS message ON message.message_id=source.introduced_message_id
+                   ORDER BY source.event_rowid LIMIT 1;",
+                [],
+            )
+            .unwrap(),
+        1
+    );
+    assert_before_begin_cancel_is_fenced("frozen", frozen);
+    drop(frozen_root);
+
+    let (authority_root, authority_path) = database();
+    let mut authority = Storage::open(&authority_path).expect("authority v7 storage");
+    seed_v7_prefix(&mut authority);
+    authority
+        .connection_for_test()
+        .execute_batch(
+            "INSERT INTO maintenance_jobs(
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+               failure_kind,created_at,updated_at
+             ) VALUES ('authority_job','losslessCompaction','running','{}',
+               '2026-08-28T12:02:00Z',NULL,NULL,NULL,
+               '2026-08-28T12:02:00Z','2026-08-28T12:02:00Z');
+             INSERT INTO ledger_compaction_delete_authority(
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+               aggregate_id,aggregate_sequence,authorized_at
+             ) SELECT 'authority_job',1,'prefix_cancel',event_rowid,event_id,operation_id,
+               aggregate_type,aggregate_id,aggregate_sequence,'2026-08-28T12:02:00Z'
+               FROM event_source_index
+               WHERE aggregate_type='project' AND aggregate_id='project_lifetime'
+                 AND aggregate_sequence=1;
+             UPDATE maintenance_jobs SET state='succeeded',
+               completed_at='2026-08-28T12:03:00Z',updated_at='2026-08-28T12:03:00Z'
+               WHERE job_id='authority_job';",
+        )
+        .unwrap();
+    assert_before_begin_cancel_is_fenced("authority", authority);
+    drop(authority_root);
+}
+
+fn seed_v7_prefix(storage: &mut Storage) {
+    let events = populate_lifetime_fixture(storage);
+    drive_bounded_v6(storage);
+    let historical = events
+        .iter()
+        .find(|event| event.aggregate_type == "project" && event.aggregate_sequence == 1)
+        .expect("historical project source");
+    let historical_id = baseline_id("project", "project_lifetime", 1);
+    storage
+        .connection_for_test()
+        .execute(
+            "INSERT INTO ledger_baselines(\
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,\
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at\
+             ) VALUES (?1,'project','project_lifetime',1,1,?2,?3,\
+               '2026-08-28T12:01:00Z','2026-08-28T12:01:00Z');",
+            params![
+                historical_id,
+                historical.canonical_json_payload,
+                sha256_file_version_v1(historical.canonical_json_payload.as_bytes())
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        storage
+            .connection_for_test()
+            .execute(
+                "INSERT INTO ledger_compaction_prefixes(
+                   prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,
+                   anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,
+                   baseline_projection_digest,created_at,verified_at
+                 ) SELECT 'prefix_cancel','project','project_lifetime',1,event_rowid,event_id,
+                   operation_id,aggregate_sequence,?1,?2,
+                   '2026-08-28T12:01:00Z','2026-08-28T12:01:00Z'
+                   FROM event_source_index
+                   WHERE aggregate_type='project' AND aggregate_id='project_lifetime'
+                     AND aggregate_sequence=2;",
+                params![
+                    baseline_id("project", "project_lifetime", 1),
+                    sha256_file_version_v1(historical.canonical_json_payload.as_bytes())
+                ],
+            )
+            .unwrap(),
+        1
+    );
+}
+
+fn assert_before_begin_cancel_is_fenced(name: &str, mut storage: Storage) {
+    storage.checkpoint().expect("checkpoint fenced v7 fixture");
+    let facts_before: (i64, i64, i64, i64, i64, i64, i64) = storage
         .connection_for_test()
         .query_row(
             "SELECT (SELECT count(*) FROM events),\
+                    (SELECT count(*) FROM event_source_index),\
                     (SELECT count(*) FROM lifetime_materialization_job),\
-                    (SELECT state FROM maintenance_jobs WHERE job_id='active_compaction');",
+                    (SELECT count(*) FROM maintenance_jobs),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes),\
+                    (SELECT count(*) FROM frozen_message_sources),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority);",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
         )
         .unwrap();
+    let bytes_before = fs::read(storage.path()).expect("read fenced v7 fixture");
+    let mut cancellation = |point| point == MaterializationCancellationPoint::BeforeBegin;
 
     let error = storage
-        .materialize_lifetime_batch_for_test(&mut NeverCancel, None)
-        .expect_err("active compaction must fence the bounded worker");
-    assert_eq!(error.kind(), "storageSchemaMismatch");
-    let facts_after: (i64, i64, String) = storage
+        .materialize_lifetime_batch_for_test(&mut cancellation, None)
+        .expect_err("BeforeBegin cancel must not bypass the V7 compaction fence");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(
+        error.detail(),
+        "storage compaction state is not runnable before the C1B consumer",
+        "{name}"
+    );
+    let facts_after: (i64, i64, i64, i64, i64, i64, i64) = storage
         .connection_for_test()
         .query_row(
             "SELECT (SELECT count(*) FROM events),\
+                    (SELECT count(*) FROM event_source_index),\
                     (SELECT count(*) FROM lifetime_materialization_job),\
-                    (SELECT state FROM maintenance_jobs WHERE job_id='active_compaction');",
+                    (SELECT count(*) FROM maintenance_jobs),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes),\
+                    (SELECT count(*) FROM frozen_message_sources),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority);",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
         )
         .unwrap();
-    assert_eq!(facts_after, facts_before);
+    assert_eq!(facts_after, facts_before, "{name}");
+    assert_eq!(
+        fs::read(storage.path()).expect("reread fenced v7 fixture"),
+        bytes_before,
+        "{name}"
+    );
 }
 
 #[test]

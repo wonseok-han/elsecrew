@@ -687,6 +687,9 @@ pub(crate) fn materialize_lifetime_batch(
     cancellation: &mut dyn MaterializationCancellation,
     failure: Option<BatchMaterializationFailurePoint>,
 ) -> Result<LifetimeMaterializationBatchResult, SidecarError> {
+    // Cancellation is not an escape hatch from the V7 compaction fence. Keep
+    // the transaction-local check below as well so state cannot race the arm.
+    verify_bounded_storage_runtime_state(connection)?;
     if cancellation.cancelled(MaterializationCancellationPoint::BeforeBegin) {
         return Ok(LifetimeMaterializationBatchResult::Suspended {
             cursor: read_pending_cursor(connection)?,

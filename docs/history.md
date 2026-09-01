@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 BeforeBegin fence P2 수정)
+
+- **취소 우회 차단**: bounded lifetime worker가 `BeforeBegin` 취소를 반환하기 전에 V7 uncompacted-only runtime state를 먼저 확인하도록 순서를 수정했다. arm transaction 내부 재검증도 유지해 사전 확인과 arm 사이의 compaction-state 변경을 계속 fail-closed한다.
+- **무변경 회귀**: active lossless-compaction, durable prefix, frozen message source, delete authority 각각이 존재할 때 `BeforeBegin` 취소도 동일한 `storageSchemaMismatch` 상세로 거부되고 DB 파일 바이트와 event/source-index/lifetime/maintenance/compaction 행 수가 바뀌지 않음을 고정했다. exact V6와 정상 uncompacted V7의 `BeforeBegin → Suspended` zero-mutation 의미는 각각 별도 회귀로 보존했다.
+- **검증**: focused lifetime 41개와 storage 37개, sidecar 전체 149개+stdio 10개(1 ignored), protocol 전체 41개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B compaction·삭제·wire/scheduler 범위는 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 sidecar consumer C1A)
 
 - **exact V7 open/migration 소비**: `Storage::open`이 fresh/V1~V6를 exact predecessor schema와 기존 reopen policy로 검증한 뒤 immutable fixture V6→V7 migration을 원자 적용하고, V7 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V6의 `materialization_state`와 present lifetime job, terminal maintenance history는 byte-exact 보존하며 history backfill·상태 자동 변환·frozen message 생성은 하지 않는다. attempting lifetime job과 pending/running lossless-compaction job은 migration mutation 전에 거부하고, injected migration failure는 전체 schema/row snapshot을 exact V6로 rollback한다.
