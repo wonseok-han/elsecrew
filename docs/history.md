@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append entry fence P2 수정)
+
+- **재제출 우회 차단**: append의 `BEGIN IMMEDIATE` 직후 V7/V8 runtime fence를 실행해 ledger load와 duplicate/conflict 분류보다 먼저 uncompacted-only 상태를 검증한다. 실제 INSERT 직전 동일 transaction 재검증도 공통 helper로 유지해 entry와 mutation 사이 TOCTOU 없이 기존 append 원자성을 보존한다.
+- **전 상태 mutation-zero 회귀**: V8 prefix, frozen message, delete authority, frozen operation, active compaction 각각에서 duplicate와 conflicting resubmit이 모두 `storageSchemaMismatch`로 거부되고 exact schema·전체 table rows snapshot·DB file bytes가 변하지 않음을 5×2 matrix로 고정했다. 유효한 uncompacted V7/V8은 기존 `DuplicateNoOp`/`Conflict`와 zero-mutation 의미를 유지한다.
+- **검증**: focused storage 45개와 lifetime 41개, sidecar 전체 157개+stdio 10개(1 ignored), protocol 전체 42개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B private writer/backfill/compaction/delete와 wire 범위는 변경하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 sidecar consumer C1A)
 
 - **exact V8 open/migration 소비**: `Storage::open`이 fresh/V1~V7을 각 exact predecessor와 reopen policy로 검증한 뒤 immutable fixture V7→V8 migration을 원자 적용하고 V8 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V7 materialization state/job과 terminal maintenance history는 byte-exact 보존하며 history/frozen-operation backfill은 하지 않는다. attempting lifetime, active lossless-compaction, prefix/frozen-message/delete-authority, partial/extra/tamper는 migration mutation 전에 거부하고 injected failure는 exact V7 bytes로 rollback한다.

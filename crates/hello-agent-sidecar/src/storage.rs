@@ -359,6 +359,7 @@ impl Storage {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sqlite_error)?;
+        verify_append_runtime_state(&transaction)?;
         let existing_events = load_events(&transaction)?;
         match classify_operation_v1(&existing_events, event).map_err(storage_contract_error)? {
             OperationDecisionV1::DuplicateNoOp => {
@@ -2568,6 +2569,7 @@ fn load_json_projection(
 }
 
 fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<(), SidecarError> {
+    verify_append_runtime_state(transaction)?;
     transaction
         .execute(
             "INSERT INTO events(event_id, operation_id, request_id, aggregate_type, aggregate_id, aggregate_sequence, event_type, payload_schema_version, canonical_json_payload, timestamp) \
@@ -2591,11 +2593,9 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
-            verify_v7_uncompacted_runtime_state(transaction)?;
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
-            verify_v8_uncompacted_runtime_state(transaction)?;
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         None
@@ -2611,6 +2611,23 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         }
     }
     Ok(())
+}
+
+fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarError> {
+    match storage_schema_version(connection)? {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => verify_v7_uncompacted_runtime_state(connection),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => verify_v8_uncompacted_runtime_state(connection),
+        None
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => Ok(()),
+        Some(_) => Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "event append encountered an unsupported storage schema version",
+        )),
+    }
 }
 
 fn insert_v6_source_index_and_invalidate_ready(

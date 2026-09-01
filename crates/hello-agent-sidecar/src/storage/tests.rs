@@ -1878,27 +1878,7 @@ fn v8_preflight_rejects_every_nonempty_v7_compaction_table_without_mutation() {
 
     let (_root, authority_path) = database();
     let mut authority = populated_v7_storage(&authority_path, "pending");
-    seed_v7_prefix_for_v8(&mut authority);
-    authority
-        .connection
-        .execute_batch(
-            "INSERT INTO maintenance_jobs(
-               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
-               failure_kind,created_at,updated_at
-             ) VALUES ('v8_authority_job','losslessCompaction','running','{}',
-               '2026-09-01T04:12:00Z',NULL,NULL,NULL,
-               '2026-09-01T04:12:00Z','2026-09-01T04:12:00Z');
-             INSERT INTO ledger_compaction_delete_authority(
-               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
-               aggregate_id,aggregate_sequence,authorized_at
-             ) SELECT 'v8_authority_job',1,'prefix_v8',event_rowid,event_id,operation_id,
-               aggregate_type,aggregate_id,aggregate_sequence,'2026-09-01T04:12:00Z'
-               FROM event_source_index WHERE event_id='evt_v8_prefix_1';
-             UPDATE maintenance_jobs SET state='succeeded',
-               completed_at='2026-09-01T04:13:00Z',updated_at='2026-09-01T04:13:00Z'
-               WHERE job_id='v8_authority_job';",
-        )
-        .unwrap();
+    seed_v7_authority_for_v8(&mut authority);
     assert_v8_migration_rejected_without_mutation(&mut authority, "authority");
 }
 
@@ -1978,6 +1958,111 @@ fn exact_v8_reopen_rejects_schema_tamper_and_non_runnable_state() {
         let connection = Connection::open(&path).unwrap();
         configure_connection(&connection).unwrap();
         assert_eq!(database_snapshot(&connection), before, "{state}");
+    }
+}
+
+#[test]
+fn v8_forbidden_runtime_states_fence_duplicate_and_conflicting_resubmits_at_entry() {
+    for state in [
+        "prefix",
+        "frozen_message",
+        "authority",
+        "frozen_operation",
+        "active_compaction",
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("fresh v8");
+        let original = event(
+            &format!("evt_v8_resubmit_{state}"),
+            &format!("op_v8_resubmit_{state}"),
+            "project",
+            &format!("project_v8_resubmit_{state}"),
+            1,
+            json!({
+                "canonical_path":format!("/fixture/v8-resubmit-{state}"),
+                "project_id":format!("project_v8_resubmit_{state}")
+            }),
+            "2026-09-01T05:00:00Z",
+        );
+        assert_eq!(
+            storage.append_event(&original).expect("append original"),
+            AppendOutcome::Committed,
+            "{state}"
+        );
+        seed_v8_forbidden_append_state(&mut storage, state);
+        assert_resubmits_rejected_without_mutation(&mut storage, &original, state);
+    }
+}
+
+#[test]
+fn uncompacted_v7_and_v8_keep_duplicate_and_conflict_semantics() {
+    for version in ["v7", "v8"] {
+        let (_root, path) = database();
+        let mut storage = if version == "v7" {
+            Storage::open_v7_for_test(&path).expect("fresh v7")
+        } else {
+            Storage::open(&path).expect("fresh v8")
+        };
+        let original = event(
+            &format!("evt_{version}_valid_resubmit"),
+            &format!("op_{version}_valid_resubmit"),
+            "project",
+            &format!("project_{version}_valid_resubmit"),
+            1,
+            json!({
+                "canonical_path":format!("/fixture/{version}-valid-resubmit"),
+                "project_id":format!("project_{version}_valid_resubmit")
+            }),
+            "2026-09-01T05:10:00Z",
+        );
+        assert_eq!(
+            storage.append_event(&original).expect("append original"),
+            AppendOutcome::Committed,
+            "{version}"
+        );
+        storage.checkpoint().expect("checkpoint valid resubmit");
+        let snapshot = database_snapshot(&storage.connection);
+        let bytes = fs::read(storage.path()).expect("read valid resubmit database");
+
+        assert_eq!(
+            storage.append_event(&original).expect("duplicate resubmit"),
+            AppendOutcome::DuplicateNoOp,
+            "{version}"
+        );
+        assert_eq!(
+            database_snapshot(&storage.connection),
+            snapshot,
+            "{version}"
+        );
+        assert_eq!(
+            fs::read(storage.path()).expect("reread duplicate database"),
+            bytes,
+            "{version}"
+        );
+
+        let mut conflict = original.clone();
+        conflict.canonical_json_payload = canonical_json_v1(json!({
+            "canonical_path":format!("/fixture/{version}-conflict"),
+            "project_id":format!("project_{version}_valid_resubmit")
+        }))
+        .unwrap();
+        assert_eq!(
+            storage
+                .append_event(&conflict)
+                .expect("conflicting resubmit"),
+            AppendOutcome::Conflict,
+            "{version}"
+        );
+        assert_eq!(
+            database_snapshot(&storage.connection),
+            snapshot,
+            "{version}"
+        );
+        assert_eq!(
+            fs::read(storage.path()).expect("reread conflict database"),
+            bytes,
+            "{version}"
+        );
     }
 }
 
@@ -3316,6 +3401,202 @@ fn seed_v7_frozen_message_for_v8(storage: &mut Storage) {
     );
 }
 
+fn seed_v7_authority_for_v8(storage: &mut Storage) {
+    seed_v7_prefix_for_v8(storage);
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO maintenance_jobs(
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+               failure_kind,created_at,updated_at
+             ) VALUES ('v8_authority_job','losslessCompaction','running','{}',
+               '2026-09-01T04:12:00Z',NULL,NULL,NULL,
+               '2026-09-01T04:12:00Z','2026-09-01T04:12:00Z');
+             INSERT INTO ledger_compaction_delete_authority(
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+               aggregate_id,aggregate_sequence,authorized_at
+             ) SELECT 'v8_authority_job',1,'prefix_v8',event_rowid,event_id,operation_id,
+               aggregate_type,aggregate_id,aggregate_sequence,'2026-09-01T04:12:00Z'
+               FROM event_source_index WHERE event_id='evt_v8_prefix_1';
+             UPDATE maintenance_jobs SET state='succeeded',
+               completed_at='2026-09-01T04:13:00Z',updated_at='2026-09-01T04:13:00Z'
+               WHERE job_id='v8_authority_job';",
+        )
+        .unwrap();
+}
+
+fn seed_exact_v8_prefix(storage: &mut Storage) {
+    let first = event(
+        "evt_v8_runtime_prefix_1",
+        "op_v8_runtime_prefix_1",
+        "project",
+        "project_v8_runtime_prefix",
+        1,
+        json!({
+            "canonical_path":"/fixture/v8-runtime-prefix",
+            "project_id":"project_v8_runtime_prefix"
+        }),
+        "2026-09-01T05:02:01Z",
+    );
+    let second = event(
+        "evt_v8_runtime_prefix_2",
+        "op_v8_runtime_prefix_2",
+        "project",
+        "project_v8_runtime_prefix",
+        2,
+        json!({
+            "canonical_path":"/fixture/v8-runtime-prefix",
+            "project_id":"project_v8_runtime_prefix"
+        }),
+        "2026-09-01T05:02:02Z",
+    );
+    storage
+        .append_event(&first)
+        .expect("append V8 prefix row 1");
+    storage
+        .append_event(&second)
+        .expect("append V8 prefix row 2");
+    insert_exact_v8_frozen_operation(storage, &first, "2026-09-01T05:03:01Z");
+    insert_exact_v8_frozen_operation(storage, &second, "2026-09-01T05:03:02Z");
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO ledger_baselines(
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at
+             ) VALUES ('baseline_v8_runtime','project','project_v8_runtime_prefix',1,1,
+               '{}','digest_v8_runtime','2026-09-01T05:04:00Z','2026-09-01T05:04:00Z');
+             INSERT INTO ledger_compaction_prefixes(
+               prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,
+               anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,
+               baseline_projection_digest,created_at,verified_at
+             ) SELECT 'prefix_v8_runtime','project','project_v8_runtime_prefix',1,event_rowid,
+               event_id,operation_id,aggregate_sequence,'baseline_v8_runtime','digest_v8_runtime',
+               '2026-09-01T05:04:00Z','2026-09-01T05:04:00Z'
+               FROM event_source_index WHERE event_id='evt_v8_runtime_prefix_2';",
+        )
+        .expect("insert exact V8 prefix");
+}
+
+fn seed_exact_v8_frozen_message(storage: &mut Storage) {
+    storage
+        .append_event(&event(
+            "evt_v8_runtime_frozen_project",
+            "op_v8_runtime_frozen_project",
+            "project",
+            "project_v8_runtime_frozen",
+            1,
+            json!({
+                "canonical_path":"/fixture/v8-runtime-frozen",
+                "project_id":"project_v8_runtime_frozen"
+            }),
+            "2026-09-01T05:05:00Z",
+        ))
+        .expect("append V8 frozen-message project");
+    let source = event(
+        "evt_v8_runtime_frozen_chat",
+        "op_v8_runtime_frozen_chat",
+        "chat",
+        "chat_v8_runtime_frozen",
+        1,
+        v6_chat_payload(
+            "chat_v8_runtime_frozen",
+            "project_v8_runtime_frozen",
+            1,
+            team_message("chat_v8_runtime_frozen", "message_v8_runtime_frozen", 1),
+        ),
+        "2026-09-01T05:05:01Z",
+    );
+    storage
+        .append_event(&source)
+        .expect("append V8 frozen-message chat");
+    insert_exact_v8_frozen_operation(storage, &source, "2026-09-01T05:06:00Z");
+    storage
+        .connection
+        .execute(
+            "INSERT INTO chat_messages(
+               message_id,chat_id,event_sequence,canonical_message_json,message_digest,
+               created_at,materialized_at
+             ) VALUES ('message_v8_runtime_frozen','chat_v8_runtime_frozen',1,?1,
+               'digest_v8_runtime_frozen','2026-09-01T05:05:01Z','2026-09-01T05:06:00Z');",
+            [canonical_json_v1(team_message(
+                "chat_v8_runtime_frozen",
+                "message_v8_runtime_frozen",
+                1,
+            ))
+            .unwrap()],
+        )
+        .expect("insert exact V8 chat message");
+    assert_eq!(
+        storage
+            .connection
+            .execute(
+                "INSERT INTO frozen_message_sources(
+                   message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+                   source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+                 ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,
+                   message.chat_id,source.aggregate_sequence,message.event_sequence,
+                   message.canonical_message_json,message.message_digest,'2026-09-01T05:06:01Z'
+                   FROM event_source_index AS source
+                   JOIN chat_messages AS message ON message.message_id=source.introduced_message_id
+                   WHERE source.event_id='evt_v8_runtime_frozen_chat';",
+                [],
+            )
+            .expect("insert exact V8 frozen message"),
+        1
+    );
+}
+
+fn seed_exact_v8_authority(storage: &mut Storage) {
+    seed_exact_v8_prefix(storage);
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO maintenance_jobs(
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+               failure_kind,created_at,updated_at
+             ) VALUES ('v8_runtime_authority_job','losslessCompaction','running','{}',
+               '2026-09-01T05:07:00Z',NULL,NULL,NULL,
+               '2026-09-01T05:07:00Z','2026-09-01T05:07:00Z');
+             INSERT INTO ledger_compaction_delete_authority(
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,
+               aggregate_id,aggregate_sequence,authorized_at
+             ) SELECT 'v8_runtime_authority_job',1,'prefix_v8_runtime',event_rowid,event_id,
+               operation_id,aggregate_type,aggregate_id,aggregate_sequence,'2026-09-01T05:07:01Z'
+               FROM event_source_index WHERE event_id='evt_v8_runtime_prefix_1';
+             UPDATE maintenance_jobs SET state='succeeded',
+               completed_at='2026-09-01T05:07:02Z',updated_at='2026-09-01T05:07:02Z'
+               WHERE job_id='v8_runtime_authority_job';",
+        )
+        .expect("insert exact V8 authority");
+}
+
+fn seed_v8_forbidden_append_state(storage: &mut Storage, state: &str) {
+    match state {
+        "prefix" => seed_exact_v8_prefix(storage),
+        "frozen_message" => seed_exact_v8_frozen_message(storage),
+        "authority" => seed_exact_v8_authority(storage),
+        "frozen_operation" => {
+            seed_exact_v8_frozen_operation(storage);
+        }
+        "active_compaction" => {
+            storage
+                .connection
+                .execute(
+                    "INSERT INTO maintenance_jobs(
+                       job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,
+                       failure_kind,created_at,updated_at
+                     ) VALUES ('v8_resubmit_active','losslessCompaction','running','{}',
+                       '2026-09-01T05:01:00Z',NULL,NULL,NULL,
+                       '2026-09-01T05:01:00Z','2026-09-01T05:01:00Z');",
+                    [],
+                )
+                .unwrap();
+        }
+        _ => panic!("unknown V8 forbidden append state: {state}"),
+    }
+}
+
 fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
     let source = event(
         "evt_v8_frozen_operation",
@@ -3330,20 +3611,15 @@ fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
         "2026-09-01T04:31:00Z",
     );
     storage.append_event(&source).expect("append V8 source");
-    let mut completed = false;
-    for _ in 0..256 {
-        let result = storage
-            .materialize_lifetime_batch_for_test(&mut crate::storage_lifetime::NeverCancel, None)
-            .expect("materialize V8 source receipt");
-        if matches!(
-            result,
-            crate::storage_lifetime::LifetimeMaterializationBatchResult::Completed { .. }
-        ) {
-            completed = true;
-            break;
-        }
-    }
-    assert!(completed, "V8 receipt materialization must complete");
+    insert_exact_v8_frozen_operation(storage, &source, "2026-09-01T04:31:01Z");
+    source.operation_id
+}
+
+fn insert_exact_v8_frozen_operation(
+    storage: &mut Storage,
+    source: &LedgerEventV1,
+    frozen_at: &str,
+) {
     let source_event_rowid: i64 = storage
         .connection
         .query_row(
@@ -3356,6 +3632,30 @@ fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
         .strip_prefix("sha256:")
         .unwrap()
         .to_string();
+    storage
+        .connection
+        .execute(
+            "INSERT INTO operation_receipts(
+               operation_id,event_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,
+               payload_schema_version,canonical_payload_json,canonical_payload_digest_algorithm,
+               canonical_payload_digest_version,canonical_payload_digest_format,
+               canonical_payload_digest,event_timestamp,materialized_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'sha256',1,'lowercaseHex64',?9,?10,?11);",
+            params![
+                source.operation_id,
+                source.event_id,
+                source.aggregate_type,
+                source.aggregate_id,
+                sql_i64(source.aggregate_sequence).unwrap(),
+                source.event_type,
+                source.payload_schema_version,
+                source.canonical_json_payload,
+                canonical_payload_digest,
+                source.timestamp,
+                frozen_at,
+            ],
+        )
+        .expect("insert exact V8 operation receipt");
     let mut frozen = FrozenOperationSourceV1 {
         operation_id: source.operation_id.clone(),
         source_event_rowid: u64::try_from(source_event_rowid).unwrap(),
@@ -3371,7 +3671,7 @@ fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
         event_timestamp: source.timestamp.clone(),
         canonical_record_json: String::new(),
         record_digest: String::new(),
-        frozen_at: "2026-09-01T04:31:01Z".to_string(),
+        frozen_at: frozen_at.to_string(),
     };
     frozen.canonical_record_json =
         canonical_frozen_operation_record_v1(&frozen).expect("canonical frozen operation record");
@@ -3407,7 +3707,6 @@ fn seed_exact_v8_frozen_operation(storage: &mut Storage) -> String {
             ],
         )
         .expect("insert exact frozen operation");
-    source.operation_id
 }
 
 fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
@@ -3482,6 +3781,43 @@ fn assert_v8_migration_rejected_without_mutation(storage: &mut Storage, name: &s
     assert_eq!(
         fs::read(storage.path()).expect("reread unsafe v7 fixture"),
         bytes_before,
+        "{name}"
+    );
+}
+
+fn assert_resubmits_rejected_without_mutation(
+    storage: &mut Storage,
+    original: &LedgerEventV1,
+    name: &str,
+) {
+    storage
+        .checkpoint()
+        .expect("checkpoint forbidden append fixture");
+    let snapshot = database_snapshot(&storage.connection);
+    let bytes = fs::read(storage.path()).expect("read forbidden append database");
+
+    let duplicate_error = storage
+        .append_event(original)
+        .expect_err("duplicate must hit the runtime fence before classification");
+    assert_eq!(duplicate_error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(database_snapshot(&storage.connection), snapshot, "{name}");
+    assert_eq!(
+        fs::read(storage.path()).expect("reread duplicate database"),
+        bytes,
+        "{name}"
+    );
+
+    let mut conflict = original.clone();
+    conflict.canonical_json_payload =
+        canonical_json_v1(json!({"forbiddenResubmitConflict":name})).unwrap();
+    let conflict_error = storage
+        .append_event(&conflict)
+        .expect_err("conflict must hit the runtime fence before classification");
+    assert_eq!(conflict_error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(database_snapshot(&storage.connection), snapshot, "{name}");
+    assert_eq!(
+        fs::read(storage.path()).expect("reread conflict database"),
+        bytes,
         "{name}"
     );
 }
