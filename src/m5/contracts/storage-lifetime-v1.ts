@@ -1779,6 +1779,8 @@ const STORAGE_LIFETIME_BATCH_POLICY_V4 = {
     predecessorLookup: {
       indexed: "exactAggregateTypeIdAndAggregateSequenceMinusOne",
       missingDuringMigrationPendingAppend: "exactPredecessorEventsAggregateTupleLookupOnly",
+      insertGuardFallbackEnforcement:
+        "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
       forbidden: ["scan", "sort", "latestLookup"],
     },
     historyBackfillByMigration: false,

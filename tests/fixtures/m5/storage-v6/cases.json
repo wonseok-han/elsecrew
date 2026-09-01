@@ -165,7 +165,8 @@
     "invalidTransitions": [
       "durableDecrease", "durableJump", "increaseWithoutValidTeamMessage",
       "unchangedWithChangedSnapshotMessageId", "doubleIntroduction",
-      "wrongMessageEventSequence", "wrongMessageChatId", "missingExactPredecessor",
+      "wrongMessageEventSequence", "wrongMessageChatId", "wrongIntroducedMessageId",
+      "missingExactPredecessor", "malformedExactPredecessor",
       "scanOrSortPredecessorLookup"
     ]
   },
@@ -282,6 +283,11 @@
       "name": "predecessor found by latest scan and sort",
       "path": ["sourceIndex", "predecessorLookup", "indexed"],
       "replacement": "latestAggregateScanAndSort"
+    },
+    {
+      "name": "missing indexed predecessor bypasses insert guard",
+      "path": ["sourceIndex", "predecessorLookup", "insertGuardFallbackEnforcement"],
+      "replacement": "consumerValidationOnly"
     },
     {
       "name": "message uniqueness relaxed",

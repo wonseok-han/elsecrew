@@ -1825,7 +1825,7 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     )
     .is_err());
     assert_eq!(cases.source_index.valid_transitions.len(), 5);
-    assert_eq!(cases.source_index.invalid_transitions.len(), 9);
+    assert_eq!(cases.source_index.invalid_transitions.len(), 11);
     assert_eq!(cases.query_plans.len(), 7);
     for plan in &cases.query_plans {
         assert!(
@@ -2015,6 +2015,8 @@ fn storage_v6_freezes_source_index_migration_and_sixteen_bounded_phases() {
     assert!(sql.contains("'$.last_message.messageId'"));
     assert!(sql.contains("'$.last_message.eventSequence'"));
     assert!(sql.contains("'$.last_message.chatId'"));
+    assert!(sql.contains("FROM events AS predecessor_event"));
+    assert!(sql.contains("predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_update"));
     assert!(sql.contains("CREATE TRIGGER event_source_index_append_only_delete"));
     assert!(sql.contains("'indexSource', 'verifySourceIndex'"));

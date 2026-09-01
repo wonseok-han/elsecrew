@@ -2393,6 +2393,8 @@ pub fn validate_storage_lifetime_batch_policy_v4(
                 "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
                 "missingDuringMigrationPendingAppend":
                     "exactPredecessorEventsAggregateTupleLookupOnly",
+                "insertGuardFallbackEnforcement":
+                    "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
                 "forbidden": ["scan", "sort", "latestLookup"],
             },
             "historyBackfillByMigration": false,

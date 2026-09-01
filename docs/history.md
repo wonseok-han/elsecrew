@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 fallback trigger P1 수정)
+
+- **fallback도 INSERT trigger가 fail-closed**: chat source-index predecessor가 아직 없으면 consumer 선검증만 믿던 우회 경로를 제거했다. 같은 aggregate type/id와 sequence-1의 `events` unique tuple을 exact 조회하고, predecessor payload의 durable/snapshot/TeamMessage가 유효할 때만 indexed predecessor와 동일한 증가·비메시지 전이를 허용한다. predecessor event 부재·malformed payload·durable 감소/jump·메시지 없는 증가·변경된 snapshot·잘못된 introduced identity·TeamMessage chatId/eventSequence 불일치를 모두 INSERT 전에 거부한다.
+- **직접 SQLite 회귀**: Rust/TypeScript validator를 먼저 부르지 않은 실제 SQL INSERT로 exact fallback 성공과 위 실패 경로를 검증했고, predecessor 조회는 기존 aggregate unique index의 exact query plan만 허용하며 scan/sort는 계속 금지했다. migration no-backfill과 V1~V5 fixture 불변은 유지했고 sidecar consumer는 변경하지 않았다.
+
 ### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 메시지 도입 전이 정정)
 
 - **snapshot과 introduction 분리**: 모호한 `message_id`를 `introduced_message_id`로 바꾸고 chat의 `durable_event_sequence`와 현재 `last_message.messageId`를 각각 nullable `chat_durable_sequence`·`chat_snapshot_message_id`로 exact mirror한다. non-chat은 세 필드가 모두 NULL이다. 첫 chat predecessor는 durable 0/null이고, 새 메시지는 durable이 정확히 1 증가하면서 valid TeamMessage의 eventSequence·chatId·snapshot·introduced identity가 일치해야 한다. 비메시지 event는 durable을 유지하고 introduction은 NULL이며 snapshot은 NULL 또는 직전 snapshot과 같은 ID만 허용한다.

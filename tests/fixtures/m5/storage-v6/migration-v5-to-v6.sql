@@ -102,6 +102,12 @@ WHEN NOT EXISTS (
                   )
                   OR (
                       json_type(source.canonical_json_payload, '$.last_message') = 'object'
+                      AND (
+                          SELECT COUNT(*)
+                          FROM json_each(source.canonical_json_payload, '$.last_message')
+                      ) = 11
+                      AND json_type(source.canonical_json_payload, '$.last_message.schemaVersion') = 'integer'
+                      AND json_extract(source.canonical_json_payload, '$.last_message.schemaVersion') = 1
                       AND json_type(
                           source.canonical_json_payload, '$.last_message.messageId'
                       ) = 'text'
@@ -111,27 +117,276 @@ WHEN NOT EXISTS (
                       AND NEW.chat_snapshot_message_id = json_extract(
                           source.canonical_json_payload, '$.last_message.messageId'
                       )
+                      AND json_type(source.canonical_json_payload, '$.last_message.chatId') = 'text'
+                      AND length(json_extract(source.canonical_json_payload, '$.last_message.chatId')) > 0
+                      AND json_type(source.canonical_json_payload, '$.last_message.taskId') = 'text'
+                      AND length(json_extract(source.canonical_json_payload, '$.last_message.taskId')) > 0
+                      AND json_type(source.canonical_json_payload, '$.last_message.worktreeId') = 'text'
+                      AND length(json_extract(source.canonical_json_payload, '$.last_message.worktreeId')) > 0
+                      AND json_type(source.canonical_json_payload, '$.last_message.eventSequence') = 'integer'
+                      AND json_extract(source.canonical_json_payload, '$.last_message.eventSequence') >= 1
+                      AND json_extract(source.canonical_json_payload, '$.last_message.eventSequence') <= 9007199254740991
+                      AND json_extract(source.canonical_json_payload, '$.last_message.kind')
+                          IN ('user', 'role', 'system', 'status')
+                      AND json_type(source.canonical_json_payload, '$.last_message.text') = 'text'
+                      AND length(CAST(json_extract(
+                          source.canonical_json_payload, '$.last_message.text'
+                      ) AS BLOB)) <= 65536
+                      AND json_type(source.canonical_json_payload, '$.last_message.createdAt') = 'text'
+                      AND length(json_extract(source.canonical_json_payload, '$.last_message.createdAt')) = 20
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 5, 1) = '-'
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 8, 1) = '-'
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 11, 1) = 'T'
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 14, 1) = ':'
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 17, 1) = ':'
+                      AND substr(json_extract(source.canonical_json_payload, '$.last_message.createdAt'), 20, 1) = 'Z'
+                      AND (
+                          (
+                              json_extract(source.canonical_json_payload, '$.last_message.kind') = 'role'
+                              AND json_extract(source.canonical_json_payload, '$.last_message.roleId')
+                                  IN ('planning', 'coding', 'review')
+                              AND json_type(source.canonical_json_payload, '$.last_message.runId') = 'text'
+                              AND length(json_extract(source.canonical_json_payload, '$.last_message.runId')) > 0
+                          )
+                          OR (
+                              json_extract(source.canonical_json_payload, '$.last_message.kind') = 'user'
+                              AND json_type(source.canonical_json_payload, '$.last_message.roleId') = 'null'
+                              AND json_type(source.canonical_json_payload, '$.last_message.runId') = 'null'
+                          )
+                          OR (
+                              json_extract(source.canonical_json_payload, '$.last_message.kind')
+                                  IN ('system', 'status')
+                              AND json_type(source.canonical_json_payload, '$.last_message.roleId') = 'null'
+                              AND (
+                                  json_type(source.canonical_json_payload, '$.last_message.runId') = 'null'
+                                  OR (
+                                      json_type(source.canonical_json_payload, '$.last_message.runId') = 'text'
+                                      AND length(json_extract(
+                                          source.canonical_json_payload, '$.last_message.runId'
+                                      )) > 0
+                                  )
+                              )
+                          )
+                      )
                   )
               )
               AND (
                   (
-                      NEW.aggregate_sequence > 1
-                      AND NOT EXISTS (
+                      NEW.aggregate_sequence = 1
+                      OR EXISTS (
                           SELECT 1 FROM event_source_index AS predecessor
                           WHERE predecessor.aggregate_type = NEW.aggregate_type
                             AND predecessor.aggregate_id = NEW.aggregate_id
                             AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
                       )
+                      OR EXISTS (
+                          SELECT 1 FROM events AS predecessor_event
+                          WHERE predecessor_event.aggregate_type = NEW.aggregate_type
+                            AND predecessor_event.aggregate_id = NEW.aggregate_id
+                            AND predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1
+                            AND json_type(
+                                predecessor_event.canonical_json_payload,
+                                '$.durable_event_sequence'
+                            ) = 'integer'
+                            AND json_extract(
+                                predecessor_event.canonical_json_payload,
+                                '$.durable_event_sequence'
+                            ) BETWEEN 0 AND 9007199254740991
+                            AND (
+                                json_type(
+                                    predecessor_event.canonical_json_payload, '$.last_message'
+                                ) = 'null'
+                                OR (
+                                    json_type(
+                                        predecessor_event.canonical_json_payload, '$.last_message'
+                                    ) = 'object'
+                                    AND (
+                                        SELECT COUNT(*) FROM json_each(
+                                            predecessor_event.canonical_json_payload,
+                                            '$.last_message'
+                                        )
+                                    ) = 11
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.schemaVersion'
+                                    ) = 'integer'
+                                    AND json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.schemaVersion'
+                                    ) = 1
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.messageId'
+                                    ) = 'text'
+                                    AND length(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.messageId'
+                                    )) > 0
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.chatId'
+                                    ) = 'text'
+                                    AND length(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.chatId'
+                                    )) > 0
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.taskId'
+                                    ) = 'text'
+                                    AND length(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.taskId'
+                                    )) > 0
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.worktreeId'
+                                    ) = 'text'
+                                    AND length(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.worktreeId'
+                                    )) > 0
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.eventSequence'
+                                    ) = 'integer'
+                                    AND json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.eventSequence'
+                                    ) BETWEEN 1 AND 9007199254740991
+                                    AND json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.kind'
+                                    ) IN ('user', 'role', 'system', 'status')
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.text'
+                                    ) = 'text'
+                                    AND length(CAST(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.text'
+                                    ) AS BLOB)) <= 65536
+                                    AND json_type(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ) = 'text'
+                                    AND length(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    )) = 20
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 5, 1) = '-'
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 8, 1) = '-'
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 11, 1) = 'T'
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 14, 1) = ':'
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 17, 1) = ':'
+                                    AND substr(json_extract(
+                                        predecessor_event.canonical_json_payload,
+                                        '$.last_message.createdAt'
+                                    ), 20, 1) = 'Z'
+                                    AND (
+                                        (
+                                            json_extract(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.kind'
+                                            ) = 'role'
+                                            AND json_extract(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.roleId'
+                                            ) IN ('planning', 'coding', 'review')
+                                            AND json_type(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.runId'
+                                            ) = 'text'
+                                            AND length(json_extract(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.runId'
+                                            )) > 0
+                                        )
+                                        OR (
+                                            json_extract(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.kind'
+                                            ) = 'user'
+                                            AND json_type(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.roleId'
+                                            ) = 'null'
+                                            AND json_type(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.runId'
+                                            ) = 'null'
+                                        )
+                                        OR (
+                                            json_extract(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.kind'
+                                            ) IN ('system', 'status')
+                                            AND json_type(
+                                                predecessor_event.canonical_json_payload,
+                                                '$.last_message.roleId'
+                                            ) = 'null'
+                                            AND (
+                                                json_type(
+                                                    predecessor_event.canonical_json_payload,
+                                                    '$.last_message.runId'
+                                                ) = 'null'
+                                                OR (
+                                                    json_type(
+                                                        predecessor_event.canonical_json_payload,
+                                                        '$.last_message.runId'
+                                                    ) = 'text'
+                                                    AND length(json_extract(
+                                                        predecessor_event.canonical_json_payload,
+                                                        '$.last_message.runId'
+                                                    )) > 0
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                      )
                   )
-                  OR (
+                  AND (
+                    (
                       NEW.chat_durable_sequence = CASE
                           WHEN NEW.aggregate_sequence = 1 THEN 1
-                          ELSE (
+                          WHEN EXISTS (
+                              SELECT 1 FROM event_source_index AS predecessor
+                              WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                AND predecessor.aggregate_id = NEW.aggregate_id
+                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          ) THEN (
                               SELECT predecessor.chat_durable_sequence + 1
                               FROM event_source_index AS predecessor
                               WHERE predecessor.aggregate_type = NEW.aggregate_type
                                 AND predecessor.aggregate_id = NEW.aggregate_id
                                 AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          )
+                          ELSE (
+                              SELECT json_extract(
+                                  predecessor_event.canonical_json_payload,
+                                  '$.durable_event_sequence'
+                              ) + 1
+                              FROM events AS predecessor_event
+                              WHERE predecessor_event.aggregate_type = NEW.aggregate_type
+                                AND predecessor_event.aggregate_id = NEW.aggregate_id
+                                AND predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1
                           )
                       END
                       AND json_type(source.canonical_json_payload, '$.last_message') = 'object'
@@ -148,29 +403,62 @@ WHEN NOT EXISTS (
                           source.canonical_json_payload, '$.last_message.chatId'
                       ) = NEW.aggregate_id
                       AND NEW.introduced_message_id = NEW.chat_snapshot_message_id
-                  )
-                  OR (
+                    )
+                    OR (
                       NEW.chat_durable_sequence = CASE
                           WHEN NEW.aggregate_sequence = 1 THEN 0
-                          ELSE (
+                          WHEN EXISTS (
+                              SELECT 1 FROM event_source_index AS predecessor
+                              WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                AND predecessor.aggregate_id = NEW.aggregate_id
+                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                          ) THEN (
                               SELECT predecessor.chat_durable_sequence
                               FROM event_source_index AS predecessor
                               WHERE predecessor.aggregate_type = NEW.aggregate_type
                                 AND predecessor.aggregate_id = NEW.aggregate_id
                                 AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
                           )
+                          ELSE (
+                              SELECT json_extract(
+                                  predecessor_event.canonical_json_payload,
+                                  '$.durable_event_sequence'
+                              )
+                              FROM events AS predecessor_event
+                              WHERE predecessor_event.aggregate_type = NEW.aggregate_type
+                                AND predecessor_event.aggregate_id = NEW.aggregate_id
+                                AND predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1
+                          )
                       END
                       AND NEW.introduced_message_id IS NULL
                       AND (
                           NEW.chat_snapshot_message_id IS NULL
-                          OR NEW.chat_snapshot_message_id = (
-                              SELECT predecessor.chat_snapshot_message_id
-                              FROM event_source_index AS predecessor
-                              WHERE predecessor.aggregate_type = NEW.aggregate_type
-                                AND predecessor.aggregate_id = NEW.aggregate_id
-                                AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
-                          )
+                          OR NEW.chat_snapshot_message_id = CASE
+                              WHEN EXISTS (
+                                  SELECT 1 FROM event_source_index AS predecessor
+                                  WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                    AND predecessor.aggregate_id = NEW.aggregate_id
+                                    AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                              ) THEN (
+                                  SELECT predecessor.chat_snapshot_message_id
+                                  FROM event_source_index AS predecessor
+                                  WHERE predecessor.aggregate_type = NEW.aggregate_type
+                                    AND predecessor.aggregate_id = NEW.aggregate_id
+                                    AND predecessor.aggregate_sequence = NEW.aggregate_sequence - 1
+                              )
+                              ELSE (
+                                  SELECT json_extract(
+                                      predecessor_event.canonical_json_payload,
+                                      '$.last_message.messageId'
+                                  )
+                                  FROM events AS predecessor_event
+                                  WHERE predecessor_event.aggregate_type = NEW.aggregate_type
+                                    AND predecessor_event.aggregate_id = NEW.aggregate_id
+                                    AND predecessor_event.aggregate_sequence = NEW.aggregate_sequence - 1
+                              )
+                          END
                       )
+                    )
                   )
               )
           )

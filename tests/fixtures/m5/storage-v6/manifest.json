@@ -124,6 +124,7 @@
       "predecessorLookup": {
         "indexed": "exactAggregateTypeIdAndAggregateSequenceMinusOne",
         "missingDuringMigrationPendingAppend": "exactPredecessorEventsAggregateTupleLookupOnly",
+        "insertGuardFallbackEnforcement": "exactPredecessorEventMustExistAndBeValidThenSameTransitionOrReject",
         "forbidden": ["scan", "sort", "latestLookup"]
       },
       "historyBackfillByMigration": false,
