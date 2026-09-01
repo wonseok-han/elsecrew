@@ -787,7 +787,10 @@ fn status_counts_utf8_ledger_and_projection_bytes_and_excludes_app_instances() {
     let mut storage = Storage::open(&path).expect("storage");
     let payloads = [
         json!({"canonical_path":"/fixture/프로젝트","project_id":"project_status"}),
-        json!({"chat_id":"chat_status","project_id":"project_status","title":"비밀 대화"}),
+        json!({
+            "chat_id":"chat_status","project_id":"project_status","title":"비밀 대화",
+            "durable_event_sequence":0,"last_message":null
+        }),
         json!({"chat_id":"chat_status","run_id":"run_status","state":"running","worktree_path":"/fixture/worktree"}),
         json!({"evidence":{"detail":"private provider text"},"lock_id":"lock_status","poisoned":false,"project_id":"project_status","recovery_required":false,"worktree_path":"/fixture/worktree","writer_run_id":"run_status"}),
     ];

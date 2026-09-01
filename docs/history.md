@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 sidecar migration)
+
+- **exact V6 소비 구현**: `Storage::open`이 fresh/V1~V5를 각 exact predecessor schema와 canonical meta/job pair로 검증한 뒤 fixture V5→V6 migration을 원자 적용하고, 현재 V6는 schema·index·trigger·foreign-key enforcement와 reopen pair를 재검증한다. migration은 history를 backfill하지 않고 ready+absent를 pending+absent로 바꾸며 모든 present V5 job의 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed V6는 계속 fail-closed다.
+- **append serialization·provenance**: 모든 ledger append의 단일 transaction이 event와 exact `event_source_index` 행, projection, ready 무효화를 함께 commit한다. non-chat의 세 chat 필드는 NULL이며, chat sequence 1은 durable 0/null synthetic predecessor를 사용한다. sequence 2 이상은 exact sequence-1 index와 그 rowid의 source event를 Rust validator로 재검증하고 raw-event fallback을 허용하지 않는다. valid TeamMessage의 chatId/eventSequence, durable unchanged 또는 정확히 +1, repeated/null snapshot과 introduced identity를 구분하며 gap·변조·double introduction은 전체 rollback한다.
+- **검증·남은 경계**: V5 3 state×14 phase와 absent pair migration, exact rollback/preflight/reopen tamper, no-backfill, repeated `last_message`, missing/tampered predecessor, duplicate/conflict, injected append failure를 회귀로 추가했다. focused storage 32개와 lifetime 12개, sidecar 전체 115개+stdio 10개(1 ignored), 기존 chat 회귀, protocol lifetime 8개, scoped strict clippy가 통과했다. bounded `indexSource` worker·scheduler·wire/status·cleanup·deletion·compaction은 활성화하지 않았으며 다음 단계에서 별도 구현·검토가 필요하다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 query-plan 선언 정합성 수정)
 
 - **stale raw-event plan 제거**: 재귀 predecessor fallback 제거 뒤에도 `queryPlanAcceptance.missingIndexedPredecessorEvent`가 남아 raw events aggregate tuple 조회를 허용하는 것처럼 보이던 계약 불일치를 Rust·TypeScript·V6 manifest에서 제거했다.

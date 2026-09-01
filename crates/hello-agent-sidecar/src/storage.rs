@@ -1,15 +1,19 @@
 use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_protocol::storage_lifetime_v1::{
+    validate_storage_event_source_index_transition_v1,
     validate_storage_lifetime_materialization_job_v1,
     validate_storage_lifetime_materialization_job_v2,
     validate_storage_lifetime_materialization_job_v3,
+    validate_storage_lifetime_materialization_job_v4,
     validate_storage_lifetime_materialization_pair_v1,
     validate_storage_lifetime_materialization_pair_v2,
-    validate_storage_lifetime_materialization_pair_v3, validate_storage_lifetime_reopen_pair_v2,
-    validate_storage_lifetime_reopen_pair_v3, StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V3, STORAGE_LIFETIME_SCHEMA_VERSION_V4,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V5,
+    validate_storage_lifetime_materialization_pair_v3,
+    validate_storage_lifetime_materialization_pair_v4, validate_storage_lifetime_reopen_pair_v2,
+    validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
+    StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V4, STORAGE_LIFETIME_SCHEMA_VERSION_V5,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V6,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, recover_unclean_shutdown_v1, replay_ledger_v1,
@@ -34,6 +38,8 @@ const MIGRATION_V4: &str =
     include_str!("../../../tests/fixtures/m5/storage-v4/migration-v3-to-v4.sql");
 const MIGRATION_V5: &str =
     include_str!("../../../tests/fixtures/m5/storage-v5/migration-v4-to-v5.sql");
+const MIGRATION_V6: &str =
+    include_str!("../../../tests/fixtures/m5/storage-v6/migration-v5-to-v6.sql");
 type SchemaObject = (String, String, String, Option<String>);
 type LifetimeJobRow = (
     u32,
@@ -137,7 +143,9 @@ impl Storage {
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
                 migrate_v5(&mut connection)?;
-                verify_schema_v5_for_open(&connection)?;
+                verify_schema_v5(&connection)?;
+                migrate_v6(&mut connection)?;
+                verify_schema_v6_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1) => {
                 verify_schema_v2(&connection)?;
@@ -146,22 +154,33 @@ impl Storage {
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
                 migrate_v5(&mut connection)?;
-                verify_schema_v5_for_open(&connection)?;
+                verify_schema_v5(&connection)?;
+                migrate_v6(&mut connection)?;
+                verify_schema_v6_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3) => {
                 verify_schema_v3(&connection)?;
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
                 migrate_v5(&mut connection)?;
-                verify_schema_v5_for_open(&connection)?;
+                verify_schema_v5(&connection)?;
+                migrate_v6(&mut connection)?;
+                verify_schema_v6_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4) => {
                 verify_schema_v4(&connection)?;
                 migrate_v5(&mut connection)?;
-                verify_schema_v5_for_open(&connection)?;
+                verify_schema_v5(&connection)?;
+                migrate_v6(&mut connection)?;
+                verify_schema_v6_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {
-                verify_schema_v5_for_open(&connection)?;
+                verify_schema_v5(&connection)?;
+                migrate_v6(&mut connection)?;
+                verify_schema_v6_for_open(&connection)?;
+            }
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
+                verify_schema_v6_for_open(&connection)?;
             }
             Some(_) => {
                 return Err(SidecarError::new(
@@ -250,6 +269,14 @@ impl Storage {
         let mut storage = Self::open_v3_for_test(path)?;
         migrate_v4(&mut storage.connection)?;
         verify_schema_v4_for_open(&storage.connection)?;
+        Ok(storage)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_v5_for_test(path: &Path) -> Result<Self, SidecarError> {
+        let mut storage = Self::open_v4_for_test(path)?;
+        migrate_v5(&mut storage.connection)?;
+        verify_schema_v5_for_open(&storage.connection)?;
         Ok(storage)
     }
 
@@ -1011,6 +1038,17 @@ fn migrate_v5(connection: &mut Connection) -> Result<(), SidecarError> {
     execute_migration(connection, MIGRATION_V5, "v5")
 }
 
+fn migrate_v6(connection: &mut Connection) -> Result<(), SidecarError> {
+    if schema_objects(connection)? != reference_schema_v5()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema is not the exact storage v5 migration base",
+        ));
+    }
+    verify_schema_v5(connection)?;
+    execute_migration(connection, MIGRATION_V6, "v6")
+}
+
 fn execute_migration(
     connection: &mut Connection,
     migration: &str,
@@ -1431,6 +1469,7 @@ fn verify_v4_materialization_snapshot(
     Ok(())
 }
 
+#[cfg(test)]
 fn verify_schema_v5_for_open(connection: &Connection) -> Result<(), SidecarError> {
     let materialization_state = verify_schema_v5(connection)?;
     verify_v5_materialization_snapshot(connection, &materialization_state, true)
@@ -1583,6 +1622,162 @@ fn verify_v5_materialization_snapshot(
     Ok(())
 }
 
+fn verify_schema_v6_for_open(connection: &Connection) -> Result<(), SidecarError> {
+    let materialization_state = verify_schema_v6(connection)?;
+    verify_v6_materialization_snapshot(connection, &materialization_state, true)
+}
+
+fn verify_schema_v6(connection: &Connection) -> Result<String, SidecarError> {
+    let metadata: (u32, u32, String, String, String) = connection
+        .query_row(
+            "SELECT storage_schema_version, protocol_version, migration_state, materialization_state, migrated_at FROM storage_schema_meta WHERE singleton = 1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v6 metadata is missing or unreadable",
+            )
+        })?;
+    let metadata_count: u32 = connection
+        .query_row("SELECT count(*) FROM storage_schema_meta;", [], |row| {
+            row.get(0)
+        })
+        .map_err(sqlite_error)?;
+    let migrated_at_valid: Option<bool> = connection
+        .query_row(
+            "SELECT migrated_at = strftime('%Y-%m-%d %H:%M:%S', migrated_at) FROM storage_schema_meta WHERE singleton = 1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v6 migration timestamp is unreadable",
+            )
+        })?;
+    let foreign_keys: u32 = connection
+        .query_row("PRAGMA foreign_keys;", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V6
+        || metadata.1 != PROTOCOL_VERSION
+        || metadata.2 != "ready"
+        || metadata_count != 1
+        || migrated_at_valid != Some(true)
+        || foreign_keys != 1
+    {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "storage schema v6 metadata or foreign-key enforcement does not match the supported migration",
+        ));
+    }
+    if schema_objects(connection)? != reference_schema_v6()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema does not exactly match the storage v6 golden schema",
+        ));
+    }
+    verify_v6_materialization_snapshot(connection, &metadata.3, false)?;
+    Ok(metadata.3)
+}
+
+fn verify_v6_materialization_snapshot(
+    connection: &Connection,
+    materialization_state: &str,
+    reopen: bool,
+) -> Result<(), SidecarError> {
+    let job_count: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM lifetime_materialization_job;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    let row: Option<LifetimeJobRowV4> = connection
+        .query_row(
+            "SELECT singleton,job_id,state,cutoff_event_rowid,phase,after_scan_rowid,\
+                    scan_exhausted,failure_kind,created_at,updated_at,completed_at \
+             FROM lifetime_materialization_job WHERE singleton=1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    if job_count != u32::from(row.is_some()) {
+        return Err(storage_materialization_snapshot_error());
+    }
+    if row.as_ref().is_some_and(|row| !matches!(row.6, 0 | 1)) {
+        return Err(storage_materialization_snapshot_error());
+    }
+    let job = row.map(
+        |(
+            singleton,
+            job_id,
+            state,
+            cutoff_event_rowid,
+            phase,
+            after_scan_rowid,
+            scan_exhausted,
+            failure_kind,
+            created_at,
+            updated_at,
+            completed_at,
+        )| {
+            json!({
+                "singleton": singleton,
+                "jobId": job_id,
+                "state": state,
+                "cutoffEventRowid": cutoff_event_rowid,
+                "phase": phase,
+                "afterScanRowid": after_scan_rowid,
+                "scanExhausted": scan_exhausted == 1,
+                "failureKind": failure_kind,
+                "createdAt": created_at,
+                "updatedAt": updated_at,
+                "completedAt": completed_at,
+            })
+        },
+    );
+    if let Some(job) = job.as_ref() {
+        validate_storage_lifetime_materialization_job_v4(job)
+            .map_err(|_| storage_materialization_snapshot_error())?;
+    }
+    let pair = json!({
+        "materializationState": materialization_state,
+        "job": job,
+    });
+    validate_storage_lifetime_materialization_pair_v4(&pair)
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    if reopen {
+        validate_storage_lifetime_reopen_pair_v4(&pair)
+            .map_err(|_| storage_materialization_snapshot_error())?;
+    }
+    Ok(())
+}
+
 fn storage_materialization_snapshot_error() -> SidecarError {
     SidecarError::new(
         "storageSchemaMismatch",
@@ -1637,6 +1832,21 @@ fn reference_schema_v5() -> Result<Vec<SchemaObject>, SidecarError> {
     execute_migration(&mut connection, MIGRATION_V3, "reference v3")?;
     execute_migration(&mut connection, MIGRATION_V4, "reference v4")?;
     execute_migration(&mut connection, MIGRATION_V5, "reference v5")?;
+    schema_objects(&connection)
+}
+
+fn reference_schema_v6() -> Result<Vec<SchemaObject>, SidecarError> {
+    let mut connection = Connection::open_in_memory().map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V1)
+        .map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V2)
+        .map_err(sqlite_error)?;
+    execute_migration(&mut connection, MIGRATION_V3, "reference v3")?;
+    execute_migration(&mut connection, MIGRATION_V4, "reference v4")?;
+    execute_migration(&mut connection, MIGRATION_V5, "reference v5")?;
+    execute_migration(&mut connection, MIGRATION_V6, "reference v6")?;
     schema_objects(&connection)
 }
 
@@ -1865,7 +2075,240 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
             ],
         )
         .map_err(sqlite_error)?;
+    match storage_schema_version(transaction)? {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
+            insert_v6_source_index_and_invalidate_ready(transaction, event)?;
+        }
+        None
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4)
+        | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {}
+        Some(_) => {
+            return Err(SidecarError::new(
+                "storageSchemaMismatch",
+                "event append encountered an unsupported storage schema version",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn insert_v6_source_index_and_invalidate_ready(
+    transaction: &Transaction<'_>,
+    event: &LedgerEventV1,
+) -> Result<(), SidecarError> {
+    let event_rowid = u64::try_from(transaction.last_insert_rowid()).map_err(|_| {
+        SidecarError::new(
+            "storageSchemaMismatch",
+            "inserted event rowid is outside the supported unsigned range",
+        )
+    })?;
+    if event_rowid == 0 {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "inserted event rowid must be positive",
+        ));
+    }
+
+    let (chat_durable_sequence, chat_snapshot_message_id) = chat_source_state(event)?;
+    let (predecessor_entry, predecessor_source, previous_durable) =
+        if event.aggregate_type != "chat" || event.aggregate_sequence == 1 {
+            (None, None, 0)
+        } else {
+            let predecessor =
+                load_exact_source_index_predecessor(transaction, event)?.ok_or_else(|| {
+                    SidecarError::new(
+                        "storageContractViolation",
+                        "chat append requires the exact indexed predecessor",
+                    )
+                })?;
+            let predecessor_rowid = predecessor
+                .get("eventRowid")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    SidecarError::new(
+                        "storageSchemaMismatch",
+                        "indexed predecessor rowid is unreadable",
+                    )
+                })?;
+            let predecessor_durable = predecessor
+                .get("chatDurableSequence")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    SidecarError::new(
+                        "storageSchemaMismatch",
+                        "indexed chat predecessor durable sequence is unreadable",
+                    )
+                })?;
+            let source =
+                load_exact_event_by_rowid(transaction, predecessor_rowid)?.ok_or_else(|| {
+                    SidecarError::new(
+                        "storageSchemaMismatch",
+                        "indexed predecessor source event is missing",
+                    )
+                })?;
+            (Some(predecessor), Some(source), predecessor_durable)
+        };
+    let introduced_message_id = chat_durable_sequence
+        .filter(|current| previous_durable.checked_add(1) == Some(*current))
+        .and_then(|_| chat_snapshot_message_id.clone());
+    let entry = json!({
+        "eventRowid": event_rowid,
+        "eventId": event.event_id,
+        "operationId": event.operation_id,
+        "aggregateType": event.aggregate_type,
+        "aggregateId": event.aggregate_id,
+        "aggregateSequence": event.aggregate_sequence,
+        "introducedMessageId": introduced_message_id,
+        "chatDurableSequence": chat_durable_sequence,
+        "chatSnapshotMessageId": chat_snapshot_message_id,
+    });
+    validate_storage_event_source_index_transition_v1(
+        event_rowid,
+        &entry,
+        event,
+        predecessor_entry.as_ref(),
+        predecessor_source.as_ref(),
+    )
+    .map_err(storage_contract_error)?;
+    transaction
+        .execute(
+            "INSERT INTO event_source_index(\
+               event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,\
+               introduced_message_id,chat_durable_sequence,chat_snapshot_message_id\
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9);",
+            params![
+                sql_i64(event_rowid)?,
+                event.event_id,
+                event.operation_id,
+                event.aggregate_type,
+                event.aggregate_id,
+                sql_i64(event.aggregate_sequence)?,
+                introduced_message_id,
+                chat_durable_sequence.map(sql_i64).transpose()?,
+                chat_snapshot_message_id,
+            ],
+        )
+        .map_err(sqlite_error)?;
+
+    let materialization_state: String = transaction
+        .query_row(
+            "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    verify_v6_materialization_snapshot(transaction, &materialization_state, false)?;
+    if materialization_state == "ready" {
+        let changed = transaction
+            .execute(
+                "UPDATE storage_schema_meta SET materialization_state='pending' \
+                 WHERE singleton=1 AND materialization_state='ready' \
+                   AND NOT EXISTS(SELECT 1 FROM lifetime_materialization_job);",
+                [],
+            )
+            .map_err(sqlite_error)?;
+        if changed != 1 {
+            return Err(storage_materialization_snapshot_error());
+        }
+    }
+    Ok(())
+}
+
+fn chat_source_state(event: &LedgerEventV1) -> Result<(Option<u64>, Option<String>), SidecarError> {
+    if event.aggregate_type != "chat" {
+        return Ok((None, None));
+    }
+    let payload: Value =
+        serde_json::from_str(&event.canonical_json_payload).map_err(storage_contract_error)?;
+    let object = payload.as_object().ok_or_else(|| {
+        SidecarError::new(
+            "storageContractViolation",
+            "chat source index payload must be an object",
+        )
+    })?;
+    let durable = object
+        .get("durable_event_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            SidecarError::new(
+                "storageContractViolation",
+                "chat source index requires a safe unsigned durable_event_sequence",
+            )
+        })?;
+    let snapshot = match object.get("last_message") {
+        Some(Value::Null) => None,
+        Some(Value::Object(message)) => message
+            .get("messageId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => {
+            return Err(SidecarError::new(
+                "storageContractViolation",
+                "chat source index last_message must be an object or null",
+            ));
+        }
+    };
+    Ok((Some(durable), snapshot))
+}
+
+fn load_exact_source_index_predecessor(
+    transaction: &Transaction<'_>,
+    event: &LedgerEventV1,
+) -> Result<Option<Value>, SidecarError> {
+    transaction
+        .query_row(
+            "SELECT event_rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,\
+                    introduced_message_id,chat_durable_sequence,chat_snapshot_message_id \
+             FROM event_source_index \
+             WHERE aggregate_type='chat' AND aggregate_id=?1 AND aggregate_sequence=?2;",
+            params![event.aggregate_id, sql_i64(event.aggregate_sequence - 1)?],
+            |row| {
+                Ok(json!({
+                    "eventRowid": row_u64(row, 0)?,
+                    "eventId": row.get::<_, String>(1)?,
+                    "operationId": row.get::<_, String>(2)?,
+                    "aggregateType": row.get::<_, String>(3)?,
+                    "aggregateId": row.get::<_, String>(4)?,
+                    "aggregateSequence": row_u64(row, 5)?,
+                    "introducedMessageId": row.get::<_, Option<String>>(6)?,
+                    "chatDurableSequence": optional_row_u64(row, 7)?,
+                    "chatSnapshotMessageId": row.get::<_, Option<String>>(8)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)
+}
+
+fn load_exact_event_by_rowid(
+    transaction: &Transaction<'_>,
+    event_rowid: u64,
+) -> Result<Option<LedgerEventV1>, SidecarError> {
+    transaction
+        .query_row(
+            "SELECT event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,\
+                    event_type,payload_schema_version,canonical_json_payload,timestamp \
+             FROM events WHERE rowid=?1;",
+            [sql_i64(event_rowid)?],
+            |row| {
+                Ok(LedgerEventV1 {
+                    event_id: row.get(0)?,
+                    operation_id: row.get(1)?,
+                    request_id: row.get(2)?,
+                    aggregate_type: row.get(3)?,
+                    aggregate_id: row.get(4)?,
+                    aggregate_sequence: row_u64(row, 5)?,
+                    event_type: row.get(6)?,
+                    payload_schema_version: row.get(7)?,
+                    canonical_json_payload: row.get(8)?,
+                    timestamp: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)
 }
 
 fn write_projection(
@@ -2079,6 +2522,14 @@ fn required_bool(record: &Map<String, Value>, field: &str) -> Result<bool, Sidec
 fn row_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
     let value: i64 = row.get(index)?;
     u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+}
+
+fn optional_row_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(index)?
+        .map(|value| {
+            u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+        })
+        .transpose()
 }
 
 fn sql_i64(value: u64) -> Result<i64, SidecarError> {

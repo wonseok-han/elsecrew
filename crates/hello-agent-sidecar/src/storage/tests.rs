@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
+type ChatSourceIndexRow = (i64, Option<String>, Option<i64>, Option<String>);
 
 fn database() -> (TempDir, PathBuf) {
     let root = tempfile::tempdir().expect("temporary directory");
@@ -33,6 +34,40 @@ fn event(
         canonical_json_payload: canonical_json_v1(payload).expect("canonical payload"),
         timestamp: timestamp.to_string(),
     }
+}
+
+fn team_message(chat_id: &str, message_id: &str, sequence: u64) -> Value {
+    json!({
+        "schemaVersion":1,
+        "messageId":message_id,
+        "chatId":chat_id,
+        "taskId":"task_v6",
+        "worktreeId":"worktree_v6",
+        "eventSequence":sequence,
+        "kind":"user",
+        "roleId":null,
+        "runId":null,
+        "text":"message",
+        "createdAt":"2026-08-28T13:20:00Z",
+    })
+}
+
+fn v6_chat_payload(
+    chat_id: &str,
+    project_id: &str,
+    durable_sequence: u64,
+    last_message: Value,
+) -> Value {
+    json!({
+        "chat_id":chat_id,
+        "project_id":project_id,
+        "worktree_id":"worktree_v6",
+        "workspace_identity":"workspace_v6",
+        "state":"draft",
+        "record":{},
+        "last_message":last_message,
+        "durable_event_sequence":durable_sequence,
+    })
 }
 
 fn ready(id: &str) -> ReadyPayloadV1 {
@@ -71,11 +106,11 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 }
 
 #[test]
-fn fresh_database_applies_exact_v5_and_reopens_idempotently() {
+fn fresh_database_applies_exact_v6_and_reopens_idempotently() {
     let (_root, path) = database();
     let storage = Storage::open(&path).expect("fresh storage");
     verify_schema(&storage.connection).expect("v1 schema");
-    verify_schema_v5_for_open(&storage.connection).expect("v5 schema");
+    verify_schema_v6_for_open(&storage.connection).expect("v6 schema");
     assert_eq!(
         storage
             .connection
@@ -96,7 +131,7 @@ fn fresh_database_applies_exact_v5_and_reopens_idempotently() {
                 |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
-        (STORAGE_LIFETIME_SCHEMA_VERSION_V5, "pending".to_string())
+        (STORAGE_LIFETIME_SCHEMA_VERSION_V6, "pending".to_string())
     );
     assert_eq!(
         storage
@@ -109,10 +144,20 @@ fn fresh_database_applies_exact_v5_and_reopens_idempotently() {
             .unwrap(),
         0
     );
+    assert_eq!(
+        storage
+            .connection
+            .query_row("SELECT count(*) FROM event_source_index;", [], |row| {
+                row.get::<_, u32>(0)
+            })
+            .unwrap(),
+        0,
+        "fresh migration must not backfill event history"
+    );
     drop(storage);
 
     let reopened = Storage::open(&path).expect("idempotent reopen");
-    verify_schema_v5_for_open(&reopened.connection).expect("reopened v5 schema");
+    verify_schema_v6_for_open(&reopened.connection).expect("reopened v6 schema");
 }
 
 #[test]
@@ -303,7 +348,7 @@ fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status()
         drop(storage);
 
         let mut upgraded = Storage::open(&path).expect("upgrade exact populated v2");
-        verify_schema_v5_for_open(&upgraded.connection).expect("exact v5");
+        verify_schema_v6_for_open(&upgraded.connection).expect("exact v6");
         assert_eq!(
             upgraded
                 .connection
@@ -313,7 +358,7 @@ fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status()
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap(),
-            state
+            "pending"
         );
         assert_eq!(
             upgraded
@@ -1116,7 +1161,7 @@ fn exact_v5_reopen_rejects_partial_extra_and_non_runnable_jobs() {
         ),
     ] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v5");
+        let storage = Storage::open_v5_for_test(&path).expect("fresh v5");
         storage.connection.execute_batch(mutation).unwrap();
         drop(storage);
         let error = Storage::open(&path).err().expect("non-exact v5 must fail");
@@ -1125,7 +1170,7 @@ fn exact_v5_reopen_rejects_partial_extra_and_non_runnable_jobs() {
 
     for state in ["attempting", "failed"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v5");
+        let storage = Storage::open_v5_for_test(&path).expect("fresh v5");
         let (failure_kind, completed_at) = if state == "failed" {
             (Some("database"), Some("2026-08-28T10:02:00Z"))
         } else {
@@ -1160,7 +1205,7 @@ fn exact_v5_reopen_rejects_partial_extra_and_non_runnable_jobs() {
         ("invalid_scan_exhausted", "verifyProjects", 20, 3, 2),
     ] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v5");
+        let storage = Storage::open_v5_for_test(&path).expect("fresh v5");
         storage
             .connection
             .execute_batch("PRAGMA ignore_check_constraints=ON;")
@@ -1184,6 +1229,798 @@ fn exact_v5_reopen_rejects_partial_extra_and_non_runnable_jobs() {
         let error = Storage::open(&path).err().expect("malformed v5 must fail");
         assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
     }
+}
+
+#[test]
+fn every_admissible_v5_job_migrates_to_exact_v6_at_index_source() {
+    let phases = [
+        "receipts",
+        "messages",
+        "workspaces",
+        "baselines",
+        "verifySource",
+        "verifyProjects",
+        "verifyChats",
+        "verifyRuns",
+        "verifyLocks",
+        "verifyAppInstances",
+        "verifyReceipts",
+        "verifyMessages",
+        "verifyWorkspaces",
+        "verifyBaselines",
+    ];
+    for state in ["pending", "attempting", "failed"] {
+        for phase in phases {
+            let (_root, path) = database();
+            let mut storage = populated_v5_storage(&path, "pending");
+            let failure_kind = (state == "failed").then_some("database");
+            let completed_at = (state == "failed").then_some("2026-08-28T13:02:00Z");
+            insert_v4_job(
+                &storage.connection,
+                &format!("v6_{state}_{phase}"),
+                state,
+                phase,
+                20,
+                3,
+                1,
+                failure_kind,
+                completed_at,
+            );
+            verify_schema_v5(&storage.connection).expect("admissible exact v5 pair");
+            let preserved_tables = preserved_table_rows(&storage.connection);
+            let guarded_schema = guarded_schema_objects(&storage.connection);
+            let compaction = storage.lifetime_status().unwrap().compaction;
+
+            migrate_v6(&mut storage.connection).expect("canonical v5 to v6 migration");
+            assert_eq!(
+                verify_schema_v6(&storage.connection).expect("exact structural v6"),
+                "pending"
+            );
+            let migrated: (
+                String,
+                String,
+                i64,
+                i64,
+                Option<String>,
+                String,
+                String,
+                Option<String>,
+            ) = storage
+                .connection
+                .query_row(
+                    "SELECT state,phase,after_scan_rowid,scan_exhausted,failure_kind,created_at,updated_at,completed_at FROM lifetime_materialization_job WHERE singleton=1;",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(migrated.0, state, "{state} {phase}: state");
+            assert_eq!(migrated.1, "indexSource", "{state} {phase}: phase");
+            assert_eq!((migrated.2, migrated.3), (0, 0), "{state} {phase}");
+            assert_eq!(migrated.4.as_deref(), failure_kind, "{state} {phase}");
+            assert_eq!(migrated.5, "2026-08-28T09:00:00Z", "{state} {phase}");
+            assert_eq!(migrated.6, "2026-08-28T09:01:00Z", "{state} {phase}");
+            assert_eq!(migrated.7.as_deref(), completed_at, "{state} {phase}");
+            assert_eq!(preserved_table_rows(&storage.connection), preserved_tables);
+            assert_eq!(guarded_schema_objects(&storage.connection), guarded_schema);
+            assert_eq!(storage.lifetime_status().unwrap().compaction, compaction);
+            assert_eq!(
+                storage
+                    .connection
+                    .query_row("SELECT count(*) FROM event_source_index;", [], |row| {
+                        row.get::<_, u32>(0)
+                    })
+                    .unwrap(),
+                0,
+                "migration must not backfill history"
+            );
+
+            match verify_schema_v6_for_open(&storage.connection) {
+                Ok(()) if state == "pending" => {}
+                Ok(()) => panic!("{state} {phase}: non-runnable v6 job reopened"),
+                Err(error) if state != "pending" => {
+                    assert_eq!(error.kind(), "storageSchemaMismatch")
+                }
+                Err(error) => panic!("{state} {phase}: pending v6 job must reopen: {error:?}"),
+            }
+        }
+    }
+
+    for previous_state in ["pending", "ready"] {
+        let (_root, path) = database();
+        let mut storage = populated_v5_storage(&path, previous_state);
+        let preserved_tables = preserved_table_rows(&storage.connection);
+        let guarded_schema = guarded_schema_objects(&storage.connection);
+        migrate_v6(&mut storage.connection).expect("migrate absent v5 pair");
+        verify_schema_v6_for_open(&storage.connection).expect("absent v6 pair reopens");
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT storage_schema_version,materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                    [],
+                    |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            (STORAGE_LIFETIME_SCHEMA_VERSION_V6, "pending".to_string())
+        );
+        assert_eq!(preserved_table_rows(&storage.connection), preserved_tables);
+        assert_eq!(guarded_schema_objects(&storage.connection), guarded_schema);
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT count(*) FROM event_source_index;", [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[test]
+fn v6_rebuild_failure_rolls_back_to_exact_v5() {
+    let (_root, path) = database();
+    let mut storage = populated_v5_storage(&path, "pending");
+    insert_v4_job(
+        &storage.connection,
+        "rollback_v6",
+        "failed",
+        "verifyBaselines",
+        20,
+        3,
+        1,
+        Some("database"),
+        Some("2026-08-28T13:02:00Z"),
+    );
+    let snapshot_before = database_snapshot(&storage.connection);
+    let invalid = MIGRATION_V6.replacen(
+        "DROP TABLE lifetime_materialization_job_v5;",
+        "INVALID SQL;\nDROP TABLE lifetime_materialization_job_v5;",
+        1,
+    );
+
+    let error = execute_migration(&mut storage.connection, &invalid, "v6 injected")
+        .expect_err("mid-rebuild failure must roll back");
+    assert_eq!(error.kind(), "migrationFailed");
+    assert!(storage.connection.is_autocommit());
+    verify_schema_v5(&storage.connection).expect("rollback restored exact v5");
+    assert_eq!(database_snapshot(&storage.connection), snapshot_before);
+}
+
+#[test]
+fn v6_preflight_rejects_unsafe_v5_without_mutating_a_byte() {
+    for (name, materialization_state, job) in [
+        ("materializing_meta", "materializing", None),
+        ("failed_meta", "failed", None),
+        (
+            "ready_with_job",
+            "ready",
+            Some(("pending", "receipts", 20_i64, 0_i64, 0_i64)),
+        ),
+        (
+            "bad_phase",
+            "pending",
+            Some(("pending", "verify", 20, 0, 0)),
+        ),
+        (
+            "cursor_past_cutoff",
+            "pending",
+            Some(("pending", "verifySource", 20, 21, 0)),
+        ),
+        (
+            "bad_exhaustion",
+            "pending",
+            Some(("pending", "verifyProjects", 20, 3, 2)),
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v5_storage(&path, "pending");
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=ON;")
+            .unwrap();
+        storage
+            .connection
+            .execute(
+                "UPDATE storage_schema_meta SET materialization_state=?1 WHERE singleton=1;",
+                [materialization_state],
+            )
+            .unwrap();
+        if let Some((state, phase, cutoff, after, exhausted)) = job {
+            insert_v4_job(
+                &storage.connection,
+                name,
+                state,
+                phase,
+                cutoff,
+                after,
+                exhausted,
+                None,
+                None,
+            );
+        }
+        storage
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
+        assert_v6_migration_rejected_without_mutation(&mut storage, name);
+    }
+
+    for (name, mutation) in [
+        ("partial", "DROP INDEX maintenance_jobs_status_created;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v5(value TEXT) STRICT;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v5_storage(&path, "pending");
+        storage.connection.execute_batch(mutation).unwrap();
+        assert_v6_migration_rejected_without_mutation(&mut storage, name);
+    }
+}
+
+#[test]
+fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
+    for (name, mutation) in [
+        ("partial", "DROP TABLE event_source_index;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v6(value TEXT) STRICT;",
+        ),
+        (
+            "trigger_tamper",
+            "DROP TRIGGER event_source_index_requires_exact_event;",
+        ),
+        (
+            "index_tamper",
+            "DROP INDEX event_source_index_message_unique;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v6");
+        storage.connection.execute_batch(mutation).unwrap();
+        drop(storage);
+        let error = Storage::open(&path).err().expect("non-exact v6 must fail");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    }
+
+    for state in ["attempting", "failed"] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v6");
+        let (failure_kind, completed_at) = if state == "failed" {
+            (Some("database"), Some("2026-08-28T13:02:00Z"))
+        } else {
+            (None, None)
+        };
+        insert_v4_job(
+            &storage.connection,
+            state,
+            state,
+            "indexSource",
+            20,
+            0,
+            0,
+            failure_kind,
+            completed_at,
+        );
+        verify_schema_v6(&storage.connection).expect("structural v6 retains evidence");
+        drop(storage);
+        let error = Storage::open(&path)
+            .err()
+            .expect("non-runnable v6 must fail open");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");
+        assert_eq!(
+            error.detail(),
+            "storage lifetime materialization state is invalid"
+        );
+    }
+}
+
+#[test]
+fn v6_append_indexes_message_introduction_and_repeated_snapshot_transitions() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v6");
+    storage
+        .connection
+        .execute(
+            "UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1;",
+            [],
+        )
+        .unwrap();
+    storage
+        .append_event(&event(
+            "evt_v6_project",
+            "op_v6_project",
+            "project",
+            "project_v6",
+            1,
+            json!({"canonical_path":"/fixture/v6","project_id":"project_v6"}),
+            "2026-08-28T13:19:59Z",
+        ))
+        .unwrap();
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "pending"
+    );
+    insert_v4_job(
+        &storage.connection,
+        "append_preserves_v6_job",
+        "pending",
+        "indexSource",
+        1,
+        0,
+        0,
+        None,
+        None,
+    );
+    let job_before = table_rows(&storage.connection, "lifetime_materialization_job");
+
+    let chat_events = [
+        event(
+            "evt_v6_chat_1",
+            "op_v6_chat_1",
+            "chat",
+            "chat_v6",
+            1,
+            v6_chat_payload(
+                "chat_v6",
+                "project_v6",
+                1,
+                team_message("chat_v6", "message_a", 1),
+            ),
+            "2026-08-28T13:20:00Z",
+        ),
+        event(
+            "evt_v6_chat_2",
+            "op_v6_chat_2",
+            "chat",
+            "chat_v6",
+            2,
+            v6_chat_payload(
+                "chat_v6",
+                "project_v6",
+                1,
+                team_message("chat_v6", "message_a", 1),
+            ),
+            "2026-08-28T13:20:01Z",
+        ),
+        event(
+            "evt_v6_chat_3",
+            "op_v6_chat_3",
+            "chat",
+            "chat_v6",
+            3,
+            v6_chat_payload("chat_v6", "project_v6", 1, Value::Null),
+            "2026-08-28T13:20:02Z",
+        ),
+        event(
+            "evt_v6_chat_4",
+            "op_v6_chat_4",
+            "chat",
+            "chat_v6",
+            4,
+            v6_chat_payload(
+                "chat_v6",
+                "project_v6",
+                2,
+                team_message("chat_v6", "message_b", 2),
+            ),
+            "2026-08-28T13:20:03Z",
+        ),
+    ];
+    for event in &chat_events {
+        assert_eq!(
+            storage.append_event(event).unwrap(),
+            AppendOutcome::Committed
+        );
+    }
+    assert_eq!(
+        table_rows(&storage.connection, "lifetime_materialization_job"),
+        job_before,
+        "append must preserve the pending job evidence and cursor"
+    );
+
+    let rows: Vec<ChatSourceIndexRow> = storage
+        .connection
+        .prepare(
+            "SELECT aggregate_sequence,introduced_message_id,chat_durable_sequence,chat_snapshot_message_id \
+             FROM event_source_index WHERE aggregate_type='chat' ORDER BY aggregate_sequence;",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                1,
+                Some("message_a".to_string()),
+                Some(1),
+                Some("message_a".to_string())
+            ),
+            (2, None, Some(1), Some("message_a".to_string())),
+            (3, None, Some(1), None),
+            (
+                4,
+                Some("message_b".to_string()),
+                Some(2),
+                Some("message_b".to_string())
+            ),
+        ]
+    );
+    let project_fields: (Option<String>, Option<i64>, Option<String>) = storage
+        .connection
+        .query_row(
+            "SELECT introduced_message_id,chat_durable_sequence,chat_snapshot_message_id \
+             FROM event_source_index WHERE event_id='evt_v6_project';",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(project_fields, (None, None, None));
+}
+
+#[test]
+fn v6_chat_append_rejects_missing_predecessor_and_invalid_provenance_atomically() {
+    let (_root, path) = database();
+    let mut storage = populated_v5_storage(&path, "pending");
+    migrate_v6(&mut storage.connection).expect("v5 to v6");
+    let events_before = table_rows(&storage.connection, "events");
+    let error = storage
+        .append_event(&event(
+            "evt_missing_predecessor",
+            "op_missing_predecessor",
+            "chat",
+            "chat_v2",
+            2,
+            v6_chat_payload(
+                "chat_v2",
+                "project_v2",
+                1,
+                team_message("chat_v2", "message_after_migration", 1),
+            ),
+            "2026-08-28T13:30:00Z",
+        ))
+        .expect_err("raw predecessor event must not substitute for exact source index");
+    assert_eq!(error.kind(), "storageContractViolation");
+    assert_eq!(table_rows(&storage.connection, "events"), events_before);
+    assert_eq!(
+        storage
+            .connection
+            .query_row("SELECT count(*) FROM event_source_index;", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+
+    for (name, payload) in [
+        (
+            "wrong_chat",
+            v6_chat_payload(
+                "chat_invalid",
+                "project_v2",
+                1,
+                team_message("different_chat", "message_wrong_chat", 1),
+            ),
+        ),
+        (
+            "wrong_sequence",
+            v6_chat_payload(
+                "chat_invalid",
+                "project_v2",
+                1,
+                team_message("chat_invalid", "message_wrong_sequence", 2),
+            ),
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut fresh = Storage::open(&path).expect("fresh v6");
+        let error = fresh
+            .append_event(&event(
+                &format!("evt_{name}"),
+                &format!("op_{name}"),
+                "chat",
+                "chat_invalid",
+                1,
+                payload,
+                "2026-08-28T13:30:01Z",
+            ))
+            .expect_err("invalid TeamMessage provenance must fail");
+        assert_eq!(error.kind(), "storageContractViolation", "{name}");
+        assert_eq!(
+            fresh
+                .connection
+                .query_row("SELECT count(*) FROM events;", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "{name}"
+        );
+        assert_eq!(
+            fresh
+                .connection
+                .query_row("SELECT count(*) FROM event_source_index;", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn v6_chat_sequence_one_uses_synthetic_zero_and_predecessor_tamper_fails_in_rust() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v6");
+    storage
+        .append_event(&event(
+            "evt_zero_project",
+            "op_zero_project",
+            "project",
+            "project_zero",
+            1,
+            json!({"canonical_path":"/fixture/zero","project_id":"project_zero"}),
+            "2026-08-28T13:34:59Z",
+        ))
+        .unwrap();
+    let zero = event(
+        "evt_zero_chat_1",
+        "op_zero_chat_1",
+        "chat",
+        "chat_zero",
+        1,
+        v6_chat_payload("chat_zero", "project_zero", 0, Value::Null),
+        "2026-08-28T13:35:00Z",
+    );
+    assert_eq!(
+        storage.append_event(&zero).unwrap(),
+        AppendOutcome::Committed
+    );
+    let zero_index: (Option<String>, Option<i64>, Option<String>) = storage
+        .connection
+        .query_row(
+            "SELECT introduced_message_id,chat_durable_sequence,chat_snapshot_message_id \
+             FROM event_source_index WHERE event_id='evt_zero_chat_1';",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(zero_index, (None, Some(0), None));
+
+    let introduced = event(
+        "evt_zero_chat_2",
+        "op_zero_chat_2",
+        "chat",
+        "chat_zero",
+        2,
+        v6_chat_payload(
+            "chat_zero",
+            "project_zero",
+            1,
+            team_message("chat_zero", "message_zero", 1),
+        ),
+        "2026-08-28T13:35:01Z",
+    );
+    assert_eq!(
+        storage.append_event(&introduced).unwrap(),
+        AppendOutcome::Committed
+    );
+    storage
+        .connection
+        .execute_batch(
+            "DROP TRIGGER event_source_index_append_only_update;\
+             UPDATE event_source_index SET chat_snapshot_message_id='tampered' \
+             WHERE event_id='evt_zero_chat_2';",
+        )
+        .unwrap();
+    let events_before = table_rows(&storage.connection, "events");
+    let error = storage
+        .append_event(&event(
+            "evt_zero_chat_3",
+            "op_zero_chat_3",
+            "chat",
+            "chat_zero",
+            3,
+            v6_chat_payload(
+                "chat_zero",
+                "project_zero",
+                1,
+                team_message("chat_zero", "message_zero", 1),
+            ),
+            "2026-08-28T13:35:02Z",
+        ))
+        .expect_err("Rust predecessor provenance must reject a corrupted index row");
+    assert_eq!(error.kind(), "storageContractViolation");
+    assert_eq!(table_rows(&storage.connection, "events"), events_before);
+}
+
+#[test]
+fn v6_chat_append_rejects_gap_changed_snapshot_and_duplicate_message_identity() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v6");
+    storage
+        .append_event(&event(
+            "evt_transition_project",
+            "op_transition_project",
+            "project",
+            "project_transition",
+            1,
+            json!({
+                "canonical_path":"/fixture/transition",
+                "project_id":"project_transition"
+            }),
+            "2026-08-28T13:39:59Z",
+        ))
+        .unwrap();
+    let first = event(
+        "evt_transition_1",
+        "op_transition_1",
+        "chat",
+        "chat_transition",
+        1,
+        v6_chat_payload(
+            "chat_transition",
+            "project_transition",
+            1,
+            team_message("chat_transition", "message_transition", 1),
+        ),
+        "2026-08-28T13:40:00Z",
+    );
+    assert_eq!(
+        storage.append_event(&first).unwrap(),
+        AppendOutcome::Committed
+    );
+    let rows_before = table_rows(&storage.connection, "event_source_index");
+
+    for (name, durable, message_id, message_sequence) in [
+        ("gap", 3, "message_gap", 3),
+        ("changed_snapshot", 1, "message_changed", 1),
+    ] {
+        let error = storage
+            .append_event(&event(
+                &format!("evt_{name}"),
+                &format!("op_{name}"),
+                "chat",
+                "chat_transition",
+                2,
+                v6_chat_payload(
+                    "chat_transition",
+                    "project_transition",
+                    durable,
+                    team_message("chat_transition", message_id, message_sequence),
+                ),
+                "2026-08-28T13:40:01Z",
+            ))
+            .expect_err("invalid transition must fail");
+        assert_eq!(error.kind(), "storageContractViolation", "{name}");
+        assert_eq!(
+            table_rows(&storage.connection, "event_source_index"),
+            rows_before,
+            "{name}"
+        );
+    }
+
+    let duplicate = first.clone();
+    assert_eq!(
+        storage.append_event(&duplicate).unwrap(),
+        AppendOutcome::DuplicateNoOp
+    );
+    let mut conflict = first;
+    conflict.canonical_json_payload = canonical_json_v1(v6_chat_payload(
+        "chat_transition",
+        "project_transition",
+        1,
+        Value::Null,
+    ))
+    .unwrap();
+    assert_eq!(
+        storage.append_event(&conflict).unwrap(),
+        AppendOutcome::Conflict
+    );
+    assert_eq!(
+        table_rows(&storage.connection, "event_source_index"),
+        rows_before
+    );
+
+    let identity_conflict = event(
+        "evt_identity_conflict",
+        "op_identity_conflict",
+        "chat",
+        "chat_other",
+        1,
+        v6_chat_payload(
+            "chat_other",
+            "project_other",
+            1,
+            team_message("chat_other", "message_transition", 1),
+        ),
+        "2026-08-28T13:40:02Z",
+    );
+    let error = storage
+        .append_event(&identity_conflict)
+        .expect_err("message introduction identity must be globally unique");
+    assert_eq!(error.kind(), "databaseFailure");
+    assert_eq!(
+        table_rows(&storage.connection, "event_source_index"),
+        rows_before
+    );
+}
+
+#[test]
+fn v6_injected_append_failure_rolls_back_event_index_projection_and_readiness() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v6");
+    storage
+        .connection
+        .execute(
+            "UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1;",
+            [],
+        )
+        .unwrap();
+    let project = event(
+        "evt_v6_rollback",
+        "op_v6_rollback",
+        "project",
+        "project_v6_rollback",
+        1,
+        json!({"canonical_path":"/fixture/v6","project_id":"project_v6_rollback"}),
+        "2026-08-28T13:50:00Z",
+    );
+    let error = storage
+        .append_event_with_failure(
+            &project,
+            Some(AppendFailurePoint::AfterEventInsertBeforeProjection),
+        )
+        .expect_err("injected failure must roll back all append state");
+    assert_eq!(error.kind(), "injectedFailure");
+    for table in ["events", "event_source_index", "projects"] {
+        assert_eq!(
+            storage
+                .connection
+                .query_row(&format!("SELECT count(*) FROM {table};"), [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT materialization_state FROM storage_schema_meta WHERE singleton=1;",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "ready"
+    );
 }
 
 #[test]
@@ -1437,7 +2274,8 @@ fn database_symlink_is_rejected_without_touching_target() {
 fn drop_lifetime_schema(connection: &Connection) {
     connection
         .execute_batch(
-            "DROP TABLE lifetime_materialization_job;\
+            "DROP TABLE event_source_index;\
+             DROP TABLE lifetime_materialization_job;\
              DROP TABLE maintenance_jobs;\
              DROP TABLE prepared_workspaces;\
              DROP TABLE chat_messages;\
@@ -1537,6 +2375,13 @@ fn populated_v4_storage(path: &Path, state: &str) -> Storage {
     storage
 }
 
+fn populated_v5_storage(path: &Path, state: &str) -> Storage {
+    let mut storage = populated_v4_storage(path, state);
+    migrate_v5(&mut storage.connection).expect("migrate populated fixture to v5");
+    verify_schema_v5(&storage.connection).expect("exact populated v5 fixture");
+    storage
+}
+
 fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
     storage.checkpoint().expect("checkpoint unsafe v4 fixture");
     let snapshot_before = database_snapshot(&storage.connection);
@@ -1556,12 +2401,41 @@ fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &s
     );
 }
 
+fn assert_v6_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
+    storage.checkpoint().expect("checkpoint unsafe v5 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read unsafe v5 fixture");
+
+    let error = migrate_v6(&mut storage.connection).expect_err("unsafe v5 must fail preflight");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(
+        database_snapshot(&storage.connection),
+        snapshot_before,
+        "{name}"
+    );
+    assert_eq!(
+        fs::read(storage.path()).expect("reread unsafe v5 fixture"),
+        bytes_before,
+        "{name}"
+    );
+}
+
 fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
     schema_objects(connection)
         .unwrap()
         .into_iter()
         .filter(|(_, name, _, _)| {
-            name != "storage_schema_meta" && name != "lifetime_materialization_job"
+            ![
+                "storage_schema_meta",
+                "lifetime_materialization_job",
+                "event_source_index",
+                "event_source_index_aggregate_latest",
+                "event_source_index_message_unique",
+                "event_source_index_requires_exact_event",
+                "event_source_index_append_only_update",
+                "event_source_index_append_only_delete",
+            ]
+            .contains(&name.as_str())
         })
         .collect()
 }
