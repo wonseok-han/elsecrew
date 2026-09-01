@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 sidecar consumer C1A)
+
+- **exact V7 open/migration 소비**: `Storage::open`이 fresh/V1~V6를 exact predecessor schema와 기존 reopen policy로 검증한 뒤 immutable fixture V6→V7 migration을 원자 적용하고, V7 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V6의 `materialization_state`와 present lifetime job, terminal maintenance history는 byte-exact 보존하며 history backfill·상태 자동 변환·frozen message 생성은 하지 않는다. attempting lifetime job과 pending/running lossless-compaction job은 migration mutation 전에 거부하고, injected migration failure는 전체 schema/row snapshot을 exact V6로 rollback한다.
+- **C1B 전 fail-closed 경계**: C1A는 prefix·frozen source·delete authority가 모두 비어 있고 active compaction이 없는 uncompacted V7만 runnable로 허용한다. 이 durable evidence가 하나라도 있으면 reopen·append·bounded lifetime worker가 mutation 전에 중단한다. 정상 V7 append는 기존 단일 transaction의 event/source-index/projection/readiness invalidation을 그대로 사용하고, 기존 16단계 worker의 100행·1 MiB·keyset·cancel/commit-uncertainty 계약도 유지한다. compaction phase/worker, runtime DDL, delete authority 생성, 실제 event/source deletion, scheduler·wire/status·cleanup/checkpoint/VACUUM은 활성화하지 않았다.
+- **회귀·검증**: fresh/V1~V6→V7, exact V7 no-op reopen, 네 V6 admissible pair와 terminal history 보존, attempting/active/partial/extra mutation-zero preflight, migration rollback, schema tamper, durable authority/frozen evidence, V7 append rollback과 bounded worker fence를 추가했다. focused storage 37개와 lifetime 40개, sidecar 전체 148개+stdio 10개(1 ignored), protocol 전체 41개, Node lifetime golden 16개, sidecar scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. `pnpm run m5:test:bounded-storage`는 worktree dependency 설치가 격리 네트워크의 npm `ENOTFOUND`로 중단됐지만 그 스크립트의 exact Node/Rust focused set은 직접 실행해 모두 통과했다. 다음은 독립 코드 리뷰·QA 뒤 C1B compaction phase/deletion-aware replay를 별도 계약으로 구현하는 것이며, Windows와 실제 삭제 시험은 수행하지 않았다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 single-running-job P1 수정)
 
 - **schema가 단일 running job 강제**: 최초 V7 계약은 delete-authority가 생긴 뒤에만 서로 다른 running job을 배제해 arm 직후 authority 0 상태에서는 여러 `losslessCompaction` running 행이 공존할 수 있었다. V7 one-time migration에 `job_kind='losslessCompaction' AND state='running'` partial unique index를 추가해 INSERT와 pending→running UPDATE 모두 authority 전에 SQLite가 거부하도록 고정했다.

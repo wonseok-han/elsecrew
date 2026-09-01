@@ -15,7 +15,8 @@ use hello_agent_protocol::storage_lifetime_v1::{
     OPERATION_RECEIPT_DIGEST_ALGORITHM_V2, OPERATION_RECEIPT_DIGEST_FORMAT_V2,
     OPERATION_RECEIPT_DIGEST_VERSION_V2,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_STATUS_SCHEMA_VERSION_V1,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_LIFETIME_SCHEMA_VERSION_V7,
+    STORAGE_STATUS_SCHEMA_VERSION_V1,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, LedgerEventV1, OperationDecisionV1, ProjectionStateV1,
@@ -662,6 +663,25 @@ fn next_phase(phase: StorageLifetimePhaseV4) -> Option<StorageLifetimePhaseV4> {
     }
 }
 
+fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), SidecarError> {
+    let version: u32 = connection
+        .query_row(
+            "SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| materialization_error("storage schema version is unreadable"))?;
+    match version {
+        STORAGE_LIFETIME_SCHEMA_VERSION_V6 => Ok(()),
+        STORAGE_LIFETIME_SCHEMA_VERSION_V7 => {
+            crate::storage::verify_v7_uncompacted_runtime_state(connection)
+        }
+        _ => Err(materialization_error(
+            "bounded materialization requires exact storage v6 or v7",
+        )),
+    }
+}
+
 pub(crate) fn materialize_lifetime_batch(
     connection: &mut Connection,
     cancellation: &mut dyn MaterializationCancellation,
@@ -676,6 +696,7 @@ pub(crate) fn materialize_lifetime_batch(
     let arm = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_error)?;
+    verify_bounded_storage_runtime_state(&arm)?;
     let mut job = match load_materialization_pair(&arm)? {
         MaterializationPair::Ready => {
             let cutoff_event_rowid = max_event_rowid(&arm)?;
@@ -825,6 +846,7 @@ fn run_bounded_batch(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_error)?;
+    verify_bounded_storage_runtime_state(&transaction)?;
     match load_materialization_pair(&transaction)? {
         MaterializationPair::Attempting(current)
             if current.job_id == job.job_id && current.cursor() == job.cursor() => {}
@@ -2267,6 +2289,7 @@ fn finalize_materialization(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_error)?;
+    verify_bounded_storage_runtime_state(&transaction)?;
     let job = match load_materialization_pair(&transaction)? {
         MaterializationPair::Pending(job)
             if job.phase == StorageLifetimePhaseV4::VerifyBaselines && job.scan_exhausted =>

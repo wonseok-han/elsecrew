@@ -13,7 +13,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     validate_storage_lifetime_reopen_pair_v3, validate_storage_lifetime_reopen_pair_v4,
     StorageStatusV1, STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
     STORAGE_LIFETIME_SCHEMA_VERSION_V4, STORAGE_LIFETIME_SCHEMA_VERSION_V5,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V6,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_LIFETIME_SCHEMA_VERSION_V7,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, recover_unclean_shutdown_v1, replay_ledger_v1,
@@ -40,6 +40,8 @@ const MIGRATION_V5: &str =
     include_str!("../../../tests/fixtures/m5/storage-v5/migration-v4-to-v5.sql");
 const MIGRATION_V6: &str =
     include_str!("../../../tests/fixtures/m5/storage-v6/migration-v5-to-v6.sql");
+const MIGRATION_V7: &str =
+    include_str!("../../../tests/fixtures/m5/storage-v7/migration-v6-to-v7.sql");
 type SchemaObject = (String, String, String, Option<String>);
 type LifetimeJobRow = (
     u32,
@@ -145,7 +147,9 @@ impl Storage {
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
                 migrate_v6(&mut connection)?;
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1) => {
                 verify_schema_v2(&connection)?;
@@ -156,7 +160,9 @@ impl Storage {
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
                 migrate_v6(&mut connection)?;
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3) => {
                 verify_schema_v3(&connection)?;
@@ -165,22 +171,33 @@ impl Storage {
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
                 migrate_v6(&mut connection)?;
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4) => {
                 verify_schema_v4(&connection)?;
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
                 migrate_v6(&mut connection)?;
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {
                 verify_schema_v5(&connection)?;
                 migrate_v6(&mut connection)?;
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
-                verify_schema_v6_for_open(&connection)?;
+                verify_schema_v6(&connection)?;
+                migrate_v7(&mut connection)?;
+                verify_schema_v7_for_open(&connection)?;
+            }
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
+                verify_schema_v7_for_open(&connection)?;
             }
             Some(_) => {
                 return Err(SidecarError::new(
@@ -290,6 +307,14 @@ impl Storage {
         let mut storage = Self::open_v4_for_test(path)?;
         migrate_v5(&mut storage.connection)?;
         verify_schema_v5_for_open(&storage.connection)?;
+        Ok(storage)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_v6_for_test(path: &Path) -> Result<Self, SidecarError> {
+        let mut storage = Self::open_v5_for_test(path)?;
+        migrate_v6(&mut storage.connection)?;
+        verify_schema_v6_for_open(&storage.connection)?;
         Ok(storage)
     }
 
@@ -1062,6 +1087,39 @@ fn migrate_v6(connection: &mut Connection) -> Result<(), SidecarError> {
     execute_migration(connection, MIGRATION_V6, "v6")
 }
 
+fn migrate_v7(connection: &mut Connection) -> Result<(), SidecarError> {
+    if schema_objects(connection)? != reference_schema_v6()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema is not the exact storage v6 migration base",
+        ));
+    }
+    verify_schema_v6(connection)?;
+    let attempting_materialization: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM lifetime_materialization_job \
+             WHERE singleton=1 AND state='attempting');",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_materialization_snapshot_error())?;
+    let active_compaction: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM maintenance_jobs \
+             WHERE job_kind='losslessCompaction' AND state IN ('pending','running'));",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_compaction_state_error())?;
+    if attempting_materialization {
+        return Err(storage_materialization_snapshot_error());
+    }
+    if active_compaction {
+        return Err(storage_compaction_state_error());
+    }
+    execute_migration(connection, MIGRATION_V7, "v7")
+}
+
 fn execute_migration(
     connection: &mut Connection,
     migration: &str,
@@ -1635,6 +1693,7 @@ fn verify_v5_materialization_snapshot(
     Ok(())
 }
 
+#[cfg(test)]
 fn verify_schema_v6_for_open(connection: &Connection) -> Result<(), SidecarError> {
     let materialization_state = verify_schema_v6(connection)?;
     verify_v6_materialization_snapshot(connection, &materialization_state, true)
@@ -1791,10 +1850,109 @@ fn verify_v6_materialization_snapshot(
     Ok(())
 }
 
+fn verify_schema_v7_for_open(connection: &Connection) -> Result<(), SidecarError> {
+    let materialization_state = verify_schema_v7(connection)?;
+    verify_v6_materialization_snapshot(connection, &materialization_state, true)?;
+    verify_v7_uncompacted_runtime_state(connection)
+}
+
+fn verify_schema_v7(connection: &Connection) -> Result<String, SidecarError> {
+    let metadata: (u32, u32, String, String, String) = connection
+        .query_row(
+            "SELECT storage_schema_version,protocol_version,migration_state,materialization_state,migrated_at \
+             FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v7 metadata is missing or unreadable",
+            )
+        })?;
+    let metadata_count: u32 = connection
+        .query_row("SELECT count(*) FROM storage_schema_meta;", [], |row| {
+            row.get(0)
+        })
+        .map_err(sqlite_error)?;
+    let migrated_at_valid: Option<bool> = connection
+        .query_row(
+            "SELECT migrated_at = strftime('%Y-%m-%d %H:%M:%S', migrated_at) \
+             FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v7 migration timestamp is unreadable",
+            )
+        })?;
+    let foreign_keys: u32 = connection
+        .query_row("PRAGMA foreign_keys;", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V7
+        || metadata.1 != PROTOCOL_VERSION
+        || metadata.2 != "ready"
+        || metadata_count != 1
+        || migrated_at_valid != Some(true)
+        || foreign_keys != 1
+    {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "storage schema v7 metadata or foreign-key enforcement does not match the supported migration",
+        ));
+    }
+    if schema_objects(connection)? != reference_schema_v7()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema does not exactly match the storage v7 golden schema",
+        ));
+    }
+    verify_v6_materialization_snapshot(connection, &metadata.3, false)?;
+    Ok(metadata.3)
+}
+
+pub(crate) fn verify_v7_uncompacted_runtime_state(
+    connection: &Connection,
+) -> Result<(), SidecarError> {
+    let state: (u32, u32, u32, u32) = connection
+        .query_row(
+            "SELECT \
+               (SELECT count(*) FROM ledger_compaction_prefixes),\
+               (SELECT count(*) FROM frozen_message_sources),\
+               (SELECT count(*) FROM ledger_compaction_delete_authority),\
+               (SELECT count(*) FROM maintenance_jobs \
+                WHERE job_kind='losslessCompaction' AND state IN ('pending','running'));",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| storage_compaction_state_error())?;
+    if state != (0, 0, 0, 0) {
+        return Err(storage_compaction_state_error());
+    }
+    Ok(())
+}
+
 fn storage_materialization_snapshot_error() -> SidecarError {
     SidecarError::new(
         "storageSchemaMismatch",
         "storage lifetime materialization state is invalid",
+    )
+}
+
+fn storage_compaction_state_error() -> SidecarError {
+    SidecarError::new(
+        "storageSchemaMismatch",
+        "storage compaction state is not runnable before the C1B consumer",
     )
 }
 
@@ -1860,6 +2018,22 @@ fn reference_schema_v6() -> Result<Vec<SchemaObject>, SidecarError> {
     execute_migration(&mut connection, MIGRATION_V4, "reference v4")?;
     execute_migration(&mut connection, MIGRATION_V5, "reference v5")?;
     execute_migration(&mut connection, MIGRATION_V6, "reference v6")?;
+    schema_objects(&connection)
+}
+
+fn reference_schema_v7() -> Result<Vec<SchemaObject>, SidecarError> {
+    let mut connection = Connection::open_in_memory().map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V1)
+        .map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V2)
+        .map_err(sqlite_error)?;
+    execute_migration(&mut connection, MIGRATION_V3, "reference v3")?;
+    execute_migration(&mut connection, MIGRATION_V4, "reference v4")?;
+    execute_migration(&mut connection, MIGRATION_V5, "reference v5")?;
+    execute_migration(&mut connection, MIGRATION_V6, "reference v6")?;
+    execute_migration(&mut connection, MIGRATION_V7, "reference v7")?;
     schema_objects(&connection)
 }
 
@@ -2090,6 +2264,10 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         .map_err(sqlite_error)?;
     match storage_schema_version(transaction)? {
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
+            insert_v6_source_index_and_invalidate_ready(transaction, event)?;
+        }
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
+            verify_v7_uncompacted_runtime_state(transaction)?;
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
         None

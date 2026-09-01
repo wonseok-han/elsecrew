@@ -106,11 +106,11 @@ fn migration_failure_rolls_back_every_table_and_can_retry() {
 }
 
 #[test]
-fn fresh_database_applies_exact_v6_and_reopens_idempotently() {
+fn fresh_database_applies_exact_v7_and_reopens_idempotently() {
     let (_root, path) = database();
     let storage = Storage::open(&path).expect("fresh storage");
     verify_schema(&storage.connection).expect("v1 schema");
-    verify_schema_v6_for_open(&storage.connection).expect("v6 schema");
+    verify_schema_v7_for_open(&storage.connection).expect("v7 schema");
     assert_eq!(
         storage
             .connection
@@ -131,7 +131,7 @@ fn fresh_database_applies_exact_v6_and_reopens_idempotently() {
                 |row| Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?)),
             )
             .unwrap(),
-        (STORAGE_LIFETIME_SCHEMA_VERSION_V6, "pending".to_string())
+        (STORAGE_LIFETIME_SCHEMA_VERSION_V7, "pending".to_string())
     );
     assert_eq!(
         storage
@@ -154,10 +154,25 @@ fn fresh_database_applies_exact_v6_and_reopens_idempotently() {
         0,
         "fresh migration must not backfill event history"
     );
+    assert_eq!(
+        storage
+            .connection
+            .query_row(
+                "SELECT \
+                   (SELECT count(*) FROM ledger_compaction_prefixes) + \
+                   (SELECT count(*) FROM frozen_message_sources) + \
+                   (SELECT count(*) FROM ledger_compaction_delete_authority);",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        0,
+        "fresh migration must not invent compaction provenance or authority"
+    );
     drop(storage);
 
     let reopened = Storage::open(&path).expect("idempotent reopen");
-    verify_schema_v6_for_open(&reopened.connection).expect("reopened v6 schema");
+    verify_schema_v7_for_open(&reopened.connection).expect("reopened v7 schema");
 }
 
 #[test]
@@ -179,6 +194,11 @@ fn populated_v1_migrates_without_changing_rows_triggers_or_materializing() {
         .register_app_instance(&ready("sidecar_v1"))
         .expect("app instance");
     drop_lifetime_schema(&storage.connection);
+    assert_eq!(
+        schema_objects(&storage.connection).unwrap(),
+        reference_schema_v1().unwrap(),
+        "test fixture must restore exact v1 schema"
+    );
     let tables = [
         "schema_meta",
         "app_instances",
@@ -348,7 +368,7 @@ fn populated_v2_pending_and_ready_upgrade_preserves_all_rows_guards_and_status()
         drop(storage);
 
         let mut upgraded = Storage::open(&path).expect("upgrade exact populated v2");
-        verify_schema_v6_for_open(&upgraded.connection).expect("exact v6");
+        verify_schema_v7_for_open(&upgraded.connection).expect("exact v7");
         assert_eq!(
             upgraded
                 .connection
@@ -1472,6 +1492,204 @@ fn v6_preflight_rejects_unsafe_v5_without_mutating_a_byte() {
 }
 
 #[test]
+fn v7_migration_preserves_every_admissible_v6_pair_and_all_existing_rows() {
+    for (name, materialization_state, job_state) in [
+        ("ready_absent", "ready", None),
+        ("pending_absent", "pending", None),
+        ("pending_pending", "pending", Some("pending")),
+        ("pending_failed", "pending", Some("failed")),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v6_storage(&path, materialization_state);
+        if materialization_state == "ready" {
+            storage
+                .connection
+                .execute(
+                    "UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1;",
+                    [],
+                )
+                .unwrap();
+        }
+        if let Some(state) = job_state {
+            let (failure_kind, completed_at) = if state == "failed" {
+                (Some("database"), Some("2026-08-28T13:02:00Z"))
+            } else {
+                (None, None)
+            };
+            insert_v4_job(
+                &storage.connection,
+                name,
+                state,
+                "indexSource",
+                20,
+                0,
+                0,
+                failure_kind,
+                completed_at,
+            );
+        }
+        storage
+            .connection
+            .execute(
+                "INSERT INTO maintenance_jobs(\
+                   job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                   failure_kind,created_at,updated_at\
+                 ) VALUES (?1,'losslessCompaction','succeeded','{}',\
+                   '2026-08-28T13:00:00Z','2026-08-28T13:01:00Z',\
+                   '2026-08-28T13:01:00Z',NULL,'2026-08-28T13:00:00Z',\
+                   '2026-08-28T13:01:00Z');",
+                [format!("maintenance_{name}")],
+            )
+            .unwrap();
+        verify_schema_v6(&storage.connection).expect("admissible exact v6 pair");
+        let meta_before = table_rows(&storage.connection, "storage_schema_meta");
+        let job_before = table_rows(&storage.connection, "lifetime_materialization_job");
+        let maintenance_before = table_rows(&storage.connection, "maintenance_jobs");
+        let source_index_before = table_rows(&storage.connection, "event_source_index");
+        let preserved_before = preserved_table_rows(&storage.connection);
+
+        migrate_v7(&mut storage.connection).expect("exact v6 to v7 migration");
+        assert_eq!(
+            verify_schema_v7(&storage.connection).expect("exact structural v7"),
+            materialization_state,
+            "{name}"
+        );
+        let meta_after = table_rows(&storage.connection, "storage_schema_meta");
+        assert_eq!(meta_after.len(), 1, "{name}");
+        assert_eq!(meta_after[0][3], meta_before[0][3], "{name}: state");
+        assert_eq!(
+            meta_after[0][4], meta_before[0][4],
+            "{name}: materialization state"
+        );
+        assert_eq!(
+            meta_after[0][5], meta_before[0][5],
+            "{name}: migration timestamp"
+        );
+        assert_eq!(
+            table_rows(&storage.connection, "lifetime_materialization_job"),
+            job_before,
+            "{name}: job evidence"
+        );
+        assert_eq!(
+            table_rows(&storage.connection, "maintenance_jobs"),
+            maintenance_before,
+            "{name}: maintenance history"
+        );
+        assert_eq!(
+            table_rows(&storage.connection, "event_source_index"),
+            source_index_before,
+            "{name}: source index"
+        );
+        assert_eq!(
+            preserved_table_rows(&storage.connection),
+            preserved_before,
+            "{name}: preserved records"
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row(
+                    "SELECT (SELECT count(*) FROM ledger_compaction_prefixes) + \
+                            (SELECT count(*) FROM frozen_message_sources) + \
+                            (SELECT count(*) FROM ledger_compaction_delete_authority);",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0,
+            "{name}: migration must not backfill future compaction evidence"
+        );
+        match verify_schema_v7_for_open(&storage.connection) {
+            Ok(()) if job_state != Some("failed") => {}
+            Err(error) if job_state == Some("failed") => {
+                assert_eq!(error.kind(), "storageSchemaMismatch")
+            }
+            result => panic!("{name}: unexpected V7 reopen result: {result:?}"),
+        }
+    }
+}
+
+#[test]
+fn v7_preflight_rejects_attempting_active_partial_and_extra_v6_without_mutation() {
+    for (name, lifetime_state, maintenance_state) in [
+        ("attempting_lifetime", Some("attempting"), None),
+        ("pending_compaction", None, Some("pending")),
+        ("running_compaction", None, Some("running")),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v6_storage(&path, "pending");
+        if let Some(state) = lifetime_state {
+            insert_v4_job(
+                &storage.connection,
+                name,
+                state,
+                "indexSource",
+                20,
+                0,
+                0,
+                None,
+                None,
+            );
+        }
+        if let Some(state) = maintenance_state {
+            storage
+                .connection
+                .execute(
+                    "INSERT INTO maintenance_jobs(\
+                       job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                       failure_kind,created_at,updated_at\
+                     ) VALUES (?1,'losslessCompaction',?2,NULL,NULL,NULL,NULL,NULL,\
+                       '2026-08-28T13:00:00Z','2026-08-28T13:00:00Z');",
+                    params![name, state],
+                )
+                .unwrap();
+        }
+        assert_v7_migration_rejected_without_mutation(&mut storage, name);
+    }
+
+    for (name, mutation) in [
+        ("partial", "DROP INDEX event_source_index_message_unique;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v6_for_v7(value TEXT) STRICT;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = populated_v6_storage(&path, "pending");
+        storage.connection.execute_batch(mutation).unwrap();
+        assert_v7_migration_rejected_without_mutation(&mut storage, name);
+    }
+}
+
+#[test]
+fn v7_injected_migration_failure_restores_exact_v6() {
+    let (_root, path) = database();
+    let mut storage = populated_v6_storage(&path, "pending");
+    storage.checkpoint().expect("checkpoint exact v6 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read exact v6 fixture");
+    let invalid = MIGRATION_V7.replacen(
+        "DROP TABLE storage_schema_meta_v6;",
+        "INVALID SQL;\nDROP TABLE storage_schema_meta_v6;",
+        1,
+    );
+
+    let error = execute_migration(&mut storage.connection, &invalid, "v7 injected")
+        .expect_err("mid-migration failure must roll back");
+    assert_eq!(error.kind(), "migrationFailed");
+    assert!(storage.connection.is_autocommit());
+    verify_schema_v6(&storage.connection).expect("rollback restored exact v6");
+    assert_eq!(database_snapshot(&storage.connection), snapshot_before);
+    storage
+        .checkpoint()
+        .expect("checkpoint rolled back v6 fixture");
+    assert_eq!(
+        fs::read(storage.path()).expect("read rolled back v6 fixture"),
+        bytes_before
+    );
+}
+
+#[test]
 fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
     for (name, mutation) in [
         ("partial", "DROP TABLE event_source_index;"),
@@ -1489,7 +1707,7 @@ fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
         ),
     ] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v6");
+        let storage = Storage::open_v6_for_test(&path).expect("fresh v6");
         storage.connection.execute_batch(mutation).unwrap();
         drop(storage);
         let error = Storage::open(&path).err().expect("non-exact v6 must fail");
@@ -1498,7 +1716,7 @@ fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
 
     for state in ["attempting", "failed"] {
         let (_root, path) = database();
-        let storage = Storage::open(&path).expect("fresh v6");
+        let storage = Storage::open_v6_for_test(&path).expect("fresh v6");
         let (failure_kind, completed_at) = if state == "failed" {
             (Some("database"), Some("2026-08-28T13:02:00Z"))
         } else {
@@ -1526,6 +1744,224 @@ fn exact_v6_reopen_rejects_partial_extra_tampered_and_non_runnable_state() {
             "storage lifetime materialization state is invalid"
         );
     }
+}
+
+#[test]
+fn exact_v7_reopen_rejects_schema_tamper_and_active_compaction_without_mutation() {
+    for (name, mutation) in [
+        ("partial", "DROP TABLE frozen_message_sources;"),
+        (
+            "extra",
+            "CREATE TABLE unexpected_storage_v7(value TEXT) STRICT;",
+        ),
+        (
+            "trigger_tamper",
+            "DROP TRIGGER frozen_message_sources_require_exact_source;",
+        ),
+        (
+            "index_tamper",
+            "DROP INDEX ledger_compaction_prefixes_latest;",
+        ),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v7");
+        storage.connection.execute_batch(mutation).unwrap();
+        drop(storage);
+        let error = Storage::open(&path).err().expect("non-exact v7 must fail");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    }
+
+    for state in ["pending", "running"] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).expect("fresh v7");
+        storage
+            .connection
+            .execute(
+                "INSERT INTO maintenance_jobs(\
+                   job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                   failure_kind,created_at,updated_at\
+                 ) VALUES (?1,'losslessCompaction',?2,NULL,NULL,NULL,NULL,NULL,\
+                   '2026-08-28T13:00:00Z','2026-08-28T13:00:00Z');",
+                params![format!("active_{state}"), state],
+            )
+            .unwrap();
+        let before = database_snapshot(&storage.connection);
+        drop(storage);
+        let error = Storage::open(&path)
+            .err()
+            .expect("active compaction must fail closed");
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{state}");
+        let connection = Connection::open(&path).unwrap();
+        configure_connection(&connection).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{state}");
+    }
+}
+
+#[test]
+fn v7_rejects_durable_compaction_authority_and_frozen_sources_before_c1b() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("fresh v7");
+    for sequence in 1..=2 {
+        storage
+            .append_event(&event(
+                &format!("evt_authority_{sequence}"),
+                &format!("op_authority_{sequence}"),
+                "project",
+                "project_authority",
+                sequence,
+                json!({
+                    "canonical_path":"/fixture/authority",
+                    "project_id":"project_authority"
+                }),
+                &format!("2026-08-28T14:00:0{sequence}Z"),
+            ))
+            .unwrap();
+    }
+    storage
+        .connection
+        .execute_batch(
+            "INSERT INTO ledger_baselines(\
+               baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,\
+               payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at\
+             ) VALUES ('baseline_authority','project','project_authority',1,1,'{}',\
+               'digest_authority','2026-08-28T14:01:00Z','2026-08-28T14:01:00Z');\
+             INSERT INTO ledger_compaction_prefixes(\
+               prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,\
+               anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,\
+               baseline_projection_digest,created_at,verified_at\
+             ) SELECT 'prefix_authority','project','project_authority',1,event_rowid,\
+               event_id,operation_id,aggregate_sequence,'baseline_authority','digest_authority',\
+               '2026-08-28T14:01:00Z','2026-08-28T14:01:00Z'\
+               FROM event_source_index WHERE event_id='evt_authority_2';\
+             INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+               failure_kind,created_at,updated_at\
+             ) VALUES ('authority_job','losslessCompaction','running','{}',\
+               '2026-08-28T14:02:00Z',NULL,NULL,NULL,\
+               '2026-08-28T14:02:00Z','2026-08-28T14:02:00Z');\
+             INSERT INTO ledger_compaction_delete_authority(\
+               job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,\
+               aggregate_id,aggregate_sequence,authorized_at\
+             ) SELECT 'authority_job',1,'prefix_authority',event_rowid,event_id,operation_id,\
+               aggregate_type,aggregate_id,aggregate_sequence,'2026-08-28T14:02:00Z'\
+               FROM event_source_index WHERE event_id='evt_authority_1';\
+             UPDATE maintenance_jobs SET state='succeeded',\
+               completed_at='2026-08-28T14:03:00Z',updated_at='2026-08-28T14:03:00Z'\
+               WHERE job_id='authority_job';",
+        )
+        .unwrap();
+    verify_schema_v7(&storage.connection).expect("durable authority retains exact v7 schema");
+    let events_before = table_rows(&storage.connection, "events");
+    let authority_before = table_rows(&storage.connection, "ledger_compaction_delete_authority");
+    let error = storage
+        .append_event(&event(
+            "evt_authority_3",
+            "op_authority_3",
+            "project",
+            "project_authority",
+            3,
+            json!({
+                "canonical_path":"/fixture/authority",
+                "project_id":"project_authority"
+            }),
+            "2026-08-28T14:00:03Z",
+        ))
+        .expect_err("C1A must reject append against durable compaction history");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(table_rows(&storage.connection, "events"), events_before);
+    assert_eq!(
+        table_rows(&storage.connection, "ledger_compaction_delete_authority"),
+        authority_before
+    );
+    drop(storage);
+    assert_eq!(
+        Storage::open(&path)
+            .err()
+            .expect("durable authority must reject reopen")
+            .kind(),
+        "storageSchemaMismatch"
+    );
+
+    let (_root, frozen_path) = database();
+    let mut frozen = Storage::open(&frozen_path).expect("fresh v7");
+    frozen
+        .append_event(&event(
+            "evt_frozen_project",
+            "op_frozen_project",
+            "project",
+            "project_frozen",
+            1,
+            json!({"canonical_path":"/fixture/frozen","project_id":"project_frozen"}),
+            "2026-08-28T14:10:00Z",
+        ))
+        .unwrap();
+    frozen
+        .append_event(&event(
+            "evt_frozen_chat",
+            "op_frozen_chat",
+            "chat",
+            "chat_frozen",
+            1,
+            v6_chat_payload(
+                "chat_frozen",
+                "project_frozen",
+                1,
+                team_message("chat_frozen", "message_frozen", 1),
+            ),
+            "2026-08-28T14:10:01Z",
+        ))
+        .unwrap();
+    frozen
+        .connection
+        .execute(
+            "INSERT INTO chat_messages(\
+               message_id,chat_id,event_sequence,canonical_message_json,message_digest,created_at,materialized_at\
+             ) VALUES ('message_frozen','chat_frozen',1,?1,'digest_frozen',\
+               '2026-08-28T14:10:01Z','2026-08-28T14:10:02Z');",
+            [canonical_json_v1(team_message("chat_frozen", "message_frozen", 1)).unwrap()],
+        )
+        .unwrap();
+    assert_eq!(
+        frozen
+            .connection
+            .execute(
+            "INSERT INTO frozen_message_sources(
+               message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,
+               source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at
+             ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,
+               message.chat_id,source.aggregate_sequence,message.event_sequence,
+               message.canonical_message_json,message.message_digest,'2026-08-28T14:11:00Z'
+               FROM event_source_index AS source
+               JOIN chat_messages AS message ON message.message_id=source.introduced_message_id
+               WHERE source.event_id='evt_frozen_chat';",
+                [],
+            )
+            .unwrap(),
+        1,
+        "the exact materialized message source must be frozen"
+    );
+    let frozen_before = database_snapshot(&frozen.connection);
+    let error = frozen
+        .append_event(&event(
+            "evt_frozen_other",
+            "op_frozen_other",
+            "project",
+            "project_other",
+            1,
+            json!({"canonical_path":"/fixture/other","project_id":"project_other"}),
+            "2026-08-28T14:12:00Z",
+        ))
+        .expect_err("any frozen provenance is not runnable before C1B");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(database_snapshot(&frozen.connection), frozen_before);
+    drop(frozen);
+    assert_eq!(
+        Storage::open(&frozen_path)
+            .err()
+            .expect("frozen provenance must reject reopen")
+            .kind(),
+        "storageSchemaMismatch"
+    );
 }
 
 #[test]
@@ -2274,17 +2710,33 @@ fn database_symlink_is_rejected_without_touching_target() {
 fn drop_lifetime_schema(connection: &Connection) {
     connection
         .execute_batch(
-            "DROP TABLE event_source_index;\
-             DROP TABLE lifetime_materialization_job;\
-             DROP TABLE maintenance_jobs;\
-             DROP TABLE prepared_workspaces;\
-             DROP TABLE chat_messages;\
-             DROP TABLE operation_receipts;\
-             DROP TABLE ledger_baselines;\
-             DROP TABLE storage_schema_meta;\
+            "DROP TRIGGER events_consume_exact_v7_delete_authority;
+             DROP TRIGGER events_are_append_only_delete;
+             DROP TABLE ledger_compaction_delete_authority;
+             DROP TABLE frozen_message_sources;
+             DROP TABLE ledger_compaction_prefixes;
+             DROP TABLE event_source_index;
+             DROP TABLE lifetime_materialization_job;
+             DROP TABLE maintenance_jobs;
+             DROP TABLE prepared_workspaces;
+             DROP TABLE chat_messages;
+             DROP TABLE operation_receipts;
+             DROP TABLE ledger_baselines;
+             DROP TABLE storage_schema_meta;
              DROP INDEX chats_identity_project;",
         )
         .expect("remove additive v2 objects for v1 migration fixture");
+    let v1_delete_trigger = reference_schema_v1()
+        .expect("reference v1 schema")
+        .into_iter()
+        .find_map(|(kind, name, _, sql)| {
+            (kind == "trigger" && name == "events_are_append_only_delete").then_some(sql)
+        })
+        .flatten()
+        .expect("reference v1 delete trigger");
+    connection
+        .execute_batch(&v1_delete_trigger)
+        .expect("restore exact v1 delete trigger");
 }
 
 fn populated_v2_storage(path: &Path, state: &str) -> Storage {
@@ -2382,6 +2834,13 @@ fn populated_v5_storage(path: &Path, state: &str) -> Storage {
     storage
 }
 
+fn populated_v6_storage(path: &Path, state: &str) -> Storage {
+    let mut storage = populated_v5_storage(path, state);
+    migrate_v6(&mut storage.connection).expect("migrate populated fixture to v6");
+    verify_schema_v6(&storage.connection).expect("exact populated v6 fixture");
+    storage
+}
+
 fn assert_v5_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
     storage.checkpoint().expect("checkpoint unsafe v4 fixture");
     let snapshot_before = database_snapshot(&storage.connection);
@@ -2420,6 +2879,25 @@ fn assert_v6_migration_rejected_without_mutation(storage: &mut Storage, name: &s
     );
 }
 
+fn assert_v7_migration_rejected_without_mutation(storage: &mut Storage, name: &str) {
+    storage.checkpoint().expect("checkpoint unsafe v6 fixture");
+    let snapshot_before = database_snapshot(&storage.connection);
+    let bytes_before = fs::read(storage.path()).expect("read unsafe v6 fixture");
+
+    let error = migrate_v7(&mut storage.connection).expect_err("unsafe v6 must fail preflight");
+    assert_eq!(error.kind(), "storageSchemaMismatch", "{name}");
+    assert_eq!(
+        database_snapshot(&storage.connection),
+        snapshot_before,
+        "{name}"
+    );
+    assert_eq!(
+        fs::read(storage.path()).expect("reread unsafe v6 fixture"),
+        bytes_before,
+        "{name}"
+    );
+}
+
 fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
     schema_objects(connection)
         .unwrap()
@@ -2434,6 +2912,26 @@ fn guarded_schema_objects(connection: &Connection) -> Vec<SchemaObject> {
                 "event_source_index_requires_exact_event",
                 "event_source_index_append_only_update",
                 "event_source_index_append_only_delete",
+                "events_are_append_only_delete",
+                "ledger_compaction_prefixes",
+                "ledger_compaction_prefixes_latest",
+                "ledger_compaction_prefixes_require_exact_anchor",
+                "ledger_compaction_prefixes_append_only_update",
+                "ledger_compaction_prefixes_append_only_delete",
+                "frozen_message_sources",
+                "frozen_message_sources_chat_sequence",
+                "frozen_message_sources_require_exact_source",
+                "frozen_message_sources_append_only_update",
+                "frozen_message_sources_append_only_delete",
+                "event_source_index_rejects_frozen_message_reuse",
+                "maintenance_jobs_single_running_lossless_compaction",
+                "ledger_compaction_delete_authority",
+                "ledger_compaction_delete_authority_require_exact_tuple",
+                "ledger_compaction_delete_authority_no_update",
+                "ledger_compaction_delete_authority_delete_after_source",
+                "events_consume_exact_v7_delete_authority",
+                "ledger_baselines_compaction_immutable_update",
+                "ledger_baselines_compaction_immutable_delete",
             ]
             .contains(&name.as_str())
         })

@@ -1314,6 +1314,49 @@ fn bounded_v6_cancellation_before_begin_has_zero_mutation() {
 }
 
 #[test]
+fn bounded_v7_refuses_active_compaction_before_materialization_mutation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("v7 storage");
+    storage
+        .connection_for_test()
+        .execute(
+            "INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+               failure_kind,created_at,updated_at\
+             ) VALUES ('active_compaction','losslessCompaction','pending',NULL,NULL,NULL,NULL,NULL,\
+               '2026-08-28T12:00:00Z','2026-08-28T12:00:00Z');",
+            [],
+        )
+        .unwrap();
+    let facts_before: (i64, i64, String) = storage
+        .connection_for_test()
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),\
+                    (SELECT count(*) FROM lifetime_materialization_job),\
+                    (SELECT state FROM maintenance_jobs WHERE job_id='active_compaction');",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+
+    let error = storage
+        .materialize_lifetime_batch_for_test(&mut NeverCancel, None)
+        .expect_err("active compaction must fence the bounded worker");
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let facts_after: (i64, i64, String) = storage
+        .connection_for_test()
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),\
+                    (SELECT count(*) FROM lifetime_materialization_job),\
+                    (SELECT state FROM maintenance_jobs WHERE job_id='active_compaction');",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(facts_after, facts_before);
+}
+
+#[test]
 fn bounded_v6_unconfirmed_batch_commit_leaves_attempting_and_reopen_fails_closed() {
     let (_root, path) = database();
     let mut storage = Storage::open(&path).expect("v4 storage");
@@ -1637,7 +1680,7 @@ fn bounded_v6_accepts_source_backed_historical_baseline_but_requires_newest() {
     ));
 
     let (_root, missing_path) = database();
-    let mut missing = Storage::open(&missing_path).expect("v4 storage");
+    let mut missing = Storage::open_v6_for_test(&missing_path).expect("v6 corruption fixture");
     populate_lifetime_fixture(&mut missing);
     drive_until_cursor(&mut missing, "verifySource", 0);
     let newest_id = baseline_id("project", "project_lifetime", 2);
