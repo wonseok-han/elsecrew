@@ -1,9 +1,20 @@
-//! Operations-only, volatile verification. This is NOT a reopen/admission proof:
-//! prefix/baseline, messages, replay and integrity still require separate checks.
+//! Volatile R1 operations-only and R2 compaction-local verification. Neither is
+//! a reopen/admission proof: global replay and integrity remain separate checks.
 //! No transaction survives a call, no cursor is persisted or accepted from callers,
 //! and cancellation/error/drop discards all progress. Production fences are unchanged.
 
 use super::*;
+
+mod closure;
+pub(crate) use closure::CompactionPhase;
+#[cfg(test)]
+pub(crate) use closure::{phase_batch_for_test, phase_queries_for_test};
+
+#[derive(Clone, Copy)]
+enum VerificationMode {
+    OperationsOnly,
+    CompactionClosure,
+}
 
 // Independent of the 1 MiB canonical-source budget. A canonical JSON string's
 // embedding in the frozen envelope can double its bytes; frozen payload + envelope
@@ -14,7 +25,7 @@ use super::*;
 const MAX_CLOSURE_BYTES: usize = 8 * COMPACTION_VERIFY_MAX_PAYLOAD_BYTES;
 
 enum SessionState {
-    Scanning { after: u64 },
+    Scanning { after: u64, phase: CompactionPhase },
     Finished,
     Invalid,
 }
@@ -25,6 +36,7 @@ pub(crate) struct FrozenOperationVerificationSession<'connection> {
     connection: &'connection mut Connection,
     data_version: i64,
     cutoff: u64,
+    mode: VerificationMode,
     state: SessionState,
 }
 
@@ -34,11 +46,17 @@ pub(crate) enum FrozenOperationVerificationStep {
     Pending(BatchUsage),
     Cancelled,
     FrozenOperationsVerified(BatchUsage),
+    CompactionClosurePending {
+        phase: CompactionPhase,
+        usage: BatchUsage,
+    },
+    CompactionClosureVerified(BatchUsage),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct BatchUsage {
     pub(crate) rows: usize,
+    // R1 source bytes; R2 phase-primary bytes (source/baseline/message).
     pub(crate) canonical_source_bytes: usize,
     pub(crate) encoded_closure_bytes: usize,
 }
@@ -46,6 +64,19 @@ pub(crate) struct BatchUsage {
 impl<'connection> FrozenOperationVerificationSession<'connection> {
     /// Exact-schema bootstrap is separate from the per-step 100-row work bound.
     pub(crate) fn start(connection: &'connection mut Connection) -> Result<Self, SidecarError> {
+        Self::start_mode(connection, VerificationMode::OperationsOnly)
+    }
+
+    pub(crate) fn start_compaction_closure(
+        connection: &'connection mut Connection,
+    ) -> Result<Self, SidecarError> {
+        Self::start_mode(connection, VerificationMode::CompactionClosure)
+    }
+
+    fn start_mode(
+        connection: &'connection mut Connection,
+        mode: VerificationMode,
+    ) -> Result<Self, SidecarError> {
         if !connection.is_autocommit() {
             return Err(session_error());
         }
@@ -69,6 +100,9 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             if forbidden {
                 return Err(session_error());
             }
+            if matches!(mode, VerificationMode::CompactionClosure) {
+                closure::reject_hidden_rowids(&transaction)?;
+            }
             Ok((marker, verify_terminal_compaction_proof(&transaction)?))
         })();
         let (marker, cutoff) = match checked {
@@ -88,7 +122,11 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             connection,
             data_version: marker,
             cutoff,
-            state: SessionState::Scanning { after: 0 },
+            mode,
+            state: SessionState::Scanning {
+                after: 0,
+                phase: CompactionPhase::Operations,
+            },
         })
     }
 
@@ -114,24 +152,44 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             if data_version(&transaction)? != self.data_version {
                 return Err(session_error());
             }
-            let SessionState::Scanning { after } = previous else {
+            let SessionState::Scanning { after, phase } = previous else {
                 return Err(session_error());
             };
-            scan_batch(&transaction, after, self.cutoff, cancelled)
+            let batch = match self.mode {
+                VerificationMode::OperationsOnly => {
+                    scan_batch(&transaction, after, self.cutoff, cancelled)
+                }
+                VerificationMode::CompactionClosure => {
+                    closure::scan_batch(&transaction, phase, after, self.cutoff, cancelled)
+                }
+            }?;
+            Ok(batch.map(|(next, usage, exhausted)| (phase, next, usage, exhausted)))
         })();
         match checked {
-            Ok(Some((next, usage, exhausted))) if !cancelled() => {
+            Ok(Some((phase, next, usage, exhausted))) if !cancelled() => {
                 transaction.commit().map_err(|_| session_error())?;
                 if !self.connection.is_autocommit() {
                     return Err(session_error());
                 }
-                if exhausted {
+                if matches!(self.mode, VerificationMode::CompactionClosure) {
+                    if exhausted && phase == CompactionPhase::FrozenMessages {
+                        self.state = SessionState::Finished;
+                        return Ok(FrozenOperationVerificationStep::CompactionClosureVerified(
+                            usage,
+                        ));
+                    }
+                    self.state = SessionState::Scanning {
+                        after: if exhausted { 0 } else { next },
+                        phase: if exhausted { phase.next() } else { phase },
+                    };
+                    Ok(FrozenOperationVerificationStep::CompactionClosurePending { phase, usage })
+                } else if exhausted {
                     self.state = SessionState::Finished;
                     Ok(FrozenOperationVerificationStep::FrozenOperationsVerified(
                         usage,
                     ))
                 } else {
-                    self.state = SessionState::Scanning { after: next };
+                    self.state = SessionState::Scanning { after: next, phase };
                     Ok(FrozenOperationVerificationStep::Pending(usage))
                 }
             }
