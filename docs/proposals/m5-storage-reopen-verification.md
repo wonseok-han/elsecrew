@@ -147,3 +147,57 @@ R3A 통합 `63ab510`에서 아래 조건을 조사했다. 다음 파동은 이�
 - 없는 index를 찾는 경로는 raw source의 명시적 중첩 keyset과 종료 조건이 필요하다. JSON 조건으로 전체 이력을 탐색하면서 `LIMIT`만 붙이는 방식은 bounded scan이 아니다. 유일성 확인 후 message association은 정확한 도입 source를 찾거나 keyset 끝까지 검사해야 한다. 한 outer record를 호출 사이 유지한다면 retained encoded bytes도 매 호출 종속 예산에 포함하며, 외부 commit·취소·오류 때 모두 폐기한다. 최악의 유일성 탐색은 `미색인 도입 수 × live event 수`일 수 있어 호출당 예산을 전체 시작 시간 보장으로 해석하지 않는다.
 - pending workspace는 최신 project append보다 오래된 정상 파생 기록일 수 있다. exact historical live/frozen source를 bounded하게 찾는 규칙과, bound chat의 **최신 raw live source**를 쓰는 composite identity 검증을 명시해야 한다. ready는 최신 project member→row와 row→최신 member를 모두 확인해 누락·stale·extra를 거부한다. 100개 초과 workspace member도 내부 cursor·예산 검증 대상이다.
 - **별도 lifecycle 결함**: 현행 `storage_lifetime.rs`의 bounded `materialize_workspace_event`는 기존 row를 갱신하기 전에 latest-only `source_workspace_matches`를 호출한다. 따라서 R3B가 정상 historical pending row를 받아들여도 이후 catch-up이 실패할 수 있다. 이는 source 대조로 확인한 경로이며 이번에 재현 테스트나 수정을 수행하지 않았다. R3B의 읽기 검증 성공을 catch-up 호환성으로 주장하지 않고, R3C/lifecycle 계약에서 재현·수정·검증한 뒤 제품 활성화를 판단한다.
+
+## 8. R3B — 전역 파생 기록 검증 계약
+
+### 8.1 완료선·비활성 경계
+
+R3A의 독립 gate·마감 기준 `5cdd5dd`에서 이어간다. 같은 private 세션에 새로운 immutable mode를 추가해 R2/R3A를 먼저 끝내고, 저장된 source index·receipt·message·baseline·workspace 전체를 source와 양방향으로 결속한다. 최종 결과는 정보성 결과이며 기존 R1/R2/R3A 진입점·결과와 제품 open/복구/append/lifetime 경로는 바꾸지 않는다. R3C admission, 실제 100개 초과 제품 재오픈과 catch-up, compaction writer/delete·scheduler/status는 이번 완료선이 아니다.
+
+### 8.2 파생 기록과 coverage
+
+| 기록 | 존재하는 모든 행의 역방향 검증 | ready에서 추가로 요구하는 정방향 coverage |
+| --- | --- | --- |
+| `event_source_index` | exact live event rowid·event/operation/aggregate tuple 및 source-backed predecessor/introduction 전이 | 모든 live event의 exact index |
+| `operation_receipts` | exact live source 또는 같은 세션에서 R2로 검증한 frozen operation; 기존 request ID 제외·duplicate classifier 유지 | app-instance를 포함한 모든 live event의 exact receipt |
+| `chat_messages` | 반복 snapshot이 아닌 exact introduction과 typed fields·canonical JSON·digest 결속 | 모든 live introduction의 exact normalized message |
+| `ledger_baselines` | exact historical source tuple·deterministic ID·payload·digest; 정상 unreferenced historical baseline 허용 | latest project/chat/run/lock source의 exact baseline; app-instance baseline 금지 |
+| `prepared_workspaces` | exact project source member와 typed fields·digest·composite identity | 모든 latest project member→exact row와 모든 row→latest member; 누락·stale·extra 거부 |
+
+pending의 미생성 기록은 허용하되 존재하는 기록을 receipt 자체·timestamp·현재 projection만으로 신뢰하지 않는다. ready는 검증 의무이지 검증 증거가 아니다. 삭제 source에 필요한 R2 frozen/prefix/message closure는 두 상태 모두 필수다. 위 모든 table의 primary keyset을 끝까지 검사하며 0 이하 rowid가 숨지 않아야 한다.
+
+receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 찾지 않는다. raw `events` unique `(aggregate_type, aggregate_id, aggregate_sequence)`의 exact lookup으로 먼저 결속하고, 해당 live source가 없을 때만 같은 세션의 R2-verified frozen operation으로 대조한다. source-index 자체의 역검증은 raw event rowid와 exact tuple을 함께 확인한다. V5→V6에서 기존 receipt/baseline은 남고 index는 비어 있을 수 있으므로 기존 index-first helper를 그대로 호출해 정상 pending을 거부하지 않는다.
+
+### 8.3 미색인 메시지와 전역 유일성
+
+- 메시지 `event_sequence`는 chat durable sequence이며 aggregate source sequence로 직접 사용하지 않는다. 기존 null-or-same 전이와 반복 snapshot을 보존한다.
+- index가 없는 각 introduction에 대해 exact indexed introduction/frozen message 조회와 **전체 live event의 raw rowid keyset** 중첩 탐색으로 같은 ID를 도입한 다른 source가 없는지 검사한다. index/normalized row가 둘 다 없는 두 introduction도 거부해야 한다. 후보마다 exact source/predecessor 전이를 판정하며, 같은 source와 반복 snapshot은 충돌로 오인하지 않는다. 일치 하나를 찾은 시점이 아니라 keyset exhaustion까지 검사해야 유일성이 성립한다. 이미 indexed된 introduction끼리는 exact schema의 unique index와 각 index/source 결속을 함께 사용한다.
+- 이 유일성 단계가 같은 unchanged 세션에서 완료된 뒤 normalized message 역검증을 진행한다. exact indexed/frozen source로 해결되지 않으면 raw `events`의 `(aggregate_type, aggregate_id, aggregate_sequence)` unique index를 이용한 per-chat sequence keyset으로 정확한 introduction을 찾거나 끝까지 검사한다. 첫 nonmatch/page에서 멈추지 않고, match에서 멈추는 근거도 앞선 전역 유일성 검증이다.
+- JSON 조건으로 전체 이력을 탐색하면서 matching row에만 `LIMIT`를 붙이는 쿼리, `OFFSET`, 전체-history `Vec`/map/set, TEMP index/schema 변경은 금지한다. candidate가 실제로 방문되는 raw keyset·exact lookup과 query plan을 증거로 남긴다.
+
+### 8.4 pending workspace와 가변 member
+
+- pending workspace가 최신 project append보다 오래됐다면 **exact historical live 또는 R2-verified frozen project source member**와 결속되는 경우만 허용한다. 이 source 발견은 live project events와 frozen project operations 각각의 indexed aggregate-sequence keyset·별도 private cursor로 처리한다. 후보 source/member를 JSON 조건 뒤에 숨기지 않는다. ready의 역검증은 historical match가 아니라 최신 member와 같아야 한다.
+- bound workspace의 `boundChatId`는 raw `events` unique `(aggregate_type, aggregate_id, aggregate_sequence)` index에서 찾은 **최신 live chat source**의 project/worktree/workspace identity와 일치해야 한다. pending source-index row 부재는 허용하지만 projection이나 임의 과거 chat source를 권위로 바꾸지 않는다. compacted aggregate는 retained live anchor/tail을 유지하므로 현재 exact live source가 없으면 거부한다.
+- 하나의 정상 project payload에도 100개 초과 workspace member가 들어갈 수 있다. member 검증과 가변 bound-chat lookup은 명시적 inner cursor·공유 작업 예산을 사용한다. 기존 all-members helper를 고정 비용 dependency처럼 호출하지 않는다.
+- 이 규칙은 **읽기 검증의 정상 pending 수락**이다. §7.5의 기존 bounded materializer 갱신 전 latest-only 대조 문제를 해결했다고 주장하지 않는다. R3C/lifecycle에서 재현·수정·검증하기 전에는 product catch-up/admission으로 연결하지 않는다.
+
+### 8.5 호출당 예산·volatile 진행
+
+- primary scan은 최대 100행이며, outer row·중첩 source 후보·가변 member 처리도 합쳐 **최대 100 work units**를 소비한다. 고정 개수의 exact dependency는 조회 graph를 명시하고 별도 byte 예산으로 제한한다. 같은 후보의 재조회도 실제 읽기 비용에서 빼지 않는다.
+- fresh primary canonical 입력 합계는 호출당 1 MiB다. receipt/message/baseline/workspace는 해당 저장 canonical JSON, source 후보는 canonical event payload를 계산한다. canonical JSON column이 없는 source-index phase는 결속할 exact source의 canonical payload를 primary로 계산하며 index의 모든 UTF-8 column은 별도 closure에 포함한다. 각 SQL String/JSON 입력은 decode 전에 BLOB byte-length로 검사한다.
+- 호출 사이에는 **bounded outer record 하나**만 유지할 수 있다. 이를 처음 읽은 호출에 primary 비용을 청구하며, 다음 호출에서 다시 읽지 않은 canonical bytes를 fresh primary로 이중 청구하지 않는다. 대신 retained encoded outer bytes는 **매 호출** fresh candidate/dependency 입력과 함께 8 MiB closure 예산에 포함한다. 중복 decoded tree와 무제한 과거 기록을 보관하지 않는다.
+- 다음 후보가 retained outer를 포함한 fresh 호출에는 들어가지만 남은 예산에는 안 들어가면 미소비 상태로 양보한다. retained outer와 합친 intrinsic fixed closure가 8 MiB를 초과하면 terminal failure다. outer 완료 전에도 유효한 inner 진행은 commit 후 유지할 수 있으며 zero-progress retry를 만들지 않는다. 재시작한 호출의 retained outer+후보도 함께 preflight한다.
+- 같은 mutable connection 독점 차용·매 `BEGIN IMMEDIATE` 내부 최초 `data_version` 대조·commit 뒤에만 outer/inner cursor publish를 유지한다. 취소·SQL/COMMIT 오류·외부 commit은 retained row와 모든 진행을 폐기하고 재사용을 거부한다. 호출 사이 transaction, 영속 cursor/proof, public admission token을 만들지 않는다.
+- 최악의 유일성 탐색 비용은 `미색인 introduction 수 × live event 수`이며 message/workspace resolver 비용도 별도다. 호출당 상한을 전체 시작 시간 상한으로 주장하지 않는다. R3C의 SQLite 전체 integrity/FK와 Electron ready 3초 계약은 그대로이며 early-ready나 임의 timeout 연장은 금지한다.
+
+### 8.6 합격 기준·소유권
+
+1. empty/pending/ready·compacted V8와 다섯 derived table 각각 100행 초과 정상 fixture를 다회 완료한다. 정상 historical pending workspace·unreferenced baseline·null/repeat message를 유지한다. V5→V6 migration처럼 index가 전부 없고 receipt/baseline은 남은 pending에서 raw live source 결속과 필요한 frozen fallback을 검증한다.
+2. 첫 행과 후반부의 orphan·typed/indexed/canonical/digest/identity 불일치, ready 누락과 pending 미생성의 차이, live/frozen/anchor 경계를 검사한다. ready workspace는 member 누락·extra/stale row를 양방향으로 거부하고 100개 초과 member를 포함한다.
+3. 서로 다른 chat에서 100개 초과 후보 간격으로 떨어진 동일 ID의 unindexed introduction을, 양쪽 normalized row도 없는 상태에서 거부한다. indexed↔unindexed·frozen↔unindexed 충돌과 정상 repeated snapshot을 구분한다. per-chat 100개 이후 match와 source absence의 exact exhaustion, source-index가 전부 없는 pending bound workspace의 최신 raw chat 결속을 검사한다.
+4. primary exact 1 MiB/+1·closure exact 8 MiB/+1·멀티바이트·남은 예산 양보·retained outer와 큰 source의 호출 분리·100 work units·no-progress 방지와 실제 query plan을 확인한다. private phase probe와 full-session earliest rejection을 구분한다.
+5. 각 phase·nested late/terminal 경계에서 외부 commit·entry/mid/precommit 취소·실제 SQL read/COMMIT 거부·busy BEGIN 뒤 전체 진행 폐기 및 DB schema/rows/file bytes 무변경을 검사한다.
+6. 새 focused tests, 기존 R1/R2/R3A, full sidecar/stdio, Node/protocol lifetime, scoped strict clippy·Rust 2021 format·diff check, 독립 exact-commit 코드 리뷰와 최신 통합 QA를 통과한다. 누적 하네스는 `CI=1` 환경을 사용하고 환경 제한·미실행 외부 게이트는 별도 기록한다.
+
+단일 Rust 구현 담당이 별도 `m5/g5d-v8-reopen-derived` branch·`.worktrees/g5d-v8-reopen-derived`에서 `storage/reopen.rs`와 하위 모듈, storage test 하위 모듈 및 module 등록, 자기 branch의 `docs/history.md`를 소유한다. `storage.rs`는 동작 보존 helper 추출·설명만 허용한다. 통합 담당은 계약·현행 구조·색인·통합 기록을 소유한다. schema/protocol/golden/의존성/lockfile·제품 open/복구/append/lifetime·기존 materializer catch-up 수정·scheduler/writer/status·Electron/UI는 변경 금지다. 소유 밖 수정이나 안전 계약 변경이 필요하면 구현을 멈추고 보고한다. 실제 provider·사용자 프로젝트·Windows·파괴적 시험, main 병합·push는 수행하지 않는다.

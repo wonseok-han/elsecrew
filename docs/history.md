@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 계약 착수)
+
+- **기준·범위**: clean `m5/coding-agent-ide`·`5cdd5dd`에서 이전 R3A 코드/QA가 유지됨을 확인했다. R3B는 기존 private 세션 뒤에 전체 derived-record 검증을 추가하며 제품 admission·catch-up·100개 제한 해제는 R3C에 남긴다. §7.5 조사와 별도 검토 준비 초안을 `proposals/m5-storage-reopen-verification.md` §8의 구체 계약으로 옮기고 독립 검토 뒤 구현 worktree를 분기한다.
+- **결정·검증**: pending source-index 부재 시 raw source keyset, 메시지 도입 ID 전역 유일성, historical workspace와 최신 raw chat 결속, ready 양방향 coverage, retained outer/중첩 cursor의 100 work units·1 MiB/8 MiB 예산을 명시했다. Node lifetime 17개·protocol lifetime 10개 기준 검증이 통과했다(`/tmp/hello-agent-r3b-{node,protocol}-baseline.log`). R3A 검증 이후 코드·schema·lockfile diff는 없으며 새 구현은 아직 시작하지 않았다. 기존 materializer catch-up 결함과 실제 시작 시간 평가는 후속 계약에서 닫고 이번에 완료로 간주하지 않는다.
+- **계약 리뷰·기준 회귀**: 독립 리뷰에서 index-empty pending의 receipt/baseline을 기존 index-first helper로 찾으면 정상 migration 기록을 거부할 수 있음을 지적했다. raw `events` tuple exact lookup을 먼저 하고 live source 부재 때만 frozen fallback을 사용하도록 §8.2와 회귀 조건을 명시한 뒤 계약 PASS를 받았다. R3A focused 16개도 재통과했다(120.26초, `/tmp/hello-agent-r3b-r3a-baseline.log`).
+- **구현 가능성 확인**: 별도 설계 검토도 nested cursor·100 work units·retained outer 예산을 CLEAR로 판정했다. fresh-call fit에도 retained outer를 포함하고 합산 intrinsic closure 초과는 재시도 없이 실패함을 명확히 했다. 제품 경로·공개 proof·schema 변경 없이 이 계약에서 기능 worktree를 분기한다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3A 독립 검토·통합 QA)
 
 - **통합·경계**: 검토된 계약 `d4c3751`에서 기능 `6217517`을 구현하고 독립 exact-commit 코드 리뷰 PASS 뒤 `63ab510`으로 통합했다. feature와 integration tree가 같고 QA 전후 clean임을 확인했다. R3A는 R2 뒤 ledger와 다섯 projection을 같은 내부 세션에서 검증하며 제품 open/append/lifetime, schema/protocol/의존성을 바꾸지 않는다. 구현 branch의 워크로그도 보존했다. 독립 최종 gate는 exact `63ab510`의 R3A 범위에 한해 PASS다.
