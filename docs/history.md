@@ -9,6 +9,20 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 독립 검토·통합)
+
+- **검토·통합**: 기능 `334210d5179d2fcc0782ffab2805479ee9615248`은 exact base `0eafac4`와 보완 계약 `da539a6`에 대한 독립 코드 리뷰 PASS를 받았다. 검토자는 R3B 21개를 별도로 실행해 통과했고(109.82초), 앞선 테스트 증거 누락이 닫혔음을 확인했다. root는 raw 자체 검증 로그와 10개 소유 파일, 제품/규약/의존성 경로 불변을 대조했다. 통합 시 history 삽입 충돌만 발생했으며 기능·통합 branch의 모든 엔트리와 핵심 결정을 보존했다.
+- **다음·범위**: 이 통합 commit의 clean tree에서 누적 `g5d-bounded-storage` QA와 최종 독립 gate가 남는다. 기능 branch의 전체 228 passed/1 ignored·stdio 10 passed를 통합 QA로 대체하지 않는다. 제품 admission·R3C·전체 G5D 완료가 아니며 기존 100-operation fence는 유지한다. main 병합·push는 하지 않았다.
+
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B bounded derived-record 구현)
+
+- **기준·소유·결과**: 검토된 §8 계약 `0eafac40`와 every-live-introduction identity 보완 `da539a6`을 따라 별도 `m5/g5d-v8-reopen-derived` worktree에 `start_derived_records`를 추가했다. 같은 mutable connection/변경 감지 epoch에서 R2 → R3A → source indexes/receipts/baselines/introduction identity/messages/workspaces/coverage를 검증한다. 기존 R1/R2/R3A API·결과와 제품 100개 초과 거부는 유지하며 `DerivedRecordsVerified`는 정보성 결과다. schema/protocol/의존성/lockfile·제품 open/append/recovery/lifetime/materializer·UI/Electron은 바꾸지 않았다.
+- **권위·진행**: receipt/baseline은 raw live tuple exact lookup을 먼저 하고 live 부재 시 R2-verified frozen source로 대조한다. 모든 live introduction은 indexed/frozen identity와 비교하며 unindexed introduction만 전체 raw source keyset을 추가 소진한다. normalized message는 전역 identity 단계 뒤 exact introduction 또는 bounded per-chat 발견으로 결속한다. pending workspace는 historical live/frozen member를 허용하지만 bound chat은 최신 raw source와 대조한다. ready 양방향 coverage와 하나의 source payload 안 100개 초과 member의 `pop_first` 진행을 구현했다.
+- **예산·실패**: outer/candidate/member를 합쳐 호출당 100 work units, fresh primary 1 MiB, 모든 SQL UTF-8 입력과 retained outer를 합쳐 별도 8 MiB를 적용한다. 고정 read plan 전체를 BLOB byte-length로 preflight하며 반복 SQL load도 청구한다. 미소비 후보의 remaining-budget 양보와 retained+fresh intrinsic 초과 terminal failure를 구분하고 COMMIT 뒤에만 volatile cursor를 보존한다. 별도 connection commit·entry/mid/precommit 취소·실제 SQLite READ/COMMIT 거부·busy BEGIN은 모든 cursor를 폐기한다. 새 schema/index/public proof나 장기 transaction은 없다.
+- **자체 검증**: 최종 R3B focused 21 passed(121.71초), R1 14 passed(23.91초), R2 15 passed(43.87초), R3A 16 passed(139.45초), full sidecar 228 passed/1 ignored(417.96초) + stdio 10 passed(1.35초), scoped strict clippy·Rust 2021 아홉 Rust 파일 format·diff check 모두 exit 0이다. exact commands/results와 raw logs는 `/tmp/g5d-v8-reopen-derived-evidence.wkBFkI/manifest.md`에 기록했다.
+- **증거 구분·발견**: phase-private semantic/byte probes와 full-session earliest rejection을 구분한다. TeamMessage 64 KiB text 정책은 유지하고 정상 message/workspace 합계 exact 1 MiB, 모든 신규 입력 경로의 exact/+1·UTF-8·retained budget, 각 phase/네 retained cursor 종류의 실패/무변경을 검사한다. mixed fixture용 R2 helper는 frozen-message seeding을 자기 `chat_r2` aggregate에 한정했고 deleted-payload helper의 test-only 형제 접근을 허용했다. 초기 실패는 fixture column/digest/path 형식과 committed-progress/remaining-budget 기대를 바로잡았으며 검증 정책은 완화하지 않았다.
+- **다음·한계**: 자체 검증 뒤 exact-commit 독립 리뷰와 최신 통합 QA가 필요하다. R3C integrity/FK·실제 startup/admission과 기존 historical-workspace catch-up 결함은 미해결이며 전체 시작 시간 상한을 주장하지 않는다. Node/protocol/누적 앱 게이트는 통합 담당 소유다. 실제 provider·사용자 DB/프로젝트·Windows·물리 I/O 고장 시험, merge/rebase/cherry-pick/push는 수행하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 테스트 중간 검토)
 
 - **진행**: 별도 derived worktree에서 정상/손상·중첩 탐색·예산·수명 시험을 구현 중이다. 작업자 stdout의 탐색용 16개 집중 test는 92.21초에 통과했으나 raw log 파일은 저장하지 않았고 추가 회귀 이전 결과다. 최종 feature commit·전체 회귀·통합 QA의 대체 증거로 사용하지 않는다. root는 제품 진입점 변경 없이 private 모듈/테스트에 한정된 현재 diff를 대조했다.
@@ -384,6 +398,7 @@
 
 - **pnpm 복원과 누적 검증 환경(2026-09-02)**: stale node_modules metadata만으로 설치 성공을 판단하지 않는다. frozen lockfile/ignore-scripts/공급망 정책을 유지한 복원 뒤 하네스와 동일한 `CI=1`로 확인한 build·누적 `g5d-bounded-storage`가 `d4c3751`·`63ab510`에서 PASS했다. 격리 환경의 Electron runtime fetch 실패와 더 넓은 core/protocol lint 실패는 scoped 성공과 별도 기록한다. 자동 install/CI 정규화 차이는 관찰했지만 package 소실 원인을 전부 입증한 것은 아니므로 임의 설정 변경이나 정책 완화로 해결했다고 주장하지 않는다.
 
+- **R3B 내부 derived-record 경계(2026-09-02)**: private 정보성 mode는 R2/R3A 뒤 전체 derived table과 ready 양방향 coverage를 검증한다. index-empty pending receipt/baseline은 raw tuple을 먼저 찾고, indexed 여부와 무관하게 모든 live introduction을 frozen identity와 비교한다. 추가 global raw scan은 unindexed introduction에만 필요하다. historical pending workspace 수락은 기존 catch-up 결함 해결이 아니다. retained outer+fresh dependency가 새 호출에도 8 MiB를 넘으면 terminal failure지만 이번 호출의 이미 소비한 입력 때문에 넘는 경우는 Pending일 수 있다. 실패 batch 안에서 검증한 행과 COMMIT된 진행을 테스트에서 혼동하지 않는다.
 - **R3A 내부 ledger/projection 경계(2026-09-02)**: compacted DB는 R2 closure와 R3A를 같은 세션/변경 감지 epoch에서 검증한다. pending의 누락 source index는 exact live predecessor에서 필요한 사실을 구성해 허용하지만 존재하는 index는 항상 결속하며 ready의 누락은 거부한다. latest source와 다섯 projection의 양방향 일치는 global derived-record/R3B 또는 startup/admission/R3C 완료 증거가 아니다. phase-local typed app-instance 1 MiB는 canonical JSON source 1 MiB와 동일한 크기 정의가 아니므로 용량 positive-control을 혼동하지 않는다.
 
 - **R3 startup/admission의 추가 경계(2026-09-02)**: pending materialization은 일부 파생 기록 미생성이 정상이며 ready는 검증 의무이지 proof가 아니다. 현행 startup의 복구 쓰기보다 앞선 read-only semantic preflight가 필요하다. SQLite 전체 integrity/FK 검사와 Electron ready 3초는 batch 예산과 별개다. 둘을 몰래 완화하지 않고 R3A/B/C와 사용자 결정이 필요한 변경을 `proposals/m5-storage-reopen-verification.md` §7에 분리한다.

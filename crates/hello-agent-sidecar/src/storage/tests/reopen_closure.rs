@@ -113,7 +113,7 @@ fn seed_with_anchor_intro(
     storage.connection.execute(
         "INSERT INTO frozen_message_sources(message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at)
          SELECT m.message_id,i.event_rowid,i.event_id,i.operation_id,m.chat_id,i.aggregate_sequence,m.event_sequence,m.canonical_message_json,m.message_digest,?1
-         FROM event_source_index i JOIN chat_messages m ON m.message_id=i.introduced_message_id WHERE i.aggregate_sequence<=?2 ORDER BY i.event_rowid", params![STAMP,deleted as i64]).unwrap();
+         FROM event_source_index i JOIN chat_messages m ON m.message_id=i.introduced_message_id WHERE i.aggregate_type='chat' AND i.aggregate_id='chat_r2' AND i.aggregate_sequence<=?2 ORDER BY i.event_rowid", params![STAMP,deleted as i64]).unwrap();
     for (index, source) in sources.iter().take(deleted).enumerate() {
         baseline(&storage.connection, source);
         storage.connection.execute(
@@ -205,7 +205,7 @@ fn literal(value: &str) -> String {
 
 /// Keep the closed deleted tuple internally consistent while varying primary size.
 /// This is test-only fixture construction, not a product mutation/repair path.
-fn replace_deleted_payload(connection: &Connection, sequence: usize, payload: Value) {
+pub(super) fn replace_deleted_payload(connection: &Connection, sequence: usize, payload: Value) {
     let operation = format!("op_r2_{sequence}");
     let mut source: FrozenOperationSourceV1 = serde_json::from_value(
         load_frozen_operation_value(connection, &operation)

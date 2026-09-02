@@ -1,15 +1,19 @@
-//! Volatile R1/R2 and R3A ledger/projection verification. None is a reopen/admission
-//! proof: global derived records, integrity and startup remain separate checks.
+//! Volatile R1/R2, R3A ledger/projection and R3B derived-record verification.
+//! None is a reopen/admission proof: integrity and startup remain separate checks.
 //! No transaction survives a call, no cursor is persisted or accepted from callers,
 //! and cancellation/error/drop discards all progress. Production fences are unchanged.
 
 use super::*;
 
 mod closure;
+mod derived;
 mod projection;
 pub(crate) use closure::CompactionPhase;
 #[cfg(test)]
 pub(crate) use closure::{phase_batch_for_test, phase_queries_for_test};
+#[cfg(test)]
+pub(crate) use derived::{queries_for_test as derived_queries_for_test, DerivedProbe};
+pub(crate) use derived::{DerivedPhase, DerivedUsage};
 pub(crate) use projection::ProjectionPhase;
 #[cfg(test)]
 pub(crate) use projection::{projection_batch_for_test, projection_queries_for_test};
@@ -19,6 +23,7 @@ enum VerificationMode {
     OperationsOnly,
     CompactionClosure,
     LedgerProjection,
+    DerivedRecords,
 }
 
 #[derive(Clone, Copy)]
@@ -42,6 +47,7 @@ enum SessionState {
     },
     Finished,
     Invalid,
+    Derived(Box<derived::Progress>),
 }
 
 /// The exclusive borrow pins connection identity and prevents same-connection
@@ -71,6 +77,17 @@ pub(crate) enum FrozenOperationVerificationStep {
         usage: BatchUsage,
     },
     LedgerProjectionVerified(BatchUsage),
+    DerivedRecordsPending {
+        phase: DerivedVerificationPhase,
+        usage: DerivedUsage,
+    },
+    DerivedRecordsVerified(DerivedUsage),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DerivedVerificationPhase {
+    Prerequisite(LedgerProjectionPhase),
+    Derived(DerivedPhase),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +123,12 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
         Self::start_mode(connection, VerificationMode::LedgerProjection)
     }
 
+    pub(crate) fn start_derived_records(
+        connection: &'connection mut Connection,
+    ) -> Result<Self, SidecarError> {
+        Self::start_mode(connection, VerificationMode::DerivedRecords)
+    }
+
     fn start_mode(
         connection: &'connection mut Connection,
         mode: VerificationMode,
@@ -135,11 +158,19 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             }
             if matches!(
                 mode,
-                VerificationMode::CompactionClosure | VerificationMode::LedgerProjection
+                VerificationMode::CompactionClosure
+                    | VerificationMode::LedgerProjection
+                    | VerificationMode::DerivedRecords
             ) {
                 closure::reject_hidden_rowids(&transaction)?;
             }
-            let uncompacted = if matches!(mode, VerificationMode::LedgerProjection) {
+            if matches!(mode, VerificationMode::DerivedRecords) {
+                derived::reject_hidden_rowids(&transaction)?;
+            }
+            let uncompacted = if matches!(
+                mode,
+                VerificationMode::LedgerProjection | VerificationMode::DerivedRecords
+            ) {
                 projection::reject_hidden_rowids(&transaction)?;
                 projection::compaction_tables_empty(&transaction)?
             } else {
@@ -197,6 +228,54 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| session_error())?;
+        if let SessionState::Derived(progress) = previous {
+            let phase = progress.phase;
+            let checked = (|| {
+                if data_version(&transaction)? != self.data_version {
+                    return Err(session_error());
+                }
+                derived::scan_batch(
+                    &transaction,
+                    *progress,
+                    self.cutoff,
+                    self.source_index_required,
+                    cancelled,
+                )
+            })();
+            return match checked {
+                Ok(Some((progress, usage, exhausted))) if !cancelled() => {
+                    transaction.commit().map_err(|_| session_error())?;
+                    if !self.connection.is_autocommit() {
+                        return Err(session_error());
+                    }
+                    let next = if exhausted {
+                        progress.next_phase()
+                    } else {
+                        Some(progress)
+                    };
+                    if let Some(progress) = next {
+                        self.state = SessionState::Derived(Box::new(progress));
+                        Ok(FrozenOperationVerificationStep::DerivedRecordsPending {
+                            phase: DerivedVerificationPhase::Derived(phase),
+                            usage,
+                        })
+                    } else {
+                        self.state = SessionState::Finished;
+                        Ok(FrozenOperationVerificationStep::DerivedRecordsVerified(
+                            usage,
+                        ))
+                    }
+                }
+                Ok(_) => {
+                    transaction.rollback().map_err(|_| session_error())?;
+                    Ok(FrozenOperationVerificationStep::Cancelled)
+                }
+                Err(error) => {
+                    transaction.rollback().map_err(|_| session_error())?;
+                    Err(error)
+                }
+            };
+        }
         let checked = (|| {
             // Must be read under the acquired writer lock, not before BEGIN.
             if data_version(&transaction)? != self.data_version {
@@ -212,16 +291,17 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                 (_, VerificationPhase::Compaction(phase)) => {
                     closure::scan_batch(&transaction, phase, after, self.cutoff, cancelled)
                 }
-                (VerificationMode::LedgerProjection, VerificationPhase::Projection(phase)) => {
-                    projection::scan_batch(
-                        &transaction,
-                        phase,
-                        after,
-                        self.cutoff,
-                        self.source_index_required,
-                        cancelled,
-                    )
-                }
+                (
+                    VerificationMode::LedgerProjection | VerificationMode::DerivedRecords,
+                    VerificationPhase::Projection(phase),
+                ) => projection::scan_batch(
+                    &transaction,
+                    phase,
+                    after,
+                    self.cutoff,
+                    self.source_index_required,
+                    cancelled,
+                ),
                 _ => Err(session_error()),
             }?;
             Ok(batch.map(|(next, usage, exhausted)| (phase, next, usage, exhausted)))
@@ -232,7 +312,10 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                 if !self.connection.is_autocommit() {
                     return Err(session_error());
                 }
-                if matches!(self.mode, VerificationMode::LedgerProjection) {
+                if matches!(
+                    self.mode,
+                    VerificationMode::LedgerProjection | VerificationMode::DerivedRecords
+                ) {
                     let reported = match phase {
                         VerificationPhase::Compaction(p) => LedgerProjectionPhase::Compaction(p),
                         VerificationPhase::Projection(p) => LedgerProjectionPhase::Projection(p),
@@ -253,6 +336,13 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                         Some(phase)
                     };
                     let Some(next_phase) = next_phase else {
+                        if matches!(self.mode, VerificationMode::DerivedRecords) {
+                            self.state = SessionState::Derived(Box::new(derived::Progress::new()));
+                            return Ok(FrozenOperationVerificationStep::DerivedRecordsPending {
+                                phase: DerivedVerificationPhase::Prerequisite(reported),
+                                usage: usage.into(),
+                            });
+                        }
                         self.state = SessionState::Finished;
                         return Ok(FrozenOperationVerificationStep::LedgerProjectionVerified(
                             usage,
@@ -262,6 +352,12 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                         after: if exhausted { 0 } else { next },
                         phase: next_phase,
                     };
+                    if matches!(self.mode, VerificationMode::DerivedRecords) {
+                        return Ok(FrozenOperationVerificationStep::DerivedRecordsPending {
+                            phase: DerivedVerificationPhase::Prerequisite(reported),
+                            usage: usage.into(),
+                        });
+                    }
                     return Ok(FrozenOperationVerificationStep::LedgerProjectionPending {
                         phase: reported,
                         usage,

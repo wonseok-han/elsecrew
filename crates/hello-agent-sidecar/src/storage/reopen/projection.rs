@@ -271,7 +271,7 @@ fn number(value: &Value, key: &str) -> Result<u64, SidecarError> {
         .filter(|n| *n <= hello_agent_protocol::MAX_SEQUENCE)
         .ok_or_else(session_error)
 }
-fn protocol_value(value: &Value) -> Value {
+pub(super) fn protocol_value(value: &Value) -> Value {
     let mut mapped = Map::new();
     for (key, value) in value.as_object().expect("fixed SQL row") {
         let mut words = key.split('_');
@@ -287,7 +287,7 @@ fn protocol_value(value: &Value) -> Value {
     }
     Value::Object(mapped)
 }
-fn event(value: &Value) -> Result<(u64, LedgerEventV1), SidecarError> {
+pub(super) fn event(value: &Value) -> Result<(u64, LedgerEventV1), SidecarError> {
     let rowid = number(value, "rowid")?;
     if rowid == 0 {
         return Err(session_error());
@@ -299,7 +299,7 @@ fn event(value: &Value) -> Result<(u64, LedgerEventV1), SidecarError> {
     validate_event(&event)?;
     Ok((rowid, event))
 }
-fn validate_event(event: &LedgerEventV1) -> Result<Map<String, Value>, SidecarError> {
+pub(super) fn validate_event(event: &LedgerEventV1) -> Result<Map<String, Value>, SidecarError> {
     classify_operation_v1(&[], event).map_err(|_| session_error())?;
     let payload: Value =
         serde_json::from_str(&event.canonical_json_payload).map_err(|_| session_error())?;
@@ -329,7 +329,42 @@ fn synthesized_index(
     )
 }
 
-fn verify_ledger(row: &Row, cutoff: u64, require_index: bool) -> Result<(), SidecarError> {
+pub(super) struct SourceFacts {
+    pub(super) rowid: u64,
+    pub(super) event: LedgerEventV1,
+    pub(super) introduced: Option<String>,
+    pub(super) indexed: bool,
+}
+
+// R3B uses precisely the six source/predecessor roles, not projection loads.
+// Callers must reserve the complete returned cost in their enclosing transaction
+// before load_source; no source Strings are decoded by source_cost.
+fn source_plan() -> Vec<Read> {
+    read_plan(ProjectionPhase::Ledger)
+        .into_iter()
+        .take(6)
+        .collect()
+}
+pub(super) fn source_cost(
+    connection: &Connection,
+    rowid: u64,
+) -> Result<(usize, usize), SidecarError> {
+    preflight(connection, &source_plan(), ProjectionPhase::Ledger, rowid)
+}
+pub(super) fn load_source(
+    connection: &Connection,
+    rowid: u64,
+    cutoff: u64,
+    require_index: bool,
+) -> Result<SourceFacts, SidecarError> {
+    source_facts(
+        &load_row(connection, &source_plan(), rowid)?,
+        cutoff,
+        require_index,
+    )
+}
+
+fn source_facts(row: &Row, cutoff: u64, require_index: bool) -> Result<SourceFacts, SidecarError> {
     let (rowid, current) = event(row.required(Role::Event)?)?;
     let prefix = row
         .get(Role::Prefix)
@@ -398,7 +433,7 @@ fn verify_ledger(row: &Row, cutoff: u64, require_index: bool) -> Result<(), Side
     let current_index = match row.get(Role::Index) {
         Some(index) => protocol_value(index),
         None if require_index => return Err(session_error()),
-        None => synthesized_index(rowid, &current, introduced)?,
+        None => synthesized_index(rowid, &current, introduced.clone())?,
     };
     validate_storage_event_source_index_transition_v1(
         rowid,
@@ -408,9 +443,19 @@ fn verify_ledger(row: &Row, cutoff: u64, require_index: bool) -> Result<(), Side
         predecessor.as_ref().map(|(_, event)| event),
     )
     .map_err(|_| session_error())?;
-    if number(row.required(Role::Latest)?, "rowid")? == rowid {
-        let phase = ProjectionPhase::from_aggregate(&current.aggregate_type)?;
-        verify_projection(phase, row.required(Role::Projection(phase))?, &current)?;
+    Ok(SourceFacts {
+        rowid,
+        event: current,
+        introduced,
+        indexed: row.get(Role::Index).is_some(),
+    })
+}
+
+fn verify_ledger(row: &Row, cutoff: u64, require_index: bool) -> Result<(), SidecarError> {
+    let source = source_facts(row, cutoff, require_index)?;
+    if number(row.required(Role::Latest)?, "rowid")? == source.rowid {
+        let phase = ProjectionPhase::from_aggregate(&source.event.aggregate_type)?;
+        verify_projection(phase, row.required(Role::Projection(phase))?, &source.event)?;
     }
     Ok(())
 }

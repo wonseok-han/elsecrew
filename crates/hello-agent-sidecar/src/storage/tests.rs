@@ -10,6 +10,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 mod reopen_closure;
+mod reopen_derived;
 mod reopen_projection;
 
 type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
