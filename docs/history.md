@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3 시작 경계 조사)
+
+- **시작·기준**: clean `m5/coding-agent-ide`·`04c1b69`에서 R3를 이어간다. 현재 코드·공유 규칙·R2 계약과 검증 결과를 확인했고 R2 focused 15개(36.21초), Node lifetime 17개·protocol lifetime 10개가 통과했다. 로그는 `/tmp/hello-agent-r3-{baseline,node-baseline,protocol-baseline}.log`다. 기존 미커밋 변경은 없었다.
+- **발견·계약**: `proposals/m5-storage-reopen-verification.md` §7에 R3A bounded ledger/projection, R3B 파생 기록, R3C 실제 startup/admission의 완료선을 구분했다. 현행 replay는 snapshot upsert여서 indexed predecessor/latest-source 검증으로 전체 이력 할당을 줄일 수 있다. pending은 파생 기록 미생성이 정상일 수 있고, startup은 일부 복구 쓰기 뒤 actual-run 검증을 하므로 read-only semantic preflight가 별도로 필요하다.
+- **보존·다음**: SQLite 전체 integrity/FK 검사와 Electron ready hard timeout 3초를 유지한다. 검증을 지키면서 시작 시간 계약을 만족할 수 없는 경우 사용자 승인 없이 early-ready·검사 생략·timeout 연장을 하지 않는다. R3A 계약을 독립 검토한 뒤 별도 worktree에서 구현한다. 전체 R3·100개 초과 제품 재오픈·G5D는 아직 미완료이며 `main` 병합·push는 하지 않았다.
+- **검토·빌드 환경**: 별도 코드 검토자가 §7 R3A 계약을 PASS로 판정했다. 빌드 진단은 pnpm 11.17의 optimistic repeat-install이 stale metadata와 `node_modules` 디렉터리 존재만 믿어 실제 package/`.bin` 부재를 놓치는 것을 확인했다. `--no-optimistic-repeat-install`을 더한 offline/frozen/ignore-scripts 복원을 시도했지만 supply-chain policy 확인 후 registry `ENOTFOUND` 재시도가 발생해 해당 PID 49319만 TERM으로 종료했다(exit 143). 도구·설정·lockfile 변경이나 정책 완화는 없으며 앱 빌드는 미복구다. 증거: `.artifacts/m5-qa/g5d-build-environment-diagnosis.json`, `/tmp/hello-agent-r3-dependency-restore.log`.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R2 독립 검토·통합 QA)
 
 - **검토·통합**: 독립 검토를 통과한 계약 `55083af`에서 기능 `852dc7c`를 만들고 exact-commit 코드 리뷰 PASS 뒤 `9327bcd`로 통합했다. 두 구현 tree가 같음을 확인했고 기존 현황 기록·기능 branch 워크로그를 모두 보존했다. 최신 QA와 증거를 대조한 독립 최종 gate도 `9327bcd`의 R2 범위에 한해 PASS다. R2는 압축 관련 source/prefix/message의 내부 검증이며 제품 admission 또는 전체 G5D 완료가 아니다.
@@ -332,6 +339,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **R3 startup/admission의 추가 경계(2026-09-02)**: pending materialization은 일부 파생 기록 미생성이 정상이며 ready는 검증 의무이지 proof가 아니다. 현행 startup의 복구 쓰기보다 앞선 read-only semantic preflight가 필요하다. SQLite 전체 integrity/FK 검사와 Electron ready 3초는 batch 예산과 별개다. 둘을 몰래 완화하지 않고 R3A/B/C와 사용자 결정이 필요한 변경을 `proposals/m5-storage-reopen-verification.md` §7에 분리한다.
 - **R2 내부 closure 구현 경계(2026-09-02)**: `start_compaction_closure`의 3-phase 결과는 admission이 아니며 product >100 거부를 해제하지 않는다. 각 행의 고정 dependency graph 전체를 먼저 byte-preflight하므로 뒤늦은 oversized dependency도 무한 Pending으로 남지 않는다. TeamMessage 64 KiB text cap과 메시지 단계의 1 MiB 합계 예산을 혼동하지 않는다. 후기 corruption fixture는 frozen message 삽입 순서를 source rowid로 고정해야 실제 100행 이후 위치를 보장할 수 있다.
 - **R2 내부 검증 구현·범위(2026-09-02)**: `9327bcd`의 같은 connection 세션이 operations→prefixes→frozen messages를 다회 처리한다. 삭제 frozen source↔정확한 sequence prefix/baseline, 삭제 chat introduction↔frozen message↔해당 normalized message가 대상이다. 참조되지 않는 정상 historical baseline을 금지하지 않으며 전체 derived-table replay와 제품 admission은 R3에 남긴다. chat의 동일 durable sequence는 null-or-same snapshot이 허용된다는 protocol 규칙을 보존한다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §6, 현행 구현은 `architecture.md`를 확인한다.
 - **V8 operation 검증 전구체는 admission이 아니다(2026-09-02)**: `storage::reopen` 내부 세션은 mutable connection borrow + 매 batch의 transaction-under-lock `data_version` 비교로 frozen operation만 다회 검증한다(100행·canonical 1 MiB·별도 raw closure 8 MiB). 완료·취소·실패는 재사용하지 않으며 durable cursor/proof를 쓰지 않는다. prefix/message/replay/integrity와 product activation은 별도 게이트이고 제품의 100개 초과 재오픈 거부는 유지한다. 같은 프로세스라도 별도 SQLite 연결의 commit은 외부 변경이며 production exclusive-lock 정책을 느슨하게 바꾸지 않는다.

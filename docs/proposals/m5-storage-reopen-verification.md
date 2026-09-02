@@ -97,3 +97,44 @@ chat introduction 여부는 기존 protocol의 transition 규칙을 따른다. d
 6. focused tests, full sidecar/stdio, protocol·Node lifetime, scoped clippy, Rust 2021 format, diff check, 독립 코드 리뷰와 최신 통합 QA를 통과한다. 환경 문제로 실행하지 못한 전체 앱/누적 하네스는 별도 미완료로 기록한다.
 
 단일 Rust 담당이 `storage/reopen.rs`와 그 하위 모듈·`storage/tests.rs`의 회귀를 소유한다. 기존 `storage.rs` helper의 추출이 필요하면 동작 보존에 한정한다. schema/protocol/lockfile, startup/append/lifetime admission, writer/delete/scheduler/status, Electron/UI는 변경 금지다. 이 경계를 넘겨야 하면 구현을 멈추고 계약 담당에게 보고한다.
+
+## 7. R3 — 전체 재오픈과 실행 허용 연결
+
+### 7.1 완료선과 구현 순서
+
+R3의 완료선은 내부 검증 결과 추가가 아니라 **100개 초과 압축 기록의 제품 재오픈 → 복구 → app-instance 기록 → 정상 후속 append/lifetime 처리**다. 같은 DB의 손상·검증 후 외부 변경은 첫 쓰기와 `system.ready` 전에 거부해야 한다. 이를 다음 순서로 구현·독립 검토한다. 하위 단계 통과를 R3 또는 G5D 완료로 올리지 않는다.
+
+1. **R3A: 원장과 projection 검증** — 전체 `Vec` replay 대신 indexed predecessor와 마지막 snapshot을 사용해 기존 결정적 replay와 같은 결과를 bounded scan으로 검증한다. R2 압축 closure와 같은 연결·변경 감지 수명에 묶는다. 제품 경로는 아직 바꾸지 않는다.
+2. **R3B: 파생 기록 검증** — source index·receipt·normalized message·historical baseline·workspace 등 저장된 파생 기록을 원본과 양방향 대조한다. 기존 materialization 상태에 따라 아직 없는 기록과 손상된 기록을 구분한다.
+3. **R3C: startup/admission 통합** — 기존 SQLite integrity/FK 검사와 복구 대상의 읽기 전용 사전 검증을 완료한 뒤, Storage 내부의 같은 연결에만 귀속된 실행 허용 상태를 만든다. open·복구·app-instance·append·lifetime이 이를 실제로 소비하도록 연결한다. 검증 완료와 첫 mutation 사이, 이후 mutation 사이의 변경 경주 및 같은 연결 내부 쓰기도 다룬다.
+
+R3B/C의 구체적인 쓰기 계약은 R3A의 검토 결과를 반영해 별도로 고정한다. R3A에 후속 단계의 공개 API·영속 proof·실행 허용 boolean을 미리 만들지 않는다. 이전 프로세스의 완료 표시나 materialization `ready` 자체는 검증 증거가 아니다.
+
+### 7.2 기존 안전·호환 계약
+
+- `pending + absent` 또는 `pending + pending`은 migration/append 이후 가능한 정상 상태다. append는 event와 source index를 쓰고 기존 `ready`를 `pending`으로 돌리지만 모든 receipt/message/baseline을 즉시 만들지 않는다. 따라서 pending에서 모든 파생 기록의 존재를 무조건 요구하지 않는다. **존재하는 기록은 항상 원본에 결속하고**, ready라면 해당 단계가 약속한 전체 coverage를 검사한다. 압축으로 삭제된 source에 필요한 frozen/prefix/message closure는 pending이어도 생략하지 않는다.
+- 현행 startup은 저장소 복구를 먼저 쓰고 actual-run 검증을 뒤에 한다. R3C는 ledger/projection 일치만으로 복구 의미까지 검증했다고 주장하지 않는다. 복구 candidate와 연결된 chat/project, actual persisted evidence를 읽기 전용으로 먼저 검사하고 DB/파일시스템 변경은 그 뒤에 실행한다. poisoned·identityless recovery의 잠금과 fail-closed 동작을 유지한다.
+- `PRAGMA integrity_check`와 `foreign_key_check`는 SQLite 전체 엔진 검사이며 100행/1 MiB batch라고 설명하지 않는다. 기존 검사를 생략하거나 `quick_check`로 바꾸지 않는다. 중단 시 완료로 처리하지 않으며 재시도는 처음부터다.
+- Electron의 현행 ready hard timeout 3초와 ready 이전 실패 시 중단은 유지한다. 충분한 데이터로 실제 시작 시간을 측정한다. 전체 검증을 지키면서 이 계약을 충족할 수 없다면 별도 시작 진행 표시·시간 제한 변경안을 사용자에게 승인받는다. 검증 전 ready나 임의 timeout 연장으로 우회하지 않는다.
+- schema V8·protocol·사용자 설정·exclusive SQLite 잠금·권한은 유지한다. 실제 compaction writer/delete, scheduler/status, 실제 provider·사용자 프로젝트·Windows 시험은 별도 게이트다.
+
+### 7.3 R3A의 원장·projection 동등성
+
+현행 replay는 각 aggregate의 마지막 canonical snapshot에 `last_event_sequence`를 넣는 upsert다. R3A는 이 성질을 사용하되 원장 전체를 읽거나 aggregate별 전체 이력을 재귀 탐색하지 않는다.
+
+- R2의 exact schema/control·압축 closure를 같은 private 세션에서 검증한 뒤 live events와 다섯 projection table을 각각 keyset으로 스캔한다. 정상 uncompacted/empty V8에는 terminal-compaction proof를 요구하지 않으며, 압축 관련 table의 bounded exact-empty 확인 없이 R2를 건너뛰지 않는다. app-instance는 frozen source/prefix를 허용하지 않는다. 기존 R1/R2의 진입점·결과·제품 동작은 보존한다.
+- live event마다 기존 event 형식·canonical payload·aggregate ID를 검사한다. sequence 1부터 시작하거나 검증된 최신 compacted prefix 바로 다음 retained anchor여야 한다. 이후 source는 같은 aggregate의 정확한 sequence-1 predecessor와 이전 rowid 순서로 결속한다. gap·역순·prefix 아래 남은 live source·anchor 누락을 거부한다. prefix/baseline의 신뢰는 R2가 같은 세션에서 검사한 사실에만 의존한다.
+- 각 aggregate의 마지막 live event는 반드시 해당 projection과 일치해야 한다. projection 쪽도 마지막 source를 역조회해 extra projection·누락·stale sequence를 거부한다. 프로젝트/채팅/실행/잠금의 JSON과 별도 indexed column, app-instance의 모든 typed column을 현재 replay/column 검사와 같은 의미로 비교한다. JSON의 공백이나 키 순서 차이를 새로운 손상 기준으로 만들지 않는다.
+- source index가 존재하면 exact source 및 chat transition과 결속하고, ready의 누락 index는 거부한다. pending의 미생성 index는 허용한다. predecessor index가 없으면 exact live predecessor에서 비교에 필요한 사실을 구성하며 receipt나 현재 projection을 predecessor 권위로 사용하지 않는다. 전체 index의 orphan/역방향 coverage와 나머지 파생 table 검증은 R3B다. chat의 null-or-same snapshot 규칙을 유지한다.
+- 모든 primary scan은 rowid keyset 최대 100행이며 0 이하 rowid를 숨길 수 없어야 한다. primary canonical 입력 합계 1 MiB, 별도 실제 읽는 종속 UTF-8 합계 8 MiB를 **decode 전** 검사한다. projection phase는 저장 snapshot(typed app-instance는 해당 필드 입력)을 primary로 계산한다. exact/최신 indexed lookup과 고정 수의 종속 입력만 허용하며 `OFFSET`, 전체-history `Vec`/map/set, 전역 정렬/집계를 추가하지 않는다.
+- 같은 연결 독점 차용, 매 batch `BEGIN IMMEDIATE` 안의 최초 `data_version` 대조, commit 후에만 cursor/phase publish, 취소/오류/COMMIT 불확실성 후 전체 세션 폐기를 유지한다. 마지막 결과도 정보성이며 Storage가 받는 admission token이 아니다.
+
+### 7.4 R3A 합격 기준과 소유권
+
+1. 빈/미압축/pending/ready V8, aggregate가 섞인 100행 초과 live ledger와 다섯 projection, 100개 초과 prefix/message의 정상 압축 fixture를 여러 호출로 완료한다. 작은 정상 fixture의 판정은 기존 deterministic replay와 대조한다.
+2. 첫 행과 후반부의 payload/ID·sequence gap·역순 rowid·누락/extra/stale projection·indexed column/evidence 불일치·source index/chat transition 변조를 거부한다. 삭제 source와 retained anchor 경계를 검사한다.
+3. 100행·exact 1 MiB/+1·8 MiB/+1·다중 바이트 입력·남은 예산 양보를 검증하고, 주요 SQL query plan의 keyset/exact index 사용을 확인한다. 예산을 넘긴 row는 decode하거나 cursor를 전진시키지 않는다.
+4. phase 전환·late batch·마지막 완료 뒤 외부 commit, entry/mid/precommit 취소, 실제 COMMIT 거부 후 재사용 불가와 DB schema/rows/file bytes 무변경을 확인한다.
+5. 기존 R1/R2, focused Rust, full sidecar/stdio, protocol/Node lifetime, scoped clippy·Rust 2021 format·diff check, 독립 exact-commit 리뷰와 최신 통합 QA를 통과한다. 제품의 100개 초과 거부와 기존 startup/append/lifetime 경로는 그대로임을 확인한다.
+
+단일 Rust 구현 담당이 `storage/reopen.rs` 및 하위 모듈, `storage/tests.rs` 및 하위 회귀, 자기 branch의 `docs/history.md`를 소유한다. `storage.rs`는 module 등록·설명 또는 동작 보존 helper 추출만 허용한다. schema/protocol/golden/의존성/lockfile, 실제 open/append/lifetime·복구 admission, Electron/UI, scheduler/writer/status는 변경 금지다. 통합 담당은 이 문서·현행 구조·색인·통합 워크로그를 소유한다. 경계를 넘겨야 하면 중단하고 보고한다.
