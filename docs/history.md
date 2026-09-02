@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 테스트 중간 검토)
+
+- **진행**: 별도 derived worktree에서 정상/손상·중첩 탐색·예산·수명 시험을 구현 중이다. 작업자 stdout의 탐색용 16개 집중 test는 92.21초에 통과했으나 raw log 파일은 저장하지 않았고 추가 회귀 이전 결과다. 최종 feature commit·전체 회귀·통합 QA의 대체 증거로 사용하지 않는다. root는 제품 진입점 변경 없이 private 모듈/테스트에 한정된 현재 diff를 대조했다.
+- **독립 중간 검토**: 외부 변경 직후 snapshot 기준, pending workspace의 100개 이후 live→frozen 탐색 부재, ready extra/stale row, workspace candidate 전용 byte 경계, retained identity/workspace/member의 취소/외부 변경 증거를 보강하도록 요청했다. 세부는 `.artifacts/m5-review/g5d-r3b-test-preaudit.json`이며 구현자는 추가 중이다. R3B 완료·최종 승인이나 제품 활성화로 처리하지 않는다.
+- **다음**: 마지막 추가 fixture와 focused/R1/R2/R3A/full sidecar·stdio/clippy/format 검증의 raw log를 확보한 뒤 exact feature commit 독립 검토 → 최신 clean 통합 QA → 최종 gate 순서로 이어간다. R3C 조사 문서 `d51ca37`는 독립 문구 검토를 통과했으며 기존 예산·100-operation fence는 유지한다. main 병합·push는 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C 활성화 호환성 조사)
 
 - **새 발견**: 독립 설계 분석과 root 코드 대조에서 기존 public text 16×64 KiB 허용량에 metadata를 더한 actual-run snapshot이 R3A/B primary 1 MiB를 넘을 수 있음을 확인했다. 읽기 검증이 허용하는 index-empty pending과 chat 쓰기가 요구하는 indexed predecessor도 구분했다. `proposals/m5-storage-reopen-verification.md` §9에 snapshot 호환·검증 후 catch-up 순서·복구 preflight·전체 시작 시간의 후속 선행 조건을 기록했으며 기존 예산/쓰기 계약이나 제품 경로는 변경하지 않았다.
