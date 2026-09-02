@@ -1,3 +1,4 @@
+use super::reopen::{FrozenOperationVerificationSession, FrozenOperationVerificationStep};
 use super::*;
 use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use hello_agent_protocol::storage_lifetime_v1::{
@@ -2237,7 +2238,7 @@ fn terminal_compacted_v8_reopens_replays_appends_and_classifies_deleted_operatio
     run_bounded_materializer_to_ready(&mut storage);
     insert_exact_v8_frozen_operation(&mut storage, &first, "2026-09-01T11:01:00Z");
     insert_exact_v8_frozen_operation(&mut storage, &second, "2026-09-01T11:01:01Z");
-    let baseline_identity = "project\0project_v8_c1b1\01";
+    let baseline_identity = "project\0project_v8_c1b1\u{0}1";
     let baseline_id = format!(
         "baseline_{}",
         sha256_file_version_v1(baseline_identity.as_bytes())
@@ -2346,6 +2347,14 @@ fn terminal_compacted_v8_reopens_replays_appends_and_classifies_deleted_operatio
 
     verify_v8_compaction_runtime_state(&storage.connection).expect("valid compacted runtime");
     verify_projection_replay(&storage.connection).expect("baseline plus tail replay");
+    let before = database_snapshot(&storage.connection);
+    {
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(matches!(verifier.step(&mut || false).unwrap(),
+        FrozenOperationVerificationStep::FrozenOperationsVerified(usage) if usage.rows == 2));
+    }
+    assert_eq!(database_snapshot(&storage.connection), before);
     drop(storage);
     let mut reopened = Storage::open(&path).expect("terminal compacted v8 reopens");
     let mut retried_with_new_request = first.clone();
@@ -2444,7 +2453,7 @@ fn terminal_compacted_v8_chat_uses_frozen_predecessor_and_reserves_message_ident
             params!["2026-09-01T11:11:02Z", first.operation_id],
         )
         .expect("freeze introduced message");
-    let baseline_identity = "chat\0chat_v8_c1b1\01";
+    let baseline_identity = "chat\0chat_v8_c1b1\u{0}1";
     let baseline_id = format!(
         "baseline_{}",
         sha256_file_version_v1(baseline_identity.as_bytes())
@@ -2735,6 +2744,651 @@ fn run_bounded_materializer_to_ready(storage: &mut Storage) {
         }
     }
     panic!("bounded materializer did not complete");
+}
+
+// These fixtures only write isolated temporary databases, never product state.
+fn seed_reopen_operations(
+    storage: &mut Storage,
+    count: usize,
+    payload_bytes: usize,
+    request_bytes: usize,
+) -> Vec<LedgerEventV1> {
+    let mut sources = Vec::new();
+    for ordinal in 0..count {
+        let project_id = format!("project_reopen_{ordinal}");
+        let empty =
+            canonical_json_v1(json!({"canonical_path":"", "project_id":project_id})).unwrap();
+        let mut source = event(
+            &format!("evt_reopen_{ordinal}"),
+            &format!("op_reopen_{ordinal}"),
+            "project",
+            &project_id,
+            1,
+            json!({"canonical_path":format!("{ordinal:08}{}", "x".repeat(payload_bytes - empty.len() - 8)), "project_id":project_id}),
+            "2026-09-02T01:00:00Z",
+        );
+        source.request_id = (request_bytes > 0).then(|| "r".repeat(request_bytes));
+        assert_eq!(source.canonical_json_payload.len(), payload_bytes);
+        storage.append_event(&source).unwrap();
+        sources.push(source);
+    }
+    for source in &sources {
+        insert_exact_v8_frozen_operation(storage, source, "2026-09-02T01:00:01Z");
+    }
+    let cutoff: i64 = storage
+        .connection
+        .query_row("SELECT coalesce(max(rowid),0) FROM events;", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let proof = json!({"storageCompactionV2PrivateState": {
+        "schemaVersion":1,
+        "cursor":{"schemaVersion":2,"cutoffEventRowid":cutoff,"phase":"finalize",
+                  "afterEventRowid":cutoff,"scanExhausted":true},
+        "operationsVerified":true,"equivalenceVerified":true
+    }});
+    storage.connection.execute(
+        "INSERT INTO maintenance_jobs(job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,created_at,updated_at)
+         VALUES ('compact_reopen','losslessCompaction','succeeded',?1,?2,?2,?2,?2,?2);",
+        params![proof.to_string(), "2026-09-02T01:00:02Z"]).unwrap();
+    sources
+}
+
+fn mutate_reopen_fixture(
+    connection: &Connection,
+    trigger_name: &str,
+    sql: &str,
+    parameters: impl rusqlite::Params,
+) {
+    let trigger: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1;",
+            [trigger_name],
+            |row| row.get(0),
+        )
+        .unwrap();
+    connection
+        .execute_batch(&format!("DROP TRIGGER {trigger_name};"))
+        .unwrap();
+    connection.execute(sql, parameters).unwrap();
+    connection.execute_batch(&trigger).unwrap();
+}
+
+#[test]
+fn frozen_reopen_session_scans_over_one_hundred_without_changing_db_or_product_fences() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    let sources = seed_reopen_operations(&mut storage, 201, 512, 0);
+    storage.checkpoint().unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let snapshot = database_snapshot(&storage.connection);
+    let initial_marker: i64 = storage
+        .connection
+        .query_row("PRAGMA data_version;", [], |row| row.get(0))
+        .unwrap();
+    {
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        for expected_rows in [100, 100] {
+            let FrozenOperationVerificationStep::Pending(usage) =
+                verifier.step(&mut || false).unwrap()
+            else {
+                panic!("pending");
+            };
+            assert_eq!(usage.rows, expected_rows);
+            assert_eq!(usage.canonical_source_bytes, 512 * expected_rows);
+            assert!(usage.encoded_closure_bytes <= 8 * 1_048_576);
+        }
+        assert!(matches!(verifier.step(&mut || false).unwrap(),
+        FrozenOperationVerificationStep::FrozenOperationsVerified(usage) if usage.rows == 1));
+        // Terminal outcome cannot be queried repeatedly or used as admission.
+        assert!(verifier.step(&mut || false).is_err());
+    }
+    assert!(storage.connection.is_autocommit());
+    let marker: i64 = storage
+        .connection
+        .query_row("PRAGMA data_version;", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        marker, initial_marker,
+        "same connection's read-only transactions preserve marker"
+    );
+    assert_eq!(database_snapshot(&storage.connection), snapshot);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    for source in [
+        &sources[0],
+        &event(
+            "evt_new",
+            "op_new",
+            "project",
+            "project_new",
+            1,
+            json!({"project_id":"project_new","canonical_path":"/fixture/new"}),
+            "2026-09-02T01:00:03Z",
+        ),
+    ] {
+        assert_eq!(
+            storage.append_event(source).unwrap_err().kind(),
+            "storageSchemaMismatch"
+        );
+    }
+    assert_eq!(database_snapshot(&storage.connection), snapshot);
+    drop(storage);
+    assert_eq!(
+        Storage::open(&path).err().unwrap().kind(),
+        "storageSchemaMismatch"
+    );
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn frozen_reopen_session_exact_hundred_finishes_without_empty_drain_call() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_reopen_operations(&mut storage, 100, 512, 0);
+    let mut verifier = FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+    assert!(matches!(verifier.step(&mut || false).unwrap(),
+        FrozenOperationVerificationStep::FrozenOperationsVerified(usage) if usage.rows == 100));
+}
+
+#[test]
+fn frozen_reopen_session_yields_on_canonical_budget_and_rescans_from_zero_after_drop() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_reopen_operations(&mut storage, 3, 600_000, 0);
+    {
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(
+            matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage)
+        if usage.rows == 1 && usage.canonical_source_bytes == 600_000)
+        );
+    }
+    let mut verifier = FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+    let mut total = 0;
+    for ordinal in 0..3 {
+        let outcome = verifier.step(&mut || false).unwrap();
+        let usage = match outcome {
+            FrozenOperationVerificationStep::Pending(usage) if ordinal < 2 => usage,
+            FrozenOperationVerificationStep::FrozenOperationsVerified(usage) if ordinal == 2 => {
+                usage
+            }
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(usage.rows, 1);
+        assert_eq!(usage.canonical_source_bytes, 600_000);
+        total += usage.canonical_source_bytes;
+    }
+    assert!(total > COMPACTION_VERIFY_MAX_PAYLOAD_BYTES);
+}
+
+#[test]
+fn frozen_reopen_session_accepts_exact_mib_and_rejects_single_oversize_terminally() {
+    for size in [1_048_576, 1_048_577] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, 1, size, 0);
+        let before = database_snapshot(&storage.connection);
+        {
+            let mut verifier =
+                FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+            let outcome = verifier.step(&mut || false);
+            if size == 1_048_576 {
+                assert!(
+                    matches!(outcome.unwrap(), FrozenOperationVerificationStep::FrozenOperationsVerified(usage)
+                if usage.rows == 1 && usage.canonical_source_bytes == size)
+                );
+            } else {
+                assert_eq!(outcome.unwrap_err().kind(), "storageSchemaMismatch");
+                assert!(verifier.step(&mut || false).is_err());
+            }
+        }
+        assert_eq!(database_snapshot(&storage.connection), before);
+    }
+}
+
+#[test]
+fn frozen_reopen_session_secondary_budget_yields_but_impossible_single_closure_fails() {
+    for request_size in [1_500_000, 3_000_000] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, 2, 512, request_size);
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        if request_size == 1_500_000 {
+            assert!(
+                matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage)
+                if usage.rows == 1 && usage.canonical_source_bytes == 512 && usage.encoded_closure_bytes > 4_000_000)
+            );
+            assert!(matches!(verifier.step(&mut || false).unwrap(),
+                FrozenOperationVerificationStep::FrozenOperationsVerified(usage) if usage.rows == 1));
+        } else {
+            assert!(verifier.step(&mut || false).is_err());
+            assert!(
+                verifier.step(&mut || false).is_err(),
+                "no infinite pending retry"
+            );
+        }
+    }
+}
+
+#[test]
+fn frozen_reopen_session_preflights_all_large_encoded_dependencies_before_decoding() {
+    for (table, column, trigger) in [
+        (
+            "frozen_operation_sources",
+            "canonical_record_json",
+            "frozen_operation_sources_append_only_update",
+        ),
+        (
+            "frozen_operation_sources",
+            "request_id",
+            "frozen_operation_sources_append_only_update",
+        ),
+        (
+            "operation_receipts",
+            "canonical_payload_json",
+            "operation_receipts_compaction_immutable_update",
+        ),
+        (
+            "operation_receipts",
+            "event_id",
+            "operation_receipts_compaction_immutable_update",
+        ),
+        (
+            "events",
+            "canonical_json_payload",
+            "events_are_append_only_update",
+        ),
+        ("events", "request_id", "events_are_append_only_update"),
+        (
+            "event_source_index",
+            "introduced_message_id",
+            "event_source_index_append_only_update",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, 1, 512, 0);
+        // Multibyte data proves byte length, not SQLite character length, is used.
+        let oversized = "한".repeat(3_000_000);
+        mutate_reopen_fixture(
+            &storage.connection,
+            trigger,
+            &format!("UPDATE {table} SET {column}=?1;"),
+            [&oversized],
+        );
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        let error = verifier.step(&mut || false).unwrap_err();
+        assert_eq!(
+            error.detail(),
+            "frozen operation verification session is invalid",
+            "{table}.{column}: rejected by length gate"
+        );
+        assert!(verifier.step(&mut || false).is_err());
+    }
+}
+
+#[test]
+fn frozen_reopen_session_rejects_digest_source_receipt_and_late_corruption() {
+    for (table, column, value, trigger, count, target) in [
+        (
+            "frozen_operation_sources",
+            "canonical_payload_digest",
+            "0".repeat(64),
+            "frozen_operation_sources_append_only_update",
+            1,
+            0,
+        ),
+        (
+            "frozen_operation_sources",
+            "record_digest",
+            "0".repeat(64),
+            "frozen_operation_sources_append_only_update",
+            1,
+            0,
+        ),
+        (
+            "frozen_operation_sources",
+            "canonical_record_json",
+            "{}".into(),
+            "frozen_operation_sources_append_only_update",
+            1,
+            0,
+        ),
+        (
+            "operation_receipts",
+            "canonical_payload_digest",
+            "0".repeat(64),
+            "operation_receipts_compaction_immutable_update",
+            1,
+            0,
+        ),
+        (
+            "operation_receipts",
+            "event_id",
+            "evt_corrupt".into(),
+            "operation_receipts_compaction_immutable_update",
+            1,
+            0,
+        ),
+        (
+            "events",
+            "request_id",
+            "request_corrupt".into(),
+            "events_are_append_only_update",
+            1,
+            0,
+        ),
+        (
+            "event_source_index",
+            "introduced_message_id",
+            "evt_corrupt".into(),
+            "event_source_index_append_only_update",
+            1,
+            0,
+        ),
+        (
+            "frozen_operation_sources",
+            "record_digest",
+            "0".repeat(64),
+            "frozen_operation_sources_append_only_update",
+            101,
+            100,
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, count, 512, 0);
+        mutate_reopen_fixture(
+            &storage.connection,
+            trigger,
+            &format!("UPDATE {table} SET {column}=?1 WHERE operation_id=?2;"),
+            params![value, format!("op_reopen_{target}")],
+        );
+        storage.checkpoint().unwrap();
+        let bytes = fs::read(&path).unwrap();
+        let before = database_snapshot(&storage.connection);
+        {
+            let mut verifier =
+                FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+            if count > 100 {
+                assert!(
+                    matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100)
+                );
+            }
+            assert_eq!(
+                verifier.step(&mut || false).unwrap_err().kind(),
+                "storageSchemaMismatch",
+                "{table}.{column}"
+            );
+            assert!(verifier.step(&mut || false).is_err());
+        }
+        assert!(storage.connection.is_autocommit());
+        assert_eq!(database_snapshot(&storage.connection), before);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn frozen_reopen_session_external_commits_invalidate_including_after_terminal() {
+    for count in [1, 101] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, count, 512, 0);
+        storage.checkpoint().unwrap();
+        drop(storage);
+        // Production owns an EXCLUSIVE connection. Cross-connection scenarios
+        // use raw, normally locked test connections without changing that policy.
+        let mut connection = Connection::open(&path).unwrap();
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        let external = Connection::open(&path).unwrap();
+        external.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        // An external pre-session commit is part of the initial marker, not a
+        // false invalidation based on a marker obtained from another connection.
+        external
+            .execute(
+                "UPDATE maintenance_jobs SET updated_at='2026-09-02T01:01:00Z';",
+                [],
+            )
+            .unwrap();
+        {
+            let mut verifier = FrozenOperationVerificationSession::start(&mut connection).unwrap();
+            assert!(verifier.step(&mut || false).is_ok());
+            external
+                .execute(
+                    "UPDATE maintenance_jobs SET updated_at='2026-09-02T01:02:00Z';",
+                    [],
+                )
+                .unwrap();
+            assert!(verifier.step(&mut || false).is_err());
+            assert!(verifier.step(&mut || false).is_err());
+        }
+        // New session always starts at zero, even if 100 rows were checked.
+        let mut verifier = FrozenOperationVerificationSession::start(&mut connection).unwrap();
+        let outcome = verifier.step(&mut || false).unwrap();
+        assert!(
+            matches!(outcome, FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100)
+                || count == 1
+        );
+    }
+}
+
+#[test]
+fn frozen_reopen_session_cancellation_at_entry_mid_batch_and_precommit_discards_progress() {
+    for cancel_poll in [1, 2, 51, 102] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, 101, 512, 0);
+        storage.checkpoint().unwrap();
+        let before = database_snapshot(&storage.connection);
+        let bytes = fs::read(&path).unwrap();
+        {
+            let mut verifier =
+                FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+            let mut polls = 0;
+            assert_eq!(
+                verifier
+                    .step(&mut || {
+                        polls += 1;
+                        polls == cancel_poll
+                    })
+                    .unwrap(),
+                FrozenOperationVerificationStep::Cancelled
+            );
+            assert!(verifier.step(&mut || false).is_err());
+        }
+        assert!(storage.connection.is_autocommit());
+        assert_eq!(database_snapshot(&storage.connection), before);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(
+            matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100)
+        );
+    }
+}
+
+#[test]
+fn frozen_reopen_session_busy_begin_invalidates_and_no_lock_survives_a_call() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_reopen_operations(&mut storage, 101, 512, 0);
+    storage.checkpoint().unwrap();
+    drop(storage);
+    let mut connection = Connection::open(&path).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    connection.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let external = Connection::open(&path).unwrap();
+    external.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    let mut verifier = FrozenOperationVerificationSession::start(&mut connection).unwrap();
+    assert!(matches!(
+        verifier.step(&mut || false).unwrap(),
+        FrozenOperationVerificationStep::Pending(_)
+    ));
+    external
+        .execute_batch("BEGIN IMMEDIATE;")
+        .expect("no lock retained across calls");
+    assert!(verifier.step(&mut || false).is_err());
+    external.execute_batch("ROLLBACK;").unwrap();
+    assert!(
+        verifier.step(&mut || false).is_err(),
+        "errors terminally discard progress"
+    );
+}
+
+#[test]
+fn frozen_reopen_session_commit_error_discards_cursor_and_rolls_back() {
+    use std::ffi::{c_char, c_int, c_void, CStr};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // SQLite's real authorizer rejects COMMIT, with no production failure hook.
+    unsafe extern "C" fn deny_commit(
+        context: *mut c_void,
+        action: c_int,
+        argument: *const c_char,
+        _: *const c_char,
+        _: *const c_char,
+        _: *const c_char,
+    ) -> c_int {
+        // SAFETY: the boxed AtomicBool outlives the connection, SQLite supplies a
+        // valid NUL-terminated argument for SQLITE_TRANSACTION, checked for NULL.
+        let reject = unsafe { &*context.cast::<AtomicBool>() };
+        if action == rusqlite::ffi::SQLITE_TRANSACTION
+            && !argument.is_null()
+            && unsafe { CStr::from_ptr(argument) }.to_bytes() == b"COMMIT"
+            && reject.load(Ordering::Relaxed)
+        {
+            rusqlite::ffi::SQLITE_DENY
+        } else {
+            rusqlite::ffi::SQLITE_OK
+        }
+    }
+
+    let reject = Box::new(AtomicBool::new(false));
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_reopen_operations(&mut storage, 101, 512, 0);
+    let before = database_snapshot(&storage.connection);
+    // SAFETY: this test exclusively owns the connection; no SQLite API is called
+    // from the callback. reject remains allocated until after storage is dropped.
+    unsafe {
+        assert_eq!(
+            rusqlite::ffi::sqlite3_set_authorizer(
+                storage.connection.handle(),
+                Some(deny_commit),
+                (&*reject as *const AtomicBool).cast_mut().cast()
+            ),
+            rusqlite::ffi::SQLITE_OK
+        );
+    }
+    {
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(matches!(
+            verifier.step(&mut || false).unwrap(),
+            FrozenOperationVerificationStep::Pending(_)
+        ));
+        reject.store(true, Ordering::Relaxed);
+        assert!(
+            verifier.step(&mut || false).is_err(),
+            "terminal COMMIT must fail"
+        );
+        reject.store(false, Ordering::Relaxed);
+        assert!(
+            verifier.step(&mut || false).is_err(),
+            "cannot resume after completion error"
+        );
+    }
+    assert!(
+        storage.connection.is_autocommit(),
+        "failed COMMIT was rolled back"
+    );
+    assert_eq!(database_snapshot(&storage.connection), before);
+    {
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(
+            matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100)
+        );
+    }
+    drop(storage);
+}
+
+#[test]
+fn frozen_reopen_session_queries_use_keysets_and_exact_dependency_indexes() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    for (query, required_index) in [
+        ("SELECT source_event_rowid,length(CAST(canonical_payload_json AS BLOB)) FROM frozen_operation_sources
+          WHERE source_event_rowid>?1 ORDER BY source_event_rowid LIMIT 100", "frozen_operation_sources_source_rowid"),
+        ("SELECT source_event_rowid FROM frozen_operation_sources WHERE source_event_rowid>?1 ORDER BY source_event_rowid LIMIT 1", "frozen_operation_sources_source_rowid"),
+        ("SELECT r.canonical_payload_json FROM operation_receipts r JOIN frozen_operation_sources f ON r.operation_id=f.operation_id
+          WHERE f.source_event_rowid=?1 LIMIT 1", "sqlite_autoindex_operation_receipts_1"),
+        ("SELECT canonical_json_payload FROM events WHERE rowid=?1 LIMIT 1", "INTEGER PRIMARY KEY"),
+        ("SELECT event_id FROM event_source_index WHERE event_rowid=?1 LIMIT 1", "INTEGER PRIMARY KEY"),
+    ] {
+        let plans: Vec<String> = storage.connection.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap()
+            .query_map([1_i64], |row| row.get(3)).unwrap().map(Result::unwrap).collect();
+        assert!(plans.iter().any(|plan| plan.contains(required_index)), "{query}: {plans:?}");
+        assert!(plans.iter().all(|plan| !plan.contains("SCAN ") && !plan.contains("TEMP B-TREE")), "{query}: {plans:?}");
+    }
+}
+
+#[test]
+fn frozen_reopen_session_rejects_nested_transaction_and_empty_or_out_of_cutoff_sources() {
+    for count in [0, 1] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, count, 512, 0);
+        storage.connection.execute_batch("BEGIN;").unwrap();
+        assert!(FrozenOperationVerificationSession::start(&mut storage.connection).is_err());
+        assert!(
+            !storage.connection.is_autocommit(),
+            "caller transaction untouched"
+        );
+        storage.connection.execute_batch("ROLLBACK;").unwrap();
+        if count == 1 {
+            // A valid-shaped proof with cutoff zero must not hide row one.
+            storage
+                .connection
+                .execute(
+                    "UPDATE maintenance_jobs SET cutoff_json=json_set(cutoff_json,
+                '$.storageCompactionV2PrivateState.cursor.cutoffEventRowid',0,
+                '$.storageCompactionV2PrivateState.cursor.afterEventRowid',0);",
+                    [],
+                )
+                .unwrap();
+        }
+        let mut verifier =
+            FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+        assert!(verifier.step(&mut || false).is_err());
+    }
+}
+
+#[test]
+fn frozen_reopen_session_preflight_rejects_schema_pair_active_and_nonunique_proof() {
+    for mutation in [
+        "DROP INDEX frozen_operation_sources_aggregate;",
+        "UPDATE storage_schema_meta SET materialization_state='failed';",
+        "PRAGMA ignore_check_constraints=ON;
+         INSERT INTO storage_schema_meta SELECT 2,storage_schema_version,protocol_version,migration_state,materialization_state,migrated_at FROM storage_schema_meta;
+         PRAGMA ignore_check_constraints=OFF;",
+        "UPDATE maintenance_jobs SET state='pending',completed_at=NULL;",
+        "UPDATE maintenance_jobs SET cutoff_json='{}';",
+        "INSERT INTO maintenance_jobs(job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,created_at,updated_at)
+         SELECT 'second_proof',job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,created_at,updated_at FROM maintenance_jobs;",
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        seed_reopen_operations(&mut storage, 1, 512, 0);
+        storage.connection.execute_batch(mutation).unwrap();
+        let before = database_snapshot(&storage.connection);
+        assert!(FrozenOperationVerificationSession::start(&mut storage.connection).is_err(), "{mutation}");
+        assert!(storage.connection.is_autocommit());
+        assert_eq!(database_snapshot(&storage.connection), before);
+    }
 }
 
 #[test]

@@ -36,6 +36,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+// Internal operations-only precursor; deliberately not wired into open/admission.
+#[allow(dead_code)]
+pub(crate) mod reopen;
+
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
     include_str!("../../../tests/fixtures/m5/storage-v2/migration-v1-to-v2.sql");
