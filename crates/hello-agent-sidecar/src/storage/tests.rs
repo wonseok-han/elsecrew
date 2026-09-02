@@ -3032,102 +3032,86 @@ fn frozen_reopen_session_preflights_all_large_encoded_dependencies_before_decodi
 
 #[test]
 fn frozen_reopen_session_rejects_digest_source_receipt_and_late_corruption() {
-    for (table, column, value, trigger, count, target) in [
-        (
-            "frozen_operation_sources",
-            "canonical_payload_digest",
-            "0".repeat(64),
-            "frozen_operation_sources_append_only_update",
-            1,
-            0,
-        ),
-        (
-            "frozen_operation_sources",
-            "record_digest",
-            "0".repeat(64),
-            "frozen_operation_sources_append_only_update",
-            1,
-            0,
-        ),
-        (
-            "frozen_operation_sources",
-            "canonical_record_json",
-            "{}".into(),
-            "frozen_operation_sources_append_only_update",
-            1,
-            0,
-        ),
-        (
-            "operation_receipts",
-            "canonical_payload_digest",
-            "0".repeat(64),
-            "operation_receipts_compaction_immutable_update",
-            1,
-            0,
-        ),
-        (
-            "operation_receipts",
-            "event_id",
-            "evt_corrupt".into(),
-            "operation_receipts_compaction_immutable_update",
-            1,
-            0,
-        ),
-        (
-            "events",
-            "request_id",
-            "request_corrupt".into(),
-            "events_are_append_only_update",
-            1,
-            0,
-        ),
-        (
-            "event_source_index",
-            "introduced_message_id",
-            "evt_corrupt".into(),
-            "event_source_index_append_only_update",
-            1,
-            0,
-        ),
-        (
-            "frozen_operation_sources",
-            "record_digest",
-            "0".repeat(64),
-            "frozen_operation_sources_append_only_update",
-            101,
-            100,
-        ),
-    ] {
-        let (_root, path) = database();
-        let mut storage = Storage::open(&path).unwrap();
-        seed_reopen_operations(&mut storage, count, 512, 0);
-        mutate_reopen_fixture(
-            &storage.connection,
-            trigger,
-            &format!("UPDATE {table} SET {column}=?1 WHERE operation_id=?2;"),
-            params![value, format!("op_reopen_{target}")],
-        );
-        storage.checkpoint().unwrap();
-        let bytes = fs::read(&path).unwrap();
-        let before = database_snapshot(&storage.connection);
-        {
-            let mut verifier =
-                FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
-            if count > 100 {
+    for (count, target) in [(1, 0), (101, 100)] {
+        for (table, column, value, trigger) in [
+            (
+                "frozen_operation_sources",
+                "canonical_payload_digest",
+                "0".repeat(64),
+                "frozen_operation_sources_append_only_update",
+            ),
+            (
+                "frozen_operation_sources",
+                "record_digest",
+                "0".repeat(64),
+                "frozen_operation_sources_append_only_update",
+            ),
+            (
+                "frozen_operation_sources",
+                "canonical_record_json",
+                "{}".into(),
+                "frozen_operation_sources_append_only_update",
+            ),
+            (
+                "operation_receipts",
+                "canonical_payload_digest",
+                "0".repeat(64),
+                "operation_receipts_compaction_immutable_update",
+            ),
+            (
+                "operation_receipts",
+                "event_id",
+                "evt_corrupt".into(),
+                "operation_receipts_compaction_immutable_update",
+            ),
+            (
+                "events",
+                "request_id",
+                "request_corrupt".into(),
+                "events_are_append_only_update",
+            ),
+            (
+                "event_source_index",
+                "introduced_message_id",
+                "evt_corrupt".into(),
+                "event_source_index_append_only_update",
+            ),
+        ] {
+            let (_root, path) = database();
+            let mut storage = Storage::open(&path).unwrap();
+            seed_reopen_operations(&mut storage, count, 512, 0);
+            mutate_reopen_fixture(
+                &storage.connection,
+                trigger,
+                &format!("UPDATE {table} SET {column}=?1 WHERE operation_id=?2;"),
+                params![value, format!("op_reopen_{target}")],
+            );
+            storage.checkpoint().unwrap();
+            let bytes = fs::read(&path).unwrap();
+            let before = database_snapshot(&storage.connection);
+            {
+                let mut verifier =
+                    FrozenOperationVerificationSession::start(&mut storage.connection).unwrap();
+                if count > 100 {
+                    assert!(
+                        matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100),
+                        "{table}.{column} at source {target}: first 100 must verify"
+                    );
+                }
+                assert_eq!(
+                    verifier.step(&mut || false).unwrap_err().kind(),
+                    "storageSchemaMismatch",
+                    "{table}.{column} at source {target}"
+                );
                 assert!(
-                    matches!(verifier.step(&mut || false).unwrap(), FrozenOperationVerificationStep::Pending(usage) if usage.rows == 100)
+                    verifier.step(&mut || false).is_err(),
+                    "{table}.{column} at source {target}: no resume"
                 );
             }
-            assert_eq!(
-                verifier.step(&mut || false).unwrap_err().kind(),
-                "storageSchemaMismatch",
-                "{table}.{column}"
-            );
-            assert!(verifier.step(&mut || false).is_err());
+            assert!(storage.connection.is_autocommit());
+            assert_eq!(database_snapshot(&storage.connection), before);
+            assert_eq!(fs::read(&path).unwrap(), bytes);
         }
-        assert!(storage.connection.is_autocommit());
-        assert_eq!(database_snapshot(&storage.connection), before);
-        assert_eq!(fs::read(&path).unwrap(), bytes);
     }
 }
 

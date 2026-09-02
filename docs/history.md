@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D V8 late-row corruption QA 보강)
+
+- **test-only evidence gap 보강**: frozen payload digest·record digest·canonical envelope, receipt digest·event ID, live request ID, source-index introduction ID의 기존 7개 변조를 각각 첫 행과 101번째 행에서 모두 실행하도록 matrix를 7×2로 확장했다. 모든 late case는 첫 호출의 100행 `Pending`을 먼저 확인하고 두 번째 호출의 거부·재개 불가·autocommit 복귀·schema/전체 rows/file bytes 무변경을 확인한다. verifier와 production 코드는 변경하지 않았다.
+- **검증**: `cargo test -p hello-agent-sidecar --locked frozen_reopen_session -- --nocapture` 14 passed(17.69초), `cargo clippy -p hello-agent-sidecar --all-targets --no-deps -- -D warnings`, `rustfmt --edition 2021 --check crates/hello-agent-sidecar/src/storage/tests.rs`, `git diff --check` 모두 exit 0이다. 이 test-only 후속에서는 full sidecar를 재실행하지 않았다(앞선 구현 commit `8529ba37`의 176 passed/1 ignored + stdio 10 passed 증거 유지).
+- **다음/경계**: 독립 QA/최종 게이트가 보강된 7×2 matrix를 확인한다. 제품 admission·100개 초과 reopen 허용·scheduler·writer/delete·Windows·실제 provider/사용자 프로젝트는 여전히 범위 밖이다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D V8 frozen-operation verification precursor)
 
 - **operations-only 내부 세션**: `storage/reopen.rs`에 단일 `&mut Connection`을 세션 수명 동안 빌리는 private cursor verifier를 추가했다. exact V8 schema/materialization pair·authority/active-job 부재·유일한 terminal-success cutoff를 preflight하며 현재 100행 full-runtime validator는 호출하지 않는다. 각 step은 독립 `BEGIN IMMEDIATE` 안에서 같은 연결의 초기 `PRAGMA data_version`을 먼저 대조하고 frozen source rowid keyset `LIMIT 100`과 indexed successor만 조회한다. 다른 연결의 commit, 오류, 취소는 진행을 폐기하고 새 세션은 0부터 시작한다. 완료는 재사용 불가능한 정보성 `FrozenOperationsVerified`이며 product admission·전체 reopen proof가 아니다.
