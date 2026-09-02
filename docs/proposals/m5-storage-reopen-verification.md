@@ -203,6 +203,8 @@ receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 �
 
 단일 Rust 구현 담당이 별도 `m5/g5d-v8-reopen-derived` branch·`.worktrees/g5d-v8-reopen-derived`에서 `storage/reopen.rs`와 하위 모듈, storage test 하위 모듈 및 module 등록, 자기 branch의 `docs/history.md`를 소유한다. `storage.rs`는 동작 보존 helper 추출·설명만 허용한다. 통합 담당은 계약·현행 구조·색인·통합 기록을 소유한다. schema/protocol/golden/의존성/lockfile·제품 open/복구/append/lifetime·기존 materializer catch-up 수정·scheduler/writer/status·Electron/UI는 변경 금지다. 소유 밖 수정이나 안전 계약 변경이 필요하면 구현을 멈추고 보고한다. 실제 provider·사용자 프로젝트·Windows·파괴적 시험, main 병합·push는 수행하지 않는다.
 
+R3B 구현은 exact 통합 `e5f9f01c397f3482975a231621ee5b16aa4381e8`에서 누적 13단계·독립 QA·최종 gate를 통과했다. 현행 구조는 `../architecture.md` §9, 검증 기록은 `../history.md`와 `.artifacts/m5-qa/e5f9f01c397f3482975a231621ee5b16aa4381e8/manifest.json`에서 확인한다. 이 완료는 내부 정보성 검증기에 한정하며 제품 admission은 승인하지 않는다.
+
 ## 9. R3C 활성화 전 조사 — 아직 구현 계약 아님
 
 `da539a6`의 제품 경로를 R3A/B 계약과 대조한 후속 조사다. 아래 호환성·순서 조건은 R3B 구현 범위나 기존 안전 예산을 바꾸지 않는다. 제품 활성화 전에 재현 fixture·별도 계약·독립 검토로 닫아야 한다.
@@ -213,3 +215,54 @@ receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 �
 - **전체 시간은 별도 증거**: 미색인 전역 탐색·전체 integrity/FK·catch-up·복구를 포함한 실제 시작 시간을 측정해야 한다. 호출당 예산만으로 현행 ready 3초를 보장하지 않으며 SQLite busy timeout 5초도 성공 보장이 아니다. 검증 전 ready, 임의 timeout 변경, 제품 100-operation fence 해제는 승인되지 않았다.
 
 순서 조사와 코드 위치는 `.artifacts/m5-review/g5d-r3c-startup-discovery.json`에 보조 증거로 남긴다. §7.5의 historical workspace catch-up 재현·수정과 함께 후속 계약의 선행 조건이며, 이 절은 R3C 완료나 구현 착수 승인이 아니다.
+
+## 10. R3C 연결 전 저장 snapshot 호환성 진단 — 테스트 전용 계약
+
+§9의 정상 입력 크기 문제를 재현하는 한정된 후속 작업이다. R3B의 exact 통합 QA·최종 gate 이후 이 계약을 검토·커밋하고 별도 기능 worktree에서 시작한다. 제품 admission·새 저장 표현·용량 정책 변경을 승인하지 않는다.
+
+### 10.1 기준·소유·금지 영역
+
+- 기준 코드는 R3B 통합 `e5f9f01c397f3482975a231621ee5b16aa4381e8`이다. 실제 기능 branch는 이 계약을 포함한 최신 clean 통합 commit에서 생성하며 exact SHA를 작업 계약·검증 manifest에 기록한다.
+- 단일 Rust 담당은 `crates/hello-agent-sidecar/src/agent_runtime.rs`의 기존 `#[cfg(test)] mod budget_tests`와 자기 branch의 `docs/history.md`만 소유한다. production helper는 그대로 호출하며 접근 범위를 늘리지 않는다.
+- production 코드·visibility·schema/protocol/golden·의존성/lockfile·Storage open/append/recovery·예산·기존 100-operation fence·Electron ready 시간은 변경 금지다. 소유 밖 수정이나 정책 결정이 필요하면 구현을 멈추고 보고한다.
+- 임시 DB만 사용한다. 실제 provider 실행·로그인·사용자 DB/프로젝트·Git 작업 복사본·ProjectManager·Windows·파괴적 시험은 하지 않는다.
+
+### 10.2 정상 저장 fixture
+
+기존 `public_event`, `public_budget_metrics`, `agent_run_record`, `agent_run_projection`, `chat_projection_with_record`를 사용한다. 기존 golden의 `chat-record`, `prepare-b-is-distinct-from-bound-a` standalone manifest, `actual-run-persists-without-fixture-scenario` readOnly selected profile을 복사·재결속하되 golden 파일은 고치지 않는다.
+
+TempDir의 project/chat/최초 사용자 메시지/readOnly actual run은 public event의 `*_a` 식별자와 일치해야 한다. chat/run/manifest 형식과 profile·workspace·run 결속을 독립 검사한다. provider discovery와 runtime attestation을 생략한 형태는 기존 `validate_provider_projection`이 허용하는 **pre-G5C 저장 기록 호환 형태**다. 이를 현재 실제 provider의 실행 전 검증 증거로 표현하지 않는다.
+
+public event 하나마다 전체 run 배열 snapshot과 대응하는 유효한 TeamMessage를 production helper로 만들고 일반 `Storage::upsert_projection_records_atomic`으로 함께 저장한다. 최초 사용자 메시지 뒤 chat durable/message sequence가 단조 증가해야 한다.
+
+| 사례 | 입력 | 요구 결과 |
+| --- | --- | --- |
+| ASCII 최대 text | 16개 × 65,536바이트 `x` | raw text 1,048,576바이트, metadata 포함 단일 canonical run snapshot은 1 MiB 초과 |
+| JSON escaping | 9개 × 65,536바이트 역슬래시 | raw text 589,824바이트인데 encoded snapshot은 1 MiB 초과 |
+| 작은 정상 대조군 | 작은 text의 event 16개 | 모든 run source canonical payload가 1 MiB 이하이고 전체 private R3B 완료 |
+
+모든 event와 모든 prefix가 기존 public validation·1 MiB text·256 event·16 MiB 누적 snapshot 예산을 실제 통과해야 한다. escaping의 encoded 크기를 추정치만으로 판정하거나 16개 escape-heavy event도 허용된다고 가정하지 않는다.
+
+### 10.3 서로 구분해 입증할 결과
+
+1. **기존 저장 허용**: 모든 atomic write가 `Committed`이고 `AgentRuntime::blocked().validate_persisted_runs`가 성공한다. checkpoint/drop/일반 `Storage::open` 뒤 최신 run payload·계수·chat sequence가 같고 persisted-run validation도 다시 통과한다. 이 결과는 **Storage reopen**이며 Sidecar 시작·복구·ready·provider 성공이 아니다.
+2. **크기 귀속**: 저장된 exact event rowid의 `length(CAST(canonical_json_payload AS BLOB))`를 측정하고 첫 oversized row를 기록한다. 작은 대조군도 입력 문자열 길이뿐 아니라 가장 큰 persisted run-event payload가 1,048,576바이트 이하임을 확인한다.
+3. **전체 private verifier의 호환성 거부**: Storage를 checkpoint/drop한 뒤 같은 임시 DB에 설정된 별도 connection으로 `start_derived_records`를 호출한다. 시작은 성공해야 하며 0회 이상의 Pending 뒤 `storageSchemaMismatch`로 종료하고 재사용을 거부해야 한다. 관측된 모든 Pending은 `DerivedVerificationPhase::Prerequisite(LedgerProjectionPhase::Projection(ProjectionPhase::Ledger))`여야 한다. `DerivedRecordsVerified`나 다른 단계의 오류로 이 크기 문제를 입증하지 않는다.
+4. **정확한 실패 원인·대조**: 기존 test-private `projection_batch_for_test`를 oversized source 직전에서 실행해 그 행의 byte preflight 거부를 별도 입증한다. 전체 session의 최초 실패와 phase-local 귀속을 혼동하지 않으며 heap/decode 계측을 했다고 주장하지 않는다. schema·rows·DB file bytes가 변하지 않아야 하고 작은 sibling DB의 동일 full-session 경로는 `DerivedRecordsVerified`까지 완료해야 한다.
+
+호출당 100행 미만이어도 남은 primary/closure byte 예산 때문에 양보할 수 있으므로 첫 호출 실패나 최소 한 번의 Pending을 강제하지 않는다. 제품의 100-operation fence는 frozen operation 수의 제한이며 일반 live event 수 제한과 다르다.
+
+### 10.4 검증·인계
+
+새 진단은 아래 exact test 하나 안에서 세 사례를 구분해 검증한다. 각 focused 명령은 실행한 test가 정확히 하나인지 확인하고 raw log·실제 종료 코드를 남긴다.
+
+```bash
+cargo test -p hello-agent-sidecar --locked --lib agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary -- --exact --nocapture
+cargo test -p hello-agent-sidecar --locked --lib agent_runtime::budget_tests::valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one -- --exact --nocapture
+cargo clippy -p hello-agent-sidecar --locked --all-targets --no-deps -- -D warnings
+rustfmt --edition 2021 --check crates/hello-agent-sidecar/src/agent_runtime.rs
+```
+
+diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의 독립 focused QA를 수행한다. production diff가 없다는 사실과 상속한 R3B 누적 QA를 명시하며 테스트 전용 변경의 범위를 넘어가면 전체 재검증 계획을 다시 정한다. main 병합·push는 하지 않는다.
+
+합격은 호환성 문제가 재현됐다는 뜻이다. 기존 입력을 안전하게 수락하는 해결책이나 R3C·전체 G5D 완료가 아니다. 결과를 §9와 작업 이력에 반영한 뒤 저장 표현·검증 단위·이전 기록 호환 정책을 별도로 설계한다.

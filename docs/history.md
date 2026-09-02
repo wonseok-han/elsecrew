@@ -9,6 +9,18 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C snapshot 호환성 시험 계약)
+
+- **범위·검토**: 정상 public-event 예산 안의 큰 run snapshot이 private 1 MiB primary cap을 넘는 문제를 재현할 테스트 전용 §10을 작성했다. 독립 검토는 `PASS_FOR_TEST_CONTRACT`이며 실제 구현·정책 변경 승인이 아니다. 실제 기능 작업은 이 계약의 clean 통합 commit에서 별도 worktree로 분기해 `agent_runtime.rs`의 기존 test module와 기능 워크로그만 수정한다.
+- **판정 기준**: ASCII 16 × 64 KiB, 역슬래시 9 × 64 KiB와 작은 대조군을 일반 atomic persistence→Storage reopen→전체 private R3B로 비교한다. pre-G5C readable 저장 형태를 실제 provider attestation으로 표현하지 않는다. exact source BLOB/rowid와 phase-local probe로 크기 실패를 귀속하며, byte 예산 때문에 100행 미만에서도 양보할 수 있어 0회 이상의 ledger Pending을 허용한다. 작은 대조군의 최대 persisted canonical 크기와 전체 완료를 함께 확인한다.
+- **다음**: 문서 변경 독립 검토·커밋 후 시험 구현·focused 검증·exact-commit 리뷰·통합 QA를 진행한다. 아직 이 재현 시험은 실행하지 않았으며 예산·저장 표현·제품 경로·100-operation fence는 바꾸지 않는다. main 병합·push는 하지 않았다.
+
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 통합 QA·최종 gate 완료)
+
+- **완료·검증**: clean exact `e5f9f01c397f3482975a231621ee5b16aa4381e8`에서 누적 `g5d-bounded-storage`의 13단계가 모두 PASS했다(26분 0.481초). sidecar 228 passed/1 ignored·stdio 10, storage 116·bounded V6 27·Node lifetime 17·protocol lifetime 10과 R3B 21/21 test 이름을 raw 보고서에서 대조했다. scoped strict clippy·Rust 2021 아홉 파일 format·diff·clean SHA도 통과했고 독립 최종 gate는 R3B 내부 정보성 완료선만 PASS했다.
+- **환경·증거**: 최초 sandbox Electron runtime fetch 실패는 별도 보존하고 동일 명령의 scoped-network 실행만 재시도했다. 보고서는 `.artifacts/m5-harness/g5d-bounded-storage-2026-09-02T07-48-51-204Z.json`, QA는 `.artifacts/m5-qa/e5f9f01c397f3482975a231621ee5b16aa4381e8/manifest.json`, gate는 `.artifacts/m5-review/g5d-r3b-final-gate.json`이다. 검증 중 tracked tree는 고정했으며 완료 후 현행 구조·색인·계약의 구현 포인터를 갱신했다.
+- **남음·기록**: R3C 호환성/catch-up·integrity/FK·복구/startup/admission, writer/delete·scheduler/status, Windows·실제 provider는 미완료다. 전체 G5D는 `NOT_READY`이고 제품 frozen operation 100개 제한도 유지한다. 워크로그가 500줄을 넘어 2026-08-28과 2026-09-01 엔트리를 날짜 단위 그대로 월별 아카이브로 이동한다. 고정 핵심 결정과 기존 아카이브 내용은 보존한다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 독립 검토·통합)
 
 - **검토·통합**: 기능 `334210d5179d2fcc0782ffab2805479ee9615248`은 exact base `0eafac4`와 보완 계약 `da539a6`에 대한 독립 코드 리뷰 PASS를 받았다. 검토자는 R3B 21개를 별도로 실행해 통과했고(109.82초), 앞선 테스트 증거 누락이 닫혔음을 확인했다. root는 raw 자체 검증 로그와 10개 소유 파일, 제품/규약/의존성 경로 불변을 대조했다. 통합 시 history 삽입 충돌만 발생했으며 기능·통합 branch의 모든 엔트리와 핵심 결정을 보존했다.
@@ -123,264 +135,6 @@
 - **계약과 독립 검토**: `proposals/m5-storage-reopen-verification.md`에 schema V8 유지, connection 독점 차용, transaction 내부 `data_version` 확인, 외부 commit/취소/실패 시 volatile 진행 폐기, 호출당 100개·source 1 MiB·종속 입력 8 MiB를 고정했다. `FrozenOperationsVerified`는 실행 허용 증거가 아니다. 독립 설계 리뷰에서 같은 connection 차용과 제품 `EXCLUSIVE` 잠금의 차이를 정정했고 차단 finding은 해소됐다. 외부 commit 회귀는 normal-lock fixture에서 수행하며 제품 잠금을 완화하지 않는다.
 - **기준 검증·다음**: Node lifetime 17개, protocol lifetime 10개, sidecar 162개+stdio 10개(1 ignored), TypeScript no-emit와 diff check 통과. 별도 `m5/g5d-v8-reopen-verifier` worktree에서 구현·회귀를 진행하고 exact feature commit 리뷰 후 통합 QA를 수행한다. 제품 100개 제한 해제, prefix/message/full-startup 검증, C1B2 writer/delete, scheduler/status, 실제 provider·Windows는 미완료다.
 
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 C1B1 bounded compacted replay)
-
-- **read/replay 전용 C1B1**: 제품에 delete·compaction job/authority writer를 추가하지 않고, exact terminal-success private proof와 empty authority/active-job fence를 통과한 V8 compacted state를 읽는다. frozen operation은 `source_event_rowid` keyset `LIMIT 100`과 canonical payload 합계 1 MiB 안에서 canonical record/digest를 재계산하고 immutable receipt에 교차 결속한다. live source는 exact event+9-field source index, deleted source는 exact frozen operation+receipt와 strict prefix/baseline coverage만 권위로 사용하며 receipt-only reconstruction은 거부한다.
-- **baseline+tail와 채팅 의미 보존**: latest immutable baseline으로 project/chat/run/lock projection을 seed하고 retained ledger tail을 연속 replay한다. 삭제된 operation의 duplicate/conflict는 frozen operation+receipt로 판정하며 request ID는 기존처럼 제외한다. 삭제된 chat predecessor는 frozen canonical payload에서만 복원하고 normalized frozen message reservation을 교차 검증한다. append와 16단계 bounded materializer는 retained anchor의 기존 source index를 exact no-op 검증하고, compacted predecessor·receipt·message·historical baseline을 frozen authority로 확인한다. app-instance와 actual/legacy/recovery의 상위 저장 경로, scheduler/wire/status는 변경하지 않았다.
-- **임시 지원 한계와 검증**: 재오픈 검증 cursor writer가 이번 읽기 전용 소유 범위에 없으므로 frozen operation은 최대 100개인 terminal compacted V8만 runnable이다. 첫 `LIMIT 100` 뒤 indexed successor `LIMIT 1`이 101번째를 찾으면 DB를 바꾸지 않고 `storageSchemaMismatch`로 거부한다. 정확히 1 MiB는 허용하고 단일 1 MiB+1은 거부하며 retained chat anchor semantic 3-field 변조도 bytes/rows 무변경으로 거부한다. sidecar 전체 162개+stdio 10개(1 ignored), protocol lifetime 10개, Node lifetime golden 17개, sidecar scoped strict clippy와 Rust 2021 rustfmt가 통과했다. dependency 포함 strict clippy는 소유 밖 core/protocol의 기존 Rust 1.97 lint 5건에서만 실패했다. C1B2 실제 writer/delete와 100개 초과 재오픈 지원에는 독립 리뷰와 추가 durable reopen-proof 계약이 먼저 필요하다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append materialization fence P2 수정)
-
-- **reopen pair 정책을 append에도 적용**: V7/V8 append entry와 INSERT 직전의 공통 runtime fence가 compaction evidence뿐 아니라 exact materialization meta/job pair를 현재 reopen validator로 함께 확인한다. `pending+attempting`, `pending+failed`, `ready+pending` 같은 비실행 pair는 ledger load·duplicate/conflict 분류·신규 INSERT 전에 fail-closed하고, ready+absent·pending+absent·pending+pending은 기존 append 의미를 유지한다.
-- **mutation-zero 회귀**: attempting·failed·noncanonical pair 각각에서 duplicate, conflict, fresh append가 모두 `storageSchemaMismatch`이며 exact schema·전체 table rows snapshot·DB file bytes가 변하지 않음을 고정했다. 앞선 prefix/frozen-message/delete-authority/frozen-operation/active-compaction 5×2 재제출 matrix와 정상 uncompacted V7/V8 `DuplicateNoOp`/`Conflict` 회귀도 유지한다.
-- **검증**: focused storage 46개와 lifetime 41개, sidecar 전체 158개+stdio 10개(1 ignored), protocol 전체 42개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B/private writer/backfill/compaction/delete/wire는 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 append entry fence P2 수정)
-
-- **재제출 우회 차단**: append의 `BEGIN IMMEDIATE` 직후 V7/V8 runtime fence를 실행해 ledger load와 duplicate/conflict 분류보다 먼저 uncompacted-only 상태를 검증한다. 실제 INSERT 직전 동일 transaction 재검증도 공통 helper로 유지해 entry와 mutation 사이 TOCTOU 없이 기존 append 원자성을 보존한다.
-- **전 상태 mutation-zero 회귀**: V8 prefix, frozen message, delete authority, frozen operation, active compaction 각각에서 duplicate와 conflicting resubmit이 모두 `storageSchemaMismatch`로 거부되고 exact schema·전체 table rows snapshot·DB file bytes가 변하지 않음을 5×2 matrix로 고정했다. 유효한 uncompacted V7/V8은 기존 `DuplicateNoOp`/`Conflict`와 zero-mutation 의미를 유지한다.
-- **검증**: focused storage 45개와 lifetime 41개, sidecar 전체 157개+stdio 10개(1 ignored), protocol 전체 42개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B private writer/backfill/compaction/delete와 wire 범위는 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 sidecar consumer C1A)
-
-- **exact V8 open/migration 소비**: `Storage::open`이 fresh/V1~V7을 각 exact predecessor와 reopen policy로 검증한 뒤 immutable fixture V7→V8 migration을 원자 적용하고 V8 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V7 materialization state/job과 terminal maintenance history는 byte-exact 보존하며 history/frozen-operation backfill은 하지 않는다. attempting lifetime, active lossless-compaction, prefix/frozen-message/delete-authority, partial/extra/tamper는 migration mutation 전에 거부하고 injected failure는 exact V7 bytes로 rollback한다.
-- **C1B 전 frozen-operation fail-closed 경계**: V8 product path는 prefix·frozen message·delete authority·frozen operation·active compaction이 모두 없는 uncompacted DB만 reopen/append/bounded lifetime 실행을 허용한다. 예상 밖 frozen operation은 canonical payload SHA-256과 full canonical envelope SHA-256을 독립 재계산하고 live event·V6 source-index·immutable receipt authority를 교차 검증한 뒤에도 다음 reviewed wave 전까지 mutation 없이 거부한다. product frozen row/private writer, job/cutoff 변경, authority 생성, compaction/delete, runtime DDL, scheduler/wire/status는 구현하지 않았다.
-- **회귀·검증**: V7 admissible pair·terminal fact 보존, preflight mutation-zero, exact rollback/reopen/schema guards, append/materializer, frozen digest/source/receipt tamper를 추가했다. focused storage 43개와 lifetime 41개, sidecar 전체 155개+stdio 10개(1 ignored), protocol 전체 42개, Node lifetime golden 17개, sidecar scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. `pnpm run m5:test:bounded-storage`는 격리 네트워크 npm `ENOTFOUND`로 dependency install 중 중단했지만 스크립트의 exact Node/Rust 하위 명령은 직접 모두 통과했다. 다음은 독립 리뷰 뒤 C1B private compaction writer/deletion-aware replay이며 Windows와 실제 삭제 시험은 수행하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 private proof P1 수정)
-
-- **public proof minting 제거**: V2 공개 Rust·TypeScript cursor transition은 양수인 최대 100행·1 MiB progress만 받고 `scanExhausted` false→true를 항상 거부한다. 공개 lifecycle의 `complete`도 항상 거부하고 equivalence evidence validator/type은 공개 API에서 제거해 caller가 0행/0바이트/empty 주장이나 최종 boolean으로 exhaustion·성공을 만들 수 없게 했다. 성공 job shape의 읽기 검증은 유지하지만 상태 전이 권한으로 쓰지 않는다.
-- **sidecar-private 경계 동결**: exact-empty bounded keyset 조회와 durable cursor 변경, bounded operations/equivalence 검증과 verified/succeeded 변경은 각각 sidecar 전용 동일 SQLite transaction에서만 가능하며 wire/public JSON으로 proof authority를 표현할 수 없다고 V8 manifest와 양 언어 exact policy에 고정했다. 제품 compaction/delete/wire는 계속 비활성이고 C1 consumer가 이 private writer 경계를 구현해야 한다.
-- **회귀·검증**: 실제 SQLite golden에서 nonempty keyset과 forged public exhaustion/final boolean이 maintenance state를 한 바이트도 바꾸지 않으며, 내부 exact-empty cursor commit과 bounded authority-empty final commit만 동일 transaction에서 영속화되는 것을 확인했다. Node lifetime 17개, protocol lifetime 10개·전체 42개, TypeScript no-emit, Rust 2021 rustfmt, 범위 밖 기존 clippy lint 두 종류를 제외한 scoped `-D warnings`, diff check가 모두 통과했고 V1~V7 fixture는 base와 byte-diff가 없다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 frozen-operation source 계약)
-
-- **uncompacted V7 전용 additive migration**: exact V7 schema와 네 admissible materialization pair만 mutation 전에 허용하고 attempting·active lossless-compaction·prefix/frozen-message/delete-authority 존재·V8 partial/extra/tamper를 fail-closed하는 schema V8 golden을 추가했다. migration은 terminal maintenance/history와 기존 data·trigger를 보존하고 history backfill 없이 `frozen_operation_sources`와 versioned dependent guards만 만든다. 실패는 exact V7로 rollback하며 runtime DDL, scheduler/wire, 제품 실행과 실제 delete는 C1 consumer 전까지 모두 비활성이다.
-- **독립 operation provenance**: project/chat/run/lock의 live event·V6 source-index·immutable receipt에 exact 결속된 append-only frozen operation record를 고정했다. SQLite는 immutable field·canonical envelope text·SHA-256 lowercase-hex shape를 강제하지만 digest 계산 확장에는 의존하지 않는다. Rust·TypeScript consumer가 canonical payload와 full envelope를 독립 재구성·SHA-256 재계산하고, source가 삭제된 뒤에도 exact receipt와 재결속하며 bounded `verifyOperations` reopen 전 검증해야 한다. receipt-only 재구성, app-instance, request-id 기반 duplicate/conflict 판정과 deleted chat predecessor의 receipt self-reconstruction은 거부한다.
-- **V2 bounded compaction 경계·검증**: 기존 V7 cursor를 바꾸지 않고 `freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → finalize` V2 cursor, 최대 100행·1 MiB·exact-empty exhaustion, pending/running sentinel·cancel·commit uncertainty·authority-empty finalization을 양 언어 validator/cases로 고정했다. 실제 Node SQLite golden 17개가 migration mapping/rollback, source·receipt·digest tamper, dependent guards, frozen message ID reuse, exact query plan/no scan을 통과했고 protocol lifetime 10개와 protocol 전체 42개, TypeScript no-emit, Rust 2021 rustfmt·diff check가 통과했다. strict clippy는 범위 밖 기존 lint 3건에서만 실패했고 그 세 lint를 명시적으로 제외한 scoped `-D warnings`는 통과했다. V1~V7 fixture digest는 불변이며 다음은 독립 계약 리뷰 뒤 C1 consumer가 이 schema와 bounded reopen 검증을 소비하는 별도 파동이다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 BeforeBegin fence P2 수정)
-
-- **취소 우회 차단**: bounded lifetime worker가 `BeforeBegin` 취소를 반환하기 전에 V7 uncompacted-only runtime state를 먼저 확인하도록 순서를 수정했다. arm transaction 내부 재검증도 유지해 사전 확인과 arm 사이의 compaction-state 변경을 계속 fail-closed한다.
-- **무변경 회귀**: active lossless-compaction, durable prefix, frozen message source, delete authority 각각이 존재할 때 `BeforeBegin` 취소도 동일한 `storageSchemaMismatch` 상세로 거부되고 DB 파일 바이트와 event/source-index/lifetime/maintenance/compaction 행 수가 바뀌지 않음을 고정했다. exact V6와 정상 uncompacted V7의 `BeforeBegin → Suspended` zero-mutation 의미는 각각 별도 회귀로 보존했다.
-- **검증**: focused lifetime 41개와 storage 37개, sidecar 전체 149개+stdio 10개(1 ignored), protocol 전체 41개, scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. C1B compaction·삭제·wire/scheduler 범위는 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 sidecar consumer C1A)
-
-- **exact V7 open/migration 소비**: `Storage::open`이 fresh/V1~V6를 exact predecessor schema와 기존 reopen policy로 검증한 뒤 immutable fixture V6→V7 migration을 원자 적용하고, V7 schema·meta·index·trigger·foreign-key enforcement를 exact 재검증한다. V6의 `materialization_state`와 present lifetime job, terminal maintenance history는 byte-exact 보존하며 history backfill·상태 자동 변환·frozen message 생성은 하지 않는다. attempting lifetime job과 pending/running lossless-compaction job은 migration mutation 전에 거부하고, injected migration failure는 전체 schema/row snapshot을 exact V6로 rollback한다.
-- **C1B 전 fail-closed 경계**: C1A는 prefix·frozen source·delete authority가 모두 비어 있고 active compaction이 없는 uncompacted V7만 runnable로 허용한다. 이 durable evidence가 하나라도 있으면 reopen·append·bounded lifetime worker가 mutation 전에 중단한다. 정상 V7 append는 기존 단일 transaction의 event/source-index/projection/readiness invalidation을 그대로 사용하고, 기존 16단계 worker의 100행·1 MiB·keyset·cancel/commit-uncertainty 계약도 유지한다. compaction phase/worker, runtime DDL, delete authority 생성, 실제 event/source deletion, scheduler·wire/status·cleanup/checkpoint/VACUUM은 활성화하지 않았다.
-- **회귀·검증**: fresh/V1~V6→V7, exact V7 no-op reopen, 네 V6 admissible pair와 terminal history 보존, attempting/active/partial/extra mutation-zero preflight, migration rollback, schema tamper, durable authority/frozen evidence, V7 append rollback과 bounded worker fence를 추가했다. focused storage 37개와 lifetime 40개, sidecar 전체 148개+stdio 10개(1 ignored), protocol 전체 41개, Node lifetime golden 16개, sidecar scoped strict clippy, Rust 2021 rustfmt와 diff check가 통과했다. `pnpm run m5:test:bounded-storage`는 worktree dependency 설치가 격리 네트워크의 npm `ENOTFOUND`로 중단됐지만 그 스크립트의 exact Node/Rust focused set은 직접 실행해 모두 통과했다. 다음은 독립 코드 리뷰·QA 뒤 C1B compaction phase/deletion-aware replay를 별도 계약으로 구현하는 것이며, Windows와 실제 삭제 시험은 수행하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 single-running-job P1 수정)
-
-- **schema가 단일 running job 강제**: 최초 V7 계약은 delete-authority가 생긴 뒤에만 서로 다른 running job을 배제해 arm 직후 authority 0 상태에서는 여러 `losslessCompaction` running 행이 공존할 수 있었다. V7 one-time migration에 `job_kind='losslessCompaction' AND state='running'` partial unique index를 추가해 INSERT와 pending→running UPDATE 모두 authority 전에 SQLite가 거부하도록 고정했다.
-- **C1 소비 경계·검증**: manifest와 Rust·TypeScript exact policy/cases는 C1이 application-only 사전검사에 의존하지 않고 exact schema guard를 요구하도록 명시한다. 실제 SQLite migration/guard 회귀, Node lifetime 16개, focused/full protocol, TypeScript no-emit, focused rustfmt·scoped clippy·diff check와 V1~V6 digest 불변을 재검증했다. terminal maintenance history 보존과 V6 active-maintenance mutation-zero 거부, runtime DDL 금지는 그대로다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v7 lossless-compaction 계약)
-
-- **삭제 비활성 V7 계약**: exact storage V6와 허용 meta/job pair, active maintenance 부재를 mutation 전에 검증하는 schema V7 golden을 추가했다. migration은 기존 history를 backfill하거나 삭제하지 않고 compaction prefix·frozen message source·최대 100개 exact delete-authority 표만 추가한다. 기존 두 DELETE guard는 V6→V7 schema transaction에서 한 번만 version 교체하며 runtime batch의 guard drop/recreate, 제품 자동 실행·wire·실제 삭제는 C1 consumer 전까지 모두 금지한다.
-- **lossless 불변식**: aggregate별 immutable baseline과 `deletedThrough+1` anchor, strict prefix progression, app-instance 삭제 금지, introducing-event 삭제 전 exact message provenance 동결과 message ID 영구 재사용 차단을 고정했다. delete batch는 한 running job의 exact authority만 전역 보유하고 source-index→event 순으로 같은 최대 100행 transaction에서 삭제하며 event delete가 authority를 소비한다. pending→running sentinel, commit uncertainty, cancel/rollback, authority-empty finalization, receipt 기반 deleted-operation duplicate/conflict와 legacy·actualAgent·recovery 판정 동등성을 Rust·TypeScript validator/cases로 일치시켰다.
-- **실행 검증·다음 경계**: Node SQLite golden 16개가 exact V6→V7 migration, 네 admissible pair/완료·실패 maintenance 보존, attempting·active/partial/extra schema byte-zero 거부, FK/append-only/anchor/frozen/authority/message-reuse/app-instance/commit·rollback/exact query-plan을 통과했다. protocol 전체 41개, TypeScript no-emit, focused rustfmt와 diff check가 통과했고, scoped clippy는 범위 밖 기존 lint 3개를 명시적으로 제외하면 `-D warnings`를 통과했다. C1은 이 계약을 소비하는 opener·bounded worker를 별도 구현·리뷰해야 하며, 그 전에는 어떤 실제 ledger delete도 활성화하지 않는다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 통합·하네스 등록)
-
-- **독립 승인 뒤 통합**: exact storage v6 계약과 source-event 결속·message introduction·indexed predecessor·query-plan 보완, V5→V6 sidecar migration/append serialization, 명시 호출형 16단계 bounded worker를 각각 독립 리뷰 승인 뒤 `m5/coding-agent-ide`에 순서대로 통합했다. 거절된 V5 worker와 이전 미완성 migration worktree는 통합하지 않았다.
-- **현행 구조 문서화**: `docs/architecture.md`를 exact v1→v6 additive migration, append-only source provenance, rowid keyset `LIMIT 100`·1 MiB bounded materialization과 남은 비활성 경계로 갱신했다. `핵심 결정·발견`의 오래된 schema v3 설명도 현재 exact v6 계약으로 교체했다.
-- **기계 게이트·독립 판정**: `m5:test:bounded-storage`와 누적 `g5d-bounded-storage` 하위 게이트는 Node G5D golden, protocol lifetime, sidecar V6 migration/append와 bounded worker를 한 번에 검증한다. exact HEAD `692130542e4c82e3b6a4ee10c033453570906007`에서 macOS arm64 fresh package smoke를 포함한 누적 하네스가 PASS했다(`.artifacts/m5-harness/g5d-bounded-storage-2026-09-01T02-30-48-542Z.json`). 독립 gate는 이 범위를 `G5D_BOUNDED_STORAGE_READY`로 승인했다. full `g5d-storage-lifetime`은 scheduler·`storage.status` wire·lossless compaction과 그 E2E QA 전까지 명시적으로 `NOT_READY`다. 통합 branch에서 sidecar 142개+stdio 10개(1 ignored), protocol 40개, Node G5D 15개, TypeScript no-emit과 diff check가 통과했다. cleanup/deletion·실제 provider·Windows·push·main 병합은 수행하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D bounded storage v6 materialization worker)
-
-- **명시 호출형 16단계 worker**: 아직 wire·startup·scheduler에 연결하지 않은 내부 batch 호출이 `indexSource → verifySourceIndex → receipts/messages/workspaces/baselines → source/projection/derived verify`를 처리한다. 모든 source/table scan은 rowid keyset `LIMIT 100`과 canonical payload 합계 1 MiB를 고정하고, exact-empty batch만 private exhaustion witness를 기록한 뒤 별도 transaction에서 다음 phase로 이동한다. `indexSource`는 events.rowid 순으로 append-only source index를 만들며 chat은 exact indexed sequence-1 predecessor만 허용하고 raw ledger history fallback을 사용하지 않는다.
-- **indexed provenance·fail-closed lifecycle**: source/current projection/receipt/message/workspace/baseline 검증은 V6가 허용한 rowid·aggregate latest·introduced message·exact predecessor index와 exact payload-rowid 조회만 사용한다. repeated chat snapshot은 새 message로 materialize하지 않고, prepared workspace는 최신 project source payload 하나로만 증명하며 app instance는 baseline에서 제외한다. pending→attempting arm, savepoint rollback cancellation, terminal failed evidence, commit-uncertain attempting sentinel, verification 전 append catch-up reset, scan-free final ready publication을 보존하며 failed/attempting 자동 retry와 legacy helper interleave를 거부한다.
-- **회귀·검증·남은 경계**: 251개 단일 chat aggregate와 100행 재개, exact/aggregate 1 MiB, oversize, 모든 cancel/failure boundary, source-index gap·변조·source-less row, projection/derived drift, repeated snapshot, historical/newest baseline, phase별 append catch-up, exact query plan·statement status를 추가했다. focused worker 27개, sidecar 전체 142개+stdio 10개(1 ignored), protocol lifetime 8개, Node G5D 15개, sidecar scoped strict clippy, focused rustfmt와 `git diff --check`가 통과했다. dependency 포함 strict clippy는 범위 밖 core/protocol 기존 경고 5건에서만 실패했다. worker 자동 호출, wire/status, cleanup·deletion·compaction·checkpoint/VACUUM은 계속 비활성이다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 sidecar migration)
-
-- **exact V6 소비 구현**: `Storage::open`이 fresh/V1~V5를 각 exact predecessor schema와 canonical meta/job pair로 검증한 뒤 fixture V5→V6 migration을 원자 적용하고, 현재 V6는 schema·index·trigger·foreign-key enforcement와 reopen pair를 재검증한다. migration은 history를 backfill하지 않고 ready+absent를 pending+absent로 바꾸며 모든 present V5 job의 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed V6는 계속 fail-closed다.
-- **append serialization·provenance**: 모든 ledger append의 단일 transaction이 event와 exact `event_source_index` 행, projection, ready 무효화를 함께 commit한다. non-chat의 세 chat 필드는 NULL이며, chat sequence 1은 durable 0/null synthetic predecessor를 사용한다. sequence 2 이상은 exact sequence-1 index와 그 rowid의 source event를 Rust validator로 재검증하고 raw-event fallback을 허용하지 않는다. valid TeamMessage의 chatId/eventSequence, durable unchanged 또는 정확히 +1, repeated/null snapshot과 introduced identity를 구분하며 gap·변조·double introduction은 전체 rollback한다.
-- **검증·남은 경계**: V5 3 state×14 phase와 absent pair migration, exact rollback/preflight/reopen tamper, no-backfill, repeated `last_message`, missing/tampered predecessor, duplicate/conflict, injected append failure를 회귀로 추가했다. focused storage 32개와 lifetime 12개, sidecar 전체 115개+stdio 10개(1 ignored), 기존 chat 회귀, protocol lifetime 8개, scoped strict clippy가 통과했다. bounded `indexSource` worker·scheduler·wire/status·cleanup·deletion·compaction은 활성화하지 않았으며 다음 단계에서 별도 구현·검토가 필요하다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 query-plan 선언 정합성 수정)
-
-- **stale raw-event plan 제거**: 재귀 predecessor fallback 제거 뒤에도 `queryPlanAcceptance.missingIndexedPredecessorEvent`가 남아 raw events aggregate tuple 조회를 허용하는 것처럼 보이던 계약 불일치를 Rust·TypeScript·V6 manifest에서 제거했다.
-- **exact set 회귀**: 실행하는 EXPLAIN fixture 이름을 정책 키와 동일하게 만들고, `mode`·`reject`를 제외한 허용 query-plan 키 집합이 fixture 이름 집합과 정확히 같아야 통과하도록 Rust·TypeScript golden을 강화했다. stale 선언, 누락 선언, 미선언 fixture를 각각 거부하며 V1~V5 fixture와 저장 동작은 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 재귀 predecessor 신뢰 제거)
-
-- **indexed predecessor만 신뢰**: chat aggregate sequence 2 이상의 source-index INSERT는 같은 aggregate의 sequence-1 source-index 행이 먼저 존재하고 exact source event에 결속된 경우만 허용한다. raw predecessor event를 재귀적으로 해석하던 fallback을 SQL trigger와 Rust·TypeScript validator에서 제거했으며, migration-pending append는 `indexSource`가 직전 행을 채울 때까지 fail-closed로 거부·중단한다. sequence 1만 durable 0/null의 synthetic predecessor를 사용한다.
-- **순차 backfill 회귀**: sequence 1에서 durable 2로 뛰는 입력, raw predecessor event만 있는 sequence 2를 직접 SQLite INSERT와 양 언어 validator가 거부한다. 유효한 sequence 1 index를 먼저 넣으면 sequence 2가 통과하고, fixture history의 `A → repeat A → null → B` 순차 indexSource도 통과하도록 고정했다. raw-event fallback query plan과 계약 주장을 제거했으며 migration no-backfill, non-chat 동작, V1~V5 fixture는 변경하지 않았다. sidecar consumer는 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 snapshot provenance P1 수정)
-
-- **반복 snapshot provenance 결속**: durable sequence가 증가하지 않는 event도 non-null `last_message`가 있으면 messageId 일치만으로는 부족하다. 현재 snapshot의 TeamMessage `chatId`가 aggregate id와, `eventSequence`가 mirrored durable sequence와 일치하도록 Rust·TypeScript·SQL을 강화했다. indexed predecessor의 non-null snapshot도 exact source event rowid 조회로 같은 provenance를 재검증하고, fallback predecessor event 역시 사용 전에 동일 결속을 요구한다.
-- **양 경로 회귀**: messageId는 그대로 둔 채 chatId 또는 eventSequence만 바꾼 반복 snapshot을 indexed-predecessor와 exact-events fallback 양쪽의 직접 SQLite INSERT에서 거부한다. Rust·TypeScript validator도 현재 및 predecessor provenance 위조를 거부하며 introduction 전이, exact query plan/no scan·sort, migration no-backfill과 V1~V5 fixture 불변은 유지했다. sidecar consumer는 변경하지 않았다.
-
-### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v6 fallback trigger P1 수정)
-
-- **fallback도 INSERT trigger가 fail-closed**: chat source-index predecessor가 아직 없으면 consumer 선검증만 믿던 우회 경로를 제거했다. 같은 aggregate type/id와 sequence-1의 `events` unique tuple을 exact 조회하고, predecessor payload의 durable/snapshot/TeamMessage가 유효할 때만 indexed predecessor와 동일한 증가·비메시지 전이를 허용한다. predecessor event 부재·malformed payload·durable 감소/jump·메시지 없는 증가·변경된 snapshot·잘못된 introduced identity·TeamMessage chatId/eventSequence 불일치를 모두 INSERT 전에 거부한다.
-- **직접 SQLite 회귀**: Rust/TypeScript validator를 먼저 부르지 않은 실제 SQL INSERT로 exact fallback 성공과 위 실패 경로를 검증했고, predecessor 조회는 기존 aggregate unique index의 exact query plan만 허용하며 scan/sort는 계속 금지했다. migration no-backfill과 V1~V5 fixture 불변은 유지했고 sidecar consumer는 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 메시지 도입 전이 정정)
-
-- **snapshot과 introduction 분리**: 모호한 `message_id`를 `introduced_message_id`로 바꾸고 chat의 `durable_event_sequence`와 현재 `last_message.messageId`를 각각 nullable `chat_durable_sequence`·`chat_snapshot_message_id`로 exact mirror한다. non-chat은 세 필드가 모두 NULL이다. 첫 chat predecessor는 durable 0/null이고, 새 메시지는 durable이 정확히 1 증가하면서 valid TeamMessage의 eventSequence·chatId·snapshot·introduced identity가 일치해야 한다. 비메시지 event는 durable을 유지하고 introduction은 NULL이며 snapshot은 NULL 또는 직전 snapshot과 같은 ID만 허용한다.
-- **bounded predecessor·golden 검증**: predecessor는 aggregate sequence-1 exact indexed lookup만 사용하고, migration-pending append에서 index row가 아직 없을 때만 같은 aggregate tuple의 exact event lookup으로 fallback한다. SQL trigger는 current-row mirror와 indexed predecessor가 있을 때의 방어 전이를 강제하고 partial unique index는 introduced identity만 대상으로 한다. 실제 V5 history `A → repeat A → null → B`의 no-backfill/indexSource, 첫·반복·NULL·두 번째 메시지, double introduction, 감소·jump·invalid message·snapshot 변경·missing-index fallback 및 exact query plan을 Rust·TypeScript·SQLite에서 확인했다. sidecar consumer는 아직 변경하지 않았으며 다음은 이 정정된 V6를 소비하는 별도 migration/append 구현이다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index P1 수정)
-
-- **source event exact 결속**: `event_source_index` INSERT가 존재하는 한 `events` row의 rowid·event/operation identity·aggregate tuple을 모두 동시에 일치시키도록 외래 키와 same-row trigger를 추가했다. chat message provenance는 canonical payload의 `last_message.messageId`와 exact 일치하고 non-chat 또는 message가 없는 chat만 NULL을 허용한다. 서로 다른 event에서 개별 FK 값만 섞는 cross-event 조합도 trigger가 거부한다.
-- **실행 회귀 검증**: source-less index 삽입을 허용하던 golden을 실제 source event를 먼저 넣는 형태로 교체했다. exact pair 성공, nonexistent source 거부, mirrored field 7개와 message identity 각각의 불일치 거부, cross-event mix 거부, foreign-key integrity를 Rust·TypeScript validator와 실제 Node SQLite에서 함께 확인했다. protocol 40개, focused Rust storage-v6 1개, Node lifetime 15개, TypeScript no-emit, scoped strict clippy, rustfmt, `git diff --check`가 통과했다. migration은 계속 과거 history를 backfill하지 않으며 sidecar consumer는 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v6 source-index contract)
-
-- **append-only source index 계약**: exact storage-v5에서 empty `event_source_index`만 추가하는 schema-only v6 migration을 고정했다. index row는 event rowid·event/operation identity·aggregate tuple·nullable public message identity를 exact하게 담고, aggregate 최신 source와 partial unique message lookup index 및 UPDATE/DELETE 거부 trigger를 둔다. migration은 기존 event를 backfill하지 않으며 ready+absent는 pending+absent로 무효화하고 모든 present job은 state·identity·timestamps·failure evidence를 보존한 채 `indexSource/0/unexhausted`로 재시작한다. attempting/failed는 reopen fail-closed다.
-- **16단계·원자성·provenance 경계**: `indexSource → verifySourceIndex`를 기존 v5 14단계 앞에 추가했다. event append·projection·source-index insert·ready invalidation은 같은 `BEGIN IMMEDIATE`이고 exact 재처리는 no-op, identity/message conflict는 전체 rollback이다. prepared workspace는 aggregate latest index로 project source rowid 하나를 찾고, events PK로 최대 1 MiB canonical payload 하나만 읽어 Rust exact 비교한다. aggregate removal/tombstone이 합법화되면 source-index 의미를 versioning할 때까지 구현을 중단하도록 명시했다. 다섯 query는 exact `EXPLAIN QUERY PLAN` detail을 합격선으로 고정했다.
-- **golden 검증·범위**: Rust/TypeScript validator와 immutable storage-v6 manifest/migration/cases를 추가했다. 실제 SQLite에서 3 job state×14 v5 phase reset, pending/ready absent mapping, no-backfill, preserved rows/schema, unsafe pair/extra schema byte-zero 거부, append-only/unique guards, append rollback, exact query plans을 확인했고 v1~v5 fixture digest 불변도 고정했다. protocol 40개와 Node lifetime 15개, TypeScript no-emit, focused rustfmt·scoped strict clippy·`git diff --check`가 통과했다. unscoped `-D warnings` clippy는 변경 범위 밖 기존 lint 3건 때문에 실패했다. sidecar consumer·scheduler/wire/UI·cleanup/삭제/compaction은 변경하지 않았으며 다음은 독립 계약 리뷰 뒤 별도 v6 migration consumer다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 sidecar migration)
-
-- **exact v5 소비 구현**: `Storage::open`이 fresh/v2/v3/v4/v5를 exact predecessor schema와 canonical meta/job pair로 검증하고 v4→v5 fixture SQL을 원자 적용한다. v4는 어떤 target DDL보다 먼저 exact schema와 admissible `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 확인하며, current exact v5는 migration SQL 없이 schema와 reopen pair를 재검증한다.
-- **보수적 mapping·재시작 경계**: v4의 `receipts`~`verifySource` phase/cursor/private exhaustion은 보존하고, 이미 진행한 `verifyReceipts`~`verifyBaselines`는 state·job identity·timestamps·실패 증거를 그대로 둔 채 `verifySource/0/unexhausted`로 되돌린다. v5 reopen은 `ready+absent`, `pending+absent`, `pending+pending`만 허용하며 attempting/failed sentinel은 자동 retry/success 없이 fail-closed한다. 기존 unbounded D1B helper는 v5 job을 소비하지 않고 mutation 전에 거부한다.
-- **보존·실패 주입·검증**: 3개 v4 job state×9개 phase와 absent pair를 실행 migration해 모든 원장·projection·materialized row, append-only trigger, named index, compaction history/status 보존을 확인했다. malformed phase/cursor/exhaustion, unsafe meta/pair, partial/extra v4는 checkpoint 뒤 DB bytes와 전체 schema/row snapshot이 하나도 바뀌지 않았고, v5 rebuild 중간 SQL 실패는 exact v4로 rollback했다. storage focused 23개, sidecar 전체 106개+stdio 10개(1 ignored), protocol 전체 39개, sidecar `--no-deps -D warnings` clippy, rustfmt와 `git diff --check`를 통과했다. dependency 포함 strict clippy는 변경 범위 밖의 기존 core/protocol 경고 5건 때문에 실패했다. worker·scheduler·wire/UI·cleanup/삭제·compaction은 변경하지 않았으며 다음은 별도 bounded v5 projection verification worker다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 reopen/catch-up P1 수정)
-
-- **pending-before-arm으로 catch-up 한정**: 최초 v5 계약이 max-rowid 증가 시 `attempting` job도 public `catchUpReset`으로 pending에 되돌릴 수 있게 해, durable attempting sentinel은 reopen에서 절대 자동 성공·재시도하지 않는다는 v4 불변식과 충돌했다. 정상 worker는 각 projection/derived batch를 arm하기 전 pending 상태에서 max rowid를 검사하며, arm을 commit한 같은 synchronous sidecar owner는 즉시 batch로 들어간다. 따라서 public catch-up은 pending verification job만 허용하고 attempting/failed는 모두 거부한다.
-- **v5 reopen fail-closed validator**: Rust·TypeScript 양쪽에 v5 reopen pair validator를 추가해 `ready+absent`, `pending+absent`, `pending+pending`만 허용하고 `pending+attempting|failed` 및 구조적으로 잘못된 pair를 거부한다. v4→v5 migration은 attempting/failed 상태와 증거를 보존하지만, 전 3 state×9 phase 실행 migration 뒤 reopen 판정에서 attempting/failed가 계속 fail-closed임을 확인한다. sidecar consumer는 아직 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v5 projection verification 계약)
-
-- **v5 migration·보수적 재검증**: exact storage-v4 schema와 `ready+absent|pending+absent|pending+pending|attempting|failed` pair를 어떤 mutation보다 먼저 확인하고 metadata/job 두 표만 transaction 재구축하는 storage v5 계약을 추가했다. v4 `receipts`~`verifySource`의 state/phase/cursor/private exhaustion은 보존하되, 새 projection phase를 건너뛸 수 있는 기존 `verifyReceipts`~`verifyBaselines`는 state·실패 증거를 보존한 채 `verifySource/0/unexhausted`로 되돌린다. v1~v4 golden 파일은 고정 digest로 불변을 확인한다.
-- **14단계 bounded projection 검증**: materialization 뒤 `verifySource → projects → chats → runs → locks → app_instances → receipts → messages → workspaces → baselines`를 각 table `rowid` keyset `LIMIT 100`으로 검사한다. source phase는 cutoff 이하 sequence/predecessor·필수 derived 존재·최신 projection 존재를 확인하고, table phase는 최신 exact source event와 projection JSON·mirrored/indexed column 전체를 비교한다. missing은 source phase, extra/source-less는 table phase가 맡으며 `COUNT`·window·`GROUP BY`·anti-join·full scan·unbounded namespace query는 금지한다. `app_instances`는 검증하지만 materialized snapshot aggregate에서는 계속 제외한다.
-- **append fence·lifecycle**: projection 검증 진입 전, 모든 projection/derived batch 전, scan-free final publication 전에 `BEGIN IMMEDIATE` 안의 exact max event rowid가 cutoff와 같은지 확인한다. 더 크면 실패시키지 않고 같은 singleton을 새 cutoff의 `pending/receipts/0/unexhausted`로 reset하며, frozen materialization phase는 기존 cutoff로 계속 진행할 수 있다. pending/attempting/failed·cancel·terminal failure·private empty-query exhaustion 의미는 v4와 동일하다. 다음은 독립 계약 검토 뒤 별도 sidecar worker가 exact v5 migration과 bounded verification을 소비하는 구현이다.
-- **검증·소유 경계**: 실제 SQLite migration으로 v4 3개 job state×9개 phase와 pending/ready absent, unsafe pair·extra schema의 DB byte-zero 거부를 확인했다. Node lifetime 12개, protocol 전체 39개, TypeScript no-emit, Rust 2021 rustfmt와 `git diff --check`를 통과했다. sidecar consumer·wire/scheduler/UI·삭제/compaction·제품 보존 정책은 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 sidecar migration)
-
-- **exact v4 소비 구현**: `Storage::open`이 fresh/v2/v3 상태를 exact v1→v2→v3→v4 순서로 검증·이전하고, 현재 exact v4는 migration SQL 없이 재검증한다. v3→v4 DDL 전에 exact v3 schema와 canonical v3 job/meta pair를 모두 검사하며, canonical transaction 뒤 exact v4 schema·metadata·optional job과 phase별 cursor를 protocol v2 validator로 재검증한다. partial/extra/version/table mismatch와 unsafe v3/v4 pair는 fail-closed다.
-- **보존·재시작 경계**: v3 pending/failed의 다섯 phase와 pending/ready absent를 모두 실행 이전해 `verify→verifySource`, `after_event_rowid→after_scan_rowid`, `scan_exhausted=false`, failed 보존을 확인했다. 원장·projection·materialized data·append-only trigger·index·compaction history는 그대로 유지한다. v4 pending job과 sidecar-private exhaustion proof는 재시작 가능하지만 attempting/failed는 구조적으로 읽은 뒤 non-runnable으로 거부한다. 기존 unbounded D1B helper는 v3 회귀를 유지하되 v4에서는 어떤 materialization mutation 전 거부한다.
-- **실패 주입·검증·경계**: metadata/job rebuild 뒤 강제 SQL 실패가 exact v3 schema/data로 rollback함을 주입 검증했다. storage focused 19개, lifetime focused 12개, protocol lifetime 6개, sidecar 전체 102개+stdio 10개(1 ignored), strict sidecar clippy, Rust 2021 rustfmt와 `git diff --check`를 통과했다. worker·scheduler·wire/UI·compaction/삭제·provider는 변경하지 않았으며 다음은 bounded v4 batch worker의 별도 구현·검토다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D private exhaustion authority 수정)
-
-- **위조 가능한 공개 proof 제거**: 직전 검토 수정의 `markScanExhausted`/`emptyBatchObserved` JSON lifecycle 입력은 caller가 빈 keyset 조회 사실을 스스로 주장할 수 있어 증명이 아니었다. Rust·TypeScript 공개 operation과 witness 타입·validator·fixture에서 이를 전부 제거하고, 제거된 literal도 fail-closed로 거부한다. 어떤 공개 lifecycle transition도 `scanExhausted` false→true를 만들 수 없다.
-- **구현 소유 경계**: durable `scan_exhausted`와 v3→v4 false migration은 유지한다. false→true mutation authority는 `sidecarPrivateExactEmptyKeysetQuerySameTransaction`으로 고정하고, 증명은 public JSON으로 표현하지 않으며 sidecar 구현 테스트가 책임진다고 Rust·TypeScript·manifest에 exact 합의했다. protocol lifecycle은 sidecar가 이미 저장한 true state에서 `phaseAdvance`/final publication을 검증할 뿐 그 state를 만들었다고 주장하지 않는다.
-- **검증 범위**: 제거 operation literal과 직접 false→true lifecycle 입력 회귀를 Rust·TypeScript golden에 추가했다. sidecar 구현은 이 contract branch의 소유 범위 밖이므로 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 exhaustion review 수정)
-
-- **P1 durable exhaustion proof**: `afterScanRowid=0`만으로 빈 derived table과 아직 검사하지 않은 table을 구분할 수 없어 phase chain을 건너뛰고 ready를 게시할 수 있던 결함을 수정했다. v4 job에 `scan_exhausted`를 추가하고 migration은 모든 v3 job을 보수적으로 false로 옮긴다. nonempty batch·arm·cancel·failure는 false/current proof를 보존하며, pending current phase에서 `emptyBatchObserved=true` witness를 받은 `markScanExhausted`만 false→true를 허용한다. 별도 `phaseAdvance`는 true인 exact 직전 phase만 다음 phase/rowid 0/false로 옮기고, final publish와 max-rowid reset도 exhausted `verifyBaselines`만 받는다.
-- **P2 migration matrix**: 실제 Node SQLite golden이 pending/failed의 v3 다섯 phase를 모두 실행 migration하고 `verify→verifySource`, cursor rename, `scan_exhausted=0`, failed 보존을 확인한다. job 없는 pending·ready도 각각 실행해 exact v4와 absent singleton을 확인하므로 preflight가 허용하는 모든 v3 pair가 실행 사례를 갖는다.
-- **경계·검증**: Rust·TypeScript 공용 lifecycle fixture가 witness 없는/false witness exhaustion, nonempty batch의 forged true, unexhausted cursor-0 derived skip, unexhausted final publication을 거부한다. sidecar·wire·scheduler·cleanup/삭제·compaction·제품 정책은 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v4 bounded verification 계약)
-
-- **additive v4 migration 계약**: exact storage-v3 schema와 `ready+absent` 또는 구조적으로 유효한 `pending+absent|pending|failed` pair를 어떤 mutation보다 먼저 확인하고, transaction 안에서 `storage_schema_meta` version CHECK와 `lifetime_materialization_job`만 재구축한다. v3 `verify`는 `verifySource`, `after_event_rowid`는 `after_scan_rowid`로 옮기며 failed는 보존한다. 나머지 원장·projection·materialized data·compaction history·named index·append-only trigger는 그대로 보존하고 unsafe pair/partial/extra schema는 DB byte-zero mutation으로 거부한다.
-- **arm·batch·검증·취소 경계**: job은 `pending|attempting|failed`, cursor는 source phases와 `verifySource`에서는 cutoff 이하 event rowid, 네 derived verification phase에서는 각 table rowid를 쓴다. caller가 바꿀 수 없는 exact `LIMIT 100`·1 MiB와 keyset scan만 허용한다. 짧은 arm transaction이 attempting을 먼저 영속하고, bounded batch success는 derived row+cursor+pending을 원자 commit한다. cancel은 batch rollback 뒤 pending을 commit하고 terminal validation은 rollback 뒤 failed를 commit한다. 두 번째 기록 transaction이 불가능하면 attempting sentinel이 남으며 reopen은 자동 retry/success를 거부한다.
-- **최종 publication·비활성 경계**: verify batch commit 뒤 cancel은 그 호출에서 즉시 `Suspended`로 끝나 final publication으로 이어지지 않는다. 별도 짧은 final transaction은 exact pair/cursor·max event rowid·두 cancel point만 검사해 job 삭제+ready를 게시하며 artifact/table scan/count는 하지 않는다. max가 늘면 receipts/새 cutoff/0으로 reset한다. cleanup·삭제·compaction·wire·scheduler와 보존/downgrade 제품 결정은 계속 비활성·열린 상태다.
-- **검증**: 공용 storage-v4 golden이 v3의 모든 pending phase·verify/failed mapping·ready absent, exact data/trigger/maintenance 보존, unsafe preflight 무변경, arm/batch/cancel/fail/attempting sentinel, source-less derived extra 거부, historical baseline 허용, final cancel/max-rowid 및 policy mutation을 Rust·TypeScript 양쪽에서 판정한다. focused Node·protocol Rust·TypeScript no-emit·rustfmt·diff check를 통과했다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage v3 review P1 수정)
-
-- **재시작 pair 검증**: exact v3 open이 metadata와 optional `lifetime_materialization_job`을 protocol canonical 값으로 구성해 job validator와 meta/job pair validator를 모두 통과시킨다. `pending+absent|pending|failed`와 `ready+absent`만 재시작하며 `ready+present`, malformed timestamp/job은 cursor·content·path를 싣지 않는 동일 오류로 fail-closed한다. terminal failed job은 계약상 유효하지만 자동 retry 대상은 아니다.
-- **레거시 D1B 격리**: 기존 unbounded `materialize_lifetime_records`는 bounded v3 cursor가 하나라도 있으면 첫 metadata mutation 전에 거부한다. 직접 회귀가 DB bytes·materialization meta·job row·derived row count 보존을 확인해 레거시 경로가 cursor를 둔 채 ready를 게시할 수 없도록 고정했다.
-- **검증·경계**: 직접 회귀 2개, sidecar 전체 97개+stdio 10개(1 ignored), protocol lifetime 5개, focused rustfmt와 strict sidecar clippy를 통과했다. worker·scheduling·wire/UI·compaction/삭제는 여전히 구현하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage schema v3 sidecar migration)
-
-- **exact v3 소비 구현**: `Storage::open`이 새 DB는 v1→exact v2 검증→v3 순서로 올리고, 기존 exact v2는 `pending|ready` 상태만 byte/schema mutation 전에 허용한 뒤 canonical v3 SQL을 원자 적용한다. exact v3 재시작은 no-op이며 부분·추가 object, index/table drift, v3 table과 metadata version 불일치는 fail-closed한다. `materializing|failed` v2는 DB bytes·schema·rows가 바뀌지 않은 채 거부한다.
-- **보존·격리 회귀**: pending/ready populated v2의 모든 v1/v2 원장·projection·receipt·public message·prepared workspace·baseline·maintenance 행과 기존 table/index/append-only trigger SQL을 그대로 보존하고 job을 만들지 않으며, 이후 ledger append가 계속 동작한다. migration 중간 실패 주입은 exact populated v2로 rollback한다. 전용 `lifetime_materialization_job` 행은 기존 `maintenance_jobs` 기반 compaction status에 영향을 주지 않는다.
-- **검증·경계**: focused storage 14개, sidecar 전체 95개+stdio 10개(1 ignored), protocol lifetime 5개, focused rustfmt와 strict sidecar clippy, `git diff --check`를 통과했다. batch worker·startup/idle scheduling·wire/UI·compaction/삭제·provider는 변경하지 않았고 기존 unbounded internal materialization도 그대로다. 다음은 이 v3 cursor를 소비하는 bounded batch/cancel 구현과 독립 리뷰다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D schema v3 preflight 검토 수정)
-
-- **P2 preflight 보강**: exact storage-v2 DDL만 확인하면 schema-valid `materializing/failed`를 v3로 그대로 복사해 시작부터 fail-closed 상태를 영속할 수 있었다. 어떤 DDL·data mutation보다 먼저 exact v2와 `materialization_state IN (pending, ready)`를 함께 검증하고, 그 밖의 상태는 schema/data byte-zero mutation으로 거부하도록 계약을 좁혔다.
-- **상태 보존 명시·검증**: v3 migration은 상태를 강제로 pending으로 만들지 않는다. 허용 경로는 `pending→pending+job absent`, `ready→ready+job absent` 두 가지뿐이다. Node golden이 두 보존 경로와 materializing/failed 무변경 거부를 실행하고 Rust·TypeScript preflight validator/mutation case가 같은 조건을 고정한다. focused Node 7개, protocol lifetime Rust 5개, TypeScript no-emit을 통과했다. 다음은 이 보강을 포함한 독립 재검토 뒤 sidecar 소비 구현이다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D storage schema v3 계약)
-
-- **전용 singleton으로 정정**: `maintenance_jobs`는 DDL상 `losslessCompaction` 전용이고 기존 status 계산도 모든 terminal maintenance row를 compaction 결과로 읽으므로, materialization cursor/성공/실패를 그 표에 저장하면 compaction 이력을 오염시킨다는 재검토 결함을 확인했다. immutable storage-v2 migration은 그대로 두고, exact v2 사전검증 뒤 `storage_schema_meta`의 version CHECK만 3으로 transaction 재구축하며 `lifetime_materialization_job` singleton을 추가하는 additive storage schema v3 계약으로 분리했다. protocol·payload schema는 계속 v1이고 downgrade 정책은 열린 질문이다.
-- **상태·재개 계약**: canonical readiness는 `storage_schema_meta.materialization_state`다. 정상 pair는 pending+absent/pending/failed와 ready+absent뿐이고 기존 materializing/meta failed 또는 ready+present는 fail-closed한다. job은 durable `pending|failed`만 허용하며 running/succeeded/cancelled를 저장하지 않는다. batch는 derived row+advanced pending cursor를 원자 commit하고 cancel/restart는 직전 pending cursor를 보존한다. terminal failure는 rollback 뒤 같은 singleton을 cursor 보존 failed로 바꾸며 자동 retry하지 않고, 완료는 singleton 삭제+meta ready를 같은 transaction으로 게시한다. ready 뒤 append는 같은 append transaction에서 meta pending+job absent, pending 중 append는 frozen cursor 불변, final max rowid 증가 감지는 같은 singleton을 더 큰 cutoff의 receipts/0으로 reset한다.
-- **golden 검증·경계**: Rust·TypeScript가 5개 bounded phase, cursor/job/pair/lifecycle와 sanitized failure kind를 같은 v3 fixture로 검증한다. Node SQLite golden은 populated v1→v2→v3에서 모든 v1/v2 data row, maintenance compaction history, table/index/trigger SQL을 보존하고 후속 event append, exact-v3 no-op, partial/extra v2 fail-closed를 확인했다. focused Node 7개, protocol lifetime Rust 5개, TypeScript no-emit을 통과했다. sidecar·wire·scheduler·삭제/cleanup·보존 threshold는 활성화하지 않았으며 다음은 이 v3 계약의 독립 검토 뒤 sidecar migration/batch 소비 구현이다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D 배치 계약 검토 수정)
-
-- **durable lifecycle 정정**: 최초 계약 commit `f131145`가 `maintenance_jobs`와 `storage_schema_meta` 상태를 한 목록으로 섞고 live projection을 materialization source로 허용한 결함을 검토에서 확인했다. `Suspended`는 메모리 내 호출 결과일 뿐 저장 상태가 아니며 canonical cursor는 단일 `pending` lifetime job의 `cutoff_json`에 저장한다. SQLite owner 하나와 매 batch `BEGIN IMMEDIATE`가 active pending/running 개수·exact job identity·pending 상태·cursor를 검사하고, DDL에 active-job UNIQUE가 없으므로 transaction 경계 검증으로 두 번째 job을 막는다. commit은 derived rows와 advanced pending cursor를 원자 결속하고 cancel/current failure는 직전 pending cursor로 rollback한다. 성공은 같은 job을 `succeeded`로 끝내며 sanitized `failed` 기록은 rollback 뒤 별도 optional best-effort transaction만 허용하고 자동 retry하지 않는다. persisted `running`은 maintenance corruption, `materializing/failed`는 `storage_schema_meta` fail-closed 상태이며 failed maintenance job은 terminal history다.
-- **frozen cutoff·phase 정정**: receipt/message/workspace/baseline/verify artifact는 frozen cutoff 이하 event와 그 event projection snapshot만 source로 삼고 live projection은 `max(event.rowid)==cutoff`를 먼저 증명한 최종 catch-up/equivalence transaction에서만 비교한다. 다섯 phase 모두 동일 100행·1 MiB guard의 keyset scan이며 phase는 `afterEventRowid=0`에서 시작해 cutoff까지 완료한 뒤 다음 phase를 0으로 reset한다. verify도 batchable하다. compact는 verify 완료 뒤에만 도달 가능한 reserved marker지만 실행은 계속 비활성이다. 최종 별도 `BEGIN IMMEDIATE`는 bounded SQL/keyset evidence로 completeness·equivalence·live reconstruction을 확인하며 max rowid가 바뀌면 ready를 게시하지 않고 새 cutoff catch-up을 pending으로 이어간다.
-- **회귀 계약·검증**: Rust·TypeScript cursor transition validator와 golden cases가 phase start/order/reset, verify batching, mid-phase append의 frozen cutoff, verify 뒤 새 cutoff catch-up, durable state/source/final-check 모순을 거부한다. 미래 sidecar 회귀 순서는 `materialize ready → append와 같은 transaction에서 pending → 별도 catch-up verify → ready`로 고정했다. focused Node 6개, protocol lifetime Rust 4개, TypeScript no-emit, focused rustfmt와 `git diff --check`를 통과했다. SQL·sidecar·wire·scheduler·삭제는 변경하지 않았고 다음은 수정 계약의 독립 재검토 뒤 sidecar 소비 구현이다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D 배치·상한·취소 계약)
-
-- **고정된 내부 guard·cursor**: lifetime materialization은 caller가 바꿀 수 없는 source 100행·canonical payload 합계 1 MiB 상한을 사용하며, 단일 source payload가 1 MiB를 넘으면 fail-closed한다. cursor schema v1은 안전 정수 `cutoffEventRowid`·`afterEventRowid`와 `receipts/messages/workspaces/baselines/verify/compact` phase만 허용하고, `rowid > after AND rowid <= cutoff ORDER BY rowid` keyset scan만 사용하며 `OFFSET`은 금지한다.
-- **재개·취소·원자성**: sidecar handshake ready 이후 idle turn마다 batch 하나를 `BEGIN IMMEDIATE` transaction 하나로 처리한다. cancel은 transaction 전에는 mutation 없이, transaction 안에서는 각 source row 전후와 precommit 직전에 확인해 현재 batch만 rollback하고 내부 `Suspended`로 끝낸다. 이미 commit된 exact derived batch는 재시작·취소 뒤에도 남을 수 있지만 source ledger mutation과 compaction trigger 변경은 atomic rollback 대상이다. commit 가능한 진행 상태는 `pending`뿐이고 persisted `running/materializing/failed`는 fail-closed하며 pending/running lifetime job은 최대 하나다. append는 같은 transaction에서 ready를 pending으로 무효화하고, ready 재공개는 별도 catch-up/verification transaction에서만 한다.
-- **계약 전용 경계·검증**: Rust·TypeScript validator/constants와 storage-v2 golden batching cases를 추가해 malformed/unsafe/out-of-order cursor, caller limit override, 100행·1 MiB 초과, rollback·ready publication 모순을 양쪽에서 거부했다. focused Node 6개와 protocol lifetime Rust 4개, TypeScript no-emit, focused rustfmt, `git diff --check`를 통과했다. SQL·sidecar 구현·wire/V6·자동 scheduling·compaction/삭제·threshold·downgrade 결정은 건드리지 않았다. 다음은 이 계약을 소비하는 sidecar batch materialization 구현과 독립 리뷰다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 Electron 개발 실행 복구)
-
-- **원인·수정**: `pnpm m5:dev`가 만든 `.vite/build/main.js`는 CommonJS인데 루트 `package.json`의 `type=module` 때문에 Electron이 ESM으로 해석해 `exports is not defined`로 창 생성 전에 중단됐다. 루트 ESM은 유지하고 Electron main/preload 산출물만 명시적 `main.cjs`/`preload.cjs`로 고정했다. preload 경로도 Forge가 제공하지 않는 선언형 상수가 아니라 main bundle 옆의 exact 파일을 사용한다.
-- **회귀 경계**: package main, Vite CJS 산출물 이름, BrowserWindow preload 경로와 ASAR smoke 기대 파일을 한 계약으로 묶었다. M5 작업대 화면은 존재하며 개발 모드는 fixture sidecar, 패키지 모드는 Rust sidecar를 사용한다. 실제 Claude/Codex provider는 계속 비활성이다.
-- **검증·경계**: Electron scaffold 4개와 TypeScript no-emit, Forge 개발 실행을 통과했고 main/preload가 `.cjs`로 빌드된 뒤 `app://m5/index.html`의 프로젝트 선택·파일·코드 편집기·변경 3열 작업대가 실제 창에 렌더링됨을 확인했다. darwin-arm64 package와 Rust sidecar 포함 ASAR smoke도 통과했다. 개발 실행은 fixture sidecar이며 패키지 실행도 실제 Claude/Codex provider는 아직 비활성이다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D1B 무삭제 materialization)
-
-- **호출형 단일 transaction materialization**: 아직 wire·startup·background에 연결하지 않은 내부 `materialize_lifetime_records`가 stable event rowid cutoff를 잡고 모든 v1 event를 immutable operation receipt로 옮긴다. canonical payload 원문과 재계산 SHA-256 metadata를 exact 비교하며 legacy·actual-agent·recovery duplicate/conflict 의미가 기존 v1과 같음을 검증한다.
-- **공개 기록·작업공간·baseline**: durable chat projection의 exact `teamMessage`만 안정된 message ID/순서로 materialize하고, project projection의 unbound/bound/abandoned workspace를 chat composite identity와 대조한다. `projects/chats/runs/locks`는 exact last sequence에 canonical baseline을 만들며 기존 baseline+새 tail이 현재 projection을 재현하는지 매번 확인한다. 기존 materialized 행 손상·extra/missing 행·namespace/recovery/projection drift는 덮어쓰지 않고 fail-closed다.
-- **원자성·검증·통합 경계**: receipt 뒤, message/workspace 뒤, baseline 뒤 metadata 직전 3개 실패 주입이 v2 행과 `materialization_state`를 모두 rollback하고 원장/projection을 바꾸지 않음을 확인했다. 독립 리뷰는 원자성·v1 idempotency·public message privacy·workspace 결속·실제 baseline+tail replay에 P0~P3 결함 없음으로 승인했고 commit `c49034293b58698cbb44b5a9694e4d2b819bd38c`로 통합했다. 통합 branch에서 focused lifetime 10개, protocol lifetime 3개, Node 계약 5개와 TypeScript no-emit을 재통과했다. event/projection 삭제, compaction/checkpoint/VACUUM, 자동 스케줄, `storage.status` wire, threshold/cleanup은 포함하지 않았다. 전체 원장을 메모리에 읽으므로 자동 실행 전에 배치·상한·취소 계약이 필요하다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A·D1A 통합)
-
-- **통합**: storage lifetime 계약의 최초·리뷰 보강·receipt 무결성 3개 commit과 SQLite v2 migration/status core를 독립 리뷰 승인 뒤 `m5/coding-agent-ide`에 순서대로 통합했다. 현재 기준은 `a7fec35de27aa3eb99c7c8d9fe8fccf359deca59`이며 `storage.status`와 Bridge V6는 계속 계획 계약일 뿐 제품 wire/ready/dispatcher에는 노출하지 않는다.
-- **통합 검증**: G5D Node 계약 5개, protocol Rust 35개, sidecar unit 86개(1 ignored)와 stdio process 10개, TypeScript no-emit, `git diff --check`를 통합 branch에서 다시 통과했다. 독립 D0A 재리뷰는 receipt canonical JSON/SHA-256·workspace composite binding을 승인했고, D1A 리뷰도 migration 원자성·exact schema·privacy-safe status에 P0~P3 결함 없음으로 승인했다.
-- **다음 할 일**: ready 이후 receipt/message/workspace/baseline materialization과 무손실 compaction, 그 뒤 `storage.status` V6 활성화·Electron/renderer·하네스/QA를 각각 독립 wave로 진행한다. 보존 기간·전체 용량 threshold·physical cleanup/삭제는 사용자 결정 전 계속 비활성이다. 실제 provider·인증·사용자 프로젝트·Windows·push·`main` 병합은 수행하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D1A schema migration·내부 status)
-
-- **additive schema v2**: `Storage::open`이 exact v1 schema를 먼저 확인한 뒤 storage-v2 golden DDL을 한 transaction으로 적용하고, v1 `schema_meta=1`·모든 원장/projection/append-only trigger를 그대로 둔 채 v2 table/index/metadata 전체를 exact 검증한다. 재시작은 idempotent하며 부분·추가·index·metadata 변조는 fail-closed다. 시작 중 record backfill/materialization/deletion은 하지 않는다.
-- **privacy-safe 내부 status**: 아직 wire에 광고·dispatch하지 않는 `Storage` 내부 상태 계산을 추가했다. SQLite page/file/WAL bytes, events count/canonical payload UTF-8 bytes, `projects/chats/runs/locks` projection snapshot row count/UTF-8 bytes, 완료된 maintenance job 상태만 durable DB 사실에서 집계한다. volume capacity는 새 의존성 없이 `unavailable/null`, physical cleanup은 `false/userPolicyNotConfigured`이며 raw chat/provider text·token/auth·absolute path를 반환하거나 오류에 싣지 않는다. app instance, filesystem worktree inventory, materialization 전 v2 row는 snapshot 집계에서 제외한다.
-- **검증·경계**: focused storage 15개와 sidecar 전체 86개+stdio 10개(1 ignored), 소유 파일 rustfmt, known baseline lint 4종을 제외한 sidecar strict clippy, `git diff --check`를 통과했다. exact strict clippy는 이번 범위 밖 core `proctree.rs` 2건과 protocol `run_recovery_v1.rs`·`workspace_v1.rs`·`lib.rs` 3건에서 실패했고, workspace fmt도 기존 `src-tauri/src/detect.rs`·`login.rs` drift만 보고했다. `storage.status` wire/V6, materialization, compaction, threshold/admission, cleanup/삭제는 D1A에 포함하지 않았으며 다음 독립 리뷰와 후속 wave가 필요하다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D receipt 무결성 재리뷰 수정)
-
-- **canonical payload 직접 검증**: Rust와 TypeScript operation receipt validator가 `canonicalPayloadJson`을 직접 parse·canonicalize하고 기존 v1 canonical JSON과 byte-exact인지 확인한다. 같은 원문 bytes의 SHA-256도 직접 재계산해 metadata 형식만 맞는 손상 digest를 거부한다.
-- **손상 회귀**: 정상 legacy·actual-agent·recovery duplicate/conflict 사례를 유지하면서, 64자리 lowercase hex지만 원문과 불일치하는 digest, 원문 digest는 일치하지만 key 순서가 canonical이 아닌 JSON, parse할 수 없는 JSON을 공용 golden fixture에서 양쪽 validator가 거부하도록 고정했다.
-- **검증**: focused G5D Node contract 5개, protocol Rust 35개, TypeScript no-emit, 소유 Rust focused rustfmt와 diff check를 통과했다. sidecar·Electron·manifest와 활성 wire는 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A 독립 리뷰 수정)
-
-- **operation receipt 정확성**: digest만 보존하던 초안을 고쳐 canonical payload 원문과 SHA-256/version/format metadata를 함께 보존한다. duplicate/conflict는 digest가 아니라 v1 immutable record의 exact canonical JSON과 나머지 불변 필드를 비교하며 request ID만 기존처럼 제외한다. legacy·actual-agent·poisoned recovery fixture가 exact duplicate와 changed-payload conflict를 교차 검증한다.
-- **prepared workspace 결속**: `bound ↔ boundChatId non-null`, `unbound/abandoned ↔ null`을 SQL CHECK로 고정하고, 기존 `chats(chat_id, project_id)`에 additive unique index를 둔 composite FK로 bound chat과 project가 같음을 SQLite가 직접 거부하게 했다. 세 valid 상태와 null/state 모순·cross-project insert를 실제 SQLite에서 검증한다.
-- **나머지 회귀**: failed compaction의 `lastSuccessfulAt`이 `lastAttemptedAt`보다 늦으면 Rust/TypeScript 모두 거부한다. v1의 7개 테이블 전체 행과 events append-only update/delete trigger·후속 append가 v2 DDL 전후 보존되는지 확장 검증했다.
-- **검증**: G5D Node contract 5개, protocol Rust 35개, TypeScript no-emit, 소유 Rust focused rustfmt와 `git diff --check`를 통과했다. sidecar/Electron/runtime method는 D0A 범위대로 변경하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5D D0A 저장 수명 계약)
-
-- **무삭제 계약**: 실제 provider 활성화 전 stop condition인 SQLite 전체 수명을 G6에서 분리해 G5D로 열었다. D0A는 채팅·메시지·run·recovery·evidence·snapshot을 삭제하지 않고 임의 보존 기간·용량 threshold·자동 정리를 정하지 않는다. physical cleanup과 cleanup candidate/action API는 비활성이다.
-- **계획된 V6·schema v2**: privacy-safe `storage.status` request/response와 additive `M5BridgeV6`, v1 원장/projection을 보존하는 storage-v2 golden DDL/metadata를 Rust·TypeScript 계약으로 고정했다. sidecar가 아직 처리하지 못하므로 `storage.status`는 D1 전 protocol v1 method/ready capability/dispatcher에 광고·예약하지 않는다.
-- **lossless compaction 경계**: baseline+tail replay, 기존 operation duplicate/conflict, actual/legacy namespace, recovery 동등성을 확인한 뒤에만 검증된 ledger cutoff를 논리 삭제하며 실패는 전체 rollback한다. checkpoint/`VACUUM`은 논리 성공 조건이 아니다. 다음은 D1 sidecar migration/materialization/status/compaction 구현과 독립 리뷰이며 물리 삭제 정책은 사용자 결정으로 남는다.
-- **검증**: G5D Node contract 4개, protocol Rust 35개, TypeScript no-emit, 소유 Rust 파일의 2021 rustfmt와 `git diff --check`를 통과했다. workspace `cargo fmt --all -- --check`는 이번 소유 범위 밖 기존 `src-tauri/src/detect.rs`·`login.rs` formatting drift만 보고해 focused rustfmt로 대체했고, 해당 파일은 수정하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5C 최종 gate)
-
-- **판정**: exact docs/integration commit `cdb3e1b49de5f0c6541ff007f007bcb65b7db122`을 독립 최종 gate가 `PASS — APPROVE / G5C_READY`로 승인했다. G5C 기능 계보와 원자성·UI·combined 독립 리뷰, exact-head 누적 하네스 12단계, 독립 QA artifact, 현행 문서와 byte-identical `AGENTS.md`/`CLAUDE.md`를 다시 대조했다.
-- **재검증·경계**: gate가 G5C 계약·UI Node 30개, protocol 32개, sidecar recovery 14개, fake provider recovery stdio 1개, 일반 `--stdio` ready/status/quit 1개와 diff check를 통과했다. G6는 의도대로 `NOT_READY`다. 실제 Claude/Codex adapter·인증 smoke, SQLite 전체 lifetime/retention/compaction, G6, Windows, 전체 OS Quit와 출시 후보 검증이 남으며 push와 `main` 병합은 하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5C 통합·누적 하네스·독립 QA)
-
-- **통합·리뷰**: provider sidecar, text/recovery 경계, durable recovery 발견, renderer recovery controls, restart-atomic saga, pre-G5C ID 백필과 identityless UI 보강을 독립 Rust·UI·combined 재리뷰 승인 뒤 `m5/coding-agent-ide`에 통합했다. G5C provider/identityless 계약 테스트도 `m5:test:run-recovery` 누적 게이트에 추가했다.
-- **누적 증거**: exact integration `42dcbfad2444eebbebaeef4e4f64f614a6de6264`의 G5 누적 하네스가 macOS arm64 Electron package smoke, Chromium Monaco, 기존 Tauri와 Rust workspace, G5A~G5C fake-only 실행·복구를 모두 PASS했다. 최초 sandbox package는 Electron artifact fetch 차단으로 실패했고 네트워크 허용 재실행은 PASS했다. 증거는 `.artifacts/m5-harness/g5-run-recovery-2026-08-28T01-03-49-390Z.json`이다.
-- **독립 QA·경계**: 같은 exact commit의 독립 QA가 no-fallback 발견, handshake 비공개, exact text/event 경계, provider recoveryRequired exit 0, random recovery와 legacy namespace, restart saga, pre-G5C recovery ID 보존, identityless zero-RPC 보호를 재검증해 `G5C_QA_PASS`로 판정했다. 증거는 `.artifacts/m5-qa/g5c-integration-42dcbfad2444eebbebaeef4e4f64f614a6de6264-2026-08-28T01-09-53Z.json`이다. 일반 `--stdio`의 실제 Claude/Codex·인증·모델·사용자 프로젝트·Windows는 실행하지 않았으며, 다음은 문서 commit의 독립 최종 gate다. push와 `main` 병합도 하지 않았다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5C identityless recovery renderer boundary)
-
-- **보호 상태**: durable actual recovery의 process identity가 없으면 renderer가 실행·저장·닫기 차단을 계속 유지하고, 초보자 화면에는 종료 상태를 안전하게 확인할 수 없어 보호 중이라는 안내만 보인다. 이 경우 recovery abandon button은 렌더하지 않으며 programmatic `abandonAgentRecovery`도 confirm·inspect·resolve 전에 반환한다.
-- **공유 경계·호환**: UI와 controller는 하나의 `canAbandonAgentRecovery` 판정을 사용해 한쪽만 완화되는 drift를 막는다. process identity가 있는 기존 actual recovery의 inspect → exact revision resolve → durable rehydrate 흐름은 바꾸지 않았다.
-- **검증·경계**: focused renderer Node 20개와 full Node 180개, TypeScript no-emit, Vite production build와 `git diff --check`를 통과했다. identityless recovery의 zero inspect/resolve, terminal hydration·reopen 뒤 차단 유지, normal recovery 허용을 회귀로 고정했다. 실제 provider·인증·사용자 프로젝트·Windows는 호출하지 않았고 다음은 기능 branch 독립 리뷰와 최신 통합 기준 QA다.
-
-### 2026-08-28 · by GPT-5.6-Sol (M5 G5C legacy recovery 예약 리뷰 수정)
-
-- **startup 보강 순서**: `source_kind=actualAgent` projection에 기존 non-null recovery가 있지만 내부 `recovery_id_reservation`이 없는 pre-G5C 상태를 skip·validation 전에 먼저 보강한다. 새 ID를 만들거나 기존 ID를 바꾸지 않고 public `recoveryId`를 같은 SQLite transaction에 저장한 뒤 persisted projection을 재조회하며, 이후 unresolved·resolved 상태의 기존 startup 분기를 그대로 따른다.
-- **회귀·롤오버**: pre-G5C unresolved recovery는 exact ID를 유지한 채 inspect와 abandon이 계속 동작하고, resolved recovery는 exact ID/public record를 유지한 채 inspect 가능·재해결 거부·byte-zero DB mutation임을 고정했다. 현재 파일에 홀로 남았던 2026-08-27 recovery 원자성 엔트리는 같은 날짜의 나머지 엔트리가 있는 `archive/history-2026-08.md`로 원문 그대로 이동해 날짜 경계를 복구했다.
-- **검증·경계**: focused startup 회귀 1 passed, sidecar 전체 78 passed·1 ignored와 stdio 10 passed, core 82 passed, protocol 32 passed, strict sidecar clippy `--no-deps`, Rust 2021 rustfmt, `git diff --check`를 통과했다. 실제 provider·인증·사용자 프로젝트·network·Windows는 실행하지 않았고 public wire·Electron·UI는 변경하지 않았다.
-
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
@@ -394,7 +148,7 @@
 
 - **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. 현재는 source 대조와 budget unit test만 확인했으며 전체 persistence/reopen 재현은 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
 
-- **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구이며 R3A source-local 검증만으로 닫히지 않는다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개다. 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있으므로 R3C/lifecycle에서 재현·수정 검증이 필요하다. 아직 구현하지 않은 세부 조건은 `proposals/m5-storage-reopen-verification.md` §7.5를 따른다.
+- **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구다. 이를 포함한 §8 내부 R3B는 `e5f9f01`에서 독립 통합 QA·최종 gate를 완료했다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개이며 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있다. 이 미해결 catch-up과 R3C 호환성은 `proposals/m5-storage-reopen-verification.md` §7.5·§9, 테스트 전용 재현 계약은 §10을 따른다.
 
 - **pnpm 복원과 누적 검증 환경(2026-09-02)**: stale node_modules metadata만으로 설치 성공을 판단하지 않는다. frozen lockfile/ignore-scripts/공급망 정책을 유지한 복원 뒤 하네스와 동일한 `CI=1`로 확인한 build·누적 `g5d-bounded-storage`가 `d4c3751`·`63ab510`에서 PASS했다. 격리 환경의 Electron runtime fetch 실패와 더 넓은 core/protocol lint 실패는 scoped 성공과 별도 기록한다. 자동 install/CI 정규화 차이는 관찰했지만 package 소실 원인을 전부 입증한 것은 아니므로 임의 설정 변경이나 정책 완화로 해결했다고 주장하지 않는다.
 
@@ -481,9 +235,13 @@
 
 ## 워크로그 (최신이 위)
 
-### 2026-08-27 기존 엔트리 → `docs/archive/history-2026-08.md`
+### 2026-09-01 기존 엔트리 → `docs/archive/history-2026-09.md`
 
-2026-08-12 ~ 2026-08-27의 기존 엔트리를 날짜 경계로 아카이브했다. 재사용할 G5C recovery 원자성 결정은 위 `핵심 결정·발견`에 반영했고, M4의 현재 결론은 `docs/proposals/m4-orchestration.md`가 기준이다.
+2026-09-01 엔트리를 날짜 경계로 아카이브했다. V8 provenance·append fence·제한된 재오픈과 남은 제품 활성화 게이트는 위 `핵심 결정·발견`에 유지했다.
+
+### 2026-08-28 및 그 이전 → `docs/archive/history-2026-08.md`
+
+2026-08-12 ~ 2026-08-28의 기존 엔트리를 날짜 경계로 아카이브했다. G5C recovery 원자성·G5D 저장소 계약과 Electron 시작 복구 등 재사용할 결정은 위 `핵심 결정·발견`에 반영했고, M4의 현재 결론은 `docs/proposals/m4-orchestration.md`가 기준이다.
 
 ### 2026-07-23 및 그 이전 → `docs/archive/history-2026-07.md`
 
