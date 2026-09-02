@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C 추가 snapshot 경로 조사)
+
+- **진행·기준**: R3B 마감과 §10 계약을 `8551cba`로 커밋한 뒤 별도 `codex/g5d-r3c-snapshot-compat` / `.worktrees/g5d-r3c-snapshot-compat`에서 테스트 전용 구현을 시작했다. 통합 코드·안전 예산은 바꾸지 않는다.
+- **추가 발견**: 독립 설계 조사와 root source 대조에서 project의 `prepared_workspaces`가 준비마다 누적되고 abandoned도 보존되며 생산 helper에 전체 map 개수/byte 상한이 없음을 확인했다. 따라서 단일 run뿐 아니라 project snapshot의 정상 성장도 후속 호환 설계에서 다뤄야 한다. 실제 크기 경계 재현은 아직 없고 현재 §10 작업 범위를 늘리지 않았다. metadata validator의 넓은 허용 범위와 실제 생산/파일 reader 제한은 구분한다. 상세는 재오픈 제안서 §9에 기록했다.
+- **검증·다음**: 읽기 전용 코드 대조이며 추가 시험·provider·사용자 프로젝트는 실행하지 않았다. 먼저 §10의 run persistence/reopen 회귀를 완료하고 exact review·통합 QA한 뒤 다른 정상 snapshot의 재현 계약과 해결 정책을 정한다. main 병합·push는 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C snapshot 호환성 시험 계약)
 
 - **범위·검토**: 정상 public-event 예산 안의 큰 run snapshot이 private 1 MiB primary cap을 넘는 문제를 재현할 테스트 전용 §10을 작성했다. 독립 검토는 `PASS_FOR_TEST_CONTRACT`이며 실제 구현·정책 변경 승인이 아니다. 실제 기능 작업은 이 계약의 clean 통합 commit에서 별도 worktree로 분기해 `agent_runtime.rs`의 기존 test module와 기능 워크로그만 수정한다.
@@ -146,7 +152,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. 현재는 source 대조와 budget unit test만 확인했으며 전체 persistence/reopen 재현은 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
+- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. project의 prepared-workspace map도 abandoned를 보존하며 전체 개수/byte cap 없이 누적되는 별도 정상 생산 경로다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. 현재 source 대조·기존 budget test만 확인했고 run persistence/reopen 재현은 §10에 따라 구현 중이며 project 경계 재현은 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
 
 - **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구다. 이를 포함한 §8 내부 R3B는 `e5f9f01`에서 독립 통합 QA·최종 gate를 완료했다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개이며 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있다. 이 미해결 catch-up과 R3C 호환성은 `proposals/m5-storage-reopen-verification.md` §7.5·§9, 테스트 전용 재현 계약은 §10을 따른다.
 
