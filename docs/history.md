@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C 활성화 호환성 조사)
+
+- **새 발견**: 독립 설계 분석과 root 코드 대조에서 기존 public text 16×64 KiB 허용량에 metadata를 더한 actual-run snapshot이 R3A/B primary 1 MiB를 넘을 수 있음을 확인했다. 읽기 검증이 허용하는 index-empty pending과 chat 쓰기가 요구하는 indexed predecessor도 구분했다. `proposals/m5-storage-reopen-verification.md` §9에 snapshot 호환·검증 후 catch-up 순서·복구 preflight·전체 시작 시간의 후속 선행 조건을 기록했으며 기존 예산/쓰기 계약이나 제품 경로는 변경하지 않았다.
+- **검증·진행**: 기존 actual public budget 경계 test 1개가 통과했다(`/tmp/hello-agent-r3c-budget-discovery-focused.log`, 0.91초). 최초 `--exact` 시도는 이름을 전체 경로로 지정하지 않아 0개 실행했으므로 검증 증거로 사용하지 않는다. 실제 큰 run persistence→reopen 재현과 R3C 구현은 아직 남았다. 별도 R3B 작업자는 첫 집중 test 3개를 통과했고 손상/중첩 탐색/예산/수명 경계 회귀를 보강 중이다. 독립 exact-commit 코드 리뷰·통합 QA 전이므로 R3B 완료로 처리하지 않는다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B frozen identity 계약 보완)
 
 - **교차 확인·보완**: 계약 `0eafac4`의 unindexed introduction 검사만으로는 indexed-live introduction과 다른 frozen source의 동일 ID 충돌을 명시적으로 닫지 못함을 root·독립 리뷰·구현 담당이 확인했다. §8.3은 **모든 live introduction**의 exact indexed/frozen identity 대조를 먼저 요구하고 unindexed만 추가 전역 keyset 탐색을 수행하도록 보완했다. 기존 정상 INSERT는 `event_source_index_rejects_frozen_message_reuse` trigger가 보호하므로 일반 append 결함으로 기록하지 않는다. exact schema를 복원한 stored-corruption fixture 회귀를 추가하며 schema/product 경로는 바꾸지 않는다.
@@ -366,6 +371,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. 현재는 source 대조와 budget unit test만 확인했으며 전체 persistence/reopen 재현은 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
 
 - **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구이며 R3A source-local 검증만으로 닫히지 않는다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개다. 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있으므로 R3C/lifecycle에서 재현·수정 검증이 필요하다. 아직 구현하지 않은 세부 조건은 `proposals/m5-storage-reopen-verification.md` §7.5를 따른다.
 

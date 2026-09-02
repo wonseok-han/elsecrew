@@ -202,3 +202,14 @@ receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 �
 6. 새 focused tests, 기존 R1/R2/R3A, full sidecar/stdio, Node/protocol lifetime, scoped strict clippy·Rust 2021 format·diff check, 독립 exact-commit 코드 리뷰와 최신 통합 QA를 통과한다. 누적 하네스는 `CI=1` 환경을 사용하고 환경 제한·미실행 외부 게이트는 별도 기록한다.
 
 단일 Rust 구현 담당이 별도 `m5/g5d-v8-reopen-derived` branch·`.worktrees/g5d-v8-reopen-derived`에서 `storage/reopen.rs`와 하위 모듈, storage test 하위 모듈 및 module 등록, 자기 branch의 `docs/history.md`를 소유한다. `storage.rs`는 동작 보존 helper 추출·설명만 허용한다. 통합 담당은 계약·현행 구조·색인·통합 기록을 소유한다. schema/protocol/golden/의존성/lockfile·제품 open/복구/append/lifetime·기존 materializer catch-up 수정·scheduler/writer/status·Electron/UI는 변경 금지다. 소유 밖 수정이나 안전 계약 변경이 필요하면 구현을 멈추고 보고한다. 실제 provider·사용자 프로젝트·Windows·파괴적 시험, main 병합·push는 수행하지 않는다.
+
+## 9. R3C 활성화 전 조사 — 아직 구현 계약 아님
+
+`da539a6`의 제품 경로를 R3A/B 계약과 대조한 후속 조사다. 아래 호환성·순서 조건은 R3B 구현 범위나 기존 안전 예산을 바꾸지 않는다. 제품 활성화 전에 재현 fixture·별도 계약·독립 검토로 닫아야 한다.
+
+- **기존 허용 입력과 단일 snapshot 크기**: `agent_runtime.rs`의 `valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one`은 16개 × 64 KiB public text를 정상으로 허용한다. `agent_run_projection`과 `persist_public_event`는 그 전체 배열에 run/manifest 등의 metadata를 더해 하나의 run snapshot으로 저장하므로 canonical payload는 1 MiB를 넘는다. `storage_v1.rs::validate_ledger_event`에는 그 canonical byte 상한이 없다. 따라서 R3A/B의 indivisible primary 1 MiB를 그대로 제품 admission에 연결하면 기존 budget-valid 입력을 거부할 수 있다. 기존 budget test 1개는 재통과했지만 해당 경계의 실제 persistence→reopen fixture는 아직 실행하지 않았다. 저장 표현·검증 단위·이전 기록 호환 정책을 결정해야 하며, G5B 허용량 축소나 R3A/B 예산 확대를 이번 조사로 승인하지 않는다.
+- **읽기 검증과 쓰기 predecessor 권위의 차이**: R3B 계약은 pending의 index 부재를 raw source 검증으로 허용하도록 정했지만, chat append는 exact indexed live predecessor 또는 검증된 deleted frozen predecessor를 요구한다. `storage_lifetime_v1.rs`의 기존 mutation 계약은 raw live fallback을 금지한다. 따라서 읽기 admission만으로 pending chat recovery가 성공한다고 할 수 없다. 필요한 index catch-up을 검증 후 affected write 전에 완료하거나 기존 거부를 유지하는 순서를 명시해야 한다. 읽기 검증에서 합성한 predecessor를 그대로 쓰기 권위로 넘기지 않는다.
+- **첫 변경 이전의 복구 검증**: exact V8 open은 integrity/FK/replay 전에 WAL 전환을 요청하고, generic recovery 뒤에도 managed directory 생성·actual reservation/manifest 쓰기·legacy manifest 쓰기가 전체 recovery semantic 검증보다 앞선다. generic recovery는 integrity/replay보다 뒤라는 사실을 구분한다. 순수 preflight는 prospective generic recovery와 정상 older-record reservation 보완을 반영하고, 모든 대상의 검증 뒤 mutation을 허용해야 한다. filesystem preflight는 잠금이 아니므로 mutation 시 identity/lifecycle 재검증도 유지한다. fresh/recognized legacy/exact V8/unsupported 저장소를 구분하며 기존 개별 migration transaction을 하나의 rollback 단위라고 표현하지 않는다. SQLite 자체 crash-recovery 파일 효과의 byte-zero 보장은 아직 조사하지 않았다.
+- **전체 시간은 별도 증거**: 미색인 전역 탐색·전체 integrity/FK·catch-up·복구를 포함한 실제 시작 시간을 측정해야 한다. 호출당 예산만으로 현행 ready 3초를 보장하지 않으며 SQLite busy timeout 5초도 성공 보장이 아니다. 검증 전 ready, 임의 timeout 변경, 제품 100-operation fence 해제는 승인되지 않았다.
+
+순서 조사와 코드 위치는 `.artifacts/m5-review/g5d-r3c-startup-discovery.json`에 보조 증거로 남긴다. §7.5의 historical workspace catch-up 재현·수정과 함께 후속 계약의 선행 조건이며, 이 절은 R3C 완료나 구현 착수 승인이 아니다.
