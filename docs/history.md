@@ -9,6 +9,18 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C 진단 독립 리뷰·통합)
+
+- **리뷰·통합**: 기능 `5a5858ff00b2ce38a5d2da6afa5f70e6dd2692a0`은 §10 exact-commit 독립 리뷰 PASS와 별도 focused 1 passed(17.63초)를 받았다. root는 검토된 테스트 코드와 기능 워크로그를 통합하며, source가 feature와 완전히 같음을 대조한다. 이는 호환성 문제 재현이며 해결책이나 제품 활성화가 아니다.
+- **기존 변경 보존·다음**: 별도 대화가 작성한 정리 절차와 같은 history의 정리 엔트리/핵심 결정을 미커밋으로 보존하기 위해 reviewed patch를 적용하고 이번 소유 hunk만 스테이징한다. 일괄 cherry-pick이나 타인 변경의 임시 제거를 하지 않는다. 최신 통합 commit의 별도 clean worktree에서 focused 독립 QA와 최종 gate가 남는다. 기존 누적 13단계는 `e5f9f01`의 production 기준선이며 새 commit에서 재실행한 결과가 아니다. main 병합·push는 하지 않았다.
+
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C snapshot 호환성 재현 — 테스트 전용)
+
+- **범위**: exact base `8551cba10011aa43042576a2c029f4f6ba02b3a1`의 별도 `codex/g5d-r3c-snapshot-compat` worktree에서 §10의 exact test 하나를 기존 `agent_runtime::budget_tests`에 추가했다. golden의 chat/standalone manifest/readOnly profile을 복사·재결속하고 production 순수 helper와 일반 run+chat atomic upsert를 사용했다. 모든 event/prefix의 기존 예산과 Committed 결과, checkpoint/drop/Storage reopen 전후 payload·계수·sequence와 blocked runtime의 persisted-run validation을 확인했다. production 코드·visibility·예산·schema·의존성·100 frozen-operation fence는 바꾸지 않았다.
+- **실측**: ASCII 16 × 65,536B는 raw text 1,048,576B/누적 snapshot 8,962,845B, 최초 초과 run source rowid 33의 canonical BLOB 1,056,022B다. 역슬래시 9 × 65,536B는 raw 589,824B/누적 5,914,764B, 최초 초과 rowid 17의 1,053,078B와 최대 1,184,517B다. 두 full private R3B session은 각각 Ledger Pending 11/6회 뒤 `storageSchemaMismatch`로 종료하고 재사용을 거부했다. 별도 exact-row phase probe도 거부했고 각 full/probe 전후 모든 schema·table rows·DB file bytes는 같았다. 작은 16-event 대조군은 최대 run canonical 7,744B와 `DerivedRecordsVerified`를 확인했다.
+- **검증**: 새 exact test 1 passed(17.50s), 기존 exact public budget boundary test 1 passed(0.97s), scoped strict clippy(`--locked --all-targets --no-deps -- -D warnings`), Rust 2021 scoped format check, diff check 모두 exit 0. raw log/명령/실제 exit는 `/tmp/g5d-r3c-snapshot-evidence.f5wSMB/manifest.md`에 기록했다. 최초 컴파일의 테스트용 unsigned `FromSql` 오류(exit 101)는 signed SQLite 값의 checked conversion으로 고쳤으며 탐색 로그를 최종 PASS와 분리 보존했다. production 불변의 테스트 전용 검증으로 기존 통합 R3B 누적 QA를 상속하며 전체 suite/Node/앱 QA를 새로 실행했다고 주장하지 않는다.
+- **한계·다음**: Karpathy 지침에 따라 기존 helper를 재사용하고 두 소유 파일 안에 한정했다. provider discovery/attestation 없는 pre-G5C readable 저장 형태이며 현재 provider 실행·Sidecar startup/recovery/ready 성공이 아니다. heap/decode 계측, 실제 provider·인증·사용자 프로젝트·Windows 시험을 하지 않았다. 호환성 문제 재현이지 해결책·R3C·전체 G5D 완료가 아니며 exact feature commit 독립 리뷰→최신 통합 focused QA와 저장 표현/검증 단위/이전 기록 호환 정책 결정이 남는다. merge/rebase/cherry-pick/push는 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C 추가 snapshot 경로 조사)
 
 - **진행·기준**: R3B 마감과 §10 계약을 `8551cba`로 커밋한 뒤 별도 `codex/g5d-r3c-snapshot-compat` / `.worktrees/g5d-r3c-snapshot-compat`에서 테스트 전용 구현을 시작했다. 통합 코드·안전 예산은 바꾸지 않는다.
@@ -152,7 +164,9 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. project의 prepared-workspace map도 abandoned를 보존하며 전체 개수/byte cap 없이 누적되는 별도 정상 생산 경로다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. 현재 source 대조·기존 budget test만 확인했고 run persistence/reopen 재현은 §10에 따라 구현 중이며 project 경계 재현은 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
+- **R3C snapshot 호환성 재현(2026-09-02, 테스트 전용)**: 정상 public text/event/누적 snapshot 예산을 통과한 ASCII 16 × 64 KiB 및 역슬래시 9 × 64 KiB의 일반 run+chat atomic writes와 Storage reopen은 성공하지만, 저장된 run canonical BLOB이 1 MiB를 초과해 전체 private R3B ledger 검증은 거부한다. 작은 16-event 대조군은 전체 완료한다. exact test `agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary`가 양 경로와 exact source row byte preflight/무변경을 구분해 고정한다. provider-less pre-G5C readable shape일 뿐 현재 provider 검증이나 제품 admission 증거가 아니며, §9/§10의 저장 표현·검증 단위·기존 기록 호환 정책을 정하기 전 제품 연결/예산 변경은 하지 않는다.
+
+- **R3C 제품 연결 전 호환성(2026-09-02)**: 기존 actual-agent의 정상 public text 최대량과 metadata를 담은 단일 run snapshot은 private verifier의 1 MiB primary cap을 넘을 수 있다. project의 prepared-workspace map도 abandoned를 보존하며 전체 개수/byte cap 없이 누적되는 별도 정상 생산 경로다. 또한 pending의 raw-source 읽기 검증은 chat mutation의 indexed predecessor 요구를 대체하지 않는다. snapshot/이전 기록 호환과 검증 후 index catch-up·복구 순서를 별도 계약/fixture로 닫기 전 제품 admission을 활성화하거나 기존 100-operation fence를 해제하지 않는다. §10의 run persistence/Storage reopen/private R3B 재현은 기능 자체 검증과 독립 리뷰를 통과했으며 최신 통합 QA가 남는다. project 경계 재현·Sidecar startup/recovery·제품 활성화는 미실행이다. 상세는 `proposals/m5-storage-reopen-verification.md` §9다.
 
 - **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구다. 이를 포함한 §8 내부 R3B는 `e5f9f01`에서 독립 통합 QA·최종 gate를 완료했다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개이며 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있다. 이 미해결 catch-up과 R3C 호환성은 `proposals/m5-storage-reopen-verification.md` §7.5·§9, 테스트 전용 재현 계약은 §10을 따른다.
 

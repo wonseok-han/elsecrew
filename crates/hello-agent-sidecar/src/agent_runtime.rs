@@ -3610,6 +3610,396 @@ mod budget_tests {
     }
 
     #[test]
+    fn budget_valid_actual_run_snapshot_exceeds_reopen_primary() {
+        use crate::storage::reopen::{
+            projection_batch_for_test, DerivedVerificationPhase,
+            FrozenOperationVerificationSession, FrozenOperationVerificationStep,
+            LedgerProjectionPhase, ProjectionPhase,
+        };
+        use crate::storage::AppendOutcome;
+        use rusqlite::{types::Value as SqlValue, Connection};
+
+        const MIB: usize = 1024 * 1024;
+        const STAMP: &str = "2026-08-27T00:00:00Z";
+
+        fn golden(source: &str, name: &str) -> Value {
+            let document: Value = serde_json::from_str(source).unwrap();
+            document["valid"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|case| case["name"] == name)
+                .unwrap()["value"]
+                .clone()
+        }
+
+        // Test-only full snapshots: include every schema object and every table
+        // row, independently of the file-byte comparison below.
+        fn snapshot(connection: &Connection) -> BTreeMap<String, Vec<Vec<SqlValue>>> {
+            let mut tables = connection
+                .prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            tables.push("sqlite_schema".into());
+            tables
+                .into_iter()
+                .map(|table| {
+                    let order = if table == "frozen_operation_sources" {
+                        "operation_id"
+                    } else {
+                        "rowid"
+                    };
+                    let mut statement = connection
+                        .prepare(&format!(
+                            "SELECT * FROM \"{}\" ORDER BY {order}",
+                            table.replace('"', "\"\"")
+                        ))
+                        .unwrap();
+                    let columns = statement.column_count();
+                    let rows = statement
+                        .query_map([], |row| {
+                            (0..columns)
+                                .map(|column| row.get(column))
+                                .collect::<rusqlite::Result<Vec<SqlValue>>>()
+                        })
+                        .unwrap()
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .unwrap();
+                    (table, rows)
+                })
+                .collect()
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        for (name, count, text, oversized) in [
+            ("ascii", 16, "x".repeat(65_536), true),
+            ("escaping", 9, "\\".repeat(65_536), true),
+            ("small", 16, "small public status".into(), false),
+        ] {
+            let path = root.path().join(format!("{name}.sqlite"));
+            let mut storage = Storage::open(&path).unwrap();
+            let mut chat = golden(
+                include_str!("../../../tests/fixtures/m5/g5-v1/cases.json"),
+                "chat-record",
+            );
+            for (key, value) in [
+                ("chatId", "chat_a"),
+                ("taskId", "task_a"),
+                ("projectId", "project_a"),
+                ("worktreeId", "worktree_a"),
+                ("workspaceIdentity", "workspace_a"),
+            ] {
+                chat[key] = json!(value);
+            }
+            let mut manifest = golden(
+                include_str!("../../../tests/fixtures/m5/g5-preparation-v1/cases.json"),
+                "prepare-b-is-distinct-from-bound-a",
+            )["candidate"]["manifest"]
+                .clone();
+            for key in ["projectId", "worktreeId", "workspaceIdentity"] {
+                manifest[key] = chat[key].clone();
+            }
+            manifest["canonicalGitRoot"] = json!(root.path().join("project"));
+            manifest["worktreePath"] = json!(root.path().join("workspace"));
+            let profile_value = golden(
+                include_str!("../../../tests/fixtures/m5/agent-adapter-v1/cases.json"),
+                "actual-run-persists-without-fixture-scenario",
+            )["selectedProfile"]
+                .clone();
+            assert_eq!(profile_value["permission"], "readOnly");
+            chat["roleSnapshots"][0] = profile_value.clone();
+            validate_g5_payload_v1("chatRecord", &chat).unwrap();
+            hello_agent_protocol::project_v1::validate_project_payload_v1(
+                "worktreeManifest",
+                &manifest,
+            )
+            .unwrap();
+            let profile: AgentResolvedProfileV1 =
+                serde_json::from_value(profile_value.clone()).unwrap();
+            let fingerprint = format!("sha256:{}", "0".repeat(64));
+            let run = agent_run_record(
+                "agent_run_a",
+                &chat,
+                &profile,
+                &fingerprint,
+                "running",
+                None,
+                STAMP,
+            )
+            .unwrap();
+            validate_agent_adapter_payload_v1("runRecord", &run).unwrap();
+            assert_eq!(run["selectedProfile"], chat["roleSnapshots"][0]);
+            for key in [
+                "chatId",
+                "taskId",
+                "projectId",
+                "worktreeId",
+                "workspaceIdentity",
+            ] {
+                assert_eq!(run[key], chat[key]);
+            }
+            for key in ["projectId", "worktreeId", "workspaceIdentity"] {
+                assert_eq!(manifest[key], chat[key]);
+            }
+            let initial_message = json!({
+                "schemaVersion":1,"messageId":"message_initial_a","chatId":"chat_a",
+                "taskId":"task_a","worktreeId":"worktree_a","eventSequence":1,
+                "kind":"user","roleId":null,"runId":null,"text":"Inspect this project",
+                "createdAt":STAMP
+            });
+            validate_g5_payload_v1("teamMessage", &initial_message).unwrap();
+            let mut chat_payload = chat_projection_with_record(
+                json!({"chat_id":"chat_a","project_id":"project_a","worktree_id":"worktree_a","workspace_identity":"workspace_a","durable_event_sequence":1})
+                    .as_object()
+                    .unwrap(),
+                &chat,
+                Some(initial_message),
+            )
+            .unwrap();
+            let initial = [
+                (
+                    "project",
+                    "project_a",
+                    json!({"project_id":"project_a","canonical_path":manifest["canonicalGitRoot"]})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+                ("chat", "chat_a", chat_payload.clone()),
+            ]
+            .into_iter()
+            .map(|(aggregate_type, aggregate_id, payload)| ProjectionUpsert {
+                aggregate_type,
+                aggregate_id: aggregate_id.into(),
+                operation_id: format!("op_initial_{aggregate_id}"),
+                request_id: None,
+                payload,
+            })
+            .collect();
+            assert_eq!(
+                storage.upsert_projection_records_atomic(initial).unwrap(),
+                vec![AppendOutcome::Committed; 2]
+            );
+
+            let mut events = Vec::new();
+            for index in 0..count {
+                let event = public_event(index, text.clone());
+                validate_agent_adapter_payload_v1("publicEvent", &event).unwrap();
+                for key in [
+                    "chatId",
+                    "taskId",
+                    "projectId",
+                    "worktreeId",
+                    "workspaceIdentity",
+                    "runId",
+                    "capabilityFingerprint",
+                ] {
+                    assert_eq!(event[key], run[key]);
+                }
+                assert_eq!(event["roleId"], profile_value["roleId"]);
+                events.push(event.clone());
+                let metrics = public_budget_metrics(&events).unwrap();
+                assert_eq!(metrics.event_count, index + 1);
+                assert_eq!(metrics.text_bytes, (index + 1) * text.len());
+                let run_payload =
+                    agent_run_projection(&run, &manifest, None, None, events.clone()).unwrap();
+                assert_eq!(
+                    validate_projection_public_budget(&run_payload).unwrap(),
+                    metrics
+                );
+                // This is a pre-G5C readable stored shape, NOT evidence that a
+                // current provider passed discovery, attestation, or execution.
+                assert!(!run_payload.contains_key("provider_discovery"));
+                assert!(!run_payload.contains_key("runtime_attestation"));
+                validate_provider_projection(&run_payload).unwrap();
+                let sequence = index + 2;
+                let message = json!({
+                    "schemaVersion":1,"messageId":format!("message_public_{index}"),
+                    "chatId":event["chatId"],"taskId":event["taskId"],"worktreeId":event["worktreeId"],
+                    "eventSequence":sequence,"kind":"status","roleId":null,"runId":event["runId"],
+                    "text":event["text"],"createdAt":event["createdAt"]
+                });
+                validate_g5_payload_v1("teamMessage", &message).unwrap();
+                chat_payload =
+                    chat_projection_with_record(&chat_payload, &chat, Some(message)).unwrap();
+                chat_payload.insert("durable_event_sequence".into(), json!(sequence));
+                assert_eq!(
+                    storage
+                        .upsert_projection_records_atomic(vec![
+                            ProjectionUpsert {
+                                aggregate_type: "run",
+                                aggregate_id: "agent_run_a".into(),
+                                operation_id: format!("op_agent_public_{index}"),
+                                request_id: None,
+                                payload: run_payload
+                            },
+                            ProjectionUpsert {
+                                aggregate_type: "chat",
+                                aggregate_id: "chat_a".into(),
+                                operation_id: format!("op_agent_public_chat_{index}"),
+                                request_id: None,
+                                payload: chat_payload.clone()
+                            },
+                        ])
+                        .unwrap(),
+                    vec![AppendOutcome::Committed; 2]
+                );
+            }
+            let metrics = public_budget_metrics(&events).unwrap();
+            if name == "ascii" {
+                assert_eq!(metrics.text_bytes, MIB);
+            }
+            if name == "escaping" {
+                assert_eq!(metrics.text_bytes, 589_824);
+            }
+            AgentRuntime::blocked()
+                .validate_persisted_runs(&storage)
+                .unwrap();
+            let saved_run = storage
+                .projection_record("run", "agent_run_a")
+                .unwrap()
+                .unwrap();
+            let saved_chat = storage
+                .projection_record("chat", "chat_a")
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved_run["public_events"], json!(events));
+            assert_eq!(saved_run["record"], run);
+            assert_eq!(saved_run["workspace_manifest"], manifest);
+            assert_eq!(saved_chat["durable_event_sequence"], json!(count + 1));
+            assert_eq!(
+                saved_chat["last_message"]["eventSequence"],
+                json!(count + 1)
+            );
+            storage.checkpoint().unwrap();
+            drop(storage);
+            let reopened = Storage::open(&path).unwrap();
+            assert_eq!(
+                reopened
+                    .projection_record("run", "agent_run_a")
+                    .unwrap()
+                    .unwrap(),
+                saved_run
+            );
+            assert_eq!(
+                reopened
+                    .projection_record("chat", "chat_a")
+                    .unwrap()
+                    .unwrap(),
+                saved_chat
+            );
+            assert_eq!(
+                validate_projection_public_budget(&saved_run).unwrap(),
+                metrics
+            );
+            AgentRuntime::blocked()
+                .validate_persisted_runs(&reopened)
+                .unwrap();
+            reopened.checkpoint().unwrap();
+            drop(reopened);
+
+            let mut connection = Connection::open(&path).unwrap();
+            connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+            let sources = connection
+                .prepare(
+                    "SELECT rowid,length(CAST(canonical_json_payload AS BLOB)) FROM events \
+                 WHERE aggregate_type='run' AND aggregate_id='agent_run_a' ORDER BY rowid",
+                )
+                .unwrap()
+                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .into_iter()
+                .map(|(rowid, bytes)| {
+                    (
+                        u64::try_from(rowid).unwrap(),
+                        usize::try_from(bytes).unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(sources.len(), count);
+            let first_oversized = sources.iter().copied().find(|(_, bytes)| *bytes > MIB);
+            let maximum = sources.iter().map(|(_, bytes)| *bytes).max().unwrap();
+            assert_eq!(first_oversized.is_some(), oversized);
+            if !oversized {
+                assert!(maximum <= MIB);
+            }
+            let before = snapshot(&connection);
+            let before_bytes = std::fs::read(&path).unwrap();
+            let mut pending_calls = 0;
+            {
+                let mut session =
+                    FrozenOperationVerificationSession::start_derived_records(&mut connection)
+                        .unwrap();
+                let mut finished = false;
+                for _ in 0..1000 {
+                    match session.step(&mut || false) {
+                        Ok(FrozenOperationVerificationStep::DerivedRecordsPending {
+                            phase,
+                            ..
+                        }) => {
+                            pending_calls += 1;
+                            if oversized {
+                                assert_eq!(
+                                    phase,
+                                    DerivedVerificationPhase::Prerequisite(
+                                        LedgerProjectionPhase::Projection(ProjectionPhase::Ledger)
+                                    )
+                                );
+                            }
+                        }
+                        Ok(FrozenOperationVerificationStep::DerivedRecordsVerified(_)) => {
+                            assert!(!oversized, "large snapshot must never mint a proof");
+                            finished = true;
+                            break;
+                        }
+                        Err(error) => {
+                            assert!(oversized, "small control failed: {error:?}");
+                            assert_eq!(error.kind, "storageSchemaMismatch");
+                            finished = true;
+                            break;
+                        }
+                        other => panic!("unexpected full-session result: {other:?}"),
+                    }
+                }
+                assert!(
+                    finished,
+                    "session failed to reach its expected terminal result"
+                );
+                assert_eq!(
+                    session.step(&mut || false).unwrap_err().kind,
+                    "storageSchemaMismatch"
+                );
+            }
+            assert_eq!(snapshot(&connection), before);
+            assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+            if let Some((rowid, _)) = first_oversized {
+                // Separate phase-local attribution, not a claim that the full
+                // session reached this row in its first call or heap profiling.
+                assert_eq!(
+                    projection_batch_for_test(
+                        &mut connection,
+                        ProjectionPhase::Ledger,
+                        rowid - 1,
+                        0,
+                        false
+                    )
+                    .unwrap_err()
+                    .kind,
+                    "storageSchemaMismatch"
+                );
+                assert_eq!(snapshot(&connection), before);
+                assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+            }
+            println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" });
+        }
+    }
+
+    #[test]
     fn valid_public_ledgers_reach_count_and_text_boundaries_but_reject_plus_one() {
         let mut count_events = (0..AGENT_PUBLIC_EVENTS_PER_RUN_MAX_V1)
             .map(|index| public_event(index, "x".into()))
