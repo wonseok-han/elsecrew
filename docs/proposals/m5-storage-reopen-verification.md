@@ -313,3 +313,15 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 5. 새 focused prefix `raw_column_bytes`, §10 exact test 1개, full sidecar/stdio, scoped strict clippy·Rust 2021 format·diff, exact-commit 독립 코드 리뷰와 최신 통합 누적 `g5d-bounded-storage` QA를 통과한다. command/actual exit/raw log를 남기고 제품 활성화·R3C 완료를 주장하지 않는다.
 
 소유 밖 수정, 기존 validator로 whole source를 넘겨야 하는 설계, 예산·schema·제품 정책 변경 필요가 드러나면 중단하고 보고한다. 실제 provider·사용자 DB/프로젝트·Windows·파괴적 시험·main 병합·push는 하지 않는다. 다음 S2는 canonical scanner와 projection 의미 비교의 기존 oracle 대비 동등성 계약이며, S1 완료만으로 이어지는 의미 검증을 생략하지 않는다.
+
+## 13. S2 전 oracle 조사 — 구현·제품 변경 계약 아님
+
+`c5be2c3`의 source 대조와 현재 protocol/serde/SQLite를 연결한 임시 primitive probe에서 **R3A 자체를 legacy 제품의 전체 수락 기준으로 사용할 수 없음**을 확인했다. `storage.rs::verify_projection_replay`는 원장 replay와 serde projection map 비교 외에 `verify_projection_columns`의 SQLite mirror 검사를 요구한다. 반면 `reopen/projection.rs::verify_projection`은 serde가 구성한 최종 map과 parsed evidence를 비교한다. 현재 제품은 legacy 검사를 계속 사용하므로 이를 곧 제품 검증 우회라고 표현하지 않는다.
+
+- **canonical source**: `canonical_json_v1`과 현재 기본 parser의 parse → 정렬 → serialize → 원문 byte 일치를 유지한다. primitive probe에서 `1`/`1.0`은 각각 canonical이지만 `1e0`은 `1.0`, `-0`은 `-0.0`으로 바뀐다. Unicode escape·surrogate·key 정렬·duplicate 소거를 포함하며 배열 중첩 127개는 parse되고 128개는 거부됐다. 이는 단독 배열의 실측으로 source object/envelope의 전체 depth 한계와 혼동하지 않는다.
+- **projection 의미**: serde의 마지막 duplicate 값, key 순서·공백과 무관한 비교, 숫자 표현 타입, typed `last_event_sequence` overlay와 missing/extra를 별도로 유지한다. canonical source에 이 관대한 비교를 적용하지 않는다.
+- **legacy SQLite mirror**: `json_extract`의 첫 duplicate 값과 SQLite `IS` 비교, lock evidence의 `json(...)` 표현 비교를 별도 기준으로 남긴다. primitive probe에서 evidence의 key 재정렬 또는 `\u0061`/`a` 차이는 serde에서는 같지만 SQLite `json` 문자열 비교에서는 달랐다. 공백만 다른 경우는 양쪽에서 같았다. hash나 serde equality만으로 mirror를 대체하지 않는다.
+
+함수 경계에서 첫 indexed ID는 wrong/마지막은 right인 duplicate나 순서·escape만 다른 lock evidence는 R3A가 허용할 수 있어도 legacy mirror가 거부할 수 있다. 동일 ID duplicate와 원장에 일치하는 마지막 non-indexed 값은 전부 금지하면 기존 수락을 축소할 수 있다. 이 귀결은 source 및 primitive 실험 근거이며 **유효한 전체 V8 fixture의 Storage reopen 결과로 재현한 것은 아니다**.
+
+후속 계약은 정상 소형 V8 fixture에 indexed duplicate의 first/last·동일 duplicate·non-indexed duplicate·evidence 재정렬/escape/공백·sequence overlay·숫자 `1`/`1.0`·bool·null을 각각 적용해 legacy와 private R3A 결과를 분리 기록해야 한다. S2가 canonical scanner까지만 구현한다면 projection 의미와 mirror 동등성은 여전히 후속 의무다. §12 S1의 소유권·완료선은 확대하지 않는다. primitive probe와 exact 명령/종료 코드는 `.artifacts/m5-review/r3c-canonical-oracle-probe.{rs,log,json}`에 있으며 임시 in-memory DB만 사용했다.

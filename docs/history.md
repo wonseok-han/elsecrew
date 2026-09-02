@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D S1 착수·S2 oracle 조사)
+
+- **착수·범위**: 검토된 계약 `c5be2c3`에서 `codex/g5d-r3c-byte-transport` 별도 worktree를 만들고 단일 Rust 담당에게 §12를 배정했다. 생성 전 root 포함 등록 20개/child 19개·약16 GiB를 확인했고 최근·dirty·사용 여부 불명 대상을 보존했다. S1 최종 gate 뒤 정리 여부를 다시 확인한다. 독립 QA 계획은 `.artifacts/m5-qa/g5d-r3cs1-plan.json`이다.
+- **발견**: 현재 protocol/serde/SQLite의 primitive probe와 독립 source 대조에서 legacy projection 검증은 serde 의미 비교와 SQLite mirror의 conjunction이며 R3A가 완전한 수락 oracle이 아님을 확인했다. 첫/마지막 duplicate 선택, evidence key 순서·escape 표현 차이를 구분해야 한다. 제품 legacy 검사는 유지되므로 제품 우회로 주장하지 않는다. §13에 canonical/의미/mirror 세 기준과 후속 전체 V8 재현 항목을 기록했다.
+- **검증·다음**: 임시 probe compile/run exit 0; raw 결과와 exact 명령은 `.artifacts/m5-review/r3c-canonical-oracle-probe.{rs,log,json}`이다. 최초 잘못 고른 cached serde feature rlib의 compile exit 1은 Cargo fingerprint 대조 뒤 수정했고 source/의존성을 바꾸지 않았다. 이는 primitive 관측이지 전체 Storage acceptance 회귀가 아니다. S1 구현·리뷰·통합 QA와 후속 oracle fixture는 남는다. 타 대화 history/procedure 변경은 미커밋 보존하며 main 병합·push 없음.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C-S1 byte transport 계약)
 
 - **계약·검토**: 큰 정상 기록 호환 설계를 재오픈 제안서 §11, 첫 구현 계약을 §12에 고정했다. V8의 allowlisted source column을 exact identity/epoch에 결속하고 호출마다 최대 1 MiB fragment와 8 MiB retained+fresh encoded 입력으로 읽는 private 단위다. UTF-8/길이/SHA 결과는 JSON·의미·admission 검증이 아니다. 독립 설계 조사와 별도 계약 리뷰 PASS를 받았으며 기존 R1–R3B·public 예산·제품 100-operation fence는 바꾸지 않는다.
@@ -175,6 +181,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **S2 oracle 분리(2026-09-02)**: legacy product는 canonical source/replay, serde projection 의미 비교, SQLite mirror를 모두 요구한다. R3A는 parsed final map/evidence를 비교해 첫 duplicate를 보는 SQLite 추출과 evidence `json(...)` 표현 비교를 그대로 재현하지 않는다. primitive 차이와 source 대조는 했지만 정상 V8 fixture의 전체 acceptance 재현은 아직이다. 기존 제품 검사는 유지하며 §13의 세 oracle·후속 회귀를 닫기 전 R3A 단독 결과를 제품 동등성으로 인용하지 않는다.
 
 - **R3C 큰 기록 처리 순서(2026-09-02)**: V8 byte transport → canonical oracle 동등성 → projection/파생 의미 비교 → 동일 연결의 쓰기 권위 순서로 나눈다. §12 S1은 fragment 1 MiB/retained+fresh 8 MiB 내 UTF-8·길이·해시 정보만 제공하며 기존 verifier·제품 fence·입력 정책을 바꾸지 않는다. historical workspace catch-up은 source sequence 없는 row 때문에 단순 latest-only 조건 변경으로 해결하지 않는다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §11–12다.
 
