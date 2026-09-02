@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R1 통합 QA·최종 검토)
+
+- **독립 검토·통합**: 계약 `38cadd2`, 구현 `8529ba3`→통합 `90c5db8`, test-only 보강 `3e70a21`→통합 `8116a24`를 기록했다. 구현과 보강 모두 다른 실행의 코드 리뷰를 통과했다. 최종 검토가 지적한 후반부 변조 시험 누락은 7종×첫 행/101번째 행 matrix로 닫았으며, 기능·계약 branch의 워크로그를 모두 보존했다. 최종 R1 gate는 `8116a24`에서 PASS이며 제품 활성화 또는 전체 G5D 완료를 뜻하지 않는다.
+- **최신 통합 QA**: clean `8116a24fbed068b84b5f3e21e2ab3068d909de53`에서 Node lifetime 17개, protocol lifetime 10개, sidecar 176개+stdio 10개(1 ignored), storage 64개, bounded lifetime 27개와 scoped strict clippy·Rust 2021 format·diff check가 통과했다. 증거는 `.artifacts/m5-qa/8116a24fbed068b84b5f3e21e2ab3068d909de53/manifest.json`, 독립 리뷰 기록은 `.artifacts/m5-review/g5d-r1-8529ba3.json`이다. 후속 문서 반영은 코드·테스트를 변경하지 않는다.
+- **미완료 검증 분리**: 이전 `90c5db8`의 누적 `g5d-bounded-storage` 하네스는 `pnpm build`에서 6분 31초 출력 없이 정체되어 해당 QA 프로세스만 정상 종료했다. 원인은 확인하지 않았으며 `INCOMPLETE_TIMEOUT`으로 남긴다. QA가 시작한 PID들이 남지 않았음도 확인했다. `m5:test:bounded-storage`의 실제 하위 명령 네 개는 최신 `8116a24`에서 모두 별도 실행했다. 전체 `g5d-storage-lifetime`은 scheduler/status/compaction script 부재로 `NOT_READY`·exit 2이며 통과로 바꾸지 않았다.
+- **다음**: `proposals/m5-storage-reopen-verification.md` §5의 R2(prefix/baseline/anchor/message closure), R3(full-startup·admission), 이후 C1B2 writer/delete·scheduler/status 순서다. 제품 100개 초과 재오픈은 여전히 거부한다. 실제 provider·사용자 프로젝트·Windows 시험, UI/패키징 검증, `main` 병합·push는 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D V8 late-row corruption QA 보강)
 
 - **test-only evidence gap 보강**: frozen payload digest·record digest·canonical envelope, receipt digest·event ID, live request ID, source-index introduction ID의 기존 7개 변조를 각각 첫 행과 101번째 행에서 모두 실행하도록 matrix를 7×2로 확장했다. 모든 late case는 첫 호출의 100행 `Pending`을 먼저 확인하고 두 번째 호출의 거부·재개 불가·autocommit 복귀·schema/전체 rows/file bytes 무변경을 확인한다. verifier와 production 코드는 변경하지 않았다.
