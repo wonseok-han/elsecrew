@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D 재오픈 검증 R1 계약)
+
+- **다음 파동 고정**: `a87b659`의 clean `m5/coding-agent-ide`에서 시작했다. 100개 초과 지원은 frozen operation 루프만 나눈다고 완료되지 않는다. 현행 open의 전체 integrity/projection replay, startup 복구·app-instance 쓰기, append/lifetime admission까지 후속 검증이 필요하므로 이번 R1은 내부 operation 세션에 한정한다.
+- **계약과 독립 검토**: `proposals/m5-storage-reopen-verification.md`에 schema V8 유지, connection 독점 차용, transaction 내부 `data_version` 확인, 외부 commit/취소/실패 시 volatile 진행 폐기, 호출당 100개·source 1 MiB·종속 입력 8 MiB를 고정했다. `FrozenOperationsVerified`는 실행 허용 증거가 아니다. 독립 설계 리뷰에서 같은 connection 차용과 제품 `EXCLUSIVE` 잠금의 차이를 정정했고 차단 finding은 해소됐다. 외부 commit 회귀는 normal-lock fixture에서 수행하며 제품 잠금을 완화하지 않는다.
+- **기준 검증·다음**: Node lifetime 17개, protocol lifetime 10개, sidecar 162개+stdio 10개(1 ignored), TypeScript no-emit와 diff check 통과. 별도 `m5/g5d-v8-reopen-verifier` worktree에서 구현·회귀를 진행하고 exact feature commit 리뷰 후 통합 QA를 수행한다. 제품 100개 제한 해제, prefix/message/full-startup 검증, C1B2 writer/delete, scheduler/status, 실제 provider·Windows는 미완료다.
+
 ### 2026-09-01 · by GPT-5.6-Sol (M5 G5D storage v8 C1B1 bounded compacted replay)
 
 - **read/replay 전용 C1B1**: 제품에 delete·compaction job/authority writer를 추가하지 않고, exact terminal-success private proof와 empty authority/active-job fence를 통과한 V8 compacted state를 읽는다. frozen operation은 `source_event_rowid` keyset `LIMIT 100`과 canonical payload 합계 1 MiB 안에서 canonical record/digest를 재계산하고 immutable receipt에 교차 결속한다. live source는 exact event+9-field source index, deleted source는 exact frozen operation+receipt와 strict prefix/baseline coverage만 권위로 사용하며 receipt-only reconstruction은 거부한다.
