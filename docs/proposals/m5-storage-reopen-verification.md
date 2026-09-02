@@ -56,3 +56,44 @@ terminal compacted V8의 frozen operation이 100개를 넘더라도, 호출마�
 4. **C1B2 및 제품 연결**: 실제 bounded compaction writer/delete, scheduler, `storage.status` wire/Electron, 다중 세션 QA를 각각 검토한다.
 
 R1의 통과는 `G5D_READY`가 아니다. 실제 provider·사용자 프로젝트·Windows 시험, 물리 cleanup/보존 정책, `main` 병합·push도 이번 범위에 없다.
+
+## 6. R2 — 압축 관련 데이터의 양방향 검증
+
+### 6.1 범위와 완료 의미
+
+같은 연결·변경 감지 수명을 유지하는 내부 R2 모드를 추가한다. R1의 operations-only 진입점과 기존 제품 경로는 보존한다. 같은 세션의 `start_compaction_closure`는 private immutable 모드와 `operations → prefixes → frozen messages` 진행을 선택하며 caller cursor/proof는 받지 않는다. 최종 결과는 정보성 `CompactionClosureVerified`이며, 전체 DB integrity·projection replay나 read/write admission 증거가 아니다. 새 schema, 영속 cursor, protocol 또는 사용자 설정을 추가하지 않는다.
+
+여기서 양방향이란 **삭제된 frozen operation ↔ 정확한 sequence의 prefix/baseline**, **삭제된 chat introduction ↔ frozen message ↔ 해당 normalized message**다. prefix/message 전체를 각각 keyset으로 검사하여 source 누락과 불필요한 frozen 파생 기록을 거부한다. prefix에서 참조하지 않는 정상 historical baseline은 허용한다. 전체 `ledger_baselines`·`chat_messages`의 source-to-derived/derived-to-source replay는 R3 경계이며, R2에서 이를 완료했다고 주장하지 않는다.
+
+### 6.2 단계와 검증 권위
+
+| 단계 | primary keyset | 확인할 내용 |
+| --- | --- | --- |
+| operations | `frozen_operation_sources.source_event_rowid` | R1 전체 권위 검증과 cutoff 보존. R2에서 live event/index가 모두 없는 source에는 그 aggregate·sequence의 **정확한 prefix**가 필요. 삭제된 chat source에 한해 introduction은 정확한 frozen/normalized message를 요구하며, 같은 삭제 source의 non-introduction은 frozen message가 없어야 함 |
+| prefixes | `ledger_compaction_prefixes.rowid` | prefix 형식·baseline identity/payload/digest·정확한 deleted frozen source·직전 prefix 연결·역사적 anchor frozen tuple을 검사. 가장 최신 prefix의 anchor만 live event/index까지 결속 |
+| frozen messages | `frozen_message_sources.rowid` | 정확한 deleted introducing source·predecessor·같은 sequence prefix와 normalized message payload/digest/identity/createdAt을 검사. 전체 prefix 벡터 대신 indexed lookup |
+
+모든 phase는 같은 최초 `data_version` 아래 동작한다. 호출 하나는 phase 하나만 처리하고, exhaustion을 확인한 transaction을 commit한 뒤에만 다음 phase를 게시한다. 빈 phase 전환도 외부 변경·취소 확인을 거친다. prefix는 최소 하나가 있어야 하며 message는 없어도 된다. 암묵적 rowid가 0 이하인 prefix/message가 양수 keyset 밖으로 숨지 않도록 indexed probe로 거부한다.
+
+역사적 anchor는 삭제되어도 exact frozen aggregate·sequence(`deletedThrough + 1`)·event rowid/event ID/operation ID가 일치해야 한다. 최신 retained anchor는 기존 event/source-index/receipt/frozen binding 및 chat transition을 모두 확인한다. 삭제 source를 단지 더 큰 prefix가 덮는다는 이유로 통과시키지 않는다.
+
+chat introduction 여부는 기존 protocol의 transition 규칙을 따른다. durable sequence 증가 시 정확한 새 TeamMessage가 필요하고, 증가가 없으면 snapshot은 null 또는 직전과 같을 수 있으며 introduction은 없다. `A 도입 → A 반복 → null → B 도입`을 허용한다. 현행 `expected_frozen_message`의 더 좁은 equality 조건을 그대로 복사하지 않으며, R2를 위해 기존 제품 동작을 몰래 변경하지 않는다.
+
+### 6.3 호출당 예산
+
+- primary 최대 100행. operations는 source canonical payload, prefixes는 참조 baseline canonical projection, messages는 canonical message를 합해 각각 호출당 최대 1 MiB다.
+- 별도 encoded closure 8 MiB에는 해당 primary와 **실제 읽는 모든 종속 UTF-8 입력**을 포함한다. frozen source/envelope, baseline, predecessor, anchor, receipt, event/index, frozen/normalized message와 식별자도 decode 전에 길이를 확인한다. 동일 데이터를 여러 경로에서 읽으면 그 읽기 비용을 보수적으로 계산한다.
+- 각 primary의 종속 조회는 고정 수의 indexed exact lookup/`LIMIT 1`이어야 한다. 전역 prefix 수집, `OFFSET`, 전체 집계/정렬, recursive history traversal을 추가하지 않는다.
+- 남은 예산만 초과하면 다음 호출로 양보한다. 단일 primary의 closure가 자체 예산을 초과하면 terminal failure이며 zero-progress retry를 만들지 않는다. 각 phase의 successor도 indexed query로 확인한다.
+- R1과 동일하게 entry/row/precommit 취소, SQL·COMMIT 오류, 다른 연결의 commit은 세션 전체를 무효화한다. 새 세션은 operations의 0부터 시작한다. 호출 사이 transaction을 보유하지 않는다.
+
+### 6.4 구현·검토 합격 기준
+
+1. 101개 이상의 prefix와 frozen message를 실제 terminal-compacted 임시 fixture로 검증하고, 각 단계의 row/primary/closure 예산과 단계 순서를 검사한다.
+2. baseline payload/digest·삭제 source·prefix chain·역사적/최신 anchor·message identity/digest/normalized payload의 첫 행과 후반부 변조를 거부한다. 필요한 frozen source/message 누락과 non-introduction의 extra frozen message도 거부한다.
+3. null/repeat/introduction의 정상 chat 전이, 메시지가 없는 project 압축, 참조되지 않는 정상 historical baseline은 유지한다.
+4. primary exact 1 MiB/초과, 종속 UTF-8 초과와 합계에 따른 양보를 검사한다. phase별 주요 SQL의 query plan이 keyset/exact index를 사용함을 확인한다.
+5. phase 전환 및 late batch 사이 외부 commit·취소·transaction 실패 뒤 재개 불가와 DB schema/rows/file bytes 무변경을 확인한다. 기존 R1 회귀와 제품 100개 초과 거부도 유지한다.
+6. focused tests, full sidecar/stdio, protocol·Node lifetime, scoped clippy, Rust 2021 format, diff check, 독립 코드 리뷰와 최신 통합 QA를 통과한다. 환경 문제로 실행하지 못한 전체 앱/누적 하네스는 별도 미완료로 기록한다.
+
+단일 Rust 담당이 `storage/reopen.rs`와 그 하위 모듈·`storage/tests.rs`의 회귀를 소유한다. 기존 `storage.rs` helper의 추출이 필요하면 동작 보존에 한정한다. schema/protocol/lockfile, startup/append/lifetime admission, writer/delete/scheduler/status, Electron/UI는 변경 금지다. 이 경계를 넘겨야 하면 구현을 멈추고 계약 담당에게 보고한다.

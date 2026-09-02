@@ -9,6 +9,18 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R2 계약·기준 확인)
+
+- **범위**: `d2e2d33`의 `m5/coding-agent-ide`에서 R2를 시작했고 기존 미커밋 현황 기록을 보존했다. `proposals/m5-storage-reopen-verification.md` §6에 압축 source·prefix/baseline·역사적/최신 anchor·frozen/normalized message의 양방향 검증과 phase별 예산을 구체화했다. R1 진입점과 제품 경로는 보존하고, 전체 projection replay·admission·100개 제한 해제는 R3에 남긴다.
+- **발견**: prefix가 참조하지 않는 historical baseline도 정상일 수 있으므로 무조건 extra row로 거부하지 않는다. chat의 durable sequence가 같을 때 snapshot은 null 또는 직전과 같을 수 있다는 기존 protocol을 따른다. 현행 `expected_frozen_message`는 이를 더 좁게 처리하므로 R2가 해당 helper를 그대로 복제하지 않으며 기존 제품 동작 수정은 이번 범위에 넣지 않는다.
+- **기준 검증·환경**: R1 focused `frozen_reopen_session` 14개, Node lifetime 17개, protocol lifetime 10개가 통과했다. 현재 `pnpm build`는 `tsc: command not found`·exit 1로 실패하며 `node_modules/.bin`과 로컬 TypeScript가 없음을 확인했다. 이는 이전 6분 31초 정체의 원인을 입증하지 않는다. 의존성·lockfile은 변경하지 않았으며 전체 앱/누적 하네스 통과를 주장하지 않는다.
+- **다음**: 독립 계약 검토 후 정확한 기준 commit의 별도 Rust worktree에서 구현하고, 독립 코드 리뷰·통합 QA·최종 gate를 거친다. 실제 provider/사용자 프로젝트·Windows·writer/delete·scheduler/status·main 병합·push는 범위 밖이다.
+
+### 2026-09-02 · by GPT-5.6-Sol (M5 전체 진행 현황 확인)
+
+- **확인**: 사용자 요청으로 `m5/coding-agent-ide`·HEAD `d2e2d33`와 시작 시 clean 상태, 현행 구조·제품 로드맵·최신 QA 증거를 대조했다. G1~G5C의 기본 작업대/모의 실행 안전 검증과 G5D R1 완료를 실제 provider 활성화나 완성 UI와 구분했다. 코드·테스트 실행 없이 기존 증거를 확인했으며 커밋/push는 하지 않았다.
+- **남은 범위**: 당장 다음은 G5D R2→R3→실제 무손실 압축 writer·자동 실행·저장 상태 연결이다. 이후 실제 Claude Code/Codex 연결 검증, 승인 시안·패널 재배치/크기 조절·새 온보딩의 제품화, 원본 적용/되돌리기 루프, G6·Windows·실사용/배포 검증이 남는다. 제품 로드맵 M5.0~M5.5와 기술 검증 G1~G6는 서로 다른 분류이므로 완료 단계 수를 전체 제품 완성률로 환산하지 않는다. 누적 하네스 정체는 해결됐다고 주장하지 않는다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R1 통합 QA·최종 검토)
 
 - **독립 검토·통합**: 계약 `38cadd2`, 구현 `8529ba3`→통합 `90c5db8`, test-only 보강 `3e70a21`→통합 `8116a24`를 기록했다. 구현과 보강 모두 다른 실행의 코드 리뷰를 통과했다. 최종 검토가 지적한 후반부 변조 시험 누락은 7종×첫 행/101번째 행 matrix로 닫았으며, 기능·계약 branch의 워크로그를 모두 보존했다. 최종 R1 gate는 `8116a24`에서 PASS이며 제품 활성화 또는 전체 G5D 완료를 뜻하지 않는다.
@@ -304,6 +316,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **R2 검증의 양방향 범위(2026-09-02)**: 삭제 frozen source↔정확한 sequence prefix/baseline, 삭제 chat introduction↔frozen message↔해당 normalized message가 대상이다. 참조되지 않는 정상 historical baseline을 금지하지 않으며 전체 derived-table replay는 R3에 남긴다. chat의 동일 durable sequence는 null-or-same snapshot이 허용된다는 protocol 규칙을 보존한다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §6이다.
 - **V8 operation 검증 전구체는 admission이 아니다(2026-09-02)**: `storage::reopen` 내부 세션은 mutable connection borrow + 매 batch의 transaction-under-lock `data_version` 비교로 frozen operation만 다회 검증한다(100행·canonical 1 MiB·별도 raw closure 8 MiB). 완료·취소·실패는 재사용하지 않으며 durable cursor/proof를 쓰지 않는다. prefix/message/replay/integrity와 product activation은 별도 게이트이고 제품의 100개 초과 재오픈 거부는 유지한다. 같은 프로세스라도 별도 SQLite 연결의 commit은 외부 변경이며 production exclusive-lock 정책을 느슨하게 바꾸지 않는다.
 - **M5 G5D storage lifetime(2026-09-01, exact schema v8)**: 실제 provider 활성화 전 SQLite 전체 수명 stop condition을 G6에서 분리해 G5D로 진행한다. exact predecessor schema를 mutation 전에 검증하는 additive v1→v8 chain은 원장과 기존 compaction history를 보존한다. V6는 source event에 exact 결속된 append-only `event_source_index`와 16단계 lifetime cursor를 두고, V7/V8은 future compaction prefix·message·operation provenance와 sidecar-private completion proof를 추가한다. 명시 호출형 worker는 모든 source/table scan을 rowid keyset `LIMIT 100`, canonical payload 합계 1 MiB로 제한하며 cancellation·commit 불확실성을 fail-closed로 보존한다. terminal compacted V8 read/replay는 frozen operation과 receipt·baseline·retained anchor를 교차 검증해 duplicate/conflict·chat predecessor·후속 append/materializer 의미를 유지하지만, 현재 frozen operation 100개까지만 재오픈하고 101번째는 무변경 거부한다. 실제 compaction writer/delete, 100개 초과 durable reopen proof, startup/background scheduling, 제품 wire/status, checkpoint/VACUUM, cleanup·retention threshold는 아직 비활성이다
 - **M5 G5C actual recovery 원자성(2026-08-27)**: recovery ID는 run 준비 시 writer lock과 같은 transaction에 random UUIDv4로 예약해 모든 후속 recovery가 재사용하며 run ID에서 파생하지 않는다. process identity 없는 재시작은 `processIdentityUnavailable` unresolved recovery와 poisoned lock을 공개하되 resolve로 폐기할 수 없다. actual abandon은 SQLite intent → exact/idempotent manifest abandon → manifest 재검증 뒤 atomic DB finalize의 restart-reconcilable saga이고, 어느 단계든 identity/digest가 다르거나 상태가 불명확하면 writer를 해제하지 않는다. SQLite와 filesystem의 원자성을 주장하지 않는다
