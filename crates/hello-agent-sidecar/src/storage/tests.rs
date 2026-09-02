@@ -10,6 +10,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 mod reopen_closure;
+mod reopen_projection;
 
 type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
 type ChatSourceIndexRow = (i64, Option<String>, Option<i64>, Option<String>);

@@ -9,6 +9,15 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3A bounded ledger/projection 구현)
+
+- **소유 범위·구현**: 검토된 §7 계약 `d4c3751`의 별도 `m5/g5d-v8-reopen-projection` worktree에서 기존 내부 세션에 `start_ledger_projection`을 추가했다. 정상 uncompacted/empty V8는 압축 table의 exact-empty probe 뒤 live ledger부터 시작하며, compacted V8는 같은 connection/epoch에서 R2 operations → prefixes → frozen messages를 모두 거친다. 이후 ledger → app instances → projects → chats → runs → locks를 검증한다. R1/R2 진입점·결과와 제품 100개 초과 거부는 유지하며 최종 `LedgerProjectionVerified`는 정보성 결과일 뿐 admission이 아니다.
+- **권위·예산**: sequence-1 live predecessor 또는 검증된 최신 prefix/frozen predecessor, rowid 순서, canonical payload/aggregate ID, 존재하는 source index와 ready coverage, protocol null-or-same chat transition을 대조한다. latest event ↔ projection을 양방향으로 검사하고 JSON snapshot·indexed column·lock evidence·app-instance typed field를 비교한다. 고정 최대 12개 exact SQL read plan 전체를 String/JSON decode 전에 BLOB byte-preflight하며 primary 100행/1 MiB와 별도 종속 입력 8 MiB를 지킨다. 동일 행의 반복 입력도 포함하고 남은 예산 초과는 미소비 Pending, intrinsic 초과는 terminal failure다. 여섯 primary table의 0 이하 rowid도 indexed probe로 거부한다.
+- **회귀·실패 주입**: 새 R3A 16 test functions에 빈/미압축/pending/ready, 다섯 종류 각각 101개와 507 live events·102 frozen operations·101 prefixes·101 messages의 22-call 압축 정상 경로, first/late corruption과 모든 typed/indexed column·source-index field·삭제 source/retained anchor 경계를 포함했다. 각 phase/late/terminal 외부 commit, entry/mid/precommit/empty phase 취소, SQLite authorizer 실제 COMMIT 거부·SQL read 거부·busy BEGIN 후 terminal 폐기, schema/rows/file bytes 무변경과 indexed EXPLAIN을 검사한다. 작은 정상·손상 fixture는 legacy replay의 수락/거부와 대조하되 legacy error taxonomy를 새 오류 계약으로 혼동하지 않는다.
+- **용량 증거 구분**: 여섯 단계 각각 exact primary 1 MiB/+1·exact secondary 8 MiB/+1·3 Mi characters/9 MiB UTF-8 입력·남은 예산 양보를 검증한다. later projection의 corruption/용량은 full-session earliest rejection과 test-private phase probe를 구분한다. 특히 typed app-instance 필드 합계 exact 1 MiB는 phase-local control이며 JSON 포장된 source가 ledger primary budget을 넘으면 전체 세션은 그대로 거부한다. 기존 TeamMessage 64 KiB 정책은 바꾸지 않았다.
+- **자체 검증**: 최종 R3A focused 16 passed(155.72초), R1 14 passed(23.73초), R2 15 passed(51.91초), full sidecar 207 passed/1 ignored(270.65초) + stdio 10 passed(1.27초), scoped strict clippy·Rust 2021 여섯 파일 format·diff check 모두 exit 0이다. 증거는 `/tmp/g5d-v8-reopen-projection-evidence.OE8mMN/`의 `r3a-focused.log`, `r1-focused.log`, `r2-focused.log`, `full-sidecar.log`, `clippy.log`, `rustfmt.log`, `diff-check.log`다. 초기 테스트 실패는 fixture의 부재한 materialization-job 행, schema timestamp 형식, legacy error-kind 차이와 테스트의 불필요한 `str::as_str()` 호출을 바로잡았으며 검증 정책은 완화하지 않았다.
+- **다음·미완료**: 자체 검증 후 독립 exact-commit 리뷰와 최신 통합 QA가 필요하다. R3B global derived-record 검증과 R3C 실제 startup/integrity/FK/recovery/admission은 미구현이며 제품 재오픈 100개 제한·startup/append/lifetime은 변경하지 않았다. schema/protocol/golden/의존성/lockfile·writer/delete/scheduler/status·UI/Electron은 범위 밖이다. Node/protocol/전체 앱 검증은 통합 담당이 별도로 기록한다. 실제 provider/사용자 DB/프로젝트·Windows·물리 I/O 고장 시험은 수행하지 않았고 merge/rebase/cherry-pick/push도 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3 시작 경계 조사)
 
 - **시작·기준**: clean `m5/coding-agent-ide`·`04c1b69`에서 R3를 이어간다. 현재 코드·공유 규칙·R2 계약과 검증 결과를 확인했고 R2 focused 15개(36.21초), Node lifetime 17개·protocol lifetime 10개가 통과했다. 로그는 `/tmp/hello-agent-r3-{baseline,node-baseline,protocol-baseline}.log`다. 기존 미커밋 변경은 없었다.
@@ -338,6 +347,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **R3A 내부 ledger/projection 경계(2026-09-02)**: compacted DB는 R2 closure와 R3A를 같은 세션/변경 감지 epoch에서 검증한다. pending의 누락 source index는 exact live predecessor에서 필요한 사실을 구성해 허용하지만 존재하는 index는 항상 결속하며 ready의 누락은 거부한다. latest source와 다섯 projection의 양방향 일치는 global derived-record/R3B 또는 startup/admission/R3C 완료 증거가 아니다. phase-local typed app-instance 1 MiB는 canonical JSON source 1 MiB와 동일한 크기 정의가 아니므로 용량 positive-control을 혼동하지 않는다.
 
 - **R3 startup/admission의 추가 경계(2026-09-02)**: pending materialization은 일부 파생 기록 미생성이 정상이며 ready는 검증 의무이지 proof가 아니다. 현행 startup의 복구 쓰기보다 앞선 read-only semantic preflight가 필요하다. SQLite 전체 integrity/FK 검사와 Electron ready 3초는 batch 예산과 별개다. 둘을 몰래 완화하지 않고 R3A/B/C와 사용자 결정이 필요한 변경을 `proposals/m5-storage-reopen-verification.md` §7에 분리한다.
 - **R2 내부 closure 구현 경계(2026-09-02)**: `start_compaction_closure`의 3-phase 결과는 admission이 아니며 product >100 거부를 해제하지 않는다. 각 행의 고정 dependency graph 전체를 먼저 byte-preflight하므로 뒤늦은 oversized dependency도 무한 Pending으로 남지 않는다. TeamMessage 64 KiB text cap과 메시지 단계의 1 MiB 합계 예산을 혼동하지 않는다. 후기 corruption fixture는 frozen message 삽입 순서를 source rowid로 고정해야 실제 100행 이후 위치를 보장할 수 있다.

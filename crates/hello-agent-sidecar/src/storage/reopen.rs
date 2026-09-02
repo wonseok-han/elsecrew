@@ -1,19 +1,30 @@
-//! Volatile R1 operations-only and R2 compaction-local verification. Neither is
-//! a reopen/admission proof: global replay and integrity remain separate checks.
+//! Volatile R1/R2 and R3A ledger/projection verification. None is a reopen/admission
+//! proof: global derived records, integrity and startup remain separate checks.
 //! No transaction survives a call, no cursor is persisted or accepted from callers,
 //! and cancellation/error/drop discards all progress. Production fences are unchanged.
 
 use super::*;
 
 mod closure;
+mod projection;
 pub(crate) use closure::CompactionPhase;
 #[cfg(test)]
 pub(crate) use closure::{phase_batch_for_test, phase_queries_for_test};
+pub(crate) use projection::ProjectionPhase;
+#[cfg(test)]
+pub(crate) use projection::{projection_batch_for_test, projection_queries_for_test};
 
 #[derive(Clone, Copy)]
 enum VerificationMode {
     OperationsOnly,
     CompactionClosure,
+    LedgerProjection,
+}
+
+#[derive(Clone, Copy)]
+enum VerificationPhase {
+    Compaction(CompactionPhase),
+    Projection(ProjectionPhase),
 }
 
 // Independent of the 1 MiB canonical-source budget. A canonical JSON string's
@@ -25,7 +36,10 @@ enum VerificationMode {
 const MAX_CLOSURE_BYTES: usize = 8 * COMPACTION_VERIFY_MAX_PAYLOAD_BYTES;
 
 enum SessionState {
-    Scanning { after: u64, phase: CompactionPhase },
+    Scanning {
+        after: u64,
+        phase: VerificationPhase,
+    },
     Finished,
     Invalid,
 }
@@ -37,6 +51,7 @@ pub(crate) struct FrozenOperationVerificationSession<'connection> {
     data_version: i64,
     cutoff: u64,
     mode: VerificationMode,
+    source_index_required: bool,
     state: SessionState,
 }
 
@@ -51,12 +66,24 @@ pub(crate) enum FrozenOperationVerificationStep {
         usage: BatchUsage,
     },
     CompactionClosureVerified(BatchUsage),
+    LedgerProjectionPending {
+        phase: LedgerProjectionPhase,
+        usage: BatchUsage,
+    },
+    LedgerProjectionVerified(BatchUsage),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LedgerProjectionPhase {
+    Compaction(CompactionPhase),
+    Projection(ProjectionPhase),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct BatchUsage {
     pub(crate) rows: usize,
-    // R1 source bytes; R2 phase-primary bytes (source/baseline/message).
+    // Phase-primary bytes: R1 source, R2 source/baseline/message, R3A event or
+    // projection snapshot (all persisted typed fields for app instances).
     pub(crate) canonical_source_bytes: usize,
     pub(crate) encoded_closure_bytes: usize,
 }
@@ -71,6 +98,12 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
         connection: &'connection mut Connection,
     ) -> Result<Self, SidecarError> {
         Self::start_mode(connection, VerificationMode::CompactionClosure)
+    }
+
+    pub(crate) fn start_ledger_projection(
+        connection: &'connection mut Connection,
+    ) -> Result<Self, SidecarError> {
+        Self::start_mode(connection, VerificationMode::LedgerProjection)
     }
 
     fn start_mode(
@@ -100,12 +133,31 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             if forbidden {
                 return Err(session_error());
             }
-            if matches!(mode, VerificationMode::CompactionClosure) {
+            if matches!(
+                mode,
+                VerificationMode::CompactionClosure | VerificationMode::LedgerProjection
+            ) {
                 closure::reject_hidden_rowids(&transaction)?;
             }
-            Ok((marker, verify_terminal_compaction_proof(&transaction)?))
+            let uncompacted = if matches!(mode, VerificationMode::LedgerProjection) {
+                projection::reject_hidden_rowids(&transaction)?;
+                projection::compaction_tables_empty(&transaction)?
+            } else {
+                false
+            };
+            let cutoff = if uncompacted {
+                0
+            } else {
+                verify_terminal_compaction_proof(&transaction)?
+            };
+            let phase = if uncompacted {
+                VerificationPhase::Projection(ProjectionPhase::Ledger)
+            } else {
+                VerificationPhase::Compaction(CompactionPhase::Operations)
+            };
+            Ok((marker, cutoff, phase, materialization_state == "ready"))
         })();
-        let (marker, cutoff) = match checked {
+        let (marker, cutoff, phase, source_index_required) = match checked {
             Ok(values) => {
                 transaction.commit().map_err(|_| session_error())?;
                 values
@@ -123,10 +175,8 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             data_version: marker,
             cutoff,
             mode,
-            state: SessionState::Scanning {
-                after: 0,
-                phase: CompactionPhase::Operations,
-            },
+            source_index_required,
+            state: SessionState::Scanning { after: 0, phase },
         })
     }
 
@@ -155,13 +205,24 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
             let SessionState::Scanning { after, phase } = previous else {
                 return Err(session_error());
             };
-            let batch = match self.mode {
-                VerificationMode::OperationsOnly => {
+            let batch = match (self.mode, phase) {
+                (VerificationMode::OperationsOnly, _) => {
                     scan_batch(&transaction, after, self.cutoff, cancelled)
                 }
-                VerificationMode::CompactionClosure => {
+                (_, VerificationPhase::Compaction(phase)) => {
                     closure::scan_batch(&transaction, phase, after, self.cutoff, cancelled)
                 }
+                (VerificationMode::LedgerProjection, VerificationPhase::Projection(phase)) => {
+                    projection::scan_batch(
+                        &transaction,
+                        phase,
+                        after,
+                        self.cutoff,
+                        self.source_index_required,
+                        cancelled,
+                    )
+                }
+                _ => Err(session_error()),
             }?;
             Ok(batch.map(|(next, usage, exhausted)| (phase, next, usage, exhausted)))
         })();
@@ -171,7 +232,45 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                 if !self.connection.is_autocommit() {
                     return Err(session_error());
                 }
+                if matches!(self.mode, VerificationMode::LedgerProjection) {
+                    let reported = match phase {
+                        VerificationPhase::Compaction(p) => LedgerProjectionPhase::Compaction(p),
+                        VerificationPhase::Projection(p) => LedgerProjectionPhase::Projection(p),
+                    };
+                    let next_phase = if exhausted {
+                        match phase {
+                            VerificationPhase::Compaction(CompactionPhase::FrozenMessages) => {
+                                Some(VerificationPhase::Projection(ProjectionPhase::Ledger))
+                            }
+                            VerificationPhase::Compaction(p) => {
+                                Some(VerificationPhase::Compaction(p.next()))
+                            }
+                            VerificationPhase::Projection(p) => {
+                                p.next().map(VerificationPhase::Projection)
+                            }
+                        }
+                    } else {
+                        Some(phase)
+                    };
+                    let Some(next_phase) = next_phase else {
+                        self.state = SessionState::Finished;
+                        return Ok(FrozenOperationVerificationStep::LedgerProjectionVerified(
+                            usage,
+                        ));
+                    };
+                    self.state = SessionState::Scanning {
+                        after: if exhausted { 0 } else { next },
+                        phase: next_phase,
+                    };
+                    return Ok(FrozenOperationVerificationStep::LedgerProjectionPending {
+                        phase: reported,
+                        usage,
+                    });
+                }
                 if matches!(self.mode, VerificationMode::CompactionClosure) {
+                    let VerificationPhase::Compaction(phase) = phase else {
+                        return Err(session_error());
+                    };
                     if exhausted && phase == CompactionPhase::FrozenMessages {
                         self.state = SessionState::Finished;
                         return Ok(FrozenOperationVerificationStep::CompactionClosureVerified(
@@ -180,7 +279,11 @@ impl<'connection> FrozenOperationVerificationSession<'connection> {
                     }
                     self.state = SessionState::Scanning {
                         after: if exhausted { 0 } else { next },
-                        phase: if exhausted { phase.next() } else { phase },
+                        phase: VerificationPhase::Compaction(if exhausted {
+                            phase.next()
+                        } else {
+                            phase
+                        }),
                     };
                     Ok(FrozenOperationVerificationStep::CompactionClosurePending { phase, usage })
                 } else if exhausted {

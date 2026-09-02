@@ -26,7 +26,7 @@ fn baseline(connection: &Connection, source: &LedgerEventV1) {
 
 /// Every deleted sequence has its own exact prefix, with historical frozen anchors
 /// and one retained live anchor. All fixture mutations use the production guards.
-fn seed(
+pub(super) fn seed(
     storage: &mut Storage,
     deleted: usize,
     chat: bool,
@@ -158,7 +158,7 @@ fn cutoff(connection: &Connection) -> u64 {
         .unwrap()
 }
 
-fn fixture(
+pub(super) fn fixture(
     deleted: usize,
     chat: bool,
     null_repeat: bool,
@@ -174,7 +174,7 @@ fn fixture(
 }
 
 /// Deliberately corrupt ONLY a disposable fixture, then restore its exact schema.
-fn corrupt(connection: &Connection, sql: &str) {
+pub(super) fn corrupt(connection: &Connection, sql: &str) {
     let triggers: Vec<(String, String)> = connection
         .prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger'")
         .unwrap()

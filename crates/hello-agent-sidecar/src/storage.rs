@@ -36,7 +36,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-// Internal R1/R2 verifiers; deliberately not wired into open/admission.
+// Internal R1/R2/R3A verifiers; deliberately not wired into open/admission.
 #[allow(dead_code)]
 pub(crate) mod reopen;
 
