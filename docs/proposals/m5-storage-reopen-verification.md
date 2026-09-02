@@ -269,3 +269,47 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 합격은 호환성 문제가 재현됐다는 뜻이다. 기존 입력을 안전하게 수락하는 해결책이나 R3C·전체 G5D 완료가 아니다. 결과를 §9와 작업 이력에 반영한 뒤 저장 표현·검증 단위·이전 기록 호환 정책을 별도로 설계한다.
 
 §10 재현은 기능 `5a5858f`의 독립 리뷰와 exact 통합 `73b2d61297b376637f5cc6794057f325652ba450`의 focused QA·최종 gate를 통과했다. 새 exact test 1개(세 사례)와 기존 budget boundary test 1개, scoped clippy/format/diff가 통과했으며 제품 코드는 바뀌지 않았다. 근거는 `.artifacts/m5-qa/73b2d61297b376637f5cc6794057f325652ba450/manifest.json`과 `../history.md`다. 이전 `e5f9f01`의 누적 13단계는 상속한 production 기준선이며 이번 test-only SHA에서 다시 실행한 결과가 아니다.
+
+## 11. 큰 기록 호환 설계 방향 — 제품 활성화 승인 아님
+
+§10은 정상 입력이 기존 indivisible-row 검사에 걸림을 입증했다. 우선 V8 저장 표현을 유지하고 **private byte span → canonical 구조 → 의미 비교 → 동일 연결의 쓰기 권위** 순서로 분리한다. 아래 방향과 §12 내부 transport 계약은 기존 R1/R2/R3A/R3B의 단일 row 거부 규칙·결과, public 입력량·예산, 제품 100-operation fence를 바꾸지 않는다. 새 primitive를 구현한 것만으로 큰 기록의 제품 수락을 승인하지 않는다.
+
+- **추천**: 고정 table/column과 indexed locator에 결속된 재개 가능한 byte-span 읽기다. `substr(CAST(column AS BLOB), offset, length)`의 반환 BLOB만 Rust로 읽어 TEXT의 byte offset을 사용한다. rowid table과 `WITHOUT ROWID` frozen table을 같은 방식으로 다룬다. SQLite 내부 materialization/캐시·벽시계 시간은 기존 Rust 입력 guard와 다르며 bounded라고 주장하지 않는다.
+- **canonical 동등성**: 현재 기준은 `serde_json` parse → 재귀 decoded key 정렬 → serialize와 원문 byte의 일치다. 이후 scanner는 숫자·escape·UTF-8·decoded key 순서·중첩을 이 oracle과 동등하게 검사해야 한다. `from_reader::<Value>`로 전체 tree를 만들거나 큰 row를 읽은 뒤 기존 whole-JSON validator에 넘기는 것은 해결이 아니다.
+- **projection 의미 동등성**: key 순서·공백이 다른 정상 projection, typed columns와 `last_event_sequence` overlay를 유지한다. 기존 parser의 중복 key 마지막 값 처리도 SQLite mirror 검사와 함께 대조해야 한다. raw hash만 비교하거나 중복 key를 새로 모두 금지하지 않는다. bounded-memory member-span 재탐색과 양방향 누락/extra 검사가 필요하며, 큰 key/string 또는 project map 전체를 retained object로 보관하지 않는다.
+- **파생 기록·권위**: receipt/baseline의 canonical payload 비교와 frozen envelope 내부의 escaped payload까지 검증해야 한다. 원본 payload digest만으로 envelope·ledger identity·전역 coverage를 대체하지 않는다. 검증 후 own commit은 `data_version`으로 탐지되지 않으므로 추후 private admission은 쓰기마다 유지·전진·폐기 조건을 정해야 한다.
+- **catch-up 선행 조건**: 현재 bounded workspace worker는 최신 project source만 처리하고, 기존 row가 다르면 다시 최신 source와 비교한다. workspace row에는 source sequence/rowid가 없다. legacy helper의 전체 history 검색을 그대로 복사하거나 R3B의 정보성 결과를 쓰기 권위로 취급하지 않는다. historical source의 bounded resolution 또는 검증된 동일 연결 권위를 갖춘 뒤 catch-up을 수정한다.
+- **기각·열린 경계**: 입력 축소·예산 확대·oversized 예외 통과·기록 삭제는 하지 않는다. 즉시 V9 전환이나 자동 JSON rewrite/TEMP spill도 기존 V8 큰 입력을 읽는 문제를 없애지 못하며 별도 migration/수명 계약을 요구한다. 재탐색·SQLite slicing·전체 integrity/FK를 포함한 3초 ready 충족은 미입증이다. 실제로 충족하지 못하면 timeout/시작 정책 또는 표현 변경은 사용자 결정 사항이며 임의로 바꾸지 않는다.
+
+## 12. R3C-S1 bounded raw-column transport — 내부 구현 계약
+
+### 12.1 목표·소유·비목표
+
+첫 구현 단위는 **실제 저장된 source column → exact identity 결속 → 다회 byte 읽기 → UTF-8/길이/SHA-256 완료**다. 이름과 결과에 JSON/canonical/ledger가 검증됐다는 의미를 넣지 않는다. 결과는 private 정보이며 Storage admission이나 기존 verifier가 소비하지 않는다.
+
+기능 branch는 이 계약을 검토·커밋한 최신 통합 SHA에서 별도 worktree로 분기한다. 단일 Rust 담당은 새 `storage/reopen/bytes.rs`, 새 `storage/tests/reopen_bytes.rs`, 각 module 등록을 위한 `storage/reopen.rs`·`storage/tests.rs`, §10 기존 fixture를 transport 대조에 재사용하기 위한 `agent_runtime.rs`의 기존 `cfg(test) budget_tests`, 자기 branch의 `docs/history.md`만 수정한다. 기존 production 함수는 module 등록 외 변경하지 않는다. schema/protocol/golden/의존성/lockfile·제품 open/append/recovery/lifetime·R1/R2/R3A/R3B 로직·기존 예산·Electron/UI는 변경 금지다.
+
+### 12.2 고정 주소·수명·결과
+
+- SQL 식별자를 caller 문자열로 받지 않는다. allowlist는 `events.canonical_json_payload`의 rowid 주소, `frozen_operation_sources.canonical_payload_json` 및 `canonical_record_json`의 operation_id 주소 세 가지다. frozen 주소는 `WITHOUT ROWID` primary key를 사용한다.
+- 주소만 신뢰하지 않는다. source rowid/event ID/operation ID/aggregate type·ID·sequence와 payload schema version·event type·request ID·timestamp의 expected tuple을 실제 typed column과 exact 결속한다. expected tuple은 내부 호출자가 선택하는 비교 대상이지 이미 검증된 source proof가 아니다. 행 부재·identity 불일치는 실패다.
+- session은 동일 mutable `Connection`을 독점 차용한다. 시작 시 autocommit과 기존 exact V8 schema preflight를 확인하고 `BEGIN IMMEDIATE` 안에서 최초 `data_version`·source identity·원래 byte 길이를 고정한다. 매 step도 같은 잠금 아래 epoch·identity·길이를 다시 확인한다. caller는 offset/hash/완료 플래그를 주입하거나 session을 직렬화·복제할 수 없다.
+- 단일 step의 로컬 결과를 COMMIT 성공 뒤에만 보존한다. UTF-8 부분 문자 최대 3바이트·incremental hash·numeric cursor·bounded source identity만 호출 사이 유지하며 payload 조각은 누적 보관하지 않는다. 오류·취소·외부 commit·COMMIT 불확실성은 모든 진행을 폐기하고 재사용을 거부한다. 호출 사이 열린 transaction은 없다.
+- 마지막 조각과 정확한 EOF를 확인하고 남은 UTF-8 조각이 없을 때만 전체 byte 길이와 SHA-256을 반환한다. 빈 TEXT도 byte/UTF-8/hash 단계에서는 처리할 수 있지만 유효 JSON이라는 뜻은 아니다. malformed UTF-8·NULL/비TEXT·offset 산술 오류·짧거나 예상 밖의 읽기를 거부한다. 완료 뒤 재사용도 거부한다.
+
+### 12.3 호출당 예산과 읽기 계획
+
+- 새 transport는 **fragment** 기준으로 fresh primary bytes ≤1 MiB를 적용한다. 단일 source 총길이가 1 MiB 또는 8 MiB를 넘는 것 자체로 거부하지 않는다. 이 변경은 새 private transport의 읽기 단위에만 적용하며 기존 row-based verifier의 정책은 불변이다.
+- retained identity/UTF-8 carry와 실제 재조회 metadata·새 fragment를 합친 encoded 입력은 매 호출 ≤8 MiB다. identifier/metadata도 String으로 읽기 전에 BLOB 길이로 preflight한다. SQL bind에 유지하는 문자열도 retained 상태에 포함한다. 이미 읽은 byte를 재조회하면 다시 청구한다. 상한은 exact heap/SQLite memory/전체 시작 시간 상한이 아니다.
+- 고정 개수 metadata 조회와 한 조각 읽기만 수행한다. 조각/후보 처리의 공유 work units는 ≤100이며 step 안에서 EOF까지 loop하지 않는다. byte offset은 0-based 내부 값에서 checked 1-based SQL 위치로 변환한다. 반환은 `Vec<u8>` 등 byte 형태이며 전체 column을 String/Value/Vec로 읽지 않는다.
+- 남은 허용량 안에서 실제로 전진할 조각을 선택한다. retained metadata 때문에 1바이트도 읽을 수 없는 intrinsic 상태는 terminal failure이며 zero-progress Pending을 반복하지 않는다. 전체 column에 JSON 조건을 걸어 matching 부분만 LIMIT하는 조회·OFFSET·TEMP index/spill·영속 cursor는 금지한다.
+
+### 12.4 합격 기준·검증
+
+1. §10 ASCII/escaping/small DB의 exact run source column을 이 transport로 끝까지 읽어 test-only 전체 byte oracle의 길이·SHA-256과 대조한다. §10의 기존 Storage reopen 성공/private R3B 거부·small 완료 assertion은 그대로 유지한다. transport 성공을 기존 R3B 성공으로 바꾸지 않는다.
+2. rowid live payload와 `WITHOUT ROWID` frozen payload/envelope를 모두 검사한다. 빈/1바이트/exact 1 MiB/+1/8 MiB 초과 source, UTF-8 문자가 fragment 경계에서 나뉘는 경우와 invalid/truncated UTF-8을 포함한다. 모든 step의 실제 읽기/retained 예산과 진행을 확인한다.
+3. identity mismatch·행 부재·같은 길이 외부 변경·후반부 변경, entry/mid/precommit 취소, 실제 SQL read/COMMIT 거부·busy BEGIN을 검사한다. 모든 실패 뒤 재사용 불가·autocommit·schema/rows/DB bytes 무변경을 확인한다. 외부 변경 fixture의 무변경 기준은 허용된 외부 commit **이후** snapshot이다.
+4. allowlisted query plan의 exact primary/unique index lookup과 byte slice를 확인한다. 전체 JSON decode/숨은 전체-history collection이 새 production 경로에 없음을 source review한다. 고정 metadata의 exact/초과 예산도 검사한다.
+5. 새 focused prefix `raw_column_bytes`, §10 exact test 1개, full sidecar/stdio, scoped strict clippy·Rust 2021 format·diff, exact-commit 독립 코드 리뷰와 최신 통합 누적 `g5d-bounded-storage` QA를 통과한다. command/actual exit/raw log를 남기고 제품 활성화·R3C 완료를 주장하지 않는다.
+
+소유 밖 수정, 기존 validator로 whole source를 넘겨야 하는 설계, 예산·schema·제품 정책 변경 필요가 드러나면 중단하고 보고한다. 실제 provider·사용자 DB/프로젝트·Windows·파괴적 시험·main 병합·push는 하지 않는다. 다음 S2는 canonical scanner와 projection 의미 비교의 기존 oracle 대비 동등성 계약이며, S1 완료만으로 이어지는 의미 검증을 생략하지 않는다.

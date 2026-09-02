@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C-S1 byte transport 계약)
+
+- **계약·검토**: 큰 정상 기록 호환 설계를 재오픈 제안서 §11, 첫 구현 계약을 §12에 고정했다. V8의 allowlisted source column을 exact identity/epoch에 결속하고 호출마다 최대 1 MiB fragment와 8 MiB retained+fresh encoded 입력으로 읽는 private 단위다. UTF-8/길이/SHA 결과는 JSON·의미·admission 검증이 아니다. 독립 설계 조사와 별도 계약 리뷰 PASS를 받았으며 기존 R1–R3B·public 예산·제품 100-operation fence는 바꾸지 않는다.
+- **발견·검증**: bounded workspace catch-up은 source sequence 없는 기존 row를 latest-only로 비교하므로 단순 조건 수정이 아니다. historical bounded resolver 또는 같은 연결의 검증된 쓰기 권위가 선행해야 한다. root 기준선 exact snapshot 진단 1 passed(17.30초)로 큰 두 사례 거부/small 완료를 재확인했다. 증거는 `.artifacts/m5-review/g5d-r3c-s1-contract.json`과 `g5d-r3c-catchup-dependency-readback.json`이다.
+- **다음·보존**: 계약 commit 기준 별도 기능 worktree에서 S1을 구현·독립 리뷰·통합 QA한다. S2 canonical/semantic 동등성, project map 재현, catch-up/startup/admission과 전체 G5D는 남는다. 다른 대화의 cleanup history/procedure는 미커밋으로 보존한다. 신규 worktree 전 정리 상태를 재점검하며 최근/사용 여부 불명 대상은 유지한다. main 병합·push 없음.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C snapshot 진단 QA·최종 gate)
 
 - **완료**: exact 통합 `73b2d61297b376637f5cc6794057f325652ba450`의 별도 clean detached QA worktree에서 새 exact test 1 passed(17.52초)·기존 경계 test 1 passed(0.94초), strict clippy·Rust 2021 format·diff를 통과했다. ASCII/escaping의 일반 Storage reopen 성공과 full private 거부, small의 전체 완료 및 무변경 assertion을 독립 최종 gate가 PASS했다. 테스트 전용 호환성 진단의 완료이며 해결책이나 R3C·전체 G5D 완료가 아니다.
@@ -169,6 +175,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **R3C 큰 기록 처리 순서(2026-09-02)**: V8 byte transport → canonical oracle 동등성 → projection/파생 의미 비교 → 동일 연결의 쓰기 권위 순서로 나눈다. §12 S1은 fragment 1 MiB/retained+fresh 8 MiB 내 UTF-8·길이·해시 정보만 제공하며 기존 verifier·제품 fence·입력 정책을 바꾸지 않는다. historical workspace catch-up은 source sequence 없는 row 때문에 단순 latest-only 조건 변경으로 해결하지 않는다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §11–12다.
 
 - **R3C snapshot 호환성 재현(2026-09-02, 테스트 전용)**: 정상 public text/event/누적 snapshot 예산을 통과한 ASCII 16 × 64 KiB 및 역슬래시 9 × 64 KiB의 일반 run+chat atomic writes와 Storage reopen은 성공하지만, 저장된 run canonical BLOB이 1 MiB를 초과해 전체 private R3B ledger 검증은 거부한다. 작은 16-event 대조군은 전체 완료한다. exact test `agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary`가 양 경로와 exact source row byte preflight/무변경을 구분해 고정한다. provider-less pre-G5C readable shape일 뿐 현재 provider 검증이나 제품 admission 증거가 아니며, §9/§10의 저장 표현·검증 단위·기존 기록 호환 정책을 정하기 전 제품 연결/예산 변경은 하지 않는다.
 
