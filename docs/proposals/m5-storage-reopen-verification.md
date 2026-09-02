@@ -171,7 +171,8 @@ receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 �
 ### 8.3 미색인 메시지와 전역 유일성
 
 - 메시지 `event_sequence`는 chat durable sequence이며 aggregate source sequence로 직접 사용하지 않는다. 기존 null-or-same 전이와 반복 snapshot을 보존한다.
-- index가 없는 각 introduction에 대해 exact indexed introduction/frozen message 조회와 **전체 live event의 raw rowid keyset** 중첩 탐색으로 같은 ID를 도입한 다른 source가 없는지 검사한다. index/normalized row가 둘 다 없는 두 introduction도 거부해야 한다. 후보마다 exact source/predecessor 전이를 판정하며, 같은 source와 반복 snapshot은 충돌로 오인하지 않는다. 일치 하나를 찾은 시점이 아니라 keyset exhaustion까지 검사해야 유일성이 성립한다. 이미 indexed된 introduction끼리는 exact schema의 unique index와 각 index/source 결속을 함께 사용한다.
+- **모든 live introduction**은 index 유무와 관계없이 exact indexed introduction/frozen message identity를 대조하고 같은 ID의 다른 introducing source를 거부한다. 이미 indexed된 live introduction과 frozen source 사이의 충돌도 포함한다. 기존 `event_source_index_rejects_frozen_message_reuse` trigger가 정상 INSERT를 보호하지만, 손상된 저장 상태의 재검증을 대신하지는 않는다.
+- index가 없는 introduction은 여기에 더해 **전체 live event의 raw rowid keyset** 중첩 탐색으로 같은 ID를 도입한 다른 source가 없는지 검사한다. index/normalized row가 둘 다 없는 두 introduction도 거부해야 한다. 후보마다 exact source/predecessor 전이를 판정하며, 같은 source와 반복 snapshot은 충돌로 오인하지 않는다. 충돌은 발견 즉시 거부하며, 충돌이 없다는 판정은 keyset exhaustion까지 검사해야 성립한다. 이미 indexed된 introduction끼리는 exact schema의 unique index와 각 index/source 결속을 함께 사용한다.
 - 이 유일성 단계가 같은 unchanged 세션에서 완료된 뒤 normalized message 역검증을 진행한다. exact indexed/frozen source로 해결되지 않으면 raw `events`의 `(aggregate_type, aggregate_id, aggregate_sequence)` unique index를 이용한 per-chat sequence keyset으로 정확한 introduction을 찾거나 끝까지 검사한다. 첫 nonmatch/page에서 멈추지 않고, match에서 멈추는 근거도 앞선 전역 유일성 검증이다.
 - JSON 조건으로 전체 이력을 탐색하면서 matching row에만 `LIMIT`를 붙이는 쿼리, `OFFSET`, 전체-history `Vec`/map/set, TEMP index/schema 변경은 금지한다. candidate가 실제로 방문되는 raw keyset·exact lookup과 query plan을 증거로 남긴다.
 
@@ -195,7 +196,7 @@ receipt와 baseline의 live source는 `event_source_index` 존재를 전제로 �
 
 1. empty/pending/ready·compacted V8와 다섯 derived table 각각 100행 초과 정상 fixture를 다회 완료한다. 정상 historical pending workspace·unreferenced baseline·null/repeat message를 유지한다. V5→V6 migration처럼 index가 전부 없고 receipt/baseline은 남은 pending에서 raw live source 결속과 필요한 frozen fallback을 검증한다.
 2. 첫 행과 후반부의 orphan·typed/indexed/canonical/digest/identity 불일치, ready 누락과 pending 미생성의 차이, live/frozen/anchor 경계를 검사한다. ready workspace는 member 누락·extra/stale row를 양방향으로 거부하고 100개 초과 member를 포함한다.
-3. 서로 다른 chat에서 100개 초과 후보 간격으로 떨어진 동일 ID의 unindexed introduction을, 양쪽 normalized row도 없는 상태에서 거부한다. indexed↔unindexed·frozen↔unindexed 충돌과 정상 repeated snapshot을 구분한다. per-chat 100개 이후 match와 source absence의 exact exhaustion, source-index가 전부 없는 pending bound workspace의 최신 raw chat 결속을 검사한다.
+3. 서로 다른 chat에서 100개 초과 후보 간격으로 떨어진 동일 ID의 unindexed introduction을, 양쪽 normalized row도 없는 상태에서 거부한다. indexed↔unindexed·frozen↔unindexed·indexed-live↔frozen 충돌과 정상 repeated snapshot을 구분한다. indexed-live↔frozen은 기존 INSERT trigger를 우회해 손상 상태를 준비한 뒤 exact schema를 복원한 fixture로 재검증하며, 정상 append가 ID 재사용을 허용한다고 주장하지 않는다. per-chat 100개 이후 match와 source absence의 exact exhaustion, source-index가 전부 없는 pending bound workspace의 최신 raw chat 결속을 검사한다.
 4. primary exact 1 MiB/+1·closure exact 8 MiB/+1·멀티바이트·남은 예산 양보·retained outer와 큰 source의 호출 분리·100 work units·no-progress 방지와 실제 query plan을 확인한다. private phase probe와 full-session earliest rejection을 구분한다.
 5. 각 phase·nested late/terminal 경계에서 외부 commit·entry/mid/precommit 취소·실제 SQL read/COMMIT 거부·busy BEGIN 뒤 전체 진행 폐기 및 DB schema/rows/file bytes 무변경을 검사한다.
 6. 새 focused tests, 기존 R1/R2/R3A, full sidecar/stdio, Node/protocol lifetime, scoped strict clippy·Rust 2021 format·diff check, 독립 exact-commit 코드 리뷰와 최신 통합 QA를 통과한다. 누적 하네스는 `CI=1` 환경을 사용하고 환경 제한·미실행 외부 게이트는 별도 기록한다.

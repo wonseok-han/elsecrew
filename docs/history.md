@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B frozen identity 계약 보완)
+
+- **교차 확인·보완**: 계약 `0eafac4`의 unindexed introduction 검사만으로는 indexed-live introduction과 다른 frozen source의 동일 ID 충돌을 명시적으로 닫지 못함을 root·독립 리뷰·구현 담당이 확인했다. §8.3은 **모든 live introduction**의 exact indexed/frozen identity 대조를 먼저 요구하고 unindexed만 추가 전역 keyset 탐색을 수행하도록 보완했다. 기존 정상 INSERT는 `event_source_index_rejects_frozen_message_reuse` trigger가 보호하므로 일반 append 결함으로 기록하지 않는다. exact schema를 복원한 stored-corruption fixture 회귀를 추가하며 schema/product 경로는 바꾸지 않는다.
+- **진행·다음**: `0eafac4`의 별도 derived worktree에서 구현을 진행하며 이 보완 계약도 적용한다. 독립 QA 계획은 `.artifacts/m5-qa/g5d-r3b-plan.json`에 있고, 새 기능 테스트·독립 코드 리뷰·통합 QA는 아직 남았다. 추가 R3C 조사에서는 generic recovery가 integrity/replay 뒤지만 전체 recovery semantic 검증 전이라는 순서와 WAL 전환·managed directory 생성·reservation/manifest 쓰기를 분리해 확인했다. 순수 preflight/legacy migration 구분은 후속 계약이며 이번 구현 범위가 아니다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3B 계약 착수)
 
 - **기준·범위**: clean `m5/coding-agent-ide`·`5cdd5dd`에서 이전 R3A 코드/QA가 유지됨을 확인했다. R3B는 기존 private 세션 뒤에 전체 derived-record 검증을 추가하며 제품 admission·catch-up·100개 제한 해제는 R3C에 남긴다. §7.5 조사와 별도 검토 준비 초안을 `proposals/m5-storage-reopen-verification.md` §8의 구체 계약으로 옮기고 독립 검토 뒤 구현 worktree를 분기한다.
