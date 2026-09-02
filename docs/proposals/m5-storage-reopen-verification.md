@@ -138,3 +138,12 @@ R3B/C의 구체적인 쓰기 계약은 R3A의 검토 결과를 반영해 별도�
 5. 기존 R1/R2, focused Rust, full sidecar/stdio, protocol/Node lifetime, scoped clippy·Rust 2021 format·diff check, 독립 exact-commit 리뷰와 최신 통합 QA를 통과한다. 제품의 100개 초과 거부와 기존 startup/append/lifetime 경로는 그대로임을 확인한다.
 
 단일 Rust 구현 담당이 `storage/reopen.rs` 및 하위 모듈, `storage/tests.rs` 및 하위 회귀, 자기 branch의 `docs/history.md`를 소유한다. `storage.rs`는 module 등록·설명 또는 동작 보존 helper 추출만 허용한다. schema/protocol/golden/의존성/lockfile, 실제 open/append/lifetime·복구 admission, Electron/UI, scheduler/writer/status는 변경 금지다. 통합 담당은 이 문서·현행 구조·색인·통합 워크로그를 소유한다. 경계를 넘겨야 하면 중단하고 보고한다.
+
+### 7.5 R3B 후속 조사 — 아직 구현 계약 아님
+
+R3A 통합 `63ab510`에서 아래 조건을 조사했다. 다음 파동은 이를 포함한 구체 계약을 독립 검토·커밋한 뒤 구현한다. R3B 구현이나 제품 실행 허용을 이 절로 승인하지 않는다.
+
+- pending의 source index와 normalized message가 모두 없어도 **메시지 도입 ID의 전역 유일성**은 기존 요구다. protocol의 `introducedMessageIdentityConflict=rollbackWholeAppend`, V6 unique index와 서로 다른 chat의 ID 재사용 거부 회귀가 근거다. 반복 snapshot은 새 도입이 아니다. 각 source/predecessor만 보는 R3A는 이 전역 검증을 대신하지 않는다.
+- 없는 index를 찾는 경로는 raw source의 명시적 중첩 keyset과 종료 조건이 필요하다. JSON 조건으로 전체 이력을 탐색하면서 `LIMIT`만 붙이는 방식은 bounded scan이 아니다. 유일성 확인 후 message association은 정확한 도입 source를 찾거나 keyset 끝까지 검사해야 한다. 한 outer record를 호출 사이 유지한다면 retained encoded bytes도 매 호출 종속 예산에 포함하며, 외부 commit·취소·오류 때 모두 폐기한다. 최악의 유일성 탐색은 `미색인 도입 수 × live event 수`일 수 있어 호출당 예산을 전체 시작 시간 보장으로 해석하지 않는다.
+- pending workspace는 최신 project append보다 오래된 정상 파생 기록일 수 있다. exact historical live/frozen source를 bounded하게 찾는 규칙과, bound chat의 **최신 raw live source**를 쓰는 composite identity 검증을 명시해야 한다. ready는 최신 project member→row와 row→최신 member를 모두 확인해 누락·stale·extra를 거부한다. 100개 초과 workspace member도 내부 cursor·예산 검증 대상이다.
+- **별도 lifecycle 결함**: 현행 `storage_lifetime.rs`의 bounded `materialize_workspace_event`는 기존 row를 갱신하기 전에 latest-only `source_workspace_matches`를 호출한다. 따라서 R3B가 정상 historical pending row를 받아들여도 이후 catch-up이 실패할 수 있다. 이는 source 대조로 확인한 경로이며 이번에 재현 테스트나 수정을 수행하지 않았다. R3B의 읽기 검증 성공을 catch-up 호환성으로 주장하지 않고, R3C/lifecycle 계약에서 재현·수정·검증한 뒤 제품 활성화를 판단한다.

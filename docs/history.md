@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3A 독립 검토·통합 QA)
+
+- **통합·경계**: 검토된 계약 `d4c3751`에서 기능 `6217517`을 구현하고 독립 exact-commit 코드 리뷰 PASS 뒤 `63ab510`으로 통합했다. feature와 integration tree가 같고 QA 전후 clean임을 확인했다. R3A는 R2 뒤 ledger와 다섯 projection을 같은 내부 세션에서 검증하며 제품 open/append/lifetime, schema/protocol/의존성을 바꾸지 않는다. 구현 branch의 워크로그도 보존했다. 독립 최종 gate는 exact `63ab510`의 R3A 범위에 한해 PASS다.
+- **최신 통합 QA**: exact `63ab510bae02ab561fb1d4fb2ba3c9ef8af3e070`에서 `CI=1` 누적 `g5d-bounded-storage` 13단계가 모두 PASS했다(18분 53.799초). frontend 199개, Electron 43개와 실제 darwin-arm64 package smoke, Rust protocol 42개, sidecar 207개/1 ignored·stdio 10개, Node lifetime 17개·protocol lifetime 10개·storage 95개·bounded V6 27개를 포함한다. 별도 R3A focused 16개(109.48초), scoped sidecar strict clippy·여섯 Rust 파일 format·diff check도 통과했다. 독립 코드 검토자는 R3A 16·R1 14·R2 15개를 별도로 통과했다. manifest는 `.artifacts/m5-qa/63ab510bae02ab561fb1d4fb2ba3c9ef8af3e070/manifest.json`, 누적 보고서는 `.artifacts/m5-harness/g5d-bounded-storage-2026-09-02T06-09-37-969Z.json`이다. phase-private 용량/후반부 검증과 full-session earliest rejection, typed app-instance의 phase-local 1 MiB는 구분한다.
+- **이전 빌드 차단 후속**: frozen lockfile·ignore-scripts·공급망 정책을 유지한 의존성 복원 뒤 일시적 build 성공과 자동 재설치 실패를 구분해 보존했다. 하네스와 같은 `CI=1` 환경에서 build가 통과했고, 기준 `d4c3751`과 최신 `63ab510`의 누적 게이트가 네트워크 허용 환경에서 각각 통과했다. 격리 환경의 Electron runtime download 실패는 별도 환경 제한이며 최신 실패 보고서 `.artifacts/m5-harness/g5d-bounded-storage-2026-09-02T06-08-40-821Z.json`도 남긴다. pnpm의 자동 설치와 CI 설정 정규화 차이를 확인했지만 package 소실의 전체 인과를 확정하지 않았다. 복원/실패 기록은 `.artifacts/m5-qa/g5d-r3a-environment.json`에 연결한다. tracked 설정·lockfile·의존성 버전은 변경하지 않았다. QA의 dependency 포함 strict clippy 첫 시도는 기존 core/protocol 경고 5개로 실패했고 scoped sidecar 검사는 통과했다.
+- **다음 조사·미완료**: R3B의 미색인 메시지 도입 ID 전역 유일성, pending historical workspace·raw source 탐색·내부 cursor 예산을 조사하고 준비 초안을 별도 검토했다. 아직 구현 계약이나 구현이 아니며 `proposals/m5-storage-reopen-verification.md` §7.5에 필요한 조건과 bounded materializer catch-up의 후속 결함을 남긴다. 다음은 R3B 정식 계약/구현, R3C integrity/FK·복구 사전 검증·startup/admission이다. 제품 100개 초과 재오픈 제한은 유지하고 전체 `g5d-storage-lifetime`은 scheduler/status/compaction script 세 개 부재로 `NOT_READY`다. 실제 provider·사용자 프로젝트·Windows·파괴적 시험, `main` 병합·push는 하지 않았다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3A bounded ledger/projection 구현)
 
 - **소유 범위·구현**: 검토된 §7 계약 `d4c3751`의 별도 `m5/g5d-v8-reopen-projection` worktree에서 기존 내부 세션에 `start_ledger_projection`을 추가했다. 정상 uncompacted/empty V8는 압축 table의 exact-empty probe 뒤 live ledger부터 시작하며, compacted V8는 같은 connection/epoch에서 R2 operations → prefixes → frozen messages를 모두 거친다. 이후 ledger → app instances → projects → chats → runs → locks를 검증한다. R1/R2 진입점·결과와 제품 100개 초과 거부는 유지하며 최종 `LedgerProjectionVerified`는 정보성 결과일 뿐 admission이 아니다.
@@ -347,6 +354,10 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **R3B 후속 호환·유일성(2026-09-02)**: pending에서 index/normalized message가 없더라도 메시지 도입 ID 전역 유일성은 기존 protocol 요구이며 R3A source-local 검증만으로 닫히지 않는다. historical pending workspace의 읽기 검증과 실제 catch-up은 별개다. 현행 bounded workspace materializer의 갱신 전 latest-only source 대조는 정상 과거 row도 거부할 수 있으므로 R3C/lifecycle에서 재현·수정 검증이 필요하다. 아직 구현하지 않은 세부 조건은 `proposals/m5-storage-reopen-verification.md` §7.5를 따른다.
+
+- **pnpm 복원과 누적 검증 환경(2026-09-02)**: stale node_modules metadata만으로 설치 성공을 판단하지 않는다. frozen lockfile/ignore-scripts/공급망 정책을 유지한 복원 뒤 하네스와 동일한 `CI=1`로 확인한 build·누적 `g5d-bounded-storage`가 `d4c3751`·`63ab510`에서 PASS했다. 격리 환경의 Electron runtime fetch 실패와 더 넓은 core/protocol lint 실패는 scoped 성공과 별도 기록한다. 자동 install/CI 정규화 차이는 관찰했지만 package 소실 원인을 전부 입증한 것은 아니므로 임의 설정 변경이나 정책 완화로 해결했다고 주장하지 않는다.
 
 - **R3A 내부 ledger/projection 경계(2026-09-02)**: compacted DB는 R2 closure와 R3A를 같은 세션/변경 감지 epoch에서 검증한다. pending의 누락 source index는 exact live predecessor에서 필요한 사실을 구성해 허용하지만 존재하는 index는 항상 결속하며 ready의 누락은 거부한다. latest source와 다섯 projection의 양방향 일치는 global derived-record/R3B 또는 startup/admission/R3C 완료 증거가 아니다. phase-local typed app-instance 1 MiB는 canonical JSON source 1 MiB와 동일한 크기 정의가 아니므로 용량 positive-control을 혼동하지 않는다.
 
