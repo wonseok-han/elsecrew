@@ -373,3 +373,5 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 - **검증**: §13 matrix와 긴 숫자의 실제 serde Number 종류/float bits 대조, 모든 escape/split·nested/overwritten duplicate·root-only overlay·양방향 missing/extra·늦은 mismatch, 각 phase의 취소/외부 commit/COMMIT 실패·무변경을 focused로 검사한다. 기존 1 MiB fresh/8 MiB retained+fresh/100 units와 COMMIT 뒤 진행 보존을 모든 재탐색·숫자 상태에 적용한다. 전체 suite는 파동 마감에 수행한다.
 
 객체 재탐색은 메모리를 제한하지만 최악의 총 작업량은 크다. 이 설계도 3초 ready 충족을 보장하지 않으며 측정 실패를 timeout 확대·입력 축소로 숨기지 않는다.
+
+§15 구현 `5ee072633ad26493327c690e46b0d2d48269bfc5`는 단일 독립 리뷰 PASS 뒤 통합했다. 최종 production S3 17개와 마지막 escape exact 1개, S1/S2/주소 대조 공유 회귀 23개·strict clippy/format/diff가 모두 exit 0다. 전체 18개를 단일 invocation으로 실행한 것은 아니다. 8,388,697-byte live/frozen source는 각각 132 calls, 1,048,579-byte 키는 22 calls, 101 members는 1,076 calls, 최종 retained+fresh 8,388,608 bytes 대조는 13 calls다. 이는 생성 fixture의 한 행 비교 실측이며 일반 append/provenance·제품 open·3초 ready 성공이 아니다. 원본 증거는 `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 있고 누적 QA 및 전역 재오픈/제품 연결은 남는다.
