@@ -9,6 +9,13 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Terra (M5 G6 Electron main security boundary regression)
+
+- **구현·범위**: `tests/m5-electron-security.test.mts`가 실제 `electron/main.ts`를 CommonJS로 transpile한 뒤 명시적인 Electron/sidecar fake VM에서 실행해 등록 IPC handler, BrowserWindow callback과 `app://` handler를 직접 호출한다. generic production test framework나 renderer/preload/protocol/Cargo/package 변경은 추가하지 않았다.
+- **경계 수리**: app asset은 exact `app://m5` authority(credential·port·query·fragment 없음), decoded relative path 및 current-platform과 Windows 절대경로 semantics를 요구하고 regular existing file만 `file:` fetch한다. malformed percent, encoded dot/slash/backslash, absolute/path escape, host/scheme spoof와 missing asset은 404이며 fetch하지 않는다. IPC/navigation도 credentialed URL을 exact allowed origin으로 보지 않는다.
+- **검증·한계**: bundled Node로 새 VM test와 기존 scaffold/bridge를 함께 실행해 47/47 PASS(exit 0), `node --experimental-strip-types --check electron/main.ts` 및 diff check exit 0을 확인했다. `tsconfig.node.json`은 `vite.config.ts`만 include해 main의 scoped project typecheck는 제공하지 않는다. 실제 Electron, package/make, Cargo, 전체 suite, 유료 CLI·사용자 데이터는 실행하지 않았다. 이는 main boundary 회귀 단위이지 G6 보안 QA 완료/`G6_READY`가 아니다.
+- **다음**: 기능 commit 뒤 exact diff 독립 리뷰와 root 통합이 남는다. 실제 Electron 런타임/packaged app의 sandbox/CSP/fuse/sidecar behavior와 Windows 실기기 증거는 별도 gate다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S2 canonical scanner 통합·S3 연속 진행)
 
 - **완료**: 정상 V8 oracle `7eeca1d`와 scanner `5c7758e` 묶음이 단일 독립 리뷰 PASS를 받아 M5에 통합된다. source 충돌 없이 양쪽 history 원문을 보존하며 현행 구조와 제안 §13–14의 완료선을 갱신한다. scanner는 source canonical byte 검증일 뿐 projection 의미·SQLite mirror·제품 실행 허가가 아니다.
@@ -294,6 +301,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.
 
 - **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
 
