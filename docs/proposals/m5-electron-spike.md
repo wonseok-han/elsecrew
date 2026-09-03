@@ -277,6 +277,8 @@ M5.0 합격 데모는 다음 한 흐름으로 고정한다.
 
 입력→paint와 event→paint는 renderer의 `performance.now()` 표식을 사용한다. 프로세스별 메모리와 전체 RSS를 함께 기록하며, 평균만으로 p95 실패를 숨기지 않는다.
 
+패키지 크기만 검사할 때는 `node scripts/m5-package-metrics.mjs --platform darwin --arch arm64 --package <unpacked-directory> --archive <zip-file>`을 사용한다. regular-file 길이와 symlink link-text 길이를 더하며 target을 따라가거나 디렉터리 할당량을 합치지 않는다. required asset은 nonempty regular file이고 그 중간 경로도 실제 디렉터리여야 한다. 결과는 로컬 개발 증거 JSON과 exit 0(PASS)/1(크기 FAIL)/2(NOT_READY)이며 ZIP 누락 또는 Windows의 미확정 기준은 PASS로 처리하지 않는다. 이 도구는 현재 commit으로의 빌드·ASAR/ZIP 전체 무결성·서명·실행 가능성·atomic filesystem snapshot이나 전체 G6 통과를 증명하지 않으며 `m5:test:package` 게이트를 대신하지 않는다.
+
 ## 11. 테스트와 실패 주입
 
 ### 11.1 자동 테스트

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (G6 패키지 크기 계측기 통합)
+
+- **완료 단위**: `1ecefff`와 검토 수리 `6f3fc7a`를 같은 reviewer가 검토해 두 차단 finding 해소와 전체 feature PASS를 확인했다. 이 기능만 M5 통합 브랜치에 병합하며 양쪽 history를 모두 보존했다. `m5-package-metrics.mjs`·회귀와 M5.0 명세 §10 사용법을 반영한다. 원격/main 변경은 없다.
+- **검증**: 기능 branch의 focused 10/10·syntax/diff exit 0 후 통합된 tree에서도 같은 Node focused 10/10 passed(262.207625ms, exit 0)를 확인했다. 검토 범위는 크기 계측과 고정 layout이며 전체 보안/성능/패키징 gate가 아니다. 원본 검증은 `/tmp/g6-package-metrics.6emKDi/validation.txt`다.
+- **실측·남음**: 새 build 없이 기존 out 폴더의 316,548,099 bytes(약 302 MiB)만 관측했다. ZIP가 없어 NOT_READY/exit 2이며 현재 commit의 산출물·서명·실행 증거로 재사용하지 않는다. 최신 package/make·압축 크기·실행/보안/성능·Windows와 전체 G6는 남는다. S2 Rust focused와 이후 저장/실제 provider 작업은 계속 진행한다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (잔여 1·2·3 착수·큰 기록 scanner 구현)
 
 - **사용자 범위**: 저장 수명/G5D 마감, 실제 Claude Code/Codex 연결, G6 보안·성능·패키징 순서로 진행 승인을 받았다. UI 재설계/온보딩/적용·되돌리기/역할 자동 왕복은 이번 1·2·3 범위에 추가하지 않는다. main 병합·push·유료 모델/사용자 인증·프로젝트 시험 승인은 별개다.
@@ -24,6 +30,18 @@
 - **현재 기술 기반의 잔여**: S2 이후 큰 기록 canonical/의미/SQLite mirror 호환 검증, historical catch-up·무결성/복구·startup/admission 연결, 압축/삭제 writer·자동 scheduling·storage status·용량 처리와 누적 QA가 G5D에 남는다. 실제 Claude Code/Codex CLI·인증·모델/권한 검증과 사용자 승인 macOS smoke, G6 보안/성능/패키징·Windows UI/fixture·종료/재시작 실증이 뒤따른다. Windows agent 실행은 별도 안전 게이트 전까지 비활성이다.
 - **전체 제품 방향의 잔여**: 현재 셸의 다중 프로젝트/채팅·역할 설정·Monaco 편집/diff는 유지하면서 승인 시안의 완성 UI·패널 drag/drop/크기 조절/배치 저장, 실제 프로젝트 기반 설치·로그인 안내의 Electron 온보딩, 원본 적용 전 복원 지점·전체 복사본 적용/되돌리기, 실제 역할 간 자동 왕복·후속 지시·알림/요약을 구현해야 한다. 이 중 온보딩 전체 이식·제품 수준 역할 왕복 등은 M5.0의 명시적 후속이며 현재 G5D 완료 조건에 추가하지 않는다.
 - **보류·검증**: 리브랜딩, 병렬 writer/다중 터미널·LSP/디버거·고급 Git/줄 단위 적용, 보존/물리 삭제 정책과 정식 서명/업데이트 인프라는 후속 결정으로 구분했다. 새 제품 구현·테스트·커밋·push는 하지 않았고 이 현황 기록만 추가한다. 즉시 다음 구현은 S2이며 기존 실패 19개 수리와 S1을 다시 미완료로 돌리지 않는다.
+
+### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size collector review fix)
+
+- **검토 수리**: `1ecefff` 독립 검토의 두 차단 finding만 보완했다. fixed executable·`app.asar`·staged sidecar는 regular file이면서 0 byte가 아니어야 하며, supplied package root 아래 fixed layout의 모든 intermediate component는 symlink가 아닌 real directory여야 한다. 따라서 symlink parent가 external assets를 가리키지만 walk에는 link-text만 남겨 작은 package가 거짓 `PASS`가 되는 경로를 `NOT_READY`로 막는다. supplied root 상위 ancestor의 symlink나 mode-bit 접근성은 metadata-size-only 범위에 추가하지 않았다.
+- **회귀·검증**: 세 required asset 각각의 zero-byte rejection과 `hello-agent.app`/`Contents`/`Resources` external-parent symlink rejection을 추가했다. bundled Node `v24.19.0`의 `node --check scripts/m5-package-metrics.mjs` 및 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`는 10/10 PASS(exit 0), `git diff --check` exit 0이다. package/make, Cargo, full suite와 실제 artifact 측정은 여전히 실행하지 않았다.
+- **다음**: 이 corrective commit은 original feature commit과 별도이며 root의 incremental reviewer 확인과 통합이 남는다. package-size-only/local-only 한계와 Windows measure-only `NOT_READY`는 변하지 않는다.
+
+### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size 측정 도구)
+
+- **구현·범위**: `scripts/m5-package-metrics.mjs`에 명시 `--platform`/`--arch`/`--package`/선택 `--archive` 입력의 재사용 가능한 pure collector와 JSON CLI를 추가했다. macOS arm64의 unpacked 350 MiB·compressed 200 MiB 잠정 한계를 exact byte 문자열로 비교하고 Windows x64/arm64는 값을 측정하되 threshold 없는 `NOT_READY`로 끝낸다. unpacked는 regular-file length + symlink link-text bytes이며 symlink를 따라가지 않는다. 필요한 executable·`app.asar`·staged sidecar layout, regular archive, `.zip` signature, bounded directory walk를 확인하고 metadata 변화가 관찰되면 `NOT_READY`로 invalidates한다.
+- **안전·한계**: supplied artifact는 읽기만 하며 app/provider/auth/build를 실행하지 않는다. report는 local developer-only package-size evidence이고 freshness, provenance, signing/notarization, launch/GUI/runtime, atomic snapshot 또는 `G6_READY`를 주장하지 않는다. archive가 없거나 asset/type/signature/readability가 불완전하면 `NOT_READY`, macOS의 완전한 측정만 `PASS`/`FAIL`을 낸다.
+- **검증·다음**: bundled Node `v24.19.0`으로 `node --check scripts/m5-package-metrics.mjs`와 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`를 실행해 8/8 PASS(exit 0)했다. sparse exact/below/over limits, missing/wrong assets, external symlink non-follow, Windows measure-only, ZIP signature, malformed CLI와 0/1/2 JSON exit를 덮었다. package/make, Cargo, full suite, real artifact measurement은 실행하지 않았다. 독립 리뷰 뒤 통합 담당이 proposal usage와 integration 여부를 결정한다.
 
 ### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
 
@@ -261,6 +279,8 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
+
+- **M5 G6 package-size 증거 도구(2026-09-03)**: `m5-package-metrics.mjs`는 macOS arm64의 unpacked ≤350 MiB와 compressed ≤200 MiB를 supplied directory/regular archive의 exact logical bytes로만 측정한다. symlink target은 세지거나 따라가지 않으며 Electron executable·`app.asar`·ASAR 밖 staged sidecar layout을 요구한다. Windows x64/arm64는 측정값을 내도 threshold 없는 `NOT_READY`다. filesystem walk는 atomic snapshot이 아니므로 metadata change를 발견하면 `NOT_READY`; report도 local-only이며 signing/freshness/runtime/G6 완료 증거가 아니다.
 
 - **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
 
