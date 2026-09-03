@@ -378,7 +378,7 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 
 ## 16. 다음 연결 기능과 승인된 분할 처리 정책 (2026-09-03)
 
-**상태: 분할 처리 정책은 2026-09-03 사용자 승인.** 기능 branch의 private 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 구현과 자체 검증을 진행했으며 독립 리뷰·통합 QA·제품 활성화는 아직 완료하지 않았다. 아래 승인된 정책과 구현 제안을 제품의 현재 동작으로 인용하지 않는다.
+**상태: 분할 처리 정책은 2026-09-03 사용자 승인, private 내부 기능은 구현·독립 리뷰·통합 QA 완료.** `5658480`에서 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage와 정상 production101을 포함한 workspace 검증이 통과했다. 제품 활성화·3초 준비 완료 기준은 미완료이며 아래 내부 동작을 제품 실행 허가로 인용하지 않는다.
 
 ### 16.1 승인된 정책과 보존 경계
 
@@ -402,3 +402,5 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 §10의 정상 실제 run snapshot·실제 생산 경로의 100개 초과 workspace snapshot·historical pending workspace 갱신이 전역 검증/catch-up/ready 재검증을 통과해야 한다. 늦은 corruption, pending/ready 차이, frozen envelope mismatch, 외부 commit, 취소/COMMIT 실패와 중간 member 재시작도 포함한다. 기존 오류 회귀는 그대로 유지한다. 고정 `INSERT…SELECT`로 큰 TEXT를 복사하더라도 SQLite 내부 시간/메모리가 bounded라고 주장하지 않는다. 이 기능 이후에도 recovery 사전 검증·첫 mutation 경주·실제 시작 시간·scheduler/compaction/status는 별도 미완료다.
 
 2026-09-03 자체 검증은 §10 actual-run 대조 1개와 전역 회귀 11개를 통과했다. 실제 생산 101 workspace의 첫 결합 테스트는 607 events/405 project sources/101 members 생성·대조 뒤 30,000-call 테스트 guard에 걸려 exit 101이었다. 동일 생산 DB의 보존본을 별도 임시 복사해 source/schema 무변경과 101 derived rows·ready를 172,685 calls/98.288초에 확인했으며, 이 별도 PASS로 원본 실패를 덮지 않는다. 정상 경로 guard는 실측에 근거한 400,000으로 수정했고 통합 QA에서 그 전체 테스트를 다시 실행한다. guard는 hang 방지용 테스트 제한이며 제품의 100 work/3초 정책을 바꾸지 않는다. **98.288초는 3초 목표를 만족하지 않으며 제품 시작 경로에도 연결하지 않았다.** 원본 실패·후속 수락·정적 검사와 남은 경계는 `/tmp/g5d-snapshot-catchup.TfEjLQ/manifest.md`에 구분한다.
+
+후속 통합 QA는 exact `5658480519a11db7eab4795112f1810221ebc801`의 정상 production101을 포함해 workspace Rust 529 passed/14 ignored/0 failed, exit 0으로 마감했다. 이전 guard 실패와 별도 replay는 역사적 증거로 유지하며 이번 fresh 정상 경로 PASS와 구분한다. 이는 단일 workspace 검증이지 13단계 하네스·새 release package·제품 admission 또는 전체 G5D/G6 READY가 아니다. 원본은 QA worktree의 `.artifacts/m5-qa/5658480519a11db7eab4795112f1810221ebc801-snapshot-wave/manifest.md`에 있다.

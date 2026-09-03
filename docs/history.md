@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 내부 기능·통합 QA 마감)
+
+- **완료**: 독립 리뷰 PASS의 기능 `5ad7162`를 통합한 `5658480519a11db7eab4795112f1810221ebc801`에서 단일 `cargo test --workspace --manifest-path Cargo.toml --locked`가 exit 0이다. Tauri 105/13 ignored·core 82·protocol 43·sidecar 289/1 ignored·stdio 10으로 총 **529 passed/14 ignored/0 failed**이며, 수정된 guard의 정상 production101 전체 경로도 통과했다. 동일 Rust subset은 반복하지 않았다.
+- **증거·경계**: QA worktree `.artifacts/m5-qa/5658480519a11db7eab4795112f1810221ebc801-snapshot-wave/manifest.md`와 raw log에 554초 실행·source clean·process 종료·Node/renderer 재사용 범위를 보존한다. 단일 workspace PASS이지 13단계 공식 하네스·새 release package·전체 G5D/G6 READY는 아니다. 기존 protocol strict lint 3개, 98.288초 대형 관측/3초 제품 목표 미충족, startup/복구/admission·compaction/scheduler/status·실제 provider·Windows는 후속이다.
+- **정리·다음**: 통합/clean/ignored 없음/담당 종료를 확인한 `.worktrees/g5d-snapshot-catchup` 하나를 비강제 제거했고 `codex/g5d-snapshot-catchup`의 `5ad7162`와 폴더 밖 원본 증거는 보존했다. 같은 branch로 worktree 재생성이 가능하다. child 21→20개, `.worktrees` 약 16 GiB이며 나머지는 기존 미커밋 변경·증거/사용 여부 정리 전까지 보존하고 다음 기능 착수 전에 재확인한다. 현행 구조·§16 상태를 정리하며 main 병합·push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 기능 통합·파동 QA 대기)
 
 - **통합**: 단일 독립 리뷰 PASS의 `5ad71629c18953c07520af23c47b82861c9900ab`을 M5에 반영한다. 충돌은 history뿐이며 양쪽 워크로그·고정 결정을 모두 보존했다. Rust 18파일과 제안서는 검토된 commit과 동일하며 현행 구조에 private 전역 복원 경계를 기록한다.
