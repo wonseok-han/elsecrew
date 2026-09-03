@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (S1–S3 파동 검증·macOS 패키징 마감)
+
+- **완료 증거**: `9af6de896c198ce20ca6a95fd4e2f12ec31b8572`에서 staging 7개, 실제 package/sidecar smoke, 재포장 없는 ZIP 생성·크기 측정이 exit 0다. unpacked 316,547,754 bytes와 ZIP 122,124,853 bytes는 macOS arm64 350/200 MiB 이내다. renderer build·editor-state 25개도 통과했고 숨긴 fixture Electron의 Monaco mount는 격리 실행에서 status-null 실패 뒤 실행 허용 환경의 exact 1개가 통과했다. 두 결과를 분리하며 원인을 단정하지 않는다.
+- **중복 제거·한계**: 변경 없는 `180cb885` source의 frontend 216개, Tauri 105/13 ignored, Rust core 82·protocol 42·sidecar 276/1 ignored·stdio 10개와 Electron/security 47개 PASS를 Git byte 동일성으로 재사용했다. 이후 Cargo subset을 반복하지 않았다. 이는 단계별 파동 검증이며 단일 13단계 하네스 PASS가 아니다. 원본 실패·수리·기준 SHA·직접/재사용 결과는 QA worktree `.artifacts/m5-qa/9af6de896c198ce20ca6a95fd4e2f12ec31b8572-s1-s3-wave/manifest.md`와 이전 SHA 폴더에 보존한다.
+- **현재 상태·다음**: 모든 QA handle은 종료했다. S1–S3 내부 큰 기록 검증과 이번 G6 경계/패키징 단위만 마감하며 G5D 전역 catch-up/startup/복구/admission·compaction/scheduler/status, 실제 provider, G6 전체 보안/성능/Windows/출시는 미완료다. 다음 진행에는 §16의 개별 큰 기록 분할 처리 정책과 실제 provider 로그인 상태 읽기 승인이 필요하다. 개발 의존성은 원래 lock/cache로 복구했고 main 병합·push·실제 인증/유료 모델/사용자 프로젝트 시험은 없다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (G6 staging 수리 통합 후보)
 
 - **반영**: `aa2ed7c`의 3파일 staging 수리는 exact-commit 단일 독립 리뷰 PASS를 받았다. Cargo artifact 경로 선택의 Node 회귀 7개·syntax/diff exit 0와 검토된 source 동일성을 확인하고 M5에 통합한다. 양쪽 history 원문은 모두 보존했다.
