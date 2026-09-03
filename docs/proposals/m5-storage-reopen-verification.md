@@ -327,3 +327,45 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 함수 경계에서 첫 indexed ID는 wrong/마지막은 right인 duplicate나 순서·escape만 다른 lock evidence는 R3A가 허용할 수 있어도 legacy mirror가 거부할 수 있다. 동일 ID duplicate와 원장에 일치하는 마지막 non-indexed 값은 전부 금지하면 기존 수락을 축소할 수 있다. 이 귀결은 source 및 primitive 실험 근거이며 **유효한 전체 V8 fixture의 Storage reopen 결과로 재현한 것은 아니다**.
 
 후속 계약은 정상 소형 V8 fixture에 indexed duplicate의 first/last·동일 duplicate·non-indexed duplicate·evidence 재정렬/escape/공백·sequence overlay·숫자 `1`/`1.0`·bool·null을 각각 적용해 legacy와 private R3A 결과를 분리 기록해야 한다. S2가 canonical scanner까지만 구현한다면 projection 의미와 mirror 동등성은 여전히 후속 의무다. §12 S1의 소유권·완료선은 확대하지 않는다. primitive probe와 exact 명령/종료 코드는 `.artifacts/m5-review/r3c-canonical-oracle-probe.{rs,log,json}`에 있으며 임시 in-memory DB만 사용했다.
+
+## 14. R3C-S2 canonical source scanner — 내부 구현 계약
+
+사용자가 2026-09-03 저장 마감→실제 provider→G6 진행을 승인했다. S2의 기준은 `69fad53`이며 §13의 실제 V8 수락 회귀와 아래 scanner를 한 기능 묶음으로 구현·단일 독립 리뷰한다. 제품 활성화나 전체 저장 검증 완료를 뜻하지 않는다.
+
+### 14.1 소유와 읽기 경계
+
+단일 Rust 담당은 기존 기능 worktree의 `codex/g5d-s2-oracles`에서 새 `storage/tests/reopen_oracles.rs`, `storage/reopen/canonical.rs`, `storage/tests/reopen_canonical.rs`, module 등록, `reopen/bytes.rs`의 공용 내부 읽기 추출, 기존 `agent_runtime.rs`의 `cfg(test)` snapshot 대조 assertion, 자기 history만 수정한다. 제안 문서와 통합 history는 root가 관리한다.
+
+- `bytes.rs`에 구체적인 내부 `BoundColumn`을 두어 고정 column/expected identity/최초 길이에 결속된 `bind`·`recheck`·`read_span`을 공유한다. SQL 식별자·외부 offset/resume token·범용 reader 확장은 없다. S1 API와 빈 TEXT·UTF-8/hash·취소 동작은 유지한다.
+- `CanonicalColumnSession::start(connection, column, expected)`와 `step(cancelled)`는 같은 mutable connection을 차용한다. 결과는 Pending/Cancelled 또는 byte 길이·SHA-256·usage를 포함한 canonical 완료 정보다. proof/capability·admission 권위는 아니다.
+- 매 호출 `progress.take()`→IMMEDIATE transaction→epoch/identity/길이 재검사→작업→취소 확인→COMMIT을 거친 뒤에만 전체 parser/comparison 진행을 보존한다. 오류·취소·외부 commit·COMMIT 실패 후와 완료 후에는 재사용을 거부한다.
+
+### 14.2 정확한 canonical 기준
+
+작은 test-only oracle는 `serde_json::from_slice::<Value>`→`canonical_json_v1`→원문 bytes exact equality다. Production은 전체 source/Value/출력 JSON 또는 전체 객체 키를 만들지 않는다.
+
+- 반복형 상태기계로 JSON 문법과 canonical escape·UTF-8을 검사한다. 공백·trailing input·불필요 Unicode/슬래시 escape·duplicate를 거부한다. 현재 serde 기본 parser와 동일하게 객체와 배열을 합친 동시 container 127개까지 허용하며 envelope도 포함한다.
+- 객체 frame에는 이전/현재 키의 source span만 둔다. 현재 키 검증 후 인접 키를 bounded 재조회하고 **decoded UTF-8 byte 순서의 엄격한 증가**를 확인한다. raw encoded 순서/hash 비교는 금지하며 긴 공통 prefix·빈 키·escape를 처리한다. 키 길이/member 수 상한은 추가하지 않는다.
+- 현재 잠긴 serde_json 1.0.150의 기본 Number(u64/i64/finite f64)와 zmij 1.0.23의 24바이트 출력 buffer를 근거로 숫자 후보/출력 scratch를 고정한다. 후보는 실제 Number parser와 serde serializer로 exact 대조한다. 24바이트 초과는 임의 입력 제한이 아니라 이 serializer의 canonical 출력 불가능 판정이며, projection 의미 parser에는 적용하지 않는다. feature/serializer 변경을 감지할 회귀와 긴 parse-valid/noncanonical 숫자 대조를 둔다.
+
+### 14.3 예산과 합격 조건
+
+- 호출당 main scan과 키 재조회 fresh bytes 합계 ≤1 MiB, retained identity/escape/UTF-8/숫자/comparison carry와 실제 metadata·fresh bytes 합계 ≤8 MiB, metadata/slice/비교 후보 work 합계 ≤100을 유지한다. 모든 재조회는 재청구한다. 사용하지 못한 fragment suffix는 버리고 다음 호출에서 다시 읽는다. hash에는 main cursor가 소비한 byte만 한 번 반영한다. Pending은 실제 cursor 또는 단계 진전이 있어야 하며 intrinsic 무진전은 terminal failure다.
+- focused `canonical_column`은 oracle corpus의 split 위치, 객체/배열 혼합 depth 127/128, 작은 키와 1 MiB/8 MiB 초과 공통-prefix 키의 정상/역순/동일, 정수/float 경계·subnormal·`1/1.0/1e0/-0/-0.0`와 긴 숫자를 검사한다. parse 성공과 canonical equality 성공을 구분한다.
+- 세 column 주소의 EOF·late malformed/UTF-8 오류·길이/hash·예산/진행을 검사한다. main 및 key-comparison 도중 취소·같은 길이 외부 변경·busy BEGIN·SQL read/COMMIT 실패의 terminal 폐기·autocommit·DB/schema/rows 무변경을 확인한다.
+- S1 `raw_column_bytes` 기존 12개와 §10 exact snapshot을 보존하고 S2 대조만 추가한다. scoped clippy/format/diff와 단일 독립 리뷰를 수행하고 전체 sidecar/stdio·누적 QA는 큰 기록 호환성 파동 마감에 수행한다. Rust jobs/threads ≤4, 무거운 실행은 컴퓨터당 하나다.
+
+S2는 canonical source만 다룬다. envelope 내부 escaped payload의 의미/digest/identity, 관대한 projection·SQLite mirror 동등성, historical catch-up, 쓰기 권위·startup/복구는 후속이다. R1–R3B·schema/의존성·기존 예산·제품 open/append/recovery·100-operation fence·Electron/UI는 변경하지 않는다. SQLite 내부 메모리나 3초 ready 충족을 주장하지 않으며 기존 예산/정책 변경 없이는 전진할 수 없을 때 중단·보고한다.
+
+## 15. S3 후속 구현 경계 — projection 한 행의 호환성
+
+S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행을 **같은 연결·epoch 아래** 대조하는 private `ProjectionCompatibilitySession`이다. 입력은 live/frozen payload column이며 envelope column은 받지 않는다. S2의 느슨한 완료 결과를 권위로 전달하지 않고 canonical→projection 전체 문법→의미 비교→exact-row SQLite mirror를 한 세션에 포함한다. locator는 expected source aggregate ID로 결정하며 source 주소와 별개의 closed `ProjectionBinding`만 추가한다. 전역 source 선택/coverage, app-instance typed 비교, frozen envelope·receipt/baseline/provenance, admission은 이 한 행 결과만으로 증명되지 않는다.
+
+- **소유**: 동일 Rust 담당의 새 `reopen/semantic.rs`·`tests/reopen_semantic.rs`, `bytes.rs`의 별도 projection binding, `canonical.rs`의 필요한 내부 primitive 공유, module 등록과 자기 history다. 기존 source allowlist·S1/S2 수락 의미·제품 정책·schema/의존성은 바꾸지 않는다. §14 구현·관련 검증을 먼저 고정하고 이어서 진행한다.
+- **문법 선행**: projection 전체를 재개 가능한 JSON cursor로 먼저 검사한다. 나중 duplicate가 덮는 값이나 root `last_event_sequence`도 serde가 먼저 parse하므로 malformed surrogate/overflow 숫자를 건너뛰지 않는다. 정상 Unicode escape/surrogate pair와 UTF-8·depth를 기존 parser와 같게 처리한다.
+- **의미 비교**: canonical source의 각 객체 키마다 projection member를 bounded 재탐색해 decoded key의 마지막 일치 value span을 선택한다. 역방향으로 projection의 모든 이름이 source에 있는지도 확인해 missing/extra를 거부한다. 전체 객체/키를 보관하지 않고 span·배열 cursor·비교 stack만 유지한다. 문자열은 decoded bytes, 숫자는 실제 Number equality, bool/null은 종류, 배열은 순서와 양쪽 EOF로 비교한다. root `last_event_sequence`만 source aggregate sequence/projection typed sequence의 virtual member로 대체하며 중첩된 동명 키는 제외하지 않는다.
+- **긴 숫자**: S2의 24바이트 canonical 출력 제한을 적용하지 않는다. 잠긴 default serde parser의 부호·문법·u64 significand·버린 정수 digit 지수·실제 반영한 소수 digit 지수·i32 exponent/overflow 상태를 조각 간 유지한다. 정수 overflow 뒤 버린 digit은 지수를 늘리고, 소수 overflow 뒤 digit은 읽기만 한다. 기존 saturating exponent와 overflow의 오류/signed-zero 분기를 재현한다. 종료 시 같은 significand/최종 지수의 최대 33바이트 내부 표현을 **실제 Number parser**에 넘겨 기존 f64 변환을 재사용한다. integer-only는 별도로 u64/i64/float와 `-0`를 보존한다. 자체 float 변환·whole-span `from_reader`·새 숫자 길이 cap은 금지한다. `float_roundtrip`/`arbitrary_precision` 등 feature 전제가 바뀌면 이 구현 근거부터 재검토한다.
+- **SQLite mirror**: 기존 table별 `IS NOT` predicate와 evidence `json(...)` 비교를 복사해 `WHERE typed_primary_key=?` 한 행의 Boolean으로 조회한다. first duplicate·SQLite 타입/escape/순서 의미를 그대로 유지하고 행 부재/SQL 오류/mismatch는 거부한다. JSON predicate로 행을 찾는 전체 검색이나 LIMIT 은폐는 하지 않는다. 실제 bind·metadata·반환값은 Rust 예산에 청구하되 SQLite 내부 JSON 평가의 시간/메모리/중간 취소 지연까지 bounded라고 주장하지 않는다.
+- **검증**: §13 matrix와 긴 숫자의 실제 serde Number 종류/float bits 대조, 모든 escape/split·nested/overwritten duplicate·root-only overlay·양방향 missing/extra·늦은 mismatch, 각 phase의 취소/외부 commit/COMMIT 실패·무변경을 focused로 검사한다. 기존 1 MiB fresh/8 MiB retained+fresh/100 units와 COMMIT 뒤 진행 보존을 모든 재탐색·숫자 상태에 적용한다. 전체 suite는 파동 마감에 수행한다.
+
+객체 재탐색은 메모리를 제한하지만 최악의 총 작업량은 크다. 이 설계도 3초 ready 충족을 보장하지 않으며 측정 실패를 timeout 확대·입력 축소로 숨기지 않는다.

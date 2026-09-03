@@ -9,6 +9,22 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (잔여 1·2·3 착수·큰 기록 scanner 구현)
+
+- **사용자 범위**: 저장 수명/G5D 마감, 실제 Claude Code/Codex 연결, G6 보안·성능·패키징 순서로 진행 승인을 받았다. UI 재설계/온보딩/적용·되돌리기/역할 자동 왕복은 이번 1·2·3 범위에 추가하지 않는다. main 병합·push·유료 모델/사용자 인증·프로젝트 시험 승인은 별개다.
+- **실행 중**: root `69fad53`에서 clean한 기존 S1 worktree를 새 `codex/g5d-s2-oracles` branch로 재사용했다. Rust 담당은 정상 V8의 legacy/SQLite/R3A 수락 기준 회귀를 `7eeca1d`로 고정했다(6 tests, 실제 V8 43사례 + 잘못된 pid 일반 write 거부 3사례, 16.45초, strict clippy/format/diff exit 0, `/tmp/g5d-s2-oracles.KAd88R/manifest.md`). 아직 통합/독립 리뷰 완료는 아니다. 읽기 전용 설계 담당의 결과를 기존 reopen 제안 §14에 반영했고 같은 구현자가 bounded canonical scanner를 이어서 작성한다. 관련 검증·단일 독립 리뷰로 묶고 누적 QA는 파동 마감에 수행한다.
+- **실제 provider 준비**: OpenAI 공식 non-interactive/app-server와 Claude 공식 headless/SDK 문서를 확인하고 로컬 version/help 및 Codex schema 생성만 수행했다. Codex 0.149.1·Claude 2.1.258은 fake manifest 버전과 다르며 fake handshake는 그대로 실제 wire로 사용할 수 없다. Codex thread-start 응답의 유효 model/cwd/approval/sandbox 필드, Claude init의 MCP/plugin 객체와 config-isolation 증거 차이를 제품 제안 §6.7에 기록했다. 인증·모델 요청은 없고 schema 생성 exit 0이다. PATH alias 생성 경고는 성공으로 감추지 않는다.
+- **G6 독립 준비**: 저장 코드와 충돌하지 않는 패키지 크기 계측기/회귀를 별도 Electron 담당에게 배정했다. clean한 기존 snapshot QA worktree를 `codex/g6-package-metrics`/`69fad53`으로 재사용하며 기존 detached QA commit은 보존했다. script/test와 자기 history만 소유하고 Node focused만 실행한다. 실제 빌드·앱 실행·G6 gate 광고는 하지 않으며 macOS arm64 350/200 MiB, Windows measure-only 경계를 유지한다. Rust 무거운 슬롯은 기존 담당 하나만 사용한다.
+- **중간 결과**: 패키지 계측 `1ecefff`는 focused 8개·syntax/diff를 통과했으나 단일 독립 리뷰가 빈 required asset 및 required path의 중간 symlink로 외부 asset을 허용하는 두 결함을 찾아 묶어 수정 중이다. 아직 통합하지 않았다. 기존 root `out` 폴더를 읽기 전용 계측한 316,548,099 bytes는 과거 산출물 관측일 뿐 현재 commit의 패키지 증거가 아니다. ZIP 부재로 전체 `NOT_READY`/exit 2이며 `.artifacts/m5-review/2026-09-03-package-metrics-existing.json`에 남긴다. S2는 첫 컴파일과 depth 127/128 회귀가 통과했고 나머지 focused 검증 중이다.
+- **남은 일**: S2 scanner/의미·mirror 동등성, historical catch-up·startup/admission/복구, lossless compaction·scheduler/status 및 누적 QA를 닫은 뒤 실제 provider를 활성화한다. G6의 기존 수치·Windows/실기기/서명 결정은 남으며 이번 연구를 G6 구현·통과로 표현하지 않는다. 기존 dirty history와 다른 worktree를 보존한다.
+
+### 2026-09-03 · by GPT-5.6-Sol (남은 M5 작업 목록 대조)
+
+- **기준·현재**: 사용자 요청으로 `69fad53`의 현행 구조·M5.0 명세·제품 제안·하네스 script·renderer를 읽기 전용 대조했다. G1~G5C의 fixture 기반 골격과 G5D 내부 R1/R2/R3A/R3B·S1 구현은 있으나, 제품 G5D와 G6 및 실제 provider 연결은 완료되지 않았다. 개발 검증 게이트 G1~G6와 제품 확장 마일스톤 M5.0~M5.5는 서로 다른 분류다.
+- **현재 기술 기반의 잔여**: S2 이후 큰 기록 canonical/의미/SQLite mirror 호환 검증, historical catch-up·무결성/복구·startup/admission 연결, 압축/삭제 writer·자동 scheduling·storage status·용량 처리와 누적 QA가 G5D에 남는다. 실제 Claude Code/Codex CLI·인증·모델/권한 검증과 사용자 승인 macOS smoke, G6 보안/성능/패키징·Windows UI/fixture·종료/재시작 실증이 뒤따른다. Windows agent 실행은 별도 안전 게이트 전까지 비활성이다.
+- **전체 제품 방향의 잔여**: 현재 셸의 다중 프로젝트/채팅·역할 설정·Monaco 편집/diff는 유지하면서 승인 시안의 완성 UI·패널 drag/drop/크기 조절/배치 저장, 실제 프로젝트 기반 설치·로그인 안내의 Electron 온보딩, 원본 적용 전 복원 지점·전체 복사본 적용/되돌리기, 실제 역할 간 자동 왕복·후속 지시·알림/요약을 구현해야 한다. 이 중 온보딩 전체 이식·제품 수준 역할 왕복 등은 M5.0의 명시적 후속이며 현재 G5D 완료 조건에 추가하지 않는다.
+- **보류·검증**: 리브랜딩, 병렬 writer/다중 터미널·LSP/디버거·고급 Git/줄 단위 적용, 보존/물리 삭제 정책과 정식 서명/업데이트 인프라는 후속 결정으로 구분했다. 새 제품 구현·테스트·커밋·push는 하지 않았고 이 현황 기록만 추가한다. 즉시 다음 구현은 S2이며 기존 실패 19개 수리와 S1을 다시 미완료로 돌리지 않는다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
 
 - **커밋·재개**: 사용자 요청으로 테스트 경로 수리·저부하 하네스·간소화 절차·기존 정리 기록 9파일을 `62abf69`로 커밋했다. 이어 보존된 S1을 기능 commit `00f54d9978145e2f1e969306e290d546d7d33c94`로 고정하고 단일 독립 리뷰(`g5d_reopen_review`)의 exact-commit PASS를 받아 `m5/coding-agent-ide`에 반영한다. 기존 19개 실패 수리는 이미 동일하게 들어 있어 중복 수정하지 않는다.
@@ -243,6 +259,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
 
 - **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
 

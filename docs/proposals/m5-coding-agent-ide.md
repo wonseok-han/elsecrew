@@ -418,6 +418,18 @@ reviewReady → discarded
 
 ---
 
+### 6.7 실제 provider 연결 준비 — 2026-09-03 조사, 제품 활성화 아님
+
+G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exact fake manifest/handshake를 실제 vendor wire로 그대로 취급하지 않는다. 로컬 `--version` 확인값은 Codex CLI `0.149.1`, Claude Code `2.1.258`로 현재 fixture의 `0.150.0`/`2.1.241`과 다르다. 버전 범위를 임의 확대하거나 fixture 모델명을 실제 사용 가능 모델로 표시하지 않는다.
+
+- **Codex 후보**: 공식 [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)의 `exec --json`은 JSONL 실행 이벤트를 제공한다. [app-server](https://learn.chatgpt.com/docs/app-server)는 초기화·모델 목록·thread/turn·interrupt를 제공한다. 로컬 0.149.1에서 모델 실행 없이 생성한 schema의 `ThreadStartResponse`에는 model/cwd/approvalPolicy/sandbox와 optional reasoningEffort가 있다. 따라서 app-server를 실행 전 유효 설정 대조 후보로 검토하되, 실제 응답·설정 격리·권한 적용/종료를 검증하기 전 startable로 올리지 않는다. 요청 argv나 schema의 존재만으로 실행 권위를 만들지 않는다.
+- **Claude 후보**: 공식 [headless](https://code.claude.com/docs/en/headless)는 `-p`/stream-json과 system/init·assistant/result 흐름을 설명한다. [SDKSystemMessage](https://code.claude.com/docs/en/agent-sdk/typescript#sdksystemmessage)의 MCP/plugin 항목은 객체이며 기존 fake의 문자열 배열과 다르다. 기존 fake 전용 `configIsolation: managedOnly`를 실제 wire가 제공한다고 가정하지 않는다. 로컬 help의 `--safe-mode`·`--restricted`·설정/MCP 제한 옵션을 버전별 isolation 후보로 검증해야 한다. `--bare`는 구독 OAuth를 읽지 않으므로 기존 로그인 재사용의 대체로 몰래 선택하지 않는다.
+- **공통 연결 순서**: 버전 고정 offline wire 회귀→provider별 실제 설정·모델/권한의 실행 전 검증→공개 메시지만 정규화→같은 snapshot/run 원장·취소/종료/복구 연결→사용자 승인 macOS smoke다. private reasoning/tool raw output·토큰·auth 원문은 채팅이나 durable public evidence에 넣지 않는다. vendor 결과 수신과 자손 소멸 관측을 구분하고 기존 poisoned/복구 계약을 유지한다.
+
+이번 확인은 공식 문서, 로컬 version/help, Codex schema 생성까지만 수행했다. 모델 요청·로그인/인증 조회·사용자 프로젝트 실행은 없었다. local schema는 `/tmp/hello-agent-provider-schema.3kFDdj`에 있으며 이 경로는 제품 의존성이 아니다. CLI 선택·인증 격리의 최종 구현 방식과 실제 smoke 승인은 남아 있다.
+
+---
+
 ## 7. 안전 경계
 
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.
