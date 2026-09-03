@@ -16,6 +16,7 @@ mod reopen_derived;
 mod reopen_oracles;
 mod reopen_projection;
 mod reopen_semantic;
+mod reopen_snapshot;
 
 type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
 type ChatSourceIndexRow = (i64, Option<String>, Option<i64>, Option<String>);

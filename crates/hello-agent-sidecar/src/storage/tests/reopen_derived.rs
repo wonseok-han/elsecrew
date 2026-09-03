@@ -19,7 +19,7 @@ const PHASES: [DerivedPhase; 7] = [
 fn literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
-fn workspace(project: &str, n: usize, bound: bool) -> Value {
+pub(super) fn workspace(project: &str, n: usize, bound: bool) -> Value {
     json!({"schemaVersion":1,"preparationId":format!("preparation_b_{n}"),"manifest":{"schemaVersion":1,"projectId":project,"canonicalGitRoot":"/fixtures/repository","worktreeId":format!("worktree_b_{n}"),"worktreePath":format!("/fixtures/workspaces/worktree_b_{n}"),"workspaceKind":"standaloneSnapshot","snapshotTransport":"gitBundle","sourceMutationPolicy":"forbidden","objectFormat":"sha1","baseCommit":"0123456789abcdef0123456789abcdef01234567","baseTree":"89abcdef0123456789abcdef0123456789abcdef","sourceIdentity":"source_repository_01","workspaceIdentity":format!("workspace_b_{n}"),"headMode":"detached","lifecycle":"active"},"bindingState":if bound {"bound"}else{"unbound"},"boundChatId":if bound {json!(format!("chat_b_{n}"))}else{Value::Null},"createdAt":STAMP,"updatedAt":STAMP})
 }
 fn chat_payload(chat: &str, project: &str, n: usize, durable: u64, message: Value) -> Value {
@@ -708,13 +708,13 @@ fn derived_records_unindexed_message_resolver_match_or_exhaustion_after_one_hund
     rejects(&mut connection, &path);
 }
 
-fn insert_workspace(connection: &Connection, record: &Value) {
+pub(super) fn insert_workspace(connection: &Connection, record: &Value) {
     let canonical = canonical_json_v1(record.clone()).unwrap();
     let manifest = &record["manifest"];
     connection.execute("INSERT INTO prepared_workspaces(preparation_id,project_id,worktree_id,workspace_identity,binding_state,bound_chat_id,canonical_record_json,record_digest,created_at,updated_at,materialized_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?9)",params![record["preparationId"].as_str().unwrap(),manifest["projectId"].as_str().unwrap(),manifest["worktreeId"].as_str().unwrap(),manifest["workspaceIdentity"].as_str().unwrap(),record["bindingState"].as_str().unwrap(),record["boundChatId"].as_str(),canonical,sha256_file_version_v1(canonical.as_bytes()),STAMP]).unwrap();
 }
 
-fn members_fixture(count: usize, ready: bool) -> (TempDir, PathBuf) {
+pub(super) fn members_fixture(count: usize, ready: bool) -> (TempDir, PathBuf) {
     let (root, path) = database();
     let mut storage = Storage::open(&path).unwrap();
     let members: Map<String, Value> = (0..count)

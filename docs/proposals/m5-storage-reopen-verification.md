@@ -378,7 +378,7 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 
 ## 16. 다음 연결 기능과 승인된 분할 처리 정책 (2026-09-03)
 
-**상태: 분할 처리 정책은 2026-09-03 사용자 승인, 구현·제품 활성화는 미완료.** 다음 기능은 helper 단위로 나누지 않고 큰 V8 snapshot의 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 재검증으로 묶는다. 아래 승인된 정책과 구현 제안을 현재 동작으로 인용하지 않는다.
+**상태: 분할 처리 정책은 2026-09-03 사용자 승인.** 기능 branch의 private 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 구현과 자체 검증을 진행했으며 독립 리뷰·통합 QA·제품 활성화는 아직 완료하지 않았다. 아래 승인된 정책과 구현 제안을 제품의 현재 동작으로 인용하지 않는다.
 
 ### 16.1 승인된 정책과 보존 경계
 
@@ -395,8 +395,10 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 - 같은 연결/epoch에서 매 step BEGIN IMMEDIATE → binding 재검사 → 제한된 derived DML/job 갱신 → COMMIT 성공 후 진행 게시를 지킨다. durable source cursor는 전체 source/member 처리 후에만 전진한다. 중간 member commit을 허용할 경우 재시작은 source 처음부터 재검증·멱등 처리하며 volatile offset을 durable 권위로 저장하지 않는다.
 - protocol의 순수 metadata/transition/prefix/메시지/workspace 판정을 동작 보존 helper로 공유한다. run마다 새 전체 schema 검증을 강요하거나 fake 축약 Value로 기존 검사를 통과시키지 않는다. prepared workspace manifest의 path에는 현재 byte cap이 없으므로 작은 member라는 가정을 추가하지 않는다.
 
-소유 후보는 기존 `storage/reopen*`, `storage_lifetime.rs`, 필요한 `storage.rs` 연결·대응 테스트이며 구체 전역 소비자가 필요하면 `reopen/snapshot.rs` 하나만 추가한다. protocol helper 추출은 별도 단일 소유자가 맡으며 정책/schema 변경과 동작 보존 추출을 구분한다.
+소유 후보는 기존 `storage/reopen*`, `storage_lifetime.rs`, 필요한 `storage.rs` 연결·대응 테스트이며 구체 전역 소비자를 `reopen/snapshot.rs`에 둔다. 구현 중 승인된 private `snapshot/workspace.rs`·`snapshot/catchup.rs` 분리는 uncapped member와 실제 DML 소비자에 한정하며 공용 framework를 만들지 않는다. protocol helper 추출은 별도 단일 소유자가 맡으며 정책/schema 변경과 동작 보존 추출을 구분한다.
 
 ### 16.3 완료 증거
 
 §10의 정상 실제 run snapshot·실제 생산 경로의 100개 초과 workspace snapshot·historical pending workspace 갱신이 전역 검증/catch-up/ready 재검증을 통과해야 한다. 늦은 corruption, pending/ready 차이, frozen envelope mismatch, 외부 commit, 취소/COMMIT 실패와 중간 member 재시작도 포함한다. 기존 오류 회귀는 그대로 유지한다. 고정 `INSERT…SELECT`로 큰 TEXT를 복사하더라도 SQLite 내부 시간/메모리가 bounded라고 주장하지 않는다. 이 기능 이후에도 recovery 사전 검증·첫 mutation 경주·실제 시작 시간·scheduler/compaction/status는 별도 미완료다.
+
+2026-09-03 자체 검증은 §10 actual-run 대조 1개와 전역 회귀 11개를 통과했다. 실제 생산 101 workspace의 첫 결합 테스트는 607 events/405 project sources/101 members 생성·대조 뒤 30,000-call 테스트 guard에 걸려 exit 101이었다. 동일 생산 DB의 보존본을 별도 임시 복사해 source/schema 무변경과 101 derived rows·ready를 172,685 calls/98.288초에 확인했으며, 이 별도 PASS로 원본 실패를 덮지 않는다. 정상 경로 guard는 실측에 근거한 400,000으로 수정했고 통합 QA에서 그 전체 테스트를 다시 실행한다. guard는 hang 방지용 테스트 제한이며 제품의 100 work/3초 정책을 바꾸지 않는다. **98.288초는 3초 목표를 만족하지 않으며 제품 시작 경로에도 연결하지 않았다.** 원본 실패·후속 수락·정적 검사와 남은 경계는 `/tmp/g5d-snapshot-catchup.TfEjLQ/manifest.md`에 구분한다.

@@ -1373,10 +1373,145 @@ impl Phase {
         }
     }
 }
-struct Progress {
+pub(super) struct Progress {
     source: CanonicalProgress,
     projection: ProjectionBinding,
     phase: Phase,
+}
+impl Progress {
+    /// Transaction-local state: the owner supplies the connection, common input
+    /// budget and cancellation predicate. No nested transaction or new epoch.
+    pub(super) fn bind(
+        connection: &Connection,
+        column: RawColumn,
+        expected: SourceIdentity,
+        usage: &mut ByteUsage,
+    ) -> Result<Self, SidecarError> {
+        if matches!(column, RawColumn::FrozenRecord) || expected.source_rowid <= 0 {
+            return Err(invalid());
+        }
+        let source = BoundColumn::bind(connection, column, expected, usage)?;
+        let projection = source.bind_projection(connection, usage)?;
+        if usage.encoded_bytes() >= INPUT_BYTES {
+            return Err(invalid());
+        }
+        Ok(Self {
+            source: CanonicalProgress::new(source),
+            projection,
+            phase: Phase::Canonical,
+        })
+    }
+
+    pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
+        self.source
+            .retained_bytes()?
+            .checked_add(self.projection.retained_bytes())
+            .and_then(|n| n.checked_add(self.phase.retained()))
+            .ok_or_else(invalid)
+    }
+
+    pub(super) fn scan(
+        &mut self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+        limit: usize,
+        cancelled: &mut impl FnMut() -> bool,
+    ) -> Result<Disposition, SidecarError> {
+        if cancelled() {
+            return Ok(Disposition::Cancelled);
+        }
+        // One global step may already have consumed work/bytes. Leave room for
+        // both two-query bindings and the mirror query; this is a yield, not
+        // evidence that an intrinsically invalid row was encountered.
+        let binding_bytes = self
+            .source
+            .bound()
+            .retained_bytes()?
+            .checked_add(self.projection.retained_bytes())
+            .ok_or_else(invalid)?;
+        if usage.work_units > 95
+            || usage
+                .encoded_bytes()
+                .checked_add(binding_bytes)
+                .is_none_or(|n| n > INPUT_BYTES)
+        {
+            if usage.work_units != 0 || usage.metadata_bytes != 0 || usage.fragment_bytes != 0 {
+                return Ok(Disposition::Pending);
+            }
+            return Err(invalid());
+        }
+        self.source.bound().recheck(connection, usage)?;
+        self.projection.recheck(connection, usage)?;
+        if matches!(self.phase, Phase::Canonical) {
+            let mut canonical = CanonicalUsage {
+                input: std::mem::take(usage),
+                ..CanonicalUsage::default()
+            };
+            let result = self
+                .source
+                .scan(connection, &mut canonical, limit, cancelled);
+            *usage = canonical.input;
+            match result? {
+                Disposition::Cancelled => return Ok(Disposition::Cancelled),
+                Disposition::Pending => {}
+                Disposition::Complete => {
+                    self.phase = Phase::Syntax(Syntax::new(Span {
+                        side: Side::Projection,
+                        start: 0,
+                        end: self.projection.byte_length,
+                    }))
+                }
+            }
+        } else if matches!(self.phase, Phase::Mirror) {
+            self.projection.mirror(connection, usage)?;
+            if cancelled() {
+                return Ok(Disposition::Cancelled);
+            }
+            return Ok(Disposition::Complete);
+        } else {
+            let mut input = Input {
+                connection,
+                source: self.source.bound(),
+                projection: &self.projection,
+                usage,
+                cache: [None, None],
+                progress: 0,
+                limit,
+                cancelled,
+                cancelled_seen: false,
+            };
+            let next = match &mut self.phase {
+                Phase::Syntax(syntax) => match syntax.run(&mut input)? {
+                    Poll::Pending => None,
+                    Poll::Ready(root) => Some(Phase::Meaning(Meaning::new(
+                        Span {
+                            side: Side::Source,
+                            start: 0,
+                            end: self.source.bound().byte_length,
+                        },
+                        root,
+                    ))),
+                },
+                Phase::Meaning(meaning) => match meaning.run(&mut input)? {
+                    Poll::Pending => None,
+                    Poll::Ready(()) => Some(Phase::Mirror),
+                },
+                _ => return Err(invalid()),
+            };
+            if input.cancelled_seen {
+                return Ok(Disposition::Cancelled);
+            }
+            if let Some(next) = next {
+                self.phase = next;
+            } else if input.progress == 0 {
+                return Err(invalid());
+            }
+        }
+        if cancelled() {
+            return Ok(Disposition::Cancelled);
+        }
+        Ok(Disposition::Pending)
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ProjectionCompatibilityStep {
@@ -1424,11 +1559,7 @@ impl<'connection> ProjectionCompatibilitySession<'connection> {
         let epoch = data_version(&tx)?;
         preflight_schema_and_control_rows(&tx)?;
         verify_schema_v8(&tx)?;
-        let source = BoundColumn::bind(&tx, column, expected, &mut usage)?;
-        let projection = source.bind_projection(&tx, &mut usage)?;
-        if usage.encoded_bytes() >= INPUT_BYTES {
-            return Err(invalid());
-        }
+        let progress = Progress::bind(&tx, column, expected, &mut usage)?;
         tx.commit().map_err(|_| invalid())?;
         if !connection.is_autocommit() {
             return Err(invalid());
@@ -1436,11 +1567,7 @@ impl<'connection> ProjectionCompatibilitySession<'connection> {
         Ok(Self {
             connection,
             epoch,
-            progress: Some(Progress {
-                source: CanonicalProgress::new(source),
-                projection,
-                phase: Phase::Canonical,
-            }),
+            progress: Some(progress),
             #[cfg(test)]
             last_usage: usage,
             #[cfg(test)]
@@ -1459,12 +1586,7 @@ impl<'connection> ProjectionCompatibilitySession<'connection> {
         if !self.connection.is_autocommit() {
             return Err(invalid());
         }
-        let retained = progress
-            .source
-            .retained_bytes()?
-            .checked_add(progress.projection.retained_bytes())
-            .and_then(|n| n.checked_add(progress.phase.retained()))
-            .ok_or_else(invalid)?;
+        let retained = progress.retained_bytes()?;
         if retained > INPUT_BYTES {
             return Err(invalid());
         }
@@ -1484,78 +1606,7 @@ impl<'connection> ProjectionCompatibilitySession<'connection> {
             if data_version(&tx)? != self.epoch {
                 return Err(invalid());
             }
-            if cancelled() {
-                return Ok(Disposition::Cancelled);
-            }
-            progress.source.bound().recheck(&tx, &mut usage)?;
-            progress.projection.recheck(&tx, &mut usage)?;
-            if matches!(progress.phase, Phase::Canonical) {
-                let mut canonical = CanonicalUsage {
-                    input: std::mem::take(&mut usage),
-                    ..CanonicalUsage::default()
-                };
-                let result = progress.source.scan(&tx, &mut canonical, limit, cancelled);
-                usage = canonical.input;
-                match result? {
-                    Disposition::Cancelled => return Ok(Disposition::Cancelled),
-                    Disposition::Pending => {}
-                    Disposition::Complete => {
-                        progress.phase = Phase::Syntax(Syntax::new(Span {
-                            side: Side::Projection,
-                            start: 0,
-                            end: progress.projection.byte_length,
-                        }))
-                    }
-                }
-            } else if matches!(progress.phase, Phase::Mirror) {
-                progress.projection.mirror(&tx, &mut usage)?;
-                if cancelled() {
-                    return Ok(Disposition::Cancelled);
-                }
-                return Ok(Disposition::Complete);
-            } else {
-                let mut input = Input {
-                    connection: &tx,
-                    source: progress.source.bound(),
-                    projection: &progress.projection,
-                    usage: &mut usage,
-                    cache: [None, None],
-                    progress: 0,
-                    limit,
-                    cancelled,
-                    cancelled_seen: false,
-                };
-                let next = match &mut progress.phase {
-                    Phase::Syntax(syntax) => match syntax.run(&mut input)? {
-                        Poll::Pending => None,
-                        Poll::Ready(root) => Some(Phase::Meaning(Meaning::new(
-                            Span {
-                                side: Side::Source,
-                                start: 0,
-                                end: progress.source.bound().byte_length,
-                            },
-                            root,
-                        ))),
-                    },
-                    Phase::Meaning(meaning) => match meaning.run(&mut input)? {
-                        Poll::Pending => None,
-                        Poll::Ready(()) => Some(Phase::Mirror),
-                    },
-                    _ => return Err(invalid()),
-                };
-                if input.cancelled_seen {
-                    return Ok(Disposition::Cancelled);
-                }
-                if let Some(next) = next {
-                    progress.phase = next;
-                } else if input.progress == 0 {
-                    return Err(invalid());
-                }
-            }
-            if cancelled() {
-                return Ok(Disposition::Cancelled);
-            }
-            Ok(Disposition::Pending)
+            progress.scan(&tx, &mut usage, limit, cancelled)
         })();
         #[cfg(test)]
         {
@@ -1638,4 +1689,45 @@ pub(crate) fn number_for_test(
         }
     }
     number.finish()
+}
+
+#[cfg(test)]
+pub(crate) fn transaction_local_for_test(
+    connection: &mut Connection,
+    expected: SourceIdentity,
+) -> Result<Vec<ByteUsage>, SidecarError> {
+    let retained = expected.bytes()? + expected.aggregate_id.len();
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| invalid())?;
+    let mut usage = ByteUsage {
+        retained_bytes: retained,
+        metadata_bytes: 19,
+        fragment_bytes: 23,
+        work_units: 2,
+    };
+    let mut progress = Progress::bind(&tx, RawColumn::EventPayload, expected, &mut usage)?;
+    tx.commit().map_err(|_| invalid())?;
+    let mut calls = vec![usage];
+    loop {
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| invalid())?;
+        let mut usage = ByteUsage {
+            retained_bytes: progress.retained_bytes()?,
+            metadata_bytes: 19,
+            fragment_bytes: 23,
+            work_units: 2,
+        };
+        let result = progress.scan(&tx, &mut usage, CHUNK, &mut || false)?;
+        tx.commit().map_err(|_| invalid())?;
+        calls.push(usage);
+        if matches!(result, Disposition::Complete) {
+            break;
+        }
+        if calls.len() > 100_000 {
+            return Err(invalid());
+        }
+    }
+    Ok(calls)
 }

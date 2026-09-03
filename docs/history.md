@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 기능 통합·파동 QA 대기)
+
+- **통합**: 단일 독립 리뷰 PASS의 `5ad71629c18953c07520af23c47b82861c9900ab`을 M5에 반영한다. 충돌은 history뿐이며 양쪽 워크로그·고정 결정을 모두 보존했다. Rust 18파일과 제안서는 검토된 commit과 동일하며 현행 구조에 private 전역 복원 경계를 기록한다.
+- **다음**: 최신 통합 SHA에서 workspace Rust/stdio와 수정 guard의 정상 production101을 한 번 검증한다. 변경 없는 Node/renderer는 기존 증거 재사용, 새 release package/실제 provider/Windows·3초 제품 ready는 이번 내부 파동의 완료로 주장하지 않는다. main 병합·push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 구현·생산 fixture 결합 중)
 
 - **분담**: 동일 base의 `codex/g5d-workspace-snapshot-fixture`(기존 `.worktrees/g5d-r3c-byte-transport` 재사용) 담당이 `chat/tests.rs`의 생산 101-workspace fixture를 작성했다. root가 수정 test와 담당 history를 주 구현 worktree에 patch로 보존 결합했으며 이후 해당 파일 소유권은 주 담당으로 돌아간다. 새 `storage/tests/reopen_snapshot.rs`의 정상/취소/외부 변경/READ·COMMIT 실패 회귀 5개와 mod 선언도 결합해 실행을 한곳에 모았다. 긴 경로·historical resolver와 파생 기록 저장은 private `reopen/snapshot/{workspace,catchup}.rs` 구체 소비자 분리까지 주 담당 소유로 허용한다.
@@ -16,6 +21,17 @@
 - **결합 검증 후속**: small/failure 5개·확장 8개와 §10 actual snapshot exact 1개는 주 담당의 focused 실행에서 통과했다. production101 결합 실행은 생성·607 events/405 project sources/101 members 대조 뒤 30,000-call 테스트 guard에 도달했다(341.77초/exit 101). root는 종료 전 SQLite read-only online backup을 `/tmp/g5d-production-evidence.NX3udd/production-observed.sqlite3`에 보존했다(607/405 sources·101 members·pending/derived0, quick_check ok). 원본 backup과 실패 로그를 유지하고 복사본에서 무진행/guard 가정을 구분하며 제품 예산은 바꾸지 않는다. 상세·hash는 같은 폴더 manifest다.
 - **기능 후보**: `5ad71629c18953c07520af23c47b82861c9900ab`의 21파일을 단일 독립 리뷰에 보냈다. 최종 maintenance 11·S3 19·protocol/golden 43과 actual-run exact 1의 focused 증거, sidecar strict/fmt/diff exit 0을 확인했다. protocol strict는 byte 동일한 기존 lint 3개로 exit 101이며 성공으로 접지 않는다. 정상 production101의 수정 guard 경로와 전체 Rust는 통합 QA에서 한 번 검증하며, 현재는 M5 미통합이다.
 - **독립 리뷰·통합 준비**: 동일 exact commit의 읽기 전용 독립 리뷰가 PASS(차단 finding 없음)다. source hash·동일 연결·실패/취소·budget·ready publication 경계를 대조했으며 정상 production101의 fresh 완주는 통합 QA로 남겼다. `docs/README.md`에 §16 위치를 추가하고 작업 기록을 보존한 뒤 통합한다. QA는 최신 통합 SHA의 workspace Rust를 한 번 실행하며 동일 Rust subset을 반복하지 않는다. byte 동일한 Node/renderer 증거만 재사용하고 새 sidecar의 release package PASS는 주장하지 않는다.
+
+### 2026-09-03 · by GPT-5.6-Sol (큰 snapshot 전역 검증·동일 연결 catch-up 자체 검증)
+
+- **구현**: §16의 private `ReopenMaintenanceSession`에 live/frozen source·envelope·5 projection/derived 양방향 coverage·historical workspace provenance·index 선행 catch-up·ready 전체 재검증을 연결했다. S3 transaction-local progress와 기존 protocol 순수 판정을 공유하고 uncapped member는 조각 처리한다. 매 BEGIN의 동일 epoch/binding·1 MiB fresh/8 MiB retained+fresh/100 work·COMMIT 뒤 진행 게시, 중간 member의 source 재시작/멱등성을 유지하며 V1 초과 거부·schema/제품 경로는 불변이다.
+- **검증·한계**: 전역 11개(실제 workspace INSERT 뒤 COMMIT 거부/취소 rollback 포함), §10 actual-run 1개, 최종 S3 19개·protocol unit/golden 43개, sidecar strict clippy·Rust 2021 fmt/diff는 exit 0다. protocol strict는 base와 동일한 기존 3 lint로 exit 101이며 범위 밖 수리는 하지 않았다. 생산 101 test는 607/405 sources·101 members 생성/대조 뒤 30,000-call guard로 341.77초/exit 101; 동일 생산 DB 보존본의 별도 재검증은 172,685 calls/98.288초에 source/schema 무변경·101 derived rows·ready PASS다. 원본 실패를 후속 PASS로 덮지 않으며 상세 명령/exit·SHA는 `/tmp/g5d-snapshot-catchup.TfEjLQ/manifest.md`다.
+- **다음**: Karpathy 지침에 따라 이 한 기능을 원자 commit으로 인계하고 단일 독립 리뷰·최신 통합 QA에서 실측 기반 400,000-call guard의 정상 생산101 전체 경로를 검증한다. 98.288초는 제품 3초 목표 미충족이며 startup/recovery/admission·compaction/scheduler/status·실제 provider·Windows/G6 전체는 미완료다. 기존 fixture 실패 기록과 root rollover 원문을 보존했고 main 병합·push·사용자 프로젝트/유료 provider 시험은 없다.
+
+### 2026-09-03 · by GPT-5.6-Sol (101 workspace 생산 fixture 분담·미검증 인계)
+
+- 기존 `Fixture::snapshot` 생산 경로 101회·manifest/파일·checkpoint/drop 뒤 read-only DB 대조 test를 추가했다. exact 1개는 314.70초/exit 101로 raw JSON에 typed sequence를 overlay하지 않은 테스트 비교에서 실패했다. 해당 비교만 기존 `load_json_projection`과 맞췄으며 production 변경은 없다.
+- 재실행·커밋은 root 지시로 보류한다. 원본 실패·정적 수리·607/405 source 기대의 코드 근거는 `/tmp/g5d-workspace-snapshot.eHFS3M/manifest.md`에 보존하고 fmt/diff exit 0이다. 새 전역 Ready 미검증이며 주 담당이 final session assertion과 결합해 한 번 검증한다. 추가로 `reopen_snapshot.rs`의 정상 ready/pending·late corruption·외부 commit·취소·READ/COMMIT 실패 회귀 5개와 mod 한 줄을 draft로 준비했으며 API 없는 base라 컴파일/실행하지 않았다.
 
 ### 2026-09-03 · by GPT-5.6-Sol (승인된 전역 snapshot 연결 착수)
 
@@ -186,6 +202,7 @@
 
 - **큰 snapshot 처리와 제품 준비 시간은 별개(2026-09-03)**: 개발 중인 새 전역 경로는 실제 생산 101-workspace DB의 보존 복사본(607 source rows)을 172,685 calls/약 98.288초에 복원·ready 재검증했다. 30,000-call 테스트 guard 실패는 무진행이 아니라 예상 횟수 부족이었다. 이 내부 정확성 관측은 3초 제품 ready 충족이나 startup/admission 활성화가 아니다. 제품 시간·1 MiB fresh/8 MiB retained+fresh/100 work·100 frozen-operation fence는 유지한다. 실패한 생성 테스트와 보존본 replay 성공을 구분하고 원본 DB는 `/tmp/g5d-production-evidence.NX3udd/manifest.md`의 SHA로 고정한다.
 
+- **큰 snapshot 새 경로와 제품 경계(2026-09-03)**: §16 private 동일 연결 전역 검증→index 선행 catch-up→ready coverage는 기존 V1/제품 verifier와 별도다. historical live/frozen workspace를 검증한 뒤 member별 COMMIT하며 durable partial offset 없이 source 처음부터 멱등 재시작한다. 실제 생성101의 보존 DB는 172,685 calls/98.288초에 완료해 3초 제품 목표를 충족하지 못한다. `ReadyVerified`를 제품 admission으로 인용하지 않으며 독립 리뷰·정상 생산 통합 QA와 제품 연결/성능은 별도다.
 - **pnpm worktree 설치 재사용 함정(2026-09-03)**: bundled pnpm 11.19.0은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 자동 install을 명시적으로 끄고(`pnpm_config_verify_deps_before_run=false`, 자식에도 전달) 실행한다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
 - **큰 source catch-up 정책 경계(2026-09-03 승인)**: 기존 protocol batch/workspace source 검사·exact `single_source_payload_oversize == "contractError"`·storage-v2/v3 golden은 개별 source 1 MiB 초과 거부를 유지한다. 사용자는 §16의 새 분할 경로에 한해 호출당 1 MiB fresh/8 MiB retained+fresh/100 work로 큰 기록을 처리하는 확장을 승인했다. 기존 V1 계약을 덮어쓰지 않고 새 경로·중단/재시작 회귀로 구분하며 제품 활성화는 구현·검증 뒤 별도 완료한다.
 - **G6 staging 경로(2026-09-03)**: Cargo target 위치는 환경·config·target triple에 따라 달라진다. staging은 build JSON의 해당 manifest/bin executable을 쓰며 root/target 또는 PATH fallback을 하지 않는다. 실제 artifact 없는 성공 exit만으로 이전 binary를 복사하지 않는다.

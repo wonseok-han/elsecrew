@@ -208,27 +208,53 @@ fn validate_worktree_manifest(value: &Value) -> Result<(), ProjectContractError>
             "snapshot compatibility worktreePath cannot be the original Git root or inside it",
         );
     }
-    if string(object.get("workspaceKind"), "workspaceKind")? != WORKSPACE_KIND_V1 {
+    validate_worktree_manifest_policy_fields_v1(&WorktreeManifestPolicyFieldsV1 {
+        workspace_kind: string(object.get("workspaceKind"), "workspaceKind")?,
+        snapshot_transport: string(object.get("snapshotTransport"), "snapshotTransport")?,
+        source_mutation_policy: string(object.get("sourceMutationPolicy"), "sourceMutationPolicy")?,
+        object_format: string(object.get("objectFormat"), "objectFormat")?,
+        base_commit: string(object.get("baseCommit"), "baseCommit")?,
+        base_tree: string(object.get("baseTree"), "baseTree")?,
+        head_mode: string(object.get("headMode"), "headMode")?,
+        lifecycle: string(object.get("lifecycle"), "lifecycle")?,
+    })
+}
+
+/// Fixed manifest policy fields. Identity, exact keys and both normalized path
+/// predicates are separate and are not implied by this pure policy check.
+pub struct WorktreeManifestPolicyFieldsV1<'a> {
+    pub workspace_kind: &'a str,
+    pub snapshot_transport: &'a str,
+    pub source_mutation_policy: &'a str,
+    pub object_format: &'a str,
+    pub base_commit: &'a str,
+    pub base_tree: &'a str,
+    pub head_mode: &'a str,
+    pub lifecycle: &'a str,
+}
+
+pub fn validate_worktree_manifest_policy_fields_v1(
+    fields: &WorktreeManifestPolicyFieldsV1<'_>,
+) -> Result<(), ProjectContractError> {
+    if fields.workspace_kind != WORKSPACE_KIND_V1 {
         return fail("workspace must be a standalone snapshot");
     }
-    if string(object.get("snapshotTransport"), "snapshotTransport")? != SNAPSHOT_TRANSPORT_V1 {
+    if fields.snapshot_transport != SNAPSHOT_TRANSPORT_V1 {
         return fail("snapshot transport must be gitBundle");
     }
-    if string(object.get("sourceMutationPolicy"), "sourceMutationPolicy")?
-        != SOURCE_MUTATION_POLICY_V1
-    {
+    if fields.source_mutation_policy != SOURCE_MUTATION_POLICY_V1 {
         return fail("source mutation is forbidden");
     }
-    let object_format = string(object.get("objectFormat"), "objectFormat")?;
+    let object_format = fields.object_format;
     if !matches!(object_format, "sha1" | "sha256") {
         return fail("unsupported Git object format");
     }
-    git_oid(object.get("baseCommit"), object_format, "baseCommit")?;
-    git_oid(object.get("baseTree"), object_format, "baseTree")?;
-    if string(object.get("headMode"), "headMode")? != WORKTREE_HEAD_MODE_V1 {
+    validate_git_oid_text(fields.base_commit, object_format, "baseCommit")?;
+    validate_git_oid_text(fields.base_tree, object_format, "baseTree")?;
+    if fields.head_mode != WORKTREE_HEAD_MODE_V1 {
         return fail("standalone snapshot must use detached HEAD");
     }
-    if !WORKTREE_LIFECYCLES_V1.contains(&string(object.get("lifecycle"), "lifecycle")?) {
+    if !WORKTREE_LIFECYCLES_V1.contains(&fields.lifecycle) {
         return fail("unknown snapshot lifecycle");
     }
     Ok(())
@@ -1257,6 +1283,15 @@ fn git_oid<'a>(
     name: &str,
 ) -> Result<&'a str, ProjectContractError> {
     let value = string(value, name)?;
+    validate_git_oid_text(value, object_format, name)?;
+    Ok(value)
+}
+
+fn validate_git_oid_text(
+    value: &str,
+    object_format: &str,
+    name: &str,
+) -> Result<(), ProjectContractError> {
     let length = match object_format {
         "sha1" => 40,
         "sha256" => 64,
@@ -1269,7 +1304,7 @@ fn git_oid<'a>(
     {
         return fail(format!("{name} length must match {object_format}"));
     }
-    Ok(value)
+    Ok(())
 }
 
 fn object<'a>(
@@ -1355,28 +1390,116 @@ fn absolute_path<'a>(
     name: &str,
 ) -> Result<&'a str, ProjectContractError> {
     let value = string(value, name)?;
-    let bytes = value.as_bytes();
-    let windows =
-        bytes.len() >= 3 && bytes[0].is_ascii_uppercase() && bytes[1] == b':' && bytes[2] == b'/';
-    if (!value.starts_with('/') && !windows)
-        || value == "/"
-        || value.contains('\\')
-        || value.ends_with('/')
-    {
-        return fail(format!("{name} must be a canonical absolute path"));
-    }
-    if value.split('/').enumerate().any(|(index, segment)| {
-        (index > 0 && segment.is_empty())
-            || matches!(segment, "." | "..")
-            || (windows
-                && index == 0
-                && !(segment.len() == 2
-                    && segment.as_bytes()[0].is_ascii_uppercase()
-                    && segment.as_bytes()[1] == b':'))
-    }) {
-        return fail(format!("{name} must be normalized"));
-    }
+    let mut scan = AbsolutePathScanV1::default();
+    scan.push(value.as_bytes())?;
+    scan.finish(name)?;
     Ok(value)
+}
+
+/// The existing manifest path predicate, evaluated over decoded UTF-8 fragments.
+/// No path, component or source document is retained and no filesystem is used.
+#[derive(Default)]
+pub struct AbsolutePathScanV1 {
+    prefix: [u8; 3],
+    length: u64,
+    last: u8,
+    segment_length: u64,
+    segment_dots: bool,
+    backslash: bool,
+    bad_segment: bool,
+    utf8: [u8; 3],
+    utf8_len: usize,
+}
+
+impl AbsolutePathScanV1 {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), ProjectContractError> {
+        let mut remaining = bytes;
+        if self.utf8_len > 0 {
+            let width = match self.utf8[0] {
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => return fail("manifest path must be UTF-8"),
+            };
+            let take = (width - self.utf8_len).min(remaining.len());
+            let mut scalar = [0_u8; 4];
+            scalar[..self.utf8_len].copy_from_slice(&self.utf8[..self.utf8_len]);
+            scalar[self.utf8_len..self.utf8_len + take].copy_from_slice(&remaining[..take]);
+            let size = self.utf8_len + take;
+            match std::str::from_utf8(&scalar[..size]) {
+                Ok(_) => self.utf8_len = 0,
+                Err(error) if error.error_len().is_none() && size < width => {
+                    self.utf8[..size].copy_from_slice(&scalar[..size]);
+                    self.utf8_len = size;
+                }
+                Err(_) => return fail("manifest path must be UTF-8"),
+            }
+            remaining = &remaining[take..];
+        }
+        if self.utf8_len == 0 {
+            match std::str::from_utf8(remaining) {
+                Ok(_) => {}
+                Err(error) if error.error_len().is_none() => {
+                    let tail = &remaining[error.valid_up_to()..];
+                    if tail.len() > 3 {
+                        return fail("manifest path must be UTF-8");
+                    }
+                    self.utf8[..tail.len()].copy_from_slice(tail);
+                    self.utf8_len = tail.len();
+                }
+                Err(_) => return fail("manifest path must be UTF-8"),
+            }
+        }
+        for byte in bytes {
+            if self.length < 3 {
+                self.prefix[self.length as usize] = *byte;
+            }
+            self.backslash |= *byte == b'\\';
+            if *byte == b'/' {
+                if self.length != 0
+                    && (self.segment_length == 0 || (self.segment_length <= 2 && self.segment_dots))
+                {
+                    self.bad_segment = true;
+                }
+                self.segment_length = 0;
+                self.segment_dots = true;
+            } else {
+                self.segment_dots =
+                    (self.segment_length == 0 || self.segment_dots) && *byte == b'.';
+                self.segment_length = self
+                    .segment_length
+                    .checked_add(1)
+                    .ok_or_else(|| ProjectContractError::new("manifest path length overflow"))?;
+            }
+            self.last = *byte;
+            self.length = self
+                .length
+                .checked_add(1)
+                .ok_or_else(|| ProjectContractError::new("manifest path length overflow"))?;
+        }
+        Ok(())
+    }
+
+    pub fn finish(&self, name: &str) -> Result<(), ProjectContractError> {
+        let windows = self.length >= 3
+            && self.prefix[0].is_ascii_uppercase()
+            && self.prefix[1] == b':'
+            && self.prefix[2] == b'/';
+        if self.utf8_len != 0 {
+            return fail("manifest path must be UTF-8");
+        }
+        if self.length == 0
+            || (self.prefix[0] != b'/' && !windows)
+            || self.last == b'/'
+            || self.backslash
+        {
+            return fail(format!("{name} must be a canonical absolute path"));
+        }
+        if self.bad_segment || (self.segment_length <= 2 && self.segment_dots) {
+            return fail(format!("{name} must be normalized"));
+        }
+        Ok(())
+    }
 }
 
 fn at_or_below(path: &str, root: &str) -> bool {

@@ -129,6 +129,179 @@ impl Fixture {
 }
 
 #[test]
+fn production_prepared_workspace_snapshot_persists_more_than_one_hundred_members() {
+    let mut fixture = Fixture::new();
+    let mut snapshots = Vec::new();
+    for index in 0..101 {
+        snapshots.push(fixture.snapshot(&format!("req_workspace_snapshot_{index}")));
+    }
+    let project = project_record(&fixture.storage, &fixture.project_id).unwrap();
+    let prepared = project["prepared_workspaces"].as_object().unwrap();
+    assert_eq!(prepared.len(), 101);
+    for snapshot in &snapshots {
+        let preparation_id = snapshot["preparationId"].as_str().unwrap();
+        let record = &prepared[preparation_id];
+        assert_eq!(record["preparationId"], preparation_id);
+        assert_eq!(record["bindingState"], "unbound");
+        assert_eq!(record["boundChatId"], Value::Null);
+        let mut manifest = snapshot.clone();
+        manifest.as_object_mut().unwrap().remove("preparationId");
+        assert_eq!(record["manifest"], manifest);
+        let workspace = std::path::Path::new(manifest["worktreePath"].as_str().unwrap());
+        assert_eq!(fs::read(workspace.join("src/value.txt")).unwrap(), b"base");
+    }
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+
+    let database = fixture._root.path().join("data/hello-agent.sqlite3");
+    fixture.storage.checkpoint().unwrap();
+    drop(fixture.chats);
+    drop(fixture.projects);
+    drop(fixture.storage);
+    // Keep the TempDir alive, but release every production handle before a
+    // read-only reopen, before the private maintenance path below can mutate
+    // derived records. Product startup readiness is a separate gate.
+    let before = fs::read(&database).unwrap();
+    let connection = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let (stored_json, sequence): (String, i64) = connection
+        .query_row(
+            "SELECT projection_json,last_event_sequence FROM projects WHERE project_id=?1",
+            [&fixture.project_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let mut stored: Value = serde_json::from_str(&stored_json).unwrap();
+    // Match load_json_projection: the sequence lives in its typed
+    // column, not in the stored projection JSON.
+    stored["last_event_sequence"] = Value::from(sequence);
+    assert!(
+        stored == Value::Object(project),
+        "persisted project with typed sequence differs from the live projection"
+    );
+    let (event_count, project_count, last_rowid): (i64, i64, i64) = connection
+        .query_row(
+            "SELECT count(*),sum(aggregate_type='project'),max(rowid) FROM events",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    // One project.open event, then prepare lock/project, pre-activation,
+    // active project/lock, and the G5 preparation-map upsert per snapshot.
+    assert_eq!(event_count, 1 + 6 * 101);
+    assert_eq!(project_count, 1 + 4 * 101);
+    assert_eq!(sequence, project_count);
+    let mut previous_rowid = 0;
+    let mut canonical_bytes = 0_i64;
+    let mut latest_source_bytes = 0_i64;
+    for (index, snapshot) in snapshots.iter().enumerate() {
+        let (rowid, source_sequence, payload, bytes): (i64, i64, String, i64) = connection
+            .query_row(
+                "SELECT rowid,aggregate_sequence,canonical_json_payload,\
+                 length(CAST(canonical_json_payload AS BLOB)) FROM events \
+                 WHERE operation_id=?1 AND aggregate_type='project' AND aggregate_id=?2",
+                rusqlite::params![
+                    format!("op_workspace_prepare_chat_req_workspace_snapshot_{index}"),
+                    fixture.project_id,
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(rowid > previous_rowid);
+        assert_eq!(source_sequence, 1 + 4 * (index as i64 + 1));
+        assert_eq!(bytes as usize, payload.len());
+        let source: Value = serde_json::from_str(&payload).unwrap();
+        let members = source["prepared_workspaces"].as_object().unwrap();
+        assert_eq!(members.len(), index + 1);
+        assert_eq!(
+            members[snapshot["preparationId"].as_str().unwrap()]["manifest"]["workspaceIdentity"],
+            snapshot["workspaceIdentity"]
+        );
+        previous_rowid = rowid;
+        canonical_bytes += bytes;
+        latest_source_bytes = bytes;
+    }
+    assert_eq!(previous_rowid, last_rowid);
+    drop(connection);
+    assert_eq!(fs::read(&database).unwrap(), before);
+    let mut connection = rusqlite::Connection::open(&database).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    let source_digest = |connection: &rusqlite::Connection| {
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        let mut statement=connection.prepare("SELECT rowid,event_id,operation_id,request_id,aggregate_type,aggregate_id,aggregate_sequence,event_type,payload_schema_version,canonical_json_payload,timestamp FROM events ORDER BY rowid").unwrap();
+        let columns = statement.column_count();
+        let mut rows = statement.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            for column in 0..columns {
+                use rusqlite::types::ValueRef;
+                match row.get_ref(column).unwrap() {
+                    ValueRef::Null => digest.update([0]),
+                    ValueRef::Integer(value) => {
+                        digest.update([1]);
+                        digest.update(value.to_be_bytes());
+                    }
+                    ValueRef::Text(value) => {
+                        digest.update([2]);
+                        digest.update((value.len() as u64).to_be_bytes());
+                        digest.update(value);
+                    }
+                    other => panic!("unexpected ledger type {other:?}"),
+                }
+            }
+        }
+        <[u8; 32]>::from(digest.finalize())
+    };
+    let source_before = source_digest(&connection);
+    use crate::storage::reopen::snapshot::{ReopenMaintenanceSession, ReopenMaintenanceStep};
+    let mut session = ReopenMaintenanceSession::start(&mut connection).unwrap();
+    let mut calls = 0;
+    loop {
+        calls += 1;
+        // The preserved exact 607-source fixture completed in 172,685 calls.
+        // This is a test hang guard, not a per-call or product startup budget.
+        assert!(calls < 400_000);
+        let (usage, done) = match session.step(&mut || false).unwrap() {
+            ReopenMaintenanceStep::Pending(usage) => (usage, false),
+            ReopenMaintenanceStep::ReadyVerified(usage) => (usage, true),
+            ReopenMaintenanceStep::Cancelled => panic!("unexpected cancellation"),
+        };
+        assert!(usage.fragment_bytes <= 1024 * 1024);
+        assert!(usage.encoded_bytes() <= 8 * 1024 * 1024);
+        assert!(usage.work_units <= 100);
+        if done {
+            break;
+        }
+    }
+    drop(session);
+    assert_eq!(source_digest(&connection), source_before);
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM prepared_workspaces", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        101
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT materialization_state FROM storage_schema_meta",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "ready"
+    );
+    eprintln!("production workspace global/catch-up/ready calls={calls} source_sha256={source_before:02x?}");
+    eprintln!("production workspaces=101 project_sources={project_count} total_sources={event_count} last_source_rowid={last_rowid} preparation_source_bytes={canonical_bytes} latest_source_bytes={latest_source_bytes}");
+}
+
+#[test]
 fn multiple_snapshots_and_chats_remain_explicitly_addressed() {
     let mut fixture = Fixture::new();
     let first = fixture.snapshot("req_snapshot_a");
