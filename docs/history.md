@@ -9,6 +9,33 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (기존 테스트 실패 19개 수리·운영 간소화 적용)
+
+- **원인·수리**: 사용자 승인으로 중단 전 실패한 `chat::tests` 19개를 조사했다. 공통 테스트 도우미가 worktree의 `target/debug`를 고정해 shared `CARGO_TARGET_DIR`에 있는 sidecar를 못 찾았으며, 대표 exact 테스트의 실행 파일 부재 panic으로 재현했다. 현재 Cargo test executable의 profile 디렉터리에서 동일 target/profile의 sidecar를 찾도록 `chat/tests.rs`만 수정하고 기본/shared/target-triple 경로 회귀를 추가했다. 기존 assertion·timeout·제품 코드·안전 정책을 완화하지 않았다.
+- **검증**: 같은 기능 worktree/shared target의 명시적 bin build exit 0 후 기존 실패와 이름 집합이 정확히 같은 **19 passed / 0 failed**(30.98초), locator 회귀 1 passed, Rust 2021 scoped format·diff check exit 0이다. 이전 binary로 수행한 19 passed(30.67초)는 중간 결과로 구분한다. 원본/최종 명령·로그·보존 대조는 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 있다. root 저부하 하네스 8/8 passed 증거는 `.artifacts/m5-review/2026-09-03-low-impact-harness.log`다. root/기능 `chat/tests.rs`는 byte-identical이며 동일 코드 검증을 통합에서 다시 반복하지 않았다.
+- **운영 결정**: 앞선 미확정 제안을 사용자가 승인해 `AGENTS.md`/`CLAUDE.md`, 오케스트레이션 절차 §1.1과 S1 계약의 검증 시점을 정리했다. 사용자 기능/명확한 결함 단위로 관련 검사→독립 리뷰 1명→파동 마감 누적 QA로 운영한다. 수정 후 영향받은 부분만 다시 확인하고 불필요한 helper별 문서 심의·전체 검사·다중 검토를 반복하지 않는다. 필수 안전 시나리오·차단 결함과 제품 활성화/출시 전 전체 검증은 그대로다.
+- **독립 검토**: 단일 읽기 전용 리뷰(`g5d_reopen_review`)가 root HEAD `56a0ead`의 지정 미커밋 운영 규칙·저부하 하네스·테스트 helper와 최종 로그를 묶어 검토해 차단 결함 없이 PASS했다. root/기능 helper SHA-256은 `d7dc80da7aef53de5d521ed04137b9d4f404a57282c2165606f858931c8de1de`로 동일하다. 검토자는 추가 전체 테스트를 실행하지 않았으며 S1의 다른 구현은 이 판정 범위가 아니다.
+- **저부하·범위·다음**: 모든 Rust 실행은 compile/test 최대 4 및 무거운 실행 하나로 제한했다. sandbox가 nice 변경을 거부한 사실은 로그에 남기며 CPU 절대 상한을 주장하지 않는다. 전체 sidecar/누적 QA는 이번 요청에서 실행하지 않았다. 기존 S1 코드 5파일과 원문 history는 기능 worktree에 그대로 보존했고 수리만 root에 반영했다. 이전 full exit 143은 전체 PASS로 바뀐 것이 아니며 다음은 S1 기능 단위 리뷰·후속 구현이다. 현재 변경은 미커밋이고 main 병합·push 없음.
+
+### 2026-09-03 · by GPT-5.6-Sol (작업 지연·검증 반복에 대한 사용자 피드백)
+
+- **피드백·분석**: 사용자가 전체 진행이 너무 오래 걸리고 중간 검사·수정이 많다고 지적했다. 최근 이력과 절차를 읽기 전용 대조했다. 작은 내부 단위마다 계약/문서 검토·기능 테스트·리뷰·통합 QA·최종 gate를 직렬 적용하고, 발견한 후속 문제마다 새 세부 단위를 추가한 운영이 지연을 키웠다는 판단이다. R3B의 누적 13단계는 26분 0.481초였으며 집중 검증과 전체 검증의 빈도·범위 구분이 필요하다. 전체 지연 중 각 원인의 비율은 측정하지 않았다.
+- **제안·미확정**: 사용자 기능 단위로 파동을 묶고 변경 관련 회귀/정적 검사→독립 리뷰 1회→파동 마감 누적 QA로 운영을 간소화한다. 수정 후에는 영향받은 검증만 다시 하고 차단 결함과 후속 개선을 분리하는 방안을 제안한다. 데이터 손상·권한·원본 보호·종료/복구의 실제 실패는 계속 차단한다. 이는 새 운영 제안이며 기존 안전 계약·역할·절차를 이번 대화에서 변경한 것은 아니다.
+- **검증·보존·다음**: 코드/설정 수정·테스트 재실행·commit/merge/push 없이 이 피드백 기록만 추가했다. 중단된 전체 테스트의 선행 19 FAILED는 원인 미확인 상태를 유지한다. 저부하 실행 제한과 기존 root/기능 worktree 변경을 보존하고, 재개 전 중복 검증 의무와 파동 완료 단위를 명시적으로 조정할 필요가 있다.
+
+### 2026-09-02 · by GPT-5.6-Sol (S1 구현 보존·저부하 요청에 따른 검증 중단)
+
+- **중단·보존**: 별도 사용자 대화의 즉시 중단/저부하 설정 요청을 받아 S1 담당에게 무거운 검증 재시작 금지를 전달했다. 기능 branch `codex/g5d-r3c-byte-transport`의 새 byte transport·회귀·기존 snapshot oracle 확장과 기능 history 6개 파일은 미커밋으로 보존한다. full QA 미통과이므로 기능 완료 커밋·통합·최종 gate는 하지 않았다.
+- **실제 검증 상태**: 새 focused 12 passed(최종 20.98초), §10 exact 1 passed(19.36초, 저장 source 41개/transport step 44회), strict clippy·scoped fmt는 통과했다. 전체 sidecar는 실제 exit 143으로 중단됐으며, 종료 전 `chat::tests` 19개의 FAILED 표시도 원본 로그에서 확인했다. 상세 panic/최종 요약이 없어 원인은 미확인이고 TERM이나 부하 때문이라고 단정하지 않는다. `/tmp/g5d-r3cs1-evidence.ympdQJ/`의 초기 실패·최종 focused·중단 full 로그를 모두 보존한다.
+- **설정·다음**: 별도 대화가 root에 반영한 저부하 하네스/회귀/절차와 기존 cleanup 문서를 확인했다. HEAD `56a0ead`와 제품 코드는 그대로이며 설정도 아직 미커밋이다. root에서 무거운 실행은 재시작하지 않았다. 재개 시 직접 Cargo도 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`, 컴퓨터당 무거운 실행 하나를 지키고 19개 선행 실패를 먼저 진단한 뒤 full 검증·exact commit 리뷰·통합 QA를 진행한다. 다른 worktree에는 설정이 자동 전파되지 않는다. main 병합·push 없음.
+
+### 2026-09-02 · by GPT-5 Codex (고부하 QA 중단·저부하 설정 즉시 반영)
+
+- **사용자 요청·중단**: 기다리지 말고 현재 고부하 작업을 중단한 뒤 설정을 바로 적용하라는 명시적 요청에 따라 CPU 1220.9%의 sidecar test PID 49354와 Cargo PID/PGID 49233을 확인하고 해당 그룹에 TERM을 보냈다. 두 PID 부재를 재확인했고 본 작업은 full Cargo exit 143 및 재시작 중지 인계를 확인했다. 중단된 QA는 PASS가 아니다.
+- **중단 증거 인계**: 본 작업은 S1 full log에 종료 전 `chat::tests FAILED` 19개가 보이지만 상세 panic/최종 요약 없이 exit 143으로 끊겨 원인 미확인이라고 보고했다. TERM 때문이라고 단정하지 않는다. `codex/g5d-r3c-byte-transport`의 6개 미커밋 파일과 `/tmp/g5d-r3cs1-evidence.ympdQJ` 로그는 보존한다. focused 12/§10/clippy/fmt PASS 보고와 전체 미완료·선행 FAILED를 구분하며, 사용자 작업 재개 시 저부하 조건에서 해당 실패 진단 후 필요한 전체 검증이 남는다.
+- **즉시 적용**: `codex/qa-low-impact`의 하네스/자원 helper/회귀 test와 절차 §13.1을 현재 `m5/coding-agent-ide` 워킹 트리에 반영했다. Rust compile/test 최대 4(기존 1~3 유지), best-effort 낮은 우선순위와 보고서 기록, 무거운 QA 컴퓨터당 하나 및 직접 Cargo에도 같은 제한을 적용한다. 기존 cleanup 문서 변경과 제품 구현은 보존했으며 commit/merge/push는 하지 않았다.
+- **검증·한계**: root focused 하네스 8/8 PASS(1775.979167ms), 두 스크립트 syntax 및 diff check PASS. 전체 QA/빌드 재실행 없이 반영했다. 현재 sandbox의 우선순위 변경 제한은 경고로 남기며 CPU 절대 상한이나 실제 부하 감소 측정을 주장하지 않는다. 다음 본 작업은 저부하 설정을 유지하고 중단된 검증의 미완료 상태와 별도 검토를 보존해야 한다.
+
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D S1 착수·S2 oracle 조사)
 
 - **착수·범위**: 검토된 계약 `c5be2c3`에서 `codex/g5d-r3c-byte-transport` 별도 worktree를 만들고 단일 Rust 담당에게 §12를 배정했다. 생성 전 root 포함 등록 20개/child 19개·약16 GiB를 확인했고 최근·dirty·사용 여부 불명 대상을 보존했다. S1 최종 gate 뒤 정리 여부를 다시 확인한다. 독립 QA 계획은 `.artifacts/m5-qa/g5d-r3cs1-plan.json`이다.
@@ -44,6 +71,12 @@
 - **진행·기준**: R3B 마감과 §10 계약을 `8551cba`로 커밋한 뒤 별도 `codex/g5d-r3c-snapshot-compat` / `.worktrees/g5d-r3c-snapshot-compat`에서 테스트 전용 구현을 시작했다. 통합 코드·안전 예산은 바꾸지 않는다.
 - **추가 발견**: 독립 설계 조사와 root source 대조에서 project의 `prepared_workspaces`가 준비마다 누적되고 abandoned도 보존되며 생산 helper에 전체 map 개수/byte 상한이 없음을 확인했다. 따라서 단일 run뿐 아니라 project snapshot의 정상 성장도 후속 호환 설계에서 다뤄야 한다. 실제 크기 경계 재현은 아직 없고 현재 §10 작업 범위를 늘리지 않았다. metadata validator의 넓은 허용 범위와 실제 생산/파일 reader 제한은 구분한다. 상세는 재오픈 제안서 §9에 기록했다.
 - **검증·다음**: 읽기 전용 코드 대조이며 추가 시험·provider·사용자 프로젝트는 실행하지 않았다. 먼저 §10의 run persistence/reopen 회귀를 완료하고 exact review·통합 QA한 뒤 다른 정상 snapshot의 재현 계약과 해결 정책을 정한다. main 병합·push는 하지 않았다.
+
+### 2026-09-02 · by GPT-5.6-Sol (완료 개발 worktree 정리 — 별도 대화)
+
+- **승인·실행**: 사용자의 명시적 정리 승인으로 초기 75개(약 70 GiB)의 개발 worktree를 조사했다. 조사 중 생성된 `g5d-r3c-snapshot-compat`는 보호해 총 76개 중 완료·clean·통합 확인된 58개만 `git worktree remove`로 제거했다. branch/commit은 전부 보존했으며 강제 제거·main 병합·push·진행 작업 중단은 하지 않았다.
+- **검증·보존**: 각 제거 직전 exact 등록 path/HEAD/branch, 전체 미커밋·미추적 목록, 실제 열린 process path와 ignored 파일을 재확인했다. ancestry 또는 history 이외 변경 patch의 exact 통합 동등성을 확인하고, 원본 history는 보존 branch에 남겼다. Forge spike 검증 기록 12개는 별도 tar로 보존하고 원본 byte와 대조했다. 58개 등록 해제·폴더 부재·branch SHA 보존 및 유지 대상 18개 존재를 확인했다. `.worktrees` 사용량은 약 16 GiB로 감소했다(약 54 GiB 감소, 파일시스템 전체 여유 공간 측정과는 구분).
+- **유지·증거·다음**: 미커밋/미추적 7개, 최근·신규 작업 5개, 통합 동등성 미확인 6개는 남겼다. 대상·보류 사유·보존 SHA·raw 제거 결과·backup은 `.artifacts/worktree-cleanup/2026-09-02/`에 있다. 재생성은 보존 branch로 `git worktree add`하고 빌드 산출물은 다시 만든다. `procedures/multi-agent-orchestration.md` §5.1에 통합·최종 QA/gate 직후 정리 점검을 명시했다. 이 별도 대화는 메인 구현을 계속하거나 중단시키지 않았고, 정리 절차·이 기록은 미커밋으로 인계한다.
 
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C snapshot 호환성 시험 계약)
 
@@ -182,9 +215,16 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **간소화 운영 확정(2026-09-03 사용자 승인)**: 기능/결함 단위의 관련 검사와 독립 리뷰 1명을 기본으로 하고 누적 QA·최종 gate는 최신 통합 파동 마감에 수행한다. 수정 후에는 영향 범위만 재검증하며 신규 공용 계약 없는 helper마다 별도 설계 심의·전체 검증을 요구하지 않는다. 기존 계약의 중복 빈도/담당 배치만 대체하며 필수 안전 시나리오와 제품 활성화/출시 게이트는 유지한다. 상세는 `procedures/multi-agent-orchestration.md` §1.1이다.
+- **Cargo 테스트 실행 파일 경로(2026-09-03)**: shared `CARGO_TARGET_DIR`에서 repo-relative `target/debug` 가정은 process-gate 19개를 실행 전 실패시켰다. test executable의 `<target>/<profile>/deps` 부모에서 sidecar를 찾고 `--lib` 테스트 전 같은 worktree/target/profile의 명시적 bin build로 freshness를 확인한다. 경로 수리 뒤 원래 실패 19개와 추가 locator 회귀가 통과했다. 이는 S1·전체 G5D 완료와 구분한다.
+
+- **QA 저부하 즉시 적용(2026-09-02 사용자 승인)**: 고부하 Cargo/sidecar 테스트를 사용자 요청으로 종료했고 다음 실행은 하네스 및 직접 Cargo 모두 compile/test 병렬 최대 4로 제한한다. 무거운 검증은 컴퓨터당 하나만 실행한다. focused 회귀와 통합 마감 누적 gate를 구분하되 필수 안전 검증은 생략하지 않는다. 낮은 우선순위는 best-effort이며 CPU 절대 상한은 아니다. 자세한 실행 규칙은 `procedures/multi-agent-orchestration.md` §13.1이다.
+
 - **S2 oracle 분리(2026-09-02)**: legacy product는 canonical source/replay, serde projection 의미 비교, SQLite mirror를 모두 요구한다. R3A는 parsed final map/evidence를 비교해 첫 duplicate를 보는 SQLite 추출과 evidence `json(...)` 표현 비교를 그대로 재현하지 않는다. primitive 차이와 source 대조는 했지만 정상 V8 fixture의 전체 acceptance 재현은 아직이다. 기존 제품 검사는 유지하며 §13의 세 oracle·후속 회귀를 닫기 전 R3A 단독 결과를 제품 동등성으로 인용하지 않는다.
 
 - **R3C 큰 기록 처리 순서(2026-09-02)**: V8 byte transport → canonical oracle 동등성 → projection/파생 의미 비교 → 동일 연결의 쓰기 권위 순서로 나눈다. §12 S1은 fragment 1 MiB/retained+fresh 8 MiB 내 UTF-8·길이·해시 정보만 제공하며 기존 verifier·제품 fence·입력 정책을 바꾸지 않는다. historical workspace catch-up은 source sequence 없는 row 때문에 단순 latest-only 조건 변경으로 해결하지 않는다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §11–12다.
+
+- **개발 worktree 정리(2026-09-02)**: 완료 기능의 통합·최종 QA/gate 직후, 다음 worktree 생성 전에 정리를 점검한다. branch SHA/통합 동등성·dirty/untracked/ignored 증거·사용 process를 확인하고 필요한 증거를 외부 보존한 뒤 승인 범위에서 비강제 제거한다. branch/commit은 보존하며 진행·미확인 작업은 유지한다. 최초 정리에서 58개를 제거하고 18개를 유지했다. 상세는 `procedures/multi-agent-orchestration.md` §5.1과 `.artifacts/worktree-cleanup/2026-09-02/approved-plan.json`이다.
 
 - **R3C snapshot 호환성 재현(2026-09-02, 테스트 전용)**: 정상 public text/event/누적 snapshot 예산을 통과한 ASCII 16 × 64 KiB 및 역슬래시 9 × 64 KiB의 일반 run+chat atomic writes와 Storage reopen은 성공하지만, 저장된 run canonical BLOB이 1 MiB를 초과해 전체 private R3B ledger 검증은 거부한다. 작은 16-event 대조군은 전체 완료한다. exact test `agent_runtime::budget_tests::budget_valid_actual_run_snapshot_exceeds_reopen_primary`가 양 경로와 exact source row byte preflight/무변경을 구분해 고정한다. provider-less pre-G5C readable shape일 뿐 현재 provider 검증이나 제품 admission 증거가 아니며, §9/§10의 저장 표현·검증 단위·기존 기록 호환 정책을 정하기 전 제품 연결/예산 변경은 하지 않는다.
 

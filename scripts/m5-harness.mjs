@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { lowerQaPriority, qaEnvironment } from "./m5-qa-resources.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
@@ -128,6 +129,7 @@ const selectedGates = gates.slice(0, gateIndex + 1);
 const requiredScripts = selectedGates.flatMap((gate) => gate.scripts);
 const missingScripts = requiredScripts.filter((script) => !packageScripts[script]);
 const startedAt = new Date().toISOString();
+const childEnv = qaEnvironment();
 const report = {
   schemaVersion: 1,
   gate: options.gate,
@@ -140,6 +142,12 @@ const report = {
   dirtyBefore: Boolean(gitValue(["status", "--porcelain"])),
   platform: process.platform,
   node: process.version,
+  resources: {
+    profile: "low-impact",
+    cargoBuildJobs: Number(childEnv.CARGO_BUILD_JOBS),
+    rustTestThreads: Number(childEnv.RUST_TEST_THREADS),
+    priority: null,
+  },
   missingScripts,
   results: [],
 };
@@ -152,6 +160,12 @@ if (missingScripts.length > 0) {
   if (path) console.error(`report: ${path}`);
   process.exit(2);
 }
+
+report.resources.priority = lowerQaPriority();
+if (report.resources.priority.error) {
+  console.warn(`[WARN] QA priority: ${report.resources.priority.error}; worker limits still apply.`);
+}
+console.log(`[QA] low-impact: cargo jobs=${childEnv.CARGO_BUILD_JOBS}, Rust test threads=${childEnv.RUST_TEST_THREADS}, priority=${report.resources.priority.actual ?? "unavailable"}`);
 
 const commands = [
   ...baselineCommands,
@@ -169,7 +183,7 @@ for (const command of commands) {
   const result = spawnSync(command.command, command.args, {
     cwd: repoRoot,
     encoding: "utf8",
-    env: { ...process.env, CI: "1", NO_COLOR: "1", TZ: "UTC" },
+    env: childEnv,
     maxBuffer: 20 * 1024 * 1024,
     timeout: 20 * 60 * 1000,
   });

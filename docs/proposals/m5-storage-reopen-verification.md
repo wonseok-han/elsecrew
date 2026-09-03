@@ -310,7 +310,7 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 2. rowid live payload와 `WITHOUT ROWID` frozen payload/envelope를 모두 검사한다. 빈/1바이트/exact 1 MiB/+1/8 MiB 초과 source, UTF-8 문자가 fragment 경계에서 나뉘는 경우와 invalid/truncated UTF-8을 포함한다. 모든 step의 실제 읽기/retained 예산과 진행을 확인한다.
 3. identity mismatch·행 부재·같은 길이 외부 변경·후반부 변경, entry/mid/precommit 취소, 실제 SQL read/COMMIT 거부·busy BEGIN을 검사한다. 모든 실패 뒤 재사용 불가·autocommit·schema/rows/DB bytes 무변경을 확인한다. 외부 변경 fixture의 무변경 기준은 허용된 외부 commit **이후** snapshot이다.
 4. allowlisted query plan의 exact primary/unique index lookup과 byte slice를 확인한다. 전체 JSON decode/숨은 전체-history collection이 새 production 경로에 없음을 source review한다. 고정 metadata의 exact/초과 예산도 검사한다.
-5. 새 focused prefix `raw_column_bytes`, §10 exact test 1개, full sidecar/stdio, scoped strict clippy·Rust 2021 format·diff, exact-commit 독립 코드 리뷰와 최신 통합 누적 `g5d-bounded-storage` QA를 통과한다. command/actual exit/raw log를 남기고 제품 활성화·R3C 완료를 주장하지 않는다.
+5. 개발 중에는 새 focused prefix `raw_column_bytes`, §10 exact test 1개, scoped strict clippy·Rust 2021 format·diff와 기능 단위 독립 코드 리뷰를 수행한다. full sidecar/stdio는 최신 통합 `g5d-bounded-storage` 누적 QA에 포함해 파동 마감에 검사하고 같은 내용을 별도로 반복하지 않는다(2026-09-03 간소화 운영). 이미 발견된 실패는 관련 검사로 먼저 닫는다. command/actual exit/raw log를 남기고 제품 활성화·R3C 완료를 주장하지 않는다.
 
 소유 밖 수정, 기존 validator로 whole source를 넘겨야 하는 설계, 예산·schema·제품 정책 변경 필요가 드러나면 중단하고 보고한다. 실제 provider·사용자 DB/프로젝트·Windows·파괴적 시험·main 병합·push는 하지 않는다. 다음 S2는 canonical scanner와 projection 의미 비교의 기존 oracle 대비 동등성 계약이며, S1 완료만으로 이어지는 의미 검증을 생략하지 않는다.
 
