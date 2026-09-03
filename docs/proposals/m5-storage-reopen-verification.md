@@ -314,6 +314,8 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 
 소유 밖 수정, 기존 validator로 whole source를 넘겨야 하는 설계, 예산·schema·제품 정책 변경 필요가 드러나면 중단하고 보고한다. 실제 provider·사용자 DB/프로젝트·Windows·파괴적 시험·main 병합·push는 하지 않는다. 다음 S2는 canonical scanner와 projection 의미 비교의 기존 oracle 대비 동등성 계약이며, S1 완료만으로 이어지는 의미 검증을 생략하지 않는다.
 
+§12 S1 구현은 기능 `00f54d9978145e2f1e969306e290d546d7d33c94`의 관련 회귀 12개·§10 대조 1개·정적 검사와 단일 독립 리뷰를 통과해 통합했다. 변경 없는 소스의 검증을 재사용했으며 누적 QA는 큰 기록 호환성 묶음 마감에 남는다. UTF-8/길이/SHA 완료를 canonical/의미 검증이나 제품 admission으로 해석하지 않는다. 현행 구조·실행 이력은 `../architecture.md`와 `../history.md`가 기준이다.
+
 ## 13. S2 전 oracle 조사 — 구현·제품 변경 계약 아님
 
 `c5be2c3`의 source 대조와 현재 protocol/serde/SQLite를 연결한 임시 primitive probe에서 **R3A 자체를 legacy 제품의 전체 수락 기준으로 사용할 수 없음**을 확인했다. `storage.rs::verify_projection_replay`는 원장 replay와 serde projection map 비교 외에 `verify_projection_columns`의 SQLite mirror 검사를 요구한다. 반면 `reopen/projection.rs::verify_projection`은 serde가 구성한 최종 map과 parsed evidence를 비교한다. 현재 제품은 legacy 검사를 계속 사용하므로 이를 곧 제품 검증 우회라고 표현하지 않는다.

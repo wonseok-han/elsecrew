@@ -9,6 +9,7 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+mod reopen_bytes;
 mod reopen_closure;
 mod reopen_derived;
 mod reopen_projection;

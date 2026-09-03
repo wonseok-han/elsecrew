@@ -9,6 +9,26 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
+
+- **커밋·재개**: 사용자 요청으로 테스트 경로 수리·저부하 하네스·간소화 절차·기존 정리 기록 9파일을 `62abf69`로 커밋했다. 이어 보존된 S1을 기능 commit `00f54d9978145e2f1e969306e290d546d7d33c94`로 고정하고 단일 독립 리뷰(`g5d_reopen_review`)의 exact-commit PASS를 받아 `m5/coding-agent-ide`에 반영한다. 기존 19개 실패 수리는 이미 동일하게 들어 있어 중복 수정하지 않는다.
+- **검증·통합**: 중단 당시 S1 code 5파일과 최종 feature source의 byte 동일성을 확인해 focused 12 passed·§10 exact 1 passed·strict clippy/format을 재사용했다. reviewer는 고정 SQL 주소·10필드 identity·동일 연결/epoch·호출당 예산·COMMIT 뒤 진행 보존·오류/취소의 terminal 폐기를 확인했다. source 충돌은 없고 history 추가 충돌은 양쪽 모든 엔트리·고정 결정을 보존해 해결했다. 통합 source 동일성·diff·문서 동기화를 확인하며 새 Cargo/전체 테스트를 반복하지 않는다. 증거는 `/tmp/g5d-r3cs1-evidence.ympdQJ/manifest.md`와 `resume-source-identity.log`다.
+- **현재 완료선·다음**: S1의 private byte transport 구현·관련 검증·독립 리뷰·통합까지다. 이전 중단된 full exit 143과 누적 QA 대기는 그대로이며 JSON canonical/의미 검증, legacy SQLite mirror 동등성, catch-up/startup/admission 및 전체 R3C/G5D 완료는 아니다. 다음 구현은 §13의 기존 V8 수락 기준 회귀를 바탕으로 S2 canonical/의미 검증을 진행한다. 큰 기록 호환성 묶음의 누적 QA는 마감 시 수행한다. 기존 안전 예산·제품 100-operation fence는 유지한다.
+- **보존·운영**: 새 worktree를 만들지 않고 기존 기능 worktree를 재사용했다. 해당 worktree는 clean이지만 후속 작업과 파동 QA 전이라 이번에는 제거하지 않으며 다음 파동 마감에 정리를 점검한다. 모든 변경은 로컬 M5 범위이며 main 병합·push·실제 provider/사용자 프로젝트 시험 없음.
+
+### 2026-09-03 · by GPT-5.6-Sol (M5 G5D R3C-S1 기능 커밋 재개)
+
+- **재개·범위**: 사용자가 현재 변경 커밋과 계속 진행을 승인하여 §12 S1의 code 5파일·기능 history와 이미 root `62abf69`에 반영된 동일한 `chat/tests.rs` 수리를 7파일 기능 단위로 고정한다. 이번 재개에는 Rust 수정이 없으며 새 byte transport는 private UTF-8/길이/SHA 정보만 제공한다. schema·기존 예산·R1–R3B·제품 open/append/recovery/admission·100-operation fence는 불변이다.
+- **동일성·관련 검증 완료**: S1 tracked 3파일의 diff와 새 2파일 전체를 중단 당시 외부 보존본과 대조해 모두 byte-for-byte 동일함을 확인했다. `chat/tests.rs`도 root `62abf69` blob과 같다. 따라서 기존 focused 12 passed(20.98초), §10 exact 1 passed(19.36초), S1 strict clippy/Rust 2021 format exit 0를 재사용하며 동일 검사를 반복하지 않았다. 별도 수리의 명시적 bin build·post-build exact 19 passed(30.98초)·locator 1 passed·format/diff exit 0도 그대로 유효하다. raw 로그·hash 대조·정확 명령은 `/tmp/g5d-r3cs1-evidence.ympdQJ/manifest.md` 및 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 보존했다. 새로 수행한 검증은 읽기 전용 동일성·커밋 범위/diff 확인이며 Cargo 실행은 없다.
+- **다음·운영**: 사용자 승인 간소화 절차 §1.1에 따라 관련 자체 검증 완료와 기능 커밋을 누적 QA 완료와 구분한다. 단일 exact-commit 독립 리뷰가 남고 이후 차단 finding만 범위 내 수리한다. 이전 full actual exit 143/stdio 미실행은 그대로 누적 QA 대기이며 전체 suite·누적 gate를 이번에 재실행하지 않았다. 앞으로도 Cargo jobs/test threads 4·컴퓨터 전체 무거운 실행 1개를 적용한다. S2 canonical/semantic 동등성, catch-up/startup/admission·전체 R3C/G5D와 Windows/실제 provider/사용자 프로젝트 검증은 미완료다. 기존 중단·수리 워크로그 원문은 보존하고 merge/rebase/cherry-pick/push는 하지 않는다.
+
+### 2026-09-03 · by GPT-5.6-Sol (중단 전 chat 테스트 19개 실패 수리)
+
+- **원인·수정**: 사용자 재개 지시에 따라 이전 full 로그의 `chat::tests` FAILED 19개만 대상으로 삼았다. 대표 exact 1개를 저부하로 실행해 `build the sidecar binary for process gate` panic(exit 101, 0.00초)을 재현했다. 공통 test helper가 worktree의 `target/debug`를 고정해 실제 shared `CARGO_TARGET_DIR`의 binary를 찾지 못한 것이 원인이었다. `chat/tests.rs`에서 현재 Cargo test executable의 `deps` 부모 profile 디렉터리의 sibling binary만 선택하고, 부재 시 같은 target/profile로 명시적 bin build를 안내한다. 임의 PATH/fallback 탐색, 제품 코드·예산·정책·assertion·sleep/timeout 변경은 없다.
+- **검증**: 수정 직후 exact 19개 PASS(30.67초)는 기존 shared binary를 사용한 중간 결과로 분리했다. 이어 같은 worktree/shared target에서 `cargo build -p hello-agent-sidecar --locked --bin hello-agent-sidecar` exit 0 후 기본/shared target 및 target-triple/release 경로의 순수 locator exact 1개 PASS(0.00초), 원래 실패와 이름 집합이 정확히 같은 19개 PASS(30.98초, exit 0)를 확인했다. Rust 2021 `chat/tests.rs` format check와 diff check exit 0. 명령·실제 종료 코드·원본 실패/중간/최종 로그·19개 이름 대조는 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 보존한다.
+- **저부하·보존**: 모든 Cargo에 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`와 shared target `/Users/wonseok-han/projects/hello-agent/target`을 명시하고 한 번에 하나만 실행했다. `nice -n 10`은 sandbox의 setpriority 거부 때문에 적용되지 않았으며 이를 성공으로 기록하지 않는다. 모든 실행 handle은 종료했고 읽기 전용 process snapshot에는 조사 명령 외 matching Cargo/sidecar fixture가 없었다(탈출 자손/전체 시스템 소멸 증명과 구분). 기존 S1 code 5파일은 SHA-256 동일, 이전 history 원문은 보존하고 이번 엔트리·고정 발견만 추가했다. root 설정·다른 worktree 변경은 건드리지 않았다.
+- **다음·한계**: 이번 수리는 미커밋이며 관련 diff의 독립 리뷰가 남는다. 새 사용자 운영 지시에 따라 앞선 S1 인계의 즉시 full/stdio 재실행 TODO를 대체하고 전체 suite·storage/harness·clippy·누적 QA는 실행하지 않았다. 이전 full exit 143/미완료는 그대로이며 S1·R3C 완료나 제품 admission을 주장하지 않는다. 실제 provider/auth/사용자 프로젝트/Windows 검증 및 merge/rebase/cherry-pick/push는 하지 않았다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (기존 테스트 실패 19개 수리·운영 간소화 적용)
 
 - **원인·수리**: 사용자 승인으로 중단 전 실패한 `chat::tests` 19개를 조사했다. 공통 테스트 도우미가 worktree의 `target/debug`를 고정해 shared `CARGO_TARGET_DIR`에 있는 sidecar를 못 찾았으며, 대표 exact 테스트의 실행 파일 부재 panic으로 재현했다. 현재 Cargo test executable의 profile 디렉터리에서 동일 target/profile의 sidecar를 찾도록 `chat/tests.rs`만 수정하고 기본/shared/target-triple 경로 회귀를 추가했다. 기존 assertion·timeout·제품 코드·안전 정책을 완화하지 않았다.
@@ -41,6 +61,15 @@
 - **착수·범위**: 검토된 계약 `c5be2c3`에서 `codex/g5d-r3c-byte-transport` 별도 worktree를 만들고 단일 Rust 담당에게 §12를 배정했다. 생성 전 root 포함 등록 20개/child 19개·약16 GiB를 확인했고 최근·dirty·사용 여부 불명 대상을 보존했다. S1 최종 gate 뒤 정리 여부를 다시 확인한다. 독립 QA 계획은 `.artifacts/m5-qa/g5d-r3cs1-plan.json`이다.
 - **발견**: 현재 protocol/serde/SQLite의 primitive probe와 독립 source 대조에서 legacy projection 검증은 serde 의미 비교와 SQLite mirror의 conjunction이며 R3A가 완전한 수락 oracle이 아님을 확인했다. 첫/마지막 duplicate 선택, evidence key 순서·escape 표현 차이를 구분해야 한다. 제품 legacy 검사는 유지되므로 제품 우회로 주장하지 않는다. §13에 canonical/의미/mirror 세 기준과 후속 전체 V8 재현 항목을 기록했다.
 - **검증·다음**: 임시 probe compile/run exit 0; raw 결과와 exact 명령은 `.artifacts/m5-review/r3c-canonical-oracle-probe.{rs,log,json}`이다. 최초 잘못 고른 cached serde feature rlib의 compile exit 1은 Cargo fingerprint 대조 뒤 수정했고 source/의존성을 바꾸지 않았다. 이는 primitive 관측이지 전체 Storage acceptance 회귀가 아니다. S1 구현·리뷰·통합 QA와 후속 oracle fixture는 남는다. 타 대화 history/procedure 변경은 미커밋 보존하며 main 병합·push 없음.
+
+
+### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C-S1 부분 구현·중단 인계)
+
+- **구현·범위**: exact base `c5be2c376c6dd19ab8b7c81d362b5f24cb106a8e`의 `codex/g5d-r3c-byte-transport` worktree에서 §12의 private `RawColumnSession`을 추가했다. events rowid payload와 WITHOUT ROWID frozen operation의 payload/envelope 세 주소만 고정 allowlist로 선택하고, caller expected identity tuple과 실제 typed metadata·최초 byte 길이·동일 connection epoch를 결속한다. 각 BEGIN IMMEDIATE에서 1 MiB 이하 단일 BLOB fragment를 UTF-8 carry(최대 3B)/incremental SHA로 처리하고 COMMIT 성공 뒤에만 cursor를 보존한다. 완료·오류·취소는 재사용 불가이며 `BytesComplete`는 raw 길이/hash 정보일 뿐 JSON/canonical/provenance/admission 증거가 아니다.
+- **입력 예산·발견**: 시작의 expected/bind identity+fresh metadata, 각 step의 retained identity/carry+실제 fresh metadata/fragment를 8 MiB로 제한한다. metadata BLOB 길이/type preflight 후 exact 비교하며 큰 전체 source를 읽어 기존 validator에 넘기지 않는다. source work는 start 2개/step 3개 고정 query unit이고 기존 exact-schema bootstrap은 같은 transaction 안에서 별도 수행한다(전체 시간/SQLite 내부 materialization/heap 상한 주장이 아님). SQLite는 빈 TEXT의 `substr(CAST(... AS BLOB),1,0)`을 NULL로 돌려주므로 같은 transaction에서 확인한 빈 TEXT만 X''로 처리한다. 2B만 남긴 metadata 예산에서 4B UTF-8 문자를 나눠 읽고 다음 호출의 retained 2B carry 때문에 여유가 없으면 terminal 거부하여 무진행 Pending을 막는다.
+- **자체 검증·증거**: 새 `raw_column_bytes` 12 passed(20.98초), 확장한 §10 exact test 1 passed(19.36초), strict scoped clippy·Rust 2021 format·diff check exit 0. full sidecar는 사용자 중단 지시를 전달받은 별도 대화가 QA PGID 49233에 TERM을 보내 실제 exit 143으로 종료됐고 전체/stdio PASS는 없다. 원본 full 로그 앞부분에 기존 `chat::tests` 19개 FAILED 표시가 있으나 상세 panic/최종 결과가 출력되기 전에 중단돼 원인은 미확인이다(외부 TERM 탓으로 소급 단정하지 않음). raw 명령·실제 exit·전체 로그는 `/tmp/g5d-r3cs1-evidence.ympdQJ/manifest.md`에 보존한다. 최초 focused 3 pass/4 fail과 clippy 101도 별도 탐색 기록이다. 초기 실패는 empty-slice 처리, invalid UTF-8를 못 읽는 기존 test snapshot, STRICT가 거부하는 BLOB fixture 가정과 test lint였다. 기존 helper/schema는 고치지 않고 새 test-local raw-cell snapshot과 명시적 SQL 방어 주입으로 구분했다.
+- **실제 실패 시험·대조**: 세 주소의 빈/1B/exact1MiB/+1/>8MiB·UTF-8 split/invalid/truncated·identity 10필드/행 부재·정확 metadata 예산/초과·multibyte metadata·drop/rescan을 검사했다. 실제 SQL READ/COMMIT 거부는 start/첫/후기 step에 주입했고, 별도 connection busy BEGIN·같은 길이/후반부/길이 변경·terminal 뒤 commit·entry/mid/precommit 취소를 검사했다. 모든 실패 후 재사용 불가·autocommit과 schema/typed raw rows/DB bytes 불변을 확인한다(외부 변경은 허용 commit 직후가 기준). NULL-on-read authorizer 및 NULL/TEXT/short/long slice function 결과는 방어 분기 시험이며 STRICT가 그런 source 저장을 허용한다는 뜻이 아니다. §10의 41개 exact run source는 44회 transport 호출로 test-only 전체 byte oracle의 길이/SHA와 일치했다. 기존 Storage reopen 성공, 큰 두 사례의 R3B 거부와 작은 대조군 완료는 그대로 유지했다.
+- **중단·다음·한계**: 모든 실행 handle은 종료됐고 읽기 전용 OS 확인에서 PGID 49233의 잔여 구성원은 없었다(전체 시스템/탈출 자손 소멸 증명과 구분). 사용자의 즉시 저부하 전환 지시 뒤 무거운 실행을 재시작하지 않으며 full 미통과이므로 완료 커밋하지 않는다. 소스/테스트/history 6파일은 feature worktree에 dirty로 보존하고 shared target은 `/Users/wonseok-han/projects/hello-agent/target`이다. 재개 지시 후 모든 직접 Cargo는 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`, 컴퓨터 전체 무거운 실행 1개 규칙을 적용하고 선행 19개 FAILED 원인 확인 및 full/stdio 재검증부터 이어간다. root의 별도 저부하 설정/타인 변경은 건드리지 않았다. Karpathy 지침에 따라 소유 6파일에 한정하며 기존 production 함수·R1–R3B·schema/protocol/golden/의존성·제품 open/append/recovery/lifetime·예산·100 frozen-operation fence는 불변이다. 실제 provider/auth/사용자 프로젝트/Windows·물리 I/O 실패 및 merge/rebase/cherry-pick/push는 하지 않았다. exact commit 독립 리뷰·통합 누적 QA·최종 gate, S2 canonical/semantic 동등성, catch-up/startup/admission 및 전체 R3C/G5D는 남는다.
 
 ### 2026-09-02 · by GPT-5.6-Sol (M5 G5D R3C-S1 byte transport 계약)
 
@@ -215,12 +244,18 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
+
 - **간소화 운영 확정(2026-09-03 사용자 승인)**: 기능/결함 단위의 관련 검사와 독립 리뷰 1명을 기본으로 하고 누적 QA·최종 gate는 최신 통합 파동 마감에 수행한다. 수정 후에는 영향 범위만 재검증하며 신규 공용 계약 없는 helper마다 별도 설계 심의·전체 검증을 요구하지 않는다. 기존 계약의 중복 빈도/담당 배치만 대체하며 필수 안전 시나리오와 제품 활성화/출시 게이트는 유지한다. 상세는 `procedures/multi-agent-orchestration.md` §1.1이다.
 - **Cargo 테스트 실행 파일 경로(2026-09-03)**: shared `CARGO_TARGET_DIR`에서 repo-relative `target/debug` 가정은 process-gate 19개를 실행 전 실패시켰다. test executable의 `<target>/<profile>/deps` 부모에서 sidecar를 찾고 `--lib` 테스트 전 같은 worktree/target/profile의 명시적 bin build로 freshness를 확인한다. 경로 수리 뒤 원래 실패 19개와 추가 locator 회귀가 통과했다. 이는 S1·전체 G5D 완료와 구분한다.
 
 - **QA 저부하 즉시 적용(2026-09-02 사용자 승인)**: 고부하 Cargo/sidecar 테스트를 사용자 요청으로 종료했고 다음 실행은 하네스 및 직접 Cargo 모두 compile/test 병렬 최대 4로 제한한다. 무거운 검증은 컴퓨터당 하나만 실행한다. focused 회귀와 통합 마감 누적 gate를 구분하되 필수 안전 검증은 생략하지 않는다. 낮은 우선순위는 best-effort이며 CPU 절대 상한은 아니다. 자세한 실행 규칙은 `procedures/multi-agent-orchestration.md` §13.1이다.
 
 - **S2 oracle 분리(2026-09-02)**: legacy product는 canonical source/replay, serde projection 의미 비교, SQLite mirror를 모두 요구한다. R3A는 parsed final map/evidence를 비교해 첫 duplicate를 보는 SQLite 추출과 evidence `json(...)` 표현 비교를 그대로 재현하지 않는다. primitive 차이와 source 대조는 했지만 정상 V8 fixture의 전체 acceptance 재현은 아직이다. 기존 제품 검사는 유지하며 §13의 세 oracle·후속 회귀를 닫기 전 R3A 단독 결과를 제품 동등성으로 인용하지 않는다.
+
+- **Cargo test fixture binary 경로(2026-09-03)**: `chat::tests`가 repo-relative `target/debug`를 가정하면 shared `CARGO_TARGET_DIR`에서 process-gate 19개가 실행 전 실패한다. test executable의 `<target>/<profile>/deps` 부모에서 동일 profile의 sidecar만 찾고, `--lib` 검증 전 같은 worktree/target/profile의 명시적 bin build로 freshness를 확인한다. 관련 수리는 테스트 전용이며 기존 S1 미완료/full exit 143과 구분한다.
+
+- **R3C-S1 raw bytes는 의미 검증이 아니다(2026-09-02)**: 새 private bytes session은 고정 source 주소/expected identity/epoch/byte 길이 아래 fragment별 UTF-8와 SHA를 끝까지 계산한다. ≤1 MiB fresh fragment + ≤8 MiB retained/fresh encoded 입력이며 start source metadata도 예산에 포함한다. schema bootstrap은 같은 BEGIN 안의 별도 비용이고 SQLite slicing 내부 메모리/전체 ready 시간 상한은 미입증이다. 빈 TEXT의 SQLite substr NULL과 retained UTF-8 carry 때문에 다음 호출이 무진행이 되는 경계를 회귀로 고정했다. §10 큰 정상 run source의 raw transport 성공은 기존 R3B 거부 해제나 canonical/admission 성공이 아니므로 S2 및 제품 연결 계약을 생략하지 않는다.
 
 - **R3C 큰 기록 처리 순서(2026-09-02)**: V8 byte transport → canonical oracle 동등성 → projection/파생 의미 비교 → 동일 연결의 쓰기 권위 순서로 나눈다. §12 S1은 fragment 1 MiB/retained+fresh 8 MiB 내 UTF-8·길이·해시 정보만 제공하며 기존 verifier·제품 fence·입력 정책을 바꾸지 않는다. historical workspace catch-up은 source sequence 없는 row 때문에 단순 latest-only 조건 변경으로 해결하지 않는다. 상세 계약은 `proposals/m5-storage-reopen-verification.md` §11–12다.
 

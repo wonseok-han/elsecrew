@@ -5,6 +5,7 @@
 
 use super::*;
 
+pub(crate) mod bytes;
 mod closure;
 mod derived;
 mod projection;

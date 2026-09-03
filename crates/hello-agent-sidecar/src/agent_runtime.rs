@@ -3995,7 +3995,60 @@ mod budget_tests {
                 assert_eq!(snapshot(&connection), before);
                 assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
             }
-            println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" });
+            // S1 transports every exact persisted run source, including the
+            // oversized row above. Whole-column reads here are TEST ORACLES,
+            // never a production fallback or an R3B/admission capability.
+            use crate::storage::reopen::bytes::{
+                RawColumn, RawColumnSession, RawColumnStep, SourceIdentity, FRAGMENT_BYTES,
+                INPUT_BYTES,
+            };
+            use sha2::{Digest, Sha256};
+            let mut transport_calls = 0;
+            for (rowid, measured) in &sources {
+                let (expected, oracle) = connection.query_row(
+                    "SELECT rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,payload_schema_version,event_type,request_id,timestamp,CAST(canonical_json_payload AS BLOB) FROM events WHERE rowid=?1",
+                    [i64::try_from(*rowid).unwrap()], |r| Ok((SourceIdentity {
+                        source_rowid:r.get(0)?,event_id:r.get(1)?,operation_id:r.get(2)?,aggregate_type:r.get(3)?,aggregate_id:r.get(4)?,aggregate_sequence:r.get(5)?,payload_schema_version:r.get(6)?,event_type:r.get(7)?,request_id:r.get(8)?,timestamp:r.get(9)?,
+                    },r.get::<_,Vec<u8>>(10)?))).unwrap();
+                assert_eq!(oracle.len(), *measured);
+                let mut transport =
+                    RawColumnSession::start(&mut connection, RawColumn::EventPayload, expected)
+                        .unwrap();
+                let mut read = 0;
+                loop {
+                    transport_calls += 1;
+                    let step = transport.step(&mut || false).unwrap();
+                    let (usage, done) = match step {
+                        RawColumnStep::Pending(usage) => {
+                            assert!(usage.fragment_bytes > 0);
+                            (usage, false)
+                        }
+                        RawColumnStep::BytesComplete {
+                            byte_length,
+                            sha256,
+                            usage,
+                        } => {
+                            assert_eq!(byte_length, oracle.len() as u64);
+                            assert_eq!(sha256, <[u8; 32]>::from(Sha256::digest(&oracle)));
+                            (usage, true)
+                        }
+                        other => panic!("unexpected byte transport {other:?}"),
+                    };
+                    assert!(usage.fragment_bytes <= FRAGMENT_BYTES);
+                    assert!(usage.encoded_bytes() <= INPUT_BYTES);
+                    assert!(usage.work_units <= 100);
+                    read += usage.fragment_bytes;
+                    assert!(read <= oracle.len());
+                    if done {
+                        assert_eq!(read, oracle.len());
+                        break;
+                    }
+                }
+                assert!(transport.step(&mut || false).is_err());
+            }
+            assert_eq!(snapshot(&connection), before);
+            assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+            println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={} byte_transport_sources={} byte_transport_calls={transport_calls}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" }, sources.len());
         }
     }
 
