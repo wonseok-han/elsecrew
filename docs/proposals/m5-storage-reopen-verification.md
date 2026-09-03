@@ -328,6 +328,8 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 
 후속 계약은 정상 소형 V8 fixture에 indexed duplicate의 first/last·동일 duplicate·non-indexed duplicate·evidence 재정렬/escape/공백·sequence overlay·숫자 `1`/`1.0`·bool·null을 각각 적용해 legacy와 private R3A 결과를 분리 기록해야 한다. S2가 canonical scanner까지만 구현한다면 projection 의미와 mirror 동등성은 여전히 후속 의무다. §12 S1의 소유권·완료선은 확대하지 않는다. primitive probe와 exact 명령/종료 코드는 `.artifacts/m5-review/r3c-canonical-oracle-probe.{rs,log,json}`에 있으며 임시 in-memory DB만 사용했다.
 
+2026-09-03 후속 실제 V8 회귀 `7eeca1d`는 정상 쓰기·materializer ready·Storage reopen 뒤 43사례와 잘못된 pid 일반 write 거부 3사례를 검사했다. 6 focused tests와 독립 리뷰가 완료되어 위 primitive 관측을 실제 V8 기준으로 대조했다. indexed first-wrong/last-right duplicate와 한쪽 evidence 순서/escape 차이는 legacy가 거부하고 R3A가 수락한다. 동일 duplicate·마지막 non-indexed 값·공백·typed sequence overlay 수락을 보존하며 projection 의미/mirror 구현은 §15에 남긴다. 원본 증거는 `/tmp/g5d-s2-oracles.KAd88R/manifest.md`다.
+
 ## 14. R3C-S2 canonical source scanner — 내부 구현 계약
 
 사용자가 2026-09-03 저장 마감→실제 provider→G6 진행을 승인했다. S2의 기준은 `69fad53`이며 §13의 실제 V8 수락 회귀와 아래 scanner를 한 기능 묶음으로 구현·단일 독립 리뷰한다. 제품 활성화나 전체 저장 검증 완료를 뜻하지 않는다.
@@ -356,6 +358,8 @@ diff check·exact feature commit 독립 코드 리뷰와 최신 통합 commit의
 - S1 `raw_column_bytes` 기존 12개와 §10 exact snapshot을 보존하고 S2 대조만 추가한다. scoped clippy/format/diff와 단일 독립 리뷰를 수행하고 전체 sidecar/stdio·누적 QA는 큰 기록 호환성 파동 마감에 수행한다. Rust jobs/threads ≤4, 무거운 실행은 컴퓨터당 하나다.
 
 S2는 canonical source만 다룬다. envelope 내부 escaped payload의 의미/digest/identity, 관대한 projection·SQLite mirror 동등성, historical catch-up, 쓰기 권위·startup/복구는 후속이다. R1–R3B·schema/의존성·기존 예산·제품 open/append/recovery·100-operation fence·Electron/UI는 변경하지 않는다. SQLite 내부 메모리나 3초 ready 충족을 주장하지 않으며 기존 예산/정책 변경 없이는 전진할 수 없을 때 중단·보고한다.
+
+§14 구현 `5c7758e`는 canonical 10개·S1 12개·§10 snapshot 1개와 scoped 정적 검사 및 단일 독립 리뷰를 통과해 통합했다. snapshot 대조는 41 sources/522 canonical calls이며 기존 R3B 큰 기록 거부를 바꾸지 않았다. 실패/중단 로그와 최종 exit 0 증거는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 분리했다. 전체 QA·projection 의미/mirror 및 제품 연결은 여전히 후속이다.
 
 ## 15. S3 후속 구현 경계 — projection 한 행의 호환성
 

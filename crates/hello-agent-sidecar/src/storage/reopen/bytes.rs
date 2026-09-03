@@ -33,7 +33,7 @@ pub(crate) struct SourceIdentity {
 }
 
 impl SourceIdentity {
-    fn bytes(&self) -> Result<usize, SidecarError> {
+    pub(super) fn bytes(&self) -> Result<usize, SidecarError> {
         [
             self.event_id.as_str(),
             self.operation_id.as_str(),
@@ -74,12 +74,90 @@ pub(crate) enum RawColumnStep {
 }
 
 struct Progress {
-    expected: SourceIdentity,
-    column: RawColumn,
-    byte_length: u64,
+    bound: BoundColumn,
     after: u64,
     hash: Sha256,
     carry: Utf8Carry,
+}
+
+/// Concrete internal read binding shared by S1 transport and S2 scanning.
+/// Offsets are session-owned, never a caller resume token or an admission proof.
+pub(super) struct BoundColumn {
+    expected: SourceIdentity,
+    column: RawColumn,
+    pub(super) byte_length: u64,
+}
+
+impl BoundColumn {
+    pub(super) fn bind(
+        connection: &Connection,
+        column: RawColumn,
+        expected: SourceIdentity,
+        usage: &mut ByteUsage,
+    ) -> Result<Self, SidecarError> {
+        let byte_length = metadata(connection, column, &expected, usage)?;
+        fragment_size(byte_length, 0, usage.encoded_bytes())?;
+        Ok(Self {
+            expected,
+            column,
+            byte_length,
+        })
+    }
+
+    pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
+        self.expected.bytes()
+    }
+
+    pub(super) fn recheck(
+        &self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+    ) -> Result<(), SidecarError> {
+        if metadata(connection, self.column, &self.expected, usage)? != self.byte_length {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_span(
+        &self,
+        connection: &Connection,
+        after: u64,
+        amount: usize,
+        usage: &mut ByteUsage,
+    ) -> Result<Vec<u8>, SidecarError> {
+        if after
+            .checked_add(amount as u64)
+            .is_none_or(|end| end > self.byte_length)
+            || usage
+                .fragment_bytes
+                .checked_add(amount)
+                .is_none_or(|n| n > FRAGMENT_BYTES)
+            || usage
+                .encoded_bytes()
+                .checked_add(amount)
+                .is_none_or(|n| n > INPUT_BYTES)
+            || usage.work_units >= 100
+        {
+            return Err(invalid());
+        }
+        let fragment = with_locator(
+            connection,
+            &self.column.slice_query(),
+            self.column,
+            &self.expected,
+            sql_position(after)?,
+            i64::try_from(amount).map_err(|_| invalid())?,
+            |row| match row.get_ref(0)? {
+                // Type and exact length precede the bounded allocation.
+                ValueRef::Blob(bytes) if bytes.len() == amount => Ok(bytes.to_vec()),
+                _ => Err(rusqlite::Error::InvalidQuery),
+            },
+        )?;
+        usage.fragment_bytes += fragment.len();
+        usage.work_units += 1;
+        Ok(fragment)
+    }
 }
 
 /// Borrow pins the connection, excluding same-connection writes; other
@@ -118,8 +196,7 @@ impl<'connection> RawColumnSession<'connection> {
         // it never loads a source column. No bootstrap latency/heap claim.
         preflight_schema_and_control_rows(&tx)?;
         verify_schema_v8(&tx)?;
-        let length = metadata(&tx, column, &expected, &mut usage)?;
-        fragment_size(length, 0, usage.encoded_bytes())?;
+        let bound = BoundColumn::bind(&tx, column, expected, &mut usage)?;
         tx.commit().map_err(|_| invalid())?;
         if !connection.is_autocommit() {
             return Err(invalid());
@@ -128,9 +205,7 @@ impl<'connection> RawColumnSession<'connection> {
             connection,
             epoch,
             progress: Some(Progress {
-                expected,
-                column,
-                byte_length: length,
+                bound,
                 after: 0,
                 hash: Sha256::new(),
                 carry: Utf8Carry::default(),
@@ -158,8 +233,8 @@ impl<'connection> RawColumnSession<'connection> {
         }
         let mut usage = ByteUsage {
             retained_bytes: progress
-                .expected
-                .bytes()?
+                .bound
+                .retained_bytes()?
                 .checked_add(progress.carry.len)
                 .ok_or_else(invalid)?,
             ..ByteUsage::default()
@@ -178,31 +253,12 @@ impl<'connection> RawColumnSession<'connection> {
             if cancelled() {
                 return Ok(false);
             }
-            let length = metadata(&tx, progress.column, &progress.expected, &mut usage)?;
-            if length != progress.byte_length {
-                return Err(invalid());
-            }
+            progress.bound.recheck(&tx, &mut usage)?;
+            let length = progress.bound.byte_length;
             let amount = fragment_size(length, progress.after, usage.encoded_bytes())?;
-            let position = sql_position(progress.after)?;
-            let query = progress.column.slice_query();
-            let fragment = with_locator(
-                &tx,
-                &query,
-                progress.column,
-                &progress.expected,
-                position,
-                i64::try_from(amount).map_err(|_| invalid())?,
-                |row| {
-                    let raw = row.get_ref(0)?;
-                    // Validate size/type before allocating the bounded Vec.
-                    match raw {
-                        ValueRef::Blob(bytes) if bytes.len() == amount => Ok(bytes.to_vec()),
-                        _ => Err(rusqlite::Error::InvalidQuery),
-                    }
-                },
-            )?;
-            usage.fragment_bytes = fragment.len();
-            usage.work_units += 1;
+            let fragment = progress
+                .bound
+                .read_span(&tx, progress.after, amount, &mut usage)?;
             if cancelled() {
                 return Ok(false);
             }
@@ -238,9 +294,9 @@ impl<'connection> RawColumnSession<'connection> {
                 if !self.connection.is_autocommit() {
                     return Err(invalid());
                 }
-                if progress.after == progress.byte_length {
+                if progress.after == progress.bound.byte_length {
                     Ok(RawColumnStep::BytesComplete {
-                        byte_length: progress.byte_length,
+                        byte_length: progress.bound.byte_length,
                         sha256: progress.hash.finalize().into(),
                         usage,
                     })

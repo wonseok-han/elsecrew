@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (S2 canonical scanner 통합·S3 연속 진행)
+
+- **완료**: 정상 V8 oracle `7eeca1d`와 scanner `5c7758e` 묶음이 단일 독립 리뷰 PASS를 받아 M5에 통합된다. source 충돌 없이 양쪽 history 원문을 보존하며 현행 구조와 제안 §13–14의 완료선을 갱신한다. scanner는 source canonical byte 검증일 뿐 projection 의미·SQLite mirror·제품 실행 허가가 아니다.
+- **검증**: canonical 10 passed(42.88초), 기존 S1 12 passed(22.33초), snapshot 1 passed(25.11초, 41 sources/522 calls), scoped strict clippy/Rust 2021 format/diff 모두 exit 0이다. 통합 source가 exact reviewed commit과 동일함을 대조해 관련 결과를 재사용한다. 원본 실패/중단과 최종 PASS는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 분리 보존했다. 전체 누적 QA는 파동 마감에 남는다.
+- **다음·경계**: 같은 Rust 담당이 §15의 source/projection 한 행 semantic·mirror 호환성을 이어서 구현한다. 기존 안전 예산·100-operation fence·제품 경로는 유지하며 historical catch-up·startup/복구·compaction/scheduler/status, 실제 provider와 G6 전체는 미완료다. main 병합·push·유료 모델/사용자 프로젝트 시험 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (G6 패키지 크기 계측기 통합)
 
 - **완료 단위**: `1ecefff`와 검토 수리 `6f3fc7a`를 같은 reviewer가 검토해 두 차단 finding 해소와 전체 feature PASS를 확인했다. 이 기능만 M5 통합 브랜치에 병합하며 양쪽 history를 모두 보존했다. `m5-package-metrics.mjs`·회귀와 M5.0 명세 §10 사용법을 반영한다. 원격/main 변경은 없다.
@@ -42,6 +48,17 @@
 - **구현·범위**: `scripts/m5-package-metrics.mjs`에 명시 `--platform`/`--arch`/`--package`/선택 `--archive` 입력의 재사용 가능한 pure collector와 JSON CLI를 추가했다. macOS arm64의 unpacked 350 MiB·compressed 200 MiB 잠정 한계를 exact byte 문자열로 비교하고 Windows x64/arm64는 값을 측정하되 threshold 없는 `NOT_READY`로 끝낸다. unpacked는 regular-file length + symlink link-text bytes이며 symlink를 따라가지 않는다. 필요한 executable·`app.asar`·staged sidecar layout, regular archive, `.zip` signature, bounded directory walk를 확인하고 metadata 변화가 관찰되면 `NOT_READY`로 invalidates한다.
 - **안전·한계**: supplied artifact는 읽기만 하며 app/provider/auth/build를 실행하지 않는다. report는 local developer-only package-size evidence이고 freshness, provenance, signing/notarization, launch/GUI/runtime, atomic snapshot 또는 `G6_READY`를 주장하지 않는다. archive가 없거나 asset/type/signature/readability가 불완전하면 `NOT_READY`, macOS의 완전한 측정만 `PASS`/`FAIL`을 낸다.
 - **검증·다음**: bundled Node `v24.19.0`으로 `node --check scripts/m5-package-metrics.mjs`와 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`를 실행해 8/8 PASS(exit 0)했다. sparse exact/below/over limits, missing/wrong assets, external symlink non-follow, Windows measure-only, ZIP signature, malformed CLI와 0/1/2 JSON exit를 덮었다. package/make, Cargo, full suite, real artifact measurement은 실행하지 않았다. 독립 리뷰 뒤 통합 담당이 proposal usage와 integration 여부를 결정한다.
+### 2026-09-03 · by GPT-5.6-Sol (R3C-S2 canonical source scanner)
+
+- **범위·구현**: §14의 private `CanonicalColumnSession`과 S1의 구체적 `BoundColumn` 읽기 추출을 구현했다. 전체 source/Value/key 없이 문법·canonical escape·UTF-8·혼합 깊이 127·실제 serde 숫자 출력·인접 decoded key 순서를 검사한다. 동일 연결·epoch/identity/길이 재검사, 1 MiB fresh/8 MiB retained+fresh/100 work, COMMIT 뒤 진행 보존과 오류·취소 terminal 폐기를 유지한다. 숫자 24-byte 출력 근거는 잠긴 serde_json 1.0.150/zmij 1.0.23와 실제 unified `default,std` 기능을 확인했다. 이는 canonical bytes 정보이며 의미/권위/admission 검증이 아니다.
+- **검증·발견**: canonical 10 passed(42.88초), S1 기존 12 passed(22.33초), §10 exact 1 passed(25.11초). 실제 run source 41개를 S2 522 calls로 검사했고 큰 두 사례의 기존 R3B 거부·small 완료 및 S1 결과는 유지했다. 세 주소의 late malformed/UTF8·hash, main/key 취소·같은 길이 외부 commit·busy BEGIN·실제 SQLite READ/COMMIT 거부와 DB/schema/typed rows/file bytes 불변을 확인했다. 긴 공통 키의 pending-byte read 교대 문제를 수정하여 1 MiB+3 prefix는 5 calls, 8 MiB+3은 33 calls로 통과했다. 작은 fresh 예산/상이한 escape 폭과 취소 중복 poll 회귀도 통과했다. 관련 raw 명령·actual exit·중단/실패 구분·수치는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 있다.
+- **정적·다음·보존**: scoped strict clippy·Rust 2021 format·diff check exit 0이다. 최초 clippy의 test observability tuple type-complexity 경고는 의미 변화 없는 내부 type alias로 정리했다. 앞선 oracle `7eeca1d`와 이번 scanner를 한 S2 묶음으로 단일 독립 리뷰한다. 기존 S1 API·R1–R3B·schema/protocol/deps·안전 예산·제품 open/append/recovery·100-operation fence는 불변이다. Karpathy 지침에 따라 소유 범위의 구체적 읽기 추출만 추가했고 제품 연결이나 범용 reader를 만들지 않았다. Cargo jobs/threads 4·단일 실행(nice sandbox 미허용)을 지켰다. 전체 sidecar/stdio/누적 QA는 이번에 실행하지 않았으며 과거 full exit 143은 여전히 미완료다. S3 projection 의미·SQLite mirror 동등성, catch-up/startup/admission·실제 provider/Windows 및 파동 마감 누적 QA가 남는다. merge/rebase/cherry-pick/push 없음.
+
+### 2026-09-03 · by GPT-5.6-Sol (S2 전 실제 V8 acceptance oracle 회귀)
+
+- **범위·발견**: §13의 primitive 추정을 ordinary append·ready materialization으로 만든 정상 소형 V8의 43사례로 고정했다. 새 `storage/tests/reopen_oracles.rs`와 module 등록·이번 history만 변경했다. serde replay equality, SQLite mirror, `verify_projection_replay`, 실제 `Storage::open`, 전체 private R3A를 따로 assert한다. indexed duplicate first-wrong/last-correct와 lock evidence key순서·escape의 단측 차이는 legacy가 거부하지만 R3A가 허용했다. 동일 duplicate·정상 마지막 nonindexed 값·공백·typed sequence overlay의 기존 수락은 유지된다. 숫자 1/1.0/bool/null은 정상 nonindexed source의 타입별 의미 비교와, 유효 pid=1/invalid pid 3개 ordinary write 거부를 분리했다.
+- **검증**: `s2_legacy_oracle` 6 passed(16.45초), scoped strict clippy·Rust 2021 format·diff check exit 0. 실제 DB 43사례 및 invalid-pid 3대조군에서 schema/typed rows/file bytes 불변을 확인했다. expected verdict는 기존 serde-last/SQLite-first·json 표현·sequence overlay 코드를 근거로 고정했으며 관측 결과를 복사하지 않았다. raw 명령·actual exit·사례별 결과는 `/tmp/g5d-s2-oracles.KAd88R/manifest.md`에 있다. Cargo jobs/test threads 4·단일 실행을 적용했고 nice는 sandbox 거부로 미적용이다.
+- **다음·한계**: 이는 private R3A의 legacy 동등성 부족을 고정한 테스트이며 제품 검증 우회나 정책 변경이 아니다. 실제 provider/사용자 프로젝트·전체 suite/harness는 실행하지 않았다. 사용자 승인 S2 묶음의 canonical scanner는 후속 §14를 읽은 뒤 구현하며, 묶음 단위 독립 리뷰 1회와 마감 누적 QA가 남는다. source/schema/예산/S1/제품 admission은 불변이고 merge/rebase/cherry-pick/push 없음.
 
 ### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
 
@@ -281,6 +298,9 @@
 - **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
 
 - **M5 G6 package-size 증거 도구(2026-09-03)**: `m5-package-metrics.mjs`는 macOS arm64의 unpacked ≤350 MiB와 compressed ≤200 MiB를 supplied directory/regular archive의 exact logical bytes로만 측정한다. symlink target은 세지거나 따라가지 않으며 Electron executable·`app.asar`·ASAR 밖 staged sidecar layout을 요구한다. Windows x64/arm64는 측정값을 내도 threshold 없는 `NOT_READY`다. filesystem walk는 atomic snapshot이 아니므로 metadata change를 발견하면 `NOT_READY`; report도 local-only이며 signing/freshness/runtime/G6 완료 증거가 아니다.
+- **S2 canonical source는 의미/admission 증거가 아니다(2026-09-03)**: 새 scanner는 schema bootstrap을 제외한 호출당 fresh main+key 재읽기 1 MiB, retained+fresh 8 MiB, work 100을 유지한다. 전체 key를 보관하지 않고 adjacent source span을 decoded UTF-8 byte로 비교한다. pending decoded byte 뒤의 다음 조각도 함께 읽되 작은 잔여 예산을 필요한 반대편에 예약해야 교대 대량 재읽기/무진전 오류를 피한다. 숫자 24-byte는 현재 serde/zmij canonical 출력 image 근거이며 관대한 projection 입력 상한으로 재사용하면 안 된다. 관련 회귀/실측은 `storage/tests/reopen_canonical.rs`와 S2 evidence manifest에 있다.
+
+- **S2 legacy oracle은 R3A 단독이 아니다(2026-09-03)**: 실제 정상 V8 fixture에서 indexed JSON duplicate의 첫 값이 틀리고 마지막만 맞거나 lock evidence key순서/escape가 한쪽만 다르면 private R3A는 허용해도 legacy SQLite mirror·Storage reopen은 거부한다. 반대로 동일 duplicate/정상 마지막 nonindexed 값/공백/typed sequence overlay는 수락된다. `storage::tests::reopen_oracles::s2_legacy_oracle*` 6개가 실제 DB 43사례를 고정하므로 S2 의미 동등성은 serde map과 SQLite mirror를 함께 보존해야 한다.
 
 - **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
 
