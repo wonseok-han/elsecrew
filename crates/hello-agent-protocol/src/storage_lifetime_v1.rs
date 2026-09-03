@@ -3278,8 +3278,7 @@ pub fn validate_frozen_operation_source_v1(
             "frozen operation source fields are invalid",
         ));
     }
-    require_timestamp(&source.event_timestamp, "frozen operation eventTimestamp")?;
-    require_timestamp(&source.frozen_at, "frozen operation frozenAt")?;
+    validate_frozen_operation_timestamps_v1(&source.event_timestamp, &source.frozen_at)?;
     let payload: Value = serde_json::from_str(&source.canonical_payload_json).map_err(|error| {
         StorageLifetimeContractError::new(format!(
             "frozen operation canonical payload must be valid JSON: {error}"
@@ -3311,6 +3310,14 @@ pub fn validate_frozen_operation_source_v1(
         ));
     }
     Ok(source)
+}
+
+pub fn validate_frozen_operation_timestamps_v1(
+    event_timestamp: &str,
+    frozen_at: &str,
+) -> Result<(), StorageLifetimeContractError> {
+    require_timestamp(event_timestamp, "frozen operation eventTimestamp")?;
+    require_timestamp(frozen_at, "frozen operation frozenAt")
 }
 
 pub fn validate_frozen_operation_source_batch_v1(
@@ -3740,6 +3747,15 @@ pub fn validate_storage_compaction_prefix_v1(
 ) -> Result<StorageCompactionPrefixV1, StorageLifetimeContractError> {
     let prefix: StorageCompactionPrefixV1 = serde_json::from_value(value.clone())
         .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
+    validate_storage_compaction_prefix_fields_v1(&prefix)?;
+    Ok(prefix)
+}
+
+/// The same prefix predicate for an already typed, bounded metadata read. It
+/// does not establish the referenced baseline/source/anchor's provenance.
+pub fn validate_storage_compaction_prefix_fields_v1(
+    prefix: &StorageCompactionPrefixV1,
+) -> Result<(), StorageLifetimeContractError> {
     require_js_safe_unsigned(
         prefix.deleted_through_sequence,
         "prefix.deletedThroughSequence",
@@ -3767,7 +3783,7 @@ pub fn validate_storage_compaction_prefix_v1(
     }
     require_timestamp(&prefix.created_at, "prefix.createdAt")?;
     require_timestamp(&prefix.verified_at, "prefix.verifiedAt")?;
-    Ok(prefix)
+    Ok(())
 }
 
 pub fn validate_frozen_message_source_v1(
@@ -4081,8 +4097,19 @@ fn storage_chat_source_state_v1(
                 "chat source index requires a safe unsigned durable_event_sequence",
             )
         })?;
+    storage_chat_snapshot_fields_v1(&source.aggregate_id, durable, object.get("last_message"))
+}
+
+/// Validate the actual extracted chat fields without constructing a truncated
+/// ledger payload. Canonical payload and exact source binding remain the
+/// consumer's independent obligations.
+pub fn storage_chat_snapshot_fields_v1(
+    aggregate_id: &str,
+    durable: u64,
+    last_message: Option<&Value>,
+) -> Result<(u64, Option<String>, Option<Value>), StorageLifetimeContractError> {
     require_js_safe_unsigned(durable, "sourceIndex.chatDurableSequence")?;
-    let message = match object.get("last_message") {
+    let message = match last_message {
         Some(Value::Null) => None,
         Some(message @ Value::Object(_)) => {
             validate_g5_payload_v1("teamMessage", message).map_err(|_| {
@@ -4104,7 +4131,7 @@ fn storage_chat_source_state_v1(
         .and_then(Value::as_str)
         .map(str::to_string);
     if let Some(message) = message.as_ref() {
-        if message.get("chatId").and_then(Value::as_str) != Some(source.aggregate_id.as_str())
+        if message.get("chatId").and_then(Value::as_str) != Some(aggregate_id)
             || message.get("eventSequence").and_then(Value::as_u64) != Some(durable)
         {
             return Err(StorageLifetimeContractError::new(
@@ -4211,8 +4238,31 @@ pub fn validate_storage_event_source_index_transition_v1(
         ));
     };
 
+    validate_storage_chat_transition_fields_v1(
+        &source.aggregate_id,
+        current_durable,
+        current_snapshot.as_deref(),
+        current_message.as_ref(),
+        previous_durable,
+        previous_snapshot.as_deref(),
+        entry.introduced_message_id.as_deref(),
+    )?;
+    Ok(entry)
+}
+
+/// Pure transition predicate shared with the fragment consumer. It does not
+/// validate a source/index/predecessor binding or grant mutation authority.
+pub fn validate_storage_chat_transition_fields_v1(
+    aggregate_id: &str,
+    current_durable: u64,
+    current_snapshot: Option<&str>,
+    current_message: Option<&Value>,
+    previous_durable: u64,
+    previous_snapshot: Option<&str>,
+    introduced_message_id: Option<&str>,
+) -> Result<(), StorageLifetimeContractError> {
     if previous_durable < MAX_SEQUENCE && current_durable == previous_durable + 1 {
-        let message = current_message.as_ref().ok_or_else(|| {
+        let message = current_message.ok_or_else(|| {
             StorageLifetimeContractError::new(
                 "durable sequence increase requires a valid introduced TeamMessage",
             )
@@ -4220,18 +4270,16 @@ pub fn validate_storage_event_source_index_transition_v1(
         let message_sequence = message.get("eventSequence").and_then(Value::as_u64);
         let message_chat_id = message.get("chatId").and_then(Value::as_str);
         if message_sequence != Some(current_durable)
-            || message_chat_id != Some(source.aggregate_id.as_str())
-            || entry.introduced_message_id != current_snapshot
+            || message_chat_id != Some(aggregate_id)
+            || introduced_message_id != current_snapshot
         {
             return Err(StorageLifetimeContractError::new(
                 "message introduction must match current durable sequence, chat, and snapshot",
             ));
         }
     } else if current_durable == previous_durable {
-        if entry.introduced_message_id.is_some()
-            || current_snapshot
-                .as_ref()
-                .is_some_and(|message_id| Some(message_id) != previous_snapshot.as_ref())
+        if introduced_message_id.is_some()
+            || current_snapshot.is_some_and(|message_id| Some(message_id) != previous_snapshot)
         {
             return Err(StorageLifetimeContractError::new(
                 "non-message transition must keep durable sequence and null-or-same snapshot",
@@ -4242,7 +4290,7 @@ pub fn validate_storage_event_source_index_transition_v1(
             "chat durable sequence must stay unchanged or increase by exactly one",
         ));
     }
-    Ok(entry)
+    Ok(())
 }
 
 pub fn validate_storage_lifetime_workspace_project_source_v1(

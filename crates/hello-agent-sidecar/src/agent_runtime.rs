@@ -4101,6 +4101,64 @@ mod budget_tests {
             }
             assert_eq!(snapshot(&connection), before);
             assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+            // The approved fragment path extends accounting, not the V1/R3B
+            // contract above. Its same-connection writer must finish a second
+            // full ready-coverage scan before returning this private result.
+            use crate::storage::reopen::snapshot::{
+                ReopenMaintenanceSession, ReopenMaintenanceStep,
+            };
+            let mut maintenance = ReopenMaintenanceSession::start(&mut connection).unwrap();
+            let mut maintenance_calls = 0;
+            loop {
+                maintenance_calls += 1;
+                assert!(
+                    maintenance_calls < 20_000,
+                    "{name} maintenance did not terminate"
+                );
+                let (usage, done) = match maintenance.step(&mut || false).unwrap() {
+                    ReopenMaintenanceStep::Pending(usage) => (usage, false),
+                    ReopenMaintenanceStep::ReadyVerified(usage) => (usage, true),
+                    ReopenMaintenanceStep::Cancelled => panic!("unexpected cancellation"),
+                };
+                assert!(usage.fragment_bytes <= FRAGMENT_BYTES);
+                assert!(usage.encoded_bytes() <= INPUT_BYTES);
+                assert!(usage.work_units <= 100);
+                if done {
+                    break;
+                }
+            }
+            assert!(maintenance.step(&mut || false).is_err());
+            drop(maintenance);
+            let after = snapshot(&connection);
+            for (table, rows) in &before {
+                if ![
+                    "event_source_index",
+                    "operation_receipts",
+                    "chat_messages",
+                    "prepared_workspaces",
+                    "ledger_baselines",
+                    "lifetime_materialization_job",
+                    "storage_schema_meta",
+                ]
+                .contains(&table.as_str())
+                {
+                    assert_eq!(
+                        &after[table], rows,
+                        "{name}: source/schema changed in {table}"
+                    );
+                }
+            }
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT materialization_state FROM storage_schema_meta",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                "ready"
+            );
+            println!("{name}: approved fragment global/catch-up/ready calls={maintenance_calls}");
             println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={} byte_transport_sources={} byte_transport_calls={transport_calls} canonical_sources={} canonical_calls={canonical_calls}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" }, sources.len(), sources.len());
         }
     }

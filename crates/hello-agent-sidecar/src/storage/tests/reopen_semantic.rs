@@ -8,6 +8,28 @@ use crate::storage::reopen::semantic::{
 };
 
 const STAMP: &str = "2026-09-03T01:00:00Z";
+
+#[test]
+fn s3_transaction_local_progress_preserves_enclosing_budget_and_data() {
+    let (_root, path) = fixture(json!({"array":[1,2,3],"text":"hello"}));
+    let mut c = connection(&path);
+    let before = snapshot(&c);
+    let file = fs::read(&path).unwrap();
+    let expected = identity(&c, "project");
+    let calls =
+        crate::storage::reopen::semantic::transaction_local_for_test(&mut c, expected).unwrap();
+    assert!(calls.len() > 4);
+    for measured in calls {
+        usage(&measured);
+        assert!(measured.metadata_bytes >= 19);
+        assert!(measured.fragment_bytes >= 23);
+        assert!(measured.work_units >= 2);
+    }
+    assert!(c.is_autocommit());
+    assert_eq!(snapshot(&c), before);
+    assert_eq!(fs::read(&path).unwrap(), file);
+}
+
 fn fixture(probe: Value) -> (TempDir, PathBuf) {
     let (root, path) = database();
     let mut storage = Storage::open(&path).unwrap();

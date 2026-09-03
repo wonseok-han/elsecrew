@@ -11,6 +11,7 @@ mod closure;
 mod derived;
 mod projection;
 pub(crate) mod semantic;
+pub(crate) mod snapshot;
 pub(crate) use closure::CompactionPhase;
 #[cfg(test)]
 pub(crate) use closure::{phase_batch_for_test, phase_queries_for_test};

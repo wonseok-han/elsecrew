@@ -300,18 +300,34 @@ fn validate_prepared_chat_workspace(value: &Value) -> Result<&Map<String, Value>
         return fail(format!("{state} preparation cannot have boundChatId"));
     }
     let lifecycle = string(manifest.get("lifecycle"), "prepared manifest lifecycle")?;
+    validate_prepared_workspace_state_fields_v1(
+        state,
+        lifecycle,
+        string(object.get("createdAt"), "createdAt")?,
+        string(object.get("updatedAt"), "updatedAt")?,
+    )?;
+    Ok(object)
+}
+
+/// State/time relation only; manifest, exact keys, schema and identity are
+/// deliberately separate checks for both whole-value and fragment consumers.
+pub fn validate_prepared_workspace_state_fields_v1(
+    state: &str,
+    lifecycle: &str,
+    created_at: &str,
+    updated_at: &str,
+) -> Result<(), G5ContractError> {
     if (state == "abandoned" && lifecycle != "abandoned")
         || (state != "abandoned" && lifecycle != "active")
     {
         return fail("prepared binding state does not match manifest lifecycle");
     }
-    timestamp(object.get("createdAt"), "createdAt")?;
-    timestamp(object.get("updatedAt"), "updatedAt")?;
-    if string(object.get("updatedAt"), "updatedAt")? < string(object.get("createdAt"), "createdAt")?
-    {
+    timestamp_text(created_at, "createdAt")?;
+    timestamp_text(updated_at, "updatedAt")?;
+    if updated_at < created_at {
         return fail("prepared workspace updatedAt must be monotonic");
     }
-    Ok(object)
+    Ok(())
 }
 
 fn validate_prepare_chat_workspace(value: &Value) -> Result<(), G5ContractError> {
@@ -2216,6 +2232,10 @@ fn one_of<'a>(
 
 fn timestamp(value: Option<&Value>, name: &str) -> Result<(), G5ContractError> {
     let value = string(value, name)?;
+    timestamp_text(value, name)
+}
+
+fn timestamp_text(value: &str, name: &str) -> Result<(), G5ContractError> {
     let bytes = value.as_bytes();
     let separators = [
         (4, b'-'),

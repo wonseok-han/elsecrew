@@ -261,6 +261,13 @@ impl Progress {
     pub(super) fn bound(&self) -> &BoundColumn {
         &self.bound
     }
+    pub(super) fn into_complete(mut self) -> Result<(BoundColumn, [u8; 32]), SidecarError> {
+        if self.after != self.bound.byte_length || self.comparison.is_some() {
+            return Err(invalid());
+        }
+        self.parser.finish()?;
+        Ok((self.bound, self.hash.finalize().into()))
+    }
     pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
         self.bound
             .retained_bytes()?

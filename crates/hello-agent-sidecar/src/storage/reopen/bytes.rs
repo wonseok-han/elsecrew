@@ -46,6 +46,102 @@ impl SourceIdentity {
         .into_iter()
         .try_fold(0_usize, |n, s| n.checked_add(s.len()).ok_or_else(invalid))
     }
+
+    /// Discover one internally selected row. Payload TEXT is not selected.
+    /// Length/type preflight precedes every owned metadata allocation.
+    pub(super) fn load(
+        connection: &Connection,
+        column: RawColumn,
+        source_rowid: i64,
+        usage: &mut ByteUsage,
+    ) -> Result<Self, SidecarError> {
+        if source_rowid <= 0 || usage.work_units > 98 {
+            return Err(invalid());
+        }
+        let (table, rowid, payload, event, timestamp) = column.parts();
+        let fields = [
+            event,
+            "operation_id",
+            "aggregate_type",
+            "aggregate_id",
+            "event_type",
+            "request_id",
+            timestamp,
+        ];
+        let bytes = fields
+            .iter()
+            .map(|f| format!("coalesce(length(CAST({f} AS BLOB)),0)"))
+            .collect::<Vec<_>>()
+            .join("+");
+        let types = fields
+            .iter()
+            .map(|f| {
+                if *f == "request_id" {
+                    "typeof(request_id) IN ('text','null')".to_owned()
+                } else {
+                    format!("typeof({f})='text'")
+                }
+            })
+            .chain([
+                format!("typeof({rowid})='integer'"),
+                "typeof(aggregate_sequence)='integer'".into(),
+                "typeof(payload_schema_version)='integer'".into(),
+                format!("typeof({payload})='text'"),
+            ])
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let (size, typed): (i64, bool) = connection
+            .query_row(
+                &format!("SELECT {bytes},({types}) FROM {table} WHERE {rowid}=?1"),
+                [source_rowid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|_| invalid())?;
+        usage.work_units += 1;
+        let size = usize::try_from(size).map_err(|_| invalid())?;
+        if !typed
+            || usage
+                .encoded_bytes()
+                .checked_add(size)
+                .is_none_or(|n| n > INPUT_BYTES)
+        {
+            return Err(invalid());
+        }
+        let identity = connection.query_row(
+            &format!("SELECT {rowid},{event},operation_id,aggregate_type,aggregate_id,aggregate_sequence,payload_schema_version,event_type,request_id,{timestamp} FROM {table} WHERE {rowid}=?1"),
+            [source_rowid], |r| Ok(Self {
+                source_rowid: r.get(0)?, event_id: r.get(1)?, operation_id: r.get(2)?, aggregate_type: r.get(3)?, aggregate_id: r.get(4)?, aggregate_sequence: r.get(5)?, payload_schema_version: r.get(6)?, event_type: r.get(7)?, request_id: r.get(8)?, timestamp: r.get(9)?,
+            }),
+        ).map_err(|_| invalid())?;
+        usage.work_units += 1;
+        usage.metadata_bytes += size;
+        if identity.bytes()? != size {
+            return Err(invalid());
+        }
+        Ok(identity)
+    }
+
+    pub(super) fn validate_metadata(&self) -> Result<(), SidecarError> {
+        if self.source_rowid <= 0 || self.source_rowid as u64 > hello_agent_protocol::MAX_SEQUENCE {
+            return Err(invalid());
+        }
+        hello_agent_protocol::storage_v1::validate_ledger_event_metadata_v1(
+            &hello_agent_protocol::storage_v1::LedgerEventMetadataV1 {
+                event_id: &self.event_id,
+                operation_id: &self.operation_id,
+                request_id: self.request_id.as_deref(),
+                aggregate_type: &self.aggregate_type,
+                aggregate_id: &self.aggregate_id,
+                aggregate_sequence: u64::try_from(self.aggregate_sequence)
+                    .map_err(|_| invalid())?,
+                event_type: &self.event_type,
+                payload_schema_version: u32::try_from(self.payload_schema_version)
+                    .map_err(|_| invalid())?,
+                timestamp: &self.timestamp,
+            },
+        )
+        .map_err(|_| invalid())
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -106,6 +202,12 @@ impl BoundColumn {
 
     pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
         self.expected.bytes()
+    }
+    pub(super) fn identity(&self) -> &SourceIdentity {
+        &self.expected
+    }
+    pub(super) fn into_identity(self) -> SourceIdentity {
+        self.expected
     }
     pub(super) fn bind_projection(
         &self,
@@ -657,6 +759,9 @@ fn metadata(
     expected: &SourceIdentity,
     usage: &mut ByteUsage,
 ) -> Result<u64, SidecarError> {
+    if usage.work_units > 98 {
+        return Err(invalid());
+    }
     let (preflight, query) = column.metadata_queries();
     let (size, typed, length) =
         with_locator(connection, &preflight, column, expected, 0, 0, |row| {
@@ -678,6 +783,7 @@ fn metadata(
     {
         return Err(invalid());
     }
+    let before = usage.metadata_bytes;
     let matched = with_locator(connection, &query, column, expected, 0, 0, |row| {
         let mut matched = row.get::<_, i64>(0)? == expected.source_rowid
             && row.get::<_, i64>(5)? == expected.aggregate_sequence
@@ -703,7 +809,7 @@ fn metadata(
         Ok(matched)
     })?;
     usage.work_units += 1;
-    if !matched || usage.metadata_bytes != size {
+    if !matched || usage.metadata_bytes.checked_sub(before) != Some(size) {
         return Err(invalid());
     }
     Ok(length)

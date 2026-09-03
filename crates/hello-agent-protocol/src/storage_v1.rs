@@ -358,19 +358,49 @@ pub fn validate_foreign_keys_enabled_v1(value: u32) -> Result<(), StorageContrac
 }
 
 fn validate_ledger_event(event: &LedgerEventV1) -> Result<(), StorageContractError> {
+    validate_ledger_event_metadata_v1(&LedgerEventMetadataV1 {
+        event_id: &event.event_id,
+        operation_id: &event.operation_id,
+        request_id: event.request_id.as_deref(),
+        aggregate_type: &event.aggregate_type,
+        aggregate_id: &event.aggregate_id,
+        aggregate_sequence: event.aggregate_sequence,
+        event_type: &event.event_type,
+        payload_schema_version: event.payload_schema_version,
+        timestamp: &event.timestamp,
+    })
+}
+
+/// Borrowed metadata only. This is not a canonical payload, source-provenance or
+/// replay proof; fragment consumers must validate those independently.
+pub struct LedgerEventMetadataV1<'a> {
+    pub event_id: &'a str,
+    pub operation_id: &'a str,
+    pub request_id: Option<&'a str>,
+    pub aggregate_type: &'a str,
+    pub aggregate_id: &'a str,
+    pub aggregate_sequence: u64,
+    pub event_type: &'a str,
+    pub payload_schema_version: u32,
+    pub timestamp: &'a str,
+}
+
+pub fn validate_ledger_event_metadata_v1(
+    event: &LedgerEventMetadataV1<'_>,
+) -> Result<(), StorageContractError> {
     for (name, value) in [
-        ("event_id", event.event_id.as_str()),
-        ("operation_id", event.operation_id.as_str()),
-        ("aggregate_id", event.aggregate_id.as_str()),
-        ("event_type", event.event_type.as_str()),
-        ("timestamp", event.timestamp.as_str()),
+        ("event_id", event.event_id),
+        ("operation_id", event.operation_id),
+        ("aggregate_id", event.aggregate_id),
+        ("event_type", event.event_type),
+        ("timestamp", event.timestamp),
     ] {
         require_id(value, name)?;
     }
-    if let Some(request_id) = &event.request_id {
+    if let Some(request_id) = event.request_id {
         require_id(request_id, "request_id")?;
     }
-    aggregate_table(&event.aggregate_type)?;
+    aggregate_table(event.aggregate_type)?;
     if event.aggregate_sequence == 0 || event.aggregate_sequence > super::MAX_SEQUENCE {
         return Err(StorageContractError::new(
             "aggregate_sequence must be between 1 and 2^53-1",

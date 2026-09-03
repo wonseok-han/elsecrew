@@ -356,3 +356,70 @@ fn fixture_cases(root: &Path, file: &str) -> FixtureCases {
     let source = fs::read(root.join(file)).expect("read project fixture cases");
     serde_json::from_slice(&source).expect("decode project fixture cases")
 }
+
+#[test]
+fn fragment_absolute_path_preserves_v1_predicate_at_every_byte_split() {
+    fn legacy(path: &str) -> bool {
+        let windows = path.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
+            && path.as_bytes().get(1) == Some(&b':')
+            && path.as_bytes().get(2) == Some(&b'/');
+        !path.is_empty()
+            && (path.starts_with('/') || windows)
+            && !path.ends_with('/')
+            && !path.contains('\\')
+            && !path
+                .split('/')
+                .skip(1)
+                .any(|part| part.is_empty() || part == "." || part == "..")
+    }
+    for path in [
+        "",
+        "/",
+        "C:/",
+        "C:/x",
+        "c:/x",
+        "relative",
+        "/a/b",
+        "/a//b",
+        "/./b",
+        "/a/..",
+        "/...",
+        "/a\\b",
+        "/한글/🙂",
+        "/nul\0path",
+        "D:/한글/é",
+        "//server/share",
+    ] {
+        for split in 0..=path.len() {
+            let mut scan = AbsolutePathScanV1::default();
+            let accepted = scan
+                .push(&path.as_bytes()[..split])
+                .and_then(|()| scan.push(&path.as_bytes()[split..]))
+                .and_then(|()| scan.finish("path"))
+                .is_ok();
+            assert_eq!(accepted, legacy(path), "{path:?} at {split}");
+        }
+        let mut scan = AbsolutePathScanV1::default();
+        let accepted = path
+            .as_bytes()
+            .chunks(1)
+            .try_for_each(|part| scan.push(part))
+            .and_then(|()| scan.finish("path"))
+            .is_ok();
+        assert_eq!(accepted, legacy(path), "one byte {path:?}");
+    }
+    let path = format!("/{}", "한글🙂".repeat(150_000));
+    let mut scan = AbsolutePathScanV1::default();
+    for part in path.as_bytes().chunks(65_536) {
+        scan.push(part).unwrap();
+    }
+    scan.finish("large path").unwrap();
+    for bytes in [&b"/\xff"[..], &b"/\xe0\x80\x80"[..], &b"/\xf0\x9f"[..]] {
+        let mut scan = AbsolutePathScanV1::default();
+        assert!(bytes
+            .chunks(1)
+            .try_for_each(|part| scan.push(part))
+            .and_then(|()| scan.finish("bad UTF-8"))
+            .is_err());
+    }
+}
