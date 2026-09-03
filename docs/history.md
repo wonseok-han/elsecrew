@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (G6 staging 수리 통합 후보)
+
+- **반영**: `aa2ed7c`의 3파일 staging 수리는 exact-commit 단일 독립 리뷰 PASS를 받았다. Cargo artifact 경로 선택의 Node 회귀 7개·syntax/diff exit 0와 검토된 source 동일성을 확인하고 M5에 통합한다. 양쪽 history 원문은 모두 보존했다.
+- **남은 검증**: QA 담당은 이전 통합의 변경 없는 Rust 회귀를 계속 실행한다. 해당 결과는 동일 Rust source에 재사용하며 새 통합에서 실제 package/smoke·ZIP·크기를 별도로 검증한다. 현재는 그 실제 패키징 결과 전이므로 전체 누적 gate/G6 완료를 주장하지 않는다. 정책/인증 확인 대기·main 미병합·push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (누적 QA 재개·공유 target 패키징 결함)
 
 - **환경 후속**: 세 번째 하네스의 frontend-unit 중단은 실제 테스트 실패가 아니라 `spawnSync npm ENOENT`였다. 기존 nvm npm 12.0.2 경로를 추가했고 bundled Node·pnpm 및 자동 install 차단은 유지했다. 다음 원본 하네스에서 frontend build/unit, 기존 Rust 105 passed/13 ignored와 Electron Node 47 passed를 확인했다.
@@ -27,6 +32,11 @@
 - **관측·원인**: exact `180cb885`의 clean detached QA 폴더에서 sidecar debug build 뒤 누적 하네스가 frontend build 진입 시 exit 1로 멈췄다. node_modules가 없는 폴더에서 pnpm이 의존성 설치를 시도했고 격리 네트워크의 registry ENOTFOUND가 발생했다. 앞선 diff 두 단계 외 실제 build/test는 시작하지 않았으므로 코드 테스트 실패나 QA PASS로 표시하지 않는다.
 - **수리·검증**: root의 기존 node_modules와 QA 기준의 package.json/pnpm-lock.yaml/pnpm-workspace.yaml이 동일한 의존성 구성을 사용함을 확인하고, QA 폴더의 없던 node_modules만 기존 root 설치본을 가리키는 symlink로 연결했다. source/lock/설정·기존 설치본을 수정하거나 새 다운로드하지 않았고 tracked tree는 clean이다. debug build는 재사용하며 실패 원본을 보존한 채 하네스에서 아직 실행되지 않은 build/test를 진행한다.
 - **다음**: QA 담당의 최종 누적 결과 및 fresh package/skip-package ZIP 크기 결과를 기다린다. 상세 증거는 QA 폴더 `.artifacts/m5-qa/180cb885f315f951d14ba11c989c899ae4120809-s1-s3-wave/`에 남긴다. 실제 provider/auth/사용자 프로젝트/Windows·main 병합·push 없음.
+
+### 2026-09-03 · by GPT-5.6-Sol (G6 sidecar staging artifact 경로 수리)
+
+- **수리**: `m5-stage-sidecar.mjs`의 repo-relative `target/release` 가정을 제거했다. 같은 Cargo build의 JSON artifact에서 exact sidecar manifest/bin/non-test executable 하나만 선택해 shared/configured target·target triple을 추측하지 않는다. 실패/없음/모호한 artifact는 복사 전에 거부하며 기존 resources/sidecar 목적지와 chmod는 유지한다. Karpathy 지침에 따라 script·새 VM 회귀·history 3파일에 한정했다.
+- **검증·다음**: 가짜 spawn/filesystem 기반 Node focused 7 passed(75.7805ms), syntax/diff exit 0. 기본/shared/custom target·cached artifact·무관한 artifact·Windows 이름/무chmod·build 실패/잘못된 JSON/없음/중복 artifact의 무변경을 검사했다. 원본 명령/actual exit는 `/tmp/g6-sidecar-staging.i54lOp/manifest.md`다. 실제 Cargo·package·Windows 실행은 하지 않았고 QA 담당의 통합 재실행과 단일 독립 리뷰가 남는다. 이전 S3 branch 보존, merge/rebase/cherry-pick/push 없음.
 
 ### 2026-09-03 · by GPT-5.6-Sol (S3 의미·SQLite mirror 통합 및 파동 QA 준비)
 
@@ -340,6 +350,7 @@
 
 - **pnpm worktree 설치 재사용 함정(2026-09-03)**: bundled pnpm 11.19.0은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 자동 install을 명시적으로 끄고(`pnpm_config_verify_deps_before_run=false`, 자식에도 전달) 실행한다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
 - **큰 source catch-up 정책 경계(2026-09-03)**: protocol `storage_lifetime_v1.rs`의 batch payload 검사·exact `single_source_payload_oversize == "contractError"`·workspace source 검사와 storage-v2/v3 golden은 개별 source 1 MiB 초과를 거부한다. 호출당 1 MiB fragment로 큰 기록을 수락하는 것은 숫자가 같아도 정책 확장이다. §16 제안의 사용자 승인 전에는 기존 validator/fixture/제품 수락을 변경하지 않는다.
+- **G6 staging 경로(2026-09-03)**: Cargo target 위치는 환경·config·target triple에 따라 달라진다. staging은 build JSON의 해당 manifest/bin executable을 쓰며 root/target 또는 PATH fallback을 하지 않는다. 실제 artifact 없는 성공 exit만으로 이전 binary를 복사하지 않는다.
 
 - **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.
 - **S3 한 행 호환성의 범위(2026-09-03)**: projection은 losing duplicate와 overlay 이전 값까지 문법 검증한 뒤 serde의 마지막 duplicate·루트 typed sequence와 exact-row SQLite의 첫 duplicate/evidence 표현을 각각 보존해야 한다. 긴 projection 숫자의 입력 길이를 S2 canonical 24-byte 출력 한계로 제한하지 않는다. S3의 재개 가능한 숫자 state/최대 33-byte 내부 Number 재구성 및 보존 parsed Number 예산은 이 구분을 지킨다. 한 행 의미/mirror 결과는 글로벌 source/provenance/admission 권위가 아니다.

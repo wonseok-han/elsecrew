@@ -1,5 +1,5 @@
 import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -9,17 +9,31 @@ if (!resourcesDirectory) throw new Error("usage: node scripts/m5-stage-sidecar.m
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const suffix = process.platform === "win32" ? ".exe" : "";
 const binary = `hello-agent-sidecar${suffix}`;
-const build = spawnSync("cargo", ["build", "--locked", "--release", "-p", "hello-agent-sidecar"], {
+const build = spawnSync("cargo", ["build", "--locked", "--release", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json-render-diagnostics"], {
   cwd: root,
-  stdio: "inherit",
+  stdio: ["inherit", "pipe", "inherit"],
+  encoding: "utf8",
 });
 if (build.status !== 0 || build.error) {
   throw build.error ?? new Error(`sidecar build failed with exit ${String(build.status)}`);
 }
 
+// Cargo reports the resolved artifact location, including target-dir config and
+// target triples. Never fall back to a possibly stale root/target executable.
+const artifacts = (build.stdout ?? "").split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line)).filter((message) =>
+  message?.reason === "compiler-artifact"
+  && message.manifest_path === resolve(root, "crates", "hello-agent-sidecar", "Cargo.toml")
+  && message.target?.name === "hello-agent-sidecar"
+  && Array.isArray(message.target.kind) && message.target.kind.includes("bin")
+  && message.profile?.test === false
+);
+if (artifacts.length !== 1 || typeof artifacts[0].executable !== "string" || !isAbsolute(artifacts[0].executable)) {
+  throw new Error("sidecar build did not report exactly one executable artifact");
+}
+const source = artifacts[0].executable;
+
 const destinationDirectory = resolve(resourcesDirectory, "sidecar");
 mkdirSync(destinationDirectory, { recursive: true });
-const source = resolve(root, "target", "release", binary);
 const destination = resolve(destinationDirectory, binary);
 copyFileSync(source, destination);
 if (process.platform !== "win32") chmodSync(destination, 0o755);
