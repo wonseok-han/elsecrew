@@ -9,6 +9,14 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 구현·생산 fixture 결합 중)
+
+- **분담**: 동일 base의 `codex/g5d-workspace-snapshot-fixture`(기존 `.worktrees/g5d-r3c-byte-transport` 재사용) 담당이 `chat/tests.rs`의 생산 101-workspace fixture를 작성했다. root가 수정 test와 담당 history를 주 구현 worktree에 patch로 보존 결합했으며 이후 해당 파일 소유권은 주 담당으로 돌아간다. 새 `storage/tests/reopen_snapshot.rs`의 정상/취소/외부 변경/READ·COMMIT 실패 회귀 5개와 mod 선언도 결합해 실행을 한곳에 모았다. 긴 경로·historical resolver와 파생 기록 저장은 private `reopen/snapshot/{workspace,catchup}.rs` 구체 소비자 분리까지 주 담당 소유로 허용한다.
+- **검증·다음**: exact fixture는 생성·manifest/파일·checkpoint/drop을 완료한 뒤 raw projection과 typed sequence overlay의 테스트 비교 오류로 314.70초/exit 101이었다. 비교 수리의 fmt/diff는 exit 0이나 재실행은 보류하고 새 session 최종 assertion과 결합해 한 번 실행한다. 원본 실패는 `/tmp/g5d-workspace-snapshot.eHFS3M/manifest.md`에 보존한다. 전역 catch-up/ready·독립 리뷰·파동 QA는 아직 미완료이며 source/helper를 완료 커밋으로 나누지 않는다.
+- **결합 검증 후속**: small/failure 5개·확장 8개와 §10 actual snapshot exact 1개는 주 담당의 focused 실행에서 통과했다. production101 결합 실행은 생성·607 events/405 project sources/101 members 대조 뒤 30,000-call 테스트 guard에 도달했다(341.77초/exit 101). root는 종료 전 SQLite read-only online backup을 `/tmp/g5d-production-evidence.NX3udd/production-observed.sqlite3`에 보존했다(607/405 sources·101 members·pending/derived0, quick_check ok). 원본 backup과 실패 로그를 유지하고 복사본에서 무진행/guard 가정을 구분하며 제품 예산은 바꾸지 않는다. 상세·hash는 같은 폴더 manifest다.
+- **기능 후보**: `5ad71629c18953c07520af23c47b82861c9900ab`의 21파일을 단일 독립 리뷰에 보냈다. 최종 maintenance 11·S3 19·protocol/golden 43과 actual-run exact 1의 focused 증거, sidecar strict/fmt/diff exit 0을 확인했다. protocol strict는 byte 동일한 기존 lint 3개로 exit 101이며 성공으로 접지 않는다. 정상 production101의 수정 guard 경로와 전체 Rust는 통합 QA에서 한 번 검증하며, 현재는 M5 미통합이다.
+- **독립 리뷰·통합 준비**: 동일 exact commit의 읽기 전용 독립 리뷰가 PASS(차단 finding 없음)다. source hash·동일 연결·실패/취소·budget·ready publication 경계를 대조했으며 정상 production101의 fresh 완주는 통합 QA로 남겼다. `docs/README.md`에 §16 위치를 추가하고 작업 기록을 보존한 뒤 통합한다. QA는 최신 통합 SHA의 workspace Rust를 한 번 실행하며 동일 Rust subset을 반복하지 않는다. byte 동일한 Node/renderer 증거만 재사용하고 새 sidecar의 release package PASS는 주장하지 않는다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (승인된 전역 snapshot 연결 착수)
 
 - **작업 계약**: base `b92a2ecbab00e0ca380546d6bf078e18aa7d21cf`, `codex/g5d-snapshot-catchup`·`.worktrees/g5d-snapshot-catchup`에서 Rust 담당이 §16의 전역 검증→catch-up→ready coverage를 구현한다. storage/reopen·lifetime와 관련 protocol 순수 판정/테스트를 단일 소유하며 기존 V1/golden·예산·제품 fence·실제 provider는 바꾸지 않는다. root는 인계/통합, 기능 완료 뒤 독립 리뷰 1명과 파동 QA를 맡는다.
@@ -175,6 +183,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **큰 snapshot 처리와 제품 준비 시간은 별개(2026-09-03)**: 개발 중인 새 전역 경로는 실제 생산 101-workspace DB의 보존 복사본(607 source rows)을 172,685 calls/약 98.288초에 복원·ready 재검증했다. 30,000-call 테스트 guard 실패는 무진행이 아니라 예상 횟수 부족이었다. 이 내부 정확성 관측은 3초 제품 ready 충족이나 startup/admission 활성화가 아니다. 제품 시간·1 MiB fresh/8 MiB retained+fresh/100 work·100 frozen-operation fence는 유지한다. 실패한 생성 테스트와 보존본 replay 성공을 구분하고 원본 DB는 `/tmp/g5d-production-evidence.NX3udd/manifest.md`의 SHA로 고정한다.
 
 - **pnpm worktree 설치 재사용 함정(2026-09-03)**: bundled pnpm 11.19.0은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 자동 install을 명시적으로 끄고(`pnpm_config_verify_deps_before_run=false`, 자식에도 전달) 실행한다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
 - **큰 source catch-up 정책 경계(2026-09-03 승인)**: 기존 protocol batch/workspace source 검사·exact `single_source_payload_oversize == "contractError"`·storage-v2/v3 golden은 개별 source 1 MiB 초과 거부를 유지한다. 사용자는 §16의 새 분할 경로에 한해 호출당 1 MiB fresh/8 MiB retained+fresh/100 work로 큰 기록을 처리하는 확장을 승인했다. 기존 V1 계약을 덮어쓰지 않고 새 경로·중단/재시작 회귀로 구분하며 제품 활성화는 구현·검증 뒤 별도 완료한다.

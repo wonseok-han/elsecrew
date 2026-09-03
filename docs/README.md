@@ -39,7 +39,7 @@
 Electron/Rust sidecar 수직 스파이크의 저장소 구조, typed IPC·JSONL protocol, SQLite 복구 계약, 보안 경계, 큰 파일·diff·다중 채팅 fixture와 수치 합격선을 고정한 구현 명세. 초기 구현의 출발 계약이며 **현재 구현 구조와 게이트는 `architecture.md`와 `history.md`를 우선**한다.
 
 **G5D 압축 기록 재검증의 후속 계약을 확인할 때 → [`proposals/m5-storage-reopen-verification.md`](proposals/m5-storage-reopen-verification.md)**
-V8을 유지하는 내부 R1 frozen-operation·R2 압축 관련 source/prefix/message·R3A ledger/projection·R3B 파생 기록 검증 계약과 R3C 전체 재오픈 활성화의 남은 게이트. §10은 정상 저장 snapshot의 크기 호환성 진단, §11–12는 큰 기록의 private byte transport, §13은 legacy oracle, §14는 canonical scanner, §15는 한 행 의미/SQLite mirror 비교 계약이다. 구현 사실은 `architecture.md`에서 확인하며 내부 단계의 성공을 제품 ready 또는 100개 초과 재오픈 지원으로 해석하지 않는다.
+V8을 유지하는 내부 R1 frozen-operation·R2 압축 관련 source/prefix/message·R3A ledger/projection·R3B 파생 기록 검증 계약과 R3C 전체 재오픈 활성화의 남은 게이트. §10은 정상 저장 snapshot의 크기 호환성 진단, §11–12는 큰 기록의 private byte transport, §13은 legacy oracle, §14는 canonical scanner, §15는 한 행 의미/SQLite mirror 비교, §16은 승인된 분할 처리 정책과 전역 검증→catch-up→ready 재검증 계약이다. 구현 사실은 `architecture.md`에서 확인하며 내부 단계의 성공을 제품 ready 또는 100개 초과 재오픈 지원으로 해석하지 않는다.
 
 **M5 작업대 화면을 직접 조작해 볼 때 → [`proposals/m5-agent-ide-concept.html`](proposals/m5-agent-ide-concept.html)**
 여러 프로젝트, 재배치 가능한 패널, 파일·변경 탐색, 프로젝트별 역할/모델 설정과 역할 간 팀 대화를 담은 독립 실행형 인터랙티브 시안. 제안서의 동반 검토 자료이며 제품 구현이 아니다.
