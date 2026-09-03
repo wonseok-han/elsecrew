@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (R3C-S2 canonical source scanner)
+
+- **범위·구현**: §14의 private `CanonicalColumnSession`과 S1의 구체적 `BoundColumn` 읽기 추출을 구현했다. 전체 source/Value/key 없이 문법·canonical escape·UTF-8·혼합 깊이 127·실제 serde 숫자 출력·인접 decoded key 순서를 검사한다. 동일 연결·epoch/identity/길이 재검사, 1 MiB fresh/8 MiB retained+fresh/100 work, COMMIT 뒤 진행 보존과 오류·취소 terminal 폐기를 유지한다. 숫자 24-byte 출력 근거는 잠긴 serde_json 1.0.150/zmij 1.0.23와 실제 unified `default,std` 기능을 확인했다. 이는 canonical bytes 정보이며 의미/권위/admission 검증이 아니다.
+- **검증·발견**: canonical 10 passed(42.88초), S1 기존 12 passed(22.33초), §10 exact 1 passed(25.11초). 실제 run source 41개를 S2 522 calls로 검사했고 큰 두 사례의 기존 R3B 거부·small 완료 및 S1 결과는 유지했다. 세 주소의 late malformed/UTF8·hash, main/key 취소·같은 길이 외부 commit·busy BEGIN·실제 SQLite READ/COMMIT 거부와 DB/schema/typed rows/file bytes 불변을 확인했다. 긴 공통 키의 pending-byte read 교대 문제를 수정하여 1 MiB+3 prefix는 5 calls, 8 MiB+3은 33 calls로 통과했다. 작은 fresh 예산/상이한 escape 폭과 취소 중복 poll 회귀도 통과했다. 관련 raw 명령·actual exit·중단/실패 구분·수치는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 있다.
+- **정적·다음·보존**: scoped strict clippy·Rust 2021 format·diff check exit 0이다. 최초 clippy의 test observability tuple type-complexity 경고는 의미 변화 없는 내부 type alias로 정리했다. 앞선 oracle `7eeca1d`와 이번 scanner를 한 S2 묶음으로 단일 독립 리뷰한다. 기존 S1 API·R1–R3B·schema/protocol/deps·안전 예산·제품 open/append/recovery·100-operation fence는 불변이다. Karpathy 지침에 따라 소유 범위의 구체적 읽기 추출만 추가했고 제품 연결이나 범용 reader를 만들지 않았다. Cargo jobs/threads 4·단일 실행(nice sandbox 미허용)을 지켰다. 전체 sidecar/stdio/누적 QA는 이번에 실행하지 않았으며 과거 full exit 143은 여전히 미완료다. S3 projection 의미·SQLite mirror 동등성, catch-up/startup/admission·실제 provider/Windows 및 파동 마감 누적 QA가 남는다. merge/rebase/cherry-pick/push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S2 전 실제 V8 acceptance oracle 회귀)
 
 - **범위·발견**: §13의 primitive 추정을 ordinary append·ready materialization으로 만든 정상 소형 V8의 43사례로 고정했다. 새 `storage/tests/reopen_oracles.rs`와 module 등록·이번 history만 변경했다. serde replay equality, SQLite mirror, `verify_projection_replay`, 실제 `Storage::open`, 전체 private R3A를 따로 assert한다. indexed duplicate first-wrong/last-correct와 lock evidence key순서·escape의 단측 차이는 legacy가 거부하지만 R3A가 허용했다. 동일 duplicate·정상 마지막 nonindexed 값·공백·typed sequence overlay의 기존 수락은 유지된다. 숫자 1/1.0/bool/null은 정상 nonindexed source의 타입별 의미 비교와, 유효 pid=1/invalid pid 3개 ordinary write 거부를 분리했다.
@@ -249,6 +255,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **S2 canonical source는 의미/admission 증거가 아니다(2026-09-03)**: 새 scanner는 schema bootstrap을 제외한 호출당 fresh main+key 재읽기 1 MiB, retained+fresh 8 MiB, work 100을 유지한다. 전체 key를 보관하지 않고 adjacent source span을 decoded UTF-8 byte로 비교한다. pending decoded byte 뒤의 다음 조각도 함께 읽되 작은 잔여 예산을 필요한 반대편에 예약해야 교대 대량 재읽기/무진전 오류를 피한다. 숫자 24-byte는 현재 serde/zmij canonical 출력 image 근거이며 관대한 projection 입력 상한으로 재사용하면 안 된다. 관련 회귀/실측은 `storage/tests/reopen_canonical.rs`와 S2 evidence manifest에 있다.
 
 - **S2 legacy oracle은 R3A 단독이 아니다(2026-09-03)**: 실제 정상 V8 fixture에서 indexed JSON duplicate의 첫 값이 틀리고 마지막만 맞거나 lock evidence key순서/escape가 한쪽만 다르면 private R3A는 허용해도 legacy SQLite mirror·Storage reopen은 거부한다. 반대로 동일 duplicate/정상 마지막 nonindexed 값/공백/typed sequence overlay는 수락된다. `storage::tests::reopen_oracles::s2_legacy_oracle*` 6개가 실제 DB 43사례를 고정하므로 S2 의미 동등성은 serde map과 SQLite mirror를 함께 보존해야 한다.
 

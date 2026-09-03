@@ -10,6 +10,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 mod reopen_bytes;
+mod reopen_canonical;
 mod reopen_closure;
 mod reopen_derived;
 mod reopen_oracles;

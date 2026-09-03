@@ -4002,14 +4002,19 @@ mod budget_tests {
                 RawColumn, RawColumnSession, RawColumnStep, SourceIdentity, FRAGMENT_BYTES,
                 INPUT_BYTES,
             };
+            use crate::storage::reopen::canonical::{CanonicalColumnSession, CanonicalColumnStep};
             use sha2::{Digest, Sha256};
             let mut transport_calls = 0;
+            let mut canonical_calls = 0;
             for (rowid, measured) in &sources {
-                let (expected, oracle) = connection.query_row(
+                let source = |connection: &rusqlite::Connection| {
+                    connection.query_row(
                     "SELECT rowid,event_id,operation_id,aggregate_type,aggregate_id,aggregate_sequence,payload_schema_version,event_type,request_id,timestamp,CAST(canonical_json_payload AS BLOB) FROM events WHERE rowid=?1",
                     [i64::try_from(*rowid).unwrap()], |r| Ok((SourceIdentity {
                         source_rowid:r.get(0)?,event_id:r.get(1)?,operation_id:r.get(2)?,aggregate_type:r.get(3)?,aggregate_id:r.get(4)?,aggregate_sequence:r.get(5)?,payload_schema_version:r.get(6)?,event_type:r.get(7)?,request_id:r.get(8)?,timestamp:r.get(9)?,
-                    },r.get::<_,Vec<u8>>(10)?))).unwrap();
+                    },r.get::<_,Vec<u8>>(10)?))).unwrap()
+                };
+                let (expected, oracle) = source(&connection);
                 assert_eq!(oracle.len(), *measured);
                 let mut transport =
                     RawColumnSession::start(&mut connection, RawColumn::EventPayload, expected)
@@ -4045,10 +4050,58 @@ mod budget_tests {
                     }
                 }
                 assert!(transport.step(&mut || false).is_err());
+                drop(transport);
+                // S2 verifies canonical byte spelling, not typed semantics or
+                // admission. The Value parse here is only the fixture oracle.
+                let value: serde_json::Value = serde_json::from_slice(&oracle).unwrap();
+                assert_eq!(
+                    hello_agent_protocol::storage_v1::canonical_json_v1(value)
+                        .unwrap()
+                        .as_bytes(),
+                    oracle
+                );
+                let (expected, _) = source(&connection);
+                let mut canonical = CanonicalColumnSession::start(
+                    &mut connection,
+                    RawColumn::EventPayload,
+                    expected,
+                )
+                .unwrap();
+                let mut consumed = 0;
+                loop {
+                    canonical_calls += 1;
+                    let (usage, done) = match canonical.step(&mut || false).unwrap() {
+                        CanonicalColumnStep::Pending(usage) => (usage, false),
+                        CanonicalColumnStep::CanonicalComplete {
+                            byte_length,
+                            sha256,
+                            usage,
+                        } => {
+                            assert_eq!(byte_length, oracle.len() as u64);
+                            assert_eq!(sha256, <[u8; 32]>::from(Sha256::digest(&oracle)));
+                            (usage, true)
+                        }
+                        other => panic!("unexpected canonical transport {other:?}"),
+                    };
+                    assert_eq!(
+                        usage.input.fragment_bytes,
+                        usage.main_read_bytes + usage.key_read_bytes
+                    );
+                    assert!(usage.input.fragment_bytes <= FRAGMENT_BYTES);
+                    assert!(usage.input.encoded_bytes() <= INPUT_BYTES);
+                    assert!(usage.input.work_units <= 100);
+                    consumed += usage.main_consumed_bytes;
+                    assert!(consumed <= oracle.len());
+                    if done {
+                        assert_eq!(consumed, oracle.len());
+                        break;
+                    }
+                }
+                assert!(canonical.step(&mut || false).is_err());
             }
             assert_eq!(snapshot(&connection), before);
             assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
-            println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={} byte_transport_sources={} byte_transport_calls={transport_calls}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" }, sources.len());
+            println!("{name}: events={} raw_text_bytes={} cumulative_snapshot_bytes={} first_oversized={first_oversized:?} max_run_source_bytes={maximum} full_pending_calls={pending_calls} storage_reopen=ok private_result={} byte_transport_sources={} byte_transport_calls={transport_calls} canonical_sources={} canonical_calls={canonical_calls}", metrics.event_count, metrics.text_bytes, metrics.cumulative_snapshot_bytes, if oversized { "storageSchemaMismatch" } else { "DerivedRecordsVerified" }, sources.len(), sources.len());
         }
     }
 
