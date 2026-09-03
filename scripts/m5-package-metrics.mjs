@@ -180,9 +180,18 @@ function expectedLayout(platform) {
 
 async function assertRecognizedLayout(packagePath, platform) {
   for (const relativePath of expectedLayout(platform)) {
-    const path = resolve(packagePath, relativePath);
-    assertWithin(packagePath, path);
-    await assertRegularFile(path, `required package asset ${relativePath}`);
+    const parts = relativePath.split("/");
+    let current = packagePath;
+    for (const [index, part] of parts.entries()) {
+      current = resolve(current, part);
+      assertWithin(packagePath, current);
+      const relative = parts.slice(0, index + 1).join("/");
+      if (index === parts.length - 1) {
+        await assertNonEmptyRegularFile(current, `required package asset ${relative}`);
+      } else {
+        await assertDirectory(current, `required package directory ${relative}`);
+      }
+    }
   }
 }
 
@@ -279,6 +288,14 @@ async function assertDirectory(path, label) {
 async function assertRegularFile(path, label) {
   const stats = await lstatChecked(path, label);
   if (!stats.isFile()) throw new PackageMetricsError("wrongKind", `${label} must be a regular file: ${path}`);
+  return stats;
+}
+
+async function assertNonEmptyRegularFile(path, label) {
+  const stats = await assertRegularFile(path, label);
+  if (stats.size === 0n) {
+    throw new PackageMetricsError("emptyRequiredAsset", `${label} must not be empty: ${path}`);
+  }
   return stats;
 }
 

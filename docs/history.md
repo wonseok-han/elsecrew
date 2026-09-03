@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size collector review fix)
+
+- **검토 수리**: `1ecefff` 독립 검토의 두 차단 finding만 보완했다. fixed executable·`app.asar`·staged sidecar는 regular file이면서 0 byte가 아니어야 하며, supplied package root 아래 fixed layout의 모든 intermediate component는 symlink가 아닌 real directory여야 한다. 따라서 symlink parent가 external assets를 가리키지만 walk에는 link-text만 남겨 작은 package가 거짓 `PASS`가 되는 경로를 `NOT_READY`로 막는다. supplied root 상위 ancestor의 symlink나 mode-bit 접근성은 metadata-size-only 범위에 추가하지 않았다.
+- **회귀·검증**: 세 required asset 각각의 zero-byte rejection과 `hello-agent.app`/`Contents`/`Resources` external-parent symlink rejection을 추가했다. bundled Node `v24.19.0`의 `node --check scripts/m5-package-metrics.mjs` 및 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`는 10/10 PASS(exit 0), `git diff --check` exit 0이다. package/make, Cargo, full suite와 실제 artifact 측정은 여전히 실행하지 않았다.
+- **다음**: 이 corrective commit은 original feature commit과 별도이며 root의 incremental reviewer 확인과 통합이 남는다. package-size-only/local-only 한계와 Windows measure-only `NOT_READY`는 변하지 않는다.
+
 ### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size 측정 도구)
 
 - **구현·범위**: `scripts/m5-package-metrics.mjs`에 명시 `--platform`/`--arch`/`--package`/선택 `--archive` 입력의 재사용 가능한 pure collector와 JSON CLI를 추가했다. macOS arm64의 unpacked 350 MiB·compressed 200 MiB 잠정 한계를 exact byte 문자열로 비교하고 Windows x64/arm64는 값을 측정하되 threshold 없는 `NOT_READY`로 끝낸다. unpacked는 regular-file length + symlink link-text bytes이며 symlink를 따라가지 않는다. 필요한 executable·`app.asar`·staged sidecar layout, regular archive, `.zip` signature, bounded directory walk를 확인하고 metadata 변화가 관찰되면 `NOT_READY`로 invalidates한다.

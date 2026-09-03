@@ -76,6 +76,61 @@ test("missing required package evidence, wrong kinds, and invalid ZIP signatures
   });
 });
 
+test("each required product asset must be non-empty", async () => {
+  for (const relativePath of [
+    "hello-agent.app/Contents/MacOS/hello-agent",
+    "hello-agent.app/Contents/Resources/app.asar",
+    "hello-agent.app/Contents/Resources/sidecar/hello-agent-sidecar",
+  ]) {
+    await withFixture(async (fixture) => {
+      await truncate(resolve(fixture.package, relativePath), 0);
+      const report = await collectPackageMetrics({ platform: "darwin", arch: "arm64", ...fixture });
+      assert.equal(report.status, "NOT_READY", relativePath);
+      assert.equal(report.reasons[0]?.code, "emptyRequiredAsset", relativePath);
+    });
+  }
+});
+
+test("fixed package-layout parents cannot be symlinks to external assets", async () => {
+  const cases = [
+    {
+      parent: "hello-agent.app",
+      files: [
+        ["Contents/MacOS/hello-agent", "external executable"],
+        ["Contents/Resources/app.asar", "external asar"],
+        ["Contents/Resources/sidecar/hello-agent-sidecar", "external sidecar"],
+      ],
+    },
+    {
+      parent: "hello-agent.app/Contents",
+      files: [
+        ["MacOS/hello-agent", "external executable"],
+        ["Resources/app.asar", "external asar"],
+        ["Resources/sidecar/hello-agent-sidecar", "external sidecar"],
+      ],
+    },
+    {
+      parent: "hello-agent.app/Contents/Resources",
+      files: [
+        ["app.asar", "external asar"],
+        ["sidecar/hello-agent-sidecar", "external sidecar"],
+      ],
+    },
+  ] as const;
+  for (const [index, testCase] of cases.entries()) {
+    await withFixture(async (fixture, temporaryDirectory) => {
+      const external = resolve(temporaryDirectory, `external-layout-${index}`);
+      await writeFixtureFiles(external, testCase.files);
+      const parent = resolve(fixture.package, testCase.parent);
+      await rm(parent, { recursive: true, force: true });
+      await symlink(external, parent);
+      const report = await collectPackageMetrics({ platform: "darwin", arch: "arm64", ...fixture });
+      assert.equal(report.status, "NOT_READY", testCase.parent);
+      assert.equal(report.reasons[0]?.code, "wrongKind", testCase.parent);
+    });
+  }
+});
+
 test("unpacked measurement counts external symlink text but never follows it", async () => {
   await withFixture(async (fixture, temporaryDirectory) => {
     const external = resolve(temporaryDirectory, "outside.bin");
@@ -179,7 +234,7 @@ async function makeWindowsFixture(temporaryDirectory: string) {
   return { package: packageDirectory, archive };
 }
 
-async function writeFixtureFiles(packageDirectory: string, files: readonly [string, string][]) {
+async function writeFixtureFiles(packageDirectory: string, files: readonly (readonly [string, string])[]) {
   for (const [relativePath, content] of files) {
     const path = resolve(packageDirectory, relativePath);
     await mkdir(dirname(path), { recursive: true });
