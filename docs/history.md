@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (분할 처리 승인·실제 로그인 상태 관측)
+
+- **승인**: 사용자가 큰 source 분할 처리와 모델 호출 없는 로그인 상태 조회를 승인했다. reopen 제안 §16을 승인 상태로 갱신하되 기존 V1 거부·새 경로의 1 MiB fresh/8 MiB retained+fresh/100 work·3초 ready·100-operation fence는 보존한다. 제품 활성화·새 로그인·유료 모델·사용자 프로젝트 시험 승인은 아니다.
+- **관측·검증**: 공식 Codex reference와 로컬 help를 확인하고 `/private/tmp`에서 상태만 조회했다. Codex exit 0/ChatGPT credentials present(PATH alias 생성 경고는 별도); Claude 격리 환경 exit 1/false, 자격 증명 접근 허용 환경 exit 0/true·claude.ai였다. 원문 계정/토큰을 출력·저장하지 않고 boolean/분류/exit만 보존했다. 상태 조회 성공은 토큰 유효성·모델 가용성·제품 연결 성공이 아니다. 상세는 제품 제안 §6.7이다.
+- **다음**: 승인된 §16 전역 검증→catch-up→ready coverage 연결을 한 기능으로 구현하고 독립 리뷰·관련 회귀 뒤 통합한다. 기존 storage V1 계약은 새 fragment 경로와 구분한다. G5D/실제 adapter/G6 전체 미완료와 main 미병합·push 없음은 유지한다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S1–S3 파동 검증·macOS 패키징 마감)
 
 - **완료 증거**: `9af6de896c198ce20ca6a95fd4e2f12ec31b8572`에서 staging 7개, 실제 package/sidecar smoke, 재포장 없는 ZIP 생성·크기 측정이 exit 0다. unpacked 316,547,754 bytes와 ZIP 122,124,853 bytes는 macOS arm64 350/200 MiB 이내다. renderer build·editor-state 25개도 통과했고 숨긴 fixture Electron의 Monaco mount는 격리 실행에서 status-null 실패 뒤 실행 허용 환경의 exact 1개가 통과했다. 두 결과를 분리하며 원인을 단정하지 않는다.
@@ -355,7 +361,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **pnpm worktree 설치 재사용 함정(2026-09-03)**: bundled pnpm 11.19.0은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 자동 install을 명시적으로 끄고(`pnpm_config_verify_deps_before_run=false`, 자식에도 전달) 실행한다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
-- **큰 source catch-up 정책 경계(2026-09-03)**: protocol `storage_lifetime_v1.rs`의 batch payload 검사·exact `single_source_payload_oversize == "contractError"`·workspace source 검사와 storage-v2/v3 golden은 개별 source 1 MiB 초과를 거부한다. 호출당 1 MiB fragment로 큰 기록을 수락하는 것은 숫자가 같아도 정책 확장이다. §16 제안의 사용자 승인 전에는 기존 validator/fixture/제품 수락을 변경하지 않는다.
+- **큰 source catch-up 정책 경계(2026-09-03 승인)**: 기존 protocol batch/workspace source 검사·exact `single_source_payload_oversize == "contractError"`·storage-v2/v3 golden은 개별 source 1 MiB 초과 거부를 유지한다. 사용자는 §16의 새 분할 경로에 한해 호출당 1 MiB fresh/8 MiB retained+fresh/100 work로 큰 기록을 처리하는 확장을 승인했다. 기존 V1 계약을 덮어쓰지 않고 새 경로·중단/재시작 회귀로 구분하며 제품 활성화는 구현·검증 뒤 별도 완료한다.
 - **G6 staging 경로(2026-09-03)**: Cargo target 위치는 환경·config·target triple에 따라 달라진다. staging은 build JSON의 해당 manifest/bin executable을 쓰며 root/target 또는 PATH fallback을 하지 않는다. 실제 artifact 없는 성공 exit만으로 이전 binary를 복사하지 않는다.
 
 - **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.

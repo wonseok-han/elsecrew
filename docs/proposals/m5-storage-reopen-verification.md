@@ -376,15 +376,15 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 
 §15 구현 `5ee072633ad26493327c690e46b0d2d48269bfc5`는 단일 독립 리뷰 PASS 뒤 통합했다. 최종 production S3 17개와 마지막 escape exact 1개, S1/S2/주소 대조 공유 회귀 23개·strict clippy/format/diff가 모두 exit 0다. 전체 18개를 단일 invocation으로 실행한 것은 아니다. 8,388,697-byte live/frozen source는 각각 132 calls, 1,048,579-byte 키는 22 calls, 101 members는 1,076 calls, 최종 retained+fresh 8,388,608 bytes 대조는 13 calls다. 이는 생성 fixture의 한 행 비교 실측이며 일반 append/provenance·제품 open·3초 ready 성공이 아니다. 원본 증거는 `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 있고 누적 QA 및 전역 재오픈/제품 연결은 남는다.
 
-## 16. 다음 연결 기능과 미승인 정책 결정 (2026-09-03)
+## 16. 다음 연결 기능과 승인된 분할 처리 정책 (2026-09-03)
 
-**상태: 제안·사용자 확인 대기.** 다음 기능은 helper 단위로 나누지 않고 큰 V8 snapshot의 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 재검증으로 묶는다. 다음 제안은 현재 동작이나 승인된 정책이 아니다.
+**상태: 분할 처리 정책은 2026-09-03 사용자 승인, 구현·제품 활성화는 미완료.** 다음 기능은 helper 단위로 나누지 않고 큰 V8 snapshot의 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 재검증으로 묶는다. 아래 승인된 정책과 구현 제안을 현재 동작으로 인용하지 않는다.
 
-### 16.1 먼저 결정할 정책
+### 16.1 승인된 정책과 보존 경계
 
 `storage_lifetime_v1.rs`의 `validate_storage_lifetime_batch_source_payloads_v1`는 개별 payload와 batch 합계의 1 MiB 초과를 거부한다. `validate_storage_lifetime_batch_policy_v1`는 `single_source_payload_oversize == "contractError"`를 요구하며 `validate_storage_lifetime_workspace_project_source_v1`도 전체 payload의 1 MiB 초과를 거부한다. 같은 값이 TS 계약과 storage-v2/v3 golden에 있다.
 
-큰 source를 여러 호출로 처리하는 것은 **개별 기록 전체에서 호출별 fragment로 회계 단위를 확장하는 결정**이다. 기존 API의 거부를 보존해도 새 제품 경로의 수락 정책은 달라진다. 사용자 확인 전 validator/fixture를 바꾸거나 새 경로로 우회하지 않는다. 제안은 새 경로에 fresh 1 MiB·retained+fresh 8 MiB·100 work를 그대로 적용하고 중단·재시작 의미를 명시하는 것이다. 3초 ready·100-operation 제품 fence도 유지한다.
+큰 source를 여러 호출로 처리하는 것은 **개별 기록 전체에서 호출별 fragment로 회계 단위를 확장하는 결정**이다. 사용자는 이 확장을 승인했다. 기존 V1 API/validator/golden의 개별 source 초과 거부는 보존하고, 새 분할 경로의 명시적 계약과 회귀로 구분한다. 새 경로에도 호출당 fresh 1 MiB·retained+fresh 8 MiB·100 work를 그대로 적용하고 중단·재시작 의미를 명시한다. 3초 ready·100-operation 제품 fence는 유지하며 메모리 상한 확대, 검증 생략, receipt/caller flag를 통한 권위 대체 또는 검증 전 활성화 승인이 아니다.
 
 ### 16.2 승인 후 한 기능의 범위
 

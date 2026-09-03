@@ -428,6 +428,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 이번 확인은 공식 문서, 로컬 version/help, Codex schema 생성까지만 수행했다. 모델 요청·로그인/인증 조회·사용자 프로젝트 실행은 없었다. local schema는 `/tmp/hello-agent-provider-schema.3kFDdj`에 있으며 이 경로는 제품 의존성이 아니다. CLI 선택·인증 격리의 최종 구현 방식과 실제 smoke 승인은 남아 있다.
 
+**2026-09-03 승인 후 로그인 상태 관측**: 사용자는 모델 호출 없는 상태 조회를 승인했다. `/private/tmp`에서 exact CLI의 `codex login status`는 exit 0/ChatGPT credentials present였고, `claude auth status --json`은 격리 환경 exit 1/false와 자격 증명 접근 허용 환경 exit 0/true·claude.ai로 달랐다. 격리 환경의 false를 전역 미로그인으로 단정하지 않는다. 결과는 boolean/분류/exit만 남겼고 계정 식별자·토큰·원문 출력은 저장하지 않았다. 이는 로그인 정보 관측이며 토큰의 실제 요청 유효성·모델 가용성·설정 격리·제품 연결 성공 증거가 아니다. [Codex 공식 CLI reference](https://developers.openai.com/codex/cli/reference/#codex-login)도 status exit 0을 credentials present로 설명한다. 새 로그인·토큰 발급·모델 요청·사용자 프로젝트 실행은 하지 않았다.
+
 **연결 전 남은 증거와 구현 경계**:
 
 - Codex의 `initialize`/`initialized`→`model/list`→`thread/start` 응답을 검사한 뒤에만 `turn/start`로 목표를 전달하는 내부 상태를 둔다. 로컬 0.149.1 schema의 요청 sandbox 값은 `read-only`/`workspace-write`이며, reasoning은 top-level 필드가 아니라 고정 `config.model_reasoning_effort` 후보와 응답 `reasoningEffort`를 대조해야 한다. 응답의 정확한 모델·cwd 신원·승인 정책·sandbox 세부 권한 및 thread/turn 소속을 생략하지 않는다. 이는 schema 기반 후보 계약이며 실제 응답 성공은 아직 관측하지 않았다.
