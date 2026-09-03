@@ -160,6 +160,8 @@
 
 ## 9. M5 G1~G5D 전환 골격·채팅 작업대
 
+Electron main은 현재 main window의 main frame과 정확한 허용 origin만 IPC에 접근시키고 popup·webview·외부 navigation을 차단한다. `app://m5` 자산은 credential/port/query/fragment 없는 authority와 renderer 내부의 기존 regular file만 허용하며 잘못된 escape·경로 이탈·Windows 절대경로도 거부한다. `02dbaeb`의 VM 실행 회귀는 실제 main의 등록 callback을 호출해 이 경계를 검증한다. 이는 Electron/OS 자체의 sandbox·CSP·fuse 강제나 실제 패키지/Windows 검증을 대신하지 않는다.
+
 M5는 `Electron + React/TypeScript + Monaco + Rust sidecar` 골격, 언어 중립 protocol v1, SQLite 수명주기, macOS standalone snapshot 작업대, 기존 G5 fixture 실행·복구와 테스트 전용 G5A~G5C fake actual-agent의 normalized public/terminal event·자원 예산·provider 발견/실행 전 검증·재시작 안전 복구 수직 흐름까지 구현됐다. G5D는 기존 v1 원장을 보존하면서 exact storage schema v8까지 순차 migration하고, append-only source index와 명시 호출형 16단계 bounded lifetime materialization, 삭제된 operation·message의 독립 provenance 계약과 terminal compacted V8 read/replay를 추가했다. 기존 Tauri 위저드와 M4 파일럿은 계속 동작하며 Electron은 아직 기본 실행·배포 경로를 대체하지 않는다.
 
 - `crates/hello-agent-core`: Tauri/Electron을 모르는 `Agent`·`AppError`·프로세스 트리 F1~F8·Claude/Codex 실행 계약. 기존 Tauri 모듈은 좁은 re-export shim으로 이 코어를 사용한다

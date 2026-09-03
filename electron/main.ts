@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
-import { mkdirSync, realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -104,15 +104,40 @@ function sidecarLaunch(dataDirectory: string): SidecarLaunchV1 {
 }
 
 async function serveAppAsset(request: Request) {
-  const url = new URL(request.url);
-  if (url.protocol !== `${APP_SCHEME}:` || url.host !== APP_HOST) {
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  if (
+    url.protocol !== `${APP_SCHEME}:` || url.hostname !== APP_HOST || url.port !== "" ||
+    url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== ""
+  ) {
     return new Response("Not found", { status: 404 });
   }
 
-  const relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+  const rawPath = request.url.slice(request.url.indexOf("/", request.url.indexOf("://") + 3));
+  if (/%(?:2e|2f|5c)/i.test(rawPath)) return new Response("Not found", { status: 404 });
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  if (!pathname.startsWith("/") || pathname.startsWith("//")) return new Response("Not found", { status: 404 });
+  const relativePath = pathname.slice(1) || "index.html";
+  if (relativePath.includes("\0") || relativePath.includes("\\") || isAbsolute(relativePath) || win32.isAbsolute(relativePath)) {
+    return new Response("Not found", { status: 404 });
+  }
   const root = rendererDirectory();
   const asset = resolve(root, relativePath);
   if (asset !== root && !asset.startsWith(`${root}${sep}`)) {
+    return new Response("Not found", { status: 404 });
+  }
+  try {
+    if (!statSync(asset).isFile()) return new Response("Not found", { status: 404 });
+  } catch {
     return new Response("Not found", { status: 404 });
   }
 
@@ -123,10 +148,12 @@ function isAllowedNavigation(target: string) {
   try {
     const url = new URL(target);
     if (!MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-      return url.protocol === `${APP_SCHEME}:` && url.host === APP_HOST && url.port === "" &&
+      return url.protocol === `${APP_SCHEME}:` && url.hostname === APP_HOST && url.port === "" &&
         url.username === "" && url.password === "";
     }
-    return url.origin === new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin;
+    const allowed = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    return allowed.username === "" && allowed.password === "" && url.username === "" && url.password === "" &&
+      url.protocol === allowed.protocol && url.hostname === allowed.hostname && url.port === allowed.port;
   } catch {
     return false;
   }
