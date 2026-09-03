@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (G6 sidecar staging artifact 경로 수리)
+
+- **수리**: `m5-stage-sidecar.mjs`의 repo-relative `target/release` 가정을 제거했다. 같은 Cargo build의 JSON artifact에서 exact sidecar manifest/bin/non-test executable 하나만 선택해 shared/configured target·target triple을 추측하지 않는다. 실패/없음/모호한 artifact는 복사 전에 거부하며 기존 resources/sidecar 목적지와 chmod는 유지한다. Karpathy 지침에 따라 script·새 VM 회귀·history 3파일에 한정했다.
+- **검증·다음**: 가짜 spawn/filesystem 기반 Node focused 7 passed(75.7805ms), syntax/diff exit 0. 기본/shared/custom target·cached artifact·무관한 artifact·Windows 이름/무chmod·build 실패/잘못된 JSON/없음/중복 artifact의 무변경을 검사했다. 원본 명령/actual exit는 `/tmp/g6-sidecar-staging.i54lOp/manifest.md`다. 실제 Cargo·package·Windows 실행은 하지 않았고 QA 담당의 통합 재실행과 단일 독립 리뷰가 남는다. 이전 S3 branch 보존, merge/rebase/cherry-pick/push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S3 의미·SQLite mirror 통합 및 파동 QA 준비)
 
 - **완료**: 기능 `5ee0726`의 source/projection 한 행 검증이 exact-commit 단일 독립 리뷰 PASS를 받아 M5에 통합된다. history 충돌은 양쪽 원문을 보존해 해결하고 검토된 Rust 6파일의 byte 동일성을 확인한다. 현행 구조·제안 §15와 색인을 갱신한다.
@@ -318,6 +323,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **G6 staging 경로(2026-09-03)**: Cargo target 위치는 환경·config·target triple에 따라 달라진다. staging은 build JSON의 해당 manifest/bin executable을 쓰며 root/target 또는 PATH fallback을 하지 않는다. 실제 artifact 없는 성공 exit만으로 이전 binary를 복사하지 않는다.
 
 - **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.
 - **S3 한 행 호환성의 범위(2026-09-03)**: projection은 losing duplicate와 overlay 이전 값까지 문법 검증한 뒤 serde의 마지막 duplicate·루트 typed sequence와 exact-row SQLite의 첫 duplicate/evidence 표현을 각각 보존해야 한다. 긴 projection 숫자의 입력 길이를 S2 canonical 24-byte 출력 한계로 제한하지 않는다. S3의 재개 가능한 숫자 state/최대 33-byte 내부 Number 재구성 및 보존 parsed Number 예산은 이 구분을 지킨다. 한 행 의미/mirror 결과는 글로벌 source/provenance/admission 권위가 아니다.
