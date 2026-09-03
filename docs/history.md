@@ -9,6 +9,25 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (누적 QA 재개·공유 target 패키징 결함)
+
+- **환경 후속**: 세 번째 하네스의 frontend-unit 중단은 실제 테스트 실패가 아니라 `spawnSync npm ENOENT`였다. 기존 nvm npm 12.0.2 경로를 추가했고 bundled Node·pnpm 및 자동 install 차단은 유지했다. 다음 원본 하네스에서 frontend build/unit, 기존 Rust 105 passed/13 ignored와 Electron Node 47 passed를 확인했다.
+- **패키징**: 격리 환경의 `fetch failed`는 cached Electron ZIP 검증을 위한 공식 checksum 다운로드 단계였다. 승인된 네트워크 실행에서 GitHub v43.4.0 SHASUMS256.txt 검증은 통과했다. 이어 release sidecar build 뒤 `m5-stage-sidecar.mjs`가 shared CARGO_TARGET_DIR 대신 worktree/target/release를 고정해 ENOENT로 실패한 실제 결함을 확인했다. 별도 기능 worktree에서 Cargo의 실제 executable artifact를 쓰는 최소 수정·Node 회귀를 진행한다.
+- **검증·다음**: 패키징 실패 원본은 보존하며 단일 QA 담당이 나머지 원래 Rust/계약/저장 명령을 진행한다. package/smoke·ZIP·크기 측정 및 누적 전체 PASS는 아직 없다. 수정은 단일 독립 리뷰 뒤 통합하며 실패한 패키징부터 재검증한다. 제품 크기 정책/인증 조회의 사용자 확인은 대기하고 main 병합·push는 없다.
+
+### 2026-09-03 · by GPT-5.6-Sol (QA 의존성 재설치 사고 복구·정책 충돌 확인)
+
+- **정정·복구**: 직전 symlink 연결 뒤 두 번째 pnpm 실행이 workspace 경로 차이를 설치 불일치로 판단해 root node_modules를 재생성하다 registry ENOTFOUND로 실패했다. 통합 담당의 재사용 판단 누락이며 기존 설치본이 보존됐다는 직전 엔트리는 그 뒤 실행에는 적용되지 않는다. 모든 QA 실행을 멈추고 잠긴 의존성을 로컬 pnpm store로 offline/frozen/ignore-scripts 재설치(exit 0, 다운로드 0)했다. Electron 43.4.0도 기존 ZIP 캐시에서 install.js로 복구(exit 0)했고 esbuild 실제 변환·주요 package 버전·Electron 경로/버전을 확인했다. source/lock 변경은 없다.
+- **재개·검증**: bundled pnpm 11.19.0 소스에서 기본 verify-deps-before-run=install과 환경 변수 전달을 확인하고 `pnpm_config_verify_deps_before_run=false`를 모든 자식에 전달했다. 통제된 세 번째 하네스는 재설치 없이 frontend build를 통과했지만 frontend-unit 진입에서 exit 1로 중단되어 원인을 조사한다. 이전 실패 원본을 보존하며 누적 PASS로 표시하지 않는다.
+- **새 승인 경계**: 독립 설계 조사와 root protocol 대조에서 single-source 1 MiB 초과 `contractError`가 명시 계약임을 확인했다. 큰 source catch-up을 여러 fragment로 허용하는 것은 기존 정책 확장이므로 사용자에게 확인을 요청했다. S1–S3 private 검증 완료와 제품 활성화를 구분하며 응답 전 계약을 바꾸지 않는다. 실제 provider 로그인 상태 조회 승인도 아직 없다.
+- **다음**: QA 환경의 남은 실행 문제를 좁혀 실제 누적 결과를 확보한다. 전역 검증/catch-up/ready coverage는 승인된 정책 아래 한 기능으로 연결하고 실제 provider·G6 전체는 미완료로 유지한다. main 병합·push 없음.
+
+### 2026-09-03 · by GPT-5.6-Sol (S1–S3 누적 QA 환경 수리)
+
+- **관측·원인**: exact `180cb885`의 clean detached QA 폴더에서 sidecar debug build 뒤 누적 하네스가 frontend build 진입 시 exit 1로 멈췄다. node_modules가 없는 폴더에서 pnpm이 의존성 설치를 시도했고 격리 네트워크의 registry ENOTFOUND가 발생했다. 앞선 diff 두 단계 외 실제 build/test는 시작하지 않았으므로 코드 테스트 실패나 QA PASS로 표시하지 않는다.
+- **수리·검증**: root의 기존 node_modules와 QA 기준의 package.json/pnpm-lock.yaml/pnpm-workspace.yaml이 동일한 의존성 구성을 사용함을 확인하고, QA 폴더의 없던 node_modules만 기존 root 설치본을 가리키는 symlink로 연결했다. source/lock/설정·기존 설치본을 수정하거나 새 다운로드하지 않았고 tracked tree는 clean이다. debug build는 재사용하며 실패 원본을 보존한 채 하네스에서 아직 실행되지 않은 build/test를 진행한다.
+- **다음**: QA 담당의 최종 누적 결과 및 fresh package/skip-package ZIP 크기 결과를 기다린다. 상세 증거는 QA 폴더 `.artifacts/m5-qa/180cb885f315f951d14ba11c989c899ae4120809-s1-s3-wave/`에 남긴다. 실제 provider/auth/사용자 프로젝트/Windows·main 병합·push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S3 의미·SQLite mirror 통합 및 파동 QA 준비)
 
 - **완료**: 기능 `5ee0726`의 source/projection 한 행 검증이 exact-commit 단일 독립 리뷰 PASS를 받아 M5에 통합된다. history 충돌은 양쪽 원문을 보존해 해결하고 검토된 Rust 6파일의 byte 동일성을 확인한다. 현행 구조·제안 §15와 색인을 갱신한다.
@@ -318,6 +337,9 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **pnpm worktree 설치 재사용 함정(2026-09-03)**: bundled pnpm 11.19.0은 script 실행 전 기본 자동 install을 수행한다. 동일 lockfile이어도 workspace-state의 절대 project 경로가 다르면 shared node_modules symlink를 따라 root 설치본을 재생성할 수 있다. 자동 install을 명시적으로 끄고(`pnpm_config_verify_deps_before_run=false`, 자식에도 전달) 실행한다. 손상 시 잠금 파일 그대로 offline frozen install과 필요한 Electron 캐시 복구를 사용하며 네트워크 실패 반복·lock 변경으로 우회하지 않는다.
+- **큰 source catch-up 정책 경계(2026-09-03)**: protocol `storage_lifetime_v1.rs`의 batch payload 검사·exact `single_source_payload_oversize == "contractError"`·workspace source 검사와 storage-v2/v3 golden은 개별 source 1 MiB 초과를 거부한다. 호출당 1 MiB fragment로 큰 기록을 수락하는 것은 숫자가 같아도 정책 확장이다. §16 제안의 사용자 승인 전에는 기존 validator/fixture/제품 수락을 변경하지 않는다.
 
 - **M5 G6 Electron main boundary regression(2026-09-03)**: `main.ts`의 registered callback은 VM-transpiled test로 검증한다. IPC는 current `BrowserWindow.webContents`의 exact main frame와 credential-free configured app/dev origin만 허용하며, rejected sender/frame/origin은 sidecar action 전에 실패한다. `app://m5` asset은 credential/port/query/fragment, encoded dot/slash/backslash, malformed percent, POSIX·Windows absolute path와 missing/non-file를 404로 거부하고 external fetch를 하지 않는다. 이 Node fake 증거는 실제 Electron/packaged renderer security, signing/fuses, Windows device 또는 전체 G6 gate가 아니다.
 - **S3 한 행 호환성의 범위(2026-09-03)**: projection은 losing duplicate와 overlay 이전 값까지 문법 검증한 뒤 serde의 마지막 duplicate·루트 typed sequence와 exact-row SQLite의 첫 duplicate/evidence 표현을 각각 보존해야 한다. 긴 projection 숫자의 입력 길이를 S2 canonical 24-byte 출력 한계로 제한하지 않는다. S3의 재개 가능한 숫자 state/최대 33-byte 내부 Number 재구성 및 보존 parsed Number 예산은 이 구분을 지킨다. 한 행 의미/mirror 결과는 글로벌 source/provenance/admission 권위가 아니다.

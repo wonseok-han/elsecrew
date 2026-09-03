@@ -375,3 +375,28 @@ S2 다음은 source payload와 projects/chats/runs/locks 중 한 projection 행�
 객체 재탐색은 메모리를 제한하지만 최악의 총 작업량은 크다. 이 설계도 3초 ready 충족을 보장하지 않으며 측정 실패를 timeout 확대·입력 축소로 숨기지 않는다.
 
 §15 구현 `5ee072633ad26493327c690e46b0d2d48269bfc5`는 단일 독립 리뷰 PASS 뒤 통합했다. 최종 production S3 17개와 마지막 escape exact 1개, S1/S2/주소 대조 공유 회귀 23개·strict clippy/format/diff가 모두 exit 0다. 전체 18개를 단일 invocation으로 실행한 것은 아니다. 8,388,697-byte live/frozen source는 각각 132 calls, 1,048,579-byte 키는 22 calls, 101 members는 1,076 calls, 최종 retained+fresh 8,388,608 bytes 대조는 13 calls다. 이는 생성 fixture의 한 행 비교 실측이며 일반 append/provenance·제품 open·3초 ready 성공이 아니다. 원본 증거는 `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 있고 누적 QA 및 전역 재오픈/제품 연결은 남는다.
+
+## 16. 다음 연결 기능과 미승인 정책 결정 (2026-09-03)
+
+**상태: 제안·사용자 확인 대기.** 다음 기능은 helper 단위로 나누지 않고 큰 V8 snapshot의 전역 검증 → 같은 연결의 catch-up → ready 전체 coverage 재검증으로 묶는다. 다음 제안은 현재 동작이나 승인된 정책이 아니다.
+
+### 16.1 먼저 결정할 정책
+
+`storage_lifetime_v1.rs`의 `validate_storage_lifetime_batch_source_payloads_v1`는 개별 payload와 batch 합계의 1 MiB 초과를 거부한다. `validate_storage_lifetime_batch_policy_v1`는 `single_source_payload_oversize == "contractError"`를 요구하며 `validate_storage_lifetime_workspace_project_source_v1`도 전체 payload의 1 MiB 초과를 거부한다. 같은 값이 TS 계약과 storage-v2/v3 golden에 있다.
+
+큰 source를 여러 호출로 처리하는 것은 **개별 기록 전체에서 호출별 fragment로 회계 단위를 확장하는 결정**이다. 기존 API의 거부를 보존해도 새 제품 경로의 수락 정책은 달라진다. 사용자 확인 전 validator/fixture를 바꾸거나 새 경로로 우회하지 않는다. 제안은 새 경로에 fresh 1 MiB·retained+fresh 8 MiB·100 work를 그대로 적용하고 중단·재시작 의미를 명시하는 것이다. 3초 ready·100-operation 제품 fence도 유지한다.
+
+### 16.2 승인 후 한 기능의 범위
+
+- S3의 transaction-local progress를 추출해 기존 session과 전역 `SnapshotProgress`가 공유한다. 전역 session 안에서 S3 session을 호출해 중첩 transaction·새 epoch·독립 예산을 만들지 않는다.
+- 기존 source/predecessor/prefix/index 판정과 phase/keyset 순서를 유지하되 전체 source `String`·projection `Value`·workspace `Vec`를 identity/닫힌 column/span/typed facts로 바꾼다. 다섯 projection과 다섯 derived table의 정방향·역방향 coverage, 최신 source 선택과 orphan 거부를 모두 검사한다. app-instance의 typed/exact-key/pid 검사는 별도 보존한다.
+- frozen envelope는 canonical 문법 외 exact keys·metadata·decoded payload bytes·두 digest를 비교한다. receipt/baseline도 canonical bytes를 직접 대조하며 hash만으로 의미 검사를 대체하지 않는다.
+- catch-up 전 기존 workspace 행의 historical live/frozen provenance를 bounded resolver로 확인한다. chat composite identity·immutable fields·updatedAt 순서와 indexed predecessor 요구를 보존하고 index catch-up을 affected chat write보다 먼저 끝낸다. 읽기 검증 중 합성한 정보나 caller verified flag를 mutation 권위로 쓰지 않는다.
+- 같은 연결/epoch에서 매 step BEGIN IMMEDIATE → binding 재검사 → 제한된 derived DML/job 갱신 → COMMIT 성공 후 진행 게시를 지킨다. durable source cursor는 전체 source/member 처리 후에만 전진한다. 중간 member commit을 허용할 경우 재시작은 source 처음부터 재검증·멱등 처리하며 volatile offset을 durable 권위로 저장하지 않는다.
+- protocol의 순수 metadata/transition/prefix/메시지/workspace 판정을 동작 보존 helper로 공유한다. run마다 새 전체 schema 검증을 강요하거나 fake 축약 Value로 기존 검사를 통과시키지 않는다. prepared workspace manifest의 path에는 현재 byte cap이 없으므로 작은 member라는 가정을 추가하지 않는다.
+
+소유 후보는 기존 `storage/reopen*`, `storage_lifetime.rs`, 필요한 `storage.rs` 연결·대응 테스트이며 구체 전역 소비자가 필요하면 `reopen/snapshot.rs` 하나만 추가한다. protocol helper 추출은 별도 단일 소유자가 맡으며 정책/schema 변경과 동작 보존 추출을 구분한다.
+
+### 16.3 완료 증거
+
+§10의 정상 실제 run snapshot·실제 생산 경로의 100개 초과 workspace snapshot·historical pending workspace 갱신이 전역 검증/catch-up/ready 재검증을 통과해야 한다. 늦은 corruption, pending/ready 차이, frozen envelope mismatch, 외부 commit, 취소/COMMIT 실패와 중간 member 재시작도 포함한다. 기존 오류 회귀는 그대로 유지한다. 고정 `INSERT…SELECT`로 큰 TEXT를 복사하더라도 SQLite 내부 시간/메모리가 bounded라고 주장하지 않는다. 이 기능 이후에도 recovery 사전 검증·첫 mutation 경주·실제 시작 시간·scheduler/compaction/status는 별도 미완료다.
