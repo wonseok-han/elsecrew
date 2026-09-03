@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size 측정 도구)
+
+- **구현·범위**: `scripts/m5-package-metrics.mjs`에 명시 `--platform`/`--arch`/`--package`/선택 `--archive` 입력의 재사용 가능한 pure collector와 JSON CLI를 추가했다. macOS arm64의 unpacked 350 MiB·compressed 200 MiB 잠정 한계를 exact byte 문자열로 비교하고 Windows x64/arm64는 값을 측정하되 threshold 없는 `NOT_READY`로 끝낸다. unpacked는 regular-file length + symlink link-text bytes이며 symlink를 따라가지 않는다. 필요한 executable·`app.asar`·staged sidecar layout, regular archive, `.zip` signature, bounded directory walk를 확인하고 metadata 변화가 관찰되면 `NOT_READY`로 invalidates한다.
+- **안전·한계**: supplied artifact는 읽기만 하며 app/provider/auth/build를 실행하지 않는다. report는 local developer-only package-size evidence이고 freshness, provenance, signing/notarization, launch/GUI/runtime, atomic snapshot 또는 `G6_READY`를 주장하지 않는다. archive가 없거나 asset/type/signature/readability가 불완전하면 `NOT_READY`, macOS의 완전한 측정만 `PASS`/`FAIL`을 낸다.
+- **검증·다음**: bundled Node `v24.19.0`으로 `node --check scripts/m5-package-metrics.mjs`와 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`를 실행해 8/8 PASS(exit 0)했다. sparse exact/below/over limits, missing/wrong assets, external symlink non-follow, Windows measure-only, ZIP signature, malformed CLI와 0/1/2 JSON exit를 덮었다. package/make, Cargo, full suite, real artifact measurement은 실행하지 않았다. 독립 리뷰 뒤 통합 담당이 proposal usage와 integration 여부를 결정한다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
 
 - **커밋·재개**: 사용자 요청으로 테스트 경로 수리·저부하 하네스·간소화 절차·기존 정리 기록 9파일을 `62abf69`로 커밋했다. 이어 보존된 S1을 기능 commit `00f54d9978145e2f1e969306e290d546d7d33c94`로 고정하고 단일 독립 리뷰(`g5d_reopen_review`)의 exact-commit PASS를 받아 `m5/coding-agent-ide`에 반영한다. 기존 19개 실패 수리는 이미 동일하게 들어 있어 중복 수정하지 않는다.
@@ -243,6 +249,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **M5 G6 package-size 증거 도구(2026-09-03)**: `m5-package-metrics.mjs`는 macOS arm64의 unpacked ≤350 MiB와 compressed ≤200 MiB를 supplied directory/regular archive의 exact logical bytes로만 측정한다. symlink target은 세지거나 따라가지 않으며 Electron executable·`app.asar`·ASAR 밖 staged sidecar layout을 요구한다. Windows x64/arm64는 측정값을 내도 threshold 없는 `NOT_READY`다. filesystem walk는 atomic snapshot이 아니므로 metadata change를 발견하면 `NOT_READY`; report도 local-only이며 signing/freshness/runtime/G6 완료 증거가 아니다.
 
 - **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
 
