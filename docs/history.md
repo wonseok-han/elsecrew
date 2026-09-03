@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (S2 전 실제 V8 acceptance oracle 회귀)
+
+- **범위·발견**: §13의 primitive 추정을 ordinary append·ready materialization으로 만든 정상 소형 V8의 43사례로 고정했다. 새 `storage/tests/reopen_oracles.rs`와 module 등록·이번 history만 변경했다. serde replay equality, SQLite mirror, `verify_projection_replay`, 실제 `Storage::open`, 전체 private R3A를 따로 assert한다. indexed duplicate first-wrong/last-correct와 lock evidence key순서·escape의 단측 차이는 legacy가 거부하지만 R3A가 허용했다. 동일 duplicate·정상 마지막 nonindexed 값·공백·typed sequence overlay의 기존 수락은 유지된다. 숫자 1/1.0/bool/null은 정상 nonindexed source의 타입별 의미 비교와, 유효 pid=1/invalid pid 3개 ordinary write 거부를 분리했다.
+- **검증**: `s2_legacy_oracle` 6 passed(16.45초), scoped strict clippy·Rust 2021 format·diff check exit 0. 실제 DB 43사례 및 invalid-pid 3대조군에서 schema/typed rows/file bytes 불변을 확인했다. expected verdict는 기존 serde-last/SQLite-first·json 표현·sequence overlay 코드를 근거로 고정했으며 관측 결과를 복사하지 않았다. raw 명령·actual exit·사례별 결과는 `/tmp/g5d-s2-oracles.KAd88R/manifest.md`에 있다. Cargo jobs/test threads 4·단일 실행을 적용했고 nice는 sandbox 거부로 미적용이다.
+- **다음·한계**: 이는 private R3A의 legacy 동등성 부족을 고정한 테스트이며 제품 검증 우회나 정책 변경이 아니다. 실제 provider/사용자 프로젝트·전체 suite/harness는 실행하지 않았다. 사용자 승인 S2 묶음의 canonical scanner는 후속 §14를 읽은 뒤 구현하며, 묶음 단위 독립 리뷰 1회와 마감 누적 QA가 남는다. source/schema/예산/S1/제품 admission은 불변이고 merge/rebase/cherry-pick/push 없음.
+
 ### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
 
 - **커밋·재개**: 사용자 요청으로 테스트 경로 수리·저부하 하네스·간소화 절차·기존 정리 기록 9파일을 `62abf69`로 커밋했다. 이어 보존된 S1을 기능 commit `00f54d9978145e2f1e969306e290d546d7d33c94`로 고정하고 단일 독립 리뷰(`g5d_reopen_review`)의 exact-commit PASS를 받아 `m5/coding-agent-ide`에 반영한다. 기존 19개 실패 수리는 이미 동일하게 들어 있어 중복 수정하지 않는다.
@@ -243,6 +249,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **S2 legacy oracle은 R3A 단독이 아니다(2026-09-03)**: 실제 정상 V8 fixture에서 indexed JSON duplicate의 첫 값이 틀리고 마지막만 맞거나 lock evidence key순서/escape가 한쪽만 다르면 private R3A는 허용해도 legacy SQLite mirror·Storage reopen은 거부한다. 반대로 동일 duplicate/정상 마지막 nonindexed 값/공백/typed sequence overlay는 수락된다. `storage::tests::reopen_oracles::s2_legacy_oracle*` 6개가 실제 DB 43사례를 고정하므로 S2 의미 동등성은 serde map과 SQLite mirror를 함께 보존해야 한다.
 
 - **R3C-S1 구현 통합(2026-09-03)**: `00f54d9`의 private `RawColumnSession`을 관련 검증·단일 독립 리뷰 뒤 반영했다. 호출당 조각 1 MiB/retained+fresh encoded 입력 8 MiB로 읽고 UTF-8·길이·SHA만 완료한다. canonical/의미/provenance/admission 증거가 아니며 S2 이후 검증과 제품 연결·파동 누적 QA는 남는다. 현행 구조는 `architecture.md`, 원본 검증·소스 동일성은 `/tmp/g5d-r3cs1-evidence.ympdQJ/`를 확인한다.
 
