@@ -107,6 +107,13 @@ impl BoundColumn {
     pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
         self.expected.bytes()
     }
+    pub(super) fn bind_projection(
+        &self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+    ) -> Result<ProjectionBinding, SidecarError> {
+        ProjectionBinding::bind(connection, &self.expected, usage)
+    }
 
     pub(super) fn recheck(
         &self,
@@ -335,6 +342,188 @@ fn invalid() -> SidecarError {
         "storageSchemaMismatch",
         "raw column byte transport is invalid",
     )
+}
+
+/// Closed projection address. Source allowlists and S1 transport remain separate.
+pub(super) struct ProjectionBinding {
+    kind: ProjectionKind,
+    id: String,
+    pub(super) byte_length: u64,
+    pub(super) sequence: i64,
+}
+enum ProjectionKind {
+    Project,
+    Chat,
+    Run,
+    Lock,
+}
+impl ProjectionBinding {
+    pub(super) fn bind(
+        connection: &Connection,
+        source: &SourceIdentity,
+        usage: &mut ByteUsage,
+    ) -> Result<Self, SidecarError> {
+        let kind = match source.aggregate_type.as_str() {
+            "project" => ProjectionKind::Project,
+            "chat" => ProjectionKind::Chat,
+            "run" => ProjectionKind::Run,
+            "lock" => ProjectionKind::Lock,
+            _ => return Err(invalid()),
+        };
+        let mut binding = Self {
+            kind,
+            id: source.aggregate_id.clone(),
+            byte_length: 0,
+            sequence: source.aggregate_sequence,
+        };
+        if binding.sequence <= 0 {
+            return Err(invalid());
+        }
+        binding.byte_length = binding.metadata(connection, usage)?;
+        Ok(binding)
+    }
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.id.len()
+    }
+    fn parts(&self) -> (&'static str, &'static str, &'static str) {
+        match self.kind {
+            ProjectionKind::Project => ("projects", "project_id", "json_extract(projection_json, '$.project_id') IS NOT project_id OR json_extract(projection_json, '$.canonical_path') IS NOT canonical_path"),
+            ProjectionKind::Chat => ("chats", "chat_id", "json_extract(projection_json, '$.chat_id') IS NOT chat_id OR json_extract(projection_json, '$.project_id') IS NOT project_id"),
+            ProjectionKind::Run => ("runs", "run_id", "json_extract(projection_json, '$.run_id') IS NOT run_id OR json_extract(projection_json, '$.chat_id') IS NOT chat_id OR json_extract(projection_json, '$.state') IS NOT state OR json_extract(projection_json, '$.worktree_path') IS NOT worktree_path"),
+            ProjectionKind::Lock => ("locks", "lock_id", "json_extract(projection_json, '$.lock_id') IS NOT lock_id OR json_extract(projection_json, '$.project_id') IS NOT project_id OR json_extract(projection_json, '$.writer_run_id') IS NOT writer_run_id OR json_extract(projection_json, '$.worktree_path') IS NOT worktree_path OR json_extract(projection_json, '$.poisoned') IS NOT poisoned OR json_extract(projection_json, '$.recovery_required') IS NOT recovery_required OR json(json_extract(projection_json, '$.evidence')) IS NOT json(evidence_json)"),
+        }
+    }
+    fn metadata(
+        &self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+    ) -> Result<u64, SidecarError> {
+        let (table, id, _) = self.parts();
+        let query = format!("SELECT typeof({id})='text' AND typeof(projection_json)='text' AND typeof(last_event_sequence)='integer',length(CAST({id} AS BLOB)),length(CAST(projection_json AS BLOB)),last_event_sequence FROM {table} WHERE {id}=?1");
+        let (typed, size, length, sequence): (bool, i64, i64, i64) = connection
+            .query_row(&query, [&self.id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .map_err(|_| invalid())?;
+        usage.work_units += 1;
+        let size = usize::try_from(size).map_err(|_| invalid())?;
+        let length = u64::try_from(length).map_err(|_| invalid())?;
+        if !typed
+            || sequence != self.sequence
+            || usage
+                .encoded_bytes()
+                .checked_add(size)
+                .is_none_or(|n| n > INPUT_BYTES)
+        {
+            return Err(invalid());
+        }
+        let matches: bool = connection
+            .query_row(
+                &format!("SELECT {id} FROM {table} WHERE {id}=?1"),
+                [&self.id],
+                |r| match r.get_ref(0)? {
+                    ValueRef::Text(bytes) => {
+                        usage.metadata_bytes += bytes.len();
+                        Ok(bytes == self.id.as_bytes() && bytes.len() == size)
+                    }
+                    _ => Err(rusqlite::Error::InvalidQuery),
+                },
+            )
+            .map_err(|_| invalid())?;
+        usage.work_units += 1;
+        if !matches {
+            return Err(invalid());
+        }
+        Ok(length)
+    }
+    pub(super) fn recheck(
+        &self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+    ) -> Result<(), SidecarError> {
+        if self.metadata(connection, usage)? != self.byte_length {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+    pub(super) fn read_span(
+        &self,
+        connection: &Connection,
+        after: u64,
+        amount: usize,
+        usage: &mut ByteUsage,
+    ) -> Result<Vec<u8>, SidecarError> {
+        if after
+            .checked_add(amount as u64)
+            .is_none_or(|n| n > self.byte_length)
+            || usage
+                .fragment_bytes
+                .checked_add(amount)
+                .is_none_or(|n| n > FRAGMENT_BYTES)
+            || usage
+                .encoded_bytes()
+                .checked_add(amount)
+                .is_none_or(|n| n > INPUT_BYTES)
+            || usage.work_units >= 100
+        {
+            return Err(invalid());
+        }
+        let (table, id, _) = self.parts();
+        let query = format!("SELECT CASE WHEN length(CAST(projection_json AS BLOB))=0 THEN X'' ELSE substr(CAST(projection_json AS BLOB),?2,?3) END FROM {table} WHERE {id}=?1");
+        let bytes = connection
+            .query_row(
+                &query,
+                rusqlite::params![
+                    self.id,
+                    sql_position(after)?,
+                    i64::try_from(amount).map_err(|_| invalid())?
+                ],
+                |r| match r.get_ref(0)? {
+                    ValueRef::Blob(bytes) if bytes.len() == amount => Ok(bytes.to_vec()),
+                    _ => Err(rusqlite::Error::InvalidQuery),
+                },
+            )
+            .map_err(|_| invalid())?;
+        usage.fragment_bytes += bytes.len();
+        usage.work_units += 1;
+        Ok(bytes)
+    }
+    pub(super) fn mirror(
+        &self,
+        connection: &Connection,
+        usage: &mut ByteUsage,
+    ) -> Result<(), SidecarError> {
+        if usage.work_units >= 100 {
+            return Err(invalid());
+        }
+        let (table, id, predicate) = self.parts();
+        // Exact legacy predicates, restricted by the typed primary key. SQLite
+        // JSON evaluation is not claimed to have bounded internal allocation.
+        let mismatch: bool = connection
+            .query_row(
+                &format!("SELECT ({predicate}) FROM {table} WHERE {id}=?1"),
+                [&self.id],
+                |r| r.get(0),
+            )
+            .map_err(|_| invalid())?;
+        usage.work_units += 1;
+        if mismatch {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn queries_for_test(&self) -> Vec<String> {
+        let (table, id, predicate) = self.parts();
+        vec![
+            format!("SELECT ({predicate}) FROM {table} WHERE {id}=?1"),
+            format!(
+                "SELECT substr(CAST(projection_json AS BLOB),?2,?3) FROM {table} WHERE {id}=?1"
+            ),
+            format!("SELECT typeof({id}),length(CAST({id} AS BLOB)),length(CAST(projection_json AS BLOB)),last_event_sequence FROM {table} WHERE {id}=?1"),
+            format!("SELECT {id} FROM {table} WHERE {id}=?1"),
+        ]
+    }
 }
 
 fn sql_position(after: u64) -> Result<i64, SidecarError> {

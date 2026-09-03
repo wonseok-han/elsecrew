@@ -38,7 +38,7 @@ pub(crate) enum CanonicalColumnStep {
     },
 }
 
-struct Progress {
+pub(super) struct Progress {
     bound: BoundColumn,
     after: u64,
     hash: Sha256,
@@ -59,7 +59,7 @@ pub(crate) struct CanonicalColumnSession<'connection> {
     fragment_limit: usize,
 }
 
-enum Disposition {
+pub(super) enum Disposition {
     Pending,
     Complete,
     Cancelled,
@@ -249,6 +249,31 @@ fn available(usage: &CanonicalUsage) -> Result<usize, SidecarError> {
 }
 
 impl Progress {
+    pub(super) fn new(bound: BoundColumn) -> Self {
+        Self {
+            bound,
+            after: 0,
+            hash: Sha256::new(),
+            parser: Parser::default(),
+            comparison: None,
+        }
+    }
+    pub(super) fn bound(&self) -> &BoundColumn {
+        &self.bound
+    }
+    pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
+        self.bound
+            .retained_bytes()?
+            .checked_add(self.parser.retained_bytes())
+            .and_then(|n| {
+                n.checked_add(
+                    self.comparison
+                        .as_ref()
+                        .map_or(0, KeyComparison::retained_bytes),
+                )
+            })
+            .ok_or_else(invalid)
+    }
     fn position(&self) -> ScanPosition {
         (
             self.after,
@@ -258,7 +283,7 @@ impl Progress {
         )
     }
 
-    fn scan(
+    pub(super) fn scan(
         &mut self,
         connection: &Connection,
         usage: &mut CanonicalUsage,

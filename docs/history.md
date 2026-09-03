@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-03 · by GPT-5.6-Sol (R3C-S3 한 행 projection 호환 검증)
+
+- **구현·경계**: §15의 private `ProjectionCompatibilitySession`에 source canonical → projection 전체 문법 → serde-last 의미/루트 sequence overlay → exact-row SQLite mirror를 연결했다. 전체 source/key/Value 없이 긴 숫자를 잠긴 serde 동작과 최대 33-byte 내부 재구성으로 비교한다. 동일 연결·epoch·identity/길이와 COMMIT 뒤 진행 보존, 1 MiB fresh/8 MiB retained+fresh/100 work를 유지한다. 모든 보존된 parsed Number도 예산에 포함했다. Karpathy 지침에 따라 구체적 S2 engine·닫힌 projection binding만 공유하며 제품 경로·100-operation fence·schema/프로토콜/예산은 불변이다.
+- **검증**: S3 17 passed(60.26초) + 마지막 escape/split exact 1 passed(6.17초), 공유 회귀 23 passed(57.62초: S1 12 + S2 10 + 주소 제외 1), 최종 strict clippy(2.38초)·Rust 2021 format·diff check exit 0. live/frozen 8,388,697-byte source는 각각 132 calls, 101 members는 1,076 calls, exact 8 MiB retained+fresh는 13 calls로 통과했다. 각 phase/중첩 재검색의 취소·외부 commit·실제 SQLite READ/COMMIT 거부와 schema/raw typed rows/file bytes 불변을 확인했다. 원본 실패와 최종 실제 exit·명령·수치는 `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 분리 보존했다.
+- **다음·한계**: 이는 project/chat/run/lock 한 행의 호환 정보이며 source 선택/전체 coverage·protocol transition·frozen provenance·app-instance·admission 증거가 아니다. SQLite exact-row JSON 내부 메모리/시간 상한도 주장하지 않는다. 단일 exact-commit 독립 리뷰와 파동 마감 full sidecar/stdio·누적 QA가 남는다(기존 full exit 143은 PASS 아님). Cargo jobs/threads 4·단일 실행을 지켰고 nice는 sandbox 거부로 미적용이다. 실제 provider/auth/사용자 프로젝트/Windows, merge/rebase/cherry-pick/push는 하지 않았다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (S2 canonical scanner 통합·S3 연속 진행)
 
 - **완료**: 정상 V8 oracle `7eeca1d`와 scanner `5c7758e` 묶음이 단일 독립 리뷰 PASS를 받아 M5에 통합된다. source 충돌 없이 양쪽 history 원문을 보존하며 현행 구조와 제안 §13–14의 완료선을 갱신한다. scanner는 source canonical byte 검증일 뿐 projection 의미·SQLite mirror·제품 실행 허가가 아니다.
@@ -294,6 +300,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **S3 한 행 호환성의 범위(2026-09-03)**: projection은 losing duplicate와 overlay 이전 값까지 문법 검증한 뒤 serde의 마지막 duplicate·루트 typed sequence와 exact-row SQLite의 첫 duplicate/evidence 표현을 각각 보존해야 한다. 긴 projection 숫자의 입력 길이를 S2 canonical 24-byte 출력 한계로 제한하지 않는다. S3의 재개 가능한 숫자 state/최대 33-byte 내부 Number 재구성 및 보존 parsed Number 예산은 이 구분을 지킨다. 한 행 의미/mirror 결과는 글로벌 source/provenance/admission 권위가 아니다.
 
 - **실제 provider wire 재확인(2026-09-03)**: 로컬 Codex 0.149.1/Claude 2.1.258은 현재 fake exact manifest와 다르다. Codex app-server schema의 thread-start 유효 설정은 후보 증거이며 실제 runtime/설정 격리 검증이 아니다. Claude init의 MCP/plugin 객체와 fake `configIsolation` 차이를 별도 adapter에서 해결해야 한다. `--bare`는 구독 OAuth를 사용하지 않으므로 인증 재사용 대체로 임의 적용하지 않는다. 공식 출처·후속 경계는 `proposals/m5-coding-agent-ide.md` §6.7.
 
