@@ -132,6 +132,26 @@ test("storage activation rejects non-plain objects and getters without invoking 
   assert.equal(getterInvoked, false);
 });
 
+test("storage activation rejects symbol, non-enumerable, and cyclic own values", () => {
+  const symbol = structuredClone(fixture);
+  Object.defineProperty(symbol, Symbol("unknown"), {
+    enumerable: true,
+    value: undefined,
+  });
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(symbol));
+
+  const nonEnumerable = structuredClone(fixture);
+  Object.defineProperty(nonEnumerable, "unknown", {
+    enumerable: false,
+    value: undefined,
+  });
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(nonEnumerable));
+
+  const cyclic = structuredClone(fixture);
+  cyclic.publicWire = cyclic;
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(cyclic));
+});
+
 test("historical V6 V7 V8 activation manifests remain disabled", () => {
   const v6 = JSON.parse(readFileSync(
     resolve("tests/fixtures/m5/storage-v6/manifest.json"), "utf8",
