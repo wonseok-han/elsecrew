@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fmt::{self, Display};
 
 pub mod agent_adapter_v1;
+pub mod lifecycle_g5d_v1;
 pub mod lifecycle_v1;
 pub mod project_v1;
 pub mod run_recovery_v1;

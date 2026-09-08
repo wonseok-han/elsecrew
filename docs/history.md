@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage readiness 계약)
+
+- **승인 결정 고정**: 기존 V1 lifecycle·startup steps와 G5/G5A/D1 exact capability를 바꾸지 않고, additive G5D `system.status`를 shell-ready + storage admission `verifying|ready|failed`로 고정했다. 일반 제품·agent-fixture 두 capability 모드, 상태별 DB/recovery 조합, 고정 공개 오류, known-no-op 차단과 shell-ready 선행 시작 순서를 Rust/TypeScript/golden에서 함께 검증한다.
+- **공개 경계**: admission 전 허용 메서드는 `system.status`·`app.prepareQuit`뿐이며 `storage.status`는 ready-only다. `M5BridgeV6`는 새 status 타입을 반환하도록 재선언하되 기존 storage status를 유지한다. 이번 변경은 공용 계약 generation이며 sidecar dispatcher·scheduler·compaction·renderer 동작을 활성화하지 않는다.
+- **검증·다음**: protocol 전체 47개와 Node legacy lifecycle/G5D 32개가 통과했고 root TypeScript `--noEmit`, protocol strict clippy, rustfmt, diff check도 exit 0이다. 다음 구현 담당은 gate 전에 params 검증·DB 연결·app 등록·append·run/recovery mutation이 일어나지 않도록 admission을 sidecar에 연결해야 한다.
+
 ### 2026-09-08 · by GPT-5 Codex (G6 security/package gate 통합·실산출물 검증)
 
 - **통합**: 기능 `128b044`와 독립 리뷰에서 찾은 pre-smoke artifact 검증·상위 harness `NOT_READY` 전파 수리 `af93bcc`, repository root 아래 output parent symlink preflight 수리 `3494aaa`를 최종 리뷰 PASS 뒤 `b4590cb96dd6ebc144b18edf374fe8525f3a8e6d`로 `m5/coding-agent-ide`에 통합했다. package/make/smoke/metrics와 harness exit 2 경계는 현재 통합 commit의 focused Node 44개, TypeScript `--noEmit`, script syntax, harness list, diff check에서 통과했다.

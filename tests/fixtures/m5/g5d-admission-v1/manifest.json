@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "readyPayloads": {
+    "generalProduct": {
+      "protocolVersion": 1,
+      "sidecarSchemaVersion": 1,
+      "appSchemaVersion": 1,
+      "pid": 4242,
+      "platform": "darwin",
+      "capabilities": [
+        "system.status", "app.prepareQuit", "project.open", "project.getTree",
+        "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
+        "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+        "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+        "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat",
+        "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings",
+        "chat.create", "chat.list", "chat.get", "run.startFixture", "run.cancel",
+        "recovery.list", "recovery.inspect", "recovery.markResolved", "storage.status"
+      ],
+      "sidecarInstanceId": "sidecar_g5d_product_01"
+    },
+    "agentFixture": {
+      "protocolVersion": 1,
+      "sidecarSchemaVersion": 1,
+      "appSchemaVersion": 1,
+      "pid": 4243,
+      "platform": "darwin",
+      "capabilities": [
+        "system.status", "app.prepareQuit", "project.open", "project.getTree",
+        "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
+        "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+        "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+        "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat",
+        "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings",
+        "chat.create", "chat.list", "chat.get", "run.startFixture", "run.cancel",
+        "recovery.list", "recovery.inspect", "recovery.markResolved", "agent.getCapabilities",
+        "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent",
+        "storage.status"
+      ],
+      "sidecarInstanceId": "sidecar_g5d_agent_fixture_01"
+    }
+  },
+  "policy": {
+    "shellReadyEvent": "system.ready",
+    "allowedWhileNotReady": ["system.status", "app.prepareQuit"],
+    "readyOnly": ["storage.status"],
+    "gateOrder": "beforeParameterValidationAndSideEffects",
+    "blockedRequestSideEffects": "knownNoOp",
+    "internalOnlyStep": "verifiedForStartup",
+    "publicStates": ["verifying", "ready", "failed"]
+  },
+  "systemStatusCases": [
+    {
+      "name": "verifying is shell-ready but has not admitted storage",
+      "expectedValid": true,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": null, "error": null},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "ready admits a healthy database and legacy recovery blockers",
+      "expectedValid": true,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": true, "blockerIds": ["run:run_fixture_01"]
+      }
+    },
+    {
+      "name": "failed exposes only the fixed public storage error",
+      "expectedValid": true,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "storageUnavailable", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": true}
+        },
+        "database": {"health": "unavailable", "schemaVersion": 1},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "verifying cannot claim completion",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z", "error": null},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "ready cannot omit completedAt",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:00:00Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": false, "blockerIds": []
+      }
+    },
+    {
+      "name": "failed cannot make an unknown outcome retryable",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "storageUnavailable", "detail": "storage admission failed", "retryable": true, "outcomeUnknown": true}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "unknown top-level fields are rejected",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": null, "error": null},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": [], "internalState": "verifiedForStartup"
+      }
+    }
+  ],
+  "blockedRequestCases": [
+    {
+      "name": "verifying blocks mutation as a known no-op",
+      "state": "verifying", "expectedValid": true, "sideEffects": "knownNoOp",
+      "error": {"code": "storageVerifying", "kind": "requestBlocked", "detail": "storage admission is still verifying", "retryable": true, "outcomeUnknown": false}
+    },
+    {
+      "name": "failed blocks mutation without automatic retry",
+      "state": "failed", "expectedValid": true, "sideEffects": "knownNoOp",
+      "error": {"code": "storageAdmissionFailed", "kind": "requestBlocked", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": false}
+    },
+    {
+      "name": "verifying cannot claim an unknown outcome",
+      "state": "verifying", "expectedValid": false, "sideEffects": "knownNoOp",
+      "error": {"code": "storageVerifying", "kind": "requestBlocked", "detail": "storage admission is still verifying", "retryable": true, "outcomeUnknown": true}
+    }
+  ],
+  "startupCases": [
+    {
+      "name": "shell ready precedes storage verification and public admission",
+      "expectedValid": true,
+      "value": {"schemaVersion": 1, "steps": ["sidecarStarted", "shellReadyEmitted", "storageConnectionVerified", "migrationComplete", "integrityCheckComplete", "projectionReplayComplete", "recoveryComplete", "verifiedForStartup", "appInstanceRegistered", "storageAdmissionReady"]}
+    },
+    {
+      "name": "app registration cannot precede verifiedForStartup",
+      "expectedValid": false,
+      "value": {"schemaVersion": 1, "steps": ["sidecarStarted", "shellReadyEmitted", "storageConnectionVerified", "migrationComplete", "integrityCheckComplete", "projectionReplayComplete", "recoveryComplete", "appInstanceRegistered", "verifiedForStartup", "storageAdmissionReady"]}
+    },
+    {
+      "name": "legacy ready-after-recovery ordering is not reused",
+      "expectedValid": false,
+      "value": {"schemaVersion": 1, "steps": ["sidecarStarted", "storageConnectionVerified", "migrationComplete", "integrityCheckComplete", "projectionReplayComplete", "recoveryComplete", "readyEmitted"]}
+    }
+  ]
+}

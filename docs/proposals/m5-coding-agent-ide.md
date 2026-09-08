@@ -42,6 +42,7 @@ M5의 목적은 기능 목록을 한꺼번에 확정하는 것이 아니라, **�
 20. 첫 적용 단위는 **작업 복사본 전체**다. 적용 직전 앱 전용 복원 지점을 만들며 파일별·줄 단위 반영은 후속으로 미룬다.
 21. UI·저장 구조는 macOS와 Windows 공통으로 개발하지만, 에이전트 실행은 검증된 macOS부터 연다. Windows는 M4와 동등한 자손 회수·소멸 확인 계약을 통과하기 전 실행을 노출하지 않는다.
 22. G4 작업 복사본은 linked Git worktree가 아니라, 읽기 전용 source capability로 만든 self-contained Git bundle에서 raw committed blob과 mode를 스트리밍 materialize한 **capability-protected standalone snapshot**이다. `project.createWorktree`, `createProjectWorktree`, `worktreeId/path`는 protocol v1 호환 이름으로만 남긴다. Windows G4 안전성은 별도 게이트 전까지 지원으로 광고하지 않는다.
+23. G5D 제품 시작은 **3초 이내 shell-ready**와 별도 저장소 admission `verifying → ready | failed`로 나눈다. `verifying`·`failed`에서는 `system.status`와 `app.prepareQuit`만 허용하고, recovery 변경·app instance 등록·append·fixture/actual agent 실행 및 `storage.status` 사실값 조회는 sidecar가 known-no-op로 차단한다. 저장소 검증을 모두 통과하고 `verifiedForStartup` 뒤 app instance 등록까지 끝낸 경우에만 public `ready`로 admission한다.
 
 ---
 
@@ -401,10 +402,16 @@ reviewReady → discarded
 - D0A는 **무삭제 계약**이다. 채팅·메시지·실행·복구·증거·standalone snapshot을 자동 또는 물리 삭제하지 않고, cleanup 후보 조회나 purge action도 공개하지 않는다.
 - 보존 기간, 전체 용량 상한, 경고/차단 임계값, 자동 정리, 폐기된 작업 복사본 정리와 downgrade 지원은 D0A가 임의로 정하지 않는다.
 
+#### 확정된 시작·admission 계약
+
+- `system.ready`는 process/shell 사용 가능 신호로 먼저 한 번 내보낸다. additive `system.status`는 최상위 `shellReady`와 저장소 `verifying|ready|failed`를 함께 돌려주며, `verifiedForStartup`은 공개 상태가 아닌 내부 순서 증거다.
+- `verifying`은 완료 시각·오류·복구 판정을 아직 주장하지 않는다. `ready`만 healthy schema v1과 기존 `recoveryRequired`/`blockerIds` 불변식을 공개하고, `failed`는 원시 DB 진단 대신 고정된 `storageAdmissionFailed` 공개 오류만 제공한다.
+- 저장소가 `verifying`이면 차단 요청은 retryable `storageVerifying`, `failed`이면 non-retryable `storageAdmissionFailed`다. 두 경우 모두 `requestBlocked`, `outcomeUnknown=false`, known-no-op이며 입력 검증이나 부작용을 admission gate보다 먼저 수행하지 않는다.
+
 #### 현재 제안
 
 - protocol v1과 payload `schemaVersion: 1`을 유지하면서 DB logical/physical bytes, WAL bytes, ledger tail event count/payload bytes, snapshot aggregate count/payload bytes와 볼륨 capacity/available 사실값만 돌려주는 exact `storage.status`를 추가한다. raw chat/provider text, 비공개 추론, prompt, token/auth, absolute path는 응답에 넣지 않는다.
-- public bridge는 additive `M5BridgeV6.getStorageStatus`로 계획한다. D0A에는 sidecar 구현이 없으므로 protocol method 목록·ready capability·dispatcher에는 아직 예약하거나 광고하지 않는다. D1에서 Rust 구현과 양쪽 dispatcher 검증이 함께 준비된 뒤에만 활성화한다.
+- public bridge는 additive `M5BridgeV6.getStorageStatus`와 새 G5D `getSystemStatus` 응답을 사용한다. protocol method와 D1 exact capability에는 `storage.status`가 예약됐지만 sidecar dispatcher·renderer 활성화는 저장소 admission 구현과 양쪽 검증이 함께 준비된 뒤에만 연다.
 - 내부 SQLite schema v2는 v1 원장과 projection을 변경·삭제하지 않는 additive table/index/metadata migration으로 `ledger_baselines`, immutable operation receipt, normalized chat message/prepared workspace, maintenance job을 수용한다. operation receipt는 canonical payload 원문을 보존해 v1과 같은 exact duplicate/conflict를 판정하고 SHA-256 v1 lowercase-hex digest는 무결성 검사용으로만 사용한다. prepared workspace는 `bound`일 때만 `boundChatId`가 있고 그 chat이 같은 project임을 composite FK로 강제한다. 앱은 DDL을 확인한 뒤 ready가 될 수 있지만 기존 record materialization은 ready 이후 idle 작업으로 수행한다.
 - lossless compaction은 `BEGIN IMMEDIATE → cutoff 고정 → receipt/message/workspace/baseline materialize → baseline+tail replay·projection·old operation duplicate/conflict·actual/legacy namespace·recovery 동등성 검증 → 검증된 cutoff만 논리 삭제 → append-only guard 복원 확인 → COMMIT` 순서다. 어느 검증도 실패하면 전체 rollback하며, checkpoint와 `VACUUM` 성공은 논리 성공 조건이 아니다.
 - active/cancelling/recoveryRequired run, unresolved recovery, poisoned/writer lock, pending intent/save, incomplete operation, active/bound workspace, 역할 설정, 사용자 chat/history/evidence, identity mismatch, orphan/symlink 불명 상태는 정리 대상으로 분류하지 않는다.
