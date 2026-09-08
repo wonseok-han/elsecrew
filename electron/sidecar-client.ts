@@ -26,6 +26,11 @@ import {
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
 import {
+  parseG5DAgentFixtureSystemStatusV1,
+  parseG5DProductSystemStatusV1,
+  type SystemStatusG5DV1,
+} from "../src/m5/contracts/lifecycle-g5d-v1.ts";
+import {
   G4_CAPABILITIES_V1,
   validateProjectCloseResultV1,
   validateG4SafetyErrorV1,
@@ -57,7 +62,9 @@ import {
 } from "../src/m5/contracts/diff-v1.ts";
 import {
   G5_CAPABILITIES_V1,
+  G5D_PRODUCT_CAPABILITIES_V1,
   parseG5ReadyPayloadV1,
+  parseG5DProductReadyPayloadV1,
   validateAbandonPreparedWorkspaceRequestV1,
   validateAbandonPreparedWorkspaceResultV1,
   validateChatCreateRequestV1,
@@ -100,6 +107,8 @@ import {
 } from "../src/m5/contracts/run-recovery-v1.ts";
 import {
   G5A_CAPABILITIES_V1,
+  G5D_AGENT_FIXTURE_CAPABILITIES_V1,
+  parseG5DAgentFixtureReadyPayloadV1,
   parsePlannedG5AReadyPayloadV1,
   validateAgentCapabilitiesRequestV1,
   validateAgentCapabilitySnapshotV1,
@@ -160,6 +169,12 @@ import {
   type WorkspaceTreeRequestV1,
   type WorkspaceWatchResultV1,
 } from "../src/m5/contracts/workspace-addressing-v1.ts";
+import {
+  validateStorageStatusRequestV1,
+  validateStorageStatusV1,
+  type StorageStatusRequestV1,
+  type StorageStatusV1,
+} from "../src/m5/contracts/storage-lifetime-v1.ts";
 
 export const SIDECAR_READY_TIMEOUT_MS = 3_000;
 export const MAX_SIDECAR_STDERR_TAIL_BYTES = 32 * 1024;
@@ -253,6 +268,7 @@ export class SidecarClientV1 {
   #stdout = Buffer.alloc(0);
   #ready: ReadyPayloadV1 | undefined;
   #agentAdapterNegotiated = false;
+  #storageAdmissionNegotiated = false;
   #lastReady: ReadyPayloadV1 | null = null;
   #readyPromise: Promise<ReadyPayloadV1> | undefined;
   #resolveReady: ((ready: ReadyPayloadV1) => void) | undefined;
@@ -374,8 +390,15 @@ export class SidecarClientV1 {
     return () => this.#agentRunStateChangedListeners.delete(listener);
   }
 
-  async getSystemStatus(): Promise<SystemStatusV1> {
-    return this.#request("system.status", {}) as Promise<SystemStatusV1>;
+  async getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
+    return this.#request("system.status", {}) as Promise<SystemStatusV1 | SystemStatusG5DV1>;
+  }
+
+  async getStorageStatus(input: StorageStatusRequestV1): Promise<StorageStatusV1> {
+    if (!this.#storageAdmissionNegotiated) {
+      return Promise.reject(new Error("storageStatusUnavailable: sidecar did not negotiate the exact planned G5D capability set"));
+    }
+    return this.#request("storage.status", validateStorageStatusRequestV1(input)) as Promise<StorageStatusV1>;
   }
 
   async prepareQuit(): Promise<PrepareQuitResultV1> {
@@ -576,12 +599,19 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const rawReady = parseReadyPayload(envelope);
-        const negotiatedG5A = sameStrings(rawReady.capabilities, G5A_CAPABILITIES_V1);
-        const ready = negotiatedG5A
-          ? parsePlannedG5AReadyPayloadV1(rawReady)
-          : parseG5ReadyPayloadV1(rawReady);
+        const negotiatedG5DAgent = sameStrings(rawReady.capabilities, G5D_AGENT_FIXTURE_CAPABILITIES_V1);
+        const negotiatedG5DProduct = sameStrings(rawReady.capabilities, G5D_PRODUCT_CAPABILITIES_V1);
+        const negotiatedG5A = !negotiatedG5DAgent && sameStrings(rawReady.capabilities, G5A_CAPABILITIES_V1);
+        const ready = negotiatedG5DAgent
+          ? parseG5DAgentFixtureReadyPayloadV1(rawReady)
+          : negotiatedG5DProduct
+            ? parseG5DProductReadyPayloadV1(rawReady)
+            : negotiatedG5A
+              ? parsePlannedG5AReadyPayloadV1(rawReady)
+              : parseG5ReadyPayloadV1(rawReady);
         this.#ready = ready;
-        this.#agentAdapterNegotiated = negotiatedG5A;
+        this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
+        this.#storageAdmissionNegotiated = negotiatedG5DAgent || negotiatedG5DProduct;
         this.#lastReady = ready;
         clearTimeout(this.#readyTimer);
         this.#resolveReady?.(ready);
@@ -687,8 +717,12 @@ export class SidecarClientV1 {
       return;
     }
     if (pending.method === "system.status") {
-      const status = parseG5SystemStatus(response.result, this.#agentAdapterNegotiated);
-      if (status.state === "ready" && !sameReady(status.sidecar, this.#ready)) {
+      const status = this.#storageAdmissionNegotiated
+        ? this.#agentAdapterNegotiated
+          ? parseG5DAgentFixtureSystemStatusV1(response.result)
+          : parseG5DProductSystemStatusV1(response.result)
+        : parseG5SystemStatus(response.result, this.#agentAdapterNegotiated);
+      if ((status.state === "ready" || status.state === "shellReady") && !sameReady(status.sidecar, this.#ready)) {
         throw new Error("system.status identity does not match system.ready");
       }
       this.#pending.delete(response.requestId);
@@ -703,6 +737,7 @@ export class SidecarClientV1 {
   #validateResult(pending: PendingRequestV1, response: ResponseV1): unknown {
     switch (pending.method) {
       case "app.prepareQuit": return parsePrepareQuitResult(response);
+      case "storage.status": return validateStorageStatusV1(response.result);
       case "project.open": return validateProjectIdentityV1(response.result);
       case "project.getTree": {
         const value = validateTreePageV1(response.result);

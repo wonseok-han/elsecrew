@@ -47,6 +47,9 @@ button:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-secondary, .m5-refresh { background: #263140; color: #e6edf3; }
 .m5-notice, .m5-rescan, .m5-error { margin: 0 0 12px; border-radius: 8px; padding: 10px 12px; }
+.m5-admission { margin: 0 0 12px; border: 1px solid #416588; border-radius: 8px; padding: 10px 12px; background: #1e3141; color: #d3ecff; }
+.m5-admission p { margin: 4px 0 0; font-size: 13px; }
+.m5-admission-failed { border-color: #a7515b; background: #412126; color: #ffd7d9; }
 .m5-notice { background: #1e3141; color: #d3ecff; }
 .m5-rescan { display: flex; justify-content: space-between; align-items: center; background: #3b3020; color: #f9d8a5; }
 .m5-rescan button { background: #f3bd65; }

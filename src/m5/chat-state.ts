@@ -1,6 +1,7 @@
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
 import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
+import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import { isAgentChatDetailPageV1, type AgentRecoveryRecordV1, type AgentRunRecordV1, type AgentPublicEventV1, type AgentRunStateChangedV1 } from "./contracts/agent-adapter-v1.ts";
 import type {
   ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleIdV1, RoleProfileV1,
@@ -28,7 +29,7 @@ export interface ChatUiSnapshot {
   error: { message: string; detail: string } | null;
 }
 
-type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5;
+type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6;
 type ChatDetail = Awaited<ReturnType<M5BridgeV4["getChat"]>>;
 
 /** Renderer-only projection. The sidecar owns all durable identity, state transitions and CAS. */

@@ -13,9 +13,10 @@ import {
   PROTOCOL_STREAM_IDS_PER_SESSION_MAX_V1,
   type EventV1,
 } from "../src/m5/contracts/protocol-v1.ts";
-import { G5_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
+import { G5_CAPABILITIES_V1, G5D_PRODUCT_CAPABILITIES_V1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import {
   G5A_CAPABILITIES_V1,
+  G5D_AGENT_FIXTURE_CAPABILITIES_V1,
   computeAgentCapabilityFingerprintV1,
   type AgentCapabilitySnapshotV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
@@ -104,6 +105,52 @@ function g5aReadyLine() {
       sidecarInstanceId: "sidecar_test_01",
     },
   });
+}
+
+function g5dReadyLine() {
+  return JSON.stringify({
+    protocolVersion: 1,
+    kind: "event",
+    sidecarInstanceId: "sidecar_test_01",
+    streamId: "system",
+    seq: 1,
+    event: "system.ready",
+    payload: {
+      protocolVersion: 1,
+      sidecarSchemaVersion: 1,
+      appSchemaVersion: 1,
+      pid: 42,
+      platform: "darwin",
+      capabilities: [...G5D_PRODUCT_CAPABILITIES_V1],
+      sidecarInstanceId: "sidecar_test_01",
+    },
+  });
+}
+
+function g5dAgentReadyLine() {
+  const ready = JSON.parse(g5dReadyLine()) as { payload: { capabilities: string[] } };
+  ready.payload.capabilities = [...G5D_AGENT_FIXTURE_CAPABILITIES_V1];
+  return JSON.stringify(ready);
+}
+
+function g5dStatus(state: "verifying" | "ready" | "failed"): Record<string, unknown> {
+  const admission = state === "verifying"
+    ? { schemaVersion: 1, state, startedAt: "2026-09-08T04:00:00Z", completedAt: null, error: null }
+    : state === "ready"
+      ? { schemaVersion: 1, state, startedAt: "2026-09-08T04:00:00Z", completedAt: "2026-09-08T04:01:00Z", error: null }
+      : { schemaVersion: 1, state, startedAt: "2026-09-08T04:00:00Z", completedAt: "2026-09-08T04:01:00Z", error: { code: "storageAdmissionFailed", kind: "storageUnavailable", detail: "storage admission failed", retryable: false, outcomeUnknown: true } };
+  return {
+    schemaVersion: 1,
+    state: "shellReady",
+    sidecar: {
+      protocolVersion: 1, sidecarSchemaVersion: 1, appSchemaVersion: 1, pid: 42, platform: "darwin",
+      capabilities: [...G5D_PRODUCT_CAPABILITIES_V1], sidecarInstanceId: "sidecar_test_01",
+    },
+    storageAdmission: admission,
+    database: state === "verifying" ? { health: "verifying", schemaVersion: null } : state === "ready" ? { health: "healthy", schemaVersion: 1 } : { health: "unavailable", schemaVersion: null },
+    recoveryRequired: state === "ready" ? false : null,
+    blockerIds: [],
+  };
 }
 
 function g5aFixture(name: string, valid = true): Record<string, unknown> {
@@ -384,6 +431,70 @@ test("G5A agent IPC rejects launch extras before IPC and remains unavailable on 
   await assert.rejects(client.getAgentCapabilities({ runtime: "claude-code", refresh: false }), /agentAdapterUnavailable/);
   await assert.rejects(client.startAgentRun(start), /agentAdapterUnavailable/);
   assert.equal(child.writes.length, 0, "current G5 handshake must not advertise or invoke G5A calls");
+});
+
+test("G5D resolves shell-ready before storage admission and accepts only exact status transitions", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${g5dReadyLine()}\n`);
+  await started;
+
+  const verifying = client.getSystemStatus();
+  const verifyingRequest = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+  assert.equal(verifyingRequest.method, "system.status");
+  child.stdout.write(responseLine(verifyingRequest.requestId, g5dStatus("verifying")));
+  const verifyingStatus = await verifying;
+  assert.equal("storageAdmission" in verifyingStatus && verifyingStatus.storageAdmission.state, "verifying");
+
+  const ready = client.getSystemStatus();
+  const readyRequest = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  child.stdout.write(responseLine(readyRequest.requestId, g5dStatus("ready")));
+  const readyStatus = await ready;
+  assert.equal("storageAdmission" in readyStatus && readyStatus.storageAdmission.state, "ready");
+
+  const storage = client.getStorageStatus({ schemaVersion: 1 });
+  const storageRequest = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string; params: unknown };
+  assert.equal(storageRequest.method, "storage.status");
+  assert.deepEqual(storageRequest.params, { schemaVersion: 1 });
+  child.stdout.write(responseLine(storageRequest.requestId, {
+    schemaVersion: 1, collectedAt: "2026-09-08T04:01:00Z",
+    database: { logicalBytes: 0, physicalBytes: 0, walBytes: 0 }, ledgerTail: { eventCount: 0, payloadBytes: 0 },
+    snapshotAggregates: { count: 0, payloadBytes: 0 }, pressureFacts: { collectionStatus: "unavailable", volumeCapacityBytes: null, volumeAvailableBytes: null },
+    compaction: { lastAttemptStatus: "neverRun", lastAttemptedAt: null, lastSuccessfulAt: null }, physicalCleanup: { enabled: false, reason: "userPolicyNotConfigured" },
+  }));
+  assert.equal((await storage).schemaVersion, 1);
+});
+
+test("G5D rejects malformed admission status without falling back to the legacy parser", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${g5dReadyLine()}\n`); await started;
+  const pending = client.getSystemStatus();
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string };
+  const malformed = g5dStatus("failed");
+  ((malformed.storageAdmission as Record<string, unknown>).error as Record<string, unknown>).detail = "SQLITE_CORRUPT /private/user.sqlite3";
+  child.stdout.write(responseLine(request.requestId, malformed));
+  await assert.rejects(pending, /storage admission/);
+  assert.equal(child.terminations, 1);
+});
+
+test("G5D agent fixture keeps G5A availability and adds storage status only through the exact D1 handshake", async () => {
+  const { child, client } = createClient();
+  const started = client.start(); child.stdout.write(`${g5dAgentReadyLine()}\n`); await started;
+  const storage = client.getStorageStatus({ schemaVersion: 1 });
+  const request = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+  assert.equal(request.method, "storage.status");
+  child.stdout.write(responseLine(request.requestId, {
+    schemaVersion: 1, collectedAt: "2026-09-08T04:01:00Z",
+    database: { logicalBytes: 0, physicalBytes: 0, walBytes: 0 }, ledgerTail: { eventCount: 0, payloadBytes: 0 },
+    snapshotAggregates: { count: 0, payloadBytes: 0 }, pressureFacts: { collectionStatus: "unavailable", volumeCapacityBytes: null, volumeAvailableBytes: null },
+    compaction: { lastAttemptStatus: "neverRun", lastAttemptedAt: null, lastSuccessfulAt: null }, physicalCleanup: { enabled: false, reason: "userPolicyNotConfigured" },
+  }));
+  await storage;
+  const capability = client.getAgentCapabilities({ runtime: "claude-code", refresh: false });
+  const capabilityRequest = JSON.parse(child.writes.at(-1) ?? "{}") as { requestId: string; method: string };
+  assert.equal(capabilityRequest.method, "agent.getCapabilities");
+  child.stdout.write(responseLine(capabilityRequest.requestId, measuredCapability()));
+  await capability;
 });
 
 test("G5A only wires exact negotiated capabilities and validates actual-agent response identity", async () => {

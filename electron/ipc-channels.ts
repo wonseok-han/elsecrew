@@ -55,3 +55,8 @@ export const M5_BRIDGE_V4_CHANNELS = {
 export const M5_BRIDGE_V5_CHANNELS = {
   agentRunStateChanged: "m5:v5:agent:run-state-changed",
 } as const;
+
+/** V6 exposes the already-negotiated, privacy-safe storage status through one fixed channel. */
+export const M5_BRIDGE_V6_CHANNELS = {
+  storageGetStatus: "m5:v6:storage:get-status",
+} as const;
