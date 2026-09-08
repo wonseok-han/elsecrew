@@ -526,8 +526,12 @@ fn preflight_schema_and_control_rows(connection: &Connection) -> Result<(), Side
     Ok(())
 }
 
-fn preflight_schema_and_control_rows_v9(connection: &Connection) -> Result<(), SidecarError> {
-    let expected = reference_schema_v9()?;
+fn preflight_schema_and_control_rows_plan(connection: &Connection) -> Result<(), SidecarError> {
+    let expected = match storage_schema_version(connection)? {
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => reference_schema_v9()?,
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => reference_schema_v10()?,
+        _ => return Err(session_error()),
+    };
     encoded_rows_bytes(
         connection,
         &format!(

@@ -581,7 +581,7 @@ fn verify_frozen_relation(
         return Ok(());
     }
     let deleted:bool=connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND (p.deleted_through_sequence=?3 OR ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1)=9 AND p.deleted_through_sequence>=?3)) AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
+        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND (p.deleted_through_sequence=?3 OR ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10) AND p.deleted_through_sequence>=?3)) AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
         params![identity.aggregate_type,identity.aggregate_id,identity.aggregate_sequence],|r|r.get(0),
     ).map_err(|_|session_error())?;
     usage.work_units += 1;
@@ -1236,7 +1236,7 @@ fn verify_prefix_row(
          AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=s.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=s.source_event_rowid) \
          AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest \
          AND a.source_event_rowid=p.anchor_event_rowid AND a.source_event_id=p.anchor_event_id AND a.operation_id=p.anchor_operation_id AND a.aggregate_sequence=p.anchor_aggregate_sequence \
-         AND ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1)=9 OR p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
+         AND ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1) IN (9,10) OR p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
          AND ((EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
               AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=a.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=a.source_event_rowid)) \
            OR (NOT EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
@@ -1493,8 +1493,12 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 verify_schema_v8(&tx)?
             }
             ReopenStartContext::Admission => {
-                preflight_schema_and_control_rows_v9(&tx)?;
-                verify_schema_v9(&tx)?
+                preflight_schema_and_control_rows_plan(&tx)?;
+                match storage_schema_version(&tx)? {
+                    Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => verify_schema_v9(&tx)?,
+                    Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10) => verify_schema_v10(&tx)?,
+                    _ => return Err(session_error()),
+                }
             }
         };
         verify_v6_materialization_snapshot(&tx, &materialization, true)?;

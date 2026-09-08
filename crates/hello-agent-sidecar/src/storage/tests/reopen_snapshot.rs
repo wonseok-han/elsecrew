@@ -508,7 +508,7 @@ fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_
     assert_eq!(preserved_table_rows(&admitted.connection), preserved);
     assert_eq!(
         storage_schema_version(&admitted.connection).unwrap(),
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
     );
 }
 
@@ -526,7 +526,7 @@ fn product_admission_accepts_uncompacted_storage_without_compaction_jobs() {
     assert_eq!(preserved_table_rows(&admitted.connection), before);
     assert_eq!(
         storage_schema_version(&admitted.connection).unwrap(),
-        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
     );
 }
 

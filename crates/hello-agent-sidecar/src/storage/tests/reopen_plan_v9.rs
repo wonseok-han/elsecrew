@@ -1556,3 +1556,285 @@ fn pending_v9_plan_cancellation_no_progress_and_external_commit_fail_closed() {
     drop(session);
     assert!(connection.is_autocommit());
 }
+
+fn exact_v9_template(count: usize) -> (TempDir, PathBuf) {
+    let (root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    for sequence in 1..=count {
+        storage
+            .append_event(&event(
+                &format!("evt_v9_migration_{sequence}"),
+                &format!("op_v9_migration_{sequence}"),
+                "project",
+                PROJECT_ID,
+                sequence as u64,
+                json!({
+                    "canonical_path":"/fixture/v9-migration",
+                    "project_id":PROJECT_ID,
+                    "sequence":sequence,
+                }),
+                STAMP,
+            ))
+            .unwrap();
+    }
+    run_bounded_materializer_to_ready(&mut storage);
+    storage.checkpoint().unwrap();
+    drop(storage);
+
+    let mut connection = Connection::open(&path).unwrap();
+    configure_connection(&connection).unwrap();
+    migrate_v9(&mut connection).unwrap();
+    verify_schema_v9(&connection).unwrap();
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(connection);
+    (root, path)
+}
+
+#[test]
+fn product_admission_migrates_exact_v9_to_v10_and_preserves_terminal_evidence() {
+    let (_root, path) = exact_v9_template(1001);
+    let mut storage = Storage {
+        connection: Connection::open(&path).unwrap(),
+        path: path.clone(),
+        writes_admitted: true,
+    };
+    configure_connection(&storage.connection).unwrap();
+    let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);
+    freeze_range(&mut storage, 1, 1001);
+    with_triggers_disabled(&storage.connection, |connection| {
+        insert_job(
+            connection,
+            "compact_v9_migration_succeeded",
+            "succeeded",
+            &terminal_state(1001),
+            Some(STAMP),
+        );
+        insert_plan(
+            connection,
+            "compact_v9_migration_succeeded",
+            0,
+            1001,
+            &baseline_id,
+            &baseline_digest,
+            None,
+        );
+        insert_plan_row(
+            connection,
+            "compact_v9_migration_succeeded",
+            1001,
+            0,
+            &baseline_id,
+            &baseline_digest,
+        );
+        insert_prefix(
+            connection,
+            "compact_v9_migration_succeeded",
+            0,
+            &baseline_id,
+            &baseline_digest,
+        );
+        delete_live_prefix(connection, 1000);
+        connection
+            .execute(
+                "INSERT INTO maintenance_jobs(\
+                   job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+                   failure_kind,created_at,updated_at) \
+                 VALUES ('compact_v9_migration_failed','losslessCompaction','failed','{}',NULL,?1,NULL,\
+                         'verificationFailed',?1,?1)",
+                [STAMP],
+            )
+            .unwrap();
+    });
+    storage.checkpoint().unwrap();
+    let before = database_snapshot(&storage.connection);
+    drop(storage);
+
+    let cancellation = AtomicBool::new(false);
+    let mut admitted = Storage::open_for_admission(&path, &cancellation).unwrap();
+    assert_eq!(
+        storage_schema_version(&admitted.connection).unwrap(),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
+    );
+    assert_eq!(
+        schema_identity_v10(&admitted.connection).unwrap(),
+        schema_identity_v10_golden().unwrap()
+    );
+    for (table, rows) in before.1 {
+        if table == "storage_schema_meta" {
+            continue;
+        }
+        assert_eq!(
+            table_rows(&admitted.connection, &table),
+            rows,
+            "preserved {} rows",
+            table
+        );
+    }
+    assert_eq!(
+        admitted
+            .append_event(&event(
+                "evt_v10_append_1002",
+                "op_v10_append_1002",
+                "project",
+                PROJECT_ID,
+                1002,
+                json!({
+                    "canonical_path":"/fixture/v9-migration",
+                    "project_id":PROJECT_ID,
+                    "sequence":1002,
+                }),
+                STAMP,
+            ))
+            .unwrap(),
+        AppendOutcome::Committed
+    );
+}
+
+#[test]
+fn v9_to_v10_preflight_rejects_drift_active_jobs_and_authority_without_mutation() {
+    for case in ["drift", "pending", "running", "authority"] {
+        let (_root, path) = exact_v9_template(0);
+        let connection = Connection::open(&path).unwrap();
+        configure_connection(&connection).unwrap();
+        match case {
+            "drift" => connection
+                .execute_batch("CREATE TABLE unexpected_v9_drift(id INTEGER PRIMARY KEY) STRICT;")
+                .unwrap(),
+            "pending" | "running" => insert_job(
+                &connection,
+                "compact_v9_active",
+                case,
+                &private_state("planEligibility", 0, false),
+                None,
+            ),
+            "authority" => with_triggers_disabled(&connection, |connection| {
+                connection
+                    .execute(
+                        "INSERT INTO ledger_compaction_delete_authority(\
+                           job_id,ordinal,prefix_id,event_rowid,event_id,operation_id,aggregate_type,\
+                           aggregate_id,aggregate_sequence,authorized_at) \
+                         VALUES ('missing_job',1,'missing_prefix',1,'event','operation','project',\
+                                 'project',1,?1)",
+                        [STAMP],
+                    )
+                    .unwrap();
+            }),
+            _ => unreachable!(),
+        }
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted unsafe V9 migration preflight case: {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "migrationFailed", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert_eq!(
+            storage_schema_version(&connection).unwrap(),
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9),
+            "{case}"
+        );
+        assert!(connection.is_autocommit(), "{case}");
+    }
+}
+
+#[test]
+fn v10_exact_schema_and_future_version_fail_closed_without_mutation() {
+    for case in ["trigger_drift", "future_version"] {
+        let (_root, path) = v9_template(0);
+        let connection = Connection::open(&path).unwrap();
+        configure_connection(&connection).unwrap();
+        match case {
+            "trigger_drift" => connection
+                .execute_batch(
+                    "DROP TRIGGER events_require_v10_complete_delete_batch; \
+                     CREATE TRIGGER events_require_v10_complete_delete_batch \
+                     BEFORE DELETE ON events BEGIN SELECT 1; END;",
+                )
+                .unwrap(),
+            "future_version" => {
+                connection
+                    .execute_batch("PRAGMA ignore_check_constraints=ON;")
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE storage_schema_meta SET storage_schema_version=11 WHERE singleton=1",
+                        [],
+                    )
+                    .unwrap();
+                connection
+                    .execute_batch("PRAGMA ignore_check_constraints=OFF;")
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted unsupported V10 case: {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert!(connection.is_autocommit(), "{case}");
+    }
+}
+
+#[test]
+fn v10_migration_ddl_failure_and_cancellation_leave_exact_v9_unchanged() {
+    let (_root, path) = exact_v9_template(0);
+    let mut connection = Connection::open(&path).unwrap();
+    configure_connection(&connection).unwrap();
+    let before = database_snapshot(&connection);
+    let broken = MIGRATION_V10.replacen(
+        "COMMIT;",
+        "INSERT INTO missing_v10_failure_target(value) VALUES (1);\nCOMMIT;",
+        1,
+    );
+    assert!(execute_migration(&mut connection, &broken, "broken v10").is_err());
+    assert_eq!(database_snapshot(&connection), before);
+    assert!(connection.is_autocommit());
+    drop(connection);
+
+    let cancellation = AtomicBool::new(true);
+    let error = match Storage::open_for_admission(&path, &cancellation) {
+        Ok(_) => panic!("cancelled V9 admission unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageAdmissionCancelled");
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(database_snapshot(&connection), before);
+    assert_eq!(
+        storage_schema_version(&connection).unwrap(),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    );
+}
+
+#[test]
+fn legacy_open_rejects_exact_v10_without_mutation() {
+    let (_root, path) = v9_template(0);
+    let connection = Connection::open(&path).unwrap();
+    let before = database_snapshot(&connection);
+    drop(connection);
+    let error = match Storage::open(&path) {
+        Ok(_) => panic!("legacy open accepted V10"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(database_snapshot(&connection), before);
+}
