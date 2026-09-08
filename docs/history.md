@@ -9,6 +9,24 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G6 package artifact parent path 재리뷰 수리)
+
+- **수리**: repository root만 신뢰 anchor로 두고, package preflight는 root 아래 기존 `out`·package·ZIP 경로의 모든 component를 `lstat`해 symlink면 package 실행 전 `NOT_READY`로 차단한다. package 성공 뒤에는 `out`부터 package root/각 asset의 모든 parent와 leaf의 fresh/non-symlink를 재확인하며, make 뒤 ZIP도 `out/make/zip/<platform>/<arch>` parent와 leaf를 확인하고서만 metrics로 진행한다.
+- **회귀**: clean fixture에서 `out`이 외부 output을 가리키면 package command 자체가 실행되지 않고, make 단계에서 ZIP parent가 외부 directory로 바뀌면 metrics가 실행되지 않는 것을 고정했다. 외부 target의 leaf가 fresh regular file인 경우도 parent symlink로 거부된다.
+- **검증·경계**: focused Node package/harness/metrics/staging 36 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, 두 gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 `NOT_READY`이며 실제 clean package/make, 서명/notarization, Windows 실기기 증거는 남아 있다.
+
+### 2026-09-08 · by GPT-5 Codex (G6 gate 독립 리뷰 P1/P2 수리)
+
+- **P1 수리**: package 성공 직후 package root와 executable/ASAR/외부 sidecar의 freshness·symlink를 확인하고, 각 leaf까지의 중간 directory도 `lstat`으로 symlink를 거부한다. 이 검증이 실패하면 smoke/make/metrics를 전혀 실행하지 않는다. make 성공 뒤에는 고정 ZIP의 freshness·symlink를 별도로 확인한 뒤 metrics를 실행한다. stale package와 symlink된 sidecar directory가 smoke에 도달하지 않는 회귀를 추가했다.
+- **P2 수리**: 누적 M5 하네스는 자식 script exit 2를 `FAIL`로 바꾸지 않고 `NOT_READY`/exit 2로 report의 해당 result와 함께 보존한다. 그 밖의 exit/error는 기존 `FAIL`/exit 1이다. 실제 production package를 실행하지 않는 child stub fixture로 `m5:test:package`의 exit 2 전파를 고정했다.
+- **검증·경계**: focused Node package/harness/metrics/staging 34 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 여전히 `NOT_READY`; signing/notarization, Windows 실기기, 실제 clean package/make 증거는 남아 있다.
+
+### 2026-09-08 · by GPT-5 Codex (G6 incremental security/package gate)
+
+- **구현**: `m5:test:security`는 main callback VM 보안·scaffold CSP/fuse/좁은 bridge·sidecar staging fail-closed 회귀와 `electron/main.ts` strip-types 문법 검사를 실제로 묶는다. `m5:test:package`는 현재 대상의 Forge package → packaged sidecar/ASAR/fuse smoke → `make --skip-package` → 고정 ZIP 경로의 metrics 순서를 실행하고, 동일 시작 시각 이후 갱신된 package/실행 파일/ASAR/외부 sidecar/ZIP만 인정한다. JSON 증거에는 HEAD·dirty 상태·각 명령 exit·정확한 산출물 경로·metrics verdict를 남긴다. Monaco `editor.worker-*.js`도 packaged ASAR smoke 필수 자산으로 추가했다.
+- **대상·제약**: macOS arm64만 size threshold PASS가 가능하다. Windows x64/arm64은 실제 산출물을 측정해도 기존 정책대로 `NOT_READY`/exit 2이고, Linux와 다른 미지원 대상은 빌드 없이 `NOT_READY`다. 서명/notarization, Windows 실기기, GUI/배포, 전체 G6는 이 증거 범위 밖이며 `m5:test:performance`를 만들지 않아 `g6-release`는 계속 `NOT_READY`다.
+- **검증**: 새 fake/injection 회귀는 순서·고정 경로·dirty/stale/missing·명령 실패·Windows/Linux status/exit·JSON evidence를 덮는다. focused Node 두 묶음 24 + 16 passed, root 설치 `tsc --noEmit`, main syntax, `pnpm harness:list`, `git diff --check`가 통과했다. 이 worktree 의존성 부재로 pnpm typecheck가 registry DNS 재시도를 시도했으나 lockfile/의존성은 변경하지 않았고, 실제 package/make는 실행하지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 정리 통합)
 
 - **통합**: exact `a0ca32ff295d36c8c96605fb9b6993060e91f1ec`의 lifetime elision 2건과 `blob.chunk` 동치 조건 정리는 strict clippy exit 0·protocol 44 passed·rustfmt/diff 통과 및 독립 리뷰 PASS 뒤 `14a2efb68c2ff6acb5f93e5b9a47100e9ed868c3`로 통합했다. 공개 API·직렬화·오류 순서·validator 의미는 불변이다.

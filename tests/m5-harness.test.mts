@@ -70,9 +70,58 @@ test("다음 미구현 게이트는 성공이나 skip 대신 NOT_READY로 끝난
 
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stderr, /NOT_READY g6-release/);
-  assert.match(result.stderr, /m5:test:security/);
-  assert.match(result.stderr, /m5:test:package/);
+  assert.doesNotMatch(result.stderr, /m5:test:security/);
+  assert.doesNotMatch(result.stderr, /m5:test:package/);
   assert.match(result.stderr, /m5:test:performance/);
+});
+
+test("하위 package gate의 exit 2는 누적 하네스에도 NOT_READY로 보존된다", {
+  skip: process.platform === "win32" ? "POSIX executable fixture; Windows PATH fixture is not claimed" : false,
+}, () => {
+  const fixture = mkdtempSync(join(tmpdir(), "m5-qa-not-ready-test-"));
+  try {
+    const scripts = join(fixture, "scripts");
+    const bin = join(fixture, "bin");
+    mkdirSync(scripts);
+    mkdirSync(bin);
+    for (const name of ["m5-harness.mjs", "m5-qa-resources.mjs"]) {
+      copyFileSync(resolve("scripts", name), join(scripts, name));
+    }
+    const gateScripts = [
+      "m5:test:electron", "m5:test:core", "m5:test:contracts", "m5:test:storage",
+      "m5:test:project", "m5:test:editor", "m5:test:run-recovery", "m5:test:bounded-storage",
+      "m5:test:storage-scheduler", "m5:test:storage-status", "m5:test:storage-compaction",
+      "m5:test:security", "m5:test:package", "m5:test:performance",
+    ];
+    writeFileSync(join(fixture, "package.json"), JSON.stringify({ scripts: Object.fromEntries(gateScripts.map((name) => [name, "fixture"])) }));
+    const stub = `#!${process.execPath}
+const { basename } = require("node:path");
+const name = basename(process.argv[1]);
+if (name === "git" && process.argv[2] === "rev-parse") console.log("fixture-head");
+else if (name === "git" && process.argv[2] === "branch") console.log("fixture-branch");
+else if (!(name === "git" && process.argv[2] === "status")) console.log(JSON.stringify({ command: name }));
+process.exit(name === "pnpm" && process.argv[2] === "run" && process.argv[3] === process.env.QA_FIXTURE_NOT_READY ? 2 : 0);
+`;
+    for (const name of ["git", "pnpm", "npm", "cargo"]) {
+      const path = join(bin, name);
+      writeFileSync(path, stub);
+      chmodSync(path, 0o755);
+    }
+    const result = spawnSync(process.execPath, [join(scripts, "m5-harness.mjs"), "--gate", "g6-release"], {
+      cwd: fixture,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, QA_FIXTURE_NOT_READY: "m5:test:package" },
+    });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stdout, /NOT_READY g6-release/);
+    const latest = readdirSync(join(fixture, ".artifacts", "m5-harness")).sort().at(-1)!;
+    const report = JSON.parse(readFileSync(join(fixture, ".artifacts", "m5-harness", latest), "utf8"));
+    assert.equal(report.status, "NOT_READY");
+    assert.equal(report.results.at(-1).id, "m5:test:package");
+    assert.equal(report.results.at(-1).exitCode, 2);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test("저부하 QA는 Rust 동시 실행을 4로 제한하고 더 작은 설정을 보존한다", () => {

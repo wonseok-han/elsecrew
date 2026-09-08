@@ -18,6 +18,8 @@
     "m5:package:smoke": "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs",
     "m5:make": "electron-forge make",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
+    "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
+    "m5:test:package": "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",
     "m5:test:core": "cargo test --workspace --manifest-path Cargo.toml",
     "m5:test:contracts": "node --test --experimental-strip-types tests/m5-protocol-contract.test.mts && cargo test -p hello-agent-protocol",
     "m5:test:storage": "node --test --experimental-strip-types tests/m5-g3-contract.test.mts tests/m5-electron-bridge.test.mts && cargo test -p hello-agent-sidecar --locked",
