@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -12,11 +13,13 @@ use hello_agent_protocol::agent_adapter_v1::{
 };
 use hello_agent_protocol::lifecycle_g5d_v1::{
     parse_g5d_agent_fixture_system_status_v1, parse_g5d_product_system_status_v1,
-    StorageAdmissionStateV1,
+    validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
 };
 use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5D_PRODUCT_CAPABILITIES_V1};
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
+
+static ADMISSION_POLL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[test]
 fn binary_storage_failure_is_reported_after_shell_ready_and_quits_cleanly() {
@@ -36,6 +39,28 @@ fn binary_storage_failure_is_reported_after_shell_ready_and_quits_cleanly() {
         panic!("shell ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_state(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        false,
+        StorageAdmissionStateV1::Failed,
+    );
+    write_raw_request_with_params(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_failed_raw_params",
+        "project.open",
+        "[\"not\",\"an\",\"object\"]",
+    );
+    let EnvelopeV1::Response(blocked) = receive_envelope(&envelopes) else {
+        panic!("failed admission block")
+    };
+    validate_g5d_blocked_request_error_v1(
+        StorageAdmissionStateV1::Failed,
+        blocked.error.as_ref().unwrap(),
+    )
+    .expect("exact failed admission error");
     wait_for_storage_state(
         &mut stdin,
         &envelopes,
@@ -181,6 +206,38 @@ fn binary_delayed_storage_still_emits_shell_ready_within_three_seconds() {
     };
     assert_eq!(
         parse_g5d_product_system_status_v1(&status.result.unwrap())
+            .unwrap()
+            .storage_admission
+            .state,
+        StorageAdmissionStateV1::Verifying
+    );
+    write_raw_request_with_params(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_raw_params",
+        "recovery.markResolved",
+        "null",
+    );
+    let EnvelopeV1::Response(blocked) = receive_envelope(&envelopes) else {
+        panic!("verifying admission block")
+    };
+    validate_g5d_blocked_request_error_v1(
+        StorageAdmissionStateV1::Verifying,
+        blocked.error.as_ref().unwrap(),
+    )
+    .expect("exact verifying admission error");
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_status_after_raw",
+        "system.status",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(status_after) = receive_envelope(&envelopes) else {
+        panic!("status after malformed params")
+    };
+    assert_eq!(
+        parse_g5d_product_system_status_v1(&status_after.result.unwrap())
             .unwrap()
             .storage_admission
             .state,
@@ -1458,11 +1515,12 @@ fn wait_for_storage_state(
     agent_fixture: bool,
     expected: StorageAdmissionStateV1,
 ) {
+    let poll_sequence = ADMISSION_POLL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     for attempt in 0..1_000_u32 {
         write_request(
             stdin,
             instance,
-            &format!("req_admission_{attempt}"),
+            &format!("req_admission_{poll_sequence}_{attempt}"),
             "system.status",
             serde_json::json!({}),
         );
@@ -1500,11 +1558,12 @@ fn wait_for_storage_ready_reader(
     instance: &str,
     agent_fixture: bool,
 ) {
+    let poll_sequence = ADMISSION_POLL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     for attempt in 0..1_000_u32 {
         write_request(
             stdin,
             instance,
-            &format!("req_admission_reader_{attempt}"),
+            &format!("req_admission_reader_{poll_sequence}_{attempt}"),
             "system.status",
             serde_json::json!({}),
         );
@@ -1556,6 +1615,23 @@ fn write_request(
     stdin
         .write_all(encode_jsonl(&request).unwrap().as_bytes())
         .unwrap();
+    stdin.flush().unwrap();
+}
+
+fn write_raw_request_with_params(
+    stdin: &mut impl Write,
+    instance: &str,
+    request_id: &str,
+    method: &str,
+    raw_params: &str,
+) {
+    let line = format!(
+        "{{\"protocolVersion\":1,\"kind\":\"request\",\"sidecarInstanceId\":{},\"requestId\":{},\"method\":{},\"params\":{raw_params}}}\n",
+        serde_json::to_string(instance).unwrap(),
+        serde_json::to_string(request_id).unwrap(),
+        serde_json::to_string(method).unwrap(),
+    );
+    stdin.write_all(line.as_bytes()).unwrap();
     stdin.flush().unwrap();
 }
 

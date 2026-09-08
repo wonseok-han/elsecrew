@@ -256,6 +256,36 @@ fn g5d_agent_fixture_advertises_exact_d1_capabilities_before_storage() {
 }
 
 #[test]
+fn admission_preflight_preserves_strict_allowed_and_ready_request_validation() {
+    let (_root, path) = database();
+    let instance = "sidecar_preflight_scope";
+    let gate = Arc::new(AtomicBool::new(false));
+    let mut sidecar =
+        SidecarSession::new(instance.to_string(), agent_runtime::AgentRuntime::blocked());
+    sidecar.start_admission_with_gate(&path, Some(Arc::clone(&gate)));
+    let raw = |method: &str| {
+        format!(
+            "{{\"protocolVersion\":1,\"kind\":\"request\",\"sidecarInstanceId\":\"{instance}\",\"requestId\":\"req_preflight\",\"method\":\"{method}\",\"params\":null}}\n"
+        )
+    };
+    assert!(
+        preflight_blocked_admission_request(raw("project.open").as_bytes(), &sidecar).is_some()
+    );
+    assert!(
+        preflight_blocked_admission_request(raw("system.status").as_bytes(), &sidecar).is_none()
+    );
+    assert!(
+        preflight_blocked_admission_request(raw("app.prepareQuit").as_bytes(), &sidecar).is_none()
+    );
+
+    gate.store(true, Ordering::Release);
+    wait_until_admitted(&mut sidecar);
+    assert!(
+        preflight_blocked_admission_request(raw("project.open").as_bytes(), &sidecar).is_none()
+    );
+}
+
+#[test]
 fn project_error_response_preserves_ambiguous_save_outcome() {
     let request = RequestV1 {
         protocol_version: PROTOCOL_VERSION,

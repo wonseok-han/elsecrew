@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D admission raw-params P1 수리)
+
+- **독립 리뷰 수리**: 기존 stdio가 `decode_jsonl`의 generic params-object 검사 뒤에 admission gate를 적용해, `params:null|array|scalar`인 차단 대상 요청이 generic protocol 오류로 세션을 종료하던 P1을 고쳤다. admission이 `verifying|failed`일 때만 exact request envelope의 version/kind/instance/request/method를 안전하게 선별하고, `system.status`·`app.prepareQuit` 외 known method의 non-object params를 session correlation에 먼저 등록한 뒤 고정 admission 응답으로 처리한다.
+- **보존 경계**: unknown/불완전 envelope, 잘못된 identity/version/kind/method, 허용 두 메서드, storage-ready 상태는 계속 기존 strict `decode_jsonl` 검증을 거친다. requestId 중복·instance 일치·response correlation은 기존 `ProtocolSessionV1::observe`를 그대로 사용하며 sidecar 외 protocol 계약은 바꾸지 않았다.
+- **검증**: 실제 process에서 배타 DB lock의 `verifying + recovery.markResolved(params:null)`과 잘못된 DB 경로의 `failed + project.open(params:array)`가 각각 exact fixed error를 반환하고 후속 `system.status`가 유지됨을 확인했다. scoped preflight unit, 전체 stdio 11개, G5D/writer focused, sidecar strict no-deps clippy, Rust format과 diff check가 통과했다. 다음은 이 별도 fix commit의 독립 재리뷰다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage storage admission 런타임)
 
 - **구현**: macOS sidecar가 exact D1 `system.ready`를 첫 stdout envelope로 내보낸 뒤 별도 worker에서 SQLite 경로·migration·integrity·projection replay를 검증하도록 시작 경계를 분리했다. 내부 검증 완료 뒤에만 ProjectManager 관리 디렉터리 생성, 기존/actual-agent startup recovery, app-instance 등록을 순서대로 수행하고 공개 `storageAdmission`을 `ready`로 전환한다. 검증 오류·worker panic은 세부 정보를 노출하지 않는 고정 `failed` 상태로 process 수명 동안 유지하며 재시작은 항상 `verifying`에서 다시 시작한다.

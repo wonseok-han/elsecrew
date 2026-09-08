@@ -14,14 +14,15 @@ use hello_agent_core as _;
 use hello_agent_protocol::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1;
 use hello_agent_protocol::lifecycle_g5d_v1::{
     DatabaseStatusG5DV1, StorageAdmissionStateV1, StorageAdmissionV1, SystemStateG5DV1,
-    SystemStatusG5DV1, STORAGE_ADMISSION_FAILED_DETAIL_V1, STORAGE_VERIFYING_BLOCKED_DETAIL_V1,
+    SystemStatusG5DV1, G5D_ALLOWED_WHILE_STORAGE_NOT_READY_V1, STORAGE_ADMISSION_FAILED_DETAIL_V1,
+    STORAGE_VERIFYING_BLOCKED_DETAIL_V1,
 };
 use hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1;
 use hello_agent_protocol::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1;
 use hello_agent_protocol::{
     decode_jsonl, encode_jsonl, EnvelopeV1, ErrorV1, EventV1, PrepareQuitResultV1,
     ProtocolSessionV1, ReadyPayloadV1, RequestV1, ResponseV1, APP_SCHEMA_VERSION,
-    MAX_CONTROL_LINE_BYTES, PROTOCOL_VERSION, SIDECAR_SCHEMA_VERSION,
+    MAX_CONTROL_LINE_BYTES, METHODS_V1, PROTOCOL_VERSION, SIDECAR_SCHEMA_VERSION,
 };
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -329,7 +330,11 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 ))
             }
         };
-        let envelope = decode_jsonl(&line).map_err(protocol_error)?;
+        sidecar.poll_admission();
+        let envelope = match preflight_blocked_admission_request(&line, &sidecar) {
+            Some(request) => EnvelopeV1::Request(request),
+            None => decode_jsonl(&line).map_err(protocol_error)?,
+        };
         session.observe(&envelope).map_err(protocol_error)?;
         let EnvelopeV1::Request(request) = envelope else {
             return Err(SidecarError::new(
@@ -337,7 +342,6 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
-        sidecar.poll_admission();
         let handled = sidecar.handle_request(request)?;
         let response = EnvelopeV1::Response(handled.response);
         session.observe(&response).map_err(protocol_error)?;
@@ -400,6 +404,25 @@ fn write_envelope<W: Write>(output: &mut W, envelope: &EnvelopeV1) -> Result<(),
     let line = encode_jsonl(envelope).map_err(protocol_error)?;
     output.write_all(line.as_bytes()).map_err(io_error)?;
     output.flush().map_err(io_error)
+}
+
+fn preflight_blocked_admission_request(line: &[u8], sidecar: &SidecarSession) -> Option<RequestV1> {
+    if sidecar.storage_is_ready() {
+        return None;
+    }
+    let request: RequestV1 = serde_json::from_slice(line).ok()?;
+    let valid_identity = request.protocol_version == PROTOCOL_VERSION
+        && request.kind == "request"
+        && !request.sidecar_instance_id.is_empty()
+        && !request.request_id.is_empty()
+        && METHODS_V1.contains(&request.method.as_str());
+    if !valid_identity
+        || request.params.is_object()
+        || G5D_ALLOWED_WHILE_STORAGE_NOT_READY_V1.contains(&request.method.as_str())
+    {
+        return None;
+    }
+    Some(request)
 }
 
 struct Sidecar {
@@ -717,6 +740,10 @@ impl SidecarSession {
 
     fn safe_to_quit(&self) -> bool {
         self.safe_to_quit
+    }
+
+    fn storage_is_ready(&self) -> bool {
+        matches!(self.admission, AdmissionState::Ready { .. })
     }
 }
 
