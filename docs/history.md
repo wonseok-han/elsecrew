@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 정리 통합)
+
+- **통합**: exact `a0ca32ff295d36c8c96605fb9b6993060e91f1ec`의 lifetime elision 2건과 `blob.chunk` 동치 조건 정리는 strict clippy exit 0·protocol 44 passed·rustfmt/diff 통과 및 독립 리뷰 PASS 뒤 `14a2efb68c2ff6acb5f93e5b9a47100e9ed868c3`로 통합했다. 공개 API·직렬화·오류 순서·validator 의미는 불변이다.
+- **정리·다음**: 완료된 clean 기능 worktree checkout은 비강제 제거하고 branch를 보존했다. 현재 root 포함 등록 worktree 10개, `.worktrees` 약 8.6 GiB이며 남은 child 9개는 미커밋 변경이나 증거 때문에 보존한다. 제품 진행은 2단계 shell-ready/storage-admission 안전 정책 사용자 결정 뒤 재개하며 main 병합·push 없음.
+
 ### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 기존 3건 정리)
 
 - **재현·수정**: base `1cd4d23ce22e64bfe83bf0ec7e551d939ca5b566`에서 protocol strict clippy의 기존 세 진단을 실제 exit 101로 재현했다. `run_recovery_v1.rs`와 `workspace_v1.rs`의 내부 helper에서 추론 가능한 lifetime만 생략하고, `lib.rs`의 `blob.chunk` 검증 조건만 동치인 단일 조건으로 접었다.
