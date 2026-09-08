@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer serialization allocation P1 수리)
+
+- **serialization 전 예약**: 신규 frozen operation은 borrowed plan field로 canonical record의 exact 길이와 source clone·canonical JSON Value·출력 digest footprint를 먼저 계산하고 합산 예산을 통과한 뒤에만 source를 clone/serialize한다. 기존 frozen operation의 `serde_json::to_value`와 protocol validator가 만드는 Value clone·payload canonicalization·record reconstruction·digest도 호출 전에 StepBudget에 예약한다.
+- **불필요한 clone 제거·감사**: frozen message는 owned source를 다시 JSON Value로 복제하지 않고 borrowed field의 JS-safe 정수·필수값·timestamp·source binding·message digest를 직접 검증한다. plan 작성의 baseline witness clone과 payload digest 결과도 clone/hash 전에 예약했다. 남은 `Value::to_string` 두 곳은 외부 문자열이 없는 고정 private cursor envelope 생성이며 입력 의존 serialization 경로가 아님을 확인했다.
+- **적대 회귀·검증**: actual SQLite의 다음 plan row aggregate ID를 dependency 상한 절반보다 1 byte 크게 만들어 단일 입력 fetch는 허용되지만 clone+canonical output 합산은 8 MiB를 넘는 경계를 재현했다. writer는 첫 serialization 전에 실패하고 event/index/receipt/frozen/authority/prefix 및 변조 plan witness를 그대로 두며 durable running sentinel만 남겼다. focused writer 9/9, verifyPrefix admission 1/1, sidecar no-deps strict clippy, Rust 2021 format과 diff check가 통과했다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer 메타데이터·allocation P1 수리)
 
 - **기존 witness 완전 검증**: private writer가 이미 존재하는 frozen operation/message를 source 열만으로 인정하지 않고 canonical record, record/message digest, `frozenAt`, source 결속을 protocol validator와 재해시로 모두 확인한다. 다음 배치 첫 operation의 canonical record·digest·시간을 변조하거나 canonical record를 8 MiB 초과로 만든 actual SQLite에서 writer가 삭제 전 실패하고 event/index/receipt/authority/prefix와 변조 witness가 그대로이며 durable running sentinel만 남는 것을 확인했다.

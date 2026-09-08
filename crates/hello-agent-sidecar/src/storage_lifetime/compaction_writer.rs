@@ -2,8 +2,8 @@ use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use hello_agent_protocol::storage_lifetime_v1::{
-    canonical_frozen_operation_record_v1, validate_frozen_message_source_v1,
-    validate_frozen_operation_source_v1, validate_storage_compaction_job_v3,
+    canonical_frozen_operation_record_v1, validate_frozen_operation_source_v1,
+    validate_frozen_operation_timestamps_v1, validate_storage_compaction_job_v3,
     validate_storage_compaction_plan_v1, FrozenMessageSourceV1, FrozenOperationSourceV1,
     StorageCompactionJobV3, StorageCompactionPhaseV3, StorageCompactionPlanV1,
     STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1, STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1,
@@ -135,6 +135,114 @@ struct ChatMessageWitness {
     durable_sequence: u64,
     canonical_message_json: String,
     message_digest: String,
+}
+
+#[derive(Clone, Copy)]
+struct FrozenOperationRecordRef<'a> {
+    operation_id: &'a str,
+    source_event_rowid: u64,
+    source_event_id: &'a str,
+    request_id: Option<&'a str>,
+    aggregate_type: &'a str,
+    aggregate_id: &'a str,
+    aggregate_sequence: u64,
+    event_type: &'a str,
+    payload_schema_version: u32,
+    canonical_payload_json: &'a str,
+    canonical_payload_digest: &'a str,
+    event_timestamp: &'a str,
+    frozen_at: &'a str,
+}
+
+#[derive(Clone, Copy)]
+struct FrozenMessageRef<'a> {
+    message_id: &'a str,
+    source_event_rowid: u64,
+    source_event_id: &'a str,
+    source_operation_id: &'a str,
+    chat_id: &'a str,
+    source_aggregate_sequence: u64,
+    durable_sequence: u64,
+    canonical_message_json: &'a str,
+    message_digest: &'a str,
+    frozen_at: &'a str,
+}
+
+impl<'a> FrozenMessageRef<'a> {
+    fn from_live(
+        row: &'a PlanRow,
+        message: &'a ChatMessageWitness,
+        frozen_at: &'a str,
+    ) -> Result<Self, SidecarError> {
+        Ok(Self {
+            message_id: row
+                .introduced_message_id
+                .as_deref()
+                .ok_or_else(compaction_error)?,
+            source_event_rowid: row.event_rowid,
+            source_event_id: &row.event_id,
+            source_operation_id: &row.operation_id,
+            chat_id: &message.chat_id,
+            source_aggregate_sequence: row.aggregate_sequence,
+            durable_sequence: message.durable_sequence,
+            canonical_message_json: &message.canonical_message_json,
+            message_digest: &message.message_digest,
+            frozen_at,
+        })
+    }
+
+    fn from_source(source: &'a FrozenMessageSourceV1) -> Self {
+        Self {
+            message_id: &source.message_id,
+            source_event_rowid: source.source_event_rowid,
+            source_event_id: &source.source_event_id,
+            source_operation_id: &source.source_operation_id,
+            chat_id: &source.chat_id,
+            source_aggregate_sequence: source.source_aggregate_sequence,
+            durable_sequence: source.durable_sequence,
+            canonical_message_json: &source.canonical_message_json,
+            message_digest: &source.message_digest,
+            frozen_at: &source.frozen_at,
+        }
+    }
+}
+
+impl<'a> FrozenOperationRecordRef<'a> {
+    fn from_plan(row: &'a PlanRow, frozen_at: &'a str) -> Self {
+        Self {
+            operation_id: &row.operation_id,
+            source_event_rowid: row.event_rowid,
+            source_event_id: &row.event_id,
+            request_id: row.request_id.as_deref(),
+            aggregate_type: &row.aggregate_type,
+            aggregate_id: &row.aggregate_id,
+            aggregate_sequence: row.aggregate_sequence,
+            event_type: &row.event_type,
+            payload_schema_version: row.payload_schema_version,
+            canonical_payload_json: &row.canonical_payload_json,
+            canonical_payload_digest: &row.canonical_payload_digest,
+            event_timestamp: &row.event_timestamp,
+            frozen_at,
+        }
+    }
+
+    fn from_source(source: &'a FrozenOperationSourceV1) -> Self {
+        Self {
+            operation_id: &source.operation_id,
+            source_event_rowid: source.source_event_rowid,
+            source_event_id: &source.source_event_id,
+            request_id: source.request_id.as_deref(),
+            aggregate_type: &source.aggregate_type,
+            aggregate_id: &source.aggregate_id,
+            aggregate_sequence: source.aggregate_sequence,
+            event_type: &source.event_type,
+            payload_schema_version: source.payload_schema_version,
+            canonical_payload_json: &source.canonical_payload_json,
+            canonical_payload_digest: &source.canonical_payload_digest,
+            event_timestamp: &source.event_timestamp,
+            frozen_at: &source.frozen_at,
+        }
+    }
 }
 
 pub(crate) fn run_private_compaction_step(
@@ -887,6 +995,20 @@ fn load_source_as_plan_row(
         return Err(compaction_error());
     }
     budget.add(length(lengths.1)?, length(lengths.2)?)?;
+    budget.add_dependency(checked_usize_sum(&[
+        71,
+        64,
+        if ordinal <= 1000 {
+            plan.baseline_id.len()
+        } else {
+            0
+        },
+        if ordinal <= 1000 {
+            plan.baseline_projection_digest.len()
+        } else {
+            0
+        },
+    ])?)?;
     let mut row = connection
         .query_row(
             "SELECT e.rowid,e.event_id,e.operation_id,e.request_id,e.aggregate_type,e.aggregate_id,\
@@ -1066,6 +1188,13 @@ fn freeze_operation(
         return Ok(());
     }
     let frozen_at = now();
+    let record = FrozenOperationRecordRef::from_plan(row, &frozen_at);
+    let record_len = frozen_operation_record_len(record)?;
+    let borrowed_dependency = frozen_operation_borrowed_dependency_len(record)?;
+    budget.add_bytes(
+        checked_scale(row.canonical_payload_json.len(), 2)?,
+        checked_usize_sum(&[checked_scale(borrowed_dependency, 2)?, record_len, 71, 64])?,
+    )?;
     let mut source = FrozenOperationSourceV1 {
         operation_id: row.operation_id.clone(),
         source_event_rowid: row.event_rowid,
@@ -1083,8 +1212,6 @@ fn freeze_operation(
         record_digest: String::new(),
         frozen_at,
     };
-    let record_len = frozen_operation_record_len(&source)?;
-    budget.add_dependency(record_len.checked_add(64).ok_or_else(compaction_error)?)?;
     source.canonical_record_json =
         canonical_frozen_operation_record_v1(&source).map_err(|_| compaction_error())?;
     if source.canonical_record_json.len() != record_len {
@@ -1158,7 +1285,9 @@ fn exact_frozen_operation(
     if !types_valid {
         return Err(compaction_error());
     }
-    budget.add_bytes(length(primary)?, length(dependency)?)?;
+    let source_primary = length(primary)?;
+    let source_dependency = length(dependency)?;
+    budget.add_bytes(source_primary, source_dependency)?;
     let source = connection
         .query_row(
             "SELECT operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,\
@@ -1188,6 +1317,11 @@ fn exact_frozen_operation(
             },
         )
         .map_err(|_| compaction_error())?;
+    let record_len = frozen_operation_record_len(FrozenOperationRecordRef::from_source(&source))?;
+    budget.add_bytes(
+        checked_scale(source_primary, 4)?,
+        checked_usize_sum(&[checked_scale(source_dependency, 3)?, record_len, 142])?,
+    )?;
     let value = serde_json::to_value(&source).map_err(|_| compaction_error())?;
     let validated = validate_frozen_operation_source_v1(&value).map_err(|_| compaction_error())?;
     if validated != source
@@ -1221,6 +1355,7 @@ fn freeze_message(
         return Ok(());
     };
     let message = load_chat_message(transaction, message_id, budget)?;
+    budget.add_dependency(71)?;
     if message.message_digest.strip_prefix("sha256:") != row.introduced_message_digest.as_deref()
         || sha256_file_version_v1(message.canonical_message_json.as_bytes())
             != message.message_digest
@@ -1230,22 +1365,10 @@ fn freeze_message(
     if exact_frozen_message(transaction, row, &message, budget)? {
         return Ok(());
     }
-    let source = FrozenMessageSourceV1 {
-        message_id: message_id.to_string(),
-        source_event_rowid: row.event_rowid,
-        source_event_id: row.event_id.clone(),
-        source_operation_id: row.operation_id.clone(),
-        chat_id: message.chat_id,
-        source_aggregate_sequence: row.aggregate_sequence,
-        durable_sequence: message.durable_sequence,
-        canonical_message_json: message.canonical_message_json,
-        message_digest: message.message_digest,
-        frozen_at: now(),
-    };
-    validate_frozen_message_source_v1(
-        &serde_json::to_value(&source).map_err(|_| compaction_error())?,
-    )
-    .map_err(|_| compaction_error())?;
+    let frozen_at = now();
+    let source = FrozenMessageRef::from_live(row, &message, &frozen_at)?;
+    budget.add_dependency(71)?;
+    validate_frozen_message_ref(source, row, &message)?;
     transaction
         .execute(
             "INSERT INTO frozen_message_sources(\
@@ -1362,12 +1485,32 @@ fn exact_frozen_message(
             },
         )
         .map_err(|_| compaction_error())?;
-    let validated = validate_frozen_message_source_v1(
-        &serde_json::to_value(&source).map_err(|_| compaction_error())?,
-    )
-    .map_err(|_| compaction_error())?;
-    if validated != source
-        || source.message_id != message_id
+    budget.add_dependency(71)?;
+    validate_frozen_message_ref(FrozenMessageRef::from_source(&source), row, message)?;
+    Ok(true)
+}
+
+fn validate_frozen_message_ref(
+    source: FrozenMessageRef<'_>,
+    row: &PlanRow,
+    message: &ChatMessageWitness,
+) -> Result<(), SidecarError> {
+    const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+    validate_frozen_operation_timestamps_v1(&row.event_timestamp, source.frozen_at)
+        .map_err(|_| compaction_error())?;
+    if source.message_id.is_empty()
+        || source.source_event_rowid == 0
+        || source.source_event_rowid > MAX_JS_SAFE_INTEGER
+        || source.source_event_id.is_empty()
+        || source.source_operation_id.is_empty()
+        || source.chat_id.is_empty()
+        || source.source_aggregate_sequence == 0
+        || source.source_aggregate_sequence > MAX_JS_SAFE_INTEGER
+        || source.durable_sequence == 0
+        || source.durable_sequence > MAX_JS_SAFE_INTEGER
+        || source.canonical_message_json.is_empty()
+        || source.message_digest.is_empty()
+        || Some(source.message_id) != row.introduced_message_id.as_deref()
         || source.source_event_rowid != row.event_rowid
         || source.source_event_id != row.event_id
         || source.source_operation_id != row.operation_id
@@ -1380,7 +1523,7 @@ fn exact_frozen_message(
     {
         return Err(compaction_error());
     }
-    Ok(true)
+    Ok(())
 }
 
 fn verify_planned_row(
@@ -1904,6 +2047,26 @@ fn checked_usize_sum(values: &[usize]) -> Result<usize, SidecarError> {
     })
 }
 
+fn checked_scale(value: usize, factor: usize) -> Result<usize, SidecarError> {
+    value.checked_mul(factor).ok_or_else(compaction_error)
+}
+
+fn frozen_operation_borrowed_dependency_len(
+    source: FrozenOperationRecordRef<'_>,
+) -> Result<usize, SidecarError> {
+    checked_usize_sum(&[
+        source.operation_id.len(),
+        source.source_event_id.len(),
+        source.request_id.map(str::len).unwrap_or(0),
+        source.aggregate_type.len(),
+        source.aggregate_id.len(),
+        source.event_type.len(),
+        source.canonical_payload_digest.len(),
+        source.event_timestamp.len(),
+        source.frozen_at.len(),
+    ])
+}
+
 fn json_string_len(value: &str) -> Result<usize, SidecarError> {
     let body = value.chars().try_fold(0usize, |total, character| {
         let bytes = match character {
@@ -1925,39 +2088,40 @@ fn decimal_len(mut value: u64) -> usize {
     digits
 }
 
-fn frozen_operation_record_len(source: &FrozenOperationSourceV1) -> Result<usize, SidecarError> {
+fn frozen_operation_record_len(
+    source: FrozenOperationRecordRef<'_>,
+) -> Result<usize, SidecarError> {
     let request_id = source
         .request_id
-        .as_deref()
         .map(json_string_len)
         .transpose()?
         .unwrap_or(4);
     checked_usize_sum(&[
         r#"{"aggregateId":"#.len(),
-        json_string_len(&source.aggregate_id)?,
+        json_string_len(source.aggregate_id)?,
         ",\"aggregateSequence\":".len(),
         decimal_len(source.aggregate_sequence),
         ",\"aggregateType\":".len(),
-        json_string_len(&source.aggregate_type)?,
+        json_string_len(source.aggregate_type)?,
         ",\"canonicalPayloadDigest\":".len(),
-        json_string_len(&source.canonical_payload_digest)?,
+        json_string_len(source.canonical_payload_digest)?,
         ",\"canonicalPayloadJson\":".len(),
-        json_string_len(&source.canonical_payload_json)?,
+        json_string_len(source.canonical_payload_json)?,
         ",\"eventTimestamp\":".len(),
-        json_string_len(&source.event_timestamp)?,
+        json_string_len(source.event_timestamp)?,
         ",\"eventType\":".len(),
-        json_string_len(&source.event_type)?,
+        json_string_len(source.event_type)?,
         ",\"frozenAt\":".len(),
-        json_string_len(&source.frozen_at)?,
+        json_string_len(source.frozen_at)?,
         ",\"operationId\":".len(),
-        json_string_len(&source.operation_id)?,
+        json_string_len(source.operation_id)?,
         ",\"payloadSchemaVersion\":".len(),
         decimal_len(u64::from(source.payload_schema_version)),
         ",\"recordSchemaVersion\":1,".len(),
         "\"requestId\":".len(),
         request_id,
         ",\"sourceEventId\":".len(),
-        json_string_len(&source.source_event_id)?,
+        json_string_len(source.source_event_id)?,
         ",\"sourceEventRowid\":".len(),
         decimal_len(source.source_event_rowid),
         1,
@@ -2064,7 +2228,8 @@ mod tests {
             record_digest: String::new(),
             frozen_at: "2026-09-09T00:00:01Z".to_string(),
         };
-        let expected = frozen_operation_record_len(&source).unwrap();
+        let expected =
+            frozen_operation_record_len(FrozenOperationRecordRef::from_source(&source)).unwrap();
         source.canonical_record_json = canonical_frozen_operation_record_v1(&source).unwrap();
         assert_eq!(expected, source.canonical_record_json.len());
     }

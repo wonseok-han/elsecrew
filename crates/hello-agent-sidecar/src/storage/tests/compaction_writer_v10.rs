@@ -251,6 +251,82 @@ fn v10_writer_rejects_corrupt_existing_frozen_operation_before_delete() {
         );
         assert_writer_rejects_before_delete(&mut copy, column, &value);
     }
+
+    let copy = root.path().join("serialization-budget.sqlite3");
+    std::fs::copy(&path, &copy).unwrap();
+    let cancellation = AtomicBool::new(false);
+    let mut copy = Storage::open_for_admission(&copy, &cancellation).unwrap();
+    let near_limit = "x".repeat(
+        usize::try_from(STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1).unwrap()
+            / 2
+            + 1,
+    );
+    super::reopen_closure::corrupt(
+        &copy.connection,
+        &format!(
+            "UPDATE storage_compaction_plan_rows SET aggregate_id='{}' \
+             WHERE ordinal=101 AND job_id=(SELECT job_id FROM maintenance_jobs \
+             WHERE job_kind='losslessCompaction');",
+            near_limit
+        ),
+    );
+    let before: (u32, u32, u32, u32, u32, u32) = copy
+        .connection
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),(SELECT count(*) FROM event_source_index),\
+                    (SELECT count(*) FROM operation_receipts),\
+                    (SELECT count(*) FROM frozen_operation_sources),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes);",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    let mut never = |_: CompactionCancellationPoint| false;
+    assert!(
+        run_private_compaction_step(&mut copy.connection, &target(), &mut never, None).is_err()
+    );
+    let after: (u32, u32, u32, u32, u32, u32, String, u32) = copy
+        .connection
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),(SELECT count(*) FROM event_source_index),\
+                    (SELECT count(*) FROM operation_receipts),\
+                    (SELECT count(*) FROM frozen_operation_sources),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes),\
+                    (SELECT state FROM maintenance_jobs WHERE job_kind='losslessCompaction'),\
+                    (SELECT length(CAST(aggregate_id AS BLOB)) FROM storage_compaction_plan_rows \
+                     WHERE ordinal=101);",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        (after.0, after.1, after.2, after.3, after.4, after.5),
+        before
+    );
+    assert_eq!(after.6, "running");
+    assert_eq!(usize::try_from(after.7).unwrap(), near_limit.len());
 }
 
 #[test]
