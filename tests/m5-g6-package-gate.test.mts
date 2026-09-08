@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
@@ -146,16 +146,35 @@ test("G6 package gate preserves the package-metrics PASS, FAIL, and NOT_READY ex
   }
 });
 
-test("G6 package gate rejects stale or missing required outputs before metrics", () => {
+test("G6 package gate rejects stale package assets before smoke or make", () => {
   withFixture(({ root, artifacts }) => {
-    for (const path of artifacts.requiredOutputs) utimesSync(path, new Date("2026-09-07T00:00:00.000Z"), new Date("2026-09-07T00:00:00.000Z"));
+    for (const path of artifacts.requiredOutputs.slice(0, -1)) {
+      utimesSync(path, new Date("2026-09-07T00:00:00.000Z"), new Date("2026-09-07T00:00:00.000Z"));
+    }
     const calls: string[][] = [];
     const outcome = runWithSuccessfulCommands(root, artifacts, calls);
     assert.equal(outcome.report.status, "NOT_READY");
     assert.equal(outcome.exitCode, 2);
     assert.ok(outcome.report.reasons.every((reason) => reason.code === "staleArtifact"));
-    assert.equal(calls.length, 3);
+    assert.deepEqual(calls, [["pnpm", "exec", "electron-forge", "package"]]);
   });
+  withFixture(({ root, artifacts }) => {
+    const sidecarDirectory = dirname(artifacts.requiredOutputs.at(-2)!);
+    rmSync(sidecarDirectory, { recursive: true });
+    const external = resolve(root, "external-sidecar");
+    mkdirSync(external);
+    writeFileSync(resolve(external, "hello-agent-sidecar"), "external fixture");
+    symlinkSync(external, sidecarDirectory);
+    const calls: string[][] = [];
+    const outcome = runWithSuccessfulCommands(root, artifacts, calls);
+    assert.equal(outcome.report.status, "NOT_READY");
+    assert.equal(outcome.exitCode, 2);
+    assert.ok(outcome.report.reasons.some((reason) => reason.code === "symlinkArtifact"));
+    assert.deepEqual(calls, [["pnpm", "exec", "electron-forge", "package"]]);
+  });
+});
+
+test("G6 package gate rejects a missing archive after make and before metrics", () => {
   withFixture(({ root, artifacts }) => {
     rmSync(artifacts.archive);
     const calls: string[][] = [];

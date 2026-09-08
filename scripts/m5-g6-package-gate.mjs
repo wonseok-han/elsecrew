@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,24 +82,33 @@ export function runPackageGate(options = {}) {
     return finish(report, repository, makeDirectory, writeFile, now);
   }
 
-  const commands = [
-    { id: "package", command: "pnpm", args: ["exec", "electron-forge", "package"] },
-    { id: "smoke", command: process.execPath, args: ["scripts/m5-electron-package-smoke.mjs"] },
-    { id: "make", command: "pnpm", args: ["exec", "electron-forge", "make", "--skip-package"] },
-  ];
-  for (const command of commands) {
+  const runCommand = (command) => {
     const result = commandResult(command, run(command.command, command.args, { cwd: repository, encoding: "utf8", stdio: "inherit" }));
     report.results.push(result);
     if (result.exitCode !== 0) {
       report.status = "FAIL";
       report.reasons.push({ code: "commandFailed", detail: `${command.id} failed.` });
-      return finish(report, repository, makeDirectory, writeFile, now);
+      return false;
     }
+    return true;
+  };
+  const packageCommand = { id: "package", command: "pnpm", args: ["exec", "electron-forge", "package"] };
+  if (!runCommand(packageCommand)) return finish(report, repository, makeDirectory, writeFile, now);
+
+  const packageProvenance = validateFreshPackageArtifacts(artifacts, startedAtMs, lstat);
+  if (packageProvenance.length > 0) {
+    report.reasons.push(...packageProvenance);
+    return finish(report, repository, makeDirectory, writeFile, now);
   }
 
-  const provenance = validateFreshArtifacts(artifacts.requiredOutputs, startedAtMs, lstat);
-  if (provenance.length > 0) {
-    report.reasons.push(...provenance);
+  const smokeCommand = { id: "smoke", command: process.execPath, args: ["scripts/m5-electron-package-smoke.mjs"] };
+  if (!runCommand(smokeCommand)) return finish(report, repository, makeDirectory, writeFile, now);
+  const makeCommand = { id: "make", command: "pnpm", args: ["exec", "electron-forge", "make", "--skip-package"] };
+  if (!runCommand(makeCommand)) return finish(report, repository, makeDirectory, writeFile, now);
+
+  const archiveProvenance = validateFreshArtifacts([artifacts.archive], startedAtMs, lstat);
+  if (archiveProvenance.length > 0) {
+    report.reasons.push(...archiveProvenance);
     return finish(report, repository, makeDirectory, writeFile, now);
   }
 
@@ -143,6 +152,29 @@ export function validateFreshArtifacts(paths, startedAtMs, lstat = lstatSync) {
       }
     } catch (error) {
       reasons.push({ code: "missingArtifact", detail: `required artifact is missing: ${path} (${String(error)})` });
+    }
+  }
+  return reasons;
+}
+
+export function validateFreshPackageArtifacts(artifacts, startedAtMs, lstat = lstatSync) {
+  const packagePaths = artifacts.requiredOutputs.slice(0, -1);
+  const reasons = validateFreshArtifacts(packagePaths, startedAtMs, lstat);
+  const seen = new Set();
+  for (const asset of packagePaths.slice(1)) {
+    const parts = relative(artifacts.packageDirectory, asset).split(/[\\/]/).filter(Boolean);
+    let current = artifacts.packageDirectory;
+    for (const part of parts.slice(0, -1)) {
+      current = resolve(current, part);
+      if (seen.has(current)) continue;
+      seen.add(current);
+      try {
+        if (lstat(current).isSymbolicLink()) {
+          reasons.push({ code: "symlinkArtifact", detail: `required package path is a symlink: ${current}` });
+        }
+      } catch (error) {
+        reasons.push({ code: "missingArtifact", detail: `required package path is missing: ${current} (${String(error)})` });
+      }
     }
   }
   return reasons;

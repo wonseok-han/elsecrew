@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G6 gate 독립 리뷰 P1/P2 수리)
+
+- **P1 수리**: package 성공 직후 package root와 executable/ASAR/외부 sidecar의 freshness·symlink를 확인하고, 각 leaf까지의 중간 directory도 `lstat`으로 symlink를 거부한다. 이 검증이 실패하면 smoke/make/metrics를 전혀 실행하지 않는다. make 성공 뒤에는 고정 ZIP의 freshness·symlink를 별도로 확인한 뒤 metrics를 실행한다. stale package와 symlink된 sidecar directory가 smoke에 도달하지 않는 회귀를 추가했다.
+- **P2 수리**: 누적 M5 하네스는 자식 script exit 2를 `FAIL`로 바꾸지 않고 `NOT_READY`/exit 2로 report의 해당 result와 함께 보존한다. 그 밖의 exit/error는 기존 `FAIL`/exit 1이다. 실제 production package를 실행하지 않는 child stub fixture로 `m5:test:package`의 exit 2 전파를 고정했다.
+- **검증·경계**: focused Node package/harness/metrics/staging 34 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 여전히 `NOT_READY`; signing/notarization, Windows 실기기, 실제 clean package/make 증거는 남아 있다.
+
 ### 2026-09-08 · by GPT-5 Codex (G6 incremental security/package gate)
 
 - **구현**: `m5:test:security`는 main callback VM 보안·scaffold CSP/fuse/좁은 bridge·sidecar staging fail-closed 회귀와 `electron/main.ts` strip-types 문법 검사를 실제로 묶는다. `m5:test:package`는 현재 대상의 Forge package → packaged sidecar/ASAR/fuse smoke → `make --skip-package` → 고정 ZIP 경로의 metrics 순서를 실행하고, 동일 시작 시각 이후 갱신된 package/실행 파일/ASAR/외부 sidecar/ZIP만 인정한다. JSON 증거에는 HEAD·dirty 상태·각 명령 exit·정확한 산출물 경로·metrics verdict를 남긴다. Monaco `editor.worker-*.js`도 packaged ASAR smoke 필수 자산으로 추가했다.

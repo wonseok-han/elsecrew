@@ -201,6 +201,10 @@ for (const command of commands) {
   report.results.push(entry);
   if (entry.stdout) process.stdout.write(entry.stdout);
   if (entry.stderr) process.stderr.write(entry.stderr);
+  if (result.status === 2 && !result.error) {
+    report.status = "NOT_READY";
+    break;
+  }
   if (result.status !== 0 || result.error) {
     report.status = "FAIL";
     break;
@@ -212,4 +216,4 @@ report.finishedAt = new Date().toISOString();
 const path = options.report ? writeReport(report) : null;
 console.log(`\n${report.status} ${report.gate}`);
 if (path) console.log(`report: ${path}`);
-process.exit(report.status === "PASS" ? 0 : 1);
+process.exit(report.status === "PASS" ? 0 : report.status === "NOT_READY" ? 2 : 1);
