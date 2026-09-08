@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 기존 3건 정리)
+
+- **재현·수정**: base `1cd4d23ce22e64bfe83bf0ec7e551d939ca5b566`에서 protocol strict clippy의 기존 세 진단을 실제 exit 101로 재현했다. `run_recovery_v1.rs`와 `workspace_v1.rs`의 내부 helper에서 추론 가능한 lifetime만 생략하고, `lib.rs`의 `blob.chunk` 검증 조건만 동치인 단일 조건으로 접었다.
+- **계약 경계**: 공개 protocol 타입·상수·capability·golden fixture와 직렬화·검증 분기는 바꾸지 않았다. 변경은 세 진단의 제안 문법과 이 기록뿐이며 새 허용/거부 동작을 추가하지 않는다.
+- **검증**: jobs/threads 4 제한에서 exact strict clippy exit 0, protocol crate 전체 44 passed/0 failed, 수정 Rust 3파일의 edition 2021 rustfmt check와 `git diff --check` exit 0다. workspace 전체 suite·actual provider·Electron·renderer·package·main·원격은 건드리지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (D1 malformed 회귀 통합·worktree 정리)
 
 - **테스트 통합**: exact `2ec19f20818321664af6e1dd66568f269e9f734a`가 D1 product/agent-fixture ready validator 양쪽에서 capability 순서 교환·`storage.status` 중복·unknown extra·누락·ready payload extra field를 Rust/TypeScript 표 기반 회귀로 거부한다. protocol 44개, Node lifetime 18개, TypeScript, rustfmt, diff 검증과 독립 리뷰 PASS 뒤 `460a23bce56dc8c9ad2d3bd64672cd0a7cad8bbe`로 통합했다.
