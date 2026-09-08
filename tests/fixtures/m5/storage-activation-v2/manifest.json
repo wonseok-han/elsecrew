@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "generation": "storageLifetimeActivationV2",
+  "databaseMigration": {
+    "fromVersion": 8,
+    "toVersion": 9,
+    "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "effect": "additiveResumeWitnessTablesAndVersionedGuards",
+    "existingRowsDeleted": false,
+    "activeV2Pending": "failAdmissionUnsupportedNoMutation"
+  },
+  "publicWire": {
+    "g5dLifecycleShape": "unchanged",
+    "storageStatusShape": "unchanged",
+    "capabilityOrder": "unchanged",
+    "readyToFailedTransition": false,
+    "physicalCleanupEnabled": false
+  },
+  "eligibility": {
+    "exactSafePrefixMinLedgerEvents": 1000,
+    "countBoundary": "sinceRetainedBoundary",
+    "belowThresholdAllowed": false,
+    "ageTrigger": false,
+    "byteTrigger": false,
+    "preconditions": [
+      "allExistingSafetyExclusionsPass",
+      "completeMaterialization",
+      "exactBeforeAfterEquivalence"
+    ]
+  },
+  "preservation": {
+    "logicalDeleteRows": ["events", "event_source_index"],
+    "preservedRecords": [
+      "userChats", "chatMessages", "userEvidence", "recoveries", "workspaces",
+      "snapshots", "baselines", "projections", "operationReceipts"
+    ],
+    "physicalCleanup": "disabled"
+  },
+  "restart": {
+    "pendingEmptyAuthority": "exactVerifyDuringAdmissionThenReadyAndResumeAfterward",
+    "runningSentinel": "failAdmissionWithoutMutationManualRecovery",
+    "nonEmptyAuthority": "failAdmissionWithoutMutationManualRecovery",
+    "ambiguousOrCommitUncertain": "failAdmissionWithoutMutationManualRecovery",
+    "automaticResetOrResumeUnsafeState": false
+  },
+  "runtime": {
+    "owner": "singleSQLiteOwnerInSidecarEventLoop",
+    "writerConnections": 1,
+    "backgroundWriterConnection": false,
+    "backgroundWriterThread": false,
+    "ticks": "readyOnly",
+    "zeroTickStates": ["verifying", "failed", "quitting"],
+    "step": "oneBoundedCommittedStepPerTick"
+  },
+  "fatalAfterReady": {
+    "causes": [
+      "semanticCorruption", "commitUncertainty", "materializerFatal", "compactorFatal"
+    ],
+    "action": "poisonStopMaintenanceAndTerminateSidecar",
+    "furtherMutationOrRun": "prohibited",
+    "nextProcess": "reenterVerifyingAndRunAdmission",
+    "wireTransition": "none"
+  },
+  "budgets": {
+    "maxWorkUnitsPerStep": 100,
+    "maxCanonicalPrimaryInputBytesPerStep": 1048576,
+    "maxRetainedAndDependencyInputBytesPerStep": 8388608,
+    "callerConfigurable": false
+  },
+  "phases": [
+    "pending", "armRunning", "freeze", "materialize", "verify", "delete", "finalize"
+  ],
+  "quit": "stopNewTicksBeforeCheckpointAndCleanMarker",
+  "resumeWitness": {
+    "generation": "storageCompactionResumeWitnessV1",
+    "privateStateSchemaVersion": 3,
+    "pendingAdmission": "exactWitnessVerificationThenReadyResumeAfterward",
+    "runningOrAuthorityOrUncertain": "failAdmissionNoMutation",
+    "publicWire": "unchanged"
+  }
+}

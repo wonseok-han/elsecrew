@@ -9,6 +9,30 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 terminal evidence P1 수리)
+
+- **전이 guard 완결**: V3 단일 `BEFORE` guard의 UPDATE 대상을 `state`·private cutoff뿐 아니라 `failure_kind`·`completed_at`까지 넓혔다. 전체 허용식은 `IS 1`로 total boolean화해 JSON 누락·SQL NULL이 통과하지 못하고, exact no-op도 네 필드 모두를 null-safe `IS` 비교하므로 terminal evidence를 나중에 다시 쓸 수 없다.
+- **terminal 계약**: pending/running은 terminal field가 둘 다 NULL이어야 한다. succeeded는 NULL failure와 immutable valid completion을, failed는 비어 있지 않은 failure와 immutable valid completion을 요구한다. SQL은 exact RFC 3339 UTC seconds shape·달력·시간 범위를 검사하며 Rust/TypeScript runtime validator가 같은 규칙을 다시 확인하는 권위는 유지한다.
+- **검증·경계**: pending terminal-field 위조, NULL/empty failure, 형식·윤년·24시 오류, terminal rewrite와 valid failure/success를 actual SQLite로 검증했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format과 diff check가 통과했다. 이는 V9 schema/protocol fixture 수리이며 runtime scheduler/delete writer 또는 readiness 활성화가 아니다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 exact schema·상태 전이 재리뷰 수리)
+
+- **P0 exact V8 강화**: V8→V9 SQL의 DDL 전 preflight를 이름 inventory에서 모든 non-autoindex table/index/trigger의 canonical `sqlite_schema.sql` exact 정의 비교로 강화했다. 같은 이름의 append-only trigger, active-job unique index, maintenance table을 약화·변형한 실제 SQLite에서도 migration이 실패하고 schema/version이 V8 그대로 rollback되는 것을 확인했다.
+- **P0 V3 UPDATE 봉쇄**: `maintenance_jobs`의 V3 `state` 또는 private cutoff를 바꾸는 UPDATE를 단일 `BEFORE` guard로 모아 exact arm·연속 cursor progress·빈 authority pending commit·인접 phase·release/finalize·terminal failure만 허용했다. phase jump/backward, state-only arm, cutoff-only flag 위조, state+cursor 위조를 거부하면서 plan INSERT/release DELETE trigger의 transaction 내부 cursor 갱신과 전체 정상 phase 경로를 보존했다.
+- **범위·검증**: Rust/TypeScript/shared policy와 현재 제안 문서를 같은 계약으로 동기화했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. 이는 schema/protocol fixture 수리이며 V9 runtime·scheduler·delete writer 구현이나 product readiness가 아니다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D resume witness 독립 리뷰 차단 수리)
+
+- **P0 migration·planning 수리**: 실제 V8→V9 SQL이 `BEGIN IMMEDIATE` 안에서 persistent DDL 전에 exact V8 object inventory, pending/running job 부재, empty authority를 검사하고 `RAISE(ROLLBACK)`하도록 고쳤다. plan row는 arm이 고정한 최대 100개 연속 ordinal만 INSERT할 수 있고 trigger가 같은 transaction에서 cursor를 전진시킨다. prefix는 exact 1,001-row plan과 완료된 planning/`verifyPrefix` 현재 phase를 요구하되 논리적으로 미래인 equivalence는 요구하지 않는다.
+- **P1 release·P2 TS 수리**: V3 cursor에 nullable `stepThroughPlanOrdinal`을 추가해 release 범위를 고정하고 delete ordinal `1..1000`만 다음 연속 순서로 지우며 `afterPlanOrdinal=1000` terminal progress와 ordinal 1001 anchor를 보존한다. TypeScript V9 validator는 plain own data object와 string `aggregateType`만 받아 custom prototype/accessor/`toString` coercion을 fail-closed한다.
+- **검증·경계**: actual SQLite에서 unsafe migration의 pre-DDL rollback, anchor-first/sparse/>100 planning, partial/wrong-phase prefix, anchor/out-of-order/101-row release, cursor-only mutation, delete+cursor rollback과 terminal anchor 보존을 검증했다. protocol Rust 전체 49개와 lifetime/activation/V9 Node 33개, TypeScript noEmit, protocol strict clippy, Rust format, diff check가 통과했다. Rust/TypeScript/golden/문서를 함께 갱신했지만 runtime migration/admission/scheduler/delete writer는 여전히 구현되지 않았고 readiness를 주장하지 않는다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D compaction resume witness 계약)
+
+- **결정 고정**: V8 compaction cursor만으로 active `pending`의 재개 결정을 증명할 수 없어 additive storage V9와 private state/cursor schema 3을 정의했다. 한 job은 retained boundary 다음 1,000 delete row와 1 anchor를 immutable header + `WITHOUT ROWID` ordinal witness로 고정하며, `afterPlanOrdinal`까지 source·receipt·message·baseline·digest를 bounded 재검증한다. active V2 pending, running/non-empty authority/commit 불명은 mutation 없이 admission 실패다.
+- **안전·호환 경계**: 기존 V2/V6/V7/V8와 activation V1, 공개 D1 `system.status`·`storage.status`·capability는 바꾸지 않았다. V8→V9는 active compaction 없음·empty authority 선행 조건의 additive migration이며 한 step 100 work/1 MiB primary/8 MiB retained+dependency, 단일 writer, exact 1,000-delete job, append-after-cutoff retained tail, 성공 뒤 bounded plan-row release와 immutable terminal header를 고정했다.
+- **범위·검증·다음**: Rust/TypeScript validator, V9 migration/공유 malformed fixture, activation V2 golden까지만 계약으로 추가했다. focused Rust 1개, protocol 전체 49개, V1~V9 SQLite migration과 기존 lifetime/activation을 포함한 Node 32개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. runtime migration/admission/scheduler/delete writer는 구현되지 않았고 이 계약 commit 자체는 readiness나 자동 compaction 활성화를 뜻하지 않는다. 독립 리뷰와 통합이 남는다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D admission compaction control-state fix)
 
 - **P1 수정**: 제품 admission이 compaction artifact 4개 테이블이 비었다는 이유만으로 `losslessCompaction` 작업 메타데이터를 무시하던 경로를 닫았다. uncompacted admission은 작업이 전혀 없을 때만 허용하고, compacted terminal admission은 정확히 하나의 `succeeded` proof와 실제 artifact가 함께 있을 때만 검증한다. active pending/running, 다른 상태, 중복 작업, malformed proof, artifact 없는 orphan succeeded는 모두 mutation 없이 실패한다.
