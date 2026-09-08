@@ -26,7 +26,7 @@ test("하네스가 M5 게이트와 준비 상태를 기계적으로 나열한다
   assert.match(result.stdout, /g4-project-editor\s+READY/);
   assert.match(result.stdout, /g5-run-recovery\s+READY/);
   assert.match(result.stdout, /g5d-bounded-storage\s+READY/);
-  assert.match(result.stdout, /g5d-storage-lifetime\s+NOT_READY/);
+  assert.match(result.stdout, /g5d-storage-lifetime\s+READY/);
   assert.match(result.stdout, /g6-release\s+NOT_READY/);
 });
 
@@ -55,14 +55,17 @@ test("G5D bounded-storage 하위 게이트는 lifetime 계약과 V6 migration·w
   assert.match(command, /hello-agent-sidecar --locked bounded_v6/);
 });
 
-test("전체 G5D는 scheduler, status wire, compaction 전까지 NOT_READY다", () => {
-  const result = run("--gate", "g5d-storage-lifetime");
-
-  assert.equal(result.status, 2, result.stderr);
-  assert.match(result.stderr, /NOT_READY g5d-storage-lifetime/);
-  assert.match(result.stderr, /m5:test:storage-scheduler/);
-  assert.match(result.stderr, /m5:test:storage-status/);
-  assert.match(result.stderr, /m5:test:storage-compaction/);
+test("전체 G5D lifetime gate는 독립 scheduler, status, compaction 증거를 요구한다", () => {
+  const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  for (const [script, gate] of [
+    ["m5:test:storage-scheduler", "scheduler"],
+    ["m5:test:storage-status", "status"],
+    ["m5:test:storage-compaction", "compaction"],
+  ] as const) {
+    assert.equal(packageJson.scripts[script], `node scripts/m5-g5d-storage-gate.mjs --gate ${gate}`);
+  }
 });
 
 test("다음 미구현 게이트는 성공이나 skip 대신 NOT_READY로 끝난다", () => {

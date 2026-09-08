@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 증거 게이트)
+
+- **구현**: `m5:test:storage-scheduler`·`storage-status`·`storage-compaction`을 독립 Node runner에 연결했다. 각 runner는 clean HEAD에서만 focused Node/Rust/diff 검증을 실행하고, command/exit/signal/duration·HEAD·dirty·worker cap을 `.artifacts/m5-g5d-storage/`의 atomic JSON evidence로 남긴다. evidence directory symlink, unsafe gate/path, git metadata 부재, malformed child result, nonzero/signal, evidence write 오류는 PASS를 주장하지 않고 fail-closed한다.
+- **범위**: scheduler는 V4 activation·ready 전/quit 후 zero-tick·poison·stdio와 actual SQLite scheduler subset, status는 D1 Rust/TypeScript fixture와 Electron V6 bridge/poller·privacy/ready-only 사실, compaction은 V9/V10 migration/admission/prefix chain 및 V10 writer/failure-injection focused subset을 각각 소유한다. full sidecar를 세 번 재실행하지 않는다.
+- **검증·다음**: injectable runner/harness Node regression 16/16과 `git diff --check`를 통과했다. clean 기능 commit 뒤 세 package gate 및 누적 `g5d-storage-lifetime` evidence를 실행해 실제 PASS 여부를 별도로 확인한다. Windows 실기기·실사용 DB 강제 종료·G6 package/release는 이 gate 범위 밖이다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D 남은 하네스 선행 조건 정정)
 
 - **실행 조건 정정**: 아직 존재하지 않는 `storage-scheduler`·`storage-status`·`storage-compaction` 하네스를 곧바로 실행하라는 표현을 제거했다. 세 스크립트와 증거 gate를 먼저 구현하고 모두 통과하기 전에는 누적 G5D gate가 fail-closed `NOT_READY`를 유지한 뒤 최신 통합 commit에서 실행하도록 제안서 순서를 바로잡았다.
