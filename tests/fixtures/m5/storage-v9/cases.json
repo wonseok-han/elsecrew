@@ -97,6 +97,7 @@
   ],
   "malformedPolicyPaths": [
     "plan.expectedRows", "discovery.targetScan", "discovery.planningWrite",
+    "plan.digestRepresentation.normalization",
     "privateState.activeV2Pending", "lifecycle.reset", "authority.source",
     "authority.singleActiveJob", "release.beforeEquivalence",
     "multiJob.verification", "budgets.maxWorkUnitsPerStep",

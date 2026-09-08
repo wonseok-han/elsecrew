@@ -614,6 +614,7 @@ pub struct StorageCompactionPlanV1 {
     pub anchor_aggregate_sequence: u64,
     pub expected_rows: u32,
     pub baseline_id: String,
+    /// Raw lowercase SHA-256 hex; the existing baseline row stores `sha256:<hex>`.
     pub baseline_projection_digest: String,
     pub previous_successful_job_id: Option<String>,
     pub created_at: String,
@@ -636,11 +637,14 @@ pub struct StorageCompactionPlanRowV1 {
     pub payload_schema_version: u32,
     pub event_timestamp: String,
     pub canonical_payload_json: String,
+    /// Raw lowercase SHA-256 hex, without an algorithm prefix.
     pub canonical_payload_digest: String,
     pub introduced_message_id: Option<String>,
+    /// Raw lowercase SHA-256 hex; existing message/frozen rows store `sha256:<hex>`.
     pub introduced_message_digest: Option<String>,
     pub decision: StorageCompactionPlanDecisionV1,
     pub baseline_id: Option<String>,
+    /// Raw lowercase SHA-256 hex, without an algorithm prefix.
     pub baseline_projection_digest: Option<String>,
     pub operation_frozen_before_plan: bool,
     pub message_frozen_before_plan: bool,
@@ -3491,6 +3495,13 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "baseline": "everyDeleteRowMatchesHeaderBaselineIdentityAndDigest",
             "anchor": "ordinal1001IsRetainAnchorAndRemainsLive",
             "message": "nullableIdentityAndDigestAppearTogether",
+            "digestRepresentation": {
+                "plan": "lowercaseHex64WithoutAlgorithmPrefix",
+                "existingBaselineMessageAndFrozen": "sha256ColonLowercaseHex64",
+                "receipt": "sha256V1LowercaseHex64Columns",
+                "normalization": "stripExactSha256ColonPrefixAfterShapeCheck",
+                "authority": "rustRehashesCanonicalPayloadBaselineAndMessage",
+            },
         },
         "discovery": {
             "targetScan": "volatileBoundedAggregateKeyset",
