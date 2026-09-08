@@ -653,9 +653,20 @@ fn product_admission_accepts_two_succeeded_v9_plans_as_one_bounded_chain() {
 #[test]
 fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests() {
     let (_root, template) = v9_template(1001);
-    for case in ["gap", "extra", "digest", "artifact"] {
+    for case in [
+        "gap",
+        "extra",
+        "correlated_digest",
+        "oversized_baseline_digest",
+        "artifact",
+    ] {
         let (_copy_root, path) = copy_template(&template);
-        seed_pending(&path, "planEligibility", 137);
+        let phase = if case == "correlated_digest" {
+            "freezeOperations"
+        } else {
+            "planEligibility"
+        };
+        seed_pending(&path, phase, 137);
         let connection = Connection::open(&path).unwrap();
         with_triggers_disabled(&connection, |connection| match case {
             "gap" => {
@@ -679,8 +690,44 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
                     &baseline_digest,
                 );
             }
-            "digest" => {
-                connection.execute("UPDATE storage_compaction_plan_rows SET canonical_payload_digest=?1 WHERE ordinal=1",["a".repeat(64)]).unwrap();
+            "correlated_digest" => {
+                let wrong = "a".repeat(64);
+                let operation_id: String = connection
+                    .query_row(
+                        "SELECT operation_id FROM storage_compaction_plan_rows WHERE ordinal=1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE storage_compaction_plan_rows SET canonical_payload_digest=?1 \
+                         WHERE ordinal=1",
+                        [&wrong],
+                    )
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE frozen_operation_sources SET canonical_payload_digest=?1 \
+                         WHERE operation_id=?2",
+                        params![wrong, operation_id],
+                    )
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE operation_receipts SET canonical_payload_digest=?1 \
+                         WHERE operation_id=?2",
+                        params![wrong, operation_id],
+                    )
+                    .unwrap();
+            }
+            "oversized_baseline_digest" => {
+                connection
+                    .execute(
+                        "UPDATE ledger_baselines SET projection_digest=?1",
+                        params!["a".repeat(8 * 1024 * 1024 + 1)],
+                    )
+                    .unwrap();
             }
             "artifact" => {
                 let private = private_state("freezeOperations", 137, false);
@@ -694,6 +741,12 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
             _ => unreachable!(),
         });
         let before = witness_snapshot(&connection);
+        let related_before = [
+            "ledger_baselines",
+            "frozen_operation_sources",
+            "operation_receipts",
+        ]
+        .map(|table| table_rows(&connection, table));
         drop(connection);
         let cancellation = AtomicBool::new(false);
         let error = match Storage::open_for_admission(&path, &cancellation) {
@@ -703,6 +756,13 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
         assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
         let connection = Connection::open(&path).unwrap();
         assert_eq!(witness_snapshot(&connection), before, "{case}");
+        let related_after = [
+            "ledger_baselines",
+            "frozen_operation_sources",
+            "operation_receipts",
+        ]
+        .map(|table| table_rows(&connection, table));
+        assert_eq!(related_after, related_before, "{case}");
         assert!(connection.is_autocommit(), "{case}");
     }
 }

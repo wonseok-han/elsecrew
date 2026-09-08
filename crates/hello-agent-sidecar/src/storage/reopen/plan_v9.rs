@@ -493,9 +493,10 @@ fn verify_plan_baseline(
     connection: &Connection,
     plan: &StorageCompactionPlanV1,
 ) -> Result<(), SidecarError> {
-    let bytes: i64 = connection
+    let lengths: (i64, i64) = connection
         .query_row(
-            "SELECT length(CAST(canonical_projection_json AS BLOB)) \
+            "SELECT length(CAST(canonical_projection_json AS BLOB)),\
+                    length(CAST(projection_digest AS BLOB)) \
              FROM ledger_baselines WHERE baseline_id=?1 \
                     AND aggregate_type=?2 AND aggregate_id=?3 AND cutoff_aggregate_sequence=?4;",
             params![
@@ -504,11 +505,20 @@ fn verify_plan_baseline(
                 plan.aggregate_id,
                 i64::try_from(plan.delete_through_sequence).map_err(|_| session_error())?
             ],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| session_error())?;
-    let bytes = usize::try_from(bytes).map_err(|_| session_error())?;
-    if bytes > FRAGMENT_BYTES {
+    let canonical_bytes = usize::try_from(lengths.0).map_err(|_| session_error())?;
+    let digest_bytes = usize::try_from(lengths.1).map_err(|_| session_error())?;
+    let dependency_bytes = canonical_bytes
+        .checked_add(digest_bytes)
+        .ok_or_else(session_error)?;
+    if canonical_bytes > FRAGMENT_BYTES
+        || digest_bytes != "sha256:".len() + 64
+        || plan_retained_bytes(plan)?
+            .checked_add(dependency_bytes)
+            .is_none_or(|value| value > INPUT_BYTES)
+    {
         return Err(session_error());
     }
     let (canonical, stored): (String, String) = connection
@@ -525,7 +535,8 @@ fn verify_plan_baseline(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| session_error())?;
-    if canonical.len() != bytes
+    if canonical.len() != canonical_bytes
+        || stored.len() != digest_bytes
         || canonical_json_v1(serde_json::from_str(&canonical).map_err(|_| session_error())?)
             .map_err(|_| session_error())?
             != canonical
@@ -538,6 +549,23 @@ fn verify_plan_baseline(
         return Err(session_error());
     }
     Ok(())
+}
+
+fn plan_retained_bytes(plan: &StorageCompactionPlanV1) -> Result<usize, SidecarError> {
+    [
+        plan.job_id.as_str(),
+        plan.aggregate_type.as_str(),
+        plan.aggregate_id.as_str(),
+        plan.baseline_id.as_str(),
+        plan.baseline_projection_digest.as_str(),
+        plan.previous_successful_job_id.as_deref().unwrap_or(""),
+        plan.created_at.as_str(),
+        plan.planned_at.as_str(),
+    ]
+    .into_iter()
+    .try_fold(0usize, |total, value| {
+        total.checked_add(value.len()).ok_or_else(session_error)
+    })
 }
 
 fn verify_plan_predecessor(
@@ -926,6 +954,10 @@ fn verify_plan_row(
     let parsed: Value =
         serde_json::from_str(&row.canonical_payload_json).map_err(|_| session_error())?;
     if canonical_json_v1(parsed).map_err(|_| session_error())? != row.canonical_payload_json {
+        return Err(session_error());
+    }
+    let computed = sha256_file_version_v1(row.canonical_payload_json.as_bytes());
+    if computed.strip_prefix("sha256:") != Some(&row.canonical_payload_digest) {
         return Err(session_error());
     }
 

@@ -9,6 +9,10 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 admission digest P0/P1 수리)
+
+- **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. plan/frozen/receipt digest 공동 위조와 8 MiB 초과 baseline digest를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 read-only admission runtime)
 
 - **구현**: legacy `Storage::open`은 V8을 유지하고 제품 admission만 exact fixture로 V8→V9 migration·exact schema 검증을 수행한다. V3 pending plan witness의 canonical digest·phase·artifact·부분 release를 bounded read-only scanner로 재검증하며, 다중 succeeded 1,000-row plan의 연속 terminal chain과 live tail 동등성을 검증한다.
