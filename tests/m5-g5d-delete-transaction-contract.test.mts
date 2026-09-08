@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -32,6 +33,9 @@ const migrationV10 = readFileSync(
 const manifest = readJson("storage-v10/manifest.json");
 const policy = readJson("storage-v10/delete-policy.json");
 const cases = readJson("storage-v10/cases.json");
+const schemaIdentity = JSON.parse(readFileSync(
+  resolve(fixtureRoot, "storage-v10/schema-identity.json"), "utf8",
+)) as Record<string, any>;
 const activation = readJson("storage-activation-v3/manifest.json");
 const phases = [
   "planEligibility", "freezeOperations", "freezeMessages", "verifyPrefix",
@@ -58,6 +62,20 @@ function schemaSnapshot(database: DatabaseSync): unknown[] {
     WHERE name NOT LIKE 'sqlite_autoindex%'
     ORDER BY type, name
   `).all();
+}
+
+function schemaIdentitySnapshot(database: DatabaseSync): unknown[] {
+  return (schemaSnapshot(database) as Array<{
+    type: string;
+    name: string;
+    tableName: string;
+    sql: string;
+  }>).map(({ type, name, tableName, sql }) => ({
+    type,
+    name,
+    tableName,
+    canonicalSqlSha256: createHash("sha256").update(sql).digest("hex"),
+  }));
 }
 
 function version(database: DatabaseSync): number {
@@ -336,6 +354,21 @@ function sourceSnapshot(database: DatabaseSync): unknown {
   };
 }
 
+function databaseSnapshot(database: DatabaseSync): unknown {
+  const tables = database.prepare(`
+    SELECT name FROM sqlite_schema
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `).all() as Array<{ name: string }>;
+  return {
+    schema: schemaSnapshot(database),
+    tables: Object.fromEntries(tables.map(({ name }) => [
+      name,
+      database.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all(),
+    ])),
+  };
+}
+
 test("V10 delete repair and activation V3 goldens are exact and public-wire neutral", () => {
   assert.equal(manifest.storageSchemaVersion, 10);
   assert.equal(manifest.migration.fromVersion, 9);
@@ -374,6 +407,7 @@ test("exact idle V9 migrates to V10 and preserves succeeded data", () => {
     ).get();
     database.exec(migrationV10);
     assert.equal(version(database), 10);
+    assert.deepEqual(schemaIdentitySnapshot(database), schemaIdentity.objects);
     assert.equal(
       database.prepare(`
         SELECT COUNT(*) AS count FROM sqlite_schema
@@ -394,6 +428,16 @@ test("exact idle V9 migrates to V10 and preserves succeeded data", () => {
       SELECT COUNT(*) AS count FROM sqlite_schema
       WHERE name='ledger_compaction_delete_authority_require_v9_plan'
     `).get()!.count, 0);
+
+    database.exec("DROP TRIGGER events_require_v10_complete_delete_batch");
+    database.exec(`
+      CREATE TRIGGER events_require_v10_complete_delete_batch
+      BEFORE DELETE ON events
+      BEGIN
+        SELECT 1;
+      END
+    `);
+    assert.notDeepEqual(schemaIdentitySnapshot(database), schemaIdentity.objects);
   } finally {
     database.close();
   }
@@ -484,6 +528,14 @@ test("V10 authority is deletePrefix-only, exact, contiguous, bounded, and atomic
 
     assert.throws(() => arm(database, "deletePrefix", 0, 101), /invalid storage v9/);
     arm(database, "deletePrefix", 0, 100);
+    const beforeNoAuthority = databaseSnapshot(database);
+    assert.throws(() => database.exec(
+      "DELETE FROM event_source_index WHERE event_rowid = 1",
+    ), /exact v7 authority/);
+    assert.throws(() => database.exec(
+      "DELETE FROM events WHERE rowid = 1",
+    ), /(complete v10 armed authority batch|exact v7 authority)/);
+    assert.deepEqual(databaseSnapshot(database), beforeNoAuthority);
     assert.throws(() => insertAuthority(database, 2, 2), /exact v10 armed deletePrefix/);
     assert.throws(() => insertAuthority(database, 1, 101), /exact v10 armed deletePrefix/);
     assert.throws(() => insertAuthority(database, 1, 1, "wrong_prefix"), /exact v10 armed deletePrefix/);
@@ -497,6 +549,16 @@ test("V10 authority is deletePrefix-only, exact, contiguous, bounded, and atomic
     `), /exact v10 armed deletePrefix/);
 
     const beforeFailed = sourceSnapshot(database);
+    database.exec("BEGIN IMMEDIATE");
+    insertAuthority(database, 1, 1);
+    const afterPartialAuthority = databaseSnapshot(database);
+    assert.throws(() => database.exec(
+      "DELETE FROM events WHERE rowid = 1",
+    ), /complete v10 armed authority batch after source index deletion/);
+    assert.deepEqual(databaseSnapshot(database), afterPartialAuthority);
+    database.exec("ROLLBACK");
+    assert.deepEqual(sourceSnapshot(database), beforeFailed);
+
     database.exec("BEGIN IMMEDIATE");
     for (let ordinal = 1; ordinal < 100; ordinal += 1) insertAuthority(database, ordinal, ordinal);
     assert.throws(() => database.exec(
@@ -524,6 +586,26 @@ test("V10 authority is deletePrefix-only, exact, contiguous, bounded, and atomic
     assert.equal(database.prepare(
       "SELECT COUNT(*) AS count FROM event_source_index WHERE event_rowid <= 100",
     ).get()!.count, 0);
+  } finally {
+    database.close();
+  }
+});
+
+test("V10 event deletion requires source-index-first order with a complete batch", () => {
+  const database = buildDeleteReadyDatabase();
+  try {
+    scanPhase(database, "authorizeDelete");
+    advancePhase(database, "authorizeDelete", "deletePrefix");
+    arm(database, "deletePrefix", 0, 100);
+    database.exec("DROP TRIGGER ledger_compaction_delete_authority_execute_v10_batch");
+    for (let ordinal = 1; ordinal <= 100; ordinal += 1) {
+      insertAuthority(database, ordinal, ordinal);
+    }
+    const beforeWrongOrder = databaseSnapshot(database);
+    assert.throws(() => database.exec(
+      "DELETE FROM events WHERE rowid = 1",
+    ), /complete v10 armed authority batch after source index deletion/);
+    assert.deepEqual(databaseSnapshot(database), beforeWrongOrder);
   } finally {
     database.close();
   }

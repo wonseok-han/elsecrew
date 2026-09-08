@@ -3660,8 +3660,10 @@ pub fn storage_compaction_delete_transaction_policy_v1() -> Value {
         "schemaIdentity": {
             "version": STORAGE_LIFETIME_SCHEMA_VERSION_V10,
             "source": "exactV1ThroughV10MigrationResult",
-            "comparison": "exactTypeNameTableNameCanonicalSql",
-            "persistentObjects": 75,
+            "comparison": "exactTypeNameTableNameCanonicalSqlSha256",
+            "persistentObjects": 76,
+            "definitionsFile": "schema-identity.json",
+            "definitionsRequired": "allPersistentObjectsExact",
             "sqliteAutoindexesExcluded": true,
         },
         "privateState": {
@@ -3696,6 +3698,8 @@ pub fn storage_compaction_delete_transaction_policy_v1() -> Value {
             ],
             "sameTransactionRequired": true,
             "execution": "finalAuthorityInsertTriggersCompleteSourceDeleteAuthorityCleanupAndCursorAdvance",
+            "sourceIndexDeletionRequiresCompleteBatch": true,
+            "eventDeletionRequiresCompleteBatchAndAbsentSourceIndex": true,
             "pendingRequiresEveryArmedPlanSourceAndIndexAbsent": true,
             "pendingRequiresEmptyAuthority": true,
             "malformedPartialOrWrongOrdinal": "rollbackNoMutation",

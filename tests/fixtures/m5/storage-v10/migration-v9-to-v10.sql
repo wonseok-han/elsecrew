@@ -1663,6 +1663,117 @@ BEGIN
     SELECT RAISE(ABORT, 'source deletion requires complete v10 armed authority batch');
 END;
 
+CREATE TRIGGER events_require_v10_complete_delete_batch
+BEFORE DELETE ON events
+WHEN NOT EXISTS (
+    SELECT 1
+    FROM ledger_compaction_delete_authority AS selected
+    JOIN maintenance_jobs AS job ON job.job_id = selected.job_id
+    JOIN storage_compaction_plans AS plan ON plan.job_id = job.job_id
+    JOIN storage_compaction_plan_rows AS planned
+      ON planned.job_id = job.job_id
+     AND planned.ordinal = json_extract(
+         job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal'
+     ) + selected.ordinal
+    JOIN ledger_compaction_prefixes AS prefix ON prefix.prefix_id = selected.prefix_id
+    WHERE selected.event_rowid = OLD.rowid
+      AND selected.event_id = OLD.event_id
+      AND selected.operation_id = OLD.operation_id
+      AND selected.aggregate_type = OLD.aggregate_type
+      AND selected.aggregate_id = OLD.aggregate_id
+      AND selected.aggregate_sequence = OLD.aggregate_sequence
+      AND job.job_kind = 'losslessCompaction'
+      AND job.state = 'running'
+      AND json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.schemaVersion') = 3
+      AND json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.schemaVersion') = 3
+      AND json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.phase') = 'deletePrefix'
+      AND json_type(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal') = 'integer'
+      AND json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal')
+          > json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal')
+      AND json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal')
+          <= json_extract(job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal') + 100
+      AND planned.ordinal <= json_extract(
+          job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal'
+      )
+      AND planned.decision = 'delete'
+      AND planned.event_rowid = selected.event_rowid
+      AND planned.event_id = selected.event_id
+      AND planned.operation_id = selected.operation_id
+      AND planned.aggregate_type = selected.aggregate_type
+      AND planned.aggregate_id = selected.aggregate_id
+      AND planned.aggregate_sequence = selected.aggregate_sequence
+      AND prefix.aggregate_type = plan.aggregate_type
+      AND prefix.aggregate_id = plan.aggregate_id
+      AND prefix.deleted_through_sequence = plan.delete_through_sequence
+      AND prefix.anchor_aggregate_sequence = plan.anchor_aggregate_sequence
+      AND prefix.baseline_id = plan.baseline_id
+      AND prefix.baseline_projection_digest = 'sha256:' || plan.baseline_projection_digest
+      AND NOT EXISTS (
+          SELECT 1 FROM storage_compaction_plan_rows AS batch_plan
+          WHERE batch_plan.job_id = job.job_id
+            AND batch_plan.ordinal > json_extract(
+                job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal'
+            )
+            AND batch_plan.ordinal <= json_extract(
+                job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal'
+            )
+            AND batch_plan.decision = 'delete'
+            AND EXISTS (
+                SELECT 1 FROM event_source_index AS source_index
+                WHERE source_index.event_rowid = batch_plan.event_rowid
+            )
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM storage_compaction_plan_rows AS batch_plan
+          WHERE batch_plan.job_id = job.job_id
+            AND batch_plan.ordinal > json_extract(
+                job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal'
+            )
+            AND batch_plan.ordinal <= json_extract(
+                job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal'
+            )
+            AND batch_plan.decision = 'delete'
+            AND NOT (
+                EXISTS (
+                    SELECT 1 FROM events AS live_source
+                    WHERE live_source.rowid = batch_plan.event_rowid
+                      AND live_source.event_id = batch_plan.event_id
+                      AND live_source.operation_id = batch_plan.operation_id
+                      AND live_source.aggregate_type = batch_plan.aggregate_type
+                      AND live_source.aggregate_id = batch_plan.aggregate_id
+                      AND live_source.aggregate_sequence = batch_plan.aggregate_sequence
+                )
+                AND EXISTS (
+                    SELECT 1 FROM ledger_compaction_delete_authority AS authority
+                    WHERE authority.job_id = job.job_id
+                      AND authority.ordinal = batch_plan.ordinal - json_extract(
+                          job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal'
+                      )
+                      AND authority.event_rowid = batch_plan.event_rowid
+                      AND authority.event_id = batch_plan.event_id
+                      AND authority.operation_id = batch_plan.operation_id
+                      AND authority.aggregate_type = batch_plan.aggregate_type
+                      AND authority.aggregate_id = batch_plan.aggregate_id
+                      AND authority.aggregate_sequence = batch_plan.aggregate_sequence
+                )
+                OR NOT EXISTS (
+                    SELECT 1 FROM events AS deleted_source
+                    WHERE deleted_source.rowid = batch_plan.event_rowid
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM ledger_compaction_delete_authority AS consumed
+                    WHERE consumed.job_id = job.job_id
+                      AND consumed.ordinal = batch_plan.ordinal - json_extract(
+                          job.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal'
+                      )
+                )
+            )
+      )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'event deletion requires complete v10 armed authority batch after source index deletion');
+END;
+
 CREATE TRIGGER maintenance_jobs_require_v10_delete_batch_completion
 BEFORE UPDATE OF state, cutoff_json ON maintenance_jobs
 WHEN OLD.job_kind = 'losslessCompaction'

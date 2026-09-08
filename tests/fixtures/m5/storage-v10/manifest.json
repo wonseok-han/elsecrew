@@ -21,6 +21,7 @@
     "triggersAdded": [
       "ledger_compaction_delete_authority_require_v10_plan_batch",
       "event_source_index_require_v10_complete_delete_batch",
+      "events_require_v10_complete_delete_batch",
       "maintenance_jobs_require_v10_delete_batch_completion",
       "ledger_compaction_delete_authority_execute_v10_batch",
       "ledger_compaction_delete_authority_finish_v10_batch"
@@ -33,8 +34,10 @@
   },
   "schemaIdentity": {
     "source": "exactV1ThroughV10MigrationResult",
-    "comparison": "exactTypeNameTableNameCanonicalSql",
-    "persistentObjects": 75,
+    "comparison": "exactTypeNameTableNameCanonicalSqlSha256",
+    "persistentObjects": 76,
+    "definitionsFile": "schema-identity.json",
+    "definitionsRequired": "allPersistentObjectsExact",
     "sqliteAutoindexesExcluded": true
   },
   "deleteTransactionPolicyFile": "delete-policy.json",

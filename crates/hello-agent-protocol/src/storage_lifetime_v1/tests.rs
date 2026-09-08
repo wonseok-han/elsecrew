@@ -4082,6 +4082,7 @@ fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
     let manifest: Value = read_json(root.join("storage-v10/manifest.json"));
     let policy: Value = read_json(root.join("storage-v10/delete-policy.json"));
     let cases: Value = read_json(root.join("storage-v10/cases.json"));
+    let schema_identity: Value = read_json(root.join("storage-v10/schema-identity.json"));
     let activation: Value = read_json(root.join("storage-activation-v3/manifest.json"));
 
     assert_eq!(manifest["storageSchemaVersion"], serde_json::json!(10));
@@ -4096,6 +4097,33 @@ fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
         serde_json::json!(false)
     );
     assert_eq!(manifest["publicWireChanged"], serde_json::json!(false));
+    assert_eq!(
+        schema_identity["objects"]
+            .as_array()
+            .expect("v10 schema identity")
+            .len(),
+        manifest["schemaIdentity"]["persistentObjects"]
+            .as_u64()
+            .expect("persistent object count") as usize
+    );
+    assert!(schema_identity["objects"]
+        .as_array()
+        .expect("v10 schema identity")
+        .iter()
+        .all(|object| {
+            object.get("type").and_then(Value::as_str).is_some()
+                && object.get("name").and_then(Value::as_str).is_some()
+                && object.get("tableName").and_then(Value::as_str).is_some()
+                && object
+                    .get("canonicalSqlSha256")
+                    .and_then(Value::as_str)
+                    .is_some_and(|digest| {
+                        digest.len() == 64
+                            && digest
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    })
+        }));
     validate_storage_compaction_delete_transaction_policy_v1(&policy)
         .expect("exact v10 delete transaction policy");
     assert_eq!(policy, storage_compaction_delete_transaction_policy_v1());

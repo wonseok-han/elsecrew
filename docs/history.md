@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 event 삭제·schema identity 재리뷰 수리)
+
+- **P0 event 순서 봉쇄**: V10 event `BEFORE DELETE`가 현재 running V3 `deletePrefix` plan/prefix와 전체 armed batch를 다시 결속하고, batch의 모든 source index가 먼저 사라진 뒤 `live event + authority` 또는 `삭제된 event + 소비된 authority`의 exact 분할만 허용한다. 부분 authority의 직접 event 삭제, authority 없는 source/index 우회, 완전 authority라도 event-before-index 순서는 전체 DB mutation 없이 거부한다.
+- **P1 exact V10 identity·검증**: object 수와 이름만 보던 테스트를 76개 전체 non-autoindex `(type, name, tableName, canonical SQL SHA-256)` golden 비교로 교체하고 같은 이름의 약화 trigger body가 불일치하는 회귀를 추가했다. actual SQLite focused 6/6·V9/activation 포함 Node 23/23, protocol Rust 50/50, TypeScript noEmit, Rust 2021 format, strict clippy와 diff check를 통과해 별도 리뷰 수정 커밋으로 인계한다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V10 atomic delete 계약 수리)
 
 - **P0 additive 수리**: 제품이 이미 만들 수 있는 exact V9를 제자리 수정하지 않고 idle V9만 exact `sqlite_schema`로 preflight하는 V9→V10 migration을 추가했다. active pending/running 또는 non-empty authority와 같은 이름의 약화 trigger/추가 object를 persistent DDL 전에 rollback하며 idle/succeeded 기록은 보존한다.

@@ -15,15 +15,18 @@
   },
   "malformedDeleteBatches": [
     "authorizeDeletePhase", "outsideInterval", "authorityGap", "over100",
-    "wrongPlanRow", "wrongPrefix", "partialBatch"
+    "wrongPlanRow", "wrongPrefix", "partialBatch", "eventBeforeSourceIndex"
   ],
   "malformedPolicyPaths": [
     "storageSchema.toVersion", "privateState.phaseOrderChanged",
     "schemaIdentity.persistentObjects",
+    "schemaIdentity.definitionsRequired",
     "authorizeDelete.authorityInsert", "deletePrefix.onlyMutationPhase",
     "deletePrefix.maxRows", "deletePrefix.authorityPlanBinding",
     "transaction.sameTransactionRequired",
     "transaction.execution",
+    "transaction.sourceIndexDeletionRequiresCompleteBatch",
+    "transaction.eventDeletionRequiresCompleteBatchAndAbsentSourceIndex",
     "transaction.pendingRequiresEveryArmedPlanSourceAndIndexAbsent",
     "preservation.publicD1WireAndCapability",
     "activation.runtimeWriterImplemented", "activation.publicWireChanged"
