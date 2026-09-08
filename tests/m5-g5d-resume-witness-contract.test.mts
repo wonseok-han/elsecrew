@@ -42,6 +42,11 @@ const migrations = [
 const migrationV9Sql = readFileSync(
   resolve("tests/fixtures/m5/storage-v9/migration-v8-to-v9.sql"), "utf8",
 );
+const v3Phases = [
+  "planEligibility", "freezeOperations", "freezeMessages", "verifyPrefix",
+  "authorizeDelete", "deletePrefix", "verifyOperations", "verifyEquivalence",
+  "releasePlan", "finalize",
+] as const;
 
 function readJson(path: string): Record<string, any> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, any>;
@@ -62,6 +67,16 @@ function persistentSchema(database: DatabaseSync): unknown[] {
     WHERE name NOT LIKE 'sqlite_autoindex%'
     ORDER BY type, name
   `).all();
+}
+
+function assertV9MigrationRollsBackBeforeDdl(database: DatabaseSync, label: string): void {
+  const before = persistentSchema(database);
+  assert.throws(() => database.exec(migrationV9Sql), /exact idle v8/);
+  assert.deepEqual(persistentSchema(database), before, label);
+  assert.equal(database.prepare(
+    "SELECT storage_schema_version AS version FROM storage_schema_meta",
+  ).get()!.version, 8);
+  assert.throws(() => database.prepare("SELECT * FROM storage_compaction_plans"));
 }
 
 function insertMaintenanceJob(
@@ -93,6 +108,8 @@ function privateState(
     planRowsReleased?: boolean;
   } = {},
 ): Record<string, unknown> {
+  const phaseIndex = v3Phases.indexOf(phase as typeof v3Phases[number]);
+  const scanExhausted = options.scanExhausted ?? false;
   return {
     storageCompactionV3PrivateState: {
       schemaVersion: 3,
@@ -102,25 +119,66 @@ function privateState(
         phase,
         afterPlanOrdinal,
         stepThroughPlanOrdinal: options.stepThroughPlanOrdinal ?? null,
-        scanExhausted: options.scanExhausted ?? false,
+        scanExhausted,
       },
-      planRowsComplete: options.planRowsComplete ?? false,
-      operationsVerified: options.operationsVerified ?? false,
-      equivalenceVerified: options.equivalenceVerified ?? false,
-      planRowsReleased: options.planRowsReleased ?? false,
+      planRowsComplete: options.planRowsComplete ?? (phaseIndex > 0 || scanExhausted),
+      operationsVerified: options.operationsVerified
+        ?? (phaseIndex > 6 || (phaseIndex === 6 && scanExhausted)),
+      equivalenceVerified: options.equivalenceVerified
+        ?? (phaseIndex > 7 || (phaseIndex === 7 && scanExhausted)),
+      planRowsReleased: options.planRowsReleased
+        ?? (phaseIndex > 8 || (phaseIndex === 8 && scanExhausted)),
     },
   };
 }
 
 function setJobState(
   database: DatabaseSync,
-  state: "pending" | "running",
+  state: "pending" | "running" | "succeeded" | "failed",
   cutoff: Record<string, unknown>,
 ): void {
   database.prepare(`
-    UPDATE maintenance_jobs SET state = ?, cutoff_json = ?, updated_at = ?
+    UPDATE maintenance_jobs
+    SET state = ?, cutoff_json = ?,
+        completed_at = CASE WHEN ? IN ('succeeded', 'failed') THEN ? ELSE NULL END,
+        failure_kind = CASE WHEN ? = 'failed' THEN 'contractError' ELSE NULL END,
+        updated_at = ?
     WHERE job_id = 'compact_v9_sql'
-  `).run(state, JSON.stringify(cutoff), "2026-09-08T01:00:02Z");
+  `).run(
+    state,
+    JSON.stringify(cutoff),
+    state,
+    "2026-09-08T01:00:02Z",
+    state,
+    "2026-09-08T01:00:02Z",
+  );
+}
+
+function scanSqlPhase(database: DatabaseSync, phase: typeof v3Phases[number]): void {
+  const limit = phase === "releasePlan" || phase === "finalize" ? 1000 : 1001;
+  for (let start = 1; start <= limit; start += 100) {
+    const through = Math.min(start + 99, limit);
+    setJobState(database, "running", privateState(phase, start - 1, {
+      stepThroughPlanOrdinal: through,
+    }));
+    setJobState(database, "pending", privateState(phase, through, {
+      scanExhausted: through === limit,
+    }));
+  }
+}
+
+function advanceSqlPhase(
+  database: DatabaseSync,
+  phase: typeof v3Phases[number],
+  nextPhase: typeof v3Phases[number],
+): void {
+  const limit = phase === "releasePlan" ? 1000 : 1001;
+  setJobState(database, "running", privateState(phase, limit, { scanExhausted: true }));
+  setJobState(database, "pending", privateState(
+    nextPhase,
+    nextPhase === "finalize" ? 1000 : 0,
+    { scanExhausted: nextPhase === "finalize" },
+  ));
 }
 
 function readJobCutoff(database: DatabaseSync): Record<string, any> {
@@ -332,7 +390,7 @@ test("exact V1 through V9 fixture migration creates guarded witness objects", ()
       "storage_compaction_plan_rows_immutable_update",
       "storage_compaction_plan_rows_release_only",
       "storage_compaction_plan_rows_advance_release_cursor",
-      "maintenance_jobs_validate_v9_compaction_cursor_advance",
+      "maintenance_jobs_guard_v9_compaction_transition",
       "ledger_compaction_prefixes_require_v9_plan",
       "ledger_compaction_delete_authority_require_v9_plan",
     ]) {
@@ -350,13 +408,7 @@ test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledg
       insertMaintenanceJob(database, `legacy_v2_${state}`, state, {
         storageCompactionV2PrivateState: { schemaVersion: 2 },
       });
-      const before = persistentSchema(database);
-      assert.throws(() => database.exec(migrationV9Sql), /exact idle v8/);
-      assert.deepEqual(persistentSchema(database), before, state);
-      assert.equal(database.prepare(
-        "SELECT storage_schema_version AS version FROM storage_schema_meta",
-      ).get()!.version, 8);
-      assert.throws(() => database.prepare("SELECT * FROM storage_compaction_plans"));
+      assertV9MigrationRollsBackBeforeDdl(database, state);
     } finally {
       database.close();
     }
@@ -379,12 +431,7 @@ test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledg
     `).run();
     database.exec(trigger.sql);
     database.exec("PRAGMA foreign_keys = ON");
-    const before = persistentSchema(database);
-    assert.throws(() => database.exec(migrationV9Sql), /exact idle v8/);
-    assert.deepEqual(persistentSchema(database), before, "nonempty authority");
-    assert.equal(database.prepare(
-      "SELECT storage_schema_version AS version FROM storage_schema_meta",
-    ).get()!.version, 8);
+    assertV9MigrationRollsBackBeforeDdl(database, "nonempty authority");
     assert.equal(database.prepare(
       "SELECT COUNT(*) AS count FROM ledger_compaction_delete_authority",
     ).get()!.count, 1);
@@ -395,14 +442,45 @@ test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledg
   const drifted = databaseThroughV8();
   try {
     drifted.exec("CREATE TABLE unexpected_v8_drift (id INTEGER PRIMARY KEY) STRICT");
-    const before = persistentSchema(drifted);
-    assert.throws(() => drifted.exec(migrationV9Sql), /exact idle v8/);
-    assert.deepEqual(persistentSchema(drifted), before, "extra v8 object");
-    assert.equal(drifted.prepare(
-      "SELECT storage_schema_version AS version FROM storage_schema_meta",
-    ).get()!.version, 8);
+    assertV9MigrationRollsBackBeforeDdl(drifted, "extra v8 object");
   } finally {
     drifted.close();
+  }
+
+  const weakenedTrigger = databaseThroughV8();
+  try {
+    weakenedTrigger.exec("DROP TRIGGER events_are_append_only_delete");
+    weakenedTrigger.exec(`
+      CREATE TRIGGER events_are_append_only_delete
+      BEFORE DELETE ON events
+      BEGIN
+        SELECT 1;
+      END
+    `);
+    assertV9MigrationRollsBackBeforeDdl(weakenedTrigger, "same-name weakened trigger");
+  } finally {
+    weakenedTrigger.close();
+  }
+
+  const weakenedIndex = databaseThroughV8();
+  try {
+    weakenedIndex.exec("DROP INDEX maintenance_jobs_single_running_lossless_compaction");
+    weakenedIndex.exec(`
+      CREATE INDEX maintenance_jobs_single_running_lossless_compaction
+      ON maintenance_jobs (job_kind)
+      WHERE job_kind = 'losslessCompaction'
+    `);
+    assertV9MigrationRollsBackBeforeDdl(weakenedIndex, "same-name weakened index");
+  } finally {
+    weakenedIndex.close();
+  }
+
+  const driftedTable = databaseThroughV8();
+  try {
+    driftedTable.exec("ALTER TABLE maintenance_jobs ADD COLUMN unchecked_state TEXT");
+    assertV9MigrationRollsBackBeforeDdl(driftedTable, "same-name drifted table");
+  } finally {
+    driftedTable.close();
   }
 
   assert.throws(() => validateStorageLifetimeV9MigrationPreflight(true, 1, 0));
@@ -410,18 +488,23 @@ test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledg
   assert.throws(() => validateStorageLifetimeV9MigrationPreflight(false, 0, 0));
 });
 
-test("actual V9 triggers enforce bounded planning, complete prefix proof, and release progress", () => {
+test("actual V9 triggers enforce exact transitions, planning, prefix proof, and release", () => {
   const database = databaseWithV9PlanSources();
   try {
+    const changedCutoff = privateState("planEligibility", 0, {
+      stepThroughPlanOrdinal: 100,
+    }) as Record<string, any>;
+    changedCutoff.storageCompactionV3PrivateState.cursor.cutoffEventRowid = 1999;
+    assert.throws(() => setJobState(database, "running", changedCutoff),
+      /invalid storage v9 maintenance transition/);
+    assert.throws(() => setJobState(database, "running", privateState("planEligibility", 0, {
+      stepThroughPlanOrdinal: 101,
+    })), /invalid storage v9 maintenance transition/);
     setJobState(database, "running", privateState("planEligibility", 0, {
       stepThroughPlanOrdinal: 100,
     }));
     assert.throws(() => insertSqlPlanRow(database, 1001), /exact witnessed source/);
     assert.throws(() => insertSqlPlanRow(database, 2), /exact witnessed source/);
-    setJobState(database, "running", privateState("planEligibility", 0, {
-      stepThroughPlanOrdinal: 101,
-    }));
-    assert.throws(() => insertSqlPlanRow(database, 1), /exact witnessed source/);
     assert.equal(database.prepare(
       "SELECT COUNT(*) AS count FROM storage_compaction_plan_rows",
     ).get()!.count, 0);
@@ -436,41 +519,73 @@ test("actual V9 triggers enforce bounded planning, complete prefix proof, and re
       ) VALUES ('prefix_v9_sql', 'project', 'project_001', 1000, 1001,
                 'event_1001', 'operation_1001', 1001, 'baseline_1000', ?, ?, ?)
     `);
-    setJobState(database, "running", privateState("verifyPrefix", 100, {
+    assert.throws(() => prefixInsert.run(
+      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+    ), /exact v9 plan anchor/);
+    assert.throws(() => setJobState(database, "running", privateState("verifyPrefix", 100, {
       stepThroughPlanOrdinal: 200,
-      planRowsComplete: false,
-    }));
+    })), /invalid storage v9 maintenance transition/);
+
+    for (let start = 101; start <= 1001; start += 100) {
+      planSqlBatch(database, start, Math.min(start + 99, 1001));
+    }
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM storage_compaction_plan_rows",
+    ).get()!.count, 1001);
+    const completedPlanState = readJobCutoff(database).storageCompactionV3PrivateState;
+    assert.equal(typeof completedPlanState.cursor.scanExhausted, "boolean");
+    assert.equal(typeof completedPlanState.planRowsComplete, "boolean");
+
+    const forgedFlags = readJobCutoff(database);
+    forgedFlags.storageCompactionV3PrivateState.operationsVerified = true;
+    assert.throws(() => setJobState(database, "running", forgedFlags),
+      /invalid storage v9 maintenance transition/);
+    assert.throws(() => setJobState(database, "running", privateState("releasePlan", 0)),
+      /invalid storage v9 maintenance transition/);
+    assert.throws(() => setJobState(database, "running", privateState("freezeMessages", 0, {
+      stepThroughPlanOrdinal: 100,
+    })), /invalid storage v9 maintenance transition/);
+    assert.throws(() => setJobState(database, "running", privateState("planEligibility", 1000, {
+      stepThroughPlanOrdinal: 1001,
+    })), /invalid storage v9 maintenance transition/);
+
     assert.throws(() => prefixInsert.run(
       "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     ), /exact v9 plan anchor/);
 
-    setJobState(database, "pending", privateState("planEligibility", 100));
-    for (let start = 101; start <= 1001; start += 100) {
-      planSqlBatch(database, start, Math.min(start + 99, 1001));
-    }
-    setJobState(database, "running", privateState("freezeMessages", 1001, {
-      scanExhausted: true,
-      planRowsComplete: true,
-    }));
+    advanceSqlPhase(database, "planEligibility", "freezeOperations");
+    assert.throws(() => setJobState(database, "running", privateState("planEligibility", 0, {
+      stepThroughPlanOrdinal: 100,
+    })), /invalid storage v9 maintenance transition/);
+    scanSqlPhase(database, "freezeOperations");
+    advanceSqlPhase(database, "freezeOperations", "freezeMessages");
+    scanSqlPhase(database, "freezeMessages");
+    advanceSqlPhase(database, "freezeMessages", "verifyPrefix");
+    scanSqlPhase(database, "verifyPrefix");
+
     assert.throws(() => prefixInsert.run(
       "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     ), /exact v9 plan anchor/);
     setJobState(database, "running", privateState("verifyPrefix", 1001, {
       scanExhausted: true,
-      planRowsComplete: true,
     }));
     prefixInsert.run(
       "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     );
+    setJobState(database, "pending", privateState("authorizeDelete", 0));
+    scanSqlPhase(database, "authorizeDelete");
+    advanceSqlPhase(database, "authorizeDelete", "deletePrefix");
+    scanSqlPhase(database, "deletePrefix");
+    advanceSqlPhase(database, "deletePrefix", "verifyOperations");
+    scanSqlPhase(database, "verifyOperations");
+    advanceSqlPhase(database, "verifyOperations", "verifyEquivalence");
+    scanSqlPhase(database, "verifyEquivalence");
+    advanceSqlPhase(database, "verifyEquivalence", "releasePlan");
 
     const releaseState = (after: number, through: number | null) => privateState(
       "releasePlan", after, {
         stepThroughPlanOrdinal: through,
         scanExhausted: after === 1000,
-        planRowsComplete: true,
-        operationsVerified: true,
-        equivalenceVerified: true,
-        planRowsReleased: after === 1000,
       },
     );
     setJobState(database, "running", releaseState(0, 100));
@@ -481,7 +596,7 @@ test("actual V9 triggers enforce bounded planning, complete prefix proof, and re
       "DELETE FROM storage_compaction_plan_rows WHERE job_id='compact_v9_sql' AND ordinal=2",
     ), /next armed delete ordinal/);
     assert.throws(() => setJobState(database, "running", releaseState(1, 100)),
-      /exact plan mutation/);
+      /invalid storage v9 maintenance transition/);
 
     assert.throws(() => database.exec(`
       DELETE FROM storage_compaction_plan_rows
@@ -536,6 +651,41 @@ test("actual V9 triggers enforce bounded planning, complete prefix proof, and re
     assert.equal(retained.length, 1);
     assert.equal(retained[0]?.ordinal, 1001);
     assert.equal(retained[0]?.decision, "retainAnchor");
+
+    advanceSqlPhase(database, "releasePlan", "finalize");
+    setJobState(database, "succeeded", privateState("finalize", 1000, {
+      scanExhausted: true,
+    }));
+    assert.equal(database.prepare(
+      "SELECT state FROM maintenance_jobs WHERE job_id='compact_v9_sql'",
+    ).get()!.state, "succeeded");
+  } finally {
+    database.close();
+  }
+});
+
+test("actual V9 transition guard permits exact failure but rejects failure cursor mutation", () => {
+  const database = databaseWithV9PlanSources();
+  try {
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET state='running' WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
+    assert.throws(() => database.prepare(`
+      UPDATE maintenance_jobs SET cutoff_json=? WHERE job_id='compact_v9_sql'
+    `).run(JSON.stringify(privateState("planEligibility", 0, {
+      planRowsComplete: true,
+    }))), /invalid storage v9 maintenance transition/);
+
+    const armed = privateState("planEligibility", 0, { stepThroughPlanOrdinal: 100 });
+    setJobState(database, "running", armed);
+    const changed = structuredClone(armed) as Record<string, any>;
+    changed.storageCompactionV3PrivateState.cursor.afterPlanOrdinal = 1;
+    assert.throws(() => setJobState(database, "failed", changed),
+      /invalid storage v9 maintenance transition/);
+    setJobState(database, "failed", armed);
+    assert.equal(database.prepare(
+      "SELECT state FROM maintenance_jobs WHERE job_id='compact_v9_sql'",
+    ).get()!.state, "failed");
   } finally {
     database.close();
   }

@@ -2688,7 +2688,7 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     fromVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V8,
     toVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V9,
     precondition: "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
-    sqlPreflight: "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    sqlPreflight: "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
     mode: "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
     runtimeDigestAuthority: "rustRecomputesCanonicalPayloadAndMessageDigests",
   },
@@ -2733,6 +2733,7 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
   lifecycle: {
     arm: "pendingToRunningSeparateCommittedSentinel",
     success: "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
+    sqlTransitionGuard: "singleBeforeUpdateExactAdjacentStatePhaseCursorFlagsAndRequiredArtifacts",
     crash: "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
     reset: "forbidden",
     appendAfterCutoff: "ignoredByPlanAndIncludedInRetainedTailEquivalence",

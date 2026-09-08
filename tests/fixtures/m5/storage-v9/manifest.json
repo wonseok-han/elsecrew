@@ -11,7 +11,7 @@
     "toVersion": 9,
     "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
     "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
-    "preflightEnforcement": "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    "preflightEnforcement": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
     "idempotency": "exactStorageV9NoOpBeforeMigrationSql",
     "historyBackfill": "none",
     "tablesAdded": ["storage_compaction_plans", "storage_compaction_plan_rows"],
@@ -32,7 +32,7 @@
       "storage_compaction_plan_rows_immutable_update",
       "storage_compaction_plan_rows_release_only",
       "storage_compaction_plan_rows_advance_release_cursor",
-      "maintenance_jobs_validate_v9_compaction_cursor_advance",
+      "maintenance_jobs_guard_v9_compaction_transition",
       "ledger_compaction_prefixes_require_v9_plan",
       "ledger_compaction_delete_authority_require_v9_plan"
     ],

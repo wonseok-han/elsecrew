@@ -3472,7 +3472,7 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "fromVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V8,
             "toVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V9,
             "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
-            "sqlPreflight": "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
+            "sqlPreflight": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
             "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
             "runtimeDigestAuthority": "rustRecomputesCanonicalPayloadAndMessageDigests",
         },
@@ -3517,6 +3517,7 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
         "lifecycle": {
             "arm": "pendingToRunningSeparateCommittedSentinel",
             "success": "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
+            "sqlTransitionGuard": "singleBeforeUpdateExactAdjacentStatePhaseCursorFlagsAndRequiredArtifacts",
             "crash": "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
             "reset": "forbidden",
             "appendAfterCutoff": "ignoredByPlanAndIncludedInRetainedTailEquivalence",

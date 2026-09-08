@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 exact schema·상태 전이 재리뷰 수리)
+
+- **P0 exact V8 강화**: V8→V9 SQL의 DDL 전 preflight를 이름 inventory에서 모든 non-autoindex table/index/trigger의 canonical `sqlite_schema.sql` exact 정의 비교로 강화했다. 같은 이름의 append-only trigger, active-job unique index, maintenance table을 약화·변형한 실제 SQLite에서도 migration이 실패하고 schema/version이 V8 그대로 rollback되는 것을 확인했다.
+- **P0 V3 UPDATE 봉쇄**: `maintenance_jobs`의 V3 `state` 또는 private cutoff를 바꾸는 UPDATE를 단일 `BEFORE` guard로 모아 exact arm·연속 cursor progress·빈 authority pending commit·인접 phase·release/finalize·terminal failure만 허용했다. phase jump/backward, state-only arm, cutoff-only flag 위조, state+cursor 위조를 거부하면서 plan INSERT/release DELETE trigger의 transaction 내부 cursor 갱신과 전체 정상 phase 경로를 보존했다.
+- **범위·검증**: Rust/TypeScript/shared policy와 현재 제안 문서를 같은 계약으로 동기화했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. 이는 schema/protocol fixture 수리이며 V9 runtime·scheduler·delete writer 구현이나 product readiness가 아니다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D resume witness 독립 리뷰 차단 수리)
 
 - **P0 migration·planning 수리**: 실제 V8→V9 SQL이 `BEGIN IMMEDIATE` 안에서 persistent DDL 전에 exact V8 object inventory, pending/running job 부재, empty authority를 검사하고 `RAISE(ROLLBACK)`하도록 고쳤다. plan row는 arm이 고정한 최대 100개 연속 ordinal만 INSERT할 수 있고 trigger가 같은 transaction에서 cursor를 전진시킨다. prefix는 exact 1,001-row plan과 완료된 planning/`verifyPrefix` 현재 phase를 요구하되 논리적으로 미래인 equivalence는 요구하지 않는다.

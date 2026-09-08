@@ -5,7 +5,7 @@
     "fromVersion": 8,
     "toVersion": 9,
     "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
-    "sqlPreflight": "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    "sqlPreflight": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
     "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
     "runtimeDigestAuthority": "rustRecomputesCanonicalPayloadAndMessageDigests"
   },
@@ -54,6 +54,7 @@
   "lifecycle": {
     "arm": "pendingToRunningSeparateCommittedSentinel",
     "success": "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
+    "sqlTransitionGuard": "singleBeforeUpdateExactAdjacentStatePhaseCursorFlagsAndRequiredArtifacts",
     "crash": "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
     "reset": "forbidden",
     "appendAfterCutoff": "ignoredByPlanAndIncludedInRetainedTailEquivalence",
