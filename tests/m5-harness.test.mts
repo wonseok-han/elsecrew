@@ -70,8 +70,8 @@ test("다음 미구현 게이트는 성공이나 skip 대신 NOT_READY로 끝난
 
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stderr, /NOT_READY g6-release/);
-  assert.match(result.stderr, /m5:test:security/);
-  assert.match(result.stderr, /m5:test:package/);
+  assert.doesNotMatch(result.stderr, /m5:test:security/);
+  assert.doesNotMatch(result.stderr, /m5:test:package/);
   assert.match(result.stderr, /m5:test:performance/);
 });
 

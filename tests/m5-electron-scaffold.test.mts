@@ -15,6 +15,7 @@ test("패키지 smoke는 canonical G5 fixture의 누적 capability 순서를 exa
   assert.match(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
   assert.match(smoke, /const expectedG5Capabilities = g5Manifest\.contract\?\.capabilities/);
   assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedG5Capabilities\)/);
+  assert.match(smoke, /editor\\\.worker-.+\\\.js/);
   assert.doesNotMatch(smoke, /ready\.payload\.capabilities, \["system\.status", "app\.prepareQuit"\]\)/);
 });
 
@@ -58,6 +59,14 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.equal(manifest.scripts["m5:test:core"], "cargo test --workspace --manifest-path Cargo.toml");
   assert.equal(manifest.scripts["m5:package"], "electron-forge package");
   assert.equal(manifest.scripts["m5:package:smoke"], "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs");
+  assert.equal(
+    manifest.scripts["m5:test:security"],
+    "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
+  );
+  assert.equal(
+    manifest.scripts["m5:test:package"],
+    "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",
+  );
   assert.equal(
     manifest.scripts["m5:test:electron"],
     "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",

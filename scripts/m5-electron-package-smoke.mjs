@@ -56,6 +56,7 @@ for (const file of ["/.vite/build/main.cjs", "/.vite/build/preload.cjs", "/.vite
 }
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.js$/.test(file)), "missing packaged renderer JavaScript");
 assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/.+\.css$/.test(file)), "missing packaged renderer CSS");
+assert.ok(files.some((file) => /^\/\.vite\/renderer\/main_window\/assets\/editor\.worker-.+\.js$/.test(file)), "missing packaged Monaco editor worker");
 assert.ok(!files.some((file) => file.includes("hello-agent-sidecar")), "sidecar must remain outside app.asar");
 
 await smokePackagedSidecar(sidecar);
