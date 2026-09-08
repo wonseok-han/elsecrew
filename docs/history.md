@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 private compaction writer)
+
+- **private writer 구현**: 명시적으로 선택한 단일 aggregate에 삭제 가능 event 1,000개와 anchor 1개가 연속할 때만 V3 job·immutable plan을 만들고, `planEligibility → freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → releasePlan → finalize`를 호출당 최대 100행·primary 1 MiB·retained/dependency 8 MiB로 진행한다. running arm은 별도 commit이며 `verifyPrefix`의 exhausted pending을 재arm한 transaction에서 prefix와 `authorizeDelete`를 함께 게시하고, finalize만 unarmed pending→succeeded로 끝낸다. 즉시 선행 성공 job을 잇는 2,000행 chain도 보존한다.
+- **실제 SQLite 안전 회귀**: 삭제 가능 999행은 무변경 no-op, 정확히 1,000행은 완료 후 event 1개·receipt 1,001개·frozen operation 1,001개·plan anchor 1개를 보존했다. planning pending과 100행 partial delete를 각각 제품 admission으로 다시 연 뒤 writer가 재개되고 후속 append가 성공했다. 잘못된 explicit target은 거부하며 authority 직후, 전체 index/event trigger mutation 직후, precommit, arm 직후 failure와 after-arm cancellation은 batch를 rollback하고 durable running sentinel을 남겨 다음 writer 호출을 fail-closed한다.
+- **검증·경계**: 실제 SQLite focused writer 3/3과 100/101·1 MiB·8 MiB budget 경계 1/1, sidecar unit 327 pass·1 ignored와 stdio 11/11, Rust 2021 format, sidecar all-target no-deps strict clippy, `git diff --check`가 통과했다. dependency 포함 strict clippy는 소유 밖 `hello-agent-core/src/proctree.rs`의 기존 lint 2건으로 실패했다. scheduler·public wire/capability·자동 실행은 활성화하지 않았고 Windows 실기기와 production scheduling은 후속 범위다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D verifyPrefix admission 경계 수리)
 
 - **재개 경계 수리**: pending `verifyPrefix`는 scan이 exhausted여도 prefix가 아직 없어야 하며, durable prefix는 다음 `authorizeDelete` phase부터 요구하도록 V9·V10 공용 admission verifier를 수정했다. 이는 V10 writer의 prefix INSERT와 `pending authorizeDelete` 전이가 한 transaction에서 일어나는 순서와 일치한다.
