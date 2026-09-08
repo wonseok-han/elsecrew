@@ -3,7 +3,11 @@ use crate::storage_lifetime::compaction_writer::{
     run_private_compaction_step, CompactionCancellationPoint, CompactionFailurePoint,
     CompactionStepResult, CompactionTarget,
 };
-use hello_agent_protocol::storage_lifetime_v1::StorageCompactionPhaseV3;
+use hello_agent_protocol::project_v1::sha256_file_version_v1;
+use hello_agent_protocol::storage_lifetime_v1::{
+    canonical_frozen_operation_record_v1, FrozenOperationSourceV1, StorageCompactionPhaseV3,
+    STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
+};
 use rusqlite::OptionalExtension;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -92,6 +96,161 @@ fn run_until_pending(
         }
     }
     panic!("writer did not reach the requested pending cursor");
+}
+
+fn preseed_frozen_operation(storage: &Storage, ordinal: u32) -> String {
+    let mut source = storage
+        .connection
+        .query_row(
+            "SELECT p.operation_id,p.event_rowid,p.event_id,p.request_id,p.aggregate_type,p.aggregate_id,\
+                    p.aggregate_sequence,p.event_type,p.payload_schema_version,p.canonical_payload_json,\
+                    p.canonical_payload_digest,p.event_timestamp \
+             FROM storage_compaction_plan_rows p JOIN maintenance_jobs j ON j.job_id=p.job_id \
+             WHERE j.job_kind='losslessCompaction' AND p.ordinal=?1;",
+            [ordinal],
+            |row| {
+                Ok(FrozenOperationSourceV1 {
+                    operation_id: row.get(0)?,
+                    source_event_rowid: u64::try_from(row.get::<_, i64>(1)?).unwrap(),
+                    source_event_id: row.get(2)?,
+                    request_id: row.get(3)?,
+                    aggregate_type: row.get(4)?,
+                    aggregate_id: row.get(5)?,
+                    aggregate_sequence: u64::try_from(row.get::<_, i64>(6)?).unwrap(),
+                    event_type: row.get(7)?,
+                    payload_schema_version: row.get(8)?,
+                    canonical_payload_json: row.get(9)?,
+                    canonical_payload_digest: row.get(10)?,
+                    event_timestamp: row.get(11)?,
+                    canonical_record_json: String::new(),
+                    record_digest: String::new(),
+                    frozen_at: STAMP.to_string(),
+                })
+            },
+        )
+        .unwrap();
+    source.canonical_record_json = canonical_frozen_operation_record_v1(&source).unwrap();
+    source.record_digest = sha256_file_version_v1(source.canonical_record_json.as_bytes())
+        .trim_start_matches("sha256:")
+        .to_string();
+    storage
+        .connection
+        .execute(
+            "INSERT INTO frozen_operation_sources(\
+               operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,aggregate_id,\
+               aggregate_sequence,event_type,payload_schema_version,canonical_payload_json,\
+               canonical_payload_digest,event_timestamp,canonical_record_json,record_digest,frozen_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15);",
+            rusqlite::params![source.operation_id, i64::try_from(source.source_event_rowid).unwrap(),
+                source.source_event_id, source.request_id, source.aggregate_type, source.aggregate_id,
+                i64::try_from(source.aggregate_sequence).unwrap(), source.event_type,
+                source.payload_schema_version, source.canonical_payload_json,
+                source.canonical_payload_digest, source.event_timestamp, source.canonical_record_json,
+                source.record_digest, source.frozen_at],
+        )
+        .unwrap();
+    source.operation_id
+}
+
+fn assert_writer_rejects_before_delete(storage: &mut Storage, column: &str, expected: &str) {
+    let before: (u32, u32, u32, u32, u32) = storage
+        .connection
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),(SELECT count(*) FROM event_source_index),\
+                    (SELECT count(*) FROM operation_receipts),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes);",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    let mut never = |_: CompactionCancellationPoint| false;
+    assert!(
+        run_private_compaction_step(&mut storage.connection, &target(), &mut never, None,).is_err()
+    );
+    let after: (u32, u32, u32, u32, u32, String) = storage
+        .connection
+        .query_row(
+            "SELECT (SELECT count(*) FROM events),(SELECT count(*) FROM event_source_index),\
+                    (SELECT count(*) FROM operation_receipts),\
+                    (SELECT count(*) FROM ledger_compaction_delete_authority),\
+                    (SELECT count(*) FROM ledger_compaction_prefixes),\
+                    (SELECT state FROM maintenance_jobs WHERE job_kind='losslessCompaction');",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!((after.0, after.1, after.2, after.3, after.4), before);
+    assert_eq!(after.5, "running");
+    let actual: String = storage
+        .connection
+        .query_row(
+            &format!(
+                "SELECT {column} FROM frozen_operation_sources WHERE operation_id='op_writer_101';"
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn v10_writer_rejects_corrupt_existing_frozen_operation_before_delete() {
+    let (root, path, mut storage) = exact_v10(1001);
+    run_until_pending(
+        &mut storage,
+        StorageCompactionPhaseV3::FreezeOperations,
+        100,
+    );
+    storage.checkpoint().unwrap();
+    drop(storage);
+
+    let oversized = "x".repeat(
+        usize::try_from(STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1).unwrap()
+            + 1,
+    );
+    for (name, column, value) in [
+        (
+            "canonical_record",
+            "canonical_record_json",
+            "{}".to_string(),
+        ),
+        ("record_digest", "record_digest", "0".repeat(64)),
+        ("frozen_at", "frozen_at", "not-a-time".to_string()),
+        ("oversized_record", "canonical_record_json", oversized),
+    ] {
+        let copy = root.path().join(format!("corrupt-{name}.sqlite3"));
+        std::fs::copy(&path, &copy).unwrap();
+        let cancellation = AtomicBool::new(false);
+        let mut copy = Storage::open_for_admission(&copy, &cancellation).unwrap();
+        assert_eq!(preseed_frozen_operation(&copy, 101), "op_writer_101");
+        super::reopen_closure::corrupt(
+            &copy.connection,
+            &format!(
+                "UPDATE frozen_operation_sources SET {column}='{}' WHERE operation_id='op_writer_101';",
+                value.replace('\'', "''")
+            ),
+        );
+        assert_writer_rejects_before_delete(&mut copy, column, &value);
+    }
 }
 
 #[test]

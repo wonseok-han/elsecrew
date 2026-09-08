@@ -2,10 +2,12 @@ use crate::SidecarError;
 use chrono::{SecondsFormat, Utc};
 use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use hello_agent_protocol::storage_lifetime_v1::{
-    canonical_frozen_operation_record_v1, validate_storage_compaction_job_v3,
-    validate_storage_compaction_plan_v1, FrozenOperationSourceV1, StorageCompactionJobV3,
-    StorageCompactionPhaseV3, StorageCompactionPlanV1, STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1,
-    STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1, STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
+    canonical_frozen_operation_record_v1, validate_frozen_message_source_v1,
+    validate_frozen_operation_source_v1, validate_storage_compaction_job_v3,
+    validate_storage_compaction_plan_v1, FrozenMessageSourceV1, FrozenOperationSourceV1,
+    StorageCompactionJobV3, StorageCompactionPhaseV3, StorageCompactionPlanV1,
+    STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1, STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1,
+    STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
     STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
     STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V10,
@@ -77,6 +79,10 @@ struct StepBudget {
 impl StepBudget {
     fn add(&mut self, primary: usize, dependency: usize) -> Result<(), SidecarError> {
         self.work = self.work.checked_add(1).ok_or_else(compaction_error)?;
+        self.add_bytes(primary, dependency)
+    }
+
+    fn add_bytes(&mut self, primary: usize, dependency: usize) -> Result<(), SidecarError> {
         self.primary = self
             .primary
             .checked_add(primary)
@@ -95,14 +101,7 @@ impl StepBudget {
     }
 
     fn add_dependency(&mut self, dependency: usize) -> Result<(), SidecarError> {
-        self.dependency = self
-            .dependency
-            .checked_add(dependency)
-            .ok_or_else(compaction_error)?;
-        if self.dependency > DEPENDENCY_BYTES {
-            return Err(compaction_error());
-        }
-        Ok(())
+        self.add_bytes(0, dependency)
     }
 }
 
@@ -128,6 +127,14 @@ struct PlanRow {
     baseline_projection_digest: Option<String>,
     operation_frozen_before_plan: bool,
     message_frozen_before_plan: bool,
+}
+
+#[derive(Debug)]
+struct ChatMessageWitness {
+    chat_id: String,
+    durable_sequence: u64,
+    canonical_message_json: String,
+    message_digest: String,
 }
 
 pub(crate) fn run_private_compaction_step(
@@ -216,11 +223,15 @@ pub(crate) fn run_private_compaction_step(
 }
 
 fn validate_target(target: &CompactionTarget) -> Result<(), SidecarError> {
+    let baseline_input_limit = DEPENDENCY_BYTES
+        .checked_sub(target.aggregate_type.len())
+        .and_then(|limit| limit.checked_sub(2 + 20))
+        .ok_or_else(compaction_error)?;
     if !matches!(
         target.aggregate_type.as_str(),
         "project" | "chat" | "run" | "lock"
     ) || target.aggregate_id.is_empty()
-        || target.aggregate_id.len() > DEPENDENCY_BYTES
+        || target.aggregate_id.len() > baseline_input_limit
     {
         return Err(compaction_error());
     }
@@ -228,9 +239,9 @@ fn validate_target(target: &CompactionTarget) -> Result<(), SidecarError> {
 }
 
 fn verify_runtime_fences(connection: &Connection) -> Result<(), SidecarError> {
-    let facts: (u32, String, u32, u32, u32) = connection
+    let facts: (u32, bool, u32, u32, u32) = connection
         .query_row(
-            "SELECT storage_schema_version,materialization_state,\
+            "SELECT storage_schema_version,materialization_state='ready',\
                     (SELECT count(*) FROM lifetime_materialization_job),\
                     (SELECT count(*) FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
                      AND state='running'),\
@@ -249,7 +260,7 @@ fn verify_runtime_fences(connection: &Connection) -> Result<(), SidecarError> {
         )
         .map_err(|_| compaction_error())?;
     if facts.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V10
-        || facts.1 != "ready"
+        || !facts.1
         || facts.2 != 0
         || facts.3 != 0
         || facts.4 != 0
@@ -312,9 +323,11 @@ fn create_candidate(
     }
 
     ensure_candidate_baseline(&transaction, target, delete_through)?;
-    let baseline_lengths: (i64, i64, i64) = transaction
+    let baseline_lengths: (bool, i64, i64, i64) = transaction
         .query_row(
-            "SELECT length(CAST(baseline_id AS BLOB)),\
+            "SELECT typeof(baseline_id)='text' AND typeof(canonical_projection_json)='text' \
+                    AND typeof(projection_digest)='text',\
+                    length(CAST(baseline_id AS BLOB)),\
                     length(CAST(canonical_projection_json AS BLOB)),\
                     length(CAST(projection_digest AS BLOB)) \
              FROM ledger_baselines WHERE aggregate_type=?1 AND aggregate_id=?2 \
@@ -324,13 +337,14 @@ fn create_candidate(
                 target.aggregate_id,
                 sql_i64(delete_through)?
             ],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|_| compaction_error())?;
     let dependency =
-        checked_lengths(&[baseline_lengths.0, baseline_lengths.1, baseline_lengths.2])?;
-    if dependency > DEPENDENCY_BYTES
-        || usize::try_from(baseline_lengths.1).map_err(|_| compaction_error())? > PRIMARY_BYTES
+        checked_lengths(&[baseline_lengths.1, baseline_lengths.2, baseline_lengths.3])?;
+    if !baseline_lengths.0
+        || dependency > DEPENDENCY_BYTES
+        || length(baseline_lengths.2)? > PRIMARY_BYTES
     {
         return Err(compaction_error());
     }
@@ -431,9 +445,13 @@ fn ensure_candidate_baseline(
     target: &CompactionTarget,
     sequence: u64,
 ) -> Result<(), SidecarError> {
-    let source_lengths: (i64, i64) = transaction
+    let source_lengths: (bool, i64, i64) = transaction
         .query_row(
-            "SELECT length(CAST(e.canonical_json_payload AS BLOB)),\
+            "SELECT typeof(e.canonical_json_payload)='text' AND typeof(e.event_id)='text' \
+                    AND typeof(e.operation_id)='text' AND typeof(e.aggregate_type)='text' \
+                    AND typeof(e.aggregate_id)='text' AND typeof(e.event_type)='text' \
+                    AND typeof(e.timestamp)='text' AND typeof(e.aggregate_sequence)='integer',\
+                    length(CAST(e.canonical_json_payload AS BLOB)),\
                     length(CAST(e.event_id AS BLOB))+length(CAST(e.operation_id AS BLOB))+\
                     length(CAST(e.aggregate_type AS BLOB))+length(CAST(e.aggregate_id AS BLOB))+\
                     length(CAST(e.event_type AS BLOB))+length(CAST(e.timestamp AS BLOB)) \
@@ -451,11 +469,12 @@ fn ensure_candidate_baseline(
                 target.aggregate_id,
                 sql_i64(sequence)?
             ],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|_| compaction_error())?;
-    if length(source_lengths.0)? > PRIMARY_BYTES
-        || checked_lengths(&[source_lengths.0, source_lengths.1])? > DEPENDENCY_BYTES
+    if !source_lengths.0
+        || length(source_lengths.1)? > PRIMARY_BYTES
+        || checked_lengths(&[source_lengths.1, source_lengths.2])? > DEPENDENCY_BYTES
     {
         return Err(compaction_error());
     }
@@ -538,30 +557,34 @@ fn immediate_predecessor(
             Ok(None)
         };
     }
-    let mut statement = connection
-        .prepare(
-            "SELECT p.job_id FROM storage_compaction_plans p JOIN maintenance_jobs j ON j.job_id=p.job_id \
+    let facts: (bool, u32, i64) = connection
+        .query_row(
+            "SELECT coalesce(min(typeof(p.job_id)='text'),1),count(*),\
+                    coalesce(max(length(CAST(p.job_id AS BLOB))),0) \
+             FROM storage_compaction_plans p JOIN maintenance_jobs j ON j.job_id=p.job_id \
              WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND p.delete_through_sequence=?3 \
-               AND j.state='succeeded' ORDER BY p.job_id LIMIT 2;",
+               AND j.state='succeeded';",
+            params![
+                target.aggregate_type,
+                target.aggregate_id,
+                sql_i64(boundary)?
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(sqlite_error)?;
-    let mut rows = statement
-        .query(params![
-            target.aggregate_type,
-            target.aggregate_id,
-            sql_i64(boundary)?
-        ])
-        .map_err(sqlite_error)?;
-    let first = rows
-        .next()
-        .map_err(sqlite_error)?
-        .map(|row| row.get::<_, String>(0))
-        .transpose()
-        .map_err(sqlite_error)?;
-    if first.is_none() || rows.next().map_err(sqlite_error)?.is_some() {
+    if !facts.0 || facts.1 != 1 || length(facts.2)? > DEPENDENCY_BYTES {
         return Err(compaction_error());
     }
-    Ok(first)
+    connection
+        .query_row(
+            "SELECT p.job_id FROM storage_compaction_plans p JOIN maintenance_jobs j ON j.job_id=p.job_id \
+             WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND p.delete_through_sequence=?3 \
+               AND j.state='succeeded';",
+            params![target.aggregate_type, target.aggregate_id, sql_i64(boundary)?],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .map_err(sqlite_error)
 }
 
 fn arm_job(
@@ -622,7 +645,7 @@ fn execute_armed_step(
 ) -> Result<(), SidecarError> {
     let cursor = &job.private_state.cursor;
     if cursor.scan_exhausted {
-        return advance_phase(transaction, job, plan);
+        return advance_phase(transaction, job, plan, budget);
     }
     let through = cursor
         .step_through_plan_ordinal
@@ -644,7 +667,7 @@ fn execute_armed_step(
             }
             StorageCompactionPhaseV3::FreezeOperations => {
                 let row = load_planned_row(transaction, plan, ordinal, budget)?;
-                freeze_operation(transaction, &row)?;
+                freeze_operation(transaction, &row, budget)?;
             }
             StorageCompactionPhaseV3::FreezeMessages => {
                 let row = load_planned_row(transaction, plan, ordinal, budget)?;
@@ -652,13 +675,13 @@ fn execute_armed_step(
             }
             StorageCompactionPhaseV3::VerifyPrefix | StorageCompactionPhaseV3::AuthorizeDelete => {
                 let row = load_planned_row(transaction, plan, ordinal, budget)?;
-                verify_planned_row(transaction, &row, true)?;
+                verify_planned_row(transaction, &row, true, budget)?;
             }
             StorageCompactionPhaseV3::DeletePrefix => {}
             StorageCompactionPhaseV3::VerifyOperations
             | StorageCompactionPhaseV3::VerifyEquivalence => {
                 let row = load_planned_row(transaction, plan, ordinal, budget)?;
-                verify_planned_row(transaction, &row, ordinal == 1001)?;
+                verify_planned_row(transaction, &row, ordinal == 1001, budget)?;
             }
             StorageCompactionPhaseV3::ReleasePlan => {
                 let changed = transaction
@@ -681,7 +704,7 @@ fn execute_armed_step(
         return Ok(());
     }
     if cursor.phase == StorageCompactionPhaseV3::VerifyEquivalence && through == 1001 {
-        verify_equivalence(transaction, plan)?;
+        verify_equivalence(transaction, plan, budget)?;
     }
     finish_batch(transaction, job, through)
 }
@@ -721,9 +744,10 @@ fn advance_phase(
     transaction: &Transaction<'_>,
     job: &StorageCompactionJobV3,
     plan: &StorageCompactionPlanV1,
+    budget: &mut StepBudget,
 ) -> Result<(), SidecarError> {
     if job.private_state.cursor.phase == StorageCompactionPhaseV3::VerifyPrefix {
-        insert_prefix(transaction, plan)?;
+        insert_prefix(transaction, plan, budget)?;
     }
     let next = next_phase(job.private_state.cursor.phase).ok_or_else(compaction_error)?;
     let after = if next == StorageCompactionPhaseV3::Finalize {
@@ -833,13 +857,22 @@ fn load_source_as_plan_row(
         .retained_boundary_sequence
         .checked_add(u64::from(ordinal))
         .ok_or_else(compaction_error)?;
-    let lengths: (i64, i64) = connection
+    let lengths: (bool, i64, i64) = connection
         .query_row(
-            "SELECT length(CAST(e.canonical_json_payload AS BLOB)),\
+            "SELECT typeof(e.rowid)='integer' AND typeof(e.event_id)='text' \
+                    AND typeof(e.operation_id)='text' AND (e.request_id IS NULL OR typeof(e.request_id)='text') \
+                    AND typeof(e.aggregate_type)='text' AND typeof(e.aggregate_id)='text' \
+                    AND typeof(e.aggregate_sequence)='integer' AND typeof(e.event_type)='text' \
+                    AND typeof(e.payload_schema_version)='integer' AND typeof(e.timestamp)='text' \
+                    AND typeof(e.canonical_json_payload)='text' AND typeof(r.canonical_payload_digest)='text' \
+                    AND (i.introduced_message_id IS NULL OR typeof(i.introduced_message_id)='text') \
+                    AND (m.message_digest IS NULL OR typeof(m.message_digest)='text'),\
+                    length(CAST(e.canonical_json_payload AS BLOB)),\
                     length(CAST(e.event_id AS BLOB))+length(CAST(e.operation_id AS BLOB))+\
                     coalesce(length(CAST(e.request_id AS BLOB)),0)+length(CAST(e.aggregate_type AS BLOB))+\
                     length(CAST(e.aggregate_id AS BLOB))+length(CAST(e.event_type AS BLOB))+\
-                    length(CAST(e.timestamp AS BLOB))+coalesce(length(CAST(i.introduced_message_id AS BLOB)),0)+\
+                    length(CAST(e.timestamp AS BLOB))+length(CAST(r.canonical_payload_digest AS BLOB))+\
+                    coalesce(length(CAST(i.introduced_message_id AS BLOB)),0)+\
                     coalesce(length(CAST(m.message_digest AS BLOB)),0) \
              FROM events e JOIN event_source_index i ON i.event_rowid=e.rowid \
              JOIN operation_receipts r ON r.operation_id=e.operation_id \
@@ -847,10 +880,13 @@ fn load_source_as_plan_row(
              WHERE e.aggregate_type=?1 AND e.aggregate_id=?2 AND e.aggregate_sequence=?3 \
                AND e.rowid<=?4 AND r.canonical_payload_json=e.canonical_json_payload;",
             params![plan.aggregate_type, plan.aggregate_id, sql_i64(sequence)?, sql_i64(plan.cutoff_event_rowid)?],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|_| compaction_error())?;
-    budget.add(length(lengths.0)?, length(lengths.1)?)?;
+    if !lengths.0 {
+        return Err(compaction_error());
+    }
+    budget.add(length(lengths.1)?, length(lengths.2)?)?;
     let mut row = connection
         .query_row(
             "SELECT e.rowid,e.event_id,e.operation_id,e.request_id,e.aggregate_type,e.aggregate_id,\
@@ -957,9 +993,22 @@ fn load_planned_row(
     ordinal: u32,
     budget: &mut StepBudget,
 ) -> Result<PlanRow, SidecarError> {
-    let lengths: (i64, i64) = connection
+    let lengths: (bool, i64, i64) = connection
         .query_row(
-            "SELECT length(CAST(canonical_payload_json AS BLOB)),\
+            "SELECT typeof(ordinal)='integer' AND typeof(event_rowid)='integer' \
+                    AND typeof(event_id)='text' AND typeof(operation_id)='text' \
+                    AND (request_id IS NULL OR typeof(request_id)='text') \
+                    AND typeof(aggregate_type)='text' AND typeof(aggregate_id)='text' \
+                    AND typeof(aggregate_sequence)='integer' AND typeof(event_type)='text' \
+                    AND typeof(payload_schema_version)='integer' AND typeof(event_timestamp)='text' \
+                    AND typeof(canonical_payload_json)='text' AND typeof(canonical_payload_digest)='text' \
+                    AND (introduced_message_id IS NULL OR typeof(introduced_message_id)='text') \
+                    AND (introduced_message_digest IS NULL OR typeof(introduced_message_digest)='text') \
+                    AND typeof(decision)='text' AND (baseline_id IS NULL OR typeof(baseline_id)='text') \
+                    AND (baseline_projection_digest IS NULL OR typeof(baseline_projection_digest)='text') \
+                    AND typeof(operation_frozen_before_plan)='integer' \
+                    AND typeof(message_frozen_before_plan)='integer',\
+                    length(CAST(canonical_payload_json AS BLOB)),\
                     length(CAST(event_id AS BLOB))+length(CAST(operation_id AS BLOB))+\
                     coalesce(length(CAST(request_id AS BLOB)),0)+length(CAST(aggregate_type AS BLOB))+\
                     length(CAST(aggregate_id AS BLOB))+length(CAST(event_type AS BLOB))+\
@@ -967,13 +1016,17 @@ fn load_planned_row(
                     coalesce(length(CAST(introduced_message_id AS BLOB)),0)+\
                     coalesce(length(CAST(introduced_message_digest AS BLOB)),0)+\
                     coalesce(length(CAST(baseline_id AS BLOB)),0)+\
-                    coalesce(length(CAST(baseline_projection_digest AS BLOB)),0) \
+                    coalesce(length(CAST(baseline_projection_digest AS BLOB)),0)+\
+                    length(CAST(decision AS BLOB)) \
              FROM storage_compaction_plan_rows WHERE job_id=?1 AND ordinal=?2;",
             params![plan.job_id, ordinal],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|_| compaction_error())?;
-    budget.add(length(lengths.0)?, length(lengths.1)?)?;
+    if !lengths.0 {
+        return Err(compaction_error());
+    }
+    budget.add(length(lengths.1)?, length(lengths.2)?)?;
     connection
         .query_row(
             "SELECT ordinal,event_rowid,event_id,operation_id,request_id,aggregate_type,aggregate_id,\
@@ -1004,8 +1057,12 @@ fn load_planned_row(
         .map_err(|_| compaction_error())
 }
 
-fn freeze_operation(transaction: &Transaction<'_>, row: &PlanRow) -> Result<(), SidecarError> {
-    if exact_frozen_operation(transaction, row)? {
+fn freeze_operation(
+    transaction: &Transaction<'_>,
+    row: &PlanRow,
+    budget: &mut StepBudget,
+) -> Result<(), SidecarError> {
+    if exact_frozen_operation(transaction, row, budget)? {
         return Ok(());
     }
     let frozen_at = now();
@@ -1026,8 +1083,13 @@ fn freeze_operation(transaction: &Transaction<'_>, row: &PlanRow) -> Result<(), 
         record_digest: String::new(),
         frozen_at,
     };
+    let record_len = frozen_operation_record_len(&source)?;
+    budget.add_dependency(record_len.checked_add(64).ok_or_else(compaction_error)?)?;
     source.canonical_record_json =
         canonical_frozen_operation_record_v1(&source).map_err(|_| compaction_error())?;
+    if source.canonical_record_json.len() != record_len {
+        return Err(compaction_error());
+    }
     source.record_digest = sha256_file_version_v1(source.canonical_record_json.as_bytes())
         .strip_prefix("sha256:")
         .ok_or_else(compaction_error)?
@@ -1051,31 +1113,100 @@ fn freeze_operation(transaction: &Transaction<'_>, row: &PlanRow) -> Result<(), 
     Ok(())
 }
 
-fn exact_frozen_operation(connection: &Connection, row: &PlanRow) -> Result<bool, SidecarError> {
-    connection
+fn exact_frozen_operation(
+    connection: &Connection,
+    row: &PlanRow,
+    budget: &mut StepBudget,
+) -> Result<bool, SidecarError> {
+    let count: u32 = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM frozen_operation_sources WHERE operation_id=?1 \
-             AND source_event_rowid=?2 AND source_event_id=?3 AND request_id IS ?4 \
-             AND aggregate_type=?5 AND aggregate_id=?6 AND aggregate_sequence=?7 \
-             AND event_type=?8 AND payload_schema_version=?9 AND canonical_payload_json=?10 \
-             AND canonical_payload_digest=?11 AND event_timestamp=?12);",
-            params![
-                row.operation_id,
-                sql_i64(row.event_rowid)?,
-                row.event_id,
-                row.request_id,
-                row.aggregate_type,
-                row.aggregate_id,
-                sql_i64(row.aggregate_sequence)?,
-                row.event_type,
-                row.payload_schema_version,
-                row.canonical_payload_json,
-                row.canonical_payload_digest,
-                row.event_timestamp,
-            ],
-            |r| r.get(0),
+            "SELECT count(*) FROM frozen_operation_sources WHERE operation_id=?1;",
+            [&row.operation_id],
+            |record| record.get(0),
         )
-        .map_err(sqlite_error)
+        .map_err(sqlite_error)?;
+    if count == 0 {
+        return Ok(false);
+    }
+    if count != 1 {
+        return Err(compaction_error());
+    }
+    let (types_valid, primary, dependency): (bool, i64, i64) = connection
+        .query_row(
+            "SELECT \
+               typeof(source_event_rowid)='integer' AND typeof(aggregate_sequence)='integer' \
+               AND typeof(payload_schema_version)='integer' \
+               AND typeof(operation_id)='text' AND typeof(source_event_id)='text' \
+               AND (request_id IS NULL OR typeof(request_id)='text') \
+               AND typeof(aggregate_type)='text' AND typeof(aggregate_id)='text' \
+               AND typeof(event_type)='text' AND typeof(canonical_payload_json)='text' \
+               AND typeof(canonical_payload_digest)='text' AND typeof(event_timestamp)='text' \
+               AND typeof(canonical_record_json)='text' AND typeof(record_digest)='text' \
+               AND typeof(frozen_at)='text',\
+               length(CAST(canonical_payload_json AS BLOB)),\
+               length(CAST(operation_id AS BLOB))+length(CAST(source_event_id AS BLOB))+\
+               coalesce(length(CAST(request_id AS BLOB)),0)+length(CAST(aggregate_type AS BLOB))+\
+               length(CAST(aggregate_id AS BLOB))+length(CAST(event_type AS BLOB))+\
+               length(CAST(canonical_payload_digest AS BLOB))+length(CAST(event_timestamp AS BLOB))+\
+               length(CAST(canonical_record_json AS BLOB))+length(CAST(record_digest AS BLOB))+\
+               length(CAST(frozen_at AS BLOB)) \
+             FROM frozen_operation_sources WHERE operation_id=?1;",
+            [&row.operation_id],
+            |record| Ok((record.get(0)?, record.get(1)?, record.get(2)?)),
+        )
+        .map_err(|_| compaction_error())?;
+    if !types_valid {
+        return Err(compaction_error());
+    }
+    budget.add_bytes(length(primary)?, length(dependency)?)?;
+    let source = connection
+        .query_row(
+            "SELECT operation_id,source_event_rowid,source_event_id,request_id,aggregate_type,\
+                    aggregate_id,aggregate_sequence,event_type,payload_schema_version,\
+                    canonical_payload_json,canonical_payload_digest,event_timestamp,\
+                    canonical_record_json,record_digest,frozen_at \
+             FROM frozen_operation_sources WHERE operation_id=?1;",
+            [&row.operation_id],
+            |record| {
+                Ok(FrozenOperationSourceV1 {
+                    operation_id: record.get(0)?,
+                    source_event_rowid: row_u64(record, 1)?,
+                    source_event_id: record.get(2)?,
+                    request_id: record.get(3)?,
+                    aggregate_type: record.get(4)?,
+                    aggregate_id: record.get(5)?,
+                    aggregate_sequence: row_u64(record, 6)?,
+                    event_type: record.get(7)?,
+                    payload_schema_version: record.get(8)?,
+                    canonical_payload_json: record.get(9)?,
+                    canonical_payload_digest: record.get(10)?,
+                    event_timestamp: record.get(11)?,
+                    canonical_record_json: record.get(12)?,
+                    record_digest: record.get(13)?,
+                    frozen_at: record.get(14)?,
+                })
+            },
+        )
+        .map_err(|_| compaction_error())?;
+    let value = serde_json::to_value(&source).map_err(|_| compaction_error())?;
+    let validated = validate_frozen_operation_source_v1(&value).map_err(|_| compaction_error())?;
+    if validated != source
+        || source.operation_id != row.operation_id
+        || source.source_event_rowid != row.event_rowid
+        || source.source_event_id != row.event_id
+        || source.request_id != row.request_id
+        || source.aggregate_type != row.aggregate_type
+        || source.aggregate_id != row.aggregate_id
+        || source.aggregate_sequence != row.aggregate_sequence
+        || source.event_type != row.event_type
+        || source.payload_schema_version != row.payload_schema_version
+        || source.canonical_payload_json != row.canonical_payload_json
+        || source.canonical_payload_digest != row.canonical_payload_digest
+        || source.event_timestamp != row.event_timestamp
+    {
+        return Err(compaction_error());
+    }
+    Ok(true)
 }
 
 fn freeze_message(
@@ -1089,67 +1220,174 @@ fn freeze_message(
         }
         return Ok(());
     };
-    let lengths: (i64, i64) = transaction
+    let message = load_chat_message(transaction, message_id, budget)?;
+    if message.message_digest.strip_prefix("sha256:") != row.introduced_message_digest.as_deref()
+        || sha256_file_version_v1(message.canonical_message_json.as_bytes())
+            != message.message_digest
+    {
+        return Err(compaction_error());
+    }
+    if exact_frozen_message(transaction, row, &message, budget)? {
+        return Ok(());
+    }
+    let source = FrozenMessageSourceV1 {
+        message_id: message_id.to_string(),
+        source_event_rowid: row.event_rowid,
+        source_event_id: row.event_id.clone(),
+        source_operation_id: row.operation_id.clone(),
+        chat_id: message.chat_id,
+        source_aggregate_sequence: row.aggregate_sequence,
+        durable_sequence: message.durable_sequence,
+        canonical_message_json: message.canonical_message_json,
+        message_digest: message.message_digest,
+        frozen_at: now(),
+    };
+    validate_frozen_message_source_v1(
+        &serde_json::to_value(&source).map_err(|_| compaction_error())?,
+    )
+    .map_err(|_| compaction_error())?;
+    transaction
+        .execute(
+            "INSERT INTO frozen_message_sources(\
+               message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,\
+               source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);",
+            params![source.message_id, sql_i64(source.source_event_rowid)?, source.source_event_id,
+                source.source_operation_id, source.chat_id, sql_i64(source.source_aggregate_sequence)?,
+                sql_i64(source.durable_sequence)?, source.canonical_message_json,
+                source.message_digest, source.frozen_at],
+        )
+        .map_err(sqlite_error)?;
+    Ok(())
+}
+
+fn load_chat_message(
+    connection: &Connection,
+    message_id: &str,
+    budget: &mut StepBudget,
+) -> Result<ChatMessageWitness, SidecarError> {
+    let (types_valid, dependency): (bool, i64) = connection
         .query_row(
-            "SELECT length(CAST(canonical_message_json AS BLOB)),length(CAST(message_digest AS BLOB)) \
+            "SELECT typeof(chat_id)='text' AND typeof(event_sequence)='integer' \
+                    AND typeof(canonical_message_json)='text' AND typeof(message_digest)='text',\
+                    length(CAST(chat_id AS BLOB))+length(CAST(canonical_message_json AS BLOB))+\
+                    length(CAST(message_digest AS BLOB)) \
              FROM chat_messages WHERE message_id=?1;",
             [message_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| compaction_error())?;
-    budget.add_dependency(checked_lengths(&[lengths.0, lengths.1])?)?;
-    let (chat_id, durable, canonical, digest): (String, i64, String, String) = transaction
-        .query_row(
-            "SELECT m.chat_id,m.event_sequence,m.canonical_message_json,m.message_digest \
-             FROM chat_messages m WHERE m.message_id=?1;",
-            [message_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .map_err(|_| compaction_error())?;
-    if digest.strip_prefix("sha256:") != row.introduced_message_digest.as_deref()
-        || sha256_file_version_v1(canonical.as_bytes()) != digest
-    {
+    if !types_valid {
         return Err(compaction_error());
     }
-    let exact: bool = transaction
+    budget.add_dependency(length(dependency)?)?;
+    connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM frozen_message_sources WHERE message_id=?1 \
-             AND source_event_rowid=?2 AND source_event_id=?3 AND source_operation_id=?4 \
-             AND chat_id=?5 AND source_aggregate_sequence=?6 AND durable_sequence=?7 \
-             AND canonical_message_json=?8 AND message_digest=?9);",
-            params![
-                message_id,
-                sql_i64(row.event_rowid)?,
-                row.event_id,
-                row.operation_id,
-                chat_id,
-                sql_i64(row.aggregate_sequence)?,
-                durable,
-                canonical,
-                digest
-            ],
+            "SELECT chat_id,event_sequence,canonical_message_json,message_digest \
+             FROM chat_messages WHERE message_id=?1;",
+            [message_id],
+            |r| {
+                Ok(ChatMessageWitness {
+                    chat_id: r.get(0)?,
+                    durable_sequence: row_u64(r, 1)?,
+                    canonical_message_json: r.get(2)?,
+                    message_digest: r.get(3)?,
+                })
+            },
+        )
+        .map_err(|_| compaction_error())
+}
+
+fn exact_frozen_message(
+    connection: &Connection,
+    row: &PlanRow,
+    message: &ChatMessageWitness,
+    budget: &mut StepBudget,
+) -> Result<bool, SidecarError> {
+    let Some(message_id) = row.introduced_message_id.as_deref() else {
+        return Err(compaction_error());
+    };
+    let count: u32 = connection
+        .query_row(
+            "SELECT count(*) FROM frozen_message_sources WHERE message_id=?1;",
+            [message_id],
             |r| r.get(0),
         )
         .map_err(sqlite_error)?;
-    if !exact {
-        transaction
-            .execute(
-                "INSERT INTO frozen_message_sources(\
-                   message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,\
-                   source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);",
-                params![message_id, sql_i64(row.event_rowid)?, row.event_id, row.operation_id,
-                    chat_id, sql_i64(row.aggregate_sequence)?, durable, canonical, digest, now()],
-            )
-            .map_err(sqlite_error)?;
+    if count == 0 {
+        return Ok(false);
     }
-    Ok(())
+    if count != 1 {
+        return Err(compaction_error());
+    }
+    let (types_valid, dependency): (bool, i64) = connection
+        .query_row(
+            "SELECT typeof(message_id)='text' AND typeof(source_event_rowid)='integer' \
+                    AND typeof(source_event_id)='text' AND typeof(source_operation_id)='text' \
+                    AND typeof(chat_id)='text' AND typeof(source_aggregate_sequence)='integer' \
+                    AND typeof(durable_sequence)='integer' AND typeof(canonical_message_json)='text' \
+                    AND typeof(message_digest)='text' AND typeof(frozen_at)='text',\
+                    length(CAST(message_id AS BLOB))+length(CAST(source_event_id AS BLOB))+\
+                    length(CAST(source_operation_id AS BLOB))+length(CAST(chat_id AS BLOB))+\
+                    length(CAST(canonical_message_json AS BLOB))+length(CAST(message_digest AS BLOB))+\
+                    length(CAST(frozen_at AS BLOB)) \
+             FROM frozen_message_sources WHERE message_id=?1;",
+            [message_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| compaction_error())?;
+    if !types_valid {
+        return Err(compaction_error());
+    }
+    budget.add_dependency(length(dependency)?)?;
+    let source = connection
+        .query_row(
+            "SELECT message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,\
+                    source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at \
+             FROM frozen_message_sources WHERE message_id=?1;",
+            [message_id],
+            |r| {
+                Ok(FrozenMessageSourceV1 {
+                    message_id: r.get(0)?,
+                    source_event_rowid: row_u64(r, 1)?,
+                    source_event_id: r.get(2)?,
+                    source_operation_id: r.get(3)?,
+                    chat_id: r.get(4)?,
+                    source_aggregate_sequence: row_u64(r, 5)?,
+                    durable_sequence: row_u64(r, 6)?,
+                    canonical_message_json: r.get(7)?,
+                    message_digest: r.get(8)?,
+                    frozen_at: r.get(9)?,
+                })
+            },
+        )
+        .map_err(|_| compaction_error())?;
+    let validated = validate_frozen_message_source_v1(
+        &serde_json::to_value(&source).map_err(|_| compaction_error())?,
+    )
+    .map_err(|_| compaction_error())?;
+    if validated != source
+        || source.message_id != message_id
+        || source.source_event_rowid != row.event_rowid
+        || source.source_event_id != row.event_id
+        || source.source_operation_id != row.operation_id
+        || source.chat_id != message.chat_id
+        || source.source_aggregate_sequence != row.aggregate_sequence
+        || source.durable_sequence != message.durable_sequence
+        || source.canonical_message_json != message.canonical_message_json
+        || source.message_digest != message.message_digest
+        || sha256_file_version_v1(source.canonical_message_json.as_bytes()) != source.message_digest
+    {
+        return Err(compaction_error());
+    }
+    Ok(true)
 }
 
 fn verify_planned_row(
     connection: &Connection,
     row: &PlanRow,
     expect_live: bool,
+    budget: &mut StepBudget,
 ) -> Result<(), SidecarError> {
     let live: bool = connection
         .query_row(
@@ -1169,21 +1407,12 @@ fn verify_planned_row(
             |r| r.get(0),
         )
         .map_err(sqlite_error)?;
-    if live != expect_live || !exact_frozen_operation(connection, row)? {
+    if live != expect_live || !exact_frozen_operation(connection, row, budget)? {
         return Err(compaction_error());
     }
     if let Some(message_id) = row.introduced_message_id.as_deref() {
-        let exact: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM frozen_message_sources f JOIN chat_messages m \
-                 ON m.message_id=f.message_id WHERE f.message_id=?1 AND f.source_event_rowid=?2 \
-                 AND f.source_event_id=?3 AND f.source_operation_id=?4 \
-                 AND f.message_digest=m.message_digest AND f.canonical_message_json=m.canonical_message_json);",
-                params![message_id, sql_i64(row.event_rowid)?, row.event_id, row.operation_id],
-                |r| r.get(0),
-            )
-            .map_err(sqlite_error)?;
-        if !exact {
+        let message = load_chat_message(connection, message_id, budget)?;
+        if !exact_frozen_message(connection, row, &message, budget)? {
             return Err(compaction_error());
         }
     }
@@ -1193,8 +1422,14 @@ fn verify_planned_row(
 fn insert_prefix(
     transaction: &Transaction<'_>,
     plan: &StorageCompactionPlanV1,
+    budget: &mut StepBudget,
 ) -> Result<(), SidecarError> {
-    let anchor = load_planned_row(transaction, plan, 1001, &mut StepBudget::default())?;
+    let anchor = load_planned_row(transaction, plan, 1001, budget)?;
+    let prefix_len = "prefix_"
+        .len()
+        .checked_add(plan.job_id.len())
+        .ok_or_else(compaction_error)?;
+    budget.add_dependency(prefix_len)?;
     let prefix_id = format!("prefix_{}", plan.job_id);
     let changed = transaction
         .execute(
@@ -1232,6 +1467,23 @@ fn delete_batch(
     budget: &mut StepBudget,
     failure: Option<CompactionFailurePoint>,
 ) -> Result<(), SidecarError> {
+    let (prefix_type_valid, prefix_length): (bool, i64) = transaction
+        .query_row(
+            "SELECT typeof(prefix_id)='text',length(CAST(prefix_id AS BLOB)) \
+             FROM ledger_compaction_prefixes WHERE aggregate_type=?1 \
+             AND aggregate_id=?2 AND deleted_through_sequence=?3;",
+            params![
+                plan.aggregate_type,
+                plan.aggregate_id,
+                sql_i64(plan.delete_through_sequence)?
+            ],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| compaction_error())?;
+    if !prefix_type_valid {
+        return Err(compaction_error());
+    }
+    budget.add_dependency(length(prefix_length)?)?;
     let prefix_id: String = transaction
         .query_row(
             "SELECT prefix_id FROM ledger_compaction_prefixes WHERE aggregate_type=?1 \
@@ -1279,14 +1531,14 @@ fn delete_batch(
         budget.add(0, 0)?;
         finish_batch(transaction, job, through)?;
     } else {
-        let state: String = transaction
+        let pending: bool = transaction
             .query_row(
-                "SELECT state FROM maintenance_jobs WHERE job_id=?1;",
+                "SELECT state='pending' FROM maintenance_jobs WHERE job_id=?1;",
                 [&job.job_id],
                 |r| r.get(0),
             )
             .map_err(sqlite_error)?;
-        if state != "pending" {
+        if !pending {
             return Err(compaction_error());
         }
     }
@@ -1296,7 +1548,66 @@ fn delete_batch(
 fn verify_equivalence(
     connection: &Connection,
     plan: &StorageCompactionPlanV1,
+    budget: &mut StepBudget,
 ) -> Result<(), SidecarError> {
+    let projection_table = match plan.aggregate_type.as_str() {
+        "project" => "projects",
+        "chat" => "chats",
+        "run" => "runs",
+        "lock" => "locks",
+        _ => return Err(compaction_error()),
+    };
+    let key = match plan.aggregate_type.as_str() {
+        "project" => "project_id",
+        "chat" => "chat_id",
+        "run" => "run_id",
+        "lock" => "lock_id",
+        _ => return Err(compaction_error()),
+    };
+    let projection_query =
+        format!("SELECT projection_json FROM {projection_table} WHERE {key}=?1;");
+    let projection_length_query = format!(
+        "SELECT typeof(projection_json)='text',length(CAST(projection_json AS BLOB)) \
+         FROM {projection_table} WHERE {key}=?1;"
+    );
+    let baseline_lengths: (bool, i64, i64) = connection
+        .query_row(
+            "SELECT typeof(canonical_projection_json)='text' AND typeof(projection_digest)='text',\
+                    length(CAST(canonical_projection_json AS BLOB)),\
+                    length(CAST(projection_digest AS BLOB)) \
+             FROM ledger_baselines WHERE baseline_id=?1 AND aggregate_type=?2 AND aggregate_id=?3 \
+               AND cutoff_aggregate_sequence=?4;",
+            params![
+                plan.baseline_id,
+                plan.aggregate_type,
+                plan.aggregate_id,
+                sql_i64(plan.delete_through_sequence)?
+            ],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| compaction_error())?;
+    let latest_lengths: (bool, i64, i64) = connection
+        .query_row(
+            "SELECT typeof(canonical_json_payload)='text' AND typeof(aggregate_type)='text',\
+                    length(CAST(canonical_json_payload AS BLOB)),length(CAST(aggregate_type AS BLOB)) \
+             FROM events WHERE aggregate_type=?1 AND aggregate_id=?2 \
+             ORDER BY aggregate_sequence DESC LIMIT 1;",
+            params![plan.aggregate_type, plan.aggregate_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| compaction_error())?;
+    let projection_lengths: (bool, i64) = connection
+        .query_row(&projection_length_query, [&plan.aggregate_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .map_err(|_| compaction_error())?;
+    if !baseline_lengths.0 || !latest_lengths.0 || !projection_lengths.0 {
+        return Err(compaction_error());
+    }
+    budget.add_bytes(
+        checked_lengths(&[baseline_lengths.1, latest_lengths.1, projection_lengths.1])?,
+        checked_lengths(&[baseline_lengths.2, latest_lengths.2])?,
+    )?;
     let baseline: (String, String) = connection
         .query_row(
             "SELECT canonical_projection_json,projection_digest FROM ledger_baselines \
@@ -1345,23 +1656,11 @@ fn verify_equivalence(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| compaction_error())?;
-    let projection_table = match latest.1.as_str() {
-        "project" => "projects",
-        "chat" => "chats",
-        "run" => "runs",
-        "lock" => "locks",
-        _ => return Err(compaction_error()),
-    };
-    let key = match latest.1.as_str() {
-        "project" => "project_id",
-        "chat" => "chat_id",
-        "run" => "run_id",
-        "lock" => "lock_id",
-        _ => return Err(compaction_error()),
-    };
-    let query = format!("SELECT projection_json FROM {projection_table} WHERE {key}=?1;");
+    if latest.1 != plan.aggregate_type {
+        return Err(compaction_error());
+    }
     let projection: String = connection
-        .query_row(&query, [&plan.aggregate_id], |r| r.get(0))
+        .query_row(&projection_query, [&plan.aggregate_id], |r| r.get(0))
         .map_err(|_| compaction_error())?;
     if projection != latest.0 {
         return Err(compaction_error());
@@ -1372,40 +1671,52 @@ fn verify_equivalence(
 fn load_active_job(
     connection: &Connection,
 ) -> Result<Option<StorageCompactionJobV3>, SidecarError> {
-    let mut statement = connection
-        .prepare(
-            "SELECT job_id FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
-             AND state IN ('pending','running') ORDER BY job_id LIMIT 2;",
+    let facts: (bool, u32, i64) = connection
+        .query_row(
+            "SELECT coalesce(min(typeof(job_id)='text'),1),count(*),\
+                    coalesce(max(length(CAST(job_id AS BLOB))),0) \
+             FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
+             AND state IN ('pending','running');",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(sqlite_error)?;
-    let mut rows = statement.query([]).map_err(sqlite_error)?;
-    let first = rows
-        .next()
-        .map_err(sqlite_error)?
-        .map(|row| row.get::<_, String>(0))
-        .transpose()
-        .map_err(sqlite_error)?;
-    if rows.next().map_err(sqlite_error)?.is_some() {
+    if !facts.0 || facts.1 > 1 || length(facts.2)? > DEPENDENCY_BYTES {
         return Err(compaction_error());
     }
-    first.map(|id| load_exact_job(connection, &id)).transpose()
+    if facts.1 == 0 {
+        return Ok(None);
+    }
+    let id: String = connection
+        .query_row(
+            "SELECT job_id FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
+             AND state IN ('pending','running');",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    load_exact_job(connection, &id).map(Some)
 }
 
 fn load_exact_job(
     connection: &Connection,
     job_id: &str,
 ) -> Result<StorageCompactionJobV3, SidecarError> {
-    let lengths: (i64, i64, i64) = connection
+    let lengths: (bool, i64, i64, i64) = connection
         .query_row(
-            "SELECT length(CAST(job_id AS BLOB)),length(CAST(cutoff_json AS BLOB)),\
+            "SELECT typeof(job_id)='text' AND typeof(state)='text' AND typeof(cutoff_json)='text' \
+                    AND (failure_kind IS NULL OR typeof(failure_kind)='text') \
+                    AND (completed_at IS NULL OR typeof(completed_at)='text'),\
+                    length(CAST(job_id AS BLOB))+length(CAST(state AS BLOB)),\
+                    length(CAST(cutoff_json AS BLOB)),\
                     coalesce(length(CAST(failure_kind AS BLOB)),0)+\
                     coalesce(length(CAST(completed_at AS BLOB)),0) \
              FROM maintenance_jobs WHERE job_id=?1 AND job_kind='losslessCompaction';",
             [job_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map_err(|_| compaction_error())?;
-    if checked_lengths(&[lengths.0, lengths.1, lengths.2])? > DEPENDENCY_BYTES {
+    if !lengths.0 || checked_lengths(&[lengths.1, lengths.2, lengths.3])? > DEPENDENCY_BYTES {
         return Err(compaction_error());
     }
     let (id, state, cutoff, failure, completed): (
@@ -1449,19 +1760,28 @@ fn load_plan(
     connection: &Connection,
     job_id: &str,
 ) -> Result<StorageCompactionPlanV1, SidecarError> {
-    let lengths: (i64, i64) = connection
+    let lengths: (bool, i64, i64) = connection
         .query_row(
-            "SELECT length(CAST(job_id AS BLOB))+length(CAST(aggregate_type AS BLOB))+\
+            "SELECT typeof(job_id)='text' AND typeof(aggregate_type)='text' \
+                    AND typeof(aggregate_id)='text' AND typeof(baseline_id)='text' \
+                    AND typeof(baseline_projection_digest)='text' \
+                    AND (previous_successful_job_id IS NULL OR typeof(previous_successful_job_id)='text') \
+                    AND typeof(created_at)='text' AND typeof(planned_at)='text' \
+                    AND typeof(plan_schema_version)='integer' AND typeof(cutoff_event_rowid)='integer' \
+                    AND typeof(retained_boundary_sequence)='integer' \
+                    AND typeof(delete_through_sequence)='integer' \
+                    AND typeof(anchor_aggregate_sequence)='integer' AND typeof(expected_rows)='integer',\
+                    length(CAST(job_id AS BLOB))+length(CAST(aggregate_type AS BLOB))+\
                     length(CAST(aggregate_id AS BLOB))+length(CAST(baseline_id AS BLOB))+\
                     length(CAST(baseline_projection_digest AS BLOB))+\
                     coalesce(length(CAST(previous_successful_job_id AS BLOB)),0),\
                     length(CAST(created_at AS BLOB))+length(CAST(planned_at AS BLOB)) \
              FROM storage_compaction_plans WHERE job_id=?1;",
             [job_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|_| compaction_error())?;
-    if checked_lengths(&[lengths.0, lengths.1])? > DEPENDENCY_BYTES {
+    if !lengths.0 || checked_lengths(&[lengths.1, lengths.2])? > DEPENDENCY_BYTES {
         return Err(compaction_error());
     }
     let value = connection
@@ -1578,6 +1898,72 @@ fn checked_lengths(values: &[i64]) -> Result<usize, SidecarError> {
     })
 }
 
+fn checked_usize_sum(values: &[usize]) -> Result<usize, SidecarError> {
+    values.iter().try_fold(0usize, |total, value| {
+        total.checked_add(*value).ok_or_else(compaction_error)
+    })
+}
+
+fn json_string_len(value: &str) -> Result<usize, SidecarError> {
+    let body = value.chars().try_fold(0usize, |total, character| {
+        let bytes = match character {
+            '"' | '\\' | '\u{0008}' | '\u{000c}' | '\n' | '\r' | '\t' => 2,
+            '\u{0000}'..='\u{001f}' => 6,
+            _ => character.len_utf8(),
+        };
+        total.checked_add(bytes).ok_or_else(compaction_error)
+    })?;
+    body.checked_add(2).ok_or_else(compaction_error)
+}
+
+fn decimal_len(mut value: u64) -> usize {
+    let mut digits = 1;
+    while value >= 10 {
+        value /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+fn frozen_operation_record_len(source: &FrozenOperationSourceV1) -> Result<usize, SidecarError> {
+    let request_id = source
+        .request_id
+        .as_deref()
+        .map(json_string_len)
+        .transpose()?
+        .unwrap_or(4);
+    checked_usize_sum(&[
+        r#"{"aggregateId":"#.len(),
+        json_string_len(&source.aggregate_id)?,
+        ",\"aggregateSequence\":".len(),
+        decimal_len(source.aggregate_sequence),
+        ",\"aggregateType\":".len(),
+        json_string_len(&source.aggregate_type)?,
+        ",\"canonicalPayloadDigest\":".len(),
+        json_string_len(&source.canonical_payload_digest)?,
+        ",\"canonicalPayloadJson\":".len(),
+        json_string_len(&source.canonical_payload_json)?,
+        ",\"eventTimestamp\":".len(),
+        json_string_len(&source.event_timestamp)?,
+        ",\"eventType\":".len(),
+        json_string_len(&source.event_type)?,
+        ",\"frozenAt\":".len(),
+        json_string_len(&source.frozen_at)?,
+        ",\"operationId\":".len(),
+        json_string_len(&source.operation_id)?,
+        ",\"payloadSchemaVersion\":".len(),
+        decimal_len(u64::from(source.payload_schema_version)),
+        ",\"recordSchemaVersion\":1,".len(),
+        "\"requestId\":".len(),
+        request_id,
+        ",\"sourceEventId\":".len(),
+        json_string_len(&source.source_event_id)?,
+        ",\"sourceEventRowid\":".len(),
+        decimal_len(source.source_event_rowid),
+        1,
+    ])
+}
+
 fn length(value: i64) -> Result<usize, SidecarError> {
     usize::try_from(value).map_err(|_| compaction_error())
 }
@@ -1623,6 +2009,25 @@ fn compaction_error() -> SidecarError {
 mod tests {
     use super::*;
 
+    fn test_plan() -> StorageCompactionPlanV1 {
+        StorageCompactionPlanV1 {
+            job_id: "compact_test".to_string(),
+            plan_schema_version: 1,
+            cutoff_event_rowid: 1001,
+            aggregate_type: "project".to_string(),
+            aggregate_id: "project_test".to_string(),
+            retained_boundary_sequence: 0,
+            delete_through_sequence: 1000,
+            anchor_aggregate_sequence: 1001,
+            expected_rows: 1001,
+            baseline_id: "baseline_test".to_string(),
+            baseline_projection_digest: "0".repeat(64),
+            previous_successful_job_id: None,
+            created_at: "2026-09-09T00:00:00Z".to_string(),
+            planned_at: "2026-09-09T00:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn step_budget_accepts_exact_limits_and_rejects_plus_one() {
         let mut work = StepBudget::default();
@@ -1638,5 +2043,194 @@ mod tests {
         let mut dependency = StepBudget::default();
         dependency.add(0, DEPENDENCY_BYTES).unwrap();
         assert!(dependency.add_dependency(1).is_err());
+    }
+
+    #[test]
+    fn frozen_operation_record_length_matches_canonical_output() {
+        let mut source = FrozenOperationSourceV1 {
+            operation_id: "op_\"\\".to_string(),
+            source_event_rowid: 42,
+            source_event_id: "evt_\n".to_string(),
+            request_id: Some("request_\u{0001}".to_string()),
+            aggregate_type: "project".to_string(),
+            aggregate_id: "project_한글".to_string(),
+            aggregate_sequence: 123,
+            event_type: "project.updated".to_string(),
+            payload_schema_version: 1,
+            canonical_payload_json: "{\"value\":\"x\"}".to_string(),
+            canonical_payload_digest: "a".repeat(64),
+            event_timestamp: "2026-09-09T00:00:00Z".to_string(),
+            canonical_record_json: String::new(),
+            record_digest: String::new(),
+            frozen_at: "2026-09-09T00:00:01Z".to_string(),
+        };
+        let expected = frozen_operation_record_len(&source).unwrap();
+        source.canonical_record_json = canonical_frozen_operation_record_v1(&source).unwrap();
+        assert_eq!(expected, source.canonical_record_json.len());
+    }
+
+    #[test]
+    fn chat_message_preflight_accepts_exact_dependency_limit_and_rejects_plus_one() {
+        for (size, accepted) in [(DEPENDENCY_BYTES, true), (DEPENDENCY_BYTES + 1, false)] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE chat_messages(\
+                       message_id TEXT PRIMARY KEY,chat_id TEXT NOT NULL,event_sequence INTEGER NOT NULL,\
+                       canonical_message_json TEXT NOT NULL,message_digest TEXT NOT NULL);\
+                     CREATE TABLE mutation_marker(value INTEGER NOT NULL);\
+                     INSERT INTO mutation_marker VALUES(7);",
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chat_messages VALUES('message_test',?1,1,'','');",
+                    ["x".repeat(size)],
+                )
+                .unwrap();
+            let mut budget = StepBudget::default();
+            assert_eq!(
+                load_chat_message(&connection, "message_test", &mut budget).is_ok(),
+                accepted
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT value FROM mutation_marker;", [], |row| row
+                        .get::<_, u32>(0))
+                    .unwrap(),
+                7
+            );
+        }
+    }
+
+    #[test]
+    fn equivalence_inputs_preflight_each_primary_string_before_allocation() {
+        let oversized = "x".repeat(PRIMARY_BYTES + 1);
+        for (table, column) in [
+            ("ledger_baselines", "canonical_projection_json"),
+            ("events", "canonical_json_payload"),
+            ("projects", "projection_json"),
+        ] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE ledger_baselines(\
+                       baseline_id TEXT,aggregate_type TEXT,aggregate_id TEXT,\
+                       cutoff_aggregate_sequence INTEGER,canonical_projection_json TEXT,projection_digest TEXT);\
+                     CREATE TABLE events(aggregate_type TEXT,aggregate_id TEXT,aggregate_sequence INTEGER,\
+                       canonical_json_payload TEXT);\
+                     CREATE TABLE projects(project_id TEXT,projection_json TEXT);\
+                     CREATE TABLE mutation_marker(value INTEGER NOT NULL);\
+                     INSERT INTO ledger_baselines VALUES(\
+                       'baseline_test','project','project_test',1000,'','sha256:e3b0c44298fc1c149afbf4c8996fb924\
+                       27ae41e4649b934ca495991b7852b855');\
+                     INSERT INTO events VALUES('project','project_test',1001,'');\
+                     INSERT INTO projects VALUES('project_test','');\
+                     INSERT INTO mutation_marker VALUES(9);",
+                )
+                .unwrap();
+            connection
+                .execute(&format!("UPDATE {table} SET {column}=?1;"), [&oversized])
+                .unwrap();
+            let mut budget = StepBudget::default();
+            assert!(verify_equivalence(&connection, &test_plan(), &mut budget).is_err());
+            assert!(budget.primary > PRIMARY_BYTES, "{table}.{column}");
+            assert_eq!(
+                connection
+                    .query_row("SELECT value FROM mutation_marker;", [], |row| row
+                        .get::<_, u32>(0))
+                    .unwrap(),
+                9
+            );
+        }
+
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE ledger_baselines(\
+                   baseline_id TEXT,aggregate_type TEXT,aggregate_id TEXT,\
+                   cutoff_aggregate_sequence INTEGER,canonical_projection_json TEXT,projection_digest TEXT);\
+                 CREATE TABLE events(aggregate_type TEXT,aggregate_id TEXT,aggregate_sequence INTEGER,\
+                   canonical_json_payload TEXT);\
+                 CREATE TABLE projects(project_id TEXT,projection_json TEXT);\
+                 INSERT INTO ledger_baselines VALUES(\
+                   'baseline_test','project','project_test',1000,'','sha256:e3b0c44298fc1c149afbf4c8996fb924\
+                   27ae41e4649b934ca495991b7852b855');\
+                 INSERT INTO events VALUES('project','project_test',1001,'');",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects VALUES('project_test',?1);",
+                ["x".repeat(PRIMARY_BYTES)],
+            )
+            .unwrap();
+        let mut budget = StepBudget::default();
+        assert!(verify_equivalence(&connection, &test_plan(), &mut budget).is_err());
+        assert_eq!(budget.primary, PRIMARY_BYTES);
+    }
+
+    #[test]
+    fn existing_frozen_message_requires_exact_metadata_and_digest() {
+        let canonical = "{\"messageId\":\"message_test\"}".to_string();
+        let digest = sha256_file_version_v1(canonical.as_bytes());
+        let row = PlanRow {
+            ordinal: 1,
+            event_rowid: 1,
+            event_id: "event_test".to_string(),
+            operation_id: "operation_test".to_string(),
+            request_id: None,
+            aggregate_type: "chat".to_string(),
+            aggregate_id: "chat_test".to_string(),
+            aggregate_sequence: 1,
+            event_type: "chat.messageAppended".to_string(),
+            payload_schema_version: 1,
+            event_timestamp: "2026-09-09T00:00:00Z".to_string(),
+            canonical_payload_json: "{}".to_string(),
+            canonical_payload_digest: "0".repeat(64),
+            introduced_message_id: Some("message_test".to_string()),
+            introduced_message_digest: digest.strip_prefix("sha256:").map(str::to_string),
+            decision: "delete",
+            baseline_id: Some("baseline_test".to_string()),
+            baseline_projection_digest: Some("0".repeat(64)),
+            operation_frozen_before_plan: false,
+            message_frozen_before_plan: false,
+        };
+        let message = ChatMessageWitness {
+            chat_id: "chat_test".to_string(),
+            durable_sequence: 1,
+            canonical_message_json: canonical,
+            message_digest: digest,
+        };
+        for mutation in [
+            "UPDATE frozen_message_sources SET frozen_at='not-a-time';",
+            "UPDATE frozen_message_sources SET message_digest='sha256:bad';",
+            "UPDATE frozen_message_sources SET chat_id='other_chat';",
+        ] {
+            let connection = Connection::open_in_memory().unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE frozen_message_sources(\
+                       message_id TEXT PRIMARY KEY,source_event_rowid INTEGER,source_event_id TEXT,\
+                       source_operation_id TEXT,chat_id TEXT,source_aggregate_sequence INTEGER,\
+                       durable_sequence INTEGER,canonical_message_json TEXT,message_digest TEXT,frozen_at TEXT);",
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO frozen_message_sources VALUES(\
+                       'message_test',1,'event_test','operation_test','chat_test',1,1,?1,?2,\
+                       '2026-09-09T00:00:01Z');",
+                    params![message.canonical_message_json, message.message_digest],
+                )
+                .unwrap();
+            let mut valid_budget = StepBudget::default();
+            assert!(exact_frozen_message(&connection, &row, &message, &mut valid_budget).unwrap());
+            connection.execute_batch(mutation).unwrap();
+            let mut invalid_budget = StepBudget::default();
+            assert!(
+                exact_frozen_message(&connection, &row, &message, &mut invalid_budget).is_err()
+            );
+        }
     }
 }

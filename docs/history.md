@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer 메타데이터·allocation P1 수리)
+
+- **기존 witness 완전 검증**: private writer가 이미 존재하는 frozen operation/message를 source 열만으로 인정하지 않고 canonical record, record/message digest, `frozenAt`, source 결속을 protocol validator와 재해시로 모두 확인한다. 다음 배치 첫 operation의 canonical record·digest·시간을 변조하거나 canonical record를 8 MiB 초과로 만든 actual SQLite에서 writer가 삭제 전 실패하고 event/index/receipt/authority/prefix와 변조 witness가 그대로이며 durable running sentinel만 남는 것을 확인했다.
+- **allocation fail-closed**: 모든 writer DB 문자열 입력에 `typeof`·BLOB byte length 선검사와 checked 누적 예산을 적용했다. frozen-operation canonical envelope는 JSON escape·숫자 길이를 allocation 전에 정확히 계산해 output+digest를 예약하고, chat ID/frozen message 전체 메타데이터, equivalence baseline·최신 payload·projection, active/predecessor job ID와 prefix/plan/job envelope도 fetch 전 100 work·primary 1 MiB·retained/dependency 8 MiB 상한을 공유한다.
+- **검증·범위**: focused writer/allocation 9/9와 교정된 V9/V10 verifyPrefix admission 1/1, sidecar all-target no-deps strict clippy, Rust format, `git diff --check`가 통과했다. production scheduler/public wire/계약은 변경하지 않았고 full sidecar 재실행은 영향 범위 검증 간소화 지침에 따라 생략했다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D V10 private compaction writer)
 
 - **private writer 구현**: 명시적으로 선택한 단일 aggregate에 삭제 가능 event 1,000개와 anchor 1개가 연속할 때만 V3 job·immutable plan을 만들고, `planEligibility → freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → releasePlan → finalize`를 호출당 최대 100행·primary 1 MiB·retained/dependency 8 MiB로 진행한다. running arm은 별도 commit이며 `verifyPrefix`의 exhausted pending을 재arm한 transaction에서 prefix와 `authorizeDelete`를 함께 게시하고, finalize만 unarmed pending→succeeded로 끝낸다. 즉시 선행 성공 job을 잇는 2,000행 chain도 보존한다.
