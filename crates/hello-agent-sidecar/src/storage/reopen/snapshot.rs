@@ -540,7 +540,7 @@ fn verify_frozen_relation(
         return Ok(());
     }
     let deleted:bool=connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND p.deleted_through_sequence=?3 AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
+        "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p JOIN ledger_baselines b ON b.baseline_id=p.baseline_id WHERE p.aggregate_type=?1 AND p.aggregate_id=?2 AND (p.deleted_through_sequence=?3 OR ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1)=9 AND p.deleted_through_sequence>=?3)) AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest)",
         params![identity.aggregate_type,identity.aggregate_id,identity.aggregate_sequence],|r|r.get(0),
     ).map_err(|_|session_error())?;
     usage.work_units += 1;
@@ -828,6 +828,7 @@ fn frozen_envelope_fields(
 
 /// Volatile owned progress; no externally supplied cursor or verified flag.
 enum SnapshotProgress {
+    Plan(plan_v9::AdmissionPlanWitness),
     Sources(SourceScan),
     Copies(CopiesScan),
     Projections(ProjectionScan),
@@ -838,6 +839,7 @@ enum SnapshotProgress {
 
 #[derive(Clone, PartialEq, Eq)]
 enum SnapshotProgressMarker {
+    Plan(plan_v9::AdmissionPlanMarker),
     Sources(bool, bool, i64, Option<SourceStageMarker>),
     Copies(usize, i64),
     Projections(
@@ -854,6 +856,7 @@ enum SnapshotProgressMarker {
 impl SnapshotProgress {
     fn retained_bytes(&self) -> Result<usize, SidecarError> {
         match self {
+            Self::Plan(plan) => plan.retained_bytes(),
             Self::Sources(s) => s.retained_bytes(),
             Self::Copies(_) => Ok(0),
             Self::Messages(m) => Ok(m
@@ -871,6 +874,7 @@ impl SnapshotProgress {
 
     fn progress_marker(&self) -> SnapshotProgressMarker {
         match self {
+            Self::Plan(plan) => SnapshotProgressMarker::Plan(plan.marker()),
             Self::Sources(source) => SnapshotProgressMarker::Sources(
                 source.frozen,
                 source.require_index,
@@ -1132,7 +1136,7 @@ fn verify_prefix_row(
          AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=s.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=s.source_event_rowid) \
          AND b.aggregate_type=p.aggregate_type AND b.aggregate_id=p.aggregate_id AND b.cutoff_aggregate_sequence=p.deleted_through_sequence AND b.projection_digest=p.baseline_projection_digest \
          AND a.source_event_rowid=p.anchor_event_rowid AND a.source_event_id=p.anchor_event_id AND a.operation_id=p.anchor_operation_id AND a.aggregate_sequence=p.anchor_aggregate_sequence \
-         AND (p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
+         AND ((SELECT storage_schema_version FROM storage_schema_meta WHERE singleton=1)=9 OR p.deleted_through_sequence=1 OR EXISTS(SELECT 1 FROM ledger_compaction_prefixes prev WHERE prev.aggregate_type=p.aggregate_type AND prev.aggregate_id=p.aggregate_id AND prev.deleted_through_sequence=p.deleted_through_sequence-1 AND prev.anchor_event_rowid=s.source_event_rowid AND prev.anchor_event_id=s.source_event_id AND prev.anchor_operation_id=s.operation_id AND prev.anchor_aggregate_sequence=s.aggregate_sequence)) \
          AND ((EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
               AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=a.source_event_rowid) AND NOT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=a.source_event_rowid)) \
            OR (NOT EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer WHERE newer.aggregate_type=p.aggregate_type AND newer.aggregate_id=p.aggregate_id AND newer.deleted_through_sequence>p.deleted_through_sequence) \
@@ -1272,7 +1276,7 @@ fn app_instance_projection(
     Ok(())
 }
 
-fn admission_compaction_cutoff(
+fn admission_compaction_cutoff_v8(
     connection: &Connection,
     compacted: bool,
 ) -> Result<u64, SidecarError> {
@@ -1317,6 +1321,7 @@ pub(crate) struct ReopenMaintenanceSession<'connection> {
 #[derive(Clone, Copy)]
 enum ReopenStartContext {
     Legacy,
+    V8Admission,
     Admission,
 }
 
@@ -1338,6 +1343,12 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
         Self::start_inner(connection, ReopenStartContext::Admission)
     }
 
+    pub(crate) fn start_for_v8_admission(
+        connection: &'connection mut Connection,
+    ) -> Result<Self, SidecarError> {
+        Self::start_inner(connection, ReopenStartContext::V8Admission)
+    }
+
     fn start_inner(
         connection: &'connection mut Connection,
         context: ReopenStartContext,
@@ -1349,14 +1360,22 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| session_error())?;
         let epoch = data_version(&tx)?;
-        preflight_schema_and_control_rows(&tx)?;
-        let materialization = verify_schema_v8(&tx)?;
+        let materialization = match context {
+            ReopenStartContext::Legacy | ReopenStartContext::V8Admission => {
+                preflight_schema_and_control_rows(&tx)?;
+                verify_schema_v8(&tx)?
+            }
+            ReopenStartContext::Admission => {
+                preflight_schema_and_control_rows_v9(&tx)?;
+                verify_schema_v9(&tx)?
+            }
+        };
         verify_v6_materialization_snapshot(&tx, &materialization, true)?;
         closure::reject_hidden_rowids(&tx)?;
         projection::reject_hidden_rowids(&tx)?;
         derived::reject_hidden_rowids(&tx)?;
         let compacted = !projection::compaction_tables_empty(&tx)?;
-        let cutoff = match context {
+        let (cutoff, plan_witness) = match context {
             ReopenStartContext::Legacy => {
                 let forbidden: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) OR EXISTS(SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' AND state IN ('pending','running') LIMIT 1)", [], |r| r.get(0),
@@ -1365,12 +1384,18 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                     return Err(session_error());
                 }
                 if compacted {
-                    verify_terminal_compaction_proof(&tx)?
+                    (verify_terminal_compaction_proof(&tx)?, None)
                 } else {
-                    0
+                    (0, None)
                 }
             }
-            ReopenStartContext::Admission => admission_compaction_cutoff(&tx, compacted)?,
+            ReopenStartContext::V8Admission => {
+                (admission_compaction_cutoff_v8(&tx, compacted)?, None)
+            }
+            ReopenStartContext::Admission => {
+                let witness = plan_v9::AdmissionPlanWitness::start(&tx, compacted)?;
+                (0, witness)
+            }
         };
         tx.commit().map_err(|_| session_error())?;
         if !connection.is_autocommit() {
@@ -1382,10 +1407,13 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
             cutoff,
             ready: materialization == "ready",
             job: None,
-            progress: Some(SnapshotProgress::Sources(SourceScan::new(
-                compacted,
-                materialization == "ready",
-            ))),
+            progress: Some(match plan_witness {
+                Some(witness) => SnapshotProgress::Plan(witness),
+                None => SnapshotProgress::Sources(SourceScan::new(
+                    compacted,
+                    materialization == "ready",
+                )),
+            }),
             #[cfg(test)]
             force_no_progress_once: false,
         })
@@ -1434,6 +1462,18 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 Disposition::Pending
             } else {
                 match &mut progress {
+                    SnapshotProgress::Plan(plan) => match plan.step(&tx, &mut usage, cancelled)? {
+                        plan_v9::AdmissionPlanStep::Pending => Disposition::Pending,
+                        plan_v9::AdmissionPlanStep::Cancelled => Disposition::Cancelled,
+                        plan_v9::AdmissionPlanStep::Complete { cutoff_event_rowid } => {
+                            self.cutoff = cutoff_event_rowid;
+                            progress = SnapshotProgress::Sources(SourceScan::new(
+                                self.cutoff > 0,
+                                self.ready,
+                            ));
+                            Disposition::Pending
+                        }
+                    },
                     SnapshotProgress::Sources(sources) => {
                         let result = sources.step(&tx, self.cutoff, &mut usage, cancelled)?;
                         if matches!(result, Disposition::Complete) {

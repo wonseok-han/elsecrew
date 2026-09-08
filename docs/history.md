@@ -9,6 +9,16 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 admission digest P0/P1 수리)
+
+- **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. V3 raw 입력은 파싱 뒤 소유권을 남기지 않고 job·plan의 동시 retained 문자열을 모두 예산에 포함한다. plan/frozen/receipt digest 공동 위조, 8 MiB 초과 baseline digest, 결합 예산을 넘는 대형 job ID를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 read-only admission runtime)
+
+- **구현**: legacy `Storage::open`은 V8을 유지하고 제품 admission만 exact fixture로 V8→V9 migration·exact schema 검증을 수행한다. V3 pending plan witness의 canonical digest·phase·artifact·부분 release를 bounded read-only scanner로 재검증하며, 다중 succeeded 1,000-row plan의 연속 terminal chain과 live tail 동등성을 검증한다.
+- **안전 경계**: migration preflight는 persistent DDL 전에 schema drift·active V2/V3·authority를 rollback하고, malformed/gap/extra/digest/artifact/running/authority/V2 pending과 fork/cycle/gap을 mutation 없이 거부한다. cancellation·no-progress·external commit도 fail-closed하며 기존 append와 prepareQuit 수명주기를 보존한다.
+- **검증·다음**: focused V9 6/6, product admission 11/11, sidecar unit 308 pass·1 ignored, stdio 11/11, Rust 2021 format, sidecar no-deps strict clippy와 diff check가 통과했다. V9 scheduler·compaction/freeze/delete/release writer와 공개 wire 변경은 구현하지 않았으며 후속 파동으로 남는다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 digest 표현 수리)
 
 - **런타임 차단 수리**: 기존 `ledger_baselines.projection_digest`·`chat_messages.message_digest`·`frozen_message_sources.message_digest`는 exact `sha256:<64 lowercase hex>`이고 V9 plan witness는 접두사 없는 lowercase hex64라는 표현 경계를 명시했다. V9 SQL은 기존 값이 정확한 `sha256:` 알고리즘·접두사·hex·digest일 때만 raw plan digest와 결합되도록 baseline header, message/frozen-message row, prefix phase/insert 비교를 수정했다.

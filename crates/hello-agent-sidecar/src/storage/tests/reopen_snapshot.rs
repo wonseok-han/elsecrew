@@ -485,6 +485,7 @@ fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_
     seed_ready_reopen_operations(&mut storage, 101);
     storage.checkpoint().unwrap();
     let before = database_snapshot(&storage.connection);
+    let preserved = preserved_table_rows(&storage.connection);
     drop(storage);
 
     let legacy = match Storage::open(&path) {
@@ -494,7 +495,7 @@ fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_
     assert_eq!(legacy.kind(), "storageSchemaMismatch");
 
     let mut connection = connection(&path);
-    let mut session = ReopenMaintenanceSession::start_for_admission(&mut connection).unwrap();
+    let mut session = ReopenMaintenanceSession::start_for_v8_admission(&mut connection).unwrap();
     let calls = complete(&mut session);
     assert!(calls > 1, "101 frozen sources must cross a bounded step");
     drop(session);
@@ -504,7 +505,11 @@ fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_
     let cancellation = AtomicBool::new(false);
     let admitted = Storage::open_for_admission(&path, &cancellation)
         .expect("product admission consumes the complete private proof");
-    assert_eq!(database_snapshot(&admitted.connection), before);
+    assert_eq!(preserved_table_rows(&admitted.connection), preserved);
+    assert_eq!(
+        storage_schema_version(&admitted.connection).unwrap(),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    );
 }
 
 #[test]
@@ -513,12 +518,16 @@ fn product_admission_accepts_uncompacted_storage_without_compaction_jobs() {
     let mut storage = Storage::open(&path).unwrap();
     run_bounded_materializer_to_ready(&mut storage);
     storage.checkpoint().unwrap();
-    let before = database_snapshot(&storage.connection);
+    let before = preserved_table_rows(&storage.connection);
     drop(storage);
 
     let cancellation = AtomicBool::new(false);
     let admitted = Storage::open_for_admission(&path, &cancellation).unwrap();
-    assert_eq!(database_snapshot(&admitted.connection), before);
+    assert_eq!(preserved_table_rows(&admitted.connection), before);
+    assert_eq!(
+        storage_schema_version(&admitted.connection).unwrap(),
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    );
 }
 
 #[test]
@@ -706,7 +715,7 @@ fn product_admission_no_progress_injection_fails_instead_of_spinning() {
     let (_root, path) = fixture(true, 2);
     let mut connection = connection(&path);
     let before = observed(&connection, &path);
-    let mut session = ReopenMaintenanceSession::start_for_admission(&mut connection).unwrap();
+    let mut session = ReopenMaintenanceSession::start_for_v8_admission(&mut connection).unwrap();
     session.force_no_progress_for_test();
     assert_eq!(
         session.step(&mut || false).unwrap_err().kind(),
