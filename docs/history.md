@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission schema allocation 수리)
+
+- **P1 bounded schema identity**: V10 golden의 exact 76-object 목록을 DB보다 먼저 읽어 외부 권위로 고정하고, SQLite 쪽은 `LIMIT 77` 숫자-only `typeof`/BLOB length 선검사에서 object 수·NULL/type과 모든 schema identity field의 합산 바이트를 checked arithmetic으로 확인한다. 기존 retained/dependency 8 MiB 예산 안인 경우에만 bounded row stream을 `String`으로 읽어 SHA-256 golden과 순서대로 비교한다.
+- **적대 회귀·검증**: actual V10의 77번째 persistent object와, object 수는 76개로 유지하면서 same-name trigger SQL만 8 MiB 초과로 바꾼 fixture가 모두 fetch 전에 `storageSchemaMismatch`로 실패하고 DB 파일 byte가 그대로임을 확인했다. focused migration/admission 18/18, Rust 2021 format, sidecar all-target no-deps strict clippy와 diff check를 통과했으며 writer/scheduler/public 범위는 변경하지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission runtime)
 
 - **제품 admission 전환**: legacy `Storage::open`은 V8 동작을 유지하고, `open_for_admission`만 exact idle V9를 통합 V10 fixture로 migration하거나 기존 exact V10을 연다. V8 제품 경로는 bounded V8 검증 뒤 V9→V10을 순서대로 적용하며 migration 사이 cancellation을 확인한다. V10 schema는 76개 persistent object의 `(type, name, tableName, canonical SQL SHA-256)` golden과 metadata를 exact 비교한다.

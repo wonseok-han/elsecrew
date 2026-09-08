@@ -2404,7 +2404,8 @@ fn verify_schema_v10(connection: &Connection) -> Result<String, SidecarError> {
             "storage schema v10 metadata or foreign-key enforcement does not match the supported migration",
         ));
     }
-    if schema_identity_v10(connection)? != schema_identity_v10_golden()? {
+    let schema_identity = schema_identity_v10_golden()?;
+    if !schema_identity_v10_matches(connection, &schema_identity)? {
         return Err(SidecarError::new(
             "storageSchemaMismatch",
             "SQLite schema does not exactly match the storage v10 identity golden",
@@ -2414,24 +2415,109 @@ fn verify_schema_v10(connection: &Connection) -> Result<String, SidecarError> {
     Ok(metadata.3)
 }
 
-fn schema_identity_v10(connection: &Connection) -> Result<Vec<SchemaIdentityObject>, SidecarError> {
+fn schema_identity_v10_matches(
+    connection: &Connection,
+    expected: &[SchemaIdentityObject],
+) -> Result<bool, SidecarError> {
+    let limit = expected
+        .len()
+        .checked_add(1)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or_else(storage_v10_schema_identity_error)?;
+    let mut length_statement = connection
+        .prepare(
+            "SELECT typeof(type)='text' AND typeof(name)='text' \
+                    AND typeof(tbl_name)='text' AND typeof(sql)='text', \
+                    length(CAST(type AS BLOB)),length(CAST(name AS BLOB)), \
+                    length(CAST(tbl_name AS BLOB)),length(CAST(sql AS BLOB)) \
+             FROM sqlite_schema WHERE name NOT LIKE 'sqlite_autoindex%' \
+             ORDER BY type,name LIMIT ?1;",
+        )
+        .map_err(|_| storage_v10_schema_identity_error())?;
+    let mut length_rows = length_statement
+        .query([limit])
+        .map_err(|_| storage_v10_schema_identity_error())?;
+    let mut row_count = 0_usize;
+    let mut encoded_bytes = 0_usize;
+    while let Some(row) = length_rows
+        .next()
+        .map_err(|_| storage_v10_schema_identity_error())?
+    {
+        if !row
+            .get::<_, bool>(0)
+            .map_err(|_| storage_v10_schema_identity_error())?
+        {
+            return Err(storage_v10_schema_identity_error());
+        }
+        row_count = row_count
+            .checked_add(1)
+            .ok_or_else(storage_v10_schema_identity_error)?;
+        for column in 1..=4 {
+            let length = row
+                .get::<_, i64>(column)
+                .ok()
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(storage_v10_schema_identity_error)?;
+            encoded_bytes = encoded_bytes
+                .checked_add(length)
+                .ok_or_else(storage_v10_schema_identity_error)?;
+            if encoded_bytes > STORAGE_SCHEMA_IDENTITY_MAX_BYTES {
+                return Err(storage_v10_schema_identity_error());
+            }
+        }
+    }
+    drop(length_rows);
+    drop(length_statement);
+    if row_count != expected.len() {
+        return Ok(false);
+    }
+
     let mut statement = connection
         .prepare(
             "SELECT type,name,tbl_name,sql FROM sqlite_schema \
-             WHERE name NOT LIKE 'sqlite_autoindex%' ORDER BY type,name;",
+             WHERE name NOT LIKE 'sqlite_autoindex%' ORDER BY type,name LIMIT ?1;",
         )
-        .map_err(sqlite_error)?;
-    let rows = statement
-        .query_map([], |row| {
-            let sql: String = row.get(3)?;
-            let digest = sha256_file_version_v1(sql.as_bytes())
-                .strip_prefix("sha256:")
-                .expect("sha256_file_version_v1 uses the fixed sha256 prefix")
-                .to_owned();
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, digest))
-        })
-        .map_err(sqlite_error)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+        .map_err(|_| storage_v10_schema_identity_error())?;
+    let mut rows = statement
+        .query([limit])
+        .map_err(|_| storage_v10_schema_identity_error())?;
+    for expected in expected {
+        let row = rows
+            .next()
+            .map_err(|_| storage_v10_schema_identity_error())?
+            .ok_or_else(storage_v10_schema_identity_error)?;
+        let object_type: String = row
+            .get(0)
+            .map_err(|_| storage_v10_schema_identity_error())?;
+        let name: String = row
+            .get(1)
+            .map_err(|_| storage_v10_schema_identity_error())?;
+        let table_name: String = row
+            .get(2)
+            .map_err(|_| storage_v10_schema_identity_error())?;
+        let sql: String = row
+            .get(3)
+            .map_err(|_| storage_v10_schema_identity_error())?;
+        let digest = sha256_file_version_v1(sql.as_bytes());
+        if object_type != expected.0
+            || name != expected.1
+            || table_name != expected.2
+            || digest.strip_prefix("sha256:") != Some(expected.3.as_str())
+        {
+            return Ok(false);
+        }
+    }
+    Ok(rows
+        .next()
+        .map_err(|_| storage_v10_schema_identity_error())?
+        .is_none())
+}
+
+fn storage_v10_schema_identity_error() -> SidecarError {
+    SidecarError::new(
+        "storageSchemaMismatch",
+        "SQLite schema cannot be bounded and matched to the storage v10 identity golden",
+    )
 }
 
 fn schema_identity_v10_golden() -> Result<Vec<SchemaIdentityObject>, SidecarError> {
@@ -2543,6 +2629,7 @@ pub(crate) fn verify_v8_uncompacted_runtime_state(
 
 const COMPACTION_VERIFY_MAX_ROWS: usize = 100;
 const COMPACTION_VERIFY_MAX_PAYLOAD_BYTES: usize = 1_048_576;
+const STORAGE_SCHEMA_IDENTITY_MAX_BYTES: usize = 8 * COMPACTION_VERIFY_MAX_PAYLOAD_BYTES;
 
 #[derive(Debug, Clone)]
 struct VerifiedCompactionPrefix {

@@ -1657,10 +1657,8 @@ fn product_admission_migrates_exact_v9_to_v10_and_preserves_terminal_evidence() 
         storage_schema_version(&admitted.connection).unwrap(),
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V10)
     );
-    assert_eq!(
-        schema_identity_v10(&admitted.connection).unwrap(),
-        schema_identity_v10_golden().unwrap()
-    );
+    let identity = schema_identity_v10_golden().unwrap();
+    assert!(schema_identity_v10_matches(&admitted.connection, &identity).unwrap());
     for (table, rows) in before.1 {
         if table == "storage_schema_meta" {
             continue;
@@ -1837,4 +1835,53 @@ fn legacy_open_rejects_exact_v10_without_mutation() {
     assert_eq!(error.kind(), "storageSchemaMismatch");
     let connection = Connection::open(&path).unwrap();
     assert_eq!(database_snapshot(&connection), before);
+}
+
+#[test]
+fn v10_schema_identity_rejects_a_seventy_seventh_object_before_fetch_without_mutation() {
+    let (_root, path) = v9_template(0);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch("CREATE TABLE unexpected_v10_object(id INTEGER PRIMARY KEY) STRICT;")
+        .unwrap();
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(connection);
+    let before = fs::read(&path).unwrap();
+
+    let cancellation = AtomicBool::new(false);
+    let error = match Storage::open_for_admission(&path, &cancellation) {
+        Ok(_) => panic!("accepted a seventy-seventh V10 schema object"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn v10_schema_identity_rejects_giant_sql_before_string_fetch_without_mutation() {
+    let (_root, path) = v9_template(0);
+    let connection = Connection::open(&path).unwrap();
+    let giant = "x".repeat(STORAGE_SCHEMA_IDENTITY_MAX_BYTES + 1);
+    connection
+        .execute_batch(&format!(
+            "DROP TRIGGER events_require_v10_complete_delete_batch; \
+             CREATE TRIGGER events_require_v10_complete_delete_batch \
+             BEFORE DELETE ON events BEGIN SELECT length('{giant}'); END;"
+        ))
+        .unwrap();
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(connection);
+    let before = fs::read(&path).unwrap();
+
+    let cancellation = AtomicBool::new(false);
+    let error = match Storage::open_for_admission(&path, &cancellation) {
+        Ok(_) => panic!("accepted an over-budget V10 schema definition"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    assert_eq!(fs::read(&path).unwrap(), before);
 }
