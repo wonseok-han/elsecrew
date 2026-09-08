@@ -2419,8 +2419,10 @@ fn schema_identity_v10_matches(
     connection: &Connection,
     expected: &[SchemaIdentityObject],
 ) -> Result<bool, SidecarError> {
-    let limit = expected
-        .len()
+    if expected.len() != STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10 {
+        return Err(storage_v10_schema_identity_error());
+    }
+    let limit = STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10
         .checked_add(1)
         .and_then(|value| i64::try_from(value).ok())
         .ok_or_else(storage_v10_schema_identity_error)?;
@@ -2468,7 +2470,7 @@ fn schema_identity_v10_matches(
     }
     drop(length_rows);
     drop(length_statement);
-    if row_count != expected.len() {
+    if row_count != STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10 {
         return Ok(false);
     }
 
@@ -2521,7 +2523,13 @@ fn storage_v10_schema_identity_error() -> SidecarError {
 }
 
 fn schema_identity_v10_golden() -> Result<Vec<SchemaIdentityObject>, SidecarError> {
-    let identity: Value = serde_json::from_str(SCHEMA_IDENTITY_V10).map_err(|_| {
+    schema_identity_v10_golden_from_str(SCHEMA_IDENTITY_V10)
+}
+
+fn schema_identity_v10_golden_from_str(
+    source: &str,
+) -> Result<Vec<SchemaIdentityObject>, SidecarError> {
+    let identity: Value = serde_json::from_str(source).map_err(|_| {
         SidecarError::new(
             "storageSchemaMismatch",
             "storage v10 schema identity golden is unreadable",
@@ -2544,7 +2552,7 @@ fn schema_identity_v10_golden() -> Result<Vec<SchemaIdentityObject>, SidecarErro
             "storage v10 schema identity golden metadata is invalid",
         ));
     }
-    identity
+    let objects: Vec<SchemaIdentityObject> = identity
         .get("objects")
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -2583,7 +2591,28 @@ fn schema_identity_v10_golden() -> Result<Vec<SchemaIdentityObject>, SidecarErro
                 field("canonicalSqlSha256")?,
             ))
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    if objects.len() != STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10
+        || objects.iter().any(|object| {
+            object.0.is_empty()
+                || object.1.is_empty()
+                || object.2.is_empty()
+                || object.3.len() != 64
+                || object
+                    .3
+                    .bytes()
+                    .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
+        })
+        || objects.windows(2).any(|pair| {
+            (&pair[0].0, &pair[0].1, &pair[0].2) >= (&pair[1].0, &pair[1].1, &pair[1].2)
+        })
+    {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "storage v10 schema identity golden inventory is invalid",
+        ));
+    }
+    Ok(objects)
 }
 
 #[cfg(test)]
@@ -2629,6 +2658,7 @@ pub(crate) fn verify_v8_uncompacted_runtime_state(
 
 const COMPACTION_VERIFY_MAX_ROWS: usize = 100;
 const COMPACTION_VERIFY_MAX_PAYLOAD_BYTES: usize = 1_048_576;
+const STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10: usize = 76;
 const STORAGE_SCHEMA_IDENTITY_MAX_BYTES: usize = 8 * COMPACTION_VERIFY_MAX_PAYLOAD_BYTES;
 
 #[derive(Debug, Clone)]

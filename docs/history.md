@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 schema golden 고정 상한 수리)
+
+- **재리뷰 차단 수리**: DB schema preflight의 row 상한을 parsed golden 길이에서 유도하지 않고 코드 상수 `76`과 `LIMIT 77`로 독립 고정했다. golden parser도 exact 76개, non-empty tuple, lowercase hex64 digest, `(type,name,tableName)` strictly sorted·unique를 요구해 잘린·중복·재정렬·변조 fixture가 DB 비교 상한을 함께 약화하지 못한다.
+- **검증**: 변경하지 않은 실제 golden과 적대 parser 4종을 직접 검증했고 focused V9/V10 migration·admission 19/19, sidecar all-target no-deps strict clippy, Rust 2021 format, diff check가 통과했다. writer/scheduler/public 범위는 그대로 비활성이다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission schema allocation 수리)
 
 - **P1 bounded schema identity**: V10 golden의 exact 76-object 목록을 DB보다 먼저 읽어 외부 권위로 고정하고, SQLite 쪽은 `LIMIT 77` 숫자-only `typeof`/BLOB length 선검사에서 object 수·NULL/type과 모든 schema identity field의 합산 바이트를 checked arithmetic으로 확인한다. 기존 retained/dependency 8 MiB 예산 안인 경우에만 bounded row stream을 `String`으로 읽어 SHA-256 golden과 순서대로 비교한다.

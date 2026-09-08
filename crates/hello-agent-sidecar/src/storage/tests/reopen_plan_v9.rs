@@ -1885,3 +1885,36 @@ fn v10_schema_identity_rejects_giant_sql_before_string_fetch_without_mutation() 
     assert_eq!(error.kind(), "storageSchemaMismatch");
     assert_eq!(fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn v10_schema_identity_golden_rejects_altered_truncated_duplicate_and_reordered_inventory() {
+    assert_eq!(
+        schema_identity_v10_golden_from_str(SCHEMA_IDENTITY_V10)
+            .unwrap()
+            .len(),
+        STORAGE_SCHEMA_IDENTITY_OBJECT_COUNT_V10
+    );
+    let original: Value = serde_json::from_str(SCHEMA_IDENTITY_V10).unwrap();
+    for case in ["altered", "truncated", "duplicate", "reordered"] {
+        let mut invalid = original.clone();
+        let objects = invalid["objects"].as_array_mut().unwrap();
+        match case {
+            "altered" => {
+                objects[0]["canonicalSqlSha256"] = Value::String("A".repeat(64));
+            }
+            "truncated" => {
+                objects.pop();
+            }
+            "duplicate" => {
+                objects[1] = objects[0].clone();
+            }
+            "reordered" => {
+                objects.swap(0, 1);
+            }
+            _ => unreachable!(),
+        }
+        let source = serde_json::to_string(&invalid).unwrap();
+        let error = schema_identity_v10_golden_from_str(&source).unwrap_err();
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+    }
+}
