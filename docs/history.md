@@ -11,7 +11,7 @@
 
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 admission digest P0/P1 수리)
 
-- **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. plan/frozen/receipt digest 공동 위조와 8 MiB 초과 baseline digest를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
+- **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. V3 raw 입력은 파싱 뒤 소유권을 남기지 않고 job·plan의 동시 retained 문자열을 모두 예산에 포함한다. plan/frozen/receipt digest 공동 위조, 8 MiB 초과 baseline digest, 결합 예산을 넘는 대형 job ID를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
 
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 read-only admission runtime)
 

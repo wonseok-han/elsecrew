@@ -658,6 +658,7 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
         "extra",
         "correlated_digest",
         "oversized_baseline_digest",
+        "large_job_id_buffers",
         "artifact",
     ] {
         let (_copy_root, path) = copy_template(&template);
@@ -666,7 +667,12 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
         } else {
             "planEligibility"
         };
-        seed_pending(&path, phase, 137);
+        let after = if case == "large_job_id_buffers" {
+            0
+        } else {
+            137
+        };
+        seed_pending(&path, phase, after);
         let connection = Connection::open(&path).unwrap();
         with_triggers_disabled(&connection, |connection| match case {
             "gap" => {
@@ -726,6 +732,22 @@ fn product_admission_rejects_pending_v9_witness_gaps_extras_and_hostile_digests(
                     .execute(
                         "UPDATE ledger_baselines SET projection_digest=?1",
                         params!["a".repeat(8 * 1024 * 1024 + 1)],
+                    )
+                    .unwrap();
+            }
+            "large_job_id_buffers" => {
+                let large_job_id = format!("large_{}", "j".repeat(4 * 1024 * 1024));
+                connection
+                    .execute(
+                        "UPDATE maintenance_jobs SET job_id=?1 WHERE job_id='compact_v9_001'",
+                        [&large_job_id],
+                    )
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE storage_compaction_plans SET job_id=?1 \
+                         WHERE job_id='compact_v9_001'",
+                        [&large_job_id],
                     )
                     .unwrap();
             }

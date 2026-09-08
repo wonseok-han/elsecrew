@@ -133,25 +133,18 @@ impl AdmissionPlanWitness {
                 if state != "pending" {
                     return Err(session_error());
                 }
-                let job = parse_v3_job(
-                    connection,
-                    &job_id,
-                    &state,
-                    &cutoff_json,
-                    failure_kind,
-                    completed_at,
-                )?;
-                let plan = load_plan(connection, &job_id)?;
+                let job = parse_v3_job(job_id, state, cutoff_json, failure_kind, completed_at)?;
+                let plan = load_plan(connection, &job.job_id)?;
                 if job.private_state.cursor.cutoff_event_rowid != plan.cutoff_event_rowid {
                     return Err(session_error());
                 }
-                verify_plan_baseline(connection, &plan)?;
+                verify_plan_baseline(connection, &plan, job_retained_bytes(&job)?)?;
                 verify_plan_predecessor(connection, &plan)?;
                 verify_active_phase_artifacts(connection, &job, &plan)?;
                 let (row_start, row_end, released_end) = active_row_bounds(&job)?;
                 reject_rows_outside_active_bounds(
                     connection,
-                    &job_id,
+                    &job.job_id,
                     row_start,
                     row_end,
                     released_end,
@@ -300,15 +293,15 @@ impl AdmissionPlanWitness {
                     self.cutoff_event_rowid = self.cutoff_event_rowid.max(cutoff);
                     *seen_v2 = true;
                 } else if object.contains_key("storageCompactionV3PrivateState") {
-                    let job = parse_v3_job(
-                        connection,
-                        &job_id,
-                        "succeeded",
-                        &cutoff_json,
+                    drop(cutoff_json);
+                    let job = validate_v3_job(
+                        job_id,
+                        "succeeded".to_string(),
+                        envelope,
                         None,
                         Some(completed_at),
                     )?;
-                    let plan = load_plan(connection, &job_id)?;
+                    let plan = load_plan(connection, &job.job_id)?;
                     if job.private_state.cursor.cutoff_event_rowid != plan.cutoff_event_rowid {
                         return Err(session_error());
                     }
@@ -318,7 +311,7 @@ impl AdmissionPlanWitness {
                     self.stage = Stage::TerminalReleased {
                         plan: Box::new(plan),
                         next: 1,
-                        after_job_id: job_id,
+                        after_job_id: job.job_id,
                         seen_v2: *seen_v2,
                     };
                     return Ok(AdmissionPlanStep::Pending);
@@ -382,14 +375,23 @@ impl AdmissionPlanWitness {
 }
 
 fn parse_v3_job(
-    _connection: &Connection,
-    job_id: &str,
-    state: &str,
-    cutoff_json: &str,
+    job_id: String,
+    state: String,
+    cutoff_json: String,
     failure_kind: Option<String>,
     completed_at: Option<String>,
 ) -> Result<StorageCompactionJobV3, SidecarError> {
-    let envelope: Value = serde_json::from_str(cutoff_json).map_err(|_| session_error())?;
+    let envelope: Value = serde_json::from_str(&cutoff_json).map_err(|_| session_error())?;
+    validate_v3_job(job_id, state, envelope, failure_kind, completed_at)
+}
+
+fn validate_v3_job(
+    job_id: String,
+    state: String,
+    envelope: Value,
+    failure_kind: Option<String>,
+    completed_at: Option<String>,
+) -> Result<StorageCompactionJobV3, SidecarError> {
     let object = envelope.as_object().ok_or_else(session_error)?;
     if object.len() != 1 {
         return Err(session_error());
@@ -492,6 +494,7 @@ fn load_plan(
 fn verify_plan_baseline(
     connection: &Connection,
     plan: &StorageCompactionPlanV1,
+    job_retained_bytes: usize,
 ) -> Result<(), SidecarError> {
     let lengths: (i64, i64) = connection
         .query_row(
@@ -515,8 +518,9 @@ fn verify_plan_baseline(
         .ok_or_else(session_error)?;
     if canonical_bytes > FRAGMENT_BYTES
         || digest_bytes != "sha256:".len() + 64
-        || plan_retained_bytes(plan)?
-            .checked_add(dependency_bytes)
+        || job_retained_bytes
+            .checked_add(plan_retained_bytes(plan)?)
+            .and_then(|value| value.checked_add(dependency_bytes))
             .is_none_or(|value| value > INPUT_BYTES)
     {
         return Err(session_error());
@@ -561,6 +565,18 @@ fn plan_retained_bytes(plan: &StorageCompactionPlanV1) -> Result<usize, SidecarE
         plan.previous_successful_job_id.as_deref().unwrap_or(""),
         plan.created_at.as_str(),
         plan.planned_at.as_str(),
+    ]
+    .into_iter()
+    .try_fold(0usize, |total, value| {
+        total.checked_add(value.len()).ok_or_else(session_error)
+    })
+}
+
+fn job_retained_bytes(job: &StorageCompactionJobV3) -> Result<usize, SidecarError> {
+    [
+        job.job_id.as_str(),
+        job.failure_kind.as_deref().unwrap_or(""),
+        job.completed_at.as_deref().unwrap_or(""),
     ]
     .into_iter()
     .try_fold(0usize, |total, value| {
@@ -826,7 +842,7 @@ fn verify_terminal_v3(
     plan: &StorageCompactionPlanV1,
     usage: &mut ByteUsage,
 ) -> Result<(), SidecarError> {
-    verify_plan_baseline(connection, plan)?;
+    verify_plan_baseline(connection, plan, job_retained_bytes(job)?)?;
     verify_plan_predecessor(connection, plan)?;
     let wrong_row: bool = connection
         .query_row(
