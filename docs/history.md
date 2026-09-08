@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (M5 잔여 작업 재대조)
+
+- **현재 기준**: `m5/coding-agent-ide`의 `5a7bc54`에서 작업 트리는 대조 시작 시 clean이다. 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·Monaco 편집/diff와 G5~G5C fixture/복구, G5D private 대형 snapshot 검증·catch-up까지 구현됐지만 일반 `--stdio`의 실제 Claude Code/Codex 실행은 아직 연결되지 않았다.
+- **다음 우선순위**: 기존 승인 순서대로 G5D를 제품 시작·복구·실행 admission에 연결한다. 101-workspace 관측 98.288초가 3초 목표를 넘으므로 사용자 대기 경로와 fail-closed admission을 함께 정리하고, 100개 초과 frozen operation, bounded compaction writer/delete, 자동 worker scheduling과 `storage.status`를 닫은 뒤 실제 provider adapter·인증/모델 출력 연결로 넘어간다.
+- **후속 게이트**: 새 sidecar를 포함한 G6 보안·성능·패키지 재검증, 전체 OS Quit E2E, Windows snapshot/자손 회수·실기기 검증, 서명/배포·업데이트 결정이 남는다. 기존 protocol strict clippy 3개와 미정리 child worktree 20개(약 16 GiB)는 기능 증거/미커밋 여부를 확인한 뒤 별도로 정리한다. 이번 대조는 코드·브랜치·main·원격을 변경하지 않았고 push도 하지 않았다.
+
 ### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 내부 기능·통합 QA 마감)
 
 - **완료**: 독립 리뷰 PASS의 기능 `5ad7162`를 통합한 `5658480519a11db7eab4795112f1810221ebc801`에서 단일 `cargo test --workspace --manifest-path Cargo.toml --locked`가 exit 0이다. Tauri 105/13 ignored·core 82·protocol 43·sidecar 289/1 ignored·stdio 10으로 총 **529 passed/14 ignored/0 failed**이며, 수정된 guard의 정상 production101 전체 경로도 통과했다. 동일 Rust subset은 반복하지 않았다.
