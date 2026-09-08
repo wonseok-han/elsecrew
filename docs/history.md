@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (D1 malformed ready 회귀 보강)
+
+- **테스트 보강**: D1 일반 제품과 agent-fixture ready validator가 capability 순서 교환, `storage.status` 중복, 알 수 없는 추가 capability, `storage.status` 누락, ready payload 추가 필드를 모두 거부하는 표 기반 Rust·TypeScript 회귀를 추가했다. 기존 legacy/D1 성공과 세대 교차 불일치 거부는 그대로 보존했다.
+- **계약 경계**: Rust의 `ReadyPayloadV1` strict serde envelope와 TypeScript `exactObject`가 추가 필드를 이미 거부하므로 production 계약 변경은 필요하지 않았다. 소유한 테스트와 이 기록 외에는 수정하지 않았다.
+- **검증**: focused Rust 1개, protocol crate 전체 44개, Node lifetime 계약 18개, root 고정 TypeScript `--noEmit`, Rust 2021 rustfmt와 `git diff --check`가 통과했다. 실제 provider·sidecar·Electron·renderer·fixture·main·원격은 건드리지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (D1 계약 통합·3초 제품 admission 결정 대기)
 
 - **통합**: exact `6df8532ade27b5a535edca0070ac5e2db4b8d3b5`의 D1 `storage.status` additive capability 계약은 관련 Rust 44개·Node 37개·TypeScript·rustfmt·diff 검증과 독립 리뷰 PASS 뒤 `1b1c978020c92566200349457ae76607fd7d3c21`로 통합했다. 기존 G5/G5A exact 협상과 실제 provider 비활성 경계는 유지하며 sidecar/Electron dispatcher는 아직 연결하지 않는다.

@@ -3475,6 +3475,19 @@ test("D1 freezes exact product and agent-fixture storage.status capability sets"
     capabilities: [...capabilities],
     sidecarInstanceId: "sidecar_storage_status_d1",
   });
+  const malformedReadyCases = (capabilities: readonly string[]) => {
+    const swapped = [...capabilities];
+    const last = swapped.length - 1;
+    [swapped[last - 1], swapped[last]] = [swapped[last], swapped[last - 1]];
+
+    return [
+      ["capability order swap", ready(swapped)],
+      ["duplicate storage.status", ready([...capabilities, STORAGE_STATUS_METHOD_V1])],
+      ["unknown extra capability", ready([...capabilities, "storage.unknown"])],
+      ["missing storage.status", ready(capabilities.slice(0, last))],
+      ["extra ready payload field", { ...ready(capabilities), extra: true }],
+    ] as const;
+  };
   assert.doesNotThrow(() => parseG5ReadyPayloadV1(ready(G5_CAPABILITIES_V1)));
   assert.doesNotThrow(() => parsePlannedG5AReadyPayloadV1(ready(G5A_CAPABILITIES_V1)));
   assert.doesNotThrow(() => parseG5DProductReadyPayloadV1(ready(G5D_PRODUCT_CAPABILITIES_V1)));
@@ -3483,6 +3496,13 @@ test("D1 freezes exact product and agent-fixture storage.status capability sets"
   assert.throws(() => parsePlannedG5AReadyPayloadV1(ready(G5D_AGENT_FIXTURE_CAPABILITIES_V1)));
   assert.throws(() => parseG5DProductReadyPayloadV1(ready(G5_CAPABILITIES_V1)));
   assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(ready(G5A_CAPABILITIES_V1)));
+
+  for (const [name, payload] of malformedReadyCases(G5D_PRODUCT_CAPABILITIES_V1)) {
+    assert.throws(() => parseG5DProductReadyPayloadV1(payload), undefined, `product: ${name}`);
+  }
+  for (const [name, payload] of malformedReadyCases(G5D_AGENT_FIXTURE_CAPABILITIES_V1)) {
+    assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(payload), undefined, `agent fixture: ${name}`);
+  }
 
   for (const version of [1, 2, 3, 4, 5]) {
     const source = readFileSync(resolve(`src/m5/contracts/bridge-v${version}.ts`), "utf8");
