@@ -29,6 +29,9 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+#[allow(dead_code)]
+pub(crate) mod compaction_writer;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MaterializationFailurePoint {
     Receipts,

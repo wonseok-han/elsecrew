@@ -9,6 +9,24 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer serialization allocation P1 수리)
+
+- **serialization 전 예약**: 신규 frozen operation은 borrowed plan field로 canonical record의 exact 길이와 source clone·canonical JSON Value·출력 digest footprint를 먼저 계산하고 합산 예산을 통과한 뒤에만 source를 clone/serialize한다. 기존 frozen operation의 `serde_json::to_value`와 protocol validator가 만드는 Value clone·payload canonicalization·record reconstruction·digest도 호출 전에 StepBudget에 예약한다.
+- **불필요한 clone 제거·감사**: frozen message는 owned source를 다시 JSON Value로 복제하지 않고 borrowed field의 JS-safe 정수·필수값·timestamp·source binding·message digest를 직접 검증한다. plan 작성의 baseline witness clone과 payload digest 결과도 clone/hash 전에 예약했다. 남은 `Value::to_string` 두 곳은 외부 문자열이 없는 고정 private cursor envelope 생성이며 입력 의존 serialization 경로가 아님을 확인했다.
+- **적대 회귀·검증**: actual SQLite의 다음 plan row aggregate ID를 dependency 상한 절반보다 1 byte 크게 만들어 단일 입력 fetch는 허용되지만 clone+canonical output 합산은 8 MiB를 넘는 경계를 재현했다. writer는 첫 serialization 전에 실패하고 event/index/receipt/frozen/authority/prefix 및 변조 plan witness를 그대로 두며 durable running sentinel만 남겼다. focused writer 9/9, verifyPrefix admission 1/1, sidecar no-deps strict clippy, Rust 2021 format과 diff check가 통과했다.
+
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer 메타데이터·allocation P1 수리)
+
+- **기존 witness 완전 검증**: private writer가 이미 존재하는 frozen operation/message를 source 열만으로 인정하지 않고 canonical record, record/message digest, `frozenAt`, source 결속을 protocol validator와 재해시로 모두 확인한다. 다음 배치 첫 operation의 canonical record·digest·시간을 변조하거나 canonical record를 8 MiB 초과로 만든 actual SQLite에서 writer가 삭제 전 실패하고 event/index/receipt/authority/prefix와 변조 witness가 그대로이며 durable running sentinel만 남는 것을 확인했다.
+- **allocation fail-closed**: 모든 writer DB 문자열 입력에 `typeof`·BLOB byte length 선검사와 checked 누적 예산을 적용했다. frozen-operation canonical envelope는 JSON escape·숫자 길이를 allocation 전에 정확히 계산해 output+digest를 예약하고, chat ID/frozen message 전체 메타데이터, equivalence baseline·최신 payload·projection, active/predecessor job ID와 prefix/plan/job envelope도 fetch 전 100 work·primary 1 MiB·retained/dependency 8 MiB 상한을 공유한다.
+- **검증·범위**: focused writer/allocation 9/9와 교정된 V9/V10 verifyPrefix admission 1/1, sidecar all-target no-deps strict clippy, Rust format, `git diff --check`가 통과했다. production scheduler/public wire/계약은 변경하지 않았고 full sidecar 재실행은 영향 범위 검증 간소화 지침에 따라 생략했다.
+
+### 2026-09-09 · by GPT-5.6-Sol (G5D V10 private compaction writer)
+
+- **private writer 구현**: 명시적으로 선택한 단일 aggregate에 삭제 가능 event 1,000개와 anchor 1개가 연속할 때만 V3 job·immutable plan을 만들고, `planEligibility → freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → releasePlan → finalize`를 호출당 최대 100행·primary 1 MiB·retained/dependency 8 MiB로 진행한다. running arm은 별도 commit이며 `verifyPrefix`의 exhausted pending을 재arm한 transaction에서 prefix와 `authorizeDelete`를 함께 게시하고, finalize만 unarmed pending→succeeded로 끝낸다. 즉시 선행 성공 job을 잇는 2,000행 chain도 보존한다.
+- **실제 SQLite 안전 회귀**: 삭제 가능 999행은 무변경 no-op, 정확히 1,000행은 완료 후 event 1개·receipt 1,001개·frozen operation 1,001개·plan anchor 1개를 보존했다. planning pending과 100행 partial delete를 각각 제품 admission으로 다시 연 뒤 writer가 재개되고 후속 append가 성공했다. 잘못된 explicit target은 거부하며 authority 직후, 전체 index/event trigger mutation 직후, precommit, arm 직후 failure와 after-arm cancellation은 batch를 rollback하고 durable running sentinel을 남겨 다음 writer 호출을 fail-closed한다.
+- **검증·경계**: 실제 SQLite focused writer 3/3과 100/101·1 MiB·8 MiB budget 경계 1/1, sidecar unit 327 pass·1 ignored와 stdio 11/11, Rust 2021 format, sidecar all-target no-deps strict clippy, `git diff --check`가 통과했다. dependency 포함 strict clippy는 소유 밖 `hello-agent-core/src/proctree.rs`의 기존 lint 2건으로 실패했다. scheduler·public wire/capability·자동 실행은 활성화하지 않았고 Windows 실기기와 production scheduling은 후속 범위다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D verifyPrefix admission 경계 수리)
 
 - **재개 경계 수리**: pending `verifyPrefix`는 scan이 exhausted여도 prefix가 아직 없어야 하며, durable prefix는 다음 `authorizeDelete` phase부터 요구하도록 V9·V10 공용 admission verifier를 수정했다. 이는 V10 writer의 prefix INSERT와 `pending authorizeDelete` 전이가 한 transaction에서 일어나는 순서와 일치한다.
