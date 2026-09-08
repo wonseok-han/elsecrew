@@ -44,7 +44,8 @@
       "recovery.inspect",
       "recovery.inspectAgent",
       "recovery.markResolved",
-      "recovery.resolveAgent"
+      "recovery.resolveAgent",
+      "storage.status"
     ],
     "events": [
       "system.ready",

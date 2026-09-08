@@ -50,6 +50,7 @@ export const METHODS_V1 = [
   "recovery.inspectAgent",
   "recovery.markResolved",
   "recovery.resolveAgent",
+  "storage.status",
 ] as const;
 
 export const EVENTS_V1 = [

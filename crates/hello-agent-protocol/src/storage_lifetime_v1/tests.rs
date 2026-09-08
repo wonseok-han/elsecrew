@@ -18,6 +18,39 @@ struct Manifest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct StorageStatusD1Manifest {
+    schema_version: u32,
+    protocol_version: u32,
+    activation: String,
+    method: String,
+    modes: StorageStatusD1Modes,
+    compatibility: StorageStatusD1Compatibility,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageStatusD1Modes {
+    general_product: StorageStatusD1Mode,
+    agent_fixture: StorageStatusD1Mode,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageStatusD1Mode {
+    legacy_capabilities: Vec<String>,
+    d1_capabilities: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageStatusD1Compatibility {
+    legacy_exact_sets_remain_valid: bool,
+    d1_adds_storage_status_at_tail: bool,
+    run_start_agent_smoke_advertised: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ManifestV3 {
     schema_version: u32,
     storage_schema_version: u32,
@@ -3222,7 +3255,94 @@ fn lossless_compaction_boundary_preserves_history_and_namespaces() {
             case.name
         );
     }
-    assert!(!crate::METHODS_V1.contains(&STORAGE_STATUS_METHOD_V1));
+    assert!(crate::METHODS_V1.contains(&STORAGE_STATUS_METHOD_V1));
+}
+
+#[test]
+fn d1_freezes_exact_product_and_agent_fixture_storage_status_capabilities() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-status-d1");
+    let manifest: StorageStatusD1Manifest = read_json(root.join("manifest.json"));
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(manifest.protocol_version, crate::PROTOCOL_VERSION);
+    assert_eq!(manifest.activation, "D1");
+    assert_eq!(manifest.method, STORAGE_STATUS_METHOD_V1);
+    assert!(crate::run_recovery_v1::G5_CAPABILITIES_V1
+        .iter()
+        .copied()
+        .eq(manifest
+            .modes
+            .general_product
+            .legacy_capabilities
+            .iter()
+            .map(String::as_str)));
+    assert!(crate::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1
+        .iter()
+        .copied()
+        .eq(manifest
+            .modes
+            .general_product
+            .d1_capabilities
+            .iter()
+            .map(String::as_str)));
+    assert!(crate::agent_adapter_v1::G5A_CAPABILITIES_V1
+        .iter()
+        .copied()
+        .eq(manifest
+            .modes
+            .agent_fixture
+            .legacy_capabilities
+            .iter()
+            .map(String::as_str)));
+    assert!(crate::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1
+        .iter()
+        .copied()
+        .eq(manifest
+            .modes
+            .agent_fixture
+            .d1_capabilities
+            .iter()
+            .map(String::as_str)));
+    assert!(manifest.compatibility.legacy_exact_sets_remain_valid);
+    assert!(manifest.compatibility.d1_adds_storage_status_at_tail);
+    assert!(!manifest.compatibility.run_start_agent_smoke_advertised);
+
+    let ready = |capabilities: &[&str]| {
+        serde_json::json!({
+            "protocolVersion": 1,
+            "sidecarSchemaVersion": 1,
+            "appSchemaVersion": 1,
+            "pid": 4242,
+            "platform": "darwin",
+            "capabilities": capabilities,
+            "sidecarInstanceId": "sidecar_storage_status_d1",
+        })
+    };
+    let legacy_product = ready(crate::run_recovery_v1::G5_CAPABILITIES_V1);
+    let d1_product = ready(crate::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1);
+    let legacy_agent_fixture = ready(crate::agent_adapter_v1::G5A_CAPABILITIES_V1);
+    let d1_agent_fixture = ready(crate::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1);
+
+    crate::run_recovery_v1::validate_g5_ready_payload_v1(&legacy_product)
+        .expect("historical G5 ready remains valid");
+    crate::agent_adapter_v1::validate_planned_g5a_ready_payload_v1(&legacy_agent_fixture)
+        .expect("historical G5A ready remains valid");
+    crate::run_recovery_v1::validate_g5d_product_ready_payload_v1(&d1_product)
+        .expect("D1 product ready");
+    crate::agent_adapter_v1::validate_g5d_agent_fixture_ready_payload_v1(&d1_agent_fixture)
+        .expect("D1 agent-fixture ready");
+    assert!(crate::run_recovery_v1::validate_g5_ready_payload_v1(&d1_product).is_err());
+    assert!(
+        crate::agent_adapter_v1::validate_planned_g5a_ready_payload_v1(&d1_agent_fixture).is_err()
+    );
+    assert!(
+        crate::run_recovery_v1::validate_g5d_product_ready_payload_v1(&legacy_product).is_err()
+    );
+    assert!(
+        crate::agent_adapter_v1::validate_g5d_agent_fixture_ready_payload_v1(&legacy_agent_fixture)
+            .is_err()
+    );
 }
 
 fn manifest() -> (PathBuf, Manifest) {
