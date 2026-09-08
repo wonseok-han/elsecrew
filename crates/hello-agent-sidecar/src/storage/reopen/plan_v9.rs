@@ -969,6 +969,9 @@ fn verify_plan_row(
     let row = validate_storage_compaction_plan_row_v1(plan, &value).map_err(|_| session_error())?;
     let parsed: Value =
         serde_json::from_str(&row.canonical_payload_json).map_err(|_| session_error())?;
+    let chat_state = (row.aggregate_type == "chat")
+        .then(|| planned_chat_state(&row.aggregate_id, &parsed))
+        .transpose()?;
     if canonical_json_v1(parsed).map_err(|_| session_error())? != row.canonical_payload_json {
         return Err(session_error());
     }
@@ -998,7 +1001,247 @@ fn verify_plan_row(
         _ => true,
     };
     verify_source_receipt_and_index(connection, &row, expect_live, expect_frozen, usage)?;
+    verify_planned_chat_transition(
+        connection,
+        plan,
+        &row,
+        chat_state.as_ref(),
+        expect_live,
+        usage,
+    )?;
     verify_message_witness(connection, job, &row, usage)?;
+    Ok(())
+}
+
+struct PlannedChatState {
+    durable: u64,
+    snapshot: Option<String>,
+    message: Option<Value>,
+}
+
+fn planned_chat_state(
+    aggregate_id: &str,
+    payload: &Value,
+) -> Result<PlannedChatState, SidecarError> {
+    let object = payload.as_object().ok_or_else(session_error)?;
+    let durable = object
+        .get("durable_event_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(session_error)?;
+    let (durable, snapshot, message) =
+        hello_agent_protocol::storage_lifetime_v1::storage_chat_snapshot_fields_v1(
+            aggregate_id,
+            durable,
+            object.get("last_message"),
+        )
+        .map_err(|_| session_error())?;
+    Ok(PlannedChatState {
+        durable,
+        snapshot,
+        message,
+    })
+}
+
+fn persisted_chat_state(
+    connection: &Connection,
+    frozen: bool,
+    rowid: i64,
+    aggregate_id: &str,
+    aggregate_sequence: u64,
+    usage: &mut ByteUsage,
+) -> Result<PlannedChatState, SidecarError> {
+    let (table, key, payload) = if frozen {
+        (
+            "frozen_operation_sources",
+            "source_event_rowid",
+            "canonical_payload_json",
+        )
+    } else {
+        ("events", "rowid", "canonical_json_payload")
+    };
+    let (kind, bytes, durable_kind, durable): (String, i64, String, i64) = connection
+        .query_row(
+            &format!(
+                "SELECT json_type({payload},'$.last_message'),\
+                        coalesce(length(CAST(json_extract({payload},'$.last_message') AS BLOB)),0),\
+                        json_type({payload},'$.durable_event_sequence'),\
+                        json_extract({payload},'$.durable_event_sequence') \
+                 FROM {table} WHERE {key}=?1 AND aggregate_type='chat' \
+                   AND aggregate_id=?2 AND aggregate_sequence=?3"
+            ),
+            params![
+                rowid,
+                aggregate_id,
+                i64::try_from(aggregate_sequence).map_err(|_| session_error())?
+            ],
+            |record| {
+                Ok((
+                    record.get(0)?,
+                    record.get(1)?,
+                    record.get(2)?,
+                    record.get(3)?,
+                ))
+            },
+        )
+        .map_err(|_| session_error())?;
+    usage.work_units += 1;
+    let bytes = usize::try_from(bytes).map_err(|_| session_error())?;
+    if !matches!(kind.as_str(), "null" | "object")
+        || durable_kind != "integer"
+        || bytes > FRAGMENT_BYTES
+        || usage
+            .encoded_bytes()
+            .checked_add(bytes)
+            .is_none_or(|total| total > INPUT_BYTES)
+    {
+        return Err(session_error());
+    }
+    let message = if kind == "null" {
+        Value::Null
+    } else {
+        let raw: String = connection
+            .query_row(
+                &format!(
+                    "SELECT json_extract({payload},'$.last_message') FROM {table} \
+                     WHERE {key}=?1"
+                ),
+                [rowid],
+                |record| record.get(0),
+            )
+            .map_err(|_| session_error())?;
+        usage.work_units += 1;
+        usage.metadata_bytes = usage
+            .metadata_bytes
+            .checked_add(bytes)
+            .ok_or_else(session_error)?;
+        if raw.len() != bytes {
+            return Err(session_error());
+        }
+        serde_json::from_str(&raw).map_err(|_| session_error())?
+    };
+    let (durable, snapshot, message) =
+        hello_agent_protocol::storage_lifetime_v1::storage_chat_snapshot_fields_v1(
+            aggregate_id,
+            u64::try_from(durable).map_err(|_| session_error())?,
+            Some(&message),
+        )
+        .map_err(|_| session_error())?;
+    Ok(PlannedChatState {
+        durable,
+        snapshot,
+        message,
+    })
+}
+
+fn verify_planned_chat_transition(
+    connection: &Connection,
+    plan: &StorageCompactionPlanV1,
+    row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
+    current: Option<&PlannedChatState>,
+    expect_live: bool,
+    usage: &mut ByteUsage,
+) -> Result<(), SidecarError> {
+    if row.aggregate_type != "chat" {
+        return Ok(());
+    }
+    // Snapshot/catch-up may exclude this row only after the complete plan witness succeeds.
+    // Rebind the transition here to the immediately preceding verified live/frozen source so
+    // that exclusion cannot bypass the generic chat transition invariant.
+    let current = current.ok_or_else(session_error)?;
+    let (previous_durable, previous_snapshot) = if row.aggregate_sequence == 1 {
+        if row.ordinal != 1 || plan.retained_boundary_sequence != 0 {
+            return Err(session_error());
+        }
+        (0, None)
+    } else {
+        let previous_sequence = row.aggregate_sequence - 1;
+        let expected_rowid: i64 = if row.ordinal > 1 {
+            connection
+                .query_row(
+                    "SELECT event_rowid FROM storage_compaction_plan_rows \
+                     WHERE job_id=?1 AND ordinal=?2 AND aggregate_type='chat' \
+                       AND aggregate_id=?3 AND aggregate_sequence=?4",
+                    params![
+                        plan.job_id,
+                        row.ordinal - 1,
+                        row.aggregate_id,
+                        i64::try_from(previous_sequence).map_err(|_| session_error())?
+                    ],
+                    |record| record.get(0),
+                )
+                .map_err(|_| session_error())?
+        } else {
+            connection
+                .query_row(
+                    "SELECT source_event_rowid FROM frozen_operation_sources \
+                     WHERE aggregate_type='chat' AND aggregate_id=?1 AND aggregate_sequence=?2",
+                    params![
+                        row.aggregate_id,
+                        i64::try_from(previous_sequence).map_err(|_| session_error())?
+                    ],
+                    |record| record.get(0),
+                )
+                .map_err(|_| session_error())?
+        };
+        usage.work_units += 1;
+        if expected_rowid <= 0
+            || u64::try_from(expected_rowid).map_err(|_| session_error())? >= row.event_rowid
+        {
+            return Err(session_error());
+        }
+        let live: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM events WHERE rowid=?1 AND aggregate_type='chat' \
+                 AND aggregate_id=?2 AND aggregate_sequence=?3)",
+                params![
+                    expected_rowid,
+                    row.aggregate_id,
+                    i64::try_from(previous_sequence).map_err(|_| session_error())?
+                ],
+                |record| record.get(0),
+            )
+            .map_err(|_| session_error())?;
+        usage.work_units += 1;
+        let previous = persisted_chat_state(
+            connection,
+            !live,
+            expected_rowid,
+            &row.aggregate_id,
+            previous_sequence,
+            usage,
+        )?;
+        (previous.durable, previous.snapshot)
+    };
+    hello_agent_protocol::storage_lifetime_v1::validate_storage_chat_transition_fields_v1(
+        &row.aggregate_id,
+        current.durable,
+        current.snapshot.as_deref(),
+        current.message.as_ref(),
+        previous_durable,
+        previous_snapshot.as_deref(),
+        row.introduced_message_id.as_deref(),
+    )
+    .map_err(|_| session_error())?;
+    if expect_live {
+        let mirror: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM event_source_index WHERE event_rowid=?1 \
+                 AND typeof(chat_durable_sequence)='integer' AND chat_durable_sequence=?2 \
+                 AND ((?3 IS NULL AND typeof(chat_snapshot_message_id)='null') \
+                   OR (typeof(chat_snapshot_message_id)='text' AND chat_snapshot_message_id=?3)))",
+                params![
+                    i64::try_from(row.event_rowid).map_err(|_| session_error())?,
+                    i64::try_from(current.durable).map_err(|_| session_error())?,
+                    current.snapshot
+                ],
+                |record| record.get(0),
+            )
+            .map_err(|_| session_error())?;
+        usage.work_units += 1;
+        if !mirror {
+            return Err(session_error());
+        }
+    }
     Ok(())
 }
 

@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 const STAMP: &str = "2026-09-08T04:00:00Z";
 const PROJECT_ID: &str = "project_v9_admission";
+const CHAT_ID: &str = "chat_v9_admission";
 
 fn v9_template(count: usize) -> (TempDir, PathBuf) {
     let (root, path) = database();
@@ -21,6 +22,47 @@ fn v9_template(count: usize) -> (TempDir, PathBuf) {
                     "project_id":PROJECT_ID,
                     "sequence":sequence,
                 }),
+                STAMP,
+            ))
+            .unwrap();
+    }
+    run_bounded_materializer_to_ready(&mut storage);
+    storage.checkpoint().unwrap();
+    drop(storage);
+    let cancellation = AtomicBool::new(false);
+    let storage = Storage::open_for_admission(&path, &cancellation).unwrap();
+    storage.checkpoint().unwrap();
+    drop(storage);
+    (root, path)
+}
+
+fn chat_v9_template() -> (TempDir, PathBuf) {
+    let (root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    storage
+        .append_event(&event(
+            "evt_v9_chat_project",
+            "op_v9_chat_project",
+            "project",
+            PROJECT_ID,
+            1,
+            json!({
+                "canonical_path":"/fixture/v9-chat-admission",
+                "project_id":PROJECT_ID,
+                "sequence":1,
+            }),
+            STAMP,
+        ))
+        .unwrap();
+    for sequence in 1..=1001 {
+        storage
+            .append_event(&event(
+                &format!("evt_v9_chat_{sequence}"),
+                &format!("op_v9_chat_{sequence}"),
+                "chat",
+                CHAT_ID,
+                sequence,
+                materializable_chat_payload(CHAT_ID, PROJECT_ID, 0, Value::Null),
                 STAMP,
             ))
             .unwrap();
@@ -75,6 +117,12 @@ fn private_state(phase: &str, after: u32, exhausted: bool) -> Value {
     }})
 }
 
+fn chat_private_state(phase: &str, after: u32, exhausted: bool) -> Value {
+    let mut state = private_state(phase, after, exhausted);
+    state["storageCompactionV3PrivateState"]["cursor"]["cutoffEventRowid"] = json!(1002);
+    state
+}
+
 fn terminal_state(cutoff: u64) -> Value {
     let mut state = private_state("finalize", 1000, true);
     state["storageCompactionV3PrivateState"]["cursor"]["cutoffEventRowid"] = json!(cutoff);
@@ -107,11 +155,20 @@ fn with_triggers_disabled(connection: &Connection, mutate: impl FnOnce(&Connecti
 }
 
 fn insert_baseline(connection: &Connection, sequence: u64) -> (String, String) {
+    insert_baseline_for(connection, "project", PROJECT_ID, sequence)
+}
+
+fn insert_baseline_for(
+    connection: &Connection,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    sequence: u64,
+) -> (String, String) {
     let canonical: String = connection
         .query_row(
-            "SELECT canonical_json_payload FROM events WHERE aggregate_type='project' \
-             AND aggregate_id=?1 AND aggregate_sequence=?2",
-            params![PROJECT_ID, sequence as i64],
+            "SELECT canonical_json_payload FROM events WHERE aggregate_type=?1 \
+             AND aggregate_id=?2 AND aggregate_sequence=?3",
+            params![aggregate_type, aggregate_id, sequence as i64],
             |row| row.get(0),
         )
         .unwrap();
@@ -119,8 +176,9 @@ fn insert_baseline(connection: &Connection, sequence: u64) -> (String, String) {
     let raw = versioned.strip_prefix("sha256:").unwrap().to_string();
     use sha2::{Digest, Sha256};
     let mut identity = Sha256::new();
-    identity.update(b"project\0");
-    identity.update(PROJECT_ID.as_bytes());
+    identity.update(aggregate_type.as_bytes());
+    identity.update([0]);
+    identity.update(aggregate_id.as_bytes());
     identity.update([0]);
     identity.update(sequence.to_string().as_bytes());
     let baseline_id = format!("baseline_{:x}", identity.finalize());
@@ -129,8 +187,16 @@ fn insert_baseline(connection: &Connection, sequence: u64) -> (String, String) {
             "INSERT INTO ledger_baselines(\
                baseline_id,aggregate_type,aggregate_id,cutoff_aggregate_sequence,\
                payload_schema_version,canonical_projection_json,projection_digest,created_at,verified_at\
-             ) VALUES (?1,'project',?2,?3,1,?4,?5,?6,?6)",
-            params![baseline_id, PROJECT_ID, sequence as i64, canonical, versioned, STAMP],
+             ) VALUES (?1,?2,?3,?4,1,?5,?6,?7,?7)",
+            params![
+                baseline_id,
+                aggregate_type,
+                aggregate_id,
+                sequence as i64,
+                canonical,
+                versioned,
+                STAMP
+            ],
         )
         .unwrap();
     (baseline_id, raw)
@@ -164,6 +230,31 @@ fn insert_plan(
     baseline_digest: &str,
     previous: Option<&str>,
 ) {
+    insert_plan_for(
+        connection,
+        job_id,
+        "project",
+        PROJECT_ID,
+        retained,
+        cutoff,
+        baseline_id,
+        baseline_digest,
+        previous,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_plan_for(
+    connection: &Connection,
+    job_id: &str,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    retained: u64,
+    cutoff: u64,
+    baseline_id: &str,
+    baseline_digest: &str,
+    previous: Option<&str>,
+) {
     connection
         .execute(
             "INSERT INTO storage_compaction_plans(\
@@ -171,11 +262,12 @@ fn insert_plan(
                retained_boundary_sequence,delete_through_sequence,anchor_aggregate_sequence,\
                expected_rows,baseline_id,baseline_projection_digest,previous_successful_job_id,\
                created_at,planned_at\
-             ) VALUES (?1,1,?2,'project',?3,?4,?5,?6,1001,?7,?8,?9,?10,?10)",
+             ) VALUES (?1,1,?2,?3,?4,?5,?6,?7,1001,?8,?9,?10,?11,?11)",
             params![
                 job_id,
                 cutoff as i64,
-                PROJECT_ID,
+                aggregate_type,
+                aggregate_id,
                 retained as i64,
                 (retained + 1000) as i64,
                 (retained + 1001) as i64,
@@ -196,6 +288,29 @@ fn insert_plan_row(
     baseline_id: &str,
     baseline_digest: &str,
 ) {
+    insert_plan_row_for(
+        connection,
+        job_id,
+        "project",
+        PROJECT_ID,
+        ordinal,
+        retained,
+        baseline_id,
+        baseline_digest,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_plan_row_for(
+    connection: &Connection,
+    job_id: &str,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    ordinal: u32,
+    retained: u64,
+    baseline_id: &str,
+    baseline_digest: &str,
+) {
     let sequence = retained + u64::from(ordinal);
     let anchor = ordinal == 1001;
     let (event_rowid, event_id, operation_id, request_id, event_type, payload, timestamp): (
@@ -209,9 +324,9 @@ fn insert_plan_row(
     ) = connection
         .query_row(
             "SELECT rowid,event_id,operation_id,request_id,event_type,canonical_json_payload,timestamp \
-             FROM events WHERE aggregate_type='project' AND aggregate_id=?1 \
-               AND aggregate_sequence=?2",
-            params![PROJECT_ID, sequence as i64],
+             FROM events WHERE aggregate_type=?1 AND aggregate_id=?2 \
+               AND aggregate_sequence=?3",
+            params![aggregate_type, aggregate_id, sequence as i64],
             |row| {
                 Ok((
                     row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
@@ -231,8 +346,8 @@ fn insert_plan_row(
                aggregate_sequence,event_type,payload_schema_version,event_timestamp,canonical_payload_json,\
                canonical_payload_digest,introduced_message_id,introduced_message_digest,decision,\
                baseline_id,baseline_projection_digest,operation_frozen_before_plan,message_frozen_before_plan\
-             ) VALUES (?1,?2,?3,?4,?5,?6,'project',?7,?8,?9,1,?10,?11,?12,NULL,NULL,\
-                       ?13,?14,?15,0,0)",
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,NULL,NULL,\
+                       ?14,?15,?16,0,0)",
             params![
                 job_id,
                 ordinal,
@@ -240,7 +355,8 @@ fn insert_plan_row(
                 event_id,
                 operation_id,
                 request_id,
-                PROJECT_ID,
+                aggregate_type,
+                aggregate_id,
                 sequence as i64,
                 event_type,
                 timestamp,
@@ -261,6 +377,27 @@ fn insert_prefix(
     baseline_id: &str,
     baseline_digest: &str,
 ) {
+    insert_prefix_for(
+        connection,
+        job_id,
+        "project",
+        PROJECT_ID,
+        retained,
+        baseline_id,
+        baseline_digest,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_prefix_for(
+    connection: &Connection,
+    job_id: &str,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    retained: u64,
+    baseline_id: &str,
+    baseline_digest: &str,
+) {
     let anchor = retained + 1001;
     connection
         .execute(
@@ -268,12 +405,13 @@ fn insert_prefix(
                prefix_id,aggregate_type,aggregate_id,deleted_through_sequence,anchor_event_rowid,\
                anchor_event_id,anchor_operation_id,anchor_aggregate_sequence,baseline_id,\
                baseline_projection_digest,created_at,verified_at\
-             ) SELECT ?1,'project',?2,?3,rowid,event_id,operation_id,?4,?5,'sha256:'||?6,?7,?7 \
-               FROM events WHERE aggregate_type='project' AND aggregate_id=?2 \
-                 AND aggregate_sequence=?4",
+             ) SELECT ?1,?2,?3,?4,rowid,event_id,operation_id,?5,?6,'sha256:'||?7,?8,?8 \
+               FROM events WHERE aggregate_type=?2 AND aggregate_id=?3 \
+                 AND aggregate_sequence=?5",
             params![
                 format!("prefix_{job_id}"),
-                PROJECT_ID,
+                aggregate_type,
+                aggregate_id,
                 (retained + 1000) as i64,
                 anchor as i64,
                 baseline_id,
@@ -285,37 +423,67 @@ fn insert_prefix(
 }
 
 fn freeze_range(storage: &mut Storage, start: u64, end: u64) {
+    freeze_range_for(storage, "project", PROJECT_ID, start, end);
+}
+
+fn freeze_range_for(
+    storage: &mut Storage,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    start: u64,
+    end: u64,
+) {
     for sequence in start..=end {
-        let source = event(
-            &format!("evt_v9_{sequence}"),
-            &format!("op_v9_{sequence}"),
-            "project",
-            PROJECT_ID,
-            sequence,
-            json!({
-                "canonical_path":"/fixture/v9-admission",
-                "project_id":PROJECT_ID,
-                "sequence":sequence,
-            }),
-            STAMP,
-        );
+        let source = storage
+            .connection
+            .query_row(
+                "SELECT event_id,operation_id,request_id,aggregate_type,aggregate_id,\
+                        aggregate_sequence,event_type,payload_schema_version,\
+                        canonical_json_payload,timestamp FROM events \
+                 WHERE aggregate_type=?1 AND aggregate_id=?2 AND aggregate_sequence=?3",
+                params![aggregate_type, aggregate_id, sequence as i64],
+                |row| {
+                    Ok(LedgerEventV1 {
+                        event_id: row.get(0)?,
+                        operation_id: row.get(1)?,
+                        request_id: row.get(2)?,
+                        aggregate_type: row.get(3)?,
+                        aggregate_id: row.get(4)?,
+                        aggregate_sequence: row_u64(row, 5)?,
+                        event_type: row.get(6)?,
+                        payload_schema_version: row.get(7)?,
+                        canonical_json_payload: row.get(8)?,
+                        timestamp: row.get(9)?,
+                    })
+                },
+            )
+            .unwrap();
         insert_exact_v8_frozen_operation(storage, &source, STAMP);
     }
 }
 
 fn delete_live_prefix(connection: &Connection, through: u64) {
+    delete_live_prefix_for(connection, "project", PROJECT_ID, through);
+}
+
+fn delete_live_prefix_for(
+    connection: &Connection,
+    aggregate_type: &str,
+    aggregate_id: &str,
+    through: u64,
+) {
     connection
         .execute(
-            "DELETE FROM event_source_index WHERE aggregate_type='project' \
-             AND aggregate_id=?1 AND aggregate_sequence<=?2",
-            params![PROJECT_ID, through as i64],
+            "DELETE FROM event_source_index WHERE aggregate_type=?1 \
+             AND aggregate_id=?2 AND aggregate_sequence<=?3",
+            params![aggregate_type, aggregate_id, through as i64],
         )
         .unwrap();
     connection
         .execute(
-            "DELETE FROM events WHERE aggregate_type='project' \
-             AND aggregate_id=?1 AND aggregate_sequence<=?2",
-            params![PROJECT_ID, through as i64],
+            "DELETE FROM events WHERE aggregate_type=?1 \
+             AND aggregate_id=?2 AND aggregate_sequence<=?3",
+            params![aggregate_type, aggregate_id, through as i64],
         )
         .unwrap();
 }
@@ -392,6 +560,133 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
         }
     });
     storage.checkpoint().unwrap();
+}
+
+fn seed_chat_pending(path: &Path, phase: &str, after: u32) {
+    let mut storage = Storage {
+        connection: Connection::open(path).unwrap(),
+        path: path.to_path_buf(),
+        writes_admitted: true,
+    };
+    let (baseline_id, baseline_digest) =
+        insert_baseline_for(&storage.connection, "chat", CHAT_ID, 1000);
+    if phase == "authorizeDelete" {
+        freeze_range_for(&mut storage, "chat", CHAT_ID, 1, 1001);
+    }
+    with_triggers_disabled(&storage.connection, |connection| {
+        insert_job(
+            connection,
+            "compact_v9_chat_001",
+            "pending",
+            &chat_private_state(phase, after, false),
+            None,
+        );
+        insert_plan_for(
+            connection,
+            "compact_v9_chat_001",
+            "chat",
+            CHAT_ID,
+            0,
+            1002,
+            &baseline_id,
+            &baseline_digest,
+            None,
+        );
+        let end = if phase == "planEligibility" {
+            after
+        } else {
+            1001
+        };
+        for ordinal in 1..=end {
+            insert_plan_row_for(
+                connection,
+                "compact_v9_chat_001",
+                "chat",
+                CHAT_ID,
+                ordinal,
+                0,
+                &baseline_id,
+                &baseline_digest,
+            );
+        }
+        if phase == "authorizeDelete" {
+            insert_prefix_for(
+                connection,
+                "compact_v9_chat_001",
+                "chat",
+                CHAT_ID,
+                0,
+                &baseline_id,
+                &baseline_digest,
+            );
+        }
+    });
+    storage.checkpoint().unwrap();
+}
+
+fn tamper_chat_transition(path: &Path, sequence: u64) {
+    let connection = Connection::open(path).unwrap();
+    let canonical = canonical_json_v1(materializable_chat_payload(
+        CHAT_ID,
+        PROJECT_ID,
+        2,
+        Value::Null,
+    ))
+    .unwrap();
+    let versioned = sha256_file_version_v1(canonical.as_bytes());
+    let raw = versioned.strip_prefix("sha256:").unwrap();
+    with_triggers_disabled(&connection, |connection| {
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE events SET canonical_json_payload=?1 \
+                     WHERE aggregate_type='chat' AND aggregate_id=?2 \
+                       AND aggregate_sequence=?3",
+                    params![canonical, CHAT_ID, sequence as i64],
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE operation_receipts \
+                     SET canonical_payload_json=?1,canonical_payload_digest=?2 \
+                     WHERE aggregate_type='chat' AND aggregate_id=?3 \
+                       AND aggregate_sequence=?4",
+                    params![canonical, raw, CHAT_ID, sequence as i64],
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE event_source_index SET chat_durable_sequence=2,\
+                       chat_snapshot_message_id=NULL,introduced_message_id=NULL \
+                     WHERE aggregate_type='chat' AND aggregate_id=?1 \
+                       AND aggregate_sequence=?2",
+                    params![CHAT_ID, sequence as i64],
+                )
+                .unwrap(),
+            1
+        );
+        if sequence == 1001 {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE chats SET projection_json=?1 \
+                         WHERE chat_id=?2 AND last_event_sequence=1001",
+                        params![canonical, CHAT_ID],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+    });
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
 }
 
 fn append_after_plan_cutoff(path: &Path) {
@@ -502,6 +797,50 @@ fn product_admission_accepts_post_prefix_pending_v9_with_live_tail_and_preserves
         ];
         assert_eq!(after_open, before, "{phase}");
         assert!(admitted.connection.is_autocommit(), "{phase}");
+    }
+}
+
+#[test]
+fn product_admission_accepts_valid_planned_chat_transitions_without_mutation() {
+    let (_root, template) = chat_v9_template();
+    for (phase, after) in [("planEligibility", 137), ("authorizeDelete", 0)] {
+        let (_copy_root, path) = copy_template(&template);
+        seed_chat_pending(&path, phase, after);
+        let connection = Connection::open(&path).unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let admitted = Storage::open_for_admission(&path, &cancellation)
+            .unwrap_or_else(|error| panic!("{phase}: {error:?}"));
+        assert_eq!(database_snapshot(&admitted.connection), before, "{phase}");
+        assert!(admitted.connection.is_autocommit(), "{phase}");
+    }
+}
+
+#[test]
+fn product_admission_rejects_coherent_planned_chat_transition_tamper_without_mutation() {
+    let (_root, template) = chat_v9_template();
+    for (case, phase, after, tampered_sequence) in [
+        ("early_live", "planEligibility", 137, 2),
+        ("post_prefix", "authorizeDelete", 0, 1001),
+    ] {
+        let (_copy_root, path) = copy_template(&template);
+        tamper_chat_transition(&path, tampered_sequence);
+        seed_chat_pending(&path, phase, after);
+        let connection = Connection::open(&path).unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted coherent planned chat transition tamper: {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert!(connection.is_autocommit(), "{case}");
     }
 }
 
