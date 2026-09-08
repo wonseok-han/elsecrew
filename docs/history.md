@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G6 security/package gate 통합·실산출물 검증)
+
+- **통합**: 기능 `128b044`와 독립 리뷰에서 찾은 pre-smoke artifact 검증·상위 harness `NOT_READY` 전파 수리 `af93bcc`, repository root 아래 output parent symlink preflight 수리 `3494aaa`를 최종 리뷰 PASS 뒤 `b4590cb96dd6ebc144b18edf374fe8525f3a8e6d`로 `m5/coding-agent-ide`에 통합했다. package/make/smoke/metrics와 harness exit 2 경계는 현재 통합 commit의 focused Node 44개, TypeScript `--noEmit`, script syntax, harness list, diff check에서 통과했다.
+- **실산출물 검증**: `m5:test:security` 15개가 통과했다. `m5:test:package` 첫 실행은 Electron checksum fetch가 격리되어 package 단계에서 fail-closed했고, 허용된 네트워크 재실행은 fresh arm64 package → exact fuse/ASAR/Monaco worker/외부 sidecar handshake·clean shutdown smoke → ZIP make → metrics를 모두 통과했다. unpacked는 **316,549,330 bytes**(350 MiB 이하), ZIP은 **122,126,568 bytes**(200 MiB 이하)이며 증거는 `.artifacts/m5-g6-package/darwin-arm64-2026-09-08T03-26-22-350Z.json`이다.
+- **남은 경계**: 이 PASS는 로컬 macOS arm64 incremental package gate 증거다. `g5d-storage-lifetime`은 scheduler/status/compaction 3개 script가 없고 `g6-release`는 `m5:test:performance`가 없어 계속 `NOT_READY`다. 서명/notarization, packaged GUI 실제 BrowserWindow, Windows 실기기·threshold/자손 회수와 전체 출시 승인은 남아 있으며 main 병합·push는 하지 않았다. storage admission을 3초 shell-ready와 별도 `verifying|ready|failed`로 분리하는 안전 정책은 사용자 승인 전까지 구현하지 않는다.
+
 ### 2026-09-08 · by GPT-5 Codex (G6 package artifact parent path 재리뷰 수리)
 
 - **수리**: repository root만 신뢰 anchor로 두고, package preflight는 root 아래 기존 `out`·package·ZIP 경로의 모든 component를 `lstat`해 symlink면 package 실행 전 `NOT_READY`로 차단한다. package 성공 뒤에는 `out`부터 package root/각 asset의 모든 parent와 leaf의 fresh/non-symlink를 재확인하며, make 뒤 ZIP도 `out/make/zip/<platform>/<arch>` parent와 leaf를 확인하고서만 metrics로 진행한다.
