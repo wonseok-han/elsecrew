@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D admission compaction control-state fix)
+
+- **P1 수정**: 제품 admission이 compaction artifact 4개 테이블이 비었다는 이유만으로 `losslessCompaction` 작업 메타데이터를 무시하던 경로를 닫았다. uncompacted admission은 작업이 전혀 없을 때만 허용하고, compacted terminal admission은 정확히 하나의 `succeeded` proof와 실제 artifact가 함께 있을 때만 검증한다. active pending/running, 다른 상태, 중복 작업, malformed proof, artifact 없는 orphan succeeded는 모두 mutation 없이 실패한다.
+- **회귀 검증**: no-job uncompacted와 101개 terminal compacted 정상 경로를 보존하고 malformed succeeded `cutoff_json`, valid-shaped orphan succeeded, duplicate succeeded proof의 DB 행·파일 byte 불변 실패 회귀를 추가했다. V9 decision-witness 작업은 시작하지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D bounded reopen product admission)
 
 - **제품 admission 연결**: `Storage::open_for_admission`만 private same-connection `ReopenMaintenanceSession`을 끝까지 구동해 terminal compacted V8의 frozen/live source, receipt, prefix·baseline, projection, derived record와 workspace 관계를 bounded step으로 재검증한다. 101개 frozen operation도 임시 legacy 100개 제한을 우회해 검증한 뒤에만 storage를 반환하며, `Storage::open`의 기존 제한과 동작은 그대로 유지한다.

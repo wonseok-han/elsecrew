@@ -508,6 +508,83 @@ fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_
 }
 
 #[test]
+fn product_admission_accepts_uncompacted_storage_without_compaction_jobs() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    run_bounded_materializer_to_ready(&mut storage);
+    storage.checkpoint().unwrap();
+    let before = database_snapshot(&storage.connection);
+    drop(storage);
+
+    let cancellation = AtomicBool::new(false);
+    let admitted = Storage::open_for_admission(&path, &cancellation).unwrap();
+    assert_eq!(database_snapshot(&admitted.connection), before);
+}
+
+#[test]
+fn product_admission_rejects_unpaired_succeeded_compaction_control_state_without_mutation() {
+    for cutoff_json in [
+        "{}".to_owned(),
+        json!({"storageCompactionV2PrivateState": {
+            "schemaVersion": 1,
+            "cursor": {"schemaVersion": 2, "cutoffEventRowid": 1, "phase": "finalize",
+                       "afterEventRowid": 1, "scanExhausted": true},
+            "operationsVerified": true,
+            "equivalenceVerified": true,
+        }})
+        .to_string(),
+    ] {
+        let (_root, path) = database();
+        let storage = Storage::open(&path).unwrap();
+        storage
+            .connection
+            .execute(
+                "INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+               failure_kind,created_at,updated_at) \
+             VALUES ('orphan_succeeded','losslessCompaction','succeeded',?1,?2,?2,?2,NULL,?2,?2);",
+                params![cutoff_json, STAMP],
+            )
+            .unwrap();
+        storage.checkpoint().unwrap();
+        let before = observed(&storage.connection, &path);
+        drop(storage);
+
+        let cancellation = AtomicBool::new(false);
+        assert!(Storage::open_for_admission(&path, &cancellation).is_err());
+        let connection = self::connection(&path);
+        unchanged(&connection, &path, &before);
+    }
+}
+
+#[test]
+fn product_admission_rejects_duplicate_succeeded_compaction_proofs_without_mutation() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_ready_reopen_operations(&mut storage, 101);
+    storage
+        .connection
+        .execute(
+            "INSERT INTO maintenance_jobs(\
+           job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+           failure_kind,created_at,updated_at) \
+         SELECT 'compact_admission_duplicate',job_kind,state,cutoff_json,started_at,completed_at,\
+                last_successful_at,failure_kind,created_at,updated_at \
+         FROM maintenance_jobs WHERE job_id='compact_admission_terminal';",
+            [],
+        )
+        .unwrap();
+    storage.checkpoint().unwrap();
+    let before = observed(&storage.connection, &path);
+    drop(storage);
+
+    let cancellation = AtomicBool::new(false);
+    assert!(Storage::open_for_admission(&path, &cancellation).is_err());
+    let connection = self::connection(&path);
+    unchanged(&connection, &path, &before);
+}
+
+#[test]
 fn product_admission_defers_pending_without_decision_witness_across_phases() {
     for (phase, operations, equivalence) in [
         ("freezeOperations", false, false),

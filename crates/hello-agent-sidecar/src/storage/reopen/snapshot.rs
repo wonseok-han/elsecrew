@@ -1276,22 +1276,30 @@ fn admission_compaction_cutoff(
     connection: &Connection,
     compacted: bool,
 ) -> Result<u64, SidecarError> {
-    let unsafe_restart_state: bool = connection
+    let authority_present: bool = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) OR \
-                    EXISTS(SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
-                           AND state IN ('pending','running') LIMIT 1);",
+            "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1);",
             [],
             |row| row.get(0),
         )
         .map_err(|_| session_error())?;
-    if unsafe_restart_state {
+    let (jobs, succeeded, active): (i64, i64, i64) = connection
+        .query_row(
+            "SELECT count(*), \
+                    coalesce(sum(state='succeeded'),0), \
+                    coalesce(sum(state IN ('pending','running')),0) \
+             FROM maintenance_jobs WHERE job_kind='losslessCompaction';",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| session_error())?;
+    if authority_present || active != 0 {
         return Err(session_error());
     }
-    if compacted {
-        verify_terminal_compaction_proof(connection)
-    } else {
-        Ok(0)
+    match (compacted, jobs, succeeded) {
+        (false, 0, 0) => Ok(0),
+        (true, 1, 1) => verify_terminal_compaction_proof(connection),
+        _ => Err(session_error()),
     }
 }
 
