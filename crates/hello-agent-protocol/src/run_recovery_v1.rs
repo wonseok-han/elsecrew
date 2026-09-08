@@ -82,6 +82,40 @@ pub const G5_CAPABILITIES_V1: &[&str] = &[
     "recovery.markResolved",
 ];
 
+pub const G5D_PRODUCT_CAPABILITIES_V1: &[&str] = &[
+    "system.status",
+    "app.prepareQuit",
+    "project.open",
+    "project.getTree",
+    "project.createWorktree",
+    "project.close",
+    "file.read",
+    "file.save",
+    "file.watch",
+    "diff.getSummary",
+    "diff.getFile",
+    "workspace.getTree",
+    "workspace.close",
+    "workspace.file.read",
+    "workspace.file.save",
+    "workspace.file.watch",
+    "workspace.diff.getSummary",
+    "workspace.diff.getFile",
+    "workspace.prepareChat",
+    "workspace.abandonPrepared",
+    "project.getRoleSettings",
+    "project.updateRoleSettings",
+    "chat.create",
+    "chat.list",
+    "chat.get",
+    "run.startFixture",
+    "run.cancel",
+    "recovery.list",
+    "recovery.inspect",
+    "recovery.markResolved",
+    "storage.status",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct G5ContractError {
     detail: String,
@@ -156,6 +190,29 @@ pub fn assert_g5_capabilities_v1() -> Result<(), G5ContractError> {
     Ok(())
 }
 
+pub fn assert_g5d_product_capabilities_v1() -> Result<(), G5ContractError> {
+    if G5D_PRODUCT_CAPABILITIES_V1[..G5_CAPABILITIES_V1.len()] != *G5_CAPABILITIES_V1 {
+        return fail("G5D product capabilities must preserve the exact G5 prefix");
+    }
+    if G5D_PRODUCT_CAPABILITIES_V1.last() != Some(&"storage.status") {
+        return fail("G5D product capabilities must add storage.status at the tail");
+    }
+    if G5D_PRODUCT_CAPABILITIES_V1
+        .iter()
+        .any(|capability| !super::METHODS_V1.contains(capability))
+    {
+        return fail("G5D product capability is not reserved by protocol v1");
+    }
+    if G5D_PRODUCT_CAPABILITIES_V1.contains(&"run.startAgentSmoke") {
+        return fail("agent smoke must remain unadvertised");
+    }
+    let unique: HashSet<_> = G5D_PRODUCT_CAPABILITIES_V1.iter().collect();
+    if unique.len() != G5D_PRODUCT_CAPABILITIES_V1.len() {
+        return fail("G5D product capabilities must be unique");
+    }
+    Ok(())
+}
+
 pub fn validate_g5_ready_payload_v1(value: &Value) -> Result<(), G5ContractError> {
     let ready: super::ReadyPayloadV1 = serde_json::from_value(value.clone())
         .map_err(|error| G5ContractError::new(format!("invalid G5 ready payload: {error}")))?;
@@ -186,6 +243,43 @@ pub fn validate_g5_ready_payload_v1(value: &Value) -> Result<(), G5ContractError
         .eq(G5_CAPABILITIES_V1.iter().copied())
     {
         return fail("G5 ready capabilities do not match the exact supported method set");
+    }
+    Ok(())
+}
+
+pub fn validate_g5d_product_ready_payload_v1(value: &Value) -> Result<(), G5ContractError> {
+    assert_g5d_product_capabilities_v1()?;
+    let ready: super::ReadyPayloadV1 = serde_json::from_value(value.clone()).map_err(|error| {
+        G5ContractError::new(format!("invalid G5D product ready payload: {error}"))
+    })?;
+    let event = super::EventV1 {
+        protocol_version: super::PROTOCOL_VERSION,
+        kind: "event".to_string(),
+        sidecar_instance_id: ready.sidecar_instance_id.clone(),
+        stream_id: "system".to_string(),
+        seq: 1,
+        event: "system.ready".to_string(),
+        chat_id: None,
+        task_id: None,
+        run_id: None,
+        payload: value.clone(),
+    };
+    super::ready_payload(&event).map_err(|error| {
+        G5ContractError::new(format!("invalid G5D product ready identity: {error}"))
+    })?;
+    if ready.protocol_version != super::PROTOCOL_VERSION
+        || ready.sidecar_schema_version != super::SIDECAR_SCHEMA_VERSION
+        || ready.app_schema_version != super::APP_SCHEMA_VERSION
+    {
+        return fail("G5D product ready identity versions do not match v1");
+    }
+    if !ready
+        .capabilities
+        .iter()
+        .map(String::as_str)
+        .eq(G5D_PRODUCT_CAPABILITIES_V1.iter().copied())
+    {
+        return fail("G5D product ready capabilities do not match the exact supported method set");
     }
     Ok(())
 }

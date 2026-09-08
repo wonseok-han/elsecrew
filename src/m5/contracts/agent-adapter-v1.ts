@@ -38,6 +38,10 @@ export const G5A_CAPABILITIES_V1 = [
   "recovery.inspectAgent",
   "recovery.resolveAgent",
 ] as const;
+export const G5D_AGENT_FIXTURE_CAPABILITIES_V1 = [
+  ...G5A_CAPABILITIES_V1,
+  "storage.status",
+] as const;
 export const AGENT_INSTALLATION_STATES_V1 = ["installed", "notInstalled", "incomplete"] as const;
 export const AGENT_AUTH_STATES_V1 = ["authenticated", "notAuthenticated", "expired", "unknown"] as const;
 export const AGENT_DISCOVERY_SOURCES_V1 = ["machineReadableCatalog", "exactVersionManifest", "unavailable"] as const;
@@ -1106,6 +1110,25 @@ export function assertG5AContractV1(): void {
   });
 }
 
+export function assertG5DAgentFixtureCapabilitiesV1(): void {
+  if (!G5D_AGENT_FIXTURE_CAPABILITIES_V1.slice(0, G5A_CAPABILITIES_V1.length)
+    .every((capability, index) => capability === G5A_CAPABILITIES_V1[index])) {
+    fail("G5D agent-fixture capabilities must preserve the exact G5A prefix");
+  }
+  if (G5D_AGENT_FIXTURE_CAPABILITIES_V1[G5D_AGENT_FIXTURE_CAPABILITIES_V1.length - 1] !== "storage.status") {
+    fail("G5D agent-fixture capabilities must add storage.status at the tail");
+  }
+  if (G5D_AGENT_FIXTURE_CAPABILITIES_V1.some((capability) => !METHODS_V1.includes(capability))) {
+    fail("G5D agent-fixture capability is not reserved by protocol v1");
+  }
+  if (G5D_AGENT_FIXTURE_CAPABILITIES_V1.includes("run.startAgentSmoke" as never)) {
+    fail("agent smoke must remain unadvertised");
+  }
+  if (new Set(G5D_AGENT_FIXTURE_CAPABILITIES_V1).size !== G5D_AGENT_FIXTURE_CAPABILITIES_V1.length) {
+    fail("G5D agent-fixture capabilities must be unique");
+  }
+}
+
 export function parsePlannedG5AReadyPayloadV1(value: unknown): ReadyPayloadV1 {
   const object = exactObject(value, ["protocolVersion", "sidecarSchemaVersion", "appSchemaVersion", "pid", "platform", "capabilities", "sidecarInstanceId"], "G5A ready payload");
   if (object.protocolVersion !== 1 || object.sidecarSchemaVersion !== 1 || object.appSchemaVersion !== 1) fail("G5A ready versions must be 1");
@@ -1115,6 +1138,21 @@ export function parsePlannedG5AReadyPayloadV1(value: unknown): ReadyPayloadV1 {
   const capabilities = array(object.capabilities, "capabilities", G5A_CAPABILITIES_V1.length);
   if (capabilities.length !== G5A_CAPABILITIES_V1.length || !capabilities.every((item, index) => item === G5A_CAPABILITIES_V1[index])) {
     fail("G5A ready capabilities must match the exact planned method set");
+  }
+  return object as unknown as ReadyPayloadV1;
+}
+
+export function parseG5DAgentFixtureReadyPayloadV1(value: unknown): ReadyPayloadV1 {
+  assertG5DAgentFixtureCapabilitiesV1();
+  const object = exactObject(value, ["protocolVersion", "sidecarSchemaVersion", "appSchemaVersion", "pid", "platform", "capabilities", "sidecarInstanceId"], "G5D agent-fixture ready payload");
+  if (object.protocolVersion !== 1 || object.sidecarSchemaVersion !== 1 || object.appSchemaVersion !== 1) fail("G5D agent-fixture ready versions must be 1");
+  if (!Number.isSafeInteger(object.pid) || (object.pid as number) <= 0) fail("pid must be positive");
+  bounded(object.platform, "platform", 64);
+  id(object.sidecarInstanceId, "sidecarInstanceId");
+  const capabilities = array(object.capabilities, "capabilities", G5D_AGENT_FIXTURE_CAPABILITIES_V1.length);
+  if (capabilities.length !== G5D_AGENT_FIXTURE_CAPABILITIES_V1.length
+    || !capabilities.every((item, index) => item === G5D_AGENT_FIXTURE_CAPABILITIES_V1[index])) {
+    fail("G5D agent-fixture ready capabilities must match the exact D1 method set");
   }
   return object as unknown as ReadyPayloadV1;
 }

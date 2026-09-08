@@ -63,6 +63,10 @@ export const G5_CAPABILITIES_V1 = [
   "recovery.inspect",
   "recovery.markResolved",
 ] as const;
+export const G5D_PRODUCT_CAPABILITIES_V1 = [
+  ...G5_CAPABILITIES_V1,
+  "storage.status",
+] as const;
 
 export type RoleIdV1 = (typeof G5_ROLE_IDS_V1)[number];
 export type RuntimeV1 = (typeof G5_RUNTIMES_V1)[number];
@@ -1138,6 +1142,25 @@ export function assertG5CapabilitiesV1(): void {
   if (new Set(G5_CAPABILITIES_V1).size !== G5_CAPABILITIES_V1.length) fail("G5 capabilities must be unique");
 }
 
+export function assertG5DProductCapabilitiesV1(): void {
+  if (!G5D_PRODUCT_CAPABILITIES_V1.slice(0, G5_CAPABILITIES_V1.length)
+    .every((capability, index) => capability === G5_CAPABILITIES_V1[index])) {
+    fail("G5D product capabilities must preserve the exact G5 prefix");
+  }
+  if (G5D_PRODUCT_CAPABILITIES_V1[G5D_PRODUCT_CAPABILITIES_V1.length - 1] !== "storage.status") {
+    fail("G5D product capabilities must add storage.status at the tail");
+  }
+  if (G5D_PRODUCT_CAPABILITIES_V1.some((capability) => !METHODS_V1.includes(capability))) {
+    fail("G5D product capability is not reserved by protocol v1");
+  }
+  if (G5D_PRODUCT_CAPABILITIES_V1.includes("run.startAgentSmoke" as never)) {
+    fail("agent smoke must remain unadvertised");
+  }
+  if (new Set(G5D_PRODUCT_CAPABILITIES_V1).size !== G5D_PRODUCT_CAPABILITIES_V1.length) {
+    fail("G5D product capabilities must be unique");
+  }
+}
+
 export function parseG5ReadyPayloadV1(value: unknown): ReadyPayloadV1 {
   const ready = value as ReadyPayloadV1;
   const event: EventV1 = {
@@ -1156,6 +1179,29 @@ export function parseG5ReadyPayloadV1(value: unknown): ReadyPayloadV1 {
   if (parsed.capabilities.length !== G5_CAPABILITIES_V1.length
     || parsed.capabilities.some((capability, index) => capability !== G5_CAPABILITIES_V1[index])) {
     fail("G5 ready capabilities do not match the exact supported method set");
+  }
+  return parsed;
+}
+
+export function parseG5DProductReadyPayloadV1(value: unknown): ReadyPayloadV1 {
+  assertG5DProductCapabilitiesV1();
+  const ready = value as ReadyPayloadV1;
+  const event: EventV1 = {
+    protocolVersion: PROTOCOL_VERSION,
+    kind: "event",
+    sidecarInstanceId: ready?.sidecarInstanceId,
+    streamId: "system",
+    seq: 1,
+    event: "system.ready",
+    payload: value as Record<string, unknown>,
+  };
+  const parsed = parseReadyPayload(event);
+  if (parsed.protocolVersion !== PROTOCOL_VERSION
+    || parsed.sidecarSchemaVersion !== SIDECAR_SCHEMA_VERSION
+    || parsed.appSchemaVersion !== APP_SCHEMA_VERSION) fail("G5D product ready identity versions do not match v1");
+  if (parsed.capabilities.length !== G5D_PRODUCT_CAPABILITIES_V1.length
+    || parsed.capabilities.some((capability, index) => capability !== G5D_PRODUCT_CAPABILITIES_V1[index])) {
+    fail("G5D product ready capabilities do not match the exact supported method set");
   }
   return parsed;
 }

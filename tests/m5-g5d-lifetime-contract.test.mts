@@ -6,9 +6,21 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import {
+  G5A_CAPABILITIES_V1,
+  G5D_AGENT_FIXTURE_CAPABILITIES_V1,
+  parseG5DAgentFixtureReadyPayloadV1,
+  parsePlannedG5AReadyPayloadV1,
+} from "../src/m5/contracts/agent-adapter-v1.ts";
 import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
 import { M5_BRIDGE_V6_METHODS } from "../src/m5/contracts/bridge-v6.ts";
 import { METHODS_V1, PROTOCOL_VERSION } from "../src/m5/contracts/protocol-v1.ts";
+import {
+  G5_CAPABILITIES_V1,
+  G5D_PRODUCT_CAPABILITIES_V1,
+  parseG5DProductReadyPayloadV1,
+  parseG5ReadyPayloadV1,
+} from "../src/m5/contracts/run-recovery-v1.ts";
 import { canonicalJsonV1 } from "../src/m5/contracts/storage-v1.ts";
 import {
   LOSSLESS_COMPACTION_STEPS_V1,
@@ -172,6 +184,22 @@ interface Manifest {
   publicStatusPrivacy: {
     allowedContent: string;
     forbiddenFields: string[];
+  };
+}
+
+interface StorageStatusD1Manifest {
+  schemaVersion: number;
+  protocolVersion: number;
+  activation: "D1";
+  method: string;
+  modes: {
+    generalProduct: { legacyCapabilities: string[]; d1Capabilities: string[] };
+    agentFixture: { legacyCapabilities: string[]; d1Capabilities: string[] };
+  };
+  compatibility: {
+    legacyExactSetsRemainValid: boolean;
+    d1AddsStorageStatusAtTail: boolean;
+    runStartAgentSmokeAdvertised: boolean;
   };
 }
 
@@ -634,6 +662,9 @@ const rootV5 = resolve("tests/fixtures/m5/storage-v5");
 const rootV6 = resolve("tests/fixtures/m5/storage-v6");
 const rootV7 = resolve("tests/fixtures/m5/storage-v7");
 const rootV8 = resolve("tests/fixtures/m5/storage-v8");
+const storageStatusD1Manifest = readJson<StorageStatusD1Manifest>(
+  resolve("tests/fixtures/m5/storage-status-d1/manifest.json"),
+);
 const manifest = readJson<Manifest>(resolve(root, "manifest.json"));
 const manifestV3 = readJson<ManifestV3>(resolve(rootV3, "manifest.json"));
 const statusCases = readJson<StatusCases>(resolve(root, manifest.wire.casesFile));
@@ -3413,13 +3444,54 @@ test("operation receipts preserve exact v1 duplicate/conflict decisions across l
   }
 });
 
-test("planned bridge V6 is additive but storage.status remains unadvertised and undispatchable before D1", () => {
+test("historical D0A manifest remains pre-D1 while protocol reserves the activated D1 method", () => {
   assert.deepEqual(M5_BRIDGE_V6_METHODS.slice(0, M5_BRIDGE_V5_METHODS.length), M5_BRIDGE_V5_METHODS);
   assert.deepEqual(M5_BRIDGE_V6_METHODS.slice(M5_BRIDGE_V5_METHODS.length), ["getStorageStatus"]);
   assert.equal(manifest.wire.advertisedBeforeD1, false);
   assert.equal(manifest.wire.dispatchableBeforeD1, false);
-  assert.equal(METHODS_V1.includes(STORAGE_STATUS_METHOD_V1 as never), false);
+  assert.equal(METHODS_V1.includes(STORAGE_STATUS_METHOD_V1), true);
   assert.equal(M5_BRIDGE_V6_METHODS.some((method) => /purge|cleanup|delete/i.test(method)), false);
+});
+
+test("D1 freezes exact product and agent-fixture storage.status capability sets", () => {
+  assert.equal(storageStatusD1Manifest.schemaVersion, 1);
+  assert.equal(storageStatusD1Manifest.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(storageStatusD1Manifest.activation, "D1");
+  assert.equal(storageStatusD1Manifest.method, STORAGE_STATUS_METHOD_V1);
+  assert.deepEqual(storageStatusD1Manifest.modes.generalProduct.legacyCapabilities, [...G5_CAPABILITIES_V1]);
+  assert.deepEqual(storageStatusD1Manifest.modes.generalProduct.d1Capabilities, [...G5D_PRODUCT_CAPABILITIES_V1]);
+  assert.deepEqual(storageStatusD1Manifest.modes.agentFixture.legacyCapabilities, [...G5A_CAPABILITIES_V1]);
+  assert.deepEqual(storageStatusD1Manifest.modes.agentFixture.d1Capabilities, [...G5D_AGENT_FIXTURE_CAPABILITIES_V1]);
+  assert.equal(storageStatusD1Manifest.compatibility.legacyExactSetsRemainValid, true);
+  assert.equal(storageStatusD1Manifest.compatibility.d1AddsStorageStatusAtTail, true);
+  assert.equal(storageStatusD1Manifest.compatibility.runStartAgentSmokeAdvertised, false);
+
+  const ready = (capabilities: readonly string[]) => ({
+    protocolVersion: 1,
+    sidecarSchemaVersion: 1,
+    appSchemaVersion: 1,
+    pid: 4242,
+    platform: "darwin",
+    capabilities: [...capabilities],
+    sidecarInstanceId: "sidecar_storage_status_d1",
+  });
+  assert.doesNotThrow(() => parseG5ReadyPayloadV1(ready(G5_CAPABILITIES_V1)));
+  assert.doesNotThrow(() => parsePlannedG5AReadyPayloadV1(ready(G5A_CAPABILITIES_V1)));
+  assert.doesNotThrow(() => parseG5DProductReadyPayloadV1(ready(G5D_PRODUCT_CAPABILITIES_V1)));
+  assert.doesNotThrow(() => parseG5DAgentFixtureReadyPayloadV1(ready(G5D_AGENT_FIXTURE_CAPABILITIES_V1)));
+  assert.throws(() => parseG5ReadyPayloadV1(ready(G5D_PRODUCT_CAPABILITIES_V1)));
+  assert.throws(() => parsePlannedG5AReadyPayloadV1(ready(G5D_AGENT_FIXTURE_CAPABILITIES_V1)));
+  assert.throws(() => parseG5DProductReadyPayloadV1(ready(G5_CAPABILITIES_V1)));
+  assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(ready(G5A_CAPABILITIES_V1)));
+
+  for (const version of [1, 2, 3, 4, 5]) {
+    const source = readFileSync(resolve(`src/m5/contracts/bridge-v${version}.ts`), "utf8");
+    assert.equal(source.includes("getStorageStatus"), false, `bridge V${version}`);
+  }
+  assert.equal(
+    readFileSync(resolve("src/m5/contracts/bridge-v6.ts"), "utf8").includes("getStorageStatus"),
+    true,
+  );
 });
 
 function readJson<T>(path: string): T {

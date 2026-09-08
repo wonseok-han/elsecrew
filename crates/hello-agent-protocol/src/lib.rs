@@ -64,6 +64,7 @@ pub const METHODS_V1: &[&str] = &[
     "recovery.inspectAgent",
     "recovery.markResolved",
     "recovery.resolveAgent",
+    "storage.status",
 ];
 
 pub const EVENTS_V1: &[&str] = &[

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D D1 storage.status capability 계약)
+
+- **계약 고정**: base `25ec6426ef529b12160ffd71fe84320aab943139`의 `codex/g5d-storage-status-contract`에서 protocol v1에 `storage.status`를 예약하고, 기존 exact G5/G5A 상수·parser를 변경하지 않은 채 각각 뒤에 해당 메서드 하나만 추가하는 exact D1 일반 제품/agent-fixture capability 상수·parser를 Rust와 TypeScript에 추가했다. 새 `storage-status-d1` golden은 두 모드의 legacy/D1 배열을 함께 고정하며, 기존 storage-v2 D0A manifest의 `advertisedBeforeD1=false`·`dispatchableBeforeD1=false`는 역사 기록으로 그대로 보존한다. `M5BridgeV6.getStorageStatus`만 renderer bridge 추가 지점임을 회귀로 고정했다.
+- **검증**: protocol crate `cargo test`는 jobs/threads 4 제한에서 44 passed, Node protocol/G5/G5A/G5D 계약은 37 passed, 직접 TypeScript `--noEmit`, Rust 2021 rustfmt와 `git diff --check`가 통과했다. 첫 pnpm TypeScript 시도는 worktree 의존성 부재로 registry 재시도에 들어가 결과로 사용하지 않았고, 저장소 루트의 기존 tsc binary를 직접 실행해 검증했다.
+- **경계·다음**: 이번 commit은 capability negotiation/public parser/golden만 소유한다. sidecar ready 광고·dispatcher·status 수집, Electron/preload/renderer 소비자는 각 구현 담당이 두 D1 exact 상수 중 실행 모드에 맞는 하나를 선택해 별도 연결해야 하며, 과거 G5/G5A parser를 D1 parser로 대체하거나 `run.startAgentSmoke`를 광고하면 안 된다. 실제 provider·사용자 프로젝트·main·원격은 건드리지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (M5 잔여 작업 재대조)
 
 - **현재 기준**: `m5/coding-agent-ide`의 `5a7bc54`에서 작업 트리는 대조 시작 시 clean이다. 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·Monaco 편집/diff와 G5~G5C fixture/복구, G5D private 대형 snapshot 검증·catch-up까지 구현됐지만 일반 `--stdio`의 실제 Claude Code/Codex 실행은 아직 연결되지 않았다.

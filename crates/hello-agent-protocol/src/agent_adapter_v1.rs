@@ -48,6 +48,44 @@ pub const G5A_CAPABILITIES_V1: &[&str] = &[
     "recovery.inspectAgent",
     "recovery.resolveAgent",
 ];
+pub const G5D_AGENT_FIXTURE_CAPABILITIES_V1: &[&str] = &[
+    "system.status",
+    "app.prepareQuit",
+    "project.open",
+    "project.getTree",
+    "project.createWorktree",
+    "project.close",
+    "file.read",
+    "file.save",
+    "file.watch",
+    "diff.getSummary",
+    "diff.getFile",
+    "workspace.getTree",
+    "workspace.close",
+    "workspace.file.read",
+    "workspace.file.save",
+    "workspace.file.watch",
+    "workspace.diff.getSummary",
+    "workspace.diff.getFile",
+    "workspace.prepareChat",
+    "workspace.abandonPrepared",
+    "project.getRoleSettings",
+    "project.updateRoleSettings",
+    "chat.create",
+    "chat.list",
+    "chat.get",
+    "run.startFixture",
+    "run.cancel",
+    "recovery.list",
+    "recovery.inspect",
+    "recovery.markResolved",
+    "agent.getCapabilities",
+    "run.startAgent",
+    "run.cancelAgent",
+    "recovery.inspectAgent",
+    "recovery.resolveAgent",
+    "storage.status",
+];
 pub const AGENT_INSTALLATION_STATES_V1: &[&str] = &["installed", "notInstalled", "incomplete"];
 pub const AGENT_AUTH_STATES_V1: &[&str] =
     &["authenticated", "notAuthenticated", "expired", "unknown"];
@@ -1089,6 +1127,29 @@ pub fn assert_g5a_contract_v1() -> Result<(), AgentAdapterContractError> {
     Ok(())
 }
 
+pub fn assert_g5d_agent_fixture_capabilities_v1() -> Result<(), AgentAdapterContractError> {
+    if G5D_AGENT_FIXTURE_CAPABILITIES_V1[..G5A_CAPABILITIES_V1.len()] != *G5A_CAPABILITIES_V1 {
+        return fail("G5D agent-fixture capabilities must preserve the exact G5A prefix");
+    }
+    if G5D_AGENT_FIXTURE_CAPABILITIES_V1.last() != Some(&"storage.status") {
+        return fail("G5D agent-fixture capabilities must add storage.status at the tail");
+    }
+    if !G5D_AGENT_FIXTURE_CAPABILITIES_V1
+        .iter()
+        .all(|capability| crate::METHODS_V1.contains(capability))
+    {
+        return fail("G5D agent-fixture capability is not reserved by protocol v1");
+    }
+    if G5D_AGENT_FIXTURE_CAPABILITIES_V1.contains(&"run.startAgentSmoke") {
+        return fail("agent smoke must remain unadvertised");
+    }
+    let unique: HashSet<_> = G5D_AGENT_FIXTURE_CAPABILITIES_V1.iter().collect();
+    if unique.len() != G5D_AGENT_FIXTURE_CAPABILITIES_V1.len() {
+        return fail("G5D agent-fixture capabilities must be unique");
+    }
+    Ok(())
+}
+
 pub fn validate_planned_g5a_ready_payload_v1(
     value: &Value,
 ) -> Result<(), AgentAdapterContractError> {
@@ -1104,6 +1165,27 @@ pub fn validate_planned_g5a_ready_payload_v1(
             .eq(G5A_CAPABILITIES_V1.iter().copied())
     {
         return fail("G5A ready payload does not match the exact planned contract");
+    }
+    bounded(&ready.platform, "platform", 64)?;
+    id(&ready.sidecar_instance_id, "sidecarInstanceId")
+}
+
+pub fn validate_g5d_agent_fixture_ready_payload_v1(
+    value: &Value,
+) -> Result<(), AgentAdapterContractError> {
+    assert_g5d_agent_fixture_capabilities_v1()?;
+    let ready: crate::ReadyPayloadV1 = from_value(value, "G5D agent-fixture ready payload")?;
+    if ready.protocol_version != crate::PROTOCOL_VERSION
+        || ready.sidecar_schema_version != crate::SIDECAR_SCHEMA_VERSION
+        || ready.app_schema_version != crate::APP_SCHEMA_VERSION
+        || ready.pid == 0
+        || !ready
+            .capabilities
+            .iter()
+            .map(String::as_str)
+            .eq(G5D_AGENT_FIXTURE_CAPABILITIES_V1.iter().copied())
+    {
+        return fail("G5D agent-fixture ready payload does not match the exact D1 contract");
     }
     bounded(&ready.platform, "platform", 64)?;
     id(&ready.sidecar_instance_id, "sidecarInstanceId")
