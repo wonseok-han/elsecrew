@@ -9,6 +9,22 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 schema golden 고정 상한 수리)
+
+- **재리뷰 차단 수리**: DB schema preflight의 row 상한을 parsed golden 길이에서 유도하지 않고 코드 상수 `76`과 `LIMIT 77`로 독립 고정했다. golden parser도 exact 76개, non-empty tuple, lowercase hex64 digest, `(type,name,tableName)` strictly sorted·unique를 요구해 잘린·중복·재정렬·변조 fixture가 DB 비교 상한을 함께 약화하지 못한다.
+- **검증**: 변경하지 않은 실제 golden과 적대 parser 4종을 직접 검증했고 focused V9/V10 migration·admission 19/19, sidecar all-target no-deps strict clippy, Rust 2021 format, diff check가 통과했다. writer/scheduler/public 범위는 그대로 비활성이다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission schema allocation 수리)
+
+- **P1 bounded schema identity**: V10 golden의 exact 76-object 목록을 DB보다 먼저 읽어 외부 권위로 고정하고, SQLite 쪽은 `LIMIT 77` 숫자-only `typeof`/BLOB length 선검사에서 object 수·NULL/type과 모든 schema identity field의 합산 바이트를 checked arithmetic으로 확인한다. 기존 retained/dependency 8 MiB 예산 안인 경우에만 bounded row stream을 `String`으로 읽어 SHA-256 golden과 순서대로 비교한다.
+- **적대 회귀·검증**: actual V10의 77번째 persistent object와, object 수는 76개로 유지하면서 same-name trigger SQL만 8 MiB 초과로 바꾼 fixture가 모두 fetch 전에 `storageSchemaMismatch`로 실패하고 DB 파일 byte가 그대로임을 확인했다. focused migration/admission 18/18, Rust 2021 format, sidecar all-target no-deps strict clippy와 diff check를 통과했으며 writer/scheduler/public 범위는 변경하지 않았다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission runtime)
+
+- **제품 admission 전환**: legacy `Storage::open`은 V8 동작을 유지하고, `open_for_admission`만 exact idle V9를 통합 V10 fixture로 migration하거나 기존 exact V10을 연다. V8 제품 경로는 bounded V8 검증 뒤 V9→V10을 순서대로 적용하며 migration 사이 cancellation을 확인한다. V10 schema는 76개 persistent object의 `(type, name, tableName, canonical SQL SHA-256)` golden과 metadata를 exact 비교한다.
+- **재개·쓰기 호환과 fail-closed 경계**: private V3 plan witness 의미가 같은 V9·V10만 bounded read-only admission과 frozen replay/append에 허용했다. V9 drift·pending/running·non-empty authority, V10 trigger drift·미래 version·tampered witness, cancellation과 DDL 실패는 원래 DB를 변경하지 않고 거부한다. V9 succeeded/failed terminal evidence와 plan rows를 V10에서 보존하고 partial `deletePrefix`, 두 succeeded chain, admission 뒤 append를 검증했다.
+- **검증·다음**: focused plan/admission 16/16, snapshot 18/18, sidecar unit 319 pass·1 ignored와 stdio 11/11, Rust 2021 format, sidecar all-target no-deps strict clippy, `git diff --check`를 통과했다. V10 writer/scheduler/public readiness는 활성화하지 않았으며 독립 리뷰와 통합 뒤 별도 파동으로 남는다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V10 event 삭제·schema identity 재리뷰 수리)
 
 - **P0 event 순서 봉쇄**: V10 event `BEFORE DELETE`가 현재 running V3 `deletePrefix` plan/prefix와 전체 armed batch를 다시 결속하고, batch의 모든 source index가 먼저 사라진 뒤 `live event + authority` 또는 `삭제된 event + 소비된 authority`의 exact 분할만 허용한다. 부분 authority의 직접 event 삭제, authority 없는 source/index 우회, 완전 authority라도 event-before-index 순서는 전체 DB mutation 없이 거부한다.
