@@ -113,6 +113,17 @@ export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1 = 100 as const;
 export const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1 = 1_048_576 as const;
+export const STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1 = 8_388_608 as const;
+export const STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1 = 1_000 as const;
+export const STORAGE_LIFETIME_ACTIVATION_PHASES_V1 = [
+  "pending",
+  "armRunning",
+  "freeze",
+  "materialize",
+  "verify",
+  "delete",
+  "finalize",
+] as const;
 export const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1 =
   "rowid > afterEventRowid AND rowid <= cutoffEventRowid" as const;
 export const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1 = "rowid" as const;
@@ -2478,6 +2489,147 @@ export function validateStorageCompactionPolicyV2(value: unknown): Record<string
     fail("storage compaction v2 policy is not exact");
   }
   return policy;
+}
+
+export const STORAGE_LIFETIME_ACTIVATION_POLICY_V1 = {
+  schemaVersion: 1,
+  generation: "storageLifetimeActivationV1",
+  databaseMigration: "none",
+  publicWire: {
+    g5dLifecycleShape: "unchanged",
+    storageStatusShape: "unchanged",
+    capabilityOrder: "unchanged",
+    readyToFailedTransition: false,
+    physicalCleanupEnabled: false,
+  },
+  eligibility: {
+    exactSafePrefixMinLedgerEvents:
+      STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1,
+    countBoundary: "sinceRetainedBoundary",
+    belowThresholdAllowed: false,
+    ageTrigger: false,
+    byteTrigger: false,
+    preconditions: [
+      "allExistingSafetyExclusionsPass",
+      "completeMaterialization",
+      "exactBeforeAfterEquivalence",
+    ],
+  },
+  preservation: {
+    logicalDeleteRows: ["events", "event_source_index"],
+    preservedRecords: [
+      "userChats",
+      "chatMessages",
+      "userEvidence",
+      "recoveries",
+      "workspaces",
+      "snapshots",
+      "baselines",
+      "projections",
+      "operationReceipts",
+    ],
+    physicalCleanup: "disabled",
+  },
+  restart: {
+    pendingEmptyAuthority: "exactVerifyDuringAdmissionThenReadyAndResumeAfterward",
+    runningSentinel: "failAdmissionWithoutMutationManualRecovery",
+    nonEmptyAuthority: "failAdmissionWithoutMutationManualRecovery",
+    ambiguousOrCommitUncertain: "failAdmissionWithoutMutationManualRecovery",
+    automaticResetOrResumeUnsafeState: false,
+  },
+  runtime: {
+    owner: "singleSQLiteOwnerInSidecarEventLoop",
+    writerConnections: 1,
+    backgroundWriterConnection: false,
+    backgroundWriterThread: false,
+    ticks: "readyOnly",
+    zeroTickStates: ["verifying", "failed", "quitting"],
+    step: "oneBoundedCommittedStepPerTick",
+  },
+  fatalAfterReady: {
+    causes: [
+      "semanticCorruption",
+      "commitUncertainty",
+      "materializerFatal",
+      "compactorFatal",
+    ],
+    action: "poisonStopMaintenanceAndTerminateSidecar",
+    furtherMutationOrRun: "prohibited",
+    nextProcess: "reenterVerifyingAndRunAdmission",
+    wireTransition: "none",
+  },
+  budgets: {
+    maxWorkUnitsPerStep: STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+    maxCanonicalPrimaryInputBytesPerStep:
+      STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+    maxRetainedAndDependencyInputBytesPerStep:
+      STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
+    callerConfigurable: false,
+  },
+  phases: STORAGE_LIFETIME_ACTIVATION_PHASES_V1,
+  quit: "stopNewTicksBeforeCheckpointAndCleanMarker",
+} as const;
+
+export function validateStorageLifetimeActivationPolicyV1(
+  value: unknown,
+): typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1 {
+  const policy = requireObject(value, "storage lifetime activation policy");
+  let exact = false;
+  try {
+    exact = exactPlainContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V1);
+  } catch {
+    exact = false;
+  }
+  if (!exact) {
+    fail("storage lifetime activation policy is not exact");
+  }
+  return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1;
+}
+
+function exactPlainContractValue(
+  actual: unknown,
+  expected: unknown,
+  ancestors = new WeakSet<object>(),
+): boolean {
+  if (actual === null || expected === null
+    || typeof actual !== "object" || typeof expected !== "object") {
+    return actual === expected;
+  }
+  const array = Array.isArray(actual);
+  if (array !== Array.isArray(expected)) return false;
+  const prototype = array ? Array.prototype : Object.prototype;
+  if (Object.getPrototypeOf(actual) !== prototype || Object.getPrototypeOf(expected) !== prototype
+    || ancestors.has(actual)) {
+    return false;
+  }
+
+  const actualKeys = Reflect.ownKeys(actual);
+  const expectedKeys = Reflect.ownKeys(expected);
+  if (actualKeys.some((key) => typeof key !== "string")
+    || expectedKeys.some((key) => typeof key !== "string")
+    || actualKeys.length !== expectedKeys.length) {
+    return false;
+  }
+  const sortedActualKeys = [...actualKeys as string[]].sort();
+  const sortedExpectedKeys = [...expectedKeys as string[]].sort();
+  if (sortedActualKeys.some((key, index) => key !== sortedExpectedKeys[index])) return false;
+
+  ancestors.add(actual);
+  try {
+    for (const key of sortedActualKeys) {
+      const actualDescriptor = Object.getOwnPropertyDescriptor(actual, key);
+      const expectedDescriptor = Object.getOwnPropertyDescriptor(expected, key);
+      if (actualDescriptor === undefined || expectedDescriptor === undefined
+        || !("value" in actualDescriptor) || !("value" in expectedDescriptor)
+        || actualDescriptor.enumerable !== expectedDescriptor.enumerable
+        || !exactPlainContractValue(actualDescriptor.value, expectedDescriptor.value, ancestors)) {
+        return false;
+      }
+    }
+    return true;
+  } finally {
+    ancestors.delete(actual);
+  }
 }
 
 export function canonicalFrozenOperationRecordV1(source: FrozenOperationSourceV1): string {

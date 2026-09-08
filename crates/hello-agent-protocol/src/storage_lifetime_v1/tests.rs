@@ -3443,3 +3443,124 @@ fn set_value_path(target: &mut Value, path: &[String], replacement: Value) {
         panic!("policy mutation target");
     }
 }
+
+#[test]
+fn storage_activation_policy_matches_golden_and_rejects_relaxed_safety() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-activation-v1");
+    let policy: Value = read_json(root.join("manifest.json"));
+
+    assert_eq!(
+        STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1,
+        1_000
+    );
+    assert_eq!(STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1, 100);
+    assert_eq!(
+        STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+        1_048_576
+    );
+    assert_eq!(
+        STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
+        8_388_608
+    );
+    assert_eq!(policy, storage_lifetime_activation_policy_v1());
+    validate_storage_lifetime_activation_policy_v1(&policy).expect("exact activation policy");
+
+    let mutations = [
+        (
+            "/eligibility/exactSafePrefixMinLedgerEvents",
+            serde_json::json!(999),
+        ),
+        (
+            "/eligibility/belowThresholdAllowed",
+            serde_json::json!(true),
+        ),
+        ("/eligibility/ageTrigger", serde_json::json!(true)),
+        ("/eligibility/byteTrigger", serde_json::json!(true)),
+        (
+            "/preservation/logicalDeleteRows",
+            serde_json::json!(["events", "chat_messages"]),
+        ),
+        (
+            "/preservation/preservedRecords",
+            serde_json::json!(["userChats"]),
+        ),
+        (
+            "/preservation/physicalCleanup",
+            serde_json::json!("enabled"),
+        ),
+        (
+            "/restart/pendingEmptyAuthority",
+            serde_json::json!("resumeDuringAdmission"),
+        ),
+        ("/restart/runningSentinel", serde_json::json!("autoReset")),
+        (
+            "/restart/nonEmptyAuthority",
+            serde_json::json!("autoResume"),
+        ),
+        (
+            "/restart/ambiguousOrCommitUncertain",
+            serde_json::json!("retry"),
+        ),
+        ("/runtime/owner", serde_json::json!("backgroundWorker")),
+        ("/runtime/writerConnections", serde_json::json!(2)),
+        (
+            "/runtime/backgroundWriterConnection",
+            serde_json::json!(true),
+        ),
+        ("/runtime/backgroundWriterThread", serde_json::json!(true)),
+        ("/runtime/ticks", serde_json::json!("allAdmissionStates")),
+        ("/runtime/step", serde_json::json!("unboundedWork")),
+        (
+            "/fatalAfterReady/action",
+            serde_json::json!("readyToFailed"),
+        ),
+        (
+            "/fatalAfterReady/furtherMutationOrRun",
+            serde_json::json!("allowed"),
+        ),
+        (
+            "/fatalAfterReady/wireTransition",
+            serde_json::json!("readyToFailed"),
+        ),
+        ("/budgets/maxWorkUnitsPerStep", serde_json::json!(101)),
+        (
+            "/budgets/maxCanonicalPrimaryInputBytesPerStep",
+            serde_json::json!(1_048_577),
+        ),
+        (
+            "/budgets/maxRetainedAndDependencyInputBytesPerStep",
+            serde_json::json!(8_388_609),
+        ),
+        ("/budgets/callerConfigurable", serde_json::json!(true)),
+        (
+            "/phases",
+            serde_json::json!(["pending", "armRunning", "delete", "finalize"]),
+        ),
+        ("/quit", serde_json::json!("checkpointBeforeStopTicks")),
+        ("/publicWire/g5dLifecycleShape", serde_json::json!("v2")),
+        ("/publicWire/storageStatusShape", serde_json::json!("v2")),
+        ("/publicWire/capabilityOrder", serde_json::json!("changed")),
+        (
+            "/publicWire/readyToFailedTransition",
+            serde_json::json!(true),
+        ),
+        (
+            "/publicWire/physicalCleanupEnabled",
+            serde_json::json!(true),
+        ),
+    ];
+    for (path, replacement) in mutations {
+        let mut invalid = policy.clone();
+        *invalid.pointer_mut(path).expect("mutation path") = replacement;
+        assert!(
+            validate_storage_lifetime_activation_policy_v1(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+
+    let mut unknown = policy;
+    unknown["runtime"]["extraWriter"] = serde_json::json!(true);
+    assert!(validate_storage_lifetime_activation_policy_v1(&unknown).is_err());
+}

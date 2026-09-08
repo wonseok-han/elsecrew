@@ -9,6 +9,22 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G5D activation comparator 경계 회귀)
+
+- **재리뷰 테스트 보강**: activation exact comparator가 own Symbol property, non-enumerable own extra property, 기존 nested object를 cycle로 교체한 입력을 모두 fail-closed하는 직접 회귀를 추가했다. production comparator·Rust·golden·public wire/runtime은 변경하지 않았다.
+- **검증**: focused Node 7개, TypeScript noEmit, diff check가 통과했다. 별도 테스트 커밋이며 production code는 바꾸지 않았다.
+
+### 2026-09-08 · by GPT-5 Codex (G5D activation TS exact comparator 수리)
+
+- **독립 리뷰 수리**: 새 activation validator가 사용한 `JSON.stringify` 비교는 값이 `undefined`인 unknown key를 누락하고 object insertion order에 민감했다. 이 validator에만 own-key 기반 plain-object exact 비교를 적용해 root/nested unknown key를 `undefined`도 포함해 거부하고, JSON 의미가 같은 object key 재배치는 허용한다. 배열 순서·길이와 primitive/type는 exact이며 symbol/non-enumerable extra, custom prototype, accessor/getter, cycle·reflection 오류는 fail-closed한다. 기존 storage validator의 비교 방식은 변경하지 않았다.
+- **검증**: root/nested undefined unknown 거부, root/nested object reorder 허용, custom prototype/getter 미호출 거부를 포함한 focused Node 6개, TypeScript noEmit과 diff check가 통과했다. 별도 fix commit이며 Rust/golden/public wire/runtime은 변경하지 않았다.
+
+### 2026-09-08 · by GPT-5 Codex (G5D storage lifetime activation 계약)
+
+- **사용자 승인 결정**: 자동 lossless compaction은 retained boundary 이후 exact safe prefix가 1,000 event 이상이고 기존 안전 제외·완전 materialization·exact 전후 동등성을 모두 만족할 때만 후보가 된다. age/byte trigger와 하한 미만 실행은 없고 user chat/message/evidence·recovery·workspace·snapshot·baseline·projection·receipt 및 물리 cleanup은 삭제 범위 밖이다.
+- **재시작·치명 오류 경계**: empty-authority `pending`은 admission exact 검증 뒤 ready와 scheduler 재개를 허용하지만 `running` sentinel·non-empty authority·commit 불명은 변경 없이 admission을 실패시킨다. ready 이후 semantic/commit/materializer/compactor fatal은 wire `ready → failed`를 추가하지 않고 maintenance를 poison한 뒤 추가 mutation/run을 차단하고 sidecar를 종료한다.
+- **계약 범위·검증**: 기존 V6/V7/V8 비활성 manifest와 공개 D1 status/capability를 바꾸지 않은 additive activation generation을 Rust·TypeScript·공유 golden에 고정했다. 단일 event-loop SQLite owner, ready-only tick, 한 tick당 bounded commit 하나, work 100/primary 1 MiB/retained+dependency 8 MiB, 단계 및 Quit 순서를 exact validator가 강제한다. focused Node 3개와 protocol 전체 48개, root TypeScript noEmit, protocol strict clippy, Rust 2021 format, diff check가 통과했다. 이 commit은 runtime scheduler/compaction을 활성화하지 않는다.
+
 ### 2026-09-08 · by GPT-5 Codex (G5D two-stage admission 통합·storage lifetime 다음 결정)
 
 - **통합**: additive G5D lifecycle 계약과 malformed golden 보강을 `78dbe69`, Rust shell-ready/storage admission 런타임 및 raw-params 선행 차단 수리를 `a4ad301`, Electron V6·renderer admission UI와 invalid bridge fail-closed 수리를 `783ae8f`로 각각 독립 리뷰 PASS 뒤 `m5/coding-agent-ide`에 통합했다. 첫 stdout shell-ready 뒤 storage가 `verifying → ready|failed`로 진행하며, ready 전 status/quit 외 요청·writer·run·recovery는 차단되고 renderer도 모든 durable control을 잠근다.
@@ -307,6 +323,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다.
 
 - **큰 snapshot 처리와 제품 준비 시간은 별개(2026-09-03)**: 개발 중인 새 전역 경로는 실제 생산 101-workspace DB의 보존 복사본(607 source rows)을 172,685 calls/약 98.288초에 복원·ready 재검증했다. 30,000-call 테스트 guard 실패는 무진행이 아니라 예상 횟수 부족이었다. 이 내부 정확성 관측은 3초 제품 ready 충족이나 startup/admission 활성화가 아니다. 제품 시간·1 MiB fresh/8 MiB retained+fresh/100 work·100 frozen-operation fence는 유지한다. 실패한 생성 테스트와 보존본 replay 성공을 구분하고 원본 DB는 `/tmp/g5d-production-evidence.NX3udd/manifest.md`의 SHA로 고정한다.
 
