@@ -3564,3 +3564,460 @@ fn storage_activation_policy_matches_golden_and_rejects_relaxed_safety() {
     unknown["runtime"]["extraWriter"] = serde_json::json!(true);
     assert!(validate_storage_lifetime_activation_policy_v1(&unknown).is_err());
 }
+
+#[test]
+fn storage_v9_resume_witness_is_exact_gapless_and_private() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5/storage-v9");
+    let manifest: Value = read_json(root.join("manifest.json"));
+    let policy: Value = read_json(root.join("witness-policy.json"));
+    let cases: Value = read_json(root.join("cases.json"));
+    let activation: Value = read_json(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("tests/fixtures/m5/storage-activation-v2/manifest.json"),
+    );
+
+    assert_eq!(
+        manifest["storageSchemaVersion"],
+        STORAGE_LIFETIME_SCHEMA_VERSION_V9
+    );
+    assert_eq!(
+        manifest["migration"]["fromVersion"],
+        STORAGE_LIFETIME_SCHEMA_VERSION_V8
+    );
+    assert_eq!(
+        manifest["migration"]["toVersion"],
+        STORAGE_LIFETIME_SCHEMA_VERSION_V9
+    );
+    assert_eq!(manifest["migration"]["existingRowsDeleted"], false);
+    assert_eq!(manifest["runtimeImplemented"], false);
+    assert_eq!(manifest["publicWireChanged"], false);
+    validate_storage_compaction_resume_witness_policy_v1(&policy).expect("exact v9 policy");
+    validate_storage_lifetime_v9_migration_preflight(true, 0, 0).expect("safe v9 preflight");
+    assert!(validate_storage_lifetime_v9_migration_preflight(false, 0, 0).is_err());
+    assert!(validate_storage_lifetime_v9_migration_preflight(true, 1, 0).is_err());
+    assert!(validate_storage_lifetime_v9_migration_preflight(true, 0, 1).is_err());
+    assert_eq!(policy, storage_compaction_resume_witness_policy_v1());
+    validate_storage_lifetime_activation_policy_v2(&activation).expect("exact activation v2");
+    assert_eq!(activation, storage_lifetime_activation_policy_v2());
+    assert_eq!(
+        storage_lifetime_activation_policy_v1()["databaseMigration"],
+        "none"
+    );
+    assert_eq!(
+        activation["publicWire"],
+        storage_lifetime_activation_policy_v1()["publicWire"]
+    );
+
+    let plan_value = cases["validPlan"].clone();
+    let plan = validate_storage_compaction_plan_v1(&plan_value).expect("valid plan");
+    let rows = make_v9_plan_rows(&cases["validDeleteRowTemplate"]);
+    validate_storage_compaction_plan_row_binding_v1(&plan, &rows[0], false, None, false)
+        .expect("exact frozen binding");
+    for (index, batch) in rows
+        .chunks(STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1 as usize)
+        .enumerate()
+    {
+        let previous = (index * STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1 as usize) as u32;
+        validate_storage_compaction_plan_batch_v1(
+            &plan_value,
+            &Value::Array(batch.to_vec()),
+            previous,
+            previous + batch.len() as u32 == STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1,
+        )
+        .expect("bounded exact plan batch");
+    }
+    validate_storage_compaction_plan_batch_v1(
+        &plan_value,
+        &Value::Array(rows[..100].to_vec()),
+        0,
+        false,
+    )
+    .expect("bounded witnessed prefix");
+
+    for path in cases["malformedHeaderPaths"]
+        .as_array()
+        .expect("header paths")
+    {
+        let path = path.as_str().expect("header path");
+        let mut invalid = plan_value.clone();
+        invalid[path] = match path {
+            "deleteThroughSequence" => serde_json::json!(999),
+            "anchorAggregateSequence" => serde_json::json!(1002),
+            "expectedRows" => serde_json::json!(1000),
+            "baselineProjectionDigest" => serde_json::json!("A".repeat(64)),
+            "previousSuccessfulJobId" => serde_json::json!(plan.job_id),
+            "plannedAt" => serde_json::json!("2026-09-08T00:59:59Z"),
+            _ => unreachable!(),
+        };
+        assert!(
+            validate_storage_compaction_plan_v1(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+
+    for path in cases["malformedRowPaths"].as_array().expect("row paths") {
+        let path = path.as_str().expect("row path");
+        let mut invalid = rows[0].clone();
+        invalid[path] = match path {
+            "ordinal" => serde_json::json!(0),
+            "aggregateSequence" => serde_json::json!(2),
+            "decision" => serde_json::json!("retainAnchor"),
+            "canonicalPayloadDigest" => serde_json::json!("a".repeat(64)),
+            "baselineId" => serde_json::json!("other"),
+            "operationFrozenBeforePlan" => serde_json::json!(true),
+            "messageFrozenBeforePlan" => serde_json::json!(true),
+            _ => unreachable!(),
+        };
+        let rejected = if matches!(
+            path,
+            "operationFrozenBeforePlan" | "messageFrozenBeforePlan"
+        ) {
+            validate_storage_compaction_plan_row_binding_v1(&plan, &invalid, false, None, false)
+                .is_err()
+        } else {
+            validate_storage_compaction_plan_row_v1(&plan, &invalid).is_err()
+        };
+        assert!(rejected, "accepted {path}");
+    }
+
+    for name in cases["malformedPrefixCases"]
+        .as_array()
+        .expect("prefix cases")
+    {
+        let name = name.as_str().expect("prefix name");
+        let mut invalid = rows[..100].to_vec();
+        let (previous, exhausted) = match name {
+            "missing" => {
+                invalid.remove(0);
+                (0, false)
+            }
+            "gap" => {
+                invalid[1]["ordinal"] = serde_json::json!(3);
+                (0, false)
+            }
+            "duplicateOrdinal" => {
+                invalid[1]["ordinal"] = serde_json::json!(1);
+                (0, false)
+            }
+            "duplicateSourceRowid" => {
+                invalid[1]["eventRowid"] = serde_json::json!(1);
+                (0, false)
+            }
+            "duplicateOperation" => {
+                invalid[1]["operationId"] = serde_json::json!("operation_1");
+                (0, false)
+            }
+            "duplicateAggregateTuple" => {
+                invalid[1]["aggregateSequence"] = serde_json::json!(1);
+                (0, false)
+            }
+            "exhaustedBefore1001" => (0, true),
+            "notExhaustedAt1001" => {
+                invalid = vec![rows[1000].clone()];
+                (1000, false)
+            }
+            "extraAfterCursor" => {
+                invalid = vec![rows[1000].clone()];
+                (1001, false)
+            }
+            _ => unreachable!(),
+        };
+        assert!(
+            validate_storage_compaction_plan_batch_v1(
+                &plan_value,
+                &Value::Array(invalid),
+                previous,
+                exhausted,
+            )
+            .is_err(),
+            "accepted {name}"
+        );
+    }
+
+    let cursor_start = cases["validCursorStart"].clone();
+    validate_storage_compaction_cursor_transition_v3(None, &cursor_start, 0).expect("cursor start");
+    let cursor_100 = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "planEligibility",
+        "afterPlanOrdinal": 100,
+        "scanExhausted": false,
+    });
+    validate_storage_compaction_cursor_transition_v3(Some(&cursor_start), &cursor_100, 100)
+        .expect("bounded cursor progress");
+    let cursor_end = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "planEligibility",
+        "afterPlanOrdinal": 1001,
+        "scanExhausted": true,
+    });
+    let cursor_next = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "freezeOperations",
+        "afterPlanOrdinal": 0,
+        "scanExhausted": false,
+    });
+    validate_storage_compaction_cursor_transition_v3(Some(&cursor_end), &cursor_next, 0)
+        .expect("exact next phase");
+
+    for name in cases["malformedCursorCases"]
+        .as_array()
+        .expect("cursor cases")
+    {
+        let name = name.as_str().expect("cursor name");
+        let rejected = match name {
+            "legacyV2" => {
+                let mut invalid = cursor_start.clone();
+                invalid["schemaVersion"] = serde_json::json!(2);
+                validate_storage_compaction_cursor_v3(&invalid).is_err()
+            }
+            "wrongPhase" => {
+                let mut invalid = cursor_start.clone();
+                invalid["phase"] = serde_json::json!("freeze");
+                validate_storage_compaction_cursor_v3(&invalid).is_err()
+            }
+            "skipPhase" => {
+                let mut invalid = cursor_next.clone();
+                invalid["phase"] = serde_json::json!("freezeMessages");
+                validate_storage_compaction_cursor_transition_v3(Some(&cursor_end), &invalid, 0)
+                    .is_err()
+            }
+            "wrongCursorColumn" => {
+                let mut invalid = cursor_start.clone();
+                let object = invalid.as_object_mut().expect("cursor object");
+                object.remove("afterPlanOrdinal");
+                object.insert("afterEventRowid".into(), serde_json::json!(0));
+                validate_storage_compaction_cursor_v3(&invalid).is_err()
+            }
+            "over100Work" => {
+                let mut invalid = cursor_start.clone();
+                invalid["afterPlanOrdinal"] = serde_json::json!(101);
+                validate_storage_compaction_cursor_transition_v3(Some(&cursor_start), &invalid, 101)
+                    .is_err()
+            }
+            "exhaustionBefore1001" => {
+                let mut invalid = cursor_start.clone();
+                invalid["afterPlanOrdinal"] = serde_json::json!(100);
+                invalid["scanExhausted"] = serde_json::json!(true);
+                validate_storage_compaction_cursor_v3(&invalid).is_err()
+            }
+            "progressAfterExhaustion" => {
+                validate_storage_compaction_cursor_transition_v3(Some(&cursor_end), &cursor_end, 1)
+                    .is_err()
+            }
+            _ => unreachable!(),
+        };
+        assert!(rejected, "accepted {name}");
+    }
+
+    let pending_start = make_v9_compaction_job("pending", cursor_start.clone(), 0);
+    let running_start = make_v9_compaction_job("running", cursor_start.clone(), 0);
+    let pending_100 = make_v9_compaction_job("pending", cursor_100.clone(), 0);
+    for name in cases["validLifecycleCases"]
+        .as_array()
+        .expect("lifecycle cases")
+    {
+        let name = name.as_str().expect("lifecycle name");
+        let result = match name {
+            "armSeparateCommit" => validate_storage_compaction_lifecycle_transition_v3(
+                StorageCompactionLifecycleOperationV3::Arm,
+                &pending_start,
+                &running_start,
+                0,
+            ),
+            "batchSuccessAtomic" => validate_storage_compaction_lifecycle_transition_v3(
+                StorageCompactionLifecycleOperationV3::BatchSuccess,
+                &running_start,
+                &pending_100,
+                100,
+            ),
+            "commitUncertainPendingAdvanced" => {
+                validate_storage_compaction_lifecycle_transition_v3(
+                    StorageCompactionLifecycleOperationV3::CommitUncertain,
+                    &running_start,
+                    &pending_100,
+                    100,
+                )
+            }
+            _ => unreachable!(),
+        };
+        assert!(result.is_ok(), "rejected {name}: {result:?}");
+    }
+    for name in cases["malformedLifecycleCases"]
+        .as_array()
+        .expect("malformed lifecycle cases")
+    {
+        let name = name.as_str().expect("lifecycle name");
+        let rejected = match name {
+            "armAdvancesCursor" => validate_storage_compaction_lifecycle_transition_v3(
+                StorageCompactionLifecycleOperationV3::Arm,
+                &pending_start,
+                &make_v9_compaction_job("running", cursor_100.clone(), 0),
+                0,
+            )
+            .is_err(),
+            "batchLeavesAuthority" => validate_storage_compaction_lifecycle_transition_v3(
+                StorageCompactionLifecycleOperationV3::BatchSuccess,
+                &running_start,
+                &make_v9_compaction_job("pending", cursor_100.clone(), 1),
+                100,
+            )
+            .is_err(),
+            "runningAutoResumeWithoutVerification" => {
+                validate_storage_compaction_lifecycle_transition_v3(
+                    StorageCompactionLifecycleOperationV3::BatchSuccess,
+                    &running_start,
+                    &pending_start,
+                    0,
+                )
+                .is_err()
+            }
+            "completeBeforeRelease" => {
+                let mut final_pending = make_v9_compaction_job(
+                    "pending",
+                    serde_json::json!({
+                        "schemaVersion": 3,
+                        "cutoffEventRowid": 2000,
+                        "phase": "finalize",
+                        "afterPlanOrdinal": 0,
+                        "scanExhausted": true,
+                    }),
+                    0,
+                );
+                final_pending["privateState"]["planRowsReleased"] = serde_json::json!(false);
+                let mut succeeded = final_pending.clone();
+                succeeded["state"] = serde_json::json!("succeeded");
+                succeeded["completedAt"] = serde_json::json!("2026-09-08T02:00:00Z");
+                validate_storage_compaction_lifecycle_transition_v3(
+                    StorageCompactionLifecycleOperationV3::Complete,
+                    &final_pending,
+                    &succeeded,
+                    0,
+                )
+                .is_err()
+            }
+            _ => unreachable!(),
+        };
+        assert!(rejected, "accepted {name}");
+    }
+
+    assert_eq!(
+        validate_storage_compaction_admission_state_v3(&Value::Null).expect("no active job"),
+        None
+    );
+    validate_storage_compaction_admission_state_v3(&cases["validAdmissionPending"])
+        .expect("v3 pending admission");
+    let released_pending = serde_json::json!({
+        "jobId": "compact_v9_001",
+        "state": "pending",
+        "privateState": {
+            "schemaVersion": 3,
+            "cursor": {
+                "schemaVersion": 3,
+                "cutoffEventRowid": 2000,
+                "phase": "finalize",
+                "afterPlanOrdinal": 0,
+                "scanExhausted": true,
+            },
+            "planRowsComplete": true,
+            "operationsVerified": true,
+            "equivalenceVerified": true,
+            "planRowsReleased": true,
+        },
+        "authorityCount": 0,
+        "planHeaderPresent": true,
+    });
+    validate_storage_compaction_admission_state_v3(&released_pending)
+        .expect("released final pending retains header evidence");
+    for name in cases["malformedAdmissionCases"]
+        .as_array()
+        .expect("admission cases")
+    {
+        let name = name.as_str().expect("admission name");
+        let mut invalid = cases["validAdmissionPending"].clone();
+        match name {
+            "activeV2Pending" => invalid["privateState"]["schemaVersion"] = serde_json::json!(2),
+            "running" => invalid["state"] = serde_json::json!("running"),
+            "nonEmptyAuthority" => invalid["authorityCount"] = serde_json::json!(1),
+            "missingPlan" => invalid["planHeaderPresent"] = serde_json::json!(false),
+            "releasedBeforeEquivalence" => {
+                invalid["privateState"]["planRowsReleased"] = serde_json::json!(true)
+            }
+            "unknownField" => invalid["unknown"] = serde_json::json!(true),
+            _ => unreachable!(),
+        }
+        assert!(
+            validate_storage_compaction_admission_state_v3(&invalid).is_err(),
+            "accepted {name}"
+        );
+    }
+
+    for path in cases["malformedPolicyPaths"]
+        .as_array()
+        .expect("policy paths")
+    {
+        let path = path.as_str().expect("policy path");
+        let pointer = format!("/{}", path.replace('.', "/"));
+        let mut invalid = policy.clone();
+        let target = invalid.pointer_mut(&pointer).expect("policy mutation path");
+        *target = match target {
+            Value::Bool(value) => Value::Bool(!*value),
+            Value::Number(_) => serde_json::json!(999),
+            _ => serde_json::json!("relaxed"),
+        };
+        assert!(
+            validate_storage_compaction_resume_witness_policy_v1(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+}
+
+fn make_v9_plan_rows(template: &Value) -> Vec<Value> {
+    (1..=STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1)
+        .map(|ordinal| {
+            let mut row = template.clone();
+            row["ordinal"] = serde_json::json!(ordinal);
+            row["eventRowid"] = serde_json::json!(ordinal);
+            row["eventId"] = serde_json::json!(format!("event_{ordinal}"));
+            row["operationId"] = serde_json::json!(format!("operation_{ordinal}"));
+            row["aggregateSequence"] = serde_json::json!(ordinal);
+            if ordinal == STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1 {
+                row["decision"] = serde_json::json!("retainAnchor");
+                row["baselineId"] = Value::Null;
+                row["baselineProjectionDigest"] = Value::Null;
+            }
+            row
+        })
+        .collect()
+}
+
+fn make_v9_compaction_job(state: &str, cursor: Value, authority_count: u32) -> Value {
+    let phase = cursor["phase"].as_str().expect("cursor phase");
+    let exhausted = cursor["scanExhausted"]
+        .as_bool()
+        .expect("cursor exhaustion");
+    let phase_index = STORAGE_COMPACTION_PHASES_V3
+        .iter()
+        .position(|candidate| *candidate == phase)
+        .expect("known phase");
+    serde_json::json!({
+        "jobId": "compact_v9_001",
+        "state": state,
+        "privateState": {
+            "schemaVersion": 3,
+            "cursor": cursor,
+            "planRowsComplete": phase_index > 0 || exhausted,
+            "operationsVerified": phase_index > 6 || (phase_index == 6 && exhausted),
+            "equivalenceVerified": phase_index > 7 || (phase_index == 7 && exhausted),
+            "planRowsReleased": phase_index > 8 || (phase_index == 8 && exhausted),
+        },
+        "authorityCount": authority_count,
+        "failureKind": null,
+        "completedAt": null,
+    })
+}

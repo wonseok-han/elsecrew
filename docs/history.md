@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D compaction resume witness 계약)
+
+- **결정 고정**: V8 compaction cursor만으로 active `pending`의 재개 결정을 증명할 수 없어 additive storage V9와 private state/cursor schema 3을 정의했다. 한 job은 retained boundary 다음 1,000 delete row와 1 anchor를 immutable header + `WITHOUT ROWID` ordinal witness로 고정하며, `afterPlanOrdinal`까지 source·receipt·message·baseline·digest를 bounded 재검증한다. active V2 pending, running/non-empty authority/commit 불명은 mutation 없이 admission 실패다.
+- **안전·호환 경계**: 기존 V2/V6/V7/V8와 activation V1, 공개 D1 `system.status`·`storage.status`·capability는 바꾸지 않았다. V8→V9는 active compaction 없음·empty authority 선행 조건의 additive migration이며 한 step 100 work/1 MiB primary/8 MiB retained+dependency, 단일 writer, exact 1,000-delete job, append-after-cutoff retained tail, 성공 뒤 bounded plan-row release와 immutable terminal header를 고정했다.
+- **범위·검증·다음**: Rust/TypeScript validator, V9 migration/공유 malformed fixture, activation V2 golden까지만 계약으로 추가했다. focused Rust 1개, protocol 전체 49개, V1~V9 SQLite migration과 기존 lifetime/activation을 포함한 Node 32개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. runtime migration/admission/scheduler/delete writer는 구현되지 않았고 이 계약 commit 자체는 readiness나 자동 compaction 활성화를 뜻하지 않는다. 독립 리뷰와 통합이 남는다.
+
 ### 2026-09-08 · by GPT-5 Codex (G5D activation comparator 경계 회귀)
 
 - **재리뷰 테스트 보강**: activation exact comparator가 own Symbol property, non-enumerable own extra property, 기존 nested object를 cycle로 교체한 입력을 모두 fail-closed하는 직접 회귀를 추가했다. production comparator·Rust·golden·public wire/runtime은 변경하지 않았다.

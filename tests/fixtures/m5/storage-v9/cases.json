@@ -1,0 +1,103 @@
+{
+  "validPlan": {
+    "jobId": "compact_v9_001",
+    "planSchemaVersion": 1,
+    "cutoffEventRowid": 2000,
+    "aggregateType": "chat",
+    "aggregateId": "chat_001",
+    "retainedBoundarySequence": 0,
+    "deleteThroughSequence": 1000,
+    "anchorAggregateSequence": 1001,
+    "expectedRows": 1001,
+    "baselineId": "baseline_1000",
+    "baselineProjectionDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "previousSuccessfulJobId": null,
+    "createdAt": "2026-09-08T01:00:00Z",
+    "plannedAt": "2026-09-08T01:00:01Z"
+  },
+  "validDeleteRowTemplate": {
+    "jobId": "compact_v9_001",
+    "ordinal": 1,
+    "eventRowid": 1,
+    "eventId": "event_1",
+    "operationId": "operation_1",
+    "requestId": null,
+    "aggregateType": "chat",
+    "aggregateId": "chat_001",
+    "aggregateSequence": 1,
+    "eventType": "chat.messageAppended",
+    "payloadSchemaVersion": 1,
+    "eventTimestamp": "2026-09-08T01:00:00Z",
+    "canonicalPayloadJson": "{}",
+    "canonicalPayloadDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "introducedMessageId": null,
+    "introducedMessageDigest": null,
+    "decision": "delete",
+    "baselineId": "baseline_1000",
+    "baselineProjectionDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "operationFrozenBeforePlan": false,
+    "messageFrozenBeforePlan": false
+  },
+  "validCursorStart": {
+    "schemaVersion": 3,
+    "cutoffEventRowid": 2000,
+    "phase": "planEligibility",
+    "afterPlanOrdinal": 0,
+    "scanExhausted": false
+  },
+  "validAdmissionPending": {
+    "jobId": "compact_v9_001",
+    "state": "pending",
+    "privateState": {
+      "schemaVersion": 3,
+      "cursor": {
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "freezeOperations",
+        "afterPlanOrdinal": 100,
+        "scanExhausted": false
+      },
+      "planRowsComplete": true,
+      "operationsVerified": false,
+      "equivalenceVerified": false,
+      "planRowsReleased": false
+    },
+    "authorityCount": 0,
+    "planHeaderPresent": true
+  },
+  "malformedHeaderPaths": [
+    "deleteThroughSequence", "anchorAggregateSequence", "expectedRows",
+    "baselineProjectionDigest", "previousSuccessfulJobId", "plannedAt"
+  ],
+  "malformedRowPaths": [
+    "ordinal", "aggregateSequence", "decision", "canonicalPayloadDigest",
+    "baselineId", "operationFrozenBeforePlan", "messageFrozenBeforePlan"
+  ],
+  "malformedPrefixCases": [
+    "missing", "gap", "duplicateOrdinal", "duplicateSourceRowid",
+    "duplicateOperation", "duplicateAggregateTuple", "exhaustedBefore1001",
+    "notExhaustedAt1001", "extraAfterCursor"
+  ],
+  "malformedCursorCases": [
+    "legacyV2", "wrongPhase", "skipPhase", "wrongCursorColumn",
+    "over100Work", "exhaustionBefore1001", "progressAfterExhaustion"
+  ],
+  "malformedAdmissionCases": [
+    "activeV2Pending", "running", "nonEmptyAuthority", "missingPlan",
+    "releasedBeforeEquivalence", "unknownField"
+  ],
+  "validLifecycleCases": [
+    "armSeparateCommit", "batchSuccessAtomic", "commitUncertainPendingAdvanced"
+  ],
+  "malformedLifecycleCases": [
+    "armAdvancesCursor", "batchLeavesAuthority", "runningAutoResumeWithoutVerification",
+    "completeBeforeRelease"
+  ],
+  "malformedPolicyPaths": [
+    "plan.expectedRows", "discovery.targetScan", "discovery.planningWrite",
+    "privateState.activeV2Pending", "lifecycle.reset", "authority.source",
+    "authority.singleActiveJob", "release.beforeEquivalence",
+    "multiJob.verification", "budgets.maxWorkUnitsPerStep",
+    "budgets.writerConnections", "activation.publicWireChanged"
+  ]
+}

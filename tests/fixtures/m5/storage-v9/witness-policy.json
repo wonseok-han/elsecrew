@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "generation": "storageCompactionResumeWitnessV1",
+  "storageSchema": {
+    "fromVersion": 8,
+    "toVersion": 9,
+    "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
+    "runtimeDigestAuthority": "rustRecomputesCanonicalPayloadAndMessageDigests"
+  },
+  "plan": {
+    "headerTable": "storage_compaction_plans",
+    "rowTable": "storage_compaction_plan_rows",
+    "rowTableWithoutRowid": true,
+    "planSchemaVersion": 1,
+    "aggregateTypes": ["project", "chat", "run", "lock"],
+    "deleteRows": 1000,
+    "expectedRows": 1001,
+    "boundary": "deleteThroughEqualsRetainedPlus1000AndAnchorEqualsDeleteThroughPlusOne",
+    "headerMutation": "forbidden",
+    "rowMutation": "forbidden",
+    "rowIdentity": "jobIdAndOrdinalPrimaryKeyWithUniqueSourceRowidOperationAndAggregateTuple",
+    "baseline": "everyDeleteRowMatchesHeaderBaselineIdentityAndDigest",
+    "anchor": "ordinal1001IsRetainAnchorAndRemainsLive",
+    "message": "nullableIdentityAndDigestAppearTogether"
+  },
+  "discovery": {
+    "targetScan": "volatileBoundedAggregateKeyset",
+    "forbidden": ["OFFSET", "fullVec", "tempTable", "unboundedScan"],
+    "creationTransaction": "beginImmediateRecheckCutoffMaterializationSafetyBoundariesAndExact1001Rows",
+    "planningWrite": "atMost100ConsecutiveOrdinalsAndCursorSameTransaction",
+    "largerPrefix": "oneExact1000DeleteJobThenRepeat"
+  },
+  "privateState": {
+    "schemaVersion": 3,
+    "fields": [
+      "schemaVersion", "cursor", "planRowsComplete", "operationsVerified",
+      "equivalenceVerified", "planRowsReleased"
+    ],
+    "cursorSchemaVersion": 3,
+    "phases": [
+      "planEligibility", "freezeOperations", "freezeMessages", "verifyPrefix",
+      "authorizeDelete", "deletePrefix", "verifyOperations", "verifyEquivalence",
+      "releasePlan", "finalize"
+    ],
+    "cursorColumn": "afterPlanOrdinal",
+    "finalizeCursor": "afterPlanOrdinalZeroAndTerminalEvidenceExhausted",
+    "resumeVerification": "beforeReleaseBoundedKeysetProvesOrdinalsOneThroughCursorNoGapsExtrasAndRehashesSourceReceiptMessageBaseline",
+    "exhausted": "trueOnlyAtExactly1001WitnessedRows",
+    "activeV2Pending": "failAdmissionUnsupportedNoMutation"
+  },
+  "lifecycle": {
+    "arm": "pendingToRunningSeparateCommittedSentinel",
+    "success": "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
+    "crash": "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
+    "reset": "forbidden",
+    "appendAfterCutoff": "ignoredByPlanAndIncludedInRetainedTailEquivalence",
+    "currentStateSafetyBeforeDelete": "failureLeavesZeroMutationPending"
+  },
+  "authority": {
+    "source": "onlyDecisionDeletePlanRows",
+    "joins": "planHeaderCurrentJobExactPlanRowAndExistingPrefix",
+    "singleActiveJob": "schemaPartialUniquePendingOrRunning",
+    "deleteBatchRows": 100,
+    "mustBeEmptyAtPending": true
+  },
+  "release": {
+    "planRows": "boundedAfterPrivateEquivalenceOnly",
+    "resumeVerification": "releasedOrdinalPrefixAbsentAndRetainedSuffixExactAgainstTerminalEvidence",
+    "header": "retainedAfterSuccess",
+    "terminalEvidence": "retainedAfterSuccessOrFailure",
+    "beforeEquivalence": "forbidden"
+  },
+  "multiJob": {
+    "previousSuccessfulJob": "optionalExactImmediatePredecessor",
+    "verification": "boundedPrimaryKeyLookupNoChainTraversal",
+    "progression": "retainedBoundaryEqualsPreviousDeleteThroughAndNewJobDeletesNextExact1000",
+    "activationWithoutBoundedTerminalEvidence": "forbidden"
+  },
+  "budgets": {
+    "maxWorkUnitsPerStep": 100,
+    "maxCanonicalPrimaryInputBytesPerStep": 1048576,
+    "maxRetainedAndDependencyInputBytesPerStep": 8388608,
+    "callerConfigurable": false,
+    "writerConnections": 1
+  },
+  "activation": {
+    "contractOnly": true,
+    "runtimeImplemented": false,
+    "productExecutionEnabled": false,
+    "automaticSchedulingEnabled": false,
+    "publicWireChanged": false
+  }
+}

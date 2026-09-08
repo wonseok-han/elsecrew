@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 9,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v8-to-v9.sql",
+    "predecessorMigrationFile": "../storage-v8/migration-v7-to-v8.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 8,
+    "toVersion": 9,
+    "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
+    "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "idempotency": "exactStorageV9NoOpBeforeMigrationSql",
+    "historyBackfill": "none",
+    "tablesAdded": ["storage_compaction_plans", "storage_compaction_plan_rows"],
+    "tablesRebuilt": ["storage_schema_meta"],
+    "indexesAdded": [
+      "maintenance_jobs_single_active_lossless_compaction",
+      "storage_compaction_plans_previous_success",
+      "storage_compaction_plan_rows_source_rowid",
+      "storage_compaction_plan_rows_operation",
+      "storage_compaction_plan_rows_aggregate"
+    ],
+    "triggersAdded": [
+      "storage_compaction_plans_exact_insert",
+      "storage_compaction_plans_immutable_update",
+      "storage_compaction_plans_immutable_delete",
+      "storage_compaction_plan_rows_exact_insert",
+      "storage_compaction_plan_rows_immutable_update",
+      "storage_compaction_plan_rows_release_only",
+      "ledger_compaction_prefixes_require_v9_plan",
+      "ledger_compaction_delete_authority_require_v9_plan"
+    ],
+    "activeJobPrecondition": "noPendingOrRunningLosslessCompaction",
+    "deleteAuthorityPrecondition": "empty",
+    "runtimeGuardDdlAllowed": false,
+    "existingRowsDeleted": false,
+    "downgradePolicy": "unsupportedAfterV9Activation"
+  },
+  "resumeWitnessPolicyFile": "witness-policy.json",
+  "casesFile": "cases.json",
+  "activationPolicyFile": "../storage-activation-v2/manifest.json",
+  "runtimeImplemented": false,
+  "publicWireChanged": false
+}
