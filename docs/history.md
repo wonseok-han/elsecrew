@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G6 package artifact parent path 재리뷰 수리)
+
+- **수리**: repository root만 신뢰 anchor로 두고, package preflight는 root 아래 기존 `out`·package·ZIP 경로의 모든 component를 `lstat`해 symlink면 package 실행 전 `NOT_READY`로 차단한다. package 성공 뒤에는 `out`부터 package root/각 asset의 모든 parent와 leaf의 fresh/non-symlink를 재확인하며, make 뒤 ZIP도 `out/make/zip/<platform>/<arch>` parent와 leaf를 확인하고서만 metrics로 진행한다.
+- **회귀**: clean fixture에서 `out`이 외부 output을 가리키면 package command 자체가 실행되지 않고, make 단계에서 ZIP parent가 외부 directory로 바뀌면 metrics가 실행되지 않는 것을 고정했다. 외부 target의 leaf가 fresh regular file인 경우도 parent symlink로 거부된다.
+- **검증·경계**: focused Node package/harness/metrics/staging 36 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, 두 gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 `NOT_READY`이며 실제 clean package/make, 서명/notarization, Windows 실기기 증거는 남아 있다.
+
 ### 2026-09-08 · by GPT-5 Codex (G6 gate 독립 리뷰 P1/P2 수리)
 
 - **P1 수리**: package 성공 직후 package root와 executable/ASAR/외부 sidecar의 freshness·symlink를 확인하고, 각 leaf까지의 중간 directory도 `lstat`으로 symlink를 거부한다. 이 검증이 실패하면 smoke/make/metrics를 전혀 실행하지 않는다. make 성공 뒤에는 고정 ZIP의 freshness·symlink를 별도로 확인한 뒤 metrics를 실행한다. stale package와 symlink된 sidecar directory가 smoke에 도달하지 않는 회귀를 추가했다.

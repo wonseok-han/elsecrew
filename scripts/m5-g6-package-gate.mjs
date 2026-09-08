@@ -82,6 +82,12 @@ export function runPackageGate(options = {}) {
     return finish(report, repository, makeDirectory, writeFile, now);
   }
 
+  const preflight = validateExistingArtifactPaths(repository, artifacts.requiredOutputs, lstat);
+  if (preflight.length > 0) {
+    report.reasons.push(...preflight);
+    return finish(report, repository, makeDirectory, writeFile, now);
+  }
+
   const runCommand = (command) => {
     const result = commandResult(command, run(command.command, command.args, { cwd: repository, encoding: "utf8", stdio: "inherit" }));
     report.results.push(result);
@@ -95,7 +101,7 @@ export function runPackageGate(options = {}) {
   const packageCommand = { id: "package", command: "pnpm", args: ["exec", "electron-forge", "package"] };
   if (!runCommand(packageCommand)) return finish(report, repository, makeDirectory, writeFile, now);
 
-  const packageProvenance = validateFreshPackageArtifacts(artifacts, startedAtMs, lstat);
+  const packageProvenance = validateFreshPackageArtifacts(repository, artifacts, startedAtMs, lstat);
   if (packageProvenance.length > 0) {
     report.reasons.push(...packageProvenance);
     return finish(report, repository, makeDirectory, writeFile, now);
@@ -106,7 +112,10 @@ export function runPackageGate(options = {}) {
   const makeCommand = { id: "make", command: "pnpm", args: ["exec", "electron-forge", "make", "--skip-package"] };
   if (!runCommand(makeCommand)) return finish(report, repository, makeDirectory, writeFile, now);
 
-  const archiveProvenance = validateFreshArtifacts([artifacts.archive], startedAtMs, lstat);
+  const archiveProvenance = [
+    ...validateFreshArtifacts([artifacts.archive], startedAtMs, lstat),
+    ...validateArtifactAncestors(repository, [artifacts.archive], lstat),
+  ];
   if (archiveProvenance.length > 0) {
     report.reasons.push(...archiveProvenance);
     return finish(report, repository, makeDirectory, writeFile, now);
@@ -157,27 +166,65 @@ export function validateFreshArtifacts(paths, startedAtMs, lstat = lstatSync) {
   return reasons;
 }
 
-export function validateFreshPackageArtifacts(artifacts, startedAtMs, lstat = lstatSync) {
+export function validateFreshPackageArtifacts(repository, artifacts, startedAtMs, lstat = lstatSync) {
   const packagePaths = artifacts.requiredOutputs.slice(0, -1);
-  const reasons = validateFreshArtifacts(packagePaths, startedAtMs, lstat);
+  return [
+    ...validateFreshArtifacts(packagePaths, startedAtMs, lstat),
+    ...validateArtifactAncestors(repository, packagePaths, lstat),
+  ];
+}
+
+export function validateExistingArtifactPaths(repository, paths, lstat = lstatSync) {
+  const reasons = [];
   const seen = new Set();
-  for (const asset of packagePaths.slice(1)) {
-    const parts = relative(artifacts.packageDirectory, asset).split(/[\\/]/).filter(Boolean);
-    let current = artifacts.packageDirectory;
-    for (const part of parts.slice(0, -1)) {
-      current = resolve(current, part);
-      if (seen.has(current)) continue;
-      seen.add(current);
+  for (const target of paths) {
+    for (const path of artifactPathComponents(repository, target)) {
+      if (seen.has(path)) continue;
+      seen.add(path);
       try {
-        if (lstat(current).isSymbolicLink()) {
-          reasons.push({ code: "symlinkArtifact", detail: `required package path is a symlink: ${current}` });
+        if (lstat(path).isSymbolicLink()) {
+          reasons.push({ code: "symlinkArtifact", detail: `existing artifact path is a symlink: ${path}` });
         }
       } catch (error) {
-        reasons.push({ code: "missingArtifact", detail: `required package path is missing: ${current} (${String(error)})` });
+        if (error?.code === "ENOENT") break;
+        reasons.push({ code: "unreadableArtifactPath", detail: `cannot inspect artifact path: ${path} (${String(error)})` });
+        break;
       }
     }
   }
   return reasons;
+}
+
+export function validateArtifactAncestors(repository, paths, lstat = lstatSync) {
+  const reasons = [];
+  const directPaths = new Set(paths);
+  const seen = new Set();
+  for (const target of paths) {
+    for (const path of artifactPathComponents(repository, target)) {
+      if (directPaths.has(path) || seen.has(path)) continue;
+      seen.add(path);
+      try {
+        if (lstat(path).isSymbolicLink()) {
+          reasons.push({ code: "symlinkArtifact", detail: `required artifact parent is a symlink: ${path}` });
+        }
+      } catch (error) {
+        reasons.push({ code: "missingArtifact", detail: `required artifact parent is missing: ${path} (${String(error)})` });
+      }
+    }
+  }
+  return reasons;
+}
+
+function artifactPathComponents(repository, target) {
+  const parts = relative(repository, target).split(/[\\/]/).filter(Boolean);
+  if (parts.length === 0 || parts.some((part) => part === "..")) throw new Error(`artifact path escapes repository: ${target}`);
+  const paths = [];
+  let current = repository;
+  for (const part of parts) {
+    current = resolve(current, part);
+    paths.push(current);
+  }
+  return paths;
 }
 
 function commandResult(command, raw) {

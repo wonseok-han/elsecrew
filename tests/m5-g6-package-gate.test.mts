@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
@@ -122,6 +122,21 @@ test("G6 package gate rejects a dirty starting tree before it creates release ar
   });
 });
 
+test("G6 package gate preflight rejects an out symlink before package can write outside the repository", () => {
+  withFixture(({ root, artifacts }) => {
+    const out = resolve(root, "out");
+    const externalOut = resolve(root, "external-out");
+    renameSync(out, externalOut);
+    symlinkSync(externalOut, out);
+    const calls: string[][] = [];
+    const outcome = runWithSuccessfulCommands(root, artifacts, calls);
+    assert.equal(outcome.report.status, "NOT_READY");
+    assert.equal(outcome.exitCode, 2);
+    assert.ok(outcome.report.reasons.some((reason) => reason.code === "symlinkArtifact"));
+    assert.deepEqual(calls, []);
+  });
+});
+
 test("G6 package gate preserves the package-metrics PASS, FAIL, and NOT_READY exit mapping", () => {
   for (const [status, expectedExitCode] of [["PASS", 0], ["FAIL", 1], ["NOT_READY", 2]] as const) {
     withFixture(({ root, artifacts }) => {
@@ -170,7 +185,7 @@ test("G6 package gate rejects stale package assets before smoke or make", () => 
     assert.equal(outcome.report.status, "NOT_READY");
     assert.equal(outcome.exitCode, 2);
     assert.ok(outcome.report.reasons.some((reason) => reason.code === "symlinkArtifact"));
-    assert.deepEqual(calls, [["pnpm", "exec", "electron-forge", "package"]]);
+    assert.deepEqual(calls, []);
   });
 });
 
@@ -183,6 +198,41 @@ test("G6 package gate rejects a missing archive after make and before metrics", 
     assert.equal(outcome.exitCode, 2);
     assert.ok(outcome.report.reasons.some((reason) => reason.code === "missingArtifact"));
     assert.equal(calls.length, 3);
+  });
+});
+
+test("G6 package gate rejects a ZIP parent symlink after make before metrics", () => {
+  withFixture(({ root, artifacts }) => {
+    const calls: string[][] = [];
+    const outcome = runPackageGate({
+      root,
+      platform: "darwin",
+      arch: "arm64",
+      version: "0.1.2",
+      startedAt: STARTED_AT,
+      readGit: () => "",
+      spawnSync(command: string, args: string[]) {
+        calls.push([command, ...args]);
+        if (args[0] === "exec" && args[2] === "make") {
+          const makeDirectory = resolve(root, "out", "make");
+          const externalMake = resolve(root, "external-make");
+          renameSync(makeDirectory, externalMake);
+          symlinkSync(externalMake, makeDirectory);
+        }
+        if (args[0] === "scripts/m5-package-metrics.mjs") assert.fail("metrics must not run through a ZIP parent symlink");
+        return { status: 0, stdout: JSON.stringify(metrics("PASS", artifacts)) };
+      },
+      writeFileSync() {},
+      mkdirSync() {},
+    });
+    assert.equal(outcome.report.status, "NOT_READY");
+    assert.equal(outcome.exitCode, 2);
+    assert.ok(outcome.report.reasons.some((reason) => reason.code === "symlinkArtifact"));
+    assert.deepEqual(calls, [
+      ["pnpm", "exec", "electron-forge", "package"],
+      [process.execPath, "scripts/m5-electron-package-smoke.mjs"],
+      ["pnpm", "exec", "electron-forge", "make", "--skip-package"],
+    ]);
   });
 });
 
