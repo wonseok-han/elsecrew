@@ -17,6 +17,16 @@ pub(super) struct Catchup {
     workspaces: workspace::Scan,
     pub(super) armed: bool,
 }
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct ProgressMarker {
+    job_id: String,
+    phase: usize,
+    after: i64,
+    canonical: Option<super::super::canonical::ScanPosition>,
+    source: Option<(i64, bool)>,
+    workspaces: workspace::ProgressMarker,
+    armed: bool,
+}
 const PHASES: [&str; 5] = [
     "indexSource",
     "receipts",
@@ -98,6 +108,22 @@ impl Catchup {
             })
             .and_then(|n| n.checked_add(self.workspaces.retained_bytes().ok()?))
             .ok_or_else(session_error)
+    }
+    pub(super) fn progress_marker(&self) -> ProgressMarker {
+        ProgressMarker {
+            job_id: self.job_id.clone(),
+            phase: self.phase,
+            after: self.after,
+            canonical: self.canonical.as_ref().map(CanonicalProgress::position),
+            source: self.source.as_ref().map(|source| {
+                (
+                    source.bound.identity().source_rowid,
+                    source.digest.is_some(),
+                )
+            }),
+            workspaces: self.workspaces.progress_marker(),
+            armed: self.armed,
+        }
     }
     pub(super) fn step(
         &mut self,

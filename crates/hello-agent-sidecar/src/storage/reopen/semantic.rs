@@ -1363,7 +1363,6 @@ impl Phase {
             _ => 0,
         }
     }
-    #[cfg(test)]
     fn name(&self) -> &'static str {
         match self {
             Self::Canonical => "canonical",
@@ -1377,6 +1376,7 @@ pub(super) struct Progress {
     source: CanonicalProgress,
     projection: ProjectionBinding,
     phase: Phase,
+    revision: u64,
 }
 impl Progress {
     /// Transaction-local state: the owner supplies the connection, common input
@@ -1399,7 +1399,12 @@ impl Progress {
             source: CanonicalProgress::new(source),
             projection,
             phase: Phase::Canonical,
+            revision: 0,
         })
+    }
+
+    pub(super) fn progress_marker(&self) -> (&'static str, super::canonical::ScanPosition, u64) {
+        (self.phase.name(), self.source.position(), self.revision)
     }
 
     pub(super) fn retained_bytes(&self) -> Result<usize, SidecarError> {
@@ -1506,6 +1511,10 @@ impl Progress {
             } else if input.progress == 0 {
                 return Err(invalid());
             }
+            self.revision = self
+                .revision
+                .checked_add(input.progress)
+                .ok_or_else(invalid)?;
         }
         if cancelled() {
             return Ok(Disposition::Cancelled);

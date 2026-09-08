@@ -378,6 +378,96 @@ fn complete(session: &mut ReopenMaintenanceSession<'_>) -> usize {
     panic!("maintenance did not complete within the step guard");
 }
 
+fn insert_pending_compaction(
+    connection: &Connection,
+    job_id: &str,
+    phase: &str,
+    after: u64,
+    scan_exhausted: bool,
+    operations_verified: bool,
+    equivalence_verified: bool,
+) -> u64 {
+    let cutoff: u64 = connection
+        .query_row(
+            "SELECT coalesce(max(source_rowid),0) FROM (\
+               SELECT rowid AS source_rowid FROM events UNION ALL \
+               SELECT source_event_rowid AS source_rowid FROM frozen_operation_sources);",
+            [],
+            |row| row_u64(row, 0),
+        )
+        .unwrap();
+    let after = if after == u64::MAX { cutoff } else { after };
+    let private = json!({
+        "storageCompactionV2PrivateState": {
+            "schemaVersion": 1,
+            "cursor": {
+                "schemaVersion": 2,
+                "cutoffEventRowid": cutoff,
+                "phase": phase,
+                "afterEventRowid": after,
+                "scanExhausted": scan_exhausted,
+            },
+            "operationsVerified": operations_verified,
+            "equivalenceVerified": equivalence_verified,
+        }
+    });
+    connection
+        .execute(
+            "INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+               failure_kind,created_at,updated_at) \
+             VALUES (?1,'losslessCompaction','pending',?2,NULL,NULL,NULL,NULL,?3,?3);",
+            params![job_id, private.to_string(), STAMP],
+        )
+        .unwrap();
+    cutoff
+}
+
+fn seed_ready_reopen_operations(storage: &mut Storage, count: usize) {
+    let mut sources = Vec::new();
+    for ordinal in 0..count {
+        let project_id = format!("project_admission_{ordinal}");
+        let source = event(
+            &format!("evt_admission_{ordinal}"),
+            &format!("op_admission_{ordinal}"),
+            "project",
+            &project_id,
+            1,
+            json!({
+                "canonical_path": format!("/fixture/admission/{ordinal}"),
+                "project_id": project_id,
+            }),
+            STAMP,
+        );
+        storage.append_event(&source).unwrap();
+        sources.push(source);
+    }
+    run_bounded_materializer_to_ready(storage);
+    for source in &sources {
+        insert_exact_v8_frozen_operation(storage, source, STAMP);
+    }
+    let cutoff: u64 = storage
+        .connection
+        .query_row("SELECT coalesce(max(rowid),0) FROM events", [], |row| {
+            row_u64(row, 0)
+        })
+        .unwrap();
+    let proof = json!({"storageCompactionV2PrivateState": {
+        "schemaVersion": 1,
+        "cursor": {"schemaVersion": 2, "cutoffEventRowid": cutoff, "phase": "finalize",
+                   "afterEventRowid": cutoff, "scanExhausted": true},
+        "operationsVerified": true,
+        "equivalenceVerified": true,
+    }});
+    storage.connection.execute(
+        "INSERT INTO maintenance_jobs(\
+           job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+           failure_kind,created_at,updated_at) \
+         VALUES ('compact_admission_terminal','losslessCompaction','succeeded',?1,?2,?2,?2,NULL,?2,?2);",
+        params![proof.to_string(), STAMP],
+    ).unwrap();
+}
+
 fn observed(connection: &Connection, path: &Path) -> (DatabaseSnapshot, Vec<u8>) {
     (database_snapshot(connection), fs::read(path).unwrap())
 }
@@ -386,6 +476,168 @@ fn unchanged(connection: &Connection, path: &Path, before: &(DatabaseSnapshot, V
     assert!(connection.is_autocommit());
     assert_eq!(database_snapshot(connection), before.0);
     assert_eq!(fs::read(path).unwrap(), before.1);
+}
+
+#[test]
+fn product_admission_reopens_more_than_one_hundred_frozen_operations_in_bounded_steps() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_ready_reopen_operations(&mut storage, 101);
+    storage.checkpoint().unwrap();
+    let before = database_snapshot(&storage.connection);
+    drop(storage);
+
+    let legacy = match Storage::open(&path) {
+        Ok(_) => panic!("legacy temporary bound remains unchanged"),
+        Err(error) => error,
+    };
+    assert_eq!(legacy.kind(), "storageSchemaMismatch");
+
+    let mut connection = connection(&path);
+    let mut session = ReopenMaintenanceSession::start_for_admission(&mut connection).unwrap();
+    let calls = complete(&mut session);
+    assert!(calls > 1, "101 frozen sources must cross a bounded step");
+    drop(session);
+    assert_eq!(database_snapshot(&connection), before);
+    drop(connection);
+
+    let cancellation = AtomicBool::new(false);
+    let admitted = Storage::open_for_admission(&path, &cancellation)
+        .expect("product admission consumes the complete private proof");
+    assert_eq!(database_snapshot(&admitted.connection), before);
+}
+
+#[test]
+fn product_admission_defers_pending_without_decision_witness_across_phases() {
+    for (phase, operations, equivalence) in [
+        ("freezeOperations", false, false),
+        ("verifyEquivalence", true, false),
+        ("finalize", true, true),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).unwrap();
+        if phase == "freezeOperations" {
+            for ordinal in 0..2 {
+                storage
+                    .append_event(&event(
+                        &format!("evt_pending_{phase}_{ordinal}"),
+                        &format!("op_pending_{phase}_{ordinal}"),
+                        "project",
+                        &format!("project_pending_{phase}_{ordinal}"),
+                        1,
+                        json!({
+                            "project_id": format!("project_pending_{phase}_{ordinal}"),
+                            "canonical_path": format!("/fixture/pending/{ordinal}"),
+                        }),
+                        STAMP,
+                    ))
+                    .unwrap();
+            }
+            run_bounded_materializer_to_ready(&mut storage);
+        } else {
+            seed_ready_reopen_operations(&mut storage, 101);
+        }
+        let cutoff = storage
+            .connection
+            .query_row("SELECT coalesce(max(rowid),0) FROM events", [], |row| {
+                row_u64(row, 0)
+            })
+            .unwrap();
+        insert_pending_compaction(
+            &storage.connection,
+            &format!("pending_{phase}"),
+            phase,
+            if phase == "freezeOperations" {
+                0
+            } else {
+                u64::MAX
+            },
+            false,
+            operations,
+            equivalence,
+        );
+        assert!(cutoff > 0);
+        storage.checkpoint().unwrap();
+        let pending_before = table_rows(&storage.connection, "maintenance_jobs");
+        let database_before = database_snapshot(&storage.connection);
+        drop(storage);
+
+        assert!(
+            Storage::open(&path).is_err(),
+            "legacy {phase} remains fenced"
+        );
+        let cancellation = AtomicBool::new(false);
+        assert!(
+            Storage::open_for_admission(&path, &cancellation).is_err(),
+            "{phase}: V2 cursor alone cannot prove skipped eligibility"
+        );
+        let admitted = self::connection(&path);
+        assert_eq!(
+            table_rows(&admitted, "maintenance_jobs"),
+            pending_before,
+            "{phase}: pending job must remain byte-exact"
+        );
+        assert_eq!(database_snapshot(&admitted), database_before);
+        assert!(admitted.is_autocommit());
+    }
+}
+
+#[test]
+fn product_admission_rejects_unsafe_or_malformed_compaction_state_without_mutation() {
+    for mutation in [
+        "UPDATE maintenance_jobs SET state='running' WHERE job_id='pending_reject';",
+        "UPDATE maintenance_jobs SET cutoff_json=json_set(cutoff_json,'$.storageCompactionV2PrivateState.cursor.cutoffEventRowid',999999,'$.storageCompactionV2PrivateState.cursor.afterEventRowid',999999) WHERE job_id='pending_reject';",
+        "UPDATE maintenance_jobs SET cutoff_json=json_set(cutoff_json,'$.storageCompactionV2PrivateState.extra',1) WHERE job_id='pending_reject';",
+        "UPDATE maintenance_jobs SET cutoff_json=json_set(cutoff_json,'$.storageCompactionV2PrivateState.cursor.phase','finalize') WHERE job_id='pending_reject';",
+        "INSERT INTO maintenance_jobs(job_id,job_kind,state,cutoff_json,created_at,updated_at) SELECT 'pending_second',job_kind,state,cutoff_json,created_at,updated_at FROM maintenance_jobs WHERE job_id='pending_reject';",
+    ] {
+        let (_root, path) = fixture(true, 2);
+        let connection = connection(&path);
+        insert_pending_compaction(
+            &connection,
+            "pending_reject",
+            "freezeOperations",
+            0,
+            false,
+            false,
+            false,
+        );
+        connection.execute_batch(mutation).unwrap();
+        connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        let before = observed(&connection, &path);
+        drop(connection);
+        let cancellation = AtomicBool::new(false);
+        assert!(Storage::open_for_admission(&path, &cancellation).is_err());
+        let connection = self::connection(&path);
+        unchanged(&connection, &path, &before);
+    }
+
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).unwrap();
+    seed_exact_v8_authority(&mut storage);
+    storage.checkpoint().unwrap();
+    let before = observed(&storage.connection, &path);
+    drop(storage);
+    let cancellation = AtomicBool::new(false);
+    assert!(Storage::open_for_admission(&path, &cancellation).is_err());
+    let connection = self::connection(&path);
+    unchanged(&connection, &path, &before);
+}
+
+#[test]
+fn product_admission_no_progress_injection_fails_instead_of_spinning() {
+    let (_root, path) = fixture(true, 2);
+    let mut connection = connection(&path);
+    let before = observed(&connection, &path);
+    let mut session = ReopenMaintenanceSession::start_for_admission(&mut connection).unwrap();
+    session.force_no_progress_for_test();
+    assert_eq!(
+        session.step(&mut || false).unwrap_err().kind(),
+        "storageSchemaMismatch"
+    );
+    assert!(session.step(&mut || false).is_err());
+    drop(session);
+    unchanged(&connection, &path, &before);
 }
 
 #[test]

@@ -21,11 +21,28 @@ enum SourceStage {
         record_digest: Option<[u8; 32]>,
     },
 }
+#[derive(Clone, PartialEq, Eq)]
+enum SourceStageMarker {
+    Payload(canonical::ScanPosition),
+    FrozenEnvelope(canonical::ScanPosition),
+    Fields(i64, bool),
+}
 impl SourceStage {
     fn retained_bytes(&self) -> Result<usize, SidecarError> {
         match self {
             Self::Payload(p) | Self::FrozenEnvelope { scan: p, .. } => p.retained_bytes(),
             Self::Fields { bound, .. } => bound.retained_bytes(),
+        }
+    }
+    fn progress_marker(&self) -> SourceStageMarker {
+        match self {
+            Self::Payload(progress) => SourceStageMarker::Payload(progress.position()),
+            Self::FrozenEnvelope { scan, .. } => SourceStageMarker::FrozenEnvelope(scan.position()),
+            Self::Fields {
+                bound,
+                record_digest,
+                ..
+            } => SourceStageMarker::Fields(bound.identity().source_rowid, record_digest.is_some()),
         }
     }
 }
@@ -819,6 +836,21 @@ enum SnapshotProgress {
     Catchup(Box<catchup::Catchup>),
 }
 
+#[derive(Clone, PartialEq, Eq)]
+enum SnapshotProgressMarker {
+    Sources(bool, bool, i64, Option<SourceStageMarker>),
+    Copies(usize, i64),
+    Projections(
+        usize,
+        i64,
+        i64,
+        Option<(&'static str, canonical::ScanPosition, u64)>,
+    ),
+    Messages(bool, i64, Option<(i64, String, String, i64)>),
+    Workspaces(workspace::ProgressMarker),
+    Catchup(catchup::ProgressMarker),
+}
+
 impl SnapshotProgress {
     fn retained_bytes(&self) -> Result<usize, SidecarError> {
         match self {
@@ -834,6 +866,43 @@ impl SnapshotProgress {
                 .map_or(Ok(0), semantic::Progress::retained_bytes),
             Self::Workspaces(w) => w.retained_bytes(),
             Self::Catchup(c) => c.retained_bytes(),
+        }
+    }
+
+    fn progress_marker(&self) -> SnapshotProgressMarker {
+        match self {
+            Self::Sources(source) => SnapshotProgressMarker::Sources(
+                source.frozen,
+                source.require_index,
+                source.after,
+                source.active.as_ref().map(SourceStage::progress_marker),
+            ),
+            Self::Copies(copies) => SnapshotProgressMarker::Copies(copies.phase, copies.after),
+            Self::Projections(projections) => SnapshotProgressMarker::Projections(
+                projections.table,
+                projections.after,
+                projections.selected,
+                projections
+                    .active
+                    .as_ref()
+                    .map(semantic::Progress::progress_marker),
+            ),
+            Self::Messages(messages) => SnapshotProgressMarker::Messages(
+                messages.backward,
+                messages.after,
+                messages.outer.as_ref().map(|outer| {
+                    (
+                        outer.rowid,
+                        outer.message.clone(),
+                        outer.chat.clone(),
+                        outer.candidate,
+                    )
+                }),
+            ),
+            Self::Workspaces(workspaces) => {
+                SnapshotProgressMarker::Workspaces(workspaces.progress_marker())
+            }
+            Self::Catchup(catchup) => SnapshotProgressMarker::Catchup(catchup.progress_marker()),
         }
     }
 }
@@ -1203,6 +1272,29 @@ fn app_instance_projection(
     Ok(())
 }
 
+fn admission_compaction_cutoff(
+    connection: &Connection,
+    compacted: bool,
+) -> Result<u64, SidecarError> {
+    let unsafe_restart_state: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) OR \
+                    EXISTS(SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
+                           AND state IN ('pending','running') LIMIT 1);",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| session_error())?;
+    if unsafe_restart_state {
+        return Err(session_error());
+    }
+    if compacted {
+        verify_terminal_compaction_proof(connection)
+    } else {
+        Ok(0)
+    }
+}
+
 pub(crate) struct ReopenMaintenanceSession<'connection> {
     connection: &'connection mut Connection,
     epoch: i64,
@@ -1210,6 +1302,14 @@ pub(crate) struct ReopenMaintenanceSession<'connection> {
     ready: bool,
     job: Option<String>,
     progress: Option<SnapshotProgress>,
+    #[cfg(test)]
+    force_no_progress_once: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ReopenStartContext {
+    Legacy,
+    Admission,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1221,6 +1321,19 @@ pub(crate) enum ReopenMaintenanceStep {
 
 impl<'connection> ReopenMaintenanceSession<'connection> {
     pub(crate) fn start(connection: &'connection mut Connection) -> Result<Self, SidecarError> {
+        Self::start_inner(connection, ReopenStartContext::Legacy)
+    }
+
+    pub(crate) fn start_for_admission(
+        connection: &'connection mut Connection,
+    ) -> Result<Self, SidecarError> {
+        Self::start_inner(connection, ReopenStartContext::Admission)
+    }
+
+    fn start_inner(
+        connection: &'connection mut Connection,
+        context: ReopenStartContext,
+    ) -> Result<Self, SidecarError> {
         if !connection.is_autocommit() {
             return Err(session_error());
         }
@@ -1235,17 +1348,22 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
         projection::reject_hidden_rowids(&tx)?;
         derived::reject_hidden_rowids(&tx)?;
         let compacted = !projection::compaction_tables_empty(&tx)?;
-        let cutoff = if compacted {
-            verify_terminal_compaction_proof(&tx)?
-        } else {
-            0
+        let cutoff = match context {
+            ReopenStartContext::Legacy => {
+                let forbidden: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) OR EXISTS(SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' AND state IN ('pending','running') LIMIT 1)", [], |r| r.get(0),
+                ).map_err(|_| session_error())?;
+                if forbidden {
+                    return Err(session_error());
+                }
+                if compacted {
+                    verify_terminal_compaction_proof(&tx)?
+                } else {
+                    0
+                }
+            }
+            ReopenStartContext::Admission => admission_compaction_cutoff(&tx, compacted)?,
         };
-        let forbidden: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) OR EXISTS(SELECT 1 FROM maintenance_jobs WHERE job_kind='losslessCompaction' AND state IN ('pending','running') LIMIT 1)", [], |r| r.get(0),
-        ).map_err(|_| session_error())?;
-        if forbidden {
-            return Err(session_error());
-        }
         tx.commit().map_err(|_| session_error())?;
         if !connection.is_autocommit() {
             return Err(session_error());
@@ -1260,7 +1378,14 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 compacted,
                 materialization == "ready",
             ))),
+            #[cfg(test)]
+            force_no_progress_once: false,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_no_progress_for_test(&mut self) {
+        self.force_no_progress_once = true;
     }
 
     pub(crate) fn step(
@@ -1268,6 +1393,7 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
         cancelled: &mut impl FnMut() -> bool,
     ) -> Result<ReopenMaintenanceStep, SidecarError> {
         let mut progress = self.progress.take().ok_or_else(session_error)?;
+        let initial_progress = progress.progress_marker();
         if !self.connection.is_autocommit() {
             return Err(session_error());
         }
@@ -1292,73 +1418,85 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
             if data_version(&tx)? != self.epoch {
                 return Err(session_error());
             }
-            let result = match &mut progress {
-                SnapshotProgress::Sources(sources) => {
-                    let result = sources.step(&tx, self.cutoff, &mut usage, cancelled)?;
-                    if matches!(result, Disposition::Complete) {
-                        progress = if sources.frozen {
-                            SnapshotProgress::Sources(SourceScan::new(false, sources.require_index))
-                        } else {
-                            SnapshotProgress::Copies(CopiesScan { phase: 0, after: 0 })
-                        };
-                    }
-                    result
-                }
-                SnapshotProgress::Copies(copies) => {
-                    let result = copies.step(&tx, &mut usage)?;
-                    if matches!(result, Disposition::Complete) {
-                        progress = SnapshotProgress::Projections(ProjectionScan::new());
-                    }
-                    result
-                }
-                SnapshotProgress::Projections(projections) => {
-                    let result = projections.step(&tx, &mut usage, cancelled)?;
-                    if matches!(result, Disposition::Complete) {
-                        progress = SnapshotProgress::Messages(MessageScan {
-                            backward: false,
-                            after: 0,
-                            outer: None,
-                        });
-                    }
-                    result
-                }
-                SnapshotProgress::Messages(messages) => {
-                    let result = messages.step(&tx, self.cutoff, &mut usage)?;
-                    if matches!(result, Disposition::Complete) {
-                        progress = SnapshotProgress::Workspaces(workspace::Scan::new(self.ready));
-                    }
-                    result
-                }
-                SnapshotProgress::Workspaces(workspaces) => {
-                    let result = workspaces.step(&tx, &mut usage, cancelled)?;
-                    if matches!(result, Disposition::Complete) {
-                        if self.ready {
-                            if let Some(job) = self.job.as_ref() {
-                                let deleted=tx.execute("DELETE FROM lifetime_materialization_job WHERE singleton=1 AND job_id=?1 AND state='pending' AND phase='verifyBaselines' AND scan_exhausted=0",[job]).map_err(|_|session_error())?;
-                                let published=tx.execute("UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1 AND materialization_state='pending'",[]).map_err(|_|session_error())?;
-                                usage.work_units += 2;
-                                if deleted != 1 || published != 1 {
-                                    return Err(session_error());
-                                }
-                            }
-                            finished = true;
-                        } else {
-                            progress = SnapshotProgress::Catchup(Box::new(
-                                catchup::Catchup::start(&tx, &mut usage)?,
-                            ));
+            #[cfg(test)]
+            let force_no_progress = std::mem::take(&mut self.force_no_progress_once);
+            #[cfg(not(test))]
+            let force_no_progress = false;
+            let result = if force_no_progress {
+                Disposition::Pending
+            } else {
+                match &mut progress {
+                    SnapshotProgress::Sources(sources) => {
+                        let result = sources.step(&tx, self.cutoff, &mut usage, cancelled)?;
+                        if matches!(result, Disposition::Complete) {
+                            progress = if sources.frozen {
+                                SnapshotProgress::Sources(SourceScan::new(
+                                    false,
+                                    sources.require_index,
+                                ))
+                            } else {
+                                SnapshotProgress::Copies(CopiesScan { phase: 0, after: 0 })
+                            };
                         }
+                        result
                     }
-                    result
-                }
-                SnapshotProgress::Catchup(catchup) => {
-                    let result = catchup.step(&tx, self.cutoff, &mut usage, cancelled)?;
-                    if matches!(result, Disposition::Complete) {
-                        self.job = Some(std::mem::take(&mut catchup.job_id));
-                        self.ready = true;
-                        progress =
-                            SnapshotProgress::Sources(SourceScan::new(self.cutoff > 0, true));
+                    SnapshotProgress::Copies(copies) => {
+                        let result = copies.step(&tx, &mut usage)?;
+                        if matches!(result, Disposition::Complete) {
+                            progress = SnapshotProgress::Projections(ProjectionScan::new());
+                        }
+                        result
                     }
-                    result
+                    SnapshotProgress::Projections(projections) => {
+                        let result = projections.step(&tx, &mut usage, cancelled)?;
+                        if matches!(result, Disposition::Complete) {
+                            progress = SnapshotProgress::Messages(MessageScan {
+                                backward: false,
+                                after: 0,
+                                outer: None,
+                            });
+                        }
+                        result
+                    }
+                    SnapshotProgress::Messages(messages) => {
+                        let result = messages.step(&tx, self.cutoff, &mut usage)?;
+                        if matches!(result, Disposition::Complete) {
+                            progress =
+                                SnapshotProgress::Workspaces(workspace::Scan::new(self.ready));
+                        }
+                        result
+                    }
+                    SnapshotProgress::Workspaces(workspaces) => {
+                        let result = workspaces.step(&tx, &mut usage, cancelled)?;
+                        if matches!(result, Disposition::Complete) {
+                            if self.ready {
+                                if let Some(job) = self.job.as_ref() {
+                                    let deleted=tx.execute("DELETE FROM lifetime_materialization_job WHERE singleton=1 AND job_id=?1 AND state='pending' AND phase='verifyBaselines' AND scan_exhausted=0",[job]).map_err(|_|session_error())?;
+                                    let published=tx.execute("UPDATE storage_schema_meta SET materialization_state='ready' WHERE singleton=1 AND materialization_state='pending'",[]).map_err(|_|session_error())?;
+                                    usage.work_units += 2;
+                                    if deleted != 1 || published != 1 {
+                                        return Err(session_error());
+                                    }
+                                }
+                                finished = true;
+                            } else {
+                                progress = SnapshotProgress::Catchup(Box::new(
+                                    catchup::Catchup::start(&tx, &mut usage)?,
+                                ));
+                            }
+                        }
+                        result
+                    }
+                    SnapshotProgress::Catchup(catchup) => {
+                        let result = catchup.step(&tx, self.cutoff, &mut usage, cancelled)?;
+                        if matches!(result, Disposition::Complete) {
+                            self.job = Some(std::mem::take(&mut catchup.job_id));
+                            self.ready = true;
+                            progress =
+                                SnapshotProgress::Sources(SourceScan::new(self.cutoff > 0, true));
+                        }
+                        result
+                    }
                 }
             };
             if cancelled() {
@@ -1367,6 +1505,11 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
             if usage.work_units > 100
                 || usage.fragment_bytes > super::bytes::FRAGMENT_BYTES
                 || usage.encoded_bytes() > INPUT_BYTES
+            {
+                return Err(session_error());
+            }
+            if matches!(result, Disposition::Pending)
+                && progress.progress_marker() == initial_progress
             {
                 return Err(session_error());
             }

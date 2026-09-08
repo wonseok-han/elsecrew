@@ -45,7 +45,7 @@ pub(super) struct Progress {
     parser: Parser,
     comparison: Option<KeyComparison>,
 }
-type ScanPosition = (u64, Option<(u64, u64)>);
+pub(super) type ScanPosition = (u64, Option<(u64, u64)>);
 
 pub(crate) struct CanonicalColumnSession<'connection> {
     connection: &'connection mut Connection,
@@ -281,7 +281,7 @@ impl Progress {
             })
             .ok_or_else(invalid)
     }
-    fn position(&self) -> ScanPosition {
+    pub(super) fn position(&self) -> ScanPosition {
         (
             self.after,
             self.comparison
