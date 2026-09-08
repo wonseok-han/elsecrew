@@ -1,0 +1,31 @@
+{
+  "validMigrationPreflight": {
+    "exactStorageV9": true,
+    "activeLosslessJobs": 0,
+    "deleteAuthorityRows": 0
+  },
+  "malformedMigrationPreflight": [
+    "schemaDrift", "pendingJob", "runningJob", "nonEmptyAuthority"
+  ],
+  "validDeleteBatch": {
+    "phase": "deletePrefix",
+    "afterPlanOrdinal": 0,
+    "stepThroughPlanOrdinal": 100,
+    "authorityOrdinals": [1, 100]
+  },
+  "malformedDeleteBatches": [
+    "authorizeDeletePhase", "outsideInterval", "authorityGap", "over100",
+    "wrongPlanRow", "wrongPrefix", "partialBatch"
+  ],
+  "malformedPolicyPaths": [
+    "storageSchema.toVersion", "privateState.phaseOrderChanged",
+    "schemaIdentity.persistentObjects",
+    "authorizeDelete.authorityInsert", "deletePrefix.onlyMutationPhase",
+    "deletePrefix.maxRows", "deletePrefix.authorityPlanBinding",
+    "transaction.sameTransactionRequired",
+    "transaction.execution",
+    "transaction.pendingRequiresEveryArmedPlanSourceAndIndexAbsent",
+    "preservation.publicD1WireAndCapability",
+    "activation.runtimeWriterImplemented", "activation.publicWireChanged"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "storageSchemaVersion": 10,
+  "protocolVersion": 1,
+  "payloadSchemaVersion": 1,
+  "migration": {
+    "file": "migration-v9-to-v10.sql",
+    "predecessorMigrationFile": "../storage-v9/migration-v8-to-v9.sql",
+    "predecessorMigrationMutationAllowed": false,
+    "fromVersion": 9,
+    "toVersion": 10,
+    "mode": "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+    "precondition": "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "preflightEnforcement": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    "idempotency": "exactStorageV10NoOpBeforeMigrationSql",
+    "historyBackfill": "none",
+    "tablesAdded": [],
+    "tablesRebuilt": ["storage_schema_meta"],
+    "indexesAdded": [],
+    "triggersRemoved": ["ledger_compaction_delete_authority_require_v9_plan"],
+    "triggersAdded": [
+      "ledger_compaction_delete_authority_require_v10_plan_batch",
+      "event_source_index_require_v10_complete_delete_batch",
+      "maintenance_jobs_require_v10_delete_batch_completion",
+      "ledger_compaction_delete_authority_execute_v10_batch",
+      "ledger_compaction_delete_authority_finish_v10_batch"
+    ],
+    "activeJobPrecondition": "noPendingOrRunningLosslessCompaction",
+    "deleteAuthorityPrecondition": "empty",
+    "runtimeGuardDdlAllowed": false,
+    "existingRowsDeleted": false,
+    "downgradePolicy": "unsupportedAfterV10Activation"
+  },
+  "schemaIdentity": {
+    "source": "exactV1ThroughV10MigrationResult",
+    "comparison": "exactTypeNameTableNameCanonicalSql",
+    "persistentObjects": 75,
+    "sqliteAutoindexesExcluded": true
+  },
+  "deleteTransactionPolicyFile": "delete-policy.json",
+  "casesFile": "cases.json",
+  "activationPolicyFile": "../storage-activation-v3/manifest.json",
+  "runtimeWriterImplemented": false,
+  "productExecutionEnabled": false,
+  "publicWireChanged": false
+}

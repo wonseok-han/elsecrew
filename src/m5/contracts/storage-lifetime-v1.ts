@@ -36,6 +36,7 @@ export const STORAGE_LIFETIME_SCHEMA_VERSION_V6 = 6 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V7 = 7 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V8 = 8 as const;
 export const STORAGE_LIFETIME_SCHEMA_VERSION_V9 = 9 as const;
+export const STORAGE_LIFETIME_SCHEMA_VERSION_V10 = 10 as const;
 export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2 = 2 as const;
 export const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3 = 3 as const;
@@ -2841,6 +2842,127 @@ export function validateStorageLifetimeActivationPolicyV2(
     fail("storage lifetime activation policy v2 is not exact");
   }
   return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V2;
+}
+
+export const STORAGE_COMPACTION_DELETE_TRANSACTION_POLICY_V1 = {
+  schemaVersion: 1,
+  generation: "storageCompactionDeleteTransactionV1",
+  storageSchema: {
+    fromVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V9,
+    toVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+    precondition: "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    sqlPreflight: "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
+    mode: "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+    existingRowsDeleted: false,
+  },
+  schemaIdentity: {
+    version: STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+    source: "exactV1ThroughV10MigrationResult",
+    comparison: "exactTypeNameTableNameCanonicalSql",
+    persistentObjects: 75,
+    sqliteAutoindexesExcluded: true,
+  },
+  privateState: {
+    schemaVersion: STORAGE_COMPACTION_PRIVATE_STATE_SCHEMA_VERSION_V3,
+    cursorSchemaVersion: STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3,
+    phases: STORAGE_COMPACTION_PHASES_V3,
+    phaseOrderChanged: false,
+    flagsChanged: false,
+  },
+  authorizeDelete: {
+    mode: "boundedReadOnlyFinalWitness",
+    authorityInsert: "forbidden",
+    sourceMutation: "forbidden",
+  },
+  deletePrefix: {
+    onlyMutationPhase: true,
+    arm: "runningV3WithStepThroughPlanOrdinal",
+    planInterval: "openAfterPlanOrdinalThroughClosedStepThroughPlanOrdinal",
+    maxRows: STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
+    authorityOrdinal: "oneBasedContiguousWithinArmedBatch",
+    authorityPlanBinding: "planOrdinalEqualsAfterPlanOrdinalPlusAuthorityOrdinal",
+    source: "exactLiveEventAndSourceIndexMatchImmutableDeletePlanRow",
+    prefix: "exactCurrentPlanPrefix",
+    outsideInterval: "rejected",
+  },
+  transaction: {
+    steps: [
+      "insertCompleteContiguousAuthorityBatch",
+      "deleteMatchingSourceIndexRows",
+      "deleteMatchingEventRowsAndConsumeAuthority",
+      "advanceCursorAndReturnPending",
+    ],
+    sameTransactionRequired: true,
+    execution: "finalAuthorityInsertTriggersCompleteSourceDeleteAuthorityCleanupAndCursorAdvance",
+    pendingRequiresEveryArmedPlanSourceAndIndexAbsent: true,
+    pendingRequiresEmptyAuthority: true,
+    malformedPartialOrWrongOrdinal: "rollbackNoMutation",
+  },
+  preservation: {
+    releasePlanAndFinalize: "unchanged",
+    idleAndSucceededV9Rows: "preserved",
+    publicD1WireAndCapability: "unchanged",
+  },
+  activation: {
+    contractOnly: true,
+    runtimeWriterImplemented: false,
+    productExecutionEnabled: false,
+    automaticSchedulingEnabled: false,
+    publicWireChanged: false,
+  },
+} as const;
+
+export function validateStorageCompactionDeleteTransactionPolicyV1(
+  value: unknown,
+): typeof STORAGE_COMPACTION_DELETE_TRANSACTION_POLICY_V1 {
+  const policy = requireObject(value, "storage compaction delete transaction policy");
+  if (!exactPlainContractValue(policy, STORAGE_COMPACTION_DELETE_TRANSACTION_POLICY_V1)) {
+    fail("storage compaction delete transaction policy is not exact");
+  }
+  return policy as unknown as typeof STORAGE_COMPACTION_DELETE_TRANSACTION_POLICY_V1;
+}
+
+export function validateStorageLifetimeV10MigrationPreflight(
+  exactStorageV9: boolean,
+  activeLosslessJobs: number,
+  deleteAuthorityRows: number,
+): void {
+  const active = requireSafeUnsigned(activeLosslessJobs, "v10Preflight.activeLosslessJobs");
+  const authority = requireSafeUnsigned(deleteAuthorityRows, "v10Preflight.deleteAuthorityRows");
+  if (exactStorageV9 !== true || active !== 0 || authority !== 0) {
+    fail("storage v10 migration requires exact v9 with no active compaction or authority");
+  }
+}
+
+export const STORAGE_LIFETIME_ACTIVATION_POLICY_V3 = {
+  ...STORAGE_LIFETIME_ACTIVATION_POLICY_V2,
+  schemaVersion: 3,
+  generation: "storageLifetimeActivationV3",
+  databaseMigration: {
+    fromVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V9,
+    toVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+    precondition: "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    effect: "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+    existingRowsDeleted: false,
+    activeV3Pending: "failAdmissionUnsupportedNoMutation",
+  },
+  deleteTransaction: {
+    generation: "storageCompactionDeleteTransactionV1",
+    authorizeDelete: "boundedReadOnlyFinalWitness",
+    deletePrefix: "onlyMutationPhaseAtomicAuthoritySourceDeleteCursorAdvance",
+    privateStateSchemaVersion: STORAGE_COMPACTION_PRIVATE_STATE_SCHEMA_VERSION_V3,
+    publicWire: "unchanged",
+  },
+} as const;
+
+export function validateStorageLifetimeActivationPolicyV3(
+  value: unknown,
+): typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V3 {
+  const policy = requireObject(value, "storage lifetime activation policy v3");
+  if (!exactPlainContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V3)) {
+    fail("storage lifetime activation policy v3 is not exact");
+  }
+  return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V3;
 }
 
 export function validateStorageCompactionPlanV1(value: unknown): StorageCompactionPlanV1 {

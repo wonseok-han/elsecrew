@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V10 atomic delete 계약 수리)
+
+- **P0 additive 수리**: 제품이 이미 만들 수 있는 exact V9를 제자리 수정하지 않고 idle V9만 exact `sqlite_schema`로 preflight하는 V9→V10 migration을 추가했다. active pending/running 또는 non-empty authority와 같은 이름의 약화 trigger/추가 object를 persistent DDL 전에 rollback하며 idle/succeeded 기록은 보존한다.
+- **원자 삭제 계약**: V3 private schema·10개 phase·flags를 유지하면서 `authorizeDelete`를 bounded read-only witness로 고정했다. `deletePrefix`에서만 armed 최대 100개 plan interval과 exact prefix/live source에 결속한 1-based 연속 authority를 허용하고, 완전 batch의 마지막 INSERT가 source index/event 삭제·authority cleanup·cursor pending 전진을 같은 transaction에서 수행한다. gap/outside/>100/wrong plan·prefix/partial batch는 mutation 없이 거부하거나 rollback한다.
+- **검증·경계**: actual SQLite V1→V10 및 rollback/100-row delete/release/finalize Node 5/5, V9·activation 포함 Node 22/22, protocol Rust 50/50, TypeScript noEmit, Rust 2021 format, protocol strict clippy, diff check를 통과했다. V10 runtime migration/admission/scheduler writer와 product execution은 활성화하지 않았고 public D1 wire/capability·물리 cleanup은 그대로다. 500줄 history는 오래된 엔트리를 월별 archive로 이동해 300줄 이하로 롤오버했다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 admission digest P0/P1 수리)
 
 - **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. V3 raw 입력은 파싱 뒤 소유권을 남기지 않고 job·plan의 동시 retained 문자열을 모두 예산에 포함한다. plan/frozen/receipt digest 공동 위조, 8 MiB 초과 baseline digest, 결합 예산을 넘는 대형 job ID를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
@@ -149,222 +155,6 @@
 - **계약 경계**: 공개 protocol 타입·상수·capability·golden fixture와 직렬화·검증 분기는 바꾸지 않았다. 변경은 세 진단의 제안 문법과 이 기록뿐이며 새 허용/거부 동작을 추가하지 않는다.
 - **검증**: jobs/threads 4 제한에서 exact strict clippy exit 0, protocol crate 전체 44 passed/0 failed, 수정 Rust 3파일의 edition 2021 rustfmt check와 `git diff --check` exit 0다. workspace 전체 suite·actual provider·Electron·renderer·package·main·원격은 건드리지 않았다.
 
-### 2026-09-08 · by GPT-5.6-Sol (D1 malformed 회귀 통합·worktree 정리)
-
-- **테스트 통합**: exact `2ec19f20818321664af6e1dd66568f269e9f734a`가 D1 product/agent-fixture ready validator 양쪽에서 capability 순서 교환·`storage.status` 중복·unknown extra·누락·ready payload extra field를 Rust/TypeScript 표 기반 회귀로 거부한다. protocol 44개, Node lifetime 18개, TypeScript, rustfmt, diff 검증과 독립 리뷰 PASS 뒤 `460a23bce56dc8c9ad2d3bd64672cd0a7cad8bbe`로 통합했다.
-- **정리**: clean·무증거·사용 프로세스 없음과 branch 보존을 확인한 오래된 checkout 9개와 완료된 임시 테스트 checkout을 비강제 제거했다. 이번 목표 시작 기준 등록 child 20개에서 현재 9개로 줄었고 `.worktrees`는 약 8.6 GiB다. 남은 child는 미커밋 변경 또는 QA/`.omo` 증거가 있어 내용 확인·보존 전에는 제거하지 않는다.
-- **게이트 현황**: `pnpm harness:list`는 `g5d-storage-lifetime`을 scheduler/status/compaction script 3개 미구현으로, `g6-release`를 security/package/performance script 3개 미구현으로 정확히 `NOT_READY` 판정한다. 2단계 shell-ready/storage-admission 안전 정책 승인 전에는 dispatcher·실행 경로를 활성화하지 않으며 main 병합·push 없음.
-
-### 2026-09-08 · by GPT-5.6-Sol (D1 malformed ready 회귀 보강)
-
-- **테스트 보강**: D1 일반 제품과 agent-fixture ready validator가 capability 순서 교환, `storage.status` 중복, 알 수 없는 추가 capability, `storage.status` 누락, ready payload 추가 필드를 모두 거부하는 표 기반 Rust·TypeScript 회귀를 추가했다. 기존 legacy/D1 성공과 세대 교차 불일치 거부는 그대로 보존했다.
-- **계약 경계**: Rust의 `ReadyPayloadV1` strict serde envelope와 TypeScript `exactObject`가 추가 필드를 이미 거부하므로 production 계약 변경은 필요하지 않았다. 소유한 테스트와 이 기록 외에는 수정하지 않았다.
-- **검증**: focused Rust 1개, protocol crate 전체 44개, Node lifetime 계약 18개, root 고정 TypeScript `--noEmit`, Rust 2021 rustfmt와 `git diff --check`가 통과했다. 실제 provider·sidecar·Electron·renderer·fixture·main·원격은 건드리지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (D1 계약 통합·3초 제품 admission 결정 대기)
-
-- **통합**: exact `6df8532ade27b5a535edca0070ac5e2db4b8d3b5`의 D1 `storage.status` additive capability 계약은 관련 Rust 44개·Node 37개·TypeScript·rustfmt·diff 검증과 독립 리뷰 PASS 뒤 `1b1c978020c92566200349457ae76607fd7d3c21`로 통합했다. 기존 G5/G5A exact 협상과 실제 provider 비활성 경계는 유지하며 sidecar/Electron dispatcher는 아직 연결하지 않는다.
-- **성능 실측·폐기**: production-101의 warm 기준선은 172,685 calls·검증 102.066초였고 source 56.922초, catch-up 30.069초, projection 13.005초가 병목이다. bounded scanner 실험은 11.873초까지 줄였지만 3초 목표에 실패했고 승인된 호출당 100 work-unit 회계를 건너뛰어 독립 아키텍처 검토에서 통합 불가 판정을 받았다. 실험 코드·테스트·임시 assertion은 모두 안전하게 원복했으며 기능 commit은 없다.
-- **남은 결정·정리**: 검증을 약화하지 않고 `system.ready`를 3초 이내 shell-ready와 별도 storage admission으로 분리해, storage가 `verifying|failed`인 동안 recovery mutation·app instance 등록·append·fixture/actual run을 sidecar에서 fail-closed 차단할지 사용자 결정이 필요하다. worktree 감사 뒤 clean·patch-equivalent·무증거인 `g5d-v8-reopen-closure`와 `g5d-v8-reopen-projection`, 완료된 임시 계약/성능 checkout을 비강제 제거하고 모든 branch를 보존했다. 등록 child는 순증감 기준 20→18개, `.worktrees` 약 15 GiB이며 나머지는 고유 commit·미커밋 변경·QA/`.omo` 증거 때문에 보존한다. main 병합·push 없음.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D D1 storage.status capability 계약)
-
-- **계약 고정**: base `25ec6426ef529b12160ffd71fe84320aab943139`의 `codex/g5d-storage-status-contract`에서 protocol v1에 `storage.status`를 예약하고, 기존 exact G5/G5A 상수·parser를 변경하지 않은 채 각각 뒤에 해당 메서드 하나만 추가하는 exact D1 일반 제품/agent-fixture capability 상수·parser를 Rust와 TypeScript에 추가했다. 새 `storage-status-d1` golden은 두 모드의 legacy/D1 배열을 함께 고정하며, 기존 storage-v2 D0A manifest의 `advertisedBeforeD1=false`·`dispatchableBeforeD1=false`는 역사 기록으로 그대로 보존한다. `M5BridgeV6.getStorageStatus`만 renderer bridge 추가 지점임을 회귀로 고정했다.
-- **검증**: protocol crate `cargo test`는 jobs/threads 4 제한에서 44 passed, Node protocol/G5/G5A/G5D 계약은 37 passed, 직접 TypeScript `--noEmit`, Rust 2021 rustfmt와 `git diff --check`가 통과했다. 첫 pnpm TypeScript 시도는 worktree 의존성 부재로 registry 재시도에 들어가 결과로 사용하지 않았고, 저장소 루트의 기존 tsc binary를 직접 실행해 검증했다.
-- **경계·다음**: 이번 commit은 capability negotiation/public parser/golden만 소유한다. sidecar ready 광고·dispatcher·status 수집, Electron/preload/renderer 소비자는 각 구현 담당이 두 D1 exact 상수 중 실행 모드에 맞는 하나를 선택해 별도 연결해야 하며, 과거 G5/G5A parser를 D1 parser로 대체하거나 `run.startAgentSmoke`를 광고하면 안 된다. 실제 provider·사용자 프로젝트·main·원격은 건드리지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (M5 잔여 작업 재대조)
-
-- **현재 기준**: `m5/coding-agent-ide`의 `5a7bc54`에서 작업 트리는 대조 시작 시 clean이다. 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·Monaco 편집/diff와 G5~G5C fixture/복구, G5D private 대형 snapshot 검증·catch-up까지 구현됐지만 일반 `--stdio`의 실제 Claude Code/Codex 실행은 아직 연결되지 않았다.
-- **다음 우선순위**: 기존 승인 순서대로 G5D를 제품 시작·복구·실행 admission에 연결한다. 101-workspace 관측 98.288초가 3초 목표를 넘으므로 사용자 대기 경로와 fail-closed admission을 함께 정리하고, 100개 초과 frozen operation, bounded compaction writer/delete, 자동 worker scheduling과 `storage.status`를 닫은 뒤 실제 provider adapter·인증/모델 출력 연결로 넘어간다.
-- **후속 게이트**: 새 sidecar를 포함한 G6 보안·성능·패키지 재검증, 전체 OS Quit E2E, Windows snapshot/자손 회수·실기기 검증, 서명/배포·업데이트 결정이 남는다. 기존 protocol strict clippy 3개와 미정리 child worktree 20개(약 16 GiB)는 기능 증거/미커밋 여부를 확인한 뒤 별도로 정리한다. 이번 대조는 코드·브랜치·main·원격을 변경하지 않았고 push도 하지 않았다.
-
-### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 내부 기능·통합 QA 마감)
-
-- **완료**: 독립 리뷰 PASS의 기능 `5ad7162`를 통합한 `5658480519a11db7eab4795112f1810221ebc801`에서 단일 `cargo test --workspace --manifest-path Cargo.toml --locked`가 exit 0이다. Tauri 105/13 ignored·core 82·protocol 43·sidecar 289/1 ignored·stdio 10으로 총 **529 passed/14 ignored/0 failed**이며, 수정된 guard의 정상 production101 전체 경로도 통과했다. 동일 Rust subset은 반복하지 않았다.
-- **증거·경계**: QA worktree `.artifacts/m5-qa/5658480519a11db7eab4795112f1810221ebc801-snapshot-wave/manifest.md`와 raw log에 554초 실행·source clean·process 종료·Node/renderer 재사용 범위를 보존한다. 단일 workspace PASS이지 13단계 공식 하네스·새 release package·전체 G5D/G6 READY는 아니다. 기존 protocol strict lint 3개, 98.288초 대형 관측/3초 제품 목표 미충족, startup/복구/admission·compaction/scheduler/status·실제 provider·Windows는 후속이다.
-- **정리·다음**: 통합/clean/ignored 없음/담당 종료를 확인한 `.worktrees/g5d-snapshot-catchup` 하나를 비강제 제거했고 `codex/g5d-snapshot-catchup`의 `5ad7162`와 폴더 밖 원본 증거는 보존했다. 같은 branch로 worktree 재생성이 가능하다. child 21→20개, `.worktrees` 약 16 GiB이며 나머지는 기존 미커밋 변경·증거/사용 여부 정리 전까지 보존하고 다음 기능 착수 전에 재확인한다. 현행 구조·§16 상태를 정리하며 main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 기능 통합·파동 QA 대기)
-
-- **통합**: 단일 독립 리뷰 PASS의 `5ad71629c18953c07520af23c47b82861c9900ab`을 M5에 반영한다. 충돌은 history뿐이며 양쪽 워크로그·고정 결정을 모두 보존했다. Rust 18파일과 제안서는 검토된 commit과 동일하며 현행 구조에 private 전역 복원 경계를 기록한다.
-- **다음**: 최신 통합 SHA에서 workspace Rust/stdio와 수정 guard의 정상 production101을 한 번 검증한다. 변경 없는 Node/renderer는 기존 증거 재사용, 새 release package/실제 provider/Windows·3초 제품 ready는 이번 내부 파동의 완료로 주장하지 않는다. main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (전역 snapshot 구현·생산 fixture 결합 중)
-
-- **분담**: 동일 base의 `codex/g5d-workspace-snapshot-fixture`(기존 `.worktrees/g5d-r3c-byte-transport` 재사용) 담당이 `chat/tests.rs`의 생산 101-workspace fixture를 작성했다. root가 수정 test와 담당 history를 주 구현 worktree에 patch로 보존 결합했으며 이후 해당 파일 소유권은 주 담당으로 돌아간다. 새 `storage/tests/reopen_snapshot.rs`의 정상/취소/외부 변경/READ·COMMIT 실패 회귀 5개와 mod 선언도 결합해 실행을 한곳에 모았다. 긴 경로·historical resolver와 파생 기록 저장은 private `reopen/snapshot/{workspace,catchup}.rs` 구체 소비자 분리까지 주 담당 소유로 허용한다.
-- **검증·다음**: exact fixture는 생성·manifest/파일·checkpoint/drop을 완료한 뒤 raw projection과 typed sequence overlay의 테스트 비교 오류로 314.70초/exit 101이었다. 비교 수리의 fmt/diff는 exit 0이나 재실행은 보류하고 새 session 최종 assertion과 결합해 한 번 실행한다. 원본 실패는 `/tmp/g5d-workspace-snapshot.eHFS3M/manifest.md`에 보존한다. 전역 catch-up/ready·독립 리뷰·파동 QA는 아직 미완료이며 source/helper를 완료 커밋으로 나누지 않는다.
-- **결합 검증 후속**: small/failure 5개·확장 8개와 §10 actual snapshot exact 1개는 주 담당의 focused 실행에서 통과했다. production101 결합 실행은 생성·607 events/405 project sources/101 members 대조 뒤 30,000-call 테스트 guard에 도달했다(341.77초/exit 101). root는 종료 전 SQLite read-only online backup을 `/tmp/g5d-production-evidence.NX3udd/production-observed.sqlite3`에 보존했다(607/405 sources·101 members·pending/derived0, quick_check ok). 원본 backup과 실패 로그를 유지하고 복사본에서 무진행/guard 가정을 구분하며 제품 예산은 바꾸지 않는다. 상세·hash는 같은 폴더 manifest다.
-- **기능 후보**: `5ad71629c18953c07520af23c47b82861c9900ab`의 21파일을 단일 독립 리뷰에 보냈다. 최종 maintenance 11·S3 19·protocol/golden 43과 actual-run exact 1의 focused 증거, sidecar strict/fmt/diff exit 0을 확인했다. protocol strict는 byte 동일한 기존 lint 3개로 exit 101이며 성공으로 접지 않는다. 정상 production101의 수정 guard 경로와 전체 Rust는 통합 QA에서 한 번 검증하며, 현재는 M5 미통합이다.
-- **독립 리뷰·통합 준비**: 동일 exact commit의 읽기 전용 독립 리뷰가 PASS(차단 finding 없음)다. source hash·동일 연결·실패/취소·budget·ready publication 경계를 대조했으며 정상 production101의 fresh 완주는 통합 QA로 남겼다. `docs/README.md`에 §16 위치를 추가하고 작업 기록을 보존한 뒤 통합한다. QA는 최신 통합 SHA의 workspace Rust를 한 번 실행하며 동일 Rust subset을 반복하지 않는다. byte 동일한 Node/renderer 증거만 재사용하고 새 sidecar의 release package PASS는 주장하지 않는다.
-
-### 2026-09-03 · by GPT-5.6-Sol (큰 snapshot 전역 검증·동일 연결 catch-up 자체 검증)
-
-- **구현**: §16의 private `ReopenMaintenanceSession`에 live/frozen source·envelope·5 projection/derived 양방향 coverage·historical workspace provenance·index 선행 catch-up·ready 전체 재검증을 연결했다. S3 transaction-local progress와 기존 protocol 순수 판정을 공유하고 uncapped member는 조각 처리한다. 매 BEGIN의 동일 epoch/binding·1 MiB fresh/8 MiB retained+fresh/100 work·COMMIT 뒤 진행 게시, 중간 member의 source 재시작/멱등성을 유지하며 V1 초과 거부·schema/제품 경로는 불변이다.
-- **검증·한계**: 전역 11개(실제 workspace INSERT 뒤 COMMIT 거부/취소 rollback 포함), §10 actual-run 1개, 최종 S3 19개·protocol unit/golden 43개, sidecar strict clippy·Rust 2021 fmt/diff는 exit 0다. protocol strict는 base와 동일한 기존 3 lint로 exit 101이며 범위 밖 수리는 하지 않았다. 생산 101 test는 607/405 sources·101 members 생성/대조 뒤 30,000-call guard로 341.77초/exit 101; 동일 생산 DB 보존본의 별도 재검증은 172,685 calls/98.288초에 source/schema 무변경·101 derived rows·ready PASS다. 원본 실패를 후속 PASS로 덮지 않으며 상세 명령/exit·SHA는 `/tmp/g5d-snapshot-catchup.TfEjLQ/manifest.md`다.
-- **다음**: Karpathy 지침에 따라 이 한 기능을 원자 commit으로 인계하고 단일 독립 리뷰·최신 통합 QA에서 실측 기반 400,000-call guard의 정상 생산101 전체 경로를 검증한다. 98.288초는 제품 3초 목표 미충족이며 startup/recovery/admission·compaction/scheduler/status·실제 provider·Windows/G6 전체는 미완료다. 기존 fixture 실패 기록과 root rollover 원문을 보존했고 main 병합·push·사용자 프로젝트/유료 provider 시험은 없다.
-
-### 2026-09-03 · by GPT-5.6-Sol (101 workspace 생산 fixture 분담·미검증 인계)
-
-- 기존 `Fixture::snapshot` 생산 경로 101회·manifest/파일·checkpoint/drop 뒤 read-only DB 대조 test를 추가했다. exact 1개는 314.70초/exit 101로 raw JSON에 typed sequence를 overlay하지 않은 테스트 비교에서 실패했다. 해당 비교만 기존 `load_json_projection`과 맞췄으며 production 변경은 없다.
-- 재실행·커밋은 root 지시로 보류한다. 원본 실패·정적 수리·607/405 source 기대의 코드 근거는 `/tmp/g5d-workspace-snapshot.eHFS3M/manifest.md`에 보존하고 fmt/diff exit 0이다. 새 전역 Ready 미검증이며 주 담당이 final session assertion과 결합해 한 번 검증한다. 추가로 `reopen_snapshot.rs`의 정상 ready/pending·late corruption·외부 commit·취소·READ/COMMIT 실패 회귀 5개와 mod 한 줄을 draft로 준비했으며 API 없는 base라 컴파일/실행하지 않았다.
-
-### 2026-09-03 · by GPT-5.6-Sol (승인된 전역 snapshot 연결 착수)
-
-- **작업 계약**: base `b92a2ecbab00e0ca380546d6bf078e18aa7d21cf`, `codex/g5d-snapshot-catchup`·`.worktrees/g5d-snapshot-catchup`에서 Rust 담당이 §16의 전역 검증→catch-up→ready coverage를 구현한다. storage/reopen·lifetime와 관련 protocol 순수 판정/테스트를 단일 소유하며 기존 V1/golden·예산·제품 fence·실제 provider는 바꾸지 않는다. root는 인계/통합, 기능 완료 뒤 독립 리뷰 1명과 파동 QA를 맡는다.
-- **기준·운영**: 기존 `9af6de8`의 동일 source QA를 기준선으로 재사용한다. 개발은 focused/strict clippy/format만, 무거운 실행은 담당 1명·jobs/threads 4다. 새 worktree 생성 전 등록/증거 보존 경계를 확인했으며 기존 검증 폴더는 원본 artifact 때문에 보존했다(생성 뒤 child 21개, `.worktrees` 약 16 GiB). 이번 기능 마감 때 정리를 다시 확인한다.
-- **기록·다음**: 새 엔트리로 500줄을 넘는 history의 2026-09-02 원문 전체를 월별 archive로 이동하고 고정 목록 사이 빈 줄만 정리해 300줄 이하로 줄인다. 실제 수락·재시작/오류 회귀가 완료되기 전 helper 구현을 기능 완료로 부르지 않는다. main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (분할 처리 승인·실제 로그인 상태 관측)
-
-- **승인**: 사용자가 큰 source 분할 처리와 모델 호출 없는 로그인 상태 조회를 승인했다. reopen 제안 §16을 승인 상태로 갱신하되 기존 V1 거부·새 경로의 1 MiB fresh/8 MiB retained+fresh/100 work·3초 ready·100-operation fence는 보존한다. 제품 활성화·새 로그인·유료 모델·사용자 프로젝트 시험 승인은 아니다.
-- **관측·검증**: 공식 Codex reference와 로컬 help를 확인하고 `/private/tmp`에서 상태만 조회했다. Codex exit 0/ChatGPT credentials present(PATH alias 생성 경고는 별도); Claude 격리 환경 exit 1/false, 자격 증명 접근 허용 환경 exit 0/true·claude.ai였다. 원문 계정/토큰을 출력·저장하지 않고 boolean/분류/exit만 보존했다. 상태 조회 성공은 토큰 유효성·모델 가용성·제품 연결 성공이 아니다. 상세는 제품 제안 §6.7이다.
-- **다음**: 승인된 §16 전역 검증→catch-up→ready coverage 연결을 한 기능으로 구현하고 독립 리뷰·관련 회귀 뒤 통합한다. 기존 storage V1 계약은 새 fragment 경로와 구분한다. G5D/실제 adapter/G6 전체 미완료와 main 미병합·push 없음은 유지한다.
-
-### 2026-09-03 · by GPT-5.6-Sol (S1–S3 파동 검증·macOS 패키징 마감)
-
-- **완료 증거**: `9af6de896c198ce20ca6a95fd4e2f12ec31b8572`에서 staging 7개, 실제 package/sidecar smoke, 재포장 없는 ZIP 생성·크기 측정이 exit 0다. unpacked 316,547,754 bytes와 ZIP 122,124,853 bytes는 macOS arm64 350/200 MiB 이내다. renderer build·editor-state 25개도 통과했고 숨긴 fixture Electron의 Monaco mount는 격리 실행에서 status-null 실패 뒤 실행 허용 환경의 exact 1개가 통과했다. 두 결과를 분리하며 원인을 단정하지 않는다.
-- **중복 제거·한계**: 변경 없는 `180cb885` source의 frontend 216개, Tauri 105/13 ignored, Rust core 82·protocol 42·sidecar 276/1 ignored·stdio 10개와 Electron/security 47개 PASS를 Git byte 동일성으로 재사용했다. 이후 Cargo subset을 반복하지 않았다. 이는 단계별 파동 검증이며 단일 13단계 하네스 PASS가 아니다. 원본 실패·수리·기준 SHA·직접/재사용 결과는 QA worktree `.artifacts/m5-qa/9af6de896c198ce20ca6a95fd4e2f12ec31b8572-s1-s3-wave/manifest.md`와 이전 SHA 폴더에 보존한다.
-- **현재 상태·다음**: 모든 QA handle은 종료했다. S1–S3 내부 큰 기록 검증과 이번 G6 경계/패키징 단위만 마감하며 G5D 전역 catch-up/startup/복구/admission·compaction/scheduler/status, 실제 provider, G6 전체 보안/성능/Windows/출시는 미완료다. 다음 진행에는 §16의 개별 큰 기록 분할 처리 정책과 실제 provider 로그인 상태 읽기 승인이 필요하다. 개발 의존성은 원래 lock/cache로 복구했고 main 병합·push·실제 인증/유료 모델/사용자 프로젝트 시험은 없다.
-
-### 2026-09-03 · by GPT-5.6-Sol (G6 staging 수리 통합 후보)
-
-- **반영**: `aa2ed7c`의 3파일 staging 수리는 exact-commit 단일 독립 리뷰 PASS를 받았다. Cargo artifact 경로 선택의 Node 회귀 7개·syntax/diff exit 0와 검토된 source 동일성을 확인하고 M5에 통합한다. 양쪽 history 원문은 모두 보존했다.
-- **남은 검증**: QA 담당은 이전 통합의 변경 없는 Rust 회귀를 계속 실행한다. 해당 결과는 동일 Rust source에 재사용하며 새 통합에서 실제 package/smoke·ZIP·크기를 별도로 검증한다. 현재는 그 실제 패키징 결과 전이므로 전체 누적 gate/G6 완료를 주장하지 않는다. 정책/인증 확인 대기·main 미병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (누적 QA 재개·공유 target 패키징 결함)
-
-- **환경 후속**: 세 번째 하네스의 frontend-unit 중단은 실제 테스트 실패가 아니라 `spawnSync npm ENOENT`였다. 기존 nvm npm 12.0.2 경로를 추가했고 bundled Node·pnpm 및 자동 install 차단은 유지했다. 다음 원본 하네스에서 frontend build/unit, 기존 Rust 105 passed/13 ignored와 Electron Node 47 passed를 확인했다.
-- **패키징**: 격리 환경의 `fetch failed`는 cached Electron ZIP 검증을 위한 공식 checksum 다운로드 단계였다. 승인된 네트워크 실행에서 GitHub v43.4.0 SHASUMS256.txt 검증은 통과했다. 이어 release sidecar build 뒤 `m5-stage-sidecar.mjs`가 shared CARGO_TARGET_DIR 대신 worktree/target/release를 고정해 ENOENT로 실패한 실제 결함을 확인했다. 별도 기능 worktree에서 Cargo의 실제 executable artifact를 쓰는 최소 수정·Node 회귀를 진행한다.
-- **검증·다음**: 패키징 실패 원본은 보존하며 단일 QA 담당이 나머지 원래 Rust/계약/저장 명령을 진행한다. package/smoke·ZIP·크기 측정 및 누적 전체 PASS는 아직 없다. 수정은 단일 독립 리뷰 뒤 통합하며 실패한 패키징부터 재검증한다. 제품 크기 정책/인증 조회의 사용자 확인은 대기하고 main 병합·push는 없다.
-
-### 2026-09-03 · by GPT-5.6-Sol (QA 의존성 재설치 사고 복구·정책 충돌 확인)
-
-- **정정·복구**: 직전 symlink 연결 뒤 두 번째 pnpm 실행이 workspace 경로 차이를 설치 불일치로 판단해 root node_modules를 재생성하다 registry ENOTFOUND로 실패했다. 통합 담당의 재사용 판단 누락이며 기존 설치본이 보존됐다는 직전 엔트리는 그 뒤 실행에는 적용되지 않는다. 모든 QA 실행을 멈추고 잠긴 의존성을 로컬 pnpm store로 offline/frozen/ignore-scripts 재설치(exit 0, 다운로드 0)했다. Electron 43.4.0도 기존 ZIP 캐시에서 install.js로 복구(exit 0)했고 esbuild 실제 변환·주요 package 버전·Electron 경로/버전을 확인했다. source/lock 변경은 없다.
-- **재개·검증**: bundled pnpm 11.19.0 소스에서 기본 verify-deps-before-run=install과 환경 변수 전달을 확인하고 `pnpm_config_verify_deps_before_run=false`를 모든 자식에 전달했다. 통제된 세 번째 하네스는 재설치 없이 frontend build를 통과했지만 frontend-unit 진입에서 exit 1로 중단되어 원인을 조사한다. 이전 실패 원본을 보존하며 누적 PASS로 표시하지 않는다.
-- **새 승인 경계**: 독립 설계 조사와 root protocol 대조에서 single-source 1 MiB 초과 `contractError`가 명시 계약임을 확인했다. 큰 source catch-up을 여러 fragment로 허용하는 것은 기존 정책 확장이므로 사용자에게 확인을 요청했다. S1–S3 private 검증 완료와 제품 활성화를 구분하며 응답 전 계약을 바꾸지 않는다. 실제 provider 로그인 상태 조회 승인도 아직 없다.
-- **다음**: QA 환경의 남은 실행 문제를 좁혀 실제 누적 결과를 확보한다. 전역 검증/catch-up/ready coverage는 승인된 정책 아래 한 기능으로 연결하고 실제 provider·G6 전체는 미완료로 유지한다. main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (S1–S3 누적 QA 환경 수리)
-
-- **관측·원인**: exact `180cb885`의 clean detached QA 폴더에서 sidecar debug build 뒤 누적 하네스가 frontend build 진입 시 exit 1로 멈췄다. node_modules가 없는 폴더에서 pnpm이 의존성 설치를 시도했고 격리 네트워크의 registry ENOTFOUND가 발생했다. 앞선 diff 두 단계 외 실제 build/test는 시작하지 않았으므로 코드 테스트 실패나 QA PASS로 표시하지 않는다.
-- **수리·검증**: root의 기존 node_modules와 QA 기준의 package.json/pnpm-lock.yaml/pnpm-workspace.yaml이 동일한 의존성 구성을 사용함을 확인하고, QA 폴더의 없던 node_modules만 기존 root 설치본을 가리키는 symlink로 연결했다. source/lock/설정·기존 설치본을 수정하거나 새 다운로드하지 않았고 tracked tree는 clean이다. debug build는 재사용하며 실패 원본을 보존한 채 하네스에서 아직 실행되지 않은 build/test를 진행한다.
-- **다음**: QA 담당의 최종 누적 결과 및 fresh package/skip-package ZIP 크기 결과를 기다린다. 상세 증거는 QA 폴더 `.artifacts/m5-qa/180cb885f315f951d14ba11c989c899ae4120809-s1-s3-wave/`에 남긴다. 실제 provider/auth/사용자 프로젝트/Windows·main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (G6 sidecar staging artifact 경로 수리)
-
-- **수리**: `m5-stage-sidecar.mjs`의 repo-relative `target/release` 가정을 제거했다. 같은 Cargo build의 JSON artifact에서 exact sidecar manifest/bin/non-test executable 하나만 선택해 shared/configured target·target triple을 추측하지 않는다. 실패/없음/모호한 artifact는 복사 전에 거부하며 기존 resources/sidecar 목적지와 chmod는 유지한다. Karpathy 지침에 따라 script·새 VM 회귀·history 3파일에 한정했다.
-- **검증·다음**: 가짜 spawn/filesystem 기반 Node focused 7 passed(75.7805ms), syntax/diff exit 0. 기본/shared/custom target·cached artifact·무관한 artifact·Windows 이름/무chmod·build 실패/잘못된 JSON/없음/중복 artifact의 무변경을 검사했다. 원본 명령/actual exit는 `/tmp/g6-sidecar-staging.i54lOp/manifest.md`다. 실제 Cargo·package·Windows 실행은 하지 않았고 QA 담당의 통합 재실행과 단일 독립 리뷰가 남는다. 이전 S3 branch 보존, merge/rebase/cherry-pick/push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (S3 의미·SQLite mirror 통합 및 파동 QA 준비)
-
-- **완료**: 기능 `5ee0726`의 source/projection 한 행 검증이 exact-commit 단일 독립 리뷰 PASS를 받아 M5에 통합된다. history 충돌은 양쪽 원문을 보존해 해결하고 검토된 Rust 6파일의 byte 동일성을 확인한다. 현행 구조·제안 §15와 색인을 갱신한다.
-- **검증**: 최종 production의 S3 17 passed(60.26초), 마지막 escape exact 1 passed(6.17초), 공유 회귀 23 passed(57.62초; S1 12+S2 10+S3 주소 대조 1), strict clippy/Rust 2021 format/diff 모두 actual exit 0다. 최종 18개 S3 테스트를 한 번에 실행했다고 표현하지 않는다. `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 초기 실패·최종 결과·SHA를 분리했다. 제품 경로·기존 제한은 불변이다.
-- **다음**: 이번 S1–S3·Electron 변경 묶음의 최신 통합 기준 누적 QA를 실행한다. 전체 재오픈 source/파생 기록 검증·historical catch-up·startup/복구/admission, compaction writer/scheduler/status와 실제 provider·G6 전체는 아직 미완료다. 실제 provider 로그인 상태 조회를 사용자에게 별도로 질문했지만 아직 답을 받지 않아 조회하지 않았다. main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (G6 main 보안 경계 통합·실제 provider 연결 제약)
-
-- **완료**: Electron main의 잘못된 origin/asset URL 거부와 실제 등록 callback VM 회귀 `02dbaeb`가 단일 독립 리뷰 PASS를 받아 M5에 통합된다. 소유 source 두 파일의 exact 동일성을 대조하며 기능 검증 security/scaffold/bridge 47 passed(1,637.2955ms), syntax/diff exit 0를 재사용한다. 실제 Electron·패키징/Windows·프로젝트 typecheck·전체 G6 통과는 아니다. 증거는 `/tmp/g6-main-security-tests.BAnPWN/validation.txt`다.
-- **실제 provider 발견**: 읽기 전용 설계 조사 뒤 root도 로컬0.149.1 schema·LaunchSpec·공식 app-server/Claude CLI 문서를 대조했다. Codex thread-start 요청의 sandbox 철자와 reasoning config 위치를 버전별로 고정해야 하며 config 조회만으로 시작 전 설정 격리를 증명할 수 없다. Claude safe-mode에도 일부 managed command가 남을 수 있고 init 수신이 prompt-release barrier는 아니다. 제품 제안 §6.7에 후속 builder/parser·증거/승인 경계를 기록했다. 기존 LaunchSpec 거부를 alias·환경 상속으로 우회하지 않는다.
-- **계속·미완료**: 동일 Rust 담당이 `c5123ff` 기반 `codex/g5d-s3-projection-compat`에서 S3 의미/mirror 검증을 구현 중이다. G5D 전체·실제 provider 활성화·G6 전체와 누적 QA는 미완료다. 실제 CLI 세션/인증 조회/모델/사용자 프로젝트를 실행하지 않았고 main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Terra (M5 G6 Electron main security boundary regression)
-
-- **구현·범위**: `tests/m5-electron-security.test.mts`가 실제 `electron/main.ts`를 CommonJS로 transpile한 뒤 명시적인 Electron/sidecar fake VM에서 실행해 등록 IPC handler, BrowserWindow callback과 `app://` handler를 직접 호출한다. generic production test framework나 renderer/preload/protocol/Cargo/package 변경은 추가하지 않았다.
-- **경계 수리**: app asset은 exact `app://m5` authority(credential·port·query·fragment 없음), decoded relative path 및 current-platform과 Windows 절대경로 semantics를 요구하고 regular existing file만 `file:` fetch한다. malformed percent, encoded dot/slash/backslash, absolute/path escape, host/scheme spoof와 missing asset은 404이며 fetch하지 않는다. IPC/navigation도 credentialed URL을 exact allowed origin으로 보지 않는다.
-- **검증·한계**: bundled Node로 새 VM test와 기존 scaffold/bridge를 함께 실행해 47/47 PASS(exit 0), `node --experimental-strip-types --check electron/main.ts` 및 diff check exit 0을 확인했다. `tsconfig.node.json`은 `vite.config.ts`만 include해 main의 scoped project typecheck는 제공하지 않는다. 실제 Electron, package/make, Cargo, 전체 suite, 유료 CLI·사용자 데이터는 실행하지 않았다. 이는 main boundary 회귀 단위이지 G6 보안 QA 완료/`G6_READY`가 아니다.
-- **다음**: 기능 commit 뒤 exact diff 독립 리뷰와 root 통합이 남는다. 실제 Electron 런타임/packaged app의 sandbox/CSP/fuse/sidecar behavior와 Windows 실기기 증거는 별도 gate다.
-### 2026-09-03 · by GPT-5.6-Sol (R3C-S3 한 행 projection 호환 검증)
-
-- **구현·경계**: §15의 private `ProjectionCompatibilitySession`에 source canonical → projection 전체 문법 → serde-last 의미/루트 sequence overlay → exact-row SQLite mirror를 연결했다. 전체 source/key/Value 없이 긴 숫자를 잠긴 serde 동작과 최대 33-byte 내부 재구성으로 비교한다. 동일 연결·epoch·identity/길이와 COMMIT 뒤 진행 보존, 1 MiB fresh/8 MiB retained+fresh/100 work를 유지한다. 모든 보존된 parsed Number도 예산에 포함했다. Karpathy 지침에 따라 구체적 S2 engine·닫힌 projection binding만 공유하며 제품 경로·100-operation fence·schema/프로토콜/예산은 불변이다.
-- **검증**: S3 17 passed(60.26초) + 마지막 escape/split exact 1 passed(6.17초), 공유 회귀 23 passed(57.62초: S1 12 + S2 10 + 주소 제외 1), 최종 strict clippy(2.38초)·Rust 2021 format·diff check exit 0. live/frozen 8,388,697-byte source는 각각 132 calls, 101 members는 1,076 calls, exact 8 MiB retained+fresh는 13 calls로 통과했다. 각 phase/중첩 재검색의 취소·외부 commit·실제 SQLite READ/COMMIT 거부와 schema/raw typed rows/file bytes 불변을 확인했다. 원본 실패와 최종 실제 exit·명령·수치는 `/tmp/g5d-s3-semantic.NYcigQ/manifest.md`에 분리 보존했다.
-- **다음·한계**: 이는 project/chat/run/lock 한 행의 호환 정보이며 source 선택/전체 coverage·protocol transition·frozen provenance·app-instance·admission 증거가 아니다. SQLite exact-row JSON 내부 메모리/시간 상한도 주장하지 않는다. 단일 exact-commit 독립 리뷰와 파동 마감 full sidecar/stdio·누적 QA가 남는다(기존 full exit 143은 PASS 아님). Cargo jobs/threads 4·단일 실행을 지켰고 nice는 sandbox 거부로 미적용이다. 실제 provider/auth/사용자 프로젝트/Windows, merge/rebase/cherry-pick/push는 하지 않았다.
-
-### 2026-09-03 · by GPT-5.6-Sol (S2 canonical scanner 통합·S3 연속 진행)
-
-- **완료**: 정상 V8 oracle `7eeca1d`와 scanner `5c7758e` 묶음이 단일 독립 리뷰 PASS를 받아 M5에 통합된다. source 충돌 없이 양쪽 history 원문을 보존하며 현행 구조와 제안 §13–14의 완료선을 갱신한다. scanner는 source canonical byte 검증일 뿐 projection 의미·SQLite mirror·제품 실행 허가가 아니다.
-- **검증**: canonical 10 passed(42.88초), 기존 S1 12 passed(22.33초), snapshot 1 passed(25.11초, 41 sources/522 calls), scoped strict clippy/Rust 2021 format/diff 모두 exit 0이다. 통합 source가 exact reviewed commit과 동일함을 대조해 관련 결과를 재사용한다. 원본 실패/중단과 최종 PASS는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 분리 보존했다. 전체 누적 QA는 파동 마감에 남는다.
-- **다음·경계**: 같은 Rust 담당이 §15의 source/projection 한 행 semantic·mirror 호환성을 이어서 구현한다. 기존 안전 예산·100-operation fence·제품 경로는 유지하며 historical catch-up·startup/복구·compaction/scheduler/status, 실제 provider와 G6 전체는 미완료다. main 병합·push·유료 모델/사용자 프로젝트 시험 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (G6 패키지 크기 계측기 통합)
-
-- **완료 단위**: `1ecefff`와 검토 수리 `6f3fc7a`를 같은 reviewer가 검토해 두 차단 finding 해소와 전체 feature PASS를 확인했다. 이 기능만 M5 통합 브랜치에 병합하며 양쪽 history를 모두 보존했다. `m5-package-metrics.mjs`·회귀와 M5.0 명세 §10 사용법을 반영한다. 원격/main 변경은 없다.
-- **검증**: 기능 branch의 focused 10/10·syntax/diff exit 0 후 통합된 tree에서도 같은 Node focused 10/10 passed(262.207625ms, exit 0)를 확인했다. 검토 범위는 크기 계측과 고정 layout이며 전체 보안/성능/패키징 gate가 아니다. 원본 검증은 `/tmp/g6-package-metrics.6emKDi/validation.txt`다.
-- **실측·남음**: 새 build 없이 기존 out 폴더의 316,548,099 bytes(약 302 MiB)만 관측했다. ZIP가 없어 NOT_READY/exit 2이며 현재 commit의 산출물·서명·실행 증거로 재사용하지 않는다. 최신 package/make·압축 크기·실행/보안/성능·Windows와 전체 G6는 남는다. S2 Rust focused와 이후 저장/실제 provider 작업은 계속 진행한다.
-
-### 2026-09-03 · by GPT-5.6-Sol (잔여 1·2·3 착수·큰 기록 scanner 구현)
-
-- **사용자 범위**: 저장 수명/G5D 마감, 실제 Claude Code/Codex 연결, G6 보안·성능·패키징 순서로 진행 승인을 받았다. UI 재설계/온보딩/적용·되돌리기/역할 자동 왕복은 이번 1·2·3 범위에 추가하지 않는다. main 병합·push·유료 모델/사용자 인증·프로젝트 시험 승인은 별개다.
-- **실행 중**: root `69fad53`에서 clean한 기존 S1 worktree를 새 `codex/g5d-s2-oracles` branch로 재사용했다. Rust 담당은 정상 V8의 legacy/SQLite/R3A 수락 기준 회귀를 `7eeca1d`로 고정했다(6 tests, 실제 V8 43사례 + 잘못된 pid 일반 write 거부 3사례, 16.45초, strict clippy/format/diff exit 0, `/tmp/g5d-s2-oracles.KAd88R/manifest.md`). 아직 통합/독립 리뷰 완료는 아니다. 읽기 전용 설계 담당의 결과를 기존 reopen 제안 §14에 반영했고 같은 구현자가 bounded canonical scanner를 이어서 작성한다. 관련 검증·단일 독립 리뷰로 묶고 누적 QA는 파동 마감에 수행한다.
-- **실제 provider 준비**: OpenAI 공식 non-interactive/app-server와 Claude 공식 headless/SDK 문서를 확인하고 로컬 version/help 및 Codex schema 생성만 수행했다. Codex 0.149.1·Claude 2.1.258은 fake manifest 버전과 다르며 fake handshake는 그대로 실제 wire로 사용할 수 없다. Codex thread-start 응답의 유효 model/cwd/approval/sandbox 필드, Claude init의 MCP/plugin 객체와 config-isolation 증거 차이를 제품 제안 §6.7에 기록했다. 인증·모델 요청은 없고 schema 생성 exit 0이다. PATH alias 생성 경고는 성공으로 감추지 않는다.
-- **G6 독립 준비**: 저장 코드와 충돌하지 않는 패키지 크기 계측기/회귀를 별도 Electron 담당에게 배정했다. clean한 기존 snapshot QA worktree를 `codex/g6-package-metrics`/`69fad53`으로 재사용하며 기존 detached QA commit은 보존했다. script/test와 자기 history만 소유하고 Node focused만 실행한다. 실제 빌드·앱 실행·G6 gate 광고는 하지 않으며 macOS arm64 350/200 MiB, Windows measure-only 경계를 유지한다. Rust 무거운 슬롯은 기존 담당 하나만 사용한다.
-- **중간 결과**: 패키지 계측 `1ecefff`는 focused 8개·syntax/diff를 통과했으나 단일 독립 리뷰가 빈 required asset 및 required path의 중간 symlink로 외부 asset을 허용하는 두 결함을 찾아 묶어 수정 중이다. 아직 통합하지 않았다. 기존 root `out` 폴더를 읽기 전용 계측한 316,548,099 bytes는 과거 산출물 관측일 뿐 현재 commit의 패키지 증거가 아니다. ZIP 부재로 전체 `NOT_READY`/exit 2이며 `.artifacts/m5-review/2026-09-03-package-metrics-existing.json`에 남긴다. S2는 첫 컴파일과 depth 127/128 회귀가 통과했고 나머지 focused 검증 중이다.
-- **남은 일**: S2 scanner/의미·mirror 동등성, historical catch-up·startup/admission/복구, lossless compaction·scheduler/status 및 누적 QA를 닫은 뒤 실제 provider를 활성화한다. G6의 기존 수치·Windows/실기기/서명 결정은 남으며 이번 연구를 G6 구현·통과로 표현하지 않는다. 기존 dirty history와 다른 worktree를 보존한다.
-
-### 2026-09-03 · by GPT-5.6-Sol (남은 M5 작업 목록 대조)
-
-- **기준·현재**: 사용자 요청으로 `69fad53`의 현행 구조·M5.0 명세·제품 제안·하네스 script·renderer를 읽기 전용 대조했다. G1~G5C의 fixture 기반 골격과 G5D 내부 R1/R2/R3A/R3B·S1 구현은 있으나, 제품 G5D와 G6 및 실제 provider 연결은 완료되지 않았다. 개발 검증 게이트 G1~G6와 제품 확장 마일스톤 M5.0~M5.5는 서로 다른 분류다.
-- **현재 기술 기반의 잔여**: S2 이후 큰 기록 canonical/의미/SQLite mirror 호환 검증, historical catch-up·무결성/복구·startup/admission 연결, 압축/삭제 writer·자동 scheduling·storage status·용량 처리와 누적 QA가 G5D에 남는다. 실제 Claude Code/Codex CLI·인증·모델/권한 검증과 사용자 승인 macOS smoke, G6 보안/성능/패키징·Windows UI/fixture·종료/재시작 실증이 뒤따른다. Windows agent 실행은 별도 안전 게이트 전까지 비활성이다.
-- **전체 제품 방향의 잔여**: 현재 셸의 다중 프로젝트/채팅·역할 설정·Monaco 편집/diff는 유지하면서 승인 시안의 완성 UI·패널 drag/drop/크기 조절/배치 저장, 실제 프로젝트 기반 설치·로그인 안내의 Electron 온보딩, 원본 적용 전 복원 지점·전체 복사본 적용/되돌리기, 실제 역할 간 자동 왕복·후속 지시·알림/요약을 구현해야 한다. 이 중 온보딩 전체 이식·제품 수준 역할 왕복 등은 M5.0의 명시적 후속이며 현재 G5D 완료 조건에 추가하지 않는다.
-- **보류·검증**: 리브랜딩, 병렬 writer/다중 터미널·LSP/디버거·고급 Git/줄 단위 적용, 보존/물리 삭제 정책과 정식 서명/업데이트 인프라는 후속 결정으로 구분했다. 새 제품 구현·테스트·커밋·push는 하지 않았고 이 현황 기록만 추가한다. 즉시 다음 구현은 S2이며 기존 실패 19개 수리와 S1을 다시 미완료로 돌리지 않는다.
-
-### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size collector review fix)
-
-- **검토 수리**: `1ecefff` 독립 검토의 두 차단 finding만 보완했다. fixed executable·`app.asar`·staged sidecar는 regular file이면서 0 byte가 아니어야 하며, supplied package root 아래 fixed layout의 모든 intermediate component는 symlink가 아닌 real directory여야 한다. 따라서 symlink parent가 external assets를 가리키지만 walk에는 link-text만 남겨 작은 package가 거짓 `PASS`가 되는 경로를 `NOT_READY`로 막는다. supplied root 상위 ancestor의 symlink나 mode-bit 접근성은 metadata-size-only 범위에 추가하지 않았다.
-- **회귀·검증**: 세 required asset 각각의 zero-byte rejection과 `hello-agent.app`/`Contents`/`Resources` external-parent symlink rejection을 추가했다. bundled Node `v24.19.0`의 `node --check scripts/m5-package-metrics.mjs` 및 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`는 10/10 PASS(exit 0), `git diff --check` exit 0이다. package/make, Cargo, full suite와 실제 artifact 측정은 여전히 실행하지 않았다.
-- **다음**: 이 corrective commit은 original feature commit과 별도이며 root의 incremental reviewer 확인과 통합이 남는다. package-size-only/local-only 한계와 Windows measure-only `NOT_READY`는 변하지 않는다.
-
-### 2026-09-03 · by GPT-5.6-Terra (M5 G6 package-size 측정 도구)
-
-- **구현·범위**: `scripts/m5-package-metrics.mjs`에 명시 `--platform`/`--arch`/`--package`/선택 `--archive` 입력의 재사용 가능한 pure collector와 JSON CLI를 추가했다. macOS arm64의 unpacked 350 MiB·compressed 200 MiB 잠정 한계를 exact byte 문자열로 비교하고 Windows x64/arm64는 값을 측정하되 threshold 없는 `NOT_READY`로 끝낸다. unpacked는 regular-file length + symlink link-text bytes이며 symlink를 따라가지 않는다. 필요한 executable·`app.asar`·staged sidecar layout, regular archive, `.zip` signature, bounded directory walk를 확인하고 metadata 변화가 관찰되면 `NOT_READY`로 invalidates한다.
-- **안전·한계**: supplied artifact는 읽기만 하며 app/provider/auth/build를 실행하지 않는다. report는 local developer-only package-size evidence이고 freshness, provenance, signing/notarization, launch/GUI/runtime, atomic snapshot 또는 `G6_READY`를 주장하지 않는다. archive가 없거나 asset/type/signature/readability가 불완전하면 `NOT_READY`, macOS의 완전한 측정만 `PASS`/`FAIL`을 낸다.
-- **검증·다음**: bundled Node `v24.19.0`으로 `node --check scripts/m5-package-metrics.mjs`와 `node --test --experimental-strip-types tests/m5-package-metrics.test.mts`를 실행해 8/8 PASS(exit 0)했다. sparse exact/below/over limits, missing/wrong assets, external symlink non-follow, Windows measure-only, ZIP signature, malformed CLI와 0/1/2 JSON exit를 덮었다. package/make, Cargo, full suite, real artifact measurement은 실행하지 않았다. 독립 리뷰 뒤 통합 담당이 proposal usage와 integration 여부를 결정한다.
-### 2026-09-03 · by GPT-5.6-Sol (R3C-S2 canonical source scanner)
-
-- **범위·구현**: §14의 private `CanonicalColumnSession`과 S1의 구체적 `BoundColumn` 읽기 추출을 구현했다. 전체 source/Value/key 없이 문법·canonical escape·UTF-8·혼합 깊이 127·실제 serde 숫자 출력·인접 decoded key 순서를 검사한다. 동일 연결·epoch/identity/길이 재검사, 1 MiB fresh/8 MiB retained+fresh/100 work, COMMIT 뒤 진행 보존과 오류·취소 terminal 폐기를 유지한다. 숫자 24-byte 출력 근거는 잠긴 serde_json 1.0.150/zmij 1.0.23와 실제 unified `default,std` 기능을 확인했다. 이는 canonical bytes 정보이며 의미/권위/admission 검증이 아니다.
-- **검증·발견**: canonical 10 passed(42.88초), S1 기존 12 passed(22.33초), §10 exact 1 passed(25.11초). 실제 run source 41개를 S2 522 calls로 검사했고 큰 두 사례의 기존 R3B 거부·small 완료 및 S1 결과는 유지했다. 세 주소의 late malformed/UTF8·hash, main/key 취소·같은 길이 외부 commit·busy BEGIN·실제 SQLite READ/COMMIT 거부와 DB/schema/typed rows/file bytes 불변을 확인했다. 긴 공통 키의 pending-byte read 교대 문제를 수정하여 1 MiB+3 prefix는 5 calls, 8 MiB+3은 33 calls로 통과했다. 작은 fresh 예산/상이한 escape 폭과 취소 중복 poll 회귀도 통과했다. 관련 raw 명령·actual exit·중단/실패 구분·수치는 `/tmp/g5d-s2-canonical.PGW1he/manifest.md`에 있다.
-- **정적·다음·보존**: scoped strict clippy·Rust 2021 format·diff check exit 0이다. 최초 clippy의 test observability tuple type-complexity 경고는 의미 변화 없는 내부 type alias로 정리했다. 앞선 oracle `7eeca1d`와 이번 scanner를 한 S2 묶음으로 단일 독립 리뷰한다. 기존 S1 API·R1–R3B·schema/protocol/deps·안전 예산·제품 open/append/recovery·100-operation fence는 불변이다. Karpathy 지침에 따라 소유 범위의 구체적 읽기 추출만 추가했고 제품 연결이나 범용 reader를 만들지 않았다. Cargo jobs/threads 4·단일 실행(nice sandbox 미허용)을 지켰다. 전체 sidecar/stdio/누적 QA는 이번에 실행하지 않았으며 과거 full exit 143은 여전히 미완료다. S3 projection 의미·SQLite mirror 동등성, catch-up/startup/admission·실제 provider/Windows 및 파동 마감 누적 QA가 남는다. merge/rebase/cherry-pick/push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (S2 전 실제 V8 acceptance oracle 회귀)
-
-- **범위·발견**: §13의 primitive 추정을 ordinary append·ready materialization으로 만든 정상 소형 V8의 43사례로 고정했다. 새 `storage/tests/reopen_oracles.rs`와 module 등록·이번 history만 변경했다. serde replay equality, SQLite mirror, `verify_projection_replay`, 실제 `Storage::open`, 전체 private R3A를 따로 assert한다. indexed duplicate first-wrong/last-correct와 lock evidence key순서·escape의 단측 차이는 legacy가 거부하지만 R3A가 허용했다. 동일 duplicate·정상 마지막 nonindexed 값·공백·typed sequence overlay의 기존 수락은 유지된다. 숫자 1/1.0/bool/null은 정상 nonindexed source의 타입별 의미 비교와, 유효 pid=1/invalid pid 3개 ordinary write 거부를 분리했다.
-- **검증**: `s2_legacy_oracle` 6 passed(16.45초), scoped strict clippy·Rust 2021 format·diff check exit 0. 실제 DB 43사례 및 invalid-pid 3대조군에서 schema/typed rows/file bytes 불변을 확인했다. expected verdict는 기존 serde-last/SQLite-first·json 표현·sequence overlay 코드를 근거로 고정했으며 관측 결과를 복사하지 않았다. raw 명령·actual exit·사례별 결과는 `/tmp/g5d-s2-oracles.KAd88R/manifest.md`에 있다. Cargo jobs/test threads 4·단일 실행을 적용했고 nice는 sandbox 거부로 미적용이다.
-- **다음·한계**: 이는 private R3A의 legacy 동등성 부족을 고정한 테스트이며 제품 검증 우회나 정책 변경이 아니다. 실제 provider/사용자 프로젝트·전체 suite/harness는 실행하지 않았다. 사용자 승인 S2 묶음의 canonical scanner는 후속 §14를 읽은 뒤 구현하며, 묶음 단위 독립 리뷰 1회와 마감 누적 QA가 남는다. source/schema/예산/S1/제품 admission은 불변이고 merge/rebase/cherry-pick/push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (운영 변경 커밋·R3C-S1 독립 리뷰와 통합)
-
-- **커밋·재개**: 사용자 요청으로 테스트 경로 수리·저부하 하네스·간소화 절차·기존 정리 기록 9파일을 `62abf69`로 커밋했다. 이어 보존된 S1을 기능 commit `00f54d9978145e2f1e969306e290d546d7d33c94`로 고정하고 단일 독립 리뷰(`g5d_reopen_review`)의 exact-commit PASS를 받아 `m5/coding-agent-ide`에 반영한다. 기존 19개 실패 수리는 이미 동일하게 들어 있어 중복 수정하지 않는다.
-- **검증·통합**: 중단 당시 S1 code 5파일과 최종 feature source의 byte 동일성을 확인해 focused 12 passed·§10 exact 1 passed·strict clippy/format을 재사용했다. reviewer는 고정 SQL 주소·10필드 identity·동일 연결/epoch·호출당 예산·COMMIT 뒤 진행 보존·오류/취소의 terminal 폐기를 확인했다. source 충돌은 없고 history 추가 충돌은 양쪽 모든 엔트리·고정 결정을 보존해 해결했다. 통합 source 동일성·diff·문서 동기화를 확인하며 새 Cargo/전체 테스트를 반복하지 않는다. 증거는 `/tmp/g5d-r3cs1-evidence.ympdQJ/manifest.md`와 `resume-source-identity.log`다.
-- **현재 완료선·다음**: S1의 private byte transport 구현·관련 검증·독립 리뷰·통합까지다. 이전 중단된 full exit 143과 누적 QA 대기는 그대로이며 JSON canonical/의미 검증, legacy SQLite mirror 동등성, catch-up/startup/admission 및 전체 R3C/G5D 완료는 아니다. 다음 구현은 §13의 기존 V8 수락 기준 회귀를 바탕으로 S2 canonical/의미 검증을 진행한다. 큰 기록 호환성 묶음의 누적 QA는 마감 시 수행한다. 기존 안전 예산·제품 100-operation fence는 유지한다.
-- **보존·운영**: 새 worktree를 만들지 않고 기존 기능 worktree를 재사용했다. 해당 worktree는 clean이지만 후속 작업과 파동 QA 전이라 이번에는 제거하지 않으며 다음 파동 마감에 정리를 점검한다. 모든 변경은 로컬 M5 범위이며 main 병합·push·실제 provider/사용자 프로젝트 시험 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (M5 G5D R3C-S1 기능 커밋 재개)
-
-- **재개·범위**: 사용자가 현재 변경 커밋과 계속 진행을 승인하여 §12 S1의 code 5파일·기능 history와 이미 root `62abf69`에 반영된 동일한 `chat/tests.rs` 수리를 7파일 기능 단위로 고정한다. 이번 재개에는 Rust 수정이 없으며 새 byte transport는 private UTF-8/길이/SHA 정보만 제공한다. schema·기존 예산·R1–R3B·제품 open/append/recovery/admission·100-operation fence는 불변이다.
-- **동일성·관련 검증 완료**: S1 tracked 3파일의 diff와 새 2파일 전체를 중단 당시 외부 보존본과 대조해 모두 byte-for-byte 동일함을 확인했다. `chat/tests.rs`도 root `62abf69` blob과 같다. 따라서 기존 focused 12 passed(20.98초), §10 exact 1 passed(19.36초), S1 strict clippy/Rust 2021 format exit 0를 재사용하며 동일 검사를 반복하지 않았다. 별도 수리의 명시적 bin build·post-build exact 19 passed(30.98초)·locator 1 passed·format/diff exit 0도 그대로 유효하다. raw 로그·hash 대조·정확 명령은 `/tmp/g5d-r3cs1-evidence.ympdQJ/manifest.md` 및 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 보존했다. 새로 수행한 검증은 읽기 전용 동일성·커밋 범위/diff 확인이며 Cargo 실행은 없다.
-- **다음·운영**: 사용자 승인 간소화 절차 §1.1에 따라 관련 자체 검증 완료와 기능 커밋을 누적 QA 완료와 구분한다. 단일 exact-commit 독립 리뷰가 남고 이후 차단 finding만 범위 내 수리한다. 이전 full actual exit 143/stdio 미실행은 그대로 누적 QA 대기이며 전체 suite·누적 gate를 이번에 재실행하지 않았다. 앞으로도 Cargo jobs/test threads 4·컴퓨터 전체 무거운 실행 1개를 적용한다. S2 canonical/semantic 동등성, catch-up/startup/admission·전체 R3C/G5D와 Windows/실제 provider/사용자 프로젝트 검증은 미완료다. 기존 중단·수리 워크로그 원문은 보존하고 merge/rebase/cherry-pick/push는 하지 않는다.
-
-### 2026-09-03 · by GPT-5.6-Sol (중단 전 chat 테스트 19개 실패 수리)
-
-- **원인·수정**: 사용자 재개 지시에 따라 이전 full 로그의 `chat::tests` FAILED 19개만 대상으로 삼았다. 대표 exact 1개를 저부하로 실행해 `build the sidecar binary for process gate` panic(exit 101, 0.00초)을 재현했다. 공통 test helper가 worktree의 `target/debug`를 고정해 실제 shared `CARGO_TARGET_DIR`의 binary를 찾지 못한 것이 원인이었다. `chat/tests.rs`에서 현재 Cargo test executable의 `deps` 부모 profile 디렉터리의 sibling binary만 선택하고, 부재 시 같은 target/profile로 명시적 bin build를 안내한다. 임의 PATH/fallback 탐색, 제품 코드·예산·정책·assertion·sleep/timeout 변경은 없다.
-- **검증**: 수정 직후 exact 19개 PASS(30.67초)는 기존 shared binary를 사용한 중간 결과로 분리했다. 이어 같은 worktree/shared target에서 `cargo build -p hello-agent-sidecar --locked --bin hello-agent-sidecar` exit 0 후 기본/shared target 및 target-triple/release 경로의 순수 locator exact 1개 PASS(0.00초), 원래 실패와 이름 집합이 정확히 같은 19개 PASS(30.98초, exit 0)를 확인했다. Rust 2021 `chat/tests.rs` format check와 diff check exit 0. 명령·실제 종료 코드·원본 실패/중간/최종 로그·19개 이름 대조는 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 보존한다.
-- **저부하·보존**: 모든 Cargo에 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4`와 shared target `/Users/wonseok-han/projects/hello-agent/target`을 명시하고 한 번에 하나만 실행했다. `nice -n 10`은 sandbox의 setpriority 거부 때문에 적용되지 않았으며 이를 성공으로 기록하지 않는다. 모든 실행 handle은 종료했고 읽기 전용 process snapshot에는 조사 명령 외 matching Cargo/sidecar fixture가 없었다(탈출 자손/전체 시스템 소멸 증명과 구분). 기존 S1 code 5파일은 SHA-256 동일, 이전 history 원문은 보존하고 이번 엔트리·고정 발견만 추가했다. root 설정·다른 worktree 변경은 건드리지 않았다.
-- **다음·한계**: 이번 수리는 미커밋이며 관련 diff의 독립 리뷰가 남는다. 새 사용자 운영 지시에 따라 앞선 S1 인계의 즉시 full/stdio 재실행 TODO를 대체하고 전체 suite·storage/harness·clippy·누적 QA는 실행하지 않았다. 이전 full exit 143/미완료는 그대로이며 S1·R3C 완료나 제품 admission을 주장하지 않는다. 실제 provider/auth/사용자 프로젝트/Windows 검증 및 merge/rebase/cherry-pick/push는 하지 않았다.
-
-### 2026-09-03 · by GPT-5.6-Sol (기존 테스트 실패 19개 수리·운영 간소화 적용)
-
-- **원인·수리**: 사용자 승인으로 중단 전 실패한 `chat::tests` 19개를 조사했다. 공통 테스트 도우미가 worktree의 `target/debug`를 고정해 shared `CARGO_TARGET_DIR`에 있는 sidecar를 못 찾았으며, 대표 exact 테스트의 실행 파일 부재 panic으로 재현했다. 현재 Cargo test executable의 profile 디렉터리에서 동일 target/profile의 sidecar를 찾도록 `chat/tests.rs`만 수정하고 기본/shared/target-triple 경로 회귀를 추가했다. 기존 assertion·timeout·제품 코드·안전 정책을 완화하지 않았다.
-- **검증**: 같은 기능 worktree/shared target의 명시적 bin build exit 0 후 기존 실패와 이름 집합이 정확히 같은 **19 passed / 0 failed**(30.98초), locator 회귀 1 passed, Rust 2021 scoped format·diff check exit 0이다. 이전 binary로 수행한 19 passed(30.67초)는 중간 결과로 구분한다. 원본/최종 명령·로그·보존 대조는 `/tmp/g5d-chat-failure-repair.oWUOWP/manifest.md`에 있다. root 저부하 하네스 8/8 passed 증거는 `.artifacts/m5-review/2026-09-03-low-impact-harness.log`다. root/기능 `chat/tests.rs`는 byte-identical이며 동일 코드 검증을 통합에서 다시 반복하지 않았다.
-- **운영 결정**: 앞선 미확정 제안을 사용자가 승인해 `AGENTS.md`/`CLAUDE.md`, 오케스트레이션 절차 §1.1과 S1 계약의 검증 시점을 정리했다. 사용자 기능/명확한 결함 단위로 관련 검사→독립 리뷰 1명→파동 마감 누적 QA로 운영한다. 수정 후 영향받은 부분만 다시 확인하고 불필요한 helper별 문서 심의·전체 검사·다중 검토를 반복하지 않는다. 필수 안전 시나리오·차단 결함과 제품 활성화/출시 전 전체 검증은 그대로다.
-- **독립 검토**: 단일 읽기 전용 리뷰(`g5d_reopen_review`)가 root HEAD `56a0ead`의 지정 미커밋 운영 규칙·저부하 하네스·테스트 helper와 최종 로그를 묶어 검토해 차단 결함 없이 PASS했다. root/기능 helper SHA-256은 `d7dc80da7aef53de5d521ed04137b9d4f404a57282c2165606f858931c8de1de`로 동일하다. 검토자는 추가 전체 테스트를 실행하지 않았으며 S1의 다른 구현은 이 판정 범위가 아니다.
-- **저부하·범위·다음**: 모든 Rust 실행은 compile/test 최대 4 및 무거운 실행 하나로 제한했다. sandbox가 nice 변경을 거부한 사실은 로그에 남기며 CPU 절대 상한을 주장하지 않는다. 전체 sidecar/누적 QA는 이번 요청에서 실행하지 않았다. 기존 S1 코드 5파일과 원문 history는 기능 worktree에 그대로 보존했고 수리만 root에 반영했다. 이전 full exit 143은 전체 PASS로 바뀐 것이 아니며 다음은 S1 기능 단위 리뷰·후속 구현이다. 현재 변경은 미커밋이고 main 병합·push 없음.
-
-### 2026-09-03 · by GPT-5.6-Sol (작업 지연·검증 반복에 대한 사용자 피드백)
-
-- **피드백·분석**: 사용자가 전체 진행이 너무 오래 걸리고 중간 검사·수정이 많다고 지적했다. 최근 이력과 절차를 읽기 전용 대조했다. 작은 내부 단위마다 계약/문서 검토·기능 테스트·리뷰·통합 QA·최종 gate를 직렬 적용하고, 발견한 후속 문제마다 새 세부 단위를 추가한 운영이 지연을 키웠다는 판단이다. R3B의 누적 13단계는 26분 0.481초였으며 집중 검증과 전체 검증의 빈도·범위 구분이 필요하다. 전체 지연 중 각 원인의 비율은 측정하지 않았다.
-- **제안·미확정**: 사용자 기능 단위로 파동을 묶고 변경 관련 회귀/정적 검사→독립 리뷰 1회→파동 마감 누적 QA로 운영을 간소화한다. 수정 후에는 영향받은 검증만 다시 하고 차단 결함과 후속 개선을 분리하는 방안을 제안한다. 데이터 손상·권한·원본 보호·종료/복구의 실제 실패는 계속 차단한다. 이는 새 운영 제안이며 기존 안전 계약·역할·절차를 이번 대화에서 변경한 것은 아니다.
-- **검증·보존·다음**: 코드/설정 수정·테스트 재실행·commit/merge/push 없이 이 피드백 기록만 추가했다. 중단된 전체 테스트의 선행 19 FAILED는 원인 미확인 상태를 유지한다. 저부하 실행 제한과 기존 root/기능 worktree 변경을 보존하고, 재개 전 중복 검증 의무와 파동 완료 단위를 명시적으로 조정할 필요가 있다.
-
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.
@@ -376,7 +166,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다.
+- **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다. V10은 `authorizeDelete`를 read-only witness로 두고 `deletePrefix`의 exact armed interval에서만 완전 authority batch와 source index/event 삭제·authority cleanup·cursor 전진을 한 transaction으로 결속한다. V10 contract fixture만으로 runtime writer 활성화나 readiness를 주장하지 않는다.
 
 - **큰 snapshot 처리와 제품 준비 시간은 별개(2026-09-03)**: 개발 중인 새 전역 경로는 실제 생산 101-workspace DB의 보존 복사본(607 source rows)을 172,685 calls/약 98.288초에 복원·ready 재검증했다. 30,000-call 테스트 guard 실패는 무진행이 아니라 예상 횟수 부족이었다. 이 내부 정확성 관측은 3초 제품 ready 충족이나 startup/admission 활성화가 아니다. 제품 시간·1 MiB fresh/8 MiB retained+fresh/100 work·100 frozen-operation fence는 유지한다. 실패한 생성 테스트와 보존본 replay 성공을 구분하고 원본 DB는 `/tmp/g5d-production-evidence.NX3udd/manifest.md`의 SHA로 고정한다.
 
@@ -498,3 +288,5 @@
 17개 엔트리(2026-07-16 ~ 2026-07-23)를 아카이브로 옮겼다. 재사용할 결정·함정은 위 `핵심 결정·발견`에 반영돼 있으므로, 통상 아카이브를 열 필요는 없다.
 
 2026-09-02 워크로그 전체는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
+
+2026-09-03 워크로그와 2026-09-08의 오래된 일부 엔트리는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
