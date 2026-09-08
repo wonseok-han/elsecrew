@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D verifyPrefix admission 경계 수리)
+
+- **재개 경계 수리**: pending `verifyPrefix`는 scan이 exhausted여도 prefix가 아직 없어야 하며, durable prefix는 다음 `authorizeDelete` phase부터 요구하도록 V9·V10 공용 admission verifier를 수정했다. 이는 V10 writer의 prefix INSERT와 `pending authorizeDelete` 전이가 한 transaction에서 일어나는 순서와 일치한다.
+- **실제 SQLite 회귀·검증**: exhausted pending `verifyPrefix` + no-prefix는 V9 read-only verifier와 V10 제품 admission에서 DB snapshot을 바꾸지 않고 허용했다. 같은 phase의 조기 exact prefix와 `authorizeDelete`의 malformed prefix는 mutation 없이 거부했고 기존 post-prefix phase 회귀도 유지했다. focused reopen-plan 21/21, 신규 verify-prefix 2/2, sidecar all-target no-deps strict clippy, Rust 2021 format과 diff check가 통과했으며 writer/scheduler/public 범위는 변경하지 않았다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V10 schema golden 고정 상한 수리)
 
 - **재리뷰 차단 수리**: DB schema preflight의 row 상한을 parsed golden 길이에서 유도하지 않고 코드 상수 `76`과 `LIMIT 77`로 독립 고정했다. golden parser도 exact 76개, non-empty tuple, lowercase hex64 digest, `(type,name,tableName)` strictly sorted·unique를 요구해 잘린·중복·재정렬·변조 fixture가 DB 비교 상한을 함께 약화하지 못한다.
