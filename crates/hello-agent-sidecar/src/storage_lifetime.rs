@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 #[allow(dead_code)]
 pub(crate) mod compaction_writer;
+pub(crate) mod scheduler;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MaterializationFailurePoint {
@@ -682,9 +683,45 @@ fn verify_bounded_storage_runtime_state(connection: &Connection) -> Result<(), S
         STORAGE_LIFETIME_SCHEMA_VERSION_V8 => {
             crate::storage::verify_v8_compaction_runtime_state(connection)
         }
+        hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V9
+        | hello_agent_protocol::storage_lifetime_v1::STORAGE_LIFETIME_SCHEMA_VERSION_V10 => {
+            let unsafe_compaction: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM maintenance_jobs \
+                     WHERE job_kind='losslessCompaction' AND state IN ('pending','running')) \
+                     OR EXISTS(SELECT 1 FROM ledger_compaction_delete_authority);",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| {
+                    materialization_error("bounded materialization state is unreadable")
+                })?;
+            if unsafe_compaction {
+                return Err(materialization_error(
+                    "bounded materialization cannot overlap compaction",
+                ));
+            }
+            Ok(())
+        }
         _ => Err(materialization_error(
-            "bounded materialization requires exact storage v6, v7, or v8",
+            "bounded materialization requires an exact supported storage schema",
         )),
+    }
+}
+
+pub(crate) fn materialization_requires_work(connection: &Connection) -> Result<bool, SidecarError> {
+    match load_materialization_pair(connection)? {
+        MaterializationPair::Ready => Ok(false),
+        MaterializationPair::Absent | MaterializationPair::Pending(_) => {
+            verify_bounded_storage_runtime_state(connection)?;
+            Ok(true)
+        }
+        MaterializationPair::Attempting(_) => Err(materialization_error(
+            "storage materialization has an unconfirmed prior attempt",
+        )),
+        MaterializationPair::Failed(_) => {
+            Err(materialization_error("storage materialization has failed"))
+        }
     }
 }
 

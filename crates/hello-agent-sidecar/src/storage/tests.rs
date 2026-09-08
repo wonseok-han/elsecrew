@@ -9,6 +9,7 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+mod compaction_writer_v10;
 mod reopen_bytes;
 mod reopen_canonical;
 mod reopen_closure;
@@ -18,7 +19,6 @@ mod reopen_plan_v9;
 mod reopen_projection;
 mod reopen_semantic;
 mod reopen_snapshot;
-mod compaction_writer_v10;
 
 type DatabaseSnapshot = (Vec<SchemaObject>, Vec<(String, Vec<Vec<SqlValue>>)>);
 type ChatSourceIndexRow = (i64, Option<String>, Option<i64>, Option<String>);
@@ -4558,6 +4558,7 @@ fn populated_v2_storage(path: &Path, state: &str) -> Storage {
         connection,
         path: path.to_path_buf(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     storage
         .append_event(&event(

@@ -483,6 +483,106 @@ fn startup_failure_becomes_sticky_admission_failure_after_shell_ready() {
 }
 
 #[test]
+fn cooperative_scheduler_has_zero_ticks_before_ready_and_after_prepare_quit() {
+    let (_root, path) = database();
+    let gate = Arc::new(AtomicBool::new(false));
+    let mut verifying = SidecarSession::new(
+        "sidecar_scheduler_verifying".to_string(),
+        agent_runtime::AgentRuntime::blocked(),
+    );
+    verifying.start_admission_with_gate(&path, Some(Arc::clone(&gate)));
+    verifying.maintenance_tick().unwrap();
+    assert!(!path.exists());
+    let _ = verifying
+        .handle_request(request_value(
+            "sidecar_scheduler_verifying",
+            "req_scheduler_quit_verifying",
+            "app.prepareQuit",
+            json!({}),
+        ))
+        .unwrap();
+    gate.store(true, Ordering::Release);
+
+    let bad_root = tempfile::tempdir().unwrap();
+    let bad_path = bad_root.path().join("hello-agent.sqlite3");
+    fs::create_dir(&bad_path).unwrap();
+    let mut failed = SidecarSession::new(
+        "sidecar_scheduler_failed".to_string(),
+        agent_runtime::AgentRuntime::blocked(),
+    );
+    failed.start_admission(&bad_path);
+    wait_until_admitted(&mut failed);
+    failed.maintenance_tick().unwrap();
+
+    let (_root, path) = database();
+    let instance = "sidecar_scheduler_quitting";
+    let mut ready =
+        SidecarSession::new(instance.to_string(), agent_runtime::AgentRuntime::blocked());
+    ready.start_admission(&path);
+    wait_until_admitted(&mut ready);
+    let _ = ready
+        .handle_request(request_value(
+            instance,
+            "req_scheduler_quit_ready",
+            "app.prepareQuit",
+            json!({}),
+        ))
+        .unwrap();
+    let AdmissionState::Ready { sidecar, .. } = &mut ready.admission else {
+        panic!("ready sidecar")
+    };
+    sidecar
+        .storage
+        .connection_for_test()
+        .execute_batch("DROP TABLE lifetime_materialization_job;")
+        .unwrap();
+    assert_eq!(
+        sidecar.maintenance_tick().unwrap(),
+        storage_lifetime::scheduler::MaintenanceTickResult::NoWork,
+        "prepareQuit must block scheduler access before cleanup and clean marking"
+    );
+}
+
+#[test]
+fn fatal_scheduler_error_poisons_later_mutation_and_agent_run() {
+    let (_root, path) = database();
+    let instance = "sidecar_scheduler_poison";
+    let mut session =
+        SidecarSession::new(instance.to_string(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else {
+        panic!("ready sidecar")
+    };
+    sidecar
+        .storage
+        .connection_for_test()
+        .execute_batch("DROP TABLE lifetime_materialization_job;")
+        .unwrap();
+    assert!(sidecar.maintenance_tick().is_err());
+    assert!(sidecar.maintenance_poisoned);
+
+    for (id, method, params) in [
+        (
+            "req_poison_project",
+            "project.open",
+            json!({"selectedPath":"/fixture"}),
+        ),
+        (
+            "req_poison_agent",
+            "run.startAgent",
+            json!({"schemaVersion":1}),
+        ),
+    ] {
+        let error = match sidecar.handle_request(request_value(instance, id, method, params)) {
+            Ok(_) => panic!("poison must fail closed before mutation or run validation"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageMaintenancePoisoned");
+    }
+}
+
+#[test]
 fn later_wave_method_is_structured_error_and_read_only_status_remains_available_after_quit() {
     let (_root, path) = database();
     let instance = "sidecar_capabilities";

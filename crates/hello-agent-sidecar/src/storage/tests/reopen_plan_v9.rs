@@ -535,6 +535,7 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
         connection: Connection::open(path).unwrap(),
         path: path.to_path_buf(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);
     if phase == "freezeOperations" {
@@ -613,6 +614,7 @@ fn seed_chat_pending(path: &Path, phase: &str, after: u32) {
         connection: Connection::open(path).unwrap(),
         path: path.to_path_buf(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     let (baseline_id, baseline_digest) =
         insert_baseline_for(&storage.connection, "chat", CHAT_ID, 1000);
@@ -891,6 +893,7 @@ fn append_after_plan_cutoff(path: &Path) {
         connection: Connection::open(path).unwrap(),
         path: path.to_path_buf(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     assert_eq!(
         storage
@@ -1351,6 +1354,7 @@ fn product_admission_accepts_two_succeeded_v9_plans_as_one_bounded_chain() {
         connection: Connection::open(&path).unwrap(),
         path: path.clone(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     let (baseline_1000, digest_1000) = insert_baseline(&storage.connection, 1000);
     let (baseline_2000, digest_2000) = insert_baseline(&storage.connection, 2000);
@@ -1695,6 +1699,7 @@ fn product_admission_migrates_exact_v9_to_v10_and_preserves_terminal_evidence() 
         connection: Connection::open(&path).unwrap(),
         path: path.clone(),
         writes_admitted: true,
+        maintenance_epoch: 0,
     };
     configure_connection(&storage.connection).unwrap();
     let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);

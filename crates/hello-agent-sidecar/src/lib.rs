@@ -321,6 +321,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 let mut events = sidecar.poll_watch_events();
                 events.extend(sidecar.poll_runtime_events()?);
                 write_events(&mut session, &mut output, events)?;
+                sidecar.maintenance_tick()?;
                 continue;
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -347,6 +348,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         session.observe(&response).map_err(protocol_error)?;
         write_envelope(&mut output, &response)?;
         write_events(&mut session, &mut output, handled.events)?;
+        sidecar.maintenance_tick()?;
     }
 }
 
@@ -433,6 +435,8 @@ struct Sidecar {
     safe_to_quit: bool,
     g5: chat::G5Manager,
     agent_runtime: agent_runtime::AgentRuntime,
+    maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
+    maintenance_poisoned: bool,
 }
 
 struct AdmissionWorker {
@@ -745,6 +749,13 @@ impl SidecarSession {
     fn storage_is_ready(&self) -> bool {
         matches!(self.admission, AdmissionState::Ready { .. })
     }
+
+    fn maintenance_tick(&mut self) -> Result<(), SidecarError> {
+        let AdmissionState::Ready { sidecar, .. } = &mut self.admission else {
+            return Ok(());
+        };
+        sidecar.maintenance_tick().map(|_| ())
+    }
 }
 
 impl Drop for SidecarSession {
@@ -780,6 +791,8 @@ impl Sidecar {
             safe_to_quit: false,
             g5,
             agent_runtime,
+            maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
+            maintenance_poisoned: false,
         })
     }
 
@@ -796,6 +809,9 @@ impl Sidecar {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
+        if self.maintenance_poisoned && request.method != "system.status" {
+            return Err(maintenance_poisoned_error());
+        }
         if self.prepared_to_quit
             && !matches!(
                 request.method.as_str(),
@@ -1628,6 +1644,24 @@ impl Sidecar {
         Ok(self.g5_events(events))
     }
 
+    fn maintenance_tick(
+        &mut self,
+    ) -> Result<storage_lifetime::scheduler::MaintenanceTickResult, SidecarError> {
+        if self.prepared_to_quit {
+            return Ok(storage_lifetime::scheduler::MaintenanceTickResult::NoWork);
+        }
+        if self.maintenance_poisoned {
+            return Err(maintenance_poisoned_error());
+        }
+        match self.maintenance_scheduler.tick(&mut self.storage) {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                self.maintenance_poisoned = true;
+                Err(error)
+            }
+        }
+    }
+
     fn g5_events(&self, events: Vec<chat::G5Event>) -> Vec<EventV1> {
         events
             .into_iter()
@@ -1645,6 +1679,13 @@ impl Sidecar {
             })
             .collect()
     }
+}
+
+fn maintenance_poisoned_error() -> SidecarError {
+    SidecarError::new(
+        "storageMaintenancePoisoned",
+        "storage maintenance is poisoned and durable mutation or agent execution is blocked",
+    )
 }
 
 fn admission_not_cancelled(cancellation: &AtomicBool) -> Result<(), SidecarError> {

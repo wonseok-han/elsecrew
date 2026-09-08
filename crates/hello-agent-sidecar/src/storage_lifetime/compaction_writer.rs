@@ -12,7 +12,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
     STORAGE_LIFETIME_SCHEMA_VERSION_V10,
 };
-use rusqlite::{params, Connection, Transaction, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -58,15 +58,18 @@ pub(crate) enum CompactionFailurePoint {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompactionStepResult {
-    NoCandidate,
-    Progress {
+    Created {
+        job_id: String,
+    },
+    ArmedWorked {
         job_id: String,
         phase: StorageCompactionPhaseV3,
         after_plan_ordinal: u32,
     },
-    Completed {
+    Finalized {
         job_id: String,
     },
+    NoWork,
 }
 
 #[derive(Default)]
@@ -267,17 +270,17 @@ pub(crate) fn run_private_compaction_step(
         }
         None => {
             if cancellation.cancelled(CompactionCancellationPoint::BeforeArm) {
-                return Ok(CompactionStepResult::NoCandidate);
+                return Ok(CompactionStepResult::NoWork);
             }
             let Some(job) = create_candidate(connection, target)? else {
-                return Ok(CompactionStepResult::NoCandidate);
+                return Ok(CompactionStepResult::NoWork);
             };
-            job
+            return Ok(CompactionStepResult::Created { job_id: job.job_id });
         }
     };
 
     if cancellation.cancelled(CompactionCancellationPoint::BeforeArm) {
-        return Ok(progress(&job));
+        return Ok(CompactionStepResult::NoWork);
     }
     if job.private_state.cursor.phase == StorageCompactionPhaseV3::Finalize {
         return complete_pending_job(connection, &job, cancellation, failure);
@@ -322,12 +325,92 @@ pub(crate) fn run_private_compaction_step(
     if next.state
         == hello_agent_protocol::storage_lifetime_v1::StorageCompactionJobStateV1::Succeeded
     {
-        Ok(CompactionStepResult::Completed {
+        Ok(CompactionStepResult::ArmedWorked {
             job_id: next.job_id,
+            phase: next.private_state.cursor.phase,
+            after_plan_ordinal: next.private_state.cursor.after_plan_ordinal,
         })
     } else {
         Ok(progress(&next))
     }
+}
+
+pub(crate) fn pending_compaction_target(
+    connection: &Connection,
+) -> Result<Option<CompactionTarget>, SidecarError> {
+    let facts: (u32, u32, u32) = connection
+        .query_row(
+            "SELECT count(*),\
+                    coalesce(sum(state='running'),0),\
+                    (SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1)) \
+             FROM (SELECT state FROM maintenance_jobs \
+                   INDEXED BY maintenance_jobs_single_active_lossless_compaction \
+                   WHERE job_kind='losslessCompaction' AND state IN ('pending','running') \
+                   LIMIT 2);",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(sqlite_error)?;
+    if facts.0 > 1 || facts.1 != 0 || facts.2 != 0 {
+        return Err(compaction_error());
+    }
+    let Some(job) = load_active_job(connection)? else {
+        return Ok(None);
+    };
+    if job.state != hello_agent_protocol::storage_lifetime_v1::StorageCompactionJobStateV1::Pending
+    {
+        return Err(compaction_error());
+    }
+    let plan = load_plan(connection, &job.job_id)?;
+    Ok(Some(CompactionTarget {
+        aggregate_type: plan.aggregate_type,
+        aggregate_id: plan.aggregate_id,
+    }))
+}
+
+pub(crate) fn next_compaction_candidate(
+    connection: &Connection,
+    aggregate_type: &str,
+    after_aggregate_id: &str,
+) -> Result<Option<CompactionTarget>, SidecarError> {
+    if !matches!(aggregate_type, "project" | "chat" | "run" | "lock")
+        || after_aggregate_id.len() > DEPENDENCY_BYTES
+    {
+        return Err(compaction_error());
+    }
+    let identity: Option<(i64, bool, i64)> = connection
+        .query_row(
+            "SELECT event_rowid,typeof(aggregate_id)='text',length(CAST(aggregate_id AS BLOB)) \
+             FROM event_source_index INDEXED BY event_source_index_aggregate_latest \
+             WHERE aggregate_type=?1 AND aggregate_id>?2 \
+             ORDER BY aggregate_id,event_rowid DESC LIMIT 1;",
+            params![aggregate_type, after_aggregate_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((event_rowid, valid_type, id_length)) = identity else {
+        return Ok(None);
+    };
+    if !valid_type || length(id_length)? > DEPENDENCY_BYTES {
+        return Err(compaction_error());
+    }
+    let (selected_type, aggregate_id): (String, String) = connection
+        .query_row(
+            "SELECT aggregate_type,aggregate_id FROM event_source_index WHERE event_rowid=?1;",
+            [event_rowid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(sqlite_error)?;
+    if selected_type != aggregate_type || aggregate_id.as_str() <= after_aggregate_id {
+        return Err(compaction_error());
+    }
+    let target = CompactionTarget {
+        aggregate_type: aggregate_type.to_string(),
+        aggregate_id,
+    };
+    validate_target(&target)?;
+    Ok(Some(target))
 }
 
 fn validate_target(target: &CompactionTarget) -> Result<(), SidecarError> {
@@ -950,7 +1033,7 @@ fn complete_pending_job(
     {
         return Err(compaction_error());
     }
-    Ok(CompactionStepResult::Completed {
+    Ok(CompactionStepResult::Finalized {
         job_id: completed.job_id,
     })
 }
@@ -1818,8 +1901,10 @@ fn load_active_job(
         .query_row(
             "SELECT coalesce(min(typeof(job_id)='text'),1),count(*),\
                     coalesce(max(length(CAST(job_id AS BLOB))),0) \
-             FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
-             AND state IN ('pending','running');",
+             FROM (SELECT job_id FROM maintenance_jobs \
+                   INDEXED BY maintenance_jobs_single_active_lossless_compaction \
+                   WHERE job_kind='losslessCompaction' AND state IN ('pending','running') \
+                   LIMIT 2);",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -2026,7 +2111,7 @@ fn phase_name(phase: StorageCompactionPhaseV3) -> &'static str {
 }
 
 fn progress(job: &StorageCompactionJobV3) -> CompactionStepResult {
-    CompactionStepResult::Progress {
+    CompactionStepResult::ArmedWorked {
         job_id: job.job_id.clone(),
         phase: job.private_state.cursor.phase,
         after_plan_ordinal: job.private_state.cursor.after_plan_ordinal,
