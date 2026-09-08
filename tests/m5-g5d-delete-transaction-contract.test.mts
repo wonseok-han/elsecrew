@@ -37,6 +37,7 @@ const schemaIdentity = JSON.parse(readFileSync(
   resolve(fixtureRoot, "storage-v10/schema-identity.json"), "utf8",
 )) as Record<string, any>;
 const activation = readJson("storage-activation-v3/manifest.json");
+const activationCases = readJson("storage-activation-v3/cases.json");
 const phases = [
   "planEligibility", "freezeOperations", "freezeMessages", "verifyPrefix",
   "authorizeDelete", "deletePrefix", "verifyOperations", "verifyEquivalence",
@@ -45,6 +46,15 @@ const phases = [
 
 function readJson(path: string): Record<string, any> {
   return JSON.parse(readFileSync(resolve(fixtureRoot, path), "utf8"));
+}
+
+function setContractPath(target: Record<string, any>, path: string, value: unknown): void {
+  const parts = path.split(".");
+  const leaf = parts.pop();
+  assert.ok(leaf);
+  let parent = target;
+  for (const part of parts) parent = parent[part] as Record<string, any>;
+  parent[leaf] = value;
 }
 
 function databaseThroughV9(): DatabaseSync {
@@ -396,6 +406,24 @@ test("V10 delete repair and activation V3 goldens are exact and public-wire neut
       : typeof current === "number" ? 999 : "relaxed";
     assert.throws(() => validateStorageCompactionDeleteTransactionPolicyV1(invalid), undefined, path);
   }
+});
+
+test("activation V3 rejects scheduler priority, commit, result, lifecycle, and fatal relaxation", () => {
+  for (const path of activationCases.malformedSchedulerPaths as string[]) {
+    const invalid = structuredClone(activation);
+    const parts = path.split(".");
+    let current: any = invalid;
+    for (const part of parts) current = current[part];
+    const replacement = typeof current === "boolean" ? !current
+      : typeof current === "number" ? 999
+        : Array.isArray(current) ? ["relaxed"] : "relaxed";
+    setContractPath(invalid, path, replacement);
+    assert.throws(() => validateStorageLifetimeActivationPolicyV3(invalid), undefined, path);
+  }
+
+  const unknown = structuredClone(activation);
+  unknown.scheduler.unknown = true;
+  assert.throws(() => validateStorageLifetimeActivationPolicyV3(unknown));
 });
 
 test("exact idle V9 migrates to V10 and preserves succeeded data", () => {

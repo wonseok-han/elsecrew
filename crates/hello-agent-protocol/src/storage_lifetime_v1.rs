@@ -3774,6 +3774,94 @@ pub fn storage_lifetime_activation_policy_v3() -> Value {
             "publicWire": "unchanged",
         }),
     );
+    object.insert(
+        "scheduler".into(),
+        serde_json::json!({
+            "implementation": {
+                "runtimeImplemented": false,
+                "productExecutionEnabled": false,
+                "automaticSchedulingEnabled": false,
+                "publicWireChanged": false,
+                "requiredExactRuntimeSupport": [
+                    "storageV9Materializer",
+                    "storageV10Materializer",
+                    "storageV10CompactionWriter",
+                ],
+            },
+            "ownership": {
+                "execution": "cooperativeOnSoleSidecarSQLiteOwner",
+                "writerConnections": 1,
+                "backgroundWriterConnection": false,
+                "backgroundWriterThread": false,
+            },
+            "admission": {
+                "requiredStorageState": "ready",
+                "quitting": false,
+                "otherStates": "zeroTicks",
+            },
+            "priority": {
+                "order": [
+                    "materializerPendingOrActive",
+                    "resumeExactPersistedPendingCompaction",
+                    "volatileKeysetCandidate",
+                ],
+                "materializerStep": "oneBoundedWorkStep",
+                "materializerReadyHandoff": "compactorWaitsUntilNextTick",
+                "pendingCompactionBeforeCandidateDiscovery": true,
+            },
+            "candidateDiscovery": {
+                "aggregateTypeOrder": ["project", "chat", "run", "lock"],
+                "cursor": "volatileIndexedKeyset",
+                "activeTargetLookup": "singleRowJoin",
+                "forbidden": [
+                    "offset",
+                    "fullVec",
+                    "tempTable",
+                    "unboundedDistinct",
+                    "unboundedScan",
+                ],
+                "dormantAfter": "fullNoCandidateSweep",
+                "wakeOn": ["appendCommitted", "materializationPending"],
+            },
+            "tick": {
+                "input": "flushResponseThenAtMostOneTick",
+                "activeTimeoutMilliseconds": 100,
+                "dormantTimeout": "noDatabaseAccess",
+                "eof": "noTick",
+                "prepareQuit": "blockTicksBeforeCheckpointAndCleanMarker",
+            },
+            "commitDiscipline": {
+                "maxBoundedWorkCommitsPerTick": 1,
+                "runningArmSentinel": "committedImmediatelyAdjacentBeforeBoundedWork",
+                "pollingBetweenArmAndWork": "forbidden",
+                "candidatePlanCreation": "administrativeCommitConsumesTickNoWorkSameTick",
+                "finalize": "administrativeCommitConsumesTickNeverArmed",
+                "candidateAndWorkSameTick": false,
+            },
+            "result": {
+                "writerApiKinds": ["created", "armed-worked", "finalized", "no-work"],
+                "schedulerResultKinds": ["created", "armed-worked", "finalized", "no-work"],
+                "mapping": "preserveWriterKindExactly",
+                "created": "candidateJobAndPlanAdministrativeCommitOnly",
+                "armed-worked": "adjacentArmCommitThenOneBoundedWorkCommit",
+                "finalized": "pendingToSucceededAdministrativeCommitWithoutArm",
+                "no-work": "noCommit",
+            },
+            "fatal": {
+                "causes": [
+                    "runningSentinel",
+                    "nonEmptyAuthority",
+                    "multipleActiveJobs",
+                    "malformedPersistedState",
+                    "materializerError",
+                    "compactorError",
+                ],
+                "action": "poisonInternalSchedulerBlockMutationAndRunReturnProcessErrorAndExit",
+                "wireReadyToFailedTransition": false,
+                "automaticReset": false,
+            },
+        }),
+    );
     policy
 }
 
