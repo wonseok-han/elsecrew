@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D resume witness 독립 리뷰 차단 수리)
+
+- **P0 migration·planning 수리**: 실제 V8→V9 SQL이 `BEGIN IMMEDIATE` 안에서 persistent DDL 전에 exact V8 object inventory, pending/running job 부재, empty authority를 검사하고 `RAISE(ROLLBACK)`하도록 고쳤다. plan row는 arm이 고정한 최대 100개 연속 ordinal만 INSERT할 수 있고 trigger가 같은 transaction에서 cursor를 전진시킨다. prefix는 exact 1,001-row plan과 완료된 planning/`verifyPrefix` 현재 phase를 요구하되 논리적으로 미래인 equivalence는 요구하지 않는다.
+- **P1 release·P2 TS 수리**: V3 cursor에 nullable `stepThroughPlanOrdinal`을 추가해 release 범위를 고정하고 delete ordinal `1..1000`만 다음 연속 순서로 지우며 `afterPlanOrdinal=1000` terminal progress와 ordinal 1001 anchor를 보존한다. TypeScript V9 validator는 plain own data object와 string `aggregateType`만 받아 custom prototype/accessor/`toString` coercion을 fail-closed한다.
+- **검증·경계**: actual SQLite에서 unsafe migration의 pre-DDL rollback, anchor-first/sparse/>100 planning, partial/wrong-phase prefix, anchor/out-of-order/101-row release, cursor-only mutation, delete+cursor rollback과 terminal anchor 보존을 검증했다. protocol Rust 전체 49개와 lifetime/activation/V9 Node 33개, TypeScript noEmit, protocol strict clippy, Rust format, diff check가 통과했다. Rust/TypeScript/golden/문서를 함께 갱신했지만 runtime migration/admission/scheduler/delete writer는 여전히 구현되지 않았고 readiness를 주장하지 않는다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D compaction resume witness 계약)
 
 - **결정 고정**: V8 compaction cursor만으로 active `pending`의 재개 결정을 증명할 수 없어 additive storage V9와 private state/cursor schema 3을 정의했다. 한 job은 retained boundary 다음 1,000 delete row와 1 anchor를 immutable header + `WITHOUT ROWID` ordinal witness로 고정하며, `afterPlanOrdinal`까지 source·receipt·message·baseline·digest를 bounded 재검증한다. active V2 pending, running/non-empty authority/commit 불명은 mutation 없이 admission 실패다.

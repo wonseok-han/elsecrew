@@ -43,6 +43,7 @@
     "cutoffEventRowid": 2000,
     "phase": "planEligibility",
     "afterPlanOrdinal": 0,
+    "stepThroughPlanOrdinal": null,
     "scanExhausted": false
   },
   "validAdmissionPending": {
@@ -55,6 +56,7 @@
         "cutoffEventRowid": 2000,
         "phase": "freezeOperations",
         "afterPlanOrdinal": 100,
+        "stepThroughPlanOrdinal": null,
         "scanExhausted": false
       },
       "planRowsComplete": true,

@@ -5,6 +5,7 @@
     "fromVersion": 8,
     "toVersion": 9,
     "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "sqlPreflight": "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
     "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
     "runtimeDigestAuthority": "rustRecomputesCanonicalPayloadAndMessageDigests"
   },
@@ -28,7 +29,7 @@
     "targetScan": "volatileBoundedAggregateKeyset",
     "forbidden": ["OFFSET", "fullVec", "tempTable", "unboundedScan"],
     "creationTransaction": "beginImmediateRecheckCutoffMaterializationSafetyBoundariesAndExact1001Rows",
-    "planningWrite": "atMost100ConsecutiveOrdinalsAndCursorSameTransaction",
+    "planningWrite": "armedAtMost100ConsecutiveOrdinalsAndTriggerAdvancedCursorSameTransaction",
     "largerPrefix": "oneExact1000DeleteJobThenRepeat"
   },
   "privateState": {
@@ -44,7 +45,8 @@
       "releasePlan", "finalize"
     ],
     "cursorColumn": "afterPlanOrdinal",
-    "finalizeCursor": "afterPlanOrdinalZeroAndTerminalEvidenceExhausted",
+    "stepBoundaryColumn": "stepThroughPlanOrdinal",
+    "finalizeCursor": "afterPlanOrdinal1000RetainsReleasedThroughProofAndAnchor",
     "resumeVerification": "beforeReleaseBoundedKeysetProvesOrdinalsOneThroughCursorNoGapsExtrasAndRehashesSourceReceiptMessageBaseline",
     "exhausted": "trueOnlyAtExactly1001WitnessedRows",
     "activeV2Pending": "failAdmissionUnsupportedNoMutation"
@@ -65,7 +67,8 @@
     "mustBeEmptyAtPending": true
   },
   "release": {
-    "planRows": "boundedAfterPrivateEquivalenceOnly",
+    "planRows": "armedNextContiguousAtMost100DeleteOrdinalsAfterPrivateEquivalenceOnly",
+    "cursorAdvance": "deleteTriggerAdvancesReleasedThroughOrdinalInSameTransaction",
     "resumeVerification": "releasedOrdinalPrefixAbsentAndRetainedSuffixExactAgainstTerminalEvidence",
     "header": "retainedAfterSuccess",
     "terminalEvidence": "retainedAfterSuccessOrFailure",

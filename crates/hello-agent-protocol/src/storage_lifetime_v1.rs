@@ -590,6 +590,7 @@ pub struct StorageCompactionCursorV3 {
     pub cutoff_event_rowid: u64,
     pub phase: StorageCompactionPhaseV3,
     pub after_plan_ordinal: u32,
+    pub step_through_plan_ordinal: Option<u32>,
     pub scan_exhausted: bool,
 }
 
@@ -3471,6 +3472,7 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "fromVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V8,
             "toVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V9,
             "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+            "sqlPreflight": "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
             "mode": "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
             "runtimeDigestAuthority": "rustRecomputesCanonicalPayloadAndMessageDigests",
         },
@@ -3494,7 +3496,7 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "targetScan": "volatileBoundedAggregateKeyset",
             "forbidden": ["OFFSET", "fullVec", "tempTable", "unboundedScan"],
             "creationTransaction": "beginImmediateRecheckCutoffMaterializationSafetyBoundariesAndExact1001Rows",
-            "planningWrite": "atMost100ConsecutiveOrdinalsAndCursorSameTransaction",
+            "planningWrite": "armedAtMost100ConsecutiveOrdinalsAndTriggerAdvancedCursorSameTransaction",
             "largerPrefix": "oneExact1000DeleteJobThenRepeat",
         },
         "privateState": {
@@ -3506,7 +3508,8 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "cursorSchemaVersion": STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3,
             "phases": STORAGE_COMPACTION_PHASES_V3,
             "cursorColumn": "afterPlanOrdinal",
-            "finalizeCursor": "afterPlanOrdinalZeroAndTerminalEvidenceExhausted",
+            "stepBoundaryColumn": "stepThroughPlanOrdinal",
+            "finalizeCursor": "afterPlanOrdinal1000RetainsReleasedThroughProofAndAnchor",
             "resumeVerification": "beforeReleaseBoundedKeysetProvesOrdinalsOneThroughCursorNoGapsExtrasAndRehashesSourceReceiptMessageBaseline",
             "exhausted": "trueOnlyAtExactly1001WitnessedRows",
             "activeV2Pending": "failAdmissionUnsupportedNoMutation",
@@ -3527,7 +3530,8 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
             "mustBeEmptyAtPending": true,
         },
         "release": {
-            "planRows": "boundedAfterPrivateEquivalenceOnly",
+            "planRows": "armedNextContiguousAtMost100DeleteOrdinalsAfterPrivateEquivalenceOnly",
+            "cursorAdvance": "deleteTriggerAdvancesReleasedThroughOrdinalInSameTransaction",
             "resumeVerification": "releasedOrdinalPrefixAbsentAndRetainedSuffixExactAgainstTerminalEvidence",
             "header": "retainedAfterSuccess",
             "terminalEvidence": "retainedAfterSuccessOrFailure",
@@ -3597,7 +3601,7 @@ pub fn storage_lifetime_activation_policy_v2() -> Value {
         serde_json::json!({
             "fromVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V8,
             "toVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V9,
-            "precondition": "noPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+            "precondition": "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
             "effect": "additiveResumeWitnessTablesAndVersionedGuards",
             "existingRowsDeleted": false,
             "activeV2Pending": "failAdmissionUnsupportedNoMutation",
@@ -3841,13 +3845,19 @@ pub fn validate_storage_compaction_cursor_v3(
 ) -> Result<StorageCompactionCursorV3, StorageLifetimeContractError> {
     let cursor: StorageCompactionCursorV3 = serde_json::from_value(value.clone())
         .map_err(|error| StorageLifetimeContractError::new(error.to_string()))?;
-    let position_valid = if cursor.phase == StorageCompactionPhaseV3::Finalize {
-        cursor.after_plan_ordinal == 0 && cursor.scan_exhausted
-    } else {
-        cursor.after_plan_ordinal <= STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1
-            && cursor.scan_exhausted
-                == (cursor.after_plan_ordinal == STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1)
-    };
+    let limit = storage_compaction_phase_v3_ordinal_limit(cursor.phase);
+    let step_valid = cursor.step_through_plan_ordinal.is_none_or(|step| {
+        !cursor.scan_exhausted
+            && step > cursor.after_plan_ordinal
+            && step <= limit
+            && step - cursor.after_plan_ordinal <= STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1
+    });
+    let position_valid = cursor.after_plan_ordinal <= limit
+        && cursor.scan_exhausted == (cursor.after_plan_ordinal == limit)
+        && step_valid
+        && (cursor.phase != StorageCompactionPhaseV3::Finalize
+            || (cursor.after_plan_ordinal == STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1
+                && cursor.step_through_plan_ordinal.is_none()));
     if cursor.schema_version != STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3
         || cursor.cutoff_event_rowid == 0
         || !position_valid
@@ -3869,6 +3879,7 @@ pub fn validate_storage_compaction_cursor_transition_v3(
     if previous_value.is_none() {
         if next.phase != StorageCompactionPhaseV3::PlanEligibility
             || next.after_plan_ordinal != 0
+            || next.step_through_plan_ordinal.is_some()
             || next.scan_exhausted
             || rows_in_step != 0
         {
@@ -3887,9 +3898,13 @@ pub fn validate_storage_compaction_cursor_transition_v3(
         ));
     }
     if previous.phase == next.phase {
+        let expected_step = previous.step_through_plan_ordinal;
         if previous.scan_exhausted
+            || expected_step.is_none()
             || rows_in_step == 0
+            || Some(next.after_plan_ordinal) != expected_step
             || next.after_plan_ordinal != previous.after_plan_ordinal + rows_in_step
+            || next.step_through_plan_ordinal.is_some()
         {
             return Err(StorageLifetimeContractError::new(
                 "storage compaction v3 cursor progress must be positive and consecutive",
@@ -3899,10 +3914,16 @@ pub fn validate_storage_compaction_cursor_transition_v3(
     }
     let previous_index = storage_compaction_phase_v3_index(previous.phase);
     let next_index = storage_compaction_phase_v3_index(next.phase);
-    let next_position_valid = if next.phase == StorageCompactionPhaseV3::Finalize {
-        next.after_plan_ordinal == 0 && next.scan_exhausted
+    let next_position_valid = if previous.phase == StorageCompactionPhaseV3::ReleasePlan
+        && next.phase == StorageCompactionPhaseV3::Finalize
+    {
+        next.after_plan_ordinal == STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1
+            && next.scan_exhausted
+            && next.step_through_plan_ordinal.is_none()
     } else {
-        next.after_plan_ordinal == 0 && !next.scan_exhausted
+        next.after_plan_ordinal == 0
+            && !next.scan_exhausted
+            && next.step_through_plan_ordinal.is_none()
     };
     if !previous.scan_exhausted
         || next_index != previous_index + 1
@@ -3932,6 +3953,11 @@ pub fn validate_storage_compaction_admission_state_v3(
         || state.state != StorageCompactionJobStateV1::Pending
         || state.authority_count != 0
         || !state.plan_header_present
+        || state
+            .private_state
+            .cursor
+            .step_through_plan_ordinal
+            .is_some()
     {
         return Err(StorageLifetimeContractError::new(
             "only exact active v3 pending compaction is admission-runnable",
@@ -3983,7 +4009,10 @@ pub fn validate_storage_compaction_job_v3(
     )?;
     match job.state {
         StorageCompactionJobStateV1::Pending => {
-            if job.authority_count != 0 || job.failure_kind.is_some() || job.completed_at.is_some()
+            if job.authority_count != 0
+                || job.failure_kind.is_some()
+                || job.completed_at.is_some()
+                || job.private_state.cursor.step_through_plan_ordinal.is_some()
             {
                 return Err(StorageLifetimeContractError::new(
                     "storage compaction v3 pending job must have empty authority",
@@ -4041,6 +4070,35 @@ pub fn validate_storage_compaction_lifecycle_transition_v3(
         ));
     }
     let same_private = previous.private_state == next.private_state;
+    let same_arm_flags = previous.private_state.schema_version == next.private_state.schema_version
+        && previous.private_state.plan_rows_complete == next.private_state.plan_rows_complete
+        && previous.private_state.operations_verified == next.private_state.operations_verified
+        && previous.private_state.equivalence_verified == next.private_state.equivalence_verified
+        && previous.private_state.plan_rows_released == next.private_state.plan_rows_released;
+    let arm_cursor_valid = previous.private_state.cursor.schema_version
+        == next.private_state.cursor.schema_version
+        && previous.private_state.cursor.cutoff_event_rowid
+            == next.private_state.cursor.cutoff_event_rowid
+        && previous.private_state.cursor.phase == next.private_state.cursor.phase
+        && previous.private_state.cursor.after_plan_ordinal
+            == next.private_state.cursor.after_plan_ordinal
+        && previous.private_state.cursor.scan_exhausted == next.private_state.cursor.scan_exhausted
+        && previous
+            .private_state
+            .cursor
+            .step_through_plan_ordinal
+            .is_none()
+        && if previous.private_state.cursor.scan_exhausted {
+            next.private_state
+                .cursor
+                .step_through_plan_ordinal
+                .is_none()
+        } else {
+            next.private_state
+                .cursor
+                .step_through_plan_ordinal
+                .is_some()
+        };
     let same_nonstate = previous.authority_count == next.authority_count
         && previous.failure_kind == next.failure_kind
         && previous.completed_at == next.completed_at;
@@ -4049,7 +4107,8 @@ pub fn validate_storage_compaction_lifecycle_transition_v3(
             rows_in_step == 0
                 && previous.state == StorageCompactionJobStateV1::Pending
                 && next.state == StorageCompactionJobStateV1::Running
-                && same_private
+                && same_arm_flags
+                && arm_cursor_valid
                 && previous.authority_count == 0
                 && next.authority_count == 0
         }
@@ -4144,6 +4203,17 @@ fn storage_compaction_phase_v3_index(phase: StorageCompactionPhaseV3) -> usize {
         StorageCompactionPhaseV3::VerifyEquivalence => 7,
         StorageCompactionPhaseV3::ReleasePlan => 8,
         StorageCompactionPhaseV3::Finalize => 9,
+    }
+}
+
+fn storage_compaction_phase_v3_ordinal_limit(phase: StorageCompactionPhaseV3) -> u32 {
+    if matches!(
+        phase,
+        StorageCompactionPhaseV3::ReleasePlan | StorageCompactionPhaseV3::Finalize
+    ) {
+        STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1
+    } else {
+        STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1
     }
 }
 

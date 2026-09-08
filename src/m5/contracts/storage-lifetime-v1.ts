@@ -501,6 +501,7 @@ export interface StorageCompactionCursorV3 {
   cutoffEventRowid: number;
   phase: StorageCompactionPhaseV3;
   afterPlanOrdinal: number;
+  stepThroughPlanOrdinal: number | null;
   scanExhausted: boolean;
 }
 
@@ -2687,6 +2688,7 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     fromVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V8,
     toVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V9,
     precondition: "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    sqlPreflight: "beginImmediateExactObjectInventoryAndLedgerStateRaiseRollbackBeforePersistentDdl",
     mode: "additivePlanWitnessAndVersionedGuardsNoExistingRowDeletion",
     runtimeDigestAuthority: "rustRecomputesCanonicalPayloadAndMessageDigests",
   },
@@ -2710,7 +2712,7 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     targetScan: "volatileBoundedAggregateKeyset",
     forbidden: ["OFFSET", "fullVec", "tempTable", "unboundedScan"],
     creationTransaction: "beginImmediateRecheckCutoffMaterializationSafetyBoundariesAndExact1001Rows",
-    planningWrite: "atMost100ConsecutiveOrdinalsAndCursorSameTransaction",
+    planningWrite: "armedAtMost100ConsecutiveOrdinalsAndTriggerAdvancedCursorSameTransaction",
     largerPrefix: "oneExact1000DeleteJobThenRepeat",
   },
   privateState: {
@@ -2722,7 +2724,8 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     cursorSchemaVersion: STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3,
     phases: STORAGE_COMPACTION_PHASES_V3,
     cursorColumn: "afterPlanOrdinal",
-    finalizeCursor: "afterPlanOrdinalZeroAndTerminalEvidenceExhausted",
+    stepBoundaryColumn: "stepThroughPlanOrdinal",
+    finalizeCursor: "afterPlanOrdinal1000RetainsReleasedThroughProofAndAnchor",
     resumeVerification: "beforeReleaseBoundedKeysetProvesOrdinalsOneThroughCursorNoGapsExtrasAndRehashesSourceReceiptMessageBaseline",
     exhausted: "trueOnlyAtExactly1001WitnessedRows",
     activeV2Pending: "failAdmissionUnsupportedNoMutation",
@@ -2743,7 +2746,8 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     mustBeEmptyAtPending: true,
   },
   release: {
-    planRows: "boundedAfterPrivateEquivalenceOnly",
+    planRows: "armedNextContiguousAtMost100DeleteOrdinalsAfterPrivateEquivalenceOnly",
+    cursorAdvance: "deleteTriggerAdvancesReleasedThroughOrdinalInSameTransaction",
     resumeVerification: "releasedOrdinalPrefixAbsentAndRetainedSuffixExactAgainstTerminalEvidence",
     header: "retainedAfterSuccess",
     terminalEvidence: "retainedAfterSuccessOrFailure",
@@ -2802,7 +2806,7 @@ export const STORAGE_LIFETIME_ACTIVATION_POLICY_V2 = {
   databaseMigration: {
     fromVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V8,
     toVersion: STORAGE_LIFETIME_SCHEMA_VERSION_V9,
-    precondition: "noPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    precondition: "exactV8NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
     effect: "additiveResumeWitnessTablesAndVersionedGuards",
     existingRowsDeleted: false,
     activeV2Pending: "failAdmissionUnsupportedNoMutation",
@@ -2827,7 +2831,7 @@ export function validateStorageLifetimeActivationPolicyV2(
 }
 
 export function validateStorageCompactionPlanV1(value: unknown): StorageCompactionPlanV1 {
-  const plan = requireObject(value, "storage compaction plan");
+  const plan = requirePlainDataObjectV9(value, "storage compaction plan");
   exactKeys(plan, [
     "jobId", "planSchemaVersion", "cutoffEventRowid", "aggregateType", "aggregateId",
     "retainedBoundarySequence", "deleteThroughSequence", "anchorAggregateSequence",
@@ -2836,7 +2840,8 @@ export function validateStorageCompactionPlanV1(value: unknown): StorageCompacti
   ]);
   if (typeof plan.jobId !== "string" || plan.jobId.length === 0
     || plan.planSchemaVersion !== STORAGE_COMPACTION_PLAN_SCHEMA_VERSION_V1
-    || !["project", "chat", "run", "lock"].includes(String(plan.aggregateType))
+    || typeof plan.aggregateType !== "string"
+    || !["project", "chat", "run", "lock"].includes(plan.aggregateType)
     || typeof plan.aggregateId !== "string" || plan.aggregateId.length === 0
     || typeof plan.baselineId !== "string" || plan.baselineId.length === 0
     || !isLowercaseHexDigest(plan.baselineProjectionDigest)
@@ -2871,7 +2876,7 @@ export function validateStorageCompactionPlanRowV1(
   plan: StorageCompactionPlanV1,
   value: unknown,
 ): StorageCompactionPlanRowV1 {
-  const row = requireObject(value, "storage compaction plan row");
+  const row = requirePlainDataObjectV9(value, "storage compaction plan row");
   exactKeys(row, [
     "jobId", "ordinal", "eventRowid", "eventId", "operationId", "requestId",
     "aggregateType", "aggregateId", "aggregateSequence", "eventType",
@@ -2972,17 +2977,27 @@ export function validateStorageCompactionPlanBatchV1(
 }
 
 export function validateStorageCompactionCursorV3(value: unknown): StorageCompactionCursorV3 {
-  const cursor = requireObject(value, "storage compaction v3 cursor");
+  const cursor = requirePlainDataObjectV9(value, "storage compaction v3 cursor");
   exactKeys(cursor, [
-    "schemaVersion", "cutoffEventRowid", "phase", "afterPlanOrdinal", "scanExhausted",
+    "schemaVersion", "cutoffEventRowid", "phase", "afterPlanOrdinal",
+    "stepThroughPlanOrdinal", "scanExhausted",
   ]);
   const cutoff = requireSafeUnsigned(cursor.cutoffEventRowid, "compactionV3.cutoffEventRowid");
   const after = requireSafeUnsigned(cursor.afterPlanOrdinal, "compactionV3.afterPlanOrdinal");
   const knownPhase = STORAGE_COMPACTION_PHASES_V3.includes(cursor.phase as StorageCompactionPhaseV3);
-  const positionValid = cursor.phase === "finalize"
-    ? after === 0 && cursor.scanExhausted === true
-    : after <= STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1
-      && cursor.scanExhausted === (after === STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1);
+  const limit = cursor.phase === "releasePlan" || cursor.phase === "finalize"
+    ? STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1
+    : STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1;
+  const step = cursor.stepThroughPlanOrdinal === null
+    ? null
+    : requireSafeUnsigned(
+      cursor.stepThroughPlanOrdinal, "compactionV3.stepThroughPlanOrdinal",
+    );
+  const stepValid = step === null || (!cursor.scanExhausted && step > after && step <= limit
+    && step - after <= STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1);
+  const positionValid = after <= limit && cursor.scanExhausted === (after === limit)
+    && stepValid && (cursor.phase !== "finalize"
+      || (after === STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1 && step === null));
   if (cursor.schemaVersion !== STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3 || cutoff === 0
     || !knownPhase || typeof cursor.scanExhausted !== "boolean" || !positionValid) {
     fail("storage compaction v3 cursor is invalid");
@@ -2999,6 +3014,7 @@ export function validateStorageCompactionCursorTransitionV3(
   const rows = requireSafeUnsigned(rowsInStep, "compactionV3.rowsInStep");
   if (previousValue === null) {
     if (next.phase !== "planEligibility" || next.afterPlanOrdinal !== 0
+      || next.stepThroughPlanOrdinal !== null
       || next.scanExhausted || rows !== 0) {
       fail("storage compaction v3 cursor must start at planEligibility zero");
     }
@@ -3010,17 +3026,21 @@ export function validateStorageCompactionCursorTransitionV3(
     fail("storage compaction v3 cursor transition exceeds fixed boundary");
   }
   if (previous.phase === next.phase) {
-    if (previous.scanExhausted || rows === 0
-      || next.afterPlanOrdinal !== previous.afterPlanOrdinal + rows) {
+    if (previous.scanExhausted || previous.stepThroughPlanOrdinal === null || rows === 0
+      || next.afterPlanOrdinal !== previous.stepThroughPlanOrdinal
+      || next.afterPlanOrdinal !== previous.afterPlanOrdinal + rows
+      || next.stepThroughPlanOrdinal !== null) {
       fail("storage compaction v3 cursor progress must be positive and consecutive");
     }
     return next;
   }
   const previousIndex = STORAGE_COMPACTION_PHASES_V3.indexOf(previous.phase);
   const nextIndex = STORAGE_COMPACTION_PHASES_V3.indexOf(next.phase);
-  const nextPositionValid = next.phase === "finalize"
-    ? next.afterPlanOrdinal === 0 && next.scanExhausted
-    : next.afterPlanOrdinal === 0 && !next.scanExhausted;
+  const nextPositionValid = previous.phase === "releasePlan" && next.phase === "finalize"
+    ? next.afterPlanOrdinal === STORAGE_COMPACTION_PLAN_DELETE_ROWS_V1
+      && next.scanExhausted && next.stepThroughPlanOrdinal === null
+    : next.afterPlanOrdinal === 0 && !next.scanExhausted
+      && next.stepThroughPlanOrdinal === null;
   if (!previous.scanExhausted || nextIndex !== previousIndex + 1
     || !nextPositionValid || rows !== 0) {
     fail("storage compaction v3 phases must advance exactly in order");
@@ -3032,14 +3052,15 @@ export function validateStorageCompactionAdmissionStateV3(
   value: unknown,
 ): StorageCompactionAdmissionStateV3 | null {
   if (value === null) return null;
-  const state = requireObject(value, "storage compaction admission state v3");
+  const state = requirePlainDataObjectV9(value, "storage compaction admission state v3");
   exactKeys(state, [
     "jobId", "state", "privateState", "authorityCount", "planHeaderPresent",
   ]);
   validateStorageCompactionPrivateStateV3(state.privateState);
   if (typeof state.jobId !== "string" || state.jobId.length === 0 || state.state !== "pending"
     || requireSafeUnsigned(state.authorityCount, "admission.authorityCount") !== 0
-    || state.planHeaderPresent !== true) {
+    || state.planHeaderPresent !== true
+    || (state.privateState as StorageCompactionPrivateStateV3).cursor.stepThroughPlanOrdinal !== null) {
     fail("only exact active v3 pending compaction is admission-runnable");
   }
   return state as unknown as StorageCompactionAdmissionStateV3;
@@ -3048,7 +3069,7 @@ export function validateStorageCompactionAdmissionStateV3(
 export function validateStorageCompactionPrivateStateV3(
   value: unknown,
 ): StorageCompactionPrivateStateV3 {
-  const state = requireObject(value, "storage compaction v3 private state");
+  const state = requirePlainDataObjectV9(value, "storage compaction v3 private state");
   exactKeys(state, [
     "schemaVersion", "cursor", "planRowsComplete", "operationsVerified",
     "equivalenceVerified", "planRowsReleased",
@@ -3070,7 +3091,7 @@ export function validateStorageCompactionPrivateStateV3(
 }
 
 export function validateStorageCompactionJobV3(value: unknown): StorageCompactionJobV3 {
-  const job = requireObject(value, "storage compaction v3 job");
+  const job = requirePlainDataObjectV9(value, "storage compaction v3 job");
   exactKeys(job, [
     "jobId", "state", "privateState", "authorityCount", "failureKind", "completedAt",
   ]);
@@ -3083,6 +3104,9 @@ export function validateStorageCompactionJobV3(value: unknown): StorageCompactio
   if (job.state === "pending") {
     if (authority !== 0 || job.failureKind !== null || job.completedAt !== null) {
       fail("storage compaction v3 pending job must have empty authority");
+    }
+    if (privateState.cursor.stepThroughPlanOrdinal !== null) {
+      fail("storage compaction v3 pending job cannot retain an armed step boundary");
     }
   } else if (job.state === "running") {
     if (job.failureKind !== null || job.completedAt !== null) {
@@ -3120,6 +3144,21 @@ export function validateStorageCompactionLifecycleTransitionV3(
     fail("storage compaction v3 transition must preserve job and budget");
   }
   const samePrivate = exactPlainContractValue(previous.privateState, next.privateState);
+  const sameArmFlags = previous.privateState.schemaVersion === next.privateState.schemaVersion
+    && previous.privateState.planRowsComplete === next.privateState.planRowsComplete
+    && previous.privateState.operationsVerified === next.privateState.operationsVerified
+    && previous.privateState.equivalenceVerified === next.privateState.equivalenceVerified
+    && previous.privateState.planRowsReleased === next.privateState.planRowsReleased;
+  const armCursorValid = previous.privateState.cursor.schemaVersion
+      === next.privateState.cursor.schemaVersion
+    && previous.privateState.cursor.cutoffEventRowid === next.privateState.cursor.cutoffEventRowid
+    && previous.privateState.cursor.phase === next.privateState.cursor.phase
+    && previous.privateState.cursor.afterPlanOrdinal === next.privateState.cursor.afterPlanOrdinal
+    && previous.privateState.cursor.scanExhausted === next.privateState.cursor.scanExhausted
+    && previous.privateState.cursor.stepThroughPlanOrdinal === null
+    && (previous.privateState.cursor.scanExhausted
+      ? next.privateState.cursor.stepThroughPlanOrdinal === null
+      : next.privateState.cursor.stepThroughPlanOrdinal !== null);
   const sameNonState = previous.authorityCount === next.authorityCount
     && previous.failureKind === next.failureKind && previous.completedAt === next.completedAt;
   const cursorProgress = (): boolean => {
@@ -3138,7 +3177,7 @@ export function validateStorageCompactionLifecycleTransitionV3(
   switch (operation) {
     case "arm":
       valid = rows === 0 && previous.state === "pending" && next.state === "running"
-        && samePrivate && sameNonState && previous.authorityCount === 0;
+        && sameArmFlags && armCursorValid && sameNonState && previous.authorityCount === 0;
       break;
     case "batchSuccess":
       valid = previous.state === "running" && next.state === "pending"
@@ -3180,6 +3219,19 @@ export function validateStorageCompactionLifecycleTransitionV3(
 
 function isLowercaseHexDigest(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function requirePlainDataObjectV9(value: unknown, name: string): Record<string, unknown> {
+  const object = requireObject(value, name);
+  if (Object.getPrototypeOf(object) !== Object.prototype
+    || Reflect.ownKeys(object).some((key) => {
+      if (typeof key !== "string") return true;
+      const descriptor = Object.getOwnPropertyDescriptor(object, key);
+      return descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable;
+    })) {
+    fail(`${name} must be a plain enumerable data object`);
+  }
+  return object;
 }
 
 function exactPlainContractValue(

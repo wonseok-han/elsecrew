@@ -3739,20 +3739,24 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
 
     let cursor_start = cases["validCursorStart"].clone();
     validate_storage_compaction_cursor_transition_v3(None, &cursor_start, 0).expect("cursor start");
+    let mut cursor_armed_100 = cursor_start.clone();
+    cursor_armed_100["stepThroughPlanOrdinal"] = serde_json::json!(100);
     let cursor_100 = serde_json::json!({
         "schemaVersion": 3,
         "cutoffEventRowid": 2000,
         "phase": "planEligibility",
         "afterPlanOrdinal": 100,
+        "stepThroughPlanOrdinal": null,
         "scanExhausted": false,
     });
-    validate_storage_compaction_cursor_transition_v3(Some(&cursor_start), &cursor_100, 100)
+    validate_storage_compaction_cursor_transition_v3(Some(&cursor_armed_100), &cursor_100, 100)
         .expect("bounded cursor progress");
     let cursor_end = serde_json::json!({
         "schemaVersion": 3,
         "cutoffEventRowid": 2000,
         "phase": "planEligibility",
         "afterPlanOrdinal": 1001,
+        "stepThroughPlanOrdinal": null,
         "scanExhausted": true,
     });
     let cursor_next = serde_json::json!({
@@ -3760,10 +3764,53 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
         "cutoffEventRowid": 2000,
         "phase": "freezeOperations",
         "afterPlanOrdinal": 0,
+        "stepThroughPlanOrdinal": null,
         "scanExhausted": false,
     });
     validate_storage_compaction_cursor_transition_v3(Some(&cursor_end), &cursor_next, 0)
         .expect("exact next phase");
+    let release_armed = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "releasePlan",
+        "afterPlanOrdinal": 0,
+        "stepThroughPlanOrdinal": 100,
+        "scanExhausted": false,
+    });
+    let released_100 = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "releasePlan",
+        "afterPlanOrdinal": 100,
+        "stepThroughPlanOrdinal": null,
+        "scanExhausted": false,
+    });
+    validate_storage_compaction_cursor_transition_v3(Some(&release_armed), &released_100, 100)
+        .expect("release cursor records released-through ordinal");
+    let release_end = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "releasePlan",
+        "afterPlanOrdinal": 1000,
+        "stepThroughPlanOrdinal": null,
+        "scanExhausted": true,
+    });
+    let finalize = serde_json::json!({
+        "schemaVersion": 3,
+        "cutoffEventRowid": 2000,
+        "phase": "finalize",
+        "afterPlanOrdinal": 1000,
+        "stepThroughPlanOrdinal": null,
+        "scanExhausted": true,
+    });
+    validate_storage_compaction_cursor_transition_v3(Some(&release_end), &finalize, 0)
+        .expect("final cursor retains release progress");
+    let mut anchor_release = release_end.clone();
+    anchor_release["afterPlanOrdinal"] = serde_json::json!(1001);
+    assert!(validate_storage_compaction_cursor_v3(&anchor_release).is_err());
+    let mut erased_finalize = finalize.clone();
+    erased_finalize["afterPlanOrdinal"] = serde_json::json!(0);
+    assert!(validate_storage_compaction_cursor_v3(&erased_finalize).is_err());
 
     for name in cases["malformedCursorCases"]
         .as_array()
@@ -3797,7 +3844,9 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
             "over100Work" => {
                 let mut invalid = cursor_start.clone();
                 invalid["afterPlanOrdinal"] = serde_json::json!(101);
-                validate_storage_compaction_cursor_transition_v3(Some(&cursor_start), &invalid, 101)
+                let mut armed = cursor_start.clone();
+                armed["stepThroughPlanOrdinal"] = serde_json::json!(101);
+                validate_storage_compaction_cursor_transition_v3(Some(&armed), &invalid, 101)
                     .is_err()
             }
             "exhaustionBefore1001" => {
@@ -3816,7 +3865,7 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
     }
 
     let pending_start = make_v9_compaction_job("pending", cursor_start.clone(), 0);
-    let running_start = make_v9_compaction_job("running", cursor_start.clone(), 0);
+    let running_start = make_v9_compaction_job("running", cursor_armed_100.clone(), 0);
     let pending_100 = make_v9_compaction_job("pending", cursor_100.clone(), 0);
     for name in cases["validLifecycleCases"]
         .as_array()
@@ -3884,7 +3933,8 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
                         "schemaVersion": 3,
                         "cutoffEventRowid": 2000,
                         "phase": "finalize",
-                        "afterPlanOrdinal": 0,
+                        "afterPlanOrdinal": 1000,
+                        "stepThroughPlanOrdinal": null,
                         "scanExhausted": true,
                     }),
                     0,
@@ -3921,7 +3971,8 @@ fn storage_v9_resume_witness_is_exact_gapless_and_private() {
                 "schemaVersion": 3,
                 "cutoffEventRowid": 2000,
                 "phase": "finalize",
-                "afterPlanOrdinal": 0,
+                "afterPlanOrdinal": 1000,
+                "stepThroughPlanOrdinal": null,
                 "scanExhausted": true,
             },
             "planRowsComplete": true,

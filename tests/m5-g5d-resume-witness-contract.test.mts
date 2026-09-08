@@ -39,9 +39,191 @@ const migrations = [
   "storage-v8/migration-v7-to-v8.sql",
   "storage-v9/migration-v8-to-v9.sql",
 ] as const;
+const migrationV9Sql = readFileSync(
+  resolve("tests/fixtures/m5/storage-v9/migration-v8-to-v9.sql"), "utf8",
+);
 
 function readJson(path: string): Record<string, any> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, any>;
+}
+
+function databaseThroughV8(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  for (const path of migrations.slice(0, -1)) {
+    database.exec(readFileSync(resolve("tests/fixtures/m5", path), "utf8"));
+  }
+  return database;
+}
+
+function persistentSchema(database: DatabaseSync): unknown[] {
+  return database.prepare(`
+    SELECT type, name, tbl_name AS tableName, sql
+    FROM sqlite_schema
+    WHERE name NOT LIKE 'sqlite_autoindex%'
+    ORDER BY type, name
+  `).all();
+}
+
+function insertMaintenanceJob(
+  database: DatabaseSync,
+  jobId: string,
+  state: "pending" | "running" | "succeeded",
+  cutoff: unknown,
+): void {
+  database.prepare(`
+    INSERT INTO maintenance_jobs (
+      job_id, job_kind, state, cutoff_json, started_at, completed_at,
+      last_successful_at, failure_kind, created_at, updated_at
+    ) VALUES (?, 'losslessCompaction', ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+  `).run(
+    jobId, state, JSON.stringify(cutoff),
+    "2026-09-08T00:00:00Z", "2026-09-08T00:00:00Z",
+  );
+}
+
+function privateState(
+  phase: string,
+  afterPlanOrdinal: number,
+  options: {
+    stepThroughPlanOrdinal?: number | null;
+    scanExhausted?: boolean;
+    planRowsComplete?: boolean;
+    operationsVerified?: boolean;
+    equivalenceVerified?: boolean;
+    planRowsReleased?: boolean;
+  } = {},
+): Record<string, unknown> {
+  return {
+    storageCompactionV3PrivateState: {
+      schemaVersion: 3,
+      cursor: {
+        schemaVersion: 3,
+        cutoffEventRowid: 2000,
+        phase,
+        afterPlanOrdinal,
+        stepThroughPlanOrdinal: options.stepThroughPlanOrdinal ?? null,
+        scanExhausted: options.scanExhausted ?? false,
+      },
+      planRowsComplete: options.planRowsComplete ?? false,
+      operationsVerified: options.operationsVerified ?? false,
+      equivalenceVerified: options.equivalenceVerified ?? false,
+      planRowsReleased: options.planRowsReleased ?? false,
+    },
+  };
+}
+
+function setJobState(
+  database: DatabaseSync,
+  state: "pending" | "running",
+  cutoff: Record<string, unknown>,
+): void {
+  database.prepare(`
+    UPDATE maintenance_jobs SET state = ?, cutoff_json = ?, updated_at = ?
+    WHERE job_id = 'compact_v9_sql'
+  `).run(state, JSON.stringify(cutoff), "2026-09-08T01:00:02Z");
+}
+
+function readJobCutoff(database: DatabaseSync): Record<string, any> {
+  const row = database.prepare(`
+    SELECT cutoff_json AS cutoff FROM maintenance_jobs WHERE job_id = 'compact_v9_sql'
+  `).get() as { cutoff: string };
+  return JSON.parse(row.cutoff) as Record<string, any>;
+}
+
+function databaseWithV9PlanSources(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  for (const path of migrations) {
+    database.exec(readFileSync(resolve("tests/fixtures/m5", path), "utf8"));
+  }
+  database.exec("BEGIN IMMEDIATE");
+  const event = database.prepare(`
+    INSERT INTO events (
+      event_id, operation_id, request_id, aggregate_type, aggregate_id,
+      aggregate_sequence, event_type, payload_schema_version,
+      canonical_json_payload, timestamp
+    ) VALUES (?, ?, NULL, 'project', 'project_001', ?, 'project.updated', 1, '{}', ?)
+  `);
+  const receipt = database.prepare(`
+    INSERT INTO operation_receipts (
+      operation_id, event_id, aggregate_type, aggregate_id, aggregate_sequence,
+      event_type, payload_schema_version, canonical_payload_json,
+      canonical_payload_digest_algorithm, canonical_payload_digest_version,
+      canonical_payload_digest_format, canonical_payload_digest, event_timestamp, materialized_at
+    ) VALUES (?, ?, 'project', 'project_001', ?, 'project.updated', 1, '{}',
+              'sha256', 1, 'lowercaseHex64', ?, ?, ?)
+  `);
+  const sourceIndex = database.prepare(`
+    INSERT INTO event_source_index (
+      event_rowid, event_id, operation_id, aggregate_type, aggregate_id,
+      aggregate_sequence, introduced_message_id, chat_durable_sequence,
+      chat_snapshot_message_id
+    ) VALUES (?, ?, ?, 'project', 'project_001', ?, NULL, NULL, NULL)
+  `);
+  const digest = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+  const timestamp = "2026-09-08T01:00:00Z";
+  for (let ordinal = 1; ordinal <= 1001; ordinal += 1) {
+    event.run(`event_${ordinal}`, `operation_${ordinal}`, ordinal, timestamp);
+    receipt.run(
+      `operation_${ordinal}`, `event_${ordinal}`, ordinal, digest, timestamp, timestamp,
+    );
+    sourceIndex.run(ordinal, `event_${ordinal}`, `operation_${ordinal}`, ordinal);
+  }
+  database.prepare(`
+    INSERT INTO ledger_baselines (
+      baseline_id, aggregate_type, aggregate_id, cutoff_aggregate_sequence,
+      payload_schema_version, canonical_projection_json, projection_digest,
+      created_at, verified_at
+    ) VALUES ('baseline_1000', 'project', 'project_001', 1000, 1, '{}', ?, ?, ?)
+  `).run("b".repeat(64), timestamp, timestamp);
+  database.exec("COMMIT");
+
+  insertMaintenanceJob(
+    database, "compact_v9_sql", "pending", privateState("planEligibility", 0),
+  );
+  database.prepare(`
+    INSERT INTO storage_compaction_plans (
+      job_id, plan_schema_version, cutoff_event_rowid, aggregate_type, aggregate_id,
+      retained_boundary_sequence, delete_through_sequence, anchor_aggregate_sequence,
+      expected_rows, baseline_id, baseline_projection_digest,
+      previous_successful_job_id, created_at, planned_at
+    ) VALUES ('compact_v9_sql', 1, 2000, 'project', 'project_001', 0, 1000, 1001,
+              1001, 'baseline_1000', ?, NULL, ?, ?)
+  `).run("b".repeat(64), timestamp, "2026-09-08T01:00:01Z");
+  return database;
+}
+
+function insertSqlPlanRow(database: DatabaseSync, ordinal: number): void {
+  const anchor = ordinal === 1001;
+  database.prepare(`
+    INSERT INTO storage_compaction_plan_rows (
+      job_id, ordinal, event_rowid, event_id, operation_id, request_id,
+      aggregate_type, aggregate_id, aggregate_sequence, event_type,
+      payload_schema_version, event_timestamp, canonical_payload_json,
+      canonical_payload_digest, introduced_message_id, introduced_message_digest,
+      decision, baseline_id, baseline_projection_digest,
+      operation_frozen_before_plan, message_frozen_before_plan
+    ) VALUES ('compact_v9_sql', ?, ?, ?, ?, NULL, 'project', 'project_001', ?,
+              'project.updated', 1, ?, '{}', ?, NULL, NULL, ?, ?, ?, 0, 0)
+  `).run(
+    ordinal, ordinal, `event_${ordinal}`, `operation_${ordinal}`, ordinal,
+    "2026-09-08T01:00:00Z",
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    anchor ? "retainAnchor" : "delete",
+    anchor ? null : "baseline_1000",
+    anchor ? null : "b".repeat(64),
+  );
+}
+
+function planSqlBatch(database: DatabaseSync, start: number, end: number): void {
+  setJobState(database, "running", privateState("planEligibility", start - 1, {
+    stepThroughPlanOrdinal: end,
+  }));
+  database.exec("BEGIN IMMEDIATE");
+  for (let ordinal = start; ordinal <= end; ordinal += 1) insertSqlPlanRow(database, ordinal);
+  const committed = readJobCutoff(database);
+  committed.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal = null;
+  setJobState(database, "pending", committed);
+  database.exec("COMMIT");
 }
 
 function makeRows(template: Record<string, unknown>): Record<string, unknown>[] {
@@ -146,8 +328,11 @@ test("exact V1 through V9 fixture migration creates guarded witness objects", ()
       "storage_compaction_plans_immutable_update",
       "storage_compaction_plans_immutable_delete",
       "storage_compaction_plan_rows_exact_insert",
+      "storage_compaction_plan_rows_advance_cursor",
       "storage_compaction_plan_rows_immutable_update",
       "storage_compaction_plan_rows_release_only",
+      "storage_compaction_plan_rows_advance_release_cursor",
+      "maintenance_jobs_validate_v9_compaction_cursor_advance",
       "ledger_compaction_prefixes_require_v9_plan",
       "ledger_compaction_delete_authority_require_v9_plan",
     ]) {
@@ -158,32 +343,199 @@ test("exact V1 through V9 fixture migration creates guarded witness objects", ()
   }
 });
 
-test("V8 to V9 migration rejects an active legacy compaction before persistent DDL", () => {
-  const database = new DatabaseSync(":memory:");
-  try {
-    for (const path of migrations.slice(0, -1)) {
-      database.exec(readFileSync(resolve("tests/fixtures/m5", path), "utf8"));
+test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledger state", () => {
+  for (const state of ["pending", "running"] as const) {
+    const database = databaseThroughV8();
+    try {
+      insertMaintenanceJob(database, `legacy_v2_${state}`, state, {
+        storageCompactionV2PrivateState: { schemaVersion: 2 },
+      });
+      const before = persistentSchema(database);
+      assert.throws(() => database.exec(migrationV9Sql), /exact idle v8/);
+      assert.deepEqual(persistentSchema(database), before, state);
+      assert.equal(database.prepare(
+        "SELECT storage_schema_version AS version FROM storage_schema_meta",
+      ).get()!.version, 8);
+      assert.throws(() => database.prepare("SELECT * FROM storage_compaction_plans"));
+    } finally {
+      database.close();
     }
+  }
+
+  const database = databaseThroughV8();
+  try {
+    const trigger = database.prepare(`
+      SELECT sql FROM sqlite_schema
+      WHERE type = 'trigger' AND name = 'ledger_compaction_delete_authority_require_exact_tuple'
+    `).get() as { sql: string };
+    database.exec("PRAGMA foreign_keys = OFF");
+    database.exec("DROP TRIGGER ledger_compaction_delete_authority_require_exact_tuple");
     database.prepare(`
-      INSERT INTO maintenance_jobs (
-        job_id, job_kind, state, cutoff_json, started_at, completed_at,
-        last_successful_at, failure_kind, created_at, updated_at
-      ) VALUES (?, 'losslessCompaction', 'pending', ?, NULL, NULL, NULL, NULL, ?, ?)
-    `).run(
-      "legacy_v2_pending",
-      JSON.stringify({ storageCompactionV2PrivateState: { schemaVersion: 1 } }),
-      "2026-09-08T00:00:00Z",
-      "2026-09-08T00:00:00Z",
+      INSERT INTO ledger_compaction_delete_authority (
+        job_id, ordinal, prefix_id, event_rowid, event_id, operation_id,
+        aggregate_type, aggregate_id, aggregate_sequence, authorized_at
+      ) VALUES ('old_done', 1, 'old_prefix', 1, 'old_event', 'old_operation',
+                'project', 'project_001', 1, '2026-09-08T00:00:00Z')
+    `).run();
+    database.exec(trigger.sql);
+    database.exec("PRAGMA foreign_keys = ON");
+    const before = persistentSchema(database);
+    assert.throws(() => database.exec(migrationV9Sql), /exact idle v8/);
+    assert.deepEqual(persistentSchema(database), before, "nonempty authority");
+    assert.equal(database.prepare(
+      "SELECT storage_schema_version AS version FROM storage_schema_meta",
+    ).get()!.version, 8);
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM ledger_compaction_delete_authority",
+    ).get()!.count, 1);
+  } finally {
+    database.close();
+  }
+
+  const drifted = databaseThroughV8();
+  try {
+    drifted.exec("CREATE TABLE unexpected_v8_drift (id INTEGER PRIMARY KEY) STRICT");
+    const before = persistentSchema(drifted);
+    assert.throws(() => drifted.exec(migrationV9Sql), /exact idle v8/);
+    assert.deepEqual(persistentSchema(drifted), before, "extra v8 object");
+    assert.equal(drifted.prepare(
+      "SELECT storage_schema_version AS version FROM storage_schema_meta",
+    ).get()!.version, 8);
+  } finally {
+    drifted.close();
+  }
+
+  assert.throws(() => validateStorageLifetimeV9MigrationPreflight(true, 1, 0));
+  assert.throws(() => validateStorageLifetimeV9MigrationPreflight(true, 0, 1));
+  assert.throws(() => validateStorageLifetimeV9MigrationPreflight(false, 0, 0));
+});
+
+test("actual V9 triggers enforce bounded planning, complete prefix proof, and release progress", () => {
+  const database = databaseWithV9PlanSources();
+  try {
+    setJobState(database, "running", privateState("planEligibility", 0, {
+      stepThroughPlanOrdinal: 100,
+    }));
+    assert.throws(() => insertSqlPlanRow(database, 1001), /exact witnessed source/);
+    assert.throws(() => insertSqlPlanRow(database, 2), /exact witnessed source/);
+    setJobState(database, "running", privateState("planEligibility", 0, {
+      stepThroughPlanOrdinal: 101,
+    }));
+    assert.throws(() => insertSqlPlanRow(database, 1), /exact witnessed source/);
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM storage_compaction_plan_rows",
+    ).get()!.count, 0);
+
+    planSqlBatch(database, 1, 100);
+    const prefixInsert = database.prepare(`
+      INSERT INTO ledger_compaction_prefixes (
+        prefix_id, aggregate_type, aggregate_id, deleted_through_sequence,
+        anchor_event_rowid, anchor_event_id, anchor_operation_id,
+        anchor_aggregate_sequence, baseline_id, baseline_projection_digest,
+        created_at, verified_at
+      ) VALUES ('prefix_v9_sql', 'project', 'project_001', 1000, 1001,
+                'event_1001', 'operation_1001', 1001, 'baseline_1000', ?, ?, ?)
+    `);
+    setJobState(database, "running", privateState("verifyPrefix", 100, {
+      stepThroughPlanOrdinal: 200,
+      planRowsComplete: false,
+    }));
+    assert.throws(() => prefixInsert.run(
+      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+    ), /exact v9 plan anchor/);
+
+    setJobState(database, "pending", privateState("planEligibility", 100));
+    for (let start = 101; start <= 1001; start += 100) {
+      planSqlBatch(database, start, Math.min(start + 99, 1001));
+    }
+    setJobState(database, "running", privateState("freezeMessages", 1001, {
+      scanExhausted: true,
+      planRowsComplete: true,
+    }));
+    assert.throws(() => prefixInsert.run(
+      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+    ), /exact v9 plan anchor/);
+    setJobState(database, "running", privateState("verifyPrefix", 1001, {
+      scanExhausted: true,
+      planRowsComplete: true,
+    }));
+    prefixInsert.run(
+      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     );
-    assert.throws(() => validateStorageLifetimeV9MigrationPreflight(true, 1, 0));
-    assert.throws(() => validateStorageLifetimeV9MigrationPreflight(true, 0, 1));
-    assert.throws(() => validateStorageLifetimeV9MigrationPreflight(false, 0, 0));
+
+    const releaseState = (after: number, through: number | null) => privateState(
+      "releasePlan", after, {
+        stepThroughPlanOrdinal: through,
+        scanExhausted: after === 1000,
+        planRowsComplete: true,
+        operationsVerified: true,
+        equivalenceVerified: true,
+        planRowsReleased: after === 1000,
+      },
+    );
+    setJobState(database, "running", releaseState(0, 100));
+    assert.throws(() => database.exec(
+      "DELETE FROM storage_compaction_plan_rows WHERE job_id='compact_v9_sql' AND ordinal=1001",
+    ), /next armed delete ordinal/);
+    assert.throws(() => database.exec(
+      "DELETE FROM storage_compaction_plan_rows WHERE job_id='compact_v9_sql' AND ordinal=2",
+    ), /next armed delete ordinal/);
+    assert.throws(() => setJobState(database, "running", releaseState(1, 100)),
+      /exact plan mutation/);
+
+    assert.throws(() => database.exec(`
+      DELETE FROM storage_compaction_plan_rows
+      WHERE job_id='compact_v9_sql' AND ordinal BETWEEN 1 AND 101
+    `), /next armed delete ordinal/);
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM storage_compaction_plan_rows",
+    ).get()!.count, 1001);
     assert.equal(
-      database.prepare("SELECT storage_schema_version AS version FROM storage_schema_meta").get()!
-        .version,
-      8,
+      readJobCutoff(database).storageCompactionV3PrivateState.cursor.afterPlanOrdinal, 0,
     );
-    assert.throws(() => database.prepare("SELECT * FROM storage_compaction_plans"));
+
+    database.exec("BEGIN IMMEDIATE");
+    database.exec(`
+      DELETE FROM storage_compaction_plan_rows
+      WHERE job_id='compact_v9_sql' AND ordinal BETWEEN 1 AND 100
+    `);
+    assert.equal(
+      readJobCutoff(database).storageCompactionV3PrivateState.cursor.afterPlanOrdinal, 100,
+      "delete trigger advances the cursor inside the same transaction",
+    );
+    database.exec("ROLLBACK");
+    assert.equal(database.prepare(
+      "SELECT COUNT(*) AS count FROM storage_compaction_plan_rows",
+    ).get()!.count, 1001);
+    assert.equal(
+      readJobCutoff(database).storageCompactionV3PrivateState.cursor.afterPlanOrdinal, 0,
+      "rollback restores both rows and cursor",
+    );
+
+    for (let start = 1; start <= 1000; start += 100) {
+      const through = Math.min(start + 99, 1000);
+      setJobState(database, "running", releaseState(start - 1, through));
+      database.exec("BEGIN IMMEDIATE");
+      database.exec(`
+        DELETE FROM storage_compaction_plan_rows
+        WHERE job_id='compact_v9_sql' AND ordinal BETWEEN ${start} AND ${through}
+      `);
+      const committed = readJobCutoff(database);
+      committed.storageCompactionV3PrivateState.cursor.stepThroughPlanOrdinal = null;
+      setJobState(database, "pending", committed);
+      database.exec("COMMIT");
+    }
+    const terminal = readJobCutoff(database).storageCompactionV3PrivateState;
+    assert.equal(terminal.cursor.afterPlanOrdinal, 1000);
+    assert.equal(Boolean(terminal.cursor.scanExhausted), true);
+    assert.equal(Boolean(terminal.planRowsReleased), true);
+    const retained = database.prepare(`
+      SELECT ordinal, decision FROM storage_compaction_plan_rows
+      WHERE job_id='compact_v9_sql'
+    `).all() as Array<{ ordinal: number; decision: string }>;
+    assert.equal(retained.length, 1);
+    assert.equal(retained[0]?.ordinal, 1001);
+    assert.equal(retained[0]?.decision, "retainAnchor");
   } finally {
     database.close();
   }
@@ -243,6 +595,32 @@ test("V9 plan validators require exact 1000 delete rows and one retained anchor"
       : () => validateStorageCompactionPlanRowV1(plan, invalid);
     assert.throws(validate, undefined, path);
   }
+
+  let coerced = false;
+  const hostileType = structuredClone(cases.validPlan);
+  hostileType.aggregateType = {
+    toString() {
+      coerced = true;
+      return "chat";
+    },
+  };
+  assert.throws(() => validateStorageCompactionPlanV1(hostileType));
+  assert.equal(coerced, false, "aggregateType is never coerced");
+
+  const inherited = Object.assign(Object.create({ aggregateType: "chat" }), cases.validPlan);
+  assert.throws(() => validateStorageCompactionPlanV1(inherited), /plain enumerable data object/);
+
+  let getterRead = false;
+  const accessor = structuredClone(cases.validPlan);
+  Object.defineProperty(accessor, "aggregateType", {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      return "chat";
+    },
+  });
+  assert.throws(() => validateStorageCompactionPlanV1(accessor), /plain enumerable data object/);
+  assert.equal(getterRead, false, "accessor is rejected before property evaluation");
 });
 
 test("V9 resume verifier rejects shared missing, gap, duplicate, and exhaustion cases", () => {
@@ -276,14 +654,41 @@ test("V9 resume verifier rejects shared missing, gap, duplicate, and exhaustion 
 test("V3 cursor is afterPlanOrdinal-only, ordered, bounded, and admission rejects V2", () => {
   const start = cases.validCursorStart;
   assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(null, start, 0));
-  const at100 = { ...start, afterPlanOrdinal: 100 };
-  assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(start, at100, 100));
-  const exhausted = { ...start, afterPlanOrdinal: 1001, scanExhausted: true };
+  const armed100 = { ...start, stepThroughPlanOrdinal: 100 };
+  const at100 = { ...start, afterPlanOrdinal: 100, stepThroughPlanOrdinal: null };
+  assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(armed100, at100, 100));
+  const exhausted = {
+    ...start, afterPlanOrdinal: 1001, stepThroughPlanOrdinal: null, scanExhausted: true,
+  };
   const next = {
     ...start,
     phase: "freezeOperations",
   };
   assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(exhausted, next, 0));
+
+  const releaseArmed = {
+    ...start, phase: "releasePlan", stepThroughPlanOrdinal: 100,
+  };
+  const released100 = {
+    ...releaseArmed, afterPlanOrdinal: 100, stepThroughPlanOrdinal: null,
+  };
+  assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(
+    releaseArmed, released100, 100,
+  ));
+  const releaseEnd = {
+    ...start, phase: "releasePlan", afterPlanOrdinal: 1000,
+    stepThroughPlanOrdinal: null, scanExhausted: true,
+  };
+  const finalize = { ...releaseEnd, phase: "finalize" };
+  assert.doesNotThrow(() => validateStorageCompactionCursorTransitionV3(
+    releaseEnd, finalize, 0,
+  ));
+  assert.throws(() => validateStorageCompactionCursorV3({
+    ...releaseEnd, afterPlanOrdinal: 1001,
+  }));
+  assert.throws(() => validateStorageCompactionCursorV3({
+    ...finalize, afterPlanOrdinal: 0,
+  }));
 
   for (const name of cases.malformedCursorCases as string[]) {
     assert.throws(() => {
@@ -298,7 +703,8 @@ test("V3 cursor is afterPlanOrdinal-only, ordered, bounded, and admission reject
           return validateStorageCompactionCursorV3({ ...invalid, afterEventRowid: 0 });
         }
         case "over100Work": return validateStorageCompactionCursorTransitionV3(
-          start, { ...start, afterPlanOrdinal: 101 }, 101,
+          { ...start, stepThroughPlanOrdinal: 101 },
+          { ...start, afterPlanOrdinal: 101 }, 101,
         );
         case "exhaustionBefore1001": return validateStorageCompactionCursorV3({
           ...start, afterPlanOrdinal: 100, scanExhausted: true,
@@ -312,7 +718,7 @@ test("V3 cursor is afterPlanOrdinal-only, ordered, bounded, and admission reject
   }
 
   const pendingStart = makeJob("pending", structuredClone(start));
-  const runningStart = makeJob("running", structuredClone(start));
+  const runningStart = makeJob("running", structuredClone(armed100));
   const pending100 = makeJob("pending", structuredClone(at100));
   for (const name of cases.validLifecycleCases as string[]) {
     const result = name === "armSeparateCommit"
@@ -349,7 +755,8 @@ test("V3 cursor is afterPlanOrdinal-only, ordered, bounded, and admission reject
           const finalCursor = {
             ...start,
             phase: "finalize",
-            afterPlanOrdinal: 0,
+            afterPlanOrdinal: 1000,
+            stepThroughPlanOrdinal: null,
             scanExhausted: true,
           };
           const pending = makeJob("pending", finalCursor);
@@ -371,7 +778,8 @@ test("V3 cursor is afterPlanOrdinal-only, ordered, bounded, and admission reject
   const releasedPending = makeJob("pending", {
     ...start,
     phase: "finalize",
-    afterPlanOrdinal: 0,
+    afterPlanOrdinal: 1000,
+    stepThroughPlanOrdinal: null,
     scanExhausted: true,
   });
   assert.doesNotThrow(() => validateStorageCompactionAdmissionStateV3({
