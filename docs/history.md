@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D activation V4 제안서 경계 수리)
+
+- **문서 생애주기 수리**: M5 제안서 §6.6이 architecture/history가 소유해야 할 현행 구현 사실을 직접 주장하던 표현을 확정 계약의 미래 지향적 구현 기준으로 바꾸고, 현재 상태는 두 현행 문서에서 확인하도록 명시했다. architecture와 기존 구현 기록은 유지했다.
+- **실행 순서 정정**: 이미 완료된 V10 admission·writer·scheduler 재구현 지시를 제거하고 최신 통합 commit의 storage scheduler/status/compaction 하네스와 누적 G5D gate, Windows·실사용 DB 강제 종료, 패키징·릴리스 판정 순으로 남은 작업을 정렬했다.
+- **검증**: activation V4 focused Node 3/3, TypeScript noEmit과 diff check를 통과했다. 공개 wire·runtime·계약 fixture는 변경하지 않았다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D activation V4 구현 진실 계약)
 
 - **additive V4**: 역사적 activation V1~V3는 바꾸지 않고 V4에서만 V9/V10 materializer, V10 compaction writer, cooperative scheduler의 exact runtime 지원과 `runtimeImplemented`·`productExecutionEnabled`·`automaticSchedulingEnabled=true`를 고정했다. 단일 sidecar SQLite owner, ready-only 우선순위/tick/commit/fatal, exact 1,000 threshold, 100 work·1 MiB·8 MiB 예산과 V3 private state는 그대로다.
