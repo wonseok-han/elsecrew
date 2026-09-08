@@ -115,6 +115,68 @@ fn ready(id: &str) -> ReadyPayloadV1 {
 }
 
 #[test]
+fn durable_writer_primitives_fail_closed_before_internal_startup_verification() {
+    let (_root, path) = database();
+    let mut storage = Storage::open(&path).expect("verified storage");
+    storage.writes_admitted = false;
+    let before = fs::read(&path).expect("database before blocked writers");
+
+    let append = storage
+        .append_event(&event(
+            "evt_pre_admission",
+            "op_pre_admission",
+            "project",
+            "project_pre_admission",
+            1,
+            json!({"project_id":"project_pre_admission","canonical_path":"/fixture"}),
+            "2026-09-08T00:00:00Z",
+        ))
+        .expect_err("append must be gated");
+    assert_eq!(append.kind(), "storageVerifying");
+
+    let atomic = storage
+        .upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: "project_pre_admission".to_string(),
+            operation_id: "op_atomic_pre_admission".to_string(),
+            request_id: None,
+            payload: json!({"project_id":"project_pre_admission","canonical_path":"/fixture"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        }])
+        .expect_err("atomic upsert must be gated");
+    assert_eq!(atomic.kind(), "storageVerifying");
+
+    let registration = storage
+        .register_app_instance(&ready("sidecar_pre_admission"))
+        .expect_err("app registration must be gated");
+    assert_eq!(registration.kind(), "storageVerifying");
+    assert_eq!(
+        storage
+            .mark_app_instance_clean("missing_pre_admission")
+            .expect_err("clean marker must be gated")
+            .kind(),
+        "storageVerifying"
+    );
+    assert_eq!(
+        storage
+            .recover_unclean_shutdown()
+            .expect_err("startup recovery writer must be gated")
+            .kind(),
+        "storageVerifying"
+    );
+    assert_eq!(
+        storage
+            .checkpoint()
+            .expect_err("checkpoint must be gated")
+            .kind(),
+        "storageVerifying"
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+}
+
+#[test]
 fn migration_failure_rolls_back_every_table_and_can_retry() {
     let (_root, path) = database();
     let mut connection = Connection::open(&path).expect("open database");
@@ -4442,6 +4504,7 @@ fn populated_v2_storage(path: &Path, state: &str) -> Storage {
     let mut storage = Storage {
         connection,
         path: path.to_path_buf(),
+        writes_admitted: true,
     };
     storage
         .append_event(&event(

@@ -9,10 +9,15 @@ mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
 
+use chrono::{SecondsFormat, Utc};
 use hello_agent_core as _;
-use hello_agent_protocol::agent_adapter_v1::G5A_CAPABILITIES_V1;
-use hello_agent_protocol::lifecycle_v1::{DatabaseStatusV1, SystemStatusV1, SQLITE_FILE_V1};
-use hello_agent_protocol::run_recovery_v1::G5_CAPABILITIES_V1;
+use hello_agent_protocol::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1;
+use hello_agent_protocol::lifecycle_g5d_v1::{
+    DatabaseStatusG5DV1, StorageAdmissionStateV1, StorageAdmissionV1, SystemStateG5DV1,
+    SystemStatusG5DV1, STORAGE_ADMISSION_FAILED_DETAIL_V1, STORAGE_VERIFYING_BLOCKED_DETAIL_V1,
+};
+use hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1;
+use hello_agent_protocol::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1;
 use hello_agent_protocol::{
     decode_jsonl, encode_jsonl, EnvelopeV1, ErrorV1, EventV1, PrepareQuitResultV1,
     ProtocolSessionV1, ReadyPayloadV1, RequestV1, ResponseV1, APP_SCHEMA_VERSION,
@@ -25,8 +30,10 @@ use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -272,11 +279,13 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     sidecar_instance_id: String,
     runtime: agent_runtime::AgentRuntime,
 ) -> Result<(), SidecarError> {
-    let mut sidecar = Sidecar::start_with_runtime(database_path, sidecar_instance_id, runtime)?;
+    g4_platform_gate()?;
+    let mut sidecar = SidecarSession::new(sidecar_instance_id, runtime);
     let ready = EnvelopeV1::Event(sidecar.ready_event()?);
     let mut session = ProtocolSessionV1::default();
     session.observe(&ready).map_err(protocol_error)?;
     write_envelope(&mut output, &ready)?;
+    sidecar.start_admission(database_path);
 
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
@@ -297,7 +306,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         let line = match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(InputMessage::Line(line)) => line,
             Ok(InputMessage::Eof) => {
-                if sidecar.safe_to_quit {
+                if sidecar.safe_to_quit() {
                     return Ok(());
                 }
                 return Err(SidecarError::new(
@@ -307,6 +316,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             }
             Ok(InputMessage::Error(error)) => return Err(error),
             Err(RecvTimeoutError::Timeout) => {
+                sidecar.poll_admission();
                 let mut events = sidecar.poll_watch_events();
                 events.extend(sidecar.poll_runtime_events()?);
                 write_events(&mut session, &mut output, events)?;
@@ -327,6 +337,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 "sidecar stdin accepts request envelopes only",
             ));
         };
+        sidecar.poll_admission();
         let handled = sidecar.handle_request(request)?;
         let response = EnvelopeV1::Response(handled.response);
         session.observe(&response).map_err(protocol_error)?;
@@ -401,47 +412,58 @@ struct Sidecar {
     agent_runtime: agent_runtime::AgentRuntime,
 }
 
-impl Sidecar {
-    fn start_with_runtime(
-        database_path: &Path,
-        sidecar_instance_id: String,
-        agent_runtime: agent_runtime::AgentRuntime,
-    ) -> Result<Self, SidecarError> {
-        g4_platform_gate()?;
-        let mut storage = Storage::open(database_path)?;
-        storage.recover_unclean_shutdown()?;
-        let g5 = chat::G5Manager::default();
-        let mut projects = ProjectManager::new(database_path)?;
-        agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
-        agent_runtime.validate_persisted_runs(&storage)?;
-        g5.recover_unclean_runs(&mut storage, &mut projects)?;
-        let capabilities = if agent_runtime.advertises_g5a() {
-            G5A_CAPABILITIES_V1
+struct AdmissionWorker {
+    cancellation: Arc<AtomicBool>,
+    handle: Option<JoinHandle<Result<Sidecar, SidecarError>>>,
+}
+
+enum AdmissionState {
+    NotStarted {
+        runtime: Option<agent_runtime::AgentRuntime>,
+    },
+    Verifying(AdmissionWorker),
+    Ready {
+        completed_at: String,
+        sidecar: Box<Sidecar>,
+    },
+    Failed {
+        completed_at: String,
+    },
+}
+
+struct SidecarSession {
+    ready: ReadyPayloadV1,
+    started_at: String,
+    admission: AdmissionState,
+    safe_to_quit: bool,
+}
+
+impl SidecarSession {
+    fn new(sidecar_instance_id: String, runtime: agent_runtime::AgentRuntime) -> Self {
+        let capabilities = if runtime.advertises_g5a() {
+            G5D_AGENT_FIXTURE_CAPABILITIES_V1
         } else {
-            G5_CAPABILITIES_V1
+            G5D_PRODUCT_CAPABILITIES_V1
         };
-        let ready = ReadyPayloadV1 {
-            protocol_version: PROTOCOL_VERSION,
-            sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
-            app_schema_version: APP_SCHEMA_VERSION,
-            pid: std::process::id(),
-            platform: protocol_platform().to_string(),
-            capabilities: capabilities
-                .iter()
-                .map(|value| (*value).to_string())
-                .collect(),
-            sidecar_instance_id,
-        };
-        storage.register_app_instance(&ready)?;
-        Ok(Self {
-            storage,
-            projects,
-            ready,
-            prepared_to_quit: false,
+        Self {
+            ready: ReadyPayloadV1 {
+                protocol_version: PROTOCOL_VERSION,
+                sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
+                app_schema_version: APP_SCHEMA_VERSION,
+                pid: std::process::id(),
+                platform: protocol_platform().to_string(),
+                capabilities: capabilities
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect(),
+                sidecar_instance_id,
+            },
+            started_at: now_utc(),
+            admission: AdmissionState::NotStarted {
+                runtime: Some(runtime),
+            },
             safe_to_quit: false,
-            g5,
-            agent_runtime,
-        })
+        }
     }
 
     fn ready_event(&self) -> Result<EventV1, SidecarError> {
@@ -456,6 +478,281 @@ impl Sidecar {
             task_id: None,
             run_id: None,
             payload: serde_json::to_value(&self.ready).map_err(json_error)?,
+        })
+    }
+
+    fn start_admission(&mut self, database_path: &Path) {
+        self.start_admission_with_gate(database_path, None);
+    }
+
+    fn start_admission_with_gate(
+        &mut self,
+        database_path: &Path,
+        start_gate: Option<Arc<AtomicBool>>,
+    ) {
+        let AdmissionState::NotStarted { runtime } = &mut self.admission else {
+            return;
+        };
+        let runtime = runtime.take().expect("admission runtime starts once");
+        let database_path = database_path.to_path_buf();
+        let ready = self.ready.clone();
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker_cancellation = Arc::clone(&cancellation);
+        let handle = thread::spawn(move || {
+            while start_gate
+                .as_ref()
+                .is_some_and(|gate| !gate.load(Ordering::Acquire))
+            {
+                admission_not_cancelled(&worker_cancellation)?;
+                thread::sleep(Duration::from_millis(1));
+            }
+            Sidecar::initialize(database_path, ready, runtime, &worker_cancellation)
+        });
+        self.admission = AdmissionState::Verifying(AdmissionWorker {
+            cancellation,
+            handle: Some(handle),
+        });
+    }
+
+    fn poll_admission(&mut self) {
+        let finished = matches!(
+            &self.admission,
+            AdmissionState::Verifying(worker)
+                if worker.handle.as_ref().is_some_and(JoinHandle::is_finished)
+        );
+        if !finished {
+            return;
+        }
+        let AdmissionState::Verifying(mut worker) = std::mem::replace(
+            &mut self.admission,
+            AdmissionState::Failed {
+                completed_at: now_utc(),
+            },
+        ) else {
+            unreachable!("finished admission state changed")
+        };
+        let outcome = worker
+            .handle
+            .take()
+            .expect("finished admission worker")
+            .join();
+        self.admission = match outcome {
+            Ok(Ok(sidecar)) => AdmissionState::Ready {
+                completed_at: now_utc(),
+                sidecar: Box::new(sidecar),
+            },
+            Ok(Err(_)) | Err(_) => AdmissionState::Failed {
+                completed_at: now_utc(),
+            },
+        };
+    }
+
+    fn handle_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+        match self.handle_validated_request(request.clone()) {
+            Err(error) if error.kind() == "invalidParams" => Ok(HandledRequest::response(
+                error_response(&request, "invalidParams", "invalidRequest", error.detail()),
+            )),
+            other => other,
+        }
+    }
+
+    fn handle_validated_request(
+        &mut self,
+        request: RequestV1,
+    ) -> Result<HandledRequest, SidecarError> {
+        match &mut self.admission {
+            AdmissionState::Ready { sidecar, .. } => {
+                if request.method == "system.status" {
+                    require_exact_params(&request.params, &[]).map_err(invalid_params)?;
+                    return Ok(HandledRequest::response(success_response(
+                        &request,
+                        serde_json::to_value(self.system_status()?).map_err(json_error)?,
+                    )));
+                }
+                let handled = sidecar.handle_request(request)?;
+                self.safe_to_quit = sidecar.safe_to_quit;
+                Ok(handled)
+            }
+            AdmissionState::NotStarted { .. } | AdmissionState::Verifying(_) => {
+                self.handle_not_ready_request(request, StorageAdmissionStateV1::Verifying)
+            }
+            AdmissionState::Failed { .. } => {
+                self.handle_not_ready_request(request, StorageAdmissionStateV1::Failed)
+            }
+        }
+    }
+
+    fn handle_not_ready_request(
+        &mut self,
+        request: RequestV1,
+        state: StorageAdmissionStateV1,
+    ) -> Result<HandledRequest, SidecarError> {
+        match request.method.as_str() {
+            "system.status" => {
+                require_exact_params(&request.params, &[]).map_err(invalid_params)?;
+                Ok(HandledRequest::response(success_response(
+                    &request,
+                    serde_json::to_value(self.system_status()?).map_err(json_error)?,
+                )))
+            }
+            "app.prepareQuit" => {
+                require_exact_params(&request.params, &[]).map_err(invalid_params)?;
+                self.cancel_and_join_admission();
+                self.safe_to_quit = true;
+                Ok(HandledRequest::response(success_response(
+                    &request,
+                    serde_json::to_value(PrepareQuitResultV1 {
+                        safe_to_quit: true,
+                        blockers: Vec::new(),
+                    })
+                    .map_err(json_error)?,
+                )))
+            }
+            _ => Ok(HandledRequest::response(admission_blocked_response(
+                &request, state,
+            ))),
+        }
+    }
+
+    fn cancel_and_join_admission(&mut self) {
+        let AdmissionState::Verifying(worker) = &mut self.admission else {
+            return;
+        };
+        worker.cancellation.store(true, Ordering::Release);
+        let mut worker = match std::mem::replace(
+            &mut self.admission,
+            AdmissionState::Failed {
+                completed_at: now_utc(),
+            },
+        ) {
+            AdmissionState::Verifying(worker) => worker,
+            _ => unreachable!("verifying admission state changed"),
+        };
+        if let Some(handle) = worker.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn system_status(&self) -> Result<SystemStatusG5DV1, SidecarError> {
+        let (storage_admission, database, recovery_required, blocker_ids) = match &self.admission {
+            AdmissionState::Ready {
+                completed_at,
+                sidecar,
+            } => {
+                let blocker_ids = sidecar.storage.blocker_ids()?;
+                (
+                    StorageAdmissionV1 {
+                        schema_version: 1,
+                        state: StorageAdmissionStateV1::Ready,
+                        started_at: self.started_at.clone(),
+                        completed_at: Some(completed_at.clone()),
+                        error: None,
+                    },
+                    DatabaseStatusG5DV1::Healthy {
+                        schema_version: APP_SCHEMA_VERSION,
+                    },
+                    Some(!blocker_ids.is_empty()),
+                    blocker_ids,
+                )
+            }
+            AdmissionState::Failed { completed_at } => (
+                StorageAdmissionV1 {
+                    schema_version: 1,
+                    state: StorageAdmissionStateV1::Failed,
+                    started_at: self.started_at.clone(),
+                    completed_at: Some(completed_at.clone()),
+                    error: Some(ErrorV1 {
+                        code: "storageAdmissionFailed".to_string(),
+                        kind: "storageUnavailable".to_string(),
+                        detail: STORAGE_ADMISSION_FAILED_DETAIL_V1.to_string(),
+                        retryable: false,
+                        outcome_unknown: Some(true),
+                    }),
+                },
+                DatabaseStatusG5DV1::Unavailable {
+                    schema_version: None,
+                },
+                None,
+                Vec::new(),
+            ),
+            AdmissionState::NotStarted { .. } | AdmissionState::Verifying(_) => (
+                StorageAdmissionV1 {
+                    schema_version: 1,
+                    state: StorageAdmissionStateV1::Verifying,
+                    started_at: self.started_at.clone(),
+                    completed_at: None,
+                    error: None,
+                },
+                DatabaseStatusG5DV1::Verifying {
+                    schema_version: None,
+                },
+                None,
+                Vec::new(),
+            ),
+        };
+        Ok(SystemStatusG5DV1 {
+            schema_version: 1,
+            state: SystemStateG5DV1::ShellReady,
+            sidecar: self.ready.clone(),
+            storage_admission,
+            database,
+            recovery_required,
+            blocker_ids,
+        })
+    }
+
+    fn poll_watch_events(&mut self) -> Vec<EventV1> {
+        match &mut self.admission {
+            AdmissionState::Ready { sidecar, .. } => sidecar.poll_watch_events(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn poll_runtime_events(&mut self) -> Result<Vec<EventV1>, SidecarError> {
+        match &mut self.admission {
+            AdmissionState::Ready { sidecar, .. } => sidecar.poll_runtime_events(),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn safe_to_quit(&self) -> bool {
+        self.safe_to_quit
+    }
+}
+
+impl Drop for SidecarSession {
+    fn drop(&mut self) {
+        self.cancel_and_join_admission();
+    }
+}
+
+impl Sidecar {
+    fn initialize(
+        database_path: std::path::PathBuf,
+        ready: ReadyPayloadV1,
+        agent_runtime: agent_runtime::AgentRuntime,
+        cancellation: &AtomicBool,
+    ) -> Result<Self, SidecarError> {
+        let mut storage = Storage::open_for_admission(&database_path, cancellation)?;
+        admission_not_cancelled(cancellation)?;
+        let mut projects = ProjectManager::new(&database_path)?;
+        admission_not_cancelled(cancellation)?;
+        storage.recover_unclean_shutdown()?;
+        let g5 = chat::G5Manager::default();
+        agent_runtime.recover_unclean_runs(&mut storage, &mut projects)?;
+        agent_runtime.validate_persisted_runs(&storage)?;
+        g5.recover_unclean_runs(&mut storage, &mut projects)?;
+        admission_not_cancelled(cancellation)?;
+        storage.register_app_instance(&ready)?;
+        admission_not_cancelled(cancellation)?;
+        Ok(Self {
+            storage,
+            projects,
+            ready,
+            prepared_to_quit: false,
+            safe_to_quit: false,
+            g5,
+            agent_runtime,
         })
     }
 
@@ -530,7 +827,18 @@ impl Sidecar {
             "system.status" => Ok({
                 require_exact_params(&request.params, &[]).map_err(invalid_params)?;
                 project::ProjectAction {
-                    result: serde_json::to_value(self.system_status()).map_err(json_error)?,
+                    result: Value::Null,
+                    ..project::ProjectAction::default()
+                }
+            }),
+            "storage.status" => Ok({
+                hello_agent_protocol::storage_lifetime_v1::validate_storage_status_request_v1(
+                    &request.params,
+                )
+                .map_err(|error| invalid_params(error.to_string()))?;
+                project::ProjectAction {
+                    result: serde_json::to_value(self.storage.lifetime_status()?)
+                        .map_err(json_error)?,
                     ..project::ProjectAction::default()
                 }
             }),
@@ -1310,34 +1618,16 @@ impl Sidecar {
             })
             .collect()
     }
+}
 
-    fn system_status(&self) -> SystemStatusV1 {
-        match self.storage.blocker_ids() {
-            Ok(blocker_ids) => SystemStatusV1::Ready {
-                sidecar: self.ready.clone(),
-                database: DatabaseStatusV1::Healthy {
-                    schema_version: APP_SCHEMA_VERSION,
-                },
-                recovery_required: !blocker_ids.is_empty(),
-                blocker_ids,
-            },
-            Err(error) => SystemStatusV1::Unavailable {
-                last_ready_sidecar: Some(self.ready.clone()),
-                database: DatabaseStatusV1::Unavailable {
-                    schema_version: Some(APP_SCHEMA_VERSION),
-                },
-                recovery_required: true,
-                blocker_ids: vec!["storage:unknown".to_string()],
-                error: ErrorV1 {
-                    code: "storageUnavailable".to_string(),
-                    kind: error.kind().to_string(),
-                    detail: error.detail().to_string(),
-                    retryable: false,
-                    outcome_unknown: Some(true),
-                },
-            },
-        }
+fn admission_not_cancelled(cancellation: &AtomicBool) -> Result<(), SidecarError> {
+    if cancellation.load(Ordering::Acquire) {
+        return Err(SidecarError::new(
+            "storageAdmissionCancelled",
+            "storage admission was cancelled before startup registration",
+        ));
     }
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1471,6 +1761,49 @@ fn project_error_response(request: &RequestV1, failure: &ProjectFailure) -> Resp
     }
 }
 
+fn success_response(request: &RequestV1, result: Value) -> ResponseV1 {
+    ResponseV1 {
+        protocol_version: PROTOCOL_VERSION,
+        kind: "response".to_string(),
+        sidecar_instance_id: request.sidecar_instance_id.clone(),
+        request_id: request.request_id.clone(),
+        ok: true,
+        result: Some(result),
+        error: None,
+    }
+}
+
+fn admission_blocked_response(request: &RequestV1, state: StorageAdmissionStateV1) -> ResponseV1 {
+    let (code, detail, retryable) = match state {
+        StorageAdmissionStateV1::Verifying => (
+            "storageVerifying",
+            STORAGE_VERIFYING_BLOCKED_DETAIL_V1,
+            true,
+        ),
+        StorageAdmissionStateV1::Failed => (
+            "storageAdmissionFailed",
+            STORAGE_ADMISSION_FAILED_DETAIL_V1,
+            false,
+        ),
+        StorageAdmissionStateV1::Ready => unreachable!("ready requests are not blocked"),
+    };
+    ResponseV1 {
+        protocol_version: PROTOCOL_VERSION,
+        kind: "response".to_string(),
+        sidecar_instance_id: request.sidecar_instance_id.clone(),
+        request_id: request.request_id.clone(),
+        ok: false,
+        result: None,
+        error: Some(ErrorV1 {
+            code: code.to_string(),
+            kind: "requestBlocked".to_string(),
+            detail: detail.to_string(),
+            retryable,
+            outcome_unknown: Some(false),
+        }),
+    }
+}
+
 fn error_response(request: &RequestV1, code: &str, kind: &str, detail: &str) -> ResponseV1 {
     ResponseV1 {
         protocol_version: PROTOCOL_VERSION,
@@ -1491,6 +1824,10 @@ fn error_response(request: &RequestV1, code: &str, kind: &str, detail: &str) -> 
 
 fn new_sidecar_instance_id() -> String {
     format!("sidecar_{}", Uuid::new_v4().simple())
+}
+
+fn now_utc() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn protocol_platform() -> &'static str {
