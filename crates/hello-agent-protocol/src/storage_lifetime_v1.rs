@@ -76,6 +76,17 @@ pub const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1: usize = 100;
 pub const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1: u64 = 1_048_576;
+pub const STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1: u64 = 8_388_608;
+pub const STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1: u64 = 1_000;
+pub const STORAGE_LIFETIME_ACTIVATION_PHASES_V1: &[&str] = &[
+    "pending",
+    "armRunning",
+    "freeze",
+    "materialize",
+    "verify",
+    "delete",
+    "finalize",
+];
 pub const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1: &str =
     "rowid > afterEventRowid AND rowid <= cutoffEventRowid";
 pub const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1: &str = "rowid";
@@ -3214,6 +3225,99 @@ pub fn validate_storage_compaction_policy_v2(
     if value != &expected {
         return Err(StorageLifetimeContractError::new(
             "storage compaction v2 policy is not exact",
+        ));
+    }
+    Ok(())
+}
+
+pub fn storage_lifetime_activation_policy_v1() -> Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "generation": "storageLifetimeActivationV1",
+        "databaseMigration": "none",
+        "publicWire": {
+            "g5dLifecycleShape": "unchanged",
+            "storageStatusShape": "unchanged",
+            "capabilityOrder": "unchanged",
+            "readyToFailedTransition": false,
+            "physicalCleanupEnabled": false,
+        },
+        "eligibility": {
+            "exactSafePrefixMinLedgerEvents":
+                STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1,
+            "countBoundary": "sinceRetainedBoundary",
+            "belowThresholdAllowed": false,
+            "ageTrigger": false,
+            "byteTrigger": false,
+            "preconditions": [
+                "allExistingSafetyExclusionsPass",
+                "completeMaterialization",
+                "exactBeforeAfterEquivalence",
+            ],
+        },
+        "preservation": {
+            "logicalDeleteRows": ["events", "event_source_index"],
+            "preservedRecords": [
+                "userChats",
+                "chatMessages",
+                "userEvidence",
+                "recoveries",
+                "workspaces",
+                "snapshots",
+                "baselines",
+                "projections",
+                "operationReceipts",
+            ],
+            "physicalCleanup": "disabled",
+        },
+        "restart": {
+            "pendingEmptyAuthority":
+                "exactVerifyDuringAdmissionThenReadyAndResumeAfterward",
+            "runningSentinel": "failAdmissionWithoutMutationManualRecovery",
+            "nonEmptyAuthority": "failAdmissionWithoutMutationManualRecovery",
+            "ambiguousOrCommitUncertain": "failAdmissionWithoutMutationManualRecovery",
+            "automaticResetOrResumeUnsafeState": false,
+        },
+        "runtime": {
+            "owner": "singleSQLiteOwnerInSidecarEventLoop",
+            "writerConnections": 1,
+            "backgroundWriterConnection": false,
+            "backgroundWriterThread": false,
+            "ticks": "readyOnly",
+            "zeroTickStates": ["verifying", "failed", "quitting"],
+            "step": "oneBoundedCommittedStepPerTick",
+        },
+        "fatalAfterReady": {
+            "causes": [
+                "semanticCorruption",
+                "commitUncertainty",
+                "materializerFatal",
+                "compactorFatal",
+            ],
+            "action": "poisonStopMaintenanceAndTerminateSidecar",
+            "furtherMutationOrRun": "prohibited",
+            "nextProcess": "reenterVerifyingAndRunAdmission",
+            "wireTransition": "none",
+        },
+        "budgets": {
+            "maxWorkUnitsPerStep": STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+            "maxCanonicalPrimaryInputBytesPerStep":
+                STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+            "maxRetainedAndDependencyInputBytesPerStep":
+                STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
+            "callerConfigurable": false,
+        },
+        "phases": STORAGE_LIFETIME_ACTIVATION_PHASES_V1,
+        "quit": "stopNewTicksBeforeCheckpointAndCleanMarker",
+    })
+}
+
+pub fn validate_storage_lifetime_activation_policy_v1(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    if value != &storage_lifetime_activation_policy_v1() {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime activation policy is not exact",
         ));
     }
     Ok(())

@@ -113,6 +113,17 @@ export const STORAGE_LIFETIME_CURSOR_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_LIFETIME_BATCH_POLICY_SCHEMA_VERSION_V1 = 1 as const;
 export const STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1 = 100 as const;
 export const STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1 = 1_048_576 as const;
+export const STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1 = 8_388_608 as const;
+export const STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1 = 1_000 as const;
+export const STORAGE_LIFETIME_ACTIVATION_PHASES_V1 = [
+  "pending",
+  "armRunning",
+  "freeze",
+  "materialize",
+  "verify",
+  "delete",
+  "finalize",
+] as const;
 export const STORAGE_LIFETIME_KEYSET_SCAN_PREDICATE_V1 =
   "rowid > afterEventRowid AND rowid <= cutoffEventRowid" as const;
 export const STORAGE_LIFETIME_KEYSET_SCAN_ORDER_V1 = "rowid" as const;
@@ -2478,6 +2489,95 @@ export function validateStorageCompactionPolicyV2(value: unknown): Record<string
     fail("storage compaction v2 policy is not exact");
   }
   return policy;
+}
+
+export const STORAGE_LIFETIME_ACTIVATION_POLICY_V1 = {
+  schemaVersion: 1,
+  generation: "storageLifetimeActivationV1",
+  databaseMigration: "none",
+  publicWire: {
+    g5dLifecycleShape: "unchanged",
+    storageStatusShape: "unchanged",
+    capabilityOrder: "unchanged",
+    readyToFailedTransition: false,
+    physicalCleanupEnabled: false,
+  },
+  eligibility: {
+    exactSafePrefixMinLedgerEvents:
+      STORAGE_LOSSLESS_COMPACTION_MIN_ELIGIBLE_LEDGER_EVENTS_V1,
+    countBoundary: "sinceRetainedBoundary",
+    belowThresholdAllowed: false,
+    ageTrigger: false,
+    byteTrigger: false,
+    preconditions: [
+      "allExistingSafetyExclusionsPass",
+      "completeMaterialization",
+      "exactBeforeAfterEquivalence",
+    ],
+  },
+  preservation: {
+    logicalDeleteRows: ["events", "event_source_index"],
+    preservedRecords: [
+      "userChats",
+      "chatMessages",
+      "userEvidence",
+      "recoveries",
+      "workspaces",
+      "snapshots",
+      "baselines",
+      "projections",
+      "operationReceipts",
+    ],
+    physicalCleanup: "disabled",
+  },
+  restart: {
+    pendingEmptyAuthority: "exactVerifyDuringAdmissionThenReadyAndResumeAfterward",
+    runningSentinel: "failAdmissionWithoutMutationManualRecovery",
+    nonEmptyAuthority: "failAdmissionWithoutMutationManualRecovery",
+    ambiguousOrCommitUncertain: "failAdmissionWithoutMutationManualRecovery",
+    automaticResetOrResumeUnsafeState: false,
+  },
+  runtime: {
+    owner: "singleSQLiteOwnerInSidecarEventLoop",
+    writerConnections: 1,
+    backgroundWriterConnection: false,
+    backgroundWriterThread: false,
+    ticks: "readyOnly",
+    zeroTickStates: ["verifying", "failed", "quitting"],
+    step: "oneBoundedCommittedStepPerTick",
+  },
+  fatalAfterReady: {
+    causes: [
+      "semanticCorruption",
+      "commitUncertainty",
+      "materializerFatal",
+      "compactorFatal",
+    ],
+    action: "poisonStopMaintenanceAndTerminateSidecar",
+    furtherMutationOrRun: "prohibited",
+    nextProcess: "reenterVerifyingAndRunAdmission",
+    wireTransition: "none",
+  },
+  budgets: {
+    maxWorkUnitsPerStep: STORAGE_LIFETIME_MAX_SOURCE_ROWS_PER_BATCH_V1,
+    maxCanonicalPrimaryInputBytesPerStep:
+      STORAGE_LIFETIME_MAX_CANONICAL_SOURCE_PAYLOAD_BYTES_PER_BATCH_V1,
+    maxRetainedAndDependencyInputBytesPerStep:
+      STORAGE_LIFETIME_MAX_RETAINED_DEPENDENCY_INPUT_BYTES_PER_STEP_V1,
+    callerConfigurable: false,
+  },
+  phases: STORAGE_LIFETIME_ACTIVATION_PHASES_V1,
+  quit: "stopNewTicksBeforeCheckpointAndCleanMarker",
+} as const;
+
+export function validateStorageLifetimeActivationPolicyV1(
+  value: unknown,
+): typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1 {
+  const policy = requireObject(value, "storage lifetime activation policy");
+  if (!sameContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V1)) {
+    fail("storage lifetime activation policy is not exact");
+  }
+  return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1;
 }
 
 export function canonicalFrozenOperationRecordV1(source: FrozenOperationSourceV1): string {

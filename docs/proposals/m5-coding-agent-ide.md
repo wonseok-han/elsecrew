@@ -43,6 +43,7 @@ M5의 목적은 기능 목록을 한꺼번에 확정하는 것이 아니라, **�
 21. UI·저장 구조는 macOS와 Windows 공통으로 개발하지만, 에이전트 실행은 검증된 macOS부터 연다. Windows는 M4와 동등한 자손 회수·소멸 확인 계약을 통과하기 전 실행을 노출하지 않는다.
 22. G4 작업 복사본은 linked Git worktree가 아니라, 읽기 전용 source capability로 만든 self-contained Git bundle에서 raw committed blob과 mode를 스트리밍 materialize한 **capability-protected standalone snapshot**이다. `project.createWorktree`, `createProjectWorktree`, `worktreeId/path`는 protocol v1 호환 이름으로만 남긴다. Windows G4 안전성은 별도 게이트 전까지 지원으로 광고하지 않는다.
 23. G5D 제품 시작은 **3초 이내 shell-ready**와 별도 저장소 admission `verifying → ready | failed`로 나눈다. `verifying`·`failed`에서는 `system.status`와 `app.prepareQuit`만 허용하고, recovery 변경·app instance 등록·append·fixture/actual agent 실행 및 `storage.status` 사실값 조회는 sidecar가 known-no-op로 차단한다. 저장소 검증을 모두 통과하고 `verifiedForStartup` 뒤 app instance 등록까지 끝낸 경우에만 public `ready`로 admission한다.
+24. G5D 자동 lossless compaction은 기존 안전 제외·완전 materialization·전후 동등성 검증을 모두 통과한 retained boundary 이후의 exact prefix가 **원장 event 1,000개 이상**일 때만 실행 후보가 된다. 재시작의 빈 authority `pending`만 admission에서 exact 검증한 뒤 ready 및 scheduler 재개를 허용하고, `running` sentinel·non-empty authority·commit 불명 상태는 변경 없이 admission을 실패시킨다. ready 이후 치명적 maintenance 오류는 공개 `ready → failed` 전이를 만들지 않고 추가 변경·실행을 차단한 채 sidecar를 종료한다.
 
 ---
 
@@ -408,12 +409,20 @@ reviewReady → discarded
 - `verifying`은 완료 시각·오류·복구 판정을 아직 주장하지 않는다. `ready`만 healthy schema v1과 기존 `recoveryRequired`/`blockerIds` 불변식을 공개하고, `failed`는 원시 DB 진단 대신 고정된 `storageAdmissionFailed` 공개 오류만 제공한다.
 - 저장소가 `verifying`이면 차단 요청은 retryable `storageVerifying`, `failed`이면 non-retryable `storageAdmissionFailed`다. 두 경우 모두 `requestBlocked`, `outcomeUnknown=false`, known-no-op이며 입력 검증이나 부작용을 admission gate보다 먼저 수행하지 않는다.
 
+#### 확정된 scheduler·compaction activation 계약
+
+- 자동 실행 임계값은 retained boundary 이후 exact safe prefix의 원장 event **1,000개** 하나뿐이다. age·byte trigger와 1,000개 미만 compaction은 없으며, 기존 안전 제외·완전 materialization·exact 전후 동등성을 모두 먼저 증명한다.
+- user chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt는 삭제하지 않는다. 검증된 prefix의 source `events`와 대응 `event_source_index` 행만 논리 삭제할 수 있고 물리 cleanup은 계속 비활성이다.
+- sidecar event loop의 단일 SQLite owner만 public ready에서 한 tick당 bounded committed step 하나를 수행한다. 별도 writer connection/thread는 만들지 않고 `verifying|failed|quitting`에서는 tick을 0으로 유지한다. 단계는 `pending → arm running → freeze → materialize → verify → delete → finalize` 순서이며 work 100, primary 1 MiB, retained+dependency 8 MiB 한도를 완화하지 않는다.
+- 재시작 시 empty-authority `pending`은 admission에서 exact 검증한 뒤 ready가 될 수 있고 scheduler가 이후 재개한다. `running` sentinel, non-empty authority, ambiguous/commit-uncertain state는 자동 reset/resume하지 않고 mutation 없이 admission을 실패시켜 수동 복구를 요구한다.
+- public ready 이후 semantic corruption·commit uncertainty·materializer/compactor fatal은 maintenance를 poison/중단하고 이후 mutation/run을 금지한 채 sidecar를 종료한다. 공개 G5D·`storage.status` shape와 capability 순서는 그대로이며 `ready → failed` wire 전이를 추가하지 않는다. 다음 process는 `verifying`부터 admission을 다시 수행한다. Quit은 새 tick을 먼저 중단한 뒤 checkpoint와 clean marker를 처리한다.
+
 #### 현재 제안
 
 - protocol v1과 payload `schemaVersion: 1`을 유지하면서 DB logical/physical bytes, WAL bytes, ledger tail event count/payload bytes, snapshot aggregate count/payload bytes와 볼륨 capacity/available 사실값만 돌려주는 exact `storage.status`를 추가한다. raw chat/provider text, 비공개 추론, prompt, token/auth, absolute path는 응답에 넣지 않는다.
 - public bridge는 additive `M5BridgeV6.getStorageStatus`와 새 G5D `getSystemStatus` 응답을 사용한다. protocol method와 D1 exact capability에는 `storage.status`가 예약됐지만 sidecar dispatcher·renderer 활성화는 저장소 admission 구현과 양쪽 검증이 함께 준비된 뒤에만 연다.
 - 내부 SQLite schema v2는 v1 원장과 projection을 변경·삭제하지 않는 additive table/index/metadata migration으로 `ledger_baselines`, immutable operation receipt, normalized chat message/prepared workspace, maintenance job을 수용한다. operation receipt는 canonical payload 원문을 보존해 v1과 같은 exact duplicate/conflict를 판정하고 SHA-256 v1 lowercase-hex digest는 무결성 검사용으로만 사용한다. prepared workspace는 `bound`일 때만 `boundChatId`가 있고 그 chat이 같은 project임을 composite FK로 강제한다. 앱은 DDL을 확인한 뒤 ready가 될 수 있지만 기존 record materialization은 ready 이후 idle 작업으로 수행한다.
-- lossless compaction은 `BEGIN IMMEDIATE → cutoff 고정 → receipt/message/workspace/baseline materialize → baseline+tail replay·projection·old operation duplicate/conflict·actual/legacy namespace·recovery 동등성 검증 → 검증된 cutoff만 논리 삭제 → append-only guard 복원 확인 → COMMIT` 순서다. 어느 검증도 실패하면 전체 rollback하며, checkpoint와 `VACUUM` 성공은 논리 성공 조건이 아니다.
+- lossless compaction 구현은 확정된 activation 계약 아래 `BEGIN IMMEDIATE → cutoff 고정 → receipt/message/workspace/baseline materialize → baseline+tail replay·projection·old operation duplicate/conflict·actual/legacy namespace·recovery 동등성 검증 → 검증된 cutoff만 논리 삭제 → append-only guard 복원 확인 → COMMIT` 순서를 따른다. 어느 검증도 실패하면 전체 rollback하며, checkpoint와 `VACUUM` 성공은 논리 성공 조건이 아니다.
 - active/cancelling/recoveryRequired run, unresolved recovery, poisoned/writer lock, pending intent/save, incomplete operation, active/bound workspace, 역할 설정, 사용자 chat/history/evidence, identity mismatch, orphan/symlink 불명 상태는 정리 대상으로 분류하지 않는다.
 
 #### 열린 질문
