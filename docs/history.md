@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (D1 malformed 회귀 통합·worktree 정리)
+
+- **테스트 통합**: exact `2ec19f20818321664af6e1dd66568f269e9f734a`가 D1 product/agent-fixture ready validator 양쪽에서 capability 순서 교환·`storage.status` 중복·unknown extra·누락·ready payload extra field를 Rust/TypeScript 표 기반 회귀로 거부한다. protocol 44개, Node lifetime 18개, TypeScript, rustfmt, diff 검증과 독립 리뷰 PASS 뒤 `460a23bce56dc8c9ad2d3bd64672cd0a7cad8bbe`로 통합했다.
+- **정리**: clean·무증거·사용 프로세스 없음과 branch 보존을 확인한 오래된 checkout 9개와 완료된 임시 테스트 checkout을 비강제 제거했다. 이번 목표 시작 기준 등록 child 20개에서 현재 9개로 줄었고 `.worktrees`는 약 8.6 GiB다. 남은 child는 미커밋 변경 또는 QA/`.omo` 증거가 있어 내용 확인·보존 전에는 제거하지 않는다.
+- **게이트 현황**: `pnpm harness:list`는 `g5d-storage-lifetime`을 scheduler/status/compaction script 3개 미구현으로, `g6-release`를 security/package/performance script 3개 미구현으로 정확히 `NOT_READY` 판정한다. 2단계 shell-ready/storage-admission 안전 정책 승인 전에는 dispatcher·실행 경로를 활성화하지 않으며 main 병합·push 없음.
+
 ### 2026-09-08 · by GPT-5.6-Sol (D1 malformed ready 회귀 보강)
 
 - **테스트 보강**: D1 일반 제품과 agent-fixture ready validator가 capability 순서 교환, `storage.status` 중복, 알 수 없는 추가 capability, `storage.status` 누락, ready payload 추가 필드를 모두 거부하는 표 기반 Rust·TypeScript 회귀를 추가했다. 기존 legacy/D1 성공과 세대 교차 불일치 거부는 그대로 보존했다.
