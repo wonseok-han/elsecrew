@@ -3,6 +3,7 @@ use crate::storage_lifetime::compaction_writer::{
     run_private_compaction_step, CompactionCancellationPoint, CompactionFailurePoint,
     CompactionStepResult, CompactionTarget,
 };
+use crate::storage_lifetime::scheduler::{CooperativeScheduler, MaintenanceTickResult};
 use hello_agent_protocol::project_v1::sha256_file_version_v1;
 use hello_agent_protocol::storage_lifetime_v1::{
     canonical_frozen_operation_record_v1, FrozenOperationSourceV1, StorageCompactionPhaseV3,
@@ -55,7 +56,7 @@ fn run_to_completion(storage: &mut Storage) -> String {
     let mut last = None;
     for _ in 0..160 {
         match run_private_compaction_step(&mut storage.connection, &target(), &mut never, None) {
-            Ok(CompactionStepResult::Completed { job_id }) => return job_id,
+            Ok(CompactionStepResult::Finalized { job_id }) => return job_id,
             Ok(result) => last = Some(result),
             Err(error) => {
                 let durable: Option<(String, String)> = storage
@@ -86,7 +87,7 @@ fn run_until_pending(
                 .unwrap();
         if matches!(
             result,
-            CompactionStepResult::Progress {
+            CompactionStepResult::ArmedWorked {
                 phase: current,
                 after_plan_ordinal: after,
                 ..
@@ -335,7 +336,7 @@ fn v10_writer_threshold_and_exact_thousand_delete_candidate() {
     let mut never = |_: CompactionCancellationPoint| false;
     assert_eq!(
         run_private_compaction_step(&mut below.connection, &target(), &mut never, None).unwrap(),
-        CompactionStepResult::NoCandidate
+        CompactionStepResult::NoWork
     );
     assert_eq!(table_rows(&below.connection, "maintenance_jobs").len(), 0);
 
@@ -349,13 +350,17 @@ fn v10_writer_threshold_and_exact_thousand_delete_candidate() {
             None,
         )
         .unwrap(),
-        CompactionStepResult::NoCandidate
+        CompactionStepResult::NoWork
     );
     assert_eq!(table_rows(&exact.connection, "maintenance_jobs").len(), 0);
 
     assert!(matches!(
         run_private_compaction_step(&mut exact.connection, &target(), &mut never, None).unwrap(),
-        CompactionStepResult::Progress {
+        CompactionStepResult::Created { .. }
+    ));
+    assert!(matches!(
+        run_private_compaction_step(&mut exact.connection, &target(), &mut never, None).unwrap(),
+        CompactionStepResult::ArmedWorked {
             phase: StorageCompactionPhaseV3::PlanEligibility,
             after_plan_ordinal: 100,
             ..
@@ -376,7 +381,7 @@ fn v10_writer_threshold_and_exact_thousand_delete_candidate() {
     run_until_pending(&mut exact, StorageCompactionPhaseV3::DeletePrefix, 0);
     assert!(matches!(
         run_private_compaction_step(&mut exact.connection, &target(), &mut never, None).unwrap(),
-        CompactionStepResult::Progress {
+        CompactionStepResult::ArmedWorked {
             phase: StorageCompactionPhaseV3::DeletePrefix,
             after_plan_ordinal: 100,
             ..
@@ -455,7 +460,7 @@ fn v10_writer_delete_failure_rolls_back_batch_and_leaves_running_sentinel() {
                 .unwrap();
         if matches!(
             result,
-            CompactionStepResult::Progress {
+            CompactionStepResult::ArmedWorked {
                 phase: StorageCompactionPhaseV3::DeletePrefix,
                 after_plan_ordinal: 0,
                 ..
@@ -525,6 +530,143 @@ fn v10_writer_delete_failure_rolls_back_batch_and_leaves_running_sentinel() {
     )
     .is_err());
     assert_failed_delete_is_closed(&mut cancelled, before);
+}
+
+#[test]
+fn cooperative_scheduler_prioritizes_materialization_and_persisted_pending_work() {
+    let (_root, _path, mut storage) = exact_v10(1001);
+    assert_eq!(
+        storage
+            .append_event(&event(
+                "evt_writer_1002",
+                "op_writer_1002",
+                "project",
+                PROJECT,
+                1002,
+                json!({
+                    "canonical_path":"/fixture/v10-writer",
+                    "project_id":PROJECT,
+                    "sequence":1002,
+                }),
+                STAMP,
+            ))
+            .unwrap(),
+        AppendOutcome::Committed
+    );
+    let mut scheduler = CooperativeScheduler::default();
+    assert_eq!(
+        scheduler.tick(&mut storage).unwrap(),
+        MaintenanceTickResult::ArmedWorked
+    );
+    assert_eq!(
+        storage
+            .connection
+            .query_row("SELECT count(*) FROM maintenance_jobs;", [], |row| row
+                .get::<_, u32>(0))
+            .unwrap(),
+        0,
+        "materializer work must precede candidate creation"
+    );
+    run_bounded_materializer_to_ready(&mut storage);
+
+    let mut never = |_: CompactionCancellationPoint| false;
+    assert!(matches!(
+        run_private_compaction_step(&mut storage.connection, &target(), &mut never, None).unwrap(),
+        CompactionStepResult::Created { .. }
+    ));
+    let mut scheduler = CooperativeScheduler::default();
+    assert_eq!(
+        scheduler.tick(&mut storage).unwrap(),
+        MaintenanceTickResult::ArmedWorked,
+        "persisted pending work must run before candidate discovery"
+    );
+}
+
+#[test]
+fn cooperative_scheduler_enforces_threshold_keyset_and_two_job_chain() {
+    let (_root, _path, mut below) = exact_v10(1000);
+    let mut below_scheduler = CooperativeScheduler::default();
+    assert_eq!(
+        below_scheduler.tick(&mut below).unwrap(),
+        MaintenanceTickResult::NoWork
+    );
+    assert_eq!(
+        below_scheduler.tick(&mut below).unwrap(),
+        MaintenanceTickResult::NoWork
+    );
+    assert!(below_scheduler.is_dormant());
+    assert_eq!(
+        below
+            .connection
+            .query_row("SELECT count(*) FROM maintenance_jobs;", [], |row| row
+                .get::<_, u32>(0))
+            .unwrap(),
+        0
+    );
+
+    let (_root, _path, mut exact) = exact_v10(1001);
+    let mut exact_scheduler = CooperativeScheduler::default();
+    assert_eq!(
+        exact_scheduler.tick(&mut exact).unwrap(),
+        MaintenanceTickResult::Created
+    );
+
+    let (_root, _path, mut chained) = exact_v10(2001);
+    let mut chained_scheduler = CooperativeScheduler::default();
+    let mut finalized = 0;
+    for _ in 0..360 {
+        if chained_scheduler.tick(&mut chained).unwrap() == MaintenanceTickResult::Finalized {
+            finalized += 1;
+        }
+        if chained_scheduler.is_dormant() {
+            break;
+        }
+    }
+    assert!(chained_scheduler.is_dormant());
+    assert_eq!(finalized, 2);
+    assert_eq!(
+        chained
+            .connection
+            .query_row(
+                "SELECT count(*) FROM maintenance_jobs WHERE job_kind='losslessCompaction' AND state='succeeded';",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        chained
+            .connection
+            .query_row(
+                "SELECT count(*) FROM events WHERE aggregate_type='project' AND aggregate_id=?1;",
+                [PROJECT],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn cooperative_scheduler_rejects_running_sentinel_without_mutation() {
+    let (_root, _path, mut storage) = exact_v10(1001);
+    let mut never = |_: CompactionCancellationPoint| false;
+    assert!(matches!(
+        run_private_compaction_step(&mut storage.connection, &target(), &mut never, None).unwrap(),
+        CompactionStepResult::Created { .. }
+    ));
+    assert!(run_private_compaction_step(
+        &mut storage.connection,
+        &target(),
+        &mut never,
+        Some(CompactionFailurePoint::AfterArmCommit),
+    )
+    .is_err());
+    let before = table_rows(&storage.connection, "maintenance_jobs");
+    let mut scheduler = CooperativeScheduler::default();
+    assert!(scheduler.tick(&mut storage).is_err());
+    assert_eq!(table_rows(&storage.connection, "maintenance_jobs"), before);
 }
 
 fn assert_failed_delete_is_closed(storage: &mut Storage, expected_events: u32) {

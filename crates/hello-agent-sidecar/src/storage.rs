@@ -107,6 +107,7 @@ pub struct Storage {
     connection: Connection,
     path: PathBuf,
     writes_admitted: bool,
+    maintenance_epoch: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -365,6 +366,7 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            maintenance_epoch: 0,
         })
     }
 
@@ -375,6 +377,55 @@ impl Storage {
     #[allow(dead_code)] // D1A verifies the internal result before dispatcher activation.
     pub(crate) fn lifetime_status(&self) -> Result<StorageStatusV1, SidecarError> {
         crate::storage_lifetime::collect_status(&self.connection, &self.path)
+    }
+
+    pub(crate) fn materialization_requires_work(&self) -> Result<bool, SidecarError> {
+        crate::storage_lifetime::materialization_requires_work(&self.connection)
+    }
+
+    pub(crate) fn run_materialization_scheduler_step(
+        &mut self,
+    ) -> Result<crate::storage_lifetime::LifetimeMaterializationBatchResult, SidecarError> {
+        self.ensure_writes_admitted()?;
+        crate::storage_lifetime::materialize_lifetime_batch(
+            &mut self.connection,
+            &mut crate::storage_lifetime::NeverCancel,
+            None,
+        )
+    }
+
+    pub(crate) fn pending_compaction_target(
+        &self,
+    ) -> Result<Option<crate::storage_lifetime::compaction_writer::CompactionTarget>, SidecarError>
+    {
+        crate::storage_lifetime::compaction_writer::pending_compaction_target(&self.connection)
+    }
+
+    pub(crate) fn next_compaction_candidate(
+        &self,
+        aggregate_type: &str,
+        after_aggregate_id: &str,
+    ) -> Result<Option<crate::storage_lifetime::compaction_writer::CompactionTarget>, SidecarError>
+    {
+        crate::storage_lifetime::compaction_writer::next_compaction_candidate(
+            &self.connection,
+            aggregate_type,
+            after_aggregate_id,
+        )
+    }
+
+    pub(crate) fn run_compaction_scheduler_step(
+        &mut self,
+        target: &crate::storage_lifetime::compaction_writer::CompactionTarget,
+    ) -> Result<crate::storage_lifetime::compaction_writer::CompactionStepResult, SidecarError>
+    {
+        self.ensure_writes_admitted()?;
+        crate::storage_lifetime::compaction_writer::run_private_compaction_step(
+            &mut self.connection,
+            target,
+            &mut (|_| false),
+            None,
+        )
     }
 
     #[allow(dead_code)] // D1B is internal until a later wire/idle-scheduler wave.
@@ -448,6 +499,7 @@ impl Storage {
             connection,
             path,
             writes_admitted: true,
+            maintenance_epoch: 0,
         })
     }
 
@@ -522,6 +574,7 @@ impl Storage {
         let projection = replay_storage_ledger(&transaction, &events)?;
         write_projection(&transaction, event, &projection)?;
         transaction.commit().map_err(sqlite_error)?;
+        self.note_maintenance_invalidation();
         Ok(AppendOutcome::Committed)
     }
 
@@ -872,6 +925,9 @@ impl Storage {
             write_projection(&transaction, event, &projection)?;
         }
         transaction.commit().map_err(sqlite_error)?;
+        if !appended.is_empty() {
+            self.note_maintenance_invalidation();
+        }
         Ok(outcomes)
     }
 
@@ -1053,6 +1109,9 @@ impl Storage {
             write_projection(&transaction, event, &final_projection)?;
         }
         transaction.commit().map_err(sqlite_error)?;
+        if !appended.is_empty() {
+            self.note_maintenance_invalidation();
+        }
         Ok(ChatBindOutcome::Committed)
     }
 
@@ -1085,10 +1144,23 @@ impl Storage {
             }
         }
         let projection = replay_storage_ledger(&transaction, &events)?;
+        let changed = !appended.is_empty();
         for event in appended {
             write_projection(&transaction, event, &projection)?;
         }
-        transaction.commit().map_err(sqlite_error)
+        transaction.commit().map_err(sqlite_error)?;
+        if changed {
+            self.note_maintenance_invalidation();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn maintenance_epoch(&self) -> u64 {
+        self.maintenance_epoch
+    }
+
+    fn note_maintenance_invalidation(&mut self) {
+        self.maintenance_epoch = self.maintenance_epoch.wrapping_add(1);
     }
 
     fn ensure_writes_admitted(&self) -> Result<(), SidecarError> {

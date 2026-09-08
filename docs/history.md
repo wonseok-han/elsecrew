@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D cooperative scheduler runtime)
+
+- **단일 writer scheduler 활성화**: storage admission이 ready이고 quit/poison 전인 sole sidecar event loop에서 response·event flush 뒤 또는 100ms active timeout 뒤 최대 한 tick만 실행한다. materializer 한 step을 먼저 실행하고 ready 전환 tick에는 compaction을 섞지 않으며, 다음으로 exact persisted pending plan, 마지막으로 `project → chat → run → lock` indexed keyset target 하나를 처리한다. full no-candidate sweep 뒤에는 volatile dormant가 되어 timeout DB 접근을 멈추고 committed append epoch가 cursor를 깨워 처음부터 다시 확인한다.
+- **writer 결과·fatal 경계**: private V10 writer를 `created | armed-worked | finalized | no-work`로 분리해 candidate/plan 생성과 unarmed finalize가 각각 독립 administrative tick을 소비하도록 했다. pending work만 polling 없이 running arm commit과 bounded work commit을 인접 실행한다. running sentinel·authority·multiple/malformed active·materializer/compactor 오류는 internal poison과 process error로 처리해 이후 mutation/run을 차단하며 공개 wire나 ready→failed 상태는 추가하지 않았다. V9/V10 bounded materializer는 compaction과 겹치지 않을 때만 production-private scheduler에서 실행된다.
+- **검증**: scheduler unit 2/2, actual SQLite scheduler 3/3, 기존 private writer 9/9, stdio process 11/11, ready 전/quit 후 zero-tick과 poison 차단 회귀 2/2를 통과했다. sidecar lib 1회 전체 실행은 bin 미빌드 때문에 chat 22개가 assertion 전 실패하고 나머지 318개가 통과했으며, 안내된 bin을 빌드한 뒤 chat 33개를 직렬 재실행해 33/33 통과했다. strict no-deps clippy, Rust 2021 format, diff check도 통과했다. 실제 Windows와 외부 DB 변조/강제 종료 실기기 검증은 여전히 후속이다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D cooperative scheduler activation 계약)
 
 - **우선순위·휴면 고정**: sole sidecar SQLite owner의 ready/non-quitting tick에서 materializer 한 step을 먼저 수행하고, ready handoff 뒤 다음 tick부터 persisted pending compaction, 그 뒤에만 `project → chat → run → lock` volatile indexed keyset 후보를 찾도록 V3 activation golden을 명료화했다. 전체 no-candidate sweep 뒤 dormant, append/materialization pending wake, dormant timeout no-DB, EOF no-tick과 `prepareQuit` 선차단도 고정했다.
