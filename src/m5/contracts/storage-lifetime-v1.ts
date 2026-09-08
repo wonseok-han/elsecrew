@@ -3054,6 +3054,62 @@ export function validateStorageLifetimeActivationPolicyV3(
   return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V3;
 }
 
+export const STORAGE_LIFETIME_ACTIVATION_POLICY_V4 = {
+  ...STORAGE_LIFETIME_ACTIVATION_POLICY_V3,
+  schemaVersion: 4,
+  generation: "storageLifetimeActivationV4",
+  scheduler: {
+    ...STORAGE_LIFETIME_ACTIVATION_POLICY_V3.scheduler,
+    implementation: {
+      runtimeImplemented: true,
+      productExecutionEnabled: true,
+      automaticSchedulingEnabled: true,
+      publicWireChanged: false,
+      requiredExactRuntimeSupport: [
+        "storageV9Materializer",
+        "storageV10Materializer",
+        "storageV10CompactionWriter",
+        "cooperativeScheduler",
+      ],
+    },
+  },
+  activationProof: {
+    claim: "reviewedIntegratedRuntimeActivationNotReleaseApproval",
+    publicStatusWire: "alreadyImplementedUnchangedD1",
+    focusedRustSuites: {
+      writer: [
+        "storage::tests::compaction_writer_v10::v10_writer_rejects_corrupt_existing_frozen_operation_before_delete",
+        "storage::tests::compaction_writer_v10::v10_writer_threshold_and_exact_thousand_delete_candidate",
+        "storage::tests::compaction_writer_v10::v10_writer_delete_failure_rolls_back_batch_and_leaves_running_sentinel",
+        "storage::tests::compaction_writer_v10::v10_writer_chains_immediate_predecessor_for_two_thousand_delete_candidates",
+      ],
+      scheduler: [
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_prioritizes_materialization_and_persisted_pending_work",
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_enforces_threshold_keyset_and_two_job_chain",
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_rejects_running_sentinel_without_mutation",
+        "tests::cooperative_scheduler_has_zero_ticks_before_ready_and_after_prepare_quit",
+        "tests::fatal_scheduler_error_poisons_later_mutation_and_agent_run",
+      ],
+    },
+    remainingGates: [
+      "cumulativeHarnessEvidence",
+      "windowsSafetyGate",
+      "actualUserDatabaseAndForcedCrash",
+      "packagingAndRelease",
+    ],
+  },
+} as const;
+
+export function validateStorageLifetimeActivationPolicyV4(
+  value: unknown,
+): typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V4 {
+  const policy = requireObject(value, "storage lifetime activation policy v4");
+  if (!exactPlainContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V4)) {
+    fail("storage lifetime activation policy v4 is not exact");
+  }
+  return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V4;
+}
+
 export function validateStorageCompactionPlanV1(value: unknown): StorageCompactionPlanV1 {
   const plan = requirePlainDataObjectV9(value, "storage compaction plan");
   exactKeys(plan, [

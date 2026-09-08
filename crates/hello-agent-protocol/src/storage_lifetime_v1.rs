@@ -3876,6 +3876,147 @@ pub fn validate_storage_lifetime_activation_policy_v3(
     Ok(())
 }
 
+pub fn storage_lifetime_activation_policy_v4() -> Value {
+    let mut policy = storage_lifetime_activation_policy_v3();
+    let object = policy
+        .as_object_mut()
+        .expect("activation policy v3 is an object");
+    object.insert("schemaVersion".into(), serde_json::json!(4));
+    object.insert(
+        "generation".into(),
+        serde_json::json!("storageLifetimeActivationV4"),
+    );
+    object.insert(
+        "scheduler".into(),
+        serde_json::json!({
+            "implementation": {
+                "runtimeImplemented": true,
+                "productExecutionEnabled": true,
+                "automaticSchedulingEnabled": true,
+                "publicWireChanged": false,
+                "requiredExactRuntimeSupport": [
+                    "storageV9Materializer",
+                    "storageV10Materializer",
+                    "storageV10CompactionWriter",
+                    "cooperativeScheduler",
+                ],
+            },
+            "ownership": {
+                "execution": "cooperativeOnSoleSidecarSQLiteOwner",
+                "writerConnections": 1,
+                "backgroundWriterConnection": false,
+                "backgroundWriterThread": false,
+            },
+            "admission": {
+                "requiredStorageState": "ready",
+                "quitting": false,
+                "otherStates": "zeroTicks",
+            },
+            "priority": {
+                "order": [
+                    "materializerPendingOrActive",
+                    "resumeExactPersistedPendingCompaction",
+                    "volatileKeysetCandidate",
+                ],
+                "materializerStep": "oneBoundedWorkStep",
+                "materializerReadyHandoff": "compactorWaitsUntilNextTick",
+                "pendingCompactionBeforeCandidateDiscovery": true,
+            },
+            "candidateDiscovery": {
+                "aggregateTypeOrder": ["project", "chat", "run", "lock"],
+                "cursor": "volatileIndexedKeyset",
+                "activeTargetLookup": "singleRowJoin",
+                "forbidden": [
+                    "offset",
+                    "fullVec",
+                    "tempTable",
+                    "unboundedDistinct",
+                    "unboundedScan",
+                ],
+                "dormantAfter": "fullNoCandidateSweep",
+                "wakeOn": ["appendCommitted", "materializationPending"],
+            },
+            "tick": {
+                "input": "flushResponseThenAtMostOneTick",
+                "activeTimeoutMilliseconds": 100,
+                "dormantTimeout": "noDatabaseAccess",
+                "eof": "noTick",
+                "prepareQuit": "blockTicksBeforeCheckpointAndCleanMarker",
+            },
+            "commitDiscipline": {
+                "maxBoundedWorkCommitsPerTick": 1,
+                "runningArmSentinel": "committedImmediatelyAdjacentBeforeBoundedWork",
+                "pollingBetweenArmAndWork": "forbidden",
+                "candidatePlanCreation": "administrativeCommitConsumesTickNoWorkSameTick",
+                "finalize": "administrativeCommitConsumesTickNeverArmed",
+                "candidateAndWorkSameTick": false,
+            },
+            "result": {
+                "writerApiKinds": ["created", "armed-worked", "finalized", "no-work"],
+                "schedulerResultKinds": ["created", "armed-worked", "finalized", "no-work"],
+                "mapping": "preserveWriterKindExactly",
+                "created": "candidateJobAndPlanAdministrativeCommitOnly",
+                "armed-worked": "adjacentArmCommitThenOneBoundedWorkCommit",
+                "finalized": "pendingToSucceededAdministrativeCommitWithoutArm",
+                "no-work": "noCommit",
+            },
+            "fatal": {
+                "causes": [
+                    "runningSentinel",
+                    "nonEmptyAuthority",
+                    "multipleActiveJobs",
+                    "malformedPersistedState",
+                    "materializerError",
+                    "compactorError",
+                ],
+                "action": "poisonInternalSchedulerBlockMutationAndRunReturnProcessErrorAndExit",
+                "wireReadyToFailedTransition": false,
+                "automaticReset": false,
+            },
+        }),
+    );
+    object.insert(
+        "activationProof".into(),
+        serde_json::json!({
+            "claim": "reviewedIntegratedRuntimeActivationNotReleaseApproval",
+            "publicStatusWire": "alreadyImplementedUnchangedD1",
+            "focusedRustSuites": {
+                "writer": [
+                    "storage::tests::compaction_writer_v10::v10_writer_rejects_corrupt_existing_frozen_operation_before_delete",
+                    "storage::tests::compaction_writer_v10::v10_writer_threshold_and_exact_thousand_delete_candidate",
+                    "storage::tests::compaction_writer_v10::v10_writer_delete_failure_rolls_back_batch_and_leaves_running_sentinel",
+                    "storage::tests::compaction_writer_v10::v10_writer_chains_immediate_predecessor_for_two_thousand_delete_candidates",
+                ],
+                "scheduler": [
+                    "storage::tests::compaction_writer_v10::cooperative_scheduler_prioritizes_materialization_and_persisted_pending_work",
+                    "storage::tests::compaction_writer_v10::cooperative_scheduler_enforces_threshold_keyset_and_two_job_chain",
+                    "storage::tests::compaction_writer_v10::cooperative_scheduler_rejects_running_sentinel_without_mutation",
+                    "tests::cooperative_scheduler_has_zero_ticks_before_ready_and_after_prepare_quit",
+                    "tests::fatal_scheduler_error_poisons_later_mutation_and_agent_run",
+                ],
+            },
+            "remainingGates": [
+                "cumulativeHarnessEvidence",
+                "windowsSafetyGate",
+                "actualUserDatabaseAndForcedCrash",
+                "packagingAndRelease",
+            ],
+        }),
+    );
+    policy
+}
+
+pub fn validate_storage_lifetime_activation_policy_v4(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    if value != &storage_lifetime_activation_policy_v4() {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime activation policy v4 is not exact",
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_storage_compaction_plan_v1(
     value: &Value,
 ) -> Result<StorageCompactionPlanV1, StorageLifetimeContractError> {

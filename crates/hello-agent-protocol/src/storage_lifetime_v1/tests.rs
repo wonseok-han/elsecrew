@@ -4197,3 +4197,70 @@ fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
         );
     }
 }
+
+#[test]
+fn storage_activation_v4_records_exact_runtime_truth_without_relaxing_v3_safety() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5");
+    let activation: Value = read_json(root.join("storage-activation-v4/manifest.json"));
+    let cases: Value = read_json(root.join("storage-activation-v4/cases.json"));
+
+    validate_storage_lifetime_activation_policy_v4(&activation).expect("exact activation v4");
+    assert_eq!(activation, storage_lifetime_activation_policy_v4());
+    assert_eq!(
+        activation["publicWire"],
+        storage_lifetime_activation_policy_v3()["publicWire"]
+    );
+    assert_eq!(
+        activation["scheduler"]["implementation"]["runtimeImplemented"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        activation["scheduler"]["implementation"]["productExecutionEnabled"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        activation["scheduler"]["implementation"]["automaticSchedulingEnabled"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        activation["activationProof"]["publicStatusWire"],
+        serde_json::json!("alreadyImplementedUnchangedD1")
+    );
+    assert_eq!(
+        activation["preservation"]["physicalCleanup"],
+        serde_json::json!("disabled")
+    );
+    validate_storage_lifetime_activation_policy_v3(&storage_lifetime_activation_policy_v3())
+        .expect("historical activation v3 remains exact");
+
+    for path in cases["malformedActivationPaths"]
+        .as_array()
+        .expect("activation paths")
+    {
+        let path = path.as_str().expect("activation path");
+        let pointer = format!("/{}", path.replace('.', "/"));
+        let current = activation
+            .pointer(&pointer)
+            .expect("activation mutation path");
+        let replacement = match current {
+            Value::Bool(value) => Value::Bool(!value),
+            Value::Number(_) => serde_json::json!(999),
+            Value::Array(_) => serde_json::json!(["relaxed"]),
+            _ => serde_json::json!("relaxed"),
+        };
+        let mut invalid = activation.clone();
+        *invalid
+            .pointer_mut(&pointer)
+            .expect("activation mutation target") = replacement;
+        assert!(
+            validate_storage_lifetime_activation_policy_v4(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+
+    let mut unknown = activation.clone();
+    unknown["activationProof"]["releaseReady"] = serde_json::json!(true);
+    assert!(validate_storage_lifetime_activation_policy_v4(&unknown).is_err());
+}
