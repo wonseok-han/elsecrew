@@ -4084,6 +4084,7 @@ fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
     let cases: Value = read_json(root.join("storage-v10/cases.json"));
     let schema_identity: Value = read_json(root.join("storage-v10/schema-identity.json"));
     let activation: Value = read_json(root.join("storage-activation-v3/manifest.json"));
+    let activation_cases: Value = read_json(root.join("storage-activation-v3/cases.json"));
 
     assert_eq!(manifest["storageSchemaVersion"], serde_json::json!(10));
     assert_eq!(manifest["migration"]["fromVersion"], serde_json::json!(9));
@@ -4135,6 +4136,34 @@ fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
     );
     validate_storage_lifetime_activation_policy_v2(&storage_lifetime_activation_policy_v2())
         .expect("historical activation v2 remains exact");
+
+    for path in activation_cases["malformedSchedulerPaths"]
+        .as_array()
+        .expect("scheduler paths")
+    {
+        let path = path.as_str().expect("scheduler path");
+        let pointer = format!("/{}", path.replace('.', "/"));
+        let current = activation
+            .pointer(&pointer)
+            .expect("scheduler mutation path");
+        let replacement = match current {
+            Value::Bool(value) => Value::Bool(!value),
+            Value::Number(_) => serde_json::json!(999),
+            Value::Array(_) => serde_json::json!(["relaxed"]),
+            _ => serde_json::json!("relaxed"),
+        };
+        let mut invalid = activation.clone();
+        *invalid
+            .pointer_mut(&pointer)
+            .expect("scheduler mutation target") = replacement;
+        assert!(
+            validate_storage_lifetime_activation_policy_v3(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+    let mut unknown_scheduler_field = activation.clone();
+    unknown_scheduler_field["scheduler"]["unknown"] = serde_json::json!(true);
+    assert!(validate_storage_lifetime_activation_policy_v3(&unknown_scheduler_field).is_err());
 
     let valid = &cases["validMigrationPreflight"];
     validate_storage_lifetime_v10_migration_preflight(

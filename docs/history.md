@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D cooperative scheduler activation 계약)
+
+- **우선순위·휴면 고정**: sole sidecar SQLite owner의 ready/non-quitting tick에서 materializer 한 step을 먼저 수행하고, ready handoff 뒤 다음 tick부터 persisted pending compaction, 그 뒤에만 `project → chat → run → lock` volatile indexed keyset 후보를 찾도록 V3 activation golden을 명료화했다. 전체 no-candidate sweep 뒤 dormant, append/materialization pending wake, dormant timeout no-DB, EOF no-tick과 `prepareQuit` 선차단도 고정했다.
+- **commit·결과 경계**: tick당 bounded work commit은 최대 하나이며 바로 인접한 running arm commit만 허용하고 그 사이 polling을 금지했다. candidate+plan 생성과 unarmed finalize는 각각 한 tick을 소비하는 administrative commit이며 `created | armed-worked | finalized | no-work` 결과를 private writer와 scheduler가 정확히 보존한다.
+- **활성화·fatal 경계**: V9/V10 materializer와 V10 writer exact runtime 지원 전에는 runtime/product/scheduling을 false로 유지한다. running/non-empty authority, multiple active, malformed state, materializer/compactor 오류는 internal poison 뒤 mutation/run 차단과 process exit로 처리하며 D1 wire/capability 또는 `ready → failed` 전이는 추가하지 않는다. Rust/TypeScript exact validator와 scheduler 전 경로 malformed golden 회귀를 추가했고 runtime 구현은 후속이다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer serialization allocation P1 수리)
 
 - **serialization 전 예약**: 신규 frozen operation은 borrowed plan field로 canonical record의 exact 길이와 source clone·canonical JSON Value·출력 digest footprint를 먼저 계산하고 합산 예산을 통과한 뒤에만 source를 clone/serialize한다. 기존 frozen operation의 `serde_json::to_value`와 protocol validator가 만드는 Value clone·payload canonicalization·record reconstruction·digest도 호출 전에 StepBudget에 예약한다.
