@@ -83,7 +83,9 @@
         "database": {"health": "unavailable", "schemaVersion": 1},
         "recoveryRequired": null, "blockerIds": []
       }
-    },
+    }
+  ],
+  "malformedCases": [
     {
       "name": "verifying cannot claim completion",
       "expectedValid": false,
@@ -125,6 +127,151 @@
         "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": null, "error": null},
         "database": {"health": "verifying", "schemaVersion": null},
         "recoveryRequired": null, "blockerIds": [], "internalState": "verifiedForStartup"
+      }
+    },
+    {
+      "name": "unknown storageAdmission fields are rejected",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": null, "error": null, "internalPhase": "replay"},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "unknown database fields are rejected",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00Z", "completedAt": null, "error": null},
+        "database": {"health": "verifying", "schemaVersion": null, "path": "/private/storage.sqlite3"},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "unknown failed error fields are rejected",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "storageUnavailable", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": true, "rawDatabaseError": "secret"}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "startedAt rejects a non-UTC timestamp shape",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-09-08T04:00:00+09:00", "completedAt": null, "error": null},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "startedAt rejects an impossible calendar date",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "verifying", "startedAt": "2026-02-30T04:00:00Z", "completedAt": null, "error": null},
+        "database": {"health": "verifying", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "completedAt cannot precede startedAt",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:01:00Z", "completedAt": "2026-09-08T04:00:59Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": false, "blockerIds": []
+      }
+    },
+    {
+      "name": "failed error code is fixed",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "startupFailed", "kind": "storageUnavailable", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": true}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "failed error kind is fixed",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "requestBlocked", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": true}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "failed error detail is fixed",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "storageUnavailable", "detail": "SQLITE_CORRUPT /private/user.sqlite3", "retryable": false, "outcomeUnknown": true}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "failed error outcomeUnknown is fixed",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {
+          "schemaVersion": 1, "state": "failed", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z",
+          "error": {"code": "storageAdmissionFailed", "kind": "storageUnavailable", "detail": "storage admission failed", "retryable": false, "outcomeUnknown": false}
+        },
+        "database": {"health": "unavailable", "schemaVersion": null},
+        "recoveryRequired": null, "blockerIds": []
+      }
+    },
+    {
+      "name": "ready blocker identities cannot be empty",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": true, "blockerIds": [""]
+      }
+    },
+    {
+      "name": "ready blocker identities must be unique",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": true, "blockerIds": ["run:run_fixture_01", "run:run_fixture_01"]
+      }
+    },
+    {
+      "name": "ready recoveryRequired must agree with blockerIds",
+      "expectedValid": false,
+      "value": {
+        "schemaVersion": 1, "state": "shellReady",
+        "storageAdmission": {"schemaVersion": 1, "state": "ready", "startedAt": "2026-09-08T04:00:00Z", "completedAt": "2026-09-08T04:01:00Z", "error": null},
+        "database": {"health": "healthy", "schemaVersion": 1},
+        "recoveryRequired": false, "blockerIds": ["run:run_fixture_01"]
       }
     }
   ],

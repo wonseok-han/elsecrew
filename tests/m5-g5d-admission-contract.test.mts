@@ -36,6 +36,11 @@ interface Manifest {
     expectedValid: boolean;
     value: Record<string, unknown>;
   }>;
+  malformedCases: Array<{
+    name: string;
+    expectedValid: false;
+    value: Record<string, unknown>;
+  }>;
   blockedRequestCases: Array<{
     name: string;
     state: StorageAdmissionStateV1;
@@ -69,7 +74,8 @@ test("G5D admission policy keeps only status and quit available before storage r
 });
 
 test("product와 agent-fixture parser가 세 admission 상태와 malformed 조합을 동일하게 판정한다", () => {
-  for (const fixture of manifest.systemStatusCases) {
+  assert.equal(manifest.malformedCases.every((fixture) => !fixture.expectedValid), true);
+  for (const fixture of [...manifest.systemStatusCases, ...manifest.malformedCases]) {
     for (const [mode, sidecar, parse] of [
       ["product", manifest.readyPayloads.generalProduct, parseG5DProductSystemStatusV1],
       ["agentFixture", manifest.readyPayloads.agentFixture, parseG5DAgentFixtureSystemStatusV1],

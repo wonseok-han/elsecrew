@@ -12,6 +12,7 @@ struct Manifest {
     ready_payloads: ReadyPayloads,
     policy: Policy,
     system_status_cases: Vec<SystemStatusCase>,
+    malformed_cases: Vec<SystemStatusCase>,
     blocked_request_cases: Vec<BlockedRequestCase>,
     startup_cases: Vec<StartupCase>,
 }
@@ -103,7 +104,15 @@ fn rust_matches_g5d_admission_policy_and_both_d1_capability_modes() {
 #[test]
 fn rust_accepts_three_states_and_rejects_malformed_cross_state_combinations() {
     let manifest = manifest();
-    for case in manifest.system_status_cases {
+    assert!(manifest
+        .malformed_cases
+        .iter()
+        .all(|case| !case.expected_valid));
+    for case in manifest
+        .system_status_cases
+        .into_iter()
+        .chain(manifest.malformed_cases)
+    {
         for (mode, sidecar) in [
             ("product", &manifest.ready_payloads.general_product),
             ("agentFixture", &manifest.ready_payloads.agent_fixture),
