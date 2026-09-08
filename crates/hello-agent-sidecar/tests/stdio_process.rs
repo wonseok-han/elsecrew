@@ -3,36 +3,89 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hello_agent_protocol::agent_adapter_v1::{
-    validate_agent_adapter_payload_v1, G5A_CAPABILITIES_V1,
+    validate_agent_adapter_payload_v1, G5D_AGENT_FIXTURE_CAPABILITIES_V1,
 };
-use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5_CAPABILITIES_V1};
+use hello_agent_protocol::lifecycle_g5d_v1::{
+    parse_g5d_agent_fixture_system_status_v1, parse_g5d_product_system_status_v1,
+    validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
+};
+use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5D_PRODUCT_CAPABILITIES_V1};
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 
+static ADMISSION_POLL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
 #[test]
-fn binary_startup_failure_uses_stderr_nonzero_and_no_stdout_ready() {
+fn binary_storage_failure_is_reported_after_shell_ready_and_quits_cleanly() {
     let root = tempfile::tempdir().expect("temporary directory");
     fs::create_dir(root.path().join("hello-agent.sqlite3")).expect("invalid database directory");
-    let output = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
         .arg("--stdio")
         .current_dir(root.path())
-        .stdin(Stdio::null())
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("run sidecar");
-
-    assert_eq!(output.status.code(), Some(70));
-    assert!(output.stdout.is_empty(), "pre-ready stdout must stay empty");
-    assert!(!output.stderr.is_empty(), "startup detail must use stderr");
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("shell ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_state(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        false,
+        StorageAdmissionStateV1::Failed,
+    );
+    write_raw_request_with_params(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_failed_raw_params",
+        "project.open",
+        "[\"not\",\"an\",\"object\"]",
+    );
+    let EnvelopeV1::Response(blocked) = receive_envelope(&envelopes) else {
+        panic!("failed admission block")
+    };
+    validate_g5d_blocked_request_error_v1(
+        StorageAdmissionStateV1::Failed,
+        blocked.error.as_ref().unwrap(),
+    )
+    .expect("exact failed admission error");
+    wait_for_storage_state(
+        &mut stdin,
+        &envelopes,
+        &ready.sidecar_instance_id,
+        false,
+        StorageAdmissionStateV1::Failed,
+    );
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_failed_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
 }
 
 #[test]
 fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
     let root = tempfile::tempdir().expect("temporary directory");
+    let started = Instant::now();
     let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
         .arg("--stdio")
         .current_dir(root.path())
@@ -51,13 +104,18 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         panic!("first envelope must be ready")
     };
     let ready = ready_payload(&ready_event).expect("ready payload");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "shell-ready envelope must not wait for storage admission"
+    );
     assert_eq!(
         ready.capabilities,
-        G5_CAPABILITIES_V1
+        G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
+    wait_for_storage_ready_reader(&mut stdin, &mut stdout, &ready.sidecar_instance_id, false);
 
     for (request_id, method) in [
         ("req_process_status", "system.status"),
@@ -113,6 +171,96 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
     assert!(clean.is_some());
 }
 
+#[test]
+fn binary_delayed_storage_still_emits_shell_ready_within_three_seconds() {
+    let root = tempfile::tempdir().expect("temporary directory");
+    initialize_database_with_sidecar(root.path());
+    let lock = Connection::open(root.path().join("hello-agent.sqlite3")).unwrap();
+    lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+
+    let started = Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .arg("--stdio")
+        .current_dir(root.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("shell ready")
+    };
+    assert!(started.elapsed() < Duration::from_secs(3));
+    let ready = ready_payload(&ready_event).unwrap();
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_status",
+        "system.status",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(status) = receive_envelope(&envelopes) else {
+        panic!("verifying status")
+    };
+    assert_eq!(
+        parse_g5d_product_system_status_v1(&status.result.unwrap())
+            .unwrap()
+            .storage_admission
+            .state,
+        StorageAdmissionStateV1::Verifying
+    );
+    write_raw_request_with_params(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_raw_params",
+        "recovery.markResolved",
+        "null",
+    );
+    let EnvelopeV1::Response(blocked) = receive_envelope(&envelopes) else {
+        panic!("verifying admission block")
+    };
+    validate_g5d_blocked_request_error_v1(
+        StorageAdmissionStateV1::Verifying,
+        blocked.error.as_ref().unwrap(),
+    )
+    .expect("exact verifying admission error");
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_status_after_raw",
+        "system.status",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(status_after) = receive_envelope(&envelopes) else {
+        panic!("status after malformed params")
+    };
+    assert_eq!(
+        parse_g5d_product_system_status_v1(&status_after.result.unwrap())
+            .unwrap()
+            .storage_admission
+            .state,
+        StorageAdmissionStateV1::Verifying
+    );
+
+    lock.execute_batch("ROLLBACK;").unwrap();
+    drop(lock);
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_delayed_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn binary_g5c_capability_cache_refreshes_only_when_requested_and_codex_stays_blocked() {
@@ -131,6 +279,7 @@ fn binary_g5c_capability_cache_refreshes_only_when_requested_and_codex_stays_blo
         panic!("ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, true);
     for (request_id, refresh) in [("req_cache_1", false), ("req_cache_2", false)] {
         write_request(
             &mut stdin,
@@ -227,11 +376,12 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     let ready = ready_payload(&ready_event).unwrap();
     assert_eq!(
         ready.capabilities,
-        G5A_CAPABILITIES_V1
+        G5D_AGENT_FIXTURE_CAPABILITIES_V1
             .iter()
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, true);
 
     write_request(
         &mut stdin,
@@ -540,6 +690,7 @@ fn binary_provider_recovery_terminal_blocks_quit_until_exact_agent_abandon() {
         panic!("ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, true);
 
     write_request(
         &mut stdin,
@@ -797,11 +948,12 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
     let ready = ready_payload(&ready_event).unwrap();
     assert_eq!(
         ready.capabilities,
-        G5_CAPABILITIES_V1
+        G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
 
     write_request(
         &mut stdin,
@@ -968,6 +1120,7 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
         panic!("ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
     write_request(
         &mut stdin,
         &ready.sidecar_instance_id,
@@ -1138,6 +1291,7 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         panic!("ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
 
     write_request(
         &mut stdin,
@@ -1309,6 +1463,140 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
     assert!(child.wait().unwrap().success());
 }
 
+fn wait_for_storage_ready(
+    stdin: &mut impl Write,
+    envelopes: &Receiver<EnvelopeV1>,
+    instance: &str,
+    agent_fixture: bool,
+) {
+    wait_for_storage_state(
+        stdin,
+        envelopes,
+        instance,
+        agent_fixture,
+        StorageAdmissionStateV1::Ready,
+    );
+}
+
+fn initialize_database_with_sidecar(data_root: &std::path::Path) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .arg("--stdio")
+        .current_dir(data_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(ready_event) = receive_envelope(&envelopes) else {
+        panic!("initial shell ready")
+    };
+    let ready = ready_payload(&ready_event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
+    write_request(
+        &mut stdin,
+        &ready.sidecar_instance_id,
+        "req_initialize_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    assert!(
+        matches!(receive_envelope(&envelopes), EnvelopeV1::Response(response) if response.result.as_ref().unwrap()["safeToQuit"] == true)
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+fn wait_for_storage_state(
+    stdin: &mut impl Write,
+    envelopes: &Receiver<EnvelopeV1>,
+    instance: &str,
+    agent_fixture: bool,
+    expected: StorageAdmissionStateV1,
+) {
+    let poll_sequence = ADMISSION_POLL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    for attempt in 0..1_000_u32 {
+        write_request(
+            stdin,
+            instance,
+            &format!("req_admission_{poll_sequence}_{attempt}"),
+            "system.status",
+            serde_json::json!({}),
+        );
+        let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+            panic!("storage admission status response")
+        };
+        let value = response.result.expect("storage admission status result");
+        let state = if agent_fixture {
+            parse_g5d_agent_fixture_system_status_v1(&value)
+                .expect("valid agent fixture G5D status")
+                .storage_admission
+                .state
+        } else {
+            parse_g5d_product_system_status_v1(&value)
+                .expect("valid product G5D status")
+                .storage_admission
+                .state
+        };
+        if state == expected {
+            return;
+        }
+        assert_eq!(
+            state,
+            StorageAdmissionStateV1::Verifying,
+            "admission reached an unexpected terminal state"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    panic!("storage admission did not reach {expected:?}");
+}
+
+fn wait_for_storage_ready_reader(
+    stdin: &mut impl Write,
+    stdout: &mut impl BufRead,
+    instance: &str,
+    agent_fixture: bool,
+) {
+    let poll_sequence = ADMISSION_POLL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    for attempt in 0..1_000_u32 {
+        write_request(
+            stdin,
+            instance,
+            &format!("req_admission_reader_{poll_sequence}_{attempt}"),
+            "system.status",
+            serde_json::json!({}),
+        );
+        let mut response_line = String::new();
+        stdout
+            .read_line(&mut response_line)
+            .expect("read admission response");
+        let EnvelopeV1::Response(response) =
+            decode_jsonl(response_line.as_bytes()).expect("decode admission response")
+        else {
+            panic!("admission request must receive a response")
+        };
+        let value = response.result.expect("admission status result");
+        let state = if agent_fixture {
+            parse_g5d_agent_fixture_system_status_v1(&value)
+                .unwrap()
+                .storage_admission
+                .state
+        } else {
+            parse_g5d_product_system_status_v1(&value)
+                .unwrap()
+                .storage_admission
+                .state
+        };
+        if state == StorageAdmissionStateV1::Ready {
+            return;
+        }
+        assert_eq!(state, StorageAdmissionStateV1::Verifying);
+        thread::sleep(Duration::from_millis(2));
+    }
+    panic!("storage admission did not become ready");
+}
+
 fn write_request(
     stdin: &mut impl Write,
     instance: &str,
@@ -1327,6 +1615,23 @@ fn write_request(
     stdin
         .write_all(encode_jsonl(&request).unwrap().as_bytes())
         .unwrap();
+    stdin.flush().unwrap();
+}
+
+fn write_raw_request_with_params(
+    stdin: &mut impl Write,
+    instance: &str,
+    request_id: &str,
+    method: &str,
+    raw_params: &str,
+) {
+    let line = format!(
+        "{{\"protocolVersion\":1,\"kind\":\"request\",\"sidecarInstanceId\":{},\"requestId\":{},\"method\":{},\"params\":{raw_params}}}\n",
+        serde_json::to_string(instance).unwrap(),
+        serde_json::to_string(request_id).unwrap(),
+        serde_json::to_string(method).unwrap(),
+    );
+    stdin.write_all(line.as_bytes()).unwrap();
     stdin.flush().unwrap();
 }
 

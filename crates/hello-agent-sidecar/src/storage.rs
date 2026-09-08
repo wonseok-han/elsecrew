@@ -34,6 +34,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 // Internal R1/R2/R3A/R3B verifiers; deliberately not wired into open/admission.
@@ -97,6 +98,7 @@ pub enum AppendOutcome {
 pub struct Storage {
     connection: Connection,
     path: PathBuf,
+    writes_admitted: bool,
 }
 
 #[derive(Debug)]
@@ -137,6 +139,19 @@ pub enum ChatBindFailurePoint {
 
 impl Storage {
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
+        static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
+        Self::open_inner(path, &NEVER_CANCELLED)
+    }
+
+    pub(crate) fn open_for_admission(
+        path: &Path,
+        cancellation: &AtomicBool,
+    ) -> Result<Self, SidecarError> {
+        Self::open_inner(path, cancellation)
+    }
+
+    fn open_inner(path: &Path, cancellation: &AtomicBool) -> Result<Self, SidecarError> {
+        ensure_admission_not_cancelled(cancellation)?;
         let path = safe_database_path(path)?;
         let mut connection = Connection::open_with_flags(
             &path,
@@ -147,82 +162,111 @@ impl Storage {
         )
         .map_err(sqlite_open_error)?;
         configure_connection(&connection)?;
+        ensure_admission_not_cancelled(cancellation)?;
         migrate(&mut connection, MIGRATION_V1)?;
         verify_schema(&connection)?;
+        ensure_admission_not_cancelled(cancellation)?;
         match storage_schema_version(&connection)? {
             None => {
                 migrate_v2(&mut connection)?;
                 verify_schema_v2(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v3(&mut connection)?;
                 verify_schema_v3(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v6(&mut connection)?;
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1) => {
                 verify_schema_v2(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v3(&mut connection)?;
                 verify_schema_v3(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v6(&mut connection)?;
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3) => {
                 verify_schema_v3(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v4(&mut connection)?;
                 verify_schema_v4(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v6(&mut connection)?;
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4) => {
                 verify_schema_v4(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v5(&mut connection)?;
                 verify_schema_v5(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v6(&mut connection)?;
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {
                 verify_schema_v5(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v6(&mut connection)?;
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
                 verify_schema_v6(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v7(&mut connection)?;
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
                 verify_schema_v7(&connection)?;
+                ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
                 verify_schema_v8_for_open(&connection)?;
             }
@@ -239,12 +283,19 @@ impl Storage {
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(sqlite_error)?;
+        ensure_admission_not_cancelled(cancellation)?;
         connection
             .pragma_update(None, "synchronous", "FULL")
             .map_err(sqlite_error)?;
         verify_integrity(&connection)?;
+        ensure_admission_not_cancelled(cancellation)?;
         verify_projection_replay(&connection)?;
-        Ok(Self { connection, path })
+        ensure_admission_not_cancelled(cancellation)?;
+        Ok(Self {
+            connection,
+            path,
+            writes_admitted: true,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -261,6 +312,7 @@ impl Storage {
         &mut self,
         failure: Option<crate::storage_lifetime::MaterializationFailurePoint>,
     ) -> Result<crate::storage_lifetime::LifetimeMaterializationResult, SidecarError> {
+        self.ensure_writes_admitted()?;
         crate::storage_lifetime::materialize_lifetime_records(&mut self.connection, failure)
     }
 
@@ -270,6 +322,7 @@ impl Storage {
         cancellation: &mut dyn crate::storage_lifetime::MaterializationCancellation,
         failure: Option<crate::storage_lifetime::BatchMaterializationFailurePoint>,
     ) -> Result<crate::storage_lifetime::LifetimeMaterializationBatchResult, SidecarError> {
+        self.ensure_writes_admitted()?;
         crate::storage_lifetime::materialize_lifetime_batch(
             &mut self.connection,
             cancellation,
@@ -321,7 +374,11 @@ impl Storage {
         connection
             .pragma_update(None, "synchronous", "FULL")
             .map_err(sqlite_error)?;
-        Ok(Self { connection, path })
+        Ok(Self {
+            connection,
+            path,
+            writes_admitted: true,
+        })
     }
 
     #[cfg(test)]
@@ -365,6 +422,7 @@ impl Storage {
         event: &LedgerEventV1,
         failure: Option<AppendFailurePoint>,
     ) -> Result<AppendOutcome, SidecarError> {
+        self.ensure_writes_admitted()?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -398,6 +456,7 @@ impl Storage {
     }
 
     pub fn recover_unclean_shutdown(&mut self) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
         let previous = latest_app_instance(&self.connection)?;
         let projection = load_projection(&self.connection)?;
         let input = RecoveryInputV1 {
@@ -442,6 +501,7 @@ impl Storage {
     }
 
     pub fn register_app_instance(&mut self, ready: &ReadyPayloadV1) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
         let timestamp = now_utc();
         let payload = json!({
             "clean_shutdown_at": Value::Null,
@@ -473,6 +533,7 @@ impl Storage {
     }
 
     pub fn checkpoint(&self) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
         let (busy, _log, _checkpointed): (u32, i64, i64) = self
             .connection
             .query_row("PRAGMA wal_checkpoint(FULL);", [], |row| {
@@ -492,6 +553,7 @@ impl Storage {
         &mut self,
         sidecar_instance_id: &str,
     ) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
         let projection = load_projection(&self.connection)?;
         let current = projection
             .app_instances
@@ -641,6 +703,7 @@ impl Storage {
         request_id: Option<&str>,
         mut payload: Map<String, Value>,
     ) -> Result<AppendOutcome, SidecarError> {
+        self.ensure_writes_admitted()?;
         let sequence = self
             .projection_record(aggregate_type, aggregate_id)?
             .as_ref()
@@ -671,6 +734,7 @@ impl Storage {
         &mut self,
         upserts: Vec<ProjectionUpsert>,
     ) -> Result<Vec<AppendOutcome>, SidecarError> {
+        self.ensure_writes_admitted()?;
         if upserts.is_empty() {
             return Ok(Vec::new());
         }
@@ -762,6 +826,7 @@ impl Storage {
         input: ChatBindInput,
         failure: Option<ChatBindFailurePoint>,
     ) -> Result<ChatBindOutcome, SidecarError> {
+        self.ensure_writes_admitted()?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -922,6 +987,7 @@ impl Storage {
     }
 
     fn append_recovery_events(&mut self, incoming: &[LedgerEventV1]) -> Result<(), SidecarError> {
+        self.ensure_writes_admitted()?;
         if incoming.is_empty() {
             return Ok(());
         }
@@ -954,6 +1020,26 @@ impl Storage {
         }
         transaction.commit().map_err(sqlite_error)
     }
+
+    fn ensure_writes_admitted(&self) -> Result<(), SidecarError> {
+        if !self.writes_admitted {
+            return Err(SidecarError::new(
+                "storageVerifying",
+                "durable storage mutation is blocked before startup verification",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn ensure_admission_not_cancelled(cancellation: &AtomicBool) -> Result<(), SidecarError> {
+    if cancellation.load(Ordering::Acquire) {
+        return Err(SidecarError::new(
+            "storageAdmissionCancelled",
+            "storage admission was cancelled during startup verification",
+        ));
+    }
+    Ok(())
 }
 
 fn safe_database_path(path: &Path) -> Result<PathBuf, SidecarError> {

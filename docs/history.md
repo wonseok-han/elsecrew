@@ -9,6 +9,19 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D admission raw-params P1 수리)
+
+- **독립 리뷰 수리**: 기존 stdio가 `decode_jsonl`의 generic params-object 검사 뒤에 admission gate를 적용해, `params:null|array|scalar`인 차단 대상 요청이 generic protocol 오류로 세션을 종료하던 P1을 고쳤다. admission이 `verifying|failed`일 때만 exact request envelope의 version/kind/instance/request/method를 안전하게 선별하고, `system.status`·`app.prepareQuit` 외 known method의 non-object params를 session correlation에 먼저 등록한 뒤 고정 admission 응답으로 처리한다.
+- **보존 경계**: unknown/불완전 envelope, 잘못된 identity/version/kind/method, 허용 두 메서드, storage-ready 상태는 계속 기존 strict `decode_jsonl` 검증을 거친다. requestId 중복·instance 일치·response correlation은 기존 `ProtocolSessionV1::observe`를 그대로 사용하며 sidecar 외 protocol 계약은 바꾸지 않았다.
+- **검증**: 실제 process에서 배타 DB lock의 `verifying + recovery.markResolved(params:null)`과 잘못된 DB 경로의 `failed + project.open(params:array)`가 각각 exact fixed error를 반환하고 후속 `system.status`가 유지됨을 확인했다. scoped preflight unit, 전체 stdio 11개, G5D/writer focused, sidecar strict no-deps clippy, Rust format과 diff check가 통과했다. 다음은 이 별도 fix commit의 독립 재리뷰다.
+
+### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage storage admission 런타임)
+
+- **구현**: macOS sidecar가 exact D1 `system.ready`를 첫 stdout envelope로 내보낸 뒤 별도 worker에서 SQLite 경로·migration·integrity·projection replay를 검증하도록 시작 경계를 분리했다. 내부 검증 완료 뒤에만 ProjectManager 관리 디렉터리 생성, 기존/actual-agent startup recovery, app-instance 등록을 순서대로 수행하고 공개 `storageAdmission`을 `ready`로 전환한다. 검증 오류·worker panic은 세부 정보를 노출하지 않는 고정 `failed` 상태로 process 수명 동안 유지하며 재시작은 항상 `verifying`에서 다시 시작한다.
+- **안전 경계**: admission 전에는 `system.status`·`app.prepareQuit`만 허용하고, 나머지 모든 요청은 malformed params도 해석하기 전에 계약의 고정 `storageVerifying`/`storageAdmissionFailed` 오류로 차단한다. `storage.status`는 ready 뒤에만 기존 privacy-safe facts를 반환한다. quit/EOF는 initializer를 취소·join해 연결을 닫고 등록 전 clean marker를 쓰지 않는다. `append_event`, atomic upsert/chat bind, recovery, app 등록, clean marker, checkpoint, materialization 진입점에도 내부 write-admission guard를 두었고 기존 저장 예산·종료/복구·원본 격리 계약은 바꾸지 않았다.
+- **검증**: focused G5D unit 3/3, durable writer bypass unit 1/1, 실제 stdio process 11/11(배타 DB lock으로 admission을 지연해도 3초 안에 첫 shell-ready, 제품/agent-fixture exact D1 capability, 실제 provider fixture recovery/cancel 및 기존 프로젝트 흐름 포함), 기존 transport/quit/invalid-param 회귀 6개가 통과했다. Rust format, sidecar `clippy --all-targets --no-deps -D warnings`, diff check도 exit 0이다. dependency 포함 strict clippy는 소유 밖 `hello-agent-core/src/proctree.rs`의 기존 `unnecessary_lazy_evaluations`·`map_entry` 두 lint로 exit 101이어서 변경하지 않았다.
+- **다음**: 독립 exact-commit 리뷰와 통합 뒤 Electron V6/renderer가 shell-ready와 storage admission 상태를 분리해 폴링·표시해야 한다. 전체 장시간 sidecar/R3C 누적 QA, scheduler/compaction, Windows 실기기와 실제 유료 provider·사용자 프로젝트 검증은 이번 기능 commit의 완료 주장에 포함하지 않는다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage readiness 계약)
 
 - **승인 결정 고정**: 기존 V1 lifecycle·startup steps와 G5/G5A/D1 exact capability를 바꾸지 않고, additive G5D `system.status`를 shell-ready + storage admission `verifying|ready|failed`로 고정했다. 일반 제품·agent-fixture 두 capability 모드, 상태별 DB/recovery 조합, 고정 공개 오류, known-no-op 차단과 shell-ready 선행 시작 순서를 Rust/TypeScript/golden에서 함께 검증한다.
