@@ -3324,6 +3324,34 @@ fn d1_freezes_exact_product_and_agent_fixture_storage_status_capabilities() {
     let legacy_agent_fixture = ready(crate::agent_adapter_v1::G5A_CAPABILITIES_V1);
     let d1_agent_fixture = ready(crate::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1);
 
+    let malformed_ready_cases = |capabilities: &[&str]| {
+        let mut swapped = capabilities.to_vec();
+        let last = swapped.len() - 1;
+        swapped.swap(last - 1, last);
+
+        let mut duplicate_storage_status = capabilities.to_vec();
+        duplicate_storage_status.push(STORAGE_STATUS_METHOD_V1);
+
+        let mut unknown_extra = capabilities.to_vec();
+        unknown_extra.push("storage.unknown");
+
+        let missing_storage_status = capabilities[..last].to_vec();
+
+        let mut extra_payload_field = ready(capabilities);
+        extra_payload_field
+            .as_object_mut()
+            .expect("ready payload object")
+            .insert("extra".to_string(), serde_json::json!(true));
+
+        vec![
+            ("capability order swap", ready(&swapped)),
+            ("duplicate storage.status", ready(&duplicate_storage_status)),
+            ("unknown extra capability", ready(&unknown_extra)),
+            ("missing storage.status", ready(&missing_storage_status)),
+            ("extra ready payload field", extra_payload_field),
+        ]
+    };
+
     crate::run_recovery_v1::validate_g5_ready_payload_v1(&legacy_product)
         .expect("historical G5 ready remains valid");
     crate::agent_adapter_v1::validate_planned_g5a_ready_payload_v1(&legacy_agent_fixture)
@@ -3343,6 +3371,23 @@ fn d1_freezes_exact_product_and_agent_fixture_storage_status_capabilities() {
         crate::agent_adapter_v1::validate_g5d_agent_fixture_ready_payload_v1(&legacy_agent_fixture)
             .is_err()
     );
+
+    for (name, payload) in
+        malformed_ready_cases(crate::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1)
+    {
+        assert!(
+            crate::run_recovery_v1::validate_g5d_product_ready_payload_v1(&payload).is_err(),
+            "product validator accepted {name}"
+        );
+    }
+    for (name, payload) in
+        malformed_ready_cases(crate::agent_adapter_v1::G5D_AGENT_FIXTURE_CAPABILITIES_V1)
+    {
+        assert!(
+            crate::agent_adapter_v1::validate_g5d_agent_fixture_ready_payload_v1(&payload).is_err(),
+            "agent-fixture validator accepted {name}"
+        );
+    }
 }
 
 fn manifest() -> (PathBuf, Manifest) {
