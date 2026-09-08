@@ -1,4 +1,5 @@
 import { M5_BRIDGE_V5_METHODS, type M5BridgeV5 } from "./bridge-v5.ts";
+import type { SystemStatusG5DV1 } from "./lifecycle-g5d-v1.ts";
 import {
   STORAGE_STATUS_BRIDGE_METHOD_V1,
   type StorageStatusRequestV1,
@@ -11,7 +12,8 @@ export const M5_BRIDGE_V6_METHODS = [
   STORAGE_STATUS_BRIDGE_METHOD_V1,
 ] as const;
 
-export type M5BridgeV6 = Omit<M5BridgeV5, "version"> & {
+export type M5BridgeV6 = Omit<M5BridgeV5, "version" | "getSystemStatus"> & {
   readonly version: 6;
+  getSystemStatus(): Promise<SystemStatusG5DV1>;
   getStorageStatus(input: StorageStatusRequestV1): Promise<StorageStatusV1>;
 };
