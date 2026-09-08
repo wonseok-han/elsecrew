@@ -732,13 +732,13 @@ fn verify_active_phase_artifacts(
     plan: &StorageCompactionPlanV1,
 ) -> Result<(), SidecarError> {
     let cursor = &job.private_state.cursor;
-    let prefix_required = match cursor.phase {
+    let prefix_required = !matches!(
+        cursor.phase,
         StorageCompactionPhaseV3::PlanEligibility
-        | StorageCompactionPhaseV3::FreezeOperations
-        | StorageCompactionPhaseV3::FreezeMessages => false,
-        StorageCompactionPhaseV3::VerifyPrefix => cursor.scan_exhausted,
-        _ => true,
-    };
+            | StorageCompactionPhaseV3::FreezeOperations
+            | StorageCompactionPhaseV3::FreezeMessages
+            | StorageCompactionPhaseV3::VerifyPrefix
+    );
     let prefix_exists = exact_prefix_exists(connection, plan)?;
     if prefix_exists != prefix_required {
         return Err(session_error());

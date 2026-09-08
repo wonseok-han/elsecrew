@@ -541,7 +541,7 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
         freeze_range(&mut storage, 1, u64::from(after));
     } else if matches!(
         phase,
-        "authorizeDelete" | "deletePrefix" | "verifyOperations" | "releasePlan"
+        "verifyPrefix" | "authorizeDelete" | "deletePrefix" | "verifyOperations" | "releasePlan"
     ) {
         freeze_range(&mut storage, 1, 1001);
     }
@@ -550,7 +550,11 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
             connection,
             "compact_v9_001",
             "pending",
-            &private_state(phase, after, phase == "authorizeDelete" && after == 1001),
+            &private_state(
+                phase,
+                after,
+                matches!(phase, "verifyPrefix" | "authorizeDelete") && after == 1001,
+            ),
             None,
         );
         insert_plan(
@@ -961,6 +965,98 @@ fn product_admission_accepts_exact_pending_v9_plan_phases_without_mutation() {
             );
         }
     }
+}
+
+#[test]
+fn exhausted_pending_verify_prefix_without_prefix_is_resumable_in_v9_and_v10() {
+    let (_v9_root, v9_path) = exact_v9_template(1001);
+    seed_pending(&v9_path, "verifyPrefix", 1001);
+    let mut v9 = Connection::open(&v9_path).unwrap();
+    configure_connection(&v9).unwrap();
+    let v9_before = database_snapshot(&v9);
+    let mut session = ReopenMaintenanceSession::start_for_admission(&mut v9).unwrap();
+    loop {
+        match session.step(&mut || false).unwrap() {
+            ReopenMaintenanceStep::Pending(_) => {}
+            ReopenMaintenanceStep::ReadyVerified(_) => break,
+            ReopenMaintenanceStep::Cancelled => panic!("V9 verification was not cancelled"),
+        }
+    }
+    drop(session);
+    assert_eq!(database_snapshot(&v9), v9_before);
+    assert!(v9.is_autocommit());
+
+    let (_v10_root, v10_path) = v9_template(1001);
+    seed_pending(&v10_path, "verifyPrefix", 1001);
+    let v10 = Connection::open(&v10_path).unwrap();
+    let v10_before = database_snapshot(&v10);
+    drop(v10);
+    let cancellation = AtomicBool::new(false);
+    let admitted = Storage::open_for_admission(&v10_path, &cancellation).unwrap();
+    assert_eq!(database_snapshot(&admitted.connection), v10_before);
+    assert!(admitted.connection.is_autocommit());
+}
+
+#[test]
+fn pending_verify_prefix_rejects_premature_or_malformed_prefix_without_mutation() {
+    let (_premature_root, premature_path) = v9_template(1001);
+    seed_pending(&premature_path, "verifyPrefix", 1001);
+    let premature = Connection::open(&premature_path).unwrap();
+    let (baseline_id, baseline_digest): (String, String) = premature
+        .query_row(
+            "SELECT baseline_id,baseline_projection_digest \
+             FROM storage_compaction_plans WHERE job_id='compact_v9_001'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    with_triggers_disabled(&premature, |connection| {
+        insert_prefix(
+            connection,
+            "compact_v9_001",
+            0,
+            &baseline_id,
+            &baseline_digest,
+        );
+    });
+    premature
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    let premature_before = database_snapshot(&premature);
+    drop(premature);
+    let cancellation = AtomicBool::new(false);
+    let error = match Storage::open_for_admission(&premature_path, &cancellation) {
+        Ok(_) => panic!("pending verifyPrefix accepted a premature exact prefix"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let premature = Connection::open(&premature_path).unwrap();
+    assert_eq!(database_snapshot(&premature), premature_before);
+
+    let (_malformed_root, malformed_path) = v9_template(1001);
+    seed_pending(&malformed_path, "authorizeDelete", 0);
+    let malformed = Connection::open(&malformed_path).unwrap();
+    with_triggers_disabled(&malformed, |connection| {
+        connection
+            .execute(
+                "UPDATE ledger_compaction_prefixes SET anchor_event_id='malformed' \
+                 WHERE prefix_id='prefix_compact_v9_001'",
+                [],
+            )
+            .unwrap();
+    });
+    malformed
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    let malformed_before = database_snapshot(&malformed);
+    drop(malformed);
+    let error = match Storage::open_for_admission(&malformed_path, &cancellation) {
+        Ok(_) => panic!("authorizeDelete accepted a malformed prefix"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let malformed = Connection::open(&malformed_path).unwrap();
+    assert_eq!(database_snapshot(&malformed), malformed_before);
 }
 
 #[test]
