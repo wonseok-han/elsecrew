@@ -6,7 +6,7 @@ import { createContext, runInContext } from "node:vm";
 import test from "node:test";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS } from "../electron/ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
 const typescript = require("typescript") as typeof import("typescript");
@@ -288,7 +288,7 @@ function moduleFor(
   if (specifier === "node:path" || specifier === "node:url") return require(specifier);
   if (specifier.endsWith("lifecycle-v1.ts")) return { M5_INTERNAL_CHANNELS_V1 };
   if (specifier === "./ipc-channels.ts") {
-    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS };
+    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS };
   }
   if (specifier === "./event-credit.ts") return { EventCreditV1: fakes.FakeEventCredit };
   if (specifier === "./quit-coordinator.ts") return { QuitCoordinatorV1: fakes.FakeQuitCoordinator };

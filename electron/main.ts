@@ -7,6 +7,8 @@ import {
   M5_INTERNAL_CHANNELS_V1,
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
+import type { SystemStatusG5DV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
+import type { StorageStatusRequestV1 } from "../src/m5/contracts/storage-lifetime-v1.ts";
 import type { EventV1, PrepareQuitResultV1 } from "../src/m5/contracts/protocol-v1.ts";
 import type { WatchEventV1 } from "../src/m5/contracts/project-v1.ts";
 import type { SaveBeginV1 } from "../src/m5/contracts/file-v1.ts";
@@ -34,7 +36,7 @@ import type {
   AgentRunCancelRequestV1,
   AgentRunStartRequestV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS } from "./ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS } from "./ipc-channels.ts";
 import { EventCreditV1 } from "./event-credit.ts";
 import { QuitCoordinatorV1 } from "./quit-coordinator.ts";
 import { SIDECAR_READY_TIMEOUT_MS, SidecarClientV1, type SidecarLaunchV1 } from "./sidecar-client.ts";
@@ -258,7 +260,7 @@ function startSidecar(): SidecarClientV1 {
   return client;
 }
 
-async function getSystemStatus(): Promise<SystemStatusV1> {
+async function getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
   if (!sidecar) return unavailableStatus(new Error("sidecar was not started"));
   try {
     await sidecar.start();
@@ -280,6 +282,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_INTERNAL_CHANNELS_V1.appPrepareQuit, async (event) => {
     assertCurrentMainFrame(event);
     return prepareQuit();
+  });
+  ipcMain.handle(M5_BRIDGE_V6_CHANNELS.storageGetStatus, async (event, input: StorageStatusRequestV1) => {
+    assertCurrentMainFrame(event);
+    if (!sidecar) throw new Error("sidecar was not started");
+    return sidecar.getStorageStatus(input);
   });
   ipcMain.on(M5_BRIDGE_V2_CHANNELS.eventAck, (event, ack) => {
     assertCurrentMainFrame(event);

@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G5D Electron V6 storage admission 연결)
+
+- **구현**: Electron sidecar client는 exact D1 product/agent-fixture `system.ready`를 3초 shell-ready로 수락하고, legacy G5/G5A 협상은 그대로 둔 채 G5D `system.status`와 ready-only `storage.status`만 추가로 해석한다. preload는 raw IPC를 노출하지 않은 V6 고정 bridge/channel로 `getSystemStatus`·`getStorageStatus`를 제공한다.
+- **화면 안전성**: renderer는 shell-ready 뒤 별도 storage admission을 중복 없는 500ms 폴링으로 `checking/verifying/ready/failed` 표시한다. verifying/failed에는 비기술적 안내만 표시하고 프로젝트 선택·작업 복사본·저장·채팅/역할 변경·실행/취소/복구를 비활성화한다. status parser 실패도 안전한 failed 화면으로만 전환하며 unmount/client 종료는 timer·in-flight 후속 갱신을 취소한다.
+- **검증·한계**: fake sidecar의 product/agent fixture D1 ready, verifying→ready, malformed fail-closed, V6 storage route와 poller one-at-a-time/cancellation을 포함한 Node 53개, TypeScript noEmit, main/preload syntax, diff check가 통과했다. renderer Vite build는 성공했으나 이 격리 환경의 packaged Electron smoke는 GUI process `SIGABRT`로 실패해 제품 GUI 증거는 아니다. 다음은 exact-commit 독립 리뷰와 통합 뒤 최신 통합 파동 QA다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D admission raw-params P1 수리)
 
 - **독립 리뷰 수리**: 기존 stdio가 `decode_jsonl`의 generic params-object 검사 뒤에 admission gate를 적용해, `params:null|array|scalar`인 차단 대상 요청이 generic protocol 오류로 세션을 종료하던 P1을 고쳤다. admission이 `verifying|failed`일 때만 exact request envelope의 version/kind/instance/request/method를 안전하게 선별하고, `system.status`·`app.prepareQuit` 외 known method의 non-object params를 session correlation에 먼저 등록한 뒤 고정 admission 응답으로 처리한다.
