@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5.6-Sol (G5D 남은 하네스 선행 조건 정정)
+
+- **실행 조건 정정**: 아직 존재하지 않는 `storage-scheduler`·`storage-status`·`storage-compaction` 하네스를 곧바로 실행하라는 표현을 제거했다. 세 스크립트와 증거 gate를 먼저 구현하고 모두 통과하기 전에는 누적 G5D gate가 fail-closed `NOT_READY`를 유지한 뒤 최신 통합 commit에서 실행하도록 제안서 순서를 바로잡았다.
+- **검증·범위**: `git diff --check`를 통과했다. runtime·계약·architecture·공개 wire는 변경하지 않았다.
+
 ### 2026-09-09 · by GPT-5.6-Sol (G5D activation V4 제안서 경계 수리)
 
 - **문서 생애주기 수리**: M5 제안서 §6.6이 architecture/history가 소유해야 할 현행 구현 사실을 직접 주장하던 표현을 확정 계약의 미래 지향적 구현 기준으로 바꾸고, 현재 상태는 두 현행 문서에서 확인하도록 명시했다. architecture와 기존 구현 기록은 유지했다.

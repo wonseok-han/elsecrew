@@ -694,7 +694,7 @@ fixture 크기와 허용 지연은 M5.0 첫 구현 명세에서 수치로 고정
 
 ## 14. 다음 실행 순서
 
-1. 최신 통합 commit에서 `storage-scheduler`·`storage-status`·`storage-compaction` 하네스 증거와 누적 G5D gate를 실행해 activation V4의 통합 상태를 판정한다. 물리 cleanup은 계속 열지 않는다.
+1. `storage-scheduler`·`storage-status`·`storage-compaction` 하네스 스크립트와 증거 gate를 먼저 구현한다. 세 gate가 모두 존재해 통과하기 전까지 누적 G5D gate는 fail-closed `NOT_READY`를 유지하고, 구현 뒤 최신 통합 commit에서 세 gate와 누적 G5D gate를 실행해 activation V4의 통합 상태를 판정한다. 물리 cleanup은 계속 열지 않는다.
 2. Windows standalone snapshot·프로세스 자손 회수 안전 게이트와, 별도 승인된 실제 사용자 DB·강제 종료 복구 검증을 완료한다.
 3. 패키징·성능·전체 OS Quit·서명/권한 문자열 hardening을 검증하고 릴리스 판정을 받는다.
 4. 실제 Claude Code/Codex adapter의 argv·모델 가용성·공개 이벤트 정규화·세션/취소 계약을 fixture와 분리해 고정한다.
