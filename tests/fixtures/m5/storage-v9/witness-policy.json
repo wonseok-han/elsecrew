@@ -23,7 +23,14 @@
     "rowIdentity": "jobIdAndOrdinalPrimaryKeyWithUniqueSourceRowidOperationAndAggregateTuple",
     "baseline": "everyDeleteRowMatchesHeaderBaselineIdentityAndDigest",
     "anchor": "ordinal1001IsRetainAnchorAndRemainsLive",
-    "message": "nullableIdentityAndDigestAppearTogether"
+    "message": "nullableIdentityAndDigestAppearTogether",
+    "digestRepresentation": {
+      "plan": "lowercaseHex64WithoutAlgorithmPrefix",
+      "existingBaselineMessageAndFrozen": "sha256ColonLowercaseHex64",
+      "receipt": "sha256V1LowercaseHex64Columns",
+      "normalization": "stripExactSha256ColonPrefixAfterShapeCheck",
+      "authority": "rustRehashesCanonicalPayloadBaselineAndMessage"
+    }
   },
   "discovery": {
     "targetScan": "volatileBoundedAggregateKeyset",

@@ -1030,7 +1030,7 @@ WHEN NOT EXISTS (
       AND baseline.aggregate_type = NEW.aggregate_type
       AND baseline.aggregate_id = NEW.aggregate_id
       AND baseline.cutoff_aggregate_sequence = NEW.delete_through_sequence
-      AND baseline.projection_digest = NEW.baseline_projection_digest
+      AND baseline.projection_digest = 'sha256:' || NEW.baseline_projection_digest
       AND (
           (NEW.previous_successful_job_id IS NULL
            AND NEW.retained_boundary_sequence = COALESCE((
@@ -1133,12 +1133,12 @@ WHEN NOT EXISTS (
               AND EXISTS (
                   SELECT 1 FROM chat_messages AS message
                   WHERE message.message_id = NEW.introduced_message_id
-                    AND message.message_digest = NEW.introduced_message_digest
+                    AND message.message_digest = 'sha256:' || NEW.introduced_message_digest
               )
               AND NEW.message_frozen_before_plan = EXISTS (
                   SELECT 1 FROM frozen_message_sources AS frozen_message
                   WHERE frozen_message.message_id = NEW.introduced_message_id
-                    AND frozen_message.message_digest = NEW.introduced_message_digest
+                    AND frozen_message.message_digest = 'sha256:' || NEW.introduced_message_digest
               ))
       )
       AND (
@@ -1553,7 +1553,8 @@ BEGIN
                          AND prefix.deleted_through_sequence = plan.delete_through_sequence
                          AND prefix.anchor_aggregate_sequence = plan.anchor_aggregate_sequence
                          AND prefix.baseline_id = plan.baseline_id
-                         AND prefix.baseline_projection_digest = plan.baseline_projection_digest
+                         AND prefix.baseline_projection_digest =
+                             'sha256:' || plan.baseline_projection_digest
                         WHERE plan.job_id = OLD.job_id
                     )
                 )
@@ -1609,7 +1610,7 @@ WHEN NOT EXISTS (
       AND plan.delete_through_sequence = NEW.deleted_through_sequence
       AND plan.anchor_aggregate_sequence = NEW.anchor_aggregate_sequence
       AND plan.baseline_id = NEW.baseline_id
-      AND plan.baseline_projection_digest = NEW.baseline_projection_digest
+      AND NEW.baseline_projection_digest = 'sha256:' || plan.baseline_projection_digest
       AND anchor.decision = 'retainAnchor'
       AND anchor.event_rowid = NEW.anchor_event_rowid
       AND anchor.event_id = NEW.anchor_event_id

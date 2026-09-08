@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -188,7 +189,38 @@ function readJobCutoff(database: DatabaseSync): Record<string, any> {
   return JSON.parse(row.cutoff) as Record<string, any>;
 }
 
-function databaseWithV9PlanSources(): DatabaseSync {
+function insertSqlPlanHeader(
+  database: DatabaseSync,
+  options: {
+    jobId?: string;
+    aggregateType?: "project" | "chat";
+    aggregateId?: string;
+    baselineId?: string;
+    baselineDigest?: string;
+  } = {},
+): void {
+  const jobId = options.jobId ?? "compact_v9_sql";
+  const aggregateType = options.aggregateType ?? "project";
+  const aggregateId = options.aggregateId ?? "project_001";
+  const baselineId = options.baselineId ?? "baseline_1000";
+  const baselineDigest = options.baselineDigest ?? "b".repeat(64);
+  database.prepare(`
+    INSERT INTO storage_compaction_plans (
+      job_id, plan_schema_version, cutoff_event_rowid, aggregate_type, aggregate_id,
+      retained_boundary_sequence, delete_through_sequence, anchor_aggregate_sequence,
+      expected_rows, baseline_id, baseline_projection_digest,
+      previous_successful_job_id, created_at, planned_at
+    ) VALUES (?, 1, 2000, ?, ?, 0, 1000, 1001,
+              1001, ?, ?, NULL, ?, ?)
+  `).run(
+    jobId, aggregateType, aggregateId, baselineId, baselineDigest,
+    "2026-09-08T01:00:00Z", "2026-09-08T01:00:01Z",
+  );
+}
+
+function databaseWithV9PlanSources(
+  options: { storedBaselineDigest?: string; insertPlan?: boolean } = {},
+): DatabaseSync {
   const database = new DatabaseSync(":memory:");
   for (const path of migrations) {
     database.exec(readFileSync(resolve("tests/fixtures/m5", path), "utf8"));
@@ -232,22 +264,196 @@ function databaseWithV9PlanSources(): DatabaseSync {
       payload_schema_version, canonical_projection_json, projection_digest,
       created_at, verified_at
     ) VALUES ('baseline_1000', 'project', 'project_001', 1000, 1, '{}', ?, ?, ?)
-  `).run("b".repeat(64), timestamp, timestamp);
+  `).run(options.storedBaselineDigest ?? `sha256:${"b".repeat(64)}`, timestamp, timestamp);
   database.exec("COMMIT");
 
   insertMaintenanceJob(
     database, "compact_v9_sql", "pending", privateState("planEligibility", 0),
   );
-  database.prepare(`
-    INSERT INTO storage_compaction_plans (
-      job_id, plan_schema_version, cutoff_event_rowid, aggregate_type, aggregate_id,
-      retained_boundary_sequence, delete_through_sequence, anchor_aggregate_sequence,
-      expected_rows, baseline_id, baseline_projection_digest,
-      previous_successful_job_id, created_at, planned_at
-    ) VALUES ('compact_v9_sql', 1, 2000, 'project', 'project_001', 0, 1000, 1001,
-              1001, 'baseline_1000', ?, NULL, ?, ?)
-  `).run("b".repeat(64), timestamp, "2026-09-08T01:00:01Z");
+  if (options.insertPlan ?? true) insertSqlPlanHeader(database);
   return database;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function databaseWithV9ChatMessageSources(
+  storedMessageDigest?: string,
+  storedFrozenMessageDigest?: string,
+): { database: DatabaseSync; messageDigest: string } {
+  const database = new DatabaseSync(":memory:");
+  for (const path of migrations) {
+    database.exec(readFileSync(resolve("tests/fixtures/m5", path), "utf8"));
+  }
+  const timestamp = "2026-09-08T01:00:00Z";
+  const message = {
+    schemaVersion: 1,
+    messageId: "message_001",
+    chatId: "chat_001",
+    taskId: "task_001",
+    worktreeId: "worktree_001",
+    eventSequence: 1,
+    kind: "user",
+    roleId: null,
+    runId: null,
+    text: "hello",
+    createdAt: timestamp,
+  };
+  const canonicalMessage = JSON.stringify(message);
+  const rawMessageDigest = sha256Hex(canonicalMessage);
+  const versionedMessageDigest = storedMessageDigest ?? `sha256:${rawMessageDigest}`;
+  const canonicalPayload = JSON.stringify({
+    durable_event_sequence: 1,
+    last_message: message,
+  });
+  const canonicalPayloadDigest = sha256Hex(canonicalPayload);
+
+  database.exec("BEGIN IMMEDIATE");
+  database.prepare(`
+    INSERT INTO projects(project_id, canonical_path, projection_json, last_event_sequence)
+    VALUES ('project_chat', '/project-chat', '{}', 1)
+  `).run();
+  database.prepare(`
+    INSERT INTO chats(chat_id, project_id, projection_json, last_event_sequence)
+    VALUES ('chat_001', 'project_chat', '{}', 1)
+  `).run();
+  database.prepare(`
+    INSERT INTO events (
+      event_id, operation_id, request_id, aggregate_type, aggregate_id,
+      aggregate_sequence, event_type, payload_schema_version,
+      canonical_json_payload, timestamp
+    ) VALUES ('event_chat_001', 'operation_chat_001', NULL, 'chat', 'chat_001',
+              1, 'chat.upserted', 1, ?, ?)
+  `).run(canonicalPayload, timestamp);
+  const eventRowid = Number(database.prepare(`
+    SELECT rowid FROM events WHERE event_id = 'event_chat_001'
+  `).get()!.rowid);
+  database.prepare(`
+    INSERT INTO operation_receipts (
+      operation_id, event_id, aggregate_type, aggregate_id, aggregate_sequence,
+      event_type, payload_schema_version, canonical_payload_json,
+      canonical_payload_digest_algorithm, canonical_payload_digest_version,
+      canonical_payload_digest_format, canonical_payload_digest, event_timestamp, materialized_at
+    ) VALUES ('operation_chat_001', 'event_chat_001', 'chat', 'chat_001', 1,
+              'chat.upserted', 1, ?, 'sha256', 1, 'lowercaseHex64', ?, ?, ?)
+  `).run(canonicalPayload, canonicalPayloadDigest, timestamp, timestamp);
+  database.prepare(`
+    INSERT INTO chat_messages (
+      message_id, chat_id, event_sequence, canonical_message_json,
+      message_digest, created_at, materialized_at
+    ) VALUES ('message_001', 'chat_001', 1, ?, ?, ?, ?)
+  `).run(canonicalMessage, versionedMessageDigest, timestamp, timestamp);
+  database.prepare(`
+    INSERT INTO event_source_index (
+      event_rowid, event_id, operation_id, aggregate_type, aggregate_id,
+      aggregate_sequence, introduced_message_id, chat_durable_sequence,
+      chat_snapshot_message_id
+    ) VALUES (?, 'event_chat_001', 'operation_chat_001', 'chat', 'chat_001',
+              1, 'message_001', 1, 'message_001')
+  `).run(eventRowid);
+
+  const frozenAt = "2026-09-08T01:00:01Z";
+  const canonicalRecord = JSON.stringify({
+    aggregateId: "chat_001",
+    aggregateSequence: 1,
+    aggregateType: "chat",
+    canonicalPayloadDigest,
+    canonicalPayloadJson: canonicalPayload,
+    eventTimestamp: timestamp,
+    eventType: "chat.upserted",
+    frozenAt,
+    operationId: "operation_chat_001",
+    payloadSchemaVersion: 1,
+    recordSchemaVersion: 1,
+    requestId: null,
+    sourceEventId: "event_chat_001",
+    sourceEventRowid: eventRowid,
+  });
+  database.prepare(`
+    INSERT INTO frozen_operation_sources (
+      operation_id, source_event_rowid, source_event_id, request_id,
+      aggregate_type, aggregate_id, aggregate_sequence, event_type,
+      payload_schema_version, canonical_payload_json, canonical_payload_digest,
+      event_timestamp, canonical_record_json, record_digest, frozen_at
+    ) VALUES ('operation_chat_001', ?, 'event_chat_001', NULL, 'chat', 'chat_001', 1,
+              'chat.upserted', 1, ?, ?, ?, ?, ?, ?)
+  `).run(
+    eventRowid, canonicalPayload, canonicalPayloadDigest, timestamp,
+    canonicalRecord, sha256Hex(canonicalRecord), frozenAt,
+  );
+  database.prepare(`
+    INSERT INTO frozen_message_sources (
+      message_id, source_event_rowid, source_event_id, source_operation_id,
+      chat_id, source_aggregate_sequence, durable_sequence,
+      canonical_message_json, message_digest, frozen_at
+    ) VALUES ('message_001', ?, 'event_chat_001', 'operation_chat_001', 'chat_001',
+              1, 1, ?, ?, ?)
+  `).run(
+    eventRowid, canonicalMessage,
+    storedFrozenMessageDigest ?? versionedMessageDigest,
+    frozenAt,
+  );
+  database.prepare(`
+    INSERT INTO ledger_baselines (
+      baseline_id, aggregate_type, aggregate_id, cutoff_aggregate_sequence,
+      payload_schema_version, canonical_projection_json, projection_digest,
+      created_at, verified_at
+    ) VALUES ('baseline_chat_1000', 'chat', 'chat_001', 1000, 1, '{}', ?, ?, ?)
+  `).run(`sha256:${"c".repeat(64)}`, timestamp, timestamp);
+  database.exec("COMMIT");
+
+  insertMaintenanceJob(
+    database, "compact_v9_chat", "pending", privateState("planEligibility", 0),
+  );
+  insertSqlPlanHeader(database, {
+    jobId: "compact_v9_chat",
+    aggregateType: "chat",
+    aggregateId: "chat_001",
+    baselineId: "baseline_chat_1000",
+    baselineDigest: "c".repeat(64),
+  });
+  setJobStateForId(database, "compact_v9_chat", "running", privateState(
+    "planEligibility", 0, { stepThroughPlanOrdinal: 1 },
+  ));
+  return { database, messageDigest: rawMessageDigest };
+}
+
+function setJobStateForId(
+  database: DatabaseSync,
+  jobId: string,
+  state: "pending" | "running" | "succeeded" | "failed",
+  cutoff: Record<string, unknown>,
+): void {
+  database.prepare(`
+    UPDATE maintenance_jobs
+    SET state = ?, cutoff_json = ?, completed_at = NULL, failure_kind = NULL, updated_at = ?
+    WHERE job_id = ?
+  `).run(state, JSON.stringify(cutoff), "2026-09-08T01:00:02Z", jobId);
+}
+
+function insertSqlChatPlanRow(database: DatabaseSync, messageDigest: string): void {
+  const eventRowid = Number(database.prepare(`
+    SELECT rowid FROM events WHERE event_id = 'event_chat_001'
+  `).get()!.rowid);
+  const source = database.prepare(`
+    SELECT canonical_json_payload AS payload FROM events WHERE rowid = ?
+  `).get(eventRowid) as { payload: string };
+  database.prepare(`
+    INSERT INTO storage_compaction_plan_rows (
+      job_id, ordinal, event_rowid, event_id, operation_id, request_id,
+      aggregate_type, aggregate_id, aggregate_sequence, event_type,
+      payload_schema_version, event_timestamp, canonical_payload_json,
+      canonical_payload_digest, introduced_message_id, introduced_message_digest,
+      decision, baseline_id, baseline_projection_digest,
+      operation_frozen_before_plan, message_frozen_before_plan
+    ) VALUES ('compact_v9_chat', 1, ?, 'event_chat_001', 'operation_chat_001', NULL,
+              'chat', 'chat_001', 1, 'chat.upserted', 1, ?, ?, ?,
+              'message_001', ?, 'delete', 'baseline_chat_1000', ?, 1, 1)
+  `).run(
+    eventRowid, "2026-09-08T01:00:00Z", source.payload,
+    sha256Hex(source.payload), messageDigest, "c".repeat(64),
+  );
 }
 
 function insertSqlPlanRow(database: DatabaseSync, ordinal: number): void {
@@ -488,6 +694,86 @@ test("actual V8 to V9 SQL rolls back before persistent DDL for every unsafe ledg
   assert.throws(() => validateStorageLifetimeV9MigrationPreflight(false, 0, 0));
 });
 
+test("actual V9 triggers normalize exact versioned baseline and message digests", () => {
+  const validBaseline = databaseWithV9PlanSources();
+  try {
+    assert.equal(validBaseline.prepare(`
+      SELECT projection_digest AS digest FROM ledger_baselines
+      WHERE baseline_id = 'baseline_1000'
+    `).get()!.digest, `sha256:${"b".repeat(64)}`);
+    assert.equal(validBaseline.prepare(`
+      SELECT baseline_projection_digest AS digest FROM storage_compaction_plans
+      WHERE job_id = 'compact_v9_sql'
+    `).get()!.digest, "b".repeat(64));
+  } finally {
+    validBaseline.close();
+  }
+
+  for (const [name, storedDigest] of [
+    ["wrong prefix", `SHA256:${"b".repeat(64)}`],
+    ["wrong algorithm", `sha512:${"b".repeat(64)}`],
+    ["wrong hex", `sha256:${"B".repeat(64)}`],
+    ["wrong digest", `sha256:${"c".repeat(64)}`],
+  ] as const) {
+    const database = databaseWithV9PlanSources({
+      storedBaselineDigest: storedDigest,
+      insertPlan: false,
+    });
+    try {
+      assert.throws(() => insertSqlPlanHeader(database), /exact current job baseline/, name);
+    } finally {
+      database.close();
+    }
+  }
+
+  const validMessage = databaseWithV9ChatMessageSources();
+  try {
+    assert.match(String(validMessage.database.prepare(`
+      SELECT message_digest AS digest FROM chat_messages WHERE message_id = 'message_001'
+    `).get()!.digest), /^sha256:[0-9a-f]{64}$/);
+    assert.match(String(validMessage.database.prepare(`
+      SELECT message_digest AS digest FROM frozen_message_sources
+      WHERE message_id = 'message_001'
+    `).get()!.digest), /^sha256:[0-9a-f]{64}$/);
+    assert.doesNotThrow(() => insertSqlChatPlanRow(
+      validMessage.database, validMessage.messageDigest,
+    ));
+  } finally {
+    validMessage.database.close();
+  }
+
+  const canonicalMessage = JSON.stringify({
+    schemaVersion: 1,
+    messageId: "message_001",
+    chatId: "chat_001",
+    taskId: "task_001",
+    worktreeId: "worktree_001",
+    eventSequence: 1,
+    kind: "user",
+    roleId: null,
+    runId: null,
+    text: "hello",
+    createdAt: "2026-09-08T01:00:00Z",
+  });
+  const rawDigest = sha256Hex(canonicalMessage);
+  for (const [name, storedDigest] of [
+    ["wrong prefix", `SHA256:${rawDigest}`],
+    ["wrong algorithm", `sha512:${rawDigest}`],
+    ["wrong hex", `sha256:${"G".repeat(64)}`],
+    ["wrong digest", `sha256:${"0".repeat(64)}`],
+  ] as const) {
+    const { database, messageDigest } = databaseWithV9ChatMessageSources(
+      storedDigest, storedDigest,
+    );
+    try {
+      assert.throws(() => insertSqlChatPlanRow(database, messageDigest),
+        /exact witnessed source/, name);
+    } finally {
+      database.close();
+    }
+  }
+});
+
 test("actual V9 triggers enforce exact transitions, planning, prefix proof, and release", () => {
   const database = databaseWithV9PlanSources();
   try {
@@ -520,7 +806,7 @@ test("actual V9 triggers enforce exact transitions, planning, prefix proof, and 
                 'event_1001', 'operation_1001', 1001, 'baseline_1000', ?, ?, ?)
     `);
     assert.throws(() => prefixInsert.run(
-      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+      `sha256:${"b".repeat(64)}`, "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     ), /exact v9 plan anchor/);
     assert.throws(() => setJobState(database, "running", privateState("verifyPrefix", 100, {
       stepThroughPlanOrdinal: 200,
@@ -550,7 +836,7 @@ test("actual V9 triggers enforce exact transitions, planning, prefix proof, and 
     })), /invalid storage v9 maintenance transition/);
 
     assert.throws(() => prefixInsert.run(
-      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+      `sha256:${"b".repeat(64)}`, "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     ), /exact v9 plan anchor/);
 
     advanceSqlPhase(database, "planEligibility", "freezeOperations");
@@ -564,13 +850,13 @@ test("actual V9 triggers enforce exact transitions, planning, prefix proof, and 
     scanSqlPhase(database, "verifyPrefix");
 
     assert.throws(() => prefixInsert.run(
-      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+      `sha256:${"b".repeat(64)}`, "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     ), /exact v9 plan anchor/);
     setJobState(database, "running", privateState("verifyPrefix", 1001, {
       scanExhausted: true,
     }));
     prefixInsert.run(
-      "b".repeat(64), "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
+      `sha256:${"b".repeat(64)}`, "2026-09-08T01:10:00Z", "2026-09-08T01:10:00Z",
     );
     setJobState(database, "pending", privateState("authorizeDelete", 0));
     scanSqlPhase(database, "authorizeDelete");

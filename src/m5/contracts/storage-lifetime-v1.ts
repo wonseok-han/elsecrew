@@ -516,6 +516,7 @@ export interface StorageCompactionPlanV1 {
   anchorAggregateSequence: number;
   expectedRows: typeof STORAGE_COMPACTION_PLAN_EXPECTED_ROWS_V1;
   baselineId: string;
+  /** Raw lowercase SHA-256 hex; the existing baseline row stores `sha256:${string}`. */
   baselineProjectionDigest: string;
   previousSuccessfulJobId: string | null;
   createdAt: string;
@@ -536,11 +537,14 @@ export interface StorageCompactionPlanRowV1 {
   payloadSchemaVersion: 1;
   eventTimestamp: string;
   canonicalPayloadJson: string;
+  /** Raw lowercase SHA-256 hex, without an algorithm prefix. */
   canonicalPayloadDigest: string;
   introducedMessageId: string | null;
+  /** Raw lowercase SHA-256 hex; existing message/frozen rows store `sha256:${string}`. */
   introducedMessageDigest: string | null;
   decision: StorageCompactionPlanDecisionV1;
   baselineId: string | null;
+  /** Raw lowercase SHA-256 hex, without an algorithm prefix. */
   baselineProjectionDigest: string | null;
   operationFrozenBeforePlan: boolean;
   messageFrozenBeforePlan: boolean;
@@ -2707,6 +2711,13 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
     baseline: "everyDeleteRowMatchesHeaderBaselineIdentityAndDigest",
     anchor: "ordinal1001IsRetainAnchorAndRemainsLive",
     message: "nullableIdentityAndDigestAppearTogether",
+    digestRepresentation: {
+      plan: "lowercaseHex64WithoutAlgorithmPrefix",
+      existingBaselineMessageAndFrozen: "sha256ColonLowercaseHex64",
+      receipt: "sha256V1LowercaseHex64Columns",
+      normalization: "stripExactSha256ColonPrefixAfterShapeCheck",
+      authority: "rustRehashesCanonicalPayloadBaselineAndMessage",
+    },
   },
   discovery: {
     targetScan: "volatileBoundedAggregateKeyset",
