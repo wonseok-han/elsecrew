@@ -12,6 +12,7 @@ import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
+import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController, stateLabel } from "./chat-state.ts";
 
 type MonacoApi = typeof Monaco;
@@ -56,7 +57,23 @@ function StorageAdmissionNotice({ admission }: { admission: AdmissionView }) {
   </section>;
 }
 
-export function M5Workbench({ bridge = window.m5 as unknown as M5BridgeV6 }: { bridge?: M5BridgeV4 | M5BridgeV5 | M5BridgeV6 }) {
+export function M5Workbench({ bridge }: { bridge?: unknown }) {
+  const candidate = bridge ?? (typeof window === "undefined" ? undefined : window.m5);
+  const resolved = resolveM5Bridge(candidate);
+  if (!resolved) return <WorkbenchUnavailable />;
+  return <M5WorkbenchReady bridge={resolved} />;
+}
+
+function WorkbenchUnavailable() {
+  return <main className="m5-workbench" aria-label="M5 코딩 작업대">
+    <section className="m5-admission m5-admission-failed" role="alert">
+      <strong>작업 공간을 아직 열 수 없어요.</strong>
+      <p>앱을 다시 열어 보세요. 계속되면 도움을 요청해 주세요. 기존 프로젝트 파일은 바꾸지 않았어요.</p>
+    </section>
+  </main>;
+}
+
+function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const admission = useStorageAdmission(bridge);

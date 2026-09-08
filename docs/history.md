@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G5D Electron bridge admission P1 수리)
+
+- **수리**: renderer 외곽 경계가 `window.m5`를 신뢰하지 않고 complete fixed V4/V5/V6 bridge만 통과시킨다. bridge 부재, 알 수 없는 버전, V6의 `getSystemStatus` 누락 또는 controller가 요구하는 고정 메서드 누락은 비기술적 unavailable 화면만 렌더하며 ProjectEditor/Chat controller·durable IPC를 전혀 만들거나 호출하지 않는다. 완전한 V4/V5는 기존 ready 동작을 보존하고 완전한 V6만 admission polling으로 진입한다.
+- **검증**: absent/V7/incomplete V6에서 0 method call·blocked verdict, valid V4/V5 유지, 기존 D1 polling/malformed/IPC 회귀를 포함한 Node 55개, TypeScript noEmit, renderer Vite build, main/preload syntax와 diff check가 통과했다. GUI process smoke는 sandbox SIGABRT 한계를 그대로 둔다.
+
 ### 2026-09-08 · by GPT-5 Codex (G5D Electron V6 storage admission 연결)
 
 - **구현**: Electron sidecar client는 exact D1 product/agent-fixture `system.ready`를 3초 shell-ready로 수락하고, legacy G5/G5A 협상은 그대로 둔 채 G5D `system.status`와 ready-only `storage.status`만 추가로 해석한다. preload는 raw IPC를 노출하지 않은 V6 고정 bridge/channel로 `getSystemStatus`·`getStorageStatus`를 제공한다.
