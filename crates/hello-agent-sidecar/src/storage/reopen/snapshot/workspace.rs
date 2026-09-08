@@ -19,6 +19,18 @@ pub(super) struct Member {
     digest: Sha256,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct ProgressMarker {
+    ready: bool,
+    write_mode: bool,
+    pending_write: bool,
+    backward: bool,
+    after_row: i64,
+    project_source: Option<(i64, String)>,
+    outer: Option<(i64, String, String, i64, bool)>,
+    member: Option<(i64, bool, String, usize, usize)>,
+}
+
 fn source_parts(frozen: bool) -> (&'static str, &'static str, &'static str) {
     if frozen {
         (
@@ -37,6 +49,16 @@ fn member_from(frozen: bool) -> String {
 }
 
 impl Member {
+    fn progress_marker(&self) -> (i64, bool, String, usize, usize) {
+        (
+            self.source.identity().source_rowid,
+            self.frozen,
+            self.key.clone(),
+            self.raw_offset,
+            self.path_offset,
+        )
+    }
+
     pub(super) fn start(
         connection: &Connection,
         identity: SourceIdentity,
@@ -448,6 +470,26 @@ impl Scan {
                 )
             })
             .ok_or_else(session_error)
+    }
+    pub(super) fn progress_marker(&self) -> ProgressMarker {
+        ProgressMarker {
+            ready: self.ready,
+            write_mode: self.write_mode,
+            pending_write: self.pending_write,
+            backward: self.backward,
+            after_row: self.after_row,
+            project_source: self.project_source.clone(),
+            outer: self.outer.as_ref().map(|outer| {
+                (
+                    outer.rowid,
+                    outer.preparation.clone(),
+                    outer.project.clone(),
+                    outer.sequence,
+                    outer.frozen,
+                )
+            }),
+            member: self.member.as_ref().map(Member::progress_marker),
+        }
     }
     pub(super) fn step(
         &mut self,

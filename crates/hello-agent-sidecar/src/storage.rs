@@ -101,6 +101,12 @@ pub struct Storage {
     writes_admitted: bool,
 }
 
+#[derive(Clone, Copy)]
+enum StorageOpenMode {
+    Legacy,
+    Admission,
+}
+
 #[derive(Debug)]
 pub struct ProjectionUpsert {
     pub aggregate_type: &'static str,
@@ -140,17 +146,42 @@ pub enum ChatBindFailurePoint {
 impl Storage {
     pub fn open(path: &Path) -> Result<Self, SidecarError> {
         static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
-        Self::open_inner(path, &NEVER_CANCELLED)
+        Self::open_inner(path, &NEVER_CANCELLED, StorageOpenMode::Legacy)
     }
 
     pub(crate) fn open_for_admission(
         path: &Path,
         cancellation: &AtomicBool,
     ) -> Result<Self, SidecarError> {
-        Self::open_inner(path, cancellation)
+        let mut storage = Self::open_inner(path, cancellation, StorageOpenMode::Admission)?;
+        let mut session = reopen::snapshot::ReopenMaintenanceSession::start_for_admission(
+            &mut storage.connection,
+        )?;
+        loop {
+            ensure_admission_not_cancelled(cancellation)?;
+            match session.step(&mut || cancellation.load(Ordering::Acquire))? {
+                reopen::snapshot::ReopenMaintenanceStep::Pending(_) => {}
+                reopen::snapshot::ReopenMaintenanceStep::Cancelled => {
+                    ensure_admission_not_cancelled(cancellation)?;
+                    return Err(SidecarError::new(
+                        "storageAdmissionCancelled",
+                        "storage admission was cancelled during startup verification",
+                    ));
+                }
+                reopen::snapshot::ReopenMaintenanceStep::ReadyVerified(_) => break,
+            }
+            ensure_admission_not_cancelled(cancellation)?;
+        }
+        drop(session);
+        ensure_admission_not_cancelled(cancellation)?;
+        Ok(storage)
     }
 
-    fn open_inner(path: &Path, cancellation: &AtomicBool) -> Result<Self, SidecarError> {
+    fn open_inner(
+        path: &Path,
+        cancellation: &AtomicBool,
+        mode: StorageOpenMode,
+    ) -> Result<Self, SidecarError> {
         ensure_admission_not_cancelled(cancellation)?;
         let path = safe_database_path(path)?;
         let mut connection = Connection::open_with_flags(
@@ -187,7 +218,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1) => {
                 verify_schema_v2(&connection)?;
@@ -208,7 +239,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3) => {
                 verify_schema_v3(&connection)?;
@@ -226,7 +257,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4) => {
                 verify_schema_v4(&connection)?;
@@ -241,7 +272,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {
                 verify_schema_v5(&connection)?;
@@ -253,7 +284,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
                 verify_schema_v6(&connection)?;
@@ -262,16 +293,16 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
-                verify_schema_v8_for_open(&connection)?;
+                verify_schema_v8_for_mode(&connection, mode)?;
             }
             Some(_) => {
                 return Err(SidecarError::new(
@@ -2098,6 +2129,19 @@ fn verify_schema_v8_for_open(connection: &Connection) -> Result<(), SidecarError
     let materialization_state = verify_schema_v8(connection)?;
     verify_v6_materialization_snapshot(connection, &materialization_state, true)?;
     verify_v8_compaction_runtime_state(connection)
+}
+
+fn verify_schema_v8_for_mode(
+    connection: &Connection,
+    mode: StorageOpenMode,
+) -> Result<(), SidecarError> {
+    match mode {
+        StorageOpenMode::Legacy => verify_schema_v8_for_open(connection),
+        StorageOpenMode::Admission => {
+            let materialization_state = verify_schema_v8(connection)?;
+            verify_v6_materialization_snapshot(connection, &materialization_state, true)
+        }
+    }
 }
 
 fn verify_schema_v8(connection: &Connection) -> Result<String, SidecarError> {
