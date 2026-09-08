@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 4,
+  "generation": "storageLifetimeActivationV4",
+  "databaseMigration": {
+    "fromVersion": 9,
+    "toVersion": 10,
+    "precondition": "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+    "effect": "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+    "existingRowsDeleted": false,
+    "activeV3Pending": "failAdmissionUnsupportedNoMutation"
+  },
+  "publicWire": {
+    "g5dLifecycleShape": "unchanged",
+    "storageStatusShape": "unchanged",
+    "capabilityOrder": "unchanged",
+    "readyToFailedTransition": false,
+    "physicalCleanupEnabled": false
+  },
+  "eligibility": {
+    "exactSafePrefixMinLedgerEvents": 1000,
+    "countBoundary": "sinceRetainedBoundary",
+    "belowThresholdAllowed": false,
+    "ageTrigger": false,
+    "byteTrigger": false,
+    "preconditions": [
+      "allExistingSafetyExclusionsPass",
+      "completeMaterialization",
+      "exactBeforeAfterEquivalence"
+    ]
+  },
+  "preservation": {
+    "logicalDeleteRows": ["events", "event_source_index"],
+    "preservedRecords": [
+      "userChats", "chatMessages", "userEvidence", "recoveries", "workspaces",
+      "snapshots", "baselines", "projections", "operationReceipts"
+    ],
+    "physicalCleanup": "disabled"
+  },
+  "restart": {
+    "pendingEmptyAuthority": "exactVerifyDuringAdmissionThenReadyAndResumeAfterward",
+    "runningSentinel": "failAdmissionWithoutMutationManualRecovery",
+    "nonEmptyAuthority": "failAdmissionWithoutMutationManualRecovery",
+    "ambiguousOrCommitUncertain": "failAdmissionWithoutMutationManualRecovery",
+    "automaticResetOrResumeUnsafeState": false
+  },
+  "runtime": {
+    "owner": "singleSQLiteOwnerInSidecarEventLoop",
+    "writerConnections": 1,
+    "backgroundWriterConnection": false,
+    "backgroundWriterThread": false,
+    "ticks": "readyOnly",
+    "zeroTickStates": ["verifying", "failed", "quitting"],
+    "step": "oneBoundedCommittedStepPerTick"
+  },
+  "fatalAfterReady": {
+    "causes": [
+      "semanticCorruption", "commitUncertainty", "materializerFatal", "compactorFatal"
+    ],
+    "action": "poisonStopMaintenanceAndTerminateSidecar",
+    "furtherMutationOrRun": "prohibited",
+    "nextProcess": "reenterVerifyingAndRunAdmission",
+    "wireTransition": "none"
+  },
+  "budgets": {
+    "maxWorkUnitsPerStep": 100,
+    "maxCanonicalPrimaryInputBytesPerStep": 1048576,
+    "maxRetainedAndDependencyInputBytesPerStep": 8388608,
+    "callerConfigurable": false
+  },
+  "phases": [
+    "pending", "armRunning", "freeze", "materialize", "verify", "delete", "finalize"
+  ],
+  "quit": "stopNewTicksBeforeCheckpointAndCleanMarker",
+  "resumeWitness": {
+    "generation": "storageCompactionResumeWitnessV1",
+    "privateStateSchemaVersion": 3,
+    "pendingAdmission": "exactWitnessVerificationThenReadyResumeAfterward",
+    "runningOrAuthorityOrUncertain": "failAdmissionNoMutation",
+    "publicWire": "unchanged"
+  },
+  "deleteTransaction": {
+    "generation": "storageCompactionDeleteTransactionV1",
+    "authorizeDelete": "boundedReadOnlyFinalWitness",
+    "deletePrefix": "onlyMutationPhaseAtomicAuthoritySourceDeleteCursorAdvance",
+    "privateStateSchemaVersion": 3,
+    "publicWire": "unchanged"
+  },
+  "scheduler": {
+    "implementation": {
+      "runtimeImplemented": true,
+      "productExecutionEnabled": true,
+      "automaticSchedulingEnabled": true,
+      "publicWireChanged": false,
+      "requiredExactRuntimeSupport": [
+        "storageV9Materializer",
+        "storageV10Materializer",
+        "storageV10CompactionWriter",
+        "cooperativeScheduler"
+      ]
+    },
+    "ownership": {
+      "execution": "cooperativeOnSoleSidecarSQLiteOwner",
+      "writerConnections": 1,
+      "backgroundWriterConnection": false,
+      "backgroundWriterThread": false
+    },
+    "admission": {
+      "requiredStorageState": "ready",
+      "quitting": false,
+      "otherStates": "zeroTicks"
+    },
+    "priority": {
+      "order": [
+        "materializerPendingOrActive",
+        "resumeExactPersistedPendingCompaction",
+        "volatileKeysetCandidate"
+      ],
+      "materializerStep": "oneBoundedWorkStep",
+      "materializerReadyHandoff": "compactorWaitsUntilNextTick",
+      "pendingCompactionBeforeCandidateDiscovery": true
+    },
+    "candidateDiscovery": {
+      "aggregateTypeOrder": ["project", "chat", "run", "lock"],
+      "cursor": "volatileIndexedKeyset",
+      "activeTargetLookup": "singleRowJoin",
+      "forbidden": [
+        "offset", "fullVec", "tempTable", "unboundedDistinct", "unboundedScan"
+      ],
+      "dormantAfter": "fullNoCandidateSweep",
+      "wakeOn": ["appendCommitted", "materializationPending"]
+    },
+    "tick": {
+      "input": "flushResponseThenAtMostOneTick",
+      "activeTimeoutMilliseconds": 100,
+      "dormantTimeout": "noDatabaseAccess",
+      "eof": "noTick",
+      "prepareQuit": "blockTicksBeforeCheckpointAndCleanMarker"
+    },
+    "commitDiscipline": {
+      "maxBoundedWorkCommitsPerTick": 1,
+      "runningArmSentinel": "committedImmediatelyAdjacentBeforeBoundedWork",
+      "pollingBetweenArmAndWork": "forbidden",
+      "candidatePlanCreation": "administrativeCommitConsumesTickNoWorkSameTick",
+      "finalize": "administrativeCommitConsumesTickNeverArmed",
+      "candidateAndWorkSameTick": false
+    },
+    "result": {
+      "writerApiKinds": ["created", "armed-worked", "finalized", "no-work"],
+      "schedulerResultKinds": ["created", "armed-worked", "finalized", "no-work"],
+      "mapping": "preserveWriterKindExactly",
+      "created": "candidateJobAndPlanAdministrativeCommitOnly",
+      "armed-worked": "adjacentArmCommitThenOneBoundedWorkCommit",
+      "finalized": "pendingToSucceededAdministrativeCommitWithoutArm",
+      "no-work": "noCommit"
+    },
+    "fatal": {
+      "causes": [
+        "runningSentinel", "nonEmptyAuthority", "multipleActiveJobs",
+        "malformedPersistedState", "materializerError", "compactorError"
+      ],
+      "action": "poisonInternalSchedulerBlockMutationAndRunReturnProcessErrorAndExit",
+      "wireReadyToFailedTransition": false,
+      "automaticReset": false
+    }
+  },
+  "activationProof": {
+    "claim": "reviewedIntegratedRuntimeActivationNotReleaseApproval",
+    "publicStatusWire": "alreadyImplementedUnchangedD1",
+    "focusedRustSuites": {
+      "writer": [
+        "storage::tests::compaction_writer_v10::v10_writer_rejects_corrupt_existing_frozen_operation_before_delete",
+        "storage::tests::compaction_writer_v10::v10_writer_threshold_and_exact_thousand_delete_candidate",
+        "storage::tests::compaction_writer_v10::v10_writer_delete_failure_rolls_back_batch_and_leaves_running_sentinel",
+        "storage::tests::compaction_writer_v10::v10_writer_chains_immediate_predecessor_for_two_thousand_delete_candidates"
+      ],
+      "scheduler": [
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_prioritizes_materialization_and_persisted_pending_work",
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_enforces_threshold_keyset_and_two_job_chain",
+        "storage::tests::compaction_writer_v10::cooperative_scheduler_rejects_running_sentinel_without_mutation",
+        "tests::cooperative_scheduler_has_zero_ticks_before_ready_and_after_prepare_quit",
+        "tests::fatal_scheduler_error_poisons_later_mutation_and_agent_run"
+      ]
+    },
+    "remainingGates": [
+      "cumulativeHarnessEvidence",
+      "windowsSafetyGate",
+      "actualUserDatabaseAndForcedCrash",
+      "packagingAndRelease"
+    ]
+  }
+}
