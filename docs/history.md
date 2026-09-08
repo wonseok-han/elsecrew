@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G5D two-stage admission 통합·storage lifetime 다음 결정)
+
+- **통합**: additive G5D lifecycle 계약과 malformed golden 보강을 `78dbe69`, Rust shell-ready/storage admission 런타임 및 raw-params 선행 차단 수리를 `a4ad301`, Electron V6·renderer admission UI와 invalid bridge fail-closed 수리를 `783ae8f`로 각각 독립 리뷰 PASS 뒤 `m5/coding-agent-ide`에 통합했다. 첫 stdout shell-ready 뒤 storage가 `verifying → ready|failed`로 진행하며, ready 전 status/quit 외 요청·writer·run·recovery는 차단되고 renderer도 모든 durable control을 잠근다.
+- **통합 검증**: protocol G5D Rust 3개와 Node 계약 5개, sidecar G5D 3개·writer guard 1개·raw preflight 1개·실제 stdio 11개, Electron admission/bridge/security Node 55개, TypeScript noEmit, sidecar no-deps strict clippy, 변경 Rust rustfmt, renderer production build, diff check가 통과했다. `cargo fmt --all`은 이번 범위 밖 기존 `src-tauri/src/detect.rs`·`login.rs` 포맷 차이 때문에 실패했고, packaged Electron GUI smoke는 sandbox `SIGABRT`라 실제 GUI 증거로 인정하지 않는다.
+- **다음 결정**: D1 status wire와 bounded materializer/reopen verifier는 통합됐지만 production scheduler와 compaction writer는 없다. 옛 `m5/g5d-storage-v7-compaction-worker`는 V8 이전 consumer일 뿐이라 재사용하지 않는다. 다음 파동 전에 자동 compaction trigger, restart 시 pending/running 처리, ready 이후 maintenance fatal 처리 정책을 계약으로 확정해야 한다. 특히 101개 초과 frozen operation을 product admission의 bounded reopen 경로로 검증하기 전에는 compaction writer를 활성화하지 않는다.
+
 ### 2026-09-08 · by GPT-5 Codex (G5D Electron bridge admission P1 수리)
 
 - **수리**: renderer 외곽 경계가 `window.m5`를 신뢰하지 않고 complete fixed V4/V5/V6 bridge만 통과시킨다. bridge 부재, 알 수 없는 버전, V6의 `getSystemStatus` 누락 또는 controller가 요구하는 고정 메서드 누락은 비기술적 unavailable 화면만 렌더하며 ProjectEditor/Chat controller·durable IPC를 전혀 만들거나 호출하지 않는다. 완전한 V4/V5는 기존 ready 동작을 보존하고 완전한 V6만 admission polling으로 진입한다.
