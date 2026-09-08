@@ -4072,3 +4072,99 @@ fn make_v9_compaction_job(state: &str, cursor: Value, authority_count: u32) -> V
         "completedAt": null,
     })
 }
+
+#[test]
+fn storage_v10_delete_transaction_and_activation_contracts_are_exact() {
+    assert_eq!(STORAGE_LIFETIME_SCHEMA_VERSION_V10, 10);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/fixtures/m5");
+    let manifest: Value = read_json(root.join("storage-v10/manifest.json"));
+    let policy: Value = read_json(root.join("storage-v10/delete-policy.json"));
+    let cases: Value = read_json(root.join("storage-v10/cases.json"));
+    let schema_identity: Value = read_json(root.join("storage-v10/schema-identity.json"));
+    let activation: Value = read_json(root.join("storage-activation-v3/manifest.json"));
+
+    assert_eq!(manifest["storageSchemaVersion"], serde_json::json!(10));
+    assert_eq!(manifest["migration"]["fromVersion"], serde_json::json!(9));
+    assert_eq!(manifest["migration"]["toVersion"], serde_json::json!(10));
+    assert_eq!(
+        manifest["runtimeWriterImplemented"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        manifest["productExecutionEnabled"],
+        serde_json::json!(false)
+    );
+    assert_eq!(manifest["publicWireChanged"], serde_json::json!(false));
+    assert_eq!(
+        schema_identity["objects"]
+            .as_array()
+            .expect("v10 schema identity")
+            .len(),
+        manifest["schemaIdentity"]["persistentObjects"]
+            .as_u64()
+            .expect("persistent object count") as usize
+    );
+    assert!(schema_identity["objects"]
+        .as_array()
+        .expect("v10 schema identity")
+        .iter()
+        .all(|object| {
+            object.get("type").and_then(Value::as_str).is_some()
+                && object.get("name").and_then(Value::as_str).is_some()
+                && object.get("tableName").and_then(Value::as_str).is_some()
+                && object
+                    .get("canonicalSqlSha256")
+                    .and_then(Value::as_str)
+                    .is_some_and(|digest| {
+                        digest.len() == 64
+                            && digest
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    })
+        }));
+    validate_storage_compaction_delete_transaction_policy_v1(&policy)
+        .expect("exact v10 delete transaction policy");
+    assert_eq!(policy, storage_compaction_delete_transaction_policy_v1());
+    validate_storage_lifetime_activation_policy_v3(&activation).expect("exact activation v3");
+    assert_eq!(activation, storage_lifetime_activation_policy_v3());
+    assert_eq!(
+        activation["publicWire"],
+        storage_lifetime_activation_policy_v2()["publicWire"]
+    );
+    validate_storage_lifetime_activation_policy_v2(&storage_lifetime_activation_policy_v2())
+        .expect("historical activation v2 remains exact");
+
+    let valid = &cases["validMigrationPreflight"];
+    validate_storage_lifetime_v10_migration_preflight(
+        valid["exactStorageV9"].as_bool().expect("exact flag"),
+        valid["activeLosslessJobs"].as_u64().expect("active count") as u32,
+        valid["deleteAuthorityRows"]
+            .as_u64()
+            .expect("authority count") as u32,
+    )
+    .expect("exact idle v9 preflight");
+    assert!(validate_storage_lifetime_v10_migration_preflight(false, 0, 0).is_err());
+    assert!(validate_storage_lifetime_v10_migration_preflight(true, 1, 0).is_err());
+    assert!(validate_storage_lifetime_v10_migration_preflight(true, 0, 1).is_err());
+
+    for path in cases["malformedPolicyPaths"]
+        .as_array()
+        .expect("malformed policy paths")
+    {
+        let path = path.as_str().expect("policy path");
+        let pointer = format!("/{}", path.replace('.', "/"));
+        let mut invalid = policy.clone();
+        let target = invalid.pointer_mut(&pointer).expect("policy mutation path");
+        *target = match target {
+            Value::Bool(value) => Value::Bool(!*value),
+            Value::Number(_) => serde_json::json!(999),
+            _ => serde_json::json!("relaxed"),
+        };
+        assert!(
+            validate_storage_compaction_delete_transaction_policy_v1(&invalid).is_err(),
+            "accepted {path}"
+        );
+    }
+}

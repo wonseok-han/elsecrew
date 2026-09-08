@@ -20,6 +20,7 @@ pub const STORAGE_LIFETIME_SCHEMA_VERSION_V6: u32 = 6;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V7: u32 = 7;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V8: u32 = 8;
 pub const STORAGE_LIFETIME_SCHEMA_VERSION_V9: u32 = 9;
+pub const STORAGE_LIFETIME_SCHEMA_VERSION_V10: u32 = 10;
 pub const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V1: u32 = 1;
 pub const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V2: u32 = 2;
 pub const STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3: u32 = 3;
@@ -3639,6 +3640,149 @@ pub fn validate_storage_lifetime_activation_policy_v2(
     if value != &storage_lifetime_activation_policy_v2() {
         return Err(StorageLifetimeContractError::new(
             "storage lifetime activation policy v2 is not exact",
+        ));
+    }
+    Ok(())
+}
+
+pub fn storage_compaction_delete_transaction_policy_v1() -> Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "generation": "storageCompactionDeleteTransactionV1",
+        "storageSchema": {
+            "fromVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V9,
+            "toVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+            "precondition": "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+            "sqlPreflight": "beginImmediateExactCanonicalSqlDefinitionsAndLedgerStateRaiseRollbackBeforePersistentDdl",
+            "mode": "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+            "existingRowsDeleted": false,
+        },
+        "schemaIdentity": {
+            "version": STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+            "source": "exactV1ThroughV10MigrationResult",
+            "comparison": "exactTypeNameTableNameCanonicalSqlSha256",
+            "persistentObjects": 76,
+            "definitionsFile": "schema-identity.json",
+            "definitionsRequired": "allPersistentObjectsExact",
+            "sqliteAutoindexesExcluded": true,
+        },
+        "privateState": {
+            "schemaVersion": STORAGE_COMPACTION_PRIVATE_STATE_SCHEMA_VERSION_V3,
+            "cursorSchemaVersion": STORAGE_COMPACTION_CURSOR_SCHEMA_VERSION_V3,
+            "phases": STORAGE_COMPACTION_PHASES_V3,
+            "phaseOrderChanged": false,
+            "flagsChanged": false,
+        },
+        "authorizeDelete": {
+            "mode": "boundedReadOnlyFinalWitness",
+            "authorityInsert": "forbidden",
+            "sourceMutation": "forbidden",
+        },
+        "deletePrefix": {
+            "onlyMutationPhase": true,
+            "arm": "runningV3WithStepThroughPlanOrdinal",
+            "planInterval": "openAfterPlanOrdinalThroughClosedStepThroughPlanOrdinal",
+            "maxRows": STORAGE_COMPACTION_PLAN_MAX_ROWS_PER_STEP_V1,
+            "authorityOrdinal": "oneBasedContiguousWithinArmedBatch",
+            "authorityPlanBinding": "planOrdinalEqualsAfterPlanOrdinalPlusAuthorityOrdinal",
+            "source": "exactLiveEventAndSourceIndexMatchImmutableDeletePlanRow",
+            "prefix": "exactCurrentPlanPrefix",
+            "outsideInterval": "rejected",
+        },
+        "transaction": {
+            "steps": [
+                "insertCompleteContiguousAuthorityBatch",
+                "deleteMatchingSourceIndexRows",
+                "deleteMatchingEventRowsAndConsumeAuthority",
+                "advanceCursorAndReturnPending",
+            ],
+            "sameTransactionRequired": true,
+            "execution": "finalAuthorityInsertTriggersCompleteSourceDeleteAuthorityCleanupAndCursorAdvance",
+            "sourceIndexDeletionRequiresCompleteBatch": true,
+            "eventDeletionRequiresCompleteBatchAndAbsentSourceIndex": true,
+            "pendingRequiresEveryArmedPlanSourceAndIndexAbsent": true,
+            "pendingRequiresEmptyAuthority": true,
+            "malformedPartialOrWrongOrdinal": "rollbackNoMutation",
+        },
+        "preservation": {
+            "releasePlanAndFinalize": "unchanged",
+            "idleAndSucceededV9Rows": "preserved",
+            "publicD1WireAndCapability": "unchanged",
+        },
+        "activation": {
+            "contractOnly": true,
+            "runtimeWriterImplemented": false,
+            "productExecutionEnabled": false,
+            "automaticSchedulingEnabled": false,
+            "publicWireChanged": false,
+        },
+    })
+}
+
+pub fn validate_storage_compaction_delete_transaction_policy_v1(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    if value != &storage_compaction_delete_transaction_policy_v1() {
+        return Err(StorageLifetimeContractError::new(
+            "storage compaction delete transaction policy is not exact",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_storage_lifetime_v10_migration_preflight(
+    exact_storage_v9: bool,
+    active_lossless_jobs: u32,
+    delete_authority_rows: u32,
+) -> Result<(), StorageLifetimeContractError> {
+    if !exact_storage_v9 || active_lossless_jobs != 0 || delete_authority_rows != 0 {
+        return Err(StorageLifetimeContractError::new(
+            "storage v10 migration requires exact v9 with no active compaction or authority",
+        ));
+    }
+    Ok(())
+}
+
+pub fn storage_lifetime_activation_policy_v3() -> Value {
+    let mut policy = storage_lifetime_activation_policy_v2();
+    let object = policy
+        .as_object_mut()
+        .expect("activation policy v2 is an object");
+    object.insert("schemaVersion".into(), serde_json::json!(3));
+    object.insert(
+        "generation".into(),
+        serde_json::json!("storageLifetimeActivationV3"),
+    );
+    object.insert(
+        "databaseMigration".into(),
+        serde_json::json!({
+            "fromVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V9,
+            "toVersion": STORAGE_LIFETIME_SCHEMA_VERSION_V10,
+            "precondition": "exactV9NoPendingOrRunningLosslessJobAndEmptyDeleteAuthority",
+            "effect": "replaceDeleteAuthorityGuardAndAddAtomicBatchCompletionGuard",
+            "existingRowsDeleted": false,
+            "activeV3Pending": "failAdmissionUnsupportedNoMutation",
+        }),
+    );
+    object.insert(
+        "deleteTransaction".into(),
+        serde_json::json!({
+            "generation": "storageCompactionDeleteTransactionV1",
+            "authorizeDelete": "boundedReadOnlyFinalWitness",
+            "deletePrefix": "onlyMutationPhaseAtomicAuthoritySourceDeleteCursorAdvance",
+            "privateStateSchemaVersion": STORAGE_COMPACTION_PRIVATE_STATE_SCHEMA_VERSION_V3,
+            "publicWire": "unchanged",
+        }),
+    );
+    policy
+}
+
+pub fn validate_storage_lifetime_activation_policy_v3(
+    value: &Value,
+) -> Result<(), StorageLifetimeContractError> {
+    if value != &storage_lifetime_activation_policy_v3() {
+        return Err(StorageLifetimeContractError::new(
+            "storage lifetime activation policy v3 is not exact",
         ));
     }
     Ok(())
