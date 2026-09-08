@@ -36,7 +36,7 @@ fn v9_template(count: usize) -> (TempDir, PathBuf) {
     (root, path)
 }
 
-fn chat_v9_template() -> (TempDir, PathBuf) {
+fn chat_v9_template(with_message: bool) -> (TempDir, PathBuf) {
     let (root, path) = database();
     let mut storage = Storage::open(&path).unwrap();
     storage
@@ -55,6 +55,11 @@ fn chat_v9_template() -> (TempDir, PathBuf) {
         ))
         .unwrap();
     for sequence in 1..=1001 {
+        let (durable, last_message) = if with_message {
+            (1, team_message(CHAT_ID, "message_v9_chat_1", 1))
+        } else {
+            (0, Value::Null)
+        };
         storage
             .append_event(&event(
                 &format!("evt_v9_chat_{sequence}"),
@@ -62,7 +67,7 @@ fn chat_v9_template() -> (TempDir, PathBuf) {
                 "chat",
                 CHAT_ID,
                 sequence,
-                materializable_chat_payload(CHAT_ID, PROJECT_ID, 0, Value::Null),
+                materializable_chat_payload(CHAT_ID, PROJECT_ID, durable, last_message),
                 STAMP,
             ))
             .unwrap();
@@ -339,6 +344,23 @@ fn insert_plan_row_for(
         .strip_prefix("sha256:")
         .unwrap()
         .to_string();
+    let introduced_message_id: Option<String> = connection
+        .query_row(
+            "SELECT introduced_message_id FROM event_source_index WHERE event_rowid=?1",
+            [event_rowid],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let introduced_message_digest = introduced_message_id.as_ref().map(|message_id| {
+        let digest: String = connection
+            .query_row(
+                "SELECT message_digest FROM chat_messages WHERE message_id=?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        digest.strip_prefix("sha256:").unwrap().to_string()
+    });
     connection
         .execute(
             "INSERT INTO storage_compaction_plan_rows(\
@@ -346,8 +368,8 @@ fn insert_plan_row_for(
                aggregate_sequence,event_type,payload_schema_version,event_timestamp,canonical_payload_json,\
                canonical_payload_digest,introduced_message_id,introduced_message_digest,decision,\
                baseline_id,baseline_projection_digest,operation_frozen_before_plan,message_frozen_before_plan\
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,NULL,NULL,\
-                       ?14,?15,?16,0,0)",
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,?14,?15,\
+                       ?16,?17,?18,0,0)",
             params![
                 job_id,
                 ordinal,
@@ -362,6 +384,8 @@ fn insert_plan_row_for(
                 timestamp,
                 payload,
                 digest,
+                introduced_message_id,
+                introduced_message_digest,
                 if anchor { "retainAnchor" } else { "delete" },
                 if anchor { None } else { Some(baseline_id) },
                 if anchor { None } else { Some(baseline_digest) },
@@ -460,6 +484,24 @@ fn freeze_range_for(
             .unwrap();
         insert_exact_v8_frozen_operation(storage, &source, STAMP);
     }
+}
+
+fn freeze_chat_messages(storage: &mut Storage, aggregate_id: &str) {
+    storage
+        .connection
+        .execute(
+            "INSERT INTO frozen_message_sources(\
+               message_id,source_event_rowid,source_event_id,source_operation_id,chat_id,\
+               source_aggregate_sequence,durable_sequence,canonical_message_json,message_digest,frozen_at\
+             ) SELECT message.message_id,source.event_rowid,source.event_id,source.operation_id,\
+                      message.chat_id,source.aggregate_sequence,message.event_sequence,\
+                      message.canonical_message_json,message.message_digest,?1 \
+               FROM event_source_index source \
+               JOIN chat_messages message ON message.message_id=source.introduced_message_id \
+               WHERE source.aggregate_type='chat' AND source.aggregate_id=?2",
+            params![STAMP, aggregate_id],
+        )
+        .unwrap();
 }
 
 fn delete_live_prefix(connection: &Connection, through: u64) {
@@ -572,6 +614,7 @@ fn seed_chat_pending(path: &Path, phase: &str, after: u32) {
         insert_baseline_for(&storage.connection, "chat", CHAT_ID, 1000);
     if phase == "authorizeDelete" {
         freeze_range_for(&mut storage, "chat", CHAT_ID, 1, 1001);
+        freeze_chat_messages(&mut storage, CHAT_ID);
     }
     with_triggers_disabled(&storage.connection, |connection| {
         insert_job(
@@ -683,6 +726,64 @@ fn tamper_chat_transition(path: &Path, sequence: u64) {
                 1
             );
         }
+    });
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+}
+
+fn tamper_message_copy_metadata(path: &Path, case: &str) {
+    let connection = Connection::open(path).unwrap();
+    with_triggers_disabled(&connection, |connection| match case {
+        "message_event_sequence" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE chat_messages SET event_sequence=2 \
+                         WHERE message_id='message_v9_chat_1'",
+                        [],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        "message_created_at" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE chat_messages SET created_at='2026-09-08T04:00:01Z' \
+                         WHERE message_id='message_v9_chat_1'",
+                        [],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        "frozen_durable_sequence" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE frozen_message_sources SET durable_sequence=2 \
+                         WHERE message_id='message_v9_chat_1'",
+                        [],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        "frozen_at" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE frozen_message_sources SET frozen_at='invalid' \
+                         WHERE message_id='message_v9_chat_1'",
+                        [],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        _ => unreachable!(),
     });
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -802,7 +903,7 @@ fn product_admission_accepts_post_prefix_pending_v9_with_live_tail_and_preserves
 
 #[test]
 fn product_admission_accepts_valid_planned_chat_transitions_without_mutation() {
-    let (_root, template) = chat_v9_template();
+    let (_root, template) = chat_v9_template(false);
     for (phase, after) in [("planEligibility", 137), ("authorizeDelete", 0)] {
         let (_copy_root, path) = copy_template(&template);
         seed_chat_pending(&path, phase, after);
@@ -820,7 +921,7 @@ fn product_admission_accepts_valid_planned_chat_transitions_without_mutation() {
 
 #[test]
 fn product_admission_rejects_coherent_planned_chat_transition_tamper_without_mutation() {
-    let (_root, template) = chat_v9_template();
+    let (_root, template) = chat_v9_template(false);
     for (case, phase, after, tampered_sequence) in [
         ("early_live", "planEligibility", 137, 2),
         ("post_prefix", "authorizeDelete", 0, 1001),
@@ -835,6 +936,47 @@ fn product_admission_rejects_coherent_planned_chat_transition_tamper_without_mut
         let cancellation = AtomicBool::new(false);
         let error = match Storage::open_for_admission(&path, &cancellation) {
             Ok(_) => panic!("accepted coherent planned chat transition tamper: {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert!(connection.is_autocommit(), "{case}");
+    }
+}
+
+#[test]
+fn product_admission_validates_planned_team_message_copy_metadata_without_mutation() {
+    let (_root, template) = chat_v9_template(true);
+    for (phase, after) in [("planEligibility", 137), ("authorizeDelete", 0)] {
+        let (_copy_root, path) = copy_template(&template);
+        seed_chat_pending(&path, phase, after);
+        let connection = Connection::open(&path).unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let admitted = Storage::open_for_admission(&path, &cancellation)
+            .unwrap_or_else(|error| panic!("valid TeamMessage {phase}: {error:?}"));
+        assert_eq!(database_snapshot(&admitted.connection), before, "{phase}");
+    }
+
+    for (case, phase, after) in [
+        ("message_event_sequence", "planEligibility", 137),
+        ("message_created_at", "planEligibility", 137),
+        ("frozen_durable_sequence", "authorizeDelete", 0),
+        ("frozen_at", "authorizeDelete", 0),
+    ] {
+        let (_copy_root, path) = copy_template(&template);
+        seed_chat_pending(&path, phase, after);
+        tamper_message_copy_metadata(&path, case);
+        let connection = Connection::open(&path).unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted planned TeamMessage metadata tamper: {case}"),
             Err(error) => error,
         };
         assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");

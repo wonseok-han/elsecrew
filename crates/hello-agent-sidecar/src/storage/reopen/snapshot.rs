@@ -1088,12 +1088,24 @@ impl CopiesScan {
         let Some(table) = TABLES.get(self.phase) else {
             return Ok(Disposition::Complete);
         };
+        let query = if self.plan_aware && self.phase == 4 {
+            // Exact planned message copies were fully rebound by AdmissionPlanWitness.
+            // Rows outside that completed witness still take the generic copy path.
+            "SELECT d.rowid FROM frozen_message_sources d WHERE d.rowid>?1 \
+             AND NOT EXISTS(SELECT 1 FROM storage_compaction_plan_rows planned \
+               WHERE planned.event_rowid=d.source_event_rowid \
+                 AND planned.event_id=d.source_event_id \
+                 AND planned.operation_id=d.source_operation_id \
+                 AND planned.aggregate_type='chat' AND planned.aggregate_id=d.chat_id \
+                 AND planned.aggregate_sequence=d.source_aggregate_sequence \
+                 AND planned.introduced_message_id=d.message_id) \
+             ORDER BY d.rowid LIMIT 1"
+                .to_string()
+        } else {
+            format!("SELECT rowid FROM {table} WHERE rowid>?1 ORDER BY rowid LIMIT 1")
+        };
         let next: Option<i64> = connection
-            .query_row(
-                &format!("SELECT rowid FROM {table} WHERE rowid>?1 ORDER BY rowid LIMIT 1"),
-                [self.after],
-                |r| r.get(0),
-            )
+            .query_row(&query, [self.after], |r| r.get(0))
             .optional()
             .map_err(|_| session_error())?;
         usage.work_units += 1;

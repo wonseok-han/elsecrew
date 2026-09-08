@@ -1009,7 +1009,7 @@ fn verify_plan_row(
         expect_live,
         usage,
     )?;
-    verify_message_witness(connection, job, &row, usage)?;
+    verify_message_witness(connection, job, &row, chat_state.as_ref(), usage)?;
     Ok(())
 }
 
@@ -1362,6 +1362,7 @@ fn verify_message_witness(
     connection: &Connection,
     job: &StorageCompactionJobV3,
     row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
+    current_chat: Option<&PlannedChatState>,
     usage: &mut ByteUsage,
 ) -> Result<(), SidecarError> {
     let Some(message_id) = row.introduced_message_id.as_deref() else {
@@ -1374,6 +1375,20 @@ fn verify_message_witness(
         .introduced_message_digest
         .as_deref()
         .ok_or_else(session_error)?;
+    let current = current_chat.ok_or_else(session_error)?;
+    let message = current.message.as_ref().ok_or_else(session_error)?;
+    if current.snapshot.as_deref() != Some(message_id) {
+        return Err(session_error());
+    }
+    let message_sequence = message
+        .get("eventSequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(session_error)?;
+    let created_at = message
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .ok_or_else(session_error)?;
+    let expected_canonical = canonical_json_v1(message.clone()).map_err(|_| session_error())?;
     let event_rowid = i64::try_from(row.event_rowid).map_err(|_| session_error())?;
     let aggregate_sequence = i64::try_from(row.aggregate_sequence).map_err(|_| session_error())?;
     let lengths: Option<(i64, i64)> = connection
@@ -1401,11 +1416,20 @@ fn verify_message_witness(
     {
         return Err(session_error());
     }
-    let (canonical, stored): (String, String) = connection
+    let (canonical, stored, metadata_exact): (String, String, bool) = connection
         .query_row(
-            "SELECT canonical_message_json,message_digest FROM chat_messages WHERE message_id=?1;",
-            [message_id],
-            |record| Ok((record.get(0)?, record.get(1)?)),
+            "SELECT canonical_message_json,message_digest,\
+                    typeof(chat_id)='text' AND chat_id=?2 \
+                    AND typeof(event_sequence)='integer' AND event_sequence=?3 \
+                    AND typeof(created_at)='text' AND created_at=?4 \
+             FROM chat_messages WHERE message_id=?1;",
+            params![
+                message_id,
+                row.aggregate_id,
+                i64::try_from(message_sequence).map_err(|_| session_error())?,
+                created_at
+            ],
+            |record| Ok((record.get(0)?, record.get(1)?, record.get(2)?)),
         )
         .map_err(|_| session_error())?;
     usage.work_units += 1;
@@ -1417,12 +1441,12 @@ fn verify_message_witness(
         .metadata_bytes
         .checked_add(digest_bytes)
         .ok_or_else(session_error)?;
-    let parsed: Value = serde_json::from_str(&canonical).map_err(|_| session_error())?;
-    if canonical_json_v1(parsed).map_err(|_| session_error())? != canonical {
-        return Err(session_error());
-    }
     let computed = sha256_file_version_v1(canonical.as_bytes());
-    if stored != computed || computed.strip_prefix("sha256:") != Some(expected_raw) {
+    if !metadata_exact
+        || canonical != expected_canonical
+        || stored != computed
+        || computed.strip_prefix("sha256:") != Some(expected_raw)
+    {
         return Err(session_error());
     }
     let phase = job.private_state.cursor.phase;
@@ -1436,13 +1460,20 @@ fn verify_message_witness(
         }
         _ => true,
     };
-    let frozen_exact: bool = connection
+    let frozen_copy: Option<(bool, bool)> = connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM frozen_message_sources f WHERE f.message_id=?1 \
-             AND f.source_event_rowid=?2 AND f.source_event_id=?3 \
-             AND f.source_operation_id=?4 AND f.chat_id=?5 \
-             AND f.source_aggregate_sequence=?6 AND f.message_digest='sha256:'||?7 \
-             AND CAST(f.canonical_message_json AS BLOB)=CAST(?8 AS BLOB));",
+            "SELECT typeof(source_event_rowid)='integer' AND source_event_rowid=?2 \
+                    AND typeof(source_event_id)='text' AND source_event_id=?3 \
+                    AND typeof(source_operation_id)='text' AND source_operation_id=?4 \
+                    AND typeof(chat_id)='text' AND chat_id=?5 \
+                    AND typeof(source_aggregate_sequence)='integer' \
+                    AND source_aggregate_sequence=?6 \
+                    AND typeof(durable_sequence)='integer' AND durable_sequence=?7 \
+                    AND typeof(canonical_message_json)='text' \
+                    AND CAST(canonical_message_json AS BLOB)=CAST(?8 AS BLOB) \
+                    AND typeof(message_digest)='text' AND message_digest='sha256:'||?9,\
+                    typeof(frozen_at)='text' AND length(CAST(frozen_at AS BLOB))=20 \
+             FROM frozen_message_sources WHERE message_id=?1;",
             params![
                 message_id,
                 event_rowid,
@@ -1450,15 +1481,44 @@ fn verify_message_witness(
                 row.operation_id,
                 row.aggregate_id,
                 aggregate_sequence,
-                expected_raw,
-                canonical
+                i64::try_from(message_sequence).map_err(|_| session_error())?,
+                canonical,
+                expected_raw
             ],
-            |record| record.get(0),
+            |record| Ok((record.get(0)?, record.get(1)?)),
         )
+        .optional()
         .map_err(|_| session_error())?;
     usage.work_units += 1;
-    if frozen_exact != expected_frozen {
+    if frozen_copy.is_some_and(|(tuple, timestamp)| !tuple || !timestamp)
+        || frozen_copy.is_some() != expected_frozen
+    {
         return Err(session_error());
+    }
+    if frozen_copy.is_some() {
+        if usage
+            .encoded_bytes()
+            .checked_add(20)
+            .is_none_or(|total| total > INPUT_BYTES)
+        {
+            return Err(session_error());
+        }
+        let frozen_at: String = connection
+            .query_row(
+                "SELECT frozen_at FROM frozen_message_sources WHERE message_id=?1;",
+                [message_id],
+                |record| record.get(0),
+            )
+            .map_err(|_| session_error())?;
+        usage.work_units += 1;
+        usage.metadata_bytes = usage
+            .metadata_bytes
+            .checked_add(frozen_at.len())
+            .ok_or_else(session_error)?;
+        hello_agent_protocol::storage_lifetime_v1::validate_frozen_operation_timestamps_v1(
+            &frozen_at, &frozen_at,
+        )
+        .map_err(|_| session_error())?;
     }
     Ok(())
 }
