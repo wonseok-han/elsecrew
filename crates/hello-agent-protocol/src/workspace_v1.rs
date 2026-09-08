@@ -526,9 +526,9 @@ fn validate_workspace_save(value: &Value) -> Result<(), WorkspaceContractError> 
     )
 }
 
-fn validate_workspace_save_session<'a>(
-    value: &'a Value,
-) -> Result<&'a Map<String, Value>, WorkspaceContractError> {
+fn validate_workspace_save_session(
+    value: &Value,
+) -> Result<&Map<String, Value>, WorkspaceContractError> {
     let session = object(value, "workspace save session")?;
     exact_keys(
         session,

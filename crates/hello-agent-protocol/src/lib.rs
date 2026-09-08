@@ -632,12 +632,12 @@ fn validate_envelope(envelope: &EnvelopeV1) -> Result<(), ProtocolError> {
                         &format!("workspace event payload {name}"),
                     )?;
                 }
-            } else if event.event == "blob.chunk" {
-                if payload.len() != 1 || !matches!(payload.get("text"), Some(Value::String(_))) {
-                    return Err(ProtocolError::new(
-                        "blob.chunk payload must contain exactly one text field",
-                    ));
-                }
+            } else if event.event == "blob.chunk"
+                && (payload.len() != 1 || !matches!(payload.get("text"), Some(Value::String(_))))
+            {
+                return Err(ProtocolError::new(
+                    "blob.chunk payload must contain exactly one text field",
+                ));
             }
             if let Some(text) = event.payload.get("text").and_then(Value::as_str) {
                 if text.len() > MAX_TEXT_CHUNK_BYTES {

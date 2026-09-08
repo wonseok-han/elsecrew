@@ -1180,9 +1180,9 @@ fn validate_prepared_workspace_array<'a>(
         .collect()
 }
 
-fn prepared_manifest<'a>(
-    prepared: &'a Map<String, Value>,
-) -> Result<&'a Map<String, Value>, G5ContractError> {
+fn prepared_manifest(
+    prepared: &Map<String, Value>,
+) -> Result<&Map<String, Value>, G5ContractError> {
     object(required(prepared, "manifest")?, "prepared manifest")
 }
 
