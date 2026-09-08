@@ -15,6 +15,7 @@ pub(super) struct Catchup {
     canonical: Option<CanonicalProgress>,
     source: Option<WriteSource>,
     workspaces: workspace::Scan,
+    plan_aware: bool,
     pub(super) armed: bool,
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -25,6 +26,7 @@ pub(super) struct ProgressMarker {
     canonical: Option<super::super::canonical::ScanPosition>,
     source: Option<(i64, bool)>,
     workspaces: workspace::ProgressMarker,
+    plan_aware: bool,
     armed: bool,
 }
 const PHASES: [&str; 5] = [
@@ -39,6 +41,7 @@ impl Catchup {
     pub(super) fn start(
         connection: &Connection,
         usage: &mut ByteUsage,
+        plan_aware: bool,
     ) -> Result<Self, SidecarError> {
         let existing:Option<(i64,bool)>=connection.query_row("SELECT length(CAST(job_id AS BLOB)),state='pending' FROM lifetime_materialization_job WHERE singleton=1",[],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_|session_error())?;
         usage.work_units += 1;
@@ -87,6 +90,7 @@ impl Catchup {
             canonical: None,
             source: None,
             workspaces: workspace::Scan::writer(),
+            plan_aware,
             armed: false,
         })
     }
@@ -122,6 +126,7 @@ impl Catchup {
                 )
             }),
             workspaces: self.workspaces.progress_marker(),
+            plan_aware: self.plan_aware,
             armed: self.armed,
         }
     }
@@ -198,7 +203,14 @@ impl Catchup {
             4=>"e.aggregate_type!='app_instance' AND e.rowid=(SELECT rowid FROM events WHERE aggregate_type=e.aggregate_type AND aggregate_id=e.aggregate_id ORDER BY aggregate_sequence DESC LIMIT 1)",
             _=>return Err(session_error()),
         };
-        let next:Option<i64>=connection.query_row(&format!("SELECT e.rowid FROM events e WHERE e.rowid>?1 AND ({condition}) ORDER BY e.rowid LIMIT 1"),[self.after],|r|r.get(0)).optional().map_err(|_|session_error())?;
+        let plan_filter = if self.plan_aware {
+            // The earlier plan stage verified these exact source identities;
+            // catch up only the live tail outside that immutable witness.
+            "AND NOT EXISTS(SELECT 1 FROM storage_compaction_plan_rows planned WHERE planned.event_rowid=e.rowid)"
+        } else {
+            ""
+        };
+        let next:Option<i64>=connection.query_row(&format!("SELECT e.rowid FROM events e WHERE e.rowid>?1 AND ({condition}) {plan_filter} ORDER BY e.rowid LIMIT 1"),[self.after],|r|r.get(0)).optional().map_err(|_|session_error())?;
         usage.work_units += 1;
         let Some(next) = next else {
             return self.advance(connection, usage);

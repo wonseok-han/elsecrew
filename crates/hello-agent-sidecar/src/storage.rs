@@ -331,7 +331,14 @@ impl Storage {
             .map_err(sqlite_error)?;
         verify_integrity(&connection)?;
         ensure_admission_not_cancelled(cancellation)?;
-        verify_projection_replay(&connection)?;
+        // V9 admission establishes the active plan's exact cutoff before its
+        // bounded source/copy/projection scans. Legacy replay cannot interpret
+        // a valid prefix-inserted or partially deleted V3 witness.
+        let exact_v9_admission = matches!(mode, StorageOpenMode::Admission)
+            && storage_schema_version(&connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9);
+        if !exact_v9_admission {
+            verify_projection_replay(&connection)?;
+        }
         ensure_admission_not_cancelled(cancellation)?;
         Ok(Self {
             connection,

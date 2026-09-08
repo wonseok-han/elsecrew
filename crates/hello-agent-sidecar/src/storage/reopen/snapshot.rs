@@ -50,14 +50,16 @@ impl SourceStage {
 struct SourceScan {
     frozen: bool,
     require_index: bool,
+    plan_aware: bool,
     after: i64,
     active: Option<SourceStage>,
 }
 impl SourceScan {
-    fn new(frozen: bool, require_index: bool) -> Self {
+    fn new(frozen: bool, require_index: bool, plan_aware: bool) -> Self {
         Self {
             frozen,
             require_index,
+            plan_aware,
             after: 0,
             active: None,
         }
@@ -81,6 +83,12 @@ impl SourceScan {
         let Some(active) = self.active.take() else {
             let query = if self.frozen {
                 "SELECT source_event_rowid FROM frozen_operation_sources WHERE source_event_rowid>?1 ORDER BY source_event_rowid LIMIT 1"
+            } else if self.plan_aware {
+                // AdmissionPlanWitness has already checked every persisted plan
+                // row in this epoch. Scan every live row outside that witness.
+                "SELECT e.rowid FROM events e WHERE e.rowid>?1 \
+                 AND NOT EXISTS(SELECT 1 FROM storage_compaction_plan_rows planned \
+                   WHERE planned.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1"
             } else {
                 "SELECT rowid FROM events WHERE rowid>?1 ORDER BY rowid LIMIT 1"
             };
@@ -840,15 +848,15 @@ enum SnapshotProgress {
 #[derive(Clone, PartialEq, Eq)]
 enum SnapshotProgressMarker {
     Plan(plan_v9::AdmissionPlanMarker),
-    Sources(bool, bool, i64, Option<SourceStageMarker>),
-    Copies(usize, i64),
+    Sources(bool, bool, bool, i64, Option<SourceStageMarker>),
+    Copies(usize, i64, bool),
     Projections(
         usize,
         i64,
         i64,
         Option<(&'static str, canonical::ScanPosition, u64)>,
     ),
-    Messages(bool, i64, Option<(i64, String, String, i64)>),
+    Messages(bool, bool, i64, Option<(i64, String, String, i64)>),
     Workspaces(workspace::ProgressMarker),
     Catchup(catchup::ProgressMarker),
 }
@@ -878,10 +886,13 @@ impl SnapshotProgress {
             Self::Sources(source) => SnapshotProgressMarker::Sources(
                 source.frozen,
                 source.require_index,
+                source.plan_aware,
                 source.after,
                 source.active.as_ref().map(SourceStage::progress_marker),
             ),
-            Self::Copies(copies) => SnapshotProgressMarker::Copies(copies.phase, copies.after),
+            Self::Copies(copies) => {
+                SnapshotProgressMarker::Copies(copies.phase, copies.after, copies.plan_aware)
+            }
             Self::Projections(projections) => SnapshotProgressMarker::Projections(
                 projections.table,
                 projections.after,
@@ -893,6 +904,7 @@ impl SnapshotProgress {
             ),
             Self::Messages(messages) => SnapshotProgressMarker::Messages(
                 messages.backward,
+                messages.plan_aware,
                 messages.after,
                 messages.outer.as_ref().map(|outer| {
                     (
@@ -913,6 +925,7 @@ impl SnapshotProgress {
 
 struct MessageScan {
     backward: bool,
+    plan_aware: bool,
     after: i64,
     outer: Option<MessageOuter>,
 }
@@ -972,7 +985,17 @@ impl MessageScan {
             return Ok(Disposition::Pending);
         }
         if !self.backward {
-            let rowid:Option<i64>=connection.query_row("SELECT rowid FROM events WHERE aggregate_type='chat' AND rowid>?1 ORDER BY rowid LIMIT 1",[self.after],|r|r.get(0)).optional().map_err(|_|session_error())?;
+            let query = if self.plan_aware {
+                "SELECT e.rowid FROM events e WHERE e.aggregate_type='chat' AND e.rowid>?1 \
+                 AND NOT EXISTS(SELECT 1 FROM storage_compaction_plan_rows planned \
+                   WHERE planned.event_rowid=e.rowid) ORDER BY e.rowid LIMIT 1"
+            } else {
+                "SELECT rowid FROM events WHERE aggregate_type='chat' AND rowid>?1 ORDER BY rowid LIMIT 1"
+            };
+            let rowid: Option<i64> = connection
+                .query_row(query, [self.after], |r| r.get(0))
+                .optional()
+                .map_err(|_| session_error())?;
             usage.work_units += 1;
             let Some(rowid) = rowid else {
                 self.backward = true;
@@ -1047,6 +1070,7 @@ impl MessageScan {
 struct CopiesScan {
     phase: usize,
     after: i64,
+    plan_aware: bool,
 }
 impl CopiesScan {
     fn step(
@@ -1082,7 +1106,7 @@ impl CopiesScan {
             0=>"EXISTS(SELECT 1 FROM events s WHERE s.rowid=d.event_rowid)",
             1=>"EXISTS(SELECT 1 FROM events s WHERE s.operation_id=d.operation_id) OR EXISTS(SELECT 1 FROM frozen_operation_sources s WHERE s.operation_id=d.operation_id)",
             2=>"d.aggregate_type!='app_instance' AND (EXISTS(SELECT 1 FROM events s WHERE s.aggregate_type=d.aggregate_type AND s.aggregate_id=d.aggregate_id AND s.aggregate_sequence=d.cutoff_aggregate_sequence) OR EXISTS(SELECT 1 FROM frozen_operation_sources s WHERE s.aggregate_type=d.aggregate_type AND s.aggregate_id=d.aggregate_id AND s.aggregate_sequence=d.cutoff_aggregate_sequence))",
-            3=>{verify_prefix_row(connection,rowid,usage)?;self.after=rowid;return Ok(Disposition::Pending);}
+            3=>{verify_prefix_row(connection,rowid,self.plan_aware,usage)?;self.after=rowid;return Ok(Disposition::Pending);}
             4=>"EXISTS(SELECT 1 FROM frozen_operation_sources s WHERE s.operation_id=d.source_operation_id AND s.aggregate_type='chat' AND s.source_event_rowid=d.source_event_rowid AND s.source_event_id=d.source_event_id AND s.aggregate_id=d.chat_id AND s.aggregate_sequence=d.source_aggregate_sequence AND NOT EXISTS(SELECT 1 FROM events e WHERE e.rowid=s.source_event_rowid))",
             _=>return Err(session_error()),
         };
@@ -1105,6 +1129,7 @@ impl CopiesScan {
 fn verify_prefix_row(
     connection: &Connection,
     rowid: i64,
+    plan_aware: bool,
     usage: &mut ByteUsage,
 ) -> Result<(), SidecarError> {
     use hello_agent_protocol::storage_lifetime_v1::{
@@ -1145,7 +1170,33 @@ fn verify_prefix_row(
         [rowid],|r|r.get(0),
     ).map_err(|_|session_error())?;
     usage.work_units += 1;
-    if !valid {
+    let active_plan_valid = plan_aware
+        && connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM ledger_compaction_prefixes p \
+                 JOIN storage_compaction_plans plan ON plan.job_id IN (\
+                   SELECT job_id FROM maintenance_jobs WHERE job_kind='losslessCompaction' \
+                     AND state='pending' AND json_extract(cutoff_json, \
+                       '$.storageCompactionV3PrivateState.cursor.phase') IN ('authorizeDelete','deletePrefix')) \
+                 JOIN storage_compaction_plan_rows anchor ON anchor.job_id=plan.job_id AND anchor.ordinal=1001 \
+                 JOIN ledger_baselines b ON b.baseline_id=plan.baseline_id \
+                 WHERE p.rowid=?1 AND p.aggregate_type=plan.aggregate_type \
+                   AND p.aggregate_id=plan.aggregate_id \
+                   AND p.deleted_through_sequence=plan.delete_through_sequence \
+                   AND p.anchor_event_rowid=anchor.event_rowid AND p.anchor_event_id=anchor.event_id \
+                   AND p.anchor_operation_id=anchor.operation_id \
+                   AND p.anchor_aggregate_sequence=plan.anchor_aggregate_sequence \
+                   AND p.baseline_id=plan.baseline_id \
+                   AND p.baseline_projection_digest='sha256:'||plan.baseline_projection_digest \
+                   AND b.aggregate_type=plan.aggregate_type AND b.aggregate_id=plan.aggregate_id \
+                   AND b.cutoff_aggregate_sequence=plan.delete_through_sequence \
+                   AND b.projection_digest=p.baseline_projection_digest);",
+                [rowid],
+                |r| r.get(0),
+            )
+            .map_err(|_| session_error())?;
+    usage.work_units += usize::from(plan_aware);
+    if !valid && !active_plan_valid {
         return Err(session_error());
     }
     Ok(())
@@ -1312,6 +1363,7 @@ pub(crate) struct ReopenMaintenanceSession<'connection> {
     epoch: i64,
     cutoff: u64,
     ready: bool,
+    plan_aware: bool,
     job: Option<String>,
     progress: Option<SnapshotProgress>,
     #[cfg(test)]
@@ -1397,6 +1449,9 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                 (0, witness)
             }
         };
+        // This flag is consumed only after the complete plan stage. A malformed,
+        // gapped, extra, or unowned plan never reaches a filtered source scan.
+        let plan_aware = plan_witness.is_some();
         tx.commit().map_err(|_| session_error())?;
         if !connection.is_autocommit() {
             return Err(session_error());
@@ -1406,12 +1461,14 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
             epoch,
             cutoff,
             ready: materialization == "ready",
+            plan_aware,
             job: None,
             progress: Some(match plan_witness {
                 Some(witness) => SnapshotProgress::Plan(witness),
                 None => SnapshotProgress::Sources(SourceScan::new(
                     compacted,
                     materialization == "ready",
+                    false,
                 )),
             }),
             #[cfg(test)]
@@ -1470,6 +1527,7 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                             progress = SnapshotProgress::Sources(SourceScan::new(
                                 self.cutoff > 0,
                                 self.ready,
+                                true,
                             ));
                             Disposition::Pending
                         }
@@ -1481,9 +1539,14 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                                 SnapshotProgress::Sources(SourceScan::new(
                                     false,
                                     sources.require_index,
+                                    sources.plan_aware,
                                 ))
                             } else {
-                                SnapshotProgress::Copies(CopiesScan { phase: 0, after: 0 })
+                                SnapshotProgress::Copies(CopiesScan {
+                                    phase: 0,
+                                    after: 0,
+                                    plan_aware: self.plan_aware,
+                                })
                             };
                         }
                         result
@@ -1500,6 +1563,7 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                         if matches!(result, Disposition::Complete) {
                             progress = SnapshotProgress::Messages(MessageScan {
                                 backward: false,
+                                plan_aware: self.plan_aware,
                                 after: 0,
                                 outer: None,
                             });
@@ -1529,7 +1593,7 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                                 finished = true;
                             } else {
                                 progress = SnapshotProgress::Catchup(Box::new(
-                                    catchup::Catchup::start(&tx, &mut usage)?,
+                                    catchup::Catchup::start(&tx, &mut usage, self.plan_aware)?,
                                 ));
                             }
                         }
@@ -1540,8 +1604,11 @@ impl<'connection> ReopenMaintenanceSession<'connection> {
                         if matches!(result, Disposition::Complete) {
                             self.job = Some(std::mem::take(&mut catchup.job_id));
                             self.ready = true;
-                            progress =
-                                SnapshotProgress::Sources(SourceScan::new(self.cutoff > 0, true));
+                            progress = SnapshotProgress::Sources(SourceScan::new(
+                                self.cutoff > 0,
+                                true,
+                                self.plan_aware,
+                            ));
                         }
                         result
                     }

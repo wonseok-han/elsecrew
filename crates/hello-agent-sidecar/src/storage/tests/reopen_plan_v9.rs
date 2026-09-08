@@ -329,7 +329,10 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
     let (baseline_id, baseline_digest) = insert_baseline(&storage.connection, 1000);
     if phase == "freezeOperations" {
         freeze_range(&mut storage, 1, u64::from(after));
-    } else if matches!(phase, "verifyOperations" | "releasePlan") {
+    } else if matches!(
+        phase,
+        "authorizeDelete" | "deletePrefix" | "verifyOperations" | "releasePlan"
+    ) {
         freeze_range(&mut storage, 1, 1001);
     }
     with_triggers_disabled(&storage.connection, |connection| {
@@ -337,7 +340,7 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
             connection,
             "compact_v9_001",
             "pending",
-            &private_state(phase, after, false),
+            &private_state(phase, after, phase == "authorizeDelete" && after == 1001),
             None,
         );
         insert_plan(
@@ -365,7 +368,10 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
                 &baseline_digest,
             );
         }
-        if matches!(phase, "verifyOperations" | "releasePlan") {
+        if matches!(
+            phase,
+            "authorizeDelete" | "deletePrefix" | "verifyOperations" | "releasePlan"
+        ) {
             insert_prefix(
                 connection,
                 "compact_v9_001",
@@ -373,9 +379,45 @@ fn seed_pending(path: &Path, phase: &str, after: u32) {
                 &baseline_id,
                 &baseline_digest,
             );
-            delete_live_prefix(connection, 1000);
+            let delete_through = if phase == "deletePrefix" {
+                u64::from(after)
+            } else if matches!(phase, "verifyOperations" | "releasePlan") {
+                1000
+            } else {
+                0
+            };
+            if delete_through > 0 {
+                delete_live_prefix(connection, delete_through);
+            }
         }
     });
+    storage.checkpoint().unwrap();
+}
+
+fn append_after_plan_cutoff(path: &Path) {
+    let mut storage = Storage {
+        connection: Connection::open(path).unwrap(),
+        path: path.to_path_buf(),
+        writes_admitted: true,
+    };
+    assert_eq!(
+        storage
+            .append_event(&event(
+                "evt_v9_1002",
+                "op_v9_1002",
+                "project",
+                PROJECT_ID,
+                1002,
+                json!({
+                    "canonical_path":"/fixture/v9-admission",
+                    "project_id":PROJECT_ID,
+                    "sequence":1002,
+                }),
+                STAMP,
+            ))
+            .unwrap(),
+        AppendOutcome::Committed
+    );
     storage.checkpoint().unwrap();
 }
 
@@ -430,6 +472,81 @@ fn product_admission_accepts_exact_pending_v9_plan_phases_without_mutation() {
                 AppendOutcome::Committed
             );
         }
+    }
+}
+
+#[test]
+fn product_admission_accepts_post_prefix_pending_v9_with_live_tail_and_preserves_witness() {
+    let (_root, template) = v9_template(1001);
+    for (phase, after) in [("authorizeDelete", 0), ("deletePrefix", 137)] {
+        let (_copy_root, path) = copy_template(&template);
+        append_after_plan_cutoff(&path);
+        seed_pending(&path, phase, after);
+        let connection = Connection::open(&path).unwrap();
+        let before = [
+            witness_snapshot(&connection),
+            ["events", "event_source_index", "projects"]
+                .map(|table| table_rows(&connection, table))
+                .to_vec(),
+        ];
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let admitted = Storage::open_for_admission(&path, &cancellation)
+            .unwrap_or_else(|error| panic!("{phase}: {error:?}"));
+        let after_open = [
+            witness_snapshot(&admitted.connection),
+            ["events", "event_source_index", "projects"]
+                .map(|table| table_rows(&admitted.connection, table))
+                .to_vec(),
+        ];
+        assert_eq!(after_open, before, "{phase}");
+        assert!(admitted.connection.is_autocommit(), "{phase}");
+    }
+}
+
+#[test]
+fn product_admission_rejects_post_prefix_projection_or_source_mismatch_without_mutation() {
+    let (_root, template) = v9_template(1001);
+    for case in ["projection", "source"] {
+        let (_copy_root, path) = copy_template(&template);
+        append_after_plan_cutoff(&path);
+        seed_pending(&path, "authorizeDelete", 0);
+        let connection = Connection::open(&path).unwrap();
+        if case == "projection" {
+            connection
+                .execute(
+                    "UPDATE projects SET canonical_path='/hostile/projection' WHERE project_id=?1",
+                    [PROJECT_ID],
+                )
+                .unwrap();
+        } else {
+            with_triggers_disabled(&connection, |connection| {
+                connection
+                    .execute(
+                        "UPDATE events SET canonical_json_payload='{}' \
+                         WHERE aggregate_type='project' AND aggregate_id=?1 \
+                           AND aggregate_sequence=1001",
+                        [PROJECT_ID],
+                    )
+                    .unwrap();
+            });
+        }
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let cancellation = AtomicBool::new(false);
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted hostile post-prefix {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert!(connection.is_autocommit(), "{case}");
     }
 }
 
