@@ -20,7 +20,7 @@ use hello_agent_protocol::storage_lifetime_v1::{
     STORAGE_LIFETIME_SCHEMA_VERSION_V1, STORAGE_LIFETIME_SCHEMA_VERSION_V3,
     STORAGE_LIFETIME_SCHEMA_VERSION_V4, STORAGE_LIFETIME_SCHEMA_VERSION_V5,
     STORAGE_LIFETIME_SCHEMA_VERSION_V6, STORAGE_LIFETIME_SCHEMA_VERSION_V7,
-    STORAGE_LIFETIME_SCHEMA_VERSION_V8,
+    STORAGE_LIFETIME_SCHEMA_VERSION_V8, STORAGE_LIFETIME_SCHEMA_VERSION_V9,
 };
 use hello_agent_protocol::storage_v1::{
     canonical_json_v1, classify_operation_v1, recover_unclean_shutdown_v1, replay_ledger_v1,
@@ -56,6 +56,8 @@ const MIGRATION_V7: &str =
     include_str!("../../../tests/fixtures/m5/storage-v7/migration-v6-to-v7.sql");
 const MIGRATION_V8: &str =
     include_str!("../../../tests/fixtures/m5/storage-v8/migration-v7-to-v8.sql");
+const MIGRATION_V9: &str =
+    include_str!("../../../tests/fixtures/m5/storage-v9/migration-v8-to-v9.sql");
 type SchemaObject = (String, String, String, Option<String>);
 type LifetimeJobRow = (
     u32,
@@ -218,7 +220,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1) => {
                 verify_schema_v2(&connection)?;
@@ -239,7 +241,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3) => {
                 verify_schema_v3(&connection)?;
@@ -257,7 +259,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V4) => {
                 verify_schema_v4(&connection)?;
@@ -272,7 +274,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V5) => {
                 verify_schema_v5(&connection)?;
@@ -284,7 +286,7 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V6) => {
                 verify_schema_v6(&connection)?;
@@ -293,16 +295,25 @@ impl Storage {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V7) => {
                 verify_schema_v7(&connection)?;
                 ensure_admission_not_cancelled(cancellation)?;
                 migrate_v8(&mut connection)?;
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
             }
             Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
-                verify_schema_v8_for_mode(&connection, mode)?;
+                finish_v8_open_for_mode(&mut connection, cancellation, mode)?;
+            }
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
+                if matches!(mode, StorageOpenMode::Legacy) {
+                    return Err(SidecarError::new(
+                        "storageSchemaMismatch",
+                        "storage v9 requires product admission verification",
+                    ));
+                }
+                verify_schema_v9(&connection)?;
             }
             Some(_) => {
                 return Err(SidecarError::new(
@@ -1302,6 +1313,46 @@ fn migrate_v8(connection: &mut Connection) -> Result<(), SidecarError> {
     execute_migration(connection, MIGRATION_V8, "v8")
 }
 
+fn migrate_v9(connection: &mut Connection) -> Result<(), SidecarError> {
+    // The exact committed fixture acquires BEGIN IMMEDIATE before its canonical
+    // V8 schema/control preflight and raises ROLLBACK before persistent DDL.
+    execute_migration(connection, MIGRATION_V9, "v9")
+}
+
+fn finish_v8_open_for_mode(
+    connection: &mut Connection,
+    cancellation: &AtomicBool,
+    mode: StorageOpenMode,
+) -> Result<(), SidecarError> {
+    match mode {
+        StorageOpenMode::Legacy => verify_schema_v8_for_open(connection),
+        StorageOpenMode::Admission => {
+            verify_schema_v8(connection)?;
+            let mut session =
+                reopen::snapshot::ReopenMaintenanceSession::start_for_v8_admission(connection)?;
+            loop {
+                ensure_admission_not_cancelled(cancellation)?;
+                match session.step(&mut || cancellation.load(Ordering::Acquire))? {
+                    reopen::snapshot::ReopenMaintenanceStep::Pending(_) => {}
+                    reopen::snapshot::ReopenMaintenanceStep::Cancelled => {
+                        ensure_admission_not_cancelled(cancellation)?;
+                        return Err(SidecarError::new(
+                            "storageAdmissionCancelled",
+                            "storage admission was cancelled during v8 migration preflight",
+                        ));
+                    }
+                    reopen::snapshot::ReopenMaintenanceStep::ReadyVerified(_) => break,
+                }
+                ensure_admission_not_cancelled(cancellation)?;
+            }
+            drop(session);
+            ensure_admission_not_cancelled(cancellation)?;
+            migrate_v9(connection)?;
+            verify_schema_v9(connection).map(|_| ())
+        }
+    }
+}
+
 fn execute_migration(
     connection: &mut Connection,
     migration: &str,
@@ -2131,19 +2182,6 @@ fn verify_schema_v8_for_open(connection: &Connection) -> Result<(), SidecarError
     verify_v8_compaction_runtime_state(connection)
 }
 
-fn verify_schema_v8_for_mode(
-    connection: &Connection,
-    mode: StorageOpenMode,
-) -> Result<(), SidecarError> {
-    match mode {
-        StorageOpenMode::Legacy => verify_schema_v8_for_open(connection),
-        StorageOpenMode::Admission => {
-            let materialization_state = verify_schema_v8(connection)?;
-            verify_v6_materialization_snapshot(connection, &materialization_state, true)
-        }
-    }
-}
-
 fn verify_schema_v8(connection: &Connection) -> Result<String, SidecarError> {
     let metadata: (u32, u32, String, String, String) = connection
         .query_row(
@@ -2203,6 +2241,71 @@ fn verify_schema_v8(connection: &Connection) -> Result<String, SidecarError> {
         return Err(SidecarError::new(
             "storageSchemaMismatch",
             "SQLite schema does not exactly match the storage v8 golden schema",
+        ));
+    }
+    verify_v6_materialization_snapshot(connection, &metadata.3, false)?;
+    Ok(metadata.3)
+}
+
+fn verify_schema_v9(connection: &Connection) -> Result<String, SidecarError> {
+    let metadata: (u32, u32, String, String, String) = connection
+        .query_row(
+            "SELECT storage_schema_version,protocol_version,migration_state,materialization_state,migrated_at \
+             FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v9 metadata is missing or unreadable",
+            )
+        })?;
+    let metadata_count: u32 = connection
+        .query_row("SELECT count(*) FROM storage_schema_meta;", [], |row| {
+            row.get(0)
+        })
+        .map_err(sqlite_error)?;
+    let migrated_at_valid: Option<bool> = connection
+        .query_row(
+            "SELECT migrated_at = strftime('%Y-%m-%d %H:%M:%S', migrated_at) \
+             FROM storage_schema_meta WHERE singleton=1;",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            SidecarError::new(
+                "storageSchemaMismatch",
+                "storage schema v9 migration timestamp is unreadable",
+            )
+        })?;
+    let foreign_keys: u32 = connection
+        .query_row("PRAGMA foreign_keys;", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if metadata.0 != STORAGE_LIFETIME_SCHEMA_VERSION_V9
+        || metadata.1 != PROTOCOL_VERSION
+        || metadata.2 != "ready"
+        || metadata_count != 1
+        || migrated_at_valid != Some(true)
+        || foreign_keys != 1
+    {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "storage schema v9 metadata or foreign-key enforcement does not match the supported migration",
+        ));
+    }
+    if schema_objects(connection)? != reference_schema_v9()? {
+        return Err(SidecarError::new(
+            "storageSchemaMismatch",
+            "SQLite schema does not exactly match the storage v9 golden schema",
         ));
     }
     verify_v6_materialization_snapshot(connection, &metadata.3, false)?;
@@ -3113,7 +3216,10 @@ pub(crate) fn load_v8_verified_frozen_event(
     aggregate_id: &str,
     aggregate_sequence: u64,
 ) -> Result<Option<(u64, LedgerEventV1)>, SidecarError> {
-    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+    if !matches!(
+        storage_schema_version(connection)?,
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    ) {
         return Ok(None);
     }
     let Some(source) = load_frozen_operation_by_aggregate(
@@ -3146,7 +3252,10 @@ pub(crate) fn load_v8_verified_frozen_message_event(
     connection: &Connection,
     message_id: &str,
 ) -> Result<Option<LedgerEventV1>, SidecarError> {
-    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+    if !matches!(
+        storage_schema_version(connection)?,
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    ) {
         return Ok(None);
     }
     let operation_id = connection
@@ -3417,6 +3526,24 @@ fn reference_schema_v8() -> Result<Vec<SchemaObject>, SidecarError> {
     schema_objects(&connection)
 }
 
+fn reference_schema_v9() -> Result<Vec<SchemaObject>, SidecarError> {
+    let mut connection = Connection::open_in_memory().map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V1)
+        .map_err(sqlite_error)?;
+    connection
+        .execute_batch(MIGRATION_V2)
+        .map_err(sqlite_error)?;
+    execute_migration(&mut connection, MIGRATION_V3, "reference v3")?;
+    execute_migration(&mut connection, MIGRATION_V4, "reference v4")?;
+    execute_migration(&mut connection, MIGRATION_V5, "reference v5")?;
+    execute_migration(&mut connection, MIGRATION_V6, "reference v6")?;
+    execute_migration(&mut connection, MIGRATION_V7, "reference v7")?;
+    execute_migration(&mut connection, MIGRATION_V8, "reference v8")?;
+    execute_migration(&mut connection, MIGRATION_V9, "reference v9")?;
+    schema_objects(&connection)
+}
+
 fn reference_schema_v1() -> Result<Vec<SchemaObject>, SidecarError> {
     let connection = Connection::open_in_memory().map_err(sqlite_error)?;
     connection
@@ -3480,7 +3607,10 @@ fn replay_storage_ledger(
     connection: &Connection,
     events: &[LedgerEventV1],
 ) -> Result<ProjectionStateV1, SidecarError> {
-    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+    if !matches!(
+        storage_schema_version(connection)?,
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    ) {
         return replay_ledger_v1(events).map_err(storage_contract_error);
     }
     let seeds = load_verified_compaction_seeds(connection)?;
@@ -3554,7 +3684,42 @@ fn load_verified_compaction_seeds(
     {
         return Ok(BTreeMap::new());
     }
-    let prefixes = verify_compacted_prefix_batch(connection)?;
+    let prefixes =
+        if storage_schema_version(connection)? == Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) {
+            let mut statement = connection
+                .prepare(
+                    "SELECT p.aggregate_type,p.aggregate_id,p.deleted_through_sequence,\
+                        p.anchor_event_rowid,p.anchor_aggregate_sequence,p.anchor_event_id,\
+                        p.anchor_operation_id,b.canonical_projection_json \
+                 FROM ledger_compaction_prefixes p \
+                 JOIN ledger_baselines b ON b.baseline_id=p.baseline_id \
+                 WHERE NOT EXISTS(SELECT 1 FROM ledger_compaction_prefixes newer \
+                   WHERE newer.aggregate_type=p.aggregate_type \
+                     AND newer.aggregate_id=p.aggregate_id \
+                     AND newer.deleted_through_sequence>p.deleted_through_sequence) \
+                 ORDER BY p.aggregate_type,p.aggregate_id;",
+                )
+                .map_err(|_| storage_v8_compaction_state_error())?;
+            let prefixes = statement
+                .query_map([], |row| {
+                    Ok(VerifiedCompactionPrefix {
+                        aggregate_type: row.get(0)?,
+                        aggregate_id: row.get(1)?,
+                        deleted_through: row_u64(row, 2)?,
+                        anchor_rowid: row_u64(row, 3)?,
+                        anchor_sequence: row_u64(row, 4)?,
+                        anchor_event_id: row.get(5)?,
+                        anchor_operation_id: row.get(6)?,
+                        baseline_json: row.get(7)?,
+                    })
+                })
+                .map_err(|_| storage_v8_compaction_state_error())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| storage_v8_compaction_state_error())?;
+            prefixes
+        } else {
+            verify_compacted_prefix_batch(connection)?
+        };
     let mut seeds = BTreeMap::new();
     for prefix in prefixes {
         let key = (prefix.aggregate_type.clone(), prefix.aggregate_id.clone());
@@ -3600,7 +3765,10 @@ fn classify_storage_operation(
     existing_events: &[LedgerEventV1],
     incoming: &LedgerEventV1,
 ) -> Result<OperationDecisionV1, SidecarError> {
-    if storage_schema_version(connection)? != Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) {
+    if !matches!(
+        storage_schema_version(connection)?,
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9)
+    ) {
         return classify_operation_v1(existing_events, incoming).map_err(storage_contract_error);
     }
     if connection
@@ -3858,6 +4026,9 @@ fn insert_event(transaction: &Transaction<'_>, event: &LedgerEventV1) -> Result<
         Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8) => {
             insert_v6_source_index_and_invalidate_ready(transaction, event)?;
         }
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
+            insert_v6_source_index_and_invalidate_ready(transaction, event)?;
+        }
         None
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3)
@@ -3883,6 +4054,10 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             verify_append_materialization_pair(connection)?;
             verify_v8_compaction_runtime_state(connection)
         }
+        Some(STORAGE_LIFETIME_SCHEMA_VERSION_V9) => {
+            verify_append_materialization_pair(connection)?;
+            verify_v9_append_runtime_state(connection)
+        }
         None
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V1)
         | Some(STORAGE_LIFETIME_SCHEMA_VERSION_V3)
@@ -3894,6 +4069,22 @@ fn verify_append_runtime_state(connection: &Connection) -> Result<(), SidecarErr
             "event append encountered an unsupported storage schema version",
         )),
     }
+}
+
+fn verify_v9_append_runtime_state(connection: &Connection) -> Result<(), SidecarError> {
+    let unsafe_state: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM ledger_compaction_delete_authority LIMIT 1) \
+             OR EXISTS(SELECT 1 FROM maintenance_jobs \
+                       WHERE job_kind='losslessCompaction' AND state='running' LIMIT 1);",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| storage_v8_compaction_state_error())?;
+    if unsafe_state {
+        return Err(storage_v8_compaction_state_error());
+    }
+    Ok(())
 }
 
 fn verify_append_materialization_pair(connection: &Connection) -> Result<(), SidecarError> {

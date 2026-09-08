@@ -14,6 +14,7 @@ mod reopen_canonical;
 mod reopen_closure;
 mod reopen_derived;
 mod reopen_oracles;
+mod reopen_plan_v9;
 mod reopen_projection;
 mod reopen_semantic;
 mod reopen_snapshot;
@@ -1998,6 +1999,57 @@ fn v8_injected_migration_failure_restores_exact_v7_bytes() {
         fs::read(storage.path()).expect("read rolled back v7 fixture"),
         bytes_before
     );
+}
+
+#[test]
+fn v9_migration_uses_exact_fixture_for_fresh_and_existing_v8() {
+    for name in ["fresh_chain", "existing_v8"] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("legacy open creates exact v8");
+        verify_schema_v8_for_open(&storage.connection).expect("exact v8 predecessor");
+
+        migrate_v9(&mut storage.connection).expect("exact v8 to v9 migration");
+        assert_eq!(
+            verify_schema_v9(&storage.connection).expect("exact v9 schema"),
+            "pending",
+            "{name}"
+        );
+        assert!(storage.connection.is_autocommit(), "{name}");
+    }
+}
+
+#[test]
+fn v9_preflight_schema_drift_and_active_v2_job_rollback_to_exact_v8() {
+    for (name, mutation) in [
+        (
+            "same_name_trigger_drift",
+            "DROP TRIGGER events_are_append_only_update;\
+             CREATE TRIGGER events_are_append_only_update BEFORE UPDATE ON events BEGIN SELECT 1; END;",
+        ),
+        (
+            "active_v2_pending",
+            "INSERT INTO maintenance_jobs(\
+               job_id,job_kind,state,cutoff_json,started_at,completed_at,last_successful_at,\
+               failure_kind,created_at,updated_at\
+             ) VALUES ('v9_active','losslessCompaction','pending','{}',NULL,NULL,NULL,NULL,\
+               '2026-09-08T01:00:00Z','2026-09-08T01:00:00Z');",
+        ),
+    ] {
+        let (_root, path) = database();
+        let mut storage = Storage::open(&path).expect("exact v8 fixture");
+        storage.connection.execute_batch(mutation).unwrap();
+        let before = database_snapshot(&storage.connection);
+
+        let error = migrate_v9(&mut storage.connection).expect_err("unsafe v8 must fail");
+        assert_eq!(error.kind(), "migrationFailed", "{name}");
+        assert!(storage.connection.is_autocommit(), "{name}");
+        assert_eq!(database_snapshot(&storage.connection), before, "{name}");
+        assert_eq!(
+            storage_schema_version(&storage.connection).unwrap(),
+            Some(STORAGE_LIFETIME_SCHEMA_VERSION_V8),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -5317,10 +5369,11 @@ fn insert_v4_job(
 }
 
 fn table_rows(connection: &Connection, table: &str) -> Vec<Vec<SqlValue>> {
-    let order = if table == "frozen_operation_sources" {
-        "operation_id"
-    } else {
-        "rowid"
+    let order = match table {
+        "frozen_operation_sources" => "operation_id",
+        "storage_compaction_plans" => "job_id",
+        "storage_compaction_plan_rows" => "job_id,ordinal",
+        _ => "rowid",
     };
     let mut statement = connection
         .prepare(&format!("SELECT * FROM {table} ORDER BY {order};"))

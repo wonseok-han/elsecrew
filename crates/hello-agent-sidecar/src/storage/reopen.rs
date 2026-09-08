@@ -9,6 +9,7 @@ pub(crate) mod bytes;
 pub(crate) mod canonical;
 mod closure;
 mod derived;
+mod plan_v9;
 mod projection;
 pub(crate) mod semantic;
 pub(crate) mod snapshot;
@@ -514,6 +515,73 @@ fn preflight_schema_and_control_rows(connection: &Connection) -> Result<(), Side
         (
             &["job_id", "cutoff_json", "completed_at"][..],
             "maintenance_jobs WHERE job_kind='losslessCompaction' AND state='succeeded' LIMIT 2",
+        ),
+    ] {
+        encoded_rows_bytes(
+            connection,
+            &format!("SELECT {} FROM {from};", byte_lengths(columns)),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn preflight_schema_and_control_rows_v9(connection: &Connection) -> Result<(), SidecarError> {
+    let expected = reference_schema_v9()?;
+    encoded_rows_bytes(
+        connection,
+        &format!(
+            "SELECT {} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name LIMIT {};",
+            byte_lengths(&["type", "name", "tbl_name", "sql"]),
+            expected.len() + 1,
+        ),
+        [],
+    )?;
+    let actual = connection
+        .prepare(
+            "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' \
+             ORDER BY type,name LIMIT ?1;",
+        )
+        .map_err(|_| session_error())?
+        .query_map([sql_i64((expected.len() + 1) as u64)?], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(|_| session_error())?
+        .collect::<Result<Vec<SchemaObject>, _>>()
+        .map_err(|_| session_error())?;
+    if actual != expected {
+        return Err(session_error());
+    }
+    for table in ["storage_schema_meta", "lifetime_materialization_job"] {
+        if connection
+            .query_row(
+                &format!("SELECT 1 FROM {table} WHERE singleton<>1 LIMIT 1;"),
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|_| session_error())?
+            .is_some()
+        {
+            return Err(session_error());
+        }
+    }
+    for (columns, from) in [
+        (
+            &["migration_state", "materialization_state", "migrated_at"][..],
+            "storage_schema_meta LIMIT 2",
+        ),
+        (
+            &[
+                "job_id",
+                "state",
+                "phase",
+                "failure_kind",
+                "created_at",
+                "updated_at",
+                "completed_at",
+            ][..],
+            "lifetime_materialization_job LIMIT 2",
         ),
     ] {
         encoded_rows_bytes(
