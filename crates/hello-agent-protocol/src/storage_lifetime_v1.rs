@@ -3517,7 +3517,8 @@ pub fn storage_compaction_resume_witness_policy_v1() -> Value {
         "lifecycle": {
             "arm": "pendingToRunningSeparateCommittedSentinel",
             "success": "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
-            "sqlTransitionGuard": "singleBeforeUpdateExactAdjacentStatePhaseCursorFlagsAndRequiredArtifacts",
+            "sqlTransitionGuard": "singleBeforeUpdateStateCutoffFailureCompletedExactAdjacentPhaseCursorFlagsAndRequiredArtifacts",
+            "terminalEvidence": "nullSafeImmutableRfc3339UtcSecondSqlCalendarCheckAndRuntimeRevalidation",
             "crash": "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
             "reset": "forbidden",
             "appendAfterCutoff": "ignoredByPlanAndIncludedInRetainedTailEquivalence",

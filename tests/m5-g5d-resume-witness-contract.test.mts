@@ -653,12 +653,23 @@ test("actual V9 triggers enforce exact transitions, planning, prefix proof, and 
     assert.equal(retained[0]?.decision, "retainAnchor");
 
     advanceSqlPhase(database, "releasePlan", "finalize");
-    setJobState(database, "succeeded", privateState("finalize", 1000, {
+    const finalState = privateState("finalize", 1000, {
       scanExhausted: true,
-    }));
+    });
+    assert.throws(() => database.prepare(`
+      UPDATE maintenance_jobs
+      SET state='succeeded', cutoff_json=?, failure_kind=NULL,
+          completed_at='2026-02-29T01:00:02Z'
+      WHERE job_id='compact_v9_sql'
+    `).run(JSON.stringify(finalState)), /invalid storage v9 maintenance transition/);
+    setJobState(database, "succeeded", finalState);
     assert.equal(database.prepare(
       "SELECT state FROM maintenance_jobs WHERE job_id='compact_v9_sql'",
     ).get()!.state, "succeeded");
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET completed_at='2026-09-08T01:00:03Z'
+      WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
   } finally {
     database.close();
   }
@@ -667,6 +678,14 @@ test("actual V9 triggers enforce exact transitions, planning, prefix proof, and 
 test("actual V9 transition guard permits exact failure but rejects failure cursor mutation", () => {
   const database = databaseWithV9PlanSources();
   try {
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET completed_at='2026-09-08T01:00:02Z'
+      WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET failure_kind='forged'
+      WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
     assert.throws(() => database.exec(`
       UPDATE maintenance_jobs SET state='running' WHERE job_id='compact_v9_sql'
     `), /invalid storage v9 maintenance transition/);
@@ -677,7 +696,27 @@ test("actual V9 transition guard permits exact failure but rejects failure curso
     }))), /invalid storage v9 maintenance transition/);
 
     const armed = privateState("planEligibility", 0, { stepThroughPlanOrdinal: 100 });
+    const missingPhase = structuredClone(armed) as Record<string, any>;
+    delete missingPhase.storageCompactionV3PrivateState.cursor.phase;
+    assert.throws(() => setJobState(database, "running", missingPhase),
+      /invalid storage v9 maintenance transition/);
     setJobState(database, "running", armed);
+    const failUpdate = database.prepare(`
+      UPDATE maintenance_jobs
+      SET state='failed', cutoff_json=?, failure_kind=?, completed_at=?, updated_at=?
+      WHERE job_id='compact_v9_sql'
+    `);
+    for (const [failureKind, completedAt] of [
+      [null, "2026-09-08T01:00:02Z"],
+      ["", "2026-09-08T01:00:02Z"],
+      ["contractError", "not-a-time"],
+      ["contractError", "2026-02-29T01:00:02Z"],
+      ["contractError", "2026-09-08T24:00:02Z"],
+    ] as const) {
+      assert.throws(() => failUpdate.run(
+        JSON.stringify(armed), failureKind, completedAt, "2026-09-08T01:00:02Z",
+      ), /invalid storage v9 maintenance transition/);
+    }
     const changed = structuredClone(armed) as Record<string, any>;
     changed.storageCompactionV3PrivateState.cursor.afterPlanOrdinal = 1;
     assert.throws(() => setJobState(database, "failed", changed),
@@ -686,6 +725,14 @@ test("actual V9 transition guard permits exact failure but rejects failure curso
     assert.equal(database.prepare(
       "SELECT state FROM maintenance_jobs WHERE job_id='compact_v9_sql'",
     ).get()!.state, "failed");
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET failure_kind='rewritten'
+      WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
+    assert.throws(() => database.exec(`
+      UPDATE maintenance_jobs SET completed_at='2026-09-08T01:00:03Z'
+      WHERE job_id='compact_v9_sql'
+    `), /invalid storage v9 maintenance transition/);
   } finally {
     database.close();
   }

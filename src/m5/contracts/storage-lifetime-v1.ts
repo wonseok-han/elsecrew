@@ -2733,7 +2733,8 @@ export const STORAGE_COMPACTION_RESUME_WITNESS_POLICY_V1 = {
   lifecycle: {
     arm: "pendingToRunningSeparateCommittedSentinel",
     success: "runningToPendingWithAdvancedCursorAndEmptyAuthorityAtomic",
-    sqlTransitionGuard: "singleBeforeUpdateExactAdjacentStatePhaseCursorFlagsAndRequiredArtifacts",
+    sqlTransitionGuard: "singleBeforeUpdateStateCutoffFailureCompletedExactAdjacentPhaseCursorFlagsAndRequiredArtifacts",
+    terminalEvidence: "nullSafeImmutableRfc3339UtcSecondSqlCalendarCheckAndRuntimeRevalidation",
     crash: "pendingAdvancedCommittedRunningOrNonemptyAuthorityOrUncertainFailsAdmissionNoMutation",
     reset: "forbidden",
     appendAfterCutoff: "ignoredByPlanAndIncludedInRetainedTailEquivalence",

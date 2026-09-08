@@ -1226,11 +1226,11 @@ BEGIN
 END;
 
 CREATE TRIGGER maintenance_jobs_guard_v9_compaction_transition
-BEFORE UPDATE OF state, cutoff_json ON maintenance_jobs
+BEFORE UPDATE OF state, cutoff_json, failure_kind, completed_at ON maintenance_jobs
 WHEN json_extract(OLD.cutoff_json, '$.storageCompactionV3PrivateState.schemaVersion') = 3
   OR json_extract(NEW.cutoff_json, '$.storageCompactionV3PrivateState.schemaVersion') = 3
 BEGIN
-    SELECT CASE WHEN NOT (
+    SELECT CASE WHEN NOT ((
         json_valid(NEW.cutoff_json)
         AND json_type(NEW.cutoff_json, '$') = 'object'
         AND (SELECT COUNT(*) FROM json_each(NEW.cutoff_json)) = 1
@@ -1391,12 +1391,22 @@ BEGIN
             NEW.state IN ('pending', 'running')
             AND NEW.failure_kind IS NULL
             AND NEW.completed_at IS NULL
-            OR NEW.state = 'succeeded'
-            AND NEW.failure_kind IS NULL
-            AND NEW.completed_at IS NOT NULL
-            OR NEW.state = 'failed'
-            AND length(NEW.failure_kind) > 0
-            AND NEW.completed_at IS NOT NULL
+            OR NEW.state IN ('succeeded', 'failed')
+            AND (
+                NEW.state = 'succeeded' AND NEW.failure_kind IS NULL
+                OR NEW.state = 'failed'
+                AND typeof(NEW.failure_kind) = 'text'
+                AND length(NEW.failure_kind) > 0
+            )
+            AND typeof(NEW.completed_at) = 'text'
+            AND length(NEW.completed_at) = 20
+            AND NEW.completed_at GLOB
+                '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'
+            AND CAST(substr(NEW.completed_at, 1, 4) AS INTEGER) BETWEEN 1 AND 9999
+            AND CAST(substr(NEW.completed_at, 12, 2) AS INTEGER) BETWEEN 0 AND 23
+            AND CAST(substr(NEW.completed_at, 15, 2) AS INTEGER) BETWEEN 0 AND 59
+            AND CAST(substr(NEW.completed_at, 18, 2) AS INTEGER) BETWEEN 0 AND 59
+            AND strftime('%Y-%m-%dT%H:%M:%SZ', NEW.completed_at) IS NEW.completed_at
         )
         AND json_extract(OLD.cutoff_json, '$.storageCompactionV3PrivateState.schemaVersion') = 3
         AND json_extract(
@@ -1408,7 +1418,10 @@ BEGIN
             NEW.cutoff_json, '$.storageCompactionV3PrivateState.cursor.cutoffEventRowid'
         )
         AND (
-            (NEW.state = OLD.state AND NEW.cutoff_json = OLD.cutoff_json)
+            (NEW.state IS OLD.state
+             AND NEW.cutoff_json IS OLD.cutoff_json
+             AND NEW.failure_kind IS OLD.failure_kind
+             AND NEW.completed_at IS OLD.completed_at)
             OR (
                 OLD.state = 'pending' AND NEW.state = 'running'
                 AND NOT EXISTS (
@@ -1547,7 +1560,7 @@ BEGIN
             )
             OR (
                 OLD.state = 'pending' AND NEW.state = 'succeeded'
-                AND NEW.cutoff_json = OLD.cutoff_json
+                AND NEW.cutoff_json IS OLD.cutoff_json
                 AND json_extract(NEW.cutoff_json, '$.storageCompactionV3PrivateState.cursor.phase') = 'finalize'
                 AND json_extract(NEW.cutoff_json, '$.storageCompactionV3PrivateState.cursor.afterPlanOrdinal') = 1000
                 AND NOT EXISTS (
@@ -1561,10 +1574,10 @@ BEGIN
             )
             OR (
                 OLD.state = 'running' AND NEW.state = 'failed'
-                AND NEW.cutoff_json = OLD.cutoff_json
+                AND NEW.cutoff_json IS OLD.cutoff_json
             )
         )
-    ) THEN RAISE(ABORT, 'invalid storage v9 maintenance transition') END;
+    ) IS 1) THEN RAISE(ABORT, 'invalid storage v9 maintenance transition') END;
 END;
 
 DROP TRIGGER ledger_compaction_prefixes_require_exact_anchor;

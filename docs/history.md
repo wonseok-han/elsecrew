@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (G5D V9 terminal evidence P1 수리)
+
+- **전이 guard 완결**: V3 단일 `BEFORE` guard의 UPDATE 대상을 `state`·private cutoff뿐 아니라 `failure_kind`·`completed_at`까지 넓혔다. 전체 허용식은 `IS 1`로 total boolean화해 JSON 누락·SQL NULL이 통과하지 못하고, exact no-op도 네 필드 모두를 null-safe `IS` 비교하므로 terminal evidence를 나중에 다시 쓸 수 없다.
+- **terminal 계약**: pending/running은 terminal field가 둘 다 NULL이어야 한다. succeeded는 NULL failure와 immutable valid completion을, failed는 비어 있지 않은 failure와 immutable valid completion을 요구한다. SQL은 exact RFC 3339 UTC seconds shape·달력·시간 범위를 검사하며 Rust/TypeScript runtime validator가 같은 규칙을 다시 확인하는 권위는 유지한다.
+- **검증·경계**: pending terminal-field 위조, NULL/empty failure, 형식·윤년·24시 오류, terminal rewrite와 valid failure/success를 actual SQLite로 검증했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format과 diff check가 통과했다. 이는 V9 schema/protocol fixture 수리이며 runtime scheduler/delete writer 또는 readiness 활성화가 아니다.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D V9 exact schema·상태 전이 재리뷰 수리)
 
 - **P0 exact V8 강화**: V8→V9 SQL의 DDL 전 preflight를 이름 inventory에서 모든 non-autoindex table/index/trigger의 canonical `sqlite_schema.sql` exact 정의 비교로 강화했다. 같은 이름의 append-only trigger, active-job unique index, maintenance table을 약화·변형한 실제 SQLite에서도 migration이 실패하고 schema/version이 V8 그대로 rollback되는 것을 확인했다.
