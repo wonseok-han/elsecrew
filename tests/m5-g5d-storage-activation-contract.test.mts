@@ -93,6 +93,45 @@ test("storage activation rejects relaxed threshold, restart, fatal, writer, and 
   assert.throws(() => validateStorageLifetimeActivationPolicyV1(unknown));
 });
 
+test("storage activation rejects undefined unknown keys at root and nested levels", () => {
+  const rootUnknown = structuredClone(fixture);
+  rootUnknown.unknown = undefined;
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(rootUnknown));
+
+  const nestedUnknown = structuredClone(fixture);
+  (nestedUnknown.runtime as Record<string, unknown>).unknown = undefined;
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(nestedUnknown));
+});
+
+test("storage activation accepts semantically equal reordered root and nested objects", () => {
+  const reorderedRoot = Object.fromEntries(Object.entries(structuredClone(fixture)).reverse());
+  assert.doesNotThrow(() => validateStorageLifetimeActivationPolicyV1(reorderedRoot));
+
+  const reorderedNested = structuredClone(fixture);
+  reorderedNested.runtime = Object.fromEntries(
+    Object.entries(reorderedNested.runtime as Record<string, unknown>).reverse(),
+  );
+  assert.doesNotThrow(() => validateStorageLifetimeActivationPolicyV1(reorderedNested));
+});
+
+test("storage activation rejects non-plain objects and getters without invoking them", () => {
+  const inherited = structuredClone(fixture);
+  Object.setPrototypeOf(inherited, { inherited: true });
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(inherited));
+
+  let getterInvoked = false;
+  const getter = structuredClone(fixture);
+  Object.defineProperty(getter.runtime as Record<string, unknown>, "owner", {
+    enumerable: true,
+    get() {
+      getterInvoked = true;
+      return "singleSQLiteOwnerInSidecarEventLoop";
+    },
+  });
+  assert.throws(() => validateStorageLifetimeActivationPolicyV1(getter));
+  assert.equal(getterInvoked, false);
+});
+
 test("historical V6 V7 V8 activation manifests remain disabled", () => {
   const v6 = JSON.parse(readFileSync(
     resolve("tests/fixtures/m5/storage-v6/manifest.json"), "utf8",

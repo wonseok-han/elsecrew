@@ -9,6 +9,11 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5 Codex (G5D activation TS exact comparator 수리)
+
+- **독립 리뷰 수리**: 새 activation validator가 사용한 `JSON.stringify` 비교는 값이 `undefined`인 unknown key를 누락하고 object insertion order에 민감했다. 이 validator에만 own-key 기반 plain-object exact 비교를 적용해 root/nested unknown key를 `undefined`도 포함해 거부하고, JSON 의미가 같은 object key 재배치는 허용한다. 배열 순서·길이와 primitive/type는 exact이며 symbol/non-enumerable extra, custom prototype, accessor/getter, cycle·reflection 오류는 fail-closed한다. 기존 storage validator의 비교 방식은 변경하지 않았다.
+- **검증**: root/nested undefined unknown 거부, root/nested object reorder 허용, custom prototype/getter 미호출 거부를 포함한 focused Node 6개, TypeScript noEmit과 diff check가 통과했다. 별도 fix commit이며 Rust/golden/public wire/runtime은 변경하지 않았다.
+
 ### 2026-09-08 · by GPT-5 Codex (G5D storage lifetime activation 계약)
 
 - **사용자 승인 결정**: 자동 lossless compaction은 retained boundary 이후 exact safe prefix가 1,000 event 이상이고 기존 안전 제외·완전 materialization·exact 전후 동등성을 모두 만족할 때만 후보가 된다. age/byte trigger와 하한 미만 실행은 없고 user chat/message/evidence·recovery·workspace·snapshot·baseline·projection·receipt 및 물리 cleanup은 삭제 범위 밖이다.

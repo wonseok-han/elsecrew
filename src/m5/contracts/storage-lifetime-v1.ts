@@ -2574,10 +2574,62 @@ export function validateStorageLifetimeActivationPolicyV1(
   value: unknown,
 ): typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1 {
   const policy = requireObject(value, "storage lifetime activation policy");
-  if (!sameContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V1)) {
+  let exact = false;
+  try {
+    exact = exactPlainContractValue(policy, STORAGE_LIFETIME_ACTIVATION_POLICY_V1);
+  } catch {
+    exact = false;
+  }
+  if (!exact) {
     fail("storage lifetime activation policy is not exact");
   }
   return policy as unknown as typeof STORAGE_LIFETIME_ACTIVATION_POLICY_V1;
+}
+
+function exactPlainContractValue(
+  actual: unknown,
+  expected: unknown,
+  ancestors = new WeakSet<object>(),
+): boolean {
+  if (actual === null || expected === null
+    || typeof actual !== "object" || typeof expected !== "object") {
+    return actual === expected;
+  }
+  const array = Array.isArray(actual);
+  if (array !== Array.isArray(expected)) return false;
+  const prototype = array ? Array.prototype : Object.prototype;
+  if (Object.getPrototypeOf(actual) !== prototype || Object.getPrototypeOf(expected) !== prototype
+    || ancestors.has(actual)) {
+    return false;
+  }
+
+  const actualKeys = Reflect.ownKeys(actual);
+  const expectedKeys = Reflect.ownKeys(expected);
+  if (actualKeys.some((key) => typeof key !== "string")
+    || expectedKeys.some((key) => typeof key !== "string")
+    || actualKeys.length !== expectedKeys.length) {
+    return false;
+  }
+  const sortedActualKeys = [...actualKeys as string[]].sort();
+  const sortedExpectedKeys = [...expectedKeys as string[]].sort();
+  if (sortedActualKeys.some((key, index) => key !== sortedExpectedKeys[index])) return false;
+
+  ancestors.add(actual);
+  try {
+    for (const key of sortedActualKeys) {
+      const actualDescriptor = Object.getOwnPropertyDescriptor(actual, key);
+      const expectedDescriptor = Object.getOwnPropertyDescriptor(expected, key);
+      if (actualDescriptor === undefined || expectedDescriptor === undefined
+        || !("value" in actualDescriptor) || !("value" in expectedDescriptor)
+        || actualDescriptor.enumerable !== expectedDescriptor.enumerable
+        || !exactPlainContractValue(actualDescriptor.value, expectedDescriptor.value, ancestors)) {
+        return false;
+      }
+    }
+    return true;
+  } finally {
+    ancestors.delete(actual);
+  }
 }
 
 export function canonicalFrozenOperationRecordV1(source: FrozenOperationSourceV1): string {
