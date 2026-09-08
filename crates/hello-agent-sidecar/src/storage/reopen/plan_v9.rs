@@ -1,4 +1,4 @@
-use super::bytes::{ByteUsage, FRAGMENT_BYTES, INPUT_BYTES};
+use super::bytes::{ByteUsage, SourceIdentity, FRAGMENT_BYTES, INPUT_BYTES};
 use super::*;
 use hello_agent_protocol::storage_lifetime_v1::{
     validate_storage_compaction_job_v2, validate_storage_compaction_job_v3,
@@ -1000,16 +1000,17 @@ fn verify_plan_row(
         }
         _ => true,
     };
-    verify_source_receipt_and_index(connection, &row, expect_live, expect_frozen, usage)?;
-    verify_planned_chat_transition(
+    verify_source_receipt(connection, &row, expect_live, expect_frozen, usage)?;
+    verify_planned_chat_transition(connection, plan, &row, chat_state.as_ref(), usage)?;
+    verify_message_witness(connection, job, &row, chat_state.as_ref(), usage)?;
+    verify_planned_source_parity(
         connection,
-        plan,
         &row,
         chat_state.as_ref(),
         expect_live,
+        expect_frozen,
         usage,
     )?;
-    verify_message_witness(connection, job, &row, chat_state.as_ref(), usage)?;
     Ok(())
 }
 
@@ -1138,7 +1139,6 @@ fn verify_planned_chat_transition(
     plan: &StorageCompactionPlanV1,
     row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
     current: Option<&PlannedChatState>,
-    expect_live: bool,
     usage: &mut ByteUsage,
 ) -> Result<(), SidecarError> {
     if row.aggregate_type != "chat" {
@@ -1222,30 +1222,60 @@ fn verify_planned_chat_transition(
         row.introduced_message_id.as_deref(),
     )
     .map_err(|_| session_error())?;
-    if expect_live {
-        let mirror: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM event_source_index WHERE event_rowid=?1 \
-                 AND typeof(chat_durable_sequence)='integer' AND chat_durable_sequence=?2 \
-                 AND ((?3 IS NULL AND typeof(chat_snapshot_message_id)='null') \
-                   OR (typeof(chat_snapshot_message_id)='text' AND chat_snapshot_message_id=?3)))",
-                params![
-                    i64::try_from(row.event_rowid).map_err(|_| session_error())?,
-                    i64::try_from(current.durable).map_err(|_| session_error())?,
-                    current.snapshot
-                ],
-                |record| record.get(0),
-            )
-            .map_err(|_| session_error())?;
-        usage.work_units += 1;
-        if !mirror {
-            return Err(session_error());
-        }
-    }
     Ok(())
 }
 
-fn verify_source_receipt_and_index(
+fn verify_planned_source_parity(
+    connection: &Connection,
+    row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
+    chat: Option<&PlannedChatState>,
+    expect_live: bool,
+    expect_frozen: bool,
+    usage: &mut ByteUsage,
+) -> Result<(), SidecarError> {
+    let identity = SourceIdentity {
+        source_rowid: i64::try_from(row.event_rowid).map_err(|_| session_error())?,
+        event_id: row.event_id.clone(),
+        operation_id: row.operation_id.clone(),
+        aggregate_type: row.aggregate_type.clone(),
+        aggregate_id: row.aggregate_id.clone(),
+        aggregate_sequence: i64::try_from(row.aggregate_sequence).map_err(|_| session_error())?,
+        payload_schema_version: i64::from(row.payload_schema_version),
+        event_type: row.event_type.clone(),
+        request_id: row.request_id.clone(),
+        timestamp: row.event_timestamp.clone(),
+    };
+    if expect_live {
+        super::snapshot::source_payload_identity(connection, &identity, false, usage)?;
+    }
+    if expect_frozen {
+        super::snapshot::source_payload_identity(connection, &identity, true, usage)?;
+    }
+    let durable = chat
+        .map(|chat| i64::try_from(chat.durable).map_err(|_| session_error()))
+        .transpose()?;
+    let index = super::snapshot::source_index_fields_status(
+        connection,
+        &identity,
+        durable,
+        chat.and_then(|chat| chat.snapshot.as_deref()),
+        row.introduced_message_id.as_deref(),
+        usage,
+    )?;
+    if (expect_live && index != Some(true)) || (!expect_live && index.is_some()) {
+        return Err(session_error());
+    }
+    super::snapshot::verify_source_baseline_copy(
+        connection,
+        &identity,
+        !expect_live && expect_frozen,
+        expect_live,
+        &row.canonical_payload_digest,
+        usage,
+    )
+}
+
+fn verify_source_receipt(
     connection: &Connection,
     row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
     expect_live: bool,
@@ -1330,29 +1360,7 @@ fn verify_source_receipt_and_index(
         )
         .map_err(|_| session_error())?;
     usage.work_units += 1;
-    let index_exact: bool = connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM event_source_index i WHERE i.event_rowid=?1 \
-             AND i.event_id=?2 AND i.operation_id=?3 AND i.aggregate_type=?4 \
-             AND i.aggregate_id=?5 AND i.aggregate_sequence=?6 \
-             AND i.introduced_message_id IS ?7);",
-            params![
-                event_rowid,
-                row.event_id,
-                row.operation_id,
-                row.aggregate_type,
-                row.aggregate_id,
-                aggregate_sequence,
-                row.introduced_message_id
-            ],
-            |record| record.get(0),
-        )
-        .map_err(|_| session_error())?;
-    usage.work_units += 1;
     if live_exact != expect_live || frozen_exact != expect_frozen || !receipt_exact {
-        return Err(session_error());
-    }
-    if (expect_live && !index_exact) || (!expect_live && index_exact) {
         return Err(session_error());
     }
     Ok(())

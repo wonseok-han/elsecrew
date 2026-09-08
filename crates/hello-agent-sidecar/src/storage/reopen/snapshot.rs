@@ -318,6 +318,42 @@ fn source_index_matches(
     required: bool,
     usage: &mut ByteUsage,
 ) -> Result<(), SidecarError> {
+    source_index_fields_match(
+        connection,
+        identity,
+        fields.map(|fields| fields.durable as i64),
+        fields.and_then(|fields| fields.snapshot.as_deref()),
+        introduced,
+        required,
+        usage,
+    )
+}
+
+pub(super) fn source_index_fields_match(
+    connection: &Connection,
+    identity: &SourceIdentity,
+    durable: Option<i64>,
+    snapshot: Option<&str>,
+    introduced: Option<&str>,
+    required: bool,
+    usage: &mut ByteUsage,
+) -> Result<(), SidecarError> {
+    let matches =
+        source_index_fields_status(connection, identity, durable, snapshot, introduced, usage)?;
+    if matches == Some(false) || (required && matches.is_none()) {
+        return Err(session_error());
+    }
+    Ok(())
+}
+
+pub(super) fn source_index_fields_status(
+    connection: &Connection,
+    identity: &SourceIdentity,
+    durable: Option<i64>,
+    snapshot: Option<&str>,
+    introduced: Option<&str>,
+    usage: &mut ByteUsage,
+) -> Result<Option<bool>, SidecarError> {
     let matches: Option<bool> = connection.query_row(
         "SELECT (typeof(event_rowid)='integer' AND typeof(aggregate_sequence)='integer' \
          AND typeof(event_id)='text' AND typeof(operation_id)='text' AND typeof(aggregate_type)='text' AND typeof(aggregate_id)='text' \
@@ -327,14 +363,11 @@ fn source_index_matches(
          AND ((?9 IS NULL AND typeof(introduced_message_id)='null') OR (typeof(introduced_message_id)='text' AND introduced_message_id=?9))) \
          FROM event_source_index WHERE event_rowid=?1",
         params![identity.source_rowid, identity.event_id, identity.operation_id, identity.aggregate_type, identity.aggregate_id, identity.aggregate_sequence,
-            fields.map(|f| f.durable as i64), fields.and_then(|f| f.snapshot.as_deref()), introduced],
+            durable, snapshot, introduced],
         |r| r.get(0),
     ).optional().map_err(|_| session_error())?;
     usage.work_units += 1;
-    if matches == Some(false) || (required && matches.is_none()) {
-        return Err(session_error());
-    }
-    Ok(())
+    Ok(matches)
 }
 
 fn verify_live_relation(
@@ -609,7 +642,7 @@ fn verify_frozen_relation(
     Ok(())
 }
 
-fn source_payload_identity(
+pub(super) fn source_payload_identity(
     connection: &Connection,
     identity: &SourceIdentity,
     frozen: bool,
@@ -710,6 +743,36 @@ fn verify_source_copies(
         return Ok(());
     }
 
+    verify_source_baseline_copy(
+        connection,
+        identity,
+        frozen,
+        ready,
+        &hex(payload_digest),
+        usage,
+    )
+}
+
+pub(super) fn verify_source_baseline_copy(
+    connection: &Connection,
+    identity: &SourceIdentity,
+    frozen: bool,
+    require_latest: bool,
+    payload_digest: &str,
+    usage: &mut ByteUsage,
+) -> Result<(), SidecarError> {
+    if identity.aggregate_type == "app_instance" {
+        return Ok(());
+    }
+    let (source, rowid, payload) = if frozen {
+        (
+            "frozen_operation_sources",
+            "source_event_rowid",
+            "canonical_payload_json",
+        )
+    } else {
+        ("events", "rowid", "canonical_json_payload")
+    };
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     hash.update(identity.aggregate_type.as_bytes());
@@ -725,13 +788,13 @@ fn verify_source_copies(
          AND typeof(b.canonical_projection_json)='text' AND typeof(b.projection_digest)='text' \
          AND CAST(b.canonical_projection_json AS BLOB)=CAST(s.{payload} AS BLOB) AND b.projection_digest=?3) \
          FROM {source} s JOIN ledger_baselines b ON b.aggregate_type=s.aggregate_type AND b.aggregate_id=s.aggregate_id AND b.cutoff_aggregate_sequence=s.aggregate_sequence WHERE s.{rowid}=?1"),
-        params![identity.source_rowid, expected_id, format!("sha256:{}", hex(payload_digest))], |r| r.get(0),
+        params![identity.source_rowid, expected_id, format!("sha256:{payload_digest}")], |r| r.get(0),
     ).optional().map_err(|_| session_error())?;
     usage.work_units += 1;
     if baseline == Some(false) {
         return Err(session_error());
     }
-    if ready && !frozen {
+    if require_latest && !frozen {
         let latest: i64 = connection.query_row(
             "SELECT rowid FROM events WHERE aggregate_type=?1 AND aggregate_id=?2 ORDER BY aggregate_sequence DESC LIMIT 1",
             params![identity.aggregate_type, identity.aggregate_id], |r| r.get(0),

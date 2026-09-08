@@ -732,6 +732,98 @@ fn tamper_chat_transition(path: &Path, sequence: u64) {
         .unwrap();
 }
 
+fn tamper_chat_root_identity(path: &Path) {
+    let connection = Connection::open(path).unwrap();
+    let canonical = canonical_json_v1(materializable_chat_payload(
+        "hostile_chat_v9_admission",
+        PROJECT_ID,
+        0,
+        Value::Null,
+    ))
+    .unwrap();
+    let digest = sha256_file_version_v1(canonical.as_bytes());
+    let raw = digest.strip_prefix("sha256:").unwrap();
+    with_triggers_disabled(&connection, |connection| {
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE events SET canonical_json_payload=?1 \
+                     WHERE aggregate_type='chat' AND aggregate_id=?2 \
+                       AND aggregate_sequence=2",
+                    params![canonical, CHAT_ID],
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE operation_receipts \
+                     SET canonical_payload_json=?1,canonical_payload_digest=?2 \
+                     WHERE aggregate_type='chat' AND aggregate_id=?3 \
+                       AND aggregate_sequence=2",
+                    params![canonical, raw, CHAT_ID],
+                )
+                .unwrap(),
+            1
+        );
+    });
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+}
+
+fn tamper_project_plan_parity(path: &Path, case: &str) {
+    let connection = Connection::open(path).unwrap();
+    with_triggers_disabled(&connection, |connection| match case {
+        "non_chat_durable" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE event_source_index SET chat_durable_sequence=0 \
+                         WHERE aggregate_type='project' AND aggregate_id=?1 \
+                           AND aggregate_sequence=2",
+                        [PROJECT_ID],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        "non_chat_snapshot" => {
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE event_source_index \
+                         SET chat_snapshot_message_id='hostile_message' \
+                         WHERE aggregate_type='project' AND aggregate_id=?1 \
+                           AND aggregate_sequence=2",
+                        [PROJECT_ID],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        "mismatched_extra_baseline" => {
+            insert_baseline(connection, 2);
+            assert_eq!(
+                connection
+                    .execute(
+                        "UPDATE ledger_baselines SET canonical_projection_json='{}' \
+                         WHERE aggregate_type='project' AND aggregate_id=?1 \
+                           AND cutoff_aggregate_sequence=2",
+                        [PROJECT_ID],
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        _ => unreachable!(),
+    });
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+}
+
 fn tamper_message_copy_metadata(path: &Path, case: &str) {
     let connection = Connection::open(path).unwrap();
     with_triggers_disabled(&connection, |connection| match case {
@@ -936,6 +1028,49 @@ fn product_admission_rejects_coherent_planned_chat_transition_tamper_without_mut
         let cancellation = AtomicBool::new(false);
         let error = match Storage::open_for_admission(&path, &cancellation) {
             Ok(_) => panic!("accepted coherent planned chat transition tamper: {case}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
+        let connection = Connection::open(&path).unwrap();
+        assert_eq!(database_snapshot(&connection), before, "{case}");
+        assert!(connection.is_autocommit(), "{case}");
+    }
+}
+
+#[test]
+fn product_admission_rejects_planned_source_parity_tamper_without_mutation() {
+    let (_chat_root, chat_template) = chat_v9_template(false);
+    let (_copy_root, chat_path) = copy_template(&chat_template);
+    tamper_chat_root_identity(&chat_path);
+    seed_chat_pending(&chat_path, "planEligibility", 137);
+    let connection = Connection::open(&chat_path).unwrap();
+    let before = database_snapshot(&connection);
+    drop(connection);
+    let cancellation = AtomicBool::new(false);
+    let error = match Storage::open_for_admission(&chat_path, &cancellation) {
+        Ok(_) => panic!("accepted coherent planned chat root identity tamper"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+    let connection = Connection::open(&chat_path).unwrap();
+    assert_eq!(database_snapshot(&connection), before);
+    assert!(connection.is_autocommit());
+
+    let (_project_root, project_template) = v9_template(1001);
+    for case in [
+        "non_chat_durable",
+        "non_chat_snapshot",
+        "mismatched_extra_baseline",
+    ] {
+        let (_copy_root, path) = copy_template(&project_template);
+        seed_pending(&path, "planEligibility", 137);
+        tamper_project_plan_parity(&path, case);
+        let connection = Connection::open(&path).unwrap();
+        let before = database_snapshot(&connection);
+        drop(connection);
+
+        let error = match Storage::open_for_admission(&path, &cancellation) {
+            Ok(_) => panic!("accepted planned source parity tamper: {case}"),
             Err(error) => error,
         };
         assert_eq!(error.kind(), "storageSchemaMismatch", "{case}");
