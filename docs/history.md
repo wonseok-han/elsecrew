@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-08 · by GPT-5.6-Sol (D1 계약 통합·3초 제품 admission 결정 대기)
+
+- **통합**: exact `6df8532ade27b5a535edca0070ac5e2db4b8d3b5`의 D1 `storage.status` additive capability 계약은 관련 Rust 44개·Node 37개·TypeScript·rustfmt·diff 검증과 독립 리뷰 PASS 뒤 `1b1c978020c92566200349457ae76607fd7d3c21`로 통합했다. 기존 G5/G5A exact 협상과 실제 provider 비활성 경계는 유지하며 sidecar/Electron dispatcher는 아직 연결하지 않는다.
+- **성능 실측·폐기**: production-101의 warm 기준선은 172,685 calls·검증 102.066초였고 source 56.922초, catch-up 30.069초, projection 13.005초가 병목이다. bounded scanner 실험은 11.873초까지 줄였지만 3초 목표에 실패했고 승인된 호출당 100 work-unit 회계를 건너뛰어 독립 아키텍처 검토에서 통합 불가 판정을 받았다. 실험 코드·테스트·임시 assertion은 모두 안전하게 원복했으며 기능 commit은 없다.
+- **남은 결정·정리**: 검증을 약화하지 않고 `system.ready`를 3초 이내 shell-ready와 별도 storage admission으로 분리해, storage가 `verifying|failed`인 동안 recovery mutation·app instance 등록·append·fixture/actual run을 sidecar에서 fail-closed 차단할지 사용자 결정이 필요하다. worktree 감사 뒤 clean·patch-equivalent·무증거인 `g5d-v8-reopen-closure`와 `g5d-v8-reopen-projection`, 완료된 임시 계약/성능 checkout을 비강제 제거하고 모든 branch를 보존했다. 등록 child는 순증감 기준 20→18개, `.worktrees` 약 15 GiB이며 나머지는 고유 commit·미커밋 변경·QA/`.omo` 증거 때문에 보존한다. main 병합·push 없음.
+
 ### 2026-09-08 · by GPT-5.6-Sol (G5D D1 storage.status capability 계약)
 
 - **계약 고정**: base `25ec6426ef529b12160ffd71fe84320aab943139`의 `codex/g5d-storage-status-contract`에서 protocol v1에 `storage.status`를 예약하고, 기존 exact G5/G5A 상수·parser를 변경하지 않은 채 각각 뒤에 해당 메서드 하나만 추가하는 exact D1 일반 제품/agent-fixture capability 상수·parser를 Rust와 TypeScript에 추가했다. 새 `storage-status-d1` golden은 두 모드의 legacy/D1 배열을 함께 고정하며, 기존 storage-v2 D0A manifest의 `advertisedBeforeD1=false`·`dispatchableBeforeD1=false`는 역사 기록으로 그대로 보존한다. `M5BridgeV6.getStorageStatus`만 renderer bridge 추가 지점임을 회귀로 고정했다.
