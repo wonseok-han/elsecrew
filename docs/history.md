@@ -12,8 +12,8 @@
 ### 2026-09-09 · by GPT-5 Codex (G5D evidence leaf와 pnpm wrapper P1 수리)
 
 - **evidence 안전 수리**: JSON evidence 임시 leaf는 random token을 쓰되 `O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW`로 0600 생성하고, write-all·fsync·close 뒤 parent/final 부재와 owned regular temp inode를 다시 확인한 뒤에만 atomic rename한다. 최종 leaf도 regular non-symlink인지 확인하며, 실패 때는 같은 device/inode의 owned temporary만 unlink한다.
-- **wrapper 실행 수리**: repository `.npmrc`에는 `verify-deps-before-run=false` 한 줄만 두어 isolated worktree package script가 registry install을 재시도하지 않게 했다. runner가 spawn하는 모든 child에도 같은 `pnpm_config_verify_deps_before_run=false`를 명시적으로 전달한다. lockfile·의존성·registry 설정은 바꾸지 않았다.
-- **회귀·다음**: 예측된 temporary symlink, final symlink race, preexisting regular temp, evidence write failure와 외부 sentinel 불변, env 상속·package dispatch를 Node 회귀로 고정했다. clean fix commit 뒤 실제 `pnpm run m5:test:storage-status`와 evidence를 다시 확인한다.
+- **wrapper 설정과 실제 한계**: repository `.npmrc`에는 사용자가 승인한 `verify-deps-before-run=false` 한 줄만 두고, runner child에는 같은 `pnpm_config_verify_deps_before_run=false`를 명시적으로 전달한다. 그러나 현지 pnpm 11.25는 이 `.npmrc` key를 읽지 않아 plain `pnpm run`이 여전히 install을 시도했다. `pnpm --config.verify-deps-before-run=false run m5:test:storage-status`는 즉시 dispatch·PASS했지만 plain wrapper 해결에는 다른 config surface 또는 설치된 integration worktree가 필요하다. lockfile·의존성·registry 설정은 바꾸지 않았다.
+- **회귀·검증**: 예측된 temporary symlink, final symlink race, preexisting regular temp, evidence write failure와 외부 sentinel 불변, env 상속·package dispatch를 Node 회귀로 고정했다. Node 19/19·diff check와 explicit pnpm config status gate PASS evidence를 확인했으며, plain pnpm wrapper의 DNS install은 PASS로 인용하지 않는다.
 
 ### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 증거 게이트)
 
