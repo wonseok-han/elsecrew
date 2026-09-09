@@ -1,16 +1,50 @@
 const listeners = new Set();
 const workspaceListeners = new Set();
 const chatListeners = new Set();
+const agentPublicEventListeners = new Set();
+const agentRunStateListeners = new Set();
 let snapshotCreated = false;
 
+const unexpected = (method) => async () => { throw new Error(`renderer smoke fixture did not expect ${method}`); };
+const unsubscribe = (listeners, listener) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
 window.m5 = {
-  version: 3,
-  getSystemStatus: async () => ({ state: "unavailable" }),
+  version: 6,
+  getSystemStatus: async () => ({
+    schemaVersion: 1,
+    state: "shellReady",
+    sidecar: {
+      protocolVersion: 1,
+      sidecarSchemaVersion: 1,
+      appSchemaVersion: 1,
+      pid: 42,
+      platform: "darwin",
+      capabilities: [
+        "system.status", "app.prepareQuit", "project.open", "project.getTree", "project.createWorktree", "project.close",
+        "file.read", "file.save", "file.watch", "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+        "workspace.file.read", "workspace.file.save", "workspace.file.watch", "workspace.diff.getSummary", "workspace.diff.getFile",
+        "workspace.prepareChat", "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings", "chat.create", "chat.list", "chat.get",
+        "run.startFixture", "run.cancel", "recovery.list", "recovery.inspect", "recovery.markResolved", "storage.status",
+      ],
+      sidecarInstanceId: "smoke_sidecar",
+    },
+    storageAdmission: {
+      schemaVersion: 1,
+      state: "ready",
+      startedAt: "2026-09-09T00:00:00Z",
+      completedAt: "2026-09-09T00:00:01Z",
+      error: null,
+    },
+    database: { health: "healthy", schemaVersion: 1 },
+    recoveryRequired: false,
+    blockerIds: [],
+  }),
+  getStorageStatus: unexpected("getStorageStatus"),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
-  onSidecarEvent: (listener) => {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
+  onSidecarEvent: (listener) => unsubscribe(listeners, listener),
   openProject: async () => ({
     schemaVersion: 1,
     projectId: "smoke_project",
@@ -82,10 +116,18 @@ window.m5 = {
   },
   getDiffFile: async () => { throw new Error("not used by renderer smoke"); },
   onProjectEvent: () => () => {},
-  onWorkspaceEvent: (listener) => {
-    workspaceListeners.add(listener);
-    return () => workspaceListeners.delete(listener);
-  },
+  getWorkspaceTree: unexpected("getWorkspaceTree"),
+  closeWorkspace: unexpected("closeWorkspace"),
+  readWorkspaceFile: unexpected("readWorkspaceFile"),
+  beginWorkspaceFileSave: unexpected("beginWorkspaceFileSave"),
+  appendWorkspaceFileSaveChunk: unexpected("appendWorkspaceFileSaveChunk"),
+  commitWorkspaceFileSave: unexpected("commitWorkspaceFileSave"),
+  watchWorkspaceFiles: unexpected("watchWorkspaceFiles"),
+  getWorkspaceDiffSummary: unexpected("getWorkspaceDiffSummary"),
+  getWorkspaceDiffFile: unexpected("getWorkspaceDiffFile"),
+  onWorkspaceEvent: (listener) => unsubscribe(workspaceListeners, listener),
+  prepareChatWorkspace: unexpected("prepareChatWorkspace"),
+  abandonPreparedWorkspace: unexpected("abandonPreparedWorkspace"),
   getProjectRoleSettings: async ({ projectId }) => ({
     schemaVersion: 1,
     projectId,
@@ -93,9 +135,21 @@ window.m5 = {
     roles: [],
     updatedAt: "2026-08-26T00:00:00Z",
   }),
+  updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
+  createChat: unexpected("createChat"),
   listChats: async ({ projectId }) => ({ projectId, items: [], nextCursor: null }),
-  onChatEvent: (listener) => {
-    chatListeners.add(listener);
-    return () => chatListeners.delete(listener);
-  },
+  getChat: unexpected("getChat"),
+  startFixtureRun: unexpected("startFixtureRun"),
+  cancelRun: unexpected("cancelRun"),
+  listRecoveries: async () => ({ items: [], nextCursor: null }),
+  inspectRecovery: unexpected("inspectRecovery"),
+  markRecoveryResolved: unexpected("markRecoveryResolved"),
+  onChatEvent: (listener) => unsubscribe(chatListeners, listener),
+  getAgentCapabilities: unexpected("getAgentCapabilities"),
+  startAgentRun: unexpected("startAgentRun"),
+  cancelAgentRun: unexpected("cancelAgentRun"),
+  inspectAgentRecovery: unexpected("inspectAgentRecovery"),
+  resolveAgentRecovery: unexpected("resolveAgentRecovery"),
+  onAgentPublicEvent: (listener) => unsubscribe(agentPublicEventListeners, listener),
+  onAgentRunStateChanged: (listener) => unsubscribe(agentRunStateListeners, listener),
 };
