@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -16,10 +17,31 @@ test("패키지 smoke는 canonical D1 product fixture의 capability 순서를 ex
   assert.match(smoke, /const expectedProductCapabilities = storageStatusD1Manifest\.modes\?\.generalProduct\?\.d1Capabilities/);
   assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedProductCapabilities\)/);
   assert.match(smoke, /expectedProductCapabilities\.at\(-1\) === "storage\.status"/);
+  assert.match(smoke, /assert\.equal\(status\.result\.state, "shellReady"\)/);
+  assert.match(smoke, /await waitForStorageReady\(/);
+  assert.match(smoke, /admissionState === "ready"/);
+  assert.match(smoke, /assert\.equal\(admissionState, "verifying"/);
+  assert.match(smoke, /validateProductSystemStatus\(response\.result, readyPayload\)/);
+  assert.match(smoke, /Object\.keys\(value\)\.sort\(\)/);
+  assert.match(smoke, /requireTimestamp\(admission\.startedAt, "startedAt"\)/);
+  assert.match(smoke, /packaged product storage admission timed out/);
   assert.doesNotMatch(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
   assert.doesNotMatch(smoke, /modes\?\.agentFixture/);
   assert.match(smoke, /editor\\\.worker-.+\\\.js/);
   assert.doesNotMatch(smoke, /ready\.payload\.capabilities, \["system\.status", "app\.prepareQuit"\]\)/);
+});
+
+test("패키지 smoke의 D1 status validator는 injected malformed product 상태를 fail-closed 한다", () => {
+  const output = execFileSync(
+    process.execPath,
+    ["scripts/m5-electron-package-smoke.mjs"],
+    {
+      cwd: root,
+      env: { ...process.env, M5_PACKAGE_SMOKE_STATUS_VALIDATOR_TEST: "1" },
+      encoding: "utf8",
+    },
+  );
+  assert.match(output, /PASS G5D product status validator regression/);
 });
 
 test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명령으로 고정한다", () => {
