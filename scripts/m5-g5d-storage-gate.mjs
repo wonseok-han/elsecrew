@@ -230,11 +230,11 @@ function finish(report, root, filesystem, now) {
 }
 
 export function writeEvidence(root, report, filesystem = defaultFilesystem()) {
-  const evidenceDirectory = safeEvidenceDirectory(root, filesystem);
+  const evidenceDirectory = captureEvidenceDirectoryChain(root, filesystem);
   const timestamp = report.startedAt.replaceAll(":", "-").replaceAll(".", "-");
   const filename = `${report.gate}-v${report.gateVersion}-${timestamp}-${process.pid}-${evidenceSequence += 1}.json`;
-  const finalPath = resolve(evidenceDirectory, filename);
-  assertWithinDirectory(evidenceDirectory, finalPath);
+  const finalPath = resolve(evidenceDirectory.path, filename);
+  assertWithinDirectory(evidenceDirectory.path, finalPath);
   assertAbsentLeaf(finalPath, filesystem.lstatSync, "final evidence");
   const token = typeof filesystem.randomToken === "function"
     ? filesystem.randomToken()
@@ -242,13 +242,14 @@ export function writeEvidence(root, report, filesystem = defaultFilesystem()) {
   if (typeof token !== "string" || !/^[A-Za-z0-9_-]{12,128}$/.test(token)) {
     throw new Error("evidence temporary token is unsafe");
   }
-  const temporaryPath = resolve(evidenceDirectory, `.${filename}.${token}.tmp`);
-  assertWithinDirectory(evidenceDirectory, temporaryPath);
+  const temporaryPath = resolve(evidenceDirectory.path, `.${filename}.${token}.tmp`);
+  assertWithinDirectory(evidenceDirectory.path, temporaryPath);
   assertAbsentLeaf(temporaryPath, filesystem.lstatSync, "temporary evidence");
   let descriptor = null;
   let ownedTemporary = null;
   try {
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    assertDirectoryChainUnchanged(evidenceDirectory.checkpoints, filesystem.lstatSync);
     descriptor = filesystem.openSync(
       temporaryPath,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
@@ -263,11 +264,11 @@ export function writeEvidence(root, report, filesystem = defaultFilesystem()) {
     filesystem.closeSync(descriptor);
     descriptor = null;
 
-    safeEvidenceDirectory(root, filesystem);
+    assertDirectoryChainUnchanged(evidenceDirectory.checkpoints, filesystem.lstatSync);
     assertAbsentLeaf(finalPath, filesystem.lstatSync, "final evidence before rename");
     assertOwnedRegularLeaf(temporaryPath, ownedTemporary, filesystem.lstatSync, "temporary evidence before rename");
     filesystem.renameSync(temporaryPath, finalPath);
-    assertRegularLeaf(finalPath, filesystem.lstatSync, "final evidence after rename");
+    assertOwnedRegularLeaf(finalPath, ownedTemporary, filesystem.lstatSync, "final evidence after rename");
     return finalPath;
   } catch (error) {
     if (descriptor !== null) {
@@ -293,27 +294,42 @@ function defaultFilesystem() {
 }
 
 export function safeEvidenceDirectory(root, filesystem = defaultFilesystem()) {
+  return captureEvidenceDirectoryChain(root, filesystem).path;
+}
+
+function captureEvidenceDirectoryChain(root, filesystem) {
   const repository = resolve(root);
-  ensureNotSymlink(repository, filesystem.lstatSync, "repository root");
+  const checkpoints = [directoryCheckpoint(repository, filesystem.lstatSync, "repository root")];
   let directory = repository;
   for (const segment of [".artifacts", "m5-g5d-storage"]) {
     directory = resolve(directory, segment);
     assertWithinDirectory(repository, directory);
     try {
-      ensureNotSymlink(directory, filesystem.lstatSync, "evidence directory");
+      directoryCheckpoint(directory, filesystem.lstatSync, "evidence directory");
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
       filesystem.mkdirSync(directory, { recursive: false });
-      ensureNotSymlink(directory, filesystem.lstatSync, "created evidence directory");
+      directoryCheckpoint(directory, filesystem.lstatSync, "created evidence directory");
     }
+    checkpoints.push(directoryCheckpoint(directory, filesystem.lstatSync, "evidence directory"));
   }
-  return directory;
+  return { path: directory, checkpoints };
 }
 
-function ensureNotSymlink(path, lstat, label) {
+function directoryCheckpoint(path, lstat, label) {
   const metadata = lstat(path);
   if (metadata.isSymbolicLink()) throw new Error(`${label} must not be a symlink: ${path}`);
   if (!metadata.isDirectory()) throw new Error(`${label} must be a directory: ${path}`);
+  return { path, dev: metadata.dev, ino: metadata.ino };
+}
+
+function assertDirectoryChainUnchanged(checkpoints, lstat) {
+  for (const checkpoint of checkpoints) {
+    const metadata = lstat(checkpoint.path);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.dev !== checkpoint.dev || metadata.ino !== checkpoint.ino) {
+      throw new Error(`evidence directory changed before publication: ${checkpoint.path}`);
+    }
+  }
 }
 
 function assertAbsentLeaf(path, lstat, label) {
@@ -331,13 +347,6 @@ function assertOwnedRegularLeaf(path, expected, lstat, label) {
   const metadata = lstat(path);
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.dev !== expected.dev || metadata.ino !== expected.ino) {
     throw new Error(`${label} was replaced before publication: ${path}`);
-  }
-}
-
-function assertRegularLeaf(path, lstat, label) {
-  const metadata = lstat(path);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error(`${label} is not a regular file: ${path}`);
   }
 }
 

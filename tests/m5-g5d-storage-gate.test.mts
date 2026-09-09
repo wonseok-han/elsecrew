@@ -17,7 +17,7 @@ import {
   writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import { exitCodeForStorageGate, runStorageGate, safeEvidenceDirectory, writeEvidence } from "../scripts/m5-g5d-storage-gate.mjs";
@@ -254,8 +254,74 @@ test("a preexisting regular temporary leaf is rejected before write and child co
   });
 });
 
-test("storage package wrappers dispatch only through the runner and keep the repository pnpm setting exact", () => {
-  assert.equal(readFileSync(resolve(".npmrc"), "utf8"), "verify-deps-before-run=false\n");
+test("replaced evidence parent fails closed without touching a sentinel or the detached owned temporary", () => {
+  withFixture((root) => {
+    const evidenceDirectory = resolve(root, ".artifacts", "m5-g5d-storage");
+    const displacedDirectory = resolve(root, "displaced-evidence-directory");
+    const sentinel = resolve(evidenceDirectory, "sentinel");
+    let temporaryPath: string | null = null;
+    const outcome = runStorageGate("fixture", {
+      root,
+      gates: fixtureGate([command()]),
+      startedAt: STARTED_AT,
+      readGit: cleanGit,
+      randomToken: () => "predictable-token",
+      spawnSync() { return { status: 0, signal: null }; },
+      openSync(path: string, flags: number, permissions: number) {
+        const descriptor = openSync(path, flags, permissions);
+        temporaryPath = path;
+        renameSync(evidenceDirectory, displacedDirectory);
+        mkdirSync(evidenceDirectory);
+        writeFileSync(sentinel, "do not alter");
+        return descriptor;
+      },
+    });
+    assert.equal(outcome.exitCode, 1);
+    assert.equal(outcome.report.status, "FAIL");
+    assert.equal(outcome.evidencePath, null);
+    assert.equal(readFileSync(sentinel, "utf8"), "do not alter");
+    assert.ok(temporaryPath);
+    assert.ok(lstatSync(resolve(displacedDirectory, basename(temporaryPath!))).isFile());
+  });
+});
+
+test("substituted regular temporary leaf fails closed and is never unlinked during cleanup", () => {
+  withFixture((root) => {
+    const sentinel = resolve(root, "external-sentinel");
+    writeFileSync(sentinel, "do not alter");
+    let temporaryPath: string | null = null;
+    let substituted = false;
+    const outcome = runStorageGate("fixture", {
+      root,
+      gates: fixtureGate([command()]),
+      startedAt: STARTED_AT,
+      readGit: cleanGit,
+      randomToken: () => "predictable-token",
+      spawnSync() { return { status: 0, signal: null }; },
+      openSync(path: string, flags: number, permissions: number) {
+        temporaryPath = path;
+        return openSync(path, flags, permissions);
+      },
+      closeSync(descriptor: number) {
+        closeSync(descriptor);
+        if (!substituted && temporaryPath) {
+          substituted = true;
+          unlinkSync(temporaryPath);
+          writeFileSync(temporaryPath, "substituted");
+        }
+      },
+    });
+    assert.equal(outcome.exitCode, 1);
+    assert.equal(outcome.report.status, "FAIL");
+    assert.equal(outcome.evidencePath, null);
+    assert.equal(readFileSync(sentinel, "utf8"), "do not alter");
+    assert.equal(readFileSync(temporaryPath!, "utf8"), "substituted");
+  });
+});
+
+test("storage package wrappers dispatch only through the runner and keep the project pnpm setting exact", () => {
+  assert.equal(readFileSync(resolve("pnpm-workspace.yaml"), "utf8"), "allowBuilds:\n  esbuild: true\nnodeLinker: hoisted\nverifyDepsBeforeRun: false\n");
+  assert.throws(() => readFileSync(resolve(".npmrc"), "utf8"), { code: "ENOENT" });
   const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { scripts: Record<string, string> };
   assert.equal(packageJson.scripts["m5:test:storage-status"], "node scripts/m5-g5d-storage-gate.mjs --gate status");
 });
