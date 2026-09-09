@@ -17,7 +17,7 @@ function waitFor(script, label) {
     const deadline = Date.now() + 7000;
     const timer = setInterval(() => {
       if (${script}) { clearInterval(timer); resolve(true); }
-      else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(\`renderer smoke timed out: ${label}\`)); }
+      else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(\`renderer smoke timed out: ${label}; body=\${document.body?.innerText?.trim().slice(0, 1000) || "<empty>"}; controls=\${JSON.stringify([...document.querySelectorAll("button")].map((button) => ({ text: button.textContent?.trim(), ariaLabel: button.getAttribute("aria-label"), disabled: button.disabled }))) }\`)); }
     }, 25);
   })`;
 }
@@ -40,10 +40,14 @@ app.whenReady().then(async () => {
     if (typeof globalThis.MonacoEnvironment !== "undefined" || Object.hasOwn(globalThis, "MonacoEnvironment")) {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
-    [...document.querySelectorAll("button")].find((button) => button.textContent.includes("프로젝트 선택")).click();
+    const controlLabel = "프로젝트 선택";
+    await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
+    const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
+    if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
+    projectButton.click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     document.querySelector(".m5-file-row").click();
-    await ${waitFor("document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment?.getWorker === 'function'", "Monaco mount")};
+    await ${waitFor("document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount")};
     const localWorker = globalThis.MonacoEnvironment.getWorker("smoke", "editor");
     localWorker.terminate();
     return { workerCreated: true, text: document.body.textContent };

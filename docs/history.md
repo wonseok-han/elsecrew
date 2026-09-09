@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (G5D renderer smoke bridge/admission 수리)
+
+- **원인·수리**: Chromium smoke preload가 더는 지원하지 않는 V3이고 현재 renderer boundary의 complete V4/V5/V6 fixed-method 검증도 통과하지 못해, durable controller 대신 unavailable 화면만 렌더했다. 그래서 `프로젝트 선택` 검색 결과가 없는데 `.click()`을 호출했다. fixture를 complete V6 bridge, exact G5D product `shellReady` + `storageAdmission: ready` status로 올렸고, 사용하지 않는 durable route는 명시적으로 실패하는 fixture method로 보존했다.
+- **회귀·관측성**: VM regression은 exact V6 method set, strict product status parse, snapshot 생성 전 tree 거부와 생성 뒤 `example.ts` tree를 고정한다. Chromium runner는 이제 7초 안에 enabled accessible `프로젝트 선택` control을 기다리고, timeout에는 body text와 각 button의 label/disabled state를 포함한다. snapshot-before-tree, lazy local Monaco worker, `example.ts` assertion은 유지했다.
+- **검증·남은 경계**: root `node_modules`를 read-only 재사용해 focused `pnpm run m5:test:editor`는 Vite build와 기존 editor 25개를 통과했지만 Electron child가 이 sandbox에서 stdout/stderr 없이 exit 134 (`SIGABRT`)로 종료해 Chromium test도 실패했다. 수정 뒤 preload-only regression 1/1, CJS syntax, `git diff --check`는 통과했다. 실제 BrowserWindow/Monaco worker 증거는 sandbox 밖 최신 통합 commit에서 다시 실행해야 하며, 이 변경은 product bridge/contract를 바꾸지 않는다.
+
 ### 2026-09-09 · by GPT-5 Codex (G5D packaged status exact validation)
 
 - **리뷰 수리**: polling 중첩 state만 확인하던 packaged product smoke를 canonical G5D product status contract 전체로 강화했다. root/admission/database의 exact fields, `shellReady`, UTC calendar timestamp, verifying/ready/failed cross-state, blocker uniqueness와 fixed failed error를 매 status response마다 검증한 뒤에만 state를 분기한다. MJS는 TS validator를 직접 import하지 않고 canonical admission fixture와 순수 JS validator를 사용한다.
