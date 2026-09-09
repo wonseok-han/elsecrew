@@ -1,5 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fsyncSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { qaEnvironment } from "./m5-qa-resources.mjs";
@@ -81,12 +93,21 @@ export function runStorageGate(gateName, options = {}) {
   const run = options.spawnSync ?? spawnSync;
   const now = options.now ?? (() => new Date());
   const readGit = options.readGit ?? defaultReadGit;
-  const environment = options.environment ?? qaEnvironment();
+  const environment = {
+    ...(options.environment ?? qaEnvironment()),
+    pnpm_config_verify_deps_before_run: "false",
+  };
   const filesystem = {
+    closeSync: options.closeSync ?? closeSync,
+    fsyncSync: options.fsyncSync ?? fsyncSync,
+    fstatSync: options.fstatSync ?? fstatSync,
     lstatSync: options.lstatSync ?? lstatSync,
     mkdirSync: options.mkdirSync ?? mkdirSync,
-    writeFileSync: options.writeFileSync ?? writeFileSync,
+    openSync: options.openSync ?? openSync,
     renameSync: options.renameSync ?? renameSync,
+    unlinkSync: options.unlinkSync ?? unlinkSync,
+    writeSync: options.writeSync ?? writeSync,
+    randomToken: options.randomToken,
   };
   const startedAt = options.startedAt ?? now().toISOString();
   const head = readGit(root, ["rev-parse", "HEAD"]);
@@ -208,20 +229,70 @@ function finish(report, root, filesystem, now) {
   return { report, evidencePath, exitCode: exitCodeForStorageGate(report.status) };
 }
 
-export function writeEvidence(root, report, filesystem = { lstatSync, mkdirSync, writeFileSync, renameSync }) {
+export function writeEvidence(root, report, filesystem = defaultFilesystem()) {
   const evidenceDirectory = safeEvidenceDirectory(root, filesystem);
   const timestamp = report.startedAt.replaceAll(":", "-").replaceAll(".", "-");
   const filename = `${report.gate}-v${report.gateVersion}-${timestamp}-${process.pid}-${evidenceSequence += 1}.json`;
   const finalPath = resolve(evidenceDirectory, filename);
   assertWithinDirectory(evidenceDirectory, finalPath);
-  const temporaryPath = resolve(evidenceDirectory, `.${filename}.tmp`);
+  assertAbsentLeaf(finalPath, filesystem.lstatSync, "final evidence");
+  const token = typeof filesystem.randomToken === "function"
+    ? filesystem.randomToken()
+    : randomBytes(16).toString("hex");
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{12,128}$/.test(token)) {
+    throw new Error("evidence temporary token is unsafe");
+  }
+  const temporaryPath = resolve(evidenceDirectory, `.${filename}.${token}.tmp`);
   assertWithinDirectory(evidenceDirectory, temporaryPath);
-  filesystem.writeFileSync(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  filesystem.renameSync(temporaryPath, finalPath);
-  return finalPath;
+  assertAbsentLeaf(temporaryPath, filesystem.lstatSync, "temporary evidence");
+  let descriptor = null;
+  let ownedTemporary = null;
+  try {
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    descriptor = filesystem.openSync(
+      temporaryPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
+      0o600,
+    );
+    ownedTemporary = filesystem.fstatSync(descriptor);
+    if (!ownedTemporary.isFile() || ownedTemporary.isSymbolicLink?.()) {
+      throw new Error("new temporary evidence is not a regular file");
+    }
+    writeAll(descriptor, Buffer.from(`${JSON.stringify(report, null, 2)}\n`, "utf8"), filesystem.writeSync);
+    filesystem.fsyncSync(descriptor);
+    filesystem.closeSync(descriptor);
+    descriptor = null;
+
+    safeEvidenceDirectory(root, filesystem);
+    assertAbsentLeaf(finalPath, filesystem.lstatSync, "final evidence before rename");
+    assertOwnedRegularLeaf(temporaryPath, ownedTemporary, filesystem.lstatSync, "temporary evidence before rename");
+    filesystem.renameSync(temporaryPath, finalPath);
+    assertRegularLeaf(finalPath, filesystem.lstatSync, "final evidence after rename");
+    return finalPath;
+  } catch (error) {
+    if (descriptor !== null) {
+      try { filesystem.closeSync(descriptor); } catch {}
+    }
+    if (ownedTemporary) cleanupOwnedTemporary(temporaryPath, ownedTemporary, filesystem);
+    throw error;
+  }
 }
 
-export function safeEvidenceDirectory(root, filesystem = { lstatSync, mkdirSync, writeFileSync, renameSync }) {
+function defaultFilesystem() {
+  return {
+    closeSync,
+    fsyncSync,
+    fstatSync,
+    lstatSync,
+    mkdirSync,
+    openSync,
+    renameSync,
+    unlinkSync,
+    writeSync,
+  };
+}
+
+export function safeEvidenceDirectory(root, filesystem = defaultFilesystem()) {
   const repository = resolve(root);
   ensureNotSymlink(repository, filesystem.lstatSync, "repository root");
   let directory = repository;
@@ -243,6 +314,49 @@ function ensureNotSymlink(path, lstat, label) {
   const metadata = lstat(path);
   if (metadata.isSymbolicLink()) throw new Error(`${label} must not be a symlink: ${path}`);
   if (!metadata.isDirectory()) throw new Error(`${label} must be a directory: ${path}`);
+}
+
+function assertAbsentLeaf(path, lstat, label) {
+  try {
+    const metadata = lstat(path);
+    const kind = metadata.isSymbolicLink() ? "symlink" : metadata.isFile() ? "regular file" : "non-file";
+    throw new Error(`${label} already exists as ${kind}: ${path}`);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+}
+
+function assertOwnedRegularLeaf(path, expected, lstat, label) {
+  const metadata = lstat(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.dev !== expected.dev || metadata.ino !== expected.ino) {
+    throw new Error(`${label} was replaced before publication: ${path}`);
+  }
+}
+
+function assertRegularLeaf(path, lstat, label) {
+  const metadata = lstat(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} is not a regular file: ${path}`);
+  }
+}
+
+function writeAll(descriptor, bytes, write) {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = write(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(written) || written <= 0) throw new Error("evidence write made no progress");
+    offset += written;
+  }
+}
+
+function cleanupOwnedTemporary(path, expected, filesystem) {
+  try {
+    assertOwnedRegularLeaf(path, expected, filesystem.lstatSync, "temporary evidence cleanup");
+    filesystem.unlinkSync(path);
+  } catch {
+    // Never unlink a substituted/symlink leaf; it is not demonstrably ours.
+  }
 }
 
 function assertWithinDirectory(directory, candidate) {

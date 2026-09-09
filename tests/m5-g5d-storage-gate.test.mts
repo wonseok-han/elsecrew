@@ -1,5 +1,21 @@
 import assert from "node:assert/strict";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -113,7 +129,7 @@ test("storage gate never reports PASS when atomic evidence persistence fails", (
       startedAt: STARTED_AT,
       readGit: cleanGit,
       spawnSync() { return { status: 0, signal: null }; },
-      writeFileSync() { throw new Error("disk denied"); },
+      openSync() { throw new Error("disk denied"); },
     });
     assert.equal(outcome.exitCode, 1);
     assert.equal(outcome.report.status, "FAIL");
@@ -135,7 +151,7 @@ test("storage evidence directory rejects symlink escape and gate-name path injec
   assert.equal(injected.evidencePath, null);
 });
 
-test("storage evidence writes a temporary sibling then renames it into the allowed directory", () => {
+test("storage evidence exclusively creates, syncs, and renames a regular temporary sibling", () => {
   withFixture((root) => {
     const writes: string[] = [];
     const renames: Array<[string, string]> = [];
@@ -146,17 +162,102 @@ test("storage evidence writes a temporary sibling then renames it into the allow
       status: "PASS",
     };
     const path = writeEvidence(root, report, {
+      closeSync,
+      fsyncSync,
+      fstatSync,
       lstatSync,
       mkdirSync,
-      writeFileSync(path: string, contents: string) { writes.push(path); writeFileSync(path, contents); },
+      openSync,
       renameSync(from: string, to: string) { renames.push([from, to]); renameSync(from, to); },
+      unlinkSync,
+      writeSync(descriptor: number, bytes: Uint8Array, offset: number, length: number, position: number | null) {
+        writes.push(String(descriptor));
+        return writeSync(descriptor, bytes, offset, length, position);
+      },
+      randomToken: () => "predictable-token",
     });
     assert.equal(writes.length, 1);
     assert.equal(renames.length, 1);
-    assert.equal(renames[0][0], writes[0]);
+    assert.match(renames[0][0], /\.predictable-token\.tmp$/);
     assert.equal(renames[0][1], path);
     assert.equal(readdirSync(dirname(path)).some((name) => name.endsWith(".tmp")), false);
   });
+});
+
+test("precreated temporary or final symlink leaves external data untouched and never yields evidence", () => {
+  for (const mode of ["temporary", "final-race"] as const) {
+    withFixture((root) => {
+      const external = resolve(root, "external-sentinel");
+      writeFileSync(external, "do not overwrite");
+      const token = "predictable-token";
+      let temporaryPath: string | null = null;
+      let raced = false;
+      const outcome = runStorageGate("fixture", {
+        root,
+        gates: fixtureGate([command()]),
+        startedAt: STARTED_AT,
+        readGit: cleanGit,
+        randomToken: () => token,
+        spawnSync() { return { status: 0, signal: null }; },
+        openSync(path: string, flags: number, permissions: number) {
+          temporaryPath = path;
+          if (mode === "temporary") symlinkSync(external, path);
+          return openSync(path, flags, permissions);
+        },
+        lstatSync(path: string) {
+          if (mode === "final-race" && temporaryPath && !raced) {
+            const suffix = `.${token}.tmp`;
+            const name = temporaryPath.slice(dirname(temporaryPath).length + 2, -suffix.length);
+            const finalPath = resolve(dirname(temporaryPath), name);
+            if (path === finalPath) {
+              raced = true;
+              symlinkSync(external, path);
+            }
+          }
+          return lstatSync(path);
+        },
+      });
+      assert.equal(outcome.exitCode, 1, mode);
+      assert.equal(outcome.report.status, "FAIL", mode);
+      assert.equal(outcome.evidencePath, null, mode);
+      assert.equal(readFileSync(external, "utf8"), "do not overwrite", mode);
+      if (mode === "temporary") assert.ok(temporaryPath && lstatSync(temporaryPath).isSymbolicLink());
+    });
+  }
+});
+
+test("a preexisting regular temporary leaf is rejected before write and child commands inherit pnpm no-install", () => {
+  withFixture((root) => {
+    const token = "predictable-token";
+    let temporaryPath: string | null = null;
+    let childEnvironment: Record<string, string> | undefined;
+    const outcome = runStorageGate("fixture", {
+      root,
+      gates: fixtureGate([command()]),
+      startedAt: STARTED_AT,
+      readGit: cleanGit,
+      randomToken: () => token,
+      spawnSync(_command: string, _args: string[], options: { env: Record<string, string> }) {
+        childEnvironment = options.env;
+        return { status: 0, signal: null };
+      },
+      openSync(path: string, flags: number, permissions: number) {
+        temporaryPath = path;
+        writeFileSync(path, "preexisting");
+        return openSync(path, flags, permissions);
+      },
+    });
+    assert.equal(outcome.exitCode, 1);
+    assert.equal(outcome.evidencePath, null);
+    assert.equal(readFileSync(temporaryPath!, "utf8"), "preexisting");
+    assert.equal(childEnvironment?.pnpm_config_verify_deps_before_run, "false");
+  });
+});
+
+test("storage package wrappers dispatch only through the runner and keep the repository pnpm setting exact", () => {
+  assert.equal(readFileSync(resolve(".npmrc"), "utf8"), "verify-deps-before-run=false\n");
+  const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { scripts: Record<string, string> };
+  assert.equal(packageJson.scripts["m5:test:storage-status"], "node scripts/m5-g5d-storage-gate.mjs --gate status");
 });
 
 test("storage gate exit mapping is fixed", () => {

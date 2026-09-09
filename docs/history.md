@@ -9,6 +9,12 @@
 >
 > **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
 
+### 2026-09-09 · by GPT-5 Codex (G5D evidence leaf와 pnpm wrapper P1 수리)
+
+- **evidence 안전 수리**: JSON evidence 임시 leaf는 random token을 쓰되 `O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW`로 0600 생성하고, write-all·fsync·close 뒤 parent/final 부재와 owned regular temp inode를 다시 확인한 뒤에만 atomic rename한다. 최종 leaf도 regular non-symlink인지 확인하며, 실패 때는 같은 device/inode의 owned temporary만 unlink한다.
+- **wrapper 실행 수리**: repository `.npmrc`에는 `verify-deps-before-run=false` 한 줄만 두어 isolated worktree package script가 registry install을 재시도하지 않게 했다. runner가 spawn하는 모든 child에도 같은 `pnpm_config_verify_deps_before_run=false`를 명시적으로 전달한다. lockfile·의존성·registry 설정은 바꾸지 않았다.
+- **회귀·다음**: 예측된 temporary symlink, final symlink race, preexisting regular temp, evidence write failure와 외부 sentinel 불변, env 상속·package dispatch를 Node 회귀로 고정했다. clean fix commit 뒤 실제 `pnpm run m5:test:storage-status`와 evidence를 다시 확인한다.
+
 ### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 증거 게이트)
 
 - **구현**: `m5:test:storage-scheduler`·`storage-status`·`storage-compaction`을 독립 Node runner에 연결했다. 각 runner는 clean HEAD에서만 focused Node/Rust/diff 검증을 실행하고, command/exit/signal/duration·HEAD·dirty·worker cap을 `.artifacts/m5-g5d-storage/`의 atomic JSON evidence로 남긴다. evidence directory symlink, unsafe gate/path, git metadata 부재, malformed child result, nonzero/signal, evidence write 오류는 PASS를 주장하지 않고 fail-closed한다.
