@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (G5D packaged status admission polling)
+
+- **수리**: packaged product `--stdio` smoke가 첫 `system.status`를 legacy `state: "ready"`로 해석하던 결함을 고쳤다. G5D의 공개 상태인 top-level `state: "shellReady"`와 `storageAdmission.state: "verifying"`를 먼저 exact 검증하고, 최대 3초·500ms per request의 bounded polling으로 `storageAdmission.state: "ready"`에 도달한 뒤 healthy database/recovery/quit assertions를 수행한다.
+- **실패 경계**: `failed`, malformed/non-shell-ready 상태와 timeout은 즉시 assertion 실패로 종료하며, pre-D1 및 agent-fixture capability 경계는 변경하지 않았다.
+- **검증·다음**: 관련 Node source 회귀 4/4, `node --check scripts/m5-electron-package-smoke.mjs`, `git diff --check`를 통과했다. package/full harness는 통합 담당이 실행한다.
+
 ### 2026-09-09 · by GPT-5 Codex (G5D packaged product capability smoke)
 
 - **수리**: packaged product `--stdio` smoke가 pre-D1 `g5-v1` capability 목록을 기대하던 경로를 canonical `storage-status-d1` fixture의 `modes.generalProduct.d1Capabilities`로 전환했다. D1의 `storage.status` tail을 직접 확인해 product와 agent-fixture capability 경계를 유지했다.

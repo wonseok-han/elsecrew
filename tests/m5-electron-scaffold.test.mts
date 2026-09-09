@@ -16,6 +16,11 @@ test("패키지 smoke는 canonical D1 product fixture의 capability 순서를 ex
   assert.match(smoke, /const expectedProductCapabilities = storageStatusD1Manifest\.modes\?\.generalProduct\?\.d1Capabilities/);
   assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedProductCapabilities\)/);
   assert.match(smoke, /expectedProductCapabilities\.at\(-1\) === "storage\.status"/);
+  assert.match(smoke, /assert\.equal\(status\.result\.state, "shellReady"\)/);
+  assert.match(smoke, /await waitForStorageReady\(/);
+  assert.match(smoke, /admissionState === "ready"/);
+  assert.match(smoke, /assert\.equal\(admissionState, "verifying"/);
+  assert.match(smoke, /packaged product storage admission timed out/);
   assert.doesNotMatch(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
   assert.doesNotMatch(smoke, /modes\?\.agentFixture/);
   assert.match(smoke, /editor\\\.worker-.+\\\.js/);

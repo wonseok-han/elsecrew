@@ -100,13 +100,24 @@ async function smokePackagedSidecar(binary) {
     assert.deepEqual(ready.payload.capabilities, expectedProductCapabilities);
     assert.equal(ready.payload.sidecarInstanceId, ready.sidecarInstanceId);
 
-    const status = await request(lines, child, ready.sidecarInstanceId, "package_status", "system.status");
+    const status = await request(lines, child, ready.sidecarInstanceId, "package_status_initial", "system.status");
     assert.equal(status.ok, true);
-    assert.equal(status.result.state, "ready");
+    assert.equal(status.result.state, "shellReady");
     assert.deepEqual(status.result.sidecar, ready.payload);
-    assert.deepEqual(status.result.database, { health: "healthy", schemaVersion: 1 });
-    assert.equal(status.result.recoveryRequired, false);
-    assert.deepEqual(status.result.blockerIds, []);
+    const readyStatus = await waitForStorageReady(
+      lines,
+      child,
+      ready.sidecarInstanceId,
+      ready.payload,
+      status,
+    );
+    assert.equal(readyStatus.ok, true);
+    assert.equal(readyStatus.result.state, "shellReady");
+    assert.equal(readyStatus.result.storageAdmission.state, "ready");
+    assert.deepEqual(readyStatus.result.sidecar, ready.payload);
+    assert.deepEqual(readyStatus.result.database, { health: "healthy", schemaVersion: 1 });
+    assert.equal(readyStatus.result.recoveryRequired, false);
+    assert.deepEqual(readyStatus.result.blockerIds, []);
 
     const quit = await request(lines, child, ready.sidecarInstanceId, "package_quit", "app.prepareQuit");
     assert.equal(quit.ok, true);
@@ -131,7 +142,35 @@ async function smokePackagedSidecar(binary) {
   }
 }
 
-async function request(lines, child, sidecarInstanceId, requestId, method) {
+async function waitForStorageReady(lines, child, sidecarInstanceId, readyPayload, initialResponse) {
+  const deadline = Date.now() + 3_000;
+  let response = initialResponse;
+  let attempt = 0;
+  for (;;) {
+    assert.equal(response.ok, true);
+    assert.equal(response.result?.state, "shellReady");
+    assert.deepEqual(response.result?.sidecar, readyPayload);
+    const admissionState = response.result?.storageAdmission?.state;
+    if (admissionState === "ready") return response;
+    assert.equal(admissionState, "verifying", "packaged product admission must fail closed unless verifying or ready");
+    assert.deepEqual(response.result.database, { health: "verifying", schemaVersion: null });
+    assert.equal(response.result.recoveryRequired, null);
+    assert.deepEqual(response.result.blockerIds, []);
+    const remaining = deadline - Date.now();
+    assert.ok(remaining > 0, "packaged product storage admission timed out");
+    await new Promise((resolve) => setTimeout(resolve, Math.min(10, remaining)));
+    response = await request(
+      lines,
+      child,
+      sidecarInstanceId,
+      `package_status_${++attempt}`,
+      "system.status",
+      Math.min(500, Math.max(1, deadline - Date.now())),
+    );
+  }
+}
+
+async function request(lines, child, sidecarInstanceId, requestId, method, timeoutMs = 3_000) {
   child.stdin.write(`${JSON.stringify({
     protocolVersion: 1,
     kind: "request",
@@ -140,7 +179,7 @@ async function request(lines, child, sidecarInstanceId, requestId, method) {
     method,
     params: {},
   })}\n`);
-  const response = JSON.parse(await nextProtocolLine(lines, `${method} response`));
+  const response = JSON.parse(await nextProtocolLine(lines, `${method} response`, timeoutMs));
   assert.equal(response.protocolVersion, 1);
   assert.equal(response.kind, "response");
   assert.equal(response.sidecarInstanceId, sidecarInstanceId);
@@ -169,8 +208,8 @@ async function stopChild(child) {
   await withDeadline(exited, 3_000, "failed packaged sidecar cleanup");
 }
 
-async function nextProtocolLine(lines, label) {
-  const result = await withDeadline(lines.next(), 3_000, label);
+async function nextProtocolLine(lines, label, timeoutMs = 3_000) {
+  const result = await withDeadline(lines.next(), timeoutMs, label);
   assert.equal(result.done, false, `packaged sidecar ended before ${label}`);
   return result.value;
 }
