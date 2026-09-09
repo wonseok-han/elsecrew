@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (M5 cumulative harness 중복 제거)
+
+- **변경**: 독립 실행용 `m5:test:*` wrapper의 Rust 범위는 보존하고, 누적 harness만 G1의 locked workspace core 검사를 한 번 실행한 뒤 G2~G5D의 정확한 Node-only alias를 사용하도록 분리했다. scheduler → status → compaction의 clean-HEAD storage evidence gate 세 개는 순서와 독립 evidence를 그대로 유지한다.
+- **fail-closed 경계**: schema v2 report는 canonical/cumulative script plan, 전후 HEAD·dirty 상태와 failure reason을 기록한다. 시작 전 Git metadata/clean tree 또는 필요한 canonical·alias script가 없으면 명령 없이 `NOT_READY`(2)이고, 각 명령 전후 HEAD 변경·dirty·metadata 상실은 즉시 `FAIL`(1)이다. storage child stdout은 expected gate/PASS/same HEAD/clean start/evidence path를 모두 검증한다.
+- **검증·다음**: focused harness/Electron/storage-gate Node 회귀, `pnpm harness:list`, `git diff --check`는 구현 branch에서 실행한다. 이 commit 뒤 독립 review와 clean integration HEAD의 누적 G5D lifetime 한 번만 남았으며, 실제 provider·Windows·G6 출시 검증은 여전히 범위 밖이다.
+
 ### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 통합 gate 종결)
 
 - **통합·수리**: reviewed storage lifetime evidence gates를 `3dc88cd`, packaged D1 capability/admission smoke를 `eea003e`·`79332d8`, current V6 renderer/Monaco smoke fixture를 `42531a4`로 `m5/coding-agent-ide`에 통합했다. 실제 누적 실행에서 발견된 오래된 package smoke의 pre-D1 capability·즉시-ready 가정과 renderer smoke의 불완전 V3 bridge fixture를 각각 canonical D1 exact status polling과 complete V6 bridge로 고쳤다.
