@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (M5 누적 하네스 중복 제거 통합·실측)
+
+- **통합**: 독립 리뷰 PASS를 받은 `00fbce861738dd893748605d742a52c3322c5662`를 `m5/coding-agent-ide`에 `6461e67617f4f5e55d7d646034dbb0971f1d845a`로 통합했다. 독립 `m5:test:*` wrapper는 기존 Rust 범위를 유지하고, 누적 gate만 locked workspace core를 한 번 실행한 뒤 G2~G5D Node-only alias를 사용한다. 각 명령 전후 clean/same-HEAD와 세 storage child evidence의 gate·PASS·HEAD·clean·path를 외부 schema v2 report가 fail-closed 검증한다.
+- **실측 검증**: clean integration HEAD `6461e67617f4f5e55d7d646034dbb0971f1d845a`에서 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 node scripts/m5-harness.mjs --gate g5d-storage-lifetime`가 16/16 PASS했다. 전후 HEAD가 같고 dirty는 모두 false다. report는 `.artifacts/m5-harness/g5d-storage-lifetime-2026-09-09T03-27-46-038Z.json`이며 총 16분 32초로 직전 47분 18초보다 약 30분 46초 단축됐다. focused Node 26/26, `pnpm harness:list`, `git diff --check`와 독립 코드 리뷰도 통과했다.
+- **남은 경계**: 이 변경은 테스트 실행 중복만 줄였으며 제품 동작·안전 계약·standalone 검증 범위를 바꾸지 않는다. Windows 실기기, 실제 사용자 DB·강제 종료, 실제 Claude Code/Codex provider·인증, G6 성능·서명·배포와 출시 승인은 여전히 남아 있다. main 병합과 push는 하지 않았다.
+
 ### 2026-09-09 · by GPT-5 Codex (M5 cumulative harness 중복 제거)
 
 - **변경**: 독립 실행용 `m5:test:*` wrapper의 Rust 범위는 보존하고, 누적 harness만 G1의 locked workspace core 검사를 한 번 실행한 뒤 G2~G5D의 정확한 Node-only alias를 사용하도록 분리했다. scheduler → status → compaction의 clean-HEAD storage evidence gate 세 개는 순서와 독립 evidence를 그대로 유지한다.
