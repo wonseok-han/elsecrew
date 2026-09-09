@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (G5D packaged product capability smoke)
+
+- **수리**: packaged product `--stdio` smoke가 pre-D1 `g5-v1` capability 목록을 기대하던 경로를 canonical `storage-status-d1` fixture의 `modes.generalProduct.d1Capabilities`로 전환했다. D1의 `storage.status` tail을 직접 확인해 product와 agent-fixture capability 경계를 유지했다.
+- **검증**: smoke source 회귀가 D1 product manifest 선택·exact capability 비교·`storage.status` tail과 pre-D1 manifest 비참조를 고정했다. 관련 Node 테스트 4/4와 직접 fixture/source 검증, `git diff --check`를 통과했다.
+- **다음 할 일**: 통합 worktree에서 packaging 전체 및 누적 G5D gate를 실행한다.
+
 > 여러 코딩 에이전트(Claude Code, Codex)가 **번갈아 작업**할 때 컨텍스트를 이어받기 위한 워크로그다.
 >
 > **세션 시작**: 아래 "핵심 결정·발견"과 "작업 규칙"을 읽고, 워크로그 맨 위 엔트리로 현재 상태를 파악한다.

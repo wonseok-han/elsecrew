@@ -9,12 +9,15 @@ function source(path: string) {
   return readFileSync(resolve(root, path), "utf8");
 }
 
-test("패키지 smoke는 canonical G5 fixture의 누적 capability 순서를 exact 검증한다", () => {
+test("패키지 smoke는 canonical D1 product fixture의 capability 순서를 exact 검증한다", () => {
   const smoke = source("scripts/m5-electron-package-smoke.mjs");
 
-  assert.match(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
-  assert.match(smoke, /const expectedG5Capabilities = g5Manifest\.contract\?\.capabilities/);
-  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedG5Capabilities\)/);
+  assert.match(smoke, /tests\/fixtures\/m5\/storage-status-d1\/manifest\.json/);
+  assert.match(smoke, /const expectedProductCapabilities = storageStatusD1Manifest\.modes\?\.generalProduct\?\.d1Capabilities/);
+  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedProductCapabilities\)/);
+  assert.match(smoke, /expectedProductCapabilities\.at\(-1\) === "storage\.status"/);
+  assert.doesNotMatch(smoke, /tests\/fixtures\/m5\/g5-v1\/manifest\.json/);
+  assert.doesNotMatch(smoke, /modes\?\.agentFixture/);
   assert.match(smoke, /editor\\\.worker-.+\\\.js/);
   assert.doesNotMatch(smoke, /ready\.payload\.capabilities, \["system\.status", "app\.prepareQuit"\]\)/);
 });
