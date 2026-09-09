@@ -198,7 +198,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
-- **actual-agent 전체 수명 보존의 남은 게이트**: G5D의 exact v10 admission, V9/V10 materializer, V10 bounded lossless writer, cooperative scheduler와 기존 D1 `storage.status` wire는 구현됐다. 다만 이 구현 증거는 출시 승인이 아니며 최신 통합 commit의 누적 하네스, Windows 안전 게이트, 실제 사용자 DB·강제 종료 검증, 패키징·릴리스 판정이 남아 있다. 보존 기간과 physical cleanup/삭제 정책은 사용자 결정 전 계속 비활성이다.
+- **actual-agent 전체 수명 보존의 현재 경계**: G5D의 exact v10 admission, V9/V10 materializer, V10 bounded lossless writer, cooperative scheduler와 기존 D1 `storage.status` wire는 구현됐다. clean integration commit `42531a41732a482a35f72efee45c09bd2f906348`에서 macOS fixture 누적 `g5d-storage-lifetime` 16/16과 darwin-arm64 package·Chromium Monaco smoke를 통과했다(`.artifacts/m5-harness/g5d-storage-lifetime-2026-09-09T02-04-29-963Z.json`). 이는 출시 승인이 아니며 Windows 안전 게이트, 실제 사용자 DB·강제 종료 검증, 실제 Claude Code·Codex provider·인증, G6 성능·서명·배포 판정이 남아 있다. 보존 기간과 physical cleanup/삭제 정책은 사용자 결정 전 계속 비활성이다.
 - **코드 서명**: 미서명 배포 시 SmartScreen/Gatekeeper 경고. 베타는 미서명 + 통과 안내 이미지로 진행, 정식 릴리즈 전 비용(연 $250~400) 결정 — 기획 문서 참고.
 - **실기기 출시 검증**: 깨끗한 macOS 계정과 Windows 기기에서 설치·로그인·오프라인·권한 오류·한글 경로 시나리오 확인.
 - **업데이트 채널**: 현재 앱은 에이전트 최신 버전만 확인한다. Hello, Agent 자체 업데이트와 레시피 원격 갱신 방식은 첫 베타 이후 결정.
