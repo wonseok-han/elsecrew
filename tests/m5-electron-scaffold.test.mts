@@ -81,7 +81,7 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.match(source("electron/vite.main.config.ts"), /`\$\{entryName\}\.cjs`/);
   assert.match(source("electron/vite.preload.config.ts"), /entryFileNames: "\[name\]\.cjs"/);
   assert.match(source("electron/main.ts"), /preload: join\(__dirname, "preload\.cjs"\)/);
-  assert.equal(manifest.scripts["m5:test:core"], "cargo test --workspace --manifest-path Cargo.toml");
+  assert.equal(manifest.scripts["m5:test:core"], "cargo test --workspace --manifest-path Cargo.toml --locked");
   assert.equal(manifest.scripts["m5:package"], "electron-forge package");
   assert.equal(manifest.scripts["m5:package:smoke"], "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs");
   assert.equal(
