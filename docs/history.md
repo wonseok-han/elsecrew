@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 통합 gate 종결)
+
+- **통합·수리**: reviewed storage lifetime evidence gates를 `3dc88cd`, packaged D1 capability/admission smoke를 `eea003e`·`79332d8`, current V6 renderer/Monaco smoke fixture를 `42531a4`로 `m5/coding-agent-ide`에 통합했다. 실제 누적 실행에서 발견된 오래된 package smoke의 pre-D1 capability·즉시-ready 가정과 renderer smoke의 불완전 V3 bridge fixture를 각각 canonical D1 exact status polling과 complete V6 bridge로 고쳤다.
+- **최종 누적 증거**: clean integration HEAD `42531a41732a482a35f72efee45c09bd2f906348`에서 `node scripts/m5-harness.mjs --gate g5d-storage-lifetime`가 16/16 command PASS했다. Electron darwin-arm64 package smoke, Chromium lazy Monaco worker, workspace core, protocol/storage/project/run-recovery/bounded-storage와 scheduler/status/compaction 세 evidence gate가 모두 포함된다. 누적 report는 `.artifacts/m5-harness/g5d-storage-lifetime-2026-09-09T02-04-29-963Z.json`, 세 storage evidence는 같은 HEAD의 `2026-09-09T02-47-56-042Z`·`02-49-06-584Z`·`02-49-09-675Z` JSON이다.
+- **운영 발견·남은 경계**: 누적 gate는 `m5:test:core`·`m5:test:storage`·`m5:test:run-recovery`·`m5:test:bounded-storage`에서 같은 대형 sidecar suite를 여러 번 실행해 총 47분 18초가 걸렸다. 다음 하네스 개선에서는 clean HEAD에 묶인 동일 test evidence 재사용 또는 gate별 비중복 test selection을 설계한다. G5D macOS fixture gate 통과는 출시 승인이 아니며 Windows 실기기, 실제 사용자 DB/강제 종료, 실제 Claude Code·Codex provider·인증, G6 성능·서명·배포가 남아 있다. main merge와 push는 하지 않았다.
+
 ### 2026-09-09 · by GPT-5 Codex (G5D renderer smoke bridge/admission 수리)
 
 - **원인·수리**: Chromium smoke preload가 더는 지원하지 않는 V3이고 현재 renderer boundary의 complete V4/V5/V6 fixed-method 검증도 통과하지 못해, durable controller 대신 unavailable 화면만 렌더했다. 그래서 `프로젝트 선택` 검색 결과가 없는데 `.click()`을 호출했다. fixture를 complete V6 bridge, exact G5D product `shellReady` + `storageAdmission: ready` status로 올렸고, 사용하지 않는 durable route는 명시적으로 실패하는 fixture method로 보존했다.
