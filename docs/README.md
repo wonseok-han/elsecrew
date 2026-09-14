@@ -26,8 +26,8 @@
 **배포할 때 → [`release-checklist.md`](release-checklist.md)**
 자동 검증, 깨끗한 기기 확인, 실패 경로, 미서명 베타와 정식 서명 배포 게이트.
 
-**여러 구현·검토 에이전트를 함께 운영할 때 → [`procedures/multi-agent-orchestration.md`](procedures/multi-agent-orchestration.md)**
-통합 담당, 기능별 Git worktree와 파일 소유권, 파동식 병렬화, 독립 코드 리뷰·QA·최종 게이트를 정의한 저장소 공통 실행 절차. 실제 Codex 역할·모델·권한은 루트 `.codex/config.toml`과 `.codex/agents/`에 있으며 M5 구현 전부터 적용한다.
+**직접 개발과 위임 방식을 선택할 때 → [`procedures/multi-agent-orchestration.md`](procedures/multi-agent-orchestration.md)**
+2026-09-14부터 사용자가 선택한 Astra 메인의 직접 개발을 기본으로 한다. 위임이 더 유리하면 이유와 범위를 설명하고 대기한다. 승인된 병렬 작업에만 worktree·파일 소유권·다중 역할 절차를 적용한다. `.codex/config.toml`과 `.codex/agents/`는 보관된 서브에이전트 설정이며 메인 모델이나 자동 호출을 지정하는 운영 지시가 아니다.
 
 **M4(멀티 에이전트 오케스트레이션)를 다룰 때 → [`proposals/m4-orchestration.md`](proposals/m4-orchestration.md)**
 이 주제는 워크로그가 아니라 **이 문서가 단일 기준점**이다. 논의·결정·철회를 전부 여기 쌓는다. **손대기 전 §9 `철회된 주장`을 먼저 읽을 것** — 이미 틀린 것으로 판명된 결론에 다시 도달하는 것을 막는다.

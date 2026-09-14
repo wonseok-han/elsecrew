@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra
+
+- **사용자 결정·반영**: Sol 기반 의무 위임 운영에서 현재 Astra 메인의 직접 개발을 기본으로 전환했다. AGENTS.md/CLAUDE.md를 동일하게 갱신하고 실행 절차·문서 색인에 우선 규칙을 추가했다. 단일 기능의 의무 worktree·역할별 인계·반복 검사를 줄이고 서브에이전트가 더 유리하면 이유·범위를 설명한 뒤 호출 전에 대기한다.
+- **범위**: 기존 역할별 Sol/Terra 설정은 대기용으로 보관하며 모델·추론 수준을 일괄 변경하지 않았다. 중요 안전 경계와 제품 활성화·출시의 독립 검토, M5 자동 커밋·main/push 승인 경계를 명시했다. 이번 규칙 변경은 미커밋으로 남긴다.
+- **검증·다음**: 두 루트 지침의 동일성, 관련 문서 우선순위와 diff 검사를 확인한다. 제품 코드·하네스는 변경하지 않았으며 누적 테스트나 서브에이전트 호출은 하지 않는다. 다음 구현은 최신 코드·명세를 확인해 메인이 직접 진행하는 것을 우선한다.
+
 ### 2026-09-09 · by GPT-5 Codex (M5 누적 하네스 중복 제거 통합·실측)
 
 - **통합**: 독립 리뷰 PASS를 받은 `00fbce861738dd893748605d742a52c3322c5662`를 `m5/coding-agent-ide`에 `6461e67617f4f5e55d7d646034dbb0971f1d845a`로 통합했다. 독립 `m5:test:*` wrapper는 기존 Rust 범위를 유지하고, 누적 gate만 locked workspace core를 한 번 실행한 뒤 G2~G5D Node-only alias를 사용한다. 각 명령 전후 clean/same-HEAD와 세 storage child evidence의 gate·PASS·HEAD·clean·path를 외부 schema v2 report가 fail-closed 검증한다.
@@ -299,6 +305,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Astra 직접 개발 우선(2026-09-14 사용자 지시)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 위임이 더 유리하거나 중요 안전 경계의 독립 검토가 필요하면 구현·관련 검증을 준비하고 이유·범위를 설명한 뒤 호출 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 기존 서브에이전트 모델 설정은 보관 상태다.
 
 - **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다. V10은 `authorizeDelete`를 read-only witness로 두고 `deletePrefix`의 exact armed interval에서만 완전 authority batch와 source index/event 삭제·authority cleanup·cursor 전진을 한 transaction으로 결속한다. V10 contract fixture만으로 runtime writer 활성화나 readiness를 주장하지 않는다.
 
