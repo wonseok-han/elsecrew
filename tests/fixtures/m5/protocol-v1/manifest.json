@@ -35,6 +35,7 @@
       "chat.list",
       "chat.get",
       "chat.appendMessage",
+      "provider.login",
       "agent.getCapabilities",
       "run.startFixture",
       "run.startAgent",

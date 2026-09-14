@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { LOGIN_CHANNEL as M5_LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus, type LoginRequest } from "../src/m5/contracts/provider-login-v1.ts";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { M5BridgeV6 } from "../src/m5/contracts/bridge-v6.ts";
@@ -87,6 +88,9 @@ const bridge: M5BridgeV7 = Object.freeze({
 });
 
 contextBridge.exposeInMainWorld("m5", bridge);
+contextBridge.exposeInMainWorld("m5Login", Object.freeze({
+  request: async (input: LoginRequest) => validateLoginStatus(await ipcRenderer.invoke(M5_LOGIN_CHANNEL, validateLoginRequest(input))),
+}));
 
 const sidecarListeners = new Set<(event: EventV1) => void>();
 const projectListeners = new Set<Parameters<M5BridgeV6["onProjectEvent"]>[0]>();

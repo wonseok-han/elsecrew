@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
 import { spawn } from "node:child_process";
 import { TextDecoder } from "node:util";
@@ -406,6 +407,10 @@ export class SidecarClientV1 {
   async prepareQuit(): Promise<PrepareQuitResultV1> {
     return this.#request("app.prepareQuit", {}) as Promise<PrepareQuitResultV1>;
   }
+  login(input: LoginRequest): Promise<LoginStatus> {
+    if (!this.#ready?.capabilities.includes("provider.login")) return Promise.reject(new Error("login unavailable"));
+    return this.#request("provider.login", validateLoginRequest(input)) as Promise<LoginStatus>;
+  }
 
   openProject(selectedPath: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath }) as Promise<ProjectIdentityV1>; }
   getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
@@ -605,6 +610,11 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const advertisedReady = parseReadyPayload(envelope);
+        const hasLogin = advertisedReady.capabilities.at(-1) === "provider.login";
+        if (hasLogin) {
+          if (advertisedReady.capabilities.at(-2) !== "chat.appendMessage") throw new Error("invalid login capability baseline");
+          advertisedReady.capabilities = advertisedReady.capabilities.slice(0,-1);
+        }
         // The optional suffix extends an exact known baseline, never an arbitrary
         // subset of capabilities. Older sidecars remain usable without follow-up.
         const hasFollowup = advertisedReady.capabilities.at(-1) === "chat.appendMessage";
@@ -623,6 +633,7 @@ export class SidecarClientV1 {
               : parseG5ReadyPayloadV1(rawReady);
         if (hasFollowup && !negotiatedG5DAgent && !negotiatedG5DProduct) throw new Error("follow-up requires storage admission support");
         const negotiatedReady = hasFollowup ? advertisedReady : ready;
+        if (hasLogin) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.login"];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#storageAdmissionNegotiated = negotiatedG5DAgent || negotiatedG5DProduct;
@@ -857,6 +868,7 @@ export class SidecarClientV1 {
         validateChatAppendMessageTranscriptV1({ request: pending.params, message: response.result });
         return response.result;
       }
+      case "provider.login": return validateLoginStatus(response.result);
       case "chat.list": {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;
       }

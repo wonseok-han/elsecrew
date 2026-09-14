@@ -56,6 +56,10 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
     let mut baseline = ready.payload.clone();
     assert_eq!(
         baseline["capabilities"].as_array_mut().unwrap().pop(),
+        Some(json!("provider.login"))
+    );
+    assert_eq!(
+        baseline["capabilities"].as_array_mut().unwrap().pop(),
         Some(json!("chat.appendMessage"))
     );
     validate_g5d_product_ready_payload_v1(&baseline).expect("exact product D1 baseline");

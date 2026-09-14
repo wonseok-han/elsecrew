@@ -3,26 +3,29 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
-#[cfg(unix)]
-#[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
-mod provider_profile;
-#[cfg(unix)]
-#[allow(dead_code)] // Internal login I/O; the isolated process owner is not activated yet.
-mod provider_login_io;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)] // Lifecycle owner; validated vendor launcher and IPC activation remain separate.
-mod provider_login_process;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)] // Internal gate; executable admission and vendor environment remain separate.
-mod provider_login_gate;
+mod chat;
+mod project;
 #[cfg(unix)]
 #[allow(dead_code)] // Pin validation is not vendor activation or signature admission.
 mod provider_executable;
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Internal gate; executable admission and vendor environment remain separate.
+mod provider_login_gate;
+#[cfg(unix)]
+#[allow(dead_code)] // Internal login I/O; the isolated process owner is not activated yet.
+mod provider_login_io;
+#[cfg(target_os = "macos")]
+mod provider_login_manager;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+// Lifecycle owner; validated vendor launcher and IPC activation remain separate.
+mod provider_login_process;
+#[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal session, pending validated vendor launcher and IPC/UI activation.
 mod provider_login_session;
-mod chat;
-mod project;
+#[cfg(unix)]
+#[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
+mod provider_profile;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
@@ -446,6 +449,8 @@ fn preflight_blocked_admission_request(line: &[u8], sidecar: &SidecarSession) ->
 }
 
 struct Sidecar {
+    #[cfg(target_os = "macos")]
+    login: provider_login_manager::LoginManager,
     storage: Storage,
     projects: ProjectManager,
     ready: ReadyPayloadV1,
@@ -500,6 +505,7 @@ impl SidecarSession {
                 capabilities: capabilities
                     .iter()
                     .chain(std::iter::once(&"chat.appendMessage"))
+                    .chain(std::iter::once(&"provider.login"))
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -804,6 +810,8 @@ impl Sidecar {
         admission_not_cancelled(cancellation)?;
         Ok(Self {
             storage,
+            #[cfg(target_os = "macos")]
+            login: provider_login_manager::LoginManager::default(),
             projects,
             ready,
             prepared_to_quit: false,
@@ -887,6 +895,16 @@ impl Sidecar {
         }
 
         let action = match request.method.as_str() {
+            "provider.login" => {
+                #[cfg(target_os = "macos")]
+                let result = self.login.request(&self.storage, &request.params)?;
+                #[cfg(not(target_os = "macos"))]
+                let result = serde_json::json!({"state":"unsupported","attemptId":null,"authUrl":null,"error":null});
+                Ok(project::ProjectAction {
+                    result,
+                    ..project::ProjectAction::default()
+                })
+            }
             "system.status" => Ok({
                 require_exact_params(&request.params, &[]).map_err(invalid_params)?;
                 project::ProjectAction {
@@ -917,13 +935,20 @@ impl Sidecar {
                     .g5
                     .prepare_quit(&mut self.storage, &mut self.projects)
                     .map_err(|failure| SidecarError::new(failure.kind, failure.detail))?;
-                if blockers.is_empty() && !self.safe_to_quit {
+                #[cfg(target_os = "macos")]
+                let login_stopped = self.login.prepare_quit();
+                #[cfg(not(target_os = "macos"))]
+                let login_stopped = true;
+                if blockers.is_empty() && login_stopped && !self.safe_to_quit {
                     self.storage.checkpoint()?;
                     self.storage
                         .mark_app_instance_clean(&self.ready.sidecar_instance_id)?;
                     self.safe_to_quit = true;
                 }
-                let blockers = self.storage.blocker_ids()?;
+                let mut blockers = self.storage.blocker_ids()?;
+                if !login_stopped {
+                    blockers.push("provider-login:codex".to_owned());
+                }
                 project::ProjectAction {
                     result: serde_json::to_value(PrepareQuitResultV1 {
                         safe_to_quit: self.safe_to_quit && blockers.is_empty(),

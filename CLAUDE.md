@@ -62,7 +62,7 @@
 - 플랫폼: macOS + Windows
 - UI: 한국어·영어 전환. 현재 구현 이름은 `Hello, Agent`, M5 새 이름은 개발과 분리해 보류
 - 현행 구조: 재방문용 홈베이스 + 6단계 위저드(에이전트 → 진단 → 설치 → 로그인 → 프로젝트 → 첫 대화) + macOS M4 `HandoffPilot`
-- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B의 normalized public/terminal event·자원 예산과 G5C의 provider 발견/실행 전 검증·restart-atomic recovery까지 Electron V5와 renderer에 연결한다. 제품 Electron이 실행하는 일반 `--stdio`는 exact G5이며 실제 Claude Code/Codex CLI provider·인증·모델 출력은 아직 연결되지 않았다
+- M5 현행 골격: Electron + React/TypeScript + Monaco 셸과 Rust sidecar에 여러 프로젝트·영속 채팅·프로젝트별 역할/모델·채팅별 standalone snapshot·코드 편집/diff·기존 G5 fixture 실행/복구를 구현했다. 테스트 전용 `--stdio-agent-fixture`에서만 fake actual-agent provider가 exact G5A를 협상하며, G5B의 normalized public/terminal event·자원 예산과 G5C의 provider 발견/실행 전 검증·restart-atomic recovery까지 Electron V5와 renderer에 연결한다. 제품 `--stdio`는 G5D 저장 수명 및 후속 메시지 확장에 고정 `provider.login`을 추가한다. macOS Codex 0.153.4의 앱 전용 로그인 UI/실행을 연결했으며 실제 계정 인증은 사용자 검증 대상이다. Claude 로그인과 실제 모델 작업/출력은 아직 연결되지 않았다
 - 홈베이스: 프로젝트 폴더 스캔, 에이전트 설치·로그인 상태, 업데이트 확인
 - 상태: M0~M3와 주요 오류 복구, M4 파일럿 완료. M5 G1~G5 macOS fixture gate `G5_READY`, G5A `G5A_READY`, G5B `G5B_READY`, G5C provider discovery·launch attestation/recovery 최종 gate `G5C_READY`를 완료했다. 실제 Claude Code/Codex adapter, G6 보안/패키징/성능, Windows 안전 게이트, 출시 후보 검증과 서명/배포 결정이 남음
 

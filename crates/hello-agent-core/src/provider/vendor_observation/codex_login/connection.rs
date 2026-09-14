@@ -46,6 +46,9 @@ impl LoginConnection {
         }
         let mut init = ModelFreeExchange::default();
         let request = init.next_request()?.ok_or_else(error)?;
+        let mut request: serde_json::Value = serde_json::from_str(&request).map_err(|_| error())?;
+        request["params"]["capabilities"] = serde_json::json!({"experimentalApi":false,"requestAttestation":false,"optOutNotificationMethods":["remoteControl/status/changed"]});
+        let request = format!("{request}\n");
         Ok((
             Self {
                 init,

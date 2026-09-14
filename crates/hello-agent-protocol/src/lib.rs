@@ -55,6 +55,7 @@ pub const METHODS_V1: &[&str] = &[
     "chat.list",
     "chat.get",
     "chat.appendMessage",
+    "provider.login",
     "agent.getCapabilities",
     "run.startFixture",
     "run.startAgent",

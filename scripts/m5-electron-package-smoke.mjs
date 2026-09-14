@@ -112,7 +112,7 @@ async function smokePackagedSidecar(binary) {
     assert.ok(Number.isSafeInteger(ready.payload.pid) && ready.payload.pid > 0);
     assert.equal(typeof ready.payload.platform, "string");
     assert.ok(ready.payload.platform.length > 0);
-    assert.deepEqual(ready.payload.capabilities, [...expectedProductCapabilities, "chat.appendMessage"]);
+    assert.deepEqual(ready.payload.capabilities, [...expectedProductCapabilities, "chat.appendMessage", "provider.login"]);
     assert.equal(ready.payload.sidecarInstanceId, ready.sidecarInstanceId);
 
     const status = await request(lines, child, ready.sidecarInstanceId, "package_status_initial", "system.status");

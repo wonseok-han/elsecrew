@@ -433,6 +433,27 @@ test("G5A agent IPC rejects launch extras before IPC and remains unavailable on 
   assert.equal(child.writes.length, 0, "current G5 handshake must not advertise or invoke G5A calls");
 });
 
+test("login capability negotiates exact status and fixed requests", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  const ready = JSON.parse(g5dReadyLine());
+  ready.payload.capabilities.push("chat.appendMessage", "provider.login");
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.equal((await started).capabilities.at(-1), "provider.login");
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push("chat.appendMessage", "provider.login");
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  await status;
+  const login = client.login({ action: "status" });
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method, "provider.login");
+  assert.deepEqual(sent.params, { action: "status" });
+  const idle = { state: "idle", attemptId: null, authUrl: null, error: null };
+  child.stdout.write(responseLine(sent.requestId, idle));
+  assert.deepEqual(await login, idle);
+});
+
 test("follow-up capability binds stored messages and preserves exact status identity", async () => {
   const fixture = JSON.parse(readFileSync(new URL("./fixtures/m5/followup-message-v1.json", import.meta.url), "utf8"));
   for (const corrupt of [false, true]) {

@@ -6,11 +6,29 @@ import { createContext, runInContext } from "node:vm";
 import test from "node:test";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
-import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS } from "../electron/ipc-channels.ts";
+import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
 const typescript = require("typescript") as typeof import("typescript");
 const root = resolve(".");
+
+test("renderer status during load starts the sidecar before returning admission", async () => {
+  const harness = await loadMain(undefined, true);
+  assert.equal((harness.window.initialStatus as {state: string}).state, "ready");
+  assert.deepEqual(harness.sidecarCalls, ["getSystemStatus"]);
+});
+
+test("login opens a validated browser URL only in main and never on cancel", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(loginContract.LOGIN_CHANNEL);
+  assert.ok(handler);
+  const response = await handler(harness.currentEvent(), { action: "start", attemptId: "test" }) as {authUrl: unknown};
+  assert.equal(response.authUrl, null);
+  assert.deepEqual(harness.sidecarCalls, ["login", "openExternal"]);
+  await handler(harness.currentEvent(), { action: "cancel", attemptId: "test" });
+  assert.deepEqual(harness.sidecarCalls, ["login", "openExternal", "login"]);
+  await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
+});
 
 test("main-process IPC accepts only the current main frame at the exact allowed origin", async () => {
   const harness = await loadMain();
@@ -138,6 +156,8 @@ interface MainHarness {
 
 class FakeWindow {
   static windows: FakeWindow[] = [];
+  static duringLoad: ((window: FakeWindow) => Promise<unknown>) | undefined;
+  initialStatus: unknown;
   destroyed = false;
   openHandler: (() => { action: string }) | undefined;
   readonly options: unknown;
@@ -165,12 +185,14 @@ class FakeWindow {
 
   async loadURL(url: string) {
     this.webContents.mainFrame.url = url;
+    this.initialStatus = await FakeWindow.duringLoad?.(this);
   }
 }
 
-async function loadMain(devServerUrl: string | undefined = undefined): Promise<MainHarness> {
+async function loadMain(devServerUrl: string | undefined = undefined, requestDuringLoad = false): Promise<MainHarness> {
   FakeWindow.windows = [];
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  FakeWindow.duringLoad = requestDuringLoad ? async (window) => handlers.get(M5_INTERNAL_CHANNELS_V1.systemGetStatus)!({sender: window.webContents, senderFrame: window.webContents.mainFrame}) : undefined;
   const protocolHandlers = new Map<string, (request: { url: string }) => Promise<Response>>();
   const netFetches: string[] = [];
   const sidecarCalls: string[] = [];
@@ -185,6 +207,7 @@ async function loadMain(devServerUrl: string | undefined = undefined): Promise<M
     },
     BrowserWindow: Object.assign(FakeWindow, { getAllWindows: () => FakeWindow.windows }),
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+    shell: { openExternal: async () => { sidecarCalls.push("openExternal"); } },
     ipcMain: {
       handle: (channel: string, handler: (...args: unknown[]) => Promise<unknown>) => handlers.set(channel, handler),
       on: () => undefined,
@@ -208,6 +231,10 @@ async function loadMain(devServerUrl: string | undefined = undefined): Promise<M
     onAgentPublicEvent() {}
     onAgentRunStateChanged() {}
     async start() {}
+    async login() {
+      sidecarCalls.push("login");
+      return {state: "waiting", attemptId: "test", authUrl: "https://auth.openai.com/authorize?state=private", error: null};
+    }
     async getSystemStatus() {
       sidecarCalls.push("getSystemStatus");
       return { state: "ready" };
@@ -275,6 +302,7 @@ function moduleFor(
   },
 ) {
   if (specifier === "electron") return fakes.electron;
+  if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier === "node:fs") {
     return {
       mkdirSync: () => undefined,
@@ -288,10 +316,11 @@ function moduleFor(
   if (specifier === "node:path" || specifier === "node:url") return require(specifier);
   if (specifier.endsWith("lifecycle-v1.ts")) return { M5_INTERNAL_CHANNELS_V1 };
   if (specifier === "./ipc-channels.ts") {
-    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS };
+    return { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS };
   }
   if (specifier === "./event-credit.ts") return { EventCreditV1: fakes.FakeEventCredit };
   if (specifier === "./quit-coordinator.ts") return { QuitCoordinatorV1: fakes.FakeQuitCoordinator };
   if (specifier === "./sidecar-client.ts") return { SIDECAR_READY_TIMEOUT_MS: 3_000, SidecarClientV1: fakes.FakeSidecar };
   throw new Error(`unexpected main.ts runtime import: ${specifier}`);
 }
+import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";

@@ -13,7 +13,7 @@
     "test:m5": "node scripts/m5-harness.mjs --gate g6-release",
     "harness:list": "node scripts/m5-harness.mjs --list",
     "tauri": "tauri",
-    "m5:dev": "electron-forge start",
+    "m5:dev": "cargo build -p hello-agent-sidecar -j 4 && electron-forge start",
     "m5:package": "electron-forge package",
     "m5:package:smoke": "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs",
     "m5:make": "electron-forge make",

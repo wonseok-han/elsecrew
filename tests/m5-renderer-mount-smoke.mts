@@ -22,7 +22,7 @@ test("renderer smoke preload exposes the complete V7 bridge with ready admission
   const getSystemStatus = bridge.getSystemStatus as () => Promise<unknown>;
   const getProjectTree = bridge.getProjectTree as (input: unknown) => Promise<unknown>;
   const createProjectWorktree = bridge.createProjectWorktree as (input: unknown) => Promise<unknown>;
-  const status = await getSystemStatus();
+  const status = await getSystemStatus.call(bridge);
   assert.doesNotThrow(() => parseG5DProductSystemStatusV1(status));
   await assert.rejects(getProjectTree({}), /before creating its standalone snapshot/);
   await createProjectWorktree({ projectId: "smoke_project" });

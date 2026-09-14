@@ -99,6 +99,12 @@ export function parseG5DProductSystemStatusV1(value: unknown): SystemStatusG5DV1
 export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean): SystemStatusG5DV1 {
   return parseSystemStatus(value, (sidecar) => {
     const baseline = agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
+    if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities) && sidecar.capabilities[sidecar.capabilities.length-1] === "provider.login") {
+      const caps = sidecar.capabilities;
+      if (caps[caps.length-2] !== "chat.appendMessage") throw new Error("invalid login capability baseline");
+      const parsed = baseline({ ...sidecar, capabilities: caps.slice(0,-2) });
+      return { ...parsed, capabilities: [...parsed.capabilities, "chat.appendMessage", "provider.login"] };
+    }
     if (typeof sidecar !== "object" || sidecar === null || !("capabilities" in sidecar) || !Array.isArray(sidecar.capabilities) || sidecar.capabilities[sidecar.capabilities.length - 1] !== "chat.appendMessage") return baseline(sidecar);
     const parsed = baseline({ ...sidecar, capabilities: sidecar.capabilities.slice(0, -1) });
     return { ...parsed, capabilities: [...parsed.capabilities, "chat.appendMessage"] };

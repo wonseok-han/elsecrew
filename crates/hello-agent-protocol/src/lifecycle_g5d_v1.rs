@@ -129,7 +129,12 @@ fn parse_followup_status(
     let capabilities = normalized
         .pointer_mut("/sidecar/capabilities")
         .and_then(Value::as_array_mut);
+    let mut login = false;
     let extended = capabilities.is_some_and(|capabilities| {
+        if capabilities.last().and_then(Value::as_str) == Some("provider.login") {
+            capabilities.pop();
+            login = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("chat.appendMessage") {
             capabilities.pop();
             true
@@ -138,11 +143,22 @@ fn parse_followup_status(
         }
     });
     let mut parsed = baseline(&normalized)?;
+    if login && !extended {
+        return Err(G5DAdmissionContractError::new(
+            "login requires followup baseline",
+        ));
+    }
     if extended {
         parsed
             .sidecar
             .capabilities
             .push("chat.appendMessage".to_owned());
+    }
+    if login {
+        parsed
+            .sidecar
+            .capabilities
+            .push("provider.login".to_owned());
     }
     Ok(parsed)
 }

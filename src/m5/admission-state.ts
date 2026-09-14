@@ -21,7 +21,10 @@ export class StorageAdmissionPoller {
   constructor(
     getStatus: () => Promise<SystemStatusG5DV1>,
     onState: (state: AdmissionView) => void,
-    timer: TimerV1 = { set: setTimeout, clear: clearTimeout },
+    timer: TimerV1 = {
+      set: (callback, delayMs) => setTimeout(callback, delayMs),
+      clear: (timer) => clearTimeout(timer),
+    },
   ) {
     this.#getStatus = getStatus;
     this.#onState = onState;

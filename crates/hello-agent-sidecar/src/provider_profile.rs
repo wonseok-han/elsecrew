@@ -57,12 +57,36 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
         return Err(failure());
     }
     let profile = Dir::from_std_file(handle.into_std());
-    // Login-only profile contract. Additional vendor runtime artifacts require a
-    // separately reviewed policy before the runtime can use this directory.
+    // Login-only profile contract: only the pinned vendor's observed runtime
+    // artifact names below are admitted; arbitrary existing profiles are rejected.
     for entry in profile.entries().map_err(|_| failure())? {
         let entry = entry.map_err(|_| failure())?;
         if entry.file_name() != "config.toml" && entry.file_name() != "auth.json" {
-            return Err(failure());
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(failure)?;
+            let directory = matches!(name, "skills" | "tmp" | ".tmp");
+            let database = [
+                "goals_1.sqlite",
+                "logs_2.sqlite",
+                "memories_1.sqlite",
+                "queue_1.sqlite",
+                "state_5.sqlite",
+            ]
+            .iter()
+            .any(|base| {
+                name == *base || name == format!("{base}-shm") || name == format!("{base}-wal")
+            });
+            if !directory && !database && name != "installation_id" {
+                return Err(failure());
+            }
+            let meta = profile.symlink_metadata(name).map_err(|_| failure())?;
+            if meta.uid() != unsafe { libc::geteuid() }
+                || meta.permissions().mode() & 0o022 != 0
+                || (directory && !meta.is_dir())
+                || (!directory && (!meta.is_file() || meta.nlink() != 1))
+            {
+                return Err(failure());
+            }
         }
         if entry.file_name() == "auth.json" {
             let metadata = profile
@@ -270,6 +294,37 @@ mod tests {
         symlink(&target, &config).unwrap();
         assert!(prepare_codex_profile(&root(&temp)).is_err());
         assert_eq!(std::fs::read(target).unwrap(), CONFIG);
+    }
+
+    #[test]
+    fn observed_login_runtime_names_require_safe_types_and_permissions() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = prepare_codex_profile(&root(&temp)).unwrap();
+        for name in ["skills", "tmp", ".tmp"] {
+            profile.create_dir(name).unwrap();
+        }
+        for name in [
+            "installation_id",
+            "state_5.sqlite",
+            "state_5.sqlite-wal",
+            "state_5.sqlite-shm",
+        ] {
+            profile.write(name, b"synthetic runtime artifact").unwrap();
+        }
+        prepare_codex_profile(&root(&temp)).unwrap();
+        let database = temp
+            .path()
+            .join(CODEX_PROFILE_DIRECTORY)
+            .join("state_5.sqlite");
+        std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(prepare_codex_profile(&root(&temp)).is_err());
+        std::fs::remove_file(&database).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("sentinel");
+        std::fs::write(&target, b"preserve").unwrap();
+        symlink(&target, &database).unwrap();
+        assert!(prepare_codex_profile(&root(&temp)).is_err());
+        assert_eq!(std::fs::read(target).unwrap(), b"preserve");
     }
 
     #[test]

@@ -41,6 +41,11 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Codex 로그인' && !b.disabled)", "enabled login button")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === 'Codex 로그인').click();
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '로그인 취소' && !b.disabled)", "login waiting and cancellation")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === '로그인 취소').click();
+    await ${waitFor("document.querySelector('.m5-provider-login').textContent.includes('로그인을 취소했어요')", "canceled login feedback")};
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");

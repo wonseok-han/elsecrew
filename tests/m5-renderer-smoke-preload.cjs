@@ -1,9 +1,16 @@
 const listeners = new Set();
+let loginStatus = {state: "idle", attemptId: null, authUrl: null, error: null};
+window.m5Login = { request: async (input) => {
+  if (input.action === "start") loginStatus = {...loginStatus, state: "waiting", attemptId: input.attemptId};
+  if (input.action === "cancel") loginStatus = {...loginStatus, state: "canceled"};
+  return loginStatus;
+} };
 const workspaceListeners = new Set();
 const chatListeners = new Set();
 const agentPublicEventListeners = new Set();
 const agentRunStateListeners = new Set();
 let snapshotCreated = false;
+let statusReads = 0;
 const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 
@@ -21,7 +28,9 @@ window.m5 = {
     for (const listener of chatListeners) listener(message);
     return message;
   },
-  getSystemStatus: async () => ({
+  getSystemStatus: async function () {
+    if (this !== window.m5) throw new TypeError("Illegal invocation");
+    const status = {
     schemaVersion: 1,
     state: "shellReady",
     sidecar: {
@@ -49,7 +58,15 @@ window.m5 = {
     database: { health: "healthy", schemaVersion: 1 },
     recoveryRequired: false,
     blockerIds: [],
-  }),
+    };
+    if (++statusReads === 1) {
+      status.storageAdmission.state = "verifying";
+      status.storageAdmission.completedAt = null;
+      status.database = {health: "verifying", schemaVersion: null};
+      status.recoveryRequired = null;
+    }
+    return status;
+  },
   getStorageStatus: unexpected("getStorageStatus"),
   prepareQuit: async () => ({ safeToQuit: true, blockers: [] }),
   onSidecarEvent: (listener) => unsubscribe(listeners, listener),

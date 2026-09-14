@@ -39,20 +39,28 @@ impl<'a> LoginSession<'a> {
         profile: &'a CodexProfileBinding,
         spawn: impl FnOnce() -> std::io::Result<Child>,
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+        cancel: &AtomicBool,
     ) -> Result<Self, SidecarError> {
         let home = profile.revalidate()?;
         let (flow, request) =
             LoginConnection::begin(home.to_str().ok_or_else(failure)?).map_err(|_| failure())?;
-        let mut process = LoginProcess::reserve(profile)?;
-        process.launch_with_barrier(spawn, release)?;
-        process.send(request, RPC_TIMEOUT, &AtomicBool::new(false))?;
-        Ok(Self {
-            process,
+        let mut session = Self {
+            process: LoginProcess::reserve(profile)?,
             flow,
             deadline: Instant::now() + RPC_TIMEOUT,
             closed: false,
             cleanup_required: false,
-        })
+        };
+        let preparation = session
+            .process
+            .launch_with_barrier(spawn, release)
+            .and_then(|()| session.process.send(request, RPC_TIMEOUT, cancel));
+        if let Err(error) = preparation {
+            session.flow.invalidate();
+            session.cleanup_failed_preparation()?;
+            return Err(error);
+        }
+        Ok(session)
     }
 
     #[cfg(test)]
@@ -60,7 +68,7 @@ impl<'a> LoginSession<'a> {
         profile: &'a CodexProfileBinding,
         spawn: impl FnOnce() -> std::io::Result<Child>,
     ) -> Result<Self, SidecarError> {
-        Self::start_with_barrier(profile, spawn, |_| Ok(()))
+        Self::start_with_barrier(profile, spawn, |_| Ok(()), &AtomicBool::new(false))
     }
 
     /// Owner calls at most 100ms apart, including while the browser is open.
@@ -145,6 +153,21 @@ impl<'a> LoginSession<'a> {
         result
     }
 
+    fn cleanup_failed_preparation(&mut self) -> Result<(), SidecarError> {
+        if let Err(error) = self.close_process() {
+            // Retain the child through delayed OS observations, but preserve
+            // the original uncertainty even after a later successful reap.
+            for _ in 0..10 {
+                std::thread::sleep(Duration::from_millis(100));
+                if self.retry_cleanup().is_ok() {
+                    break;
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Also called by subsequent advance/cancel after an uncertain close. The
     /// first uncertainty stays fenced even if later OS cleanup succeeds.
     pub(crate) fn retry_cleanup(&mut self) -> Result<(), SidecarError> {
@@ -197,6 +220,31 @@ exec /bin/sleep 30
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn cancel_during_initialization_explicitly_reaps_and_allows_new_reservation() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let cancel = AtomicBool::new(false);
+        let result = LoginSession::start_with_barrier(
+            &binding,
+            || {
+                Command::new("/bin/cat")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+            },
+            |_| {
+                cancel.store(true, Ordering::Release);
+                Ok(())
+            },
+            &cancel,
+        );
+        assert!(result.is_err());
+        assert!(!temp.path().join("codex-login.pending").exists());
+        LoginProcess::reserve(&binding).unwrap().finish().unwrap();
     }
 
     #[test]
@@ -327,6 +375,39 @@ exec /bin/sleep 30
                 );
             }
         }
+    }
+
+    #[test]
+    fn failed_preparation_cleanup_retains_child_until_reaped_without_clearing_fence() {
+        use hello_agent_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let home = binding.revalidate().unwrap();
+        let (flow, _) = LoginConnection::begin(home.to_str().unwrap()).unwrap();
+        let mut session = LoginSession {
+            process: LoginProcess::reserve(&binding).unwrap(),
+            flow,
+            deadline: Instant::now() + RPC_TIMEOUT,
+            closed: false,
+            cleanup_required: false,
+        };
+        session
+            .process
+            .launch_with_barrier(
+                || {
+                    Command::new("/bin/cat")
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+        let root = session.process.root_for_test();
+        session.process.inject_uncertain_cleanup_once();
+        assert!(session.cleanup_failed_preparation().is_err());
+        assert!(matches!(SystemProcTable.probe(root), ProbeResult::Gone));
+        assert!(temp.path().join("codex-login.pending").exists());
     }
 
     #[test]

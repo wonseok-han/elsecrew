@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -47,7 +48,6 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 const APP_SCHEME = "app";
 const APP_HOST = "m5";
 const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
-const DEV_FIXTURE_SIDECAR = resolve(__dirname, "..", "..", "scripts", "m5-sidecar-fixture.mjs");
 
 let mainWindow: BrowserWindow | undefined;
 let sidecar: SidecarClientV1 | undefined;
@@ -99,8 +99,8 @@ function sidecarLaunch(dataDirectory: string): SidecarLaunchV1 {
     };
   }
   return {
-    command: process.execPath,
-    args: [DEV_FIXTURE_SIDECAR, "--stdio"],
+    command: resolve(__dirname, "..", "..", "target", "debug", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`),
+    args: ["--stdio"],
     cwd: dataDirectory,
   };
 }
@@ -261,7 +261,9 @@ function startSidecar(): SidecarClientV1 {
 }
 
 async function getSystemStatus(): Promise<SystemStatusV1 | SystemStatusG5DV1> {
-  if (!sidecar) return unavailableStatus(new Error("sidecar was not started"));
+  // The renderer can request status before loadURL resolves. Start exactly once
+  // here rather than permanently presenting that startup race as unavailable.
+  if (!sidecar) sidecar = startSidecar();
   try {
     await sidecar.start();
     return await sidecar.getSystemStatus();
@@ -275,6 +277,20 @@ function prepareQuit(): Promise<PrepareQuitResultV1> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle(LOGIN_CHANNEL, async (event, input: unknown) => {
+    assertCurrentMainFrame(event);
+    if (!sidecar) throw new Error("sidecar was not started");
+    const request = validateLoginRequest(input);
+    const result = validateLoginStatus(await sidecar.login(request));
+    if (result.authUrl && request.action !== "cancel") {
+      try { await shell.openExternal(result.authUrl); }
+      catch {
+        if (result.attemptId) await sidecar.login({action:"cancel",attemptId:result.attemptId});
+        throw new Error("login browser could not be opened");
+      }
+    }
+    return { ...result, authUrl: null }; // OAuth URL never reaches renderer or persistent state.
+  });
   ipcMain.handle(M5_INTERNAL_CHANNELS_V1.systemGetStatus, async (event) => {
     assertCurrentMainFrame(event);
     return getSystemStatus();
@@ -379,7 +395,7 @@ app.whenReady().then(async () => {
   await protocol.handle(APP_SCHEME, serveAppAsset);
   registerIpcHandlers();
   await createMainWindow();
-  sidecar = startSidecar();
+  sidecar ??= startSidecar();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
@@ -398,7 +414,6 @@ app.on("window-all-closed", () => {
 
 export {
   APP_ORIGIN,
-  DEV_FIXTURE_SIDECAR,
   SIDECAR_READY_TIMEOUT_MS,
   assertCurrentMainFrame,
   m5DataDirectory,

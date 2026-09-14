@@ -13,6 +13,7 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController, stateLabel } from "./chat-state.ts";
 import { WorkbenchDock } from "./workbench-dock.tsx";
+import { ProviderLogin } from "./provider-login.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 
 type MonacoApi = typeof Monaco;
@@ -42,7 +43,7 @@ function useStorageAdmission(bridge: SupportedM5Bridge): AdmissionView {
     const v6 = bridge as Partial<M5BridgeV6>;
     const getSystemStatus = v6.getSystemStatus;
     if (bridge.version < 6 || typeof getSystemStatus !== "function") { setAdmission("ready"); return; }
-    const poller = new StorageAdmissionPoller(getSystemStatus, setAdmission);
+    const poller = new StorageAdmissionPoller(() => v6.getSystemStatus!(), setAdmission);
     poller.start();
     return () => poller.stop();
   }, [bridge]);
@@ -140,6 +141,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.notice}</p>}
       <StorageAdmissionNotice admission={admission} />
+      <ProviderLogin disabled={!admissionReady} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{snapshot.error.message}</strong>

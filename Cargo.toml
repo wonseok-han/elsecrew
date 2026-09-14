@@ -6,3 +6,7 @@ members = [
     "crates/hello-agent-sidecar",
     "src-tauri",
 ]
+
+# Large provider binaries are hashed before launch, including in the dev app.
+[profile.dev.package.sha2]
+opt-level = 3

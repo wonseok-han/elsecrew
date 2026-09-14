@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (제품 Codex 로그인 연결)
+
+- **구현**: 내부 helper에서 멈추지 않고 macOS pinned Codex 0.153.4 launcher → 앱 전용 HOME/CODEX_HOME → login session → 고정 provider.login IPC → main의 공식 HTTPS 브라우저 열기 → 작업대 로그인/대기/취소/오류 UI를 연결했다. 개발 실행도 기존 더미 대신 실제 debug sidecar를 사용한다. 실제 모델 작업·Claude 로그인·Windows는 이 기능의 완료 주장이 아니다.
+- **안전/검토 수정**: 초기 send에도 취소를 전달하고 준비/실행 실패 때 소유 session을 유지한 bounded cleanup 재시도를 수행한다. 취소 요청은 URL을 제거하고 main도 브라우저를 열지 않는다. worker panic·미확인 종료는 provider-login:codex quit blocker로 남는다. 후속 OS 종료 관측만으로 최초 불확실 fence를 자동 해제하지 않으며 UI에 안전 종료/재로그인 차단을 명시한다. 수동 복구 UI는 후속이다.
+- **실제 관측**: 설치된 Codex 및 host 쌍을 strict codesign으로 검증했다. 별도 임시 profile에서 실제 OAuth URL 생성 → 브라우저 없이 즉시 취소 → process 종료/예약 해제 PASS(2.54초). sandbox의 localhost callback 제한은 모델 없는 동일 검사의 허용 실행으로 대조했다. 기존 인증 읽기/복사·유료 모델 호출 없음. sha2만 dev 최적화하여 약 283MB 실행 파일 pin 재검사의 개발 지연을 줄였다.
+- **검증**: 전체 protocol 52 PASS, sidecar 377 PASS/기대값 1 FAIL/2 ignored(663.68초)에서 새 capability 기대값을 고친 뒤 해당 검사 PASS. 이후 변경 영역 provider 41 PASS/1 ignored, core login 8 PASS, 실제 설치 CLI의 임시 OAuth URL→취소 검사 1 PASS(2.54초). 전체 Node 335 PASS, 추가 bridge 협상 포함 45 PASS, main 보안/시작 경합 6 PASS, Chromium 준비 중→완료→로그인→취소/Monaco 2 PASS. TypeScript·renderer build·변경 crate rustfmt·diff PASS. sidecar strict clippy `--no-deps` PASS; dependency 포함 strict 검사는 변경하지 않은 core proctree의 기존 2개 lint(unnecessary_lazy_evaluations/map_entry) 때문에 실패했다. 이를 전체 strict PASS로 기록하지 않는다.
+- **실제 앱 확인**: 초기 비활성화를 재현했다. loadURL 전 상태 요청 경합을 방지하고, 준비 중 polling의 browser setTimeout/clearTimeout을 메서드로 직접 호출해 발생한 Illegal invocation을 wrapper로 수정했다. bridge 호출도 receiver를 유지한다. 즉시 ready만 반환하던 Chromium fixture에 verifying→ready 전환을 추가했고 새 프로세스로 앱을 다시 열어 프로젝트 선택·Codex 로그인 버튼 활성화를 확인했다. 임시 진단 로그는 제거했다. 독립 읽기 전용 검토에서 cleanup 경로의 차단 결함 해소를 확인했다(검토자는 테스트 미실행).
+- **실사용 경계**: browser 인증 완료 후 fresh account/read와 cleanup 성공을 확인하는 흐름은 구현했지만 실제 사용자 계정 로그인 완료는 사용자가 직접 수행해야 한다. 재시작 후 로그인 상태 복원은 아직 없다. 캐시 삭제·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (실행 파일 pin 재검증 연결)
 
 - **직접 구현**: clean `18bc985`에서 내부 PinnedExecutable과 gated process 연결을 구현했다. backend가 별도로 제공하는 SHA-256과 no-follow 경로/파일 handle을 대조하며 regular·root/현재 UID·단일 링크·실행 권한·setuid/setgid 및 group/other write 금지·512MiB 상한을 요구한다. 64KiB streaming hash 전후 길이/mtime/ctime을 비교하고 보존 inode와 새 경로 신원을 재검증한다. gate 생성 전과 release 직전에 다시 검사한다. expected digest를 후보 파일로부터 자동 신뢰하는 경로는 없다.
@@ -315,6 +324,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **제품 로그인 활성화(2026-09-14)**: macOS Codex 0.153.4 exact pinned 쌍으로 앱 전용 로그인 UI/IPC/launcher를 연결했다. 원래 터미널 인증은 보존한다. 로그인은 모델 실행 준비 판정이 아니며 실제 사용자 인증 완료는 별도 확인한다. 일반 개발 실행도 실제 debug sidecar를 필요로 한다. 초기/실행 cleanup 불확실성은 bounded 재시도 후에도 자동 해제하지 않고 안전 종료와 재로그인을 차단한다.
 
 - **CLI 버전 드리프트(2026-09-14 후속)**: 현재 ChatGPT.app 번들의 Codex는 0.153.4다. 앞선 0.149.1 관측은 당시 증거이며 현 설치 버전으로 재인용하지 않는다. 로그인 schema 20파일 비교에서 Bedrock 인증 추가 2파일 차이가 있고 chatgpt 분기는 동일하다. `scripts/m5-codex-login-schema.mjs`로 생성 schema와 의존 타입을 오프라인 대조할 수 있지만 결과는 실제 provider/version 활성화 권위가 아니다.
 

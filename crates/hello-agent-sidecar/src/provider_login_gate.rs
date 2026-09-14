@@ -13,13 +13,18 @@ const SCRIPT: &str =
     "IFS= read -r gate && [ \"$gate\" = hello-agent-login-release-v1 ] && exec \"$@\"";
 
 pub(super) fn spawn(program: &Path, args: &[&OsStr], cwd: &Path) -> io::Result<Child> {
+    command(program, args, cwd)?.spawn()
+}
+
+pub(super) fn command(program: &Path, args: &[&OsStr], cwd: &Path) -> io::Result<Command> {
     if !program.is_absolute() || !cwd.is_absolute() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "absolute launch paths required",
         ));
     }
-    Command::new("/bin/sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .args(["-c", SCRIPT, "hello-agent-login-gate"])
         .arg(program)
         .args(args)
@@ -27,8 +32,8 @@ pub(super) fn spawn(program: &Path, args: &[&OsStr], cwd: &Path) -> io::Result<C
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    Ok(command)
 }
 
 /// Only the lifecycle owner's one-shot release callback calls this. Nonblocking,
