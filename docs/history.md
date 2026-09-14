@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (압축 후 chat 재개방 경계 수정)
+
+- **원인·직접 수정**: `83de9e1` 위에서 기존 실패 회귀를 이어 조사했다. v9 계획의 완료/부분 release는 이전 plan row를 의도적으로 삭제하지만 재개방 chat transition 검사가 그 행을 계속 요구했다. `plan_v9.rs`에서 ReleasePlan/Finalize의 cursor가 이미 해제한 predecessor만 exact frozen source로 대조하고, 그 외 단계는 plan predecessor 필수 검증을 유지했다. 저장 형식·삭제 정책·검증 예산은 변경하지 않았다.
+- **증거·검토**: 보존 실패 DB의 복사본에서 수정 전 plan_v9.rs:1172 실패→수정 후 product admission 성공을 확인했다. Karpathy 지침에 따라 임시 진단 출력과 로컬 경로 하드코딩 검사는 제거했다. 실제 1,000행 압축→원본 후속 event 부재→재개방→동일 메시지 재시도 무이벤트/무변경 및 frozen predecessor 누락 거부를 포함한 집중 4/4이 66.78초에 통과했다. 기존 읽기 전용 검토자는 코드 결함 없음으로 확인하고 부분 ReleasePlan 경계 검사 추가를 요청했다.
+- **최종 검증·다음**: 부분 release 재개방 성공·해제된 frozen predecessor 누락·아직 남아야 하는 plan predecessor 누락 거부를 추가한 최신 focused 4/4(66.89초), 관련 reopen_plan_v9 21/21(109.46초), sidecar 자체 clippy(all-targets/no-deps, warnings denied)·scoped rustfmt·diff 검사 PASS. 독립 검토자가 추가 경계 검사까지 지적 없음으로 확인했다. 전체 sidecar/제품 누적 검증을 이번에 실행한 것은 아니다. 수정·회귀·이 기록만 작업 단위 커밋한다. 후속 메시지 wire/UI·실제 provider 로그인 선택·원본 적용/복구·guided start·G6/Windows/출시는 계속 남는다. main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (후속 메시지 압축 후 재시도 검증)
+
+- **검사 추가**: clean `83de9e1`에서 후속 메시지 저장→동일 chat의 1,001 source rows→제품 배치 정규화→검증 재개방→실제 1,000행 압축→원본 메시지 event 부재 확인→재시작/재시도 시 동일 메시지·무이벤트·동일 projection을 확인하는 회귀를 추가했다. 제품 코드와 임계값은 바꾸지 않았고 테스트용 임시 DB만 사용했다.
+- **테스트 구성 수정**: 최초 타입과 준비 절차를 바로잡았다. 압축 전후 모두 v10 product admission으로 열어야 하며, 검사용 별도 SQLite 연결은 기존 저장소를 닫은 뒤 사용해야 한다. v10을 일반 Storage::open으로 재개방하거나 살아 있는 exclusive 연결 옆에서 읽는 실패를 제품 결함으로 기록하지 않는다. Karpathy 지침에 따라 기존 제품 경로로 검증하고 우회/새 저장 구조를 만들지 않았다.
+- **새 실패 증거**: 올바른 product admission 경로에서도 압축 후 재시작이 `storageSchemaMismatch: frozen operation verification session is invalid`로 거부됐다. 마지막 session `34683`은 exit 101, 57.64초로 종료했다. `/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/.tmpNbjzRi/data/hello-agent.sqlite3`를 보존했다. read-only SQL로 chat 원본은 seq1001 한 행만 남고 frozen_operation_sources 1001개, frozen_message_sources/chat_messages 양쪽에 초기 seq1·후속 seq2가 있음을 확인했다. 단순 fresh-row 중복 문제가 아니며 정확한 원인은 조사 중이다.
+- **다음**: 실패 회귀와 기록은 미커밋으로 유지한다. 기존 승인된 읽기 전용 검토자에게 코드/보존 DB의 압축-재시작 불일치를 조사 요청했다. 새 test의 잘못된 구성인지 실제 product 결함인지 증거로 구분하고 해결 전 압축 후 재시도 PASS로 표시하지 않는다. 후속 메시지의 동일 요청 강제 interleaving·실패 주입·wire/bridge·전송 UI와 실제 provider/적용/복구·guided start·G6/Windows/출시 작업은 남는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (후속 저장 검토 수정 검증)
 
 - **검증 재개**: 이전 broad chat 검사 session `83144`의 PID 56585가 6분 이상 CPU를 사용하며 101-snapshot을 실행 중인 것을 확인했다. 검토 전 코드의 검사이므로 의도적으로 SIGINT로 중단하고 종료 코드 101을 확인했다. 이 실행은 미완료이며 통과로 사용하지 않는다. 최신 수정 집중 검사로 전환했다.
@@ -165,6 +178,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **압축 계획 해제 후 chat 검증(2026-09-14)**: plan ordinals 1..1000은 release 중 삭제되고 완료 후 anchor 1001만 남는다. release cursor 이하의 직전 행은 exact frozen source에서 검증해야 한다. plan 행 부재를 모든 단계에서 허용하는 fallback은 금지한다. 실제 product admission 실패는 plan_v9 transition 조회였고 구형 closure의 prefix 조회라는 초기 정적 추정은 이 실패 원인으로 확인되지 않았다.
 - **편집 초안 복구(2026-09-14)**: 재읽기는 사용자 확인 시의 정확한 tab 객체와 완료 시 프로젝트/작업 복사본·차단 상태를 대조한 뒤에만 초안을 교체한다. 실패하면 보존하고 파일은 쓰지 않는다. Monaco의 프로그램적 내용 동기화도 change 알림을 내므로 같은 텍스트는 dirty로 바꾸지 않는다.
 - **2026-09-14 실제 CLI 관측 경계**: Codex 0.149.1의 모델 없는 app-server 초기화/config/account 조회와 Claude 2.1.269 인증 상태 조회는 성공했다. 설정 격리·모델 가용성·actual provider 실행 권위는 아직 증명하지 못했다. 원문 인증/설정은 보존하지 않는다. 최신 후보 계약은 제안서 §6.7이다.
 - **2026-09-14 작업대 배치**: 파일·편집기·변경·팀 대화의 가로 순서/폭은 사용자 조절 및 로컬 저장 가능하다. 전체 시안/상하 분할 도킹 완료는 아니며 실행 안전 계약은 그대로다.

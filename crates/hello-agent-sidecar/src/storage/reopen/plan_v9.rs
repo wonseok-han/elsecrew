@@ -1001,7 +1001,7 @@ fn verify_plan_row(
         _ => true,
     };
     verify_source_receipt(connection, &row, expect_live, expect_frozen, usage)?;
-    verify_planned_chat_transition(connection, plan, &row, chat_state.as_ref(), usage)?;
+    verify_planned_chat_transition(connection, job, plan, &row, chat_state.as_ref(), usage)?;
     verify_message_witness(connection, job, &row, chat_state.as_ref(), usage)?;
     verify_planned_source_parity(
         connection,
@@ -1136,6 +1136,7 @@ fn persisted_chat_state(
 
 fn verify_planned_chat_transition(
     connection: &Connection,
+    job: &StorageCompactionJobV3,
     plan: &StorageCompactionPlanV1,
     row: &hello_agent_protocol::storage_lifetime_v1::StorageCompactionPlanRowV1,
     current: Option<&PlannedChatState>,
@@ -1155,7 +1156,14 @@ fn verify_planned_chat_transition(
         (0, None)
     } else {
         let previous_sequence = row.aggregate_sequence - 1;
-        let expected_rowid: i64 = if row.ordinal > 1 {
+        // Released plan rows are intentionally gone; their frozen sources remain the
+        // authority. Do not accept a missing predecessor in any earlier phase.
+        let predecessor_released = matches!(
+            job.private_state.cursor.phase,
+            StorageCompactionPhaseV3::ReleasePlan | StorageCompactionPhaseV3::Finalize
+        ) && row.ordinal - 1
+            <= job.private_state.cursor.after_plan_ordinal;
+        let expected_rowid: i64 = if row.ordinal > 1 && !predecessor_released {
             connection
                 .query_row(
                     "SELECT event_rowid FROM storage_compaction_plan_rows \

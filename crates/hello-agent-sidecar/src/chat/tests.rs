@@ -529,6 +529,178 @@ fn followup_request(chat: &Value, sequence: u64, id: &str) -> Value {
 }
 
 #[test]
+fn followup_retry_survives_actual_source_compaction_and_reopen() {
+    use crate::storage_lifetime::compaction_writer::{CompactionStepResult, CompactionTarget};
+    use hello_agent_protocol::storage_lifetime_v1::StorageCompactionPhaseV3;
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_compact_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_compact_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let first = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    // Keep the two durable messages, but reach the real 1,000-source-event threshold.
+    for index in 0..999 {
+        persist_chat_state(
+            &mut fixture.storage,
+            &chat,
+            &format!("op_followup_compact_{index}"),
+        )
+        .unwrap();
+    }
+    for _ in 0..20_000 {
+        if !fixture.storage.materialization_requires_work().unwrap() {
+            break;
+        }
+        fixture
+            .storage
+            .run_materialization_scheduler_step()
+            .unwrap();
+    }
+    assert!(!fixture.storage.materialization_requires_work().unwrap());
+    fixture.storage.checkpoint().unwrap();
+    let database = fixture.storage.path().to_path_buf();
+    drop(fixture.storage);
+    fixture.storage =
+        Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let target = CompactionTarget {
+        aggregate_type: "chat".into(),
+        aggregate_id: chat_id.into(),
+    };
+    let mut finalized = false;
+    let mut partial_reopen_checked = false;
+    for _ in 0..1000 {
+        let step = fixture
+            .storage
+            .run_compaction_scheduler_step(&target)
+            .unwrap();
+        if let CompactionStepResult::ArmedWorked {
+            phase: StorageCompactionPhaseV3::ReleasePlan,
+            after_plan_ordinal,
+            ..
+        } = &step
+        {
+            if !partial_reopen_checked && (1..1000).contains(after_plan_ordinal) {
+                fixture.storage.checkpoint().unwrap();
+                drop(fixture.storage);
+                assert_compacted_chat_missing_row_rejected(
+                    &database,
+                    chat_id,
+                    "frozen_operation_sources",
+                    *after_plan_ordinal,
+                );
+                assert_compacted_chat_missing_row_rejected(
+                    &database,
+                    chat_id,
+                    "storage_compaction_plan_rows",
+                    *after_plan_ordinal + 1,
+                );
+                fixture.storage = Storage::open_for_admission(
+                    &database,
+                    &std::sync::atomic::AtomicBool::new(false),
+                )
+                .unwrap();
+                partial_reopen_checked = true;
+            }
+        }
+        if matches!(step, CompactionStepResult::Finalized { .. }) {
+            finalized = true;
+            break;
+        }
+    }
+    assert!(finalized, "real compaction did not finalize");
+    assert!(
+        partial_reopen_checked,
+        "partial release boundary was not exercised"
+    );
+    let database = fixture.storage.path().to_path_buf();
+    let before = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    fixture.storage.checkpoint().unwrap();
+    drop(fixture.storage);
+    let inspection = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let remaining: i64 = inspection
+        .query_row(
+            "SELECT count(*) FROM events WHERE operation_id=?1",
+            [format!(
+                "op_followup_{}",
+                request["clientMessageId"].as_str().unwrap()
+            )],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0, "retry must not rely on the fresh source row");
+    drop(inspection);
+    assert_compacted_chat_missing_row_rejected(
+        &database,
+        chat_id,
+        "frozen_operation_sources",
+        1000,
+    );
+    let mut reopened =
+        Storage::open_for_admission(&database, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let replay = fixture
+        .chats
+        .append_user_message(&mut reopened, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.events.is_empty());
+    assert_eq!(chat_projection_record(&reopened, chat_id).unwrap(), before);
+}
+
+fn assert_compacted_chat_missing_row_rejected(
+    database: &std::path::Path,
+    chat_id: &str,
+    table: &str,
+    sequence: u32,
+) {
+    // A released plan predecessor must still have a valid frozen source. Preserve
+    // the schema while injecting corruption into a separate disposable database.
+    assert!(matches!(
+        table,
+        "frozen_operation_sources" | "storage_compaction_plan_rows"
+    ));
+    let copy_root = tempfile::tempdir().unwrap();
+    let damaged = copy_root.path().join("missing-predecessor.sqlite3");
+    fs::copy(database, &damaged).unwrap();
+    let connection = rusqlite::Connection::open(&damaged).unwrap();
+    let triggers: Vec<(String, String)> = connection
+        .prepare("SELECT name,sql FROM sqlite_schema WHERE type='trigger' AND tbl_name=?1")
+        .unwrap()
+        .query_map([table], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    for (name, _) in &triggers {
+        connection
+            .execute_batch(&format!("DROP TRIGGER \"{}\"", name.replace('"', "\"\"")))
+            .unwrap();
+    }
+    assert_eq!(connection.execute(
+        &format!("DELETE FROM {table} WHERE aggregate_type='chat' AND aggregate_id=?1 AND aggregate_sequence=?2"),
+        rusqlite::params![chat_id, sequence],
+    ).unwrap(), 1);
+    for (_, sql) in triggers {
+        connection.execute_batch(&sql).unwrap();
+    }
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(connection);
+    let error =
+        match Storage::open_for_admission(&damaged, &std::sync::atomic::AtomicBool::new(false)) {
+            Ok(_) => panic!("missing frozen predecessor was accepted"),
+            Err(error) => error,
+        };
+    assert_eq!(error.kind(), "storageSchemaMismatch");
+}
+
+#[test]
 fn followup_append_is_durable_and_retries_without_new_event() {
     let mut fixture = Fixture::new();
     let snapshot = fixture.snapshot("req_followup_snapshot");
