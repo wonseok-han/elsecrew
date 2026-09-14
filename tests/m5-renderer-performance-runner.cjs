@@ -122,7 +122,7 @@ app.whenReady().then(async () => {
       await wait(() => document.querySelector('[aria-label="저장되지 않은 변경"]') && document.querySelector('.view-line')?.textContent.includes('Z')); await paint();
       const inputPaintMs = performance.now() - globalThis.__performanceInputStart;
       let start = performance.now(); document.querySelector('.m5-change-row').click();
-      await wait(() => document.querySelector('.m5-diff-details pre')?.textContent.startsWith('--- a/file-0')); await paint();
+      await wait(() => document.querySelector('.m5-diff-lines tbody code')?.textContent.startsWith('--- a/file-0')); await paint();
       const diffFirstFileMs = performance.now() - start;
       await new Promise(r => setTimeout(r, 50));
       globalThis.__performanceLongTasks.push(...globalThis.__performanceObserver.takeRecords().map(e => e.duration));

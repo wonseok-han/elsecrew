@@ -112,9 +112,13 @@ window.m5 = {
   },
   getDiffSummary: async () => {
     if (!snapshotCreated) throw new Error("renderer requested changes before creating its standalone snapshot");
-    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: [] };
+    return { projectId: "smoke_project", baseCommit: "a".repeat(40), entries: [{ path: "src/example.ts", kind: "modified", binary: false }] };
   },
-  getDiffFile: async () => { throw new Error("not used by renderer smoke"); },
+  getDiffFile: async () => {
+    const text = "@@ -1 +1,401 @@\n-old\n" + Array.from({ length: 401 }, (_, index) => `+line ${index + 1}\n`).join("");
+    for (const listener of listeners) listener({ protocolVersion: 1, kind: "event", sidecarInstanceId: "smoke_sidecar", streamId: "smoke_diff", seq: 1, event: "blob.chunk", payload: { text } });
+    return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
+  },
   onProjectEvent: () => () => {},
   getWorkspaceTree: unexpected("getWorkspaceTree"),
   closeWorkspace: unexpected("closeWorkspace"),

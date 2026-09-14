@@ -100,6 +100,19 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('[role=alertdialog] button')].find(button => button.textContent === '편집 내용 버리고 다시 불러오기').click();
     await ${waitFor("!document.querySelector('[role=alertdialog]') && !document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "saved text restored")};
   })()`);
+  await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('.m5-change-row').click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
+    if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
+    const next = () => [...document.querySelectorAll('button')].find(button => button.textContent === '다음 변경');
+    next().click();
+    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "second diff page")};
+    next().click();
+    await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 3", "last diff page")};
+    if (!next().disabled || !document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
+    document.querySelector('.m5-change-row').click();
+    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('1 /')", "reopened diff resets page")};
+  })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   await window.close();
   app.exit(0);

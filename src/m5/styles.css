@@ -100,6 +100,16 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-change-kind { min-width: 58px; font-size: 11px; font-weight: 700; }
 .m5-kind-added { color: #72d39b; }.m5-kind-modified { color: #91c5ff; }.m5-kind-deleted { color: #fa8d97; }.m5-kind-renamed { color: #d5b5ff; }.m5-kind-binary { color: #f5c95d; }
 .m5-diff-details { margin: 12px; padding: 12px; border-top: 1px solid #303b49; color: #d8e0eb; }
+.m5-diff-lines { max-height: 480px; overflow: auto; border: 1px solid #303b49; border-radius: 6px; }
+.m5-diff-lines table { border-collapse: collapse; width: 100%; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.m5-diff-lines th { text-align: left; position: sticky; top: 0; background: #202a36; padding: 6px; }
+.m5-diff-lines td { padding: 2px 6px; vertical-align: top; }
+.m5-diff-lines td:not(:last-child) { width: 4ch; min-width: 4ch; text-align: right; color: #abb9ca; user-select: none; border-right: 1px solid #303b49; }
+.m5-diff-lines code { white-space: pre; font: inherit; }
+.m5-diff-added { background: #153d2d; color: #bcf5d0; }
+.m5-diff-deleted { background: #49242d; color: #ffd0d6; }
+.m5-diff-metadata { background: #202a36; color: #b8c9e3; }
+.m5-diff-pages { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
 .m5-diff-details p { color: #aab4c1; font-size: 12px; }.m5-diff-details pre { max-height: 260px; overflow: auto; white-space: pre-wrap; color: #d8e0eb; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .m5-chat-strip, .m5-timeline, .m5-settings { margin: 0 0 14px; border: 1px solid #303b49; border-radius: 10px; background: #171d26; }

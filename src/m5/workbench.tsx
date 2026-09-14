@@ -15,6 +15,7 @@ import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController, stateLabel } from "./chat-state.ts";
 import { WorkbenchDock } from "./workbench-dock.tsx";
+import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 
 type MonacoApi = typeof Monaco;
 
@@ -329,11 +330,29 @@ function MonacoEditor({ tab, readOnly, onChange }: { tab: EditorTab; readOnly: b
 }
 
 function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string }) {
+  const rows = useMemo(() => diffRows(text), [text]);
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [descriptor, text]);
+  const pages = Math.max(1, Math.ceil(rows.length / DIFF_PAGE_ROWS));
+  const current = Math.min(page, pages - 1);
+  const visible = rows.slice(current * DIFF_PAGE_ROWS, (current + 1) * DIFF_PAGE_ROWS);
   return (
     <section className="m5-diff-details" aria-label="선택한 변경 상세">
       <strong>{descriptor.path}</strong>
       <p>{labelForKind(descriptor.kind)}{descriptor.oldPath ? ` · 이전: ${descriptor.oldPath}` : ""}</p>
-      {descriptor.kind === "binary" ? <Empty text="이진 변경은 내용 대신 파일 변경 사실만 보여요." /> : <pre>{text || "변경 내용을 준비하고 있어요."}</pre>}
+      {descriptor.kind === "binary" ? <Empty text="이진 변경은 내용 대신 파일 변경 사실만 보여요." /> : !text ? <Empty text="표시할 텍스트 변경이 없어요." /> : <>
+        <p>− 삭제된 줄 · + 추가된 줄 · 왼쪽 번호는 변경 전, 오른쪽은 변경 후예요.</p>
+        <div className="m5-diff-lines" tabIndex={0} aria-label="변경 전후 줄 비교">
+          <table><thead><tr><th scope="col">이전</th><th scope="col">이후</th><th scope="col">내용</th></tr></thead><tbody>
+            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{row.before}</td><td>{row.after}</td><td><code>{row.text}</code></td></tr>)}
+          </tbody></table>
+        </div>
+        {pages > 1 && <nav className="m5-diff-pages" aria-label="변경 내용 페이지">
+          <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>이전 변경</button>
+          <span aria-live="polite">{current + 1} / {pages} 페이지 · 전체 {rows.length}줄</span>
+          <button type="button" disabled={current === pages - 1} onClick={() => setPage(current + 1)}>다음 변경</button>
+        </nav>}
+      </>}
     </section>
   );
 }
