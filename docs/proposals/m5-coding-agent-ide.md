@@ -454,6 +454,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **연결 전 남은 증거와 구현 경계**:
 
+**2026-09-14 독립 검토 후 구현 순서**: 일반 제품의 차단 모드는 유지한다. 현재 start의 fake executable/launcher 및 Claude-only handshake를 실제 CLI로 단순 치환하지 않는다. 첫 offline 버전/인증 파서는 `core/provider/vendor_observation.rs`에 분리했으며 실행 권위를 반환하지 않는다. 다음은 provider별 config/model/handshake 검증과 입력 보류 경계다. 이후에만 기존 snapshot 검증→run/쓰기 잠금 영속화→프로세스 신원/시작 증거→입력 전달→공개 event→종료/poison/recovery에 연결한다. 버전/auth 성공만으로 제품 capability를 광고하거나 `canStart`를 올리지 않는다.
+
 **2026-09-14 추가 관측**: 사용자 잔여 작업 진행 요청 후 생성한 빈 임시 폴더에서 Codex 0.149.1의 `initialize`→`initialized`→`config/read`→`account/read(refreshToken:false)`를 확인했다. 초기화/config 응답 성공, chatgpt credentials present 분류와 stdin 종료 후 exit 0만 기록했다. Claude 2.1.269의 `auth status --json`은 exit 0/loggedIn true/claude.ai였다. thread/turn/model 요청은 0회이고 원문 설정·계정 식별자·토큰은 보존하지 않았다. 이전 startup/config 관측 대기는 이 범위에서 해소했지만 설정 격리·실제 모델 smoke·제품 활성화는 여전히 미완료다.
 
 - Codex의 `initialize`/`initialized`→`model/list`→`thread/start` 응답을 검사한 뒤에만 `turn/start`로 목표를 전달하는 내부 상태를 둔다. 로컬 0.149.1 schema의 요청 sandbox 값은 `read-only`/`workspace-write`이며, reasoning은 top-level 필드가 아니라 고정 `config.model_reasoning_effort` 후보와 응답 `reasoningEffort`를 대조해야 한다. 응답의 정확한 모델·cwd 신원·승인 정책·sandbox 세부 권한 및 thread/turn 소속을 생략하지 않는다. 이는 schema 기반 후보 계약이며 실제 응답 성공은 아직 관측하지 않았다.

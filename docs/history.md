@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (실제 provider 독립 검토 승인)
+
+- **사용자 승인·작업 계약**: `bbb03f08cdeced97bddf53f792b2edc84ccfa2a7`의 clean `m5/coding-agent-ide`에서 실제 provider 연결의 읽기 전용 검토자 1명을 호출했다. 메인이 모든 구현·문서·커밋을 소유하며 새 worktree·병렬 구현자는 만들지 않는다. 승인 범위는 독립 안전 검토이며 실제 유료 모델 실행·사용자 프로젝트 변경·서명/배포·main/push 승인은 아니다.
+- **직접 대조**: 일반 runtime은 아직 차단 모드이고 start·provider 관측·launcher는 fake executable에 결합돼 있다. 이전 로그인/초기화 관측을 제품 실행 권위로 올리지 않는다. 기존 fake 버전을 실제 CLI 버전으로 치환하거나 LaunchSpec의 설정/환경 거부를 해제하는 방식으로 연결하지 않는다.
+- **독립 결과·직접 구현**: 검토자는 일반 제품의 차단 상태와 fake-only discovery/launcher/Claude handshake를 확인했다. 실제 활성화 승인이 아니라 미구현 경계 확인이다. 메인은 기존 provider와 분리된 `vendor_observation.rs`에 Codex 0.149.1·Claude 2.1.269 exact version/auth 파서를 구현했다. bounded transient 입력과 redacted enum 출력만 다루고 runtime/capability·공개 계약·설정 격리·원본/복구는 변경하지 않는다. 같은 검토자에게 이 변경만 재확인 요청했다.
+- **검증·다음**: 새 회귀 4/4와 기존 provider 포함 18/18, rustfmt·diff 검사 PASS. Clippy 일반 실행은 성공했지만 `-D warnings`는 변경 없는 proctree.rs/tests.rs의 기존 lint 3개로 실패했다(새 모듈 경고 없음). AGENTS.md/CLAUDE.md 동일성 확인. config/model/handshake·입력 보류·실제 프로세스 연결 및 승인 smoke가 다음이다. 실제 CLI 재실행·모델 호출·main/push는 없다.
+- **변경 재검토 완료**: 같은 독립 검토자는 파서 diff에 actionable defect 없음을 확인했다. 권고한 Codex 중복 필드·버전 공백·Claude null/unknown auth 경계 회귀 2개를 더해 최종 provider 검사 20/20 PASS했다. 신규 파서 검토 통과는 실제 provider 활성화 승인과 구분한다.
+
 ### 2026-09-14 · by GPT-6 Astra (패널 배치 구현·모델 없는 실제 CLI 관측)
 
 - **직접 구현**: 파일·편집기·변경·팀 대화를 같은 작업대로 연결하고 drag/drop 순서 변경, 경계선 드래그·키보드 폭 조절, 로컬 배치 저장·검증·기본값 복원을 추가했다. 패널 key를 유지해 이동 중 Monaco를 재생성하지 않는다. 현재는 가로 열 재배치이며 자유로운 상하 분할·탭 도킹이나 전체 시안 적용 완료를 뜻하지 않는다.

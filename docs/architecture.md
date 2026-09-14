@@ -198,6 +198,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
+- **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다.
+
 - **작업대 배치 현행**: `src/m5/workbench-dock.tsx`는 파일·편집기·변경·팀 대화를 가로 패널로 구성한다. 제목 drag/drop·이동 버튼과 경계선 pointer/키보드 조절을 지원하며 순서/폭을 검증해 localStorage에 저장한다. 이동 때 Monaco identity를 유지한다. 상하 분할·탭 도킹 및 전체 승인 시안 적용은 아직 남는다.
 - **실제 CLI 최소 관측(2026-09-14)**: 빈 임시 폴더에서 Codex 0.149.1 app-server 초기화·config/account 조회·정상 종료와 Claude 2.1.269 인증 상태 조회를 확인했다. 모델 요청과 thread 생성은 없었다. 이 관측만으로 설정 격리·모델 가용성·실행 권위를 보장하지 않으며 제품 actual provider는 활성화하지 않았다.
 

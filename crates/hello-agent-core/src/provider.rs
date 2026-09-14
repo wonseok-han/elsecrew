@@ -10,6 +10,8 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+pub mod vendor_observation;
+
 pub const PROVIDER_OBSERVATION_LINE_MAX_BYTES: usize = 128 * 1024;
 pub const PROVIDER_OBSERVATION_TOTAL_MAX_BYTES: usize = 1024 * 1024;
 pub const PROVIDER_INTERNAL_EVENTS_MAX: usize = 1024;
