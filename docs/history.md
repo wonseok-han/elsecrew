@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (테스트 설치본·저장공간 점검)
+
+- **현재 상태**: clean `0df309c`·`m5/coding-agent-ide`에서 로그인 실행 연결의 미구현 경계를 재확인하며 사용자가 추가 요청한 저장공간 점검을 우선 수행했다. 이번에는 제품 코드를 변경하지 않았다. Karpathy 지침에 따라 임의 launcher나 인증 설정 우회는 추가하지 않았다.
+- **설치본 확인**: `/Applications`·`~/Applications`의 깊이 3 이내 이름 검색 및 Spotlight에서 별도 Hello Agent 설치본은 발견되지 않았다(검색 범위 밖/미색인 위치까지 부재를 보장하지 않음). 발견된 앱은 저장소 `out/hello-agent-darwin-arm64/hello-agent.app` 약 285MiB다. `out` 전체는 430736KiB(약 421MiB)이며 배포 ZIP 등이 포함된다. 프로세스 목록 읽기를 허용된 방식으로 재시도한 시점에는 hello-agent/cargo/rustc 실행 항목이 없었다. 다른 제품 astxAgent는 이 앱과 무관하므로 정리 대상이 아니다.
+- **주요 용량**: root `target` 15681036KiB(약 15.0GiB), `src-tauri/target` 5080492KiB(약 4.8GiB), node_modules 약 536MiB, `.vite` 약 2.9MiB다. Git worktree는 현재 checkout 하나뿐이고 `.worktrees` 약 8KiB다. 설치본보다 빌드 캐시가 주원인이다. 두 debug/incremental만 합쳐 6162728KiB(약 5.9GiB)이며 삭제 후 다시 생성 가능하지만 다음 빌드 비용이 생긴다.
+- **보존·다음**: 이번 요청은 확인이므로 파일을 삭제하지 않았다. 소스·최신 테스트 앱·사용자 데이터를 보존하고 위 두 incremental 디렉터리만 정리할지 비동기 질문했다. 실제 launcher/barrier·환경/runtime artifact 정책·로그인/복구 IPC/UI는 여전히 남으며 이번 점검을 구현 완료로 세지 않는다. 문서 diff 검사 후 기록만 커밋한다. main 미병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (설치 CLI 변경과 로그인 스키마 대조)
 
 - **직접 작업**: clean `d4ee925`·`m5/coding-agent-ide`에서 실제 launcher 준비 중 설치 CLI가 0.149.1→0.153.4로 변경됐음을 확인했다. 실행 위치는 `/Applications/ChatGPT.app/Contents/Resources/codex`이며 Codex.app 후보는 현재 없다. 기존 exact-version 허용 정책이나 제품 capability는 변경하지 않았다.
