@@ -454,7 +454,7 @@ export class ProjectEditorController {
   updateText(path: string, text: string): void {
     const tab = this.#tab(path);
     if (!tab || tab.mode !== "text" || tab.saveState === "conflicted") return;
-    this.#replaceTab(path, { ...tab, text, saveState: "dirty" });
+    this.#replaceTab(path, { ...tab, text, saveState: tab.saveState === "saving" ? "saving" : "dirty" });
   }
 
   async saveActive(): Promise<void> {
@@ -493,8 +493,9 @@ export class ProjectEditorController {
         this.#setNotice("다른 변경이 먼저 들어왔어요. 내 초안은 보존했고 덮어쓰지는 않았어요.");
         return;
       }
-      this.#replaceTab(path, { ...latest, baseVersion: committed.version, saveState: "clean", byteLength: totalBytes });
-      this.#setNotice("안전하게 저장했어요.");
+      const hasNewerDraft = latest.text !== tab.text;
+      this.#replaceTab(path, { ...latest, baseVersion: committed.version, saveState: hasNewerDraft ? "dirty" : "clean", byteLength: totalBytes });
+      this.#setNotice(hasNewerDraft ? "저장 중에 추가한 내용은 아직 저장하지 않았어요. 한 번 더 저장해 주세요." : "안전하게 저장했어요.");
       await this.refreshChanges();
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;

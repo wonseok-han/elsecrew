@@ -302,6 +302,57 @@ async function openText(bridge = new FakeBridge()) {
   return { bridge, controller };
 }
 
+test("typing during save preserves the newer draft and advances the committed base", async () => {
+  const bridge = new FakeBridge();
+  const pending = deferred<{ outcome: "committed"; version: FileVersionV1 }>();
+  bridge.pendingCommit = pending;
+  const { controller } = await openText(bridge);
+  try {
+    controller.updateText("src/file-000.ts", "first");
+    const saving = controller.saveActive();
+    controller.updateText("src/file-000.ts", "newer 🦦");
+    assert.equal(controller.snapshot().tabs[0]?.saveState, "saving");
+    await controller.saveActive(); // Duplicate save cannot race the active one.
+    pending.resolve({ outcome: "committed", version: version("first") });
+    await saving;
+    assert.equal(bridge.savedText, "first");
+    assert.equal(controller.snapshot().tabs[0]?.text, "newer 🦦");
+    assert.equal(controller.snapshot().tabs[0]?.saveState, "dirty");
+    assert.deepEqual(controller.snapshot().tabs[0]?.baseVersion, version("first"));
+    assert.equal(controller.closeTab("src/file-000.ts"), false);
+    bridge.pendingCommit = null;
+    bridge.appended.length = 0;
+    const commit = bridge.commitFileSave.bind(bridge);
+    bridge.commitFileSave = async request => {
+      assert.deepEqual(request.expectedVersion, version("first"));
+      return commit(request);
+    };
+    await controller.saveActive();
+    assert.equal(bridge.savedText, "newer 🦦");
+    assert.equal(controller.snapshot().tabs[0]?.saveState, "clean");
+  } finally { controller.dispose(); }
+});
+
+test("save failure and conflict preserve input added while saving", async () => {
+  for (const outcome of ["failure", "conflict"] as const) {
+    const { bridge, controller } = await openText();
+    bridge.pendingCommit = deferred();
+    try {
+      const base = controller.snapshot().tabs[0]!.baseVersion;
+      controller.updateText("src/file-000.ts", "submitted");
+      const saving = controller.saveActive();
+      await nextTurn();
+      controller.updateText("src/file-000.ts", "newer");
+      if (outcome === "failure") bridge.pendingCommit.reject(new Error("save failed"));
+      else bridge.pendingCommit.resolve({ outcome: "dirtyConflict", error: { code: "E_DIRTY_CONFLICT", kind: "dirtyConflict", detail: "changed", retryable: false, outcomeUnknown: false } });
+      await saving;
+      assert.equal(controller.snapshot().tabs[0]?.text, "newer");
+      assert.equal(controller.snapshot().tabs[0]?.saveState, outcome === "failure" ? "dirty" : "conflicted");
+      assert.deepEqual(controller.snapshot().tabs[0]?.baseVersion, base);
+    } finally { controller.dispose(); }
+  }
+});
+
 test("dirty 저장은 UTF-8 chunk와 새 baseVersion을 사용해 clean으로 끝난다", async () => {
   const { bridge, controller } = await openText();
   assert.equal(controller.snapshot().tabs[0]?.text, bridge.fileText);

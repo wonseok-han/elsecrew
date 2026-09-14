@@ -198,6 +198,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
+- **저장 중 입력 보존**: editor controller는 저장 중 추가 입력을 허용하되 saving 상태로 중복 저장을 막는다. 성공 시 baseVersion을 갱신하고 이후 입력은 dirty로 남겨 다음 저장에 사용한다. 외부 watcher 충돌이 관측되면 늦은 성공보다 conflicted 상태를 우선한다.
+
 - **패널 접기와 집중**: dock은 순서/폭 외에 숨김 상태를 저장한다. 접힌 패널은 DOM을 유지해 Monaco를 폐기하지 않으며 최소 한 패널을 표시한다. 대화 패널만 표시하다 채팅을 벗어나면 편집기를 노출한다. 전체 시안 적용·상하 분할 도킹 완료를 뜻하지 않는다.
 
 - **모델 없는 Codex 통신 순서**: `vendor_observation/codex_rpc.rs`는 initialize/config/account/model 4개 요청의 single-flight 순서와 응답 ID를 결속하며 예상 밖 frame은 실패로 고정한다. RawValue로 중첩 중복 키를 보존해 vendor 파서에 전달한다. 알림 일반 처리·process runner·timeout·설정 격리·실제 입력 전달/실행 권위는 이 모듈의 기능이 아니다.
