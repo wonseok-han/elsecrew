@@ -1,6 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultDockLayout, moveDockPanel, parseDockLayout, resizeDockPanels } from "../src/m5/dock-layout.ts";
+import { defaultDockLayout, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, resizeDockPanels, toggleDockPanel, visibleDockPanels } from "../src/m5/dock-layout.ts";
+
+test("panel visibility persists without allowing an empty workspace", () => {
+  const initial = defaultDockLayout();
+  const focused = focusDockPanel(initial, "editor");
+  assert.deepEqual(visibleDockPanels(focused, PANEL_IDS), ["editor"]);
+  assert.equal(toggleDockPanel(focused, "editor", PANEL_IDS), focused);
+  const reopened = toggleDockPanel(focused, "files", PANEL_IDS);
+  assert.deepEqual(visibleDockPanels(reopened, PANEL_IDS), ["files", "editor"]);
+  assert.deepEqual(parseDockLayout(JSON.stringify(reopened)), reopened);
+  assert.deepEqual(reopened.widths, initial.widths);
+  assert.deepEqual(reopened.order, initial.order);
+  assert.equal(initial.hidden, undefined);
+});
+test("leaving a focused conversation retains editor access and can reopen panels", () => {
+  const available = ["files", "editor", "changes"] as const;
+  const layout = focusDockPanel(defaultDockLayout(), "conversation");
+  assert.deepEqual(visibleDockPanels(layout, available), ["editor"]);
+  const reopened = toggleDockPanel(layout, "files", available);
+  assert.deepEqual(visibleDockPanels(reopened, available), ["files", "editor"]);
+  assert.equal(toggleDockPanel(layout, "conversation", available), layout);
+});
+test("invalid visibility is discarded and older saved layouts remain readable", () => {
+  for (const hidden of ["editor", ["unknown"], PANEL_IDS, ["files", "files"], null]) {
+    assert.deepEqual(parseDockLayout(JSON.stringify({...defaultDockLayout(),hidden})), defaultDockLayout());
+  }
+  assert.deepEqual(parseDockLayout(JSON.stringify(defaultDockLayout())), defaultDockLayout());
+});
 
 test("layout round-trip and invalid stored data recover to a complete default", () => {
   const initial = defaultDockLayout();

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (작업대 패널 접기·집중 모드)
+
+- **직접 구현**: clean `08dbc7e`에서 메인이 dock 상태/UI/CSS·관련 회귀를 수정했다. 파일·편집기·변경·대화 패널을 접고 다시 열거나 하나에 집중할 수 있다. 순서·폭과 함께 표시 상태를 저장하며 예전 v1 배치는 호환한다. 마지막 패널은 접을 수 없고 대화만 보다가 채팅을 벗어나면 편집기를 표시한다. 숨긴 패널은 unmount하지 않아 Monaco 인스턴스를 유지한다. 실행·원본·저장 계약은 변경하지 않았다.
+- **검증**: dock 회귀 6/6, 실제 Chromium smoke 2/2(접기·복원·집중·이동에서 같은 Monaco DOM 유지), TypeScript noEmit·production renderer build·diff 검사 PASS. 일반 UI 변경은 직접 검토했으며 새 worktree·서브에이전트 호출은 없다. renderer 번들의 기존 크기 경고는 남는다.
+- **전체 목표·다음**: 이전 RPC commit은 진전이며 개발 완료가 아니다. 실제 연결의 전용 환경 로그인 선택은 답변 대기다. 코드 편집의 저장 중 추가 입력 처리도 다음 확인 대상으로 발견했다. 실제 provider/인계·후속 지시·적용/복원·guided start·G6/Windows/출시는 남고 목표를 유지한다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (완료 목표 지속·Codex 요청 응답 결속)
 
 - **목표·기준**: 사용자 `개발 완료까지 계속` 목표를 유지한다. 이전 응답 파서 통합은 진전이지만 전체 완료가 아니다. clean `7a156d6`에서 메인이 core Cargo feature·vendor_observation 모듈·관련 문서를 소유했다.
