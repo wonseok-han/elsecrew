@@ -33,6 +33,56 @@ class FakeBridge {
   emit(event: TeamMessageV1) { for (const listener of this.listeners) listener(event); }
 }
 
+test("chat pagination preserves existing items, deduplicates overlap and retries failures", async () => {
+  let calls = 0, fail = true;
+  const bridge = Object.assign(new FakeBridge(), {
+    async listChats({ cursor }: { cursor: string | null }) {
+      calls++;
+      if (cursor === null) return { projectId: "project_a", items: [chat("chat_a")], nextCursor: "offset_100" };
+      assert.equal(cursor, "offset_100");
+      if (fail) throw new Error("temporary read failure");
+      return { projectId: "project_a", items: [chat("chat_a"), chat("chat_more"), chat("chat_more")], nextCursor: null };
+    },
+  });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  await controller.loadMoreChats();
+  assert.equal(controller.snapshot().chats.length, 1);
+  assert.equal(controller.snapshot().nextChatCursor, "offset_100");
+  assert.equal(controller.snapshot().loadingMoreChats, false);
+  assert.ok(controller.snapshot().error);
+  fail = false;
+  await controller.loadMoreChats();
+  assert.deepEqual(controller.snapshot().chats.map(item => item.chatId), ["chat_a", "chat_more"]);
+  assert.equal(controller.snapshot().nextChatCursor, null);
+  await controller.loadMoreChats();
+  assert.equal(calls, 3);
+});
+
+test("chat pagination coalesces clicks and ignores old project responses", async () => {
+  let complete!: (page: { projectId: string; items: ChatRecordV1[]; nextCursor: string | null }) => void;
+  let requests = 0;
+  const bridge = Object.assign(new FakeBridge(), {
+    async listChats({ projectId, cursor }: { projectId: string; cursor: string | null }) {
+      if (cursor === null) return { projectId, items: [], nextCursor: "offset_100" };
+      requests++;
+      return new Promise<{ projectId: string; items: ChatRecordV1[]; nextCursor: string | null }>(resolve => { complete = resolve; });
+    },
+  });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  const loading = controller.loadMoreChats();
+  await controller.loadMoreChats();
+  assert.equal(requests, 1);
+  await controller.openProject("project_b");
+  complete({ projectId: "project_a", items: [chat("old")], nextCursor: null });
+  await loading;
+  assert.equal(controller.snapshot().projectId, "project_b");
+  assert.equal(controller.snapshot().nextChatCursor, "offset_100");
+  assert.deepEqual(controller.snapshot().chats, []);
+  assert.equal(controller.snapshot().loadingMoreChats, false);
+});
+
 for (const rejected of [false, true]) test(`프로젝트 전환 후 이전 설정 저장 ${rejected ? "실패" : "성공"}은 현재 프로젝트를 바꾸지 않는다`, async () => {
   let complete!: (value: ProjectRoleSettingsV1) => void;
   let fail!: (error: Error) => void;

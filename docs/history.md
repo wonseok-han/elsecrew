@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (채팅 목록 추가 페이지 연결)
+
+- **발견·직접 구현**: clean `feeaa45`에서 후속 메시지 흐름을 조사했다. 현재 bridge/sidecar에는 chat.create/list/get만 있고 사용자 후속 메시지 저장 API가 없으므로 별도 영속 계약 연결이 필요하다. 함께 확인한 목록 결함은 첫 100개 뒤 nextCursor를 버려 나머지 채팅에 접근할 수 없는 것이었다. controller/작업대에 `채팅 더 보기`를 연결했다. 기존 목록과 최신 객체는 유지하고 중복 ID를 제거하며 한 번에 100개만 추가 요청한다.
+- **검증**: 채팅·public-event 29/29, TypeScript noEmit·diff 검사 PASS. 추가 페이지 실패/재시도·끝 페이지·중복 클릭·프로젝트 변경 뒤 늦은 응답을 확인했다. 파일/실행/저장 권한은 변경하지 않았고 일반 목록 UI는 직접 검토했다. 서브에이전트·worktree 추가 없음.
+- **다음**: 후속 지시 전송은 아직 구현되지 않았다. 사용자 메시지의 영속 순서·재시도 중복 방지·정확한 채팅 소속과 실행 중 제출 정책을 새 통신 계약에서 결속해야 한다. 실제 provider의 별도 로그인 방식 답변 대기와 원본 적용/복구·guided start·G6/Windows/출시 범위도 남는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (새 diff 화면 성능 실측)
 
 - **실측**: clean `3f621732df1e1834fe2528964d94320221c84776`의 production renderer를 실제 Electron/Chromium에서 warm-up 1회 뒤 10회 측정해 PASS했다. p95는 tree root 76ms, 폴더 확장 17.1ms, 5MiB 파일 표시 94.1ms, 입력 24.8ms, 500파일 변경 요약 77.4ms, 첫 파일 diff 17.5ms다. 측정 회차의 longtask 관측은 0ms, tree DOM은 500개다. 전후 clean/same HEAD이며 `.artifacts/m5-performance/renderer-2026-09-14T04-46-30.281Z-33604.json`에 표본을 보존했다.

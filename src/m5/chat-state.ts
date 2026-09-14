@@ -12,6 +12,8 @@ export interface ChatUiSnapshot {
   projectId: string | null;
   settings: ProjectRoleSettingsV1 | null;
   chats: readonly ChatRecordV1[];
+  nextChatCursor: string | null;
+  loadingMoreChats: boolean;
   activeChat: ChatRecordV1 | null;
   messages: readonly TeamMessageV1[];
   runs: readonly RunRecordV1[];
@@ -44,7 +46,7 @@ export class ChatUiController {
   #pending: { chat: ChatRecordV1; generation: number; messages: TeamMessageV1[]; detail: ChatDetail | null } | null = null;
   #hydrations = new Map<string, Promise<void>>();
   #hydrationTriggers = new Map<string, number>();
-  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
+  #state: ChatUiSnapshot = { projectId: null, settings: null, chats: [], nextChatCursor: null, loadingMoreChats: false, activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], preparing: false, switching: false, preparationApiUnavailable: false, activeRunId: null, notice: null, error: null };
 
   constructor(bridge: M5ChatBridge) { this.#bridge = bridge; }
   snapshot(): ChatUiSnapshot { return this.#state; }
@@ -64,15 +66,38 @@ export class ChatUiController {
 
   async openProject(projectId: string): Promise<void> {
     const generation = ++this.#generation;
-    this.#set({ projectId, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
+    this.#set({ projectId, settings: null, chats: [], nextChatCursor: null, loadingMoreChats: false, activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
     try {
       const [settings, page] = await Promise.all([
         this.#bridge.getProjectRoleSettings({ projectId }),
         this.#bridge.listChats({ projectId, cursor: null, limit: 100 }),
       ]);
       if (!this.#live(generation) || this.#state.projectId !== projectId) return;
-      this.#set({ settings, chats: page.items });
+      this.#set({ settings, chats: page.items, nextChatCursor: page.nextCursor });
     } catch (error) { if (this.#live(generation)) this.#error("프로젝트 채팅을 불러오지 못했어요.", error); }
+  }
+
+  async loadMoreChats(): Promise<void> {
+    const { projectId, nextChatCursor: cursor, loadingMoreChats } = this.#state;
+    if (!projectId || cursor === null || loadingMoreChats || this.#disposed) return;
+    const generation = this.#generation;
+    this.#set({ loadingMoreChats: true, error: null });
+    try {
+      const page = await this.#bridge.listChats({ projectId, cursor, limit: 100 });
+      if (!this.#live(generation) || this.#state.projectId !== projectId) return;
+      if (page.projectId !== projectId || page.items.some(item => item.projectId !== projectId) || page.nextCursor === cursor) throw new Error("chat page identity or cursor mismatch");
+      const existing = new Set(this.#state.chats.map(item => item.chatId));
+      const appended = page.items.filter(item => {
+        if (existing.has(item.chatId)) return false;
+        existing.add(item.chatId);
+        return true;
+      });
+      this.#set({ chats: [...this.#state.chats, ...appended], nextChatCursor: page.nextCursor });
+    } catch (error) {
+      if (this.#live(generation) && this.#state.projectId === projectId) this.#error("나머지 채팅을 불러오지 못했어요. 다시 시도해 주세요.", error);
+    } finally {
+      if (this.#live(generation) && this.#state.projectId === projectId) this.#set({ loadingMoreChats: false });
+    }
   }
 
   async updateSettings(roles: readonly RoleProfileV1[]): Promise<void> {
