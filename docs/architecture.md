@@ -211,7 +211,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 - **모델 없는 Codex 통신 순서**: `vendor_observation/codex_rpc.rs`는 initialize/config/account/model 4개 요청의 single-flight 순서와 응답 ID를 결속하며 예상 밖 frame은 실패로 고정한다. RawValue로 중첩 중복 키를 보존해 vendor 파서에 전달한다. 알림 일반 처리·process runner·timeout·설정 격리·실제 입력 전달/실행 권위는 이 모듈의 기능이 아니다.
 
 - **Codex 제품 로그인(macOS)**: `provider_login_manager.rs` → 고정 `provider.login` → Electron main/preload → 작업대 `Codex 로그인` 버튼을 연결한다. main만 검증된 공식 HTTPS URL을 열고 renderer/영속 기록에는 URL·계정·토큰을 전달하지 않는다. start/status/cancel만 허용하고 모델 호출은 하지 않는다. 현재 서명 검증 및 SHA-256 pin으로 승인한 Codex 0.153.4/host 쌍만 실행한다. `pnpm m5:dev`가 sidecar를 4 jobs 이하로 빌드한 뒤 실제 `target/debug/hello-agent-sidecar --stdio`로 앱을 연다. Windows와 Claude 로그인은 미연결이다.
-- **전용 환경**: `provider_profile.rs`의 app-data 하위 private profile을 HOME/CODEX_HOME으로 전달하고 상속 환경을 비운다. 원래 터미널 인증은 읽거나 복사하지 않는다. 고정 config/auth 외에 해당 vendor에서 관측한 skills/tmp/.tmp, installation_id 및 고정 SQLite 이름만 소유권/종류/권한 검사 후 허용한다. 인증 성공은 browser 완료만이 아니라 fresh account/read와 process cleanup 뒤 관측한다. 실제 사용자 인증 완료는 별도 실사용 검증이며 재시작 후 UI 연결 상태 복원은 아직 없다.
+- **전용 환경**: `provider_profile.rs`의 app-data 하위 private profile을 HOME/CODEX_HOME으로 전달하고 상속 환경을 비운다. 원래 터미널 인증은 읽거나 복사하지 않는다. 고정 config/auth 외에 해당 vendor에서 관측한 skills/tmp/.tmp, installation_id 및 고정 SQLite 이름만 소유권/종류/권한 검사 후 허용한다. 인증 성공은 browser 완료만이 아니라 fresh account/read와 process cleanup 뒤 관측한다. 2026-09-14 사용자 브라우저 인증 및 앱 연결 완료 표시를 실사용 확인했으며 재시작 후 UI 연결 상태 복원은 아직 없다.
 
 - **로그인 profile 신원 재검사**: `CodexProfileBinding::from_storage`는 열린 Storage에서 부모 경로를 받아 no-follow로 app-data/profile handle을 보존한다. 실행 전 현재 dev/ino·정책을 다시 대조하고 삭제된 config/폴더를 복구하지 않는다. 로그인 owner가 사용하지만 이후 동일 UID 경합까지 막는 원자적 실행 권위는 아니다.
 

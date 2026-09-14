@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Codex 실제 로그인 통과)
+
+- **실사용 확인**: clean `8eb6129`에서 사용자가 브라우저 인증 완료를 알렸다. 실행 중인 Electron 앱의 `이 앱에 Codex 로그인이 연결됐어요`·`연결됨` 표시와 프로젝트 선택 활성 상태를 직접 확인했다. 앱 전용 `codex-login.pending` 부재도 확인했다. 인증 파일 내용·토큰·계정 정보는 읽지 않았고 모델 호출은 하지 않았다.
+- **판정**: macOS Codex의 앱 전용 로그인 버튼→브라우저 인증→연결 완료 경로는 이번 사용자 실사용을 통과했다. UI의 connected는 현행 구현상 fresh account/read 및 process cleanup 뒤에만 발행한다. 이전 엔트리의 실제 인증 대기는 이 확인으로 해소되며 기존 기록은 보존한다.
+- **다음/경계**: 재시작 후 연결 상태 복원, Claude 로그인, 실제 모델 작업/출력은 별도 남는다. 실행 중인 앱과 인증을 보존했으며 재시작·재로그인·유료 실행 시험은 하지 않았다. 문서 diff 검사 후 실사용 결과만 커밋한다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (제품 Codex 로그인 연결)
 
 - **구현**: 내부 helper에서 멈추지 않고 macOS pinned Codex 0.153.4 launcher → 앱 전용 HOME/CODEX_HOME → login session → 고정 provider.login IPC → main의 공식 HTTPS 브라우저 열기 → 작업대 로그인/대기/취소/오류 UI를 연결했다. 개발 실행도 기존 더미 대신 실제 debug sidecar를 사용한다. 실제 모델 작업·Claude 로그인·Windows는 이 기능의 완료 주장이 아니다.
@@ -325,7 +331,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **제품 로그인 활성화(2026-09-14)**: macOS Codex 0.153.4 exact pinned 쌍으로 앱 전용 로그인 UI/IPC/launcher를 연결했다. 원래 터미널 인증은 보존한다. 로그인은 모델 실행 준비 판정이 아니며 실제 사용자 인증 완료는 별도 확인한다. 일반 개발 실행도 실제 debug sidecar를 필요로 한다. 초기/실행 cleanup 불확실성은 bounded 재시도 후에도 자동 해제하지 않고 안전 종료와 재로그인을 차단한다.
+- **제품 로그인 활성화(2026-09-14)**: macOS Codex 0.153.4 exact pinned 쌍의 앱 전용 로그인은 사용자 브라우저 인증과 앱 `연결됨` 표시, pending marker 부재로 실사용 통과했다(`8eb6129`). 원래 터미널 인증은 보존한다. 로그인은 모델 실행 준비 판정이나 재시작 후 상태 복원 증거가 아니다. 일반 개발 실행도 실제 debug sidecar를 필요로 한다. 초기/실행 cleanup 불확실성은 bounded 재시도 후에도 자동 해제하지 않고 안전 종료와 재로그인을 차단한다.
 
 - **CLI 버전 드리프트(2026-09-14 후속)**: 현재 ChatGPT.app 번들의 Codex는 0.153.4다. 앞선 0.149.1 관측은 당시 증거이며 현 설치 버전으로 재인용하지 않는다. 로그인 schema 20파일 비교에서 Bedrock 인증 추가 2파일 차이가 있고 chatgpt 분기는 동일하다. `scripts/m5-codex-login-schema.mjs`로 생성 schema와 의존 타입을 오프라인 대조할 수 있지만 결과는 실제 provider/version 활성화 권위가 아니다.
 
