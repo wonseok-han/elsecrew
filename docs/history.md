@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (부분 메모리 재측정 PASS·실제 연결 승인 대기)
+
+- **결과**: clean `dfe12bd980ba076b4fe14717a3f477345b447e1d`의 lazy fixture로 같은 GUI 10회+60초 잔류를 재측정해 PASS했다. Electron subtree idle 356.703125 MiB, peak 761.734375 MiB, 잔류 110.125 MiB다. tree p95 30.5ms, 파일 표시 93.2ms, 입력 24.8ms, diff 요약 48.3ms, 첫 diff 17.5ms이며 `.artifacts/m5-performance/renderer-2026-09-14T02-42-47.203Z-1604.json`에 clean/same HEAD·원시 표본을 남겼다. 이전 FAIL은 보존하며 그 회차 지연 원인은 확정하지 않는다.
+- **완료·다음**: `affd08d`의 프로젝트 설정 경합 수정(관련 27/27)과 메모리 수집/fixture(5/5)를 커밋했다. 전체 G6·실제 provider·적용/복원·Windows·출시는 미완료다. 실제 CLI startup/config/login 최소 관측은 사용자에게 승인 요청한 상태이며 모델 호출·인증 변경·사용자 프로젝트 실행은 하지 않았다. 승인 전 실제 연결 단계는 대기한다. 서브에이전트·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (idle 측정 fixture 할당 분리)
 
 - **발견·수정**: `affd08d`에서 메인이 renderer 측정용 fixture/preload를 수정했다. 측정 fixture가 파일을 열기 전부터 5 MiB 텍스트 생성·UTF-8 SHA 계산을 수행해 empty idle에 테스트 데이터 비용을 포함했다. 파일을 실제 요청할 때만 생성/hash하도록 바꿨다. 제품 코드 최적화나 앞선 FAIL의 원인 확정 주장이 아니다.
@@ -349,6 +354,8 @@
 - **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). 추가 `f4def74`의 `--memory` 실측은 Electron subtree idle 약 409.73 MiB와 한 회차 tree/diff 약 3.38초로 FAIL이며 원인 미확정이다. packaged startup·실제 stream·전체 제품 메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
 
 - **Astra 직접 개발 우선(2026-09-14 사용자 지시)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 위임이 더 유리하거나 중요 안전 경계의 독립 검토가 필요하면 구현·관련 검증을 준비하고 이유·범위를 설명한 뒤 호출 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 기존 서브에이전트 모델 설정은 보관 상태다.
+
+- **부분 RSS 재측정(2026-09-14)**: idle에서 테스트용 5 MiB 텍스트 생성을 분리한 `dfe12bd`의 Electron subtree 측정은 idle/peak/60초 잔류 356.70/761.73/110.125 MiB와 GUI 시간 기준 PASS다. 실제 sidecar/agent는 제외하므로 전체 제품 RSS/G6 완료로 사용하지 않는다. 앞선 `f4def74` FAIL 증거도 유지한다.
 
 - **G5D storage lifetime activation 정책(2026-09-08 사용자 승인)**: automatic lossless compaction의 유일한 trigger는 retained boundary 이후 exact safe prefix 1,000 ledger events다. 기존 안전 제외·완전 materialization·exact 전후 동등성이 선행하며 source event/index만 논리 삭제하고 사용자 chat/message/evidence, recovery, workspace, snapshot, baseline, projection, receipt와 물리 cleanup은 보존한다. empty-authority pending만 admission exact 검증 뒤 재개하고 running/non-empty/commit 불명은 변경 없이 fail-closed한다. ready 이후 치명 maintenance 오류는 wire 상태를 추가하지 않고 sidecar 종료로 다음 verifying admission에 넘긴다. 단일 event-loop SQLite writer, ready-only bounded tick, work 100/primary 1 MiB/retained+dependency 8 MiB를 유지한다. V10은 `authorizeDelete`를 read-only witness로 두고 `deletePrefix`의 exact armed interval에서만 완전 authority batch와 source index/event 삭제·authority cleanup·cursor 전진을 한 transaction으로 결속한다. V10 contract fixture만으로 runtime writer 활성화나 readiness를 주장하지 않는다.
 
