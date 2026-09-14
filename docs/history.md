@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (로그인 실행 허용의 두 단계 연결)
+
+- **직접 구현**: clean `e46bddc`의 메인 checkout에서 login process/session을 변경했다. Karpathy 지침에 따라 기존 Child·TreeTracker·durable reservation을 재사용했다. `launch_with_barrier(spawn, release)`는 대기 child를 소유하고 신원 기록·관찰·profile/marker 재검사·pipe 존재 확인 후 release를 한 번 호출한다. session도 이 API로 연결하고 기존 무조건 launch/start shortcut은 테스트 전용으로 제한했다.
+- **실패 경계**: 준비 실패는 release를 건너뛰며 release 오류/이후 I/O 오류에도 Child를 owner에 남겨 기존 cleanup을 수행한다. 중복 launch는 거절한다. callback은 신뢰하는 backend가 제공해야 하며 bounded 실행·실제 executable 검증·환경 격리·vendor가 release 전 실행되지 않는 보장은 여전히 launcher의 책임이다. 이번 API만으로 그 보장을 증명하거나 실제 provider를 활성화하지 않는다.
+- **검증·검토**: 자체 생성 sh read→exec cat peer로 release 시점에 PID/시작시각이 이미 durable marker에 있음을 확인하고 이후 프로토콜 송수신·정상 종료를 검사했다. pipe 누락 시 무허용·release 실패 뒤 보존/정리·재허용 차단을 추가했다. 로그인 관련 집중 18/18·strict sidecar clippy·rustfmt·diff PASS. 기존 승인된 읽기 전용 검토자는 추가 actionable 없음으로 확인했다(검토자는 테스트 미실행). 실제 로그인·사용자 인증·유료 호출은 하지 않았다.
+- **다음**: 검증한 이 단위를 커밋한다. 실제 gated launcher와 실행 파일/환경 정책·로그인/복구 IPC/UI가 남으며 전체 제품 완료가 아니다. 사용자는 캐시 위치 확인 후 개발 재개를 요청했으므로 빌드 캐시는 삭제하지 않았다. main 미병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (테스트 설치본·저장공간 점검)
 
 - **현재 상태**: clean `0df309c`·`m5/coding-agent-ide`에서 로그인 실행 연결의 미구현 경계를 재확인하며 사용자가 추가 요청한 저장공간 점검을 우선 수행했다. 이번에는 제품 코드를 변경하지 않았다. Karpathy 지침에 따라 임의 launcher나 인증 설정 우회는 추가하지 않았다.

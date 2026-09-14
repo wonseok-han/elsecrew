@@ -162,13 +162,15 @@ impl<'a> LoginProcess<'a> {
         })
     }
 
-    /// Trusted backend launcher callback only. It must enforce executable/version,
-    /// environment/cwd isolation and a pre-exec tracking barrier. This owner is not
-    /// proof of those properties. The callback must return every spawned child.
-    /// There is deliberately no renderer command/path input or default vendor spawn.
-    pub(crate) fn launch(
+    /// Trusted backend launcher only: spawn must return a child whose vendor
+    /// execution is still gated. Release is called once, only after durable
+    /// identity recording and a successful observation. Both callbacks must be
+    /// bounded; executable/environment validation remains the launcher's job.
+    /// No renderer command/path input or default vendor spawn is provided.
+    pub(crate) fn launch_with_barrier(
         &mut self,
         spawn: impl FnOnce() -> std::io::Result<Child>,
+        release: impl FnOnce(&mut Child) -> std::io::Result<()>,
     ) -> Result<(), SidecarError> {
         if self.attempted || self.finished || self.failed {
             return Err(failure());
@@ -182,6 +184,15 @@ impl<'a> LoginProcess<'a> {
             let root = identity_of(child.id()).map_err(|_| failure())?;
             self.tracker = Some(TreeTracker::new(root));
             self.reservation.record(&[root])?;
+            self.observe_with(&SystemProcTable, true)?;
+            self.profile.revalidate()?;
+            self.reservation.verify()?;
+            let child = self.child.as_mut().ok_or_else(failure)?;
+            // Do not release an unusable transport, even if the root was recorded.
+            if child.stdin.is_none() || child.stdout.is_none() {
+                return Err(failure());
+            }
+            release(child).map_err(|_| failure())?;
             self.io = Some(LoginIo::attach(child)?);
             self.observe_with(&SystemProcTable, true)
         })();
@@ -189,6 +200,15 @@ impl<'a> LoginProcess<'a> {
             self.failed = true;
         }
         result
+    }
+
+    /// Existing toy peers have no vendor payload. Production has no ungated shortcut.
+    #[cfg(test)]
+    pub(crate) fn launch(
+        &mut self,
+        spawn: impl FnOnce() -> std::io::Result<Child>,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_barrier(spawn, |_| Ok(()))
     }
 
     /// Caller must tick while waiting for user/browser input (at most 100 ms apart).
@@ -368,6 +388,87 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn barrier_release_follows_durable_identity_and_precedes_protocol() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        let mut released = false;
+        process
+            .launch_with_barrier(
+                || {
+                    Command::new("/bin/sh")
+                        .args([
+                            "-c",
+                            "IFS= read -r gate && test \"$gate\" = release && exec /bin/cat",
+                        ])
+                        .env_clear()
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .spawn()
+                },
+                |child| {
+                    let root = identity_of(child.id()).unwrap();
+                    let saved = std::fs::read_to_string(temp.path().join(PENDING)).unwrap();
+                    assert!(saved.contains(&format!("{} {}", root.pid, root.start_us)));
+                    assert!(!released);
+                    released = true;
+                    child.stdin.as_mut().unwrap().write_all(b"release\n")
+                },
+            )
+            .unwrap();
+        assert!(released);
+        let (_, request) = LoginExchange::begin(1).unwrap();
+        process
+            .send(request, Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process
+            .receive(Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process.finish().unwrap();
+        assert!(!temp.path().join(PENDING).exists());
+    }
+
+    #[test]
+    fn failed_preparation_never_releases_and_release_failure_retains_child_for_cleanup() {
+        for fail_before_release in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let binding = profile(&temp);
+            let mut process = LoginProcess::reserve(&binding).unwrap();
+            let mut released = false;
+            let result = process.launch_with_barrier(
+                || {
+                    let mut command = Command::new("/bin/cat");
+                    command
+                        .env_clear()
+                        .stdin(Stdio::piped())
+                        .stderr(Stdio::null());
+                    command.stdout(if fail_before_release {
+                        Stdio::null()
+                    } else {
+                        Stdio::piped()
+                    });
+                    command.spawn()
+                },
+                |_| {
+                    released = true;
+                    Err(std::io::Error::other("synthetic release failure"))
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(released, !fail_before_release);
+            assert!(process.failed);
+            let root = process.tracker.as_ref().unwrap().tracked_identities()[0];
+            assert!(process.child.is_some());
+            assert!(process
+                .launch_with_barrier(cat, |_| panic!("second release"))
+                .is_err());
+            process.finish().unwrap();
+            assert!(matches!(SystemProcTable.probe(root), ProbeResult::Gone));
+        }
     }
 
     #[test]

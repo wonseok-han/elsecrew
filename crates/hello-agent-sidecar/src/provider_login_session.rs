@@ -35,15 +35,16 @@ fn failure() -> SidecarError {
 }
 
 impl<'a> LoginSession<'a> {
-    pub(crate) fn start(
+    pub(crate) fn start_with_barrier(
         profile: &'a CodexProfileBinding,
         spawn: impl FnOnce() -> std::io::Result<Child>,
+        release: impl FnOnce(&mut Child) -> std::io::Result<()>,
     ) -> Result<Self, SidecarError> {
         let home = profile.revalidate()?;
         let (flow, request) =
             LoginConnection::begin(home.to_str().ok_or_else(failure)?).map_err(|_| failure())?;
         let mut process = LoginProcess::reserve(profile)?;
-        process.launch(spawn)?;
+        process.launch_with_barrier(spawn, release)?;
         process.send(request, RPC_TIMEOUT, &AtomicBool::new(false))?;
         Ok(Self {
             process,
@@ -52,6 +53,14 @@ impl<'a> LoginSession<'a> {
             closed: false,
             cleanup_required: false,
         })
+    }
+
+    #[cfg(test)]
+    fn start(
+        profile: &'a CodexProfileBinding,
+        spawn: impl FnOnce() -> std::io::Result<Child>,
+    ) -> Result<Self, SidecarError> {
+        Self::start_with_barrier(profile, spawn, |_| Ok(()))
     }
 
     /// Owner calls at most 100ms apart, including while the browser is open.
