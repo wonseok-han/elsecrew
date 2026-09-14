@@ -210,6 +210,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **모델 없는 Codex 통신 순서**: `vendor_observation/codex_rpc.rs`는 initialize/config/account/model 4개 요청의 single-flight 순서와 응답 ID를 결속하며 예상 밖 frame은 실패로 고정한다. RawValue로 중첩 중복 키를 보존해 vendor 파서에 전달한다. 알림 일반 처리·process runner·timeout·설정 격리·실제 입력 전달/실행 권위는 이 모듈의 기능이 아니다.
 
+- **Codex 공개 본문 추출(미연결)**: `vendor_observation/codex_events.rs`는 [공식 item event](https://learn.chatgpt.com/docs/app-server#events)의 agentMessage/plan delta와 completed 본문만 명시적 thread/turn에 결속해 추출한다. completed는 누적 본문의 교체값이며 비공개 추론·도구 출력·미지원 알림은 공개하지 않고 별도 처리 필요로 반환한다. 중복 필드·모델 reroute·예산 초과는 실패 후 재사용을 막는다. 아직 runtime에 연결하지 않았으며 알림 순서/terminal/권한 검증이나 프로세스 종료 증명이 아니다.
+
 - **Codex offline 설정 대조**: `vendor_observation/codex_preflight.rs`는 0.149.1 schema 기반 config/read·완전 model/list·read-only thread/start 응답을 명시적 tuple/정책/cwd와 비교한다. raw 입력을 반환하지 않고 실제 runtime/capability에는 연결하지 않는다. 응답 일치와 실제 파일 신원·설정 격리·권한 강제는 다른 증거다. 쓰기 정책·페이지 수집·Claude init은 아직 지원하지 않는다.
 
 - **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다.

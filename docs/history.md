@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Codex 공개 이벤트 추출 준비)
+
+- **범위·직접 구현**: clean `54d9bb3`에서 core vendor observation과 현행 문서를 소유했다. 원본 적용은 제안서 §14의 실제 adapter 안전 검증 뒤 순서를 유지한다. OpenAI Docs의 [공식 app-server events](https://learn.chatgpt.com/docs/app-server#events)와 보존된 로컬 생성 TS schema의 threadId/turnId/item 구조를 확인하고, agentMessage/plan delta·최종 본문 추출만 구현했다. Karpathy 지침에 따라 transport·로그인·권한 계약으로 범위를 넓히지 않았다.
+- **계약**: 공개 본문은 명시적 thread/turn에 결속하며 최종 item은 append가 아니라 교체값이다. raw serde로 인식 필드 중복을 거부하고, 모델 reroute·개수/바이트 예산 위반은 실패 뒤 재사용하지 못한다. 추론·도구·미지원 알림은 본문을 반환하지 않고 owner의 별도 처리를 요구한다. 이 모듈은 순서/terminal 검증·프로세스 종료 증명이 아니며 runtime에 미연결이다.
+- **검증**: provider 회귀 33/33 PASS. core all-targets/no-deps clippy는 종료 0, 기존 proctree 경고 3개만 있으며 신규 경고 없음이다. 공개/비공개 stream 개수와 단일 본문 크기 검사에 더해 비공개 누적 byte 초과 회귀를 보완했다. 실제 모델 호출·인증 조회/변경·사용자 프로젝트 변경 없음.
+- **검토 마감·다음**: 기존 승인된 읽기 전용 검토자는 수정할 결함 없음을 확인했다. 누적 byte 회귀 추가 후 focused 3/3·rustfmt·diff 검사도 PASS이며 이 단위만 커밋한다. 실제 provider 환경/로그인 선택은 답변 대기이며 요청 응답·item/turn 순서·종료 연결, Claude, 역할 인계·원본 적용/복구·guided start·G6/Windows/출시는 남는다. 전체 개발 완료가 아니며 main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (후속 메시지 파동 macOS 패키지 검증)
 
 - **수정·빌드**: clean `3e57b1f`에서 package smoke의 구형 D1 기대값 뒤에 `chat.appendMessage` 하나를 exact 비교하도록 갱신했다. Karpathy 지침에 따라 baseline fixture나 보안 검증은 완화하지 않았다. 첫 package 실행은 외부 파일 fetch 제한으로 실패했고 허용된 네트워크 실행으로 같은 작업을 재시도해 main/preload/renderer와 release Rust sidecar를 새로 빌드했다.
