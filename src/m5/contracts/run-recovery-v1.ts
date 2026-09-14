@@ -494,6 +494,38 @@ export function validateChatCreateRequestV1(value: unknown): ChatCreateRequestV1
   return object as unknown as ChatCreateRequestV1;
 }
 
+/** Follow-up contract only; not yet an advertised bridge method. */
+export interface ChatAppendMessageRequestV1 {
+  projectId: string;
+  chatId: string;
+  taskId: string;
+  worktreeId: string;
+  workspaceIdentity: string;
+  clientMessageId: string;
+  expectedEventSequence: number;
+  text: string;
+}
+
+export function validateChatAppendMessageRequestV1(value: unknown): ChatAppendMessageRequestV1 {
+  const object = requireObject(value, "chat append message request");
+  exactKeys(object, ["projectId", "chatId", "taskId", "worktreeId", "workspaceIdentity", "clientMessageId", "expectedEventSequence", "text"]);
+  for (const field of ["projectId", "chatId", "taskId", "worktreeId", "workspaceIdentity"]) requireId(object[field], field);
+  if (typeof object.clientMessageId !== "string" || !/^user_[0-9a-f]{32}$/.test(object.clientMessageId)) throw new Error("clientMessageId must be a reserved user UUID");
+  positiveSequence(object.expectedEventSequence, "expectedEventSequence");
+  if (object.expectedEventSequence === Number.MAX_SAFE_INTEGER) throw new Error("message sequence exhausted");
+  boundedText(object.text, "follow-up text", G5_GOAL_MAX_BYTES_V1);
+  return object as unknown as ChatAppendMessageRequestV1;
+}
+
+export function validateChatAppendMessageTranscriptV1(value: unknown): void {
+  const object = requireObject(value, "chat append message transcript");
+  exactKeys(object, ["request", "message"]);
+  const request = validateChatAppendMessageRequestV1(object.request);
+  const message = validateTeamMessageV1(object.message);
+  if (message.kind !== "user" || message.messageId !== request.clientMessageId || message.text !== request.text || message.eventSequence !== request.expectedEventSequence + 1) throw new Error("follow-up message differs from request");
+  for (const field of ["chatId", "taskId", "worktreeId"] as const) if (message[field] !== request[field]) throw new Error("follow-up message identity mismatch");
+}
+
 export function validateChatRecordV1(value: unknown): ChatRecordV1 {
   const object = requireObject(value, "chat record");
   exactKeys(object, [

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (후속 지시 요청·결과 계약 시작)
+
+- **직접 구현**: clean `da82a07`에서 메인이 TS/Rust protocol validator·공용 후속 메시지 fixture와 회귀를 소유했다. exact 소속·reserved user UUID·UTF-8 16KiB·안전한 예상 순서를 검사하고 durable user 메시지의 ID/원문/소속/다음 sequence를 대조한다. 제안서의 후속 지시 연결 계약 초안에 동일 요청 재시도·충돌·실행 중 입력 분리와 구현 잔여를 기록했다.
+- **검증**: TS focused 2/2와 Rust protocol 전체 52/52 PASS. 초기 Rust 구문 오류는 수정했다. scoped rustfmt·TypeScript·diff 검사 PASS이며 전체 workspace fmt에서 발견한 기존 Tauri detect/login 포맷 차이는 무관하여 변경하지 않았다. 저장/전송 API와 capability는 아직 열지 않았고 실제 모델 호출·로그인 변경·main 병합·push는 없다.
+- **다음**: 후속 지시는 계약 구현 단계일 뿐 제품 기능 완료가 아니다. durable ID 재시도/충돌 처리와 보존 원장 연결→bridge→화면→독립 검토를 진행한다. 실제 provider 별도 로그인 선택은 계속 사용자 답변 대기이고 적용/복구·guided start·G6/Windows/출시도 남는다.
+
 ### 2026-09-14 · by GPT-6 Astra (채팅 목록 추가 페이지 연결)
 
 - **발견·직접 구현**: clean `feeaa45`에서 후속 메시지 흐름을 조사했다. 현재 bridge/sidecar에는 chat.create/list/get만 있고 사용자 후속 메시지 저장 API가 없으므로 별도 영속 계약 연결이 필요하다. 함께 확인한 목록 결함은 첫 100개 뒤 nextCursor를 버려 나머지 채팅에 접근할 수 없는 것이었다. controller/작업대에 `채팅 더 보기`를 연결했다. 기존 목록과 최신 객체는 유지하고 중복 ID를 제거하며 한 번에 100개만 추가 요청한다.

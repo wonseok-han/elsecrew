@@ -148,6 +148,8 @@ pub fn validate_g5_payload_v1(validator: &str, value: &Value) -> Result<(), G5Co
         "abandonPreparedWorkspaceRequest" => validate_abandon_prepared_request(value).map(|_| ()),
         "abandonPreparedWorkspace" => validate_abandon_prepared_workspace(value),
         "chatCreateRequest" => validate_chat_create_request(value).map(|_| ()),
+        "chatAppendMessageRequest" => validate_chat_append_message_request(value),
+        "chatAppendMessageTranscript" => validate_chat_append_message_transcript(value),
         "chatRecord" => validate_chat_record(value).map(|_| ()),
         "chatTransition" => validate_chat_transition(value),
         "teamMessage" => validate_team_message(value).map(|_| ()),
@@ -760,6 +762,117 @@ fn validate_chat_transition(value: &Value) -> Result<(), G5ContractError> {
     let after_updated = string(after.get("updatedAt"), "after updatedAt")?;
     if after_updated < before_updated {
         return fail("chat transition updatedAt must be monotonic");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod followup_tests {
+    use super::*;
+
+    #[test]
+    fn followup_contract_binds_request_and_message() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/m5/followup-message-v1.json"
+        ))
+        .unwrap();
+        validate_g5_payload_v1("chatAppendMessageTranscript", &fixture).unwrap();
+        for field in [
+            "chatId",
+            "taskId",
+            "worktreeId",
+            "text",
+            "messageId",
+            "kind",
+        ] {
+            let mut invalid = fixture.clone();
+            invalid["message"][field] = Value::String("other".into());
+            assert!(validate_g5_payload_v1("chatAppendMessageTranscript", &invalid).is_err());
+        }
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(9_007_199_254_740_991_u64),
+        ] {
+            let mut invalid = fixture["request"].clone();
+            invalid["expectedEventSequence"] = value;
+            assert!(validate_g5_payload_v1("chatAppendMessageRequest", &invalid).is_err());
+        }
+        for text in [String::new(), "가".repeat(5462)] {
+            let mut invalid = fixture["request"].clone();
+            invalid["text"] = Value::String(text);
+            assert!(validate_g5_payload_v1("chatAppendMessageRequest", &invalid).is_err());
+        }
+    }
+}
+
+fn validate_chat_append_message_request(value: &Value) -> Result<(), G5ContractError> {
+    let request = object(value, "chat append message request")?;
+    exact_keys(
+        request,
+        &[
+            "projectId",
+            "chatId",
+            "taskId",
+            "worktreeId",
+            "workspaceIdentity",
+            "clientMessageId",
+            "expectedEventSequence",
+            "text",
+        ],
+    )?;
+    for field in [
+        "projectId",
+        "chatId",
+        "taskId",
+        "worktreeId",
+        "workspaceIdentity",
+    ] {
+        id(request.get(field), field)?;
+    }
+    let message_id = string(request.get("clientMessageId"), "clientMessageId")?;
+    let suffix = message_id.strip_prefix("user_").unwrap_or_default();
+    if suffix.len() != 32
+        || !suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return fail("clientMessageId must be a reserved user UUID");
+    }
+    if positive(
+        request.get("expectedEventSequence"),
+        "expectedEventSequence",
+    )? == 9_007_199_254_740_991
+    {
+        return fail("message sequence exhausted");
+    }
+    bounded_text(request.get("text"), "follow-up text", G5_GOAL_MAX_BYTES_V1)?;
+    Ok(())
+}
+
+fn validate_chat_append_message_transcript(value: &Value) -> Result<(), G5ContractError> {
+    let transcript = object(value, "chat append message transcript")?;
+    exact_keys(transcript, &["request", "message"])?;
+    let request_value = required(transcript, "request")?;
+    validate_chat_append_message_request(request_value)?;
+    let request = object(request_value, "request")?;
+    let message = validate_team_message(required(transcript, "message")?)?;
+    if message.get("kind").and_then(Value::as_str) != Some("user")
+        || message.get("messageId") != request.get("clientMessageId")
+        || message.get("text") != request.get("text")
+        || message.get("eventSequence").and_then(Value::as_u64)
+            != Some(
+                positive(
+                    request.get("expectedEventSequence"),
+                    "expectedEventSequence",
+                )? + 1,
+            )
+    {
+        return fail("follow-up message differs from request");
+    }
+    for field in ["chatId", "taskId", "worktreeId"] {
+        if message.get(field) != request.get(field) {
+            return fail("follow-up message identity mismatch");
+        }
     }
     Ok(())
 }
