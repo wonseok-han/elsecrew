@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (패널 배치 구현·모델 없는 실제 CLI 관측)
+
+- **직접 구현**: 파일·편집기·변경·팀 대화를 같은 작업대로 연결하고 drag/drop 순서 변경, 경계선 드래그·키보드 폭 조절, 로컬 배치 저장·검증·기본값 복원을 추가했다. 패널 key를 유지해 이동 중 Monaco를 재생성하지 않는다. 현재는 가로 열 재배치이며 자유로운 상하 분할·탭 도킹이나 전체 시안 적용 완료를 뜻하지 않는다.
+- **검증**: 배치 파서/순서/폭 경계 회귀 3/3, 실제 Chromium smoke 2/2(이동·키보드 resize·저장·Monaco DOM 유지), TypeScript noEmit·production renderer build PASS. 제품 실행/원본/저장 계약은 변경하지 않았다.
+- **실제 관측**: 사용자 잔여 작업 진행 요청 범위에서 모델 없는 관측을 수행했다. 생성한 빈 임시 폴더에서 Codex 0.149.1 app-server의 initialize→initialized→config/read→account/read(refreshToken:false)가 성공하고 stdin 종료 후 exit 0이었다. 계정은 chatgpt/credentials present 분류만 남겼다. Claude 2.1.269 auth status는 exit 0/loggedIn true/claude.ai였다. thread/turn/model 요청 0회이며 계정 식별자·토큰·원문 설정은 기록하지 않았다. 이는 설정 격리·모델 가용성·제품 활성화 증거가 아니다.
+- **다음·경계**: 실제 adapter/인계·원본 적용/복원·guided start·전체 G6·Windows·출시는 남는다. 제품 활성화 전 읽기 전용 독립 검토자 1명 승인을 요청했으며 답변 전 호출하지 않는다. 유료 smoke·사용자 프로젝트 변경·서명/배포도 별도 승인 경계다. 500줄 초과를 막기 위해 9월 8~9일 워크로그를 내용 변경 없이 월별 아카이브로 이동했다. main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (잔여 제품 작업 현황 확인)
+
+- `e412225`와 현행 M5 화면·계약을 대조했다. 워크트리 정리는 종결했지만 실제 CLI adapter/역할 인계·후속 지시, 원본 적용/복원, 승인 시안/설치·로그인 guided start의 Electron 연결, 전체 G6·Windows·출시 검증은 남는다. G1~G5D fixture 기반 성공과 제품 M5.0~M5.5 완료를 혼동하지 않는다. 다음 핵심 구현은 실제 CLI 연결이며 모델 없는 startup/config 관측도 기존 별도 승인 대기다. 코드 수정·테스트 재실행·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (잔여 미커밋 작업 9개 대조·종결)
 
 - **사용자 요청·결론**: `3790832`에서 남은 9개를 전수 대조했다. 4개는 검토 자료뿐이고 5개 코드 초안은 후속 통합 구현으로 대체돼 있었다. V6→V10·version-only Electron→V6 bridge·linked worktree→standalone snapshot을 옛 코드로 되돌리지 않았다. 누락된 managed-worktree symlink swap 회귀만 현재 저장 syscall hook으로 이식했고 제품 코드는 변경하지 않았다. 원본 파일·메모·ignored 검증 로그는 기존 기능 브랜치의 보존 커밋 9개에 남겼다.
@@ -63,294 +74,6 @@
 - **범위**: 기존 역할별 Sol/Terra 설정은 대기용으로 보관하며 모델·추론 수준을 일괄 변경하지 않았다. 중요 안전 경계와 제품 활성화·출시의 독립 검토, M5 자동 커밋·main/push 승인 경계를 명시했다. 이번 규칙 변경은 미커밋으로 남긴다.
 - **검증·다음**: 두 루트 지침의 동일성, 관련 문서 우선순위와 diff 검사를 확인한다. 제품 코드·하네스는 변경하지 않았으며 누적 테스트나 서브에이전트 호출은 하지 않는다. 다음 구현은 최신 코드·명세를 확인해 메인이 직접 진행하는 것을 우선한다.
 
-### 2026-09-09 · by GPT-5 Codex (M5 누적 하네스 중복 제거 통합·실측)
-
-- **통합**: 독립 리뷰 PASS를 받은 `00fbce861738dd893748605d742a52c3322c5662`를 `m5/coding-agent-ide`에 `6461e67617f4f5e55d7d646034dbb0971f1d845a`로 통합했다. 독립 `m5:test:*` wrapper는 기존 Rust 범위를 유지하고, 누적 gate만 locked workspace core를 한 번 실행한 뒤 G2~G5D Node-only alias를 사용한다. 각 명령 전후 clean/same-HEAD와 세 storage child evidence의 gate·PASS·HEAD·clean·path를 외부 schema v2 report가 fail-closed 검증한다.
-- **실측 검증**: clean integration HEAD `6461e67617f4f5e55d7d646034dbb0971f1d845a`에서 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 node scripts/m5-harness.mjs --gate g5d-storage-lifetime`가 16/16 PASS했다. 전후 HEAD가 같고 dirty는 모두 false다. report는 `.artifacts/m5-harness/g5d-storage-lifetime-2026-09-09T03-27-46-038Z.json`이며 총 16분 32초로 직전 47분 18초보다 약 30분 46초 단축됐다. focused Node 26/26, `pnpm harness:list`, `git diff --check`와 독립 코드 리뷰도 통과했다.
-- **남은 경계**: 이 변경은 테스트 실행 중복만 줄였으며 제품 동작·안전 계약·standalone 검증 범위를 바꾸지 않는다. Windows 실기기, 실제 사용자 DB·강제 종료, 실제 Claude Code/Codex provider·인증, G6 성능·서명·배포와 출시 승인은 여전히 남아 있다. main 병합과 push는 하지 않았다.
-
-### 2026-09-09 · by GPT-5 Codex (M5 cumulative harness 중복 제거)
-
-- **변경**: 독립 실행용 `m5:test:*` wrapper의 Rust 범위는 보존하고, 누적 harness만 G1의 locked workspace core 검사를 한 번 실행한 뒤 G2~G5D의 정확한 Node-only alias를 사용하도록 분리했다. scheduler → status → compaction의 clean-HEAD storage evidence gate 세 개는 순서와 독립 evidence를 그대로 유지한다.
-- **fail-closed 경계**: schema v2 report는 canonical/cumulative script plan, 전후 HEAD·dirty 상태와 failure reason을 기록한다. 시작 전 Git metadata/clean tree 또는 필요한 canonical·alias script가 없으면 명령 없이 `NOT_READY`(2)이고, 각 명령 전후 HEAD 변경·dirty·metadata 상실은 즉시 `FAIL`(1)이다. storage child stdout은 expected gate/PASS/same HEAD/clean start/evidence path를 모두 검증한다.
-- **검증·다음**: focused harness/Electron/storage-gate Node 회귀, `pnpm harness:list`, `git diff --check`는 구현 branch에서 실행한다. 이 commit 뒤 독립 review와 clean integration HEAD의 누적 G5D lifetime 한 번만 남았으며, 실제 provider·Windows·G6 출시 검증은 여전히 범위 밖이다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 통합 gate 종결)
-
-- **통합·수리**: reviewed storage lifetime evidence gates를 `3dc88cd`, packaged D1 capability/admission smoke를 `eea003e`·`79332d8`, current V6 renderer/Monaco smoke fixture를 `42531a4`로 `m5/coding-agent-ide`에 통합했다. 실제 누적 실행에서 발견된 오래된 package smoke의 pre-D1 capability·즉시-ready 가정과 renderer smoke의 불완전 V3 bridge fixture를 각각 canonical D1 exact status polling과 complete V6 bridge로 고쳤다.
-- **최종 누적 증거**: clean integration HEAD `42531a41732a482a35f72efee45c09bd2f906348`에서 `node scripts/m5-harness.mjs --gate g5d-storage-lifetime`가 16/16 command PASS했다. Electron darwin-arm64 package smoke, Chromium lazy Monaco worker, workspace core, protocol/storage/project/run-recovery/bounded-storage와 scheduler/status/compaction 세 evidence gate가 모두 포함된다. 누적 report는 `.artifacts/m5-harness/g5d-storage-lifetime-2026-09-09T02-04-29-963Z.json`, 세 storage evidence는 같은 HEAD의 `2026-09-09T02-47-56-042Z`·`02-49-06-584Z`·`02-49-09-675Z` JSON이다.
-- **운영 발견·남은 경계**: 누적 gate는 `m5:test:core`·`m5:test:storage`·`m5:test:run-recovery`·`m5:test:bounded-storage`에서 같은 대형 sidecar suite를 여러 번 실행해 총 47분 18초가 걸렸다. 다음 하네스 개선에서는 clean HEAD에 묶인 동일 test evidence 재사용 또는 gate별 비중복 test selection을 설계한다. gate reviewer는 macOS fixture G5D 파동 종결을 승인했고 `docs/architecture.md`의 오래된 “누적 하네스가 남음” 문구도 현재 증거로 정정했다. 이 결과는 출시 승인이 아니며 Windows 실기기, 실제 사용자 DB/강제 종료, 실제 Claude Code·Codex provider·인증, G6 성능·서명·배포가 남아 있다. main merge와 push는 하지 않았다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D renderer smoke bridge/admission 수리)
-
-- **원인·수리**: Chromium smoke preload가 더는 지원하지 않는 V3이고 현재 renderer boundary의 complete V4/V5/V6 fixed-method 검증도 통과하지 못해, durable controller 대신 unavailable 화면만 렌더했다. 그래서 `프로젝트 선택` 검색 결과가 없는데 `.click()`을 호출했다. fixture를 complete V6 bridge, exact G5D product `shellReady` + `storageAdmission: ready` status로 올렸고, 사용하지 않는 durable route는 명시적으로 실패하는 fixture method로 보존했다.
-- **회귀·관측성**: VM regression은 exact V6 method set, strict product status parse, snapshot 생성 전 tree 거부와 생성 뒤 `example.ts` tree를 고정한다. Chromium runner는 이제 7초 안에 enabled accessible `프로젝트 선택` control을 기다리고, timeout에는 body text와 각 button의 label/disabled state를 포함한다. snapshot-before-tree, lazy local Monaco worker, `example.ts` assertion은 유지했다.
-- **검증·남은 경계**: root `node_modules`를 read-only 재사용해 focused `pnpm run m5:test:editor`는 Vite build와 기존 editor 25개를 통과했지만 Electron child가 이 sandbox에서 stdout/stderr 없이 exit 134 (`SIGABRT`)로 종료해 Chromium test도 실패했다. 수정 뒤 preload-only regression 1/1, CJS syntax, `git diff --check`는 통과했다. 실제 BrowserWindow/Monaco worker 증거는 sandbox 밖 최신 통합 commit에서 다시 실행해야 하며, 이 변경은 product bridge/contract를 바꾸지 않는다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D packaged status exact validation)
-
-- **리뷰 수리**: polling 중첩 state만 확인하던 packaged product smoke를 canonical G5D product status contract 전체로 강화했다. root/admission/database의 exact fields, `shellReady`, UTC calendar timestamp, verifying/ready/failed cross-state, blocker uniqueness와 fixed failed error를 매 status response마다 검증한 뒤에만 state를 분기한다. MJS는 TS validator를 직접 import하지 않고 canonical admission fixture와 순수 JS validator를 사용한다.
-- **회귀**: missing/extra/invalid schema, impossible timestamp, stale ready error를 injected child-process regression으로 고정했다. malformed status는 모두 fail-closed하며 bounded polling·request IDs·quit flow는 유지했다.
-- **검증·다음**: focused Node 5/5, validator self-test, syntax check, `git diff --check`를 통과했다. package/full harness는 통합 담당이 실행한다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D packaged status admission polling)
-
-- **수리**: packaged product `--stdio` smoke가 첫 `system.status`를 legacy `state: "ready"`로 해석하던 결함을 고쳤다. G5D의 공개 상태인 top-level `state: "shellReady"`와 `storageAdmission.state: "verifying"`를 먼저 exact 검증하고, 최대 3초·500ms per request의 bounded polling으로 `storageAdmission.state: "ready"`에 도달한 뒤 healthy database/recovery/quit assertions를 수행한다.
-- **실패 경계**: `failed`, malformed/non-shell-ready 상태와 timeout은 즉시 assertion 실패로 종료하며, pre-D1 및 agent-fixture capability 경계는 변경하지 않았다.
-- **검증·다음**: 관련 Node source 회귀 4/4, `node --check scripts/m5-electron-package-smoke.mjs`, `git diff --check`를 통과했다. package/full harness는 통합 담당이 실행한다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D packaged product capability smoke)
-
-- **수리**: packaged product `--stdio` smoke가 pre-D1 `g5-v1` capability 목록을 기대하던 경로를 canonical `storage-status-d1` fixture의 `modes.generalProduct.d1Capabilities`로 전환했다. D1의 `storage.status` tail을 직접 확인해 product와 agent-fixture capability 경계를 유지했다.
-- **검증**: smoke source 회귀가 D1 product manifest 선택·exact capability 비교·`storage.status` tail과 pre-D1 manifest 비참조를 고정했다. 관련 Node 테스트 4/4와 직접 fixture/source 검증, `git diff --check`를 통과했다.
-- **다음 할 일**: 통합 worktree에서 packaging 전체 및 누적 G5D gate를 실행한다.
-
-> 여러 코딩 에이전트(Claude Code, Codex)가 **번갈아 작업**할 때 컨텍스트를 이어받기 위한 워크로그다.
->
-> **세션 시작**: 아래 "핵심 결정·발견"과 "작업 규칙"을 읽고, 워크로그 맨 위 엔트리로 현재 상태를 파악한다.
-> **세션 종료**: 코드 변경이 없어도 프로젝트에 영향을 주는 분석·결정·검증·외부 작업을 했다면 워크로그 맨 위에 새 엔트리를 추가한다(최신이 위). 헤더는 `### YYYY-MM-DD · by <모델명>` 형식으로 **작업한 모델을 구체적으로** 적는다(예: `by Claude Opus 4.8`, `by GPT-5 Codex`). 한 날 여러 모델이 작업했으면 엔트리를 나눈다. 재사용할 만한 새 결정·발견은 "핵심 결정·발견"에도 반영한다. **엔트리는 덮어쓰지 말고 계속 쌓는다.**
->
-> **아카이브 롤오버**: 이 파일이 **500줄을 넘으면** 오래된 엔트리부터 `archive/history-YYYY-MM.md`로 옮겨 **300줄 이하로 줄인다.** 날짜 경계에서 자르고(같은 날짜를 쪼개지 않음), 삭제가 아니라 이동이며, 고정 섹션은 옮기지 않는다. **날짜별로 파일을 쪼개지 않는다** — 현재 진실이 흩어진다. 날짜별 조회는 `git log -- docs/history.md`.
->
-> **설계 심의는 여기 쌓지 않는다**: 한 주제의 토론 왕복·철회·정정이 여러 엔트리에 얽히기 시작하면 전용 설계 문서로 옮기고 여기에는 결론 요약과 포인터만 남긴다. 워크로그는 *무엇이 일어났나*, 설계 문서는 *무엇이 참인가*를 기록한다. 예: `proposals/m4-orchestration.md`
-
-### 2026-09-09 · by GPT-5 Codex (G5D evidence 신뢰 경계·pnpm project 설정 수리)
-
-- **QA evidence 경계**: G5D JSON evidence writer는 신뢰된 로컬 checkout 또는 격리 CI의 기계 검증 기록용이다. 최초 repository/`.artifacts`/gate-directory의 `(dev, ino)` 체인을 저장하고 open 직전·rename 직전에 같은 regular non-symlink directory인지 대조하며, rename 뒤 final leaf가 생성한 temporary와 동일 `(dev, ino)`인 regular non-symlink인지 확인한다. parent 대체와 regular temp 바꿔치기는 `FAIL`·`evidencePath: null`이며 sentinel이나 대체 leaf를 unlink하지 않는 회귀로 고정했다.
-- **의도적으로 보장하지 않는 것**: 제품 데이터 저장소 경계, hostile same-UID concurrent rename이 checkpoint 뒤에 일어나는 경우, publication 뒤 파일 변조, 서명/remote provenance는 이 QA evidence helper의 보장이 아니다. 해당 위협은 별도 제품 보안·CI provenance 설계가 필요하다.
-- **pnpm wrapper**: 효과 없는 `.npmrc`를 삭제하고 기존 `pnpm-workspace.yaml`에만 `verifyDepsBeforeRun: false`를 추가했다. pnpm project config가 boolean `false`로 해석되는 것을 확인했으며, runner child의 `pnpm_config_verify_deps_before_run=false`도 유지한다. package/lock/dependency/registry 변경은 없다.
-- **검증**: injectable Node regression 12/12과 `pnpm config get --json verifyDepsBeforeRun --location project` → `false`, `git diff --check`를 통과했다. clean fix commit에서 plain `pnpm run m5:test:storage-status`는 install/DNS 시도 없이 3.376초에 PASS했고, focused Node 70/70·Rust status facts 3/3·admission/quit 1/1씩·diff check의 새 JSON evidence를 남겼다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D evidence leaf와 pnpm wrapper P1 수리)
-
-- **evidence 안전 수리(범위 정정)**: JSON evidence 임시 leaf는 random token을 쓰되 `O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW`로 0600 생성하고, write-all·fsync·close 뒤 parent/final 부재와 owned regular temp inode를 다시 확인한 뒤에만 atomic rename한다. 이는 신뢰된 local checkout/isolated CI의 QA 기록 보강이지 제품 저장 경계·동시 hostile rename·발행 뒤 변조 보장이 아니다. 실패 때는 같은 device/inode의 owned temporary만 unlink한다.
-- **wrapper 설정과 실제 한계(정정)**: `.npmrc`의 kebab-case key는 현지 pnpm 11.25에서 적용되지 않아 plain `pnpm run`이 install을 시도했다. 후속 수정은 `pnpm-workspace.yaml`의 `verifyDepsBeforeRun: false`를 사용하며, runner child에는 `pnpm_config_verify_deps_before_run=false`를 명시적으로 전달한다. lockfile·의존성·registry 설정은 바꾸지 않았다.
-- **회귀·검증**: 예측된 temporary symlink, final symlink race, preexisting regular temp, evidence write failure와 외부 sentinel 불변, env 상속·package dispatch를 Node 회귀로 고정했다. Node 19/19·diff check와 explicit pnpm config status gate PASS evidence를 확인했으며, plain pnpm wrapper의 DNS install은 PASS로 인용하지 않는다.
-
-### 2026-09-09 · by GPT-5 Codex (G5D storage lifetime 증거 게이트)
-
-- **구현**: `m5:test:storage-scheduler`·`storage-status`·`storage-compaction`을 독립 Node runner에 연결했다. 각 runner는 clean HEAD에서만 focused Node/Rust/diff 검증을 실행하고, command/exit/signal/duration·HEAD·dirty·worker cap을 `.artifacts/m5-g5d-storage/`의 atomic JSON evidence로 남긴다. evidence directory symlink, unsafe gate/path, git metadata 부재, malformed child result, nonzero/signal, evidence write 오류는 PASS를 주장하지 않고 fail-closed한다.
-- **범위**: scheduler는 V4 activation·ready 전/quit 후 zero-tick·poison·stdio와 actual SQLite scheduler subset, status는 D1 Rust/TypeScript fixture와 Electron V6 bridge/poller·privacy/ready-only 사실, compaction은 V9/V10 migration/admission/prefix chain 및 V10 writer/failure-injection focused subset을 각각 소유한다. full sidecar를 세 번 재실행하지 않는다.
-- **검증·다음**: injectable runner/harness Node regression 16/16과 `git diff --check`를 통과했다. clean 기능 commit 뒤 세 package gate 및 누적 `g5d-storage-lifetime` evidence를 실행해 실제 PASS 여부를 별도로 확인한다. Windows 실기기·실사용 DB 강제 종료·G6 package/release는 이 gate 범위 밖이다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D 남은 하네스 선행 조건 정정)
-
-- **실행 조건 정정**: 아직 존재하지 않는 `storage-scheduler`·`storage-status`·`storage-compaction` 하네스를 곧바로 실행하라는 표현을 제거했다. 세 스크립트와 증거 gate를 먼저 구현하고 모두 통과하기 전에는 누적 G5D gate가 fail-closed `NOT_READY`를 유지한 뒤 최신 통합 commit에서 실행하도록 제안서 순서를 바로잡았다.
-- **검증·범위**: `git diff --check`를 통과했다. runtime·계약·architecture·공개 wire는 변경하지 않았다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D activation V4 제안서 경계 수리)
-
-- **문서 생애주기 수리**: M5 제안서 §6.6이 architecture/history가 소유해야 할 현행 구현 사실을 직접 주장하던 표현을 확정 계약의 미래 지향적 구현 기준으로 바꾸고, 현재 상태는 두 현행 문서에서 확인하도록 명시했다. architecture와 기존 구현 기록은 유지했다.
-- **실행 순서 정정**: 이미 완료된 V10 admission·writer·scheduler 재구현 지시를 제거하고 최신 통합 commit의 storage scheduler/status/compaction 하네스와 누적 G5D gate, Windows·실사용 DB 강제 종료, 패키징·릴리스 판정 순으로 남은 작업을 정렬했다.
-- **검증**: activation V4 focused Node 3/3, TypeScript noEmit과 diff check를 통과했다. 공개 wire·runtime·계약 fixture는 변경하지 않았다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D activation V4 구현 진실 계약)
-
-- **additive V4**: 역사적 activation V1~V3는 바꾸지 않고 V4에서만 V9/V10 materializer, V10 compaction writer, cooperative scheduler의 exact runtime 지원과 `runtimeImplemented`·`productExecutionEnabled`·`automaticSchedulingEnabled=true`를 고정했다. 단일 sidecar SQLite owner, ready-only 우선순위/tick/commit/fatal, exact 1,000 threshold, 100 work·1 MiB·8 MiB 예산과 V3 private state는 그대로다.
-- **증거·공개 경계**: activation proof는 통합된 writer/scheduler focused Rust test 이름을 직접 가리키며 claim을 runtime 활성화로 제한한다. D1 `storage.status`는 이미 구현된 shape·capability 순서를 그대로 쓰고 새 공개 wire나 `ready → failed` 전이는 없다. physical cleanup도 계속 비활성이다.
-- **검증·남은 게이트**: V1~V4 Node activation 27/27, protocol Rust 51/51, TypeScript noEmit, protocol no-deps strict clippy와 Rust 2021 format을 통과했다. 최신 통합 commit 누적 하네스, Windows 안전 게이트, 실제 사용자 DB·강제 종료, 패키징·릴리스 판정은 별도이며 V4 자체는 출시 승인이 아니다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D cooperative scheduler runtime)
-
-- **단일 writer scheduler 활성화**: storage admission이 ready이고 quit/poison 전인 sole sidecar event loop에서 response·event flush 뒤 또는 100ms active timeout 뒤 최대 한 tick만 실행한다. materializer 한 step을 먼저 실행하고 ready 전환 tick에는 compaction을 섞지 않으며, 다음으로 exact persisted pending plan, 마지막으로 `project → chat → run → lock` indexed keyset target 하나를 처리한다. full no-candidate sweep 뒤에는 volatile dormant가 되어 timeout DB 접근을 멈추고 committed append epoch가 cursor를 깨워 처음부터 다시 확인한다.
-- **writer 결과·fatal 경계**: private V10 writer를 `created | armed-worked | finalized | no-work`로 분리해 candidate/plan 생성과 unarmed finalize가 각각 독립 administrative tick을 소비하도록 했다. pending work만 polling 없이 running arm commit과 bounded work commit을 인접 실행한다. running sentinel·authority·multiple/malformed active·materializer/compactor 오류는 internal poison과 process error로 처리해 이후 mutation/run을 차단하며 공개 wire나 ready→failed 상태는 추가하지 않았다. V9/V10 bounded materializer는 compaction과 겹치지 않을 때만 production-private scheduler에서 실행된다.
-- **검증**: scheduler unit 2/2, actual SQLite scheduler 3/3, 기존 private writer 9/9, stdio process 11/11, ready 전/quit 후 zero-tick과 poison 차단 회귀 2/2를 통과했다. sidecar lib 1회 전체 실행은 bin 미빌드 때문에 chat 22개가 assertion 전 실패하고 나머지 318개가 통과했으며, 안내된 bin을 빌드한 뒤 chat 33개를 직렬 재실행해 33/33 통과했다. strict no-deps clippy, Rust 2021 format, diff check도 통과했다. 실제 Windows와 외부 DB 변조/강제 종료 실기기 검증은 여전히 후속이다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D cooperative scheduler activation 계약)
-
-- **우선순위·휴면 고정**: sole sidecar SQLite owner의 ready/non-quitting tick에서 materializer 한 step을 먼저 수행하고, ready handoff 뒤 다음 tick부터 persisted pending compaction, 그 뒤에만 `project → chat → run → lock` volatile indexed keyset 후보를 찾도록 V3 activation golden을 명료화했다. 전체 no-candidate sweep 뒤 dormant, append/materialization pending wake, dormant timeout no-DB, EOF no-tick과 `prepareQuit` 선차단도 고정했다.
-- **commit·결과 경계**: tick당 bounded work commit은 최대 하나이며 바로 인접한 running arm commit만 허용하고 그 사이 polling을 금지했다. candidate+plan 생성과 unarmed finalize는 각각 한 tick을 소비하는 administrative commit이며 `created | armed-worked | finalized | no-work` 결과를 private writer와 scheduler가 정확히 보존한다.
-- **활성화·fatal 경계**: V9/V10 materializer와 V10 writer exact runtime 지원 전에는 runtime/product/scheduling을 false로 유지한다. running/non-empty authority, multiple active, malformed state, materializer/compactor 오류는 internal poison 뒤 mutation/run 차단과 process exit로 처리하며 D1 wire/capability 또는 `ready → failed` 전이는 추가하지 않는다. Rust/TypeScript exact validator와 scheduler 전 경로 malformed golden 회귀를 추가했고 runtime 구현은 후속이다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer serialization allocation P1 수리)
-
-- **serialization 전 예약**: 신규 frozen operation은 borrowed plan field로 canonical record의 exact 길이와 source clone·canonical JSON Value·출력 digest footprint를 먼저 계산하고 합산 예산을 통과한 뒤에만 source를 clone/serialize한다. 기존 frozen operation의 `serde_json::to_value`와 protocol validator가 만드는 Value clone·payload canonicalization·record reconstruction·digest도 호출 전에 StepBudget에 예약한다.
-- **불필요한 clone 제거·감사**: frozen message는 owned source를 다시 JSON Value로 복제하지 않고 borrowed field의 JS-safe 정수·필수값·timestamp·source binding·message digest를 직접 검증한다. plan 작성의 baseline witness clone과 payload digest 결과도 clone/hash 전에 예약했다. 남은 `Value::to_string` 두 곳은 외부 문자열이 없는 고정 private cursor envelope 생성이며 입력 의존 serialization 경로가 아님을 확인했다.
-- **적대 회귀·검증**: actual SQLite의 다음 plan row aggregate ID를 dependency 상한 절반보다 1 byte 크게 만들어 단일 입력 fetch는 허용되지만 clone+canonical output 합산은 8 MiB를 넘는 경계를 재현했다. writer는 첫 serialization 전에 실패하고 event/index/receipt/frozen/authority/prefix 및 변조 plan witness를 그대로 두며 durable running sentinel만 남겼다. focused writer 9/9, verifyPrefix admission 1/1, sidecar no-deps strict clippy, Rust 2021 format과 diff check가 통과했다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D V10 writer 메타데이터·allocation P1 수리)
-
-- **기존 witness 완전 검증**: private writer가 이미 존재하는 frozen operation/message를 source 열만으로 인정하지 않고 canonical record, record/message digest, `frozenAt`, source 결속을 protocol validator와 재해시로 모두 확인한다. 다음 배치 첫 operation의 canonical record·digest·시간을 변조하거나 canonical record를 8 MiB 초과로 만든 actual SQLite에서 writer가 삭제 전 실패하고 event/index/receipt/authority/prefix와 변조 witness가 그대로이며 durable running sentinel만 남는 것을 확인했다.
-- **allocation fail-closed**: 모든 writer DB 문자열 입력에 `typeof`·BLOB byte length 선검사와 checked 누적 예산을 적용했다. frozen-operation canonical envelope는 JSON escape·숫자 길이를 allocation 전에 정확히 계산해 output+digest를 예약하고, chat ID/frozen message 전체 메타데이터, equivalence baseline·최신 payload·projection, active/predecessor job ID와 prefix/plan/job envelope도 fetch 전 100 work·primary 1 MiB·retained/dependency 8 MiB 상한을 공유한다.
-- **검증·범위**: focused writer/allocation 9/9와 교정된 V9/V10 verifyPrefix admission 1/1, sidecar all-target no-deps strict clippy, Rust format, `git diff --check`가 통과했다. production scheduler/public wire/계약은 변경하지 않았고 full sidecar 재실행은 영향 범위 검증 간소화 지침에 따라 생략했다.
-
-### 2026-09-09 · by GPT-5.6-Sol (G5D V10 private compaction writer)
-
-- **private writer 구현**: 명시적으로 선택한 단일 aggregate에 삭제 가능 event 1,000개와 anchor 1개가 연속할 때만 V3 job·immutable plan을 만들고, `planEligibility → freezeOperations → freezeMessages → verifyPrefix → authorizeDelete → deletePrefix → verifyOperations → verifyEquivalence → releasePlan → finalize`를 호출당 최대 100행·primary 1 MiB·retained/dependency 8 MiB로 진행한다. running arm은 별도 commit이며 `verifyPrefix`의 exhausted pending을 재arm한 transaction에서 prefix와 `authorizeDelete`를 함께 게시하고, finalize만 unarmed pending→succeeded로 끝낸다. 즉시 선행 성공 job을 잇는 2,000행 chain도 보존한다.
-- **실제 SQLite 안전 회귀**: 삭제 가능 999행은 무변경 no-op, 정확히 1,000행은 완료 후 event 1개·receipt 1,001개·frozen operation 1,001개·plan anchor 1개를 보존했다. planning pending과 100행 partial delete를 각각 제품 admission으로 다시 연 뒤 writer가 재개되고 후속 append가 성공했다. 잘못된 explicit target은 거부하며 authority 직후, 전체 index/event trigger mutation 직후, precommit, arm 직후 failure와 after-arm cancellation은 batch를 rollback하고 durable running sentinel을 남겨 다음 writer 호출을 fail-closed한다.
-- **검증·경계**: 실제 SQLite focused writer 3/3과 100/101·1 MiB·8 MiB budget 경계 1/1, sidecar unit 327 pass·1 ignored와 stdio 11/11, Rust 2021 format, sidecar all-target no-deps strict clippy, `git diff --check`가 통과했다. dependency 포함 strict clippy는 소유 밖 `hello-agent-core/src/proctree.rs`의 기존 lint 2건으로 실패했다. scheduler·public wire/capability·자동 실행은 활성화하지 않았고 Windows 실기기와 production scheduling은 후속 범위다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D verifyPrefix admission 경계 수리)
-
-- **재개 경계 수리**: pending `verifyPrefix`는 scan이 exhausted여도 prefix가 아직 없어야 하며, durable prefix는 다음 `authorizeDelete` phase부터 요구하도록 V9·V10 공용 admission verifier를 수정했다. 이는 V10 writer의 prefix INSERT와 `pending authorizeDelete` 전이가 한 transaction에서 일어나는 순서와 일치한다.
-- **실제 SQLite 회귀·검증**: exhausted pending `verifyPrefix` + no-prefix는 V9 read-only verifier와 V10 제품 admission에서 DB snapshot을 바꾸지 않고 허용했다. 같은 phase의 조기 exact prefix와 `authorizeDelete`의 malformed prefix는 mutation 없이 거부했고 기존 post-prefix phase 회귀도 유지했다. focused reopen-plan 21/21, 신규 verify-prefix 2/2, sidecar all-target no-deps strict clippy, Rust 2021 format과 diff check가 통과했으며 writer/scheduler/public 범위는 변경하지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V10 schema golden 고정 상한 수리)
-
-- **재리뷰 차단 수리**: DB schema preflight의 row 상한을 parsed golden 길이에서 유도하지 않고 코드 상수 `76`과 `LIMIT 77`로 독립 고정했다. golden parser도 exact 76개, non-empty tuple, lowercase hex64 digest, `(type,name,tableName)` strictly sorted·unique를 요구해 잘린·중복·재정렬·변조 fixture가 DB 비교 상한을 함께 약화하지 못한다.
-- **검증**: 변경하지 않은 실제 golden과 적대 parser 4종을 직접 검증했고 focused V9/V10 migration·admission 19/19, sidecar all-target no-deps strict clippy, Rust 2021 format, diff check가 통과했다. writer/scheduler/public 범위는 그대로 비활성이다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission schema allocation 수리)
-
-- **P1 bounded schema identity**: V10 golden의 exact 76-object 목록을 DB보다 먼저 읽어 외부 권위로 고정하고, SQLite 쪽은 `LIMIT 77` 숫자-only `typeof`/BLOB length 선검사에서 object 수·NULL/type과 모든 schema identity field의 합산 바이트를 checked arithmetic으로 확인한다. 기존 retained/dependency 8 MiB 예산 안인 경우에만 bounded row stream을 `String`으로 읽어 SHA-256 golden과 순서대로 비교한다.
-- **적대 회귀·검증**: actual V10의 77번째 persistent object와, object 수는 76개로 유지하면서 same-name trigger SQL만 8 MiB 초과로 바꾼 fixture가 모두 fetch 전에 `storageSchemaMismatch`로 실패하고 DB 파일 byte가 그대로임을 확인했다. focused migration/admission 18/18, Rust 2021 format, sidecar all-target no-deps strict clippy와 diff check를 통과했으며 writer/scheduler/public 범위는 변경하지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V10 admission runtime)
-
-- **제품 admission 전환**: legacy `Storage::open`은 V8 동작을 유지하고, `open_for_admission`만 exact idle V9를 통합 V10 fixture로 migration하거나 기존 exact V10을 연다. V8 제품 경로는 bounded V8 검증 뒤 V9→V10을 순서대로 적용하며 migration 사이 cancellation을 확인한다. V10 schema는 76개 persistent object의 `(type, name, tableName, canonical SQL SHA-256)` golden과 metadata를 exact 비교한다.
-- **재개·쓰기 호환과 fail-closed 경계**: private V3 plan witness 의미가 같은 V9·V10만 bounded read-only admission과 frozen replay/append에 허용했다. V9 drift·pending/running·non-empty authority, V10 trigger drift·미래 version·tampered witness, cancellation과 DDL 실패는 원래 DB를 변경하지 않고 거부한다. V9 succeeded/failed terminal evidence와 plan rows를 V10에서 보존하고 partial `deletePrefix`, 두 succeeded chain, admission 뒤 append를 검증했다.
-- **검증·다음**: focused plan/admission 16/16, snapshot 18/18, sidecar unit 319 pass·1 ignored와 stdio 11/11, Rust 2021 format, sidecar all-target no-deps strict clippy, `git diff --check`를 통과했다. V10 writer/scheduler/public readiness는 활성화하지 않았으며 독립 리뷰와 통합 뒤 별도 파동으로 남는다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V10 event 삭제·schema identity 재리뷰 수리)
-
-- **P0 event 순서 봉쇄**: V10 event `BEFORE DELETE`가 현재 running V3 `deletePrefix` plan/prefix와 전체 armed batch를 다시 결속하고, batch의 모든 source index가 먼저 사라진 뒤 `live event + authority` 또는 `삭제된 event + 소비된 authority`의 exact 분할만 허용한다. 부분 authority의 직접 event 삭제, authority 없는 source/index 우회, 완전 authority라도 event-before-index 순서는 전체 DB mutation 없이 거부한다.
-- **P1 exact V10 identity·검증**: object 수와 이름만 보던 테스트를 76개 전체 non-autoindex `(type, name, tableName, canonical SQL SHA-256)` golden 비교로 교체하고 같은 이름의 약화 trigger body가 불일치하는 회귀를 추가했다. actual SQLite focused 6/6·V9/activation 포함 Node 23/23, protocol Rust 50/50, TypeScript noEmit, Rust 2021 format, strict clippy와 diff check를 통과해 별도 리뷰 수정 커밋으로 인계한다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V10 atomic delete 계약 수리)
-
-- **P0 additive 수리**: 제품이 이미 만들 수 있는 exact V9를 제자리 수정하지 않고 idle V9만 exact `sqlite_schema`로 preflight하는 V9→V10 migration을 추가했다. active pending/running 또는 non-empty authority와 같은 이름의 약화 trigger/추가 object를 persistent DDL 전에 rollback하며 idle/succeeded 기록은 보존한다.
-- **원자 삭제 계약**: V3 private schema·10개 phase·flags를 유지하면서 `authorizeDelete`를 bounded read-only witness로 고정했다. `deletePrefix`에서만 armed 최대 100개 plan interval과 exact prefix/live source에 결속한 1-based 연속 authority를 허용하고, 완전 batch의 마지막 INSERT가 source index/event 삭제·authority cleanup·cursor pending 전진을 같은 transaction에서 수행한다. gap/outside/>100/wrong plan·prefix/partial batch는 mutation 없이 거부하거나 rollback한다.
-- **검증·경계**: actual SQLite V1→V10 및 rollback/100-row delete/release/finalize Node 5/5, V9·activation 포함 Node 22/22, protocol Rust 50/50, TypeScript noEmit, Rust 2021 format, protocol strict clippy, diff check를 통과했다. V10 runtime migration/admission/scheduler writer와 product execution은 활성화하지 않았고 public D1 wire/capability·물리 cleanup은 그대로다. 500줄 history는 오래된 엔트리를 월별 archive로 이동해 300줄 이하로 롤오버했다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V9 admission digest P0/P1 수리)
-
-- **수리·검증**: plan row canonical payload를 Rust SHA-256로 재해시해 raw digest에 결속하고, baseline canonical/digest 길이·exact digest 길이·결합 예산을 String fetch 전에 검사한다. V3 raw 입력은 파싱 뒤 소유권을 남기지 않고 job·plan의 동시 retained 문자열을 모두 예산에 포함한다. plan/frozen/receipt digest 공동 위조, 8 MiB 초과 baseline digest, 결합 예산을 넘는 대형 job ID를 actual SQLite에서 mutation 없이 거부했으며 focused V9 6/6, Rust 2021 format, strict clippy, diff check가 통과했다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V9 read-only admission runtime)
-
-- **구현**: legacy `Storage::open`은 V8을 유지하고 제품 admission만 exact fixture로 V8→V9 migration·exact schema 검증을 수행한다. V3 pending plan witness의 canonical digest·phase·artifact·부분 release를 bounded read-only scanner로 재검증하며, 다중 succeeded 1,000-row plan의 연속 terminal chain과 live tail 동등성을 검증한다.
-- **안전 경계**: migration preflight는 persistent DDL 전에 schema drift·active V2/V3·authority를 rollback하고, malformed/gap/extra/digest/artifact/running/authority/V2 pending과 fork/cycle/gap을 mutation 없이 거부한다. cancellation·no-progress·external commit도 fail-closed하며 기존 append와 prepareQuit 수명주기를 보존한다.
-- **검증·다음**: focused V9 6/6, product admission 11/11, sidecar unit 308 pass·1 ignored, stdio 11/11, Rust 2021 format, sidecar no-deps strict clippy와 diff check가 통과했다. V9 scheduler·compaction/freeze/delete/release writer와 공개 wire 변경은 구현하지 않았으며 후속 파동으로 남는다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V9 digest 표현 수리)
-
-- **런타임 차단 수리**: 기존 `ledger_baselines.projection_digest`·`chat_messages.message_digest`·`frozen_message_sources.message_digest`는 exact `sha256:<64 lowercase hex>`이고 V9 plan witness는 접두사 없는 lowercase hex64라는 표현 경계를 명시했다. V9 SQL은 기존 값이 정확한 `sha256:` 알고리즘·접두사·hex·digest일 때만 raw plan digest와 결합되도록 baseline header, message/frozen-message row, prefix phase/insert 비교를 수정했다.
-- **교차 계약**: operation receipt는 기존처럼 별도 algorithm=`sha256`, version=1, format=`lowercaseHex64`와 raw hex를 유지한다. Rust/TypeScript/shared policy와 타입 설명은 동일한 normalization 및 runtime Rust의 canonical payload·baseline·message 재해시 권위를 고정하고, 다른 알고리즘이나 접두사 완화는 허용하지 않는다.
-- **검증·경계**: 실제 V1→V9 SQLite에서 71자 baseline/message/frozen-message를 사용한 header·plan row 성공과 잘못된 prefix/algorithm/hex/digest 거부를 추가했다. focused Node, protocol Rust 전체, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check를 실행한다. 이는 schema/protocol fixture 수리이며 V9 runtime·scheduler·delete writer 구현이나 readiness 주장이 아니다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V9 terminal evidence P1 수리)
-
-- **전이 guard 완결**: V3 단일 `BEFORE` guard의 UPDATE 대상을 `state`·private cutoff뿐 아니라 `failure_kind`·`completed_at`까지 넓혔다. 전체 허용식은 `IS 1`로 total boolean화해 JSON 누락·SQL NULL이 통과하지 못하고, exact no-op도 네 필드 모두를 null-safe `IS` 비교하므로 terminal evidence를 나중에 다시 쓸 수 없다.
-- **terminal 계약**: pending/running은 terminal field가 둘 다 NULL이어야 한다. succeeded는 NULL failure와 immutable valid completion을, failed는 비어 있지 않은 failure와 immutable valid completion을 요구한다. SQL은 exact RFC 3339 UTC seconds shape·달력·시간 범위를 검사하며 Rust/TypeScript runtime validator가 같은 규칙을 다시 확인하는 권위는 유지한다.
-- **검증·경계**: pending terminal-field 위조, NULL/empty failure, 형식·윤년·24시 오류, terminal rewrite와 valid failure/success를 actual SQLite로 검증했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format과 diff check가 통과했다. 이는 V9 schema/protocol fixture 수리이며 runtime scheduler/delete writer 또는 readiness 활성화가 아니다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D V9 exact schema·상태 전이 재리뷰 수리)
-
-- **P0 exact V8 강화**: V8→V9 SQL의 DDL 전 preflight를 이름 inventory에서 모든 non-autoindex table/index/trigger의 canonical `sqlite_schema.sql` exact 정의 비교로 강화했다. 같은 이름의 append-only trigger, active-job unique index, maintenance table을 약화·변형한 실제 SQLite에서도 migration이 실패하고 schema/version이 V8 그대로 rollback되는 것을 확인했다.
-- **P0 V3 UPDATE 봉쇄**: `maintenance_jobs`의 V3 `state` 또는 private cutoff를 바꾸는 UPDATE를 단일 `BEFORE` guard로 모아 exact arm·연속 cursor progress·빈 authority pending commit·인접 phase·release/finalize·terminal failure만 허용했다. phase jump/backward, state-only arm, cutoff-only flag 위조, state+cursor 위조를 거부하면서 plan INSERT/release DELETE trigger의 transaction 내부 cursor 갱신과 전체 정상 phase 경로를 보존했다.
-- **범위·검증**: Rust/TypeScript/shared policy와 현재 제안 문서를 같은 계약으로 동기화했다. actual V1→V9 SQLite를 포함한 lifetime/activation Node 34개, protocol Rust 전체 49개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. 이는 schema/protocol fixture 수리이며 V9 runtime·scheduler·delete writer 구현이나 product readiness가 아니다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D resume witness 독립 리뷰 차단 수리)
-
-- **P0 migration·planning 수리**: 실제 V8→V9 SQL이 `BEGIN IMMEDIATE` 안에서 persistent DDL 전에 exact V8 object inventory, pending/running job 부재, empty authority를 검사하고 `RAISE(ROLLBACK)`하도록 고쳤다. plan row는 arm이 고정한 최대 100개 연속 ordinal만 INSERT할 수 있고 trigger가 같은 transaction에서 cursor를 전진시킨다. prefix는 exact 1,001-row plan과 완료된 planning/`verifyPrefix` 현재 phase를 요구하되 논리적으로 미래인 equivalence는 요구하지 않는다.
-- **P1 release·P2 TS 수리**: V3 cursor에 nullable `stepThroughPlanOrdinal`을 추가해 release 범위를 고정하고 delete ordinal `1..1000`만 다음 연속 순서로 지우며 `afterPlanOrdinal=1000` terminal progress와 ordinal 1001 anchor를 보존한다. TypeScript V9 validator는 plain own data object와 string `aggregateType`만 받아 custom prototype/accessor/`toString` coercion을 fail-closed한다.
-- **검증·경계**: actual SQLite에서 unsafe migration의 pre-DDL rollback, anchor-first/sparse/>100 planning, partial/wrong-phase prefix, anchor/out-of-order/101-row release, cursor-only mutation, delete+cursor rollback과 terminal anchor 보존을 검증했다. protocol Rust 전체 49개와 lifetime/activation/V9 Node 33개, TypeScript noEmit, protocol strict clippy, Rust format, diff check가 통과했다. Rust/TypeScript/golden/문서를 함께 갱신했지만 runtime migration/admission/scheduler/delete writer는 여전히 구현되지 않았고 readiness를 주장하지 않는다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D compaction resume witness 계약)
-
-- **결정 고정**: V8 compaction cursor만으로 active `pending`의 재개 결정을 증명할 수 없어 additive storage V9와 private state/cursor schema 3을 정의했다. 한 job은 retained boundary 다음 1,000 delete row와 1 anchor를 immutable header + `WITHOUT ROWID` ordinal witness로 고정하며, `afterPlanOrdinal`까지 source·receipt·message·baseline·digest를 bounded 재검증한다. active V2 pending, running/non-empty authority/commit 불명은 mutation 없이 admission 실패다.
-- **안전·호환 경계**: 기존 V2/V6/V7/V8와 activation V1, 공개 D1 `system.status`·`storage.status`·capability는 바꾸지 않았다. V8→V9는 active compaction 없음·empty authority 선행 조건의 additive migration이며 한 step 100 work/1 MiB primary/8 MiB retained+dependency, 단일 writer, exact 1,000-delete job, append-after-cutoff retained tail, 성공 뒤 bounded plan-row release와 immutable terminal header를 고정했다.
-- **범위·검증·다음**: Rust/TypeScript validator, V9 migration/공유 malformed fixture, activation V2 golden까지만 계약으로 추가했다. focused Rust 1개, protocol 전체 49개, V1~V9 SQLite migration과 기존 lifetime/activation을 포함한 Node 32개, TypeScript noEmit, protocol no-deps strict clippy, Rust 2021 format, diff check가 통과했다. runtime migration/admission/scheduler/delete writer는 구현되지 않았고 이 계약 commit 자체는 readiness나 자동 compaction 활성화를 뜻하지 않는다. 독립 리뷰와 통합이 남는다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D admission compaction control-state fix)
-
-- **P1 수정**: 제품 admission이 compaction artifact 4개 테이블이 비었다는 이유만으로 `losslessCompaction` 작업 메타데이터를 무시하던 경로를 닫았다. uncompacted admission은 작업이 전혀 없을 때만 허용하고, compacted terminal admission은 정확히 하나의 `succeeded` proof와 실제 artifact가 함께 있을 때만 검증한다. active pending/running, 다른 상태, 중복 작업, malformed proof, artifact 없는 orphan succeeded는 모두 mutation 없이 실패한다.
-- **회귀 검증**: no-job uncompacted와 101개 terminal compacted 정상 경로를 보존하고 malformed succeeded `cutoff_json`, valid-shaped orphan succeeded, duplicate succeeded proof의 DB 행·파일 byte 불변 실패 회귀를 추가했다. V9 decision-witness 작업은 시작하지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D bounded reopen product admission)
-
-- **제품 admission 연결**: `Storage::open_for_admission`만 private same-connection `ReopenMaintenanceSession`을 끝까지 구동해 terminal compacted V8의 frozen/live source, receipt, prefix·baseline, projection, derived record와 workspace 관계를 bounded step으로 재검증한다. 101개 frozen operation도 임시 legacy 100개 제한을 우회해 검증한 뒤에만 storage를 반환하며, `Storage::open`의 기존 제한과 동작은 그대로 유지한다.
-- **재시작 경계 보류**: 현 V2 pending cursor에는 건너뛴 후보의 적격성 결정을 재구성할 persisted witness가 없어 arbitrary mid-phase pending을 exact 검증할 수 없다는 아키텍처 판정을 반영했다. 따라서 pending empty-authority도 포함해 모든 active pending/running·non-empty authority는 mutation 없이 admission을 실패시킨다. 승인된 pending resume는 별도 decision-witness 계약·migration 뒤로 분리하며 scheduler·compaction writer는 이번 파동에서 활성화하지 않았다.
-- **종료·진행 안전성**: 모든 step 전후에 admission cancellation을 확인하고 기존 transaction rollback/autocommit 복구를 사용한다. phase·scanner cursor·active parser 상태의 private fingerprint가 `Pending` 전후 같으면 내부 오류로 실패해 상한 없는 제품 loop가 정지 상태로 회전하지 않는다. 행/시간/step 상한은 추가하지 않았고 100 work unit, primary 1 MiB, retained/dependency 8 MiB를 유지한다.
-- **검증**: product admission 4개, 전체 snapshot reopen 15개, frozen reopen 14개, legacy V8 reopen 3개, 실제 stdio 11개가 통과했다. 변경 Rust의 edition 2021 rustfmt, sidecar all-target no-deps strict clippy, diff check도 통과했다. 다음은 exact commit 독립 리뷰와 통합 후 persisted decision-witness 설계이며, ready 이후 scheduler/compaction writer·실제 사용자 DB·Windows 실기기는 남아 있다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D activation comparator 경계 회귀)
-
-- **재리뷰 테스트 보강**: activation exact comparator가 own Symbol property, non-enumerable own extra property, 기존 nested object를 cycle로 교체한 입력을 모두 fail-closed하는 직접 회귀를 추가했다. production comparator·Rust·golden·public wire/runtime은 변경하지 않았다.
-- **검증**: focused Node 7개, TypeScript noEmit, diff check가 통과했다. 별도 테스트 커밋이며 production code는 바꾸지 않았다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D activation TS exact comparator 수리)
-
-- **독립 리뷰 수리**: 새 activation validator가 사용한 `JSON.stringify` 비교는 값이 `undefined`인 unknown key를 누락하고 object insertion order에 민감했다. 이 validator에만 own-key 기반 plain-object exact 비교를 적용해 root/nested unknown key를 `undefined`도 포함해 거부하고, JSON 의미가 같은 object key 재배치는 허용한다. 배열 순서·길이와 primitive/type는 exact이며 symbol/non-enumerable extra, custom prototype, accessor/getter, cycle·reflection 오류는 fail-closed한다. 기존 storage validator의 비교 방식은 변경하지 않았다.
-- **검증**: root/nested undefined unknown 거부, root/nested object reorder 허용, custom prototype/getter 미호출 거부를 포함한 focused Node 6개, TypeScript noEmit과 diff check가 통과했다. 별도 fix commit이며 Rust/golden/public wire/runtime은 변경하지 않았다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D storage lifetime activation 계약)
-
-- **사용자 승인 결정**: 자동 lossless compaction은 retained boundary 이후 exact safe prefix가 1,000 event 이상이고 기존 안전 제외·완전 materialization·exact 전후 동등성을 모두 만족할 때만 후보가 된다. age/byte trigger와 하한 미만 실행은 없고 user chat/message/evidence·recovery·workspace·snapshot·baseline·projection·receipt 및 물리 cleanup은 삭제 범위 밖이다.
-- **재시작·치명 오류 경계**: empty-authority `pending`은 admission exact 검증 뒤 ready와 scheduler 재개를 허용하지만 `running` sentinel·non-empty authority·commit 불명은 변경 없이 admission을 실패시킨다. ready 이후 semantic/commit/materializer/compactor fatal은 wire `ready → failed`를 추가하지 않고 maintenance를 poison한 뒤 추가 mutation/run을 차단하고 sidecar를 종료한다.
-- **계약 범위·검증**: 기존 V6/V7/V8 비활성 manifest와 공개 D1 status/capability를 바꾸지 않은 additive activation generation을 Rust·TypeScript·공유 golden에 고정했다. 단일 event-loop SQLite owner, ready-only tick, 한 tick당 bounded commit 하나, work 100/primary 1 MiB/retained+dependency 8 MiB, 단계 및 Quit 순서를 exact validator가 강제한다. focused Node 3개와 protocol 전체 48개, root TypeScript noEmit, protocol strict clippy, Rust 2021 format, diff check가 통과했다. 이 commit은 runtime scheduler/compaction을 활성화하지 않는다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D two-stage admission 통합·storage lifetime 다음 결정)
-
-- **통합**: additive G5D lifecycle 계약과 malformed golden 보강을 `78dbe69`, Rust shell-ready/storage admission 런타임 및 raw-params 선행 차단 수리를 `a4ad301`, Electron V6·renderer admission UI와 invalid bridge fail-closed 수리를 `783ae8f`로 각각 독립 리뷰 PASS 뒤 `m5/coding-agent-ide`에 통합했다. 첫 stdout shell-ready 뒤 storage가 `verifying → ready|failed`로 진행하며, ready 전 status/quit 외 요청·writer·run·recovery는 차단되고 renderer도 모든 durable control을 잠근다.
-- **통합 검증**: protocol G5D Rust 3개와 Node 계약 5개, sidecar G5D 3개·writer guard 1개·raw preflight 1개·실제 stdio 11개, Electron admission/bridge/security Node 55개, TypeScript noEmit, sidecar no-deps strict clippy, 변경 Rust rustfmt, renderer production build, diff check가 통과했다. `cargo fmt --all`은 이번 범위 밖 기존 `src-tauri/src/detect.rs`·`login.rs` 포맷 차이 때문에 실패했고, packaged Electron GUI smoke는 sandbox `SIGABRT`라 실제 GUI 증거로 인정하지 않는다.
-- **다음 결정**: D1 status wire와 bounded materializer/reopen verifier는 통합됐지만 production scheduler와 compaction writer는 없다. 옛 `m5/g5d-storage-v7-compaction-worker`는 V8 이전 consumer일 뿐이라 재사용하지 않는다. 다음 파동 전에 자동 compaction trigger, restart 시 pending/running 처리, ready 이후 maintenance fatal 처리 정책을 계약으로 확정해야 한다. 특히 101개 초과 frozen operation을 product admission의 bounded reopen 경로로 검증하기 전에는 compaction writer를 활성화하지 않는다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D Electron bridge admission P1 수리)
-
-- **수리**: renderer 외곽 경계가 `window.m5`를 신뢰하지 않고 complete fixed V4/V5/V6 bridge만 통과시킨다. bridge 부재, 알 수 없는 버전, V6의 `getSystemStatus` 누락 또는 controller가 요구하는 고정 메서드 누락은 비기술적 unavailable 화면만 렌더하며 ProjectEditor/Chat controller·durable IPC를 전혀 만들거나 호출하지 않는다. 완전한 V4/V5는 기존 ready 동작을 보존하고 완전한 V6만 admission polling으로 진입한다.
-- **검증**: absent/V7/incomplete V6에서 0 method call·blocked verdict, valid V4/V5 유지, 기존 D1 polling/malformed/IPC 회귀를 포함한 Node 55개, TypeScript noEmit, renderer Vite build, main/preload syntax와 diff check가 통과했다. GUI process smoke는 sandbox SIGABRT 한계를 그대로 둔다.
-
-### 2026-09-08 · by GPT-5 Codex (G5D Electron V6 storage admission 연결)
-
-- **구현**: Electron sidecar client는 exact D1 product/agent-fixture `system.ready`를 3초 shell-ready로 수락하고, legacy G5/G5A 협상은 그대로 둔 채 G5D `system.status`와 ready-only `storage.status`만 추가로 해석한다. preload는 raw IPC를 노출하지 않은 V6 고정 bridge/channel로 `getSystemStatus`·`getStorageStatus`를 제공한다.
-- **화면 안전성**: renderer는 shell-ready 뒤 별도 storage admission을 중복 없는 500ms 폴링으로 `checking/verifying/ready/failed` 표시한다. verifying/failed에는 비기술적 안내만 표시하고 프로젝트 선택·작업 복사본·저장·채팅/역할 변경·실행/취소/복구를 비활성화한다. status parser 실패도 안전한 failed 화면으로만 전환하며 unmount/client 종료는 timer·in-flight 후속 갱신을 취소한다.
-- **검증·한계**: fake sidecar의 product/agent fixture D1 ready, verifying→ready, malformed fail-closed, V6 storage route와 poller one-at-a-time/cancellation을 포함한 Node 53개, TypeScript noEmit, main/preload syntax, diff check가 통과했다. renderer Vite build는 성공했으나 이 격리 환경의 packaged Electron smoke는 GUI process `SIGABRT`로 실패해 제품 GUI 증거는 아니다. 다음은 exact-commit 독립 리뷰와 통합 뒤 최신 통합 파동 QA다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D admission raw-params P1 수리)
-
-- **독립 리뷰 수리**: 기존 stdio가 `decode_jsonl`의 generic params-object 검사 뒤에 admission gate를 적용해, `params:null|array|scalar`인 차단 대상 요청이 generic protocol 오류로 세션을 종료하던 P1을 고쳤다. admission이 `verifying|failed`일 때만 exact request envelope의 version/kind/instance/request/method를 안전하게 선별하고, `system.status`·`app.prepareQuit` 외 known method의 non-object params를 session correlation에 먼저 등록한 뒤 고정 admission 응답으로 처리한다.
-- **보존 경계**: unknown/불완전 envelope, 잘못된 identity/version/kind/method, 허용 두 메서드, storage-ready 상태는 계속 기존 strict `decode_jsonl` 검증을 거친다. requestId 중복·instance 일치·response correlation은 기존 `ProtocolSessionV1::observe`를 그대로 사용하며 sidecar 외 protocol 계약은 바꾸지 않았다.
-- **검증**: 실제 process에서 배타 DB lock의 `verifying + recovery.markResolved(params:null)`과 잘못된 DB 경로의 `failed + project.open(params:array)`가 각각 exact fixed error를 반환하고 후속 `system.status`가 유지됨을 확인했다. scoped preflight unit, 전체 stdio 11개, G5D/writer focused, sidecar strict no-deps clippy, Rust format과 diff check가 통과했다. 다음은 이 별도 fix commit의 독립 재리뷰다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage storage admission 런타임)
-
-- **구현**: macOS sidecar가 exact D1 `system.ready`를 첫 stdout envelope로 내보낸 뒤 별도 worker에서 SQLite 경로·migration·integrity·projection replay를 검증하도록 시작 경계를 분리했다. 내부 검증 완료 뒤에만 ProjectManager 관리 디렉터리 생성, 기존/actual-agent startup recovery, app-instance 등록을 순서대로 수행하고 공개 `storageAdmission`을 `ready`로 전환한다. 검증 오류·worker panic은 세부 정보를 노출하지 않는 고정 `failed` 상태로 process 수명 동안 유지하며 재시작은 항상 `verifying`에서 다시 시작한다.
-- **안전 경계**: admission 전에는 `system.status`·`app.prepareQuit`만 허용하고, 나머지 모든 요청은 malformed params도 해석하기 전에 계약의 고정 `storageVerifying`/`storageAdmissionFailed` 오류로 차단한다. `storage.status`는 ready 뒤에만 기존 privacy-safe facts를 반환한다. quit/EOF는 initializer를 취소·join해 연결을 닫고 등록 전 clean marker를 쓰지 않는다. `append_event`, atomic upsert/chat bind, recovery, app 등록, clean marker, checkpoint, materialization 진입점에도 내부 write-admission guard를 두었고 기존 저장 예산·종료/복구·원본 격리 계약은 바꾸지 않았다.
-- **검증**: focused G5D unit 3/3, durable writer bypass unit 1/1, 실제 stdio process 11/11(배타 DB lock으로 admission을 지연해도 3초 안에 첫 shell-ready, 제품/agent-fixture exact D1 capability, 실제 provider fixture recovery/cancel 및 기존 프로젝트 흐름 포함), 기존 transport/quit/invalid-param 회귀 6개가 통과했다. Rust format, sidecar `clippy --all-targets --no-deps -D warnings`, diff check도 exit 0이다. dependency 포함 strict clippy는 소유 밖 `hello-agent-core/src/proctree.rs`의 기존 `unnecessary_lazy_evaluations`·`map_entry` 두 lint로 exit 101이어서 변경하지 않았다.
-- **다음**: 독립 exact-commit 리뷰와 통합 뒤 Electron V6/renderer가 shell-ready와 storage admission 상태를 분리해 폴링·표시해야 한다. 전체 장시간 sidecar/R3C 누적 QA, scheduler/compaction, Windows 실기기와 실제 유료 provider·사용자 프로젝트 검증은 이번 기능 commit의 완료 주장에 포함하지 않는다.
-
-### 2026-09-08 · by GPT-5.6-Sol (G5D two-stage readiness 계약)
-
-- **승인 결정 고정**: 기존 V1 lifecycle·startup steps와 G5/G5A/D1 exact capability를 바꾸지 않고, additive G5D `system.status`를 shell-ready + storage admission `verifying|ready|failed`로 고정했다. 일반 제품·agent-fixture 두 capability 모드, 상태별 DB/recovery 조합, 고정 공개 오류, known-no-op 차단과 shell-ready 선행 시작 순서를 Rust/TypeScript/golden에서 함께 검증한다.
-- **공개 경계**: admission 전 허용 메서드는 `system.status`·`app.prepareQuit`뿐이며 `storage.status`는 ready-only다. `M5BridgeV6`는 새 status 타입을 반환하도록 재선언하되 기존 storage status를 유지한다. 이번 변경은 공용 계약 generation이며 sidecar dispatcher·scheduler·compaction·renderer 동작을 활성화하지 않는다.
-- **검증·다음**: protocol 전체 47개와 Node legacy lifecycle/G5D 32개가 통과했고 root TypeScript `--noEmit`, protocol strict clippy, rustfmt, diff check도 exit 0이다. 다음 구현 담당은 gate 전에 params 검증·DB 연결·app 등록·append·run/recovery mutation이 일어나지 않도록 admission을 sidecar에 연결해야 한다.
-- **독립 리뷰 P2 수리**: shared `malformedCases`에 nested admission/database/failed-error unknown field, timestamp shape·calendar·역순, 고정 failed error 각 필드 변조, ready blocker 빈 값·중복·flag 불일치를 추가했다. Rust·TypeScript가 모든 case를 일반 제품과 agent-fixture 두 모드에서 함께 거부한다.
-
-### 2026-09-08 · by GPT-5 Codex (G6 security/package gate 통합·실산출물 검증)
-
-- **통합**: 기능 `128b044`와 독립 리뷰에서 찾은 pre-smoke artifact 검증·상위 harness `NOT_READY` 전파 수리 `af93bcc`, repository root 아래 output parent symlink preflight 수리 `3494aaa`를 최종 리뷰 PASS 뒤 `b4590cb96dd6ebc144b18edf374fe8525f3a8e6d`로 `m5/coding-agent-ide`에 통합했다. package/make/smoke/metrics와 harness exit 2 경계는 현재 통합 commit의 focused Node 44개, TypeScript `--noEmit`, script syntax, harness list, diff check에서 통과했다.
-- **실산출물 검증**: `m5:test:security` 15개가 통과했다. `m5:test:package` 첫 실행은 Electron checksum fetch가 격리되어 package 단계에서 fail-closed했고, 허용된 네트워크 재실행은 fresh arm64 package → exact fuse/ASAR/Monaco worker/외부 sidecar handshake·clean shutdown smoke → ZIP make → metrics를 모두 통과했다. unpacked는 **316,549,330 bytes**(350 MiB 이하), ZIP은 **122,126,568 bytes**(200 MiB 이하)이며 증거는 `.artifacts/m5-g6-package/darwin-arm64-2026-09-08T03-26-22-350Z.json`이다.
-- **남은 경계**: 이 PASS는 로컬 macOS arm64 incremental package gate 증거다. `g5d-storage-lifetime`은 scheduler/status/compaction 3개 script가 없고 `g6-release`는 `m5:test:performance`가 없어 계속 `NOT_READY`다. 서명/notarization, packaged GUI 실제 BrowserWindow, Windows 실기기·threshold/자손 회수와 전체 출시 승인은 남아 있으며 main 병합·push는 하지 않았다. storage admission을 3초 shell-ready와 별도 `verifying|ready|failed`로 분리하는 안전 정책은 사용자 승인 전까지 구현하지 않는다.
-
-### 2026-09-08 · by GPT-5 Codex (G6 package artifact parent path 재리뷰 수리)
-
-- **수리**: repository root만 신뢰 anchor로 두고, package preflight는 root 아래 기존 `out`·package·ZIP 경로의 모든 component를 `lstat`해 symlink면 package 실행 전 `NOT_READY`로 차단한다. package 성공 뒤에는 `out`부터 package root/각 asset의 모든 parent와 leaf의 fresh/non-symlink를 재확인하며, make 뒤 ZIP도 `out/make/zip/<platform>/<arch>` parent와 leaf를 확인하고서만 metrics로 진행한다.
-- **회귀**: clean fixture에서 `out`이 외부 output을 가리키면 package command 자체가 실행되지 않고, make 단계에서 ZIP parent가 외부 directory로 바뀌면 metrics가 실행되지 않는 것을 고정했다. 외부 target의 leaf가 fresh regular file인 경우도 parent symlink로 거부된다.
-- **검증·경계**: focused Node package/harness/metrics/staging 36 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, 두 gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 `NOT_READY`이며 실제 clean package/make, 서명/notarization, Windows 실기기 증거는 남아 있다.
-
-### 2026-09-08 · by GPT-5 Codex (G6 gate 독립 리뷰 P1/P2 수리)
-
-- **P1 수리**: package 성공 직후 package root와 executable/ASAR/외부 sidecar의 freshness·symlink를 확인하고, 각 leaf까지의 중간 directory도 `lstat`으로 symlink를 거부한다. 이 검증이 실패하면 smoke/make/metrics를 전혀 실행하지 않는다. make 성공 뒤에는 고정 ZIP의 freshness·symlink를 별도로 확인한 뒤 metrics를 실행한다. stale package와 symlink된 sidecar directory가 smoke에 도달하지 않는 회귀를 추가했다.
-- **P2 수리**: 누적 M5 하네스는 자식 script exit 2를 `FAIL`로 바꾸지 않고 `NOT_READY`/exit 2로 report의 해당 result와 함께 보존한다. 그 밖의 exit/error는 기존 `FAIL`/exit 1이다. 실제 production package를 실행하지 않는 child stub fixture로 `m5:test:package`의 exit 2 전파를 고정했다.
-- **검증·경계**: focused Node package/harness/metrics/staging 34 passed, security/scaffold 8 passed, root 설치 `tsc --noEmit`, gate script syntax, `pnpm harness:list`, `git diff --check`가 통과했다. G6 release는 성능 script 부재로 여전히 `NOT_READY`; signing/notarization, Windows 실기기, 실제 clean package/make 증거는 남아 있다.
-
-### 2026-09-08 · by GPT-5 Codex (G6 incremental security/package gate)
-
-- **구현**: `m5:test:security`는 main callback VM 보안·scaffold CSP/fuse/좁은 bridge·sidecar staging fail-closed 회귀와 `electron/main.ts` strip-types 문법 검사를 실제로 묶는다. `m5:test:package`는 현재 대상의 Forge package → packaged sidecar/ASAR/fuse smoke → `make --skip-package` → 고정 ZIP 경로의 metrics 순서를 실행하고, 동일 시작 시각 이후 갱신된 package/실행 파일/ASAR/외부 sidecar/ZIP만 인정한다. JSON 증거에는 HEAD·dirty 상태·각 명령 exit·정확한 산출물 경로·metrics verdict를 남긴다. Monaco `editor.worker-*.js`도 packaged ASAR smoke 필수 자산으로 추가했다.
-- **대상·제약**: macOS arm64만 size threshold PASS가 가능하다. Windows x64/arm64은 실제 산출물을 측정해도 기존 정책대로 `NOT_READY`/exit 2이고, Linux와 다른 미지원 대상은 빌드 없이 `NOT_READY`다. 서명/notarization, Windows 실기기, GUI/배포, 전체 G6는 이 증거 범위 밖이며 `m5:test:performance`를 만들지 않아 `g6-release`는 계속 `NOT_READY`다.
-- **검증**: 새 fake/injection 회귀는 순서·고정 경로·dirty/stale/missing·명령 실패·Windows/Linux status/exit·JSON evidence를 덮는다. focused Node 두 묶음 24 + 16 passed, root 설치 `tsc --noEmit`, main syntax, `pnpm harness:list`, `git diff --check`가 통과했다. 이 worktree 의존성 부재로 pnpm typecheck가 registry DNS 재시도를 시도했으나 lockfile/의존성은 변경하지 않았고, 실제 package/make는 실행하지 않았다.
-
-### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 정리 통합)
-
-- **통합**: exact `a0ca32ff295d36c8c96605fb9b6993060e91f1ec`의 lifetime elision 2건과 `blob.chunk` 동치 조건 정리는 strict clippy exit 0·protocol 44 passed·rustfmt/diff 통과 및 독립 리뷰 PASS 뒤 `14a2efb68c2ff6acb5f93e5b9a47100e9ed868c3`로 통합했다. 공개 API·직렬화·오류 순서·validator 의미는 불변이다.
-- **정리·다음**: 완료된 clean 기능 worktree checkout은 비강제 제거하고 branch를 보존했다. 현재 root 포함 등록 worktree 10개, `.worktrees` 약 8.6 GiB이며 남은 child 9개는 미커밋 변경이나 증거 때문에 보존한다. 제품 진행은 2단계 shell-ready/storage-admission 안전 정책 사용자 결정 뒤 재개하며 main 병합·push 없음.
-
-### 2026-09-08 · by GPT-5.6-Sol (protocol strict clippy 기존 3건 정리)
-
-- **재현·수정**: base `1cd4d23ce22e64bfe83bf0ec7e551d939ca5b566`에서 protocol strict clippy의 기존 세 진단을 실제 exit 101로 재현했다. `run_recovery_v1.rs`와 `workspace_v1.rs`의 내부 helper에서 추론 가능한 lifetime만 생략하고, `lib.rs`의 `blob.chunk` 검증 조건만 동치인 단일 조건으로 접었다.
-- **계약 경계**: 공개 protocol 타입·상수·capability·golden fixture와 직렬화·검증 분기는 바꾸지 않았다. 변경은 세 진단의 제안 문법과 이 기록뿐이며 새 허용/거부 동작을 추가하지 않는다.
-- **검증**: jobs/threads 4 제한에서 exact strict clippy exit 0, protocol crate 전체 44 passed/0 failed, 수정 Rust 3파일의 edition 2021 rustfmt check와 `git diff --check` exit 0다. workspace 전체 suite·actual provider·Electron·renderer·package·main·원격은 건드리지 않았다.
 
 ## 프로젝트 요약 (고정)
 
@@ -362,6 +85,9 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-09-14 실제 CLI 관측 경계**: Codex 0.149.1의 모델 없는 app-server 초기화/config/account 조회와 Claude 2.1.269 인증 상태 조회는 성공했다. 설정 격리·모델 가용성·actual provider 실행 권위는 아직 증명하지 못했다. 원문 인증/설정은 보존하지 않는다. 최신 후보 계약은 제안서 §6.7이다.
+- **2026-09-14 작업대 배치**: 파일·편집기·변경·팀 대화의 가로 순서/폭은 사용자 조절 및 로컬 저장 가능하다. 전체 시안/상하 분할 도킹 완료는 아니며 실행 안전 계약은 그대로다.
 
 - **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). 추가 `f4def74`의 `--memory` 실측은 Electron subtree idle 약 409.73 MiB와 한 회차 tree/diff 약 3.38초로 FAIL이며 원인 미확정이다. packaged startup·실제 stream·전체 제품 메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
 
@@ -494,3 +220,5 @@
 2026-09-02 워크로그 전체는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
 
 2026-09-03 워크로그와 2026-09-08의 오래된 일부 엔트리는 [월별 아카이브](archive/history-2026-09.md)에 보존했다.
+
+2026-09-08~09의 나머지 워크로그 전체도 [월별 아카이브](archive/history-2026-09.md)에 보존했다.

@@ -454,6 +454,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **연결 전 남은 증거와 구현 경계**:
 
+**2026-09-14 추가 관측**: 사용자 잔여 작업 진행 요청 후 생성한 빈 임시 폴더에서 Codex 0.149.1의 `initialize`→`initialized`→`config/read`→`account/read(refreshToken:false)`를 확인했다. 초기화/config 응답 성공, chatgpt credentials present 분류와 stdin 종료 후 exit 0만 기록했다. Claude 2.1.269의 `auth status --json`은 exit 0/loggedIn true/claude.ai였다. thread/turn/model 요청은 0회이고 원문 설정·계정 식별자·토큰은 보존하지 않았다. 이전 startup/config 관측 대기는 이 범위에서 해소했지만 설정 격리·실제 모델 smoke·제품 활성화는 여전히 미완료다.
+
 - Codex의 `initialize`/`initialized`→`model/list`→`thread/start` 응답을 검사한 뒤에만 `turn/start`로 목표를 전달하는 내부 상태를 둔다. 로컬 0.149.1 schema의 요청 sandbox 값은 `read-only`/`workspace-write`이며, reasoning은 top-level 필드가 아니라 고정 `config.model_reasoning_effort` 후보와 응답 `reasoningEffort`를 대조해야 한다. 응답의 정확한 모델·cwd 신원·승인 정책·sandbox 세부 권한 및 thread/turn 소속을 생략하지 않는다. 이는 schema 기반 후보 계약이며 실제 응답 성공은 아직 관측하지 않았다.
 - [공식 app-server](https://learn.chatgpt.com/docs/app-server)의 `config/read`와 `configRequirements/read`는 유효 설정/관리 요구를 조회하지만, 시작 중 임의 설정 명령이 이미 실행되지 않았다는 증명은 아니다. 사용자 설정과 기존 구독 인증이 함께 있는 home을 임의 교체하거나 인증 파일을 복사하지 않는다. 설정 격리와 인증 재사용을 함께 보장하는 exact-version 시작 경로는 추가 관측이 필요하다.
 - [Claude CLI reference](https://code.claude.com/docs/en/cli-reference)의 `--safe-mode`는 인증을 유지하지만 관리 정책의 hook·statusline·file-suggestion 명령은 남길 수 있다. `--restricted`는 user/project 설정과 기본 파일 도구의 접근을 제한하나 실제 init만으로 모든 설정 격리·권한 강제를 증명할 수는 없다. `-p <prompt>` 직후 init 검사만으로 첫 모델 요청 전에 입력을 보류했다고 주장하지 않는다. streaming-input 초기화와 실제 prompt-release 경계를 확인해야 한다.

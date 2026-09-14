@@ -14,6 +14,7 @@ import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController, stateLabel } from "./chat-state.ts";
+import { WorkbenchDock } from "./workbench-dock.tsx";
 
 type MonacoApi = typeof Monaco;
 
@@ -162,7 +163,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
       {settingsOpen && chat.settings && <RoleSettings settings={chat.settings} disabled={!admissionReady} onSave={(roles) => void chatController.updateSettings(roles)} onClose={() => setSettingsOpen(false)} />}
 
-      <section className="m5-panels" aria-label="파일, 편집기, 변경 패널">
+      <WorkbenchDock conversation={chat.activeChat ? <TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} /> : undefined}>
         <aside className="m5-panel m5-files" aria-label="파일">
           <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
             파일
@@ -228,8 +229,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             </>
           ) : <Empty text="변경 내용은 프로젝트를 선택한 뒤 보여요." />}
         </aside>
-      </section>
-      {chat.activeChat && <TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} />}
+      </WorkbenchDock>
     </main>
   );
 }

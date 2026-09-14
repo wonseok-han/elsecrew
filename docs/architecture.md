@@ -198,6 +198,9 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
+- **작업대 배치 현행**: `src/m5/workbench-dock.tsx`는 파일·편집기·변경·팀 대화를 가로 패널로 구성한다. 제목 drag/drop·이동 버튼과 경계선 pointer/키보드 조절을 지원하며 순서/폭을 검증해 localStorage에 저장한다. 이동 때 Monaco identity를 유지한다. 상하 분할·탭 도킹 및 전체 승인 시안 적용은 아직 남는다.
+- **실제 CLI 최소 관측(2026-09-14)**: 빈 임시 폴더에서 Codex 0.149.1 app-server 초기화·config/account 조회·정상 종료와 Claude 2.1.269 인증 상태 조회를 확인했다. 모델 요청과 thread 생성은 없었다. 이 관측만으로 설정 격리·모델 가용성·실행 권위를 보장하지 않으며 제품 actual provider는 활성화하지 않았다.
+
 - **부분 RSS 관측 경계**: `m5:measure:renderer --memory`는 실제 Electron subtree의 RSS를 250ms 간격으로 관측한다. `f4def74`는 idle 약 409.73 MiB 및 한 회차 표시 지연으로 FAIL했다. 테스트 fixture의 idle 선할당을 분리한 `dfe12bd`는 idle/peak/60초 잔류 356.70/761.73/110.125 MiB와 GUI 시간 기준을 통과했다. 합성 bridge를 쓰며 실제 sidecar/agent·이탈 자손은 포함하지 않아 전체 제품 메모리 증거가 아니다. 이전 실패는 삭제하지 않는다.
 
 - **G6 성능 계측**: `scripts/m5-performance-metrics.mjs`는 명세 §10의 공급된 측정값을 판정하고 `scripts/m5-sidecar-startup-metrics.mts`는 현재 Cargo release executable을 생성된 빈 DB에서 migration 제외·warm-up 1회·10회 실행해 shell/storage ready를 구분한다. `d97ee56`에서 p95 3.863/52.596ms와 정상 종료·clean marker를 확인했다. `7832348`의 `scripts/m5-renderer-metrics.mjs`는 production renderer·실제 Monaco와 합성 bridge fixture로 대형 파일/diff·파일 목록의 10회 GUI 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms, 변경 요약 38.7ms, 첫 diff 25.0ms). 파일 목록은 opaque cursor로 다음 500개를 탐색하고 오래된 응답이 새 폴더를 덮지 못한다. 패키징 interactive startup·실제 스트림 paint·전체 RSS·경합/종료 계측은 아직 남아 있으며 `m5:test:performance`는 미등록 상태다. 절차는 `procedures/m5-performance.md`다.
