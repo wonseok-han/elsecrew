@@ -212,6 +212,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **전용 Codex 로그인 환경 준비(미연결)**: sidecar `provider_profile.rs`는 Unix의 trusted app-data capability 아래 `codex-profile-v1`과 file 방식 인증 저장 config를 생성/검사한다. 기존 내용·권한을 임의 수정하거나 인증 파일을 읽지 않는다. retained directory handle만 반환하며 실제 CODEX_HOME 전달·경로 신원 대조·로그인 UI·Windows 지원은 아직 연결되지 않았다. 별도 로그인 구현 방향은 사용자 승인됐지만 실제 인증 완료를 의미하지 않는다.
 
+- **로그인 profile 신원 재검사(미연결)**: 같은 모듈의 `CodexProfileBinding::from_storage`는 이미 열린 sidecar Storage에서 부모 경로를 받아 no-follow로 열고 app-data/profile handle을 보존한다. 임의 경로 문자열 생성자는 없다. 실행에 앞서 현재 경로의 dev/ino와 profile 정책을 읽기 전용으로 다시 대조하며 삭제된 config/폴더를 복구하지 않는다. 반환 경로는 시점별 관측일 뿐 이후 동일 UID 경합 방지나 process launch 권위가 아니며 실제 로그인 owner에 연결되지 않았다.
+
 - **Codex 로그인 교환(미연결)**: `vendor_observation/codex_login.rs`는 browser 로그인 시작 응답의 request ID와 완료 알림의 login ID를 묶는다. 제한된 HTTPS 로그인 URL만 transient 값으로 반환하며 credentials나 모델 호출은 표현하지 않는다. 완료 알림 성공은 `VerificationRequired`이고 owner의 fresh account/read가 필요하다. 취소/EOF/timeout 뒤 성공을 채택하지 않으며 실제 프로세스 취소·종료와 URL 열기·계정 재확인은 owner의 미연결 책임이다.
 
 - **Codex 공개 본문 추출(미연결)**: `vendor_observation/codex_events.rs`는 [공식 item event](https://learn.chatgpt.com/docs/app-server#events)의 agentMessage/plan delta와 completed 본문만 명시적 thread/turn에 결속해 추출한다. completed는 누적 본문의 교체값이며 비공개 추론·도구 출력·미지원 알림은 공개하지 않고 별도 처리 필요로 반환한다. 중복 필드·모델 reroute·예산 초과는 실패 후 재사용을 막는다. 아직 runtime에 연결하지 않았으며 알림 순서/terminal/권한 검증이나 프로세스 종료 증명이 아니다.

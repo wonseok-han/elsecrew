@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (로그인 profile 경로·handle 결속)
+
+- **직접 구현**: clean `cb1b12d`에서 sidecar profile 준비 모듈을 소유했다. Karpathy 지침에 따라 기존 설정/권한 검사를 재사용하고 생성과 읽기 전용 재검사를 분리했다. startup DB 경로의 고정 파일명·절대 경로를 요구하고 각 디렉터리를 no-follow로 열어 app-data/profile handle의 dev/ino를 보존한다. 재검사는 현재 경로의 identity와 기존 profile 정책을 대조하고, 삭제된 설정이나 폴더를 다시 만들지 않는다.
+- **검증**: profile focused 6/6 PASS. 부모/profile 교체·상위 symlink·잘못된 DB 파일명·삭제 config 무복원 거부를 포함한다. 실제 사용자 설정/인증은 접근하지 않고 임시 폴더만 검사했다. 독립 검토 요청 중이다.
+- **검토 보완·마감**: 임의 basename 경로만으로 profile 생성을 허용하는 지적을 수정해 `from_storage(&Storage)`로 한정했다. renderer 경로 문자열 대신 이미 열린 sidecar 저장소 객체가 필요하다. 실제 Storage를 열어 수행한 최신 focused 6/6·strict sidecar clippy·rustfmt·diff PASS이며 기존 무생성 재검사·identity 비교는 유지한다. 독립 재검토에서 helper 경계의 지적 해소·추가 지적 없음을 확인해 이 단위를 커밋한다.
+- **경계·다음**: owner는 자신의 startup Storage를 전달해야 하며, 반환 경로는 같은 UID의 후속 변경까지 막는 실행 권위가 아니다. 실제 로그인 프로세스 owner·취소/종료·고정 IPC/UI 연결과 Claude는 아직 남는다. 처음 알린 실제 연결 작업의 선행 경계를 보완한 것이며 로그인 UI 완료로 보고하지 않는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (Codex 로그인 요청·완료 결속)
 
 - **직접 구현**: clean `220245a`에서 core vendor login exchange와 현행 문서를 소유했다. OpenAI Docs의 공식 app-server Auth endpoints와 생성 schema를 확인했다. Karpathy 지침에 따라 기존 RawValue/BoundedObservation을 재사용하고 browser 로그인 시작·취소 요청만 표현한다. 로그인 URL은 HTTPS 공식 origin으로 한정하고 Debug/Serialize가 없는 transient 값으로만 반환한다.

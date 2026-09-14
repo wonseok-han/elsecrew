@@ -8,6 +8,7 @@ use cap_std::fs::{
     Dir, DirBuilder, DirBuilderExt, MetadataExt, OpenOptions, OpenOptionsExt, PermissionsExt,
 };
 use std::io::{Read, Write};
+use std::path::{Component, Path, PathBuf};
 
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";
 const CONFIG: &[u8] = b"# Managed by Hello, Agent. Credentials stay in this profile.\ncli_auth_credentials_store = \"file\"\n";
@@ -22,16 +23,22 @@ fn failure() -> SidecarError {
 /// Returns a retained directory capability, not a path or launch authorization.
 /// Existing unexpected content is preserved and refused, never repaired in place.
 pub(crate) fn prepare_codex_profile(app_data: &Dir) -> Result<Dir, SidecarError> {
+    profile_directory(app_data, true)
+}
+
+fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, SidecarError> {
     let parent = app_data.dir_metadata().map_err(|_| failure())?;
     if parent.uid() != unsafe { libc::geteuid() } || parent.permissions().mode() & 0o022 != 0 {
         return Err(failure());
     }
     let mut builder = DirBuilder::new();
     builder.mode(0o700);
-    match app_data.create_dir_with(CODEX_PROFILE_DIRECTORY, &builder) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(_) => return Err(failure()),
+    if create_missing {
+        match app_data.create_dir_with(CODEX_PROFILE_DIRECTORY, &builder) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err(failure()),
+        }
     }
     let mut options = OpenOptions::new();
     options
@@ -76,13 +83,15 @@ pub(crate) fn prepare_codex_profile(app_data: &Dir) -> Result<Dir, SidecarError>
         .create_new(true)
         .mode(0o600)
         .follow(FollowSymlinks::No);
-    match profile.open_with("config.toml", &create) {
-        Ok(mut file) => {
-            file.write_all(CONFIG).map_err(|_| failure())?;
-            file.sync_all().map_err(|_| failure())?;
+    if create_missing {
+        match profile.open_with("config.toml", &create) {
+            Ok(mut file) => {
+                file.write_all(CONFIG).map_err(|_| failure())?;
+                file.sync_all().map_err(|_| failure())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err(failure()),
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(_) => return Err(failure()),
     }
     let mut read = OpenOptions::new();
     read.read(true)
@@ -109,6 +118,86 @@ pub(crate) fn prepare_codex_profile(app_data: &Dir) -> Result<Dir, SidecarError>
         return Err(failure());
     }
     Ok(profile)
+}
+
+/// Retains the app-data and login directory identities for the owning sidecar.
+/// Construction accepts an opened Storage, never a renderer-supplied path.
+/// This is a point-in-time check, not protection from hostile same-UID mutations
+/// after validation. The process owner still owns lifetime and launch isolation.
+pub(crate) struct CodexProfileBinding {
+    app_data_path: PathBuf,
+    app_data: Dir,
+    profile: Dir,
+}
+
+impl CodexProfileBinding {
+    pub(crate) fn from_storage(storage: &crate::Storage) -> Result<Self, SidecarError> {
+        let database_path = storage.path();
+        if database_path.file_name()
+            != Some(std::ffi::OsStr::new(
+                hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1,
+            ))
+        {
+            return Err(failure());
+        }
+        let path = database_path.parent().ok_or_else(failure)?;
+        let app_data = open_absolute_directory(path)?;
+        let profile = prepare_codex_profile(&app_data)?;
+        let binding = Self {
+            app_data_path: path.to_path_buf(),
+            app_data,
+            profile,
+        };
+        binding.revalidate()?;
+        Ok(binding)
+    }
+
+    /// Reopens without following links and never recreates a missing directory or
+    /// config. No vendor or authentication file contents are read here.
+    pub(crate) fn revalidate(&self) -> Result<PathBuf, SidecarError> {
+        let current = open_absolute_directory(&self.app_data_path)?;
+        if !same_directory(&current, &self.app_data)? {
+            return Err(failure());
+        }
+        let profile = profile_directory(&current, false)?;
+        if !same_directory(&profile, &self.profile)? {
+            return Err(failure());
+        }
+        Ok(self.app_data_path.join(CODEX_PROFILE_DIRECTORY))
+    }
+}
+
+fn same_directory(left: &Dir, right: &Dir) -> Result<bool, SidecarError> {
+    let left = left.dir_metadata().map_err(|_| failure())?;
+    let right = right.dir_metadata().map_err(|_| failure())?;
+    Ok(left.dev() == right.dev() && left.ino() == right.ino())
+}
+
+fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> {
+    if !path.is_absolute() || path == Path::new("/") {
+        return Err(failure());
+    }
+    let mut current =
+        Dir::open_ambient_dir("/", cap_std::ambient_authority()).map_err(|_| failure())?;
+    for component in path.components() {
+        let name = match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => return Err(failure()),
+        };
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .maybe_dir(true)
+            .follow(FollowSymlinks::No)
+            .custom_flags(libc::O_NONBLOCK);
+        let handle = current.open_with(name, &options).map_err(|_| failure())?;
+        if !handle.metadata().map_err(|_| failure())?.is_dir() {
+            return Err(failure());
+        }
+        current = Dir::from_std_file(handle.into_std());
+    }
+    Ok(current)
 }
 
 #[cfg(test)]
@@ -191,5 +280,43 @@ mod tests {
             b"unexpected instructions"
         );
         assert_eq!(profile.read("config.toml").unwrap(), CONFIG);
+    }
+
+    #[test]
+    fn binding_detects_directory_replacement_and_never_repairs_missing_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().canonicalize().unwrap();
+        let database = canonical.join(hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1);
+        let storage = crate::Storage::open(&database).unwrap();
+        let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+        drop(storage);
+        let path = binding.revalidate().unwrap();
+        std::fs::remove_file(path.join("config.toml")).unwrap();
+        assert!(binding.revalidate().is_err());
+        assert!(!path.join("config.toml").exists());
+        std::fs::rename(&path, canonical.join("retained-profile")).unwrap();
+        let _replacement = prepare_codex_profile(&root(&temp)).unwrap();
+        assert!(binding.revalidate().is_err());
+    }
+
+    #[test]
+    fn binding_rejects_symlinked_ancestors_and_replaced_app_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        std::fs::create_dir(base.join("data")).unwrap();
+        let database = base
+            .join("data")
+            .join(hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1);
+        let storage = crate::Storage::open(&database).unwrap();
+        let binding = CodexProfileBinding::from_storage(&storage).unwrap();
+        drop(storage);
+        std::fs::rename(base.join("data"), base.join("original")).unwrap();
+        std::fs::create_dir(base.join("data")).unwrap();
+        assert!(binding.revalidate().is_err());
+        assert_eq!(std::fs::read_dir(base.join("data")).unwrap().count(), 0);
+        symlink(base.join("original"), base.join("alias")).unwrap();
+        assert!(open_absolute_directory(&base.join("alias")).is_err());
+        let storage = crate::Storage::open(&base.join("wrong.sqlite")).unwrap();
+        assert!(CodexProfileBinding::from_storage(&storage).is_err());
     }
 }
