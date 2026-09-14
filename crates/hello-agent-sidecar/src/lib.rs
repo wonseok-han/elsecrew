@@ -12,6 +12,9 @@ mod provider_login_io;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Lifecycle owner; validated vendor launcher and IPC activation remain separate.
 mod provider_login_process;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Internal session, pending validated vendor launcher and IPC/UI activation.
+mod provider_login_session;
 mod chat;
 mod project;
 mod storage;

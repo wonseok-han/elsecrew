@@ -1,9 +1,12 @@
 //! ChatGPT browser-login exchange for an already initialized, isolated app-server.
 //! No process/browser launch, credentials, model request or implicit auth reuse.
 //! Owner reserves the request ID and validates the returned URL before opening it.
+//! The connection submodule adds initialization and fresh account verification.
 use super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
+
+pub mod connection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginState {
@@ -20,7 +23,7 @@ pub struct BrowserLogin {
     pub auth_url: String,
 }
 
-/// An exact login request, constructed only by the correlated login exchange.
+/// An exact login/setup request, constructed only by the correlated exchanges.
 /// Arbitrary provider methods cannot be supplied to the login transport.
 /// ```compile_fail
 /// use hello_agent_core::provider::vendor_observation::codex_login::LoginRequest;

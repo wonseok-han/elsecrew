@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (초기화부터 로그인 재확인까지 연결)
+
+- **직접 구현**: clean `b1535de`에서 core login connection·sidecar login session과 기존 process/I/O 연결을 소유했다. Karpathy 지침에 따라 ModelFreeExchange 초기화와 LoginExchange·TreeTracker를 재사용했다. OpenAI Docs의 [초기화](https://learn.chatgpt.com/docs/app-server#initialization)·[인증](https://learn.chatgpt.com/docs/app-server#auth-endpoints)과 보존 0.149.1 생성 schema를 대조했다. 새 연결은 전용 home/macOS 응답을 비교하고 initialize→initialized→명시적 로그인→브라우저 완료→fresh account/read를 고정 ID·단일 사용 요청으로 보낸다.
+- **관측·종료 경계**: 계정 갱신 알림은 bounded 검증만 하고 성공 근거로 쓰지 않는다. 마지막 계정 응답이 chatgpt이고 process.finish가 성공한 뒤에만 CredentialsObserved를 반환한다. 이는 모델 가용성/설정 격리 증명이 아니다. 취소·잘못된 ID/계정 종류·알림 폭주·프로세스 정리 실패는 성공으로 접지 않는다. raw account/OAuth/오류 내용은 저장하지 않는다.
+- **대기 방식**: nonblocking poll은 데이터가 아직 없음을 None으로 구분하며 EOF/잘린 입력은 계속 실패다. 기존 줄/누적 예산과 추적 callback을 유지한다. 내부 기본 대기 한도는 RPC 30초·브라우저 5분이며 caller는 browser 대기 중에도 100ms 이내 간격으로 advance해야 한다. 취소는 즉시 로컬 성공 자격을 철회하고 프로세스 종료를 확인한다.
+- **검증 진행·다음**: core 로그인 8/8·sidecar 로그인 14/14 PASS 후 cleanup 실패/브라우저 취소 회귀를 보완했다. 실제 pipe의 고정 sh peer로 요청 순서·업데이트 알림 교차·계정 재확인·종료 뒤 성공을 검사하며 실제 Codex/사용자 인증/브라우저/유료 모델은 실행하지 않았다. 독립 검토·정적 검사를 마무리 중이다. 검증된 실제 launcher/barrier/환경 정책·로그인/복구 IPC·UI와 Claude 연결은 남고 제품 미활성·main 미병합·push 없음이다.
+- **검토 보완·검증**: 외부 세션 closed와 내부 cleanup_required를 분리했다. 첫 종료 미확인 뒤 session을 보관해도 다음 advance/cancel 또는 명시 retry_cleanup이 정리를 재시도하고, 처음 불확실했던 fence는 해제하지 않는다. toy peer는 EOF 후 같은 PID의 sleep으로 생존하게 해 root Alive→후속 tick Gone 검사의 타이밍 의존성을 제거했다. 최신 session 5/5·strict sidecar clippy·scoped rustfmt·diff PASS, opaque 요청 doctest 2/2 PASS다. core clippy는 기존 proctree 3경고 외 신규 없이 종료 0이며, core 8/8와 영향 없는 I/O/owner 11/11 증거를 재사용한다. 전체 제품 누적 gate와 실제 인증 완료 증거는 아니다.
+- **마감**: 독립 재검토에서 cleanup 재시도 P1 해소와 추가 차단 결함 없음을 확인해 이 연결 단위를 커밋한다. 실제 launcher·환경 격리 검증과 제품 IPC/UI 활성화는 여전히 다음 작업이며 이번 toy peer 검증으로 완료 처리하지 않는다.
+
 ### 2026-09-14 · by GPT-6 Astra (로그인 수명·재시작 잠금 연결)
 
 - **직접 구현**: clean `3d5ee64`에서 sidecar의 로그인 process owner·기존 I/O observer hook·profile capability와 현행 문서를 소유했다. Karpathy 지침에 따라 기존 TreeTracker와 bounded I/O를 재사용했다. app-data의 고정 `codex-login.pending`을 create-new 0600·파일/디렉터리 sync한 뒤 backend launcher callback을 호출하고, 반환된 Child를 즉시 소유해 PID+시작 시각·자손 신원을 추적/저장한다. OAuth URL·계정·명령줄은 기록하지 않는다.

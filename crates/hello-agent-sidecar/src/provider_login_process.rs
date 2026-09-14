@@ -140,6 +140,8 @@ pub(crate) struct LoginProcess<'a> {
     evidence_failed: bool,
     attempted: bool,
     finished: bool,
+    #[cfg(test)]
+    fail_next_cleanup: bool,
 }
 
 impl<'a> LoginProcess<'a> {
@@ -155,6 +157,8 @@ impl<'a> LoginProcess<'a> {
             evidence_failed: false,
             attempted: false,
             finished: false,
+            #[cfg(test)]
+            fail_next_cleanup: false,
         })
     }
 
@@ -257,6 +261,23 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
+    /// Poll without blocking the owner's idle/browser event loop.
+    pub(crate) fn poll(
+        &mut self,
+        cancel: &AtomicBool,
+    ) -> Result<Option<BoundedObservation>, SidecarError> {
+        if self.failed || self.finished {
+            return Err(failure());
+        }
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.poll_observed(cancel, &mut || self.tick());
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     /// This proves cleanup only, never authentication or model readiness.
     /// Cancel/timeouts can finish cleanly; observation/storage failures cannot.
     pub(crate) fn finish(&mut self) -> Result<(), SidecarError> {
@@ -280,6 +301,10 @@ impl<'a> LoginProcess<'a> {
     }
 
     fn cleanup(&mut self, table: &impl ProcTable) -> bool {
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_cleanup) {
+            return false;
+        }
         let Some(child) = self.child.as_mut() else {
             return !self.attempted;
         };
@@ -295,6 +320,16 @@ impl<'a> LoginProcess<'a> {
         // Never call blocking wait after an unconfirmed termination.
         let reaped = matches!(child.try_wait(), Ok(Some(_)));
         report.confirmed() && saved && reaped && !self.evidence_failed
+    }
+}
+
+#[cfg(test)]
+impl LoginProcess<'_> {
+    pub(crate) fn inject_uncertain_cleanup_once(&mut self) {
+        self.fail_next_cleanup = true;
+    }
+    pub(crate) fn root_for_test(&self) -> hello_agent_core::proctree::ProcIdentity {
+        self.tracker.as_ref().unwrap().tracked_identities()[0]
     }
 }
 

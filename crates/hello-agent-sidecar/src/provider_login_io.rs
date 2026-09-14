@@ -144,20 +144,56 @@ impl LoginIo {
         cancel: &AtomicBool,
         observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<BoundedObservation, SidecarError> {
-        if self.failed {
-            return Err(failure());
-        }
         let start = Instant::now();
         loop {
             check_wait(start, timeout, cancel)?;
-            observe()?;
+            let frame = self.poll_inner(cancel, observe)?;
             check_wait(start, timeout, cancel)?;
+            if let Some(frame) = frame {
+                return Ok(frame);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// A bounded, nonblocking poll: no bytes yet is not EOF or a timeout.
+    pub(crate) fn poll_observed(
+        &mut self,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<Option<BoundedObservation>, SidecarError> {
+        let result = self.poll_inner(cancel, observe);
+        if result.is_err() {
+            self.failed = true;
+            self.pending.clear();
+        }
+        result
+    }
+
+    fn poll_inner(
+        &mut self,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<Option<BoundedObservation>, SidecarError> {
+        if self.failed {
+            return Err(failure());
+        }
+        for _ in 0..32 {
+            if cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
+            observe()?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
             if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
                 if end == 0 || end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
                     return Err(failure());
                 }
                 let bytes: Vec<u8> = self.pending.drain(..=end).collect();
-                return BoundedObservation::new(bytes).map_err(|_| failure());
+                return BoundedObservation::new(bytes)
+                    .map(Some)
+                    .map_err(|_| failure());
             }
             if self.pending.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
                 return Err(failure());
@@ -173,12 +209,13 @@ impl LoginIo {
                     self.pending.extend_from_slice(&chunk[..count]);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(2))
+                    return Ok(None);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(_) => return Err(failure()),
             }
         }
+        Ok(None)
     }
 }
 
