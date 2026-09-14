@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Codex 로그인 요청·완료 결속)
+
+- **직접 구현**: clean `220245a`에서 core vendor login exchange와 현행 문서를 소유했다. OpenAI Docs의 공식 app-server Auth endpoints와 생성 schema를 확인했다. Karpathy 지침에 따라 기존 RawValue/BoundedObservation을 재사용하고 browser 로그인 시작·취소 요청만 표현한다. 로그인 URL은 HTTPS 공식 origin으로 한정하고 Debug/Serialize가 없는 transient 값으로만 반환한다.
+- **상태 경계**: request ID·login ID·중복 필드를 대조하며 완료 성공은 사용 가능이 아니라 fresh account/read가 필요한 상태다. 취소 후 늦은 성공·다른 시도 응답·시작 전 완료는 거부한다. EOF/timeout 시 owner가 invalidate해야 하며 실제 login transport/프로세스 종료·브라우저 열기는 아직 미연결이다. 실제 인증·유료 모델·사용자 프로젝트 실행은 하지 않았다.
+- **검증**: provider 회귀 40/40과 로그인 거절/모순 성공 보완 후 focused 4/4 PASS. core clippy 종료 0(기존 proctree 3개 경고 외 신규 없음), rustfmt·diff PASS. 독립 검토를 요청했다.
+- **검토 수정**: 실제 생성 schema와 비교한 독립 검토에서 emittedAtMs·필수 onboardingEntrypoint 누락을 발견했다. 이전 합성 성공 예제의 PASS는 현 wire 호환 증거가 아니었다. bounded timestamp를 허용하고 추가 온보딩은 null일 때만 진행하도록 보완했다. 같은 timestamp 누락을 기존 공개 이벤트 envelope에서도 수정했다. 전체 필드 성공·누락/중복/잘못된 타입 회귀를 포함한 최신 vendor observation 29/29 PASS다.
+- **마감·다음**: 독립 재검토에서 두 스키마 결함의 해소·추가 지적 없음을 확인했다. 최신 로그인 5/5·정적/포맷/diff 검사도 통과해 이 단위를 커밋한다. 앱 데이터 path/handle 결속, 로그인 통신 owner/UI, Claude 분리 검증·실제 실행 연결은 남는다. 새 로그인 방식 승인을 다시 요구하지 않는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (전용 로그인 승인·Codex profile 준비)
 
 - **사용자 결정**: 전용 환경에서 별도 로그인하는 구현을 승인받아 앞선 결정 대기가 해소됐다. 기존 터미널 설정·인증정보 복사나 유료 모델 실행은 포함하지 않는다. 이전 미커밋 대기 기록은 삭제하지 않고 보존한다.

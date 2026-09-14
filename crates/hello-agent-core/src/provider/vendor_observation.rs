@@ -5,6 +5,7 @@ use super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 
 pub mod codex_events;
+pub mod codex_login;
 pub mod codex_preflight;
 pub mod codex_rpc;
 

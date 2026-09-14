@@ -44,6 +44,8 @@ pub enum Projection {
 struct Notification {
     method: String,
     params: Box<RawValue>,
+    #[serde(default, rename = "emittedAtMs")]
+    emitted_at_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +136,9 @@ impl TurnProjection {
             return Err(invalid());
         }
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if frame.emitted_at_ms > 9_007_199_254_740_991 {
+            return Err(invalid());
+        }
         // No JSON-RPC requests/responses can be mistaken for public notifications.
         if frame.method == "model/rerouted" {
             return Err(invalid());
@@ -238,6 +243,22 @@ mod tests {
             p.project(&reasoning).unwrap(),
             Projection::RequiresHandling
         ));
+    }
+
+    #[test]
+    fn supports_current_envelope_timestamp_without_trusting_it() {
+        for stamp in [
+            "123",
+            "null",
+            "-1",
+            "9007199254740992",
+            "1,\"emittedAtMs\":2",
+        ] {
+            let raw = format!("{{\"emittedAtMs\":{stamp},\"method\":\"item/agentMessage/delta\",\"params\":{{\"threadId\":\"t\",\"turnId\":\"r\",\"itemId\":\"i\",\"delta\":\"hello\"}}}}");
+            let mut p = TurnProjection::new("t", "r").unwrap();
+            let result = p.project(&BoundedObservation::new(raw.into_bytes()).unwrap());
+            assert_eq!(result.is_ok(), stamp == "123");
+        }
     }
     #[test]
     fn rejects_cross_turn_duplicate_fields_requests_and_reroutes_permanently() {
