@@ -26,6 +26,9 @@
 **배포할 때 → [`release-checklist.md`](release-checklist.md)**
 자동 검증, 깨끗한 기기 확인, 실패 경로, 미서명 베타와 정식 서명 배포 게이트.
 
+**M5 성능을 측정할 때 → [`procedures/m5-performance.md`](procedures/m5-performance.md)**
+release sidecar 시작 실측과 전체 측정 JSON 판정의 실행법·입력 형식·남은 G6 수집 범위.
+
 **직접 개발과 위임 방식을 선택할 때 → [`procedures/multi-agent-orchestration.md`](procedures/multi-agent-orchestration.md)**
 2026-09-14부터 사용자가 선택한 Astra 메인의 직접 개발을 기본으로 한다. 위임이 더 유리하면 이유와 범위를 설명하고 대기한다. 승인된 병렬 작업에만 worktree·파일 소유권·다중 역할 절차를 적용한다. `.codex/config.toml`과 `.codex/agents/`는 보관된 서브에이전트 설정이며 메인 모델이나 자동 호출을 지정하는 운영 지시가 아니다.
 

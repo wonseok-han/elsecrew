@@ -17,6 +17,8 @@
     "m5:package": "electron-forge package",
     "m5:package:smoke": "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs",
     "m5:make": "electron-forge make",
+    "m5:measure:performance": "node scripts/m5-performance-metrics.mjs",
+    "m5:measure:sidecar-startup": "node --experimental-strip-types scripts/m5-sidecar-startup-metrics.mts",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
     "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
     "m5:test:package": "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",

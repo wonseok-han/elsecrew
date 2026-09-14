@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (G6 성능 측정 도구 직접 구현)
+
+- **기준·범위**: 사용자 커밋 승인으로 Astra 운영 규칙을 `e97d0ee1d6a7bcbc060358b594583755c105a8e5`에 기록했다. 같은 기준에서 메인이 package scripts·성능 측정 도구 2개·회귀·문서를 직접 소유해 구현했다. 서브에이전트 호출은 없었다.
+- **구현**: §10의 표본·fixture·시간·메모리·오류 상한을 공급된 JSON에 대해 판정한다. 누락/비정상/다른 HEAD는 NOT_READY, 초과는 FAIL이며 합성 fixture를 실측으로 쓰지 않는다. 별도 sidecar collector는 current release Cargo executable, 생성된 빈 DB, migration 제외·warm-up 1회·10회, canonical 응답 검증·정상 종료/clean marker와 shell/storage 준비 시간을 기록한다.
+- **검증·다음**: 판정기 Node 회귀 8/8, 두 스크립트 syntax와 diff 검사 통과. 최초 회귀에서 발견한 CLI의 macOS 임시 경로 alias 진입점 판정을 realpath 비교로 고쳤다. clean commit 뒤 sidecar 실측을 수행한다. 전체 UI/메모리/경합/종료 계측 수집은 후속이며 `m5:test:performance`는 아직 열지 않아 G6 NOT_READY를 유지한다. 사용법은 `procedures/m5-performance.md`다.
+
 ### 2026-09-14 · by GPT-6 Astra
 
 - **사용자 결정·반영**: Sol 기반 의무 위임 운영에서 현재 Astra 메인의 직접 개발을 기본으로 전환했다. AGENTS.md/CLAUDE.md를 동일하게 갱신하고 실행 절차·문서 색인에 우선 규칙을 추가했다. 단일 기능의 의무 worktree·역할별 인계·반복 검사를 줄이고 서브에이전트가 더 유리하면 이유·범위를 설명한 뒤 호출 전에 대기한다.
