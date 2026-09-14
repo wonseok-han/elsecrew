@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Electron 부분 RSS 수집)
+
+- **범위·구현**: `2e200d2`에서 메인이 기존 renderer collector와 RSS helper/회귀/절차를 직접 소유했다. 선택 PID와 자손의 실제 RSS를 250ms마다 수집하고, 문서 닫기 후 60초 잔류를 관측하는 `--memory` 옵션을 추가했다. 제품 실행·권한·저장 경계는 변경하지 않는다.
+- **검증·다음**: PID subtree·누락/중복/비정상 값 거부·합계/잔류/상한 회귀 3/3, syntax·diff 검사 PASS. clean commit 뒤 GUI 실측한다. 실제 sidecar/agent·이탈 자손은 포함하지 않아 전체 RSS/G6 완료로 쓰지 않는다. 서브에이전트·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (renderer 대형 fixture 실측 완료)
 
 - **완료·증거**: clean `78323488f7df93e0e92a136347aa0b6b3a15a9ea`의 production renderer를 실제 Electron/Chromium 창에서 warm-up 1회 뒤 10회 측정해 PASS했다. p95는 tree root 21.3ms, 폴더 확장 18.3ms, 5MiB 파일 표시 75.9ms, 입력→화면 32.3ms, 변경 요약 38.7ms, 첫 diff 25.0ms다. 두 번째 500개 페이지를 탐색했고 tree DOM 500개를 유지했다. 측정 회차에서 50ms 이상 longtask는 관측되지 않았다. 전후 HEAD 동일·clean이며 `.artifacts/m5-performance/renderer-2026-09-14T02-27-28.543Z-72171.json`에 표본·renderer hash·환경을 보존했다.

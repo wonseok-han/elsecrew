@@ -13,7 +13,7 @@ try {
   const build = run("pnpm", ["exec", "vite", "build", "--config", "electron/vite.renderer.config.ts"]);
   if (build.status !== 0) throw new Error(`renderer build failed: ${build.stderr}`);
   const electron = createRequire(import.meta.url)("electron");
-  const result = run(electron, ["tests/m5-renderer-performance-runner.cjs"], { env: { ...qaEnvironment(), M5_MEASUREMENT_HEAD: head.stdout.trim() } });
+  const result = run(electron, ["tests/m5-renderer-performance-runner.cjs"], { maxBuffer: 8 * 1024 * 1024, env: { ...qaEnvironment(), M5_MEASUREMENT_HEAD: head.stdout.trim(), M5_MEASURE_MEMORY: process.argv.includes("--memory") ? "1" : "0" } });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error || result.signal || ![0, 1].includes(result.status)) throw new Error("renderer measurement process failed");

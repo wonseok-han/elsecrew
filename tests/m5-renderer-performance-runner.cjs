@@ -3,7 +3,8 @@ const { app, BrowserWindow, net, protocol } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mkdirSync, writeFileSync } = require("node:fs");
-const { spawnSync } = require("node:child_process");
+const { spawnSync, execFile } = require("node:child_process");
+const { processTreeMemory, summarizeMemory } = require("../scripts/m5-process-memory.cjs");
 const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { cpus, totalmem, release } = require("node:os");
@@ -12,12 +13,38 @@ const renderer = resolve(root, ".vite/renderer/main_window");
 const samples = [];
 let window;
 let timeout;
+const measureMemory = process.env.M5_MEASURE_MEMORY === "1";
+const memorySamples = [];
+let memoryPhase = "idle";
+let memoryTimer;
+let memoryPending;
+let memoryError;
+let finished = false;
+function sampleMemory() {
+  if (memoryPending) return memoryPending;
+  const phase = memoryPhase;
+  memoryPending = new Promise((resolveSample, reject) => {
+    const child = execFile("/bin/ps", ["-axo", "pid=,ppid=,rss="], { timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) return reject(error);
+      try {
+        // Exclude only the collector process itself, not application helpers.
+        const rows = stdout.split("\n").filter(line => Number(line.trim().split(/\s+/)[0]) !== child.pid).join("\n");
+        memorySamples.push({ elapsedMs: performance.now(), phase, ...processTreeMemory(rows, process.pid) });
+        resolveSample();
+      } catch (error) { reject(error); }
+    });
+  }).finally(() => { memoryPending = null; });
+  return memoryPending;
+}
 protocol.registerSchemesAsPrivileged([{ scheme: "m5perf", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const report = { schemaVersion: 1, evidence: "m5-renderer-fixture-performance", status: "NOT_READY", head: process.env.M5_MEASUREMENT_HEAD, startedAt: new Date().toISOString(), samples,
   environment: { electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model, ramBytes: totalmem(), os: release() },
   limitations: ["Production renderer build with synthetic bridge, not packaged-app startup, filesystem/IPC throughput, real agent streams, or overall G6 readiness."] };
 function finish(error) {
+  if (finished) return;
+  finished = true;
   clearTimeout(timeout);
+  clearInterval(memoryTimer);
   if (error) { report.status = "FAIL"; report.error = String(error.stack || error); }
   report.finishedAt = new Date().toISOString();
   try {
@@ -44,6 +71,19 @@ app.whenReady().then(async () => {
   });
   window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload: resolve(__dirname, "m5-renderer-performance-preload.cjs"), contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false } });
   window.webContents.on("render-process-gone", (_event, details) => finish(new Error(details.reason)));
+  if (measureMemory) {
+    report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples };
+    await window.loadURL("m5perf://m5/index.html");
+    await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const deadline = performance.now() + 10000;
+      const check = () => { if (document.querySelector('.m5-workbench')) resolve(); else if (performance.now() > deadline) reject(new Error('idle UI missing')); else setTimeout(check, 10); }; check();
+    })`);
+    await sampleMemory();
+    memoryTimer = setInterval(() => { sampleMemory().catch(error => { memoryError = error; }); }, 250);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (memoryPending) await memoryPending;
+    memoryPhase = "loaded";
+  }
   for (let trial = 0; trial < 11; trial++) {
     await window.loadURL("m5perf://m5/index.html");
     const sample = await window.webContents.executeJavaScript(`(async () => {
@@ -94,6 +134,22 @@ app.whenReady().then(async () => {
   const limits = { treeRootMs: 1000, treeExpandMs: 250, fileEditableMs: 1500, inputPaintMs: 50, diffSummaryMs: 2000, diffFirstFileMs: 1500, rendererLongTaskMs: 200, treeDomNodes: 500 };
   report.maxima = Object.fromEntries(Object.keys(limits).map(key => [key, Math.max(...samples.map(sample => sample[key]))]));
   report.failedMetrics = Object.keys(limits).filter(key => report.maxima[key] > limits[key]);
+  if (measureMemory) {
+    await sampleMemory();
+    memoryPhase = "closing";
+    // Reload the same empty workbench to release documents without force-GC.
+    await window.loadURL("m5perf://m5/index.html");
+    const closedAt = performance.now();
+    await new Promise(resolve => setTimeout(resolve, 60000));
+    if (memoryPending) await memoryPending;
+    memoryPhase = "retained";
+    await sampleMemory();
+    report.memory.actualCloseWaitMs = performance.now() - closedAt;
+    clearInterval(memoryTimer);
+    if (memoryError) throw memoryError;
+    Object.assign(report.memory, summarizeMemory(memorySamples));
+    report.failedMetrics.push(...report.memory.failedMetrics);
+  }
   report.status = report.failedMetrics.length ? "FAIL" : "PASS";
   report.headAfter = git(["rev-parse", "HEAD"]); report.dirtyAfter = git(["status", "--porcelain"]) !== "";
   if (report.headAfter !== report.head || report.dirtyAfter) throw new Error("checkout changed during measurement");

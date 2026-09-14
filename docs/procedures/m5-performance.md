@@ -20,6 +20,8 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 데이터는 sidecar 대신 contextIsolation을 유지한 fixture bridge에서 공급한다. fixture preload의 Node require를 위해 테스트 창만 sandbox=false이며 제품 보안 설정을 변경하지 않는다. 이 측정은 실제 renderer와 Monaco의 성능 증거이고 packaged 앱 시작, 파일시스템/sidecar IPC 성능, IME 조합 입력, 실제 agent stream·전체 앱 RSS의 증거는 아니다. 결과와 실패 항목은 `.artifacts/m5-performance/renderer-*.json`에 기록한다. 기준 초과 시 exit 1이며 실패 숫자를 통과로 바꾸지 않는다.
 
+`pnpm run m5:measure:renderer --memory`는 추가로 `/bin/ps`의 KiB RSS를 250ms 간격으로 수집한다. 측정 Electron PID와 현재 자손만 합산하고 수집용 ps 자체와 다른 앱은 제외한다. idle 1초 관측 뒤 기존 대형 fixture를 열고, 같은 빈 작업대로 reload해 문서/Monaco를 해제한 후 강제 GC 없이 60초 기다린다. 프로세스별 원시 표본과 idle/관측 peak/잔류 delta를 저장하며 §10의 400/800/120 MiB 상한을 적용한다. 샘플 사이의 순간 peak, 부모를 이탈한 자손, 실제 sidecar/agent 메모리는 포함하지 않으므로 전체 제품 메모리 gate를 대신하지 않는다. 표시 시간에는 수집기 오버헤드가 포함된다.
+
 `pnpm run m5:measure:performance --input <measurement.json>`은 공급된 측정값을 검증한다. 계측기를 대신하지 않으며 unit fixture를 실측으로 사용하면 안 된다. `PASS`=0, 기준 초과 `FAIL`=1, 누락·잘못된 입력·불일치 HEAD `NOT_READY`=2이다. 알려진 기준 초과는 다른 항목 누락과 함께 있어도 FAIL로 남긴다. 최대 4 MiB regular UTF-8 JSON만 받는다. 출력 JSON은 stdout으로 전달한다.
 
 입력 schemaVersion은 1이며 필수 필드는 다음과 같다.
