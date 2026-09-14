@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (실행 파일 pin 재검증 연결)
+
+- **직접 구현**: clean `18bc985`에서 내부 PinnedExecutable과 gated process 연결을 구현했다. backend가 별도로 제공하는 SHA-256과 no-follow 경로/파일 handle을 대조하며 regular·root/현재 UID·단일 링크·실행 권한·setuid/setgid 및 group/other write 금지·512MiB 상한을 요구한다. 64KiB streaming hash 전후 길이/mtime/ctime을 비교하고 보존 inode와 새 경로 신원을 재검증한다. gate 생성 전과 release 직전에 다시 검사한다. expected digest를 후보 파일로부터 자동 신뢰하는 경로는 없다.
+- **검증**: pin 변경/동일 경로 교체·링크/권한 거절 2/2 PASS. provider 관련 33검사에서 32 PASS, 새 gate 테스트가 failed launch의 기존 fence 보존을 잘못 기대해 assertion만 수정했다. 제품 복구 정책은 그대로 유지한다. strict sidecar clippy PASS. 기존 승인된 읽기 전용 검토자에게 독립 검토를 요청했다. Karpathy 지침으로 기존 no-follow 디렉터리 검사를 재사용했고 OpenAI Docs [환경 변수](https://learn.chatgpt.com/docs/config-file/environment-variables)를 확인했다.
+- **경계·다음**: point-in-time 내용/신원 일치이며 서명/버전/helper closure admission이나 hostile same-UID 후속 변경 방지·fd-exec 보장이 아니다. 실제 Codex를 실행하거나 사용자 인증을 읽지 않았다. 전용 HOME/CODEX_HOME/runtime artifact 정책과 실제 로그인 IPC/UI는 여전히 남는다. 캐시 삭제·main 병합·push 없음. 집중 재검증·독립 검토 마감 후 이 단위를 커밋한다.
+- **마감**: 수정한 pin gate 집중 1/1 PASS. 독립 검토의 추가 코드 결함 없음과 비차단 회귀 권고를 확인했다. gate spawn 후 파일을 변경하는 결정적 callback 테스트를 보완해 release 무호출·Drop 종료·fence 보존 1/1 PASS다. 기존 32개 성공 증거와 strict clippy/포맷 증거는 영향 범위를 구분해 재사용하며 전체 제품 gate로 주장하지 않는다.
+
 ### 2026-09-14 · by GPT-6 Astra (대기형 로그인 런처 연결)
 
 - **직접 구현**: `5a3e39b`에서 이전 현황 답변의 미커밋 작업 기록을 보존하고 gate/process/lib만 변경했다. Karpathy 지침에 따라 기존 launch_with_barrier·Child·TreeTracker를 재사용했다. 내부 gate는 고정 `/bin/sh` read→정확한 허용 토큰→exec 순서로 vendor 이전에 대기하며, 절대 경로 program/cwd·별도 positional args·빈 상속 환경·stdio pipe만 사용한다. 프로세스 소유자의 durable 기록 뒤 단일 nonblocking write로 허용한다.

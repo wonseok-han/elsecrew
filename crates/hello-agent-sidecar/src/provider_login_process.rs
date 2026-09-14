@@ -225,6 +225,30 @@ impl<'a> LoginProcess<'a> {
         )
     }
 
+    /// Compare backend-pinned bytes both before the waiting shell starts and
+    /// immediately before release. Signature and vendor closure admission are separate.
+    pub(crate) fn launch_pinned_command(
+        &mut self,
+        executable: &crate::provider_executable::PinnedExecutable,
+        args: &[&std::ffi::OsStr],
+        cwd: &std::path::Path,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_barrier(
+            || {
+                let path = executable
+                    .revalidate()
+                    .map_err(|_| std::io::Error::other("executable changed"))?;
+                crate::provider_login_gate::spawn(path, args, cwd)
+            },
+            |child| {
+                executable
+                    .revalidate()
+                    .map_err(|_| std::io::Error::other("executable changed"))?;
+                crate::provider_login_gate::release(child)
+            },
+        )
+    }
+
     /// Caller must tick while waiting for user/browser input (at most 100 ms apart).
     /// Blocking stdio waits also invoke this observer, not just the final shutdown.
     pub(crate) fn tick(&mut self) -> Result<(), SidecarError> {
@@ -402,6 +426,80 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn pinned_gate_rejects_changed_executable_without_spawning() {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let root = temp.path().canonicalize().unwrap();
+        let path = root.join("toy");
+        let bytes = b"#!/bin/sh\nexec /bin/cat\n";
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let pin =
+            crate::provider_executable::PinnedExecutable::open(&path, Sha256::digest(bytes).into())
+                .unwrap();
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process.launch_pinned_command(&pin, &[], &root).unwrap();
+        let (_, request) = LoginExchange::begin(1).unwrap();
+        process
+            .send(request, Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process
+            .receive(Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process.finish().unwrap();
+        std::fs::write(&path, b"changed").unwrap();
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        assert!(process.launch_pinned_command(&pin, &[], &root).is_err());
+        assert!(process.child.is_none());
+        // Existing failed-launch policy retains the durable fence, even when
+        // no child was returned. Do not silently weaken that recovery contract.
+        assert!(process.finish().is_err());
+        assert!(temp.path().join(PENDING).exists());
+    }
+
+    #[test]
+    fn pin_change_while_gate_waits_prevents_release_and_drop_keeps_fence() {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let root = temp.path().canonicalize().unwrap();
+        let path = root.join("toy");
+        let bytes = b"#!/bin/sh\ntouch EXECUTED\n";
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let pin =
+            crate::provider_executable::PinnedExecutable::open(&path, Sha256::digest(bytes).into())
+                .unwrap();
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        let mut released = false;
+        assert!(process
+            .launch_with_barrier(
+                || {
+                    let child =
+                        crate::provider_login_gate::spawn(pin.revalidate().unwrap(), &[], &root)?;
+                    std::fs::write(&path, b"changed")?;
+                    Ok(child)
+                },
+                |child| {
+                    pin.revalidate()
+                        .map_err(|_| std::io::Error::other("changed"))?;
+                    released = true;
+                    crate::provider_login_gate::release(child)
+                },
+            )
+            .is_err());
+        let identity = process.root_for_test();
+        assert!(!released);
+        drop(process);
+        assert!(matches!(SystemProcTable.probe(identity), ProbeResult::Gone));
+        assert!(!root.join("EXECUTED").exists());
+        assert!(root.join(PENDING).exists());
     }
 
     #[test]

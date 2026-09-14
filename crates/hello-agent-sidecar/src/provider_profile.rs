@@ -178,7 +178,7 @@ fn same_directory(left: &Dir, right: &Dir) -> Result<bool, SidecarError> {
     Ok(left.dev() == right.dev() && left.ino() == right.ino())
 }
 
-fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> {
+pub(super) fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> {
     if !path.is_absolute() || path == Path::new("/") {
         return Err(failure());
     }
