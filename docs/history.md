@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (idle 측정 fixture 할당 분리)
+
+- **발견·수정**: `affd08d`에서 메인이 renderer 측정용 fixture/preload를 수정했다. 측정 fixture가 파일을 열기 전부터 5 MiB 텍스트 생성·UTF-8 SHA 계산을 수행해 empty idle에 테스트 데이터 비용을 포함했다. 파일을 실제 요청할 때만 생성/hash하도록 바꿨다. 제품 코드 최적화나 앞선 FAIL의 원인 확정 주장이 아니다.
+- **검증·다음**: fixture의 exact bytes/lines/diff/tree 및 RSS helper 5/5, preload syntax PASS. clean commit 뒤 같은 메모리 실측을 다시 수행하며 기존 실패 표본은 보존한다.
+
 ### 2026-09-14 · by GPT-6 Astra (RSS 실패 증거·프로젝트 설정 응답 격리)
 
 - **실측**: clean `f4def74e2a9b4f683271535839b2f2094400da4c`에서 `m5:measure:renderer --memory`를 실행했다. idle 429,637,632 bytes(약 409.73 MiB), 관측 peak 798,261,248 bytes(약 761.28 MiB), 60초 잔류 delta 0 bytes다. idle 400 MiB 기준과 한 회차 tree 3383.7ms/diff 요약 3387.7ms가 초과해 **FAIL**을 유지한다. `.artifacts/m5-performance/renderer-2026-09-14T02-37-44.611Z-91340.json`에 동일 HEAD·clean·전체 표본이 있다. 합성 bridge Electron 측정이므로 실제 제품 sidecar 포함 RSS나 원인 확정으로 해석하지 않는다.

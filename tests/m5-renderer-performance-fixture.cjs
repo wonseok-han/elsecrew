@@ -4,7 +4,8 @@ function sizedLines(bytes, lines) {
   const prefix = line.repeat(lines - 1);
   return prefix + "x".repeat(bytes - Buffer.byteLength(prefix) - 1) + "\n";
 }
-const fileText = sizedLines(5 * MiB, 100000);
+let cachedFileText;
+function getFileText() { return cachedFileText ??= sizedLines(5 * MiB, 100000); }
 const patchBytes = 10 * MiB;
 function patch(index) {
   const size = Math.floor(patchBytes / 500) + (index < patchBytes % 500 ? 1 : 0);
@@ -20,4 +21,4 @@ function tree(parentPath = "", cursor = null) {
   if (![0, 500].includes(start)) throw new Error("invalid fixture cursor");
   return { projectId: "smoke_project", parentPath, entries: Array.from({ length: 500 }, (_, i) => ({ name: `folder-${start + i}`, path: `folder-${start + i}`, kind: "directory" })), nextCursor: start === 0 ? "500" : null };
 }
-module.exports = { fileText, patch, tree };
+module.exports = { get fileText() { return getFileText(); }, getFileText, patch, tree };

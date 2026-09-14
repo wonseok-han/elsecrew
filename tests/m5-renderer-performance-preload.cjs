@@ -1,11 +1,12 @@
 const { contextBridge } = require("electron");
 require("./m5-renderer-smoke-preload.cjs");
-const { fileText, patch, tree } = require("./m5-renderer-performance-fixture.cjs");
+const { getFileText, patch, tree } = require("./m5-renderer-performance-fixture.cjs");
 const { createHash } = require("node:crypto");
 const bridge = window.m5;
 const streamListeners = new Set();
 let streamIndex = 0;
-const version = "sha256:" + createHash("sha256").update(fileText).digest("hex");
+let version;
+function fileVersion() { return version ??= "sha256:" + createHash("sha256").update(getFileText()).digest("hex"); }
 function send(text) {
   const streamId = `performance_${++streamIndex}`;
   // UTF-8 safe chunks, including the Korean content in the large-file fixture.
@@ -22,12 +23,12 @@ bridge.getProjectTree = async ({ parentPath, cursor }) => {
   return tree(parentPath, cursor);
 };
 bridge.onSidecarEvent = (listener) => { streamListeners.add(listener); return () => streamListeners.delete(listener); };
-bridge.readFile = async ({ path }) => ({ projectId: "smoke_project", path, classification: "utf8", byteLength: Buffer.byteLength(fileText), version, stream: send(fileText) });
+bridge.readFile = async ({ path }) => { const text = getFileText(); return { projectId: "smoke_project", path, classification: "utf8", byteLength: Buffer.byteLength(text), version: fileVersion(), stream: send(text) }; };
 bridge.getDiffSummary = async () => ({ projectId: "smoke_project", baseCommit: "a".repeat(40), entries: Array.from({ length: 500 }, (_, i) => ({ kind: "modified", path: `file-${i}.txt`, binary: false })) });
 bridge.getDiffFile = async ({ path }) => {
   const index = Number(/^file-(\d+)\.txt$/.exec(path)?.[1]);
   if (!Number.isInteger(index) || index < 0 || index >= 500) throw new Error("invalid fixture diff");
   const text = patch(index);
-  return { projectId: "smoke_project", path, kind: "modified", oldPath: null, baseVersion: version, worktreeVersion: version, byteLength: Buffer.byteLength(text), stream: send(text) };
+  return { projectId: "smoke_project", path, kind: "modified", oldPath: null, baseVersion: fileVersion(), worktreeVersion: fileVersion(), byteLength: Buffer.byteLength(text), stream: send(text) };
 };
 contextBridge.exposeInMainWorld("m5", bridge);
