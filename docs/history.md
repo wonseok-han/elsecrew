@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (renderer 대형 fixture 실측 완료)
+
+- **완료·증거**: clean `78323488f7df93e0e92a136347aa0b6b3a15a9ea`의 production renderer를 실제 Electron/Chromium 창에서 warm-up 1회 뒤 10회 측정해 PASS했다. p95는 tree root 21.3ms, 폴더 확장 18.3ms, 5MiB 파일 표시 75.9ms, 입력→화면 32.3ms, 변경 요약 38.7ms, 첫 diff 25.0ms다. 두 번째 500개 페이지를 탐색했고 tree DOM 500개를 유지했다. 측정 회차에서 50ms 이상 longtask는 관측되지 않았다. 전후 HEAD 동일·clean이며 `.artifacts/m5-performance/renderer-2026-09-14T02-27-28.543Z-72171.json`에 표본·renderer hash·환경을 보존했다.
+- **검증·범위**: Apple M4 Pro/24GiB, Electron 43.4.0에서 합성 bridge fixture와 실제 Monaco를 사용했다. editor/fixture 30/30 및 채팅 workspace editor 4/4, TypeScript·renderer build·syntax·diff 검사 PASS. 실제 provider·사용자 프로젝트·인증은 사용하지 않았으며 무관한 누적 G5D 검사와 서브에이전트 호출은 생략했다.
+- **다음**: packaged interactive startup, 실제 stream paint·전체 RSS·저장 경합/종료 수집이 남아 있다. 이번 결과는 renderer 부분 성능 증거이며 전체 G6 완료가 아니다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (대형 파일 목록·renderer 성능 계측)
 
 - **기준·직접 구현**: `3691e57`에서 메인이 editor-state/workbench/styles·renderer 측정 fixture/runner·package script·관련 문서를 소유했다. 큰 프로젝트에서 nextCursor를 버려 첫 500개 이후 접근할 수 없던 결함에 페이지 탐색을 추가했다. 한 번에 500개만 표시하고 폴더 전환/늦은 응답/실패 재시도와 중복 클릭을 처리한다. tree 행의 장식은 CSS로 옮겨 페이지 내부 element를 500개 이하로 유지한다.
@@ -324,7 +330,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. 전체 UI·메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
+- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). packaged startup·실제 stream·메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
 
 - **Astra 직접 개발 우선(2026-09-14 사용자 지시)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 위임이 더 유리하거나 중요 안전 경계의 독립 검토가 필요하면 구현·관련 검증을 준비하고 이유·범위를 설명한 뒤 호출 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 기존 서브에이전트 모델 설정은 보관 상태다.
 
