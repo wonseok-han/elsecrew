@@ -228,7 +228,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **Codex offline 설정 대조**: `vendor_observation/codex_preflight.rs`는 0.149.1 schema 기반 config/read·완전 model/list·read-only thread/start 응답을 명시적 tuple/정책/cwd와 비교한다. raw 입력을 반환하지 않고 실제 runtime/capability에는 연결하지 않는다. 응답 일치와 실제 파일 신원·설정 격리·권한 강제는 다른 증거다. 쓰기 정책·페이지 수집·Claude init은 아직 지원하지 않는다.
 
-- **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다.
+- **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다. 이후 설치 CLI는 0.153.4로 변경됐으며 기존 exact version 허용을 자동 확대하지 않았다.
+- **로그인 schema 드리프트 검사**: `node scripts/m5-codex-login-schema.mjs <기준 생성 폴더> <후보 생성 폴더>`는 초기화·로그인/취소·계정 조회/알림 타입과 재귀 type import의 원문 해시를 비교한다. 종료 0은 이 범위의 원문 동일, 2는 검토 필요, 1은 비교 불가이며 전체 프로토콜/실행 호환 판정이 아니다. 0.149.1→0.153.4 대조는 20파일 중 Bedrock 인증 추가 2파일 변경으로 검토 필요다. 생성 입력은 로컬 임시 증거이며 이 도구가 CLI 실행·인증 조회를 하지는 않는다.
 
 - **작업대 배치 현행**: `src/m5/workbench-dock.tsx`는 파일·편집기·변경·팀 대화를 가로 패널로 구성한다. 제목 drag/drop·이동 버튼과 경계선 pointer/키보드 조절을 지원하며 순서/폭을 검증해 localStorage에 저장한다. 이동 때 Monaco identity를 유지한다. 상하 분할·탭 도킹 및 전체 승인 시안 적용은 아직 남는다.
 - **실제 CLI 최소 관측(2026-09-14)**: 빈 임시 폴더에서 Codex 0.149.1 app-server 초기화·config/account 조회·정상 종료와 Claude 2.1.269 인증 상태 조회를 확인했다. 모델 요청과 thread 생성은 없었다. 이 관측만으로 설정 격리·모델 가용성·실행 권위를 보장하지 않으며 제품 actual provider는 활성화하지 않았다.

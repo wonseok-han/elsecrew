@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (설치 CLI 변경과 로그인 스키마 대조)
+
+- **직접 작업**: clean `d4ee925`·`m5/coding-agent-ide`에서 실제 launcher 준비 중 설치 CLI가 0.149.1→0.153.4로 변경됐음을 확인했다. 실행 위치는 `/Applications/ChatGPT.app/Contents/Resources/codex`이며 Codex.app 후보는 현재 없다. 기존 exact-version 허용 정책이나 제품 capability는 변경하지 않았다.
+- **관측 범위**: env를 비운 버전·app-server 도움말·generate-ts만 실행했다. 사용자 인증 조회/복사·로그인·모델 호출은 하지 않았다. CLI SHA-256 `87a08119b8effa519f0ecb552dc98043f58a8200bf2ec5da60f76890c33e9c3a`, sibling code-mode-host `038b9c6b60baacbfacba1fe81cf603c22b73697810e013d4efda040f1a7294e7`. codesign 표시의 TeamIdentifier는 2DC432GLL2였으나 표시 명령은 서명 검증/실행 승인이 아니다. PATH alias 생성 권한 경고는 기존 환경을 수정해 우회하지 않았다.
+- **검사 구현·결과**: `scripts/m5-codex-login-schema.mjs`는 두 생성 schema 폴더의 로그인 루트 10개와 재귀 type import를 SHA-256 비교한다. 동일/검토 필요/읽기 실패를 종료 코드 0/2/1로 구분하며 vendor 실행이나 호환 버전 등록은 하지 않는다. 보존 0.149.1과 새 0.153.4에서 20개 중 18개 동일, AuthMode의 bedrockAccessKeys 및 LoginAccountParams의 amazonBedrockAccessKeys 추가 2개로 REVIEW_REQUIRED(예상 종료 2)다. 현재 사용하는 chatgpt 요청 분기와 완료/계정 응답은 동일하지만 전체 runtime 호환 증거가 아니다.
+- **검증·다음**: 도구 테스트 3/3 PASS(동일·의존 타입 변경/순환·누락/경로 이탈), diff 검사 PASS. OpenAI 공식 [app-server](https://learn.chatgpt.com/docs/app-server)·[환경 변수](https://learn.chatgpt.com/docs/config-file/environment-variables)를 재확인했다. 실제 launcher/barrier·환경/runtime artifact 정책·로그인/복구 IPC/UI는 이번 작업에서 구현하지 않았다. 다음은 이 실행 연결이며 기존 인증/유료 실행 승인을 추정하지 않는다. main 미병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (초기화부터 로그인 재확인까지 연결)
 
 - **직접 구현**: clean `b1535de`에서 core login connection·sidecar login session과 기존 process/I/O 연결을 소유했다. Karpathy 지침에 따라 ModelFreeExchange 초기화와 LoginExchange·TreeTracker를 재사용했다. OpenAI Docs의 [초기화](https://learn.chatgpt.com/docs/app-server#initialization)·[인증](https://learn.chatgpt.com/docs/app-server#auth-endpoints)과 보존 0.149.1 생성 schema를 대조했다. 새 연결은 전용 home/macOS 응답을 비교하고 initialize→initialized→명시적 로그인→브라우저 완료→fresh account/read를 고정 ID·단일 사용 요청으로 보낸다.
@@ -274,6 +281,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **CLI 버전 드리프트(2026-09-14 후속)**: 현재 ChatGPT.app 번들의 Codex는 0.153.4다. 앞선 0.149.1 관측은 당시 증거이며 현 설치 버전으로 재인용하지 않는다. 로그인 schema 20파일 비교에서 Bedrock 인증 추가 2파일 차이가 있고 chatgpt 분기는 동일하다. `scripts/m5-codex-login-schema.mjs`로 생성 schema와 의존 타입을 오프라인 대조할 수 있지만 결과는 실제 provider/version 활성화 권위가 아니다.
 
 - **로그인 불확실 종료 fence(2026-09-14, 내부 owner 미활성)**: app-data의 `codex-login.pending` 존재는 내용이 비었거나 손상돼도 새 내부 로그인 예약을 차단한다. 자동 삭제/기록 PID 재사용은 하지 않는다. 파일에는 프로세스 신원만 남기며 explicit cleanup의 tree 종료·root 회수·증거 저장 확인 전에는 해제하지 않는다. 제품 launcher/초기화/IPC·수동 복구 연결은 별도 남는다.
 
