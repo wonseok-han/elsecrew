@@ -4,6 +4,8 @@
 use super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 
+pub mod codex_preflight;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Vendor {
     Codex01491,

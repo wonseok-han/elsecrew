@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Codex 설정·모델·thread 응답 검증)
+
+- **직접 작업 계약**: clean `0a7e9ab`에서 메인이 core의 `vendor_observation/codex_preflight.rs`와 모듈 선언·관련 기록을 소유했다. 기존 승인된 읽기 전용 검토자 1명만 같은 연결 파동의 변경을 검토하고 새 worktree/구현자는 만들지 않는다.
+- **구현**: Codex 0.149.1의 config/read는 명시적 model/effort·openai·on-request·read-only와 대조하고, model/list는 완전한 목록의 정확한 model/effort만 받는다. 숨긴 모델·기본값/upgrade 대체·불완전 페이지·중복 필드는 거부한다. thread/start 응답은 정확한 model/effort/cwd·user 승인·network 없는 readOnly·빈 instructionSources를 대조한다. 결과는 unit뿐이며 실행 권위나 파일시스템 신원/설정 격리 증명이 아니다. runtime/capability/기존 fake 계약은 변경하지 않았다.
+- **출처·관측 범위**: 공식 app-server 문서를 재확인하고 로컬 0.149.1의 generate-ts로 모델 호출 없이 schema를 재생성했다. 예전 임시 schema 경로는 없어 새 `/private/tmp/hello-agent-schema-gM1m6L`을 사용했다. schema 구조와 합성 wire 테스트이며 실제 config/model/thread 요청 성공이나 모델 가용성 실측을 주장하지 않는다.
+- **검증·다음**: 기존 provider 포함 27/27 PASS, rustfmt·diff 검사 PASS. Clippy는 변경 없는 proctree의 기존 경고 3개와 함께 성공했고 새 모듈 경고는 없다. 설정/인증 격리·응답 소속 검증/입력 보류·실제 process 연결·Claude 검증과 승인 모델 smoke는 남는다. 제품 활성화·사용자 프로젝트 변경·main 병합·push 없음.
+- **독립 검토 종결**: 동일 검토자가 config/model과 thread 응답 대조의 최종 변경을 확인해 actionable defect 없음으로 판정했다. runtime 비연결·legacy sandbox 응답과 실제 권한/격리의 구분을 재확인했으며 제품 활성화 판정은 아니다.
+
 ### 2026-09-14 · by GPT-6 Astra (실제 provider 독립 검토 승인)
 
 - **사용자 승인·작업 계약**: `bbb03f08cdeced97bddf53f792b2edc84ccfa2a7`의 clean `m5/coding-agent-ide`에서 실제 provider 연결의 읽기 전용 검토자 1명을 호출했다. 메인이 모든 구현·문서·커밋을 소유하며 새 worktree·병렬 구현자는 만들지 않는다. 승인 범위는 독립 안전 검토이며 실제 유료 모델 실행·사용자 프로젝트 변경·서명/배포·main/push 승인은 아니다.
