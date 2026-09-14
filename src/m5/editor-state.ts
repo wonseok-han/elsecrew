@@ -454,7 +454,28 @@ export class ProjectEditorController {
   updateText(path: string, text: string): void {
     const tab = this.#tab(path);
     if (!tab || tab.mode !== "text" || tab.saveState === "conflicted") return;
+    if (text === tab.text) return;
     this.#replaceTab(path, { ...tab, text, saveState: tab.saveState === "saving" ? "saving" : "dirty" });
+  }
+
+  /** Requires explicit UI confirmation of this exact draft; does not write any file. */
+  async reloadConfirmedDraft(confirmed: EditorTab): Promise<boolean> {
+    const project = this.#state.project;
+    const workspace = this.#state.workspace;
+    const epoch = this.#projectEpoch;
+    if (!project || this.#actionBlocked || confirmed.saveState === "saving" || this.#tab(confirmed.path) !== confirmed) return false;
+    try {
+      const descriptor = workspace ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path: confirmed.path }) : await this.#bridge.readFile({ projectId: project.id, path: confirmed.path });
+      if (descriptor.classification !== "utf8" || !descriptor.stream) throw new Error("saved file is not an editable text file");
+      const text = await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || this.#actionBlocked || this.#tab(confirmed.path) !== confirmed) return false;
+      this.#replaceTab(confirmed.path, { ...confirmed, text, baseVersion: descriptor.version, byteLength: descriptor.byteLength, saveState: "clean", technicalDetail: undefined });
+      this.#set({ error: null, notice: "내 편집 내용을 버리고 저장된 파일을 다시 불러왔어요. 파일 자체는 변경하지 않았어요." });
+      return true;
+    } catch (error) {
+      if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace) && this.#tab(confirmed.path) === confirmed) this.#setError("다시 불러오지 못했어요. 내 편집 내용은 그대로 남아 있어요.", error);
+      return false;
+    }
   }
 
   async saveActive(): Promise<void> {

@@ -302,6 +302,46 @@ async function openText(bridge = new FakeBridge()) {
   return { bridge, controller };
 }
 
+test("confirmed reload clears a conflict only after saved text is available without writing", async () => {
+  const { bridge, controller } = await openText();
+  try {
+    controller.updateText("src/file-000.ts", "draft");
+    bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+    const draft = controller.snapshot().tabs[0]!;
+    assert.equal(draft.saveState, "conflicted");
+    bridge.fileText = "saved externally";
+    assert.equal(await controller.reloadConfirmedDraft(draft), true);
+    assert.equal(controller.snapshot().tabs[0]?.text, bridge.fileText);
+    assert.equal(controller.snapshot().tabs[0]?.saveState, "clean");
+    assert.deepEqual(controller.snapshot().tabs[0]?.baseVersion, version(bridge.fileText));
+    assert.equal(bridge.savedText, "");
+    assert.equal(bridge.appended.length, 0);
+  } finally { controller.dispose(); }
+});
+
+test("reload failure and a stale confirmation never discard the current draft", async () => {
+  const { bridge, controller } = await openText();
+  try {
+    controller.updateText("src/file-000.ts", "draft");
+    const draft = controller.snapshot().tabs[0]!;
+    bridge.readError = new Error("unavailable");
+    assert.equal(await controller.reloadConfirmedDraft(draft), false);
+    assert.equal(controller.snapshot().tabs[0], draft);
+    bridge.readError = null;
+    controller.updateText(draft.path, "newer");
+    assert.equal(await controller.reloadConfirmedDraft(draft), false);
+    assert.equal(controller.snapshot().tabs[0]?.text, "newer");
+    const latest = controller.snapshot().tabs[0]!;
+    bridge.autoReadChunks = false;
+    const reload = controller.reloadConfirmedDraft(latest);
+    await nextTurn();
+    controller.updateText(latest.path, "typed while reading");
+    bridge.emitChunk("stream_read", bridge.fileText);
+    assert.equal(await reload, false);
+    assert.equal(controller.snapshot().tabs[0]?.text, "typed while reading");
+  } finally { controller.dispose(); }
+});
+
 test("typing during save preserves the newer draft and advances the committed base", async () => {
   const bridge = new FakeBridge();
   const pending = deferred<{ outcome: "committed"; version: FileVersionV1 }>();

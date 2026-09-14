@@ -81,6 +81,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const admissionReady = admission === "ready";
   const [goal, setGoal] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reloadDraft, setReloadDraft] = useState<EditorTab | null>(null);
+  const [reloadingDraft, setReloadingDraft] = useState(false);
   const snapshot = useSyncExternalStore(
     (listener) => controller.subscribe(listener),
     () => controller.snapshot(),
@@ -200,12 +202,22 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </div>
           <div className="m5-editor-head">
             <span>{activeTab?.path ?? "파일을 선택하세요"}</span>
+            {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>저장된 내용 다시 불러오기</button>}
             {activeTab?.mode === "text" && (
               <button type="button" onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
                 {activeTab.saveState === "saving" ? "저장 중…" : activeTab.saveState === "conflicted" ? "충돌 해결 필요" : "저장"}
               </button>
             )}
           </div>
+          {reloadDraft && <section role="alertdialog" aria-label="편집 내용 버리기 확인" className="m5-error">
+            <p><strong>{reloadDraft.path}</strong>의 저장하지 않은 편집 내용을 버리고 저장된 파일로 돌아갈까요? 필요한 내용은 먼저 복사해 주세요.</p>
+            <button type="button" disabled={reloadingDraft} onClick={() => setReloadDraft(null)}>취소</button>
+            <button type="button" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft || !snapshot.tabs.includes(reloadDraft)} onClick={async () => {
+              setReloadingDraft(true);
+              try { await controller.reloadConfirmedDraft(reloadDraft); } finally { setReloadingDraft(false); setReloadDraft(null); }
+            }}>{reloadingDraft ? "다시 불러오는 중…" : "편집 내용 버리고 다시 불러오기"}</button>
+            {!snapshot.tabs.includes(reloadDraft) && <p>확인 중 파일 상태가 바뀌었어요. 취소한 뒤 다시 확인해 주세요.</p>}
+          </section>}
           <EditorContent tab={activeTab} readOnly={!admissionReady} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} />
         </section>
 
@@ -266,7 +278,7 @@ function EditorContent({ tab, readOnly, onChange }: { tab: EditorTab | null; rea
   if (tab.mode === "binary") return <Empty text="이 파일은 이진 파일이라 내용을 편집하지 않아요." />;
   if (tab.mode === "tooLarge") return <Empty text="5MiB보다 큰 파일은 안전하게 미리 보지 않아요." />;
   if (tab.saveState === "conflicted") {
-    return <section className="m5-conflict"><strong>저장 충돌</strong><p>내 초안은 그대로 보존했어요. 최신 파일을 확인한 뒤 새 변경으로 저장해 주세요.</p><details><summary>기술 정보</summary><pre>{tab.technicalDetail ?? "external file change"}</pre></details></section>;
+    return <section className="m5-conflict"><strong>저장 충돌</strong><p>내 초안은 그대로 보존했어요. 필요한 내용을 아래에서 복사한 뒤 저장된 파일을 다시 불러올 수 있어요.</p><textarea aria-label="보존된 편집 내용" readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><details><summary>기술 정보</summary><pre>{tab.technicalDetail ?? "external file change"}</pre></details></section>;
   }
   return <MonacoEditor tab={tab} readOnly={readOnly} onChange={onChange} />;
 }

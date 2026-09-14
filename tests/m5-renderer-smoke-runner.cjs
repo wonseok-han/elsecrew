@@ -83,6 +83,23 @@ app.whenReady().then(async () => {
   })()`);
   if (!result.workerCreated || !result.text.includes("example.ts")) throw new Error("Monaco editor or local worker did not mount");
   if (!result.dockVerified) throw new Error("panel layout was not verified");
+  window.show();
+  window.focus();
+  await window.webContents.executeJavaScript(`document.querySelector('.monaco-editor textarea').focus()`);
+  window.webContents.sendInputEvent({ type: "char", keyCode: "Z" });
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "edited draft")};
+    const reloadButton = () => [...document.querySelectorAll('button')].find(button => button.textContent === '저장된 내용 다시 불러오기');
+    reloadButton().click();
+    await ${waitFor("document.querySelector('[role=alertdialog]')", "reload confirmation")};
+    [...document.querySelectorAll('[role=alertdialog] button')].find(button => button.textContent === '취소').click();
+    await ${waitFor("!document.querySelector('[role=alertdialog]')", "cancel reload")};
+    if (!document.querySelector('[aria-label=\"저장되지 않은 변경\"]')) throw new Error('cancel discarded draft');
+    reloadButton().click();
+    await ${waitFor("document.querySelector('[role=alertdialog]')", "confirm reload again")};
+    [...document.querySelectorAll('[role=alertdialog] button')].find(button => button.textContent === '편집 내용 버리고 다시 불러오기').click();
+    await ${waitFor("!document.querySelector('[role=alertdialog]') && !document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "saved text restored")};
+  })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   await window.close();
   app.exit(0);
