@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (후속 메시지 파동 macOS 패키지 검증)
+
+- **수정·빌드**: clean `3e57b1f`에서 package smoke의 구형 D1 기대값 뒤에 `chat.appendMessage` 하나를 exact 비교하도록 갱신했다. Karpathy 지침에 따라 baseline fixture나 보안 검증은 완화하지 않았다. 첫 package 실행은 외부 파일 fetch 제한으로 실패했고 허용된 네트워크 실행으로 같은 작업을 재시도해 main/preload/renderer와 release Rust sidecar를 새로 빌드했다.
+- **검증**: darwin-arm64 Forge package PASS, 실제 포함 sidecar의 shell ready→storage admission ready→prepareQuit→exit 0/clean marker 및 app.asar/Monaco worker·Electron fuses 검사 PASS. 파동 마감의 run-recovery Node 누적 124/124와 scaffold 5/5·diff 검사 PASS. 패키지 경로는 `out/hello-agent-darwin-arm64/hello-agent.app`이며 SHA-256은 sidecar `e05c0e637a4d19e574e3a540559f224433786d36b89403bdf888f35e0fd70bf6`, app.asar `8a9c261aa750516d87d098f425daaeeb2b582aee223707ae1f904557f711afb1`이다. 패키지 전체 GUI/실제 모델/Windows/서명·배포 승인이나 전체 G6 완료를 뜻하지 않는다.
+- **다음**: 실제 provider를 앱 전용 환경의 별도 로그인 방식으로 구현해도 되는지 사용자 선택을 다시 비동기로 요청했다. 유료 모델 실행·기존 인증정보 복사는 승인 범위에 넣지 않았다. 답변 대기 중에도 guided start 등 허용된 개발은 진행할 수 있다. provider·인계·원본 적용/복구·guided start·G6/Windows/출시는 남고 main 병합·push는 하지 않았다.
+
 ### 2026-09-14 · by GPT-6 Astra (V7 후속 메시지 입력창 연결)
 
 - **직접 구현**: clean `ee9dd0d`에서 V7의 고정 append IPC·preload·renderer 경계와 팀 대화 입력창을 연결했다. V4~V6는 유지하고 V7도 storage admission 완료 전 쓰기를 차단한다. 채팅별 초안·불확실한 요청을 분리해 전송 중 새 입력과 채팅 전환 중 늦은 응답을 보존하고, 응답/event 중복은 기존 merge로 처리한다. 명시적 무기록 순서 충돌만 새로 읽은 순서로 같은 메시지 ID를 재사용하며 불확실한 결과는 원래 요청 그대로 재시도한다.
