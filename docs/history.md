@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (새 diff 화면 성능 실측)
+
+- **실측**: clean `3f621732df1e1834fe2528964d94320221c84776`의 production renderer를 실제 Electron/Chromium에서 warm-up 1회 뒤 10회 측정해 PASS했다. p95는 tree root 76ms, 폴더 확장 17.1ms, 5MiB 파일 표시 94.1ms, 입력 24.8ms, 500파일 변경 요약 77.4ms, 첫 파일 diff 17.5ms다. 측정 회차의 longtask 관측은 0ms, tree DOM은 500개다. 전후 clean/same HEAD이며 `.artifacts/m5-performance/renderer-2026-09-14T04-46-30.281Z-33604.json`에 표본을 보존했다.
+- **범위·다음 결정**: 합성 bridge의 renderer 부분 측정이며 실제 provider·sidecar IPC·메모리·전체 G6 검증이 아니다. 실제 연결의 핵심 대기 사항은 앱 전용 환경에서 별도 로그인하는 방식의 허용 여부다. 기존 사용자 인증/설정을 복사하거나 바꾸지 않고 이 선택을 다시 명확히 질문한다. 실제 실행·역할 인계/후속 지시·원본 적용/복구·guided start·Windows/출시는 계속 미완료다. 이번에는 코드 수정·서브에이전트·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (줄 단위 변경 검토 화면)
 
 - **직접 구현**: clean `bd8dea3`에서 diff 표시 모듈·작업대/CSS·관련 테스트를 소유했다. 원시 patch 대신 변경 전후 줄 번호와 추가/삭제 색상·기호를 표시하고 200줄씩 전체 내용을 탐색한다. 여러 hunk·0줄 범위·파일 끝 개행 없음 표시를 처리하며 불완전/미지원 hunk는 줄 번호를 추측하지 않고 원문 그대로 보여 준다. 렌더링은 텍스트 노드만 사용하고 파일 반영·실행 계약은 변경하지 않았다.
