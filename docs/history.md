@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (sidecar 시작 성능 실측)
+
+- **완료·증거**: clean `d97ee562c0e32efea36ea4d6116a63bfa12f4d84`의 release sidecar를 생성한 임시 빈 DB에서 migration bootstrap·warm-up 1회 뒤 10회 측정했다. shell-ready p95 3.863ms, storage-ready p95 52.596ms로 1,000ms 기준 PASS이며 모든 회차의 protocol/status/quit 응답, 정상 종료와 DB clean marker를 확인했다. 전후 HEAD 동일·clean. `.artifacts/m5-performance/sidecar-startup-2026-09-14T02-18-19.162Z-56332.json`에 표본·binary SHA·기기 정보를 보존했다. 정상 측정 뒤 해당 임시 DB 폴더는 정리했다.
+- **환경·검증**: 첫 sandbox 실행은 기기 정보 조회 실패로 표본 없이 FAIL을 기록했고, 권한을 허용한 실행에서 위 실측을 완료했다. 성능 판정기 회귀 8/8, syntax·diff 검사 통과. 제품 코드 변경이 없어 기존 16분 누적 G5D 검사를 반복하지 않았다. 서브에이전트 호출·main 병합·push는 없다.
+- **다음**: 패키징 앱 interactive·큰 파일/diff·stream paint·전체 RSS·저장 경합/종료 계측을 연결해야 전체 `m5:test:performance`를 열 수 있다. 현재 도구는 개별 성능 관측/입력 판정이며 G6 완료 또는 실제 provider·Windows 승인 증거가 아니다.
+
 ### 2026-09-14 · by GPT-6 Astra (G6 성능 측정 도구 직접 구현)
 
 - **기준·범위**: 사용자 커밋 승인으로 Astra 운영 규칙을 `e97d0ee1d6a7bcbc060358b594583755c105a8e5`에 기록했다. 같은 기준에서 메인이 package scripts·성능 측정 도구 2개·회귀·문서를 직접 소유해 구현했다. 서브에이전트 호출은 없었다.
@@ -311,6 +317,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. 전체 UI·메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
 
 - **Astra 직접 개발 우선(2026-09-14 사용자 지시)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 위임이 더 유리하거나 중요 안전 경계의 독립 검토가 필요하면 구현·관련 검증을 준비하고 이유·범위를 설명한 뒤 호출 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 기존 서브에이전트 모델 설정은 보관 상태다.
 
