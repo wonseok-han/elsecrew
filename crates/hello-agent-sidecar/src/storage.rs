@@ -793,6 +793,58 @@ impl Storage {
         Ok(table.values().cloned().collect())
     }
 
+    /// Bounded lookup in the retained message table; survives source-event compaction.
+    #[allow(dead_code)] // Follow-up writer is staged before wire activation.
+    pub fn retained_chat_message(&self, message_id: &str) -> Result<Option<Value>, SidecarError> {
+        self.ensure_writes_admitted()?;
+        let raw: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT canonical_message_json FROM chat_messages WHERE message_id=?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| SidecarError::new("storageReadFailed", error.to_string()))?;
+        let message = raw
+            .map(|text| {
+                serde_json::from_str(&text).map_err(|_| {
+                    SidecarError::new("projectionInvalid", "stored message is invalid")
+                })
+            })
+            .transpose()?;
+        if message.is_some() {
+            return Ok(message);
+        }
+        // Fresh writes are in the indexed source ledger before lifetime materialization.
+        let source: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT canonical_json_payload FROM events WHERE operation_id=?1",
+                [format!("op_followup_{message_id}")],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| SidecarError::new("storageReadFailed", error.to_string()))?;
+        source
+            .map(|text| {
+                let payload: Value = serde_json::from_str(&text).map_err(|_| {
+                    SidecarError::new("projectionInvalid", "stored follow-up is invalid")
+                })?;
+                payload
+                    .get("last_message")
+                    .filter(|value| !value.is_null())
+                    .cloned()
+                    .ok_or_else(|| {
+                        SidecarError::new(
+                            "projectionInvalid",
+                            "stored follow-up message is missing",
+                        )
+                    })
+            })
+            .transpose()
+    }
+
     pub fn aggregate_event_payloads(
         &self,
         aggregate_type: &str,
@@ -816,6 +868,56 @@ impl Storage {
                 })
             })
             .collect()
+    }
+
+    #[allow(dead_code)] // Follow-up writer is staged before wire activation.
+    pub fn append_followup_checked(
+        &mut self,
+        chat_id: &str,
+        operation_id: &str,
+        expected: &Map<String, Value>,
+        mut payload: Map<String, Value>,
+    ) -> Result<bool, SidecarError> {
+        self.ensure_writes_admitted()?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        verify_append_runtime_state(&transaction)?;
+        let current = load_projection(&transaction)?;
+        if current.chats.get(chat_id) != Some(expected) {
+            return Ok(false);
+        }
+        let sequence = required_u64(expected, "last_event_sequence")?
+            .checked_add(1)
+            .ok_or_else(|| SidecarError::new("sequenceOverflow", "event sequence overflow"))?;
+        payload.remove("last_event_sequence");
+        let event = LedgerEventV1 {
+            event_id: format!("evt_{}", Uuid::new_v4().simple()),
+            operation_id: operation_id.to_string(),
+            request_id: None,
+            aggregate_type: "chat".to_string(),
+            aggregate_id: chat_id.to_string(),
+            aggregate_sequence: sequence,
+            event_type: "chat.upserted".to_string(),
+            payload_schema_version: SQLITE_SCHEMA_VERSION,
+            canonical_json_payload: canonical_json_v1(Value::Object(payload))
+                .map_err(storage_contract_error)?,
+            timestamp: now_utc(),
+        };
+        let existing = load_events(&transaction)?;
+        if classify_storage_operation(&transaction, &existing, &event)?
+            != OperationDecisionV1::Append
+        {
+            return Ok(false);
+        }
+        insert_event(&transaction, &event)?;
+        let events = load_events(&transaction)?;
+        let projection = replay_storage_ledger(&transaction, &events)?;
+        write_projection(&transaction, &event, &projection)?;
+        transaction.commit().map_err(sqlite_error)?;
+        self.note_maintenance_invalidation();
+        Ok(true)
     }
 
     pub fn upsert_projection_record(

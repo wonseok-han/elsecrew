@@ -500,6 +500,109 @@ impl G5Manager {
         })
     }
 
+    /// Staged durable follow-up operation. Does not start or interrupt a provider.
+    #[allow(dead_code)] // Wire/bridge activation follows persistence verification.
+    pub fn append_user_message(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        request: &Value,
+    ) -> Result<G5Action, ProjectFailure> {
+        validate_g5_payload_v1("chatAppendMessageRequest", request)
+            .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
+        let chat_id = request["chatId"].as_str().unwrap();
+        let mut stored = chat_projection_record(storage, chat_id)?;
+        let mut chat = stored["record"].clone();
+        for field in [
+            "projectId",
+            "chatId",
+            "taskId",
+            "worktreeId",
+            "workspaceIdentity",
+        ] {
+            if chat[field] != request[field] {
+                return Err(ProjectFailure::manifest("follow-up chat identity differs"));
+            }
+        }
+        let validate_result = |message: &Value| {
+            validate_g5_payload_v1(
+                "chatAppendMessageTranscript",
+                &json!({"request":request,"message":message}),
+            )
+            .map_err(|error| ProjectFailure::manifest(error.to_string()))
+        };
+        let message_id = request["clientMessageId"].as_str().unwrap();
+        if let Some(message) = storage.retained_chat_message(message_id)? {
+            validate_result(&message)?;
+            return Ok(G5Action {
+                result: message,
+                events: vec![],
+            });
+        }
+        if self.preparing_to_quit
+            || !matches!(
+                chat["state"].as_str(),
+                Some(
+                    "draft"
+                        | "running"
+                        | "waitingForUser"
+                        | "reviewReady"
+                        | "needsAttention"
+                        | "canceled"
+                )
+            )
+        {
+            return Err(ProjectFailure::recovery(
+                "chat does not accept new follow-up messages",
+            ));
+        }
+        projects.verify_workspace(storage, &address_from_chat(&chat)?)?;
+        let expected = request["expectedEventSequence"].as_u64().unwrap();
+        if stored["durable_event_sequence"].as_u64() != Some(expected) {
+            return Err(ProjectFailure::dirty(
+                "chat message sequence changed before append",
+            ));
+        }
+        let sequence = expected + 1; // The request validator excludes safe-integer overflow.
+        chat["updatedAt"] = Value::String(now());
+        let mut message = team_message(
+            &chat,
+            sequence,
+            "user",
+            None,
+            None,
+            request["text"].as_str().unwrap(),
+        )?;
+        message["messageId"] = request["clientMessageId"].clone();
+        validate_result(&message)?;
+        // Preserve save sessions and compare the full original row inside the write transaction.
+        let expected_projection = stored.clone();
+        stored.insert("record".to_string(), chat.clone());
+        stored.insert("last_message".to_string(), message.clone());
+        stored.insert("durable_event_sequence".to_string(), json!(sequence));
+        if !storage.append_followup_checked(
+            chat_id,
+            &format!("op_followup_{message_id}"),
+            &expected_projection,
+            stored,
+        )? {
+            if let Some(message) = storage.retained_chat_message(message_id)? {
+                validate_result(&message)?;
+                return Ok(G5Action {
+                    result: message,
+                    events: vec![],
+                });
+            }
+            return Err(ProjectFailure::dirty(
+                "chat changed before follow-up commit",
+            ));
+        }
+        Ok(G5Action {
+            result: message.clone(),
+            events: vec![chat_event(&chat, sequence, message)],
+        })
+    }
+
     pub fn list_chats(
         &self,
         storage: &Storage,

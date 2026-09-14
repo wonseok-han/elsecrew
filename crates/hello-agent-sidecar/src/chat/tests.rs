@@ -363,6 +363,44 @@ fn multiple_snapshots_and_chats_remain_explicitly_addressed() {
 }
 
 #[test]
+fn followup_append_preserves_save_sessions_and_refuses_recovery_state() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_state_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_state_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let mut stored = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    stored.insert("save_sessions".into(), json!([]));
+    fixture
+        .storage
+        .upsert_projection_record("chat", chat_id, "op_followup_save_sessions", None, stored)
+        .unwrap();
+    fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    let stored = chat_projection_record(&fixture.storage, chat_id).unwrap();
+    assert_eq!(stored["save_sessions"], json!([]));
+    let mut blocked = stored;
+    blocked.insert("state".into(), json!("recoveryRequired"));
+    blocked.get_mut("record").unwrap()["state"] = json!("recoveryRequired");
+    fixture
+        .storage
+        .upsert_projection_record("chat", chat_id, "op_followup_recovery", None, blocked)
+        .unwrap();
+    let next = followup_request(&chat, 2, "user_abcdef0123456789abcdef0123456789");
+    assert!(fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &next)
+        .is_err());
+    assert!(fixture
+        .storage
+        .retained_chat_message(next["clientMessageId"].as_str().unwrap())
+        .unwrap()
+        .is_none());
+}
+
+#[test]
 fn save_continuations_reject_cross_chat_and_preserve_other_workspace() {
     let mut fixture = Fixture::new();
     let first = fixture.snapshot("req_save_snapshot_a");
@@ -482,6 +520,123 @@ fn chat_ledger_pages_keep_durable_sequence_separate_from_wire_streams() {
     assert_eq!(detail["messages"][0]["eventSequence"], 1);
     assert_eq!(detail["messages"][0]["text"], "persist me");
     validate_g5_payload_v1("chatDetailPage", &detail).unwrap();
+}
+
+fn followup_request(chat: &Value, sequence: u64, id: &str) -> Value {
+    json!({"projectId":chat["projectId"],"chatId":chat["chatId"],"taskId":chat["taskId"],
+        "worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],
+        "expectedEventSequence":sequence,"clientMessageId":id,"text":"후속 지시"})
+}
+
+#[test]
+fn followup_append_is_durable_and_retries_without_new_event() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_chat");
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    let original =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    let first = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(first.events.len(), 1);
+    assert_eq!(first.result["eventSequence"], 2);
+    let retry = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(retry.result, first.result);
+    assert!(retry.events.is_empty());
+    let current =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    assert!(!fixture
+        .storage
+        .append_followup_checked(
+            chat["chatId"].as_str().unwrap(),
+            "op_interleaved_followup",
+            &original,
+            current.clone()
+        )
+        .unwrap());
+    assert_eq!(
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap(),
+        current
+    );
+    for _ in 0..10_000 {
+        if !fixture.storage.materialization_requires_work().unwrap() {
+            break;
+        }
+        fixture
+            .storage
+            .run_materialization_scheduler_step()
+            .unwrap();
+    }
+    assert!(!fixture.storage.materialization_requires_work().unwrap());
+    let materialized_retry = fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(materialized_retry.result, first.result);
+    assert!(materialized_retry.events.is_empty());
+    let detail = fixture
+        .chats
+        .get_chat(
+            &fixture.storage,
+            chat["chatId"].as_str().unwrap(),
+            0,
+            None,
+            50,
+            false,
+        )
+        .unwrap();
+    assert_eq!(detail["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(detail["chat"]["state"], "draft");
+    assert_eq!(detail["chat"]["roleSnapshots"], chat["roleSnapshots"]);
+    let database = fixture._root.path().join("data/hello-agent.sqlite3");
+    drop(fixture.storage);
+    let mut reopened = Storage::open(&database).unwrap();
+    let replay = fixture
+        .chats
+        .append_user_message(&mut reopened, &fixture.projects, &request)
+        .unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.events.is_empty());
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
+fn followup_rejects_id_reuse_identity_drift_and_stale_sequence_without_mutation() {
+    let mut fixture = Fixture::new();
+    let snapshot = fixture.snapshot("req_followup_reject_snapshot");
+    let chat = fixture.create_chat(&snapshot, "original", "req_followup_reject_chat");
+    let request = followup_request(&chat, 1, "user_0123456789abcdef0123456789abcdef");
+    fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &request)
+        .unwrap();
+    let before =
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap();
+    for field in ["text", "taskId", "workspaceIdentity"] {
+        let mut invalid = request.clone();
+        invalid[field] = json!("other");
+        assert!(fixture
+            .chats
+            .append_user_message(&mut fixture.storage, &fixture.projects, &invalid)
+            .is_err());
+    }
+    let stale = followup_request(&chat, 1, "user_abcdef0123456789abcdef0123456789");
+    assert!(fixture
+        .chats
+        .append_user_message(&mut fixture.storage, &fixture.projects, &stale)
+        .is_err());
+    assert_eq!(
+        chat_projection_record(&fixture.storage, chat["chatId"].as_str().unwrap()).unwrap(),
+        before
+    );
 }
 
 #[test]

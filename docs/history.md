@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (후속 저장 검토 수정 검증)
+
+- **검증 재개**: 이전 broad chat 검사 session `83144`의 PID 56585가 6분 이상 CPU를 사용하며 101-snapshot을 실행 중인 것을 확인했다. 검토 전 코드의 검사이므로 의도적으로 SIGINT로 중단하고 종료 코드 101을 확인했다. 이 실행은 미완료이며 통과로 사용하지 않는다. 최신 수정 집중 검사로 전환했다.
+- **수정·증거**: 테스트의 폐기된 구형 materialize 호출 실패를 현재 product 배치 scheduler로 고쳤다. 최신 focused 3/3 PASS: fresh 재시도·stale projection CAS 거부·정규화 완료 후 재시도·DB 재시작·소속/원문/sequence 충돌·save_sessions 보존·복구 상태 신규 제출 거부. IMMEDIATE transaction의 전체 projection 비교와 CAS 실패 뒤 동일 ID 재조회는 유지한다. Karpathy 지침에 따라 기존 정책을 우회하거나 새 저장 테이블을 만들지 않았다.
+- **마감 검증·검토**: sidecar 자체 `clippy --all-targets --no-deps --locked -- -D warnings`, scoped rustfmt·diff 검사 PASS. 의존 core를 포함한 strict 검사 실패는 앞선 기록대로 유지한다. 읽기 전용 검토자는 두 correctness 지적의 코드 수정을 확인하고 현재 내부 구현 차단 결함 없음으로 재검토했다. CAS-false/동일 요청 재조회 분기의 강제 interleaving 검사는 미완료이며 활성화 전 보완 대상이다.
+- **남은 범위**: 이 코드는 아직 내부 단계다. 실제 source compaction 후 재시도·실패 주입·새 wire/bridge 협상·전송 UI 검증이 남고, 실제 에이전트 로그인 방식의 사용자 선택 및 전체 M5 잔여도 유지한다. main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (후속 메시지 영속 저장 경로)
+
+- **직접 구현**: clean `a35f0cc`에서 chat writer·storage 조회·회귀를 소유했다. 후속 메시지를 기존 chat upsert transaction에 저장하고 save_sessions와 기존 projection 필드를 보존한다. 정확한 소속/예상 sequence를 확인하며 같은 ID·내용·순서의 재시도는 기존 메시지만 반환하고 event를 다시 보내지 않는다. 새 제출은 복구/폐기/완료와 종료 준비 중 차단하며 모델을 실행하지 않는다. 제품 wire/bridge는 아직 미연결이다.
+- **검증 중 발견**: 정규화 chat_messages만 조회하면 materialization 전의 새 메시지를 찾지 못하는 실패를 재현했다. operation_id unique index로 fresh source도 조회하도록 수정해 최초 저장·재시도·재시작·원문/소속/순서 충돌·저장 세션 보존·복구 차단 focused 3/3을 통과했다. source compaction 뒤 검증은 아직 별도 미완료다. scoped rustfmt·diff 검사 PASS. strict clippy는 기존 core/proctree의 unnecessary_lazy_evaluations·map_entry에서 실패해 전체 PASS로 주장하지 않는다.
+- **독립 검토·수정 진행**: 검토자가 transaction 밖 순서 검사와 동일 요청 동시 재시도 경합을 지적했다. IMMEDIATE transaction 안에서 원본 chat projection 전체를 대조하고, 불일치 후에도 같은 ID의 저장 결과가 생겼는지 재조회하도록 수정했다. stale projection 검사·materialize 후 재시도 테스트를 추가했으며 이 최신 변경의 실행 검증은 아직 대기다. 앞선 3/3을 수정 후 PASS로 대신하지 않는다.
+- **진행 중 검증·다음**: 이전 코드의 `cargo test -p hello-agent-sidecar chat::tests --locked`는 exec session `83144`, PID 56574/56585에서 101개 snapshot 검사 중이며 2026-09-14 관측 시 약 5분 경과한 live 상태였다. 종료/실패로 추정하지 않고 같은 handle로 확인한 뒤 최신 focused 검사를 수행한다. 현재 변경은 미커밋이다. 압축 후 재시도/실패 주입 검증·wire/bridge·전송 UI와 실제 provider 로그인 선택, 원본 적용/복구·guided start·G6/Windows/출시는 남는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (후속 지시 요청·결과 계약 시작)
 
 - **직접 구현**: clean `da82a07`에서 메인이 TS/Rust protocol validator·공용 후속 메시지 fixture와 회귀를 소유했다. exact 소속·reserved user UUID·UTF-8 16KiB·안전한 예상 순서를 검사하고 durable user 메시지의 ID/원문/소속/다음 sequence를 대조한다. 제안서의 후속 지시 연결 계약 초안에 동일 요청 재시도·충돌·실행 중 입력 분리와 구현 잔여를 기록했다.
