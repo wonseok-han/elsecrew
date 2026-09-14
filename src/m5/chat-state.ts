@@ -64,7 +64,7 @@ export class ChatUiController {
 
   async openProject(projectId: string): Promise<void> {
     const generation = ++this.#generation;
-    this.#set({ projectId, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
+    this.#set({ projectId, settings: null, chats: [], activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null, agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [], notice: null, error: null });
     try {
       const [settings, page] = await Promise.all([
         this.#bridge.getProjectRoleSettings({ projectId }),
@@ -78,11 +78,13 @@ export class ChatUiController {
   async updateSettings(roles: readonly RoleProfileV1[]): Promise<void> {
     const settings = this.#state.settings;
     if (!settings) return;
+    const generation = this.#generation;
     try {
       const updated = await this.#bridge.updateProjectRoleSettings({ projectId: settings.projectId, expectedRevision: settings.revision, roles });
-      if (this.#state.settings?.revision !== settings.revision) return;
+      if (!this.#live(generation) || this.#state.projectId !== settings.projectId || this.#state.settings?.revision !== settings.revision) return;
       this.#set({ settings: updated, notice: "새 채팅에 사용할 역할과 모델을 저장했어요. 이미 만든 채팅의 설정은 바뀌지 않아요.", error: null });
     } catch (error) {
+      if (!this.#live(generation) || this.#state.projectId !== settings.projectId) return;
       this.#error("설정이 다른 곳에서 바뀌었어요. 최신 설정을 다시 불러와 확인해 주세요.", error);
       void this.openProject(settings.projectId);
     }

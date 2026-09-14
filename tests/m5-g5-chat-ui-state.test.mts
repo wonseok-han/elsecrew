@@ -33,6 +33,37 @@ class FakeBridge {
   emit(event: TeamMessageV1) { for (const listener of this.listeners) listener(event); }
 }
 
+for (const rejected of [false, true]) test(`프로젝트 전환 후 이전 설정 저장 ${rejected ? "실패" : "성공"}은 현재 프로젝트를 바꾸지 않는다`, async () => {
+  let complete!: (value: ProjectRoleSettingsV1) => void;
+  let fail!: (error: Error) => void;
+  const pending = new Promise<ProjectRoleSettingsV1>((resolve, reject) => { complete = resolve; fail = reject; });
+  const bridge = new FakeBridge();
+  bridge.updateProjectRoleSettings = async () => pending;
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  const saving = controller.updateSettings(roles);
+  bridge.getProjectRoleSettings = async () => ({ ...settings(), projectId: "project_b" });
+  await controller.openProject("project_b");
+  if (rejected) fail(new Error("late failure")); else complete({ ...settings(), revision: 2 });
+  await saving;
+  assert.equal(controller.snapshot().projectId, "project_b");
+  assert.equal(controller.snapshot().settings?.projectId, "project_b");
+  assert.equal(controller.snapshot().error, null);
+  controller.dispose();
+});
+
+test("새 프로젝트 설정을 불러오는 동안 이전 프로젝트 설정을 표시하지 않는다", async () => {
+  const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  let complete!: (value: ProjectRoleSettingsV1) => void;
+  bridge.getProjectRoleSettings = () => new Promise(resolve => { complete = resolve; });
+  const opening = controller.openProject("project_b");
+  assert.equal(controller.snapshot().settings, null);
+  complete({ ...settings(), projectId: "project_b" }); await opening;
+  assert.equal(controller.snapshot().settings?.projectId, "project_b");
+  controller.dispose();
+});
+
 test("새 채팅은 prepareChatWorkspace의 서로 다른 identity와 exact preparationId를 사용한다", async () => {
   const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3); controller.start();
   await controller.openProject("project_a");

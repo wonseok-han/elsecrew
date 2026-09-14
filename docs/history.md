@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (RSS 실패 증거·프로젝트 설정 응답 격리)
+
+- **실측**: clean `f4def74e2a9b4f683271535839b2f2094400da4c`에서 `m5:measure:renderer --memory`를 실행했다. idle 429,637,632 bytes(약 409.73 MiB), 관측 peak 798,261,248 bytes(약 761.28 MiB), 60초 잔류 delta 0 bytes다. idle 400 MiB 기준과 한 회차 tree 3383.7ms/diff 요약 3387.7ms가 초과해 **FAIL**을 유지한다. `.artifacts/m5-performance/renderer-2026-09-14T02-37-44.611Z-91340.json`에 동일 HEAD·clean·전체 표본이 있다. 합성 bridge Electron 측정이므로 실제 제품 sidecar 포함 RSS나 원인 확정으로 해석하지 않는다.
+- **결함·직접 수정**: 여러 프로젝트 이동 중 이전 프로젝트의 settings가 남고, 늦은 저장 성공이 같은 revision의 새 프로젝트 설정을 덮거나 늦은 실패가 이전 프로젝트를 다시 여는 UI 경합을 확인했다. 프로젝트 진입 때 settings를 비우고 저장 성공/실패 모두 generation·projectId를 대조한다. 제품 권한·원본·실행 경계는 변경하지 않는다.
+- **검증·다음**: 새 성공/실패/로딩 회귀 포함 chat/public-event 27/27, TypeScript noEmit·diff 검사 PASS. 실제 adapter startup/config 관측은 §6.7의 별도 사용자 승인 전 실행하지 않는다. 모델 호출 없는 임시 폴더 연결 확인 승인을 요청했다. 이후 실제 adapter 연결·적용/복원, 전체 성능·Windows·출시 경계가 남아 있어 개발 완료가 아니다. main 병합·push·서브에이전트 호출 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (Electron 부분 RSS 수집)
 
 - **범위·구현**: `2e200d2`에서 메인이 기존 renderer collector와 RSS helper/회귀/절차를 직접 소유했다. 선택 PID와 자손의 실제 RSS를 250ms마다 수집하고, 문서 닫기 후 60초 잔류를 관측하는 `--memory` 옵션을 추가했다. 제품 실행·권한·저장 경계는 변경하지 않는다.
@@ -335,7 +341,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). packaged startup·실제 stream·메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
+- **G6 성능 도구와 실제 완료 경계(2026-09-14)**: `m5:measure:performance`는 공급된 측정 JSON만 판정하고 `m5:measure:sidecar-startup`은 현재 release sidecar의 생성된 빈 DB warm 시작을 직접 측정한다. `d97ee56`에서 10회 shell/storage p95 3.863/52.596ms PASS. `7832348`의 `m5:measure:renderer`는 합성 bridge·실제 Monaco로 대형 파일/diff·500개 페이지 탐색의 10회 측정을 통과했다(파일 표시 p95 75.9ms, 입력 32.3ms). 추가 `f4def74`의 `--memory` 실측은 Electron subtree idle 약 409.73 MiB와 한 회차 tree/diff 약 3.38초로 FAIL이며 원인 미확정이다. packaged startup·실제 stream·전체 제품 메모리·경합·종료 수집이 남아 있어 `m5:test:performance`와 G6는 미완료다. 입력 형식·측정 의미는 `procedures/m5-performance.md`를 따른다.
 
 - **Astra 직접 개발 우선(2026-09-14 사용자 지시)**: 메인은 현재 사용자 선택 `gpt-6-astra`와 추론 설정을 따른다. 단일 기능은 직접 구현·검증하며 의무 역할 분할/worktree를 생략할 수 있다. 위임이 더 유리하거나 중요 안전 경계의 독립 검토가 필요하면 구현·관련 검증을 준비하고 이유·범위를 설명한 뒤 호출 전에 대기한다. 과거 의무 위임 규칙보다 AGENTS.md의 `개발 방식 선택`과 운영 절차 §1이 우선한다. 기존 서브에이전트 모델 설정은 보관 상태다.
 
