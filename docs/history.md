@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (완료 목표 지속·Codex 요청 응답 결속)
+
+- **목표·기준**: 사용자 `개발 완료까지 계속` 목표를 유지한다. 이전 응답 파서 통합은 진전이지만 전체 완료가 아니다. clean `7a156d6`에서 메인이 core Cargo feature·vendor_observation 모듈·관련 문서를 소유했다.
+- **구현**: `codex_rpc.rs`는 한 번에 한 요청만 발행하고 initialize→initialized 알림/config→account(refreshToken:false)→model 목록 순서를 고정한다. 정확한 숫자 ID·중복 envelope·오류/예상 밖 frame을 검사하고 실패 뒤 재사용을 막는다. 임의 메서드·thread/turn 생성·인증 변경·prompt 전달은 표현할 수 없다. serde_json raw_value 기능으로 중첩 원문을 보존해 기존 typed 파서의 중복 필드 거부가 재직렬화로 사라지지 않게 했다. 수신 성공은 필드 검증·실행 권위가 아니며 실제 process/runtime에는 아직 미연결이다.
+- **검증**: provider 회귀 30/30 PASS. Clippy 일반 실행은 기존 proctree 경고 3개 외 신규 경고 없음. lock 변경·실제 모델 호출·인증 조회/변경·사용자 프로젝트 변경 없음. 같은 승인된 읽기 전용 검토자에게 이 변경만 검토 요청했다.
+- **검토 종결**: 독립 검토에서 actionable defect 없음을 확인했다. 권고한 initialized 전체 객체·요청 ID assertion을 추가하고 RPC 회귀를 재확인했다. runtime 연결 또는 제품 활성화 승인으로 해석하지 않는다.
+- **다음 결정**: 공식 인증/환경 문서와 local app-server help를 확인했지만 기존 구독 인증을 재사용하면서 모든 사용자 설정을 분리하는 지원 경로는 아직 확정하지 못했다. 사용자에게 앱 전용 환경의 별도 로그인 허용 여부를 비동기로 질문했다. 기존 HOME/인증 파일 복사·설정 거부 해제는 하지 않는다. 이 선택, 실제 transport/종료 연결·Claude·원본 적용/복원·guided start·G6/Windows/출시는 미완료이며 목표를 유지한다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (Codex 설정·모델·thread 응답 검증)
 
 - **직접 작업 계약**: clean `0a7e9ab`에서 메인이 core의 `vendor_observation/codex_preflight.rs`와 모듈 선언·관련 기록을 소유했다. 기존 승인된 읽기 전용 검토자 1명만 같은 연결 파동의 변경을 검토하고 새 worktree/구현자는 만들지 않는다.
