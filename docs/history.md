@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (후속 메시지 sidecar 통신 연결)
+
+- **직접 구현**: clean `a26faec`에서 기존 저장 writer를 `chat.appendMessage`로 dispatch하고 Electron client 요청/결과 검증을 연결했다. exact G5D baseline은 보존하며 마지막 선택적 capability만 협상한다. 이전 sidecar에는 요청하지 않고 잘못된 순서·중복·미지원 baseline을 거부한다. current Rust/TS 상태 파서는 이 확장과 기존 형식을 지원하되 최초 ready와 status의 신원/기능 목록 일치는 유지한다. storage admission·종료 차단을 우회하지 않으며 모델을 실행하지 않는다.
+- **검증**: Electron bridge 44/44, 실제 sidecar stdio 11/11(후속 저장·동일 요청 재시도·기존 준비/취소/복구 포함), Rust protocol 52/52, TypeScript noEmit·sidecar/protocol 자체 strict clippy PASS. 초기 protocol manifest method 누락과 renderer target의 Array.at 오류를 수정한 뒤 재검증했다. Karpathy 지침에 따라 기존 저장 및 transcript 계약을 재사용했다. 전체 제품 누적 gate는 이번 범위가 아니다.
+- **검토 마감·다음**: 독립 검토의 기존 baseline 단위 테스트 지적을 수정하고, 저장소 verifying 및 prepareQuit 뒤 요청 차단을 추가했다. 최신 admission 3/3·TS protocol 4/4·포맷/diff 검사 PASS이고 재검토 지적 없음이다. 이 통신 단위를 커밋한다. preload/renderer 입력창은 아직 연결되지 않아 화면에서 후속 지시를 보낼 수 있는 완료 상태가 아니다. 그 연결과 제출 중 추가 입력/재시도 UX, 실제 provider 로그인 선택·실행 인계·원본 적용/복구·guided start·G6/Windows/출시가 남는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (압축 후 chat 재개방 경계 수정)
 
 - **원인·직접 수정**: `83de9e1` 위에서 기존 실패 회귀를 이어 조사했다. v9 계획의 완료/부분 release는 이전 plan row를 의도적으로 삭제하지만 재개방 chat transition 검사가 그 행을 계속 요구했다. `plan_v9.rs`에서 ReleasePlan/Finalize의 cursor가 이미 해제한 predecessor만 exact frozen source로 대조하고, 그 외 단계는 plan predecessor 필수 검증을 유지했다. 저장 형식·삭제 정책·검증 예산은 변경하지 않았다.

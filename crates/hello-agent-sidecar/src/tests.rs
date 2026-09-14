@@ -1,6 +1,7 @@
 use super::*;
 use hello_agent_protocol::lifecycle_g5d_v1::{
-    parse_g5d_agent_fixture_system_status_v1, parse_g5d_product_system_status_v1,
+    parse_current_agent_fixture_system_status_v1 as parse_g5d_agent_fixture_system_status_v1,
+    parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1,
     validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
 };
 use hello_agent_protocol::run_recovery_v1::validate_g5d_product_ready_payload_v1;
@@ -52,7 +53,12 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
         SidecarSession::new(instance.to_string(), agent_runtime::AgentRuntime::blocked());
 
     let ready = sidecar.ready_event().expect("shell ready");
-    validate_g5d_product_ready_payload_v1(&ready.payload).expect("exact product D1 ready");
+    let mut baseline = ready.payload.clone();
+    assert_eq!(
+        baseline["capabilities"].as_array_mut().unwrap().pop(),
+        Some(json!("chat.appendMessage"))
+    );
+    validate_g5d_product_ready_payload_v1(&baseline).expect("exact product D1 baseline");
     assert!(
         !path.exists(),
         "building shell readiness must not touch SQLite"
@@ -77,6 +83,7 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
         ),
         ("req_recovery", "recovery.markResolved", json!(null)),
         ("req_agent", "run.startAgent", json!([])),
+        ("req_followup", "chat.appendMessage", json!(null)),
     ] {
         let response = sidecar
             .handle_request(request_value(instance, id, method, params))
@@ -159,6 +166,17 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
             json!({}),
         ))
         .unwrap();
+    let blocked = ready_sidecar
+        .handle_request(request_value(
+            instance,
+            "req_followup_after_quit",
+            "chat.appendMessage",
+            json!(null),
+        ))
+        .unwrap()
+        .response;
+    assert!(!blocked.ok);
+    assert_eq!(blocked.error.unwrap().kind, "requestBlocked");
     drop(ready_sidecar);
 
     let restart_gate = Arc::new(AtomicBool::new(false));

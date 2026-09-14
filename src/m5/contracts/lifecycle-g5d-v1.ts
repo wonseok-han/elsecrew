@@ -95,6 +95,16 @@ export function parseG5DProductSystemStatusV1(value: unknown): SystemStatusG5DV1
   return parseSystemStatus(value, parseG5DProductReadyPayloadV1);
 }
 
+/** Optional follow-up suffix over an otherwise exact D1 baseline. */
+export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean): SystemStatusG5DV1 {
+  return parseSystemStatus(value, (sidecar) => {
+    const baseline = agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
+    if (typeof sidecar !== "object" || sidecar === null || !("capabilities" in sidecar) || !Array.isArray(sidecar.capabilities) || sidecar.capabilities[sidecar.capabilities.length - 1] !== "chat.appendMessage") return baseline(sidecar);
+    const parsed = baseline({ ...sidecar, capabilities: sidecar.capabilities.slice(0, -1) });
+    return { ...parsed, capabilities: [...parsed.capabilities, "chat.appendMessage"] };
+  });
+}
+
 export function parseG5DAgentFixtureSystemStatusV1(value: unknown): SystemStatusG5DV1 {
   return parseSystemStatus(value, parseG5DAgentFixtureReadyPayloadV1);
 }

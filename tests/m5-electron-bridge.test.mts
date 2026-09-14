@@ -433,6 +433,56 @@ test("G5A agent IPC rejects launch extras before IPC and remains unavailable on 
   assert.equal(child.writes.length, 0, "current G5 handshake must not advertise or invoke G5A calls");
 });
 
+test("follow-up capability binds stored messages and preserves exact status identity", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/m5/followup-message-v1.json", import.meta.url), "utf8"));
+  for (const corrupt of [false, true]) {
+    const { child, client } = createClient();
+    const started = client.start();
+    const ready = JSON.parse(g5dReadyLine());
+    ready.payload.capabilities.push("chat.appendMessage");
+    child.stdout.write(`${JSON.stringify(ready)}\n`);
+    assert.equal((await started).capabilities.at(-1), "chat.appendMessage");
+    const status = client.getSystemStatus();
+    const statusRequest = JSON.parse(child.writes.at(-1)!);
+    const result = g5dStatus("ready") as any;
+    result.sidecar.capabilities.push("chat.appendMessage");
+    child.stdout.write(responseLine(statusRequest.requestId, result));
+    await status;
+    const append = client.appendChatMessage(fixture.request);
+    const sent = JSON.parse(child.writes.at(-1)!);
+    assert.equal(sent.method, "chat.appendMessage");
+    assert.deepEqual(sent.params, fixture.request);
+    const message = { ...fixture.message, ...(corrupt ? { text: "wrong response" } : {}) };
+    const outcome = corrupt ? assert.rejects(append) : append;
+    child.stdout.write(responseLine(sent.requestId, message));
+    if (corrupt) await outcome;
+    else assert.deepEqual(await outcome, fixture.message);
+  }
+  const { child, client } = createClient();
+  const started = client.start();
+  child.stdout.write(`${g5dReadyLine()}\n`);
+  await started;
+  const writes = child.writes.length;
+  await assert.rejects(client.appendChatMessage(fixture.request), /does not support/);
+  assert.equal(child.writes.length, writes);
+});
+
+test("follow-up rejects misplaced, duplicated and unknown baseline capabilities", async () => {
+  for (const capabilities of [
+    ["chat.appendMessage", ...G5D_PRODUCT_CAPABILITIES_V1],
+    [...G5D_PRODUCT_CAPABILITIES_V1, "chat.appendMessage", "chat.appendMessage"],
+    [...G5_CAPABILITIES_V1, "chat.appendMessage"],
+  ]) {
+    const { child, client } = createClient();
+    const started = client.start();
+    const rejected = assert.rejects(started);
+    const ready = JSON.parse(g5dReadyLine());
+    ready.payload.capabilities = capabilities;
+    child.stdout.write(`${JSON.stringify(ready)}\n`);
+    await rejected;
+  }
+});
+
 test("G5D resolves shell-ready before storage admission and accepts only exact status transitions", async () => {
   const { child, client } = createClient();
   const started = client.start();

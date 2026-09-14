@@ -481,6 +481,7 @@ impl SidecarSession {
                 platform: protocol_platform().to_string(),
                 capabilities: capabilities
                     .iter()
+                    .chain(std::iter::once(&"chat.appendMessage"))
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -841,6 +842,7 @@ impl Sidecar {
                 | "chat.create"
                 | "chat.list"
                 | "chat.get"
+                | "chat.appendMessage"
                 | "run.startFixture"
                 | "run.cancel"
                 | "recovery.list"
@@ -1331,6 +1333,11 @@ impl Sidecar {
                         &request.request_id,
                     )?
                 }
+                "chat.appendMessage" => self.g5.append_user_message(
+                    &mut self.storage,
+                    &self.projects,
+                    &request.params,
+                )?,
                 "chat.list" => {
                     let params =
                         require_exact_params(&request.params, &["projectId", "cursor", "limit"])

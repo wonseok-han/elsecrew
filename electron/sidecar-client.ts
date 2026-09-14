@@ -26,8 +26,7 @@ import {
   type SystemStatusV1,
 } from "../src/m5/contracts/lifecycle-v1.ts";
 import {
-  parseG5DAgentFixtureSystemStatusV1,
-  parseG5DProductSystemStatusV1,
+  parseCurrentSystemStatusV1,
   type SystemStatusG5DV1,
 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 import {
@@ -68,6 +67,9 @@ import {
   validateAbandonPreparedWorkspaceRequestV1,
   validateAbandonPreparedWorkspaceResultV1,
   validateChatCreateRequestV1,
+  validateChatAppendMessageRequestV1,
+  validateChatAppendMessageTranscriptV1,
+  type ChatAppendMessageRequestV1,
   validateChatDetailPageV1,
   validateChatGetRequestV1,
   validateChatListPageV1,
@@ -477,6 +479,10 @@ export class SidecarClientV1 {
   }
   listChats(input: ChatListRequestV1): Promise<ChatListPageV1> { return this.#request("chat.list", validateChatListRequestV1(input)) as Promise<ChatListPageV1>; }
   getChat(input: ChatGetRequestV1): Promise<AgentChatGetResultV1> { return this.#request("chat.get", validateChatGetRequestV1(input)) as Promise<AgentChatGetResultV1>; }
+  appendChatMessage(input: ChatAppendMessageRequestV1): Promise<TeamMessageV1> {
+    if (!this.#ready?.capabilities.includes("chat.appendMessage")) return Promise.reject(new Error("sidecar does not support follow-up messages"));
+    return this.#request("chat.appendMessage", validateChatAppendMessageRequestV1(input)) as Promise<TeamMessageV1>;
+  }
   startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> { return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>; }
   cancelRun(input: RunCancelRequestV1): Promise<RunRecordV1> { return this.#request("run.cancel", validateRunCancelRequestV1(input)) as Promise<RunRecordV1>; }
   listRecoveries(input: PageRequestV1): Promise<RecoveryPageV1> { return this.#request("recovery.list", validatePageRequestV1(input)) as Promise<RecoveryPageV1>; }
@@ -598,7 +604,13 @@ export class SidecarClientV1 {
     this.#session.observe(envelope);
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
-        const rawReady = parseReadyPayload(envelope);
+        const advertisedReady = parseReadyPayload(envelope);
+        // The optional suffix extends an exact known baseline, never an arbitrary
+        // subset of capabilities. Older sidecars remain usable without follow-up.
+        const hasFollowup = advertisedReady.capabilities.at(-1) === "chat.appendMessage";
+        const rawReady = hasFollowup
+          ? { ...advertisedReady, capabilities: advertisedReady.capabilities.slice(0, -1) }
+          : advertisedReady;
         const negotiatedG5DAgent = sameStrings(rawReady.capabilities, G5D_AGENT_FIXTURE_CAPABILITIES_V1);
         const negotiatedG5DProduct = sameStrings(rawReady.capabilities, G5D_PRODUCT_CAPABILITIES_V1);
         const negotiatedG5A = !negotiatedG5DAgent && sameStrings(rawReady.capabilities, G5A_CAPABILITIES_V1);
@@ -609,12 +621,14 @@ export class SidecarClientV1 {
             : negotiatedG5A
               ? parsePlannedG5AReadyPayloadV1(rawReady)
               : parseG5ReadyPayloadV1(rawReady);
-        this.#ready = ready;
+        if (hasFollowup && !negotiatedG5DAgent && !negotiatedG5DProduct) throw new Error("follow-up requires storage admission support");
+        const negotiatedReady = hasFollowup ? advertisedReady : ready;
+        this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#storageAdmissionNegotiated = negotiatedG5DAgent || negotiatedG5DProduct;
-        this.#lastReady = ready;
+        this.#lastReady = negotiatedReady;
         clearTimeout(this.#readyTimer);
-        this.#resolveReady?.(ready);
+        this.#resolveReady?.(negotiatedReady);
         this.#resolveReady = undefined;
         this.#rejectReady = undefined;
       }
@@ -718,9 +732,7 @@ export class SidecarClientV1 {
     }
     if (pending.method === "system.status") {
       const status = this.#storageAdmissionNegotiated
-        ? this.#agentAdapterNegotiated
-          ? parseG5DAgentFixtureSystemStatusV1(response.result)
-          : parseG5DProductSystemStatusV1(response.result)
+        ? parseCurrentSystemStatusV1(response.result, this.#agentAdapterNegotiated)
         : parseG5SystemStatus(response.result, this.#agentAdapterNegotiated);
       if ((status.state === "ready" || status.state === "shellReady") && !sameReady(status.sidecar, this.#ready)) {
         throw new Error("system.status identity does not match system.ready");
@@ -840,6 +852,10 @@ export class SidecarClientV1 {
         assertPreparedChatBinding(value, prepared);
         this.#preparedWorkspaces.delete(preparationId);
         return value;
+      }
+      case "chat.appendMessage": {
+        validateChatAppendMessageTranscriptV1({ request: pending.params, message: response.result });
+        return response.result;
       }
       case "chat.list": {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;

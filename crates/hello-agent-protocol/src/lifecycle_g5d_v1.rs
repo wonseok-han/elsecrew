@@ -108,6 +108,45 @@ pub fn parse_g5d_product_system_status_v1(
     })
 }
 
+/// Preserve the exact D1 baseline while allowing the negotiated follow-up suffix.
+pub fn parse_current_product_system_status_v1(
+    value: &Value,
+) -> Result<SystemStatusG5DV1, G5DAdmissionContractError> {
+    parse_followup_status(value, parse_g5d_product_system_status_v1)
+}
+
+pub fn parse_current_agent_fixture_system_status_v1(
+    value: &Value,
+) -> Result<SystemStatusG5DV1, G5DAdmissionContractError> {
+    parse_followup_status(value, parse_g5d_agent_fixture_system_status_v1)
+}
+
+fn parse_followup_status(
+    value: &Value,
+    baseline: fn(&Value) -> Result<SystemStatusG5DV1, G5DAdmissionContractError>,
+) -> Result<SystemStatusG5DV1, G5DAdmissionContractError> {
+    let mut normalized = value.clone();
+    let capabilities = normalized
+        .pointer_mut("/sidecar/capabilities")
+        .and_then(Value::as_array_mut);
+    let extended = capabilities.is_some_and(|capabilities| {
+        if capabilities.last().and_then(Value::as_str) == Some("chat.appendMessage") {
+            capabilities.pop();
+            true
+        } else {
+            false
+        }
+    });
+    let mut parsed = baseline(&normalized)?;
+    if extended {
+        parsed
+            .sidecar
+            .capabilities
+            .push("chat.appendMessage".to_owned());
+    }
+    Ok(parsed)
+}
+
 pub fn parse_g5d_agent_fixture_system_status_v1(
     value: &Value,
 ) -> Result<SystemStatusG5DV1, G5DAdmissionContractError> {

@@ -12,7 +12,8 @@ use hello_agent_protocol::agent_adapter_v1::{
     validate_agent_adapter_payload_v1, G5D_AGENT_FIXTURE_CAPABILITIES_V1,
 };
 use hello_agent_protocol::lifecycle_g5d_v1::{
-    parse_g5d_agent_fixture_system_status_v1, parse_g5d_product_system_status_v1,
+    parse_current_agent_fixture_system_status_v1 as parse_g5d_agent_fixture_system_status_v1,
+    parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1,
     validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
 };
 use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5D_PRODUCT_CAPABILITIES_V1};
@@ -112,6 +113,7 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         ready.capabilities,
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
+            .chain(std::iter::once(&"chat.appendMessage"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -378,6 +380,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
         ready.capabilities,
         G5D_AGENT_FIXTURE_CAPABILITIES_V1
             .iter()
+            .chain(std::iter::once(&"chat.appendMessage"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -950,6 +953,7 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
         ready.capabilities,
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
+            .chain(std::iter::once(&"chat.appendMessage"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -1170,6 +1174,40 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
     assert!(
         matches!(receive_envelope(&envelopes), EnvelopeV1::Event(event) if event.event == "chat.eventAppended")
     );
+    let followup = serde_json::json!({
+        "projectId":project_id,"chatId":chat_a["chatId"],"taskId":chat_a["taskId"],
+        "worktreeId":chat_a["worktreeId"],"workspaceIdentity":chat_a["workspaceIdentity"],
+        "clientMessageId":"user_0123456789abcdef0123456789abcdef",
+        "expectedEventSequence":1,"text":"Follow-up through the real wire",
+    });
+    let mut first_message = None;
+    for request_id in ["req_followup_first", "req_followup_retry"] {
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            request_id,
+            "chat.appendMessage",
+            followup.clone(),
+        );
+        let EnvelopeV1::Response(response) = receive_envelope(&envelopes) else {
+            panic!("follow-up response");
+        };
+        assert!(response.ok, "{:?}", response.error);
+        let message = response.result.unwrap();
+        validate_g5_payload_v1(
+            "chatAppendMessageTranscript",
+            &serde_json::json!({"request":followup,"message":message}),
+        )
+        .unwrap();
+        if let Some(first) = &first_message {
+            assert_eq!(&message, first);
+        } else {
+            assert!(
+                matches!(receive_envelope(&envelopes), EnvelopeV1::Event(event) if event.event == "chat.eventAppended" && event.payload == message)
+            );
+            first_message = Some(message);
+        }
+    }
     let prepared_b = prepare_workspace(
         &mut stdin,
         &envelopes,

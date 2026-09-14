@@ -501,7 +501,6 @@ impl G5Manager {
     }
 
     /// Staged durable follow-up operation. Does not start or interrupt a provider.
-    #[allow(dead_code)] // Wire/bridge activation follows persistence verification.
     pub fn append_user_message(
         &self,
         storage: &mut Storage,

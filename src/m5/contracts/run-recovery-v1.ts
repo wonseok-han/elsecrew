@@ -494,7 +494,7 @@ export function validateChatCreateRequestV1(value: unknown): ChatCreateRequestV1
   return object as unknown as ChatCreateRequestV1;
 }
 
-/** Follow-up contract only; not yet an advertised bridge method. */
+/** Durable follow-up storage request; does not start or feed an agent run. */
 export interface ChatAppendMessageRequestV1 {
   projectId: string;
   chatId: string;
