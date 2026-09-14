@@ -160,7 +160,7 @@
 
 ## 9. M5 G1~G5D 전환 골격·채팅 작업대
 
-후속 메시지 저장 통신은 `chat.appendMessage`를 지원한다. 현행 sidecar는 기존 exact G5D 제품/agent-fixture capability 배열의 마지막에 이 capability만 추가하며, Electron client는 해당 확장을 협상한 경우에만 요청한다. 기존 baseline 상수와 검증기는 그대로이고 current 상태 검증기는 정확한 baseline+선택적 suffix만 허용한다. 요청의 전체 채팅/작업 공간 소속·client message ID·예상 durable 순서·본문을 저장 결과와 대조하며, 동일 요청 재시도는 같은 메시지를 반환하고 이벤트를 중복 발행하지 않는다. 이 단계는 main↔sidecar 통신까지이며 preload·renderer 전송 UI와 다음 모델 실행 연결은 아직 미완료다. 메시지 저장은 provider 실행/실행 중 stdin 전달을 의미하지 않는다.
+후속 메시지 저장 통신은 `chat.appendMessage`를 지원한다. 현행 sidecar는 기존 exact G5D 제품/agent-fixture capability 배열의 마지막에 이 capability만 추가하며, Electron client는 해당 확장을 협상한 경우에만 요청한다. 기존 baseline 상수와 검증기는 그대로이고 current 상태 검증기는 정확한 baseline+선택적 suffix만 허용한다. V7 preload의 고정 `appendChatMessage` 채널과 팀 대화 입력창이 연결됐고 V4~V6는 유지된다. 요청의 전체 채팅/작업 공간 소속·client message ID·예상 durable 순서·본문을 저장 결과와 대조하며, 동일 요청 재시도는 같은 메시지를 반환하고 이벤트를 중복 발행하지 않는다. 초안과 불확실한 요청은 controller 수명 내에서 채팅별로 보존하며 앱 재시작까지의 초안 영속 저장은 아직 없다. 명시적 무기록 순서 충돌만 기록을 새로 읽고 같은 ID의 예상 순서를 갱신한다. 저장된 메시지는 다음 실제 실행의 inputMessageIds에 포함되지만, 실제 provider 활성화는 별도 미완료이고 메시지 저장 자체는 실행/실행 중 stdin 전달을 의미하지 않는다.
 
 Electron main은 현재 main window의 main frame과 정확한 허용 origin만 IPC에 접근시키고 popup·webview·외부 navigation을 차단한다. `app://m5` 자산은 credential/port/query/fragment 없는 authority와 renderer 내부의 기존 regular file만 허용하며 잘못된 escape·경로 이탈·Windows 절대경로도 거부한다. `02dbaeb`의 VM 실행 회귀는 실제 main의 등록 callback을 호출해 이 경계를 검증한다. 이는 Electron/OS 자체의 sandbox·CSP·fuse 강제나 실제 패키지/Windows 검증을 대신하지 않는다.
 

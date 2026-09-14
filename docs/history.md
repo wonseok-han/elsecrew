@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (V7 후속 메시지 입력창 연결)
+
+- **직접 구현**: clean `ee9dd0d`에서 V7의 고정 append IPC·preload·renderer 경계와 팀 대화 입력창을 연결했다. V4~V6는 유지하고 V7도 storage admission 완료 전 쓰기를 차단한다. 채팅별 초안·불확실한 요청을 분리해 전송 중 새 입력과 채팅 전환 중 늦은 응답을 보존하고, 응답/event 중복은 기존 merge로 처리한다. 명시적 무기록 순서 충돌만 새로 읽은 순서로 같은 메시지 ID를 재사용하며 불확실한 결과는 원래 요청 그대로 재시도한다.
+- **검증·검토**: 채팅/공개 이벤트/admission 39/39, bridge 44/44, scaffold 5/5, Chromium renderer smoke 2/2, TypeScript noEmit·renderer build PASS. 실제 Chromium에서 채팅 전환→본문 입력→추가→한 번 표시·입력 지우기를 확인했다. 격리 환경의 Electron 실행 실패는 허용된 GUI 실행으로 재검증했고 초기 TS/구버전 scaffold 기대값 오류는 수정했다. 독립 검토에서 추가 지적 없음이다. Karpathy 지침에 따라 저장·메시지 병합 계약을 재사용했다.
+- **경계·다음**: 후속 내용은 대화에 저장되며 진행 중인 에이전트 stdin으로 보내지 않는다. 초안은 controller 수명 안에서만 보존된다. 실제 provider 연결·로그인 선택, 작업 간 인계, 원본 적용/복구·guided start·G6/Windows/출시는 여전히 남는다. 패키지 smoke의 ready 기대값이 구형 exact D1에 고정된 것을 확인해 다음 통합 QA에서 새 명시적 suffix에 맞춰 갱신해야 한다. 전체 패키지/누적 게이트를 이번 검사로 대신하지 않는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (후속 메시지 sidecar 통신 연결)
 
 - **직접 구현**: clean `a26faec`에서 기존 저장 writer를 `chat.appendMessage`로 dispatch하고 Electron client 요청/결과 검증을 연결했다. exact G5D baseline은 보존하며 마지막 선택적 capability만 협상한다. 이전 sidecar에는 요청하지 않고 잘못된 순서·중복·미지원 baseline을 거부한다. current Rust/TS 상태 파서는 이 확장과 기존 형식을 지원하되 최초 ready와 status의 신원/기능 목록 일치는 유지한다. storage admission·종료 차단을 우회하지 않으며 모델을 실행하지 않는다.

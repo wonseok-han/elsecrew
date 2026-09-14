@@ -331,6 +331,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatCreate, invoke((client, input: ChatCreateRequestV1) => client.createChat(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatList, invoke((client, input: ChatListRequestV1) => client.listChats(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.chatGet, invoke((client, input: ChatGetRequestV1) => client.getChat(input)));
+  ipcMain.handle(M5_BRIDGE_V7_CHANNELS.chatAppendMessage, invoke((client, input: ChatAppendMessageRequestV1) => client.appendChatMessage(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runStartFixture, invoke((client, input: FixtureRunStartRequestV1) => client.startFixtureRun(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.runCancel, invoke((client, input: RunCancelRequestV1) => client.cancelRun(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryList, invoke((client, input: PageRequestV1) => client.listRecoveries(input)));
@@ -403,3 +404,5 @@ export {
   m5DataDirectory,
   sidecarLaunch,
 };
+import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
+import type { ChatAppendMessageRequestV1 } from "../src/m5/contracts/run-recovery-v1.ts";

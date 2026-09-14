@@ -112,6 +112,15 @@ app.whenReady().then(async () => {
     if (!next().disabled || !document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('1 /')", "reopened diff resets page")};
+    document.querySelector('.m5-chat-chip').click();
+    await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
+    const input = document.querySelector('#m5-followup-text');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '설명을 추가해 주세요.');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await ${waitFor("!document.querySelector('.m5-followup button').disabled", "enabled follow-up submit")};
+    document.querySelector('.m5-followup button').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
+    if ([...document.querySelectorAll('.m5-message p')].filter(node => node.textContent === '설명을 추가해 주세요.').length !== 1) throw new Error('duplicate follow-up message');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   await window.close();

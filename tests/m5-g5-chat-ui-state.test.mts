@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { ChatUiController } from "../src/m5/chat-state.ts";
 import type { M5BridgeV3 } from "../src/m5/contracts/bridge-v3.ts";
+import type { M5BridgeV7 } from "../src/m5/contracts/bridge-v7.ts";
+import type { ChatAppendMessageRequestV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 import type { ChatRecordV1, ProjectRoleSettingsV1, RoleProfileV1, TeamMessageV1 } from "../src/m5/contracts/run-recovery-v1.ts";
 
 const roles: readonly RoleProfileV1[] = [
@@ -32,6 +34,103 @@ class FakeBridge {
   onChatEvent(listener: (event: TeamMessageV1) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit(event: TeamMessageV1) { for (const listener of this.listeners) listener(event); }
 }
+
+async function followupFixture() {
+  const calls: ChatAppendMessageRequestV1[] = [];
+  let complete!: (message: TeamMessageV1) => void;
+  let fail!: (error: Error) => void;
+  const bridge = Object.assign(new FakeBridge(), { version: 7 as const,
+    appendChatMessage(request: ChatAppendMessageRequestV1) {
+      calls.push(request);
+      return new Promise<TeamMessageV1>((resolve, reject) => { complete = resolve; fail = reject; });
+    },
+  });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV7);
+  controller.start();
+  await controller.openProject("project_a");
+  await controller.prepareSwitch("chat_a", true);
+  await controller.commitPrepared("chat_a", true);
+  bridge.emit({ schemaVersion: 1, messageId: "initial", chatId: "chat_a", taskId: "task_chat_a", worktreeId: "worktree_chat_a", eventSequence: 1, kind: "user", roleId: null, runId: null, text: "first", createdAt: "2026-09-14T00:00:00Z" });
+  return { controller, bridge, calls, fail: (error: Error) => fail(error), complete: () => {
+    const request = calls[calls.length - 1]!;
+    const message: TeamMessageV1 = { schemaVersion: 1, messageId: request.clientMessageId, chatId: request.chatId, taskId: request.taskId, worktreeId: request.worktreeId, eventSequence: request.expectedEventSequence + 1, kind: "user", roleId: null, runId: null, text: request.text, createdAt: "2026-09-14T00:00:01Z" };
+    complete(message);
+    return message;
+  } };
+}
+
+test("follow-up preserves newer input and deduplicates the response/event pair", async () => {
+  const f = await followupFixture();
+  f.controller.editFollowup("send this");
+  await f.controller.appendFollowup(false);
+  assert.equal(f.calls.length, 0);
+  const pending = f.controller.appendFollowup(true);
+  await f.controller.appendFollowup(true);
+  assert.equal(f.calls.length, 1);
+  f.controller.editFollowup("newer draft");
+  const message = f.complete();
+  f.bridge.emit(message);
+  await pending;
+  assert.equal(f.controller.snapshot().messages.length, 2);
+  assert.equal(f.controller.snapshot().followups?.chat_a?.text, "newer draft");
+  assert.equal(f.controller.snapshot().followups?.chat_a?.request, null);
+});
+
+test("follow-up retries the exact unknown-outcome request and isolates a switched chat", async () => {
+  const f = await followupFixture();
+  f.controller.editFollowup("original");
+  const first = f.controller.appendFollowup(true);
+  f.fail(new Error("connection lost"));
+  await first;
+  f.controller.editFollowup("additional draft");
+  const retry = f.controller.appendFollowup(true);
+  assert.strictEqual(f.calls[1], f.calls[0]);
+  await f.controller.prepareSwitch("chat_b", true);
+  await f.controller.commitPrepared("chat_b", true);
+  f.controller.editFollowup("chat b input");
+  f.complete();
+  await retry;
+  assert.equal(f.controller.snapshot().activeChat?.chatId, "chat_b");
+  assert.equal(f.controller.snapshot().messages.length, 0);
+  assert.equal(f.controller.snapshot().followups?.chat_b?.text, "chat b input");
+  assert.equal(f.controller.snapshot().followups?.chat_a?.text, "additional draft");
+  assert.equal(f.controller.snapshot().followups?.chat_a?.sending, false);
+});
+
+test("follow-up clears unchanged input only after success and blocks invalid text or recovery", async () => {
+  const f = await followupFixture();
+  f.controller.editFollowup("가".repeat(6000));
+  await f.controller.appendFollowup(true);
+  assert.equal(f.calls.length, 0);
+  assert.ok(f.controller.snapshot().followups?.chat_a?.error);
+  f.controller.editFollowup("valid");
+  const pending = f.controller.appendFollowup(true);
+  f.complete();
+  await pending;
+  assert.equal(f.controller.snapshot().followups?.chat_a?.text, "");
+  f.bridge.chats[1] = { ...f.bridge.chats[1]!, state: "recoveryRequired" };
+  await f.controller.prepareSwitch("chat_b", true);
+  await f.controller.commitPrepared("chat_b", true);
+  f.controller.editFollowup("blocked");
+  await f.controller.appendFollowup(true);
+  assert.equal(f.calls.length, 1);
+});
+
+test("explicit stale-sequence rejection refreshes and rebases the same message ID", async () => {
+  const f = await followupFixture();
+  f.controller.editFollowup("follow up");
+  const pending = f.controller.appendFollowup(true);
+  const initial = f.controller.snapshot().messages[0]!;
+  f.bridge.getChat = async () => ({ chat: chat("chat_a"), afterEventSequence: 1, messages: [{ ...initial, messageId: "concurrent", eventSequence: 2, text: "new event" }], runs: [], nextEventSequence: null });
+  f.fail(new Error("dirtyWorktree: chat message sequence changed before append"));
+  await pending;
+  const retry = f.controller.appendFollowup(true);
+  assert.equal(f.calls[1]?.clientMessageId, f.calls[0]?.clientMessageId);
+  assert.equal(f.calls[1]?.expectedEventSequence, 2);
+  f.complete();
+  await retry;
+  assert.equal(f.controller.snapshot().messages.length, 3);
+});
 
 test("chat pagination preserves existing items, deduplicates overlap and retries failures", async () => {
   let calls = 0, fail = true;

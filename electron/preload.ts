@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { M5BridgeV6 } from "../src/m5/contracts/bridge-v6.ts";
+import type { M5BridgeV7 } from "../src/m5/contracts/bridge-v7.ts";
+import { validateChatAppendMessageRequestV1 } from "../src/m5/contracts/run-recovery-v1.ts";
+import { M5_BRIDGE_V7_CHANNELS } from "./ipc-channels.ts";
 import type { EventV1 } from "../src/m5/contracts/protocol-v1.ts";
 import {
   validateAgentCapabilitiesRequestV1,
@@ -28,8 +31,9 @@ import {
   validateWorkspaceSaveCommitInput, validateWorkspaceTreeInput,
 } from "./bridge-input.ts";
 
-const bridge: M5BridgeV6 = Object.freeze({
-  version: 6,
+const bridge: M5BridgeV7 = Object.freeze({
+  version: 7,
+  appendChatMessage: (input) => ipcRenderer.invoke(M5_BRIDGE_V7_CHANNELS.chatAppendMessage, validateChatAppendMessageRequestV1(input)),
   getSystemStatus: () => ipcRenderer.invoke(M5_INTERNAL_CHANNELS_V1.systemGetStatus),
   getStorageStatus: (input) => ipcRenderer.invoke(M5_BRIDGE_V6_CHANNELS.storageGetStatus, validateStorageStatusRequestV1(input)),
   prepareQuit: () => ipcRenderer.invoke(M5_INTERNAL_CHANNELS_V1.appPrepareQuit),

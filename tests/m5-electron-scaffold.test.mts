@@ -102,8 +102,8 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.match(source("electron/preload.ts"), /ipcRenderer\.on\(M5_BRIDGE_V5_CHANNELS\.agentRunStateChanged/);
   assert.match(source("electron/preload.ts"), /validateAgentRunStateChangedV1\(payload\.event\)/);
   assert.match(source("electron/preload.ts"), /validateAgentPublicEventV1\(payload\.event\)/);
-  assert.match(source("electron/preload.ts"), /const bridge: M5BridgeV6 = Object\.freeze\(\{/);
-  assert.match(source("electron/preload.ts"), /version: 6/);
+  assert.match(source("electron/preload.ts"), /const bridge: M5BridgeV7 = Object\.freeze\(\{/);
+  assert.match(source("electron/preload.ts"), /version: 7/);
   assert.match(source("electron/preload.ts"), /getStorageStatus: \(input\) => ipcRenderer\.invoke\(M5_BRIDGE_V6_CHANNELS\.storageGetStatus, validateStorageStatusRequestV1\(input\)\)/);
   assert.match(source("electron/main.ts"), /ipcMain\.handle\(M5_BRIDGE_V6_CHANNELS\.storageGetStatus/);
   assert.match(source("pnpm-workspace.yaml"), /^nodeLinker: hoisted$/m);

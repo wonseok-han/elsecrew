@@ -6,19 +6,19 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { M5_BRIDGE_V6_METHODS } from "../src/m5/contracts/bridge-v6.ts";
+import { M5_BRIDGE_V7_METHODS } from "../src/m5/contracts/bridge-v7.ts";
 import { parseG5DProductSystemStatusV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron") as string;
 
-test("renderer smoke preload exposes the complete V6 bridge with ready admission and enforces snapshot-before-tree", async () => {
+test("renderer smoke preload exposes the complete V7 bridge with ready admission and enforces snapshot-before-tree", async () => {
   const window: { m5?: Record<string, unknown> } = {};
   runInNewContext(readFileSync(resolve("tests/m5-renderer-smoke-preload.cjs"), "utf8"), { window, Set, Error });
   const bridge = window.m5;
   assert.ok(bridge);
-  assert.equal(bridge.version, 6);
-  assert.deepEqual(Object.keys(bridge).sort(), ["version", ...M5_BRIDGE_V6_METHODS].sort());
+  assert.equal(bridge.version, 7);
+  assert.deepEqual(Object.keys(bridge).sort(), ["version", ...M5_BRIDGE_V7_METHODS].sort());
   const getSystemStatus = bridge.getSystemStatus as () => Promise<unknown>;
   const getProjectTree = bridge.getProjectTree as (input: unknown) => Promise<unknown>;
   const createProjectWorktree = bridge.createProjectWorktree as (input: unknown) => Promise<unknown>;

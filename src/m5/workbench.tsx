@@ -7,8 +7,6 @@ import {
   type WorkbenchPanel,
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
-import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
-import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
@@ -38,12 +36,12 @@ function loadMonaco(): Promise<MonacoApi> {
 }
 
 /** Poll rather than subscribe: G5D deliberately adds no public storage-admission event. */
-function useStorageAdmission(bridge: M5BridgeV4 | M5BridgeV5 | M5BridgeV6): AdmissionView {
-  const [admission, setAdmission] = useState<AdmissionView>(() => bridge.version === 6 ? "checking" : "ready");
+function useStorageAdmission(bridge: SupportedM5Bridge): AdmissionView {
+  const [admission, setAdmission] = useState<AdmissionView>(() => bridge.version >= 6 ? "checking" : "ready");
   useEffect(() => {
     const v6 = bridge as Partial<M5BridgeV6>;
     const getSystemStatus = v6.getSystemStatus;
-    if (v6.version !== 6 || typeof getSystemStatus !== "function") { setAdmission("ready"); return; }
+    if (bridge.version < 6 || typeof getSystemStatus !== "function") { setAdmission("ready"); return; }
     const poller = new StorageAdmissionPoller(getSystemStatus, setAdmission);
     poller.start();
     return () => poller.stop();
@@ -167,7 +165,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 
       {settingsOpen && chat.settings && <RoleSettings settings={chat.settings} disabled={!admissionReady} onSave={(roles) => void chatController.updateSettings(roles)} onClose={() => setSettingsOpen(false)} />}
 
-      <WorkbenchDock conversation={chat.activeChat ? <TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} /> : undefined}>
+      <WorkbenchDock conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
         <aside className="m5-panel m5-files" aria-label="파일">
           <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
             파일
@@ -253,6 +251,20 @@ function RoleSettings({ settings, disabled, onSave, onClose }: { settings: NonNu
   useEffect(() => setRoles(settings.roles), [settings]);
   const change = (index: number, field: keyof RoleProfileV1, value: string | null) => setRoles((old) => old.map((role, current) => current === index ? { ...role, [field]: value } : role));
   return <section className="m5-settings" aria-label="프로젝트 역할과 모델 설정"><header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" onClick={onClose}>작업대로 돌아가기</button></header><p>모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.</p><div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card"><strong>{({ planning: "기획", coding: "코딩", review: "검토" })[role.roleId]}</strong><label>실행 환경<select disabled={disabled} value={role.runtime} onChange={(event) => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label><label>정확한 모델 이름<input disabled={disabled} value={role.modelSelector} onChange={(event) => change(index, "modelSelector", event.target.value)} /></label><label>추론 수준<select disabled={disabled} value={role.reasoningEffort ?? ""} onChange={(event) => change(index, "reasoningEffort", event.target.value || null)}><option value="">기본값</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><span>권한: {role.permission === "readOnly" ? "읽기 전용" : "격리된 작업 복사본에만 쓰기"}</span></article>)}</div><button type="button" disabled={disabled} onClick={() => onSave(roles)}>새 채팅 설정 저장</button></section>;
+}
+
+function FollowupComposer({ controller, chat, admissionReady }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean }) {
+  const draft = chat.followups?.[chat.activeChat!.chatId];
+  const allowed = admissionReady && controller.canAppendFollowup();
+  return <form className="m5-followup" aria-label="후속 메시지" onSubmit={event => { event.preventDefault(); void controller.appendFollowup(admissionReady); }}>
+    <label htmlFor="m5-followup-text">추가로 알려줄 내용</label>
+    <textarea id="m5-followup-text" value={draft?.text ?? ""} onChange={event => controller.editFollowup(event.target.value)} placeholder="계획에 보완할 점이나 다음에 할 일을 적어 주세요." rows={3} />
+    <p>대화에 저장해요. 진행 중인 에이전트에 바로 전달되지는 않으며, 다음 실제 실행에서 함께 사용해요.</p>
+    {draft?.error && <div role="alert"><p>저장 여부를 확인하지 못했어요. 입력은 보존했어요. 다시 시도하면 같은 메시지로 확인해요.</p><details><summary>기술 정보</summary><pre>{draft.error}</pre></details></div>}
+    {draft?.request && !draft.sending && <details><summary>다시 확인할 메시지</summary><p>{draft.request.text}</p></details>}
+    <button type="submit" disabled={!allowed || draft?.sending || (!draft?.request && !draft?.text.trim())}>{draft?.sending ? "저장 확인 중…" : draft?.request ? "같은 메시지 다시 확인" : "대화에 추가"}</button>
+    {!allowed && <p>현재 앱 또는 작업 공간 상태에서는 메시지를 추가할 수 없어요.</p>}
+  </form>;
 }
 
 function TeamTimeline({ controller, chat, admissionReady }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean }) {

@@ -6,6 +6,7 @@ import { resolveM5Bridge } from "../src/m5/bridge-boundary.ts";
 import { M5_BRIDGE_V4_METHODS } from "../src/m5/contracts/bridge-v4.ts";
 import { M5_BRIDGE_V5_METHODS } from "../src/m5/contracts/bridge-v5.ts";
 import { M5_BRIDGE_V6_METHODS } from "../src/m5/contracts/bridge-v6.ts";
+import { M5_BRIDGE_V7_METHODS } from "../src/m5/contracts/bridge-v7.ts";
 import type { SystemStatusG5DV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 
 function status(state: "verifying" | "ready" | "failed") {
@@ -61,9 +62,16 @@ function bridge(version: 4 | 5 | 6): Record<string, unknown> {
 test("G5D renderer bridge boundary blocks absent, unknown, and incomplete bridges before any durable method", () => {
   const calls: string[] = [];
   const incompleteV6 = { version: 6, getSystemStatus: () => calls.push("status") };
-  const unknownV7 = { ...bridge(6), version: 7 };
-  for (const value of [undefined, unknownV7, incompleteV6]) assert.equal(resolveM5Bridge(value), null);
+  const incompleteV7 = { ...bridge(6), version: 7 };
+  for (const value of [undefined, incompleteV7, { ...bridge(6), version: 8 }, incompleteV6]) assert.equal(resolveM5Bridge(value), null);
   assert.deepEqual(calls, []);
+});
+
+test("complete V7 adds only follow-up and still requires all admission methods", () => {
+  assert.deepEqual(M5_BRIDGE_V7_METHODS, [...M5_BRIDGE_V6_METHODS, "appendChatMessage"]);
+  const v7 = { ...bridge(6), version: 7, appendChatMessage: () => {} };
+  assert.equal(resolveM5Bridge(v7), v7);
+  assert.equal(resolveM5Bridge({ ...v7, getStorageStatus: undefined }), null);
 });
 
 test("G5D renderer bridge boundary preserves complete V4 and V5 legacy bridges", () => {

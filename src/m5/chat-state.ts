@@ -2,6 +2,15 @@ import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
 import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
+import type { M5BridgeV7 } from "./contracts/bridge-v7.ts";
+import { validateChatAppendMessageRequestV1, validateChatAppendMessageTranscriptV1, type ChatAppendMessageRequestV1 } from "./contracts/run-recovery-v1.ts";
+
+export interface FollowupDraft {
+  text: string;
+  request: ChatAppendMessageRequestV1 | null;
+  sending: boolean;
+  error: string | null;
+}
 import { isAgentChatDetailPageV1, type AgentRecoveryRecordV1, type AgentRunRecordV1, type AgentPublicEventV1, type AgentRunStateChangedV1 } from "./contracts/agent-adapter-v1.ts";
 import type {
   ChatRecordV1, ProjectRoleSettingsV1, RecoveryRecordV1, RoleIdV1, RoleProfileV1,
@@ -9,6 +18,7 @@ import type {
 } from "./contracts/run-recovery-v1.ts";
 
 export interface ChatUiSnapshot {
+  followups?: Readonly<Record<string, FollowupDraft>>;
   projectId: string | null;
   settings: ProjectRoleSettingsV1 | null;
   chats: readonly ChatRecordV1[];
@@ -31,7 +41,7 @@ export interface ChatUiSnapshot {
   error: { message: string; detail: string } | null;
 }
 
-type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6;
+type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6 | M5BridgeV7;
 type ChatDetail = Awaited<ReturnType<M5BridgeV4["getChat"]>>;
 
 /** Renderer-only projection. The sidecar owns all durable identity, state transitions and CAS. */
@@ -50,6 +60,68 @@ export class ChatUiController {
 
   constructor(bridge: M5ChatBridge) { this.#bridge = bridge; }
   snapshot(): ChatUiSnapshot { return this.#state; }
+  canAppendFollowup(): boolean {
+    const chat = this.#state.activeChat;
+    return !this.#disposed && this.#bridge.version === 7 && Boolean(chat)
+      && !this.#state.switching && !this.isRecoveryBlocked()
+      && ["draft", "running", "waitingForUser", "reviewReady", "needsAttention", "canceled"].includes(chat!.state);
+  }
+  editFollowup(text: string): void {
+    const chat = this.#state.activeChat;
+    if (!chat || this.#disposed) return;
+    const draft = this.#state.followups?.[chat.chatId] ?? { text: "", request: null, sending: false, error: null };
+    this.#setFollowup(chat.chatId, { ...draft, text });
+  }
+  async appendFollowup(admissionReady: boolean): Promise<void> {
+    const chat = this.#state.activeChat;
+    const bridge = this.#bridge;
+    const draft = chat && this.#state.followups?.[chat.chatId];
+    if (!admissionReady || !chat || bridge.version !== 7 || !draft || draft.sending || !this.canAppendFollowup() || (!draft.request && !draft.text.trim())) return;
+    const generation = this.#generation;
+    let request: ChatAppendMessageRequestV1;
+    try {
+      request = draft.request ?? validateChatAppendMessageRequestV1({
+        projectId: chat.projectId, chatId: chat.chatId, taskId: chat.taskId,
+        worktreeId: chat.worktreeId, workspaceIdentity: chat.workspaceIdentity,
+        clientMessageId: `user_${crypto.randomUUID().replace(/-/g, "")}`,
+        expectedEventSequence: this.#state.messages[this.#state.messages.length - 1]?.eventSequence ?? 0,
+        text: draft.text,
+      });
+    } catch (error) {
+      this.#setFollowup(chat.chatId, { ...draft, error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    this.#setFollowup(chat.chatId, { ...draft, request, sending: true, error: null });
+    try {
+      const message = await bridge.appendChatMessage(request);
+      validateChatAppendMessageTranscriptV1({ request, message });
+      if (this.#disposed) return;
+      const latest = this.#state.followups?.[chat.chatId];
+      if (latest?.request !== request) return;
+      this.#setFollowup(chat.chatId, { text: latest.text === request.text ? "" : latest.text, request: null, sending: false, error: null });
+      if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#onEvent(message);
+    } catch (error) {
+      if (this.#disposed) return;
+      const latest = this.#state.followups?.[chat.chatId];
+      if (latest?.request !== request) return;
+      // Only the explicit no-write sequence rejection can rebase the same ID.
+      // Unknown outcomes retain the exact request for deduplicated retry.
+      let retry = request;
+      const detail = error instanceof Error ? error.message : String(error);
+      if (detail.includes("chat message sequence changed before append") && this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) {
+        try {
+          await this.#hydrateChat(chat, generation);
+          const sequence = this.#state.messages[this.#state.messages.length - 1]?.eventSequence;
+          if (sequence && this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) retry = { ...request, expectedEventSequence: sequence };
+        } catch { /* Keep the original request when refresh cannot be verified. */ }
+      }
+      const current = this.#state.followups?.[chat.chatId];
+      if (current?.request === request) this.#setFollowup(chat.chatId, { ...current, request: retry, sending: false, error: detail.slice(0, 2048) });
+    }
+  }
+  #setFollowup(chatId: string, draft: FollowupDraft): void {
+    this.#set({ followups: { ...this.#state.followups, [chatId]: draft } });
+  }
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
   start(): void {
     if (this.#unsubscribe) return;

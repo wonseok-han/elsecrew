@@ -4,6 +4,8 @@ const chatListeners = new Set();
 const agentPublicEventListeners = new Set();
 const agentRunStateListeners = new Set();
 let snapshotCreated = false;
+const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
+const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 
 const unexpected = (method) => async () => { throw new Error(`renderer smoke fixture did not expect ${method}`); };
 const unsubscribe = (listeners, listener) => {
@@ -12,7 +14,13 @@ const unsubscribe = (listeners, listener) => {
 };
 
 window.m5 = {
-  version: 6,
+  version: 7,
+  appendChatMessage: async (request) => {
+    const message = { ...smokeMessages[0], messageId: request.clientMessageId, text: request.text, eventSequence: request.expectedEventSequence + 1 };
+    smokeMessages.push(message);
+    for (const listener of chatListeners) listener(message);
+    return message;
+  },
   getSystemStatus: async () => ({
     schemaVersion: 1,
     state: "shellReady",
@@ -120,14 +128,14 @@ window.m5 = {
     return { projectId: "smoke_project", path: "src/example.ts", kind: "modified", oldPath: null, baseVersion: "sha256:" + "a".repeat(64), worktreeVersion: "sha256:" + "b".repeat(64), byteLength: text.length, stream: { streamId: "smoke_diff", chunkBytes: 262144 } };
   },
   onProjectEvent: () => () => {},
-  getWorkspaceTree: unexpected("getWorkspaceTree"),
+  getWorkspaceTree: async (input) => ({ ...input, entries: [], nextCursor: null }),
   closeWorkspace: unexpected("closeWorkspace"),
   readWorkspaceFile: unexpected("readWorkspaceFile"),
   beginWorkspaceFileSave: unexpected("beginWorkspaceFileSave"),
   appendWorkspaceFileSaveChunk: unexpected("appendWorkspaceFileSaveChunk"),
   commitWorkspaceFileSave: unexpected("commitWorkspaceFileSave"),
-  watchWorkspaceFiles: unexpected("watchWorkspaceFiles"),
-  getWorkspaceDiffSummary: unexpected("getWorkspaceDiffSummary"),
+  watchWorkspaceFiles: async (input) => ({ ...input, watching: true }),
+  getWorkspaceDiffSummary: async (input) => ({ ...input, baseCommit: "a".repeat(40), entries: [] }),
   getWorkspaceDiffFile: unexpected("getWorkspaceDiffFile"),
   onWorkspaceEvent: (listener) => unsubscribe(workspaceListeners, listener),
   prepareChatWorkspace: unexpected("prepareChatWorkspace"),
@@ -141,8 +149,8 @@ window.m5 = {
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
-  listChats: async ({ projectId }) => ({ projectId, items: [], nextCursor: null }),
-  getChat: unexpected("getChat"),
+  listChats: async ({ projectId }) => ({ projectId, items: [smokeChat], nextCursor: null }),
+  getChat: async ({ afterEventSequence }) => ({ chat: smokeChat, afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > afterEventSequence), runs: [], nextEventSequence: null }),
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),
   listRecoveries: async () => ({ items: [], nextCursor: null }),
