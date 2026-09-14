@@ -172,12 +172,16 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               <button className="m5-root" type="button" title={snapshot.project.root} onClick={() => void controller.loadTree("")}>{snapshot.treeParent || snapshot.project.root}</button>
               <div className="m5-file-list">
                 {snapshot.tree.map((entry) => (
-                  <button key={entry.path} type="button" className="m5-file-row" onClick={() => entry.kind === "file" ? void controller.openFile(entry.path) : entry.kind === "directory" ? void controller.loadTree(entry.path) : undefined} disabled={!admissionReady || entry.kind === "symlink"}>
-                    <span aria-hidden="true">{entry.kind === "directory" ? "▸" : entry.kind === "symlink" ? "↗" : "·"}</span>
+                  <button key={entry.path} type="button" className="m5-file-row" data-kind={entry.kind} onClick={() => entry.kind === "file" ? void controller.openFile(entry.path) : entry.kind === "directory" ? void controller.loadTree(entry.path) : undefined} disabled={!admissionReady || entry.kind === "symlink"}>
                     {entry.name}
                   </button>
                 ))}
               </div>
+              <nav className="m5-tree-pages" aria-label="파일 목록 페이지">
+                <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>처음으로</button>
+                <span>{snapshot.treeLoading ? "불러오는 중…" : `${snapshot.treePage}페이지`}</span>
+                <button type="button" disabled={!admissionReady || snapshot.treeLoading || !snapshot.treeNextCursor} onClick={() => void controller.loadNextTreePage()}>다음 목록</button>
+              </nav>
             </>
           ) : <Empty text="프로젝트를 고르면 파일을 표시해요." />}
         </aside>

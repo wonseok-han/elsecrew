@@ -25,6 +25,67 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("tree pagination replaces each bounded page and resets on folder navigation", async () => {
+  class PagedBridge extends FakeBridge {
+    requests: Array<{ parentPath: string; cursor: string | null }> = [];
+    async getProjectTree({ parentPath = "", cursor = null }: { projectId: string; parentPath?: string; cursor?: string | null }): Promise<TreePageV1> {
+      this.requests.push({ parentPath, cursor });
+      return { projectId: "project_01", parentPath, entries: Array.from({ length: 500 }, (_, i) => ({ kind: "file" as const, name: `${cursor ?? "first"}-${i}`, path: `${parentPath ? `${parentPath}/` : ""}${cursor ?? "first"}-${i}` })), nextCursor: cursor ? null : "page2" };
+    }
+  }
+  const bridge = new PagedBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject(); await controller.loadNextTreePage();
+    assert.equal(controller.snapshot().tree.length, 500);
+    assert.equal(controller.snapshot().tree[0].name, "page2-0");
+    assert.equal(controller.snapshot().treePage, 2);
+    assert.equal(controller.snapshot().treeNextCursor, null);
+    await controller.loadNextTreePage(); assert.equal(bridge.requests.length, 2);
+    await controller.loadTree("folder");
+    assert.equal(controller.snapshot().treePage, 1);
+    assert.deepEqual(bridge.requests.at(-1), { parentPath: "folder", cursor: null });
+  } finally { controller.dispose(); }
+});
+
+test("late tree page cannot replace a newer folder, and repeated next clicks are coalesced", async () => {
+  class DelayedBridge extends FakeBridge {
+    pending = deferred<TreePageV1>(); nextCalls = 0;
+    async getProjectTree({ parentPath = "", cursor = null }: { projectId: string; parentPath?: string; cursor?: string | null }): Promise<TreePageV1> {
+      if (cursor) { this.nextCalls++; return this.pending.promise; }
+      return { projectId: "project_01", parentPath, entries: [], nextCursor: parentPath ? null : "next" };
+    }
+  }
+  const bridge = new DelayedBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    const pending = controller.loadNextTreePage(); await controller.loadNextTreePage();
+    assert.equal(bridge.nextCalls, 1);
+    await controller.loadTree("new-folder");
+    bridge.pending.resolve({ projectId: "project_01", parentPath: "", entries: [], nextCursor: "stale" }); await pending;
+    assert.equal(controller.snapshot().treeParent, "new-folder");
+    assert.equal(controller.snapshot().treeNextCursor, null);
+    assert.equal(controller.snapshot().treeLoading, false);
+  } finally { controller.dispose(); }
+});
+
+test("failed next page preserves the current list and permits retry", async () => {
+  class FailingBridge extends FakeBridge {
+    failNext = true;
+    async getProjectTree({ cursor = null }: { projectId: string; cursor?: string | null }): Promise<TreePageV1> {
+      if (cursor && this.failNext) throw new Error("page unavailable");
+      return { projectId: "project_01", parentPath: "", entries: [], nextCursor: cursor ? null : "next" };
+    }
+  }
+  const bridge = new FailingBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject(); await controller.loadNextTreePage();
+    assert.equal(controller.snapshot().treePage, 1); assert.equal(controller.snapshot().treeLoading, false);
+    assert.equal(controller.snapshot().treeNextCursor, "next");
+    bridge.failNext = false; await controller.loadNextTreePage();
+    assert.equal(controller.snapshot().treePage, 2);
+  } finally { controller.dispose(); }
+});
+
 function snapshotManifest(projectId: string, canonicalGitRoot: string): WorktreeManifestV1 {
   return {
     schemaVersion: 1,

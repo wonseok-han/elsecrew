@@ -33,6 +33,9 @@ export interface EditorSnapshot {
   workspace: ChatWorkspaceRefV1 | null;
   tree: readonly TreeEntryV1[];
   treeParent: string;
+  treeNextCursor: string | null;
+  treePage: number;
+  treeLoading: boolean;
   tabs: readonly EditorTab[];
   activePath: string | null;
   panel: WorkbenchPanel;
@@ -117,6 +120,7 @@ export class ProjectEditorController {
   #controllerGeneration = 0;
   #projectEpoch = 0;
   #selectionGeneration = 0;
+  #treeGeneration = 0;
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
   #actionBlocked = false;
@@ -125,6 +129,9 @@ export class ProjectEditorController {
     workspace: null,
     tree: [],
     treeParent: "",
+    treeNextCursor: null,
+    treePage: 1,
+    treeLoading: false,
     tabs: [],
     activePath: null,
     panel: "files",
@@ -236,7 +243,7 @@ export class ProjectEditorController {
     if (!project || project.id !== workspace.projectId) { this.#setError("선택한 프로젝트와 채팅 작업 복사본이 맞지 않아요.", new Error("chat project identity mismatch")); return false; }
     const previous = this.#state;
     const epoch = ++this.#projectEpoch;
-    this.#set({ workspace, tree: [], treeParent: "", tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
+    this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
     try {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
       await this.#loadTree(project.id, epoch, "", true);
@@ -311,6 +318,9 @@ export class ProjectEditorController {
         workspace: null,
         tree: [],
         treeParent: "",
+        treeNextCursor: null,
+        treePage: 1,
+        treeLoading: false,
         tabs: [],
         activePath: null,
         diffSummary: null,
@@ -384,16 +394,25 @@ export class ProjectEditorController {
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
   }
 
-  async #loadTree(projectId: string, epoch: number, parentPath: string, propagate = false): Promise<void> {
+  async loadNextTreePage(): Promise<void> {
+    const { project, treeNextCursor, treeParent, treePage, treeLoading } = this.#state;
+    if (this.#actionBlocked || !project || !treeNextCursor || treeLoading) return;
+    await this.#loadTree(project.id, this.#projectEpoch, treeParent, false, treeNextCursor, treePage + 1);
+  }
+
+  async #loadTree(projectId: string, epoch: number, parentPath: string, propagate = false, cursor: string | null = null, pageNumber = 1): Promise<void> {
+    const generation = ++this.#treeGeneration;
+    this.#set({ treeLoading: true });
     try {
       const workspace = this.#state.workspace;
-      const page = workspace ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor: null }) : await this.#bridge.getProjectTree({ projectId, parentPath, cursor: null });
-      if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
+      const page = workspace ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor }) : await this.#bridge.getProjectTree({ projectId, parentPath, cursor });
+      if (!this.#isCurrent(projectId, epoch) || !sameWorkspace(this.#state.workspace, workspace) || generation !== this.#treeGeneration) return;
       // The sidecar contract already caps a page at 500. Keep the renderer bounded too.
       const entries = page.entries.slice(0, MAX_RENDERED_TREE_ENTRIES);
-      this.#set({ tree: entries, treeParent: page.parentPath, rescanRequired: false });
+      this.#set({ tree: entries, treeParent: page.parentPath, treeNextCursor: page.nextCursor, treePage: pageNumber, treeLoading: false, rescanRequired: false });
     } catch (error) {
-      if (!this.#isCurrent(projectId, epoch)) return;
+      if (!this.#isCurrent(projectId, epoch) || generation !== this.#treeGeneration) return;
+      this.#set({ treeLoading: false });
       this.#setError("파일 목록을 불러오지 못했어요.", error);
       if (propagate) throw error;
     }
@@ -521,6 +540,9 @@ export class ProjectEditorController {
         workspace: null,
         tree: [],
         treeParent: "",
+        treeNextCursor: null,
+        treePage: 1,
+        treeLoading: false,
         tabs: [],
         activePath: null,
         diffSummary: null,

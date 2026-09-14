@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (대형 파일 목록·renderer 성능 계측)
+
+- **기준·직접 구현**: `3691e57`에서 메인이 editor-state/workbench/styles·renderer 측정 fixture/runner·package script·관련 문서를 소유했다. 큰 프로젝트에서 nextCursor를 버려 첫 500개 이후 접근할 수 없던 결함에 페이지 탐색을 추가했다. 한 번에 500개만 표시하고 폴더 전환/늦은 응답/실패 재시도와 중복 클릭을 처리한다. tree 행의 장식은 CSS로 옮겨 페이지 내부 element를 500개 이하로 유지한다.
+- **계측**: production renderer·실제 Monaco에 context-isolated fixture bridge로 1,000폴더/10,000파일, 한국어 5MiB/100,000줄, 500파일/20,000변경줄/10MiB 합계 patch를 공급한다. 보이는 Chromium 창에서 warm-up 1회·10회 표시/입력/longtask를 관측한다. sidecar·실제 사용자 프로젝트·제품 sandbox는 변경하지 않는다.
+- **검증·다음**: editor/fixture Node 30/30, TypeScript noEmit, renderer build 통과. clean commit 뒤 실제 GUI 측정한다. 누적 G6와 실제 stream/RSS/packaged startup은 아직 완료가 아니다. 서브에이전트 호출 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (sidecar 시작 성능 실측)
 
 - **완료·증거**: clean `d97ee562c0e32efea36ea4d6116a63bfa12f4d84`의 release sidecar를 생성한 임시 빈 DB에서 migration bootstrap·warm-up 1회 뒤 10회 측정했다. shell-ready p95 3.863ms, storage-ready p95 52.596ms로 1,000ms 기준 PASS이며 모든 회차의 protocol/status/quit 응답, 정상 종료와 DB clean marker를 확인했다. 전후 HEAD 동일·clean. `.artifacts/m5-performance/sidecar-startup-2026-09-14T02-18-19.162Z-56332.json`에 표본·binary SHA·기기 정보를 보존했다. 정상 측정 뒤 해당 임시 DB 폴더는 정리했다.

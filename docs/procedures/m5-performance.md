@@ -14,6 +14,12 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ## 전체 측정값 판정
 
+### Renderer 대형 fixture 실측
+
+clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 production Vite renderer를 빌드한 뒤 보이는 Electron 창에서 warm-up 1회·측정 10회를 수행한다. 1,000개 폴더/10,000개 파일의 페이지 탐색, 한국어가 포함된 5 MiB·100,000줄 파일의 실제 Monaco 표시·입력, 500개 파일/20,000 changed lines/총 10 MiB diff의 요약·첫 파일 표시를 측정한다. 시각 완료는 조건 충족 후 두 animation frame으로 관측하며 renderer의 performance.now와 longtask observer를 사용한다. 입력 측정은 Electron의 실제 char event 전달과 dirty 상태·화면 텍스트 관측을 포함하므로 IPC 지연도 포함한 상한이다. 첫 diff는 전체 10 MiB patch 중 한 파일만 요청한다.
+
+데이터는 sidecar 대신 contextIsolation을 유지한 fixture bridge에서 공급한다. fixture preload의 Node require를 위해 테스트 창만 sandbox=false이며 제품 보안 설정을 변경하지 않는다. 이 측정은 실제 renderer와 Monaco의 성능 증거이고 packaged 앱 시작, 파일시스템/sidecar IPC 성능, IME 조합 입력, 실제 agent stream·전체 앱 RSS의 증거는 아니다. 결과와 실패 항목은 `.artifacts/m5-performance/renderer-*.json`에 기록한다. 기준 초과 시 exit 1이며 실패 숫자를 통과로 바꾸지 않는다.
+
 `pnpm run m5:measure:performance --input <measurement.json>`은 공급된 측정값을 검증한다. 계측기를 대신하지 않으며 unit fixture를 실측으로 사용하면 안 된다. `PASS`=0, 기준 초과 `FAIL`=1, 누락·잘못된 입력·불일치 HEAD `NOT_READY`=2이다. 알려진 기준 초과는 다른 항목 누락과 함께 있어도 FAIL로 남긴다. 최대 4 MiB regular UTF-8 JSON만 받는다. 출력 JSON은 stdout으로 전달한다.
 
 입력 schemaVersion은 1이며 필수 필드는 다음과 같다.

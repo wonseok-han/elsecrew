@@ -76,6 +76,9 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-file-row, .m5-change-row { display: flex; width: 100%; gap: 8px; border: 0; border-radius: 0; padding: 8px 11px; background: transparent; color: #d8e0eb; text-align: left; font-weight: 400; }
 .m5-file-row:hover:not(:disabled), .m5-change-row:hover { background: #293545; }
 .m5-file-row:disabled { color: #8c9aad; }
+.m5-file-row::before { content: "·"; }
+.m5-file-row[data-kind="directory"]::before { content: "▸"; }
+.m5-file-row[data-kind="symlink"]::before { content: "↗"; }
 
 .m5-editor { display: grid; grid-template-rows: auto auto minmax(0, 1fr); background: #11161d; }
 .m5-tab-list { display: flex; overflow: auto; border-bottom: 1px solid #303b49; }
@@ -91,6 +94,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-conflict { margin: 20px; padding: 16px; border: 1px solid #a7515b; border-radius: 8px; background: #312126; color: #ffd7d9; }
 
 .m5-refresh { margin: 10px; padding: 6px 9px; font-size: 12px; }
+.m5-tree-pages { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 8px; font-size: 12px; }
+.m5-tree-pages button { padding: 5px; font-size: 12px; }
 .m5-change-row { align-items: center; }
 .m5-change-kind { min-width: 58px; font-size: 11px; font-weight: 700; }
 .m5-kind-added { color: #72d39b; }.m5-kind-modified { color: #91c5ff; }.m5-kind-deleted { color: #fa8d97; }.m5-kind-renamed { color: #d5b5ff; }.m5-kind-binary { color: #f5c95d; }
