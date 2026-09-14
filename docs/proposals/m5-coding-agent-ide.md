@@ -462,7 +462,7 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **연결 전 남은 증거와 구현 경계**:
 
-**2026-09-14 격리 결정 대기**: [공식 인증 문서](https://learn.chatgpt.com/docs/auth)와 [환경 변수 문서](https://learn.chatgpt.com/docs/config-file/environment-variables)를 대조했다. 기존 인증 재사용과 사용자 설정 완전 분리를 함께 만족하는 exact-version 경로는 아직 확정하지 못했다. 앱 전용 환경에서 별도 로그인하는 선택지를 사용자에게 질문했으며 아직 채택된 결정이 아니다. 인증 파일 복사나 기존 home 교체·설정 덮어쓰기로 우회하지 않는다. `codex_rpc.rs`의 모델 없는 요청 순서 구현과 실제 격리된 프로세스 연결 완료는 구분한다.
+**2026-09-14 사용자 확정 — 앱 전용 별도 로그인**: 기존 터미널 설정·인증을 보존하고 앱 전용 환경에서 Codex·Claude에 별도 로그인하도록 구현하는 방향을 사용자가 승인했다. 기존 인증정보 복사나 유료 모델 실행은 승인에 포함하지 않는다. [공식 인증 저장 문서](https://learn.chatgpt.com/docs/auth#credential-storage)의 Codex `file` 방식은 전용 `CODEX_HOME` 아래 auth.json에 저장한다. 앱 전용 접근 제한 폴더만 사용하고 기존 설정 덮어쓰기·자동 keyring fallback·공유 인증 재사용을 하지 않는다. Claude의 macOS 인증 저장 분리는 별도 확인하며 Codex와 같다고 추정하지 않는다. 환경 준비·모델 없는 파서와 실제 격리 프로세스/로그인 UI 연결 완료는 구분한다.
 
 **2026-09-14 Codex offline 대조 구현**: `vendor_observation/codex_preflight.rs`는 명시적 model/effort와 config/read 및 완전 model/list를 비교한다. thread/start에는 readOnly/networkAccess=false, on-request/user, exact cwd 및 빈 instructionSources만 허용한다. 이 초기 읽기 전용 후보의 성공은 쓰기 역할 지원·파일 신원·설정 격리·실행 권위가 아니다. 기존 실행/공개 capability는 차단 상태다. 로컬 0.149.1 generate-ts 출력의 SHA-256은 Config.ts `f3fce144710f8972c83c229345611038066b67bd1777a9f859c696545c4bc5df`, Model.ts `ff56f09e9b9f301f1c6ecc565e2bcf6355c6ea66880f3ac963b7754e74cbe0a3`, ThreadStartResponse.ts `efc3d5df82b8f6f7d320fc97e2c51e8f25dc38195ae49af55f37b2ead8a05464`다. 실제 CLI 응답 관측을 대신하지 않으며 합성 테스트 모델명을 실제 카탈로그로 표시하지 않는다.
 

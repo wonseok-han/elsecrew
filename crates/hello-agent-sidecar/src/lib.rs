@@ -3,6 +3,9 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+#[cfg(unix)]
+#[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
+mod provider_profile;
 mod chat;
 mod project;
 mod storage;

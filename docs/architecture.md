@@ -210,6 +210,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **모델 없는 Codex 통신 순서**: `vendor_observation/codex_rpc.rs`는 initialize/config/account/model 4개 요청의 single-flight 순서와 응답 ID를 결속하며 예상 밖 frame은 실패로 고정한다. RawValue로 중첩 중복 키를 보존해 vendor 파서에 전달한다. 알림 일반 처리·process runner·timeout·설정 격리·실제 입력 전달/실행 권위는 이 모듈의 기능이 아니다.
 
+- **전용 Codex 로그인 환경 준비(미연결)**: sidecar `provider_profile.rs`는 Unix의 trusted app-data capability 아래 `codex-profile-v1`과 file 방식 인증 저장 config를 생성/검사한다. 기존 내용·권한을 임의 수정하거나 인증 파일을 읽지 않는다. retained directory handle만 반환하며 실제 CODEX_HOME 전달·경로 신원 대조·로그인 UI·Windows 지원은 아직 연결되지 않았다. 별도 로그인 구현 방향은 사용자 승인됐지만 실제 인증 완료를 의미하지 않는다.
+
 - **Codex 공개 본문 추출(미연결)**: `vendor_observation/codex_events.rs`는 [공식 item event](https://learn.chatgpt.com/docs/app-server#events)의 agentMessage/plan delta와 completed 본문만 명시적 thread/turn에 결속해 추출한다. completed는 누적 본문의 교체값이며 비공개 추론·도구 출력·미지원 알림은 공개하지 않고 별도 처리 필요로 반환한다. 중복 필드·모델 reroute·예산 초과는 실패 후 재사용을 막는다. 아직 runtime에 연결하지 않았으며 알림 순서/terminal/권한 검증이나 프로세스 종료 증명이 아니다.
 
 - **Codex 응답 순서 검사(미연결)**: `codex_events/stream.rs`는 위 projection과 같은 예산 안에서 turn 시작→item 시작/종류가 일치하는 delta/완료→turn 완료 순서를 검사한다. 중복·소속/종류 변경·완료 후 frame·terminal 없는 EOF는 실패한다. 정상 completed는 미완료 item이 없어야 하며 interrupted/failed는 성공과 구분한다. private/미지원 알림은 owner의 추가 처리를 요구한다. 이 검사도 실제 transport·권한·자손 종료 증명을 대신하지 않는다.

@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (전용 로그인 승인·Codex profile 준비)
+
+- **사용자 결정**: 전용 환경에서 별도 로그인하는 구현을 승인받아 앞선 결정 대기가 해소됐다. 기존 터미널 설정·인증정보 복사나 유료 모델 실행은 포함하지 않는다. 이전 미커밋 대기 기록은 삭제하지 않고 보존한다.
+- **직접 구현**: `ae5af65`에서 sidecar의 고정 Codex profile 준비 함수를 추가했다. trusted app-data 디렉터리 capability 아래 0700 폴더·0600 config를 create-new로 만들고 링크/소유자/권한/하드링크/정확한 bounded 내용을 검사한다. 기존 설정이 다르면 덮어쓰지 않고 거부하며 인증 파일은 읽거나 복사하지 않는다. 공식 Codex 인증 저장 문서를 OpenAI Docs로 확인했고 Karpathy 지침에 따라 기존 fake 실행/권한 계약은 바꾸지 않았다.
+- **검증·경계**: 임시 폴더 기반 fresh/reopen·기존 synthetic 인증 보존·변조 config/넓은 권한/링크 거부 3/3, sidecar strict clippy all-targets/no-deps PASS. 실제 사용자 인증이나 모델을 실행하지 않았다. 준비 helper는 아직 제품 login transport에 연결되지 않았고 Unix 한정이다. 실제 launch 전 경로/handle 신원 대조와 전체 설정 격리는 여전히 필요하다.
+- **검토 보완**: 예상 밖 profile 파일이 허용되는 지적을 수정해 로그인 준비 시 config/auth 외 항목을 거부한다. auth는 내용 없이 파일 종류·소유자·권한·링크 수만 확인한다. 추가 AGENTS.md 무변경 거부 포함 최신 focused 4/4 PASS. vendor runtime artifact 허용 정책과 generic Dir의 app-data 출처 강제는 제품 연결 전에 별도로 필요하며 현재 함수 성공을 전체 격리 증명으로 사용하지 않는다.
+- **마감·다음**: 독립 재검토에서 지적 닫힘·현재 준비 helper 범위 추가 결함 없음을 확인했다. 수정 후 strict clippy·rustfmt·diff PASS. [Claude 공식 인증 문서](https://code.claude.com/docs/en/authentication#credential-management)는 CLAUDE_CONFIG_DIR별 macOS Keychain 구분과 파일 fallback을 명시한다. 이는 후보 근거이며 설치 버전에서의 실제 분리 검증은 남는다. 로그인 통신/UI·설치 진단·실제 adapter 연결을 이어간다. main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (자동 목표를 사용자 결정 대기로 전환)
+
+- **세 번째 연속 점검**: HEAD `ae5af65`와 미커밋 작업 기록 외 변화가 없고 로그인 방식에 대한 사용자 답변도 없다. 앞선 턴은 기능 진전이나 살아 있는 작업의 검증 대기가 아니었다. 동일한 의존 결정을 우회하지 않고 자동 목표를 blocked로 전환한다. 개발 완료 판정이 아니다.
+- **재개 조건**: 기존 설정을 보존하는 앱 전용 환경에서 별도 로그인하도록 구현할지 사용자가 결정하면 실제 연결을 이어간다. 인증정보 복사·유료 호출·Windows/출시 검증 승인을 함께 받은 것으로 해석하지 않는다. 미커밋은 이 대기 기록을 포함한 `docs/history.md`뿐이며 코드 변경·main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (로그인 결정 대기 재확인)
+
+- **두 번째 점검**: HEAD `ae5af65`와 브랜치는 그대로이며 미커밋은 앞선 작업 기록뿐이다. 새 사용자 결정이나 외부 완료 증거가 없어 실제 연결·처음 시작하기의 동일한 결정 대기가 유지된다. 이전 점검은 기능 진전이나 실행 중인 검증 대기가 아니며, 이번에도 반복 테스트·추가 미연결 모듈로 진전을 대신하지 않는다.
+- **다음**: 앱 전용 별도 로그인 방식의 구현 허용 여부를 사용자에게 확인한 뒤 진행한다. 제품 완료를 선언하지 않고 목표는 유지한다. 코드 변경·모델 호출·인증 접근·main 병합·push 없음.
+
+### 2026-09-14 · by GPT-6 Astra (실제 연결·처음 시작하기 의존 결정 확인)
+
+- **현재 확인**: clean `ae5af65`, `m5/coding-agent-ide`, Darwin에서 잔여 흐름을 대조했다. 이전 turn은 실제 코드 커밋으로 진전이 있었지만 전체 개발 완료는 아니다. 작업대는 프로젝트 선택·채팅으로 바로 진입하며 Electron preload에 설치/로그인 경로는 없다. 제안서 §5.1은 설치·로그인·연결 확인 뒤 실제 프로젝트를 요구하므로 미연결 안내 화면을 완료로 대체하지 않는다.
+- **진행 경계**: §14는 실제 adapter 안전 검증 뒤 원본 적용/복원을 열도록 한다. 전용 환경의 별도 로그인 구현 여부는 아직 사용자 답변이 없으며 자동 목표 재개를 승인으로 해석하지 않는다. 기존 인증 복사·사용자 설정 재사용·유료 실행을 임의로 선택하지 않는다. 이번에는 읽기 전용 코드/문서/OS·Git 대조만 했고 새 테스트 PASS나 새 제품 기능을 주장하지 않는다.
+- **다음**: 사용자에게 전용 환경 별도 로그인 구현 결정을 받은 뒤 설치/인증→실제 adapter→첫 프로젝트 작업의 연결을 진행한다. 실제 유료 smoke·Windows/출시 증거도 별도 남는다. 현재는 첫 명시적 결정 대기 점검이며 목표 완료/blocked를 선언하지 않는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (Codex turn/item 응답 순서 검사)
 
 - **직접 구현**: clean `9ad3094`에서 `codex_events/stream.rs`와 module export·현행 문서를 소유했다. OpenAI Docs의 공식 events와 로컬 생성 schema를 대조했다. Karpathy 지침에 따라 기존 projection/예산을 재사용하고 turn/item 시작·완료·delta의 소속/종류/순서를 확인한다. 공개 본문은 순서 확인 뒤 반환하고, 원시 실패 메시지는 반환하지 않는다.
@@ -209,6 +233,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **실제 agent 별도 로그인 승인(2026-09-14)**: 기존 사용자 터미널 설정/인증을 보존하는 앱 전용 환경에 별도 로그인하도록 구현한다. 인증정보 복사·공유 keyring 자동 fallback·유료 모델 smoke는 이 승인에 포함하지 않는다. 로그인 방식 선택은 더 이상 답변 대기가 아니며 실제 구현/검증과 구분한다.
 
 - **압축 계획 해제 후 chat 검증(2026-09-14)**: plan ordinals 1..1000은 release 중 삭제되고 완료 후 anchor 1001만 남는다. release cursor 이하의 직전 행은 exact frozen source에서 검증해야 한다. plan 행 부재를 모든 단계에서 허용하는 fallback은 금지한다. 실제 product admission 실패는 plan_v9 transition 조회였고 구형 closure의 prefix 조회라는 초기 정적 추정은 이 실패 원인으로 확인되지 않았다.
 - **편집 초안 복구(2026-09-14)**: 재읽기는 사용자 확인 시의 정확한 tab 객체와 완료 시 프로젝트/작업 복사본·차단 상태를 대조한 뒤에만 초안을 교체한다. 실패하면 보존하고 파일은 쓰지 않는다. Monaco의 프로그램적 내용 동기화도 change 알림을 내므로 같은 텍스트는 dirty로 바꾸지 않는다.
