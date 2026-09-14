@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (Codex turn/item 응답 순서 검사)
+
+- **직접 구현**: clean `9ad3094`에서 `codex_events/stream.rs`와 module export·현행 문서를 소유했다. OpenAI Docs의 공식 events와 로컬 생성 schema를 대조했다. Karpathy 지침에 따라 기존 projection/예산을 재사용하고 turn/item 시작·완료·delta의 소속/종류/순서를 확인한다. 공개 본문은 순서 확인 뒤 반환하고, 원시 실패 메시지는 반환하지 않는다.
+- **경계·검증**: provider 회귀 36/36 PASS. 정상 완료는 열린 item이 없어야 하며 중단·실패를 성공과 구분한다. 시작 전/중복 시작/종류 변경/완료 후 내용/terminal 없는 EOF는 실패 후 재사용을 막는다. private/미지원 알림은 owner의 별도 처리를 요구하며 허가나 무시할 권위가 아니다. 실제 transport·권한·자손 종료는 미연결이고 모델·인증·사용자 프로젝트 실행은 없었다.
+- **검토 수정**: 독립 검토에서 private/unknown item 시작도 owner의 처리가 필요하다고 알려야 한다는 누락을 지적해 agentMessage/plan 이외에는 시작부터 RequiresHandling을 반환하도록 고쳤다. reasoning/command/fileChange/unknown 시작·완료와 reasoning delta 회귀를 추가해 focused 4/4 PASS. core clippy 종료 0(기존 proctree 경고 3개 외 신규 없음), rustfmt·diff PASS다.
+- **마감·다음**: 독립 재검토에서 지적이 닫힌 것을 확인했고 이 단위를 커밋한다. 실제 provider 로그인 환경 선택은 답변 대기다. 전체 목표는 계속 유지하며 실제 실행 연결·Claude·역할 인계·원본 적용/복원·guided start·G6/Windows/출시 완료를 이번 오프라인 검증으로 주장하지 않는다. main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (Codex 공개 이벤트 추출 준비)
 
 - **범위·직접 구현**: clean `54d9bb3`에서 core vendor observation과 현행 문서를 소유했다. 원본 적용은 제안서 §14의 실제 adapter 안전 검증 뒤 순서를 유지한다. OpenAI Docs의 [공식 app-server events](https://learn.chatgpt.com/docs/app-server#events)와 보존된 로컬 생성 TS schema의 threadId/turnId/item 구조를 확인하고, agentMessage/plan delta·최종 본문 추출만 구현했다. Karpathy 지침에 따라 transport·로그인·권한 계약으로 범위를 넓히지 않았다.

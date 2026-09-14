@@ -1,6 +1,7 @@
 //! Offline public-item projection for app-server notifications.
 //! https://learn.chatgpt.com/docs/app-server#events
-//! Not a transport, lifecycle validator, permission gate, or process-exit proof.
+//! TurnProjection is not a lifecycle validator; `stream::TurnStream` adds ordering.
+//! Neither is a transport, permission gate, or process-exit proof.
 //! The owner must correlate request responses and enforce turn/item ordering before
 //! publishing these projections. Unknown notifications require owner handling, never
 //! silent acceptance. Raw reasoning, tools, errors and credentials are not projected.
@@ -12,6 +13,8 @@ use crate::provider::{
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
+
+pub mod stream;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PublicKind {
