@@ -211,6 +211,20 @@ impl<'a> LoginProcess<'a> {
         self.launch_with_barrier(spawn, |_| Ok(()))
     }
 
+    /// Empty-environment gate for an already vetted backend target. This is not
+    /// a Codex launcher: vendor-specific environment/admission is still required.
+    pub(crate) fn launch_gated_command(
+        &mut self,
+        program: &std::path::Path,
+        args: &[&std::ffi::OsStr],
+        cwd: &std::path::Path,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_barrier(
+            || crate::provider_login_gate::spawn(program, args, cwd),
+            crate::provider_login_gate::release,
+        )
+    }
+
     /// Caller must tick while waiting for user/browser input (at most 100 ms apart).
     /// Blocking stdio waits also invoke this observer, not just the final shutdown.
     pub(crate) fn tick(&mut self) -> Result<(), SidecarError> {
@@ -388,6 +402,64 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn gated_command_preserves_literal_arguments_and_cleans_tracked_root() {
+        use std::{ffi::OsStr, path::Path};
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process
+            .launch_gated_command(Path::new("/bin/cat"), &[], temp.path())
+            .unwrap();
+        let root = process.root_for_test();
+        let (_, request) = LoginExchange::begin(1).unwrap();
+        process
+            .send(request, Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process
+            .receive(Duration::from_secs(1), &AtomicBool::new(false))
+            .unwrap();
+        process.finish().unwrap();
+        assert!(matches!(SystemProcTable.probe(root), ProbeResult::Gone));
+
+        // Shell metacharacters in arguments remain literal. No command interpolation.
+        let mut child = crate::provider_login_gate::spawn(
+            Path::new("/usr/bin/printf"),
+            &[
+                OsStr::new("%s"),
+                OsStr::new("$(touch SHOULD_NOT_EXIST); 'quoted'"),
+            ],
+            temp.path(),
+        )
+        .unwrap();
+        crate::provider_login_gate::release(&mut child).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"$(touch SHOULD_NOT_EXIST); 'quoted'");
+        assert!(!temp.path().join("SHOULD_NOT_EXIST").exists());
+    }
+
+    #[test]
+    fn unreleased_gate_eof_or_wrong_token_never_executes_target() {
+        use std::{ffi::OsStr, path::Path};
+        let temp = tempfile::tempdir().unwrap();
+        for wrong in [false, true] {
+            let mut child = crate::provider_login_gate::spawn(
+                Path::new("/usr/bin/touch"),
+                &[OsStr::new("SHOULD_NOT_EXIST")],
+                temp.path(),
+            )
+            .unwrap();
+            if wrong {
+                child.stdin.as_mut().unwrap().write_all(b"wrong\n").unwrap();
+            }
+            drop(child.stdin.take());
+            assert!(!child.wait().unwrap().success());
+            assert!(!temp.path().join("SHOULD_NOT_EXIST").exists());
+        }
+        assert!(crate::provider_login_gate::spawn(Path::new("cat"), &[], temp.path()).is_err());
     }
 
     #[test]

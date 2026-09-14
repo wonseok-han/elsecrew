@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (대기형 로그인 런처 연결)
+
+- **직접 구현**: `5a3e39b`에서 이전 현황 답변의 미커밋 작업 기록을 보존하고 gate/process/lib만 변경했다. Karpathy 지침에 따라 기존 launch_with_barrier·Child·TreeTracker를 재사용했다. 내부 gate는 고정 `/bin/sh` read→정확한 허용 토큰→exec 순서로 vendor 이전에 대기하며, 절대 경로 program/cwd·별도 positional args·빈 상속 환경·stdio pipe만 사용한다. 프로세스 소유자의 durable 기록 뒤 단일 nonblocking write로 허용한다.
+- **검증**: 로그인 집중 20/20·strict sidecar clippy·rustfmt·diff PASS. 실제 자체 생성 cat 송수신/추적 종료, printf 특수문자 인수 무해석, touch 대상의 EOF/잘못된 토큰 무실행, 상대 실행 경로 거절을 검사했다. 사용자 프로젝트/인증·Codex·유료 모델은 실행하지 않았다. 기존 승인된 읽기 전용 검토자가 좁은 안전 경계를 검토 중이다.
+- **남은 경계**: 이 gate는 검증된 backend 대상에 사용할 내부 실행 제어이며 실제 Codex 실행 파일 admission·전용 HOME/CODEX_HOME/runtime artifact 정책·제품 로그인 IPC/UI는 여전히 미연결이다. 빈 환경 자체를 완전한 vendor 설정 격리로 주장하지 않는다. 캐시 삭제·main 병합·push 없음. 독립 검토 마감 후 현재 단위를 커밋한다.
+- **마감**: 독립 검토에서 인자 처리·release·cleanup 연결의 추가 차단 결함 없음을 확인했다. 검토자는 테스트를 재실행하지 않았으며 위 메인 실행 증거를 구분해 보존한다. 이전 현황 기록을 포함해 이 단위를 커밋한다.
+
+### 2026-09-14 · by GPT-6 Astra (잔여 작업 현황 정리)
+
+- **확인**: clean `5a3e39b`와 현행 architecture·최신 기록을 대조했다. 최근 로그인 관련 커밋은 내부 준비/통신/종료/실행 허용 연결이며 실제 Codex·Claude 제품 실행 완료가 아니다.
+- **남은 순서**: 실제 실행기·전용 환경/로그인/복구 화면 → 실제 작업 실행·출력/취소/재시작 연결 → 역할별 Codex/Claude 인계 → diff 검토 후 원본 적용/폐기/복구 → 실제 프로젝트 기반 guided start와 남은 시안/상하 도킹 → G6 통합 보안/성능/패키징 및 Windows·출시 후보 실기기 검증이다. 기존 프로젝트/채팅 저장·편집/diff·가로 패널 배치·fixture 검증을 미구현으로 되돌리지 않는다. 각 범주는 크기가 달라 완료율을 단순 계산하지 않는다.
+- **경계**: 현황 답변만 수행했으며 테스트 재실행·제품 변경·캐시 삭제·main 병합·push 없음. 다음 개발 우선순위는 실제 provider의 사용자 사용 가능 경로를 닫는 것이다.
+
 ### 2026-09-14 · by GPT-6 Astra (로그인 실행 허용의 두 단계 연결)
 
 - **직접 구현**: clean `e46bddc`의 메인 checkout에서 login process/session을 변경했다. Karpathy 지침에 따라 기존 Child·TreeTracker·durable reservation을 재사용했다. `launch_with_barrier(spawn, release)`는 대기 child를 소유하고 신원 기록·관찰·profile/marker 재검사·pipe 존재 확인 후 release를 한 번 호출한다. session도 이 API로 연결하고 기존 무조건 launch/start shortcut은 테스트 전용으로 제한했다.
