@@ -9,6 +9,9 @@ mod provider_profile;
 #[cfg(unix)]
 #[allow(dead_code)] // Internal login I/O; the isolated process owner is not activated yet.
 mod provider_login_io;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Lifecycle owner; validated vendor launcher and IPC activation remain separate.
+mod provider_login_process;
 mod chat;
 mod project;
 mod storage;

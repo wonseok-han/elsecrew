@@ -61,7 +61,17 @@ impl LoginIo {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
-        let result = self.send_inner(frame.as_str().as_bytes(), timeout, cancel);
+        self.send_observed(frame, timeout, cancel, &mut || Ok(()))
+    }
+
+    pub(crate) fn send_observed(
+        &mut self,
+        frame: LoginRequest,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        let result = self.send_inner(frame.as_str().as_bytes(), timeout, cancel, observe);
         if result.is_err() {
             self.failed = true;
         }
@@ -73,6 +83,7 @@ impl LoginIo {
         frame: &[u8],
         timeout: Duration,
         cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if self.failed
             || frame.len() < 2
@@ -86,6 +97,8 @@ impl LoginIo {
         let start = Instant::now();
         let mut written = 0;
         while written < frame.len() {
+            check_wait(start, timeout, cancel)?;
+            observe()?;
             check_wait(start, timeout, cancel)?;
             match self.input.write(&frame[written..]) {
                 Ok(0) => return Err(failure()),
@@ -108,7 +121,16 @@ impl LoginIo {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<BoundedObservation, SidecarError> {
-        let result = self.receive_inner(timeout, cancel);
+        self.receive_observed(timeout, cancel, &mut || Ok(()))
+    }
+
+    pub(crate) fn receive_observed(
+        &mut self,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<BoundedObservation, SidecarError> {
+        let result = self.receive_inner(timeout, cancel, observe);
         if result.is_err() {
             self.failed = true;
             self.pending.clear();
@@ -120,12 +142,15 @@ impl LoginIo {
         &mut self,
         timeout: Duration,
         cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<BoundedObservation, SidecarError> {
         if self.failed {
             return Err(failure());
         }
         let start = Instant::now();
         loop {
+            check_wait(start, timeout, cancel)?;
+            observe()?;
             check_wait(start, timeout, cancel)?;
             if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
                 if end == 0 || end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
@@ -247,7 +272,8 @@ mod tests {
             .send_inner(
                 &vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1],
                 Duration::from_secs(1),
-                &AtomicBool::new(false)
+                &AtomicBool::new(false),
+                &mut || Ok(())
             )
             .is_err());
     }

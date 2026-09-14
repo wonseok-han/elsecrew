@@ -131,6 +131,11 @@ pub(crate) struct CodexProfileBinding {
 }
 
 impl CodexProfileBinding {
+    pub(super) fn login_lease_directory(&self) -> Result<Dir, SidecarError> {
+        self.revalidate()?;
+        self.app_data.try_clone().map_err(|_| failure())
+    }
+
     pub(crate) fn from_storage(storage: &crate::Storage) -> Result<Self, SidecarError> {
         let database_path = storage.path();
         if database_path.file_name()

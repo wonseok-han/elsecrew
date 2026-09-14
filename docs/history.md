@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (로그인 수명·재시작 잠금 연결)
+
+- **직접 구현**: clean `3d5ee64`에서 sidecar의 로그인 process owner·기존 I/O observer hook·profile capability와 현행 문서를 소유했다. Karpathy 지침에 따라 기존 TreeTracker와 bounded I/O를 재사용했다. app-data의 고정 `codex-login.pending`을 create-new 0600·파일/디렉터리 sync한 뒤 backend launcher callback을 호출하고, 반환된 Child를 즉시 소유해 PID+시작 시각·자손 신원을 추적/저장한다. OAuth URL·계정·명령줄은 기록하지 않는다.
+- **종료·재시작**: 송수신 대기 중에도 추적하며 browser 대기는 caller의 100ms tick을 요구한다. 명시적 finish는 누적 tree 종료 확인·root try_wait·증거 저장과 profile/marker 신원 확인 뒤에만 자기 잠금을 제거한다. 불확실한 종료 뒤 blocking wait는 하지 않는다. Drop/불완전 기록/추적·증거 실패는 잠금을 보존하며 새 owner는 기존 파일을 읽거나 수정하거나 저장 PID에 자동 신호를 보내지 않고 거부한다.
+- **검증 진행**: 최초 실패 주입 테스트가 probe보다 list가 먼저라고 잘못 가정한 것을 수정했다. 최신 owner 집중 7/7·I/O 3/3 PASS이며 자체 생성 cat/sh/sleep만 사용했다. 부모 선행 종료 후 추적 자손 회수·timeout/cleanup 구분·중복 launch·Drop/재시작·마커 교체 무변경·증거 실패 sticky를 포함한다. clippy의 test-module 위치 지적을 수정했고 정적 검사·독립 검토를 마무리 중이다.
+- **독립 검토 수정**: 미확인 cleanup에도 finished를 고정해 재시도/Drop 정리를 건너뛰던 결함을 수정했다. 첫 종료 실패 후 실제 root가 살아 있음을 확인하고 명시적 재시도 또는 Drop이 종료를 다시 시도하되 fence를 보존하는 회귀를 추가했다. marker 대조→이름 기반 삭제는 원자적 unlink-if-inode가 아니므로 기존 profile과 동일한 point-in-time 경계로 주석/현행 문서를 명확히 했다. hostile same-UID 후속 교체 보호를 새 보장으로 주장하지 않는다.
+- **마감 검증**: 수정 후 owner 8/8·strict sidecar clippy·scoped rustfmt·diff 검사 PASS다. 변경 영향이 없는 I/O 3/3 증거는 재사용했다. 독립 재검토에서 cleanup 지적 해소·추가 actionable finding 없음으로 확인해 이 단위를 커밋한다. 전체 sidecar/패키지/제품 누적 gate는 재실행하지 않았다.
+- **경계·다음**: 이 내부 owner의 backend callback은 검증된 executable·별도 환경/cwd·실행 전 barrier를 별도로 제공해야 한다. 현재 제품에는 실제 vendor launcher·Codex 초기화/로그인/계정 재확인·취소 UI·미확인 로그인 복구 UI가 없으며 이 테스트를 실제 인증이나 제품 활성화 증거로 쓰지 않는다. OpenAI Docs [initialization/auth](https://learn.chatgpt.com/docs/app-server#initialization)를 재확인했으며 초기화 교환이 선행해야 한다. 실제 사용자 인증·유료 모델 호출·main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (로그인 프로세스의 bounded stdio)
 
 - **직접 구현**: clean `14aed10`에서 `provider_login_io.rs`와 lib module export를 소유했다. Karpathy 지침에 따라 기존 BoundedObservation을 재사용했다. caller가 Child와 종료 tracker를 유지한 채 pipe만 nonblocking으로 연결한다. 단일 줄·누적 송수신량·대기시간·취소를 제한하며 부분 쓰기/EOF/잘린 줄/오류 뒤 재사용하지 않는다. 원문 버퍼는 Debug로 노출하지 않는다.
@@ -256,6 +265,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **로그인 불확실 종료 fence(2026-09-14, 내부 owner 미활성)**: app-data의 `codex-login.pending` 존재는 내용이 비었거나 손상돼도 새 내부 로그인 예약을 차단한다. 자동 삭제/기록 PID 재사용은 하지 않는다. 파일에는 프로세스 신원만 남기며 explicit cleanup의 tree 종료·root 회수·증거 저장 확인 전에는 해제하지 않는다. 제품 launcher/초기화/IPC·수동 복구 연결은 별도 남는다.
 
 - **실제 agent 별도 로그인 승인(2026-09-14)**: 기존 사용자 터미널 설정/인증을 보존하는 앱 전용 환경에 별도 로그인하도록 구현한다. 인증정보 복사·공유 keyring 자동 fallback·유료 모델 smoke는 이 승인에 포함하지 않는다. 로그인 방식 선택은 더 이상 답변 대기가 아니며 실제 구현/검증과 구분한다.
 
