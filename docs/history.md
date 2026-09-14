@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (잔여 미커밋 작업 9개 대조·종결)
+
+- **사용자 요청·결론**: `3790832`에서 남은 9개를 전수 대조했다. 4개는 검토 자료뿐이고 5개 코드 초안은 후속 통합 구현으로 대체돼 있었다. V6→V10·version-only Electron→V6 bridge·linked worktree→standalone snapshot을 옛 코드로 되돌리지 않았다. 누락된 managed-worktree symlink swap 회귀만 현재 저장 syscall hook으로 이식했고 제품 코드는 변경하지 않았다. 원본 파일·메모·ignored 검증 로그는 기존 기능 브랜치의 보존 커밋 9개에 남겼다.
+- **검증·정리**: 새 Rust 회귀 1/1, 기존 syscall 회귀 2/2, Electron/하네스 Node 14/14, rustfmt·diff 검사 PASS. 보존 SHA·브랜치·clean 상태 확인 후 9개 worktree를 force 없이 제거했다. 현재 개발 checkout만 남고 약 8.2 GiB를 추가 정리했다. QA JSON은 `.artifacts/retired-worktrees-2026-09-14/qa-low-impact`에도 복사·대조했다. 원본 복원 SHA와 항목별 대응은 `archive/m5-worktree-reconciliation-2026-09.md`다.
+- **다음 경계**: 잔여 워크트리 작업 대조/통합은 종결했다. 실제 CLI 연결 승인·전체 G6·적용/복원·Windows 검증은 별개로 남는다. main 병합·push·서브에이전트 호출 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (완료된 워크트리 정리)
 
 - **사용자 요청·처리**: 저장공간 정리 대상이 workflow가 아니라 worktree임을 확인했다. 등록된 보조 worktree 30개 중 HEAD가 통합 브랜치의 조상이고 tracked/untracked 변경이 없는 21개를 재검증한 뒤 `git worktree remove`로 제거했다. force·브랜치 삭제·main 병합·push는 하지 않았다. 현재 checkout과 미커밋 변경이 있는 9개(그중 `m5-g4-project-safety`는 HEAD도 미통합)는 보존했다.

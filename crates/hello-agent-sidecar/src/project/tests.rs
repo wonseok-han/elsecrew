@@ -909,6 +909,65 @@ fn parent_move_at_stable_root_rename_syscall_never_writes_external_target() {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn managed_worktree_child_swap_at_save_syscall_never_writes_symlink_target() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let managed = active.worktree_path.clone();
+    let held = fixture._root.path().join("held-workspace");
+    let external = fixture._root.path().join("external-workspace");
+    fs::create_dir_all(external.join("src")).unwrap();
+    fs::write(external.join("src/edit.txt"), b"external").unwrap();
+    let expected = sha256_file_version_v1(&fs::read(managed.join("src/edit.txt")).unwrap());
+    let begin = fixture
+        .manager
+        .begin_save(
+            &fixture.storage,
+            &fixture.project_id,
+            "src/edit.txt",
+            &expected,
+            5,
+            "utf8",
+        )
+        .unwrap();
+    let save_id = begin.result["saveId"].as_str().unwrap();
+    fixture
+        .manager
+        .append_save_chunk(save_id, 1, "world")
+        .unwrap();
+    let error = fixture
+        .manager
+        .commit_save_with_pre_syscall_hook(
+            &mut fixture.storage,
+            save_id,
+            &expected,
+            1,
+            5,
+            "req_workspace_swap",
+            || {
+                fs::rename(&managed, &held).unwrap();
+                std::os::unix::fs::symlink(&external, &managed).unwrap();
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert!(!error.outcome_unknown);
+    assert_eq!(
+        fs::read(external.join("src/edit.txt")).unwrap(),
+        b"external"
+    );
+    assert_eq!(fs::read(held.join("src/edit.txt")).unwrap(), b"hello");
+    assert!(fixture
+        .storage
+        .blocker_ids()
+        .unwrap()
+        .iter()
+        .any(|id| id.starts_with("lock:")));
+    fs::remove_file(&managed).unwrap();
+    fs::rename(&held, &managed).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn parent_symlink_swap_at_stable_root_rename_syscall_never_writes_external_target() {
     let mut fixture = Fixture::open();
     let active = fixture.create();
