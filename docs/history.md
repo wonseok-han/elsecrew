@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (완료된 워크트리 정리)
+
+- **사용자 요청·처리**: 저장공간 정리 대상이 workflow가 아니라 worktree임을 확인했다. 등록된 보조 worktree 30개 중 HEAD가 통합 브랜치의 조상이고 tracked/untracked 변경이 없는 21개를 재검증한 뒤 `git worktree remove`로 제거했다. force·브랜치 삭제·main 병합·push는 하지 않았다. 현재 checkout과 미커밋 변경이 있는 9개(그중 `m5-g4-project-safety`는 HEAD도 미통합)는 보존했다.
+- **보존·검증**: 제거 대상의 사용 중 cwd가 관측되지 않음을 확인했다. `g5d-r3c-snapshot-qa`와 `g5d-storage-harness`의 검증 증거는 `.artifacts/retired-worktrees-2026-09-14/<원래 이름>/`으로 복사하고 recursive diff로 일치를 확인했다. 브랜치/커밋에서 소스 worktree는 재생성 가능하며 제거된 빌드 캐시는 재빌드가 필요하다. `.worktrees`는 약 24 GiB에서 8,595,224 KiB(약 8.2 GiB)로 감소했다. root `target`·node_modules·배포 산출물은 이번 삭제 대상이 아니다.
+- **다음**: 남은 9개는 미커밋 코드·작업 메모 보존/중복 확인 전 삭제하지 않는다. 실제 에이전트 연결 승인 대기는 그대로이며 개발 완료를 뜻하지 않는다.
+
 ### 2026-09-14 · by GPT-6 Astra (부분 메모리 재측정 PASS·실제 연결 승인 대기)
 
 - **결과**: clean `dfe12bd980ba076b4fe14717a3f477345b447e1d`의 lazy fixture로 같은 GUI 10회+60초 잔류를 재측정해 PASS했다. Electron subtree idle 356.703125 MiB, peak 761.734375 MiB, 잔류 110.125 MiB다. tree p95 30.5ms, 파일 표시 93.2ms, 입력 24.8ms, diff 요약 48.3ms, 첫 diff 17.5ms이며 `.artifacts/m5-performance/renderer-2026-09-14T02-42-47.203Z-1604.json`에 clean/same HEAD·원시 표본을 남겼다. 이전 FAIL은 보존하며 그 회차 지연 원인은 확정하지 않는다.
