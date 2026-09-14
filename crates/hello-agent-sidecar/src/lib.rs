@@ -6,6 +6,9 @@ mod agent_runtime;
 #[cfg(unix)]
 #[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
 mod provider_profile;
+#[cfg(unix)]
+#[allow(dead_code)] // Internal login I/O; the isolated process owner is not activated yet.
+mod provider_login_io;
 mod chat;
 mod project;
 mod storage;

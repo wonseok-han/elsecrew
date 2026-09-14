@@ -20,6 +20,28 @@ pub struct BrowserLogin {
     pub auth_url: String,
 }
 
+/// An exact login request, constructed only by the correlated login exchange.
+/// Arbitrary provider methods cannot be supplied to the login transport.
+/// ```compile_fail
+/// use hello_agent_core::provider::vendor_observation::codex_login::LoginRequest;
+/// let request = LoginRequest("{\"method\":\"thread/start\"}\n".to_owned());
+/// ```
+/// Requests are non-Clone and consumed by the transport, including failed sends.
+/// ```compile_fail
+/// use hello_agent_core::provider::vendor_observation::codex_login::{LoginExchange, LoginRequest};
+/// fn send(_: LoginRequest) {}
+/// let (_, request) = LoginExchange::begin(1).unwrap();
+/// send(request);
+/// send(request);
+/// ```
+pub struct LoginRequest(String);
+
+impl LoginRequest {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 pub struct LoginExchange {
     request_id: u64,
     login_id: Option<String>,
@@ -33,7 +55,7 @@ fn error() -> ProviderError {
 impl LoginExchange {
     /// Caller must reserve a unique ID on the connection, initialize the server,
     /// and obtain the user's login action before sending this exact request.
-    pub fn begin(request_id: u64) -> Result<(Self, String), ProviderError> {
+    pub fn begin(request_id: u64) -> Result<(Self, LoginRequest), ProviderError> {
         if request_id == 0 || request_id > 9_007_199_254_740_991 {
             return Err(error());
         }
@@ -43,10 +65,10 @@ impl LoginExchange {
                 login_id: None,
                 state: LoginState::AwaitingStart,
             },
-            format!(
+            LoginRequest(format!(
                 "{}\n",
                 serde_json::json!({"id":request_id,"method":"account/login/start","params":{"type":"chatgpt"}})
-            ),
+            )),
         ))
     }
 
@@ -177,7 +199,7 @@ impl LoginExchange {
     /// Local cancellation immediately revokes this attempt's eligibility. The owner
     /// must still deliver this request and confirm vendor cancellation/process exit.
     /// Cancellation before start response requires closing the owning transport.
-    pub fn cancel(&mut self, request_id: u64) -> Result<String, ProviderError> {
+    pub fn cancel(&mut self, request_id: u64) -> Result<LoginRequest, ProviderError> {
         if self.state != LoginState::WaitingForBrowser
             || request_id == 0
             || request_id == self.request_id
@@ -186,10 +208,10 @@ impl LoginExchange {
             return Err(error());
         }
         self.state = LoginState::Canceled;
-        Ok(format!(
+        Ok(LoginRequest(format!(
             "{}\n",
             serde_json::json!({"id":request_id,"method":"account/login/cancel","params":{"loginId":self.login_id}})
-        ))
+        )))
     }
 
     /// Called on EOF, timeout or owner failure; never turns missing evidence into success.
@@ -217,7 +239,7 @@ mod tests {
     #[test]
     fn login_is_correlated_and_callback_is_not_ready() {
         let (mut exchange, request) = LoginExchange::begin(9).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&request).unwrap();
+        let value: serde_json::Value = serde_json::from_str(request.as_str()).unwrap();
         assert_eq!(
             value,
             serde_json::json!({"id":9,"method":"account/login/start","params":{"type":"chatgpt"}})
@@ -252,7 +274,7 @@ mod tests {
         let (mut exchange, _) = LoginExchange::begin(9).unwrap();
         exchange.accept_start(&reply()).unwrap();
         let request: serde_json::Value =
-            serde_json::from_str(&exchange.cancel(10).unwrap()).unwrap();
+            serde_json::from_str(exchange.cancel(10).unwrap().as_str()).unwrap();
         assert_eq!(
             request,
             serde_json::json!({"id":10,"method":"account/login/cancel","params":{"loginId":"attempt"}})

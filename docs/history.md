@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-14 · by GPT-6 Astra (로그인 프로세스의 bounded stdio)
+
+- **직접 구현**: clean `14aed10`에서 `provider_login_io.rs`와 lib module export를 소유했다. Karpathy 지침에 따라 기존 BoundedObservation을 재사용했다. caller가 Child와 종료 tracker를 유지한 채 pipe만 nonblocking으로 연결한다. 단일 줄·누적 송수신량·대기시간·취소를 제한하며 부분 쓰기/EOF/잘린 줄/오류 뒤 재사용하지 않는다. 원문 버퍼는 Debug로 노출하지 않는다.
+- **실제 검사**: 자체 생성 cat/sh/exec-sleep 테스트 프로세스로 두 응답의 왕복·순서를 기존 auth 파서로 확인했다. 시간 초과·취소·부분 EOF·빈 줄·큰 줄·읽지 않는 stdin backpressure를 검사하고 test guard가 자신이 만든 단일 프로세스를 kill/wait한다. 실제 사용자 프로세스·인증·모델은 사용하지 않았다. 이 검사는 제품 자손 회수 gate나 로그인 완료가 아니다.
+- **검토 수정**: 임의 raw frame을 받을 수 있다는 독립 검토 지적에 따라 core의 private-field `LoginRequest`만 송신하도록 제한했다. 생성자는 기존 로그인 시작/취소 exchange에만 있고 임의 thread/start 생성은 compile-fail 회귀로 검사한다. 읽지 않는 stdin에는 typed 요청을 반복해 실제 포화 뒤 timeout/poison을 검사한다.
+- **최종 검증**: 같은 요청 객체의 재전송 지적도 non-Clone 값 소비 방식으로 수정했다. 고유 ID 요청을 사용하는 통신 집중 3/3, 로그인 상태 5/5, 임의 생성/동일 객체 재사용 compile-fail 2/2, strict sidecar clippy·scoped rustfmt·diff 검사 PASS. 독립 재검토에서 두 지적 해소·추가 차단 결함 없음으로 확인해 이 단위를 커밋한다. 전체 sidecar/제품 누적 게이트는 이번 작은 변경에서 재실행하지 않았다. 요청 ID의 연결 내 유일성은 owner가 보장해야 한다.
+- **경계·다음**: 이번에는 I/O까지 구현했다. 처음 알린 프로세스 owner 전체는 완료하지 않았으며 기존 TreeTracker를 사용하는 준비/종료·불확실 cleanup 영속 기록·전용 환경 spawn·초기 handshake/계정 재확인·로그인 UI 연결이 남는다. 실제 vendor 응답과 연결한 검사는 아니며 main 병합·push 없음.
+
 ### 2026-09-14 · by GPT-6 Astra (로그인 profile 경로·handle 결속)
 
 - **직접 구현**: clean `cb1b12d`에서 sidecar profile 준비 모듈을 소유했다. Karpathy 지침에 따라 기존 설정/권한 검사를 재사용하고 생성과 읽기 전용 재검사를 분리했다. startup DB 경로의 고정 파일명·절대 경로를 요구하고 각 디렉터리를 no-follow로 열어 app-data/profile handle의 dev/ino를 보존한다. 재검사는 현재 경로의 identity와 기존 profile 정책을 대조하고, 삭제된 설정이나 폴더를 다시 만들지 않는다.
