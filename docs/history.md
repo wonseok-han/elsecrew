@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (공급자 실행 전 상속 핸들 차단)
+
+- **진전/범위**: 직전 OS 기제 실측은 `c7a7118`에 커밋됐다. clean 통합 checkout에서 실제 gate가 non-CLOEXEC writable fd를 vendor에 전달하는 회귀를 먼저 재현했다(exit 101). 메인은 Karpathy 지침에 따라 기존 gate의 고정 셸에서 `/dev/fd`를 순회해 0/1/2 외 핸들을 닫도록 수정했다. 숫자만 허용한 fd의 builtin redirection이며 PATH lookup·외부 helper·추가 자손은 없다. 순회/닫기 실패는 payload 실행 전 거절한다. Rust spawn의 오류 전달 pipe를 pre_exec에서 닫지 않고 셸 exec 뒤 처리한다.
+- **검증 중**: 같은 누출 회귀는 수정 후 PASS. 낮은 fd와 200/4096 이상 fd, 부모 fd/flags 보존 검사로 확대하고 기존 로그인·preflight·20사례 실행 원장 회귀와 strict clippy를 순차 실행 중이다. 실제 CLI/인증/유료 모델/사용자 프로젝트는 사용하지 않는다.
+- **경계/다음**: stdin/stdout은 기존 protocol pipe, stderr는 기존 null 경로다. 원본 hardlink 입장 검사·생산 sandbox 정책은 별도 남는다. 공유 gate 안전 경계이므로 관련 검사 및 독립 검토 후 커밋하며 제품 실행 활성화·main 병합·push는 하지 않는다.
+- **마감**: 최신 로그인 32 PASS/실제 계정 3 ignored, preflight 5 PASS, text 원장 1테스트/20사례 PASS(38.21초), strict sidecar clippy·fmt·diff PASS. 상시 승인된 `run_ledger_review` 한 명이 `c7a7118` 대비 고정 delta를 정적으로 검토해 차단 결함 없이 PASS했다. 자체 검사와 독립 검토를 구분하며 추가 테스트는 중복 실행하지 않았다. 관련 3파일을 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (외부 sandbox 기제 검증과 원본 보호 한계)
 
 - **진전/기준**: 직전 launch 연결은 `34f3017`로 커밋된 진전이다. clean 통합 checkout에서 실제 쓰기 실행의 격리 조건을 조사했다. OpenAI 공식 `agent-approvals-security` 문서를 열어 공급자 sandbox와 승인의 별도 역할을 확인했다. 메인은 Karpathy 지침에 따라 제품 코드/권한을 바꾸지 않고 opt-in 임시 fixture 기제 검사를 추가했다.
@@ -100,6 +107,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **외부 경로 sandbox만으로 원본 보호 불충분(2026-09-28)**: 임시 fixture의 macOS `macos_sandbox_probe`에서 기존 writable descriptor와 hardlink로 sandbox 밖 원본 변경을 재현했다. 직접/심볼릭 링크/자손 쓰기와 실행 중 hardlink 생성은 차단됐다. probe exit 0은 기제 관측 완료이지 안전 gate PASS가 아니며 제품에 적용된 정책이 아니다. 기존 핸들·inode 공유·IPC 경계가 포함된 입장/실행 정책이 필요하다. 제안서 §6.8 참조.
+- **공유 vendor gate의 fd 상속 차단(2026-09-28)**: 고정 셸이 payload release 전 0/1/2 외 inherited fd를 닫는다. 임시 원본의 non-CLOEXEC fd 누출을 먼저 재현하고 낮은/높은 fd 및 부모 보존·기존 로그인/실행 회귀·독립 검토로 수정 확인했다. hardlink 및 전체 sandbox 보장으로 확대 해석하지 않는다.
 
 - **실제 실행 원장 통합 파동 검토 통과(2026-09-28, 기준 `e738340`)**: 공통 RunPreparation이 메시지/역할/snapshot 해석과 run/recovery/writer 예약을 담당한다. RunReservation은 gate 전 신원 저장·release 기록·누적 자손 갱신과 예약 입력의 text 통신·공개 원장·explicit 종료 증거에 따른 terminal/복구 저장을 연결한다. 임시 snapshot/SQLite/toy pipe와 DB 재오픈 회귀 및 독립 정적 검토 PASS다. 누적 라이브러리 증거와 후속 변경의 집중 회귀를 조합하며 전체 최신 소스 누적 재실행으로 주장하지 않는다. native provider 입장·workspace-write OS 격리·도구/승인·제품 caller는 여전히 미완료다. 가짜 공급자 증거로 실제 provider·유료 모델·제품 활성화를 주장하지 않는다. 상세는 현재 및 월간 archive의 2026-09-28 기록이다.
 
