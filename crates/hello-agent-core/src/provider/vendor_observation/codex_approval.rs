@@ -5,7 +5,7 @@ use super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(untagged)]
 pub enum RequestId {
     Number(u64),

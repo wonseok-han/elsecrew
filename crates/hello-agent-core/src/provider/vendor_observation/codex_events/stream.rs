@@ -2,6 +2,7 @@
 //! The transport owner must dispatch all notifications for this turn here and handle
 //! `RequiresHandling` separately. This does not authorize tools or prove process exit.
 
+use super::super::codex_approval::{Action, PendingApproval, RequestId};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -26,6 +27,7 @@ pub enum Observed {
 struct ItemState {
     kind: String,
     completed: bool,
+    command: Option<(String, String)>,
 }
 
 pub struct TurnStream {
@@ -34,6 +36,7 @@ pub struct TurnStream {
     outcome: Option<TurnOutcome>,
     items: BTreeMap<String, ItemState>,
     failed: bool,
+    approvals: BTreeMap<RequestId, Option<String>>,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +69,7 @@ impl TurnStream {
             outcome: None,
             items: BTreeMap::new(),
             failed: false,
+            approvals: BTreeMap::new(),
         })
     }
 
@@ -90,10 +94,78 @@ impl TurnStream {
         self.outcome.ok_or_else(invalid)
     }
 
+    /// Observe an approval only for this stream's still-live tool item. No reply
+    /// or execution authority is produced; an owner/UI must decide separately.
+    pub fn pending_approval(
+        &mut self,
+        input: &BoundedObservation,
+    ) -> Result<PendingApproval, ProviderError> {
+        let result = (|| {
+            if self.failed || self.outcome.is_some() || !self.started {
+                return Err(invalid());
+            }
+            self.projection.charge(input)?;
+            let mut request = PendingApproval::parse(
+                input,
+                &self.projection.thread_id,
+                &self.projection.turn_id,
+            )?;
+            if self.approvals.contains_key(&request.request_id) {
+                return Err(invalid());
+            }
+            let item = self.items.get(&request.item_id).ok_or_else(invalid)?;
+            if item.completed {
+                return Err(invalid());
+            }
+            match &mut request.action {
+                Action::Command { command, cwd, .. } if item.kind == "commandExecution" => {
+                    let (expected_command, expected_cwd) =
+                        item.command.as_ref().ok_or_else(invalid)?;
+                    if command.as_ref().is_some_and(|v| v != expected_command)
+                        || cwd.as_ref().is_some_and(|v| v != expected_cwd)
+                    {
+                        return Err(invalid());
+                    }
+                    *command = Some(expected_command.clone());
+                    *cwd = Some(expected_cwd.clone());
+                }
+                Action::FileChange { .. } if item.kind == "fileChange" => {}
+                _ => return Err(invalid()),
+            }
+            self.approvals
+                .insert(request.request_id.clone(), Some(request.item_id.clone()));
+            Ok(request)
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     fn observe_inner(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
         // Charge all notifications, including non-public ones, exactly once.
         let projected = self.projection.project(input)?;
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if frame.method == "serverRequest/resolved" {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct Resolved {
+                thread_id: String,
+                request_id: RequestId,
+            }
+            let resolved: Resolved = decode(frame.params.get())?;
+            if !self.started || resolved.thread_id != self.projection.thread_id {
+                return Err(invalid());
+            }
+            let pending = self
+                .approvals
+                .get_mut(&resolved.request_id)
+                .ok_or_else(invalid)?;
+            if pending.take().is_none() {
+                return Err(invalid());
+            }
+            return Ok(Observed::Private);
+        }
         if matches!(frame.method.as_str(), "turn/started" | "turn/completed") {
             let wire: TurnFrame = decode(frame.params.get())?;
             if wire.thread_id != self.projection.thread_id
@@ -136,6 +208,9 @@ impl TurnStream {
                 }
                 _ => return Err(invalid()),
             };
+            if outcome == TurnOutcome::Completed && self.approvals.values().any(Option::is_some) {
+                return Err(invalid());
+            }
             self.outcome = Some(outcome);
             return Ok(Observed::Finished(outcome));
         }
@@ -158,11 +233,32 @@ impl TurnStream {
                     return Err(invalid());
                 }
                 let public = matches!(item.kind.as_str(), "agentMessage" | "plan");
+                let command = if item.kind == "commandExecution" {
+                    #[derive(Deserialize)]
+                    struct Command {
+                        command: String,
+                        cwd: String,
+                        status: String,
+                    }
+                    let value: Command = decode(wire.item.get())?;
+                    if value.status != "inProgress"
+                        || value.command.len() > 64 * 1024
+                        || value.command.contains('\0')
+                        || value.cwd.len() > 16 * 1024
+                        || value.cwd.chars().any(char::is_control)
+                    {
+                        return Err(invalid());
+                    }
+                    Some((value.command, value.cwd))
+                } else {
+                    None
+                };
                 self.items.insert(
                     item.id,
                     ItemState {
                         kind: item.kind,
                         completed: false,
+                        command,
                     },
                 );
                 return Ok(if public {
@@ -172,6 +268,13 @@ impl TurnStream {
                 } else {
                     Observed::RequiresHandling
                 });
+            }
+            if self
+                .approvals
+                .values()
+                .any(|v| v.as_deref() == Some(&item.id))
+            {
+                return Err(invalid());
             }
             let existing = self.items.get_mut(&item.id).ok_or_else(invalid)?;
             if existing.completed || existing.kind != item.kind {
@@ -239,7 +342,7 @@ mod tests {
     fn item(method: &str, kind: &str) -> BoundedObservation {
         frame(
             method,
-            json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public"}}),
+            json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public","command":"echo test","cwd":"/snapshot","status":"inProgress"}}),
         )
     }
     fn delta() -> BoundedObservation {
@@ -451,6 +554,114 @@ mod tests {
                 .unwrap();
             assert!(!error.to_string().contains("PRIVATE"));
             assert!(stream.finish().is_err());
+        }
+    }
+
+    fn approval(request_id: u64) -> BoundedObservation {
+        BoundedObservation::new(json!({"id":request_id,"method":"item/commandExecution/requestApproval","params":{"threadId":"t","turnId":"r","itemId":"i","startedAtMs":1,"kind":"command","environmentId":null}}).to_string().into_bytes()).unwrap()
+    }
+
+    #[test]
+    fn approval_matches_live_tool_context_and_resolves_once() {
+        let mut stream = started();
+        assert!(matches!(
+            stream
+                .observe(&item("item/started", "commandExecution"))
+                .unwrap(),
+            Observed::RequiresHandling
+        ));
+        let request = stream.pending_approval(&approval(10)).unwrap();
+        assert!(
+            matches!(request.action,Action::Command {command:Some(ref c),cwd:Some(ref p),..} if c=="echo test"&&p=="/snapshot")
+        );
+        assert!(matches!(
+            stream
+                .observe(&frame(
+                    "serverRequest/resolved",
+                    json!({"threadId":"t","requestId":10})
+                ))
+                .unwrap(),
+            Observed::Private
+        ));
+        stream
+            .observe(&item("item/completed", "commandExecution"))
+            .unwrap();
+        stream
+            .observe(&turn("turn/completed", "completed"))
+            .unwrap();
+        assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+    }
+
+    #[test]
+    fn approval_wrong_item_scope_duplicate_context_and_resolution_fail_closed() {
+        for case in [
+            "missing-item",
+            "closed-item",
+            "duplicate",
+            "resolved-reuse",
+            "wrong-command",
+            "wrong-cwd",
+            "wrong-type",
+            "pending-completion",
+            "unknown-resolution",
+            "duplicate-resolution",
+        ] {
+            let mut stream = started();
+            if case != "missing-item" {
+                stream
+                    .observe(&item(
+                        "item/started",
+                        if case == "wrong-type" {
+                            "agentMessage"
+                        } else {
+                            "commandExecution"
+                        },
+                    ))
+                    .unwrap();
+            }
+            if case == "closed-item" {
+                stream
+                    .observe(&item("item/completed", "commandExecution"))
+                    .unwrap();
+            }
+            let mut event: serde_json::Value = serde_json::from_slice(&approval(10).bytes).unwrap();
+            if case == "wrong-command" {
+                event["params"]["command"] = json!("other");
+            }
+            if case == "wrong-cwd" {
+                event["params"]["cwd"] = json!("/other");
+            }
+            let event = BoundedObservation::new(event.to_string().into_bytes()).unwrap();
+            let resolved = frame(
+                "serverRequest/resolved",
+                json!({"threadId":"t","requestId":10}),
+            );
+            let rejected = match case {
+                "duplicate" => {
+                    stream.pending_approval(&event).unwrap();
+                    stream.pending_approval(&event).is_err()
+                }
+                "resolved-reuse" => {
+                    stream.pending_approval(&event).unwrap();
+                    stream.observe(&resolved).unwrap();
+                    stream.pending_approval(&event).is_err()
+                }
+                "pending-completion" => {
+                    stream.pending_approval(&event).unwrap();
+                    stream
+                        .observe(&item("item/completed", "commandExecution"))
+                        .is_err()
+                }
+                "unknown-resolution" => stream.observe(&resolved).is_err(),
+                "duplicate-resolution" => {
+                    stream.pending_approval(&event).unwrap();
+                    stream.observe(&resolved).unwrap();
+                    stream.observe(&resolved).is_err()
+                }
+                _ => stream.pending_approval(&event).is_err(),
+            };
+            assert!(rejected, "{case}");
+            assert!(stream.finish().is_err(), "{case}");
         }
     }
 }

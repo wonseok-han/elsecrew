@@ -129,6 +129,11 @@ impl TurnProjection {
     }
 
     fn project_inner(&mut self, input: &BoundedObservation) -> Result<Projection, ProviderError> {
+        self.charge(input)?;
+        self.project_charged(input)
+    }
+
+    fn charge(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
         self.events += 1;
         self.bytes += input.bytes.len();
         if self.events > PROVIDER_INTERNAL_EVENTS_MAX
@@ -136,6 +141,10 @@ impl TurnProjection {
         {
             return Err(invalid());
         }
+        Ok(())
+    }
+
+    fn project_charged(&mut self, input: &BoundedObservation) -> Result<Projection, ProviderError> {
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
         if frame.emitted_at_ms > 9_007_199_254_740_991 {
             return Err(invalid());

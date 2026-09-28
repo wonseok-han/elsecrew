@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (승인 요청·진행 중 도구 결속)
+
+- **진전/기준**: 직전 `6e02393`는 순수 승인 요청 파서·검증·커밋의 진전이다. 이번 clean HEAD에서 메인이 현재 TurnStream에 pending_approval 관측을 연결했다. 같은 thread/turn의 진행 중 item에만 요청을 결속하고 command/fileChange 종류를 대조한다. 명령 요청의 command/cwd가 생략되면 이미 관측한 도구 문맥을 쓰며 불일치하면 거절한다.
+- **수명/예산**: request ID는 처리 뒤에도 재사용을 막고, serverRequest/resolved는 같은 thread의 알려진 미처리 요청 한 번만 해소한다. pending 승인 상태의 item 완료·알 수 없는/중복 resolution·종료된 item 요청은 실패한다. 요청도 기존 총 event/byte 예산에 포함한다. 이 관측은 승인 응답·실행 성공이나 파일 diff/snapshot 권위가 아니다.
+- **검증/범위**: core events 13 PASS(정상 결속/해소와 10종 오류), sidecar 집중 5 PASS. Karpathy 지침으로 기존 stream을 확장했고 제품 실행/허용 응답/UI는 열지 않았다. 실제 CLI·인증·유료 호출·신규 위임·main 병합·push 없음. 다음은 사용자 결정과 live pending 요청을 묶는 응답/대기 경로이며 원장·snapshot admission은 계속 남는다.
+- **마감**: strict sidecar clippy·core fmt·diff PASS. 자체 diff 검토를 마친 관측/회귀·문서 변경만 기능 커밋한다. 실제 승인 처리 또는 제품 완료를 주장하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (승인 요청 관측 계약)
 
 - **진전/기준**: 직전 `74988d6`는 비공개 이벤트 처리·회귀·커밋을 마친 진전이다. 이번 clean HEAD에서 OpenAI Docs command approval 및 pinned 0.158 request/decision schema를 대조하고 현재 제품 계약에 승인 대기 UI/전송 경로가 없음을 확인했다.
