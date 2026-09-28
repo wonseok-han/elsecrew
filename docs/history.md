@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (화면 연결 전 실제 통신과 실행 루프 점검)
+
+- **직전/현재 확인**: 직전 예약 handler 연결은 `bffbea7`에 커밋된 진전이며 clean `m5/coding-agent-ide`에서 현재 코드를 확인했다. 제품 `AgentRuntime::blocked()`는 유지되고 native candidate는 공개 실행 경로에 연결되지 않았다. 승인 UI 계약도 아직 없다.
+- **중요 발견/순서**: `lib.rs`의 stdio dispatcher는 한 루프에서 요청과 runtime poll을 처리하지만 `run_candidate_with_handler`→`run_text_checked`는 종료까지 동기식으로 대기한다. 이를 handle_request에 바로 붙이면 승인·취소 IPC를 처리하지 못한다. 실제 CLI의 오프라인 설정 handshake 검증 뒤, main의 Storage 단일 소유권을 유지하는 단계별 실행/poll 구조를 먼저 만들고 승인 IPC/UI를 연결해야 한다. 화면/가짜 handler 추가만으로 실제 작업 가능 상태라고 주장하지 않는다.
+- **승인 필요**: 앞서 요청한 설치 Codex CLI의 새 임시 HOME/작업 폴더·네트워크 차단 initialize/config/read 전용 시험은 아직 미승인이다. 기존 인증/사용자 프로젝트·account/read/model/list·thread/turn·유료 모델 호출은 사용하지 않는 범위로 재확인을 요청한다. 실제 공급자 호환성 확인 없이 추가 활성화/실행 아키텍처를 확정하지 않는다.
+- **검증/다음**: Git 상태와 위 실행 호출/dispatch 경로를 읽기 전용으로 확인했다. 새 구현 테스트를 반복하지 않았고 실제 provider 실행·main 병합/push 없음. 승인을 받으면 해당 무모델 실측부터 수행하고 성공/차단 근거를 바탕으로 비차단 runtime 통합을 이어간다. 앱 전체 목표는 미완료이며 완료로 표시하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (예약 실행과 상호작용 handler 연결)
 
 - **진전/기준**: 직전 전송 파동은 `dfe7ceb`로 커밋됐다. clean checkout에서 메인이 RunReservation의 기존 입력/권한·공개 원장·terminal 흐름을 재사용하는 내부 handler 진입점을 연결했다. process 관측과 workspace checkpoint는 예약 owner가 처리하며 도구/승인 callback에 위임하지 않는다. 도구·승인 callback 전 입력/역할을 검증하고 응답 직전 기존 관측 checkpoint에서 다시 검증한다.
