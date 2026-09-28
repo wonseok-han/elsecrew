@@ -909,8 +909,10 @@ IFS= read -r hold
                             }
                             TextAction::VerifyWorkspace => {
                                 checks += 1;
-                                if (case == "turn-workspace-before-thread" && checks == 2)
-                                    || (case == "turn-workspace-before-prompt" && checks == 3)
+                                // Five small preflight frames add five flush checks;
+                                // the thread frame adds one before the prompt boundary.
+                                if (case == "turn-workspace-before-thread" && checks == 7)
+                                    || (case == "turn-workspace-before-prompt" && checks == 9)
                                 {
                                     return Err(failure());
                                 }
@@ -972,13 +974,15 @@ IFS= read -r hold
                     case,
                     "turn-success" | "turn-approval-decline" | "turn-approval-cleared"
                 ) {
-                    assert_eq!(
-                        checks,
-                        if case == "turn-approval-decline" {
-                            4
-                        } else {
-                            3
-                        }
+                    // Initial/boundary checks plus every queued write attempt.
+                    // Backpressure may add further authority revalidations.
+                    assert!(
+                        checks
+                            >= if case == "turn-approval-decline" {
+                                12
+                            } else {
+                                10
+                            }
                     );
                     assert_eq!(result.unwrap(), TurnOutcome::Completed);
                     assert_eq!(text, "hello");

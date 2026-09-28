@@ -472,28 +472,6 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
-    pub(crate) fn send_turn_observed(
-        &mut self,
-        request: hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest,
-        timeout: Duration,
-        cancel: &AtomicBool,
-        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
-    ) -> Result<(), SidecarError> {
-        if self.failed || self.finished || !self.preflight_claimed {
-            return Err(failure());
-        }
-        self.transport_used = true;
-        let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.send_turn(request, timeout, cancel, &mut || {
-            self.tick_with_run(observer)
-        });
-        self.io = Some(io);
-        if result.is_err() {
-            self.failed = true;
-        }
-        result
-    }
-
     pub(crate) fn receive(
         &mut self,
         timeout: Duration,
@@ -505,18 +483,31 @@ impl<'a> LoginProcess<'a> {
         self.receive_inner(timeout, cancel, &mut |_| Ok(()))
     }
 
-    pub(crate) fn send_approval_observed(
+    pub(crate) fn queue_native(
         &mut self,
-        reply: hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply,
-        timeout: Duration,
-        cancel: &AtomicBool,
-        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+        frame: crate::provider_login_io::NativeFrame,
     ) -> Result<(), SidecarError> {
         if self.failed || self.finished || !self.preflight_claimed {
             return Err(failure());
         }
+        self.transport_used = true;
+        let result = self.io.as_mut().ok_or_else(failure)?.queue_native(frame);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn flush_native_observed(
+        &mut self,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<bool, SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
         let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.send_approval(reply, timeout, cancel, &mut || self.tick_with_run(observer));
+        let result = io.flush_native(cancel, &mut || self.tick_with_run(observer));
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (단계별 송신으로 제어권 반환)
+
+- **진전/기준**: 직전 단계별 수신 세션은 `874616b`로 커밋된 진전이다. clean 통합 checkout에서 메인이 native typed frame을 한 번의 nonblocking write로 전송하도록 연결했다. 파이프가 차면 미전송 suffix를 유지하고 다음 advance까지 반환한다. 재시도마다 workspace/예약 권위와 취소/공유 예산을 검사한다. 기존 로그인 송신은 유지하며 사용처가 없어진 동기 turn/approval wrapper만 제거했다.
+- **검증**: 실제 임시 pipe IO 5 PASS/0.06초(신규 backpressure 128회 반환·취소 후 재사용 거절·96KiB 정확한 분할 전송·중복 queue 거절 포함). preflight 5개 기존 사례와 단계별 세션 1개 중, checkpoint 수/시점 assertion은 새 flush 검사에 맞춰 수정하고 복합 통신 회귀 재실행 PASS/9.18초. 예약 상호작용 2사례 PASS/7.83초. 전체 예약 원장·process 회귀와 최종 clippy/독립 검토를 이어간다.
+- **경계/다음**: 실제 CLI/계정/모델은 호출하지 않았다. 송수신 대기는 yield하지만 파일/DB 관측과 explicit cleanup은 아직 동기식이며 runtime의 장기 process/profile 소유권과 공개 승인 IPC는 미연결이다. 실제 활성화가 아닌 다음 통합의 선행 작업이며 main 병합/push 없음.
+- **마감**: 최종 예약 원장 25사례 PASS/52.99초, process 14 PASS/4.10초, strict sidecar clippy·scoped fmt·diff PASS. 독립 검토자 1명이 부분 전송/실패 poison·상관관계·소유권/cleanup 경계를 검토해 PASS했다. 관련 6파일을 원자 커밋하며 앱 전체 목표는 계속 미완료다.
+
 ### 2026-09-28 · by GPT-6 Astra (응답 대기 루프의 단계별 진행)
 
 - **진전/기준**: 직전은 이미 반영된 검토자 승인 정책 재확인으로 개발 진전은 없었다. clean `21a1ad5`에서 메인이 기존 text 후보를 단계별 세션으로 전환했다. preflight/thread/turn 시작·출력/승인을 한 상태에 보존하고 호출당 수신 frame 하나 이하만 처리해 응답이 없는 때에도 반환한다. 기존 동기식 wrapper가 같은 세션을 구동하므로 별도 실행 구현을 복제하지 않는다.

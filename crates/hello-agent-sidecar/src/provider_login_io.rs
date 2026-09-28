@@ -37,6 +37,26 @@ pub(crate) struct LoginIo {
     sent: usize,
     code_sent: bool,
     failed: bool,
+    outgoing: Option<(Vec<u8>, usize)>,
+}
+
+/// Only requests already admitted by the corresponding protocol state machine.
+pub(crate) enum NativeFrame {
+    Preflight(
+        hello_agent_core::provider::vendor_observation::codex_preflight::exchange::PreflightRequest,
+    ),
+    Turn(hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest),
+    Approval(hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply),
+}
+
+impl NativeFrame {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Preflight(frame) => frame.as_str().as_bytes(),
+            Self::Turn(frame) => frame.as_str().as_bytes(),
+            Self::Approval(frame) => frame.as_str().as_bytes(),
+        }
+    }
 }
 
 /// CLI output is not JSONL: blank lines and clean EOF are valid. Never mix this
@@ -48,8 +68,72 @@ pub(crate) enum OutputChunk {
 }
 
 impl LoginIo {
+    pub(crate) fn queue_native(&mut self, frame: NativeFrame) -> Result<(), SidecarError> {
+        self.queue_bytes(frame.bytes())
+    }
+
+    fn queue_bytes(&mut self, bytes: &[u8]) -> Result<(), SidecarError> {
+        if self.failed
+            || self.outgoing.is_some()
+            || bytes.len() < 2
+            || bytes.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES
+            || bytes.last() != Some(&b'\n')
+            || bytes[..bytes.len() - 1].contains(&b'\n')
+            || self.sent + bytes.len() > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES
+        {
+            self.failed = true;
+            self.outgoing = None;
+            return Err(failure());
+        }
+        self.outgoing = Some((bytes.to_vec(), 0));
+        Ok(())
+    }
+
+    /// One nonblocking write syscall. False retains the exact unwritten suffix.
+    /// The session owner applies its overall deadline between these calls.
+    pub(crate) fn flush_native(
+        &mut self,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<bool, SidecarError> {
+        let result = (|| {
+            if self.failed || cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
+            observe()?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
+            let (bytes, written) = self.outgoing.as_mut().ok_or_else(failure)?;
+            match self.input.write(&bytes[*written..]) {
+                Ok(0) => return Err(failure()),
+                Ok(count) => {
+                    *written += count;
+                    self.sent += count;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) => {}
+                Err(_) => return Err(failure()),
+            }
+            let complete = *written == bytes.len();
+            if complete {
+                self.outgoing = None;
+            }
+            Ok(complete)
+        })();
+        if result.is_err() {
+            self.failed = true;
+            self.outgoing = None;
+        }
+        result
+    }
+
     pub(crate) fn poll_chunk(&mut self, cancel: &AtomicBool) -> Result<OutputChunk, SidecarError> {
         if self.failed
+            || self.outgoing.is_some()
             || !self.pending.is_empty()
             || (self.sent != 0 && !self.code_sent)
             || cancel.load(Ordering::Acquire)
@@ -95,6 +179,7 @@ impl LoginIo {
             sent: 0,
             code_sent: false,
             failed: false,
+            outgoing: None,
         })
     }
 
@@ -162,34 +247,6 @@ impl LoginIo {
         result
     }
 
-    pub(crate) fn send_turn(
-        &mut self,
-        frame: hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest,
-        timeout: Duration,
-        cancel: &AtomicBool,
-        observe: &mut impl FnMut() -> Result<(), SidecarError>,
-    ) -> Result<(), SidecarError> {
-        let result = self.send_inner(frame.as_str().as_bytes(), timeout, cancel, observe);
-        if result.is_err() {
-            self.failed = true;
-        }
-        result
-    }
-
-    pub(crate) fn send_approval(
-        &mut self,
-        frame: hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply,
-        timeout: Duration,
-        cancel: &AtomicBool,
-        observe: &mut impl FnMut() -> Result<(), SidecarError>,
-    ) -> Result<(), SidecarError> {
-        let result = self.send_inner(frame.as_str().as_bytes(), timeout, cancel, observe);
-        if result.is_err() {
-            self.failed = true;
-        }
-        result
-    }
-
     fn send_inner(
         &mut self,
         frame: &[u8],
@@ -198,6 +255,7 @@ impl LoginIo {
         observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if self.failed
+            || self.outgoing.is_some()
             || frame.len() < 2
             || frame.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES
             || frame.last() != Some(&b'\n')
@@ -287,7 +345,7 @@ impl LoginIo {
         cancel: &AtomicBool,
         observe: &mut impl FnMut() -> Result<(), SidecarError>,
     ) -> Result<Option<BoundedObservation>, SidecarError> {
-        if self.failed {
+        if self.failed || self.outgoing.is_some() {
             return Err(failure());
         }
         for _ in 0..32 {
@@ -373,6 +431,65 @@ mod tests {
                 .unwrap(),
         )
     }
+    #[test]
+    fn queued_write_yields_under_backpressure_and_cancel_is_sticky() {
+        let mut child = fixture(Some("exec /bin/sleep 5"));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        let mut bytes = vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES - 1];
+        bytes.push(b'\n');
+        io.queue_bytes(&bytes).unwrap();
+        let cancel = AtomicBool::new(false);
+        for _ in 0..128 {
+            assert!(!io.flush_native(&cancel, &mut || Ok(())).unwrap());
+        }
+        let written = io.outgoing.as_ref().unwrap().1;
+        assert!(written > 0 && written < bytes.len());
+        assert_eq!(io.sent, written);
+        cancel.store(true, Ordering::Release);
+        assert!(io.flush_native(&cancel, &mut || Ok(())).is_err());
+        cancel.store(false, Ordering::Release);
+        assert!(io.outgoing.is_none());
+        assert!(io.queue_bytes(b"{}\n").is_err());
+        assert!(io.flush_native(&cancel, &mut || Ok(())).is_err());
+    }
+
+    #[test]
+    fn queued_partial_writes_preserve_exact_frame_and_reject_overlap() {
+        let mut child = fixture(Some(
+            "IFS= read -r line; printf '%s\\n' \"$line\"; IFS= read -r hold",
+        ));
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        let bytes = format!("{{\"text\":\"{}\"}}\n", "x".repeat(96 * 1024));
+        let cancel = AtomicBool::new(false);
+        io.queue_bytes(bytes.as_bytes()).unwrap();
+        let start = Instant::now();
+        while !io.flush_native(&cancel, &mut || Ok(())).unwrap() {
+            assert!(start.elapsed() < Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(io.sent, bytes.len());
+        // Inspect this synthetic peer's bytes directly, without exposing raw
+        // provider observations in the production API.
+        let mut echoed = Vec::new();
+        while echoed.len() < bytes.len() {
+            let mut chunk = [0; 4096];
+            match io.output.read(&mut chunk) {
+                Ok(0) => panic!("early EOF"),
+                Ok(count) => echoed.extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(start.elapsed() < Duration::from_secs(3));
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("{error}"),
+            }
+        }
+        assert_eq!(echoed, bytes.as_bytes());
+        io.queue_bytes(b"{}\n").unwrap();
+        assert!(io.queue_bytes(b"{}\n").is_err());
+        assert!(io.outgoing.is_none());
+        assert!(io.flush_native(&cancel, &mut || Ok(())).is_err());
+    }
+
     #[test]
     fn real_pipe_roundtrip_and_buffered_frames() {
         use hello_agent_core::provider::vendor_observation::{AuthObservation, Vendor};

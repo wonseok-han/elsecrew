@@ -1,11 +1,13 @@
 //! Resumable protocol state, used by the synchronous compatibility driver.
 //! No process/ledger ownership or cleanup authority: the driver retains all three.
 use super::*;
+use crate::provider_login_io::NativeFrame;
 use hello_agent_core::provider::vendor_observation::{
     codex_approval::PendingApproval,
     codex_events::stream::{Observed, TurnOutcome, TurnStream},
     codex_turn::TurnStart,
 };
+use std::collections::VecDeque;
 
 enum Stage {
     Preflight {
@@ -23,6 +25,8 @@ pub(super) struct TextSession {
     text: String,
     pending: Vec<PendingApproval>,
     started: Instant,
+    outgoing: VecDeque<NativeFrame>,
+    transmitting: bool,
 }
 
 impl TextSession {
@@ -45,6 +49,8 @@ impl TextSession {
             text: text.into(),
             pending: Vec::new(),
             started: Instant::now(),
+            outgoing: VecDeque::new(),
+            transmitting: false,
         })
     }
 
@@ -58,8 +64,8 @@ impl TextSession {
     }
 
     /// Consumes at most one received frame per call; never sleeps for a response.
-    /// Typed sends still have a bounded blocking deadline. This is not yet a
-    /// nonblocking product runtime; the caller must explicitly finish its owner.
+    /// Sends use one nonblocking write per call. Observations and cleanup still
+    /// have their own latency; the caller must explicitly finish its owner.
     pub(super) fn advance(
         &mut self,
         process: &mut LoginProcess<'_>,
@@ -68,6 +74,24 @@ impl TextSession {
     ) -> Result<Option<TurnOutcome>, SidecarError> {
         let stage = self.stage.take().ok_or_else(failure)?;
         self.remaining(cancel)?;
+        if self.transmitting || !self.outgoing.is_empty() {
+            // Recheck authority after yielding, before every possible partial write.
+            on_action(process, TextAction::VerifyWorkspace)?;
+            on_action(process, TextAction::ObserveProcess)?;
+            self.remaining(cancel)?;
+            if !self.transmitting {
+                process.queue_native(self.outgoing.pop_front().ok_or_else(failure)?)?;
+                self.transmitting = true;
+            }
+            if process.flush_native_observed(cancel, &mut |process| {
+                on_action(process, TextAction::ObserveProcess)
+            })? {
+                self.transmitting = false;
+            }
+            self.remaining(cancel)?;
+            self.stage = Some(stage);
+            return Ok(None);
+        }
         let next = match stage {
             Stage::Preflight {
                 mut flow,
@@ -79,39 +103,24 @@ impl TextSession {
                         if frames.is_empty() {
                             return Err(failure());
                         }
-                        for frame in frames {
-                            on_action(process, TextAction::ObserveProcess)?;
-                            process.send_preflight_observed(
-                                frame,
-                                self.remaining(cancel)?,
-                                cancel,
-                                &mut |process| on_action(process, TextAction::ObserveProcess),
-                            )?;
-                        }
+                        self.outgoing
+                            .extend(frames.into_iter().map(NativeFrame::Preflight));
                         waiting = true;
                     }
                     PreflightState::ObservationsMatched => {
                         on_action(process, TextAction::VerifyWorkspace)?;
                         on_action(process, TextAction::ObserveProcess)?;
                         let request = flow.start_thread(&self.cwd).map_err(|_| failure())?;
-                        process.send_preflight_observed(
-                            request,
-                            self.remaining(cancel)?,
-                            cancel,
-                            &mut |process| on_action(process, TextAction::ObserveProcess),
-                        )?;
+                        self.outgoing.push_back(NativeFrame::Preflight(request));
                         waiting = true;
                     }
                     PreflightState::ThreadMatched => {
                         on_action(process, TextAction::VerifyWorkspace)?;
                         on_action(process, TextAction::ObserveProcess)?;
                         let mut turn = flow.into_text_turn(&self.text).map_err(|_| failure())?;
-                        process.send_turn_observed(
+                        self.outgoing.push_back(NativeFrame::Turn(
                             turn.take_frame().map_err(|_| failure())?,
-                            self.remaining(cancel)?,
-                            cancel,
-                            &mut |process| on_action(process, TextAction::ObserveProcess),
-                        )?;
+                        ));
                         self.remaining(cancel)?;
                         self.stage = Some(Stage::Starting(turn));
                         return Ok(None);
@@ -181,12 +190,8 @@ impl TextSession {
                             let reply = stream
                                 .prepare_approval_reply(&request.request_id, decision)
                                 .map_err(|_| failure())?;
-                            process.send_approval_observed(
-                                reply,
-                                self.remaining(cancel)?,
-                                cancel,
-                                &mut |process| on_action(process, TextAction::ObserveProcess),
-                            )?;
+                            self.outgoing.push_back(NativeFrame::Approval(reply));
+                            break;
                         }
                     }
                 }
@@ -238,7 +243,10 @@ mod tests {
             let cancel = AtomicBool::new(false);
             process.begin_preflight().unwrap();
             let mut observe = |_: &mut LoginProcess<'_>, action: TextAction| {
-                assert!(matches!(action, TextAction::ObserveProcess));
+                assert!(matches!(
+                    action,
+                    TextAction::ObserveProcess | TextAction::VerifyWorkspace
+                ));
                 Ok(())
             };
             // Send initialization, then return repeatedly with no peer response.
