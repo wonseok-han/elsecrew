@@ -6,6 +6,8 @@ use super::super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
+pub mod exchange;
+
 /// An explicit requested tuple; never filled from vendor defaults or upgrade suggestions.
 pub struct ExpectedProfile<'a> {
     pub model: &'a str,

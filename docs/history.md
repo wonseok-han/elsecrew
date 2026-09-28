@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실행 전 검증 연결 단계)
+
+- **직접 구현**: clean `cd64fbe`에서 `codex_preflight/exchange.rs`를 추가했다. 기존 single-flight RPC와 설정/모델 검증기를 한 연결의 initialize→config/read→account/read→model/list 순서에 결속한다. 초기화의 앱 profile/macOS 신원, 명시적 모델/추론/읽기 전용 정책, ChatGPT 계정, 완전한 모델 목록을 모두 대조하며 불일치·중복·순서 위반은 이후 요청을 차단한다. 원문 계정/설정은 보관·반환하지 않는다.
+- **범위·검증**: Karpathy 지침으로 기존 검증기를 재사용했다. OpenAI 공식 [app-server 문서](https://learn.chatgpt.com/docs/app-server)의 모델 목록·초기화·계정 조회 및 thread/start와 turn/start의 구분을 재확인했다. 집중 preflight 테스트 10 PASS. 이 내부 부품은 실제 transport/프로세스 owner와 아직 연결하지 않았으며 실행 활성화·모델 호출·권한 증명이 아니다.
+- **회귀·다음**: vendor_observation 관련 Rust 36 PASS, core rustfmt·diff 검사 PASS. process owner와 bounded I/O에 이 검증 순서를 연결하고 실제 버전 응답 및 설정 격리를 검증한 뒤 thread/turn·공개 출력·원장에 연결한다. 읽기 전용 단계는 전체 제품의 쓰기 역할을 대체하지 않는다. 유료 호출·사용자 프로젝트 변경·main 병합·push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (Codex native 배포 대응·두 로그인 복원)
 
 - **정정·구현**: 직전 기록의 unsigned 파일은 실제 CLI가 아니라 shell wrapper였다. 부모 앱과 nested CodexCLI.app의 strict 서명(Team 2DC432GLL2)을 확인하고 0.158.0-alpha.2.1 native CLI(`3e11ccc7…`)/host(`4c398936…`) exact pair를 추가했다. Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex를 직접 선택하며 wrapper는 실행하지 않는다. 기존 쌍과 혼합·미등록 파일은 계속 거절한다.
