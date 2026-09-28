@@ -140,6 +140,16 @@ impl PreflightExchange {
         }
     }
 
+    /// Consume this connection's observations to prepare one text turn. This is
+    /// not process/snapshot admission; the runtime must acquire that separately.
+    pub fn into_text_turn(
+        self,
+        text: &str,
+    ) -> Result<crate::provider::vendor_observation::codex_turn::TurnStart, ProviderError> {
+        let thread = self.matched_thread_id().ok_or_else(invalid)?;
+        crate::provider::vendor_observation::codex_turn::TurnStart::new(thread, text)
+    }
+
     /// Split initialized and its following request into individual JSONL frames.
     pub fn next_frames(&mut self) -> Result<Vec<PreflightRequest>, ProviderError> {
         Ok(self
@@ -385,6 +395,41 @@ mod tests {
         let mut another = super::tests::exchange();
         assert!(another.accept(&reply(0, &results()[0])).is_err());
         assert!(another.next_request().is_err());
+    }
+
+    #[test]
+    fn turn_preparation_consumes_only_a_live_matched_thread() {
+        for state in [
+            PreflightState::Checking,
+            PreflightState::ObservationsMatched,
+            PreflightState::ThreadStarting,
+            PreflightState::Failed,
+            PreflightState::Closed,
+        ] {
+            let mut flow = exchange();
+            flow.state = state;
+            flow.thread_id = Some("thread-1".into());
+            assert!(flow.into_text_turn("goal").is_err());
+        }
+        let mut flow = exchange();
+        for (index, result) in results().iter().enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, result)).unwrap();
+        }
+        flow.start_read_only_thread(std::path::Path::new("/managed/snapshot"))
+            .unwrap();
+        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+        flow.accept(&reply(4, &result)).unwrap();
+        flow.accept(
+            &BoundedObservation::new(
+                br#"{"method":"thread/started","params":{"thread":{"id":"thread-1"}}}"#.to_vec(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut turn = flow.into_text_turn("goal").unwrap();
+        let request: Value = serde_json::from_str(&turn.take_request().unwrap()).unwrap();
+        assert_eq!(request["params"]["threadId"], "thread-1");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Model-free vendor observations, never launch authority or fixture manifest evidence.
+//! Vendor observations and offline wire preparation, never launch authority or fixture evidence.
 //! Inputs are transient; outputs contain no account identifiers, tokens or raw config.
 
 use super::{BoundedObservation, ProviderError};
@@ -8,6 +8,7 @@ pub mod codex_events;
 pub mod codex_login;
 pub mod codex_preflight;
 pub mod codex_rpc;
+pub mod codex_turn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Vendor {

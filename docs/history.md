@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (목표 입력·실행 ID 결속)
+
+- **진전/기준**: 직전 `b301add`는 실제 무모델 thread 실측·독립 검토·커밋을 마친 진전이다. clean HEAD에서 메인이 직접 OpenAI Docs turns 및 로컬 0.158 생성 TurnStartParams/Response를 확인하고, 누락된 text turn 요청과 기존 TurnStream의 연결을 구현했다.
+- **구현**: 검증 완료된 살아 있는 PreflightExchange를 소비해야 TurnStart를 얻는다. 목표는 64 KiB 이하의 비어 있지 않은 text만 받고 정책/모델/cwd override는 노출하지 않는다. 요청은 한 번만 꺼내며 id=6 응답과 동일 thread/turn의 시작 알림을 양순서로 대조한 뒤 이미 시작 알림을 소비한 출력 stream을 반환한다. 잘못된 순서·다른 ID·오류·중복·지나간 재사용은 영구 실패한다. 사용자 목표/응답 원문은 오류 문자열에 넣지 않는다.
+- **경계/다음**: Karpathy 지침으로 기존 출력 파서와 검증된 thread 정책을 재사용했다. 오프라인 요청/파서만 연결한 것으로 실제 process 전송·snapshot/run 잠금·공개 원장·유료 실행·제품 capability는 열지 않는다. 다음은 동일 실행 owner에 이 요청/출력 처리를 연결하는 작업이다. 신규 위임·실제 CLI 호출·main 병합·push 없음.
+- **검증**: Codex 관련 55 PASS 후 추가한 preflight→turn gate를 포함한 focused turn 3 PASS. core 일반 clippy·fmt·diff PASS. strict core clippy는 비변경 proctree.rs의 unnecessary_lazy_evaluations/map_entry와 proctree/tests.rs len_zero 3개 기존 경고로 실패했다(HEAD 원문으로 확인). 해당 안전 코드는 수정하지 않았으며 strict 통과로 기록하지 않는다. 자체 diff 검토 후 이 미활성 순수 wire 변경을 기능 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (승인된 무모델 대화 생성·출처 검토)
 
 - **승인/범위**: 사용자가 임시 환경의 실제 thread 생성/종료 시험과 읽기 전용 리뷰어 1명을 모두 승인했다. HEAD `2a789e3`의 미커밋 출처/훅 검증을 이어 직접 시험하고 독립 검토를 진행했다. OpenAI Docs의 app-server·hooks와 pinned 생성 schema를 대조했으며 Karpathy 지침으로 기존 엄격 파서를 유지한다.
