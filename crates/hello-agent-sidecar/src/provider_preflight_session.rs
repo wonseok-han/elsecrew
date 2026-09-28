@@ -7,6 +7,8 @@ use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPer
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+mod incremental;
+
 #[cfg(test)]
 thread_local! {
     pub(crate) static BEFORE_RELEASE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
@@ -425,7 +427,7 @@ pub(crate) enum TextAction<'a> {
 
 fn run_text_checked(
     process: &mut LoginProcess<'_>,
-    mut flow: PreflightExchange,
+    flow: PreflightExchange,
     cancel: &AtomicBool,
     cwd: &std::path::Path,
     text: &str,
@@ -434,103 +436,16 @@ fn run_text_checked(
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
 > {
-    use hello_agent_core::provider::vendor_observation::codex_events::stream::Observed;
-    hello_agent_core::provider::vendor_observation::codex_turn::TurnStart::validate_text(text)
-        .map_err(|_| failure())?;
-    PreflightExchange::validate_thread_cwd(cwd).map_err(|_| failure())?;
+    let mut session = incremental::TextSession::new(flow, cwd, text)?;
     on_action(process, TextAction::VerifyWorkspace)?;
-    let started = Instant::now();
-    let budget = Duration::from_secs(30);
-    if !flow.is_fresh() || process.begin_preflight().is_err() {
-        return Err(failure());
-    }
-    let result = (|| {
-        check_claimed(
-            process,
-            &mut flow,
-            cancel,
-            budget,
-            started,
-            Some(cwd),
-            on_action,
-        )?;
-        on_action(process, TextAction::VerifyWorkspace)?;
-        on_action(process, TextAction::ObserveProcess)?;
-        let mut turn = flow.into_text_turn(text).map_err(|_| failure())?;
-        let remaining = || budget.checked_sub(started.elapsed()).ok_or_else(failure);
-        process.send_turn_observed(
-            turn.take_frame().map_err(|_| failure())?,
-            remaining()?,
-            cancel,
-            &mut |process| on_action(process, TextAction::ObserveProcess),
-        )?;
-        let mut stream = None;
-        for _ in 0..2 {
-            let response =
-                process.receive_preflight_observed(remaining()?, cancel, &mut |process| {
-                    on_action(process, TextAction::ObserveProcess)
-                })?;
-            on_action(process, TextAction::ObserveProcess)?;
-            if let Some(value) = turn.accept(&response).map_err(|_| failure())? {
-                stream = Some(value);
-            }
+    process.begin_preflight()?;
+    let result = loop {
+        match session.advance(process, cancel, on_action) {
+            Ok(Some(outcome)) => break Ok(outcome),
+            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Err(error) => break Err(error),
         }
-        let mut stream = stream.ok_or_else(failure)?;
-        let mut pending = Vec::<
-            hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval,
-        >::new();
-        loop {
-            remaining()?;
-            let frame = process.poll_preflight_observed(cancel, &mut |process| {
-                on_action(process, TextAction::ObserveProcess)
-            })?;
-            pending.retain(|request| stream.awaits_approval_decision(&request.request_id));
-            let Some(frame) = frame else {
-                for request in &pending {
-                    let mut decision = None;
-                    on_action(
-                        process,
-                        TextAction::PollApproval {
-                            request,
-                            decision: &mut decision,
-                        },
-                    )?;
-                    if let Some(decision) = decision {
-                        on_action(process, TextAction::VerifyWorkspace)?;
-                        on_action(process, TextAction::ObserveProcess)?;
-                        if cancel.load(Ordering::Acquire) {
-                            return Err(failure());
-                        }
-                        let reply = stream
-                            .prepare_approval_reply(&request.request_id, decision)
-                            .map_err(|_| failure())?;
-                        process.send_approval_observed(
-                            reply,
-                            remaining()?,
-                            cancel,
-                            &mut |process| on_action(process, TextAction::ObserveProcess),
-                        )?;
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(2));
-                continue;
-            };
-            on_action(process, TextAction::ObserveProcess)?;
-            let observed = stream.observe(&frame).map_err(|_| failure())?;
-            if cancel.load(Ordering::Acquire) || started.elapsed() >= budget {
-                return Err(failure());
-            }
-            match observed {
-                Observed::Public(value) => on_action(process, TextAction::Public(value))?,
-                Observed::ItemStarted | Observed::Private => {}
-                Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
-                Observed::Tool(tool) => on_action(process, TextAction::Tool(tool))?,
-                Observed::Approval(request) => pending.push(request),
-                // Tools/private notifications need an explicit owner handler.
-                Observed::Started | Observed::RequiresHandling => return Err(failure()),
-            }
-        }
-    })();
+    };
     process.finish()?;
     if cancel.load(Ordering::Acquire) {
         return Err(failure());

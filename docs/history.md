@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (응답 대기 루프의 단계별 진행)
+
+- **진전/기준**: 직전은 이미 반영된 검토자 승인 정책 재확인으로 개발 진전은 없었다. clean `21a1ad5`에서 메인이 기존 text 후보를 단계별 세션으로 전환했다. preflight/thread/turn 시작·출력/승인을 한 상태에 보존하고 호출당 수신 frame 하나 이하만 처리해 응답이 없는 때에도 반환한다. 기존 동기식 wrapper가 같은 세션을 구동하므로 별도 실행 구현을 복제하지 않는다.
+- **순서 정정/경계**: 직전 기록의 실제 CLI handshake 선행은 실제 활성화 검증에 필요하지만 안전한 내부 구조 개선까지 막을 필요는 없다. 실제 CLI 시험 승인은 여전히 미수신이며 실행하지 않았다. 세션은 private이고 동일 process를 가진 wrapper 안에서만 사용한다. Storage/process 소유권·종료/fence 순서는 유지한다. 송신·cleanup은 아직 bounded blocking이며 제품 main-loop/승인 IPC 연결은 후속이다.
+- **검증/다음**: 기존 preflight 5 PASS/12.97초, 신규 응답 없는 peer에서 20회 반환·취소/예산/handler 실패 후 재개 거절·명시적 cleanup 전 fence 유지 1테스트/3사례 PASS/0.98초. 예약 원장 회귀·strict clippy·독립 검토를 이어간다. main 병합/push·실제 계정/모델 호출 없음.
+- **마감**: 예약 원장 25사례 PASS/52.59초, 상호작용/역할 변경 2사례 PASS/6.98초, strict sidecar clippy·scoped fmt·diff PASS. 테스트 모듈 위치 lint를 이동만으로 정리했다. 동일 독립 검토자 1명의 정적 검토 PASS이며 관련 4파일을 커밋한다. 다음은 세션/process/profile을 실제 runtime이 오래 소유하도록 연결하고 송신/종료를 포함한 main-loop 응답성을 확보하는 작업이다. 실제 제품 실행·앱 완료가 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (화면 연결 전 실제 통신과 실행 루프 점검)
 
 - **직전/현재 확인**: 직전 예약 handler 연결은 `bffbea7`에 커밋된 진전이며 clean `m5/coding-agent-ide`에서 현재 코드를 확인했다. 제품 `AgentRuntime::blocked()`는 유지되고 native candidate는 공개 실행 경로에 연결되지 않았다. 승인 UI 계약도 아직 없다.
