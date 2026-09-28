@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실제 공급자 연결 전 검사 범위 확인)
+
+- **현재 증거**: 직전 지연 취소 파동은 `0edc305`로 커밋됐고 checkout은 clean이었다. 설치된 ChatGPT.app 안의 native Codex와 code-mode-host를 실행하지 않고 SHA-256만 읽어 `CODEX_LOGIN_PAIRS` 첫 쌍(`3e11ccc7…` / `4c398936…`)과 일치함을 확인했다. Codex.app 경로는 없으며 wrapper가 아닌 nested native 경로를 사용해야 한다. 로그인용 pin 일치는 실행 호환성/권한 승인 증명이 아니다.
+- **연결 점검/결정**: `OwnedTextRun`은 아직 runtime active 목록에 없으며 terminal까지 preparing 예약 계약을 사용한다. 단순 등록만으로 running/승인/실제 실행이 완성되지 않는다. 기존 `inspect_full_preflight_candidate`는 account/read·model/list까지 보내므로 제한된 config-only 검사에 사용하지 않는다. 실제 CLI의 초기화/설정 호환성을 먼저 확인한 뒤 그 결과로 제품 연결을 진행한다. 추가 내부 골격만으로 완료를 주장하지 않는다.
+- **승인 필요/다음**: 새 임시 HOME·작업 폴더와 네트워크 차단 아래 initialize/config/read만 하는 검사의 명시적 승인을 다시 요청했다. 승인 시 두 교환 이후 종료하는 제한된 검사로 수행하며 기존 인증/사용자 프로젝트·계정/모델 조회·thread/turn을 포함하지 않는다. 이번에는 어떤 vendor도 실행하지 않았다. 코드 무변경으로 이전 회귀를 반복하지 않았고 문서 diff·AGENTS/CLAUDE 일치만 확인한다. 앱 전체 목표는 미완료이며 main 병합/push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (취소 완료 응답과 stdio 진행 연결)
 
 - **기준/진전**: 직전 단계별 종료/복구 파동 `cb656a4`는 커밋된 진전이다. clean 통합 checkout에서 메인이 기존 run.cancelAgent의 완료 응답 계약을 유지하는 지연 응답을 dispatcher/runtime에 연결했다. fixture actual run의 취소는 다음 poll에서 종료·누적 신원 저장·terminal transaction을 진행하며 완료 전에는 성공을 응답하지 않는다.
