@@ -1,6 +1,6 @@
 export const PANEL_IDS = ["files", "editor", "changes", "conversation"] as const;
 export type DockPanel = typeof PANEL_IDS[number];
-export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; direction?: "horizontal" | "vertical" }
+export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel }
 export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
   return { version: 1, order: [...PANEL_IDS], widths: { files: .17, editor: .36, changes: .21, conversation: .26 } };
@@ -13,7 +13,9 @@ export function parseDockLayout(raw: string | null): DockLayout {
     if (Math.abs(PANEL_IDS.reduce((sum, id) => sum + value.widths[id], 0) - 1) > .000001) return defaultDockLayout();
     if (value.hidden !== undefined && (!Array.isArray(value.hidden) || value.hidden.length >= PANEL_IDS.length || new Set(value.hidden).size !== value.hidden.length || value.hidden.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
     if (value.direction !== undefined && value.direction !== "horizontal" && value.direction !== "vertical") return defaultDockLayout();
-    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.direction ? { direction: value.direction } : {}) };
+    if (value.tabbed !== undefined && typeof value.tabbed !== "boolean") return defaultDockLayout();
+    if (value.activeTab !== undefined && !PANEL_IDS.includes(value.activeTab)) return defaultDockLayout();
+    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.direction ? { direction: value.direction } : {}), ...(value.tabbed !== undefined ? { tabbed: value.tabbed } : {}), ...(value.activeTab ? { activeTab: value.activeTab } : {}) };
   } catch { return defaultDockLayout(); }
 }
 
@@ -21,6 +23,11 @@ export function visibleDockPanels(layout: DockLayout, available: readonly DockPa
   const visible = layout.order.filter(id => available.includes(id) && !layout.hidden?.includes(id));
   // A chat can disappear while only its conversation was visible. Always retain a usable panel.
   return visible.length ? visible : available.includes("editor") ? ["editor"] : available.slice(0, 1);
+}
+
+export function activeDockTab(layout: DockLayout, visible: readonly DockPanel[]): DockPanel | undefined {
+  return layout.activeTab && visible.includes(layout.activeTab) ? layout.activeTab
+    : visible.includes("editor") ? "editor" : visible[0];
 }
 
 export function toggleDockPanel(layout: DockLayout, panel: DockPanel, available: readonly DockPanel[]): DockLayout {

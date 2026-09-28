@@ -140,6 +140,9 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-visibility { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
 .m5-dock-visibility button { padding: 5px 10px; background: #202a37; color: #aab4c1; }
 .m5-dock-visibility button[aria-pressed="true"] { color: #e4f1ff; border-color: #91c5ff; }
+.m5-dock-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border-bottom: 1px solid #3b495b; }
+.m5-dock-tabs button { border-radius: 6px 6px 0 0; background: #202a37; color: #aab4c1; cursor: grab; }
+.m5-dock-tabs button[aria-selected="true"] { color: #e4f1ff; border-bottom: 2px solid #91c5ff; background: #171d26; }
 .m5-conversation { flex: 1; min-width: 0; overflow: auto; }
 .m5-followup { display: grid; gap: 8px; padding: 16px; border-top: 1px solid #303b49; color: #d8e0eb; }
 .m5-followup textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 10px; color: #e6edf3; background: #11161d; border: 1px solid #526176; border-radius: 8px; font: inherit; }

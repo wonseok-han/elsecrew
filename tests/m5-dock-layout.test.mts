@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultDockLayout, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, resizeDockPanels, toggleDockPanel, visibleDockPanels } from "../src/m5/dock-layout.ts";
+import { activeDockTab, defaultDockLayout, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, resizeDockPanels, toggleDockPanel, visibleDockPanels } from "../src/m5/dock-layout.ts";
+
+test("tabs persist selection and recover when a hidden or unavailable tab disappears", () => {
+  const layout = { ...defaultDockLayout(), tabbed: true, activeTab: "conversation" as const };
+  assert.deepEqual(parseDockLayout(JSON.stringify(layout)), layout);
+  assert.equal(activeDockTab(layout, PANEL_IDS), "conversation");
+  assert.equal(activeDockTab(layout, ["files", "editor", "changes"]), "editor");
+  assert.equal(activeDockTab(layout, ["files"]), "files");
+  assert.equal(activeDockTab(layout, []), undefined);
+  const hidden = toggleDockPanel(layout, "conversation", PANEL_IDS);
+  assert.equal(activeDockTab(hidden, visibleDockPanels(hidden, PANEL_IDS)), "editor");
+  for (const invalid of [{ tabbed: "yes" }, { activeTab: "missing" }, { activeTab: null }]) {
+    assert.deepEqual(parseDockLayout(JSON.stringify({ ...layout, ...invalid })), defaultDockLayout());
+  }
+});
 
 test("panel visibility persists without allowing an empty workspace", () => {
   const initial = defaultDockLayout();
