@@ -1,6 +1,6 @@
 export const PANEL_IDS = ["files", "editor", "changes", "conversation"] as const;
 export type DockPanel = typeof PANEL_IDS[number];
-export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[] }
+export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; direction?: "horizontal" | "vertical" }
 export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
   return { version: 1, order: [...PANEL_IDS], widths: { files: .17, editor: .36, changes: .21, conversation: .26 } };
@@ -12,7 +12,8 @@ export function parseDockLayout(raw: string | null): DockLayout {
     if (!value.widths || PANEL_IDS.some(id => !Number.isFinite(value.widths[id]) || value.widths[id] < .08 || value.widths[id] > .76)) return defaultDockLayout();
     if (Math.abs(PANEL_IDS.reduce((sum, id) => sum + value.widths[id], 0) - 1) > .000001) return defaultDockLayout();
     if (value.hidden !== undefined && (!Array.isArray(value.hidden) || value.hidden.length >= PANEL_IDS.length || new Set(value.hidden).size !== value.hidden.length || value.hidden.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
-    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}) };
+    if (value.direction !== undefined && value.direction !== "horizontal" && value.direction !== "vertical") return defaultDockLayout();
+    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.direction ? { direction: value.direction } : {}) };
   } catch { return defaultDockLayout(); }
 }
 

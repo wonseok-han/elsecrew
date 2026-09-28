@@ -34,6 +34,15 @@ test("layout round-trip and invalid stored data recover to a complete default", 
   assert.deepEqual(parseDockLayout(JSON.stringify(initial)), initial);
   for (const raw of [null, "{", "null", JSON.stringify({ ...initial, order: ["files", "files", "editor", "changes"] }), JSON.stringify({ ...initial, widths: { ...initial.widths, editor: -1 } }), JSON.stringify({ ...initial, version: 2 })]) assert.deepEqual(parseDockLayout(raw), initial);
 });
+test("vertical layout round-trips with resizing, movement and visibility intact", () => {
+  const layout = { ...defaultDockLayout(), direction: "vertical" as const };
+  const moved = resizeDockPanels(moveDockPanel(layout, "editor", "files"), "editor", "files", .04);
+  const focused = focusDockPanel(moved, "editor");
+  assert.deepEqual(parseDockLayout(JSON.stringify(focused)), focused);
+  for (const direction of [null, "diagonal", 1, {}]) {
+    assert.deepEqual(parseDockLayout(JSON.stringify({ ...layout, direction })), defaultDockLayout());
+  }
+});
 test("panel movement in either direction preserves widths and all identities", () => {
   const initial = defaultDockLayout();
   const moved = moveDockPanel(initial, "files", "changes");

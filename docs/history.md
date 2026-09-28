@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (작업대 세로 배치)
+
+- **직접 진행**: 이전 목표 턴은 preflight pipe 구현·검증으로 진전했지만 독립 검토 승인은 아직 없다. 자동 계속 메시지를 위임 승인으로 간주하지 않고 Rust 변경을 보존했다. 별도 UI 요구를 진행해 가로/세로 배치 전환, 세로 drag/drop·위아래 이동·포인터/키보드 크기 조절과 localStorage 방향 저장을 추가했다. 기존 v1 저장 배치는 그대로 읽고 잘못된 방향은 기본 배치로 복구한다.
+- **검증**: Karpathy 지침으로 기존 패널 identity·가중치 연산을 재사용했다. 배치 단위 7 PASS, tsc·renderer build·diff PASS, 실제 Chromium 2 PASS. 후자는 세로 좌표·방향에 맞는 separator/키보드 조절·재정렬·저장 및 Monaco DOM identity 유지·가로 복귀를 포함한다. 중첩/탭 도킹과 전체 시안 마감은 아직 남는다.
+- **커밋 경계/다음**: UI와 작업 기록만 커밋하며 아래 preflight Rust 구현은 미커밋·제품 비활성 상태로 남긴다. 문서의 해당 내부 구현 설명은 워킹 트리 상태를 기록한 것이며 커밋된 실행 기능이라는 뜻이 아니다. 다음은 승인 후 실행 경계 독립 검토, 실제 모델 출력 연결 및 UI 나머지 마감이다. main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (preflight 파이프·종료 연결)
+
+- **진행 분류/구현**: 이전 목표 턴은 `e5b9fae`의 검증 순서 구현으로 진전했다. 이번에는 해당 clean HEAD에서 `provider_preflight_session.rs`를 추가해 고정 typed preflight frame을 기존 nonblocking I/O·프로세스 소유자에 연결했다. 전체 30초 예산, 취소, 각 프레임 사이 자손 관측과 기존 finish를 유지하며 성공 응답도 종료 확인 후에만 반환한다. 오류 시 소유자를 호출자에 남겨 불확실 cleanup을 재시도할 수 있게 한다. 이미 시작한 다른 exchange 재사용은 거절한다.
+- **검증**: 실제 pipe를 사용하는 가짜 CLI의 정상·설정 불일치·취소·0초 예산·종료 불확실·exchange 재사용 6사례(1 테스트) PASS, core preflight 10 PASS, sidecar strict clippy·변경 crate rustfmt·diff 검사 PASS. 최초 테스트는 DB 이름이 기존 profile 규칙과 달라 실패해 기존 helper와 같은 hello-agent.sqlite3로 수정했다. Karpathy 지침으로 기존 종료/잠금 코드는 바꾸지 않고 재사용했다.
+- **남음**: 제품 launcher·IPC에는 아직 연결하지 않았고 vendor/사용자 인증/유료 모델은 실행하지 않았다. 이 변경은 process/종료 경계여서 독립 검토 승인 전 커밋·활성화를 보류한다. 이전 로그인 검토 승인을 새 adapter 검토 승인으로 확대 해석하지 않는다. 다음은 이 연결 검토와 실제 profile 설정·thread/turn·공개 출력/원장 통합이다. main 병합·push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 전 검증 연결 단계)
 
 - **직접 구현**: clean `cd64fbe`에서 `codex_preflight/exchange.rs`를 추가했다. 기존 single-flight RPC와 설정/모델 검증기를 한 연결의 initialize→config/read→account/read→model/list 순서에 결속한다. 초기화의 앱 profile/macOS 신원, 명시적 모델/추론/읽기 전용 정책, ChatGPT 계정, 완전한 모델 목록을 모두 대조하며 불일치·중복·순서 위반은 이후 요청을 차단한다. 원문 계정/설정은 보관·반환하지 않는다.
