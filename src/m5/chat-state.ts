@@ -182,8 +182,21 @@ export class ChatUiController {
       this.#set({ settings: updated, notice: "새 채팅에 사용할 역할과 모델을 저장했어요. 이미 만든 채팅의 설정은 바뀌지 않아요.", error: null });
     } catch (error) {
       if (!this.#live(generation) || this.#state.projectId !== settings.projectId) return;
-      this.#error("설정이 다른 곳에서 바뀌었어요. 최신 설정을 다시 불러와 확인해 주세요.", error);
-      void this.openProject(settings.projectId);
+      this.#error("설정을 저장하지 못했어요. 입력은 유지했어요. 다시 시도하거나 저장된 설정을 다시 불러와 주세요.", error);
+    }
+  }
+
+  async reloadSettings(): Promise<void> {
+    const projectId = this.#state.projectId;
+    if (!projectId) return;
+    const generation = this.#generation;
+    const settings = this.#state.settings;
+    try {
+      const updated = await this.#bridge.getProjectRoleSettings({ projectId });
+      if (!this.#live(generation) || this.#state.projectId !== projectId || this.#state.settings !== settings) return;
+      this.#set({ settings: updated, notice: "저장된 역할과 모델을 다시 불러왔어요.", error: null });
+    } catch (error) {
+      if (this.#live(generation) && this.#state.projectId === projectId && this.#state.settings === settings) this.#error("저장된 설정을 불러오지 못했어요. 입력은 유지했어요.", error);
     }
   }
 

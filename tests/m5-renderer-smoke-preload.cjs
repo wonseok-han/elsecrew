@@ -172,7 +172,11 @@ window.m5 = {
     schemaVersion: 1,
     projectId,
     revision: 1,
-    roles: [],
+    roles: [
+      { roleId: "planning", runtime: "codex", modelSelector: "test-model", reasoningEffort: "medium", permission: "readOnly" },
+      { roleId: "coding", runtime: "claude-code", modelSelector: "test-model", reasoningEffort: null, permission: "workspaceWrite" },
+      { roleId: "review", runtime: "codex", modelSelector: "test-model", reasoningEffort: null, permission: "readOnly" },
+    ],
     updatedAt: "2026-08-26T00:00:00Z",
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),

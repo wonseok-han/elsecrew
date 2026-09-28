@@ -201,6 +201,45 @@ for (const rejected of [false, true]) test(`프로젝트 전환 후 이전 설�
   controller.dispose();
 });
 
+test("settings save failure and explicit reload preserve the active chat and settings draft source", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  await controller.prepareSwitch("chat_a", true);
+  await controller.commitPrepared("chat_a", true);
+  const before = controller.snapshot();
+  assert.equal(before.activeChat?.chatId, "chat_a");
+  bridge.updateProjectRoleSettings = async () => { throw new Error("offline"); };
+  await controller.updateSettings(roles);
+  assert.equal(controller.snapshot().settings, before.settings);
+  assert.equal(controller.snapshot().activeChat, before.activeChat);
+  assert.equal(controller.snapshot().chats, before.chats);
+  bridge.revision = 2;
+  await controller.reloadSettings();
+  assert.equal(controller.snapshot().settings?.revision, 2);
+  assert.equal(controller.snapshot().activeChat, before.activeChat);
+  assert.equal(controller.snapshot().chats, before.chats);
+  const loaded = controller.snapshot().settings;
+  bridge.getProjectRoleSettings = async () => { throw new Error("offline"); };
+  await controller.reloadSettings();
+  assert.equal(controller.snapshot().settings, loaded);
+  controller.dispose();
+});
+
+test("late settings reload cannot overwrite a newer successful save", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  await controller.openProject("project_a");
+  let complete!: (value: ProjectRoleSettingsV1) => void;
+  bridge.getProjectRoleSettings = () => new Promise(resolve => { complete = resolve; });
+  const reload = controller.reloadSettings();
+  await controller.updateSettings(roles);
+  complete(settings());
+  await reload;
+  assert.equal(controller.snapshot().settings?.revision, 2);
+  controller.dispose();
+});
+
 test("새 프로젝트 설정을 불러오는 동안 이전 프로젝트 설정을 표시하지 않는다", async () => {
   const bridge = new FakeBridge(); const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
   await controller.openProject("project_a");

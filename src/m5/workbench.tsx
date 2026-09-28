@@ -8,7 +8,7 @@ import {
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
-import type { RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
+import { validateRoleProfileV1, type RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
 import { resolveM5Bridge, type SupportedM5Bridge } from "./bridge-boundary.ts";
 import { canAbandonAgentRecovery, ChatUiController, stateLabel } from "./chat-state.ts";
@@ -165,7 +165,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </form>
       </section>}
 
-      {settingsOpen && chat.settings && <RoleSettings settings={chat.settings} disabled={!admissionReady} onSave={(roles) => void chatController.updateSettings(roles)} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} disabled={!admissionReady} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={() => setSettingsOpen(false)} />}
 
       <WorkbenchDock conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
         <aside className="m5-panel m5-files" aria-label="파일">
@@ -248,11 +248,30 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
 }
 
-function RoleSettings({ settings, disabled, onSave, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; disabled: boolean; onSave: (roles: readonly RoleProfileV1[]) => void; onClose: () => void }) {
+function RoleSettings({ settings, disabled, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; disabled: boolean; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
+  const [busy, setBusy] = useState(false);
   useEffect(() => setRoles(settings.roles), [settings]);
   const change = (index: number, field: keyof RoleProfileV1, value: string | null) => setRoles((old) => old.map((role, current) => current === index ? { ...role, [field]: value } : role));
-  return <section className="m5-settings" aria-label="프로젝트 역할과 모델 설정"><header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" onClick={onClose}>작업대로 돌아가기</button></header><p>모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.</p><div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card"><strong>{({ planning: "기획", coding: "코딩", review: "검토" })[role.roleId]}</strong><label>실행 환경<select disabled={disabled} value={role.runtime} onChange={(event) => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label><label>정확한 모델 이름<input disabled={disabled} value={role.modelSelector} onChange={(event) => change(index, "modelSelector", event.target.value)} /></label><label>추론 수준<select disabled={disabled} value={role.reasoningEffort ?? ""} onChange={(event) => change(index, "reasoningEffort", event.target.value || null)}><option value="">기본값</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><span>권한: {role.permission === "readOnly" ? "읽기 전용" : "격리된 작업 복사본에만 쓰기"}</span></article>)}</div><button type="button" disabled={disabled} onClick={() => onSave(roles)}>새 채팅 설정 저장</button></section>;
+  let valid = roles.length === 3;
+  try { roles.forEach(role => { validateRoleProfileV1(role); if (!role.modelSelector.trim()) valid = false; }); } catch { valid = false; }
+  const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
+  return <section className="m5-settings" aria-label="프로젝트 역할과 모델 설정">
+    <header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" disabled={busy} onClick={onClose}>작업대로 돌아가기</button></header>
+    <p>모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.</p>
+    <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card">
+      <strong>{({ planning: "기획", coding: "코딩", review: "검토" })[role.roleId]}</strong>
+      <label>실행 환경<select disabled={disabled || busy} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
+      <label>정확한 모델 이름<input disabled={disabled || busy} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
+      <label>추론 수준<input disabled={disabled || busy} value={role.reasoningEffort ?? ""} placeholder="기본값은 비워 두세요" onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
+      <small>선택한 모델이 지원하는 정확한 값을 입력해요. 지원 여부는 실행 전에 확인합니다.</small>
+      <span>권한: {role.permission === "readOnly" ? "읽기 전용" : "격리된 작업 복사본에만 쓰기"}</span>
+    </article>)}</div>
+    {!valid && <p role="alert">모든 역할의 모델 이름과 추론 수준을 확인해 주세요. 모델 이름은 비울 수 없고, 지나치게 긴 값은 저장할 수 없어요.</p>}
+    <button type="button" disabled={disabled || busy || !valid} onClick={() => void run(() => onSave(roles))}>{busy ? "처리 중…" : "새 채팅 설정 저장"}</button>
+    <button className="m5-secondary" type="button" disabled={disabled || busy} onClick={() => void run(onReload)}>저장된 설정 다시 불러오기</button>
+    <p>다시 불러오면 이 화면에서 아직 저장하지 않은 설정은 저장된 값으로 바뀝니다. 채팅과 파일 편집 내용은 그대로 유지돼요.</p>
+  </section>;
 }
 
 function FollowupComposer({ controller, chat, admissionReady }: { controller: ChatUiController; chat: ReturnType<ChatUiController["snapshot"]>; admissionReady: boolean }) {

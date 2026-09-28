@@ -68,6 +68,18 @@ app.whenReady().then(async () => {
     const localWorker = globalThis.MonacoEnvironment.getWorker("smoke", "editor");
     localWorker.terminate();
     const editorNode = document.querySelector('.monaco-editor');
+    [...document.querySelectorAll('button')].find(button => button.textContent === '역할과 모델').click();
+    await ${waitFor("document.querySelectorAll('.m5-role-card').length === 3", "role settings")};
+    const modelField = document.querySelector('.m5-role-card input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(modelField,'draft-model');
+    modelField.dispatchEvent(new Event('input',{bubbles:true}));
+    await ${waitFor("document.querySelector('.m5-role-card input').value === 'draft-model'", "model draft")};
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '새 채팅 설정 저장').click();
+    await ${waitFor("document.body.textContent.includes('설정을 저장하지 못했어요') && document.querySelector('.m5-role-card input').value === 'draft-model'", "settings failure preserves draft")};
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '저장된 설정 다시 불러오기').click();
+    await ${waitFor("document.querySelector('.m5-role-card input').value === 'test-model'", "explicit settings reload")};
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
+    if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '기본 배치로').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && document.querySelectorAll('.m5-dock-separator').length === 2", "reset panel visibility")};
     document.querySelector('[aria-label="편집기 패널에 집중"]').click();
