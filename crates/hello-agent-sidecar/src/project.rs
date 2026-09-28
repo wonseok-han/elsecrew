@@ -30,6 +30,7 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::MetadataExt, process::CommandExt},
 };
 use uuid::Uuid;
+mod runtime_isolation;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";
@@ -2541,6 +2542,21 @@ impl ProjectManager {
     ) -> Result<Value, ProjectFailure> {
         let active = self.validate_workspace_address(storage, address)?;
         manifest_value(&active, "active")
+    }
+
+    /// Point-in-time file admission, not a sandbox or protection against a hostile
+    /// same-UID writer racing this scan. Scan BEFORE Git verification can run.
+    #[cfg(unix)]
+    pub(crate) fn verify_runtime_file_isolation(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<(), ProjectFailure> {
+        self.verify_managed_paths()?;
+        let root = open_real_child_dir(&self.worktrees_dir, &address.worktree_id)?;
+        runtime_isolation::verify(&root)?;
+        self.validate_workspace_address(storage, address)?;
+        Ok(())
     }
 
     pub fn verify_unbound_workspace(

@@ -469,6 +469,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         "idle-observer",
         "bound",
         "bound-native",
+        "bound-native-hardlink",
         "bound-native-gate-cli",
         "bound-native-gate-helper",
         "bound-native-gate-cancel",
@@ -673,7 +674,15 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                     std::fs::write(path, original).unwrap();
                 }
                 let launch_cancel = std::sync::Arc::new(AtomicBool::new(false));
-                if failure != "bound-native" {
+                if failure == "bound-native-hardlink" {
+                    std::fs::hard_link(
+                        fixture.source.join("src/value.txt"),
+                        std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                            .join(".git/shared-source"),
+                    )
+                    .unwrap();
+                }
+                if failure.starts_with("bound-native-gate-") {
                     let cli_path = cli_path.clone();
                     let helper_path = helper_path.clone();
                     let canceled = launch_cancel.clone();
@@ -703,6 +712,16 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                         .with(|hook| assert!(hook.borrow().is_none()));
                     assert!(!fixture._root.path().join("native-argv").exists());
                     let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    if failure == "bound-native-hardlink" {
+                        assert!(run["barrier"].is_null());
+                        assert!(run["process_identity_internal"].is_null());
+                        process.finish().unwrap();
+                        assert_eq!(
+                            fs::read(fixture.source.join("src/value.txt")).unwrap(),
+                            b"base"
+                        );
+                        continue;
+                    }
                     assert_eq!(run["barrier"]["releaseGranted"], false);
                     assert!(!run["process_identity_internal"]
                         .as_array()

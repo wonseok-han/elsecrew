@@ -47,6 +47,12 @@ impl RunReservation {
         {
             return Err(failure());
         }
+        projects
+            .verify_runtime_file_isolation(
+                storage,
+                &address_from_chat(&self.run).map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
         self.validate_text_input(storage, projects)
             .map_err(|_| failure())?;
         let home = process.codex_preflight_home()?;
@@ -379,6 +385,7 @@ impl RunReservation {
             ));
         }
         let address = address_from_chat(&self.run)?;
+        projects.verify_runtime_file_isolation(storage, &address)?;
         let manifest = projects.verify_workspace(storage, &address)?;
         if projection["workspace_manifest"] != manifest {
             return Err(ProjectFailure::recovery(

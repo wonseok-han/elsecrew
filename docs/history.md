@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실행 준비 파일 공유 검사)
+
+- **진전/범위**: 직전 fd 차단은 `dc861cd`로 커밋된 진전이다. clean 통합 checkout에서 메인이 snapshot의 기존 hardlink 차단을 추가했다. capability directory를 따라 숨김/`.git` 포함 전체 항목을 검사하고 regular file의 nlink=1만 허용한다. symlink·특수 파일·128단계 초과·200,000항목 초과는 거절하고 자동 삭제/복사는 하지 않는다.
+- **연결**: native Codex launch의 spawn 전 및 공통 예약 gate의 신원 저장 전 검사한다. 새 검사 함수 안에서는 파일 검사를 먼저 하고 기존 Git/snapshot 신원을 대조한다. public output/통신 polling마다 전체 트리를 다시 순회하지 않는다. 검사 뒤 적대적인 same-UID 동시 교체까지 원자적으로 차단하는 sandbox 증명은 아니며 profile/tmp의 전체 쓰기 허용 정책도 별도로 남는다.
+- **검증 중**: 순수 scanner 2 PASS(일반/숨김/`.git`/중첩 파일·복사본 통과·hardlink/symlink/예산 거절), 기존 예약 gate 4사례 PASS. 원본 파일을 `.git` 안으로 hardlink한 후보가 child 생성 전 거절되는 통합 사례를 추가해 21사례와 strict clippy를 실행 중이다. 실제 vendor/계정/유료 모델/사용자 프로젝트 접근 없음. 독립 검토 후 관련 파일만 커밋한다.
+- **최신 검사**: 실행 원장 1테스트/21사례 PASS(40.27초), strict sidecar clippy·fmt·diff PASS. `run_ledger_review` 한 명에게 기준 `dc861cd` 대비 신규 모듈을 포함한 고정 delta의 읽기 전용 검토를 전달했다. 중복 테스트는 요청하지 않았으며 검사 세션은 모두 종료됐다.
+- **마감**: 고정 delta 독립 검토가 차단 결함 없이 PASS했다. snapshot 파일 입장·gate 연결·숨김 hardlink 회귀와 제한된 보장 범위를 확인했다. 관련 6파일만 커밋한다. 다음은 profile/tmp를 포함한 실제 실행의 OS 정책 및 공급자 입장 연결이며 앱 전체 완료가 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (공급자 실행 전 상속 핸들 차단)
 
 - **진전/범위**: 직전 OS 기제 실측은 `c7a7118`에 커밋됐다. clean 통합 checkout에서 실제 gate가 non-CLOEXEC writable fd를 vendor에 전달하는 회귀를 먼저 재현했다(exit 101). 메인은 Karpathy 지침에 따라 기존 gate의 고정 셸에서 `/dev/fd`를 순회해 0/1/2 외 핸들을 닫도록 수정했다. 숫자만 허용한 fd의 builtin redirection이며 PATH lookup·외부 helper·추가 자손은 없다. 순회/닫기 실패는 payload 실행 전 거절한다. Rust spawn의 오류 전달 pipe를 pre_exec에서 닫지 않고 셸 exec 뒤 처리한다.
