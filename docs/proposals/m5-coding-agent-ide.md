@@ -477,6 +477,20 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **2026-09-14 독립 검토 후 구현 순서**: 일반 제품의 차단 모드는 유지한다. 현재 start의 fake executable/launcher 및 Claude-only handshake를 실제 CLI로 단순 치환하지 않는다. 첫 offline 버전/인증 파서는 `core/provider/vendor_observation.rs`에 분리했으며 실행 권위를 반환하지 않는다. 다음은 provider별 config/model/handshake 검증과 입력 보류 경계다. 이후에만 기존 snapshot 검증→run/쓰기 잠금 영속화→프로세스 신원/시작 증거→입력 전달→공개 event→종료/poison/recovery에 연결한다. 버전/auth 성공만으로 제품 capability를 광고하거나 `canStart`를 올리지 않는다.
 
+**2026-09-28 다음 실행 통합 단위 — 제안, 아직 미구현**
+
+기준 `f913af6`에서 내부 Codex text 후보는 채팅 snapshot을 확인하지만 실행 원장을 소유하지 않는다. 기존 `AgentRuntime::start_agent`는 preparing run·recovery ID·쓰기 잠금을 함께 저장하고, 프로세스 신원을 저장한 뒤 launcher를 release한다. 반면 후보가 사용하는 `LoginProcess`의 profile fence는 로그인/프로세스 보호이며 chat/run 복구 원장과 별개다. 두 소멸 증거를 서로 대신 사용하지 않는다.
+
+다음 구현은 helper마다 별도 완료시키지 않고 다음을 포함하는 하나의 **실제 실행 소유권 연결 파동**으로 묶는다.
+
+1. 기존 actual-agent namespace와 preparing/recovery 예약을 재사용한다. 목표는 지정 채팅의 저장된 메시지 ID에서, 모델·추론·권한은 해당 채팅의 role snapshot에서 해석한다. 임의 prompt/model을 원장과 따로 받는 제품 진입점은 만들지 않는다. fixture provider 증거를 실제 provider 증거로 재표시하지 않는다.
+2. 단일 owner가 profile fence·run ID·작업 공간을 함께 소유한다. launch 전 run 예약, payload release 전 프로세스 신원 영속화, thread/turn 전 같은 run/역할/snapshot 재검사를 연결한다. 초기 설정 관측용 프로세스와 작업 실행 프로세스의 재사용 여부는 명시적으로 정하고, 이미 닫힌 관측 세션을 실행 권위로 사용하지 않는다.
+3. 공개 출력은 기존 원장의 순서/용량/신원 검증으로 저장한다. 현재 `TextWorkspace`의 장기 `&Storage` 참조와 public event 저장의 `&mut Storage` 요구를 함께 정리한다. 빌림 문제를 별도 DB writer나 병렬 owner로 우회하지 않고, 상태 소유자가 검증·통신·저장을 순차 수행하도록 만든다.
+4. 종료 확인 뒤에만 terminal 상태와 잠금 해제를 확정한다. run 기록 실패·프로세스 종료 불확실·앱 재시작 시 profile fence만 지우거나 run만 완료 처리하지 않는다. 기존 actual recovery 경로가 같은 실행을 찾고 보수적으로 복구할 수 있어야 한다.
+5. 가짜 vendor pipe와 실제 임시 snapshot/SQLite를 함께 사용하는 통합 회귀로 원장→입력→출력→종료 및 각 저장 실패를 확인한다. 잘못된 역할/채팅, 중복 시작, 입력 전 취소, 출력 저장 실패, 종료 불확실, 재시작 복구를 포함한다. 순수 파서·mock callback PASS만으로 이 파동을 완료하지 않는다.
+
+이 파동은 workspace-write OS 격리·도구 lifecycle/승인 UI·Claude adapter 및 사용자 승인 실제 모델 smoke를 생략하는 대안이 아니다. 해당 실행 정책과 사용자 화면까지 검증하기 전 제품 capability는 계속 닫는다. 이는 현재 제안이며 확정된 제품 범위·원본 보호 규칙을 변경하지 않는다.
+
 **2026-09-14 추가 관측**: 사용자 잔여 작업 진행 요청 후 생성한 빈 임시 폴더에서 Codex 0.149.1의 `initialize`→`initialized`→`config/read`→`account/read(refreshToken:false)`를 확인했다. 초기화/config 응답 성공, chatgpt credentials present 분류와 stdin 종료 후 exit 0만 기록했다. Claude 2.1.269의 `auth status --json`은 exit 0/loggedIn true/claude.ai였다. thread/turn/model 요청은 0회이고 원문 설정·계정 식별자·토큰은 보존하지 않았다. 이전 startup/config 관측 대기는 이 범위에서 해소했지만 설정 격리·실제 모델 smoke·제품 활성화는 여전히 미완료다.
 
 - Codex의 `initialize`/`initialized`→`model/list`→`thread/start` 응답을 검사한 뒤에만 `turn/start`로 목표를 전달하는 내부 상태를 둔다. 로컬 0.149.1 schema의 요청 sandbox 값은 `read-only`/`workspace-write`이며, reasoning은 top-level 필드가 아니라 고정 `config.model_reasoning_effort` 후보와 응답 `reasoningEffort`를 대조해야 한다. 응답의 정확한 모델·cwd 신원·승인 정책·sandbox 세부 권한 및 thread/turn 소속을 생략하지 않는다. 이는 schema 기반 후보 계약이며 실제 응답 성공은 아직 관측하지 않았다.

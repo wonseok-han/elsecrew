@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실제 실행 원장 통합 경계 확인)
+
+- **진전/조사**: 직전 `f913af6`는 독립 검토·커밋을 마친 진전이다. clean checkout에서 `AgentRuntime::start_agent`의 run/recovery/쓰기 잠금 예약·release 전 신원 저장, `persist_public_event`의 mutable Storage, `recover_unclean_runs`의 actual-agent 원장 복구를 현재 text 후보와 대조했다. 후보의 profile fence는 run 원장을 대신하지 않으며 TextWorkspace의 장기 읽기 빌림을 유지한 채 동일 Storage에 공개 event를 저장할 수 없다.
+- **다음 구현 단위**: 제안서 §6.7에 실제 실행 소유권 연결 파동을 기록했다. 저장된 메시지/역할에서 입력 해석→run 예약→신원 저장→입력/공개 event→종료/복구까지 같은 owner로 연결하고 실제 임시 snapshot/SQLite와 가짜 vendor pipe를 결합해 검증한다. helper별 합격이나 실행 파일 치환을 제품 연결로 주장하지 않는다. 문서의 제안은 미구현이며 workspace-write·도구/승인 UI·Claude·실제 모델 검증을 대체하지 않는다.
+- **검증/범위**: 현재 코드 읽기와 문서 diff 검사만 수행했다. 비변경 Rust 테스트는 반복하지 않았다. 제품 활성화·신규 위임·CLI/인증/유료 호출·main 병합·push 없음. 다음은 위 통합 파동 구현이다.
+
 ### 2026-09-28 · by GPT-6 Astra (작업 공간 결속 독립 검토 재개)
 
 - **승인/범위**: 사용자의 `승ㅣㄴ`을 직전 리뷰어 1명 승인 요청에 대한 승인으로 이해하고 `workspace_binding_review`를 호출했다. 기준 `0396195`의 미커밋 Rust 2파일·architecture 변경을 읽기 전용으로 검토하며 메인은 해당 코드를 동결한다. 기존 focused 검사 증거를 재사용하고 실제 CLI·인증·유료 실행·제품 활성화는 포함하지 않는다.
