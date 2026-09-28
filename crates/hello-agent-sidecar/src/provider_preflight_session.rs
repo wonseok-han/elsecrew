@@ -358,6 +358,40 @@ pub(crate) fn run_text_and_close(
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
 > {
+    run_text_with_handler_and_close(
+        process,
+        flow,
+        cancel,
+        workspace,
+        text,
+        &mut |storage, process, action| match action {
+            TextAction::Public(value) => on_public(storage, value),
+            TextAction::ObserveProcess => on_process(storage, process),
+            TextAction::Tool(_) | TextAction::PollApproval { .. } | TextAction::VerifyWorkspace => {
+                Err(failure())
+            }
+        },
+    )
+}
+
+/// Trusted owner handler only: must be nonblocking and enforce role/OS admission.
+/// No product caller or implicit tool permission. VerifyWorkspace is handled here,
+/// never delegated; other callbacks share the exact bound workspace's storage.
+pub(crate) fn run_text_with_handler_and_close(
+    process: &mut LoginProcess<'_>,
+    flow: PreflightExchange,
+    cancel: &AtomicBool,
+    workspace: &mut TextWorkspace<'_>,
+    text: &str,
+    on_action: &mut impl FnMut(
+        &mut crate::Storage,
+        &mut LoginProcess<'_>,
+        TextAction<'_>,
+    ) -> Result<(), SidecarError>,
+) -> Result<
+    hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+    SidecarError,
+> {
     let cwd = workspace.cwd.clone();
     run_text_checked(
         process,
@@ -367,18 +401,26 @@ pub(crate) fn run_text_and_close(
         text,
         &mut |process, action| match action {
             TextAction::VerifyWorkspace => workspace.revalidate(),
-            TextAction::Public(value) => on_public(workspace.storage, value),
-            TextAction::ObserveProcess => on_process(workspace.storage, process),
+            action => on_action(workspace.storage, process, action),
         },
     )
 }
 
 // A single sequential callback avoids two closures aliasing the same ledger.
 // This is private transport plumbing, not a renderer-controlled action API.
-enum TextAction {
+pub(crate) enum TextAction<'a> {
     VerifyWorkspace,
     ObserveProcess,
     Public(hello_agent_core::provider::vendor_observation::codex_events::Projection),
+    Tool(hello_agent_core::provider::vendor_observation::codex_events::stream::ToolEvent),
+    /// Must return promptly; None keeps waiting, never grants a default decision.
+    PollApproval {
+        request:
+            &'a hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval,
+        decision: &'a mut Option<
+            hello_agent_core::provider::vendor_observation::codex_approval::Decision,
+        >,
+    },
 }
 
 fn run_text_checked(
@@ -434,11 +476,45 @@ fn run_text_checked(
             }
         }
         let mut stream = stream.ok_or_else(failure)?;
+        let mut pending = Vec::<
+            hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval,
+        >::new();
         loop {
-            let frame =
-                process.receive_preflight_observed(remaining()?, cancel, &mut |process| {
-                    on_action(process, TextAction::ObserveProcess)
-                })?;
+            remaining()?;
+            let frame = process.poll_preflight_observed(cancel, &mut |process| {
+                on_action(process, TextAction::ObserveProcess)
+            })?;
+            pending.retain(|request| stream.awaits_approval_decision(&request.request_id));
+            let Some(frame) = frame else {
+                for request in &pending {
+                    let mut decision = None;
+                    on_action(
+                        process,
+                        TextAction::PollApproval {
+                            request,
+                            decision: &mut decision,
+                        },
+                    )?;
+                    if let Some(decision) = decision {
+                        on_action(process, TextAction::VerifyWorkspace)?;
+                        on_action(process, TextAction::ObserveProcess)?;
+                        if cancel.load(Ordering::Acquire) {
+                            return Err(failure());
+                        }
+                        let reply = stream
+                            .prepare_approval_reply(&request.request_id, decision)
+                            .map_err(|_| failure())?;
+                        process.send_approval_observed(
+                            reply,
+                            remaining()?,
+                            cancel,
+                            &mut |process| on_action(process, TextAction::ObserveProcess),
+                        )?;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(2));
+                continue;
+            };
             on_action(process, TextAction::ObserveProcess)?;
             let observed = stream.observe(&frame).map_err(|_| failure())?;
             if cancel.load(Ordering::Acquire) || started.elapsed() >= budget {
@@ -448,11 +524,10 @@ fn run_text_checked(
                 Observed::Public(value) => on_action(process, TextAction::Public(value))?,
                 Observed::ItemStarted | Observed::Private => {}
                 Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
+                Observed::Tool(tool) => on_action(process, TextAction::Tool(tool))?,
+                Observed::Approval(request) => pending.push(request),
                 // Tools/private notifications need an explicit owner handler.
-                Observed::Started
-                | Observed::Tool(_)
-                | Observed::Approval(_)
-                | Observed::RequiresHandling => return Err(failure()),
+                Observed::Started | Observed::RequiresHandling => return Err(failure()),
             }
         }
     })();
@@ -772,6 +847,12 @@ IFS= read -r hold
             "turn-sink-error",
             "turn-uncertain",
             "turn-tool",
+            "turn-approval-decline",
+            "turn-approval-cleared",
+            "turn-approval-cancel",
+            "turn-approval-handler-error",
+            "turn-approval-accept-blocked",
+            "turn-approval-send-error",
             "turn-workspace-before-thread",
             "turn-workspace-before-prompt",
         ] {
@@ -850,6 +931,18 @@ printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","tu
 if test "$6" = turn-tool; then
 printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"commandExecution","id":"c1","command":"PRIVATE"}}}'
 fi
+case "$6" in turn-approval-*)
+printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"commandExecution","id":"c1","command":"echo test","cwd":"/managed/snapshot","status":"inProgress"}}}'
+printf '%s\n' '{"id":40,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-test","turnId":"t1","itemId":"c1","startedAtMs":1,"kind":"command"}}'
+if test "$6" = turn-approval-send-error; then exec 0<&-; /bin/sleep 0.4; exit 0; fi
+if test "$6" != turn-approval-cleared; then
+IFS= read -r decision || exit 9
+printf '%s\n' "$decision" > "$9"
+test "$decision" = '{"id":40,"result":{"decision":"decline"}}' || exit 10
+fi
+printf '%s\n' '{"method":"serverRequest/resolved","params":{"threadId":"thread-test","requestId":40}}'
+printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"commandExecution","id":"c1","command":"echo test","cwd":"/managed/snapshot","status":"declined"}}}'
+;; esac
 printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":""}}}'
 printf '%s\n' '{"method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"t1","itemId":"a1","delta":"hello"}}'
 printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":"hello"}}}'
@@ -865,6 +958,7 @@ IFS= read -r hold
                         .arg(case)
                         .arg(temp.path().join("thread-received"))
                         .arg(temp.path().join("prompt-received"))
+                        .arg(temp.path().join("approval-received"))
                         .env_clear()
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
@@ -881,6 +975,9 @@ IFS= read -r hold
                 use hello_agent_core::provider::vendor_observation::codex_events::Projection;
                 let mut text = String::new();
                 let mut checks = 0;
+                let mut approval_polls = 0;
+                let mut tool_events = 0;
+                let mut approval_observations = 0;
                 let result = run_text_checked(
                     &mut process,
                     flow,
@@ -889,7 +986,12 @@ IFS= read -r hold
                     "test goal",
                     &mut |_, action| {
                         let value = match action {
-                            TextAction::ObserveProcess => return Ok(()),
+                            TextAction::ObserveProcess => {
+                                if approval_polls > 0 {
+                                    approval_observations += 1;
+                                }
+                                return Ok(());
+                            }
                             TextAction::VerifyWorkspace => {
                                 checks += 1;
                                 if (case == "turn-workspace-before-thread" && checks == 2)
@@ -900,6 +1002,36 @@ IFS= read -r hold
                                 return Ok(());
                             }
                             TextAction::Public(value) => value,
+                            TextAction::Tool(tool) => {
+                                if !case.starts_with("turn-approval-") {
+                                    return Err(failure());
+                                }
+                                assert_eq!(tool.item_id, "c1");
+                                tool_events += 1;
+                                return Ok(());
+                            }
+                            TextAction::PollApproval { request, decision } => {
+                                if !case.starts_with("turn-approval-") {
+                                    return Err(failure());
+                                }
+                                assert_eq!(request.item_id, "c1");
+                                approval_polls += 1;
+                                if case == "turn-approval-handler-error" {
+                                    return Err(failure());
+                                }
+                                if case == "turn-approval-cancel" {
+                                    cancel.store(true, Ordering::Release);
+                                }
+                                if approval_polls >= 55 {
+                                    use hello_agent_core::provider::vendor_observation::codex_approval::Decision;
+                                    *decision = Some(if case == "turn-approval-accept-blocked" {
+                                        Decision::AcceptOnce
+                                    } else {
+                                        Decision::Decline
+                                    });
+                                }
+                                return Ok(());
+                            }
                         };
                         match value {
                             Projection::Delta { text: value, .. } => {
@@ -921,12 +1053,43 @@ IFS= read -r hold
                         Ok(())
                     },
                 );
-                if case == "turn-success" {
-                    assert_eq!(checks, 3);
+                if matches!(
+                    case,
+                    "turn-success" | "turn-approval-decline" | "turn-approval-cleared"
+                ) {
+                    assert_eq!(
+                        checks,
+                        if case == "turn-approval-decline" {
+                            4
+                        } else {
+                            3
+                        }
+                    );
                     assert_eq!(result.unwrap(), TurnOutcome::Completed);
                     assert_eq!(text, "hello");
                 } else {
                     assert!(result.is_err(), "{case}");
+                }
+                if case.starts_with("turn-approval-") {
+                    assert_eq!(
+                        temp.path().join("approval-received").exists(),
+                        case == "turn-approval-decline"
+                    );
+                    if case == "turn-approval-cleared" {
+                        assert!(approval_polls < 55);
+                    }
+                    if case == "turn-approval-decline" {
+                        assert_eq!(approval_polls, 55);
+                        assert!(approval_observations > 0);
+                    }
+                    assert_eq!(
+                        tool_events,
+                        if matches!(case, "turn-approval-decline" | "turn-approval-cleared") {
+                            2
+                        } else {
+                            1
+                        }
+                    );
                 }
                 if case.starts_with("turn-workspace-") {
                     assert!(!temp.path().join("prompt-received").exists());

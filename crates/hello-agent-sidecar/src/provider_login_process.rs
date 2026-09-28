@@ -505,6 +505,42 @@ impl<'a> LoginProcess<'a> {
         self.receive_inner(timeout, cancel, &mut |_| Ok(()))
     }
 
+    pub(crate) fn send_approval_observed(
+        &mut self,
+        reply: hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.send_approval(reply, timeout, cancel, &mut || self.tick_with_run(observer));
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn poll_preflight_observed(
+        &mut self,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<Option<BoundedObservation>, SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.poll_observed(cancel, &mut || self.tick_with_run(observer));
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     pub(crate) fn receive_preflight(
         &mut self,
         timeout: Duration,

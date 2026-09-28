@@ -226,6 +226,19 @@ impl TurnStream {
         result
     }
 
+    /// A UI poll must discard a request cleared by the server or already answered.
+    pub fn awaits_approval_decision(&self, request_id: &RequestId) -> bool {
+        !self.failed
+            && self.outcome.is_none()
+            && !self.prepared_replies.contains(request_id)
+            && self
+                .approvals
+                .get(request_id)
+                .and_then(Option::as_ref)
+                .and_then(|id| self.items.get(id))
+                .is_some_and(|item| !item.completed)
+    }
+
     fn observe_inner(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
         #[derive(Deserialize)]
         struct Envelope {
@@ -828,9 +841,11 @@ mod tests {
             _ => panic!("approval was not dispatched"),
         };
         assert!(request.request_id == RequestId::Number(10));
+        assert!(stream.awaits_approval_decision(&request.request_id));
         let reply = stream
             .prepare_approval_reply(&request.request_id, Decision::Decline)
             .unwrap();
+        assert!(!stream.awaits_approval_decision(&request.request_id));
         assert_eq!(
             serde_json::from_str::<Value>(reply.as_str()).unwrap(),
             json!({"id":10,"result":{"decision":"decline"}})

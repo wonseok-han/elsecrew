@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (승인 대기와 응답 전송 후보)
+
+- **진전/기준**: 직전 이벤트 분류는 `a55c38a`로 커밋됐다. clean 통합 checkout에서 메인이 기존 LoginIo/Process에 typed ApprovalReply 전송과 claim 전용 비차단 poll을 연결했다. 같은 TurnStream에서 살아 있는 미응답 요청만 owner handler에 질의하며 None은 계속 대기한다. 서버의 해제/완료 알림을 먼저 읽고 취소·관측·동일 workspace 검증 뒤 단회 응답을 보낸다. 기존 accept 차단은 유지한다.
+- **출처/경계**: OpenAI Docs로 [공식 승인 흐름](https://learn.chatgpt.com/docs/app-server#approvals)을 다시 검색·열었다. 새 내부 handler 진입점은 같은 workspace/storage를 사용하고 callback은 즉시 반환해야 한다. 기존 run_text_and_close/예약 경로는 계속 tool/approval을 거절한다. 후보 전체 30초 예산도 유지하므로 제품의 장시간 실행·사용자 승인 UI/원장/실제 provider 입장은 별도다.
+- **검증/다음**: fake pipe에서 지연된 decline 단회 송신·대기 중 process 관측·서버 해제 후 무응답·취소·handler 오류·accept 차단을 검사한다. preflight 5 PASS/10.97초 뒤 기존 예약 원장 25사례를 검증 중이다. 종료/오류를 성공으로 바꾸거나 실제 계정/모델을 호출하지 않았다. 관련 검사·독립 검토 후 커밋하며 main 병합/push 없음.
+- **최신 검사**: 예약 원장 25사례 PASS/46.93초, 최종 전송단절 사례 포함 preflight 5 PASS/11.24초, core event 19 PASS/0.03초, strict sidecar clippy·기존 lint 3종 제외 core clippy·scoped fmt·diff PASS. `run_ledger_review` 1명이 고정 6파일을 정적 검토 중이다. 정상/실패 모두 caller가 소유한 cleanup 경계를 유지하며 실제 앱 사용자 승인 UI 검증은 아니다.
+- **마감**: 독립 정적 검토 PASS(신규 차단 결함 없음). pending prune·전송 전 재검증·typed 실패 cleanup·기존 text wrapper 거절 경계를 확인했다. 관련 6파일을 원자 커밋한다. 다음은 예약 owner/원장·UI 승인 상태 연결이며 제품 활성화·앱 전체 완료는 아직 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (도구·승인 이벤트 분류)
 
 - **진전/기준**: 직전 역할 권한 연결은 `18da7ea`에 커밋됐고 clean checkout에서 이어갔다. 메인이 기존 TurnStream에 command/file-change의 typed 시작/출력/완료·실패·거절 metadata와 scoped PendingApproval 분류를 추가했다. raw 명령 출력/diff는 공개하지 않으며 unknown 도구는 RequiresHandling 그대로다. command 완료의 명령/cwd 변경·잘못된 status·늦은 출력은 sticky failure다.
