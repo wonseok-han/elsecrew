@@ -19,6 +19,7 @@ pub(crate) enum LoginProgress {
     Pending,
     Browser(BrowserLogin),
     CredentialsObserved,
+    CredentialsAbsent,
     Canceled,
 }
 
@@ -28,6 +29,7 @@ pub(crate) struct LoginSession<'a> {
     deadline: Instant,
     closed: bool,
     cleanup_required: bool,
+    check_only: bool,
 }
 
 fn failure() -> SidecarError {
@@ -35,11 +37,22 @@ fn failure() -> SidecarError {
 }
 
 impl<'a> LoginSession<'a> {
+    #[cfg(test)]
     pub(crate) fn start_with_barrier(
         profile: &'a CodexProfileBinding,
         spawn: impl FnOnce() -> std::io::Result<Child>,
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
         cancel: &AtomicBool,
+    ) -> Result<Self, SidecarError> {
+        Self::begin_with_barrier(profile, spawn, release, cancel, false)
+    }
+
+    pub(crate) fn begin_with_barrier(
+        profile: &'a CodexProfileBinding,
+        spawn: impl FnOnce() -> std::io::Result<Child>,
+        release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+        cancel: &AtomicBool,
+        check_only: bool,
     ) -> Result<Self, SidecarError> {
         let home = profile.revalidate()?;
         let (flow, request) =
@@ -50,6 +63,7 @@ impl<'a> LoginSession<'a> {
             deadline: Instant::now() + RPC_TIMEOUT,
             closed: false,
             cleanup_required: false,
+            check_only,
         };
         let preparation = session
             .process
@@ -106,7 +120,12 @@ impl<'a> LoginSession<'a> {
             LoginAction::Send(request) => {
                 self.process.send(request, RPC_TIMEOUT, cancel)?;
                 if self.flow.state() == ConnectionState::ReadyToLogin {
-                    let request = self.flow.start_login().map_err(|_| failure())?;
+                    let request = if self.check_only {
+                        self.flow.check_account()
+                    } else {
+                        self.flow.start_login()
+                    }
+                    .map_err(|_| failure())?;
                     self.process.send(request, RPC_TIMEOUT, cancel)?;
                 }
                 self.deadline = Instant::now() + RPC_TIMEOUT;
@@ -117,6 +136,14 @@ impl<'a> LoginSession<'a> {
                 Ok(LoginProgress::Browser(browser))
             }
             LoginAction::AccountUpdated => Ok(LoginProgress::Pending),
+            LoginAction::CredentialsAbsent => {
+                self.close_process()?;
+                Ok(if cancel.load(Ordering::Acquire) {
+                    LoginProgress::Canceled
+                } else {
+                    LoginProgress::CredentialsAbsent
+                })
+            }
             LoginAction::CredentialsObserved => {
                 self.close_process()?;
                 // A concurrent cancel never publishes a successful login outcome.
@@ -223,6 +250,57 @@ exec /bin/sleep 30
     }
 
     #[test]
+    fn restoration_queries_account_without_browser_and_releases_fence_before_result() {
+        for present in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let binding = profile(&temp);
+            let home = binding.revalidate().unwrap();
+            let init = serde_json::json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}).to_string();
+            let account = if present {
+                serde_json::json!({"type":"chatgpt","email":"synthetic"})
+            } else {
+                serde_json::Value::Null
+            };
+            let reply =
+                serde_json::json!({"id":3,"result":{"account":account,"requiresOpenaiAuth":true}})
+                    .to_string();
+            let script = "IFS= read -r line; printf '%s\\n' \"$1\"; IFS= read -r line; IFS= read -r line; test \"$line\" = '{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}' || exit 2; printf '%s\\n' \"$2\"; IFS= read -r hold; exec /bin/sleep 30";
+            let mut session = LoginSession::begin_with_barrier(
+                &binding,
+                || {
+                    Command::new("/bin/sh")
+                        .args(["-c", script, "peer", &init, &reply])
+                        .env_clear()
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                },
+                |_| Ok(()),
+                &AtomicBool::new(false),
+                true,
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                assert!(Instant::now() < deadline);
+                match session.advance(&AtomicBool::new(false)).unwrap() {
+                    LoginProgress::Pending => std::thread::sleep(Duration::from_millis(10)),
+                    LoginProgress::CredentialsObserved => {
+                        assert!(present);
+                        break;
+                    }
+                    LoginProgress::CredentialsAbsent => {
+                        assert!(!present);
+                        break;
+                    }
+                    _ => panic!("restoration must not start browser login"),
+                }
+            }
+            assert!(!temp.path().join("codex-login.pending").exists());
+        }
+    }
+
+    #[test]
     fn cancel_during_initialization_explicitly_reaps_and_allows_new_reservation() {
         let temp = tempfile::tempdir().unwrap();
         let binding = profile(&temp);
@@ -265,7 +343,7 @@ exec /bin/sleep 30
                 }
                 LoginProgress::CredentialsObserved => break,
                 LoginProgress::Pending => std::thread::sleep(Duration::from_millis(5)),
-                LoginProgress::Canceled => panic!(),
+                LoginProgress::Canceled | LoginProgress::CredentialsAbsent => panic!(),
             }
         }
         assert!(browser_seen);
@@ -390,6 +468,7 @@ exec /bin/sleep 30
             deadline: Instant::now() + RPC_TIMEOUT,
             closed: false,
             cleanup_required: false,
+            check_only: false,
         };
         session
             .process

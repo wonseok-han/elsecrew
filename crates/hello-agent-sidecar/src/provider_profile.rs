@@ -11,6 +11,11 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";
+pub(crate) trait LoginProfile {
+    fn revalidate(&self) -> Result<PathBuf, SidecarError>;
+    fn login_lease_directory(&self) -> Result<Dir, SidecarError>;
+    fn pending_name(&self) -> &'static str;
+}
 const CONFIG: &[u8] = b"# Managed by Hello, Agent. Credentials stay in this profile.\ncli_auth_credentials_store = \"file\"\n";
 
 fn failure() -> SidecarError {
@@ -196,7 +201,19 @@ impl CodexProfileBinding {
     }
 }
 
-fn same_directory(left: &Dir, right: &Dir) -> Result<bool, SidecarError> {
+impl LoginProfile for CodexProfileBinding {
+    fn revalidate(&self) -> Result<PathBuf, SidecarError> {
+        self.revalidate()
+    }
+    fn login_lease_directory(&self) -> Result<Dir, SidecarError> {
+        self.login_lease_directory()
+    }
+    fn pending_name(&self) -> &'static str {
+        "codex-login.pending"
+    }
+}
+
+pub(super) fn same_directory(left: &Dir, right: &Dir) -> Result<bool, SidecarError> {
     let left = left.dir_metadata().map_err(|_| failure())?;
     let right = right.dir_metadata().map_err(|_| failure())?;
     Ok(left.dev() == right.dev() && left.ino() == right.ino())

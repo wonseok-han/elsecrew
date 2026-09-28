@@ -1,9 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { loginErrorMessage } from "../src/m5/provider-login-message.ts";
+test("login feedback distinguishes executable drift from authentication and recovery",()=>{
+  assert.match(loginErrorMessage("codex","providerExecutableChanged"), /호환성 업데이트/);
+  assert.match(loginErrorMessage("codex","providerExecutableChanged"), /로그아웃된 것은 아니/);
+  assert.match(loginErrorMessage("codex","providerExecutableMissing"), /실행 파일을 찾지/);
+  assert.match(loginErrorMessage("codex","providerProfileUnavailable"), /아직 확인하지/);
+  assert.match(loginErrorMessage("claude","providerLoginFailed"), /재설정하지 말고/);
+  assert.match(loginErrorMessage("claude","providerLoginRecoveryRequired"), /안전 종료를 차단/);
+});
 import { validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+test("connection code submission is Claude-only, bounded and never accepts commands or URLs",()=>{
+  const request={action:"submitCode",provider:"claude",attemptId:"a",code:"synthetic#state"};
+  assert.deepEqual(validateLoginRequest(request),request);
+  for(const code of ["","a\nb","https://platform.claude.com/","a".repeat(4097)]) assert.throws(()=>validateLoginRequest({...request,code}));
+  assert.throws(()=>validateLoginRequest({...request,provider:"codex"}));
+  assert.throws(()=>validateLoginRequest({...request,extra:true}));
+  assert.equal(validateLoginStatus({state:"verifying",attemptId:"a",authUrl:null,error:null},"claude").state,"verifying");
+});
 test("login requests are fixed and attempts cannot carry paths or commands",()=>{
   assert.deepEqual(validateLoginRequest({action:"start",attemptId:"abc-123"}),{action:"start",attemptId:"abc-123"});
+  assert.deepEqual(validateLoginRequest({action:"check",provider:"claude",attemptId:"abc-123"}),{action:"check",provider:"claude",attemptId:"abc-123"});
+  for (const provider of [null,undefined,"unknown","../codex"]) assert.throws(()=>validateLoginRequest({action:"status",provider}));
   for (const value of [{action:"status",extra:1},{action:"start",attemptId:"../foo"},{action:"exec",attemptId:"a"},{action:"cancel"}]) assert.throws(()=>validateLoginRequest(value));
+});
+test("Claude OAuth host cannot be substituted into a Codex response or vice versa",()=>{
+  const status={state:"waiting",attemptId:"a",authUrl:"https://claude.ai/oauth/authorize?state=private",error:null};
+  assert.equal(validateLoginStatus(status,"claude").state,"waiting");
+  assert.equal(validateLoginStatus({...status,authUrl:"https://claude.com/cai/oauth/authorize?state=private"},"claude").state,"waiting");
+  assert.throws(()=>validateLoginStatus(status,"codex"));
+  for (const authUrl of ["https://claude.ai/other","https://auth.openai.com/authorize","https://claude.ai.evil.test/oauth/authorize","https://claude.ai:444/oauth/authorize"]) assert.throws(()=>validateLoginStatus({...status,authUrl},"claude"));
 });
 test("only transient HTTPS OAuth URLs from fixed official hosts can reach browser",()=>{
   const status={state:"waiting",attemptId:"a",authUrl:"https://auth.openai.com/authorize?state=private",error:null};

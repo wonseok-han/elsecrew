@@ -41,11 +41,23 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
-    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Codex 로그인' && !b.disabled)", "enabled login button")};
-    [...document.querySelectorAll('button')].find(b => b.textContent === 'Codex 로그인').click();
+    await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "restored Codex login without browser")};
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "enabled Claude login button")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '로그인 취소' && !b.disabled)", "login waiting and cancellation")};
     [...document.querySelectorAll('button')].find(b => b.textContent === '로그인 취소').click();
-    await ${waitFor("document.querySelector('.m5-provider-login').textContent.includes('로그인을 취소했어요')", "canceled login feedback")};
+    await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('로그인을 취소했어요')", "canceled Claude login feedback")};
+    if (!document.querySelector('[aria-label="Codex 연결"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')) throw new Error("Claude cancellation changed Codex status");
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "retry Claude login")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
+    await ${waitFor("document.querySelector('#claude-connection-code')", "connection code input")};
+    const codeInput = document.querySelector('#claude-connection-code');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(codeInput,'synthetic#state');
+    codeInput.dispatchEvent(new Event('input',{bubbles:true}));
+    await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '연결 확인' && !b.disabled)", "code submit enabled")};
+    [...document.querySelectorAll('button')].find(b => b.textContent === '연결 확인').click();
+    await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('이 앱에 Claude Code 로그인이 연결됐어요')", "Claude code accepted")};
+    if (document.querySelector('#claude-connection-code')) throw new Error('submitted code input was retained');
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
@@ -90,7 +102,12 @@ app.whenReady().then(async () => {
   if (!result.dockVerified) throw new Error("panel layout was not verified");
   window.show();
   window.focus();
-  await window.webContents.executeJavaScript(`document.querySelector('.monaco-editor textarea').focus()`);
+  window.webContents.focus();
+  await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('.monaco-editor').scrollIntoView({block:'center'});
+    document.querySelector('.monaco-editor textarea').focus();
+    await ${waitFor("document.hasFocus() && document.activeElement === document.querySelector('.monaco-editor textarea')", "focused editor input")};
+  })()`);
   window.webContents.sendInputEvent({ type: "char", keyCode: "Z" });
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "edited draft")};

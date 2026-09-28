@@ -19,13 +19,20 @@ use std::{
 
 #[derive(Default)]
 pub(crate) struct LoginManager {
+    claude: bool,
     worker: Option<JoinHandle<()>>,
     cancel: Arc<AtomicBool>,
     view: Arc<Mutex<Value>>,
     attempt: Option<String>,
+    code: Arc<Mutex<Option<String>>>,
 }
 
 impl LoginManager {
+    pub(crate) fn claude() -> Self {
+        let mut manager = Self::default();
+        manager.claude = true;
+        manager
+    }
     pub(crate) fn request(
         &mut self,
         storage: &Storage,
@@ -37,10 +44,22 @@ impl LoginManager {
             .and_then(Value::as_str)
             .ok_or_else(invalid)?;
         let id = params.get("attemptId").and_then(Value::as_str);
-        if params
-            .as_object()
-            .is_none_or(|p| p.len() != if action == "status" { 1 } else { 2 })
-        {
+        let provider = params.get("provider");
+        if provider.is_some_and(|value| {
+            value.as_str() != Some(if self.claude { "claude" } else { "codex" })
+        }) {
+            return Err(invalid());
+        }
+        if params.as_object().is_none_or(|p| {
+            p.len()
+                != (if action == "status" {
+                    1
+                } else if action == "submitCode" {
+                    3
+                } else {
+                    2
+                }) + usize::from(provider.is_some())
+        }) {
             return Err(invalid());
         }
         if action != "status"
@@ -54,16 +73,38 @@ impl LoginManager {
         }
         match action {
             "status" => {}
+            "submitCode" => {
+                let code = params
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .ok_or_else(invalid)?;
+                if !self.claude
+                    || self.attempt.as_deref() != id
+                    || !valid_code(code)
+                    || self.cancel.load(Ordering::Acquire)
+                    || self.worker.as_ref().is_none_or(|w| w.is_finished())
+                {
+                    return Err(invalid());
+                }
+                let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+                if view["state"] != "waiting" {
+                    return Err(invalid());
+                }
+                *self.code.lock().unwrap_or_else(|e| e.into_inner()) = Some(code.to_owned());
+                view["state"] = "verifying".into();
+                view["authUrl"] = Value::Null;
+            }
             "cancel" => {
                 if self.attempt.as_deref() == id {
                     self.cancel.store(true, Ordering::Release);
+                    self.code.lock().unwrap_or_else(|e| e.into_inner()).take();
                     let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
                     if view.is_object() {
                         view["authUrl"] = Value::Null;
                     }
                 }
             }
-            "start" => {
+            "start" | "check" => {
                 if self.attempt.as_deref() == id {
                     return Ok(self.status());
                 }
@@ -75,10 +116,16 @@ impl LoginManager {
                 }
                 self.attempt = id.map(str::to_owned);
                 self.cancel = Arc::new(AtomicBool::new(false));
+                self.code = Arc::new(Mutex::new(None));
                 self.view = Arc::new(Mutex::new(
                     json!({"state":"starting","attemptId":id,"authUrl":null,"error":null}),
                 ));
-                let profile = match CodexProfileBinding::from_storage(storage) {
+                let profile = match if self.claude {
+                    crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)
+                        .map(Profile::Claude)
+                } else {
+                    CodexProfileBinding::from_storage(storage).map(Profile::Codex)
+                } {
                     Ok(profile) => profile,
                     Err(error) => {
                         *self.view.lock().unwrap_or_else(|e| e.into_inner()) = json!({"state":"failed","attemptId":id,"authUrl":null,"error":error.kind()});
@@ -87,13 +134,25 @@ impl LoginManager {
                 };
                 let view = self.view.clone();
                 let cancel = self.cancel.clone();
+                let code = self.code.clone();
                 let attempt = self.attempt.clone().unwrap();
+                let check_only = action == "check";
                 self.worker = Some(thread::spawn(move || {
                     let publish = |state: &str, url: Option<String>, error: Option<&str>| {
-                        *view.lock().unwrap_or_else(|e| e.into_inner()) =
+                        let mut view = view.lock().unwrap_or_else(|e| e.into_inner());
+                        if state == "waiting" && cancel.load(Ordering::Acquire) {
+                            return;
+                        }
+                        *view =
                             json!({"state":state,"attemptId":attempt,"authUrl":url,"error":error});
                     };
-                    let result = run(&profile, &cancel, &publish);
+                    let result = match &profile {
+                        Profile::Codex(profile) => run(profile, &cancel, &publish, check_only),
+                        Profile::Claude(profile) => crate::provider_claude_login::run(
+                            profile, &cancel, &publish, check_only, &code,
+                        ),
+                    };
+                    code.lock().unwrap_or_else(|e| e.into_inner()).take();
                     if let Err(error) = result {
                         if cancel.load(Ordering::Acquire)
                             && error.kind() != "providerLoginRecoveryRequired"
@@ -122,6 +181,7 @@ impl LoginManager {
 
     pub(crate) fn prepare_quit(&mut self) -> bool {
         self.cancel.store(true, Ordering::Release);
+        self.code.lock().unwrap_or_else(|e| e.into_inner()).take();
         self.reap_finished();
         self.worker.as_ref().is_none_or(|w| w.is_finished())
             && self
@@ -144,6 +204,13 @@ impl LoginManager {
         }
     }
 }
+pub(super) fn valid_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 4096
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-#.=~".contains(&b))
+}
 impl Drop for LoginManager {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
@@ -155,13 +222,18 @@ impl Drop for LoginManager {
 fn invalid() -> SidecarError {
     SidecarError::new("invalidParams", "invalid login request")
 }
+#[cfg(test)]
 fn unavailable() -> SidecarError {
     SidecarError::new(
         "providerUnavailable",
         "supported Codex executable is unavailable",
     )
 }
-fn digest(value: &str) -> [u8; 32] {
+enum Profile {
+    Codex(CodexProfileBinding),
+    Claude(crate::provider_claude_profile::ClaudeProfileBinding),
+}
+pub(super) fn digest(value: &str) -> [u8; 32] {
     let mut bytes = [0; 32];
     for (i, byte) in bytes.iter_mut().enumerate() {
         *byte = u8::from_str_radix(&value[i * 2..i * 2 + 2], 16).expect("fixed digest");
@@ -169,37 +241,79 @@ fn digest(value: &str) -> [u8; 32] {
     bytes
 }
 
+// Exact signed CLI/host pairs; never learn trust from an installed candidate.
+// 0.154.0-alpha.6.2 has identical generated login types to 0.153.4 (20 files).
+const CODEX_LOGIN_PAIRS: &[(&str, &str)] = &[
+    (
+        "3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a",
+        "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
+    ),
+    (
+        "a1d2f191e70023ed7afd619bc70530f26067a085926e03bae50cf5c0f8298bcf",
+        "35ce5aa1789c994e1cd2dbe134e7156fe4aebdd4d463bc5330e165c2cf925095",
+    ),
+    (
+        "87a08119b8effa519f0ecb552dc98043f58a8200bf2ec5da60f76890c33e9c3a",
+        "038b9c6b60baacbfacba1fe81cf603c22b73697810e013d4efda040f1a7294e7",
+    ),
+];
+
+fn select_pair(
+    roots: &[&Path],
+    pairs: &[(&str, &str)],
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    let mut present = false;
+    for root in roots {
+        // 0.158 packages a shell wrapper in bin/. Bypass it: pin and execute
+        // the signed native binary inside CodexCLI.app directly.
+        for (cli_relative, host_relative) in [
+            (
+                "codex-cli/CodexCLI.app/Contents/MacOS/codex",
+                "codex-cli/bin/codex-code-mode-host",
+            ),
+            ("codex", "codex-code-mode-host"),
+        ] {
+            let path = root.join(cli_relative);
+            present |= std::fs::symlink_metadata(&path).is_ok();
+            for (cli_hash, host_hash) in pairs {
+                if let (Ok(cli), Ok(host)) = (
+                    PinnedExecutable::open(&path, digest(cli_hash)),
+                    PinnedExecutable::open(&root.join(host_relative), digest(host_hash)),
+                ) {
+                    return Ok((cli, host));
+                }
+            }
+        }
+    }
+    Err(SidecarError::new(
+        if present {
+            "providerExecutableChanged"
+        } else {
+            "providerExecutableMissing"
+        },
+        "Supported provider executable pair is unavailable",
+    ))
+}
+
 fn run(
     profile: &CodexProfileBinding,
     cancel: &AtomicBool,
     publish: &impl Fn(&str, Option<String>, Option<&str>),
+    check_only: bool,
 ) -> Result<(), SidecarError> {
-    let mut selected = None;
-    for root in [
-        "/Applications/ChatGPT.app/Contents/Resources",
-        "/Applications/Codex.app/Contents/Resources",
-    ] {
-        let executable = PinnedExecutable::open(
-            &Path::new(root).join("codex"),
-            digest("87a08119b8effa519f0ecb552dc98043f58a8200bf2ec5da60f76890c33e9c3a"),
-        );
-        // The exact supported pair was independently signature-verified before activation.
-        if let Ok(executable) = executable {
-            selected = Some((root, executable));
-            break;
-        }
-    }
-    let (root, executable) = selected.ok_or_else(unavailable)?;
-    let helper = PinnedExecutable::open(
-        &Path::new(root).join("codex-code-mode-host"),
-        digest("038b9c6b60baacbfacba1fe81cf603c22b73697810e013d4efda040f1a7294e7"),
+    let (executable, helper) = select_pair(
+        &[
+            Path::new("/Applications/ChatGPT.app/Contents/Resources"),
+            Path::new("/Applications/Codex.app/Contents/Resources"),
+        ],
+        CODEX_LOGIN_PAIRS,
     )?;
     let home = profile.revalidate()?;
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);
         return Ok(());
     }
-    let mut session = LoginSession::start_with_barrier(
+    let mut session = LoginSession::begin_with_barrier(
         profile,
         || {
             let path = executable
@@ -237,6 +351,7 @@ fn run(
             provider_login_gate::release(child)
         },
         cancel,
+        check_only,
     )?;
     loop {
         let progress = session.advance(cancel).inspect_err(|error| {
@@ -253,6 +368,10 @@ fn run(
                 publish("connected", None, None);
                 return Ok(());
             }
+            LoginProgress::CredentialsAbsent => {
+                publish("idle", None, None);
+                return Ok(());
+            }
             LoginProgress::Canceled => {
                 publish("canceled", None, None);
                 return Ok(());
@@ -262,7 +381,7 @@ fn run(
     }
 }
 
-fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), SidecarError>) {
+pub(super) fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), SidecarError>) {
     for _ in 0..10 {
         thread::sleep(Duration::from_millis(100));
         if cleanup().is_ok() {
@@ -275,6 +394,84 @@ fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), SidecarError>) {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn admission_requires_one_complete_pair_and_reports_drift_separately() {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let a = format!("{:x}", Sha256::digest(b"cli-a"));
+        let b = format!("{:x}", Sha256::digest(b"host-a"));
+        let c = format!("{:x}", Sha256::digest(b"cli-b"));
+        let d = format!("{:x}", Sha256::digest(b"host-b"));
+        let pairs = [(a.as_str(), b.as_str()), (c.as_str(), d.as_str())];
+        assert_eq!(
+            select_pair(&[&root], &pairs).err().unwrap().kind(),
+            "providerExecutableMissing"
+        );
+        for (name, bytes) in [
+            ("codex", b"cli-a".as_slice()),
+            ("codex-code-mode-host", b"host-b".as_slice()),
+        ] {
+            std::fs::write(root.join(name), bytes).unwrap();
+            std::fs::set_permissions(root.join(name), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
+        assert_eq!(
+            select_pair(&[&root], &pairs).err().unwrap().kind(),
+            "providerExecutableChanged"
+        );
+        std::fs::write(root.join("codex-code-mode-host"), b"host-a").unwrap();
+        assert!(select_pair(&[&root], &pairs).is_ok());
+        std::fs::write(root.join("codex"), b"cli-b").unwrap();
+        std::fs::write(root.join("codex-code-mode-host"), b"host-b").unwrap();
+        assert!(select_pair(&[&root], &pairs).is_ok());
+        let native = root.join("codex-cli/CodexCLI.app/Contents/MacOS/codex");
+        let host = root.join("codex-cli/bin/codex-code-mode-host");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(host.parent().unwrap()).unwrap();
+        std::fs::rename(root.join("codex"), &native).unwrap();
+        std::fs::rename(root.join("codex-code-mode-host"), &host).unwrap();
+        std::fs::write(root.join("codex-cli/bin/codex"), b"untrusted shell wrapper").unwrap();
+        let (cli, _) = select_pair(&[&root], &pairs).unwrap();
+        assert_eq!(cli.revalidate().unwrap(), native);
+        std::fs::write(&host, b"host-a").unwrap();
+        assert!(select_pair(&[&root], &pairs).is_err());
+    }
+
+    #[test]
+    fn code_submission_is_private_single_use_and_bound_to_live_claude_attempt() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let mut manager = LoginManager::claude();
+        manager.attempt = Some("current".into());
+        *manager.view.lock().unwrap() =
+            json!({"state":"waiting","attemptId":"current","authUrl":null,"error":null});
+        let cancel = manager.cancel.clone();
+        manager.worker = Some(thread::spawn(move || {
+            while !cancel.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(5));
+            }
+        }));
+        let mut request = json!({"action":"submitCode","provider":"claude","attemptId":"old","code":"synthetic#state"});
+        assert!(manager.request(&storage, &request).is_err());
+        request["attemptId"] = "current".into();
+        let response = manager.request(&storage, &request).unwrap();
+        assert_eq!(response["state"], "verifying");
+        assert!(!response.to_string().contains("synthetic"));
+        assert!(manager.request(&storage, &request).is_err());
+        manager
+            .request(&storage, &json!({"action":"cancel","attemptId":"current"}))
+            .unwrap();
+        assert!(manager.code.lock().unwrap().is_none());
+        assert!(manager.request(&storage, &request).is_err());
+        assert!(LoginManager::default().request(&storage, &request).is_err());
+        for invalid in ["", "x\ny", "code secret", "https://host/code", "a\u{0}"] {
+            assert!(!valid_code(invalid));
+        }
+    }
 
     #[test]
     fn cleanup_owner_is_retained_through_delayed_observations() {
@@ -350,6 +547,89 @@ mod tests {
 
     /// New temporary app-owned profile only. Opens no browser and performs no
     /// model call; requests an OAuth URL and then immediately cancels the login.
+    #[test]
+    #[ignore = "explicit model-free installed providers check smoke"]
+    fn installed_providers_check_empty_profiles_without_login() {
+        for mut manager in [LoginManager::default(), LoginManager::claude()] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            manager
+                .request(&storage, &json!({"action":"check","attemptId":"check"}))
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(40);
+            loop {
+                let status = manager
+                    .request(&storage, &json!({"action":"status"}))
+                    .unwrap();
+                assert!(status["authUrl"].is_null());
+                assert_ne!(status["state"], "waiting");
+                assert_ne!(status["state"], "failed", "safe error: {}", status["error"]);
+                if status["state"] == "idle" {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(50));
+            }
+            assert!(manager.prepare_quit());
+            assert!(!root
+                .join(if manager.claude {
+                    "claude-login.pending"
+                } else {
+                    "codex-login.pending"
+                })
+                .exists());
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit model-free installed Claude login URL cancellation smoke"]
+    fn installed_claude_login_url_then_cancel() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let mut manager = LoginManager::claude();
+        manager
+            .request(&storage, &json!({"action":"start","attemptId":"smoke"}))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut observed = false;
+        loop {
+            let status = manager
+                .request(&storage, &json!({"action":"status"}))
+                .unwrap();
+            if status["state"] == "waiting" {
+                observed = status["authUrl"].as_str().is_some_and(|s| {
+                    s.starts_with("https://claude.ai/oauth/authorize?")
+                        || s.starts_with("https://claude.com/cai/oauth/authorize?")
+                });
+                break;
+            }
+            if status["state"] == "failed" || Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        manager
+            .request(&storage, &json!({"action":"cancel","attemptId":"smoke"}))
+            .unwrap();
+        let cleanup_deadline = Instant::now() + Duration::from_secs(10);
+        while !manager.prepare_quit() && Instant::now() < cleanup_deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            manager.prepare_quit(),
+            "safe error: {}",
+            manager.status()["error"]
+        );
+        assert!(
+            observed,
+            "OAuth URL not observed; safe error: {}",
+            manager.status()["error"]
+        );
+        assert!(!root.join("claude-login.pending").exists());
+    }
+
     #[test]
     #[ignore = "explicit model-free installed Codex login smoke"]
     fn installed_codex_login_url_then_cancel_without_browser() {

@@ -1,9 +1,20 @@
 const listeners = new Set();
-let loginStatus = {state: "idle", attemptId: null, authUrl: null, error: null};
+const loginStates = {codex:{state: "idle", attemptId: null, authUrl: null, error: null},claude:{state: "idle", attemptId: null, authUrl: null, error: null}};
 window.m5Login = { request: async (input) => {
-  if (input.action === "start") loginStatus = {...loginStatus, state: "waiting", attemptId: input.attemptId};
-  if (input.action === "cancel") loginStatus = {...loginStatus, state: "canceled"};
-  return loginStatus;
+  const provider = input.provider ?? "codex";
+  let status = loginStates[provider];
+  if (input.action === "check") status = {...status,state:provider === "codex" ? "connected" : "idle",attemptId:input.attemptId};
+  if (input.action === "start") {
+    if (provider === "codex") throw new Error("restoration must not start OAuth");
+    status = {...status, state: "waiting", attemptId: input.attemptId};
+  }
+  if (input.action === "cancel") status = {...status, state: "canceled"};
+  if (input.action === "submitCode") {
+    if (provider !== "claude" || status.state !== "waiting" || input.attemptId !== status.attemptId || input.code !== "synthetic#state") throw new Error("invalid code handoff");
+    status = {...status,state:"connected"};
+  }
+  loginStates[provider] = status;
+  return status;
 } };
 const workspaceListeners = new Set();
 const chatListeners = new Set();

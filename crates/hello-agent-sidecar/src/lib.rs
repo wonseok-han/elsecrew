@@ -5,6 +5,10 @@
 mod agent_runtime;
 mod chat;
 mod project;
+#[cfg(target_os = "macos")]
+mod provider_claude_login;
+#[cfg(target_os = "macos")]
+mod provider_claude_profile;
 #[cfg(unix)]
 #[allow(dead_code)] // Pin validation is not vendor activation or signature admission.
 mod provider_executable;
@@ -451,6 +455,8 @@ fn preflight_blocked_admission_request(line: &[u8], sidecar: &SidecarSession) ->
 struct Sidecar {
     #[cfg(target_os = "macos")]
     login: provider_login_manager::LoginManager,
+    #[cfg(target_os = "macos")]
+    claude_login: provider_login_manager::LoginManager,
     storage: Storage,
     projects: ProjectManager,
     ready: ReadyPayloadV1,
@@ -812,6 +818,8 @@ impl Sidecar {
             storage,
             #[cfg(target_os = "macos")]
             login: provider_login_manager::LoginManager::default(),
+            #[cfg(target_os = "macos")]
+            claude_login: provider_login_manager::LoginManager::claude(),
             projects,
             ready,
             prepared_to_quit: false,
@@ -897,7 +905,12 @@ impl Sidecar {
         let action = match request.method.as_str() {
             "provider.login" => {
                 #[cfg(target_os = "macos")]
-                let result = self.login.request(&self.storage, &request.params)?;
+                let result =
+                    if request.params.get("provider").and_then(Value::as_str) == Some("claude") {
+                        self.claude_login.request(&self.storage, &request.params)?
+                    } else {
+                        self.login.request(&self.storage, &request.params)?
+                    };
                 #[cfg(not(target_os = "macos"))]
                 let result = serde_json::json!({"state":"unsupported","attemptId":null,"authUrl":null,"error":null});
                 Ok(project::ProjectAction {
@@ -936,9 +949,19 @@ impl Sidecar {
                     .prepare_quit(&mut self.storage, &mut self.projects)
                     .map_err(|failure| SidecarError::new(failure.kind, failure.detail))?;
                 #[cfg(target_os = "macos")]
-                let login_stopped = self.login.prepare_quit();
+                let login_blockers = {
+                    let mut blockers = Vec::new();
+                    if !self.login.prepare_quit() {
+                        blockers.push("provider-login:codex".to_owned());
+                    }
+                    if !self.claude_login.prepare_quit() {
+                        blockers.push("provider-login:claude".to_owned());
+                    }
+                    blockers
+                };
                 #[cfg(not(target_os = "macos"))]
-                let login_stopped = true;
+                let login_blockers: Vec<String> = Vec::new();
+                let login_stopped = login_blockers.is_empty();
                 if blockers.is_empty() && login_stopped && !self.safe_to_quit {
                     self.storage.checkpoint()?;
                     self.storage
@@ -946,9 +969,7 @@ impl Sidecar {
                     self.safe_to_quit = true;
                 }
                 let mut blockers = self.storage.blocker_ids()?;
-                if !login_stopped {
-                    blockers.push("provider-login:codex".to_owned());
-                }
+                blockers.extend(login_blockers);
                 project::ProjectAction {
                     result: serde_json::to_value(PrepareQuitResultV1 {
                         safe_to_quit: self.safe_to_quit && blockers.is_empty(),

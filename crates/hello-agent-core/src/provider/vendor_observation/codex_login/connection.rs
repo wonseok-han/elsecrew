@@ -14,6 +14,7 @@ pub enum ConnectionState {
     WaitingForBrowser,
     Verifying,
     CredentialsObserved,
+    CredentialsAbsent,
     Canceled,
     Failed,
 }
@@ -25,6 +26,7 @@ pub enum LoginAction {
     Browser(BrowserLogin),
     AccountUpdated,
     CredentialsObserved,
+    CredentialsAbsent,
 }
 
 pub struct LoginConnection {
@@ -74,6 +76,18 @@ impl LoginConnection {
         self.login = Some(login);
         self.state = ConnectionState::Starting;
         Ok(request)
+    }
+
+    /// Observe this profile without starting OAuth or a model. A missing account
+    /// is normal only on this path, never after a successful browser completion.
+    pub fn check_account(&mut self) -> Result<LoginRequest, ProviderError> {
+        if self.state != ConnectionState::ReadyToLogin {
+            return Err(error());
+        }
+        self.state = ConnectionState::Verifying;
+        Ok(LoginRequest(
+            "{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}\n".into(),
+        ))
     }
 
     pub fn accept(&mut self, input: &BoundedObservation) -> Result<LoginAction, ProviderError> {
@@ -150,9 +164,12 @@ impl LoginConnection {
                     return Err(error());
                 }
                 let result = BoundedObservation::new(reply.result.get().as_bytes().to_vec())?;
-                if Vendor::Codex01491.observe_auth(&result, 0)?
-                    != AuthObservation::CredentialsPresent
-                {
+                let observation = Vendor::Codex01491.observe_auth(&result, 0)?;
+                if self.login.is_none() && observation == AuthObservation::NotAuthenticated {
+                    self.state = ConnectionState::CredentialsAbsent;
+                    return Ok(LoginAction::CredentialsAbsent);
+                }
+                if observation != AuthObservation::CredentialsPresent {
                     return Err(error());
                 }
                 #[derive(Deserialize)]
@@ -243,6 +260,38 @@ mod tests {
     const UPDATE: &str =
         r#"{"method":"account/updated","params":{"authMode":"chatgpt","planType":"plus"}}"#;
     const ACCOUNT: &str = r#"{"id":3,"result":{"account":{"type":"chatgpt","email":"PRIVATE"},"requiresOpenaiAuth":true}}"#;
+    #[test]
+    fn account_check_never_starts_login_and_absence_is_not_browser_success() {
+        for (reply, present) in [
+            (ACCOUNT, true),
+            (
+                r#"{"id":3,"result":{"account":null,"requiresOpenaiAuth":true}}"#,
+                false,
+            ),
+        ] {
+            let (mut flow, _) = LoginConnection::begin("/app/profile").unwrap();
+            flow.accept(&obs(INIT)).unwrap();
+            let request = flow.check_account().unwrap();
+            assert_eq!(
+                request.as_str(),
+                "{\"id\":3,\"method\":\"account/read\",\"params\":{\"refreshToken\":false}}\n"
+            );
+            assert!(flow.start_login().is_err());
+            let action = flow.accept(&obs(reply)).unwrap();
+            assert!(matches!(
+                (action, present),
+                (LoginAction::CredentialsObserved, true) | (LoginAction::CredentialsAbsent, false)
+            ));
+            assert!(flow.accept(&obs(reply)).is_err());
+        }
+        let mut flow = waiting();
+        flow.accept(&obs(DONE)).unwrap();
+        assert!(flow
+            .accept(&obs(
+                r#"{"id":3,"result":{"account":null,"requiresOpenaiAuth":true}}"#
+            ))
+            .is_err());
+    }
     fn waiting() -> LoginConnection {
         let (mut flow, _) = LoginConnection::begin("/app/profile").unwrap();
         assert!(matches!(

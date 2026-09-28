@@ -1142,6 +1142,59 @@ test("G5 recovery-ready status stays connected for recovery APIs and unsafe quit
   assert.deepEqual(exits, []);
 });
 
+test("one quit waits for both login workers to confirm cleanup", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const exits: string[] = [];
+  let calls = 0;
+  const coordinator = new QuitCoordinatorV1({
+    prepareSidecarQuit: async () => {
+      calls += 1;
+      const blockers = calls === 1 ? ["provider-login:codex", "provider-login:claude"]
+        : calls === 2 ? ["provider-login:claude"] : [];
+      return { safeToQuit: blockers.length === 0, blockers };
+    },
+    failedBeforeReady: () => false,
+    allowProcessExit: (kind) => exits.push(kind),
+  });
+  coordinator.handleBeforeQuit();
+  const pending = coordinator.prepareQuit(); // joins the same single-quit operation
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.deepEqual(exits, []);
+  t.mock.timers.tick(250);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.deepEqual(exits, []);
+  t.mock.timers.tick(250);
+  assert.equal((await pending).safeToQuit, true);
+  assert.equal(calls, 3);
+  assert.deepEqual(exits, ["clean"]);
+});
+
+test("persistent login recovery remains blocked after the bounded quit retry budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  const exits: string[] = [];
+  const coordinator = new QuitCoordinatorV1({
+    prepareSidecarQuit: async () => {
+      calls += 1;
+      return { safeToQuit: false, blockers: ["provider-login:claude"] };
+    },
+    failedBeforeReady: () => false,
+    allowProcessExit: (kind) => exits.push(kind),
+  });
+  coordinator.handleBeforeQuit();
+  const pending = coordinator.prepareQuit();
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(250);
+  }
+  assert.equal((await pending).safeToQuit, false);
+  assert.equal(calls, 41);
+  assert.equal(coordinator.exitAllowed, false);
+  assert.deepEqual(exits, []);
+});
+
 test("pre-ready startup failure permits one explicitly unclean app close without re-entering quit", () => {
   let sidecarCalls = 0;
   const exits: string[] = [];

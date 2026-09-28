@@ -281,11 +281,11 @@ function registerIpcHandlers(): void {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");
     const request = validateLoginRequest(input);
-    const result = validateLoginStatus(await sidecar.login(request));
+    const result = validateLoginStatus(await sidecar.login(request), request.provider);
     if (result.authUrl && request.action !== "cancel") {
       try { await shell.openExternal(result.authUrl); }
       catch {
-        if (result.attemptId) await sidecar.login({action:"cancel",attemptId:result.attemptId});
+        if (result.attemptId) await sidecar.login({action:"cancel",attemptId:result.attemptId,...(request.provider ? {provider:request.provider} : {})});
         throw new Error("login browser could not be opened");
       }
     }

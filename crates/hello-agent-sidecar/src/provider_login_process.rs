@@ -3,7 +3,7 @@
 //! A durable reservation precedes launch. Uncertain exits retain it across restarts.
 //! Like the profile binding, identity checks are point-in-time: hostile same-UID
 //! directory/path replacement after a check is outside this capability's guarantee.
-use crate::{provider_login_io::LoginIo, provider_profile::CodexProfileBinding, SidecarError};
+use crate::{provider_login_io::LoginIo, provider_profile::LoginProfile, SidecarError};
 use cap_std::fs::{Dir, File, MetadataExt, OpenOptions, OpenOptionsExt};
 use hello_agent_core::proctree::{
     identity_of, ProcIdentity, ProcTable, SystemClock, SystemProcTable, TerminationConfig,
@@ -17,6 +17,7 @@ use std::process::Child;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
 const PENDING: &str = "codex-login.pending";
 const MAX_TRACKED: usize = 256;
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
@@ -31,6 +32,7 @@ fn failure() -> SidecarError {
 /// The file's existence is the inter-session/restart fence, even if empty or malformed.
 /// Never read an old reservation, repair it or automatically adopt its PIDs.
 struct Reservation {
+    name: &'static str,
     directory: Dir,
     file: File,
     recorded: BTreeSet<ProcIdentity>,
@@ -38,18 +40,19 @@ struct Reservation {
 }
 
 impl Reservation {
-    fn create(profile: &CodexProfileBinding) -> Result<Self, SidecarError> {
+    fn create(profile: &dyn LoginProfile) -> Result<Self, SidecarError> {
         let directory = profile.login_lease_directory()?;
         let mut options = OpenOptions::new();
         options.write(true).create_new(true).mode(0o600);
         let mut file = directory
-            .open_with(PENDING, &options)
+            .open_with(profile.pending_name(), &options)
             .map_err(|_| failure())?;
-        file.write_all(b"hello-agent codex login pending v1\n")
+        file.write_all(b"hello-agent provider login pending v1\n")
             .map_err(|_| failure())?;
         file.sync_all().map_err(|_| failure())?;
         sync_directory(&directory)?;
         Ok(Self {
+            name: profile.pending_name(),
             directory,
             file,
             recorded: BTreeSet::new(),
@@ -61,7 +64,7 @@ impl Reservation {
         let held = self.file.metadata().map_err(|_| failure())?;
         let current = self
             .directory
-            .symlink_metadata(PENDING)
+            .symlink_metadata(self.name)
             .map_err(|_| failure())?;
         if !current.is_file()
             || held.dev() != current.dev()
@@ -113,7 +116,9 @@ impl Reservation {
         self.verify()?;
         // POSIX unlink is name-based, not an atomic unlink-if-inode operation.
         // This detects prior substitution, not a hostile same-UID race after verify.
-        self.directory.remove_file(PENDING).map_err(|_| failure())?;
+        self.directory
+            .remove_file(self.name)
+            .map_err(|_| failure())?;
         sync_directory(&self.directory)
     }
 }
@@ -130,7 +135,7 @@ fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
 /// Owns the Child before any fallible identity/pipe operation. No Debug/raw error logging.
 /// Dropping attempts cleanup but never releases the durable fence: only explicit finish does.
 pub(crate) struct LoginProcess<'a> {
-    profile: &'a CodexProfileBinding,
+    profile: &'a dyn LoginProfile,
     reservation: Reservation,
     child: Option<Child>,
     tracker: Option<TreeTracker>,
@@ -145,7 +150,7 @@ pub(crate) struct LoginProcess<'a> {
 }
 
 impl<'a> LoginProcess<'a> {
-    pub(crate) fn reserve(profile: &'a CodexProfileBinding) -> Result<Self, SidecarError> {
+    pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
         Ok(Self {
             profile,
             reservation: Reservation::create(profile)?,
@@ -337,6 +342,45 @@ impl<'a> LoginProcess<'a> {
     }
 
     /// This proves cleanup only, never authentication or model readiness.
+    pub(crate) fn poll_output(
+        &mut self,
+        cancel: &AtomicBool,
+    ) -> Result<crate::provider_login_io::OutputChunk, SidecarError> {
+        self.tick()?;
+        let result = self.io.as_mut().ok_or_else(failure)?.poll_chunk(cancel);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn submit_claude_code(
+        &mut self,
+        code: &str,
+        cancel: &AtomicBool,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || self.profile.pending_name() != "claude-login.pending" {
+            return Err(failure());
+        }
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.submit_claude_code(code, cancel, &mut || self.tick());
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn exit_status(&mut self) -> Result<Option<std::process::ExitStatus>, SidecarError> {
+        self.tick()?;
+        self.child
+            .as_mut()
+            .ok_or_else(failure)?
+            .try_wait()
+            .map_err(|_| failure())
+    }
+
+    /// This proves cleanup only, never authentication or model readiness.
     /// Cancel/timeouts can finish cleanly; observation/storage failures cannot.
     pub(crate) fn finish(&mut self) -> Result<(), SidecarError> {
         self.finish_with(&SystemProcTable)
@@ -404,6 +448,7 @@ impl Drop for LoginProcess<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_profile::CodexProfileBinding;
     use hello_agent_core::proctree::{ProbeResult, ProcEntry, TreeSignal};
     use hello_agent_core::provider::vendor_observation::codex_login::LoginExchange;
     use std::process::{Command, Stdio};
@@ -823,7 +868,17 @@ mod tests {
             let temp = tempfile::tempdir().unwrap();
             let binding = profile(&temp);
             let mut process = LoginProcess::reserve(&binding).unwrap();
-            process.launch(cat).unwrap();
+            // Closing stdin must not end the peer before the injected OS
+            // observation failure is checked (cat raced EOF with this assertion).
+            process
+                .launch(|| {
+                    Command::new("/bin/sleep")
+                        .arg("30")
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                })
+                .unwrap();
             let root = process.tracker.as_ref().unwrap().tracked_identities()[0];
             assert!(process.finish_with(&FailedTable).is_err());
             assert!(!process.finished);

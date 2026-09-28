@@ -89,7 +89,10 @@ const bridge: M5BridgeV7 = Object.freeze({
 
 contextBridge.exposeInMainWorld("m5", bridge);
 contextBridge.exposeInMainWorld("m5Login", Object.freeze({
-  request: async (input: LoginRequest) => validateLoginStatus(await ipcRenderer.invoke(M5_LOGIN_CHANNEL, validateLoginRequest(input))),
+  request: async (input: LoginRequest) => {
+    const request = validateLoginRequest(input);
+    return validateLoginStatus(await ipcRenderer.invoke(M5_LOGIN_CHANNEL, request),request.provider);
+  },
 }));
 
 const sidecarListeners = new Set<(event: EventV1) => void>();

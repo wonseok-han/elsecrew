@@ -868,7 +868,7 @@ export class SidecarClientV1 {
         validateChatAppendMessageTranscriptV1({ request: pending.params, message: response.result });
         return response.result;
       }
-      case "provider.login": return validateLoginStatus(response.result);
+      case "provider.login": return validateLoginStatus(response.result, validateLoginRequest(pending.params).provider);
       case "chat.list": {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;
       }

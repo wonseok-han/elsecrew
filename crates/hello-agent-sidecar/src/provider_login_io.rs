@@ -35,10 +35,52 @@ pub(crate) struct LoginIo {
     pending: Vec<u8>,
     received: usize,
     sent: usize,
+    code_sent: bool,
     failed: bool,
 }
 
+/// CLI output is not JSONL: blank lines and clean EOF are valid. Never mix this
+/// transport mode with send/poll frames on one connection.
+pub(crate) enum OutputChunk {
+    Pending,
+    Bytes(Vec<u8>),
+    Eof,
+}
+
 impl LoginIo {
+    pub(crate) fn poll_chunk(&mut self, cancel: &AtomicBool) -> Result<OutputChunk, SidecarError> {
+        if self.failed
+            || !self.pending.is_empty()
+            || (self.sent != 0 && !self.code_sent)
+            || cancel.load(Ordering::Acquire)
+        {
+            return Err(failure());
+        }
+        let mut chunk = [0; 4096];
+        match self.output.read(&mut chunk) {
+            Ok(0) => Ok(OutputChunk::Eof),
+            Ok(count) => {
+                self.received += count;
+                if self.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
+                    self.failed = true;
+                    return Err(failure());
+                }
+                Ok(OutputChunk::Bytes(chunk[..count].to_vec()))
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(OutputChunk::Pending)
+            }
+            Err(_) => {
+                self.failed = true;
+                Err(failure())
+            }
+        }
+    }
     /// Must attach only to a child already held by the process/lifecycle owner.
     /// Caller must drain or redirect stderr separately. On failure the child and
     /// both pipe handles remain with the caller (possibly set to nonblocking).
@@ -51,8 +93,36 @@ impl LoginIo {
             pending: Vec::new(),
             received: 0,
             sent: 0,
+            code_sent: false,
             failed: false,
         })
+    }
+
+    pub(crate) fn submit_claude_code(
+        &mut self,
+        code: &str,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        if self.sent != 0
+            || self.code_sent
+            || code.is_empty()
+            || code.len() > 4096
+            || !code
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_-#.=~".contains(&b))
+        {
+            return Err(failure());
+        }
+        let mut bytes = code.as_bytes().to_vec();
+        bytes.push(b'\n');
+        let result = self.send_inner(&bytes, Duration::from_secs(1), cancel, observe);
+        bytes.fill(0);
+        self.code_sent = true;
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
     }
 
     pub(crate) fn send(
