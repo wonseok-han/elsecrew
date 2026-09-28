@@ -341,6 +341,17 @@ fn binary_g5c_capability_cache_refreshes_only_when_requested_and_codex_stays_blo
 #[cfg(target_os = "macos")]
 #[test]
 fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
+    g5a_public_event_flow(false);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn binary_g5a_progress_survives_continuous_requests() {
+    g5a_public_event_flow(true);
+}
+
+#[cfg(target_os = "macos")]
+fn g5a_public_event_flow(continuous_requests: bool) {
     let root = tempfile::tempdir().expect("temporary directory");
     let source = root.path().join("source");
     let data = root.path().join("data");
@@ -504,7 +515,70 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
     validate_agent_adapter_payload_v1("runAccepted", &accepted).unwrap();
     let run_id = accepted["runId"].as_str().unwrap().to_string();
 
-    let EnvelopeV1::Event(running) = receive_envelope(&envelopes) else {
+    let mut buffered = std::collections::VecDeque::new();
+    if continuous_requests {
+        use std::sync::{atomic::AtomicBool, Arc};
+        let sending = Arc::new(AtomicBool::new(true));
+        let sent = Arc::new(AtomicU64::new(0));
+        let writer_active = sending.clone();
+        let writer_count = sent.clone();
+        let instance = ready.sidecar_instance_id.clone();
+        let writer = thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(1);
+            let mut count = 0;
+            while Instant::now() < until {
+                count += 1;
+                write_request(
+                    &mut stdin,
+                    &instance,
+                    &format!("req_busy_{count}"),
+                    "system.status",
+                    serde_json::json!({}),
+                );
+                writer_count.store(count, Ordering::Release);
+                thread::sleep(Duration::from_millis(5));
+            }
+            writer_active.store(false, Ordering::Release);
+            stdin
+        });
+        let mut responses = 0;
+        let mut progressed_while_busy = false;
+        let drain_started = Instant::now();
+        while sending.load(Ordering::Acquire) || responses < sent.load(Ordering::Acquire) {
+            let envelope = match envelopes.recv_timeout(Duration::from_millis(50)) {
+                Ok(envelope) => envelope,
+                Err(mpsc::RecvTimeoutError::Timeout)
+                    if drain_started.elapsed() < Duration::from_secs(5) =>
+                {
+                    continue
+                }
+                error => panic!("busy request drain failed: {error:?}"),
+            };
+            match envelope {
+                EnvelopeV1::Response(response) => {
+                    assert!(response.ok && response.request_id.starts_with("req_busy_"));
+                    responses += 1;
+                }
+                event @ EnvelopeV1::Event(_) => {
+                    progressed_while_busy |= sending.load(Ordering::Acquire);
+                    buffered.push_back(event);
+                }
+                _ => panic!("unexpected request on stdout"),
+            }
+        }
+        stdin = writer.join().unwrap();
+        assert!(responses > 10);
+        assert!(
+            progressed_while_busy,
+            "runtime must progress without an idle input interval"
+        );
+    }
+    let mut receive_run = || {
+        buffered
+            .pop_front()
+            .unwrap_or_else(|| receive_envelope(&envelopes))
+    };
+    let EnvelopeV1::Event(running) = receive_run() else {
         panic!("running state event")
     };
     assert_eq!(running.event, "agent.runStateChanged");
@@ -514,7 +588,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
 
     let mut public_events = Vec::new();
     for expected_seq in 2..=4 {
-        let EnvelopeV1::Event(event) = receive_envelope(&envelopes) else {
+        let EnvelopeV1::Event(event) = receive_run() else {
             panic!("public event")
         };
         assert_eq!(event.event, "agent.publicEvent");
@@ -547,7 +621,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
             .collect::<Vec<_>>(),
         ["status", "question", "final"]
     );
-    let EnvelopeV1::Event(terminal) = receive_envelope(&envelopes) else {
+    let EnvelopeV1::Event(terminal) = receive_run() else {
         panic!("terminal state event")
     };
     assert_eq!(terminal.event, "agent.runStateChanged");

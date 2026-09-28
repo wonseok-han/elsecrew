@@ -65,7 +65,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub use project::{
@@ -333,6 +333,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             }
         }
     });
+    let mut last_runtime_poll = Instant::now();
     loop {
         let line = match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(InputMessage::Line(line)) => line,
@@ -351,6 +352,7 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 let mut events = sidecar.poll_watch_events();
                 events.extend(sidecar.poll_runtime_events()?);
                 write_events(&mut session, &mut output, events)?;
+                last_runtime_poll = Instant::now();
                 sidecar.maintenance_tick()?;
                 continue;
             }
@@ -378,6 +380,14 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
         session.observe(&response).map_err(protocol_error)?;
         write_envelope(&mut output, &response)?;
         write_events(&mut session, &mut output, handled.events)?;
+        // A busy renderer must not starve agent/watch progression by keeping
+        // recv_timeout from expiring. Preserve response-before-event ordering.
+        if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= Duration::from_millis(100) {
+            let mut events = sidecar.poll_watch_events();
+            events.extend(sidecar.poll_runtime_events()?);
+            write_events(&mut session, &mut output, events)?;
+            last_runtime_poll = Instant::now();
+        }
         sidecar.maintenance_tick()?;
     }
 }

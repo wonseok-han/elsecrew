@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (연속 요청 중 실행 진행 starvation 수정)
+
+- **기준/발견**: 직전 owner 파동 `8198a6e`는 커밋된 진전이다. runtime 통합 경로를 조사하니 stdio가 recv_timeout 100ms 만료 때만 runtime/watch를 poll해 연속 UI 요청이 실행 진행을 막았다. 실제 fixture sidecar에 5ms마다 system.status를 1초 전송한 신규 회귀가 수정 전 실패해 재현했다.
+- **수정/범위**: 메인이 응답/직접 이벤트를 보낸 뒤 경과 시간이 100ms 이상이면 runtime/watch를 진행하도록 수정했다. 응답 선행 순서와 idle poll을 유지하고 safeToQuit 이후에는 새 요청 경로 poll을 하지 않는다. 실제 공급자·계정·모델을 호출하지 않은 stdio 통합 수정이며 전체 stdio 회귀/clippy·독립 검토를 진행한다.
+- **통합 계약 발견**: 현재 run.cancelAgent의 Rust/TS 결과는 canceled 또는 recoveryRequired와 종료 증거를 요구한다. 새 owner의 취소 접수 flag를 이 완료 응답으로 포장하면 안 된다. native 통합 시 기존 결과 계약을 유지하는 지연 응답/진행 경로 또는 별도 명시적 계약이 필요하다. 이번 수정은 그 응답 의미를 바꾸지 않는다.
+- **승인/다음**: 실제 CLI의 새 임시 HOME/작업 폴더·네트워크 차단 initialize/config/read 검증 승인은 여전히 미수신이라 다시 질문했다. 기존 인증/사용자 프로젝트·계정/모델 조회·thread/turn·유료 호출을 포함하지 않는다. native 활성화 전에 실제 호환성을 확인해야 한다. 제품 owner 등록/승인 IPC·비차단 cleanup은 미완료이며 main 병합/push 없음.
+- **마감**: 테스트 writer 종료 직전의 빈 drain 대기 race는 bounded 수신 loop로 수정했다. 최종 stdio 통합 12 PASS/2.77초, strict sidecar clippy PASS/2.40초, scoped fmt·diff PASS. 독립 검토자 1명이 응답/이벤트 순서·quit·진행 공정성을 검토해 PASS했다. 관련 4파일을 커밋한다. 앱 전체는 미완료다.
+
 ### 2026-09-28 · by GPT-6 Astra (장기 실행 owner와 정확한 취소 대상)
 
 - **진전/기준**: 직전 단계 실행 파동 `c1a56ce`는 커밋된 진전이다. clean checkout에서 메인이 OwnedTextRun에 준비된 예약·프로세스/프로필·단계 상태·취소 표식을 함께 보관하도록 연결했다. Storage borrow 없이 요청 사이 보관하며 같은 advance/terminal 경로를 재사용한다. 객체 생성이 실행 입장이나 공급자 활성화 권한을 만들지 않는다.
