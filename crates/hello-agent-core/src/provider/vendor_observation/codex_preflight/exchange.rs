@@ -1,10 +1,7 @@
 //! One connection's ordered preflight observations. No launch authority or prompt API.
 //! The process owner must separately enforce profile isolation, deadlines and cleanup.
 
-use super::{
-    match_model_catalog, match_read_only_config, match_read_only_thread, validate_profile,
-    ExpectedProfile,
-};
+use super::{match_model_catalog, match_read_only_thread, validate_profile, ExpectedProfile};
 use crate::provider::vendor_observation::codex_rpc::{ModelFreeExchange, ObservationKind};
 use crate::provider::{BoundedObservation, ProviderError};
 use serde::Deserialize;
@@ -59,7 +56,7 @@ impl PreflightExchange {
             return Err(invalid());
         }
         Ok(Self {
-            rpc: ModelFreeExchange::default(),
+            rpc: ModelFreeExchange::with_config_layers(),
             model: profile.model.into(),
             effort: profile.reasoning_effort.into(),
             expected_home: expected_home.into(),
@@ -262,7 +259,9 @@ impl PreflightExchange {
                     return Err(invalid());
                 }
             }
-            ObservationKind::Config => match_read_only_config(&observation, &profile)?,
+            ObservationKind::Config => {
+                super::layers::match_layers(&observation, &profile, &self.expected_home)?
+            }
             ObservationKind::Account => {
                 // This product uses its own ChatGPT login, not arbitrary API keys or tokens.
                 #[derive(Deserialize)]
@@ -307,12 +306,20 @@ mod tests {
         .unwrap()
     }
     fn results() -> Vec<Value> {
-        vec![
+        let mut values = vec![
             json!({"userAgent":"test","codexHome":"/app/profile","platformFamily":"unix","platformOs":"macos"}),
             json!({"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only"}}),
             json!({"account":{"type":"chatgpt","email":"PRIVATE"},"requiresOpenaiAuth":true}),
             json!({"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}),
-        ]
+        ];
+        values[1]["config"]["features"] = json!({"hooks":false});
+        let config = values[1]["config"].clone();
+        values[1]["layers"] = json!([
+            {"name":{"type":"sessionFlags"},"config":config},
+            {"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},
+            {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
+        ]);
+        values
     }
     fn reply(index: usize, result: &Value) -> BoundedObservation {
         BoundedObservation::new(serde_json::to_vec(&json!({"id":index+1,"result":result})).unwrap())
@@ -324,6 +331,9 @@ mod tests {
         let mut exchange = exchange();
         for (index, result) in results().iter().enumerate() {
             let request = exchange.next_request().unwrap().unwrap();
+            if index == 1 {
+                assert!(request.contains("\"includeLayers\":true"));
+            }
             assert!(
                 !request.contains("turn/")
                     && !request.contains("thread/")
@@ -344,6 +354,8 @@ mod tests {
             (0, "codexHome", json!("/other")),
             (0, "platformOs", json!("windows")),
             (1, "config", json!({})),
+            (1, "layers", Value::Null),
+            (1, "layers", json!([])),
             (2, "account", Value::Null),
             (2, "account", json!({"type":"apiKey"})),
             (3, "nextCursor", json!("more")),

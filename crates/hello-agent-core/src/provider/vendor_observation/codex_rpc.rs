@@ -19,6 +19,7 @@ pub struct ModelFreeExchange {
     next: usize,
     pending: bool,
     failed: bool,
+    include_config_layers: bool,
 }
 
 fn error() -> ProviderError {
@@ -26,18 +27,27 @@ fn error() -> ProviderError {
 }
 
 impl ModelFreeExchange {
+    pub fn with_config_layers() -> Self {
+        Self {
+            include_config_layers: true,
+            ..Self::default()
+        }
+    }
     /// Returns JSONL bytes for one known request, or None after the four read-only exchanges.
     /// The second request includes the required initialized notification first.
     pub fn next_request(&mut self) -> Result<Option<String>, ProviderError> {
         if self.failed || self.pending {
             return Err(error());
         }
-        let (method, params) = match self.next {
+        let (method, mut params) = match self.next {
             0 => (
                 "initialize",
                 serde_json::json!({"clientInfo":{"name":"hello_agent","version":"0.1.0"}}),
             ),
-            1 => ("config/read", serde_json::json!({"includeLayers":false})),
+            1 => (
+                "config/read",
+                serde_json::json!({"includeLayers":self.include_config_layers}),
+            ),
             2 => ("account/read", serde_json::json!({"refreshToken":false})),
             3 => (
                 "model/list",
@@ -45,6 +55,15 @@ impl ModelFreeExchange {
             ),
             _ => return Ok(None),
         };
+        if self.next == 0 && self.include_config_layers {
+            // The pinned native CLI emits this unrelated startup notification.
+            // Suppress only this method; unexpected frames still fail closed.
+            params["capabilities"] = serde_json::json!({
+                "experimentalApi": false,
+                "requestAttestation": false,
+                "optOutNotificationMethods": ["remoteControl/status/changed"]
+            });
+        }
         self.pending = true;
         let prefix = if self.next == 1 {
             "{\"method\":\"initialized\",\"params\":{}}\n"
@@ -119,6 +138,39 @@ mod tests {
     use super::*;
     fn input(text: &str) -> BoundedObservation {
         BoundedObservation::new(text.as_bytes().to_vec()).unwrap()
+    }
+    #[test]
+    fn layered_probe_suppresses_only_unrelated_remote_status() {
+        let request: serde_json::Value = serde_json::from_str(
+            &ModelFreeExchange::with_config_layers()
+                .next_request()
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            request["params"]["capabilities"],
+            serde_json::json!({
+                "experimentalApi":false,"requestAttestation":false,
+                "optOutNotificationMethods":["remoteControl/status/changed"]
+            })
+        );
+        let original: serde_json::Value = serde_json::from_str(
+            &ModelFreeExchange::default()
+                .next_request()
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(original["params"].get("capabilities").is_none());
+        let mut exchange = ModelFreeExchange::with_config_layers();
+        exchange.next_request().unwrap();
+        assert!(exchange
+            .accept(&input(
+                r#"{"method":"remoteControl/status/changed","params":{}}"#
+            ))
+            .is_err());
+        assert!(exchange.next_request().is_err());
     }
     #[test]
     fn request_order_never_creates_a_thread_or_sends_a_prompt() {

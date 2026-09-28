@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 
 pub mod exchange;
+mod layers;
 
 /// An explicit requested tuple; never filled from vendor defaults or upgrade suggestions.
 pub struct ExpectedProfile<'a> {

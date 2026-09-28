@@ -1,5 +1,37 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (승인된 무모델 대화 생성·출처 검토)
+
+- **승인/범위**: 사용자가 임시 환경의 실제 thread 생성/종료 시험과 읽기 전용 리뷰어 1명을 모두 승인했다. HEAD `2a789e3`의 미커밋 출처/훅 검증을 이어 직접 시험하고 독립 검토를 진행했다. OpenAI Docs의 app-server·hooks와 pinned 생성 schema를 대조했으며 Karpathy 지침으로 기존 엄격 파서를 유지한다.
+- **실측**: CLI/helper SHA `3e11ccc7…`/`4c398936…`를 재확인하고 새 임시 HOME/CODEX_HOME·가짜 프로젝트에서 initialize→config/read→thread/start만 요청했다. 설정/layer·명시적 read-only/네트워크 false·빈 instructionSources·모델/effort/cwd·응답/알림 ID 일치 및 root exit0, auth.json 미생성을 확인했다(`/private/tmp/hello-agent-thread-smoke-JzIThe`). 로그인·계정/model-list·turn/start·유료 호출·사용자 프로젝트 접근 없음.
+- **발견/수정**: 실제 CLI의 remoteControl/status/changed 알림은 엄격 preflight를 실패시킬 수 있다. 내부 layered probe의 initialize에 해당 이름만 optOutNotificationMethods로 지정했다. 알림 무시 범위 확대나 parser 완화 없이 예상 밖 frame은 계속 거절하며 default RPC/로그인은 그대로다. 후속 실제 실행은 thread/started만 받았다.
+- **격리 범위**: 후속 임시 profile에 adjacent hooks.json의 SessionStart/SessionEnd touch와 미신뢰 가짜 프로젝트의 MCP touch 설정을 만들었다. 세 표시 파일 모두 미생성, 동일 thread 관측과 정상 root 종료를 확인했다(`/private/tmp/hello-agent-thread-smoke-oaxGXs`, 스크립트 `/private/tmp/hello-agent-thread-smoke.mjs`). 신뢰 hook 양성 대조·managed/plugin·신뢰된 프로젝트 설정·모든 자손 회수의 증명은 아니며 별도 JS 실측을 Rust full preflight/제품 실행 PASS로 확대하지 않는다.
+- **검증/다음**: core Codex 관련 52 PASS. 독립 리뷰 및 최종 sidecar/clippy/fmt/diff 결과를 마감에 기록한다. 제품 비활성을 유지하고 snapshot 설정 입장 조건·실제 turn/출력/원장 연결을 후속으로 남긴다. main 병합·push 없음.
+- **마감**: 동일 리뷰어가 exact opt-out 수정 뒤 차단 결함 없음을 확인했다. 메인 sidecar 집중 4 PASS·strict clippy·scoped fmt·diff PASS, 리뷰어도 preflight core 13/sidecar 4 및 정적 검사를 독립 통과했다. 출처 검증·훅 override·알림 협상·회귀·현행 문서/기록을 기능 커밋한다. 전체 앱 완료나 signed-in full preflight PASS를 주장하지 않는다.
+
+### 2026-09-28 · by GPT-6 Astra (대화 생성 시험 승인 대기 재확인)
+
+- **분류/상태**: 직전 목표 턴은 승인 범위 정리·요청이며 구현 진전이나 실행 중 시험 대기가 아니었다. 이번 HEAD `2a789e3`·미커밋 출처/훅 검증·diff PASS를 재확인했다. 새 thread/start 격리 시험 및 리뷰어 승인 미수신은 동일 조건으로 두 번째 이어졌다.
+- **보존/다음**: 기존 config-only 승인을 확대하지 않고 코드·기록을 보존한다. 완료된 가짜 회귀 반복으로 격리 실측을 대체하지 않는다. 빈 임시 환경의 모델 입력 없는 대화 생성/종료·가짜 hook/외부 도구 시험과 읽기 전용 리뷰어 1명 승인이 필요하다. CLI 실행 확대·위임·커밋·main 병합·push 없음. 전체 목표는 미완료다.
+
+### 2026-09-28 · by GPT-6 Astra (대화 생성 격리 시험 승인 범위)
+
+- **분류/재확인**: 직전은 훅 비활성 구현과 config-only 실측으로 진전했다. 현재 HEAD `2a789e3`, 미커밋 출처/훅 검증 변경과 diff PASS를 재확인했다. 다음 thread/start 및 통제된 hook/MCP 시험은 기존 config-only 승인에서 명시적으로 제외된 범위이므로 자동 계속 메시지로 확대하지 않는다.
+- **요청 범위**: 새 빈 임시 profile/가짜 프로젝트에서 고정 CLI의 대화 생성·종료까지 모델 입력 없이 시험한다. 필요 시 앱이 만든 임시 표시 파일만 쓰는 가짜 hook/외부 도구로 실행 억제 여부를 확인한다. 사용자 프로젝트·기존 인증·관리 설정은 변경하지 않으며 로그인·turn/start·유료 모델 호출은 제외한다. 현재 출처/훅 검증 및 이 시험 결과를 읽기 전용 리뷰어 1명이 함께 검토하도록 승인 요청한다.
+- **다음/보존**: 승인 대기 첫 턴이다. 불필요한 동일 테스트 반복이나 사후 조회를 실제 실행 격리 증명으로 대체하지 않는다. 코드/문서는 미커밋·제품 비활성으로 보존한다. 실제 CLI 시험 확대·새 위임·커밋·main 병합·push 없음. 전체 목표는 미완료다.
+
+### 2026-09-28 · by GPT-6 Astra (훅 비활성 요청·유효 설정 대조)
+
+- **진전/구현**: 직전은 includeLayers 설정 출처 검증을 실제 흐름에 연결한 진전이다. OpenAI Docs [Hooks](https://learn.chatgpt.com/docs/hooks)의 canonical features.hooks=false와 관리 정책의 강제 가능성을 확인했다. 내부 launcher에 해당 호출별 override를 추가하고 layer 및 effective config 모두 hooks=false를 요구한다. 누락/true/관리 layer는 거절하며 관리 정책을 덮어써 실행하는 fallback은 없다. 기존 미커밋 출처 검증과 함께 보존한다.
+- **검증**: core preflight 13 PASS(출처·훅 12사례 포함), sidecar 4 PASS. 앞서 승인된 빈 환경 config-only 시험에서 기존 설정·layer 일치와 hooksDisabled=true, root exit0을 확인했다(`/private/tmp/hello-agent-config-smoke-QeYqrJ`). 원문 설정 비저장, account/model/thread/turn 미호출을 유지했다. Karpathy 지침으로 기존 pipeline에 설정 한 개와 실패 조건을 추가했다.
+- **남음**: 이는 설정 적용 관측이며 실제 SessionStart/SessionEnd hook 억제 및 MCP/plugin 미실행 증거가 아니다. 해당 통합 경계와 후속 turn/출력 연결·독립 검토 전에는 제품을 활성화하지 않는다. 새 위임·커밋·main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (설정 출처 검증 연결)
+
+- **진전/구현**: 직전 `2a789e3` 회귀 마감 뒤 clean checkout에서 full preflight의 config/read를 includeLayers:true로 바꾸고 strict source 비교를 연결했다. 호출별 모델/정책 5개, 정확한 앱 profile config의 file 인증 저장 설정, 빈 /etc/codex/config.toml layer를 각각 한 번 요구한다. 프로젝트·관리 layer/내용 있는 시스템 설정·다른 사용자 경로·중복/누락/disabled layer·예상 밖 flag는 거절하고 계정/모델 조회로 진행하지 않는다. 일반 ModelFreeExchange 기본값과 로그인은 그대로다.
+- **검증/실측**: core preflight 13 PASS(출처 9사례와 실패 후 진행 차단 포함), sidecar 집중 4 PASS, strict sidecar clippy·fmt·diff PASS. 앞서 승인된 동일 config-only 실측을 새 빈 profile에서 수행해 출처 비교 조건의 boolean 일치와 root exit 0을 확인했다(`/private/tmp/hello-agent-config-smoke-UUOWiM`). 원문 설정은 저장하지 않았고 account/model/thread/turn 요청도 없다. Rust 파서 합성 회귀와 별도 JS 실측 조건 비교를 구분한다.
+- **경계/다음**: Karpathy 지침으로 기존 순서/종료 계약을 유지했다. 출처 관측은 startup hook/MCP 무실행 증명이 아니고 관리 설정 무시/제품 활성화도 아니다. 이 새 검증 경계는 미커밋으로 보존하고 startup 격리·실제 실행 연결 파동의 독립 검토에 포함한다. main 병합·push·추가 위임 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 직전 경합 회귀 마감)
 
 - **진전/직접 구현**: 직전 `c9b6c9e`는 승인 실측과 독립 검토를 마친 진전이다. 이번 clean HEAD에서 리뷰의 비차단 후속인 gate 대기 중 CLI 변경/helper 변경/예약 후 취소 3사례를 추가했다. thread-local cfg(test) hook으로 release 직전만 주입하며 제품 빌드에는 hook이 없다. 각 사례에서 payload 미실행, 원 owner/잠금 유지, 명시적 cleanup 후 root 소멸·재예약을 검증했다.
@@ -170,7 +202,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **Codex 격리 미입증 조건(2026-09-28)**: HOME/CODEX_HOME 분리와 CLI 모델/권한 override는 시스템/회사 관리 layer 및 전역 hook 배제 증명이 아니다. config/read는 startup 부작용 이후의 관측이며 현재 includeLayers=false다. 제품 활성화 전 실측·격리 검토가 필요하고 관리 정책을 임의 우회하지 않는다. 승인 요청 범위는 제안서 §6.7의 2026-09-28 항목을 따른다.
+- **Codex 격리 미입증 조건(2026-09-28)**: HOME/CODEX_HOME 분리와 CLI 모델/권한 override는 시스템/회사 관리 layer 및 전역 hook 배제 증명이 아니다. 내부 full preflight는 includeLayers=true로 정확한 flags/user/빈 system 출처와 hooks=false를 대조한다(default RPC는 false 유지). 조회는 startup 부작용 이후의 관측이다. 빈 임시 환경의 무모델 thread 실측과 미신뢰 hook/MCP 표시 미생성은 통과했지만 신뢰/관리/plugin 및 프로젝트 입장 격리는 별도 남는다. 관리 정책을 우회하지 않는다. remoteControl/status/changed는 exact opt-out으로 억제하고 예상 밖 수신 frame은 계속 거절한다.
 
 - **최신 로그인 복원(2026-09-28)**: Codex 0.158.0-alpha.2.1의 signed nested native CLI와 helper exact pair를 직접 실행해 Claude 2.1.275와 함께 실제 앱 재시작 복원을 확인했다. `codex-cli/bin/codex`는 shell wrapper이므로 native 신뢰 판정과 혼동하지 않는다. 아래 과거 항목의 Claude 복원 대기는 해소됐다. 실제 모델 실행/출력은 여전히 별도다.
 

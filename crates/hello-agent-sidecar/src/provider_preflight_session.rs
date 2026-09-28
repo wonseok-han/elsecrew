@@ -106,6 +106,8 @@ fn discovery_command(
         "approval_policy=\"on-request\"",
         "-c",
         "sandbox_mode=\"read-only\"",
+        "-c",
+        "features.hooks=false",
     ]
     .into_iter()
     .map(std::ffi::OsStr::new)
@@ -295,7 +297,7 @@ IFS= read -r request
 printf '{"id":1,"result":{"userAgent":"toy","codexHome":"%s","platformFamily":"unix","platformOs":"macos"}}\n' "$HOME"
 IFS= read -r request
 IFS= read -r request
-printf '%s\n' '{"id":2,"result":{"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only"}}}'
+printf '{"id":2,"result":{"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}},"layers":[{"name":{"type":"sessionFlags"},"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}}},{"name":{"type":"user","file":"%s/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]}}\n' "$HOME"
 IFS= read -r request
 printf '%s\n' '{"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
 IFS= read -r request
@@ -393,7 +395,9 @@ IFS= read -r hold
                 "-c",
                 "approval_policy=\"on-request\"",
                 "-c",
-                "sandbox_mode=\"read-only\""
+                "sandbox_mode=\"read-only\"",
+                "-c",
+                "features.hooks=false"
             ]
         );
         assert_eq!(
@@ -463,7 +467,17 @@ IFS= read -r hold
                 json!({"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}),
                 json!({"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}),
                 json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":if case == "wrong-thread" {"/wrong"} else {"/managed/snapshot"},"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"}}),
-            ].map(|value| value.to_string());
+            ].map(|mut value| {
+                if value["id"]==2 {
+                    value["result"]["config"]["features"]=json!({"hooks":false});
+                    value["result"]["layers"]=json!([
+                        {"name":{"type":"sessionFlags"},"config":value["result"]["config"]},
+                        {"name":{"type":"user","file":home.join("config.toml")},"config":{"cli_auth_credentials_store":"file"}},
+                        {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
+                    ]);
+                }
+                value.to_string()
+            });
             let script = r#"
 IFS= read -r line; case "$line" in *'"method":"initialize"'*) ;; *) exit 2;; esac
 printf '%s\n' "$1"
