@@ -161,6 +161,41 @@ impl RunReservation {
         hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
         SidecarError,
     > {
+        self.run_candidate_with_handler(
+            storage,
+            projects,
+            process,
+            cancel,
+            &mut |storage, action| match action {
+                crate::provider_preflight_session::TextAction::Public(event) => {
+                    on_public(storage, event)
+                }
+                _ => Err(SidecarError::new(
+                    "agentInteractionUnavailable",
+                    "tool or approval handler is unavailable",
+                )),
+            },
+        )
+    }
+
+    /// Trusted owner only; caller must enforce admission and bind real user choices.
+    /// The reservation retains input, process, public-ledger and terminal authority.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn run_candidate_with_handler(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+        SidecarError,
+    > {
+        use crate::provider_preflight_session::TextAction;
         use hello_agent_core::provider::vendor_observation::codex_events::{
             stream::TurnOutcome, Projection, PublicKind,
         };
@@ -192,13 +227,28 @@ impl RunReservation {
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
         let mut pending_answer = None;
         process.retain_fence_until_terminal()?;
-        let outcome = crate::provider_preflight_session::run_text_and_close(
+        let outcome = crate::provider_preflight_session::run_text_with_handler_and_close(
             process,
             flow,
             cancel,
             &mut workspace,
             text,
-            &mut |storage, event| {
+            &mut |storage, process, action| {
+                let event = match action {
+                    TextAction::ObserveProcess => {
+                        self.observe_process(storage, process)?;
+                        return self
+                            .validate_text_input(storage, projects)
+                            .map_err(|_| failure());
+                    }
+                    TextAction::VerifyWorkspace => return Err(failure()),
+                    TextAction::Public(event) => event,
+                    action => {
+                        self.validate_text_input(storage, projects)
+                            .map_err(|_| failure())?;
+                        return on_action(storage, action);
+                    }
+                };
                 // Completed text replaces deltas; never append the same answer twice.
                 if let Projection::Completed { kind, text, .. } = &event {
                     match kind {
@@ -211,12 +261,7 @@ impl RunReservation {
                         PublicKind::Plan => self.persist_text(storage, "status", text.clone())?,
                     }
                 }
-                on_public(storage, event)
-            },
-            &mut |storage, process| {
-                self.observe_process(storage, process)?;
-                self.validate_text_input(storage, projects)
-                    .map_err(|_| failure())
+                on_action(storage, TextAction::Public(event))
             },
         );
         // The transport has returned only after observed cleanup. An interrupted

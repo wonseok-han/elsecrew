@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (예약 실행과 상호작용 handler 연결)
+
+- **진전/기준**: 직전 전송 파동은 `dfe7ceb`로 커밋됐다. clean checkout에서 메인이 RunReservation의 기존 입력/권한·공개 원장·terminal 흐름을 재사용하는 내부 handler 진입점을 연결했다. process 관측과 workspace checkpoint는 예약 owner가 처리하며 도구/승인 callback에 위임하지 않는다. 도구·승인 callback 전 입력/역할을 검증하고 응답 직전 기존 관측 checkpoint에서 다시 검증한다.
+- **경계/검증 중**: 기본 readOnly/text 진입점은 여전히 상호작용을 거절한다. 가짜 pipe의 예약 run에서 tool→decline→공개 답변→terminal 흐름 및 callback 중 저장된 역할 변경 시 응답을 보내지 않는 회귀를 추가했다. 실제 사용자 UI/승인 wire·영속 승인 상태는 아직 없으며 native 입장/실제 공급자/계정·유료 실행을 하지 않았다. 관련 검사·독립 검토 뒤 커밋한다. main 병합/push 없음.
+- **최신 검사**: 기존25+신규2 사례 통합 PASS/53.77초. 공개 최종 원장 assertion을 보강한 신규2사례는 별도 test로 분리해 PASS/7.04초이며 반복 시 기존25를 재실행하지 않아도 된다. strict sidecar all-targets clippy·scoped fmt·diff PASS. 고정4파일을 동일 독립 검토자1명이 검토 중이다.
+- **마감**: 독립 정적 검토 PASS. 예약 권위·callback 전/응답 전 역할 검증·기본 wrapper의 거절 경계를 확인했다. 관련4파일을 커밋한다. 다음은 사용자 승인 상태/결정을 공개 IPC와 UI에 결속하는 작업이며 실제 제품 실행 활성화·앱 완료가 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (승인 대기와 응답 전송 후보)
 
 - **진전/기준**: 직전 이벤트 분류는 `a55c38a`로 커밋됐다. clean 통합 checkout에서 메인이 기존 LoginIo/Process에 typed ApprovalReply 전송과 claim 전용 비차단 poll을 연결했다. 같은 TurnStream에서 살아 있는 미응답 요청만 owner handler에 질의하며 None은 계속 대기한다. 서버의 해제/완료 알림을 먼저 읽고 취소·관측·동일 workspace 검증 뒤 단회 응답을 보낸다. 기존 accept 차단은 유지한다.

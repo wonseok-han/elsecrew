@@ -453,16 +453,21 @@ fn actual_run_preparation_rejects_foreign_input_and_stale_evidence_without_write
 
 #[test]
 fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
-    text_candidate_cases(false);
+    text_candidate_cases(false, false);
+}
+
+#[test]
+fn reserved_interactions_preserve_ledger_and_reject_role_changes() {
+    text_candidate_cases(false, true);
 }
 
 #[test]
 #[ignore = "macOS outer sandbox required; temporary toy CLI only, no account or network"]
 fn text_candidate_os_isolated_native_lifecycle() {
-    text_candidate_cases(true);
+    text_candidate_cases(true, false);
 }
 
-fn text_candidate_cases(offline_native: bool) {
+fn text_candidate_cases(offline_native: bool, interactions: bool) {
     use crate::provider_login_process::LoginProcess;
     use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
     use crate::provider_profile::CodexProfileBinding;
@@ -478,6 +483,8 @@ fn text_candidate_cases(offline_native: bool) {
         "idle-success",
         "idle-observer",
         "bound",
+        "bound-handler",
+        "bound-handler-role",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -503,6 +510,9 @@ fn text_candidate_cases(offline_native: bool) {
         if matches!(failure, "bound-native" | "bound-native-write") != offline_native {
             continue;
         }
+        if failure.starts_with("bound-handler") != interactions {
+            continue;
+        }
         let writer = matches!(
             failure,
             "bound-native-write" | "bound-writer-cleanup" | "bound-writer-terminal"
@@ -518,6 +528,7 @@ fn text_candidate_cases(offline_native: bool) {
             "none"
                 | "idle-success"
                 | "bound"
+                | "bound-handler"
                 | "bound-native"
                 | "bound-native-write"
                 | "bound-interrupted"
@@ -637,6 +648,24 @@ fn text_candidate_cases(offline_native: bool) {
             expanded.push('\n');
             expanded.push_str(finished);
             replies[5] = expanded;
+        }
+        let handler = failure.starts_with("bound-handler");
+        if handler {
+            let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
+            let tool = json!({"type":"commandExecution","id":"c1","command":"echo test","cwd":snapshot["worktreePath"],"status":"inProgress"});
+            replies[5] = format!(
+                "{}\n{}\n{}\n{}",
+                lines[0],
+                lines[1],
+                json!({"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":tool}}),
+                json!({"id":40,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-test","turnId":"t1","itemId":"c1","startedAtMs":1,"kind":"command"}})
+            );
+            let mut completed = tool;
+            completed["status"] = json!("declined");
+            replies.push(format!("{}\n{}\n{}",
+                json!({"method":"serverRequest/resolved","params":{"threadId":"thread-test","requestId":40}}),
+                json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":completed}}),
+                lines[2..].join("\n")));
         }
         let flow = PreflightExchange::new(
             &ExpectedProfile {
@@ -935,7 +964,29 @@ fn text_candidate_cases(offline_native: bool) {
             Ok(())
         };
         let result = if let Some(reservation) = &reservation {
-            if writer || failure == "bound-write-mismatch" {
+            if handler {
+                reservation.run_candidate_with_handler(
+                    &mut fixture.storage, &mut fixture.projects, &mut process,
+                    &AtomicBool::new(false), &mut |storage, action| {
+                        use crate::provider_preflight_session::TextAction;
+                        match action {
+                            TextAction::Public(event) => sink(storage, event),
+                            TextAction::Tool(tool) => { assert_eq!(tool.item_id, "c1"); Ok(()) },
+                            TextAction::PollApproval { request, decision } => {
+                                assert_eq!(request.item_id, "c1");
+                                if failure == "bound-handler-role" {
+                                    let mut chat = storage.projection_record("chat", &address.chat_id)?.unwrap();
+                                    chat["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
+                                    storage.upsert_projection_record("chat", &address.chat_id, "op_approval_role_changed", None, chat)?;
+                                }
+                                *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
+                                Ok(())
+                            }
+                            _ => panic!("owner checkpoint escaped reservation"),
+                        }
+                    },
+                )
+            } else if writer || failure == "bound-write-mismatch" {
                 reservation.run_text_candidate(
                     &mut fixture.storage,
                     &mut fixture.projects,
@@ -1035,13 +1086,35 @@ fn text_candidate_cases(offline_native: bool) {
             assert!(!requests.contains("thread/start"));
             assert!(!requests.contains("turn/start"));
         }
+        if handler {
+            let requests: Vec<Value> = fs::read_to_string(&captured)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let replies: Vec<_> = requests
+                .iter()
+                .filter(|value| value.get("result").is_some())
+                .collect();
+            if failure == "bound-handler" {
+                assert_eq!(
+                    replies,
+                    vec![&json!({"id":40,"result":{"decision":"decline"}})]
+                );
+            } else {
+                assert!(replies.is_empty());
+            }
+        }
         if failure == "idle-observer" {
             assert!(!responded.exists());
         }
         if success && reservation.is_none() {
             assert!(observations.get() > 10);
         }
-        if matches!(failure, "bound" | "bound-native" | "bound-native-write") {
+        if matches!(
+            failure,
+            "bound" | "bound-handler" | "bound-native" | "bound-native-write"
+        ) {
             let requests: Vec<Value> = fs::read_to_string(&captured)
                 .unwrap()
                 .lines()
@@ -1170,6 +1243,8 @@ fn text_candidate_cases(offline_native: bool) {
                 | "bound-native"
                 | "bound-native-write"
                 | "bound-write-mismatch"
+                | "bound-handler"
+                | "bound-handler-role"
                 | "bound-multiple"
                 | "bound-persist"
                 | "bound-sink"
@@ -1182,8 +1257,8 @@ fn text_candidate_cases(offline_native: bool) {
             assert_eq!(
                 run["state"],
                 match failure {
-                    "bound" | "bound-native" | "bound-native-write" | "bound-multiple" =>
-                        "succeeded",
+                    "bound" | "bound-handler" | "bound-native" | "bound-native-write"
+                    | "bound-multiple" => "succeeded",
                     "bound-interrupted" | "bound-cancel" => "canceled",
                     "bound-cleanup" => "recoveryRequired",
                     _ => "failed",
