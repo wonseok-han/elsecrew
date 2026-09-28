@@ -38,6 +38,7 @@ pub struct PreflightExchange {
     started: bool,
     thread_cwd: Option<std::path::PathBuf>,
     thread_id: Option<String>,
+    notified_thread_id: Option<String>,
 }
 
 fn invalid() -> ProviderError {
@@ -66,6 +67,7 @@ impl PreflightExchange {
             started: false,
             thread_cwd: None,
             thread_id: None,
+            notified_thread_id: None,
         })
     }
 
@@ -80,6 +82,7 @@ impl PreflightExchange {
     pub fn invalidate(&mut self) {
         self.state = PreflightState::Failed;
         self.thread_id = None;
+        self.notified_thread_id = None;
     }
 
     /// A finished process cannot lend its observations to a new connection.
@@ -88,6 +91,7 @@ impl PreflightExchange {
             self.state = PreflightState::Closed;
         }
         self.thread_id = None;
+        self.notified_thread_id = None;
     }
 
     pub fn next_request(&mut self) -> Result<Option<String>, ProviderError> {
@@ -161,6 +165,16 @@ impl PreflightExchange {
         result.map_err(|_| invalid())
     }
 
+    fn match_thread_pair(&mut self) -> Result<PreflightState, ProviderError> {
+        if let (Some(reply), Some(note)) = (&self.thread_id, &self.notified_thread_id) {
+            if reply != note {
+                return Err(invalid());
+            }
+            self.state = PreflightState::ThreadMatched;
+        }
+        Ok(self.state)
+    }
+
     fn accept_inner(
         &mut self,
         input: &BoundedObservation,
@@ -180,6 +194,30 @@ impl PreflightExchange {
             struct ResultWire {
                 thread: Thread,
             }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Notification {
+                method: String,
+                params: ResultWire,
+            }
+            if input.json()?.get("method").is_some() {
+                let note: Notification =
+                    serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+                let id = note.params.thread.id;
+                if note.method != "thread/started"
+                    || self.notified_thread_id.is_some()
+                    || id.is_empty()
+                    || id.len() > 128
+                    || id.chars().any(char::is_control)
+                {
+                    return Err(invalid());
+                }
+                self.notified_thread_id = Some(id);
+                return self.match_thread_pair();
+            }
+            if self.thread_id.is_some() {
+                return Err(invalid());
+            }
             let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
             if reply.id != 5 {
                 return Err(invalid());
@@ -196,8 +234,7 @@ impl PreflightExchange {
             let result: ResultWire =
                 serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
             self.thread_id = Some(result.thread.id);
-            self.state = PreflightState::ThreadMatched;
-            return Ok(self.state);
+            return self.match_thread_pair();
         }
         if self.state != PreflightState::Checking {
             return Err(invalid());
@@ -373,7 +410,14 @@ mod tests {
             }
             let accepted = flow.accept(&reply(if mismatch == "id" { 3 } else { 4 }, &result));
             if mismatch == "none" {
-                assert_eq!(accepted.unwrap(), PreflightState::ThreadMatched);
+                assert_eq!(accepted.unwrap(), PreflightState::ThreadStarting);
+                assert_eq!(flow.matched_thread_id(), None);
+                let note = BoundedObservation::new(
+                    br#"{"method":"thread/started","params":{"thread":{"id":"thread-1"}}}"#
+                        .to_vec(),
+                )
+                .unwrap();
+                assert_eq!(flow.accept(&note).unwrap(), PreflightState::ThreadMatched);
                 assert_eq!(flow.matched_thread_id(), Some("thread-1"));
                 flow.invalidate();
                 assert_eq!(flow.matched_thread_id(), None);
@@ -382,6 +426,66 @@ mod tests {
                 assert_eq!(flow.state(), PreflightState::Failed);
                 assert_eq!(flow.matched_thread_id(), None);
                 assert!(flow.next_request().is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn thread_notification_is_bounded_correlated_and_never_authority_alone() {
+        let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+        for case in [
+            "before",
+            "after",
+            "different",
+            "duplicate",
+            "request",
+            "unknown",
+            "empty",
+        ] {
+            let mut flow = exchange();
+            for (index, result) in results().iter().enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, result)).unwrap();
+            }
+            flow.start_read_only_thread(std::path::Path::new("/managed/snapshot"))
+                .unwrap();
+            let mut note = json!({"method":"thread/started","params":{"thread":{"id":"thread-1"}}});
+            match case {
+                "different" => note["params"]["thread"]["id"] = json!("other"),
+                "request" => note["id"] = json!(99),
+                "unknown" => note["method"] = json!("thread/unknown"),
+                "empty" => note["params"]["thread"]["id"] = json!(""),
+                _ => {}
+            }
+            let note = BoundedObservation::new(note.to_string().into_bytes()).unwrap();
+            if matches!(case, "request" | "unknown" | "empty") {
+                assert!(flow.accept(&note).is_err());
+            } else if case == "after" {
+                assert_eq!(
+                    flow.accept(&reply(4, &result)).unwrap(),
+                    PreflightState::ThreadStarting
+                );
+                assert_eq!(flow.matched_thread_id(), None);
+                assert_eq!(flow.accept(&note).unwrap(), PreflightState::ThreadMatched);
+            } else {
+                assert_eq!(flow.accept(&note).unwrap(), PreflightState::ThreadStarting);
+                assert_eq!(flow.matched_thread_id(), None);
+                if case == "duplicate" {
+                    assert!(flow.accept(&note).is_err());
+                } else if case == "different" {
+                    assert!(flow.accept(&reply(4, &result)).is_err());
+                } else {
+                    assert_eq!(
+                        flow.accept(&reply(4, &result)).unwrap(),
+                        PreflightState::ThreadMatched
+                    );
+                }
+            }
+            if matches!(case, "before" | "after") {
+                assert_eq!(flow.matched_thread_id(), Some("thread-1"));
+            } else {
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert_eq!(flow.matched_thread_id(), None);
             }
         }
     }

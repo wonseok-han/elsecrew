@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (thread 생성 알림 결속)
+
+- **마감 검사**: sidecar 실제 가짜 pipe 1테스트/12사례(응답/알림 양순서 포함), strict sidecar clippy·core/sidecar fmt·diff 검사 PASS. 변경 메시지 처리의 자체 검토를 완료하고 기능 커밋한다. 실행/종료 권한 변경이나 제품 활성화는 포함하지 않는다.
+- **직접 진행**: clean `c915175`에서 정상 thread/started 알림도 오류로 거절하던 내부 진단을 확장했다. OpenAI Docs [app-server](https://learn.chatgpt.com/docs/app-server)와 기존 생성 schema의 ThreadStartedNotification을 확인해 응답·알림 양쪽의 동일 thread ID를 요구한다. 앞뒤 순서는 허용하지만 알림 단독·다른 ID·중복·요청 위장·미지원 method는 완료 권위가 아니다. 두 frame만 기존 통신 예산 안에서 읽고 기존 claim/cleanup/잠금 정책은 변경하지 않았다.
+- **운영/검증**: 개발·로컬 검증은 메인이 계속 담당하고 로그인 인증·유료 실행 승인만 필요 시 사용자에게 요청한다. Karpathy 지침으로 기존 파서를 확장했다. core preflight 12 PASS. 제품 launcher/turn/출력 연결과 실제 계정 검증은 아직 별개이며 이번 내부 메시지 처리 수정은 제품 활성화가 아니다. 새 위임·main 병합·push·유료 실행 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 경계 독립 검토 재개)
 
 - **승인/범위**: 사용자가 읽기 전용 리뷰어 1명 호출을 승인해 `71de02e` 기준 미커밋 Rust preflight 5파일(신규 세션 포함)의 독립 검토를 시작했다. 검토 중 Rust 소스를 동결하고 요청 순서·응답 결속·시간 제한·취소·종료/잠금·닫힌 세션 재사용을 확인한다. 이전 승인 대기는 해소됐으며 실제 모델 호출·제품 활성화 승인을 뜻하지 않는다.

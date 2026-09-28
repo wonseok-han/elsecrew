@@ -71,12 +71,16 @@ fn observe_with_budget(
                 let request = flow.start_read_only_thread(cwd).map_err(|_| failure())?;
                 let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
                 process.send_preflight(request, remaining, cancel)?;
-                let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
-                let response = process.receive_preflight(remaining, cancel)?;
-                if started.elapsed() >= budget
-                    || flow.accept(&response).map_err(|_| failure())?
-                        != PreflightState::ThreadMatched
-                {
+                // Exactly one reply and one thread/started, in either order.
+                for _ in 0..2 {
+                    let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
+                    let response = process.receive_preflight(remaining, cancel)?;
+                    if started.elapsed() >= budget {
+                        return Err(failure());
+                    }
+                    flow.accept(&response).map_err(|_| failure())?;
+                }
+                if flow.state() != PreflightState::ThreadMatched {
                     return Err(failure());
                 }
             }
@@ -118,6 +122,7 @@ mod tests {
             "polled-process",
             "claimed-process",
             "thread",
+            "thread-before",
             "wrong-thread",
         ] {
             let temp = tempfile::tempdir().unwrap();
@@ -159,7 +164,13 @@ IFS= read -r line; case "$line" in *'"method":"model/list"'*) ;; *) exit 6;; esa
 printf '%s\n' "$4"
 IFS= read -r line || exit 0
 case "$line" in *'"method":"thread/start"'*) ;; *) exit 7;; esac
-printf '%s\n' "$5"
+if test "$6" = thread-before; then
+  printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
+  printf '%s\n' "$5"
+else
+  printf '%s\n' "$5"
+  printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
+fi
 IFS= read -r hold
 "#;
             process
@@ -167,6 +178,7 @@ IFS= read -r hold
                     Command::new("/bin/sh")
                         .args(["-c", script, "preflight-peer"])
                         .args(&replies)
+                        .arg(case)
                         .env_clear()
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
@@ -206,7 +218,7 @@ IFS= read -r hold
             } else {
                 Duration::from_secs(3)
             };
-            let thread_cwd = if matches!(case, "thread" | "wrong-thread") {
+            let thread_cwd = if matches!(case, "thread" | "thread-before" | "wrong-thread") {
                 Some(std::path::Path::new("/managed/snapshot"))
             } else {
                 None
@@ -214,12 +226,12 @@ IFS= read -r hold
             let result = observe_with_budget(&mut process, &mut flow, &cancel, budget, thread_cwd);
             assert_eq!(
                 result.is_ok(),
-                matches!(case, "success" | "thread"),
+                matches!(case, "success" | "thread" | "thread-before"),
                 "{case}"
             );
             assert_eq!(
                 flow.state(),
-                if matches!(case, "success" | "thread") {
+                if matches!(case, "success" | "thread" | "thread-before") {
                     PreflightState::Closed
                 } else {
                     PreflightState::Failed
