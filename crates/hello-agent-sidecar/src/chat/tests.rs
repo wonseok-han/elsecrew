@@ -539,7 +539,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         let snapshot = fixture.snapshot("req_sink_snapshot");
         let chat = fixture.create_chat(&snapshot, "goal", "req_sink_chat");
         let address = address_from_chat(&chat).unwrap();
-        let reservation = if failure.starts_with("bound") {
+        let mut reservation = if failure.starts_with("bound") {
             // Synthetic admitted evidence only, never a real Codex discovery result.
             let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
             let mut capability: hello_agent_protocol::agent_adapter_v1::AgentCapabilitySnapshotV1 =
@@ -910,8 +910,9 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         let mut writes = 0;
         let observations = std::cell::Cell::new(0);
         let observed_idle_child = std::cell::Cell::new(false);
+        let has_reservation = reservation.is_some();
         let mut sink = |storage: &mut Storage, event| {
-            assert!(reservation.is_some() || observations.get() > 0);
+            assert!(has_reservation || observations.get() > 0);
             if fail_sink {
                 return Err(SidecarError::new(
                     "testSinkFailed",
@@ -967,10 +968,10 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
             )?;
             Ok(())
         };
-        let result = if let Some(reservation) = &reservation {
-            if handler {
+        let result = if let Some(reserved) = reservation.take() {
+            let (result, restored) = if handler {
                 let cancel = AtomicBool::new(false);
-                let mut state = reservation
+                let mut state = reserved
                     .begin_text_candidate(&mut fixture.storage, &fixture.projects, &mut process)
                     .unwrap();
                 // A second dispatcher request must not lend a different process
@@ -988,7 +989,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                     CodexProfileBinding::from_storage(&other_storage).unwrap(),
                 )
                 .unwrap();
-                assert!(reservation
+                assert!(reserved
                     .advance_text_candidate(
                         &mut fixture.storage,
                         &mut fixture.projects,
@@ -1000,6 +1001,31 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                     .is_err());
                 assert!(other.closure_evidence().is_none());
                 other.finish().unwrap();
+                let run = fixture.storage.projection_records("run").unwrap()[0]["record"].clone();
+                let identity = crate::agent_runtime::RunIdentity {
+                    chat_id: address.chat_id.clone(),
+                    task_id: run["taskId"].as_str().unwrap().into(),
+                    project_id: address.project_id.clone(),
+                    worktree_id: address.worktree_id.clone(),
+                    workspace_identity: address.workspace_identity.clone(),
+                    run_id: run["runId"].as_str().unwrap().into(),
+                };
+                let mut owned = crate::agent_runtime::preparation::OwnedTextRun::from_prepared(
+                    reserved, process, state,
+                );
+                // Every address component is required; no unrelated request may cancel.
+                for field in 0..6 {
+                    let mut foreign = identity.clone();
+                    match field {
+                        0 => foreign.chat_id.push_str("-other"),
+                        1 => foreign.task_id.push_str("-other"),
+                        2 => foreign.project_id.push_str("-other"),
+                        3 => foreign.worktree_id.push_str("-other"),
+                        4 => foreign.workspace_identity.push_str("-other"),
+                        _ => foreign.run_id.push_str("-other"),
+                    }
+                    assert!(owned.request_cancel(&foreign).is_err());
+                }
                 let cancel_between_steps = std::cell::Cell::new(false);
                 let mut action = |storage: &mut crate::Storage, action: crate::provider_preflight_session::TextAction<'_>| {
                         use crate::provider_preflight_session::TextAction;
@@ -1020,7 +1046,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                                 *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
                                 Ok(())
                             }
-                            _ => panic!("owner checkpoint escaped reservation"),
+                            _ => panic!("owner checkpoint escaped reserved"),
                         }
                 };
                 let mut steps = 0;
@@ -1033,53 +1059,51 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                         .projection_record("chat", &address.chat_id)
                         .unwrap()
                         .is_some());
-                    match reservation.advance_text_candidate(
-                        &mut fixture.storage,
-                        &mut fixture.projects,
-                        &mut process,
-                        &cancel,
-                        &mut state,
-                        &mut action,
-                    ) {
+                    match owned.advance(&mut fixture.storage, &mut fixture.projects, &mut action) {
                         Ok(Some(outcome)) => break Ok(outcome),
                         Err(error) => break Err(error),
                         Ok(None) => {
                             if cancel_between_steps.get() {
-                                cancel.store(true, std::sync::atomic::Ordering::Release);
+                                owned.request_cancel(&identity).unwrap();
                             }
                             std::thread::sleep(std::time::Duration::from_millis(2));
                         }
                     }
                 };
                 assert!(steps > 10);
-                assert!(reservation
-                    .advance_text_candidate(
+                assert!(owned
+                    .advance(
                         &mut fixture.storage,
                         &mut fixture.projects,
-                        &mut process,
-                        &cancel,
-                        &mut state,
                         &mut |_, _| panic!("terminal replay callback"),
                     )
                     .is_err());
-                outcome
-            } else if writer || failure == "bound-write-mismatch" {
-                reservation.run_text_candidate(
-                    &mut fixture.storage,
-                    &mut fixture.projects,
-                    &mut process,
-                    &AtomicBool::new(false),
-                    &mut sink,
-                )
+                assert!(owned.request_cancel(&identity).is_err());
+                let (restored, returned_process) = owned.into_parts_for_test();
+                process = returned_process;
+                (outcome, restored)
             } else {
-                reservation.run_read_only_text(
-                    &mut fixture.storage,
-                    &mut fixture.projects,
-                    &mut process,
-                    &AtomicBool::new(failure == "bound-cancel"),
-                    &mut sink,
-                )
-            }
+                let outcome = if writer || failure == "bound-write-mismatch" {
+                    reserved.run_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(false),
+                        &mut sink,
+                    )
+                } else {
+                    reserved.run_read_only_text(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(failure == "bound-cancel"),
+                        &mut sink,
+                    )
+                };
+                (outcome, reserved)
+            };
+            reservation = Some(restored);
+            result
         } else {
             let mut workspace =
                 TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).unwrap();

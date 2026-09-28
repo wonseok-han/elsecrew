@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (장기 실행 owner와 정확한 취소 대상)
+
+- **진전/기준**: 직전 단계 실행 파동 `c1a56ce`는 커밋된 진전이다. clean checkout에서 메인이 OwnedTextRun에 준비된 예약·프로세스/프로필·단계 상태·취소 표식을 함께 보관하도록 연결했다. Storage borrow 없이 요청 사이 보관하며 같은 advance/terminal 경로를 재사용한다. 객체 생성이 실행 입장이나 공급자 활성화 권한을 만들지 않는다.
+- **취소 계약/검증**: 기존 RunIdentity의 프로젝트·채팅·task·worktree·workspace·run 6필드가 전부 맞고 원래 process/세션이 live일 때만 취소 표식을 설정한다. 접수는 cleanup 완료가 아니다. 직접 owner 실행 3사례 PASS/12.04초(정상 decline·역할 변경·단계 사이 취소, 각각 6필드 변조 거절과 terminal 재진행/취소 거절). 테스트만 owner를 분해해 기존 terminal/fence 증거를 확인한다.
+- **다음/경계**: strict clippy·fmt·diff와 독립 검토 후 관련 변경을 커밋한다. 제품 active-run 목록/공개 IPC·승인 UI·비차단 cleanup 연결은 아직 남는다. 실제 CLI/계정/모델 시험·main 병합/push 없음.
+- **마감**: strict sidecar clippy PASS/2.50초, scoped fmt·diff PASS. 독립 검토자 1명이 정확한 취소 신원·원래 owner/세션 결속·기존 cleanup/terminal/fence 위임을 검토해 PASS했다. 변경 없는 원장 알고리즘의 직전 25사례 PASS/52.15초는 재사용했다. 관련 4파일을 커밋하며 앱 전체는 미완료다.
+
 ### 2026-09-28 · by GPT-6 Astra (예약 실행 원장의 단계별 진행)
 
 - **진전/기준**: 직전 소유권 파동 `c555250`은 커밋된 진전이다. 메인이 RunReservation의 기존 실행을 begin/advance로 분리해 Storage borrow 없이 상태를 보관하도록 연결했다. 기존 동기 wrapper도 같은 경로를 사용한다. 세션은 run ID와 process 생성 시 발급한 연결 ID에 결속해 다른 owner로 진행/cleanup하거나 terminal을 재처리하지 못한다. 공개 답변 누적·종료 확인→terminal 원자 기록→fence 해제 순서를 유지한다.

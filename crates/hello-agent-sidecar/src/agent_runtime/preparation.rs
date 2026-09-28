@@ -38,6 +38,87 @@ pub(crate) struct RunTextState {
     finished: bool,
 }
 
+/// Long-lived native execution owner. No borrowed Storage or profile remains
+/// across dispatcher requests. Creation does not launch or admit a provider.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct OwnedTextRun {
+    reservation: RunReservation,
+    process: crate::provider_login_process::LoginProcess<'static>,
+    state: RunTextState,
+    cancel: std::sync::atomic::AtomicBool,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl OwnedTextRun {
+    pub(crate) fn from_prepared(
+        reservation: RunReservation,
+        process: crate::provider_login_process::LoginProcess<'static>,
+        state: RunTextState,
+    ) -> Self {
+        Self {
+            reservation,
+            process,
+            state,
+            cancel: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Exact accepted identity only. This queues cancellation; it does not claim
+    /// that cleanup or durable terminal persistence has already completed.
+    pub(crate) fn request_cancel(&self, identity: &RunIdentity) -> Result<(), SidecarError> {
+        let matches = identity_value(identity).as_object().is_some_and(|fields| {
+            fields
+                .iter()
+                .all(|(key, value)| self.reservation.run.get(key) == Some(value))
+        });
+        if !matches
+            || self.state.finished
+            || self.state.run_id != self.reservation.run_id
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "native run identity differs",
+            ));
+        }
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome>,
+        SidecarError,
+    > {
+        self.reservation.advance_text_candidate(
+            storage,
+            projects,
+            &mut self.process,
+            &self.cancel,
+            &mut self.state,
+            on_action,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn into_parts_for_test(
+        self,
+    ) -> (
+        RunReservation,
+        crate::provider_login_process::LoginProcess<'static>,
+    ) {
+        (self.reservation, self.process)
+    }
+}
+
 impl RunReservation {
     /// Offline OS-isolated launch candidate only, with no model networking.
     /// Pins do not supply provider admission. Caller retains failure cleanup.
