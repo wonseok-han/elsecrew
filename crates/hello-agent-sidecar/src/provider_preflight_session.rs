@@ -3,6 +3,7 @@ use crate::{provider_login_process::LoginProcess, SidecarError};
 use hello_agent_core::provider::vendor_observation::codex_preflight::exchange::{
     PreflightExchange, PreflightState,
 };
+use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -84,7 +85,7 @@ pub(crate) fn discovery_command(
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
 ) -> std::io::Result<std::process::Command> {
-    let args = discovery_arguments(home, expected)?;
+    let args = discovery_arguments(home, expected, ExpectedPermission::ReadOnly)?;
     let references: Vec<_> = args.iter().map(std::ffi::OsString::as_os_str).collect();
     let mut command = crate::provider_login_gate::command(executable, &references, home)?;
     discovery_environment(&mut command, home);
@@ -98,15 +99,23 @@ pub(crate) fn offline_discovery_command(
     home: &std::path::Path,
     workspace: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    permission: ExpectedPermission,
 ) -> std::io::Result<std::process::Command> {
-    let args = discovery_arguments(home, expected)?;
+    let args = discovery_arguments(home, expected, permission)?;
     let mut command = crate::provider_runtime_sandbox::command(
         executable,
         helper,
         &args,
         home,
         workspace,
-        crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly,
+        match permission {
+            ExpectedPermission::ReadOnly => {
+                crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly
+            }
+            ExpectedPermission::WorkspaceWrite => {
+                crate::provider_runtime_sandbox::WorkspaceAccess::Write
+            }
+        },
     )?;
     discovery_environment(&mut command, home);
     Ok(command)
@@ -115,16 +124,19 @@ pub(crate) fn offline_discovery_command(
 fn discovery_arguments(
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    permission: ExpectedPermission,
 ) -> std::io::Result<Vec<std::ffi::OsString>> {
-    PreflightExchange::new(
+    PreflightExchange::with_permission(
         expected,
         home.to_str()
             .ok_or_else(|| std::io::Error::other("invalid home"))?,
+        permission,
     )
     .map_err(|_| std::io::Error::other("invalid model profile"))?;
     let model = format!("model=\"{}\"", expected.model);
     let effort = format!("model_reasoning_effort=\"{}\"", expected.reasoning_effort);
-    let args = [
+    let sandbox = format!("sandbox_mode=\"{}\"", permission.sandbox_mode());
+    let mut args: Vec<std::ffi::OsString> = [
         "app-server",
         "--listen",
         "stdio://",
@@ -137,13 +149,23 @@ fn discovery_arguments(
         "-c",
         "approval_policy=\"on-request\"",
         "-c",
-        "sandbox_mode=\"read-only\"",
+        &sandbox,
         "-c",
         "features.hooks=false",
     ]
     .into_iter()
     .map(std::ffi::OsString::from)
     .collect();
+    if permission == ExpectedPermission::WorkspaceWrite {
+        for setting in [
+            "sandbox_workspace_write.writable_roots=[]",
+            "sandbox_workspace_write.network_access=false",
+            "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+            "sandbox_workspace_write.exclude_slash_tmp=true",
+        ] {
+            args.extend(["-c".into(), setting.into()]);
+        }
+    }
     Ok(args)
 }
 
@@ -250,7 +272,7 @@ fn check_claimed(
             if let Some(cwd) = thread_cwd {
                 on_action(process, TextAction::VerifyWorkspace)?;
                 on_action(process, TextAction::ObserveProcess)?;
-                let request = flow.start_read_only_thread(cwd).map_err(|_| failure())?;
+                let request = flow.start_thread(cwd).map_err(|_| failure())?;
                 let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
                 process.send_preflight_observed(request, remaining, cancel, &mut |process| {
                     on_action(process, TextAction::ObserveProcess)

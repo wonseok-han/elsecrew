@@ -26,8 +26,7 @@ const POLICY: &str = r#"(version 1)
 #[derive(Clone, Copy)]
 pub(crate) enum WorkspaceAccess {
     ReadOnly,
-    // Not yet selected by a native run: tools/approvals and vendor admission remain.
-    #[allow(dead_code)]
+    // Native offline candidate only; tools/approvals and vendor admission remain.
     Write,
 }
 

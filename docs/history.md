@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (저장된 역할과 쓰기 실행 연결)
+
+- **진전/범위**: 직전 턴은 이미 반영된 검토자 승인 정책 재확인이며 신규 개발 진전은 없었다. `7d32c08`·clean `m5/coding-agent-ide`에서 메인이 저장된 Codex 역할의 permission을 native argv·오프라인 OS 정책·preflight 설정/스레드 검증에 함께 연결했다. readOnly 전용 진입점은 유지하며 새 내부 role-bound 진입점은 두 권한만 허용한다. 제품 capability·네트워크·실제 도구 실행은 열지 않는다.
+- **발견/수정**: 첫 집중 검사에서 기존 terminal이 readOnly만 허용해 writer mismatch의 종료 기록이 preparing에 남는 것을 확인했다. 기존 writer-lock 함수를 재사용해 run/chat terminal과 잠금 해제/poison 저장을 같은 transaction에 넣었다. terminal 저장 실패는 writer와 profile fence를 유지한다.
+- **검증/다음**: 읽기 전용 회귀·쓰기 모드 불일치·writer 불확실 종료/DB 실패 및 OS 격리 fake writer 통합을 검사한다. 실제 공급자/계정/유료 모델은 실행하지 않으며 config-only 실제 CLI 승인도 아직 미수신이다. 한 명의 독립 검토 뒤 관련 파일만 커밋한다. 도구/승인·실제 공급자 호환성·Claude·제품 UI·출시 게이트는 남는다. main 병합/push 없음.
+- **최신 검사**: text 원장 25사례 PASS/48.46초, OS 격리 native readOnly·workspaceWrite 2사례 PASS/7.53초. writer는 turn 입력 후 실제 임시 snapshot 파일 변경·원본/제어 파일 보호·argv/thread 권한 일치·terminal/DB 재오픈을 확인했다. 초기 synthetic writer가 review 역할을 잘못 사용해 chat 검증이 거절한 테스트 데이터는 coding 역할로 수정했다. preflight 회귀와 strict sidecar clippy·fmt/diff를 이어간다.
+- **검사 종료**: preflight 5 PASS/9.29초, strict sidecar all-targets clippy·scoped rustfmt·diff PASS. 7파일 고정 delta는 상시 승인된 `run_ledger_review` 한 명이 정적 검토 중이며 검사를 중복 실행하지 않는다. 다음 연결점은 기존 core의 tool/approval 상태 머신으로, 현재 sidecar는 `RequiresHandling` 이벤트를 여전히 거절한다.
+- **마감**: 독립 정적 검토 PASS(신규 차단 결함 없음). 저장된 권한의 argv/OS/preflight 일치, readOnly 거절 경계, writer terminal 원자성과 실패 시 잠금 유지가 확인됐다. 관련 7파일을 승인된 M5 작업 단위로 커밋한다. 오프라인 후보의 통합 완료이지 실제 코딩 에이전트나 앱 전체 완료가 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (쓰기 역할 preflight 계약)
 
 - **진전/범위**: 직전 OS 쓰기 정책은 `f3ffdff`로 커밋됐다. clean 통합 checkout에서 메인이 core에 고정 ExpectedPermission과 workspace-write 설정/flag/thread 요청·응답 검증을 추가했다. 추가 쓰기 root 없음·명시 network false·TMPDIR와 /tmp 제외를 요구한다. 기존 readOnly의 유효 설정 호환성과 flag deny-unknown(null 포함)을 보존했고 아직 sidecar native 역할 선택은 변경하지 않았다.
@@ -154,7 +163,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 임시 OS 실측은 통과했지만 native run은 계속 ReadOnly이며 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
+- **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 저장된 역할이 native argv·OS 모드·preflight 기대 권한을 함께 정하며 별도 renderer 인자는 없다. writer terminal은 run/chat/잠금을 원자 기록하고 불확실 종료/저장 실패는 잠금을 유지한다. 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
 
 - **Codex 실행 profile 입장(2026-09-28)**: 기존 snapshot scanner를 runtime HOME 전체에 재사용해 spawn 전·release 직전 중첩 파일의 nlink=1·실제 directory 조건을 확인한다. 로그인 규칙 자체를 강화해 기존 연결을 깨뜨리지 않으며 파일/인증 내용은 변경하지 않는다. OS sandbox와 적대적 동시 교체 보호는 별도다.
 

@@ -479,6 +479,7 @@ fn text_candidate_cases(offline_native: bool) {
         "idle-observer",
         "bound",
         "bound-native",
+        "bound-native-write",
         "bound-native-hardlink",
         "bound-native-profile-hardlink",
         "bound-native-gate-profile",
@@ -487,18 +488,30 @@ fn text_candidate_cases(offline_native: bool) {
         "bound-native-gate-cancel",
         "bound-role",
         "bound-write",
+        "bound-write-mismatch",
         "bound-input",
         "bound-persist",
         "bound-sink",
         "bound-cleanup",
+        "bound-writer-cleanup",
         "bound-interrupted",
         "bound-multiple",
         "bound-terminal",
+        "bound-writer-terminal",
         "bound-cancel",
     ] {
-        if (failure == "bound-native") != offline_native {
+        if matches!(failure, "bound-native" | "bound-native-write") != offline_native {
             continue;
         }
+        let writer = matches!(
+            failure,
+            "bound-native-write" | "bound-writer-cleanup" | "bound-writer-terminal"
+        );
+        let failure = match failure {
+            "bound-writer-cleanup" => "bound-cleanup",
+            "bound-writer-terminal" => "bound-terminal",
+            value => value,
+        };
         let fail_sink = matches!(failure, "sink" | "bound-sink");
         let success = matches!(
             failure,
@@ -506,6 +519,7 @@ fn text_candidate_cases(offline_native: bool) {
                 | "idle-success"
                 | "bound"
                 | "bound-native"
+                | "bound-native-write"
                 | "bound-interrupted"
                 | "bound-multiple"
         );
@@ -532,11 +546,17 @@ fn text_candidate_cases(offline_native: bool) {
                 .projection_record("chat", &address.chat_id)
                 .unwrap()
                 .unwrap();
-            let role = &mut saved["record"]["roleSnapshots"][2];
+            let coding = writer || failure == "bound-write-mismatch";
+            let role = &mut saved["record"]["roleSnapshots"][if coding { 1 } else { 2 }];
             role["runtime"] = json!("codex");
             role["modelSelector"] = json!("test-model");
             role["reasoningEffort"] = json!("medium");
-            if failure == "bound-write" {
+            if writer
+                || matches!(
+                    failure,
+                    "bound-write" | "bound-write-mismatch" | "bound-native-write"
+                )
+            {
                 role["permission"] = json!("workspaceWrite");
             }
             fixture
@@ -545,7 +565,7 @@ fn text_candidate_cases(offline_native: bool) {
                 .unwrap();
             let request = AgentRunStartRequestV1 {
                 chat_id: address.chat_id.clone(),
-                role_id: "review".into(),
+                role_id: if coding { "coding" } else { "review" }.into(),
                 input_message_ids: vec![initial_message_id(&fixture, &address.chat_id)],
                 expected_capability_fingerprint: capability.fingerprint.clone(),
             };
@@ -569,7 +589,13 @@ fn text_candidate_cases(offline_native: bool) {
         };
         let profile = CodexProfileBinding::from_storage(&fixture.storage).unwrap();
         let home = profile.revalidate().unwrap();
-        let settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}});
+        let mut settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}});
+        let mut sandbox = json!({"type":"readOnly","networkAccess":false});
+        if writer {
+            settings["sandbox_mode"] = json!("workspace-write");
+            settings["sandbox_workspace_write"] = json!({"writable_roots":[],"network_access":false,"exclude_tmpdir_env_var":true,"exclude_slash_tmp":true});
+            sandbox = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
+        }
         let messages = [
             json!({"id":1,"result":{"userAgent":"test","codexHome":home,"platformFamily":"unix","platformOs":"macos"}}),
             json!({"id":2,"result":{"config":settings,"layers":[
@@ -579,7 +605,7 @@ fn text_candidate_cases(offline_native: bool) {
             ]}}),
             json!({"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}),
             json!({"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}),
-            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"}}),
+            json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":snapshot["worktreePath"],"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":sandbox,"reasoningEffort":"medium"}}),
             json!({"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}),
         ];
         let mut replies: Vec<String> = messages.iter().map(Value::to_string).collect();
@@ -647,13 +673,27 @@ fn text_candidate_cases(offline_native: bool) {
                     std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
                         .join("src/value.txt");
                 let source_file = fixture.source.join("src/value.txt");
-                let denied_operations = format!(
+                let mut denied_operations = format!(
                     "if (printf changed > {}) 2>/dev/null; then exit 71; fi\nif /bin/cat {} >/dev/null 2>&1; then exit 72; fi\nif (printf changed > {}) 2>/dev/null; then exit 73; fi\n/bin/cat {} >/dev/null || exit 74\n",
                     quote(workspace_file.to_str().unwrap()), quote(source_file.to_str().unwrap()),
                     quote(home.join("config.toml").to_str().unwrap()), quote(workspace_file.to_str().unwrap()),
                 );
+                if writer {
+                    // A toy provider writes only after it receives turn/start.
+                    denied_operations = format!(
+                        "if /bin/cat {} >/dev/null 2>&1; then exit 72; fi\nif (printf changed > {}) 2>/dev/null; then exit 73; fi\nif (printf changed > {}) 2>/dev/null; then exit 75; fi\n",
+                        quote(source_file.to_str().unwrap()),
+                        quote(home.join("config.toml").to_str().unwrap()),
+                        quote(workspace_file.parent().unwrap().parent().unwrap().join(".git/config").to_str().unwrap()),
+                    );
+                }
+                let edit = if writer {
+                    format!("case \"$line\" in *'\"method\":\"turn/start\"'*) printf changed > {} || exit 76;; esac\n", quote(workspace_file.to_str().unwrap()))
+                } else {
+                    String::new()
+                };
                 let script = format!(
-                    "#!/bin/sh\n{denied_operations}printf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\nprintf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
+                    "#!/bin/sh\n{denied_operations}printf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\n{edit}printf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
                     quote(native_argv.to_str().unwrap()),
                     replies.iter().map(|value| quote(value)).collect::<Vec<_>>().join(" "),
                     quote(captured.to_str().unwrap()), quote(received.to_str().unwrap()),
@@ -750,7 +790,7 @@ fn text_candidate_cases(offline_native: bool) {
                     &helper,
                     &launch_cancel,
                 );
-                if failure != "bound-native" {
+                if !matches!(failure, "bound-native" | "bound-native-write") {
                     assert!(launched.is_err());
                     crate::provider_preflight_session::BEFORE_RELEASE
                         .with(|hook| assert!(hook.borrow().is_none()));
@@ -895,13 +935,23 @@ fn text_candidate_cases(offline_native: bool) {
             Ok(())
         };
         let result = if let Some(reservation) = &reservation {
-            reservation.run_read_only_text(
-                &mut fixture.storage,
-                &mut fixture.projects,
-                &mut process,
-                &AtomicBool::new(failure == "bound-cancel"),
-                &mut sink,
-            )
+            if writer || failure == "bound-write-mismatch" {
+                reservation.run_text_candidate(
+                    &mut fixture.storage,
+                    &mut fixture.projects,
+                    &mut process,
+                    &AtomicBool::new(false),
+                    &mut sink,
+                )
+            } else {
+                reservation.run_read_only_text(
+                    &mut fixture.storage,
+                    &mut fixture.projects,
+                    &mut process,
+                    &AtomicBool::new(failure == "bound-cancel"),
+                    &mut sink,
+                )
+            }
         } else {
             let mut workspace =
                 TextWorkspace::new(&fixture.projects, &mut fixture.storage, &address).unwrap();
@@ -980,13 +1030,18 @@ fn text_candidate_cases(offline_native: bool) {
         if failure.starts_with("idle-") {
             assert!(observed_idle_child.get());
         }
+        if failure == "bound-write-mismatch" {
+            let requests = fs::read_to_string(&captured).unwrap();
+            assert!(!requests.contains("thread/start"));
+            assert!(!requests.contains("turn/start"));
+        }
         if failure == "idle-observer" {
             assert!(!responded.exists());
         }
         if success && reservation.is_none() {
             assert!(observations.get() > 10);
         }
-        if matches!(failure, "bound" | "bound-native") {
+        if matches!(failure, "bound" | "bound-native" | "bound-native-write") {
             let requests: Vec<Value> = fs::read_to_string(&captured)
                 .unwrap()
                 .lines()
@@ -1002,6 +1057,20 @@ fn text_candidate_cases(offline_native: bool) {
                 .find(|value| value["method"] == "thread/start")
                 .unwrap();
             assert_eq!(thread["params"]["model"], "test-model");
+            assert_eq!(
+                thread["params"]["sandbox"],
+                if writer {
+                    "workspace-write"
+                } else {
+                    "read-only"
+                }
+            );
+            if writer {
+                assert_eq!(
+                    thread["params"]["config"]["sandbox_workspace_write"],
+                    settings["sandbox_workspace_write"]
+                );
+            }
             let run = &fixture.storage.projection_records("run").unwrap()[0];
             assert_eq!(run["barrier"]["releaseGranted"], true);
             assert!(!run["process_identity_internal"]
@@ -1013,8 +1082,11 @@ fn text_candidate_cases(offline_native: bool) {
             assert_eq!(run["public_events"][0]["text"], "hello");
             assert_eq!(last_message["kind"], "role");
             assert_eq!(last_message["text"], "hello");
-            assert_eq!(last_message["roleId"], "review");
-            if failure == "bound-native" {
+            assert_eq!(
+                last_message["roleId"],
+                if writer { "coding" } else { "review" }
+            );
+            if matches!(failure, "bound-native" | "bound-native-write") {
                 assert_eq!(
                     fs::read(fixture.source.join("src/value.txt")).unwrap(),
                     b"base"
@@ -1025,29 +1097,45 @@ fn text_candidate_cases(offline_native: bool) {
                             .join("src/value.txt")
                     )
                     .unwrap(),
-                    b"base"
+                    if writer {
+                        b"changed".as_slice()
+                    } else {
+                        b"base".as_slice()
+                    }
                 );
                 let args = fs::read_to_string(&native_argv).unwrap();
-                assert_eq!(
-                    args.lines().collect::<Vec<_>>(),
-                    vec![
-                        "app-server",
-                        "--listen",
-                        "stdio://",
-                        "-c",
-                        "model=\"test-model\"",
-                        "-c",
-                        "model_reasoning_effort=\"medium\"",
-                        "-c",
-                        "model_provider=\"openai\"",
-                        "-c",
-                        "approval_policy=\"on-request\"",
-                        "-c",
-                        "sandbox_mode=\"read-only\"",
-                        "-c",
-                        "features.hooks=false",
-                    ]
-                );
+                if writer {
+                    assert!(args.contains("sandbox_mode=\"workspace-write\"\n"));
+                    for setting in [
+                        "writable_roots=[]",
+                        "network_access=false",
+                        "exclude_tmpdir_env_var=true",
+                        "exclude_slash_tmp=true",
+                    ] {
+                        assert!(args.contains(&format!("sandbox_workspace_write.{setting}\n")));
+                    }
+                } else {
+                    assert_eq!(
+                        args.lines().collect::<Vec<_>>(),
+                        vec![
+                            "app-server",
+                            "--listen",
+                            "stdio://",
+                            "-c",
+                            "model=\"test-model\"",
+                            "-c",
+                            "model_reasoning_effort=\"medium\"",
+                            "-c",
+                            "model_provider=\"openai\"",
+                            "-c",
+                            "approval_policy=\"on-request\"",
+                            "-c",
+                            "sandbox_mode=\"read-only\"",
+                            "-c",
+                            "features.hooks=false",
+                        ]
+                    );
+                }
             }
         }
         if matches!(failure, "bound-persist" | "bound-sink" | "bound-cleanup") {
@@ -1080,6 +1168,8 @@ fn text_candidate_cases(offline_native: bool) {
             failure,
             "bound"
                 | "bound-native"
+                | "bound-native-write"
+                | "bound-write-mismatch"
                 | "bound-multiple"
                 | "bound-persist"
                 | "bound-sink"
@@ -1092,7 +1182,8 @@ fn text_candidate_cases(offline_native: bool) {
             assert_eq!(
                 run["state"],
                 match failure {
-                    "bound" | "bound-native" | "bound-multiple" => "succeeded",
+                    "bound" | "bound-native" | "bound-native-write" | "bound-multiple" =>
+                        "succeeded",
                     "bound-interrupted" | "bound-cancel" => "canceled",
                     "bound-cleanup" => "recoveryRequired",
                     _ => "failed",
@@ -1125,6 +1216,27 @@ fn text_candidate_cases(offline_native: bool) {
             assert_eq!(fixture.storage.projection_records("run").unwrap(), runs);
         }
         // Rejection before claiming the protocol leaves cleanup with the caller.
+        if writer || failure == "bound-write-mismatch" {
+            let lock = fixture
+                .storage
+                .projection_record("lock", &format!("lock_{}", address.worktree_id))
+                .unwrap()
+                .unwrap();
+            let retained = matches!(failure, "bound-cleanup" | "bound-terminal");
+            assert_eq!(lock["writer_run_id"].is_null(), !retained);
+            assert_eq!(lock["poisoned"], failure == "bound-cleanup");
+            if failure != "bound-terminal" {
+                let run = &fixture.storage.projection_records("run").unwrap()[0];
+                assert_eq!(
+                    run["termination"]["writerLockState"],
+                    if retained {
+                        "recoveryRequired"
+                    } else {
+                        "released"
+                    }
+                );
+            }
+        }
         if matches!(failure, "bound-role" | "bound-write" | "bound-input") {
             process.finish().unwrap();
         }
@@ -1136,7 +1248,12 @@ fn text_candidate_cases(offline_native: bool) {
         }
         if matches!(
             failure,
-            "bound" | "bound-native" | "bound-terminal" | "bound-cleanup"
+            "bound"
+                | "bound-native"
+                | "bound-native-write"
+                | "bound-write-mismatch"
+                | "bound-terminal"
+                | "bound-cleanup"
         ) {
             let before = fixture.storage.projection_records("run").unwrap();
             if failure == "bound-terminal" {

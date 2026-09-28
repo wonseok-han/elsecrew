@@ -15,6 +15,11 @@ impl RunReservation {
             .closure_evidence()
             .ok_or_else(|| ProjectFailure::recovery("explicit process closure is missing"))?;
         let projection = actual_run_projection(storage, &self.run_id)?;
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(json_failure)?;
+        let writer = codex_permission(&profile)
+            .map_err(|_| ProjectFailure::recovery("reserved permission changed"))?
+            == ExpectedPermission::WorkspaceWrite;
         let identities = evidence.identities();
         let prior = projection["process_identity_internal"]
             .as_array()
@@ -24,7 +29,6 @@ impl RunReservation {
             || !projection["recovery"].is_null()
             || projection["barrier"]["phase"] != "providerLaunchGate"
             || projection["barrier"]["releaseGranted"] != true
-            || self.run["selectedProfile"]["permission"] != "readOnly"
             || prior.is_empty()
             || identities.is_empty()
             || prior.iter().any(|item| {
@@ -68,7 +72,7 @@ impl RunReservation {
         let termination = json!({
             "schemaVersion":1,"runId":self.run_id,"outcome":outcome,
             "processesProvenGone":confirmed,"poisoned":!confirmed,
-            "writerLockState":if confirmed {"none"} else {"recoveryRequired"},
+            "writerLockState":if confirmed {if writer {"released"} else {"none"}} else {"recoveryRequired"},
             "chatState":state,"trackedProcesses":tracked,
             "evidenceDigest":digest_text(&serde_json::to_string(&json!({"runId":self.run_id,"trackedProcesses":tracked,"confirmed":confirmed})).map_err(json_failure)?),
             "observedAt":now()
@@ -95,8 +99,6 @@ impl RunReservation {
                 "terminal workspace binding changed",
             ));
         }
-        let profile =
-            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(json_failure)?;
         let run = agent_run_record(
             &self.run_id,
             chat,
@@ -138,7 +140,7 @@ impl RunReservation {
             // workspace blocked; startup recovery reconciles the preparing record.
             projects.workspace_mark_recovery_required(storage, &address)?;
         }
-        storage.upsert_projection_records_atomic(vec![
+        let mut upserts = vec![
             ProjectionUpsert {
                 aggregate_type: "run",
                 aggregate_id: self.run_id.clone(),
@@ -153,7 +155,17 @@ impl RunReservation {
                 request_id: None,
                 payload: chat_projection_with_record(&chat_projection, &updated_chat, None)?,
             },
-        ])?;
+        ];
+        if writer {
+            upserts.push(release_writer_lock(
+                storage,
+                &address,
+                &self.run_id,
+                &self.run_id,
+                !confirmed,
+            )?);
+        }
+        storage.upsert_projection_records_atomic(upserts)?;
         Ok(())
     }
 }

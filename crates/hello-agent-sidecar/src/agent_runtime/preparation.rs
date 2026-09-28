@@ -1,6 +1,18 @@
 //! Shared durable preparation, without spawning or granting provider authority.
 use super::*;
+use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 mod terminal;
+
+fn codex_permission(profile: &AgentResolvedProfileV1) -> Result<ExpectedPermission, SidecarError> {
+    match (profile.runtime.as_str(), profile.permission.as_str()) {
+        ("codex", "readOnly") => Ok(ExpectedPermission::ReadOnly),
+        ("codex", "workspaceWrite") => Ok(ExpectedPermission::WorkspaceWrite),
+        _ => Err(SidecarError::new(
+            "agentInputChanged",
+            "reserved role permission is unavailable",
+        )),
+    }
+}
 
 pub(crate) struct RunPreparation {
     request: AgentRunStartRequestV1,
@@ -41,10 +53,8 @@ impl RunReservation {
         };
         let profile: AgentResolvedProfileV1 =
             serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
-        if profile.runtime != "codex"
-            || profile.permission != "readOnly"
-            || cancel.load(std::sync::atomic::Ordering::Acquire)
-        {
+        let permission = codex_permission(&profile)?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
             return Err(failure());
         }
         projects
@@ -79,6 +89,7 @@ impl RunReservation {
             &home,
             workspace,
             &expected,
+            permission,
         )
         .map_err(|_| failure())?;
         self.launch_gated(
@@ -124,6 +135,32 @@ impl RunReservation {
         hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
         SidecarError,
     > {
+        if self.run["selectedProfile"]["permission"] != "readOnly" {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "reserved text input is unavailable",
+            ));
+        }
+        self.run_text_candidate(storage, projects, process, cancel, on_public)
+    }
+
+    /// Internal role-bound transport; tools still require a separate handler.
+    /// This does not admit a provider or grant OS permissions to a process.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn run_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        on_public: &mut impl FnMut(
+            &mut Storage,
+            hello_agent_core::provider::vendor_observation::codex_events::Projection,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+        SidecarError,
+    > {
         use hello_agent_core::provider::vendor_observation::codex_events::{
             stream::TurnOutcome, Projection, PublicKind,
         };
@@ -134,21 +171,19 @@ impl RunReservation {
             || SidecarError::new("agentInputChanged", "reserved text input is unavailable");
         let profile: AgentResolvedProfileV1 =
             serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
-        // Never silently turn a coding/write role into a read-only execution.
-        if profile.runtime != "codex" || profile.permission != "readOnly" {
-            return Err(failure());
-        }
+        let permission = codex_permission(&profile)?;
         self.validate_text_input(storage, projects)
             .map_err(|_| failure())?;
         // Reject a different owner before the transport acquires cleanup authority.
         self.observe_process(storage, process)?;
         let home = process.codex_preflight_home()?;
-        let flow = PreflightExchange::new(
+        let flow = PreflightExchange::with_permission(
             &ExpectedProfile {
                 model: &profile.model_selector,
                 reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
             },
             home.to_str().ok_or_else(failure)?,
+            permission,
         )
         .map_err(|_| failure())?;
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
