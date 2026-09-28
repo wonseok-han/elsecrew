@@ -485,6 +485,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         "bound",
         "bound-handler",
         "bound-handler-role",
+        "bound-handler-cancel",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -968,15 +969,49 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         };
         let result = if let Some(reservation) = &reservation {
             if handler {
-                reservation.run_candidate_with_handler(
-                    &mut fixture.storage, &mut fixture.projects, &mut process,
-                    &AtomicBool::new(false), &mut |storage, action| {
+                let cancel = AtomicBool::new(false);
+                let mut state = reservation
+                    .begin_text_candidate(&mut fixture.storage, &fixture.projects, &mut process)
+                    .unwrap();
+                // A second dispatcher request must not lend a different process
+                // to this live session, or acquire cleanup authority over it.
+                let other_root = tempfile::tempdir().unwrap();
+                let other_storage = crate::Storage::open(
+                    &other_root
+                        .path()
+                        .canonicalize()
+                        .unwrap()
+                        .join("hello-agent.sqlite3"),
+                )
+                .unwrap();
+                let mut other = LoginProcess::reserve_codex_owned(
+                    CodexProfileBinding::from_storage(&other_storage).unwrap(),
+                )
+                .unwrap();
+                assert!(reservation
+                    .advance_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut other,
+                        &cancel,
+                        &mut state,
+                        &mut |_, _| panic!("foreign process callback"),
+                    )
+                    .is_err());
+                assert!(other.closure_evidence().is_none());
+                other.finish().unwrap();
+                let cancel_between_steps = std::cell::Cell::new(false);
+                let mut action = |storage: &mut crate::Storage, action: crate::provider_preflight_session::TextAction<'_>| {
                         use crate::provider_preflight_session::TextAction;
                         match action {
                             TextAction::Public(event) => sink(storage, event),
                             TextAction::Tool(tool) => { assert_eq!(tool.item_id, "c1"); Ok(()) },
                             TextAction::PollApproval { request, decision } => {
                                 assert_eq!(request.item_id, "c1");
+                                if failure == "bound-handler-cancel" {
+                                    cancel_between_steps.set(true);
+                                    return Ok(());
+                                }
                                 if failure == "bound-handler-role" {
                                     let mut chat = storage.projection_record("chat", &address.chat_id)?.unwrap();
                                     chat["record"]["roleSnapshots"][2]["modelSelector"] = json!("changed-model");
@@ -987,8 +1022,47 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                             }
                             _ => panic!("owner checkpoint escaped reservation"),
                         }
-                    },
-                )
+                };
+                let mut steps = 0;
+                let outcome = loop {
+                    steps += 1;
+                    // No mutable Storage borrow survives advance: other requests
+                    // can inspect the original chat while the agent is waiting.
+                    assert!(fixture
+                        .storage
+                        .projection_record("chat", &address.chat_id)
+                        .unwrap()
+                        .is_some());
+                    match reservation.advance_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &cancel,
+                        &mut state,
+                        &mut action,
+                    ) {
+                        Ok(Some(outcome)) => break Ok(outcome),
+                        Err(error) => break Err(error),
+                        Ok(None) => {
+                            if cancel_between_steps.get() {
+                                cancel.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                        }
+                    }
+                };
+                assert!(steps > 10);
+                assert!(reservation
+                    .advance_text_candidate(
+                        &mut fixture.storage,
+                        &mut fixture.projects,
+                        &mut process,
+                        &cancel,
+                        &mut state,
+                        &mut |_, _| panic!("terminal replay callback"),
+                    )
+                    .is_err());
+                outcome
             } else if writer || failure == "bound-write-mismatch" {
                 reservation.run_text_candidate(
                     &mut fixture.storage,
@@ -1248,6 +1322,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                 | "bound-write-mismatch"
                 | "bound-handler"
                 | "bound-handler-role"
+                | "bound-handler-cancel"
                 | "bound-multiple"
                 | "bound-persist"
                 | "bound-sink"
@@ -1262,7 +1337,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                 match failure {
                     "bound" | "bound-handler" | "bound-native" | "bound-native-write"
                     | "bound-multiple" => "succeeded",
-                    "bound-interrupted" | "bound-cancel" => "canceled",
+                    "bound-interrupted" | "bound-cancel" | "bound-handler-cancel" => "canceled",
                     "bound-cleanup" => "recoveryRequired",
                     _ => "failed",
                 }

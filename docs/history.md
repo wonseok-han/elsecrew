@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (예약 실행 원장의 단계별 진행)
+
+- **진전/기준**: 직전 소유권 파동 `c555250`은 커밋된 진전이다. 메인이 RunReservation의 기존 실행을 begin/advance로 분리해 Storage borrow 없이 상태를 보관하도록 연결했다. 기존 동기 wrapper도 같은 경로를 사용한다. 세션은 run ID와 process 생성 시 발급한 연결 ID에 결속해 다른 owner로 진행/cleanup하거나 terminal을 재처리하지 못한다. 공개 답변 누적·종료 확인→terminal 원자 기록→fence 해제 순서를 유지한다.
+- **회귀/발견**: 직접 단계 호출 사이에 채팅 조회가 가능하고 외부 process 거절 뒤 원래 실행이 계속되는 2사례가 PASS/16.63초, 기존 원장 25사례 PASS/86.08초였다. 빈 poll마다 workspace/원장을 재검사한 중복 비용을 확인해 기존 송신 전·수신 후·process 관측 checkpoint를 재사용하도록 정리했다. 승인 대기 중 단계 사이 취소→canceled 기록과 terminal replay 거절을 추가해 최종 관련 검사를 진행한다.
+- **경계/다음**: 상태를 보관/진행할 수 있지만 제품 manager·IPC/승인 화면은 아직 연결하지 않았다. 파일/DB checkpoint와 terminal cleanup은 여전히 동기식이다. 실제 CLI/계정/모델 호출·main 병합/push 없음. 관련 검사와 독립 검토 후 마감한다.
+- **마감**: 최종 직접 단계 실행 3사례 PASS/12.13초(정상 decline·역할 변경 거절·단계 사이 취소, 모두 foreign process/terminal replay 거절 포함), 원장 25사례 PASS/52.15초, strict sidecar clippy·scoped fmt·diff PASS. 같은 독립 검토자 1명이 실행/연결 ID 결속·권위 checkpoint·종료→terminal→fence 순서를 검토해 PASS했다. 관련 6파일을 원자 커밋한다. 앱 전체 목표는 미완료다.
+
 ### 2026-09-28 · by GPT-6 Astra (요청 수명과 실행 프로필 소유권 분리)
 
 - **진전/기준**: 직전 송신 파동 `da287dc`의 clean 통합 checkout에서 메인이 process의 프로필 보관을 borrowed/owned로 확장했다. 기존 Codex/Claude 로그인 API는 borrowed 그대로이며 native 실행은 검증된 Codex 디렉터리 capability 자체를 이동해 요청 반환 뒤에도 보유할 수 있다. 경로로 재생성하거나 raw 인증을 읽지 않는다. 예약 생성·종료·fence 로직은 같은 구현을 공유한다.

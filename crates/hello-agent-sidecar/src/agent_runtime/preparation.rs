@@ -30,6 +30,14 @@ pub(crate) struct RunReservation {
     prompt: Vec<u8>,
 }
 
+/// No Storage borrow: the dispatcher can service other requests between steps.
+pub(crate) struct RunTextState {
+    transport: crate::provider_preflight_session::BoundTextSession,
+    pending_answer: Option<String>,
+    run_id: String,
+    finished: bool,
+}
+
 impl RunReservation {
     /// Offline OS-isolated launch candidate only, with no model networking.
     /// Pins do not supply provider admission. Caller retains failure cleanup.
@@ -195,10 +203,24 @@ impl RunReservation {
         hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
         SidecarError,
     > {
-        use crate::provider_preflight_session::TextAction;
-        use hello_agent_core::provider::vendor_observation::codex_events::{
-            stream::TurnOutcome, Projection, PublicKind,
-        };
+        let mut state = self.begin_text_candidate(storage, projects, process)?;
+        loop {
+            if let Some(outcome) = self
+                .advance_text_candidate(storage, projects, process, cancel, &mut state, on_action)?
+            {
+                return Ok(outcome);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Prepare one resumable run without retaining a borrow of Storage.
+    pub(crate) fn begin_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<RunTextState, SidecarError> {
         use hello_agent_core::provider::vendor_observation::codex_preflight::{
             exchange::PreflightExchange, ExpectedProfile,
         };
@@ -223,16 +245,55 @@ impl RunReservation {
         .map_err(|_| failure())?;
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
-        let mut workspace =
+        let workspace =
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
-        let mut pending_answer = None;
         process.retain_fence_until_terminal()?;
-        let outcome = crate::provider_preflight_session::run_text_with_handler_and_close(
+        let transport = crate::provider_preflight_session::BoundTextSession::begin(
+            process, flow, &workspace, text,
+        )?;
+        Ok(RunTextState {
+            transport,
+            pending_answer: None,
+            run_id: self.run_id.clone(),
+            finished: false,
+        })
+    }
+
+    /// Advances one protocol step. Terminal cleanup is still synchronous.
+    /// Mismatched owners never acquire authority to finish another process.
+    pub(crate) fn advance_text_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+        state: &mut RunTextState,
+        on_action: &mut impl FnMut(
+            &mut Storage,
+            crate::provider_preflight_session::TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome>,
+        SidecarError,
+    > {
+        use crate::provider_preflight_session::TextAction;
+        use hello_agent_core::provider::vendor_observation::codex_events::{
+            stream::TurnOutcome, Projection, PublicKind,
+        };
+        let failure =
+            || SidecarError::new("agentInputChanged", "reserved text input is unavailable");
+        if state.finished
+            || state.run_id != self.run_id
+            || !state.transport.matches_process(process)
+        {
+            return Err(failure());
+        }
+        state.finished = true;
+        let outcome = state.transport.advance(
             process,
-            flow,
             cancel,
-            &mut workspace,
-            text,
+            storage,
+            projects,
             &mut |storage, process, action| {
                 let event = match action {
                     TextAction::ObserveProcess => {
@@ -253,10 +314,10 @@ impl RunReservation {
                 if let Projection::Completed { kind, text, .. } = &event {
                     match kind {
                         PublicKind::AgentMessage => {
-                            if let Some(previous) = pending_answer.take() {
+                            if let Some(previous) = state.pending_answer.take() {
                                 self.persist_text(storage, "status", previous)?;
                             }
-                            pending_answer = Some(text.clone());
+                            state.pending_answer = Some(text.clone());
                         }
                         PublicKind::Plan => self.persist_text(storage, "status", text.clone())?,
                     }
@@ -264,12 +325,26 @@ impl RunReservation {
                 on_action(storage, TextAction::Public(event))
             },
         );
-        // The transport has returned only after observed cleanup. An interrupted
-        // or failed turn may preserve text, but must not label it a final answer.
+        let outcome = match outcome {
+            Ok(None) => {
+                state.finished = false;
+                return Ok(None);
+            }
+            Ok(Some(outcome)) => Ok(outcome),
+            Err(error) => Err(error),
+        };
+        // Preserve cleanup-before-final and terminal-before-fence-release ordering.
+        let outcome = process.finish().and(outcome).and_then(|outcome| {
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                Err(failure())
+            } else {
+                Ok(outcome)
+            }
+        });
         let result = outcome.and_then(|outcome| {
             self.validate_text_input(storage, projects)
                 .map_err(|_| failure())?;
-            if let Some(answer) = pending_answer {
+            if let Some(answer) = state.pending_answer.take() {
                 self.persist_text(
                     storage,
                     if outcome == TurnOutcome::Completed {
@@ -301,7 +376,7 @@ impl RunReservation {
         {
             process.release_after_run_terminal()?;
         }
-        result
+        result.map(Some)
     }
 
     fn persist_text(

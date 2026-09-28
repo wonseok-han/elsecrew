@@ -150,6 +150,7 @@ impl ProcessClosureEvidence {
 /// Owns the Child before any fallible identity/pipe operation. No Debug/raw error logging.
 /// Dropping attempts cleanup but never releases the durable fence: only explicit finish does.
 pub(crate) struct LoginProcess<'a> {
+    connection_id: uuid::Uuid,
     profile: ProfileOwner<'a>,
     reservation: Reservation,
     child: Option<Child>,
@@ -195,6 +196,9 @@ impl LoginProcess<'static> {
 }
 
 impl<'a> LoginProcess<'a> {
+    pub(crate) fn connection_id(&self) -> uuid::Uuid {
+        self.connection_id
+    }
     /// Trusted run owner only, before claiming this fresh transport. Ordinary
     /// login sessions retain their existing finish-and-release behavior.
     pub(crate) fn retain_fence_until_terminal(&mut self) -> Result<(), SidecarError> {
@@ -248,6 +252,7 @@ impl<'a> LoginProcess<'a> {
     fn reserve_profile(profile: ProfileOwner<'a>) -> Result<Self, SidecarError> {
         let reservation = Reservation::create(profile.as_ref())?;
         Ok(Self {
+            connection_id: uuid::Uuid::new_v4(),
             profile,
             reservation,
             child: None,

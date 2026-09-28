@@ -409,6 +409,72 @@ pub(crate) fn run_text_with_handler_and_close(
 }
 
 // A single sequential callback avoids two closures aliasing the same ledger.
+/// Keeps the exact workspace and connection binding without borrowing Storage.
+/// The run owner retains cleanup and must advance using its original process.
+pub(crate) struct BoundTextSession {
+    session: incremental::TextSession,
+    address: crate::project::WorkspaceAddress,
+    cwd: std::path::PathBuf,
+    connection_id: uuid::Uuid,
+}
+
+impl BoundTextSession {
+    pub(crate) fn begin(
+        process: &mut LoginProcess<'_>,
+        flow: PreflightExchange,
+        workspace: &TextWorkspace<'_>,
+        text: &str,
+    ) -> Result<Self, SidecarError> {
+        let session = incremental::TextSession::new(flow, &workspace.cwd, text)?;
+        workspace.revalidate()?;
+        process.begin_preflight()?;
+        Ok(Self {
+            session,
+            address: workspace.address.clone(),
+            cwd: workspace.cwd.clone(),
+            connection_id: process.connection_id(),
+        })
+    }
+
+    pub(crate) fn matches_process(&self, process: &LoginProcess<'_>) -> bool {
+        self.connection_id == process.connection_id()
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        process: &mut LoginProcess<'_>,
+        cancel: &AtomicBool,
+        storage: &mut crate::Storage,
+        projects: &crate::project::ProjectManager,
+        on_action: &mut impl FnMut(
+            &mut crate::Storage,
+            &mut LoginProcess<'_>,
+            TextAction<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome>,
+        SidecarError,
+    > {
+        if !self.matches_process(process) {
+            return Err(failure());
+        }
+        // These bindings came from begin's validated workspace, not caller paths.
+        // Revalidate at the existing authority checkpoints rather than doing
+        // redundant database/filesystem work on every empty pipe poll.
+        let workspace = TextWorkspace {
+            projects,
+            storage,
+            address: self.address.clone(),
+            cwd: self.cwd.clone(),
+        };
+        self.session
+            .advance(process, cancel, &mut |process, action| match action {
+                TextAction::VerifyWorkspace => workspace.revalidate(),
+                action => on_action(workspace.storage, process, action),
+            })
+    }
+}
+
 // This is private transport plumbing, not a renderer-controlled action API.
 pub(crate) enum TextAction<'a> {
     VerifyWorkspace,
