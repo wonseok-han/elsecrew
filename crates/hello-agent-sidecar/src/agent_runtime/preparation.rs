@@ -19,8 +19,8 @@ pub(crate) struct RunReservation {
 }
 
 impl RunReservation {
-    /// Internal launch candidate only. Pins do not supply provider admission or
-    /// sandbox authority. Caller retains the process on every failure for cleanup.
+    /// Offline OS-isolated launch candidate only, with no model networking.
+    /// Pins do not supply provider admission. Caller retains failure cleanup.
     /// Model/effort come from the reserved role, never independent launch arguments.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn launch_codex_candidate(
@@ -65,9 +65,19 @@ impl RunReservation {
         helper.revalidate()?;
         // Construct the exact invocation before creating any child. The command
         // starts the existing inert gate; only the identity-recorded owner releases it.
-        let mut command = crate::provider_preflight_session::discovery_command(
+        let manifest = projects
+            .verify_workspace(
+                storage,
+                &address_from_chat(&self.run).map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
+        let workspace =
+            std::path::Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let mut command = crate::provider_preflight_session::offline_discovery_command(
             executable.revalidate()?,
+            helper.revalidate()?,
             &home,
+            workspace,
             &expected,
         )
         .map_err(|_| failure())?;

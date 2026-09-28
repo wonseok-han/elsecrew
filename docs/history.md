@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (OS 격리와 예약 실행 연결)
+
+- **진전/기준**: 직전 profile 입장 변경은 `2b75bcb`로 커밋된 진전이다. clean 통합 checkout에서 메인이 기본 거부 macOS 정책을 native 예약 후보에 연결했다. 기존 fd 닫기·신원 기록 gate가 release 뒤 sandbox-exec/payload로 전환하며, 경로는 개별 parameter argv다. profile와 작업 사본 중첩/비정규 경로를 거절하고 profile config·작업 사본 쓰기 및 네트워크 권한은 열지 않는다.
+- **검증**: 기존 원장 22사례 PASS/38.95초, 명령/경로 테스트 1 PASS, 기존 preflight 5 PASS/8.82초. 성공 native 사례는 중첩 sandbox 제약 때문에 opt-in으로 분리하고 임시 toy CLI만으로 외부 OS 실측 1 PASS/3.63초를 확인했다. 원본 읽기·작업 사본 쓰기·config 변경 거절과 허용 읽기/임시 출력·공개 답변·terminal/재오픈을 같은 경로에서 확인했다. 실제 provider/계정/유료 모델을 실행하지 않았다.
+- **경계/다음**: 이것은 오프라인 readOnly 후보와 lifecycle의 결합이며 실제 모델/쓰기 역할 완성이 아니다. 실제 네트워크·vendor/관리 설정/IPC 호환성·도구/승인·Claude·제품 UI는 남는다. 검증 실패 시 무격리 fallback은 없다. strict clippy·fmt·diff와 상시 승인 검토자 1명의 고정 delta 검토 후 관련 파일만 커밋한다. main 병합·push 없음.
+- **최신 검사**: strict sidecar all-targets clippy·fmt·diff PASS. 실제 OS 시험은 별도 probe 문자열이 아니라 이번 runtime builder를 사용한다. 신규 모듈을 포함한 7파일 고정 delta를 `run_ledger_review` 한 명에게 전달했고 추가 테스트는 중복 실행하지 않는다.
+- **마감**: 독립 정적 검토 PASS. 고정 sandbox 명령·경로 parameter·기존 PID/cleanup 소유권·무격리 fallback 부재와 기존 진단 builder 보존을 확인했다. 관련 7파일을 커밋한다. 실제 공급자/통신/쓰기 역할 입장은 여전히 다음 단계이며 앱 전체 완료가 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 프로필 파일 입장 연결)
 
 - **진전/범위**: 직전 승인 확인은 이미 반영된 규칙의 재확인으로 신규 구현 진전은 없었다. `1e16616`·clean 통합 checkout에서 메인이 기존 scanner를 재사용해 Codex 실행 후보의 HOME 전체를 spawn 전·payload release 직전에 검사하도록 연결했다. skills/tmp/.tmp의 중첩 hardlink·symlink·특수 파일을 거절하며 기존 로그인/상태 확인·인증 내용은 변경하지 않는다.

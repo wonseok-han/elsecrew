@@ -33,6 +33,8 @@ mod provider_preflight_session;
 #[cfg(unix)]
 #[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
 mod provider_profile;
+#[cfg(target_os = "macos")]
+mod provider_runtime_sandbox;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;

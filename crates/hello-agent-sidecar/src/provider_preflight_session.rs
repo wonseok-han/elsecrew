@@ -84,6 +84,32 @@ pub(crate) fn discovery_command(
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
 ) -> std::io::Result<std::process::Command> {
+    let args = discovery_arguments(home, expected)?;
+    let references: Vec<_> = args.iter().map(std::ffi::OsString::as_os_str).collect();
+    let mut command = crate::provider_login_gate::command(executable, &references, home)?;
+    discovery_environment(&mut command, home);
+    Ok(command)
+}
+
+/// Offline OS-isolated candidate, not a networking or product activation path.
+pub(crate) fn offline_discovery_command(
+    executable: &std::path::Path,
+    helper: &std::path::Path,
+    home: &std::path::Path,
+    workspace: &std::path::Path,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+) -> std::io::Result<std::process::Command> {
+    let args = discovery_arguments(home, expected)?;
+    let mut command =
+        crate::provider_runtime_sandbox::command(executable, helper, &args, home, workspace)?;
+    discovery_environment(&mut command, home);
+    Ok(command)
+}
+
+fn discovery_arguments(
+    home: &std::path::Path,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+) -> std::io::Result<Vec<std::ffi::OsString>> {
     PreflightExchange::new(
         expected,
         home.to_str()
@@ -92,7 +118,7 @@ pub(crate) fn discovery_command(
     .map_err(|_| std::io::Error::other("invalid model profile"))?;
     let model = format!("model=\"{}\"", expected.model);
     let effort = format!("model_reasoning_effort=\"{}\"", expected.reasoning_effort);
-    let args: Vec<&std::ffi::OsStr> = [
+    let args = [
         "app-server",
         "--listen",
         "stdio://",
@@ -110,15 +136,17 @@ pub(crate) fn discovery_command(
         "features.hooks=false",
     ]
     .into_iter()
-    .map(std::ffi::OsStr::new)
+    .map(std::ffi::OsString::from)
     .collect();
-    let mut command = crate::provider_login_gate::command(executable, &args, home)?;
+    Ok(args)
+}
+
+fn discovery_environment(command: &mut std::process::Command, home: &std::path::Path) {
     command
         .env("HOME", home)
         .env("CODEX_HOME", home)
         .env("TMPDIR", home.join("tmp"))
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
-    Ok(command)
 }
 
 /// The caller retains ownership on error so uncertain cleanup can be retried.

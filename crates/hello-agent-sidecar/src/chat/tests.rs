@@ -453,6 +453,16 @@ fn actual_run_preparation_rejects_foreign_input_and_stale_evidence_without_write
 
 #[test]
 fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
+    text_candidate_cases(false);
+}
+
+#[test]
+#[ignore = "macOS outer sandbox required; temporary toy CLI only, no account or network"]
+fn text_candidate_os_isolated_native_lifecycle() {
+    text_candidate_cases(true);
+}
+
+fn text_candidate_cases(offline_native: bool) {
     use crate::provider_login_process::LoginProcess;
     use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
     use crate::provider_profile::CodexProfileBinding;
@@ -486,6 +496,9 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         "bound-terminal",
         "bound-cancel",
     ] {
+        if (failure == "bound-native") != offline_native {
+            continue;
+        }
         let fail_sink = matches!(failure, "sink" | "bound-sink");
         let success = matches!(
             failure,
@@ -608,9 +621,17 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         )
         .unwrap();
         let mut process = LoginProcess::reserve(&profile).unwrap();
-        let received = fixture._root.path().join("received-protocol");
+        let evidence_root = if failure.starts_with("bound-native") {
+            let scratch = home.join("tmp");
+            std::fs::create_dir(&scratch).unwrap();
+            scratch
+        } else {
+            fixture._root.path().to_path_buf()
+        };
+        let received = evidence_root.join("received-protocol");
         let responded = fixture._root.path().join("sent-first-response");
-        let captured = fixture._root.path().join("captured-requests");
+        let captured = evidence_root.join("captured-requests");
+        let native_argv = evidence_root.join("native-argv");
         let spawn = || {
             Command::new("/bin/sh")
             .args(["-c", "first=yes; for reply in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; if test \"$first\" = yes; then if test \"$DELAY\" = yes; then /bin/sleep 0.6; fi; printf sent > \"$RESPONDED\"; fi; printf '%s\\n' \"$reply\"; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; IFS= read -r hold", "snapshot-peer"])
@@ -622,9 +643,18 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                 use sha2::{Digest, Sha256};
                 use std::os::unix::fs::PermissionsExt;
                 let quote = |value: &str| format!("'{}'", value.replace('\'', "'\\''"));
+                let workspace_file =
+                    std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                        .join("src/value.txt");
+                let source_file = fixture.source.join("src/value.txt");
+                let denied_operations = format!(
+                    "if (printf changed > {}) 2>/dev/null; then exit 71; fi\nif /bin/cat {} >/dev/null 2>&1; then exit 72; fi\nif (printf changed > {}) 2>/dev/null; then exit 73; fi\n/bin/cat {} >/dev/null || exit 74\n",
+                    quote(workspace_file.to_str().unwrap()), quote(source_file.to_str().unwrap()),
+                    quote(home.join("config.toml").to_str().unwrap()), quote(workspace_file.to_str().unwrap()),
+                );
                 let script = format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\nprintf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
-                    quote(fixture._root.path().join("native-argv").to_str().unwrap()),
+                    "#!/bin/sh\n{denied_operations}printf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\nprintf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
+                    quote(native_argv.to_str().unwrap()),
                     replies.iter().map(|value| quote(value)).collect::<Vec<_>>().join(" "),
                     quote(captured.to_str().unwrap()), quote(received.to_str().unwrap()),
                 );
@@ -685,7 +715,6 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                     .unwrap();
                 }
                 if failure == "bound-native-profile-hardlink" {
-                    std::fs::create_dir(home.join("tmp")).unwrap();
                     std::fs::hard_link(
                         fixture.source.join("src/value.txt"),
                         home.join("tmp/shared-source"),
@@ -707,7 +736,6 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                                 std::fs::write(helper_path, b"changed").unwrap()
                             }
                             "bound-native-gate-profile" => {
-                                std::fs::create_dir(home.join("tmp")).unwrap();
                                 std::fs::hard_link(source, home.join("tmp/shared-source")).unwrap();
                             }
                             _ => canceled.store(true, std::sync::atomic::Ordering::Release),
@@ -726,7 +754,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                     assert!(launched.is_err());
                     crate::provider_preflight_session::BEFORE_RELEASE
                         .with(|hook| assert!(hook.borrow().is_none()));
-                    assert!(!fixture._root.path().join("native-argv").exists());
+                    assert!(!native_argv.exists());
                     let run = &fixture.storage.projection_records("run").unwrap()[0];
                     if matches!(
                         failure,
@@ -749,7 +777,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                     assert!(LoginProcess::reserve(&profile).is_err());
                     process.finish().unwrap();
                     assert!(!received.exists());
-                    assert!(!fixture._root.path().join("native-argv").exists());
+                    assert!(!native_argv.exists());
                     AgentRuntime::blocked()
                         .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
                         .unwrap();
@@ -987,7 +1015,19 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
             assert_eq!(last_message["text"], "hello");
             assert_eq!(last_message["roleId"], "review");
             if failure == "bound-native" {
-                let args = fs::read_to_string(fixture._root.path().join("native-argv")).unwrap();
+                assert_eq!(
+                    fs::read(fixture.source.join("src/value.txt")).unwrap(),
+                    b"base"
+                );
+                assert_eq!(
+                    fs::read(
+                        std::path::Path::new(snapshot["worktreePath"].as_str().unwrap())
+                            .join("src/value.txt")
+                    )
+                    .unwrap(),
+                    b"base"
+                );
+                let args = fs::read_to_string(&native_argv).unwrap();
                 assert_eq!(
                     args.lines().collect::<Vec<_>>(),
                     vec![
