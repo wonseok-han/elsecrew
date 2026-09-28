@@ -2,9 +2,9 @@
 //! The transport owner must dispatch all notifications for this turn here and handle
 //! `RequiresHandling` separately. This does not authorize tools or prove process exit.
 
-use super::super::codex_approval::{Action, PendingApproval, RequestId};
+use super::super::codex_approval::{Action, ApprovalReply, Decision, PendingApproval, RequestId};
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnOutcome {
@@ -37,6 +37,7 @@ pub struct TurnStream {
     items: BTreeMap<String, ItemState>,
     failed: bool,
     approvals: BTreeMap<RequestId, Option<String>>,
+    prepared_replies: BTreeSet<RequestId>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +71,7 @@ impl TurnStream {
             items: BTreeMap::new(),
             failed: false,
             approvals: BTreeMap::new(),
+            prepared_replies: BTreeSet::new(),
         })
     }
 
@@ -135,6 +137,40 @@ impl TurnStream {
             self.approvals
                 .insert(request.request_id.clone(), Some(request.item_id.clone()));
             Ok(request)
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    /// Prepare exactly one response, not a delivery acknowledgement or completion.
+    /// Only an admitted runtime bound to a live user decision may call this.
+    /// Transport failure must terminate that runtime; never retry on a new session.
+    pub fn prepare_approval_reply(
+        &mut self,
+        request_id: &RequestId,
+        decision: Decision,
+    ) -> Result<ApprovalReply, ProviderError> {
+        let result = (|| {
+            if self.failed
+                || self.outcome.is_some()
+                || !self.started
+                || self.prepared_replies.contains(request_id)
+            {
+                return Err(invalid());
+            }
+            let item_id = self
+                .approvals
+                .get(request_id)
+                .and_then(Option::as_ref)
+                .ok_or_else(invalid)?;
+            if self.items.get(item_id).is_none_or(|item| item.completed) {
+                return Err(invalid());
+            }
+            let reply = ApprovalReply::new(request_id, decision);
+            self.prepared_replies.insert(request_id.clone());
+            Ok(reply)
         })();
         if result.is_err() {
             self.failed = true;
@@ -662,6 +698,78 @@ mod tests {
             };
             assert!(rejected, "{case}");
             assert!(stream.finish().is_err(), "{case}");
+        }
+    }
+
+    #[test]
+    fn approval_decisions_are_single_use_and_do_not_complete_the_request() {
+        for (decision, wire) in [
+            (Decision::AcceptOnce, "accept"),
+            (Decision::Decline, "decline"),
+            (Decision::Cancel, "cancel"),
+        ] {
+            let mut stream = started();
+            stream
+                .observe(&item("item/started", "commandExecution"))
+                .unwrap();
+            stream.pending_approval(&approval(10)).unwrap();
+            let reply = stream
+                .prepare_approval_reply(&RequestId::Number(10), decision)
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_str(reply.as_str()).unwrap();
+            assert_eq!(value, json!({"id":10,"result":{"decision":wire}}));
+            assert!(reply.as_str().ends_with('\n'));
+            // Preparing a response cannot stand in for the server's resolution.
+            assert!(stream
+                .observe(&item("item/completed", "commandExecution"))
+                .is_err());
+            assert!(stream.finish().is_err());
+        }
+    }
+
+    #[test]
+    fn late_unknown_duplicate_and_cross_id_decisions_fail_closed() {
+        for case in ["unknown", "duplicate", "resolved", "interrupted", "text-id"] {
+            let mut stream = started();
+            stream
+                .observe(&item("item/started", "commandExecution"))
+                .unwrap();
+            if case != "unknown" {
+                stream.pending_approval(&approval(10)).unwrap();
+            }
+            match case {
+                "duplicate" => {
+                    stream
+                        .prepare_approval_reply(&RequestId::Number(10), Decision::Decline)
+                        .unwrap();
+                }
+                "resolved" => {
+                    stream
+                        .observe(&frame(
+                            "serverRequest/resolved",
+                            json!({"threadId":"t","requestId":10}),
+                        ))
+                        .unwrap();
+                }
+                "interrupted" => {
+                    stream
+                        .observe(&turn("turn/completed", "interrupted"))
+                        .unwrap();
+                }
+                _ => {}
+            }
+            let id = if case == "text-id" {
+                RequestId::Text("10".into())
+            } else {
+                RequestId::Number(10)
+            };
+            assert!(
+                stream
+                    .prepare_approval_reply(&id, Decision::AcceptOnce)
+                    .is_err(),
+                "{case}"
+            );
+            assert!(stream.finish().is_err());
         }
     }
 }

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (단회 승인 응답 준비)
+
+- **진전/기준**: 직전 `9edbb51`는 승인 요청·tool item 결속과 회귀를 커밋한 진전이다. 이번 clean HEAD에서 메인이 같은 live TurnStream에 한 번만 응답을 준비하는 순수 wire builder를 추가했다. pinned 결정 값 accept/decline/cancel만 만들며 세션 허용/정책 amendment는 API에 없다.
+- **상태**: 처리됐거나 없는 요청, 숫자/문자열 ID 혼동, 중복 응답, 종료/실패한 stream의 결정을 거절한다. 응답 준비는 전송/서버 처리/명령 완료가 아니므로 serverRequest/resolved 이전의 item 완료를 계속 거절한다. transport caller는 아직 없고 실제 사용자 결정·role/snapshot admission을 별도로 묶어야 한다. 이 builder 자체를 승인 권한으로 사용하면 안 된다.
+- **범위/다음**: Karpathy 지침으로 기존 pending 상태를 확장했다. 실제 승인 전송·UI·run 원장·snapshot 검증은 미연결이며 제품은 기존 도구 요청 거절을 유지한다. 실행 권한을 여는 변경은 후속 파동에서 독립 검토해야 한다. 신규 위임·CLI·인증·유료 호출·main 병합·push 없음.
+- **검증/마감**: approval 관련 7 PASS와 late decision 집중 1 PASS(3결정의 정확한 wire·5종 늦은/중복/미지 응답 포함), strict sidecar clippy·core fmt·diff PASS. 자체 diff 검토 후 미연결 순수 builder·회귀·문서를 기능 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (승인 요청·진행 중 도구 결속)
 
 - **진전/기준**: 직전 `6e02393`는 순수 승인 요청 파서·검증·커밋의 진전이다. 이번 clean HEAD에서 메인이 현재 TurnStream에 pending_approval 관측을 연결했다. 같은 thread/turn의 진행 중 item에만 요청을 결속하고 command/fileChange 종류를 대조한다. 명령 요청의 command/cwd가 생략되면 이미 관측한 도구 문맥을 쓰며 불일치하면 거절한다.
