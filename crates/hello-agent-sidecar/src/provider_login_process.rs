@@ -150,7 +150,7 @@ impl ProcessClosureEvidence {
 /// Owns the Child before any fallible identity/pipe operation. No Debug/raw error logging.
 /// Dropping attempts cleanup but never releases the durable fence: only explicit finish does.
 pub(crate) struct LoginProcess<'a> {
-    profile: &'a dyn LoginProfile,
+    profile: ProfileOwner<'a>,
     reservation: Reservation,
     child: Option<Child>,
     tracker: Option<TreeTracker>,
@@ -166,6 +166,32 @@ pub(crate) struct LoginProcess<'a> {
     retain_for_terminal: bool,
     #[cfg(test)]
     fail_next_cleanup: bool,
+}
+
+/// An owned binding retains directory capabilities, never just a path to reopen.
+/// Borrowed bindings preserve the existing Codex/Claude login API.
+enum ProfileOwner<'a> {
+    Borrowed(&'a dyn LoginProfile),
+    Codex(crate::provider_profile::CodexProfileBinding),
+}
+
+impl ProfileOwner<'_> {
+    fn as_ref(&self) -> &dyn LoginProfile {
+        match self {
+            Self::Borrowed(profile) => *profile,
+            Self::Codex(profile) => profile,
+        }
+    }
+}
+
+impl LoginProcess<'static> {
+    /// Move the already verified profile capability into the process lifetime.
+    /// Suitable for retention between dispatcher requests; not launch authority.
+    pub(crate) fn reserve_codex_owned(
+        profile: crate::provider_profile::CodexProfileBinding,
+    ) -> Result<Self, SidecarError> {
+        Self::reserve_profile(ProfileOwner::Codex(profile))
+    }
 }
 
 impl<'a> LoginProcess<'a> {
@@ -198,7 +224,7 @@ impl<'a> LoginProcess<'a> {
         {
             return Err(failure());
         }
-        self.profile.revalidate()?;
+        self.profile.as_ref().revalidate()?;
         self.reservation.release()?;
         self.retain_for_terminal = false;
         Ok(())
@@ -208,17 +234,22 @@ impl<'a> LoginProcess<'a> {
         self.closure.as_ref()
     }
     pub(crate) fn codex_preflight_home(&self) -> Result<std::path::PathBuf, SidecarError> {
-        if self.profile.pending_name() != "codex-login.pending" {
+        if self.profile.as_ref().pending_name() != "codex-login.pending" {
             return Err(failure());
         }
         self.reservation.verify()?;
-        self.profile.revalidate()
+        self.profile.as_ref().revalidate()
     }
 
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
+        Self::reserve_profile(ProfileOwner::Borrowed(profile))
+    }
+
+    fn reserve_profile(profile: ProfileOwner<'a>) -> Result<Self, SidecarError> {
+        let reservation = Reservation::create(profile.as_ref())?;
         Ok(Self {
             profile,
-            reservation: Reservation::create(profile)?,
+            reservation,
             child: None,
             tracker: None,
             io: None,
@@ -261,7 +292,7 @@ impl<'a> LoginProcess<'a> {
         }
         self.attempted = true;
         let result = (|| {
-            self.profile.revalidate()?;
+            self.profile.as_ref().revalidate()?;
             self.reservation.verify()?;
             self.child = Some(spawn().map_err(|_| failure())?);
             let child = self.child.as_mut().ok_or_else(failure)?;
@@ -269,7 +300,7 @@ impl<'a> LoginProcess<'a> {
             self.tracker = Some(TreeTracker::new(root));
             self.reservation.record(&[root])?;
             self.observe_with(&SystemProcTable, true)?;
-            self.profile.revalidate()?;
+            self.profile.as_ref().revalidate()?;
             self.reservation.verify()?;
             let child = self.child.as_mut().ok_or_else(failure)?;
             // Do not release an unusable transport, even if the root was recorded.
@@ -414,7 +445,7 @@ impl<'a> LoginProcess<'a> {
             || self.transport_used
             || self.preflight_claimed
             || self.io.is_none()
-            || self.profile.pending_name() != "codex-login.pending"
+            || self.profile.as_ref().pending_name() != "codex-login.pending"
         {
             return Err(failure());
         }
@@ -614,7 +645,7 @@ impl<'a> LoginProcess<'a> {
         if self.failed
             || self.finished
             || self.preflight_claimed
-            || self.profile.pending_name() != "claude-login.pending"
+            || self.profile.as_ref().pending_name() != "claude-login.pending"
         {
             return Err(failure());
         }
@@ -663,7 +694,7 @@ impl<'a> LoginProcess<'a> {
             return Err(failure());
         }
         self.finished = true;
-        self.profile.revalidate()?;
+        self.profile.as_ref().revalidate()?;
         if self.retain_for_terminal {
             self.reservation.verify()?;
         } else {
@@ -742,6 +773,52 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn owned_profile_outlives_request_and_keeps_cleanup_and_identity_fences() {
+        fn open_request(temp: &tempfile::TempDir) -> LoginProcess<'static> {
+            // Storage and the local binding do not outlive this request.
+            LoginProcess::reserve_codex_owned(profile(temp)).unwrap()
+        }
+        for case in ["finish", "drop", "uncertain", "replaced"] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut process = open_request(&temp);
+            let home = process.codex_preflight_home().unwrap();
+            process.launch(cat).unwrap();
+            let identity = process.root_for_test();
+            // Another dispatcher request cannot reserve the same profile.
+            let independent = profile(&temp);
+            assert!(LoginProcess::reserve(&independent).is_err());
+            if case == "replaced" {
+                std::fs::rename(&home, home.with_file_name("retained-profile")).unwrap();
+                // Same pathname now refers to a fresh, otherwise valid profile.
+                let replacement = profile(&temp);
+                assert!(replacement.revalidate().is_ok());
+                assert!(process.codex_preflight_home().is_err());
+            }
+            if case == "uncertain" {
+                process.inject_uncertain_cleanup_once();
+            }
+            if case != "drop" {
+                assert_eq!(process.finish().is_ok(), case == "finish", "{case}");
+            }
+            drop(process);
+            assert!(matches!(
+                SystemProcTable.probe(identity),
+                hello_agent_core::proctree::ProbeResult::Gone
+            ));
+            assert_eq!(
+                temp.path().join(PENDING).exists(),
+                case != "finish",
+                "{case}"
+            );
+            assert_eq!(
+                LoginProcess::reserve(&profile(&temp)).is_ok(),
+                case == "finish",
+                "{case}"
+            );
+        }
     }
 
     #[test]

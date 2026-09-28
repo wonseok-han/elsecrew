@@ -675,7 +675,10 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
             home.to_str().unwrap(),
         )
         .unwrap();
-        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(
+            CodexProfileBinding::from_storage(&fixture.storage).unwrap(),
+        )
+        .unwrap();
         let evidence_root = if failure.starts_with("bound-native") {
             let scratch = home.join("tmp");
             std::fs::create_dir(&scratch).unwrap();

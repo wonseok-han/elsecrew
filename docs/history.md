@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (요청 수명과 실행 프로필 소유권 분리)
+
+- **진전/기준**: 직전 송신 파동 `da287dc`의 clean 통합 checkout에서 메인이 process의 프로필 보관을 borrowed/owned로 확장했다. 기존 Codex/Claude 로그인 API는 borrowed 그대로이며 native 실행은 검증된 Codex 디렉터리 capability 자체를 이동해 요청 반환 뒤에도 보유할 수 있다. 경로로 재생성하거나 raw 인증을 읽지 않는다. 예약 생성·종료·fence 로직은 같은 구현을 공유한다.
+- **검증/경계**: process 15 PASS/4.93초. 신규 요청 scope 종료 후 사용·정상 종료·drop·종료 불확실·동일 경로 profile 교체 4사례에서 신원 검증과 fence 보존을 확인했다. 기존 예약 text/상호작용 fixture를 owned 경로로 전환해 원장·복구 회귀를 진행한다. 이 타입은 runtime 보관의 선행 조건이며 실제 manager/승인 UI 연결 완료가 아니다.
+- **다음**: strict clippy·독립 검토 후 관련 변경을 마감하고 장기 보관 run/session에 연결한다. cleanup은 아직 동기식이다. 실제 CLI/계정/모델 시험·main 병합/push 없음.
+- **마감**: owned 경로의 예약 원장 25사례 PASS/54.80초, 상호작용 2사례 PASS/8.33초, strict sidecar clippy·scoped fmt·diff PASS. 독립 검토자 1명이 소유권·원래 디렉터리 신원 유지·cleanup/fence 경계를 검토해 PASS했다. 관련 4파일을 커밋한다. 장기 run/session manager 연결은 다음 단계이며 제품 완료를 주장하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (단계별 송신으로 제어권 반환)
 
 - **진전/기준**: 직전 단계별 수신 세션은 `874616b`로 커밋된 진전이다. clean 통합 checkout에서 메인이 native typed frame을 한 번의 nonblocking write로 전송하도록 연결했다. 파이프가 차면 미전송 suffix를 유지하고 다음 advance까지 반환한다. 재시도마다 workspace/예약 권위와 취소/공유 예산을 검사한다. 기존 로그인 송신은 유지하며 사용처가 없어진 동기 turn/approval wrapper만 제거했다.
