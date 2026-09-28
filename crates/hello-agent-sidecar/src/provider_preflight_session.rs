@@ -157,7 +157,30 @@ fn observe_with_budget(
         flow.close();
         return Err(failure());
     }
-    let result = (|| loop {
+    let result = check_claimed(process, flow, cancel, budget, started, thread_cwd);
+    // Even a protocol error or cancellation must run the existing observed cleanup.
+    let cleanup = process.finish();
+    if result.is_err() || cleanup.is_err() || cancel.load(Ordering::Acquire) {
+        flow.invalidate();
+    }
+    flow.close();
+    cleanup?;
+    result?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(failure());
+    }
+    Ok(())
+}
+
+fn check_claimed(
+    process: &mut LoginProcess<'_>,
+    flow: &mut PreflightExchange,
+    cancel: &AtomicBool,
+    budget: Duration,
+    started: Instant,
+    thread_cwd: Option<&std::path::Path>,
+) -> Result<(), SidecarError> {
+    loop {
         if cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
@@ -194,19 +217,71 @@ fn observe_with_budget(
             }
             return Ok(());
         }
-    })();
-    // Even a protocol error or cancellation must run the existing observed cleanup.
-    let cleanup = process.finish();
-    if result.is_err() || cleanup.is_err() || cancel.load(Ordering::Acquire) {
-        flow.invalidate();
     }
-    flow.close();
-    cleanup?;
-    result?;
+}
+
+/// Internal candidate, no product caller. Caller must admit the snapshot and
+/// persist run ownership before use. Public callbacks are provisional until the
+/// returned outcome AND observed cleanup succeed; they are not terminal events.
+pub(crate) fn run_text_and_close(
+    process: &mut LoginProcess<'_>,
+    mut flow: PreflightExchange,
+    cancel: &AtomicBool,
+    cwd: &std::path::Path,
+    text: &str,
+    on_public: &mut impl FnMut(
+        hello_agent_core::provider::vendor_observation::codex_events::Projection,
+    ) -> Result<(), SidecarError>,
+) -> Result<
+    hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+    SidecarError,
+> {
+    use hello_agent_core::provider::vendor_observation::codex_events::stream::Observed;
+    hello_agent_core::provider::vendor_observation::codex_turn::TurnStart::validate_text(text)
+        .map_err(|_| failure())?;
+    PreflightExchange::validate_thread_cwd(cwd).map_err(|_| failure())?;
+    let started = Instant::now();
+    let budget = Duration::from_secs(30);
+    if !flow.is_fresh() || process.begin_preflight().is_err() {
+        return Err(failure());
+    }
+    let result = (|| {
+        check_claimed(process, &mut flow, cancel, budget, started, Some(cwd))?;
+        let mut turn = flow.into_text_turn(text).map_err(|_| failure())?;
+        let remaining = || budget.checked_sub(started.elapsed()).ok_or_else(failure);
+        process.send_turn(
+            turn.take_frame().map_err(|_| failure())?,
+            remaining()?,
+            cancel,
+        )?;
+        let mut stream = None;
+        for _ in 0..2 {
+            let response = process.receive_preflight(remaining()?, cancel)?;
+            if let Some(value) = turn.accept(&response).map_err(|_| failure())? {
+                stream = Some(value);
+            }
+        }
+        let mut stream = stream.ok_or_else(failure)?;
+        loop {
+            let frame = process.receive_preflight(remaining()?, cancel)?;
+            let observed = stream.observe(&frame).map_err(|_| failure())?;
+            if cancel.load(Ordering::Acquire) || started.elapsed() >= budget {
+                return Err(failure());
+            }
+            match observed {
+                Observed::Public(value) => on_public(value)?,
+                Observed::ItemStarted => {}
+                Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
+                // Tools/private notifications need an explicit owner handler.
+                Observed::Started | Observed::RequiresHandling => return Err(failure()),
+            }
+        }
+    })();
+    process.finish()?;
     if cancel.load(Ordering::Acquire) {
         return Err(failure());
     }
-    Ok(())
+    result
 }
 
 #[cfg(test)]
@@ -216,6 +291,67 @@ mod tests {
     use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
     use serde_json::json;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn invalid_turn_text_never_claims_or_initializes_the_live_owner() {
+        for (text, cwd) in [
+            ("", "/managed"),
+            (" \n", "/managed"),
+            ("bad\0text", "/managed"),
+            (&"x".repeat(65537), "/managed"),
+            ("goal", "relative"),
+            ("goal", "/managed/../other"),
+            ("goal", "/managed/\nother"),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+            let home = profile.revalidate().unwrap();
+            let marker = root.join("received-input");
+            let flow = PreflightExchange::new(
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium",
+                },
+                home.to_str().unwrap(),
+            )
+            .unwrap();
+            let mut process = LoginProcess::reserve(&profile).unwrap();
+            process
+                .launch(|| {
+                    Command::new("/bin/sh")
+                        .args([
+                            "-c",
+                            "IFS= read -r line && printf received > \"$1\"; IFS= read -r hold",
+                            "invalid-input-peer",
+                        ])
+                        .arg(&marker)
+                        .env_clear()
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::null())
+                        .spawn()
+                })
+                .unwrap();
+            let result = run_text_and_close(
+                &mut process,
+                flow,
+                &AtomicBool::new(false),
+                std::path::Path::new(cwd),
+                text,
+                &mut |_| panic!("unexpected output"),
+            );
+            assert!(result.is_err());
+            assert!(process.exit_status().unwrap().is_none());
+            assert!(LoginProcess::reserve(&profile).is_err());
+            // Fresh claim proves the rejected call did not use or claim transport.
+            process.begin_preflight().unwrap();
+            process.finish().unwrap();
+            assert!(!marker.exists());
+            assert!(LoginProcess::reserve(&profile).is_ok());
+        }
+    }
 
     #[test]
     fn waiting_gate_blocks_changed_pair_and_late_cancel_without_losing_owner() {
@@ -440,6 +576,12 @@ IFS= read -r hold
             "thread",
             "thread-before",
             "wrong-thread",
+            "turn-success",
+            "turn-wrong-id",
+            "turn-eof",
+            "turn-cancel",
+            "turn-sink-error",
+            "turn-uncertain",
         ] {
             let temp = tempfile::tempdir().unwrap();
             let storage = crate::Storage::open(
@@ -497,6 +639,20 @@ else
   printf '%s\n' "$5"
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
 fi
+case "$6" in turn-*)
+IFS= read -r line; case "$line" in *'"method":"turn/start"'*) ;; *) exit 8;; esac
+test "$6" != turn-eof || exit 0
+if test "$6" = turn-wrong-id; then
+printf '%s\n' '{"id":99,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
+else
+printf '%s\n' '{"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
+fi
+printf '%s\n' '{"method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
+printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":""}}}'
+printf '%s\n' '{"method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"t1","itemId":"a1","delta":"hello"}}'
+printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":"hello"}}}'
+printf '%s\n' '{"method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"t1","status":"completed","items":[],"error":null}}}'
+;; esac
 IFS= read -r hold
 "#;
             process
@@ -512,10 +668,52 @@ IFS= read -r hold
                         .spawn()
                 })
                 .unwrap();
-            if case == "uncertain" {
+            if case == "uncertain" || case == "turn-uncertain" {
                 process.inject_uncertain_cleanup_once();
             }
             let cancel = AtomicBool::new(case == "cancel");
+            if case.starts_with("turn-") {
+                use hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome;
+                use hello_agent_core::provider::vendor_observation::codex_events::Projection;
+                let mut text = String::new();
+                let result = run_text_and_close(
+                    &mut process,
+                    flow,
+                    &cancel,
+                    std::path::Path::new("/managed/snapshot"),
+                    "test goal",
+                    &mut |value| {
+                        match value {
+                            Projection::Delta { text: value, .. } => text.push_str(&value),
+                            Projection::Completed { text: value, .. } => text = value,
+                            Projection::RequiresHandling => panic!("private projection"),
+                        }
+                        if case == "turn-cancel" {
+                            cancel.store(true, Ordering::Release);
+                        }
+                        if case == "turn-sink-error" {
+                            return Err(failure());
+                        }
+                        Ok(())
+                    },
+                );
+                if case == "turn-success" {
+                    assert_eq!(result.unwrap(), TurnOutcome::Completed);
+                    assert_eq!(text, "hello");
+                } else {
+                    assert!(result.is_err(), "{case}");
+                }
+                if case == "turn-uncertain" {
+                    let _ = process.finish();
+                }
+                drop(process);
+                assert_eq!(
+                    LoginProcess::reserve(&profile).is_ok(),
+                    case != "turn-uncertain",
+                    "{case}"
+                );
+                continue;
+            }
             if case == "polled-process" {
                 assert!(process.poll(&cancel).unwrap().is_none());
             }

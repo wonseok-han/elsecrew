@@ -346,6 +346,25 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
+    pub(crate) fn send_turn(
+        &mut self,
+        request: hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
+        self.transport_used = true;
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.send_turn(request, timeout, cancel, &mut || self.tick());
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     pub(crate) fn receive(
         &mut self,
         timeout: Duration,

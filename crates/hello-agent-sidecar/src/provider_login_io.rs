@@ -162,6 +162,20 @@ impl LoginIo {
         result
     }
 
+    pub(crate) fn send_turn(
+        &mut self,
+        frame: hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observe: &mut impl FnMut() -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        let result = self.send_inner(frame.as_str().as_bytes(), timeout, cancel, observe);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     fn send_inner(
         &mut self,
         frame: &[u8],

@@ -110,6 +110,20 @@ impl PreflightExchange {
         if self.state != PreflightState::ObservationsMatched {
             return Err(invalid());
         }
+        let path = Self::validate_thread_cwd(cwd)?;
+        let request = serde_json::json!({"id":5,"method":"thread/start","params":{
+            "model":self.model,"modelProvider":"openai","cwd":path,
+            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"read-only",
+            "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
+            "baseInstructions":"","developerInstructions":""
+        }});
+        self.thread_cwd = Some(cwd.to_owned());
+        self.state = PreflightState::ThreadStarting;
+        Ok(PreflightRequest(format!("{request}\n")))
+    }
+
+    /// Syntax only; the runtime must separately admit the snapshot identity.
+    pub fn validate_thread_cwd(cwd: &std::path::Path) -> Result<&str, ProviderError> {
         let path = cwd.to_str().ok_or_else(invalid)?;
         if !cwd.is_absolute()
             || path.len() > 16 * 1024
@@ -120,15 +134,7 @@ impl PreflightExchange {
         {
             return Err(invalid());
         }
-        let request = serde_json::json!({"id":5,"method":"thread/start","params":{
-            "model":self.model,"modelProvider":"openai","cwd":path,
-            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"read-only",
-            "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
-            "baseInstructions":"","developerInstructions":""
-        }});
-        self.thread_cwd = Some(cwd.to_owned());
-        self.state = PreflightState::ThreadStarting;
-        Ok(PreflightRequest(format!("{request}\n")))
+        Ok(path)
     }
 
     /// Correlated identity, not permission to execute a turn or proof of filesystem isolation.

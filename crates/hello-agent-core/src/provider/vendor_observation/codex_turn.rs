@@ -14,6 +14,14 @@ pub struct TurnStart {
     complete: bool,
 }
 
+/// Typed text request. No arbitrary renderer JSON can construct it.
+pub struct TurnRequest(String);
+impl TurnRequest {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 fn invalid() -> ProviderError {
     ProviderError("Codex turn start did not match the requested conversation".into())
 }
@@ -42,10 +50,16 @@ impl Turn {
 }
 
 impl TurnStart {
-    pub(super) fn new(thread: &str, text: &str) -> Result<Self, ProviderError> {
+    /// Validate before acquiring a process or sending initialization frames.
+    pub fn validate_text(text: &str) -> Result<(), ProviderError> {
         if text.trim().is_empty() || text.len() > 64 * 1024 || text.contains('\0') {
             return Err(invalid());
         }
+        Ok(())
+    }
+
+    pub(super) fn new(thread: &str, text: &str) -> Result<Self, ProviderError> {
+        Self::validate_text(text)?;
         // Inherit the exact validated thread policy; no caller-supplied overrides.
         let request = serde_json::json!({"id":6,"method":"turn/start","params":{
             "threadId":thread,"input":[{"type":"text","text":text,"text_elements":[]}]
@@ -66,6 +80,10 @@ impl TurnStart {
             return Err(invalid());
         }
         self.request.take().ok_or_else(invalid)
+    }
+
+    pub fn take_frame(&mut self) -> Result<TurnRequest, ProviderError> {
+        self.take_request().map(TurnRequest)
     }
 
     /// Exactly one response and one started notification, in either order.
