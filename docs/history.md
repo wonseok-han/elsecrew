@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (코딩 작업용 OS 쓰기 경계)
+
+- **진전/기준**: 직전 OS 읽기 전용 연결은 `35691cb`로 커밋됐다. clean checkout에서 메인이 같은 policy builder에 typed workspace 쓰기 모드를 추가했다. 일반 작업 파일만 쓰게 하고 `.git/.agents/.codex` 및 profile config를 보호한다. CLI/helper가 HOME/작업 사본 안에 있는 경우도 거절한다. native run은 아직 ReadOnly 고정이다.
+- **검증**: 경로/argv 집중 1 PASS. 외부 OS 임시 셸 시험 1 PASS/0.18초로 일반 파일·자식·scratch 쓰기 성공 및 원본/제어 파일 변경·Git 이동·원본/config hardlink·symlink 우회 거절을 확인했다. 현재 실제 공급자 없이 기존 readOnly 원장 OS 시험과 strict clippy·fmt·diff를 이어간다. 독립 검토 후 작업 단위 커밋한다.
+- **승인/다음**: [공식 app-server 문서](https://learn.chatgpt.com/docs/app-server)를 검색·열어 initialize/initialized와 thread/turn 시작 단계 분리를 재확인했다. 현재 해시 검증 CLI·새 임시 프로필에서 네트워크 차단 상태로 initialize/config/read만 하는 실제 무모델 검사 승인을 비동기로 요청했고 아직 실행하지 않았다. 기존 계정·사용자 프로젝트·모델 요청은 사용하지 않는다. 실제 공급자 통신·workspaceWrite preflight/도구/승인·Claude·UI는 남으며 main 병합/push 없음.
+- **최신 검사**: 기존 OS readOnly 원장 시험 1 PASS/3.89초, strict sidecar all-targets clippy·fmt·diff PASS. 변경 4파일은 기존 `run_ledger_review` 한 명의 읽기 전용 독립 검토 중이며 실행 중 검사는 없다.
+- **마감**: 고정 delta의 독립 검토 PASS. 보호 deny 규칙·CLI/helper 위치·ReadOnly 고정 호출과 실제 역할 미활성 경계를 확인했다. 관련 4파일을 커밋한다. 실제 CLI 검사 요청의 응답은 아직 없으며 해당 실행을 임의 시작하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (OS 격리와 예약 실행 연결)
 
 - **진전/기준**: 직전 profile 입장 변경은 `2b75bcb`로 커밋된 진전이다. clean 통합 checkout에서 메인이 기본 거부 macOS 정책을 native 예약 후보에 연결했다. 기존 fd 닫기·신원 기록 gate가 release 뒤 sandbox-exec/payload로 전환하며, 경로는 개별 parameter argv다. profile와 작업 사본 중첩/비정규 경로를 거절하고 profile config·작업 사본 쓰기 및 네트워크 권한은 열지 않는다.
@@ -136,6 +144,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 임시 OS 실측은 통과했지만 native run은 계속 ReadOnly이며 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
 
 - **Codex 실행 profile 입장(2026-09-28)**: 기존 snapshot scanner를 runtime HOME 전체에 재사용해 spawn 전·release 직전 중첩 파일의 nlink=1·실제 directory 조건을 확인한다. 로그인 규칙 자체를 강화해 기존 연결을 깨뜨리지 않으며 파일/인증 내용은 변경하지 않는다. OS sandbox와 적대적 동시 교체 보호는 별도다.
 

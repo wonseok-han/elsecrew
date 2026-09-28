@@ -100,8 +100,14 @@ pub(crate) fn offline_discovery_command(
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
 ) -> std::io::Result<std::process::Command> {
     let args = discovery_arguments(home, expected)?;
-    let mut command =
-        crate::provider_runtime_sandbox::command(executable, helper, &args, home, workspace)?;
+    let mut command = crate::provider_runtime_sandbox::command(
+        executable,
+        helper,
+        &args,
+        home,
+        workspace,
+        crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly,
+    )?;
     discovery_environment(&mut command, home);
     Ok(command)
 }
