@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (허용 응답의 샌드박스 경계 재검증)
+
+- **진전/발견**: 직전 `4a02dda`는 단회 응답 builder 구현의 진전이다. 이번 실제 전송 연결 전 [공식 sandbox approval 설명](https://learn.chatgpt.com/docs/sandboxing/auto-review)을 다시 확인했다. 승인 요청에는 sandbox 밖 실행·쓰기 root 밖 수정이 포함되며, 현재 request metadata만으로 일반 명령 accept가 앱의 snapshot 보호를 유지한다고 증명할 수 없다. cwd 문자열 일치는 OS 경계가 아니다.
+- **수정/정정**: 현재 내부 후보는 read-only이고 별도 enclosing 실행 격리가 검증되지 않았으므로 live pending 요청이라도 AcceptOnce 응답 생성을 거절한다. decline/cancel 단회 준비는 유지하고 오류 뒤 세션은 재사용하지 않는다. 이전 accept wire 구현은 미전송 상태에서 차단했으며 실제 허용/원본 쓰기는 한 번도 실행하지 않았다. Karpathy 지침으로 기존 builder 한 지점에서 막고 정책 fallback이나 임의 권한 확대를 추가하지 않았다.
+- **다음**: 앱의 원본 보호를 유지하는 workspace-write 역할의 권한·snapshot 입장 검증을 먼저 연결한다. 읽기 전용 후보를 최종 코딩 IDE로 대체하는 결정이 아니며 도구 내부 실행·사용자 승인 UI·원장 연결은 여전히 필요하다. 범위 밖 실행 허용은 독립적으로 강제되는 경계의 증거 없이 열지 않는다. 신규 위임·실제 CLI·인증·모델 호출·main 병합·push 없음.
+- **검증/마감**: core events 16 PASS, strict sidecar clippy·fmt·diff PASS. late/중복 ID 회귀가 accept의 일괄 거절 때문에 우연히 통과하지 않도록 Decline으로 바꿔 집중 1 PASS를 재확인했다. 자체 검토 후 미연결 builder 차단·회귀·문서만 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (단회 승인 응답 준비)
 
 - **진전/기준**: 직전 `9edbb51`는 승인 요청·tool item 결속과 회귀를 커밋한 진전이다. 이번 clean HEAD에서 메인이 같은 live TurnStream에 한 번만 응답을 준비하는 순수 wire builder를 추가했다. pinned 결정 값 accept/decline/cancel만 만들며 세션 허용/정책 amendment는 API에 없다.
@@ -271,6 +278,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **승인은 snapshot 보호를 대체하지 않는다(2026-09-28)**: Codex requestApproval에는 sandbox 밖 실행/추가 쓰기가 포함될 수 있다. cwd·item 신원 일치나 사용자 클릭만으로 원본 보호를 증명하지 못한다. 현재 미활성 후보의 AcceptOnce builder는 거절하도록 수정했고 decline/cancel만 준비한다. workspace-write의 독립 권한 검증을 먼저 구현하며 관리 정책 우회/원본 직접 쓰기 경로로 대체하지 않는다.
 
 - **Codex 격리 미입증 조건(2026-09-28)**: HOME/CODEX_HOME 분리와 CLI 모델/권한 override는 시스템/회사 관리 layer 및 전역 hook 배제 증명이 아니다. 내부 full preflight는 includeLayers=true로 정확한 flags/user/빈 system 출처와 hooks=false를 대조한다(default RPC는 false 유지). 조회는 startup 부작용 이후의 관측이다. 빈 임시 환경의 무모델 thread 실측과 미신뢰 hook/MCP 표시 미생성은 통과했지만 신뢰/관리/plugin 및 프로젝트 입장 격리는 별도 남는다. 관리 정책을 우회하지 않는다. remoteControl/status/changed는 exact opt-out으로 억제하고 예상 밖 수신 frame은 계속 거절한다.
 

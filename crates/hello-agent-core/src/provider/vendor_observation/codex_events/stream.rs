@@ -168,7 +168,7 @@ impl TurnStream {
             if self.items.get(item_id).is_none_or(|item| item.completed) {
                 return Err(invalid());
             }
-            let reply = ApprovalReply::new(request_id, decision);
+            let reply = ApprovalReply::new(request_id, decision)?;
             self.prepared_replies.insert(request_id.clone());
             Ok(reply)
         })();
@@ -703,11 +703,7 @@ mod tests {
 
     #[test]
     fn approval_decisions_are_single_use_and_do_not_complete_the_request() {
-        for (decision, wire) in [
-            (Decision::AcceptOnce, "accept"),
-            (Decision::Decline, "decline"),
-            (Decision::Cancel, "cancel"),
-        ] {
+        for (decision, wire) in [(Decision::Decline, "decline"), (Decision::Cancel, "cancel")] {
             let mut stream = started();
             stream
                 .observe(&item("item/started", "commandExecution"))
@@ -765,11 +761,27 @@ mod tests {
             };
             assert!(
                 stream
-                    .prepare_approval_reply(&id, Decision::AcceptOnce)
+                    .prepare_approval_reply(&id, Decision::Decline)
                     .is_err(),
                 "{case}"
             );
             assert!(stream.finish().is_err());
         }
+    }
+
+    #[test]
+    fn live_user_accept_cannot_expand_the_unadmitted_sandbox_boundary() {
+        let mut stream = started();
+        stream
+            .observe(&item("item/started", "commandExecution"))
+            .unwrap();
+        stream.pending_approval(&approval(10)).unwrap();
+        assert!(stream
+            .prepare_approval_reply(&RequestId::Number(10), Decision::AcceptOnce)
+            .is_err());
+        assert!(stream
+            .prepare_approval_reply(&RequestId::Number(10), Decision::Decline)
+            .is_err());
+        assert!(stream.finish().is_err());
     }
 }

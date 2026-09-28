@@ -49,6 +49,7 @@ pub struct PendingApproval {
 }
 
 /// Explicit choices only: never session-wide or policy-amending approval.
+/// AcceptOnce is a requested UI choice, not a supported sandbox permission.
 /// A choice is not admission: the runtime must enforce role/snapshot policy
 /// and bind an actual user action before preparing or transmitting a reply.
 pub enum Decision {
@@ -63,20 +64,23 @@ impl ApprovalReply {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-    pub(super) fn new(id: &RequestId, decision: Decision) -> Self {
+    pub(super) fn new(id: &RequestId, decision: Decision) -> Result<Self, ProviderError> {
         let id = match id {
             RequestId::Number(n) => serde_json::json!(n),
             RequestId::Text(s) => serde_json::json!(s),
         };
         let decision = match decision {
-            Decision::AcceptOnce => "accept",
+            // Approval requests can cross the vendor sandbox. No independent
+            // enclosing execution boundary is admitted yet, so even an explicit
+            // UI choice cannot authorize this wire reply in the current candidate.
+            Decision::AcceptOnce => return Err(invalid()),
             Decision::Decline => "decline",
             Decision::Cancel => "cancel",
         };
-        Self(format!(
+        Ok(Self(format!(
             "{}\n",
             serde_json::json!({"id":id,"result":{"decision":decision}})
-        ))
+        )))
     }
 }
 
