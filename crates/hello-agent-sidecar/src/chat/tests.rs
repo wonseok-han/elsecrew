@@ -468,6 +468,10 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         "idle-success",
         "idle-observer",
         "bound",
+        "bound-native",
+        "bound-native-gate-cli",
+        "bound-native-gate-helper",
+        "bound-native-gate-cancel",
         "bound-role",
         "bound-write",
         "bound-input",
@@ -482,7 +486,12 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         let fail_sink = matches!(failure, "sink" | "bound-sink");
         let success = matches!(
             failure,
-            "none" | "idle-success" | "bound" | "bound-interrupted" | "bound-multiple"
+            "none"
+                | "idle-success"
+                | "bound"
+                | "bound-native"
+                | "bound-interrupted"
+                | "bound-multiple"
         );
         let mut fixture = Fixture::new();
         let snapshot = fixture.snapshot("req_sink_snapshot");
@@ -605,16 +614,126 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
             .args(&replies).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received).env("RESPONDED", &responded).env("DELAY", if failure.starts_with("idle-") {"yes"} else {"no"}).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
         };
         if let Some(reservation) = &reservation {
-            // Toy peer cannot act until its first request; release has no payload.
-            reservation
-                .launch_gated(
+            if failure.starts_with("bound-native") {
+                use crate::provider_executable::PinnedExecutable;
+                use sha2::{Digest, Sha256};
+                use std::os::unix::fs::PermissionsExt;
+                let quote = |value: &str| format!("'{}'", value.replace('\'', "'\\''"));
+                let script = format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nfirst=yes\nfor reply in {}; do\nIFS= read -r line || exit 2\nprintf '%s\\n' \"$line\" >> {}\nprintf received > {}\nprintf '%s\\n' \"$reply\"\nif test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi\ndone\nIFS= read -r hold\n",
+                    quote(fixture._root.path().join("native-argv").to_str().unwrap()),
+                    replies.iter().map(|value| quote(value)).collect::<Vec<_>>().join(" "),
+                    quote(captured.to_str().unwrap()), quote(received.to_str().unwrap()),
+                );
+                let native_root = fixture._root.path().canonicalize().unwrap();
+                let cli_path = native_root.join("toy-cli");
+                let helper_path = native_root.join("toy-helper");
+                std::fs::write(&cli_path, &script).unwrap();
+                std::fs::write(&helper_path, b"#!/bin/sh\nexit 0\n").unwrap();
+                for path in [&cli_path, &helper_path] {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+                }
+                let cli =
+                    PinnedExecutable::open(&cli_path, Sha256::digest(script.as_bytes()).into())
+                        .unwrap();
+                let helper = PinnedExecutable::open(
+                    &helper_path,
+                    Sha256::digest(b"#!/bin/sh\nexit 0\n").into(),
+                )
+                .unwrap();
+                // Pre-launch rejects leave the same fresh owner/run untouched.
+                assert!(reservation
+                    .launch_codex_candidate(
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        &cli,
+                        &helper,
+                        &AtomicBool::new(true),
+                    )
+                    .is_err());
+                for (path, original) in [
+                    (&cli_path, script.as_bytes()),
+                    (&helper_path, b"#!/bin/sh\nexit 0\n".as_slice()),
+                ] {
+                    std::fs::write(path, b"changed").unwrap();
+                    assert!(reservation
+                        .launch_codex_candidate(
+                            &mut fixture.storage,
+                            &fixture.projects,
+                            &mut process,
+                            &cli,
+                            &helper,
+                            &AtomicBool::new(false),
+                        )
+                        .is_err());
+                    assert!(fixture.storage.projection_records("run").unwrap()[0]
+                        ["process_identity_internal"]
+                        .is_null());
+                    std::fs::write(path, original).unwrap();
+                }
+                let launch_cancel = std::sync::Arc::new(AtomicBool::new(false));
+                if failure != "bound-native" {
+                    let cli_path = cli_path.clone();
+                    let helper_path = helper_path.clone();
+                    let canceled = launch_cancel.clone();
+                    crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
+                        *hook.borrow_mut() = Some(Box::new(move || match failure {
+                            "bound-native-gate-cli" => {
+                                std::fs::write(cli_path, b"changed").unwrap()
+                            }
+                            "bound-native-gate-helper" => {
+                                std::fs::write(helper_path, b"changed").unwrap()
+                            }
+                            _ => canceled.store(true, std::sync::atomic::Ordering::Release),
+                        }));
+                    });
+                }
+                let launched = reservation.launch_codex_candidate(
                     &mut fixture.storage,
                     &fixture.projects,
                     &mut process,
-                    spawn,
-                    |_| Ok(()),
-                )
-                .unwrap();
+                    &cli,
+                    &helper,
+                    &launch_cancel,
+                );
+                if failure != "bound-native" {
+                    assert!(launched.is_err());
+                    crate::provider_preflight_session::BEFORE_RELEASE
+                        .with(|hook| assert!(hook.borrow().is_none()));
+                    assert!(!fixture._root.path().join("native-argv").exists());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    assert_eq!(run["barrier"]["releaseGranted"], false);
+                    assert!(!run["process_identity_internal"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty());
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    process.finish().unwrap();
+                    assert!(!received.exists());
+                    assert!(!fixture._root.path().join("native-argv").exists());
+                    AgentRuntime::blocked()
+                        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap();
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]["state"],
+                        "recoveryRequired"
+                    );
+                    continue;
+                }
+                launched.unwrap();
+            } else {
+                // Toy peer cannot act until its first request; release has no payload.
+                reservation
+                    .launch_gated(
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        spawn,
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+            }
             if matches!(failure, "bound-role" | "bound-input") {
                 let mut saved = fixture
                     .storage
@@ -801,7 +920,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         if success && reservation.is_none() {
             assert!(observations.get() > 10);
         }
-        if failure == "bound" {
+        if matches!(failure, "bound" | "bound-native") {
             let requests: Vec<Value> = fs::read_to_string(&captured)
                 .unwrap()
                 .lines()
@@ -829,6 +948,29 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
             assert_eq!(last_message["kind"], "role");
             assert_eq!(last_message["text"], "hello");
             assert_eq!(last_message["roleId"], "review");
+            if failure == "bound-native" {
+                let args = fs::read_to_string(fixture._root.path().join("native-argv")).unwrap();
+                assert_eq!(
+                    args.lines().collect::<Vec<_>>(),
+                    vec![
+                        "app-server",
+                        "--listen",
+                        "stdio://",
+                        "-c",
+                        "model=\"test-model\"",
+                        "-c",
+                        "model_reasoning_effort=\"medium\"",
+                        "-c",
+                        "model_provider=\"openai\"",
+                        "-c",
+                        "approval_policy=\"on-request\"",
+                        "-c",
+                        "sandbox_mode=\"read-only\"",
+                        "-c",
+                        "features.hooks=false",
+                    ]
+                );
+            }
         }
         if matches!(failure, "bound-persist" | "bound-sink" | "bound-cleanup") {
             let run = &fixture.storage.projection_records("run").unwrap()[0];
@@ -859,6 +1001,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         if matches!(
             failure,
             "bound"
+                | "bound-native"
                 | "bound-multiple"
                 | "bound-persist"
                 | "bound-sink"
@@ -871,7 +1014,7 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
             assert_eq!(
                 run["state"],
                 match failure {
-                    "bound" | "bound-multiple" => "succeeded",
+                    "bound" | "bound-native" | "bound-multiple" => "succeeded",
                     "bound-interrupted" | "bound-cancel" => "canceled",
                     "bound-cleanup" => "recoveryRequired",
                     _ => "failed",
@@ -913,7 +1056,10 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         } else {
             assert!(LoginProcess::reserve(&profile).is_ok());
         }
-        if matches!(failure, "bound" | "bound-terminal" | "bound-cleanup") {
+        if matches!(
+            failure,
+            "bound" | "bound-native" | "bound-terminal" | "bound-cleanup"
+        ) {
             let before = fixture.storage.projection_records("run").unwrap();
             if failure == "bound-terminal" {
                 assert_eq!(before[0]["state"], "preparing");

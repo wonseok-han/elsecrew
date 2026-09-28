@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 #[cfg(test)]
 thread_local! {
-    static BEFORE_RELEASE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static BEFORE_RELEASE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn failure() -> SidecarError {
@@ -79,7 +79,7 @@ pub(crate) fn inspect_full_preflight_candidate<'a>(
 }
 
 /// Invocation-only overrides: never rewrite the user's app-owned login config.
-fn discovery_command(
+pub(crate) fn discovery_command(
     executable: &std::path::Path,
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,

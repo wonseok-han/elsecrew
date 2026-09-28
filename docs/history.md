@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (예약 기반 Codex launch 연결)
+
+- **진전/범위**: 직전 실행 원장 파동은 `9890ae9`에 커밋됐고 clean 통합 checkout에서 이어갔다. 메인이 기존 discovery 명령을 재사용하는 예약 launch 후보를 구현했다. 모델/추론은 저장된 역할, HOME은 profile owner에서만 얻으며 CLI/helper pin과 취소를 spawn 전·release 직전에 대조한다. 프로세스 신원은 기존 run gate 순서로 먼저 저장된다. 제품 admission이나 쓰기 권한을 새로 열지 않는다.
+- **검증**: 실제 임시 snapshot/SQLite와 가짜 pinned CLI의 gate→설정 관측→저장된 목표→공개 답변→terminal 연결 및 gate 직전 CLI/helper 교체·취소 차단까지 1테스트/20사례 PASS. 초기 테스트의 비정규화 임시 경로가 pin 검사에 거절된 것은 테스트에서 canonicalize해 해결했다. 최신 추가 terminal/재오픈 assertion과 strict clippy를 검사 중이다. 실제 vendor CLI/계정/유료 실행은 없다.
+- **다음**: 이 launch 연결 delta의 독립 검토 후 커밋한다. 실제 provider 입장·설정/쓰기 격리·도구/승인·Claude·제품 UI는 계속 남으며 main 병합/push는 하지 않는다.
+- **최신 검사**: terminal/DB 재오픈 assertion을 포함한 최신 소스 20사례 PASS(40.21초), strict sidecar clippy·scoped fmt·diff PASS. `run_ledger_review` 한 명이 기준 `9890ae9` 대비 고정 delta를 읽기 전용 검토 중이며 추가 테스트는 요청하지 않았다.
+- **마감**: 해당 고정 delta의 독립 정적 검토가 차단 결함 없이 PASS했다. 현재 역할/명령·profile·pin·gate·실패 cleanup 연결까지만 확인한 결과이며 signature/version/config 입장·helper 실제 실행 결속·OS 쓰기 격리·제품 활성화는 포함하지 않는다. 승인된 M5 범위로 5파일을 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 원장 파동 독립 검토 통과)
 
 - **진전**: 직전 턴은 검토자 상시 승인 반영과 실제 검토 시작이었다. 이번에는 `run_ledger_review`의 live 상태를 확인하고 동일 검토 결과를 회수했다. 기준 `e738340` 대비 준비/예약·gate 신원·입력/공개 원장·terminal/복구·profile fence 변경의 정적 독립 검토는 차단 결함 없이 PASS다. 제품 실행 활성화나 workspace-write 격리의 합격은 아니다.

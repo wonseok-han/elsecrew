@@ -19,6 +19,73 @@ pub(crate) struct RunReservation {
 }
 
 impl RunReservation {
+    /// Internal launch candidate only. Pins do not supply provider admission or
+    /// sandbox authority. Caller retains the process on every failure for cleanup.
+    /// Model/effort come from the reserved role, never independent launch arguments.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn launch_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
+        let failure = || {
+            SidecarError::new(
+                "agentLaunchRejected",
+                "reserved provider launch is unavailable",
+            )
+        };
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        if profile.runtime != "codex"
+            || profile.permission != "readOnly"
+            || cancel.load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(failure());
+        }
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let home = process.codex_preflight_home()?;
+        let expected = ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
+        executable.revalidate()?;
+        helper.revalidate()?;
+        // Construct the exact invocation before creating any child. The command
+        // starts the existing inert gate; only the identity-recorded owner releases it.
+        let mut command = crate::provider_preflight_session::discovery_command(
+            executable.revalidate()?,
+            &home,
+            &expected,
+        )
+        .map_err(|_| failure())?;
+        self.launch_gated(
+            storage,
+            projects,
+            process,
+            || command.spawn(),
+            |child| {
+                #[cfg(test)]
+                crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().take() {
+                        hook();
+                    }
+                });
+                executable.revalidate().map_err(std::io::Error::other)?;
+                helper.revalidate().map_err(std::io::Error::other)?;
+                if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                    return Err(std::io::Error::other("provider launch canceled"));
+                }
+                crate::provider_login_gate::release(child)
+            },
+        )
+    }
+
     /// Internal read-only candidate: inputs come only from this reservation.
     /// Deltas remain provisional. Completed items use the existing public ledger;
     /// only a completed turn with confirmed cleanup may publish its final answer.
