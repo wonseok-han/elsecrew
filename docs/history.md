@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (외부 sandbox 기제 검증과 원본 보호 한계)
+
+- **진전/기준**: 직전 launch 연결은 `34f3017`로 커밋된 진전이다. clean 통합 checkout에서 실제 쓰기 실행의 격리 조건을 조사했다. OpenAI 공식 `agent-approvals-security` 문서를 열어 공급자 sandbox와 승인의 별도 역할을 확인했다. 메인은 Karpathy 지침에 따라 제품 코드/권한을 바꾸지 않고 opt-in 임시 fixture 기제 검사를 추가했다.
+- **실측**: 기본 중첩 환경은 sandbox_apply/Operation not permitted(71), 승인된 외부 진단은 `/usr/bin/true` exit 0. 새 `macos_sandbox_probe`를 임시 파일만으로 실행해 허용 폴더 쓰기와 외부 직접/심볼릭 링크/부모 경로/자손 쓰기·삭제/이동 차단을 확인했다. 기존 writable fd·hardlink는 원본 변경 성공, 실행 중 외부 hardlink 생성은 거절됐다. `standalone_source_protection_candidate=false`이며 probe exit 0을 제품 안전 PASS로 기록하지 않는다. 실제 vendor/인증/유료 모델/사용자 프로젝트 접근 없음.
+- **결정/다음**: 단순 경로 기반 sandbox wrapper만으로 제품을 활성화하지 않는다. 제안서 §6.8에 child 핸들 차단·snapshot inode 공유 입장 검사·IPC/network 포함 생산 정책·독립 검토 필요 조건을 정리했다. 기존 내부 후보는 닫힌 상태다. 테스트 전용 변경의 fmt/clippy/diff 검증 후 커밋하며 main 병합/push는 하지 않는다.
+- **마감 검증**: 최신 probe 실행은 exit 0/0.12초, 단독 원본 보호 후보 판정은 false. scoped fmt·probe 대상 strict clippy·diff PASS. 생산 코드·안전 경계 변경이 없는 진단 테스트/설계 기록 3파일만 직접 검토해 커밋한다. 다음 구현은 격리 입장 시 inode 공유와 상속 핸들 배제이며, 제품 활성화 전 독립 검토는 그대로 필요하다.
+
 ### 2026-09-28 · by GPT-6 Astra (예약 기반 Codex launch 연결)
 
 - **진전/범위**: 직전 실행 원장 파동은 `9890ae9`에 커밋됐고 clean 통합 checkout에서 이어갔다. 메인이 기존 discovery 명령을 재사용하는 예약 launch 후보를 구현했다. 모델/추론은 저장된 역할, HOME은 profile owner에서만 얻으며 CLI/helper pin과 취소를 spawn 전·release 직전에 대조한다. 프로세스 신원은 기존 run gate 순서로 먼저 저장된다. 제품 admission이나 쓰기 권한을 새로 열지 않는다.
@@ -91,6 +98,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **외부 경로 sandbox만으로 원본 보호 불충분(2026-09-28)**: 임시 fixture의 macOS `macos_sandbox_probe`에서 기존 writable descriptor와 hardlink로 sandbox 밖 원본 변경을 재현했다. 직접/심볼릭 링크/자손 쓰기와 실행 중 hardlink 생성은 차단됐다. probe exit 0은 기제 관측 완료이지 안전 gate PASS가 아니며 제품에 적용된 정책이 아니다. 기존 핸들·inode 공유·IPC 경계가 포함된 입장/실행 정책이 필요하다. 제안서 §6.8 참조.
 
 - **실제 실행 원장 통합 파동 검토 통과(2026-09-28, 기준 `e738340`)**: 공통 RunPreparation이 메시지/역할/snapshot 해석과 run/recovery/writer 예약을 담당한다. RunReservation은 gate 전 신원 저장·release 기록·누적 자손 갱신과 예약 입력의 text 통신·공개 원장·explicit 종료 증거에 따른 terminal/복구 저장을 연결한다. 임시 snapshot/SQLite/toy pipe와 DB 재오픈 회귀 및 독립 정적 검토 PASS다. 누적 라이브러리 증거와 후속 변경의 집중 회귀를 조합하며 전체 최신 소스 누적 재실행으로 주장하지 않는다. native provider 입장·workspace-write OS 격리·도구/승인·제품 caller는 여전히 미완료다. 가짜 공급자 증거로 실제 provider·유료 모델·제품 활성화를 주장하지 않는다. 상세는 현재 및 월간 archive의 2026-09-28 기록이다.
 

@@ -501,6 +501,23 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 ---
 
+### 6.8 외부 프로세스 격리 검증 조건 (2026-09-28, 제안)
+
+실제 쓰기 역할을 열기 전, 공급자 내부 sandbox 설정 대조와 앱이 강제하는 원본 보호를 구분한다. [OpenAI 공식 보안 문서](https://learn.chatgpt.com/docs/agent-approvals-security)는 macOS 명령 실행에 Seatbelt를 사용하며 승인 정책과 sandbox를 별개로 설명한다. 이는 우리 앱의 app-server 전체 startup·상속 자원·원본 보호 증명은 아니다.
+
+`tests/macos_sandbox_probe.rs`는 임시 파일만 사용하는 opt-in OS 기제 실험이다. 실행: `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar --test macos_sandbox_probe -- --ignored --nocapture`. 이미 sandbox 안인 환경에서는 `sandbox_apply: Operation not permitted`로 실패할 수 있으며 이를 성공이나 제품 fallback 조건으로 처리하지 않는다.
+
+2026-09-28 로컬 관측은 다음과 같다. broad allow/default + 경로별 write 제한은 작업 폴더 쓰기를 허용하고 외부 직접/심볼릭 링크/부모 경로/자식 프로세스 쓰기·외부 삭제/이동·실행 중 외부 hardlink 생성을 거절했다. 그러나 **sandbox 진입 전 열린 writable descriptor와 기존 hardlink로 원본 파일을 변경할 수 있었다.** 출력 `standalone_source_protection_candidate=false`가 판정이며 테스트 프로세스 exit 0은 이 정책의 제품 합격이 아니다. 외부 네트워크·Mach IPC·실제 vendor 호환성은 검증하지 않았다. 현재 제품에 이 정책을 적용하지 않는다.
+
+따라서 후속 구현/입장 검증에는 다음이 필요하다.
+
+1. 원본 파일의 열린 핸들이 child에 전달되지 않음을 명시적으로 확인한다. stdio는 pipe이고 그 외 descriptor는 close-on-exec 또는 명시 닫기 대상이며, 원본 파일을 stdout/stderr로 전달하지 않는다.
+2. snapshot과 쓰기 허용 디렉터리의 기존 inode 공유/hardlink를 입장 단계에서 거절한다. 현재 snapshot 생성 방식만 믿고 후속 경로 교체를 허용하지 않는다. 준비 시점 검증과 실행 직전 재검증, 검사 비용을 함께 설계한다.
+3. 기제 실험의 `(allow default)`를 생산 정책으로 채택하지 않는다. 파일 정책 외에도 IPC를 통한 다른 프로세스의 대리 쓰기·network·자손 프로세스·권한 확대와 설정 실행을 다뤄야 한다. 기존 사용자/회사 관리 정책을 우회하지 않는다.
+4. 제품 runtime은 위 검증·실제 공급자 격리 관측·독립 검토를 통과한 실행 경로만 허용한다. 거절 시 무격리 fallback하지 않는다. Windows는 별도 OS 증거가 필요하다.
+
+이는 새 사용자 권한 승인이 아니라 기존 원본 보호 계약을 구현하기 위한 검증 조건이다. 읽기 전용 후보나 이 실험을 코딩 역할·승인 UI의 대체 완료선으로 사용하지 않는다.
+
 ## 7. 안전 경계
 
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.
