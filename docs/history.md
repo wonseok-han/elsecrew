@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (설정 전용 검사 범위 고정)
+
+- **기준/진전**: 직전 `c196299`는 설치 쌍 일치와 검사 범위를 확인한 기록이다. 메인은 Karpathy 지침에 따라 기존 preflight 검증기를 재사용하고 `configuration_only` 생성자를 추가했다. 초기화·설정 layer 검증 뒤 별도 ConfigurationMatched 상태에서 멈추며 계정/모델 조회·thread/turn으로 승격할 수 없다. 기존 전체 preflight 계약은 유지한다.
+- **출처/검증**: OpenAI Docs로 [공식 app-server 초기화](https://learn.chatgpt.com/docs/app-server#initialization)를 검색·열어 initialize/initialized 순서를 확인했다. 신규 순수 검사 2 PASS, 가짜 CLI 실제 pipe 복합 회귀 1 PASS/9.83초로 config-only 후 추가 요청 부재·thread 진단 거절·종료 확인을 검증했다. core 전체 preflight·strict sidecar clippy·fmt/diff와 동일 검토자 1명의 읽기 전용 검토를 이어간다.
+- **마감 검사**: core preflight 18 PASS/0.01초, strict sidecar all-targets clippy PASS/2.78초, scoped fmt·diff PASS. core strict clippy는 기존 proctree의 3개 lint(unnecessary_lazy_evaluations/map_entry/len_zero)로 실패했고 그 3종만 명령에서 제외한 검사로 영향 범위를 확인했다. 해당 소스는 수정하지 않았다. 같은 검토자 1명의 독립 정적 검토 PASS로 계정/모델/thread/turn 비승격·기존 full preflight·cleanup 보존을 확인했다. 관련 4파일을 원자 커밋한다.
+- **경계/다음**: 이것은 오프라인 실제 검사의 전송 범위를 고정한 준비이며 native 호환성/계정/모델 가용성 증거가 아니다. 설치 CLI 실행 승인은 아직 없고 vendor를 실행하지 않았다. 승인 후 새 임시 환경·네트워크 차단 상태로 이 설정 전용 경로를 사용한다. 제품 native owner 등록·승인 IPC/UI·실제 작업 연결은 남고 앱 전체는 미완료다. main 병합/push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (실제 공급자 연결 전 검사 범위 확인)
 
 - **현재 증거**: 직전 지연 취소 파동은 `0edc305`로 커밋됐고 checkout은 clean이었다. 설치된 ChatGPT.app 안의 native Codex와 code-mode-host를 실행하지 않고 SHA-256만 읽어 `CODEX_LOGIN_PAIRS` 첫 쌍(`3e11ccc7…` / `4c398936…`)과 일치함을 확인했다. Codex.app 경로는 없으며 wrapper가 아닌 nested native 경로를 사용해야 한다. 로그인용 pin 일치는 실행 호환성/권한 승인 증명이 아니다.

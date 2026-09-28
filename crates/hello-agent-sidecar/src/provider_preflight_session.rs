@@ -180,7 +180,8 @@ fn discovery_environment(command: &mut std::process::Command, home: &std::path::
 }
 
 /// The caller retains ownership on error so uncertain cleanup can be retried.
-/// Ok means observations matched AND cleanup was confirmed, never launch readiness.
+/// Ok means the selected observation scope matched AND cleanup was confirmed,
+/// never launch readiness. A configuration-only flow never queries account/models.
 /// The 30-second budget bounds protocol I/O; observed cleanup has its own deadline.
 pub(crate) fn observe_and_close(
     process: &mut LoginProcess<'_>,
@@ -270,7 +271,15 @@ fn check_claimed(
         if started.elapsed() >= budget {
             return Err(failure());
         }
-        if flow.accept(&reply).map_err(|_| failure())? == PreflightState::ObservationsMatched {
+        let state = flow.accept(&reply).map_err(|_| failure())?;
+        if state == PreflightState::ConfigurationMatched {
+            return if thread_cwd.is_none() {
+                Ok(())
+            } else {
+                Err(failure())
+            };
+        }
+        if state == PreflightState::ObservationsMatched {
             if let Some(cwd) = thread_cwd {
                 on_action(process, TextAction::VerifyWorkspace)?;
                 on_action(process, TextAction::ObserveProcess)?;
@@ -811,6 +820,8 @@ IFS= read -r hold
         for case in [
             "success",
             "config",
+            "config-only",
+            "config-only-thread",
             "cancel",
             "uncertain",
             "timeout",
@@ -848,7 +859,12 @@ IFS= read -r hold
             .unwrap();
             let profile = CodexProfileBinding::from_storage(&storage).unwrap();
             let home = profile.revalidate().unwrap();
-            let mut flow = PreflightExchange::new(
+            let constructor = if case.starts_with("config-only") {
+                PreflightExchange::configuration_only
+            } else {
+                PreflightExchange::new
+            };
+            let mut flow = constructor(
                 &ExpectedProfile {
                     model: "test-model",
                     reasoning_effort: "medium",
@@ -880,7 +896,9 @@ printf '%s\n' "$1"
 IFS= read -r line; test "$line" = '{"method":"initialized","params":{}}' || exit 3
 IFS= read -r line; case "$line" in *'"method":"config/read"'*) ;; *) exit 4;; esac
 printf '%s\n' "$2"
-IFS= read -r line; case "$line" in *'"method":"account/read"'*) ;; *) exit 5;; esac
+IFS= read -r line || exit 0
+printf received > "$7.account"
+case "$line" in *'"method":"account/read"'*) ;; *) exit 5;; esac
 printf '%s\n' "$3"
 IFS= read -r line; case "$line" in *'"method":"model/list"'*) ;; *) exit 6;; esac
 printf '%s\n' "$4"
@@ -1123,7 +1141,10 @@ IFS= read -r hold
             } else {
                 Duration::from_secs(3)
             };
-            let thread_cwd = if matches!(case, "thread" | "thread-before" | "wrong-thread") {
+            let thread_cwd = if matches!(
+                case,
+                "thread" | "thread-before" | "wrong-thread" | "config-only-thread"
+            ) {
                 Some(std::path::Path::new("/managed/snapshot"))
             } else {
                 None
@@ -1131,12 +1152,12 @@ IFS= read -r hold
             let result = observe_with_budget(&mut process, &mut flow, &cancel, budget, thread_cwd);
             assert_eq!(
                 result.is_ok(),
-                matches!(case, "success" | "thread" | "thread-before"),
+                matches!(case, "success" | "thread" | "thread-before" | "config-only"),
                 "{case}"
             );
             assert_eq!(
                 flow.state(),
-                if matches!(case, "success" | "thread" | "thread-before") {
+                if matches!(case, "success" | "thread" | "thread-before" | "config-only") {
                     PreflightState::Closed
                 } else {
                     PreflightState::Failed
@@ -1147,6 +1168,12 @@ IFS= read -r hold
                 .start_read_only_thread(std::path::Path::new("/managed/snapshot"))
                 .is_err());
             assert_eq!(flow.matched_thread_id(), None);
+            if case.starts_with("config-only") {
+                assert!(!temp.path().join("thread-received.account").exists());
+                assert!(!temp.path().join("thread-received").exists());
+                assert!(!temp.path().join("prompt-received").exists());
+                assert!(process.closure_evidence().unwrap().confirmed());
+            }
             if matches!(
                 case,
                 "reused" | "used-process" | "polled-process" | "claimed-process"

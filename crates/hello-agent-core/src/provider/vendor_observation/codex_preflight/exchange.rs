@@ -11,6 +11,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreflightState {
     Checking,
+    ConfigurationMatched,
     ObservationsMatched,
     ThreadStarting,
     ThreadMatched,
@@ -39,6 +40,7 @@ pub struct PreflightExchange {
     thread_cwd: Option<std::path::PathBuf>,
     thread_id: Option<String>,
     notified_thread_id: Option<String>,
+    configuration_only: bool,
 }
 
 fn invalid() -> ProviderError {
@@ -46,6 +48,17 @@ fn invalid() -> ProviderError {
 }
 
 impl PreflightExchange {
+    /// Inspect initialization and configuration only. This cannot establish
+    /// account/model readiness or be upgraded to thread/turn authority.
+    pub fn configuration_only(
+        profile: &ExpectedProfile<'_>,
+        expected_home: &str,
+    ) -> Result<Self, ProviderError> {
+        let mut exchange = Self::new(profile, expected_home)?;
+        exchange.configuration_only = true;
+        Ok(exchange)
+    }
+
     pub fn new(profile: &ExpectedProfile<'_>, expected_home: &str) -> Result<Self, ProviderError> {
         Self::with_permission(profile, expected_home, ExpectedPermission::ReadOnly)
     }
@@ -77,6 +90,7 @@ impl PreflightExchange {
             thread_cwd: None,
             thread_id: None,
             notified_thread_id: None,
+            configuration_only: false,
         })
     }
 
@@ -107,7 +121,7 @@ impl PreflightExchange {
         self.started = true;
         match self.state {
             PreflightState::Failed | PreflightState::Closed => Err(invalid()),
-            PreflightState::ObservationsMatched => Ok(None),
+            PreflightState::ConfigurationMatched | PreflightState::ObservationsMatched => Ok(None),
             PreflightState::ThreadStarting | PreflightState::ThreadMatched => Err(invalid()),
             PreflightState::Checking => self.rpc.next_request(),
         }
@@ -304,12 +318,17 @@ impl PreflightExchange {
                     return Err(invalid());
                 }
             }
-            ObservationKind::Config => super::layers::match_layers(
-                &observation,
-                &profile,
-                &self.expected_home,
-                self.permission,
-            )?,
+            ObservationKind::Config => {
+                super::layers::match_layers(
+                    &observation,
+                    &profile,
+                    &self.expected_home,
+                    self.permission,
+                )?;
+                if self.configuration_only {
+                    self.state = PreflightState::ConfigurationMatched;
+                }
+            }
             ObservationKind::Account => {
                 // This product uses its own ChatGPT login, not arbitrary API keys or tokens.
                 #[derive(Deserialize)]
@@ -395,6 +414,63 @@ mod tests {
             ExpectedPermission::WorkspaceWrite,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn configuration_only_cannot_query_accounts_models_or_start_threads() {
+        let mut flow = PreflightExchange::configuration_only(
+            &ExpectedProfile {
+                model: "test-model",
+                reasoning_effort: "medium",
+            },
+            "/app/profile",
+        )
+        .unwrap();
+        let mut methods = Vec::new();
+        for (index, value) in results().iter().take(2).enumerate() {
+            for frame in flow.next_frames().unwrap() {
+                let value: Value = serde_json::from_str(frame.as_str()).unwrap();
+                methods.push(value["method"].as_str().unwrap().to_owned());
+            }
+            flow.accept(&reply(index, value)).unwrap();
+        }
+        assert_eq!(methods, ["initialize", "initialized", "config/read"]);
+        assert_eq!(flow.state(), PreflightState::ConfigurationMatched);
+        for _ in 0..3 {
+            assert!(flow.next_frames().unwrap().is_empty());
+            assert!(flow
+                .start_thread(std::path::Path::new("/managed/snapshot"))
+                .is_err());
+        }
+        assert!(flow.matched_thread_id().is_none());
+        assert!(flow.into_text_turn("must not send").is_err());
+    }
+
+    #[test]
+    fn configuration_only_rejects_mismatches_and_unsolicited_later_responses() {
+        for invalid_config in [false, true] {
+            let mut flow = PreflightExchange::configuration_only(
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium",
+                },
+                "/app/profile",
+            )
+            .unwrap();
+            let mut values = results();
+            flow.next_frames().unwrap();
+            flow.accept(&reply(0, &values[0])).unwrap();
+            flow.next_frames().unwrap();
+            if invalid_config {
+                values[1]["config"]["model"] = json!("unexpected-model");
+                assert!(flow.accept(&reply(1, &values[1])).is_err());
+            } else {
+                flow.accept(&reply(1, &values[1])).unwrap();
+                assert!(flow.accept(&reply(2, &values[2])).is_err());
+            }
+            assert_eq!(flow.state(), PreflightState::Failed);
+            assert!(flow.next_frames().is_err());
+        }
     }
 
     #[test]
@@ -578,6 +654,7 @@ mod tests {
     fn turn_preparation_consumes_only_a_live_matched_thread() {
         for state in [
             PreflightState::Checking,
+            PreflightState::ConfigurationMatched,
             PreflightState::ObservationsMatched,
             PreflightState::ThreadStarting,
             PreflightState::Failed,
