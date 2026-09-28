@@ -165,8 +165,11 @@ pub(crate) struct LoginProcess<'a> {
     preflight_claimed: bool,
     closure: Option<ProcessClosureEvidence>,
     retain_for_terminal: bool,
+    cleanup_started: Option<Instant>,
     #[cfg(test)]
     fail_next_cleanup: bool,
+    #[cfg(test)]
+    cleanup_identity_once: Option<ProcIdentity>,
 }
 
 /// An owned binding retains directory capabilities, never just a path to reopen.
@@ -267,8 +270,11 @@ impl<'a> LoginProcess<'a> {
             preflight_claimed: false,
             closure: None,
             retain_for_terminal: false,
+            cleanup_started: None,
             #[cfg(test)]
             fail_next_cleanup: false,
+            #[cfg(test)]
+            cleanup_identity_once: None,
         })
     }
 
@@ -331,6 +337,23 @@ impl<'a> LoginProcess<'a> {
     /// retaining the observed child/tracker for the ordinary explicit cleanup.
     pub(crate) fn invalidate_transport(&mut self) {
         self.failed = true;
+    }
+
+    pub(crate) fn tracked_for_cleanup(&self) -> Vec<ProcIdentity> {
+        self.tracker
+            .as_ref()
+            .map(TreeTracker::tracked_identities)
+            .unwrap_or_default()
+    }
+
+    /// The run ledger failed to durably retain cleanup observations. Even a
+    /// subsequently clean OS observation cannot release either safety fence.
+    pub(crate) fn invalidate_cleanup_evidence(&mut self) {
+        self.failed = true;
+        self.evidence_failed = true;
+        if let Some(receipt) = &mut self.closure {
+            receipt.confirmed = false;
+        }
     }
 
     /// Existing toy peers have no vendor payload. Production has no ungated shortcut.
@@ -680,11 +703,37 @@ impl<'a> LoginProcess<'a> {
     }
 
     fn finish_with(&mut self, table: &impl ProcTable) -> Result<(), SidecarError> {
-        if self.finished {
+        if !self.finished && self.closure.is_some() {
+            // Explicit retry may still reclaim survivors, but cannot erase the
+            // failed receipt or turn a previously uncertain fence into success.
+            self.cleanup(table);
+            let identities = self.tracked_for_cleanup();
+            self.closure.as_mut().unwrap().identities = identities;
+            return Err(failure());
+        }
+        loop {
+            if self.poll_finish_with(table)? {
+                return Ok(());
+            }
+            std::thread::sleep(OBSERVE_INTERVAL);
+        }
+    }
+
+    /// One cleanup observation, without waiting through TERM/KILL grace periods.
+    /// false means still closing; no terminal receipt or fence release exists yet.
+    pub(crate) fn poll_finish(&mut self) -> Result<bool, SidecarError> {
+        self.poll_finish_with(&SystemProcTable)
+    }
+
+    fn poll_finish_with(&mut self, table: &impl ProcTable) -> Result<bool, SidecarError> {
+        if self.finished || self.closure.is_some() {
             return Err(failure());
         }
         self.io.take();
-        let clean = self.cleanup(table);
+        self.failed = true; // No further launch or protocol I/O during cleanup.
+        let Some(clean) = self.poll_cleanup(table) else {
+            return Ok(false);
+        };
         self.closure = Some(ProcessClosureEvidence {
             identities: self
                 .tracker
@@ -706,7 +755,43 @@ impl<'a> LoginProcess<'a> {
             self.reservation.release()?;
         }
         self.closure.as_mut().unwrap().confirmed = true;
-        Ok(())
+        Ok(true)
+    }
+
+    fn poll_cleanup(&mut self, table: &impl ProcTable) -> Option<bool> {
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_cleanup) {
+            return Some(false);
+        }
+        let Some(child) = self.child.as_mut() else {
+            return Some(!self.attempted);
+        };
+        let Some(tracker) = self.tracker.as_mut() else {
+            let _ = child.kill();
+            let _ = child.try_wait();
+            return Some(false);
+        };
+        let started = self.cleanup_started.get_or_insert_with(Instant::now);
+        #[cfg(test)]
+        if let Some(identity) = self.cleanup_identity_once.take() {
+            tracker.track_identity(identity);
+        }
+        let report = tracker.poll_termination(
+            table,
+            started.elapsed().as_millis() as u64,
+            TerminationConfig::default(),
+        );
+        // Newly discovered descendants must survive a crash between polls too.
+        if self
+            .reservation
+            .record(&tracker.tracked_identities())
+            .is_err()
+        {
+            self.evidence_failed = true;
+        }
+        let report = report?;
+        let reaped = matches!(child.try_wait(), Ok(Some(_)));
+        Some(report.confirmed() && reaped && !self.evidence_failed)
     }
 
     fn cleanup(&mut self, table: &impl ProcTable) -> bool {
@@ -734,6 +819,9 @@ impl<'a> LoginProcess<'a> {
 
 #[cfg(test)]
 impl LoginProcess<'_> {
+    pub(crate) fn inject_cleanup_identity_once(&mut self, identity: ProcIdentity) {
+        self.cleanup_identity_once = Some(identity);
+    }
     pub(crate) fn inject_uncertain_cleanup_once(&mut self) {
         self.fail_next_cleanup = true;
     }
@@ -778,6 +866,61 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn incremental_cleanup_yields_and_retains_fence_until_confirmed() {
+        struct Held(ProcIdentity);
+        impl ProcTable for Held {
+            fn list(&self) -> Result<Vec<ProcEntry>, String> {
+                Ok(Vec::new())
+            }
+            fn probe(&self, identity: ProcIdentity) -> ProbeResult {
+                assert_eq!(identity, self.0);
+                ProbeResult::Alive(ProcEntry {
+                    identity,
+                    ppid: 1,
+                    comm: "toy".into(),
+                })
+            }
+            fn signal(&self, _: u32, _: TreeSignal) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process
+            .launch(|| {
+                Command::new("/bin/sleep")
+                    .arg("30")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+            })
+            .unwrap();
+        process.retain_fence_until_terminal().unwrap();
+        let root = process.root_for_test();
+        for _ in 0..32 {
+            assert!(!process.poll_finish_with(&Held(root)).unwrap());
+            assert!(process.closure_evidence().is_none());
+            assert!(process.release_after_run_terminal().is_err());
+            assert!(LoginProcess::reserve(&binding).is_err());
+            assert!(process.tick().is_err());
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !process.poll_finish().unwrap() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(process.closure_evidence().unwrap().confirmed());
+        assert!(
+            LoginProcess::reserve(&binding).is_err(),
+            "terminal transaction still owns fence"
+        );
+        process.release_after_run_terminal().unwrap();
+        assert!(LoginProcess::reserve(&binding).is_ok());
+        assert!(process.poll_finish().is_err());
     }
 
     #[test]

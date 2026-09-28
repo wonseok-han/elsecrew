@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (예약 실행의 단계별 종료 확인)
+
+- **기준/진전**: 직전 응답은 이미 저장된 검토자 승인 정책 확인으로 개발 진전이 없었다. clean `bbb4c88`에서 메인이 native 실행의 동기 cleanup 대기를 제거하는 작업을 시작했다. core 종료 알고리즘을 최초 기한/누적 신원/실패를 보존하는 poll로 추출하고 기존 동기 terminate도 같은 경로를 사용한다.
+- **연결/경계**: LoginProcess의 poll_finish와 RunTextState의 통신 완료 결과를 연결했다. 종료 대기 동안 새 protocol I/O 없이 반환하며, 관측 신원을 저장하고 종료 확인→최종 답변/terminal 저장→fence 해제 순서를 유지한다. 기존 로그인 sync finish·비정상 Drop/실패 재시도 cleanup은 보존한다. 파일/DB/OS 조회와 fallback Drop은 여전히 동기식이라 앱 전체 비차단을 주장하지 않는다.
+- **검증 진행**: 기존 core 종료 17 PASS 뒤 신규 기한 유지/빈 poll/terminal 재신호 방지/신원 추가/관측 오류 회귀를 포함해 19 PASS/0.47초. 기존 process 15 PASS/4.99초, 직접 실행 3사례 PASS/12.37초. 추가 process poll 및 실행 중 cleanup의 원장/fence 유지 assertion, 관련 원장 회귀와 정적 검사·독립 검토를 진행한다.
+- **검토 보완**: 첫 독립 검토에서 cleanup의 새 자손이 profile pending 파일에만 남고 재시작이 읽는 실행 원장에는 terminal까지 반영되지 않는 차단 결함을 확인했다. 기존 process snapshot 저장을 재사용해 매 cleanup 반환 전 원장에 반영하며 저장 실패는 closure를 불확실하게 고정한다. 명시적 불확실 cleanup 재시도도 누적 receipt 신원을 갱신하되 confirmed=false를 유지한다. 단계 사이 DB 재오픈 복구·cleanup 원장 실패 회귀를 추가해 재검증한다.
+- **다음**: 실제 공급자 admission/제품 active-run 등록·지연 취소 완료 응답·승인 IPC/UI는 미완료다. 설치 CLI의 임시 HOME·네트워크 차단 initialize/config/read 전용 시험 승인도 아직 미수신이며 실행하지 않았다. 실제 계정/모델·사용자 프로젝트 시험·main 병합·push 없음.
+- **최종 검사**: 보완 후 직접 실행/재시작/저장 실패 5사례 PASS/21.15초, 예약 원장 25사례 PASS/53.27초, process 16 PASS/5.18초, 최신 빌드 stdio 통합 12 PASS/3.21초, strict sidecar clippy PASS/3.68초. core 19 PASS와 기존 unrelated lint 3종만 허용한 core clippy PASS/1.23초는 이후 core 무변경으로 재사용했다. scoped fmt·diff PASS. 동일 검토자의 재검토 PASS로 차단 결함을 닫고 7파일을 원자 커밋하며 앱 전체 완료를 주장하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (연속 요청 중 실행 진행 starvation 수정)
 
 - **기준/발견**: 직전 owner 파동 `8198a6e`는 커밋된 진전이다. runtime 통합 경로를 조사하니 stdio가 recv_timeout 100ms 만료 때만 runtime/watch를 poll해 연속 UI 요청이 실행 진행을 막았다. 실제 fixture sidecar에 5ms마다 system.status를 1초 전송한 신규 회귀가 수정 전 실패해 재현했다.
@@ -235,6 +244,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 제품 연결에는 지연 완료 응답이 필요하며 비정상 Drop fallback은 아직 동기식이다.
 
 - **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 저장된 역할이 native argv·OS 모드·preflight 기대 권한을 함께 정하며 별도 renderer 인자는 없다. writer terminal은 run/chat/잠금을 원자 기록하고 불확실 종료/저장 실패는 잠금을 유지한다. 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
 

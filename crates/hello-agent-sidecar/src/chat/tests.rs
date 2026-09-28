@@ -476,7 +476,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         codex_preflight::{exchange::PreflightExchange, ExpectedProfile},
     };
     use std::{process::Stdio, sync::atomic::AtomicBool};
-    for failure in [
+    'cases: for failure in [
         "none",
         "sink",
         "observer",
@@ -486,6 +486,8 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         "bound-handler",
         "bound-handler-role",
         "bound-handler-cancel",
+        "bound-handler-restart",
+        "bound-handler-cleanup-save",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -693,8 +695,8 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         let native_argv = evidence_root.join("native-argv");
         let spawn = || {
             Command::new("/bin/sh")
-            .args(["-c", "first=yes; for reply in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; if test \"$first\" = yes; then if test \"$DELAY\" = yes; then /bin/sleep 0.6; fi; printf sent > \"$RESPONDED\"; fi; printf '%s\\n' \"$reply\"; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; IFS= read -r hold", "snapshot-peer"])
-            .args(&replies).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received).env("RESPONDED", &responded).env("DELAY", if failure.starts_with("idle-") {"yes"} else {"no"}).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+            .args(["-c", "first=yes; for reply in \"$@\"; do IFS= read -r line || exit 2; printf '%s\\n' \"$line\" >> \"$CAPTURED\"; printf received > \"$RECEIVED\"; if test \"$first\" = yes; then if test \"$DELAY\" = yes; then /bin/sleep 0.6; fi; printf sent > \"$RESPONDED\"; fi; printf '%s\\n' \"$reply\"; if test \"$first\" = yes; then IFS= read -r initialized || exit 3; first=no; fi; done; if test \"$HOLD_AFTER_RUN\" = yes; then exec /bin/sleep 30; fi; IFS= read -r hold", "snapshot-peer"])
+            .args(&replies).env_clear().env("CAPTURED", &captured).env("RECEIVED", &received).env("RESPONDED", &responded).env("HOLD_AFTER_RUN", if failure == "bound-handler" {"yes"} else {"no"}).env("DELAY", if failure.starts_with("idle-") {"yes"} else {"no"}).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
         };
         if let Some(reservation) = &reservation {
             if failure.starts_with("bound-native") {
@@ -1010,6 +1012,32 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                     workspace_identity: address.workspace_identity.clone(),
                     run_id: run["runId"].as_str().unwrap().into(),
                 };
+                let mut cleanup_child = if matches!(
+                    failure,
+                    "bound-handler-restart" | "bound-handler-cleanup-save"
+                ) {
+                    // A synthetic descendant discovery exactly at the first cleanup
+                    // round, backed by an owned real toy process. Core F2 separately
+                    // checks OS-table descendant discovery during termination.
+                    let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+                    let child_identity =
+                        hello_agent_core::proctree::identity_of(child.id()).unwrap();
+                    process.inject_cleanup_identity_once(child_identity);
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]
+                            ["process_identity_internal"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        1
+                    );
+                    if failure == "bound-handler-cleanup-save" {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_cleanup_tree BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_tree_%' BEGIN SELECT RAISE(ABORT, 'injected cleanup tree persistence failure'); END;").unwrap();
+                    }
+                    Some(child)
+                } else {
+                    None
+                };
                 let mut owned = crate::agent_runtime::preparation::OwnedTextRun::from_prepared(
                     reserved, process, state,
                 );
@@ -1050,6 +1078,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                         }
                 };
                 let mut steps = 0;
+                let mut closing_steps = 0;
                 let outcome = loop {
                     steps += 1;
                     // No mutable Storage borrow survives advance: other requests
@@ -1063,6 +1092,66 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                         Ok(Some(outcome)) => break Ok(outcome),
                         Err(error) => break Err(error),
                         Ok(None) => {
+                            if owned.closing_for_test() {
+                                closing_steps += 1;
+                                let run = &fixture.storage.projection_records("run").unwrap()[0];
+                                assert_eq!(run["state"], "preparing");
+                                assert!(run["termination"].is_null());
+                                assert!(!run["public_events"]
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .any(|event| event["kind"] == "final"));
+                                assert!(LoginProcess::reserve(&profile).is_err());
+                                if failure == "bound-handler-restart" {
+                                    let before = fixture.storage.projection_records("run").unwrap();
+                                    let identities =
+                                        before[0]["process_identity_internal"].as_array().unwrap();
+                                    assert_eq!(identities.len(), 2);
+                                    assert!(identities
+                                        .iter()
+                                        .any(|item| item["pid"]
+                                            == cleanup_child.as_ref().unwrap().id()));
+                                    // Discard volatile execution state without a terminal
+                                    // transaction. Drop cleans only our test children;
+                                    // the durable DB is exactly the crash-at-yield image.
+                                    drop(owned);
+                                    cleanup_child.as_mut().unwrap().wait().unwrap();
+                                    assert_eq!(
+                                        fixture.storage.projection_records("run").unwrap(),
+                                        before
+                                    );
+                                    let database =
+                                        fixture._root.path().join("data/hello-agent.sqlite3");
+                                    drop(fixture.storage);
+                                    fixture.storage = Storage::open(&database).unwrap();
+                                    fixture.projects = ProjectManager::new(&database).unwrap();
+                                    let runtime = AgentRuntime::blocked();
+                                    runtime
+                                        .recover_unclean_runs(
+                                            &mut fixture.storage,
+                                            &mut fixture.projects,
+                                        )
+                                        .unwrap();
+                                    runtime.validate_persisted_runs(&fixture.storage).unwrap();
+                                    let recovered =
+                                        fixture.storage.projection_records("run").unwrap();
+                                    assert_eq!(recovered[0]["state"], "recoveryRequired");
+                                    assert_eq!(
+                                        recovered[0]["process_identity_internal"],
+                                        before[0]["process_identity_internal"]
+                                    );
+                                    assert_eq!(
+                                        recovered[0]["recovery"]["trackedProcesses"]
+                                            .as_array()
+                                            .unwrap()
+                                            .len(),
+                                        2
+                                    );
+                                    assert!(LoginProcess::reserve(&profile).is_err());
+                                    continue 'cases;
+                                }
+                            }
                             if cancel_between_steps.get() {
                                 owned.request_cancel(&identity).unwrap();
                             }
@@ -1071,6 +1160,12 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                     }
                 };
                 assert!(steps > 10);
+                if failure == "bound-handler" {
+                    assert!(
+                        closing_steps > 0,
+                        "cleanup must yield before terminal persistence"
+                    );
+                }
                 assert!(owned
                     .advance(
                         &mut fixture.storage,
@@ -1081,6 +1176,22 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                 assert!(owned.request_cancel(&identity).is_err());
                 let (restored, returned_process) = owned.into_parts_for_test();
                 process = returned_process;
+                if failure == "bound-handler-cleanup-save" {
+                    assert!(outcome.is_err());
+                    assert!(!process.closure_evidence().unwrap().confirmed());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    assert_eq!(run["state"], "recoveryRequired");
+                    assert_eq!(
+                        run["recovery"]["trackedProcesses"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        2
+                    );
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    cleanup_child.as_mut().unwrap().wait().unwrap();
+                    continue 'cases;
+                }
                 (outcome, restored)
             } else {
                 let outcome = if writer || failure == "bound-write-mismatch" {

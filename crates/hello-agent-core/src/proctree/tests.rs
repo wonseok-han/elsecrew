@@ -242,6 +242,85 @@ fn signaled(table: &FakeTable, pid: u32) -> bool {
     table.0.borrow().signals.iter().any(|(p, _)| *p == pid)
 }
 
+#[test]
+fn termination_steps_yield_keep_deadlines_and_do_not_repeat_terminal_signals() {
+    let (table, clock) = harness(World::spawn_root(100, 1_000, true));
+    let root = ProcIdentity {
+        pid: 100,
+        start_us: 1_000,
+    };
+    let mut tracker = TreeTracker::new(root);
+    assert!(tracker.poll_termination(&table, 0, config()).is_none());
+    for _ in 0..100 {
+        assert!(tracker.poll_termination(&table, 0, config()).is_none());
+    }
+    assert_eq!(clock.elapsed_ms(), 0, "poll must never sleep");
+    assert_eq!(table.0.borrow().signals, [(100, TreeSignal::Term)]);
+    // A caller cannot postpone the first deadline by supplying a new config.
+    assert!(tracker
+        .poll_termination(&table, 300, TerminationConfig::default())
+        .is_none());
+    assert_eq!(
+        table.0.borrow().signals.last(),
+        Some(&(100, TreeSignal::Kill))
+    );
+    let report = tracker.poll_termination(&table, 400, config()).unwrap();
+    assert!(report.confirmed());
+    let signals = table.0.borrow().signals.len();
+    assert!(tracker
+        .poll_termination(&table, 500, config())
+        .unwrap()
+        .confirmed());
+    assert_eq!(table.0.borrow().signals.len(), signals);
+    // A later explicitly tracked identity invalidates a cached clean receipt.
+    let child = ProcIdentity {
+        pid: 200,
+        start_us: 2_000,
+    };
+    table.0.borrow_mut().apply(Step::Spawn {
+        pid: child.pid,
+        ppid: 1,
+        start_us: child.start_us,
+        comm: "late",
+        ignores_term: true,
+    });
+    tracker.track_identity(child);
+    assert!(tracker.poll_termination(&table, 500, config()).is_none());
+    let report = tracker.poll_termination(&table, 600, config()).unwrap();
+    assert!(report.confirmed());
+    assert_eq!(report.tracked, [root, child]);
+}
+
+#[test]
+fn termination_steps_retain_survivors_and_sticky_observation_failure() {
+    for broken in [false, true] {
+        let mut world = World::spawn_root(100, 1_000, true);
+        world.signal_error = Some("EPERM".into());
+        let (table, _) = harness(world);
+        let mut tracker = TreeTracker::new(ProcIdentity {
+            pid: 100,
+            start_us: 1_000,
+        });
+        assert!(tracker.poll_termination(&table, 10, config()).is_none());
+        if broken {
+            table.0.borrow_mut().list_error = Some("unavailable".into());
+            assert!(tracker.observe(&table).is_err());
+            table.0.borrow_mut().list_error = None;
+            table.0.borrow_mut().procs.clear();
+        }
+        let report = tracker.poll_termination(&table, 610, config()).unwrap();
+        assert_eq!(
+            report.outcome,
+            TerminationOutcome::Unconfirmed(if broken {
+                UnconfirmedReason::ProbeFailed
+            } else {
+                UnconfirmedReason::Survivors
+            })
+        );
+        assert!(!report.signal_errors.is_empty());
+    }
+}
+
 // ───────────────────────── F1 재부모화 고아 ─────────────────────────
 
 /// **F1** — 유예 중 자손이 생기고, **부모가 먼저 종료**되어 자손만 `ppid=1`로 살아남는다.

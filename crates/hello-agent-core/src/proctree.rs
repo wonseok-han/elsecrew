@@ -180,6 +180,15 @@ pub struct TreeTracker {
     /// 그 순간 놓친 자손이 있었는지 알 수 없으므로 소멸을 주장할 근거가 사라진 것이다.
     integrity_error: Option<(UnconfirmedReason, String)>,
     signal_errors: Vec<String>,
+    termination: Option<TerminationProgress>,
+}
+
+struct TerminationProgress {
+    started_ms: u64,
+    next_poll_ms: u64,
+    config: TerminationConfig,
+    rounds: u32,
+    report: Option<TerminationReport>,
 }
 
 impl TreeTracker {
@@ -197,6 +206,7 @@ impl TreeTracker {
             tracked,
             integrity_error: None,
             signal_errors: Vec::new(),
+            termination: None,
         }
     }
 
@@ -206,6 +216,7 @@ impl TreeTracker {
     /// `terminate`가 `Confirmed`를 내지 못하게 만든다 — 그 회차에 놓친 자손이 있었는지
     /// 확인할 방법이 없기 때문이다.
     pub fn observe<T: ProcTable>(&mut self, table: &T) -> Result<(), String> {
+        self.invalidate_termination_report();
         match self.refresh(table) {
             Ok(_) => Ok(()),
             Err((reason, detail)) => {
@@ -231,11 +242,19 @@ impl TreeTracker {
 
     /// Add a directly handshaken identity before descendant enumeration begins.
     pub fn track_identity(&mut self, identity: ProcIdentity) {
+        self.invalidate_termination_report();
         self.tracked.entry(identity).or_insert(TrackedProc {
             identity,
             state: TrackedState::Live,
             comm: String::new(),
         });
+    }
+
+    fn invalidate_termination_report(&mut self) {
+        if let Some(progress) = &mut self.termination {
+            progress.report = None;
+            progress.next_poll_ms = 0;
+        }
     }
 
     fn refresh<T: ProcTable>(&mut self, table: &T) -> Result<Refresh, (UnconfirmedReason, String)> {
@@ -310,58 +329,82 @@ impl TreeTracker {
         clock: &C,
         config: TerminationConfig,
     ) -> TerminationReport {
-        let started_ms = clock.elapsed_ms();
-        let deadline_ms = started_ms + config.term_grace_ms + config.kill_grace_ms;
-        let mut rounds: u32 = 0;
-
+        // A synchronous retry starts a fresh observation attempt, but never
+        // clears tracked identities or a remembered integrity failure.
+        self.termination = None;
         loop {
-            rounds += 1;
-            let now_ms = clock.elapsed_ms();
-
-            let refreshed = match self.refresh(table) {
-                Ok(r) => r,
-                Err((reason, detail)) => {
-                    let remembered = (reason.clone(), detail.clone());
-                    self.integrity_error.get_or_insert(remembered);
-                    return self.report(reason, detail, Vec::new(), rounds);
-                }
-            };
-
-            // 누적 집합 전체가 소멸했고 새로 발견된 것도 없을 때만 성공이다.
-            // 루트가 죽었다는 사실도, 트리가 비었다는 사실도 성공 근거가 아니다.
-            if refreshed.live.is_empty() && refreshed.discovered == 0 {
-                return self.report_final(rounds);
+            if let Some(report) = self.poll_termination(table, clock.elapsed_ms(), config) {
+                return report;
             }
-
-            if now_ms >= deadline_ms {
-                let detail = format!(
-                    "{} process(es) still alive after TERM and KILL",
-                    refreshed.live.len()
-                );
-                return self.report(UnconfirmedReason::Survivors, detail, refreshed.live, rounds);
-            }
-
-            // 신호는 이번 회차에 살아 있다고 확인된 신원 전원에게 보낸다.
-            // 프로세스 그룹에 의존하지 않는다 — 도구 자식은 별도 그룹·세션이다(§7.10.1.2 ③).
-            let signal = if now_ms < started_ms + config.term_grace_ms {
-                TreeSignal::Term
-            } else {
-                TreeSignal::Kill
-            };
-            for entry in &refreshed.live {
-                if let Err(e) = table.signal(entry.identity.pid, signal) {
-                    // 판정에 쓰지 않는다. `EPERM`은 성공도 소멸 증거도 아니다.
-                    let line = format!("{signal:?} -> pid {}: {e}", entry.identity.pid);
-                    if !self.signal_errors.contains(&line) {
-                        self.signal_errors.push(line);
-                    }
-                }
-            }
-
-            clock.sleep(Duration::from_millis(config.poll_interval_ms));
+            clock.sleep(Duration::from_millis(config.poll_interval_ms.max(1)));
         }
     }
 
+    /// One termination observation/signaling round, without sleeping. The first
+    /// call fixes the monotonic clock origin and config. Subsequent calls retain
+    /// deadlines and return the same terminal report without further signals.
+    /// The progress belongs to this tracker, not a transferable process token.
+    pub fn poll_termination<T: ProcTable>(
+        &mut self,
+        table: &T,
+        now_ms: u64,
+        config: TerminationConfig,
+    ) -> Option<TerminationReport> {
+        let mut progress = self.termination.take().unwrap_or(TerminationProgress {
+            started_ms: now_ms,
+            next_poll_ms: now_ms,
+            config,
+            rounds: 0,
+            report: None,
+        });
+        if progress.report.is_none() && now_ms >= progress.next_poll_ms {
+            progress.rounds = progress.rounds.saturating_add(1);
+            let term_end = progress
+                .started_ms
+                .saturating_add(progress.config.term_grace_ms);
+            let deadline_ms = term_end.saturating_add(progress.config.kill_grace_ms);
+            progress.report = match self.refresh(table) {
+                Err((reason, detail)) => {
+                    self.integrity_error
+                        .get_or_insert((reason.clone(), detail.clone()));
+                    Some(self.report(reason, detail, Vec::new(), progress.rounds))
+                }
+                Ok(refreshed) if refreshed.live.is_empty() && refreshed.discovered == 0 => {
+                    Some(self.report_final(progress.rounds))
+                }
+                Ok(refreshed) if now_ms >= deadline_ms => Some(self.report(
+                    UnconfirmedReason::Survivors,
+                    format!(
+                        "{} process(es) still alive after TERM and KILL",
+                        refreshed.live.len()
+                    ),
+                    refreshed.live,
+                    progress.rounds,
+                )),
+                Ok(refreshed) => {
+                    let signal = if now_ms < term_end {
+                        TreeSignal::Term
+                    } else {
+                        TreeSignal::Kill
+                    };
+                    for entry in &refreshed.live {
+                        if let Err(error) = table.signal(entry.identity.pid, signal) {
+                            let line = format!("{signal:?} -> pid {}: {error}", entry.identity.pid);
+                            if !self.signal_errors.contains(&line) {
+                                self.signal_errors.push(line);
+                            }
+                        }
+                    }
+                    progress.next_poll_ms =
+                        now_ms.saturating_add(progress.config.poll_interval_ms.max(1));
+                    None
+                }
+            };
+        }
+        let report = progress.report.clone();
+        self.termination = Some(progress);
+        report
+    }
     fn identities(&self) -> Vec<ProcIdentity> {
         self.tracked.values().map(|p| p.identity).collect()
     }

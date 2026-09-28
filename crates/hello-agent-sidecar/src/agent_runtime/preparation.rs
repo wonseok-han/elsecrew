@@ -34,6 +34,12 @@ pub(crate) struct RunReservation {
 pub(crate) struct RunTextState {
     transport: crate::provider_preflight_session::BoundTextSession,
     pending_answer: Option<String>,
+    completion: Option<
+        Result<
+            hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+            SidecarError,
+        >,
+    >,
     run_id: String,
     finished: bool,
 }
@@ -106,6 +112,11 @@ impl OwnedTextRun {
             &mut self.state,
             on_action,
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn closing_for_test(&self) -> bool {
+        self.state.completion.is_some() && !self.state.finished
     }
 
     #[cfg(test)]
@@ -335,12 +346,14 @@ impl RunReservation {
         Ok(RunTextState {
             transport,
             pending_answer: None,
+            completion: None,
             run_id: self.run_id.clone(),
             finished: false,
         })
     }
 
-    /// Advances one protocol step. Terminal cleanup is still synchronous.
+    /// Advances one protocol or cleanup step, without waiting for the peer or
+    /// through termination grace periods. Filesystem/DB checkpoints remain sync.
     /// Mismatched owners never acquire authority to finish another process.
     pub(crate) fn advance_text_candidate(
         &self,
@@ -370,58 +383,83 @@ impl RunReservation {
             return Err(failure());
         }
         state.finished = true;
-        let outcome = state.transport.advance(
-            process,
-            cancel,
-            storage,
-            projects,
-            &mut |storage, process, action| {
-                let event = match action {
-                    TextAction::ObserveProcess => {
-                        self.observe_process(storage, process)?;
-                        return self
-                            .validate_text_input(storage, projects)
-                            .map_err(|_| failure());
-                    }
-                    TextAction::VerifyWorkspace => return Err(failure()),
-                    TextAction::Public(event) => event,
-                    action => {
-                        self.validate_text_input(storage, projects)
-                            .map_err(|_| failure())?;
-                        return on_action(storage, action);
-                    }
-                };
-                // Completed text replaces deltas; never append the same answer twice.
-                if let Projection::Completed { kind, text, .. } = &event {
-                    match kind {
-                        PublicKind::AgentMessage => {
-                            if let Some(previous) = state.pending_answer.take() {
-                                self.persist_text(storage, "status", previous)?;
-                            }
-                            state.pending_answer = Some(text.clone());
+        if state.completion.is_none() {
+            let outcome = state.transport.advance(
+                process,
+                cancel,
+                storage,
+                projects,
+                &mut |storage, process, action| {
+                    let event = match action {
+                        TextAction::ObserveProcess => {
+                            self.observe_process(storage, process)?;
+                            return self
+                                .validate_text_input(storage, projects)
+                                .map_err(|_| failure());
                         }
-                        PublicKind::Plan => self.persist_text(storage, "status", text.clone())?,
+                        TextAction::VerifyWorkspace => return Err(failure()),
+                        TextAction::Public(event) => event,
+                        action => {
+                            self.validate_text_input(storage, projects)
+                                .map_err(|_| failure())?;
+                            return on_action(storage, action);
+                        }
+                    };
+                    // Completed text replaces deltas; never append the same answer twice.
+                    if let Projection::Completed { kind, text, .. } = &event {
+                        match kind {
+                            PublicKind::AgentMessage => {
+                                if let Some(previous) = state.pending_answer.take() {
+                                    self.persist_text(storage, "status", previous)?;
+                                }
+                                state.pending_answer = Some(text.clone());
+                            }
+                            PublicKind::Plan => {
+                                self.persist_text(storage, "status", text.clone())?
+                            }
+                        }
                     }
+                    on_action(storage, TextAction::Public(event))
+                },
+            );
+            state.completion = Some(match outcome {
+                Ok(None) => {
+                    state.finished = false;
+                    return Ok(None);
                 }
-                on_action(storage, TextAction::Public(event))
-            },
-        );
-        let outcome = match outcome {
-            Ok(None) => {
+                Ok(Some(outcome)) => Ok(outcome),
+                Err(error) => Err(error),
+            });
+        }
+        // Preserve cleanup-before-final and terminal-before-fence-release ordering.
+        let cleanup = process.poll_finish();
+        if self
+            .persist_process_snapshot(storage, &process.tracked_for_cleanup())
+            .is_err()
+        {
+            process.invalidate_cleanup_evidence();
+            state.completion = Some(Err(SidecarError::new(
+                "agentProcessObservationFailed",
+                "cleanup process evidence requires recovery",
+            )));
+        }
+        let cleanup = match cleanup {
+            Ok(false) => {
                 state.finished = false;
                 return Ok(None);
             }
-            Ok(Some(outcome)) => Ok(outcome),
+            Ok(true) => Ok(()),
             Err(error) => Err(error),
         };
-        // Preserve cleanup-before-final and terminal-before-fence-release ordering.
-        let outcome = process.finish().and(outcome).and_then(|outcome| {
-            if cancel.load(std::sync::atomic::Ordering::Acquire) {
-                Err(failure())
-            } else {
-                Ok(outcome)
-            }
-        });
+        let outcome = cleanup
+            .and(state.completion.take().ok_or_else(failure)?)
+            .and_then(|outcome| {
+                if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                    Err(failure())
+                } else {
+                    Ok(outcome)
+                }
+            });
         let result = outcome.and_then(|outcome| {
             self.validate_text_input(storage, projects)
                 .map_err(|_| failure())?;
@@ -524,35 +562,7 @@ impl RunReservation {
         process: &mut crate::provider_login_process::LoginProcess<'_>,
     ) -> Result<(), SidecarError> {
         let (identities, observed) = process.observe_for_run();
-        let saved = (|| -> Result<(), ProjectFailure> {
-            let projection = actual_run_projection(storage, &self.run_id)?;
-            if projection["record"] != self.run
-                || projection["state"] != "preparing"
-                || projection["barrier"]["phase"] != "providerLaunchGate"
-                || projection["barrier"]["releaseGranted"] != true
-                || !projection["recovery"].is_null()
-            {
-                return Err(ProjectFailure::recovery(
-                    "run no longer accepts process observations",
-                ));
-            }
-            let prior = projection["process_identity_internal"]
-                .as_array()
-                .ok_or_else(|| ProjectFailure::recovery("run process binding is missing"))?;
-            if prior.is_empty()
-                || prior.iter().any(|item| {
-                    !identities.iter().any(|identity| {
-                        item["pid"].as_u64() == Some(identity.pid as u64)
-                            && item["start_us"].as_i64() == Some(identity.start_us)
-                    })
-                })
-            {
-                return Err(ProjectFailure::recovery(
-                    "process owner differs from reserved run",
-                ));
-            }
-            persist_tracker_snapshot(storage, &self.run_id, &identities)
-        })();
+        let saved = self.persist_process_snapshot(storage, &identities);
         if saved.is_err() || observed.is_err() {
             process.invalidate_transport();
             return Err(SidecarError::new(
@@ -561,6 +571,40 @@ impl RunReservation {
             ));
         }
         Ok(())
+    }
+
+    fn persist_process_snapshot(
+        &self,
+        storage: &mut Storage,
+        identities: &[ProcIdentity],
+    ) -> Result<(), ProjectFailure> {
+        let projection = actual_run_projection(storage, &self.run_id)?;
+        if projection["record"] != self.run
+            || projection["state"] != "preparing"
+            || projection["barrier"]["phase"] != "providerLaunchGate"
+            || projection["barrier"]["releaseGranted"] != true
+            || !projection["recovery"].is_null()
+        {
+            return Err(ProjectFailure::recovery(
+                "run no longer accepts process observations",
+            ));
+        }
+        let prior = projection["process_identity_internal"]
+            .as_array()
+            .ok_or_else(|| ProjectFailure::recovery("run process binding is missing"))?;
+        if prior.is_empty()
+            || prior.iter().any(|item| {
+                !identities.iter().any(|identity| {
+                    item["pid"].as_u64() == Some(identity.pid as u64)
+                        && item["start_us"].as_i64() == Some(identity.start_us)
+                })
+            })
+        {
+            return Err(ProjectFailure::recovery(
+                "process owner differs from reserved run",
+            ));
+        }
+        persist_tracker_snapshot(storage, &self.run_id, identities)
     }
 
     /// Keep process ownership with the caller on every failure, including a
