@@ -1,5 +1,27 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (작업 공간 결속 독립 검토 재개)
+
+- **승인/범위**: 사용자의 `승ㅣㄴ`을 직전 리뷰어 1명 승인 요청에 대한 승인으로 이해하고 `workspace_binding_review`를 호출했다. 기준 `0396195`의 미커밋 Rust 2파일·architecture 변경을 읽기 전용으로 검토하며 메인은 해당 코드를 동결한다. 기존 focused 검사 증거를 재사용하고 실제 CLI·인증·유료 실행·제품 활성화는 포함하지 않는다.
+- **다음**: 독립 검토에서 확인된 결함만 수정·관련 재검증한 뒤 승인된 M5 범위로 커밋한다. run 원장·workspace-write 격리 등 전체 제품의 남은 항목은 이 내부 후보의 합격 범위와 구분한다.
+- **검토/마감**: 독립 리뷰어가 기준 전체 SHA `039619542fb80785c978e1c1b9dd61c1d105b6ba`의 고정 diff에서 차단 결함 없음을 확인했다. durable binding/3회 재검사/claim 전후 cleanup 권한 및 회귀 범위를 정적으로 검토했으며 테스트는 새로 실행하지 않았다. 메인의 이전 focused PASS를 비변경 코드 증거로 재사용하고 최종 fmt·diff 검사 후 4파일만 커밋한다. 제품 caller·run 원장·workspace-write 강제 경계는 계속 후속이며 main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (작업 공간 결속 검토 승인 차단)
+
+- **감사/상태**: 직전은 보존 상태 재확인만 한 무진전 턴이었다. HEAD `0396195`·미커밋 4파일·diff PASS를 재확인했다. 새 독립 리뷰어 호출 승인 미수신이 세 번째 이어졌으며 실행 중 검토는 없다. 자체 회귀를 독립 승인으로 대체하지 않고 목표를 blocked로 전환한다.
+- **재개 조건**: 현재 작업 공간 결속 변경을 읽기 전용 리뷰어 1명에게 맡기는 사용자 승인. 승인 후 검토·필요 수정·커밋을 진행한다. 기존 구현/검증을 보존했고 신규 위임·실제 CLI/유료 실행·제품 활성화·main 병합·push는 없다. 앱 전체 완료가 아니다.
+
+### 2026-09-28 · by GPT-6 Astra (작업 공간 결속 검토 승인 대기)
+
+- **감사**: 직전은 구현·회귀의 진전이며 독립 리뷰 승인 요청 첫 턴이었다. 이번 `0396195`·통합 브랜치·기존 미커밋 4파일 보존과 diff PASS를 확인했다. 신규 읽기 전용 리뷰어 승인 미수신은 동일 조건 두 번째이며 현재 검토 작업은 실행 중이 아니다.
+- **다음**: 작업 공간 결속 변경에 대한 리뷰어 1명 승인 후 검토·필요 수정·커밋한다. 자동 계속 지시로 위임 권한을 확대하거나 동일 테스트를 반복하지 않았다. 제품 활성화·CLI·유료 호출·커밋·main 병합·push 없음. 전체 목표는 active·미완료로 유지한다.
+
+### 2026-09-28 · by GPT-6 Astra (text 실행 후보의 채팅 작업 공간 결속)
+
+- **범위/구현**: clean `0396195`·`m5/coding-agent-ide`에서 메인이 직접 진행했다. Karpathy 지침으로 새 검증 정책 대신 기존 `ProjectManager::verify_workspace`를 재사용한다. 내부 text 실행 진입점은 임의 cwd 대신 durable chat 주소로 만든 `TextWorkspace`만 받고 process claim 전·thread 생성 전·목표 전송 전에 재검사한다. 조회 전용 진단 API와 기존 종료/불확실 잠금 정책은 유지한다.
+- **검증**: sidecar preflight 5 PASS(새 thread 직전/prompt 직전 거절 및 입력 미전송 포함), 실제 임시 snapshot의 정상·다른/없는 채팅·marker 변경·닫힌 workspace 회귀 1 PASS, 입력 거절 8사례 집중 1 PASS, strict sidecar clippy·scoped fmt·diff PASS. 첫 snapshot 회귀의 Rust borrow 오류는 binding을 해제한 뒤 close하고 새 binding을 거절하는 검사로 바로잡았다. 실제 vendor CLI·인증·유료 모델·사용자 프로젝트 시험은 없다.
+- **경계/다음**: 이는 시점별 snapshot 신원 검사이며 run 예약/독점 잠금이나 OS sandbox 보장이 아니다. 저장소를 읽기 참조로 보유하는 내부 후보이므로 향후 writable run 원장 연결의 소유권도 별도로 정해야 한다. workspace-write 격리·run 원장·도구/승인 UI·제품 활성화는 미완료다. 실행 입장 경계 변경에 대한 읽기 전용 독립 리뷰어 1명 승인 요청 전까지 구현/회귀/문서 4파일을 미커밋으로 보존한다. 신규 위임·main 병합·push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (허용 응답의 샌드박스 경계 재검증)
 
 - **진전/발견**: 직전 `4a02dda`는 단회 응답 builder 구현의 진전이다. 이번 실제 전송 연결 전 [공식 sandbox approval 설명](https://learn.chatgpt.com/docs/sandboxing/auto-review)을 다시 확인했다. 승인 요청에는 sandbox 밖 실행·쓰기 root 밖 수정이 포함되며, 현재 request metadata만으로 일반 명령 accept가 앱의 snapshot 보호를 유지한다고 증명할 수 없다. cwd 문자열 일치는 OS 경계가 아니다.

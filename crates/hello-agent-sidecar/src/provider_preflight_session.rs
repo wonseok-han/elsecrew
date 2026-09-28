@@ -1,4 +1,4 @@
-//! Internal model-free discovery through the gated process owner. No prompt API.
+//! Internal discovery and text-turn candidates through the gated process owner.
 use crate::{provider_login_process::LoginProcess, SidecarError};
 use hello_agent_core::provider::vendor_observation::codex_preflight::exchange::{
     PreflightExchange, PreflightState,
@@ -157,7 +157,15 @@ fn observe_with_budget(
         flow.close();
         return Err(failure());
     }
-    let result = check_claimed(process, flow, cancel, budget, started, thread_cwd);
+    let result = check_claimed(
+        process,
+        flow,
+        cancel,
+        budget,
+        started,
+        thread_cwd,
+        &mut || Ok(()),
+    );
     // Even a protocol error or cancellation must run the existing observed cleanup.
     let cleanup = process.finish();
     if result.is_err() || cleanup.is_err() || cancel.load(Ordering::Acquire) {
@@ -179,6 +187,7 @@ fn check_claimed(
     budget: Duration,
     started: Instant,
     thread_cwd: Option<&std::path::Path>,
+    verify_workspace: &mut impl FnMut() -> Result<(), SidecarError>,
 ) -> Result<(), SidecarError> {
     loop {
         if cancel.load(Ordering::Acquire) {
@@ -199,6 +208,7 @@ fn check_claimed(
         }
         if flow.accept(&reply).map_err(|_| failure())? == PreflightState::ObservationsMatched {
             if let Some(cwd) = thread_cwd {
+                verify_workspace()?;
                 let request = flow.start_read_only_thread(cwd).map_err(|_| failure())?;
                 let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
                 process.send_preflight(request, remaining, cancel)?;
@@ -220,14 +230,55 @@ fn check_claimed(
     }
 }
 
-/// Internal candidate, no product caller. Caller must admit the snapshot and
-/// persist run ownership before use. Public callbacks are provisional until the
+/// A durable chat/snapshot binding, not a run reservation or OS sandbox grant.
+/// Revalidated at each input boundary; callers must still own the run lock and
+/// enforce launch-time isolation. No arbitrary cwd can enter the text candidate.
+pub(crate) struct TextWorkspace<'a> {
+    projects: &'a crate::project::ProjectManager,
+    storage: &'a crate::Storage,
+    address: crate::project::WorkspaceAddress,
+    cwd: std::path::PathBuf,
+}
+
+impl<'a> TextWorkspace<'a> {
+    pub(crate) fn new(
+        projects: &'a crate::project::ProjectManager,
+        storage: &'a crate::Storage,
+        address: &crate::project::WorkspaceAddress,
+    ) -> Result<Self, SidecarError> {
+        let manifest = projects
+            .verify_workspace(storage, address)
+            .map_err(|_| failure())?;
+        let cwd = std::path::PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        PreflightExchange::validate_thread_cwd(&cwd).map_err(|_| failure())?;
+        Ok(Self {
+            projects,
+            storage,
+            address: address.clone(),
+            cwd,
+        })
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), SidecarError> {
+        let manifest = self
+            .projects
+            .verify_workspace(self.storage, &self.address)
+            .map_err(|_| failure())?;
+        if manifest["worktreePath"].as_str() != self.cwd.to_str() {
+            return Err(failure());
+        }
+        Ok(())
+    }
+}
+
+/// Internal candidate, no product caller. Caller must persist run ownership and
+/// enforce isolation before use. Public callbacks are provisional until the
 /// returned outcome AND observed cleanup succeed; they are not terminal events.
 pub(crate) fn run_text_and_close(
     process: &mut LoginProcess<'_>,
-    mut flow: PreflightExchange,
+    flow: PreflightExchange,
     cancel: &AtomicBool,
-    cwd: &std::path::Path,
+    workspace: &TextWorkspace<'_>,
     text: &str,
     on_public: &mut impl FnMut(
         hello_agent_core::provider::vendor_observation::codex_events::Projection,
@@ -236,17 +287,52 @@ pub(crate) fn run_text_and_close(
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
 > {
+    run_text_checked(
+        process,
+        flow,
+        cancel,
+        &workspace.cwd,
+        text,
+        on_public,
+        &mut || workspace.revalidate(),
+    )
+}
+
+fn run_text_checked(
+    process: &mut LoginProcess<'_>,
+    mut flow: PreflightExchange,
+    cancel: &AtomicBool,
+    cwd: &std::path::Path,
+    text: &str,
+    on_public: &mut impl FnMut(
+        hello_agent_core::provider::vendor_observation::codex_events::Projection,
+    ) -> Result<(), SidecarError>,
+    verify_workspace: &mut impl FnMut() -> Result<(), SidecarError>,
+) -> Result<
+    hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
+    SidecarError,
+> {
     use hello_agent_core::provider::vendor_observation::codex_events::stream::Observed;
     hello_agent_core::provider::vendor_observation::codex_turn::TurnStart::validate_text(text)
         .map_err(|_| failure())?;
     PreflightExchange::validate_thread_cwd(cwd).map_err(|_| failure())?;
+    verify_workspace()?;
     let started = Instant::now();
     let budget = Duration::from_secs(30);
     if !flow.is_fresh() || process.begin_preflight().is_err() {
         return Err(failure());
     }
     let result = (|| {
-        check_claimed(process, &mut flow, cancel, budget, started, Some(cwd))?;
+        check_claimed(
+            process,
+            &mut flow,
+            cancel,
+            budget,
+            started,
+            Some(cwd),
+            verify_workspace,
+        )?;
+        verify_workspace()?;
         let mut turn = flow.into_text_turn(text).map_err(|_| failure())?;
         let remaining = || budget.checked_sub(started.elapsed()).ok_or_else(failure);
         process.send_turn(
@@ -302,6 +388,7 @@ mod tests {
             ("goal", "relative"),
             ("goal", "/managed/../other"),
             ("goal", "/managed/\nother"),
+            ("goal", "/managed"), // Well-formed input, rejected workspace admission.
         ] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
@@ -334,15 +421,24 @@ mod tests {
                         .spawn()
                 })
                 .unwrap();
-            let result = run_text_and_close(
+            let mut workspace_checks = 0;
+            let result = run_text_checked(
                 &mut process,
                 flow,
                 &AtomicBool::new(false),
                 std::path::Path::new(cwd),
                 text,
                 &mut |_| panic!("unexpected output"),
+                &mut || {
+                    workspace_checks += 1;
+                    Err(failure())
+                },
             );
             assert!(result.is_err());
+            assert_eq!(
+                workspace_checks,
+                usize::from(text == "goal" && cwd == "/managed")
+            );
             assert!(process.exit_status().unwrap().is_none());
             assert!(LoginProcess::reserve(&profile).is_err());
             // Fresh claim proves the rejected call did not use or claim transport.
@@ -583,6 +679,8 @@ IFS= read -r hold
             "turn-sink-error",
             "turn-uncertain",
             "turn-tool",
+            "turn-workspace-before-thread",
+            "turn-workspace-before-prompt",
         ] {
             let temp = tempfile::tempdir().unwrap();
             let storage = crate::Storage::open(
@@ -633,6 +731,7 @@ IFS= read -r line; case "$line" in *'"method":"model/list"'*) ;; *) exit 6;; esa
 printf '%s\n' "$4"
 IFS= read -r line || exit 0
 case "$line" in *'"method":"thread/start"'*) ;; *) exit 7;; esac
+printf received > "$7"
 if test "$6" = thread-before; then
   printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-test"}}}'
   printf '%s\n' "$5"
@@ -642,6 +741,7 @@ else
 fi
 case "$6" in turn-*)
 IFS= read -r line; case "$line" in *'"method":"turn/start"'*) ;; *) exit 8;; esac
+printf received > "$8"
 test "$6" != turn-eof || exit 0
 if test "$6" = turn-wrong-id; then
 printf '%s\n' '{"id":99,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
@@ -670,6 +770,8 @@ IFS= read -r hold
                         .args(["-c", script, "preflight-peer"])
                         .args(&replies)
                         .arg(case)
+                        .arg(temp.path().join("thread-received"))
+                        .arg(temp.path().join("prompt-received"))
                         .env_clear()
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
@@ -685,7 +787,8 @@ IFS= read -r hold
                 use hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome;
                 use hello_agent_core::provider::vendor_observation::codex_events::Projection;
                 let mut text = String::new();
-                let result = run_text_and_close(
+                let mut checks = 0;
+                let result = run_text_checked(
                     &mut process,
                     flow,
                     &cancel,
@@ -711,12 +814,30 @@ IFS= read -r hold
                         }
                         Ok(())
                     },
+                    &mut || {
+                        checks += 1;
+                        if (case == "turn-workspace-before-thread" && checks == 2)
+                            || (case == "turn-workspace-before-prompt" && checks == 3)
+                        {
+                            return Err(failure());
+                        }
+                        Ok(())
+                    },
                 );
                 if case == "turn-success" {
+                    assert_eq!(checks, 3);
                     assert_eq!(result.unwrap(), TurnOutcome::Completed);
                     assert_eq!(text, "hello");
                 } else {
                     assert!(result.is_err(), "{case}");
+                }
+                if case.starts_with("turn-workspace-") {
+                    assert!(!temp.path().join("prompt-received").exists());
+                    assert_eq!(
+                        temp.path().join("thread-received").exists(),
+                        case == "turn-workspace-before-prompt"
+                    );
+                    assert!(text.is_empty());
                 }
                 if case == "turn-uncertain" {
                     let _ = process.finish();

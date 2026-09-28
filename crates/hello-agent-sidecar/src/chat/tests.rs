@@ -129,6 +129,42 @@ impl Fixture {
 }
 
 #[test]
+fn text_candidate_requires_durable_chat_snapshot_and_rechecks_marker() {
+    use crate::provider_preflight_session::TextWorkspace;
+    let mut fixture = Fixture::new();
+    let first = fixture.snapshot("req_text_first");
+    let second = fixture.snapshot("req_text_second");
+    let chat = fixture.create_chat(&first, "goal", "req_text_chat");
+    let address = address_from_chat(&chat).unwrap();
+    let binding = TextWorkspace::new(&fixture.projects, &fixture.storage, &address).unwrap();
+    binding.revalidate().unwrap();
+    let mut other = address.clone();
+    other.worktree_id = second["worktreeId"].as_str().unwrap().into();
+    other.workspace_identity = second["workspaceIdentity"].as_str().unwrap().into();
+    assert!(TextWorkspace::new(&fixture.projects, &fixture.storage, &other).is_err());
+    let mut missing = address.clone();
+    missing.chat_id = "missing_chat".into();
+    assert!(TextWorkspace::new(&fixture.projects, &fixture.storage, &missing).is_err());
+    let marker = std::path::Path::new(first["worktreePath"].as_str().unwrap())
+        .join(".git/hello-agent-snapshot-v1.json");
+    let original = fs::read(&marker).unwrap();
+    fs::write(&marker, b"{}").unwrap();
+    assert!(binding.revalidate().is_err());
+    fs::write(&marker, original).unwrap();
+    binding.revalidate().unwrap();
+    drop(binding);
+    fixture
+        .projects
+        .workspace_close(&fixture.storage, &address)
+        .unwrap();
+    assert!(TextWorkspace::new(&fixture.projects, &fixture.storage, &address).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("src/value.txt")).unwrap(),
+        b"base"
+    );
+}
+
+#[test]
 fn production_prepared_workspace_snapshot_persists_more_than_one_hundred_members() {
     let mut fixture = Fixture::new();
     let mut snapshots = Vec::new();
