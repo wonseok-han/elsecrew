@@ -518,6 +518,10 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 이는 새 사용자 권한 승인이 아니라 기존 원본 보호 계약을 구현하기 위한 검증 조건이다. 읽기 전용 후보나 이 실험을 코딩 역할·승인 UI의 대체 완료선으로 사용하지 않는다.
 
+**기본 거부 정책 실측(2026-09-28, 아직 테스트 전용)**: 같은 probe의 `default_deny_outer_policy_enforces_writes_and_network_boundary`는 `(deny default)`에서 지정된 시스템/작업 복사본/profile/scratch 읽기, 세 쓰기 폴더, 프로세스 생성/실행·자기 signal·sysctl-read만 명시 허용한다. `.git`·`.agents`·`.codex` 및 profile config 쓰기는 별도 거절한다. 시스템 셸의 쓰기/자식 실행·지정 파일 읽기는 성공하고, 임시 원본 읽기/쓰기·symlink 우회·보호 설정 변경/이동·외부 hardlink 생성·localhost TCP 연결은 거절됐다. 네트워크 대조군은 같은 임시 listener에 sandbox 밖에서 연결 성공을 확인한다. Mach IPC 및 실제 provider 호환성·인증 갱신·모델 네트워크 연결은 별도 미검증이다.
+
+초기 읽기 제한은 시스템 로더의 SIGABRT를 일으켰다. 해당 진단 자식 PID의 kernel deny 로그가 `file-read-data /`를 가리켰고, `(literal "/")`의 디렉터리 자체 읽기를 추가해 해결했다. `(subpath "/")`나 file-read 전체 허용으로 우회하지 않았다. 로컬 시스템 경로 허용은 다른 macOS 버전의 호환성 보장이 아니다. 실제 실행에 사용하기 전 trusted CLI/helper 읽기 경로·profile/scratch의 inode 입장·명시적 모델 통신 경계를 조합하고, fd 차단 gate 및 프로세스 소유권과 통합 검증해야 한다. 이 정책을 제품 capability에 연결하거나 네트워크 허용 fallback으로 사용하지 않는다.
+
 ## 7. 안전 경계
 
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.

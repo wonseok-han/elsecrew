@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (기본 거부 OS 정책 실측)
+
+- **진전/기준**: 직전 snapshot 파일 입장 검사는 `01fafb9`로 커밋됐고 clean 통합 checkout에서 이어갔다. 메인이 테스트 전용 macOS 정책을 broad allow 대신 deny-default·명시된 읽기/쓰기 폴더·최소 process 허용으로 구성했다. 실제 provider/계정/유료 모델/사용자 파일은 사용하지 않았다.
+- **실측/함정**: 임시 workspace/profile/scratch 쓰기·자식 실행·허용 파일 읽기 성공, 원본 읽기/쓰기·symlink 우회·보호 설정(.git/.agents/.codex/profile config) 변경/이동·외부 hardlink 생성·localhost 연결 거절. 초기 시스템 셸 SIGABRT는 해당 진단 PID의 kernel 로그 `file-read-data /`로 원인을 좁혀 루트 디렉터리 자체 literal 읽기만 허용해 해결했다. 추측으로 추가했던 cache/random 경로는 제거했다. 생성된 시스템 crash report는 OS 진단 파일이며 사용자 로그를 삭제하지 않았다.
+- **검증/다음**: 같은 임시 loopback listener의 비격리 성공 대조군과 허용 파일 읽기 대조군을 포함한 최신 opt-in 시험 결과를 회수한다. 제안서 §6.8에 결과와 미검증 경계를 기록했다. 테스트 정책은 아직 제품에 적용되지 않았고 Mach/실제 vendor·인증 갱신·모델 통신은 미검증이다. 다음은 지정된 실행 읽기 경로·profile/tmp 입장·통신 경계와 기존 gate의 통합이며 main 병합/push는 하지 않는다.
+- **마감**: 최신 시험 1 PASS/0.14초, probe 대상 strict clippy·fmt·diff PASS. 실제 제품 코드/권한 변경이 없는 진단/설계 3파일을 직접 검토해 커밋한다. 이 성공은 테스트에 명시한 행위의 로컬 관측이지 전체 sandbox gate 합격이 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 준비 파일 공유 검사)
 
 - **진전/범위**: 직전 fd 차단은 `dc861cd`로 커밋된 진전이다. clean 통합 checkout에서 메인이 snapshot의 기존 hardlink 차단을 추가했다. capability directory를 따라 숨김/`.git` 포함 전체 항목을 검사하고 regular file의 nlink=1만 허용한다. symlink·특수 파일·128단계 초과·200,000항목 초과는 거절하고 자동 삭제/복사는 하지 않는다.
@@ -113,6 +120,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **deny-default 로컬 정책 후보(2026-09-28)**: opt-in probe에서 지정 폴더 쓰기/읽기·자식 실행은 통과, 원본/보호 설정 변경과 외부 hardlink 생성·loopback TCP는 거절됐다. 시스템 로더가 루트 디렉터리 자체 읽기를 요구해 `(literal "/")`만 추가했다. broad root 읽기/쓰기 허용이 아니며 실제 vendor/Mach/인증/모델 통신 호환성은 미검증이다. 테스트 정책만 존재하며 제안서 §6.8을 따른다.
 
 - **외부 경로 sandbox만으로 원본 보호 불충분(2026-09-28)**: 임시 fixture의 macOS `macos_sandbox_probe`에서 기존 writable descriptor와 hardlink로 sandbox 밖 원본 변경을 재현했다. 직접/심볼릭 링크/자손 쓰기와 실행 중 hardlink 생성은 차단됐다. probe exit 0은 기제 관측 완료이지 안전 gate PASS가 아니며 제품에 적용된 정책이 아니다. 기존 핸들·inode 공유·IPC 경계가 포함된 입장/실행 정책이 필요하다. 제안서 §6.8 참조.
 - **공유 vendor gate의 fd 상속 차단(2026-09-28)**: 고정 셸이 payload release 전 0/1/2 외 inherited fd를 닫는다. 임시 원본의 non-CLOEXEC fd 누출을 먼저 재현하고 낮은/높은 fd 및 부모 보존·기존 로그인/실행 회귀·독립 검토로 수정 확인했다. hardlink 및 전체 sandbox 보장으로 확대 해석하지 않는다.

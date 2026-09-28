@@ -15,6 +15,136 @@ const POLICY: &str = r#"(version 1)
 (allow file-write* (subpath (param "WORKSPACE")))
 "#;
 
+// Second experiment: no blanket permission for Mach IPC, sockets or networking.
+// Read roots are narrowed for this toy policy; vendor compatibility is NOT proven.
+const DEFAULT_DENY_POLICY: &str = r#"(version 1)
+(deny default)
+(allow file-read-metadata)
+(allow file-read*
+    (literal "/")
+    (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin")
+    (literal "/dev/null") (literal "/dev/urandom")
+    (subpath (param "WORKSPACE"))
+    (subpath (param "PROFILE"))
+    (subpath (param "SCRATCH")))
+(allow process-exec)
+(allow process-fork)
+(allow signal (target self))
+(allow sysctl-read)
+(allow file-write*
+    (subpath (param "WORKSPACE"))
+    (subpath (param "PROFILE"))
+    (subpath (param "SCRATCH")))
+(deny file-write*
+    (subpath (string-append (param "WORKSPACE") "/.git"))
+    (subpath (string-append (param "WORKSPACE") "/.agents"))
+    (subpath (string-append (param "WORKSPACE") "/.codex"))
+    (literal (string-append (param "PROFILE") "/config.toml")))
+"#;
+
+#[test]
+#[ignore = "macOS external sandbox only; temporary files and loopback listener, no vendor"]
+fn default_deny_outer_policy_enforces_writes_and_network_boundary() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let workspace = root.join("workspace");
+    let profile = root.join("profile");
+    let scratch = root.join("scratch");
+    let source = root.join("source");
+    for directory in [&workspace, &profile, &scratch, &source] {
+        fs::create_dir(directory).unwrap();
+    }
+    for directory in [".git", ".agents", ".codex"] {
+        fs::create_dir(workspace.join(directory)).unwrap();
+        fs::write(workspace.join(directory).join("protected"), b"original").unwrap();
+    }
+    fs::write(profile.join("config.toml"), b"original").unwrap();
+    fs::write(source.join("original"), b"original").unwrap();
+    symlink(&source, workspace.join("escape")).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let control = Command::new("/usr/bin/nc")
+        .args(["-n", "-z", "-G", "1", "-w", "1", "127.0.0.1", &port])
+        .output()
+        .unwrap();
+    assert!(control.status.success(), "loopback positive control failed");
+    drop(
+        listener
+            .accept()
+            .expect("positive-control connection missing"),
+    );
+    let run = |script: &str| {
+        Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", DEFAULT_DENY_POLICY, "-D"])
+            .arg(format!("WORKSPACE={}", workspace.display()))
+            .arg("-D")
+            .arg(format!("PROFILE={}", profile.display()))
+            .arg("-D")
+            .arg(format!("SCRATCH={}", scratch.display()))
+            .args(["/bin/sh", "-c", script, "deny-default-probe"])
+            .arg(&workspace)
+            .arg(&profile)
+            .arg(&scratch)
+            .arg(&source)
+            .arg(&port)
+            .env_clear()
+            .current_dir(&workspace)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap()
+    };
+    for script in [
+        "printf allowed > \"$1/allowed\"",
+        "printf allowed > \"$2/runtime\"",
+        "printf allowed > \"$3/temporary\"",
+        "/bin/sh -c 'printf child > \"$1/child\"' child \"$1\"",
+    ] {
+        let output = run(script);
+        assert!(
+            output.status.success(),
+            "allowed operation failed ({script}, status={}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let read_allowed = run("/bin/cat \"$1/allowed\"");
+    assert!(read_allowed.status.success());
+    assert_eq!(read_allowed.stdout, b"allowed");
+    for script in [
+        "/bin/cat \"$4/original\"",
+        "printf changed > \"$4/original\"",
+        "printf changed > \"$1/escape/original\"",
+        "printf changed > \"$1/.git/protected\"",
+        "printf changed > \"$1/.agents/protected\"",
+        "printf changed > \"$1/.codex/protected\"",
+        "printf changed > \"$2/config.toml\"",
+        "/bin/mv \"$1/.git\" \"$1/renamed-git\"",
+        "/bin/rm \"$2/config.toml\"",
+        "/bin/ln \"$4/original\" \"$1/new-link\"",
+        "/usr/bin/nc -n -z -G 1 -w 1 127.0.0.1 \"$5\"",
+    ] {
+        let output = run(script);
+        assert!(
+            !output.status.success(),
+            "forbidden operation succeeded: {script}"
+        );
+    }
+    assert_eq!(fs::read(source.join("original")).unwrap(), b"original");
+    assert_eq!(fs::read(profile.join("config.toml")).unwrap(), b"original");
+    for directory in [".git", ".agents", ".codex"] {
+        assert_eq!(
+            fs::read(workspace.join(directory).join("protected")).unwrap(),
+            b"original"
+        );
+    }
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+}
+
 #[test]
 #[ignore = "requires macOS sandbox-exec outside an existing nested sandbox; temp fixtures only"]
 fn outer_sandbox_write_boundary_probe() {
