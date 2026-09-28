@@ -270,7 +270,7 @@ pub(crate) fn run_text_and_close(
             }
             match observed {
                 Observed::Public(value) => on_public(value)?,
-                Observed::ItemStarted => {}
+                Observed::ItemStarted | Observed::Private => {}
                 Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
                 // Tools/private notifications need an explicit owner handler.
                 Observed::Started | Observed::RequiresHandling => return Err(failure()),
@@ -582,6 +582,7 @@ IFS= read -r hold
             "turn-cancel",
             "turn-sink-error",
             "turn-uncertain",
+            "turn-tool",
         ] {
             let temp = tempfile::tempdir().unwrap();
             let storage = crate::Storage::open(
@@ -648,6 +649,14 @@ else
 printf '%s\n' '{"id":6,"result":{"turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
 fi
 printf '%s\n' '{"method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"t1","status":"inProgress","items":[],"error":null}}}'
+printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"userMessage","id":"u1","clientId":null,"content":[{"type":"text","text":"PRIVATE","text_elements":[]}]}}}'
+printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"userMessage","id":"u1","clientId":null,"content":[{"type":"text","text":"PRIVATE","text_elements":[]}]}}}'
+printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"reasoning","id":"r1","summary":[],"content":[]}}}'
+printf '%s\n' '{"method":"item/reasoning/textDelta","params":{"threadId":"thread-test","turnId":"t1","itemId":"r1","delta":"PRIVATE","contentIndex":0}}'
+printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"reasoning","id":"r1","summary":[],"content":["PRIVATE"]}}}'
+if test "$6" = turn-tool; then
+printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"commandExecution","id":"c1","command":"PRIVATE"}}}'
+fi
 printf '%s\n' '{"method":"item/started","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":""}}}'
 printf '%s\n' '{"method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"t1","itemId":"a1","delta":"hello"}}'
 printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":"hello"}}}'
@@ -684,8 +693,14 @@ IFS= read -r hold
                     "test goal",
                     &mut |value| {
                         match value {
-                            Projection::Delta { text: value, .. } => text.push_str(&value),
-                            Projection::Completed { text: value, .. } => text = value,
+                            Projection::Delta { text: value, .. } => {
+                                assert_eq!(value, "hello");
+                                text.push_str(&value);
+                            }
+                            Projection::Completed { text: value, .. } => {
+                                assert_eq!(value, "hello");
+                                text = value;
+                            }
                             Projection::RequiresHandling => panic!("private projection"),
                         }
                         if case == "turn-cancel" {

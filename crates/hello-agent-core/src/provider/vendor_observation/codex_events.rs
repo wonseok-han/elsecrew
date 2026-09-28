@@ -14,6 +14,7 @@ use crate::provider::{
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
+mod private;
 pub mod stream;
 
 #[derive(Debug, PartialEq, Eq)]

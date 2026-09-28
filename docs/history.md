@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (비공개 입력·추론 이벤트 처리)
+
+- **진전/기준**: 직전 `9738912`는 동일 프로세스 실행 연결·독립 검토·커밋을 마친 진전이다. 이번 clean HEAD에서 OpenAI Docs events와 현재 생성 ThreadItem/Reasoning* schema를 확인하고, 정상 text turn에 섞이는 userMessage/reasoning 때문에 후보가 즉시 실패하는 누락을 처리했다.
+- **구현**: 기존 TurnStream의 thread/turn/item 신원·시작/완료 순서·총 byte/event 예산 아래에서 text userMessage와 reasoning 항목 및 세 reasoning delta를 검증한다. 별도 Private 결과만 반환하며 원문을 public callback/원장/오류로 내보내지 않는다. 파일/명령/도구/미지 이벤트는 계속 RequiresHandling→종료 오류로 처리한다. Karpathy 지침으로 기존 순서·권한·정리 경계를 바꾸지 않고 파서와 내부 소비자만 확장했다.
+- **검증/남음**: core events 10 PASS(비공개 정상/타 실행·형식 오류·완료 후 delta·request 위장 포함). 실제 모델 실행 증거가 아니라 합성 wire 회귀다. 제품 run 원장·snapshot 입장·도구/승인 처리·실제 유료 smoke는 남으며 신규 위임·실제 CLI/인증·main 병합·push 없음.
+- **마감**: sidecar 집중 5 PASS(기존 turn cases에 비공개 echo/추론 삽입, tool 거절 추가), strict sidecar clippy·fmt·diff PASS. 추가 private shape 회귀 1테스트/6사례 PASS로 누락/중복/타입 오류/이미지/command 혼입을 거절한다. 자체 diff 검토 후 미활성 파서·소비자/회귀·문서만 기능 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (실행 연결 검토 승인·재개)
 
 - **승인/진행**: 사용자가 신규 읽기 전용 리뷰어 호출을 승인했다. `cf8b535` 기준 미커밋 typed turn 전송·동일 process 실행/출력·취소/종료 변경을 리뷰어 1명에게 맡겼다. 기존 승인 차단은 해소됐으며 검토 중 해당 코드를 동결한다.

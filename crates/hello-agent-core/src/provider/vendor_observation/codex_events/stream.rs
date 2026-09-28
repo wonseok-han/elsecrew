@@ -16,6 +16,8 @@ pub enum Observed {
     Started,
     Public(Projection),
     ItemStarted,
+    /// Validated user echo/reasoning metadata; payload is discarded, never public.
+    Private,
     Finished(TurnOutcome),
     /// No public content; not an authorization to ignore a tool/request/policy event.
     RequiresHandling,
@@ -147,6 +149,10 @@ impl TurnStream {
             if !identifier(&item.id) || !identifier(&item.kind) {
                 return Err(invalid());
             }
+            let private = matches!(item.kind.as_str(), "userMessage" | "reasoning");
+            if private {
+                super::private::validate_item(wire.item.get())?;
+            }
             if frame.method == "item/started" {
                 if self.items.contains_key(&item.id) {
                     return Err(invalid());
@@ -161,6 +167,8 @@ impl TurnStream {
                 );
                 return Ok(if public {
                     Observed::ItemStarted
+                } else if private {
+                    Observed::Private
                 } else {
                     Observed::RequiresHandling
                 });
@@ -172,6 +180,7 @@ impl TurnStream {
             existing.completed = true;
             return Ok(match projected {
                 Projection::Completed { .. } => Observed::Public(projected),
+                _ if private => Observed::Private,
                 _ => Observed::RequiresHandling,
             });
         }
@@ -190,6 +199,10 @@ impl TurnStream {
         let item = self.items.get(&reference.item_id).ok_or_else(invalid)?;
         if item.completed || item.kind != expected_kind {
             return Err(invalid());
+        }
+        if expected_kind == "reasoning" {
+            super::private::validate_delta(&frame.method, frame.params.get())?;
+            return Ok(Observed::Private);
         }
         Ok(match projected {
             Projection::Delta { .. } => Observed::Public(projected),
@@ -339,22 +352,12 @@ mod tests {
 
     #[test]
     fn private_and_unknown_items_require_owner_handling_throughout() {
-        for kind in ["reasoning", "commandExecution", "fileChange", "futureItem"] {
+        for kind in ["commandExecution", "fileChange", "futureItem"] {
             let mut stream = started();
             assert!(matches!(
                 stream.observe(&item("item/started", kind)).unwrap(),
                 Observed::RequiresHandling
             ));
-            if kind == "reasoning" {
-                let private = frame(
-                    "item/reasoning/textDelta",
-                    json!({"threadId":"t","turnId":"r","itemId":"i","delta":"SECRET"}),
-                );
-                assert!(matches!(
-                    stream.observe(&private).unwrap(),
-                    Observed::RequiresHandling
-                ));
-            }
             assert!(matches!(
                 stream.observe(&item("item/completed", kind)).unwrap(),
                 Observed::RequiresHandling
@@ -363,6 +366,91 @@ mod tests {
                 .observe(&turn("turn/completed", "completed"))
                 .unwrap();
             assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+        }
+    }
+
+    #[test]
+    fn private_items_are_validated_without_public_projection() {
+        for kind in ["userMessage", "reasoning"] {
+            let mut stream = started();
+            let value = if kind == "userMessage" {
+                json!({"type":kind,"id":"i","clientId":null,"content":[{"type":"text","text":"PRIVATE","text_elements":[]}]})
+            } else {
+                json!({"type":kind,"id":"i","summary":[],"content":["PRIVATE"]})
+            };
+            let params = json!({"threadId":"t","turnId":"r","item":value});
+            assert!(matches!(
+                stream
+                    .observe(&frame("item/started", params.clone()))
+                    .unwrap(),
+                Observed::Private
+            ));
+            if kind == "reasoning" {
+                for (method, index) in [
+                    ("item/reasoning/textDelta", "contentIndex"),
+                    ("item/reasoning/summaryTextDelta", "summaryIndex"),
+                    ("item/reasoning/summaryPartAdded", "summaryIndex"),
+                ] {
+                    let mut body = json!({"threadId":"t","turnId":"r","itemId":"i"});
+                    body[index] = json!(0);
+                    if !method.ends_with("Added") {
+                        body["delta"] = json!("PRIVATE");
+                    }
+                    assert!(matches!(
+                        stream.observe(&frame(method, body)).unwrap(),
+                        Observed::Private
+                    ));
+                }
+            }
+            assert!(matches!(
+                stream.observe(&frame("item/completed", params)).unwrap(),
+                Observed::Private
+            ));
+            stream
+                .observe(&turn("turn/completed", "completed"))
+                .unwrap();
+            assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+        }
+    }
+
+    #[test]
+    fn malformed_or_cross_scoped_private_events_fail_permanently() {
+        for case in [
+            "missing",
+            "wrong-type",
+            "cross-thread",
+            "negative-index",
+            "late",
+            "request",
+        ] {
+            let mut stream = started();
+            let params = json!({"threadId":"t","turnId":"r","item":{"type":"reasoning","id":"i","summary":[],"content":[]}});
+            stream
+                .observe(&frame("item/started", params.clone()))
+                .unwrap();
+            if case == "late" {
+                stream.observe(&frame("item/completed", params)).unwrap();
+            }
+            let mut body = json!({"threadId":"t","turnId":"r","itemId":"i","contentIndex":0,"delta":"PRIVATE"});
+            match case {
+                "missing" => {
+                    body.as_object_mut().unwrap().remove("delta");
+                }
+                "wrong-type" => body["delta"] = json!({}),
+                "cross-thread" => body["threadId"] = json!("other"),
+                "negative-index" => body["contentIndex"] = json!(-1),
+                _ => {}
+            }
+            let mut event = json!({"method":"item/reasoning/textDelta","params":body});
+            if case == "request" {
+                event["id"] = json!(9);
+            }
+            let error = stream
+                .observe(&BoundedObservation::new(event.to_string().into_bytes()).unwrap())
+                .err()
+                .unwrap();
+            assert!(!error.to_string().contains("PRIVATE"));
+            assert!(stream.finish().is_err());
         }
     }
 }
