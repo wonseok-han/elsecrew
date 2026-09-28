@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (core 엄격 정적 검사 경고 정리)
+
+- **기준/범위**: 직전 `e9124b5`는 설정 전용 검사 경로 구현·검증 진전이다. clean 통합 checkout에서 메인이 반복 보고되던 core lint 3개를 정리한다. 미리 만들어 둔 오류 tuple을 get_or_insert로 전달하고, 기존 신원을 덮어쓰지 않는 BTreeMap vacant entry를 사용하며, 테스트의 길이 비교를 is_empty로 바꿨다. 종료 기한·누적 신원·실패 기억·복구 정책은 변경하지 않는다.
+- **검증/다음**: core 전체 unit test와 경고 예외 없는 strict core/sidecar clippy·fmt/diff를 실행한다. 종료 추적 코드의 기계적 변경이므로 상시 승인된 동일 검토자 1명에게 의미 보존을 확인받고 관련 파일만 커밋한다. 실제 CLI 오프라인 초기화/설정 검사 승인은 여전히 미수신이며 vendor/계정/모델 호출·main 병합/push 없음. 실제 실행 연결과 제품 완료는 아직 남는다.
+- **마감**: core 전체 146 PASS/0.48초(실제 임시 프로세스 트리 종료 포함), core+sidecar all-targets strict clippy 예외 없이 PASS/3.32초, scoped fmt·diff PASS. 동일 검토자의 독립 정적 검토 PASS로 첫 실패 보존·기존 신원 비덮어쓰기·신규 발견 수 유지·assertion 동치를 확인했다. 이제 앞선 기록의 core lint 3개는 해소됐으며 관련 3파일을 커밋한다.
+
 ### 2026-09-28 · by GPT-6 Astra (설정 전용 검사 범위 고정)
 
 - **기준/진전**: 직전 `c196299`는 설치 쌍 일치와 검사 범위를 확인한 기록이다. 메인은 Karpathy 지침에 따라 기존 preflight 검증기를 재사용하고 `configuration_only` 생성자를 추가했다. 초기화·설정 layer 검증 뒤 별도 ConfigurationMatched 상태에서 멈추며 계정/모델 조회·thread/turn으로 승격할 수 없다. 기존 전체 preflight 계약은 유지한다.

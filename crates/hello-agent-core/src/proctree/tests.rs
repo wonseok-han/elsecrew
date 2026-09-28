@@ -843,7 +843,7 @@ fn system_table_terminates_a_real_process_tree() {
     let _ = child.wait();
     assert!(report.confirmed(), "실제 트리 종료 실패: {report:?}");
     assert!(
-        report.tracked.len() >= 1,
+        !report.tracked.is_empty(),
         "루트 신원은 최소한 추적돼야 한다"
     );
 }

@@ -221,8 +221,7 @@ impl TreeTracker {
             Ok(_) => Ok(()),
             Err((reason, detail)) => {
                 let remembered = detail.clone();
-                self.integrity_error
-                    .get_or_insert_with(|| (reason, remembered));
+                self.integrity_error.get_or_insert((reason, remembered));
                 Err(detail)
             }
         }
@@ -303,15 +302,14 @@ impl TreeTracker {
             for entry in descendants_of(&snapshot, &live_pids) {
                 // 신원 전체로 조회한다. 같은 pid라도 시작 시각이 다르면 **다른 프로세스**이며
                 // 새 신원으로 편입돼야 한다.
-                if !self.tracked.contains_key(&entry.identity) {
-                    self.tracked.insert(
-                        entry.identity,
-                        TrackedProc {
-                            identity: entry.identity,
-                            state: TrackedState::Live,
-                            comm: entry.comm.clone(),
-                        },
-                    );
+                if let std::collections::btree_map::Entry::Vacant(slot) =
+                    self.tracked.entry(entry.identity)
+                {
+                    slot.insert(TrackedProc {
+                        identity: entry.identity,
+                        state: TrackedState::Live,
+                        comm: entry.comm.clone(),
+                    });
                     discovered += 1;
                 }
             }
