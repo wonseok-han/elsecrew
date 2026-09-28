@@ -1,5 +1,33 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실행 경계 독립 검토 재개)
+
+- **승인/범위**: 사용자가 읽기 전용 리뷰어 1명 호출을 승인해 `71de02e` 기준 미커밋 Rust preflight 5파일(신규 세션 포함)의 독립 검토를 시작했다. 검토 중 Rust 소스를 동결하고 요청 순서·응답 결속·시간 제한·취소·종료/잠금·닫힌 세션 재사용을 확인한다. 이전 승인 대기는 해소됐으며 실제 모델 호출·제품 활성화 승인을 뜻하지 않는다.
+- **진행/다음**: 기존 집중 테스트 결과를 재사용하며 새 결함이 있으면 최소 수정과 영향 회귀를 수행한다. 검토 결과 확인 후 기능 단위 커밋한다. main 병합·push·사용자 인증 접근 없음.
+- **검토 반영**: 새 flow만 확인하던 경계를 process transport의 단회 claim에 결속했다. 이전 send/receive/poll이 있는 process는 진단에 재사용하지 않고 claim 뒤에는 로그인/일반 읽기를 거절한다. prior login 응답 미소비·prior poll·중복 claim 회귀를 추가했다. Karpathy 지침으로 기존 cleanup/fence는 유지한다.
+- **시간 설명 정정**: 위아래 과거 기록의 하나의 30초 예산은 통신 예산이다. 안전한 종료 확인은 기존 TERM/KILL 관측 예산을 별도로 사용하므로 전체 반환 30초를 보장하지 않는다. 독립 검토에서도 cleanup 포함 30초의 상위 계약은 확인되지 않았으며 종료 확인을 줄이지 않고 주석/현행 문서를 정정했다.
+- **재검토 수정/검증**: claim 거절 뒤에도 기존 process를 finish하던 경로를 early return으로 고쳤다. 거절된 기존 연결은 child 생존·잠금 유지와 원래 caller의 명시적 종료를 확인한다. 최종 preflight pipe 1테스트/11사례 PASS, process 모드 변경 뒤 로그인 회귀 31 PASS/3 의도적 ignored. core 11 PASS는 변경 없는 기존 증거를 재사용한다. 실제 CLI/계정·유료 모델 검증은 수행하지 않았다.
+- **독립 검토 마감**: 동일 리뷰어가 최종 delta의 두 결함 해소와 남은 차단 결함 없음을 확인했다(정적 검토·diff check, 독립 테스트 실행 아님). sidecar strict clippy·core/sidecar fmt·diff 검사 PASS. 이 내부 진단 변경을 기능 커밋하며 실제 launcher 설정 격리·thread 알림/turn·출력/원장 연결은 다음 작업으로 남는다. 제품 전체 완료나 실제 실행 활성화 판정이 아니다.
+
+### 2026-09-28 · by GPT-6 Astra (실행 경계 검토 승인 대기)
+
+- **재확인**: HEAD `71de02e`, Rust preflight 5파일과 작업 기록이 미커밋으로 보존돼 있고 diff 검사는 통과한다. live agent 조회에서 이전 로그인 리뷰어는 완료 상태이며 새 preflight 검토가 실행 중인 것은 아니다. 이전 목표 턴은 동일 process 진단·종료 무효화 구현으로 진전했지만, 이번 재확인은 새 구현 진전이나 실행 중 작업 대기가 아니다.
+- **차단 판단**: 새 실행 경계의 독립 검토 위임 승인이 3회 이상의 연속 목표 턴에서 미해결이다. 그동안 비의존 UI와 검토용 구현·회귀를 진행했지만 현재 실행 경계 통합/활성화는 프로젝트 규칙상 승인 없이 진행할 수 없다. 자체 검증을 독립 검토로 대체하거나 이전 로그인 검토 승인을 확대하지 않는다. 추가 주변 기능으로 이 핵심 승인 결정을 계속 미루지 않고 목표를 사용자 입력 필요 상태로 전환한다.
+- **필요 입력/보존**: 읽기 전용 리뷰어 1명의 현재 preflight 변경 검토 호출 승인. 코드는 미커밋·제품 비활성으로 유지하며 승인 후 검토·수정·통합과 실제 adapter 작업을 재개한다. 제품 전체 완료가 아니고 main 병합·push·유료 호출 승인 요청도 아니다.
+
+### 2026-09-28 · by GPT-6 Astra (동일 프로세스 thread 관측 연결)
+
+- **진행**: 앞선 턴의 thread 응답 검증 추가는 코드·테스트 증거가 있는 진전이었다. 이번에는 미커밋 preflight 세션에 `observe_thread_and_close` 진단 경로를 추가해 같은 process에서 initialize/config/account/models→thread/start→exact 응답 확인→관측된 cleanup 순서로 연결했다. 기존 discovery-only 함수는 thread를 생성하지 않는다. 두 경로는 하나의 30초 예산을 쓰며, 닫힌 flow는 Closed로 바뀌고 thread ID/후속 요청 생성 권한을 남기지 않는다.
+- **검증**: 실제 pipe의 가짜 CLI 8사례(정상 조회·설정 불일치·취소·불확실 종료·시간 초과·exchange 재사용·정상 thread·다른 cwd thread)가 PASS했다. 종료 후 두 요청 생성 API 거부와 thread ID 부재도 확인했다. Karpathy 지침으로 기존 finish/영속 fence를 유지했다. 실제 vendor thread/모델 호출은 하지 않았다.
+- **남음**: launcher 설정 격리·runtime 원장/공개 출력·turn 시작 및 실제 실행 승인은 별개다. 현재 thread 진단은 correlated response를 기대하며 thread 알림 순서까지 검증한 live adapter가 아니다. 제품 연결/커밋 전 독립 검토 승인을 계속 기다리며 전체 미커밋 실행 변경을 보존한다. main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (동일 연결 thread 시작 검증)
+
+- **구현**: `71de02e`와 기존 미커밋 preflight 위에서 동일 exchange의 config/auth/model 관측 성공 뒤에만 read-only thread/start 요청을 생성하도록 확장했다. request ID 5, 명시적 model/provider/cwd/effort·on-request/user·ephemeral을 결속하며 응답의 exact cwd/model/effort/권한·빈 instructionSources를 기존 검증기로 비교한다. 응답 전에는 thread ID가 없고 불일치/무효화 뒤 ID는 폐기한다. 기존 조회 후 종료 세션은 discovery 전용이며 이를 실제 turn 연결로 재사용하지 않는다.
+- **현재 근거**: OpenAI Docs의 [thread 시작과 turn 시작](https://learn.chatgpt.com/docs/app-server)을 확인했다. 이전 임시 schema 폴더는 없어져 현재 native CLI SHA-256 `3e11ccc7…`을 다시 확인한 뒤 빈 HOME/CODEX_HOME에서 generate-ts만 수행했다. ThreadStartParams/Response 해시는 `0303dcced2de5d056ba552a810dde3cf5d5cf699da9353abdfc788599829881c` / `2ecc3c074f9f4092ee0e8703e9c2bcecbe9544cf70663c15e82b325a1fd2efcf`이다. 인증/모델 조회 또는 실제 thread 생성은 하지 않았다.
+- **추가 회귀**: sidecar preflight pipe 6사례(1 테스트), sidecar strict clippy, core/sidecar rustfmt 및 diff 검사 PASS. 새 provider 프로세스·독립 검토자·실제 계정 요청을 실행하지 않았고 main 병합·push 없음.
+- **검증/경계**: core preflight 11 PASS(조기/중복 시작·다른 응답 ID/cwd/model/권한/지침 거부 포함). Karpathy 지침으로 기존 비교기를 재사용했다. 이 코드는 작업 공간 filesystem 신원·hooks/MCP/plugin 격리 증명이 아니고 제품 활성화/turn 전송을 허용하지 않는다. thread 생성 자체도 설정된 통합을 초기화할 수 있으므로 실제 실행 전 launcher 격리 검증이 필요하다. 기존 실행 경계 변경과 함께 미커밋으로 보존하고 독립 검토 승인은 계속 대기한다.
+
 ### 2026-09-28 · by GPT-6 Astra (역할 설정 실패 복구)
 
 - **직접 수정**: `5b42134` 기준으로 역할 설정 저장 실패가 openProject를 호출해 채팅 선택과 settings draft source를 초기화하던 경로를 제거했다. 실패 시 입력/채팅을 보존하고 명시적 `저장된 설정 다시 불러오기`만 설정을 교체한다. 늦은 reload는 프로젝트 세대·설정 객체가 달라지면 무시한다. 저장/불러오기 중 입력·중복 제출을 막고 기존 계약 검증으로 빈 모델·잘못된 값을 저장 전에 안내한다.

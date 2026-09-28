@@ -232,9 +232,9 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **Codex offline 설정 대조**: `vendor_observation/codex_preflight.rs`는 0.149.1 schema 기반 config/read·완전 model/list·read-only thread/start 응답을 명시적 tuple/정책/cwd와 비교한다. raw 입력을 반환하지 않고 실제 runtime/capability에는 연결하지 않는다. 응답 일치와 실제 파일 신원·설정 격리·권한 강제는 다른 증거다. 쓰기 정책·페이지 수집·Claude init은 아직 지원하지 않는다.
 
-- **Codex 순차 preflight(내부·미연결)**: `codex_preflight/exchange.rs`는 위 검증기를 single-flight RPC에 결속해 앱 profile/macOS 초기화→설정→ChatGPT 계정→완전 모델 목록을 검사한다. 중간 실패는 영구 차단하며 raw 관측값을 저장하지 않는다. `ObservationsMatched`는 이 네 응답만 일치한다는 의미이고 thread/turn 전송·설정 격리·프로세스 종료 권위는 제공하지 않는다.
+- **Codex 순차 preflight(제품 미연결)**: `codex_preflight/exchange.rs`는 위 검증기를 single-flight RPC에 결속해 앱 profile/macOS 초기화→설정→ChatGPT 계정→완전 모델 목록을 검사한다. `ObservationsMatched` 뒤에는 동일 연결의 명시적 read-only thread/start와 exact 응답 대조를 지원한다. 중간 실패는 영구 차단하며 raw 관측값을 저장하지 않는다. thread ID도 닫힘/실패 뒤 폐기한다. 응답 일치는 turn 전송·설정 격리·프로세스 종료 권위가 아니다.
 
-- **내부 preflight 세션(제품 미활성)**: `provider_preflight_session.rs`는 새로운 exchange의 typed frame만 기존 LoginProcess/LoginIo에 보내며 전체 30초 예산과 취소·자손 관측·종료 확인을 적용한다. 모델 없는 관측 성공은 cleanup 확인 후 반환하고, 불확실 종료는 기존 영속 잠금을 유지한다. 가짜 CLI 파이프 검사 단계이며 실제 provider launcher/config 격리·제품 실행 gate는 별도로 남는다.
+- **내부 preflight 세션(제품 미활성)**: `provider_preflight_session.rs`는 새로운 exchange의 typed frame만 기존 LoginProcess/LoginIo에 보내며 통신 전체 30초 예산과 취소·자손 관측·별도 종료 확인을 적용한다. 조회 전용 또는 동일 process의 read-only thread 진단 뒤 cleanup을 확인하고 exchange를 닫는다. 불확실 종료는 기존 영속 잠금과 호출자의 owner를 유지한다. 가짜 CLI 파이프 검사 단계이며 thread/started 알림 처리·실제 provider launcher/config 격리·제품 실행 gate는 별도로 남는다. thread 생성도 통합 기능을 초기화할 수 있어 실제 진단 전 격리가 필요하다.
 
 - **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다. 이후 설치 CLI는 0.153.4로 변경됐으며 기존 exact version 허용을 자동 확대하지 않았다.
 - **로그인 schema 드리프트 검사**: `node scripts/m5-codex-login-schema.mjs <기준 생성 폴더> <후보 생성 폴더>`는 초기화·로그인/취소·계정 조회/알림 타입과 재귀 type import의 원문 해시를 비교한다. 종료 0은 이 범위의 원문 동일, 2는 검토 필요, 1은 비교 불가이며 전체 프로토콜/실행 호환 판정이 아니다. 0.149.1→0.153.4 대조는 20파일 중 Bedrock 인증 추가 2파일 변경으로 검토 필요다. 생성 입력은 로컬 임시 증거이며 이 도구가 CLI 실행·인증 조회를 하지는 않는다.

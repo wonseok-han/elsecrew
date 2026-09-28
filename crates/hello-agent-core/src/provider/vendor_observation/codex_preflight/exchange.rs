@@ -1,7 +1,10 @@
 //! One connection's ordered preflight observations. No launch authority or prompt API.
 //! The process owner must separately enforce profile isolation, deadlines and cleanup.
 
-use super::{match_model_catalog, match_read_only_config, validate_profile, ExpectedProfile};
+use super::{
+    match_model_catalog, match_read_only_config, match_read_only_thread, validate_profile,
+    ExpectedProfile,
+};
 use crate::provider::vendor_observation::codex_rpc::{ModelFreeExchange, ObservationKind};
 use crate::provider::{BoundedObservation, ProviderError};
 use serde::Deserialize;
@@ -10,7 +13,19 @@ use serde::Deserialize;
 pub enum PreflightState {
     Checking,
     ObservationsMatched,
+    ThreadStarting,
+    ThreadMatched,
+    Closed,
     Failed,
+}
+
+/// Constructible only by the fixed model-free exchange, never by renderer input.
+pub struct PreflightRequest(String);
+
+impl PreflightRequest {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Holds only the requested tuple and profile identity, never raw account/config replies.
@@ -20,6 +35,9 @@ pub struct PreflightExchange {
     effort: String,
     expected_home: String,
     state: PreflightState,
+    started: bool,
+    thread_cwd: Option<std::path::PathBuf>,
+    thread_id: Option<String>,
 }
 
 fn invalid() -> ProviderError {
@@ -45,6 +63,9 @@ impl PreflightExchange {
             effort: profile.reasoning_effort.into(),
             expected_home: expected_home.into(),
             state: PreflightState::Checking,
+            started: false,
+            thread_cwd: None,
+            thread_id: None,
         })
     }
 
@@ -52,16 +73,84 @@ impl PreflightExchange {
         self.state
     }
 
+    pub fn is_fresh(&self) -> bool {
+        !self.started && self.state == PreflightState::Checking
+    }
+
     pub fn invalidate(&mut self) {
         self.state = PreflightState::Failed;
+        self.thread_id = None;
+    }
+
+    /// A finished process cannot lend its observations to a new connection.
+    pub fn close(&mut self) {
+        if self.state != PreflightState::Failed {
+            self.state = PreflightState::Closed;
+        }
+        self.thread_id = None;
     }
 
     pub fn next_request(&mut self) -> Result<Option<String>, ProviderError> {
+        self.started = true;
         match self.state {
-            PreflightState::Failed => Err(invalid()),
+            PreflightState::Failed | PreflightState::Closed => Err(invalid()),
             PreflightState::ObservationsMatched => Ok(None),
+            PreflightState::ThreadStarting | PreflightState::ThreadMatched => Err(invalid()),
             PreflightState::Checking => self.rpc.next_request(),
         }
+    }
+
+    /// Same connection only. The owner must hold the managed cwd and enforce isolation
+    /// before sending this: thread creation may initialize configured integrations.
+    pub fn start_read_only_thread(
+        &mut self,
+        cwd: &std::path::Path,
+    ) -> Result<PreflightRequest, ProviderError> {
+        if self.state != PreflightState::ObservationsMatched {
+            return Err(invalid());
+        }
+        let path = cwd.to_str().ok_or_else(invalid)?;
+        if !cwd.is_absolute()
+            || path.len() > 16 * 1024
+            || path.chars().any(char::is_control)
+            || cwd
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err(invalid());
+        }
+        let request = serde_json::json!({"id":5,"method":"thread/start","params":{
+            "model":self.model,"modelProvider":"openai","cwd":path,
+            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"read-only",
+            "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
+            "baseInstructions":"","developerInstructions":""
+        }});
+        self.thread_cwd = Some(cwd.to_owned());
+        self.state = PreflightState::ThreadStarting;
+        Ok(PreflightRequest(format!("{request}\n")))
+    }
+
+    /// Correlated identity, not permission to execute a turn or proof of filesystem isolation.
+    pub fn matched_thread_id(&self) -> Option<&str> {
+        if self.state == PreflightState::ThreadMatched {
+            self.thread_id.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// Split initialized and its following request into individual JSONL frames.
+    pub fn next_frames(&mut self) -> Result<Vec<PreflightRequest>, ProviderError> {
+        Ok(self
+            .next_request()?
+            .into_iter()
+            .flat_map(|batch| {
+                batch
+                    .lines()
+                    .map(|line| PreflightRequest(format!("{line}\n")))
+                    .collect::<Vec<_>>()
+            })
+            .collect())
     }
 
     pub fn accept(&mut self, input: &BoundedObservation) -> Result<PreflightState, ProviderError> {
@@ -76,6 +165,40 @@ impl PreflightExchange {
         &mut self,
         input: &BoundedObservation,
     ) -> Result<PreflightState, ProviderError> {
+        if self.state == PreflightState::ThreadStarting {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Reply {
+                id: u64,
+                result: Box<serde_json::value::RawValue>,
+            }
+            #[derive(Deserialize)]
+            struct Thread {
+                id: String,
+            }
+            #[derive(Deserialize)]
+            struct ResultWire {
+                thread: Thread,
+            }
+            let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            if reply.id != 5 {
+                return Err(invalid());
+            }
+            let observation = BoundedObservation::new(reply.result.get().as_bytes().to_vec())?;
+            match_read_only_thread(
+                &observation,
+                &ExpectedProfile {
+                    model: &self.model,
+                    reasoning_effort: &self.effort,
+                },
+                self.thread_cwd.as_deref().ok_or_else(invalid)?,
+            )?;
+            let result: ResultWire =
+                serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
+            self.thread_id = Some(result.thread.id);
+            self.state = PreflightState::ThreadMatched;
+            return Ok(self.state);
+        }
         if self.state != PreflightState::Checking {
             return Err(invalid());
         }
@@ -213,5 +336,53 @@ mod tests {
         let mut another = super::tests::exchange();
         assert!(another.accept(&reply(0, &results()[0])).is_err());
         assert!(another.next_request().is_err());
+    }
+
+    #[test]
+    fn thread_requires_preflight_and_exact_correlated_workspace_settings() {
+        let cwd = std::path::Path::new("/managed/snapshot");
+        assert!(exchange().start_read_only_thread(cwd).is_err());
+        for mismatch in ["none", "id", "cwd", "model", "sandbox", "instructions"] {
+            let mut flow = exchange();
+            for (index, result) in results().iter().enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, result)).unwrap();
+            }
+            assert!(flow
+                .start_read_only_thread(std::path::Path::new("/managed/../other"))
+                .is_err());
+            let request = flow.start_read_only_thread(cwd).unwrap();
+            let request: Value = serde_json::from_str(request.as_str()).unwrap();
+            assert_eq!(request["id"], 5);
+            assert_eq!(request["method"], "thread/start");
+            assert_eq!(request["params"]["sandbox"], "read-only");
+            assert_eq!(
+                request["params"]["config"]["model_reasoning_effort"],
+                "medium"
+            );
+            assert_eq!(request["params"]["ephemeral"], true);
+            assert!(flow.start_read_only_thread(cwd).is_err());
+            assert_eq!(flow.matched_thread_id(), None);
+            let mut result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
+            match mismatch {
+                "cwd" => result["cwd"] = json!("/other"),
+                "model" => result["model"] = json!("other"),
+                "sandbox" => result["sandbox"] = json!({"type":"workspaceWrite"}),
+                "instructions" => result["instructionSources"] = json!(["/user/AGENTS.md"]),
+                _ => {}
+            }
+            let accepted = flow.accept(&reply(if mismatch == "id" { 3 } else { 4 }, &result));
+            if mismatch == "none" {
+                assert_eq!(accepted.unwrap(), PreflightState::ThreadMatched);
+                assert_eq!(flow.matched_thread_id(), Some("thread-1"));
+                flow.invalidate();
+                assert_eq!(flow.matched_thread_id(), None);
+            } else {
+                assert!(accepted.is_err());
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert_eq!(flow.matched_thread_id(), None);
+                assert!(flow.next_request().is_err());
+            }
+        }
     }
 }

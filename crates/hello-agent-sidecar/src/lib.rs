@@ -27,6 +27,9 @@ mod provider_login_process;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal session, pending validated vendor launcher and IPC/UI activation.
 mod provider_login_session;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Internal preflight; not product execution authority.
+mod provider_preflight_session;
 #[cfg(unix)]
 #[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
 mod provider_profile;

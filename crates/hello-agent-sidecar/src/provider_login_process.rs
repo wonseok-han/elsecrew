@@ -145,6 +145,8 @@ pub(crate) struct LoginProcess<'a> {
     evidence_failed: bool,
     attempted: bool,
     finished: bool,
+    transport_used: bool,
+    preflight_claimed: bool,
     #[cfg(test)]
     fail_next_cleanup: bool,
 }
@@ -162,6 +164,8 @@ impl<'a> LoginProcess<'a> {
             evidence_failed: false,
             attempted: false,
             finished: false,
+            transport_used: false,
+            preflight_claimed: false,
             #[cfg(test)]
             fail_next_cleanup: false,
         })
@@ -289,17 +293,52 @@ impl<'a> LoginProcess<'a> {
         Ok(())
     }
 
+    /// Reserve an untouched Codex transport for exactly one preflight exchange.
+    pub(crate) fn begin_preflight(&mut self) -> Result<(), SidecarError> {
+        if self.failed
+            || self.finished
+            || self.transport_used
+            || self.preflight_claimed
+            || self.io.is_none()
+            || self.profile.pending_name() != "codex-login.pending"
+        {
+            return Err(failure());
+        }
+        self.preflight_claimed = true;
+        Ok(())
+    }
+
     pub(crate) fn send(
         &mut self,
         request: LoginRequest,
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
-        if self.failed || self.finished {
+        if self.failed || self.finished || self.preflight_claimed {
             return Err(failure());
         }
+        self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
         let result = io.send_observed(request, timeout, cancel, &mut || self.tick());
+        self.io = Some(io);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    pub(crate) fn send_preflight(
+        &mut self,
+        request: hello_agent_core::provider::vendor_observation::codex_preflight::exchange::PreflightRequest,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<(), SidecarError> {
+        if self.failed || self.finished || !self.preflight_claimed {
+            return Err(failure());
+        }
+        self.transport_used = true;
+        let mut io = self.io.take().ok_or_else(failure)?;
+        let result = io.send_preflight(request, timeout, cancel, &mut || self.tick());
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;
@@ -312,9 +351,32 @@ impl<'a> LoginProcess<'a> {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<BoundedObservation, SidecarError> {
+        if self.preflight_claimed {
+            return Err(failure());
+        }
+        self.receive_inner(timeout, cancel)
+    }
+
+    pub(crate) fn receive_preflight(
+        &mut self,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<BoundedObservation, SidecarError> {
+        if !self.preflight_claimed {
+            return Err(failure());
+        }
+        self.receive_inner(timeout, cancel)
+    }
+
+    fn receive_inner(
+        &mut self,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<BoundedObservation, SidecarError> {
         if self.failed || self.finished {
             return Err(failure());
         }
+        self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
         let result = io.receive_observed(timeout, cancel, &mut || self.tick());
         self.io = Some(io);
@@ -329,9 +391,10 @@ impl<'a> LoginProcess<'a> {
         &mut self,
         cancel: &AtomicBool,
     ) -> Result<Option<BoundedObservation>, SidecarError> {
-        if self.failed || self.finished {
+        if self.failed || self.finished || self.preflight_claimed {
             return Err(failure());
         }
+        self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
         let result = io.poll_observed(cancel, &mut || self.tick());
         self.io = Some(io);
@@ -346,6 +409,10 @@ impl<'a> LoginProcess<'a> {
         &mut self,
         cancel: &AtomicBool,
     ) -> Result<crate::provider_login_io::OutputChunk, SidecarError> {
+        if self.preflight_claimed {
+            return Err(failure());
+        }
+        self.transport_used = true;
         self.tick()?;
         let result = self.io.as_mut().ok_or_else(failure)?.poll_chunk(cancel);
         if result.is_err() {
@@ -359,9 +426,14 @@ impl<'a> LoginProcess<'a> {
         code: &str,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
-        if self.failed || self.finished || self.profile.pending_name() != "claude-login.pending" {
+        if self.failed
+            || self.finished
+            || self.preflight_claimed
+            || self.profile.pending_name() != "claude-login.pending"
+        {
             return Err(failure());
         }
+        self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
         let result = io.submit_claude_code(code, cancel, &mut || self.tick());
         self.io = Some(io);
