@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (쓰기 역할 preflight 계약)
+
+- **진전/범위**: 직전 OS 쓰기 정책은 `f3ffdff`로 커밋됐다. clean 통합 checkout에서 메인이 core에 고정 ExpectedPermission과 workspace-write 설정/flag/thread 요청·응답 검증을 추가했다. 추가 쓰기 root 없음·명시 network false·TMPDIR와 /tmp 제외를 요구한다. 기존 readOnly의 유효 설정 호환성과 flag deny-unknown(null 포함)을 보존했고 아직 sidecar native 역할 선택은 변경하지 않았다.
+- **출처/한계**: [공식 app-server](https://learn.chatgpt.com/docs/app-server)와 [config reference](https://learn.chatgpt.com/docs/config-file/config-reference)를 검색·열어 sandbox 요청·추가 writable roots·임시 폴더 제외 설정을 확인했다. 남아 있는 `/private/tmp/hello-agent-schema-keS4J1/schema/v2/{SandboxPolicy,ThreadStartParams,ThreadStartResponse}.ts`도 읽었으나 이 산출물의 정확한 CLI 버전/생성 provenance는 확인하지 못했다. 따라서 후보 parser 근거일 뿐 현재 설치 버전 호환성/활성화 증거로 사용하지 않는다. 새 실제 CLI를 실행하지 않았다.
+- **검증 중**: core preflight 16 PASS(설정 두 layer의 12변조·thread 9사례·기존 읽기 전용 회귀 포함). strict core clippy는 HEAD에도 동일한 proctree 3개 lint로 exit 101이며 범위 밖 코드는 수정하지 않았다. 해당 lint만 명령에서 제외한 검사·sidecar preflight·strict sidecar clippy·fmt/diff를 이어간다. 검토자 1명의 독립 검토 뒤 관련 파일만 커밋한다.
+- **다음**: 저장된 역할과 요청/OS 정책 연결, 도구/승인·실제 공급자 통신/호환성·Claude·제품 UI가 남는다. 실제 config-only 검사 승인은 아직 없으며 계정/유료 실행·사용자 프로젝트·main 병합/push 없음.
+- **최신 검사**: core 기존 lint 3종을 명령에서만 제외한 clippy PASS, sidecar preflight 5 PASS/8.45초, strict sidecar all-targets clippy·fmt·diff PASS. 검토자 `run_ledger_review` 한 명에게 고정 5파일을 전달했다. source 및 허용 lint는 추가 변경하지 않았다.
+- **마감**: 독립 정적 검토 PASS. 모드 불변·readOnly 기본값·설정/flag/thread 검증 일치·reply/notification 결속 및 불일치 후 turn 거절을 확인했다. 승인된 M5 범위로 관련 5파일을 커밋한다. 실제 역할 활성화나 앱 전체 완료는 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (코딩 작업용 OS 쓰기 경계)
 
 - **진전/기준**: 직전 OS 읽기 전용 연결은 `35691cb`로 커밋됐다. clean checkout에서 메인이 같은 policy builder에 typed workspace 쓰기 모드를 추가했다. 일반 작업 파일만 쓰게 하고 `.git/.agents/.codex` 및 profile config를 보호한다. CLI/helper가 HOME/작업 사본 안에 있는 경우도 거절한다. native run은 아직 ReadOnly 고정이다.

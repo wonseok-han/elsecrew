@@ -1,7 +1,9 @@
 //! One connection's ordered preflight observations. No launch authority or prompt API.
 //! The process owner must separately enforce profile isolation, deadlines and cleanup.
 
-use super::{match_model_catalog, match_read_only_thread, validate_profile, ExpectedProfile};
+use super::{
+    match_model_catalog, match_thread, validate_profile, ExpectedPermission, ExpectedProfile,
+};
 use crate::provider::vendor_observation::codex_rpc::{ModelFreeExchange, ObservationKind};
 use crate::provider::{BoundedObservation, ProviderError};
 use serde::Deserialize;
@@ -31,6 +33,7 @@ pub struct PreflightExchange {
     model: String,
     effort: String,
     expected_home: String,
+    permission: ExpectedPermission,
     state: PreflightState,
     started: bool,
     thread_cwd: Option<std::path::PathBuf>,
@@ -44,6 +47,14 @@ fn invalid() -> ProviderError {
 
 impl PreflightExchange {
     pub fn new(profile: &ExpectedProfile<'_>, expected_home: &str) -> Result<Self, ProviderError> {
+        Self::with_permission(profile, expected_home, ExpectedPermission::ReadOnly)
+    }
+
+    pub fn with_permission(
+        profile: &ExpectedProfile<'_>,
+        expected_home: &str,
+        permission: ExpectedPermission,
+    ) -> Result<Self, ProviderError> {
         validate_profile(profile)?;
         let path = std::path::Path::new(expected_home);
         if !path.is_absolute()
@@ -60,6 +71,7 @@ impl PreflightExchange {
             model: profile.model.into(),
             effort: profile.reasoning_effort.into(),
             expected_home: expected_home.into(),
+            permission,
             state: PreflightState::Checking,
             started: false,
             thread_cwd: None,
@@ -107,16 +119,32 @@ impl PreflightExchange {
         &mut self,
         cwd: &std::path::Path,
     ) -> Result<PreflightRequest, ProviderError> {
+        if self.permission != ExpectedPermission::ReadOnly {
+            return Err(invalid());
+        }
+        self.start_thread(cwd)
+    }
+
+    pub fn start_thread(
+        &mut self,
+        cwd: &std::path::Path,
+    ) -> Result<PreflightRequest, ProviderError> {
         if self.state != PreflightState::ObservationsMatched {
             return Err(invalid());
         }
         let path = Self::validate_thread_cwd(cwd)?;
-        let request = serde_json::json!({"id":5,"method":"thread/start","params":{
+        let mut request = serde_json::json!({"id":5,"method":"thread/start","params":{
             "model":self.model,"modelProvider":"openai","cwd":path,
-            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":"read-only",
+            "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
             "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
             "baseInstructions":"","developerInstructions":""
         }});
+        if self.permission == ExpectedPermission::WorkspaceWrite {
+            request["params"]["config"]["sandbox_workspace_write"] = serde_json::json!({
+                "writable_roots":[], "network_access":false,
+                "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
+            });
+        }
         self.thread_cwd = Some(cwd.to_owned());
         self.state = PreflightState::ThreadStarting;
         Ok(PreflightRequest(format!("{request}\n")))
@@ -236,13 +264,14 @@ impl PreflightExchange {
                 return Err(invalid());
             }
             let observation = BoundedObservation::new(reply.result.get().as_bytes().to_vec())?;
-            match_read_only_thread(
+            match_thread(
                 &observation,
                 &ExpectedProfile {
                     model: &self.model,
                     reasoning_effort: &self.effort,
                 },
                 self.thread_cwd.as_deref().ok_or_else(invalid)?,
+                self.permission,
             )?;
             let result: ResultWire =
                 serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
@@ -275,9 +304,12 @@ impl PreflightExchange {
                     return Err(invalid());
                 }
             }
-            ObservationKind::Config => {
-                super::layers::match_layers(&observation, &profile, &self.expected_home)?
-            }
+            ObservationKind::Config => super::layers::match_layers(
+                &observation,
+                &profile,
+                &self.expected_home,
+                self.permission,
+            )?,
             ObservationKind::Account => {
                 // This product uses its own ChatGPT login, not arbitrary API keys or tokens.
                 #[derive(Deserialize)]
@@ -340,6 +372,145 @@ mod tests {
     fn reply(index: usize, result: &Value) -> BoundedObservation {
         BoundedObservation::new(serde_json::to_vec(&json!({"id":index+1,"result":result})).unwrap())
             .unwrap()
+    }
+
+    fn write_results() -> Vec<Value> {
+        let mut values = results();
+        values[1]["config"]["sandbox_mode"] = json!("workspace-write");
+        values[1]["config"]["sandbox_workspace_write"] = json!({
+            "writable_roots":[], "network_access":false,
+            "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
+        });
+        values[1]["layers"][0]["config"] = values[1]["config"].clone();
+        values
+    }
+
+    fn write_exchange() -> PreflightExchange {
+        PreflightExchange::with_permission(
+            &ExpectedProfile {
+                model: "test-model",
+                reasoning_effort: "medium",
+            },
+            "/app/profile",
+            ExpectedPermission::WorkspaceWrite,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn write_config_requires_exact_effective_and_flag_permissions() {
+        for scope in ["/config", "/layers/0/config"] {
+            for (field, replacement) in [
+                ("sandbox_mode", json!("read-only")),
+                ("sandbox_workspace_write", Value::Null),
+                ("sandbox_workspace_write/network_access", json!(true)),
+                ("sandbox_workspace_write/exclude_slash_tmp", json!(false)),
+                (
+                    "sandbox_workspace_write/exclude_tmpdir_env_var",
+                    json!(false),
+                ),
+                (
+                    "sandbox_workspace_write/writable_roots",
+                    json!(["/outside"]),
+                ),
+            ] {
+                let mut flow = write_exchange();
+                let mut values = write_results();
+                *values[1].pointer_mut(&format!("{scope}/{field}")).unwrap() = replacement;
+                flow.next_frames().unwrap();
+                flow.accept(&reply(0, &values[0])).unwrap();
+                flow.next_frames().unwrap();
+                assert!(
+                    flow.accept(&reply(1, &values[1])).is_err(),
+                    "{scope}/{field}"
+                );
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert!(flow.next_frames().is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn write_thread_request_and_response_keep_the_same_permission() {
+        for case in [
+            "valid",
+            "read-only",
+            "network",
+            "root",
+            "tmp-env",
+            "slash-tmp",
+            "missing",
+            "unknown",
+            "duplicate",
+        ] {
+            let mut flow = write_exchange();
+            for (index, value) in write_results().iter().enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            let cwd = std::path::Path::new("/managed/snapshot");
+            assert!(flow.start_read_only_thread(cwd).is_err());
+            let request = flow.start_thread(cwd).unwrap();
+            let request: Value = serde_json::from_str(request.as_str()).unwrap();
+            assert_eq!(request["params"]["sandbox"], "workspace-write");
+            assert_eq!(
+                request["params"]["config"]["sandbox_workspace_write"],
+                json!({
+                    "writable_roots":[], "network_access":false,
+                    "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
+                })
+            );
+            let mut response = json!({"thread":{"id":"write-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true},"reasoningEffort":"medium"});
+            match case {
+                "read-only" => {
+                    response["sandbox"] = json!({"type":"readOnly","networkAccess":false})
+                }
+                "network" => response["sandbox"]["networkAccess"] = json!(true),
+                "root" => response["sandbox"]["writableRoots"] = json!(["/outside"]),
+                "tmp-env" => response["sandbox"]["excludeTmpdirEnvVar"] = json!(false),
+                "slash-tmp" => response["sandbox"]["excludeSlashTmp"] = json!(false),
+                "missing" => {
+                    response["sandbox"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("excludeSlashTmp");
+                }
+                "unknown" => response["sandbox"]["extra"] = json!(true),
+                _ => {}
+            }
+            let wire = reply(4, &response);
+            let wire = if case == "duplicate" {
+                BoundedObservation::new(
+                    String::from_utf8(wire.bytes)
+                        .unwrap()
+                        .replace(
+                            "\"networkAccess\":false",
+                            "\"networkAccess\":true,\"networkAccess\":false",
+                        )
+                        .into_bytes(),
+                )
+                .unwrap()
+            } else {
+                wire
+            };
+            assert_eq!(flow.accept(&wire).is_ok(), case == "valid", "{case}");
+            if case == "valid" {
+                assert!(flow.matched_thread_id().is_none());
+                flow.accept(
+                    &BoundedObservation::new(
+                        br#"{"method":"thread/started","params":{"thread":{"id":"write-1"}}}"#
+                            .to_vec(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                let mut turn = flow.into_text_turn("edit the managed copy").unwrap();
+                assert!(turn.take_request().unwrap().contains("write-1"));
+            } else {
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert!(flow.into_text_turn("goal").is_err());
+            }
+        }
     }
 
     #[test]

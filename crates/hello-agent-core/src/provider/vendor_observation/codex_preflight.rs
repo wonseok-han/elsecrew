@@ -1,4 +1,4 @@
-//! Offline matching of Codex 0.149.1 config/read, model/list and thread/start results.
+//! Offline matching of reported Codex config/read, model/list and thread/start results.
 //! A match is NOT config isolation, runtime attestation, or permission to send a prompt.
 //! The caller must correlate responses and verify the executable/version separately.
 
@@ -13,6 +13,40 @@ mod layers;
 pub struct ExpectedProfile<'a> {
     pub model: &'a str,
     pub reasoning_effort: &'a str,
+}
+
+/// Requested wire policy only; never OS or provider admission authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpectedPermission {
+    ReadOnly,
+    WorkspaceWrite,
+}
+
+impl ExpectedPermission {
+    pub fn sandbox_mode(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceWriteConfig {
+    writable_roots: Vec<String>,
+    network_access: bool,
+    exclude_tmpdir_env_var: bool,
+    exclude_slash_tmp: bool,
+}
+
+impl WorkspaceWriteConfig {
+    fn matches(&self) -> bool {
+        self.writable_roots.is_empty()
+            && !self.network_access
+            && self.exclude_tmpdir_env_var
+            && self.exclude_slash_tmp
+    }
 }
 
 fn invalid() -> ProviderError {
@@ -40,6 +74,15 @@ pub fn match_read_only_thread(
     profile: &ExpectedProfile<'_>,
     expected_cwd: &std::path::Path,
 ) -> Result<(), ProviderError> {
+    match_thread(input, profile, expected_cwd, ExpectedPermission::ReadOnly)
+}
+
+pub fn match_thread(
+    input: &BoundedObservation,
+    profile: &ExpectedProfile<'_>,
+    expected_cwd: &std::path::Path,
+    permission: ExpectedPermission,
+) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     struct Thread {
         id: String,
@@ -51,6 +94,13 @@ pub fn match_read_only_thread(
         ReadOnly {
             #[serde(rename = "networkAccess")]
             network_access: bool,
+        },
+        #[serde(rename = "workspaceWrite", rename_all = "camelCase")]
+        WorkspaceWrite {
+            writable_roots: Vec<String>,
+            network_access: bool,
+            exclude_tmpdir_env_var: bool,
+            exclude_slash_tmp: bool,
         },
     }
     #[derive(Deserialize)]
@@ -77,7 +127,24 @@ pub fn match_read_only_thread(
         return Err(invalid());
     }
     let response: Response = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
-    let Sandbox::ReadOnly { network_access } = response.sandbox;
+    let sandbox_matches = match (permission, response.sandbox) {
+        (ExpectedPermission::ReadOnly, Sandbox::ReadOnly { network_access }) => !network_access,
+        (
+            ExpectedPermission::WorkspaceWrite,
+            Sandbox::WorkspaceWrite {
+                writable_roots,
+                network_access,
+                exclude_tmpdir_env_var,
+                exclude_slash_tmp,
+            },
+        ) => {
+            writable_roots.is_empty()
+                && !network_access
+                && exclude_tmpdir_env_var
+                && exclude_slash_tmp
+        }
+        _ => false,
+    };
     if response.thread.id.is_empty()
         || response.thread.id.len() > 128
         || response.thread.id.chars().any(char::is_control)
@@ -88,7 +155,7 @@ pub fn match_read_only_thread(
         || response.approval_policy != "on-request"
         || response.approvals_reviewer != "user"
         || !response.instruction_sources.is_empty()
-        || network_access
+        || !sandbox_matches
     {
         return Err(invalid());
     }
@@ -100,6 +167,14 @@ pub fn match_read_only_thread(
 pub fn match_read_only_config(
     input: &BoundedObservation,
     profile: &ExpectedProfile<'_>,
+) -> Result<(), ProviderError> {
+    match_config(input, profile, ExpectedPermission::ReadOnly)
+}
+
+fn match_config(
+    input: &BoundedObservation,
+    profile: &ExpectedProfile<'_>,
+    permission: ExpectedPermission,
 ) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     struct Config {
@@ -120,9 +195,23 @@ pub fn match_read_only_config(
         || config.model_reasoning_effort != profile.reasoning_effort
         || config.model_provider != "openai"
         || config.approval_policy != "on-request"
-        || config.sandbox_mode != "read-only"
+        || config.sandbox_mode != permission.sandbox_mode()
     {
         return Err(invalid());
+    }
+    if permission == ExpectedPermission::WorkspaceWrite {
+        #[derive(Deserialize)]
+        struct WriteConfig {
+            sandbox_workspace_write: WorkspaceWriteConfig,
+        }
+        #[derive(Deserialize)]
+        struct WriteResponse {
+            config: WriteConfig,
+        }
+        let write: WriteResponse = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if !write.config.sandbox_workspace_write.matches() {
+            return Err(invalid());
+        }
     }
     Ok(())
 }
@@ -284,6 +373,9 @@ mod tests {
 
     #[test]
     fn explicit_observations_match_without_returning_raw_fields() {
+        let mut extra = config();
+        extra["config"]["sandbox_workspace_write"] = json!({"future_default":true});
+        match_read_only_config(&input(&extra), &profile()).unwrap();
         assert_eq!(
             match_read_only_config(&input(&config()), &profile()).unwrap(),
             ()

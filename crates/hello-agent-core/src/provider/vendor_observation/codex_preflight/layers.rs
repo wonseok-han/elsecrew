@@ -1,5 +1,5 @@
 //! Reported config provenance only. Not proof that startup hooks never ran.
-use super::{invalid, match_read_only_config, ExpectedProfile};
+use super::{invalid, match_config, ExpectedPermission, ExpectedProfile, WorkspaceWriteConfig};
 use crate::provider::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -8,6 +8,7 @@ pub(super) fn match_layers(
     input: &BoundedObservation,
     profile: &ExpectedProfile<'_>,
     home: &str,
+    permission: ExpectedPermission,
 ) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     struct Response {
@@ -62,6 +63,7 @@ pub(super) fn match_layers(
         approval_policy: String,
         sandbox_mode: String,
         features: FlagFeatures,
+        sandbox_workspace_write: Option<WorkspaceWriteConfig>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -77,14 +79,30 @@ pub(super) fn match_layers(
         }
         let index = match layer.name {
             Source::Flags => {
+                // Preserve the old deny-unknown contract, including explicit null.
+                if permission == ExpectedPermission::ReadOnly
+                    && serde_json::from_str::<serde_json::Value>(layer.config.get())
+                        .map_err(|_| invalid())?
+                        .get("sandbox_workspace_write")
+                        .is_some()
+                {
+                    return Err(invalid());
+                }
                 let config: Flags =
                     serde_json::from_str(layer.config.get()).map_err(|_| invalid())?;
                 if config.model != profile.model
                     || config.model_provider != "openai"
                     || config.model_reasoning_effort != profile.reasoning_effort
                     || config.approval_policy != "on-request"
-                    || config.sandbox_mode != "read-only"
+                    || config.sandbox_mode != permission.sandbox_mode()
                     || config.features.hooks
+                    || match permission {
+                        ExpectedPermission::ReadOnly => config.sandbox_workspace_write.is_some(),
+                        ExpectedPermission::WorkspaceWrite => !config
+                            .sandbox_workspace_write
+                            .as_ref()
+                            .is_some_and(WorkspaceWriteConfig::matches),
+                    }
                 {
                     return Err(invalid());
                 }
@@ -113,7 +131,7 @@ pub(super) fn match_layers(
             return Err(invalid());
         }
     }
-    match_read_only_config(input, profile)
+    match_config(input, profile, permission)
 }
 
 #[cfg(test)]
@@ -137,6 +155,7 @@ mod tests {
             "effective-hooks",
             "flag-hooks",
             "missing-hooks",
+            "null-write",
         ] {
             let mut value = base.clone();
             match case {
@@ -155,6 +174,10 @@ mod tests {
                 "effective-hooks" => value["config"]["features"]["hooks"] = json!(true),
                 "flag-hooks" => value["layers"][0]["config"]["features"]["hooks"] = json!(true),
                 "missing-hooks" => value["config"]["features"] = json!({}),
+                "null-write" => {
+                    value["layers"][0]["config"]["sandbox_workspace_write"] =
+                        serde_json::Value::Null
+                }
                 _ => {}
             }
             let input = BoundedObservation::new(value.to_string().into_bytes()).unwrap();
@@ -165,7 +188,8 @@ mod tests {
                         model: "test-model",
                         reasoning_effort: "medium"
                     },
-                    "/app/profile"
+                    "/app/profile",
+                    ExpectedPermission::ReadOnly,
                 )
                 .is_ok(),
                 case == "valid",
