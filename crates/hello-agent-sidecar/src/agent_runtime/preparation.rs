@@ -56,6 +56,7 @@ impl RunReservation {
         self.validate_text_input(storage, projects)
             .map_err(|_| failure())?;
         let home = process.codex_preflight_home()?;
+        crate::provider_profile::verify_runtime_files(&home)?;
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
@@ -84,6 +85,8 @@ impl RunReservation {
                 });
                 executable.revalidate().map_err(std::io::Error::other)?;
                 helper.revalidate().map_err(std::io::Error::other)?;
+                crate::provider_profile::verify_runtime_files(&home)
+                    .map_err(std::io::Error::other)?;
                 if cancel.load(std::sync::atomic::Ordering::Acquire) {
                     return Err(std::io::Error::other("provider launch canceled"));
                 }

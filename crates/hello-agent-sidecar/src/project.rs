@@ -30,7 +30,7 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::MetadataExt, process::CommandExt},
 };
 use uuid::Uuid;
-mod runtime_isolation;
+pub(crate) mod runtime_isolation;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";

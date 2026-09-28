@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실행 프로필 파일 입장 연결)
+
+- **진전/범위**: 직전 승인 확인은 이미 반영된 규칙의 재확인으로 신규 구현 진전은 없었다. `1e16616`·clean 통합 checkout에서 메인이 기존 scanner를 재사용해 Codex 실행 후보의 HOME 전체를 spawn 전·payload release 직전에 검사하도록 연결했다. skills/tmp/.tmp의 중첩 hardlink·symlink·특수 파일을 거절하며 기존 로그인/상태 확인·인증 내용은 변경하지 않는다.
+- **검증 중**: 정상 복사본/중첩 링크/FIFO 및 실행 전·gate 직전 주입 회귀를 추가했다. 초기 Unix socket fixture는 macOS 경로 길이 한계로 실패해 같은 특수 파일 조건을 FIFO로 검사한다. 프로필 집중 검사와 23사례 실행 원장 검사를 순차 수행하고 이후 strict clippy·fmt·diff 및 승인된 검토자 1명의 독립 검토로 마감한다.
+- **다음/경계**: 실제 OS 정책과 gate 통합·통신 경계·provider 입장·쓰기/도구/승인·Claude·제품 UI 연결이 남는다. 이번 입장 검사는 시점 검사이며 동시 same-UID 변조나 전체 sandbox 증명이 아니다. 실제 계정/CLI/유료 실행·main 병합·push는 하지 않았다.
+- **최신 검증**: profile 8 PASS/0.51초, text 원장 1테스트/23사례 PASS/44.82초, strict sidecar all-targets clippy·fmt·diff PASS. 기존 `run_ledger_review` 한 명이 고정 delta를 읽기 전용 검토 중이다. 새 구현 위임이나 중복 테스트 실행은 하지 않았다.
+- **마감**: 고정 delta의 독립 정적 검토가 차단 결함 없이 PASS했다. 재검증된 HOME·bounded metadata scan·신원 기록 뒤 late injection 거절·기존 cleanup 소유권을 확인했다. 관련 7파일만 승인된 M5 범위로 커밋한다. 앱 전체 완료/제품 활성화는 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (기본 거부 OS 정책 실측)
 
 - **진전/기준**: 직전 snapshot 파일 입장 검사는 `01fafb9`로 커밋됐고 clean 통합 checkout에서 이어갔다. 메인이 테스트 전용 macOS 정책을 broad allow 대신 deny-default·명시된 읽기/쓰기 폴더·최소 process 허용으로 구성했다. 실제 provider/계정/유료 모델/사용자 파일은 사용하지 않았다.
@@ -120,6 +128,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Codex 실행 profile 입장(2026-09-28)**: 기존 snapshot scanner를 runtime HOME 전체에 재사용해 spawn 전·release 직전 중첩 파일의 nlink=1·실제 directory 조건을 확인한다. 로그인 규칙 자체를 강화해 기존 연결을 깨뜨리지 않으며 파일/인증 내용은 변경하지 않는다. OS sandbox와 적대적 동시 교체 보호는 별도다.
 
 - **deny-default 로컬 정책 후보(2026-09-28)**: opt-in probe에서 지정 폴더 쓰기/읽기·자식 실행은 통과, 원본/보호 설정 변경과 외부 hardlink 생성·loopback TCP는 거절됐다. 시스템 로더가 루트 디렉터리 자체 읽기를 요구해 `(literal "/")`만 추가했다. broad root 읽기/쓰기 허용이 아니며 실제 vendor/Mach/인증/모델 통신 호환성은 미검증이다. 테스트 정책만 존재하며 제안서 §6.8을 따른다.
 

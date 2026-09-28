@@ -470,6 +470,8 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
         "bound",
         "bound-native",
         "bound-native-hardlink",
+        "bound-native-profile-hardlink",
+        "bound-native-gate-profile",
         "bound-native-gate-cli",
         "bound-native-gate-helper",
         "bound-native-gate-cancel",
@@ -682,10 +684,20 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                     )
                     .unwrap();
                 }
+                if failure == "bound-native-profile-hardlink" {
+                    std::fs::create_dir(home.join("tmp")).unwrap();
+                    std::fs::hard_link(
+                        fixture.source.join("src/value.txt"),
+                        home.join("tmp/shared-source"),
+                    )
+                    .unwrap();
+                }
                 if failure.starts_with("bound-native-gate-") {
                     let cli_path = cli_path.clone();
                     let helper_path = helper_path.clone();
                     let canceled = launch_cancel.clone();
+                    let home = home.clone();
+                    let source = fixture.source.join("src/value.txt");
                     crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
                         *hook.borrow_mut() = Some(Box::new(move || match failure {
                             "bound-native-gate-cli" => {
@@ -693,6 +705,10 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                             }
                             "bound-native-gate-helper" => {
                                 std::fs::write(helper_path, b"changed").unwrap()
+                            }
+                            "bound-native-gate-profile" => {
+                                std::fs::create_dir(home.join("tmp")).unwrap();
+                                std::fs::hard_link(source, home.join("tmp/shared-source")).unwrap();
                             }
                             _ => canceled.store(true, std::sync::atomic::Ordering::Release),
                         }));
@@ -712,7 +728,10 @@ fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
                         .with(|hook| assert!(hook.borrow().is_none()));
                     assert!(!fixture._root.path().join("native-argv").exists());
                     let run = &fixture.storage.projection_records("run").unwrap()[0];
-                    if failure == "bound-native-hardlink" {
+                    if matches!(
+                        failure,
+                        "bound-native-hardlink" | "bound-native-profile-hardlink"
+                    ) {
                         assert!(run["barrier"].is_null());
                         assert!(run["process_identity_internal"].is_null());
                         process.finish().unwrap();

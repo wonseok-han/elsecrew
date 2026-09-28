@@ -25,6 +25,14 @@ fn failure() -> SidecarError {
     )
 }
 
+/// Execution-only admission. Ordinary login/status checks retain their existing
+/// artifact contract. Scan metadata, including skills and temporary descendants,
+/// without reading credentials or following links. Not a same-UID race barrier.
+pub(crate) fn verify_runtime_files(home: &Path) -> Result<(), SidecarError> {
+    let profile = open_absolute_directory(home)?;
+    crate::project::runtime_isolation::verify(&profile).map_err(|_| failure())
+}
+
 /// Returns a retained directory capability, not a path or launch authorization.
 /// Existing unexpected content is preserved and refused, never repaired in place.
 pub(crate) fn prepare_codex_profile(app_data: &Dir) -> Result<Dir, SidecarError> {
@@ -253,6 +261,41 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt as _};
     fn root(temp: &tempfile::TempDir) -> Dir {
         Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap()
+    }
+
+    #[test]
+    fn runtime_admission_checks_nested_artifacts_without_changing_login_or_credentials() {
+        for location in ["skills/.hidden/item", "tmp/nested/item", ".tmp/item"] {
+            let temp = tempfile::tempdir().unwrap();
+            prepare_codex_profile(&root(&temp)).unwrap();
+            let home = temp
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join(CODEX_PROFILE_DIRECTORY);
+            let outside = temp.path().join("original");
+            std::fs::write(&outside, b"preserve").unwrap();
+            let target = home.join(location);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::copy(&outside, &target).unwrap();
+            verify_runtime_files(&home).unwrap();
+            std::fs::remove_file(&target).unwrap();
+            std::fs::hard_link(&outside, &target).unwrap();
+            // Login still accepts its known top-level artifact directories;
+            // execution alone requires all descendants to be unshared.
+            prepare_codex_profile(&root(&temp)).unwrap();
+            assert!(verify_runtime_files(&home).is_err());
+            std::fs::remove_file(&target).unwrap();
+            symlink(&outside, &target).unwrap();
+            assert!(verify_runtime_files(&home).is_err());
+            std::fs::remove_file(&target).unwrap();
+            use std::os::unix::ffi::OsStrExt;
+            let fifo = std::ffi::CString::new(target.as_os_str().as_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            assert!(verify_runtime_files(&home).is_err());
+            assert_eq!(std::fs::read(&outside).unwrap(), b"preserve");
+            assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), CONFIG);
+        }
     }
 
     #[test]

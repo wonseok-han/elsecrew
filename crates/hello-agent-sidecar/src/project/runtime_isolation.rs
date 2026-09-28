@@ -1,8 +1,8 @@
-//! Admission of a snapshot's existing files; never follows links or repairs data.
+//! Admission of existing runtime files; never follows links or repairs data.
 use super::*;
 
 #[cfg(unix)]
-pub(super) fn verify(root: &Dir) -> Result<(), ProjectFailure> {
+pub(crate) fn verify(root: &Dir) -> Result<(), ProjectFailure> {
     let mut remaining = SNAPSHOT_ENTRIES_MAX_V1;
     scan(root, 0, &mut remaining)
 }
