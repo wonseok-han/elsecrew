@@ -114,6 +114,7 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(std::iter::once(&"provider.login"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -381,6 +382,7 @@ fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
         G5D_AGENT_FIXTURE_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(std::iter::once(&"provider.login"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -954,6 +956,7 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
         G5D_PRODUCT_CAPABILITIES_V1
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
+            .chain(std::iter::once(&"provider.login"))
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );

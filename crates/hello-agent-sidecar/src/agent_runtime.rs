@@ -44,6 +44,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
+pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
 const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
 
@@ -493,27 +494,16 @@ impl AgentRuntime {
         let observed_provider = observed_provider.ok_or_else(|| {
             ProjectFailure::recovery("startable provider evidence is unavailable after preflight")
         })?;
-        if !G5_RUN_START_CHAT_STATES_V1.contains(&chat["state"].as_str().unwrap_or_default()) {
+        let preparation = preparation::RunPreparation::resolve(storage, projects, &request)?;
+        if preparation.chat != chat
+            || serde_json::to_value(&preparation.profile).map_err(json_failure)?
+                != serde_json::to_value(&profile).map_err(json_failure)?
+        {
             return Err(ProjectFailure::recovery(
-                "chat state does not allow a new agent run",
+                "chat changed during provider discovery",
             ));
         }
-        if storage.projection_records("run")?.iter().any(|run| {
-            run.get("chat_id").and_then(Value::as_str) == Some(request.chat_id.as_str())
-                && run
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| {
-                        ["preparing", "running", "cancelling", "recoveryRequired"].contains(&state)
-                    })
-        }) {
-            return Err(ProjectFailure::recovery(
-                "chat already has an active or poisoned run",
-            ));
-        }
-        let address = address_from_chat(&chat)?;
-        let manifest = projects.verify_workspace(storage, &address)?;
-        let prompt = resolve_prompt(storage, &request.chat_id, &request.input_message_ids)?;
+        let manifest = preparation.manifest.clone();
         let executable = self
             .fake_executable
             .as_ref()
@@ -530,41 +520,18 @@ impl AgentRuntime {
                     .ok_or_else(|| ProjectFailure::manifest("workspace path is missing"))?,
             ),
             BTreeMap::new(),
-            prompt,
+            preparation.prompt.clone(),
             "claude-code.system-init.v1",
             "claude-code.stream-json.v1",
         )
         .map_err(adapter_failure)?;
 
-        let run_id = format!("agent_run_{}", Uuid::new_v4().simple());
-        let recovery_id = new_recovery_id();
-        let created = now();
-        let run = agent_run_record(
-            &run_id,
-            &chat,
-            &profile,
-            &capability.fingerprint,
-            "preparing",
-            None,
-            &created,
-        )?;
-        let mut preparing_projection =
-            agent_run_projection(&run, &manifest, None, None, Vec::new())?;
-        preparing_projection.insert(
-            RECOVERY_RESERVATION_FIELD.into(),
-            Value::String(recovery_id),
-        );
-        let mut upserts = vec![ProjectionUpsert {
-            aggregate_type: "run",
-            aggregate_id: run_id.clone(),
-            operation_id: format!("op_agent_run_prepare_{request_id}"),
-            request_id: Some(request_id.to_string()),
-            payload: preparing_projection,
-        }];
-        if profile.permission == "workspaceWrite" {
-            upserts.push(acquire_writer_lock(storage, &chat, &run_id, request_id)?);
-        }
-        storage.upsert_projection_records_atomic(upserts)?;
+        let preparation::RunReservation {
+            run_id,
+            created,
+            run,
+            ..
+        } = preparation.reserve(storage, projects, &capability, request_id)?;
 
         if self.scenario == FakeScenario::SpawnFailure {
             return Err(fail_before_release(
@@ -1633,101 +1600,13 @@ impl AgentRuntime {
         let active = self.active.get_mut(run_id).ok_or_else(|| {
             PublicEventPersistError::Fault(ProjectFailure::manifest("active agent run is missing"))
         })?;
-        let projection =
-            actual_run_projection(storage, run_id).map_err(PublicEventPersistError::Fault)?;
-        let current = stored_public_budget(&projection).map_err(PublicEventPersistError::Fault)?;
-        let mut events = projection["public_events"]
-            .as_array()
-            .cloned()
-            .ok_or_else(|| {
-                PublicEventPersistError::Fault(ProjectFailure::recovery(
-                    "actual-agent public event ledger is missing",
-                ))
-            })?;
-        validate_agent_adapter_payload_v1("publicEvent", &event)
-            .map_err(contract_failure)
-            .map_err(PublicEventPersistError::Fault)?;
         validate_public_event_binding(&event, active).map_err(PublicEventPersistError::Fault)?;
-        if projection["record"]["capabilityFingerprint"] != active.capability_fingerprint {
-            return Err(PublicEventPersistError::Fault(ProjectFailure::recovery(
-                "durable agent run fingerprint differs from the accepted run",
-            )));
-        }
-        let event_text_bytes = event["text"]
-            .as_str()
-            .ok_or_else(|| {
-                PublicEventPersistError::Fault(ProjectFailure::recovery(
-                    "validated public event text is missing",
-                ))
-            })?
-            .len();
-        let event_count = current
-            .event_count
-            .checked_add(1)
-            .ok_or(PublicEventPersistError::BudgetExceeded)?;
-        let text_bytes = current
-            .text_bytes
-            .checked_add(event_text_bytes)
-            .ok_or(PublicEventPersistError::BudgetExceeded)?;
-        events.push(event.clone());
-        let next_snapshot_bytes = agent_public_events_snapshot_bytes_v1(&events)
-            .map_err(contract_failure)
+        let expected = actual_run_projection(storage, run_id)
+            .map_err(PublicEventPersistError::Fault)?["record"]
+            .clone();
+        validate_state_event_binding(&json!({"run":expected}), active)
             .map_err(PublicEventPersistError::Fault)?;
-        let cumulative_snapshot_bytes = current
-            .cumulative_snapshot_bytes
-            .checked_add(next_snapshot_bytes)
-            .ok_or(PublicEventPersistError::BudgetExceeded)?;
-        let next_budget = PublicBudgetMetrics {
-            event_count,
-            text_bytes,
-            cumulative_snapshot_bytes,
-        };
-        if enforce_public_budget(next_budget).is_err() {
-            return Err(PublicEventPersistError::BudgetExceeded);
-        }
-        let mut updated = projection;
-        updated.remove("last_event_sequence");
-        updated.insert("public_events".into(), Value::Array(events));
-        apply_public_budget(&mut updated, next_budget);
-        let mut chat_projection = actual_chat_projection(storage, &active.identity.chat_id)
-            .map_err(PublicEventPersistError::Fault)?;
-        let sequence = chat_projection["durable_event_sequence"]
-            .as_u64()
-            .unwrap_or(0)
-            + 1;
-        let kind = event["kind"].as_str().unwrap_or_default();
-        let text = event["text"].as_str().unwrap_or_default();
-        let message_kind = if kind == "final" { "role" } else { "status" };
-        let role_id = (kind == "final").then(|| active.profile.role_id.clone());
-        let message = json!({"schemaVersion":1,"messageId":format!("message_{}",Uuid::new_v4().simple()),"chatId":active.identity.chat_id,"taskId":active.identity.task_id,"worktreeId":active.identity.worktree_id,"eventSequence":sequence,"kind":message_kind,"roleId":role_id,"runId":run_id,"text":text,"createdAt":now()});
-        validate_g5_payload_v1("teamMessage", &message)
-            .map_err(|error| {
-                ProjectFailure::manifest(format!("invalid actual-agent public message: {error}"))
-            })
-            .map_err(PublicEventPersistError::Fault)?;
-        chat_projection.remove("last_event_sequence");
-        chat_projection.insert("last_message".into(), message);
-        chat_projection.insert("durable_event_sequence".into(), Value::from(sequence));
-        let operation = event["eventId"].as_str().unwrap_or_default();
-        storage
-            .upsert_projection_records_atomic(vec![
-                ProjectionUpsert {
-                    aggregate_type: "run",
-                    aggregate_id: run_id.into(),
-                    operation_id: format!("op_agent_public_{operation}"),
-                    request_id: None,
-                    payload: updated,
-                },
-                ProjectionUpsert {
-                    aggregate_type: "chat",
-                    aggregate_id: active.identity.chat_id.clone(),
-                    operation_id: format!("op_agent_public_chat_{operation}"),
-                    request_id: None,
-                    payload: chat_projection,
-                },
-            ])
-            .map_err(ProjectFailure::from)
-            .map_err(PublicEventPersistError::Fault)?;
+        persist_public_event_record(storage, &expected, &event)?;
         active.next_wire_seq += 1;
         Ok(G5Event {
             stream_id: active.stream_id.clone(),
@@ -2396,7 +2275,7 @@ fn resolve_prompt(
     ids: &[String],
 ) -> Result<Vec<u8>, ProjectFailure> {
     let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
-    let mut found = HashSet::new();
+    let mut found = BTreeMap::new();
     let mut prompt = Vec::new();
     for payload in storage.aggregate_event_payloads("chat", chat_id)? {
         if let Some(message) = payload.get("last_message").filter(|value| !value.is_null()) {
@@ -2407,12 +2286,15 @@ fn resolve_prompt(
                 let text = message["text"]
                     .as_str()
                     .ok_or_else(|| ProjectFailure::manifest("input message text is missing"))?;
-                found.insert(
-                    message["messageId"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                );
+                let id = message["messageId"].as_str().unwrap_or_default();
+                // Projection updates can retain the same last_message. A message
+                // ID contributes once, while conflicting retained text is invalid.
+                if let Some(prior) = found.insert(id.to_owned(), text.to_owned()) {
+                    if prior != text {
+                        return Err(ProjectFailure::manifest("input message text changed"));
+                    }
+                    continue;
+                }
                 prompt.extend_from_slice(text.as_bytes());
                 prompt.push(b'\n');
             }
@@ -2718,6 +2600,128 @@ impl<'a> PublicEventCollector<'a> {
     fn into_events(self) -> Vec<Value> {
         self.events
     }
+}
+
+fn persist_public_event_record(
+    storage: &mut Storage,
+    expected: &Value,
+    event: &Value,
+) -> Result<(), PublicEventPersistError> {
+    let run_id = expected["runId"].as_str().unwrap_or_default();
+    let projection =
+        actual_run_projection(storage, run_id).map_err(PublicEventPersistError::Fault)?;
+    let current = stored_public_budget(&projection).map_err(PublicEventPersistError::Fault)?;
+    let mut events = projection["public_events"]
+        .as_array()
+        .cloned()
+        .ok_or_else(|| {
+            PublicEventPersistError::Fault(ProjectFailure::recovery(
+                "actual-agent public event ledger is missing",
+            ))
+        })?;
+    validate_agent_adapter_payload_v1("publicEvent", event)
+        .map_err(contract_failure)
+        .map_err(PublicEventPersistError::Fault)?;
+    let binding = serde_json::from_value(json!({
+        "chatId":expected["chatId"], "taskId":expected["taskId"],
+        "projectId":expected["projectId"], "worktreeId":expected["worktreeId"],
+        "workspaceIdentity":expected["workspaceIdentity"], "runId":expected["runId"],
+        "roleId":expected["selectedProfile"]["roleId"],
+        "capabilityFingerprint":expected["capabilityFingerprint"]
+    }))
+    .map_err(json_failure)
+    .map_err(PublicEventPersistError::Fault)?;
+    hello_agent_protocol::agent_adapter_v1::validate_agent_public_event_against_run_v1(
+        event, &binding,
+    )
+    .map_err(contract_failure)
+    .map_err(PublicEventPersistError::Fault)?;
+    if projection["record"] != *expected {
+        return Err(PublicEventPersistError::Fault(ProjectFailure::recovery(
+            "durable agent run fingerprint differs from the accepted run",
+        )));
+    }
+    let event_text_bytes = event["text"]
+        .as_str()
+        .ok_or_else(|| {
+            PublicEventPersistError::Fault(ProjectFailure::recovery(
+                "validated public event text is missing",
+            ))
+        })?
+        .len();
+    let event_count = current
+        .event_count
+        .checked_add(1)
+        .ok_or(PublicEventPersistError::BudgetExceeded)?;
+    let text_bytes = current
+        .text_bytes
+        .checked_add(event_text_bytes)
+        .ok_or(PublicEventPersistError::BudgetExceeded)?;
+    events.push(event.clone());
+    let next_snapshot_bytes = agent_public_events_snapshot_bytes_v1(&events)
+        .map_err(contract_failure)
+        .map_err(PublicEventPersistError::Fault)?;
+    let cumulative_snapshot_bytes = current
+        .cumulative_snapshot_bytes
+        .checked_add(next_snapshot_bytes)
+        .ok_or(PublicEventPersistError::BudgetExceeded)?;
+    let next_budget = PublicBudgetMetrics {
+        event_count,
+        text_bytes,
+        cumulative_snapshot_bytes,
+    };
+    if enforce_public_budget(next_budget).is_err() {
+        return Err(PublicEventPersistError::BudgetExceeded);
+    }
+    let mut updated = projection;
+    updated.remove("last_event_sequence");
+    updated.insert("public_events".into(), Value::Array(events));
+    apply_public_budget(&mut updated, next_budget);
+    let mut chat_projection =
+        actual_chat_projection(storage, expected["chatId"].as_str().unwrap_or_default())
+            .map_err(PublicEventPersistError::Fault)?;
+    let sequence = chat_projection["durable_event_sequence"]
+        .as_u64()
+        .and_then(|seq| seq.checked_add(1))
+        .ok_or_else(|| {
+            PublicEventPersistError::Fault(ProjectFailure::recovery(
+                "chat event sequence is invalid",
+            ))
+        })?;
+    let kind = event["kind"].as_str().unwrap_or_default();
+    let text = event["text"].as_str().unwrap_or_default();
+    let message_kind = if kind == "final" { "role" } else { "status" };
+    let role_id = (kind == "final").then(|| expected["selectedProfile"]["roleId"].clone());
+    let message = json!({"schemaVersion":1,"messageId":format!("message_{}",Uuid::new_v4().simple()),"chatId":expected["chatId"],"taskId":expected["taskId"],"worktreeId":expected["worktreeId"],"eventSequence":sequence,"kind":message_kind,"roleId":role_id,"runId":run_id,"text":text,"createdAt":now()});
+    validate_g5_payload_v1("teamMessage", &message)
+        .map_err(|error| {
+            ProjectFailure::manifest(format!("invalid actual-agent public message: {error}"))
+        })
+        .map_err(PublicEventPersistError::Fault)?;
+    chat_projection.remove("last_event_sequence");
+    chat_projection.insert("last_message".into(), message);
+    chat_projection.insert("durable_event_sequence".into(), Value::from(sequence));
+    let operation = event["eventId"].as_str().unwrap_or_default();
+    storage
+        .upsert_projection_records_atomic(vec![
+            ProjectionUpsert {
+                aggregate_type: "run",
+                aggregate_id: run_id.into(),
+                operation_id: format!("op_agent_public_{operation}"),
+                request_id: None,
+                payload: updated,
+            },
+            ProjectionUpsert {
+                aggregate_type: "chat",
+                aggregate_id: expected["chatId"].as_str().unwrap_or_default().into(),
+                operation_id: format!("op_agent_public_chat_{operation}"),
+                request_id: None,
+                payload: chat_projection,
+            },
+        ])
+        .map_err(ProjectFailure::from)
+        .map_err(PublicEventPersistError::Fault)?;
+    Ok(())
 }
 
 fn public_budget_metrics(events: &[Value]) -> Result<PublicBudgetMetrics, ProjectFailure> {

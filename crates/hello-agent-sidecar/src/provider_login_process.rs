@@ -132,6 +132,21 @@ fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
         .map_err(|_| failure())
 }
 
+/// Issued only by explicit finish; callers cannot manufacture a clean receipt.
+pub(crate) struct ProcessClosureEvidence {
+    identities: Vec<ProcIdentity>,
+    confirmed: bool,
+}
+
+impl ProcessClosureEvidence {
+    pub(crate) fn identities(&self) -> &[ProcIdentity] {
+        &self.identities
+    }
+    pub(crate) fn confirmed(&self) -> bool {
+        self.confirmed
+    }
+}
+
 /// Owns the Child before any fallible identity/pipe operation. No Debug/raw error logging.
 /// Dropping attempts cleanup but never releases the durable fence: only explicit finish does.
 pub(crate) struct LoginProcess<'a> {
@@ -147,11 +162,59 @@ pub(crate) struct LoginProcess<'a> {
     finished: bool,
     transport_used: bool,
     preflight_claimed: bool,
+    closure: Option<ProcessClosureEvidence>,
+    retain_for_terminal: bool,
     #[cfg(test)]
     fail_next_cleanup: bool,
 }
 
 impl<'a> LoginProcess<'a> {
+    /// Trusted run owner only, before claiming this fresh transport. Ordinary
+    /// login sessions retain their existing finish-and-release behavior.
+    pub(crate) fn retain_fence_until_terminal(&mut self) -> Result<(), SidecarError> {
+        if self.finished
+            || self.failed
+            || self.transport_used
+            || self.preflight_claimed
+            || self.retain_for_terminal
+            || self.io.is_none()
+        {
+            return Err(failure());
+        }
+        self.reservation.verify()?;
+        self.retain_for_terminal = true;
+        Ok(())
+    }
+
+    /// Called by the run owner only after its terminal transaction succeeded.
+    /// A failed release remains blocked; ordinary finish/drop cannot bypass it.
+    pub(crate) fn release_after_run_terminal(&mut self) -> Result<(), SidecarError> {
+        if !self.retain_for_terminal
+            || !self.finished
+            || !self
+                .closure
+                .as_ref()
+                .is_some_and(|receipt| receipt.confirmed)
+        {
+            return Err(failure());
+        }
+        self.profile.revalidate()?;
+        self.reservation.release()?;
+        self.retain_for_terminal = false;
+        Ok(())
+    }
+
+    pub(crate) fn closure_evidence(&self) -> Option<&ProcessClosureEvidence> {
+        self.closure.as_ref()
+    }
+    pub(crate) fn codex_preflight_home(&self) -> Result<std::path::PathBuf, SidecarError> {
+        if self.profile.pending_name() != "codex-login.pending" {
+            return Err(failure());
+        }
+        self.reservation.verify()?;
+        self.profile.revalidate()
+    }
+
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
         Ok(Self {
             profile,
@@ -166,6 +229,8 @@ impl<'a> LoginProcess<'a> {
             finished: false,
             transport_used: false,
             preflight_claimed: false,
+            closure: None,
+            retain_for_terminal: false,
             #[cfg(test)]
             fail_next_cleanup: false,
         })
@@ -180,6 +245,16 @@ impl<'a> LoginProcess<'a> {
         &mut self,
         spawn: impl FnOnce() -> std::io::Result<Child>,
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_identity_barrier(spawn, |child, _| release(child))
+    }
+
+    /// The trusted run owner can durably bind the already observed identities
+    /// before releasing the gate. A failed callback never attaches protocol I/O.
+    pub(crate) fn launch_with_identity_barrier(
+        &mut self,
+        spawn: impl FnOnce() -> std::io::Result<Child>,
+        release: impl FnOnce(&mut Child, &[ProcIdentity]) -> std::io::Result<()>,
     ) -> Result<(), SidecarError> {
         if self.attempted || self.finished || self.failed {
             return Err(failure());
@@ -201,7 +276,12 @@ impl<'a> LoginProcess<'a> {
             if child.stdin.is_none() || child.stdout.is_none() {
                 return Err(failure());
             }
-            release(child).map_err(|_| failure())?;
+            let identities = self
+                .tracker
+                .as_ref()
+                .ok_or_else(failure)?
+                .tracked_identities();
+            release(child, &identities).map_err(|_| failure())?;
             self.io = Some(LoginIo::attach(child)?);
             self.observe_with(&SystemProcTable, true)
         })();
@@ -209,6 +289,12 @@ impl<'a> LoginProcess<'a> {
             self.failed = true;
         }
         result
+    }
+
+    /// External durable run bookkeeping failed. Stop all protocol input while
+    /// retaining the observed child/tracker for the ordinary explicit cleanup.
+    pub(crate) fn invalidate_transport(&mut self) {
+        self.failed = true;
     }
 
     /// Existing toy peers have no vendor payload. Production has no ungated shortcut.
@@ -272,6 +358,34 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
+    /// Return the cumulative identities even when observation fails, so the run
+    /// ledger can retain known descendants without treating the observation as safe.
+    pub(crate) fn observe_for_run(&mut self) -> (Vec<ProcIdentity>, Result<(), SidecarError>) {
+        let observed = self.tick();
+        let identities = self
+            .tracker
+            .as_ref()
+            .map(TreeTracker::tracked_identities)
+            .unwrap_or_default();
+        (identities, observed)
+    }
+
+    fn tick_with_run(
+        &mut self,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        let before = self.last_observed;
+        let observed = self.tick();
+        // I/O polls every few milliseconds; write/read the run ledger only when
+        // the process observer advances (or fails), not on every empty poll.
+        let saved = if observed.is_err() || before != self.last_observed {
+            observer(self)
+        } else {
+            Ok(())
+        };
+        observed.and(saved)
+    }
+
     fn observe_with(&mut self, table: &impl ProcTable, force: bool) -> Result<(), SidecarError> {
         if !force
             && self
@@ -333,12 +447,24 @@ impl<'a> LoginProcess<'a> {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
+        self.send_preflight_observed(request, timeout, cancel, &mut |_| Ok(()))
+    }
+
+    pub(crate) fn send_preflight_observed(
+        &mut self,
+        request: hello_agent_core::provider::vendor_observation::codex_preflight::exchange::PreflightRequest,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
         if self.failed || self.finished || !self.preflight_claimed {
             return Err(failure());
         }
         self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.send_preflight(request, timeout, cancel, &mut || self.tick());
+        let result = io.send_preflight(request, timeout, cancel, &mut || {
+            self.tick_with_run(observer)
+        });
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;
@@ -346,18 +472,21 @@ impl<'a> LoginProcess<'a> {
         result
     }
 
-    pub(crate) fn send_turn(
+    pub(crate) fn send_turn_observed(
         &mut self,
         request: hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest,
         timeout: Duration,
         cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if self.failed || self.finished || !self.preflight_claimed {
             return Err(failure());
         }
         self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.send_turn(request, timeout, cancel, &mut || self.tick());
+        let result = io.send_turn(request, timeout, cancel, &mut || {
+            self.tick_with_run(observer)
+        });
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;
@@ -373,7 +502,7 @@ impl<'a> LoginProcess<'a> {
         if self.preflight_claimed {
             return Err(failure());
         }
-        self.receive_inner(timeout, cancel)
+        self.receive_inner(timeout, cancel, &mut |_| Ok(()))
     }
 
     pub(crate) fn receive_preflight(
@@ -381,23 +510,33 @@ impl<'a> LoginProcess<'a> {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<BoundedObservation, SidecarError> {
+        self.receive_preflight_observed(timeout, cancel, &mut |_| Ok(()))
+    }
+
+    pub(crate) fn receive_preflight_observed(
+        &mut self,
+        timeout: Duration,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
+    ) -> Result<BoundedObservation, SidecarError> {
         if !self.preflight_claimed {
             return Err(failure());
         }
-        self.receive_inner(timeout, cancel)
+        self.receive_inner(timeout, cancel, observer)
     }
 
     fn receive_inner(
         &mut self,
         timeout: Duration,
         cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
     ) -> Result<BoundedObservation, SidecarError> {
         if self.failed || self.finished {
             return Err(failure());
         }
         self.transport_used = true;
         let mut io = self.io.take().ok_or_else(failure)?;
-        let result = io.receive_observed(timeout, cancel, &mut || self.tick());
+        let result = io.receive_observed(timeout, cancel, &mut || self.tick_with_run(observer));
         self.io = Some(io);
         if result.is_err() {
             self.failed = true;
@@ -483,6 +622,14 @@ impl<'a> LoginProcess<'a> {
         }
         self.io.take();
         let clean = self.cleanup(table);
+        self.closure = Some(ProcessClosureEvidence {
+            identities: self
+                .tracker
+                .as_ref()
+                .map(|tracker| tracker.tracked_identities())
+                .unwrap_or_default(),
+            confirmed: false,
+        });
         if !clean {
             self.failed = true;
             self.evidence_failed = true;
@@ -490,7 +637,13 @@ impl<'a> LoginProcess<'a> {
         }
         self.finished = true;
         self.profile.revalidate()?;
-        self.reservation.release()
+        if self.retain_for_terminal {
+            self.reservation.verify()?;
+        } else {
+            self.reservation.release()?;
+        }
+        self.closure.as_mut().unwrap().confirmed = true;
+        Ok(())
     }
 
     fn cleanup(&mut self, table: &impl ProcTable) -> bool {

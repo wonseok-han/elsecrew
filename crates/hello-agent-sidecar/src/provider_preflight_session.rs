@@ -164,7 +164,7 @@ fn observe_with_budget(
         budget,
         started,
         thread_cwd,
-        &mut || Ok(()),
+        &mut |_, _| Ok(()),
     );
     // Even a protocol error or cancellation must run the existing observed cleanup.
     let cleanup = process.finish();
@@ -187,7 +187,7 @@ fn check_claimed(
     budget: Duration,
     started: Instant,
     thread_cwd: Option<&std::path::Path>,
-    verify_workspace: &mut impl FnMut() -> Result<(), SidecarError>,
+    on_action: &mut impl FnMut(&mut LoginProcess<'_>, TextAction) -> Result<(), SidecarError>,
 ) -> Result<(), SidecarError> {
     loop {
         if cancel.load(Ordering::Acquire) {
@@ -198,24 +198,37 @@ fn check_claimed(
             return Err(failure());
         }
         for frame in frames {
+            on_action(process, TextAction::ObserveProcess)?;
             let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
-            process.send_preflight(frame, remaining, cancel)?;
+            process.send_preflight_observed(frame, remaining, cancel, &mut |process| {
+                on_action(process, TextAction::ObserveProcess)
+            })?;
         }
         let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
-        let reply = process.receive_preflight(remaining, cancel)?;
+        let reply = process.receive_preflight_observed(remaining, cancel, &mut |process| {
+            on_action(process, TextAction::ObserveProcess)
+        })?;
+        on_action(process, TextAction::ObserveProcess)?;
         if started.elapsed() >= budget {
             return Err(failure());
         }
         if flow.accept(&reply).map_err(|_| failure())? == PreflightState::ObservationsMatched {
             if let Some(cwd) = thread_cwd {
-                verify_workspace()?;
+                on_action(process, TextAction::VerifyWorkspace)?;
+                on_action(process, TextAction::ObserveProcess)?;
                 let request = flow.start_read_only_thread(cwd).map_err(|_| failure())?;
                 let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
-                process.send_preflight(request, remaining, cancel)?;
+                process.send_preflight_observed(request, remaining, cancel, &mut |process| {
+                    on_action(process, TextAction::ObserveProcess)
+                })?;
                 // Exactly one reply and one thread/started, in either order.
                 for _ in 0..2 {
                     let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
-                    let response = process.receive_preflight(remaining, cancel)?;
+                    let response =
+                        process.receive_preflight_observed(remaining, cancel, &mut |process| {
+                            on_action(process, TextAction::ObserveProcess)
+                        })?;
+                    on_action(process, TextAction::ObserveProcess)?;
                     if started.elapsed() >= budget {
                         return Err(failure());
                     }
@@ -235,7 +248,7 @@ fn check_claimed(
 /// enforce launch-time isolation. No arbitrary cwd can enter the text candidate.
 pub(crate) struct TextWorkspace<'a> {
     projects: &'a crate::project::ProjectManager,
-    storage: &'a crate::Storage,
+    storage: &'a mut crate::Storage,
     address: crate::project::WorkspaceAddress,
     cwd: std::path::PathBuf,
 }
@@ -243,7 +256,7 @@ pub(crate) struct TextWorkspace<'a> {
 impl<'a> TextWorkspace<'a> {
     pub(crate) fn new(
         projects: &'a crate::project::ProjectManager,
-        storage: &'a crate::Storage,
+        storage: &'a mut crate::Storage,
         address: &crate::project::WorkspaceAddress,
     ) -> Result<Self, SidecarError> {
         let manifest = projects
@@ -278,24 +291,38 @@ pub(crate) fn run_text_and_close(
     process: &mut LoginProcess<'_>,
     flow: PreflightExchange,
     cancel: &AtomicBool,
-    workspace: &TextWorkspace<'_>,
+    workspace: &mut TextWorkspace<'_>,
     text: &str,
     on_public: &mut impl FnMut(
+        &mut crate::Storage,
         hello_agent_core::provider::vendor_observation::codex_events::Projection,
     ) -> Result<(), SidecarError>,
+    on_process: &mut impl FnMut(&mut crate::Storage, &mut LoginProcess<'_>) -> Result<(), SidecarError>,
 ) -> Result<
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
 > {
+    let cwd = workspace.cwd.clone();
     run_text_checked(
         process,
         flow,
         cancel,
-        &workspace.cwd,
+        &cwd,
         text,
-        on_public,
-        &mut || workspace.revalidate(),
+        &mut |process, action| match action {
+            TextAction::VerifyWorkspace => workspace.revalidate(),
+            TextAction::Public(value) => on_public(workspace.storage, value),
+            TextAction::ObserveProcess => on_process(workspace.storage, process),
+        },
     )
+}
+
+// A single sequential callback avoids two closures aliasing the same ledger.
+// This is private transport plumbing, not a renderer-controlled action API.
+enum TextAction {
+    VerifyWorkspace,
+    ObserveProcess,
+    Public(hello_agent_core::provider::vendor_observation::codex_events::Projection),
 }
 
 fn run_text_checked(
@@ -304,10 +331,7 @@ fn run_text_checked(
     cancel: &AtomicBool,
     cwd: &std::path::Path,
     text: &str,
-    on_public: &mut impl FnMut(
-        hello_agent_core::provider::vendor_observation::codex_events::Projection,
-    ) -> Result<(), SidecarError>,
-    verify_workspace: &mut impl FnMut() -> Result<(), SidecarError>,
+    on_action: &mut impl FnMut(&mut LoginProcess<'_>, TextAction) -> Result<(), SidecarError>,
 ) -> Result<
     hello_agent_core::provider::vendor_observation::codex_events::stream::TurnOutcome,
     SidecarError,
@@ -316,7 +340,7 @@ fn run_text_checked(
     hello_agent_core::provider::vendor_observation::codex_turn::TurnStart::validate_text(text)
         .map_err(|_| failure())?;
     PreflightExchange::validate_thread_cwd(cwd).map_err(|_| failure())?;
-    verify_workspace()?;
+    on_action(process, TextAction::VerifyWorkspace)?;
     let started = Instant::now();
     let budget = Duration::from_secs(30);
     if !flow.is_fresh() || process.begin_preflight().is_err() {
@@ -330,32 +354,42 @@ fn run_text_checked(
             budget,
             started,
             Some(cwd),
-            verify_workspace,
+            on_action,
         )?;
-        verify_workspace()?;
+        on_action(process, TextAction::VerifyWorkspace)?;
+        on_action(process, TextAction::ObserveProcess)?;
         let mut turn = flow.into_text_turn(text).map_err(|_| failure())?;
         let remaining = || budget.checked_sub(started.elapsed()).ok_or_else(failure);
-        process.send_turn(
+        process.send_turn_observed(
             turn.take_frame().map_err(|_| failure())?,
             remaining()?,
             cancel,
+            &mut |process| on_action(process, TextAction::ObserveProcess),
         )?;
         let mut stream = None;
         for _ in 0..2 {
-            let response = process.receive_preflight(remaining()?, cancel)?;
+            let response =
+                process.receive_preflight_observed(remaining()?, cancel, &mut |process| {
+                    on_action(process, TextAction::ObserveProcess)
+                })?;
+            on_action(process, TextAction::ObserveProcess)?;
             if let Some(value) = turn.accept(&response).map_err(|_| failure())? {
                 stream = Some(value);
             }
         }
         let mut stream = stream.ok_or_else(failure)?;
         loop {
-            let frame = process.receive_preflight(remaining()?, cancel)?;
+            let frame =
+                process.receive_preflight_observed(remaining()?, cancel, &mut |process| {
+                    on_action(process, TextAction::ObserveProcess)
+                })?;
+            on_action(process, TextAction::ObserveProcess)?;
             let observed = stream.observe(&frame).map_err(|_| failure())?;
             if cancel.load(Ordering::Acquire) || started.elapsed() >= budget {
                 return Err(failure());
             }
             match observed {
-                Observed::Public(value) => on_public(value)?,
+                Observed::Public(value) => on_action(process, TextAction::Public(value))?,
                 Observed::ItemStarted | Observed::Private => {}
                 Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
                 // Tools/private notifications need an explicit owner handler.
@@ -428,8 +462,8 @@ mod tests {
                 &AtomicBool::new(false),
                 std::path::Path::new(cwd),
                 text,
-                &mut |_| panic!("unexpected output"),
-                &mut || {
+                &mut |_, action| {
+                    assert!(matches!(action, TextAction::VerifyWorkspace));
                     workspace_checks += 1;
                     Err(failure())
                 },
@@ -794,7 +828,20 @@ IFS= read -r hold
                     &cancel,
                     std::path::Path::new("/managed/snapshot"),
                     "test goal",
-                    &mut |value| {
+                    &mut |_, action| {
+                        let value = match action {
+                            TextAction::ObserveProcess => return Ok(()),
+                            TextAction::VerifyWorkspace => {
+                                checks += 1;
+                                if (case == "turn-workspace-before-thread" && checks == 2)
+                                    || (case == "turn-workspace-before-prompt" && checks == 3)
+                                {
+                                    return Err(failure());
+                                }
+                                return Ok(());
+                            }
+                            TextAction::Public(value) => value,
+                        };
                         match value {
                             Projection::Delta { text: value, .. } => {
                                 assert_eq!(value, "hello");
@@ -810,15 +857,6 @@ IFS= read -r hold
                             cancel.store(true, Ordering::Release);
                         }
                         if case == "turn-sink-error" {
-                            return Err(failure());
-                        }
-                        Ok(())
-                    },
-                    &mut || {
-                        checks += 1;
-                        if (case == "turn-workspace-before-thread" && checks == 2)
-                            || (case == "turn-workspace-before-prompt" && checks == 3)
-                        {
                             return Err(failure());
                         }
                         Ok(())
