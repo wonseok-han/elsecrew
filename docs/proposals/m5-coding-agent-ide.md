@@ -462,6 +462,15 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 **연결 전 남은 증거와 구현 경계**:
 
+**2026-09-28 승인 실측 결과**: 사용자 승인 뒤 pinned 0.158 native CLI를 빈 임시 profile에서 initialize/config-read-only로 시험했다. 호출별 명시 설정 5개는 모두 일치했고 설정 출처는 sessionFlags/user/빈 system, disabledReason은 생략됐다. stdin EOF 뒤 root exit 0이다. 로그인·account/model/thread/turn 요청은 없었다. 이는 아래 config-only 실측 범위에 한정되며, `inspect_full_preflight_candidate`의 전체 조회(account/model 포함)나 signed-in 관리 설정·thread startup 격리 성공은 아니다. 독립 검토에서 내부 후보의 새 차단 결함은 없었고 gate 대기 중 CLI/helper 변경·취소 회귀는 활성화 전 후속으로 남겼다.
+
+**2026-09-28 설정 격리 재확인 — 다음 실측 범위**: 공식 [설정 우선순위](https://learn.chatgpt.com/docs/config-file/config-basic#configuration-precedence)는 CLI override 외에도 system·cloud-managed·project layer를 명시한다. [훅 설정](https://learn.chatgpt.com/docs/config-file/config-advanced#hooks)은 project trust가 user/global hook을 끄지 않는다고 설명한다. 따라서 앱 전용 HOME, 빈 환경, 모델/정책 override만으로 hooks/MCP/plugins 격리를 선언하지 않는다. 현재 config/read는 includeLayers=false이고 유효 모델/권한만 비교하므로 설정 출처 증명도 없다. 로컬 0.158 생성 schema의 ConfigLayerSource에는 packagedDefaults/mdm/system/enterpriseManaged/user/project/sessionFlags/legacy managed 종류가 있다. 모르는 종류를 앱 소유 설정으로 간주하면 안 된다.
+
+- 다음 실측은 사용자 승인 후, 고정 CLI/helper·새 빈 임시 profile·앱 소유 가짜 프로젝트만 사용한다. 기존 앱/터미널 인증 파일은 읽거나 복사하지 않는다. initialize/initialized/config/read(includeLayers:true)까지만 수행하고 thread/start·turn/start·로그인·model/list는 보내지 않는다.
+- 반환값은 layer 종류/활성 여부와 허용한 모델·정책의 일치 여부만 기록한다. 원문 config·계정·환경 비밀을 로그나 증거로 저장하지 않는다. 실제 CLI는 승인 없이 시작하지 않는다.
+- 시작/종료·예상 밖 활성 layer를 확인하고, 관리 설정을 무시하는 우회가 아니라 지원 불가를 명시적으로 거절할 조건을 정한다. config/read는 이미 일어난 startup 명령의 무실행 증명이 아니므로 소스 검토 및 통제된 훅/외부 도구 실행 여부 시험도 별도로 필요하다.
+- 이번 내부 launcher는 검토 전 미커밋이며 제품 IPC/actual-agent capability를 열지 않는다. 독립 검토는 launcher·profile·preflight·취소/종료 소유권을 함께 한 번에 다룬다. 실측 및 독립 검토 완료 전 사용자 목표를 전달하는 turn 경로를 활성화하지 않는다.
+
 **2026-09-14 사용자 확정 — 앱 전용 별도 로그인**: 기존 터미널 설정·인증을 보존하고 앱 전용 환경에서 Codex·Claude에 별도 로그인하도록 구현하는 방향을 사용자가 승인했다. 기존 인증정보 복사나 유료 모델 실행은 승인에 포함하지 않는다. [공식 인증 저장 문서](https://learn.chatgpt.com/docs/auth#credential-storage)의 Codex `file` 방식은 전용 `CODEX_HOME` 아래 auth.json에 저장한다. 앱 전용 접근 제한 폴더만 사용하고 기존 설정 덮어쓰기·자동 keyring fallback·공유 인증 재사용을 하지 않는다. Claude의 macOS 인증 저장 분리는 별도 확인하며 Codex와 같다고 추정하지 않는다. 환경 준비·모델 없는 파서와 실제 격리 프로세스/로그인 UI 연결 완료는 구분한다.
 
 **2026-09-14 Codex offline 대조 구현**: `vendor_observation/codex_preflight.rs`는 명시적 model/effort와 config/read 및 완전 model/list를 비교한다. thread/start에는 readOnly/networkAccess=false, on-request/user, exact cwd 및 빈 instructionSources만 허용한다. 이 초기 읽기 전용 후보의 성공은 쓰기 역할 지원·파일 신원·설정 격리·실행 권위가 아니다. 기존 실행/공개 capability는 차단 상태다. 로컬 0.149.1 generate-ts 출력의 SHA-256은 Config.ts `f3fce144710f8972c83c229345611038066b67bd1777a9f859c696545c4bc5df`, Model.ts `ff56f09e9b9f301f1c6ecc565e2bcf6355c6ea66880f3ac963b7754e74cbe0a3`, ThreadStartResponse.ts `efc3d5df82b8f6f7d320fc97e2c51e8f25dc38195ae49af55f37b2ead8a05464`다. 실제 CLI 응답 관측을 대신하지 않으며 합성 테스트 모델명을 실제 카탈로그로 표시하지 않는다.

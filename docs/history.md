@@ -1,5 +1,41 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (승인된 설정 조회 실측·launcher 검토)
+
+- **승인/재개**: 사용자가 빈 임시 환경의 실제 config 조회와 읽기 전용 리뷰어 1명을 모두 승인했다. `a1297bf` 위 미커밋 launcher 변경을 동결해 검토자에게 맡기고 메인은 OpenAI Docs의 조회 규격·설정 우선순위를 확인했다. 이전 별도 승인 대기는 해소됐다.
+- **실제 관측**: CLI/helper SHA `3e11ccc7…`/`4c398936…` 일치, nested/parent strict codesign 및 Team 2DC432GLL2 확인. 새 빈 HOME/CODEX_HOME에서 initialize→initialized→config/read(includeLayers:true)만 전송했다. 모델/effort/provider/approval/read-only 다섯 값이 일치했고 sessionFlags·user·내용이 빈 system layer를 관측했다. stdin 종료 뒤 root exit 0. 계정/model-list/thread/turn 요청은 없고 auth.json 미생성이다. 원문 설정/인증·stderr는 저장하지 않았다.
+- **실측 정정/한계**: 첫 요약의 disabledReason 미존재를 null과 달라 disabled로 잘못 분류했다. 필드 부재와 비활성 이유 존재를 구분해 새 빈 프로필로 재실측했고 세 layer 모두 이유 필드가 생략됐다. 최종 요약 경로는 `/private/tmp/hello-agent-config-smoke-2eXAVo`다. 이 일회성 root 정상 종료는 모든 자손 회수/시스템 전체 격리 증명이 아니며 signed-in managed policy·thread startup hook/MCP·유료 실행도 검증하지 않았다. Rust 코드 검토 결과에 따라 수정/통합하며 제품 활성화는 별도다.
+- **검토 명료화**: 실측은 별도 `/private/tmp/hello-agent-config-smoke.mjs`의 두 요청만 사용했으며 내부 Rust full preflight를 실행하지 않았다. full 후보는 account/read·model/list도 요청하므로 `inspect_full_preflight_candidate`로 이름을 바꾸고 이번 config-only 승인으로 호출하면 안 된다는 주석을 추가했다. 해당 함수 호출은 가짜 시험뿐이며 실측 PASS를 이 전체 경로의 실제 PASS로 확대하지 않는다.
+- **마감/다음**: 동일 리뷰어가 최종 delta의 혼동 해소·새 차단 결함 없음을 확인했다. 집중 3테스트 재실행 PASS, fmt·diff PASS, 변경 없는 launcher 로직의 strict clippy PASS를 재사용했다. Karpathy 지침으로 기존 gate/owner를 유지했고 내부 후보와 문서만 기능 커밋한다. 활성화 전 gate 대기 중 CLI/helper 변경·예약 후 취소 회귀, 관리 설정/통합 격리 및 실제 turn/출력 연결은 남는다. main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (실측·검토 승인 차단 상태)
+
+- **차단 감사**: 직전은 상태 재확인만 한 무진전 턴이었다. 이번에도 HEAD `a1297bf`, 미커밋 3파일과 diff PASS를 확인했고 별도 승인 미수신은 동일하게 세 번째 이어졌다. 가짜 실행/관련 검증은 완료했지만 실제 설정 격리 실측 및 독립 검토를 대체할 수 없다. 자동 계속 메시지는 해당 호출의 별도 승인이 아니다.
+- **보존/필요 입력**: 목표를 blocked로 전환한다. 필요한 승인은 빈 임시 환경의 실제 Codex initialize/config 조회(로그인·인증 복사·모델 호출 제외)와 읽기 전용 리뷰어 1명이다. 코드/문서 변경은 미커밋으로 보존하고 실제 CLI 실행·위임·제품 활성화·main 병합·push는 하지 않았다. 사용자 승인 후 해당 범위부터 재개하며 앱 전체 완료를 주장하지 않는다.
+
+### 2026-09-28 · by GPT-6 Astra (실측·검토 승인 대기 재확인)
+
+- **분류/상태**: 직전 목표 턴은 설정 layer의 새 근거를 확인해 실측 범위를 정한 진전이었다. 이번에는 HEAD `a1297bf`와 기존 미커밋 3파일, diff 검사 PASS를 확인했지만 새 구현 진전이나 살아 있는 작업의 대기는 아니다. 실제 CLI 설정 조회 시험과 읽기 전용 리뷰어 1명 승인은 여전히 미수신이며 동일 승인 대기 두 번째 턴이다.
+- **보존/다음**: 이 실행 경로의 가짜 시험은 이미 통과했다. 이를 반복하거나 다른 주변 기능을 추가해 실제 격리 검증을 대체하지 않는다. 별도 승인 전 CLI 실행·새 위임·제품 활성화·커밋은 하지 않고 기존 변경을 보존한다. 사용자가 두 항목을 승인하면 지정된 빈 임시 환경 실측과 독립 검토를 진행한다. 전체 완료가 아니며 main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (설정 격리 근거·실측 경계 확정)
+
+- **진전 판단/조사**: 직전은 가짜 launcher 5사례와 stale pin 조기 거절 구현으로 진전했다. 이번 OpenAI Docs의 설정 우선순위/훅 문서와 현재 0.158 생성 schema를 대조해 HOME 분리만으로 system/cloud-managed/global hooks를 배제하지 못함을 확인했다. 현재 config/read의 includeLayers=false는 모델·정책 대조만 제공하며 출처 격리 증거가 아니다. 이것이 다음 실제 시험의 범위를 바꾼 새 근거다.
+- **다음 필수 단계**: 제안서 §6.7에 빈 임시 profile·가짜 프로젝트·고정 실행 파일의 initialize/config-read-only 실측 범위를 기록했다. 계정·model/list·thread/turn·유료 호출은 제외한다. 실제 CLI 실측과 새 launcher 독립 리뷰어 1명 호출은 별도 승인이 필요하므로 사용자에게 요청한다. 자동 계속 지시는 이 권한을 확대하지 않는다. 기존 미커밋 코드는 보존하며 제품은 비활성이다.
+- **검증/경계**: 공식 문서 및 로컬 schema/코드 읽기와 문서 diff 검사만 수행했다. 변경 없는 테스트는 반복하지 않았다. 원문 설정/인증 접근·CLI 실행·새 위임·커밋·main 병합·push 없음. 제품 전체 완료가 아니며 승인 대기 첫 턴이다.
+
+### 2026-09-28 · by GPT-6 Astra (조회 launcher 전체 경로 회귀)
+
+- **직접 진행**: 직전 launcher 구현·검증은 진전이며 현재 `a1297bf` 위 미커밋 변경을 보존했다. pinned 가짜 실행 파일을 실제 gate/pipe에 연결해 정상 조회·시작 전 취소·CLI 변경·helper 변경·조기 EOF의 5사례를 시험했다. 앱 profile config byte 불변과 auth.json 미생성도 확인했다. 실제 vendor/사용자 인증/모델 호출은 없다.
+- **발견/수정**: 첫 회귀는 spawn 준비 실패 뒤 기존 owner가 영속 fence를 보수적으로 유지한다는 계약 때문에 실패했다. 이를 완화하지 않고 이미 stale인 pin을 예약 전에 거절하도록 고쳤다. spawn/release 직전 재검사는 유지해 이후 경합은 기존 실패/잠금 정책을 따른다. 실패 owner 반환과 불확실 cleanup은 앞선 owner 계약을 유지한다.
+- **검증/다음**: 집중 3테스트 PASS(전체 launcher 5사례·기존 pipe 12사례·argv/환경 검사), strict sidecar clippy·fmt·diff PASS. Karpathy 지침으로 기존 종료 정책을 수정하지 않았다. 검토 전 미커밋·제품 비활성을 유지하며 다음은 실제 설정 격리 조건과 이 실행 경로의 독립 검토 준비다. 이 가짜 실행 증거를 실제 CLI 호환/전체 M5 완료로 인용하지 않는다. main 병합·push 없음.
+
+### 2026-09-28 · by GPT-6 Astra (전용 설정 조회 launcher 연결 준비)
+
+- **진전/범위**: 직전 `a1297bf`는 정상 알림 처리와 회귀를 실제로 반영한 진전이다. 이번 clean HEAD에서 기존 로그인 config가 인증 저장 방식만 지정해 preflight의 명시적 모델/정책 검증에 충분하지 않음을 확인했다. OpenAI 공식 [CLI reference](https://developers.openai.com/codex/cli/reference/)의 호출별 -c 우선순위에 따라 파일을 덮어쓰지 않는 model/effort/provider/read-only/on-request argv를 구성했다.
+- **내부 연결**: 별도 승인된 pinned CLI/helper를 받는 inspect_provider가 profile 재검사→예약→기존 launch barrier→조회 세션을 연결한다. 환경은 앱 HOME/CODEX_HOME/tmp와 고정 PATH뿐이다. release 직전 파일/profile·취소를 재검사하고 시작/정리 오류여도 process owner를 결과와 함께 반환해 caller가 cleanup을 재시도할 수 있게 했다. 제품 IPC에 노출하지 않고 thread/turn/실제 CLI 실행은 하지 않았다.
+- **검증/다음**: 집중 2테스트 PASS(기존 pipe 12사례와 argv/환경/입력 거부), sidecar strict clippy·diff 검사 PASS. 실제 launcher 설정 격리 전체(관리 설정·hooks/MCP/plugin 포함) 증거는 미완료이며 이번 argv만으로 격리를 주장하지 않는다. Karpathy 지침으로 기존 owner/gate를 재사용했다. 실행 경계 변경은 검토용 미커밋으로 보존하고, 다음은 이 경로의 실패 회귀 및 격리 조건 검증이다. 중간 helper마다 새 검토자를 부르지 않고 파동 범위를 준비한 뒤 독립 검토를 요청한다. main 병합·push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (thread 생성 알림 결속)
 
 - **마감 검사**: sidecar 실제 가짜 pipe 1테스트/12사례(응답/알림 양순서 포함), strict sidecar clippy·core/sidecar fmt·diff 검사 PASS. 변경 메시지 처리의 자체 검토를 완료하고 기능 커밋한다. 실행/종료 권한 변경이나 제품 활성화는 포함하지 않는다.
@@ -127,6 +163,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Codex 격리 미입증 조건(2026-09-28)**: HOME/CODEX_HOME 분리와 CLI 모델/권한 override는 시스템/회사 관리 layer 및 전역 hook 배제 증명이 아니다. config/read는 startup 부작용 이후의 관측이며 현재 includeLayers=false다. 제품 활성화 전 실측·격리 검토가 필요하고 관리 정책을 임의 우회하지 않는다. 승인 요청 범위는 제안서 §6.7의 2026-09-28 항목을 따른다.
 
 - **최신 로그인 복원(2026-09-28)**: Codex 0.158.0-alpha.2.1의 signed nested native CLI와 helper exact pair를 직접 실행해 Claude 2.1.275와 함께 실제 앱 재시작 복원을 확인했다. `codex-cli/bin/codex`는 shell wrapper이므로 native 신뢰 판정과 혼동하지 않는다. 아래 과거 항목의 Claude 복원 대기는 해소됐다. 실제 모델 실행/출력은 여전히 별도다.
 

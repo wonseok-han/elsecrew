@@ -1,4 +1,4 @@
-//! Model-free preflight on an already gated, owned process. No spawn or prompt API.
+//! Internal model-free discovery through the gated process owner. No prompt API.
 use crate::{provider_login_process::LoginProcess, SidecarError};
 use hello_agent_core::provider::vendor_observation::codex_preflight::exchange::{
     PreflightExchange, PreflightState,
@@ -11,6 +11,101 @@ fn failure() -> SidecarError {
         "providerPreflightFailed",
         "provider settings could not be verified",
     )
+}
+
+/// Internal discovery entry point for a separately admitted executable pair.
+/// Does not create a thread, send user input, or grant runtime execution authority.
+pub(crate) struct ProviderInspection<'a> {
+    pub(crate) result: Result<(), SidecarError>,
+    pub(crate) process: LoginProcess<'a>,
+}
+
+/// Full candidate includes account/read and model/list. This is NOT the approved
+/// config-only smoke and must not be invoked under that narrower authorization.
+/// No product caller exists; configuration isolation/admission remains separate.
+pub(crate) fn inspect_full_preflight_candidate<'a>(
+    profile: &'a crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    helper: &crate::provider_executable::PinnedExecutable,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    cancel: &AtomicBool,
+) -> Result<ProviderInspection<'a>, SidecarError> {
+    let home = profile.revalidate()?;
+    let mut flow = PreflightExchange::new(expected, home.to_str().ok_or_else(failure)?)
+        .map_err(|_| failure())?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(failure());
+    }
+    // Reject already stale pins before creating a durable process reservation.
+    // The spawn/release checks below still catch subsequent changes.
+    executable.revalidate()?;
+    helper.revalidate()?;
+    let mut process = LoginProcess::reserve(profile)?;
+    let result = process
+        .launch_with_barrier(
+            || {
+                let path = executable.revalidate().map_err(std::io::Error::other)?;
+                helper.revalidate().map_err(std::io::Error::other)?;
+                discovery_command(path, &home, expected)?.spawn()
+            },
+            |child| {
+                executable.revalidate().map_err(std::io::Error::other)?;
+                helper.revalidate().map_err(std::io::Error::other)?;
+                let current = profile
+                    .revalidate()
+                    .map_err(|_| std::io::Error::other("profile changed"))?;
+                if current != home || cancel.load(Ordering::Acquire) {
+                    return Err(std::io::Error::other(
+                        "preflight canceled or profile changed",
+                    ));
+                }
+                crate::provider_login_gate::release(child)
+            },
+        )
+        .and_then(|()| observe_and_close(&mut process, &mut flow, cancel));
+    // Even a launch/cleanup error returns its owner for explicit cleanup retries.
+    Ok(ProviderInspection { result, process })
+}
+
+/// Invocation-only overrides: never rewrite the user's app-owned login config.
+fn discovery_command(
+    executable: &std::path::Path,
+    home: &std::path::Path,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+) -> std::io::Result<std::process::Command> {
+    PreflightExchange::new(
+        expected,
+        home.to_str()
+            .ok_or_else(|| std::io::Error::other("invalid home"))?,
+    )
+    .map_err(|_| std::io::Error::other("invalid model profile"))?;
+    let model = format!("model=\"{}\"", expected.model);
+    let effort = format!("model_reasoning_effort=\"{}\"", expected.reasoning_effort);
+    let args: Vec<&std::ffi::OsStr> = [
+        "app-server",
+        "--listen",
+        "stdio://",
+        "-c",
+        &model,
+        "-c",
+        &effort,
+        "-c",
+        "model_provider=\"openai\"",
+        "-c",
+        "approval_policy=\"on-request\"",
+        "-c",
+        "sandbox_mode=\"read-only\"",
+    ]
+    .into_iter()
+    .map(std::ffi::OsStr::new)
+    .collect();
+    let mut command = crate::provider_login_gate::command(executable, &args, home)?;
+    command
+        .env("HOME", home)
+        .env("CODEX_HOME", home)
+        .env("TMPDIR", home.join("tmp"))
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
+    Ok(command)
 }
 
 /// The caller retains ownership on error so uncertain cleanup can be retried.
@@ -108,6 +203,146 @@ mod tests {
     use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
     use serde_json::json;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn pinned_discovery_runs_end_to_end_and_rejects_stale_pins_before_reservation() {
+        use crate::provider_executable::PinnedExecutable;
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        const PEER: &str = r#"#!/bin/sh
+test "$1" = app-server || exit 2
+test "$2" = --listen || exit 2
+test "$3" = stdio:// || exit 2
+test "$HOME" = "$CODEX_HOME" || exit 2
+IFS= read -r request
+printf '{"id":1,"result":{"userAgent":"toy","codexHome":"%s","platformFamily":"unix","platformOs":"macos"}}\n' "$HOME"
+IFS= read -r request
+IFS= read -r request
+printf '%s\n' '{"id":2,"result":{"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only"}}}'
+IFS= read -r request
+printf '%s\n' '{"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
+IFS= read -r request
+printf '%s\n' '{"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}'
+IFS= read -r hold
+"#;
+        for case in [
+            "success",
+            "canceled",
+            "changed-cli",
+            "changed-helper",
+            "eof",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+            let home = profile.revalidate().unwrap();
+            let original = std::fs::read(home.join("config.toml")).unwrap();
+            let script = if case == "eof" {
+                "#!/bin/sh\nexit 0\n"
+            } else {
+                PEER
+            };
+            let cli_path = root.join("toy-cli");
+            let helper_path = root.join("toy-helper");
+            for (path, source) in [(&cli_path, script), (&helper_path, "#!/bin/sh\nexit 0\n")] {
+                std::fs::write(path, source).unwrap();
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let cli = PinnedExecutable::open(&cli_path, Sha256::digest(script.as_bytes()).into())
+                .unwrap();
+            let helper =
+                PinnedExecutable::open(&helper_path, Sha256::digest(b"#!/bin/sh\nexit 0\n").into())
+                    .unwrap();
+            if case == "changed-cli" {
+                std::fs::write(&cli_path, "changed").unwrap();
+            }
+            if case == "changed-helper" {
+                std::fs::write(&helper_path, "changed").unwrap();
+            }
+            let cancel = AtomicBool::new(case == "canceled");
+            let outcome = inspect_full_preflight_candidate(
+                &profile,
+                &cli,
+                &helper,
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium",
+                },
+                &cancel,
+            );
+            if case == "canceled" || case.starts_with("changed-") {
+                assert!(outcome.is_err());
+                LoginProcess::reserve(&profile).unwrap().finish().unwrap();
+            } else {
+                let outcome = outcome.unwrap();
+                assert_eq!(outcome.result.is_ok(), case == "success", "{case}");
+                drop(outcome);
+                LoginProcess::reserve(&profile).unwrap().finish().unwrap();
+            }
+            assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), original);
+            assert!(!home.join("auth.json").exists());
+        }
+    }
+
+    #[test]
+    fn discovery_uses_invocation_only_settings_and_rejects_injected_values() {
+        let profile = ExpectedProfile {
+            model: "test-model",
+            reasoning_effort: "medium",
+        };
+        let command = discovery_command(
+            std::path::Path::new("/verified/codex"),
+            std::path::Path::new("/private/profile"),
+            &profile,
+        )
+        .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            &args[4..],
+            &[
+                "app-server",
+                "--listen",
+                "stdio://",
+                "-c",
+                "model=\"test-model\"",
+                "-c",
+                "model_reasoning_effort=\"medium\"",
+                "-c",
+                "model_provider=\"openai\"",
+                "-c",
+                "approval_policy=\"on-request\"",
+                "-c",
+                "sandbox_mode=\"read-only\""
+            ]
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::path::Path::new("/private/profile"))
+        );
+        let env: std::collections::BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(key, value)| (key.to_str().unwrap(), value.unwrap().to_str().unwrap()))
+            .collect();
+        assert_eq!(env.len(), 4);
+        assert_eq!(env["HOME"], "/private/profile");
+        assert_eq!(env["CODEX_HOME"], "/private/profile");
+        assert_eq!(env["TMPDIR"], "/private/profile/tmp");
+        for model in ["", "x\"\nmalicious=true", "x y", "$(touch x)"] {
+            assert!(discovery_command(
+                std::path::Path::new("/verified/codex"),
+                std::path::Path::new("/private/profile"),
+                &ExpectedProfile {
+                    model,
+                    reasoning_effort: "medium"
+                }
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn real_pipes_match_cleanup_and_fail_closed_on_wrong_config_cancel_or_uncertainty() {
