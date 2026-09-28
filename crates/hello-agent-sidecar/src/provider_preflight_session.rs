@@ -6,6 +6,11 @@ use hello_agent_core::provider::vendor_observation::codex_preflight::exchange::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_RELEASE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 fn failure() -> SidecarError {
     SidecarError::new(
         "providerPreflightFailed",
@@ -49,6 +54,12 @@ pub(crate) fn inspect_full_preflight_candidate<'a>(
                 discovery_command(path, &home, expected)?.spawn()
             },
             |child| {
+                #[cfg(test)]
+                BEFORE_RELEASE.with(|hook| {
+                    if let Some(hook) = hook.borrow_mut().take() {
+                        hook();
+                    }
+                });
                 executable.revalidate().map_err(std::io::Error::other)?;
                 helper.revalidate().map_err(std::io::Error::other)?;
                 let current = profile
@@ -203,6 +214,72 @@ mod tests {
     use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
     use serde_json::json;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn waiting_gate_blocks_changed_pair_and_late_cancel_without_losing_owner() {
+        use crate::provider_executable::PinnedExecutable;
+        use hello_agent_core::proctree::{ProbeResult, ProcTable, SystemProcTable};
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Arc;
+        const SCRIPT: &str = "#!/bin/sh\nprintf ran > \"$HOME/vendor-ran\"\n";
+        for case in ["cli", "helper", "cancel"] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+            let home = profile.revalidate().unwrap();
+            let cli_path = root.join("toy-cli");
+            let helper_path = root.join("toy-helper");
+            for path in [&cli_path, &helper_path] {
+                std::fs::write(path, SCRIPT).unwrap();
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let digest: [u8; 32] = Sha256::digest(SCRIPT.as_bytes()).into();
+            let cli = PinnedExecutable::open(&cli_path, digest).unwrap();
+            let helper = PinnedExecutable::open(&helper_path, digest).unwrap();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let trigger = cancel.clone();
+            BEFORE_RELEASE.with(|hook| {
+                *hook.borrow_mut() = Some(Box::new(move || match case {
+                    "cli" => std::fs::write(cli_path, "changed CLI").unwrap(),
+                    "helper" => std::fs::write(helper_path, "changed helper").unwrap(),
+                    _ => trigger.store(true, Ordering::Release),
+                }))
+            });
+            let mut outcome = inspect_full_preflight_candidate(
+                &profile,
+                &cli,
+                &helper,
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium",
+                },
+                &cancel,
+            )
+            .unwrap();
+            assert!(outcome.result.is_err(), "{case}");
+            BEFORE_RELEASE.with(|hook| assert!(hook.borrow().is_none(), "hook must execute"));
+            let identity = outcome.process.root_for_test();
+            assert!(
+                matches!(SystemProcTable.probe(identity), ProbeResult::Alive(_)),
+                "gated root retained: {case}"
+            );
+            assert!(
+                LoginProcess::reserve(&profile).is_err(),
+                "reservation retained: {case}"
+            );
+            assert!(!home.join("vendor-ran").exists());
+            outcome.process.finish().unwrap();
+            assert!(matches!(SystemProcTable.probe(identity), ProbeResult::Gone));
+            assert!(
+                !home.join("vendor-ran").exists(),
+                "vendor must never execute: {case}"
+            );
+            drop(outcome);
+            LoginProcess::reserve(&profile).unwrap().finish().unwrap();
+        }
+    }
 
     #[test]
     fn pinned_discovery_runs_end_to_end_and_rejects_stale_pins_before_reservation() {

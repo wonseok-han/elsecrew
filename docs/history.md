@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (실행 직전 경합 회귀 마감)
+
+- **진전/직접 구현**: 직전 `c9b6c9e`는 승인 실측과 독립 검토를 마친 진전이다. 이번 clean HEAD에서 리뷰의 비차단 후속인 gate 대기 중 CLI 변경/helper 변경/예약 후 취소 3사례를 추가했다. thread-local cfg(test) hook으로 release 직전만 주입하며 제품 빌드에는 hook이 없다. 각 사례에서 payload 미실행, 원 owner/잠금 유지, 명시적 cleanup 후 root 소멸·재예약을 검증했다.
+- **검증**: 집중 4테스트 PASS, strict sidecar clippy PASS. 최초 테스트는 실패 상태에서 exit_status가 tick으로 거절되는 기존 계약을 무시해 실패했으며, 이미 있는 root_for_test의 PID+시작시각을 OS에서 직접 조회하도록 바로잡았다. 제품 정책을 완화하지 않았다. Karpathy 지침으로 변경을 테스트 계측/회귀에 한정했다.
+- **다음/경계**: 자체 diff 검토·fmt·diff 검사 후 테스트 변경과 기록을 커밋한다. 해당 독립 리뷰 후속은 해소됐지만 관리 설정/통합 격리·실제 turn/출력·원장 연결과 제품 전체 완료는 남는다. 실제 provider·인증·모델 호출, 신규 위임·main 병합·push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (승인된 설정 조회 실측·launcher 검토)
 
 - **승인/재개**: 사용자가 빈 임시 환경의 실제 config 조회와 읽기 전용 리뷰어 1명을 모두 승인했다. `a1297bf` 위 미커밋 launcher 변경을 동결해 검토자에게 맡기고 메인은 OpenAI Docs의 조회 규격·설정 우선순위를 확인했다. 이전 별도 승인 대기는 해소됐다.
