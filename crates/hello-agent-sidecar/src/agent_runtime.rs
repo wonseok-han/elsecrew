@@ -11,7 +11,7 @@ use chrono::{SecondsFormat, Utc};
 use hello_agent_core::agent_adapter::{AgentAdapterError, LaunchSpec, MAX_AGENT_EVENT_BYTES};
 use hello_agent_core::proctree::{
     identity_of, ProbeResult, ProcIdentity, ProcTable, SystemClock, SystemProcTable,
-    TerminationConfig, TreeTracker,
+    TerminationConfig, TerminationReport, TreeTracker,
 };
 use hello_agent_core::provider::{
     BoundedObservation, ClaudeHandshakeContextV1, DiscoveryInputV1, InternalProviderEventV1,
@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
@@ -125,6 +125,7 @@ struct ActiveAgentRun {
     evidence_failed: bool,
     provider_classifier: ProviderEventClassifierV1,
     provider_terminal_outcome: Option<String>,
+    cancellation_started: Option<Instant>,
 }
 
 enum PublicEventPersistError {
@@ -1040,6 +1041,7 @@ impl AgentRuntime {
                 evidence_failed: false,
                 provider_classifier,
                 provider_terminal_outcome: None,
+                cancellation_started: None,
             },
         );
         Ok(G5Action {
@@ -1065,6 +1067,19 @@ impl AgentRuntime {
                     .state_event(storage, &run_id)
                     .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
                 events.push(event);
+            }
+            if self
+                .active
+                .get(&run_id)
+                .is_some_and(|active| active.cancellation_started.is_some())
+            {
+                if let Some(event) = self
+                    .poll_cancel(storage, projects, &run_id)
+                    .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?
+                {
+                    events.push(event);
+                }
+                continue;
             }
             let projection = actual_run_projection(storage, &run_id)
                 .map_err(|error| self.fail_poll(storage, projects, &run_id, error))?;
@@ -1244,6 +1259,92 @@ impl AgentRuntime {
         Ok(events)
     }
 
+    /// Queue only. The wire response must wait for the terminal transaction.
+    pub(crate) fn request_cancel(&mut self, identity: &RunIdentity) -> Result<(), ProjectFailure> {
+        let active = self
+            .active
+            .get_mut(&identity.run_id)
+            .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
+        if !same_identity(&active.identity, identity) {
+            return Err(ProjectFailure::manifest("agent run identity differs"));
+        }
+        if active.cancellation_started.is_some() {
+            return Err(ProjectFailure::manifest(
+                "agent cancellation is already pending",
+            ));
+        }
+        active.cancellation_started = Some(Instant::now());
+        Ok(())
+    }
+
+    fn poll_cancel(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        run_id: &str,
+    ) -> Result<Option<G5Event>, ProjectFailure> {
+        let active = self
+            .active
+            .get_mut(run_id)
+            .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
+        let started = active
+            .cancellation_started
+            .as_ref()
+            .ok_or_else(|| ProjectFailure::manifest("agent cancellation is not pending"))?;
+        let report = active.tracker.poll_termination(
+            &SystemProcTable,
+            started.elapsed().as_millis() as u64,
+            termination_config(),
+        );
+        if let Err(error) =
+            persist_tracker_snapshot(storage, run_id, &active.tracker.tracked_identities())
+        {
+            active.evidence_failed = true;
+            return Err(error);
+        }
+        match report {
+            Some(report) => self
+                .finish_with_report(storage, projects, run_id, "canceled", true, report)
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn cancel_result(
+        &self,
+        storage: &Storage,
+        identity: &RunIdentity,
+    ) -> Result<Option<Value>, ProjectFailure> {
+        if self.active.contains_key(&identity.run_id) {
+            return Ok(None);
+        }
+        let projection = actual_run_projection(storage, &identity.run_id)?;
+        let run = projection["record"].clone();
+        if identity_value(identity)
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| run.get(key) != Some(value))
+        {
+            return Err(ProjectFailure::manifest(
+                "agent cancel terminal identity differs",
+            ));
+        }
+        let outcome = match run["state"].as_str() {
+            Some("canceled") => "canceled",
+            Some("recoveryRequired") => "recoveryRequired",
+            _ => {
+                return Err(ProjectFailure::recovery(
+                    "agent cancel terminal is unavailable",
+                ))
+            }
+        };
+        let result = json!({"schemaVersion":1,"request":identity_value(identity),"run":run,
+            "termination":projection["termination"],"recovery":projection["recovery"],"outcome":outcome});
+        validate_agent_adapter_payload_v1("runCancelResult", &result).map_err(contract_failure)?;
+        Ok(Some(result))
+    }
+
     pub(crate) fn cancel(
         &mut self,
         storage: &mut Storage,
@@ -1263,17 +1364,9 @@ impl AgentRuntime {
         }
         let terminal_event = self.finish(storage, projects, &identity.run_id, "canceled", true)?;
         events.push(terminal_event);
-        let projection = actual_run_projection(storage, &identity.run_id)?;
-        let run = projection["record"].clone();
-        let termination = projection["termination"].clone();
-        let recovery = projection.get("recovery").cloned().unwrap_or(Value::Null);
-        let outcome = if run["state"] == "recoveryRequired" {
-            "recoveryRequired"
-        } else {
-            "canceled"
-        };
-        let result = json!({"schemaVersion":1,"request":identity_value(identity),"run":run,"termination":termination,"recovery":recovery,"outcome":outcome});
-        validate_agent_adapter_payload_v1("runCancelResult", &result).map_err(contract_failure)?;
+        let result = self
+            .cancel_result(storage, identity)?
+            .ok_or_else(|| ProjectFailure::recovery("agent cancellation did not finish"))?;
         Ok(G5Action { result, events })
     }
 
@@ -1458,6 +1551,9 @@ impl AgentRuntime {
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
         for run_id in ids {
             if let Some(active) = self.active.get(&run_id) {
+                if active.cancellation_started.is_some() {
+                    continue;
+                }
                 let identity = active.identity.clone();
                 let _ = self.cancel(storage, projects, &identity);
             }
@@ -1666,10 +1762,34 @@ impl AgentRuntime {
             &SystemClock::default(),
             termination_config(),
         );
-        let _ = active.launcher.wait();
+        self.finish_with_report(
+            storage,
+            projects,
+            run_id,
+            requested_state,
+            cancelling,
+            report,
+        )
+    }
+
+    fn finish_with_report(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        run_id: &str,
+        requested_state: &str,
+        cancelling: bool,
+        report: TerminationReport,
+    ) -> Result<G5Event, ProjectFailure> {
+        let active = self
+            .active
+            .get_mut(run_id)
+            .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
+        // Never wait indefinitely after an uncertain process-tree observation.
+        let reaped = matches!(active.launcher.try_wait(), Ok(Some(_)));
         let forced_uncertain =
             active.scenario == FakeScenario::CancelUncertain || active.evidence_failed;
-        let observed_processes_gone = report.confirmed() && !forced_uncertain;
+        let observed_processes_gone = report.confirmed() && reaped && !forced_uncertain;
         let provider_requested_recovery = requested_state == "recoveryRequired";
         let recovery_required = provider_requested_recovery || !observed_processes_gone;
         // An explicit provider recovery verdict invalidates the public termination proof even

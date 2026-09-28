@@ -70,7 +70,11 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
     sidecar.start_admission_with_gate(&path, Some(Arc::clone(&gate)));
 
     let status_request = request_value(instance, "req_status", "system.status", json!({}));
-    let status = sidecar.handle_request(status_request).unwrap().response;
+    let status = sidecar
+        .handle_request(status_request)
+        .unwrap()
+        .response
+        .unwrap();
     let status = status.result.expect("verifying status");
     let parsed = parse_g5d_product_system_status_v1(&status).expect("valid verifying status");
     assert_eq!(
@@ -92,7 +96,8 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
         let response = sidecar
             .handle_request(request_value(instance, id, method, params))
             .unwrap()
-            .response;
+            .response
+            .unwrap();
         assert!(!response.ok, "{method} must be blocked while verifying");
         validate_g5d_blocked_request_error_v1(
             StorageAdmissionStateV1::Verifying,
@@ -110,7 +115,8 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
             json!({}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert_eq!(quit.result.unwrap()["safeToQuit"], true);
     assert!(sidecar.safe_to_quit());
     assert!(
@@ -142,6 +148,7 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
         ))
         .unwrap()
         .response
+        .unwrap()
         .result
         .unwrap();
     let parsed = parse_g5d_product_system_status_v1(&status).expect("valid ready status");
@@ -157,7 +164,8 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
             json!({"schemaVersion":1}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert!(
         storage.ok,
         "storage.status is available only after admission"
@@ -178,7 +186,8 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
             json!(null),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert!(!blocked.ok);
     assert_eq!(blocked.error.unwrap().kind, "requestBlocked");
     drop(ready_sidecar);
@@ -198,6 +207,7 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
         ))
         .unwrap()
         .response
+        .unwrap()
         .result
         .unwrap();
     assert_eq!(
@@ -238,7 +248,8 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
                 json!({"selectedPath": 7}),
             ))
             .unwrap()
-            .response;
+            .response
+            .unwrap();
         validate_g5d_blocked_request_error_v1(
             StorageAdmissionStateV1::Failed,
             response.error.as_ref().unwrap(),
@@ -254,6 +265,7 @@ fn g5d_success_and_failure_states_are_exact_and_failure_is_sticky() {
         ))
         .unwrap()
         .response
+        .unwrap()
         .result
         .unwrap();
     let failed_status =
@@ -346,7 +358,7 @@ fn invalid_g4_params_return_structured_error_without_killing_the_session() {
             json!({"saveId":"save_01","seq":"one","text":"hello"}),
         ),
     ] {
-        let invalid = sidecar.handle_request(request).unwrap().response;
+        let invalid = sidecar.handle_request(request).unwrap().response.unwrap();
         assert!(!invalid.ok);
         assert_eq!(invalid.error.as_ref().unwrap().code, "invalidParams");
     }
@@ -358,7 +370,8 @@ fn invalid_g4_params_return_structured_error_without_killing_the_session() {
             json!({}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert!(quit.ok);
 }
 
@@ -385,7 +398,8 @@ fn ready_status_and_idempotent_prepare_quit_mark_clean_before_safe_response() {
             json!({}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     parse_g5d_product_system_status_v1(&status_response.result.unwrap()).expect("ready status");
     for request_id in ["req_quit_1", "req_quit_2"] {
         let response = sidecar
@@ -396,7 +410,8 @@ fn ready_status_and_idempotent_prepare_quit_mark_clean_before_safe_response() {
                 json!({}),
             ))
             .unwrap()
-            .response;
+            .response
+            .unwrap();
         assert!(response.ok);
         assert_eq!(response.result.as_ref().unwrap()["safeToQuit"], true);
     }
@@ -620,7 +635,8 @@ fn later_wave_method_is_structured_error_and_read_only_status_remains_available_
             json!({}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert!(!unavailable.ok);
     assert_eq!(
         unavailable.error.as_ref().unwrap().code,
@@ -642,7 +658,8 @@ fn later_wave_method_is_structured_error_and_read_only_status_remains_available_
             json!({}),
         ))
         .unwrap()
-        .response;
+        .response
+        .unwrap();
     assert!(status.ok);
 }
 

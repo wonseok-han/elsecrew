@@ -4577,6 +4577,15 @@ fn corrupted_durable_counter_and_terminal_state_construction_errors_propagate() 
 
 #[test]
 fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_recovery() {
+    terminal_failure_cases(false);
+}
+
+#[test]
+fn deferred_cancel_never_reports_completion_after_terminal_persistence_failure() {
+    terminal_failure_cases(true);
+}
+
+fn terminal_failure_cases(cancel: bool) {
     for scenario in [
         FakeScenario::TerminalConstructionFailure,
         FakeScenario::TerminalUpsertFailure,
@@ -4609,7 +4618,23 @@ fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_re
             )
             .unwrap();
         let run_id = started.result["runId"].as_str().unwrap().to_string();
+        let identity = RunIdentity {
+            chat_id: chat_id.into(),
+            task_id: chat["taskId"].as_str().unwrap().into(),
+            project_id: chat["projectId"].as_str().unwrap().into(),
+            worktree_id: chat["worktreeId"].as_str().unwrap().into(),
+            workspace_identity: chat["workspaceIdentity"].as_str().unwrap().into(),
+            run_id: run_id.clone(),
+        };
+        if cancel {
+            runtime.request_cancel(&identity).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let error = loop {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "terminal failure must propagate"
+            );
             match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
                 Ok(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
                 Err(error) => break error,
@@ -4617,6 +4642,10 @@ fn terminal_construction_and_upsert_failures_keep_active_until_restart_poison_re
         };
         assert_eq!(error.kind(), "agentRuntimeFailure");
         assert!(runtime.has_active_run(&run_id));
+        assert!(runtime
+            .cancel_result(&fixture.storage, &identity)
+            .unwrap()
+            .is_none());
         let durable = fixture
             .storage
             .projection_record("run", &run_id)

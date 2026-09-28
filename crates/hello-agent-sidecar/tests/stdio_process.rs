@@ -341,17 +341,25 @@ fn binary_g5c_capability_cache_refreshes_only_when_requested_and_codex_stays_blo
 #[cfg(target_os = "macos")]
 #[test]
 fn binary_g5a_public_events_follow_accepted_and_keep_raw_carriers_private() {
-    g5a_public_event_flow(false);
+    g5a_public_event_flow(false, None);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn binary_g5a_progress_survives_continuous_requests() {
-    g5a_public_event_flow(true);
+    g5a_public_event_flow(true, None);
 }
 
 #[cfg(target_os = "macos")]
-fn g5a_public_event_flow(continuous_requests: bool) {
+#[test]
+fn binary_agent_cancel_defers_completion_without_blocking_status_or_quit() {
+    for scenario in ["cancel-clean", "cancel-uncertain"] {
+        g5a_public_event_flow(false, Some(scenario));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) {
     let root = tempfile::tempdir().expect("temporary directory");
     let source = root.path().join("source");
     let data = root.path().join("data");
@@ -375,7 +383,7 @@ fn g5a_public_event_flow(continuous_requests: bool) {
     );
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
-        .args(["--stdio-agent-fixture", "clean"])
+        .args(["--stdio-agent-fixture", cancellation.unwrap_or("clean")])
         .current_dir(&data)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -514,6 +522,20 @@ fn g5a_public_event_flow(continuous_requests: bool) {
     let accepted = accepted.result.unwrap();
     validate_agent_adapter_payload_v1("runAccepted", &accepted).unwrap();
     let run_id = accepted["runId"].as_str().unwrap().to_string();
+
+    if let Some(scenario) = cancellation {
+        agent_cancel_flow(
+            &mut stdin,
+            &envelopes,
+            &ready.sidecar_instance_id,
+            &chat,
+            &run_id,
+            scenario,
+        );
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        return;
+    }
 
     let mut buffered = std::collections::VecDeque::new();
     if continuous_requests {
@@ -725,6 +747,165 @@ fn g5a_public_event_flow(continuous_requests: bool) {
     ] {
         assert!(!persisted.contains(forbidden));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn agent_cancel_flow(
+    stdin: &mut std::process::ChildStdin,
+    envelopes: &Receiver<EnvelopeV1>,
+    instance: &str,
+    chat: &serde_json::Value,
+    run_id: &str,
+    scenario: &str,
+) {
+    let fields = [
+        "chatId",
+        "taskId",
+        "projectId",
+        "worktreeId",
+        "workspaceIdentity",
+        "runId",
+    ];
+    let mut identity = serde_json::json!({"runId":run_id});
+    for field in &fields[..5] {
+        identity[*field] = chat[*field].clone();
+    }
+    for (index, field) in fields.iter().enumerate() {
+        let mut wrong = identity.clone();
+        wrong[*field] = serde_json::json!(format!("wrong_{index}"));
+        let request_id = format!("req_wrong_cancel_{index}");
+        write_request(stdin, instance, &request_id, "run.cancelAgent", wrong);
+        loop {
+            match receive_envelope(envelopes) {
+                EnvelopeV1::Response(response) => {
+                    assert_eq!(response.request_id, request_id);
+                    assert!(!response.ok);
+                    break;
+                }
+                EnvelopeV1::Event(event) => assert_ne!(event.payload["run"]["state"], "canceled"),
+                _ => panic!("unexpected request"),
+            }
+        }
+    }
+    write_request(
+        stdin,
+        instance,
+        "req_deferred_cancel",
+        "run.cancelAgent",
+        identity.clone(),
+    );
+    write_request(
+        stdin,
+        instance,
+        "req_cancel_status",
+        "system.status",
+        serde_json::json!({}),
+    );
+    write_request(
+        stdin,
+        instance,
+        "req_duplicate_cancel",
+        "run.cancelAgent",
+        identity.clone(),
+    );
+    write_request(
+        stdin,
+        instance,
+        "req_pending_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    let mut status_seen = false;
+    let mut duplicate_seen = false;
+    let mut quit_seen = false;
+    let mut terminal_seen = false;
+    let mut result = None;
+    while !status_seen || !duplicate_seen || !quit_seen || !terminal_seen || result.is_none() {
+        match receive_envelope(envelopes) {
+            EnvelopeV1::Response(response) => match response.request_id.as_str() {
+                "req_cancel_status" => {
+                    assert!(response.ok);
+                    assert!(
+                        result.is_none(),
+                        "status must remain responsive before cancellation completes"
+                    );
+                    status_seen = true;
+                }
+                "req_duplicate_cancel" => {
+                    assert!(!response.ok);
+                    duplicate_seen = true;
+                }
+                "req_pending_quit" => {
+                    assert_eq!(response.result.unwrap()["safeToQuit"], false);
+                    quit_seen = true;
+                }
+                "req_deferred_cancel" => {
+                    assert!(response.ok, "{:?}", response.error);
+                    assert!(result.is_none(), "only one final response");
+                    let value = response.result.unwrap();
+                    validate_agent_adapter_payload_v1("runCancelResult", &value).unwrap();
+                    assert_eq!(value["request"], identity);
+                    assert_eq!(
+                        value["termination"]["processesProvenGone"],
+                        scenario == "cancel-clean"
+                    );
+                    assert_eq!(
+                        value["outcome"],
+                        if scenario == "cancel-clean" {
+                            "canceled"
+                        } else {
+                            "recoveryRequired"
+                        }
+                    );
+                    result = Some(value);
+                }
+                _ => panic!("unexpected response"),
+            },
+            EnvelopeV1::Event(event) => {
+                if ["canceled", "recoveryRequired"]
+                    .contains(&event.payload["run"]["state"].as_str().unwrap_or_default())
+                {
+                    assert!(
+                        result.is_some(),
+                        "completed cancellation reply precedes its terminal event"
+                    );
+                    terminal_seen = true;
+                }
+            }
+            _ => panic!("unexpected request"),
+        }
+    }
+    if scenario == "cancel-uncertain" {
+        let recovery = &result.as_ref().unwrap()["recovery"];
+        let mut resolution = identity;
+        resolution["recoveryId"] = recovery["recoveryId"].clone();
+        resolution["expectedRevision"] = recovery["revision"].clone();
+        resolution["resolution"] = serde_json::json!("abandon");
+        write_request(
+            stdin,
+            instance,
+            "req_cancel_recovery",
+            "recovery.resolveAgent",
+            resolution,
+        );
+        let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+            panic!("recovery response");
+        };
+        assert!(response.ok, "{:?}", response.error);
+        assert_eq!(response.result.unwrap()["outcome"], "resolvedAbandoned");
+    }
+    write_request(
+        stdin,
+        instance,
+        "req_cancel_final_quit",
+        "app.prepareQuit",
+        serde_json::json!({}),
+    );
+    let EnvelopeV1::Response(response) = receive_envelope(envelopes) else {
+        panic!("final quit response");
+    };
+    assert!(response.ok);
+    assert_eq!(response.result.unwrap()["safeToQuit"], true);
 }
 
 #[cfg(target_os = "macos")]

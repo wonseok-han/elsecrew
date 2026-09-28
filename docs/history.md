@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (취소 완료 응답과 stdio 진행 연결)
+
+- **기준/진전**: 직전 단계별 종료/복구 파동 `cb656a4`는 커밋된 진전이다. clean 통합 checkout에서 메인이 기존 run.cancelAgent의 완료 응답 계약을 유지하는 지연 응답을 dispatcher/runtime에 연결했다. fixture actual run의 취소는 다음 poll에서 종료·누적 신원 저장·terminal transaction을 진행하며 완료 전에는 성공을 응답하지 않는다.
+- **권위/순서**: 6필드 run 신원 검증, run당 보류 취소 한 건, 중복 거절을 적용했다. 상태 조회는 계속 응답하며 보류 응답이 있으면 quit은 clean으로 표시하지 않는다. 완료 응답은 해당 poll의 terminal 이벤트보다 먼저 내보낸다. 기존 sync cancel은 같은 결과 생성기를 사용하고, 불확실 종료 후 무기한 launcher.wait를 try_wait로 바꿔 종료 증거가 없으면 복구로 남긴다.
+- **최종 검사/검토**: 최신 stdio 전체 13 PASS/3.90초, dispatcher 14 PASS/2.58초, fake-agent 3 PASS/3.56초, 관련 runtime 4 PASS/3.28초, 신규 취소 terminal 저장 실패 1테스트/2사례 PASS/1.64초. strict sidecar all-targets clippy PASS/2.86초, scoped fmt·diff PASS. 상시 승인된 동일 검토자 1명의 독립 정적 검토 PASS이며 테스트는 메인 실행 결과와 구분한다. 사용자 지시대로 검토자 1명 호출/재검토에는 추가 승인을 묻지 않으며 AGENTS/CLAUDE의 기존 반영과 일치도 확인했다. 관련 7파일만 원자 커밋한다.
+- **검증 진행**: 새 실제 stdio 시험 1테스트/2사례(정상·불확실 취소) PASS/2.91초. 각 사례가 6필드 변조 거절, 상태 응답 선행, 중복 취소 거절, quit 보류, 단회 최종 응답과 terminal 순서, 불확실 복구의 명시적 abandon을 확인한다. 기존 stdio 12 PASS/3.07초 뒤 관련 runtime/dispatcher 회귀·strict clippy·독립 검토를 진행한다.
+- **경계/다음**: 현재 native provider는 여전히 blocked다. 이 파동은 제품 공통 stdio 응답 기반과 fixture runtime 검증이며 native OwnedTextRun의 active 등록·실제 provider 입장·승인 IPC/UI 완료를 주장하지 않는다. 승인 대기 중인 설치 CLI 오프라인 config 검사·실제 계정/모델·사용자 프로젝트 시험은 실행하지 않았고 main 병합/push 없음.
+
 ### 2026-09-28 · by GPT-6 Astra (예약 실행의 단계별 종료 확인)
 
 - **기준/진전**: 직전 응답은 이미 저장된 검토자 승인 정책 확인으로 개발 진전이 없었다. clean `bbb4c88`에서 메인이 native 실행의 동기 cleanup 대기를 제거하는 작업을 시작했다. core 종료 알고리즘을 최초 기한/누적 신원/실패를 보존하는 poll로 추출하고 기존 동기 terminate도 같은 경로를 사용한다.
@@ -245,7 +253,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 제품 연결에는 지연 완료 응답이 필요하며 비정상 Drop fallback은 아직 동기식이다.
+- **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 공통 stdio의 지연 완료 응답을 fixture runtime에 연결해 검증했으며 native owner 등록은 남는다. 비정상 Drop fallback은 아직 동기식이다.
 
 - **코딩용 OS 쓰기 경계 후보(2026-09-28)**: 같은 deny-default builder의 Write 모드는 작업 사본 일반 파일을 허용하되 Git/agent 제어 경로와 profile config를 보호한다. CLI/helper는 HOME/작업 사본 밖이어야 한다. 저장된 역할이 native argv·OS 모드·preflight 기대 권한을 함께 정하며 별도 renderer 인자는 없다. writer terminal은 run/chat/잠금을 원자 기록하고 불확실 종료/저장 실패는 잠금을 유지한다. 실제 공급자·도구/승인·네트워크 입장을 대신하지 않는다.
 

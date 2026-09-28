@@ -55,7 +55,7 @@ use hello_agent_protocol::{
     MAX_CONTROL_LINE_BYTES, METHODS_V1, PROTOCOL_VERSION, SIDECAR_SCHEMA_VERSION,
 };
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt::{self, Display};
 use std::fs;
@@ -350,7 +350,9 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             Err(RecvTimeoutError::Timeout) => {
                 sidecar.poll_admission();
                 let mut events = sidecar.poll_watch_events();
-                events.extend(sidecar.poll_runtime_events()?);
+                let (responses, runtime_events) = sidecar.poll_runtime_events()?;
+                write_responses(&mut session, &mut output, responses)?;
+                events.extend(runtime_events);
                 write_events(&mut session, &mut output, events)?;
                 last_runtime_poll = Instant::now();
                 sidecar.maintenance_tick()?;
@@ -376,20 +378,33 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
             ));
         };
         let handled = sidecar.handle_request(request)?;
-        let response = EnvelopeV1::Response(handled.response);
-        session.observe(&response).map_err(protocol_error)?;
-        write_envelope(&mut output, &response)?;
+        write_responses(&mut session, &mut output, handled.response)?;
         write_events(&mut session, &mut output, handled.events)?;
         // A busy renderer must not starve agent/watch progression by keeping
         // recv_timeout from expiring. Preserve response-before-event ordering.
         if !sidecar.safe_to_quit() && last_runtime_poll.elapsed() >= Duration::from_millis(100) {
             let mut events = sidecar.poll_watch_events();
-            events.extend(sidecar.poll_runtime_events()?);
+            let (responses, runtime_events) = sidecar.poll_runtime_events()?;
+            write_responses(&mut session, &mut output, responses)?;
+            events.extend(runtime_events);
             write_events(&mut session, &mut output, events)?;
             last_runtime_poll = Instant::now();
         }
         sidecar.maintenance_tick()?;
     }
+}
+
+fn write_responses<W: Write>(
+    session: &mut ProtocolSessionV1,
+    output: &mut W,
+    responses: impl IntoIterator<Item = ResponseV1>,
+) -> Result<(), SidecarError> {
+    for response in responses {
+        let envelope = EnvelopeV1::Response(response);
+        session.observe(&envelope).map_err(protocol_error)?;
+        write_envelope(output, &envelope)?;
+    }
+    Ok(())
 }
 
 enum InputMessage {
@@ -479,6 +494,7 @@ struct Sidecar {
     safe_to_quit: bool,
     g5: chat::G5Manager,
     agent_runtime: agent_runtime::AgentRuntime,
+    pending_agent_cancels: BTreeMap<String, (RequestV1, agent_runtime::RunIdentity)>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
 }
@@ -781,10 +797,10 @@ impl SidecarSession {
         }
     }
 
-    fn poll_runtime_events(&mut self) -> Result<Vec<EventV1>, SidecarError> {
+    fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         match &mut self.admission {
             AdmissionState::Ready { sidecar, .. } => sidecar.poll_runtime_events(),
-            _ => Ok(Vec::new()),
+            _ => Ok((Vec::new(), Vec::new())),
         }
     }
 
@@ -841,6 +857,7 @@ impl Sidecar {
             safe_to_quit: false,
             g5,
             agent_runtime,
+            pending_agent_cancels: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         })
@@ -977,7 +994,11 @@ impl Sidecar {
                 #[cfg(not(target_os = "macos"))]
                 let login_blockers: Vec<String> = Vec::new();
                 let login_stopped = login_blockers.is_empty();
-                if blockers.is_empty() && login_stopped && !self.safe_to_quit {
+                if blockers.is_empty()
+                    && login_stopped
+                    && self.pending_agent_cancels.is_empty()
+                    && !self.safe_to_quit
+                {
                     self.storage.checkpoint()?;
                     self.storage
                         .mark_app_instance_clean(&self.ready.sidecar_instance_id)?;
@@ -985,6 +1006,11 @@ impl Sidecar {
                 }
                 let mut blockers = self.storage.blocker_ids()?;
                 blockers.extend(login_blockers);
+                for run_id in self.pending_agent_cancels.keys() {
+                    if !blockers.contains(run_id) {
+                        blockers.push(run_id.clone());
+                    }
+                }
                 project::ProjectAction {
                     result: serde_json::to_value(PrepareQuitResultV1 {
                         safe_to_quit: self.safe_to_quit && blockers.is_empty(),
@@ -1189,7 +1215,7 @@ impl Sidecar {
             .extend(self.projects.poll_watchers(&self.storage));
         let events = self.action_events(&action);
         Ok(HandledRequest {
-            response: ResponseV1 {
+            response: Some(ResponseV1 {
                 protocol_version: PROTOCOL_VERSION,
                 kind: "response".to_string(),
                 sidecar_instance_id: request.sidecar_instance_id,
@@ -1197,7 +1223,7 @@ impl Sidecar {
                 ok: true,
                 result: Some(action.result),
                 error: None,
-            },
+            }),
             events,
         })
     }
@@ -1531,7 +1557,7 @@ impl Sidecar {
             }
         };
         Ok(HandledRequest {
-            response: ResponseV1 {
+            response: Some(ResponseV1 {
                 protocol_version: PROTOCOL_VERSION,
                 kind: "response".to_string(),
                 sidecar_instance_id: request.sidecar_instance_id,
@@ -1539,13 +1565,62 @@ impl Sidecar {
                 ok: true,
                 result: Some(action.result),
                 error: None,
-            },
+            }),
             events: self.g5_events(action.events),
         })
     }
 
     fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        if request.method == "run.cancelAgent" {
+            let queued = (|| -> Result<agent_runtime::RunIdentity, ProjectFailure> {
+                let params = require_exact_params(
+                    &request.params,
+                    &[
+                        "chatId",
+                        "taskId",
+                        "projectId",
+                        "worktreeId",
+                        "workspaceIdentity",
+                        "runId",
+                    ],
+                )
+                .map_err(ProjectFailure::manifest)?;
+                let field = |key| {
+                    param_string(params, key)
+                        .map(str::to_owned)
+                        .map_err(ProjectFailure::manifest)
+                };
+                let identity = agent_runtime::RunIdentity {
+                    chat_id: field("chatId")?,
+                    task_id: field("taskId")?,
+                    project_id: field("projectId")?,
+                    worktree_id: field("worktreeId")?,
+                    workspace_identity: field("workspaceIdentity")?,
+                    run_id: field("runId")?,
+                };
+                if self.pending_agent_cancels.contains_key(&identity.run_id) {
+                    return Err(ProjectFailure::manifest(
+                        "agent cancellation is already pending",
+                    ));
+                }
+                self.agent_runtime.request_cancel(&identity)?;
+                Ok(identity)
+            })();
+            return match queued {
+                Ok(identity) => {
+                    self.pending_agent_cancels
+                        .insert(identity.run_id.clone(), (request, identity));
+                    Ok(HandledRequest {
+                        response: None,
+                        events: Vec::new(),
+                    })
+                }
+                Err(failure) => Ok(HandledRequest::response(project_error_response(
+                    &request, &failure,
+                ))),
+            };
+        }
         let result =
             (|| -> Result<chat::G5Action, ProjectFailure> {
                 match request.method.as_str() {
@@ -1577,42 +1652,6 @@ impl Sidecar {
                             &request.request_id,
                         )
                     }
-                    "run.cancelAgent" => {
-                        let params = require_exact_params(
-                            &request.params,
-                            &[
-                                "chatId",
-                                "taskId",
-                                "projectId",
-                                "worktreeId",
-                                "workspaceIdentity",
-                                "runId",
-                            ],
-                        )
-                        .map_err(ProjectFailure::manifest)?;
-                        let identity = agent_runtime::RunIdentity {
-                            chat_id: param_string(params, "chatId")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                            task_id: param_string(params, "taskId")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                            project_id: param_string(params, "projectId")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                            worktree_id: param_string(params, "worktreeId")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                            workspace_identity: param_string(params, "workspaceIdentity")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                            run_id: param_string(params, "runId")
-                                .map_err(ProjectFailure::manifest)?
-                                .into(),
-                        };
-                        self.agent_runtime
-                            .cancel(&mut self.storage, &mut self.projects, &identity)
-                    }
                     "recovery.inspectAgent" => Ok(chat::G5Action {
                         result: self
                             .agent_runtime
@@ -1640,7 +1679,7 @@ impl Sidecar {
             }
         };
         Ok(HandledRequest {
-            response: ResponseV1 {
+            response: Some(ResponseV1 {
                 protocol_version: PROTOCOL_VERSION,
                 kind: "response".into(),
                 sidecar_instance_id: request.sidecar_instance_id,
@@ -1648,7 +1687,7 @@ impl Sidecar {
                 ok: true,
                 result: Some(action.result),
                 error: None,
-            },
+            }),
             events: self.g5_events(action.events),
         })
     }
@@ -1721,13 +1760,25 @@ impl Sidecar {
         self.action_events(&action)
     }
 
-    fn poll_runtime_events(&mut self) -> Result<Vec<EventV1>, SidecarError> {
+    fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
         events.extend(
             self.agent_runtime
                 .poll(&mut self.storage, &mut self.projects)?,
         );
-        Ok(self.g5_events(events))
+        let mut responses = Vec::new();
+        let ids: Vec<_> = self.pending_agent_cancels.keys().cloned().collect();
+        for run_id in ids {
+            let (request, identity) = &self.pending_agent_cancels[&run_id];
+            let response = match self.agent_runtime.cancel_result(&self.storage, identity) {
+                Ok(None) => continue,
+                Ok(Some(result)) => success_response(request, result),
+                Err(failure) => project_error_response(request, &failure),
+            };
+            self.pending_agent_cancels.remove(&run_id);
+            responses.push(response);
+        }
+        Ok((responses, self.g5_events(events)))
     }
 
     fn maintenance_tick(
@@ -1798,14 +1849,14 @@ fn g4_platform_gate() -> Result<(), SidecarError> {
 }
 
 struct HandledRequest {
-    response: ResponseV1,
+    response: Option<ResponseV1>,
     events: Vec<EventV1>,
 }
 
 impl HandledRequest {
     fn response(response: ResponseV1) -> Self {
         Self {
-            response,
+            response: Some(response),
             events: Vec::new(),
         }
     }
