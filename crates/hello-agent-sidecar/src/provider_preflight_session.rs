@@ -449,7 +449,10 @@ fn run_text_checked(
                 Observed::ItemStarted | Observed::Private => {}
                 Observed::Finished(_) => return stream.finish().map_err(|_| failure()),
                 // Tools/private notifications need an explicit owner handler.
-                Observed::Started | Observed::RequiresHandling => return Err(failure()),
+                Observed::Started
+                | Observed::Tool(_)
+                | Observed::Approval(_)
+                | Observed::RequiresHandling => return Err(failure()),
             }
         }
     })();

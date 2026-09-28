@@ -20,8 +20,56 @@ pub enum Observed {
     /// Validated user echo/reasoning metadata; payload is discarded, never public.
     Private,
     Finished(TurnOutcome),
+    /// Validated lifecycle metadata, not tool permission or public tool output.
+    Tool(ToolEvent),
+    /// Scoped to a live tool. The owner must obtain a decision; never auto-accept.
+    Approval(PendingApproval),
     /// No public content; not an authorization to ignore a tool/request/policy event.
     RequiresHandling,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Command,
+    FileChange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPhase {
+    Started,
+    Output,
+    Completed,
+    Failed,
+    Declined,
+}
+
+pub struct ToolEvent {
+    pub item_id: String,
+    pub kind: ToolKind,
+    pub phase: ToolPhase,
+}
+
+fn tool_kind(kind: &str) -> Option<ToolKind> {
+    match kind {
+        "commandExecution" => Some(ToolKind::Command),
+        "fileChange" => Some(ToolKind::FileChange),
+        _ => None,
+    }
+}
+
+fn tool_phase(raw: &str, started: bool) -> Result<ToolPhase, ProviderError> {
+    #[derive(Deserialize)]
+    struct Status {
+        status: String,
+    }
+    let status: Status = decode(raw)?;
+    match (started, status.status.as_str()) {
+        (true, "inProgress") => Ok(ToolPhase::Started),
+        (false, "completed") => Ok(ToolPhase::Completed),
+        (false, "failed") => Ok(ToolPhase::Failed),
+        (false, "declined") => Ok(ToolPhase::Declined),
+        _ => Err(invalid()),
+    }
 }
 
 struct ItemState {
@@ -179,6 +227,15 @@ impl TurnStream {
     }
 
     fn observe_inner(&mut self, input: &BoundedObservation) -> Result<Observed, ProviderError> {
+        #[derive(Deserialize)]
+        struct Envelope {
+            id: Option<Box<RawValue>>,
+        }
+        let envelope: Envelope = decode(std::str::from_utf8(&input.bytes).map_err(|_| invalid())?)?;
+        if envelope.id.is_some() {
+            // Server requests use their own parser and charge the same turn budget.
+            return self.pending_approval(input).map(Observed::Approval);
+        }
         // Charge all notifications, including non-public ones, exactly once.
         let projected = self.projection.project(input)?;
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
@@ -261,6 +318,15 @@ impl TurnStream {
                 return Err(invalid());
             }
             let private = matches!(item.kind.as_str(), "userMessage" | "reasoning");
+            let tool = tool_kind(&item.kind)
+                .map(|kind| {
+                    Ok::<_, ProviderError>(ToolEvent {
+                        item_id: item.id.clone(),
+                        kind,
+                        phase: tool_phase(wire.item.get(), frame.method == "item/started")?,
+                    })
+                })
+                .transpose()?;
             if private {
                 super::private::validate_item(wire.item.get())?;
             }
@@ -301,6 +367,8 @@ impl TurnStream {
                     Observed::ItemStarted
                 } else if private {
                     Observed::Private
+                } else if let Some(tool) = tool {
+                    Observed::Tool(tool)
                 } else {
                     Observed::RequiresHandling
                 });
@@ -316,10 +384,22 @@ impl TurnStream {
             if existing.completed || existing.kind != item.kind {
                 return Err(invalid());
             }
+            if let Some((expected_command, expected_cwd)) = &existing.command {
+                #[derive(Deserialize)]
+                struct Command {
+                    command: String,
+                    cwd: String,
+                }
+                let command: Command = decode(wire.item.get())?;
+                if &command.command != expected_command || &command.cwd != expected_cwd {
+                    return Err(invalid());
+                }
+            }
             existing.completed = true;
             return Ok(match projected {
                 Projection::Completed { .. } => Observed::Public(projected),
                 _ if private => Observed::Private,
+                _ if tool.is_some() => Observed::Tool(tool.unwrap()),
                 _ => Observed::RequiresHandling,
             });
         }
@@ -342,6 +422,15 @@ impl TurnStream {
         if expected_kind == "reasoning" {
             super::private::validate_delta(&frame.method, frame.params.get())?;
             return Ok(Observed::Private);
+        }
+        if let Some(kind) = tool_kind(expected_kind) {
+            // Validate the payload shape, but never expose raw stdout/diff here.
+            let _: Delta = decode(frame.params.get())?;
+            return Ok(Observed::Tool(ToolEvent {
+                item_id: reference.item_id,
+                kind,
+                phase: ToolPhase::Output,
+            }));
         }
         Ok(match projected {
             Projection::Delta { .. } => Observed::Public(projected),
@@ -378,7 +467,7 @@ mod tests {
     fn item(method: &str, kind: &str) -> BoundedObservation {
         frame(
             method,
-            json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public","command":"echo test","cwd":"/snapshot","status":"inProgress"}}),
+            json!({"threadId":"t","turnId":"r","item":{"id":"i","type":kind,"text":"public","command":"echo test","cwd":"/snapshot","status":if method == "item/started" {"inProgress"} else {"completed"}}}),
         )
     }
     fn delta() -> BoundedObservation {
@@ -490,21 +579,117 @@ mod tests {
     }
 
     #[test]
-    fn private_and_unknown_items_require_owner_handling_throughout() {
+    fn tools_are_typed_and_unknown_items_still_require_owner_handling() {
         for kind in ["commandExecution", "fileChange", "futureItem"] {
             let mut stream = started();
-            assert!(matches!(
-                stream.observe(&item("item/started", kind)).unwrap(),
-                Observed::RequiresHandling
-            ));
-            assert!(matches!(
-                stream.observe(&item("item/completed", kind)).unwrap(),
-                Observed::RequiresHandling
-            ));
+            for (method, phase) in [
+                ("item/started", ToolPhase::Started),
+                ("item/completed", ToolPhase::Completed),
+            ] {
+                match stream.observe(&item(method, kind)).unwrap() {
+                    Observed::Tool(tool) => {
+                        assert_eq!(Some(tool.kind), tool_kind(kind));
+                        assert_eq!(tool.phase, phase);
+                        assert_eq!(tool.item_id, "i");
+                    }
+                    Observed::RequiresHandling => assert_eq!(kind, "futureItem"),
+                    _ => panic!("unexpected public tool projection"),
+                }
+            }
             stream
                 .observe(&turn("turn/completed", "completed"))
                 .unwrap();
             assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+        }
+    }
+
+    #[test]
+    fn tool_output_is_metadata_only_and_terminal_status_is_preserved() {
+        for (kind, method) in [
+            ("commandExecution", "item/commandExecution/outputDelta"),
+            ("fileChange", "item/fileChange/outputDelta"),
+        ] {
+            for (status, phase) in [
+                ("completed", ToolPhase::Completed),
+                ("failed", ToolPhase::Failed),
+                ("declined", ToolPhase::Declined),
+            ] {
+                let mut stream = started();
+                stream.observe(&item("item/started", kind)).unwrap();
+                let output = frame(
+                    method,
+                    json!({"threadId":"t","turnId":"r","itemId":"i","delta":"PRIVATE output"}),
+                );
+                assert!(matches!(
+                    stream.observe(&output).unwrap(),
+                    Observed::Tool(ToolEvent {
+                        phase: ToolPhase::Output,
+                        ..
+                    })
+                ));
+                let mut completed: Value =
+                    serde_json::from_slice(&item("item/completed", kind).bytes).unwrap();
+                completed["params"]["item"]["status"] = json!(status);
+                let event = BoundedObservation::new(completed.to_string().into_bytes()).unwrap();
+                match stream.observe(&event).unwrap() {
+                    Observed::Tool(value) => assert_eq!(value.phase, phase),
+                    _ => panic!("tool output entered public stream"),
+                }
+                assert!(stream.observe(&output).is_err());
+                assert!(stream.finish().is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_tool_lifecycle_permanently_fails_the_stream() {
+        for case in [
+            "start-status",
+            "end-status",
+            "changed-command",
+            "changed-cwd",
+            "missing-delta",
+            "wrong-item",
+            "wrong-kind",
+            "wrong-turn",
+        ] {
+            let mut stream = started();
+            let mut event: Value =
+                serde_json::from_slice(&item("item/started", "commandExecution").bytes).unwrap();
+            if case == "start-status" {
+                event["params"]["item"]["status"] = json!("completed");
+            } else {
+                stream
+                    .observe(&item("item/started", "commandExecution"))
+                    .unwrap();
+                event = serde_json::from_slice(&item("item/completed", "commandExecution").bytes)
+                    .unwrap();
+                match case {
+                    "end-status" => event["params"]["item"]["status"] = json!("inProgress"),
+                    "changed-command" => event["params"]["item"]["command"] = json!("PRIVATE"),
+                    "changed-cwd" => event["params"]["item"]["cwd"] = json!("/other"),
+                    _ => {
+                        event = json!({"method":"item/commandExecution/outputDelta","params":{"threadId":"t","turnId":"r","itemId":"i","delta":"PRIVATE"}});
+                        match case {
+                            "missing-delta" => {
+                                event["params"].as_object_mut().unwrap().remove("delta");
+                            }
+                            "wrong-item" => event["params"]["itemId"] = json!("other"),
+                            "wrong-kind" => event["method"] = json!("item/fileChange/outputDelta"),
+                            _ => event["params"]["turnId"] = json!("other"),
+                        }
+                    }
+                }
+            }
+            let error = stream
+                .observe(&BoundedObservation::new(event.to_string().into_bytes()).unwrap())
+                .err()
+                .unwrap();
+            assert!(!error.to_string().contains("PRIVATE"));
+            assert!(stream
+                .observe(&turn("turn/completed", "completed"))
+                .is_err());
+            assert!(stream.finish().is_err());
         }
     }
 
@@ -604,7 +789,11 @@ mod tests {
             stream
                 .observe(&item("item/started", "commandExecution"))
                 .unwrap(),
-            Observed::RequiresHandling
+            Observed::Tool(ToolEvent {
+                kind: ToolKind::Command,
+                phase: ToolPhase::Started,
+                ..
+            })
         ));
         let request = stream.pending_approval(&approval(10)).unwrap();
         assert!(
@@ -626,6 +815,62 @@ mod tests {
             .observe(&turn("turn/completed", "completed"))
             .unwrap();
         assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+    }
+
+    #[test]
+    fn unified_dispatch_preserves_approval_identity_and_single_use() {
+        let mut stream = started();
+        stream
+            .observe(&item("item/started", "commandExecution"))
+            .unwrap();
+        let request = match stream.observe(&approval(10)).unwrap() {
+            Observed::Approval(request) => request,
+            _ => panic!("approval was not dispatched"),
+        };
+        assert!(request.request_id == RequestId::Number(10));
+        let reply = stream
+            .prepare_approval_reply(&request.request_id, Decision::Decline)
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(reply.as_str()).unwrap(),
+            json!({"id":10,"result":{"decision":"decline"}})
+        );
+        stream
+            .observe(&frame(
+                "serverRequest/resolved",
+                json!({"threadId":"t","requestId":10}),
+            ))
+            .unwrap();
+        stream
+            .observe(&item("item/completed", "commandExecution"))
+            .unwrap();
+        stream
+            .observe(&turn("turn/completed", "completed"))
+            .unwrap();
+        assert_eq!(stream.finish().unwrap(), TurnOutcome::Completed);
+
+        for case in ["duplicate", "unknown", "response", "missing-tool"] {
+            let mut stream = started();
+            if case != "missing-tool" {
+                stream
+                    .observe(&item("item/started", "commandExecution"))
+                    .unwrap();
+            }
+            if case == "duplicate" {
+                stream.observe(&approval(10)).unwrap();
+            }
+            let mut event: Value = serde_json::from_slice(&approval(10).bytes).unwrap();
+            if case == "unknown" {
+                event["method"] = json!("future/requestApproval");
+            }
+            if case == "response" {
+                event["result"] = json!({});
+            }
+            assert!(stream
+                .observe(&BoundedObservation::new(event.to_string().into_bytes()).unwrap())
+                .is_err());
+            assert!(stream.finish().is_err());
+        }
     }
 
     #[test]

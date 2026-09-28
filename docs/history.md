@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (도구·승인 이벤트 분류)
+
+- **진전/기준**: 직전 역할 권한 연결은 `18da7ea`에 커밋됐고 clean checkout에서 이어갔다. 메인이 기존 TurnStream에 command/file-change의 typed 시작/출력/완료·실패·거절 metadata와 scoped PendingApproval 분류를 추가했다. raw 명령 출력/diff는 공개하지 않으며 unknown 도구는 RequiresHandling 그대로다. command 완료의 명령/cwd 변경·잘못된 status·늦은 출력은 sticky failure다.
+- **출처/경계**: [공식 app-server approvals](https://learn.chatgpt.com/docs/app-server#approvals)를 검색·열어 item/started → 승인 요청 → 응답 → serverRequest/resolved → item/completed 순서를 확인했다. 기존 임시 schema ThreadItem/FileUpdateChange는 참고했지만 provenance 미검증 한계는 유지한다. 자동 수락을 추가하지 않았고 sidecar는 새 Tool/Approval 분류도 아직 거절한다. 실제 도구/승인 UI 연결은 다음 단계다.
+- **검증/다음**: core lifecycle·approval 회귀와 기존 sidecar pipe 거절 동작, scoped clippy/fmt/diff를 검증 중이다. core 기존 무관 lint 3종만 명령에서 제외하며 소스는 변경하지 않는다. 실제 provider/계정/모델 실행·main 병합/push 없음. 독립 검토자 1명 검토 후 원자 커밋한다.
+- **최신 검사**: core codex_events 19 PASS/0.03초, sidecar preflight 5 PASS/8.74초, strict sidecar clippy·기존 lint 3종 제외 core clippy·scoped fmt·diff PASS. 고정 4파일의 독립 정적 검토를 요청한다. 실제 승인 전송이나 제품 동작 검증으로 확대 해석하지 않는다.
+- **마감**: 독립 정적 검토 PASS. tool scope/명령 결속·raw 비공개·unknown 거절·승인 parser의 단일 예산 차감과 sidecar 미활성 경계를 확인했다. 관련 4파일을 커밋한다. 다음은 이 typed 이벤트의 실행 owner handler와 승인 대기/응답 전송 연결이며 앱 전체 완료는 아니다.
+
 ### 2026-09-28 · by GPT-6 Astra (저장된 역할과 쓰기 실행 연결)
 
 - **진전/범위**: 직전 턴은 이미 반영된 검토자 승인 정책 재확인이며 신규 개발 진전은 없었다. `7d32c08`·clean `m5/coding-agent-ide`에서 메인이 저장된 Codex 역할의 permission을 native argv·오프라인 OS 정책·preflight 설정/스레드 검증에 함께 연결했다. readOnly 전용 진입점은 유지하며 새 내부 role-bound 진입점은 두 권한만 허용한다. 제품 capability·네트워크·실제 도구 실행은 열지 않는다.
