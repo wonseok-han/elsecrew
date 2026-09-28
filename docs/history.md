@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-28 · by GPT-6 Astra (승인 요청 관측 계약)
+
+- **진전/기준**: 직전 `74988d6`는 비공개 이벤트 처리·회귀·커밋을 마친 진전이다. 이번 clean HEAD에서 OpenAI Docs command approval 및 pinned 0.158 request/decision schema를 대조하고 현재 제품 계약에 승인 대기 UI/전송 경로가 없음을 확인했다.
+- **구현**: `codex_approval.rs`에 bounded 서버 요청 파서를 추가했다. command/writeStdin/network/fileChange를 구분하고 request ID·thread/turn/item·시간·문자열 한도를 검사한다. 요청·알림 혼동/다른 실행/중복 필드/새 권한 필드/미지원 정책 amendment는 거절한다. 명령/cwd/이유/외부 쓰기 root 등은 transient 문맥으로만 반환하고 Debug/직렬화/공개 채팅 projection을 제공하지 않는다. 승인 응답 builder나 허용 권위는 없으며 pending tool item과의 결속·사용자 결정은 후속 owner/UI 책임이다.
+- **범위/다음**: Karpathy 지침으로 기존 실행 거절 정책을 유지하고 순수 파서만 작성했다. 실행부/원장/UI는 아직 이 파서를 호출하지 않는다. 제품 승인 대기·한 번 허용/거절·도구 lifecycle·run 원장·snapshot 입장 연결이 남는다. 새 위임·실제 CLI/인증/유료 호출·main 병합·push 없음.
+- **검증/마감**: approval 집중 3테스트 PASS(4종 문맥·12종 거절·3종 중복), strict sidecar clippy·core fmt·diff PASS. 자체 diff 검토 후 순수 관측 파서·회귀·문서만 커밋한다. 파서 통과를 승인 안전성/실제 모델 실행의 증거로 확대하지 않는다.
+
 ### 2026-09-28 · by GPT-6 Astra (비공개 입력·추론 이벤트 처리)
 
 - **진전/기준**: 직전 `9738912`는 동일 프로세스 실행 연결·독립 검토·커밋을 마친 진전이다. 이번 clean HEAD에서 OpenAI Docs events와 현재 생성 ThreadItem/Reasoning* schema를 확인하고, 정상 text turn에 섞이는 userMessage/reasoning 때문에 후보가 즉시 실패하는 누락을 처리했다.
