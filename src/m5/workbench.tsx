@@ -103,7 +103,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return () => { controller.dispose(); chatController.dispose(); };
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
-  useEffect(() => { controller.setActionBlocked(!admissionReady || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? "작업 공간을 준비하는 동안 변경을 만들거나 저장하지 않아요." : chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [admissionReady, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
+  useEffect(() => { controller.setActionBlocked(!admissionReady || settingsOpen || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? "작업 공간을 준비하는 동안 변경을 만들거나 저장하지 않아요." : settingsOpen ? "역할과 모델 설정을 마치면 파일 작업을 계속할 수 있어요." : chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [admissionReady, settingsOpen, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
   const leaveProject = async () => {
     const project = controller.snapshot().project;
     if (!project || settingsOpen || !window.m5Projects || !admissionReady || controller.snapshot().actionBlocked || !controller.canLeaveProject() || !chatController.beginLeavingProjectView()) return;
@@ -154,8 +154,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
-          <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={!admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
-          <button type="button" onClick={() => void controller.chooseProject()} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
+          <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
+          <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {snapshot.project ? "프로젝트 바꾸기" : "프로젝트 선택"}
           </button>
           {snapshot.project && (
@@ -163,7 +163,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               프로젝트 화면 닫기
             </button>
           )}
-          {snapshot.project && <button className="m5-secondary" type="button" onClick={() => setSettingsOpen((open) => !open)} disabled={!admissionReady}>역할과 모델</button>}
+          {snapshot.project && <button className="m5-secondary" type="button" onClick={() => { controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen}>역할과 모델</button>}
         </div>
       </header>
 
@@ -284,25 +284,33 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
 function RoleSettings({ settings, disabled, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; disabled: boolean; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
   const [busy, setBusy] = useState(false);
-  useEffect(() => setRoles(settings.roles), [settings]);
+  const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
+  const dirty = JSON.stringify(roles) !== JSON.stringify(settings.roles);
+  useEffect(() => { setRoles(settings.roles); setDiscardAction(null); }, [settings]);
   const change = (index: number, field: keyof RoleProfileV1, value: string | null) => setRoles((old) => old.map((role, current) => current === index ? { ...role, [field]: value } : role));
   let valid = roles.length === 3;
   try { roles.forEach(role => { validateRoleProfileV1(role); if (!role.modelSelector.trim()) valid = false; }); } catch { valid = false; }
   const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
   return <section className="m5-settings" aria-label="프로젝트 역할과 모델 설정">
-    <header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" disabled={busy} onClick={onClose}>작업대로 돌아가기</button></header>
+    <header><div><p className="m5-eyebrow">이 프로젝트 전용 설정 · 버전 {settings.revision}</p><h2>역할과 모델</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={() => dirty ? setDiscardAction("close") : onClose()}>작업대로 돌아가기</button></header>
+    {dirty && <p role="status">저장하지 않은 설정 변경이 있어요.</p>}
+    {discardAction && <section role="alertdialog" aria-label="저장하지 않은 설정 확인">
+      <p>아직 저장하지 않은 역할과 모델 설정을 버릴까요?</p>
+      <button type="button" onClick={() => setDiscardAction(null)}>설정 계속 편집</button>
+      <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") onClose(); else void run(onReload); }}>설정 변경 버리고 {discardAction === "close" ? "닫기" : "다시 불러오기"}</button>
+    </section>}
     <p>모델을 실제로 사용할 수 있는지는 실행 전에 확인해요. 데모는 모델 설치·로그인·실행을 확인하지 않습니다. 이미 만든 채팅은 당시 설정을 그대로 보존해요.</p>
     <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card">
       <strong>{({ planning: "기획", coding: "코딩", review: "검토" })[role.roleId]}</strong>
-      <label>실행 환경<select disabled={disabled || busy} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
-      <label>정확한 모델 이름<input disabled={disabled || busy} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
-      <label>추론 수준<input disabled={disabled || busy} value={role.reasoningEffort ?? ""} placeholder="기본값은 비워 두세요" onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
+      <label>실행 환경<select disabled={disabled || busy || discardAction !== null} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
+      <label>정확한 모델 이름<input disabled={disabled || busy || discardAction !== null} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
+      <label>추론 수준<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} placeholder="기본값은 비워 두세요" onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
       <small>선택한 모델이 지원하는 정확한 값을 입력해요. 지원 여부는 실행 전에 확인합니다.</small>
       <span>권한: {role.permission === "readOnly" ? "읽기 전용" : "격리된 작업 복사본에만 쓰기"}</span>
     </article>)}</div>
     {!valid && <p role="alert">모든 역할의 모델 이름과 추론 수준을 확인해 주세요. 모델 이름은 비울 수 없고, 지나치게 긴 값은 저장할 수 없어요.</p>}
-    <button type="button" disabled={disabled || busy || !valid} onClick={() => void run(() => onSave(roles))}>{busy ? "처리 중…" : "새 채팅 설정 저장"}</button>
-    <button className="m5-secondary" type="button" disabled={disabled || busy} onClick={() => void run(onReload)}>저장된 설정 다시 불러오기</button>
+    <button type="button" disabled={disabled || busy || !valid || discardAction !== null} onClick={() => void run(() => onSave(roles))}>{busy ? "처리 중…" : "새 채팅 설정 저장"}</button>
+    <button className="m5-secondary" type="button" disabled={disabled || busy || discardAction !== null} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>저장된 설정 다시 불러오기</button>
     <p>다시 불러오면 이 화면에서 아직 저장하지 않은 설정은 저장된 값으로 바뀝니다. 채팅과 파일 편집 내용은 그대로 유지돼요.</p>
   </section>;
 }
