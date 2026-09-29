@@ -474,6 +474,30 @@ mod tests {
     }
 
     #[test]
+    fn configuration_warning_cannot_fall_back_to_defaults_and_continue() {
+        let mut flow = PreflightExchange::configuration_only(
+            &ExpectedProfile {
+                model: "test-model",
+                reasoning_effort: "medium",
+            },
+            "/app/profile",
+        )
+        .unwrap();
+        flow.next_frames().unwrap();
+        flow.accept(&reply(0, &results()[0])).unwrap();
+        flow.next_frames().unwrap();
+        let warning = BoundedObservation::new(br#"{"method":"configWarning","params":{"summary":"Invalid configuration; using defaults.","details":"PRIVATE_MANAGED_CONFIG"}}"#.to_vec()).unwrap();
+        let error = flow.accept(&warning).unwrap_err();
+        assert!(!error.to_string().contains("PRIVATE_MANAGED_CONFIG"));
+        assert_eq!(flow.state(), PreflightState::Failed);
+        assert!(flow.accept(&reply(1, &results()[1])).is_err());
+        assert!(flow.next_frames().is_err());
+        assert!(flow
+            .start_thread(std::path::Path::new("/managed/snapshot"))
+            .is_err());
+    }
+
+    #[test]
     fn write_config_requires_exact_effective_and_flag_permissions() {
         for scope in ["/config", "/layers/0/config"] {
             for (field, replacement) in [

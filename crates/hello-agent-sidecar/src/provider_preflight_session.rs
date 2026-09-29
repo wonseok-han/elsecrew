@@ -536,6 +536,147 @@ mod tests {
     use serde_json::json;
     use std::process::{Command, Stdio};
 
+    /// Explicit approval only: real installed CLI, but fresh profile, OS-denied
+    /// networking and config-only RPC. Never select the user's login profile.
+    #[test]
+    #[ignore = "requires explicit approval for installed CLI offline configuration inspection"]
+    fn installed_codex_offline_configuration_only() {
+        use crate::provider_executable::PinnedExecutable;
+        use std::path::Path;
+        assert_eq!(
+            std::env::var("HELLO_AGENT_APPROVED_OFFLINE_CONFIG").as_deref(),
+            Ok("1"),
+            "explicit config-only inspection approval is required"
+        );
+        let cli = PinnedExecutable::open(
+            Path::new("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+            crate::provider_login_manager::digest("3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a"),
+        ).unwrap();
+        let helper = PinnedExecutable::open(
+            Path::new(
+                "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host",
+            ),
+            crate::provider_login_manager::digest(
+                "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
+            ),
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let workspace = root.join("empty-workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let original_config = std::fs::read(home.join("config.toml")).unwrap();
+        assert!(!home.join("auth.json").exists());
+        crate::provider_profile::verify_runtime_files(&home).unwrap();
+        // This is a configuration tuple only, not a model availability claim.
+        let expected = ExpectedProfile {
+            model: "test-model",
+            reasoning_effort: "medium",
+        };
+        let mut flow =
+            PreflightExchange::configuration_only(&expected, home.to_str().unwrap()).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let launch = process.launch_with_barrier(
+            || {
+                let cli_path = cli.revalidate().map_err(std::io::Error::other)?;
+                let helper_path = helper.revalidate().map_err(std::io::Error::other)?;
+                offline_discovery_command(
+                    cli_path,
+                    helper_path,
+                    &home,
+                    &workspace,
+                    &expected,
+                    ExpectedPermission::ReadOnly,
+                )?
+                .spawn()
+            },
+            |child| {
+                cli.revalidate().map_err(std::io::Error::other)?;
+                helper.revalidate().map_err(std::io::Error::other)?;
+                if profile.revalidate().map_err(std::io::Error::other)? != home {
+                    return Err(std::io::Error::other("inspection profile changed"));
+                }
+                crate::provider_login_gate::release(child)
+            },
+        );
+        // Name only the exchange stage, never print raw config/auth responses.
+        // Use the same typed transport and validators as the shared driver.
+        eprintln!(
+            "offline_config owned_pids={:?}",
+            process
+                .tracked_for_cleanup()
+                .iter()
+                .map(|identity| identity.pid)
+                .collect::<Vec<_>>()
+        );
+        let observation = launch.and_then(|()| {
+            process.begin_preflight()?;
+            let started = Instant::now();
+            for stage in ["initialize", "configuration"] {
+                let remaining = || {
+                    Duration::from_secs(30)
+                        .checked_sub(started.elapsed())
+                        .ok_or_else(failure)
+                };
+                for frame in flow.next_frames().map_err(|_| failure())? {
+                    process.send_preflight(frame, remaining()?, &cancel)?;
+                }
+                let reply = process.receive_preflight(remaining()?, &cancel)?;
+                let accepted = flow.accept(&reply);
+                eprintln!("offline_config stage={stage} accepted={}", accepted.is_ok());
+                accepted.map_err(|_| failure())?;
+            }
+            if flow.state() != PreflightState::ConfigurationMatched
+                || !flow.next_frames().map_err(|_| failure())?.is_empty()
+            {
+                return Err(failure());
+            }
+            Ok(())
+        });
+        // Retain cleanup ownership on every diagnostic failure. Never retry and
+        // reinterpret an uncertain receipt as a confirmed result.
+        let cleanup = if process.closure_evidence().is_some() {
+            Ok(())
+        } else {
+            process.finish()
+        };
+        let confirmed = process
+            .closure_evidence()
+            .is_some_and(|evidence| evidence.confirmed());
+        if observation.is_err() || cleanup.is_err() || !confirmed {
+            flow.invalidate();
+        }
+        flow.close();
+        eprintln!(
+            "offline_config observation={} cleanup={} confirmed={} state={:?}",
+            observation
+                .as_ref()
+                .err()
+                .map_or("matched", |error| error.kind()),
+            cleanup.as_ref().err().map_or("ok", |error| error.kind()),
+            confirmed,
+            flow.state()
+        );
+        assert_eq!(
+            std::fs::read(home.join("config.toml")).unwrap(),
+            original_config
+        );
+        assert!(!home.join("auth.json").exists());
+        assert!(
+            cleanup.is_ok() && confirmed,
+            "offline inspection cleanup was not confirmed"
+        );
+        assert!(observation.is_ok(), "offline configuration did not match");
+        assert_eq!(flow.state(), PreflightState::Closed);
+        assert!(flow.next_request().is_err());
+        drop(process);
+        LoginProcess::reserve(&profile).unwrap().finish().unwrap();
+    }
+
     #[test]
     fn invalid_turn_text_never_claims_or_initializes_the_live_owner() {
         for (text, cwd) in [

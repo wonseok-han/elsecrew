@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인된 실제 Codex 오프라인 설정 검사)
+
+- **승인/범위**: 사용자가 새 임시 HOME·빈 작업 폴더·네트워크 차단의 initialize/config/read 검사를 승인해 `ae3a33f`에서 재개했다. `installed_codex_offline_configuration_only`는 ignored+명시적 환경 flag로만 실행되며 기존 pin·gate·deny-default sandbox·typed config-only 교환·종료 owner를 사용한다. 실제 계정/모델 조회·thread/turn·사용자 프로젝트는 사용하지 않았다.
+- **실측 결과**: 현재 설치된 native CLI/helper SHA-256은 `3e11ccc7…`/`4c398936…`로 승인된 쌍과 일치한다. 도구 sandbox 안 codesign은 invalid였지만 외부 read-only strict 검증은 두 파일 모두 exit 0/valid on disk였다. 실제 CLI는 초기화에 성공했고 설정 응답 앞에 configWarning `Invalid configuration; using defaults.`를 보내 거절됐다. 경고 내용의 정적 분류에서 managed/failed를 확인했으나 정확한 실패 원인을 확정하지 않는다. 최종 소스 재현은 FAIL/2.45초, cleanup=ok·confirmed=true·임시 config 원문 불변·auth.json 미생성이다. 합격으로 재해석하거나 경고를 suppress하지 않는다.
+- **OS 관측/함정**: 09:36:23 KST에 이 검사 소유 PID 95491의 sandbox 로그만 조회했다. `/private/etc/passwd`, 번들의 codex-package.json/앱 디렉터리 읽기, opendirectoryd.libinfo 등 Mach 조회 및 syslog Unix socket 접근 거절을 관측했다. 어떤 거절이 기본값 fallback을 유발했는지는 별도 좁혀야 한다. 시스템/관리 정책을 무시하거나 광범위 읽기·Mach·네트워크 권한을 추가하지 않았다. 첫 검토의 테스트 중복 finish 결함은 실행 전 수정했고, 최종 테스트는 단계 이름만 남기는 두 교환과 한 번의 explicit cleanup을 사용한다.
+- **검증/다음**: configWarning 뒤 정상 설정 응답이 와도 실패 상태가 유지되고 private 경고 내용이 오류에 유출되지 않는 회귀를 추가해 core preflight 19 PASS/0.01초. 진단용 임시 core 출력은 모두 제거했다. 최종 strict clippy·fmt/diff·동일 검토자 1명 재검토 후 검사/기록을 커밋한다. 다음은 관리 설정 초기화에 필요한 OS 조회를 최소 범위로 식별하고 안전 계약을 유지하며 호환성을 수정하는 일이다. 기존 승인 대기는 해소됐지만 실제 설정 호환성·native 작업 연결·앱 전체는 미완료이며 main 병합/push 없음.
+- **마감**: core+sidecar all-targets strict clippy PASS/3.64초, scoped fmt·diff PASS, 동일 검토자의 최종 정적 재검토 PASS. 이는 검사 코드의 승인 범위·실패 처리 검토이며 실제 설정 검사 FAIL을 뒤집지 않는다. 관련 4파일을 원자 커밋한다. 임시 실측 폴더는 테스트 종료 시 정리되며 별도 앱 설치·사용자 파일 삭제는 없었다.
+
 ### 2026-09-28 · by GPT-6 Astra (실제 초기화 검사 승인 대기)
 
 - **재확인**: `37428e6`·clean checkout이며 제품 runtime은 여전히 blocked로 생성된다. 직전 세 파동에서 같은 실제 CLI 실행 승인 미수신을 기록했고, 그 사이 설정 전용 전송 제한과 core lint 해소를 완료했다. 실제 초기화/설정 응답 및 OS 격리 호환성은 아직 관측하지 못했다.
@@ -277,6 +285,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **실제 offline 설정 검사는 아직 FAIL(2026-09-29)**: 사용자가 승인한 현재 exact CLI/helper 쌍은 deny-default 정책에서 initialize는 통과하지만 configWarning `Invalid configuration; using defaults.`로 config-only 검증이 실패한다. 관측된 managed/failed 분류와 passwd/앱 리소스/Mach 거절은 원인 후보이지 인과 확정이 아니다. 경고를 무시해 정상 실행으로 승격하지 않으며 기존 계정/모델/프로젝트를 사용하지 않았다. typed 검사·정상 cleanup 성공과 실제 설정 호환성 성공을 구분한다.
 
 - **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 공통 stdio의 지연 완료 응답을 fixture runtime에 연결해 검증했으며 native owner 등록은 남는다. 비정상 Drop fallback은 아직 동기식이다.
 
