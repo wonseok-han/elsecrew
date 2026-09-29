@@ -14,6 +14,15 @@ const PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
 // I/O. Keep a hard total bound; activity must never restart this timer.
 const TURN_BUDGET: Duration = Duration::from_secs(10 * 60);
 
+/// Constructible only in this transport, after the owner boundary callbacks.
+/// No Clone/Debug/Deserialize and no public constructor.
+pub(crate) struct ConfinedAcceptReply(String);
+impl ConfinedAcceptReply {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
 enum Stage {
     Preflight {
         flow: PreflightExchange,
@@ -233,10 +242,18 @@ impl TextSession {
                             on_action(process, TextAction::VerifyWorkspace)?;
                             on_action(process, TextAction::ObserveProcess)?;
                             self.remaining(cancel)?;
-                            let reply = stream
-                                .prepare_approval_reply(&request.request_id, decision)
-                                .map_err(|_| failure())?;
-                            self.outgoing.push_back(NativeFrame::Approval(reply));
+                            let frame = if matches!(decision, hello_agent_core::provider::vendor_observation::codex_approval::Decision::AcceptOnce) {
+                                stream.reserve_approval_response(&request.request_id).map_err(|_| failure())?;
+                                use hello_agent_core::provider::vendor_observation::codex_approval::RequestId;
+                                let id = match &request.request_id {
+                                    RequestId::Number(id) => serde_json::json!(id),
+                                    RequestId::Text(id) => serde_json::json!(id),
+                                };
+                                NativeFrame::ConfinedAccept(ConfinedAcceptReply(format!("{}\n", serde_json::json!({"id":id,"result":{"decision":"accept"}}))))
+                            } else {
+                                NativeFrame::Approval(stream.prepare_approval_reply(&request.request_id, decision).map_err(|_| failure())?)
+                            };
+                            self.outgoing.push_back(frame);
                             break;
                         }
                     }

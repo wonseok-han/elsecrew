@@ -56,6 +56,27 @@ pub(crate) struct OwnedTextRun {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl OwnedTextRun {
+    pub(super) fn verify_approval_boundary(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+    ) -> Result<(), SidecarError> {
+        if self.state.finished
+            || self.state.completion.is_some()
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentApprovalChanged",
+                "approval owner is no longer current",
+            ));
+        }
+        self.reservation.verify_approval_boundary(
+            storage,
+            projects,
+            &mut self.process,
+            &self.cancel,
+        )
+    }
     pub(super) fn pending_approvals(
         &self,
     ) -> Vec<&hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval> {

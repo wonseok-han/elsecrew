@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (내부 일회 허용·전송 권위 분리)
+
+- **구현**: 03cbca1 기준 동일 live ticket의 명시 상세 조회 뒤에만 내부 일회 허용을 접수한다. 예약 owner의 격리/역할/작업 폴더/프로세스/취소 검사와 원자 intent 저장 뒤 전송하며 중복 접수는 거절한다. 일반 core AcceptOnce 차단은 유지했다. 초기 공개 core 허용 encoder는 독립 검토에서 반려되어 제거하고, core는 단회 순서 예약만 반환하며 private sidecar transport만 생성 가능한 opaque accept frame으로 바꿨다. 동일 검토자 재검토 PASS.
+- **검증**: core 151 PASS·compile-fail 포함 doctest 3 PASS, sidecar 승인 단위 7 PASS. macOS 격리 toy CLI의 정상 readonly/write·저장 실패·접수 전/후 취소·접수 후 role 변경 6개 case PASS(78.74초). sandbox 안 첫 실행은 process launch 거부로 실패했으며 승인된 OS 실행 환경에서 재검증했다. strict all-targets clippy PASS(5.80초), 변경 Rust 파일 rustfmt와 diff 검사 PASS. 전체 sidecar 누적 재실행이나 실제 vendor 도구 실행 증거는 아니다.
+- **남음/활성화 경계**: 공개 IPC/UI accept·native 제품 start는 계속 미활성이다. 현행 sandbox의 PROFILE 읽기/쓰기는 vendor 자손에도 열리므로 인증/profile 도구 격리를 해결하기 전 실제 허용 활성화하지 않는다. 인증을 복사하거나 정책을 완화하지 않았다. 다음은 이 프로필 경계 해결과 실제 provider 연결이며 Claude·실사용·UI·출시 게이트까지 전체 목표는 미완료다. Karpathy 지침에 따라 기존 owner/transport를 재사용했고 실제 유료 호출·main 병합/push 없음.
+
+- **기존 경로 회귀**: native dispatcher 거절 round-trip도 PASS(15.79초). 검토·관련 검사 완료 후 이 내부 후보를 작업 단위 커밋하며 제품 활성화 완료로 해석하지 않는다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 요청 재점검)
+
+- 사용자 요청에 따라 실제 프로세스 목록을 재조회했다. sandbox 안의 ps는 거부되어 읽기 전용 권한 확장으로 확인했으며 Hello Agent 개발 앱·sidecar·Vite는 없었다. VS Code/Cursor crash handler만 검색되어 종료하지 않았다.
+- 활성 `codex-login.pending`은 없으며 보존 잠금 inode 168613811·보존 helper inode 166226396이 유지된다. 인증 파일은 내용 없이 mode 0600만 확인했다. 이전 보존 복구가 완료된 상태이므로 추가 이동·삭제·로그인 초기화·재부팅 없이 유지했다.
+- 기준 HEAD 03cbca1, 기존 구현 미커밋 7개 파일은 보존했다. 이번 확인은 실제 로그인/모델 실행 검증이 아니며 진행 중 구현·독립 검토 지적 해소는 별도 남는다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인 직전 예약·격리 경계 연결)
 
 - **구현**: 1015441의 sealed launch scope를 예약 owner의 승인 전제 검사와 결합했다. 취소/role/input/snapshot·파일 분리/profile·프로세스 관측을 대조하며 파일 스캔은 Git 검사보다 먼저 한다. 기존 시작 때만 확인하던 writer 소유권을 현재 입력 검증마다 확인한다. AcceptOnce 제안은 새 callback을 거치며 이후 전송 단계에서도 재검증하도록 했다. core 허용 응답 차단과 제품 미활성 상태는 유지한다.
@@ -65,6 +79,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **내부 일회 허용과 제품 활성화 경계(2026-09-29)**: core는 accept bytes를 생성하지 않고 순서만 예약한다. private sidecar transport가 inspected live ticket·현재 예약/격리/취소·원자 intent 뒤 일회 accept를 전송하며 부분 전송도 재검증한다. toy 6case와 독립 검토는 통과했으나 공개 accept/native start는 미활성이다. PROFILE 전체 읽기/쓰기가 vendor 자손에 상속되므로 인증/profile 도구 격리가 다음 활성화 차단 조건이며 기존 snapshot 보호와 혼동하지 않는다.
 
 - **승인 상세 조회(2026-09-29)**: 기본 요약과 별도로 명시 inspect만 live ticket/실행/연결에 결속된 상세를 일시 반환한다. 원장/채팅에는 저장하지 않으며 평문 표시 때 C0/C1·전체 Cf를 escape한다. 상세 열람은 추가 권한 허용이 아니며 제품 native 활성화는 별도다. 아래 유형 표시 당시의 상세 미지원 상태를 이 구현으로 갱신한다.
 

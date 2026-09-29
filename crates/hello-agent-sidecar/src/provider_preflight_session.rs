@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 mod incremental;
+pub(crate) use incremental::ConfinedAcceptReply;
 
 #[cfg(test)]
 thread_local! {

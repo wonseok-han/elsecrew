@@ -200,6 +200,19 @@ impl TurnStream {
         request_id: &RequestId,
         decision: Decision,
     ) -> Result<ApprovalReply, ProviderError> {
+        let reply = ApprovalReply::new(request_id, decision).inspect_err(|_| {
+            self.failed = true;
+        })?;
+        self.reserve_approval_response(request_id)?;
+        Ok(reply)
+    }
+
+    /// Reserve response order only; produces no wire response or permission.
+    /// Accept encoding belongs exclusively to the admitted transport owner.
+    pub fn reserve_approval_response(
+        &mut self,
+        request_id: &RequestId,
+    ) -> Result<(), ProviderError> {
         let result = (|| {
             if self.failed
                 || self.outcome.is_some()
@@ -216,9 +229,8 @@ impl TurnStream {
             if self.items.get(item_id).is_none_or(|item| item.completed) {
                 return Err(invalid());
             }
-            let reply = ApprovalReply::new(request_id, decision)?;
             self.prepared_replies.insert(request_id.clone());
-            Ok(reply)
+            Ok(())
         })();
         if result.is_err() {
             self.failed = true;
@@ -1030,6 +1042,23 @@ mod tests {
             );
             assert!(stream.finish().is_err());
         }
+    }
+
+    #[test]
+    fn confined_accept_is_single_request_and_still_needs_server_resolution() {
+        let mut stream = started();
+        stream
+            .observe(&item("item/started", "commandExecution"))
+            .unwrap();
+        stream.pending_approval(&approval(10)).unwrap();
+        stream
+            .reserve_approval_response(&RequestId::Number(10))
+            .unwrap();
+        assert!(!stream.awaits_approval_decision(&RequestId::Number(10)));
+        assert!(stream
+            .reserve_approval_response(&RequestId::Number(10))
+            .is_err());
+        assert!(stream.finish().is_err());
     }
 
     #[test]

@@ -63,6 +63,11 @@ pub enum Decision {
 }
 
 /// No Clone/Debug/Deserialize: a fixed response to one pending server request.
+/// Consumers cannot construct arbitrary (including accept) responses.
+/// ```compile_fail
+/// use hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply;
+/// let reply = ApprovalReply(String::from("{\"result\":{\"decision\":\"accept\"}}\n"));
+/// ```
 pub struct ApprovalReply(String);
 impl ApprovalReply {
     pub fn as_str(&self) -> &str {

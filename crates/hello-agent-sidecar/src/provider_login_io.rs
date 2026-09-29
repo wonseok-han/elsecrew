@@ -47,6 +47,7 @@ pub(crate) enum NativeFrame {
     ),
     Turn(hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest),
     Approval(hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply),
+    ConfinedAccept(crate::provider_preflight_session::ConfinedAcceptReply),
 }
 
 impl NativeFrame {
@@ -55,6 +56,7 @@ impl NativeFrame {
             Self::Preflight(frame) => frame.as_str().as_bytes(),
             Self::Turn(frame) => frame.as_str().as_bytes(),
             Self::Approval(frame) => frame.as_str().as_bytes(),
+            Self::ConfinedAccept(frame) => frame.as_bytes(),
         }
     }
 }

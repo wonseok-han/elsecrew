@@ -205,6 +205,25 @@ impl AgentRuntime {
             .decline(approval_id)
     }
 
+    /// Internal candidate only. Public IPC acceptance is a separate UI boundary.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn accept_native_approval_once(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+        approval_id: &str,
+    ) -> Result<(), SidecarError> {
+        let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
+            SidecarError::new("agentApprovalChanged", "approval run is no longer current")
+        })?;
+        active
+            .live_approvals(storage, projects, identity)?
+            .validate_acceptance(approval_id)?;
+        active.owner.verify_approval_boundary(storage, projects)?;
+        active.approvals.accept_once(approval_id)
+    }
+
     /// Take the owner only after validation; rejection leaves cleanup responsibility
     /// with the caller. No public IPC/production start path invokes this yet.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -262,18 +281,29 @@ impl AgentRuntime {
                 let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
                 // Tool notifications grant no permission. Only an explicit
                 // queued decision can produce a reply; waiting keeps polling.
-                active.stopped = !matches!(active.owner.advance(storage, projects, &mut |storage, action| {
-                    match action {
-                        TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
-                        TextAction::PollApproval { request, decision } => {
-                            if active.approvals.poll(storage, &active.identity, &connection, request)? {
-                                *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
+                active.stopped = !matches!(
+                    active
+                        .owner
+                        .advance(storage, projects, &mut |storage, action| {
+                            match action {
+                                TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
+                                TextAction::PollApproval { request, decision } => {
+                                    *decision = active.approvals.poll(
+                                        storage,
+                                        &active.identity,
+                                        &connection,
+                                        request,
+                                    )?;
+                                    Ok(())
+                                }
+                                _ => Err(SidecarError::new(
+                                    "agentRecoveryRequired",
+                                    "unexpected native checkpoint",
+                                )),
                             }
-                            Ok(())
-                        }
-                        _ => Err(SidecarError::new("agentRecoveryRequired", "unexpected native checkpoint")),
-                    }
-                }), Ok(None));
+                        }),
+                    Ok(None)
+                );
                 if active
                     .approvals
                     .retain_live(

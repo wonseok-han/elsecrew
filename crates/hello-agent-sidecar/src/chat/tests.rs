@@ -483,6 +483,21 @@ fn native_dispatcher_approval_round_trip() {
     text_candidate_cases_selected(false, true, false, Some("bound-handler-runtime"));
 }
 
+#[test]
+#[ignore = "macOS outer sandbox and local listener; toy acceptance only, no account/upstream"]
+fn native_confined_acceptance_round_trip() {
+    for case in [
+        "bound-native-accept",
+        "bound-native-accept-write",
+        "bound-native-accept-approval-store",
+        "bound-native-accept-approval-cancel",
+        "bound-native-accept-after-cancel",
+        "bound-native-accept-after-role",
+    ] {
+        text_candidate_cases_selected(true, true, true, Some(case));
+    }
+}
+
 fn text_candidate_cases_selected(
     offline_native: bool,
     interactions: bool,
@@ -516,6 +531,12 @@ fn text_candidate_cases_selected(
         "bound-handler-runtime-approval-store",
         "bound-handler-runtime-approval-cancel",
         "bound-native",
+        "bound-native-accept",
+        "bound-native-accept-write",
+        "bound-native-accept-approval-store",
+        "bound-native-accept-approval-cancel",
+        "bound-native-accept-after-cancel",
+        "bound-native-accept-after-role",
         "bound-native-write",
         "bound-native-hardlink",
         "bound-native-profile-hardlink",
@@ -552,12 +573,16 @@ fn text_candidate_cases_selected(
         } {
             continue;
         }
-        if failure.starts_with("bound-handler") != interactions {
+        let accepting = failure.starts_with("bound-native-accept");
+        if (failure.starts_with("bound-handler") || accepting) != interactions {
             continue;
         }
         let writer = matches!(
             failure,
-            "bound-native-write" | "bound-writer-cleanup" | "bound-writer-terminal"
+            "bound-native-write"
+                | "bound-native-accept-write"
+                | "bound-writer-cleanup"
+                | "bound-writer-terminal"
         );
         let failure = match failure {
             "bound-writer-cleanup" => "bound-cleanup",
@@ -691,7 +716,7 @@ fn text_candidate_cases_selected(
             expanded.push_str(finished);
             replies[5] = expanded;
         }
-        let handler = failure.starts_with("bound-handler");
+        let handler = failure.starts_with("bound-handler") || accepting;
         if handler {
             let lines: Vec<_> = replies[5].lines().map(str::to_owned).collect();
             let tool = json!({"type":"commandExecution","id":"c1","command":"echo test","cwd":snapshot["worktreePath"],"status":"inProgress"});
@@ -704,6 +729,10 @@ fn text_candidate_cases_selected(
             );
             let mut completed = tool;
             completed["status"] = json!("declined");
+            if accepting {
+                completed["status"] = json!("completed");
+                completed["exitCode"] = json!(0);
+            }
             replies.push(format!("{}\n{}\n{}",
                 json!({"method":"serverRequest/resolved","params":{"threadId":"thread-test","requestId":40}}),
                 json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":completed}}),
@@ -909,7 +938,7 @@ fn text_candidate_cases_selected(
                     );
                     continue;
                 }
-                if !matches!(failure, "bound-native" | "bound-native-write") {
+                if !matches!(failure, "bound-native" | "bound-native-write") && !accepting {
                     assert!(launched.is_err());
                     crate::provider_preflight_session::BEFORE_RELEASE
                         .with(|hook| assert!(hook.borrow().is_none()));
@@ -1208,7 +1237,7 @@ fn text_candidate_cases_selected(
                     }
                     assert!(owned.request_cancel(&foreign).is_err());
                 }
-                if failure.starts_with("bound-handler-runtime") {
+                if failure.starts_with("bound-handler-runtime") || accepting {
                     let mut slot = Some(owned);
                     let mut quitting = AgentRuntime::blocked();
                     quitting.prepare_quit(&mut fixture.storage, &mut fixture.projects);
@@ -1358,6 +1387,16 @@ fn text_candidate_cases_selected(
                                         .storage
                                         .projection_record("run", &identity.run_id)
                                         .unwrap();
+                                    if accepting {
+                                        assert!(runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id
+                                            )
+                                            .is_err());
+                                    }
                                     let detail = runtime.approval_request(&fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
                                     assert_eq!(detail["inspection"]["approvalId"], id);
                                     assert_eq!(detail["inspection"]["command"], "echo test");
@@ -1368,7 +1407,47 @@ fn text_candidate_cases_selected(
                                             .unwrap(),
                                         before_inspection
                                     );
-                                    let receipt = runtime
+                                    if accepting {
+                                        runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id,
+                                            )
+                                            .unwrap();
+                                        assert!(runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id
+                                            )
+                                            .is_err());
+                                        if failure.ends_with("-after-cancel") {
+                                            runtime.request_cancel(&identity).unwrap();
+                                        }
+                                        if failure.ends_with("-after-role") {
+                                            let mut changed = fixture
+                                                .storage
+                                                .projection_record("chat", &address.chat_id)
+                                                .unwrap()
+                                                .unwrap();
+                                            changed["record"]["roleSnapshots"][2]
+                                                ["modelSelector"] = json!("changed-after-accept");
+                                            fixture
+                                                .storage
+                                                .upsert_projection_record(
+                                                    "chat",
+                                                    &address.chat_id,
+                                                    "op_role_after_accept",
+                                                    None,
+                                                    changed,
+                                                )
+                                                .unwrap();
+                                        }
+                                    } else {
+                                        let receipt = runtime
                                         .approval_request(
                                             &fixture.storage,
                                             &fixture.projects,
@@ -1378,8 +1457,9 @@ fn text_candidate_cases_selected(
                                             }}),
                                         )
                                         .unwrap();
-                                    assert_eq!(receipt["queued"], id);
-                                    assert_eq!(receipt["pending"], json!([]));
+                                        assert_eq!(receipt["queued"], id);
+                                        assert_eq!(receipt["pending"], json!([]));
+                                    }
                                     assert!(runtime
                                         .decline_native_approval(
                                             &fixture.storage,
@@ -1408,7 +1488,7 @@ fn text_candidate_cases_selected(
                         .projection_record("run", &identity.run_id)
                         .unwrap()
                         .unwrap();
-                    if failure.ends_with("-approval-store") {
+                    if failure.ends_with("-approval-store") || failure.ends_with("-after-role") {
                         assert_eq!(run["state"], "failed");
                         assert!(run.get("approval_intents_internal").is_none());
                         assert!(!fs::read_to_string(&captured)
@@ -1419,9 +1499,22 @@ fn text_candidate_cases_selected(
                     if !canceled {
                         let intents = run["approval_intents_internal"].as_array().unwrap();
                         assert_eq!(intents.len(), 1);
-                        assert_eq!(intents[0]["decision"], "decline");
+                        assert_eq!(
+                            intents[0]["decision"],
+                            if accepting { "acceptOnce" } else { "decline" }
+                        );
+                        if accepting {
+                            assert!(fs::read_to_string(&captured)
+                                .unwrap()
+                                .contains("\"decision\":\"accept\""));
+                        }
                         assert_eq!(intents[0]["state"], "intentRecorded");
                         assert!(!intents[0].to_string().contains("echo test"));
+                    }
+                    if accepting && canceled {
+                        assert!(!fs::read_to_string(&captured)
+                            .unwrap()
+                            .contains("\"decision\":\"accept\""));
                     }
                     assert_eq!(
                         run["state"],

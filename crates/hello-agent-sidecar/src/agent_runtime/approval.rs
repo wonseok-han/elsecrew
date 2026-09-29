@@ -2,7 +2,7 @@
 //! No raw command/account context is serialized into the run ledger.
 use super::*;
 use hello_agent_core::provider::vendor_observation::codex_approval::{
-    Action, CommandKind, PendingApproval, RequestId,
+    Action, CommandKind, Decision, PendingApproval, RequestId,
 };
 
 const MAX_INTENTS: usize = 128;
@@ -17,15 +17,15 @@ pub(super) struct ApprovalQueue {
 impl ApprovalQueue {
     /// Explicit transient inspection, never appended to an event/projection.
     pub(super) fn inspect(
-        &self,
+        &mut self,
         identity: &RunIdentity,
         connection: &str,
         requests: &[&PendingApproval],
         id: &str,
     ) -> Result<Value, SidecarError> {
-        let ticket = &self
+        let ticket = &mut self
             .entries
-            .iter()
+            .iter_mut()
             .find(|(ticket, queued)| ticket.id == id && !ticket.consumed && !queued)
             .ok_or_else(failure)?
             .0;
@@ -33,6 +33,7 @@ impl ApprovalQueue {
             if fingerprint(identity, connection, request)? != ticket.digest {
                 continue;
             }
+            ticket.inspected = true;
             let (command, cwd, grant_root, host, protocol) = match &request.action {
                 Action::Command {
                     command,
@@ -95,6 +96,30 @@ impl ApprovalQueue {
         Ok(())
     }
 
+    /// Requires a prior explicit inspection of this exact live fingerprint.
+    pub(super) fn validate_acceptance(&self, id: &str) -> Result<(), SidecarError> {
+        self.entries
+            .iter()
+            .any(|(ticket, queued)| {
+                ticket.id == id && ticket.inspected && !ticket.consumed && !queued
+            })
+            .then_some(())
+            .ok_or_else(failure)
+    }
+
+    pub(super) fn accept_once(&mut self, id: &str) -> Result<(), SidecarError> {
+        let (ticket, queued) = self
+            .entries
+            .iter_mut()
+            .find(|(ticket, queued)| {
+                ticket.id == id && ticket.inspected && !ticket.consumed && !queued
+            })
+            .ok_or_else(failure)?;
+        ticket.accept = true;
+        *queued = true;
+        Ok(())
+    }
+
     pub(super) fn retain_live(
         &mut self,
         identity: &RunIdentity,
@@ -117,7 +142,7 @@ impl ApprovalQueue {
         identity: &RunIdentity,
         connection: &str,
         request: &PendingApproval,
-    ) -> Result<bool, SidecarError> {
+    ) -> Result<Option<Decision>, SidecarError> {
         let digest = fingerprint(identity, connection, request)?;
         if let Some((ticket, queued)) = self
             .entries
@@ -125,17 +150,21 @@ impl ApprovalQueue {
             .find(|(ticket, _)| ticket.digest == digest)
         {
             if *queued {
-                ticket.record_decline(storage, identity, connection, request)?;
-                return Ok(true);
+                ticket.record_decision(storage, identity, connection, request)?;
+                return Ok(Some(if ticket.accept {
+                    Decision::AcceptOnce
+                } else {
+                    Decision::Decline
+                }));
             }
-            return Ok(false);
+            return Ok(None);
         }
         if self.entries.len() >= MAX_INTENTS {
             return Err(failure());
         }
         self.entries
             .push((ApprovalTicket::new(identity, connection, request)?, false));
-        Ok(false)
+        Ok(None)
     }
 }
 
@@ -181,7 +210,7 @@ fn valid_entries(entries: &[Value]) -> bool {
                 && binding
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                && entry["decision"] == "decline"
+                && matches!(entry["decision"].as_str(), Some("decline" | "acceptOnce"))
                 && entry["state"] == "intentRecorded"
                 && ids.insert(id)
                 && bindings.insert(binding)
@@ -237,6 +266,8 @@ pub(super) struct ApprovalTicket {
     id: String,
     digest: String,
     consumed: bool,
+    inspected: bool,
+    accept: bool,
 }
 
 impl ApprovalTicket {
@@ -249,18 +280,20 @@ impl ApprovalTicket {
             id: format!("approval_{}", Uuid::new_v4().simple()),
             digest: fingerprint(identity, connection, request)?,
             consumed: false,
+            inspected: false,
+            accept: false,
         })
     }
 
-    /// Current automatic decline only. A UI accept path needs separate authority
-    /// and immediate role/workspace/process/fence checks before transmission.
-    pub(super) fn record_decline(
+    /// Persist only intent; transport must independently recheck its boundary.
+    pub(super) fn record_decision(
         &mut self,
         storage: &mut Storage,
         identity: &RunIdentity,
         connection: &str,
         request: &PendingApproval,
     ) -> Result<(), SidecarError> {
+        let decision = if self.accept { "acceptOnce" } else { "decline" };
         self.consume(identity, connection, request, |id, digest| {
             let mut projection =
                 actual_run_projection(storage, &identity.run_id).map_err(|_| failure())?;
@@ -292,7 +325,7 @@ impl ApprovalTicket {
                 return Err(failure());
             }
             entries.push(
-                json!({"id":id,"binding":digest,"decision":"decline","state":"intentRecorded"}),
+                json!({"id":id,"binding":digest,"decision":decision,"state":"intentRecorded"}),
             );
             storage
                 .upsert_projection_records_atomic(vec![ProjectionUpsert {
@@ -341,6 +374,31 @@ mod tests {
         };
         let request = PendingApproval::parse(&BoundedObservation::new(json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","itemId":"item","startedAtMs":1,"kind":"command","command":"echo PRIVATE","cwd":"/snapshot"}}).to_string().into_bytes()).unwrap(), "thread", "turn").unwrap();
         (identity, request)
+    }
+
+    #[test]
+    fn acceptance_requires_inspection_and_is_single_use() {
+        let (identity, request) = context();
+        let ticket = ApprovalTicket::new(&identity, "connection", &request).unwrap();
+        let id = ticket.id.clone();
+        let mut queue = ApprovalQueue {
+            entries: vec![(ticket, false)],
+        };
+        assert!(queue.accept_once(&id).is_err());
+        queue
+            .inspect(&identity, "connection", &[&request], &id)
+            .unwrap();
+        queue.accept_once(&id).unwrap();
+        assert!(queue.ids().is_empty());
+        assert!(queue.accept_once(&id).is_err());
+        assert!(queue.decline(&id).is_err());
+        assert!(queue
+            .inspect(&identity, "connection", &[&request], &id)
+            .is_err());
+        queue
+            .retain_live(&identity, "replacement", &[&request])
+            .unwrap();
+        assert!(queue.entries.is_empty());
     }
 
     #[test]
