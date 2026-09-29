@@ -29,7 +29,7 @@ test("renderer smoke preload exposes the complete V7 bridge with ready admission
   assert.deepEqual(JSON.parse(JSON.stringify(await getProjectTree({}))), {
     projectId: "smoke_project",
     parentPath: "",
-    entries: [{ path: "src/example.ts", name: "example.ts", kind: "file" }],
+    entries: [{ path: "src", name: "src", kind: "directory" }],
     nextCursor: null,
   });
 });

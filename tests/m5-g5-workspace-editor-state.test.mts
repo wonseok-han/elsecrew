@@ -45,6 +45,41 @@ test("active chat tree/read/save/watch/diff는 V3 exact ref만 사용하고 V2 �
   assert.ok(bridge.calls.some((call) => call.includes("chat_a"))); controller.dispose();
 });
 
+test("file search uses only the active chat workspace and stops at a recovery gate", async () => {
+  const { bridge, controller } = await bound();
+  bridge.calls = [];
+  bridge.getWorkspaceTree = async input => {
+    assert.equal(input.workspaceIdentity, a.workspaceIdentity);
+    bridge.calls.push(`v3.tree:${input.chatId}`);
+    return { ...input, entries: [{ name: "a.ts", path: "a.ts", kind: "file" as const }], nextCursor: null };
+  };
+  const found = await controller.searchFiles("a.ts", new AbortController().signal);
+  assert.equal(found.matches[0].path, "a.ts");
+  assert.deepEqual(bridge.calls, ["v3.tree:chat_a"]);
+  controller.setActionBlocked(true);
+  await assert.rejects(controller.searchFiles("a", new AbortController().signal), { name: "AbortError" });
+  assert.deepEqual(bridge.calls, ["v3.tree:chat_a"]);
+  controller.dispose();
+});
+
+test("late search page from chat A cannot continue after switching to chat B", async () => {
+  const { bridge, controller } = await bound();
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  let aReads = 0;
+  bridge.getWorkspaceTree = async input => {
+    if (input.chatId === a.chatId) { aReads++; await pending; }
+    return { ...input, entries: [], nextCursor: null };
+  };
+  const search = controller.searchFiles("a", new AbortController().signal);
+  assert.equal(await controller.bindChat(b), true);
+  release();
+  await assert.rejects(search, { name: "AbortError" });
+  assert.equal(aReads, 1);
+  assert.equal(controller.snapshot().workspace?.chatId, b.chatId);
+  controller.dispose();
+});
+
 test("A에서 B로 clean switch하면 V3만 다시 로드하고, dirty A는 전환과 late B event를 막는다", async () => {
   const { bridge, controller } = await bound(); await controller.openFile("src/a.ts"); controller.updateText("src/a.ts", "draft\n"); assert.equal(await controller.bindChat(b), false); assert.equal(controller.snapshot().workspace?.chatId, "chat_a");
   bridge.emit({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar", streamId: "wrong", seq: 1, event: "workspace.changed", payload: { ...b, event: "file.changed", paths: ["src/a.ts"], rescanRequired: true } });

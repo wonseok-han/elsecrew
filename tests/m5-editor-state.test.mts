@@ -25,6 +25,40 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("cancel and restart cannot accumulate unresolved search reads", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    const pending = deferred<TreePageV1>(); let reads = 0;
+    bridge.getProjectTree = async () => { reads++; return pending.promise; };
+    const request = new AbortController();
+    const first = controller.searchFiles("file", request.signal);
+    request.abort();
+    for (let attempt = 0; attempt < 5; attempt++) await assert.rejects(controller.searchFiles("file", new AbortController().signal), /previous search read/);
+    assert.equal(reads, 1);
+    pending.resolve({ projectId: "project_01", parentPath: "", entries: [], nextCursor: null });
+    await assert.rejects(first, { name: "AbortError" });
+    const next = await controller.searchFiles("file", new AbortController().signal);
+    assert.equal(next.limited, false);
+    assert.equal(reads, 2);
+  } finally { controller.dispose(); }
+});
+
+test("file search leaves browsing state intact and rejects results after project closure", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    const before = controller.snapshot();
+    const pending = deferred<TreePageV1>();
+    bridge.getProjectTree = async () => pending.promise;
+    const result = controller.searchFiles("late", new AbortController().signal);
+    assert.equal(controller.snapshot(), before);
+    controller.dispose();
+    pending.resolve({ projectId: "project_01", parentPath: "", entries: [{ name: "late.ts", path: "late.ts", kind: "file" }], nextCursor: null });
+    await assert.rejects(result, { name: "AbortError" });
+  } finally { controller.dispose(); }
+});
+
 test("tree pagination replaces each bounded page and resets on folder navigation", async () => {
   class PagedBridge extends FakeBridge {
     requests: Array<{ parentPath: string; cursor: string | null }> = [];

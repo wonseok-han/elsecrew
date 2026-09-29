@@ -5,6 +5,7 @@ import { FILE_MAX_BYTES_V1, TREE_PAGE_MAX_ENTRIES_V1, type TreeEntryV1, type Wat
 import type { DiffFileDescriptorV1, DiffSummaryV1 } from "./contracts/diff-v1.ts";
 import type { FileVersionV1 } from "./contracts/file-v1.ts";
 import type { EventV1 } from "./contracts/protocol-v1.ts";
+import { FileSearchBusyError, searchFileNames, type FileSearchResult } from "./file-search.ts";
 
 export const MAX_RENDERED_TREE_ENTRIES = TREE_PAGE_MAX_ENTRIES_V1;
 export const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
@@ -124,6 +125,7 @@ export class ProjectEditorController {
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
   #actionBlocked = false;
+  #fileSearchActive = false;
   #state: EditorSnapshot = {
     project: null,
     workspace: null,
@@ -392,6 +394,24 @@ export class ProjectEditorController {
     const project = this.#state.project;
     if (!project) return;
     await this.#loadTree(project.id, this.#projectEpoch, parentPath);
+  }
+
+  async searchFiles(query: string, signal: AbortSignal): Promise<FileSearchResult> {
+    const project = this.#state.project, workspace = this.#state.workspace, epoch = this.#projectEpoch;
+    const check = () => {
+      if (!project || signal.aborted || this.#actionBlocked || !this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) throw new DOMException("Search context changed", "AbortError");
+    };
+    check();
+    if (this.#fileSearchActive) throw new FileSearchBusyError("previous search read is still pending");
+    this.#fileSearchActive = true;
+    try { return await searchFileNames(async (parentPath, cursor) => {
+      check();
+      const page = workspace
+        ? await this.#workspaceMethods()!.getWorkspaceTree({ ...workspace, parentPath, cursor })
+        : await this.#bridge.getProjectTree({ projectId: project!.id, parentPath, cursor });
+      check();
+      return page;
+    }, query, signal); } finally { this.#fileSearchActive = false; }
   }
 
   async loadNextTreePage(): Promise<void> {

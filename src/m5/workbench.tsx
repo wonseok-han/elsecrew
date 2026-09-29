@@ -16,6 +16,7 @@ import { WorkbenchDock } from "./workbench-dock.tsx";
 import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
+import { FileSearch } from "./file-search-view.tsx";
 
 type MonacoApi = typeof Monaco;
 
@@ -175,6 +176,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </PanelTitle>
           {snapshot.project ? (
             <>
+              <FileSearch key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} disabled={!admissionReady || snapshot.actionBlocked} search={(query, signal) => controller.searchFiles(query, signal)} open={path => { void controller.openFile(path); }} />
               <button className="m5-root" type="button" title={snapshot.project.root} onClick={() => void controller.loadTree("")}>{snapshot.treeParent || snapshot.project.root}</button>
               <div className="m5-file-list">
                 {snapshot.tree.map((entry) => (

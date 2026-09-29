@@ -100,12 +100,12 @@ window.m5 = {
     selectedPath: "/work/smoke",
     canonicalGitRoot: "/work/smoke",
   }),
-  getProjectTree: async () => {
+  getProjectTree: async ({ parentPath = "" }) => {
     if (!snapshotCreated) throw new Error("renderer requested the tree before creating its standalone snapshot");
     return {
       projectId: "smoke_project",
-      parentPath: "",
-      entries: [{ path: "src/example.ts", name: "example.ts", kind: "file" }],
+      parentPath,
+      entries: parentPath === "src" ? [{ path: "src/example.ts", name: "example.ts", kind: "file" }] : [{ path: "src", name: "src", kind: "directory" }],
       nextCursor: null,
     };
   },

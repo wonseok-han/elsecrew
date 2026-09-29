@@ -78,7 +78,14 @@ app.whenReady().then(async () => {
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
     projectButton.click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
-    document.querySelector(".m5-file-row").click();
+    const fileSearch = document.querySelector('[aria-label="파일 이름 또는 경로 찾기"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(fileSearch, 'EXAMPLE.TS');
+    fileSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    await ${waitFor("!document.querySelector('.m5-file-search button[type=submit]').disabled", "file search enabled")};
+    document.querySelector('.m5-file-search button[type=submit]').click();
+    await ${waitFor("document.querySelector('.m5-search-results button')?.textContent === 'src/example.ts'", "recursive file search result")};
+    if (document.querySelector('.m5-file-row').textContent !== 'src') throw new Error('search changed folder navigation');
+    document.querySelector('.m5-search-results button').click();
     await ${waitFor("document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount")};
     const localWorker = globalThis.MonacoEnvironment.getWorker("smoke", "editor");
     localWorker.terminate();

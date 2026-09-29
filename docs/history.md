@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (작업 복사본 파일 이름 검색)
+
+- 80ddcc1 기준 파일 패널에 하위 폴더의 이름/경로 검색·중단·결과 열기를 추가했다. 원본/파일 내용을 읽는 새 권한 없이 기존 tree RPC를 순차 재사용하며 symlink를 따라가지 않는다. 기존 폴더 탐색 상태와 편집 초안은 바꾸지 않는다. Karpathy 지침으로 검색 상태만 분리했다.
+- 한 번의 검색은 최대 100페이지·100결과·1000폴더, 다음 페이지 시작 전 10초 검사로 제한하고 한도 도달은 부분 결과로 명시한다. 진행 중 RPC는 기존 통신 예산을 따르며 10초 강제 취소를 주장하지 않는다. 요청 취소·프로젝트 epoch·정확한 chat workspace·actionBlocked를 각 읽기 전후에 대조해 늦은 결과를 버린다.
+- 검증: 최초 검색/편집 controller 41 PASS, 최신 검색·workspace 경계·숨김 Chromium 11 PASS. Chromium에서 대소문자 무관 하위 폴더 검색→결과 열기→도킹/편집 복구/후속 대화까지 통과했다. pnpm build·M5 renderer build PASS(기존 Monaco chunk 경고). mock tree의 잘못된 root 직계 파일 구조도 실제 directory→file 구조로 바로잡았다.
+- 검토 보완: 중단/재검색이 미완료 RPC를 누적할 수 있다는 지적을 반영해 controller의 단일 검색 소유권을 실제 promise 정리까지 유지한다. UI는 이전 검색 정리 중임을 안내한다. 취소 뒤 5회 재시도에도 read 1건, 정리 후 새 검색 허용·A→B 전환의 late page 폐기·폴더/시간 한도를 포함한 최신 집중 검사 45 PASS, 두 빌드 PASS.
+- 최종 숨김 Chromium 2 PASS/3.35초, 동일 독립 검토자 재검토 PASS, diff 검사 PASS 후 작업 단위 커밋한다. 진행 중 IPC 강제 취소가 아닌 결과 폐기/추가 요청 차단이라는 한계는 유지한다.
+- 전체 내용 검색·실제 공급자 활성화·검토/적용/복원·시안 완성과 출시 게이트는 별도 남는다. 실제 계정/유료 모델·사용자 프로젝트를 실행하지 않았고 main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (Monaco 읽기 전용 상태 갱신)
 
 - d44cba1 clean tree에서 updateOptions가 저장 중 여부만 반영하고 readOnly prop을 누락하는 결함을 고쳤다. 실제 컴포넌트를 AST로 추출하고 Monaco/hook double로 실행하는 회귀는 수정 전 admission lock 실패, 수정 후 통과했다.
