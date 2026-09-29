@@ -10,6 +10,9 @@ use cap_std::fs::{
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+mod stale_helper;
+
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";
 pub(crate) trait LoginProfile: Sync {
     fn revalidate(&self) -> Result<PathBuf, SidecarError>;

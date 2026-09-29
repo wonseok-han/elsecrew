@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (stale helper 원본 보존 복구 구현)
+
+- **구현**: a5ad8fb에서 macOS 내부 명시 호출형 복구를 추가했다. 기존 LoginProcess 예약으로 동시 로그인/실행을 막고, caller가 지정한 leaf/dev/inode·단일 helper symlink·고정 옛 대상 부재를 확인한 뒤 app-data의 UUID 보존 이름으로 nofollow/exclusive rename·양쪽 디렉터리 fsync한다. 인증은 열거나 복사하지 않고 runtime scanner도 완화하지 않는다. 자동 제품 호출은 없다.
+- **검토 수정**: 첫 테스트는 cap_std read_link가 absolute link 내용을 거절해 실패했으며 비추적 read_link_contents로 수정했다. 독립 검토자는 옛 실행 파일이 검증 중 다시 생기는 경우를 지적했다. 최종 rename 직전에도 대상 부재를 재검증하고 임시 target의 absent→present 회귀를 추가했다. 테스트는 실제 설치 경로 존재 여부에 의존하지 않게 분리했다.
+- **실제 복구**: 독립 재검토 PASS와 개발 앱/sidecar 부재 확인 후 사용자 승인된 복구 범위에서 exact leaf/dev16777232/inode166226396 helper를 보존 이동했다. 보존 위치는 m5 앱 데이터의 `codex-stale-helper-preserved-ec5db708-c8c2-4683-8dfd-72c926603381`이다. opt-in 실행 PASS/0.28초, 원본 directory inode 보존·같은 profile의 전체 runtime 파일 검사 PASS이며 로그인 예약도 정상 해제했다. vendor/모델은 호출하지 않았고 인증을 직접 변경하지 않았다. 파일 삭제는 없다.
+- **검증/다음**: profile11 PASS/2 ignored(초기 수정), 최종8-case 집중 PASS/1.29초, strict sidecar all-targets clippy PASS/3.36초. scoped fmt·diff 검사 및 독립 정적 재검토 PASS. stale 링크 차단은 해소됐으나 전체 제품 runtime 활성화·정상 helper 수명/도구/모델 네트워크 등은 별도 남는다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (실행 전 stale helper 링크 차단 원인 실측)
 
 - **진전**: 직전 턴은 종료·복구 상태 재확인뿐이었다. 이번에는 앱 프로필 tmp/arg0/codex-arg0ovNqx1/codex-execve-wrapper가 존재하지 않는 `/Applications/ChatGPT.app/Contents/Resources/codex`를 가리킴을 확인했다. 현재 pinned nested CLI와 다르며 로그인 실패로 해석하지 않는다.
@@ -170,6 +177,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **stale helper 보존 복구 완료(2026-09-29)**: exact 옛 tmp helper 디렉터리를 `codex-stale-helper-preserved-ec5db708-c8c2-4683-8dfd-72c926603381`로 inode 그대로 보존했다. 현재 앱 profile 전체 runtime 파일 검사가 통과하며 기존 stale 링크는 더 이상 차단이 아니다. 명시 복구만 구현했고 자동 허용/링크 scanner 완화는 없다. 정상 vendor helper의 실행 수명과 제품 활성화 검증은 별도 남는다.
 
 - **stale helper 차단 실측(2026-09-29)**: 실제 앱 tmp의 codex-execve-wrapper는 사라진 옛 번들 경로를 가리킨다. 고정 CLI offline 임시 프로필 재현에서 초기화/설정 조회와 cleanup은 성공하지만 dangling helper가 남아 recursive runtime scanner는 계속 거절했다. 로그인 잠금과 별개이며 재로그인/재부팅을 요구하지 않는다. 실제 임시 artifact의 보존 복구는 아직 실행하지 않았다.
 
