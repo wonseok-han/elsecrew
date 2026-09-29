@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+test("explicit recovery uses fixed provider and attempt without filesystem parameters",()=>{
+  for (const provider of ["codex","claude"] as const) {
+    assert.deepEqual(validateLoginRequest({action:"recover",attemptId:"repair-1",provider}),{action:"recover",attemptId:"repair-1",provider});
+  }
+  for (const input of [{action:"recover"},{action:"recover",attemptId:"../x"},{action:"recover",attemptId:"a",path:"/tmp/fence"},{action:"recover",attemptId:"a",force:true}]) assert.throws(()=>validateLoginRequest(input));
+});
 import { loginErrorMessage } from "../src/m5/provider-login-message.ts";
 test("login feedback distinguishes executable drift from authentication and recovery",()=>{
   assert.match(loginErrorMessage("codex","providerExecutableChanged"), /호환성 업데이트/);

@@ -13,6 +13,7 @@ use hello_agent_core::provider::vendor_observation::codex_login::LoginRequest;
 use hello_agent_core::provider::BoundedObservation;
 use std::collections::BTreeSet;
 use std::io::Write;
+use std::os::fd::AsRawFd;
 use std::process::Child;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
@@ -22,7 +23,7 @@ const PENDING: &str = "codex-login.pending";
 const MAX_TRACKED: usize = 256;
 // A future explicit recovery may inspect this evidence, but its presence alone
 // never admits work or releases an existing reservation.
-const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-v1\n";
+const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-locked-v2\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 
 fn failure() -> SidecarError {
@@ -50,6 +51,7 @@ impl Reservation {
         let mut file = directory
             .open_with(profile.pending_name(), &options)
             .map_err(|_| failure())?;
+        lock_exclusive(&file)?;
         file.write_all(b"hello-agent provider login pending v1\n")
             .map_err(|_| failure())?;
         file.sync_all().map_err(|_| failure())?;
@@ -142,6 +144,97 @@ impl Reservation {
             .map_err(|_| failure())?;
         sync_directory(&self.directory)
     }
+}
+
+fn lock_exclusive(file: &File) -> Result<(), SidecarError> {
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err(failure());
+    }
+    Ok(())
+}
+
+/// Explicit recovery only. Legacy/uncertain records remain fenced.
+/// A v2 marker proves the writer held the same exclusive lock until it exited.
+pub(crate) fn recover_confirmed_login(profile: &dyn LoginProfile) -> Result<(), SidecarError> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use std::io::Read;
+    let home = profile.revalidate()?;
+    let directory = profile.login_lease_directory()?;
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .custom_flags(libc::O_NONBLOCK);
+    let mut file = directory
+        .open_with(profile.pending_name(), &options)
+        .map_err(|_| failure())?;
+    let meta = file.metadata().map_err(|_| failure())?;
+    if !meta.is_file() || meta.len() > 16 * 1024 {
+        return Err(failure());
+    }
+    lock_exclusive(&file)?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| failure())?;
+    if bytes.len() as u64 != meta.len()
+        || !bytes.ends_with(LOGIN_TERMINATED)
+        || bytes.contains(&b'\r')
+    {
+        return Err(failure());
+    }
+    let text = std::str::from_utf8(&bytes[..bytes.len() - LOGIN_TERMINATED.len()])
+        .map_err(|_| failure())?;
+    if !text.ends_with('\n') {
+        return Err(failure());
+    }
+    let mut lines = text.lines();
+    if lines.next() != Some("hello-agent provider login pending v1") {
+        return Err(failure());
+    }
+    let mut recorded = BTreeSet::new();
+    for line in lines {
+        let (pid, start) = line.split_once(' ').ok_or_else(failure)?;
+        let identity = ProcIdentity {
+            pid: pid.parse().map_err(|_| failure())?,
+            start_us: start.parse().map_err(|_| failure())?,
+        };
+        if identity.pid <= 1
+            || identity.start_us <= 0
+            || line != format!("{} {}", identity.pid, identity.start_us)
+            || !recorded.insert(identity)
+            || recorded.len() > MAX_TRACKED
+        {
+            return Err(failure());
+        }
+    }
+    let reservation = Reservation {
+        name: profile.pending_name(),
+        directory,
+        file,
+        recorded,
+        failed: false,
+    };
+    reservation.verify()?;
+    for identity in &reservation.recorded {
+        if !matches!(
+            SystemProcTable.probe(*identity),
+            hello_agent_core::proctree::ProbeResult::Gone
+        ) {
+            return Err(failure());
+        }
+    }
+    if profile.revalidate()? != home
+        || !crate::provider_profile::same_directory(
+            &reservation.directory,
+            &profile.login_lease_directory()?,
+        )?
+    {
+        return Err(failure());
+    }
+    // Same inode remains exclusively locked through validated unlink and sync.
+    reservation.release()
 }
 
 fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
@@ -1216,6 +1309,85 @@ mod tests {
                 .is_err());
             process.finish().unwrap();
             assert!(matches!(SystemProcTable.probe(root), ProbeResult::Gone));
+        }
+    }
+
+    #[test]
+    fn explicit_recovery_requires_closed_owner_and_valid_termination_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process.launch(cat).unwrap();
+        let home = binding.revalidate().unwrap();
+        let obstacle = home.join("unexpected-artifact");
+        std::fs::write(&obstacle, b"preserve").unwrap();
+        assert!(process.finish().is_err());
+        std::fs::remove_file(obstacle).unwrap();
+        assert!(
+            recover_confirmed_login(&binding).is_err(),
+            "live owner still holds lock"
+        );
+        drop(process);
+        recover_confirmed_login(&binding).unwrap();
+        assert!(!temp.path().join(PENDING).exists());
+        LoginProcess::reserve(&binding).unwrap().finish().unwrap();
+    }
+
+    #[test]
+    fn explicit_recovery_rejects_legacy_malformed_and_unsafe_files() {
+        use std::os::unix::fs::PermissionsExt;
+        for case in [
+            "legacy",
+            "v1-marker",
+            "partial",
+            "malformed",
+            "directory",
+            "symlink",
+            "hardlink",
+            "writable",
+            "oversized",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let binding = profile(&temp);
+            let path = temp.path().join(PENDING);
+            let valid = format!(
+                "hello-agent provider login pending v1\n{}",
+                std::str::from_utf8(LOGIN_TERMINATED).unwrap()
+            );
+            let source = temp.path().join("source");
+            std::fs::write(&source, valid.as_bytes()).unwrap();
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+            match case {
+                "directory" => std::fs::create_dir(&path).unwrap(),
+                "symlink" => std::os::unix::fs::symlink(&source, &path).unwrap(),
+                "hardlink" => std::fs::hard_link(&source, &path).unwrap(),
+                _ => {
+                    let bytes = match case {
+                        "legacy" => "hello-agent provider login pending v1\n42 123\n".to_owned(),
+                        "v1-marker" => {
+                            "hello-agent provider login pending v1\nlogin-processes-terminated-v1\n"
+                                .to_owned()
+                        }
+                        "partial" => valid.trim_end().to_owned(),
+                        "malformed" => valid.replace("v1\n", "v1\n00 1\n"),
+                        "oversized" => "x".repeat(16385),
+                        _ => valid.clone(),
+                    };
+                    std::fs::write(&path, bytes).unwrap();
+                    std::fs::set_permissions(
+                        &path,
+                        std::fs::Permissions::from_mode(if case == "writable" {
+                            0o666
+                        } else {
+                            0o600
+                        }),
+                    )
+                    .unwrap();
+                }
+            }
+            assert!(recover_confirmed_login(&binding).is_err(), "{case}");
+            assert!(path.symlink_metadata().is_ok(), "{case}");
+            assert_eq!(std::fs::read(&source).unwrap(), valid.as_bytes());
         }
     }
 

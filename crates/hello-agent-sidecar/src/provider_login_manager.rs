@@ -73,6 +73,28 @@ impl LoginManager {
         }
         match action {
             "status" => {}
+            "recover" => {
+                if self.worker.is_some() {
+                    return Err(invalid());
+                }
+                let result = if self.claude {
+                    crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)
+                        .and_then(|profile| {
+                            crate::provider_login_process::recover_confirmed_login(&profile)
+                        })
+                } else {
+                    CodexProfileBinding::from_storage(storage).and_then(|profile| {
+                        crate::provider_login_process::recover_confirmed_login(&profile)
+                    })
+                };
+                self.attempt = id.map(str::to_owned);
+                *self.view.lock().unwrap_or_else(|e| e.into_inner()) = match result {
+                    Ok(()) => json!({"state":"idle","attemptId":id,"authUrl":null,"error":null}),
+                    Err(error) => {
+                        json!({"state":"failed","attemptId":id,"authUrl":null,"error":error.kind()})
+                    }
+                };
+            }
             "submitCode" => {
                 let code = params
                     .get("code")
@@ -513,6 +535,42 @@ mod tests {
         assert!(manager.cancel.load(Ordering::Acquire));
         *manager.view.lock().unwrap() = json!({"state":"failed","attemptId":"test","authUrl":null,"error":"providerLoginRecoveryRequired"});
         assert!(!manager.prepare_quit());
+    }
+
+    #[test]
+    fn explicit_recovery_resets_failure_without_starting_a_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut owner = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
+        let obstacle = home.join("unrecognized-artifact");
+        std::fs::write(&obstacle, b"synthetic").unwrap();
+        assert!(owner.finish().is_err());
+        std::fs::remove_file(obstacle).unwrap();
+        drop(owner);
+        let mut manager = LoginManager::default();
+        let status = manager
+            .request(&storage, &json!({"action":"recover","attemptId":"repair"}))
+            .unwrap();
+        assert_eq!(status["state"], "idle");
+        assert!(status["error"].is_null());
+        assert!(manager.worker.is_none());
+        assert!(!root.join("codex-login.pending").exists());
+        assert!(!home.join("auth.json").exists());
+        // A legacy record is not upgraded by the recovery action.
+        std::fs::write(
+            root.join("codex-login.pending"),
+            b"hello-agent provider login pending v1\n",
+        )
+        .unwrap();
+        let status = manager
+            .request(&storage, &json!({"action":"recover","attemptId":"legacy"}))
+            .unwrap();
+        assert_eq!(status["state"], "failed");
+        assert_eq!(status["error"], "providerLoginRecoveryRequired");
+        assert!(root.join("codex-login.pending").exists());
     }
 
     #[test]

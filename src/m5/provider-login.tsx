@@ -57,6 +57,7 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
     </form>}
     {waiting ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>로그인 취소</button>
       : <button disabled={disabled||busy||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{status.state==="connected"?"연결됨":`${name} 로그인`}</button>}
+    {status.error === "providerLoginRecoveryRequired" && <div><p>종료가 확인된 기록만 복구해요. 로그인 정보는 지우지 않으며, 증거가 부족하면 잠금을 유지해요.</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>연결 잠금 복구</button></div>}
     {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error)}</p><details><summary>도움 요청용 정보</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
   </section>;
 }

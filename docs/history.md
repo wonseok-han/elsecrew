@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (종료 증거 기반 명시적 연결 복구)
+
+- **구현**: `b269926`에서 fixed provider.login `recover`와 로그인 화면의 연결 잠금 복구 버튼을 연결했다. 새 reservation은 exclusive flock을 보유하며 종료 표시를 locked-v2로 올려 lock 미보유 구버전 v1을 복구 대상에서 제외한다. 복구는 nofollow/nonblock·16KiB 제한·정확한 header/marker·canonical pid/start·중복/256개 제한·uid/mode/nlink/inode·exclusive lock·기록 신원 모두 Gone·프로필/부모 capability 재검증 뒤에만 기존 release를 호출한다. live worker는 거절하고 native terminal 보류와 legacy/불확실 fence는 해제하지 않는다.
+- **검증**: process 20 PASS/8.58초, manager 7 PASS/0.87초(실계정 3 ignored), Node 로그인 계약 6 PASS, pnpm build PASS, strict sidecar all-targets clippy PASS/3.01초. 실제 임시 프로세스의 owner lock 유지/종료 후 복구와 malformed/legacy/link/hardlink/dir/writable/oversize 거절을 확인했다. 동일 독립 검토자 scoped PASS. 실제 Electron 화면 클릭은 아직 검증하지 않았다.
+- **다음/경계**: 실제 앱 pending은 종료 증거 없는 이전 기록이므로 이번 경로로 풀리지 않으며 건드리지 않았다. 이전 기록에 대해 신뢰할 수 있는 별도 종료 증명이 필요하다. 프로필 원문을 렌더링하거나 pid를 강제 종료하지 않는다. same-UID 적대적 바꿔치기는 기존 point-in-time 한계이며 marker는 암호학적 서명이 아니다. 실제 provider 재호출·main 병합/push 없음. 앱 전체 미완료다.
+
 ### 2026-09-29 · by GPT-6 Astra (로그인 종료 증거의 재시작 보존)
 
 - **구현**: `39645ad`에서 로그인/조회 owner가 종료·reap·누적 신원 저장을 확인한 뒤 프로필을 재검증하기 전에 보유 pending fd에 `login-processes-terminated-v1`을 쓰고 fsync·파일 신원을 재확인하도록 했다. 기록 실패는 예약을 실패 상태로 고정하고 잠금을 보존한다. 실제 run은 terminal DB 계약을 유지하도록 이 표시를 쓰지 않는다. 표시만으로 자동 해제하는 reader/API는 아직 없다.
@@ -69,6 +75,7 @@
 
 - **종료/잠금 진단 분리(2026-09-29)**: ProcessClosureEvidence.termination_confirmed는 추적한 프로세스 종료/reap와 증거 저장까지 확인한 진단값이다. 프로필·예약 검증까지 통과한 confirmed를 대신해 실행/잠금 해제 권한으로 쓰지 않는다. 과거 pending은 이 증거가 없으므로 PID가 없다는 사실로 confirmed를 재구성하지 않는다.
 - **로그인 종료 표시(2026-09-29)**: 새 로그인/조회는 clean 종료 뒤 profile 재검증 전에 pending 마지막 줄에 login-processes-terminated-v1을 fsync한다. native run의 terminal 보류에는 쓰지 않으며 표시만으로 자동 해제하지 않는다. legacy pending에 소급해 표시를 붙이지 않는다.
+- **명시적 복구 갱신(2026-09-29)**: 후속 구현은 flock owner와 locked-v2 종료 표시만 복구 대상으로 삼는다. v1 표시도 자동 승격하지 않는다. UI recover는 제한된 기록/메타데이터·OS Gone·capability 검증 후만 해제하며, 실제 현재 legacy pending은 여전히 미해결이다.
 
 - **실제 offline 설정 호환성 PASS, MDM 검증은 미완료(2026-09-29)**: 현재 exact CLI/helper의 config-only 검사는 기존 정책에서 `Failed to synchronize managed preferences`로 실패했으나 opendirectoryd.libinfo Mach 조회 한 항목 추가로 PASS/2.49초다. 다른 설정/Mach/공유 메모리 허용은 제거했고 config 원문 불변·auth 미생성·cleanup confirmed를 확인했다. 독립 검토는 이 변경에 scoped PASS이나, inaccessible MDM layer가 upstream에서 생략되는 false PASS 위험은 닫히지 않았다. 관리 정책 가시성/명시적 거절 확인 전 제품 admission 근거로 사용하지 않으며 runtime은 blocked 유지다.
 
