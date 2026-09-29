@@ -9,6 +9,11 @@ use hello_agent_core::provider::vendor_observation::{
 };
 use std::collections::VecDeque;
 
+const PREFLIGHT_BUDGET: Duration = Duration::from_secs(30);
+// A coding turn includes tool execution and approval waiting, not just handshake
+// I/O. Keep a hard total bound; activity must never restart this timer.
+const TURN_BUDGET: Duration = Duration::from_secs(10 * 60);
+
 enum Stage {
     Preflight {
         flow: PreflightExchange,
@@ -25,6 +30,7 @@ pub(super) struct TextSession {
     text: String,
     pending: Vec<PendingApproval>,
     started: Instant,
+    turn_started: Option<Instant>,
     outgoing: VecDeque<NativeFrame>,
     transmitting: bool,
 }
@@ -49,18 +55,38 @@ impl TextSession {
             text: text.into(),
             pending: Vec::new(),
             started: Instant::now(),
+            turn_started: None,
             outgoing: VecDeque::new(),
             transmitting: false,
         })
     }
 
     fn remaining(&self, cancel: &AtomicBool) -> Result<Duration, SidecarError> {
+        self.remaining_at(Instant::now(), cancel)
+    }
+
+    fn remaining_at(&self, now: Instant, cancel: &AtomicBool) -> Result<Duration, SidecarError> {
         if cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
-        Duration::from_secs(30)
-            .checked_sub(self.started.elapsed())
+        let (started, budget) = self
+            .turn_started
+            .map_or((self.started, PREFLIGHT_BUDGET), |started| {
+                (started, TURN_BUDGET)
+            });
+        budget
+            .checked_sub(now.saturating_duration_since(started))
+            .filter(|remaining| !remaining.is_zero())
             .ok_or_else(failure)
+    }
+
+    fn begin_turn_budget(&mut self, now: Instant, cancel: &AtomicBool) -> Result<(), SidecarError> {
+        self.remaining_at(now, cancel)?;
+        if self.turn_started.is_some() {
+            return Err(failure());
+        }
+        self.turn_started = Some(now);
+        Ok(())
     }
 
     /// Consumes at most one received frame per call; never sleeps for a response.
@@ -122,6 +148,7 @@ impl TextSession {
                             turn.take_frame().map_err(|_| failure())?,
                         ));
                         self.remaining(cancel)?;
+                        self.begin_turn_budget(Instant::now(), cancel)?;
                         self.stage = Some(Stage::Starting(turn));
                         return Ok(None);
                     }
@@ -212,8 +239,49 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
+    fn turn_budget_is_separate_bounded_and_cannot_be_refreshed() {
+        let make = || {
+            let flow = PreflightExchange::new(
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium",
+                },
+                "/profile",
+            )
+            .unwrap();
+            TextSession::new(flow, std::path::Path::new("/workspace"), "goal").unwrap()
+        };
+        let cancel = AtomicBool::new(false);
+        let mut expired = make();
+        assert!(expired
+            .begin_turn_budget(expired.started + PREFLIGHT_BUDGET, &cancel)
+            .is_err());
+        assert!(expired.turn_started.is_none());
+        let mut session = make();
+        let turn = session.started + Duration::from_secs(29);
+        session.begin_turn_budget(turn, &cancel).unwrap();
+        // Crossing the old 30s session deadline is valid during the actual turn.
+        assert_eq!(
+            session
+                .remaining_at(turn + Duration::from_secs(31), &cancel)
+                .unwrap(),
+            Duration::from_secs(569)
+        );
+        assert!(session
+            .begin_turn_budget(turn + Duration::from_secs(32), &cancel)
+            .is_err());
+        assert_eq!(session.turn_started, Some(turn));
+        assert!(session.remaining_at(turn + TURN_BUDGET, &cancel).is_err());
+        cancel.store(true, Ordering::Release);
+        assert!(session
+            .remaining_at(turn + Duration::from_secs(1), &cancel)
+            .is_err());
+        assert_eq!(session.turn_started, Some(turn));
+    }
+
+    #[test]
     fn stalled_peer_yields_and_failed_session_cannot_resume_or_release_owner() {
-        for case in ["cancel", "deadline", "handler"] {
+        for case in ["cancel", "deadline", "turn-deadline", "handler"] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().canonicalize().unwrap();
             let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
@@ -266,6 +334,7 @@ mod tests {
             match case {
                 "cancel" => cancel.store(true, Ordering::Release),
                 "deadline" => session.started = Instant::now() - Duration::from_secs(31),
+                "turn-deadline" => session.turn_started = Some(Instant::now() - TURN_BUDGET),
                 _ => {
                     // Force the next observation checkpoint without changing the transport.
                     std::thread::sleep(Duration::from_millis(110));
@@ -276,6 +345,7 @@ mod tests {
                 .is_err());
             cancel.store(false, Ordering::Release);
             session.started = Instant::now();
+            session.turn_started = None;
             assert!(session
                 .advance(&mut process, &cancel, &mut observe)
                 .is_err());

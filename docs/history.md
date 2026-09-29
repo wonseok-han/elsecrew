@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (native 작업 시간과 연결 확인 시간 분리)
+
+- **발견/구현**: clean ab72048에서 실제 시작 연결을 조사하던 중 incremental TextSession이 초기화부터 최종 답변까지 전체를 30초로 제한함을 확인했다. toy 통신 제한을 실제 코딩 작업 한도로 사용하면 정상 장시간 작업도 중단된다. preflight/thread 준비 30초는 유지하고 turn 요청 queue 생성부터 10분의 별도 hard-total 예산을 적용했다. partial write·시작 응답·출력·도구·승인 대기 모두 같은 단조 시각 기준이며 활동으로 갱신하지 않는다. 제품 runtime 활성화나 네트워크 권한 변경은 아니다.
+- **검증**: 시간 전환은 단1회이며 preflight 만료 후 전환·예산 재설정·정확한 만료 경계·취소를 결정적 시각 검사로 검증했다. toy live pipe에서 turn 만료도 stage를 소모하고 명시 cleanup 전까지 예약을 유지함을 확인했다. preflight7 PASS/2 ignored(14.53초), 마지막 turn 만료 사례 추가 후 incremental2 PASS/1.28초. 동일 독립 검토자 scoped 정적 PASS다.
+- **다음**: 실제 native start/capability·모델 네트워크/도구/승인 UI·제품 최종 검증은 남는다. 실제 공급자/계정/유료 모델을 호출하지 않았다. 이전 턴의 stale helper 복구는 완료 상태를 유지하며 main 병합/push 없음.
+- **원장 회귀**: 기존 reserved interactions 통합 검사 PASS/38.33초. 일반 완료·역할 변경·취소·quit·종료 저장 실패/재시작 복구 경로가 유지됨을 확인했다. 이 검사와 타이머 경계 회귀를 조합하며 실제 10분 모델 실행을 검증했다고 주장하지 않는다.
+
 ### 2026-09-29 · by GPT-6 Astra (stale helper 원본 보존 복구 구현)
 
 - **구현**: a5ad8fb에서 macOS 내부 명시 호출형 복구를 추가했다. 기존 LoginProcess 예약으로 동시 로그인/실행을 막고, caller가 지정한 leaf/dev/inode·단일 helper symlink·고정 옛 대상 부재를 확인한 뒤 app-data의 UUID 보존 이름으로 nofollow/exclusive rename·양쪽 디렉터리 fsync한다. 인증은 열거나 복사하지 않고 runtime scanner도 완화하지 않는다. 자동 제품 호출은 없다.
@@ -177,6 +184,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **native 시간 예산 분리(2026-09-29)**: 이전 전체30초 toy 제한을 연결/thread 준비30초와 turn queue 생성부터 총10분으로 분리했다. 도구·승인 대기 포함, 활동 갱신 없음, 취소·sticky failure·기존 cleanup 경계 유지. 실제 모델 장시간 실측/제품 활성화는 아직 별도다.
 
 - **stale helper 보존 복구 완료(2026-09-29)**: exact 옛 tmp helper 디렉터리를 `codex-stale-helper-preserved-ec5db708-c8c2-4683-8dfd-72c926603381`로 inode 그대로 보존했다. 현재 앱 profile 전체 runtime 파일 검사가 통과하며 기존 stale 링크는 더 이상 차단이 아니다. 명시 복구만 구현했고 자동 허용/링크 scanner 완화는 없다. 정상 vendor helper의 실행 수명과 제품 활성화 검증은 별도 남는다.
 
