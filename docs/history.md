@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (원본 반영·복원 구현 준비)
+
+- 1517906의 제품 방향 §5.5/§6.5/M5.3과 ProjectManager·SourceRepository·source_digest를 대조했다. 현행 diff/원본 Git identity는 원본 working tree/index 무변경의 증거가 아니며 적용·복원 writer는 아직 없다. 일반 git status를 preflight로 추가하지 않고 raw 파일/기준 tree 비교가 필요하다. 공식 Git config 문서로 fsmonitor hook 실행 경계도 확인했다.
+- proposals/m5-change-application.md에 A1 source 비교→A2 immutable review→A3 복원 지점/intent→A4 적용·재시작 복구→A5 UI 계약 초안을 작성하고 README 색인을 추가했다. 원본 쓰기·사용자 프로젝트 시험·제품 활성화 권한은 추가하지 않았다. 같은 UID 외부 편집 경쟁과 복원 지점 용량/보존 정책은 명시 미해결이다.
+- 독립 검토의 시작 baseline 누락 지적을 반영해 새 snapshot 생성 때 raw source/index receipt를 영속 결속하는 A1 정책을 추가했다. tracked/index clean 조건과 untracked/ignored 원본 파일 보존·변경/충돌 거절을 구분한다. receipt 없는 기존 snapshot은 읽기/검토만 유지하며 현재 source에서 과거 baseline을 소급 생성하지 않는다. 이 제안은 아직 구현되지 않았다.
+- Karpathy 지침으로 기존 capability/plumbing/원장을 재사용할 경계와 검증부터 정리했다. 문서 참조·diff 검사를 수행했으며 runtime 테스트를 실행한 것으로 주장하지 않는다. 실제 Codex command/exec의 무과금 임시 격리 시험은 사용자에게 별도 비동기 승인을 요청했으며 답변 전 실행하지 않는다. 다음은 A1 내부 읽기 전용 검증 구현이다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (미저장 역할 설정 보호)
 
 - 2d61d02의 역할 설정창에서 닫기/재조회가 입력을 조용히 버리는 경로를 보완했다. 미저장 표시와 계속 편집/명시 변경 버리기 확인을 추가하고 확인 중 입력·저장·재조회를 잠근다. 설정창 열기 때 기존 editor selection을 무효화하고 프로젝트 선택·저장 목록·toolbar 토글 우회를 막는다. 저장 형식·IPC·원장 변경 없음.
