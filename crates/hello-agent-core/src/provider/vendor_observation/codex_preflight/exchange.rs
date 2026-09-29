@@ -417,6 +417,61 @@ mod tests {
     }
 
     #[test]
+    fn reported_managed_layers_cannot_be_ignored_or_recovered_on_same_connection() {
+        // This tests reported provenance, not visibility of host MDM policy.
+        // Inaccessible/omitted requirements need separate admission evidence.
+        for source in [
+            "mdm",
+            "cloudRequirements",
+            "cloudManagedConfig",
+            "legacyManagedConfigFile",
+            "legacyManagedConfigMdm",
+            "unknown",
+        ] {
+            for append in [false, true] {
+                for disabled in [false, true] {
+                    let mut flow = PreflightExchange::new(
+                        &ExpectedProfile {
+                            model: "test-model",
+                            reasoning_effort: "medium",
+                        },
+                        "/app/profile",
+                    )
+                    .unwrap();
+                    let values = results();
+                    flow.next_frames().unwrap();
+                    flow.accept(&reply(0, &values[0])).unwrap();
+                    flow.next_frames().unwrap();
+                    let mut config = values[1].clone();
+                    let layer = json!({
+                        "name": {"type": source},
+                        "config": {"private_marker": "PRIVATE_MANAGED_POLICY"},
+                        "disabledReason": if disabled { Some("PRIVATE_MANAGED_REASON") } else { None },
+                    });
+                    if append {
+                        config["layers"].as_array_mut().unwrap().push(layer);
+                    } else {
+                        config["layers"][2] = layer;
+                    }
+                    let error = flow.accept(&reply(1, &config)).unwrap_err();
+                    assert!(!error.to_string().contains("PRIVATE_MANAGED"));
+                    assert_eq!(
+                        flow.state(),
+                        PreflightState::Failed,
+                        "{source}/{append}/{disabled}"
+                    );
+                    assert!(flow.accept(&reply(1, &values[1])).is_err());
+                    assert!(flow.next_frames().is_err());
+                    assert!(flow
+                        .start_thread(std::path::Path::new("/managed/snapshot"))
+                        .is_err());
+                    assert!(flow.into_text_turn("must not send").is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn configuration_only_cannot_query_accounts_models_or_start_threads() {
         let mut flow = PreflightExchange::configuration_only(
             &ExpectedProfile {

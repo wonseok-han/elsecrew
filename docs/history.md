@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (보고된 관리 계층 거절 회귀와 다음 조회 범위)
+
+- **진전**: `08af26b`의 실제 config-only 호환성 PASS 이후, 메인은 설정 출처 검증을 확인했다. 추가/치환·활성/disabled·MDM/cloud/legacy/unknown 조합 24사례에서 보고된 관리 계층을 거절하고 같은 연결의 후속 정상 응답·thread/turn 승격도 거절하며 private 내용을 오류에 노출하지 않는 회귀를 추가했다. 제품 검증 로직과 runtime 활성화는 변경하지 않았다.
+- **근거/검증**: OpenAI Docs로 [공식 app-server API](https://learn.chatgpt.com/docs/app-server#api-overview)를 검색·읽어 `config/read`와 별도 `configRequirements/read`의 차이를 확인했다. 후자는 requirements.toml/MDM의 관리 정책을 조회하므로 현재 config 세 layer 일치만으로 정책 검증 완료를 선언하지 않는다. core preflight 20 PASS/0.01초(신규 24사례 포함). 누락된 관리 계층의 가시성은 이 회귀로 증명하지 못한다.
+- **다음/권한**: 앱 전용 로그인 프로필의 account/read·model/list 조회를 사용자에게 비동기로 요청했고 아직 응답은 없다. 기존 승인은 새 임시 환경의 initialize/config/read에 한정되므로 실제 계정 조회나 별도 requirements RPC를 임의 실행하지 않았다. 다음 구현은 관리 정책 응답/가시성 확인과 계정·모델 대조를 실행 입장에 결합하는 일이다. 실제 모델 실행·프로젝트 변경·main 병합/push 없음.
+- **마감**: strict core all-targets clippy·scoped fmt·diff PASS. 동작 변경 없는 회귀/문서 3파일만 직접 검토 후 커밋하며 실제 provider는 실행하지 않았다. 후속 조회 승인을 받을 때 requirements 조회도 명시적으로 포함하고, 유료 모델 실행/사용자 프로젝트 변경과 구분한다.
+
 ### 2026-09-29 · by GPT-6 Astra (오프라인 설정 호환성 최소 정책 수정)
 
 - **구현/실측**: `2bddc6d`에서 메인이 Karpathy 지침에 따라 OS 정책 후보를 좁혔다. Codex 도메인 설정 읽기만 추가한 검사 FAIL/2.46초, cfprefsd Mach까지 추가한 검사도 같은 sync 경고로 FAIL/2.48초였다. 소유 PID 15705 로그에 사용자 식별/설정 캐시 거절이 남았다. opendirectoryd.libinfo와 캐시 읽기를 추가해 PASS 후 불필요한 허용을 제거했으며, 최종적으로 opendirectoryd.libinfo Mach 조회 한 줄만으로 initialize/config/read PASS/2.49초·cleanup confirmed·config 불변·auth 미생성을 확인했다. 임시 core 진단은 제거했고 기존 auth/사용자 프로젝트/account/model/thread/turn은 사용하지 않았다.
