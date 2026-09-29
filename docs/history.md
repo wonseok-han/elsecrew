@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (자연 종료와 root 회수 사이 경합 수정)
+
+- **진전/재현**: 직전 턴은 복구 상태 재확인으로 개발 진전이 없었다. cec60ea의 미커밋 진단을 이어 200회 cat 종료 검사 중 34번째에서 tracker Confirmed/reaped=false/evidence_failed=false 실패를 재현했다. 프로세스 신원 소멸을 확인해도 root 종료 결과 회수는 즉시 완료되지 않을 수 있다.
+- **수정**: try_wait가 Ok(None)이면 기존 TERM+KILL 총 8초 종료 예산 안에서 pending으로 유지한다. 회수 성공·증거 저장·프로필 재검증 전 잠금을 해제하지 않고, 만료/오류/관측 불확실은 계속 실패다. 동기 cleanup도 제한 시간 내 회수를 기다린다. 첫 수정의 sync/poll 공용화는 실패 보고 캐시 때문에 재시도 정리를 생략하는 회귀가 있어 철회하고 기존 fresh terminate 경로를 유지했다. 진단 출력은 제거했다.
+- **검증**: 결정적 Gone/미회수 회귀는 대기 중 잠금 유지·회수 후 성공·만료 뒤 실패 고정을 검사한다. 최종 lifecycle21 PASS/3 ignored/9.56초, 별도 실제 임시 cat200회 PASS/55.19초. 동일 검토자 최종 scoped 정적 PASS. 이전에 관측한 모든 cleanup 오류가 같은 원인이었다고 확대하지 않는다.
+- **다음**: 모델 중계 서비스·native 실행 입장·도구/승인 UI·제품 최종 검증은 남는다. 실제 계정/모델은 호출하지 않았고 main 병합/push 없음. Karpathy 지침에 따라 재현된 회수 경합만 고쳤다.
+- **마감 검증**: reserved interactions 원장 통합 회귀 PASS/38.61초, OS loopback/proxy 수명 검사4 PASS/0.99초, strict sidecar all-targets clippy PASS/2.71초, scoped rustfmt·diff 검사 PASS. 이전 종료/복구 상태 확인 기록과 함께 작업 단위 커밋한다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 요청 현재 상태 확인)
+
+- **확인**: cec60ea에서 외부 읽기 전용 프로세스 조회 결과 개발 Electron/hello-agent sidecar는 이미 종료되어 있었다. 활성 codex-login.pending은 없고, legacy 잠금 보존본(inode168613811)과 stale helper 보존본(inode166226396)은 유지된다. 이전 종료·보존 복구가 완료된 상태이므로 중복 종료/복구나 파일 삭제를 실행하지 않았다.
+- **경계/다음**: 인증 정보는 열거나 변경하지 않았다. 기존 provider_login_process.rs의 미커밋 진단 변경을 보존했다. 이번 요청의 복구 상태와 간헐적 cleanup 실패 원인 조사·제품 실행 연결 미완료는 구분한다. 재부팅 불필요, main 병합/push 없음. 이번 확인 기록은 미커밋으로 남긴다.
+
 ### 2026-09-29 · by GPT-6 Astra (중계 listener와 실행 owner 수명 결합)
 
 - **구현/검토**: 직전 미커밋 포트 경계의 독립 검토 지적을 수정했다. ModelProxyCommand가 Command와 listener를 소유하고 소비형 launch로 기존 LoginProcess에 함께 전달한다. raw Command/Child를 반환하지 않으며 owner가 확인된 종료 후 listener를 놓는다. 불확실 Drop은 descriptor를 sidecar 종료까지 보존해 살아 있을 수 있는 자손의 포트 재사용을 막는다. 일반 로그인은 listener=None으로 기존 동작을 유지한다. 같은 검토자가 scoped PASS했다.
@@ -199,6 +212,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **macOS 종료/회수 경합(2026-09-29)**: identity Gone과 Child::try_wait의 종료 결과 준비는 동시에 보장되지 않는다. LoginProcess는 confirmed tree에서 Ok(None)이면 원래 8초 종료 예산 내 pending을 유지하며 root 회수까지 fence/listener를 놓지 않는다. 동기 재시도는 TreeTracker::terminate의 fresh 관측을 유지해야 cached failure로 생존 프로세스 정리를 건너뛰지 않는다. 실패 receipt/integrity 오류를 재시도로 성공 승격하지 않는다.
 
 - **중계 endpoint 소유권(2026-09-29)**: loopback tcp4 단일 포트 정책만으로 listener 신원 수명이 보장되지 않는다. opaque command가 listener를 lifecycle owner에 옮기도록 수정했고, 종료 확인 전 보유·불확실 Drop 시 sidecar 종료까지 descriptor 보존을 검사했다. 상류 broker 인증/목적지/실제 모델 통신은 아직 미완료이며 제품 활성화에 사용할 수 없다. cat 자연 종료 cleanup 실패 1회는 원인 미확정으로 남긴다.
 

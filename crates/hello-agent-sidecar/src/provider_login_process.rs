@@ -921,11 +921,8 @@ impl<'a> LoginProcess<'a> {
         if let Some(identity) = self.cleanup_identity_once.take() {
             tracker.track_identity(identity);
         }
-        let report = tracker.poll_termination(
-            table,
-            started.elapsed().as_millis() as u64,
-            TerminationConfig::default(),
-        );
+        let config = TerminationConfig::default();
+        let report = tracker.poll_termination(table, started.elapsed().as_millis() as u64, config);
         // Newly discovered descendants must survive a crash between polls too.
         if self
             .reservation
@@ -935,8 +932,22 @@ impl<'a> LoginProcess<'a> {
             self.evidence_failed = true;
         }
         let report = report?;
-        let reaped = matches!(child.try_wait(), Ok(Some(_)));
-        Some(report.confirmed() && reaped && !self.evidence_failed)
+        let reaped = child.try_wait();
+        if !report.confirmed() || self.evidence_failed {
+            return Some(false);
+        }
+        match reaped {
+            Ok(Some(_)) => Some(true),
+            // macOS can report the identity Gone before waitpid exposes status.
+            // Keep the fence and listener, sharing the original cleanup deadline.
+            Ok(None)
+                if started.elapsed()
+                    < Duration::from_millis(config.term_grace_ms + config.kill_grace_ms) =>
+            {
+                None
+            }
+            Ok(None) | Err(_) => Some(false),
+        }
     }
 
     fn cleanup(&mut self, table: &impl ProcTable) -> bool {
@@ -948,17 +959,30 @@ impl<'a> LoginProcess<'a> {
             return !self.attempted;
         };
         let Some(tracker) = self.tracker.as_mut() else {
-            // Child handle still owns this root. Do not claim its unknown tree gone.
             let _ = child.kill();
             let _ = child.try_wait();
             return false;
         };
-        let report =
-            tracker.terminate(table, &SystemClock::default(), TerminationConfig::default());
+        // terminate starts a fresh best-effort reclamation attempt without
+        // clearing earlier integrity failures or upgrading failed receipts.
+        let started = Instant::now();
+        let config = TerminationConfig::default();
+        let report = tracker.terminate(table, &SystemClock::default(), config);
         let saved = self.reservation.record(&report.tracked).is_ok();
-        // Never call blocking wait after an unconfirmed termination.
-        let reaped = matches!(child.try_wait(), Ok(Some(_)));
-        report.confirmed() && saved && reaped && !self.evidence_failed
+        loop {
+            let reaped = child.try_wait();
+            if !report.confirmed() || !saved || self.evidence_failed {
+                return false;
+            }
+            match reaped {
+                Ok(Some(_)) => return true,
+                Ok(None)
+                    if started.elapsed()
+                        < Duration::from_millis(config.term_grace_ms + config.kill_grace_ms) => {}
+                Ok(None) | Err(_) => return false,
+            }
+            std::thread::sleep(OBSERVE_INTERVAL);
+        }
     }
 }
 
@@ -1021,6 +1045,69 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    fn gone_identity_waits_for_reap_without_releasing_fence() {
+        struct Gone;
+        impl ProcTable for Gone {
+            fn list(&self) -> Result<Vec<ProcEntry>, String> {
+                Ok(Vec::new())
+            }
+            fn probe(&self, _: ProcIdentity) -> ProbeResult {
+                ProbeResult::Gone
+            }
+            fn signal(&self, _: u32, _: TreeSignal) -> Result<(), String> {
+                panic!("Gone identity must not be signalled");
+            }
+        }
+        for expire in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let binding = profile(&temp);
+            let mut process = LoginProcess::reserve(&binding).unwrap();
+            process
+                .launch(|| {
+                    Command::new("/bin/sleep")
+                        .arg("30")
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                })
+                .unwrap();
+            // Deterministically model the gap between identity disappearance
+            // and an owned Child becoming reapable. This is not an OS claim.
+            assert!(!process.poll_finish_with(&Gone).unwrap());
+            assert!(process.closure_evidence().is_none());
+            assert!(LoginProcess::reserve(&binding).is_err());
+            if expire {
+                process.cleanup_started = Some(Instant::now() - Duration::from_secs(9));
+                assert!(process.poll_finish_with(&Gone).is_err());
+                assert!(!process.closure_evidence().unwrap().confirmed());
+            }
+            let child = process.child.as_mut().unwrap();
+            child.kill().unwrap();
+            child.wait().unwrap();
+            if expire {
+                assert!(process.finish_with(&Gone).is_err());
+                assert!(LoginProcess::reserve(&binding).is_err());
+            } else {
+                assert!(process.poll_finish_with(&Gone).unwrap());
+                assert!(process.closure_evidence().unwrap().confirmed());
+                assert!(LoginProcess::reserve(&binding).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "bounded natural-exit stress probe; toy processes only"]
+    fn natural_eof_cleanup_repro() {
+        for attempt in 0..200 {
+            let temp = tempfile::tempdir().unwrap();
+            let profile = profile(&temp);
+            let mut process = LoginProcess::reserve(&profile).unwrap();
+            process.launch(cat).unwrap();
+            assert!(process.finish().is_ok(), "EOF cleanup attempt {attempt}");
+        }
     }
 
     #[test]
