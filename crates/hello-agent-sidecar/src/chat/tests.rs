@@ -488,6 +488,10 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         "bound-handler-cancel",
         "bound-handler-restart",
         "bound-handler-cleanup-save",
+        "bound-handler-runtime",
+        "bound-handler-runtime-cancel",
+        "bound-handler-runtime-quit",
+        "bound-handler-runtime-terminal",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -670,6 +674,10 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                 json!({"method":"item/completed","params":{"threadId":"thread-test","turnId":"t1","item":completed}}),
                 lines[2..].join("\n")));
         }
+        replies.insert(
+            4,
+            json!({"id":50,"result":{"requirements":null}}).to_string(),
+        );
         let flow = PreflightExchange::new(
             &ExpectedProfile {
                 model: "test-model",
@@ -1053,6 +1061,124 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                         _ => foreign.run_id.push_str("-other"),
                     }
                     assert!(owned.request_cancel(&foreign).is_err());
+                }
+                if failure.starts_with("bound-handler-runtime") {
+                    let mut slot = Some(owned);
+                    let mut quitting = AgentRuntime::blocked();
+                    quitting.prepare_quit(&mut fixture.storage, &mut fixture.projects);
+                    assert!(quitting
+                        .register_native_candidate(&fixture.storage, &fixture.projects, &mut slot)
+                        .is_err());
+                    assert!(
+                        slot.is_some(),
+                        "rejected registration retains caller ownership"
+                    );
+                    let mut runtime = AgentRuntime::blocked();
+                    runtime
+                        .register_native_candidate(&fixture.storage, &fixture.projects, &mut slot)
+                        .unwrap();
+                    assert!(slot.is_none());
+                    assert!(runtime.has_active_run(&identity.run_id));
+                    assert!(runtime
+                        .cancel_result(&fixture.storage, &identity)
+                        .unwrap()
+                        .is_none());
+                    let mut foreign = identity.clone();
+                    foreign.workspace_identity.push_str("-other");
+                    assert!(runtime.request_cancel(&foreign).is_err());
+                    assert!(runtime.cancel_result(&fixture.storage, &foreign).is_err());
+                    if failure.ends_with("-cancel") {
+                        runtime.request_cancel(&identity).unwrap();
+                    } else if failure.ends_with("-quit") {
+                        runtime.prepare_quit(&mut fixture.storage, &mut fixture.projects);
+                    } else if failure.ends_with("-terminal") {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_native_terminal BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_native_chat_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal persistence failure'); END;").unwrap();
+                    }
+                    let mut emitted = Vec::new();
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                    loop {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "native dispatcher timeout"
+                        );
+                        match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
+                            Ok(events) => emitted.extend(events),
+                            Err(error) => {
+                                assert!(failure.ends_with("-terminal"), "{}", error.detail);
+                                assert!(runtime.has_active_run(&identity.run_id));
+                                assert!(LoginProcess::reserve(&profile).is_err());
+                                let run = fixture
+                                    .storage
+                                    .projection_record("run", &identity.run_id)
+                                    .unwrap()
+                                    .unwrap();
+                                assert_eq!(run["state"], "preparing");
+                                drop(runtime);
+                                let recovery = AgentRuntime::blocked();
+                                recovery
+                                    .recover_unclean_runs(
+                                        &mut fixture.storage,
+                                        &mut fixture.projects,
+                                    )
+                                    .unwrap();
+                                assert_eq!(
+                                    fixture
+                                        .storage
+                                        .projection_record("run", &identity.run_id)
+                                        .unwrap()
+                                        .unwrap()["state"],
+                                    "recoveryRequired"
+                                );
+                                continue 'cases;
+                            }
+                        }
+                        if !runtime.has_active_run(&identity.run_id) {
+                            break;
+                        }
+                        assert!(runtime
+                            .cancel_result(&fixture.storage, &identity)
+                            .unwrap()
+                            .is_none());
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    for (index, event) in emitted.iter().enumerate() {
+                        assert_eq!(event.seq, index as u64 + 1);
+                        assert_eq!(event.stream_id, emitted[0].stream_id);
+                        assert_eq!(event.run_id.as_deref(), Some(identity.run_id.as_str()));
+                    }
+                    let canceled = failure.ends_with("-cancel") || failure.ends_with("-quit");
+                    let run = fixture
+                        .storage
+                        .projection_record("run", &identity.run_id)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        run["state"],
+                        if canceled { "canceled" } else { "succeeded" }
+                    );
+                    assert_eq!(emitted.last().unwrap().event, "agent.runStateChanged");
+                    assert_eq!(emitted.last().unwrap().payload["run"], run["record"]);
+                    if canceled {
+                        assert_eq!(
+                            runtime
+                                .cancel_result(&fixture.storage, &identity)
+                                .unwrap()
+                                .unwrap()["outcome"],
+                            "canceled"
+                        );
+                    } else {
+                        assert!(emitted
+                            .iter()
+                            .any(|event| event.event == "agent.publicEvent"
+                                && event.payload["kind"] == "final"));
+                    }
+                    assert!(runtime
+                        .poll(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap()
+                        .is_empty());
+                    let mut reusable = LoginProcess::reserve(&profile).unwrap();
+                    reusable.finish().unwrap();
+                    continue 'cases;
                 }
                 let cancel_between_steps = std::cell::Cell::new(false);
                 let mut action = |storage: &mut crate::Storage, action: crate::provider_preflight_session::TextAction<'_>| {

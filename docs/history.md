@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (native 실행 소유 객체를 dispatcher 수명주기에 연결)
+
+- **구현 범위**: clean `bc0934b`에서 메인이 OwnedTextRun을 AgentRuntime의 별도 목록에 연결했다. 등록은 예약/프로필/작업 주소 대조 후 소유권을 가져오고 거절 시 호출자에게 남긴다. fixture와 합산한 동시 실행 상한, poll의 저장된 공개/종료 event, 정확한 주소의 취소 요청·지연 결과, 앱 종료의 취소 접수를 기존 dispatcher에 연결했다. 종료 저장 실패는 owner/fence를 보존하고 재시작 복구 대상으로 남긴다. UI 승인 연결 전에는 명시 decline만 보내며 실제 공급자 입장/생성자는 계속 blocked다.
+- **발견/수정**: LoginProcess의 borrowed profile도 초기화 스레드 전달 타입에 포함되므로 LoginProfile에 Sync 제약을 추가했다(unsafe 구현 없음). 기존 toy peer fixture가 앞선 id50 관리 정책 조회 추가를 반영하지 않아 실패했으며 fixture 응답을 갱신했다. 내부 preparing 상태는 wire 계약에 없으므로 running으로 위장하지 않고 상태 event에서 제외했다. 실제 account/model/network 호출·사용자 프로젝트 쓰기는 없다.
+- **검증**: 기존 상호작용 회귀에 runtime 정상 완료·명시 취소·quit·terminal DB 실패 네 경우를 추가해 PASS/40.75초. 등록 거절의 owner 보존, 다른 주소 취소 거절, 종료 전 응답 대기, event seq/최종 원장 일치, 재폴링 중복 없음, DB 실패 후 잠금 유지·복구를 검증했다. 동일 독립 검토자 scoped PASS. 전체 sidecar 라이브러리 421 PASS/9 ignored/729.68초다. 설치 provider·OS opt-in 등 ignored 검사는 이 누적 결과에 포함하지 않는다. 같은 소스 누적 검사를 새 변화 없이 반복하지 않는다.
+- **다음**: 실제 native start/capability admission·plugin/tmp 격리·모델 네트워크·도구/승인 UI와 최종 제품 검증이 남는다. 이번 목록 연결은 실행 활성화가 아니다. 직전 턴은 실제 로그인 복구/조회 통과의 구현 진전이었고 이번에는 dispatcher 소유권 연결을 진행했다. main 병합/push 없음.
+- **마감**: strict sidecar all-targets clippy PASS/4.45초, scoped rustfmt·git diff --check PASS. 이번 소유권 연결/회귀/현행 및 작업 기록 7파일을 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (플러그인 캐시 호환·실제 연결 복구 및 조회 통과)
 
 - **구현**: `5371842`에서 plugins 실제 디렉터리를 기존 uid/쓰기 권한 검사에 따라 로그인·조회에만 허용했다. native 실행은 plugins 항목이 있으면 spawn 전과 gate release 전 계속 거절한다. 파일 scanner가 plugin hook/MCP 비활성화 증명이 아님을 명시했다. Karpathy 지침으로 한 모듈에 한정했고 OpenAI Docs app-server API overview에서 plugin API가 아직 production 사용 대상이 아님을 확인했다. plugin 설치/삭제/설정 변경 API는 사용하지 않았다.
@@ -141,6 +149,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **native dispatcher 소유권 연결(2026-09-29)**: 내부 등록 목록을 공통 poll/취소/quit에 연결해 임시 프로세스의 정상·취소·종료·DB 실패 복구를 통과했다. 준비 상태는 wire running으로 바꾸지 않으며 native start/capability는 미활성이다. 이 파동의 sidecar 라이브러리 누적 결과는 421 PASS/9 ignored/729.68초이며 과거 fixture의 id50 누락도 수정됐다. 실제 공급자 활성화·격리·모델 통신/도구 UI와 혼동하지 않는다.
 
 - **앱 프로필 조회 최종 통과(2026-09-29)**: plugins 캐시를 로그인/조회에서 검증해 허용하고 native 실행에서는 명시 거절하도록 분리했다. 기존 v2 종료 증거 API로 복구한 뒤 실제 5 RPC preflight가 matched/termination/cleanup 모두 true로 통과했다. 아래 과거 plugins 잠금/requirements 미확인 상태는 해소됐다. 이 결과는 실제 작업 실행 활성화나 plugin 격리 증명이 아니며 runtime blocked는 유지된다.
 

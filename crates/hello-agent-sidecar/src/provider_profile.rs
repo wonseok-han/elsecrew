@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";
-pub(crate) trait LoginProfile {
+pub(crate) trait LoginProfile: Sync {
     fn revalidate(&self) -> Result<PathBuf, SidecarError>;
     fn login_lease_directory(&self) -> Result<Dir, SidecarError>;
     fn pending_name(&self) -> &'static str;

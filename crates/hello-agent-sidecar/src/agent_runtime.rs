@@ -44,6 +44,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
+mod native;
 pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
 const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
@@ -157,6 +158,7 @@ pub(crate) struct AgentRuntime {
     fake_executable: Option<PathBuf>,
     scenario: FakeScenario,
     active: HashMap<String, ActiveAgentRun>,
+    native: HashMap<String, native::NativeRun>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -176,6 +178,7 @@ impl AgentRuntime {
             fake_executable: None,
             scenario: FakeScenario::Clean,
             active: HashMap::new(),
+            native: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -391,7 +394,7 @@ impl AgentRuntime {
 
     #[cfg(test)]
     pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
-        self.active.contains_key(run_id)
+        self.active.contains_key(run_id) || self.native.contains_key(run_id)
     }
 
     #[cfg(test)]
@@ -411,6 +414,7 @@ impl AgentRuntime {
             fake_executable: Some(executable),
             scenario,
             active: HashMap::new(),
+            native: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -460,7 +464,7 @@ impl AgentRuntime {
         if self.preparing_to_quit {
             return Err(ProjectFailure::recovery("sidecar is preparing to quit"));
         }
-        if active_run_limit_reached(self.active.len()) {
+        if active_run_limit_reached(self.active.len() + self.native.len()) {
             return Err(ProjectFailure::recovery(
                 "actual-agent session active-run limit reached before spawn or lock",
             ));
@@ -1056,7 +1060,7 @@ impl AgentRuntime {
         projects: &mut ProjectManager,
     ) -> Result<Vec<G5Event>, SidecarError> {
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
-        let mut events = Vec::new();
+        let mut events = self.poll_native(storage, projects)?;
         for run_id in ids {
             if self
                 .active
@@ -1261,6 +1265,9 @@ impl AgentRuntime {
 
     /// Queue only. The wire response must wait for the terminal transaction.
     pub(crate) fn request_cancel(&mut self, identity: &RunIdentity) -> Result<(), ProjectFailure> {
+        if let Some(active) = self.native.get(&identity.run_id) {
+            return active.request_cancel(identity);
+        }
         let active = self
             .active
             .get_mut(&identity.run_id)
@@ -1315,6 +1322,12 @@ impl AgentRuntime {
         storage: &Storage,
         identity: &RunIdentity,
     ) -> Result<Option<Value>, ProjectFailure> {
+        if let Some(active) = self.native.get(&identity.run_id) {
+            if !same_identity(&active.identity, identity) {
+                return Err(ProjectFailure::manifest("native cancel identity differs"));
+            }
+            return Ok(None);
+        }
         if self.active.contains_key(&identity.run_id) {
             return Ok(None);
         }
@@ -1548,6 +1561,9 @@ impl AgentRuntime {
 
     pub(crate) fn prepare_quit(&mut self, storage: &mut Storage, projects: &mut ProjectManager) {
         self.preparing_to_quit = true;
+        for active in self.native.values() {
+            let _ = active.request_cancel(&active.identity);
+        }
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
         for run_id in ids {
             if let Some(active) = self.active.get(&run_id) {

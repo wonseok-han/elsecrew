@@ -56,6 +56,34 @@ pub(crate) struct OwnedTextRun {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl OwnedTextRun {
+    pub(super) fn registration_identity(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+    ) -> Result<RunIdentity, SidecarError> {
+        if self.state.finished
+            || self.state.run_id != self.reservation.run_id
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "native owner differs",
+            ));
+        }
+        self.reservation
+            .validate_text_input(storage, projects)
+            .map_err(|_| SidecarError::new("agentInputChanged", "native reservation differs"))?;
+        let run = &self.reservation.run;
+        Ok(RunIdentity {
+            chat_id: self.reservation.request.chat_id.clone(),
+            task_id: run["taskId"].as_str().unwrap_or_default().into(),
+            project_id: run["projectId"].as_str().unwrap_or_default().into(),
+            worktree_id: run["worktreeId"].as_str().unwrap_or_default().into(),
+            workspace_identity: run["workspaceIdentity"].as_str().unwrap_or_default().into(),
+            run_id: run["runId"].as_str().unwrap_or_default().into(),
+        })
+    }
+
     pub(crate) fn from_prepared(
         reservation: RunReservation,
         process: crate::provider_login_process::LoginProcess<'static>,
