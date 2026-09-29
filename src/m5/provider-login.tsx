@@ -38,6 +38,7 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
   },[disabled]);
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
   const waiting=status.state === "starting" || status.state === "waiting" || status.state === "verifying";
+  const recoveryRequired=status.error === "providerLoginRecoveryRequired";
   const label = {idle:"아직 연결하지 않았어요",starting:"연결 상태를 확인하고 있어요…",waiting:"브라우저에서 로그인을 완료해 주세요",verifying:"연결 코드를 확인하고 있어요…",connected:`이 앱에 ${name} 로그인이 연결됐어요`,canceled:"로그인을 취소했어요",failed:"연결을 확인하지 못했어요",unsupported:"이 환경에서는 아직 연결할 수 없어요"}[status.state];
   return <section className="m5-provider-login" aria-label={`${name} 연결`}>
     <div><strong>{name} 연결</strong><p role="status">{label}</p><small>기존 터미널 로그인과 별도로 연결해요. 모델을 실행하거나 비용을 사용하지 않아요.</small></div>
@@ -56,8 +57,9 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
       {codeError && <p role="alert">코드 전체를 다시 복사해 주세요. 주소가 아닌 연결 코드를 입력해야 해요.</p>}
     </form>}
     {waiting ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>로그인 취소</button>
-      : <button disabled={disabled||busy||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{status.state==="connected"?"연결됨":`${name} 로그인`}</button>}
-    {status.error === "providerLoginRecoveryRequired" && <div><p>종료가 확인된 기록만 복구해요. 로그인 정보는 지우지 않으며, 증거가 부족하면 잠금을 유지해요.</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>연결 잠금 복구</button></div>}
+      : <button disabled={disabled||busy||recoveryRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{status.state==="connected"?"연결됨":`${name} 로그인`}</button>}
+    {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"check",attemptId:crypto.randomUUID()})}>연결 상태 다시 확인</button>}
+    {recoveryRequired && <div><p>종료가 확인된 기록만 복구해요. 로그인 정보는 지우지 않으며, 증거가 부족하면 잠금을 유지해요. 복구되면 연결 상태를 다시 확인해 주세요.</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>연결 잠금 복구</button></div>}
     {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error)}</p><details><summary>도움 요청용 정보</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
   </section>;
 }

@@ -1,9 +1,22 @@
 const listeners = new Set();
 const loginStates = {codex:{state: "idle", attemptId: null, authUrl: null, error: null},claude:{state: "idle", attemptId: null, authUrl: null, error: null}};
+let codexRecoveryAttempts = 0;
+let codexChecks = 0;
 window.m5Login = { request: async (input) => {
   const provider = input.provider ?? "codex";
   let status = loginStates[provider];
-  if (input.action === "check") status = {...status,state:provider === "codex" ? "connected" : "idle",attemptId:input.attemptId};
+  if (input.action === "check") {
+    if (provider === "codex") codexChecks += 1;
+    const recoveryRequired = provider === "codex" && codexChecks > 1 && codexRecoveryAttempts < 2;
+    status = {...status,state:provider === "codex" ? (recoveryRequired ? "failed" : "connected") : "idle",attemptId:input.attemptId,error:recoveryRequired ? "providerLoginRecoveryRequired" : null};
+  }
+  if (input.action === "recover") {
+    if (provider !== "codex" || status.error !== "providerLoginRecoveryRequired") throw new Error("unexpected recovery");
+    codexRecoveryAttempts += 1;
+    // First attempt has insufficient evidence. A later explicit attempt succeeds.
+    await new Promise(resolve => setTimeout(resolve, 150));
+    status = {...status,state:codexRecoveryAttempts < 2 ? "failed" : "idle",attemptId:input.attemptId,error:codexRecoveryAttempts < 2 ? "providerLoginRecoveryRequired" : null};
+  }
   if (input.action === "start") {
     if (provider === "codex") throw new Error("restoration must not start OAuth");
     status = {...status, state: "waiting", attemptId: input.attemptId};

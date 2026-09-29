@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (복구 후 기존 로그인 재확인 UI)
+
+- **구현**: clean `1f44961`에서 native active-map은 아직 fixture 전용임을 확인했다. 실제 프로필 검사와 무관하게 해결할 수 있는 UI 누락을 수정했다. 기존에는 복구 후 idle에서 새 로그인 버튼만 있었으므로 `연결 상태 다시 확인`을 추가했다. recoveryRequired일 때 start/check를 비활성화하며 recover 성공을 connected로 간주하지 않는다. 시작 시 자동 check와 기존 in-flight 제한은 유지한다. Rust/권한/복구 해제 조건 변경은 없다.
+- **검증**: renderer production build·tsc PASS, 로그인 계약 6 PASS. 도구 sandbox에서 Electron 조기 종료로 최초 GUI 검사는 실패했으며, 외부 실행한 최종 기존 renderer smoke 2 PASS/3.06초다. 실제 Chromium과 가짜 bridge로 자동 로그인 복원→명시적 재확인 실패→복구 처리 중 비활성→증거 부족 거절→다시 복구 성공→명시적 check로 연결됨을 확인했다. 같은 smoke의 Claude 코드/취소·Monaco·프로젝트/편집/diff/후속 메시지 검증도 통과했다. 실계정/sidecar/모델 실행 증거가 아니며 사용자 인증 파일은 건드리지 않았다.
+- **다음/마감**: 기존 실제 pending은 보존하고 재부팅 완료는 미수신이다. 실제 계정 preflight·native runtime 연결·전체 앱은 미완료다. 일반 UI 변경은 메인 직접 diff 검토와 관련 검사로 마감하며 별도 검토자를 호출하지 않았다. diff --check PASS, 관련 5파일만 커밋하고 main 병합/push는 하지 않는다. 직전 턴은 관리 정책 연결의 구현 진전이었다.
+
 ### 2026-09-29 · by GPT-6 Astra (관리 정책 조회를 full preflight에 결속)
 
 - **구현/범위**: clean `c38b72b`에서 메인이 OpenAI Docs·Karpathy 지침으로 기존 full preflight에 고정 configRequirements/read(id 50)를 추가했다. 기존 thread/turn id 5/6은 유지하고 모델 목록만으로 ObservationsMatched가 되지 않는다. 정확한 requirements:null만 수락하며 누락·관리 객체·중복·미지 필드·오류는 실패 고정한다. 설정 전용 2 RPC는 넓히지 않았다. 기존 동기/단계별 세션이 같은 검사기를 사용한다.

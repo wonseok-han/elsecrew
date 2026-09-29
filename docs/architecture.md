@@ -160,7 +160,7 @@
 
 ## 9. M5 G1~G5D 전환 골격·채팅 작업대
 
-- **연결 잠금 복구**: 로그인 UI의 명시적 `provider.login`/`recover`는 종료 증거가 있는 locked-v2 pending만 처리한다. 생성 owner와 복구자는 같은 파일의 exclusive flock을 사용한다. 복구자는 고정 이름·nofollow·16KiB·canonical 기록·소유권/권한/단일 링크·inode·모든 기록 신원의 Gone·프로필/부모 capability를 검증한 뒤 해제한다. 진행 중 worker, legacy/v1/불완전 기록, native run의 terminal 보류는 거절한다. 인증 정보 삭제나 재로그인을 하지 않으며 증거 없는 기존 실제 pending은 이 경로로 복구되지 않는다. 실제 Electron 클릭 QA는 미완료다.
+- **연결 잠금 복구**: 로그인 UI의 명시적 `provider.login`/`recover`는 종료 증거가 있는 locked-v2 pending만 처리한다. 생성 owner와 복구자는 같은 파일의 exclusive flock을 사용한다. 복구자는 고정 이름·nofollow·16KiB·canonical 기록·소유권/권한/단일 링크·inode·모든 기록 신원의 Gone·프로필/부모 capability를 검증한 뒤 해제한다. 진행 중 worker, legacy/v1/불완전 기록, native run의 terminal 보류는 거절한다. 인증 정보 삭제나 재로그인을 하지 않으며 증거 없는 기존 실제 pending은 이 경로로 복구되지 않는다. UI는 잠금 중 start/check를 비활성화하고 복구 성공을 인증 성공으로 표시하지 않는다. 복구 후 사용자가 `연결 상태 다시 확인`으로 기존 자격 증명을 검사할 수 있다. Electron Chromium에서 가짜 bridge의 실패/성공·처리 중 버튼·명시적 재확인 클릭을 검증했으며 실제 프로필 복구 E2E는 미완료다.
 
 후속 메시지 저장 통신은 `chat.appendMessage`를 지원한다. 현행 sidecar는 기존 exact G5D 제품/agent-fixture capability 배열의 마지막에 이 capability만 추가하며, Electron client는 해당 확장을 협상한 경우에만 요청한다. 기존 baseline 상수와 검증기는 그대로이고 current 상태 검증기는 정확한 baseline+선택적 suffix만 허용한다. V7 preload의 고정 `appendChatMessage` 채널과 팀 대화 입력창이 연결됐고 V4~V6는 유지된다. 요청의 전체 채팅/작업 공간 소속·client message ID·예상 durable 순서·본문을 저장 결과와 대조하며, 동일 요청 재시도는 같은 메시지를 반환하고 이벤트를 중복 발행하지 않는다. 초안과 불확실한 요청은 controller 수명 내에서 채팅별로 보존하며 앱 재시작까지의 초안 영속 저장은 아직 없다. 명시적 무기록 순서 충돌만 기록을 새로 읽고 같은 ID의 예상 순서를 갱신한다. 저장된 메시지는 다음 실제 실행의 inputMessageIds에 포함되지만, 실제 provider 활성화는 별도 미완료이고 메시지 저장 자체는 실행/실행 중 stdin 전달을 의미하지 않는다.
 

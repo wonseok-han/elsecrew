@@ -41,6 +41,21 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
+    const codexSection = () => document.querySelector('[aria-label="Codex 연결"]');
+    const codexButton = text => [...codexSection().querySelectorAll('button')].find(b => b.textContent === text);
+    await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "automatic saved-login restoration")};
+    codexButton('연결 상태 다시 확인').click();
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && !b.disabled)", "recoverable login UI")};
+    if (!codexButton('Codex 로그인').disabled || !codexButton('연결 상태 다시 확인').disabled) throw new Error('fenced login permits start/check');
+    codexButton('연결 잠금 복구').click();
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && b.disabled)", "recovery single flight")};
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && !b.disabled)", "rejected recovery remains visible")};
+    if (!codexButton('Codex 로그인').disabled) throw new Error('failed recovery enabled login');
+    codexButton('연결 잠금 복구').click();
+    await ${waitFor("![...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구')", "recovery completed")};
+    if (codexSection().textContent.includes('로그인이 연결됐어요')) throw new Error('recovery falsely claims authentication');
+    await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 상태 다시 확인' && !b.disabled)", "explicit credential recheck")};
+    codexButton('연결 상태 다시 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "restored Codex login without browser")};
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === 'Claude Code 로그인' && !b.disabled)", "enabled Claude login button")};
     [...document.querySelectorAll('button')].find(b => b.textContent === 'Claude Code 로그인').click();
