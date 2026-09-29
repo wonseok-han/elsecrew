@@ -154,6 +154,10 @@ fn discovery_arguments(
         &sandbox,
         "-c",
         "features.hooks=false",
+        "-c",
+        "features.apps=false",
+        "-c",
+        "features.plugins=false",
     ]
     .into_iter()
     .map(std::ffi::OsString::from)
@@ -833,7 +837,7 @@ IFS= read -r request
 printf '{"id":1,"result":{"userAgent":"toy","codexHome":"%s","platformFamily":"unix","platformOs":"macos"}}\n' "$HOME"
 IFS= read -r request
 IFS= read -r request
-printf '{"id":2,"result":{"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}},"layers":[{"name":{"type":"sessionFlags"},"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}}},{"name":{"type":"user","file":"%s/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]}}\n' "$HOME"
+printf '{"id":2,"result":{"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}},"layers":[{"name":{"type":"sessionFlags"},"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}}},{"name":{"type":"user","file":"%s/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]}}\n' "$HOME"
 IFS= read -r request
 printf '%s\n' '{"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
 IFS= read -r request
@@ -936,7 +940,11 @@ IFS= read -r hold
                 "-c",
                 "sandbox_mode=\"read-only\"",
                 "-c",
-                "features.hooks=false"
+                "features.hooks=false",
+                "-c",
+                "features.apps=false",
+                "-c",
+                "features.plugins=false"
             ]
         );
         assert_eq!(
@@ -1032,7 +1040,7 @@ IFS= read -r hold
                 json!({"id":5,"result":{"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":if case == "wrong-thread" {"/wrong"} else {"/managed/snapshot"},"instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"}}),
             ].map(|mut value| {
                 if value["id"]==2 {
-                    value["result"]["config"]["features"]=json!({"hooks":false});
+                    value["result"]["config"]["features"]=json!({"hooks":false,"apps":false,"plugins":false});
                     value["result"]["layers"]=json!([
                         {"name":{"type":"sessionFlags"},"config":value["result"]["config"]},
                         {"name":{"type":"user","file":home.join("config.toml")},"config":{"cli_auth_credentials_store":"file"}},

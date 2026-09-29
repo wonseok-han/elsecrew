@@ -24,6 +24,9 @@ const POLICY: &str = r#"(version 1)
 (allow file-write-data (literal "/dev/null"))
 (allow file-write* (subpath (param "PROFILE")))
 (deny file-write* (literal (string-append (param "PROFILE") "/config.toml")))
+; An invocation flag is not an OS file boundary. Do not load or modify cached
+; plugins, including through children, even if a future vendor ignores the flag.
+(deny file-read* file-write* (subpath (string-append (param "PROFILE") "/plugins")))
 "#;
 
 #[derive(Clone, Copy)]
@@ -171,6 +174,12 @@ mod tests {
         }
         std::fs::write(&original, b"original").unwrap();
         std::fs::write(home.join("config.toml"), b"original").unwrap();
+        let plugin = home.join("plugins/cache/payload");
+        std::fs::create_dir_all(plugin.parent().unwrap()).unwrap();
+        std::fs::write(&plugin, b"#!/bin/sh\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&plugin, home.join("plugin-alias")).unwrap();
         for name in [".git", ".agents", ".codex"] {
             std::fs::create_dir(workspace.join(name)).unwrap();
             std::fs::write(workspace.join(name).join("protected"), b"original").unwrap();
@@ -213,6 +222,13 @@ mod tests {
         assert_eq!(std::fs::read(workspace.join("file")).unwrap(), b"changed");
         for script in [
             "printf changed > \"$3\"",
+            "/bin/cat \"$2/plugins/cache/payload\"",
+            "/bin/cat \"$2/plugin-alias\"",
+            "\"$2/plugins/cache/payload\"",
+            "/bin/sh -c '/bin/cat \"$1/plugins/cache/payload\"' child \"$2\"",
+            "printf changed > \"$2/plugins/cache/payload\"",
+            "printf new > \"$2/plugins/new\"",
+            "/bin/mv \"$2/plugins\" \"$2/moved-plugins\"",
             "printf changed > \"$2/config.toml\"",
             "printf changed > \"$1/.git/protected\"",
             "printf changed > \"$1/.agents/protected\"",
@@ -225,6 +241,7 @@ mod tests {
             assert!(!run(script).status.success(), "forbidden write succeeded: {script}");
         }
         assert_eq!(std::fs::read(original).unwrap(), b"original");
+        assert_eq!(std::fs::read(plugin).unwrap(), b"#!/bin/sh\nexit 0\n");
         assert_eq!(
             std::fs::read(home.join("config.toml")).unwrap(),
             b"original"

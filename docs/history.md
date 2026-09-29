@@ -1,5 +1,14 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (플러그인 캐시 OS 격리와 실제 설정 대조)
+
+- **구현**: clean `6b2e8b8`에서 OpenAI Docs의 managed configuration 설명을 확인하고 native/discovery argv에 apps/plugins=false를 고정했다. core는 hooks와 함께 effective·sessionFlags 양쪽의 명시 false를 요구하며 true/null/누락/중복 키를 거절한다. 사용자 config는 변경하지 않는다. macOS 정책에 PROFILE/plugins read/write deny를 추가해 payload/자식의 캐시 읽기·실행·수정·이동을 차단한다. 이에 따라 plugins 존재 자체의 임시 거절은 제거했지만 내부 symlink/hardlink/특수 파일을 전부 검사하는 기존 scanner는 유지했다. 같은 HOME의 pre-spawn/pre-release 검사와 필수 sandbox 경로 결합을 동일 독립 검토자가 scoped PASS했다.
+- **검증**: core preflight22 PASS/0.01초, sidecar preflight6 PASS/14.44초(실제1 ignored), profile10 PASS/0.52초(실제2 ignored). 임시 macOS shell의 정상 쓰기/자식 쓰기 및 plugins 직접·alias·자식 읽기/실행/쓰기/이동 거절 probe PASS/0.47초다. 기존 전체421 PASS 누적 증거는 재실행하지 않고 이번 영향 영역만 검증했다.
+- **실제 고정 CLI**: 기존 승인 범위에서 새 임시 HOME·네트워크 차단의 initialize/config-only 검사 PASS/2.54초, cleanup confirmed·config 불변·auth 미생성. 앱 로그인 프로필의 5 RPC 검사도 PASS/4.24초, matched/termination/cleanup 모두 true. 이 후자는 OS 격리 없는 discovery의 flag·사후 설정 보고 대조이며 startup plugin/hook 부재 증명이 아니다. 실제 유료 모델/thread/turn·사용자 프로젝트는 미사용이며 캐시/인증 파일을 직접 삭제/이동하지 않았다.
+- **실패 보존**: 기존 일반 toy text 회귀가 처음 1.65초에 cleanup 확인 실패, OS toy native 회귀도 처음 bound-native/4.55초에 같은 일반 오류로 실패했다. 사례 이름과 종료/프로필 확인 boolean을 실패 메시지에 추가해 각각 한 번 재검사했고 PASS/58.40초 및 PASS/9.19초(읽기·쓰기 두 시나리오)다. 초기 실패 원인은 미확정이며 재검사 PASS를 원인 수정/플레이크 해결로 표현하지 않는다. 프로세스 회수·잠금 해제 조건은 완화하지 않았다.
+- **다음**: 앱 프로필의 기존 tmp helper symlink 입장, native start/capability·모델 네트워크·도구/승인 연결과 전체 출시 검증은 남는다. 제품 runtime blocked 유지. 직전 턴은 dispatcher 연결의 진전이며 이번에는 plugins 안전한 캐시 폴더 입장과 OS deny·실제 설정 호환성까지 진전했다. main 병합/push 없음.
+- **마감**: core+sidecar strict all-targets clippy PASS/4.05초, scoped rustfmt·diff 검사 PASS. 관련 구현/회귀/현행 및 작업 기록 8파일만 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (native 실행 소유 객체를 dispatcher 수명주기에 연결)
 
 - **구현 범위**: clean `bc0934b`에서 메인이 OwnedTextRun을 AgentRuntime의 별도 목록에 연결했다. 등록은 예약/프로필/작업 주소 대조 후 소유권을 가져오고 거절 시 호출자에게 남긴다. fixture와 합산한 동시 실행 상한, poll의 저장된 공개/종료 event, 정확한 주소의 취소 요청·지연 결과, 앱 종료의 취소 접수를 기존 dispatcher에 연결했다. 종료 저장 실패는 owner/fence를 보존하고 재시작 복구 대상으로 남긴다. UI 승인 연결 전에는 명시 decline만 보내며 실제 공급자 입장/생성자는 계속 blocked다.
@@ -149,6 +158,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **plugins 실행 입장 갱신(2026-09-29)**: blanket 존재 거절 대신 hooks/apps/plugins=false의 명시 argv·effective/sessionFlags 검사 + 기존 전체 profile 재귀 scanner + macOS PROFILE/plugins read/write deny를 결합했다. OS 캐시 차단 probe·고정 CLI offline config·앱 프로필5 RPC가 통과했다. 실제 tmp helper symlink와 네트워크/도구·관리 설정 전체 입장은 별도다. toy 실행 회귀의 cleanup 실패 2회는 재검사에서 재현되지 않았으나 원인 미확정으로 남긴다. 이전 plugins 존재 거절 설명은 당시 임시 조건이며 현행은 architecture를 따른다.
 
 - **native dispatcher 소유권 연결(2026-09-29)**: 내부 등록 목록을 공통 poll/취소/quit에 연결해 임시 프로세스의 정상·취소·종료·DB 실패 복구를 통과했다. 준비 상태는 wire running으로 바꾸지 않으며 native start/capability는 미활성이다. 이 파동의 sidecar 라이브러리 누적 결과는 421 PASS/9 ignored/729.68초이며 과거 fixture의 id50 누락도 수정됐다. 실제 공급자 활성화·격리·모델 통신/도구 UI와 혼동하지 않는다.
 

@@ -607,7 +607,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         };
         let profile = CodexProfileBinding::from_storage(&fixture.storage).unwrap();
         let home = profile.revalidate().unwrap();
-        let mut settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}});
+        let mut settings = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
         let mut sandbox = json!({"type":"readOnly","networkAccess":false});
         if writer {
             settings["sandbox_mode"] = json!("workspace-write");
@@ -1369,7 +1369,12 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
             );
         } else {
             assert_eq!(
-                result.unwrap(),
+                result.unwrap_or_else(|error| {
+                    let closure = process
+                        .closure_evidence()
+                        .map(|evidence| (evidence.termination_confirmed(), evidence.confirmed()));
+                    panic!("{failure}: {error:?}; closure(termination,profile)={closure:?}")
+                }),
                 if failure == "bound-interrupted" {
                     TurnOutcome::Interrupted
                 } else {
@@ -1544,6 +1549,10 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                             "sandbox_mode=\"read-only\"",
                             "-c",
                             "features.hooks=false",
+                            "-c",
+                            "features.apps=false",
+                            "-c",
+                            "features.plugins=false",
                         ]
                     );
                 }

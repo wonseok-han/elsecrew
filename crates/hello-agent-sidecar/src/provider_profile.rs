@@ -26,16 +26,12 @@ fn failure() -> SidecarError {
 }
 
 /// Execution-only admission. Ordinary login/status checks retain their existing
-/// artifact contract. Scan metadata, including skills and temporary descendants,
-/// without reading credentials or following links. Not a same-UID race barrier.
+/// artifact contract. Scan metadata, including plugins and temporary descendants,
+/// without reading credentials or following links. Native launch additionally
+/// denies plugin cache reads/writes in provider_runtime_sandbox. This scanner
+/// alone is not plugin-disable authority or a same-UID race barrier.
 pub(crate) fn verify_runtime_files(home: &Path) -> Result<(), SidecarError> {
     let profile = open_absolute_directory(home)?;
-    // Login/discovery may materialize vendor plugin caches. Filesystem isolation
-    // does not prove that their hooks/MCP contributions are disabled at runtime.
-    match profile.symlink_metadata("plugins") {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        _ => return Err(failure()),
-    }
     crate::project::runtime_isolation::verify(&profile).map_err(|_| failure())
 }
 
@@ -375,7 +371,12 @@ mod tests {
 
     #[test]
     fn runtime_admission_checks_nested_artifacts_without_changing_login_or_credentials() {
-        for location in ["skills/.hidden/item", "tmp/nested/item", ".tmp/item"] {
+        for location in [
+            "skills/.hidden/item",
+            "tmp/nested/item",
+            ".tmp/item",
+            "plugins/cache/item",
+        ] {
             let temp = tempfile::tempdir().unwrap();
             prepare_codex_profile(&root(&temp)).unwrap();
             let home = temp
@@ -409,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_cache_is_login_only_and_requires_a_safe_directory() {
+    fn plugin_cache_requires_a_safe_directory_and_runtime_scans_its_contents() {
         for case in ["directory", "symlink", "file", "writable"] {
             let temp = tempfile::tempdir().unwrap();
             prepare_codex_profile(&root(&temp)).unwrap();
@@ -441,7 +442,14 @@ mod tests {
                 case == "directory",
                 "{case}"
             );
-            assert!(verify_runtime_files(&home).is_err(), "{case}");
+            // Full runtime admission first uses the profile binding's metadata
+            // checks; its recursive scan then rejects nested shared/link files.
+            if case == "directory" {
+                verify_runtime_files(&home).unwrap();
+            }
+            if case == "symlink" {
+                assert!(verify_runtime_files(&home).is_err());
+            }
             assert!(std::fs::symlink_metadata(&plugins).is_ok());
             assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), CONFIG);
         }

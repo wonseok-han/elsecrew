@@ -22,11 +22,15 @@ pub(super) fn match_layers(
     #[derive(Deserialize)]
     struct Features {
         hooks: bool,
+        apps: bool,
+        plugins: bool,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct FlagFeatures {
         hooks: bool,
+        apps: bool,
+        plugins: bool,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -69,7 +73,11 @@ pub(super) fn match_layers(
     #[serde(deny_unknown_fields)]
     struct Empty {}
     let response: Response = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
-    if response.layers.len() != 3 || response.config.features.hooks {
+    if response.layers.len() != 3
+        || response.config.features.hooks
+        || response.config.features.apps
+        || response.config.features.plugins
+    {
         return Err(invalid());
     }
     let mut seen = [false; 3];
@@ -96,6 +104,8 @@ pub(super) fn match_layers(
                     || config.approval_policy != "on-request"
                     || config.sandbox_mode != permission.sandbox_mode()
                     || config.features.hooks
+                    || config.features.apps
+                    || config.features.plugins
                     || match permission {
                         ExpectedPermission::ReadOnly => config.sandbox_workspace_write.is_some(),
                         ExpectedPermission::WorkspaceWrite => !config
@@ -140,7 +150,7 @@ mod tests {
     use serde_json::json;
     #[test]
     fn only_exact_reported_profile_layers_match() {
-        let config = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false}});
+        let config = json!({"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only","features":{"hooks":false,"apps":false,"plugins":false}});
         let base = json!({"config":config,"layers":[{"name":{"type":"sessionFlags"},"config":config},{"name":{"type":"user","file":"/app/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]});
         for case in [
             "valid",
@@ -195,6 +205,50 @@ mod tests {
                 case == "valid",
                 "{case}"
             );
+        }
+        for feature in ["apps", "plugins"] {
+            for pointer in ["/config/features", "/layers/0/config/features"] {
+                for replacement in [Some(json!(true)), Some(json!(null)), None] {
+                    let mut value = base.clone();
+                    let features = value.pointer_mut(pointer).unwrap().as_object_mut().unwrap();
+                    match replacement {
+                        Some(value) => {
+                            features.insert(feature.into(), value);
+                        }
+                        None => {
+                            features.remove(feature);
+                        }
+                    }
+                    let input = BoundedObservation::new(value.to_string().into_bytes()).unwrap();
+                    assert!(
+                        match_layers(
+                            &input,
+                            &ExpectedProfile {
+                                model: "test-model",
+                                reasoning_effort: "medium"
+                            },
+                            "/app/profile",
+                            ExpectedPermission::ReadOnly
+                        )
+                        .is_err(),
+                        "{pointer}/{feature}"
+                    );
+                }
+            }
+            let wire = base.to_string().replace(
+                &format!("\"{feature}\":false"),
+                &format!("\"{feature}\":false,\"{feature}\":false"),
+            );
+            assert!(match_layers(
+                &BoundedObservation::new(wire.into_bytes()).unwrap(),
+                &ExpectedProfile {
+                    model: "test-model",
+                    reasoning_effort: "medium"
+                },
+                "/app/profile",
+                ExpectedPermission::ReadOnly
+            )
+            .is_err());
         }
     }
 }

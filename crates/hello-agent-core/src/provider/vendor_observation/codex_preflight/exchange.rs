@@ -433,7 +433,7 @@ mod tests {
             json!({"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}),
             json!({"requirements":null}),
         ];
-        values[1]["config"]["features"] = json!({"hooks":false});
+        values[1]["config"]["features"] = json!({"hooks":false,"apps":false,"plugins":false});
         let config = values[1]["config"].clone();
         values[1]["layers"] = json!([
             {"name":{"type":"sessionFlags"},"config":config},
