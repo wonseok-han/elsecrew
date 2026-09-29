@@ -143,6 +143,21 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border-bottom: 1px solid #3b495b; }
 .m5-dock-tabs button { border-radius: 6px 6px 0 0; background: #202a37; color: #aab4c1; cursor: grab; }
 .m5-dock-tabs button[aria-selected="true"] { color: #e4f1ff; border-bottom: 2px solid #91c5ff; background: #171d26; }
+.m5-panels.m5-dock-tree { position: relative; display: block; height: max(680px, calc(100vh - 200px)); min-height: 0; }
+.m5-dock-tree .m5-dock-slot { position: absolute; box-sizing: border-box; padding: 4px; min-height: 0; overflow: hidden; }
+.m5-dock-tree .m5-dock-heading { flex-shrink: 0; overflow: auto; }
+.m5-dock-group-tabs { display: flex; flex: 1; gap: 2px; min-width: max-content; }
+.m5-dock-group-tabs button { cursor: grab; background: #202a37; color: #aab4c1; white-space: nowrap; }
+.m5-dock-group-tabs button[aria-selected="true"] { background: #171d26; color: #e4f1ff; box-shadow: inset 0 -2px #91c5ff; }
+.m5-dock-heading select { max-width: 86px; padding: 4px; background: #202a37; color: #d8e0eb; border: 1px solid #3b495b; border-radius: 4px; }
+.m5-dock-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.m5-dock-content > .m5-panel, .m5-dock-content > .m5-timeline { flex: 1; min-width: 0; min-height: 0; margin: 0; overflow: auto; }
+.m5-dock-tree .m5-dock-separator { position: absolute; z-index: 2; }
+.m5-dock-tree .m5-dock-split-horizontal { width: 8px !important; transform: translateX(-4px); cursor: col-resize; }
+.m5-dock-tree .m5-dock-split-vertical { height: 8px !important; transform: translateY(-4px); cursor: row-resize; }
+.m5-dock-drop { position: absolute; inset: 4px; z-index: 3; display: grid; place-items: center; background: #335b8999; border: 2px solid #91c5ff; border-radius: 6px; color: white; pointer-events: none; }
+.m5-dock-drop-left { right: 50%; }.m5-dock-drop-right { left: 50%; }
+.m5-dock-drop-top { bottom: 50%; }.m5-dock-drop-bottom { top: 50%; }
 .m5-conversation { flex: 1; min-width: 0; overflow: auto; }
 .m5-followup { display: grid; gap: 8px; padding: 16px; border-top: 1px solid #303b49; color: #d8e0eb; }
 .m5-followup textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 10px; color: #e6edf3; background: #11161d; border: 1px solid #526176; border-radius: 8px; font: inherit; }

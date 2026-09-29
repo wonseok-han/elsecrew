@@ -1,5 +1,24 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (도킹 UI 검증·자동 시험 초점 간섭 해소)
+
+- 앞선 간헐 dirty 실패를 입력 이벤트로 재현했다. 시험이 보내는 Z 외에 한글 keydown/composition 이벤트가 전면 시험 창으로 들어와 확인/복구 중 초안을 바꾸고 있었다. 제품의 stale 확인 거절은 유지한다. 임시 입력 진단은 제거했다.
+- 합성 Electron 창의 show/focus를 없애고 CDP focus emulation·Input.insertText로 바꿨다. 일반 hidden insertText는 Monaco로 전달되지 않아 실패했으며 CDP 경로에서 편집/취소/복구/후속 대화 전체가 통과했다. OS 창 표시/초점 미획득도 assert한다. 이는 테스트 전용으로 제품 debug 접근을 열지 않는다.
+- 최종 숨김/초점 회귀는 3회 연속 exit 0, diff 검사 PASS. 일반 UI 변경 범위의 메인 직접 diff 검토 후 중첩 도킹과 시험 수정을 함께 작업 단위 커밋한다.
+- Karpathy 지침대로 제품 편집 로직을 추정으로 변경하지 않았다. 중첩 도킹의 기존 단위 13·편집 controller 36 PASS와 build 증거를 재사용한다. 후속으로 Monaco 옵션 갱신의 readOnly 누락을 확인할 회귀가 남으며, 설치 CLI 시험 승인·실제 공급자/시안/G6/Windows/출시도 별도 미완료다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (중첩 분할·탭 그룹 구현)
+
+- c245e47에서 진행 중이던 배치 UI를 이어서 구현했다. split/tab 트리·가장자리/가운데 drag/drop·키보드 배치 메뉴·각 분할 크기 조절·탭 초점 이동을 연결했다. 기존 저장 배치 호환과 숨김 그룹 복원을 유지하고 Monaco의 평면 keyed 부모를 보존한다. Karpathy 지침으로 기존 패널 상태/편집 안전 계약은 변경하지 않았다.
+- 검증: 배치 단위 13 PASS, 편집/작업 복사본 controller 36 PASS, pnpm build와 M5 renderer build PASS(기존 Monaco chunk 경고). Chromium smoke는 혼합 분할·탭/키보드·저장·Monaco identity를 통과했고 전체 성공도 관측했다. 다만 재실행 중 다시 불러오기 확인 또는 후속 대화 전환에서 dirty가 다시 생기는 간헐 실패가 관측됐다. 임시 길이 진단을 넣은 3회는 성공했고 진단은 제거했다. 이 성공을 간헐 실패 해소로 해석하지 않는다.
+- 다음: 편집 입력/동기화 경합 재현·해소 후 파동 UI 완료 판정. 실제 설치 CLI command/exec 시험은 여전히 별도 승인 대기이며 실제 계정/유료 모델은 호출하지 않았다. 전체 앱·시안 완료 아님. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 상태 확인)
+
+- 사용자 종료·복구 요청으로 c245e47의 현재 프로세스와 앱 데이터 메타데이터를 재확인했다. 권한 확장 읽기 전용 ps 조회에서 Hello Agent 개발 앱·sidecar·Vite는 없었다. 다른 앱의 crash handler는 종료하지 않았다.
+- 활성 codex-login.pending은 없고 보존 잠금 inode 168613811과 보존 helper inode 166226396이 그대로 유지된다. auth.json은 내용 조회 없이 mode 0600 유지 확인. 이미 수행한 보존 복구를 반복하거나 인증 정보를 초기화하지 않았으며 재부팅도 필요하지 않다.
+- 기존 도킹 UI 미커밋 5개 파일은 보존했다. 이번 검사는 종료/보존 복구 상태 확인이며 실제 로그인·모델 실행 성공을 의미하지 않는다. 다음은 진행 중 UI 검증과 별도 승인 대기 중 설치 CLI 시험이다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인 대기 중 오프라인 도구 시험 준비)
 
 - **범위**: 167d961 기준 실제 설치 CLI의 command/exec 시험 승인은 아직 받지 않았다. 대신 macOS test-only `provider_permission_probe`를 준비했다. 고정 initialize/initialized/config-read/command-exec 이외 RPC가 없으며 생성한 임시 profile·sentinel·workspace만 사용한다. 설치 CLI 시험은 ignored와 별도 승인 환경변수로 막고 CLI/helper pin을 release 전에도 대조한다. 실제 계정/모델/사용자 프로젝트는 쓰지 않는다.

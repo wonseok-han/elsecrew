@@ -1,6 +1,58 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeDockTab, defaultDockLayout, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, resizeDockPanels, toggleDockPanel, visibleDockPanels } from "../src/m5/dock-layout.ts";
+import { activeDockTab, defaultDockLayout, dockGeometry, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockPanels, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockPlacement } from "../src/m5/dock-layout.ts";
+
+test("nested split and tab groups preserve all panels and round-trip", () => {
+  let layout = placeDockPanel(defaultDockLayout(), "changes", "files", "bottom");
+  assert.ok(dockGeometry(layout, PANEL_IDS).separators.some(split => split.axis === "vertical"));
+  layout = placeDockPanel(layout, "conversation", "editor", "tab");
+  const group = dockGeometry(layout, PANEL_IDS).groups.find(group => group.panels.includes("editor"))!;
+  assert.deepEqual(group.panels, ["editor", "conversation"]);
+  assert.equal(group.active, "conversation");
+  assert.equal(dockGeometry(selectDockTab(layout, "editor"), PANEL_IDS).groups.find(group => group.panels.includes("editor"))?.active, "editor");
+  assert.deepEqual(parseDockLayout(JSON.stringify(layout)), layout);
+  assert.deepEqual([...layout.order].sort(), [...PANEL_IDS].sort());
+});
+test("nested hidden groups collapse geometrically without losing saved placement", () => {
+  const layout = placeDockPanel(defaultDockLayout(), "files", "editor", "top");
+  const focused = focusDockPanel(layout, "editor");
+  const geometry = dockGeometry(focused, PANEL_IDS);
+  assert.deepEqual(geometry.groups.map(group => group.rect), [{ x: 0, y: 0, width: 1, height: 1 }]);
+  assert.equal(geometry.separators.length, 0);
+  assert.deepEqual(focused.tree, layout.tree);
+  const reopened = toggleDockPanel(focused, "files", PANEL_IDS);
+  assert.equal(dockGeometry(reopened, PANEL_IDS).groups.length, 2);
+});
+test("every placement keeps an exact partition, including moving a tab out of its group", () => {
+  let layout = defaultDockLayout();
+  for (const placement of ["tab", "left", "right", "top", "bottom"] as DockPlacement[]) {
+    for (const source of PANEL_IDS) for (const target of PANEL_IDS) {
+      layout = placeDockPanel(layout, source, target, placement);
+      assert.deepEqual(parseDockLayout(JSON.stringify(layout)), layout);
+      const geometry = dockGeometry(layout, PANEL_IDS);
+      assert.deepEqual(geometry.groups.flatMap(group => group.panels).sort(), [...PANEL_IDS].sort());
+      assert.ok(Math.abs(geometry.groups.reduce((area, group) => area + group.rect.width * group.rect.height, 0) - 1) < .000001);
+    }
+  }
+});
+test("nested split resize is bounded and restores correctly after legacy minimum widths", () => {
+  const legacy = resizeDockPanels(defaultDockLayout(), "files", "editor", -100);
+  const layout = selectDockTab(legacy, "files");
+  assert.deepEqual(parseDockLayout(JSON.stringify(layout)), layout);
+  const resized = resizeDockSplit(layout, "", 100);
+  assert.equal(dockGeometry(resized, PANEL_IDS).separators[0].ratio, .9);
+  assert.deepEqual(parseDockLayout(JSON.stringify(resized)), resized);
+  assert.equal(resizeDockSplit(layout, "", NaN), layout);
+});
+test("malformed, duplicate and excessively deep trees restore defaults", () => {
+  const initial = defaultDockLayout();
+  let deep: unknown = { type: "tabs", panels: PANEL_IDS, active: "editor" };
+  for (let depth = 0; depth < 10; depth++) deep = { type: "split", axis: "horizontal", ratio: .5, first: deep, second: { type: "tabs", panels: ["files"], active: "files" } };
+  assert.deepEqual(parseDockLayout(JSON.stringify({ ...initial, tree: deep })), initial);
+  for (const tree of [null, {}, { type: "tabs", panels: [...PANEL_IDS, "files"], active: "files" }, { type: "tabs", panels: PANEL_IDS, active: "missing" }, { type: "split", axis: "horizontal", ratio: .5, first: null, second: null }]) {
+    assert.deepEqual(parseDockLayout(JSON.stringify({ ...initial, tree })), initial);
+  }
+});
 
 test("tabs persist selection and recover when a hidden or unavailable tab disappears", () => {
   const layout = { ...defaultDockLayout(), tabbed: true, activeTab: "conversation" as const };
