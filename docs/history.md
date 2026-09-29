@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (실행 파동 누적 검증 착수·승인 범위 확인)
+
+- **진행 중**: 358b547 clean source에서 CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4로 전체 sidecar lib458검사를 시작했다. terminal session7361이 살아 있으며 결과는 아직 미확정이다. 관측 대기 때문에 재시작하지 않는다. 소스 변경은 없다.
+- **다음 계약/검토**: 동일 검토자와 §6.8/§7·현재 코드를 대조했다. 승인 UI의 선택을 동일 실행/connection/thread/turn/request/item/action에 일회성으로 묶고, 전송 직전 role/workspace/fence/cancel 및 실제 vendor 격리를 검증해야 한다. domain-fronting 방지는 원문에 독립 필수조건으로 없으므로 opaque CONNECT의 잔존 한계로 명시하되, 도메인별 유출 방지나 네트워크 권한 확대를 보장하지 않는다. AcceptOnce 차단·제품 미활성은 유지하며 실제 유료 smoke는 별도 승인 사항이다.
+- **완료 확인**: 같은 session7361을 재시작 없이 관찰해 lib432 PASS/0 FAIL/26 ignored/729.83초·exit0을 확인했다. 이는358b547 소스의 누적 기준이며 ignored 실제 공급자/OS 검사를 대신하지 않는다. 임시 프로젝트 파일 한 줄 수정의 실제 Codex1회에 대해 별도 비동기 승인을 요청했으며 아직 답변이 없어 실행하지 않았다. 이번 변경은 검증 기록뿐이고 main 병합/push는 없다.
+
 ### 2026-09-29 · by GPT-6 Astra (프록시 실행과 작업 원장 연결)
 
 - **구현**: 직전1d8854f의 실제 격리 조회 성공에서 이어 RunReservation에 내부 proxied Codex 실행 후보를 연결했다. 기존 offline 진입점은 유지하고 선택 역할/model/permission·snapshot 격리·profile/pin/cancel 검사를 공유한다. opaque command는 process identities를 기존 durable pre-release 기록에 전달한 뒤 gate를 연다. release 후 저장 실패는 공용 record-or-invalidate로 통신/중계를 중단하고 종료 owner를 유지한다.
