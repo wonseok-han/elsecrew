@@ -350,6 +350,21 @@ impl PreflightExchange {
             }
             ObservationKind::Models => {
                 match_model_catalog(&observation, &profile)?;
+            }
+            ObservationKind::Requirements => {
+                // Managed policies are not supported by this isolated candidate.
+                // Null is an explicit report, not proof that inaccessible MDM
+                // policy was successfully loaded by the vendor.
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Requirements {
+                    requirements: Box<serde_json::value::RawValue>,
+                }
+                let result: Requirements =
+                    serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
+                if result.requirements.get() != "null" {
+                    return Err(invalid());
+                }
                 self.state = PreflightState::ObservationsMatched;
             }
         }
@@ -378,6 +393,7 @@ mod tests {
             json!({"config":{"model":"test-model","model_provider":"openai","model_reasoning_effort":"medium","approval_policy":"on-request","sandbox_mode":"read-only"}}),
             json!({"account":{"type":"chatgpt","email":"PRIVATE"},"requiresOpenaiAuth":true}),
             json!({"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}),
+            json!({"requirements":null}),
         ];
         values[1]["config"]["features"] = json!({"hooks":false});
         let config = values[1]["config"].clone();
@@ -389,7 +405,17 @@ mod tests {
         values
     }
     fn reply(index: usize, result: &Value) -> BoundedObservation {
-        BoundedObservation::new(serde_json::to_vec(&json!({"id":index+1,"result":result})).unwrap())
+        BoundedObservation::new(
+            serde_json::to_vec(
+                &json!({"id":if index == 4 { 50 } else { index+1 },"result":result}),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn thread_reply(result: &Value) -> BoundedObservation {
+        BoundedObservation::new(serde_json::to_vec(&json!({"id":5,"result":result})).unwrap())
             .unwrap()
     }
 
@@ -633,7 +659,7 @@ mod tests {
                 "unknown" => response["sandbox"]["extra"] = json!(true),
                 _ => {}
             }
-            let wire = reply(4, &response);
+            let wire = thread_reply(&response);
             let wire = if case == "duplicate" {
                 BoundedObservation::new(
                     String::from_utf8(wire.bytes)
@@ -669,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn matched_requires_all_four_ordered_observations_and_never_sends_user_input() {
+    fn matched_requires_all_five_ordered_observations_and_never_sends_user_input() {
         let mut exchange = exchange();
         for (index, result) in results().iter().enumerate() {
             let request = exchange.next_request().unwrap().unwrap();
@@ -688,6 +714,59 @@ mod tests {
         assert!(exchange.next_request().unwrap().is_none());
         exchange.invalidate();
         assert!(exchange.next_request().is_err());
+    }
+
+    #[test]
+    fn requirements_must_be_explicit_null_before_thread_or_turn() {
+        for result in [
+            r#"{"requirements":null}"#,
+            r#"{}"#,
+            r#"{"requirements":{}}"#,
+            r#"{"requirements":{"allowedSandboxModes":["readOnly"],"private":"PRIVATE_POLICY"}}"#,
+            r#"{"requirements":false}"#,
+            r#"{"requirements":[]}"#,
+            r#"{"requirements":"null"}"#,
+            r#"{"requirements":null,"requirements":null}"#,
+            r#"{"requirements":{},"requirements":null}"#,
+            r#"{"requirements":null,"extra":"PRIVATE_POLICY"}"#,
+        ] {
+            let mut flow = exchange();
+            for (index, value) in results().iter().take(4).enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            assert_eq!(flow.state(), PreflightState::Checking);
+            assert!(flow
+                .start_thread(std::path::Path::new("/managed/snapshot"))
+                .is_err());
+            let request = flow.next_frames().unwrap();
+            assert_eq!(request.len(), 1);
+            assert_eq!(
+                serde_json::from_str::<Value>(request[0].as_str()).unwrap(),
+                json!({"id":50,"method":"configRequirements/read","params":{}})
+            );
+            assert!(flow.next_frames().is_err());
+            let wire =
+                BoundedObservation::new(format!(r#"{{"id":50,"result":{result}}}"#).into_bytes())
+                    .unwrap();
+            let accepted = flow.accept(&wire);
+            if result == r#"{"requirements":null}"# {
+                assert_eq!(accepted.unwrap(), PreflightState::ObservationsMatched);
+                assert!(flow.next_frames().unwrap().is_empty());
+            } else {
+                let error = accepted.unwrap_err();
+                assert!(!error.to_string().contains("PRIVATE_POLICY"));
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert!(flow
+                    .accept(&reply(4, &json!({"requirements":null})))
+                    .is_err());
+                assert!(flow.next_frames().is_err());
+                assert!(flow
+                    .start_thread(std::path::Path::new("/managed/snapshot"))
+                    .is_err());
+                assert!(flow.into_text_turn("goal").is_err());
+            }
+        }
     }
 
     #[test]
@@ -752,7 +831,7 @@ mod tests {
         flow.start_read_only_thread(std::path::Path::new("/managed/snapshot"))
             .unwrap();
         let result = json!({"thread":{"id":"thread-1"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"});
-        flow.accept(&reply(4, &result)).unwrap();
+        flow.accept(&thread_reply(&result)).unwrap();
         flow.accept(
             &BoundedObservation::new(
                 br#"{"method":"thread/started","params":{"thread":{"id":"thread-1"}}}"#.to_vec(),
@@ -798,7 +877,12 @@ mod tests {
                 "instructions" => result["instructionSources"] = json!(["/user/AGENTS.md"]),
                 _ => {}
             }
-            let accepted = flow.accept(&reply(if mismatch == "id" { 3 } else { 4 }, &result));
+            let wire = if mismatch == "id" {
+                reply(3, &result)
+            } else {
+                thread_reply(&result)
+            };
+            let accepted = flow.accept(&wire);
             if mismatch == "none" {
                 assert_eq!(accepted.unwrap(), PreflightState::ThreadStarting);
                 assert_eq!(flow.matched_thread_id(), None);
@@ -852,7 +936,7 @@ mod tests {
                 assert!(flow.accept(&note).is_err());
             } else if case == "after" {
                 assert_eq!(
-                    flow.accept(&reply(4, &result)).unwrap(),
+                    flow.accept(&thread_reply(&result)).unwrap(),
                     PreflightState::ThreadStarting
                 );
                 assert_eq!(flow.matched_thread_id(), None);
@@ -863,10 +947,10 @@ mod tests {
                 if case == "duplicate" {
                     assert!(flow.accept(&note).is_err());
                 } else if case == "different" {
-                    assert!(flow.accept(&reply(4, &result)).is_err());
+                    assert!(flow.accept(&thread_reply(&result)).is_err());
                 } else {
                     assert_eq!(
-                        flow.accept(&reply(4, &result)).unwrap(),
+                        flow.accept(&thread_reply(&result)).unwrap(),
                         PreflightState::ThreadMatched
                     );
                 }

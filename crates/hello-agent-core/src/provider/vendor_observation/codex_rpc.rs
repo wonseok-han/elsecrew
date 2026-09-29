@@ -12,6 +12,7 @@ pub enum ObservationKind {
     Config,
     Account,
     Models,
+    Requirements,
 }
 
 #[derive(Debug, Default)]
@@ -33,7 +34,16 @@ impl ModelFreeExchange {
             ..Self::default()
         }
     }
-    /// Returns JSONL bytes for one known request, or None after the four read-only exchanges.
+    // Keep the existing thread/turn IDs 5/6 unchanged on the same connection.
+    fn request_id(&self) -> u64 {
+        if self.next == 4 {
+            50
+        } else {
+            self.next as u64 + 1
+        }
+    }
+
+    /// Returns one fixed request. Layered preflight adds a fifth requirements read.
     /// The second request includes the required initialized notification first.
     pub fn next_request(&mut self) -> Result<Option<String>, ProviderError> {
         if self.failed || self.pending {
@@ -53,6 +63,7 @@ impl ModelFreeExchange {
                 "model/list",
                 serde_json::json!({"limit":256,"includeHidden":false}),
             ),
+            4 if self.include_config_layers => ("configRequirements/read", serde_json::json!({})),
             _ => return Ok(None),
         };
         if self.next == 0 && self.include_config_layers {
@@ -72,7 +83,7 @@ impl ModelFreeExchange {
         };
         Ok(Some(format!(
             "{prefix}{}\n",
-            serde_json::json!({"id":self.next + 1,"method":method,"params":params})
+            serde_json::json!({"id":self.request_id(),"method":method,"params":params})
         )))
     }
 
@@ -104,7 +115,7 @@ impl ModelFreeExchange {
             return Err(error());
         }
         let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| error())?;
-        if reply.id != self.next as u64 + 1 || !reply.result.get().trim_start().starts_with('{') {
+        if reply.id != self.request_id() || !reply.result.get().trim_start().starts_with('{') {
             return Err(error());
         }
         let result =
@@ -125,6 +136,7 @@ impl ModelFreeExchange {
             1 => ObservationKind::Config,
             2 => ObservationKind::Account,
             3 => ObservationKind::Models,
+            4 if self.include_config_layers => ObservationKind::Requirements,
             _ => return Err(error()),
         };
         self.next += 1;

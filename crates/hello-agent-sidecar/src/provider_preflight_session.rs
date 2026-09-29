@@ -28,7 +28,7 @@ pub(crate) struct ProviderInspection<'a> {
     pub(crate) process: LoginProcess<'a>,
 }
 
-/// Full candidate includes account/read and model/list. This is NOT the approved
+/// Full candidate includes account/read, model/list and configRequirements/read. This is NOT the approved
 /// config-only smoke and must not be invoked under that narrower authorization.
 /// No product caller exists; configuration isolation/admission remains separate.
 pub(crate) fn inspect_full_preflight_candidate<'a>(
@@ -833,6 +833,9 @@ IFS= read -r request
 printf '%s\n' '{"id":3,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
 IFS= read -r request
 printf '%s\n' '{"id":4,"result":{"data":[{"id":"test-model","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null}}'
+IFS= read -r request
+test "$request" = '{"id":50,"method":"configRequirements/read","params":{}}' || exit 3
+printf '%s\n' '{"id":50,"result":{"requirements":null}}'
 IFS= read -r hold
 "#;
         for case in [
@@ -961,6 +964,8 @@ IFS= read -r hold
         for case in [
             "success",
             "config",
+            "requirements",
+            "requirements-error",
             "config-only",
             "config-only-thread",
             "cancel",
@@ -1043,6 +1048,14 @@ case "$line" in *'"method":"account/read"'*) ;; *) exit 5;; esac
 printf '%s\n' "$3"
 IFS= read -r line; case "$line" in *'"method":"model/list"'*) ;; *) exit 6;; esac
 printf '%s\n' "$4"
+IFS= read -r line; test "$line" = '{"id":50,"method":"configRequirements/read","params":{}}' || exit 6
+if test "$6" = requirements; then
+printf '%s\n' '{"id":50,"result":{"requirements":{"allowedSandboxModes":["readOnly"]}}}'
+elif test "$6" = requirements-error; then
+printf '%s\n' '{"id":50,"error":{"message":"PRIVATE_POLICY"}}'
+else
+printf '%s\n' '{"id":50,"result":{"requirements":null}}'
+fi
 IFS= read -r line || exit 0
 case "$line" in *'"method":"thread/start"'*) ;; *) exit 7;; esac
 printf received > "$7"
@@ -1134,10 +1147,10 @@ IFS= read -r hold
                             }
                             TextAction::VerifyWorkspace => {
                                 checks += 1;
-                                // Five small preflight frames add five flush checks;
+                                // Six small preflight frames add six flush checks;
                                 // the thread frame adds one before the prompt boundary.
-                                if (case == "turn-workspace-before-thread" && checks == 7)
-                                    || (case == "turn-workspace-before-prompt" && checks == 9)
+                                if (case == "turn-workspace-before-thread" && checks == 8)
+                                    || (case == "turn-workspace-before-prompt" && checks == 10)
                                 {
                                     return Err(failure());
                                 }
@@ -1284,7 +1297,12 @@ IFS= read -r hold
             };
             let thread_cwd = if matches!(
                 case,
-                "thread" | "thread-before" | "wrong-thread" | "config-only-thread"
+                "thread"
+                    | "thread-before"
+                    | "wrong-thread"
+                    | "config-only-thread"
+                    | "requirements"
+                    | "requirements-error"
             ) {
                 Some(std::path::Path::new("/managed/snapshot"))
             } else {
@@ -1309,6 +1327,11 @@ IFS= read -r hold
                 .start_read_only_thread(std::path::Path::new("/managed/snapshot"))
                 .is_err());
             assert_eq!(flow.matched_thread_id(), None);
+            if case.starts_with("requirements") {
+                assert!(!temp.path().join("thread-received").exists());
+                assert!(!temp.path().join("prompt-received").exists());
+                assert!(process.closure_evidence().unwrap().confirmed());
+            }
             if case.starts_with("config-only") {
                 assert!(!temp.path().join("thread-received.account").exists());
                 assert!(!temp.path().join("thread-received").exists());

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (관리 정책 조회를 full preflight에 결속)
+
+- **구현/범위**: clean `c38b72b`에서 메인이 OpenAI Docs·Karpathy 지침으로 기존 full preflight에 고정 configRequirements/read(id 50)를 추가했다. 기존 thread/turn id 5/6은 유지하고 모델 목록만으로 ObservationsMatched가 되지 않는다. 정확한 requirements:null만 수락하며 누락·관리 객체·중복·미지 필드·오류는 실패 고정한다. 설정 전용 2 RPC는 넓히지 않았다. 기존 동기/단계별 세션이 같은 검사기를 사용한다.
+- **검증**: core preflight 21 PASS/0.02초(정책 응답 10사례 포함), 기존 model-free RPC 4 PASS/0.01초, sidecar preflight 5 PASS/13.51초(실제 CLI 1 ignored). 정책 거절 시 thread/prompt 미전송·confirmed cleanup을 강화한 최종 pipe 회귀 1 PASS/10.24초. 동일 독립 검토자 scoped PASS. 실제 provider·계정·유료 실행·사용자 프로젝트는 사용하지 않았다.
+- **다음/한계**: 공식 API의 null은 vendor가 보고한 정책 부재이지 접근 불가 MDM 가시성 증명이 아니다. 제품 runtime은 blocked 유지하며 native 실제 조회 성공·실행 연결은 미완료다. 기존 앱 pending과 재부팅 전 체크포인트는 그대로이며 사용자 재부팅 완료는 아직 미수신이다. 재부팅 후 신원 대조/복구와 5 RPC 실제 검사가 다음 단계다. 직전 승인 확인 턴은 구현 진전이 없었지만 이번 턴은 실제 후보 연결을 변경했다. main 병합/push 없음.
+- **마감**: core+sidecar all-targets strict clippy PASS/6.05초, scoped rustfmt·git diff --check PASS. 변경 5파일만 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (이전 잠금의 재부팅 전 증거 보존)
 
 - **진전/현황**: clean `d7a128d`에서 이전 pending의 종료 증거 부재를 재확인했다. 현재 부팅에서 PID 부재만으로 해제하지 않는다. macOS 커널 bootsessionuuid는 도구 sandbox 안에서 EPERM이지만 외부 읽기 전용 조회는 성공했다. 파일 지문 조회 전후 부팅 UUID가 동일했다. 실제 재부팅을 통해 이전 프로세스가 모두 종료된 뒤 동일 파일인지 대조하는 복구 절차를 선택했다.
@@ -78,6 +85,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **관리 정책 조회 후보(2026-09-29)**: full preflight는 고정 configRequirements/read(id 50)의 explicit requirements:null까지 받아야 observations가 일치한다. 객체/누락/중복/미지 응답은 거절하며 configuration-only는 기존 2 RPC를 유지한다. 이는 공식 vendor 보고 검증이며 inaccessible MDM visibility/실제 계정 검사 성공/제품 admission 증거는 아니다. 현행 경계는 architecture의 관리 정책 조회 항목에 기록한다.
 
 - **종료/잠금 진단 분리(2026-09-29)**: ProcessClosureEvidence.termination_confirmed는 추적한 프로세스 종료/reap와 증거 저장까지 확인한 진단값이다. 프로필·예약 검증까지 통과한 confirmed를 대신해 실행/잠금 해제 권한으로 쓰지 않는다. 과거 pending은 이 증거가 없으므로 PID가 없다는 사실로 confirmed를 재구성하지 않는다.
 - **로그인 종료 표시(2026-09-29)**: 새 로그인/조회는 clean 종료 뒤 profile 재검증 전에 pending 마지막 줄에 login-processes-terminated-v1을 fsync한다. native run의 terminal 보류에는 쓰지 않으며 표시만으로 자동 해제하지 않는다. legacy pending에 소급해 표시를 붙이지 않는다.
