@@ -63,6 +63,11 @@ export function moveDockPanel(layout: DockLayout, source: DockPanel, target: Doc
   order.splice(layout.order.indexOf(target), 0, source);
   return { ...layout, order };
 }
+export function revealDockPanel(layout: DockLayout, panel: DockPanel): DockLayout {
+  if (!PANEL_IDS.includes(panel)) return layout;
+  const visible = { ...layout, ...(layout.hidden ? { hidden: layout.hidden.filter(id => id !== panel) } : {}) };
+  return layout.tree ? selectDockTab(visible, panel) : layout.tabbed ? { ...visible, activeTab: panel } : visible;
+}
 export function resizeDockPanels(layout: DockLayout, left: DockPanel, right: DockPanel, delta: number): DockLayout {
   if (!Number.isFinite(delta) || left === right || !PANEL_IDS.includes(left) || !PANEL_IDS.includes(right)) return layout;
   const pair = layout.widths[left] + layout.widths[right];

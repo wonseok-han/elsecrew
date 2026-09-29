@@ -40,6 +40,7 @@ export interface EditorSnapshot {
   tabs: readonly EditorTab[];
   activePath: string | null;
   panel: WorkbenchPanel;
+  panelRequest: { panel: WorkbenchPanel } | null;
   diffSummary: DiffSummaryV1 | null;
   diffFile: DiffFileDescriptorV1 | null;
   diffText: string;
@@ -137,6 +138,7 @@ export class ProjectEditorController {
     tabs: [],
     activePath: null,
     panel: "files",
+    panelRequest: null,
     diffSummary: null,
     diffFile: null,
     diffText: "",
@@ -871,7 +873,7 @@ export class ProjectEditorController {
 
   #set(update: Partial<EditorSnapshot>): void {
     if (this.#disposed) return;
-    this.#state = { ...this.#state, ...update };
+    this.#state = { ...this.#state, ...update, ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
     for (const listener of this.#listeners) listener();
   }
 }

@@ -40,6 +40,9 @@ button, input, textarea {
 h1 { margin: 0; font-size: 22px; }
 .m5-subtitle, .m5-root, .m5-empty { color: #aab4c1; font-size: 13px; }
 .m5-subtitle { margin: 5px 0 0; }
+.m5-breadcrumbs { display: flex; flex-wrap: wrap; gap: 3px; padding: 6px; }
+.m5-breadcrumbs button { background: transparent; color: #aab4c1; border: 0; padding: 4px; overflow-wrap: anywhere; }
+.m5-breadcrumbs [aria-current] { color: #e6edf3; }
 .m5-file-search { padding: 8px; border-bottom: 1px solid #3f4c5c; }
 .m5-file-search form { display: flex; flex-wrap: wrap; gap: 6px; }
 .m5-file-search input { flex: 1; min-width: 70px; width: 100%; background: #12161d; color: #e6edf3; border: 1px solid #3f4c5c; border-radius: 5px; padding: 7px; }

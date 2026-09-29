@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { revealDockPanel } from "../src/m5/dock-layout.ts";
 import { activeDockTab, defaultDockLayout, dockGeometry, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockPanels, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockPlacement } from "../src/m5/dock-layout.ts";
 
 test("nested split and tab groups preserve all panels and round-trip", () => {
@@ -12,6 +13,20 @@ test("nested split and tab groups preserve all panels and round-trip", () => {
   assert.equal(dockGeometry(selectDockTab(layout, "editor"), PANEL_IDS).groups.find(group => group.panels.includes("editor"))?.active, "editor");
   assert.deepEqual(parseDockLayout(JSON.stringify(layout)), layout);
   assert.deepEqual([...layout.order].sort(), [...PANEL_IDS].sort());
+});
+
+test("explicit navigation reveals a hidden panel and selects its existing tab without rearranging splits", () => {
+  const grouped = placeDockPanel(defaultDockLayout(), "editor", "files", "tab");
+  const focused = focusDockPanel(selectDockTab(grouped, "files"), "files");
+  const revealed = revealDockPanel(focused, "editor");
+  assert.deepEqual(revealed.order, focused.order);
+  assert.deepEqual(revealed.widths, focused.widths);
+  assert.deepEqual(revealed.hidden, ["changes", "conversation"]);
+  assert.equal(dockGeometry(revealed, PANEL_IDS).groups[0].active, "editor");
+  assert.deepEqual(parseDockLayout(JSON.stringify(revealed)), revealed);
+  const legacy = revealDockPanel({ ...defaultDockLayout(), tabbed: true, activeTab: "files" }, "editor");
+  assert.equal(legacy.activeTab, "editor");
+  assert.equal(legacy.tree, undefined);
 });
 test("nested hidden groups collapse geometrically without losing saved placement", () => {
   const layout = placeDockPanel(defaultDockLayout(), "files", "editor", "top");

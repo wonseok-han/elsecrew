@@ -25,6 +25,19 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("explicit panel requests repeat but background state updates do not reopen dock panels", async () => {
+  const controller = new ProjectEditorController(new FakeBridge());
+  assert.equal(controller.snapshot().panelRequest, null);
+  controller.selectPanel("editor");
+  const first = controller.snapshot().panelRequest;
+  controller.setActionBlocked(false);
+  assert.equal(controller.snapshot().panelRequest, first);
+  controller.selectPanel("editor");
+  assert.notEqual(controller.snapshot().panelRequest, first);
+  assert.deepEqual(controller.snapshot().panelRequest, { panel: "editor" });
+  controller.dispose();
+});
+
 test("cancel and restart cannot accumulate unresolved search reads", async () => {
   const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
   try {

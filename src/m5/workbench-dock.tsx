@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { defaultDockLayout, DOCK_STORAGE_KEY, dockGeometry, focusDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockLayout, type DockPanel, type DockPlacement, type DockRect } from "./dock-layout.ts";
+import { defaultDockLayout, DOCK_STORAGE_KEY, dockGeometry, focusDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockSplit, revealDockPanel, selectDockTab, toggleDockPanel, visibleDockPanels, type DockLayout, type DockPanel, type DockPlacement, type DockRect } from "./dock-layout.ts";
 const labels: Record<DockPanel, string> = { files: "파일", editor: "편집기", changes: "변경", conversation: "팀 대화" };
 const placements: Record<DockPlacement, string> = { left: "왼쪽", right: "오른쪽", top: "위", bottom: "아래", tab: "같은 탭 그룹" };
 const dragType = "application/x-hello-agent-panel";
 const position = (rect: DockRect): CSSProperties => ({ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` });
 
-export function WorkbenchDock({ children, conversation }: { children: ReactNode[]; conversation?: ReactNode }) {
+export function WorkbenchDock({ children, conversation, reveal }: { children: ReactNode[]; conversation?: ReactNode; reveal?: { panel: DockPanel } | null }) {
   const [layout, setLayout] = useState(() => { try { return parseDockLayout(localStorage.getItem(DOCK_STORAGE_KEY)); } catch { return defaultDockLayout(); } });
   const [drop, setDrop] = useState<{ target: DockPanel; placement: DockPlacement } | null>(null);
   const container = useRef<HTMLElement>(null);
@@ -16,6 +16,7 @@ export function WorkbenchDock({ children, conversation }: { children: ReactNode[
   };
   const resizing = useRef<{ coordinate: number; size: number; ratio: number; path: string; axis: string; layout: DockLayout } | null>(null);
   useEffect(() => { try { localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(layout)); } catch { /* In-memory layout remains usable. */ } }, [layout]);
+  useEffect(() => { if (reveal) { resizing.current = null; setLayout(current => revealDockPanel(current, reveal.panel)); } }, [reveal]);
   const panels: Record<DockPanel, ReactNode> = { files: children[0], editor: children[1], changes: children[2], conversation };
   const available = PANEL_IDS.filter(id => Boolean(panels[id]));
   const eligible = visibleDockPanels(layout, available);
