@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
 import { spawn } from "node:child_process";
 import { TextDecoder } from "node:util";
@@ -418,6 +419,10 @@ export class SidecarClientV1 {
   }
 
   openProject(selectedPath: string): Promise<ProjectIdentityV1> { return this.#request("project.open", { selectedPath }) as Promise<ProjectIdentityV1>; }
+  projectCatalog(input: ProjectCatalogRequest): Promise<ProjectCatalogResult> {
+    if (!this.#ready?.capabilities.includes("project.catalog")) return Promise.reject(new Error("project catalog unavailable"));
+    return this.#request("project.catalog", validateProjectCatalogRequest(input)) as Promise<ProjectCatalogResult>;
+  }
   getProjectTree(input: { projectId: string; parentPath: string; cursor: string | null }): Promise<TreePageV1> { return this.#request("project.getTree", input) as Promise<TreePageV1>; }
   createProjectWorktree(input: { projectId: string }): Promise<WorktreeManifestV1> { return this.#request("project.createWorktree", input) as Promise<WorktreeManifestV1>; }
   closeProject(input: { projectId: string }): Promise<ProjectCloseResultV1> { return this.#request("project.close", input) as Promise<ProjectCloseResultV1>; }
@@ -615,6 +620,11 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const advertisedReady = parseReadyPayload(envelope);
+        const hasCatalog = advertisedReady.capabilities.at(-1) === "project.catalog";
+        if (hasCatalog) {
+          if (advertisedReady.capabilities.at(-2) !== "run.approval") throw new Error("invalid catalog capability baseline");
+          advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -1);
+        }
         const hasApproval = advertisedReady.capabilities.at(-1) === "run.approval";
         if (hasApproval) {
           if (advertisedReady.capabilities.at(-2) !== "provider.login") throw new Error("invalid approval capability baseline");
@@ -645,6 +655,7 @@ export class SidecarClientV1 {
         const negotiatedReady = hasFollowup ? advertisedReady : ready;
         if (hasLogin) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.login"];
         if (hasApproval) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "run.approval"];
+        if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#storageAdmissionNegotiated = negotiatedG5DAgent || negotiatedG5DProduct;
@@ -773,6 +784,7 @@ export class SidecarClientV1 {
       case "app.prepareQuit": return parsePrepareQuitResult(response);
       case "storage.status": return validateStorageStatusV1(response.result);
       case "project.open": return validateProjectIdentityV1(response.result);
+      case "project.catalog": return validateProjectCatalogResult(response.result, validateProjectCatalogRequest(pending.params));
       case "project.getTree": {
         const value = validateTreePageV1(response.result);
         assertResponseField(value, pending.params, "projectId");

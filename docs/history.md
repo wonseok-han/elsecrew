@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 목록·재열기 IPC)
+
+- 3692450 기반 미커밋 목록/reopen을 이어서 project.catalog list/reopen 계약과 sidecar dispatch, Rust/TS capability suffix, Electron main/preload 고정 IPC에 연결했다. 목록은 ID 순 keyset 50개이며 raw 512KiB와 encoded JSON 768KiB 한도를 분리한다. 재열기는 저장 ID로만 경로를 찾고 hash·canonical path·실제 Git root를 확인한 뒤 폴더 선택과 같은 검증을 공유한다. 새 HEAD는 허용하되 recoveryRequired와 바뀐 링크를 거절하고 active snapshot은 유지한다.
+- 검증: saved_project Rust 4 PASS, shell-ready 1 PASS, catalog dispatch 1 PASS, protocol lifecycle 3 PASS, strict all-targets clippy PASS/5.01초, Node 계약/bridge/security/scaffold 65 PASS, pnpm build PASS. 초기 macro/test 인자·없는 tsx 호출과 보안 mock import 실패를 수정하고 해당 검사를 재실행했다. package smoke의 오래된 capability 기대값도 현행으로 고쳐 scaffold 5 PASS; 실제 패키지 smoke는 실행하지 않았다. scoped rustfmt·diff 검사 PASS.
+- 단일 독립 검토자가 저장/reopen 및 IPC/preload 확장에서 새 safety/compatibility blocker 없음으로 검토했다. Karpathy 지침으로 기존 검증과 projects table을 재사용했다. 사용자 프로젝트/계정/모델 실행 없이 진행했다. 다음은 저장 프로젝트 선택 UI와 기존 초안/채팅 보호 흐름 연결이며 아직 화면에서 목록 선택 가능한 기능 완료는 아니다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 재확인)
+
+- 사용자 요청에 따라 권한 확장 읽기 전용 프로세스 조회와 앱 데이터 메타데이터를 재확인했다. Hello Agent 개발 앱·sidecar·Vite는 이미 종료되어 있다. ChatGPT의 code-mode-host와 VS Code/Cursor crash handler는 대상이 아니므로 종료하지 않았다.
+- 활성 codex-login.pending은 없으며 보존 잠금 inode 168613811·stale helper inode 166226396이 유지된다. auth.json은 내용 조회 없이 mode 0600만 확인했다. 이전 보존 복구가 유지되어 추가 이동·삭제·인증 초기화·재부팅은 수행하지 않았다.
+- 기존 프로젝트 목록/재열기 미커밋 5개 파일은 보존했다. 이번 확인은 실제 로그인 재실행이나 모델 실행 성공의 증거가 아니다. 다음은 진행 중 목록 UI 연결이며 설치 CLI 도구 실행 시험은 별도 승인 대기다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (저장된 프로젝트 목록 조회 기반)
 
 - d399b1c에서 여러 프로젝트 재선택 경로를 조사했다. 저장된 project 원장은 있으나 공개 openProject는 native 폴더 선택기만 거치며 목록 API는 없다. storage/catalog에 읽기 전용 keyset 조회를 추가했다. ID/경로 열만 읽고 큰 workspace projection_json은 materialize하지 않으며 파일 시스템 접근·snapshot 생성·프로젝트 활성화는 하지 않는다.

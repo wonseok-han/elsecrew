@@ -22,6 +22,52 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn catalog_dispatch_lists_empty_storage_and_rejects_unknown_reopen() {
+    let (_root, path) = database();
+    let instance = "catalog_session";
+    let mut sidecar = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    sidecar.start_admission(&path);
+    wait_until_admitted(&mut sidecar);
+    let listed = sidecar
+        .handle_request(request_value(
+            instance,
+            "catalog_list",
+            "project.catalog",
+            json!({"action":"list","cursor":null}),
+        ))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(listed.ok);
+    assert_eq!(
+        listed.result,
+        Some(json!({"schemaVersion":1,"action":"list","projects":[],"nextCursor":null}))
+    );
+    let missing = sidecar
+        .handle_request(request_value(
+            instance,
+            "catalog_missing",
+            "project.catalog",
+            json!({"action":"reopen","projectId":"project_missing"}),
+        ))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(!missing.ok);
+    let listed_again = sidecar
+        .handle_request(request_value(
+            instance,
+            "catalog_again",
+            "project.catalog",
+            json!({"action":"list","cursor":null}),
+        ))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(listed_again.ok);
+}
+
+#[test]
 fn approval_errors_are_request_scoped_and_do_not_stop_the_session() {
     let (_root, path) = database();
     let instance = "approval_session";
@@ -94,6 +140,10 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
 
     let ready = sidecar.ready_event().expect("shell ready");
     let mut baseline = ready.payload.clone();
+    assert_eq!(
+        baseline["capabilities"].as_array_mut().unwrap().pop(),
+        Some(json!("project.catalog"))
+    );
     assert_eq!(
         baseline["capabilities"].as_array_mut().unwrap().pop(),
         Some(json!("run.approval"))

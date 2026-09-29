@@ -1,6 +1,6 @@
 use super::Storage;
 use crate::SidecarError;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 pub const PROJECT_CATALOG_PAGE_SIZE: usize = 50;
 const PATH_BYTES_MAX: usize = 128 * 1024;
@@ -19,6 +19,29 @@ pub struct ProjectCatalogPage {
 }
 
 impl Storage {
+    pub fn project_catalog_path(&self, project_id: &str) -> Result<Option<String>, SidecarError> {
+        self.ensure_writes_admitted()?;
+        if !valid_id(project_id) {
+            return Err(SidecarError::new(
+                "projectCatalogInvalid",
+                "invalid project ID",
+            ));
+        }
+        let path: Option<Option<String>> = self.connection.query_row(
+            "SELECT CASE WHEN length(CAST(canonical_path AS BLOB)) <= ?2 THEN canonical_path END FROM projects WHERE project_id = ?1",
+            params![project_id, PATH_BYTES_MAX as i64],
+            |row| row.get(0),
+        ).optional().map_err(catalog_sql)?;
+        match path {
+            None => Ok(None),
+            Some(Some(path)) if !path.is_empty() && !path.contains('\0') => Ok(Some(path)),
+            _ => Err(SidecarError::new(
+                "projectCatalogInvalid",
+                "invalid catalog path",
+            )),
+        }
+    }
+
     /// Metadata only: no filesystem access or project/snapshot activation.
     /// Keyset pagination intentionally uses stable IDs, not a guessed recency.
     pub fn project_catalog_page(

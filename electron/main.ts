@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
+import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -278,6 +279,12 @@ function prepareQuit(): Promise<PrepareQuitResultV1> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle(PROJECT_CATALOG_CHANNEL, async (event, input: unknown) => {
+    assertCurrentMainFrame(event);
+    if (!sidecar) throw new Error("sidecar was not started");
+    const request = validateProjectCatalogRequest(input);
+    return validateProjectCatalogResult(await sidecar.projectCatalog(request), request);
+  });
   ipcMain.handle(APPROVAL_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");

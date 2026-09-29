@@ -364,13 +364,84 @@ impl ProjectManager {
     ) -> Result<ProjectAction, ProjectFailure> {
         let selected = canonical_existing_directory(Path::new(selected_path))?;
         let source = self.open_source_repository(&selected)?;
+        self.open_verified_source(storage, &selected, source, request_id)
+    }
+
+    /// Explicit selection of a saved ID, not renderer-supplied filesystem authority.
+    pub fn reopen_project(
+        &mut self,
+        storage: &mut Storage,
+        project_id: &str,
+        request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let path = storage
+            .project_catalog_path(project_id)?
+            .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
+        if project_id_for_root(&path) != project_id {
+            return Err(ProjectFailure::manifest("saved project ID and root differ"));
+        }
+        let selected = canonical_existing_directory(Path::new(&path))?;
+        if canonical_protocol_path(&selected)? != path {
+            return Err(ProjectFailure::manifest(
+                "saved project path now resolves elsewhere",
+            ));
+        }
+        let source = self.open_source_repository(&selected)?;
+        if source.canonical_root != selected {
+            return Err(ProjectFailure::manifest(
+                "saved project is no longer a repository root",
+            ));
+        }
+        // Keep the already validated capability-held repository through admission.
+        // A newer HEAD is allowed just as with an explicit folder picker selection.
+        self.open_verified_source(storage, &selected, source, request_id)
+    }
+
+    pub fn list_saved_projects(
+        &self,
+        storage: &Storage,
+        cursor: Option<&str>,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let page = storage.project_catalog_page(cursor)?;
+        let projects: Vec<Value> = page
+            .entries
+            .into_iter()
+            .map(|entry| {
+                json!({
+                    "projectId": entry.project_id, "canonicalPath": entry.canonical_path,
+                })
+            })
+            .collect();
+        let result = json!({"schemaVersion":1,"action":"list","projects":projects,"nextCursor":page.next_cursor});
+        if serde_json::to_vec(&result)
+            .map_err(|error| ProjectFailure::manifest(error.to_string()))?
+            .len()
+            > 768 * 1024
+        {
+            return Err(ProjectFailure::manifest(
+                "encoded project catalog page exceeds limit",
+            ));
+        }
+        Ok(ProjectAction {
+            result,
+            ..ProjectAction::default()
+        })
+    }
+
+    fn open_verified_source(
+        &mut self,
+        storage: &mut Storage,
+        selected: &Path,
+        source: SourceRepository,
+        request_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
         if !selected.starts_with(&source.canonical_root) {
             return Err(ProjectFailure::manifest(
                 "picker-approved path is outside the capability-held Git root",
             ));
         }
         let canonical_text = canonical_protocol_path(&source.canonical_root)?;
-        let selected_text = canonical_protocol_path(&selected)?;
+        let selected_text = canonical_protocol_path(selected)?;
         let project_id = project_id_for_root(&canonical_text);
 
         if let Some(existing) = storage.projection_record("project", &project_id)? {

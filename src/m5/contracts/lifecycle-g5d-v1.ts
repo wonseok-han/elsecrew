@@ -99,6 +99,13 @@ export function parseG5DProductSystemStatusV1(value: unknown): SystemStatusG5DV1
 export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean): SystemStatusG5DV1 {
   return parseSystemStatus(value, (sidecar) => {
     const baseline = agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
+    if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities) && sidecar.capabilities[sidecar.capabilities.length - 1] === "project.catalog") {
+      const caps = sidecar.capabilities;
+      const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog"];
+      if (caps.slice(-4).join("|") !== suffix.join("|")) throw new Error("invalid catalog capability baseline");
+      const parsed = baseline({ ...sidecar, capabilities: caps.slice(0, -4) });
+      return { ...parsed, capabilities: [...parsed.capabilities, ...suffix] };
+    }
     if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities) && sidecar.capabilities[sidecar.capabilities.length - 1] === "run.approval") {
       const caps = sidecar.capabilities;
       if (caps[caps.length - 2] !== "provider.login" || caps[caps.length - 3] !== "chat.appendMessage") throw new Error("invalid approval capability baseline");

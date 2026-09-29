@@ -314,6 +314,7 @@ function moduleFor(
   if (specifier === "electron") return fakes.electron;
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
+  if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
   if (specifier === "node:fs") {
     return {
       mkdirSync: () => undefined,
@@ -336,3 +337,13 @@ function moduleFor(
 }
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
 import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
+import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
+
+test("catalog IPC rejects foreign frames and renderer-supplied paths", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(catalogContract.PROJECT_CATALOG_CHANNEL);
+  assert.ok(handler);
+  await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
+  await assert.rejects(handler(harness.currentEvent(), {action: "reopen", projectId: "project_a", path: "/other"}));
+  assert.deepEqual(harness.sidecarCalls, []);
+});

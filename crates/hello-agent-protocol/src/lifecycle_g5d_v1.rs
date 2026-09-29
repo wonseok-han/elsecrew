@@ -131,7 +131,12 @@ fn parse_followup_status(
         .and_then(Value::as_array_mut);
     let mut login = false;
     let mut approval = false;
+    let mut catalog = false;
     let extended = capabilities.is_some_and(|capabilities| {
+        if capabilities.last().and_then(Value::as_str) == Some("project.catalog") {
+            capabilities.pop();
+            catalog = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("run.approval") {
             capabilities.pop();
             approval = true;
@@ -148,6 +153,11 @@ fn parse_followup_status(
         }
     });
     let mut parsed = baseline(&normalized)?;
+    if catalog && !approval {
+        return Err(G5DAdmissionContractError::new(
+            "catalog requires approval baseline",
+        ));
+    }
     if approval && !login {
         return Err(G5DAdmissionContractError::new(
             "approval requires login baseline",
@@ -172,6 +182,12 @@ fn parse_followup_status(
     }
     if approval {
         parsed.sidecar.capabilities.push("run.approval".to_owned());
+    }
+    if catalog {
+        parsed
+            .sidecar
+            .capabilities
+            .push("project.catalog".to_owned());
     }
     Ok(parsed)
 }

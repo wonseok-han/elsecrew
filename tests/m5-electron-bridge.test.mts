@@ -454,6 +454,28 @@ test("login capability negotiates exact status and fixed requests", async () => 
   assert.deepEqual(await login, idle);
 });
 
+test("catalog capability negotiates status and validates selected IDs", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  const ready = JSON.parse(g5dReadyLine());
+  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog"];
+  ready.payload.capabilities.push(...suffix);
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.equal((await started).capabilities.at(-1), "project.catalog");
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push(...suffix);
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  await status;
+  const pending = client.projectCatalog({ action: "list", cursor: null });
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method, "project.catalog");
+  const page = { schemaVersion: 1, action: "list", projects: [], nextCursor: null };
+  child.stdout.write(responseLine(sent.requestId, page));
+  assert.deepEqual(await pending, page);
+  assert.throws(() => client.projectCatalog({ action: "reopen", projectId: "../escape" } as any));
+});
+
 test("approval capability extends exact status and binds decline receipts", async () => {
   const { child, client } = createClient();
   const started = client.start();
@@ -515,6 +537,9 @@ test("follow-up rejects misplaced, duplicated and unknown baseline capabilities"
     ["chat.appendMessage", ...G5D_PRODUCT_CAPABILITIES_V1],
     [...G5D_PRODUCT_CAPABILITIES_V1, "chat.appendMessage", "chat.appendMessage"],
     [...G5_CAPABILITIES_V1, "chat.appendMessage"],
+    [...G5D_PRODUCT_CAPABILITIES_V1, "project.catalog"],
+    [...G5D_PRODUCT_CAPABILITIES_V1, "chat.appendMessage", "provider.login", "project.catalog"],
+    [...G5D_PRODUCT_CAPABILITIES_V1, "chat.appendMessage", "provider.login", "run.approval", "project.catalog", "project.catalog"],
   ]) {
     const { child, client } = createClient();
     const started = client.start();

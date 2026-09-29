@@ -549,6 +549,7 @@ impl SidecarSession {
                     .chain(std::iter::once(&"chat.appendMessage"))
                     .chain(std::iter::once(&"provider.login"))
                     .chain(std::iter::once(&"run.approval"))
+                    .chain(std::iter::once(&"project.catalog"))
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -1047,6 +1048,29 @@ impl Sidecar {
                     ..project::ProjectAction::default()
                 }
             }),
+            "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("list") => {
+                    let params = require_exact_params(&request.params, &["action", "cursor"])
+                        .map_err(invalid_params)?;
+                    self.projects.list_saved_projects(
+                        &self.storage,
+                        param_nullable_string(params, "cursor").map_err(invalid_params)?,
+                    )
+                }
+                Some("reopen") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"])
+                        .map_err(invalid_params)?;
+                    self.projects.reopen_project(
+                            &mut self.storage,
+                            param_string(params, "projectId").map_err(invalid_params)?,
+                            &request.request_id,
+                        ).map(|mut action| {
+                            action.result = serde_json::json!({ "schemaVersion": 1, "action": "reopen", "project": action.result });
+                            action
+                        })
+                }
+                _ => return Err(invalid_params("invalid project catalog action".to_owned())),
+            },
             "project.open" => {
                 let params = require_exact_params(&request.params, &["selectedPath"])
                     .map_err(invalid_params)?;

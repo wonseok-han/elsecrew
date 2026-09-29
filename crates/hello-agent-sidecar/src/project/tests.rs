@@ -104,6 +104,161 @@ impl Fixture {
 }
 
 #[test]
+fn saved_project_catalog_uses_typed_wire_keys_without_activating_project() {
+    let fixture = Fixture::open();
+    let before = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    let page = fixture
+        .manager
+        .list_saved_projects(&fixture.storage, None)
+        .unwrap();
+    assert_eq!(page.result["schemaVersion"], 1);
+    assert_eq!(page.result["action"], "list");
+    assert_eq!(page.result["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(page.result["projects"][0]["projectId"], fixture.project_id);
+    assert_eq!(
+        page.result["projects"][0]["canonicalPath"],
+        before.as_ref().unwrap()["canonical_path"]
+    );
+    assert!(page.result["nextCursor"].is_null());
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        before
+    );
+}
+
+#[test]
+fn saved_project_reopen_accepts_new_head_and_reuses_active_snapshot() {
+    let mut fixture = Fixture::open();
+    git_raw(
+        &fixture.source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "new head",
+        ],
+    );
+    let reopened = fixture
+        .manager
+        .reopen_project(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_reopen_new_head",
+        )
+        .unwrap();
+    assert_eq!(reopened.result["projectId"], fixture.project_id);
+    assert_eq!(
+        reopened.result["canonicalGitRoot"],
+        canonical_protocol_path(&fs::canonicalize(&fixture.source).unwrap()).unwrap()
+    );
+    let active = fixture.create();
+    let before = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    fixture
+        .manager
+        .reopen_project(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_reopen_active",
+        )
+        .unwrap();
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        fixture
+            .manager
+            .validate_active_project(&fixture.storage, &fixture.project_id)
+            .unwrap()
+            .worktree_id,
+        active.worktree_id
+    );
+}
+
+#[test]
+fn saved_project_reopen_rejects_unknown_and_recovery_records() {
+    let mut fixture = Fixture::open();
+    assert!(fixture
+        .manager
+        .reopen_project(&mut fixture.storage, "project_unknown", "req_unknown")
+        .is_err());
+    let mut record = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap()
+        .unwrap();
+    record.insert("lifecycle".into(), json!("recoveryRequired"));
+    append_object(
+        &mut fixture.storage,
+        "project",
+        &fixture.project_id,
+        "op_recovery_fixture",
+        "req_recovery_fixture",
+        Value::Object(record.clone()),
+    )
+    .unwrap();
+    let before_reopen = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    assert!(fixture
+        .manager
+        .reopen_project(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_recovery_reopen"
+        )
+        .is_err());
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        before_reopen
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn saved_project_reopen_rejects_retargeted_symlink() {
+    let mut fixture = Fixture::open();
+    let other = Fixture::open();
+    fs::rename(&fixture.source, fixture.source.with_extension("preserved")).unwrap();
+    std::os::unix::fs::symlink(&other.source, &fixture.source).unwrap();
+    let before = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    assert!(fixture
+        .manager
+        .reopen_project(&mut fixture.storage, &fixture.project_id, "req_retarget")
+        .is_err());
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        before
+    );
+}
+
+#[test]
 fn detached_worktree_preserves_original_and_surfaces_tree_read_and_diff() {
     let mut fixture = Fixture::open();
     let before_head = git_text(&fixture.source, ["rev-parse", "HEAD"]);
