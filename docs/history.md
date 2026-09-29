@@ -1,5 +1,35 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인된 개발 앱 정상 종료·legacy 잠금 보존 복구)
+
+- **승인/실행**: 사용자가 `개발 앱 종료하고 복구 진행해`를 명시 승인했다. exact 저장소 Electron.app에 AppleEvent quit를 보내 정상 종료했고 기존 Electron21731/sidecar21862·진단45359 부재와 exact pending/profile lsof 무출력을 확인했다. 강제 종료·다른 Codex 종료는 하지 않았다.
+- **복구**: `/private/tmp/hello-agent-legacy-recovery.py`의 nofollow ancestor dirfd·exact dev/inode/61-byte content/SHA/uid/mode/nlink·기록 PID 부재·프로필/설정 검증·flock·lsof/app 재시작 검사를 수행했다. 동일 독립 검토자 scoped 실행 PASS 뒤 exclusive hardlink backup→fsync→두 inode/nlink 확인→기존 이름 unlink→fsync로 원본을 보존했다. 보존 파일은 앱 m5 데이터의 `codex-login.pending.preserved-20260929-168613811`, inode168613811/61bytes/0600/nlink1/SHA `8abd8a174e3d15e4e5a3444950c02f1534e0ca9cba088628867ca48bec047300`로 최종 재확인했다. 복구 스크립트는 auth 내용 미열람·메타데이터 전후 동일이었다. 이는 불확실성을 고지한 사용자 승인 수동 복구이며 제품 legacy 자동 복구 정책을 완화하지 않았다.
+- **후속 실측**: 기존 승인된 model-free 앱 프로필 검사 1회 FAIL/4.00초. matched=false지만 termination_confirmed=true·cleanup_confirmed=true이고 config 원문 불변 검사는 통과했다. 현재 active pending은 없고 개발 앱도 종료 상태다. 따라서 기존 잠금 문제는 해결됐으며 새 검사 프로세스도 정리됐다. 계정/모델/정책 대조 중 정확한 불일치 단계는 아직 미확정이다. 실제 thread/turn·유료 모델 실행은 없었고 vendor 조회의 자체 캐시/인증 갱신 부작용까지 무변경이라고 주장하지 않는다.
+- **다음/마감**: 재부팅 없이 복구 완료. 앱은 자동 재실행하지 않았다. 다음은 민감한 응답 원문을 출력하지 않는 단계별 진단으로 실제 preflight 불일치를 좁히는 일이다. 이전 승인 대기·재조사 기록도 보존해 함께 커밋한다. docs diff --check PASS, 제품 코드 변경·main 병합/push 없음. 전체 앱은 미완료다.
+
+### 2026-09-29 · by GPT-6 Astra (수동 복구 승인 대기로 자동 진행 차단)
+
+- **차단 감사**: 재조사 재개 턴부터 세 턴 동안 legacy pending의 안전한 해제 조건/수동 복구 권한이 충족되지 않았다. 재조사에서는 재부팅 필수 주장을 정정했으나, 이후 정상 종료·제한된 복구 승인 요청에 답변은 없다. 직전 턴은 상태 확인과 승인 요청뿐인 no progress였고 이번에도 실행 중 작업 핸들을 기다리는 상황이 아니다. Git은 a99a196의 코드와 history 미커밋 기록만 유지하며 diff --check PASS다.
+- **상태/재개**: 자동 목표를 blocked로 전환한다. 사용자 작업 저장 및 개발 앱 정상 종료·잠금 원본 보존형 수동 복구 승인 후, 당시 조건을 다시 확인해 진행한다. 재부팅만이 유일한 재개 조건은 아니다. 자동 계속 메시지를 구체적 복구 승인으로 간주하지 않는다. 앱 미완료, 프로세스/인증/잠금 변경·커밋·main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 정상 종료 승인 요청)
+
+- **확인/범위**: 재조사 다음 턴에서도 개발 Electron21731와 그 sidecar21862가 동일 시작 시각으로 살아 있다. 직전 턴은 재부팅 필요성 판단을 바꾼 조사 진전이었으며 이번 턴에는 구현 진전이 없다. 실행 중인 앱은 확인됐지만 기다리는 작업 핸들이 아니므로 verified wait로 분류하지 않는다.
+- **다음**: 사용자에게 열린 작업 저장 후 개발 앱만 정상 종료하고, 기록 PID/프로필 재검증을 거쳐 잠금 원본을 보존하는 수동 복구 진행 승인을 요청한다. 미기록 자손 종료의 잔여 불확실성은 남으며 이상 징후에는 해제하지 않는다. 강제 종료·인증 삭제·다른 Codex 프로세스 종료는 범위 밖이다. 이 턴에는 어떠한 앱/잠금 변경도 없고 기존 미커밋 history만 보존·추가했다. diff 검사 PASS, 앱 전체 미완료.
+
+### 2026-09-29 · by GPT-6 Astra (사용자 요청으로 재부팅 필요성 재조사)
+
+- **읽기 전용 실측**: 사용자 `다시 확인해봐`에 따라 PID45359·현재 PPID45359 프로세스 부재, exact pending 및 앱 codex-profile-v1 하위 열린 파일 lsof 무출력(exit1, 오류 출력 없음)을 확인했다. 조회된 Codex 실행 파일은 모두 진단 시각(10:01:41 KST)보다 먼저 시작했다. 개발 Electron21731/sidecar21862는 9월28일부터 실행 중이고 cwd가 각각 저장소/해당 m5 앱 데이터임을 확인했다. 인증 내용·환경변수는 읽지 않았고 프로세스/잠금은 변경하지 않았다. PGID45359도 없지만 launcher는 전용 그룹을 만들지 않으므로 그룹 정리 증명으로 쓰지 않는다.
+- **판단 정정**: 당시 950c557의 poll_finish는 프로세스 clean 확인 후 profile.revalidate 실패도 closure.confirmed=false로 합쳤다. 이전 진단 결과만으로 OS 종료가 불확실하다고 단정하거나 Mac 재부팅이 필수라고 결론낸 것은 과도했다. 현재 관측은 stale pending 가능성을 지지하지만 재부모화/미관측 자손 전체 부재를 증명하지는 않는다. 과거 기록을 삭제하지 않고 이번 정정으로 대체한다. Karpathy 지침에 따라 관측과 추정을 구분했고 동일 읽기 전용 검토자에게 복구 판단 경계를 검토 요청했다.
+- **후속 경계**: 현행 앱을 정상 종료한 뒤 파일 신원·사용 프로세스를 재확인하고 원본 pending을 보존하는 제한된 수동 복구가 가능한지 판단하는 방향을 우선한다. 아직 안전한 복구 확정/실행은 아니다. 이번 요청은 진단이므로 앱 종료·잠금 삭제/이동·실제 provider 호출을 하지 않는다. 이전 미커밋 로그를 보존하고 이번 기록도 미커밋으로 남긴다. 전체 앱 및 실제 계정 검증은 미완료다.
+- **독립 확인**: 동일 검토자도 재부팅 필수 단정은 과도하다고 판단했다. legacy 자동 해제는 계속 거절하고, 수동 복구 전 모든 기록 PID/start Gone·profile/parent capability 재검증·개발 앱과 sidecar 정상 종료 확인이 필요하다. 그 이후에도 미기록 자손의 불확실성은 별도로 고지해야 한다. 재부팅 자체가 pending 파일을 제거하는 것도 아니다. diff --check PASS.
+
+### 2026-09-29 · by GPT-6 Astra (재부팅 미관측으로 실제 계정 경로 차단)
+
+- **재확인**: clean `a99a196`에서 커널 boot UUID `6B717DD3-F890-45B0-AD89-0D44CD7AC107`가 이전 체크포인트와 동일하다. pending의 dev/inode/size/uid/mode/mtime/ctime/birthtime와 SHA-256도 전부 동일하다. 사용자 재부팅 완료 통지는 없으며 실제 프로필·프로세스·인증을 변경하지 않았다. 제품 생성자는 여전히 AgentRuntime::blocked()다.
+- **차단 감사**: 이전 잠금 체크포인트 이후 세 턴 이상 같은 재부팅 전제 미충족이 지속됐다. 직전 두 구현 턴에서는 그동안 독립적으로 할 수 있는 관리 정책 조회와 복구 후 재확인 UI를 완료했지만, 이번 턴은 상태 재확인뿐이며 구현 진전/실행 중 핸들 대기가 아니다. 다음 실제 계정 검사·실행 입장은 legacy 종료 증거 부재를 해결해야 한다. 기존 PASS 반복이나 확인되지 않은 실제 응답을 가정한 추가 실행 골격으로 이를 대체하지 않는다.
+- **재개 조건**: 사용자가 작업을 저장하고 Mac을 재부팅한 뒤 완료 통지하면 live boot UUID 변경과 동일 pending 신원을 다시 대조하고 보존 가능한 복구를 검토한다. 앱 전체는 미완료이며 자동 목표는 외부 상태 변경이 필요한 blocked로 전환한다(완료/사용자 pause 아님). 기록만 미커밋으로 남긴다. 코드 변경·실계정 호출·main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (복구 후 기존 로그인 재확인 UI)
 
 - **구현**: clean `1f44961`에서 native active-map은 아직 fixture 전용임을 확인했다. 실제 프로필 검사와 무관하게 해결할 수 있는 UI 누락을 수정했다. 기존에는 복구 후 idle에서 새 로그인 버튼만 있었으므로 `연결 상태 다시 확인`을 추가했다. recoveryRequired일 때 start/check를 비활성화하며 recover 성공을 connected로 간주하지 않는다. 시작 시 자동 check와 기존 in-flight 제한은 유지한다. Rust/권한/복구 해제 조건 변경은 없다.
@@ -91,6 +121,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **legacy 잠금 수동 복구 완료(2026-09-29)**: 사용자 명시 승인으로 개발 앱을 정상 종료하고 exact legacy pending을 원본 inode/hash 그대로 `.preserved-20260929-168613811`로 보존했다. 재부팅은 하지 않았다. 후속 실제 model-free 검사에서는 대조 실패가 남았지만 프로세스 종료·cleanup 모두 confirmed이며 활성 pending은 없다. 과거 재부팅/승인 대기를 현재 차단으로 반복하지 않는다. 다음 원인은 preflight 응답의 단계별 불일치이며 인증 실패라고 아직 단정하지 않는다.
 
 - **관리 정책 조회 후보(2026-09-29)**: full preflight는 고정 configRequirements/read(id 50)의 explicit requirements:null까지 받아야 observations가 일치한다. 객체/누락/중복/미지 응답은 거절하며 configuration-only는 기존 2 RPC를 유지한다. 이는 공식 vendor 보고 검증이며 inaccessible MDM visibility/실제 계정 검사 성공/제품 admission 증거는 아니다. 현행 경계는 architecture의 관리 정책 조회 항목에 기록한다.
 
