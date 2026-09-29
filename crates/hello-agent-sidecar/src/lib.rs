@@ -36,7 +36,7 @@ mod provider_profile;
 #[cfg(target_os = "macos")]
 mod provider_runtime_sandbox;
 #[cfg(target_os = "macos")]
-#[allow(dead_code)] // Internal admission/relay; broker and vendor compatibility pending.
+#[allow(dead_code)] // Internal broker; process lease and vendor compatibility pending.
 mod provider_model_proxy;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.

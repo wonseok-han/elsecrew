@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (목적지 검증·연결 작업·중계 서비스 결합)
+
+- **구현**: 진전한 직전360f8fa의 요청 검사/relay를 Broker로 묶었다. exact loopback listener·실행 credential·동시8개·tick당4accept·600초/128MiB 총량을 유지하고 인증 성공만 연결 작업으로 보낸다. 전체 DNS 결과16개 이하·443·public IPv4/v6·scope 검증 후 숫자 주소로만 연결한다. 연결 작업10초·시도2초이며 OS DNS는 loop 밖의 전역최대8작업자에서 실행한다. 취소/만료에도 실제 스레드가 끝나기 전 슬롯을 재사용하지 않는다. 멈춘 DNS 스레드 자체를 종료할 수 있다는 주장은 하지 않는다.
+- **주소 정책 근거**: [IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry)·[IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry)를 현재 조회해 보수적 특수 범위 차단을 적용했다. 일반 is_global 대체가 아니며 일부 global 특수 서비스 예외도 허용하지 않는다. 이 검사는 TLS peer/SNI/HTTP 경로를 검사하지 않아 공유 CDN IP domain fronting을 막는 근거가 아니다.
+- **검증**: 단위8 PASS/5 ignored: 특수/혼합/과대 DNS 답변·작업자 정지/취소 후 슬롯 보존·기존 framing/relay. 첫 loopback검사4 PASS/1실패는 wrong-auth TCP가 한 tick에 도착한다는 테스트 가정이었다. bounded poll로 수정 후 로컬5 PASS/0.06초: 인증→테스트 전용 local dial→relay, upstream에 credential/header 미전달, 8개 cap·header timeout·stop/port lease. 공유 총량의 별도 두-relay 검사도 PASS했다. 실제 DNS/TLS·외부 목적지·계정·모델 호출은 없다.
+- **다음**: LoginProcess와 Broker 수명 결합, native CLI proxy 호환성, 실제 runtime admission·승인 UI와 최종 제품 검증은 남는다. Karpathy 지침대로 local integration 증거와 실제 vendor 실행을 구분한다. main 병합/push 없음.
+- **마감/검토**: 동일 검토자 scoped PASS. proxy_url은 실행별 비밀을 포함하므로 향후 launcher 내부에서만 전달하고 IPC/로그로 보내지 않아야 한다. shared-budget 추가 후 strict sidecar all-targets clippy PASS/2.77초, diff 검사 PASS. IPv6 scope/flow 거절 회귀를 추가했다. 관련7파일만 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (제한된 양방향 모델 중계 transport)
 
 - **구현**: 직전 요청 입장 구현24115ec에서 이미 연결된 두 소켓을 소유하는 nonblocking Relay를 추가했다. 방향별8KiB 고정 버퍼, poll당 각 방향 read/write 각1회 이하, 합계128MiB payload/600초 한도, 200응답 후 upstream bytes, partial write/역압 보존, EOF 뒤 버퍼 배출 및 half-close를 적용한다. 취소/오류/Drop은 양쪽 shutdown·버퍼 정리하며 종료된 owner의 재개를 거절한다. DNS/연결/입장 권한을 이 transport가 대신하지 않는다.
@@ -228,6 +236,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Broker/DNS 연결(2026-09-29, 미활성)**: fixed destination DNS 결과를 모두 검증하고 숫자 주소에만 연결한다. DNS/연결 작업자는 전역8개이며 취소된 정지 resolver도 실제 종료까지 슬롯을 점유한다. Broker는8연결·600초/128MiB aggregate이며 stop 때 listener를 drop하지 않는다. 제품 process lease 결합·native 호환성은 후속, 실제 공급자나 TLS/domain-fronting 검증으로 사용하지 않는다.
 
 - **모델 중계 transport(2026-09-29, 내부)**: Relay는 preconnected socket2개·방향별8KiB·128MiB/600초를 소유하고 EOF half-close/역압·취소·오류·Drop을 처리한다. 로컬 소켓 회귀만 검증했으며 broker/DNS/동시 연결 제한·process lease 결합은 후속이다. TLS peer identity나 경로 접근 권한을 검증한 것으로 사용하지 않는다.
 

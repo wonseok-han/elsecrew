@@ -1,10 +1,12 @@
 //! Local CONNECT admission, not an activated proxy or vendor network attestation.
-//! Never forwards proxy credentials, logs request bytes, or resolves a hostname.
-//! Opaque-byte relay is separate. The broker must still validate resolved addresses,
-//! cap concurrent connections, and retain the endpoint until process cleanup.
+//! Never forwards proxy credentials or logs request bytes. The broker validates
+//! resolved addresses and caps connection resources. Binding its endpoint and
+//! shutdown to the provider process owner remains separate.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::time::{Duration, Instant};
 
+pub(super) mod broker;
+mod connect;
 mod relay;
 
 const MAX_HEADER: usize = 8 * 1024;

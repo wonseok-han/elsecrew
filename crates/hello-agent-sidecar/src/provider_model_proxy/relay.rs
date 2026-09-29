@@ -135,6 +135,19 @@ impl Relay {
         result
     }
 
+    pub(super) fn advance_with_budget(
+        &mut self,
+        now: Instant,
+        canceled: bool,
+        budget: &mut u64,
+    ) -> io::Result<bool> {
+        self.remaining = self.remaining.min(*budget);
+        let before = self.remaining;
+        let result = self.advance(now, canceled);
+        *budget -= before - self.remaining;
+        result
+    }
+
     fn advance_open(&mut self, now: Instant, canceled: bool) -> io::Result<bool> {
         if canceled {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "proxy canceled"));
@@ -418,5 +431,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    #[ignore = "local sockets only; shared broker byte budget"]
+    fn multiple_relays_cannot_each_spend_the_shared_budget() {
+        let (mut client_a, downstream_a) = pair();
+        let (upstream_a, _server_a) = pair();
+        let (mut client_b, downstream_b) = pair();
+        let (upstream_b, mut server_b) = pair();
+        server_b
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let now = Instant::now();
+        let mut a = Relay::new(downstream_a, upstream_a, now).unwrap();
+        let mut b = Relay::new(downstream_b, upstream_b, now).unwrap();
+        let mut budget = 5;
+        client_a.write_all(b"abc").unwrap();
+        let deadline = now + Duration::from_secs(1);
+        while budget == 5 {
+            assert!(Instant::now() < deadline);
+            a.advance_with_budget(Instant::now(), false, &mut budget)
+                .unwrap();
+        }
+        assert_eq!(budget, 2);
+        client_b.write_all(b"def").unwrap();
+        loop {
+            assert!(Instant::now() < deadline);
+            if b.advance_with_budget(Instant::now(), false, &mut budget)
+                .is_err()
+            {
+                break;
+            }
+        }
+        assert_eq!(budget, 2);
+        let mut rejected = Vec::new();
+        server_b.read_to_end(&mut rejected).unwrap();
+        assert!(rejected.is_empty());
     }
 }
