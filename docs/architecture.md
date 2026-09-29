@@ -204,7 +204,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
-- **모델 중계 요청 입장(내부 후보)**: `provider_model_proxy`는 실행별 Basic credential·정확한 HTTPS authority/Host·허용 헤더만 받는 단회 CONNECT parser다. 헤더 총8KiB/5초 제한, 미완료/거절/수락 상태를 구분한다. 임시 curl의 로컬 요청 검사만 통과했으며 DNS/public IP 검증·socket relay·동시 연결 제한·native CLI 모델 호환성과 제품 연결은 아직 없다. credential은 같은 실행 자손과 공유될 수 있고 TLS 안의 요청 경로를 검사하지 않는다.
+- **모델 중계 요청 입장(내부 후보)**: `provider_model_proxy`는 실행별 Basic credential·정확한 HTTPS authority/Host·허용 헤더만 받는 단회 CONNECT parser다. 헤더 총8KiB/5초 제한, 미완료/거절/수락 상태를 구분한다. 별도 Relay는 이미 연결된 두 소켓을 소유하고 방향별8KiB 버퍼·양방향 합계128MiB payload·총600초 한도에서 nonblocking 전달한다. EOF 방향은 버퍼 배출 뒤 write-half를 닫고 반대 방향은 계속 전달한다. 취소/오류/Drop은 양쪽 연결을 닫으며 종료 뒤 재개하지 않는다. 임시 curl 입장과 로컬 소켓 전달만 검사했으며 DNS/public IP 검증·동시 연결 제한·broker 수명 결합·native CLI 모델 호환성과 제품 연결은 아직 없다. credential은 같은 실행 자손과 공유될 수 있고 TLS 안의 요청 경로를 검사하지 않는다.
 
 - **변경 검토 현행**: 텍스트 diff는 변경 전후 줄 번호·추가/삭제 색상과 기호를 표시하며 페이지당 200행으로 전체 내용을 탐색한다. 불완전/미지원 hunk는 원문 표시로 보존하고 이 파서는 파일 적용 권위로 사용하지 않는다. 파일 반영·복원 루프는 여전히 후속이다.
 

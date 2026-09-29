@@ -1,9 +1,11 @@
 //! Local CONNECT admission, not an activated proxy or vendor network attestation.
 //! Never forwards proxy credentials, logs request bytes, or resolves a hostname.
-//! TLS remains end-to-end: a future relay must also validate resolved addresses,
-//! bound connection resources, and retain the endpoint until process cleanup.
+//! Opaque-byte relay is separate. The broker must still validate resolved addresses,
+//! cap concurrent connections, and retain the endpoint until process cleanup.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::time::{Duration, Instant};
+
+mod relay;
 
 const MAX_HEADER: usize = 8 * 1024;
 const HEADER_TIMEOUT: Duration = Duration::from_secs(5);

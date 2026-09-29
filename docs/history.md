@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (제한된 양방향 모델 중계 transport)
+
+- **구현**: 직전 요청 입장 구현24115ec에서 이미 연결된 두 소켓을 소유하는 nonblocking Relay를 추가했다. 방향별8KiB 고정 버퍼, poll당 각 방향 read/write 각1회 이하, 합계128MiB payload/600초 한도, 200응답 후 upstream bytes, partial write/역압 보존, EOF 뒤 버퍼 배출 및 half-close를 적용한다. 취소/오류/Drop은 양쪽 shutdown·버퍼 정리하며 종료된 owner의 재개를 거절한다. DNS/연결/입장 권한을 이 transport가 대신하지 않는다.
+- **검증**: 첫 컴파일의 큰 고정 배열 Default 파생 오류를 명시 초기화로 수정했다. 단위2 PASS(분할 write/WouldBlock·두 버퍼보다 큰 payload·EOF·용량 초과 미전달), 실제 loopback2 PASS/0.06초(양방향 정확 바이트·half-close 뒤 응답·취소/만료/용량/Drop 종료와 재개 거절). 외부 DNS/TLS·계정·모델은 호출하지 않았다.
+- **다음/경계**: socket caller/broker는 아직 없다. 목적지 DNS/public IP 검증, 연결/동시성 예산, listener/process 수명 결합, native proxy 호환성·제품 활성화를 이어야 한다. Karpathy 지침으로 새 transport와 실제 공급자 연결 완료를 구분한다. main 병합/push 없음.
+- **독립 검토 수정**: 초기200응답 partial write 중에도 client bytes를 upstream으로 전달할 수 있다는 지적을 받아 one-shot established barrier를 추가했다. 실제 transfer 경로의 결정적 느린 writer 회귀에서 응답 전체 배출 전에는 client read·upstream write·payload budget 차감 모두 없고 이후에만 전달됨을 확인했다. 최종 단위3 PASS/2 ignored, 로컬 admission+relay3 PASS/0.06초, 동일 검토자 재검토 scoped PASS다.
+- **마감**: 최종 strict sidecar all-targets clippy PASS/3.86초, 새 파일 rustfmt·git diff --check PASS. 관련5파일 작업 단위 커밋이며 제품 실행 성공으로 표현하지 않는다.
+
 ### 2026-09-29 · by GPT-6 Astra (모델 중계 CONNECT 요청 입장 검사)
 
 - **진전**: 직전 종료 경합 수정746f2d0의 clean tree에서 모델 중계 요청 입장 모듈을 추가했다. 실행별 무작위 Basic 인증, exact HTTPS authority 3개, Host 일치, 중복/미지 헤더·본문/파이프라이닝 거절, 총8KiB/5초 제한과 실패/소비 후 재사용 거절을 구현했다. credential은 Debug/직렬화/로그에 노출하지 않는다. 기존 lock의 base64 0.22.1을 직접 의존성으로 추가했다.
@@ -220,6 +228,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **모델 중계 transport(2026-09-29, 내부)**: Relay는 preconnected socket2개·방향별8KiB·128MiB/600초를 소유하고 EOF half-close/역압·취소·오류·Drop을 처리한다. 로컬 소켓 회귀만 검증했으며 broker/DNS/동시 연결 제한·process lease 결합은 후속이다. TLS peer identity나 경로 접근 권한을 검증한 것으로 사용하지 않는다.
 
 - **모델 중계 입장(2026-09-29, 제품 미연결)**: provider_model_proxy는 per-run Basic credential과 bounded CONNECT framing만 검증한다. 정확 authority/Host·단회 소비·8KiB/5초를 적용하며 실제 curl의 로컬 요청은 통과했다. upstream DNS/public IP·TLS 내부 목적지·relay 예산·native 모델 호환성은 별도다. 이 parser를 실행 권한 또는 완성된 네트워크 격리로 사용하지 않는다.
 
