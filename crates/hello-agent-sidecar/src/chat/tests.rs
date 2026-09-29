@@ -1262,6 +1262,20 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                                         listing["pending"],
                                         json!([{"approvalId":id,"kind":"command"}])
                                     );
+                                    let before_inspection = fixture
+                                        .storage
+                                        .projection_record("run", &identity.run_id)
+                                        .unwrap();
+                                    let detail = runtime.approval_request(&fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
+                                    assert_eq!(detail["inspection"]["approvalId"], id);
+                                    assert_eq!(detail["inspection"]["command"], "echo test");
+                                    assert_eq!(
+                                        fixture
+                                            .storage
+                                            .projection_record("run", &identity.run_id)
+                                            .unwrap(),
+                                        before_inspection
+                                    );
                                     let receipt = runtime
                                         .approval_request(
                                             &fixture.storage,

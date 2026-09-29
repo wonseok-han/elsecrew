@@ -121,7 +121,7 @@ impl AgentRuntime {
             .ok_or_else(invalid)?;
         let keys: &[&str] = match action {
             "list" => &["action", "identity"],
-            "decline" => &["action", "identity", "approvalId"],
+            "decline" | "inspect" => &["action", "identity", "approvalId"],
             _ => return Err(invalid()),
         };
         let object = params.as_object().ok_or_else(invalid)?;
@@ -163,7 +163,17 @@ impl AgentRuntime {
             &connection,
             &active.owner.pending_approvals(),
         )?;
-        Ok(json!({"identity":raw,"pending":pending,"queued":queued}))
+        let mut result = json!({"identity":raw,"pending":pending,"queued":queued});
+        if action == "inspect" {
+            let id = params["approvalId"].as_str().ok_or_else(invalid)?;
+            result["inspection"] = active.approvals.inspect(
+                &identity,
+                &connection,
+                &active.owner.pending_approvals(),
+                id,
+            )?;
+        }
+        Ok(result)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

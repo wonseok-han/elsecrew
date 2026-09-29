@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인 요청 명시적 상세 조회)
+
+- **구현**: 8567dbc 기준 기존 ticket/실행 owner를 재사용해 `run.approval inspect`와 카드 상세 펼치기를 연결했다. 기본 목록/거절 응답은 요약만 유지하며 명시 조회만 bounded 명령·경로·이유·네트워크 대상을 반환한다. 만료/연결 불일치/이미 접수된 요청은 거절하고 조회 전후 run projection 불변을 검사했다. 상세는 평문이며 닫기·만료·오류·신원 변경 시 화면 상태를 비운다.
+- **검증**: Rust 승인 단위6·native 상호작용 matrix PASS/61.09초, strict all-targets clippy PASS/3.64초. 계약/bridge/security58 PASS, 최종 Cf 보완 계약3 PASS, pnpm build·M5 renderer build·scoped rustfmt PASS. 독립 검토에서 U+061C/U+200E/U+200F 누락을 발견해 C0/C1+전체 Unicode Cf 이스케이프와 supplementary 회귀를 추가했고 동일 검토자 재검토 PASS. 합성 브라우저에서 명시 클릭 전 조회0/후1, markup 평문·U+200E 가시 표시 확인. 테스트 서버 종료; 탭은 후속 확인 시 이미 세션에서 제거됨. 비로그인 shell의 node PATH 실패는 정상 개발 shell로 재실행해 해소했다.
+- **남음**: Karpathy 지침으로 새 저장소/권한 체계를 만들지 않았다. 상세 조회는 허용 권한이 아니며 AcceptOnce·실제 provider 제품 활성화·유료 모델 smoke·전체 앱 완료는 미완료다. 실제 계정/모델 호출·main 병합/push 없음. 이 작업 단위 변경을 커밋하고 실제 실행 연결을 이어간다.
+
+### 2026-09-29 · by GPT-6 Astra (종료·복구 요청 현행 재확인)
+
+- 사용자 요청으로 프로세스와 앱 데이터 메타데이터를 다시 확인했다. Hello Agent 개발 앱/sidecar는 이미 종료되어 있어 추가 종료하지 않았다. ChatGPT의 code-mode-host와 다른 앱의 crash handler는 대상이 아니므로 유지했다.
+- 활성 `codex-login.pending`은 없고 보존된 legacy 잠금(inode 168613811)과 stale helper(inode 166226396)가 그대로 있다. 앱 전용 인증 파일은 내용 열람 없이 mode 0600 유지 확인. 보존 복구는 이미 완료된 상태이며 추가 삭제·초기화·재부팅은 필요하지 않다.
+- 기존 승인 상세 보기 구현의 미커밋 6개 파일을 그대로 보존했다. 이번 확인은 로그인 재실행/실제 모델 동작 검증이 아니며 해당 개발·검토는 별도 미완료다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인 요청 유형 표시)
 
 - **구현**: 88abe6e의 미출시 승인 응답 pending을 `{approvalId, kind}` 요약으로 바꿨다. 실제 live 요청과 실행/연결 digest가 맞는 미접수 ticket에서만 command/writeStdin/network/fileChange 고정 유형을 추출한다. 카드에 한국어 유형·접근성 이름을 표시하며 raw 명령/경로/reason/host는 전달하지 않는다. 이는 허용 판단용 상세 검토나 권한 확대가 아니다.
@@ -41,6 +53,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **승인 상세 조회(2026-09-29)**: 기본 요약과 별도로 명시 inspect만 live ticket/실행/연결에 결속된 상세를 일시 반환한다. 원장/채팅에는 저장하지 않으며 평문 표시 때 C0/C1·전체 Cf를 escape한다. 상세 열람은 추가 권한 허용이 아니며 제품 native 활성화는 별도다. 아래 유형 표시 당시의 상세 미지원 상태를 이 구현으로 갱신한다.
 
 - **권한 요청 요약(2026-09-29)**: 공개 승인 pending은 `{approvalId,kind}`만 반환한다. 고정4유형 표시는 raw 행위/host/명령 원문 공개나 허용 권한이 아니며, 구체적 허용 결정을 위한 정보/경계는 별도 구현 대상이다.
 

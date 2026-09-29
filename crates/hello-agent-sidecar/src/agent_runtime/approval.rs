@@ -15,6 +15,48 @@ pub(super) struct ApprovalQueue {
 }
 
 impl ApprovalQueue {
+    /// Explicit transient inspection, never appended to an event/projection.
+    pub(super) fn inspect(
+        &self,
+        identity: &RunIdentity,
+        connection: &str,
+        requests: &[&PendingApproval],
+        id: &str,
+    ) -> Result<Value, SidecarError> {
+        let ticket = &self
+            .entries
+            .iter()
+            .find(|(ticket, queued)| ticket.id == id && !ticket.consumed && !queued)
+            .ok_or_else(failure)?
+            .0;
+        for request in requests {
+            if fingerprint(identity, connection, request)? != ticket.digest {
+                continue;
+            }
+            let (command, cwd, grant_root, host, protocol) = match &request.action {
+                Action::Command {
+                    command,
+                    cwd,
+                    network,
+                    ..
+                } => (
+                    command.as_deref(),
+                    cwd.as_deref(),
+                    None,
+                    network.as_ref().map(|n| n.host.as_str()),
+                    network.as_ref().map(|n| n.protocol.as_str()),
+                ),
+                Action::FileChange { grant_root } => {
+                    (None, None, grant_root.as_deref(), None, None)
+                }
+            };
+            return Ok(
+                json!({"approvalId":id,"kind":request_kind(request),"command":command,"cwd":cwd,"reason":request.reason,"grantRoot":grant_root,"host":host,"protocol":protocol}),
+            );
+        }
+        Err(failure())
+    }
+
     pub(super) fn summaries(
         &self,
         identity: &RunIdentity,
@@ -299,6 +341,31 @@ mod tests {
         };
         let request = PendingApproval::parse(&BoundedObservation::new(json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","itemId":"item","startedAtMs":1,"kind":"command","command":"echo PRIVATE","cwd":"/snapshot"}}).to_string().into_bytes()).unwrap(), "thread", "turn").unwrap();
         (identity, request)
+    }
+
+    #[test]
+    fn inspection_is_explicit_live_and_does_not_consume_a_ticket() {
+        let (identity, request) = context();
+        let ticket = ApprovalTicket::new(&identity, "connection", &request).unwrap();
+        let id = ticket.id.clone();
+        let mut queue = ApprovalQueue {
+            entries: vec![(ticket, false)],
+        };
+        let detail = queue
+            .inspect(&identity, "connection", &[&request], &id)
+            .unwrap();
+        assert_eq!(detail["command"], "echo PRIVATE");
+        assert_eq!(detail.as_object().unwrap().len(), 8);
+        assert_eq!(queue.ids(), vec![id.clone()]);
+        assert!(queue.inspect(&identity, "other", &[&request], &id).is_err());
+        assert!(queue.inspect(&identity, "connection", &[], &id).is_err());
+        assert!(queue
+            .inspect(&identity, "connection", &[&request], "unknown")
+            .is_err());
+        queue.decline(&id).unwrap();
+        assert!(queue
+            .inspect(&identity, "connection", &[&request], &id)
+            .is_err());
     }
 
     #[test]
