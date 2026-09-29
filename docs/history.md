@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (격리 모델 조회의 CA 접근 수정)
+
+- **진전/원인 범위**: 직전6f97306의 account 실패를 좁혔다. 비밀 없는 구조 분류와 설치 바이너리 내 일치하는 고정 리터럴 대조로 RPC -32603/workspace routing discovery failed를 확인했다. 실제 인증 CONNECT·상류 TCP 연결·payload 이후 relay reset이 관측됐다. 같은 proxy를 유지하고 OS 격리만 제외한 임시 비교는5 RPC PASS/4.49초, 격리를 유지하고 공개 OS CA만 명시한 비교는 PASS/3.14초였다. 개별 Mach 거절이 원인이라는 주장은 하지 않는다.
+- **수정**: proxy 경로에 고정 `/private/etc/ssl/cert.pem` exact read와 CODEX_CA_CERTIFICATE를 추가했다. 일반 파일/root 소유/그룹·타인 쓰기 불가/비어 있지 않음/1MiB 이하를 확인하며 외부 CA 환경은 상속하지 않는다. offline 정책·TLS 인증서 검증은 유지하고 키체인/Mach 권한은 늘리지 않았다. 모든 임시 우회·상세 진단 코드는 제거했다.
+- **근거/검증**: OpenAI Docs [custom CA bundles](https://learn.chatgpt.com/docs/auth#custom-ca-bundles)의 HTTPS/login/WebSocket 공통 CA 설정을 확인했다. 최종 변경의 실제 격리 model-free5 RPC PASS/3.33초, matched/termination/cleanup 모두 true와 config 원문 불변. 로컬 OS 정책/환경/소유권4 PASS/0.45초. 원인 분류 중 실제 조회 실패9회를 성공으로 숨기지 않으며 이들은 모두 확인된 cleanup으로 종료했다. 유료 model/thread/turn은 실행하지 않았다.
+- **경계/다음**: 사용자 키체인의 별도 사설 CA·실제 유료 turn·TLS/domain-fronting·제품 admission/승인 UI·제품 최종 검증은 미완료다. Karpathy 지침대로 원인 분리에 쓴 우회는 제거하고 최소 CA 변경만 유지했다. main 병합/push 없음.
+- **마감**: 동일 독립 검토자 scoped PASS, strict sidecar all-targets clippy·scoped rustfmt·git diff --check PASS. 소스1개와 현행 구조/작업 기록만 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (실제 CLI의 격리 중계 조회 비교)
 
 - **구현**: 385be6d 기준 메인이 기존 full preflight의 pin/profile/cancel release 검사를 공유하고 OS sandbox+owned Broker를 사용하는 model-free 진단 진입점을 추가했다. opaque proxy command에 기존 discovery와 같은 고정 HOME/CODEX_HOME/TMPDIR/PATH를 전달한다. 임시 빈 workspace는 읽기 전용이며 앱 profile의 vendor 인증/캐시 갱신 가능성은 기존 승인 조회와 같다. 프로필 불변이나 제품 활성화를 주장하지 않는다.
@@ -257,6 +265,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **격리 조회 CA 해결(2026-09-29)**: 기존 account id3 실패는 OS 공개 CA 파일을 fixed env/exact read로 명시한 뒤 실제5 RPC·cleanup 통과했다. CONNECT/auth/upstream은 동작하며 키체인/Mach 권한 또는 TLS검증 해제는 필요하지 않았다. 아래 격리 조회 차이 기록은 수정 전 증거다. 사설 사용자 CA·실제turn·domain-fronting·제품 활성화까지 검증된 것은 아니다.
 
 - **격리 조회 차이(2026-09-29)**: 실제 앱 프로필의 비격리 full preflight는5 RPC 통과하지만 OS sandbox+proxy 후보는id1/2 뒤 account id3 단계에서 거절된다. 두 경로 모두 종료/cleanup 확인이며 기존 로그인 실패로 단정하지 않는다. 다음은 계정 응답의 비밀 없는 구조 진단이고, proxy CONNECT 성공이나 제품 활성화는 아직 증명되지 않았다.
 

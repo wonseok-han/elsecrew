@@ -3,7 +3,7 @@
 > 대상 독자: 이 프로젝트에 기여하는 개발자. 제품 배경·시장 조사는 기획 문서(Obsidian) 참고.
 > 다이어그램: [시스템 구성](diagrams/architecture.excalidraw) · [위저드 플로우](diagrams/wizard-flow.excalidraw)
 
-> 2026-09-29 진단 상태: 내부 `inspect_proxied_preflight_candidate`는 OS 격리와 owned Broker를 통한 model-free 조회 후보다. 실제 설치 CLI는 초기화/설정까지 통과하지만 계정 응답 검증에서 실패하며 기존 비격리 5 RPC 조회는 통과한다. WorkspaceAccess::ReadOnly는 workspace 쓰기 제한이지 profile 인증/캐시 불변 보장이 아니다. 정상 cleanup은 확인했으나 중계 트래픽 호환성이나 제품 실행 준비 완료의 증거로 사용하지 않는다.
+> 2026-09-29 진단 상태: 내부 `inspect_proxied_preflight_candidate`의 실제 설치 CLI 격리 조회는 고정 OS CA 파일을 명시한 뒤 5 RPC·종료/cleanup을 통과했다. 모델 중계 경로만 root 소유·일반 파일·그룹/타인 쓰기 불가·1MiB 이하의 `/private/etc/ssl/cert.pem`을 확인하고 exact read 허용 및 `CODEX_CA_CERTIFICATE`로 전달한다. TLS 검증 비활성화나 키체인/Mach 접근 추가는 없다. 사용자 키체인의 별도 사설 CA 지원은 이 증거에 포함하지 않는다. WorkspaceAccess::ReadOnly는 workspace 쓰기 제한이지 profile 인증/캐시 불변 보장이 아니다. 실제 유료 turn·TLS/domain-fronting 경계·제품 활성화는 별도 미완료다.
 
 ## 1. 목표와 비목표
 

@@ -4,6 +4,7 @@ use crate::provider_model_proxy::broker::Broker;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path};
 use std::process::Command;
 
@@ -48,7 +49,10 @@ const WORKSPACE_WRITE: &str = r#"
 
 const MODEL_PROXY: &str = r#"
 (allow network-outbound (remote tcp4 (param "MODEL_PROXY")))
+(allow file-read* (literal "/private/etc/ssl/cert.pem"))
 "#;
+
+const SYSTEM_CA: &str = "/private/etc/ssl/cert.pem";
 
 pub(crate) fn command(
     executable: &Path,
@@ -92,6 +96,15 @@ pub(crate) fn command_with_model_proxy(
     access: WorkspaceAccess,
     listener: TcpListener,
 ) -> io::Result<ModelProxyCommand> {
+    let ca = std::fs::symlink_metadata(SYSTEM_CA)?;
+    if !ca.is_file()
+        || ca.uid() != 0
+        || ca.mode() & 0o022 != 0
+        || ca.len() == 0
+        || ca.len() > 1024 * 1024
+    {
+        return Err(io::Error::other("untrusted system CA bundle"));
+    }
     let broker = Broker::new(listener, std::time::Instant::now())?;
     let mut command = command_network(
         executable,
@@ -116,6 +129,9 @@ pub(crate) fn command_with_model_proxy(
         command.env(key, &url);
     }
     command.env("NO_PROXY", "").env("no_proxy", "");
+    // Use the public system PEM bundle without granting keychain/Mach access.
+    // Never inherit a caller-supplied CA path or disable TLS verification.
+    command.env("CODEX_CA_CERTIFICATE", SYSTEM_CA);
     command
         .env("HOME", home)
         .env("CODEX_HOME", home)
@@ -223,6 +239,7 @@ mod tests {
         assert!(TcpListener::bind(address).is_err());
         let proxy = command.broker.proxy_url().unwrap();
         let env: std::collections::BTreeMap<_, _> = command.command.get_envs().collect();
+        assert!(env.get(OsStr::new("CODEX_CA_CERTIFICATE")) == Some(&Some(OsStr::new(SYSTEM_CA))));
         for key in ["HOME", "CODEX_HOME"] {
             assert!(env.get(OsStr::new(key)) == Some(&Some(home.as_os_str())));
         }
