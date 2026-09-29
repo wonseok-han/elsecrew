@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
 
 import {
@@ -323,24 +323,27 @@ function MonacoEditor({ tab, readOnly, onChange }: { tab: EditorTab; readOnly: b
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
+  const latest = useRef({ tab, readOnly, onChange });
+  useLayoutEffect(() => { latest.current = { tab, readOnly, onChange }; }, [tab, readOnly, onChange]);
 
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void loadMonaco().then((monaco) => {
       if (cancelled || !host.current) return;
-      const nextModel = monaco.editor.createModel(tab.text, languageFor(tab.path));
+      const current = latest.current;
+      const nextModel = monaco.editor.createModel(current.tab.text, languageFor(current.tab.path));
       model.current = nextModel;
       const nextEditor = monaco.editor.create(host.current, {
         model: nextModel,
         automaticLayout: true,
         minimap: { enabled: false },
         fontSize: 13,
-        readOnly: readOnly || tab.saveState === "saving",
+        readOnly: current.readOnly || current.tab.saveState === "saving",
         ariaLabel: `${tab.path} 코드 편집기`,
       });
       editor.current = nextEditor;
-      const subscription = nextModel.onDidChangeContent(() => onChange(nextModel.getValue()));
+      const subscription = nextModel.onDidChangeContent(() => latest.current.onChange(nextModel.getValue()));
       cleanup = () => {
         subscription.dispose();
         nextEditor.dispose();
@@ -358,7 +361,7 @@ function MonacoEditor({ tab, readOnly, onChange }: { tab: EditorTab; readOnly: b
   useEffect(() => {
     const currentModel = model.current;
     if (currentModel && currentModel.getValue() !== tab.text) currentModel.setValue(tab.text);
-    editor.current?.updateOptions({ readOnly: tab.saveState === "saving" });
+    editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
   }, [tab.text, tab.saveState, readOnly]);
 
   return <div className="m5-monaco" ref={host} />;

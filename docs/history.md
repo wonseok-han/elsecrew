@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (Monaco 읽기 전용 상태 갱신)
+
+- d44cba1 clean tree에서 updateOptions가 저장 중 여부만 반영하고 readOnly prop을 누락하는 결함을 고쳤다. 실제 컴포넌트를 AST로 추출하고 Monaco/hook double로 실행하는 회귀는 수정 전 admission lock 실패, 수정 후 통과했다.
+- 독립 검토에서 지연 로딩 중 잠금 전환을 놓치는 추가 경합을 발견했다. 최신 committed tab/readOnly/onChange를 layout effect의 ref에 보존하고 로딩 완료 시 최신 내용·잠금으로 생성한다. 저장 중/입장 차단이 각각 로딩 도중 바뀌는 회귀를 추가했고 동일 검토자 재검토 PASS. 제품 RPC·권한·파일 쓰기 계약은 바꾸지 않았다.
+- 검증: 옵션 회귀 3 PASS, pnpm build·M5 renderer build PASS(기존 Monaco chunk 경고), 숨김 Chromium smoke 2 PASS/3.27초. Karpathy 지침으로 편집기 상태 동기화만 최소 수정했다. diff 확인 뒤 작업 단위 커밋하며 main 병합/push 없음.
+- 남은 제품 범위를 제안서 §9와 현행 architecture에 대조했다. 실제 provider 활성화/도구 격리, 전체 승인 시안/안내 흐름, 검토·적용·복원 루프와 G6/Windows/출시 증거는 이 UI 수정으로 완료되지 않는다. 설치 CLI의 별도 command/exec 시험은 명시 승인 대기다.
+
 ### 2026-09-29 · by GPT-6 Astra (도킹 UI 검증·자동 시험 초점 간섭 해소)
 
 - 앞선 간헐 dirty 실패를 입력 이벤트로 재현했다. 시험이 보내는 Z 외에 한글 keydown/composition 이벤트가 전면 시험 창으로 들어와 확인/복구 중 초안을 바꾸고 있었다. 제품의 stale 확인 거절은 유지한다. 임시 입력 진단은 제거했다.
