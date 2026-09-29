@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (실제 프로세스 연결과 승인 의도 결속)
+
+- **진전**: f107e7a에서 승인 UI 연결을 조사하던 중 기존 검토의 후속 조건을 먼저 닫았다. OwnedTextRun이 실제 LoginProcess connection UUID를 제공하고 native ticket이 dispatcher stream과 함께 이를 digest에 포함한다. BoundTextSession은 매 advance에서 같은 process인지 별도 확인한다. renderer가 connection을 제공하지 않는다.
+- **검증 완료**: 동일 stream/요청의 다른 process UUID 사용과 실패 후 재사용 거절을 포함한 단위3 PASS, 상호작용 회귀 PASS/45.95초, strict all-targets clippy PASS/3.08초, rustfmt/diff 검사와 동일 검토자 scoped PASS. Karpathy 지침으로 기존 ticket/owner를 재사용했다. UI·공개 응답 API·AcceptOnce·실제 공급자 활성화는 아직 미완료이며 실제 모델 호출·main 병합/push는 하지 않았다.
+- **다음 구현 범위**: native live pending 요청의 조회/일회 응답 계약 → Electron 고정 IPC와 채팅 승인 카드 → 직전 정책/작업 공간/취소 검증을 통과한 응답 전송. 프로세스/앱 재시작 뒤 live 요청은 복원하지 않는다. 기존 자동 거절을 허용 권한으로 대체하지 않는다.
+
 ### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·보존 복구 재확인)
 
 - 사용자 요청에 따라 현재 상태를 재확인했다. 프로세스 이름 조회에서 Hello Agent 개발 앱/sidecar는 없으며 다른 앱의 Electron crash handler는 건드리지 않았다. 활성 `codex-login.pending`은 없고 보존된 legacy 잠금 inode 168613811과 stale helper inode 166226396은 유지된다. 인증 파일은 내용 없이 메타데이터만 확인했으며 mode 0600으로 남아 있다.
@@ -17,6 +23,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **승인 연결 신원 보강(2026-09-29)**: 아래 초기 승인 의도 기록의 후속 조건 중 실제 process UUID 결속은 완료했다. dispatcher stream과 LoginProcess UUID를 함께 사용하며 BoundTextSession의 매 advance 신원 검증을 유지한다. UI/직전 권한 재검증/허용 연결은 여전히 남는다.
 
 - **승인 의도 기록(2026-09-29, 내부 후보)**: native 자동 거절은 실행 신원·dispatcher stream·thread/turn/request/item/시각·내용 digest에 묶인 일회성 ticket을 원자 저장한 뒤 전송한다. 원장은 최대128개 opaque 의도이며 전달/수행 성공이나 승인 권한이 아니다. 저장 실패는 무전송·정리로 처리하고 terminal/recovery에서도 기록을 보존한다. 독립 검토 scoped PASS. 실제 허용 경로는 process transport UUID의 추가 결속·직전 권한 재검증·UI 연결이 필요하며 AcceptOnce는 여전히 차단된다.
 

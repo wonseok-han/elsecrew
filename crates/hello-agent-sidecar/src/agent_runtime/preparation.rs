@@ -56,6 +56,12 @@ pub(crate) struct OwnedTextRun {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl OwnedTextRun {
+    /// Captured from the process owner, never a renderer-supplied stream ID.
+    /// `advance` independently checks the bound session against this process.
+    pub(super) fn connection_id(&self) -> uuid::Uuid {
+        self.process.connection_id()
+    }
+
     pub(super) fn registration_identity(
         &self,
         storage: &Storage,

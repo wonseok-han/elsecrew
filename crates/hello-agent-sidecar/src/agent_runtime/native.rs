@@ -138,14 +138,15 @@ impl AgentRuntime {
         for id in ids {
             let active = self.native.get_mut(&id).unwrap();
             if !active.stopped {
+                let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
                 // Tool notifications grant no permission. Until approval UI is
                 // connected, requests are explicitly declined, never accepted.
                 active.stopped = !matches!(active.owner.advance(storage, projects, &mut |storage, action| {
                     match action {
                         TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
                         TextAction::PollApproval { request, decision } => {
-                            let mut ticket = super::approval::ApprovalTicket::new(&active.identity, &active.stream_id, request)?;
-                            ticket.record_decline(storage, &active.identity, &active.stream_id, request)?;
+                            let mut ticket = super::approval::ApprovalTicket::new(&active.identity, &connection, request)?;
+                            ticket.record_decline(storage, &active.identity, &connection, request)?;
                             *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
                             Ok(())
                         }

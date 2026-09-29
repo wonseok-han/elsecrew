@@ -196,6 +196,25 @@ mod tests {
     }
 
     #[test]
+    fn same_stream_cannot_reuse_a_ticket_on_another_process_connection() {
+        let (identity, request) = context();
+        let stream = format!("agent_stream_{}", Uuid::new_v4().simple());
+        let original = format!("{stream}:{}", Uuid::new_v4());
+        let replacement = format!("{stream}:{}", Uuid::new_v4());
+        let mut ticket = ApprovalTicket::new(&identity, &original, &request).unwrap();
+        assert!(ticket
+            .consume(&identity, &replacement, &request, |_, _| panic!(
+                "wrong process"
+            ))
+            .is_err());
+        assert!(ticket
+            .consume(&identity, &original, &request, |_, _| panic!(
+                "consumed ticket"
+            ))
+            .is_err());
+    }
+
+    #[test]
     fn stored_intents_are_bounded_exact_and_unique() {
         let entry = json!({"id":format!("approval_{}", "a".repeat(32)),"binding":"b".repeat(64),"decision":"decline","state":"intentRecorded"});
         assert!(valid_entries(std::slice::from_ref(&entry)));
