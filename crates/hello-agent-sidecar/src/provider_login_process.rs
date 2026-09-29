@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 const PENDING: &str = "codex-login.pending";
 const MAX_TRACKED: usize = 256;
+// A future explicit recovery may inspect this evidence, but its presence alone
+// never admits work or releases an existing reservation.
+const LOGIN_TERMINATED: &[u8] = b"login-processes-terminated-v1\n";
 const OBSERVE_INTERVAL: Duration = Duration::from_millis(100);
 
 fn failure() -> SidecarError {
@@ -107,6 +110,24 @@ impl Reservation {
             self.file.sync_all().map_err(|_| failure())?;
         }
         Ok(())
+    }
+
+    fn record_login_termination(&mut self) -> Result<(), SidecarError> {
+        let result = (|| {
+            if self.failed {
+                return Err(failure());
+            }
+            self.verify()?;
+            self.file
+                .write_all(LOGIN_TERMINATED)
+                .map_err(|_| failure())?;
+            self.file.sync_all().map_err(|_| failure())?;
+            self.verify()
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
     }
 
     fn release(&self) -> Result<(), SidecarError> {
@@ -755,6 +776,11 @@ impl<'a> LoginProcess<'a> {
             self.evidence_failed = true;
             return Err(failure());
         }
+        if !self.retain_for_terminal {
+            // Only after tracked termination/reaping and identity persistence.
+            // A run reservation must still rely on its terminal DB transaction.
+            self.reservation.record_login_termination()?;
+        }
         self.finished = true;
         self.profile.as_ref().revalidate()?;
         if self.retain_for_terminal {
@@ -922,6 +948,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(process.closure_evidence().unwrap().confirmed());
+        assert!(!std::fs::read(temp.path().join(PENDING))
+            .unwrap()
+            .ends_with(LOGIN_TERMINATED));
         assert!(
             LoginProcess::reserve(&binding).is_err(),
             "terminal transaction still owns fence"
@@ -1191,6 +1220,23 @@ mod tests {
     }
 
     #[test]
+    fn failed_termination_record_preserves_the_fence() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process.launch(cat).unwrap();
+        // Keep the exact inode but inject a write failure at the final marker.
+        process.reservation.file = process.reservation.directory.open(PENDING).unwrap();
+        assert!(process.finish().is_err());
+        assert!(process.reservation.failed);
+        assert!(!process.closure_evidence().unwrap().confirmed());
+        assert!(!std::fs::read(temp.path().join(PENDING))
+            .unwrap()
+            .ends_with(LOGIN_TERMINATED));
+        assert!(LoginProcess::reserve(&binding).is_err());
+    }
+
+    #[test]
     fn termination_evidence_does_not_clear_a_profile_validation_failure() {
         let temp = tempfile::tempdir().unwrap();
         let binding = profile(&temp);
@@ -1203,6 +1249,9 @@ mod tests {
         assert!(receipt.termination_confirmed());
         assert!(!receipt.confirmed());
         assert!(temp.path().join(PENDING).exists());
+        assert!(std::fs::read(temp.path().join(PENDING))
+            .unwrap()
+            .ends_with(LOGIN_TERMINATED));
         // Repairing a profile is not retroactive cleanup authority.
         std::fs::remove_file(home.join("unrecognized-artifact")).unwrap();
         assert!(process.finish().is_err());
@@ -1380,6 +1429,9 @@ mod tests {
         assert!(process.evidence_failed);
         assert!(process.finish().is_err());
         assert!(!process.closure_evidence().unwrap().termination_confirmed());
+        assert!(!std::fs::read(temp.path().join(PENDING))
+            .unwrap()
+            .ends_with(LOGIN_TERMINATED));
         assert!(LoginProcess::reserve(&binding).is_err());
         assert!(!std::fs::read_to_string(temp.path().join(PENDING))
             .unwrap()

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (로그인 종료 증거의 재시작 보존)
+
+- **구현**: `39645ad`에서 로그인/조회 owner가 종료·reap·누적 신원 저장을 확인한 뒤 프로필을 재검증하기 전에 보유 pending fd에 `login-processes-terminated-v1`을 쓰고 fsync·파일 신원을 재확인하도록 했다. 기록 실패는 예약을 실패 상태로 고정하고 잠금을 보존한다. 실제 run은 terminal DB 계약을 유지하도록 이 표시를 쓰지 않는다. 표시만으로 자동 해제하는 reader/API는 아직 없다.
+- **검증**: 기존 process 17 PASS/6.50초, 신규 같은 inode의 읽기 전용 fd를 통한 기록 실패 1 PASS/0.31초. 프로필 검증 실패에는 종료 표시가 남고 OS 관측 실패·terminal 보류 run에는 표시가 없는 것을 확인했다. 동일 독립 검토자 scoped PASS, strict sidecar all-targets clippy PASS/2.99초, scoped fmt·diff PASS. 관련 2파일만 커밋한다.
+- **다음/한계**: 기존 실제 pending은 이 증거를 갖고 있지 않으며 수정하지 않았다. 이후 명시적 복구는 표시의 구조·파일 소유권·동시 owner·프로필을 검증해야 하고 legacy/불확실 기록을 동일하게 취급하면 안 된다. 현재 계정/모델 검사 재실행과 앱 완성은 미완료다. vendor 호출·인증 파일 변경·main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (종료 증거와 프로필 잠금 실패 구분)
 
 - **구현**: `950c557`에서 실제 pending은 보존하고 ProcessClosureEvidence에 진단 전용 termination_confirmed를 추가했다. 기존 confirmed·프로필 재검증·fence 해제 조건은 바꾸지 않는다. 앱 프로필 검사도 종료 확인과 전체 cleanup 확인을 별도로 출력하므로 이후 같은 실패의 원인을 구분할 수 있다. 과거 검사에 없던 종료 증거를 소급해 만들어내지 않는다.
@@ -62,6 +68,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **종료/잠금 진단 분리(2026-09-29)**: ProcessClosureEvidence.termination_confirmed는 추적한 프로세스 종료/reap와 증거 저장까지 확인한 진단값이다. 프로필·예약 검증까지 통과한 confirmed를 대신해 실행/잠금 해제 권한으로 쓰지 않는다. 과거 pending은 이 증거가 없으므로 PID가 없다는 사실로 confirmed를 재구성하지 않는다.
+- **로그인 종료 표시(2026-09-29)**: 새 로그인/조회는 clean 종료 뒤 profile 재검증 전에 pending 마지막 줄에 login-processes-terminated-v1을 fsync한다. native run의 terminal 보류에는 쓰지 않으며 표시만으로 자동 해제하지 않는다. legacy pending에 소급해 표시를 붙이지 않는다.
 
 - **실제 offline 설정 호환성 PASS, MDM 검증은 미완료(2026-09-29)**: 현재 exact CLI/helper의 config-only 검사는 기존 정책에서 `Failed to synchronize managed preferences`로 실패했으나 opendirectoryd.libinfo Mach 조회 한 항목 추가로 PASS/2.49초다. 다른 설정/Mach/공유 메모리 허용은 제거했고 config 원문 불변·auth 미생성·cleanup confirmed를 확인했다. 독립 검토는 이 변경에 scoped PASS이나, inaccessible MDM layer가 upstream에서 생략되는 false PASS 위험은 닫히지 않았다. 관리 정책 가시성/명시적 거절 확인 전 제품 admission 근거로 사용하지 않으며 runtime은 blocked 유지다.
 
