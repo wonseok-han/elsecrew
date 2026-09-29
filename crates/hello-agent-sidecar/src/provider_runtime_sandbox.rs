@@ -7,6 +7,9 @@ use std::process::Command;
 
 const POLICY: &str = r#"(version 1)
 (deny default)
+; CoreFoundation needs OS user identity to synchronize preferences.
+; This is not proof that managed preferences are visible or honored.
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
 (allow file-read-metadata)
 (allow file-read*
     (literal "/")

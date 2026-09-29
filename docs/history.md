@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (오프라인 설정 호환성 최소 정책 수정)
+
+- **구현/실측**: `2bddc6d`에서 메인이 Karpathy 지침에 따라 OS 정책 후보를 좁혔다. Codex 도메인 설정 읽기만 추가한 검사 FAIL/2.46초, cfprefsd Mach까지 추가한 검사도 같은 sync 경고로 FAIL/2.48초였다. 소유 PID 15705 로그에 사용자 식별/설정 캐시 거절이 남았다. opendirectoryd.libinfo와 캐시 읽기를 추가해 PASS 후 불필요한 허용을 제거했으며, 최종적으로 opendirectoryd.libinfo Mach 조회 한 줄만으로 initialize/config/read PASS/2.49초·cleanup confirmed·config 불변·auth 미생성을 확인했다. 임시 core 진단은 제거했고 기존 auth/사용자 프로젝트/account/model/thread/turn은 사용하지 않았다.
+- **검증/검토**: 경로/중첩 unit 1 PASS, 실제 OS 원본/config/control 파일 보호 회귀 1 PASS/0.15초, strict sidecar all-targets clippy PASS/3.68초, scoped fmt·diff·AGENTS/CLAUDE 일치 PASS. 상시 승인된 동일 검토자 1명은 한 줄 변경을 scoped PASS로 판단했다. 직접 파일 쓰기/네트워크 권한을 추가하지 않으며 cfprefsd·user-preference-read·공유 메모리 후보는 모두 제거했다. 관련 3파일만 커밋한다.
+- **한계/다음**: 실제 config-only 호환성은 진전이지만 MDM 강제 설정 검증은 아니다. 접근 불가 관리 설정이 upstream에서 조용히 생략되면 현재 3-layer 검사만으로 구별할 수 있다는 근거가 없다. 관리 정책의 trusted visibility 또는 explicit rejection을 확인하기 전 제품 입장 근거로 사용하지 않는다. OS directory broker의 간접 네트워크 동작도 별도 검증 대상이다. 실제 runtime은 blocked 유지, native 작업/승인 UI·Claude 등 앱 전체 미완료이며 main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (관리 설정 경고의 정확한 실패 단계 확인)
 
 - **조사/결과**: clean `5172b84`에서 승인된 임시 HOME·빈 workspace·네트워크 차단 initialize/config/read 검사를 한 번 수행했다. raw 응답 대신 고정 문자열 동등성 boolean만 임시 출력해 configWarning의 details가 `Failed to synchronize managed preferences`와 정확히 일치함을 확인했다. initialize PASS, config 검사 FAIL/2.53초, cleanup=ok·confirmed=true이며 기존 인증·계정/모델 조회·thread/turn은 사용하지 않았다.
@@ -292,7 +298,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **실제 offline 설정 검사는 아직 FAIL(2026-09-29)**: 사용자가 승인한 현재 exact CLI/helper 쌍은 deny-default 정책에서 initialize는 통과하지만 configWarning `Invalid configuration; using defaults.`로 config-only 검증이 실패한다. 후속 검사에서 details가 `Failed to synchronize managed preferences`와 정확히 일치해 관리 설정 동기화 실패로 좁혔다. passwd/앱 리소스/Mach 거절 중 직접 원인은 미확정이다. 경고를 무시해 정상 실행으로 승격하지 않으며 기존 계정/모델/프로젝트를 사용하지 않았다. typed 검사·정상 cleanup 성공과 실제 설정 호환성 성공을 구분한다.
+- **실제 offline 설정 호환성 PASS, MDM 검증은 미완료(2026-09-29)**: 현재 exact CLI/helper의 config-only 검사는 기존 정책에서 `Failed to synchronize managed preferences`로 실패했으나 opendirectoryd.libinfo Mach 조회 한 항목 추가로 PASS/2.49초다. 다른 설정/Mach/공유 메모리 허용은 제거했고 config 원문 불변·auth 미생성·cleanup confirmed를 확인했다. 독립 검토는 이 변경에 scoped PASS이나, inaccessible MDM layer가 upstream에서 생략되는 false PASS 위험은 닫히지 않았다. 관리 정책 가시성/명시적 거절 확인 전 제품 admission 근거로 사용하지 않으며 runtime은 blocked 유지다.
 
 - **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 공통 stdio의 지연 완료 응답을 fixture runtime에 연결해 검증했으며 native owner 등록은 남는다. 비정상 Drop fallback은 아직 동기식이다.
 
