@@ -14,7 +14,7 @@ use hello_agent_core::provider::BoundedObservation;
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::process::Child;
+use std::process::{Child, Command};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
@@ -287,6 +287,9 @@ pub(crate) struct LoginProcess<'a> {
     closure: Option<ProcessClosureEvidence>,
     retain_for_terminal: bool,
     cleanup_started: Option<Instant>,
+    // Retained even if the caller drops every broker clone. A child cannot outlive
+    // the endpoint merely because a command builder or broker task was dropped.
+    model_proxy: Option<std::net::TcpListener>,
     #[cfg(test)]
     fail_next_cleanup: bool,
     #[cfg(test)]
@@ -392,6 +395,7 @@ impl<'a> LoginProcess<'a> {
             closure: None,
             retain_for_terminal: false,
             cleanup_started: None,
+            model_proxy: None,
             #[cfg(test)]
             fail_next_cleanup: false,
             #[cfg(test)]
@@ -410,6 +414,19 @@ impl<'a> LoginProcess<'a> {
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
     ) -> Result<(), SidecarError> {
         self.launch_with_identity_barrier(spawn, |child, _| release(child))
+    }
+
+    pub(super) fn launch_with_model_proxy(
+        &mut self,
+        mut command: Command,
+        listener: std::net::TcpListener,
+        release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        if self.attempted || self.finished || self.failed || self.model_proxy.is_some() {
+            return Err(failure());
+        }
+        self.model_proxy = Some(listener);
+        self.launch_with_barrier(|| command.spawn(), release)
     }
 
     /// The trusted run owner can durably bind the already observed identities
@@ -882,6 +899,7 @@ impl<'a> LoginProcess<'a> {
             self.reservation.release()?;
         }
         self.closure.as_mut().unwrap().confirmed = true;
+        self.model_proxy.take();
         Ok(true)
     }
 
@@ -959,9 +977,19 @@ impl LoginProcess<'_> {
 
 impl Drop for LoginProcess<'_> {
     fn drop(&mut self) {
-        if !self.finished {
+        let clean = if !self.finished {
             self.io.take();
-            self.cleanup(&SystemProcTable);
+            self.cleanup(&SystemProcTable)
+        } else {
+            true // finished is set only after clean process termination.
+        };
+        if !clean {
+            if let Some(listener) = self.model_proxy.take() {
+                // Uncertain survivors must not gain access to a replacement local
+                // server. Quarantine this descriptor until sidecar process exit.
+                // This is not crash-survival protection or broker authentication.
+                std::mem::forget(listener);
+            }
         }
         // A crash, early return or dropped owner leaves the durable reservation.
     }
@@ -993,6 +1021,70 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
+    }
+
+    #[test]
+    #[ignore = "requires local TCP bind; toy process only, no provider/account"]
+    fn model_proxy_listener_is_owned_until_confirmed_process_cleanup() {
+        for uncertain in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let profile = profile(&temp);
+            let mut process = LoginProcess::reserve(&profile).unwrap();
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            // Remain alive independently of stdin EOF so this probe isolates
+            // listener ownership from natural-exit timing.
+            let mut command = Command::new("/bin/sleep");
+            command
+                .arg("30")
+                .env_clear()
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            process
+                .launch_with_model_proxy(command, listener, |_| Ok(()))
+                .unwrap();
+            assert!(std::net::TcpListener::bind(address).is_err());
+            if uncertain {
+                process.inject_uncertain_cleanup_once();
+                assert!(process.finish().is_err());
+                assert!(std::net::TcpListener::bind(address).is_err());
+                assert!(process.model_proxy.is_some());
+                // Only this owned toy root exists. Explicitly reap it before
+                // taking the test's retained socket; production has no accessor.
+                let child = process.child.as_mut().unwrap();
+                child.kill().unwrap();
+                child.wait().unwrap();
+                process.model_proxy.take();
+            } else {
+                process.finish().unwrap();
+                assert!(process.model_proxy.is_none());
+                assert!(process.closure_evidence().unwrap().confirmed());
+            }
+            assert!(std::net::TcpListener::bind(address).is_ok());
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local TCP bind; no provider/account"]
+    fn uncertain_drop_quarantines_proxy_instead_of_releasing_its_port() {
+        use std::os::fd::FromRawFd;
+        let temp = tempfile::tempdir().unwrap();
+        let profile = profile(&temp);
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let fd = listener.as_raw_fd();
+        // No process was started, so the test can safely reclaim its own fd
+        // after injecting uncertainty. Production exposes no reclamation API.
+        process.model_proxy = Some(listener);
+        process.inject_uncertain_cleanup_once();
+        drop(process);
+        assert!(std::net::TcpListener::bind(address).is_err());
+        // SAFETY: Drop deliberately forgot this exact owned listener, and no
+        // other object owns/closes the descriptor. No child was ever spawned.
+        drop(unsafe { std::net::TcpListener::from_raw_fd(fd) });
+        assert!(std::net::TcpListener::bind(address).is_ok());
     }
 
     #[test]

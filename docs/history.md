@@ -1,5 +1,20 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (중계 listener와 실행 owner 수명 결합)
+
+- **구현/검토**: 직전 미커밋 포트 경계의 독립 검토 지적을 수정했다. ModelProxyCommand가 Command와 listener를 소유하고 소비형 launch로 기존 LoginProcess에 함께 전달한다. raw Command/Child를 반환하지 않으며 owner가 확인된 종료 후 listener를 놓는다. 불확실 Drop은 descriptor를 sidecar 종료까지 보존해 살아 있을 수 있는 자손의 포트 재사용을 막는다. 일반 로그인은 listener=None으로 기존 동작을 유지한다. 같은 검토자가 scoped PASS했다.
+- **경계**: 이 보존은 sidecar 강제 종료/crash를 넘어서는 보장이 아니고 모델 broker 인증/상류 목적지 제한을 대체하지 않는다. spawn 실패도 현재 보수적으로 descriptor를 보존할 수 있다. 제품 caller는 여전히 없으며 실제 통신 전에 중계 서비스·실행 입장·종료 결합의 후속 검증이 필요하다.
+- **검증/실패 보존**: 새 로컬 bind 검사는 도구 sandbox에서 EPERM으로 실패해 ignored opt-in으로 전환했다. 외부 실행의 첫 4검사 중 3개 PASS, cat 기반 정상 cleanup 사례는 기존 providerLoginRecoveryRequired로 실패했다. 원인은 미확정이며 종료 확인을 완화하지 않았다. listener 수명과 자연 EOF 종료를 분리하도록 toy를 sleep으로 바꾼 뒤 4 PASS/1.02초: 정확 포트 정책·소유권 이동·확인된 종료 후 해제·불확실 종료/Drop의 포트 보존을 확인했다. 이를 자연 종료 문제 해결로 주장하지 않는다.
+- **다음**: 목적지/인증이 제한된 모델 중계 서비스와 실제 실행 연결, 기존 간헐 cleanup 실패 원인 분석이 남는다. 실제 계정·모델·외부 네트워크 호출 없이 임시 소켓/프로세스만 사용했다. main 병합/push 없음.
+- **마감**: 기존 lifecycle20 PASS/2 ignored/8.88초, strict sidecar all-targets clippy·scoped rustfmt·diff 검사 PASS. 이전 턴의 포트 경계와 이번 소유권 수정을 함께 작업 단위 커밋하며 기존 미커밋 기록도 보존한다.
+
+### 2026-09-29 · by GPT-6 Astra (모델 중계용 단일 loopback 접속 경계)
+
+- **구현**: clean9840c99에서 OpenAI Docs managed-network 설명을 확인했다. 명령 프록시는 Codex 서비스/MCP 등 전체 통신을 통제하지 않으므로 기존 network_access=false를 모델 통신 격리 근거로 쓰지 않는다. 기존 offline command는 그대로 두고 backend가 이미 bind한 IPv4 127.0.0.1 listener의 포트 하나만 허용하는 내부 command_with_model_proxy 후보를 추가했다. renderer 포트 입력이나 제품 호출은 없으며 caller가 child 종료까지 listener를 보유해야 한다.
+- **실측/수정**: 초기 literal IP SBPL은 컴파일 실패(exit65)였다. 기존 gate가 stderr를 버려 test에서만 piped로 바꿔 `host must be * or localhost`를 확인했고 tcp4 localhost:port 규칙으로 수정했다. 대조군 nonblocking accept의 순간 WouldBlock도 관측해 2초 bounded 관측으로 고쳤다. 최종 실제 macOS probe2 PASS/0.47초: offline 연결 거절, 정확한 포트 허용, 다른 포트와 같은 번호 IPv6 거절, 0.0.0.0 listener 거절 및 기존 파일/플러그인 보호 유지. 세 listener 모두 sandbox 밖 연결 대조군을 통과했다. 일반 argv/root 검사1 PASS다.
+- **한계/다음**: 자손도 이 로컬 포트에 접근할 수 있다. 이 정책은 upstream 허용 도메인·TLS·중계 인증·수명/종료·서비스 호환성을 제공하지 않으며, trusted broker와 실행 owner 결합 전에는 제품 활성화에 사용하지 않는다. 외부 네트워크·계정·모델 호출 없음. 다음은 제한된 중계와 실제 native 실행 입장 연결이다. main 병합/push 없음.
+- **독립 검토/미완료**: 검토자는 반환 Command가 listener를 소유하지 않아 caller가 먼저 drop한 뒤 같은 포트가 재사용될 수 있음을 차단 사항으로 지적했다. 현재 caller는 없지만 주석의 유지 의무만으로 실행 수명 결합을 주장하지 않는다. OS probe PASS와 listener 소유권 완료는 분리한다. 구현/검사는 미커밋으로 남기며 다음 턴에서 실행 owner와 listener lease를 결합한다. 제품 활성화/승인 완료로 표현하지 않는다. strict sidecar all-targets clippy·scoped fmt·diff 검사는 통과했다.
+
 ### 2026-09-29 · by GPT-6 Astra (native 작업 시간과 연결 확인 시간 분리)
 
 - **발견/구현**: clean ab72048에서 실제 시작 연결을 조사하던 중 incremental TextSession이 초기화부터 최종 답변까지 전체를 30초로 제한함을 확인했다. toy 통신 제한을 실제 코딩 작업 한도로 사용하면 정상 장시간 작업도 중단된다. preflight/thread 준비 30초는 유지하고 turn 요청 queue 생성부터 10분의 별도 hard-total 예산을 적용했다. partial write·시작 응답·출력·도구·승인 대기 모두 같은 단조 시각 기준이며 활동으로 갱신하지 않는다. 제품 runtime 활성화나 네트워크 권한 변경은 아니다.
@@ -184,6 +199,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **중계 endpoint 소유권(2026-09-29)**: loopback tcp4 단일 포트 정책만으로 listener 신원 수명이 보장되지 않는다. opaque command가 listener를 lifecycle owner에 옮기도록 수정했고, 종료 확인 전 보유·불확실 Drop 시 sidecar 종료까지 descriptor 보존을 검사했다. 상류 broker 인증/목적지/실제 모델 통신은 아직 미완료이며 제품 활성화에 사용할 수 없다. cat 자연 종료 cleanup 실패 1회는 원인 미확정으로 남긴다.
 
 - **native 시간 예산 분리(2026-09-29)**: 이전 전체30초 toy 제한을 연결/thread 준비30초와 turn queue 생성부터 총10분으로 분리했다. 도구·승인 대기 포함, 활동 갱신 없음, 취소·sticky failure·기존 cleanup 경계 유지. 실제 모델 장시간 실측/제품 활성화는 아직 별도다.
 

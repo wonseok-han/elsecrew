@@ -2,6 +2,7 @@
 //! Apply after the inert gate has closed inherited descriptors and been recorded.
 use std::ffi::{OsStr, OsString};
 use std::io;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Component, Path};
 use std::process::Command;
 
@@ -44,6 +45,10 @@ const WORKSPACE_WRITE: &str = r#"
     (subpath (string-append (param "WORKSPACE") "/.codex")))
 "#;
 
+const MODEL_PROXY: &str = r#"
+(allow network-outbound (remote tcp4 (param "MODEL_PROXY")))
+"#;
+
 pub(crate) fn command(
     executable: &Path,
     helper: &Path,
@@ -51,6 +56,61 @@ pub(crate) fn command(
     home: &Path,
     workspace: &Path,
     access: WorkspaceAccess,
+) -> io::Result<Command> {
+    command_network(executable, helper, args, home, workspace, access, None)
+}
+
+/// A command and its owned endpoint move together into the lifecycle owner.
+/// No raw Command/Child escape hatch: spawning always transfers the listener.
+#[allow(dead_code)] // Pending upstream broker and native admission.
+pub(crate) struct ModelProxyCommand {
+    command: Command,
+    listener: TcpListener,
+}
+
+#[allow(dead_code)]
+impl ModelProxyCommand {
+    pub(crate) fn launch(
+        self,
+        owner: &mut crate::provider_login_process::LoginProcess<'_>,
+        release: impl FnOnce(&mut std::process::Child) -> io::Result<()>,
+    ) -> Result<(), crate::SidecarError> {
+        owner.launch_with_model_proxy(self.command, self.listener, release)
+    }
+}
+
+/// Trusted backend candidate only. Upstream filtering/authentication is separate;
+/// descendants share access to this endpoint. Not product activation authority.
+#[allow(dead_code)]
+pub(crate) fn command_with_model_proxy(
+    executable: &Path,
+    helper: &Path,
+    args: &[OsString],
+    home: &Path,
+    workspace: &Path,
+    access: WorkspaceAccess,
+    listener: TcpListener,
+) -> io::Result<ModelProxyCommand> {
+    let command = command_network(
+        executable,
+        helper,
+        args,
+        home,
+        workspace,
+        access,
+        Some(&listener),
+    )?;
+    Ok(ModelProxyCommand { command, listener })
+}
+
+fn command_network(
+    executable: &Path,
+    helper: &Path,
+    args: &[OsString],
+    home: &Path,
+    workspace: &Path,
+    access: WorkspaceAccess,
+    listener: Option<&TcpListener>,
 ) -> io::Result<Command> {
     let invalid = || io::Error::other("invalid offline runtime roots");
     for path in [executable, helper, home, workspace] {
@@ -74,10 +134,23 @@ pub(crate) fn command(
         return Err(invalid());
     }
     // Parameter values are individual argv values, never Scheme/shell source.
-    let policy = match access {
+    let proxy = listener
+        .map(|listener| match listener.local_addr()? {
+            SocketAddr::V4(address)
+                if address.ip() == &Ipv4Addr::LOCALHOST && address.port() != 0 =>
+            {
+                Ok(format!("localhost:{}", address.port()))
+            }
+            _ => Err(invalid()),
+        })
+        .transpose()?;
+    let mut policy = match access {
         WorkspaceAccess::ReadOnly => POLICY.to_owned(),
         WorkspaceAccess::Write => format!("{POLICY}{WORKSPACE_WRITE}"),
     };
+    if proxy.is_some() {
+        policy.push_str(MODEL_PROXY);
+    }
     let mut sandbox_args = vec![OsString::from("-p"), OsString::from(policy)];
     for (name, path) in [
         ("CLI", executable),
@@ -90,6 +163,10 @@ pub(crate) fn command(
         value.push(path);
         sandbox_args.push(value);
     }
+    if let Some(proxy) = proxy {
+        sandbox_args.push(OsString::from("-D"));
+        sandbox_args.push(OsString::from(format!("MODEL_PROXY={proxy}")));
+    }
     sandbox_args.push(executable.as_os_str().to_owned());
     sandbox_args.extend_from_slice(args);
     let references: Vec<&OsStr> = sandbox_args.iter().map(OsString::as_os_str).collect();
@@ -99,6 +176,153 @@ pub(crate) fn command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires outer macOS sandbox and local TCP; toy process only"]
+    fn proxy_command_transfers_listener_to_process_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let profile = crate::provider_profile::CodexProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let workspace = root.join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let command = command_with_model_proxy(
+            Path::new("/bin/sleep"),
+            Path::new("/bin/sleep"),
+            &[OsString::from("30")],
+            &home,
+            &workspace,
+            WorkspaceAccess::ReadOnly,
+            listener,
+        )
+        .unwrap();
+        assert!(TcpListener::bind(address).is_err());
+        let mut owner = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
+        command
+            .launch(&mut owner, crate::provider_login_gate::release)
+            .unwrap();
+        assert!(TcpListener::bind(address).is_err());
+        owner.finish().unwrap();
+        assert!(TcpListener::bind(address).is_ok());
+    }
+
+    #[test]
+    #[ignore = "requires outer macOS sandbox; local listeners only, no provider/account"]
+    fn model_proxy_policy_allows_only_the_owned_listener() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let home = root.join("profile");
+        let workspace = root.join("workspace");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::create_dir(&workspace).unwrap();
+        let allowed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let denied = TcpListener::bind("127.0.0.1:0").unwrap();
+        let ipv6 = TcpListener::bind((
+            std::net::Ipv6Addr::LOCALHOST,
+            allowed.local_addr().unwrap().port(),
+        ))
+        .unwrap();
+        let broad = TcpListener::bind("0.0.0.0:0").unwrap();
+        let accept = |listener: &TcpListener| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error)
+                        if error.kind() == io::ErrorKind::WouldBlock
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(5))
+                    }
+                    Err(error) => panic!("local accept failed: {error}"),
+                }
+            }
+        };
+        for listener in [&allowed, &denied, &ipv6] {
+            listener.set_nonblocking(true).unwrap();
+            // Prove both endpoints work outside the sandbox first.
+            let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            drop(accept(listener));
+            drop(client);
+        }
+        let run = |host: &str, port: u16, proxy: Option<&TcpListener>| {
+            let args: Vec<OsString> = [
+                "-n",
+                "-v",
+                "-z",
+                "-G",
+                "1",
+                "-w",
+                "1",
+                host,
+                &port.to_string(),
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+            let mut command = command_network(
+                Path::new("/usr/bin/nc"),
+                Path::new("/usr/bin/nc"),
+                &args,
+                &home,
+                &workspace,
+                WorkspaceAccess::ReadOnly,
+                proxy,
+            )
+            .unwrap();
+            command.stderr(std::process::Stdio::piped());
+            let mut child = command.spawn().unwrap();
+            crate::provider_login_gate::release(&mut child).unwrap();
+            child.wait_with_output().unwrap()
+        };
+        assert!(
+            !run("127.0.0.1", allowed.local_addr().unwrap().port(), None)
+                .status
+                .success()
+        );
+        let permitted = run(
+            "127.0.0.1",
+            allowed.local_addr().unwrap().port(),
+            Some(&allowed),
+        );
+        assert!(
+            permitted.status.success(),
+            "local probe failed: {:?} {}",
+            permitted.status,
+            String::from_utf8_lossy(&permitted.stderr)
+        );
+        drop(accept(&allowed));
+        assert!(!run(
+            "127.0.0.1",
+            denied.local_addr().unwrap().port(),
+            Some(&allowed)
+        )
+        .status
+        .success());
+        assert_eq!(
+            denied.accept().unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert!(
+            !run("::1", ipv6.local_addr().unwrap().port(), Some(&allowed))
+                .status
+                .success()
+        );
+        assert_eq!(ipv6.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        assert!(command_with_model_proxy(
+            Path::new("/usr/bin/nc"),
+            Path::new("/usr/bin/nc"),
+            &[],
+            &home,
+            &workspace,
+            WorkspaceAccess::ReadOnly,
+            broad
+        )
+        .is_err());
+    }
 
     #[test]
     fn offline_roots_are_parameters_and_cannot_overlap() {
