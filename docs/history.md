@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (인증/도구 프로필 경계 실측)
+
+- **기준/범위**: 6f8b569 clean tree에서 메인이 직접 조사했다. OpenAI Docs로 app-server/permissions 공식 문서를 확인하고, 실제 인증 파일 대신 임시 sentinel만 사용했다. CLI/helper SHA-256은 기존 고정값 3e11ccc…aca5a / 4c398936…43f6d와 일치한다. 홈 읽기·파일 쓰기·네트워크를 OS 차단한 help 검사와 지정 임시 폴더만 쓰는 일반/experimental schema 생성만 실행했다. 로그인/계정/모델/도구 RPC는 보내지 않았다.
+- **증거/진전**: 새 ignored `separate_tool_home_excludes_login_profile`은 현재 combined profile에서 가짜 auth.json 읽힘(exit 21)을 대조군으로 확인하고, 별도 scratch root에서는 readOnly/workspaceWrite 모두 직접·자손 읽기/쓰기 거절과 scratch 쓰기 성공을 확인했다(PASS/0.11초). 실제 제품의 프로필 분리가 구현됐다는 뜻은 아니다. scoped 독립 검토 PASS, strict all-targets clippy PASS/4.24초.
+- **설치 버전 차이**: 공식 문서의 readOnly.access/workspaceWrite.readOnlyAccess는 고정 설치 CLI의 일반 SandboxPolicy 생성물에 없다. experimental 생성물에는 thread/start·turn/start의 named `permissions` 및 ThreadStartResponse.activePermissionProfile이 있다. 일반 schema만 보면 이 필드가 없으며 최신 문서 필드를 검증 없이 추가하면 안 된다. 생성물은 `/private/tmp/hello-agent-permission-schema.ntmzFl`의 조사 자료로 제품 의존성이 아니다.
+- **다음 실행 경로**: 새 빈 임시 profile에서 named permission profile의 config/read·effective provenance와 실제 model-free OS 도구의 profile 읽기 차단을 먼저 검증한다. 구 sandbox_mode 설정과 혼용하면 구 설정이 우선하므로 기존 앱 로그인 config를 몰래 변경하지 않는다. 이 경로는 정상 sandboxed tool용이며 unsandboxed AcceptOnce를 허용하는 근거가 아니다. remote code-mode host는 CLI 옵션이 있으나 실제 OS tool delegate 위치/경계가 증명되지 않았고, external tokens는 host-owned 인증 수명 전환이 필요하므로 둘 다 해결책으로 채택하지 않았다. 공개 accept/native start 미활성·유료 호출 없음·main 병합/push 없음.
+- **출처/권한**: [공식 app-server](https://learn.chatgpt.com/docs/app-server), [공식 permissions](https://learn.chatgpt.com/docs/permissions). 설치 CLI의 실제 `command/exec` 시험은 기존 config-only 실측 범위 밖이므로 별도 승인을 요청한다. 제안 시험은 새 임시 profile/가짜 인증 sentinel만 사용하며 실제 인증·사용자 프로젝트·모델·외부 네트워크를 사용하지 않는다. scoped rustfmt/diff 검사 PASS 후 증거 회귀를 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (내부 일회 허용·전송 권위 분리)
 
 - **구현**: 03cbca1 기준 동일 live ticket의 명시 상세 조회 뒤에만 내부 일회 허용을 접수한다. 예약 owner의 격리/역할/작업 폴더/프로세스/취소 검사와 원자 intent 저장 뒤 전송하며 중복 접수는 거절한다. 일반 core AcceptOnce 차단은 유지했다. 초기 공개 core 허용 encoder는 독립 검토에서 반려되어 제거하고, core는 단회 순서 예약만 반환하며 private sidecar transport만 생성 가능한 opaque accept frame으로 바꿨다. 동일 검토자 재검토 PASS.
@@ -79,6 +87,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **고정 CLI의 권한 계약(2026-09-29)**: SHA 3e11ccc…aca5a의 일반 SandboxPolicy에는 최신 문서의 restricted read 필드가 없다. `generate-ts --experimental`에서 named permissions와 activePermissionProfile을 확인했으나 runtime 유효 권한/OS 강제는 아직 미검증이다. beta permissions와 기존 sandbox_mode를 혼용하면 안 된다. 별도 도구 scratch의 synthetic OS 격리는 PASS지만 vendor tool routing 분리는 미구현이다.
 
 - **내부 일회 허용과 제품 활성화 경계(2026-09-29)**: core는 accept bytes를 생성하지 않고 순서만 예약한다. private sidecar transport가 inspected live ticket·현재 예약/격리/취소·원자 intent 뒤 일회 accept를 전송하며 부분 전송도 재검증한다. toy 6case와 독립 검토는 통과했으나 공개 accept/native start는 미활성이다. PROFILE 전체 읽기/쓰기가 vendor 자손에 상속되므로 인증/profile 도구 격리가 다음 활성화 차단 조건이며 기존 snapshot 보호와 혼동하지 않는다.
 

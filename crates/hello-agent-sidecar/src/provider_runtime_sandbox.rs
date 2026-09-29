@@ -246,6 +246,67 @@ fn command_network(
 mod tests {
     use super::*;
 
+    /// Evidence for a separate executor root, not vendor routing/admission.
+    /// Only disposable sentinel files are used; never open account credentials.
+    #[test]
+    #[ignore = "requires outer macOS sandbox; synthetic credential sentinel only"]
+    fn separate_tool_home_excludes_login_profile() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let login = root.join("login-profile");
+        let scratch = root.join("tool-home");
+        let workspace = root.join("workspace");
+        for path in [&login, &scratch, &workspace] {
+            std::fs::create_dir(path).unwrap();
+        }
+        let sentinel = login.join("auth.json");
+        std::fs::write(&sentinel, b"synthetic-not-a-credential").unwrap();
+        // The same probe must detect the current combined profile exposure.
+        // Then prove direct and descendant reads/writes fail with a separate
+        // scratch root while tool scratch writes still work.
+        let script = r#"
+if /bin/cat "$1" >/dev/null 2>&1; then exit 21; fi
+if (printf changed >> "$1") 2>/dev/null; then exit 22; fi
+/bin/sh -c '
+    if /bin/cat "$1" >/dev/null 2>&1; then exit 23; fi
+    if (printf changed >> "$1") 2>/dev/null; then exit 24; fi
+    printf scratch-ok > "$2/result"
+' probe-child "$1" "$2" || exit $?
+"#;
+        for access in [WorkspaceAccess::ReadOnly, WorkspaceAccess::Write] {
+            for (home, expected) in [(&login, 21), (&scratch, 0)] {
+                let args = [
+                    OsString::from("-c"),
+                    OsString::from(script),
+                    OsString::from("profile-boundary-probe"),
+                    sentinel.as_os_str().to_owned(),
+                    scratch.as_os_str().to_owned(),
+                ];
+                let mut child = command(
+                    Path::new("/bin/sh"),
+                    Path::new("/bin/sh"),
+                    &args,
+                    home,
+                    &workspace,
+                    access,
+                )
+                .unwrap()
+                .spawn()
+                .unwrap();
+                crate::provider_login_gate::release(&mut child).unwrap();
+                assert_eq!(child.wait().unwrap().code(), Some(expected));
+                assert_eq!(
+                    std::fs::read(&sentinel).unwrap(),
+                    b"synthetic-not-a-credential"
+                );
+            }
+        }
+        assert_eq!(
+            std::fs::read(scratch.join("result")).unwrap(),
+            b"scratch-ok"
+        );
+    }
+
     #[test]
     #[ignore = "requires outer macOS sandbox and local TCP; toy process only"]
     fn proxy_command_transfers_listener_to_process_owner() {
