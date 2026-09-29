@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (이전 잠금의 재부팅 전 증거 보존)
+
+- **진전/현황**: clean `d7a128d`에서 이전 pending의 종료 증거 부재를 재확인했다. 현재 부팅에서 PID 부재만으로 해제하지 않는다. macOS 커널 bootsessionuuid는 도구 sandbox 안에서 EPERM이지만 외부 읽기 전용 조회는 성공했다. 파일 지문 조회 전후 부팅 UUID가 동일했다. 실제 재부팅을 통해 이전 프로세스가 모두 종료된 뒤 동일 파일인지 대조하는 복구 절차를 선택했다.
+- **고정 체크포인트**: 앱 데이터 `hello-agent/com.wonseokhan.helloagent/m5/codex-login.pending`, boot UUID `6B717DD3-F890-45B0-AD89-0D44CD7AC107`, dev `16777232`, inode `168613811`, size `61`, uid `501`, mode `600`, mtime/ctime `1790643701`, birthtime `1790643700`, SHA-256 `8abd8a174e3d15e4e5a3444950c02f1534e0ca9cba088628867ca48bec047300`. 파일·인증·프로세스를 변경하지 않았다.
+- **다음/사용자 작업**: 사용자에게 작업 저장 후 Mac 재부팅과 완료 통지를 요청했다. 재부팅 뒤 커널 UUID 변경 및 위 잠금 지문·파일 신원·프로필을 다시 확인해야 하며, 어느 항목이라도 불명확/변경되면 자동 복구하지 않는다. 재부팅은 아직 관측되지 않았고 완료를 추정하지 않는다. 적합할 때에도 원본 잠금을 보존하는 복구를 우선한다. 이번에는 코드/기존 검사 재실행·실제 계정 조회·main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (종료 증거 기반 명시적 연결 복구)
 
 - **구현**: `b269926`에서 fixed provider.login `recover`와 로그인 화면의 연결 잠금 복구 버튼을 연결했다. 새 reservation은 exclusive flock을 보유하며 종료 표시를 locked-v2로 올려 lock 미보유 구버전 v1을 복구 대상에서 제외한다. 복구는 nofollow/nonblock·16KiB 제한·정확한 header/marker·canonical pid/start·중복/256개 제한·uid/mode/nlink/inode·exclusive lock·기록 신원 모두 Gone·프로필/부모 capability 재검증 뒤에만 기존 release를 호출한다. live worker는 거절하고 native terminal 보류와 legacy/불확실 fence는 해제하지 않는다.
@@ -76,6 +82,7 @@
 - **종료/잠금 진단 분리(2026-09-29)**: ProcessClosureEvidence.termination_confirmed는 추적한 프로세스 종료/reap와 증거 저장까지 확인한 진단값이다. 프로필·예약 검증까지 통과한 confirmed를 대신해 실행/잠금 해제 권한으로 쓰지 않는다. 과거 pending은 이 증거가 없으므로 PID가 없다는 사실로 confirmed를 재구성하지 않는다.
 - **로그인 종료 표시(2026-09-29)**: 새 로그인/조회는 clean 종료 뒤 profile 재검증 전에 pending 마지막 줄에 login-processes-terminated-v1을 fsync한다. native run의 terminal 보류에는 쓰지 않으며 표시만으로 자동 해제하지 않는다. legacy pending에 소급해 표시를 붙이지 않는다.
 - **명시적 복구 갱신(2026-09-29)**: 후속 구현은 flock owner와 locked-v2 종료 표시만 복구 대상으로 삼는다. v1 표시도 자동 승격하지 않는다. UI recover는 제한된 기록/메타데이터·OS Gone·capability 검증 후만 해제하며, 실제 현재 legacy pending은 여전히 미해결이다.
+- **현재 legacy 잠금 복구 체크포인트(2026-09-29)**: 동일 날짜의 재부팅 전 증거 워크로그에 boot UUID와 pending inode/시간/hash를 보존했다. 다른 부팅 세션과 정확한 파일 신원 재확인 전에는 해제하지 않는다. 사용자에게 Mac 재부팅을 요청했으며 아직 완료 증거는 없다.
 
 - **실제 offline 설정 호환성 PASS, MDM 검증은 미완료(2026-09-29)**: 현재 exact CLI/helper의 config-only 검사는 기존 정책에서 `Failed to synchronize managed preferences`로 실패했으나 opendirectoryd.libinfo Mach 조회 한 항목 추가로 PASS/2.49초다. 다른 설정/Mach/공유 메모리 허용은 제거했고 config 원문 불변·auth 미생성·cleanup confirmed를 확인했다. 독립 검토는 이 변경에 scoped PASS이나, inaccessible MDM layer가 upstream에서 생략되는 false PASS 위험은 닫히지 않았다. 관리 정책 가시성/명시적 거절 확인 전 제품 admission 근거로 사용하지 않으며 runtime은 blocked 유지다.
 
