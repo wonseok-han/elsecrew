@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (실제 계정 갱신 알림의 preflight 호환성)
+
+- **원인/구현**: clean `e21b7f9`에서 실제 조회를 고정 단계/boolean 진단으로 좁혔다. initialize/config 후 account/read 대기 시 account/updated가 먼저 와서 기존 RPC parser가 거절했다. 정상 chatgpt 알림의 3번째 필드는 기존 로그인 parser에도 있는 emittedAtMs였다. full preflight에서 해당 단계의 typed 알림 단1회만 수용하고 RPC pending은 유지하도록 수정했다. sync/incremental driver는 추가 요청 없이 같은 시간 예산/owner에서 실제 계정 응답을 기다린다. auth 변경/중복/잘못된 단계/미지 필드는 거절한다. 임시 진단 출력은 모두 제거했다.
+- **실측 결과**: 단계 식별 FAIL 3.18초, 알림 분류 FAIL 3.13초, 초기 note 수정 FAIL 3.30초, envelope 분류 FAIL 3.12/3.39초 모두 termination/cleanup confirmed였다. emittedAtMs 적용 후 마지막 검사 FAIL/4.32초는 계정·모델 대조를 통과하고 requirements 요청까지 전송했다. 종료는 termination_confirmed=true지만 profile cleanup=false였다. 모델/조회 과정에서 새 plugins/.remote-plugin-install-staging 및 plugins/cache/openai-curated-remote 디렉터리를 발견했고 현행 whitelist가 plugins를 거절한다. 계정 로그아웃으로 해석하지 않는다. requirements 최종 대조 성공은 아직 확인하지 못했다.
+- **새 fence/다음**: 기존 legacy 보존본은 유지한다. 새 pending(inode168650275,98bytes)은 PID54985/start1790647097545809 및 login-processes-terminated-locked-v2를 갖는다. 프로필/플러그인 생성·격리 계약 확인 전 pending/plugins를 지우거나 재호출하지 않는다. 종료 증거 없는 과거 legacy와 다르며 재부팅 요구로 되돌아가지 않는다. plugins를 단순 허용해 실제 실행 권한으로 승격하지 않는다. 실제 유료 모델/thread/turn·사용자 프로젝트는 미사용, 제품 runtime blocked 유지.
+- **검증**: 최종 core preflight22 PASS/0.01초, sidecar preflight5 PASS/13.83초(실제 offline1 ignored), timestamp 적용 후 실제 fake pipe 회귀1 PASS/10.35초. 동일 독립 검토자 최종 scoped PASS. OpenAI Docs 공식 app-server의 auth notification과 조회 규격을 확인했고 기존 로그인 timestamp validator를 재사용한 규칙으로 제한했다. 실제 계정 응답 원문·인증 내용은 출력하지 않았다. 직전 턴은 legacy 복구/실측 진전이며 이번 턴은 계정 wire 호환성 구현 진전이다.
+- **마감**: core+sidecar strict all-targets clippy PASS/4.33초, scoped rustfmt·diff 검사 PASS. 제품 변경4파일+현행/작업기록2파일만 커밋한다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인된 개발 앱 정상 종료·legacy 잠금 보존 복구)
 
 - **승인/실행**: 사용자가 `개발 앱 종료하고 복구 진행해`를 명시 승인했다. exact 저장소 Electron.app에 AppleEvent quit를 보내 정상 종료했고 기존 Electron21731/sidecar21862·진단45359 부재와 exact pending/profile lsof 무출력을 확인했다. 강제 종료·다른 Codex 종료는 하지 않았다.
@@ -121,6 +129,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **계정 preflight 진전/새 프로필 경계(2026-09-29)**: 계정 응답 전 account/updated+emittedAtMs를 bounded 단1회 처리해 실제 account/model 대조를 통과했다. 마지막 requirements 단계 뒤 vendor plugins 생성으로 profile cleanup이 실패했다. 새 pending에는 locked-v2 종료 증거가 있으므로 legacy/reboot 이슈로 회귀하지 않는다. 플러그인 자동 생성/격리와 프로필 admission이 다음 조사이며 현재 plugins/pending은 보존한다.
 
 - **legacy 잠금 수동 복구 완료(2026-09-29)**: 사용자 명시 승인으로 개발 앱을 정상 종료하고 exact legacy pending을 원본 inode/hash 그대로 `.preserved-20260929-168613811`로 보존했다. 재부팅은 하지 않았다. 후속 실제 model-free 검사에서는 대조 실패가 남았지만 프로세스 종료·cleanup 모두 confirmed이며 활성 pending은 없다. 과거 재부팅/승인 대기를 현재 차단으로 반복하지 않는다. 다음 원인은 preflight 응답의 단계별 불일치이며 인증 실패라고 아직 단정하지 않는다.
 

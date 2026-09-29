@@ -133,7 +133,7 @@ impl TextSession {
                         {
                             on_action(process, TextAction::ObserveProcess)?;
                             flow.accept(&frame).map_err(|_| failure())?;
-                            waiting = false;
+                            waiting = flow.awaiting_response();
                         }
                     }
                     _ => return Err(failure()),

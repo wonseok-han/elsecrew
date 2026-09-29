@@ -41,6 +41,7 @@ pub struct PreflightExchange {
     thread_id: Option<String>,
     notified_thread_id: Option<String>,
     configuration_only: bool,
+    account_note_seen: bool,
 }
 
 fn invalid() -> ProviderError {
@@ -91,11 +92,18 @@ impl PreflightExchange {
             thread_id: None,
             notified_thread_id: None,
             configuration_only: false,
+            account_note_seen: false,
         })
     }
 
     pub fn state(&self) -> PreflightState {
         self.state
+    }
+
+    /// An account notification is not the correlated RPC response. Keep reading
+    /// under the same owner/deadline without sending another request.
+    pub fn awaiting_response(&self) -> bool {
+        self.state == PreflightState::Checking && self.rpc.awaiting_reply()
     }
 
     pub fn is_fresh(&self) -> bool {
@@ -294,6 +302,36 @@ impl PreflightExchange {
         }
         if self.state != PreflightState::Checking {
             return Err(invalid());
+        }
+        if input.json()?.get("method").is_some() {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields, rename_all = "camelCase")]
+            struct Params {
+                auth_mode: String,
+                plan_type: Option<String>,
+            }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Note {
+                method: String,
+                params: Params,
+                #[serde(default, rename = "emittedAtMs")]
+                emitted_at_ms: u64,
+            }
+            let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            if !self.rpc.awaiting_account_reply()
+                || self.account_note_seen
+                || note.method != "account/updated"
+                || note.params.auth_mode != "chatgpt"
+                || note.emitted_at_ms > 9_007_199_254_740_991
+                || note.params.plan_type.as_ref().is_some_and(|value| {
+                    value.is_empty() || value.len() > 128 || value.chars().any(char::is_control)
+                })
+            {
+                return Err(invalid());
+            }
+            self.account_note_seen = true;
+            return Ok(self.state);
         }
         let (kind, observation) = self.rpc.accept(input)?;
         let profile = ExpectedProfile {
@@ -714,6 +752,70 @@ mod tests {
         assert!(exchange.next_request().unwrap().is_none());
         exchange.invalidate();
         assert!(exchange.next_request().is_err());
+    }
+
+    #[test]
+    fn account_note_is_bounded_and_never_substitutes_for_the_reply() {
+        let valid =
+            r#"{"method":"account/updated","params":{"authMode":"chatgpt","planType":"pro"}}"#;
+        let timed = r#"{"method":"account/updated","emittedAtMs":1790643701003,"params":{"authMode":"chatgpt","planType":"pro"}}"#;
+        for note in [
+            valid,
+            timed,
+            r#"{"method":"account/updated","emittedAtMs":-1,"params":{"authMode":"chatgpt"}}"#,
+            r#"{"method":"account/updated","emittedAtMs":9007199254740992,"params":{"authMode":"chatgpt"}}"#,
+            r#"{"method":"account/updated","emittedAtMs":1,"emittedAtMs":2,"params":{"authMode":"chatgpt"}}"#,
+            r#"{"method":"account/updated","params":{"authMode":null}}"#,
+            r#"{"method":"account/updated","params":{"authMode":"apikey"}}"#,
+            r#"{"method":"account/updated","params":{"authMode":"chatgpt","authMode":"chatgpt"}}"#,
+            r#"{"method":"account/updated","params":{"authMode":"chatgpt","extra":"PRIVATE"}}"#,
+            r#"{"id":3,"method":"account/updated","params":{"authMode":"chatgpt"}}"#,
+            r#"{"method":"account/unknown","params":{"authMode":"chatgpt"}}"#,
+        ] {
+            let mut flow = exchange();
+            let values = results();
+            for (index, value) in values.iter().take(2).enumerate() {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            flow.next_frames().unwrap();
+            let note = BoundedObservation::new(note.as_bytes().to_vec()).unwrap();
+            let accepted = flow.accept(&note);
+            if note.bytes == valid.as_bytes() || note.bytes == timed.as_bytes() {
+                assert_eq!(accepted.unwrap(), PreflightState::Checking);
+                assert!(flow.awaiting_response());
+                assert!(flow.next_frames().is_err());
+                assert!(flow
+                    .start_thread(std::path::Path::new("/managed/snapshot"))
+                    .is_err());
+                flow.accept(&reply(2, &values[2])).unwrap();
+                assert!(!flow.awaiting_response());
+                for (index, value) in values.iter().enumerate().skip(3) {
+                    flow.next_frames().unwrap();
+                    flow.accept(&reply(index, value)).unwrap();
+                }
+                assert_eq!(flow.state(), PreflightState::ObservationsMatched);
+            } else {
+                assert!(!accepted.unwrap_err().to_string().contains("PRIVATE"));
+                assert_eq!(flow.state(), PreflightState::Failed);
+                assert!(flow.accept(&reply(2, &values[2])).is_err());
+            }
+        }
+        for at in [0, 1, 2, 3] {
+            let mut flow = exchange();
+            let values = results();
+            for (index, value) in values.iter().enumerate().take(at) {
+                flow.next_frames().unwrap();
+                flow.accept(&reply(index, value)).unwrap();
+            }
+            flow.next_frames().unwrap();
+            let note = BoundedObservation::new(valid.as_bytes().to_vec()).unwrap();
+            if at == 2 {
+                flow.accept(&note).unwrap();
+            }
+            assert!(flow.accept(&note).is_err()); // wrong stage or duplicate
+            assert_eq!(flow.state(), PreflightState::Failed);
+        }
     }
 
     #[test]

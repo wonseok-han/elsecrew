@@ -252,8 +252,13 @@ fn check_claimed(
         if cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
-        let frames = flow.next_frames().map_err(|_| failure())?;
-        if frames.is_empty() {
+        let awaiting = flow.awaiting_response();
+        let frames = if awaiting {
+            Vec::new()
+        } else {
+            flow.next_frames().map_err(|_| failure())?
+        };
+        if frames.is_empty() && !awaiting {
             return Err(failure());
         }
         for frame in frames {
@@ -1045,6 +1050,7 @@ printf '%s\n' "$2"
 IFS= read -r line || exit 0
 printf received > "$7.account"
 case "$line" in *'"method":"account/read"'*) ;; *) exit 5;; esac
+printf '%s\n' '{"method":"account/updated","emittedAtMs":1,"params":{"authMode":"chatgpt","planType":"pro"}}'
 printf '%s\n' "$3"
 IFS= read -r line; case "$line" in *'"method":"model/list"'*) ;; *) exit 6;; esac
 printf '%s\n' "$4"

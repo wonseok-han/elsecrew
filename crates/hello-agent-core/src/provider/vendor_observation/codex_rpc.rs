@@ -28,6 +28,13 @@ fn error() -> ProviderError {
 }
 
 impl ModelFreeExchange {
+    pub(super) fn awaiting_reply(&self) -> bool {
+        self.pending && !self.failed
+    }
+
+    pub(super) fn awaiting_account_reply(&self) -> bool {
+        self.awaiting_reply() && self.next == 2
+    }
     pub fn with_config_layers() -> Self {
         Self {
             include_config_layers: true,
