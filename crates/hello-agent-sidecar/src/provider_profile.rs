@@ -30,6 +30,12 @@ fn failure() -> SidecarError {
 /// without reading credentials or following links. Not a same-UID race barrier.
 pub(crate) fn verify_runtime_files(home: &Path) -> Result<(), SidecarError> {
     let profile = open_absolute_directory(home)?;
+    // Login/discovery may materialize vendor plugin caches. Filesystem isolation
+    // does not prove that their hooks/MCP contributions are disabled at runtime.
+    match profile.symlink_metadata("plugins") {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return Err(failure()),
+    }
     crate::project::runtime_isolation::verify(&profile).map_err(|_| failure())
 }
 
@@ -77,7 +83,7 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
         if entry.file_name() != "config.toml" && entry.file_name() != "auth.json" {
             let name = entry.file_name();
             let name = name.to_str().ok_or_else(failure)?;
-            let directory = matches!(name, "skills" | "tmp" | ".tmp");
+            let directory = matches!(name, "skills" | "tmp" | ".tmp" | "plugins");
             let database = [
                 "goals_1.sqlite",
                 "logs_2.sqlite",
@@ -257,6 +263,28 @@ pub(super) fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> 
 #[cfg(test)]
 mod tests {
     #[test]
+    #[ignore = "requires explicit approval to recover an app-owned confirmed login fence"]
+    fn installed_codex_confirmed_login_recovery() {
+        assert_eq!(
+            std::env::var("HELLO_AGENT_APPROVED_LOGIN_RECOVERY").as_deref(),
+            Ok("1")
+        );
+        let path = std::path::PathBuf::from(
+            std::env::var_os("HELLO_AGENT_INSPECTION_APP_DATA")
+                .expect("explicit app data directory"),
+        );
+        assert!(path.ends_with("com.wonseokhan.helloagent/m5"));
+        let app_data = super::open_absolute_directory(&path).unwrap();
+        let profile = super::profile_directory(&app_data, false).unwrap();
+        let binding = super::CodexProfileBinding {
+            app_data_path: path,
+            app_data,
+            profile,
+        };
+        crate::provider_login_process::recover_confirmed_login(&binding).unwrap();
+    }
+
+    #[test]
     #[ignore = "requires approval for existing app-owned account and model inspection"]
     fn installed_codex_app_profile_model_free_inspection() {
         use crate::provider_executable::PinnedExecutable;
@@ -376,6 +404,45 @@ mod tests {
             assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
             assert!(verify_runtime_files(&home).is_err());
             assert_eq!(std::fs::read(&outside).unwrap(), b"preserve");
+            assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), CONFIG);
+        }
+    }
+
+    #[test]
+    fn plugin_cache_is_login_only_and_requires_a_safe_directory() {
+        for case in ["directory", "symlink", "file", "writable"] {
+            let temp = tempfile::tempdir().unwrap();
+            prepare_codex_profile(&root(&temp)).unwrap();
+            let home = temp
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join(CODEX_PROFILE_DIRECTORY);
+            let plugins = home.join("plugins");
+            match case {
+                "symlink" => symlink(temp.path(), &plugins).unwrap(),
+                "file" => std::fs::write(&plugins, b"not a cache directory").unwrap(),
+                _ => {
+                    std::fs::create_dir_all(plugins.join("cache/openai-curated-remote")).unwrap();
+                    std::fs::create_dir(plugins.join(".remote-plugin-install-staging")).unwrap();
+                    std::fs::set_permissions(
+                        &plugins,
+                        std::fs::Permissions::from_mode(if case == "writable" {
+                            0o777
+                        } else {
+                            0o755
+                        }),
+                    )
+                    .unwrap();
+                }
+            }
+            assert_eq!(
+                prepare_codex_profile(&root(&temp)).is_ok(),
+                case == "directory",
+                "{case}"
+            );
+            assert!(verify_runtime_files(&home).is_err(), "{case}");
+            assert!(std::fs::symlink_metadata(&plugins).is_ok());
             assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), CONFIG);
         }
     }

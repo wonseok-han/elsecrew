@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (플러그인 캐시 호환·실제 연결 복구 및 조회 통과)
+
+- **구현**: `5371842`에서 plugins 실제 디렉터리를 기존 uid/쓰기 권한 검사에 따라 로그인·조회에만 허용했다. native 실행은 plugins 항목이 있으면 spawn 전과 gate release 전 계속 거절한다. 파일 scanner가 plugin hook/MCP 비활성화 증명이 아님을 명시했다. Karpathy 지침으로 한 모듈에 한정했고 OpenAI Docs app-server API overview에서 plugin API가 아직 production 사용 대상이 아님을 확인했다. plugin 설치/삭제/설정 변경 API는 사용하지 않았다.
+- **실제 복구/검증**: 동일 독립 검토자 scoped PASS 뒤 명시 opt-in helper로 기존 locked-v2 복구 API를 실행해 PASS/0.02초. 이어 승인된 계정·모델·관리 정책 5 RPC 검사 PASS/3.56초, matched=true/termination_confirmed=true/cleanup_confirmed=true다. config 원문 불변 검사도 통과했다. 인증 파일 내용은 출력하지 않았고 유료 모델/thread/turn·사용자 프로젝트는 미사용이다. vendor 자체 캐시/인증 갱신까지 무변경이라고 주장하지 않는다. legacy 원본 보존본은 유지하며 새 종료 확인 잠금만 기존 API로 해제했다.
+- **검증/다음**: profile 10 PASS(실제 검사2 ignored), 기존 explicit recovery 2 PASS, strict sidecar all-targets clippy·scoped rustfmt·diff 검사 PASS. 직전 턴은 상태 반복(no progress)이었으나 이번에는 실제 복구와 전체 조회 성공까지 진전했다. 재부팅/로그인 복구는 더 이상 현재 차단이 아니다. native 실행의 plugin/tmp 격리·모델 네트워크/도구/승인·runtime 연결과 전체 제품 완료는 별도 남는다. main 병합/push 없음. 이전 미커밋 재확인 기록도 보존해 함께 커밋한다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 결과 재확인)
+
+- **확인**: clean `5371842`에서 사용자 승인 대상 개발 Electron/hello-agent sidecar의 프로세스 목록이 비어 있음을 재확인했다. 도구 sandbox의 ps 거절 뒤 외부 읽기 전용 조회로 확인했으며 종료 명령을 중복 실행하지 않았다.
+- **복구 구분**: 기존 legacy 원본 보존본(inode168613811/61bytes/0600)은 유지된다. 후속 검사에서 생성된 새 pending(inode168650275/98bytes/0600)도 그대로다. 앞선 legacy 복구 완료를 새 잠금까지 해제됐다는 의미로 확대하지 않는다. 현재 프로필 코드는 plugins를 허용하지 않으므로 새 잠금 복구 전 해당 계약 수정·검증이 남는다.
+- **경계/다음**: 인증·캐시·잠금·프로세스 변경이나 vendor 재호출 없이 상태만 확인했다. 재부팅은 요구하지 않는다. 제품 코드 변경·main 병합/push 없음. 이 재확인 기록은 미커밋으로 남긴다.
+
 ### 2026-09-29 · by GPT-6 Astra (실제 계정 갱신 알림의 preflight 호환성)
 
 - **원인/구현**: clean `e21b7f9`에서 실제 조회를 고정 단계/boolean 진단으로 좁혔다. initialize/config 후 account/read 대기 시 account/updated가 먼저 와서 기존 RPC parser가 거절했다. 정상 chatgpt 알림의 3번째 필드는 기존 로그인 parser에도 있는 emittedAtMs였다. full preflight에서 해당 단계의 typed 알림 단1회만 수용하고 RPC pending은 유지하도록 수정했다. sync/incremental driver는 추가 요청 없이 같은 시간 예산/owner에서 실제 계정 응답을 기다린다. auth 변경/중복/잘못된 단계/미지 필드는 거절한다. 임시 진단 출력은 모두 제거했다.
@@ -129,6 +141,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **앱 프로필 조회 최종 통과(2026-09-29)**: plugins 캐시를 로그인/조회에서 검증해 허용하고 native 실행에서는 명시 거절하도록 분리했다. 기존 v2 종료 증거 API로 복구한 뒤 실제 5 RPC preflight가 matched/termination/cleanup 모두 true로 통과했다. 아래 과거 plugins 잠금/requirements 미확인 상태는 해소됐다. 이 결과는 실제 작업 실행 활성화나 plugin 격리 증명이 아니며 runtime blocked는 유지된다.
 
 - **계정 preflight 진전/새 프로필 경계(2026-09-29)**: 계정 응답 전 account/updated+emittedAtMs를 bounded 단1회 처리해 실제 account/model 대조를 통과했다. 마지막 requirements 단계 뒤 vendor plugins 생성으로 profile cleanup이 실패했다. 새 pending에는 locked-v2 종료 증거가 있으므로 legacy/reboot 이슈로 회귀하지 않는다. 플러그인 자동 생성/격리와 프로필 admission이 다음 조사이며 현재 plugins/pending은 보존한다.
 
