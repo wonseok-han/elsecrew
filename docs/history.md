@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (저장된 프로젝트 목록 조회 기반)
+
+- d399b1c에서 여러 프로젝트 재선택 경로를 조사했다. 저장된 project 원장은 있으나 공개 openProject는 native 폴더 선택기만 거치며 목록 API는 없다. storage/catalog에 읽기 전용 keyset 조회를 추가했다. ID/경로 열만 읽고 큰 workspace projection_json은 materialize하지 않으며 파일 시스템 접근·snapshot 생성·프로젝트 활성화는 하지 않는다.
+- 조회는 admission 완료 후만 허용하고 ID 순서 50개·원시 UTF-8 합계 512KiB/경로 128KiB를 제한한다. 한도에서 다음 cursor를 반환하고 초과 메타데이터는 누락시키지 않고 거절한다. wire 직렬화 크기 검증은 공개 API 연결 때 별도로 필요하다. 기존 원장·스키마 migration 변경 없음.
+- 검증: focused Rust 4 PASS/1.08초(재시작·페이지 연속성·바이트 한도·쓰기 없음·입장 전 차단), strict all-targets clippy PASS/4.27초, scoped rustfmt·직접 diff 검토·diff 검사 PASS. 실제 계정/모델/사용자 프로젝트를 사용하지 않았다. Karpathy 지침으로 기존 projects table을 재사용했다.
+- 다음은 typed 목록/명시 재열기 계약과 Electron/renderer 연결이다. 현재 함수는 내부 기반으로 public capability/UI는 아직 없으며 여러 프로젝트 관리 기능 완료로 주장하지 않는다. 목록은 접근 권한이 아니므로 재열기 시 저장된 ID와 경로·현재 Git root·복구/초안 경계를 다시 검증해야 한다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (파일 선택과 패널 표시 연결)
 
 - b22c6eb에서 파일 선택이 편집 상태만 바꾸고 숨긴 편집기/비활성 도킹 탭을 드러내지 않는 누락을 확인했다. controller의 명시 panel 요청을 도킹으로 전달해 기존 배치에서 해당 패널만 표시한다. 같은 열린 파일을 재선택해도 동작하며 일반 상태 갱신/입력은 패널을 강제로 열지 않는다. 패널 표시 전 진행 중 크기 조절 기준도 비운다.

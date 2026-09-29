@@ -42,6 +42,10 @@ use uuid::Uuid;
 #[allow(dead_code)]
 pub(crate) mod reopen;
 
+// Read-only catalog preparation; public project selection is wired separately.
+#[allow(dead_code)]
+pub(crate) mod catalog;
+
 const MIGRATION_V1: &str = include_str!("../../../tests/fixtures/m5/storage-v1/migration.sql");
 const MIGRATION_V2: &str =
     include_str!("../../../tests/fixtures/m5/storage-v2/migration-v1-to-v2.sql");
