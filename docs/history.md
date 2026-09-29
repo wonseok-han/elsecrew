@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (프록시 실행과 작업 원장 연결)
+
+- **구현**: 직전1d8854f의 실제 격리 조회 성공에서 이어 RunReservation에 내부 proxied Codex 실행 후보를 연결했다. 기존 offline 진입점은 유지하고 선택 역할/model/permission·snapshot 격리·profile/pin/cancel 검사를 공유한다. opaque command는 process identities를 기존 durable pre-release 기록에 전달한 뒤 gate를 연다. release 후 저장 실패는 공용 record-or-invalidate로 통신/중계를 중단하고 종료 owner를 유지한다.
+- **검증/검토**: 최초 로컬 toy8경로 PASS/17.73초(읽기/쓰기·pin 변경·취소·profile/workspace hardlink 거절). 동일 독립 검토자 scoped PASS. 실제 공급자/계정/유료 모델을 실행하지 않았고 제품 start/admission은 여전히 blocked다. Karpathy 지침에 따라 기존 offline 경로와 안전 검사를 재사용했다.
+- **다음**: 승인 UI 전에 필요한 실행 원장/중계 연결을 먼저 완료한다. 사용자 승인 응답·제품 admission·TLS/domain-fronting·최종 누적 검증은 남는다. main 병합/push 없음.
+- **마감 검증**: identity/release 저장 실패 주입을 추가한 proxied toy10경로 PASS/22.36초, 기존 offline 읽기/쓰기 PASS/10.67초, process lifecycle21 PASS/5 ignored/9.06초. 저장 실패는 protocol 진입을 거절하고 정리 전 fence를 유지하며 종료 확인 뒤 run은 recoveryRequired로 복구된다. strict sidecar all-targets clippy·scoped rustfmt·diff 검사도 통과했다.
+- **정적 검사 수정**: 최초 clippy에서 테스트 함수 포인터 호출의 불필요한 이중 참조3곳을 지적해 제거한 뒤 재검사했다. 실행 의미 변경은 없다.
+
 ### 2026-09-29 · by GPT-6 Astra (격리 모델 조회의 CA 접근 수정)
 
 - **진전/원인 범위**: 직전6f97306의 account 실패를 좁혔다. 비밀 없는 구조 분류와 설치 바이너리 내 일치하는 고정 리터럴 대조로 RPC -32603/workspace routing discovery failed를 확인했다. 실제 인증 CONNECT·상류 TCP 연결·payload 이후 relay reset이 관측됐다. 같은 proxy를 유지하고 OS 격리만 제외한 임시 비교는5 RPC PASS/4.49초, 격리를 유지하고 공개 OS CA만 명시한 비교는 PASS/3.14초였다. 개별 Mach 거절이 원인이라는 주장은 하지 않는다.
@@ -265,6 +273,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **프록시 실행 원장 결합(2026-09-29)**: RunReservation의 내부 proxied launch는 기존 offline 경로와 입력/pin/profile 검증을 공유한다. identity 기록 전에 gate를 열지 않으며 release 저장 실패는 transport/broker 중단 후 owner cleanup으로 처리한다. toy10경로 통과는 제품 admission이나 실제 모델 작업의 증거가 아니다.
 
 - **격리 조회 CA 해결(2026-09-29)**: 기존 account id3 실패는 OS 공개 CA 파일을 fixed env/exact read로 명시한 뒤 실제5 RPC·cleanup 통과했다. CONNECT/auth/upstream은 동작하며 키체인/Mach 권한 또는 TLS검증 해제는 필요하지 않았다. 아래 격리 조회 차이 기록은 수정 전 증거다. 사설 사용자 CA·실제turn·domain-fronting·제품 활성화까지 검증된 것은 아니다.
 

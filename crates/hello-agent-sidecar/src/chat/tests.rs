@@ -453,21 +453,27 @@ fn actual_run_preparation_rejects_foreign_input_and_stale_evidence_without_write
 
 #[test]
 fn text_candidate_public_sink_uses_the_same_snapshot_storage_owner() {
-    text_candidate_cases(false, false);
+    text_candidate_cases(false, false, false);
 }
 
 #[test]
 fn reserved_interactions_preserve_ledger_and_reject_role_changes() {
-    text_candidate_cases(false, true);
+    text_candidate_cases(false, true, false);
 }
 
 #[test]
 #[ignore = "macOS outer sandbox required; temporary toy CLI only, no account or network"]
 fn text_candidate_os_isolated_native_lifecycle() {
-    text_candidate_cases(true, false);
+    text_candidate_cases(true, false, false);
 }
 
-fn text_candidate_cases(offline_native: bool, interactions: bool) {
+#[test]
+#[ignore = "macOS outer sandbox and local listener; toy CLI only, no account/upstream"]
+fn text_candidate_os_isolated_proxied_lifecycle() {
+    text_candidate_cases(true, false, true);
+}
+
+fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool) {
     use crate::provider_login_process::LoginProcess;
     use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
     use crate::provider_profile::CodexProfileBinding;
@@ -500,6 +506,8 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         "bound-native-gate-cli",
         "bound-native-gate-helper",
         "bound-native-gate-cancel",
+        "bound-native-identity-persist",
+        "bound-native-release-persist",
         "bound-role",
         "bound-write",
         "bound-write-mismatch",
@@ -514,7 +522,14 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
         "bound-writer-terminal",
         "bound-cancel",
     ] {
-        if matches!(failure, "bound-native" | "bound-native-write") != offline_native {
+        if !proxied && failure.starts_with("bound-native-") && failure.ends_with("-persist") {
+            continue;
+        }
+        if if proxied {
+            !failure.starts_with("bound-native")
+        } else {
+            matches!(failure, "bound-native" | "bound-native-write") != offline_native
+        } {
             continue;
         }
         if failure.starts_with("bound-handler") != interactions {
@@ -758,31 +773,36 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                 )
                 .unwrap();
                 // Pre-launch rejects leave the same fresh owner/run untouched.
-                assert!(reservation
-                    .launch_codex_candidate(
-                        &mut fixture.storage,
-                        &fixture.projects,
-                        &mut process,
-                        &cli,
-                        &helper,
-                        &AtomicBool::new(true),
-                    )
-                    .is_err());
+                let launch = if proxied {
+                    crate::agent_runtime::preparation::RunReservation::launch_proxied_codex_candidate
+                } else {
+                    crate::agent_runtime::preparation::RunReservation::launch_codex_candidate
+                };
+                assert!(launch(
+                    reservation,
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &mut process,
+                    &cli,
+                    &helper,
+                    &AtomicBool::new(true),
+                )
+                .is_err());
                 for (path, original) in [
                     (&cli_path, script.as_bytes()),
                     (&helper_path, b"#!/bin/sh\nexit 0\n".as_slice()),
                 ] {
                     std::fs::write(path, b"changed").unwrap();
-                    assert!(reservation
-                        .launch_codex_candidate(
-                            &mut fixture.storage,
-                            &fixture.projects,
-                            &mut process,
-                            &cli,
-                            &helper,
-                            &AtomicBool::new(false),
-                        )
-                        .is_err());
+                    assert!(launch(
+                        reservation,
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        &cli,
+                        &helper,
+                        &AtomicBool::new(false),
+                    )
+                    .is_err());
                     assert!(fixture.storage.projection_records("run").unwrap()[0]
                         ["process_identity_internal"]
                         .is_null());
@@ -825,7 +845,14 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                         }));
                     });
                 }
-                let launched = reservation.launch_codex_candidate(
+                if failure == "bound-native-identity-persist" {
+                    fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_identity BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_identity_%' BEGIN SELECT RAISE(ABORT, 'injected identity persistence failure'); END;").unwrap();
+                }
+                if failure == "bound-native-release-persist" {
+                    fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_release BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_released_%' BEGIN SELECT RAISE(ABORT, 'injected release persistence failure'); END;").unwrap();
+                }
+                let launched = launch(
+                    reservation,
                     &mut fixture.storage,
                     &fixture.projects,
                     &mut process,
@@ -833,6 +860,35 @@ fn text_candidate_cases(offline_native: bool, interactions: bool) {
                     &helper,
                     &launch_cancel,
                 );
+                if failure.ends_with("-persist") {
+                    assert!(launched.is_err());
+                    assert!(process.begin_preflight().is_err());
+                    assert!(LoginProcess::reserve(&profile).is_err());
+                    let run = &fixture.storage.projection_records("run").unwrap()[0];
+                    if failure == "bound-native-identity-persist" {
+                        assert!(run["process_identity_internal"].is_null());
+                        assert!(!native_argv.exists());
+                    } else {
+                        assert_eq!(run["barrier"]["releaseGranted"], false);
+                        assert!(!run["process_identity_internal"]
+                            .as_array()
+                            .unwrap()
+                            .is_empty());
+                    }
+                    process.finish().unwrap();
+                    assert!(process
+                        .closure_evidence()
+                        .is_some_and(|receipt| receipt.confirmed()));
+                    assert!(!received.exists());
+                    AgentRuntime::blocked()
+                        .recover_unclean_runs(&mut fixture.storage, &mut fixture.projects)
+                        .unwrap();
+                    assert_eq!(
+                        fixture.storage.projection_records("run").unwrap()[0]["state"],
+                        "recoveryRequired"
+                    );
+                    continue;
+                }
                 if !matches!(failure, "bound-native" | "bound-native-write") {
                     assert!(launched.is_err());
                     crate::provider_preflight_session::BEFORE_RELEASE

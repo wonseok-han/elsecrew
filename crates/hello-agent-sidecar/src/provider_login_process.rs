@@ -418,15 +418,24 @@ impl<'a> LoginProcess<'a> {
 
     pub(super) fn launch_with_model_proxy(
         &mut self,
-        mut command: Command,
+        command: Command,
         broker: crate::provider_model_proxy::broker::Broker,
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_model_proxy_identity(command, broker, |child, _| release(child))
+    }
+
+    pub(super) fn launch_with_model_proxy_identity(
+        &mut self,
+        mut command: Command,
+        broker: crate::provider_model_proxy::broker::Broker,
+        release: impl FnOnce(&mut Child, &[ProcIdentity]) -> std::io::Result<()>,
     ) -> Result<(), SidecarError> {
         if self.attempted || self.finished || self.failed || self.model_proxy.is_some() {
             return Err(failure());
         }
         self.model_proxy = Some(broker);
-        let result = self.launch_with_barrier(|| command.spawn(), release);
+        let result = self.launch_with_identity_barrier(|| command.spawn(), release);
         if result.is_err() {
             self.stop_model_proxy();
         }

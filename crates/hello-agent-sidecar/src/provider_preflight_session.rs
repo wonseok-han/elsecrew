@@ -172,7 +172,7 @@ pub(crate) fn offline_discovery_command(
     Ok(command)
 }
 
-fn discovery_arguments(
+pub(crate) fn discovery_arguments(
     home: &std::path::Path,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
     permission: ExpectedPermission,

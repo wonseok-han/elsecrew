@@ -75,6 +75,17 @@ pub(crate) struct ModelProxyCommand {
 
 #[allow(dead_code)]
 impl ModelProxyCommand {
+    pub(crate) fn launch_with_identity(
+        self,
+        owner: &mut crate::provider_login_process::LoginProcess<'_>,
+        release: impl FnOnce(
+            &mut std::process::Child,
+            &[hello_agent_core::proctree::ProcIdentity],
+        ) -> io::Result<()>,
+    ) -> Result<(), crate::SidecarError> {
+        owner.launch_with_model_proxy_identity(self.command, self.broker, release)
+    }
+
     pub(crate) fn launch(
         self,
         owner: &mut crate::provider_login_process::LoginProcess<'_>,

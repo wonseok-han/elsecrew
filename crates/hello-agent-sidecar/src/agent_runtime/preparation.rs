@@ -172,7 +172,54 @@ impl RunReservation {
         helper: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<(), SidecarError> {
-        use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            false,
+        )
+    }
+
+    /// Internal proxy candidate, not product admission or approval authority.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn launch_proxied_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            true,
+        )
+    }
+
+    fn launch_codex_with_network(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        pair: (
+            &crate::provider_executable::PinnedExecutable,
+            &crate::provider_executable::PinnedExecutable,
+        ),
+        cancel: &std::sync::atomic::AtomicBool,
+        proxied: bool,
+    ) -> Result<(), SidecarError> {
+        let (executable, helper) = pair;
+        use crate::provider_runtime_sandbox::WorkspaceAccess;
+        use hello_agent_core::provider::vendor_observation::codex_preflight::{
+            ExpectedPermission, ExpectedProfile,
+        };
         let failure = || {
             SidecarError::new(
                 "agentLaunchRejected",
@@ -211,37 +258,58 @@ impl RunReservation {
             .map_err(|_| failure())?;
         let workspace =
             std::path::Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        let mut command = crate::provider_preflight_session::offline_discovery_command(
-            executable.revalidate()?,
-            helper.revalidate()?,
-            &home,
-            workspace,
-            &expected,
-            permission,
-        )
-        .map_err(|_| failure())?;
-        self.launch_gated(
-            storage,
-            projects,
-            process,
-            || command.spawn(),
-            |child| {
-                #[cfg(test)]
-                crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
-                    if let Some(hook) = hook.borrow_mut().take() {
-                        hook();
-                    }
-                });
-                executable.revalidate().map_err(std::io::Error::other)?;
-                helper.revalidate().map_err(std::io::Error::other)?;
-                crate::provider_profile::verify_runtime_files(&home)
-                    .map_err(std::io::Error::other)?;
-                if cancel.load(std::sync::atomic::Ordering::Acquire) {
-                    return Err(std::io::Error::other("provider launch canceled"));
+        let release = |child: &mut Child| {
+            #[cfg(test)]
+            crate::provider_preflight_session::BEFORE_RELEASE.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().take() {
+                    hook();
                 }
-                crate::provider_login_gate::release(child)
-            },
-        )
+            });
+            executable.revalidate().map_err(std::io::Error::other)?;
+            helper.revalidate().map_err(std::io::Error::other)?;
+            crate::provider_profile::verify_runtime_files(&home).map_err(std::io::Error::other)?;
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(std::io::Error::other("provider launch canceled"));
+            }
+            crate::provider_login_gate::release(child)
+        };
+        if proxied {
+            let args = crate::provider_preflight_session::discovery_arguments(
+                &home, &expected, permission,
+            )
+            .map_err(|_| failure())?;
+            let command = crate::provider_runtime_sandbox::command_with_model_proxy(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &args,
+                &home,
+                workspace,
+                match permission {
+                    ExpectedPermission::ReadOnly => WorkspaceAccess::ReadOnly,
+                    ExpectedPermission::WorkspaceWrite => WorkspaceAccess::Write,
+                },
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .map_err(|_| failure())?,
+            )
+            .map_err(|_| failure())?;
+            command.launch_with_identity(process, |child, identities| {
+                self.record_pre_release(storage, projects, identities)
+                    .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
+                release(child)
+            })?;
+            self.record_released_or_invalidate(storage, process)
+        } else {
+            let mut command = crate::provider_preflight_session::offline_discovery_command(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &home,
+                workspace,
+                &expected,
+                permission,
+            )
+            .map_err(|_| failure())?;
+            self.launch_gated(storage, projects, process, || command.spawn(), release)
+        }
     }
 
     /// Internal read-only candidate: inputs come only from this reservation.
@@ -651,6 +719,14 @@ impl RunReservation {
                 .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
             release(child)
         })?;
+        self.record_released_or_invalidate(storage, process)
+    }
+
+    fn record_released_or_invalidate(
+        &self,
+        storage: &mut Storage,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(), SidecarError> {
         self.record_released(storage).map_err(|_| {
             process.invalidate_transport();
             SidecarError::new(
