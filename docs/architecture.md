@@ -204,6 +204,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
+- **모델 중계 요청 입장(내부 후보)**: `provider_model_proxy`는 실행별 Basic credential·정확한 HTTPS authority/Host·허용 헤더만 받는 단회 CONNECT parser다. 헤더 총8KiB/5초 제한, 미완료/거절/수락 상태를 구분한다. 임시 curl의 로컬 요청 검사만 통과했으며 DNS/public IP 검증·socket relay·동시 연결 제한·native CLI 모델 호환성과 제품 연결은 아직 없다. credential은 같은 실행 자손과 공유될 수 있고 TLS 안의 요청 경로를 검사하지 않는다.
+
 - **변경 검토 현행**: 텍스트 diff는 변경 전후 줄 번호·추가/삭제 색상과 기호를 표시하며 페이지당 200행으로 전체 내용을 탐색한다. 불완전/미지원 hunk는 원문 표시로 보존하고 이 파서는 파일 적용 권위로 사용하지 않는다. 파일 반영·복원 루프는 여전히 후속이다.
 
 - **편집 초안 재읽기**: dirty/충돌 탭은 명시적 확인 후 저장된 파일을 다시 읽을 수 있다. 읽기 완료까지 초안을 보존하고 확인 이후 변경된 탭·프로젝트/작업 복사본·차단 상태에서는 교체하지 않는다. 충돌 초안은 복사 가능하다. 파일 쓰기나 원본 프로젝트 적용/되돌리기가 아니며 Monaco의 동일 텍스트 동기화는 dirty를 만들지 않는다.

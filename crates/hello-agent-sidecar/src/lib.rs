@@ -35,6 +35,9 @@ mod provider_preflight_session;
 mod provider_profile;
 #[cfg(target_os = "macos")]
 mod provider_runtime_sandbox;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Admission parser only; socket relay and vendor compatibility pending.
+mod provider_model_proxy;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;

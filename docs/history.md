@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (모델 중계 CONNECT 요청 입장 검사)
+
+- **진전**: 직전 종료 경합 수정746f2d0의 clean tree에서 모델 중계 요청 입장 모듈을 추가했다. 실행별 무작위 Basic 인증, exact HTTPS authority 3개, Host 일치, 중복/미지 헤더·본문/파이프라이닝 거절, 총8KiB/5초 제한과 실패/소비 후 재사용 거절을 구현했다. credential은 Debug/직렬화/로그에 노출하지 않는다. 기존 lock의 base64 0.22.1을 직접 의존성으로 추가했다.
+- **근거/경계**: OpenAI Docs [설정 레퍼런스](https://learn.chatgpt.com/docs/config-file/config-reference)와 [permissions](https://learn.chatgpt.com/docs/permissions#configuration-spec)를 확인했다. 명령용 proxy 설정은 모델 통신 격리 증거가 아니며 현재 native CLI의 모델 proxy 호환성은 이 문서만으로 입증하지 못했다. chatgpt.com/auth.openai.com/api.openai.com:443은 내부 후보 allowlist이고 실제 필요 목적지 전체를 검증한 목록이 아니다. TLS 내부 경로 검증·DNS/public-address 검사·relay·동시 연결 예산·native 연결은 아직 없다. 자손의 같은 run credential 접근을 차단하는 권한 경계로 주장하지 않는다.
+- **검증**: 초기 단위3 PASS(모든 byte split·타 실행 인증·주소 위장·헤더 모호성·시간/크기 경계), 실제 로컬 curl CONNECT 검사 PASS/0.03초. curl이 인증을 보내는지 확인하고 서버는403으로 닫아 외부 DNS/TLS/모델/계정 호출을 하지 않았다. 이 결과는 native vendor 호환성이나 proxy 서비스 완성 증거가 아니다.
+- **다음**: DNS/연결/relay 수명과 예산을 결합한 뒤 native CLI의 로컬 proxy 호환성을 확인한다. 제품 runtime은 계속 blocked이며 main 병합/push 없음. Karpathy 지침으로 요청 입장과 아직 없는 relay를 구분했고 OpenAI Docs로 확인되지 않은 호환성을 가정하지 않았다.
+- **마감**: 누락/중복 인증·Host 불일치 회귀 추가 후 단위3 PASS/1 ignored, strict sidecar all-targets clippy PASS/6.06초. 동일 독립 검토자 scoped PASS. 새 모듈 rustfmt·git diff --check를 확인하고 관련6파일만 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (자연 종료와 root 회수 사이 경합 수정)
 
 - **진전/재현**: 직전 턴은 복구 상태 재확인으로 개발 진전이 없었다. cec60ea의 미커밋 진단을 이어 200회 cat 종료 검사 중 34번째에서 tracker Confirmed/reaped=false/evidence_failed=false 실패를 재현했다. 프로세스 신원 소멸을 확인해도 root 종료 결과 회수는 즉시 완료되지 않을 수 있다.
@@ -212,6 +220,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **모델 중계 입장(2026-09-29, 제품 미연결)**: provider_model_proxy는 per-run Basic credential과 bounded CONNECT framing만 검증한다. 정확 authority/Host·단회 소비·8KiB/5초를 적용하며 실제 curl의 로컬 요청은 통과했다. upstream DNS/public IP·TLS 내부 목적지·relay 예산·native 모델 호환성은 별도다. 이 parser를 실행 권한 또는 완성된 네트워크 격리로 사용하지 않는다.
 
 - **macOS 종료/회수 경합(2026-09-29)**: identity Gone과 Child::try_wait의 종료 결과 준비는 동시에 보장되지 않는다. LoginProcess는 confirmed tree에서 Ok(None)이면 원래 8초 종료 예산 내 pending을 유지하며 root 회수까지 fence/listener를 놓지 않는다. 동기 재시도는 TreeTracker::terminate의 fresh 관측을 유지해야 cached failure로 생존 프로세스 정리를 건너뛰지 않는다. 실패 receipt/integrity 오류를 재시도로 성공 승격하지 않는다.
 
