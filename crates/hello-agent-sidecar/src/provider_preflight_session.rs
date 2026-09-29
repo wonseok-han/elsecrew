@@ -550,6 +550,18 @@ mod tests {
     #[test]
     #[ignore = "requires explicit approval for installed CLI offline configuration inspection"]
     fn installed_codex_offline_configuration_only() {
+        inspect_installed_codex_offline(false);
+    }
+
+    /// Reproduce a vendor-update leftover in a disposable profile only. This
+    /// probe does not authorize bypassing runtime admission for a real profile.
+    #[test]
+    #[ignore = "requires explicit approval for installed CLI offline configuration inspection"]
+    fn installed_codex_offline_stale_helper_probe() {
+        inspect_installed_codex_offline(true);
+    }
+
+    fn inspect_installed_codex_offline(stale_helper: bool) {
         use crate::provider_executable::PinnedExecutable;
         use std::path::Path;
         assert_eq!(
@@ -580,6 +592,14 @@ mod tests {
         let original_config = std::fs::read(home.join("config.toml")).unwrap();
         assert!(!home.join("auth.json").exists());
         crate::provider_profile::verify_runtime_files(&home).unwrap();
+        let stale_link = home.join("tmp/arg0/codex-arg0stale/codex-execve-wrapper");
+        if stale_helper {
+            std::fs::create_dir_all(stale_link.parent().unwrap()).unwrap();
+            // Deliberately absent target inside the disposable test root. Never
+            // link to user data or give the vendor an additional executable.
+            std::os::unix::fs::symlink(root.join("removed-cli"), &stale_link).unwrap();
+            assert!(crate::provider_profile::verify_runtime_files(&home).is_err());
+        }
         // This is a configuration tuple only, not a model availability claim.
         let expected = ExpectedProfile {
             model: "test-model",
@@ -660,6 +680,13 @@ mod tests {
             flow.invalidate();
         }
         flow.close();
+        if stale_helper {
+            eprintln!(
+                "offline_stale_helper retained={} runtime_files_accepted={}",
+                std::fs::symlink_metadata(&stale_link).is_ok(),
+                crate::provider_profile::verify_runtime_files(&home).is_ok(),
+            );
+        }
         eprintln!(
             "offline_config observation={} cleanup={} confirmed={} state={:?}",
             observation

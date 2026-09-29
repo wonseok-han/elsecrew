@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (실행 전 stale helper 링크 차단 원인 실측)
+
+- **진전**: 직전 턴은 종료·복구 상태 재확인뿐이었다. 이번에는 앱 프로필 tmp/arg0/codex-arg0ovNqx1/codex-execve-wrapper가 존재하지 않는 `/Applications/ChatGPT.app/Contents/Resources/codex`를 가리킴을 확인했다. 현재 pinned nested CLI와 다르며 로그인 실패로 해석하지 않는다.
+- **재현**: 기존 opt-in offline config 검사를 공통 helper로 추출하고 별도 ignored stale-helper probe를 추가했다. 새 임시 프로필에 임시 루트 안의 없는 target을 가리키는 링크를 만들며 실제 인증/프로젝트는 사용하지 않는다. 승인된 고정 CLI·네트워크 차단 initialize/config-only 실행은 PASS/2.47초, cleanup confirmed였다. 그러나 retained=true/runtime_files_accepted=false로 stale 링크가 그대로 남았다. probe PASS는 관측 실행 성공이며 runtime 입장 PASS가 아니다.
+- **결론/다음**: 조회 재실행만으로 stale 링크가 제거되지 않으므로 재로그인/재부팅을 해결책으로 요구하지 않는다. 다음은 기존 인증을 보존하는 명시적 임시 artifact 보존 복구와 정상 helper 수명주기 입장을 분리하는 것이다. scanner 완화·실제 프로필 변경·유료 모델 호출은 없었다. OpenAI Docs 설정 레퍼런스에는 이 wrapper 정리 계약을 확인하지 못했고 위 결과는 현재 설치 바이너리의 실측이다. 제품 runtime blocked 유지, main 병합/push 없음.
+- **마감**: scoped rustfmt·strict sidecar all-targets clippy(3.74초)·git diff --check PASS. 제품 실행 경계를 바꾸지 않는 진단 시험과 작업 기록만 직접 검토해 커밋한다. 이전 미커밋 재확인 기록도 함께 보존한다.
+
+### 2026-09-29 · by GPT-6 Astra (종료·복구 최종 상태 재확인)
+
+- **확인**: 사용자 개발 앱 종료·복구 요청에 대해 현재 프로세스 목록에서 개발 Electron/hello-agent sidecar가 없고 활성 codex-login.pending도 없음을 읽기 전용으로 재확인했다. legacy 보존본은 inode168613811/61bytes/0600 그대로 존재한다.
+- **경계/다음**: 이미 완료된 종료·복구를 중복 실행하지 않았다. 인증 삭제·앱 재실행·재부팅 없이 복구 완료 상태이며, 실제 작업 실행 연결 등 제품 개발 미완료와 구분한다. 제품 소스 변경·main 병합/push 없음. 이번 확인 기록만 워킹 트리에 남긴다.
+
 ### 2026-09-29 · by GPT-6 Astra (플러그인 캐시 OS 격리와 실제 설정 대조)
 
 - **구현**: clean `6b2e8b8`에서 OpenAI Docs의 managed configuration 설명을 확인하고 native/discovery argv에 apps/plugins=false를 고정했다. core는 hooks와 함께 effective·sessionFlags 양쪽의 명시 false를 요구하며 true/null/누락/중복 키를 거절한다. 사용자 config는 변경하지 않는다. macOS 정책에 PROFILE/plugins read/write deny를 추가해 payload/자식의 캐시 읽기·실행·수정·이동을 차단한다. 이에 따라 plugins 존재 자체의 임시 거절은 제거했지만 내부 symlink/hardlink/특수 파일을 전부 검사하는 기존 scanner는 유지했다. 같은 HOME의 pre-spawn/pre-release 검사와 필수 sandbox 경로 결합을 동일 독립 검토자가 scoped PASS했다.
@@ -158,6 +170,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **stale helper 차단 실측(2026-09-29)**: 실제 앱 tmp의 codex-execve-wrapper는 사라진 옛 번들 경로를 가리킨다. 고정 CLI offline 임시 프로필 재현에서 초기화/설정 조회와 cleanup은 성공하지만 dangling helper가 남아 recursive runtime scanner는 계속 거절했다. 로그인 잠금과 별개이며 재로그인/재부팅을 요구하지 않는다. 실제 임시 artifact의 보존 복구는 아직 실행하지 않았다.
 
 - **plugins 실행 입장 갱신(2026-09-29)**: blanket 존재 거절 대신 hooks/apps/plugins=false의 명시 argv·effective/sessionFlags 검사 + 기존 전체 profile 재귀 scanner + macOS PROFILE/plugins read/write deny를 결합했다. OS 캐시 차단 probe·고정 CLI offline config·앱 프로필5 RPC가 통과했다. 실제 tmp helper symlink와 네트워크/도구·관리 설정 전체 입장은 별도다. toy 실행 회귀의 cleanup 실패 2회는 재검사에서 재현되지 않았으나 원인 미확정으로 남긴다. 이전 plugins 존재 거절 설명은 당시 임시 조건이며 현행은 architecture를 따른다.
 
