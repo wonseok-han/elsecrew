@@ -316,8 +316,12 @@ mod tests {
             .process
             .closure_evidence()
             .is_some_and(|receipt| receipt.confirmed());
+        let terminated = inspection
+            .process
+            .closure_evidence()
+            .is_some_and(|receipt| receipt.termination_confirmed());
         eprintln!(
-            "app_profile_inspection matched={} cleanup_confirmed={confirmed}",
+            "app_profile_inspection matched={} termination_confirmed={terminated} cleanup_confirmed={confirmed}",
             inspection.result.is_ok()
         );
         assert_eq!(

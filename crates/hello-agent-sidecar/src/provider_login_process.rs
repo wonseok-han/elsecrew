@@ -135,6 +135,7 @@ fn sync_directory(directory: &Dir) -> Result<(), SidecarError> {
 /// Issued only by explicit finish; callers cannot manufacture a clean receipt.
 pub(crate) struct ProcessClosureEvidence {
     identities: Vec<ProcIdentity>,
+    termination_confirmed: bool,
     confirmed: bool,
 }
 
@@ -144,6 +145,12 @@ impl ProcessClosureEvidence {
     }
     pub(crate) fn confirmed(&self) -> bool {
         self.confirmed
+    }
+    /// Diagnostic only: tracked termination/reaping and evidence persistence.
+    /// Profile/fence validation may still have failed.
+    /// Never use this in place of confirmed() to release a fence or admit work.
+    pub(crate) fn termination_confirmed(&self) -> bool {
+        self.termination_confirmed
     }
 }
 
@@ -740,6 +747,7 @@ impl<'a> LoginProcess<'a> {
                 .as_ref()
                 .map(|tracker| tracker.tracked_identities())
                 .unwrap_or_default(),
+            termination_confirmed: clean,
             confirmed: false,
         });
         if !clean {
@@ -1183,6 +1191,25 @@ mod tests {
     }
 
     #[test]
+    fn termination_evidence_does_not_clear_a_profile_validation_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = profile(&temp);
+        let mut process = LoginProcess::reserve(&binding).unwrap();
+        process.launch(cat).unwrap();
+        let home = binding.revalidate().unwrap();
+        std::fs::write(home.join("unrecognized-artifact"), b"preserve").unwrap();
+        assert!(process.finish().is_err());
+        let receipt = process.closure_evidence().unwrap();
+        assert!(receipt.termination_confirmed());
+        assert!(!receipt.confirmed());
+        assert!(temp.path().join(PENDING).exists());
+        // Repairing a profile is not retroactive cleanup authority.
+        std::fs::remove_file(home.join("unrecognized-artifact")).unwrap();
+        assert!(process.finish().is_err());
+        assert!(LoginProcess::reserve(&binding).is_err());
+    }
+
+    #[test]
     fn reservation_precedes_launch_and_confirmed_finish_releases_it() {
         let temp = tempfile::tempdir().unwrap();
         let binding = profile(&temp);
@@ -1352,6 +1379,7 @@ mod tests {
         assert!(process.observe_with(&FailedTable, true).is_err());
         assert!(process.evidence_failed);
         assert!(process.finish().is_err());
+        assert!(!process.closure_evidence().unwrap().termination_confirmed());
         assert!(LoginProcess::reserve(&binding).is_err());
         assert!(!std::fs::read_to_string(temp.path().join(PENDING))
             .unwrap()
