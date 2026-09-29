@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인 직전 예약·격리 경계 연결)
+
+- **구현**: 1015441의 sealed launch scope를 예약 owner의 승인 전제 검사와 결합했다. 취소/role/input/snapshot·파일 분리/profile·프로세스 관측을 대조하며 파일 스캔은 Git 검사보다 먼저 한다. 기존 시작 때만 확인하던 writer 소유권을 현재 입력 검증마다 확인한다. AcceptOnce 제안은 새 callback을 거치며 이후 전송 단계에서도 재검증하도록 했다. core 허용 응답 차단과 제품 미활성 상태는 유지한다.
+- **검증/실패 분석**: 새 테스트의 존재하지 않는 writer ID는 SQLite FK에 먼저 막혔으므로 실제 run ID/null로 바꿔 readonly/writer 소유권 불일치를 검사했다. private field 접근·새 enum의 누락 match arm도 수정했다. OS proxied toy lifecycle PASS/27.91초. 기존 상호작용은10초 시험 한도에서 실패해 단일 case로 분리했으며 승인 관측7.316초·거절 전송9.186초 부근의 정상 진행을 확인했다. 제품 준비30초/정리8초를 포함하도록 외부 시험 watchdog만40초로 조정하고 원문 임시 진단을 제거했다. 제품 예산·기능 검증은 불변이며 독립 검토도 이 변경을 별도로 PASS했다. 최종 전체 해당 matrix PASS/92.96초, strict clippy PASS/4.32초·rustfmt/diff PASS. 단일 진단 테스트는 정상 matrix 중복 실행을 막기 위해 ignored다.
+- **남음**: 사용자 결정의 단회 접수/의도 저장·허용 응답 serializer·UI·실제 provider admission과 유료 모델 smoke가 아직 남는다. Karpathy 지침으로 기존 owner/transport/lock 검사를 사용했고 외부 권한이나 새 저장소는 추가하지 않았다. 실제 계정/모델 호출·main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (격리 실행 출처 전달)
 
 - **구현**: 57c8569에서 일회 허용 전제를 조사했다. 기존 core는 독립 격리 증거 없이 AcceptOnce를 거절하며, proxy 보유 여부만으로 OS 격리를 추론할 수 없었다. 고정 sandbox builder가 만든 opaque RuntimeScope를 해당 명령의 launch 성공 후 process owner에 전달했다. exact workspace/access 대조와 실패/정리/종료 무효화를 제공하며 raw proxy 경로는 증거를 얻지 못한다.

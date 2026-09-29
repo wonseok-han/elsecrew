@@ -506,6 +506,10 @@ impl RunReservation {
                 projects,
                 &mut |storage, process, action| {
                     let event = match action {
+                        TextAction::VerifyApprovalBoundary => {
+                            return self
+                                .verify_approval_boundary(storage, projects, process, cancel);
+                        }
                         TextAction::ObserveProcess => {
                             self.observe_process(storage, process)?;
                             return self
@@ -636,12 +640,76 @@ impl RunReservation {
         })
     }
 
+    /// A prerequisite to a one-shot decision, never a user decision itself.
+    /// Re-evaluated by the transport before preparing/transmitting an acceptance.
+    pub(crate) fn verify_approval_boundary(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_runtime_sandbox::WorkspaceAccess;
+        let failure = || {
+            SidecarError::new(
+                "agentApprovalChanged",
+                "approval execution boundary differs",
+            )
+        };
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(failure());
+        }
+        let address = address_from_chat(&self.run).map_err(|_| failure())?;
+        projects
+            .verify_runtime_file_isolation(storage, &address)
+            .map_err(|_| failure())?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let access = match codex_permission(&profile)? {
+            ExpectedPermission::ReadOnly => WorkspaceAccess::ReadOnly,
+            ExpectedPermission::WorkspaceWrite => WorkspaceAccess::Write,
+        };
+        let manifest = projects
+            .verify_workspace(storage, &address)
+            .map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        if !process.matches_runtime_scope(workspace, access) {
+            return Err(failure());
+        }
+        let home = process.codex_preflight_home()?;
+        crate::provider_profile::verify_runtime_files(&home)?;
+        self.observe_process(storage, process)?;
+        if cancel.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(failure());
+        }
+        Ok(())
+    }
+
     fn validate_text_input(
         &self,
         storage: &Storage,
         projects: &ProjectManager,
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
+        let lock = storage
+            .projection_record(
+                "lock",
+                &format!(
+                    "lock_{}",
+                    self.run["worktreeId"].as_str().unwrap_or_default()
+                ),
+            )?
+            .ok_or_else(|| ProjectFailure::recovery("reserved workspace lock is missing"))?;
+        let writer = if self.run["selectedProfile"]["permission"] == "workspaceWrite" {
+            json!(self.run_id)
+        } else {
+            Value::Null
+        };
+        if lock.get("writer_run_id") != Some(&writer) {
+            return Err(ProjectFailure::recovery("reserved writer changed"));
+        }
         let chat = actual_chat_projection(storage, &self.request.chat_id)?;
         let role = chat["record"]["roleSnapshots"]
             .as_array()

@@ -448,9 +448,10 @@ pub(crate) fn run_text_and_close(
         &mut |storage, process, action| match action {
             TextAction::Public(value) => on_public(storage, value),
             TextAction::ObserveProcess => on_process(storage, process),
-            TextAction::Tool(_) | TextAction::PollApproval { .. } | TextAction::VerifyWorkspace => {
-                Err(failure())
-            }
+            TextAction::Tool(_)
+            | TextAction::PollApproval { .. }
+            | TextAction::VerifyWorkspace
+            | TextAction::VerifyApprovalBoundary => Err(failure()),
         },
     )
 }
@@ -563,6 +564,9 @@ impl BoundTextSession {
 // This is private transport plumbing, not a renderer-controlled action API.
 pub(crate) enum TextAction<'a> {
     VerifyWorkspace,
+    /// No default approval. The reserved owner must verify its immutable role,
+    /// workspace/fence, live process and sealed outer-sandbox launch provenance.
+    VerifyApprovalBoundary,
     ObserveProcess,
     Public(hello_agent_core::provider::vendor_observation::codex_events::Projection),
     Tool(hello_agent_core::provider::vendor_observation::codex_events::stream::ToolEvent),
@@ -1247,6 +1251,7 @@ IFS= read -r hold
                     "test goal",
                     &mut |_, action| {
                         let value = match action {
+                            TextAction::VerifyApprovalBoundary => return Err(failure()),
                             TextAction::ObserveProcess => {
                                 if approval_polls > 0 {
                                     approval_observations += 1;

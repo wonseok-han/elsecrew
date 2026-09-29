@@ -33,6 +33,7 @@ pub(super) struct TextSession {
     turn_started: Option<Instant>,
     outgoing: VecDeque<NativeFrame>,
     transmitting: bool,
+    requires_approval_boundary: bool,
 }
 
 impl TextSession {
@@ -68,6 +69,7 @@ impl TextSession {
             turn_started: None,
             outgoing: VecDeque::new(),
             transmitting: false,
+            requires_approval_boundary: false,
         })
     }
 
@@ -111,6 +113,9 @@ impl TextSession {
         let stage = self.stage.take().ok_or_else(failure)?;
         self.remaining(cancel)?;
         if self.transmitting || !self.outgoing.is_empty() {
+            if self.requires_approval_boundary {
+                on_action(process, TextAction::VerifyApprovalBoundary)?;
+            }
             // Recheck authority after yielding, before every possible partial write.
             on_action(process, TextAction::VerifyWorkspace)?;
             on_action(process, TextAction::ObserveProcess)?;
@@ -221,6 +226,10 @@ impl TextSession {
                             },
                         )?;
                         if let Some(decision) = decision {
+                            if matches!(decision, hello_agent_core::provider::vendor_observation::codex_approval::Decision::AcceptOnce) {
+                                self.requires_approval_boundary = true;
+                                on_action(process, TextAction::VerifyApprovalBoundary)?;
+                            }
                             on_action(process, TextAction::VerifyWorkspace)?;
                             on_action(process, TextAction::ObserveProcess)?;
                             self.remaining(cancel)?;

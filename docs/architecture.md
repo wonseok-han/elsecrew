@@ -208,6 +208,8 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 ## 10. 미해결 사항
 
+- **승인 직전 경계 후보**: 예약 owner의 `verify_approval_boundary`가 취소·현재 불변 role/input·writer 소유권·snapshot/파일 분리·exact 격리 launch scope·앱 profile·프로세스 관측 원장을 함께 검사한다. 파일 분리 스캔을 Git 검증보다 먼저 수행한다. TextSession의 AcceptOnce 제안은 이 callback을 거쳐야 하며 이후 전송마다 재검증하도록 묶었다. 일반 text-only 경로는 거절한다. Core의 실제 AcceptOnce 직렬화는 아직 차단되어 있어 이 전제 연결을 허용 기능 완료로 보지 않는다.
+
 - **격리 실행 출처(승인 권위 아님)**: fixed `ModelProxyCommand` builder만 생성하는 비직렬화 `RuntimeScope`가 동일 명령의 identity-barrier launch 성공 후 process owner로 이동한다. exact 작업 폴더/ReadOnly·Write를 보존하며 일반 proxy/raw launch는 이 출처 정보를 만들지 않는다. failed/finished/cleanup/no-I/O/no-child 상태에서는 일치하지 않는다. 실제 프로세스 생존·현재 역할/작업 폴더/잠금·사용자 일회 결정 검증을 대체하지 않으며 AcceptOnce와 제품 활성화는 아직 차단된다.
 
 - **모델 중계(내부 후보)**: `provider_model_proxy`의 Broker가 실행별 Basic credential·정확한 HTTPS authority/Host·8KiB/5초 단회 CONNECT 검사와 연결 작업·Relay를 묶는다. 동시8연결·poll당4accept·서비스 총600초/128MiB payload 예산을 적용한다. DNS는 고정 목적지만 한 번 조회하고 최대16개 결과 전체의443/public IP 여부를 검사한 뒤 숫자 주소에 연결한다. 전역8개 작업자 슬롯·10초 연결 예산·시도당최대2초이며 OS DNS가 멈추면 취소 후에도 실제 작업자 종료까지 슬롯을 보유한다. 이는 DNS 스레드를 강제 종료한다는 보장이 아니다. Relay는 방향별8KiB 버퍼, 200응답 배출 후 전달, EOF half-close와 취소/오류/Drop 종료를 유지한다. Broker stop은 연결을 닫되 listener는 drop까지 보유한다. 검사 증거는 합성 DNS 목록·가짜 지연 작업자·로컬 소켓 통합뿐이며 실제 DNS/목적지 연결은 실행하지 않았다. LoginProcess 수명에는 내부 연결했지만 native CLI 호환성과 제품 admission은 아직 없다. 자손도 credential을 사용할 수 있으며 TLS peer/SNI/HTTP 경로를 검사하지 않아 공유 IP의 domain fronting까지 차단한다고 주장하지 않는다.

@@ -474,6 +474,21 @@ fn text_candidate_os_isolated_proxied_lifecycle() {
 }
 
 fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool) {
+    text_candidate_cases_selected(offline_native, interactions, proxied, None);
+}
+
+#[test]
+#[ignore = "focused diagnosis; covered by reserved_interactions matrix"]
+fn native_dispatcher_approval_round_trip() {
+    text_candidate_cases_selected(false, true, false, Some("bound-handler-runtime"));
+}
+
+fn text_candidate_cases_selected(
+    offline_native: bool,
+    interactions: bool,
+    proxied: bool,
+    selected: Option<&str>,
+) {
     use crate::provider_login_process::LoginProcess;
     use crate::provider_preflight_session::{run_text_and_close, TextWorkspace};
     use crate::provider_profile::CodexProfileBinding;
@@ -524,6 +539,9 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
         "bound-writer-terminal",
         "bound-cancel",
     ] {
+        if selected.is_some_and(|selected| selected != failure) {
+            continue;
+        }
         if !proxied && failure.starts_with("bound-native-") && failure.ends_with("-persist") {
             continue;
         }
@@ -929,6 +947,76 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                     continue;
                 }
                 launched.unwrap();
+                assert!(reservation
+                    .verify_approval_boundary(
+                        &mut fixture.storage,
+                        &fixture.projects,
+                        &mut process,
+                        &AtomicBool::new(true)
+                    )
+                    .is_err());
+                let checked = reservation.verify_approval_boundary(
+                    &mut fixture.storage,
+                    &fixture.projects,
+                    &mut process,
+                    &AtomicBool::new(false),
+                );
+                assert_eq!(
+                    checked.is_ok(),
+                    proxied,
+                    "approval boundary requires sealed proxy launch"
+                );
+                if proxied {
+                    let lock_id = format!("lock_{}", address.worktree_id);
+                    let saved = fixture
+                        .storage
+                        .projection_record("lock", &lock_id)
+                        .unwrap()
+                        .unwrap();
+                    let mut changed = saved.clone();
+                    changed["writer_run_id"] = if writer {
+                        Value::Null
+                    } else {
+                        fixture.storage.projection_records("run").unwrap()[0]["record"]["runId"]
+                            .clone()
+                    };
+                    fixture
+                        .storage
+                        .upsert_projection_record(
+                            "lock",
+                            &lock_id,
+                            "op_test_changed_writer",
+                            None,
+                            changed,
+                        )
+                        .unwrap();
+                    assert!(reservation
+                        .verify_approval_boundary(
+                            &mut fixture.storage,
+                            &fixture.projects,
+                            &mut process,
+                            &AtomicBool::new(false)
+                        )
+                        .is_err());
+                    fixture
+                        .storage
+                        .upsert_projection_record(
+                            "lock",
+                            &lock_id,
+                            "op_test_restored_writer",
+                            None,
+                            saved,
+                        )
+                        .unwrap();
+                    reservation
+                        .verify_approval_boundary(
+                            &mut fixture.storage,
+                            &fixture.projects,
+                            &mut process,
+                            &AtomicBool::new(false),
+                        )
+                        .unwrap();
+                }
             } else {
                 // Toy peer cannot act until its first request; release has no payload.
                 reservation
@@ -1155,11 +1243,15 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                         fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_approval BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_approval_%' BEGIN SELECT RAISE(ABORT, 'injected approval persistence failure'); END;").unwrap();
                     }
                     let mut emitted = Vec::new();
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                    // Enclose the production 30s preparation and 8s cleanup
+                    // budgets. Never shorten the product's allowed lifecycle.
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
                     loop {
                         assert!(
                             std::time::Instant::now() < deadline,
-                            "native dispatcher timeout"
+                            "native dispatcher timeout: {failure}; run state={:?}, pending query={:?}",
+                            fixture.storage.projection_record("run", &identity.run_id).unwrap().map(|run| run["state"].clone()),
+                            runtime.pending_native_approvals(&fixture.storage, &fixture.projects, &identity)
                         );
                         match runtime.poll(&mut fixture.storage, &mut fixture.projects) {
                             Ok(events) => emitted.extend(events),
