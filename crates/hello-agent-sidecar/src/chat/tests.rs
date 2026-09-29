@@ -498,6 +498,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
         "bound-handler-runtime-cancel",
         "bound-handler-runtime-quit",
         "bound-handler-runtime-terminal",
+        "bound-handler-runtime-approval-store",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -1149,6 +1150,8 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                         runtime.prepare_quit(&mut fixture.storage, &mut fixture.projects);
                     } else if failure.ends_with("-terminal") {
                         fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_native_terminal BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_agent_native_chat_terminal_%' BEGIN SELECT RAISE(ABORT, 'injected terminal persistence failure'); END;").unwrap();
+                    } else if failure.ends_with("-approval-store") {
+                        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_reject_approval BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_approval_%' BEGIN SELECT RAISE(ABORT, 'injected approval persistence failure'); END;").unwrap();
                     }
                     let mut emitted = Vec::new();
                     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -1208,6 +1211,21 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                         .projection_record("run", &identity.run_id)
                         .unwrap()
                         .unwrap();
+                    if failure.ends_with("-approval-store") {
+                        assert_eq!(run["state"], "failed");
+                        assert!(run.get("approval_intents_internal").is_none());
+                        assert!(!fs::read_to_string(&captured)
+                            .unwrap()
+                            .contains("\"decision\""));
+                        continue 'cases;
+                    }
+                    if !canceled {
+                        let intents = run["approval_intents_internal"].as_array().unwrap();
+                        assert_eq!(intents.len(), 1);
+                        assert_eq!(intents[0]["decision"], "decline");
+                        assert_eq!(intents[0]["state"], "intentRecorded");
+                        assert!(!intents[0].to_string().contains("echo test"));
+                    }
                     assert_eq!(
                         run["state"],
                         if canceled { "canceled" } else { "succeeded" }

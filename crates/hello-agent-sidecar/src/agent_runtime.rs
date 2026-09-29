@@ -44,6 +44,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const SOURCE_KIND: &str = "actualAgent";
+mod approval;
 mod native;
 pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
@@ -2491,7 +2492,11 @@ fn actual_run_projection(
 }
 
 fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<String, Value>) {
-    for field in ["provider_discovery", "runtime_attestation"] {
+    for field in [
+        "provider_discovery",
+        "runtime_attestation",
+        "approval_intents_internal",
+    ] {
         if let Some(value) = source.get(field) {
             target.insert(field.into(), value.clone());
         }

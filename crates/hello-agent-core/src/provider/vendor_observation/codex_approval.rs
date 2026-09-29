@@ -41,9 +41,13 @@ pub struct Network {
 }
 
 pub struct PendingApproval {
+    pub thread_id: String,
+    pub turn_id: String,
     pub request_id: RequestId,
     pub item_id: String,
     pub reason: Option<String>,
+    /// Descriptive vendor breakdown, retained for context binding, never authority.
+    pub command_actions: Option<serde_json::Value>,
     pub started_at_ms: u64,
     pub action: Action,
 }
@@ -234,9 +238,12 @@ impl PendingApproval {
             _ => return Err(invalid()),
         };
         Ok(Self {
+            thread_id: scope.thread_id,
+            turn_id: scope.turn_id,
             request_id: request.id,
             item_id: scope.item_id,
             reason: scope.reason,
+            command_actions: params.get("commandActions").cloned(),
             started_at_ms: scope.started_at_ms,
             action,
         })

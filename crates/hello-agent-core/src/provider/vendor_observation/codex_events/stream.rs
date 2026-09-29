@@ -23,7 +23,7 @@ pub enum Observed {
     /// Validated lifecycle metadata, not tool permission or public tool output.
     Tool(ToolEvent),
     /// Scoped to a live tool. The owner must obtain a decision; never auto-accept.
-    Approval(PendingApproval),
+    Approval(Box<PendingApproval>),
     /// No public content; not an authorization to ignore a tool/request/policy event.
     RequiresHandling,
 }
@@ -247,7 +247,10 @@ impl TurnStream {
         let envelope: Envelope = decode(std::str::from_utf8(&input.bytes).map_err(|_| invalid())?)?;
         if envelope.id.is_some() {
             // Server requests use their own parser and charge the same turn budget.
-            return self.pending_approval(input).map(Observed::Approval);
+            return self
+                .pending_approval(input)
+                .map(Box::new)
+                .map(Observed::Approval);
         }
         // Charge all notifications, including non-public ones, exactly once.
         let projected = self.projection.project(input)?;

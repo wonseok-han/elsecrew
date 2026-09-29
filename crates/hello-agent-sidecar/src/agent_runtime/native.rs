@@ -140,10 +140,12 @@ impl AgentRuntime {
             if !active.stopped {
                 // Tool notifications grant no permission. Until approval UI is
                 // connected, requests are explicitly declined, never accepted.
-                active.stopped = !matches!(active.owner.advance(storage, projects, &mut |_, action| {
+                active.stopped = !matches!(active.owner.advance(storage, projects, &mut |storage, action| {
                     match action {
                         TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
-                        TextAction::PollApproval { decision, .. } => {
+                        TextAction::PollApproval { request, decision } => {
+                            let mut ticket = super::approval::ApprovalTicket::new(&active.identity, &active.stream_id, request)?;
+                            ticket.record_decline(storage, &active.identity, &active.stream_id, request)?;
                             *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
                             Ok(())
                         }

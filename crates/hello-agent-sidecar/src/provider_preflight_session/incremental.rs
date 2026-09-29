@@ -197,7 +197,7 @@ impl TextSession {
                             return stream.finish().map(Some).map_err(|_| failure())
                         }
                         Observed::Tool(tool) => on_action(process, TextAction::Tool(tool))?,
-                        Observed::Approval(request) => self.pending.push(request),
+                        Observed::Approval(request) => self.pending.push(*request),
                         Observed::Started | Observed::RequiresHandling => return Err(failure()),
                     }
                 } else {
