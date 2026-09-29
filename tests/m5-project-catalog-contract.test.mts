@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("view release is ID-only and binds the acknowledgment", () => {
+  const input = { action: "releaseView" as const, projectId: "project_a" };
+  assert.doesNotThrow(() => validateProjectCatalogRequest(input));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...input }, input));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "releaseView", projectId: "other" }, input));
+  assert.throws(() => validateProjectCatalogRequest({ ...input, path: "/other" }));
+});
+
 test("catalog requests carry explicit stored IDs, never renderer filesystem paths", () => {
   assert.deepEqual(validateProjectCatalogRequest({ action: "list", cursor: null }), { action: "list", cursor: null });
   assert.deepEqual(validateProjectCatalogRequest({ action: "reopen", projectId: "project_a" }), { action: "reopen", projectId: "project_a" });

@@ -625,6 +625,18 @@ export class ProjectEditorController {
     }
   }
 
+  /** Leave the view without abandoning the durable snapshot or its chat. */
+  leaveProjectView(): boolean {
+    if (this.#disposed || this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()) return false;
+    this.#selectionGeneration++;
+    this.#projectEpoch++;
+    this.#set({ project: null, workspace: null, tree: [], treeParent: "", treeNextCursor: null,
+      treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null,
+      diffFile: null, diffText: "", rescanRequired: false, error: null,
+      notice: "프로젝트 화면을 닫았어요. 작업 복사본과 대화는 보존되어 다시 열 수 있어요." });
+    return true;
+  }
+
   async refreshChanges(): Promise<void> {
     if (this.#actionBlocked) return;
     const project = this.#state.project;

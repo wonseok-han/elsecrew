@@ -428,6 +428,28 @@ impl ProjectManager {
         })
     }
 
+    /// Detach watchers only; durable snapshots and chat bindings remain reusable.
+    pub fn release_project_view(
+        &mut self,
+        storage: &Storage,
+        project_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        storage
+            .project_catalog_path(project_id)?
+            .ok_or_else(|| ProjectFailure::manifest("saved project was not found"))?;
+        self.watchers.retain(|key, watcher| {
+            key != project_id
+                && watcher
+                    .workspace
+                    .as_ref()
+                    .is_none_or(|workspace| workspace.project_id != project_id)
+        });
+        Ok(ProjectAction {
+            result: json!({"schemaVersion":1,"action":"releaseView","projectId":project_id}),
+            ..ProjectAction::default()
+        })
+    }
+
     fn open_verified_source(
         &mut self,
         storage: &mut Storage,

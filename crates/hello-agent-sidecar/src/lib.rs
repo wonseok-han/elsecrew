@@ -1049,6 +1049,14 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("releaseView") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"])
+                        .map_err(invalid_params)?;
+                    self.projects.release_project_view(
+                        &self.storage,
+                        param_string(params, "projectId").map_err(invalid_params)?,
+                    )
+                }
                 Some("list") => {
                     let params = require_exact_params(&request.params, &["action", "cursor"])
                         .map_err(invalid_params)?;

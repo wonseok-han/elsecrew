@@ -149,6 +149,33 @@ export class ChatUiController {
     } catch (error) { if (this.#live(generation)) this.#error("프로젝트 채팅을 불러오지 못했어요.", error); }
   }
 
+  canLeaveProjectView(): boolean {
+    return !this.#disposed && !this.#state.preparing && !this.#state.switching
+      && !this.isRecoveryBlocked() && !this.#state.agentStartingRoleId && !this.#state.activeRunId
+      && !this.#state.runs.some(isActive)
+      && !this.#state.agentRuns.some(run => ["preparing", "running", "cancelling"].includes(run.state))
+      && !Object.values(this.#state.followups ?? {}).some(draft => draft.sending);
+  }
+
+  clearProjectView(): boolean {
+    if (!this.canLeaveProjectView()) return false;
+    this.#generation++;
+    this.#pending = null;
+    this.#set({ projectId: null, settings: null, chats: [], nextChatCursor: null, loadingMoreChats: false,
+      activeChat: null, messages: [], runs: [], agentRuns: [], agentStartingRoleId: null,
+      agentRecovery: null, agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: [],
+      preparing: false, switching: false, activeRunId: null, notice: null, error: null });
+    return true;
+  }
+
+  beginLeavingProjectView(): boolean {
+    if (!this.canLeaveProjectView()) return false;
+    this.#set({ switching: true });
+    return true;
+  }
+
+  finishLeavingProjectView(): void { this.#set({ switching: false }); }
+
   async loadMoreChats(): Promise<void> {
     const { projectId, nextChatCursor: cursor, loadingMoreChats } = this.#state;
     if (!projectId || cursor === null || loadingMoreChats || this.#disposed) return;

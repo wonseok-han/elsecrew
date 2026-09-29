@@ -2,6 +2,71 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[test]
+fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
+    let mut fixture = Fixture::open();
+    fixture.create();
+    fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert_eq!(fixture.manager.watchers.len(), 1);
+    for (chat_id, project_id) in [
+        ("chat_a", fixture.project_id.clone()),
+        ("chat_other", "other_project".to_owned()),
+    ] {
+        fixture.manager.watchers.insert(
+            format!("workspace:{chat_id}"),
+            WatchState {
+                stream_id: format!("watch_{chat_id}"),
+                snapshot: BTreeMap::new(),
+                next_seq: 1,
+                workspace: Some(WorkspaceAddress {
+                    chat_id: chat_id.to_owned(),
+                    project_id,
+                    worktree_id: "worktree_test".to_owned(),
+                    workspace_identity: "identity_test".to_owned(),
+                }),
+            },
+        );
+    }
+    let before = fixture
+        .storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    let result = fixture
+        .manager
+        .release_project_view(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert_eq!(result.result["projectId"], fixture.project_id);
+    assert_eq!(fixture.manager.watchers.len(), 1);
+    assert!(fixture
+        .manager
+        .watchers
+        .contains_key("workspace:chat_other"));
+    assert_eq!(
+        fixture
+            .storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        before
+    );
+    fixture
+        .manager
+        .validate_active_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    fixture
+        .manager
+        .watch_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert_eq!(fixture.manager.watchers.len(), 2);
+    assert!(fixture
+        .manager
+        .release_project_view(&fixture.storage, "missing_project")
+        .is_err());
+    assert_eq!(fixture.manager.watchers.len(), 2);
+}
+
 struct Fixture {
     _root: TempDir,
     source: PathBuf,

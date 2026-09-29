@@ -59,6 +59,64 @@ async function followupFixture() {
   } };
 }
 
+test("leaving the project view clears visible chat but preserves its follow-up draft", async () => {
+  const f = await followupFixture();
+  try {
+    f.controller.editFollowup("preserved draft");
+    assert.equal(f.controller.canLeaveProjectView(), true);
+    f.controller.clearProjectView();
+    assert.equal(f.controller.snapshot().projectId, null);
+    assert.equal(f.controller.snapshot().activeChat, null);
+    assert.deepEqual(f.controller.snapshot().messages, []);
+    assert.equal(f.controller.snapshot().followups?.chat_a?.text, "preserved draft");
+    await f.controller.openProject("project_a");
+    await f.controller.prepareSwitch("chat_a", true);
+    await f.controller.commitPrepared("chat_a", true);
+    assert.equal(f.controller.snapshot().activeChat?.chatId, "chat_a");
+    assert.equal(f.controller.snapshot().followups?.chat_a?.text, "preserved draft");
+  } finally { f.controller.dispose(); }
+});
+
+test("pending send and chat switch prevent leaving the project view", async () => {
+  const f = await followupFixture();
+  try {
+    f.controller.editFollowup("send");
+    const pending = f.controller.appendFollowup(true);
+    assert.equal(f.controller.canLeaveProjectView(), false);
+    f.complete(); await pending;
+    assert.equal(f.controller.canLeaveProjectView(), true);
+    await f.controller.prepareSwitch("chat_b", true);
+    assert.equal(f.controller.canLeaveProjectView(), false);
+  } finally { f.controller.dispose(); }
+});
+
+test("late project loading cannot repopulate a cleared view", async () => {
+  const bridge = new FakeBridge();
+  let resolve!: (value: Awaited<ReturnType<FakeBridge["listChats"]>>) => void;
+  bridge.listChats = () => new Promise(next => { resolve = next; });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  try {
+    const loading = controller.openProject("project_a");
+    controller.clearProjectView();
+    resolve({ projectId: "project_a", items: [chat("chat_a")], nextCursor: null });
+    await loading;
+    assert.equal(controller.snapshot().projectId, null);
+    assert.deepEqual(controller.snapshot().chats, []);
+    assert.equal(controller.snapshot().settings, null);
+  } finally { controller.dispose(); }
+});
+
+test("fixture launch pending prevents leaving before its run record arrives", async () => {
+  const f = await followupFixture();
+  let reject!: (error: Error) => void;
+  Object.assign(f.bridge, { startFixtureRun: () => new Promise((_resolve, fail) => { reject = fail; }) });
+  try {
+    const starting = f.controller.startDemo("planning");
+    assert.equal(f.controller.canLeaveProjectView(), false);
+    reject(new Error("synthetic start failure")); await starting;
+  } finally { f.controller.dispose(); }
+});
+
 test("follow-up preserves newer input and deduplicates the response/event pair", async () => {
   const f = await followupFixture();
   f.controller.editFollowup("send this");

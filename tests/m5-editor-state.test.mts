@@ -25,6 +25,25 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("leaving a project view preserves the durable snapshot and rejects dirty views", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    await controller.openFile("src/file-000.ts");
+    controller.updateText("src/file-000.ts", "draft");
+    assert.equal(controller.leaveProjectView(), false);
+    await controller.saveActive();
+    bridge.calls.length = 0;
+    assert.equal(controller.leaveProjectView(), true);
+    assert.equal(controller.snapshot().project, null);
+    assert.equal(controller.snapshot().workspace, null);
+    assert.deepEqual(bridge.calls, []);
+    await controller.chooseProject();
+    assert.equal(controller.snapshot().project?.id, "project_01");
+  } finally { controller.dispose(); }
+});
+
 test("saved project selection uses snapshot flow without invoking the folder picker", async () => {
   const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
   controller.start();

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (프로젝트 화면 나가기와 기록 보존)
+
+- f1229a0에서 toolbar 닫기가 workspace.close의 abandoned manifest 쓰기로 이어지는 것을 확인했다. 이 API를 프로젝트 이동에 재사용하면 채팅 복사본을 다시 열 수 없으므로 toolbar를 비파괴 프로젝트 화면 닫기로 분리했다. backend 폐기 API는 변경하지 않고 원장·복사본·후속 메시지 초안을 보존한다.
+- editor의 dirty·actionBlocked·진행 중 snapshot은 나가기를 막는다. chat의 실행 시작/진행·준비·전환·전송·복구도 거절한다. 성공한 화면 전환은 generation을 무효화해 늦은 목록 응답이 이전 화면을 되살리지 못한다. Karpathy 지침으로 기존 영속 채팅/복사본을 그대로 재사용했다.
+- 독립 검토에서 감시 누적과 역할 설정 draft 손실 경로를 찾아 보완했다. project.catalog releaseView는 admission 완료된 저장 ID의 standalone/workspace watcher만 제거하며 다른 프로젝트 watcher와 모든 manifest를 유지한다. UI는 chat/editor를 잠그고 ID-bound 해제 응답·최신 상태 확인 뒤 나가며 실패는 화면/잠금을 유지한다. 역할 설정창이 열려 있으면 나가기를 거절한다.
+- 검증: editor 42 PASS, chat 19 PASS, catalog 계약 4 PASS, Rust release 1 PASS(프로젝트/채팅 watcher 제거·타 프로젝트 보존·active manifest·재등록), strict clippy PASS/3.07초, renderer build·tsc PASS, 숨김 Chromium 2 PASS/3.61초(화면 닫기→재열기·기존 메시지 유지·감시 해제 실패 시 화면 유지·설정창 보호). 초기 회귀의 잘못된 saveFile 호출을 실제 saveActive로 수정했다. 실제 계정·사용자 프로젝트·모델 호출 없음. 다음은 미완료 실행/검토·적용/복원 흐름이며 전체 완료는 아니다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 선택 화면)
 
 - d55e478 위에서 작업대의 저장된 프로젝트 버튼·경로 목록·다음 페이지·재조회·로딩/오류를 연결했다. 페이지는 교체 표시하며 요청을 직렬화하고 늦은 목록 응답을 무효화한다. 최근 사용 순서가 아닌 ID 순서라고 명시했다.

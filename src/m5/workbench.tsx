@@ -18,6 +18,7 @@ import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
+import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
 
 type MonacoApi = typeof Monaco;
 
@@ -82,8 +83,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const admission = useStorageAdmission(bridge);
   const admissionReady = admission === "ready";
+  const admissionReadyRef = useRef(admissionReady);
+  admissionReadyRef.current = admissionReady;
   const [goal, setGoal] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [leavingProject, setLeavingProject] = useState(false);
+  const [leaveError, setLeaveError] = useState(false);
   const [reloadDraft, setReloadDraft] = useState<EditorTab | null>(null);
   const [reloadingDraft, setReloadingDraft] = useState(false);
   const snapshot = useSyncExternalStore(
@@ -98,7 +103,26 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return () => { controller.dispose(); chatController.dispose(); };
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
-  useEffect(() => { controller.setActionBlocked(!admissionReady || chat.switching || chatController.isActionBlocked(), !admissionReady ? "작업 공간을 준비하는 동안 변경을 만들거나 저장하지 않아요." : chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [admissionReady, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
+  useEffect(() => { controller.setActionBlocked(!admissionReady || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? "작업 공간을 준비하는 동안 변경을 만들거나 저장하지 않아요." : chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [admissionReady, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
+  const leaveProject = async () => {
+    const project = controller.snapshot().project;
+    if (!project || settingsOpen || !window.m5Projects || !admissionReady || controller.snapshot().actionBlocked || !controller.canLeaveProject() || !chatController.beginLeavingProjectView()) return;
+    controller.setActionBlocked(true);
+    setLeavingProject(true);
+    try {
+      const input = { action: "releaseView" as const, projectId: project.id };
+      validateProjectCatalogResult(await window.m5Projects.request(input), input);
+      chatController.finishLeavingProjectView();
+      if (!admissionReadyRef.current || !chatController.canLeaveProjectView() || controller.snapshot().project?.id !== project.id) throw new Error("project leave state changed");
+      controller.setActionBlocked(false);
+      if (!controller.leaveProjectView()) throw new Error("project view changed during release");
+      chatController.clearProjectView();
+    } catch {
+      setLeaveError(true);
+      controller.setActionBlocked(true);
+      // Keep chat actions locked when watcher release cannot be confirmed.
+    } finally { setLeavingProject(false); }
+  };
   const switchChat = async (chatId: string) => {
     controller.setActionBlocked(true, "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요.");
     const candidate = await chatController.prepareSwitch(chatId, controller.canLeaveProject());
@@ -135,8 +159,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             {snapshot.project ? "프로젝트 바꾸기" : "프로젝트 선택"}
           </button>
           {snapshot.project && (
-            <button className="m5-secondary" type="button" onClick={() => void controller.abandonProject()} disabled={!admissionReady || !controller.canLeaveProject()}>
-              작업 복사본 닫기
+            <button className="m5-secondary" type="button" onClick={() => void leaveProject()} disabled={!admissionReady || settingsOpen || leavingProject || leaveError || !window.m5Projects || snapshot.actionBlocked || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} title={settingsOpen ? "역할과 모델 설정을 먼저 마무리해 주세요." : undefined}>
+              프로젝트 화면 닫기
             </button>
           )}
           {snapshot.project && <button className="m5-secondary" type="button" onClick={() => setSettingsOpen((open) => !open)} disabled={!admissionReady}>역할과 모델</button>}
@@ -144,6 +168,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </header>
 
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.notice}</p>}
+      {leaveError && <p className="m5-error" role="alert">파일 감시 해제를 확인하지 못해 이동을 멈췄어요. 작업과 대화는 보존되어 있어요. 앱을 다시 열어 상태를 확인해 주세요.</p>}
       <StorageAdmissionNotice admission={admission} />
       <ProviderLogin disabled={!admissionReady} />
       {snapshot.error && (
