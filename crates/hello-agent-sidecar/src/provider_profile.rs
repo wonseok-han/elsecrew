@@ -89,7 +89,7 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
             .any(|base| {
                 name == *base || name == format!("{base}-shm") || name == format!("{base}-wal")
             });
-            if !directory && !database && name != "installation_id" {
+            if !directory && !database && !matches!(name, "installation_id" | "models_cache.json") {
                 return Err(failure());
             }
             let meta = profile.symlink_metadata(name).map_err(|_| failure())?;
@@ -256,6 +256,84 @@ pub(super) fn open_absolute_directory(path: &Path) -> Result<Dir, SidecarError> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires approval for existing app-owned account and model inspection"]
+    fn installed_codex_app_profile_model_free_inspection() {
+        use crate::provider_executable::PinnedExecutable;
+        use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
+        use std::sync::atomic::AtomicBool;
+        assert_eq!(
+            std::env::var("HELLO_AGENT_APPROVED_ACCOUNT_INSPECTION").as_deref(),
+            Ok("1")
+        );
+        let path = std::path::PathBuf::from(
+            std::env::var_os("HELLO_AGENT_INSPECTION_APP_DATA")
+                .expect("explicit app data directory"),
+        );
+        assert!(path.ends_with("com.wonseokhan.helloagent/m5"));
+        let app_data = super::open_absolute_directory(&path).unwrap();
+        // Open an existing validated profile without opening/migrating the app DB.
+        let profile = super::profile_directory(&app_data, false).unwrap();
+        let binding = super::CodexProfileBinding {
+            app_data_path: path,
+            app_data,
+            profile,
+        };
+        let home = binding.revalidate().unwrap();
+        // This is the login/discovery contract, not runtime file admission.
+        // Vendor-created temporary links still block actual code execution.
+        let original_config = std::fs::read(home.join("config.toml")).unwrap();
+        let cli = PinnedExecutable::open(
+            std::path::Path::new("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+            crate::provider_login_manager::digest("3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a"),
+        ).unwrap();
+        let helper = PinnedExecutable::open(
+            std::path::Path::new(
+                "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host",
+            ),
+            crate::provider_login_manager::digest(
+                "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
+            ),
+        )
+        .unwrap();
+        let mut inspection = crate::provider_preflight_session::inspect_full_preflight_candidate(
+            &binding,
+            &cli,
+            &helper,
+            &ExpectedProfile {
+                model: "gpt-6-astra",
+                reasoning_effort: "medium",
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let cleanup = if inspection.process.closure_evidence().is_some() {
+            Ok(())
+        } else {
+            inspection.process.finish()
+        };
+        let confirmed = inspection
+            .process
+            .closure_evidence()
+            .is_some_and(|receipt| receipt.confirmed());
+        eprintln!(
+            "app_profile_inspection matched={} cleanup_confirmed={confirmed}",
+            inspection.result.is_ok()
+        );
+        assert_eq!(
+            std::fs::read(home.join("config.toml")).unwrap(),
+            original_config
+        );
+        assert!(
+            cleanup.is_ok() && confirmed,
+            "inspection cleanup not confirmed"
+        );
+        assert!(
+            inspection.result.is_ok(),
+            "account/model configuration did not match"
+        );
+    }
+
     use super::*;
     use cap_std::ambient_authority;
     use std::os::unix::fs::{symlink, PermissionsExt as _};
@@ -354,6 +432,43 @@ mod tests {
         symlink(&target, &config).unwrap();
         assert!(prepare_codex_profile(&root(&temp)).is_err());
         assert_eq!(std::fs::read(target).unwrap(), CONFIG);
+    }
+
+    #[test]
+    fn model_catalog_cache_requires_an_unshared_nonwritable_regular_file() {
+        for case in ["regular", "symlink", "hardlink", "directory", "writable"] {
+            let temp = tempfile::tempdir().unwrap();
+            prepare_codex_profile(&root(&temp)).unwrap();
+            let cache = temp
+                .path()
+                .join(CODEX_PROFILE_DIRECTORY)
+                .join("models_cache.json");
+            let source = temp.path().join("synthetic-model-cache");
+            std::fs::write(&source, b"synthetic cache").unwrap();
+            match case {
+                "symlink" => symlink(&source, &cache).unwrap(),
+                "hardlink" => std::fs::hard_link(&source, &cache).unwrap(),
+                "directory" => std::fs::create_dir(&cache).unwrap(),
+                _ => {
+                    std::fs::copy(&source, &cache).unwrap();
+                    std::fs::set_permissions(
+                        &cache,
+                        std::fs::Permissions::from_mode(if case == "writable" {
+                            0o666
+                        } else {
+                            0o644
+                        }),
+                    )
+                    .unwrap();
+                }
+            }
+            assert_eq!(
+                prepare_codex_profile(&root(&temp)).is_ok(),
+                case == "regular",
+                "{case}"
+            );
+            assert_eq!(std::fs::read(&source).unwrap(), b"synthetic cache");
+        }
     }
 
     #[test]
