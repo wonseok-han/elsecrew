@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (격리 실행 출처 전달)
+
+- **구현**: 57c8569에서 일회 허용 전제를 조사했다. 기존 core는 독립 격리 증거 없이 AcceptOnce를 거절하며, proxy 보유 여부만으로 OS 격리를 추론할 수 없었다. 고정 sandbox builder가 만든 opaque RuntimeScope를 해당 명령의 launch 성공 후 process owner에 전달했다. exact workspace/access 대조와 실패/정리/종료 무효화를 제공하며 raw proxy 경로는 증거를 얻지 못한다.
+- **검증**: 기존 로컬 OS sandbox·TCP toy2개 PASS(0.33/0.44초), launch 실패 시 scope 미보유 회귀를 추가한 최종 해당 테스트 PASS/0.47초·strict clippy PASS/2.71초. 동일 독립 검토자 scoped PASS. Karpathy 지침대로 기존 명령 builder/owner에 출처만 추가했고 새 실행기·영속 저장소는 만들지 않았다. 실제 계정/모델 호출 없음.
+- **다음**: 이 출처는 허용 권위나 OS 생존 증명이 아니다. 현재 예약 역할/작업 폴더/잠금·취소/프로세스·명시 UI 결정을 전송 직전에 함께 검증하는 owner 연결이 남는다. AcceptOnce와 제품 native 활성화는 계속 차단하며 전체 앱은 미완료다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인 요청 명시적 상세 조회)
 
 - **구현**: 8567dbc 기준 기존 ticket/실행 owner를 재사용해 `run.approval inspect`와 카드 상세 펼치기를 연결했다. 기본 목록/거절 응답은 요약만 유지하며 명시 조회만 bounded 명령·경로·이유·네트워크 대상을 반환한다. 만료/연결 불일치/이미 접수된 요청은 거절하고 조회 전후 run projection 불변을 검사했다. 상세는 평문이며 닫기·만료·오류·신원 변경 시 화면 상태를 비운다.

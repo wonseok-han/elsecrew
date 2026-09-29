@@ -32,7 +32,7 @@ const POLICY: &str = r#"(version 1)
 (deny file-read* file-write* (subpath (string-append (param "PROFILE") "/plugins")))
 "#;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkspaceAccess {
     ReadOnly,
     // Native offline candidate only; tools/approvals and vendor admission remain.
@@ -71,6 +71,20 @@ pub(crate) fn command(
 pub(crate) struct ModelProxyCommand {
     command: Command,
     broker: Broker,
+    scope: RuntimeScope,
+}
+
+/// Sealed launch provenance, not permission to approve a vendor request.
+/// Only the fixed sandbox builder can create it; it is never deserialized.
+pub(crate) struct RuntimeScope {
+    workspace: std::path::PathBuf,
+    access: WorkspaceAccess,
+}
+
+impl RuntimeScope {
+    pub(crate) fn matches(&self, workspace: &Path, access: WorkspaceAccess) -> bool {
+        self.workspace == workspace && self.access == access
+    }
 }
 
 #[allow(dead_code)]
@@ -83,7 +97,7 @@ impl ModelProxyCommand {
             &[hello_agent_core::proctree::ProcIdentity],
         ) -> io::Result<()>,
     ) -> Result<(), crate::SidecarError> {
-        owner.launch_with_model_proxy_identity(self.command, self.broker, release)
+        owner.launch_isolated_model_proxy(self.command, self.broker, self.scope, release)
     }
 
     pub(crate) fn launch(
@@ -91,7 +105,7 @@ impl ModelProxyCommand {
         owner: &mut crate::provider_login_process::LoginProcess<'_>,
         release: impl FnOnce(&mut std::process::Child) -> io::Result<()>,
     ) -> Result<(), crate::SidecarError> {
-        owner.launch_with_model_proxy(self.command, self.broker, release)
+        self.launch_with_identity(owner, |child, _| release(child))
     }
 }
 
@@ -148,7 +162,14 @@ pub(crate) fn command_with_model_proxy(
         .env("CODEX_HOME", home)
         .env("TMPDIR", home.join("tmp"))
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
-    Ok(ModelProxyCommand { command, broker })
+    Ok(ModelProxyCommand {
+        command,
+        broker,
+        scope: RuntimeScope {
+            workspace: workspace.to_owned(),
+            access,
+        },
+    })
 }
 
 fn command_network(
@@ -273,12 +294,34 @@ mod tests {
             .get_args()
             .any(|arg| arg == OsStr::new(&proxy)));
         let mut owner = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
+        assert!(!owner.matches_runtime_scope(&workspace, WorkspaceAccess::ReadOnly));
         command
             .launch(&mut owner, crate::provider_login_gate::release)
             .unwrap();
         assert!(TcpListener::bind(address).is_err());
+        assert!(owner.matches_runtime_scope(&workspace, WorkspaceAccess::ReadOnly));
+        assert!(!owner.matches_runtime_scope(&workspace, WorkspaceAccess::Write));
+        assert!(!owner.matches_runtime_scope(&home, WorkspaceAccess::ReadOnly));
         owner.finish().unwrap();
+        assert!(!owner.matches_runtime_scope(&workspace, WorkspaceAccess::ReadOnly));
         assert!(TcpListener::bind(address).is_ok());
+
+        let mut rejected = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
+        let command = command_with_model_proxy(
+            Path::new("/bin/sleep"),
+            Path::new("/bin/sleep"),
+            &[OsString::from("30")],
+            &home,
+            &workspace,
+            WorkspaceAccess::Write,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+        )
+        .unwrap();
+        assert!(command
+            .launch(&mut rejected, |_| Err(io::Error::other("release rejected")))
+            .is_err());
+        assert!(!rejected.matches_runtime_scope(&workspace, WorkspaceAccess::Write));
+        rejected.finish().unwrap();
     }
 
     #[test]

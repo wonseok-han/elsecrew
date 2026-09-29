@@ -290,6 +290,7 @@ pub(crate) struct LoginProcess<'a> {
     // Own the service with the process; uncertain cleanup quarantines its bound
     // listener after closing relays/jobs. Sidecar crashes remain a separate risk.
     model_proxy: Option<crate::provider_model_proxy::broker::Broker>,
+    runtime_scope: Option<crate::provider_runtime_sandbox::RuntimeScope>,
     #[cfg(test)]
     fail_next_cleanup: bool,
     #[cfg(test)]
@@ -396,6 +397,7 @@ impl<'a> LoginProcess<'a> {
             retain_for_terminal: false,
             cleanup_started: None,
             model_proxy: None,
+            runtime_scope: None,
             #[cfg(test)]
             fail_next_cleanup: false,
             #[cfg(test)]
@@ -416,6 +418,7 @@ impl<'a> LoginProcess<'a> {
         self.launch_with_identity_barrier(spawn, |child, _| release(child))
     }
 
+    #[cfg(test)]
     pub(super) fn launch_with_model_proxy(
         &mut self,
         command: Command,
@@ -440,6 +443,39 @@ impl<'a> LoginProcess<'a> {
             self.stop_model_proxy();
         }
         result
+    }
+
+    /// The scope is sealed by the fixed sandbox command builder. A raw command,
+    /// proxy listener, or successful preflight cannot manufacture this evidence.
+    pub(super) fn launch_isolated_model_proxy(
+        &mut self,
+        command: Command,
+        broker: crate::provider_model_proxy::broker::Broker,
+        scope: crate::provider_runtime_sandbox::RuntimeScope,
+        release: impl FnOnce(&mut Child, &[ProcIdentity]) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        self.launch_with_model_proxy_identity(command, broker, release)?;
+        self.runtime_scope = Some(scope);
+        Ok(())
+    }
+
+    /// Provenance only. The caller must still verify the live process, current
+    /// role/workspace/fence and explicit bound user decision before any reply.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn matches_runtime_scope(
+        &self,
+        workspace: &std::path::Path,
+        access: crate::provider_runtime_sandbox::WorkspaceAccess,
+    ) -> bool {
+        !self.failed
+            && !self.finished
+            && self.cleanup_started.is_none()
+            && self.io.is_some()
+            && self.child.is_some()
+            && self
+                .runtime_scope
+                .as_ref()
+                .is_some_and(|scope| scope.matches(workspace, access))
     }
 
     /// The trusted run owner can durably bind the already observed identities
@@ -1165,6 +1201,10 @@ mod tests {
                 )
                 .unwrap();
             assert!(std::net::TcpListener::bind(address).is_err());
+            assert!(!process.matches_runtime_scope(
+                temp.path(),
+                crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly
+            ));
             let mut peer = std::net::TcpStream::connect(address).unwrap();
             peer.write_all(b"C").unwrap(); // Incomplete header: must never dial.
             peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
