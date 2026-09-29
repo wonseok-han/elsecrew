@@ -1,4 +1,11 @@
 const listeners = new Set();
+window.m5Projects = { request: async (input) => {
+  if (input.action === "list") return input.cursor === null
+    ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}], nextCursor: "earlier_project"}
+    : {schemaVersion: 1, action: "list", projects: [{projectId: "smoke_project", canonicalPath: "/work/smoke"}], nextCursor: null};
+  if (input.action !== "reopen" || input.projectId !== "smoke_project") throw new Error("unexpected catalog selection");
+  return {schemaVersion: 1, action: "reopen", project: {schemaVersion: 1, projectId: "smoke_project", selectedPath: "/work/smoke", canonicalGitRoot: "/work/smoke"}};
+} };
 const loginStates = {codex:{state: "idle", attemptId: null, authUrl: null, error: null},claude:{state: "idle", attemptId: null, authUrl: null, error: null}};
 let codexRecoveryAttempts = 0;
 let codexChecks = 0;

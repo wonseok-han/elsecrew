@@ -6,6 +6,7 @@ import type { DiffFileDescriptorV1, DiffSummaryV1 } from "./contracts/diff-v1.ts
 import type { FileVersionV1 } from "./contracts/file-v1.ts";
 import type { EventV1 } from "./contracts/protocol-v1.ts";
 import { FileSearchBusyError, searchFileNames, type FileSearchResult } from "./file-search.ts";
+import { validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
 
 export const MAX_RENDERED_TREE_ENTRIES = TREE_PAGE_MAX_ENTRIES_V1;
 export const MAX_DIFF_STREAM_BYTES = 10 * 1024 * 1024;
@@ -170,7 +171,11 @@ export class ProjectEditorController {
   snapshot(): EditorSnapshot {
     return this.#state;
   }
-  setActionBlocked(blocked: boolean, notice?: string): void { this.#actionBlocked = blocked; this.#set({ actionBlocked: blocked, notice: blocked && notice ? notice : this.#state.notice }); }
+  setActionBlocked(blocked: boolean, notice?: string): void {
+    if (blocked && !this.#actionBlocked) this.#selectionGeneration += 1;
+    this.#actionBlocked = blocked;
+    this.#set({ actionBlocked: blocked, notice: blocked && notice ? notice : this.#state.notice });
+  }
 
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener);
@@ -199,7 +204,21 @@ export class ProjectEditorController {
   }
 
   async chooseProject(): Promise<void> {
+    return this.#selectProject(() => this.#bridge.openProject());
+  }
+
+  async reopenProject(projectId: string, request: (input: ProjectCatalogRequest) => Promise<ProjectCatalogResult>): Promise<void> {
+    return this.#selectProject(async () => {
+      const input = { action: "reopen" as const, projectId };
+      const result = validateProjectCatalogResult(await request(input), input);
+      if (result.action !== "reopen") throw new Error("unexpected project catalog response");
+      return result.project;
+    });
+  }
+
+  async #selectProject(open: ProjectBridge["openProject"]): Promise<void> {
     if (this.#disposed) return;
+    if (this.#actionBlocked) return;
     if (this.#state.workspace) {
       this.#setNotice("열어 둔 채팅 작업 복사본이 있어 프로젝트를 바꿀 수 없어요. 먼저 명시적으로 닫아 주세요.");
       return;
@@ -212,9 +231,14 @@ export class ProjectEditorController {
     const selection = ++this.#selectionGeneration;
     const controllerGeneration = this.#controllerGeneration;
     try {
-      const project = await this.#bridge.openProject();
+      const project = await open();
       if (!this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
       if (this.#snapshotCreationBlocked) return;
+      if (this.#actionBlocked) return;
+      if (this.#state.workspace || !this.canLeaveProject()) {
+        this.#setNotice("프로젝트를 확인하는 동안 작업 내용이 바뀌었어요. 먼저 저장하거나 열린 채팅을 닫아 주세요.");
+        return;
+      }
       // Picker cancellation must leave the existing project surface untouched. Clear transient
       // messages only after the native picker returned a real project identity.
       this.#set({ error: null, notice: null });
@@ -306,7 +330,7 @@ export class ProjectEditorController {
         await this.#abandonCreatedSnapshot(operation, new Error("snapshot manifest does not match the selected project"));
         return;
       }
-      if (!this.#isLiveOperation(operation) || operation.timedOut || operation.selection !== this.#selectionGeneration) {
+      if (!this.#isLiveOperation(operation) || operation.timedOut || operation.selection !== this.#selectionGeneration || this.#actionBlocked || this.#state.workspace || !this.canLeaveProject()) {
         await this.#abandonCreatedSnapshot(operation, new Error("snapshot creation completed after its selection was no longer current"));
         return;
       }

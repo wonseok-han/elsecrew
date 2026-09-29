@@ -50,6 +50,13 @@ h1 { margin: 0; font-size: 22px; }
 .m5-search-results { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow: auto; }
 .m5-search-results button { text-align: left; overflow-wrap: anywhere; background: #202a36; color: #e6edf3; }
 .m5-toolbar-actions { display: flex; gap: 8px; }
+.m5-project-catalog { position: relative; }
+.m5-project-catalog-list { position: absolute; z-index: 20; right: 0; top: 44px; width: min(420px, 85vw); max-height: 65vh; overflow: auto; padding: 16px; border: 1px solid #39414b; border-radius: 12px; background: #20252c; color: #eef1f5; box-shadow: 0 12px 32px #0006; }
+.m5-project-catalog-list ul { list-style: none; margin: 12px 0; padding: 0; }
+.m5-project-catalog-list li { margin: 6px 0; }
+.m5-project-catalog-list li button { display: grid; gap: 6px; width: 100%; text-align: left; }
+.m5-project-catalog-list li span { font-size: 12px; color: #b8c2ce; overflow-wrap: anywhere; }
+.m5-project-catalog-list > div { display: flex; flex-wrap: wrap; gap: 8px; }
 button { border: 1px solid #3f4c5c; border-radius: 7px; padding: 8px 10px; background: #e87d62; color: #161b22; cursor: pointer; font-weight: 650; }
 button:hover:not(:disabled) { background: #ff987c; }
 button:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }

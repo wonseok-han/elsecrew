@@ -25,6 +25,92 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("saved project selection uses snapshot flow without invoking the folder picker", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    const project = await bridge.openProject(); bridge.calls.length = 0;
+    let requests = 0;
+    const reopen = async () => { requests++; return { schemaVersion: 1 as const, action: "reopen" as const, project }; };
+    await controller.reopenProject(project.projectId, reopen);
+    assert.equal(controller.snapshot().project?.id, project.projectId);
+    assert.equal(bridge.calls.includes("openProject"), false);
+    assert.ok(bridge.calls.includes("createProjectWorktree:project_01"));
+    await controller.openFile("src/file-000.ts");
+    controller.updateText("src/file-000.ts", "unsaved");
+    await controller.reopenProject(project.projectId, reopen);
+    assert.equal(requests, 1);
+    assert.equal(controller.snapshot().tabs[0].text, "unsaved");
+  } finally { controller.dispose(); }
+});
+
+test("saved project mismatched identity cannot create a snapshot", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    const project = await bridge.openProject(); bridge.calls.length = 0;
+    await controller.reopenProject("other_project", async () => ({ schemaVersion: 1, action: "reopen", project }));
+    assert.deepEqual(bridge.calls, []);
+    assert.equal(controller.snapshot().project, null);
+    assert.ok(controller.snapshot().error);
+  } finally { controller.dispose(); }
+});
+
+test("action blocking before or during saved project lookup prevents switching", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    const project = await bridge.openProject(); bridge.calls.length = 0;
+    const lookup = deferred<any>(); let requests = 0;
+    const request = () => { requests++; return lookup.promise; };
+    const opening = controller.reopenProject(project.projectId, request);
+    const previous = controller.snapshot().project;
+    controller.setActionBlocked(true);
+    lookup.resolve({ schemaVersion: 1, action: "reopen", project });
+    await opening;
+    await controller.reopenProject(project.projectId, request);
+    assert.equal(requests, 1);
+    assert.deepEqual(bridge.calls, []);
+    assert.equal(controller.snapshot().project, previous);
+  } finally { controller.dispose(); }
+});
+
+test("editing while saved project lookup is pending prevents switching", async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    await controller.openFile("src/file-000.ts");
+    const project = await bridge.openProject(); bridge.calls.length = 0;
+    const lookup = deferred<any>();
+    const opening = controller.reopenProject(project.projectId, () => lookup.promise);
+    controller.updateText("src/file-000.ts", "typed during lookup");
+    lookup.resolve({ schemaVersion: 1, action: "reopen", project });
+    await opening;
+    assert.deepEqual(bridge.calls, []);
+    assert.equal(controller.snapshot().tabs[0].text, "typed during lookup");
+    assert.match(controller.snapshot().notice ?? "", /작업 내용이 바뀌었어요/);
+  } finally { controller.dispose(); }
+});
+
+for (const closeFails of [false, true]) test(`blocked snapshot completion is cleaned up (close failure: ${closeFails})`, async () => {
+  const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
+  try {
+    const project = await bridge.openProject(); bridge.calls.length = 0;
+    const creation = deferred<WorktreeManifestV1>();
+    bridge.createProjectWorktree = async () => creation.promise;
+    bridge.closeError = closeFails ? new Error("uncertain close") : null;
+    const opening = controller.reopenProject(project.projectId, async () => ({ schemaVersion: 1, action: "reopen", project }));
+    await nextTurn();
+    controller.setActionBlocked(true);
+    controller.setActionBlocked(false);
+    creation.resolve(snapshotManifest(project.projectId, project.canonicalGitRoot));
+    await opening;
+    assert.equal(controller.snapshot().project, null);
+    assert.deepEqual(bridge.calls, ["closeProject:project_01"]);
+    assert.equal(controller.snapshot().selectionBlocked, closeFails);
+  } finally { controller.dispose(); }
+});
+
 test("explicit panel requests repeat but background state updates do not reopen dock panels", async () => {
   const controller = new ProjectEditorController(new FakeBridge());
   assert.equal(controller.snapshot().panelRequest, null);

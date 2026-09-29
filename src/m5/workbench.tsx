@@ -17,6 +17,7 @@ import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
+import { ProjectCatalog } from "./project-catalog-view.tsx";
 
 type MonacoApi = typeof Monaco;
 
@@ -129,6 +130,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </p>
         </div>
         <div className="m5-toolbar-actions">
+          <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={!admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
           <button type="button" onClick={() => void controller.chooseProject()} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {snapshot.project ? "프로젝트 바꾸기" : "프로젝트 선택"}
           </button>

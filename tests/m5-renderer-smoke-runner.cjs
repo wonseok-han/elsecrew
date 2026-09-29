@@ -76,7 +76,13 @@ app.whenReady().then(async () => {
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
-    projectButton.click();
+    document.querySelector('.m5-project-catalog > button').click();
+    await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
+    if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
+    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
+    if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
+    document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
     document.querySelector('.m5-file-row').click();
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};

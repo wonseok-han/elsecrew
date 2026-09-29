@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 선택 화면)
+
+- d55e478 위에서 작업대의 저장된 프로젝트 버튼·경로 목록·다음 페이지·재조회·로딩/오류를 연결했다. 페이지는 교체 표시하며 요청을 직렬화하고 늦은 목록 응답을 무효화한다. 최근 사용 순서가 아닌 ID 순서라고 명시했다.
+- controller의 native 폴더 선택과 저장 ID 선택이 같은 snapshot-before-tree 흐름을 공유한다. 기존 dirty/열린 채팅 보호를 유지하고 조회를 기다리는 사이 새 편집이 생겨도 snapshot 생성 전에 전환을 멈춘다. Karpathy 지침으로 별도 프로젝트 활성화 구현을 만들지 않았다.
+- 검증: editor-state 41 PASS, pnpm build·M5 renderer build PASS, 숨김 Chromium 2 PASS(목록 페이지 이동→선택→파일 탐색/편집·도킹/후속 대화). 초기 시험의 호출 이름 기대값을 수정했으며 sandbox 안 Electron 실행 거절은 승인된 실행 환경에서 재검증했다. 독립 검토가 찾은 chat switch/actionBlocked 중 재열기 경합을 controller 요청 전/응답 후 검사·차단 전이 시 selection 무효화·snapshot 완료 시 기존 cleanup으로 수정했다. 준비 중 잠깐 차단됐다 풀려도 늦은 snapshot은 활성화하지 않으며 cleanup 실패는 기존 fence를 유지하는 회귀도 통과했다. diff 검사 PASS. 실제 인증/모델/사용자 프로젝트 미사용, main 병합/push 없음.
+- 다음은 프로젝트·채팅 이동 UX의 남은 제약과 제품 흐름 검증이다. 실제 provider 도구 격리/활성화·적용/복원·전체 시안·출시 검증은 여전히 별도 미완료이며 앱 전체 완료로 주장하지 않는다.
+
 ### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 목록·재열기 IPC)
 
 - 3692450 기반 미커밋 목록/reopen을 이어서 project.catalog list/reopen 계약과 sidecar dispatch, Rust/TS capability suffix, Electron main/preload 고정 IPC에 연결했다. 목록은 ID 순 keyset 50개이며 raw 512KiB와 encoded JSON 768KiB 한도를 분리한다. 재열기는 저장 ID로만 경로를 찾고 hash·canonical path·실제 Git root를 확인한 뒤 폴더 선택과 같은 검증을 공유한다. 새 HEAD는 허용하되 recoveryRequired와 바뀐 링크를 거절하고 active snapshot은 유지한다.
