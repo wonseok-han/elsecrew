@@ -38,6 +38,39 @@ pub(crate) fn inspect_full_preflight_candidate<'a>(
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
     cancel: &AtomicBool,
 ) -> Result<ProviderInspection<'a>, SidecarError> {
+    inspect_preflight_candidate(profile, executable, helper, expected, cancel, None)
+}
+
+/// Model-free inspection through the OS-isolated, owned proxy. This requires
+/// account/model inspection authorization, not merely config-only approval.
+/// ReadOnly limits workspace writes, not vendor auth/cache updates in the profile.
+#[allow(dead_code)] // Diagnostic candidate; no product admission.
+pub(crate) fn inspect_proxied_preflight_candidate<'a>(
+    profile: &'a crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    helper: &crate::provider_executable::PinnedExecutable,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    cancel: &AtomicBool,
+    workspace: &std::path::Path,
+) -> Result<ProviderInspection<'a>, SidecarError> {
+    inspect_preflight_candidate(
+        profile,
+        executable,
+        helper,
+        expected,
+        cancel,
+        Some(workspace),
+    )
+}
+
+fn inspect_preflight_candidate<'a>(
+    profile: &'a crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    helper: &crate::provider_executable::PinnedExecutable,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    cancel: &AtomicBool,
+    workspace: Option<&std::path::Path>,
+) -> Result<ProviderInspection<'a>, SidecarError> {
     let home = profile.revalidate()?;
     let mut flow = PreflightExchange::new(expected, home.to_str().ok_or_else(failure)?)
         .map_err(|_| failure())?;
@@ -49,34 +82,50 @@ pub(crate) fn inspect_full_preflight_candidate<'a>(
     executable.revalidate()?;
     helper.revalidate()?;
     let mut process = LoginProcess::reserve(profile)?;
-    let result = process
-        .launch_with_barrier(
+    let release = |child: &mut std::process::Child| {
+        #[cfg(test)]
+        BEFORE_RELEASE.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().take() {
+                hook();
+            }
+        });
+        executable.revalidate().map_err(std::io::Error::other)?;
+        helper.revalidate().map_err(std::io::Error::other)?;
+        let current = profile.revalidate().map_err(std::io::Error::other)?;
+        if current != home || cancel.load(Ordering::Acquire) {
+            return Err(std::io::Error::other(
+                "preflight canceled or profile changed",
+            ));
+        }
+        crate::provider_login_gate::release(child)
+    };
+    let launch = if let Some(workspace) = workspace {
+        let command = (|| {
+            let args = discovery_arguments(&home, expected, ExpectedPermission::ReadOnly)?;
+            crate::provider_runtime_sandbox::command_with_model_proxy(
+                executable.revalidate().map_err(std::io::Error::other)?,
+                helper.revalidate().map_err(std::io::Error::other)?,
+                &args,
+                &home,
+                workspace,
+                crate::provider_runtime_sandbox::WorkspaceAccess::ReadOnly,
+                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?,
+            )
+        })();
+        command
+            .map_err(|_| failure())
+            .and_then(|command| command.launch(&mut process, release))
+    } else {
+        process.launch_with_barrier(
             || {
                 let path = executable.revalidate().map_err(std::io::Error::other)?;
                 helper.revalidate().map_err(std::io::Error::other)?;
                 discovery_command(path, &home, expected)?.spawn()
             },
-            |child| {
-                #[cfg(test)]
-                BEFORE_RELEASE.with(|hook| {
-                    if let Some(hook) = hook.borrow_mut().take() {
-                        hook();
-                    }
-                });
-                executable.revalidate().map_err(std::io::Error::other)?;
-                helper.revalidate().map_err(std::io::Error::other)?;
-                let current = profile
-                    .revalidate()
-                    .map_err(|_| std::io::Error::other("profile changed"))?;
-                if current != home || cancel.load(Ordering::Acquire) {
-                    return Err(std::io::Error::other(
-                        "preflight canceled or profile changed",
-                    ));
-                }
-                crate::provider_login_gate::release(child)
-            },
+            release,
         )
-        .and_then(|()| observe_and_close(&mut process, &mut flow, cancel));
+    };
+    let result = launch.and_then(|()| observe_and_close(&mut process, &mut flow, cancel));
     // Even a launch/cleanup error returns its owner for explicit cleanup retries.
     Ok(ProviderInspection { result, process })
 }
@@ -266,6 +315,13 @@ fn check_claimed(
             return Err(failure());
         }
         for frame in frames {
+            #[cfg(test)]
+            {
+                let id = serde_json::from_str::<serde_json::Value>(frame.as_str())
+                    .ok()
+                    .and_then(|value| value.get("id").and_then(serde_json::Value::as_u64));
+                eprintln!("preflight sending_rpc_id={id:?}");
+            }
             on_action(process, TextAction::ObserveProcess)?;
             let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
             process.send_preflight_observed(frame, remaining, cancel, &mut |process| {
@@ -280,7 +336,12 @@ fn check_claimed(
         if started.elapsed() >= budget {
             return Err(failure());
         }
-        let state = flow.accept(&reply).map_err(|_| failure())?;
+        #[cfg(test)]
+        let previous = flow.state();
+        let accepted = flow.accept(&reply);
+        #[cfg(test)]
+        eprintln!("preflight stage={previous:?} accepted={}", accepted.is_ok());
+        let state = accepted.map_err(|_| failure())?;
         if state == PreflightState::ConfigurationMatched {
             return if thread_cwd.is_none() {
                 Ok(())

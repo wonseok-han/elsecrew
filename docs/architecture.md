@@ -3,6 +3,8 @@
 > 대상 독자: 이 프로젝트에 기여하는 개발자. 제품 배경·시장 조사는 기획 문서(Obsidian) 참고.
 > 다이어그램: [시스템 구성](diagrams/architecture.excalidraw) · [위저드 플로우](diagrams/wizard-flow.excalidraw)
 
+> 2026-09-29 진단 상태: 내부 `inspect_proxied_preflight_candidate`는 OS 격리와 owned Broker를 통한 model-free 조회 후보다. 실제 설치 CLI는 초기화/설정까지 통과하지만 계정 응답 검증에서 실패하며 기존 비격리 5 RPC 조회는 통과한다. WorkspaceAccess::ReadOnly는 workspace 쓰기 제한이지 profile 인증/캐시 불변 보장이 아니다. 정상 cleanup은 확인했으나 중계 트래픽 호환성이나 제품 실행 준비 완료의 증거로 사용하지 않는다.
+
 ## 1. 목표와 비목표
 
 **목표**: 터미널을 열어본 적 없는 사용자가 앱 더블클릭 → 안내를 따라가기만 하면 Claude Code 또는 Codex가 동작하는 상태(첫 대화 성공)까지 도달하고, 이후 프로젝트와 에이전트 상태를 한곳에서 관리한다.

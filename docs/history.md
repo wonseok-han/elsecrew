@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (실제 CLI의 격리 중계 조회 비교)
+
+- **구현**: 385be6d 기준 메인이 기존 full preflight의 pin/profile/cancel release 검사를 공유하고 OS sandbox+owned Broker를 사용하는 model-free 진단 진입점을 추가했다. opaque proxy command에 기존 discovery와 같은 고정 HOME/CODEX_HOME/TMPDIR/PATH를 전달한다. 임시 빈 workspace는 읽기 전용이며 앱 profile의 vendor 인증/캐시 갱신 가능성은 기존 승인 조회와 같다. 프로필 불변이나 제품 활성화를 주장하지 않는다.
+- **실측**: 승인된 앱 계정 조회에서 새 경로는 초기화(id1)·설정(id2) PASS 후 계정(id3) 응답 수용에 실패했다(최종 2.97초). 종료/cleanup 확인과 config 원문 불변은 통과했다. 단계 진단을 추가하며 동일 실패를 총3회 관측했고 raw 응답/인증은 출력하지 않았다. 기존 비격리 조회는 5 RPC 전체 PASS/3.72초이므로 재로그인이나 재부팅을 요구할 근거가 아니다. 유료 모델/thread/turn은 실행하지 않았다. 이 검사는 proxy CONNECT/상류 통신 성공의 증거가 아니다.
+- **검증/검토**: 기존 preflight7 PASS/2 ignored/13.71초, strict sidecar all-targets clippy PASS/3.02초. 동일 검토자는 profile 불변으로 오해한 최초 지적을 승인된 vendor 갱신 계약 확인 후 철회하고 scoped PASS했다. Karpathy 지침에 따라 기존 경로를 유지하고 실제 실패를 성공 처리하지 않았다.
+- **다음**: 격리 경로의 계정 응답 차이를 비밀 없는 구조 진단으로 좁힌 뒤 proxy 트래픽을 확인한다. TLS/domain-fronting·제품 admission/승인 UI·최종 검증은 여전히 남고 runtime blocked 유지. 직전 복구 상태 확인은 no progress였으나 이번에는 실제 CLI 비교 증거와 재현 가능한 opt-in 검사를 추가했다. main 병합/push 없음.
+- **마감**: 추가 환경/소유권 로컬 회귀 PASS/0.31초, rustfmt·diff 검사 PASS. 실제 실패를 재현하는 ignored 검사는 성공한 것으로 기록하지 않고 후속 진단 진입점으로 보존한다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 상태 재확인)
+
+- **확인**: 사용자 요청에 따라 385be6d의 clean tree에서 현재 프로세스와 복구 파일 메타데이터를 재확인했다. 개발 Electron/hello-agent sidecar는 실행 중이 아니며 활성 codex-login.pending도 없다. legacy 잠금 보존본(inode168613811/61bytes/0600)과 stale helper 보존본(inode166226396)은 그대로 존재한다.
+- **결과/경계**: 이전 종료·보존 복구가 이미 완료된 상태이므로 추가 종료·이동·삭제를 하지 않았다. 인증 내용은 읽거나 변경하지 않았고 재부팅도 필요하지 않다. 실제 모델 실행 연결 등 제품 개발 미완료와는 별개다. 이번 확인 기록만 미커밋으로 남기며 main 병합/push는 없다.
+
 ### 2026-09-29 · by GPT-6 Astra (중계 서비스와 실행 프로세스 수명 결합)
 
 - **구현**: 직전a95e74f Broker를 opaque ModelProxyCommand→LoginProcess 소유권으로 연결했다. 인증 proxy URL은 argv/IPC 대신 고정 HTTP(S)/ALL proxy 환경으로만 전달하고 bypass 환경은 비운다. owner tick이 중계를 진행하며 통신/cleanup 증거 무효화·finish 시작·cleanup 때 stop한다. 불확실 Drop은 Broker 객체/연결/작업을 정리하고 bound listener만 소비형 반환해 descriptor를 보존한다. 기존 proxy=None 로그인은 같은 경로를 유지한다.
@@ -244,6 +257,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **격리 조회 차이(2026-09-29)**: 실제 앱 프로필의 비격리 full preflight는5 RPC 통과하지만 OS sandbox+proxy 후보는id1/2 뒤 account id3 단계에서 거절된다. 두 경로 모두 종료/cleanup 확인이며 기존 로그인 실패로 단정하지 않는다. 다음은 계정 응답의 비밀 없는 구조 진단이고, proxy CONNECT 성공이나 제품 활성화는 아직 증명되지 않았다.
 
 - **중계/실행 소유권 결합(2026-09-29)**: ModelProxyCommand가 Broker를 LoginProcess에 이동하고 proxy secret은 고정 환경으로만 전달한다. owner tick으로 처리하며 종료/무효화 때 stop, 불확실 Drop은 listener만 보존하고 Broker의 연결/작업/인증 객체는 drop한다. 중계 실패는 프로세스 종료 증거가 아니다. native 환경 호환성·제품 admission은 아직 미확인이다.
 

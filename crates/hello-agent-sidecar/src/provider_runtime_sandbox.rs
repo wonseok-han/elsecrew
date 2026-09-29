@@ -116,6 +116,11 @@ pub(crate) fn command_with_model_proxy(
         command.env(key, &url);
     }
     command.env("NO_PROXY", "").env("no_proxy", "");
+    command
+        .env("HOME", home)
+        .env("CODEX_HOME", home)
+        .env("TMPDIR", home.join("tmp"))
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
     Ok(ModelProxyCommand { command, broker })
 }
 
@@ -218,6 +223,10 @@ mod tests {
         assert!(TcpListener::bind(address).is_err());
         let proxy = command.broker.proxy_url().unwrap();
         let env: std::collections::BTreeMap<_, _> = command.command.get_envs().collect();
+        for key in ["HOME", "CODEX_HOME"] {
+            assert!(env.get(OsStr::new(key)) == Some(&Some(home.as_os_str())));
+        }
+        assert!(env.get(OsStr::new("TMPDIR")) == Some(&Some(home.join("tmp").as_os_str())));
         for key in [
             "HTTP_PROXY",
             "HTTPS_PROXY",

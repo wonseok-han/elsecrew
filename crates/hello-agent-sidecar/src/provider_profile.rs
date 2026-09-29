@@ -286,6 +286,16 @@ mod tests {
     #[test]
     #[ignore = "requires approval for existing app-owned account and model inspection"]
     fn installed_codex_app_profile_model_free_inspection() {
+        inspect_app_profile(false);
+    }
+
+    #[test]
+    #[ignore = "requires approval for app-owned account inspection through local model proxy"]
+    fn installed_codex_app_profile_proxied_model_free_inspection() {
+        inspect_app_profile(true);
+    }
+
+    fn inspect_app_profile(proxied: bool) {
         use crate::provider_executable::PinnedExecutable;
         use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
         use std::sync::atomic::AtomicBool;
@@ -323,16 +333,22 @@ mod tests {
             ),
         )
         .unwrap();
-        let mut inspection = crate::provider_preflight_session::inspect_full_preflight_candidate(
-            &binding,
-            &cli,
-            &helper,
-            &ExpectedProfile {
-                model: "gpt-6-astra",
-                reasoning_effort: "medium",
-            },
-            &AtomicBool::new(false),
-        )
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let expected = ExpectedProfile {
+            model: "gpt-6-astra",
+            reasoning_effort: "medium",
+        };
+        let cancel = AtomicBool::new(false);
+        let mut inspection = if proxied {
+            crate::provider_preflight_session::inspect_proxied_preflight_candidate(
+                &binding, &cli, &helper, &expected, &cancel, &workspace,
+            )
+        } else {
+            crate::provider_preflight_session::inspect_full_preflight_candidate(
+                &binding, &cli, &helper, &expected, &cancel,
+            )
+        }
         .unwrap();
         let cleanup = if inspection.process.closure_evidence().is_some() {
             Ok(())
@@ -348,7 +364,7 @@ mod tests {
             .closure_evidence()
             .is_some_and(|receipt| receipt.termination_confirmed());
         eprintln!(
-            "app_profile_inspection matched={} termination_confirmed={terminated} cleanup_confirmed={confirmed}",
+            "app_profile_inspection proxied={proxied} matched={} termination_confirmed={terminated} cleanup_confirmed={confirmed}",
             inspection.result.is_ok()
         );
         assert_eq!(
