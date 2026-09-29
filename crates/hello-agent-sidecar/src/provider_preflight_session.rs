@@ -498,6 +498,12 @@ pub(crate) struct BoundTextSession {
 }
 
 impl BoundTextSession {
+    pub(crate) fn pending_approvals(
+        &self,
+    ) -> Vec<&hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval> {
+        self.session.pending_approvals()
+    }
+
     pub(crate) fn begin(
         process: &mut LoginProcess<'_>,
         flow: PreflightExchange,

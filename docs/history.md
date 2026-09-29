@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (native 승인 대기·일회 응답 연결)
+
+- **구현**: 90e1126에서 자동 Decline을 live 대기열로 바꿨다. 실제 stream의 미응답 요청에만 opaque ticket을 유지하며 내부 조회/거절 메서드는 전체 RunIdentity와 예약 입력을 검증한다. 명시적 거절 접수 뒤 다음 callback에서 원자 의도 저장 후에만 응답한다. 중복/미지 ID·취소·완료·서버 해제·연결 변경 뒤 요청은 거절한다. 재시작 시 live ticket 복원은 없다.
+- **검증 완료**: 미응답 반복 poll·대기 중 취소를 추가한 최종 상호작용 matrix PASS/59.39초, 단위 만료/중복/connection/일회성4 PASS, strict all-targets clippy PASS/3.63초, scoped rustfmt/diff 검사 및 동일 검토자 scoped PASS. Karpathy 지침으로 기존 stream/owner/ticket을 사용했다. 실제 모델·사용자 프로젝트 호출이나 main 병합/push는 하지 않았다.
+- **남은 범위**: 현재 내부 API는 요청 ID 조회/거절만 제공한다. 공개 Rust/TS 계약·Electron IPC·채팅 카드·허용 권위/실제 공급자 입장은 아직 연결하지 않았고 제품 생성자는 blocked 유지다. 대기열을 완성된 승인 화면으로 표현하지 않는다.
+
 ### 2026-09-29 · by GPT-6 Astra (실제 프로세스 연결과 승인 의도 결속)
 
 - **진전**: f107e7a에서 승인 UI 연결을 조사하던 중 기존 검토의 후속 조건을 먼저 닫았다. OwnedTextRun이 실제 LoginProcess connection UUID를 제공하고 native ticket이 dispatcher stream과 함께 이를 digest에 포함한다. BoundTextSession은 매 advance에서 같은 process인지 별도 확인한다. renderer가 connection을 제공하지 않는다.
@@ -23,6 +29,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **native 승인 live 대기열(2026-09-29)**: 자동 거절은 명시적 거절 접수 방식으로 교체했다. 조회/응답과 매 advance 뒤 실제 미응답 stream 집합을 대조하며 취소/완료/서버 해제 뒤 ticket을 제거한다. 요청 ID는 프로세스 로컬이며 원장만으로 복원하지 않는다. 내부 조회/거절은 exact 실행 신원과 예약 입력을 재검증한다. 공개 UI/IPC와 허용은 후속이다.
 
 - **승인 연결 신원 보강(2026-09-29)**: 아래 초기 승인 의도 기록의 후속 조건 중 실제 process UUID 결속은 완료했다. dispatcher stream과 LoginProcess UUID를 함께 사용하며 BoundTextSession의 매 advance 신원 검증을 유지한다. UI/직전 권한 재검증/허용 연결은 여전히 남는다.
 

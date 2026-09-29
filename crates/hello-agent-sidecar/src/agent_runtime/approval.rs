@@ -8,6 +8,75 @@ use hello_agent_core::provider::vendor_observation::codex_approval::{
 const MAX_INTENTS: usize = 128;
 const FIELD: &str = "approval_intents_internal";
 
+/// Live decisions only: never deserialize or reconstruct from durable intents.
+#[derive(Default)]
+pub(super) struct ApprovalQueue {
+    entries: Vec<(ApprovalTicket, bool)>,
+}
+
+impl ApprovalQueue {
+    pub(super) fn ids(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|(ticket, queued)| !ticket.consumed && !queued)
+            .map(|(ticket, _)| ticket.id.clone())
+            .collect()
+    }
+
+    pub(super) fn decline(&mut self, id: &str) -> Result<(), SidecarError> {
+        let (_, queued) = self
+            .entries
+            .iter_mut()
+            .find(|(ticket, queued)| ticket.id == id && !ticket.consumed && !queued)
+            .ok_or_else(failure)?;
+        *queued = true;
+        Ok(())
+    }
+
+    pub(super) fn retain_live(
+        &mut self,
+        identity: &RunIdentity,
+        connection: &str,
+        requests: &[&PendingApproval],
+    ) -> Result<(), SidecarError> {
+        let live: Result<HashSet<_>, _> = requests
+            .iter()
+            .map(|request| fingerprint(identity, connection, request))
+            .collect();
+        let live = live?;
+        self.entries
+            .retain(|(ticket, _)| live.contains(&ticket.digest));
+        Ok(())
+    }
+
+    pub(super) fn poll(
+        &mut self,
+        storage: &mut Storage,
+        identity: &RunIdentity,
+        connection: &str,
+        request: &PendingApproval,
+    ) -> Result<bool, SidecarError> {
+        let digest = fingerprint(identity, connection, request)?;
+        if let Some((ticket, queued)) = self
+            .entries
+            .iter_mut()
+            .find(|(ticket, _)| ticket.digest == digest)
+        {
+            if *queued {
+                ticket.record_decline(storage, identity, connection, request)?;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        if self.entries.len() >= MAX_INTENTS {
+            return Err(failure());
+        }
+        self.entries
+            .push((ApprovalTicket::new(identity, connection, request)?, false));
+        Ok(false)
+    }
+}
+
 fn valid_entries(entries: &[Value]) -> bool {
     let mut ids = HashSet::new();
     let mut bindings = HashSet::new();
@@ -193,6 +262,33 @@ mod tests {
         };
         let request = PendingApproval::parse(&BoundedObservation::new(json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","itemId":"item","startedAtMs":1,"kind":"command","command":"echo PRIVATE","cwd":"/snapshot"}}).to_string().into_bytes()).unwrap(), "thread", "turn").unwrap();
         (identity, request)
+    }
+
+    #[test]
+    fn live_queue_rejects_duplicate_unknown_and_expired_decisions() {
+        let (identity, request) = context();
+        let ticket = ApprovalTicket::new(&identity, "connection", &request).unwrap();
+        let id = ticket.id.clone();
+        let mut queue = ApprovalQueue {
+            entries: vec![(ticket, false)],
+        };
+        queue
+            .retain_live(&identity, "connection", &[&request])
+            .unwrap();
+        assert_eq!(queue.ids(), vec![id.clone()]);
+        assert!(queue.decline("unknown").is_err());
+        queue.decline(&id).unwrap();
+        assert!(queue.ids().is_empty());
+        assert!(queue.decline(&id).is_err());
+        queue.retain_live(&identity, "connection", &[]).unwrap();
+        assert!(queue.entries.is_empty());
+        assert!(queue.decline(&id).is_err());
+        let ticket = ApprovalTicket::new(&identity, "connection", &request).unwrap();
+        queue.entries.push((ticket, false));
+        queue
+            .retain_live(&identity, "replacement", &[&request])
+            .unwrap();
+        assert!(queue.ids().is_empty());
     }
 
     #[test]

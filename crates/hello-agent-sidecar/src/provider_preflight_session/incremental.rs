@@ -36,6 +36,16 @@ pub(super) struct TextSession {
 }
 
 impl TextSession {
+    pub(super) fn pending_approvals(&self) -> Vec<&PendingApproval> {
+        let Some(Stage::Streaming(stream)) = &self.stage else {
+            return Vec::new();
+        };
+        self.pending
+            .iter()
+            .filter(|request| stream.awaits_approval_decision(&request.request_id))
+            .collect()
+    }
+
     pub(super) fn new(
         flow: PreflightExchange,
         cwd: &std::path::Path,

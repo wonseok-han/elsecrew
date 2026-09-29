@@ -499,6 +499,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
         "bound-handler-runtime-quit",
         "bound-handler-runtime-terminal",
         "bound-handler-runtime-approval-store",
+        "bound-handler-runtime-approval-cancel",
         "bound-native",
         "bound-native-write",
         "bound-native-hardlink",
@@ -1144,7 +1145,7 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                     foreign.workspace_identity.push_str("-other");
                     assert!(runtime.request_cancel(&foreign).is_err());
                     assert!(runtime.cancel_result(&fixture.storage, &foreign).is_err());
-                    if failure.ends_with("-cancel") {
+                    if failure == "bound-handler-runtime-cancel" {
                         runtime.request_cancel(&identity).unwrap();
                     } else if failure.ends_with("-quit") {
                         runtime.prepare_quit(&mut fixture.storage, &mut fixture.projects);
@@ -1193,6 +1194,80 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                         }
                         if !runtime.has_active_run(&identity.run_id) {
                             break;
+                        }
+                        if failure != "bound-handler-runtime-cancel" && !failure.ends_with("-quit")
+                        {
+                            // No automatic reply: the owner waits until an exact
+                            // caller identity submits this live opaque ticket.
+                            if let Ok(ids) = runtime.pending_native_approvals(
+                                &fixture.storage,
+                                &fixture.projects,
+                                &identity,
+                            ) {
+                                for id in ids {
+                                    if failure == "bound-handler-runtime" {
+                                        for _ in 0..3 {
+                                            emitted.extend(
+                                                runtime
+                                                    .poll(
+                                                        &mut fixture.storage,
+                                                        &mut fixture.projects,
+                                                    )
+                                                    .unwrap(),
+                                            );
+                                            assert_eq!(
+                                                runtime
+                                                    .pending_native_approvals(
+                                                        &fixture.storage,
+                                                        &fixture.projects,
+                                                        &identity
+                                                    )
+                                                    .unwrap(),
+                                                vec![id.clone()]
+                                            );
+                                        }
+                                    }
+                                    if failure.ends_with("-approval-cancel") {
+                                        runtime.request_cancel(&identity).unwrap();
+                                        assert!(runtime
+                                            .decline_native_approval(
+                                                &fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id
+                                            )
+                                            .is_err());
+                                        continue;
+                                    }
+                                    assert!(!fs::read_to_string(&captured)
+                                        .unwrap()
+                                        .contains("\"decision\""));
+                                    assert!(runtime
+                                        .decline_native_approval(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &foreign,
+                                            &id
+                                        )
+                                        .is_err());
+                                    runtime
+                                        .decline_native_approval(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &identity,
+                                            &id,
+                                        )
+                                        .unwrap();
+                                    assert!(runtime
+                                        .decline_native_approval(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &identity,
+                                            &id
+                                        )
+                                        .is_err());
+                                }
+                            }
                         }
                         assert!(runtime
                             .cancel_result(&fixture.storage, &identity)

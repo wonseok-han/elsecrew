@@ -11,9 +11,32 @@ pub(super) struct NativeRun {
     public_count: usize,
     last_state: Option<Value>,
     stopped: bool,
+    approvals: super::approval::ApprovalQueue,
 }
 
 impl NativeRun {
+    fn live_approvals(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+    ) -> Result<&mut super::approval::ApprovalQueue, SidecarError> {
+        if self.stopped
+            || identity_value(&self.identity) != identity_value(identity)
+            || identity_value(&self.owner.registration_identity(storage, projects)?)
+                != identity_value(identity)
+        {
+            return Err(SidecarError::new(
+                "agentApprovalChanged",
+                "approval run is no longer current",
+            ));
+        }
+        let connection = format!("{}:{}", self.stream_id, self.owner.connection_id());
+        self.approvals
+            .retain_live(identity, &connection, &self.owner.pending_approvals())?;
+        Ok(&mut self.approvals)
+    }
+
     pub(super) fn request_cancel(&self, identity: &RunIdentity) -> Result<(), ProjectFailure> {
         self.owner
             .request_cancel(identity)
@@ -85,6 +108,35 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn pending_native_approvals(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+    ) -> Result<Vec<String>, SidecarError> {
+        let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
+            SidecarError::new("agentApprovalChanged", "approval run is no longer current")
+        })?;
+        Ok(active.live_approvals(storage, projects, identity)?.ids())
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn decline_native_approval(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        identity: &RunIdentity,
+        approval_id: &str,
+    ) -> Result<(), SidecarError> {
+        let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
+            SidecarError::new("agentApprovalChanged", "approval run is no longer current")
+        })?;
+        active
+            .live_approvals(storage, projects, identity)?
+            .decline(approval_id)
+    }
+
     /// Take the owner only after validation; rejection leaves cleanup responsibility
     /// with the caller. No public IPC/production start path invokes this yet.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -122,6 +174,7 @@ impl AgentRuntime {
                 public_count: 0,
                 last_state: None,
                 stopped: false,
+                approvals: Default::default(),
             },
         );
         Ok(())
@@ -139,20 +192,31 @@ impl AgentRuntime {
             let active = self.native.get_mut(&id).unwrap();
             if !active.stopped {
                 let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
-                // Tool notifications grant no permission. Until approval UI is
-                // connected, requests are explicitly declined, never accepted.
+                // Tool notifications grant no permission. Only an explicit
+                // queued decision can produce a reply; waiting keeps polling.
                 active.stopped = !matches!(active.owner.advance(storage, projects, &mut |storage, action| {
                     match action {
                         TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
                         TextAction::PollApproval { request, decision } => {
-                            let mut ticket = super::approval::ApprovalTicket::new(&active.identity, &connection, request)?;
-                            ticket.record_decline(storage, &active.identity, &connection, request)?;
-                            *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
+                            if active.approvals.poll(storage, &active.identity, &connection, request)? {
+                                *decision = Some(hello_agent_core::provider::vendor_observation::codex_approval::Decision::Decline);
+                            }
                             Ok(())
                         }
                         _ => Err(SidecarError::new("agentRecoveryRequired", "unexpected native checkpoint")),
                     }
                 }), Ok(None));
+                if active
+                    .approvals
+                    .retain_live(
+                        &active.identity,
+                        &connection,
+                        &active.owner.pending_approvals(),
+                    )
+                    .is_err()
+                {
+                    active.owner.request_cancel(&active.identity)?;
+                }
             }
             let (emitted, terminal) = active.events(storage)?;
             if active.stopped && !terminal {

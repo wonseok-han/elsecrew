@@ -56,6 +56,19 @@ pub(crate) struct OwnedTextRun {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl OwnedTextRun {
+    pub(super) fn pending_approvals(
+        &self,
+    ) -> Vec<&hello_agent_core::provider::vendor_observation::codex_approval::PendingApproval> {
+        if self.state.finished
+            || self.state.completion.is_some()
+            || self.cancel.load(std::sync::atomic::Ordering::Acquire)
+            || !self.state.transport.matches_process(&self.process)
+        {
+            return Vec::new();
+        }
+        self.state.transport.pending_approvals()
+    }
+
     /// Captured from the process owner, never a renderer-supplied stream ID.
     /// `advance` independently checks the bound session against this process.
     pub(super) fn connection_id(&self) -> uuid::Uuid {
