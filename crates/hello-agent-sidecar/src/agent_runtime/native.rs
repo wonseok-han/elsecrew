@@ -153,7 +153,16 @@ impl AgentRuntime {
         } else {
             None
         };
-        let pending = self.pending_native_approvals(storage, projects, &identity)?;
+        let active = self.native.get_mut(&identity.run_id).ok_or_else(|| {
+            SidecarError::new("agentApprovalChanged", "approval run is no longer current")
+        })?;
+        active.live_approvals(storage, projects, &identity)?;
+        let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
+        let pending = active.approvals.summaries(
+            &identity,
+            &connection,
+            &active.owner.pending_approvals(),
+        )?;
         Ok(json!({"identity":raw,"pending":pending,"queued":queued}))
     }
 

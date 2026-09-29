@@ -470,8 +470,9 @@ test("approval capability extends exact status and binds decline receipts", asyn
   const pending = client.approval({action:"list",identity});
   const sent = JSON.parse(child.writes.at(-1)!);
   assert.equal(sent.method,"run.approval");
-  child.stdout.write(responseLine(sent.requestId,{identity,pending:[],queued:null}));
-  assert.deepEqual((await pending).pending,[]);
+  const summaries = [{approvalId:`approval_${"a".repeat(32)}`,kind:"command"}];
+  child.stdout.write(responseLine(sent.requestId,{identity,pending:summaries,queued:null}));
+  assert.deepEqual((await pending).pending,summaries);
   assert.throws(()=>client.approval({action:"accept",identity} as any));
 });
 

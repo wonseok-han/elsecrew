@@ -4,6 +4,15 @@ import { validateApprovalRequest, validateApprovalResult } from "../src/m5/contr
 
 const identity = { chatId:"chat_01",taskId:"task_01",projectId:"project_01",worktreeId:"worktree_01",workspaceIdentity:"workspace_01",runId:"agent_run_01" };
 const approvalId = `approval_${"a".repeat(32)}`;
+test("approval summaries admit only fixed types and never raw command fields", () => {
+  const request = validateApprovalRequest({action:"list",identity});
+  for (const kind of ["command","writeStdin","network","fileChange"]) {
+    const summary = {approvalId,kind};
+    assert.deepEqual(validateApprovalResult({identity,pending:[summary],queued:null},request).pending,[summary]);
+    for (const changed of [{...summary,command:"PRIVATE"},{...summary,kind:"unknown"},{...summary,kind:"toString"}]) assert.throws(()=>validateApprovalResult({identity,pending:[changed],queued:null},request));
+    assert.throws(()=>validateApprovalResult({identity,pending:[summary,summary],queued:null},request));
+  }
+});
 test("approval contract only admits exact list/decline and binds the receipt", () => {
   const request = validateApprovalRequest({action:"decline",identity,approvalId});
   assert.equal(validateApprovalResult({identity,pending:[],queued:approvalId},request).queued,approvalId);

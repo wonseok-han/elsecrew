@@ -1250,6 +1250,18 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                                             &id
                                         )
                                         .is_err());
+                                    let public_identity = json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id});
+                                    let listing = runtime
+                                        .approval_request(
+                                            &fixture.storage,
+                                            &fixture.projects,
+                                            &json!({"action":"list","identity":public_identity}),
+                                        )
+                                        .unwrap();
+                                    assert_eq!(
+                                        listing["pending"],
+                                        json!([{"approvalId":id,"kind":"command"}])
+                                    );
                                     let receipt = runtime
                                         .approval_request(
                                             &fixture.storage,

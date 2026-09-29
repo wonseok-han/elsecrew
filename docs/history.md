@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인 요청 유형 표시)
+
+- **구현**: 88abe6e의 미출시 승인 응답 pending을 `{approvalId, kind}` 요약으로 바꿨다. 실제 live 요청과 실행/연결 digest가 맞는 미접수 ticket에서만 command/writeStdin/network/fileChange 고정 유형을 추출한다. 카드에 한국어 유형·접근성 이름을 표시하며 raw 명령/경로/reason/host는 전달하지 않는다. 이는 허용 판단용 상세 검토나 권한 확대가 아니다.
+- **검증**: Rust 승인 단위5·strict clippy PASS/2.90초, pnpm build PASS, Node 계약/bridge/security57 PASS 및 마지막 bridge 변경1 PASS. 합성 브라우저에서4유형 표시·네트워크1건 거절·나머지3건 유지·전송1회를 확인하고 탭/서버 종료했다. 동일 검토자 scoped PASS, Karpathy 지침에 따라 기존 ticket/context를 재사용했다. 실제 계정/모델·사용자 프로젝트 미사용.
+- **마감/남음**: 최종 native API 조회/거절 상호작용 회귀 PASS/61.16초, rustfmt/diff 확인 후 커밋한다. 승인 가능한 구체적 행위 범위·일회 허용 권위·실제 공급자 활성화/유료 smoke·전체 앱 완료는 아직 아니다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인 대기열 IPC·채팅 카드 연결)
 
 - **구현**: 26aa845에서 `run.approval`의 exact list/decline 요청·전체 실행 신원/응답 결속을 Rust와 TS에 연결했다. capability는 기존 followup/login 뒤의 고정 suffix로 협상하고 Electron main 현재 frame·preload 양방향 검증을 거친다. 채팅 카드는 직렬 poll·응답 epoch·언마운트 무효화·일회 거절/실행 취소를 제공하며 추가 권한 허용 미지원과 접수/전달 차이를 표시한다. raw 명령·비밀·허용 권위를 추가하지 않는다.
@@ -35,6 +41,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **권한 요청 요약(2026-09-29)**: 공개 승인 pending은 `{approvalId,kind}`만 반환한다. 고정4유형 표시는 raw 행위/host/명령 원문 공개나 허용 권한이 아니며, 구체적 허용 결정을 위한 정보/경계는 별도 구현 대상이다.
 
 - **승인 UI 경계(2026-09-29)**: run.approval은 opaque 대기 ID 조회와 명시 거절만 제공하며 receipt의 queued는 접수일 뿐 wire 전달 증거가 아니다. exact suffix·실행 신원·현재 frame을 검증하고 만료 요청 오류는 세션 전체를 종료하지 않는다. 카드의 허용 기능/요청 상세/실제 provider 활성화는 아직 없으며 이 부분 구현을 앱 완료로 주장하지 않는다.
 

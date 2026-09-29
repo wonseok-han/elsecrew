@@ -15,6 +15,26 @@ pub(super) struct ApprovalQueue {
 }
 
 impl ApprovalQueue {
+    pub(super) fn summaries(
+        &self,
+        identity: &RunIdentity,
+        connection: &str,
+        requests: &[&PendingApproval],
+    ) -> Result<Vec<Value>, SidecarError> {
+        let mut summaries = Vec::new();
+        for request in requests {
+            let digest = fingerprint(identity, connection, request)?;
+            if let Some((ticket, _)) = self
+                .entries
+                .iter()
+                .find(|(ticket, queued)| ticket.digest == digest && !ticket.consumed && !queued)
+            {
+                summaries.push(json!({"approvalId":ticket.id,"kind":request_kind(request)}));
+            }
+        }
+        Ok(summaries)
+    }
+
     pub(super) fn ids(&self) -> Vec<String> {
         self.entries
             .iter()
@@ -74,6 +94,23 @@ impl ApprovalQueue {
         self.entries
             .push((ApprovalTicket::new(identity, connection, request)?, false));
         Ok(false)
+    }
+}
+
+fn request_kind(request: &PendingApproval) -> &'static str {
+    match &request.action {
+        Action::FileChange { .. } => "fileChange",
+        Action::Command {
+            network: Some(_), ..
+        } => "network",
+        Action::Command {
+            kind: CommandKind::WriteStdin,
+            ..
+        } => "writeStdin",
+        Action::Command {
+            kind: CommandKind::Command,
+            ..
+        } => "command",
     }
 }
 
@@ -262,6 +299,50 @@ mod tests {
         };
         let request = PendingApproval::parse(&BoundedObservation::new(json!({"id":1,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread","turnId":"turn","itemId":"item","startedAtMs":1,"kind":"command","command":"echo PRIVATE","cwd":"/snapshot"}}).to_string().into_bytes()).unwrap(), "thread", "turn").unwrap();
         (identity, request)
+    }
+
+    #[test]
+    fn summaries_classify_live_requests_without_disclosing_raw_context() {
+        for expected in ["command", "writeStdin", "network", "fileChange"] {
+            let (identity, mut request) = context();
+            if expected == "fileChange" {
+                request.action = Action::FileChange {
+                    grant_root: Some("/PRIVATE".into()),
+                };
+            } else if let Action::Command { kind, network, .. } = &mut request.action {
+                if expected == "writeStdin" {
+                    *kind = CommandKind::WriteStdin;
+                }
+                if expected == "network" {
+                    *network = Some(
+                        hello_agent_core::provider::vendor_observation::codex_approval::Network {
+                            host: "PRIVATE.example".into(),
+                            protocol: "https".into(),
+                        },
+                    );
+                }
+            }
+            request.reason = Some("PRIVATE reason".into());
+            let ticket = ApprovalTicket::new(&identity, "connection", &request).unwrap();
+            let id = ticket.id.clone();
+            let mut queue = ApprovalQueue {
+                entries: vec![(ticket, false)],
+            };
+            let summary = queue
+                .summaries(&identity, "connection", &[&request])
+                .unwrap();
+            assert_eq!(summary, vec![json!({"approvalId":id,"kind":expected})]);
+            assert!(!serde_json::to_string(&summary).unwrap().contains("PRIVATE"));
+            assert!(queue
+                .summaries(&identity, "other", &[&request])
+                .unwrap()
+                .is_empty());
+            queue.decline(&id).unwrap();
+            assert!(queue
+                .summaries(&identity, "connection", &[&request])
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
