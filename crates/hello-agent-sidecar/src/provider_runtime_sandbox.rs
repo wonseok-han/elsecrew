@@ -1,5 +1,6 @@
 //! Offline macOS runtime candidate. No production provider admission.
 //! Apply after the inert gate has closed inherited descriptors and been recorded.
+use crate::provider_model_proxy::broker::Broker;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
@@ -62,10 +63,10 @@ pub(crate) fn command(
 
 /// A command and its owned endpoint move together into the lifecycle owner.
 /// No raw Command/Child escape hatch: spawning always transfers the listener.
-#[allow(dead_code)] // Pending upstream broker and native admission.
+#[allow(dead_code)] // Pending native compatibility and product admission.
 pub(crate) struct ModelProxyCommand {
     command: Command,
-    listener: TcpListener,
+    broker: Broker,
 }
 
 #[allow(dead_code)]
@@ -75,7 +76,7 @@ impl ModelProxyCommand {
         owner: &mut crate::provider_login_process::LoginProcess<'_>,
         release: impl FnOnce(&mut std::process::Child) -> io::Result<()>,
     ) -> Result<(), crate::SidecarError> {
-        owner.launch_with_model_proxy(self.command, self.listener, release)
+        owner.launch_with_model_proxy(self.command, self.broker, release)
     }
 }
 
@@ -91,16 +92,31 @@ pub(crate) fn command_with_model_proxy(
     access: WorkspaceAccess,
     listener: TcpListener,
 ) -> io::Result<ModelProxyCommand> {
-    let command = command_network(
+    let broker = Broker::new(listener, std::time::Instant::now())?;
+    let mut command = command_network(
         executable,
         helper,
         args,
         home,
         workspace,
         access,
-        Some(&listener),
+        Some(broker.listener()),
     )?;
-    Ok(ModelProxyCommand { command, listener })
+    // Backend-only environment handoff. The secret is never a command argument
+    // or IPC field. Tool descendants may inherit it; this is not role isolation.
+    let url = broker.proxy_url()?;
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        command.env(key, &url);
+    }
+    command.env("NO_PROXY", "").env("no_proxy", "");
+    Ok(ModelProxyCommand { command, broker })
 }
 
 fn command_network(
@@ -200,6 +216,25 @@ mod tests {
         )
         .unwrap();
         assert!(TcpListener::bind(address).is_err());
+        let proxy = command.broker.proxy_url().unwrap();
+        let env: std::collections::BTreeMap<_, _> = command.command.get_envs().collect();
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            assert!(env.get(OsStr::new(key)) == Some(&Some(OsStr::new(&proxy))));
+        }
+        for key in ["NO_PROXY", "no_proxy"] {
+            assert!(env.get(OsStr::new(key)) == Some(&Some(OsStr::new(""))));
+        }
+        assert!(!command
+            .command
+            .get_args()
+            .any(|arg| arg == OsStr::new(&proxy)));
         let mut owner = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
         command
             .launch(&mut owner, crate::provider_login_gate::release)

@@ -287,9 +287,9 @@ pub(crate) struct LoginProcess<'a> {
     closure: Option<ProcessClosureEvidence>,
     retain_for_terminal: bool,
     cleanup_started: Option<Instant>,
-    // Retained even if the caller drops every broker clone. A child cannot outlive
-    // the endpoint merely because a command builder or broker task was dropped.
-    model_proxy: Option<std::net::TcpListener>,
+    // Own the service with the process; uncertain cleanup quarantines its bound
+    // listener after closing relays/jobs. Sidecar crashes remain a separate risk.
+    model_proxy: Option<crate::provider_model_proxy::broker::Broker>,
     #[cfg(test)]
     fail_next_cleanup: bool,
     #[cfg(test)]
@@ -419,14 +419,18 @@ impl<'a> LoginProcess<'a> {
     pub(super) fn launch_with_model_proxy(
         &mut self,
         mut command: Command,
-        listener: std::net::TcpListener,
+        broker: crate::provider_model_proxy::broker::Broker,
         release: impl FnOnce(&mut Child) -> std::io::Result<()>,
     ) -> Result<(), SidecarError> {
         if self.attempted || self.finished || self.failed || self.model_proxy.is_some() {
             return Err(failure());
         }
-        self.model_proxy = Some(listener);
-        self.launch_with_barrier(|| command.spawn(), release)
+        self.model_proxy = Some(broker);
+        let result = self.launch_with_barrier(|| command.spawn(), release);
+        if result.is_err() {
+            self.stop_model_proxy();
+        }
+        result
     }
 
     /// The trusted run owner can durably bind the already observed identities
@@ -475,6 +479,7 @@ impl<'a> LoginProcess<'a> {
     /// retaining the observed child/tracker for the ordinary explicit cleanup.
     pub(crate) fn invalidate_transport(&mut self) {
         self.failed = true;
+        self.stop_model_proxy();
     }
 
     pub(crate) fn tracked_for_cleanup(&self) -> Vec<ProcIdentity> {
@@ -489,6 +494,7 @@ impl<'a> LoginProcess<'a> {
     pub(crate) fn invalidate_cleanup_evidence(&mut self) {
         self.failed = true;
         self.evidence_failed = true;
+        self.stop_model_proxy();
         if let Some(receipt) = &mut self.closure {
             receipt.confirmed = false;
         }
@@ -547,10 +553,14 @@ impl<'a> LoginProcess<'a> {
         let result = if self.failed || self.finished {
             Err(failure())
         } else {
-            self.observe_with(&SystemProcTable, false)
+            let proxy = self.model_proxy.as_mut().map_or(Ok(()), |broker| {
+                broker.tick(Instant::now(), false).map_err(|_| failure())
+            });
+            proxy.and_then(|_| self.observe_with(&SystemProcTable, false))
         };
         if result.is_err() {
             self.failed = true;
+            self.stop_model_proxy();
         }
         result
     }
@@ -867,6 +877,7 @@ impl<'a> LoginProcess<'a> {
         if self.finished || self.closure.is_some() {
             return Err(failure());
         }
+        self.stop_model_proxy();
         self.io.take();
         self.failed = true; // No further launch or protocol I/O during cleanup.
         let Some(clean) = self.poll_cleanup(table) else {
@@ -951,6 +962,7 @@ impl<'a> LoginProcess<'a> {
     }
 
     fn cleanup(&mut self, table: &impl ProcTable) -> bool {
+        self.stop_model_proxy();
         #[cfg(test)]
         if std::mem::take(&mut self.fail_next_cleanup) {
             return false;
@@ -984,6 +996,12 @@ impl<'a> LoginProcess<'a> {
             std::thread::sleep(OBSERVE_INTERVAL);
         }
     }
+
+    fn stop_model_proxy(&mut self) {
+        if let Some(broker) = self.model_proxy.as_mut() {
+            broker.stop();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1008,11 +1026,11 @@ impl Drop for LoginProcess<'_> {
             true // finished is set only after clean process termination.
         };
         if !clean {
-            if let Some(listener) = self.model_proxy.take() {
+            if let Some(broker) = self.model_proxy.take() {
                 // Uncertain survivors must not gain access to a replacement local
                 // server. Quarantine this descriptor until sidecar process exit.
                 // This is not crash-survival protection or broker authentication.
-                std::mem::forget(listener);
+                std::mem::forget(broker.into_stopped_listener());
             }
         }
         // A crash, early return or dropped owner leaves the durable reservation.
@@ -1113,6 +1131,7 @@ mod tests {
     #[test]
     #[ignore = "requires local TCP bind; toy process only, no provider/account"]
     fn model_proxy_listener_is_owned_until_confirmed_process_cleanup() {
+        use std::io::{Read, Write};
         for uncertain in [false, true] {
             let temp = tempfile::tempdir().unwrap();
             let profile = profile(&temp);
@@ -1129,14 +1148,29 @@ mod tests {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
             process
-                .launch_with_model_proxy(command, listener, |_| Ok(()))
+                .launch_with_model_proxy(
+                    command,
+                    crate::provider_model_proxy::broker::Broker::new(listener, Instant::now())
+                        .unwrap(),
+                    |_| Ok(()),
+                )
                 .unwrap();
             assert!(std::net::TcpListener::bind(address).is_err());
+            let mut peer = std::net::TcpStream::connect(address).unwrap();
+            peer.write_all(b"C").unwrap(); // Incomplete header: must never dial.
+            peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while process.model_proxy.as_ref().unwrap().connection_count() == 0 {
+                assert!(Instant::now() < deadline);
+                process.tick().unwrap();
+                std::thread::sleep(Duration::from_millis(2));
+            }
             if uncertain {
                 process.inject_uncertain_cleanup_once();
                 assert!(process.finish().is_err());
                 assert!(std::net::TcpListener::bind(address).is_err());
                 assert!(process.model_proxy.is_some());
+                assert_eq!(process.model_proxy.as_ref().unwrap().connection_count(), 0);
                 // Only this owned toy root exists. Explicitly reap it before
                 // taking the test's retained socket; production has no accessor.
                 let child = process.child.as_mut().unwrap();
@@ -1148,8 +1182,92 @@ mod tests {
                 assert!(process.model_proxy.is_none());
                 assert!(process.closure_evidence().unwrap().confirmed());
             }
+            let mut byte = [0];
+            match peer.read(&mut byte) {
+                Ok(count) => assert_eq!(count, 0),
+                Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+            }
             assert!(std::net::TcpListener::bind(address).is_ok());
         }
+    }
+
+    #[test]
+    #[ignore = "local broker lifecycle only; no upstream or provider"]
+    fn expired_broker_fails_transport_without_claiming_process_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = profile(&temp);
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let broker = crate::provider_model_proxy::broker::Broker::new(
+            listener,
+            Instant::now() - Duration::from_secs(600),
+        )
+        .unwrap();
+        let mut command = Command::new("/bin/sleep");
+        command
+            .arg("30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        process
+            .launch_with_model_proxy(command, broker, |_| Ok(()))
+            .unwrap();
+        assert!(process.tick().is_err());
+        assert!(process.tick().is_err());
+        assert!(process.closure_evidence().is_none());
+        assert!(LoginProcess::reserve(&profile).is_err());
+        process.finish().unwrap();
+        assert!(process.closure_evidence().unwrap().confirmed());
+        assert!(LoginProcess::reserve(&profile).is_ok());
+    }
+
+    #[test]
+    #[ignore = "local broker/barrier failure only; no provider/upstream"]
+    fn model_proxy_barrier_failure_stops_service_before_cleanup() {
+        use std::io::{Read, Write};
+        let temp = tempfile::tempdir().unwrap();
+        let profile = profile(&temp);
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut broker =
+            crate::provider_model_proxy::broker::Broker::new(listener, Instant::now()).unwrap();
+        let mut peer = std::net::TcpStream::connect(address).unwrap();
+        peer.write_all(b"C").unwrap(); // Pending admission; cannot start an upstream job.
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while broker.connection_count() == 0 {
+            assert!(Instant::now() < deadline);
+            broker.tick(Instant::now(), false).unwrap();
+        }
+        let command = crate::provider_login_gate::command(
+            std::path::Path::new("/bin/sleep"),
+            &[std::ffi::OsStr::new("30")],
+            &profile.revalidate().unwrap(),
+        )
+        .unwrap();
+        assert!(process
+            .launch_with_model_proxy(command, broker, |child| {
+                crate::provider_login_gate::release(child)?;
+                Err(std::io::Error::other("uncertain release result"))
+            })
+            .is_err());
+        assert_eq!(process.model_proxy.as_ref().unwrap().connection_count(), 0);
+        assert!(process
+            .model_proxy
+            .as_mut()
+            .unwrap()
+            .tick(Instant::now(), false)
+            .is_err());
+        assert!(std::net::TcpListener::bind(address).is_err());
+        let mut byte = [0];
+        match peer.read(&mut byte) {
+            Ok(count) => assert_eq!(count, 0),
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+        }
+        assert!(process.closure_evidence().is_none());
+        assert!(LoginProcess::reserve(&profile).is_err());
+        process.finish().unwrap();
+        assert!(std::net::TcpListener::bind(address).is_ok());
     }
 
     #[test]
@@ -1164,7 +1282,9 @@ mod tests {
         let fd = listener.as_raw_fd();
         // No process was started, so the test can safely reclaim its own fd
         // after injecting uncertainty. Production exposes no reclamation API.
-        process.model_proxy = Some(listener);
+        process.model_proxy = Some(
+            crate::provider_model_proxy::broker::Broker::new(listener, Instant::now()).unwrap(),
+        );
         process.inject_uncertain_cleanup_once();
         drop(process);
         assert!(std::net::TcpListener::bind(address).is_err());

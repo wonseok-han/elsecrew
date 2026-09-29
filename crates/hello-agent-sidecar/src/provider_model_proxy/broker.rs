@@ -15,7 +15,7 @@ enum Entry {
 }
 
 pub(crate) struct Broker {
-    listener: TcpListener,
+    listener: Option<TcpListener>,
     credential: ProxyCredential,
     entries: Vec<Entry>,
     started: Instant,
@@ -33,7 +33,7 @@ impl Broker {
         }
         listener.set_nonblocking(true)?;
         Ok(Self {
-            listener,
+            listener: Some(listener),
             credential: ProxyCredential::new(),
             entries: Vec::new(),
             started: now,
@@ -43,12 +43,14 @@ impl Broker {
     }
 
     pub(crate) fn listener(&self) -> &TcpListener {
-        &self.listener
+        self.listener
+            .as_ref()
+            .expect("listener owned until consuming handoff")
     }
 
     pub(crate) fn proxy_url(&self) -> io::Result<String> {
         Ok(self.credential.loopback_url(
-            std::num::NonZeroU16::new(self.listener.local_addr()?.port())
+            std::num::NonZeroU16::new(self.listener().local_addr()?.port())
                 .ok_or_else(|| io::Error::other("proxy port missing"))?,
         ))
     }
@@ -76,7 +78,7 @@ impl Broker {
             return Err(io::Error::other("proxy stopped"));
         }
         for _ in 0..4 {
-            match self.listener.accept() {
+            match self.listener().accept() {
                 Ok((stream, peer)) => {
                     if self.entries.len() < MAX_CONNECTIONS
                         && peer.ip() == Ipv4Addr::LOCALHOST
@@ -122,6 +124,20 @@ impl Broker {
         self.stopped = true;
         // Keep the bound listener until owner drop so a stopped service's port
         // cannot be rebound while a process cleanup lease still owns this broker.
+    }
+
+    /// Quarantine only the bound descriptor, not relay buffers/credentials/jobs.
+    /// The consuming owner must retain it when process termination is uncertain.
+    pub(crate) fn into_stopped_listener(mut self) -> TcpListener {
+        self.stop();
+        self.listener
+            .take()
+            .expect("listener owned until consuming handoff")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connection_count(&self) -> usize {
+        self.entries.len()
     }
 }
 impl Drop for Broker {

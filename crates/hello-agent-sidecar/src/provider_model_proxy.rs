@@ -1,7 +1,7 @@
 //! Local CONNECT admission, not an activated proxy or vendor network attestation.
 //! Never forwards proxy credentials or logs request bytes. The broker validates
-//! resolved addresses and caps connection resources. Binding its endpoint and
-//! shutdown to the provider process owner remains separate.
+//! resolved addresses and caps connection resources. LoginProcess owns endpoint
+//! shutdown; native vendor compatibility and product admission remain separate.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::time::{Duration, Instant};
 

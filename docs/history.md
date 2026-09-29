@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (중계 서비스와 실행 프로세스 수명 결합)
+
+- **구현**: 직전a95e74f Broker를 opaque ModelProxyCommand→LoginProcess 소유권으로 연결했다. 인증 proxy URL은 argv/IPC 대신 고정 HTTP(S)/ALL proxy 환경으로만 전달하고 bypass 환경은 비운다. owner tick이 중계를 진행하며 통신/cleanup 증거 무효화·finish 시작·cleanup 때 stop한다. 불확실 Drop은 Broker 객체/연결/작업을 정리하고 bound listener만 소비형 반환해 descriptor를 보존한다. 기존 proxy=None 로그인은 같은 경로를 유지한다.
+- **검증**: 초기 lifecycle21 PASS/3 ignored/8.72초. 로컬 proxy10 PASS/0.97초는 인증/relay·owner tick의 미완성 header 수용·정상/불확실 종료 시 peer 종료·포트 보존·환경-only 인증 전달을 포함한다. 별도 expired Broker 회귀 PASS/0.28초: 중계 만료는 통신을 실패 고정하지만 종료 receipt/fence 해제를 만들지 않고 실제 process cleanup 후에만 해제한다. 실제 계정/CLI/외부 목적지는 호출하지 않았다.
+- **다음/경계**: native CLI의 proxy 환경 호환성·TLS/domain-fronting 경계·제품 admission/승인 UI·최종 검증은 미완료다. 멈춘 OS DNS 작업자의 제한된 잔존 가능성과 sidecar crash 후 포트 수명 한계는 유지한다. Karpathy 지침으로 기존 로그인 계약과 새 중계 owner 연결의 변경 범위를 분리했다. main 병합/push 없음.
+- **검토 수정/검증**: barrier 오류 반환 직후에도 Broker active 상태가 남는다는 지적을 반영해 launch_with_model_proxy의 Err 경로에서 즉시 stop한다. 실제 gate를 release한 뒤 오류를 돌려주는 회귀 PASS/0.35초: 수용된 partial-header peer 종료·중계 재tick 거절·포트 보존·receipt 없음·확인된 finish 후 해제. Broker accept는 owner tick에서만 수행하므로 동시 background accept가 있었던 것으로 확대하지 않는다. 같은 검토자 재검토 scoped PASS다.
+- **마감**: lifecycle21 PASS/4 ignored/8.70초, reserved interactions 원장 통합 PASS/40.53초, 최종 strict sidecar all-targets clippy PASS, scoped rustfmt·diff 검사 PASS. 관련7파일만 작업 단위 커밋한다.
+
 ### 2026-09-29 · by GPT-6 Astra (목적지 검증·연결 작업·중계 서비스 결합)
 
 - **구현**: 진전한 직전360f8fa의 요청 검사/relay를 Broker로 묶었다. exact loopback listener·실행 credential·동시8개·tick당4accept·600초/128MiB 총량을 유지하고 인증 성공만 연결 작업으로 보낸다. 전체 DNS 결과16개 이하·443·public IPv4/v6·scope 검증 후 숫자 주소로만 연결한다. 연결 작업10초·시도2초이며 OS DNS는 loop 밖의 전역최대8작업자에서 실행한다. 취소/만료에도 실제 스레드가 끝나기 전 슬롯을 재사용하지 않는다. 멈춘 DNS 스레드 자체를 종료할 수 있다는 주장은 하지 않는다.
@@ -236,6 +244,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **중계/실행 소유권 결합(2026-09-29)**: ModelProxyCommand가 Broker를 LoginProcess에 이동하고 proxy secret은 고정 환경으로만 전달한다. owner tick으로 처리하며 종료/무효화 때 stop, 불확실 Drop은 listener만 보존하고 Broker의 연결/작업/인증 객체는 drop한다. 중계 실패는 프로세스 종료 증거가 아니다. native 환경 호환성·제품 admission은 아직 미확인이다.
 
 - **Broker/DNS 연결(2026-09-29, 미활성)**: fixed destination DNS 결과를 모두 검증하고 숫자 주소에만 연결한다. DNS/연결 작업자는 전역8개이며 취소된 정지 resolver도 실제 종료까지 슬롯을 점유한다. Broker는8연결·600초/128MiB aggregate이며 stop 때 listener를 drop하지 않는다. 제품 process lease 결합·native 호환성은 후속, 실제 공급자나 TLS/domain-fronting 검증으로 사용하지 않는다.
 
