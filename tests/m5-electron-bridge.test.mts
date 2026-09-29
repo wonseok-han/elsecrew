@@ -454,6 +454,27 @@ test("login capability negotiates exact status and fixed requests", async () => 
   assert.deepEqual(await login, idle);
 });
 
+test("approval capability extends exact status and binds decline receipts", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  const ready = JSON.parse(g5dReadyLine());
+  ready.payload.capabilities.push("chat.appendMessage", "provider.login", "run.approval");
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.equal((await started).capabilities.at(-1), "run.approval");
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push("chat.appendMessage", "provider.login", "run.approval");
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  await status;
+  const identity = {chatId:"chat_01",taskId:"task_01",projectId:"project_01",worktreeId:"worktree_01",workspaceIdentity:"workspace_01",runId:"agent_run_01"};
+  const pending = client.approval({action:"list",identity});
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method,"run.approval");
+  child.stdout.write(responseLine(sent.requestId,{identity,pending:[],queued:null}));
+  assert.deepEqual((await pending).pending,[]);
+  assert.throws(()=>client.approval({action:"accept",identity} as any));
+});
+
 test("follow-up capability binds stored messages and preserves exact status identity", async () => {
   const fixture = JSON.parse(readFileSync(new URL("./fixtures/m5/followup-message-v1.json", import.meta.url), "utf8"));
   for (const corrupt of [false, true]) {

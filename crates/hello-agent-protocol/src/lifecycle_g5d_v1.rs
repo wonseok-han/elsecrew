@@ -130,7 +130,12 @@ fn parse_followup_status(
         .pointer_mut("/sidecar/capabilities")
         .and_then(Value::as_array_mut);
     let mut login = false;
+    let mut approval = false;
     let extended = capabilities.is_some_and(|capabilities| {
+        if capabilities.last().and_then(Value::as_str) == Some("run.approval") {
+            capabilities.pop();
+            approval = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("provider.login") {
             capabilities.pop();
             login = true;
@@ -143,6 +148,11 @@ fn parse_followup_status(
         }
     });
     let mut parsed = baseline(&normalized)?;
+    if approval && !login {
+        return Err(G5DAdmissionContractError::new(
+            "approval requires login baseline",
+        ));
+    }
     if login && !extended {
         return Err(G5DAdmissionContractError::new(
             "login requires followup baseline",
@@ -159,6 +169,9 @@ fn parse_followup_status(
             .sidecar
             .capabilities
             .push("provider.login".to_owned());
+    }
+    if approval {
+        parsed.sidecar.capabilities.push("run.approval".to_owned());
     }
     Ok(parsed)
 }

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인 대기열 IPC·채팅 카드 연결)
+
+- **구현**: 26aa845에서 `run.approval`의 exact list/decline 요청·전체 실행 신원/응답 결속을 Rust와 TS에 연결했다. capability는 기존 followup/login 뒤의 고정 suffix로 협상하고 Electron main 현재 frame·preload 양방향 검증을 거친다. 채팅 카드는 직렬 poll·응답 epoch·언마운트 무효화·일회 거절/실행 취소를 제공하며 추가 권한 허용 미지원과 접수/전달 차이를 표시한다. raw 명령·비밀·허용 권위를 추가하지 않는다.
+- **검증**: pnpm build 및 M5 renderer build PASS, 계약/bridge/security/scaffold61 PASS, Rust lifecycle3·shell-ready1·요청 오류 뒤 세션 유지1 PASS, strict clippy PASS/2.76초, 동일 검토자 scoped PASS. 초기 TS Array.at 호환성·테스트 run namespace·고정 channel 이름 검사 실패를 수정했다. 합성 브라우저 카드에서 대기→버튼 비활성→decline calls:1/접수 표시→취소 callback을 관측했다. 이는 카드 동작 확인이며 전체 작업대 디자인 검증이나 실제 모델 증거가 아니다. 테스트 탭/서버 종료, 실제 계정/모델 미사용.
+- **마감/남음**: 새 API를 통한 native 정상 응답·저장 실패·취소 상호작용 matrix PASS/57.38초, rustfmt/diff 검사 PASS 후 작업 단위 커밋한다. 구체적 요청 내용/허용 선택·최종 실행 정책·실제 provider 활성화와 유료 smoke는 미완료다. 제품 생성자는 blocked 유지하며 main 병합/push 없음. Karpathy 지침에 따라 기존 queue·검증·취소 경로를 재사용했다.
+
 ### 2026-09-29 · by GPT-6 Astra (native 승인 대기·일회 응답 연결)
 
 - **구현**: 90e1126에서 자동 Decline을 live 대기열로 바꿨다. 실제 stream의 미응답 요청에만 opaque ticket을 유지하며 내부 조회/거절 메서드는 전체 RunIdentity와 예약 입력을 검증한다. 명시적 거절 접수 뒤 다음 callback에서 원자 의도 저장 후에만 응답한다. 중복/미지 ID·취소·완료·서버 해제·연결 변경 뒤 요청은 거절한다. 재시작 시 live ticket 복원은 없다.
@@ -29,6 +35,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **승인 UI 경계(2026-09-29)**: run.approval은 opaque 대기 ID 조회와 명시 거절만 제공하며 receipt의 queued는 접수일 뿐 wire 전달 증거가 아니다. exact suffix·실행 신원·현재 frame을 검증하고 만료 요청 오류는 세션 전체를 종료하지 않는다. 카드의 허용 기능/요청 상세/실제 provider 활성화는 아직 없으며 이 부분 구현을 앱 완료로 주장하지 않는다.
 
 - **native 승인 live 대기열(2026-09-29)**: 자동 거절은 명시적 거절 접수 방식으로 교체했다. 조회/응답과 매 advance 뒤 실제 미응답 stream 집합을 대조하며 취소/완료/서버 해제 뒤 ticket을 제거한다. 요청 ID는 프로세스 로컬이며 원장만으로 복원하지 않는다. 내부 조회/거절은 exact 실행 신원과 예약 입력을 재검증한다. 공개 UI/IPC와 허용은 후속이다.
 

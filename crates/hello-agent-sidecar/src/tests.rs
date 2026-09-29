@@ -21,6 +21,46 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
     (root, path)
 }
 
+#[test]
+fn approval_errors_are_request_scoped_and_do_not_stop_the_session() {
+    let (_root, path) = database();
+    let instance = "approval_session";
+    let mut sidecar = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    sidecar.start_admission(&path);
+    wait_until_admitted(&mut sidecar);
+    let identity = json!({"chatId":"chat_01","taskId":"task_01","projectId":"project_01","worktreeId":"worktree_01","workspaceIdentity":"workspace_01","runId":"agent_run_01"});
+    for params in [
+        json!({"action":"list","identity":identity}),
+        json!({"action":"accept","identity":identity}),
+        json!({"action":"decline","identity":identity,"approvalId":"../x"}),
+        json!({"action":"list","identity":identity,"force":true}),
+    ] {
+        let response = sidecar
+            .handle_request(request_value(
+                instance,
+                "approval_request",
+                "run.approval",
+                params,
+            ))
+            .unwrap()
+            .response
+            .unwrap();
+        assert!(!response.ok);
+        assert_eq!(response.error.unwrap().code, "approvalUnavailable");
+    }
+    let status = sidecar
+        .handle_request(request_value(
+            instance,
+            "status_after_approval",
+            "system.status",
+            json!({}),
+        ))
+        .unwrap()
+        .response
+        .unwrap();
+    assert!(status.ok);
+}
+
 fn request_value(instance: &str, id: &str, method: &str, params: Value) -> RequestV1 {
     RequestV1 {
         protocol_version: PROTOCOL_VERSION,
@@ -54,6 +94,10 @@ fn g5d_shell_ready_precedes_storage_and_verifying_blocks_before_params_or_side_e
 
     let ready = sidecar.ready_event().expect("shell ready");
     let mut baseline = ready.payload.clone();
+    assert_eq!(
+        baseline["capabilities"].as_array_mut().unwrap().pop(),
+        Some(json!("run.approval"))
+    );
     assert_eq!(
         baseline["capabilities"].as_array_mut().unwrap().pop(),
         Some(json!("provider.login"))

@@ -28,6 +28,9 @@ mod provider_login_process;
 #[allow(dead_code)] // Internal session, pending validated vendor launcher and IPC/UI activation.
 mod provider_login_session;
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Internal broker; native compatibility/product admission pending.
+mod provider_model_proxy;
+#[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal preflight; not product execution authority.
 mod provider_preflight_session;
 #[cfg(unix)]
@@ -35,9 +38,6 @@ mod provider_preflight_session;
 mod provider_profile;
 #[cfg(target_os = "macos")]
 mod provider_runtime_sandbox;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)] // Internal broker; native compatibility/product admission pending.
-mod provider_model_proxy;
 mod storage;
 #[allow(dead_code)] // D1A keeps status internal until the later wire-activation wave.
 mod storage_lifetime;
@@ -546,6 +546,7 @@ impl SidecarSession {
                     .iter()
                     .chain(std::iter::once(&"chat.appendMessage"))
                     .chain(std::iter::once(&"provider.login"))
+                    .chain(std::iter::once(&"run.approval"))
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -938,6 +939,27 @@ impl Sidecar {
         }
 
         let action = match request.method.as_str() {
+            "run.approval" => {
+                let result = match self.agent_runtime.approval_request(
+                    &self.storage,
+                    &self.projects,
+                    &request.params,
+                ) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        return Ok(HandledRequest::response(error_response(
+                            &request,
+                            "approvalUnavailable",
+                            error.kind(),
+                            error.detail(),
+                        )))
+                    }
+                };
+                Ok(project::ProjectAction {
+                    result,
+                    ..project::ProjectAction::default()
+                })
+            }
             "provider.login" => {
                 #[cfg(target_os = "macos")]
                 let result =

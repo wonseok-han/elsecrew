@@ -108,6 +108,55 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    pub(crate) fn approval_request(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        params: &Value,
+    ) -> Result<Value, SidecarError> {
+        let invalid = || SidecarError::new("invalidParams", "invalid approval request");
+        let action = params
+            .get("action")
+            .and_then(Value::as_str)
+            .ok_or_else(invalid)?;
+        let keys: &[&str] = match action {
+            "list" => &["action", "identity"],
+            "decline" => &["action", "identity", "approvalId"],
+            _ => return Err(invalid()),
+        };
+        let object = params.as_object().ok_or_else(invalid)?;
+        if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
+            return Err(invalid());
+        }
+        let raw = &params["identity"];
+        validate_agent_adapter_payload_v1("runCancelRequest", raw).map_err(|_| invalid())?;
+        let identity = RunIdentity {
+            chat_id: raw["chatId"].as_str().unwrap().into(),
+            task_id: raw["taskId"].as_str().unwrap().into(),
+            project_id: raw["projectId"].as_str().unwrap().into(),
+            worktree_id: raw["worktreeId"].as_str().unwrap().into(),
+            workspace_identity: raw["workspaceIdentity"].as_str().unwrap().into(),
+            run_id: raw["runId"].as_str().unwrap().into(),
+        };
+        let queued = if action == "decline" {
+            let id = params["approvalId"].as_str().ok_or_else(invalid)?;
+            if !id.strip_prefix("approval_").is_some_and(|suffix| {
+                suffix.len() == 32
+                    && suffix
+                        .bytes()
+                        .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            }) {
+                return Err(invalid());
+            }
+            self.decline_native_approval(storage, projects, &identity, id)?;
+            Some(id)
+        } else {
+            None
+        };
+        let pending = self.pending_native_approvals(storage, projects, &identity)?;
+        Ok(json!({"identity":raw,"pending":pending,"queued":queued}))
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn pending_native_approvals(
         &mut self,

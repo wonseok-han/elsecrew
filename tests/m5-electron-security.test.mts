@@ -30,6 +30,16 @@ test("login opens a validated browser URL only in main and never on cancel", asy
   await assertRejectedWithoutSidecar(handler, {sender: {}, senderFrame: {}}, harness);
 });
 
+test("approval IPC rejects foreign frames and cannot grant acceptance", async () => {
+  const harness = await loadMain();
+  const handler = harness.handlers.get(approvalContract.APPROVAL_CHANNEL);
+  assert.ok(handler);
+  await assertRejectedWithoutSidecar(handler, {sender:{},senderFrame:{}}, harness);
+  const identity = {chatId:"chat_01",taskId:"task_01",projectId:"project_01",worktreeId:"worktree_01",workspaceIdentity:"workspace_01",runId:"agent_run_01"};
+  await assert.rejects(handler(harness.currentEvent(),{action:"accept",identity}));
+  assert.deepEqual(harness.sidecarCalls,[]);
+});
+
 test("main-process IPC accepts only the current main frame at the exact allowed origin", async () => {
   const harness = await loadMain();
   const handler = harness.handlers.get(M5_BRIDGE_V2_CHANNELS.projectGetTree);
@@ -303,6 +313,7 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
+  if (specifier.endsWith("approval-v1.ts")) return approvalContract;
   if (specifier === "node:fs") {
     return {
       mkdirSync: () => undefined,
@@ -324,3 +335,4 @@ function moduleFor(
   throw new Error(`unexpected main.ts runtime import: ${specifier}`);
 }
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
+import * as approvalContract from "../src/m5/contracts/approval-v1.ts";

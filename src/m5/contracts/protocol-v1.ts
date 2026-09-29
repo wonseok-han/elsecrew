@@ -41,6 +41,7 @@ export const METHODS_V1 = [
   "chat.get",
   "chat.appendMessage",
   "provider.login",
+  "run.approval",
   "agent.getCapabilities",
   "run.startFixture",
   "run.startAgent",

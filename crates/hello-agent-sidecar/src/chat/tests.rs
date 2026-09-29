@@ -1250,14 +1250,18 @@ fn text_candidate_cases(offline_native: bool, interactions: bool, proxied: bool)
                                             &id
                                         )
                                         .is_err());
-                                    runtime
-                                        .decline_native_approval(
+                                    let receipt = runtime
+                                        .approval_request(
                                             &fixture.storage,
                                             &fixture.projects,
-                                            &identity,
-                                            &id,
+                                            &json!({"action":"decline","approvalId":id,"identity":{
+                                                "chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,
+                                                "worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id
+                                            }}),
                                         )
                                         .unwrap();
+                                    assert_eq!(receipt["queued"], id);
+                                    assert_eq!(receipt["pending"], json!([]));
                                     assert!(runtime
                                         .decline_native_approval(
                                             &fixture.storage,
