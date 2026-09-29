@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (관리 설정 경고의 정확한 실패 단계 확인)
+
+- **조사/결과**: clean `5172b84`에서 승인된 임시 HOME·빈 workspace·네트워크 차단 initialize/config/read 검사를 한 번 수행했다. raw 응답 대신 고정 문자열 동등성 boolean만 임시 출력해 configWarning의 details가 `Failed to synchronize managed preferences`와 정확히 일치함을 확인했다. initialize PASS, config 검사 FAIL/2.53초, cleanup=ok·confirmed=true이며 기존 인증·계정/모델 조회·thread/turn은 사용하지 않았다.
+- **근거/한계**: 설치된 pinned 바이너리에 같은 오류 문구가 있다. [공식 소스](https://github.com/openai/codex/blob/main/codex-rs/config/src/loader/macos.rs)의 synchronize_managed_preferences는 CFPreferencesAppSynchronize 실패 시 이 오류를 반환한다. 공개 main 소스는 설치 바이너리와 동일 revision이라고 주장하지 않는다. [공식 관리 설정 문서](https://learn.chatgpt.com/docs/enterprise/managed-configuration#locations-and-precedence)는 macOS MDM 계층을 명시한다. 이전 passwd/Mach 거절 중 어느 것이 직접 원인인지는 아직 미확정이다.
+- **검증/다음**: 임시 진단 코드는 전부 제거해 제품 소스는 기준 HEAD와 동일하다. 경고 무시·MDM 우회·sandbox 권한 확대는 하지 않았다. 문서 diff와 AGENTS/CLAUDE 일치를 확인하고 기록만 커밋한다. 다음은 관리 설정 동기화에 필요한 최소 OS 접근을 분리 검증하는 일이며 실제 설정 호환성과 native 제품 연결은 아직 미완료다. main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (승인된 실제 Codex 오프라인 설정 검사)
 
 - **승인/범위**: 사용자가 새 임시 HOME·빈 작업 폴더·네트워크 차단의 initialize/config/read 검사를 승인해 `ae3a33f`에서 재개했다. `installed_codex_offline_configuration_only`는 ignored+명시적 환경 flag로만 실행되며 기존 pin·gate·deny-default sandbox·typed config-only 교환·종료 owner를 사용한다. 실제 계정/모델 조회·thread/turn·사용자 프로젝트는 사용하지 않았다.
@@ -286,7 +292,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **실제 offline 설정 검사는 아직 FAIL(2026-09-29)**: 사용자가 승인한 현재 exact CLI/helper 쌍은 deny-default 정책에서 initialize는 통과하지만 configWarning `Invalid configuration; using defaults.`로 config-only 검증이 실패한다. 관측된 managed/failed 분류와 passwd/앱 리소스/Mach 거절은 원인 후보이지 인과 확정이 아니다. 경고를 무시해 정상 실행으로 승격하지 않으며 기존 계정/모델/프로젝트를 사용하지 않았다. typed 검사·정상 cleanup 성공과 실제 설정 호환성 성공을 구분한다.
+- **실제 offline 설정 검사는 아직 FAIL(2026-09-29)**: 사용자가 승인한 현재 exact CLI/helper 쌍은 deny-default 정책에서 initialize는 통과하지만 configWarning `Invalid configuration; using defaults.`로 config-only 검증이 실패한다. 후속 검사에서 details가 `Failed to synchronize managed preferences`와 정확히 일치해 관리 설정 동기화 실패로 좁혔다. passwd/앱 리소스/Mach 거절 중 직접 원인은 미확정이다. 경고를 무시해 정상 실행으로 승격하지 않으며 기존 계정/모델/프로젝트를 사용하지 않았다. typed 검사·정상 cleanup 성공과 실제 설정 호환성 성공을 구분한다.
 
 - **종료 대기와 완료 응답 분리(2026-09-28)**: native 예약 실행은 통신 결과를 보관하고 poll_finish로 종료를 단계 진행한다. 대기 중 receipt/final/terminal/fence 해제는 없고 완료 후 기존 원자 저장 순서를 유지한다. run.cancelAgent 결과는 종료 증거를 요구하므로 취소 접수 flag로 대신할 수 없다. 공통 stdio의 지연 완료 응답을 fixture runtime에 연결해 검증했으며 native owner 등록은 남는다. 비정상 Drop fallback은 아직 동기식이다.
 
