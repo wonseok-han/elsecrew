@@ -792,6 +792,52 @@ impl<'a> LoginProcess<'a> {
         self.receive_preflight_observed(timeout, cancel, &mut |_| Ok(()))
     }
 
+    /// Test-only fixed offline probe. Never exposes raw observations in product.
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn receive_permission_probe(
+        &mut self,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<serde_json::Value, SidecarError> {
+        let result = (|| {
+            if !self.preflight_claimed || self.failed || self.finished {
+                return Err(failure());
+            }
+            let started = Instant::now();
+            let mut bytes = Vec::new();
+            loop {
+                if started.elapsed() >= timeout {
+                    return Err(failure());
+                }
+                self.tick()?;
+                match self
+                    .io
+                    .as_mut()
+                    .ok_or_else(failure)?
+                    .poll_permission_probe_chunk(cancel)?
+                {
+                    crate::provider_login_io::OutputChunk::Pending => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    crate::provider_login_io::OutputChunk::Eof => return Err(failure()),
+                    crate::provider_login_io::OutputChunk::Bytes(chunk) => {
+                        if bytes.len() + chunk.len() > 64 * 1024 {
+                            return Err(failure());
+                        }
+                        bytes.extend_from_slice(&chunk);
+                        if bytes.ends_with(b"\n") {
+                            return serde_json::from_slice(&bytes).map_err(|_| failure());
+                        }
+                    }
+                }
+            }
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
     pub(crate) fn receive_preflight_observed(
         &mut self,
         timeout: Duration,

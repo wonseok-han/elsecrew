@@ -30,6 +30,8 @@ mod provider_login_session;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal broker; native compatibility/product admission pending.
 mod provider_model_proxy;
+#[cfg(all(test, target_os = "macos"))]
+mod provider_permission_probe;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal preflight; not product execution authority.
 mod provider_preflight_session;

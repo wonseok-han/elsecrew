@@ -48,6 +48,8 @@ pub(crate) enum NativeFrame {
     Turn(hello_agent_core::provider::vendor_observation::codex_turn::TurnRequest),
     Approval(hello_agent_core::provider::vendor_observation::codex_approval::ApprovalReply),
     ConfinedAccept(crate::provider_preflight_session::ConfinedAcceptReply),
+    #[cfg(all(test, target_os = "macos"))]
+    PermissionProbe(crate::provider_permission_probe::ProbeFrame),
 }
 
 impl NativeFrame {
@@ -57,6 +59,8 @@ impl NativeFrame {
             Self::Turn(frame) => frame.as_str().as_bytes(),
             Self::Approval(frame) => frame.as_str().as_bytes(),
             Self::ConfinedAccept(frame) => frame.as_bytes(),
+            #[cfg(all(test, target_os = "macos"))]
+            Self::PermissionProbe(frame) => frame.as_bytes(),
         }
     }
 }
@@ -70,6 +74,41 @@ pub(crate) enum OutputChunk {
 }
 
 impl LoginIo {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn poll_permission_probe_chunk(
+        &mut self,
+        cancel: &AtomicBool,
+    ) -> Result<OutputChunk, SidecarError> {
+        if self.failed
+            || self.outgoing.is_some()
+            || !self.pending.is_empty()
+            || cancel.load(Ordering::Acquire)
+        {
+            return Err(failure());
+        }
+        let mut chunk = [0; 4096];
+        match self.output.read(&mut chunk) {
+            Ok(0) => Ok(OutputChunk::Eof),
+            Ok(count) => {
+                self.received += count;
+                if self.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
+                    self.failed = true;
+                    return Err(failure());
+                }
+                Ok(OutputChunk::Bytes(chunk[..count].to_vec()))
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                Ok(OutputChunk::Pending)
+            }
+            Err(_) => Err(failure()),
+        }
+    }
+
     pub(crate) fn queue_native(&mut self, frame: NativeFrame) -> Result<(), SidecarError> {
         self.queue_bytes(frame.bytes())
     }

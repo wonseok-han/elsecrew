@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (승인 대기 중 오프라인 도구 시험 준비)
+
+- **범위**: 167d961 기준 실제 설치 CLI의 command/exec 시험 승인은 아직 받지 않았다. 대신 macOS test-only `provider_permission_probe`를 준비했다. 고정 initialize/initialized/config-read/command-exec 이외 RPC가 없으며 생성한 임시 profile·sentinel·workspace만 사용한다. 설치 CLI 시험은 ignored와 별도 승인 환경변수로 막고 CLI/helper pin을 release 전에도 대조한다. 실제 계정/모델/사용자 프로젝트는 쓰지 않는다.
+- **통신/정리**: 제품의 opaque observation을 공개하지 않고 cfg(test) 프레임·bounded 수신만 추가했다. 기존 LoginProcess owner·관측·15초 교환 예산·종료 증거를 재사용한다. 성공/거절 뒤 cleanup을 요구하고 불확실 종료에는 임시 폴더를 보존한다. Karpathy 지침대로 별도 production 실행기를 만들지 않았다.
+- **검증/수정**: 초기 시험 DB 파일명은 profile binding의 고정 이름과 달라 거절되어 수정했다. core의 비공개 observation bytes를 열지 않고 test-only 수신으로 바꿨다. 가짜 프로세스의 성공/거절 정리 및 legacy sandbox flags 혼용 방지 2개 시험을 통과했다. 설치 CLI case는 컴파일만 했으며 아직 실행하지 않았다. 다음은 명시 승인 뒤 그 단일 시험을 실행하는 것이고, 결과를 actual provider 제품 활성화나 전체 앱 완료와 혼동하지 않는다.
+- **최종 검사**: toy 2 PASS/0.40초, strict all-targets clippy PASS/2.53초·제품 lib cargo check PASS·scoped rustfmt/diff PASS. 독립 검토의 non-mac cfg 지적은 상위 모듈 자체가 macOS 전용이라 실제 회귀가 아니었음을 동일 검토자가 정정했다. helper/wrapper cfg는 명시적으로 통일하고 재검토 PASS. 설치 target은 macOS ARM64뿐이므로 Windows/Linux 검증을 주장하지 않는다. M5 작업 단위 커밋만 하며 main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (인증/도구 프로필 경계 실측)
 
 - **기준/범위**: 6f8b569 clean tree에서 메인이 직접 조사했다. OpenAI Docs로 app-server/permissions 공식 문서를 확인하고, 실제 인증 파일 대신 임시 sentinel만 사용했다. CLI/helper SHA-256은 기존 고정값 3e11ccc…aca5a / 4c398936…43f6d와 일치한다. 홈 읽기·파일 쓰기·네트워크를 OS 차단한 help 검사와 지정 임시 폴더만 쓰는 일반/experimental schema 생성만 실행했다. 로그인/계정/모델/도구 RPC는 보내지 않았다.
