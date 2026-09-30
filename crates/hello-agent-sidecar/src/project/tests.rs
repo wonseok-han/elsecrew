@@ -35,6 +35,73 @@ fn prepared_backup_fixture() -> (Fixture, String) {
 
 #[cfg(unix)]
 #[test]
+fn applying_item_reader_uses_bound_archive_and_rejects_stale_or_corrupt_records() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"updated").unwrap();
+    let review =
+        persistence::publish(&f.manager, &mut f.storage, &f.project_id, "req_item_review").unwrap();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            review["reviewId"].as_str().unwrap(),
+        )
+        .unwrap();
+    let grant = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_item_backup")
+        .unwrap();
+    let prepared = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        grant,
+        "req_item_begin",
+    )
+    .unwrap();
+    assert!(
+        intent::inspect_write_item(&f.manager, &f.storage, &f.project_id, &prepared, 0).is_err()
+    );
+    let applying = intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &prepared,
+        "req_item_start",
+    )
+    .unwrap();
+    let db = f.manager.data_root.join("hello-agent.sqlite3");
+    drop(f.storage);
+    let storage = Storage::open(&db).unwrap();
+    let item =
+        intent::inspect_write_item(&f.manager, &storage, &f.project_id, &applying, 0).unwrap();
+    assert_eq!(item["path"], "src/edit.txt");
+    assert_eq!(item["before"]["size"], 5);
+    assert_eq!(item["after"]["size"], 7);
+    assert!(intent::inspect_write_item(&f.manager, &storage, &f.project_id, &applying, 1).is_err());
+    let mut wrong = applying.clone();
+    wrong["backup"]["header"]["count"] = json!(2);
+    assert!(intent::inspect_write_item(&f.manager, &storage, &f.project_id, &wrong, 0).is_err());
+    let path = f
+        .manager
+        .data_root
+        .join("application-backups-v1")
+        .join(applying["backup"]["name"].as_str().unwrap());
+    fs::write(path, b"corrupt archive").unwrap();
+    assert!(intent::inspect_write_item(&f.manager, &storage, &f.project_id, &applying, 0).is_err());
+    assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), applying);
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn application_write_boundary_survives_restart_and_cannot_be_abandoned() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

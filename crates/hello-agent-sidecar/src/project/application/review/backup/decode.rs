@@ -64,20 +64,28 @@ fn image(value: &Value) -> Result<(), ProjectFailure> {
 }
 
 pub(super) fn validate(input: &mut impl BufRead) -> Result<Value, ProjectFailure> {
-    validate_inner(input, None)
+    validate_inner(input, None, None).map(|(header, _)| header)
+}
+
+// Retain only one bounded metadata frame; never expose it before EOF and the
+// complete changes digest have passed. Payload bytes are validated, not retained.
+pub(super) fn item(input: &mut impl BufRead, index: u64) -> Result<(Value, Value), ProjectFailure> {
+    let (header, selected) = validate_inner(input, None, Some(index))?;
+    Ok((header, selected.ok_or_else(invalid)?))
 }
 
 pub(super) fn validate_against(
     input: &mut impl BufRead,
     baseline: &SourceInventory,
 ) -> Result<Value, ProjectFailure> {
-    validate_inner(input, Some(baseline))
+    validate_inner(input, Some(baseline), None).map(|(header, _)| header)
 }
 
 fn validate_inner(
     input: &mut impl BufRead,
     baseline: Option<&SourceInventory>,
-) -> Result<Value, ProjectFailure> {
+    selected_index: Option<u64>,
+) -> Result<(Value, Option<Value>), ProjectFailure> {
     let mut metadata_budget = 32 * 1024 * 1024;
     let mut content_budget = MAX_BYTES;
     let mut path_budget = 8 * 1024 * 1024usize;
@@ -91,6 +99,7 @@ fn validate_inner(
     if header["version"] != serde_json::json!(2)
         || !header["binding"].is_object()
         || count > 100000
+        || selected_index.is_some_and(|index| index >= count)
         || id.len() != 39
         || !id.starts_with("review_")
         || !id[7..]
@@ -106,7 +115,8 @@ fn validate_inner(
     };
     serde_json::to_writer(&mut changes, &(1u32, &header["binding"])).map_err(|_| invalid())?;
     let mut previous = String::new();
-    for _ in 0..count {
+    let mut selected = None;
+    for index in 0..count {
         let item = line(input, &mut metadata_budget)?;
         object(&item, &["path", "before", "after"])?;
         let path = item["path"].as_str().ok_or_else(invalid)?;
@@ -177,13 +187,16 @@ fn validate_inner(
             return Err(invalid());
         }
         serde_json::to_writer(&mut changes, &(path, before_image, after)).map_err(|_| invalid())?;
+        if selected_index == Some(index) {
+            selected = Some(item);
+        }
     }
     if !input.fill_buf().map_err(|_| invalid())?.is_empty()
         || <[u8; 32]>::from(changes.hash.finalize()) != expected
     {
         return Err(invalid());
     }
-    Ok(header)
+    Ok((header, selected))
 }
 
 #[cfg(test)]
@@ -227,6 +240,33 @@ mod tests {
 
     fn valid(bytes: &[u8]) -> bool {
         validate(&mut std::io::Cursor::new(bytes)).is_ok()
+    }
+
+    #[test]
+    fn selected_item_requires_the_entire_archive_to_validate() {
+        let first = fixture();
+        let mut second = fixture();
+        second.0["path"] = json!("b");
+        let bytes = archive(&[first.clone(), second.clone()]);
+        for (index, expected) in [(0, &first.0), (1, &second.0)] {
+            let (header, selected) = item(&mut std::io::Cursor::new(&bytes), index).unwrap();
+            assert_eq!(header["count"], 2);
+            assert_eq!(&selected, expected);
+        }
+        for index in [2, u64::MAX] {
+            assert!(item(&mut std::io::Cursor::new(&bytes), index).is_err());
+        }
+        assert!(item(&mut std::io::Cursor::new(archive(&[])), 0).is_err());
+        // Even the first item's metadata is unavailable if a later payload fails.
+        for cut in 0..bytes.len() {
+            assert!(item(&mut std::io::Cursor::new(&bytes[..cut]), 0).is_err());
+        }
+        let mut corrupt = bytes.clone();
+        *corrupt.last_mut().unwrap() ^= 1;
+        assert!(item(&mut std::io::Cursor::new(corrupt), 0).is_err());
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(item(&mut std::io::Cursor::new(trailing), 0).is_err());
     }
 
     #[test]

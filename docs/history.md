@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (결속 백업의 복구 항목 조회)
+
+- f69f728에서 기존 archive decoder/verify를 재사용해 선택 순번의 metadata 한 프레임만 추가 보존한다. 전체 파일 hash·payload/변경 digest·canonical framing·EOF·전후 신원 확인 전에는 항목을 반환하지 않는다. intent::inspect_write_item은 exact applying/lock과 project의 exact ready backup/header/binding에서만 읽는다.
+- 검증: decoder 기존/신규 3 PASS(0.03초; 모든 byte truncation·뒤쪽 손상·trailing·순번 범위 포함), 실제 합성 snapshot/SQLite 재시작·항목 before/after 조회·옛/변조 기록·손상 백업 거절과 원본/잠금 보존 1 PASS(9.91초). strict all-targets clippy와 변경 범위 rustfmt·diff 검사 PASS. 독립 read-only 검토 scoped PASS이며 테스트 재실행은 아니다.
+- Karpathy 지침으로 별도 parser 대신 기존 bounded 검증기를 공유했다. 단건마다 전체 archive를 읽는 복구 조회이므로 전체 writer의 반복 적용 루프로 사용하지 않는다. 다음은 순차 journal/항목별 진행 및 현재 원본 분류와 쓰기·복원 연결이다. 실제 source writes·계정/유료 모델/사용자 원본 시험·main 병합/push 없음. 앱 전체 완료는 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (원본 쓰기 시작 전 영속 복구 경계)
 
 - e5ab16c에서 intent::mark_write_started를 추가했다. exact prepared/lock 및 결속 ready archive를 다시 검증하고 project applying·lock applicationWriting을 같은 CAS transaction으로 게시한다. 최초 파일 변경 전 사용해야 하는 내부 복구 fence이며 파일 쓰기 capability가 아니다. 아직 실제 writer/public caller는 없다.

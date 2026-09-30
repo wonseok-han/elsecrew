@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 적용 항목 읽기(내부): `intent::inspect_write_item`은 현재 applying intent/lock·백업 원장의 exact ready 기록에 결속된 archive에서 지정 순번의 path/before/after metadata를 읽는다. 기존 전체 archive hash·canonical decoder·payload 및 변경 digest·EOF·전후 파일 신원 검증을 재사용하고 모두 통과하기 전에는 항목을 반환하지 않는다. metadata 한 프레임(기존64KiB 제한)만 추가 보존하며 payload를 메모리에 모으지 않는다. 호출마다 전체 archive를 읽으므로 전체 적용 루프의 항목별 반복 호출용 성능 경로는 아니며, 향후 순차 writer/journal과 구분한다. 이 읽기는 현재 원본의 before/after 분류나 복원·쓰기 권위가 아니다.
+
 > 쓰기 시작 영속 경계(내부): `intent::mark_write_started`는 exact prepared 기록과 lock을 대조하고 결속된 ready 백업을 실제 archive까지 재검증한 뒤 project `applying`과 lock `applicationWriting`을 같은 CAS transaction으로 게시한다. 중간 DB 실패는 prepared를 보존하고, 성공 뒤에는 재시작해도 recovery 잠금을 유지한다. 재전송은 쓰기 재개 권위가 아니므로 거절하며 applying에 대해 준비 취소도 거절한다. 이는 첫 파일 변경 전에 필요한 영속 fence일 뿐 파일별 journal·현재 원본/작업 복사본 재검증·외부 작성자 경합 보호·source writer나 restore의 구현은 아니다. 제품 caller는 없다.
 
 > 적용 입장 직렬화 전제: fixture 시작과 native `RunPreparation::reserve`는 단일 runtime의 `&mut Storage`를 동기적으로 보유한 동안 project intent를 재검사하고 run을 기록한다. 그 사이 scheduler yield/외부 callback은 없고 SQLite EXCLUSIVE 연결이 별도 연결의 쓰기를 거절한다. 사전 resolve 결과만으로 예약하지 않는다. 따라서 현재 앱 내부에서 intent 게시가 검사와 예약 사이에 끼어들 수 없으며, 다중 DB writer나 비동기 예약으로 바꿀 때에는 project revision을 포함한 atomic admission으로 다시 설계해야 한다. 이는 파일 시스템의 외부 작성자 배제를 뜻하지 않는다.

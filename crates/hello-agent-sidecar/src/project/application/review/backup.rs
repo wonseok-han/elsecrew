@@ -354,6 +354,26 @@ pub(in crate::project) fn verify(
     manager: &ProjectManager,
     backup: &Backup,
 ) -> Result<Value, ProjectFailure> {
+    verify_inner(manager, backup, None).map(|(header, _)| header)
+}
+
+/// Read a recovery item's exact metadata from a trusted ledger descriptor.
+/// This does not grant write authority or classify the current source file.
+#[allow(dead_code)]
+pub(in crate::project) fn verify_item(
+    manager: &ProjectManager,
+    backup: &Backup,
+    index: u64,
+) -> Result<(Value, Value), ProjectFailure> {
+    let (header, item) = verify_inner(manager, backup, Some(index))?;
+    Ok((header, item.ok_or_else(invalid)?))
+}
+
+fn verify_inner(
+    manager: &ProjectManager,
+    backup: &Backup,
+    index: Option<u64>,
+) -> Result<(Value, Option<Value>), ProjectFailure> {
     let dir = directory(manager)?;
     let mut file = open(&dir, &backup.name, false)?;
     let meta = file.metadata().map_err(|_| invalid())?;
@@ -387,13 +407,22 @@ pub(in crate::project) fn verify(
         return Err(invalid());
     }
     file.rewind().map_err(|_| invalid())?;
-    let header = decode::validate(&mut std::io::BufReader::new(&mut file))?;
+    let (header, item) = match index {
+        Some(index) => {
+            let (header, item) = decode::item(&mut std::io::BufReader::new(&mut file), index)?;
+            (header, Some(item))
+        }
+        None => (
+            decode::validate(&mut std::io::BufReader::new(&mut file))?,
+            None,
+        ),
+    };
     if stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&meta) != stamp(&dir.symlink_metadata(&backup.name).map_err(|_| invalid())?)
     {
         return Err(invalid());
     }
-    Ok(header)
+    Ok((header, item))
 }
 
 #[cfg(test)]

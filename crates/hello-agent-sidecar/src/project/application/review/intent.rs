@@ -133,6 +133,39 @@ pub(in crate::project) fn inspect(
     Ok(record.clone())
 }
 
+/// Read a single journal candidate from the current applying record, never from
+/// renderer-supplied file paths or an unbound archive found on disk.
+#[allow(dead_code)]
+pub(in crate::project) fn inspect_write_item(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+    expected: &Value,
+    index: u64,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applying" || inspect(storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let review_id = expected["backup"]["header"]["reviewId"]
+        .as_str()
+        .ok_or_else(invalid)?;
+    let project = required_project(storage, project_id)?;
+    if project
+        .get("application_backups")
+        .and_then(|v| v.get(review_id))
+        != Some(&expected["backup"])
+        || expected["backup"]["state"] != "ready"
+    {
+        return Err(invalid());
+    }
+    let archive = backup::Backup::from_value(&expected["backup"]["backup"])?;
+    let (header, item) = backup::verify_item(manager, &archive, index)?;
+    if header != expected["backup"]["header"] || header["binding"] != expected["binding"] {
+        return Err(invalid());
+    }
+    Ok(item)
+}
+
 /// Persist before the first source mutation. This is a recovery fence, NOT a
 /// source-write capability: the eventual writer must separately establish file
 /// admission and OS race protection. Replaying this transition never authorizes

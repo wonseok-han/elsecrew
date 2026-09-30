@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 항목 복구 입력(2026-09-30 내부): applying intent와 백업 원장에 결속된 archive의 특정 순번 metadata를 전체 검증 후 읽는 경로를 추가했다. 파일별 journal에 임의 renderer path를 받지 않기 위한 읽기 기반이며 진행 기록/원본 분류/쓰기·복원 기능은 아니다. 단건 조회마다 전체 archive를 재검증하므로 전체 적용은 별도의 순차 처리로 연결해야 한다.
+
 - 2026-09-30 내부 진행: prepared→applying 영속 전환과 applicationWriting 잠금을 원자 게시하는 `intent::mark_write_started`를 구현했다. ready 백업 재검증 실패·DB 실패 시 전환하지 않으며 성공 뒤 재시작/재전송/준비 취소로 잠금을 해제하지 않는다. 파일 쓰기 권위가 아닌 중단 복구 경계이고 실제 writer·파일별 journal·OS 경합 보호·복원/UI는 아직 남는다.
 
 - 전체 작업 복사본의 명시 반영, 반영 직전 복원 지점, 명시 되돌리기. 부분 반영·자동 충돌 해결·자동 Git commit/push는 하지 않는다.
