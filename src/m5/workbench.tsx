@@ -17,6 +17,7 @@ import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
+import { requestEditorSave } from "./editor-actions.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
 import { WorkStatusNotice } from "./work-status-view.tsx";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
@@ -241,7 +242,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             <span>{activeTab?.path ?? "파일을 선택하세요"}</span>
             {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>저장된 내용 다시 불러오기</button>}
             {activeTab?.mode === "text" && (
-              <button type="button" onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
+              <button type="button" title="저장 (⌘S / Ctrl+S)" onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
                 {activeTab.saveState === "saving" ? "저장 중…" : activeTab.saveState === "conflicted" ? "충돌 해결 필요" : "저장"}
               </button>
             )}
@@ -255,7 +256,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             }}>{reloadingDraft ? "다시 불러오는 중…" : "편집 내용 버리고 다시 불러오기"}</button>
             {!snapshot.tabs.includes(reloadDraft) && <p>확인 중 파일 상태가 바뀌었어요. 취소한 뒤 다시 확인해 주세요.</p>}
           </section>}
-          <EditorContent tab={activeTab} readOnly={!admissionReady} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} />
+          <EditorContent tab={activeTab} readOnly={!admissionReady || snapshot.actionBlocked} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} onSave={(path) => {
+            if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
+          }} />
         </section>
 
         <aside className="m5-panel m5-changes" aria-label="변경">
@@ -351,22 +354,22 @@ function PanelTitle({ active, panel, onSelect, children }: { active: boolean; pa
   return <button type="button" className="m5-panel-title" aria-pressed={active} onClick={() => onSelect(panel)}>{children}</button>;
 }
 
-function EditorContent({ tab, readOnly, onChange }: { tab: EditorTab | null; readOnly: boolean; onChange: (text: string) => void }) {
+function EditorContent({ tab, readOnly, onChange, onSave }: { tab: EditorTab | null; readOnly: boolean; onChange: (text: string) => void; onSave: (path: string) => void }) {
   if (!tab) return <Empty text="파일을 열면 여기서 코드를 읽고 편집할 수 있어요." />;
   if (tab.mode === "binary") return <Empty text="이 파일은 이진 파일이라 내용을 편집하지 않아요." />;
   if (tab.mode === "tooLarge") return <Empty text="5MiB보다 큰 파일은 안전하게 미리 보지 않아요." />;
   if (tab.saveState === "conflicted") {
     return <section className="m5-conflict"><strong>저장 충돌</strong><p>내 초안은 그대로 보존했어요. 필요한 내용을 아래에서 복사한 뒤 저장된 파일을 다시 불러올 수 있어요.</p><textarea aria-label="보존된 편집 내용" readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><details><summary>기술 정보</summary><pre>{tab.technicalDetail ?? "external file change"}</pre></details></section>;
   }
-  return <MonacoEditor tab={tab} readOnly={readOnly} onChange={onChange} />;
+  return <MonacoEditor tab={tab} readOnly={readOnly} onChange={onChange} onSave={onSave} />;
 }
 
-function MonacoEditor({ tab, readOnly, onChange }: { tab: EditorTab; readOnly: boolean; onChange: (text: string) => void }) {
+function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; readOnly: boolean; onChange: (text: string) => void; onSave: (path: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
-  const latest = useRef({ tab, readOnly, onChange });
-  useLayoutEffect(() => { latest.current = { tab, readOnly, onChange }; }, [tab, readOnly, onChange]);
+  const latest = useRef({ tab, readOnly, onChange, onSave });
+  useLayoutEffect(() => { latest.current = { tab, readOnly, onChange, onSave }; }, [tab, readOnly, onChange, onSave]);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,8 +388,19 @@ function MonacoEditor({ tab, readOnly, onChange }: { tab: EditorTab; readOnly: b
         ariaLabel: `${tab.path} 코드 편집기`,
       });
       editor.current = nextEditor;
+      const saveAction = nextEditor.addAction({
+        id: "hello-agent.save-file",
+        label: "작업 복사본에 저장",
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        contextMenuGroupId: "9_cutcopypaste",
+        run: () => {
+          const current = latest.current;
+          requestEditorSave(current.tab, current.readOnly, current.onSave);
+        },
+      });
       const subscription = nextModel.onDidChangeContent(() => latest.current.onChange(nextModel.getValue()));
       cleanup = () => {
+        saveAction.dispose();
         subscription.dispose();
         nextEditor.dispose();
         nextModel.dispose();

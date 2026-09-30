@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (편집기 저장 단축키 연결)
+
+- 원본 반영 정책은 미승인으로 유지하고 독립적인 IDE 편집 기능을 진행했다. Monaco의 Cmd/Ctrl+S와 context menu 저장을 기존 saveActive에 연결했다. 최신 tab/path·readOnly·dirty 조건과 현재 active path/admission을 확인하며 controller의 기존 충돌/작업 차단 검증은 유지한다. 편집기 밖 전역 키 이벤트는 등록하지 않는다.
+- 검증: 저장 진입 24조합을 포함한 editor actions/state 43 PASS, TypeScript noEmit·M5 renderer build PASS(기존 Monaco chunk 크기 경고 유지), 숨김 Electron/Chromium 2 PASS(실제 단축키 입력→save commit 1회→dirty 해제). 실제 사용자 파일/모델/계정을 사용하지 않았고 시험 창은 종료됐다. diff 검사 PASS.
+- Karpathy 지침으로 기존 저장 경로와 회귀 도구를 재사용했다. 원본 적용/복원 안전 정책과 5GiB 제안은 승인하지 않았으며 앞선 검토 문서 변경은 미커밋으로 보존한다. main 병합/push 없음. 전체 앱 완료는 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (pending 파일의 읽기 전용 원본 분류)
 
 - aeab4fc에서 intent/observation.rs를 추가했다. exact pending/archive와 저장 canonical source/Git identity를 대조하고 기존 두-pass raw inventory·root 재열기 stamp 및 부모 real directory를 검사한다. before 전체 metadata/inode·after 정규화 image·충돌을 구분해 현재 관측만 반환한다. 파일/DB/잠금 변경은 없다.

@@ -235,6 +235,23 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('[role=alertdialog]') && !document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "saved text restored")};
   })()`);
   await window.webContents.executeJavaScript(`(async () => {
+    globalThis.shortcutSaves = 0;
+    const commit = window.m5.commitFileSave;
+    window.m5.commitFileSave = async (...args) => { globalThis.shortcutSaves++; return commit(...args); };
+    document.querySelector('.monaco-editor textarea').focus();
+  })()`);
+  await window.webContents.debugger.sendCommand("Input.insertText", { text: "S" });
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "shortcut dirty draft")};
+  })()`);
+  for (const type of ["keyDown", "keyUp"]) {
+    await window.webContents.debugger.sendCommand("Input.dispatchKeyEvent", {
+      type, key: "s", code: "KeyS", windowsVirtualKeyCode: 83,
+      modifiers: process.platform === "darwin" ? 4 : 2,
+    });
+  }
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("globalThis.shortcutSaves === 1 && !document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "keyboard save commits the snapshot draft")};
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
