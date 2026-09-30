@@ -79,34 +79,48 @@ impl LoginIo {
         &mut self,
         cancel: &AtomicBool,
     ) -> Result<OutputChunk, SidecarError> {
-        if self.failed
-            || self.outgoing.is_some()
-            || !self.pending.is_empty()
-            || cancel.load(Ordering::Acquire)
-        {
+        if self.failed || self.outgoing.is_some() || cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
-        let mut chunk = [0; 4096];
-        match self.output.read(&mut chunk) {
-            Ok(0) => Ok(OutputChunk::Eof),
-            Ok(count) => {
-                self.received += count;
-                if self.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
-                    self.failed = true;
+        for _ in 0..32 {
+            if let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+                if end == 0 || end > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
                     return Err(failure());
                 }
-                Ok(OutputChunk::Bytes(chunk[..count].to_vec()))
+                return Ok(OutputChunk::Bytes(self.pending.drain(..=end).collect()));
             }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                ) =>
-            {
-                Ok(OutputChunk::Pending)
+            if self.pending.len() > PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+                return Err(failure());
             }
-            Err(_) => Err(failure()),
+            let mut chunk = [0; 4096];
+            match self.output.read(&mut chunk) {
+                Ok(0) => {
+                    return if self.pending.is_empty() {
+                        Ok(OutputChunk::Eof)
+                    } else {
+                        Err(failure())
+                    }
+                }
+                Ok(count) => {
+                    self.received += count;
+                    if self.received > PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
+                        self.failed = true;
+                        return Err(failure());
+                    }
+                    self.pending.extend_from_slice(&chunk[..count]);
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    return Ok(OutputChunk::Pending);
+                }
+                Err(_) => return Err(failure()),
+            }
         }
+        Ok(OutputChunk::Pending)
     }
 
     pub(crate) fn queue_native(&mut self, frame: NativeFrame) -> Result<(), SidecarError> {
@@ -557,6 +571,29 @@ mod tests {
             io.received,
             frames.iter().map(|frame| frame.len()).sum::<usize>()
         );
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permission_probe_preserves_coalesced_lines_and_rejects_invalid_frames() {
+        let mut child = fixture(None);
+        let mut io = LoginIo::attach(&mut child.0).unwrap();
+        let cancel = AtomicBool::new(false);
+        io.pending.extend_from_slice(b"{\"id\":1}\n{\"id\":2}\n");
+        for expected in [b"{\"id\":1}\n", b"{\"id\":2}\n"] {
+            match io.poll_permission_probe_chunk(&cancel).unwrap() {
+                OutputChunk::Bytes(bytes) => assert_eq!(bytes, expected),
+                _ => panic!("buffered line was lost"),
+            }
+        }
+        assert!(io.pending.is_empty());
+        io.pending.push(b'\n');
+        assert!(io.poll_permission_probe_chunk(&cancel).is_err());
+        io.pending = vec![b'x'; PROVIDER_OBSERVATION_LINE_MAX_BYTES + 1];
+        assert!(io.poll_permission_probe_chunk(&cancel).is_err());
+        io.pending.clear();
+        assert!(io
+            .poll_permission_probe_chunk(&AtomicBool::new(true))
+            .is_err());
     }
     #[test]
     fn timeout_cancel_partial_eof_and_oversize_poison_connection() {

@@ -34,13 +34,7 @@ fn configuration_arguments() -> Vec<std::ffi::OsString> {
         "-c",
         "approval_policy=\"never\"",
         "-c",
-        "permissions.hello-agent-probe.filesystem.\":root\"=\"deny\"",
-        "-c",
-        "permissions.hello-agent-probe.filesystem.\":minimal\"=\"read\"",
-        "-c",
-        "permissions.hello-agent-probe.filesystem.\":workspace_roots\".\".\"=\"write\"",
-        "-c",
-        "permissions.hello-agent-probe.network.enabled=false",
+        "permissions={hello-agent-probe={filesystem={\":root\"=\"deny\",\":minimal\"=\"read\",\":workspace_roots\"={\".\"=\"write\"}},network={enabled=false}}}",
         "-c",
         "features.hooks=false",
         "-c",
@@ -83,7 +77,7 @@ fn exchange(
     };
     process.begin_preflight()?;
     for frame in [
-        json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"hello-agent-offline-permission-probe","version":"0.1.0"},"capabilities":{"experimentalApi":true}}}),
+        json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"hello-agent-offline-permission-probe","version":"0.1.0"},"capabilities":{"experimentalApi":true,"optOutNotificationMethods":["remoteControl/status/changed"]}}}),
         json!({"method":"initialized"}),
         json!({"id":2,"method":"config/read","params":{"includeLayers":true}}),
         json!({"id":3,"method":"command/exec","params":probe_command(home, workspace)}),
@@ -98,9 +92,19 @@ fn exchange(
             std::thread::sleep(Duration::from_millis(2));
         }
         let Some(id) = id else { continue };
-        let reply = process.receive_permission_probe(remaining()?, &cancel)?;
+        let reply = process
+            .receive_permission_probe(remaining()?, &cancel)
+            .map_err(|error| {
+                SidecarError::new(
+                    "permissionProbeFailed",
+                    format!("RPC {id} receive failed: {}", error.detail()),
+                )
+            })?;
         if reply["id"] != id || reply.get("error").is_some() {
-            return Err(failure());
+            return Err(SidecarError::new(
+                "permissionProbeFailed",
+                format!("RPC {id} rejected or mismatched"),
+            ));
         }
         let result = &reply["result"];
         match id {
@@ -112,11 +116,22 @@ fn exchange(
                     || !config["sandbox_mode"].is_null()
                     || config["permissions"]["hello-agent-probe"]["network"]["enabled"] != false
                 {
-                    return Err(failure());
+                    return Err(SidecarError::new(
+                        "permissionProbeFailed",
+                        "permission config mismatch",
+                    ));
                 }
             }
             3 if result["exitCode"] != 0 || result["stdout"] != "protected" => {
-                return Err(failure())
+                return Err(SidecarError::new(
+                    "permissionProbeFailed",
+                    format!(
+                        "sentinel command mismatch: exit={:?}, nested_sandbox_denied={}",
+                        result["exitCode"].as_i64(),
+                        result["stderr"].as_str().is_some_and(|value| value
+                            .contains("sandbox-exec: sandbox_apply: Operation not permitted"))
+                    ),
+                ))
             }
             _ => {}
         }
@@ -211,21 +226,25 @@ printf '%s\n' '{{"id":3,"result":{{"exitCode":{},"stdout":"protected"}}}}'
         );
     }
     assert_eq!(
-        observation.is_err(),
-        rejected,
-        "only protocol success/failure is reported"
-    );
-    assert_eq!(
         std::fs::read(home.join("skills/credential-sentinel")).unwrap(),
         b"synthetic-only"
     );
     assert!(!home.join("auth.json").exists());
-    if installed {
+    if installed && observation.is_ok() {
         assert_eq!(
             std::fs::read(workspace.join("probe-result")).unwrap(),
             b"workspace-ok"
         );
     }
+    assert_eq!(
+        observation.is_err(),
+        rejected,
+        "cleanup confirmed, sentinel unchanged, auth absent; sanitized probe result: {:?}",
+        observation
+            .as_ref()
+            .err()
+            .map(|error| (error.kind(), error.detail()))
+    );
 }
 
 #[test]
@@ -240,6 +259,16 @@ fn permission_probe_never_mixes_legacy_sandbox_flags() {
     let arguments: Vec<_> = arguments.iter().map(|arg| arg.to_str().unwrap()).collect();
     assert!(arguments.contains(&"default_permissions=\"hello-agent-probe\""));
     assert!(arguments.contains(&"approval_policy=\"never\""));
+    // Override keys are split by the CLI, not parsed as quoted TOML keys.
+    // Keep special filesystem keys inside one TOML value instead.
+    assert_eq!(
+        arguments
+            .iter()
+            .filter(|arg| arg.starts_with("permissions="))
+            .count(),
+        1
+    );
+    assert!(!arguments.iter().any(|arg| arg.starts_with("permissions.")));
     assert!(!arguments
         .iter()
         .any(|arg| arg.contains("sandbox_mode") || arg.contains("sandbox_workspace_write")));

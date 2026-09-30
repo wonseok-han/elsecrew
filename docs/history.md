@@ -1,5 +1,42 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (1·3 승인 반영·설치 CLI 오프라인 시험)
+
+- 사용자 명시 승인으로 임시 profile/가짜 sentinel만 쓰는 설치 CLI command/exec 시험을 실행했다. 원본 반영은 외부 편집 중지·보존형 충돌 중단, 복원 데이터 앱 전체5GiB/자동 삭제 없음 정책을 채택해 제안서에 기록했다. 기존2번은 업데이트 호환 우선으로 확정돼 전용 구버전 고정 설치 권고는 철회 상태다. 실제 인증·사용자 프로젝트·네트워크·유료 모델 호출은 이번 승인/시험에 포함하지 않았다.
+- 3ec81cf에서 Karpathy 지침으로 시험 오류만 수정했다. quoted dotted CLI override가 FilesystemPermissionToml 파싱을 실패시켜 단일 inline TOML table로 바꿨고, test-only 수신이 합쳐 도착한 JSONL2줄을 한 JSON으로 읽던 문제를 줄 단위 bounded buffer로 고쳤다. remoteControl 알림 opt-out을 기존 방식대로 명시했다. 원문 stderr 임시 진단은 제거하고 고정 오류 분류/숫자만 남겼다.
+- 실제 시험은 설정 조회 이후 command/exec에서 exit71·sandbox_apply Operation not permitted로 실패했다. 현재 outer sandbox 아래 vendor 내부 sandbox 적용이 거절됐으며 인증/profile 접근 보호 성공으로 해석하지 않는다. 기존 실행 정책은 완화하지 않았고 native 제품 입장도 미활성이다. 로그 `/private/tmp/m5-approved-permission-probe-command.log`에 실패 근거를 보존했다. 다음은 업데이트 대응 공식 adapter와 도구/인증 격리 책임 재설계·검증이며, 단순 externalSandbox 우회는 해결책으로 채택하지 않는다.
+- 집중 toy2 PASS/설치 시험1 ignored(별도 실측은 FAIL), I/O6 PASS. strict all-target clippy·변경 Rust rustfmt·diff check PASS. 최종 실제 시험2.62초 FAIL 로그 `/private/tmp/m5-approved-permission-probe-final.log`는 실패 판정 전에 cleanup confirmed·sentinel unchanged·auth absent를 확인한다. 독립 검토자는3개 시험 코드 변경을 차단 지적 없이 승인했고 실제 실행 호환/제품 안전 합격과 구분했다. 이전 작업 기록/승인된 정책 문서를 함께 보존하며 관련 변경만 선택 커밋하고 main 병합/push하지 않는다. 과거 아카이브 미커밋 기록은 별도 보존한다.
+
+### 2026-09-30 · by GPT-6 Astra (업데이트 호환 요구 확정·버전 고정 권고 철회)
+
+- 사용자는 Codex/Claude Code 업데이트 후에도 연동 유지를 원하며 exact SHA-256 허용 목록으로 업데이트를 막는 방식을 거부했다. 이를 확정 제품 요구로 제안서 §5.1.1에 기록했다. 앱 전용 고정 버전 설치를 해결책으로 권고한 것과 이전3개 질문 중 설치 공급 A/B 선택 요청은 철회한다. 초보자용 설치 지원은 유지하며 공식 연동 인터페이스·공급자 adapter·신뢰와 기능 호환 검증 분리·업데이트 전후 회귀를 후속 방향으로 정리했다.
+- 현재 코드가 바뀌었다고 주장하지 않는다. 기존 보안 검사를 삭제하거나 미검증 실행을 활성화하지 않았으며 공식 계약 자체의 파괴적 변경까지 무조건 호환된다고 약속하지 않는다. 무결성/실행 중 교체 탐지용 해시와 제품 호환성을 exact 파일 해시로 판단하는 정책을 구분했다.
+- 문서 diff check 확인, 코드/설치/인증 변경·커밋·push 없음. 기존 미커밋 문서는 보존한다. 오프라인 시험과 원본 반영 정책의 별도 승인 문제는 이번 요구로 자동 승인되지 않는다. 다음은 새 호환성 요구에 맞춘 연동 구조 재설계/구현이며 이전 설치 정책 질문을 다시 반복하지 않는다.
+
+### 2026-09-30 · by GPT-6 Astra (외부 업데이트와 연결 차단 원인 설명 정정)
+
+- 사용자 질문에 현행 select_pair/PinnedExecutable을 확인했다. Codex 로그인은 다른 앱 번들의 CLI/helper에 의존하고 고정 SHA-256 pair와 일치해야 한다. 정상 업데이트도 파일 내용이 달라지면 providerExecutableChanged로 차단될 수 있다. 이것은 실제 프로토콜 비호환이나 인증 소실을 입증한 것이 아니라 현재 exact-pin 정책의 의도적 미검증 버전 거절이다.
+- 외부 업데이트는 항상 연결을 깨뜨린다는 설명으로 일반화하지 않는다. 버전별 경로/규격 변화 가능성과 현재 코드의 과도한 결합을 분리했다. 앱 전용 설치는 한 해결 후보일 뿐 필수 결론이 아니며 공급자 신뢰·지원 버전/기능 호환 검사와 검증된 fallback의 설계 선택이 남는다. 이번에는 정책/허용 목록/설치/인증을 변경하지 않았고 기존 승인 대기 유지. 소스 대조·diff check만 수행했다.
+
+### 2026-09-30 · by GPT-6 Astra (자동 목표 입력 대기 전환)
+
+- 같은 명시 승인 대기가 연속3개 목표 턴에서 유지됐고 사용자 답변·실행 중 검증 handle·새 코드 변경은 없다. 직전 턴의 범위 재확인은 구현 진전이나 verified wait가 아니다. 현재 HEAD 3ec81cf와 미승인 제안 상태를 재확인했다.
+- 실제 CLI 오프라인 격리 시험, 앱 전용 공급 정책, 원본 반영 지원 조건/복원 예산을 임의 확정해 핵심 기능을 연결할 수 없어 목표를 blocked(입력 대기)로 전환했다. 완료/사용자 요청 pause가 아니며 전체 제품 목표는 그대로 보존된다. 준비된 시험은 실행하지 않았고 인증·사용자 프로젝트·main/push 변경도 없다.
+- 재개 조건: 사용자가3가지 요청에 답한다. 부분 승인이라면 승인된 경로만 진행한다. 기존 미커밋 정책/아카이브/이번 작업 기록은 보존했으며 diff check PASS. 같은 상태 확인을 자동 반복하며 완료로 포장하지 않는다.
+
+### 2026-09-30 · by GPT-6 Astra (승인 대기와 변경 검토 연결 전제 확인)
+
+- 자동 목표 재개에는 앞서 요청한3개 결정의 실제 답변이 없다. 설치 CLI 오프라인 시험·설치 공급 선택·원본 반영 지원 조건을 승인으로 간주하지 않았다. 실행 중인 검증 handle도 없어 verified wait로 표현하지 않는다. 목표는 active/미완료이며 승인 대기를 새 구현 진전으로 세지 않는다.
+- 독립적인 읽기 전용 검토 UI 연결 가능성을 소스에서 확인했다. 공개 prepare_chat_workspace는 FreshChat이고 source baseline은 내부 ApplicationCandidate에서만 생성한다. 내부 ReviewPlan은 생성 당시 receipt 검증을 요구하므로 기존 제품 snapshot을 현재 원본과 비교해 반영 가능한 것으로 승격할 수 없다. 실제 연결에는 신규 baseline 생성·실패/legacy 상태 처리부터 필요하며 단순 UI 바인딩으로 대체하지 않는다.
+- 이번은 읽기 전용 범위 재확인이고 코드/인증/사용자 프로젝트 변경은 없다. 기존 미커밋 문서를 보존하고 diff check를 확인했다. 다음 핵심 실행 단계는 명시 승인된 범위의 오프라인 실측이며 사용자 결정 응답을 기다린다. main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (실제 실행 연결의 승인 경계 재확인)
+
+- 3ec81cf의 제품 start/내부 native owner·PROFILE sandbox와 준비된 provider_permission_probe를 대조했다. 직전 목표 턴은 연결 UI 구현/검증 진전이지만 실제 실행 활성화가 아니다. native 후보의 PROFILE 읽기/쓰기 권한이 자손에게 상속되는 문제가 남아, 공개 start/accept를 단순 연결해서는 안 된다.
+- 다음 직접 실측은 이미 준비된 ignored installed_permission_profile_blocks_profile_access다. 설치 CLI/helper SHA-256이 시험의 고정값 3e11ccc…aca5a/4c398936…43f6d와 현재도 일치함을 읽기 전용 확인했다. OpenAI Docs의 공식 app-server command execution 본문은 command/exec가 thread 없이 sandbox 명령을 실행한다고 설명하지만 고정 CLI의 named permission 강제 증거는 아니다. https://learn.chatgpt.com/docs/app-server#command-execution
+- 과거 별도 승인 대기를 자동 목표 재개로 덮지 않았다. 임시 profile/가짜 sentinel만 사용하는 오프라인 시험 승인, 앱 전용 설치 공급 정책, 외부 편집 중지/보존형 원본 반영과5GiB 무자동삭제 정책을 사용자에게 다시 명확히 질문했다. 실제 계정/프로젝트/유료 모델/네트워크 시험은 요청 범위에서 제외했다. 응답 전 시험 실행·정책 변경·제품 활성화는 하지 않는다.
+- 이번 검증은 소스/문서/고정 실행 파일 해시 대조와 diff check다. 기존 미커밋 정책/아카이브 보존, main 병합/push 없음. 전체 앱 목표는 미완료·active이며 다음 핵심 실행 작업은 해당 시험 승인 응답 후 진행한다.
+
 ### 2026-09-30 · by GPT-6 Astra (연결 완료 후 작업대 설정 접기)
 
 - 8b46f3a에서 승인된 설정 후 작업대 진입 흐름을 대조하고, 메인이 Karpathy 지침으로 로그인 완료 패널의 점진적 표시를 구현했다. 오류 없는 connected만 접고 사용자가 다시 펼칠 수 있다. 주기적 상태 확인은 컴포넌트 unmount 없이 유지하며 진행/복구/조회 오류는 항상 노출한다. 다른 공급자의 패널과 인증·실행 권한은 변경하지 않는다.
@@ -120,6 +157,10 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **1·3 승인과 오프라인 실측(2026-09-30)**: 오프라인 설치 CLI/가짜 sentinel 시험과 원본 반영 외부 편집 중지·보존형 충돌 중단/복원5GiB·자동 삭제 없음 정책은 사용자 승인 완료다. 아래 승인 대기는 과거 상태다. 시험은 설정 조회까지 성공했으나 현재 outer sandbox와 vendor 내부 sandbox 조합에서 exit71로 실패해 실제 도구 격리 성공은 미입증이다. 업데이트 대응 adapter와 격리 책임을 함께 해결해야 하며 같은 승인을 반복 요청하지 않는다.
+
+- **업데이트 호환 우선(2026-09-30 사용자 확정)**: 공급자 정상 업데이트를 exact 실행 파일 SHA-256 미등록이라는 이유로 차단하는 정책은 제품 방향에서 제외한다. 구버전 고정/중복 전용 설치로 이를 대체하지 않는다. 이전 앱 전용 설치 A/B 권고·선택 요청은 철회됐으며 제안서 §5.1.1의 신뢰/기능 호환 분리와 공식 adapter 방향으로 재설계한다. 코드의 기존 pin은 아직 남아 있고 검증 없이 제거하지 않는다. 아래 설치 공급 결정 대기 기록은 당시 상태다.
 
 - **M5 설치 공급 불일치(2026-09-30)**: 레거시 Codex standalone 최신 설치와 M5의 pinned 앱 번들 CLI/helper admission은 호환을 보장하지 않는다. 앱 전용 검증 버전 설치 vs 기존 설치 사용 정책은 제안서 §5.1.1의 사용자 결정 대기다. 사전 진단의 후보 부재를 시스템 전체 미설치로 단정하거나 latest 설치 성공을 사용 가능으로 표시하지 않는다.
 

@@ -83,7 +83,7 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 - 첫 구현의 clean-source 조건은 HEAD/tree만이 아니라 staged/unstaged 변경, 추가 파일과 경로 충돌을 다룬다. ignored 파일도 덮어쓸 대상과 충돌하면 거절한다. 시작 시 이미 dirty였던 원본을 HEAD snapshot과 같다고 간주하지 않는다.
 - 검증은 raw blob/entry 비교와 no-follow capability 읽기로 구현한다. Git object 읽기는 bounded `ls-tree`/`cat-file` plumbing을 사용하며 external filter·fsmonitor를 실행하지 않았다는 hostile-config fixture를 둔다. index가 HEAD tree와 같은지는 별도 검증하며 파일 내용만 같다고 staged 상태를 무시하지 않는다.
-- external editor/다른 프로세스는 앱 잠금을 따르지 않는다. 검사와 rename 사이의 동일 UID 동시 수정에 대한 실제 OS 경계를 증명하기 전에는 제품 적용을 활성화하지 않는다. 이 문제를 단순 digest 재확인으로 해결됐다고 주장하지 않는다.
+- external editor/다른 프로세스는 앱 잠금을 따르지 않는다. 2026-09-30 사용자 승인으로 반영 중 외부 편집 중지를 지원 조건으로 삼는다. 전후 충돌 검사·기존 파일의 보존형 교체·불확실 시 양쪽 내용 보존과 중단을 구현/검증하기 전에는 제품 적용을 활성화하지 않는다. 동일 UID 외부 작성을 OS 차원에서 완전히 배제하거나 단순 digest 재확인으로 경합이 해결됐다고 주장하지 않는다.
 - 경로 종류 전환·대소문자 충돌·Unicode 정규화·submodule·symlink·실행 권한·binary·대용량·disk-full·부모 디렉터리 교체를 명시 지원하거나 이유와 함께 거절한다. 조용한 누락/부분 성공은 금지한다.
 - 복원 지점은 적용 성공 뒤에도 유지한다. 용량 부족이면 원본을 쓰기 전에 거절한다. 정리/보존 기간은 사용자가 복원 가능성을 이해하는 별도 정책으로 결정하며 무기한 보관이나 자동 삭제를 암묵 도입하지 않는다.
 - 재시작은 각 항목의 현재 bytes/identity를 before/after/불명 중 하나로 분류한다. 명확한 자체 변경만 복구 대상으로 삼고 불명확하면 잠금·증거를 보존한다. 응답 유실 후 같은 operation ID 재조회는 기존 결과를 반환하며 다른 payload의 재사용은 거절한다.
@@ -101,6 +101,17 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 메인이 A1부터 직접 구현한다. A2 이전에 byte/파일 개수·백업 용량의 수치 제한과 계약 버전을 고정하고 golden fixture를 추가한다. A4의 source 쓰기·복구 경계는 독립 검토를 통과해야 하며, A1~A4 성공도 A5/실제 제품 완료의 대체 증거가 아니다. 테스트는 합성 임시 저장소만 사용하고 실제 사용자 프로젝트 적용은 별도 승인 대상이다.
 
 ## 열린 결정
+
+### 제품 writer 지원 조건 (2026-09-30 사용자 승인, 구현 전)
+
+사용자가 1번 오프라인 시험과 3번 반영·복원 정책을 명시 승인했다. 아래 제안 A와 앱 전체 복원 데이터5GiB/자동 삭제 없음 정책을 채택한다. 한도 초과 전 새 반영을 차단하고 사용자가 명시 정리하거나 예산을 변경하도록 한다. 승인 자체는 writer/예산/복원 구현 완료나 실제 사용자 프로젝트 시험 승인이 아니다. 아래의 미승인 설명은 승인 전 검토 이력이며 대안 B는 채택하지 않았다.
+
+현재 구현은 `99d52f2`까지 내부 준비/백업/첫 항목 기록/관측이며 실제 원본 writer는 없다. 아래 선택을 확정하지 않고 작은 내부 helper 추가만으로 A4가 닫힌다고 판단하지 않는다.
+
+- 확인된 OS 동작: 로컬 `man 2 rename`과 [Apple XNU rename 문서](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/rename.2)는 일반 rename이 기존 대상을 대체하며 SWAP은 두 이름을 교환한다고 설명한다. 이것은 예상 inode/내용이 같을 때만 수행하는 비교 후 교환 권위가 아니다. [Apple flock 문서](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html)는 잠금을 따르지 않는 프로세스의 접근을 막지 못한다고 명시한다. 이 자료로 모든 가능한 OS 전략의 불가능성을 증명한 것은 아니지만 현재 검사+앱 잠금만으로 기존 절대 보장 충족을 주장할 수 없다.
+- 제안 A — 지원 조건을 명확히 하는 실용적인 반영: 반영 중 외부 편집 중지를 요구하고, 전후 충돌 검사·기존 파일의 보존형 교체·불확실 시 양쪽 내용 보존 및 중단을 구현/검증한다. 외부 프로세스를 OS 차원에서 완전히 배제한다는 보장은 하지 않는다. 이는 기존 절대 무덮어쓰기 계약의 변경이므로 사용자 승인 전 적용하지 않는다. 같은 UID의 악의적 데이터 훼손까지 방지한다고 주장하지 않으며, SWAP 하나로 crash recovery/부모 경합/열린 handle 문제가 해결됐다고 보지 않는다.
+- 대안 B — 기존 강한 계약 유지: 필요한 OS 경계를 입증할 때까지 원본 반영 비활성을 유지한다. 이는 앱 전체 완료가 아니고 patch 내보내기를 전체 반영 기능의 대체 완료로 취급하지 않는다.
+- 별도 보존 정책 제안 — 앱 전체 복원 데이터 기본 예산 5GiB, 자동 삭제 없음. 예산 초과 전 새 반영을 차단하고 사용자가 복원 지점을 확인 후 삭제하거나 예산을 바꾸도록 한다. 아직 구현·승인되지 않았으며 현재 archive 단건 상한과 구분한다. 디스크 여유 공간·staging 추가 여유도 별도 확인해야 한다.
 
 적용 준비 원장 후속(2026-09-30): 내부 intent::begin이 세션 확인/백업 결과를 소비한 뒤 application_intent prepared와 대상 snapshot의 recovery 잠금을 같은 CAS transaction으로 저장한다. 재시작 후도 새 준비가 막히며 exact prepared에 대한 명시 abandon만 파일 변경 없이 잠금을 해제한다. 향후 writer는 첫 원본 쓰기 전에 prepared를 벗어나는 별도 영속 phase를 기록해야 한다. 이 단계는 앱 내부 준비 배타권이며 OS 수준 동일 UID 원본 쓰기 경합을 해결한 것은 아니다. 전체 restore journal/항목별 writer·공개 UI 연결은 남는다.
 

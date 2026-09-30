@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 오프라인 도구 격리 실측(2026-09-30): 사용자 승인된 설치 Codex/임시 profile·가짜 sentinel 시험에서 named permission 설정 조회까지 도달했으나 command/exec가 exit71, `sandbox-exec: sandbox_apply: Operation not permitted`로 실패했다. 현재 외부 deny-default 정책 아래 vendor 내부 sandbox 적용이 거절된 관측이며 인증 파일 차단 성공이나 macOS의 모든 중첩 정책 불가능성을 입증한 것은 아니다. 시험의 inline TOML 전달/JSONL 여러 줄 수신 오류는 수정했고 제품 정책·실제 실행 활성화는 변경하지 않았다. 다음은 공식 실행 경계와 격리 책임을 함께 재설계·검증하는 것이다.
+
 > 연결 설정의 점진적 표시: 공급자 로그인 상태가 오류 없는 connected이면 상세 조작을 접고 연결 요약과 `연결 관리`를 남긴다. 펼친 상태는 반복 status 조회에서 유지하고 새 connected 전환에서 다시 접는다. 연결 컴포넌트와 polling은 유지하며, 진행 중·미연결·복구 필요·조회 오류는 접을 수 없다. 이는 표시 정책일 뿐 실제 모델 실행 가능을 뜻하지 않는다.
 
 > 실제 실행 capability의 미관측 상태: 비활성 제품 adapter는 설치를 조사하지 않았으므로 `installationState: unknown`, `authState: unknown`, 빈 모델 목록·실행 파일 없음과 `canStart: false`를 반환한다. macOS 사유는 `capabilityUnknown`, 비지원 플랫폼은 `platformUnsupported`다. 로그인 사전 진단 성공으로 실행 capability를 승격하지 않는다. unknown은 공개 capability snapshot에만 추가한 값이며 실제 G5C 공급자 관측의 installation enum은 변경하지 않는다. Rust/TypeScript는 unknown의 인증·discovery 증거 주장을 거부하고 기존 fingerprint 검증을 유지한다. sidecar/renderer는 함께 배포하며 구형 renderer가 새 값을 거부하는 경우 fail-closed한다.

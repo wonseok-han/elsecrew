@@ -819,14 +819,30 @@ impl<'a> LoginProcess<'a> {
                     crate::provider_login_io::OutputChunk::Pending => {
                         std::thread::sleep(Duration::from_millis(2));
                     }
-                    crate::provider_login_io::OutputChunk::Eof => return Err(failure()),
+                    crate::provider_login_io::OutputChunk::Eof => {
+                        return Err(SidecarError::new(
+                            "permissionProbeFailed",
+                            "probe stdout EOF",
+                        ))
+                    }
                     crate::provider_login_io::OutputChunk::Bytes(chunk) => {
                         if bytes.len() + chunk.len() > 64 * 1024 {
                             return Err(failure());
                         }
                         bytes.extend_from_slice(&chunk);
                         if bytes.ends_with(b"\n") {
-                            return serde_json::from_slice(&bytes).map_err(|_| failure());
+                            return serde_json::from_slice(&bytes).map_err(|error| {
+                                SidecarError::new(
+                                    "permissionProbeFailed",
+                                    format!(
+                                        "probe JSON {:?} at {}:{} ({} lines)",
+                                        error.classify(),
+                                        error.line(),
+                                        error.column(),
+                                        bytes.iter().filter(|byte| **byte == b'\n').count()
+                                    ),
+                                )
+                            });
                         }
                     }
                 }
