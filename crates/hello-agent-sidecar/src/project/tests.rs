@@ -35,6 +35,111 @@ fn prepared_backup_fixture() -> (Fixture, String) {
 
 #[cfg(unix)]
 #[test]
+fn application_intent_fence_is_atomic_restart_safe_and_cancelable_before_writes() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut owner = Confirmations::default();
+    let target = ReviewTarget::Project(&f.project_id);
+    let (token, _) = owner
+        .open(&f.manager, &f.storage, target, &review_id)
+        .unwrap();
+    let grant = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_intent_backup")
+        .unwrap();
+    let before_project = required_project(&f.storage, &f.project_id).unwrap();
+    let lock_id = before_project["lock_id"].as_str().unwrap().to_owned();
+    let before_lock = f.storage.projection_record("lock", &lock_id).unwrap();
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_intent_lock BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_prepare_lock' BEGIN SELECT RAISE(ABORT, 'test intent lock failure'); END;").unwrap();
+    assert!(intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        grant,
+        "req_intent_fail"
+    )
+    .is_err());
+    assert_eq!(
+        required_project(&f.storage, &f.project_id).unwrap(),
+        before_project
+    );
+    assert_eq!(
+        f.storage.projection_record("lock", &lock_id).unwrap(),
+        before_lock
+    );
+    assert!(f.storage.blocker_ids().unwrap().is_empty());
+    f.storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_intent_lock;")
+        .unwrap();
+    let (token, _) = owner
+        .open(&f.manager, &f.storage, target, &review_id)
+        .unwrap();
+    let grant = owner
+        .prepare_backup(
+            &f.manager,
+            &mut f.storage,
+            &token,
+            "req_intent_retry_backup",
+        )
+        .unwrap();
+    let prepared = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        grant,
+        "req_intent_begin",
+    )
+    .unwrap();
+    assert_eq!(prepared["state"], "prepared");
+    assert!(!f.storage.blocker_ids().unwrap().is_empty());
+    assert!(f
+        .manager
+        .create_worktree(&mut f.storage, &f.project_id, "req_intent_block_create")
+        .is_err());
+    let db = f.manager.data_root.join("hello-agent.sqlite3");
+    drop(f.storage);
+    let mut storage = Storage::open(&db).unwrap();
+    assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), prepared);
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    let mut wrong = prepared.clone();
+    wrong["applicationId"] = json!("different");
+    assert!(
+        intent::abandon_unwritten(&mut storage, &f.project_id, &wrong, "req_intent_wrong").is_err()
+    );
+    storage.connection_for_test().execute_batch("CREATE TRIGGER fail_intent_abandon BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_abandon_lock' BEGIN SELECT RAISE(ABORT, 'test intent abandon failure'); END;").unwrap();
+    assert!(intent::abandon_unwritten(
+        &mut storage,
+        &f.project_id,
+        &prepared,
+        "req_intent_abandon_fail"
+    )
+    .is_err());
+    assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), prepared);
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_intent_abandon;")
+        .unwrap();
+    let abandoned =
+        intent::abandon_unwritten(&mut storage, &f.project_id, &prepared, "req_intent_abandon")
+            .unwrap();
+    assert_eq!(abandoned["state"], "abandoned");
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(
+        intent::abandon_unwritten(
+            &mut storage,
+            &f.project_id,
+            &prepared,
+            "req_intent_abandon_replay"
+        )
+        .unwrap(),
+        abandoned
+    );
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn confirmed_backup_handoff_is_single_session_and_rechecks_files() {
     use application::review::{confirmation::Confirmations, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

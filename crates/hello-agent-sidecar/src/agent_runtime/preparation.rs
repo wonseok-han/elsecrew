@@ -291,7 +291,7 @@ impl RunReservation {
         // Construct the exact invocation before creating any child. The command
         // starts the existing inert gate; only the identity-recorded owner releases it.
         let manifest = projects
-            .verify_workspace(
+            .verify_workspace_for_run(
                 storage,
                 &address_from_chat(&self.run).map_err(|_| failure())?,
             )
@@ -693,7 +693,7 @@ impl RunReservation {
             ExpectedPermission::WorkspaceWrite => WorkspaceAccess::Write,
         };
         let manifest = projects
-            .verify_workspace(storage, &address)
+            .verify_workspace_for_run(storage, &address)
             .map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         if !process.matches_runtime_scope(workspace, access) {
@@ -749,7 +749,7 @@ impl RunReservation {
                 &self.request.chat_id,
                 &self.request.input_message_ids,
             )? != self.prompt
-            || projects.verify_workspace(storage, &address_from_chat(&self.run)?)?
+            || projects.verify_workspace_for_run(storage, &address_from_chat(&self.run)?)?
                 != projection["workspace_manifest"]
         {
             return Err(ProjectFailure::recovery("reserved text input changed"));
@@ -891,7 +891,7 @@ impl RunReservation {
         }
         let address = address_from_chat(&self.run)?;
         projects.verify_runtime_file_isolation(storage, &address)?;
-        let manifest = projects.verify_workspace(storage, &address)?;
+        let manifest = projects.verify_workspace_for_run(storage, &address)?;
         if projection["workspace_manifest"] != manifest {
             return Err(ProjectFailure::recovery(
                 "reserved workspace changed before release",
@@ -983,7 +983,7 @@ impl RunPreparation {
                 .ok_or_else(|| ProjectFailure::manifest("chat role snapshot is missing"))?,
         )
         .map_err(json_failure)?;
-        let manifest = projects.verify_workspace(storage, &address_from_chat(&chat)?)?;
+        let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&chat)?)?;
         let prompt = resolve_prompt(storage, &request.chat_id, &request.input_message_ids)?;
         Ok(Self {
             request: request.clone(),

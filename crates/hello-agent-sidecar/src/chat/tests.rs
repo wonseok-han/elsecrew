@@ -9,6 +9,77 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+#[test]
+fn project_application_fence_blocks_other_chat_runs_before_reservation() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    let mut f = Fixture::new();
+    let first = f.snapshot("req_intent_first");
+    let fixture_chat = f.create_chat(&first, "fixture goal", "req_intent_fixture_chat");
+    let second = f.snapshot("req_intent_second");
+    let native_chat = f.create_exact_claude_chat(&second, "native goal", "req_intent_native_chat");
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let chat_id = native_chat["chatId"].as_str().unwrap();
+    let request = AgentRunStartRequestV1 {
+        chat_id: chat_id.to_owned(),
+        role_id: "coding".into(),
+        input_message_ids: vec![initial_message_id(&f, chat_id)],
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    };
+    let stale = RunPreparation::resolve(&f.storage, &f.projects, &request).unwrap();
+    let mut project = project_record(&f.storage, &f.project_id).unwrap();
+    project.insert(
+        "application_intent".into(),
+        json!({"state":"prepared","binding":{"worktreeId":first["worktreeId"]}}),
+    );
+    f.storage
+        .upsert_projection_record(
+            "project",
+            &f.project_id,
+            "op_test_application_fence",
+            None,
+            project,
+        )
+        .unwrap();
+    let before_runs = f.storage.projection_records("run").unwrap();
+    let before_locks = f.storage.projection_records("lock").unwrap();
+    assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_err());
+    assert!(stale
+        .reserve(
+            &mut f.storage,
+            &f.projects,
+            &serde_json::from_value(capability).unwrap(),
+            "req_intent_stale_reserve"
+        )
+        .is_err());
+    let error = f
+        .chats
+        .start_fixture(
+            &mut f.storage,
+            &mut f.projects,
+            fixture_chat["chatId"].as_str().unwrap(),
+            "planning",
+            "planning-success",
+            "req_intent_fixture_run",
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "recoveryRequired");
+    assert_eq!(f.storage.projection_records("run").unwrap(), before_runs);
+    assert_eq!(f.storage.projection_records("lock").unwrap(), before_locks);
+    let mut project = project_record(&f.storage, &f.project_id).unwrap();
+    project["application_intent"]["state"] = json!("abandoned");
+    f.storage
+        .upsert_projection_record(
+            "project",
+            &f.project_id,
+            "op_test_application_release",
+            None,
+            project,
+        )
+        .unwrap();
+    assert!(RunPreparation::resolve(&f.storage, &f.projects, &request).is_ok());
+}
+
 struct Fixture {
     _root: TempDir,
     source: std::path::PathBuf,

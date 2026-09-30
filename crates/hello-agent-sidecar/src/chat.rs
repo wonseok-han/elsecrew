@@ -251,7 +251,7 @@ impl G5Manager {
             ProjectFailure::manifest(format!("prepared workspace is invalid: {error}"))
         })?;
         let mut project = project_record(storage, project_id)?;
-        for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups"] {
+        for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent"] {
             if !project.contains_key(field) {
                 if let Some(value) = before.get(field).cloned() {
                     project.insert(field.to_string(), value);
@@ -837,7 +837,7 @@ impl G5Manager {
             ));
         }
         let address = address_from_chat(&chat)?;
-        let manifest = projects.verify_workspace(storage, &address)?;
+        let manifest = projects.verify_workspace_for_run(storage, &address)?;
         let run_id = format!("run_{}", Uuid::new_v4().simple());
         let created = now();
         let stage = match role_id {

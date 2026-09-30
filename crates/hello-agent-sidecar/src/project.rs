@@ -2685,6 +2685,26 @@ impl ProjectManager {
         manifest_value(&active, "active")
     }
 
+    /// Point-in-time admission. Reservation callers recheck while synchronously
+    /// holding the sole mutable Storage owner through commit (EXCLUSIVE SQLite).
+    /// Do not cache this result across a scheduler yield as execution authority.
+    pub(crate) fn verify_workspace_for_run(
+        &self,
+        storage: &Storage,
+        address: &WorkspaceAddress,
+    ) -> Result<Value, ProjectFailure> {
+        let project = required_project(storage, &address.project_id)?;
+        if project
+            .get("application_intent")
+            .is_some_and(|intent| intent["state"] != "abandoned")
+        {
+            return Err(ProjectFailure::recovery(
+                "project has an unfinished source application",
+            ));
+        }
+        self.verify_workspace(storage, address)
+    }
+
     /// Point-in-time file admission, not a sandbox or protection against a hostile
     /// same-UID writer racing this scan. Scan BEFORE Git verification can run.
     #[cfg(unix)]
@@ -4424,7 +4444,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups"] {
+    for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups", "application_intent"] {
         if let Some(extension) = previous.get(field).cloned() {
             object.insert(field.to_string(), extension);
         }

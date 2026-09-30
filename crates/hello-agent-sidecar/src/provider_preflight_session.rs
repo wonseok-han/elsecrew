@@ -398,7 +398,7 @@ impl<'a> TextWorkspace<'a> {
         address: &crate::project::WorkspaceAddress,
     ) -> Result<Self, SidecarError> {
         let manifest = projects
-            .verify_workspace(storage, address)
+            .verify_workspace_for_run(storage, address)
             .map_err(|_| failure())?;
         let cwd = std::path::PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         PreflightExchange::validate_thread_cwd(&cwd).map_err(|_| failure())?;
@@ -413,7 +413,7 @@ impl<'a> TextWorkspace<'a> {
     pub(crate) fn revalidate(&self) -> Result<(), SidecarError> {
         let manifest = self
             .projects
-            .verify_workspace(self.storage, &self.address)
+            .verify_workspace_for_run(self.storage, &self.address)
             .map_err(|_| failure())?;
         if manifest["worktreePath"].as_str() != self.cwd.to_str() {
             return Err(failure());

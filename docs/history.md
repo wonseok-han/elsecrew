@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (적용 준비 원장과 실행 배타 마감)
+
+- 49bece3 기준 내부 intent::begin이 일회성 PreparedApplication을 소비하고 project.application_intent와 workspace recovery 잠금을 project/lock/chat revision CAS로 원자 게시한다. exact inspect와 쓰기 전 abandon_unwritten은 재시작·응답 유실 재시도를 지원하고 원본 파일은 변경하지 않는다. 실제 writer는 첫 쓰기 전 반드시 prepared를 떠나야 한다.
+- 독립 검토가 찾은 다른 chat 실행 입장 누락을 project-scoped verify_workspace_for_run으로 수정했다. fixture/native resolve·reserve·release와 TextWorkspace가 재검사한다. 후속 검사/예약 사이 경합 지적은 단일 동기 mutable Storage owner·EXCLUSIVE 연결·dispatch 경로 확인 뒤 검토자가 철회하고 scoped PASS했다. 검토자는 테스트를 재실행하지 않았다. 이 직렬화 전제를 architecture와 코드에 명시했다.
+- 검증: intent 원자 rollback·재시작·취소 rollback/멱등·원본 보존 1 PASS(11.22초), 다른 chat fixture/native 사전 준비·예약 거절 1 PASS(1.49초), 기존 actual_run_preparation 2 PASS, provider_preflight_session 7 PASS/설치 CLI 승인 필요 2 ignored. 추가 DB 소유권 회귀는 별도 연결 BEGIN IMMEDIATE 거절과 owner drop 후 성공 1 PASS(0.16초). 새 소유권 테스트를 포함한 최종 strict all-targets clippy PASS(3.78초), 변경 블록 포맷·git diff --check PASS.
+- Karpathy 지침으로 기존 원장/CAS와 입장 검증을 재사용하고 불가능한 다중 writer를 위한 중복 프로토콜은 추가하지 않았다. 남음: source writer/외부 작성자 경합 보호·영속 쓰기 journal/restore·공개 IPC/UI. 앱 전체 완료가 아니며 실제 계정/유료 모델/사용자 원본 시험·main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료 및 로그인 복구 재확인)
+
+- 사용자 요청으로 49bece3/m5/coding-agent-ide의 개발 앱·sidecar·Vite 프로세스를 다시 확인했다. 모두 이미 종료돼 추가 종료 대상이 없었다. 검색된 VS Code/Cursor crash handler는 다른 앱이므로 유지했다.
+- 활성 codex-login.pending은 없고 보존 pending inode 168613811·helper inode 166226396이 유지된다. 앱 전용 auth.json은 내용을 읽지 않고 0600 권한만 확인했다. 기존 보존 복구 상태가 유지되어 추가 삭제·인증 초기화·재부팅은 하지 않았다. 실제 로그인 재시도 성공을 검증한 것은 아니다.
+- 기존 적용 intent 관련 미커밋 구현·테스트·문서 변경은 보존했다. 독립 검토의 run admission 경합 후보와 단일 writer 계약의 도달 가능성 판단은 다음 개발에서 마감해야 하며 완료 승인으로 취급하지 않는다. 이번 요청은 종료/복구 상태 확인으로 한정한다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (검토 확인과 백업 준비 결속)
 
 - 4b09af0 기준 Confirmations::prepare_backup이 token을 먼저 소비하고 fresh review 뒤 새 백업 준비 또는 ready 재검증 재사용을 연결한다. pending/abandoned 자동복구는 거절한다. PreparedApplication은 private/move-only 세션 grant이며 owner generation·최초 만료 시각을 유지한다. cancel·새 open 실패·다른 owner는 무효이고 consume은 generation을 소비한 뒤 current review와 exact ready archive/record를 다시 확인한다.

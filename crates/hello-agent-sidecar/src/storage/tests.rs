@@ -30,6 +30,22 @@ fn database() -> (TempDir, PathBuf) {
     (root, path)
 }
 
+#[test]
+fn runtime_storage_owner_excludes_external_transaction_until_drop() {
+    let (_root, path) = database();
+    let storage = Storage::open(&path).unwrap();
+    let external = Connection::open(&path).unwrap();
+    external.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let error = external.execute_batch("BEGIN IMMEDIATE;").unwrap_err();
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy)
+    );
+    assert!(external.is_autocommit());
+    drop(storage);
+    external.execute_batch("BEGIN IMMEDIATE; ROLLBACK;").unwrap();
+}
+
 fn event(
     event_id: &str,
     operation_id: &str,

@@ -94,6 +94,8 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 ## 열린 결정
 
+적용 준비 원장 후속(2026-09-30): 내부 intent::begin이 세션 확인/백업 결과를 소비한 뒤 application_intent prepared와 대상 snapshot의 recovery 잠금을 같은 CAS transaction으로 저장한다. 재시작 후도 새 준비가 막히며 exact prepared에 대한 명시 abandon만 파일 변경 없이 잠금을 해제한다. 향후 writer는 첫 원본 쓰기 전에 prepared를 벗어나는 별도 영속 phase를 기록해야 한다. 이 단계는 앱 내부 준비 배타권이며 OS 수준 동일 UID 원본 쓰기 경합을 해결한 것은 아니다. 전체 restore journal/항목별 writer·공개 UI 연결은 남는다.
+
 확인→백업 결속 후속(2026-09-30): 내부 prepare_backup/consume_prepared가 exact 확인 token·같은 review의 ready 백업·세션 generation·최초5분 만료를 연결한다. 저장된 ready를 재시작 승인으로 해석하지 않으며 실패한 open/취소도 이전 grant를 무효화한다. grant는 메모리에서 이동 소비하고 최종 검토/백업을 재검증한다. 아래 confirmation 미연결 중 이 단계는 구현됐지만 적용 intent 게시/배타권 취득·writer 및 UI에서 사용자 확인 받기는 여전히 남는다.
 
 명시 백업 복구 후속(2026-09-30): private resume은 준비 기록과 현재 검토가 일치할 때만 complete archive의 모든 before metadata/payload를 bound source baseline에 대조해 ready 게시를 재시도한다. owner executable만 포함하는 검토 digest로 권한·inode 전체를 대신하지 않는다. abandon은 준비 기록을 보존 종료해 다음 새 검토의 백업을 허용하며 파일 삭제/잠금 해제를 하지 않는다. ready의 원본 반영 승인·source writer/restore와 자동 디스크 정리는 여전히 별도다. 아래 과거 내부 진전의 미완료 정리/재개 항목 중 메타데이터 기반 명시 종료·완성 백업 검증 재개는 이 단계에서 구현됐으며 파일 회수/UI는 남는다.
