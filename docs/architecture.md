@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 채팅별 검토 대상(내부): `ReviewTarget::Chat`은 프로젝트의 현재 active 포인터 대신 해당 채팅의 manifest/marker로 exact workspace를 검증한다. chat/task ID·상태·revision과 건강한 미소유 lock의 ID/실제 경로/revision을 binding에 포함한다. `application_chat_reviews[chatId]`에 각 최신 descriptor를 보존하고 project+chat+lock revision을 같은 transaction에서 검사한다. 다른 채팅의 새 검토는 기존 채팅 검토를 덮지 않으며 후속 대화·잠금 변경은 재검토를 요구한다. 명시 확인 ticket·승인/원본 쓰기는 아직 연결하지 않았다.
+
 > 변경 검토 기반(내부): `application/review.rs`가 원장 receipt·현재 원본·현재 snapshot을 재검증하여 정렬된 before/after 변경 집합과 bounded digest를 만든다. untracked 충돌·case/정규화 충돌·미지원 종류/권한을 거절하고 확인 후 원본/복사본의 내용·신원 변화도 거절한다. `review/persistence.rs`는 프로젝트의 최신 prepared descriptor를 revision CAS로 원장에 게시하고 재열기 때 현재 파일에서 plan을 재구성·대조한다. descriptor에는 binding·변경 digest·root/파일 신원 포함 snapshot digest·count가 있고 승인 상태는 없다. 원본을 쓰거나 삭제하지 않으며 chat/task 승인·공개 IPC/UI·writer는 아직 없다. 상세 지원/한도는 `proposals/m5-change-application.md` A2를 따른다.
 
 > 원본 기준 생성 결속(내부): Unix `SnapshotCreation::ApplicationCandidate`는 공통 snapshot 생성 경로에서 launch fence → clean baseline → bundle export → baseline 재대조 → 불변 receipt/원장 게시 → 기존 활성화를 수행한다. 활성화 직전 최신 project 원장을 읽어 새/과거 receipt를 보존한다. 3개 복사본 생성·DB 재열기·각 receipt 검증과 dirty/게시 실패/rename 후 실패 잠금 유지 회귀를 통과했다. 공개 IPC caller는 없고 기존 일반/채팅 생성은 그대로다. 시작 이후 프로세스 복구·원장 누적 용량/압축·지원 불가 원본의 제품 안내 및 원본 writer는 미완료다.

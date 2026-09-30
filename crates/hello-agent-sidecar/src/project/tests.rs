@@ -26,6 +26,231 @@ fn source_index_fixture() -> Fixture {
 
 #[cfg(unix)]
 #[test]
+fn chat_application_reviews_keep_separate_targets_and_invalidate_on_chat_change() {
+    use application::review::{persistence, ReviewTarget};
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_chat_review_open",
+        )
+        .unwrap();
+    let mut saved = Vec::new();
+    for name in ["one", "two"] {
+        fixture
+            .manager
+            .create_worktree_inner(
+                &mut fixture.storage,
+                &fixture.project_id,
+                &format!("req_chat_review_{name}"),
+                None,
+                None,
+                SnapshotCreation::ApplicationCandidate,
+            )
+            .unwrap();
+        let active = fixture
+            .manager
+            .validate_active_project(&fixture.storage, &fixture.project_id)
+            .unwrap();
+        let address = WorkspaceAddress {
+            chat_id: format!("chat_{name}"),
+            project_id: fixture.project_id.clone(),
+            worktree_id: active.worktree_id,
+            workspace_identity: active.workspace_identity,
+        };
+        let task = format!("task_{name}");
+        let payload = json!({"chat_id":address.chat_id,"project_id":address.project_id,"worktree_id":address.worktree_id,"workspace_identity":address.workspace_identity,"state":"draft","durable_event_sequence":0,"last_message":null,"record":{"chatId":address.chat_id,"projectId":address.project_id,"worktreeId":address.worktree_id,"workspaceIdentity":address.workspace_identity,"taskId":task,"state":"draft"}});
+        fixture
+            .storage
+            .upsert_projection_record(
+                "chat",
+                &address.chat_id,
+                &format!("op_chat_review_{name}"),
+                None,
+                payload.as_object().unwrap().clone(),
+            )
+            .unwrap();
+        let result = persistence::publish_target(
+            &fixture.manager,
+            &mut fixture.storage,
+            ReviewTarget::Chat {
+                address: &address,
+                task_id: &task,
+            },
+            &format!("req_publish_{name}"),
+        )
+        .unwrap();
+        saved.push((
+            address,
+            task,
+            result["reviewId"].as_str().unwrap().to_owned(),
+        ));
+    }
+    for (address, task, id) in &saved {
+        persistence::reopen_target(
+            &fixture.manager,
+            &fixture.storage,
+            ReviewTarget::Chat {
+                address,
+                task_id: task,
+            },
+            id,
+        )
+        .unwrap();
+        assert!(persistence::reopen_target(
+            &fixture.manager,
+            &fixture.storage,
+            ReviewTarget::Chat {
+                address,
+                task_id: "wrong_task"
+            },
+            id
+        )
+        .is_err());
+    }
+    let (first, task, id) = &saved[0];
+    let mixed = WorkspaceAddress {
+        chat_id: first.chat_id.clone(),
+        ..saved[1].0.clone()
+    };
+    assert!(persistence::reopen_target(
+        &fixture.manager,
+        &fixture.storage,
+        ReviewTarget::Chat {
+            address: &mixed,
+            task_id: task
+        },
+        id
+    )
+    .is_err());
+    let mut chat = fixture
+        .storage
+        .projection_record("chat", &first.chat_id)
+        .unwrap()
+        .unwrap();
+    let old_revision = chat["last_event_sequence"].as_u64().unwrap();
+    chat.insert("test_followup".into(), json!(true));
+    fixture
+        .storage
+        .upsert_projection_record("chat", &first.chat_id, "op_followup_review", None, chat)
+        .unwrap();
+    assert!(persistence::reopen_target(
+        &fixture.manager,
+        &fixture.storage,
+        ReviewTarget::Chat {
+            address: first,
+            task_id: task
+        },
+        id
+    )
+    .is_err());
+    let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(fixture
+        .storage
+        .upsert_projection_records_atomic_checked(
+            vec![crate::storage::ProjectionUpsert {
+                aggregate_type: "project",
+                aggregate_id: fixture.project_id.clone(),
+                operation_id: "op_stale_chat_review".into(),
+                request_id: None,
+                payload: project.clone()
+            }],
+            &[("chat", &first.chat_id, old_revision)]
+        )
+        .is_err());
+    assert_eq!(
+        required_project(&fixture.storage, &fixture.project_id).unwrap(),
+        project
+    );
+    let (second, task, id) = &saved[1];
+    persistence::reopen_target(
+        &fixture.manager,
+        &fixture.storage,
+        ReviewTarget::Chat {
+            address: second,
+            task_id: task,
+        },
+        id,
+    )
+    .unwrap();
+    let lock_id = format!("lock_{}", second.worktree_id);
+    fixture.storage.upsert_projection_record("run", "run_test_writer", "op_review_completed_run", None, json!({"run_id":"run_test_writer","chat_id":second.chat_id,"state":"succeeded","worktree_path":null}).as_object().unwrap().clone()).unwrap();
+    let mut lock = fixture
+        .storage
+        .projection_record("lock", &lock_id)
+        .unwrap()
+        .unwrap();
+    lock.insert("writer_run_id".into(), json!("run_test_writer"));
+    fixture
+        .storage
+        .upsert_projection_record("lock", &lock_id, "op_review_writer_acquire", None, lock)
+        .unwrap();
+    assert!(persistence::publish_target(
+        &fixture.manager,
+        &mut fixture.storage,
+        ReviewTarget::Chat {
+            address: second,
+            task_id: task
+        },
+        "req_review_while_owned"
+    )
+    .is_err());
+    let mut lock = fixture
+        .storage
+        .projection_record("lock", &lock_id)
+        .unwrap()
+        .unwrap();
+    lock.insert("writer_run_id".into(), Value::Null);
+    fixture
+        .storage
+        .upsert_projection_record("lock", &lock_id, "op_review_writer_release", None, lock)
+        .unwrap();
+    assert!(persistence::reopen_target(
+        &fixture.manager,
+        &fixture.storage,
+        ReviewTarget::Chat {
+            address: second,
+            task_id: task
+        },
+        id
+    )
+    .is_err());
+    let mut tampered = fixture
+        .storage
+        .projection_record("lock", &lock_id)
+        .unwrap()
+        .unwrap();
+    tampered.insert("worktree_path".into(), json!("/different-workspace"));
+    fixture
+        .storage
+        .upsert_projection_record("lock", &lock_id, "op_review_wrong_path", None, tampered)
+        .unwrap();
+    assert!(persistence::publish_target(
+        &fixture.manager,
+        &mut fixture.storage,
+        ReviewTarget::Chat {
+            address: second,
+            task_id: task
+        },
+        "req_review_wrong_path"
+    )
+    .is_err());
+    assert!(persistence::reopen_target(
+        &fixture.manager,
+        &fixture.storage,
+        ReviewTarget::Chat {
+            address: second,
+            task_id: task
+        },
+        id
+    )
+    .is_err());
+}
+
+#[cfg(unix)]
+#[test]
 fn saved_application_review_reopens_without_approval_and_rejects_replacement() {
     use application::review::persistence;
     let mut fixture = source_index_fixture();

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (채팅별 검토 대상·잠금 결속)
+
+- 327bb99에서 ReviewTarget::Chat을 추가했다. 해당 chat의 manifest/marker로 옛 snapshot도 검증하고 projection/record의 chat/task/workspace·상태·revision을 묶는다. application_chat_reviews[chatId] 슬롯을 분리하여 다른 채팅 검토를 덮지 않는다. project+chat+lock revision CAS로 게시하며 모든 target은 건강한 미소유 lock을 요구한다.
+- 독립 검토가 찾은 lock worktree_path 대조 누락을 수정해 canonical 실제 경로와 lock ID도 검사한다. 재검토 scoped PASS. 초기 합성 chat의 durable_event_sequence/last_message 누락, writer FK용 run 누락과 match 타입추론 컴파일 오류는 fixture/코드에서 수정했다. 제품 계약을 완화하지 않았다.
+- 검증: 두 채팅 독립 snapshot·task/workspace 혼합 거절·chat 변경/원자 guard rollback·writer 보유/해제 revision·다른 잠금 경로 거절 집중1 PASS/7.75초, 기존 project 영속 검토1 PASS/8.66초, 최종 strict clippy PASS/2.76초·scoped rustfmt/diff 검사. Karpathy 지침으로 기존 주소/원장 검증을 재사용했다. 명시 확인 ticket·승인·writer는 아직 없고 실제 계정/모델/사용자 프로젝트 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (검토 지문의 영속 게시·재열기)
 
 - 5cc6eb3의 읽기 전용 plan을 기존 project 원장 application_review에 최신 descriptor로 게시한다. binding·변경 digest·snapshot 신원 digest·count와 prepared 상태를 revision CAS로 저장하고, 재열기는 현재 파일에서 새 plan을 구성해 exact 비교한다. 새 저장 폴더/파일이나 원본 쓰기 권한은 추가하지 않았고 project/chat lifecycle에서 extension을 보존한다.
@@ -101,6 +107,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **채팅별 검토 대상(2026-09-30)**: 각 chat descriptor 슬롯과 exact task/workspace/chat revision·lock 신원/revision을 결속한다. 다른 chat의 active 포인터로 바뀌어도 원래 manifest를 검증하며 chat/lock 변경은 옛 검토를 무효화한다. 세 원장 revision CAS와 미소유 lock을 요구하고 아직 승인/쓰기 권위는 없다.
 - **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source/snapshot 변화·신원을 읽기 전용으로 묶는다. 최신 descriptor는 project 원장 CAS로 게시하고 재시작 시 현재 파일에서 재구성/대조한다. untracked·경로 충돌·미지원 권한과 승인 상태/superseded ID는 거절한다. 과거 파일 내용 보관이나 승인/쓰기 권위는 아니며 chat/task 확인 수명과 A3~A5는 남는다.
 - **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.

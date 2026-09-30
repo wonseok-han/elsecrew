@@ -986,6 +986,7 @@ impl Storage {
             let record = match *kind {
                 "project" => projection.projects.get(*id),
                 "lock" => projection.locks.get(*id),
+                "chat" => projection.chats.get(*id),
                 _ => return Err(SidecarError::new("aggregateUnsupported", "unsupported guarded aggregate")),
             };
             if record.and_then(|value| value.get("last_event_sequence")).and_then(Value::as_u64) != Some(*sequence) {

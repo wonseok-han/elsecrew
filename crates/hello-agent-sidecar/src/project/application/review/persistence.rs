@@ -53,9 +53,25 @@ pub(in crate::project) fn publish(
     project_id: &str,
     request_id: &str,
 ) -> Result<Value, ProjectFailure> {
-    let plan = prepare(manager, storage, project_id)?;
+    publish_target(
+        manager,
+        storage,
+        ReviewTarget::Project(project_id),
+        request_id,
+    )
+}
+
+#[allow(dead_code)]
+pub(in crate::project) fn publish_target(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    target: ReviewTarget<'_>,
+    request_id: &str,
+) -> Result<Value, ProjectFailure> {
+    let project_id = target.project_id();
+    let plan = prepare_target(manager, storage, target)?;
     let mut project = required_project(storage, project_id)?;
-    if snapshot_identity(&manager.validate_active_project(storage, project_id)?)? != plan.binding {
+    if target.resolve(manager, storage)?.1 != plan.binding {
         return Err(invalid());
     }
     let revision = project
@@ -64,7 +80,38 @@ pub(in crate::project) fn publish(
         .ok_or_else(invalid)?;
     let review_id = format!("review_{}", Uuid::new_v4().simple());
     let record = descriptor(&plan, &review_id)?;
-    project.insert("application_review".into(), record.clone());
+    let lock_id = format!(
+        "lock_{}",
+        plan.binding["worktreeId"].as_str().ok_or_else(invalid)?
+    );
+    let mut guards = vec![
+        ("project", project_id, revision),
+        (
+            "lock",
+            lock_id.as_str(),
+            plan.binding["lockRevision"].as_u64().ok_or_else(invalid)?,
+        ),
+    ];
+    match target {
+        ReviewTarget::Project(_) => {
+            project.insert("application_review".into(), record.clone());
+        }
+        ReviewTarget::Chat { address, .. } => {
+            let reviews = project
+                .entry("application_chat_reviews")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or_else(invalid)?;
+            reviews.insert(address.chat_id.clone(), record.clone());
+            guards.push((
+                "chat",
+                address.chat_id.as_str(),
+                plan.binding["chatBinding"]["revision"]
+                    .as_u64()
+                    .ok_or_else(invalid)?,
+            ));
+        }
+    }
     // Same-transaction CAS prevents overwriting concurrent project metadata.
     storage.upsert_projection_records_atomic_checked(
         vec![ProjectionUpsert {
@@ -74,7 +121,7 @@ pub(in crate::project) fn publish(
             request_id: Some(request_id.to_owned()),
             payload: project,
         }],
-        &[("project", project_id, revision)],
+        &guards,
     )?;
     Ok(record)
 }
@@ -86,6 +133,21 @@ pub(in crate::project) fn reopen(
     project_id: &str,
     review_id: &str,
 ) -> Result<ReviewPlan, ProjectFailure> {
+    reopen_target(
+        manager,
+        storage,
+        ReviewTarget::Project(project_id),
+        review_id,
+    )
+}
+
+#[allow(dead_code)]
+pub(in crate::project) fn reopen_target(
+    manager: &ProjectManager,
+    storage: &Storage,
+    target: ReviewTarget<'_>,
+    review_id: &str,
+) -> Result<ReviewPlan, ProjectFailure> {
     if review_id.len() != 39
         || !review_id.starts_with("review_")
         || !review_id[7..]
@@ -94,9 +156,15 @@ pub(in crate::project) fn reopen(
     {
         return Err(invalid());
     }
-    let project = required_project(storage, project_id)?;
-    let saved = project.get("application_review").ok_or_else(invalid)?;
-    let current = prepare(manager, storage, project_id)?;
+    let project = required_project(storage, target.project_id())?;
+    let saved = match target {
+        ReviewTarget::Project(_) => project.get("application_review"),
+        ReviewTarget::Chat { address, .. } => project
+            .get("application_chat_reviews")
+            .and_then(|v| v.get(&address.chat_id)),
+    }
+    .ok_or_else(invalid)?;
+    let current = prepare_target(manager, storage, target)?;
     if *saved != descriptor(&current, review_id)? {
         return Err(invalid());
     }

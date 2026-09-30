@@ -4,7 +4,9 @@ use super::{
     git_baseline::raw_baseline::{capture_clean_baseline, receipt},
     Entry, SourceInventory,
 };
-use crate::project::{snapshot_identity, ProjectFailure, ProjectManager};
+use crate::project::{
+    snapshot_identity, ActiveProject, ProjectFailure, ProjectManager, WorkspaceAddress,
+};
 use crate::storage::Storage;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -14,6 +16,110 @@ use unicode_normalization::UnicodeNormalization;
 
 const MAX_REVIEW_BYTES: usize = 32 * 1024 * 1024;
 pub(in crate::project) mod persistence;
+
+#[derive(Clone, Copy)]
+pub(in crate::project) enum ReviewTarget<'a> {
+    Project(&'a str),
+    #[allow(dead_code)]
+    Chat {
+        address: &'a WorkspaceAddress,
+        task_id: &'a str,
+    },
+}
+
+impl ReviewTarget<'_> {
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Project(id) => id,
+            Self::Chat { address, .. } => &address.project_id,
+        }
+    }
+    fn resolve(
+        &self,
+        manager: &ProjectManager,
+        storage: &Storage,
+    ) -> Result<(ActiveProject, Value), ProjectFailure> {
+        let (active, mut binding): (ActiveProject, Value) = match self {
+            Self::Project(id) => {
+                let active = manager.validate_active_project(storage, id)?;
+                let binding = snapshot_identity(&active)?;
+                (active, binding)
+            }
+            Self::Chat { address, task_id } => {
+                let active = manager.validate_workspace_address(storage, address)?;
+                let chat = storage
+                    .projection_record("chat", &address.chat_id)?
+                    .ok_or_else(|| ProjectFailure::dirty("review chat is missing"))?;
+                let record = chat
+                    .get("record")
+                    .ok_or_else(|| ProjectFailure::dirty("review chat record is missing"))?;
+                for (field, expected) in [
+                    ("chatId", address.chat_id.as_str()),
+                    ("projectId", address.project_id.as_str()),
+                    ("worktreeId", address.worktree_id.as_str()),
+                    ("workspaceIdentity", address.workspace_identity.as_str()),
+                    ("taskId", *task_id),
+                ] {
+                    if expected.is_empty()
+                        || record.get(field).and_then(Value::as_str) != Some(expected)
+                    {
+                        return Err(ProjectFailure::dirty(
+                            "review task identity differs from chat",
+                        ));
+                    }
+                }
+                let state = chat
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ProjectFailure::dirty("review chat state missing"))?;
+                if record.get("state").and_then(Value::as_str) != Some(state)
+                    || !matches!(
+                        state,
+                        "draft"
+                            | "waitingForUser"
+                            | "reviewReady"
+                            | "completed"
+                            | "needsAttention"
+                            | "canceled"
+                    )
+                {
+                    return Err(ProjectFailure::recovery(
+                        "review chat is running, discarded, or requires recovery",
+                    ));
+                }
+                let revision = chat
+                    .get("last_event_sequence")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| ProjectFailure::dirty("review chat revision missing"))?;
+                let mut binding = snapshot_identity(&active)?;
+                binding["chatBinding"] = serde_json::json!({"chatId":address.chat_id,"taskId":task_id,"revision":revision,"state":state});
+                (active, binding)
+            }
+        };
+        let lock = storage
+            .projection_record("lock", &active.lock_id)?
+            .ok_or_else(|| ProjectFailure::recovery("review lock missing"))?;
+        if lock.get("project_id") != Some(&serde_json::json!(active.project_id))
+            || lock.get("lock_id") != Some(&serde_json::json!(active.lock_id))
+            || lock.get("worktree_path")
+                != Some(&serde_json::json!(crate::project::canonical_protocol_path(
+                    &active.worktree_path
+                )?))
+            || lock.get("writer_run_id") != Some(&Value::Null)
+            || lock.get("poisoned") != Some(&serde_json::json!(false))
+            || lock.get("recovery_required") != Some(&serde_json::json!(false))
+        {
+            return Err(ProjectFailure::recovery(
+                "review requires an unowned healthy workspace lock",
+            ));
+        }
+        binding["lockRevision"] = serde_json::json!(lock
+            .get("last_event_sequence")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ProjectFailure::dirty("review lock revision missing"))?);
+        Ok((active, binding))
+    }
+}
 
 fn validate_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), ProjectFailure> {
     let mut names = BTreeMap::new();
@@ -105,12 +211,20 @@ pub(in crate::project) fn prepare(
     storage: &Storage,
     project_id: &str,
 ) -> Result<ReviewPlan, ProjectFailure> {
+    prepare_target(manager, storage, ReviewTarget::Project(project_id))
+}
+
+fn prepare_target(
+    manager: &ProjectManager,
+    storage: &Storage,
+    target: ReviewTarget<'_>,
+) -> Result<ReviewPlan, ProjectFailure> {
     if !storage.blocker_ids()?.is_empty() {
         return Err(ProjectFailure::recovery(
             "review requires all writers and recovery blockers to finish",
         ));
     }
-    let active = manager.validate_active_project(storage, project_id)?;
+    let (active, binding) = target.resolve(manager, storage)?;
     let source = manager.open_source_repository(&active.canonical_git_root)?;
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
@@ -187,8 +301,11 @@ pub(in crate::project) fn prepare(
             "source or snapshot changed during review",
         ));
     }
-    manager.validate_active_project(storage, project_id)?;
-    let binding = snapshot_identity(&active)?;
+    if target.resolve(manager, storage)?.1 != binding {
+        return Err(ProjectFailure::dirty(
+            "review target changed during preparation",
+        ));
+    }
     let mut sink = ReviewHash {
         hash: Sha256::new(),
         remaining: MAX_REVIEW_BYTES,

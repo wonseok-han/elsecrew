@@ -71,6 +71,8 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 ## 반드시 닫을 안전 조건
 
+검토 대상 연결 후속: `ReviewTarget::Chat`은 정확한 WorkspaceAddress와 task ID를 받되 값만 믿지 않고 durable chat projection/record와 active manifest/marker를 대조한다. draft/waitingForUser/reviewReady/completed/needsAttention/canceled만 후보이며 진행 중 run/recovery 전역 blocker와 writer 소유 lock은 거절한다. binding에 chat revision·state와 exact lock revision을 포함한다. 저장 슬롯은 프로젝트 단위 `application_review`와 별개인 `application_chat_reviews[chatId]`이며 project+chat+lock CAS로 게시한다. 다른 채팅으로 전환해도 해당 snapshot을 검토할 수 있고, 채팅/잠금 변경 뒤 옛 descriptor는 거절한다. 이는 확인 ticket이나 실행 권한이 아니며 기존 descriptor에 없는 새 binding을 소급 보충하지 않는다.
+
 - 첫 구현의 clean-source 조건은 HEAD/tree만이 아니라 staged/unstaged 변경, 추가 파일과 경로 충돌을 다룬다. ignored 파일도 덮어쓸 대상과 충돌하면 거절한다. 시작 시 이미 dirty였던 원본을 HEAD snapshot과 같다고 간주하지 않는다.
 - 검증은 raw blob/entry 비교와 no-follow capability 읽기로 구현한다. Git object 읽기는 bounded `ls-tree`/`cat-file` plumbing을 사용하며 external filter·fsmonitor를 실행하지 않았다는 hostile-config fixture를 둔다. index가 HEAD tree와 같은지는 별도 검증하며 파일 내용만 같다고 staged 상태를 무시하지 않는다.
 - external editor/다른 프로세스는 앱 잠금을 따르지 않는다. 검사와 rename 사이의 동일 UID 동시 수정에 대한 실제 OS 경계를 증명하기 전에는 제품 적용을 활성화하지 않는다. 이 문제를 단순 digest 재확인으로 해결됐다고 주장하지 않는다.
