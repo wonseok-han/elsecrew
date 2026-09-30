@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (pending 파일의 읽기 전용 원본 분류)
+
+- aeab4fc에서 intent/observation.rs를 추가했다. exact pending/archive와 저장 canonical source/Git identity를 대조하고 기존 두-pass raw inventory·root 재열기 stamp 및 부모 real directory를 검사한다. before 전체 metadata/inode·after 정규화 image·충돌을 구분해 현재 관측만 반환한다. 파일/DB/잠금 변경은 없다.
+- 검증: 실제 임시 source에 원래 bytes·after bytes·외부 편집·같은 bytes 새 inode·부모 symlink 교체를 주입한 기존 pending 통합 회귀 1 PASS(10.38초), strict all-targets clippy PASS(3.47초), 변경 블록 rustfmt·diff 검사 PASS. 독립 정적 검토 scoped PASS(검토자 테스트 재실행 없음). 제품 코드는 읽기 전용이며 시험은 합성 임시 원본만 사용했다.
+- Karpathy 지침으로 기존 source/capture 검증을 재사용했다. after 일치는 앱 작성 소유권 증명이 아니고 before 일치도 변경 이력 부재 증명이 아니다. 과거 root 신원 보존·동일 UID 경합 보호·파일별 완료 cursor/writer/restore·제품 UI는 남는다. 계정/유료 모델/사용자 원본 시험·main 병합/push 없음. 전체 앱 완료가 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (첫 파일 pending 영속 기록)
 
 - 7a2de9f에서 record_first_item이 applying의 exact archive 첫 항목을 검증해 pendingItem(index0/item)을 project/lock revision CAS로 저장하도록 추가했다. 기존 pending 또는 stale 요청은 거절한다. inspect_pending_item은 재시작 후 전체 archive와 영속 metadata를 다시 대조하며 원본 파일을 쓰지 않는다.

@@ -6,6 +6,10 @@ use confirmation::{Confirmations, PreparedApplication};
 use serde_json::json;
 use uuid::Uuid;
 
+mod observation;
+#[allow(unused_imports)]
+pub(in crate::project) use observation::observe_pending_source;
+
 fn invalid() -> ProjectFailure {
     ProjectFailure::recovery("application preparation identity, phase, or lock changed")
 }

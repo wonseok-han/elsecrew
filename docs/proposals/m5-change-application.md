@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 원본 관측(2026-09-30 내부): pending 항목을 현재 raw inventory와 비교해 before metadata/inode 일치·after image 일치·충돌을 읽기 전용으로 보고한다. 실제 Git/root 결속과 부모 real directory를 확인하지만 과거 root 신원/동일 UID 경합 배제나 앱 작성 소유권을 증명하지 않는다. 분류 결과로 journal을 완료시키거나 자동 복원하지 않는다.
+
 - 첫 파일 기록(2026-09-30 내부): applying 상태에서 첫 archive 항목의 pending metadata를 project/lock CAS로 저장하고 재시작 때 archive와 대조한다. 중복/stale 요청은 실행 권위로 재사용하지 않는다. 완료와 다음 항목 전진에는 writer가 생성할 파일 소유 신원·동기화/사후 관측 증거가 필요하며 아직 연결하지 않았다. 이 단계는 전체 journal/restore 완료가 아니다.
 
 - 항목 복구 입력(2026-09-30 내부): applying intent와 백업 원장에 결속된 archive의 특정 순번 metadata를 전체 검증 후 읽는 경로를 추가했다. 파일별 journal에 임의 renderer path를 받지 않기 위한 읽기 기반이며 진행 기록/원본 분류/쓰기·복원 기능은 아니다. 단건 조회마다 전체 archive를 재검증하므로 전체 적용은 별도의 순차 처리로 연결해야 한다.
