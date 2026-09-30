@@ -42,6 +42,7 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
   const [status,setStatus] = useState<LoginStatus>({state:"idle",attemptId:null,authUrl:null,error:null});
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState(false);
+  const [expanded,setExpanded] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
   const checked = useRef(false);
@@ -76,11 +77,16 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
     }
   },[disabled,status.state]);
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
+  useEffect(()=>{ if (status.state === "connected") setExpanded(false); },[status.state]);
   const waiting=status.state === "diagnosing" || status.state === "starting" || status.state === "waiting" || status.state === "verifying";
   const recoveryRequired=status.error === "providerLoginRecoveryRequired";
+  const canCollapse=status.state === "connected" && !status.error && !error;
+  const showDetails=!canCollapse || expanded;
   const label = t(`m5.login.state.${status.state}`, { name });
   return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>
     <div><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p><small>{t("m5.login.separate")}</small></div>
+    {canCollapse && <button type="button" aria-expanded={showDetails} aria-controls={`${provider}-connection-details`} onClick={()=>setExpanded(value=>!value)}>{t(showDetails ? "m5.login.hideDetails" : "m5.login.showDetails")}</button>}
+    <div id={`${provider}-connection-details`} hidden={!showDetails}>
     {provider === "claude" && status.state === "waiting" && <form onSubmit={event=>{
       event.preventDefault();
       if (inFlight.current || !status.attemptId) return;
@@ -101,5 +107,6 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
     {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"diagnose",attemptId:crypto.randomUUID()})}>{t("m5.login.diagnose")}</button>}
     {recoveryRequired && <div><p>{t("m5.login.recovery.help")}</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>{t("m5.login.recovery.action")}</button></div>}
     {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error,lang)}</p><details><summary>{t("m5.login.detail")}</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
+    </div>
   </section>;
 }

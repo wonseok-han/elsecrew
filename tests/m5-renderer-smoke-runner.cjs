@@ -77,9 +77,15 @@ app.whenReady().then(async () => {
     const codexSection = () => document.querySelector('[aria-label="Codex 연결"]');
     const codexButton = text => [...codexSection().querySelectorAll('button')].find(b => b.textContent === text);
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "automatic saved-login restoration")};
+    if (!document.getElementById('codex-connection-details').hidden) throw new Error('connected account did not collapse');
+    codexButton('연결 관리').click();
+    await ${waitFor("!document.getElementById('codex-connection-details').hidden", "connection settings expanded")};
+    await new Promise(resolve => setTimeout(resolve, 600));
+    if (document.getElementById('codex-connection-details').hidden) throw new Error('status polling collapsed explicit settings');
     codexButton('연결 상태 다시 확인').click();
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && !b.disabled)", "recoverable login UI")};
     if (!codexButton('Codex 로그인').disabled || !codexButton('연결 상태 다시 확인').disabled) throw new Error('fenced login permits start/check');
+    if (document.getElementById('codex-connection-details').hidden || codexSection().querySelector('[aria-controls]')) throw new Error('recovery controls can be hidden');
     codexButton('연결 잠금 복구').click();
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && b.disabled)", "recovery single flight")};
     await ${waitFor("[...document.querySelectorAll('[aria-label=\"Codex 연결\"] button')].some(b => b.textContent === '연결 잠금 복구' && !b.disabled)", "rejected recovery remains visible")};
@@ -111,6 +117,12 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('button')].find(b => b.textContent === '연결 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('이 앱에 Claude Code 로그인이 연결됐어요')", "Claude code accepted")};
     if (document.querySelector('#claude-connection-code')) throw new Error('submitted code input was retained');
+    await ${waitFor("document.getElementById('codex-connection-details').hidden && document.getElementById('claude-connection-details').hidden", "both signed-in panels compact")};
+    window.m5SmokeLoginStatusFailure = true;
+    await ${waitFor("!document.getElementById('codex-connection-details').hidden && document.querySelector('[aria-label=\"Codex 연결\"] [role=alert]')", "poll failure reveals connection controls")};
+    if (!document.getElementById('claude-connection-details').hidden) throw new Error('Codex error expanded unrelated Claude');
+    window.m5SmokeLoginStatusFailure = false;
+    await ${waitFor("document.getElementById('codex-connection-details').hidden", "status restoration compacts connection")};
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");

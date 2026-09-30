@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (연결 완료 후 작업대 설정 접기)
+
+- 8b46f3a에서 승인된 설정 후 작업대 진입 흐름을 대조하고, 메인이 Karpathy 지침으로 로그인 완료 패널의 점진적 표시를 구현했다. 오류 없는 connected만 접고 사용자가 다시 펼칠 수 있다. 주기적 상태 확인은 컴포넌트 unmount 없이 유지하며 진행/복구/조회 오류는 항상 노출한다. 다른 공급자의 패널과 인증·실행 권한은 변경하지 않는다.
+- 검증: 로그인/선택 Node11 PASS, TypeScript noEmit·renderer build PASS, 합성 Chromium2 PASS(최종6.86초). 명시 펼침의 polling 유지, 복구 조작 노출, Claude 코드 입력 회귀, 접힌 상태 조회 오류의 자동 펼침/복원과 공급자별 독립성을 확인했다. 직접 diff 검토·diff check PASS. 실제 계정/유료 호출은 없고 독립 안전 경계 변경도 없다.
+- 기존 복구 확인 기록을 함께 보존하고 관련 파일만 선택 커밋한다. 설치 공급 정책/원본 반영 정책 응답과 실제 provider 제품 활성화·반영/복원·G6/Windows/출시는 남는다. 전체 목표는 active이며 main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 재확인)
+
+- 사용자 재요청으로 현재 OS 프로세스와 앱 전용 로그인 파일 메타데이터를 확인했다. hello-agent 개발 앱/Electron/Vite 프로세스는 없고 활성 codex-login.pending도 없어 추가 종료·잠금 해제 대상이 없다. 앞선 보존 복구가 유지되는 상태이며 이번에 복구를 새로 수행했다고 주장하지 않는다.
+- preserved pending inode 168613811과 helper inode 166226396, 인증 파일 inode 165969554/0600을 확인했다. 인증 내용 조회·변경·삭제, 다른 앱 종료, 재부팅은 하지 않았다. 다음은 개발 앱 재실행 후 연결 상태 확인이며 실제 인증 성공은 이번 검사 범위가 아니다. 기존 미커밋 문서는 보존했다.
+
 ### 2026-09-30 · by GPT-6 Astra (비활성 실제 adapter의 미설치 오보고 수정)
 
 - 5c6b6ea에서 actual 실행 연결을 조사하며 AgentRuntime::blocked가 설치 관측 없이 항상 notInstalled를 반환하는 결함을 확인했다. Karpathy 지침으로 공개 capability snapshot에만 unknown을 추가해 미관측 사실을 표시하고 macOS capabilityUnknown/비지원 플랫폼 platformUnsupported와 canStart=false를 유지했다. 로그인 성공과 실제 작업 가능을 혼동하지 않으며 제품 실제 시작은 여전히 비활성이다.
