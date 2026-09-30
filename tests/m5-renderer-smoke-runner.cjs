@@ -322,8 +322,24 @@ app.whenReady().then(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(modelInput, 'unsaved-model');
     modelInput.dispatchEvent(new Event('input', {bubbles: true}));
     await ${waitFor("document.querySelector('.m5-settings [role=status]')", "role draft dirty")};
+    const changeSettingsLanguage = language => {
+      const select = document.querySelector('.m5-toolbar-actions select');
+      select.value = language;
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+    };
+    changeSettingsLanguage('en');
+    await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === 'Roles and models'", "English role settings")};
+    if (document.querySelector('.m5-settings input') !== modelInput || modelInput.value !== 'unsaved-model' || !leave.disabled) throw new Error('language switch lost or unlocked role settings draft');
+    if (document.querySelector('.m5-role-card strong').textContent !== 'Planning') throw new Error('role name is not translated');
+    changeSettingsLanguage('ko');
+    await ${waitFor("document.querySelector('.m5-settings h2')?.textContent === '역할과 모델'", "Korean role settings")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
     await ${waitFor("document.querySelector('[aria-label=\"저장하지 않은 설정 확인\"]')", "role close confirmation")};
+    changeSettingsLanguage('en');
+    await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')?.textContent.includes('Discard your unsaved role and model settings?')", "English discard confirmation")};
+    if (modelInput.value !== 'unsaved-model') throw new Error('translating discard confirmation changed draft');
+    changeSettingsLanguage('ko');
+    await ${waitFor("document.querySelector('[aria-label=\"저장하지 않은 설정 확인\"]')", "Korean discard confirmation retained")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 계속 편집').click();
     await ${waitFor("!document.querySelector('.m5-settings [role=alertdialog]')", "role draft retained")};
     if (document.querySelector('.m5-settings input').value !== 'unsaved-model') throw new Error('cancel lost role draft');
