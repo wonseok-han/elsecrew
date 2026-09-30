@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (동적 편집 오류 번역 키 연결)
+
+- 8b085b9의 ProjectEditorController 오류18종에 typed messageKey를 보관하고 renderer가 현재 언어로 해석하도록 연결했다. 기존 한국어 message와 기술 상세2048자 제한은 호환성을 위해 유지한다. Karpathy 지침으로 실행/저장/복구 조건과 오류 시점은 변경하지 않았다. 일반 notice와 ChatUiController 오류는 아직 별도다.
+- 검증: editor/workspace/번역 Node 50 PASS, TypeScript noEmit·renderer build PASS, Chromium 기존 회귀2 PASS. 동일 저장 오류 객체의 ko/en 키 해석과 technicalDetail 불변을 단위 검사했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/프로젝트 시험은 아니다.
+- 관련 코드/기록만 선택 커밋하고 정책 제안 및 아카이브 미커밋 기록은 보존한다. 다음은 일반 차단/상태 notice·채팅 오류의 구조화와 남은 Monaco 내부 안내다. 원본 정책·실제 provider/G6/Windows/출시 미완료이며 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (작업 패널 배치 다국어)
 
 - b4fd359에서 WorkbenchDock의 패널 이름·분할/탭 배치·드래그/집중/숨김·크기 조절 접근성 안내를 ko/en 24개 키로 옮겼다. Karpathy 지침으로 저장 형식과 위치/크기/탭 선택 계산·이벤트·효과 의존성은 유지했다.

@@ -1,3 +1,5 @@
+import { ko, type MessageKey } from "../locales/ko.ts";
+type EditorErrorKey = Extract<MessageKey, `m5.editorError.${string}`>;
 import type { M5BridgeV2 } from "./contracts/bridge-v2.ts";
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { ChatWorkspaceRefV1, WorkspaceEventV1 } from "./contracts/workspace-addressing-v1.ts";
@@ -49,7 +51,7 @@ export interface EditorSnapshot {
   selectionBlocked: boolean;
   actionBlocked: boolean;
   notice: string | null;
-  error: { message: string; technicalDetail: string } | null;
+  error: { message: string; messageKey: EditorErrorKey; technicalDetail: string } | null;
 }
 
 export type ProjectBridge = Pick<
@@ -258,7 +260,7 @@ export class ProjectEditorController {
       if (isPickerCancelled(error)) {
         return;
       }
-      this.#setError("프로젝트를 열지 못했어요. 다른 Git 프로젝트를 선택해 보세요.", error);
+      this.#setError("m5.editorError.openProject", error);
     }
   }
 
@@ -266,9 +268,9 @@ export class ProjectEditorController {
   async bindChat(workspace: ChatWorkspaceRefV1): Promise<boolean> {
     if (this.#disposed) return false;
     if (!this.canLeaveProject()) { this.#setNotice("저장하지 않은 변경이 있어 채팅을 바꿀 수 없어요."); return false; }
-    if (!this.#workspaceMethods()) { this.#setError("이 채팅의 작업 복사본을 열 수 없어요.", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }
+    if (!this.#workspaceMethods()) { this.#setError("m5.editorError.workspaceUnavailable", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }
     const project = this.#state.project;
-    if (!project || project.id !== workspace.projectId) { this.#setError("선택한 프로젝트와 채팅 작업 복사본이 맞지 않아요.", new Error("chat project identity mismatch")); return false; }
+    if (!project || project.id !== workspace.projectId) { this.#setError("m5.editorError.identity", new Error("chat project identity mismatch")); return false; }
     const previous = this.#state;
     const epoch = ++this.#projectEpoch;
     this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
@@ -281,7 +283,7 @@ export class ProjectEditorController {
     } catch (error) {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
         this.#projectEpoch += 1;
-        this.#set({ ...previous, actionBlocked: true, notice: "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.", error: errorDetail("채팅 작업 복사본을 열지 못했어요.", error) });
+        this.#set({ ...previous, actionBlocked: true, notice: "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.", error: errorDetail("m5.editorError.openWorkspace", error) });
       }
       return false;
     }
@@ -309,7 +311,7 @@ export class ProjectEditorController {
         operation.timedOut = true;
         this.#blockSnapshotCreation(
           operation,
-          "작업 복사본 준비가 오래 걸려 안전하게 멈췄어요. 앱을 다시 열어 상태를 확인한 뒤 다시 선택해 주세요.",
+          "m5.editorError.timeout",
           new Error(`snapshot creation did not settle within ${this.#snapshotCreationTimeoutMs}ms`),
         );
         nextResolve(null);
@@ -361,13 +363,13 @@ export class ProjectEditorController {
       if (operation.timedOut) {
         this.#blockSnapshotCreation(
           operation,
-          "작업 복사본 준비 결과를 확인할 수 없어요. 앱을 다시 열어 복구 상태를 확인해 주세요.",
+          "m5.editorError.unknownPreparation",
           error,
         );
       } else if (this.#isLiveOperation(operation) && operation.selection === this.#selectionGeneration) {
-        this.#setError("작업 복사본을 준비하지 못했어요. 원본 프로젝트는 건드리지 않았어요.", error);
+        this.#setError("m5.editorError.prepare", error);
       } else {
-        this.#setError("이전 프로젝트 선택이 안전하게 끝났는지 확인할 수 없어요. 상태를 확인해 주세요.", error);
+        this.#setError("m5.editorError.previousSelection", error);
       }
       operation.resolve(null);
     } finally {
@@ -388,13 +390,13 @@ export class ProjectEditorController {
       } else if (operation.selection !== this.#selectionGeneration) {
         this.#setNotice("이전 프로젝트 선택을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.");
       } else {
-        this.#setError("작업 복사본 결과를 확인하지 못했어요. 원본 프로젝트는 건드리지 않았어요.", reason);
+        this.#setError("m5.editorError.unknownWorkspace", reason);
       }
     } catch (error) {
       if (!this.#isLiveOperation(operation)) return;
       this.#blockSnapshotCreation(
         operation,
-        "이전 작업 복사본을 안전하게 닫았는지 확인할 수 없어요. 앱을 다시 열어 복구 상태를 확인해 주세요.",
+        "m5.editorError.previousClose",
         error,
       );
     } finally {
@@ -402,7 +404,7 @@ export class ProjectEditorController {
     }
   }
 
-  #blockSnapshotCreation(operation: SnapshotCreationOperation, message: string, error: unknown): void {
+  #blockSnapshotCreation(operation: SnapshotCreationOperation, message: EditorErrorKey, error: unknown): void {
     if (!this.#isLiveOperation(operation)) return;
     this.#snapshotCreationBlocked = operation;
     this.#set({ selectionBlocked: true, error: errorDetail(message, error) });
@@ -459,7 +461,7 @@ export class ProjectEditorController {
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch) || generation !== this.#treeGeneration) return;
       this.#set({ treeLoading: false });
-      this.#setError("파일 목록을 불러오지 못했어요.", error);
+      this.#setError("m5.editorError.tree", error);
       if (propagate) throw error;
     }
   }
@@ -493,7 +495,7 @@ export class ProjectEditorController {
       this.#set({ tabs: [...this.#state.tabs, tab], activePath: path, panel: "editor" });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
-      this.#setError("파일을 열지 못했어요.", error);
+      this.#setError("m5.editorError.file", error);
     }
   }
 
@@ -519,7 +521,7 @@ export class ProjectEditorController {
       this.#set({ error: null, notice: "내 편집 내용을 버리고 저장된 파일을 다시 불러왔어요. 파일 자체는 변경하지 않았어요." });
       return true;
     } catch (error) {
-      if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace) && this.#tab(confirmed.path) === confirmed) this.#setError("다시 불러오지 못했어요. 내 편집 내용은 그대로 남아 있어요.", error);
+      if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace) && this.#tab(confirmed.path) === confirmed) this.#setError("m5.editorError.reload", error);
       return false;
     }
   }
@@ -535,7 +537,7 @@ export class ProjectEditorController {
     if (!project || !tab || tab.mode !== "text" || tab.saveState !== "dirty") return;
     const totalBytes = new TextEncoder().encode(tab.text).byteLength;
     if (totalBytes > FILE_MAX_BYTES_V1) {
-      this.#setError("5MiB보다 큰 파일은 여기서 저장할 수 없어요.", new Error(`draft is ${totalBytes} bytes`));
+      this.#setError("m5.editorError.large", new Error(`draft is ${totalBytes} bytes`));
       return;
     }
     const saveGeneration = (this.#saveGenerations.get(path) ?? 0) + 1;
@@ -570,7 +572,7 @@ export class ProjectEditorController {
       if (latest?.saveState === "saving" && this.#saveGenerations.get(path) === saveGeneration) {
         this.#replaceTab(path, { ...latest, saveState: "dirty" });
       }
-      this.#setError("저장하지 못했어요. 초안은 그대로 남아 있어요.", error);
+      this.#setError("m5.editorError.save", error);
     }
   }
 
@@ -621,7 +623,7 @@ export class ProjectEditorController {
       });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
-      this.#setError("프로젝트 연결을 닫지 못했어요.", error);
+      this.#setError("m5.editorError.close", error);
     }
   }
 
@@ -652,7 +654,7 @@ export class ProjectEditorController {
       this.#set({ diffSummary, rescanRequired: false });
     } catch (error) {
       if (!this.#isCurrent(projectId, epoch)) return;
-      this.#setError("변경 목록을 불러오지 못했어요.", error);
+      this.#setError("m5.editorError.changes", error);
       if (propagate) throw error;
     }
   }
@@ -672,7 +674,7 @@ export class ProjectEditorController {
       this.#set({ diffFile, diffText, panel: "changes", error: null });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
-      this.#setError("이 파일의 변경 내용을 불러오지 못했어요.", error);
+      this.#setError("m5.editorError.diff", error);
     }
   }
 
@@ -903,7 +905,7 @@ export class ProjectEditorController {
     this.#set({ notice });
   }
 
-  #setError(message: string, error: unknown): void {
+  #setError(message: EditorErrorKey, error: unknown): void {
     this.#set({ error: errorDetail(message, error) });
   }
 
@@ -949,9 +951,9 @@ function sameWorkspace(left: ChatWorkspaceRefV1 | null | undefined, right: ChatW
   return left.chatId === right.chatId && left.projectId === right.projectId && left.worktreeId === right.worktreeId && left.workspaceIdentity === right.workspaceIdentity;
 }
 
-function errorDetail(message: string, error: unknown): { message: string; technicalDetail: string } {
+function errorDetail(message: EditorErrorKey, error: unknown): { message: string; messageKey: EditorErrorKey; technicalDetail: string } {
   const technicalDetail = error instanceof Error ? error.message : String(error);
-  return { message, technicalDetail: technicalDetail.slice(0, 2048) };
+  return { message: ko[message], messageKey: message, technicalDetail: technicalDetail.slice(0, 2048) };
 }
 
 function isBlobChunkEvent(event: EventV1): event is EventV1 & { event: "blob.chunk"; payload: { text: string } } {

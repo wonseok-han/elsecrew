@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { en } from "../src/locales/en.ts";
+import { ko } from "../src/locales/ko.ts";
 
 import {
   DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS,
@@ -622,6 +624,12 @@ test("picker AbortError는 상태를 바꾸지 않는 조용한 취소이고 ope
   await failedController.chooseProject();
   assert.match(failedController.snapshot().error?.message ?? "", /열지 못했어요/);
   assert.match(failedController.snapshot().error?.technicalDetail ?? "", /E_NOT_GIT/);
+  const storedError = failedController.snapshot().error!;
+  assert.equal(storedError.messageKey, "m5.editorError.openProject");
+  assert.equal(ko[storedError.messageKey], storedError.message);
+  assert.equal(en[storedError.messageKey], "Could not open the project. Try another Git project.");
+  assert.equal(failedController.snapshot().error, storedError, "display language must not require another controller operation");
+  assert.equal(storedError.technicalDetail, "E_NOT_GIT /tmp/not-a-project");
   cancelledController.dispose();
   failedController.dispose();
 });

@@ -197,7 +197,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       <ProviderLogin disabled={!admissionReady} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
-          <strong>{snapshot.error.message}</strong>
+          <strong>{t(snapshot.error.messageKey)}</strong>
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}
