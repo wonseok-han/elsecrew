@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (다국어 파동 후 핵심 제품 경로 재대조)
+
+- 998c011/m5 통합 checkout과 제품 명세 §5.1, provider-login.tsx, AgentRuntime::blocked/blocked_capability, native dispatcher 및 원본 반영 제안을 대조했다. 이전 파동은 구현/누적404 PASS의 진전이며 전체 완료가 아니다. 제품 actual 시작은 여전히 차단돼 있고 source writer/restore·공개 반영 UI가 없다. Electron에는 로그인은 있지만 설치·기기 진단을 포함한 승인된 guided-start 연결이 없다.
+- 다음 독립 구현 우선순위는 Electron guided-start의 설치/진단 연결이다. 기존 Tauri 시스템 레시피와 Electron IPC/sidecar 경계부터 조사하고 설치 완료·로그인 완료·실제 실행 가능을 분리해야 한다. 단순 성공 배지나 로그인만으로 사용 가능을 선언하지 않는다. 실제 공급자 활성화는 독립 검토와 명시 계정/모델 검증이 별도 필요하다.
+- 원본 반영의 외부 편집 중지/보존형 충돌 중단 지원 조건과 복원 데이터5GiB·자동 삭제 없음 정책을 각각 비동기 질문으로 요청했다. 응답 전 승인으로 간주하지 않는다. 전체 목표를 blocked/complete로 변경하지 않으며 설치/진단 등 독립 작업은 계속 가능하다. 성능 절차도 읽었으나 clean checkout 필수 조건과 기존 미커밋 문서를 보존해 측정은 실행하지 않았다. 이번은 코드 검증 추가가 아닌 근거 재대조이며 diff check만 수행, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (Monaco 앱 명령 번역·다국어 파동 누적 검증)
 
 - 3b18fbb 기준 앱이 등록한 Monaco 저장 명령과 접근성 이름을 ko/en으로 갱신한다. 언어 전환은 명령만 재등록하고 모델/편집기를 재생성하지 않는다. 최신 언어는 지연 로딩에도 반영하며 갱신 실패는 기존 보존/명시 재시도 화면으로 전환한다. Karpathy 지침으로 Monaco 자체 내장 메뉴 전체 번역은 별도 범위로 명시했다.
