@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (프로젝트·작업 상태·준비 복구 다국어)
+
+- be0ecaa에서 저장된 프로젝트/작업 상태/시작 실패 복구 안내 ko/en 28개 키를 연결했다. Karpathy 지침으로 표시와 결과 안내 종류만 변경하고 요청/검증·generation/epoch·종료 조건은 유지한다. 원본/작업 파일 비삭제 및 재부팅 해결 단정 금지 경고를 양쪽 언어에 유지했다.
+- 검증: 프로젝트 계약/작업 상태/번역 Node 9 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.57초). 결과 불명 상태에서 ko/en 전환에도 같은 준비 확인 DOM/ID·프로젝트 경로를 보존하고 명시 재확인으로 종료하는 기존 합성 흐름을 검증했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 사용자 복구를 실행한 것은 아니다.
+- 관련 구현/기록만 선택 커밋한다. 이전 정책/로그인 미커밋 기록은 아카이브에 보존한다. 다음은 동적 controller 오류/차단 안내와 dock·Monaco 내부 표시의 남은 번역 및 누적 UI 검증이다. 원본 정책/실제 공급자·G6/Windows/출시는 여전히 남는다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (편집기 실패·공통 안내 다국어)
 
 - 3680a71에서 Monaco 초기화 실패/보존 초안/명시 재시도와 작업대 이동 실패·목록 갱신·상세 펼치기 안내 ko/en 7개 키를 연결했다. Karpathy 지침으로 효과 의존성/복구/저장 동작은 변경하지 않았다. controller 생성 오류 본문과 Monaco 내부 메뉴는 아직 번역되지 않았다.

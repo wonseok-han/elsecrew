@@ -110,6 +110,14 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
     recoveryButton('이 준비 기록 종료').click();
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('결과를 확인하지 못했어요')", "lost preparation response")};
+    const pendingPreparation = document.querySelector('[aria-label="실패한 준비 종료 확인"]');
+    const pendingId = pendingPreparation.querySelector('code').textContent;
+    chooseLanguage('en');
+    await ${waitFor("document.querySelector('[aria-label=\\\"Project startup failure recovery\\\"]')?.textContent.includes('Could not verify the outcome.')", "English unknown preparation outcome")};
+    if (pendingPreparation !== document.querySelector('[aria-label="Confirm closing failed preparation"]') || pendingPreparation.querySelector('code').textContent !== pendingId) throw new Error('language switch reset preparation confirmation');
+    if (document.querySelector('.m5-project-catalog').getAttribute('aria-label') !== 'Saved projects' || document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('language switch lost saved project');
+    chooseLanguage('ko');
+    await ${waitFor("document.querySelector('[aria-label=\\\"프로젝트 시작 실패 복구\\\"]')?.textContent.includes('결과를 확인하지 못했어요')", "Korean preparation outcome restored")};
     recoveryButton('이 준비 기록 종료').click();
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('실패한 준비 기록을 종료했어요')", "preparation retry acknowledgment")};
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');

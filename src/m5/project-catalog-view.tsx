@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
 import { PreparationRecovery } from "./preparation-recovery-view.tsx";
@@ -6,6 +7,7 @@ import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contra
 export function ProjectCatalog({ controller, disabled, currentId }: {
   controller: ProjectEditorController; disabled: boolean; currentId?: string;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ProjectCatalogEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -37,18 +39,18 @@ export function ProjectCatalog({ controller, disabled, currentId }: {
     try { await controller.reopenProject(projectId, input => service.request(input)); }
     finally { inFlight.current = false; setBusy(false); setOpen(false); }
   };
-  return <section className="m5-project-catalog" aria-label="저장된 프로젝트">
-    <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>저장된 프로젝트</button>
+  return <section className="m5-project-catalog" aria-label={t("m5.catalog.title")}>
+    <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>
     {open && <div className="m5-project-catalog-list" aria-busy={busy}>
-      <p>전에 열었던 프로젝트 · ID 순서</p>
-      {busy && <p role="status">프로젝트를 확인하고 있어요…</p>}
-      {error ? <p role="alert">목록을 불러오지 못했어요. 다시 확인해 주세요.</p> : !busy && entries.length === 0 ? <p>저장된 프로젝트가 없어요. 프로젝트 선택으로 폴더를 열어 주세요.</p> :
+      <p>{t("m5.catalog.order")}</p>
+      {busy && <p role="status">{t("m5.catalog.busy")}</p>}
+      {error ? <p role="alert">{t("m5.catalog.error")}</p> : !busy && entries.length === 0 ? <p>{t("m5.catalog.empty")}</p> :
         <ul>{entries.map(entry => <li key={entry.projectId}><button type="button" disabled={disabled || busy || entry.projectId === currentId} onClick={() => void select(entry.projectId)}>
-          <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}{entry.projectId === currentId ? " · 현재 프로젝트" : ""}</strong>
+          <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}{entry.projectId === currentId ? t("m5.catalog.current") : ""}</strong>
           <span dir="auto">{entry.canonicalPath}</span>
         </button><PreparationRecovery projectId={entry.projectId} disabled={disabled || busy} /></li>)}</ul>}
-      <div><button type="button" disabled={disabled || busy} onClick={() => void load(null)}>처음부터 다시 확인</button>
-        <button type="button" disabled={disabled || busy || !next || error} onClick={() => void load(next)}>다음 목록</button></div>
+      <div><button type="button" disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>
+        <button type="button" disabled={disabled || busy || !next || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button></div>
     </div>}
   </section>;
 }
