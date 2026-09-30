@@ -9,6 +9,7 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use uuid::Uuid;
 
 const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
+const RESTORE_BUDGET: u64 = 5 * 1024 * 1024 * 1024;
 mod decode;
 pub(in crate::project) mod staging;
 
@@ -70,11 +71,12 @@ struct ArchiveWriter {
     file: File,
     hash: Sha256,
     length: u64,
+    limit: u64,
 }
 
 impl Write for ArchiveWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() as u64 > MAX_ARCHIVE.saturating_sub(self.length) {
+        if bytes.len() as u64 > self.limit.saturating_sub(self.length) {
             return Err(io::Error::other("backup exceeds archive budget"));
         }
         let n = self.file.write(bytes)?;
@@ -99,6 +101,43 @@ fn directory(manager: &ProjectManager) -> Result<Dir, ProjectFailure> {
         "application-backups-v1",
     )?
     .1)
+}
+
+// Held through publication/cleanup. All archive creators cooperate on the same
+// directory inode; closing this separately opened descriptor releases the lock.
+struct BudgetGuard {
+    _directory: Dir,
+    remaining: u64,
+}
+
+impl BudgetGuard {
+    fn acquire(dir: Dir, budget: u64) -> Result<Self, ProjectFailure> {
+        if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(ProjectFailure::recovery(
+                "another backup preparation is active",
+            ));
+        }
+        let mut used = 0u64;
+        for entry in dir.entries().map_err(|_| invalid())? {
+            let entry = entry.map_err(|_| invalid())?;
+            let meta = dir
+                .symlink_metadata(entry.file_name())
+                .map_err(|_| invalid())?;
+            // Include orphaned/abandoned archives, not just ledger restore points.
+            // Unknown objects are not followed, removed, or silently discounted.
+            if !meta.is_file() || meta.nlink() != 1 {
+                return Err(invalid());
+            }
+            used = used.checked_add(meta.len()).ok_or_else(invalid)?;
+        }
+        let remaining = budget.checked_sub(used).filter(|v| *v > 0).ok_or_else(|| {
+            ProjectFailure::recovery("restore storage budget reached; existing backups preserved")
+        })?;
+        Ok(Self {
+            _directory: dir,
+            remaining,
+        })
+    }
 }
 
 // Every intermediate component is opened without following links.
@@ -160,7 +199,8 @@ fn create_inner(
     let source = manager.open_source_repository(&active.canonical_git_root)?;
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
-    let dir = directory(manager)?;
+    let budget = BudgetGuard::acquire(directory(manager)?, RESTORE_BUDGET)?;
+    let dir = &budget._directory;
     let c = CString::new(name).map_err(|_| invalid())?;
     let fd = unsafe {
         libc::openat(
@@ -179,6 +219,7 @@ fn create_inner(
             file: file.try_clone().map_err(|_| invalid())?,
             hash: Sha256::new(),
             length: 0,
+            limit: MAX_ARCHIVE.min(budget.remaining),
         };
         // JSON header lines specify payload byte lengths. Payload may contain newlines.
         serde_json::to_writer(&mut out, &serde_json::json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()})).map_err(|_| invalid())?;
@@ -260,7 +301,7 @@ fn create_inner(
             }
         }
         out.file.sync_all().map_err(|_| invalid())?;
-        sync_capability_directory(&dir)?;
+        sync_capability_directory(dir)?;
         let backup = Backup {
             name: name.to_owned(),
             length: out.length,
@@ -279,7 +320,7 @@ fn create_inner(
         Ok(backup)
     })();
     if result.is_err() {
-        remove_failed(&dir, name, &file)?;
+        remove_failed(dir, name, &file)?;
     }
     result
 }
@@ -436,6 +477,7 @@ mod tests {
             file: File::from_std(std::fs::File::create(temp.path().join("archive")).unwrap()),
             hash: Sha256::new(),
             length: MAX_ARCHIVE,
+            limit: MAX_ARCHIVE,
         };
         assert!(output.write_all(b"x").is_err());
         assert_eq!(output.file.metadata().unwrap().len(), 0);
@@ -453,5 +495,31 @@ mod tests {
             std::fs::read(temp.path().join("archive")).unwrap(),
             b"replacement"
         );
+    }
+
+    #[test]
+    fn restore_budget_counts_orphans_serializes_and_preserves_existing_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_dir = || Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        std::fs::write(temp.path().join("orphan"), b"keep").unwrap();
+        let guard = BudgetGuard::acquire(open_dir(), 6).unwrap();
+        assert_eq!(guard.remaining, 2);
+        assert!(BudgetGuard::acquire(open_dir(), 6).is_err());
+        let mut output = ArchiveWriter {
+            file: File::from_std(std::fs::File::create(temp.path().join("new")).unwrap()),
+            hash: Sha256::new(),
+            length: 0,
+            limit: guard.remaining,
+        };
+        output.write_all(b"ok").unwrap();
+        assert!(output.write_all(b"x").is_err());
+        drop(guard);
+        assert!(BudgetGuard::acquire(open_dir(), 6).is_err());
+        assert!(BudgetGuard::acquire(open_dir(), 5).is_err());
+        assert_eq!(std::fs::read(temp.path().join("orphan")).unwrap(), b"keep");
+        assert_eq!(std::fs::read(temp.path().join("new")).unwrap(), b"ok");
+        assert!(BudgetGuard::acquire(open_dir(), 7).is_ok());
+        std::os::unix::fs::symlink("orphan", temp.path().join("link")).unwrap();
+        assert!(BudgetGuard::acquire(open_dir(), 100).is_err());
     }
 }

@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 내부 반영 백업 용량 제한: `application-backups-v1`의 모든 일반 파일(고아·abandoned 포함)을 합산해 기본 5GiB 내에서만 새 archive를 작성한다. 동일 directory inode의 비차단 flock을 census부터 작성/실패 정리까지 유지해 협력하는 작성자를 직렬화하며 남은 용량을 매 write에 적용한다. 기존 복원 파일은 자동 삭제하지 않는다. 링크·특수 객체는 따라가지 않고 거절한다. 이 경계는 내부 준비 경로이며 제품 원본 writer/복원 UI, 사용자 용량 변경·명시 정리 UI는 아직 없다. 준비 중 용량 부족도 기존 preparing 복구 상태를 유지할 수 있고 원본에는 쓰지 않는다.
+
 > 오프라인 도구 격리 실측(2026-09-30): 사용자 승인된 설치 Codex/임시 profile·가짜 sentinel 시험에서 named permission 설정 조회까지 도달했으나 command/exec가 exit71, `sandbox-exec: sandbox_apply: Operation not permitted`로 실패했다. 현재 외부 deny-default 정책 아래 vendor 내부 sandbox 적용이 거절된 관측이며 인증 파일 차단 성공이나 macOS의 모든 중첩 정책 불가능성을 입증한 것은 아니다. 시험의 inline TOML 전달/JSONL 여러 줄 수신 오류는 수정했고 제품 정책·실제 실행 활성화는 변경하지 않았다. 다음은 공식 실행 경계와 격리 책임을 함께 재설계·검증하는 것이다.
 
 > 연결 설정의 점진적 표시: 공급자 로그인 상태가 오류 없는 connected이면 상세 조작을 접고 연결 요약과 `연결 관리`를 남긴다. 펼친 상태는 반복 status 조회에서 유지하고 새 connected 전환에서 다시 접는다. 연결 컴포넌트와 polling은 유지하며, 진행 중·미연결·복구 필요·조회 오류는 접을 수 없다. 이는 표시 정책일 뿐 실제 모델 실행 가능을 뜻하지 않는다.
