@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (Claude 로그인 업데이트 대응)
+
+- bcac6f4 이후 현재 설치를 확인했다. native launcher는2.1.285를 선택하고 versions에는283/284/285만 있어 기존 고정275/270 경로는 더 이상 존재하지 않는다. 실제 인증 실패를 주장하지 않으며 구버전 파일 목록으로 새 설치를 거절하는 원인을 수정한다. Karpathy 지침으로 native 링크 선택·공급자 검증만 바꾸고 로그인 명령/profile/OAuth 코드/종료 정책을 유지했다.
+- 공식 setup 문서의 native symlink/auto-update 구조를 확인했다(https://code.claude.com/docs/en/setup#auto-updates). 링크를 실행하지 않고 no-follow 부모에서 raw 내용을 읽어 고정 versions의 단일 숫자 X.Y.Z 대상만 허용한다. Anthropic PBC의 Apple 인증서 TeamQ6L2SF6YDW와 com.anthropic.claude-code 식별자를 현재 설치본에서 확인하고 strict 서명 검증을 통과했다. 기존 서명 검사 전후·실행 직전 파일/상위경로 교체 검증을 재사용한다.
+- 최초 실제 선택 검사는 cap_std read_link가 절대 링크를 거절해 FAIL했다. read_link_contents로 바꿔 내용만 읽고 별도 경로 제한을 유지한 뒤 설치본 직접 검사1 PASS(0.92초)했다. 기존 digest helper의 마지막 제품 caller가 사라져 clippy가 dead_code를 보고했고 test-only로 한정했다. 최종 Claude6 PASS/설치1 ignored, 공통 executable5 PASS/1 ignored·manager8 PASS/3 ignored, strict clippy·rustfmt·diff check PASS. 같은 독립 검토자가 raw 링크 읽기와 target 제한·서명 결속·test-only 변경을 재확인해 차단 지적 없이 승인했다. 실제 계정/모델/사용자 프로젝트 실행 없음. native 외 설치·실제 agent 실행·원본 반영/복원·G6/Windows/출시는 남고, 기존 archive 미커밋 보존·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (Codex 로그인 공급자 서명 전환)
 
 - 94aefcc의 복원 예산 완료 뒤 실제 채팅 생성의 baseline 연결을 대조했다. FreshChat을 ApplicationCandidate로 바로 바꾸면 미지원 원본까지 새 입장 조건으로 막으므로 제품 안내/복구와 함께 연결해야 한다. 대신 확정된 업데이트 호환 요구에 따라 Codex 로그인·진단의 exact SHA release 목록을 제거하고 OpenAI 서명 신뢰와 실행 중 bytes 결속을 분리했다. Karpathy 지침으로 Claude·실제 모델 실행 정책은 변경하지 않는다.
@@ -169,6 +175,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude 로그인 업데이트 입장(2026-09-30)**: 고정275/270 버전/SHA 목록 대신 공식 native launcher가 가리키는 versions/X.Y.Z 실파일을 Anthropic 서명으로 검증한다. 공식 링크는 bin 밖 절대경로이므로 cap_std의 read_link가 아닌 read_link_contents 후 고정 target 검증을 사용한다. launcher 자체는 실행하지 않고 현재 선택한 실파일을 bind한다. 설치2.1.285 읽기 전용 검증 통과는 계정 인증/모델 실행 완료가 아니다. npm/Homebrew/custom launcher 경로는 별도다.
 
 - **Codex 로그인 업데이트 입장(2026-09-30)**: 로그인·진단은 고정 bundle native 후보의 Apple anchor/OpenAI Team2DC432GLL2/exact CLI·helper identifier 서명으로 입장한다. release SHA 목록은 이 경로에서 제거했고 실행 중 교체 감지용 digest는 유지한다. 새 코드 경로의 설치본 검사는 CLI/helper 수락·잘못된 identifier/다른 공급자 거절을 확인했으나 계정/모델을 호출하지 않았다. Claude와 actual runtime의 pin/호환 전환은 남으며 모든 upstream 파괴적 변경 호환을 보장하지 않는다.
 

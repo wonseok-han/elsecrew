@@ -46,7 +46,20 @@ fn signature_directory(path: &Path) -> Result<cap_std::fs::Dir, SidecarError> {
 impl PinnedExecutable {
     #[cfg(target_os = "macos")]
     pub(crate) fn open_codex_signed(path: &Path, helper: bool) -> Result<Self, SidecarError> {
-        Self::open_authenticated(path, |path| verify_codex_signature(path, helper))
+        let requirement = if helper {
+            "=anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\" and identifier \"codex-code-mode-host\""
+        } else {
+            "=anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\" and identifier \"codex\""
+        };
+        Self::open_authenticated(path, |path| verify_signature(path, requirement))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_claude_signed(path: &Path) -> Result<Self, SidecarError> {
+        Self::open_authenticated(path, |path| {
+            verify_signature(path,
+            "=anchor apple generic and certificate leaf[subject.OU] = \"Q6L2SF6YDW\" and identifier \"com.anthropic.claude-code\"")
+        })
     }
 
     #[cfg(any(test, target_os = "macos"))]
@@ -144,16 +157,11 @@ fn signature_stamp(meta: &cap_std::fs::Metadata) -> SignatureStamp {
 }
 
 #[cfg(target_os = "macos")]
-fn verify_codex_signature(path: &Path, helper: bool) -> Result<(), SidecarError> {
+fn verify_signature(path: &Path, requirement: &str) -> Result<(), SidecarError> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
     // Publisher and identifiers were verified on the previously trusted release.
     // Neither values nor requirement expressions come from renderer/candidate data.
-    let requirement = if helper {
-        "=anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\" and identifier \"codex-code-mode-host\""
-    } else {
-        "=anchor apple generic and certificate leaf[subject.OU] = \"2DC432GLL2\" and identifier \"codex\""
-    };
     let mut child = Command::new("/usr/bin/codesign")
         .args([
             "--verify",

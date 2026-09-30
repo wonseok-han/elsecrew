@@ -1,4 +1,4 @@
-//! Pinned, model-free Claude auth commands in the app-owned credential namespace.
+//! Publisher-authenticated, model-free Claude auth in the app credential namespace.
 use crate::{
     provider_claude_profile::ClaudeProfileBinding, provider_executable::PinnedExecutable,
     provider_login_gate, provider_login_io::OutputChunk, provider_login_process::LoginProcess,
@@ -22,7 +22,11 @@ fn failure() -> SidecarError {
 pub(crate) fn diagnose() -> Result<(), SidecarError> {
     let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
         .join(".local/share/claude/versions");
-    select_executable(&versions).map(|_| ())
+    select_executable(
+        &versions,
+        &PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?).join(".local/bin/claude"),
+    )
+    .map(|_| ())
 }
 
 pub(crate) fn run(
@@ -32,10 +36,13 @@ pub(crate) fn run(
     check_only: bool,
     code: &std::sync::Mutex<Option<String>>,
 ) -> Result<(), SidecarError> {
-    // Never follow the mutable launcher symlink or auto-trust a new version.
+    // Resolve only the native installer's bounded link target, then authenticate
+    // and execute the concrete binary, never the mutable launcher itself.
     let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
         .join(".local/share/claude/versions");
-    let executable = select_executable(&versions)?;
+    let launcher =
+        PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?).join(".local/bin/claude");
+    let executable = select_executable(&versions, &launcher)?;
     if !check_only {
         let (_, exit) = command_with_code(profile, &executable, cancel, false, publish, code)?;
         if cancel.load(Ordering::Acquire) {
@@ -59,7 +66,10 @@ pub(crate) fn run(
     Ok(())
 }
 
-fn select_executable(versions: &std::path::Path) -> Result<PinnedExecutable, SidecarError> {
+fn select_executable(
+    versions: &std::path::Path,
+    launcher: &std::path::Path,
+) -> Result<PinnedExecutable, SidecarError> {
     if std::fs::symlink_metadata(versions)
         .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
     {
@@ -68,27 +78,36 @@ fn select_executable(versions: &std::path::Path) -> Result<PinnedExecutable, Sid
             "Claude installation directory is unavailable",
         ));
     }
-    for (version, hash) in [
-        (
-            "2.1.275",
-            "1b8177fe49f2be5bacc75e89b5f88fa7454791283113ace16a453fe9171d179b",
-        ),
-        (
-            "2.1.270",
-            "a506b6d970a4cf44f6abdb53a81ddcd5d3b0ce042a95c502fe9d1f946bdb8807",
-        ),
-    ] {
-        if let Ok(executable) = PinnedExecutable::open(
-            &versions.join(version),
-            super::provider_login_manager::digest(hash),
-        ) {
-            return Ok(executable);
-        }
+    let parent =
+        crate::provider_profile::open_absolute_directory(launcher.parent().ok_or_else(failure)?)?;
+    let target = parent
+        .read_link_contents(launcher.file_name().ok_or_else(failure)?)
+        .map_err(|_| failure())?;
+    let selected = selected_version_path(versions, &target)?;
+    PinnedExecutable::open_claude_signed(&selected)
+}
+
+fn selected_version_path(
+    versions: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<PathBuf, SidecarError> {
+    let relative = target
+        .strip_prefix(versions)
+        .or_else(|_| target.strip_prefix("../share/claude/versions"))
+        .map_err(|_| failure())?;
+    let name = relative.to_str().ok_or_else(failure)?;
+    let parts: Vec<_> = name.split('.').collect();
+    if parts.len() != 3
+        || parts.iter().any(|p| {
+            p.is_empty()
+                || p.len() > 9
+                || !p.bytes().all(|b| b.is_ascii_digit())
+                || (p.len() > 1 && p.starts_with('0'))
+        })
+    {
+        return Err(failure());
     }
-    Err(SidecarError::new(
-        "providerExecutableChanged",
-        "No verified Claude version is available",
-    ))
+    Ok(versions.join(name))
 }
 
 fn account(bytes: &[u8], exit: i32, home: &std::path::Path) -> Result<bool, SidecarError> {
@@ -274,23 +293,60 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;
     #[test]
-    fn installed_version_names_never_authorize_unpinned_bytes() {
+    fn installed_version_names_never_authorize_unsigned_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         assert_eq!(
-            select_executable(&root.join("missing"))
+            select_executable(&root.join("missing"), &root.join("launcher"))
                 .err()
                 .unwrap()
                 .kind(),
             "providerExecutableMissing"
         );
-        assert!(select_executable(&root).is_err());
+        assert!(select_executable(&root, &root.join("launcher")).is_err());
         for version in ["2.1.275", "2.1.270", "99.0.0"] {
             std::fs::write(root.join(version), b"untrusted executable").unwrap();
             std::fs::set_permissions(root.join(version), std::fs::Permissions::from_mode(0o700))
                 .unwrap();
         }
-        assert!(select_executable(&root).is_err());
+        std::os::unix::fs::symlink(root.join("99.0.0"), root.join("launcher")).unwrap();
+        assert_eq!(
+            select_executable(&root, &root.join("launcher"))
+                .err()
+                .unwrap()
+                .kind(),
+            "providerExecutableChanged"
+        );
+    }
+
+    #[test]
+    fn native_launcher_target_is_confined_to_one_version() {
+        let root = std::path::Path::new("/home/test/.local/share/claude/versions");
+        for target in [
+            root.join("2.1.285"),
+            PathBuf::from("../share/claude/versions/99.12.345"),
+        ] {
+            assert!(selected_version_path(root, &target).is_ok());
+        }
+        for target in [
+            "/outside/2.1.285",
+            "../share/claude/versions/../2.1.285",
+            "../share/claude/versions/2.1.285/nested",
+            "../share/claude/versions/01.2.3",
+            "../share/claude/versions/2.1.x",
+            "../share/claude/versions/2.1.285-beta",
+        ] {
+            assert!(selected_version_path(root, std::path::Path::new(target)).is_err());
+        }
+    }
+
+    #[test]
+    #[ignore = "read-only installed Claude signature verification; does not execute provider"]
+    fn installed_claude_launcher_selects_authenticated_current_version() {
+        diagnose().unwrap();
+        assert!(
+            PinnedExecutable::open_claude_signed(std::path::Path::new("/usr/bin/true")).is_err()
+        );
     }
     #[test]
     fn os_home_and_app_credential_namespace_are_separate() {

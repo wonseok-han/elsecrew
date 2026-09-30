@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> Claude 로그인 업데이트 호환: macOS native 설치의 `~/.local/bin/claude` 링크 내용을 no-follow 부모 capability로 읽고, 고정 `~/.local/share/claude/versions/<숫자 X.Y.Z>` 또는 이에 해당하는 `../share/claude/versions/<숫자 X.Y.Z>`만 선택한다. 런처 자체를 실행하거나 PATH/임의 최신 파일로 fallback하지 않는다. 선택한 실파일은 Apple anchor + Anthropic TeamIdentifier `Q6L2SF6YDW` + `com.anthropic.claude-code` 서명과 기존 파일/상위 경로 stamp로 검증한다. 기존 버전/SHA 목록은 제거했고 auth·profile·코드 입력·종료 경계는 유지한다. native 설치 외 npm/Homebrew·custom launcher 지원은 이 경로의 범위가 아니다. [공식 설치/업데이트 문서](https://code.claude.com/docs/en/setup#auto-updates)의 런처 구조와 현재 설치2.1.285의 읽기 전용 선택/서명 검사를 확인했으며 실제 계정 로그인 회귀는 별도다.
+
 > Codex 로그인 업데이트 호환: macOS 로그인·설치 진단은 고정 bundle 후보의 native CLI/helper를 Apple 서명 anchor + OpenAI TeamIdentifier `2DC432GLL2` + 각각 `codex`/`codex-code-mode-host` identifier로 검증한다. 버전별 파일 SHA 허용 목록은 이 경로에서 제거했다. 검증 시점 bytes의 SHA는 실행 중 교체 감지에만 사용하며 기존 로그인 응답·URL·profile·종료 검증을 유지한다. 진단은 공급자를 실행하지 않지만 고정 `/usr/bin/codesign` 검증 프로세스는 실행한다. Claude와 실제 모델 실행의 기존 admission은 별도이며, 업데이트 전후 실제 계정 인증 회귀까지 입증한 것은 아니다. 아래 과거 pinned 로그인 설명은 이 Codex 경로에 한해 갱신한다.
 
 > 내부 반영 백업 용량 제한: `application-backups-v1`의 모든 일반 파일(고아·abandoned 포함)을 합산해 기본 5GiB 내에서만 새 archive를 작성한다. 동일 directory inode의 비차단 flock을 census부터 작성/실패 정리까지 유지해 협력하는 작성자를 직렬화하며 남은 용량을 매 write에 적용한다. 기존 복원 파일은 자동 삭제하지 않는다. 링크·특수 객체는 따라가지 않고 거절한다. 이 경계는 내부 준비 경로이며 제품 원본 writer/복원 UI, 사용자 용량 변경·명시 정리 UI는 아직 없다. 준비 중 용량 부족도 기존 preparing 복구 상태를 유지할 수 있고 원본에는 쓰지 않는다.

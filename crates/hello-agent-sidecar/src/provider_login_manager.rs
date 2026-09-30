@@ -312,6 +312,7 @@ enum Profile {
     Codex(CodexProfileBinding),
     Claude(crate::provider_claude_profile::ClaudeProfileBinding),
 }
+#[cfg(test)]
 pub(super) fn digest(value: &str) -> [u8; 32] {
     let mut bytes = [0; 32];
     for (i, byte) in bytes.iter_mut().enumerate() {
