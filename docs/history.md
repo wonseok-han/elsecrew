@@ -1,10 +1,43 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (누적 회귀 실패 수정 검증 마감)
+
+- session82474의 101개 snapshot 회귀가 477.48초에 통과했다. 실제 708 source/405 project source와 174301 bounded maintenance calls 이후 원장 digest 보존·101개 workspace·ready를 검증했다. 임시 디렉터리는 테스트 종료로 자동 정리됐다. 앞서 수정한 일반 approval interaction도 75.06초에 통과했으며 제품 안전 코드는 변경하지 않았다.
+- 미실행 stdio integration을 이어 돌려 8 PASS/5 FAIL을 확인했다. 세 capability 기대 목록에 기존 run.approval/project.catalog가 빠진 문제였으며 해당 기대만 추가한 뒤 13 PASS(4.49초), strict all-targets clippy PASS(3.25초), diff check PASS다. 최초 library 502 PASS/2 FAIL/30 ignored와 두 실패 수정 후 집중 PASS를 구분하며 단일 전체 재실행 PASS로 주장하지 않는다. opt-in 30개 및 macOS probe 2개는 이번에 실행하지 않았다.
+- Karpathy 지침에 따라 테스트 정합성만 수정하고 안전 검사 완화 없이 미격리 승인 거절 검증을 보강했다. 테스트/분석·검증 기록만 선택 커밋하며 원본 반영 정책/5GiB 제안은 미커밋으로 남긴다. 다음은 원본 적용 정책 결정 후 writer/UI 연결 및 실제 공급자·출시 게이트다. main 병합/push 없음, 전체 앱 완료 아님.
+
+### 2026-09-30 · by GPT-6 Astra (대규모 snapshot 검사 지연 위치 관측)
+
+- session82474의 단일 snapshot 회귀는 계속 실행 중이다. ps에서 시험 PID6310의 CPU98.9%/running을 확인했고 1초 sample은 Fixture::snapshot→create_worktree_inner→persist_pre_activation→append_event→replay_storage_ledger 경로를 보여줬다. 아직 생성 단계였으며 단순 무응답/정지로 판정하지 않는다. 보고서는 /private/tmp/hello-agent-snapshot-regression-sample.txt다.
+- storage.rs의 append_event_with_failure가 기존 events 로드·분류 후 insert, 전체 events 재로드·replay를 수행함을 확인했다. 큰 prepared_workspaces 원장 비용의 후속 성능 조사 근거이며 이번 1초 샘플만으로 전체 제품 성능이나 수정안을 확정하지 않는다. 실행 중인 검사/안전 코드/계정 데이터를 바꾸지 않았다. 결과 회수와 stdio integration 검증이 다음이다.
+
+### 2026-09-30 · by GPT-6 Astra (대규모 snapshot 회귀 대기와 잔여 검증 범위)
+
+- 동일 session82474를 재조회했다. 일반 interaction 통과 후 시작한 production_prepared_workspace_snapshot_persists_more_than_one_hundred_members는 아직 종료되지 않았다. timeout은 관측 대기 종료일 뿐 테스트 실패가 아니므로 중단/중복 실행하지 않았다. 소스 테스트 수정은 미커밋으로 유지한다.
+- 초기 누적 lib 실패가 막았던 별도 stdio_process integration 13개를 다음 순차 검증 대상으로 확인했다. macos_sandbox_probe 2개는 명시 opt-in으로 남긴다. 전체 library를 반복하는 대신 기존 502 PASS와 수정된 실패 집중 검사·미실행 integration 결과를 구분해 기록한다. 실제 계정/모델·정책 승인·main/push 변경 없음.
+
+### 2026-09-30 · by GPT-6 Astra (누적 Rust 실패 원인 분리와 회귀 수정)
+
+- session3824 종료 결과는 library 502 PASS/2 FAIL/30 ignored, 749.11초다. 이후 integration target은 lib 실패로 실행되지 않았다. 101개 snapshot 회귀는 export-start lock 추가 이후 events 기대가 607에 머물러 실제 708과 달랐다. project sequence 기대는 그대로 두고 lock 증가만 반영했다.
+- reserved_interactions 실패를 진단 문구 추가로 재현해 bound-native-accept임을 확인했다(84.36초). 승인 허용에는 sealed model-proxy runtime scope가 필요한데 일반 비프록시 matrix에 해당 경우가 섞였다. 전용 ignored native_confined_acceptance_round_trip에는 그대로 유지하고 일반 matrix에서 분리했다. 대신 일반 handler에서 inspect 후에도 accept가 agentApprovalChanged로 거절되고 원장이 그대로인지 검증한다. 제품 안전 검사를 변경하지 않았다.
+- 수정 후 일반 interaction 집중 1 PASS(75.06초). 동일 순차 session82474에서 101개 snapshot 회귀가 현재 실행 중이며 결과를 회수해야 한다. 변경 블록 수동 포맷·diff check PASS. Karpathy 최소 수정 원칙으로 테스트만 변경했으며 아직 커밋하지 않았다. 실제 CLI/계정/모델·main 병합/push 없음. 앱 전체 완료 및 누적 전체 PASS 아님.
+
+### 2026-09-30 · by GPT-6 Astra (진행 중인 누적 Rust 검사 인계)
+
+- 프런트 fixture 정합성 수정은 f3e5906으로 선택 커밋했다. 정책 제안과 로그인 복구 확인의 기존 미커밋 문서는 보존했다. sidecar 누적 Cargo session3824는 현재도 출력이 이어지므로 중복 실행/중단하지 않았다.
+- 현재 reserved_interactions_preserve_ledger_and_reject_role_changes와 production_prepared_workspace_snapshot_persists_more_than_one_hundred_members 실패를 관측했다. 최종 libtest 실패 상세·총계는 아직 나오지 않았으며 원인을 단정하지 않는다. 다음 작업은 동일 session 결과 회수 후 두 실패 진단과 영향 범위 재검증이다. 전체 앱 완료/전체 Rust PASS 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (누적 프런트 회귀 fixture 정합성 복구)
 
 - 전체 Node 검사에서 저장 단축키 추가 후 Monaco mock의 KeyMod/KeyCode/addAction 누락과 기존 공개 run.approval/project.catalog의 canonical manifest 누락을 발견해 수정했다. 제품 동작/API를 바꾸지 않았고 최신 admission/saving 상태에서 단축키 차단·정상 저장을 회귀에 추가했다.
 - 검증: 집중 Node 7 PASS, 수정 후 전체 tests/*.test.mts exit0, Rust canonical transcript 1 PASS. 직접 diff 검토와 diff check PASS. Karpathy 지침으로 기존 fixture만 수정했다. 병행 시작한 sidecar 전체 검사는 아직 진행 중이며 reserved_interactions 실패의 상세 진단이 남아 전체 Rust PASS로 표현하지 않는다.
 - 미승인 원본 반영 정책/예산 제안과 로그인 복구 확인 기록은 별도 미커밋으로 보존한다. 다음은 누적 Rust 결과 회수·실패 수정이며 main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·로그인 복구 상태 재확인)
+
+- 사용자 요청 범위에서 현재 프로세스와 앱 전용 복구 파일을 다시 확인했다. 개발 Electron/Vite/제품 sidecar는 이미 종료되어 추가 종료 대상이 없었다. 실행 중인 Cargo/sidecar 테스트와 Codex 도구 프로세스는 개발 앱이 아니므로 종료하지 않았다.
+- 활성 codex-login.pending은 없고 보존 pending inode 168613811·helper inode 166226396이 유지된다. auth.json은 내용 조회 없이 0600 권한을 확인했다. 기존 보존 복구 상태가 유지되어 추가 파일 이동·삭제·인증 초기화·재부팅은 하지 않았다. 실제 재로그인 성공을 확인한 것은 아니다.
+- 기존 미커밋 정책 문서와 테스트 수정은 보존했다. 선행 누적 Rust 검사(session3824)는 진행 중이며 reserved_interactions_preserve_ledger_and_reject_role_changes 실패가 관측되어 종료 후 상세 원인 확인이 남는다. 로그인 복구와 전체 개발 완료를 혼동하지 않는다. main 병합/push 없음.
 
 ### 2026-09-30 · by GPT-6 Astra (코드 편집기 언어 정의 보완)
 
@@ -205,6 +238,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **대규모 snapshot 생성 비용 관측(2026-09-30)**: 101개 작업 복사본 회귀의 진행 중 1초 CPU sample에서 append_event의 전체 원장 replay/JSON 검증을 관측했다. storage.rs:append_event_with_failure도 매 append 후 전체 events를 재로드·replay한다. 검사 정지를 의미하지 않으며, 기존 보존/중복/충돌 계약을 유지하는 성능 개선은 별도 설계·검증해야 한다. 단일 debug sample을 배포판 성능 수치로 인용하지 않는다.
 - **채팅별 검토 대상(2026-09-30)**: 각 chat descriptor 슬롯과 exact task/workspace/chat revision·lock 신원/revision을 결속한다. 다른 chat의 active 포인터로 바뀌어도 원래 manifest를 검증하며 chat/lock 변경은 옛 검토를 무효화한다. 세 원장 revision CAS와 미소유 lock을 요구하고 아직 승인/쓰기 권위는 없다.
 - **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source/snapshot 변화·신원을 읽기 전용으로 묶는다. 최신 descriptor는 project 원장 CAS로 게시하고 재시작 시 현재 파일에서 재구성/대조한다. untracked·경로 충돌·미지원 권한과 승인 상태/superseded ID는 거절한다. 과거 파일 내용 보관이나 승인/쓰기 권위는 아니며 chat/task 확인 수명과 A3~A5는 남는다.
 - **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.

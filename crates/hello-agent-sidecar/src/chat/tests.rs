@@ -645,6 +645,12 @@ fn text_candidate_cases_selected(
             continue;
         }
         let accepting = failure.starts_with("bound-native-accept");
+        // Acceptance requires sealed model-proxy launch provenance. Those
+        // scenarios belong to native_confined_acceptance_round_trip, not the
+        // ordinary unconfined interaction/decline matrix.
+        if accepting && !proxied {
+            continue;
+        }
         if (failure.starts_with("bound-handler") || accepting) != interactions {
             continue;
         }
@@ -1471,6 +1477,17 @@ fn text_candidate_cases_selected(
                                     let detail = runtime.approval_request(&fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
                                     assert_eq!(detail["inspection"]["approvalId"], id);
                                     assert_eq!(detail["inspection"]["command"], "echo test");
+                                    if failure == "bound-handler-runtime" {
+                                        let error = runtime
+                                            .accept_native_approval_once(
+                                                &mut fixture.storage,
+                                                &fixture.projects,
+                                                &identity,
+                                                &id,
+                                            )
+                                            .unwrap_err();
+                                        assert_eq!(error.kind, "agentApprovalChanged");
+                                    }
                                     assert_eq!(
                                         fixture
                                             .storage
@@ -1486,7 +1503,9 @@ fn text_candidate_cases_selected(
                                                 &identity,
                                                 &id,
                                             )
-                                            .unwrap();
+                                            .unwrap_or_else(|error| {
+                                                panic!("approval acceptance failed for {failure}: {error:?}")
+                                            });
                                         assert!(runtime
                                             .accept_native_approval_once(
                                                 &mut fixture.storage,
@@ -2255,9 +2274,9 @@ fn production_prepared_workspace_snapshot_persists_more_than_one_hundred_members
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    // One project.open event, then prepare lock/project, pre-activation,
-    // active project/lock, and the G5 preparation-map upsert per snapshot.
-    assert_eq!(event_count, 1 + 6 * 101);
+    // One project.open event, then prepare lock/project, export-start lock,
+    // pre-activation, active project/lock, and the G5 preparation-map upsert.
+    assert_eq!(event_count, 1 + 7 * 101);
     assert_eq!(project_count, 1 + 4 * 101);
     assert_eq!(sequence, project_count);
     let mut previous_rowid = 0;
@@ -2327,7 +2346,8 @@ fn production_prepared_workspace_snapshot_persists_more_than_one_hundred_members
     let mut calls = 0;
     loop {
         calls += 1;
-        // The preserved exact 607-source fixture completed in 172,685 calls.
+        // The earlier 607-source fixture completed in 172,685 calls;
+        // the export-start lock adds one source per snapshot (708 total).
         // This is a test hang guard, not a per-call or product startup budget.
         assert!(calls < 400_000);
         let (usage, done) = match session.step(&mut || false).unwrap() {
