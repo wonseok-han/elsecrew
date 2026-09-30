@@ -2,6 +2,169 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+fn source_index_fixture() -> Fixture {
+    let fixture = Fixture::open();
+    git_raw(
+        &fixture.source,
+        ["update-index", "--force-remove", "vendor/sub"],
+    );
+    git_raw(
+        &fixture.source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "remove gitlink for index baseline",
+        ],
+    );
+    fixture
+}
+
+#[cfg(unix)]
+#[test]
+fn source_index_baseline_rejects_staged_and_head_changes() {
+    use application::git_baseline::capture_index_baseline;
+    let fixture = source_index_fixture();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    capture_index_baseline(&fixture.manager, &source).unwrap();
+    let original_index = fs::read(fixture.source.join(".git/index")).unwrap();
+    // Index-only modification: working-tree bytes stay unchanged.
+    let oid = git_text(&fixture.source, ["rev-parse", "HEAD:src/delete.txt"]);
+    let entry = format!("100644,{oid},src/edit.txt");
+    git_raw(&fixture.source, ["update-index", "--cacheinfo", &entry]);
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+        b"hello"
+    );
+    fs::write(fixture.source.join(".git/index"), original_index).unwrap();
+    capture_index_baseline(&fixture.manager, &source).unwrap();
+    git_raw(
+        &fixture.source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "new head same tree",
+        ],
+    );
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn source_index_baseline_rejects_split_index_and_gitlinks() {
+    use application::git_baseline::capture_index_baseline;
+    let with_gitlink = Fixture::open();
+    let source = with_gitlink
+        .manager
+        .open_source_repository(&with_gitlink.source)
+        .unwrap();
+    assert!(capture_index_baseline(&with_gitlink.manager, &source).is_err());
+    let fixture = source_index_fixture();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    git_raw(&fixture.source, ["update-index", "--split-index"]);
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+    git_raw(&fixture.source, ["update-index", "--no-split-index"]);
+    git_raw(
+        &fixture.source,
+        ["sparse-checkout", "set", "--cone", "--sparse-index", "src"],
+    );
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+    git_raw(
+        &fixture.source,
+        ["sparse-checkout", "reapply", "--no-sparse-index"],
+    );
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+    git_raw(&fixture.source, ["sparse-checkout", "disable"]);
+    git_raw(
+        &fixture.source,
+        ["update-index", "--assume-unchanged", "src/edit.txt"],
+    );
+    assert!(capture_index_baseline(&fixture.manager, &source).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn source_index_baseline_rejects_intent_to_add_for_committed_empty_file() {
+    use application::git_baseline::capture_index_baseline;
+    let fixture = source_index_fixture();
+    fs::write(fixture.source.join("empty.txt"), b"").unwrap();
+    git_raw(&fixture.source, ["add", "empty.txt"]);
+    git_raw(
+        &fixture.source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "empty file",
+        ],
+    );
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    git_raw(&fixture.source, ["rm", "--cached", "empty.txt"]);
+    git_raw(&fixture.source, ["add", "--intent-to-add", "empty.txt"]);
+    assert_eq!(
+        capture_index_baseline(&fixture.manager, &source)
+            .unwrap_err()
+            .kind,
+        "dirtyConflict"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_index_baseline_does_not_run_user_hooks_filters_or_rewrite_index() {
+    use application::git_baseline::capture_index_baseline;
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = source_index_fixture();
+    let hook = fixture.source.join("probe.sh");
+    fs::write(&hook, b"#!/bin/sh\n/usr/bin/touch \"$0.called\"\nexit 1\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+    for key in [
+        "core.fsmonitor",
+        "filter.probe.clean",
+        "filter.probe.smudge",
+        "diff.external",
+    ] {
+        git_raw(&fixture.source, ["config", key, hook.to_str().unwrap()]);
+    }
+    fs::write(
+        fixture.source.join(".gitattributes"),
+        b"* filter=probe diff=probe\n",
+    )
+    .unwrap();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let before = fs::read(fixture.source.join(".git/index")).unwrap();
+    let raw_before = application::capture(&source._root).unwrap();
+    capture_index_baseline(&fixture.manager, &source).unwrap();
+    assert_eq!(fs::read(fixture.source.join(".git/index")).unwrap(), before);
+    assert_eq!(application::capture(&source._root).unwrap(), raw_before);
+    assert!(!fixture.source.join("probe.sh.called").exists());
+}
+
 #[test]
 fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
     let mut fixture = Fixture::open();

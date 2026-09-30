@@ -23,6 +23,10 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 기존 snapshot에는 receipt가 없으므로 원본 적용에는 사용할 수 없다. 기존 파일/채팅/diff 열기는 유지하지만 과거 baseline을 현재 source에서 소급 생성하지 않는다. 사용자에게 새 기준에서 작업을 시작하도록 안내한다. A1은 receipt 생성·영속 binding·재검증·legacy 거절 회귀까지 통과해야 하며, 그 전 A2 검토 묶음은 writer admission 근거가 아니다.
 
+내부 `application/git_baseline.rs` 후보는 index image 32MiB와 각 Git 출력 24MiB를 제한하고, `ls-files -v --stage --sparse -z`와 `ls-tree -rz`의 경로/mode/OID 집합을 대조한다. staged 변경·unmerged stage·gitlink·split index·sparse directory entry·skip-worktree·assume-unchanged는 거절한다. full index 형태의 sparse checkout도 skip-worktree 표시로 차단한다. 같은 빈 blob으로 보이는 intent-to-add는 cached 전용 `diff-index --ita-invisible-in-index`로 추가 확인한다. 외부 diff/textconv/rename과 fsmonitor/hooks를 명시 끄고 index stamp/hash 및 HEAD를 전후 확인한다. 이 검사는 작업 폴더 bytes의 HEAD 동등성을 증명하지 않으며 raw blob 비교와 영속 receipt 결속은 별도 미완료다. unsupported Git 옵션도 허용으로 해석하지 않고 실패한다. 실제 사용자 저장소·외부 객체 fetch/관리 설정 전체 안전성 증거 없이 제품 입장에 연결하지 않는다.
+
+명령 의미는 [Git ls-files](https://git-scm.com/docs/git-ls-files), [ls-tree](https://git-scm.com/docs/git-ls-tree), [diff-index](https://git-scm.com/docs/git-diff-index)의 공식 문서를 확인했다. `diff-index --cached`는 working-tree 파일을 비교하지 않으며 외부 변환은 별도로 끈다. 일반 `git diff`/`status`를 무설정으로 실행하는 정책이 아니다.
+
 검토 대상은 project/chat/task/worktree/workspace identity, base commit/tree, 검토 시 snapshot 파일 집합의 digest로 고정한다. renderer는 원본 절대 경로·patch bytes·백업 경로를 전달하지 않는다.
 
 1. **준비**: active workspace·원장·실행 종료 증거·writer 잠금을 확인한다. source의 canonical root 및 실물 디렉터리 capability, HEAD/tree, index, tracked bytes/mode와 대상 경로 충돌을 읽기 전용으로 대조한다.

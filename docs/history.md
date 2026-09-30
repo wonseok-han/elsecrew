@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A1 index·HEAD 비교 내부 구현)
+
+- de3671f의 raw inventory에 이어 application/git_baseline.rs 내부 후보를 추가했다. fixed Git의 bounded ls-files/ls-tree로 mode/OID/path 집합을 비교하고 index image32MiB·Git 출력24MiB·기존 항목/경로 한도 및 index stamp/hash·HEAD 전후 검사를 적용한다. Git 공식 ls-files/ls-tree/diff-index 문서를 확인해 제안서에 출처와 제한을 기록했다.
+- 실제 임시 Git 저장소에서 index-only drift·같은 tree의 새 HEAD·hostile fsmonitor/filter/externaldiff marker 미생성과 index/raw source 보존을 검사했다. 빈 파일 intent-to-add가 mode/OID/path만으로 통과하는 결함을 재현해 cached-only diff-index(외부 diff/textconv/rename 금지) 검사로 닫았다. exit1은 독립 검토 권고대로 manifest 손상이 아닌 dirtyConflict다. split index의 별도 shared image와 sparse directory·gitlink는 명시 미지원으로 거절하며 제품 활성화하지 않는다.
+- 독립 검토의 full-index sparse 지적을 반영해 ls-files -v의 H만 허용하고 skip-worktree/assume-unchanged도 명시 거절한다. 실제 sparse-index와 full-index sparse 전환·assume-unchanged 회귀를 포함한 focused4 PASS/1.76초, 파서1 PASS, strict all-targets clippy PASS/2.63초, 새 모듈 및 추가 테스트 블록 rustfmt·diff 검사 PASS. 동일 검토자 최종 scoped PASS이며 독립 테스트 실행은 주장하지 않는다.
+- Karpathy 지침으로 기존 bounded Git/capability helper를 재사용했다. 초기 파서의 tab-path positive 기대를 기존 제어문자 거절 정책에 맞춰 수정했다. raw working-tree bytes와 committed blob 비교·영속 receipt 결속·기존 snapshot 적용 거절은 아직 남아 있으며 이번 index 검사만으로 원본 적용 가능 상태라 판단하지 않는다. 사용자 계정/프로젝트·모델 실행과 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A1 원본 raw inventory 내부 구현)
 
 - a8cb328 기준 메인이 project/application.rs에 읽기 전용 Unix source inventory를 구현했다. root .git만 제외하며 ignored/숨김·임시 이름/하위 .git·빈 디렉터리·raw binary·mode·링크 문자열을 포함한다. capability 상대 openat/no-follow/nonblock과 열린 파일/경로 identity·ctime 전후 검사, 두 pass 결과 비교를 사용한다. Git 명령·source 쓰기·계정/모델 호출은 없다.
@@ -194,6 +201,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **A1 index 비교 함정(2026-09-30)**: mode/OID/path만으로는 HEAD의 빈 파일에 대한 intent-to-add를 구분하지 못한다. cached-only diff-index와 명시 외부 converter 차단을 더하고 dirty exit1을 dirtyConflict로 분류한다. split index는 별도 shared image가 필요해 거절하고 sparse-index·full-index sparse·assume-unchanged도 현재 내부 후보에서 거절한다. 실제 raw blob 동등성·receipt 결속 전에는 적용 권위가 아니다.
 
 - **원본 baseline 내부 후보(2026-09-30)**: project/application.rs는 root .git만 제외한 raw inventory를 bounded/no-follow로 읽는다. ignored/임시 이름과 nested .git도 포함하며 identity와 내용 변경을 구분한다. 읽기로 바뀔 수 있는 atime은 무변경 보장에서 제외한다. 두 pass 일치·집중 회귀·독립 검토는 HEAD/index/영속 receipt 또는 원본 writer 활성화의 증거가 아니다. 상세와 한도는 proposals/m5-change-application.md A1을 따른다.
 
