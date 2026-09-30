@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (코드 편집기 초기화 실패 복구)
+
+- 952dd4f에서 Monaco import/create 실패의 unhandled rejection·빈 화면 경로를 수정했다. 현재 초안을 read-only 복사 화면으로 보여주고 명시 재시도만 제공한다. rejected loader cache와 생성된 model/editor/action/subscription을 정리하며 기존 저장·admission 경계는 유지한다. 원본 정책/계정/실행 권한은 변경하지 않았다.
+- 검증: 실제 loader cache 및 component effects의 실패 3단계/초안/명시 재시도/읽기 잠금/자원 정리 포함 Node 7 PASS, TypeScript noEmit·renderer build PASS, 정상 Chromium mount/단축키/worker smoke 2 PASS(4.23초), diff check PASS. 실패 화면 검증은 VM component 검사이며 실제 Chromium 장애 주입은 아니다. 기존 Monaco chunk 크기 경고는 남는다.
+- Karpathy 지침으로 편집기 수명 안에서만 수정했다. 코드와 검증 기록을 선택 커밋하고 미승인 원본 적용 정책 문서는 보존한다. 다음은 제품 연결/원본 반영 정책 결정·실제 provider·출시 검증이며 전체 완료가 아니다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (누적 회귀 실패 수정 검증 마감)
 
 - session82474의 101개 snapshot 회귀가 477.48초에 통과했다. 실제 708 source/405 project source와 174301 bounded maintenance calls 이후 원장 digest 보존·101개 workspace·ready를 검증했다. 임시 디렉터리는 테스트 종료로 자동 정리됐다. 앞서 수정한 일반 approval interaction도 75.06초에 통과했으며 제품 안전 코드는 변경하지 않았다.

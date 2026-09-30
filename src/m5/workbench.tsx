@@ -52,6 +52,9 @@ function loadMonaco(): Promise<MonacoApi> {
       getWorker: (_id, label) => label === "json" ? new jsonWorker.default() : new editorWorker.default(),
     };
     return api;
+  }).catch((error: unknown) => {
+    monacoLoader = undefined;
+    throw error;
   });
   return monacoLoader;
 }
@@ -379,6 +382,8 @@ function EditorContent({ tab, readOnly, onChange, onSave }: { tab: EditorTab | n
 }
 
 function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; readOnly: boolean; onChange: (text: string) => void; onSave: (path: string) => void }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
@@ -387,11 +392,18 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 
   useEffect(() => {
     let cancelled = false;
-    let cleanup: (() => void) | undefined;
+    setFailed(false);
+    const resources: { dispose(): void }[] = [];
+    const cleanup = () => {
+      for (const resource of resources.splice(0).reverse()) resource.dispose();
+      editor.current = null;
+      model.current = null;
+    };
     void loadMonaco().then((monaco) => {
       if (cancelled || !host.current) return;
       const current = latest.current;
       const nextModel = monaco.editor.createModel(current.tab.text, languageFor(current.tab.path));
+      resources.push(nextModel);
       model.current = nextModel;
       const nextEditor = monaco.editor.create(host.current, {
         model: nextModel,
@@ -401,6 +413,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
         readOnly: current.readOnly || current.tab.saveState === "saving",
         ariaLabel: `${tab.path} 코드 편집기`,
       });
+      resources.push(nextEditor);
       editor.current = nextEditor;
       const saveAction = nextEditor.addAction({
         id: "hello-agent.save-file",
@@ -412,21 +425,19 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
           requestEditorSave(current.tab, current.readOnly, current.onSave);
         },
       });
+      resources.push(saveAction);
       const subscription = nextModel.onDidChangeContent(() => latest.current.onChange(nextModel.getValue()));
-      cleanup = () => {
-        saveAction.dispose();
-        subscription.dispose();
-        nextEditor.dispose();
-        nextModel.dispose();
-        editor.current = null;
-        model.current = null;
-      };
+      resources.push(subscription);
+    }).catch(() => {
+      if (cancelled) return;
+      cleanup();
+      setFailed(true);
     });
     return () => {
       cancelled = true;
-      cleanup?.();
+      cleanup();
     };
-  }, [tab.path]);
+  }, [tab.path, attempt]);
 
   useEffect(() => {
     const currentModel = model.current;
@@ -434,7 +445,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
     editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
   }, [tab.text, tab.saveState, readOnly]);
 
-  return <div className="m5-monaco" ref={host} />;
+  return <>{failed && <section className="m5-error" role="alert"><strong>코드 편집기를 열지 못했어요.</strong><p>편집 내용은 그대로 보존했어요. 아래에서 복사하거나 편집기를 다시 열 수 있어요.</p><textarea aria-label="보존된 편집 내용" readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>편집기 다시 열기</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
 
 function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string }) {

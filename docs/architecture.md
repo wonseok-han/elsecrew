@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 편집기 초기화 복구: 로컬 Monaco 로딩/생성 실패는 자동 반복하지 않고 현재 초안의 읽기 전용 복사 화면과 명시 재시도를 제공한다. 실패한 loader cache와 부분 생성 자원을 정리하고 재시도 때 최신 초안·읽기 전용 상태를 사용한다. 앱 재시작까지 초안을 영속 보존한다는 의미는 아니다.
+
 > 편집기 언어: 로컬 Monaco tokenizer로 TS/JS·Markdown·Python·Rust·Go·Shell·YAML·CSS·HTML·SQL·Dockerfile을 지원하고 JSON은 별도 로컬 worker를 선택한다. JSON 원격 schema 요청은 고정 Monaco 0.52 기본값(false)을 유지한다. 미지원 파일은 plaintext이며 외부 언어 서버/실행기 지원을 뜻하지 않는다.
 
 > 편집기 저장: Monaco의 Cmd/Ctrl+S 및 context menu는 현재 editable dirty tab만 기존 controller.saveActive로 전달한다. 최신 active path/storage admission과 controller의 작업 차단/충돌 검증을 유지하며 editor 밖 전역 키를 가로채지 않는다. 원본 적용이 아니라 작업 복사본 저장이다.

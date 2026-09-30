@@ -13,6 +13,38 @@ const compiled = ts.transpileModule(`${component.getText(source)}\nglobalThis.Co
   compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
 }).outputText;
 
+test("Monaco loader shares an attempt but clears a rejected cache for explicit retry", async () => {
+  const loader = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "loadMonaco")!;
+  const loaderCode = ts.transpileModule(`let monacoLoader;\n${loader.getText(source)}\nglobalThis.load = loadMonaco;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    transformers: { before: [context => root => ts.visitNode(root, function visit(node): ts.Node {
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        return ts.factory.createCallExpression(ts.factory.createIdentifier("fakeImport"), undefined, node.arguments);
+      }
+      return ts.visitEachChild(node, visit, context);
+    }) as ts.SourceFile] },
+  }).outputText;
+  let fail = true;
+  let attempts = 0;
+  const api = {};
+  const context: Record<string, any> = { fakeImport: async (path: string) => {
+    if (path.endsWith("editor.api")) {
+      attempts++;
+      if (fail) throw new Error("missing local editor chunk");
+      return api;
+    }
+    return { default: class Worker {} };
+  } };
+  runInNewContext(loaderCode, context);
+  const first = context.load();
+  assert.equal(context.load(), first);
+  await assert.rejects(first, /missing local editor chunk/);
+  fail = false;
+  assert.equal(await context.load(), api);
+  assert.equal(await context.load(), api);
+  assert.equal(attempts, 2);
+});
+
 for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps current read-only state (deferred gate: ${delayedGate ?? "none"})`, async () => {
   const refs: { current: any }[] = [];
   const dependencies: unknown[][] = [];
@@ -27,13 +59,14 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   const model = { getValue: () => text, setValue: (value: string) => { text = value; }, onDidChangeContent: () => ({ dispose() {} }), dispose() {} };
   const editor = { updateOptions: (options: { readOnly: boolean }) => { readOnly = options.readOnly; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() {} }; }, dispose() {} };
   const context: Record<string, any> = {
+    useState: (initial: unknown) => [initial, () => {}],
     useRef: (initial: unknown) => { const index = cursor++; return refs[index] ??= { current: initial }; },
     useEffect: (effect: () => unknown, deps: unknown[]) => {
       const index = cursor++;
       if (!dependencies[index] || deps.some((value, i) => value !== dependencies[index][i])) pending.push(effect);
       dependencies[index] = deps;
     },
-    React: { createElement: (_type: unknown, props: { ref: { current: unknown } }) => { props.ref.current = {}; return null; } },
+    React: { createElement: (_type: unknown, props: { ref?: { current: unknown } } | null) => { if (props?.ref) props.ref.current = {}; return null; } },
     languageFor: () => "plaintext",
     requestEditorSave,
     loadMonaco: () => loader,
@@ -81,4 +114,88 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   await render(false, "saving");
   saveAction.run();
   assert.deepEqual(saves, ["test.txt"], "saving must block a duplicate shortcut");
+});
+
+for (const failure of ["load", "editor", "action"]) test(`Monaco preserves drafts and explicitly retries ${failure} failure`, async () => {
+  const values: any[] = [];
+  const dependencies: unknown[][] = [];
+  const cleanups: (() => void)[] = [];
+  let cursor = 0;
+  let pending: { index: number; effect: () => any }[] = [];
+  let buttons: any[] = [];
+  let drafts: any[] = [];
+  let fail = true;
+  let loads = 0;
+  let text = "";
+  let locked = false;
+  const disposed: string[] = [];
+  const changes: string[] = [];
+  const context: Record<string, any> = {
+    useState: (initial: unknown) => {
+      const index = cursor++;
+      if (!(index in values)) values[index] = initial;
+      return [values[index], (next: any) => { values[index] = typeof next === "function" ? next(values[index]) : next; }];
+    },
+    useRef: (initial: unknown) => { const index = cursor++; return values[index] ??= { current: initial }; },
+    useEffect: (effect: () => any, deps: unknown[]) => {
+      const index = cursor++;
+      if (!dependencies[index] || deps.some((value, i) => value !== dependencies[index][i])) {
+        dependencies[index] = deps;
+        pending.push({ index, effect });
+      }
+    },
+    React: { createElement: (type: string, props: any) => {
+      if (props?.ref) props.ref.current ??= {};
+      if (type === "button") buttons.push(props);
+      if (type === "textarea") drafts.push(props);
+      return null;
+    } },
+    languageFor: () => "plaintext", requestEditorSave,
+    loadMonaco: async () => {
+      loads++;
+      if (fail && failure === "load") throw new Error("chunk unavailable");
+      return { KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: {
+        createModel: (value: string) => {
+          text = value;
+          return { getValue: () => text, setValue: (next: string) => { text = next; },
+            onDidChangeContent: () => ({ dispose() { disposed.push("subscription"); } }),
+            dispose() { disposed.push("model"); } };
+        },
+        create: (_host: unknown, options: { readOnly: boolean }) => {
+          if (fail && failure === "editor") throw new Error("editor unavailable");
+          locked = options.readOnly;
+          return { updateOptions: (next: { readOnly: boolean }) => { locked = next.readOnly; },
+            addAction: () => {
+              if (fail && failure === "action") throw new Error("action unavailable");
+              return { dispose() { disposed.push("action"); } };
+            }, dispose() { disposed.push("editor"); } };
+        },
+      } };
+    },
+  };
+  context.useLayoutEffect = context.useEffect;
+  runInNewContext(compiled, context);
+  const render = async () => {
+    cursor = 0; pending = []; buttons = []; drafts = [];
+    context.Component({ tab: { path: "draft.txt", mode: "text", text: "unsaved draft", saveState: "dirty" },
+      readOnly: true, onChange: (value: string) => changes.push(value), onSave() { assert.fail("must not save during recovery"); } });
+    for (const { index, effect } of pending) { cleanups[index]?.(); cleanups[index] = effect(); }
+    await Promise.resolve(); await Promise.resolve();
+  };
+  await render(); await render();
+  assert.equal(loads, 1, "failure must not trigger an automatic retry");
+  assert.equal(drafts[0].value, "unsaved draft");
+  assert.equal(drafts[0].readOnly, true);
+  assert.deepEqual(disposed, failure === "load" ? [] : failure === "editor" ? ["model"] : ["editor", "model"]);
+  fail = false;
+  buttons[0].onClick();
+  await render(); await render();
+  assert.equal(loads, 2);
+  assert.equal(drafts.length, 0);
+  assert.equal(text, "unsaved draft");
+  assert.equal(locked, true, "retry must retain the current admission lock");
+  assert.deepEqual(changes, []);
+  const before = disposed.length;
+  for (const cleanup of cleanups) cleanup?.();
+  assert.deepEqual(disposed.slice(before), ["subscription", "action", "editor", "model"]);
 });
