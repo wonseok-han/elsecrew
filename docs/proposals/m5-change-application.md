@@ -59,6 +59,14 @@ DB 게시 실패 시 부분/완성 파일과 recovery lock을 보존하며 동�
 6. **완료**: 전체 after-image를 다시 확인한 뒤 완료를 기록한다. 파일 여러 개의 변경을 원자적이라고 표현하지 않는다. 중간 실패는 `recoveryRequired`이며 반영 성공으로 표시하지 않는다.
 7. **복원**: 명시 선택한 복원 지점과 적용 결과를 대조한다. 현재 원본이 기록된 after-image와 다르면 사용자의 후속 편집으로 보고 자동 덮어쓰지 않는다. 복원도 자체 intent·항목별 진행·fsync·최종 대조를 가지며 완료 뒤에만 잠금을 해제한다.
 
+### A2 읽기 전용 ReviewPlan 후보
+
+`application/review.rs`는 현재 active project의 snapshot identity와 원장 receipt를 재검증하고 tracked 파일의 변경/삭제 및 snapshot의 추가 경로를 정렬된 before/after kind·owner executable·size·SHA-256 묶음으로 만든다. 원본의 untracked/ignored 파일을 삭제로 추론하지 않고 같은 경로 추가는 내용이 같아도 거절한다. 기존 디렉터리는 유지하며 새 디렉터리만 추가로 기록한다. 파일 종류 전환과 중첩 `.git`, regular 0644/0755·directory0755 밖의 snapshot 권한은 현재 명시 미지원이다. 원본의 실행 bit 외 권한은 receipt에서 검증하며 향후 writer가 보존해야 한다.
+
+source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key로 case-only/정규화 충돌을 거절한다. 이는 모든 OS의 collation을 재현한다는 보장이 아니다. [unicode-normalization 공식 API](https://docs.rs/unicode-normalization/0.1.25/unicode_normalization/)의 0.1.25를 고정하며 정규화 개별4KiB·합16MiB, 항목별 review 직렬화 hash 입력32MiB를 제한한다. 전체 JSON을 선할당하지 않는다.
+
+생성 전후 source baseline/snapshot inventory를 대조하고 `revalidate`는 같은 binding·digest·변경 집합과 파일 신원까지 재검증한다. receipt 없는 legacy, 외부 원본 변화, 같은 bytes의 snapshot inode 교체도 거절한다. 아직 메모리 내 private plan이며 chat/task별 승인 ticket·영속 plan·IPC/UI·원본 writer와 재시작 승인 수명은 연결하지 않았다. 일반 diff 화면의 표시와 이 내부 apply 후보의 권위를 혼동하지 않는다.
+
 ## 반드시 닫을 안전 조건
 
 - 첫 구현의 clean-source 조건은 HEAD/tree만이 아니라 staged/unstaged 변경, 추가 파일과 경로 충돌을 다룬다. ignored 파일도 덮어쓸 대상과 충돌하면 거절한다. 시작 시 이미 dirty였던 원본을 HEAD snapshot과 같다고 간주하지 않는다.

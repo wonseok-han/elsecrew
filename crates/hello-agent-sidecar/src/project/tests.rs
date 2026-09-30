@@ -26,6 +26,152 @@ fn source_index_fixture() -> Fixture {
 
 #[cfg(unix)]
 #[test]
+fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
+    use application::review;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_review_open",
+        )
+        .unwrap();
+    fixture
+        .manager
+        .create_worktree_inner(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_review_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let active = fixture
+        .manager
+        .validate_active_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    let clean = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert!(
+        clean.changed_paths().is_empty(),
+        "{:?}",
+        clean.changed_paths()
+    );
+    fs::write(active.worktree_path.join("src/edit.txt"), [0, 255, 7]).unwrap();
+    fs::set_permissions(active.worktree_path.join("src/edit.txt"), fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fs::set_permissions(
+        active.worktree_path.join("src/edit.txt"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    fs::create_dir(active.worktree_path.join("new-dir")).unwrap();
+    fs::write(active.worktree_path.join("new-dir/file"), b"added").unwrap();
+    symlink("/not-followed", active.worktree_path.join("new-link")).unwrap();
+    let plan = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert_eq!(
+        plan.changed_paths(),
+        vec!["new-dir", "new-dir/file", "new-link", "src/edit.txt"]
+    );
+    review::revalidate(
+        &fixture.manager,
+        &fixture.storage,
+        &fixture.project_id,
+        &plan,
+    )
+    .unwrap();
+    fs::write(active.worktree_path.join("new-dir/replacement"), b"added").unwrap();
+    fs::rename(active.worktree_path.join("new-dir/replacement"), active.worktree_path.join("new-dir/file")).unwrap();
+    assert!(review::revalidate(&fixture.manager, &fixture.storage, &fixture.project_id, &plan).is_err());
+    let plan = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert!(review::revalidate(
+        &fixture.manager,
+        &fixture.storage,
+        &fixture.project_id,
+        &clean
+    )
+    .is_err());
+    fs::remove_file(active.worktree_path.join("src/edit.txt")).unwrap();
+    let deleted = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
+    assert!(deleted.changed_paths().contains(&"src/edit.txt"));
+    assert!(review::revalidate(
+        &fixture.manager,
+        &fixture.storage,
+        &fixture.project_id,
+        &plan
+    )
+    .is_err());
+    fs::create_dir(active.worktree_path.join("src/edit.txt")).unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+        b"hello"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn application_review_preserves_untracked_source_and_rejects_legacy() {
+    use application::review;
+    let mut fixture = source_index_fixture();
+    fs::write(fixture.source.join("personal"), b"keep").unwrap();
+    fs::write(fixture.source.join("café"), b"unicode").unwrap();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_review_open",
+        )
+        .unwrap();
+    let legacy = fixture.create();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fixture
+        .manager
+        .create_worktree_inner(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_review_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let active = fixture
+        .manager
+        .validate_active_project(&fixture.storage, &fixture.project_id)
+        .unwrap();
+    assert_ne!(legacy.worktree_id, active.worktree_id);
+    assert!(
+        review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id)
+            .unwrap()
+            .changed_paths()
+            .is_empty()
+    );
+    fs::write(active.worktree_path.join("personal"), b"keep").unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fs::remove_file(active.worktree_path.join("personal")).unwrap();
+    fs::write(active.worktree_path.join("Personal"), b"case collision").unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fs::remove_file(active.worktree_path.join("Personal")).unwrap();
+    fs::write(active.worktree_path.join("cafe\u{301}"), b"unicode collision").unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fs::remove_file(active.worktree_path.join("cafe\u{301}")).unwrap();
+    fs::rename(active.worktree_path.join("src/edit.txt"), active.worktree_path.join("src/Edit.txt")).unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    fs::rename(active.worktree_path.join("src/Edit.txt"), active.worktree_path.join("src/edit.txt")).unwrap();
+    fs::write(fixture.source.join("personal"), b"changed externally").unwrap();
+    assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("personal")).unwrap(),
+        b"changed externally"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn application_snapshot_creation_preserves_all_receipts_after_restart() {
     use application::git_baseline::raw_baseline::{capture_clean_baseline, receipt};
     let mut fixture = source_index_fixture();

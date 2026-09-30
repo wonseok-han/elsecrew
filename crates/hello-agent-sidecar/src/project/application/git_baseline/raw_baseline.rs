@@ -19,6 +19,13 @@ pub(in crate::project) struct SourceBaseline {
     index: GitIndexBaseline,
 }
 
+impl SourceBaseline {
+    pub(in crate::project::application) fn inventory(&self) -> &SourceInventory { &self.raw }
+    pub(in crate::project::application) fn tracked_paths(&self) -> impl Iterator<Item = &str> {
+        self.index.entries.keys().map(String::as_str)
+    }
+}
+
 // Used by the internal application snapshot candidate; no product writer admission.
 pub(in crate::project) fn capture_clean_baseline(
     manager: &ProjectManager,

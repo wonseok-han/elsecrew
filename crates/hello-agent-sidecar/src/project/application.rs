@@ -12,6 +12,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DEPTH: usize = 128;
 pub(super) mod git_baseline;
+pub(super) mod review;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct SourceInventory {

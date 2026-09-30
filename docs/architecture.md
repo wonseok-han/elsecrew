@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 변경 검토 기반(내부): `application/review.rs`가 원장 receipt·현재 원본·현재 snapshot을 재검증하여 정렬된 before/after 변경 집합과 bounded digest를 만든다. untracked 충돌·case/정규화 충돌·미지원 종류/권한을 거절하고 확인 후 원본/복사본의 내용·신원 변화도 거절한다. 원본 파일/기존 디렉터리를 쓰거나 삭제하지 않는다. 메모리 내 private ReviewPlan으로, chat/task 승인·영속 plan·공개 IPC/UI·writer는 아직 없다. 상세 지원/한도는 `proposals/m5-change-application.md` A2를 따른다.
+
 > 원본 기준 생성 결속(내부): Unix `SnapshotCreation::ApplicationCandidate`는 공통 snapshot 생성 경로에서 launch fence → clean baseline → bundle export → baseline 재대조 → 불변 receipt/원장 게시 → 기존 활성화를 수행한다. 활성화 직전 최신 project 원장을 읽어 새/과거 receipt를 보존한다. 3개 복사본 생성·DB 재열기·각 receipt 검증과 dirty/게시 실패/rename 후 실패 잠금 유지 회귀를 통과했다. 공개 IPC caller는 없고 기존 일반/채팅 생성은 그대로다. 시작 이후 프로세스 복구·원장 누적 용량/압축·지원 불가 원본의 제품 안내 및 원본 writer는 미완료다.
 
 > 준비 복구 공개 연결: `project.catalog`의 `inspectPreparation`/`abandonPreparation`과 main/preload의 기존 exact validator를 통해 저장 프로젝트별 명시 확인·종료를 제공한다. 원본 경로나 patch를 입력받지 않고 inspection의 project/worktree/workspace/lock 및 두 revision을 그대로 대조한다. 응답 유실 재전송은 동일 project가 abandoned이고 동일 lock의 완료 evidence가 exact inspection일 때만 no-op 성공한다. 새 snapshot으로 전환된 뒤 옛 요청은 거절한다. 아래의 공개 연결 미완료 표기는 이 구현으로 갱신하며, legacy/실행 시작 이후의 준비 복구는 여전히 지원하지 않는다.

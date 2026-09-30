@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A2 읽기 전용 변경 검토 묶음)
+
+- 91483bd 위에 private ReviewPlan 후보를 추가했다. exact receipt·현재 source/snapshot 검증, tracked 변경/삭제와 새 snapshot 경로의 정렬된 before/after·bounded digest, 확인 후 내용/신원 재대조를 제공한다. 원본 untracked를 삭제로 취급하지 않으며 충돌·종류 전환·미지원 권한은 거절한다. 아직 메모리 내 project 검토이며 chat/task ticket·영속 plan·IPC/UI·writer는 없다.
+- 독립 검토의 cross-image case/Unicode 충돌 지적을 보완했다. 공식 API 확인 후 unicode-normalization0.1.25 고정 의존성으로 보수적 key와 개별4KiB/합16MiB 한도를 적용했다. 재검토 scoped PASS. 최초 serde 직접 의존성 누락 컴파일 오류는 새 의존성 대신 기존 serde_json 항목별 직렬화로 해결했다.
+- 검증: 실제 임시snapshot 집중2 PASS/6.23초(binary·실행bit·link·추가/삭제·legacy·untracked/대소문자/NFC-NFD 충돌·외부변화), 순수 key/hash 한도2 PASS, strict all-targets clippy PASS/6.60초. 같은 bytes inode 교체 추가 회귀1 PASS/7.55초. 신규 모듈 rustfmt·diff 검사. Karpathy 지침으로 기존 raw inventory/receipt를 재사용했다. 실제 사용자 프로젝트/계정/모델·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (원본 기준과 snapshot 생성 경로 결속)
 
 - 375aba8의 공통 create_worktree_inner에 Unix 내부 ApplicationCandidate를 연결했다. launch fence→clean baseline→export→baseline 재대조→receipt/원장 게시→기존 활성화 순서다. 활성화 시 최초 project 사본으로 새 receipt를 잃지 않도록 최신 원장을 재조회한다. 기존 ReuseActive/FreshChat은 유지하며 공개 caller와 원본 writer는 열지 않았다.
@@ -89,6 +95,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+- **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source와 snapshot의 tracked 변화/추가 경로를 읽기 전용으로 묶고 내용·신원을 재대조한다. 원본 untracked 보존, cross-image 대소문자/정규화 충돌·미지원 종류/권한 거절. 내부 메모리 plan만 있으며 승인/쓰기 권위가 아니다. 다음은 영속 검토와 chat/task 승인 수명 및 A3~A5다.
 - **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
 - **A1 원장/생성 결속 후보(2026-09-30)**: source_baselines[worktreeId]는 불변 descriptor를 게시·조회하며 close/open에서 보존한다. 내부 ApplicationCandidate 생성3회·재시작 검증을 통과했고 활성화는 최신 원장 extension을 보존한다. DB 게시 실패는 artifact와 잠금을 남긴다. 공개 생성 활성화·시작 이후 복구·누적 크기/압축은 남고 아래 receipt 게시/생성 미구현 기록은 이 내부 후보 추가로 갱신한다.
