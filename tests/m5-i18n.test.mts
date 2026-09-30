@@ -23,7 +23,7 @@ test("language choice survives restart and unavailable storage falls back to sys
 
 test("both dictionaries cover the workbench shell and admission keys", () => {
   const keys = Object.keys(ko).filter(key => key.startsWith("m5.")) as (keyof typeof ko)[];
-  assert.equal(keys.length, 16);
+  assert.ok(keys.length >= 16);
   for (const key of keys) {
     assert.ok(ko[key].length > 0);
     assert.ok(en[key].length > 0);

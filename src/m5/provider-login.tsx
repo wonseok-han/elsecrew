@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 import { loginErrorMessage } from "./provider-login-message.ts";
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
 
@@ -6,6 +7,7 @@ export function ProviderLogin({ disabled }: {disabled: boolean}) {
   return <><ProviderConnection disabled={disabled} provider="codex"/><ProviderConnection disabled={disabled} provider="claude"/></>;
 }
 function ProviderConnection({ disabled, provider }: {disabled: boolean; provider: LoginProvider}) {
+  const { lang, t } = useI18n();
   const name = provider === "codex" ? "Codex" : "Claude Code";
   const [status,setStatus] = useState<LoginStatus>({state:"idle",attemptId:null,authUrl:null,error:null});
   const [busy,setBusy] = useState(false);
@@ -39,9 +41,9 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
   useEffect(()=>{setCode("");setCodeError(false);},[status.attemptId,status.state]);
   const waiting=status.state === "starting" || status.state === "waiting" || status.state === "verifying";
   const recoveryRequired=status.error === "providerLoginRecoveryRequired";
-  const label = {idle:"아직 연결하지 않았어요",starting:"연결 상태를 확인하고 있어요…",waiting:"브라우저에서 로그인을 완료해 주세요",verifying:"연결 코드를 확인하고 있어요…",connected:`이 앱에 ${name} 로그인이 연결됐어요`,canceled:"로그인을 취소했어요",failed:"연결을 확인하지 못했어요",unsupported:"이 환경에서는 아직 연결할 수 없어요"}[status.state];
-  return <section className="m5-provider-login" aria-label={`${name} 연결`}>
-    <div><strong>{name} 연결</strong><p role="status">{label}</p><small>기존 터미널 로그인과 별도로 연결해요. 모델을 실행하거나 비용을 사용하지 않아요.</small></div>
+  const label = t(`m5.login.state.${status.state}`, { name });
+  return <section className="m5-provider-login" aria-label={t("m5.login.section", { name })}>
+    <div><strong>{t("m5.login.section", { name })}</strong><p role="status">{label}</p><small>{t("m5.login.separate")}</small></div>
     {provider === "claude" && status.state === "waiting" && <form onSubmit={event=>{
       event.preventDefault();
       if (inFlight.current || !status.attemptId) return;
@@ -50,16 +52,16 @@ function ProviderConnection({ disabled, provider }: {disabled: boolean; provider
       setCode("");setCodeError(false);
       void request({action:"submitCode",provider:"claude",attemptId:status.attemptId,code:value});
     }}>
-      <label htmlFor="claude-connection-code">연결 코드 붙여넣기</label>
-      <p id="claude-code-help">브라우저의 마지막 화면에 표시된 코드 전체를 붙여넣어 주세요. 이메일 확인 번호가 아니에요.</p>
+      <label htmlFor="claude-connection-code">{t("m5.login.code.label")}</label>
+      <p id="claude-code-help">{t("m5.login.code.help")}</p>
       <input id="claude-connection-code" type="password" autoComplete="off" spellCheck={false} maxLength={4096} aria-describedby="claude-code-help" value={code} onChange={event=>setCode(event.target.value)} disabled={disabled}/>
-      <button type="submit" disabled={disabled||busy||!code.trim()}>연결 확인</button>
-      {codeError && <p role="alert">코드 전체를 다시 복사해 주세요. 주소가 아닌 연결 코드를 입력해야 해요.</p>}
+      <button type="submit" disabled={disabled||busy||!code.trim()}>{t("m5.login.code.submit")}</button>
+      {codeError && <p role="alert">{t("m5.login.code.invalid")}</p>}
     </form>}
-    {waiting ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>로그인 취소</button>
-      : <button disabled={disabled||busy||recoveryRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{status.state==="connected"?"연결됨":`${name} 로그인`}</button>}
-    {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"check",attemptId:crypto.randomUUID()})}>연결 상태 다시 확인</button>}
-    {recoveryRequired && <div><p>종료가 확인된 기록만 복구해요. 로그인 정보는 지우지 않으며, 증거가 부족하면 잠금을 유지해요. 복구되면 연결 상태를 다시 확인해 주세요.</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>연결 잠금 복구</button></div>}
-    {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error)}</p><details><summary>도움 요청용 정보</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
+    {waiting ? <button disabled={disabled||busy||!status.attemptId} onClick={()=>void request({action:"cancel",attemptId:status.attemptId!})}>{t("m5.login.cancel")}</button>
+      : <button disabled={disabled||busy||recoveryRequired||status.state==="connected"||status.state==="unsupported"||!window.m5Login} onClick={()=>void request({action:"start",attemptId:crypto.randomUUID()})}>{t(status.state==="connected"?"m5.login.connected":"m5.login.start", { name })}</button>}
+    {!waiting && status.state!=="unsupported" && <button disabled={disabled||busy||recoveryRequired||!window.m5Login} onClick={()=>void request({action:"check",attemptId:crypto.randomUUID()})}>{t("m5.login.check")}</button>}
+    {recoveryRequired && <div><p>{t("m5.login.recovery.help")}</p><button disabled={disabled||busy||waiting||!window.m5Login} onClick={()=>void request({action:"recover",attemptId:crypto.randomUUID()})}>{t("m5.login.recovery.action")}</button></div>}
+    {(error||status.state==="failed") && <div role="alert"><p>{loginErrorMessage(provider,status.error,lang)}</p><details><summary>{t("m5.login.detail")}</summary><code>{status.error ?? "providerLoginUnavailable"}</code></details></div>}
   </section>;
 }

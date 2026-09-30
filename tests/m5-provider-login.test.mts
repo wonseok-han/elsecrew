@@ -7,6 +7,14 @@ test("explicit recovery uses fixed provider and attempt without filesystem param
   for (const input of [{action:"recover"},{action:"recover",attemptId:"../x"},{action:"recover",attemptId:"a",path:"/tmp/fence"},{action:"recover",attemptId:"a",force:true}]) assert.throws(()=>validateLoginRequest(input));
 });
 import { loginErrorMessage } from "../src/m5/provider-login-message.ts";
+test("English login guidance preserves credential and recovery cautions", () => {
+  assert.match(loginErrorMessage("codex", "providerExecutableChanged", "en"), /does not mean you are signed out/);
+  assert.match(loginErrorMessage("codex", "providerExecutableMissing", "en"), /credentials have not been deleted/);
+  assert.match(loginErrorMessage("codex", "providerProfileUnavailable", "en"), /Sign-out has not been confirmed/);
+  assert.match(loginErrorMessage("claude", "providerLoginRecoveryRequired", "en"), /safe shutdown are blocked/);
+  assert.match(loginErrorMessage("claude", "providerLoginFailed", "en"), /cancel it instead of resetting/);
+  assert.match(loginErrorMessage("codex", null, "en"), /Do not delete credentials/);
+});
 test("login feedback distinguishes executable drift from authentication and recovery",()=>{
   assert.match(loginErrorMessage("codex","providerExecutableChanged"), /호환성 업데이트/);
   assert.match(loginErrorMessage("codex","providerExecutableChanged"), /로그아웃된 것은 아니/);

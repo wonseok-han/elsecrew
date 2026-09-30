@@ -49,6 +49,7 @@ app.whenReady().then(async () => {
     };
     chooseLanguage('en');
     await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
+    if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
     if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
     await ${waitFor("document.querySelector('main').lang === 'ko' && document.querySelector('h1').textContent === '프로젝트를 선택해 시작하세요'", "Korean shell")};
@@ -89,6 +90,11 @@ app.whenReady().then(async () => {
     const codeInput = document.querySelector('#claude-connection-code');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(codeInput,'synthetic#state');
     codeInput.dispatchEvent(new Event('input',{bubbles:true}));
+    chooseLanguage('en');
+    await ${waitFor("document.querySelector('#claude-code-help')?.textContent.includes('not the email verification code')", "English code guidance")};
+    if (document.querySelector('#claude-connection-code') !== codeInput || codeInput.value !== 'synthetic#state' || codeInput.type !== 'password') throw new Error('language change replaced or exposed the connection code');
+    chooseLanguage('ko');
+    await ${waitFor("document.querySelector('#claude-code-help')?.textContent.includes('이메일 확인 번호가 아니에요')", "Korean code guidance")};
     await ${waitFor("[...document.querySelectorAll('button')].some(b => b.textContent === '연결 확인' && !b.disabled)", "code submit enabled")};
     [...document.querySelectorAll('button')].find(b => b.textContent === '연결 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('이 앱에 Claude Code 로그인이 연결됐어요')", "Claude code accepted")};
