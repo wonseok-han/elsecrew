@@ -164,6 +164,8 @@
 
 ## 9. M5 G1~G5D 전환 골격·채팅 작업대
 
+- **진행/복구 상태 안내**: WorkStatusNotice는 기존 system.status의 blockerIds를 admission 후 및 작업 오류/채팅 상태 변화 때 읽고 명시 재확인을 제공한다. run과 lock은 진행 중에도 존재하므로 종료 실패로 단정하지 않는다. 채팅 생성 전 잠금도 표시하며 도움 요청 ID는20개·각160자로 제한하고 제어문자를 가시화한다. 실패한 재조회는 이전 정보임을 표시하고 늦은 응답을 버린다. 추가 실행·잠금 해제·파일 삭제 권한은 없으며 snapshot 준비 실패 전용 폐기 API는 아직 미구현이다.
+
 - **Unix Git 실행 시간 제한**: 프로젝트 Git stream은 `project/git_process.rs`의 nonblocking stdin/stdout/stderr와 동일 명령별120초 deadline을 사용한다. stderr tail은8KiB로 유지하고 직접 child를 reap하기 전 stderr 완료를 기다린다. 오류/Drop은 reader를 취소하고 아직 reap하지 않은 leader의 그룹·직접 child에 종료를 시도하며 direct reap 대기는2초로 제한한다. 정상 EOF/status와 시간 초과를 구분한다. 이는 Unix 파이프/exit 대기의 상한이며 새 세션으로 이탈한 자손·파이프를 닫은 자손·커널 비중단 상태까지 전체 종료를 증명하는 계약은 아니다. Windows fallback은 종전 구현이며 해당 플랫폼 검증은 별도다.
 
 - **프로젝트 화면 닫기**: toolbar의 나가기는 project.catalog releaseView로 해당 프로젝트의 standalone/workspace watcher만 해제한 뒤 renderer 선택을 비우고 영속 snapshot·채팅·후속 메시지 초안을 보존한다. 이는 manifest를 abandoned로 바꾸는 workspace.close/폐기와 다르다. 감시 해제 실패·dirty/저장·실행·채팅 전환·복구·snapshot 생성·열린 역할 설정창은 나가기를 막는다. 다시 프로젝트와 채팅을 선택해 기존 작업을 이어간다. 닫힌 화면으로 오는 이전 응답은 generation으로 무효화한다.

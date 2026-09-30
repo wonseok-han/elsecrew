@@ -88,14 +88,15 @@ window.m5 = {
       error: null,
     },
     database: { health: "healthy", schemaVersion: 1 },
-    recoveryRequired: false,
-    blockerIds: [],
+    recoveryRequired: (window.m5SmokeBlockers ?? ["lock:before_chat"]).length > 0,
+    blockerIds: window.m5SmokeBlockers ?? ["lock:before_chat"],
     };
     if (++statusReads === 1) {
       status.storageAdmission.state = "verifying";
       status.storageAdmission.completedAt = null;
       status.database = {health: "verifying", schemaVersion: null};
       status.recoveryRequired = null;
+      status.blockerIds = [];
     }
     return status;
   },

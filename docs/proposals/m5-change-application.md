@@ -43,7 +43,7 @@ Unix Git stream의 stdout/input/stderr/exit 대기에 명령별120초 한도를 
 
 재검증은 신뢰되는 원장으로부터 받은 descriptor와 새로 수집한 baseline이 모두 필요하다. 단순 파일 존재나 renderer 입력은 권위가 아니다. descriptor가 없는 legacy snapshot은 파일이 있더라도 거절한다. 내부 persist_and_bind는 exact project/source/workspace 신원·recoveryRequired·복구 잠금·writer 없음 확인 뒤 파일 durability를 확보하고 기존 project 원장 source_baselines[worktreeId]에 binding/descriptor를 게시한다. verify_bound는 해당 원장의 exact 신원과 파일을 함께 검증한다. 실제 SQLite 재열기 및 프로젝트 close/open에서 extension 보존을 검증한다. **snapshot 생성 시 호출은 아직 없다.** Git 시간/자손 종료 경계와 원장 누적 크기/압축·과거 여러 workspace 수명 검증을 완료한 뒤 제품 생성에 연결한다.
 
-DB 게시 실패 시 부분/완성 파일과 recovery lock을 보존하며 동일 snapshot에 자동 재게시하지 않는다. 현재 source에서 과거 기준을 소급 생성하는 위험을 피하기 위해 미완료 snapshot을 기존 명시 recovery 폐기로 닫고 새 snapshot을 만드는 정책이다. 이 실패를 앱 전체 영구 잠금으로 남기지 않는 실제 recovery 통합 회귀는 생성 경로 연결 때 필수다. 정상 legacy 파일/채팅/diff 열기는 보존하고 적용만 차단한다.
+DB 게시 실패 시 부분/완성 파일과 recovery lock을 보존하며 동일 snapshot에 자동 재게시하지 않는다. 현재 source에서 과거 기준을 소급 생성하는 위험을 피하기 위해 미완료 snapshot을 명시 폐기하고 새 snapshot을 만드는 정책이다. **현재 공개 recovery API는 run 중심이며 채팅 생성 전 snapshot 준비 잠금을 폐기하는 경로는 아직 없다.** 기존 workspace recovery 메서드만으로 이 경로가 구현됐다고 보지 않는다. 프로세스 종료 증거·신원·정확한 실패 단계와 결속한 명시 폐기 API 및 재시작 통합 회귀를 먼저 구현해야 한다. 정상 legacy 파일/채팅/diff 열기는 보존하고 적용만 차단한다.
 
 1. **준비**: active workspace·원장·실행 종료 증거·writer 잠금을 확인한다. source의 canonical root 및 실물 디렉터리 capability, HEAD/tree, index, tracked bytes/mode와 대상 경로 충돌을 읽기 전용으로 대조한다.
 2. **검토 묶음**: sidecar가 변경 파일의 before/after 존재·종류·mode·size·content digest와 묶음 digest를 만든다. rename은 표시용 관계이며 쓰기는 정확한 old/new path 항목으로 표현한다. binary·삭제·심볼릭 링크·권한 변경도 빠짐없이 요약한다.

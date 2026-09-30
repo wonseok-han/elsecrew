@@ -41,6 +41,15 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
+    await ${waitFor("document.querySelector('[aria-label=\"진행 및 복구 상태\"] code')?.textContent === 'lock:before_chat'", "pre-chat lock notice")};
+    const getStatus = window.m5.getSystemStatus;
+    window.m5.getSystemStatus = async () => { throw new Error('synthetic status failure'); };
+    document.querySelector('[aria-label="진행 및 복구 상태"] button').click();
+    await ${waitFor("document.querySelector('[aria-label=\"진행 및 복구 상태\"]').textContent.includes('이전 조회')", "stale status labeled")};
+    window.m5.getSystemStatus = getStatus;
+    window.m5SmokeBlockers = [];
+    document.querySelector('[aria-label="진행 및 복구 상태"] button').click();
+    await ${waitFor("!document.querySelector('[aria-label=\"진행 및 복구 상태\"]')", "cleared status notice")};
     const codexSection = () => document.querySelector('[aria-label="Codex 연결"]');
     const codexButton = text => [...codexSection().querySelectorAll('button')].find(b => b.textContent === text);
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]').textContent.includes('이 앱에 Codex 로그인이 연결됐어요')", "automatic saved-login restoration")};

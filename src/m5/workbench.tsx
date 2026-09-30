@@ -18,6 +18,7 @@ import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
+import { WorkStatusNotice } from "./work-status-view.tsx";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
 
 type MonacoApi = typeof Monaco;
@@ -170,6 +171,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.notice}</p>}
       {leaveError && <p className="m5-error" role="alert">파일 감시 해제를 확인하지 못해 이동을 멈췄어요. 작업과 대화는 보존되어 있어요. 앱을 다시 열어 상태를 확인해 주세요.</p>}
       <StorageAdmissionNotice admission={admission} />
+      <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       <ProviderLogin disabled={!admissionReady} />
       {snapshot.error && (
         <section className="m5-error" role="alert">

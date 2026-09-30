@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (채팅 생성 전 잠금 상태 안내)
+
+- b1576b6에서 생성 실패 복구를 조사했다. 현재 공개 recovery API는 run 중심이며 채팅 생성 전 snapshot 준비 잠금의 명시 폐기 API는 없다. 앞선 A1 문서의 기존 recovery로 닫는다는 표현을 미구현 정책으로 바로잡았다. 실제 종료 증거·단계별 신원 결속 없이 잠금만 해제하는 우회는 추가하지 않았다.
+- WorkStatusNotice에 기존 system.status 읽기와 명시 재확인을 연결했다. admission 이후/작업 오류·채팅 상태 변화 때 직렬 조회하며 오래된 응답은 버린다. live run도 blocker이므로 종료 실패로 단정하지 않고, 조회 실패 시 이전 정보라고 표시한다. 도움 요청 ID는20개·각160자/제어문자 치환으로 제한하며 삭제/취소/복구 변경은 하지 않는다.
+- 검증: 요약 로직2 PASS, pnpm build(tsc 포함)·Electron renderer build PASS, 숨김 Chromium smoke2 PASS/4.07초. 실제 DOM에서 pre-chat lock 표시→조회 실패/이전 조회→명시 재확인/안내 제거와 기존 편집/채팅/설정 흐름을 확인했다. 창 표시/초점 이동·실제 계정/사용자 프로젝트/모델 호출 없음. diff 검사 PASS. Karpathy 지침에 따라 새 IPC 대신 기존 조회를 사용했다.
+- 다음: snapshot 준비 실패의 프로세스 종료 증거와 명시 폐기·새 작업 생성 회귀, A1 생성 결속, 원본 적용/복원 및 실제 provider 연결은 남는다. 설치 CLI의 가짜 프로필 model-free 격리 시험은 비동기 승인을 다시 요청했으며 답변 전 실행하지 않는다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (Unix Git 파이프·종료 대기 시간 제한)
 
 - 44f2896의 실제 프로젝트 Git stream과 A1 cat-file을 Unix BudgetPipe/StreamingGitChild에 연결했다. nonblocking stdin/stdout/stderr가 같은 명령별120초 deadline을 공유하며 stderr는8KiB tail이다. stderr 완료 전 leader를 reap하지 않고 exit도 bounded poll한다. 실패 Drop은 cancel→unreaped 그룹/직접 child 종료 시도→최대2초 direct reap→reader join 순서다. Windows는 기존 fallback을 유지한다.
@@ -235,6 +242,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **snapshot 준비 복구 API 격차(2026-09-30)**: 기존 공개 recovery는 run 대상으로, 채팅 이전 준비 lock을 명시 폐기하는 API는 없다. 아래 A1의 기존 recovery 폐기 정책은 구현 사실이 아니다. 작업대는 system.status로 해당 잠금을 읽기 전용 안내하지만 종료 증거/원자 폐기와 새 snapshot 시작 경로는 후속 필수다.
 
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
 
