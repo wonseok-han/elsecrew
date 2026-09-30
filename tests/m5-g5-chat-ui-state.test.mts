@@ -269,6 +269,8 @@ test("settings save failure and explicit reload preserve the active chat and set
   assert.equal(before.activeChat?.chatId, "chat_a");
   bridge.updateProjectRoleSettings = async () => { throw new Error("offline"); };
   await controller.updateSettings(roles);
+  assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.settingsSave");
+  assert.equal(controller.snapshot().error?.detail, "offline");
   assert.equal(controller.snapshot().settings, before.settings);
   assert.equal(controller.snapshot().activeChat, before.activeChat);
   assert.equal(controller.snapshot().chats, before.chats);

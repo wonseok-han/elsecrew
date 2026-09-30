@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (동적 채팅 오류 번역 키 연결)
+
+- d1d1c15 기준 ChatUiController의 생성/전환/설정/실행/종료/복구 오류13종에 typed messageKey를 추가하고 화면에서 현재 언어로 표시한다. 기존 한국어 message·기술 detail·오류/복구 조건은 유지했다. Karpathy 지침으로 모델 자동 대체 없음과 종료 미확인 보호 안내를 그대로 번역했다. 일반 notice는 별도 남는다.
+- 검증: chat UI state/번역 Node 21 PASS, TypeScript noEmit·renderer build PASS, Chromium 기존+오류 언어 전환 회귀2 PASS. 저장 실패 이후 ko/en 전환에도 동일 모델 입력/초안·기술 상세 보존과 기존 재읽기 흐름을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/모델 요청 아님.
+- 관련 코드/기록만 선택 커밋하고 이전 정책/아카이브 변경은 보존한다. 다음은 일반 상태/차단 notice와 Monaco 내부 안내의 번역 및 누적 UI 검증이다. 원본 정책·실제 공급자/G6/Windows/출시는 미완료, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (동적 편집 오류 번역 키 연결)
 
 - 8b085b9의 ProjectEditorController 오류18종에 typed messageKey를 보관하고 renderer가 현재 언어로 해석하도록 연결했다. 기존 한국어 message와 기술 상세2048자 제한은 호환성을 위해 유지한다. Karpathy 지침으로 실행/저장/복구 조건과 오류 시점은 변경하지 않았다. 일반 notice와 ChatUiController 오류는 아직 별도다.

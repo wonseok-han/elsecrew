@@ -1,3 +1,5 @@
+import { ko, type MessageKey } from "../locales/ko.ts";
+type ChatErrorKey = Extract<MessageKey, `m5.chatError.${string}`>;
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
 import type { M5BridgeV5 } from "./contracts/bridge-v5.ts";
@@ -38,7 +40,7 @@ export interface ChatUiSnapshot {
   preparationApiUnavailable: boolean;
   activeRunId: string | null;
   notice: string | null;
-  error: { message: string; detail: string } | null;
+  error: { message: string; messageKey: ChatErrorKey; detail: string } | null;
 }
 
 type M5ChatBridge = M5BridgeV3 | M5BridgeV4 | M5BridgeV5 | M5BridgeV6 | M5BridgeV7;
@@ -146,7 +148,7 @@ export class ChatUiController {
       ]);
       if (!this.#live(generation) || this.#state.projectId !== projectId) return;
       this.#set({ settings, chats: page.items, nextChatCursor: page.nextCursor });
-    } catch (error) { if (this.#live(generation)) this.#error("프로젝트 채팅을 불러오지 못했어요.", error); }
+    } catch (error) { if (this.#live(generation)) this.#error("m5.chatError.project", error); }
   }
 
   canLeaveProjectView(): boolean {
@@ -193,7 +195,7 @@ export class ChatUiController {
       });
       this.#set({ chats: [...this.#state.chats, ...appended], nextChatCursor: page.nextCursor });
     } catch (error) {
-      if (this.#live(generation) && this.#state.projectId === projectId) this.#error("나머지 채팅을 불러오지 못했어요. 다시 시도해 주세요.", error);
+      if (this.#live(generation) && this.#state.projectId === projectId) this.#error("m5.chatError.more", error);
     } finally {
       if (this.#live(generation) && this.#state.projectId === projectId) this.#set({ loadingMoreChats: false });
     }
@@ -209,7 +211,7 @@ export class ChatUiController {
       this.#set({ settings: updated, notice: "새 채팅에 사용할 역할과 모델을 저장했어요. 이미 만든 채팅의 설정은 바뀌지 않아요.", error: null });
     } catch (error) {
       if (!this.#live(generation) || this.#state.projectId !== settings.projectId) return;
-      this.#error("설정을 저장하지 못했어요. 입력은 유지했어요. 다시 시도하거나 저장된 설정을 다시 불러와 주세요.", error);
+      this.#error("m5.chatError.settingsSave", error);
     }
   }
 
@@ -223,7 +225,7 @@ export class ChatUiController {
       if (!this.#live(generation) || this.#state.projectId !== projectId || this.#state.settings !== settings) return;
       this.#set({ settings: updated, notice: "저장된 역할과 모델을 다시 불러왔어요.", error: null });
     } catch (error) {
-      if (this.#live(generation) && this.#state.projectId === projectId && this.#state.settings === settings) this.#error("저장된 설정을 불러오지 못했어요. 입력은 유지했어요.", error);
+      if (this.#live(generation) && this.#state.projectId === projectId && this.#state.settings === settings) this.#error("m5.chatError.settingsLoad", error);
     }
   }
 
@@ -246,7 +248,7 @@ export class ChatUiController {
         const manifest = prepared.manifest;
         try { await this.#bridge.abandonPreparedWorkspace({ preparationId: prepared.preparationId, projectId: manifest.projectId, worktreeId: manifest.worktreeId, workspaceIdentity: manifest.workspaceIdentity }); } catch { /* original create error remains the user-facing evidence */ }
       }
-      if (this.#live(generation)) this.#error("새 채팅을 준비하지 못했어요. 원본 프로젝트는 바꾸지 않았어요.", error);
+      if (this.#live(generation)) this.#error("m5.chatError.prepare", error);
       return null;
     } finally { if (this.#live(generation)) this.#set({ preparing: false }); }
   }
@@ -264,13 +266,13 @@ export class ChatUiController {
       await this.#hydrateChat(chat, generation);
       if (!this.#live(generation) || this.#pending?.chat.chatId !== chat.chatId) return null;
       return chat;
-    } catch (error) { if (this.#live(generation)) this.#endSwitch("채팅 기록을 불러오지 못했어요.", error); return null; }
+    } catch (error) { if (this.#live(generation)) this.#endSwitch("m5.chatError.history", error); return null; }
   }
 
   async commitPrepared(chatId: string, bound: boolean): Promise<void> {
     const pending = this.#pending;
     if (!pending || pending.chat.chatId !== chatId) return;
-    if (!bound || !pending.detail) { this.#endSwitch("채팅 작업 복사본을 열지 못했어요."); return; }
+    if (!bound || !pending.detail) { this.#endSwitch("m5.chatError.workspace"); return; }
     const detail = pending.detail;
     this.#pending = null;
     this.#set({ activeChat: detail.chat, messages: pending.messages, runs: detail.runs, agentRuns: isAgentChatDetailPageV1(detail) ? detail.agentRuns : [], agentStartingRoleId: null, agentRecovery: agentRecoveryFor(detail), agentRecoveryResolving: false, recoveries: [], refreshNeededChatIds: this.#state.refreshNeededChatIds.filter((item) => item !== detail.chat.chatId), activeRunId: detail.runs.find(isActive)?.runId ?? null, switching: false, notice: null });
@@ -286,7 +288,7 @@ export class ChatUiController {
       const run = await this.#bridge.startFixtureRun({ chatId: chat.chatId, roleId, scenario });
       if (this.#state.activeChat?.chatId !== chat.chatId) return;
       this.#set({ runs: [run, ...this.#state.runs.filter((item) => item.runId !== run.runId)], activeRunId: isActive(run) ? run.runId : null });
-    } catch (error) { this.#error("선택한 역할·모델을 지금 실행할 수 없어요. 다른 모델로 자동 변경하지 않았어요.", error); }
+    } catch (error) { this.#error("m5.chatError.run", error); }
   }
 
   async cancelRun(): Promise<void> {
@@ -297,7 +299,7 @@ export class ChatUiController {
       if (!this.#live(generation) || this.#state.switching || this.#state.activeChat?.chatId !== chat.chatId || this.#state.activeRunId !== runId) return;
       this.#set({ runs: [run, ...this.#state.runs.filter((item) => item.runId !== run.runId)], activeRunId: null, notice: run.state === "recoveryRequired" ? "종료 확인이 필요해요. 복구 상태를 먼저 확인해 주세요." : "데모 실행을 멈췄어요." });
       await this.#loadRecoveries(chat.chatId, generation);
-    } catch (error) { this.#error("실행 종료를 확인하지 못했어요. 복구 상태를 확인해 주세요.", error); }
+    } catch (error) { this.#error("m5.chatError.termination", error); }
   }
 
   async startAgent(roleId: RoleIdV1): Promise<void> {
@@ -329,7 +331,7 @@ export class ChatUiController {
       await this.#hydrateChat(chat, generation);
       // The accepted binding is independently validated by the bridge. The durable ledger owns terminal state.
       if (accepted.runId.length === 0) throw new Error("empty accepted agent run identity");
-    } catch (error) { this.#error("선택한 역할·모델을 지금 실행할 수 없어요. 다른 모델로 자동 변경하지 않았어요.", error); }
+    } catch (error) { this.#error("m5.chatError.run", error); }
     finally { if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#set({ agentStartingRoleId: null }); }
   }
 
@@ -341,7 +343,7 @@ export class ChatUiController {
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       this.#set({ agentRecovery: result.outcome === "recoveryRequired" ? result.recovery : null, notice: result.outcome === "recoveryRequired" ? "실제 에이전트의 종료를 아직 확인하지 못했어요. 복구가 필요하므로 이 작업 복사본을 다시 사용하지 않았어요." : "실제 에이전트 실행을 멈췄어요." });
       await this.#hydrateChat(chat, generation);
-    } catch (error) { this.#error("실제 에이전트의 종료를 확인하지 못했어요. 복구 상태를 확인해 주세요.", error); }
+    } catch (error) { this.#error("m5.chatError.agentTermination", error); }
   }
 
   isRecoveryBlocked(): boolean { return this.#state.agentRecovery !== null || this.#state.activeChat?.state === "recoveryRequired" || this.#state.recoveries.some((item) => item.state === "unresolved"); }
@@ -349,7 +351,7 @@ export class ChatUiController {
   async abandonRecovery(recovery: RecoveryRecordV1): Promise<void> {
     if (!window.confirm("종료 증거를 다시 확인한 뒤 이 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
     try { await this.#bridge.markRecoveryResolved({ recoveryId: recovery.recoveryId, expectedRevision: recovery.revision, resolution: "abandon" }); await this.#loadRecoveries(recovery.chatId, this.#generation); this.#set({ notice: "복구가 필요한 작업 복사본을 버렸어요." }); }
-    catch (error) { this.#error("아직 종료를 확인할 수 없어요. 자세한 정보를 확인해 주세요.", error); }
+    catch (error) { this.#error("m5.chatError.pendingTermination", error); }
   }
 
   async abandonAgentRecovery(): Promise<void> {
@@ -370,7 +372,7 @@ export class ChatUiController {
           : "복구 기록이 다른 곳에서 바뀌었어요. 최신 상태를 다시 확인하고 있어요.";
       this.#set({ notice });
       await this.#hydrateChat(chat, generation);
-    } catch (error) { this.#error("실제 에이전트의 종료 상태를 확인하지 못했어요. 이 작업 복사본은 계속 보호하고 있어요.", error); }
+    } catch (error) { this.#error("m5.chatError.protected", error); }
     finally { if (this.#live(generation) && this.#state.activeChat?.chatId === chat.chatId) this.#set({ agentRecoveryResolving: false }); }
   }
 
@@ -384,7 +386,7 @@ export class ChatUiController {
     }
     const chat = this.#state.activeChat;
     if (!chat || !matchesChat(event, chat)) return;
-    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("대화 기록 순서를 안전하게 확인하지 못했어요. 다시 열어 주세요.", error); }
+    try { this.#set({ messages: mergeMessages(this.#state.messages, [event]) }); } catch (error) { this.#error("m5.chatError.order", error); }
   }
   #onAgentPublicEvent(event: AgentPublicEventV1): void {
     this.#hydrateForAgentRun(event);
@@ -454,9 +456,9 @@ export class ChatUiController {
     const bridge = this.#bridge as Partial<M5BridgeV5>;
     return typeof bridge.onAgentRunStateChanged === "function" ? bridge as M5BridgeV5 : null;
   }
-  #endSwitch(message: string, error?: unknown): void { this.#pending = null; this.#set({ switching: false, notice: message, error: error ? { message, detail: error instanceof Error ? error.message : String(error) } : this.#state.error }); }
+  #endSwitch(message: ChatErrorKey, error?: unknown): void { this.#pending = null; this.#set({ switching: false, notice: ko[message], error: error ? { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message : String(error) } : this.#state.error }); }
   #live(generation: number): boolean { return !this.#disposed && this.#generation === generation; }
-  #error(message: string, error: unknown): void { this.#set({ error: { message, detail: error instanceof Error ? error.message.slice(0, 2048) : String(error).slice(0, 2048) } }); }
+  #error(message: ChatErrorKey, error: unknown): void { this.#set({ error: { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message.slice(0, 2048) : String(error).slice(0, 2048) } }); }
   #set(update: Partial<ChatUiSnapshot>): void { if (this.#disposed) return; this.#state = { ...this.#state, ...update }; for (const listener of this.#listeners) listener(); }
 }
 

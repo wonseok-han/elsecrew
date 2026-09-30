@@ -201,7 +201,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}
-      {chat.error && <section className="m5-error" role="alert"><strong>{chat.error.message}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
+      {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       {snapshot.rescanRequired && (
         <section className="m5-rescan" role="status">
           <span>{t("m5.feedback.overflow")}</span>

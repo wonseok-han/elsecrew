@@ -163,6 +163,13 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-role-card input').value === 'draft-model'", "model draft")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '새 채팅 설정 저장').click();
     await ${waitFor("document.body.textContent.includes('설정을 저장하지 못했어요') && document.querySelector('.m5-role-card input').value === 'draft-model'", "settings failure preserves draft")};
+    const failedSettingsDetails = [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|');
+    const settingsLanguage = document.querySelector('.m5-toolbar-actions select');
+    settingsLanguage.value = 'en'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.body.textContent.includes('Could not save settings. Your input is preserved.')", "English persisted settings error")};
+    if (modelField !== document.querySelector('.m5-role-card input') || modelField.value !== 'draft-model' || failedSettingsDetails !== [...document.querySelectorAll('[role=alert] pre')].map(node => node.textContent).join('|')) throw new Error('error translation changed draft or technical details');
+    settingsLanguage.value = 'ko'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.body.textContent.includes('설정을 저장하지 못했어요')", "Korean persisted settings error")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '저장된 설정 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "failed-save draft reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
