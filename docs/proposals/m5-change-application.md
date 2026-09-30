@@ -94,6 +94,8 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 ## 열린 결정
 
+백업 원장 결속(2026-09-30 내부 구현): archive 생성 전 exact filename/header를 preparing으로 CAS 저장하고 검증 후 ready/descriptor를 게시한다. 재시작 inspection은 원장의 header와 strict decoder 결과를 대조한다. 부분/완료 파일이 남아도 preparing은 자동 승격하지 않는다. 정상 실패와 강제 중단 모두 원장으로 대상 이름을 찾을 수 있으나 명시 정리·재개 API는 후속이다. 저장 위치는 project.application_backups[reviewId]이며 프로젝트/잠금/채팅 revision을 검사하고 미완료가 있으면 새 준비를 막는다. 준비 metadata256KiB 상한은 전체 디스크 보존 정책과 다르다. 아직 source-writer 배타권·적용 intent·확인 소비를 제공하지 않는다. 아래의 DB 게시/재시작 미연결은 적용 intent의 경계이며 백업 준비 기록 자체는 구현됐다.
+
 A3 내부 진전(2026-09-30): `review/backup.rs`의 version2 archive 후보는 변경 대상의 raw bytes/링크 문자열·원래 권한·부재와 after image를 담는다. archive 한 개 상한은 raw4GiB+metadata32MiB이며 전체 보존 용량/기간 정책은 아래 열린 결정과 별개다. 정상 실패의 자체 파일 정리·신원 불일치 보존 오류와 bounded canonical framing decoder를 지원하지만 crash orphan의 영속 등록, DB intent 게시/재시작과 confirmation 소비 연결은 아직 없다. header는 version=2/reviewId/binding/changesDigest/count JSON+LF, 각 item은 path/before(kind,mode,size,digest,identity 또는 null)/after(kind,executable,size,digest 또는 null) JSON+LF 후 정확한 before.size bytes이며 null payload는0이다. after의 종류로 새 파일/디렉터리를 구분하고 null로 삭제를 구분한다. decoder는 각 payload hash와 기존 ReviewPlan digest도 재계산한다. descriptor version/name/length/digest의 엄격한 직렬화가 있지만 신뢰 원장 게시와 대상 결속 전에는 renderer가 제공한 descriptor나 파일 발견을 복원 권위로 사용하지 않는다. 미출시 내부 version1은 거절하며 자동 승격하지 않는다.
 
 1. 동일 UID 외부 작성자와 경합할 때 원본을 절대 덮어쓰지 않는 보장을 제공할 OS 전략과 지원 플랫폼 범위. 실패 시 수동 전달 경로는 대안이지 전체 적용 기능의 완료가 아니다.

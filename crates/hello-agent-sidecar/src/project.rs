@@ -4424,7 +4424,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews"] {
+    for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups"] {
         if let Some(extension) = previous.get(field).cloned() {
             object.insert(field.to_string(), extension);
         }

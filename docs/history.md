@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (백업 준비·완료 원장 연결)
+
+- 1c4fbde 기준 backup/staging.rs가 project.application_backups[reviewId]에 exact name/header preparing을 file 생성 전 CAS 저장하고, 검증된 descriptor/header와 같은 pending·fresh plan을 대조해 ready를 게시한다. project/lock/chat revision guard와 준비 metadata256KiB 한도를 적용하며 미완료가 있으면 새 준비를 거절한다. lifecycle extension도 보존한다.
+- 재시작 inspect는 preparing을 자동 승격하지 않고 ready의 archive/원장 header를 대조한다. source writer lock·적용 intent·confirmation 연결은 아직 없으며 미완료 정리/재개·디스크 보존 정책·복원 UI는 후속이다. Karpathy 지침으로 기존 원자 원장과 검토 검증을 재사용했다.
+- 검증: 준비 게시 DB 실패→파일 미생성·재시도 성공·SQLite 재열기·프로젝트 재열기·header 변조 거절1 PASS/7.81초; 준비 직후 중단 및 ready 게시 DB 실패→재시작 pending 보존·파일 자동승격 없음·추가 준비 거절1 PASS/13.75초. 테스트의 잘못된 테이블명과 재시작 전에 남은 실패주입 트리거를 수정했으며 제품 스키마 검증은 유지했다. strict all-targets clippy PASS/3.28초(후속 reserve-failure assertion은 focused test로 검증), 새 모듈/테스트 블록 포맷·diff 검사. 독립 정적 검토 scoped PASS, 검토자 테스트 재실행 아님. 실제 계정/모델/사용자 원본 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (백업 v2 엄격한 읽기 검증)
 
 - 709ea8c의 archive에 after image를 추가해 새 디렉터리/파일과 삭제·반영 예상 내용을 구분한다. version2만 수락하며 descriptor version/name/length/digest 직렬화·재구성을 추가했다. decode는 canonical JSON/exact key·한 줄64KiB/metadata32MiB/내용4GiB/경로8MiB·항목100,000·정렬/경로/종류/권한/link count와 각 payload hash 및 검토 digest를 검사한다. 전체 hash 읽기 후 rewind 검증하고 다시 파일 신원을 대조한다.

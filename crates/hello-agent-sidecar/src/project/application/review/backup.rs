@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
 mod decode;
+pub(in crate::project) mod staging;
 
 pub(in crate::project) struct Backup {
     name: String,
@@ -120,7 +121,8 @@ pub(in crate::project) fn create(
     target: ReviewTarget<'_>,
     review_id: &str,
 ) -> Result<Backup, ProjectFailure> {
-    create_inner(manager, storage, target, review_id, |_| Ok(()))
+    let name = format!("backup_{}.bin", Uuid::new_v4().simple());
+    create_inner(manager, storage, target, review_id, &name, |_| Ok(()))
 }
 
 #[cfg(test)]
@@ -131,7 +133,8 @@ pub(in crate::project) fn fail_for_test(
     review_id: &str,
     stage: u8,
 ) -> Result<Backup, ProjectFailure> {
-    create_inner(manager, storage, target, review_id, |at| {
+    let name = format!("backup_{}.bin", Uuid::new_v4().simple());
+    create_inner(manager, storage, target, review_id, &name, |at| {
         if at == stage {
             Err(invalid())
         } else {
@@ -145,6 +148,7 @@ fn create_inner(
     storage: &Storage,
     target: ReviewTarget<'_>,
     review_id: &str,
+    name: &str,
     mut check: impl FnMut(u8) -> Result<(), ProjectFailure>,
 ) -> Result<Backup, ProjectFailure> {
     let plan = persistence::reopen_target(manager, storage, target, review_id)?;
@@ -153,8 +157,7 @@ fn create_inner(
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
     let dir = directory(manager)?;
-    let name = format!("backup_{}.bin", Uuid::new_v4().simple());
-    let c = CString::new(name.as_str()).map_err(|_| invalid())?;
+    let c = CString::new(name).map_err(|_| invalid())?;
     let fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),
@@ -255,7 +258,7 @@ fn create_inner(
         out.file.sync_all().map_err(|_| invalid())?;
         sync_capability_directory(&dir)?;
         let backup = Backup {
-            name: name.clone(),
+            name: name.to_owned(),
             length: out.length,
             digest: out.hash.finalize().into(),
         };
@@ -272,7 +275,7 @@ fn create_inner(
         Ok(backup)
     })();
     if result.is_err() {
-        remove_failed(&dir, &name, &file)?;
+        remove_failed(&dir, name, &file)?;
     }
     result
 }

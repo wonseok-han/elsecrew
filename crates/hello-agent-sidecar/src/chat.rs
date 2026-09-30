@@ -251,7 +251,7 @@ impl G5Manager {
             ProjectFailure::manifest(format!("prepared workspace is invalid: {error}"))
         })?;
         let mut project = project_record(storage, project_id)?;
-        for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews"] {
+        for field in ["role_settings", "prepared_workspaces", "source_baselines", "application_review", "application_chat_reviews", "application_backups"] {
             if !project.contains_key(field) {
                 if let Some(value) = before.get(field).cloned() {
                     project.insert(field.to_string(), value);

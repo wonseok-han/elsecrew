@@ -3,6 +3,170 @@ use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
 #[cfg(unix)]
+fn prepared_backup_fixture() -> (Fixture, String) {
+    use application::review::persistence;
+    let mut f = source_index_fixture();
+    f.manager
+        .open_project(
+            &mut f.storage,
+            f.source.to_str().unwrap(),
+            "req_backup_open",
+        )
+        .unwrap();
+    f.manager
+        .create_worktree_inner(
+            &mut f.storage,
+            &f.project_id,
+            "req_backup_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let record = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_backup_review",
+    )
+    .unwrap();
+    (f, record["reviewId"].as_str().unwrap().to_owned())
+}
+
+#[cfg(unix)]
+#[test]
+fn staged_backup_survives_restart_and_keeps_header_binding() {
+    use application::review::{backup::staging, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_backup_reserve BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_backup_%_preparing' BEGIN SELECT RAISE(ABORT, 'test backup reserve failure'); END;").unwrap();
+    assert!(staging::prepare(
+        &f.manager,
+        &mut f.storage,
+        ReviewTarget::Project(&f.project_id),
+        &review_id,
+        "req_backup_fail_reserve"
+    )
+    .is_err());
+    assert!(!f.manager.data_root.join("application-backups-v1").exists());
+    assert!(required_project(&f.storage, &f.project_id)
+        .unwrap()
+        .get("application_backups")
+        .is_none());
+    f.storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_backup_reserve;")
+        .unwrap();
+    let ready = staging::prepare(
+        &f.manager,
+        &mut f.storage,
+        ReviewTarget::Project(&f.project_id),
+        &review_id,
+        "req_backup_prepare",
+    )
+    .unwrap();
+    assert_eq!(ready["state"], "ready");
+    assert!(staging::prepare(
+        &f.manager,
+        &mut f.storage,
+        ReviewTarget::Project(&f.project_id),
+        &review_id,
+        "req_backup_duplicate"
+    )
+    .is_err());
+    let database = f.manager.data_root.join("hello-agent.sqlite3");
+    drop(f.storage);
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    assert_eq!(
+        staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap(),
+        ready
+    );
+    manager
+        .open_project(
+            &mut storage,
+            f.source.to_str().unwrap(),
+            "req_backup_reopen_project",
+        )
+        .unwrap();
+    assert_eq!(
+        staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap(),
+        ready
+    );
+    let mut altered = required_project(&storage, &f.project_id).unwrap();
+    altered["application_backups"][&review_id]["header"]["binding"]["workspaceIdentity"] =
+        json!("different");
+    storage
+        .upsert_projection_record(
+            "project",
+            &f.project_id,
+            "op_backup_bad_header",
+            None,
+            altered,
+        )
+        .unwrap();
+    assert!(staging::inspect(&manager, &storage, &f.project_id, &review_id).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn staged_backup_failures_preserve_reservation_without_promoting_files() {
+    use application::review::{backup::staging, persistence, ReviewTarget};
+    for completed_file in [false, true] {
+        let (mut f, review_id) = prepared_backup_fixture();
+        if completed_file {
+            f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_backup_ready BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_backup_%_ready' BEGIN SELECT RAISE(ABORT, 'test backup ready failure'); END;").unwrap();
+            assert!(staging::prepare(
+                &f.manager,
+                &mut f.storage,
+                ReviewTarget::Project(&f.project_id),
+                &review_id,
+                "req_backup_fail_publish"
+            )
+            .is_err());
+            f.storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER fail_backup_ready;")
+                .unwrap();
+        } else {
+            assert!(staging::stop_after_reservation_for_test(
+                &f.manager,
+                &mut f.storage,
+                ReviewTarget::Project(&f.project_id),
+                &review_id
+            )
+            .is_err());
+        }
+        let database = f.manager.data_root.join("hello-agent.sqlite3");
+        drop(f.storage);
+        let mut storage = Storage::open(&database).unwrap();
+        let manager = ProjectManager::new(&database).unwrap();
+        let pending = staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap();
+        assert_eq!(pending["state"], "preparing");
+        assert!(pending.get("backup").is_none());
+        let path = manager
+            .data_root
+            .join("application-backups-v1")
+            .join(pending["name"].as_str().unwrap());
+        assert_eq!(path.exists(), completed_file);
+        let second =
+            persistence::publish(&manager, &mut storage, &f.project_id, "req_next_review").unwrap();
+        assert!(staging::prepare(
+            &manager,
+            &mut storage,
+            ReviewTarget::Project(&f.project_id),
+            second["reviewId"].as_str().unwrap(),
+            "req_next_backup"
+        )
+        .is_err());
+        assert_eq!(
+            staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap(),
+            pending
+        );
+        assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn application_backup_preserves_before_images_and_rejects_tampering() {
     use application::review::{backup, persistence, ReviewTarget};
