@@ -81,8 +81,8 @@ fn verify_blobs(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     let mut child = StreamingGitChild::spawn(&mut command).map_err(|_| failure())?;
-    let mut input = child.child.stdin.take().ok_or_else(failure)?;
-    let mut output = BufReader::new(child.child.stdout.take().ok_or_else(failure)?);
+    let mut input = child.stdin.take().ok_or_else(failure)?;
+    let mut output = BufReader::new(child.stdout.take().ok_or_else(failure)?);
     let mut remaining = MAX_BYTES;
     for (path, entry) in &index.entries {
         let actual = raw

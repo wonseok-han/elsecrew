@@ -22,7 +22,10 @@ use std::ffi::{CString, OsStr};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
+use std::process::{Command, Output, Stdio};
+#[cfg(not(unix))]
+use std::process::{Child, ChildStdin, ChildStdout, ExitStatus};
+#[cfg(not(unix))]
 use std::thread::JoinHandle;
 #[cfg(unix)]
 use std::{
@@ -32,6 +35,14 @@ use std::{
 use uuid::Uuid;
 #[cfg(unix)]
 mod application;
+#[cfg(unix)]
+mod git_process;
+#[cfg(unix)]
+use git_process::{GitStdin, GitStdout, StreamingGitChild};
+#[cfg(not(unix))]
+type GitStdin = ChildStdin;
+#[cfg(not(unix))]
+type GitStdout = ChildStdout;
 pub(crate) mod runtime_isolation;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
@@ -253,12 +264,16 @@ struct SnapshotStats {
     largest_blob: u64,
 }
 
+#[cfg(not(unix))]
 struct StreamingGitChild {
     child: Child,
+    stdin: Option<ChildStdin>,
+    stdout: Option<ChildStdout>,
     stderr_reader: Option<JoinHandle<std::io::Result<Vec<u8>>>>,
     finished: bool,
 }
 
+#[cfg(not(unix))]
 impl StreamingGitChild {
     fn spawn(command: &mut Command) -> std::io::Result<Self> {
         command.stderr(Stdio::piped());
@@ -270,6 +285,8 @@ impl StreamingGitChild {
             ));
         };
         Ok(Self {
+            stdin: child.stdin.take(),
+            stdout: child.stdout.take(),
             child,
             stderr_reader: Some(spawn_bounded_stderr_reader(stderr)),
             finished: false,
@@ -289,6 +306,7 @@ impl StreamingGitChild {
     }
 }
 
+#[cfg(not(unix))]
 impl Drop for StreamingGitChild {
     fn drop(&mut self) {
         if !self.finished {
@@ -2860,7 +2878,6 @@ impl ProjectManager {
             ProjectFailure::recovery(format!("could not start bundle export: {error}"))
         })?;
         let mut stdout = child
-            .child
             .stdout
             .take()
             .ok_or_else(|| ProjectFailure::recovery("bundle export did not expose stdout"))?;
@@ -2965,7 +2982,6 @@ impl ProjectManager {
             ProjectFailure::recovery(format!("could not start tree stream: {error}"))
         })?;
         let stdout = ls_child
-            .child
             .stdout
             .take()
             .ok_or_else(|| ProjectFailure::recovery("tree stream did not expose stdout"))?;
@@ -2979,12 +2995,10 @@ impl ProjectManager {
             ProjectFailure::recovery(format!("could not start blob stream: {error}"))
         })?;
         let mut cat_stdin = cat_child
-            .child
             .stdin
             .take()
             .ok_or_else(|| ProjectFailure::recovery("blob stream did not expose stdin"))?;
         let cat_stdout = cat_child
-            .child
             .stdout
             .take()
             .ok_or_else(|| ProjectFailure::recovery("blob stream did not expose stdout"))?;
@@ -3437,7 +3451,7 @@ impl ProjectManager {
             ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
         })?;
         let mut stdout =
-            child.child.stdout.take().ok_or_else(|| {
+            child.stdout.take().ok_or_else(|| {
                 ProjectFailure::recovery("fixed Git command did not expose stdout")
             })?;
         let mut bytes = Vec::with_capacity(GIT_CONTROL_OUTPUT_MAX_BYTES + 1);
@@ -3486,7 +3500,7 @@ impl ProjectManager {
             ProjectFailure::manifest(format!("could not start fixed Git command: {error}"))
         })?;
         let mut stdout =
-            child.child.stdout.take().ok_or_else(|| {
+            child.stdout.take().ok_or_else(|| {
                 ProjectFailure::recovery("fixed Git command did not expose stdout")
             })?;
         let mut bytes = Vec::with_capacity(limit.saturating_add(1));
@@ -3683,8 +3697,8 @@ fn parse_tree_record(
 }
 
 fn request_blob_header(
-    input: &mut ChildStdin,
-    output: &mut BufReader<ChildStdout>,
+    input: &mut GitStdin,
+    output: &mut BufReader<GitStdout>,
     oid: &str,
     object_format: &str,
 ) -> Result<u64, ProjectFailure> {
@@ -3720,7 +3734,7 @@ fn request_blob_header(
         .map_err(|_| ProjectFailure::manifest("raw blob size is invalid"))
 }
 
-fn consume_batch_newline(output: &mut BufReader<ChildStdout>) -> Result<(), ProjectFailure> {
+fn consume_batch_newline(output: &mut BufReader<GitStdout>) -> Result<(), ProjectFailure> {
     let mut newline = [0_u8; 1];
     output.read_exact(&mut newline).map_err(|error| {
         ProjectFailure::recovery(format!("raw blob stream is truncated: {error}"))
@@ -3770,7 +3784,7 @@ fn materialize_regular_blob(
     path: &str,
     executable: bool,
     size: u64,
-    input: &mut BufReader<ChildStdout>,
+    input: &mut BufReader<GitStdout>,
 ) -> Result<(), ProjectFailure> {
     let mut options = CapOpenOptions::new();
     options
@@ -3813,11 +3827,13 @@ fn materialize_regular_blob(
     Ok(())
 }
 
+#[cfg(not(unix))]
 fn terminate_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
 
+#[cfg(not(unix))]
 fn spawn_bounded_stderr_reader(
     mut stderr: std::process::ChildStderr,
 ) -> JoinHandle<std::io::Result<Vec<u8>>> {

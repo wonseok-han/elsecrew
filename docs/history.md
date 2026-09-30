@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (Unix Git 파이프·종료 대기 시간 제한)
+
+- 44f2896의 실제 프로젝트 Git stream과 A1 cat-file을 Unix BudgetPipe/StreamingGitChild에 연결했다. nonblocking stdin/stdout/stderr가 같은 명령별120초 deadline을 공유하며 stderr는8KiB tail이다. stderr 완료 전 leader를 reap하지 않고 exit도 bounded poll한다. 실패 Drop은 cancel→unreaped 그룹/직접 child 종료 시도→최대2초 direct reap→reader join 순서다. Windows는 기존 fallback을 유지한다.
+- 검증: toy3 PASS/0.35초(stdout 무응답·stdin 포화·자손 stderr 보유·pipe 닫힌 parent exit 지연·빠른 Drop·정상 출력/status/tail), receipt6 PASS/7.96초, project::tests 45 PASS/17.75초·의도된 subprocess 전용1 ignored. strict all-targets clippy PASS/5.60초, 새 모듈 rustfmt·diff 검사 PASS. 취소 오류는 Read helper가 무한 재시도할 수 있는 Interrupted 대신 BrokenPipe로 고정했다. 독립 정적 검토 scoped PASS이며 독립 테스트 재실행은 아니다.
+- Karpathy 지침으로 기존 Git 호출의 argv/출력 파서·복구 오류를 유지하고 파이프/대기 소유자만 교체했다. 실제 계정·유료 모델·사용자 프로젝트는 사용하지 않았으며 시험 프로세스만 종료했다. 전체 sidecar 누적/Windows 검증은 이번 증거가 아니다.
+- 남음: 새 세션 이탈/파이프를 닫은 자손·커널 비중단 상태의 전체 종료와 불확실 신원 영속 보존은 아직 보장하지 않는다. 이 제한을 architecture와 A1 계약에 기록했다. 실제 생성 시 baseline 호출·누적 원장 수명·복구 폐기 통합·원본 writer는 미완료다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A1 원장 결속과 프로젝트 재열기 보존)
 
 - 12f05bd에서 receipt의 내부 persist_and_bind/verify_bound를 연결했다. exact source/project/workspace 및 recoveryRequired·복구 잠금·writer 없음 확인 뒤 불변 파일을 먼저 동기화하고 기존 project 원장 source_baselines[worktreeId]에 descriptor와 identity를 원자 게시한다. 외부 입력 descriptor나 파일 존재만으로 legacy를 승격하지 않는다.
@@ -228,6 +235,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
 
 - **A1 원장 결속 후보(2026-09-30)**: source_baselines[worktreeId] extension으로 불변 파일 descriptor를 기존 project 원장에 게시·조회하며 close/open에서도 보존한다. DB 게시 실패는 artifact와 recovery lock을 남기고 자동 재결속하지 않는다. 기존 명시 폐기 후 새 snapshot 정책을 따르며 실제 생성/복구 호출과 누적 원장 수명 회귀 전에는 제품 활성화하지 않는다. 아래 receipt 게시 미구현 기록은 이 내부 후보 추가로 갱신한다.
 

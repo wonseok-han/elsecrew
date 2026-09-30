@@ -35,6 +35,8 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 ### A1 receipt 파일·원장 결속 후보 (제품 생성 연결 전)
 
+Unix Git stream의 stdout/input/stderr/exit 대기에 명령별120초 한도를 연결했다. 시간 초과/오류는 unreaped leader 그룹 종료와 최대2초 direct reap을 시도한다. 파이프를 붙잡은 자손 때문에 무한 join하지 않는 회귀는 통과했지만 새 세션 이탈·파이프를 닫고 남은 자손·종료 실패의 영속 신원 보존은 아직 별도 조건이다. 이 개선만으로 위의 전체 자손 종료/제품 활성화 조건을 닫았다고 해석하지 않는다.
+
 저장 API는 임의 Dir를 받지 않고 ProjectManager의 고정 managed child에서만 생성되는 opaque ReceiptStore를 받는다. 전체 raw/index JSON 트리를 만들지 않으며 정렬된 항목을 하나씩 bounded writer에 직렬화한다. 64MiB는 encoded payload 한도이며 기존 baseline과 검증용 읽기 버퍼를 포함한 프로세스 전체 메모리 한도를 뜻하지 않는다.
 
 `raw_baseline/receipt.rs`는 앱 전용 `source-baselines-v1` 디렉터리 capability 안에 `<worktreeId>.source-baseline-v1.json`을 exclusive-create 0600으로 저장한다. payload는 snapshot_identity의 project/worktree/workspace/source root·identity·object format·base commit/tree와 raw/index 상태를 묶고 canonical JSON 최대64MiB다. file fsync → directory fsync → no-follow 재조회와 payload/digest 확인 뒤에만 `{schemaVersion:1,digest,length}` descriptor를 반환한다. 기존 파일·부분 쓰기 파일은 덮어쓰거나 자동 삭제하지 않는다.
