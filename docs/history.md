@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (설치 공급 경로 불일치 확인·선택 요청)
+
+- b5bd325와 기존 Tauri install.rs를 대조했다. 최신 standalone/vendor installer를 그대로 연결하면 M5의 pinned 앱 번들 pair/Claude 버전 허용과 불일치한다. OpenAI Docs로 Codex CLI/App Server 공식 문서를 조회·본문 확인하고 Claude 공식 setup 문서도 대조했다. 공식 설치 지원과 이 앱의 정확한 실행 파일 신뢰·runtime gate는 별개다. 이번 조사로 레거시 installer의 즉시 제품 연결 대신 공급 정책을 먼저 결정해야 함을 확인했다.
+- 제안서 §5.1.1에 앱 전용 검증 버전 설치(A 권장)와 기존 설치만 사용/안내(B)를 미승인 선택지로 분리하고, 전역 설치 보존·설치 전 표시·다운로드/취소·원자 게시/재검증·인증 분리의 후속 합격 범위를 남겼다. 사용자에게 선택을 비동기 요청했으며 자동 목표 재개를 정책 승인으로 간주하지 않는다. Karpathy 지침에 따라 결정 전 임의 공급 경로/실행 허용을 추가하지 않았다.
+- 검증: 실제 코드/공식 문서 대조 및 diff check. 설치·다운로드 실행, 인증 파일 조회/변경, 실제 모델 호출은 없다. 기존 정책/아카이브 변경 보존. 설치 정책 응답 후 해당 경로 구현을 이어가며 독립적인 다른 잔여 개발도 가능하다. 앱 전체 목표는 active이고 완료/blocked가 아니다. main 병합·push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (로그인 전 설치 사전 진단 연결)
 
 - 30b65f8 기준 메인이 Karpathy 지침으로 기존 pinned 실행 파일 선택을 재사용한 고정 diagnose 요청을 구현했다. 진단 자체는 프로필/인증 파일 생성·CLI 실행·네트워크 없이 supported 프로그램만 검사하며 installed와 실제 connected를 분리한다. renderer 최초 진단 성공 뒤 기존 계정 확인을 수행하고 명시 재진단 버튼도 제공한다. Claude 설치 경로 부재는 미지원/변조 후보와 구분한다.
@@ -89,6 +95,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **M5 설치 공급 불일치(2026-09-30)**: 레거시 Codex standalone 최신 설치와 M5의 pinned 앱 번들 CLI/helper admission은 호환을 보장하지 않는다. 앱 전용 검증 버전 설치 vs 기존 설치 사용 정책은 제안서 §5.1.1의 사용자 결정 대기다. 사전 진단의 후보 부재를 시스템 전체 미설치로 단정하거나 latest 설치 성공을 사용 가능으로 표시하지 않는다.
 
 - **M5 현재 후속(2026-09-30)**: 팀 대화/역할/로그인/채팅 목록/파일 탐색/검색/diff 상세는 ko/en 연결했고 편집기·나머지 오류 안내는 남는다. 원본 적용 내부 백업/intent/첫 항목 관측은 있으나 writer/restore·공개 반영 UI는 없다. 원본 보호 조건과 5GiB 예산은 `proposals/m5-change-application.md`의 미승인 제안이다. 실제 공급자 활성화·Windows/G6/출시 검증도 미완료이며 번역 PASS를 앱 완료로 인용하지 않는다.
 - **대규모 snapshot 생성 비용 관측(2026-09-30)**: 101개 작업 복사본 회귀의 진행 중 1초 CPU sample에서 append_event의 전체 원장 replay/JSON 검증을 관측했다. storage.rs:append_event_with_failure도 매 append 후 전체 events를 재로드·replay한다. 검사 정지를 의미하지 않으며, 기존 보존/중복/충돌 계약을 유지하는 성능 개선은 별도 설계·검증해야 한다. 단일 debug sample을 배포판 성능 수치로 인용하지 않는다.
