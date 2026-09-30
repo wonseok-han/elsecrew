@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 2026-09-30 준비 복구: `project/snapshot_recovery.rs`는 version1 `beforeSnapshotExport` 준비만 내부 inspect/abandon으로 처리한다. project/lock 준비를 원자 저장하고 export 직전 `snapshotExportStarting`을 영속화한다. exact 신원·managed 파일 부재·chat/run 미결속 검사 뒤 Immediate 트랜잭션에서 두 revision을 다시 대조하여 project 폐기와 잠금 해제를 원자 저장한다. 파일은 삭제하지 않으며 legacy/이미 시작된 기록은 거절한다. 공개 IPC/UI와 응답 유실 처리는 아직 연결되지 않았다.
+
 > 대상 독자: 이 프로젝트에 기여하는 개발자. 제품 배경·시장 조사는 기획 문서(Obsidian) 참고.
 > 다이어그램: [시스템 구성](diagrams/architecture.excalidraw) · [위저드 플로우](diagrams/wizard-flow.excalidraw)
 

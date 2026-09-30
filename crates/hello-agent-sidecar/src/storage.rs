@@ -963,6 +963,14 @@ impl Storage {
         &mut self,
         upserts: Vec<ProjectionUpsert>,
     ) -> Result<Vec<AppendOutcome>, SidecarError> {
+        self.upsert_projection_records_atomic_checked(upserts, &[])
+    }
+
+    pub(crate) fn upsert_projection_records_atomic_checked(
+        &mut self,
+        upserts: Vec<ProjectionUpsert>,
+        expected: &[(&str, &str, u64)],
+    ) -> Result<Vec<AppendOutcome>, SidecarError> {
         self.ensure_writes_admitted()?;
         if upserts.is_empty() {
             return Ok(Vec::new());
@@ -974,6 +982,16 @@ impl Storage {
         verify_append_runtime_state(&transaction)?;
         let mut events = load_events(&transaction)?;
         let mut projection = replay_storage_ledger(&transaction, &events)?;
+        for (kind, id, sequence) in expected {
+            let record = match *kind {
+                "project" => projection.projects.get(*id),
+                "lock" => projection.locks.get(*id),
+                _ => return Err(SidecarError::new("aggregateUnsupported", "unsupported guarded aggregate")),
+            };
+            if record.and_then(|value| value.get("last_event_sequence")).and_then(Value::as_u64) != Some(*sequence) {
+                return Err(SidecarError::new("operationConflict", "snapshot preparation changed before atomic update"));
+            }
+        }
         let mut outcomes = Vec::with_capacity(upserts.len());
         let mut appended = Vec::new();
 

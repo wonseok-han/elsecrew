@@ -1,5 +1,184 @@
 # 작업 이력 아카이브 2026-09 (Hello, Agent)
 
+### 2026-09-29 · by GPT-6 Astra (사용자 요청 종료·복구 상태 재확인)
+
+- 개발 앱 종료·복구 요청에 따라 OS 프로세스 목록과 앱 데이터 메타데이터를 재확인했다. Hello Agent 개발 Electron 앱과 sidecar는 이미 종료되어 추가 종료하지 않았다. 실행 중인 ChatGPT/Codex 및 다른 앱의 crash handler는 유지했다.
+- 활성 codex-login.pending은 없고 보존 잠금 inode 168613811과 보존 helper inode 166226396이 유지된다. 인증 파일은 내용 조회 없이 mode 0600만 확인했다. 기존 보존 복구가 유지되어 추가 이동·삭제·인증 초기화·재부팅을 하지 않았다.
+- 이번 검증은 종료/복구 상태 확인이며 로그인 재실행이나 실제 모델 작업 성공을 의미하지 않는다. 소스 변경 없이 이 확인 기록만 남긴다. 실제 provider 활성화와 원본 반영·복원 개발은 별도 미완료이며 main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (원본 반영·복원 구현 준비)
+
+- 1517906의 제품 방향 §5.5/§6.5/M5.3과 ProjectManager·SourceRepository·source_digest를 대조했다. 현행 diff/원본 Git identity는 원본 working tree/index 무변경의 증거가 아니며 적용·복원 writer는 아직 없다. 일반 git status를 preflight로 추가하지 않고 raw 파일/기준 tree 비교가 필요하다. 공식 Git config 문서로 fsmonitor hook 실행 경계도 확인했다.
+- proposals/m5-change-application.md에 A1 source 비교→A2 immutable review→A3 복원 지점/intent→A4 적용·재시작 복구→A5 UI 계약 초안을 작성하고 README 색인을 추가했다. 원본 쓰기·사용자 프로젝트 시험·제품 활성화 권한은 추가하지 않았다. 같은 UID 외부 편집 경쟁과 복원 지점 용량/보존 정책은 명시 미해결이다.
+- 독립 검토의 시작 baseline 누락 지적을 반영해 새 snapshot 생성 때 raw source/index receipt를 영속 결속하는 A1 정책을 추가했다. tracked/index clean 조건과 untracked/ignored 원본 파일 보존·변경/충돌 거절을 구분한다. receipt 없는 기존 snapshot은 읽기/검토만 유지하며 현재 source에서 과거 baseline을 소급 생성하지 않는다. 이 제안은 아직 구현되지 않았다.
+- Karpathy 지침으로 기존 capability/plumbing/원장을 재사용할 경계와 검증부터 정리했다. 문서 참조·diff 검사를 수행했으며 runtime 테스트를 실행한 것으로 주장하지 않는다. 실제 Codex command/exec의 무과금 임시 격리 시험은 사용자에게 별도 비동기 승인을 요청했으며 답변 전 실행하지 않는다. 다음은 A1 내부 읽기 전용 검증 구현이다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (미저장 역할 설정 보호)
+
+- 2d61d02의 역할 설정창에서 닫기/재조회가 입력을 조용히 버리는 경로를 보완했다. 미저장 표시와 계속 편집/명시 변경 버리기 확인을 추가하고 확인 중 입력·저장·재조회를 잠근다. 설정창 열기 때 기존 editor selection을 무효화하고 프로젝트 선택·저장 목록·toolbar 토글 우회를 막는다. 저장 형식·IPC·원장 변경 없음.
+- Karpathy 지침으로 기존 RoleSettings 안에 확인 상태만 추가했다. 직접 diff 검토, chat 상태 검사19 PASS, tsc·renderer build PASS, 숨김 Chromium2 PASS/3.85초. 실제 화면에서 저장 실패→명시 재조회, 닫기 취소→입력 유지, 명시 재조회→기존 모델 복원, 변경 버리고 닫기→프로젝트 재열기를 확인했다. 최초 smoke는 예전 무확인 재조회 기대 때문에 실패해 새 확인 단계로 수정했다. diff 검사 PASS.
+- 남음: 실제 provider 활성화·검토/적용/복원·전체 시안 및 출시 게이트. 이번 변경은 역할 설정 UX 보완이며 전체 완료가 아니다. 실제 계정·모델 호출, main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (프로젝트 화면 나가기와 기록 보존)
+
+- f1229a0에서 toolbar 닫기가 workspace.close의 abandoned manifest 쓰기로 이어지는 것을 확인했다. 이 API를 프로젝트 이동에 재사용하면 채팅 복사본을 다시 열 수 없으므로 toolbar를 비파괴 프로젝트 화면 닫기로 분리했다. backend 폐기 API는 변경하지 않고 원장·복사본·후속 메시지 초안을 보존한다.
+- editor의 dirty·actionBlocked·진행 중 snapshot은 나가기를 막는다. chat의 실행 시작/진행·준비·전환·전송·복구도 거절한다. 성공한 화면 전환은 generation을 무효화해 늦은 목록 응답이 이전 화면을 되살리지 못한다. Karpathy 지침으로 기존 영속 채팅/복사본을 그대로 재사용했다.
+- 독립 검토에서 감시 누적과 역할 설정 draft 손실 경로를 찾아 보완했다. project.catalog releaseView는 admission 완료된 저장 ID의 standalone/workspace watcher만 제거하며 다른 프로젝트 watcher와 모든 manifest를 유지한다. UI는 chat/editor를 잠그고 ID-bound 해제 응답·최신 상태 확인 뒤 나가며 실패는 화면/잠금을 유지한다. 역할 설정창이 열려 있으면 나가기를 거절한다.
+- 검증: editor 42 PASS, chat 19 PASS, catalog 계약 4 PASS, Rust release 1 PASS(프로젝트/채팅 watcher 제거·타 프로젝트 보존·active manifest·재등록), strict clippy PASS/3.07초, renderer build·tsc PASS, 숨김 Chromium 2 PASS/3.61초(화면 닫기→재열기·기존 메시지 유지·감시 해제 실패 시 화면 유지·설정창 보호). 초기 회귀의 잘못된 saveFile 호출을 실제 saveActive로 수정했다. 실제 계정·사용자 프로젝트·모델 호출 없음. 다음은 미완료 실행/검토·적용/복원 흐름이며 전체 완료는 아니다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 선택 화면)
+
+- d55e478 위에서 작업대의 저장된 프로젝트 버튼·경로 목록·다음 페이지·재조회·로딩/오류를 연결했다. 페이지는 교체 표시하며 요청을 직렬화하고 늦은 목록 응답을 무효화한다. 최근 사용 순서가 아닌 ID 순서라고 명시했다.
+- controller의 native 폴더 선택과 저장 ID 선택이 같은 snapshot-before-tree 흐름을 공유한다. 기존 dirty/열린 채팅 보호를 유지하고 조회를 기다리는 사이 새 편집이 생겨도 snapshot 생성 전에 전환을 멈춘다. Karpathy 지침으로 별도 프로젝트 활성화 구현을 만들지 않았다.
+- 검증: editor-state 41 PASS, pnpm build·M5 renderer build PASS, 숨김 Chromium 2 PASS(목록 페이지 이동→선택→파일 탐색/편집·도킹/후속 대화). 초기 시험의 호출 이름 기대값을 수정했으며 sandbox 안 Electron 실행 거절은 승인된 실행 환경에서 재검증했다. 독립 검토가 찾은 chat switch/actionBlocked 중 재열기 경합을 controller 요청 전/응답 후 검사·차단 전이 시 selection 무효화·snapshot 완료 시 기존 cleanup으로 수정했다. 준비 중 잠깐 차단됐다 풀려도 늦은 snapshot은 활성화하지 않으며 cleanup 실패는 기존 fence를 유지하는 회귀도 통과했다. diff 검사 PASS. 실제 인증/모델/사용자 프로젝트 미사용, main 병합/push 없음.
+- 다음은 프로젝트·채팅 이동 UX의 남은 제약과 제품 흐름 검증이다. 실제 provider 도구 격리/활성화·적용/복원·전체 시안·출시 검증은 여전히 별도 미완료이며 앱 전체 완료로 주장하지 않는다.
+
+### 2026-09-29 · by GPT-6 Astra (저장 프로젝트 목록·재열기 IPC)
+
+- 3692450 기반 미커밋 목록/reopen을 이어서 project.catalog list/reopen 계약과 sidecar dispatch, Rust/TS capability suffix, Electron main/preload 고정 IPC에 연결했다. 목록은 ID 순 keyset 50개이며 raw 512KiB와 encoded JSON 768KiB 한도를 분리한다. 재열기는 저장 ID로만 경로를 찾고 hash·canonical path·실제 Git root를 확인한 뒤 폴더 선택과 같은 검증을 공유한다. 새 HEAD는 허용하되 recoveryRequired와 바뀐 링크를 거절하고 active snapshot은 유지한다.
+- 검증: saved_project Rust 4 PASS, shell-ready 1 PASS, catalog dispatch 1 PASS, protocol lifecycle 3 PASS, strict all-targets clippy PASS/5.01초, Node 계약/bridge/security/scaffold 65 PASS, pnpm build PASS. 초기 macro/test 인자·없는 tsx 호출과 보안 mock import 실패를 수정하고 해당 검사를 재실행했다. package smoke의 오래된 capability 기대값도 현행으로 고쳐 scaffold 5 PASS; 실제 패키지 smoke는 실행하지 않았다. scoped rustfmt·diff 검사 PASS.
+- 단일 독립 검토자가 저장/reopen 및 IPC/preload 확장에서 새 safety/compatibility blocker 없음으로 검토했다. Karpathy 지침으로 기존 검증과 projects table을 재사용했다. 사용자 프로젝트/계정/모델 실행 없이 진행했다. 다음은 저장 프로젝트 선택 UI와 기존 초안/채팅 보호 흐름 연결이며 아직 화면에서 목록 선택 가능한 기능 완료는 아니다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 재확인)
+
+- 사용자 요청에 따라 권한 확장 읽기 전용 프로세스 조회와 앱 데이터 메타데이터를 재확인했다. Hello Agent 개발 앱·sidecar·Vite는 이미 종료되어 있다. ChatGPT의 code-mode-host와 VS Code/Cursor crash handler는 대상이 아니므로 종료하지 않았다.
+- 활성 codex-login.pending은 없으며 보존 잠금 inode 168613811·stale helper inode 166226396이 유지된다. auth.json은 내용 조회 없이 mode 0600만 확인했다. 이전 보존 복구가 유지되어 추가 이동·삭제·인증 초기화·재부팅은 수행하지 않았다.
+- 기존 프로젝트 목록/재열기 미커밋 5개 파일은 보존했다. 이번 확인은 실제 로그인 재실행이나 모델 실행 성공의 증거가 아니다. 다음은 진행 중 목록 UI 연결이며 설치 CLI 도구 실행 시험은 별도 승인 대기다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (저장된 프로젝트 목록 조회 기반)
+
+- d399b1c에서 여러 프로젝트 재선택 경로를 조사했다. 저장된 project 원장은 있으나 공개 openProject는 native 폴더 선택기만 거치며 목록 API는 없다. storage/catalog에 읽기 전용 keyset 조회를 추가했다. ID/경로 열만 읽고 큰 workspace projection_json은 materialize하지 않으며 파일 시스템 접근·snapshot 생성·프로젝트 활성화는 하지 않는다.
+- 조회는 admission 완료 후만 허용하고 ID 순서 50개·원시 UTF-8 합계 512KiB/경로 128KiB를 제한한다. 한도에서 다음 cursor를 반환하고 초과 메타데이터는 누락시키지 않고 거절한다. wire 직렬화 크기 검증은 공개 API 연결 때 별도로 필요하다. 기존 원장·스키마 migration 변경 없음.
+- 검증: focused Rust 4 PASS/1.08초(재시작·페이지 연속성·바이트 한도·쓰기 없음·입장 전 차단), strict all-targets clippy PASS/4.27초, scoped rustfmt·직접 diff 검토·diff 검사 PASS. 실제 계정/모델/사용자 프로젝트를 사용하지 않았다. Karpathy 지침으로 기존 projects table을 재사용했다.
+- 다음은 typed 목록/명시 재열기 계약과 Electron/renderer 연결이다. 현재 함수는 내부 기반으로 public capability/UI는 아직 없으며 여러 프로젝트 관리 기능 완료로 주장하지 않는다. 목록은 접근 권한이 아니므로 재열기 시 저장된 ID와 경로·현재 Git root·복구/초안 경계를 다시 검증해야 한다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (파일 선택과 패널 표시 연결)
+
+- b22c6eb에서 파일 선택이 편집 상태만 바꾸고 숨긴 편집기/비활성 도킹 탭을 드러내지 않는 누락을 확인했다. controller의 명시 panel 요청을 도킹으로 전달해 기존 배치에서 해당 패널만 표시한다. 같은 열린 파일을 재선택해도 동작하며 일반 상태 갱신/입력은 패널을 강제로 열지 않는다. 패널 표시 전 진행 중 크기 조절 기준도 비운다.
+- 폴더 제목을 루트/각 상위 폴더 경로 버튼으로 바꾸고 기존 loadTree 검증 경로를 재사용했다. 권한·파일 쓰기·영속 계약 변경 없이 Karpathy 지침에 따라 표시/탐색만 수정했다.
+- 검증: 배치·편집 controller 집중 검사 PASS, pnpm build·M5 renderer build PASS, 숨김 Chromium 2 PASS/3.57초. 실제 Chromium에서 src 진입→루트 복귀→편집기 접기→검색 결과 열기→다시 접기/기존 파일 재선택→동일 Monaco identity를 확인했다. 직접 diff 검토·diff 검사 후 작업 단위 커밋한다. 실제 provider/전체 시안/적용·복원/출시는 여전히 남으며 main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (작업 복사본 파일 이름 검색)
+
+- 80ddcc1 기준 파일 패널에 하위 폴더의 이름/경로 검색·중단·결과 열기를 추가했다. 원본/파일 내용을 읽는 새 권한 없이 기존 tree RPC를 순차 재사용하며 symlink를 따라가지 않는다. 기존 폴더 탐색 상태와 편집 초안은 바꾸지 않는다. Karpathy 지침으로 검색 상태만 분리했다.
+- 한 번의 검색은 최대 100페이지·100결과·1000폴더, 다음 페이지 시작 전 10초 검사로 제한하고 한도 도달은 부분 결과로 명시한다. 진행 중 RPC는 기존 통신 예산을 따르며 10초 강제 취소를 주장하지 않는다. 요청 취소·프로젝트 epoch·정확한 chat workspace·actionBlocked를 각 읽기 전후에 대조해 늦은 결과를 버린다.
+- 검증: 최초 검색/편집 controller 41 PASS, 최신 검색·workspace 경계·숨김 Chromium 11 PASS. Chromium에서 대소문자 무관 하위 폴더 검색→결과 열기→도킹/편집 복구/후속 대화까지 통과했다. pnpm build·M5 renderer build PASS(기존 Monaco chunk 경고). mock tree의 잘못된 root 직계 파일 구조도 실제 directory→file 구조로 바로잡았다.
+- 검토 보완: 중단/재검색이 미완료 RPC를 누적할 수 있다는 지적을 반영해 controller의 단일 검색 소유권을 실제 promise 정리까지 유지한다. UI는 이전 검색 정리 중임을 안내한다. 취소 뒤 5회 재시도에도 read 1건, 정리 후 새 검색 허용·A→B 전환의 late page 폐기·폴더/시간 한도를 포함한 최신 집중 검사 45 PASS, 두 빌드 PASS.
+- 최종 숨김 Chromium 2 PASS/3.35초, 동일 독립 검토자 재검토 PASS, diff 검사 PASS 후 작업 단위 커밋한다. 진행 중 IPC 강제 취소가 아닌 결과 폐기/추가 요청 차단이라는 한계는 유지한다.
+- 전체 내용 검색·실제 공급자 활성화·검토/적용/복원·시안 완성과 출시 게이트는 별도 남는다. 실제 계정/유료 모델·사용자 프로젝트를 실행하지 않았고 main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (Monaco 읽기 전용 상태 갱신)
+
+- d44cba1 clean tree에서 updateOptions가 저장 중 여부만 반영하고 readOnly prop을 누락하는 결함을 고쳤다. 실제 컴포넌트를 AST로 추출하고 Monaco/hook double로 실행하는 회귀는 수정 전 admission lock 실패, 수정 후 통과했다.
+- 독립 검토에서 지연 로딩 중 잠금 전환을 놓치는 추가 경합을 발견했다. 최신 committed tab/readOnly/onChange를 layout effect의 ref에 보존하고 로딩 완료 시 최신 내용·잠금으로 생성한다. 저장 중/입장 차단이 각각 로딩 도중 바뀌는 회귀를 추가했고 동일 검토자 재검토 PASS. 제품 RPC·권한·파일 쓰기 계약은 바꾸지 않았다.
+- 검증: 옵션 회귀 3 PASS, pnpm build·M5 renderer build PASS(기존 Monaco chunk 경고), 숨김 Chromium smoke 2 PASS/3.27초. Karpathy 지침으로 편집기 상태 동기화만 최소 수정했다. diff 확인 뒤 작업 단위 커밋하며 main 병합/push 없음.
+- 남은 제품 범위를 제안서 §9와 현행 architecture에 대조했다. 실제 provider 활성화/도구 격리, 전체 승인 시안/안내 흐름, 검토·적용·복원 루프와 G6/Windows/출시 증거는 이 UI 수정으로 완료되지 않는다. 설치 CLI의 별도 command/exec 시험은 명시 승인 대기다.
+
+### 2026-09-29 · by GPT-6 Astra (도킹 UI 검증·자동 시험 초점 간섭 해소)
+
+- 앞선 간헐 dirty 실패를 입력 이벤트로 재현했다. 시험이 보내는 Z 외에 한글 keydown/composition 이벤트가 전면 시험 창으로 들어와 확인/복구 중 초안을 바꾸고 있었다. 제품의 stale 확인 거절은 유지한다. 임시 입력 진단은 제거했다.
+- 합성 Electron 창의 show/focus를 없애고 CDP focus emulation·Input.insertText로 바꿨다. 일반 hidden insertText는 Monaco로 전달되지 않아 실패했으며 CDP 경로에서 편집/취소/복구/후속 대화 전체가 통과했다. OS 창 표시/초점 미획득도 assert한다. 이는 테스트 전용으로 제품 debug 접근을 열지 않는다.
+- 최종 숨김/초점 회귀는 3회 연속 exit 0, diff 검사 PASS. 일반 UI 변경 범위의 메인 직접 diff 검토 후 중첩 도킹과 시험 수정을 함께 작업 단위 커밋한다.
+- Karpathy 지침대로 제품 편집 로직을 추정으로 변경하지 않았다. 중첩 도킹의 기존 단위 13·편집 controller 36 PASS와 build 증거를 재사용한다. 후속으로 Monaco 옵션 갱신의 readOnly 누락을 확인할 회귀가 남으며, 설치 CLI 시험 승인·실제 공급자/시안/G6/Windows/출시도 별도 미완료다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (중첩 분할·탭 그룹 구현)
+
+- c245e47에서 진행 중이던 배치 UI를 이어서 구현했다. split/tab 트리·가장자리/가운데 drag/drop·키보드 배치 메뉴·각 분할 크기 조절·탭 초점 이동을 연결했다. 기존 저장 배치 호환과 숨김 그룹 복원을 유지하고 Monaco의 평면 keyed 부모를 보존한다. Karpathy 지침으로 기존 패널 상태/편집 안전 계약은 변경하지 않았다.
+- 검증: 배치 단위 13 PASS, 편집/작업 복사본 controller 36 PASS, pnpm build와 M5 renderer build PASS(기존 Monaco chunk 경고). Chromium smoke는 혼합 분할·탭/키보드·저장·Monaco identity를 통과했고 전체 성공도 관측했다. 다만 재실행 중 다시 불러오기 확인 또는 후속 대화 전환에서 dirty가 다시 생기는 간헐 실패가 관측됐다. 임시 길이 진단을 넣은 3회는 성공했고 진단은 제거했다. 이 성공을 간헐 실패 해소로 해석하지 않는다.
+- 다음: 편집 입력/동기화 경합 재현·해소 후 파동 UI 완료 판정. 실제 설치 CLI command/exec 시험은 여전히 별도 승인 대기이며 실제 계정/유료 모델은 호출하지 않았다. 전체 앱·시안 완료 아님. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 상태 확인)
+
+- 사용자 종료·복구 요청으로 c245e47의 현재 프로세스와 앱 데이터 메타데이터를 재확인했다. 권한 확장 읽기 전용 ps 조회에서 Hello Agent 개발 앱·sidecar·Vite는 없었다. 다른 앱의 crash handler는 종료하지 않았다.
+- 활성 codex-login.pending은 없고 보존 잠금 inode 168613811과 보존 helper inode 166226396이 그대로 유지된다. auth.json은 내용 조회 없이 mode 0600 유지 확인. 이미 수행한 보존 복구를 반복하거나 인증 정보를 초기화하지 않았으며 재부팅도 필요하지 않다.
+- 기존 도킹 UI 미커밋 5개 파일은 보존했다. 이번 검사는 종료/보존 복구 상태 확인이며 실제 로그인·모델 실행 성공을 의미하지 않는다. 다음은 진행 중 UI 검증과 별도 승인 대기 중 설치 CLI 시험이다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (승인 대기 중 오프라인 도구 시험 준비)
+
+- **범위**: 167d961 기준 실제 설치 CLI의 command/exec 시험 승인은 아직 받지 않았다. 대신 macOS test-only `provider_permission_probe`를 준비했다. 고정 initialize/initialized/config-read/command-exec 이외 RPC가 없으며 생성한 임시 profile·sentinel·workspace만 사용한다. 설치 CLI 시험은 ignored와 별도 승인 환경변수로 막고 CLI/helper pin을 release 전에도 대조한다. 실제 계정/모델/사용자 프로젝트는 쓰지 않는다.
+- **통신/정리**: 제품의 opaque observation을 공개하지 않고 cfg(test) 프레임·bounded 수신만 추가했다. 기존 LoginProcess owner·관측·15초 교환 예산·종료 증거를 재사용한다. 성공/거절 뒤 cleanup을 요구하고 불확실 종료에는 임시 폴더를 보존한다. Karpathy 지침대로 별도 production 실행기를 만들지 않았다.
+- **검증/수정**: 초기 시험 DB 파일명은 profile binding의 고정 이름과 달라 거절되어 수정했다. core의 비공개 observation bytes를 열지 않고 test-only 수신으로 바꿨다. 가짜 프로세스의 성공/거절 정리 및 legacy sandbox flags 혼용 방지 2개 시험을 통과했다. 설치 CLI case는 컴파일만 했으며 아직 실행하지 않았다. 다음은 명시 승인 뒤 그 단일 시험을 실행하는 것이고, 결과를 actual provider 제품 활성화나 전체 앱 완료와 혼동하지 않는다.
+- **최종 검사**: toy 2 PASS/0.40초, strict all-targets clippy PASS/2.53초·제품 lib cargo check PASS·scoped rustfmt/diff PASS. 독립 검토의 non-mac cfg 지적은 상위 모듈 자체가 macOS 전용이라 실제 회귀가 아니었음을 동일 검토자가 정정했다. helper/wrapper cfg는 명시적으로 통일하고 재검토 PASS. 설치 target은 macOS ARM64뿐이므로 Windows/Linux 검증을 주장하지 않는다. M5 작업 단위 커밋만 하며 main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (인증/도구 프로필 경계 실측)
+
+- **기준/범위**: 6f8b569 clean tree에서 메인이 직접 조사했다. OpenAI Docs로 app-server/permissions 공식 문서를 확인하고, 실제 인증 파일 대신 임시 sentinel만 사용했다. CLI/helper SHA-256은 기존 고정값 3e11ccc…aca5a / 4c398936…43f6d와 일치한다. 홈 읽기·파일 쓰기·네트워크를 OS 차단한 help 검사와 지정 임시 폴더만 쓰는 일반/experimental schema 생성만 실행했다. 로그인/계정/모델/도구 RPC는 보내지 않았다.
+- **증거/진전**: 새 ignored `separate_tool_home_excludes_login_profile`은 현재 combined profile에서 가짜 auth.json 읽힘(exit 21)을 대조군으로 확인하고, 별도 scratch root에서는 readOnly/workspaceWrite 모두 직접·자손 읽기/쓰기 거절과 scratch 쓰기 성공을 확인했다(PASS/0.11초). 실제 제품의 프로필 분리가 구현됐다는 뜻은 아니다. scoped 독립 검토 PASS, strict all-targets clippy PASS/4.24초.
+- **설치 버전 차이**: 공식 문서의 readOnly.access/workspaceWrite.readOnlyAccess는 고정 설치 CLI의 일반 SandboxPolicy 생성물에 없다. experimental 생성물에는 thread/start·turn/start의 named `permissions` 및 ThreadStartResponse.activePermissionProfile이 있다. 일반 schema만 보면 이 필드가 없으며 최신 문서 필드를 검증 없이 추가하면 안 된다. 생성물은 `/private/tmp/hello-agent-permission-schema.ntmzFl`의 조사 자료로 제품 의존성이 아니다.
+- **다음 실행 경로**: 새 빈 임시 profile에서 named permission profile의 config/read·effective provenance와 실제 model-free OS 도구의 profile 읽기 차단을 먼저 검증한다. 구 sandbox_mode 설정과 혼용하면 구 설정이 우선하므로 기존 앱 로그인 config를 몰래 변경하지 않는다. 이 경로는 정상 sandboxed tool용이며 unsandboxed AcceptOnce를 허용하는 근거가 아니다. remote code-mode host는 CLI 옵션이 있으나 실제 OS tool delegate 위치/경계가 증명되지 않았고, external tokens는 host-owned 인증 수명 전환이 필요하므로 둘 다 해결책으로 채택하지 않았다. 공개 accept/native start 미활성·유료 호출 없음·main 병합/push 없음.
+- **출처/권한**: [공식 app-server](https://learn.chatgpt.com/docs/app-server), [공식 permissions](https://learn.chatgpt.com/docs/permissions). 설치 CLI의 실제 `command/exec` 시험은 기존 config-only 실측 범위 밖이므로 별도 승인을 요청한다. 제안 시험은 새 임시 profile/가짜 인증 sentinel만 사용하며 실제 인증·사용자 프로젝트·모델·외부 네트워크를 사용하지 않는다. scoped rustfmt/diff 검사 PASS 후 증거 회귀를 커밋한다.
+
+### 2026-09-29 · by GPT-6 Astra (내부 일회 허용·전송 권위 분리)
+
+- **구현**: 03cbca1 기준 동일 live ticket의 명시 상세 조회 뒤에만 내부 일회 허용을 접수한다. 예약 owner의 격리/역할/작업 폴더/프로세스/취소 검사와 원자 intent 저장 뒤 전송하며 중복 접수는 거절한다. 일반 core AcceptOnce 차단은 유지했다. 초기 공개 core 허용 encoder는 독립 검토에서 반려되어 제거하고, core는 단회 순서 예약만 반환하며 private sidecar transport만 생성 가능한 opaque accept frame으로 바꿨다. 동일 검토자 재검토 PASS.
+- **검증**: core 151 PASS·compile-fail 포함 doctest 3 PASS, sidecar 승인 단위 7 PASS. macOS 격리 toy CLI의 정상 readonly/write·저장 실패·접수 전/후 취소·접수 후 role 변경 6개 case PASS(78.74초). sandbox 안 첫 실행은 process launch 거부로 실패했으며 승인된 OS 실행 환경에서 재검증했다. strict all-targets clippy PASS(5.80초), 변경 Rust 파일 rustfmt와 diff 검사 PASS. 전체 sidecar 누적 재실행이나 실제 vendor 도구 실행 증거는 아니다.
+- **남음/활성화 경계**: 공개 IPC/UI accept·native 제품 start는 계속 미활성이다. 현행 sandbox의 PROFILE 읽기/쓰기는 vendor 자손에도 열리므로 인증/profile 도구 격리를 해결하기 전 실제 허용 활성화하지 않는다. 인증을 복사하거나 정책을 완화하지 않았다. 다음은 이 프로필 경계 해결과 실제 provider 연결이며 Claude·실사용·UI·출시 게이트까지 전체 목표는 미완료다. Karpathy 지침에 따라 기존 owner/transport를 재사용했고 실제 유료 호출·main 병합/push 없음.
+
+- **기존 경로 회귀**: native dispatcher 거절 round-trip도 PASS(15.79초). 검토·관련 검사 완료 후 이 내부 후보를 작업 단위 커밋하며 제품 활성화 완료로 해석하지 않는다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·복구 요청 재점검)
+
+- 사용자 요청에 따라 실제 프로세스 목록을 재조회했다. sandbox 안의 ps는 거부되어 읽기 전용 권한 확장으로 확인했으며 Hello Agent 개발 앱·sidecar·Vite는 없었다. VS Code/Cursor crash handler만 검색되어 종료하지 않았다.
+- 활성 `codex-login.pending`은 없으며 보존 잠금 inode 168613811·보존 helper inode 166226396이 유지된다. 인증 파일은 내용 없이 mode 0600만 확인했다. 이전 보존 복구가 완료된 상태이므로 추가 이동·삭제·로그인 초기화·재부팅 없이 유지했다.
+- 기준 HEAD 03cbca1, 기존 구현 미커밋 7개 파일은 보존했다. 이번 확인은 실제 로그인/모델 실행 검증이 아니며 진행 중 구현·독립 검토 지적 해소는 별도 남는다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (승인 직전 예약·격리 경계 연결)
+
+- **구현**: 1015441의 sealed launch scope를 예약 owner의 승인 전제 검사와 결합했다. 취소/role/input/snapshot·파일 분리/profile·프로세스 관측을 대조하며 파일 스캔은 Git 검사보다 먼저 한다. 기존 시작 때만 확인하던 writer 소유권을 현재 입력 검증마다 확인한다. AcceptOnce 제안은 새 callback을 거치며 이후 전송 단계에서도 재검증하도록 했다. core 허용 응답 차단과 제품 미활성 상태는 유지한다.
+- **검증/실패 분석**: 새 테스트의 존재하지 않는 writer ID는 SQLite FK에 먼저 막혔으므로 실제 run ID/null로 바꿔 readonly/writer 소유권 불일치를 검사했다. private field 접근·새 enum의 누락 match arm도 수정했다. OS proxied toy lifecycle PASS/27.91초. 기존 상호작용은10초 시험 한도에서 실패해 단일 case로 분리했으며 승인 관측7.316초·거절 전송9.186초 부근의 정상 진행을 확인했다. 제품 준비30초/정리8초를 포함하도록 외부 시험 watchdog만40초로 조정하고 원문 임시 진단을 제거했다. 제품 예산·기능 검증은 불변이며 독립 검토도 이 변경을 별도로 PASS했다. 최종 전체 해당 matrix PASS/92.96초, strict clippy PASS/4.32초·rustfmt/diff PASS. 단일 진단 테스트는 정상 matrix 중복 실행을 막기 위해 ignored다.
+- **남음**: 사용자 결정의 단회 접수/의도 저장·허용 응답 serializer·UI·실제 provider admission과 유료 모델 smoke가 아직 남는다. Karpathy 지침으로 기존 owner/transport/lock 검사를 사용했고 외부 권한이나 새 저장소는 추가하지 않았다. 실제 계정/모델 호출·main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (격리 실행 출처 전달)
+
+- **구현**: 57c8569에서 일회 허용 전제를 조사했다. 기존 core는 독립 격리 증거 없이 AcceptOnce를 거절하며, proxy 보유 여부만으로 OS 격리를 추론할 수 없었다. 고정 sandbox builder가 만든 opaque RuntimeScope를 해당 명령의 launch 성공 후 process owner에 전달했다. exact workspace/access 대조와 실패/정리/종료 무효화를 제공하며 raw proxy 경로는 증거를 얻지 못한다.
+- **검증**: 기존 로컬 OS sandbox·TCP toy2개 PASS(0.33/0.44초), launch 실패 시 scope 미보유 회귀를 추가한 최종 해당 테스트 PASS/0.47초·strict clippy PASS/2.71초. 동일 독립 검토자 scoped PASS. Karpathy 지침대로 기존 명령 builder/owner에 출처만 추가했고 새 실행기·영속 저장소는 만들지 않았다. 실제 계정/모델 호출 없음.
+- **다음**: 이 출처는 허용 권위나 OS 생존 증명이 아니다. 현재 예약 역할/작업 폴더/잠금·취소/프로세스·명시 UI 결정을 전송 직전에 함께 검증하는 owner 연결이 남는다. AcceptOnce와 제품 native 활성화는 계속 차단하며 전체 앱은 미완료다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (승인 요청 명시적 상세 조회)
+
+- **구현**: 8567dbc 기준 기존 ticket/실행 owner를 재사용해 `run.approval inspect`와 카드 상세 펼치기를 연결했다. 기본 목록/거절 응답은 요약만 유지하며 명시 조회만 bounded 명령·경로·이유·네트워크 대상을 반환한다. 만료/연결 불일치/이미 접수된 요청은 거절하고 조회 전후 run projection 불변을 검사했다. 상세는 평문이며 닫기·만료·오류·신원 변경 시 화면 상태를 비운다.
+- **검증**: Rust 승인 단위6·native 상호작용 matrix PASS/61.09초, strict all-targets clippy PASS/3.64초. 계약/bridge/security58 PASS, 최종 Cf 보완 계약3 PASS, pnpm build·M5 renderer build·scoped rustfmt PASS. 독립 검토에서 U+061C/U+200E/U+200F 누락을 발견해 C0/C1+전체 Unicode Cf 이스케이프와 supplementary 회귀를 추가했고 동일 검토자 재검토 PASS. 합성 브라우저에서 명시 클릭 전 조회0/후1, markup 평문·U+200E 가시 표시 확인. 테스트 서버 종료; 탭은 후속 확인 시 이미 세션에서 제거됨. 비로그인 shell의 node PATH 실패는 정상 개발 shell로 재실행해 해소했다.
+- **남음**: Karpathy 지침으로 새 저장소/권한 체계를 만들지 않았다. 상세 조회는 허용 권한이 아니며 AcceptOnce·실제 provider 제품 활성화·유료 모델 smoke·전체 앱 완료는 미완료다. 실제 계정/모델 호출·main 병합/push 없음. 이 작업 단위 변경을 커밋하고 실제 실행 연결을 이어간다.
+
+### 2026-09-29 · by GPT-6 Astra (종료·복구 요청 현행 재확인)
+
+- 사용자 요청으로 프로세스와 앱 데이터 메타데이터를 다시 확인했다. Hello Agent 개발 앱/sidecar는 이미 종료되어 있어 추가 종료하지 않았다. ChatGPT의 code-mode-host와 다른 앱의 crash handler는 대상이 아니므로 유지했다.
+- 활성 `codex-login.pending`은 없고 보존된 legacy 잠금(inode 168613811)과 stale helper(inode 166226396)가 그대로 있다. 앱 전용 인증 파일은 내용 열람 없이 mode 0600 유지 확인. 보존 복구는 이미 완료된 상태이며 추가 삭제·초기화·재부팅은 필요하지 않다.
+- 기존 승인 상세 보기 구현의 미커밋 6개 파일을 그대로 보존했다. 이번 확인은 로그인 재실행/실제 모델 동작 검증이 아니며 해당 개발·검토는 별도 미완료다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (승인 요청 유형 표시)
+
+- **구현**: 88abe6e의 미출시 승인 응답 pending을 `{approvalId, kind}` 요약으로 바꿨다. 실제 live 요청과 실행/연결 digest가 맞는 미접수 ticket에서만 command/writeStdin/network/fileChange 고정 유형을 추출한다. 카드에 한국어 유형·접근성 이름을 표시하며 raw 명령/경로/reason/host는 전달하지 않는다. 이는 허용 판단용 상세 검토나 권한 확대가 아니다.
+- **검증**: Rust 승인 단위5·strict clippy PASS/2.90초, pnpm build PASS, Node 계약/bridge/security57 PASS 및 마지막 bridge 변경1 PASS. 합성 브라우저에서4유형 표시·네트워크1건 거절·나머지3건 유지·전송1회를 확인하고 탭/서버 종료했다. 동일 검토자 scoped PASS, Karpathy 지침에 따라 기존 ticket/context를 재사용했다. 실제 계정/모델·사용자 프로젝트 미사용.
+- **마감/남음**: 최종 native API 조회/거절 상호작용 회귀 PASS/61.16초, rustfmt/diff 확인 후 커밋한다. 승인 가능한 구체적 행위 범위·일회 허용 권위·실제 공급자 활성화/유료 smoke·전체 앱 완료는 아직 아니다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (승인 대기열 IPC·채팅 카드 연결)
+
+- **구현**: 26aa845에서 `run.approval`의 exact list/decline 요청·전체 실행 신원/응답 결속을 Rust와 TS에 연결했다. capability는 기존 followup/login 뒤의 고정 suffix로 협상하고 Electron main 현재 frame·preload 양방향 검증을 거친다. 채팅 카드는 직렬 poll·응답 epoch·언마운트 무효화·일회 거절/실행 취소를 제공하며 추가 권한 허용 미지원과 접수/전달 차이를 표시한다. raw 명령·비밀·허용 권위를 추가하지 않는다.
+- **검증**: pnpm build 및 M5 renderer build PASS, 계약/bridge/security/scaffold61 PASS, Rust lifecycle3·shell-ready1·요청 오류 뒤 세션 유지1 PASS, strict clippy PASS/2.76초, 동일 검토자 scoped PASS. 초기 TS Array.at 호환성·테스트 run namespace·고정 channel 이름 검사 실패를 수정했다. 합성 브라우저 카드에서 대기→버튼 비활성→decline calls:1/접수 표시→취소 callback을 관측했다. 이는 카드 동작 확인이며 전체 작업대 디자인 검증이나 실제 모델 증거가 아니다. 테스트 탭/서버 종료, 실제 계정/모델 미사용.
+- **마감/남음**: 새 API를 통한 native 정상 응답·저장 실패·취소 상호작용 matrix PASS/57.38초, rustfmt/diff 검사 PASS 후 작업 단위 커밋한다. 구체적 요청 내용/허용 선택·최종 실행 정책·실제 provider 활성화와 유료 smoke는 미완료다. 제품 생성자는 blocked 유지하며 main 병합/push 없음. Karpathy 지침에 따라 기존 queue·검증·취소 경로를 재사용했다.
+
+### 2026-09-29 · by GPT-6 Astra (native 승인 대기·일회 응답 연결)
+
+- **구현**: 90e1126에서 자동 Decline을 live 대기열로 바꿨다. 실제 stream의 미응답 요청에만 opaque ticket을 유지하며 내부 조회/거절 메서드는 전체 RunIdentity와 예약 입력을 검증한다. 명시적 거절 접수 뒤 다음 callback에서 원자 의도 저장 후에만 응답한다. 중복/미지 ID·취소·완료·서버 해제·연결 변경 뒤 요청은 거절한다. 재시작 시 live ticket 복원은 없다.
+- **검증 완료**: 미응답 반복 poll·대기 중 취소를 추가한 최종 상호작용 matrix PASS/59.39초, 단위 만료/중복/connection/일회성4 PASS, strict all-targets clippy PASS/3.63초, scoped rustfmt/diff 검사 및 동일 검토자 scoped PASS. Karpathy 지침으로 기존 stream/owner/ticket을 사용했다. 실제 모델·사용자 프로젝트 호출이나 main 병합/push는 하지 않았다.
+- **남은 범위**: 현재 내부 API는 요청 ID 조회/거절만 제공한다. 공개 Rust/TS 계약·Electron IPC·채팅 카드·허용 권위/실제 공급자 입장은 아직 연결하지 않았고 제품 생성자는 blocked 유지다. 대기열을 완성된 승인 화면으로 표현하지 않는다.
+
+### 2026-09-29 · by GPT-6 Astra (실제 프로세스 연결과 승인 의도 결속)
+
+- **진전**: f107e7a에서 승인 UI 연결을 조사하던 중 기존 검토의 후속 조건을 먼저 닫았다. OwnedTextRun이 실제 LoginProcess connection UUID를 제공하고 native ticket이 dispatcher stream과 함께 이를 digest에 포함한다. BoundTextSession은 매 advance에서 같은 process인지 별도 확인한다. renderer가 connection을 제공하지 않는다.
+- **검증 완료**: 동일 stream/요청의 다른 process UUID 사용과 실패 후 재사용 거절을 포함한 단위3 PASS, 상호작용 회귀 PASS/45.95초, strict all-targets clippy PASS/3.08초, rustfmt/diff 검사와 동일 검토자 scoped PASS. Karpathy 지침으로 기존 ticket/owner를 재사용했다. UI·공개 응답 API·AcceptOnce·실제 공급자 활성화는 아직 미완료이며 실제 모델 호출·main 병합/push는 하지 않았다.
+- **다음 구현 범위**: native live pending 요청의 조회/일회 응답 계약 → Electron 고정 IPC와 채팅 승인 카드 → 직전 정책/작업 공간/취소 검증을 통과한 응답 전송. 프로세스/앱 재시작 뒤 live 요청은 복원하지 않는다. 기존 자동 거절을 허용 권한으로 대체하지 않는다.
+
+### 2026-09-29 · by GPT-6 Astra (개발 앱 종료·보존 복구 재확인)
+
+- 사용자 요청에 따라 현재 상태를 재확인했다. 프로세스 이름 조회에서 Hello Agent 개발 앱/sidecar는 없으며 다른 앱의 Electron crash handler는 건드리지 않았다. 활성 `codex-login.pending`은 없고 보존된 legacy 잠금 inode 168613811과 stale helper inode 166226396은 유지된다. 인증 파일은 내용 없이 메타데이터만 확인했으며 mode 0600으로 남아 있다.
+- 이미 완료된 보존 복구를 반복하지 않았다. 추가 삭제·인증 초기화·재부팅·실제 모델 호출 없이 종료/복구 상태를 확인했다. 기존 승인 의도 구현 미커밋 변경은 그대로 보존한다. 실제 모델 실행 연결은 별도 미완료다.
+
+> 최신 작업 기록(2026-09-29 전체): [월별 아카이브](archive/history-2026-09.md). 날짜 경계로 이동했으며 아래 고정 섹션은 현행 인계 기준이다.
+
+
+
 > `../history.md`에서 날짜 단위로 이동한 과거 워크로그다. 내용은 당시 기록이며 현재 상태·핵심 결정·미완료 작업은 `../history.md`를 먼저 확인한다.
 
 ## 워크로그 (최신이 위)

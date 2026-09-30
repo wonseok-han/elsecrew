@@ -44,6 +44,7 @@ type GitStdin = ChildStdin;
 #[cfg(not(unix))]
 type GitStdout = ChildStdout;
 pub(crate) mod runtime_isolation;
+mod snapshot_recovery;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";
@@ -647,30 +648,17 @@ impl ProjectManager {
         let root_text = canonical_protocol_path(&source.canonical_root)?;
         let manifest_text = canonical_protocol_path_without_existing(&manifest_path)?;
 
-        append_object(
-            storage,
-            "lock",
-            &lock_id,
-            &format!("op_snapshot_prepare_lock_{worktree_id}"),
-            request_id,
-            json!({
+        let preparation_lock = json!({
                 "lock_id": lock_id,
                 "project_id": project_id,
                 "writer_run_id": Value::Null,
                 "worktree_path": worktree_text,
                 "poisoned": false,
                 "recovery_required": true,
-                "evidence": {"phase":"beforeSnapshotExport","request_id":request_id,
+                "evidence": {"phase":"beforeSnapshotExport","launchFenceVersion":1,"request_id":request_id,
                     "workspace_identity":workspace_identity},
-            }),
-        )?;
-        append_object(
-            storage,
-            "project",
-            project_id,
-            &format!("op_snapshot_prepare_project_{worktree_id}"),
-            request_id,
-            preserve_project_extensions(
+            });
+        let preparation_project = preserve_project_extensions(
                 json!({
                     "project_id": project_id,
                     "canonical_path": root_text,
@@ -687,8 +675,8 @@ impl ProjectManager {
                     "lock_id": lock_id,
                 }),
                 &project,
-            )?,
-        )?;
+            )?;
+        snapshot_recovery::write_pair(storage, &format!("snapshot_prepare_{worktree_id}"), request_id, preparation_project, preparation_lock.clone(), &[])?;
         if failure == Some(WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport) {
             return Err(ProjectFailure::recovery(
                 "failure injected after durable recovery marker before snapshot export",
@@ -712,6 +700,9 @@ impl ProjectManager {
         if let Some(hook) = &mut pre_export_hook {
             hook();
         }
+        let mut launching = preparation_lock;
+        launching["evidence"]["phase"] = json!("snapshotExportStarting");
+        append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching)?;
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
         let after = source_digest(&source.git_dir)?;
         if before != after || after.lock_count != 0 {

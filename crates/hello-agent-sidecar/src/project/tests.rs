@@ -1527,6 +1527,173 @@ fn crash_boundaries_persist_recovery_and_never_auto_retry() {
 }
 
 #[test]
+fn unstarted_snapshot_recovery_survives_restart_and_allows_new_identity() {
+    let mut fixture = Fixture::open();
+    let before = git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]);
+    fixture
+        .manager
+        .create_worktree_with_failure(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_unstarted",
+            Some(WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport),
+        )
+        .unwrap_err();
+    let database = fixture.manager.data_root.join("hello-agent.sqlite3");
+    drop(fixture.storage);
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let inspection = manager
+        .inspect_unstarted_snapshot(&storage, &fixture.project_id)
+        .unwrap();
+    let mut stale = inspection.clone();
+    stale["lockRevision"] = json!(0);
+    assert!(manager
+        .abandon_unstarted_snapshot(&mut storage, &stale, "req_stale")
+        .is_err());
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    storage.connection_for_test().execute_batch("CREATE TRIGGER fail_snapshot_release BEFORE INSERT ON events WHEN NEW.aggregate_type = 'lock' BEGIN SELECT RAISE(ABORT, 'release failure'); END;").unwrap();
+    assert!(manager
+        .abandon_unstarted_snapshot(&mut storage, &inspection, "req_failed_release")
+        .is_err());
+    storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_snapshot_release;")
+        .unwrap();
+    assert_eq!(
+        manager
+            .inspect_unstarted_snapshot(&storage, &fixture.project_id)
+            .unwrap(),
+        inspection
+    );
+    manager
+        .abandon_unstarted_snapshot(&mut storage, &inspection, "req_abandon_unstarted")
+        .unwrap();
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    manager
+        .open_project(
+            &mut storage,
+            fixture.source.to_str().unwrap(),
+            "req_reopen_unstarted",
+        )
+        .unwrap();
+    let created = manager
+        .create_worktree(&mut storage, &fixture.project_id, "req_new_snapshot")
+        .unwrap();
+    assert_ne!(created.result["worktreeId"], inspection["worktreeId"]);
+    assert_eq!(
+        before,
+        git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"])
+    );
+}
+
+#[test]
+fn unstarted_snapshot_recovery_rejects_legacy_and_launched_records() {
+    for point in [
+        WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport,
+        WorktreeFailurePoint::AfterBundleBeforeMaterialization,
+        WorktreeFailurePoint::AfterWorkspaceRenameBeforeActivation,
+    ] {
+        let mut fixture = Fixture::open();
+        fixture
+            .manager
+            .create_worktree_with_failure(
+                &mut fixture.storage,
+                &fixture.project_id,
+                "req_launch_proof",
+                Some(point),
+            )
+            .unwrap_err();
+        if point == WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport {
+            let inspected = fixture
+                .manager
+                .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
+                .unwrap();
+            let id = inspected["lockId"].as_str().unwrap();
+            let mut lock = fixture
+                .storage
+                .projection_record("lock", id)
+                .unwrap()
+                .unwrap();
+            lock.get_mut("evidence")
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("launchFenceVersion");
+            fixture
+                .storage
+                .upsert_projection_record("lock", id, "op_make_legacy", None, lock)
+                .unwrap();
+        }
+        assert!(fixture
+            .manager
+            .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
+            .is_err());
+        assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn unstarted_snapshot_recovery_transaction_checks_both_revisions() {
+    for kind in ["project", "lock"] {
+        let mut fixture = Fixture::open();
+        fixture
+            .manager
+            .create_worktree_with_failure(
+                &mut fixture.storage,
+                &fixture.project_id,
+                "req_cas_prepare",
+                Some(WorktreeFailurePoint::AfterRecoveryLedgerBeforeExport),
+            )
+            .unwrap_err();
+        let expected = fixture
+            .manager
+            .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
+            .unwrap();
+        let id = expected[if kind == "project" {
+            "projectId"
+        } else {
+            "lockId"
+        }]
+        .as_str()
+        .unwrap()
+        .to_owned();
+        let error = fixture
+            .manager
+            .abandon_unstarted_snapshot_with_hook(
+                &mut fixture.storage,
+                &expected,
+                "req_cas_release",
+                &mut |storage| {
+                    let mut record = storage.projection_record(kind, &id).unwrap().unwrap();
+                    if kind == "lock" {
+                        record.get_mut("evidence").unwrap()["phase"] =
+                            json!("snapshotExportStarting");
+                    } else {
+                        record.insert("test_revision_change".into(), json!(true));
+                    }
+                    storage
+                        .upsert_projection_record(
+                            kind,
+                            &id,
+                            "op_change_before_release",
+                            None,
+                            record,
+                        )
+                        .unwrap();
+                },
+            )
+            .unwrap_err();
+        assert!(error.detail.contains("changed before atomic update"));
+        assert_eq!(
+            required_project(&fixture.storage, &fixture.project_id).unwrap()["lifecycle"],
+            "recoveryRequired"
+        );
+        assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn post_rename_failures_keep_recovery_blocker_and_report_unknown_outcome() {
     for point in [
         SaveFailurePoint::AfterRenameBeforeDirectorySync,
