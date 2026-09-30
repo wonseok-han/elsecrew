@@ -4,16 +4,51 @@ use crate::project::application::{open, stamp, MAX_BYTES};
 use crate::project::{create_managed_directory, sync_capability_directory};
 use cap_std::fs::{Dir, File, MetadataExt};
 use std::ffi::CString;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::os::fd::{AsRawFd, FromRawFd};
 use uuid::Uuid;
 
 const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
+mod decode;
 
 pub(in crate::project) struct Backup {
     name: String,
     length: u64,
     digest: [u8; 32],
+}
+
+#[allow(dead_code)]
+impl Backup {
+    pub(in crate::project) fn to_value(&self) -> Value {
+        serde_json::json!({"version":2,"name":self.name,"length":self.length,"digest":self.digest})
+    }
+
+    // Only trusted ledger metadata may supply this descriptor; not renderer input.
+    pub(in crate::project) fn from_value(value: &Value) -> Result<Self, ProjectFailure> {
+        let fields = value.as_object().ok_or_else(invalid)?;
+        let name = value["name"].as_str().ok_or_else(invalid)?;
+        let length = value["length"].as_u64().ok_or_else(invalid)?;
+        if fields.len() != 4
+            || value["version"] != serde_json::json!(2)
+            || name.len() != 43
+            || !name.starts_with("backup_")
+            || !name.ends_with(".bin")
+            || !name[7..39]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || length == 0
+            || length > MAX_ARCHIVE
+        {
+            return Err(invalid());
+        }
+        let digest: [u8; 32] =
+            serde_json::from_value(value["digest"].clone()).map_err(|_| invalid())?;
+        Ok(Self {
+            name: name.to_owned(),
+            length,
+            digest,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +174,7 @@ fn create_inner(
             length: 0,
         };
         // JSON header lines specify payload byte lengths. Payload may contain newlines.
-        serde_json::to_writer(&mut out, &serde_json::json!({"version":1,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()})).map_err(|_| invalid())?;
+        serde_json::to_writer(&mut out, &serde_json::json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()})).map_err(|_| invalid())?;
         out.write_all(b"\n").map_err(|_| invalid())?;
         check(1)?;
         for (path, change) in &plan.changes {
@@ -148,9 +183,10 @@ fn create_inner(
                 return Err(invalid());
             }
             let metadata = entry.map(|e| serde_json::json!({"kind":e.kind,"mode":e.mode,"size":e.size,"digest":e.digest,"identity":e.identity}));
+            let after = change.after.as_ref().map(|e| serde_json::json!({"kind":e.kind,"executable":e.executable,"size":e.size,"digest":e.digest}));
             serde_json::to_writer(
                 &mut out,
-                &serde_json::json!({"path":path,"before":metadata}),
+                &serde_json::json!({"path":path,"before":metadata,"after":after}),
             )
             .map_err(|_| invalid())?;
             out.write_all(b"\n").map_err(|_| invalid())?;
@@ -257,7 +293,7 @@ fn remove_failed(dir: &Dir, name: &str, file: &File) -> Result<(), ProjectFailur
 pub(in crate::project) fn verify(
     manager: &ProjectManager,
     backup: &Backup,
-) -> Result<(), ProjectFailure> {
+) -> Result<Value, ProjectFailure> {
     let dir = directory(manager)?;
     let mut file = open(&dir, &backup.name, false)?;
     let meta = file.metadata().map_err(|_| invalid())?;
@@ -290,7 +326,14 @@ pub(in crate::project) fn verify(
     {
         return Err(invalid());
     }
-    Ok(())
+    file.rewind().map_err(|_| invalid())?;
+    let header = decode::validate(&mut std::io::BufReader::new(&mut file))?;
+    if stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
+        || stamp(&meta) != stamp(&dir.symlink_metadata(&backup.name).map_err(|_| invalid())?)
+    {
+        return Err(invalid());
+    }
+    Ok(header)
 }
 
 #[cfg(test)]

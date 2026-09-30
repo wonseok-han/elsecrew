@@ -87,6 +87,16 @@ fn application_backup_preserves_before_images_and_rejects_tampering() {
     )
     .unwrap();
     backup::verify(&f.manager, &point).unwrap();
+    let descriptor = point.to_value();
+    let reopened = backup::Backup::from_value(&descriptor).unwrap();
+    let verified_header = backup::verify(&f.manager, &reopened).unwrap();
+    assert_eq!(verified_header["reviewId"], record["reviewId"]);
+    let mut bad_descriptor = descriptor.clone();
+    bad_descriptor["name"] = serde_json::json!("../outside.bin");
+    assert!(backup::Backup::from_value(&bad_descriptor).is_err());
+    bad_descriptor = descriptor.clone();
+    bad_descriptor["extra"] = serde_json::json!(true);
+    assert!(backup::Backup::from_value(&bad_descriptor).is_err());
     let path = point.path_for_test(&f.manager);
     let bytes = fs::read(&path).unwrap();
     let mut reader = std::io::Cursor::new(&bytes);
@@ -113,6 +123,9 @@ fn application_backup_preserves_before_images_and_rejects_tampering() {
     );
     assert!(items["new-dir"].0["before"].is_null());
     assert!(items["new-dir/new-file"].0["before"].is_null());
+    assert_eq!(items["new-dir"].0["after"]["kind"], 2);
+    assert_eq!(items["new-dir/new-file"].0["after"]["kind"], 1);
+    assert!(items["raw.bin"].0["after"].is_null());
     assert_eq!(
         fs::read(f.source.join("raw.bin")).unwrap(),
         [0, 255, 10, 13]

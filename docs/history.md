@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (백업 v2 엄격한 읽기 검증)
+
+- 709ea8c의 archive에 after image를 추가해 새 디렉터리/파일과 삭제·반영 예상 내용을 구분한다. version2만 수락하며 descriptor version/name/length/digest 직렬화·재구성을 추가했다. decode는 canonical JSON/exact key·한 줄64KiB/metadata32MiB/내용4GiB/경로8MiB·항목100,000·정렬/경로/종류/권한/link count와 각 payload hash 및 검토 digest를 검사한다. 전체 hash 읽기 후 rewind 검증하고 다시 파일 신원을 대조한다.
+- 검증: real 임시 snapshot 백업 집중1 PASS/7.47초(descriptor 재구성·after 종류/삭제 포함), decoder 집중1 PASS(모든 byte 경계 잘림·후행 bytes·중복 key/항목·위험 경로·내용/metadata 변조·과대 line), strict all-targets clippy PASS/3.25초. macOS libc mode 상수의 u16/u32 초기 컴파일 오류는 저장 형식의 고정 Unix mode mask로 정정했다. 새 모듈 포맷·diff 검사. 독립 검토 scoped PASS이며 검토자 테스트 재실행은 아니다.
+- Karpathy 지침대로 기존 검토 지문을 재사용했다. 신뢰되는 영속 intent와 decoded header의 대상 재결속·crash orphan 처리·확인 ticket 결속·실제 restore writer/UI는 남는다. 현재 private candidate가 앱 완료나 원본 쓰기 권한을 뜻하지 않는다. 실제 계정/모델/사용자 원본 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (원본 before-image 백업 후보)
 
 - 7cfee21 기준 review/backup.rs를 추가했다. 최신 review/baseline 재검증 뒤 변경 대상의 이전 raw bytes·링크 문자열·mode·identity·부재를 앱 전용 archive에 스트리밍한다. 4GiB+32MiB 한도, 각 부모 no-follow, exclusive0600, file/directory fsync·재읽기 hash와 최종 원본/검토 대조를 사용하며 원본은 쓰지 않는다.
