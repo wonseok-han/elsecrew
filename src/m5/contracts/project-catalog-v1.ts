@@ -2,9 +2,13 @@ import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.
 
 export const PROJECT_CATALOG_METHOD = "project.catalog";
 export const PROJECT_CATALOG_CHANNEL = "m5:project:catalog";
-export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string };
+export interface PreparationInspection { projectId: string; worktreeId: string; workspaceIdentity: string; lockId: string; projectRevision: number; lockRevision: number }
+export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
+  | { action: "inspectPreparation"; projectId: string }
+  | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
   | { schemaVersion: 1; action: "reopen"; project: ProjectIdentityV1 };
@@ -20,13 +24,23 @@ function id(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error("invalid catalog ID");
   return value;
 }
+export function validatePreparationInspection(value: unknown): PreparationInspection {
+  const inspection = object(value);
+  keys(inspection, ["projectId", "worktreeId", "workspaceIdentity", "lockId", "projectRevision", "lockRevision"]);
+  for (const key of ["projectId", "worktreeId", "workspaceIdentity", "lockId"]) id(inspection[key]);
+  if (inspection.lockId !== `lock_${inspection.worktreeId}`) throw new Error("preparation lock mismatch");
+  for (const key of ["projectRevision", "lockRevision"]) if (!Number.isSafeInteger(inspection[key]) || (inspection[key] as number) < 1) throw new Error("invalid preparation revision");
+  return inspection as unknown as PreparationInspection;
+}
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
   if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "reopen" || request.action === "releaseView") {
+  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation") {
     keys(request, ["action", "projectId"]); id(request.projectId);
+  } else if (request.action === "abandonPreparation") {
+    keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
   } else throw new Error("invalid project catalog action");
   return request as ProjectCatalogRequest;
 }
@@ -34,7 +48,13 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "releaseView") {
+  if (request.action === "inspectPreparation" || request.action === "abandonPreparation") {
+    keys(result, ["schemaVersion", "action", "inspection"]);
+    const inspection = validatePreparationInspection(result.inspection);
+    if (request.action === "inspectPreparation") {
+      if (inspection.projectId !== request.projectId) throw new Error("preparation project mismatch");
+    } else if (Object.keys(inspection).some(key => inspection[key as keyof PreparationInspection] !== request.inspection[key as keyof PreparationInspection])) throw new Error("preparation response mismatch");
+  } else if (request.action === "releaseView") {
     keys(result, ["schemaVersion", "action", "projectId"]);
     if (id(result.projectId) !== request.projectId) throw new Error("catalog release identity mismatch");
   } else if (request.action === "reopen") {

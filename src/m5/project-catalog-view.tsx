@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectEditorController } from "./editor-state.ts";
+import { PreparationRecovery } from "./preparation-recovery-view.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogEntry } from "./contracts/project-catalog-v1.ts";
 
 export function ProjectCatalog({ controller, disabled, currentId }: {
@@ -45,7 +46,7 @@ export function ProjectCatalog({ controller, disabled, currentId }: {
         <ul>{entries.map(entry => <li key={entry.projectId}><button type="button" disabled={disabled || busy || entry.projectId === currentId} onClick={() => void select(entry.projectId)}>
           <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}{entry.projectId === currentId ? " · 현재 프로젝트" : ""}</strong>
           <span dir="auto">{entry.canonicalPath}</span>
-        </button></li>)}</ul>}
+        </button><PreparationRecovery projectId={entry.projectId} disabled={disabled || busy} /></li>)}</ul>}
       <div><button type="button" disabled={disabled || busy} onClick={() => void load(null)}>처음부터 다시 확인</button>
         <button type="button" disabled={disabled || busy || !next || error} onClick={() => void load(next)}>다음 목록</button></div>
     </div>}

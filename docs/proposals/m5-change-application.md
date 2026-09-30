@@ -35,6 +35,8 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 ### A1 receipt 파일·원장 결속 후보 (제품 생성 연결 전)
 
+2026-09-30 후속: version1 미시작 준비 복구는 `project.catalog`와 저장 프로젝트 UI에 연결했다. 명시 inspect 뒤 exact inspection으로 폐기하며, 동일한 영속 완료 증거만 응답 유실 재전송을 허용한다. 아래의 공개 연결 미완료 기록은 이 제한된 경로에 대해서 갱신한다. 이미 export를 시작한 실패나 legacy 잠금, 실제 A1 생성 결속은 이 기능으로 해결되지 않는다.
+
 준비 복구의 내부 기반은 `snapshot_recovery.rs`에 구현했다. version1 `beforeSnapshotExport` 및 정확한 신원·파일 부재·미결속을 검사하고 project/lock revision을 같은 트랜잭션에서 대조해 명시 폐기한다. export 직전에는 별도 영속 단계로 넘어가므로 이후 기록과 legacy는 이 경로를 사용할 수 없다. 공개 IPC/UI·응답 유실 처리·시작된 프로세스의 종료 증거 복구는 여전히 후속이다.
 
 Unix Git stream의 stdout/input/stderr/exit 대기에 명령별120초 한도를 연결했다. 시간 초과/오류는 unreaped leader 그룹 종료와 최대2초 direct reap을 시도한다. 파이프를 붙잡은 자손 때문에 무한 join하지 않는 회귀는 통과했지만 새 세션 이탈·파이프를 닫고 남은 자손·종료 실패의 영속 신원 보존은 아직 별도 조건이다. 이 개선만으로 위의 전체 자손 종료/제품 활성화 조건을 닫았다고 해석하지 않는다.

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (준비 실패 복구 IPC·화면 연결)
+
+- f540833에서 project.catalog의 inspectPreparation/abandonPreparation 요청·응답 검증과 sidecar 처리를 연결했다. 저장 프로젝트마다 시작 실패 확인→대상 복사본 표시→명시 준비 종료를 제공한다. 파일 삭제는 없고 같은 영속 완료 evidence에만 응답 유실 재전송을 허용하며 다른 revision·새 snapshot은 거절한다. 상태 안내도 새 복구 위치를 알려 준다.
+- 검증: 준비 Rust3 PASS/2.47초, typed 계약5 PASS, tsc·제품/renderer build PASS, 숨김 Chromium2 PASS/4.27초(명시 확인·응답 유실·재확인·기존 편집 흐름), 실제 sidecar dispatcher1 PASS/0.27초·최종 strict clippy PASS/2.87초. dispatcher 테스트의 초기 Session/입장 완료 Sidecar 접근 컴파일 오류를 바로잡았다. 독립 정적 검토 scoped PASS이며 검토자 테스트 재실행은 아니다.
+- Karpathy 지침에 따라 기존 프로젝트 관리 IPC/검증 경로를 재사용했다. 실제 계정·모델·사용자 프로젝트는 사용하지 않았다. 다음은 실제 snapshot 생성 A1 결속과 시작 이후 복구, 원본 적용/복원이다. 앱 전체 완료·Windows 증거는 아니며 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (실행 전 snapshot 준비의 원자 복구)
 
 - 준비 project/lock 원자 저장과 export 직전 launchFenceVersion1 단계 기록을 추가했다. 내부 inspect/abandon은 신원·파일 부재·chat/run 미결속을 검사하고 Immediate 트랜잭션 안에서 두 revision을 재검증한 뒤 project 폐기/lock 해제를 함께 저장한다. legacy/실행 시작 기록은 거절하고 파일은 삭제하지 않는다.
@@ -77,7 +83,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
-- **snapshot 준비 복구 API 격차(2026-09-30)**: 공개 recovery는 run 대상으로 채팅 이전 준비 폐기 UI/API는 없다. 내부 snapshot_recovery는 version1 beforeSnapshotExport 기록만 두 revision의 트랜잭션 CAS로 원자 폐기한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 재시작·rollback·새 신원 생성은 검증했으나 공개 연결과 응답 유실 처리는 남는다.
+- **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
 - **A1 원장 결속 후보(2026-09-30)**: source_baselines[worktreeId] extension으로 불변 파일 descriptor를 기존 project 원장에 게시·조회하며 close/open에서도 보존한다. DB 게시 실패는 artifact와 recovery lock을 남기고 자동 재결속하지 않는다. 기존 명시 폐기 후 새 snapshot 정책을 따르며 실제 생성/복구 호출과 누적 원장 수명 회귀 전에는 제품 활성화하지 않는다. 아래 receipt 게시 미구현 기록은 이 내부 후보 추가로 갱신한다.
 - **A1 receipt 저장 후보(2026-09-30)**: opaque ReceiptStore만 전용 source-baselines-v1에 불변 파일을 쓸 수 있다. 항목별 streaming과 encoded64MiB 한도·fsync·재검증을 제공하지만 descriptor 원장 게시/실제 snapshot 생성 연결은 미구현이다. 원장 descriptor 없는 legacy를 파일만으로 승격하지 않는다. 이전 raw blob 항목의 영속 receipt 없음은 내부 파일 후보 추가로 갱신하되 writer 권위는 여전히 없다.

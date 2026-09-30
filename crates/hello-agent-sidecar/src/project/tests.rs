@@ -1570,6 +1570,10 @@ fn unstarted_snapshot_recovery_survives_restart_and_allows_new_identity() {
         .abandon_unstarted_snapshot(&mut storage, &inspection, "req_abandon_unstarted")
         .unwrap();
     assert!(storage.blocker_ids().unwrap().is_empty());
+    let completed_project = storage.projection_record("project", &fixture.project_id).unwrap();
+    manager.abandon_unstarted_snapshot(&mut storage, &inspection, "req_response_lost").unwrap();
+    assert_eq!(storage.projection_record("project", &fixture.project_id).unwrap(), completed_project);
+    assert!(manager.abandon_unstarted_snapshot(&mut storage, &stale, "req_stale_completed").is_err());
     manager
         .open_project(
             &mut storage,
@@ -1581,6 +1585,7 @@ fn unstarted_snapshot_recovery_survives_restart_and_allows_new_identity() {
         .create_worktree(&mut storage, &fixture.project_id, "req_new_snapshot")
         .unwrap();
     assert_ne!(created.result["worktreeId"], inspection["worktreeId"]);
+    assert!(manager.abandon_unstarted_snapshot(&mut storage, &inspection, "req_old_snapshot").is_err());
     assert_eq!(
         before,
         git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"])

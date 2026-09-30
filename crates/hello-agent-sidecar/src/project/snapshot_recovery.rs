@@ -32,7 +32,6 @@ pub(super) fn write_pair(
 }
 
 impl ProjectManager {
-    #[allow(dead_code)]
     pub(crate) fn inspect_unstarted_snapshot(
         &self,
         storage: &Storage,
@@ -108,7 +107,6 @@ impl ProjectManager {
         }))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn abandon_unstarted_snapshot(
         &self,
         storage: &mut Storage,
@@ -140,6 +138,30 @@ impl ProjectManager {
             .get("projectId")
             .and_then(Value::as_str)
             .ok_or_else(|| ProjectFailure::manifest("project identity missing"))?;
+        // A lost response may be retried only against the exact durable completion.
+        let existing = required_project(storage, project_id)?;
+        if existing.get("lifecycle") == Some(&json!("abandoned")) {
+            if let Some(lock_id) = expected.get("lockId").and_then(Value::as_str) {
+                if let Some(lock) = storage.projection_record("lock", lock_id)? {
+                    let evidence = lock.get("evidence").unwrap_or(&Value::Null);
+                    if existing.get("lock_id") == Some(&json!(lock_id))
+                        && existing.get("worktree_id") == expected.get("worktreeId")
+                        && existing.get("workspace_identity") == expected.get("workspaceIdentity")
+                        && lock.get("project_id") == Some(&json!(project_id))
+                        && lock.get("recovery_required") == Some(&json!(false))
+                        && lock.get("poisoned") == Some(&json!(false))
+                        && lock.get("writer_run_id") == Some(&Value::Null)
+                        && evidence["phase"] == "abandonedBeforeSnapshotExport"
+                        && evidence.get("inspection") == Some(expected)
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            return Err(ProjectFailure::dirty(
+                "abandoned preparation identity changed",
+            ));
+        }
         if self.inspect_unstarted_snapshot(storage, project_id)? != *expected {
             return Err(ProjectFailure::dirty(
                 "preparation changed after inspection",

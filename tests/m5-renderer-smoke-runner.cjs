@@ -88,6 +88,14 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-project-catalog > button').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
+    const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
+    recoveryButton('시작 실패 확인').click();
+    await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
+    recoveryButton('이 준비 기록 종료').click();
+    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('결과를 확인하지 못했어요')", "lost preparation response")};
+    recoveryButton('이 준비 기록 종료').click();
+    await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('실패한 준비 기록을 종료했어요')", "preparation retry acknowledgment")};
+    if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');

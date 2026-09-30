@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("preparation recovery binds exact identity and safe revisions", () => {
+  const inspection = { projectId: "project_a", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", lockId: "lock_worktree_a", projectRevision: 8, lockRevision: 9 };
+  const request = { action: "abandonPreparation" as const, inspection };
+  assert.doesNotThrow(() => validateProjectCatalogRequest(request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request }, request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "project_a" }));
+  for (const patch of [{ lockId: "other" }, { projectRevision: 0 }, { lockRevision: 1.5 }, { lockRevision: Number.MAX_SAFE_INTEGER + 1 }, { path: "/other" }, { workspaceIdentity: "../escape" }]) {
+    assert.throws(() => validateProjectCatalogRequest({ ...request, inspection: { ...inspection, ...patch } }));
+  }
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, inspection: { ...inspection, projectRevision: 10 } }, request));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
+});
+
 test("view release is ID-only and binds the acknowledgment", () => {
   const input = { action: "releaseView" as const, projectId: "project_a" };
   assert.doesNotThrow(() => validateProjectCatalogRequest(input));

@@ -22,6 +22,41 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn catalog_preparation_dispatch_binds_inspection_and_retries_completion() {
+    let (_root, path) = database();
+    let instance = "preparation_session";
+    let mut sidecar = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    sidecar.start_admission(&path);
+    wait_until_admitted(&mut sidecar);
+    let AdmissionState::Ready { sidecar, .. } = &mut sidecar.admission else { panic!("storage admission missing"); };
+    let root = path.parent().unwrap().canonicalize().unwrap();
+    let workspace = root.join("worktrees-v1/worktree_failed").to_string_lossy().into_owned();
+    let manifest = root.join("worktree-manifests-v1/worktree_failed.json").to_string_lossy().into_owned();
+    for (kind, id, payload) in [
+        ("project", "project_failed", json!({"project_id":"project_failed","canonical_path":root.to_string_lossy(),"lifecycle":"recoveryRequired","worktree_id":"worktree_failed","workspace_identity":"workspace_failed","lock_id":"lock_worktree_failed","worktree_path":workspace,"manifest_path":manifest})),
+        ("lock", "lock_worktree_failed", json!({"lock_id":"lock_worktree_failed","project_id":"project_failed","writer_run_id":null,"worktree_path":workspace,"poisoned":false,"recovery_required":true,"evidence":{"phase":"beforeSnapshotExport","launchFenceVersion":1,"workspace_identity":"workspace_failed"}})),
+    ] {
+        sidecar.storage.upsert_projection_record(kind, id, &format!("op_seed_{kind}"), Some("req_seed"), payload.as_object().unwrap().clone()).unwrap();
+    }
+    let inspected = sidecar.handle_request(request_value(instance, "inspect", "project.catalog", json!({"action":"inspectPreparation","projectId":"project_failed"}))).unwrap().response.unwrap();
+    assert!(inspected.ok, "{inspected:?}");
+    let inspection = inspected.result.unwrap()["inspection"].clone();
+    for request_id in ["abandon", "lost_response_retry"] {
+        let reply = sidecar.handle_request(request_value(instance, request_id, "project.catalog", json!({"action":"abandonPreparation","inspection":inspection}))).unwrap().response.unwrap();
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(reply.result.unwrap()["inspection"], inspection);
+    }
+    assert!(sidecar.storage.blocker_ids().unwrap().is_empty());
+    let mut changed = inspection.clone();
+    changed["projectRevision"] = json!(999);
+    let rejected = sidecar.handle_request(request_value(instance, "stale", "project.catalog", json!({"action":"abandonPreparation","inspection":changed}))).unwrap().response.unwrap();
+    assert!(!rejected.ok);
+    sidecar.prepared_to_quit = true;
+    let quitting = sidecar.handle_request(request_value(instance, "quitting", "project.catalog", json!({"action":"abandonPreparation","inspection":inspection}))).unwrap().response.unwrap();
+    assert!(!quitting.ok);
+}
+
+#[test]
 fn catalog_dispatch_lists_empty_storage_and_rejects_unknown_reopen() {
     let (_root, path) = database();
     let instance = "catalog_session";

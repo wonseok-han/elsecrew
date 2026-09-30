@@ -1049,6 +1049,17 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("inspectPreparation") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
+                    self.projects.inspect_unstarted_snapshot(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
+                        .map(|inspection| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"inspectPreparation","inspection":inspection}), ..Default::default() })
+                }
+                Some("abandonPreparation") => {
+                    let params = require_exact_params(&request.params, &["action", "inspection"]).map_err(invalid_params)?;
+                    let inspection = params.get("inspection").ok_or_else(|| invalid_params("inspection missing".into()))?;
+                    self.projects.abandon_unstarted_snapshot(&mut self.storage, inspection, &request.request_id)
+                        .map(|()| project::ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"abandonPreparation","inspection":inspection}), ..Default::default() })
+                }
                 Some("releaseView") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"])
                         .map_err(invalid_params)?;

@@ -1,5 +1,13 @@
 const listeners = new Set();
+const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
+let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {
+  if (input.action === "inspectPreparation" && input.projectId === "earlier_project") return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
+  if (input.action === "abandonPreparation") {
+    if (JSON.stringify(input.inspection) !== JSON.stringify(preparationInspection)) throw new Error("wrong preparation identity");
+    if (++preparationAttempts === 1) throw new Error("synthetic response loss");
+    return {schemaVersion: 1, action: input.action, inspection: preparationInspection};
+  }
   if (input.action === "releaseView" && input.projectId === "smoke_project") return {schemaVersion: 1, action: "releaseView", projectId: input.projectId};
   if (input.action === "list") return input.cursor === null
     ? {schemaVersion: 1, action: "list", projects: [{projectId: "earlier_project", canonicalPath: "/work/earlier"}], nextCursor: "earlier_project"}
