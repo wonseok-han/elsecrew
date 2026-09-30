@@ -125,7 +125,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     return () => { controller.dispose(); chatController.dispose(); };
   }, [controller, chatController]);
   useEffect(() => { if (snapshot.project?.id !== chat.projectId) { if (snapshot.project) void chatController.openProject(snapshot.project.id); } }, [snapshot.project?.id, chat.projectId, chatController]);
-  useEffect(() => { controller.setActionBlocked(!admissionReady || settingsOpen || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? "작업 공간을 준비하는 동안 변경을 만들거나 저장하지 않아요." : settingsOpen ? "역할과 모델 설정을 마치면 파일 작업을 계속할 수 있어요." : chat.switching ? "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요." : "이 작업 복사본에서는 위험한 파일 작업을 할 수 없어요."); }, [admissionReady, settingsOpen, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
+  useEffect(() => { controller.setActionBlocked(!admissionReady || settingsOpen || leavingProject || leaveError || chat.switching || chatController.isActionBlocked(), !admissionReady ? { key: "m5.editorNotice.preparing" } : settingsOpen ? { key: "m5.editorNotice.settings" } : chat.switching ? { key: "m5.editorNotice.switching" } : { key: "m5.editorNotice.protected" }); }, [admissionReady, settingsOpen, leavingProject, leaveError, controller, chat.switching, chat.agentRecovery, chat.agentRecoveryResolving, chat.recoveries, chat.activeChat?.state]);
   const leaveProject = async () => {
     const project = controller.snapshot().project;
     if (!project || settingsOpen || !window.m5Projects || !admissionReady || controller.snapshot().actionBlocked || !controller.canLeaveProject() || !chatController.beginLeavingProjectView()) return;
@@ -146,7 +146,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     } finally { setLeavingProject(false); }
   };
   const switchChat = async (chatId: string) => {
-    controller.setActionBlocked(true, "채팅을 전환하는 동안 파일 작업을 잠시 멈췄어요.");
+    controller.setActionBlocked(true, { key: "m5.editorNotice.switching" });
     const candidate = await chatController.prepareSwitch(chatId, controller.canLeaveProject());
     if (!candidate) { controller.setActionBlocked(chatController.isActionBlocked()); return; }
     const bound = await controller.bindChat(candidate);
@@ -155,7 +155,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   };
   const createChat = async () => {
     if (!snapshot.project) return;
-    controller.setActionBlocked(true, "새 채팅 작업 복사본을 준비하는 동안 파일 작업을 잠시 멈췄어요.");
+    controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
     const created = await chatController.createChat({ projectId: snapshot.project.id }, goal);
     if (created) { setGoal(""); await switchChat(created.chatId); }
     else controller.setActionBlocked(chatController.isActionBlocked());
@@ -190,7 +190,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </div>
       </header>
 
-      {snapshot.notice && <p className="m5-notice" role="status">{snapshot.notice}</p>}
+      {snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />

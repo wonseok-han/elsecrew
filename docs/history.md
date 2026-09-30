@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (편집 상태·차단 notice 다국어)
+
+- a1b3cba에서 편집 완료/외부 변경/전환·복구 차단 안내28종에 typed noticeKey를 연결했다. 기존 notice 문자열과 setActionBlocked 문자열 인자 호환은 유지하며 명시 key 인자만 추가했다. 새 notice/null로 갱신할 때 이전 key를 제거하고 notice를 갱신하지 않는 차단 해제는 기존 안내를 유지한다. Karpathy 지침으로 차단/저장/복구 조건을 변경하지 않았다.
+- 검증: editor/workspace/번역 Node 51 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.70초). notice key 제거·기존 호출 호환과 화면의 영어 설정 차단 안내 및 기존 초안/설정/저장 동작을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 사용자 파일/모델 요청 없음.
+- 관련 코드/기록만 선택 커밋하고 정책 제안/아카이브 미커밋 변경은 보존한다. 다음은 채팅 일반 상태 안내와 Monaco 내부 표시, 누적 UI 검증이다. 원본 정책/실제 공급자/G6/Windows/출시는 미완료이며 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (동적 채팅 오류 번역 키 연결)
 
 - d1d1c15 기준 ChatUiController의 생성/전환/설정/실행/종료/복구 오류13종에 typed messageKey를 추가하고 화면에서 현재 언어로 표시한다. 기존 한국어 message·기술 detail·오류/복구 조건은 유지했다. Karpathy 지침으로 모델 자동 대체 없음과 종료 미확인 보호 안내를 그대로 번역했다. 일반 notice는 별도 남는다.

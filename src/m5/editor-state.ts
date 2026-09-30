@@ -1,4 +1,6 @@
 import { ko, type MessageKey } from "../locales/ko.ts";
+type EditorNoticeKey = Extract<MessageKey, `m5.editorNotice.${string}`>;
+function editorNotice(key: EditorNoticeKey) { return { notice: ko[key], noticeKey: key }; }
 type EditorErrorKey = Extract<MessageKey, `m5.editorError.${string}`>;
 import type { M5BridgeV2 } from "./contracts/bridge-v2.ts";
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
@@ -51,6 +53,7 @@ export interface EditorSnapshot {
   selectionBlocked: boolean;
   actionBlocked: boolean;
   notice: string | null;
+  noticeKey?: EditorNoticeKey;
   error: { message: string; messageKey: EditorErrorKey; technicalDetail: string } | null;
 }
 
@@ -173,10 +176,10 @@ export class ProjectEditorController {
   snapshot(): EditorSnapshot {
     return this.#state;
   }
-  setActionBlocked(blocked: boolean, notice?: string): void {
+  setActionBlocked(blocked: boolean, notice?: string | { key: EditorNoticeKey }): void {
     if (blocked && !this.#actionBlocked) this.#selectionGeneration += 1;
     this.#actionBlocked = blocked;
-    this.#set({ actionBlocked: blocked, notice: blocked && notice ? notice : this.#state.notice });
+    this.#set({ actionBlocked: blocked, ...(blocked && notice ? typeof notice === "string" ? { notice } : editorNotice(notice.key) : {}) });
   }
 
   subscribe(listener: () => void): () => void {
@@ -222,11 +225,11 @@ export class ProjectEditorController {
     if (this.#disposed) return;
     if (this.#actionBlocked) return;
     if (this.#state.workspace) {
-      this.#setNotice("열어 둔 채팅 작업 복사본이 있어 프로젝트를 바꿀 수 없어요. 먼저 명시적으로 닫아 주세요.");
+      this.#setNotice("m5.editorNotice.activeChat");
       return;
     }
     if (!this.canLeaveProject()) {
-      this.#setNotice("저장하지 않은 변경이 있어 프로젝트를 바꿀 수 없어요.");
+      this.#setNotice("m5.editorNotice.dirtyProject");
       return;
     }
     if (this.#snapshotCreationBlocked) return;
@@ -238,14 +241,14 @@ export class ProjectEditorController {
       if (this.#snapshotCreationBlocked) return;
       if (this.#actionBlocked) return;
       if (this.#state.workspace || !this.canLeaveProject()) {
-        this.#setNotice("프로젝트를 확인하는 동안 작업 내용이 바뀌었어요. 먼저 저장하거나 열린 채팅을 닫아 주세요.");
+        this.#setNotice("m5.editorNotice.changed");
         return;
       }
       // Picker cancellation must leave the existing project surface untouched. Clear transient
       // messages only after the native picker returned a real project identity.
       this.#set({ error: null, notice: null });
       if (this.#snapshotCreation) {
-        this.#setNotice("이전 프로젝트 선택을 안전하게 마무리하는 중이에요. 끝나면 다시 선택해 주세요.");
+        this.#setNotice("m5.editorNotice.previous");
         return;
       }
       const active = await this.#createSnapshot(project, selection, controllerGeneration);
@@ -267,13 +270,13 @@ export class ProjectEditorController {
   /** Binds the editor only after chat.create persisted its immutable workspace triple. */
   async bindChat(workspace: ChatWorkspaceRefV1): Promise<boolean> {
     if (this.#disposed) return false;
-    if (!this.canLeaveProject()) { this.#setNotice("저장하지 않은 변경이 있어 채팅을 바꿀 수 없어요."); return false; }
+    if (!this.canLeaveProject()) { this.#setNotice("m5.editorNotice.dirtyChat"); return false; }
     if (!this.#workspaceMethods()) { this.#setError("m5.editorError.workspaceUnavailable", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }
     const project = this.#state.project;
     if (!project || project.id !== workspace.projectId) { this.#setError("m5.editorError.identity", new Error("chat project identity mismatch")); return false; }
     const previous = this.#state;
     const epoch = ++this.#projectEpoch;
-    this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, notice: "채팅 전용 작업 복사본을 열었어요." });
+    this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, ...editorNotice("m5.editorNotice.opened") });
     try {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
       await this.#loadTree(project.id, epoch, "", true);
@@ -283,7 +286,7 @@ export class ProjectEditorController {
     } catch (error) {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
         this.#projectEpoch += 1;
-        this.#set({ ...previous, actionBlocked: true, notice: "새 채팅 작업 복사본을 안전하게 열지 못했어요. 이전 채팅은 그대로 두었어요.", error: errorDetail("m5.editorError.openWorkspace", error) });
+        this.#set({ ...previous, actionBlocked: true, ...editorNotice("m5.editorNotice.failedOpen"), error: errorDetail("m5.editorError.openWorkspace", error) });
       }
       return false;
     }
@@ -386,9 +389,9 @@ export class ProjectEditorController {
       }
       if (operation.timedOut) {
         this.#clearSnapshotCreationBlock(operation);
-        this.#setNotice("늦게 끝난 작업 복사본을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.");
+        this.#setNotice("m5.editorNotice.lateClosed");
       } else if (operation.selection !== this.#selectionGeneration) {
-        this.#setNotice("이전 프로젝트 선택을 안전하게 닫았어요. 필요하면 프로젝트를 다시 선택해 주세요.");
+        this.#setNotice("m5.editorNotice.previousClosed");
       } else {
         this.#setError("m5.editorError.unknownWorkspace", reason);
       }
@@ -518,7 +521,7 @@ export class ProjectEditorController {
       const text = await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
       if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || this.#actionBlocked || this.#tab(confirmed.path) !== confirmed) return false;
       this.#replaceTab(confirmed.path, { ...confirmed, text, baseVersion: descriptor.version, byteLength: descriptor.byteLength, saveState: "clean", technicalDetail: undefined });
-      this.#set({ error: null, notice: "내 편집 내용을 버리고 저장된 파일을 다시 불러왔어요. 파일 자체는 변경하지 않았어요." });
+      this.#set({ error: null, ...editorNotice("m5.editorNotice.reloaded") });
       return true;
     } catch (error) {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace) && this.#tab(confirmed.path) === confirmed) this.#setError("m5.editorError.reload", error);
@@ -527,7 +530,7 @@ export class ProjectEditorController {
   }
 
   async saveActive(): Promise<void> {
-    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 저장할 수 없어요."); return; }
+    if (this.#actionBlocked) { this.#setNotice("m5.editorNotice.blockedSave"); return; }
     const project = this.#state.project;
     const epoch = this.#projectEpoch;
     const activePath = this.#state.activePath;
@@ -559,12 +562,12 @@ export class ProjectEditorController {
       if (!latest || latest.saveState !== "saving" || this.#saveGenerations.get(path) !== saveGeneration) return;
       if (committed.outcome === "dirtyConflict") {
         this.#replaceTab(path, { ...latest, saveState: "conflicted", technicalDetail: committed.error.detail });
-        this.#setNotice("다른 변경이 먼저 들어왔어요. 내 초안은 보존했고 덮어쓰지는 않았어요.");
+        this.#setNotice("m5.editorNotice.newerChange");
         return;
       }
       const hasNewerDraft = latest.text !== tab.text;
       this.#replaceTab(path, { ...latest, baseVersion: committed.version, saveState: hasNewerDraft ? "dirty" : "clean", byteLength: totalBytes });
-      this.#setNotice(hasNewerDraft ? "저장 중에 추가한 내용은 아직 저장하지 않았어요. 한 번 더 저장해 주세요." : "안전하게 저장했어요.");
+      this.#setNotice(hasNewerDraft ? "m5.editorNotice.newerDraft" : "m5.editorNotice.saved");
       await this.refreshChanges();
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
@@ -577,11 +580,11 @@ export class ProjectEditorController {
   }
 
   closeTab(path: string): boolean {
-    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 탭을 닫을 수 없어요."); return false; }
+    if (this.#actionBlocked) { this.#setNotice("m5.editorNotice.blockedTab"); return false; }
     const tab = this.#tab(path);
     if (!tab) return true;
     if (tab.saveState !== "clean") {
-      this.#setNotice("저장하거나 충돌을 해결하기 전에는 이 탭을 닫을 수 없어요.");
+      this.#setNotice("m5.editorNotice.dirtyTab");
       return false;
     }
     const tabs = this.#state.tabs.filter((item) => item.path !== path);
@@ -591,12 +594,12 @@ export class ProjectEditorController {
   }
 
   async abandonProject(): Promise<void> {
-    if (this.#actionBlocked) { this.#setNotice("복구 또는 채팅 전환 중에는 작업 복사본을 닫을 수 없어요."); return; }
+    if (this.#actionBlocked) { this.#setNotice("m5.editorNotice.blockedClose"); return; }
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
     if (!this.canLeaveProject()) {
-      this.#setNotice("저장하지 않은 변경이나 충돌을 먼저 확인해 주세요.");
+      this.#setNotice("m5.editorNotice.dirtyClose");
       return;
     }
     try {
@@ -619,7 +622,7 @@ export class ProjectEditorController {
         diffFile: null,
         diffText: "",
         rescanRequired: false,
-        notice: "원본과 분리된 작업 복사본 연결을 닫았어요. 파일을 삭제하지는 않았어요.",
+        ...editorNotice("m5.editorNotice.closed"),
       });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
@@ -635,7 +638,7 @@ export class ProjectEditorController {
     this.#set({ project: null, workspace: null, tree: [], treeParent: "", treeNextCursor: null,
       treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null,
       diffFile: null, diffText: "", rescanRequired: false, error: null,
-      notice: "프로젝트 화면을 닫았어요. 작업 복사본과 대화는 보존되어 다시 열 수 있어요." });
+      ...editorNotice("m5.editorNotice.left") });
     return true;
   }
 
@@ -778,7 +781,7 @@ export class ProjectEditorController {
     const project = this.#state.project;
     if (!project || event.projectId !== project.id) return;
     if (event.rescanRequired) {
-      this.#set({ rescanRequired: true, notice: "파일 변경이 많아 목록을 다시 확인해야 해요." });
+      this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.rescan") });
       return;
     }
     for (const path of event.paths) {
@@ -786,9 +789,9 @@ export class ProjectEditorController {
       if (!tab) continue;
       if (event.event === "file.conflict" || tab.saveState === "dirty" || tab.saveState === "saving") {
         this.#replaceTab(path, { ...tab, saveState: "conflicted", technicalDetail: "external file change" });
-        this.#set({ rescanRequired: true, notice: "열어 둔 파일이 밖에서 바뀌었어요. 내 초안은 보존했고 자동으로 덮어쓰지 않았어요." });
+        this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.externalDraft") });
       } else {
-        this.#setNotice("열어 둔 파일이 밖에서 바뀌었어요. 다시 열어 최신 내용을 확인해 주세요.");
+        this.#setNotice("m5.editorNotice.external");
       }
     }
     if (event.event === "diff.changed") void this.refreshChanges();
@@ -901,8 +904,8 @@ export class ProjectEditorController {
     this.#set({ tabs: this.#state.tabs.map((tab) => tab.path === path ? replacement : tab) });
   }
 
-  #setNotice(notice: string): void {
-    this.#set({ notice });
+  #setNotice(notice: EditorNoticeKey): void {
+    this.#set(editorNotice(notice));
   }
 
   #setError(message: EditorErrorKey, error: unknown): void {
@@ -911,7 +914,7 @@ export class ProjectEditorController {
 
   #set(update: Partial<EditorSnapshot>): void {
     if (this.#disposed) return;
-    this.#state = { ...this.#state, ...update, ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
+    this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined } : {}), ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
     for (const listener of this.#listeners) listener();
   }
 }

@@ -3,6 +3,25 @@ import test from "node:test";
 import { en } from "../src/locales/en.ts";
 import { ko } from "../src/locales/ko.ts";
 
+test("localized blocking notices preserve compatibility and clear stale keys", async () => {
+  const controller = new ProjectEditorController(new FakeBridge());
+  controller.setActionBlocked(true, { key: "m5.editorNotice.preparing" });
+  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.preparing");
+  assert.equal(controller.snapshot().notice, ko["m5.editorNotice.preparing"]);
+  assert.equal(en[controller.snapshot().noticeKey!], "Changes cannot be made or saved while the workspace is being prepared.");
+  controller.setActionBlocked(false);
+  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.preparing");
+  assert.equal(controller.snapshot().actionBlocked, false);
+  controller.setActionBlocked(true, "custom caller notice");
+  assert.equal(controller.snapshot().noticeKey, undefined);
+  assert.equal(controller.snapshot().notice, "custom caller notice");
+  controller.setActionBlocked(false);
+  await controller.chooseProject();
+  assert.equal(controller.snapshot().noticeKey, undefined);
+  assert.equal(controller.snapshot().notice, null);
+  controller.dispose();
+});
+
 import {
   DEFAULT_SNAPSHOT_CREATION_TIMEOUT_MS,
   MAX_DIFF_STREAM_BYTES,
