@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 쓰기 시작 영속 경계(내부): `intent::mark_write_started`는 exact prepared 기록과 lock을 대조하고 결속된 ready 백업을 실제 archive까지 재검증한 뒤 project `applying`과 lock `applicationWriting`을 같은 CAS transaction으로 게시한다. 중간 DB 실패는 prepared를 보존하고, 성공 뒤에는 재시작해도 recovery 잠금을 유지한다. 재전송은 쓰기 재개 권위가 아니므로 거절하며 applying에 대해 준비 취소도 거절한다. 이는 첫 파일 변경 전에 필요한 영속 fence일 뿐 파일별 journal·현재 원본/작업 복사본 재검증·외부 작성자 경합 보호·source writer나 restore의 구현은 아니다. 제품 caller는 없다.
+
 > 적용 입장 직렬화 전제: fixture 시작과 native `RunPreparation::reserve`는 단일 runtime의 `&mut Storage`를 동기적으로 보유한 동안 project intent를 재검사하고 run을 기록한다. 그 사이 scheduler yield/외부 callback은 없고 SQLite EXCLUSIVE 연결이 별도 연결의 쓰기를 거절한다. 사전 resolve 결과만으로 예약하지 않는다. 따라서 현재 앱 내부에서 intent 게시가 검사와 예약 사이에 끼어들 수 없으며, 다중 DB writer나 비동기 예약으로 바꿀 때에는 project revision을 포함한 atomic admission으로 다시 설계해야 한다. 이는 파일 시스템의 외부 작성자 배제를 뜻하지 않는다.
 
 > 적용 전 원자 잠금(내부): `review/intent.rs::begin`은 세션의 PreparedApplication을 소비하고 project.application_intent(prepared)와 해당 workspace lock(recovery_required=true, applicationPrepared evidence)을 project/lock/chat revision CAS로 함께 저장한다. 기존 blocker 경로가 새 snapshot 생성을 막고, fixture/native 실행 공통 검증은 해당 project의 진행 중 intent가 있으면 다른 chat의 실행도 예약 전에 거절한다. 기존 준비된 run도 reserve/release 시 재검사한다. 다른 프로젝트의 실행이나 모든 snapshot 편집을 전역 차단한다고 주장하지 않는다. 이는 앱 내부 배타 경계이며 다른 snapshot의 모든 편집이나 동일 UID 외부 작성자를 막는 OS 잠금은 아니다. 재시작 inspect는 exact intent/lock 신원·phase·경로·flags를 확인한다. `abandon_unwritten`은 prepared에서만 기록 종료와 같은 잠금 해제를 원자 수행하며 파일은 변경하지 않는다. 실제 writer는 첫 쓰기 전에 영속 phase를 반드시 변경해야 하며 현재 source writer/쓰기 직전 OS 경합 보호·restore/UI는 아직 없다.

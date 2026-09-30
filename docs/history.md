@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (원본 쓰기 시작 전 영속 복구 경계)
+
+- e5ab16c에서 intent::mark_write_started를 추가했다. exact prepared/lock 및 결속 ready archive를 다시 검증하고 project applying·lock applicationWriting을 같은 CAS transaction으로 게시한다. 최초 파일 변경 전 사용해야 하는 내부 복구 fence이며 파일 쓰기 capability가 아니다. 아직 실제 writer/public caller는 없다.
+- applying은 재시작 뒤에도 잠금을 유지하며 이전 prepared와 현재 applying 모두 abandon_unwritten으로 해제할 수 없다. mark_write_started 재전송도 재개 승인으로 처리하지 않는다. 백업 소실/DB 두 번째 기록 실패는 원장을 바꾸지 않는다.
+- 검증: 실제 임시 SQLite·snapshot/backup의 백업 소실·transaction rollback·재시작·replay/취소 거절·원본 보존 집중 1 PASS(최종 10.16초), strict all-targets clippy·신규 모듈/테스트 블록 rustfmt·diff 검사 PASS. 독립 읽기 전용 리뷰 scoped PASS(검토자의 테스트 재실행은 아님).
+- Karpathy 지침으로 기존 inspect/backup 검증/CAS를 재사용했다. 다음은 파일별 영속 journal과 쓰기 직전 원본/복사본 검증·외부 작성자 경합 보호·writer/restore 연결이다. 실제 계정/유료 모델/사용자 원본 시험·main 병합/push 없음. 앱 전체 완료가 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (적용 준비 원장과 실행 배타 마감)
 
 - 49bece3 기준 내부 intent::begin이 일회성 PreparedApplication을 소비하고 project.application_intent와 workspace recovery 잠금을 project/lock/chat revision CAS로 원자 게시한다. exact inspect와 쓰기 전 abandon_unwritten은 재시작·응답 유실 재시도를 지원하고 원본 파일은 변경하지 않는다. 실제 writer는 첫 쓰기 전 반드시 prepared를 떠나야 한다.

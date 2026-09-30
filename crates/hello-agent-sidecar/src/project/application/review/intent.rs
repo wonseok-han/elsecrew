@@ -116,6 +116,7 @@ pub(in crate::project) fn inspect(
         .ok_or_else(invalid)?;
     let phase = match record["state"].as_str() {
         Some("prepared") => "applicationPrepared",
+        Some("applying") => "applicationWriting",
         Some("abandoned") => "applicationAbandoned",
         _ => return Err(invalid()),
     };
@@ -124,12 +125,68 @@ pub(in crate::project) fn inspect(
         || lock.get("worktree_path") != record.get("worktreePath")
         || lock.get("writer_run_id") != Some(&Value::Null)
         || lock.get("poisoned") != Some(&json!(false))
-        || lock.get("recovery_required") != Some(&json!(record["state"] == "prepared"))
+        || lock.get("recovery_required") != Some(&json!(record["state"] != "abandoned"))
         || lock.get("evidence") != Some(&json!({"phase":phase,"applicationId":id}))
     {
         return Err(invalid());
     }
     Ok(record.clone())
+}
+
+/// Persist before the first source mutation. This is a recovery fence, NOT a
+/// source-write capability: the eventual writer must separately establish file
+/// admission and OS race protection. Replaying this transition never authorizes
+/// resuming writes; an applying record requires explicit journal recovery.
+#[allow(dead_code)]
+pub(in crate::project) fn mark_write_started(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request_id: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "prepared" || inspect(storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let review_id = expected["backup"]["header"]["reviewId"]
+        .as_str()
+        .ok_or_else(invalid)?;
+    let backup = backup::staging::inspect(manager, storage, project_id, review_id)?;
+    if backup["state"] != "ready"
+        || backup != expected["backup"]
+        || backup["header"]["binding"] != expected["binding"]
+    {
+        return Err(invalid());
+    }
+    let id = expected["applicationId"].as_str().ok_or_else(invalid)?;
+    let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
+    let mut project = required_project(storage, project_id)?;
+    let mut lock = storage
+        .projection_record("lock", lock_id)?
+        .ok_or_else(invalid)?;
+    let project_revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let lock_revision = lock["last_event_sequence"].as_u64().ok_or_else(invalid)?;
+    let mut applying = expected.clone();
+    applying["state"] = json!("applying");
+    project.insert("application_intent".into(), applying.clone());
+    lock.insert(
+        "evidence".into(),
+        json!({"phase":"applicationWriting","applicationId":id}),
+    );
+    write_pair(
+        storage,
+        &format!("{id}_writing"),
+        request_id,
+        Value::Object(project),
+        Value::Object(lock),
+        &[
+            ("project", project_id, project_revision),
+            ("lock", lock_id, lock_revision),
+        ],
+    )?;
+    Ok(applying)
 }
 
 #[allow(dead_code)]

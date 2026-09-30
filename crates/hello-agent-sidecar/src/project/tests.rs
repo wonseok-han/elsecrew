@@ -35,6 +35,115 @@ fn prepared_backup_fixture() -> (Fixture, String) {
 
 #[cfg(unix)]
 #[test]
+fn application_write_boundary_survives_restart_and_cannot_be_abandoned() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            &review_id,
+        )
+        .unwrap();
+    let grant = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_write_backup")
+        .unwrap();
+    let prepared = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        grant,
+        "req_write_prepare",
+    )
+    .unwrap();
+    let before_project = required_project(&f.storage, &f.project_id).unwrap();
+    let lock_id = prepared["lockId"].as_str().unwrap();
+    let before_lock = f.storage.projection_record("lock", lock_id).unwrap();
+    let backup_path = f
+        .manager
+        .data_root
+        .join("application-backups-v1")
+        .join(prepared["backup"]["name"].as_str().unwrap());
+    let held_backup = backup_path.with_extension("held");
+    fs::rename(&backup_path, &held_backup).unwrap();
+    assert!(intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &prepared,
+        "req_write_missing_backup"
+    )
+    .is_err());
+    assert_eq!(
+        required_project(&f.storage, &f.project_id).unwrap(),
+        before_project
+    );
+    assert_eq!(
+        f.storage.projection_record("lock", lock_id).unwrap(),
+        before_lock
+    );
+    fs::rename(&held_backup, &backup_path).unwrap();
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_writing BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_writing_lock' BEGIN SELECT RAISE(ABORT, 'test writing failure'); END;").unwrap();
+    assert!(intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &prepared,
+        "req_write_fail"
+    )
+    .is_err());
+    assert_eq!(
+        required_project(&f.storage, &f.project_id).unwrap(),
+        before_project
+    );
+    assert_eq!(
+        f.storage.projection_record("lock", lock_id).unwrap(),
+        before_lock
+    );
+    f.storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_writing;")
+        .unwrap();
+    let applying = intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &prepared,
+        "req_write_start",
+    )
+    .unwrap();
+    assert_eq!(applying["state"], "applying");
+    let db = f.manager.data_root.join("hello-agent.sqlite3");
+    drop(f.storage);
+    let mut storage = Storage::open(&db).unwrap();
+    assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), applying);
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    assert!(intent::mark_write_started(
+        &f.manager,
+        &mut storage,
+        &f.project_id,
+        &prepared,
+        "req_write_replay"
+    )
+    .is_err());
+    for expected in [&prepared, &applying] {
+        assert!(intent::abandon_unwritten(
+            &mut storage,
+            &f.project_id,
+            expected,
+            "req_write_no_abandon"
+        )
+        .is_err());
+    }
+    assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), applying);
+    assert!(!storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn application_intent_fence_is_atomic_restart_safe_and_cancelable_before_writes() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

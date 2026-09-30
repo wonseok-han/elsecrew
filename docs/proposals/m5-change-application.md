@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-09-30 내부 진행: prepared→applying 영속 전환과 applicationWriting 잠금을 원자 게시하는 `intent::mark_write_started`를 구현했다. ready 백업 재검증 실패·DB 실패 시 전환하지 않으며 성공 뒤 재시작/재전송/준비 취소로 잠금을 해제하지 않는다. 파일 쓰기 권위가 아닌 중단 복구 경계이고 실제 writer·파일별 journal·OS 경합 보호·복원/UI는 아직 남는다.
+
 - 전체 작업 복사본의 명시 반영, 반영 직전 복원 지점, 명시 되돌리기. 부분 반영·자동 충돌 해결·자동 Git commit/push는 하지 않는다.
 - 현재 `ProjectManager`는 source를 읽어 standalone snapshot을 만들고, snapshot 파일 편집과 diff를 제공한다. `workspace.close`는 폐기이며 `project.catalog releaseView`는 감시 해제다. 둘 다 적용이나 복원이 아니다.
 - `ActiveProject`의 base commit/tree/source identity는 Git 기준만 담는다. 원본 working tree의 현재 bytes나 index의 동등성을 증명하지 않는다. `source_digest`는 Git 메타데이터 변경 감지용이지 원본 파일 baseline이 아니다.
