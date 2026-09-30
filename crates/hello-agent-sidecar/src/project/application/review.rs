@@ -13,6 +13,7 @@ use std::io::{self, Write};
 use unicode_normalization::UnicodeNormalization;
 
 const MAX_REVIEW_BYTES: usize = 32 * 1024 * 1024;
+pub(in crate::project) mod persistence;
 
 fn validate_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), ProjectFailure> {
     let mut names = BTreeMap::new();

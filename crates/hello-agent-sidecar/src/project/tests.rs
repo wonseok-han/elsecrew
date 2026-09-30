@@ -26,6 +26,129 @@ fn source_index_fixture() -> Fixture {
 
 #[cfg(unix)]
 #[test]
+fn saved_application_review_reopens_without_approval_and_rejects_replacement() {
+    use application::review::persistence;
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_saved_review_open",
+        )
+        .unwrap();
+    fixture
+        .manager
+        .create_worktree_inner(
+            &mut fixture.storage,
+            &fixture.project_id,
+            "req_saved_review_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let first = persistence::publish(
+        &fixture.manager,
+        &mut fixture.storage,
+        &fixture.project_id,
+        "req_review_publish",
+    )
+    .unwrap();
+    assert_eq!(first["state"], "prepared");
+    let database = fixture.manager.data_root.join("hello-agent.sqlite3");
+    drop(fixture.storage);
+    let mut storage = Storage::open(&database).unwrap();
+    let mut manager = ProjectManager::new(&database).unwrap();
+    let review_id = first["reviewId"].as_str().unwrap();
+    assert!(
+        persistence::reopen(&manager, &storage, &fixture.project_id, review_id)
+            .unwrap()
+            .changed_paths()
+            .is_empty()
+    );
+    assert_eq!(
+        required_project(&storage, &fixture.project_id).unwrap()["application_review"],
+        first
+    );
+    let mut altered = required_project(&storage, &fixture.project_id).unwrap();
+    altered["application_review"]["state"] = json!("approved");
+    storage
+        .upsert_projection_record(
+            "project",
+            &fixture.project_id,
+            "op_review_fake_approval",
+            None,
+            altered,
+        )
+        .unwrap();
+    assert!(persistence::reopen(&manager, &storage, &fixture.project_id, review_id).is_err());
+    let mut restored = required_project(&storage, &fixture.project_id).unwrap();
+    restored.insert("application_review".into(), first.clone());
+    storage
+        .upsert_projection_record(
+            "project",
+            &fixture.project_id,
+            "op_review_restore_prepared",
+            None,
+            restored,
+        )
+        .unwrap();
+    storage.connection_for_test().execute_batch("CREATE TRIGGER fail_review BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_review_%' BEGIN SELECT RAISE(ABORT, 'review publication failure'); END;").unwrap();
+    assert!(persistence::publish(
+        &manager,
+        &mut storage,
+        &fixture.project_id,
+        "req_publish_failure"
+    )
+    .is_err());
+    storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_review;")
+        .unwrap();
+    assert_eq!(
+        required_project(&storage, &fixture.project_id).unwrap()["application_review"],
+        first
+    );
+    let next = persistence::publish(
+        &manager,
+        &mut storage,
+        &fixture.project_id,
+        "req_review_replace",
+    )
+    .unwrap();
+    assert!(persistence::reopen(&manager, &storage, &fixture.project_id, review_id).is_err());
+    let next_id = next["reviewId"].as_str().unwrap();
+    persistence::reopen(&manager, &storage, &fixture.project_id, next_id).unwrap();
+    let active = manager
+        .validate_active_project(&storage, &fixture.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("replacement"), b"hello").unwrap();
+    fs::rename(
+        active.worktree_path.join("replacement"),
+        active.worktree_path.join("src/edit.txt"),
+    )
+    .unwrap();
+    assert!(persistence::reopen(&manager, &storage, &fixture.project_id, next_id).is_err());
+    manager
+        .create_worktree_inner(
+            &mut storage,
+            &fixture.project_id,
+            "req_saved_review_new_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    assert_eq!(
+        required_project(&storage, &fixture.project_id).unwrap()["application_review"],
+        next
+    );
+    assert!(persistence::reopen(&manager, &storage, &fixture.project_id, next_id).is_err());
+}
+
+#[cfg(unix)]
+#[test]
 fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
     use application::review;
     use std::os::unix::fs::{symlink, PermissionsExt};

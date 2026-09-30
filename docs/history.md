@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (검토 지문의 영속 게시·재열기)
+
+- 5cc6eb3의 읽기 전용 plan을 기존 project 원장 application_review에 최신 descriptor로 게시한다. binding·변경 digest·snapshot 신원 digest·count와 prepared 상태를 revision CAS로 저장하고, 재열기는 현재 파일에서 새 plan을 구성해 exact 비교한다. 새 저장 폴더/파일이나 원본 쓰기 권한은 추가하지 않았고 project/chat lifecycle에서 extension을 보존한다.
+- 검증: 실제 SQLite 재시작·게시 실패/이전 기록 보존·superseded ID·같은 bytes inode 교체·새 snapshot·승인으로 바뀐 descriptor 거절 회귀1 PASS/9.02초, strict all-targets clippy PASS/2.94초, 새 모듈/추가 테스트 rustfmt·diff 검사. 독립 정적 검토 scoped PASS이며 검토자 테스트 재실행은 아니다.
+- Karpathy 지침으로 기존 원자 원장을 재사용했다. 이는 현재 검토 재구성이지 과거 변경 내용의 보관/열람이나 승인 ticket이 아니다. 다음은 chat/task 대상 결속과 명시 확인 수명·복원 지점/쓰기 경계다. 실제 계정/모델/사용자 프로젝트 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A2 읽기 전용 변경 검토 묶음)
 
 - 91483bd 위에 private ReviewPlan 후보를 추가했다. exact receipt·현재 source/snapshot 검증, tracked 변경/삭제와 새 snapshot 경로의 정렬된 before/after·bounded digest, 확인 후 내용/신원 재대조를 제공한다. 원본 untracked를 삭제로 취급하지 않으며 충돌·종류 전환·미지원 권한은 거절한다. 아직 메모리 내 project 검토이며 chat/task ticket·영속 plan·IPC/UI·writer는 없다.
@@ -95,7 +101,7 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
-- **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source와 snapshot의 tracked 변화/추가 경로를 읽기 전용으로 묶고 내용·신원을 재대조한다. 원본 untracked 보존, cross-image 대소문자/정규화 충돌·미지원 종류/권한 거절. 내부 메모리 plan만 있으며 승인/쓰기 권위가 아니다. 다음은 영속 검토와 chat/task 승인 수명 및 A3~A5다.
+- **A2 ReviewPlan 후보(2026-09-30)**: receipt로 검증된 source/snapshot 변화·신원을 읽기 전용으로 묶는다. 최신 descriptor는 project 원장 CAS로 게시하고 재시작 시 현재 파일에서 재구성/대조한다. untracked·경로 충돌·미지원 권한과 승인 상태/superseded ID는 거절한다. 과거 파일 내용 보관이나 승인/쓰기 권위는 아니며 chat/task 확인 수명과 A3~A5는 남는다.
 - **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
 - **A1 원장/생성 결속 후보(2026-09-30)**: source_baselines[worktreeId]는 불변 descriptor를 게시·조회하며 close/open에서 보존한다. 내부 ApplicationCandidate 생성3회·재시작 검증을 통과했고 활성화는 최신 원장 extension을 보존한다. DB 게시 실패는 artifact와 잠금을 남긴다. 공개 생성 활성화·시작 이후 복구·누적 크기/압축은 남고 아래 receipt 게시/생성 미구현 기록은 이 내부 후보 추가로 갱신한다.

@@ -65,7 +65,9 @@ DB 게시 실패 시 부분/완성 파일과 recovery lock을 보존하며 동�
 
 source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key로 case-only/정규화 충돌을 거절한다. 이는 모든 OS의 collation을 재현한다는 보장이 아니다. [unicode-normalization 공식 API](https://docs.rs/unicode-normalization/0.1.25/unicode_normalization/)의 0.1.25를 고정하며 정규화 개별4KiB·합16MiB, 항목별 review 직렬화 hash 입력32MiB를 제한한다. 전체 JSON을 선할당하지 않는다.
 
-생성 전후 source baseline/snapshot inventory를 대조하고 `revalidate`는 같은 binding·digest·변경 집합과 파일 신원까지 재검증한다. receipt 없는 legacy, 외부 원본 변화, 같은 bytes의 snapshot inode 교체도 거절한다. 아직 메모리 내 private plan이며 chat/task별 승인 ticket·영속 plan·IPC/UI·원본 writer와 재시작 승인 수명은 연결하지 않았다. 일반 diff 화면의 표시와 이 내부 apply 후보의 권위를 혼동하지 않는다.
+생성 전후 source baseline/snapshot inventory를 대조하고 `revalidate`는 같은 binding·digest·변경 집합과 파일 신원까지 재검증한다. receipt 없는 legacy, 외부 원본 변화, 같은 bytes의 snapshot inode 교체도 거절한다. 일반 diff 화면의 표시와 이 내부 apply 후보의 권위를 혼동하지 않는다.
+
+`review/persistence.rs`는 전체 변경 내용 대신 프로젝트의 최신 `application_review` descriptor를 기존 원장에 revision CAS로 저장한다. schemaVersion/reviewId/state:prepared/binding/changesDigest/snapshotDigest/changeCount를 묶으며 snapshot digest는 root stamp와 모든 entry의 identity/kind/mode/size/hash를 bounded32MiB 직렬화로 계산한다. 재열기는 현재 파일에서 plan을 재구성하고 descriptor가 정확히 같은지 확인한다. 과거 파일 내용 복원이나 superseded 검토의 열람 기능은 아니다. DB 게시 실패는 이전 descriptor를 보존하며 lifecycle 갱신은 extension을 보존한다. 승인 표시로 바뀐 descriptor도 거절하고 재시작은 승인을 복원하지 않는다. chat/task별 승인 ticket·공개 IPC/UI·writer 및 재시작 승인 수명은 후속이다.
 
 ## 반드시 닫을 안전 조건
 
