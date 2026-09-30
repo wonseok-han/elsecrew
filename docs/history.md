@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (누적 프런트 회귀 fixture 정합성 복구)
+
+- 전체 Node 검사에서 저장 단축키 추가 후 Monaco mock의 KeyMod/KeyCode/addAction 누락과 기존 공개 run.approval/project.catalog의 canonical manifest 누락을 발견해 수정했다. 제품 동작/API를 바꾸지 않았고 최신 admission/saving 상태에서 단축키 차단·정상 저장을 회귀에 추가했다.
+- 검증: 집중 Node 7 PASS, 수정 후 전체 tests/*.test.mts exit0, Rust canonical transcript 1 PASS. 직접 diff 검토와 diff check PASS. Karpathy 지침으로 기존 fixture만 수정했다. 병행 시작한 sidecar 전체 검사는 아직 진행 중이며 reserved_interactions 실패의 상세 진단이 남아 전체 Rust PASS로 표현하지 않는다.
+- 미승인 원본 반영 정책/예산 제안과 로그인 복구 확인 기록은 별도 미커밋으로 보존한다. 다음은 누적 Rust 결과 회수·실패 수정이며 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (코드 편집기 언어 정의 보완)
 
 - 기존 TypeScript/Markdown 로더에 JavaScript·Python·Rust·Go·Shell·YAML·CSS·HTML·SQL·Dockerfile와 JSON 로컬 worker를 연결했다. 확장자·대소문자·Windows 경로·특수 파일명을 구분하고 미지원은 plaintext로 둔다. Monaco 0.52의 원격 JSON schema 요청 기본 비활성을 유지하며 언어 서버나 코드 실행을 추가하지 않았다.
