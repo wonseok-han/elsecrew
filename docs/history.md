@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (편집·충돌·초안 폐기 안내 다국어)
+
+- 014abf7 기준 앱 편집기/탭/저장/충돌/초안 폐기 확인과 변경 패널에 ko/en 27개 키를 연결했다. Karpathy 지침으로 표시만 변경하며 저장·재읽기 조건, 초안/경로/상세 원문은 유지한다. Monaco 내부 메뉴·초기화 실패 안내는 별도 남는다.
+- 검증: 편집 동작/상태·번역 Node 45 PASS, TypeScript noEmit·renderer build PASS. Chromium 기존 dirty 라벨 검사가 영어에서도 한국어를 찾는 실패를 재현한 뒤 언어별 라벨로 수정해 최종 2 PASS(4.21초). 새 검사는 폐기 확인창/Monaco DOM/초안 유지·영어 경고와 기존 취소/명시 재읽기/단축키 저장을 확인한다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지.
+- 구현/기록만 선택 커밋하며 아카이브의 미승인 정책/로그인 기록 및 정책 제안은 보존한다. 다음은 Monaco 실패 안내·작업대/프로젝트 오류 번역과 원본 적용 정책 결정이다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
+
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.

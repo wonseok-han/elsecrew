@@ -248,47 +248,47 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           ) : <Empty text={t("m5.navigation.empty")} />}
         </aside>
 
-        <section className="m5-panel m5-editor" aria-label="코드 편집기">
-          <div className="m5-tab-list" role="tablist" aria-label="열린 파일">
+        <section className="m5-panel m5-editor" aria-label={t("m5.editor.title")}>
+          <div className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
               <div className="m5-editor-tab" key={tab.path}>
                 <button type="button" role="tab" aria-selected={snapshot.activePath === tab.path} onClick={() => controller.openFile(tab.path)} disabled={!admissionReady}>
-                  {fileName(tab.path)} {tab.saveState !== "clean" && <span aria-label="저장되지 않은 변경">●</span>}
+                  {fileName(tab.path)} {tab.saveState !== "clean" && <span aria-label={t("m5.editor.dirty")}>●</span>}
                 </button>
-                <button type="button" className="m5-close-tab" aria-label={`${tab.path} 탭 닫기`} onClick={() => controller.closeTab(tab.path)} disabled={!admissionReady}>×</button>
+                <button type="button" className="m5-close-tab" aria-label={t("m5.editor.close", { path: tab.path })} onClick={() => controller.closeTab(tab.path)} disabled={!admissionReady}>×</button>
               </div>
             ))}
           </div>
           <div className="m5-editor-head">
-            <span>{activeTab?.path ?? "파일을 선택하세요"}</span>
-            {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>저장된 내용 다시 불러오기</button>}
+            <span>{activeTab?.path ?? t("m5.editor.select")}</span>
+            {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
             {activeTab?.mode === "text" && (
-              <button type="button" title="저장 (⌘S / Ctrl+S)" onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
-                {activeTab.saveState === "saving" ? "저장 중…" : activeTab.saveState === "conflicted" ? "충돌 해결 필요" : "저장"}
+              <button type="button" title={t("m5.editor.shortcut")} onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
+                {activeTab.saveState === "saving" ? t("m5.editor.saving") : activeTab.saveState === "conflicted" ? t("m5.editor.resolve") : t("m5.editor.save")}
               </button>
             )}
           </div>
-          {reloadDraft && <section role="alertdialog" aria-label="편집 내용 버리기 확인" className="m5-error">
-            <p><strong>{reloadDraft.path}</strong>의 저장하지 않은 편집 내용을 버리고 저장된 파일로 돌아갈까요? 필요한 내용은 먼저 복사해 주세요.</p>
-            <button type="button" disabled={reloadingDraft} onClick={() => setReloadDraft(null)}>취소</button>
+          {reloadDraft && <section role="alertdialog" aria-label={t("m5.editor.confirm")} className="m5-error">
+            <p><strong>{reloadDraft.path}</strong>{t("m5.editor.discardHelp")}</p>
+            <button type="button" disabled={reloadingDraft} onClick={() => setReloadDraft(null)}>{t("m5.editor.cancel")}</button>
             <button type="button" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft || !snapshot.tabs.includes(reloadDraft)} onClick={async () => {
               setReloadingDraft(true);
               try { await controller.reloadConfirmedDraft(reloadDraft); } finally { setReloadingDraft(false); setReloadDraft(null); }
-            }}>{reloadingDraft ? "다시 불러오는 중…" : "편집 내용 버리고 다시 불러오기"}</button>
-            {!snapshot.tabs.includes(reloadDraft) && <p>확인 중 파일 상태가 바뀌었어요. 취소한 뒤 다시 확인해 주세요.</p>}
+            }}>{reloadingDraft ? t("m5.editor.reloading") : t("m5.editor.discard")}</button>
+            {!snapshot.tabs.includes(reloadDraft) && <p>{t("m5.editor.changed")}</p>}
           </section>}
           <EditorContent tab={activeTab} readOnly={!admissionReady || snapshot.actionBlocked} onChange={(text) => activeTab && controller.updateText(activeTab.path, text)} onSave={(path) => {
             if (admissionReadyRef.current && controller.snapshot().activePath === path) void controller.saveActive();
           }} />
         </section>
 
-        <aside className="m5-panel m5-changes" aria-label="변경">
+        <aside className="m5-panel m5-changes" aria-label={t("m5.editor.changes")}>
           <PanelTitle active={snapshot.panel === "changes"} panel="changes" onSelect={controller.selectPanel.bind(controller)}>
-            변경 {snapshot.diffSummary ? `(${snapshot.diffSummary.entries.length})` : ""}
+            {t("m5.editor.changes")} {snapshot.diffSummary ? `(${snapshot.diffSummary.entries.length})` : ""}
           </PanelTitle>
           {snapshot.project ? (
             <>
-              <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady}>변경 새로 고침</button>
+              <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady}>{t("m5.editor.refresh")}</button>
               <div className="m5-change-list">
                 {snapshot.diffSummary?.entries.map((entry) => (
                   <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" onClick={() => void controller.openDiff(entry.path)} disabled={!admissionReady}>
@@ -296,11 +296,11 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                     <span>{entry.path}</span>
                   </button>
                 ))}
-                {snapshot.diffSummary?.entries.length === 0 && <Empty text="아직 확인할 변경이 없어요." />}
+                {snapshot.diffSummary?.entries.length === 0 && <Empty text={t("m5.editor.noChanges")} />}
               </div>
               {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} />}
             </>
-          ) : <Empty text="변경 내용은 프로젝트를 선택한 뒤 보여요." />}
+          ) : <Empty text={t("m5.editor.chooseProject")} />}
         </aside>
       </WorkbenchDock>
     </main>
@@ -380,11 +380,12 @@ function PanelTitle({ active, panel, onSelect, children }: { active: boolean; pa
 }
 
 function EditorContent({ tab, readOnly, onChange, onSave }: { tab: EditorTab | null; readOnly: boolean; onChange: (text: string) => void; onSave: (path: string) => void }) {
-  if (!tab) return <Empty text="파일을 열면 여기서 코드를 읽고 편집할 수 있어요." />;
-  if (tab.mode === "binary") return <Empty text="이 파일은 이진 파일이라 내용을 편집하지 않아요." />;
-  if (tab.mode === "tooLarge") return <Empty text="5MiB보다 큰 파일은 안전하게 미리 보지 않아요." />;
+  const { t } = useI18n();
+  if (!tab) return <Empty text={t("m5.editor.empty")} />;
+  if (tab.mode === "binary") return <Empty text={t("m5.editor.binary")} />;
+  if (tab.mode === "tooLarge") return <Empty text={t("m5.editor.large")} />;
   if (tab.saveState === "conflicted") {
-    return <section className="m5-conflict"><strong>저장 충돌</strong><p>내 초안은 그대로 보존했어요. 필요한 내용을 아래에서 복사한 뒤 저장된 파일을 다시 불러올 수 있어요.</p><textarea aria-label="보존된 편집 내용" readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><details><summary>기술 정보</summary><pre>{tab.technicalDetail ?? "external file change"}</pre></details></section>;
+    return <section className="m5-conflict"><strong>{t("m5.editor.conflict")}</strong><p>{t("m5.editor.conflictHelp")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><details><summary>{t("m5.editor.details")}</summary><pre>{tab.technicalDetail ?? "external file change"}</pre></details></section>;
   }
   return <MonacoEditor tab={tab} readOnly={readOnly} onChange={onChange} onSave={onSave} />;
 }

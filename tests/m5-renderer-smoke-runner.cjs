@@ -249,6 +249,16 @@ app.whenReady().then(async () => {
     const reloadButton = () => [...document.querySelectorAll('button')].find(button => button.textContent === '저장된 내용 다시 불러오기');
     reloadButton().click();
     await ${waitFor("document.querySelector('[role=alertdialog]')", "reload confirmation")};
+    const confirmation = document.querySelector('[role=alertdialog]');
+    const editorBeforeLanguage = document.querySelector('.monaco-editor');
+    const draftBeforeLanguage = editorBeforeLanguage.textContent;
+    const editorLanguage = document.querySelector('.m5-toolbar-actions select');
+    editorLanguage.value = 'en'; editorLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('[role=alertdialog]')?.getAttribute('aria-label') === 'Confirm discarding edits'", "English editor confirmation")};
+    if (confirmation !== document.querySelector('[role=alertdialog]') || editorBeforeLanguage !== document.querySelector('.monaco-editor') || editorBeforeLanguage.textContent !== draftBeforeLanguage) throw new Error('language switch lost editor or confirmation');
+    if (!document.querySelector('[aria-label="Unsaved changes"]') || !confirmation.textContent.includes('Copy anything you need first.')) throw new Error('missing English draft warning');
+    editorLanguage.value = 'ko'; editorLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('[role=alertdialog]')?.getAttribute('aria-label') === '편집 내용 버리기 확인'", "Korean editor confirmation restored")};
     [...document.querySelectorAll('[role=alertdialog] button')].find(button => button.textContent === '취소').click();
     await ${waitFor("!document.querySelector('[role=alertdialog]')", "cancel reload")};
     if (!document.querySelector('[aria-label=\"저장되지 않은 변경\"]')) throw new Error('cancel discarded draft');
@@ -272,7 +282,8 @@ app.whenReady().then(async () => {
       select.value = language;
       select.dispatchEvent(new Event('change', {bubbles:true}));
       await new Promise(resolve => setTimeout(resolve, 30));
-      if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('language switch lost the active editor draft');
+      const dirtyLabel = language === 'en' ? 'Unsaved changes' : '저장되지 않은 변경';
+      if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || ![...document.querySelectorAll('[aria-label]')].some(node => node.getAttribute('aria-label') === dirtyLabel)) throw new Error('language switch lost the active editor draft');
     }
     document.querySelector('.monaco-editor textarea').focus();
   })()`);
