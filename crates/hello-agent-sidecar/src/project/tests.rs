@@ -4,6 +4,129 @@ use tempfile::TempDir;
 
 #[cfg(unix)]
 #[test]
+fn application_backup_preserves_before_images_and_rejects_tampering() {
+    use application::review::{backup, persistence, ReviewTarget};
+    use std::io::{BufRead, Read};
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let mut f = source_index_fixture();
+    fs::write(f.source.join("raw.bin"), [0, 255, 10, 13]).unwrap();
+    symlink("outside-not-followed", f.source.join("raw-link")).unwrap();
+    fs::set_permissions(
+        f.source.join("src/edit.txt"),
+        fs::Permissions::from_mode(0o750),
+    )
+    .unwrap();
+    git_raw(&f.source, ["add", "."]);
+    git_raw(
+        &f.source,
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "backup originals",
+        ],
+    );
+    f.manager
+        .open_project(
+            &mut f.storage,
+            f.source.to_str().unwrap(),
+            "req_backup_open",
+        )
+        .unwrap();
+    f.manager
+        .create_worktree_inner(
+            &mut f.storage,
+            &f.project_id,
+            "req_backup_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"changed").unwrap();
+    fs::remove_file(active.worktree_path.join("raw.bin")).unwrap();
+    fs::remove_file(active.worktree_path.join("raw-link")).unwrap();
+    symlink("new-target", active.worktree_path.join("raw-link")).unwrap();
+    fs::create_dir(active.worktree_path.join("new-dir")).unwrap();
+    fs::write(active.worktree_path.join("new-dir/new-file"), b"new").unwrap();
+    let record = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_backup_review",
+    )
+    .unwrap();
+    for stage in [1, 2] {
+        assert!(backup::fail_for_test(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            record["reviewId"].as_str().unwrap(),
+            stage
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_dir(f.manager.data_root.join("application-backups-v1"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+    let point = backup::create(
+        &f.manager,
+        &f.storage,
+        ReviewTarget::Project(&f.project_id),
+        record["reviewId"].as_str().unwrap(),
+    )
+    .unwrap();
+    backup::verify(&f.manager, &point).unwrap();
+    let path = point.path_for_test(&f.manager);
+    let bytes = fs::read(&path).unwrap();
+    let mut reader = std::io::Cursor::new(&bytes);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let header: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(header["reviewId"], record["reviewId"]);
+    let mut items = std::collections::BTreeMap::new();
+    for _ in 0..header["count"].as_u64().unwrap() {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        let item: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let mut data = vec![0; item["before"]["size"].as_u64().unwrap_or(0) as usize];
+        reader.read_exact(&mut data).unwrap();
+        items.insert(item["path"].as_str().unwrap().to_owned(), (item, data));
+    }
+    assert_eq!(reader.position() as usize, bytes.len());
+    assert_eq!(items["raw.bin"].1, [0, 255, 10, 13]);
+    assert_eq!(items["raw-link"].1, b"outside-not-followed");
+    assert_eq!(items["src/edit.txt"].1, b"hello");
+    assert_eq!(
+        items["src/edit.txt"].0["before"]["mode"].as_u64().unwrap() & 0o7777,
+        0o750
+    );
+    assert!(items["new-dir"].0["before"].is_null());
+    assert!(items["new-dir/new-file"].0["before"].is_null());
+    assert_eq!(
+        fs::read(f.source.join("raw.bin")).unwrap(),
+        [0, 255, 10, 13]
+    );
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    fs::write(&path, b"truncated").unwrap();
+    assert!(backup::verify(&f.manager, &point).is_err());
+    fs::write(&path, &bytes).unwrap();
+    fs::hard_link(&path, path.with_extension("alias")).unwrap();
+    assert!(backup::verify(&f.manager, &point).is_err());
+}
+
+#[cfg(unix)]
+#[test]
 fn application_confirmation_is_ephemeral_single_use_and_revalidates() {
     use application::review::{confirmation::Confirmations, persistence, ReviewTarget};
     let mut f = source_index_fixture();

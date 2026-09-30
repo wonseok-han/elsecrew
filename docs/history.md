@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (원본 before-image 백업 후보)
+
+- 7cfee21 기준 review/backup.rs를 추가했다. 최신 review/baseline 재검증 뒤 변경 대상의 이전 raw bytes·링크 문자열·mode·identity·부재를 앱 전용 archive에 스트리밍한다. 4GiB+32MiB 한도, 각 부모 no-follow, exclusive0600, file/directory fsync·재읽기 hash와 최종 원본/검토 대조를 사용하며 원본은 쓰지 않는다.
+- 독립 검토에서 실패 archive 누적을 지적해 전체 작성 실패를 감싸 held inode/path stamp+nlink 확인 후 자체 파일만 제거/fsync한다. 정리 실패는 파일 이름 포함 recovery 오류다. 후속 scoped PASS. crash orphan·strict restore decoder·영속 intent/원장·confirmation 연결은 아직 없어 public 복원 지점으로 사용하지 않는다.
+- 검증: binary/삭제/link/mode/새 디렉터리·파일의 정확한 이전 내용과 원본 보존, 변조/하드링크 거절, 작성 중·최종 검증 전 실패 정리/재시도 집중1 PASS/8.16초; budget/no-follow/정리 대상 교체 보존1 PASS/0.06초; strict all-targets clippy PASS/3.51초. 초기 테스트 모듈 위치 lint를 수정했다. 신규 모듈/테스트 블록 포맷 및 diff 검사. 독립 검토자는 테스트 재실행하지 않았다. Karpathy 지침으로 기존 검증을 재사용했다. 실제 계정/모델/사용자 원본 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (일회용 검토 확인 수명)
 
 - 9f7455d에서 review/confirmation.rs 내부 owner를 추가했다. 한 개의 무작위 ticket·5분 monotonic 만료, open 실패 포함 재열기/취소 시 무효화, confirm 시 성공/실패 모두 소비한다. 확인은 기존 persisted descriptor와 source/snapshot을 다시 대조하고 검사 뒤 만료도 확인한다. 세션 재생성은 빈 상태이며 승인은 저장하지 않는다.

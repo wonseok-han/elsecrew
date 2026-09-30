@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 반영 전 백업 후보(내부): `review/backup.rs`는 최신 검토와 baseline을 재검증하고 변경 대상의 이전 bytes·mode·종류·존재 여부를 앱 전용 `application-backups-v1/backup_<uuid>.bin`에 exclusive 0600으로 스트리밍한다. 링크는 대상 문자열만 보존하고 각 부모는 no-follow로 연다. JSON header/item과 길이가 정해진 raw payload로 구성하며 상한은 4GiB+32MiB, 메모리 payload buffer는64KiB다. file/directory fsync·다시 읽은 hash·최종 source/review 대조 뒤 반환한다. 정상 오류 시 이번 파일 신원을 확인하여 제거/fsync하며 정리 실패는 이름을 포함한 recovery 오류다. 프로세스 crash orphan의 영속 등록/정리, strict restore decoder·원장 intent·확인 ticket 결속은 아직 없으므로 공개 복원 지점/원본 writer로 사용하지 않는다.
+
 > 검토 확인 수명(내부): `review/confirmation.rs`는 세션 메모리에 한 개의 무작위 ticket만 유지한다. 검토 재열기(실패 포함)·취소·owner 재생성으로 무효화하며 5분이 지나면 거절한다. 확인 시 성공/실패 모두 ticket을 소비하고 exact 저장 descriptor와 현재 파일을 다시 대조한다. 이 반환 plan은 원본 쓰기 권한이 아니다. 적용 transaction/복원 지점·쓰기 직전 재검증과 공개 IPC/UI 연결은 아직 남는다. 아래의 미연결 ticket은 제품 연결을 뜻한다.
 
 > 채팅별 검토 대상(내부): `ReviewTarget::Chat`은 프로젝트의 현재 active 포인터 대신 해당 채팅의 manifest/marker로 exact workspace를 검증한다. chat/task ID·상태·revision과 건강한 미소유 lock의 ID/실제 경로/revision을 binding에 포함한다. `application_chat_reviews[chatId]`에 각 최신 descriptor를 보존하고 project+chat+lock revision을 같은 transaction에서 검사한다. 다른 채팅의 새 검토는 기존 채팅 검토를 덮지 않으며 후속 대화·잠금 변경은 재검토를 요구한다. 명시 확인 ticket·승인/원본 쓰기는 아직 연결하지 않았다.

@@ -94,6 +94,8 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 ## 열린 결정
 
+A3 내부 진전(2026-09-30): `review/backup.rs`의 before-image archive 후보는 변경 대상의 raw bytes/링크 문자열·원래 권한·부재 항목을 담는다. archive 한 개 상한은 raw4GiB+metadata32MiB이며 전체 보존 용량/기간 정책은 아래 열린 결정과 별개다. 정상 실패의 자체 파일 정리·신원 불일치 보존 오류를 지원하지만 crash orphan의 영속 등록, strict framing decoder, DB intent 게시/재시작과 confirmation 소비 연결은 아직 없다. header는 version/reviewId/binding/changesDigest/count JSON+LF, 각 item은 path/before(kind,mode,size,digest,identity 또는 null) JSON+LF 후 정확한 size bytes이며 null payload는0이다. 전체 hash만으로 restore 의미 검증을 대체하지 않는다.
+
 1. 동일 UID 외부 작성자와 경합할 때 원본을 절대 덮어쓰지 않는 보장을 제공할 OS 전략과 지원 플랫폼 범위. 실패 시 수동 전달 경로는 대안이지 전체 적용 기능의 완료가 아니다.
 2. 복원 지점의 보존 기간·용량·삭제 확인 UX. 수치 없이 제품 writer를 열지 않는다.
 3. clean source의 submodule·LFS·필터·symlink·case-only rename 초기 지원 범위. 미지원은 UI에서 명확히 차단하되 원래 전체 제품 목표를 축소한 완료로 보고하지 않는다.
