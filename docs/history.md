@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (채팅 목록·파일 탐색 다국어 연결)
+
+- 0db5c66 기준 프로젝트 채팅 목록/추가 로딩/새 목표 입력과 파일 목록/폴더 경로/페이지 안내를 ko/en 16개 키로 연결했다. 사용자 목표·파일명·프로젝트명과 생성/전환/탐색 로직은 유지했다. Karpathy 지침으로 기존 I18nProvider와 smoke를 재사용했다.
+- 검증: chat UI state·번역 Node 21 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.34초). 영어 전환 시 동일 새 목표 input/한국어 초안·선택 채팅 DOM 보존, 파일 탐색 접근성 이름/페이지 문구를 확인하고 기존 후속 메시지 저장 흐름도 통과했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지.
+- 코드/이 기록만 선택 커밋하며 기존 미승인 정책·로그인 상태 문서는 보존한다. 다음은 편집기·검색/변경 상세 및 나머지 오류 안내의 번역과 원본 적용 정책 결정이다. 실제 계정/모델·main 병합/push 없음. 전체 앱 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (실행 상태·권한 요청 안내 다국어 연결)
 
 - 34758dc 기준 AgentRuns와 ApprovalCard의 상태·요청 종류·상세/거절/취소·민감 정보 경고를 ko/en 31개 키로 연결했다. Karpathy 지침으로 표시만 변경하며 polling/epoch·승인 계약·raw 상세 escaping·허용 미지원 경계는 유지한다.

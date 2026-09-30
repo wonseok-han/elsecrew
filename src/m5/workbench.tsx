@@ -209,26 +209,26 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </section>
       )}
 
-      {snapshot.project && <section className="m5-chat-strip" aria-label="프로젝트 채팅">
-        <div className="m5-chat-list"><strong>채팅</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={!admissionReady || chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}{chat.refreshNeededChatIds.includes(item.chatId) && <span className="m5-chat-update">새 상태</span>}</button>)}</div>
-        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? "채팅 불러오는 중…" : "채팅 더 보기"}</button>}
+      {snapshot.project && <section className="m5-chat-strip" aria-label={t("m5.navigation.chats")}>
+        <div className="m5-chat-list"><strong>{t("m5.navigation.chatTitle")}</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={!admissionReady || chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}{chat.refreshNeededChatIds.includes(item.chatId) && <span className="m5-chat-update">{t("m5.navigation.newState")}</span>}</button>)}</div>
+        {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
-          <input aria-label="새 채팅 목표" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="이 프로젝트에서 이루고 싶은 일을 적어주세요" disabled={!admissionReady || chat.preparing} />
-          <button type="submit" disabled={!admissionReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>새 채팅</button>
+          <input aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
+          <button type="submit" disabled={!admissionReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
         </form>
       </section>}
 
       {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} disabled={!admissionReady} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={() => setSettingsOpen(false)} />}
 
       <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
-        <aside className="m5-panel m5-files" aria-label="파일">
+        <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>
           <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
-            파일
+            {t("m5.navigation.files")}
           </PanelTitle>
           {snapshot.project ? (
             <>
               <FileSearch key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} disabled={!admissionReady || snapshot.actionBlocked} search={(query, signal) => controller.searchFiles(query, signal)} open={path => { void controller.openFile(path); }} />
-              <nav className="m5-breadcrumbs" aria-label="현재 폴더 경로">
+              <nav className="m5-breadcrumbs" aria-label={t("m5.navigation.folder")}>
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
               </nav>
@@ -239,13 +239,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                   </button>
                 ))}
               </div>
-              <nav className="m5-tree-pages" aria-label="파일 목록 페이지">
-                <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>처음으로</button>
-                <span>{snapshot.treeLoading ? "불러오는 중…" : `${snapshot.treePage}페이지`}</span>
-                <button type="button" disabled={!admissionReady || snapshot.treeLoading || !snapshot.treeNextCursor} onClick={() => void controller.loadNextTreePage()}>다음 목록</button>
+              <nav className="m5-tree-pages" aria-label={t("m5.navigation.pages")}>
+                <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>{t("m5.navigation.first")}</button>
+                <span>{snapshot.treeLoading ? t("m5.navigation.loading") : t("m5.navigation.page", { page: snapshot.treePage })}</span>
+                <button type="button" disabled={!admissionReady || snapshot.treeLoading || !snapshot.treeNextCursor} onClick={() => void controller.loadNextTreePage()}>{t("m5.navigation.next")}</button>
               </nav>
             </>
-          ) : <Empty text="프로젝트를 고르면 파일을 표시해요." />}
+          ) : <Empty text={t("m5.navigation.empty")} />}
         </aside>
 
         <section className="m5-panel m5-editor" aria-label="코드 편집기">

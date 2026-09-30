@@ -310,11 +310,18 @@ app.whenReady().then(async () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await ${waitFor("!document.querySelector('.m5-followup button').disabled", "enabled follow-up submit")};
     const previousMessages = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+    const goalInput = document.querySelector('.m5-new-chat-form input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(goalInput, '새 목표 초안');
+    goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const selectedChat = document.querySelector('.m5-chat-chip.selected');
     const languageSelect = document.querySelector('.m5-toolbar-actions select');
     languageSelect.value = 'en';
     languageSelect.dispatchEvent(new Event('change', {bubbles:true}));
     await ${waitFor("document.querySelector('.m5-followup button')?.textContent === 'Add to conversation' && document.querySelector('.m5-timeline')?.getAttribute('aria-label') === 'Team conversation'", "English team conversation")};
     if (input !== document.querySelector('#m5-followup-text') || input.value !== '설명을 추가해 주세요.') throw new Error('language change lost follow-up draft');
+    if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New conversation goal') throw new Error('language change lost goal draft or label');
+    if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
+    if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || !document.querySelector('.m5-tree-pages').textContent.includes('First page')) throw new Error('file navigation not translated');
     if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('language change translated user messages');
     document.querySelector('.m5-followup button').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.') && document.querySelector('#m5-followup-text').value === ''", "persisted follow-up visible and input cleared")};
