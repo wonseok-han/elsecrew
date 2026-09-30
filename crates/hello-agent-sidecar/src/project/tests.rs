@@ -35,6 +35,164 @@ fn prepared_backup_fixture() -> (Fixture, String) {
 
 #[cfg(unix)]
 #[test]
+fn staged_backup_explicit_recovery_revalidates_or_preserves_abandonment() {
+    use application::review::{backup::staging, persistence, ReviewTarget};
+    for complete in [false, true] {
+        let (mut f, review_id) = prepared_backup_fixture();
+        if complete {
+            f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_recovery_ready BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_backup_%_ready' BEGIN SELECT RAISE(ABORT, 'test recovery'); END;").unwrap();
+            assert!(staging::prepare(
+                &f.manager,
+                &mut f.storage,
+                ReviewTarget::Project(&f.project_id),
+                &review_id,
+                "req_recovery_prepare"
+            )
+            .is_err());
+            f.storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER fail_recovery_ready;")
+                .unwrap();
+        } else {
+            assert!(staging::stop_after_reservation_for_test(
+                &f.manager,
+                &mut f.storage,
+                ReviewTarget::Project(&f.project_id),
+                &review_id
+            )
+            .is_err());
+        }
+        let db = f.manager.data_root.join("hello-agent.sqlite3");
+        drop(f.storage);
+        let mut storage = Storage::open(&db).unwrap();
+        let manager = ProjectManager::new(&db).unwrap();
+        let pending = staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap();
+        let target = ReviewTarget::Project(&f.project_id);
+        if complete {
+            let active = manager
+                .validate_active_project(&storage, &f.project_id)
+                .unwrap();
+            fs::write(active.worktree_path.join("src/edit.txt"), b"changed").unwrap();
+            assert!(staging::resume(
+                &manager,
+                &mut storage,
+                target,
+                &review_id,
+                "req_recovery_stale"
+            )
+            .is_err());
+            fs::write(active.worktree_path.join("src/edit.txt"), b"hello").unwrap();
+            let ready = staging::resume(
+                &manager,
+                &mut storage,
+                target,
+                &review_id,
+                "req_recovery_resume",
+            )
+            .unwrap();
+            assert_eq!(ready["state"], "ready");
+            assert_eq!(
+                staging::resume(
+                    &manager,
+                    &mut storage,
+                    target,
+                    &review_id,
+                    "req_recovery_retry"
+                )
+                .unwrap(),
+                ready
+            );
+            assert!(staging::abandon(
+                &manager,
+                &mut storage,
+                &f.project_id,
+                &review_id,
+                &pending,
+                "req_recovery_wrong_abandon"
+            )
+            .is_err());
+        } else {
+            assert!(staging::resume(
+                &manager,
+                &mut storage,
+                target,
+                &review_id,
+                "req_recovery_missing"
+            )
+            .is_err());
+            let path = manager
+                .data_root
+                .join("application-backups-v1")
+                .join(pending["name"].as_str().unwrap());
+            fs::write(&path, b"partial preserved").unwrap();
+            assert!(staging::resume(
+                &manager,
+                &mut storage,
+                target,
+                &review_id,
+                "req_recovery_partial"
+            )
+            .is_err());
+            let mut stale = pending.clone();
+            stale["name"] = json!("different");
+            assert!(staging::abandon(
+                &manager,
+                &mut storage,
+                &f.project_id,
+                &review_id,
+                &stale,
+                "req_recovery_stale_abandon"
+            )
+            .is_err());
+            let abandoned = staging::abandon(
+                &manager,
+                &mut storage,
+                &f.project_id,
+                &review_id,
+                &pending,
+                "req_recovery_abandon",
+            )
+            .unwrap();
+            assert_eq!(abandoned["state"], "abandoned");
+            assert_eq!(
+                staging::abandon(
+                    &manager,
+                    &mut storage,
+                    &f.project_id,
+                    &review_id,
+                    &pending,
+                    "req_recovery_abandon_retry"
+                )
+                .unwrap(),
+                abandoned
+            );
+            assert_eq!(fs::read(&path).unwrap(), b"partial preserved");
+            let next = persistence::publish(
+                &manager,
+                &mut storage,
+                &f.project_id,
+                "req_recovery_new_review",
+            )
+            .unwrap();
+            staging::prepare(
+                &manager,
+                &mut storage,
+                target,
+                next["reviewId"].as_str().unwrap(),
+                "req_recovery_new_backup",
+            )
+            .unwrap();
+            assert_eq!(
+                staging::inspect(&manager, &storage, &f.project_id, &review_id).unwrap(),
+                abandoned
+            );
+        }
+        assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn staged_backup_survives_restart_and_keeps_header_binding() {
     use application::review::{backup::staging, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

@@ -64,6 +64,20 @@ fn image(value: &Value) -> Result<(), ProjectFailure> {
 }
 
 pub(super) fn validate(input: &mut impl BufRead) -> Result<Value, ProjectFailure> {
+    validate_inner(input, None)
+}
+
+pub(super) fn validate_against(
+    input: &mut impl BufRead,
+    baseline: &SourceInventory,
+) -> Result<Value, ProjectFailure> {
+    validate_inner(input, Some(baseline))
+}
+
+fn validate_inner(
+    input: &mut impl BufRead,
+    baseline: Option<&SourceInventory>,
+) -> Result<Value, ProjectFailure> {
     let mut metadata_budget = 32 * 1024 * 1024;
     let mut content_budget = MAX_BYTES;
     let mut path_budget = 8 * 1024 * 1024usize;
@@ -109,6 +123,12 @@ pub(super) fn validate(input: &mut impl BufRead) -> Result<Value, ProjectFailure
         path_budget = path_budget.checked_sub(path.len()).ok_or_else(invalid)?;
         previous = path.to_owned();
         let before = &item["before"];
+        if let Some(baseline) = baseline {
+            let expected = baseline.entries.get(path).map(|e| serde_json::json!({"kind":e.kind,"mode":e.mode,"size":e.size,"digest":e.digest,"identity":e.identity}));
+            if *before != serde_json::to_value(expected).map_err(|_| invalid())? {
+                return Err(invalid());
+            }
+        }
         let after = &item["after"];
         image(after)?;
         let before_image = if before.is_null() {
@@ -207,6 +227,33 @@ mod tests {
 
     fn valid(bytes: &[u8]) -> bool {
         validate(&mut std::io::Cursor::new(bytes)).is_ok()
+    }
+
+    #[test]
+    fn backup_recovery_compares_full_before_metadata_not_only_git_image() {
+        let mut item = fixture();
+        let baseline = SourceInventory {
+            root_stamp: [0; 9],
+            entries: BTreeMap::from([(
+                "a".to_owned(),
+                Entry {
+                    identity: (1, 2, 1),
+                    kind: 1,
+                    mode: 0o100644,
+                    size: 3,
+                    digest: Sha256::digest(b"a\nb").into(),
+                },
+            )]),
+        };
+        let bytes = archive(std::slice::from_ref(&item));
+        assert!(validate_against(&mut std::io::Cursor::new(bytes), &baseline).is_ok());
+        item.0["before"]["mode"] = json!(0o100664);
+        let bytes = archive(std::slice::from_ref(&item));
+        assert!(valid(&bytes)); // Same Git executable bit, distinct restore permissions.
+        assert!(validate_against(&mut std::io::Cursor::new(bytes), &baseline).is_err());
+        item.0["before"]["mode"] = json!(0o100644);
+        item.0["before"]["identity"] = json!([1, 99, 1]);
+        assert!(validate_against(&mut std::io::Cursor::new(archive(&[item])), &baseline).is_err());
     }
 
     #[test]

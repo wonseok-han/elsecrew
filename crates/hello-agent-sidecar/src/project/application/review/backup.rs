@@ -18,6 +18,15 @@ pub(in crate::project) struct Backup {
     digest: [u8; 32],
 }
 
+fn valid_name(name: &str) -> bool {
+    name.len() == 43
+        && name.starts_with("backup_")
+        && name.ends_with(".bin")
+        && name[7..39]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 #[allow(dead_code)]
 impl Backup {
     pub(in crate::project) fn to_value(&self) -> Value {
@@ -31,12 +40,7 @@ impl Backup {
         let length = value["length"].as_u64().ok_or_else(invalid)?;
         if fields.len() != 4
             || value["version"] != serde_json::json!(2)
-            || name.len() != 43
-            || !name.starts_with("backup_")
-            || !name.ends_with(".bin")
-            || !name[7..39]
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !valid_name(name)
             || length == 0
             || length > MAX_ARCHIVE
         {
@@ -290,6 +294,59 @@ fn remove_failed(dir: &Dir, name: &str, file: &File) -> Result<(), ProjectFailur
     }
     dir.remove_file(name).map_err(|_| failure())?;
     sync_capability_directory(dir).map_err(|_| failure())
+}
+
+// Recovery candidate only. Full current baseline and durable header comparison
+// are required before the caller can publish this newly computed descriptor.
+fn recover_candidate(
+    manager: &ProjectManager,
+    name: &str,
+    baseline: &SourceInventory,
+) -> Result<(Backup, Value), ProjectFailure> {
+    if !valid_name(name) {
+        return Err(invalid());
+    }
+    let dir = directory(manager)?;
+    let mut file = open(&dir, name, false)?;
+    let meta = file.metadata().map_err(|_| invalid())?;
+    if !meta.is_file()
+        || meta.nlink() != 1
+        || meta.mode() & 0o7777 != 0o600
+        || meta.len() == 0
+        || meta.len() > MAX_ARCHIVE
+    {
+        return Err(invalid());
+    }
+    let mut hash = Sha256::new();
+    let mut total = 0u64;
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer).map_err(|_| invalid())?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > meta.len() {
+            return Err(invalid());
+        }
+        hash.update(&buffer[..n]);
+    }
+    file.rewind().map_err(|_| invalid())?;
+    let header = decode::validate_against(&mut std::io::BufReader::new(&mut file), baseline)?;
+    if total != meta.len()
+        || stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
+        || stamp(&meta) != stamp(&dir.symlink_metadata(name).map_err(|_| invalid())?)
+    {
+        return Err(invalid());
+    }
+    Ok((
+        Backup {
+            name: name.to_owned(),
+            length: total,
+            digest: hash.finalize().into(),
+        },
+        header,
+    ))
 }
 
 #[allow(dead_code)]

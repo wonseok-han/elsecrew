@@ -103,7 +103,9 @@ fn prepare_inner(
     if let Some(records) = project.get("application_backups") {
         let records = records.as_object().ok_or_else(invalid)?;
         if records.contains_key(review_id)
-            || records.values().any(|record| record["state"] != "ready")
+            || records
+                .values()
+                .any(|record| !matches!(record["state"].as_str(), Some("ready" | "abandoned")))
         {
             return Err(invalid());
         }
@@ -174,11 +176,14 @@ pub(in crate::project) fn inspect(
     if record["version"] != 1
         || record["header"]["reviewId"] != review_id
         || record["header"]["binding"]["projectId"] != project_id
+        || !record["name"].as_str().is_some_and(valid_name)
     {
         return Err(invalid());
     }
     match record["state"].as_str() {
-        Some("preparing") if record.as_object().is_some_and(|v| v.len() == 4) => Ok(record.clone()),
+        Some("preparing" | "abandoned") if record.as_object().is_some_and(|v| v.len() == 4) => {
+            Ok(record.clone())
+        }
         Some("ready") if record.as_object().is_some_and(|v| v.len() == 5) => {
             let backup = Backup::from_value(&record["backup"])?;
             if record["name"] != backup.name || verify(manager, &backup)? != record["header"] {
@@ -188,4 +193,111 @@ pub(in crate::project) fn inspect(
         }
         _ => Err(invalid()),
     }
+}
+
+/// Explicit recovery, never invoked by inspection/startup. The entire before
+/// metadata is compared to the bound current baseline, not merely the Git image.
+#[allow(dead_code)]
+pub(in crate::project) fn resume(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    target: ReviewTarget<'_>,
+    review_id: &str,
+    request_id: &str,
+) -> Result<Value, ProjectFailure> {
+    let record = inspect(manager, storage, target.project_id(), review_id)?;
+    if !matches!(record["state"].as_str(), Some("preparing" | "ready")) {
+        return Err(invalid());
+    }
+    let plan = persistence::reopen_target(manager, storage, target, review_id)?;
+    let expected_header = json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
+    if record["header"] != expected_header {
+        return Err(invalid());
+    }
+    if record["state"] == "ready" {
+        return Ok(record);
+    }
+    let (active, _) = target.resolve(manager, storage)?;
+    let source = manager.open_source_repository(&active.canonical_git_root)?;
+    let baseline = capture_clean_baseline(manager, &source)?;
+    receipt::verify_bound(manager, storage, &active, &baseline)?;
+    let (backup, decoded) = recover_candidate(
+        manager,
+        record["name"].as_str().ok_or_else(invalid)?,
+        baseline.inventory(),
+    )?;
+    if decoded != expected_header {
+        return Err(invalid());
+    }
+    let current = persistence::reopen_target(manager, storage, target, review_id)?;
+    if current.binding != plan.binding
+        || current.digest != plan.digest
+        || current.snapshot != plan.snapshot
+        || capture_clean_baseline(manager, &source)? != baseline
+    {
+        return Err(invalid());
+    }
+    let project = required_project(storage, target.project_id())?;
+    if project
+        .get("application_backups")
+        .and_then(|v| v.get(review_id))
+        != Some(&record)
+    {
+        return Err(invalid());
+    }
+    let ready = json!({"version":1,"state":"ready","name":backup.name,"header":expected_header,"backup":backup.to_value()});
+    write_record(
+        storage,
+        target,
+        &plan.binding,
+        project,
+        review_id,
+        ready.clone(),
+        request_id,
+    )?;
+    Ok(ready)
+}
+
+/// Ends only an unfinished backup preparation. No file deletion, source mutation,
+/// or application lock release; retained filename remains available for cleanup.
+#[allow(dead_code)]
+pub(in crate::project) fn abandon(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    review_id: &str,
+    expected: &Value,
+    request_id: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "preparing" {
+        return Err(invalid());
+    }
+    let current = inspect(manager, storage, project_id, review_id)?;
+    let mut abandoned = expected.clone();
+    abandoned["state"] = json!("abandoned");
+    if current == abandoned {
+        return Ok(current);
+    }
+    if current != *expected {
+        return Err(invalid());
+    }
+    let mut project = required_project(storage, project_id)?;
+    let revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    if project["application_backups"][review_id] != current {
+        return Err(invalid());
+    }
+    project["application_backups"][review_id] = abandoned.clone();
+    storage.upsert_projection_records_atomic_checked(
+        vec![ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.to_owned(),
+            operation_id: format!("op_backup_{review_id}_abandoned"),
+            request_id: Some(request_id.to_owned()),
+            payload: project,
+        }],
+        &[("project", project_id, revision)],
+    )?;
+    Ok(abandoned)
 }

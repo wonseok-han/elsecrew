@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (미완료 백업의 명시 재개·보존 종료)
+
+- b637bdf에서 staging::resume/abandon을 추가했다. 재개는 trusted pending header와 fresh review, bound source baseline에 complete archive의 전체 before metadata/bytes를 대조하고 마지막 source/plan 확인 및 CAS 뒤 ready로 게시한다. Git 실행 bit 중심 digest로 원래 권한·inode를 대신하지 않는다. 준비 종료는 exact pending만 abandoned로 CAS 변경해 파일·원본·잠금을 보존하며 같은 요청 재전송은 멱등이다. 새 검토에서 다음 백업을 만들 수 있다.
+- 검증: metadata 대조1 PASS(mode0644→0664 및 inode 위조 거절), SQLite 재시작·완성 파일 재개/재전송·stale snapshot/missing/partial 거절·잘못된 종료 대상/ready 종료 거절·종료 후 새 검토/백업·원본/이전 파일 보존1 PASS/20.49초. strict all-targets clippy PASS/3.38초·새 모듈/테스트 블록 포맷·diff 검사. 독립 정적 검토 scoped PASS, 검토자 테스트 재실행 아님.
+- Karpathy 지침으로 기존 원장/CAS와 decoder를 재사용했다. 공개 복구 UI, 디스크 회수/보존 용량 정책·확인 소비·적용 intent/원본 writer·restore는 남는다. 실제 계정/모델/사용자 원본 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (백업 준비·완료 원장 연결)
 
 - 1c4fbde 기준 backup/staging.rs가 project.application_backups[reviewId]에 exact name/header preparing을 file 생성 전 CAS 저장하고, 검증된 descriptor/header와 같은 pending·fresh plan을 대조해 ready를 게시한다. project/lock/chat revision guard와 준비 metadata256KiB 한도를 적용하며 미완료가 있으면 새 준비를 거절한다. lifecycle extension도 보존한다.
