@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
+import { I18nProvider, useI18n } from "../i18n";
 
 import {
   ProjectEditorController,
@@ -74,30 +75,32 @@ function useStorageAdmission(bridge: SupportedM5Bridge): AdmissionView {
 }
 
 function StorageAdmissionNotice({ admission }: { admission: AdmissionView }) {
+  const { t } = useI18n();
   if (admission === "ready") return null;
   return <section className={admission === "failed" ? "m5-admission m5-admission-failed" : "m5-admission"} role="status">
-    <strong>{admission === "failed" ? "작업 공간을 아직 열 수 없어요." : "작업 공간을 안전하게 준비하고 있어요."}</strong>
-    <p>{admission === "failed" ? "앱을 다시 열어 보세요. 계속되면 도움을 요청해 주세요. 기존 프로젝트 파일은 바꾸지 않았어요." : "프로젝트와 채팅은 곧 사용할 수 있어요. 이 동안에는 변경을 만들거나 저장하지 않아요."}</p>
+    <strong>{t(admission === "failed" ? "m5.admission.failed" : "m5.admission.preparing")}</strong>
+    <p>{t(admission === "failed" ? "m5.admission.help" : "m5.admission.wait")}</p>
   </section>;
 }
 
 export function M5Workbench({ bridge }: { bridge?: unknown }) {
   const candidate = bridge ?? (typeof window === "undefined" ? undefined : window.m5);
   const resolved = resolveM5Bridge(candidate);
-  if (!resolved) return <WorkbenchUnavailable />;
-  return <M5WorkbenchReady bridge={resolved} />;
+  return <I18nProvider>{resolved ? <M5WorkbenchReady bridge={resolved} /> : <WorkbenchUnavailable />}</I18nProvider>;
 }
 
 function WorkbenchUnavailable() {
-  return <main className="m5-workbench" aria-label="M5 코딩 작업대">
+  const { lang, t } = useI18n();
+  return <main className="m5-workbench" lang={lang} aria-label={t("m5.shell.label")}>
     <section className="m5-admission m5-admission-failed" role="alert">
-      <strong>작업 공간을 아직 열 수 없어요.</strong>
-      <p>앱을 다시 열어 보세요. 계속되면 도움을 요청해 주세요. 기존 프로젝트 파일은 바꾸지 않았어요.</p>
+      <strong>{t("m5.admission.failed")}</strong>
+      <p>{t("m5.admission.help")}</p>
     </section>
   </main>;
 }
 
 function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
+  const { lang, setLang, t } = useI18n();
   const controller = useMemo(() => new ProjectEditorController(bridge), [bridge]);
   const chatController = useMemo(() => new ChatUiController(bridge), [bridge]);
   const admission = useStorageAdmission(bridge);
@@ -163,26 +166,27 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     : null;
 
   return (
-    <main className="m5-workbench" aria-label="M5 코딩 작업대">
+    <main className="m5-workbench" lang={lang} aria-label={t("m5.shell.label")}>
       <header className="m5-toolbar">
         <div>
-          <p className="m5-eyebrow">M5 · 원본과 분리된 작업 복사본</p>
-          <h1>{snapshot.project?.name ?? "프로젝트를 선택해 시작하세요"}</h1>
+          <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
+          <h1>{snapshot.project?.name ?? t("m5.shell.start")}</h1>
           <p className="m5-subtitle">
-            {snapshot.project ? "원본 프로젝트와 분리된 복사본에서 파일과 변경 내용을 안전하게 확인하고 있어요." : "Git 프로젝트를 고르면 원본과 분리된 작업 복사본의 파일과 변경 내용을 안전하게 확인할 수 있어요."}
+            {t(snapshot.project ? "m5.shell.active" : "m5.shell.intro")}
           </p>
         </div>
         <div className="m5-toolbar-actions">
+          <select aria-label={t("m5.shell.language")} title={t("m5.shell.languageScope")} value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select>
           <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
           <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
-            {snapshot.project ? "프로젝트 바꾸기" : "프로젝트 선택"}
+            {t(snapshot.project ? "m5.shell.switch" : "m5.shell.choose")}
           </button>
           {snapshot.project && (
-            <button className="m5-secondary" type="button" onClick={() => void leaveProject()} disabled={!admissionReady || settingsOpen || leavingProject || leaveError || !window.m5Projects || snapshot.actionBlocked || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} title={settingsOpen ? "역할과 모델 설정을 먼저 마무리해 주세요." : undefined}>
-              프로젝트 화면 닫기
+            <button className="m5-secondary" type="button" onClick={() => void leaveProject()} disabled={!admissionReady || settingsOpen || leavingProject || leaveError || !window.m5Projects || snapshot.actionBlocked || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} title={settingsOpen ? t("m5.shell.finishSettings") : undefined}>
+              {t("m5.shell.close")}
             </button>
           )}
-          {snapshot.project && <button className="m5-secondary" type="button" onClick={() => { controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen}>역할과 모델</button>}
+          {snapshot.project && <button className="m5-secondary" type="button" onClick={() => { controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen}>{t("m5.shell.roles")}</button>}
         </div>
       </header>
 

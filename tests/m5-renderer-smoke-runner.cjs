@@ -41,6 +41,17 @@ app.whenReady().then(async () => {
       throw new Error("MonacoEnvironment should be created by the product renderer");
     }
     const controlLabel = "프로젝트 선택";
+    await ${waitFor("document.querySelector('.m5-toolbar-actions select')", "language control")};
+    const chooseLanguage = value => {
+      const select = document.querySelector('.m5-toolbar-actions select');
+      select.value = value;
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+    };
+    chooseLanguage('en');
+    await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
+    if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
+    chooseLanguage('ko');
+    await ${waitFor("document.querySelector('main').lang === 'ko' && document.querySelector('h1').textContent === '프로젝트를 선택해 시작하세요'", "Korean shell")};
     await ${waitFor("document.querySelector('[aria-label=\"진행 및 복구 상태\"] code')?.textContent === 'lock:before_chat'", "pre-chat lock notice")};
     const getStatus = window.m5.getSystemStatus;
     window.m5.getSystemStatus = async () => { throw new Error('synthetic status failure'); };
@@ -243,6 +254,15 @@ app.whenReady().then(async () => {
   await window.webContents.debugger.sendCommand("Input.insertText", { text: "S" });
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "shortcut dirty draft")};
+    const originalEditor = document.querySelector('.monaco-editor');
+    for (const language of ['en', 'ko']) {
+      const select = document.querySelector('.m5-toolbar-actions select');
+      select.value = language;
+      select.dispatchEvent(new Event('change', {bubbles:true}));
+      await new Promise(resolve => setTimeout(resolve, 30));
+      if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || !document.querySelector('[aria-label="저장되지 않은 변경"]')) throw new Error('language switch lost the active editor draft');
+    }
+    document.querySelector('.monaco-editor textarea').focus();
   })()`);
   for (const type of ["keyDown", "keyUp"]) {
     await window.webContents.debugger.sendCommand("Input.dispatchKeyEvent", {

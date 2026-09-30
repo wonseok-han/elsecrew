@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 작업대 언어 연결(부분): Electron 작업대는 기존 I18nProvider/hello-agent.lang 설정을 재사용하며 도구막대·프로젝트 진입/준비 안내의 한국어/영어 전환을 제공한다. 설정 읽기 실패는 시스템 언어로 대체하고 전환으로 controller/Monaco를 재생성하지 않는다. 로그인·채팅·설정·파일/변경·오류 문구의 전체 번역은 아직 남아 있다.
+
 > 편집기 초기화 복구: 로컬 Monaco 로딩/생성 실패는 자동 반복하지 않고 현재 초안의 읽기 전용 복사 화면과 명시 재시도를 제공한다. 실패한 loader cache와 부분 생성 자원을 정리하고 재시도 때 최신 초안·읽기 전용 상태를 사용한다. 앱 재시작까지 초안을 영속 보존한다는 의미는 아니다.
 
 > 편집기 언어: 로컬 Monaco tokenizer로 TS/JS·Markdown·Python·Rust·Go·Shell·YAML·CSS·HTML·SQL·Dockerfile을 지원하고 JSON은 별도 로컬 worker를 선택한다. JSON 원격 schema 요청은 고정 Monaco 0.52 기본값(false)을 유지한다. 미지원 파일은 plaintext이며 외부 언어 서버/실행기 지원을 뜻하지 않는다.

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (작업대 언어 설정 연결 착수)
+
+- 원본 정책 승인 대기는 유지하되 전체 목표의 독립 필수 항목인 한국어/영어 UI를 진행했다. 88dc28e의 Electron 작업대에 없던 기존 I18nProvider와 언어 선택을 연결하고 ko/en 16개 키로 도구막대·프로젝트 진입·admission 안내를 전환한다. 저장 설정 읽기 실패는 시스템 언어로 대체한다. 부분 번역 범위를 선택기 설명에 명시했고 나머지 화면 번역 완료로 주장하지 않는다.
+- 검증: 언어 재초기화/설정 우선/저장 접근 거절·양쪽 리소스 및 기존 Monaco 집중 Node 9 PASS, TypeScript noEmit PASS, 최종 renderer build·Chromium 2 PASS. 실제 화면에서 ko/en 문구·localStorage 저장과 미저장 초안/동일 Monaco DOM 유지, 기존 저장/로그인 합성 흐름을 확인했다. diff check PASS, 기존 Monaco chunk 경고 유지.
+- Karpathy 지침으로 별도 번역 시스템 없이 기존 리소스를 재사용했다. 첫 patch의 잘못된 문맥은 적용 없이 거절돼 정확한 문구로 다시 적용했다. 다음은 로그인·채팅·설정·파일/변경 안내의 번역 확대와 핵심 원본 정책 결정이다. 원본 보호 계약·계정/모델·main/push 변경 없음. 앱 전체 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (코드 편집기 초기화 실패 복구)
 
 - 952dd4f에서 Monaco import/create 실패의 unhandled rejection·빈 화면 경로를 수정했다. 현재 초안을 read-only 복사 화면으로 보여주고 명시 재시도만 제공한다. rejected loader cache와 생성된 model/editor/action/subscription을 정리하며 기존 저장·admission 경계는 유지한다. 원본 정책/계정/실행 권한은 변경하지 않았다.

@@ -10,7 +10,7 @@ body {
   min-height: 100vh;
 }
 
-button, input, textarea {
+button, input, textarea, select {
   font: inherit;
 }
 
@@ -27,6 +27,15 @@ button, input, textarea {
   gap: 24px;
   align-items: center;
   padding: 0 4px 18px;
+}
+
+.m5-toolbar-actions > select {
+  color-scheme: dark;
+  border: 1px solid #3f4c5c;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #10161e;
+  color: #e6edf3;
 }
 
 .m5-eyebrow {
