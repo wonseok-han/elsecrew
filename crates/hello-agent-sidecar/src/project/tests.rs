@@ -76,9 +76,51 @@ fn applying_item_reader_uses_bound_archive_and_rejects_stale_or_corrupt_records(
         "req_item_start",
     )
     .unwrap();
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_pending_item BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_item_0_pending' BEGIN SELECT RAISE(ABORT, 'test pending item failure'); END;").unwrap();
+    assert!(intent::record_first_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &applying,
+        "req_pending_fail"
+    )
+    .is_err());
+    assert_eq!(
+        intent::inspect(&f.storage, &f.project_id).unwrap(),
+        applying
+    );
+    f.storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_pending_item;")
+        .unwrap();
+    let without_pending = applying;
+    let applying = intent::record_first_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &without_pending,
+        "req_pending_save",
+    )
+    .unwrap();
+    assert_eq!(applying["pendingItem"]["index"], 0);
+    assert_eq!(applying["pendingItem"]["item"]["path"], "src/edit.txt");
+    for stale in [&without_pending, &applying] {
+        assert!(intent::record_first_item(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            stale,
+            "req_pending_replay"
+        )
+        .is_err());
+    }
     let db = f.manager.data_root.join("hello-agent.sqlite3");
     drop(f.storage);
     let storage = Storage::open(&db).unwrap();
+    assert_eq!(
+        intent::inspect_pending_item(&f.manager, &storage, &f.project_id).unwrap(),
+        applying
+    );
     let item =
         intent::inspect_write_item(&f.manager, &storage, &f.project_id, &applying, 0).unwrap();
     assert_eq!(item["path"], "src/edit.txt");
@@ -94,6 +136,7 @@ fn applying_item_reader_uses_bound_archive_and_rejects_stale_or_corrupt_records(
         .join("application-backups-v1")
         .join(applying["backup"]["name"].as_str().unwrap());
     fs::write(path, b"corrupt archive").unwrap();
+    assert!(intent::inspect_pending_item(&f.manager, &storage, &f.project_id).is_err());
     assert!(intent::inspect_write_item(&f.manager, &storage, &f.project_id, &applying, 0).is_err());
     assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), applying);
     assert!(!storage.blocker_ids().unwrap().is_empty());

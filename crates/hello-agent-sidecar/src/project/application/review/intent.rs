@@ -85,11 +85,23 @@ pub(in crate::project) fn inspect(
 ) -> Result<Value, ProjectFailure> {
     let project = required_project(storage, project_id)?;
     let record = project.get("application_intent").ok_or_else(invalid)?;
-    if record.as_object().is_none_or(|v| v.len() != 7)
+    let pending = record.get("pendingItem");
+    if record
+        .as_object()
+        .is_none_or(|v| v.len() != 7 + usize::from(pending.is_some()))
         || record["version"] != 1
         || record["binding"]["projectId"] != project_id
     {
         return Err(invalid());
+    }
+    if let Some(pending) = pending {
+        if record["state"] != "applying"
+            || pending.as_object().is_none_or(|v| v.len() != 2)
+            || pending["index"].as_u64() != Some(0)
+            || !pending["item"].is_object()
+        {
+            return Err(invalid());
+        }
     }
     let id = record["applicationId"].as_str().ok_or_else(invalid)?;
     if id.len() != 44
@@ -164,6 +176,67 @@ pub(in crate::project) fn inspect_write_item(
         return Err(invalid());
     }
     Ok(item)
+}
+
+/// Reserve the first file before a writer may attempt its mutation. No completion
+/// or cursor advancement is inferred: until a writer supplies durable ownership
+/// and post-write evidence, an existing pending item is only inspectable.
+#[allow(dead_code)]
+pub(in crate::project) fn record_first_item(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request_id: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected.get("pendingItem").is_some() {
+        return Err(invalid());
+    }
+    let item = inspect_write_item(manager, storage, project_id, expected, 0)?;
+    let id = expected["applicationId"].as_str().ok_or_else(invalid)?;
+    let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
+    let mut project = required_project(storage, project_id)?;
+    let lock = storage
+        .projection_record("lock", lock_id)?
+        .ok_or_else(invalid)?;
+    let project_revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let lock_revision = lock["last_event_sequence"].as_u64().ok_or_else(invalid)?;
+    let mut next = expected.clone();
+    next["pendingItem"] = json!({"index":0,"item":item});
+    project.insert("application_intent".into(), next.clone());
+    storage.upsert_projection_records_atomic_checked(
+        vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.to_owned(),
+            operation_id: format!("op_{id}_item_0_pending"),
+            request_id: Some(request_id.to_owned()),
+            payload: project,
+        }],
+        &[
+            ("project", project_id, project_revision),
+            ("lock", lock_id, lock_revision),
+        ],
+    )?;
+    Ok(next)
+}
+
+/// A restart observation, not a retry/write grant. Recheck the entire archive so
+/// corrupted pending metadata cannot become a source path or restore authority.
+#[allow(dead_code)]
+pub(in crate::project) fn inspect_pending_item(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+) -> Result<Value, ProjectFailure> {
+    let current = inspect(storage, project_id)?;
+    let pending = current.get("pendingItem").ok_or_else(invalid)?;
+    let item = inspect_write_item(manager, storage, project_id, &current, 0)?;
+    if pending["item"] != item {
+        return Err(invalid());
+    }
+    Ok(current)
 }
 
 /// Persist before the first source mutation. This is a recovery fence, NOT a

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (첫 파일 pending 영속 기록)
+
+- 7a2de9f에서 record_first_item이 applying의 exact archive 첫 항목을 검증해 pendingItem(index0/item)을 project/lock revision CAS로 저장하도록 추가했다. 기존 pending 또는 stale 요청은 거절한다. inspect_pending_item은 재시작 후 전체 archive와 영속 metadata를 다시 대조하며 원본 파일을 쓰지 않는다.
+- 검증: 기존 항목 조회 통합 회귀에 DB 실패 rollback·pending 저장/재시작·중복/stale 거절·손상 archive 시 잠금/원본 보존을 추가해 1 PASS(9.67초). strict all-targets clippy PASS(3.57초), 변경 블록 rustfmt·diff 검사 PASS. 독립 read-only 검토 scoped PASS, 검토자 테스트 재실행 없음.
+- Karpathy 지침으로 기존 item 검증과 CAS를 재사용했다. 현재 첫 항목 기록만 지원하며 완료 cursor/다음 항목/자동 재시도 권위는 추가하지 않았다. 다음은 writer의 파일 소유 신원·사후 관측 증거와 원본 분류/복원 연결이다. 실제 원본 write·계정/유료 모델/사용자 원본 시험·main 병합/push 없음. 전체 앱 완료가 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (결속 백업의 복구 항목 조회)
 
 - f69f728에서 기존 archive decoder/verify를 재사용해 선택 순번의 metadata 한 프레임만 추가 보존한다. 전체 파일 hash·payload/변경 digest·canonical framing·EOF·전후 신원 확인 전에는 항목을 반환하지 않는다. intent::inspect_write_item은 exact applying/lock과 project의 exact ready backup/header/binding에서만 읽는다.

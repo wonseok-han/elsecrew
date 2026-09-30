@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 첫 파일 pending 기록(내부): `intent::record_first_item`은 현재 applying의 결속 archive 첫 항목을 검증한 뒤 `pendingItem {index:0,item}`을 project/lock revision CAS로 저장한다. pending이 있거나 이전 intent를 재전송하면 거절한다. `inspect_pending_item`은 재시작 후에도 실제 archive와 같은 metadata인지 대조하며 기록을 완료/재시도 권위로 해석하지 않는다. 아직 완료 cursor·다음 항목 전진·writer 소유 신원/사후 증거·역복원은 없으므로 첫 항목 기록 이후 자동 실행/잠금 해제는 없다. 원본 쓰기/제품 API는 비활성이다.
+
 > 적용 항목 읽기(내부): `intent::inspect_write_item`은 현재 applying intent/lock·백업 원장의 exact ready 기록에 결속된 archive에서 지정 순번의 path/before/after metadata를 읽는다. 기존 전체 archive hash·canonical decoder·payload 및 변경 digest·EOF·전후 파일 신원 검증을 재사용하고 모두 통과하기 전에는 항목을 반환하지 않는다. metadata 한 프레임(기존64KiB 제한)만 추가 보존하며 payload를 메모리에 모으지 않는다. 호출마다 전체 archive를 읽으므로 전체 적용 루프의 항목별 반복 호출용 성능 경로는 아니며, 향후 순차 writer/journal과 구분한다. 이 읽기는 현재 원본의 before/after 분류나 복원·쓰기 권위가 아니다.
 
 > 쓰기 시작 영속 경계(내부): `intent::mark_write_started`는 exact prepared 기록과 lock을 대조하고 결속된 ready 백업을 실제 archive까지 재검증한 뒤 project `applying`과 lock `applicationWriting`을 같은 CAS transaction으로 게시한다. 중간 DB 실패는 prepared를 보존하고, 성공 뒤에는 재시작해도 recovery 잠금을 유지한다. 재전송은 쓰기 재개 권위가 아니므로 거절하며 applying에 대해 준비 취소도 거절한다. 이는 첫 파일 변경 전에 필요한 영속 fence일 뿐 파일별 journal·현재 원본/작업 복사본 재검증·외부 작성자 경합 보호·source writer나 restore의 구현은 아니다. 제품 caller는 없다.
