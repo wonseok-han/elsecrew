@@ -285,12 +285,18 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "shortcut dirty draft")};
     const originalEditor = document.querySelector('.monaco-editor');
+    const savedLayout = localStorage.getItem('hello-agent.m5.dock.v1');
+    const panelStates = () => [...document.querySelectorAll('.m5-dock-slot')].map(node => [node.dataset.panel, node.hidden, node.getAttribute('style')]);
+    const originalPanels = JSON.stringify(panelStates());
     for (const language of ['en', 'ko']) {
       const select = document.querySelector('.m5-toolbar-actions select');
       select.value = language;
       select.dispatchEvent(new Event('change', {bubbles:true}));
       await new Promise(resolve => setTimeout(resolve, 30));
       const dirtyLabel = language === 'en' ? 'Unsaved changes' : '저장되지 않은 변경';
+      if (localStorage.getItem('hello-agent.m5.dock.v1') !== savedLayout || JSON.stringify(panelStates()) !== originalPanels) throw new Error('language switch changed dock layout');
+      if (document.querySelector('.m5-dock-visibility').getAttribute('aria-label') !== (language === 'en' ? 'Panel visibility' : '패널 표시')) throw new Error('dock visibility not translated');
+      if (document.querySelector('[data-panel=editor] select').getAttribute('aria-label') !== (language === 'en' ? 'Place Editor panel' : '편집기 패널 배치')) throw new Error('dock placement not translated');
       if (document.querySelector('main').lang !== language || document.querySelector('.monaco-editor') !== originalEditor || ![...document.querySelectorAll('[aria-label]')].some(node => node.getAttribute('aria-label') === dirtyLabel)) throw new Error('language switch lost the active editor draft');
     }
     document.querySelector('.monaco-editor textarea').focus();

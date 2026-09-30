@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (작업 패널 배치 다국어)
+
+- b4fd359에서 WorkbenchDock의 패널 이름·분할/탭 배치·드래그/집중/숨김·크기 조절 접근성 안내를 ko/en 24개 키로 옮겼다. Karpathy 지침으로 저장 형식과 위치/크기/탭 선택 계산·이벤트·효과 의존성은 유지했다.
+- 검증: dock/번역 Node 16 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.53초). 언어 전환 전후 저장된 layout 문자열·패널 위치/숨김 상태·Monaco DOM/초안을 대조하고 기존 이동/크기/탭/저장 흐름을 통과했다. 직접 diff 검토·diff check PASS, dock 한국어 하드코딩 검색 없음. 기존 Monaco chunk 경고 유지.
+- 관련 구현/기록만 선택 커밋한다. 기존 정책 제안/아카이브 미커밋 기록은 보존한다. 남은 번역은 동적 controller 오류·차단 안내와 Monaco 내부 표시이며 이후 누적 UI 검증이 필요하다. 원본 반영 정책·실제 provider·G6/Windows/출시는 미완료, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (프로젝트·작업 상태·준비 복구 다국어)
 
 - be0ecaa에서 저장된 프로젝트/작업 상태/시작 실패 복구 안내 ko/en 28개 키를 연결했다. Karpathy 지침으로 표시와 결과 안내 종류만 변경하고 요청/검증·generation/epoch·종료 조건은 유지한다. 원본/작업 파일 비삭제 및 재부팅 해결 단정 금지 경고를 양쪽 언어에 유지했다.
