@@ -165,6 +165,125 @@ fn source_index_baseline_does_not_run_user_hooks_filters_or_rewrite_index() {
     assert!(!fixture.source.join("probe.sh.called").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn source_raw_baseline_compares_bytes_modes_links_and_untracked_files() {
+    use application::git_baseline::raw_baseline::capture_clean_baseline;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let fixture = source_index_fixture();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    fs::create_dir(fixture.source.join("extras")).unwrap();
+    fs::write(fixture.source.join("extras/notes"), b"first").unwrap();
+    fs::write(fixture.source.join(".gitignore"), b"extras/\n").unwrap();
+    let first = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    fs::write(fixture.source.join("extras/notes"), b"other").unwrap();
+    assert_ne!(
+        first,
+        capture_clean_baseline(&fixture.manager, &source).unwrap()
+    );
+    fs::write(fixture.source.join("src/edit.txt"), b"HELLO").unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    fs::write(fixture.source.join("src/edit.txt"), b"hello").unwrap();
+    fs::set_permissions(
+        fixture.source.join("src/edit.txt"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    fs::set_permissions(
+        fixture.source.join("src/edit.txt"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    fs::remove_file(fixture.source.join("src/edit-link")).unwrap();
+    symlink("delete.txt", fixture.source.join("src/edit-link")).unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    fs::remove_file(fixture.source.join("src/edit-link")).unwrap();
+    symlink("edit.txt", fixture.source.join("src/edit-link")).unwrap();
+    fs::write(fixture.source.join("assets/data.bin"), [0, 158, 146, 150]).unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    fs::write(fixture.source.join("assets/data.bin"), [0, 159, 146, 150]).unwrap();
+    fs::remove_file(fixture.source.join("src/delete.txt")).unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn source_raw_baseline_ignores_filters_and_handles_packed_objects() {
+    use application::git_baseline::raw_baseline::capture_clean_baseline;
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = source_index_fixture();
+    git_raw(&fixture.source, ["gc", "--prune=now"]);
+    let hook = fixture.source.join("probe.sh");
+    fs::write(
+        &hook,
+        b"#!/bin/sh\n/usr/bin/touch \"$0.called\"\nprintf hello\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+    for key in [
+        "core.fsmonitor",
+        "filter.probe.clean",
+        "filter.probe.smudge",
+        "diff.probe.textconv",
+        "diff.external",
+    ] {
+        git_raw(&fixture.source, ["config", key, hook.to_str().unwrap()]);
+    }
+    fs::write(
+        fixture.source.join(".gitattributes"),
+        b"* filter=probe diff=probe\n",
+    )
+    .unwrap();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let index = fs::read(fixture.source.join(".git/index")).unwrap();
+    capture_clean_baseline(&fixture.manager, &source).unwrap();
+    fs::write(fixture.source.join("src/edit.txt"), b"dirty").unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    assert!(!fixture.source.join("probe.sh.called").exists());
+    assert_eq!(fs::read(fixture.source.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+        b"dirty"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_raw_baseline_rejects_missing_objects_and_replaced_source_root() {
+    use application::git_baseline::raw_baseline::capture_clean_baseline;
+    let fixture = source_index_fixture();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let oid = git_text(&fixture.source, ["rev-parse", "HEAD:src/edit.txt"]);
+    let object = fixture
+        .source
+        .join(".git/objects")
+        .join(&oid[..2])
+        .join(&oid[2..]);
+    let saved = fixture._root.path().join("saved-object");
+    fs::rename(&object, &saved).unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    fs::rename(&saved, &object).unwrap();
+    capture_clean_baseline(&fixture.manager, &source).unwrap();
+    fs::rename(&fixture.source, fixture._root.path().join("old-source")).unwrap();
+    fs::create_dir(&fixture.source).unwrap();
+    fs::write(fixture.source.join("keep"), b"replacement").unwrap();
+    assert!(capture_clean_baseline(&fixture.manager, &source).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("keep")).unwrap(),
+        b"replacement"
+    );
+}
+
 #[test]
 fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
     let mut fixture = Fixture::open();

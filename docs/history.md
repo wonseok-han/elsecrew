@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A1 raw working-tree와 blob 비교)
+
+- 54268b1 위에서 메인이 git_baseline/raw_baseline.rs의 내부 capture_clean_baseline을 구현했다. index → raw 한 pass → root 경로 신원 → cat-file batch blob 비교 → raw/index 재조회 → root 경로 재확인 순서다. raw 두 pass와 blob 한 pass 각각4GiB·header256byte를 제한한다. source 쓰기·filter/textconv/follow-symlinks 없이 파일 bytes/크기/owner 실행 bit/링크 문자열을 확인하고 untracked·ignored도 inventory에 보존한다.
+- Git object header+bytes의 OID도 재계산하기 위해 sha1=0.10.6 고정 의존성 한 개와 lock을 추가했다. offline cache에 없어 승인된 네트워크 실행으로 crates.io에서 받았다. SHA-1은 Git 호환용이며 raw receipt SHA-256은 그대로다. 최초 패치의 잘못된 저장소 밖 경로는 자동 검토에서 거절되어 적용되지 않았고, 워킹 트리 무변경 확인 후 저장소 내부의 정확한 모듈만 추가했다.
+- 합성 blob stream 회귀1 PASS(잘림·길이/내용/예산·missing·위조 OID 거절·SHA-256 형식), 실제 임시 Git 저장소3 PASS/1.63초(텍스트/binary/mode/link/삭제·ignored 변경, packed object·hostile filter marker 미생성, missing object/원본 root 교체 거절). 초기 clippy byte literal 지적을 수정했고 최종 strict all-targets clippy PASS/3.70초, 새 모듈·추가 테스트 블록 rustfmt 및 diff 검사 PASS다. 독립 정적 검토 scoped PASS이며 테스트 독립 실행으로 주장하지 않는다.
+- Karpathy 지침으로 기존 Git child/capability/정리 경로를 재사용했다. 이는 내부 비교이며 영속 receipt·snapshot binding·legacy 적용 정책·원본 writer/복원은 미연결이다. subprocess 시간 상한/비정상 Git 자손과 Git 로컬 설정/객체 전체 신뢰 경계는 제품 결속 전에 추가 검증해야 한다. 실제 사용자 프로젝트/계정·유료 모델 호출, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A1 index·HEAD 비교 내부 구현)
 
 - de3671f의 raw inventory에 이어 application/git_baseline.rs 내부 후보를 추가했다. fixed Git의 bounded ls-files/ls-tree로 mode/OID/path 집합을 비교하고 index image32MiB·Git 출력24MiB·기존 항목/경로 한도 및 index stamp/hash·HEAD 전후 검사를 적용한다. Git 공식 ls-files/ls-tree/diff-index 문서를 확인해 제안서에 출처와 제한을 기록했다.
@@ -201,6 +208,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **A1 raw blob 비교 후보(2026-09-30)**: capture_clean_baseline은 index/HEAD와 raw 파일 상태를 묶고 blob SHA-256 및 Git object OID를 직접 대조한다. ordinary byte/mode/link drift·missing object·root 경로 교체와 필터 미실행 회귀를 통과했다. 지금은 내부 반환값만 있고 영속 receipt나 writer 권위는 없으며, 기존 Git helper의 시간/자손 수명 제한을 제품 활성화 전에 닫아야 한다.
 
 - **A1 index 비교 함정(2026-09-30)**: mode/OID/path만으로는 HEAD의 빈 파일에 대한 intent-to-add를 구분하지 못한다. cached-only diff-index와 명시 외부 converter 차단을 더하고 dirty exit1을 dirtyConflict로 분류한다. split index는 별도 shared image가 필요해 거절하고 sparse-index·full-index sparse·assume-unchanged도 현재 내부 후보에서 거절한다. 실제 raw blob 동등성·receipt 결속 전에는 적용 권위가 아니다.
 

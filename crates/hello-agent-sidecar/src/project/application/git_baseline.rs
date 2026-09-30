@@ -8,6 +8,7 @@ use cap_std::fs::MetadataExt;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Read;
+pub(in crate::project) mod raw_baseline;
 
 const OUTPUT_LIMIT: usize = 24 * 1024 * 1024;
 const INDEX_LIMIT: u64 = 32 * 1024 * 1024;
@@ -26,7 +27,7 @@ struct GitEntry {
     oid: String,
 }
 
-// Not called by snapshot admission until raw content comparison and durable binding exist.
+// Index-only component; snapshot admission must use the full baseline and durable binding.
 #[allow(dead_code)]
 pub(in crate::project) fn capture_index_baseline(
     manager: &ProjectManager,

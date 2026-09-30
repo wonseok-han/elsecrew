@@ -1,6 +1,6 @@
 # M5 변경 반영·복원 구현 계약 초안
 
-상태: 구현 전. 2026-09-29, 기준 `1517906`. 제품 방향은 [M5 §5.5·§6.5·M5.3](m5-coding-agent-ide.md)이 우선한다. 이 문서는 원본 쓰기 권한을 활성화하거나 실제 사용자 프로젝트 시험을 승인하지 않는다.
+상태: A1 내부 후보 구현 중, 제품 연결·원본 writer 구현 전. 2026-09-30, 기준 `54268b1` 이후. 제품 방향은 [M5 §5.5·§6.5·M5.3](m5-coding-agent-ide.md)이 우선한다. 이 문서는 원본 쓰기 권한을 활성화하거나 실제 사용자 프로젝트 시험을 승인하지 않는다.
 
 ## 확정 범위와 현재 격차
 
@@ -15,7 +15,7 @@
 
 ### A1 baseline 정책 (구현 제안, 영속 스키마 확장 전)
 
-내부 raw inventory 후보(`project/application.rs`)는 Unix에서 한 pass당 100,000개 항목·파일/링크 내용 합계 4GiB·경로 합계 8MiB·개별 UTF-8 경로 4,096byte·깊이 128을 제한한다. 두 pass의 결과를 대조하며 전체 내용 읽기 상한은 8GiB다. root `.git`만 제외하고 ignored/임시 이름/하위 `.git`을 포함한다. 하드링크·특수 파일·비 UTF-8 경로는 거절하며 링크는 대상이 아니라 링크 문자열을 기록한다. 파일 내용·mode·관측한 identity/ctime 변경을 검사하지만 원자 snapshot이나 동일 UID 외부 작성자 차단을 보장하지 않는다. 아직 snapshot 생성·원장·제품 API에 연결하지 않았고 HEAD/index 검증·영속 binding·legacy 정책 구현은 남아 있다. 이 내부 수치가 복원 백업 용량 정책을 대신하지 않는다.
+내부 raw inventory 후보(`project/application.rs`)는 Unix에서 한 pass당 100,000개 항목·파일/링크 내용 합계 4GiB·경로 합계 8MiB·개별 UTF-8 경로 4,096byte·깊이 128을 제한한다. 두 pass의 결과를 대조하며 전체 내용 읽기 상한은 8GiB다. root `.git`만 제외하고 ignored/임시 이름/하위 `.git`을 포함한다. 하드링크·특수 파일·비 UTF-8 경로는 거절하며 링크는 대상이 아니라 링크 문자열을 기록한다. 파일 내용·mode·관측한 identity/ctime 변경을 검사하지만 원자 snapshot이나 동일 UID 외부 작성자 차단을 보장하지 않는다. 이 단독 수집기는 snapshot 생성·원장·제품 API에 연결하지 않았다. 후속 index/raw 통합 비교 후보는 아래에 기록하며 영속 binding·legacy 정책 구현은 남아 있다. 이 내부 수치가 복원 백업 용량 정책을 대신하지 않는다.
 
 새 snapshot 생성 시 no-follow raw source baseline receipt를 원장에 결속한다. receipt는 canonical root/실물 directory identity, HEAD/tree, index의 semantic entry 집합, `.git` 밖 파일의 경로·종류·mode·size·content digest·device/inode/link count를 bounded stream으로 담으며 capture 전후 동일성도 확인한다. 읽기에 따라 OS가 갱신할 수 있는 atime은 비교·무변경 보장에서 제외한다. 앱이 atime을 복원하는 쓰기도 하지 않는다. tracked 파일과 index가 HEAD의 raw tree와 다르면 첫 적용 지원 대상에서 제외한다. 필터/LFS 변환을 clean 명령으로 실행해서 동등성을 만들어내지 않는다.
 
@@ -23,9 +23,13 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 기존 snapshot에는 receipt가 없으므로 원본 적용에는 사용할 수 없다. 기존 파일/채팅/diff 열기는 유지하지만 과거 baseline을 현재 source에서 소급 생성하지 않는다. 사용자에게 새 기준에서 작업을 시작하도록 안내한다. A1은 receipt 생성·영속 binding·재검증·legacy 거절 회귀까지 통과해야 하며, 그 전 A2 검토 묶음은 writer admission 근거가 아니다.
 
-내부 `application/git_baseline.rs` 후보는 index image 32MiB와 각 Git 출력 24MiB를 제한하고, `ls-files -v --stage --sparse -z`와 `ls-tree -rz`의 경로/mode/OID 집합을 대조한다. staged 변경·unmerged stage·gitlink·split index·sparse directory entry·skip-worktree·assume-unchanged는 거절한다. full index 형태의 sparse checkout도 skip-worktree 표시로 차단한다. 같은 빈 blob으로 보이는 intent-to-add는 cached 전용 `diff-index --ita-invisible-in-index`로 추가 확인한다. 외부 diff/textconv/rename과 fsmonitor/hooks를 명시 끄고 index stamp/hash 및 HEAD를 전후 확인한다. 이 검사는 작업 폴더 bytes의 HEAD 동등성을 증명하지 않으며 raw blob 비교와 영속 receipt 결속은 별도 미완료다. unsupported Git 옵션도 허용으로 해석하지 않고 실패한다. 실제 사용자 저장소·외부 객체 fetch/관리 설정 전체 안전성 증거 없이 제품 입장에 연결하지 않는다.
+내부 `application/git_baseline.rs` 후보는 index image 32MiB와 각 Git 출력 24MiB를 제한하고, `ls-files -v --stage --sparse -z`와 `ls-tree -rz`의 경로/mode/OID 집합을 대조한다. staged 변경·unmerged stage·gitlink·split index·sparse directory entry·skip-worktree·assume-unchanged는 거절한다. full index 형태의 sparse checkout도 skip-worktree 표시로 차단한다. 같은 빈 blob으로 보이는 intent-to-add는 cached 전용 `diff-index --ita-invisible-in-index`로 추가 확인한다. 외부 diff/textconv/rename과 fsmonitor/hooks를 명시 끄고 index stamp/hash 및 HEAD를 전후 확인한다. 이 index 단독 검사는 작업 폴더 bytes의 HEAD 동등성을 증명하지 않는다. 후속 raw blob 비교 후보는 아래에 기록하며 영속 receipt 결속은 아직 미완료다. unsupported Git 옵션도 허용으로 해석하지 않고 실패한다. 실제 사용자 저장소·외부 객체 fetch/관리 설정 전체 안전성 증거 없이 제품 입장에 연결하지 않는다.
 
 명령 의미는 [Git ls-files](https://git-scm.com/docs/git-ls-files), [ls-tree](https://git-scm.com/docs/git-ls-tree), [diff-index](https://git-scm.com/docs/git-diff-index)의 공식 문서를 확인했다. `diff-index --cached`는 working-tree 파일을 비교하지 않으며 외부 변환은 별도로 끈다. 일반 `git diff`/`status`를 무설정으로 실행하는 정책이 아니다.
+
+후속 내부 `git_baseline/raw_baseline.rs`가 위의 별도 검사들을 묶는다. index/HEAD → raw inventory → committed blob 비교 → raw/index 재검사 → canonical root 경로 신원 재검사 순서다. raw source 두 pass와 blob 한 pass 각각 4GiB로 제한한다(내용 합계 최대12GiB, Git metadata 읽기는 별도 한도). 일반 파일/링크의 raw SHA-256·길이·owner 실행 bit를 비교하고 Git 객체 header+bytes의 SHA-1 또는 SHA-256도 재계산한다. SHA-1은 Git 호환용이며 receipt 내용 digest의 SHA-256을 대체하지 않는다. untracked/ignored 원본 파일은 기록에 남지만 managed 변경 파일로 승격하지 않는다.
+
+[Git cat-file 공식 문서](https://git-scm.com/docs/git-cat-file)의 batch raw 경로를 사용하며 filters/textconv/follow-symlinks 옵션은 사용하지 않는다. header256byte·본문 합계4GiB를 제한하고 missing/잘못된 OID/type/잘림·추가 stdout을 거절한다. 프로세스 정리는 기존 StreamingGitChild를 재사용한다. **시간 상한·비정상 Git 자손 종료와 Git 객체/로컬 설정 전체 신뢰 경계는 제품 결속 전 추가 검증 대상**이다. 현재 성공은 관측 구간의 비교이지 원자 snapshot이나 동일 UID 동시 작성자 차단이 아니다. 영속 receipt·snapshot 결속·legacy 정책 및 원본 writer/복원은 여전히 미구현이다.
 
 검토 대상은 project/chat/task/worktree/workspace identity, base commit/tree, 검토 시 snapshot 파일 집합의 digest로 고정한다. renderer는 원본 절대 경로·patch bytes·백업 경로를 전달하지 않는다.
 
