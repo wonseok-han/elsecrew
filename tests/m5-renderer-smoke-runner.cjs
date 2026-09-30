@@ -131,6 +131,12 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-file-search button[type=submit]').click();
     await ${waitFor("document.querySelector('.m5-search-results button')?.textContent === 'src/example.ts'", "recursive file search result")};
     if (document.querySelector('.m5-file-row').textContent !== 'src') throw new Error('search changed folder navigation');
+    const searchLanguage = document.querySelector('.m5-toolbar-actions select');
+    searchLanguage.value = 'en'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === 'Find by file name or path'", "English file search")};
+    if (fileSearch !== document.querySelector('.m5-file-search input') || fileSearch.value !== 'EXAMPLE.TS' || document.querySelector('.m5-search-results button').textContent !== 'src/example.ts') throw new Error('language switch lost search');
+    searchLanguage.value = 'ko'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === '파일 이름 또는 경로 찾기'", "Korean search restored")};
     document.querySelector('.m5-search-results button').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && document.querySelector('.monaco-editor') && Object.hasOwn(globalThis, 'MonacoEnvironment') && typeof globalThis.MonacoEnvironment.getWorker === 'function'", "Monaco mount and reveal")};
     const localWorker = globalThis.MonacoEnvironment.getWorker("smoke", "editor");
@@ -298,6 +304,13 @@ app.whenReady().then(async () => {
     const next = () => [...document.querySelectorAll('button')].find(button => button.textContent === '다음 변경');
     next().click();
     await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "second diff page")};
+    const diffLanguage = document.querySelector('.m5-toolbar-actions select');
+    const diffContents = document.querySelector('.m5-diff-lines tbody').textContent;
+    diffLanguage.value = 'en'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('Page 2 /')", "English diff pagination")};
+    if (document.querySelector('.m5-diff-lines tbody').textContent !== diffContents) throw new Error('language switch changed diff contents or page');
+    diffLanguage.value = 'ko'; diffLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('2 /')", "Korean diff restored")};
     next().click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 3", "last diff page")};
     if (!next().disabled || !document.querySelector('.m5-diff-lines').textContent.includes('+line 401')) throw new Error('last diff lines missing');
