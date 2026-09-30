@@ -3,6 +3,77 @@ use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
 #[cfg(unix)]
+#[test]
+fn application_confirmation_is_ephemeral_single_use_and_revalidates() {
+    use application::review::{confirmation::Confirmations, persistence, ReviewTarget};
+    let mut f = source_index_fixture();
+    f.manager
+        .open_project(
+            &mut f.storage,
+            f.source.to_str().unwrap(),
+            "req_confirm_open",
+        )
+        .unwrap();
+    f.manager
+        .create_worktree_inner(
+            &mut f.storage,
+            &f.project_id,
+            "req_confirm_snapshot",
+            None,
+            None,
+            SnapshotCreation::ApplicationCandidate,
+        )
+        .unwrap();
+    let saved = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_confirm_publish",
+    )
+    .unwrap();
+    let id = saved["reviewId"].as_str().unwrap();
+    let target = ReviewTarget::Project(&f.project_id);
+    let mut owner = Confirmations::default();
+    let (first, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    assert!(Confirmations::default()
+        .confirm(&f.manager, &f.storage, &first)
+        .is_err());
+    owner.confirm(&f.manager, &f.storage, &first).unwrap();
+    assert!(owner.confirm(&f.manager, &f.storage, &first).is_err());
+    let (canceled, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    owner.cancel();
+    assert!(owner.confirm(&f.manager, &f.storage, &canceled).is_err());
+    let (expired, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    owner.expire_for_test();
+    assert!(owner.confirm(&f.manager, &f.storage, &expired).is_err());
+    let (old, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    let (new, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    assert_ne!(old, new);
+    assert!(owner.confirm(&f.manager, &f.storage, &old).is_err());
+    assert!(owner.confirm(&f.manager, &f.storage, &new).is_err());
+    let (failed_open, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    assert!(owner
+        .open(&f.manager, &f.storage, target, "invalid")
+        .is_err());
+    assert!(owner.confirm(&f.manager, &f.storage, &failed_open).is_err());
+    let (stale, _) = owner.open(&f.manager, &f.storage, target, id).unwrap();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    std::fs::write(
+        active.worktree_path.join("src/edit.txt"),
+        b"changed after preview",
+    )
+    .unwrap();
+    assert!(owner.confirm(&f.manager, &f.storage, &stale).is_err());
+    assert_eq!(
+        std::fs::read(f.source.join("src/edit.txt")).unwrap(),
+        b"hello"
+    );
+}
+
+#[cfg(unix)]
 fn source_index_fixture() -> Fixture {
     let fixture = Fixture::open();
     git_raw(

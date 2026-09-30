@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 검토 확인 수명(내부): `review/confirmation.rs`는 세션 메모리에 한 개의 무작위 ticket만 유지한다. 검토 재열기(실패 포함)·취소·owner 재생성으로 무효화하며 5분이 지나면 거절한다. 확인 시 성공/실패 모두 ticket을 소비하고 exact 저장 descriptor와 현재 파일을 다시 대조한다. 이 반환 plan은 원본 쓰기 권한이 아니다. 적용 transaction/복원 지점·쓰기 직전 재검증과 공개 IPC/UI 연결은 아직 남는다. 아래의 미연결 ticket은 제품 연결을 뜻한다.
+
 > 채팅별 검토 대상(내부): `ReviewTarget::Chat`은 프로젝트의 현재 active 포인터 대신 해당 채팅의 manifest/marker로 exact workspace를 검증한다. chat/task ID·상태·revision과 건강한 미소유 lock의 ID/실제 경로/revision을 binding에 포함한다. `application_chat_reviews[chatId]`에 각 최신 descriptor를 보존하고 project+chat+lock revision을 같은 transaction에서 검사한다. 다른 채팅의 새 검토는 기존 채팅 검토를 덮지 않으며 후속 대화·잠금 변경은 재검토를 요구한다. 명시 확인 ticket·승인/원본 쓰기는 아직 연결하지 않았다.
 
 > 변경 검토 기반(내부): `application/review.rs`가 원장 receipt·현재 원본·현재 snapshot을 재검증하여 정렬된 before/after 변경 집합과 bounded digest를 만든다. untracked 충돌·case/정규화 충돌·미지원 종류/권한을 거절하고 확인 후 원본/복사본의 내용·신원 변화도 거절한다. `review/persistence.rs`는 프로젝트의 최신 prepared descriptor를 revision CAS로 원장에 게시하고 재열기 때 현재 파일에서 plan을 재구성·대조한다. descriptor에는 binding·변경 digest·root/파일 신원 포함 snapshot digest·count가 있고 승인 상태는 없다. 원본을 쓰거나 삭제하지 않으며 chat/task 승인·공개 IPC/UI·writer는 아직 없다. 상세 지원/한도는 `proposals/m5-change-application.md` A2를 따른다.

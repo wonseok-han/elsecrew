@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (일회용 검토 확인 수명)
+
+- 9f7455d에서 review/confirmation.rs 내부 owner를 추가했다. 한 개의 무작위 ticket·5분 monotonic 만료, open 실패 포함 재열기/취소 시 무효화, confirm 시 성공/실패 모두 소비한다. 확인은 기존 persisted descriptor와 source/snapshot을 다시 대조하고 검사 뒤 만료도 확인한다. 세션 재생성은 빈 상태이며 승인은 저장하지 않는다.
+- 검증: 실제 임시 snapshot 집중1 PASS/8.08초(다른 owner·재사용·취소·만료·새 ticket·실패한 재열기·파일 변경 거절/원본 보존), strict all-targets clippy PASS/3.42초. 신규 모듈/테스트 블록 포맷·diff 검사. 독립 검토자 scoped PASS, 테스트 독립 재실행은 아니다. Karpathy 지침에 따라 기존 재열기 검증을 재사용했다.
+- 반환 plan은 쓰기 권한이 아니며 공개 IPC/UI와 원본 반영 transaction·backup/intent·쓰기 직전 재검증은 남는다. 이번 확인 로직은 내부 후보이며 앱 전체 완료가 아니다. 실제 계정/모델 실행·main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 상태 재점검)
+
+- 사용자 요청으로 9f7455d/m5/coding-agent-ide에서 OS 프로세스와 앱 데이터 메타데이터를 확인했다. 개발 앱·sidecar·Vite는 이미 종료된 상태이고 검색된 VS Code/Cursor crash handler는 별도 앱이므로 종료하지 않았다.
+- 활성 codex-login.pending은 없으며 보존 pending inode 168613811·helper inode 166226396이 기존 기록과 일치한다. auth.json은 내용을 열지 않고 mode 0600 유지 확인했다. 기존 보존 복구가 유지되어 추가 삭제·인증 초기화·재부팅은 하지 않았다.
+- 실제 로그인 재실행 성공을 검증한 것은 아니다. 코드 변경 없이 이번 확인 기록만 남긴다. main 병합/push 없음. 원본 적용/복원과 실제 provider 제품 연결의 남은 개발은 별도다.
+
 ### 2026-09-30 · by GPT-6 Astra (채팅별 검토 대상·잠금 결속)
 
 - 327bb99에서 ReviewTarget::Chat을 추가했다. 해당 chat의 manifest/marker로 옛 snapshot도 검증하고 projection/record의 chat/task/workspace·상태·revision을 묶는다. application_chat_reviews[chatId] 슬롯을 분리하여 다른 채팅 검토를 덮지 않는다. project+chat+lock revision CAS로 게시하며 모든 target은 건강한 미소유 lock을 요구한다.
