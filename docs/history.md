@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A1 불변 receipt 저장 후보)
+
+- 44d3b1f의 SourceBaseline에 source 신원을 보존하고 snapshot_identity·raw/index 상태를 canonical JSON과 SHA-256 descriptor로 저장/재검증하는 내부 receipt 모듈을 추가했다. exclusive-create 0600·file/directory fsync·no-follow 재조회로 기존/부분 파일을 덮어쓰지 않는다. 기록 없는 legacy는 파일 존재만으로 허용하지 않는다.
+- 독립 검토의 임의 Dir 쓰기와 전체 JSON tree 선할당 지적을 수정했다. ProjectManager 전용 managed child에서만 만드는 opaque ReceiptStore를 사용하고 항목별 스트리밍 직렬화에 encoded64MiB 한도를 적용한다. 이는 프로세스 전체 메모리 한도 주장이 아니다. 동일 검토자의 정적 재검토 scoped PASS이며 독립 테스트 실행은 아니다.
+- 검증: focused source_receipt 4 PASS/5.33초(이번 receipt 회귀3개와 기존 storage 회귀1개), strict all-targets clippy PASS, scoped rustfmt·diff 검사. 초기 String 이동 오류는 borrow로, clippy 테스트 모듈 위치 오류는 파일 끝 이동으로 수정했다. 원본 receipt 미생성·재열기·신원/원본 drift·변조/잘림·hardlink/symlink·잘못된 descriptor·출력 한도를 확인했다.
+- Karpathy 지침에 따라 기존 capability/원장을 재사용하는 내부 후보로 제한했다. 실제 Storage descriptor 원자 게시와 snapshot 생성 연결·중단 복구, A2~A5 원본 적용/복원은 아직 남는다. 실제 계정/모델/사용자 프로젝트 시험·main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 요청 확인)
+
+- 사용자 요청에 따라 OS 프로세스와 앱 데이터 메타데이터를 다시 확인했다. sandbox의 ps 거부 뒤 승인된 읽기 전용 조회에서 Hello Agent 개발 앱·sidecar·Vite는 없었다. 검색된 VS Code/Cursor crash handler는 다른 앱이므로 종료하지 않았다.
+- 활성 codex-login.pending은 없고 보존 pending inode 168613811·helper inode 166226396이 유지된다. auth.json은 내용 조회 없이 mode 0600 유지 확인. 기존 보존 복구가 유지되어 추가 종료·파일 이동/삭제·인증 초기화·재부팅을 하지 않았다. 실제 로그인/모델 실행 성공까지 검증한 것은 아니다.
+- 기준 HEAD 44d3b1f의 기존 A1 receipt 미커밋 구현과 제안서 변경을 보존했다. 도착한 독립 검토의 임의 Dir 쓰기 경계·직렬화 전 메모리 예산 지적 2건은 미해결로 남기며 이번 종료/복구 요청에서 구현 완료나 승인으로 취급하지 않는다. 다음 개발 시 이 두 건과 원장 결속을 처리해야 한다. main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A1 raw working-tree와 blob 비교)
 
 - 54268b1 위에서 메인이 git_baseline/raw_baseline.rs의 내부 capture_clean_baseline을 구현했다. index → raw 한 pass → root 경로 신원 → cat-file batch blob 비교 → raw/index 재조회 → root 경로 재확인 순서다. raw 두 pass와 blob 한 pass 각각4GiB·header256byte를 제한한다. source 쓰기·filter/textconv/follow-symlinks 없이 파일 bytes/크기/owner 실행 bit/링크 문자열을 확인하고 untracked·ignored도 inventory에 보존한다.
@@ -208,6 +221,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **A1 receipt 저장 후보(2026-09-30)**: opaque ReceiptStore만 전용 source-baselines-v1에 불변 파일을 쓸 수 있다. 항목별 streaming과 encoded64MiB 한도·fsync·재검증을 제공하지만 descriptor 원장 게시/실제 snapshot 생성 연결은 미구현이다. 원장 descriptor 없는 legacy를 파일만으로 승격하지 않는다. 이전 raw blob 항목의 영속 receipt 없음은 내부 파일 후보 추가로 갱신하되 writer 권위는 여전히 없다.
 
 - **A1 raw blob 비교 후보(2026-09-30)**: capture_clean_baseline은 index/HEAD와 raw 파일 상태를 묶고 blob SHA-256 및 Git object OID를 직접 대조한다. ordinary byte/mode/link drift·missing object·root 경로 교체와 필터 미실행 회귀를 통과했다. 지금은 내부 반환값만 있고 영속 receipt나 writer 권위는 없으며, 기존 Git helper의 시간/자손 수명 제한을 제품 활성화 전에 닫아야 한다.
 

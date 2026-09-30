@@ -284,6 +284,115 @@ fn source_raw_baseline_rejects_missing_objects_and_replaced_source_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn source_receipt_survives_reopen_and_rejects_legacy_drift_and_tampering() {
+    use application::git_baseline::raw_baseline::{
+        capture_clean_baseline,
+        receipt::{self, BaselineReceipt},
+    };
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_refresh_receipt",
+        )
+        .unwrap();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let baseline = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let mut active = fixture.create();
+    let receipt_path = fixture.manager.data_root.join("source-baselines-v1");
+    let receipt_dir = receipt::ReceiptStore::open(&fixture.manager).unwrap();
+    let recorded = receipt::persist(&receipt_dir, &active, &baseline).unwrap();
+    let restored = BaselineReceipt::from_value(
+        &serde_json::from_slice(&serde_json::to_vec(&recorded.to_value()).unwrap()).unwrap(),
+    )
+    .unwrap();
+    let reopened = receipt::ReceiptStore::open(&fixture.manager).unwrap();
+    assert!(!fixture
+        .source
+        .join(format!("{}.source-baseline-v1.json", active.worktree_id))
+        .exists());
+    let current = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    receipt::verify(&reopened, &active, &current, Some(&restored)).unwrap();
+    assert!(receipt::verify(&reopened, &active, &current, None).is_err());
+    assert!(receipt::persist(&reopened, &active, &current).is_err());
+    let original_identity = active.workspace_identity.clone();
+    active.workspace_identity = "workspace_other".to_owned();
+    assert!(receipt::verify(&reopened, &active, &current, Some(&restored)).is_err());
+    active.workspace_identity = original_identity;
+    fs::write(fixture.source.join("untracked.txt"), b"new local work").unwrap();
+    let changed = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    assert!(receipt::verify(&reopened, &active, &changed, Some(&restored)).is_err());
+    let path = receipt_path.join(format!("{}.source-baseline-v1.json", active.worktree_id));
+    let before = fs::read(&path).unwrap();
+    let mut corrupt = before.clone();
+    corrupt[0] = b'!';
+    fs::write(&path, &corrupt).unwrap();
+    assert!(receipt::verify(&reopened, &active, &current, Some(&restored)).is_err());
+    assert!(receipt::persist(&reopened, &active, &current).is_err());
+    assert_eq!(fs::read(&path).unwrap(), corrupt);
+    fs::write(&path, &before[..before.len() / 2]).unwrap();
+    assert!(receipt::verify(&reopened, &active, &current, Some(&restored)).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn source_receipt_rejects_links_and_invalid_descriptors() {
+    use application::git_baseline::raw_baseline::{
+        capture_clean_baseline,
+        receipt::{self, BaselineReceipt},
+    };
+    use std::os::unix::fs::symlink;
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_refresh_receipt_links",
+        )
+        .unwrap();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let baseline = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let active = fixture.create();
+    let receipt_path = fixture.manager.data_root.join("source-baselines-v1");
+    let receipt_dir = receipt::ReceiptStore::open(&fixture.manager).unwrap();
+    let recorded = receipt::persist(&receipt_dir, &active, &baseline).unwrap();
+    for (key, value) in [
+        ("length", json!(0)),
+        ("length", json!(64 * 1024 * 1024 + 1)),
+        ("digest", json!("sha256:bad")),
+        ("schemaVersion", json!(2)),
+        ("extra", json!(true)),
+    ] {
+        let mut invalid = recorded.to_value();
+        invalid[key] = value;
+        assert!(BaselineReceipt::from_value(&invalid).is_err());
+    }
+    let path = receipt_path.join(format!("{}.source-baseline-v1.json", active.worktree_id));
+    let alias = receipt_path.join("receipt-alias");
+    fs::hard_link(&path, &alias).unwrap();
+    assert!(receipt::verify(&receipt_dir, &active, &baseline, Some(&recorded)).is_err());
+    fs::remove_file(&alias).unwrap();
+    fs::remove_file(&path).unwrap();
+    symlink(fixture.source.join("src/edit.txt"), &path).unwrap();
+    assert!(receipt::verify(&receipt_dir, &active, &baseline, Some(&recorded)).is_err());
+    assert!(receipt::persist(&receipt_dir, &active, &baseline).is_err());
+    assert_eq!(
+        fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+        b"hello"
+    );
+}
+
 #[test]
 fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
     let mut fixture = Fixture::open();

@@ -8,9 +8,13 @@ use crate::project::{
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::Stdio;
+pub(in crate::project) mod receipt;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::project) struct SourceBaseline {
+    source_root: String,
+    source_identity: String,
+    object_format: String,
     raw: SourceInventory,
     index: GitIndexBaseline,
 }
@@ -31,7 +35,15 @@ pub(in crate::project) fn capture_clean_baseline(
         ));
     }
     verify_root_path(source, &raw)?;
-    Ok(SourceBaseline { raw, index })
+    Ok(SourceBaseline {
+        source_root: crate::project::canonical_protocol_path_without_existing(
+            &source.canonical_root,
+        )?,
+        source_identity: source.source_identity.clone(),
+        object_format: source.object_format.clone(),
+        raw,
+        index,
+    })
 }
 
 fn verify_root_path(
