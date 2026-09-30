@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (Codex 로그인 공급자 서명 전환)
+
+- 94aefcc의 복원 예산 완료 뒤 실제 채팅 생성의 baseline 연결을 대조했다. FreshChat을 ApplicationCandidate로 바로 바꾸면 미지원 원본까지 새 입장 조건으로 막으므로 제품 안내/복구와 함께 연결해야 한다. 대신 확정된 업데이트 호환 요구에 따라 Codex 로그인·진단의 exact SHA release 목록을 제거하고 OpenAI 서명 신뢰와 실행 중 bytes 결속을 분리했다. Karpathy 지침으로 Claude·실제 모델 실행 정책은 변경하지 않는다.
+- 고정 native CLI/helper 경로와 Apple anchor·OpenAI Team2DC432GLL2·각 executable identifier를 OS codesign으로 검증한다. 기존 trusted release의 서명 신원을 확인했고 CLI/helper 실제 읽기 전용 서명 검사는 통과했다. 검사 전 파일 digest를 보관하고 검사 후 및 실행 전 신원/bytes를 다시 확인한다. 기존 로그인 wire/URL/profile/종료 검증은 유지한다. 버전이 바뀌어도 서명으로 입장하며 실제 프로토콜 비호환은 기존 응답 검증에서 거절한다.
+- 독립 검토에서 pathname 서명 검사 동안 다른 파일로 바꿨다가 원래 inode/bytes로 되돌리는 경합을 지적했다. 최초 파일·모든 상위 directory의 no-follow handle와 ctime/mtime(ns 포함)·신원 stamp를 보관하고 서명 후 및 기존 실행 전 revalidate에서 held/path 모두 대조하도록 수정했다. 파일/부모 swap-and-restore 회귀는 authenticator 도달까지 확인한다. 초기 수정은 기존 helper의 루트 경로 거절로 positive1 FAIL했고 signature용 루트 handle 처리를 분리해 고쳤다. 반환 이후 적대적 same-UID 경합까지 막는 fd-exec로 주장하지 않는다.
+- executable5 PASS/설치1 ignored, manager8 PASS/3 ignored, 설치본 별도 서명 경로1 PASS(2.19초, CLI/helper 수락·다른 식별자/공급자 거절), 최종 strict clippy·rustfmt·diff check PASS. 독립 재검토에서 P1 교체 경합 해소를 확인했다. 병렬 fixture의 공용 임시 부모 변경으로 정상 대조군1 FAIL을 관측해 정상 대조군만 최대32회 안정 관측을 기다리게 했고 거절 회귀는 재시도하지 않는다. 제품도 상위 폴더 변경을 보수적으로 거절할 수 있으며 point-in-time 검증 한계를 유지한다. 계정/모델 실행은 하지 않았으며 Claude 업데이트 정책·actual 실행·원본 반영과 복원·G6/Windows/출시는 남는다. 기존 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (승인된 복원 예산 구현)
 
 - 직전 지침 확인 응답은 개발 진전이 아니며 beb44ec/m5 통합 브랜치와 기존 archive 변경을 확인하고 직접 구현을 재개했다. Karpathy 지침으로 내부 반영 백업 생성 경로에 앱 전체 기본5GiB 제한을 연결했다. 고아/abandoned 파일도 합산하고 directory flock으로 협력 작성자를 직렬화하며 각 write 전에 남은 예산을 검사한다. 기존 복원 파일 자동 삭제나 원본 쓰기는 추가하지 않는다.
@@ -162,6 +169,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Codex 로그인 업데이트 입장(2026-09-30)**: 로그인·진단은 고정 bundle native 후보의 Apple anchor/OpenAI Team2DC432GLL2/exact CLI·helper identifier 서명으로 입장한다. release SHA 목록은 이 경로에서 제거했고 실행 중 교체 감지용 digest는 유지한다. 새 코드 경로의 설치본 검사는 CLI/helper 수락·잘못된 identifier/다른 공급자 거절을 확인했으나 계정/모델을 호출하지 않았다. Claude와 actual runtime의 pin/호환 전환은 남으며 모든 upstream 파괴적 변경 호환을 보장하지 않는다.
 
 - **복원 예산 내부 연결(2026-09-30)**: 반영 백업 생성은 앱 데이터 루트의 모든 archive 일반 파일을 합산해 기본5GiB 내 write만 허용한다. 고아/abandoned도 포함하고 directory flock으로 협력 작성자를 직렬화한다. 기존 파일 자동 삭제 없음. preparing 예약 뒤 한도 실패 시 명시 복구가 필요할 수 있다. 제품 원본 writer·복원/정리/예산 설정 UI는 별도 미구현이며 이 내부 제한으로 전체 반영 기능 완료를 주장하지 않는다.
 

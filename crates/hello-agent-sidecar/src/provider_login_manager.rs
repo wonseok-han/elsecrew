@@ -92,19 +92,16 @@ impl LoginManager {
                 let cancel = self.cancel.clone();
                 let claude = self.claude;
                 let attempt = self.attempt.clone();
-                // Only inspect the same pinned executable candidates as login.
-                // No profile creation, credentials, child process or network.
+                // Inspect the same executable candidates as login. Codex uses
+                // the OS signature verifier, not the provider or its credentials.
                 self.worker = Some(thread::spawn(move || {
                     let result = if claude {
                         crate::provider_claude_login::diagnose()
                     } else {
-                        select_pair(
-                            &[
-                                Path::new("/Applications/ChatGPT.app/Contents/Resources"),
-                                Path::new("/Applications/Codex.app/Contents/Resources"),
-                            ],
-                            CODEX_LOGIN_PAIRS,
-                        )
+                        select_signed_pair(&[
+                            Path::new("/Applications/ChatGPT.app/Contents/Resources"),
+                            Path::new("/Applications/Codex.app/Contents/Resources"),
+                        ])
                         .map(|_| ())
                     };
                     let (state, error) = if cancel.load(Ordering::Acquire) {
@@ -323,26 +320,38 @@ pub(super) fn digest(value: &str) -> [u8; 32] {
     bytes
 }
 
-// Exact signed CLI/host pairs; never learn trust from an installed candidate.
-// 0.154.0-alpha.6.2 has identical generated login types to 0.153.4 (20 files).
-const CODEX_LOGIN_PAIRS: &[(&str, &str)] = &[
-    (
-        "3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a",
-        "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
-    ),
-    (
-        "a1d2f191e70023ed7afd619bc70530f26067a085926e03bae50cf5c0f8298bcf",
-        "35ce5aa1789c994e1cd2dbe134e7156fe4aebdd4d463bc5330e165c2cf925095",
-    ),
-    (
-        "87a08119b8effa519f0ecb552dc98043f58a8200bf2ec5da60f76890c33e9c3a",
-        "038b9c6b60baacbfacba1fe81cf603c22b73697810e013d4efda040f1a7294e7",
-    ),
-];
+fn select_signed_pair(
+    roots: &[&Path],
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    select_candidates(roots, |cli, host| {
+        Ok((
+            PinnedExecutable::open_codex_signed(cli, false)?,
+            PinnedExecutable::open_codex_signed(host, true)?,
+        ))
+    })
+}
 
+#[cfg(test)]
 fn select_pair(
     roots: &[&Path],
     pairs: &[(&str, &str)],
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    select_candidates(roots, |cli, host| {
+        for (cli_hash, host_hash) in pairs {
+            if let (Ok(cli), Ok(host)) = (
+                PinnedExecutable::open(cli, digest(cli_hash)),
+                PinnedExecutable::open(host, digest(host_hash)),
+            ) {
+                return Ok((cli, host));
+            }
+        }
+        Err(unavailable())
+    })
+}
+
+fn select_candidates(
+    roots: &[&Path],
+    authenticate: impl Fn(&Path, &Path) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError>,
 ) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
     let mut present = false;
     for root in roots {
@@ -357,13 +366,8 @@ fn select_pair(
         ] {
             let path = root.join(cli_relative);
             present |= std::fs::symlink_metadata(&path).is_ok();
-            for (cli_hash, host_hash) in pairs {
-                if let (Ok(cli), Ok(host)) = (
-                    PinnedExecutable::open(&path, digest(cli_hash)),
-                    PinnedExecutable::open(&root.join(host_relative), digest(host_hash)),
-                ) {
-                    return Ok((cli, host));
-                }
+            if let Ok(pair) = authenticate(&path, &root.join(host_relative)) {
+                return Ok(pair);
             }
         }
     }
@@ -383,13 +387,10 @@ fn run(
     publish: &impl Fn(&str, Option<String>, Option<&str>),
     check_only: bool,
 ) -> Result<(), SidecarError> {
-    let (executable, helper) = select_pair(
-        &[
-            Path::new("/Applications/ChatGPT.app/Contents/Resources"),
-            Path::new("/Applications/Codex.app/Contents/Resources"),
-        ],
-        CODEX_LOGIN_PAIRS,
-    )?;
+    let (executable, helper) = select_signed_pair(&[
+        Path::new("/Applications/ChatGPT.app/Contents/Resources"),
+        Path::new("/Applications/Codex.app/Contents/Resources"),
+    ])?;
     let home = profile.revalidate()?;
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);
