@@ -18,6 +18,7 @@ import { ApprovalCard } from "./approval-card.tsx";
 import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
+import { languageFor } from "./editor-language.ts";
 import { ProjectCatalog } from "./project-catalog-view.tsx";
 import { WorkStatusNotice } from "./work-status-view.tsx";
 import { validateProjectCatalogResult } from "./contracts/project-catalog-v1.ts";
@@ -30,12 +31,25 @@ function loadMonaco(): Promise<MonacoApi> {
   monacoLoader ??= Promise.all([
     import("monaco-editor/esm/vs/editor/editor.api"),
     import("monaco-editor/esm/vs/editor/editor.worker?worker"),
+    import("monaco-editor/esm/vs/language/json/json.worker?worker"),
+    import("monaco-editor/esm/vs/language/json/monaco.contribution"),
     import("monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution"),
     import("monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution"),
-  ]).then(([api, editorWorker]) => {
+    import("monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/python/python.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/rust/rust.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/go/go.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/shell/shell.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/css/css.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/html/html.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/sql/sql.contribution"),
+    import("monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution"),
+  ]).then(([api, editorWorker, jsonWorker]) => {
+    // Monaco 0.52 JSON defaults disable remote schema requests. Keep local workers.
     // Vite emits the worker alongside the local renderer assets; no CDN or eval loader is used.
     (globalThis as typeof globalThis & { MonacoEnvironment?: Monaco.Environment }).MonacoEnvironment = {
-      getWorker: () => new editorWorker.default(),
+      getWorker: (_id, label) => label === "json" ? new jsonWorker.default() : new editorWorker.default(),
     };
     return api;
   });
@@ -457,14 +471,6 @@ function ChangeKind({ entry }: { entry: DiffEntryV1 }) {
 
 function labelForKind(kind: DiffEntryV1["kind"]): string {
   return ({ added: "추가", modified: "수정", deleted: "삭제", renamed: "이름 변경", binary: "이진" })[kind];
-}
-
-function languageFor(path: string): string {
-  if (path.endsWith(".tsx") || path.endsWith(".ts")) return "typescript";
-  if (path.endsWith(".js") || path.endsWith(".jsx")) return "javascript";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".md")) return "markdown";
-  return "plaintext";
 }
 
 function fileName(path: string): string {

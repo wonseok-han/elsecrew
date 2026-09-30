@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 편집기 언어: 로컬 Monaco tokenizer로 TS/JS·Markdown·Python·Rust·Go·Shell·YAML·CSS·HTML·SQL·Dockerfile을 지원하고 JSON은 별도 로컬 worker를 선택한다. JSON 원격 schema 요청은 고정 Monaco 0.52 기본값(false)을 유지한다. 미지원 파일은 plaintext이며 외부 언어 서버/실행기 지원을 뜻하지 않는다.
+
 > 편집기 저장: Monaco의 Cmd/Ctrl+S 및 context menu는 현재 editable dirty tab만 기존 controller.saveActive로 전달한다. 최신 active path/storage admission과 controller의 작업 차단/충돌 검증을 유지하며 editor 밖 전역 키를 가로채지 않는다. 원본 적용이 아니라 작업 복사본 저장이다.
 
 > pending 원본 관측(내부): `intent::observe_pending_source`는 결속 archive/pending 검증 후 저장 canonical root·Git source identity/HEAD/tree를 대조하고 기존 두-pass no-follow raw inventory와 root 재열기 stamp를 확인한다. 부모가 현재 real directory인 항목만 before 전체 metadata/inode와 `matchesBeforeEntry`, 또는 정규화 after와 `matchesAfterImage`로 비교하며 나머지는 conflict다. root inode를 포함한 현재 관측만 반환하며 파일/DB/잠금은 변경하지 않는다. after 일치는 앱 작성 소유권 증명이 아니고 before 일치도 중간에 외부 변경이 전혀 없었다는 뜻은 아니다. 과거 root inode 보존·동일 UID 경합 보호·안전한 자동 재시도/복원 권위를 제공하지 않는다. 기존 inventory 한도와 전체 archive 재검증 비용을 유지한다.

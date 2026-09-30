@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (코드 편집기 언어 정의 보완)
+
+- 기존 TypeScript/Markdown 로더에 JavaScript·Python·Rust·Go·Shell·YAML·CSS·HTML·SQL·Dockerfile와 JSON 로컬 worker를 연결했다. 확장자·대소문자·Windows 경로·특수 파일명을 구분하고 미지원은 plaintext로 둔다. Monaco 0.52의 원격 JSON schema 요청 기본 비활성을 유지하며 언어 서버나 코드 실행을 추가하지 않았다.
+- 검증: 28개 파일명 매핑 1 PASS, 숨김 Chromium 2 PASS(실제 Rust/Python/JSON 파일 열기와 data-mode-id, 로컬 JSON worker 생성), 최종 TypeScript noEmit·renderer build·diff 검사 PASS. 초기 ES2020 Array.at 및 빈 JSON contribution 타입 선언 오류를 수정했다. 첫 UI 실패는 data-mode-id가 내부 요소가 아닌 host에 붙는 테스트 선택자 오류였고 수정 후 통과했다. 기존 Monaco chunk 경고는 남는다.
+- Karpathy 지침으로 번들 언어 정의와 기존 worker 수명을 재사용했다. 원본 반영 안전 정책/백업 예산의 미승인 문서 변경은 보존한다. 사용자 원본/계정/유료 모델·main 병합/push 없음. 전체 앱 완료가 아니다.
+
 ### 2026-09-30 · by GPT-6 Astra (편집기 저장 단축키 연결)
 
 - 원본 반영 정책은 미승인으로 유지하고 독립적인 IDE 편집 기능을 진행했다. Monaco의 Cmd/Ctrl+S와 context menu 저장을 기존 saveActive에 연결했다. 최신 tab/path·readOnly·dirty 조건과 현재 active path/admission을 확인하며 controller의 기존 충돌/작업 차단 검증은 유지한다. 편집기 밖 전역 키 이벤트는 등록하지 않는다.

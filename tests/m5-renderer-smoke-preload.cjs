@@ -122,7 +122,7 @@ window.m5 = {
     return {
       projectId: "smoke_project",
       parentPath,
-      entries: parentPath === "src" ? [{ path: "src/example.ts", name: "example.ts", kind: "file" }] : [{ path: "src", name: "src", kind: "directory" }],
+      entries: parentPath === "src" ? ["example.ts", "sample.rs", "sample.py", "sample.json"].map(name => ({ path: `src/${name}`, name, kind: "file" })) : [{ path: "src", name: "src", kind: "directory" }],
       nextCursor: null,
     };
   },
@@ -148,7 +148,8 @@ window.m5 = {
     };
   },
   closeProject: async () => ({ projectId: "smoke_project", lifecycle: "abandoned", physicallyDeleted: false }),
-  readFile: async () => {
+  readFile: async ({ path }) => {
+    const text = path.endsWith(".rs") ? "fn main() {}\n" : path.endsWith(".py") ? "def main():\n    pass\n" : path.endsWith(".json") ? '{"ready":true}\n' : "export const smoke = true;\n";
     for (const listener of listeners) {
       listener({
         protocolVersion: 1,
@@ -157,14 +158,14 @@ window.m5 = {
         streamId: "smoke_file",
         seq: 1,
         event: "blob.chunk",
-        payload: { text: "export const smoke = true;\n" },
+        payload: { text },
       });
     }
     return {
       projectId: "smoke_project",
-      path: "src/example.ts",
+      path,
       classification: "utf8",
-      byteLength: 27,
+      byteLength: Buffer.byteLength(text),
       version: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       stream: { streamId: "smoke_file", chunkBytes: 262144 },
     };

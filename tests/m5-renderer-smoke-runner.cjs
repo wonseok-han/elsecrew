@@ -252,6 +252,20 @@ app.whenReady().then(async () => {
   }
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("globalThis.shortcutSaves === 1 && !document.querySelector('[aria-label=\"저장되지 않은 변경\"]')", "keyboard save commits the snapshot draft")};
+    document.querySelector('.m5-file-row').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-file-row')].some(b => b.textContent.includes('sample.rs'))", "language fixture files")};
+    for (const [name, language] of [['sample.rs','rust'], ['sample.py','python'], ['sample.json','json']]) {
+      [...document.querySelectorAll('.m5-file-row')].find(b => b.textContent.includes(name)).click();
+      await new Promise((resolve, reject) => {
+        const deadline = Date.now() + 3000;
+        const timer = setInterval(() => {
+          if (document.querySelector('.m5-monaco')?.getAttribute('data-mode-id') === language) { clearInterval(timer); resolve(); }
+          else if (Date.now() > deadline) { clearInterval(timer); reject(new Error('language mode not selected: ' + language + '; ' + document.body.innerText.slice(-1800))); }
+        }, 25);
+      });
+    }
+    const jsonWorker = globalThis.MonacoEnvironment.getWorker('smoke', 'json');
+    jsonWorker.terminate();
     document.querySelector('.m5-change-row').click();
     await ${waitFor("document.querySelectorAll('.m5-diff-lines tbody tr').length === 200", "bounded diff page")};
     if (!document.querySelector('.m5-diff-deleted') || !document.querySelector('.m5-diff-added')) throw new Error('missing distinct change rows');
