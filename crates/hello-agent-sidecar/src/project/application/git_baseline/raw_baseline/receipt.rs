@@ -1,4 +1,4 @@
-//! Immutable local receipt candidate. Its descriptor still needs durable ledger binding.
+//! Immutable receipt and ledger binding for the internal application snapshot candidate.
 use super::SourceBaseline;
 use crate::project::application::{open, stamp};
 use crate::project::{
@@ -17,7 +17,6 @@ const RECEIPT_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 // Publication is only legal during a durably fenced snapshot preparation.
 // The descriptor is produced here, never accepted from a renderer or a disk scan.
-#[allow(dead_code)]
 pub(in crate::project) fn persist_and_bind(
     manager: &ProjectManager,
     storage: &mut Storage,

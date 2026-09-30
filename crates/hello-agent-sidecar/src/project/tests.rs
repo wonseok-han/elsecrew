@@ -26,6 +26,128 @@ fn source_index_fixture() -> Fixture {
 
 #[cfg(unix)]
 #[test]
+fn application_snapshot_creation_preserves_all_receipts_after_restart() {
+    use application::git_baseline::raw_baseline::{capture_clean_baseline, receipt};
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_app_open",
+        )
+        .unwrap();
+    let before = git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"]);
+    let mut snapshots = Vec::new();
+    for request in ["req_app_one", "req_app_two", "req_app_three"] {
+        fixture
+            .manager
+            .create_worktree_inner(
+                &mut fixture.storage,
+                &fixture.project_id,
+                request,
+                None,
+                None,
+                SnapshotCreation::ApplicationCandidate,
+            )
+            .unwrap();
+        snapshots.push(
+            fixture
+                .manager
+                .validate_active_project(&fixture.storage, &fixture.project_id)
+                .unwrap(),
+        );
+    }
+    let database = fixture.manager.data_root.join("hello-agent.sqlite3");
+    drop(fixture.storage);
+    let storage = Storage::open(&database).unwrap();
+    let manager = ProjectManager::new(&database).unwrap();
+    let source = manager.open_source_repository(&fixture.source).unwrap();
+    let baseline = capture_clean_baseline(&manager, &source).unwrap();
+    let project = required_project(&storage, &fixture.project_id).unwrap();
+    assert_eq!(project["source_baselines"].as_object().unwrap().len(), 3);
+    for active in &snapshots {
+        receipt::verify_bound(&manager, &storage, active, &baseline).unwrap();
+    }
+    assert_eq!(
+        before,
+        git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"])
+    );
+    assert!(storage.blocker_ids().unwrap().is_empty());
+    fs::write(
+        fixture.source.join("new-untracked-file"),
+        b"changed after creation",
+    )
+    .unwrap();
+    let changed = capture_clean_baseline(&manager, &source).unwrap();
+    assert!(receipt::verify_bound(&manager, &storage, &snapshots[0], &changed).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn application_snapshot_creation_keeps_failures_fenced_without_downgrade() {
+    for scenario in ["dirty", "publication", "activation"] {
+        let mut fixture = source_index_fixture();
+        fixture
+            .manager
+            .open_project(
+                &mut fixture.storage,
+                fixture.source.to_str().unwrap(),
+                "req_app_open",
+            )
+            .unwrap();
+        if scenario == "dirty" {
+            fs::write(fixture.source.join("src/edit.txt"), b"user change").unwrap();
+        }
+        if scenario == "publication" {
+            fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_baseline BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_source_baseline_%' BEGIN SELECT RAISE(ABORT, 'publication failure'); END;").unwrap();
+        }
+        let point = (scenario == "activation")
+            .then_some(WorktreeFailurePoint::AfterWorkspaceRenameBeforeActivation);
+        assert!(fixture
+            .manager
+            .create_worktree_inner(
+                &mut fixture.storage,
+                &fixture.project_id,
+                "req_app_failure",
+                point,
+                None,
+                SnapshotCreation::ApplicationCandidate
+            )
+            .is_err());
+        let project = required_project(&fixture.storage, &fixture.project_id).unwrap();
+        assert_eq!(project["lifecycle"], "recoveryRequired");
+        assert!(!fixture.storage.blocker_ids().unwrap().is_empty());
+        assert!(fixture
+            .manager
+            .inspect_unstarted_snapshot(&fixture.storage, &fixture.project_id)
+            .is_err());
+        assert_eq!(
+            project.contains_key("source_baselines"),
+            scenario == "activation"
+        );
+        if scenario == "publication" {
+            assert!(fixture
+                .manager
+                .data_root
+                .join("source-baselines-v1")
+                .join(format!(
+                    "{}.source-baseline-v1.json",
+                    project["worktree_id"].as_str().unwrap()
+                ))
+                .is_file());
+        }
+        if scenario == "dirty" {
+            assert_eq!(
+                fs::read(fixture.source.join("src/edit.txt")).unwrap(),
+                b"user change"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn source_index_baseline_rejects_staged_and_head_changes() {
     use application::git_baseline::capture_index_baseline;
     let fixture = source_index_fixture();

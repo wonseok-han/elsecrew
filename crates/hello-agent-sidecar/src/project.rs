@@ -153,6 +153,16 @@ pub enum WorktreeFailurePoint {
     AfterWorkspaceRenameBeforeActivation,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotCreation {
+    ReuseActive,
+    FreshChat,
+    // Not exposed through product IPC until application admission is ready.
+    #[cfg(unix)]
+    #[allow(dead_code)]
+    ApplicationCandidate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveFailurePoint {
     AfterRenameBeforeDirectorySync,
@@ -550,7 +560,7 @@ impl ProjectManager {
         request_id: &str,
         failure: Option<WorktreeFailurePoint>,
     ) -> Result<ProjectAction, ProjectFailure> {
-        self.create_worktree_inner(storage, project_id, request_id, failure, None, false)
+        self.create_worktree_inner(storage, project_id, request_id, failure, None, SnapshotCreation::ReuseActive)
     }
 
     pub fn prepare_chat_workspace(
@@ -559,7 +569,7 @@ impl ProjectManager {
         project_id: &str,
         request_id: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
-        self.create_worktree_inner(storage, project_id, request_id, None, None, true)
+        self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::FreshChat)
     }
 
     #[cfg(test)]
@@ -579,7 +589,7 @@ impl ProjectManager {
             request_id,
             None,
             Some(&mut hook),
-            false,
+            SnapshotCreation::ReuseActive,
         )
     }
 
@@ -590,7 +600,7 @@ impl ProjectManager {
         request_id: &str,
         failure: Option<WorktreeFailurePoint>,
         mut pre_export_hook: Option<&mut dyn FnMut()>,
-        fresh_for_chat: bool,
+        creation: SnapshotCreation,
     ) -> Result<ProjectAction, ProjectFailure> {
         let project = required_project(storage, project_id)?;
         if !storage.blocker_ids()?.is_empty() {
@@ -599,7 +609,7 @@ impl ProjectManager {
             ));
         }
         let lifecycle = value_string(&project, "lifecycle")?;
-        if lifecycle == "active" && !fresh_for_chat {
+        if lifecycle == "active" && creation == SnapshotCreation::ReuseActive {
             let active = self.validate_active_project(storage, project_id)?;
             return Ok(ProjectAction {
                 result: manifest_value(&active, "active")?,
@@ -703,6 +713,12 @@ impl ProjectManager {
         let mut launching = preparation_lock;
         launching["evidence"]["phase"] = json!("snapshotExportStarting");
         append_object(storage, "lock", &lock_id, &format!("op_snapshot_launch_{worktree_id}"), request_id, launching)?;
+        #[cfg(unix)]
+        let baseline = if creation == SnapshotCreation::ApplicationCandidate {
+            Some(application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?)
+        } else {
+            None
+        };
         let bundle_bytes = self.export_bundle(&source.git_dir, &staging)?;
         let after = source_digest(&source.git_dir)?;
         if before != after || after.lock_count != 0 {
@@ -714,6 +730,13 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery(
                 "failure injected after bundle export before materialization",
             ));
+        }
+
+        #[cfg(unix)]
+        if let Some(expected) = &baseline {
+            if *expected != application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)? {
+                return Err(ProjectFailure::dirty("source baseline changed during snapshot export"));
+            }
         }
 
         self.initialize_snapshot_repository(&staging, &source)?;
@@ -739,6 +762,12 @@ impl ProjectManager {
             manifest_path,
             lock_id,
         };
+        #[cfg(unix)]
+        if let Some(baseline) = &baseline {
+            application::git_baseline::raw_baseline::receipt::persist_and_bind(
+                self, storage, &active, baseline, request_id,
+            )?;
+        }
         let manifest = manifest_value(&active, "active")?;
         write_json_atomic(
             &self.manifests_dir,
@@ -760,6 +789,8 @@ impl ProjectManager {
             ));
         }
 
+        // Publication may have added a source receipt after the original open record.
+        let project = required_project(storage, project_id)?;
         self.persist_pre_activation(storage, &active, &project, request_id)?;
         let final_dir = self.worktree_capability(&active)?;
         let durable = required_project(storage, &active.project_id)?;

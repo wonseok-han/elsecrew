@@ -19,8 +19,7 @@ pub(in crate::project) struct SourceBaseline {
     index: GitIndexBaseline,
 }
 
-// Internal candidate only. Durable snapshot binding and writer admission do not exist yet.
-#[allow(dead_code)]
+// Used by the internal application snapshot candidate; no product writer admission.
 pub(in crate::project) fn capture_clean_baseline(
     manager: &ProjectManager,
     source: &SourceRepository,

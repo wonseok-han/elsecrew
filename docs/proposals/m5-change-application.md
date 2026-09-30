@@ -1,6 +1,6 @@
 # M5 변경 반영·복원 구현 계약 초안
 
-상태: A1 내부 후보 구현 중, 제품 연결·원본 writer 구현 전. 2026-09-30, 기준 `54268b1` 이후. 제품 방향은 [M5 §5.5·§6.5·M5.3](m5-coding-agent-ide.md)이 우선한다. 이 문서는 원본 쓰기 권한을 활성화하거나 실제 사용자 프로젝트 시험을 승인하지 않는다.
+상태: A1 내부 생성 경로 결속·집중 회귀 완료, 제품 입장·원본 writer 구현 전. 2026-09-30, 기준 `375aba8` 이후. 제품 방향은 [M5 §5.5·§6.5·M5.3](m5-coding-agent-ide.md)이 우선한다. 이 문서는 원본 쓰기 권한을 활성화하거나 실제 사용자 프로젝트 시험을 승인하지 않는다.
 
 ## 확정 범위와 현재 격차
 
@@ -34,6 +34,8 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 검토 대상은 project/chat/task/worktree/workspace identity, base commit/tree, 검토 시 snapshot 파일 집합의 digest로 고정한다. renderer는 원본 절대 경로·patch bytes·백업 경로를 전달하지 않는다.
 
 ### A1 receipt 파일·원장 결속 후보 (제품 생성 연결 전)
+
+내부 `SnapshotCreation::ApplicationCandidate`를 공통 생성 경로에 연결했다. launch fence를 먼저 저장한 뒤 clean baseline을 수집하고 export 후 같은 baseline인지 대조하여 receipt를 게시한다. pre-activation과 activation은 최신 원장 extension을 보존한다. 3개 독립 snapshot 생성·SQLite 재열기·각 기준 검증과 원본 변화 거절을 확인했다. 기존 일반/채팅 생성은 이 admission을 강제하지 않으며 공개 IPC caller는 없다. 이미 dirty이거나 미지원 원본의 편집 기능을 깨뜨리지 않는 제품 안내/입장과 시작 이후 복구·누적 크기/압축은 다음 조건이다. 아래의 생성 미연결 표현은 공개 제품 경로에만 해당한다.
 
 2026-09-30 후속: version1 미시작 준비 복구는 `project.catalog`와 저장 프로젝트 UI에 연결했다. 명시 inspect 뒤 exact inspection으로 폐기하며, 동일한 영속 완료 증거만 응답 유실 재전송을 허용한다. 아래의 공개 연결 미완료 기록은 이 제한된 경로에 대해서 갱신한다. 이미 export를 시작한 실패나 legacy 잠금, 실제 A1 생성 결속은 이 기능으로 해결되지 않는다.
 

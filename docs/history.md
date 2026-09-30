@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (원본 기준과 snapshot 생성 경로 결속)
+
+- 375aba8의 공통 create_worktree_inner에 Unix 내부 ApplicationCandidate를 연결했다. launch fence→clean baseline→export→baseline 재대조→receipt/원장 게시→기존 활성화 순서다. 활성화 시 최초 project 사본으로 새 receipt를 잃지 않도록 최신 원장을 재조회한다. 기존 ReuseActive/FreshChat은 유지하며 공개 caller와 원본 writer는 열지 않았다.
+- 검증: 집중2 PASS/4.16초, project::tests 50 PASS/17.71초·subprocess 전용1 ignored, strict all-targets clippy PASS/5.90초, 추가 테스트 rustfmt·diff 검사. 3개 snapshot 생성/DB 재열기/모든receipt 검증·원본 untracked 변경 거절 및 dirty/DB게시실패/rename후실패 fence 유지 확인. 독립 정적 검토 scoped PASS이며 검토자 테스트 재실행은 아니다.
+- Karpathy 지침으로 별도 생성기를 만들지 않고 기존 경로를 재사용했다. clean 검사를 일반 생성에 즉시 강제하면 기존 dirty/submodule 편집이 막히므로 제품 활성화와 구분했다. 다음은 시작 이후 안전 복구·기록 누적 용량/압축·지원 불가 안내/입장과 A2~A5다. 실제 계정/모델/사용자 프로젝트 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (준비 실패 복구 IPC·화면 연결)
 
 - f540833에서 project.catalog의 inspectPreparation/abandonPreparation 요청·응답 검증과 sidecar 처리를 연결했다. 저장 프로젝트마다 시작 실패 확인→대상 복사본 표시→명시 준비 종료를 제공한다. 파일 삭제는 없고 같은 영속 완료 evidence에만 응답 유실 재전송을 허용하며 다른 revision·새 snapshot은 거절한다. 상태 안내도 새 복구 위치를 알려 준다.
@@ -85,7 +91,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 - **snapshot 준비 복구(2026-09-30)**: snapshot_recovery는 version1 beforeSnapshotExport만 두 revision의 트랜잭션 CAS로 원자 폐기한다. project.catalog와 저장 프로젝트 UI의 명시 확인/종료에 연결했고 exact 영속 완료 evidence에만 응답 유실 재확인을 허용한다. legacy/실행 시작/파일 존재/chat 또는 run 결속은 거절한다. 시작 이후의 불확실 종료 복구는 별도 남는다.
 - **Unix Git 대기 한도(2026-09-30)**: fixed Git stream stdin/stdout/stderr/exit에 명령별120초 deadline을 공유한다. stderr 완료까지 unreaped leader를 유지하고 오류는 그룹 종료·최대2초 direct reap을 시도한다. pipe 보유 자손의 무한 대기는 닫았지만 escaped/비중단 전체 tree 종료 증거는 아니며 Windows fallback에도 적용되지 않는다.
-- **A1 원장 결속 후보(2026-09-30)**: source_baselines[worktreeId] extension으로 불변 파일 descriptor를 기존 project 원장에 게시·조회하며 close/open에서도 보존한다. DB 게시 실패는 artifact와 recovery lock을 남기고 자동 재결속하지 않는다. 기존 명시 폐기 후 새 snapshot 정책을 따르며 실제 생성/복구 호출과 누적 원장 수명 회귀 전에는 제품 활성화하지 않는다. 아래 receipt 게시 미구현 기록은 이 내부 후보 추가로 갱신한다.
+- **A1 원장/생성 결속 후보(2026-09-30)**: source_baselines[worktreeId]는 불변 descriptor를 게시·조회하며 close/open에서 보존한다. 내부 ApplicationCandidate 생성3회·재시작 검증을 통과했고 활성화는 최신 원장 extension을 보존한다. DB 게시 실패는 artifact와 잠금을 남긴다. 공개 생성 활성화·시작 이후 복구·누적 크기/압축은 남고 아래 receipt 게시/생성 미구현 기록은 이 내부 후보 추가로 갱신한다.
 - **A1 receipt 저장 후보(2026-09-30)**: opaque ReceiptStore만 전용 source-baselines-v1에 불변 파일을 쓸 수 있다. 항목별 streaming과 encoded64MiB 한도·fsync·재검증을 제공하지만 descriptor 원장 게시/실제 snapshot 생성 연결은 미구현이다. 원장 descriptor 없는 legacy를 파일만으로 승격하지 않는다. 이전 raw blob 항목의 영속 receipt 없음은 내부 파일 후보 추가로 갱신하되 writer 권위는 여전히 없다.
 - **A1 raw blob 비교 후보(2026-09-30)**: capture_clean_baseline은 index/HEAD와 raw 파일 상태를 묶고 blob SHA-256 및 Git object OID를 직접 대조한다. ordinary byte/mode/link drift·missing object·root 경로 교체와 필터 미실행 회귀를 통과했다. 지금은 내부 반환값만 있고 영속 receipt나 writer 권위는 없으며, 기존 Git helper의 시간/자손 수명 제한을 제품 활성화 전에 닫아야 한다.
 - **A1 index 비교 함정(2026-09-30)**: mode/OID/path만으로는 HEAD의 빈 파일에 대한 intent-to-add를 구분하지 못한다. cached-only diff-index와 명시 외부 converter 차단을 더하고 dirty exit1을 dirtyConflict로 분류한다. split index는 별도 shared image가 필요해 거절하고 sparse-index·full-index sparse·assume-unchanged도 현재 내부 후보에서 거절한다. 실제 raw blob 동등성·receipt 결속 전에는 적용 권위가 아니다.
