@@ -399,14 +399,17 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
-  const latest = useRef({ tab, readOnly, onChange, onSave });
-  useLayoutEffect(() => { latest.current = { tab, readOnly, onChange, onSave }; }, [tab, readOnly, onChange, onSave]);
+  const labels = { save: t("m5.editor.commandSave"), name: t("m5.editor.accessibleName", { path: tab.path }) };
+  const refreshLabels = useRef<(() => void) | null>(null);
+  const latest = useRef({ tab, readOnly, onChange, onSave, labels });
+  useLayoutEffect(() => { latest.current = { tab, readOnly, onChange, onSave, labels }; }, [tab, readOnly, onChange, onSave, labels.save, labels.name]);
 
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
     const resources: { dispose(): void }[] = [];
     const cleanup = () => {
+      refreshLabels.current = null;
       for (const resource of resources.splice(0).reverse()) resource.dispose();
       editor.current = null;
       model.current = null;
@@ -423,21 +426,32 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
         minimap: { enabled: false },
         fontSize: 13,
         readOnly: current.readOnly || current.tab.saveState === "saving",
-        ariaLabel: `${tab.path} 코드 편집기`,
+        ariaLabel: current.labels.name,
       });
       resources.push(nextEditor);
       editor.current = nextEditor;
-      const saveAction = nextEditor.addAction({
-        id: "hello-agent.save-file",
-        label: "작업 복사본에 저장",
-        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-        contextMenuGroupId: "9_cutcopypaste",
-        run: () => {
-          const current = latest.current;
-          requestEditorSave(current.tab, current.readOnly, current.onSave);
-        },
-      });
-      resources.push(saveAction);
+      let saveAction: { dispose(): void } | null = null;
+      resources.push({ dispose: () => { saveAction?.dispose(); saveAction = null; } });
+      const registerLabels = () => {
+        saveAction?.dispose();
+        saveAction = null;
+        nextEditor.updateOptions({ ariaLabel: latest.current.labels.name });
+        saveAction = nextEditor.addAction({
+          id: "hello-agent.save-file",
+          label: latest.current.labels.save,
+          keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+          contextMenuGroupId: "9_cutcopypaste",
+          run: () => {
+            const current = latest.current;
+            requestEditorSave(current.tab, current.readOnly, current.onSave);
+          },
+        });
+      };
+      registerLabels();
+      refreshLabels.current = () => {
+        try { registerLabels(); }
+        catch { cleanup(); setFailed(true); }
+      };
       const subscription = nextModel.onDidChangeContent(() => latest.current.onChange(nextModel.getValue()));
       resources.push(subscription);
     }).catch(() => {
@@ -450,6 +464,8 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       cleanup();
     };
   }, [tab.path, attempt]);
+
+  useEffect(() => { refreshLabels.current?.(); }, [labels.save, labels.name]);
 
   useEffect(() => {
     const currentModel = model.current;

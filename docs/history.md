@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (Monaco 앱 명령 번역·다국어 파동 누적 검증)
+
+- 3b18fbb 기준 앱이 등록한 Monaco 저장 명령과 접근성 이름을 ko/en으로 갱신한다. 언어 전환은 명령만 재등록하고 모델/편집기를 재생성하지 않는다. 최신 언어는 지연 로딩에도 반영하며 갱신 실패는 기존 보존/명시 재시도 화면으로 전환한다. Karpathy 지침으로 Monaco 자체 내장 메뉴 전체 번역은 별도 범위로 명시했다.
+- 검증: 집중9 PASS, TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.68초). 명령1회 교체·초안/읽기 잠금/편집기1회 생성과 단축키를 확인했다. 최초 mock은 부분 updateOptions를 전체 덮어쓰기로 처리해6 FAIL했고 실제 부분 갱신 의미로 수정 후 통과했다. 누적 tests/*.test.mts 404 PASS/0 FAIL(23.58초), diff check PASS. 로그 /private/tmp/hello-agent-i18n-wave-tests.log. Monaco chunk 경고 유지.
+- 관련 코드/기록만 선택 커밋하며 정책 제안/아카이브 미커밋 기록은 보존한다. 이번 파동은 앱 안내 다국어/회귀의 완료이며 제품 전체 완료가 아니다. 원본 반영 정책 결정·실제 공급자 활성화·G6/Windows·패키징/출시 검증은 남는다. 실제 계정/모델·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (역할·공급자 조합 안내와 복구 확인 언어)
 
 - 35a8b7b의 역할/공급자 준비·실행 불가 안내를 순수 chat-notice formatter로 분리하고 키/role/runtime/reason을 보관했다. 알려진8개 원인만 선택하고 unknown은 안전한 기본 안내로 표시한다. 복구 확인은 UI 언어를 인자로 받되 기본 한국어 호환과 기존 취소/종료 증거 경계를 유지한다. Karpathy 지침으로 실행 정책은 변경하지 않았다.

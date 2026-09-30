@@ -54,15 +54,19 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   let pending: (() => unknown)[] = [];
   let text = "original";
   let readOnly: boolean | undefined;
+  let lang: "ko" | "en" = "ko";
+  let editorCreates = 0;
+  let actionDisposals = 0;
+  let accessibleName = "";
   const saves: string[] = [];
-  let saveAction: { run(): void; keybindings: number[] } | undefined;
+  let saveAction: { run(): void; keybindings: number[]; label: string } | undefined;
   let resolveLoader!: (value: unknown) => void;
   const loader = new Promise(resolve => { resolveLoader = resolve; });
   const model = { getValue: () => text, setValue: (value: string) => { text = value; }, onDidChangeContent: () => ({ dispose() {} }), dispose() {} };
-  const editor = { updateOptions: (options: { readOnly: boolean }) => { readOnly = options.readOnly; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() {} }; }, dispose() {} };
+  const editor = { updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
   const context: Record<string, any> = {
     useState: (initial: unknown) => [initial, () => {}],
-    useI18n: () => ({ t: (key: keyof typeof ko) => ko[key] }),
+    useI18n: () => ({ t: (key: keyof typeof ko, params: { path?: string } = {}) => (lang === "ko" ? ko : en)[key].replace("{path}", params.path ?? "") }),
     useRef: (initial: unknown) => { const index = cursor++; return refs[index] ??= { current: initial }; },
     useEffect: (effect: () => unknown, deps: unknown[]) => {
       const index = cursor++;
@@ -75,7 +79,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
     loadMonaco: () => loader,
   };
   context.useLayoutEffect = context.useEffect;
-  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { readOnly = options.readOnly; return editor; } } });
+  const resolveMonaco = () => resolveLoader({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 }, editor: { createModel: (value: string) => { text = value; return model; }, create: (_host: unknown, options: { readOnly: boolean }) => { editorCreates++; readOnly = options.readOnly; return editor; } } });
   runInNewContext(compiled, context);
   const render = async (locked: boolean, saveState: string, value = "original") => {
     cursor = 0; pending = [];
@@ -112,6 +116,13 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   await render(false, "clean");
   assert.equal(readOnly, false);
   await render(false, "dirty", "latest editable draft");
+  lang = "en";
+  await render(false, "dirty", "latest editable draft");
+  assert.equal(editorCreates, 1);
+  assert.equal(actionDisposals, 1);
+  assert.equal(saveAction.label, "Save to working copy");
+  assert.equal(accessibleName, "test.txt code editor");
+  assert.equal(text, "latest editable draft");
   saveAction.run();
   assert.deepEqual(saves, ["test.txt"]);
   await render(false, "saving");
@@ -169,7 +180,7 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
         create: (_host: unknown, options: { readOnly: boolean }) => {
           if (fail && failure === "editor") throw new Error("editor unavailable");
           locked = options.readOnly;
-          return { updateOptions: (next: { readOnly: boolean }) => { locked = next.readOnly; },
+          return { updateOptions: (next: { readOnly?: boolean }) => { if (next.readOnly !== undefined) locked = next.readOnly; },
             addAction: () => {
               if (fail && failure === "action") throw new Error("action unavailable");
               return { dispose() { disposed.push("action"); } };

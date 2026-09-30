@@ -4,6 +4,8 @@ import type { MessageKey } from "./ko";
 export const en: Record<MessageKey, string> = {
   "lang.ko": "한국어",
   "lang.en": "English",
+  "m5.editor.commandSave": "Save to working copy",
+  "m5.editor.accessibleName": "{path} code editor",
   "m5.agentNotice.checking": "Checking {runtime} readiness for the {role} role.",
   "m5.agentNotice.ready": "Safely prepared the {role} role run. Follow its progress in the saved conversation.",
   "m5.agentNotice.blocked": "{runtime} did not start for the {role} role: {cause}. No automatic switch to another model was made.",
@@ -356,7 +358,7 @@ export const en: Record<MessageKey, string> = {
   "m5.login.error.codex": "Could not verify the saved Codex connection. This message alone does not mean you are signed out. Do not delete credentials; use the details below to ask for help.",
   "m5.shell.label": "M5 coding workbench",
   "m5.shell.language": "Language / 화면 언어",
-  "m5.shell.languageScope": "The toolbar, startup notices, sign-in, role settings and basic team conversation controls are translated. Translation of other screens is in progress.",
+  "m5.shell.languageScope": "Workbench app guidance switches between Korean and English. Conversation text, code and technical details stay unchanged; built-in editor menus are separate.",
   "m5.shell.eyebrow": "M5 · Working copy separate from your original",
   "m5.shell.start": "Choose a project to get started",
   "m5.shell.active": "You are viewing files and changes in a working copy separate from your original project.",

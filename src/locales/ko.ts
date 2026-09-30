@@ -3,6 +3,8 @@
 export const ko = {
   "lang.ko": "한국어",
   "lang.en": "English",
+  "m5.editor.commandSave": "작업 복사본에 저장",
+  "m5.editor.accessibleName": "{path} 코드 편집기",
   "m5.agentNotice.checking": "{role} 역할의 {runtime} 준비 상태를 확인하고 있어요.",
   "m5.agentNotice.ready": "{role} 역할 실행을 안전하게 준비했어요. 진행 내용은 저장된 대화 기록으로 확인해요.",
   "m5.agentNotice.blocked": "{role} 역할의 {runtime}은 {cause} 시작하지 않았어요. 다른 모델로 자동 변경하지 않았어요.",
@@ -355,7 +357,7 @@ export const ko = {
   "m5.login.error.codex": "저장된 Codex 연결을 확인하지 못했어요. 이 메시지만으로 로그아웃된 것은 아니에요. 인증 파일을 삭제하지 말고 아래 정보로 도움을 요청해 주세요.",
   "m5.shell.label": "M5 코딩 작업대",
   "m5.shell.language": "화면 언어 / Language",
-  "m5.shell.languageScope": "현재 도구막대·준비 안내·로그인·역할 설정·팀 대화 기본 안내가 번역돼요. 나머지 화면은 준비 중이에요.",
+  "m5.shell.languageScope": "작업대의 앱 안내는 한국어·영어로 전환돼요. 대화·코드 원문과 기술 상세는 바꾸지 않으며, 편집기 내장 메뉴는 별도예요.",
   "m5.shell.eyebrow": "M5 · 원본과 분리된 작업 복사본",
   "m5.shell.start": "프로젝트를 선택해 시작하세요",
   "m5.shell.active": "원본 프로젝트와 분리된 복사본에서 파일과 변경 내용을 안전하게 확인하고 있어요.",
