@@ -19,6 +19,12 @@ fn failure() -> SidecarError {
     SidecarError::new("providerLoginFailed", "Claude login could not be verified")
 }
 
+pub(crate) fn diagnose() -> Result<(), SidecarError> {
+    let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
+        .join(".local/share/claude/versions");
+    select_executable(&versions).map(|_| ())
+}
+
 pub(crate) fn run(
     profile: &ClaudeProfileBinding,
     cancel: &AtomicBool,
@@ -54,6 +60,14 @@ pub(crate) fn run(
 }
 
 fn select_executable(versions: &std::path::Path) -> Result<PinnedExecutable, SidecarError> {
+    if std::fs::symlink_metadata(versions)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Err(SidecarError::new(
+            "providerExecutableMissing",
+            "Claude installation directory is unavailable",
+        ));
+    }
     for (version, hash) in [
         (
             "2.1.275",
@@ -263,6 +277,13 @@ mod tests {
     fn installed_version_names_never_authorize_unpinned_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
+        assert_eq!(
+            select_executable(&root.join("missing"))
+                .err()
+                .unwrap()
+                .kind(),
+            "providerExecutableMissing"
+        );
         assert!(select_executable(&root).is_err());
         for version in ["2.1.275", "2.1.270", "99.0.0"] {
             std::fs::write(root.join(version), b"untrusted executable").unwrap();

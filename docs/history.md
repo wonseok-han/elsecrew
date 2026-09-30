@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (로그인 전 설치 사전 진단 연결)
+
+- 30b65f8 기준 메인이 Karpathy 지침으로 기존 pinned 실행 파일 선택을 재사용한 고정 diagnose 요청을 구현했다. 진단 자체는 프로필/인증 파일 생성·CLI 실행·네트워크 없이 supported 프로그램만 검사하며 installed와 실제 connected를 분리한다. renderer 최초 진단 성공 뒤 기존 계정 확인을 수행하고 명시 재진단 버튼도 제공한다. Claude 설치 경로 부재는 미지원/변조 후보와 구분한다.
+- 다음 설치 연결의 주의점: 기존 src-tauri/src/install.rs는 Claude vendor script와 Codex standalone 최신 release 다운로드를 사용하지만 M5 Codex 로그인은 앱 번들의 pinned CLI+code-mode-host pair만 받는다. 레거시 설치 함수를 그대로 연결해 설치 성공=연결 가능이라고 표시하면 안 된다. supported 공급/업데이트 경로를 먼저 정합시켜야 하며 이번 진단은 전체 PATH 설치 유무를 주장하지 않는다.
+- 진단은 기존 worker·복구 필요 상태를 덮어쓰지 않는다. 완료 publication과 worker 종료 경합, 완료 직후 취소 경합을 처리해 다음 계정 확인이 잘못 시작되지 않게 했다. 검증: Node 계약/번역10 및 bridge/security57 PASS, TypeScript noEmit·renderer build PASS, 합성 Chromium2 PASS(4.88초). Rust manager8 PASS/3 ignored와 Claude pin/missing1 PASS, strict clippy·변경 파일 rustfmt·diff check PASS. 취소 회귀 추가 시 테스트가 앞선 prepare_quit의 취소 플래그를 재사용해1 FAIL했고 합성 상태를 초기화한 뒤 집중 검사 PASS했다. 전체 cargo fmt는 기존 비범위 파일 포맷 불일치로 실패해 변경 파일만 정리했다.
+- 상시 승인된 독립 검토자1명이 진단/복구/취소 경계를 최종 승인했다. 검토자가 동일 테스트 상태 초기화 문제를 확인했으며 수정 뒤 차단 지적은 없다. 실제 계정·유료 모델·설치 실행은 하지 않았고 기존 정책/아카이브 변경은 보존했다. 자동 설치·전체 기기 진단, 실제 공급자 실행, 원본 반영/복원 및 G6/Windows/출시는 여전히 미완료다. 관련 파일과 직전 복구 확인 기록만 선택 커밋하며 main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 요청 현재 상태 확인)
+
+- 사용자 요청으로 30b65f8/m5/coding-agent-ide의 개발 앱·Vite·sidecar 실행 여부와 앱 전용 로그인 파일 메타데이터를 다시 확인했다. 권한 확장 읽기 전용 프로세스 조회에서 개발 앱은 이미 종료돼 추가 종료 대상이 없었다. Codex/ChatGPT와 다른 앱의 crash handler는 유지했다.
+- 활성 codex-login.pending은 없으며 이전 보존 잠금(inode 168613811, 0600, 61바이트)과 stale helper(inode 166226396)는 유지된다. 인증 파일도 0600으로 존재하며 내용은 읽거나 변경하지 않았다. 이미 수행된 보존 복구를 반복하거나 인증을 초기화하지 않았고 재부팅도 필요하지 않다.
+- 검증은 OS 프로세스·파일 메타데이터 및 diff check이며 실제 계정 연결 성공 재검증은 아니다. 현재 추가 해제 대상은 없고 다음은 앱에서 연결 상태 재확인이다. 기존 정책/아카이브 미커밋 변경 보존, main 병합·push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (다국어 파동 후 핵심 제품 경로 재대조)
 
 - 998c011/m5 통합 checkout과 제품 명세 §5.1, provider-login.tsx, AgentRuntime::blocked/blocked_capability, native dispatcher 및 원본 반영 제안을 대조했다. 이전 파동은 구현/누적404 PASS의 진전이며 전체 완료가 아니다. 제품 actual 시작은 여전히 차단돼 있고 source writer/restore·공개 반영 UI가 없다. Electron에는 로그인은 있지만 설치·기기 진단을 포함한 승인된 guided-start 연결이 없다.

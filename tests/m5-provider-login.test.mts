@@ -24,6 +24,19 @@ test("login feedback distinguishes executable drift from authentication and reco
   assert.match(loginErrorMessage("claude","providerLoginRecoveryRequired"), /안전 종료를 차단/);
 });
 import { validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+test("installation diagnosis is fixed, model-free and separate from authentication", () => {
+  for (const provider of ["codex", "claude"] as const) {
+    assert.deepEqual(validateLoginRequest({action:"diagnose",provider,attemptId:"diagnosis-1"}), {action:"diagnose",provider,attemptId:"diagnosis-1"});
+    for (const state of ["diagnosing", "installed"]) {
+      const status = {state,attemptId:"diagnosis-1",authUrl:null,error:null};
+      assert.equal(validateLoginStatus(status,provider).state,state);
+      assert.throws(() => validateLoginStatus({...status,authUrl:"https://auth.openai.com/authorize"},provider));
+    }
+  }
+  for (const extra of [{path:"/tmp/tool"},{command:"install"},{force:true}]) {
+    assert.throws(() => validateLoginRequest({action:"diagnose",attemptId:"a",...extra}));
+  }
+});
 test("connection code submission is Claude-only, bounded and never accepts commands or URLs",()=>{
   const request={action:"submitCode",provider:"claude",attemptId:"a",code:"synthetic#state"};
   assert.deepEqual(validateLoginRequest(request),request);

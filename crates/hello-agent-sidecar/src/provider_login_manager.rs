@@ -73,6 +73,52 @@ impl LoginManager {
         }
         match action {
             "status" => {}
+            "diagnose" => {
+                if self.attempt.as_deref() == id {
+                    return Ok(self.status());
+                }
+                if self.worker.is_some()
+                    || self.view.lock().unwrap_or_else(|e| e.into_inner())["error"]
+                        == "providerLoginRecoveryRequired"
+                {
+                    return Err(invalid());
+                }
+                self.attempt = id.map(str::to_owned);
+                self.cancel = Arc::new(AtomicBool::new(false));
+                self.view = Arc::new(Mutex::new(
+                    json!({"state":"diagnosing","attemptId":id,"authUrl":null,"error":null}),
+                ));
+                let view = self.view.clone();
+                let cancel = self.cancel.clone();
+                let claude = self.claude;
+                let attempt = self.attempt.clone();
+                // Only inspect the same pinned executable candidates as login.
+                // No profile creation, credentials, child process or network.
+                self.worker = Some(thread::spawn(move || {
+                    let result = if claude {
+                        crate::provider_claude_login::diagnose()
+                    } else {
+                        select_pair(
+                            &[
+                                Path::new("/Applications/ChatGPT.app/Contents/Resources"),
+                                Path::new("/Applications/Codex.app/Contents/Resources"),
+                            ],
+                            CODEX_LOGIN_PAIRS,
+                        )
+                        .map(|_| ())
+                    };
+                    let (state, error) = if cancel.load(Ordering::Acquire) {
+                        ("canceled", None)
+                    } else {
+                        match &result {
+                            Ok(()) => ("installed", None),
+                            Err(error) => ("failed", Some(error.kind())),
+                        }
+                    };
+                    *view.lock().unwrap_or_else(|e| e.into_inner()) =
+                        json!({"state":state,"attemptId":attempt,"authUrl":null,"error":error});
+                }));
+            }
             "recover" => {
                 if self.worker.is_some() {
                     return Err(invalid());
@@ -196,7 +242,21 @@ impl LoginManager {
         if view.is_null() {
             return json!({"state":"idle","attemptId":null,"authUrl":null,"error":null});
         }
-        let result = view.clone();
+        let mut result = view.clone();
+        if result["state"] == "installed" && self.cancel.load(Ordering::Acquire) {
+            result["state"] = "canceled".into();
+            view["state"] = "canceled".into();
+        }
+        // Do not trigger the renderer's account check until diagnosis releases
+        // its worker slot, even if publication wins the final-thread-exit race.
+        if result["state"] == "installed"
+            && self
+                .worker
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished())
+        {
+            result["state"] = "diagnosing".into();
+        }
         view["authUrl"] = Value::Null; // one browser handoff; never persist or log OAuth URL
         result
     }
@@ -416,6 +476,37 @@ pub(super) fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), Sideca
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn diagnosis_cannot_clear_recovery_or_overlap_an_active_worker() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let mut manager = LoginManager::default();
+        *manager.view.lock().unwrap() = json!({"state":"failed","attemptId":"old","authUrl":null,"error":"providerLoginRecoveryRequired"});
+        assert!(manager
+            .request(&storage, &json!({"action":"diagnose","attemptId":"new"}))
+            .is_err());
+        assert!(!manager.prepare_quit());
+        assert_eq!(manager.status()["error"], "providerLoginRecoveryRequired");
+        manager.cancel.store(false, Ordering::Release);
+        *manager.view.lock().unwrap() =
+            json!({"state":"installed","attemptId":"old","authUrl":null,"error":null});
+        let (release, wait) = std::sync::mpsc::channel();
+        manager.worker = Some(thread::spawn(move || {
+            let _ = wait.recv();
+        }));
+        assert_eq!(manager.status()["state"], "diagnosing");
+        assert!(manager
+            .request(&storage, &json!({"action":"diagnose","attemptId":"new"}))
+            .is_err());
+        release.send(()).unwrap();
+        manager.worker.take().unwrap().join().unwrap();
+        assert_eq!(manager.status()["state"], "installed");
+        manager.cancel.store(true, Ordering::Release);
+        assert_eq!(manager.status()["state"], "canceled");
+        assert!(!root.join("codex-profile-v1").exists());
+    }
 
     #[test]
     fn admission_requires_one_complete_pair_and_reports_drift_separately() {

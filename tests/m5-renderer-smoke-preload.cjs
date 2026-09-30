@@ -18,10 +18,17 @@ window.m5Projects = { request: async (input) => {
 const loginStates = {codex:{state: "idle", attemptId: null, authUrl: null, error: null},claude:{state: "idle", attemptId: null, authUrl: null, error: null}};
 let codexRecoveryAttempts = 0;
 let codexChecks = 0;
+const diagnosedProviders = new Set();
 window.m5Login = { request: async (input) => {
   const provider = input.provider ?? "codex";
   let status = loginStates[provider];
+  if (input.action === "diagnose") {
+    if (status.error === "providerLoginRecoveryRequired") throw new Error("diagnosis cannot clear recovery");
+    diagnosedProviders.add(provider);
+    status = {...status,state:"installed",attemptId:input.attemptId,error:null};
+  }
   if (input.action === "check") {
+    if (!diagnosedProviders.has(provider)) throw new Error("account check before diagnosis");
     if (provider === "codex") codexChecks += 1;
     const recoveryRequired = provider === "codex" && codexChecks > 1 && codexRecoveryAttempts < 2;
     status = {...status,state:provider === "codex" ? (recoveryRequired ? "failed" : "connected") : "idle",attemptId:input.attemptId,error:recoveryRequired ? "providerLoginRecoveryRequired" : null};
