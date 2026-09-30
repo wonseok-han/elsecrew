@@ -1,4 +1,4 @@
-const { app, BrowserWindow, net, protocol } = require("electron");
+const { app, BrowserWindow, net, protocol, session } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -24,14 +24,14 @@ function waitFor(script, label) {
 
 app.whenReady().then(async () => {
   if (!rendererDirectory || rendererDirectory === resolve("")) throw new Error("M5_RENDERER_DIR is required");
-  await protocol.handle("m5smoke", (request) => {
+  await session.fromPartition("m5-renderer-smoke").protocol.handle("m5smoke", (request) => {
     const url = new URL(request.url);
     const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
     const asset = resolve(rendererDirectory, relative);
     if (asset !== rendererDirectory && !asset.startsWith(`${rendererDirectory}${sep}`)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).toString());
   });
-  const window = new BrowserWindow({ show: false, webPreferences: { preload, contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  const window = new BrowserWindow({ show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
   window.webContents.on("console-message", (_event, _level, message) => process.stderr.write(`renderer: ${message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
@@ -49,6 +49,18 @@ app.whenReady().then(async () => {
     };
     chooseLanguage('en');
     await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
+    const selection = document.querySelector('[aria-label="Choose your agents"]');
+    if (!selection || window.m5SmokeLoginRequests.length !== 0) throw new Error('first-run agents were checked before selection');
+    if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
+    await ${waitFor("!document.querySelector('.m5-provider-selection input').matches(':disabled')", "storage admission before selection")};
+    selection.querySelector('input[type=checkbox]').click();
+    await ${waitFor("!document.querySelector('.m5-provider-selection button[type=submit]').disabled", "single agent selection")};
+    selection.querySelector('button[type=submit]').click();
+    await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
+    if (document.querySelector('[aria-label="Claude Code connection"]') || window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
+    if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
+    [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
+    await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
     if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
@@ -441,6 +453,12 @@ app.whenReady().then(async () => {
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  await window.loadURL("m5smoke://m5/index.html");
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved agent selection after reload")};
+    if (document.querySelector('.m5-provider-selection form')) throw new Error('saved agent choice was lost');
+    if (!document.querySelector('[aria-label="Claude Code 연결"]')) throw new Error('added agent lost after reload');
+  })()`);
   if (window.isVisible() || window.isFocused()) throw new Error("renderer smoke captured desktop focus");
   window.webContents.debugger.detach();
   await window.close();

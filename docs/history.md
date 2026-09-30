@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (최초 에이전트 선택·선택 기억 연결)
+
+- 1b19604에서 설치 관리 정책 응답과 독립적인 승인된 시작 흐름 §5.1의 에이전트 선택을 구현했다. 메인이 Karpathy 지침으로 UI 선호값만 추가했으며 저장된 유효 선택이 없으면 명시 선택 전 공급자 호출0회다. 한 공급자만 시작하거나 나머지를 나중에 추가할 수 있고 기존 연결 컴포넌트/인증·프로젝트별 역할은 보존한다. 선택을 지원/로그인/실행 성공으로 해석하지 않는다.
+- version1의 제한된 공급자 목록만 저장/복원하며 corrupt/unknown/duplicate/future 값은 재선택으로 돌아간다. 저장 불가 시 현재 세션은 계속하고 다음 실행 재선택 안내를 표시한다. ko/en 안내와 키보드 접근 가능한 checkbox/fieldset을 연결했다. 진행 중 연결을 숨기는 해제 기능은 추가하지 않았다.
+- 검증: Node 선택/로그인/번역13 PASS, TypeScript noEmit·renderer build·diff check PASS. Chromium2 PASS(5.20초)에서 최초 호출 없음, Codex 단독 호출, Claude 명시 추가, 기존 로그인/복구/코드 초안/프로젝트 UI 회귀, 화면 reload 후 선택 유지 확인. 테스트를 메모리 전용 session으로 격리하면서 protocol 등록 session 불일치와 저장소 준비 전 클릭을 각각 수정 후 통과했다. 실제 설치/계정/모델 시험은 아니다. 일반 UI 변경으로 직접 diff 검토했으며 새 안전 권한/복구 조건은 없다.
+- 관련 파일만 선택 커밋하고 기존 정책 제안/아카이브 변경은 보존한다. 설치 관리 정책과 원본 반영 정책 응답, 실제 provider/반영·복원/G6/Windows/출시는 여전히 남아 전체 목표 active를 유지한다. main 병합·push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (설치 공급 경로 불일치 확인·선택 요청)
 
 - b5bd325와 기존 Tauri install.rs를 대조했다. 최신 standalone/vendor installer를 그대로 연결하면 M5의 pinned 앱 번들 pair/Claude 버전 허용과 불일치한다. OpenAI Docs로 Codex CLI/App Server 공식 문서를 조회·본문 확인하고 Claude 공식 setup 문서도 대조했다. 공식 설치 지원과 이 앱의 정확한 실행 파일 신뢰·runtime gate는 별개다. 이번 조사로 레거시 installer의 즉시 제품 연결 대신 공급 정책을 먼저 결정해야 함을 확인했다.

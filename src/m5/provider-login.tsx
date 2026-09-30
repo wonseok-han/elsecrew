@@ -1,10 +1,40 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { loginErrorMessage } from "./provider-login-message.ts";
+import { LOGIN_PROVIDERS, readProviderSelection, saveProviderSelection } from "./provider-selection.ts";
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
 
 export function ProviderLogin({ disabled }: {disabled: boolean}) {
-  return <><ProviderConnection disabled={disabled} provider="codex"/><ProviderConnection disabled={disabled} provider="claude"/></>;
+  const { t } = useI18n();
+  const [selected, setSelected] = useState(readProviderSelection);
+  const [draft, setDraft] = useState<LoginProvider[]>([]);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const select = (providers: LoginProvider[]) => {
+    if (disabled) return;
+    setSaveFailed(!saveProviderSelection(providers));
+    setSelected(providers);
+  };
+  return <>
+    <section className="m5-provider-selection" aria-label={t("m5.setup.agents.title")}>
+      <h2>{t("m5.setup.agents.title")}</h2>
+      <p>{t("m5.setup.agents.help")}</p>
+      {selected.length === 0 ? <form onSubmit={event => { event.preventDefault(); if (draft.length) select(draft); }}>
+        <fieldset disabled={disabled}>
+          <legend>{t("m5.setup.agents.choose")}</legend>
+          {LOGIN_PROVIDERS.map(provider => <label key={provider}>
+            <input type="checkbox" checked={draft.includes(provider)} onChange={event => { const checked = event.currentTarget.checked; setDraft(current => checked ? [...current,provider] : current.filter(item => item !== provider)); }}/>
+            {provider === "codex" ? "Codex" : "Claude Code"}
+          </label>)}
+        </fieldset>
+        <button type="submit" disabled={disabled || draft.length === 0}>{t("m5.setup.agents.continue")}</button>
+      </form> : <div>
+        <p>{t("m5.setup.agents.selected", {names: selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(", ")})}</p>
+        {LOGIN_PROVIDERS.filter(p => !selected.includes(p)).map(provider => <button key={provider} type="button" disabled={disabled} onClick={() => select([...selected,provider])}>{t("m5.setup.agents.add", {name: provider === "codex" ? "Codex" : "Claude Code"})}</button>)}
+      </div>}
+      {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
+    </section>
+    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={provider} disabled={disabled} provider={provider}/>)}
+  </>;
 }
 function ProviderConnection({ disabled, provider }: {disabled: boolean; provider: LoginProvider}) {
   const { lang, t } = useI18n();

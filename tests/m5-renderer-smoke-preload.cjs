@@ -19,8 +19,10 @@ const loginStates = {codex:{state: "idle", attemptId: null, authUrl: null, error
 let codexRecoveryAttempts = 0;
 let codexChecks = 0;
 const diagnosedProviders = new Set();
+window.m5SmokeLoginRequests = [];
 window.m5Login = { request: async (input) => {
   const provider = input.provider ?? "codex";
+  window.m5SmokeLoginRequests.push({provider, action: input.action});
   let status = loginStates[provider];
   if (input.action === "diagnose") {
     if (status.error === "providerLoginRecoveryRequired") throw new Error("diagnosis cannot clear recovery");
