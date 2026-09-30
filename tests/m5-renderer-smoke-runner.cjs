@@ -175,6 +175,12 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "failed-save draft reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-role-card input').value === 'test-model'", "explicit settings reload")};
+    if (document.querySelector('.m5-chat-notice')?.textContent !== '저장된 역할과 모델을 다시 불러왔어요.') throw new Error('chat status notice missing');
+    settingsLanguage.value = 'en'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-chat-notice')?.textContent === 'Reloaded saved roles and models.'", "English chat status notice")};
+    if (document.querySelector('.m5-role-card input').value !== 'test-model') throw new Error('notice language changed role value');
+    settingsLanguage.value = 'ko'; settingsLanguage.dispatchEvent(new Event('change', { bubbles: true }));
+    await ${waitFor("document.querySelector('.m5-chat-notice')?.textContent === '저장된 역할과 모델을 다시 불러왔어요.'", "Korean chat status notice restored")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작업대로 돌아가기').click();
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('settings reload remounted editor');
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '기본 배치로').click();

@@ -191,6 +191,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </header>
 
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.noticeKey ? t(snapshot.noticeKey) : snapshot.notice}</p>}
+      {chat.notice && <p className="m5-notice m5-chat-notice" role="status">{chat.noticeKey ? t(chat.noticeKey) : chat.notice}</p>}
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />

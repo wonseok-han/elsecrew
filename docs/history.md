@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (채팅 상태 안내 누락 연결·고정 문구 다국어)
+
+- b521090에서 chat.notice가 controller에만 저장되고 renderer에는 표시되지 않는 누락을 확인해 role=status 영역에 연결했다. 고정 준비/실행/종료/복구/설정 안내19종과 전환 오류 notice에 typed noticeKey를 보관하며 기존 한국어 문자열은 유지한다. 새 notice/null은 stale key를 제거한다. Karpathy 지침으로 동작 조건·대화 본문은 변경하지 않았다.
+- 검증: chat UI state/번역 Node21 PASS, TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.72초). 설정 재읽기 상태의 실제 표시·ko/en 전환·모델값 보존 및 기존 저장/전환 흐름을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/모델 시험 아님.
+- 관련 코드/기록만 선택 커밋한다. 역할/공급자/실행 불가 원인의 조합 문구와 네이티브 복구 확인창, Monaco 내부 표시 번역은 남는다. 정책/아카이브 미커밋 기록은 보존하며 원본 반영/실제 provider/G6/Windows/출시 미완료, main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (편집 상태·차단 notice 다국어)
 
 - a1b3cba에서 편집 완료/외부 변경/전환·복구 차단 안내28종에 typed noticeKey를 연결했다. 기존 notice 문자열과 setActionBlocked 문자열 인자 호환은 유지하며 명시 key 인자만 추가했다. 새 notice/null로 갱신할 때 이전 key를 제거하고 notice를 갱신하지 않는 차단 해제는 기존 안내를 유지한다. Karpathy 지침으로 차단/저장/복구 조건을 변경하지 않았다.

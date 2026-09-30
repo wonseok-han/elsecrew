@@ -277,6 +277,8 @@ test("settings save failure and explicit reload preserve the active chat and set
   bridge.revision = 2;
   await controller.reloadSettings();
   assert.equal(controller.snapshot().settings?.revision, 2);
+  assert.equal(controller.snapshot().noticeKey, "m5.chatNotice.settingsLoaded");
+  assert.equal(controller.snapshot().notice, "저장된 역할과 모델을 다시 불러왔어요.");
   assert.equal(controller.snapshot().activeChat, before.activeChat);
   assert.equal(controller.snapshot().chats, before.chats);
   const loaded = controller.snapshot().settings;
