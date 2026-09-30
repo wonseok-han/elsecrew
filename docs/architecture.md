@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 확인→백업 준비 결속(내부): `Confirmations::prepare_backup`은 일회용 token을 소비하고 exact 검토를 다시 연 뒤 새 백업을 준비하거나 ready 백업을 재검증해 재사용한다. preparing의 자동 복구는 하지 않는다. 결과는 serialize/clone 불가능한 `PreparedApplication`으로 동일 owner generation과 최초 만료 시각에 묶인다. cancel·새 open(실패 포함)·새 owner는 무효이며 consume은 generation을 한 번 소비하고 current review와 ready archive/record를 다시 검사한다. 긴 백업/최종 검증 후에도 만료를 검사한다. 반환은 적용 transaction의 입력 후보이며 project-wide 배타 잠금·적용 intent·쓰기 직전 검증을 대신하지 않는다. 공개 UI/IPC 연결과 source writer는 남는다.
+
 > 미완료 백업 명시 복구(내부): `staging::resume`은 preparing의 예약된 이름/header와 현재 검토·원본 baseline을 다시 대조한다. 완성 파일의 각 before mode/identity까지 baseline과 일치해야 새 descriptor를 계산해 ready를 CAS 게시한다. Git 정규화 검토 digest만으로 전체 복원 권한을 추론하지 않는다. missing/partial/stale은 거절하며 inspect는 여전히 자동 승격하지 않는다. `abandon`은 exact preparing 기록만 abandoned로 CAS 전환하고 파일·원본·잠금을 건드리지 않으며 같은 요청의 응답 유실 재전송을 허용한다. 새 검토/새 백업은 가능하지만 이전 파일과 기록은 보존한다. 디스크 회수·보존 정책과 공개 복구 UI는 아직 없다.
 
 > 백업 준비 원장(내부): `backup/staging.rs`는 archive 생성 전에 project의 `application_backups[reviewId]`에 exact 파일명·검토 header·preparing을 project/lock/chat revision CAS로 저장한다. 검증 완료 후 같은 준비 기록과 최신 검토를 대조해 ready 및 descriptor를 게시한다. 미완료가 있으면 다음 준비를 거절하고 metadata 합계256KiB를 제한한다. 재시작 inspect는 preparing을 파일 존재만으로 승격하지 않으며 ready의 strict descriptor/decoded header를 원장과 대조한다. 프로젝트/채팅 lifecycle은 이 extension을 보존한다. 이는 백업 준비만의 원장이며 source-writer 잠금이나 적용 intent가 아니다. 명시 파일 회수·원장별 보존 용량 정책·confirmation 연결과 source writer는 남는다.

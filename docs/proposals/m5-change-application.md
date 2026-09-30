@@ -94,6 +94,8 @@ source/snapshot 전체 경로의 NFKC→upper/lower→NFD 보수적 충돌 key�
 
 ## 열린 결정
 
+확인→백업 결속 후속(2026-09-30): 내부 prepare_backup/consume_prepared가 exact 확인 token·같은 review의 ready 백업·세션 generation·최초5분 만료를 연결한다. 저장된 ready를 재시작 승인으로 해석하지 않으며 실패한 open/취소도 이전 grant를 무효화한다. grant는 메모리에서 이동 소비하고 최종 검토/백업을 재검증한다. 아래 confirmation 미연결 중 이 단계는 구현됐지만 적용 intent 게시/배타권 취득·writer 및 UI에서 사용자 확인 받기는 여전히 남는다.
+
 명시 백업 복구 후속(2026-09-30): private resume은 준비 기록과 현재 검토가 일치할 때만 complete archive의 모든 before metadata/payload를 bound source baseline에 대조해 ready 게시를 재시도한다. owner executable만 포함하는 검토 digest로 권한·inode 전체를 대신하지 않는다. abandon은 준비 기록을 보존 종료해 다음 새 검토의 백업을 허용하며 파일 삭제/잠금 해제를 하지 않는다. ready의 원본 반영 승인·source writer/restore와 자동 디스크 정리는 여전히 별도다. 아래 과거 내부 진전의 미완료 정리/재개 항목 중 메타데이터 기반 명시 종료·완성 백업 검증 재개는 이 단계에서 구현됐으며 파일 회수/UI는 남는다.
 
 백업 원장 결속(2026-09-30 내부 구현): archive 생성 전 exact filename/header를 preparing으로 CAS 저장하고 검증 후 ready/descriptor를 게시한다. 재시작 inspection은 원장의 header와 strict decoder 결과를 대조한다. 부분/완료 파일이 남아도 preparing은 자동 승격하지 않는다. 정상 실패와 강제 중단 모두 원장으로 대상 이름을 찾을 수 있으나 명시 정리·재개 API는 후속이다. 저장 위치는 project.application_backups[reviewId]이며 프로젝트/잠금/채팅 revision을 검사하고 미완료가 있으면 새 준비를 막는다. 준비 metadata256KiB 상한은 전체 디스크 보존 정책과 다르다. 아직 source-writer 배타권·적용 intent·확인 소비를 제공하지 않는다. 아래의 DB 게시/재시작 미연결은 적용 intent의 경계이며 백업 준비 기록 자체는 구현됐다.

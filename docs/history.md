@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (검토 확인과 백업 준비 결속)
+
+- 4b09af0 기준 Confirmations::prepare_backup이 token을 먼저 소비하고 fresh review 뒤 새 백업 준비 또는 ready 재검증 재사용을 연결한다. pending/abandoned 자동복구는 거절한다. PreparedApplication은 private/move-only 세션 grant이며 owner generation·최초 만료 시각을 유지한다. cancel·새 open 실패·다른 owner는 무효이고 consume은 generation을 소비한 뒤 current review와 exact ready archive/record를 다시 확인한다.
+- 검증: 실제 임시 snapshot 확인→백업→전달/재사용1 PASS/23.64초(replay·cancel·다른 owner·만료·실패한 open·late edit 거절, 백업1개/원본 보존), 기존 확인 수명1 PASS/9.50초, cargo check·strict all-targets clippy PASS, 신규 모듈/테스트 블록 포맷·diff 검사. 독립 정적 검토 scoped PASS이며 테스트 독립 재실행은 아니다.
+- Karpathy 지침으로 기존 준비/재개/검증을 재사용했다. 반환 plan/record는 source writer 권한이 아니며 프로젝트 배타권·적용 intent·쓰기 직전 검증·원본 writer/restore 및 공개 UI/IPC가 남는다. 실제 계정/모델/사용자 원본 시험·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (미완료 백업의 명시 재개·보존 종료)
 
 - b637bdf에서 staging::resume/abandon을 추가했다. 재개는 trusted pending header와 fresh review, bound source baseline에 complete archive의 전체 before metadata/bytes를 대조하고 마지막 source/plan 확인 및 CAS 뒤 ready로 게시한다. Git 실행 bit 중심 digest로 원래 권한·inode를 대신하지 않는다. 준비 종료는 exact pending만 abandoned로 CAS 변경해 파일·원본·잠금을 보존하며 같은 요청 재전송은 멱등이다. 새 검토에서 다음 백업을 만들 수 있다.

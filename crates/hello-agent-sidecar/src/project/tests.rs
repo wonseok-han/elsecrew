@@ -35,6 +35,67 @@ fn prepared_backup_fixture() -> (Fixture, String) {
 
 #[cfg(unix)]
 #[test]
+fn confirmed_backup_handoff_is_single_session_and_rechecks_files() {
+    use application::review::{confirmation::Confirmations, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let target = ReviewTarget::Project(&f.project_id);
+    let mut owner = Confirmations::default();
+    let issue = |owner: &mut Confirmations, storage: &mut Storage| {
+        let (token, _) = owner.open(&f.manager, storage, target, &review_id).unwrap();
+        let grant = owner
+            .prepare_backup(&f.manager, storage, &token, "req_confirm_backup")
+            .unwrap();
+        assert!(owner
+            .prepare_backup(&f.manager, storage, &token, "req_confirm_backup_replay")
+            .is_err());
+        grant
+    };
+    let grant = issue(&mut owner, &mut f.storage);
+    let (_, first) = owner
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .unwrap();
+    assert_eq!(first["state"], "ready");
+    let grant = issue(&mut owner, &mut f.storage);
+    owner.cancel();
+    assert!(owner
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .is_err());
+    let grant = issue(&mut owner, &mut f.storage);
+    assert!(Confirmations::default()
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .is_err());
+    let mut grant = issue(&mut owner, &mut f.storage);
+    grant.expire_for_test();
+    assert!(owner
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .is_err());
+    let grant = issue(&mut owner, &mut f.storage);
+    assert!(owner
+        .open(&f.manager, &f.storage, target, "invalid")
+        .is_err());
+    assert!(owner
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .is_err());
+    let grant = issue(&mut owner, &mut f.storage);
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"late edit").unwrap();
+    assert!(owner
+        .consume_prepared(&f.manager, &f.storage, grant)
+        .is_err());
+    assert_eq!(
+        fs::read_dir(f.manager.data_root.join("application-backups-v1"))
+            .unwrap()
+            .count(),
+        1
+    );
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn staged_backup_explicit_recovery_revalidates_or_preserves_abandonment() {
     use application::review::{backup::staging, persistence, ReviewTarget};
     for complete in [false, true] {
