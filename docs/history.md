@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (팀 대화·후속 메시지 다국어 연결)
+
+- 4ce0a93 기준 TeamTimeline/FollowupComposer에 상태·취소·복구·역할·메시지 입력 안내 ko/en 43개 키를 연결했다. Karpathy 지침으로 표시만 변경하고 실행/복구 조건, 대화 원문·모델/실행 ID·미저장 입력은 보존한다. 언어별 시간 표시와 부분 번역 범위도 갱신했다.
+- 검증: chat UI state·번역 Node 21 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.42초). 언어 전환 후 동일 textarea/한국어 초안·기존 본문 보존과 영어 화면에서 한국어 후속 메시지 단일 저장을 확인했다. 중단 전 session99895의 정상 종료 결과를 회수했으며 중복 실행하지 않았다. diff check PASS, 기존 Monaco chunk 경고 유지.
+- 직접 diff 검토 후 해당 구현과 기록만 선택 커밋한다. 미승인 원본 정책과 별도 로그인 상태 기록은 보존한다. 다음은 채팅 목록/실행 상세/승인 카드와 파일·변경 화면의 번역, 원본 반영 정책 결정이다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (역할·모델 설정 다국어 연결)
 
 - 9ca8fef 기준 프로젝트 역할 설정 화면의 입력명/권한 안내/검증/저장/재읽기/폐기 확인을 ko/en 25개 키로 옮겼다. 모델 ID·역할 ID·권한값·revision·저장/폐기 로직은 유지한다. Karpathy 지침으로 표시 문구만 변경했으며 번역 범위 안내를 갱신했다.
