@@ -1,6 +1,5 @@
 import { ko, type MessageKey } from "../locales/ko.ts";
-type ChatNoticeKey = Extract<MessageKey, `m5.chatNotice.${string}` | `m5.chatError.${string}`>;
-function chatNotice(key: ChatNoticeKey) { return { notice: ko[key], noticeKey: key }; }
+import { chatNotice, recoveryConfirmation, type ChatNoticeKey, type ChatNoticeContext } from "./chat-notice.ts";
 type ChatErrorKey = Extract<MessageKey, `m5.chatError.${string}`>;
 import type { M5BridgeV3 } from "./contracts/bridge-v3.ts";
 import type { M5BridgeV4 } from "./contracts/bridge-v4.ts";
@@ -43,6 +42,7 @@ export interface ChatUiSnapshot {
   activeRunId: string | null;
   notice: string | null;
   noticeKey?: ChatNoticeKey;
+  noticeContext?: ChatNoticeContext;
   error: { message: string; messageKey: ChatErrorKey; detail: string } | null;
 }
 
@@ -313,12 +313,12 @@ export class ChatUiController {
     }
     const profile = chat.roleSnapshots.find((item) => item.roleId === roleId);
     if (!profile) return;
-    this.#set({ agentStartingRoleId: roleId, error: null, notice: `${roleLabel(roleId)} 역할의 ${runtimeLabel(profile.runtime)} 준비 상태를 확인하고 있어요.` });
+    this.#set({ agentStartingRoleId: roleId, error: null, ...chatNotice("m5.agentNotice.checking", { roleId, runtime: profile.runtime }) });
     try {
       const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       if (!capability.canStart) {
-        this.#set({ notice: unavailableCapabilityNotice(profile, capability.blockedReason) });
+        this.#set({ ...chatNotice("m5.agentNotice.blocked", { roleId, runtime: profile.runtime, reason: capability.blockedReason }) });
         return;
       }
       await this.#hydrateChat(chat, generation);
@@ -330,7 +330,7 @@ export class ChatUiController {
       }
       const accepted = await bridge.startAgentRun({ chatId: chat.chatId, roleId, inputMessageIds, expectedCapabilityFingerprint: capability.fingerprint });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
-      this.#set({ notice: `${roleLabel(roleId)} 역할 실행을 안전하게 준비했어요. 진행 내용은 저장된 대화 기록으로 확인해요.` });
+      this.#set({ ...chatNotice("m5.agentNotice.ready", { roleId, runtime: profile.runtime }) });
       await this.#hydrateChat(chat, generation);
       // The accepted binding is independently validated by the bridge. The durable ledger owns terminal state.
       if (accepted.runId.length === 0) throw new Error("empty accepted agent run identity");
@@ -351,16 +351,16 @@ export class ChatUiController {
 
   isRecoveryBlocked(): boolean { return this.#state.agentRecovery !== null || this.#state.activeChat?.state === "recoveryRequired" || this.#state.recoveries.some((item) => item.state === "unresolved"); }
   isActionBlocked(): boolean { return this.isRecoveryBlocked() || this.#state.activeChat?.state === "discarded"; }
-  async abandonRecovery(recovery: RecoveryRecordV1): Promise<void> {
-    if (!window.confirm("종료 증거를 다시 확인한 뒤 이 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
+  async abandonRecovery(recovery: RecoveryRecordV1, lang: "ko" | "en" = "ko"): Promise<void> {
+    if (!window.confirm(recoveryConfirmation(false, lang))) return;
     try { await this.#bridge.markRecoveryResolved({ recoveryId: recovery.recoveryId, expectedRevision: recovery.revision, resolution: "abandon" }); await this.#loadRecoveries(recovery.chatId, this.#generation); this.#set({ ...chatNotice("m5.chatNotice.discarded") }); }
     catch (error) { this.#error("m5.chatError.pendingTermination", error); }
   }
 
-  async abandonAgentRecovery(): Promise<void> {
+  async abandonAgentRecovery(lang: "ko" | "en" = "ko"): Promise<void> {
     const chat = this.#state.activeChat; const recovery = this.#state.agentRecovery; const bridge = this.#agentBridge(); const generation = this.#generation;
     if (!chat || !recovery || !bridge || !canAbandonAgentRecovery(recovery) || this.#state.switching || this.#state.agentRecoveryResolving || !matchesAgentRun(recovery, chat)) return;
-    if (!globalThis.confirm("종료 증거를 다시 확인한 뒤 이 실제 에이전트 작업 복사본을 버릴까요? 원본 프로젝트에는 적용하지 않습니다.")) return;
+    if (!globalThis.confirm(recoveryConfirmation(true, lang))) return;
     this.#set({ agentRecoveryResolving: true, error: null });
     try {
       const inspected = await bridge.inspectAgentRecovery(agentRecoveryIdentity(recovery));
@@ -462,7 +462,7 @@ export class ChatUiController {
   #endSwitch(message: ChatErrorKey, error?: unknown): void { this.#pending = null; this.#set({ switching: false, ...chatNotice(message), error: error ? { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message : String(error) } : this.#state.error }); }
   #live(generation: number): boolean { return !this.#disposed && this.#generation === generation; }
   #error(message: ChatErrorKey, error: unknown): void { this.#set({ error: { message: ko[message], messageKey: message, detail: error instanceof Error ? error.message.slice(0, 2048) : String(error).slice(0, 2048) } }); }
-  #set(update: Partial<ChatUiSnapshot>): void { if (this.#disposed) return; this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined } : {}) }; for (const listener of this.#listeners) listener(); }
+  #set(update: Partial<ChatUiSnapshot>): void { if (this.#disposed) return; this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined, noticeContext: update.notice ? update.noticeContext : undefined } : {}) }; for (const listener of this.#listeners) listener(); }
 }
 
 export function isActive(run: RunRecordV1): boolean { return run.state === "preparing" || run.state === "running" || run.state === "cancelling"; }
@@ -476,12 +476,6 @@ function matchesChatRecord(left: ChatRecordV1, right: ChatRecordV1): boolean { r
 function matchesAgentRun(run: Pick<AgentRunRecordV1, "chatId" | "taskId" | "projectId" | "worktreeId" | "workspaceIdentity"> | AgentPublicEventV1, chat: ChatRecordV1): boolean { return run.chatId === chat.chatId && run.taskId === chat.taskId && run.projectId === chat.projectId && run.worktreeId === chat.worktreeId && run.workspaceIdentity === chat.workspaceIdentity; }
 function agentRecoveryFor(detail: ChatDetail): AgentRecoveryRecordV1 | null { return isAgentChatDetailPageV1(detail) ? detail.agentRecovery : null; }
 function agentRecoveryIdentity(recovery: AgentRecoveryRecordV1) { return { chatId: recovery.chatId, taskId: recovery.taskId, projectId: recovery.projectId, worktreeId: recovery.worktreeId, workspaceIdentity: recovery.workspaceIdentity, runId: recovery.runId, recoveryId: recovery.recoveryId }; }
-function roleLabel(roleId: RoleIdV1): string { return ({ planning: "기획", coding: "코딩", review: "검토" })[roleId]; }
-function runtimeLabel(runtime: RoleProfileV1["runtime"]): string { return runtime === "codex" ? "Codex" : "Claude Code"; }
-function unavailableCapabilityNotice(profile: RoleProfileV1, reason: string | null): string {
-  const cause = ({ platformUnsupported: "이 운영체제에서는", notInstalled: "설치되지 않아", installationIncomplete: "설치가 완전하지 않아", unsupportedVersion: "지원하지 않는 버전이라", notAuthenticated: "로그인하지 않아", authExpired: "로그인이 만료되어", capabilityUnknown: "사용 가능 여부를 안전하게 확인할 수 없어", exactModelUnavailable: "선택한 정확한 모델을 사용할 수 없어" } as Record<string, string>)[reason ?? ""] ?? "준비 상태를 확인할 수 없어";
-  return `${roleLabel(profile.roleId)} 역할의 ${runtimeLabel(profile.runtime)}은 ${cause} 시작하지 않았어요. 다른 모델로 자동 변경하지 않았어요.`;
-}
 function mergeMessages(base: readonly TeamMessageV1[], incoming: readonly TeamMessageV1[]): TeamMessageV1[] {
   const bySequence = new Map<number, TeamMessageV1>();
   for (const message of [...base, ...incoming]) {

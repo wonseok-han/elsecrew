@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (역할·공급자 조합 안내와 복구 확인 언어)
+
+- 35a8b7b의 역할/공급자 준비·실행 불가 안내를 순수 chat-notice formatter로 분리하고 키/role/runtime/reason을 보관했다. 알려진8개 원인만 선택하고 unknown은 안전한 기본 안내로 표시한다. 복구 확인은 UI 언어를 인자로 받되 기본 한국어 호환과 기존 취소/종료 증거 경계를 유지한다. Karpathy 지침으로 실행 정책은 변경하지 않았다.
+- 검증: 조합/확인·chat state/번역23 PASS, 실제-agent 합성 UI state20 PASS(영어 확인 취소 시 inspect/resolve0회·잠금 유지 추가), TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.74초). 테스트 runtime 표기를 실제 claude-code 계약과 맞춘 뒤 조합2 PASS 재확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지.
+- 관련 코드/기록만 선택 커밋한다. 이전 정책/아카이브 미커밋 기록은 보존한다. 다음은 Monaco 내부 앱 제공 표시와 누적 UI 검증이다. 실제 계정/모델·사용자 복구 실행 아님, 원본 적용/실제 provider/G6/Windows/출시 미완료이며 main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (채팅 상태 안내 누락 연결·고정 문구 다국어)
 
 - b521090에서 chat.notice가 controller에만 저장되고 renderer에는 표시되지 않는 누락을 확인해 role=status 영역에 연결했다. 고정 준비/실행/종료/복구/설정 안내19종과 전환 오류 notice에 typed noticeKey를 보관하며 기존 한국어 문자열은 유지한다. 새 notice/null은 stale key를 제거한다. Karpathy 지침으로 동작 조건·대화 본문은 변경하지 않았다.

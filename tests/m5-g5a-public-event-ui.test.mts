@@ -295,8 +295,18 @@ test("random agent recovery는 terminal durable hydration과 재개방 뒤에도
 test("actual recovery abandon은 inspect 기록의 full identity와 revision만 resolve로 보내며 durable null 뒤에만 푼다", async () => {
   const bridge = new AgentBridge(); bridge.agentRuns = [agentRun(bridge.chatA, "recoveryRequired")]; bridge.agentRecovery = agentRecovery(bridge.chatA, "agent_recovery_opaque_9a6e");
   const controller = await open(bridge);
-  const previousConfirm = globalThis.confirm; globalThis.confirm = () => true;
-  try { await controller.abandonAgentRecovery(); }
+  const previousConfirm = globalThis.confirm;
+  let prompt = "";
+  globalThis.confirm = message => { prompt = message ?? ""; return false; };
+  try {
+    await controller.abandonAgentRecovery("en");
+    assert.match(prompt, /rechecking termination evidence/);
+    assert.deepEqual(bridge.agentRecoveryInspects, []);
+    assert.deepEqual(bridge.agentRecoveryResolves, []);
+    assert.equal(controller.isRecoveryBlocked(), true);
+    globalThis.confirm = () => true;
+    await controller.abandonAgentRecovery();
+  }
   finally { globalThis.confirm = previousConfirm; }
   const identity = { chatId: "chat_a", taskId: "task_chat_a", projectId: "project_a", worktreeId: "worktree_chat_a", workspaceIdentity: "workspace_chat_a", runId: "agent_run_01", recoveryId: "agent_recovery_opaque_9a6e" };
   assert.deepEqual(bridge.agentRecoveryInspects, [identity]);
