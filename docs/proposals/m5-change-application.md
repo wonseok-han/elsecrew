@@ -33,13 +33,15 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 검토 대상은 project/chat/task/worktree/workspace identity, base commit/tree, 검토 시 snapshot 파일 집합의 digest로 고정한다. renderer는 원본 절대 경로·patch bytes·백업 경로를 전달하지 않는다.
 
-### A1 receipt 파일 후보 (원장 게시·제품 생성 연결 전)
+### A1 receipt 파일·원장 결속 후보 (제품 생성 연결 전)
 
 저장 API는 임의 Dir를 받지 않고 ProjectManager의 고정 managed child에서만 생성되는 opaque ReceiptStore를 받는다. 전체 raw/index JSON 트리를 만들지 않으며 정렬된 항목을 하나씩 bounded writer에 직렬화한다. 64MiB는 encoded payload 한도이며 기존 baseline과 검증용 읽기 버퍼를 포함한 프로세스 전체 메모리 한도를 뜻하지 않는다.
 
 `raw_baseline/receipt.rs`는 앱 전용 `source-baselines-v1` 디렉터리 capability 안에 `<worktreeId>.source-baseline-v1.json`을 exclusive-create 0600으로 저장한다. payload는 snapshot_identity의 project/worktree/workspace/source root·identity·object format·base commit/tree와 raw/index 상태를 묶고 canonical JSON 최대64MiB다. file fsync → directory fsync → no-follow 재조회와 payload/digest 확인 뒤에만 `{schemaVersion:1,digest,length}` descriptor를 반환한다. 기존 파일·부분 쓰기 파일은 덮어쓰거나 자동 삭제하지 않는다.
 
-재검증은 신뢰되는 원장으로부터 받은 descriptor와 새로 수집한 baseline이 모두 필요하다. 단순 파일 존재나 renderer 입력은 권위가 아니다. descriptor가 없는 legacy snapshot은 파일이 있더라도 거절한다. 현재 테스트는 descriptor 직렬화·파일 재열기·신원/내용 변경과 변조/잘림/링크를 검증했지만 **실제 Storage에 descriptor를 원자 게시하는 경로와 snapshot 생성 시 호출은 아직 없다.** publication 전에 file durability를 확보하고 receipt 없는 기존 snapshot의 읽기/채팅/검토를 보존하면서 적용만 차단해야 한다. 저장 중 실패 시 남은 artifact와 recovery lock을 연결하는 절차도 그 통합 단계의 책임이다.
+재검증은 신뢰되는 원장으로부터 받은 descriptor와 새로 수집한 baseline이 모두 필요하다. 단순 파일 존재나 renderer 입력은 권위가 아니다. descriptor가 없는 legacy snapshot은 파일이 있더라도 거절한다. 내부 persist_and_bind는 exact project/source/workspace 신원·recoveryRequired·복구 잠금·writer 없음 확인 뒤 파일 durability를 확보하고 기존 project 원장 source_baselines[worktreeId]에 binding/descriptor를 게시한다. verify_bound는 해당 원장의 exact 신원과 파일을 함께 검증한다. 실제 SQLite 재열기 및 프로젝트 close/open에서 extension 보존을 검증한다. **snapshot 생성 시 호출은 아직 없다.** Git 시간/자손 종료 경계와 원장 누적 크기/압축·과거 여러 workspace 수명 검증을 완료한 뒤 제품 생성에 연결한다.
+
+DB 게시 실패 시 부분/완성 파일과 recovery lock을 보존하며 동일 snapshot에 자동 재게시하지 않는다. 현재 source에서 과거 기준을 소급 생성하는 위험을 피하기 위해 미완료 snapshot을 기존 명시 recovery 폐기로 닫고 새 snapshot을 만드는 정책이다. 이 실패를 앱 전체 영구 잠금으로 남기지 않는 실제 recovery 통합 회귀는 생성 경로 연결 때 필수다. 정상 legacy 파일/채팅/diff 열기는 보존하고 적용만 차단한다.
 
 1. **준비**: active workspace·원장·실행 종료 증거·writer 잠금을 확인한다. source의 canonical root 및 실물 디렉터리 capability, HEAD/tree, index, tracked bytes/mode와 대상 경로 충돌을 읽기 전용으로 대조한다.
 2. **검토 묶음**: sidecar가 변경 파일의 before/after 존재·종류·mode·size·content digest와 묶음 digest를 만든다. rename은 표시용 관계이며 쓰기는 정확한 old/new path 항목으로 표현한다. binary·삭제·심볼릭 링크·권한 변경도 빠짐없이 요약한다.

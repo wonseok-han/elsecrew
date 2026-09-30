@@ -5,6 +5,7 @@ use crate::project::{
     canonical_protocol_path_without_existing, create_managed_directory, snapshot_identity,
     sync_capability_directory, ActiveProject, ProjectFailure, ProjectManager,
 };
+use crate::storage::Storage;
 use cap_std::fs::{Dir, File, MetadataExt};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -13,6 +14,110 @@ use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 
 const RECEIPT_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+// Publication is only legal during a durably fenced snapshot preparation.
+// The descriptor is produced here, never accepted from a renderer or a disk scan.
+#[allow(dead_code)]
+pub(in crate::project) fn persist_and_bind(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+    request_id: &str,
+) -> Result<(), ProjectFailure> {
+    let mut project = crate::project::required_project(storage, &active.project_id)?;
+    let root = canonical_protocol_path_without_existing(&active.canonical_git_root)?;
+    let workspace = canonical_protocol_path_without_existing(&active.worktree_path)?;
+    for (key, expected) in [
+        ("canonical_path", root.as_str()),
+        ("source_identity", active.source_identity.as_str()),
+        ("base_commit", active.base_commit.as_str()),
+        ("base_tree", active.base_tree.as_str()),
+        ("object_format", active.object_format.as_str()),
+        ("worktree_path", workspace.as_str()),
+    ] {
+        if project.get(key).and_then(serde_json::Value::as_str) != Some(expected) {
+            return Err(invalid());
+        }
+    }
+    let lock = storage
+        .projection_record("lock", &active.lock_id)?
+        .ok_or_else(invalid)?;
+    if project.get("lifecycle").and_then(serde_json::Value::as_str) != Some("recoveryRequired")
+        || project
+            .get("worktree_id")
+            .and_then(serde_json::Value::as_str)
+            != Some(&active.worktree_id)
+        || project
+            .get("workspace_identity")
+            .and_then(serde_json::Value::as_str)
+            != Some(&active.workspace_identity)
+        || project.get("lock_id").and_then(serde_json::Value::as_str) != Some(&active.lock_id)
+        || lock.get("recovery_required") != Some(&json!(true))
+        || lock.get("project_id").and_then(serde_json::Value::as_str) != Some(&active.project_id)
+        || lock
+            .get("worktree_path")
+            .and_then(serde_json::Value::as_str)
+            != Some(workspace.as_str())
+        || lock.get("writer_run_id").is_none_or(|v| !v.is_null())
+    {
+        return Err(invalid());
+    }
+    let mut records = match project.remove("source_baselines") {
+        None => serde_json::Map::new(),
+        Some(serde_json::Value::Object(records)) => records,
+        _ => return Err(invalid()),
+    };
+    if records.contains_key(&active.worktree_id) {
+        return Err(invalid());
+    }
+    let store = ReceiptStore::open(manager)?;
+    let receipt = persist(&store, active, baseline)?;
+    records.insert(
+        active.worktree_id.clone(),
+        json!({
+            "binding": snapshot_identity(active)?, "receipt": receipt.to_value(),
+        }),
+    );
+    project.insert(
+        "source_baselines".into(),
+        serde_json::Value::Object(records),
+    );
+    crate::project::append_object(
+        storage,
+        "project",
+        &active.project_id,
+        &format!("op_source_baseline_{}", active.worktree_id),
+        request_id,
+        serde_json::Value::Object(project),
+    )
+}
+
+#[allow(dead_code)]
+pub(in crate::project) fn verify_bound(
+    manager: &ProjectManager,
+    storage: &Storage,
+    active: &ActiveProject,
+    current: &SourceBaseline,
+) -> Result<(), ProjectFailure> {
+    let project = crate::project::required_project(storage, &active.project_id)?;
+    let record = project
+        .get("source_baselines")
+        .and_then(|v| v.get(&active.worktree_id))
+        .ok_or_else(invalid)?;
+    if record.as_object().is_none_or(|v| v.len() != 2)
+        || record.get("binding") != Some(&snapshot_identity(active)?)
+    {
+        return Err(invalid());
+    }
+    let receipt = BaselineReceipt::from_value(record.get("receipt").ok_or_else(invalid)?)?;
+    verify(
+        &ReceiptStore::open(manager)?,
+        active,
+        current,
+        Some(&receipt),
+    )
+}
 
 pub(in crate::project) struct ReceiptStore {
     directory: Dir,

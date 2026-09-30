@@ -495,16 +495,19 @@ impl ProjectManager {
             &project_id,
             &format!("op_project_open_{request_id}"),
             request_id,
-            json!({
-                "project_id": project_id,
-                "canonical_path": canonical_text,
-                "selected_path": selected_text,
-                "base_commit": source.base_commit,
-                "base_tree": source.base_tree,
-                "object_format": source.object_format,
-                "source_identity": source.source_identity,
-                "lifecycle": "opened",
-            }),
+            preserve_project_extensions(
+                json!({
+                    "project_id": project_id,
+                    "canonical_path": canonical_text,
+                    "selected_path": selected_text,
+                    "base_commit": source.base_commit,
+                    "base_tree": source.base_tree,
+                    "object_format": source.object_format,
+                    "source_identity": source.source_identity,
+                    "lifecycle": "opened",
+                }),
+                &storage.projection_record("project", &project_id)?.unwrap_or_default(),
+            )?,
         )?;
         Ok(ProjectAction {
             result: project_identity(&project_id, &selected_text, &canonical_text),
@@ -2100,7 +2103,8 @@ impl ProjectManager {
             project_id,
             &format!("op_project_close_{request_id}"),
             request_id,
-            json!({
+            preserve_project_extensions(
+                json!({
                 "project_id":project_id,
                 "canonical_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
                 "selected_path":canonical_protocol_path_without_existing(&active.canonical_git_root)?,
@@ -2114,7 +2118,9 @@ impl ProjectManager {
                 "worktree_path":canonical_protocol_path(&active.worktree_path)?,
                 "manifest_path":canonical_protocol_path_without_existing(&active.manifest_path)?,
                 "lock_id":active.lock_id,
-            }),
+                }),
+                &required_project(storage, project_id)?,
+            )?,
         )?;
         Ok(ProjectAction {
             result: json!({
@@ -4380,7 +4386,7 @@ fn preserve_project_extensions(
         .as_object()
         .cloned()
         .ok_or_else(|| ProjectFailure::manifest("project payload must be an object"))?;
-    for field in ["role_settings", "prepared_workspaces"] {
+    for field in ["role_settings", "prepared_workspaces", "source_baselines"] {
         if let Some(extension) = previous.get(field).cloned() {
             object.insert(field.to_string(), extension);
         }

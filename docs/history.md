@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A1 원장 결속과 프로젝트 재열기 보존)
+
+- 12f05bd에서 receipt의 내부 persist_and_bind/verify_bound를 연결했다. exact source/project/workspace 및 recoveryRequired·복구 잠금·writer 없음 확인 뒤 불변 파일을 먼저 동기화하고 기존 project 원장 source_baselines[worktreeId]에 descriptor와 identity를 원자 게시한다. 외부 입력 descriptor나 파일 존재만으로 legacy를 승격하지 않는다.
+- 프로젝트 재열기/폐기 payload가 extension을 잃는 경로를 발견해 기존 보존 helper를 연결했다. activation·chat preparation도 새 extension을 보존한다. 실제 SQLite 재열기와 close_project→open_project 후 검증 PASS다. 독립 검토자는 게시 실패 시 재시도 불가 지적을 제시했으나, 소급 baseline 생성 금지와 명시 폐기/새 snapshot 정책을 확인하고 철회·scoped PASS했다. 독립 테스트 실행은 아니다.
+- 집중 검증: 기존 receipt 포함 6개 중 처음에는 DB 실패 주입용 별도 연결이 exclusive lock에 막혀 1개 실패했다. 기존 connection_for_test로 바꿔 게시 실패·unbound 파일·descriptor 없음·복구 잠금 유지 회귀 PASS/1.11초, 최종 close/reopen 결속 회귀 PASS/1.34초. 초기 기존 snapshot op ID 재사용 fixture는 임시 phase를 새 시험 operation으로 만들어 해결했다. strict all-targets clippy PASS/3.20초·diff 검사 PASS. 관련 재열기/폐기 회귀는 아래 후속 결과에 기록한다.
+- 후속 회귀: saved_project 4 PASS/1.84초, close_abandons 1 PASS/1.23초. Karpathy 지침에 따라 기존 원장/보존 helper를 재사용했다. 잘못된 패치 대상 경로는 적용되지 않았음을 확인하고 정확한 저장소 경로로 재실행했다. 실제 create_worktree 호출은 아직 없으며 Git 실행 시간/자손 경계·원장 누적 크기/압축·실패 시 명시 recovery 폐기 통합을 닫아야 한다. 앱 전체 완료나 source writer 활성화가 아니다. 실제 계정/모델/사용자 프로젝트 실행·main 병합/push 없음.
+
 ### 2026-09-30 · by GPT-6 Astra (A1 불변 receipt 저장 후보)
 
 - 44d3b1f의 SourceBaseline에 source 신원을 보존하고 snapshot_identity·raw/index 상태를 canonical JSON과 SHA-256 descriptor로 저장/재검증하는 내부 receipt 모듈을 추가했다. exclusive-create 0600·file/directory fsync·no-follow 재조회로 기존/부분 파일을 덮어쓰지 않는다. 기록 없는 legacy는 파일 존재만으로 허용하지 않는다.
@@ -221,6 +228,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **A1 원장 결속 후보(2026-09-30)**: source_baselines[worktreeId] extension으로 불변 파일 descriptor를 기존 project 원장에 게시·조회하며 close/open에서도 보존한다. DB 게시 실패는 artifact와 recovery lock을 남기고 자동 재결속하지 않는다. 기존 명시 폐기 후 새 snapshot 정책을 따르며 실제 생성/복구 호출과 누적 원장 수명 회귀 전에는 제품 활성화하지 않는다. 아래 receipt 게시 미구현 기록은 이 내부 후보 추가로 갱신한다.
 
 - **A1 receipt 저장 후보(2026-09-30)**: opaque ReceiptStore만 전용 source-baselines-v1에 불변 파일을 쓸 수 있다. 항목별 streaming과 encoded64MiB 한도·fsync·재검증을 제공하지만 descriptor 원장 게시/실제 snapshot 생성 연결은 미구현이다. 원장 descriptor 없는 legacy를 파일만으로 승격하지 않는다. 이전 raw blob 항목의 영속 receipt 없음은 내부 파일 후보 추가로 갱신하되 writer 권위는 여전히 없다.
 

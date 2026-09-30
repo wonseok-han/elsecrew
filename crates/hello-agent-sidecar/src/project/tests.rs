@@ -286,6 +286,182 @@ fn source_raw_baseline_rejects_missing_objects_and_replaced_source_root() {
 
 #[cfg(unix)]
 #[test]
+fn source_receipt_ledger_binding_requires_fence_and_survives_activation() {
+    source_receipt_binding_case(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn source_receipt_failed_publication_preserves_fence_and_unbound_file() {
+    source_receipt_binding_case(true);
+}
+
+#[cfg(unix)]
+fn source_receipt_binding_case(fail_publication: bool) {
+    use application::git_baseline::raw_baseline::{capture_clean_baseline, receipt};
+    let mut fixture = source_index_fixture();
+    fixture
+        .manager
+        .open_project(
+            &mut fixture.storage,
+            fixture.source.to_str().unwrap(),
+            "req_receipt_bind_open",
+        )
+        .unwrap();
+    let source = fixture
+        .manager
+        .open_source_repository(&fixture.source)
+        .unwrap();
+    let baseline = capture_clean_baseline(&fixture.manager, &source).unwrap();
+    let active = fixture.create();
+    assert!(receipt::verify_bound(&fixture.manager, &fixture.storage, &active, &baseline).is_err());
+    assert!(receipt::persist_and_bind(
+        &fixture.manager,
+        &mut fixture.storage,
+        &active,
+        &baseline,
+        "req_unfenced"
+    )
+    .is_err());
+    let mut previous = required_project(&fixture.storage, &active.project_id).unwrap();
+    previous.insert("lifecycle".into(), json!("recoveryRequired"));
+    fixture
+        .storage
+        .upsert_projection_record(
+            "project",
+            &active.project_id,
+            "op_receipt_test_prepare",
+            None,
+            previous,
+        )
+        .unwrap();
+    assert!(receipt::persist_and_bind(
+        &fixture.manager,
+        &mut fixture.storage,
+        &active,
+        &baseline,
+        "req_lock_missing"
+    )
+    .is_err());
+    let mut lock = fixture
+        .storage
+        .projection_record("lock", &active.lock_id)
+        .unwrap()
+        .unwrap();
+    lock.insert("recovery_required".into(), json!(true));
+    fixture
+        .storage
+        .upsert_projection_record("lock", &active.lock_id, "op_receipt_test_fence", None, lock)
+        .unwrap();
+    let database = fixture.manager.data_root.join("hello-agent.sqlite3");
+    if fail_publication {
+        fixture.storage.connection_for_test().execute_batch("CREATE TRIGGER test_receipt_failure BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'receipt publication test failure'); END;").unwrap();
+    }
+    let result = receipt::persist_and_bind(
+        &fixture.manager,
+        &mut fixture.storage,
+        &active,
+        &baseline,
+        "req_receipt_bind",
+    );
+    if fail_publication {
+        assert!(result.is_err());
+        fixture
+            .storage
+            .connection_for_test()
+            .execute_batch("DROP TRIGGER test_receipt_failure;")
+            .unwrap();
+        assert!(required_project(&fixture.storage, &active.project_id)
+            .unwrap()
+            .get("source_baselines")
+            .is_none());
+        assert_eq!(
+            fixture
+                .storage
+                .projection_record("lock", &active.lock_id)
+                .unwrap()
+                .unwrap()["recovery_required"],
+            true
+        );
+        assert!(
+            receipt::verify_bound(&fixture.manager, &fixture.storage, &active, &baseline).is_err()
+        );
+        assert!(fixture
+            .manager
+            .data_root
+            .join("source-baselines-v1")
+            .join(format!("{}.source-baseline-v1.json", active.worktree_id))
+            .is_file());
+        return;
+    }
+    result.unwrap();
+    receipt::verify_bound(&fixture.manager, &fixture.storage, &active, &baseline).unwrap();
+    assert!(receipt::persist_and_bind(
+        &fixture.manager,
+        &mut fixture.storage,
+        &active,
+        &baseline,
+        "req_receipt_duplicate"
+    )
+    .is_err());
+    let bound = required_project(&fixture.storage, &active.project_id).unwrap();
+    let mut activated = bound.clone();
+    activated.remove("source_baselines");
+    activated.insert("lifecycle".into(), json!("active"));
+    let activated = preserve_project_extensions(Value::Object(activated), &bound).unwrap();
+    fixture
+        .storage
+        .upsert_projection_record(
+            "project",
+            &active.project_id,
+            "op_receipt_test_active",
+            None,
+            activated.as_object().unwrap().clone(),
+        )
+        .unwrap();
+    drop(fixture.storage);
+    let mut reopened = Storage::open(&database).unwrap();
+    receipt::verify_bound(&fixture.manager, &reopened, &active, &baseline).unwrap();
+    let mut lock = reopened
+        .projection_record("lock", &active.lock_id)
+        .unwrap()
+        .unwrap();
+    lock.insert("recovery_required".into(), json!(false));
+    reopened
+        .upsert_projection_record(
+            "lock",
+            &active.lock_id,
+            "op_receipt_test_unlock",
+            None,
+            lock,
+        )
+        .unwrap();
+    fixture
+        .manager
+        .close_project(&mut reopened, &active.project_id, "req_receipt_close")
+        .unwrap();
+    fixture
+        .manager
+        .open_project(
+            &mut reopened,
+            fixture.source.to_str().unwrap(),
+            "req_receipt_reopen",
+        )
+        .unwrap();
+    receipt::verify_bound(&fixture.manager, &reopened, &active, &baseline).unwrap();
+    let bytes = fs::read(
+        fixture
+            .manager
+            .data_root
+            .join("source-baselines-v1")
+            .join(format!("{}.source-baseline-v1.json", active.worktree_id)),
+    )
+    .unwrap();
+    assert!(!bytes.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
 fn source_receipt_survives_reopen_and_rejects_legacy_drift_and_tampering() {
     use application::git_baseline::raw_baseline::{
         capture_clean_baseline,
