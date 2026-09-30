@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (실행 상태·권한 요청 안내 다국어 연결)
+
+- 34758dc 기준 AgentRuns와 ApprovalCard의 상태·요청 종류·상세/거절/취소·민감 정보 경고를 ko/en 31개 키로 연결했다. Karpathy 지침으로 표시만 변경하며 polling/epoch·승인 계약·raw 상세 escaping·허용 미지원 경계는 유지한다.
+- 검증: 승인 계약·양쪽 언어 렌더링/경고/상세 escaping/버튼 잠금 포함 Node 6 PASS, TypeScript noEmit·renderer build PASS. 첫 sandbox Chromium 자식은 종료 코드 null로 실패했고 실행 권한 재확인 후 기존 smoke 2 PASS(4.47초)다. 카드 상세 검증은 VM/정적 렌더링이며 실제 에이전트 권한 요청 시험은 아니다. diff check PASS, 기존 Monaco chunk 경고 유지.
+- 변경과 이 기록만 선택 커밋하고 정책 제안/로그인 상태 기록은 보존한다. 다음은 채팅 목록·파일/변경 안내 및 원본 반영 정책 결정이다. 계정/유료 모델·main 병합/push 없음. 앱 전체 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (팀 대화·후속 메시지 다국어 연결)
 
 - 4ce0a93 기준 TeamTimeline/FollowupComposer에 상태·취소·복구·역할·메시지 입력 안내 ko/en 43개 키를 연결했다. Karpathy 지침으로 표시만 변경하고 실행/복구 조건, 대화 원문·모델/실행 ID·미저장 입력은 보존한다. 언어별 시간 표시와 부분 번역 범위도 갱신했다.

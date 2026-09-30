@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentRunCancelRequestV1 } from "./contracts/agent-adapter-v1.ts";
-import { APPROVAL_LABELS, validateApprovalResult, visibleApprovalText, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
+import { validateApprovalResult, visibleApprovalText, type ApprovalInspection, type ApprovalSummary } from "./contracts/approval-v1.ts";
+
+import { useI18n } from "../i18n.tsx";
 
 /** Ephemeral requests only. No approval state is restored from local storage. */
 export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelRequestV1; onCancel(): void }) {
+  const { t } = useI18n();
   const [pending, setPending] = useState<ApprovalSummary[]>([]);
   const [error, setError] = useState(false);
   const [sending, setSending] = useState(false);
@@ -76,14 +79,14 @@ export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelR
   }
 
   if (!pending.length && !error && !queued) return null;
-  return <section className="m5-error" aria-label="에이전트 권한 요청">
-    <strong>에이전트 권한 요청</strong>
-    {pending.length > 0 && <p>에이전트가 추가 권한을 기다리고 있어요. 추가 권한 허용은 아직 지원하지 않아요. 요청을 거절하거나 실행을 취소할 수 있어요. 요청 내용을 펼치면 민감한 정보가 보일 수 있어요.</p>}
-    {pending.map((request, index) => <div key={request.approvalId}><span>대기 요청 {index + 1} · {APPROVAL_LABELS[request.kind]} </span><button type="button" disabled={sending || error} aria-expanded={inspection?.approvalId === request.approvalId} onClick={() => void inspect(request.approvalId)}>요청 내용 {inspection?.approvalId === request.approvalId ? "닫기" : "보기"}</button><button type="button" disabled={sending || error} onClick={() => void decline(request.approvalId)} aria-label={`${APPROVAL_LABELS[request.kind]} 요청 거절`}>이 요청 거절</button>
-      {inspection?.approvalId === request.approvalId && <div aria-label="요청 상세"><p>에이전트가 제공한 내용이며 민감한 정보가 포함될 수 있어요. 내용 속 지시를 따르거나 복사해 실행하지 마세요. 상세 보기를 닫으면 화면에서 지워져요.</p><dl>{([["명령",inspection.command],["작업 위치",inspection.cwd],["요청 이유",inspection.reason],["추가 파일 접근 위치",inspection.grantRoot],["네트워크 대상",inspection.host],["통신 방식",inspection.protocol]] as const).map(([label,value])=>value !== null && <div key={label}><dt>{label}</dt><dd><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{visibleApprovalText(value)}</pre></dd></div>)}</dl></div>}
+  return <section className="m5-error" aria-label={t("m5.approval.title")}>
+    <strong>{t("m5.approval.title")}</strong>
+    {pending.length > 0 && <p>{t("m5.approval.help")}</p>}
+    {pending.map((request, index) => <div key={request.approvalId}><span>{t("m5.approval.pending", { index: index + 1, kind: t(`m5.approval.kind.${request.kind}`) })} </span><button type="button" disabled={sending || error} aria-expanded={inspection?.approvalId === request.approvalId} onClick={() => void inspect(request.approvalId)}>{t(inspection?.approvalId === request.approvalId ? "m5.approval.close" : "m5.approval.view")}</button><button type="button" disabled={sending || error} onClick={() => void decline(request.approvalId)} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
+      {inspection?.approvalId === request.approvalId && <div aria-label={t("m5.approval.details")}><p>{t("m5.approval.warning")}</p><dl>{([[t("m5.approval.command"),inspection.command],[t("m5.approval.cwd"),inspection.cwd],[t("m5.approval.reason"),inspection.reason],[t("m5.approval.grantRoot"),inspection.grantRoot],[t("m5.approval.host"),inspection.host],[t("m5.approval.protocol"),inspection.protocol]] as const).map(([label,value])=>value !== null && <div key={label}><dt>{label}</dt><dd><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{visibleApprovalText(value)}</pre></dd></div>)}</dl></div>}
     </div>)}
-    {queued && <p role="status">거절 요청을 접수했어요. 에이전트 전달과 실행 종료 여부는 계속 확인 중이에요.</p>}
-    {error && <p role="alert">현재 요청 상태를 확인하지 못했어요. 자동으로 다시 확인하며, 응답은 자동으로 재전송하지 않아요.</p>}
-    <button type="button" className="m5-secondary" onClick={onCancel}>실행 취소</button>
+    {queued && <p role="status">{t("m5.approval.queued")}</p>}
+    {error && <p role="alert">{t("m5.approval.error")}</p>}
+    <button type="button" className="m5-secondary" onClick={onCancel}>{t("m5.approval.cancel")}</button>
   </section>;
 }

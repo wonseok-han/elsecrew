@@ -368,8 +368,9 @@ return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header>
 }
 
 function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
+  const { t } = useI18n();
   if (runs.length === 0) return null;
-  return <section className="m5-agent-runs" aria-label="실제 에이전트 실행 상태"><strong>실제 에이전트 실행</strong>{runs.map((run) => <article key={run.runId}><span>{({ planning: "기획", coding: "코딩", review: "검토" })[run.selectedProfile.roleId]}</span><span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span><span> · {run.state}</span></article>)}</section>;
+  return <section className="m5-agent-runs" aria-label={t("m5.run.label")}><strong>{t("m5.run.title")}</strong>{runs.map((run) => <article key={run.runId}><span>{t(`m5.roles.${run.selectedProfile.roleId}`)}</span><span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span><span> · {t(`m5.run.${run.state}`)}</span></article>)}</section>;
 }
 
 function profileLabel(chat: NonNullable<ReturnType<ChatUiController["snapshot"]>["activeChat"]>, roleId: RoleProfileV1["roleId"]): string { const profile = chat.roleSnapshots.find((item) => item.roleId === roleId); return profile ? `${profile.runtime === "codex" ? "Codex" : "Claude Code"} · ${profile.modelSelector}${profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : ""}` : ""; }
