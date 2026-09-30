@@ -363,7 +363,7 @@ export const en: Record<MessageKey, string> = {
   "m5.login.recovery.action": "Recover connection lock",
   "m5.login.detail": "Information for support",
   "m5.login.error.recovery": "Could not confirm that the sign-in process ended. New sign-in and safe shutdown are blocked, and recovery records are preserved. Do not delete credentials or force quit. Use the details below to ask for help.",
-  "m5.login.error.changed": "The installed agent has changed, so this app cannot confirm compatibility. This does not mean you are signed out; saved credentials have not been deleted. An app compatibility update is needed.",
+  "m5.login.error.changed": "The installed agent's publisher signature or file state could not be verified. If an update is in progress, wait for it to finish and check again. If this continues, use the error details to ask for help. This does not mean you are signed out; saved credentials have not been deleted.",
   "m5.login.error.missing": "A supported agent executable could not be found. Check the agent installation. Saved credentials have not been deleted.",
   "m5.login.error.profile": "The saved sign-in environment could not be opened safely. Sign-out has not been confirmed. Do not delete credentials; use the details below to ask for help.",
   "m5.login.error.claude": "Could not verify the Claude connection. If the code expired, start sign-in again and enter the new code. If a Keychain error appears, cancel it instead of resetting to defaults.",

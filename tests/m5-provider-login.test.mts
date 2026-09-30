@@ -16,7 +16,16 @@ test("English login guidance preserves credential and recovery cautions", () => 
   assert.match(loginErrorMessage("codex", null, "en"), /Do not delete credentials/);
 });
 test("login feedback distinguishes executable drift from authentication and recovery",()=>{
-  assert.match(loginErrorMessage("codex","providerExecutableChanged"), /호환성 업데이트/);
+  for (const provider of ["codex", "claude"] as const) {
+    const ko = loginErrorMessage(provider, "providerExecutableChanged");
+    const en = loginErrorMessage(provider, "providerExecutableChanged", "en");
+    assert.match(ko, /제작자 서명이나 파일 상태/);
+    assert.match(ko, /완료 후 다시 확인/);
+    assert.doesNotMatch(ko, /호환성 업데이트가 필요/);
+    assert.match(en, /publisher signature or file state/);
+    assert.match(en, /finish and check again/);
+    assert.doesNotMatch(en, /compatibility update is needed/);
+  }
   assert.match(loginErrorMessage("codex","providerExecutableChanged"), /로그아웃된 것은 아니/);
   assert.match(loginErrorMessage("codex","providerExecutableMissing"), /실행 파일을 찾지/);
   assert.match(loginErrorMessage("codex","providerProfileUnavailable"), /아직 확인하지/);
