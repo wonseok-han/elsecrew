@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "runtime": "codex",
+  "platform": "darwin",
+  "installationState": "unknown",
+  "authState": "unknown",
+  "executable": null,
+  "models": [],
+  "discovery": {
+    "source": "unavailable",
+    "verificationLevel": "unknown",
+    "exactCliVersion": null,
+    "effectiveModelEvidence": "unknown"
+  },
+  "canStart": false,
+  "blockedReason": "capabilityUnknown",
+  "fingerprint": "sha256:36aa151f8639352bad9f7da2ab85521be84722f7311714a67f5d299510b610b1",
+  "observedAt": "2026-09-30T00:00:00Z"
+}

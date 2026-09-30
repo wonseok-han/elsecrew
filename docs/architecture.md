@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> 실제 실행 capability의 미관측 상태: 비활성 제품 adapter는 설치를 조사하지 않았으므로 `installationState: unknown`, `authState: unknown`, 빈 모델 목록·실행 파일 없음과 `canStart: false`를 반환한다. macOS 사유는 `capabilityUnknown`, 비지원 플랫폼은 `platformUnsupported`다. 로그인 사전 진단 성공으로 실행 capability를 승격하지 않는다. unknown은 공개 capability snapshot에만 추가한 값이며 실제 G5C 공급자 관측의 installation enum은 변경하지 않는다. Rust/TypeScript는 unknown의 인증·discovery 증거 주장을 거부하고 기존 fingerprint 검증을 유지한다. sidecar/renderer는 함께 배포하며 구형 renderer가 새 값을 거부하는 경우 fail-closed한다.
+
 > 처음 시작하기의 에이전트 선택: 저장된 유효 선택이 없으면 Codex/Claude Code를 명시적으로 고르기 전 공급자 진단·계정 확인을 호출하지 않는다. 하나만 선택해도 연결 설정을 진행하며 다른 공급자는 나중에 추가할 수 있다. `hello-agent.m5.providers.v1`은 공급자 이름만 저장하는 UI 선호값이고 인증/실행 권한·프로젝트 역할 snapshot을 대체하지 않는다. 저장 실패는 현재 선택을 유지하되 다음 실행에 재선택이 필요함을 알린다. 선택 추가는 기존 연결 컴포넌트를 재생성하지 않으며 진행 중 연결을 숨기는 해제 기능은 이번에 추가하지 않았다.
 
 > 로그인 사전 진단: `provider.login`의 고정 `diagnose` 요청은 기존 로그인과 같은 pinned 실행 파일 후보만 검사한다. 인증/프로필 생성·CLI 실행·설치·네트워크 요청 없이 `diagnosing`→`installed` 또는 실패를 반환하며 renderer는 성공 뒤 기존 계정 확인을 별도로 수행한다. `installed`는 지원하는 로그인 프로그램의 현재 파일 검사 결과일 뿐 인증·모델 실행 가능 증거가 아니다. 진단은 진행 중 worker와 복구 필요 상태를 덮어쓰지 못한다. Claude 설치 디렉터리 부재와 미지원/변조 후보를 구분한다. 자동 설치·전체 기기 진단은 아직 연결되지 않았다.

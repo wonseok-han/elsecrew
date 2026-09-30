@@ -3,6 +3,49 @@ use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 
+#[test]
+fn unobserved_installation_is_not_missing_or_startable() {
+    let (root, _) = manifest();
+    let value: Value = read_json(root.join("unobserved-capability.json"));
+    validate_capability_snapshot(&value).unwrap();
+    let mut with_executable = value.clone();
+    with_executable["executable"] = serde_json::json!({"pathDigest":"sha256:path","fileIdentityDigest":"sha256:file","cliVersion":"0.158.0"});
+    let snapshot: AgentCapabilitySnapshotV1 =
+        serde_json::from_value(with_executable.clone()).unwrap();
+    with_executable["fingerprint"] = compute_agent_capability_fingerprint_v1(&snapshot)
+        .unwrap()
+        .into();
+    assert!(validate_capability_snapshot(&with_executable)
+        .unwrap_err()
+        .to_string()
+        .contains("installed state and executable identity must agree"));
+    for (key, replacement) in [
+        ("canStart", serde_json::json!(true)),
+        ("blockedReason", serde_json::json!("notInstalled")),
+        ("authState", serde_json::json!("authenticated")),
+        (
+            "models",
+            serde_json::json!([{"modelSelector":"some-model","reasoningEfforts":[],"permissions":["readOnly"]}]),
+        ),
+    ] {
+        let mut changed = value.clone();
+        changed[key] = replacement;
+        let snapshot: AgentCapabilitySnapshotV1 = serde_json::from_value(changed.clone()).unwrap();
+        changed["fingerprint"] = compute_agent_capability_fingerprint_v1(&snapshot)
+            .unwrap()
+            .into();
+        assert!(validate_capability_snapshot(&changed).is_err());
+    }
+    let mut windows = value;
+    windows["platform"] = "win32".into();
+    windows["blockedReason"] = "platformUnsupported".into();
+    let snapshot: AgentCapabilitySnapshotV1 = serde_json::from_value(windows.clone()).unwrap();
+    windows["fingerprint"] = compute_agent_capability_fingerprint_v1(&snapshot)
+        .unwrap()
+        .into();
+    assert!(!validate_capability_snapshot(&windows).unwrap().can_start);
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {

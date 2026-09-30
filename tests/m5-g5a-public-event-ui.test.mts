@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { validateAgentCapabilitySnapshotV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 
 import { canAbandonAgentRecovery, ChatUiController } from "../src/m5/chat-state.ts";
 import type { M5BridgeV4 } from "../src/m5/contracts/bridge-v4.ts";
@@ -246,6 +248,19 @@ test("unavailable capability는 fallback 없이 막고 start는 immutable role s
   bridge.unavailable = false; await controller.startAgent("coding");
   assert.deepEqual(bridge.starts, [{ chatId: "chat_a", roleId: "coding", inputMessageIds: ["message_chat_a_1"], expectedCapabilityFingerprint: fingerprint }]);
   assert.equal(controller.snapshot().agentRuns[0]?.selectedProfile.runtime, "claude-code");
+  controller.dispose();
+});
+
+test("inactive product capability blocks execution without claiming missing installation", async () => {
+  const bridge = new AgentBridge();
+  const controller = await open(bridge);
+  const capability = validateAgentCapabilitySnapshotV1(JSON.parse(readFileSync(new URL("./fixtures/m5/agent-adapter-v1/unobserved-capability.json", import.meta.url), "utf8")));
+  bridge.getAgentCapabilities = async () => capability;
+  await controller.startAgent("planning");
+  assert.equal(bridge.starts.length, 0);
+  assert.equal(bridge.fixtureStarts.length, 0);
+  assert.equal(controller.snapshot().noticeContext?.reason, "capabilityUnknown");
+  assert.doesNotMatch(controller.snapshot().notice ?? "", /설치되지|미설치/);
   controller.dispose();
 });
 

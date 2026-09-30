@@ -1590,7 +1590,7 @@ impl AgentRuntime {
             schema_version: 1,
             runtime: runtime.into(),
             platform: platform.into(),
-            installation_state: "notInstalled".into(),
+            installation_state: "unknown".into(),
             auth_state: "unknown".into(),
             executable: None,
             models: Vec::new(),
@@ -1603,7 +1603,7 @@ impl AgentRuntime {
             can_start: false,
             blocked_reason: Some(
                 if platform == "darwin" {
-                    "notInstalled"
+                    "capabilityUnknown"
                 } else {
                     "platformUnsupported"
                 }
@@ -3653,6 +3653,26 @@ pub(crate) fn run_agent_fixture_grandchild() {
 #[cfg(test)]
 mod budget_tests {
     use super::*;
+
+    #[test]
+    fn inactive_product_does_not_claim_provider_is_uninstalled() {
+        let mut runtime = AgentRuntime::blocked();
+        for provider in ["codex", "claude-code"] {
+            let value = runtime.get_capabilities(provider, true).unwrap();
+            assert_eq!(value["installationState"], "unknown");
+            assert_eq!(value["authState"], "unknown");
+            assert_eq!(value["canStart"], false);
+            assert_eq!(
+                value["blockedReason"],
+                if cfg!(target_os = "macos") {
+                    "capabilityUnknown"
+                } else {
+                    "platformUnsupported"
+                }
+            );
+            assert!(runtime.active.is_empty() && runtime.native.is_empty());
+        }
+    }
 
     fn public_event(index: usize, text: String) -> Value {
         json!({

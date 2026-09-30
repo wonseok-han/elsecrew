@@ -43,6 +43,7 @@ export const G5D_AGENT_FIXTURE_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 export const AGENT_INSTALLATION_STATES_V1 = ["installed", "notInstalled", "incomplete"] as const;
+export const AGENT_CAPABILITY_INSTALLATION_STATES_V1 = [...AGENT_INSTALLATION_STATES_V1, "unknown"] as const;
 export const AGENT_AUTH_STATES_V1 = ["authenticated", "notAuthenticated", "expired", "unknown"] as const;
 export const AGENT_DISCOVERY_SOURCES_V1 = ["machineReadableCatalog", "exactVersionManifest", "unavailable"] as const;
 export const AGENT_VERIFICATION_LEVELS_V1 = ["runtimeVerified", "measuredExactVersion", "unknown"] as const;
@@ -98,6 +99,7 @@ export const G5C_PROVIDER_EVENT_CLASSIFICATIONS_V1 = [
 export const G5C_INTERNAL_EVENTS_PER_RUN_MAX_V1 = 1024 as const;
 
 export type AgentInstallationStateV1 = (typeof AGENT_INSTALLATION_STATES_V1)[number];
+export type AgentCapabilityInstallationStateV1 = (typeof AGENT_CAPABILITY_INSTALLATION_STATES_V1)[number];
 export type AgentAuthStateV1 = (typeof AGENT_AUTH_STATES_V1)[number];
 export type AgentDiscoverySourceV1 = (typeof AGENT_DISCOVERY_SOURCES_V1)[number];
 export type AgentVerificationLevelV1 = (typeof AGENT_VERIFICATION_LEVELS_V1)[number];
@@ -221,7 +223,7 @@ export interface AgentCapabilitySnapshotV1 {
   schemaVersion: 1;
   runtime: RuntimeV1;
   platform: "darwin" | "win32";
-  installationState: AgentInstallationStateV1;
+  installationState: AgentCapabilityInstallationStateV1;
   authState: AgentAuthStateV1;
   executable: AgentExecutableIdentityV1 | null;
   models: readonly AgentModelCapabilityV1[];
@@ -440,7 +442,7 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   schema(object.schemaVersion);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   oneOf(object.platform, ["darwin", "win32"] as const, "platform");
-  const installation = oneOf(object.installationState, AGENT_INSTALLATION_STATES_V1, "installationState");
+  const installation = oneOf(object.installationState, AGENT_CAPABILITY_INSTALLATION_STATES_V1, "installationState");
   const auth = oneOf(object.authState, AGENT_AUTH_STATES_V1, "authState");
   const executable = object.executable === null ? null : validateExecutable(object.executable);
   const models = array(object.models, "models", 128).map(validateModelCapability);
@@ -454,6 +456,7 @@ export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabili
   timestamp(object.observedAt, "observedAt");
 
   if ((installation === "installed") !== (executable !== null)) fail("installed state and executable identity must agree");
+  if (installation === "unknown" && (auth !== "unknown" || discovery.source !== "unavailable")) fail("unobserved installation cannot claim authentication or discovery evidence");
   if (discovery.source === "unavailable" && (models.length !== 0 || discovery.exactCliVersion !== null || discovery.verificationLevel !== "unknown" || discovery.effectiveModelEvidence !== "unknown")) {
     fail("unavailable discovery cannot claim model or version evidence");
   }
@@ -1159,13 +1162,14 @@ export function parseG5DAgentFixtureReadyPayloadV1(value: unknown): ReadyPayload
 
 function capabilityBlocker(
   platform: string,
-  installation: AgentInstallationStateV1,
+  installation: AgentCapabilityInstallationStateV1,
   auth: AgentAuthStateV1,
   discovery: AgentDiscoveryEvidenceV1,
   executable: AgentExecutableIdentityV1 | null,
   models: readonly AgentModelCapabilityV1[],
 ): (typeof AGENT_CAPABILITY_BLOCK_REASONS_V1)[number] | null {
   if (platform !== "darwin") return "platformUnsupported";
+  if (installation === "unknown") return "capabilityUnknown";
   if (installation === "notInstalled") return "notInstalled";
   if (installation === "incomplete") return "installationIncomplete";
   if (executable === null) return "installationIncomplete";

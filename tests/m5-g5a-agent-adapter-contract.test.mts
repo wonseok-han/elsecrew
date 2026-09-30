@@ -89,6 +89,21 @@ interface Manifest {
 const root = resolve("tests/fixtures/m5/agent-adapter-v1");
 const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8")) as Manifest;
 const cases = JSON.parse(readFileSync(resolve(root, manifest.casesFile), "utf8")) as Cases;
+test("unobserved installation is unknown, never missing, authenticated or startable", () => {
+  const value = JSON.parse(readFileSync(resolve(root, "unobserved-capability.json"), "utf8"));
+  assert.equal(validateAgentCapabilitySnapshotV1(value).blockedReason, "capabilityUnknown");
+  const withExecutable = {...value, executable:{pathDigest:"sha256:path",fileIdentityDigest:"sha256:file",cliVersion:"0.158.0"}};
+  withExecutable.fingerprint = computeAgentCapabilityFingerprintV1(withExecutable);
+  assert.throws(() => validateAgentCapabilitySnapshotV1(withExecutable), /installed state and executable identity must agree/);
+  for (const change of [{canStart:true,blockedReason:null}, {blockedReason:"notInstalled"}, {authState:"authenticated"}, {discovery:{...value.discovery,source:"exactVersionManifest"}}, {models:[{modelSelector:"some-model",reasoningEfforts:[],permissions:["readOnly"]}]}]) {
+    const changed = {...value,...change};
+    changed.fingerprint = computeAgentCapabilityFingerprintV1(changed);
+    assert.throws(() => validateAgentCapabilitySnapshotV1(changed));
+  }
+  const windows = {...value, platform:"win32", blockedReason:"platformUnsupported"};
+  windows.fingerprint = computeAgentCapabilityFingerprintV1(windows);
+  assert.equal(validateAgentCapabilitySnapshotV1(windows).canStart,false);
+});
 const recoveryDiscoveryCases = JSON.parse(
   readFileSync(resolve(root, manifest.g5cRecoveryDiscoveryCasesFile), "utf8"),
 ) as RecoveryDiscoveryCases;

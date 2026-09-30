@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (비활성 실제 adapter의 미설치 오보고 수정)
+
+- 5c6b6ea에서 actual 실행 연결을 조사하며 AgentRuntime::blocked가 설치 관측 없이 항상 notInstalled를 반환하는 결함을 확인했다. Karpathy 지침으로 공개 capability snapshot에만 unknown을 추가해 미관측 사실을 표시하고 macOS capabilityUnknown/비지원 플랫폼 platformUnsupported와 canStart=false를 유지했다. 로그인 성공과 실제 작업 가능을 혼동하지 않으며 제품 실제 시작은 여전히 비활성이다.
+- 실제 G5C 관측용 설치 enum은 확장하지 않았다. unknown이면 실행 파일 없음·auth unknown·discovery unavailable·모델 없음이 요구되며 fingerprint/기존 차단 순서를 유지한다. Rust/TS 공동 golden과 forged auth/model/executable/start 및 Windows 회귀를 추가했다. 구형 renderer는 새 값을 거부하므로 sidecar/renderer 동시 배포가 필요하다.
+- 검증: Rust protocol adapter10 PASS, sidecar 집중1 PASS, 최종 executable 부정 회귀1 PASS. Node 계약10·G5C/notice12·actual UI21 PASS, TypeScript noEmit·renderer build·strict clippy·변경 파일 rustfmt·diff check PASS. UI controller가 실제/fixture 시작을 모두0회로 막고 미설치 안내를 하지 않음을 확인했다. 독립 검토의 unknown+실행 파일 수락 의심은 기존 boolean 불변식과 실제 회귀로 반증돼 철회됐으며 최종 검토는 차단 지적 없이 승인됐다.
+- 기존 정책/아카이브 변경 보존. 실제 CLI/인증·모델·원본 쓰기 시험 없음. 설치 공급 정책과 원본 보호/보존 예산은 여전히 응답 대기이며 native 시작 연결·실제 검증/반영·복원/G6/Windows/출시는 미완료다. main 병합·push 없음, 전체 목표 active 유지.
+
 ### 2026-09-30 · by GPT-6 Astra (최초 에이전트 선택·선택 기억 연결)
 
 - 1b19604에서 설치 관리 정책 응답과 독립적인 승인된 시작 흐름 §5.1의 에이전트 선택을 구현했다. 메인이 Karpathy 지침으로 UI 선호값만 추가했으며 저장된 유효 선택이 없으면 명시 선택 전 공급자 호출0회다. 한 공급자만 시작하거나 나머지를 나중에 추가할 수 있고 기존 연결 컴포넌트/인증·프로젝트별 역할은 보존한다. 선택을 지원/로그인/실행 성공으로 해석하지 않는다.

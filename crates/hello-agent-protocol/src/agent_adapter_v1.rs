@@ -87,6 +87,10 @@ pub const G5D_AGENT_FIXTURE_CAPABILITIES_V1: &[&str] = &[
     "storage.status",
 ];
 pub const AGENT_INSTALLATION_STATES_V1: &[&str] = &["installed", "notInstalled", "incomplete"];
+// Only public capability snapshots can be unobserved. Sanitized provider
+// observations still require one of the measured installation states above.
+pub const AGENT_CAPABILITY_INSTALLATION_STATES_V1: &[&str] =
+    &["installed", "notInstalled", "incomplete", "unknown"];
 pub const AGENT_AUTH_STATES_V1: &[&str] =
     &["authenticated", "notAuthenticated", "expired", "unknown"];
 pub const AGENT_DISCOVERY_SOURCES_V1: &[&str] = &[
@@ -1208,7 +1212,7 @@ fn validate_capability_snapshot(
     one_of(&snapshot.platform, &["darwin", "win32"], "platform")?;
     one_of(
         &snapshot.installation_state,
-        AGENT_INSTALLATION_STATES_V1,
+        AGENT_CAPABILITY_INSTALLATION_STATES_V1,
         "installationState",
     )?;
     one_of(&snapshot.auth_state, AGENT_AUTH_STATES_V1, "authState")?;
@@ -1229,6 +1233,11 @@ fn validate_capability_snapshot(
         }
     }
     validate_discovery(&snapshot.discovery)?;
+    if snapshot.installation_state == "unknown"
+        && (snapshot.auth_state != "unknown" || snapshot.discovery.source != "unavailable")
+    {
+        return fail("unobserved installation cannot claim authentication or discovery evidence");
+    }
     if snapshot.discovery.source == "unavailable"
         && (!snapshot.models.is_empty()
             || snapshot.discovery.exact_cli_version.is_some()
@@ -2198,6 +2207,7 @@ fn capability_blocker(snapshot: &AgentCapabilitySnapshotV1) -> Option<&'static s
         return Some("platformUnsupported");
     }
     match snapshot.installation_state.as_str() {
+        "unknown" => return Some("capabilityUnknown"),
         "notInstalled" => return Some("notInstalled"),
         "incomplete" => return Some("installationIncomplete"),
         _ => {}
