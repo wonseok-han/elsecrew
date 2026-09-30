@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (편집기 실패·공통 안내 다국어)
+
+- 3680a71에서 Monaco 초기화 실패/보존 초안/명시 재시도와 작업대 이동 실패·목록 갱신·상세 펼치기 안내 ko/en 7개 키를 연결했다. Karpathy 지침으로 효과 의존성/복구/저장 동작은 변경하지 않았다. controller 생성 오류 본문과 Monaco 내부 메뉴는 아직 번역되지 않았다.
+- 검증: 실제 component effects의 loader/editor/action 실패 및 언어 전환 시 초안/읽기 잠금·자동 재시도 없음 포함 Node 9 PASS, TypeScript noEmit·renderer build PASS. Chromium 정상 mount/초안/저장 회귀 2 PASS, diff check PASS. 실패 주입은 VM 검사이며 실제 Chromium 장애 주입은 아니다. 기존 Monaco chunk 경고 유지.
+- 관련 코드와 기록만 선택 커밋한다. 정책 제안과 아카이브 미커밋 기록은 보존하며 다음은 프로젝트/작업 상태 화면과 동적 오류 안내다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (편집·충돌·초안 폐기 안내 다국어)
 
 - 014abf7 기준 앱 편집기/탭/저장/충돌/초안 폐기 확인과 변경 패널에 ko/en 27개 키를 연결했다. Karpathy 지침으로 표시만 변경하며 저장·재읽기 조건, 초안/경로/상세 원문은 유지한다. Monaco 내부 메뉴·초기화 실패 안내는 별도 남는다.

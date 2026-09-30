@@ -3,6 +3,13 @@
 export const ko = {
   "lang.ko": "한국어",
   "lang.en": "English",
+  "m5.feedback.failed": "코드 편집기를 열지 못했어요.",
+  "m5.feedback.help": "편집 내용은 그대로 보존했어요. 아래에서 복사하거나 편집기를 다시 열 수 있어요.",
+  "m5.feedback.retry": "편집기 다시 열기",
+  "m5.feedback.leaveError": "파일 감시 해제를 확인하지 못해 이동을 멈췄어요. 작업과 대화는 보존되어 있어요. 앱을 다시 열어 상태를 확인해 주세요.",
+  "m5.feedback.details": "자세히 보기",
+  "m5.feedback.overflow": "파일 변경이 많아 목록이 최신이 아닐 수 있어요.",
+  "m5.feedback.refresh": "다시 확인",
   "m5.editor.title": "코드 편집기",
   "m5.editor.tabs": "열린 파일",
   "m5.editor.dirty": "저장되지 않은 변경",

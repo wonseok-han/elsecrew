@@ -4,6 +4,8 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { requestEditorSave } from "../src/m5/editor-actions.ts";
+import { ko } from "../src/locales/ko.ts";
+import { en } from "../src/locales/en.ts";
 
 // Execute the actual component's effects, without exporting a product test API
 // or loading browser-only Monaco in Node. Chromium mounting is tested separately.
@@ -60,6 +62,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   const editor = { updateOptions: (options: { readOnly: boolean }) => { readOnly = options.readOnly; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() {} }; }, dispose() {} };
   const context: Record<string, any> = {
     useState: (initial: unknown) => [initial, () => {}],
+    useI18n: () => ({ t: (key: keyof typeof ko) => ko[key] }),
     useRef: (initial: unknown) => { const index = cursor++; return refs[index] ??= { current: initial }; },
     useEffect: (effect: () => unknown, deps: unknown[]) => {
       const index = cursor++;
@@ -128,9 +131,11 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
   let loads = 0;
   let text = "";
   let locked = false;
+  let lang: "ko" | "en" = "ko";
   const disposed: string[] = [];
   const changes: string[] = [];
   const context: Record<string, any> = {
+    useI18n: () => ({ t: (key: keyof typeof ko) => (lang === "ko" ? ko : en)[key] }),
     useState: (initial: unknown) => {
       const index = cursor++;
       if (!(index in values)) values[index] = initial;
@@ -186,6 +191,13 @@ for (const failure of ["load", "editor", "action"]) test(`Monaco preserves draft
   assert.equal(loads, 1, "failure must not trigger an automatic retry");
   assert.equal(drafts[0].value, "unsaved draft");
   assert.equal(drafts[0].readOnly, true);
+  assert.equal(drafts[0]["aria-label"], "보존된 편집 내용");
+  lang = "en";
+  await render();
+  assert.equal(drafts[0]["aria-label"], "Preserved edits");
+  assert.equal(drafts[0].value, "unsaved draft");
+  assert.equal(drafts[0].readOnly, true);
+  assert.equal(loads, 1, "language change must not retry initialization");
   assert.deepEqual(disposed, failure === "load" ? [] : failure === "editor" ? ["model"] : ["editor", "model"]);
   fail = false;
   buttons[0].onClick();

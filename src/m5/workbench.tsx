@@ -191,21 +191,21 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </header>
 
       {snapshot.notice && <p className="m5-notice" role="status">{snapshot.notice}</p>}
-      {leaveError && <p className="m5-error" role="alert">파일 감시 해제를 확인하지 못해 이동을 멈췄어요. 작업과 대화는 보존되어 있어요. 앱을 다시 열어 상태를 확인해 주세요.</p>}
+      {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
       <ProviderLogin disabled={!admissionReady} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{snapshot.error.message}</strong>
-          <details><summary>자세히 보기</summary><pre>{snapshot.error.technicalDetail}</pre></details>
+          <details><summary>{t("m5.feedback.details")}</summary><pre>{snapshot.error.technicalDetail}</pre></details>
         </section>
       )}
-      {chat.error && <section className="m5-error" role="alert"><strong>{chat.error.message}</strong><details><summary>자세히 보기</summary><pre>{chat.error.detail}</pre></details></section>}
+      {chat.error && <section className="m5-error" role="alert"><strong>{chat.error.message}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       {snapshot.rescanRequired && (
         <section className="m5-rescan" role="status">
-          <span>파일 변경이 많아 목록이 최신이 아닐 수 있어요.</span>
-          <button type="button" onClick={() => void Promise.all([controller.loadTree(), controller.refreshChanges()])}>다시 확인</button>
+          <span>{t("m5.feedback.overflow")}</span>
+          <button type="button" onClick={() => void Promise.all([controller.loadTree(), controller.refreshChanges()])}>{t("m5.feedback.refresh")}</button>
         </section>
       )}
 
@@ -391,6 +391,7 @@ function EditorContent({ tab, readOnly, onChange, onSave }: { tab: EditorTab | n
 }
 
 function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; readOnly: boolean; onChange: (text: string) => void; onSave: (path: string) => void }) {
+  const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const host = useRef<HTMLDivElement>(null);
@@ -454,7 +455,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
     editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
   }, [tab.text, tab.saveState, readOnly]);
 
-  return <>{failed && <section className="m5-error" role="alert"><strong>코드 편집기를 열지 못했어요.</strong><p>편집 내용은 그대로 보존했어요. 아래에서 복사하거나 편집기를 다시 열 수 있어요.</p><textarea aria-label="보존된 편집 내용" readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>편집기 다시 열기</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
+  return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
 
 function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string }) {

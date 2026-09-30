@@ -4,6 +4,13 @@ import type { MessageKey } from "./ko";
 export const en: Record<MessageKey, string> = {
   "lang.ko": "한국어",
   "lang.en": "English",
+  "m5.feedback.failed": "Could not open the code editor.",
+  "m5.feedback.help": "Your edits are preserved. Copy them below or reopen the editor.",
+  "m5.feedback.retry": "Reopen editor",
+  "m5.feedback.leaveError": "Navigation stopped because file watching could not be confirmed stopped. Your work and conversations are preserved. Reopen the app to check its state.",
+  "m5.feedback.details": "View details",
+  "m5.feedback.overflow": "Many files changed; the list may be out of date.",
+  "m5.feedback.refresh": "Check again",
   "m5.editor.title": "Code editor",
   "m5.editor.tabs": "Open files",
   "m5.editor.dirty": "Unsaved changes",
