@@ -15,7 +15,9 @@
 
 ### A1 baseline 정책 (구현 제안, 영속 스키마 확장 전)
 
-새 snapshot 생성 시 no-follow raw source baseline receipt를 원장에 결속한다. receipt는 canonical root/실물 directory identity, HEAD/tree, index의 semantic entry 집합, `.git` 밖 파일의 경로·종류·mode·size·content digest를 bounded stream으로 담으며 capture 전후 동일성도 확인한다. tracked 파일과 index가 HEAD의 raw tree와 다르면 첫 적용 지원 대상에서 제외한다. 필터/LFS 변환을 clean 명령으로 실행해서 동등성을 만들어내지 않는다.
+내부 raw inventory 후보(`project/application.rs`)는 Unix에서 한 pass당 100,000개 항목·파일/링크 내용 합계 4GiB·경로 합계 8MiB·개별 UTF-8 경로 4,096byte·깊이 128을 제한한다. 두 pass의 결과를 대조하며 전체 내용 읽기 상한은 8GiB다. root `.git`만 제외하고 ignored/임시 이름/하위 `.git`을 포함한다. 하드링크·특수 파일·비 UTF-8 경로는 거절하며 링크는 대상이 아니라 링크 문자열을 기록한다. 파일 내용·mode·관측한 identity/ctime 변경을 검사하지만 원자 snapshot이나 동일 UID 외부 작성자 차단을 보장하지 않는다. 아직 snapshot 생성·원장·제품 API에 연결하지 않았고 HEAD/index 검증·영속 binding·legacy 정책 구현은 남아 있다. 이 내부 수치가 복원 백업 용량 정책을 대신하지 않는다.
+
+새 snapshot 생성 시 no-follow raw source baseline receipt를 원장에 결속한다. receipt는 canonical root/실물 directory identity, HEAD/tree, index의 semantic entry 집합, `.git` 밖 파일의 경로·종류·mode·size·content digest·device/inode/link count를 bounded stream으로 담으며 capture 전후 동일성도 확인한다. 읽기에 따라 OS가 갱신할 수 있는 atime은 비교·무변경 보장에서 제외한다. 앱이 atime을 복원하는 쓰기도 하지 않는다. tracked 파일과 index가 HEAD의 raw tree와 다르면 첫 적용 지원 대상에서 제외한다. 필터/LFS 변환을 clean 명령으로 실행해서 동등성을 만들어내지 않는다.
 
 Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집합에 자동 편입하지 않는다. 원본 재검사에서 receipt 범위 변화는 거절하고, snapshot의 새 파일/디렉터리와 그 파일들의 경로가 충돌하면 덮어쓰지 않는다. 이렇게 원래 존재했던 사용자 파일을 삭제 대상이나 소유 파일로 오해하지 않는다. 이 전체 집합의 byte/entry 상한과 초과 안내를 A1 구현에서 고정하며 큰 ignored tree를 조용히 제외하지 않는다.
 
@@ -44,7 +46,7 @@ Untracked/ignored 파일도 receipt 범위에 포함하되 snapshot 변경 집�
 
 | 단위 | 소유 위치 | 통과 증거 |
 | --- | --- | --- |
-| A1 raw source baseline | 새 `project/application.rs`, snapshot 생성/기존 원장, capability/plumbing helper | 새 receipt 결속·legacy receipt 없음 거절, clean/HEAD 변경/index-only/unstaged/untracked·ignored 변경/충돌과 hostile filter·fsmonitor marker 미생성, source metadata 무변경 |
+| A1 raw source baseline | 새 `project/application.rs`, snapshot 생성/기존 원장, capability/plumbing helper | 새 receipt 결속·legacy receipt 없음 거절, clean/HEAD 변경/index-only/unstaged/untracked·ignored 변경/충돌과 hostile filter·fsmonitor marker 미생성, source bytes/mode/identity/mtime/ctime 무변경(atime 제외) |
 | A2 immutable review plan | sidecar + protocol/TS 계약과 golden fixture | 전체 변경 집합/정규화 경로/byte 상한/identity 및 digest 불일치 거절, snapshot 변경 후 이전 review 무효 |
 | A3 journal/restore point | 기존 Storage 원장, 앱 전용 capability 디렉터리 | 첫 write 전 intent/backup fsync, byte 검증, disk-full·저장 실패시 source writes 0 |
 | A4 writer/restart recovery | 별도 application 모듈 | 각 파일 경계 crash injection, 삭제/추가/mode 변경 및 역복원, 외부 편집 보존, 잠금 재시작 후 유지 |

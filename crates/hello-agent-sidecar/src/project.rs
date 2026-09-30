@@ -30,6 +30,8 @@ use std::{
     os::unix::{ffi::OsStrExt, fs::MetadataExt, process::CommandExt},
 };
 use uuid::Uuid;
+#[cfg(unix)]
+mod application;
 pub(crate) mod runtime_isolation;
 
 const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";

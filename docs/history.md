@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (A1 원본 raw inventory 내부 구현)
+
+- a8cb328 기준 메인이 project/application.rs에 읽기 전용 Unix source inventory를 구현했다. root .git만 제외하며 ignored/숨김·임시 이름/하위 .git·빈 디렉터리·raw binary·mode·링크 문자열을 포함한다. capability 상대 openat/no-follow/nonblock과 열린 파일/경로 identity·ctime 전후 검사, 두 pass 결과 비교를 사용한다. Git 명령·source 쓰기·계정/모델 호출은 없다.
+- 한 pass 100,000항목·내용 4GiB·경로 합계8MiB·개별경로4096byte·깊이128로 제한한다. 하드링크·특수 파일·비 UTF-8 경로는 조용히 제외하지 않고 거절한다. 깊이 회귀에서 stack overflow를 발견해 파일과 링크 읽기 buffer를 heap으로 옮긴 뒤 해결했다. 읽기에 따른 atime 변경은 허용하며 atomic snapshot 또는 동일 UID 경쟁 차단 증거로 주장하지 않는다.
+- 독립 검토 지적을 반영해 per-entry device/inode/link count와 root stamp를 보존하고 symlink 하드링크도 거절한다. 같은 bytes inode 교체·root chmod·symlink alias 회귀를 추가했다. 최종 focused8 PASS/0.06초, identity assertion 보강 후 관련1 PASS, strict all-targets clippy PASS/2.82초, scoped rustfmt·diff 검사 PASS. 독립 정적 검토 scoped PASS이며 검토자가 테스트를 별도로 실행한 것은 아니다. APFS가 invalid UTF-8 파일명 생성 자체를 거절해 그 생성 회귀는 Linux 전용으로 한정했고 macOS 실증으로 주장하지 않는다.
+- Karpathy 지침으로 기존 capability·오류 형식을 재사용하고 내부 비활성 모듈로 한정했다. A1 전체 완료가 아니며 HEAD/index 비교·영속 baseline 결속·legacy receipt 거절과 A2~A5 적용/복원은 남는다. 이전 사용자 요청의 종료/복구 확인 기록도 보존한다. main 병합/push 없음.
+
+### 2026-09-29 · by GPT-6 Astra (사용자 요청 종료·복구 상태 재확인)
+
+- 개발 앱 종료·복구 요청에 따라 OS 프로세스 목록과 앱 데이터 메타데이터를 재확인했다. Hello Agent 개발 Electron 앱과 sidecar는 이미 종료되어 추가 종료하지 않았다. 실행 중인 ChatGPT/Codex 및 다른 앱의 crash handler는 유지했다.
+- 활성 codex-login.pending은 없고 보존 잠금 inode 168613811과 보존 helper inode 166226396이 유지된다. 인증 파일은 내용 조회 없이 mode 0600만 확인했다. 기존 보존 복구가 유지되어 추가 이동·삭제·인증 초기화·재부팅을 하지 않았다.
+- 이번 검증은 종료/복구 상태 확인이며 로그인 재실행이나 실제 모델 작업 성공을 의미하지 않는다. 소스 변경 없이 이 확인 기록만 남긴다. 실제 provider 활성화와 원본 반영·복원 개발은 별도 미완료이며 main 병합/push 없음.
+
 ### 2026-09-29 · by GPT-6 Astra (원본 반영·복원 구현 준비)
 
 - 1517906의 제품 방향 §5.5/§6.5/M5.3과 ProjectManager·SourceRepository·source_digest를 대조했다. 현행 diff/원본 Git identity는 원본 working tree/index 무변경의 증거가 아니며 적용·복원 writer는 아직 없다. 일반 git status를 preflight로 추가하지 않고 raw 파일/기준 tree 비교가 필요하다. 공식 Git config 문서로 fsmonitor hook 실행 경계도 확인했다.
@@ -181,6 +194,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **원본 baseline 내부 후보(2026-09-30)**: project/application.rs는 root .git만 제외한 raw inventory를 bounded/no-follow로 읽는다. ignored/임시 이름과 nested .git도 포함하며 identity와 내용 변경을 구분한다. 읽기로 바뀔 수 있는 atime은 무변경 보장에서 제외한다. 두 pass 일치·집중 회귀·독립 검토는 HEAD/index/영속 receipt 또는 원본 writer 활성화의 증거가 아니다. 상세와 한도는 proposals/m5-change-application.md A1을 따른다.
 
 - **고정 CLI의 권한 계약(2026-09-29)**: SHA 3e11ccc…aca5a의 일반 SandboxPolicy에는 최신 문서의 restricted read 필드가 없다. `generate-ts --experimental`에서 named permissions와 activePermissionProfile을 확인했으나 runtime 유효 권한/OS 강제는 아직 미검증이다. beta permissions와 기존 sandbox_mode를 혼용하면 안 된다. 별도 도구 scratch의 synthetic OS 격리는 PASS지만 vendor tool routing 분리는 미구현이다.
 
