@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (반영·복원 실행 오류 상세 연결)
+
+- 기준27c455e에서 Karpathy 지침으로 poll에서 버리던 ProjectFailure를 현재 세션에 보관하고 exact project/application 상태 조회에만 연결했다. 새 실행에서 지우며 durable 원장·복구 잠금을 오류 상세로 대체하지 않는다. code와 최대2,048문자 detail만 전달하고 다른 대상/현재 running 상태에는 노출하지 않는다.
+- 공용 화면은 부분 변경 가능성과 복구 기록 확인을 설명하고 기술 상세는 접힌 영역에서 제어/방향 문자를 escape해 표시한다. 재시작 후 상세 소실은 복구 완료가 아님을 명시했다. 원장 inspect 자체가 실패하면 이 상태 응답도 거절되므로 별도 진단 수단을 대체하지 않는다.
+- TS 상세 크기/실행 상태 모순과 Rust 외부 변경 뒤 poll 중단·원본 보존·잠금 유지/오류 조회 회귀를 작성했다. diff만 검사했고 실행/컴파일/UI·독립 검토는 통합 단계에 남긴다. 긴 baseline 대기·실제 공급자 활성화·Windows/G6 및 전체 검증은 남으며 제품 쓰기는 비활성이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (중단된 백업 준비의 명시 종료 화면)
 
 - 기준52b07c6에서 Karpathy 지침으로 backupPreparations/abandonBackupPreparation catalog·계약·프로젝트 복구 UI를 연결했다. preparing 기록만 최대1,000건 조회하며 project/review·구조 검증 후 기록 지문을 반환한다. 종료는 현재 기록의 exact 지문과 idle 상태를 다시 확인하고 기존 staging::abandon의 CAS를 재사용한다.

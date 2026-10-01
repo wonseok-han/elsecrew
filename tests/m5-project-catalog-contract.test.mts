@@ -40,13 +40,17 @@ test("restoration pages bind the exact current application and record fingerprin
 
 test("application status is read-only, bounded, and tied to the selected project", () => {
   const request = {action:"applicationStatus" as const,projectId:"project_a"};
-  const status = {projectId:"project_a",applicationId:"application_0123456789abcdef0123456789abcdef",state:"applying",currentIndex:1,total:2,running:true};
+  const status = {projectId:"project_a",applicationId:"application_0123456789abcdef0123456789abcdef",state:"applying",currentIndex:1,total:2,running:true,failure:null};
   assert.doesNotThrow(() => validateProjectCatalogRequest(request));
   assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status},request));
   for (const change of [{projectId:"other"},{currentIndex:2},{total:100001},{state:"unknown"},{applicationId:null},{path:"/source"},{running:"true"},{running:true,state:"restored"}]) {
     assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,...change}},request));
   }
-  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{projectId:"project_a",applicationId:null,state:"none",currentIndex:null,total:0,running:false}},request));
+  const failure = {code:"E_RECOVERY_REQUIRED",detail:"preserved"};
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,running:false,failure}},request));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,failure}},request));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,running:false,failure:{...failure,detail:"x".repeat(2049)}}},request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{projectId:"project_a",applicationId:null,state:"none",currentIndex:null,total:0,running:false,failure:null}},request));
 });
 
 test("preparation recovery binds exact identity and safe revisions", () => {

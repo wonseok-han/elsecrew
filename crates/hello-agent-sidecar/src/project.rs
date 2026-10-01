@@ -333,6 +333,7 @@ pub struct ProjectManager {
     preparation_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     // Remains false in product builds until integrated safety review is complete.
     source_writes_enabled: bool,
+    application_failure: Option<(String, String, ProjectFailure)>,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
     application_job: Option<application::review::intent::execution::ApplicationJob>,
@@ -464,6 +465,7 @@ impl ProjectManager {
             record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
         ) { return Err(ProjectFailure::recovery("application preparation identity changed")); }
         self.application_job = Some(application::review::intent::execution::ApplicationJob::Apply(owner));
+        self.application_failure = None;
         Ok(record)
     }
 
@@ -479,6 +481,7 @@ impl ProjectManager {
         self.application_confirmations.cancel();
         self.application_cancel.begin(project_id, id);
         self.application_job = Some(application::review::intent::execution::ApplicationJob::Restore(owner));
+        self.application_failure = None;
         Ok(expected.clone())
     }
 
@@ -488,8 +491,14 @@ impl ProjectManager {
             // Failure leaves the durable application fence for explicit recovery;
             // never infer completion from dropping the session owner.
             let Some(canceled) = self.application_cancel.flag() else { return; };
-            if matches!(owner.advance(self, storage, &canceled), Ok(false)) {
-                self.application_job = Some(owner);
+            match owner.advance(self, storage, &canceled) {
+                Ok(false) => self.application_job = Some(owner),
+                Ok(true) => {},
+                Err(failure) => {
+                    if let (Some(project), Some(id)) = (owner.record()["binding"]["projectId"].as_str(), owner.record()["applicationId"].as_str()) {
+                        self.application_failure = Some((project.to_owned(), id.to_owned(), failure));
+                    }
+                }
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -690,6 +699,10 @@ impl ProjectManager {
                 && owner.record()["binding"]["projectId"] == project_id;
         }
         status["running"] = serde_json::json!(running);
+        status["failure"] = self.application_failure.as_ref()
+            .filter(|(project, id, _)| project == project_id && status["applicationId"] == id.as_str() && !running)
+            .map(|(_, _, failure)| json!({"code":failure.code,"detail":failure.detail.chars().take(2048).collect::<String>()}))
+            .unwrap_or(Value::Null);
         Ok(ProjectAction {
             result: serde_json::json!({"schemaVersion":1,"action":"applicationStatus","status":status}),
             ..Default::default()
@@ -744,6 +757,7 @@ impl ProjectManager {
         Ok(Self {
             preparation_cancel: None,
             source_writes_enabled: false,
+            application_failure: None,
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
             application_job: None,

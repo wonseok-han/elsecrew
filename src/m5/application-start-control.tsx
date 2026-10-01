@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
+import { ApplicationFailure } from "./application-failure.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogRequest, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
 type StartRequest = Extract<ProjectCatalogRequest, { action: "startApplication" | "restoreApplication" }>;
@@ -81,5 +82,6 @@ export function ApplicationStartControl({ request, disabled }: { request: StartR
       {status.currentIndex !== null && <p>{t("m5.application.item")} {status.currentIndex + 1} / {status.total}</p>}
     </div>}
     {status?.running && <button type="button" disabled={disabled || busy} onClick={() => void submit(true)}>{t("m5.application.stop")}</button>}
+    {status && <ApplicationFailure failure={status.failure} />}
   </div>;
 }

@@ -2,6 +2,28 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn application_poll_conflict_exposes_bounded_failure_without_unlocking() {
+    use application::review::{confirmation::Confirmations, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    f.manager.application_confirmations = confirmations;
+    f.manager.application_cancel.begin(&f.project_id, &token);
+    f.manager.start_confirmed_application(&mut f.storage, &token, "req_failure_start").unwrap();
+    f.manager.poll_application(&mut f.storage);
+    fs::write(f.source.join("src/edit.txt"), b"external edit").unwrap();
+    f.manager.poll_application(&mut f.storage);
+    assert!(!f.manager.application_running());
+    let status = f.manager.application_status(&f.storage, &f.project_id).unwrap();
+    assert_eq!(status.result["status"]["running"], false);
+    assert!(status.result["status"]["failure"]["code"].as_str().unwrap().starts_with("E_"));
+    assert!(status.result["status"]["failure"]["detail"].as_str().unwrap().chars().count() <= 2048);
+    assert!(!f.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"external edit");
+}
+
 #[cfg(unix)]
 #[test]
 fn backup_preparation_catalog_abandons_only_the_reviewed_pending_record() {
