@@ -552,6 +552,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 ### 6.9 실행 격리 책임 재선택 (2026-10-01 사용자 승인, 제품 연결 전)
 
+**공식 계약 재확인(2026-10-01)**: [App Server thread 시작](https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread)은 named profile 사용에 experimentalApi=true와 permissions/sandbox 상호 배타를 요구한다. 실제 cwd로 permissionProfile/list를 조회해 관리 정책상 허용을 확인해야 한다. 별도 beta handshake 후보는 이 후속 검증을 대체하지 않으며 기존 stable thread 응답을 새 정책 보호 증거로 사용하지 않는다.
+
 현재 두 공급자의 로그인 설치 입장은 공급자 서명 검증으로 전환했지만 실제 모델 실행은 여전히 비활성이다. 기존 outer 정책은 인증 PROFILE 읽기/쓰기를 모든 자손에게 상속한다. 승인된 임시 sentinel 시험에서 이 정책 아래 Codex 내부 도구 sandbox 적용은 exit71로 실패했다. 이는 해당 조합의 실패이며 모든 macOS 중첩 방식의 불가능 증거가 아니다.
 
 공식 [App Server 문서](https://learn.chatgpt.com/docs/app-server)의 command execution은 이미 서버를 격리한 경우 `externalSandbox`로 Codex 자체 격리를 생략할 수 있다고 설명한다. 그러나 현재 outer PROFILE 권한을 그대로 둔 채 이 값만 바꾸면 도구와 인증 파일의 분리가 해결되지 않으므로 채택하지 않는다. 같은 문서의 외부 `chatgptAuthTokens`는 호스트가 인증 갱신 수명을 소유하는 experimental 방식이다. 기존 OAuth 파일을 임의로 읽어 이 경로로 바꾸거나 원격 Code Mode host를 검증 없이 제품 대안으로 삼지 않는다.

@@ -59,8 +59,12 @@ fn exchange(
             .ok_or_else(failure)
     };
     process.begin_preflight()?;
+    let initialize: Value = serde_json::from_str(
+        &hello_agent_core::provider::vendor_observation::codex_rpc::ModelFreeExchange::with_named_permission_config()
+            .next_request().map_err(|_| failure())?.ok_or_else(failure)?
+    ).map_err(|_| failure())?;
     for frame in [
-        json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"hello-agent-offline-permission-probe","version":"0.1.0"},"capabilities":{"experimentalApi":true,"optOutNotificationMethods":["remoteControl/status/changed"]}}}),
+        initialize,
         json!({"method":"initialized"}),
         json!({"id":2,"method":"config/read","params":{"includeLayers":true}}),
         json!({"id":3,"method":"command/exec","params":probe_command(home, workspace)}),

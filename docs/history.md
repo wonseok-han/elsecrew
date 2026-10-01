@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (named 권한 beta handshake)
+
+- 기준03e93a7에서 OpenAI Docs 지침으로 공식 App Server 문서를 검색·직접 가져왔다. named profile의 experimentalApi opt-in·permissions/sandbox 상호 배타·cwd별 permissionProfile/list 확인 필요를 제안서 §6.9에 출처와 기록했다.
+- Karpathy 지침으로 ModelFreeExchange에 명시 beta 생성자를 추가하고 sentinel 초기 요청을 연결했다. 기존 stable 생성자는 experimentalApi=false를 유지한다. stable/beta 분리와 응답 전 다음 요청 거절 회귀를 작성했다.
+- 포맷/diff만 검사했으며 실행 테스트·실제 CLI/계정/모델 호출은 하지 않았다. profile/실효 권한·새 정책 preflight/thread·서명 부모 launch와 통합 검증은 남고 제품 실행은 비활성이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (공급자 도구 권한 프로필 공용 후보)
 
 - 기준1d7bb89에서 남은 공급자 경로를 조사했다. 기존 실제 실행 후보의 discovery_arguments/PreflightExchange는 sandbox_mode 기반인데 승인된 §6.9 sentinel 시험은 named permissions 기반이다. 그대로 outer sandbox만 제거하면 계약이 일치하지 않으므로 활성화하지 않았다.

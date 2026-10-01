@@ -21,6 +21,7 @@ pub struct ModelFreeExchange {
     pending: bool,
     failed: bool,
     include_config_layers: bool,
+    experimental_permissions: bool,
 }
 
 fn error() -> ProviderError {
@@ -38,6 +39,15 @@ impl ModelFreeExchange {
     pub fn with_config_layers() -> Self {
         Self {
             include_config_layers: true,
+            ..Self::default()
+        }
+    }
+    /// Explicit beta handshake for the named-permission adapter. This does not
+    /// validate permission profiles or grant thread/turn authority.
+    pub fn with_named_permission_config() -> Self {
+        Self {
+            include_config_layers: true,
+            experimental_permissions: true,
             ..Self::default()
         }
     }
@@ -77,7 +87,7 @@ impl ModelFreeExchange {
             // The pinned native CLI emits this unrelated startup notification.
             // Suppress only this method; unexpected frames still fail closed.
             params["capabilities"] = serde_json::json!({
-                "experimentalApi": false,
+                "experimentalApi": self.experimental_permissions,
                 "requestAttestation": false,
                 "optOutNotificationMethods": ["remoteControl/status/changed"]
             });
@@ -155,6 +165,22 @@ impl ModelFreeExchange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_permissions_opt_in_does_not_change_stable_handshake() {
+        let mut named = ModelFreeExchange::with_named_permission_config();
+        let beta: serde_json::Value =
+            serde_json::from_str(&named.next_request().unwrap().unwrap()).unwrap();
+        let stable: serde_json::Value = serde_json::from_str(
+            &ModelFreeExchange::with_config_layers()
+                .next_request()
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(beta["params"]["capabilities"]["experimentalApi"], true);
+        assert_eq!(stable["params"]["capabilities"]["experimentalApi"], false);
+        assert!(named.next_request().is_err());
+    }
     fn input(text: &str) -> BoundedObservation {
         BoundedObservation::new(text.as_bytes().to_vec()).unwrap()
     }
