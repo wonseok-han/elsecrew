@@ -119,6 +119,64 @@ fn application_advances_two_files_without_losing_prior_journal() {
         intent::inspect_pending_item(&f.manager, &f.storage, &f.project_id).unwrap(),
         second
     );
+    assert!(intent::previous_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_early_back"
+    )
+    .is_err());
+    let restored_second = intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_restore_second",
+    )
+    .unwrap();
+    assert!(!f.source.join("src/new.txt").exists());
+    let previous = intent::previous_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &restored_second,
+        "req_multi_previous",
+    )
+    .unwrap();
+    assert_eq!(previous["pendingItem"], first["pendingItem"]);
+    assert_eq!(previous["restoredItems"][0], restored_second["pendingItem"]);
+    assert_eq!(previous["completedItems"], json!([]));
+    assert!(intent::advance_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &previous,
+        "req_multi_no_forward"
+    )
+    .is_err());
+    let restored_first = intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &previous,
+        "req_multi_restore_first",
+    )
+    .unwrap();
+    assert_eq!(restored_first["restoredItems"], previous["restoredItems"]);
+    assert_eq!(
+        intent::writer::inspect_regular_outcome(&f.manager, &f.storage, &f.project_id).unwrap()
+            ["comparison"],
+        "matchesUnappliedPair"
+    );
+    assert!(intent::previous_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &restored_first,
+        "req_multi_before_start"
+    )
+    .is_err());
 }
 
 #[cfg(target_os = "macos")]

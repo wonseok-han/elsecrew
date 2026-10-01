@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 역순 복원 체크포인트(미검증): restored인 현재 항목을 restoredItems로 보존하고 직전 applied 항목을 선택하는 경로를 추가했다. 복원한 suffix 순번/phase/archive를 확인하며 복원 후 정방향 전진은 거절한다. 마지막 전체 대조/잠금 해제·제품 연결은 여전히 미완료다.
+
 - 2026-10-01 다중 항목 체크포인트(미검증): applied인 현재 항목의 양쪽 파일을 확인한 뒤 다음 archive index로 전진하며 이전 journal 전체를 completedItems에 보존한다. index/목록 길이·archive metadata·project/lock CAS와 metadata32MiB 한도를 대조한다. 마지막 항목 이후 전체 완료, 역순 다중 복원과 제품 IPC/UI는 아직 연결 전이다.
 
 - 2026-10-01 후속 체크포인트(미검증): 첫 일반 파일의 applied→restoring→restored 역복원, 후속 편집 충돌 거절, 읽기 전용 쌍 분류, 완료 DB 기록 유실 시 명시 acknowledge를 추가했다. before/after 신원과 내용·root/부모 결속을 대조하며 원본/보존 파일을 삭제하거나 잠금을 해제하지 않는다. 복원 전체/UI 완료가 아니고 누적 검증·다중 항목 및 다른 파일 종류 처리는 남는다.

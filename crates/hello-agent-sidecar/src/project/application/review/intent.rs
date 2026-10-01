@@ -93,6 +93,7 @@ pub(in crate::project) fn inspect(
     let record = project.get("application_intent").ok_or_else(invalid)?;
     let pending = record.get("pendingItem");
     let completed = record.get("completedItems");
+    let restored = record.get("restoredItems");
     let completed_count = match completed {
         Some(value) => {
             let items = value.as_array().ok_or_else(invalid)?;
@@ -112,8 +113,30 @@ pub(in crate::project) fn inspect(
         }
         None => 0,
     };
+    if let Some(restored) = restored {
+        let items = restored.as_array().ok_or_else(invalid)?;
+        if items.is_empty()
+            || items.len() > 100_000
+            || pending.is_none()
+            || record["state"] != "applying"
+        {
+            return Err(invalid());
+        }
+        for (offset, item) in items.iter().enumerate() {
+            if item.as_object().is_none_or(|v| v.len() != 3)
+                || item["index"].as_u64() != Some(completed_count + (items.len() - offset) as u64)
+                || !item["item"].is_object()
+                || item["writeJournal"]["phase"] != "restored"
+            {
+                return Err(invalid());
+            }
+        }
+    }
     if record.as_object().is_none_or(|v| {
-        v.len() != 7 + usize::from(pending.is_some()) + usize::from(completed.is_some())
+        v.len()
+            != 7 + usize::from(pending.is_some())
+                + usize::from(completed.is_some())
+                + usize::from(restored.is_some())
     }) || record["version"] != 1
         || record["binding"]["projectId"] != project_id
     {
@@ -273,6 +296,21 @@ pub(in crate::project) fn inspect_pending_item(
             }
         }
     }
+    if let Some(restored) = current["restoredItems"].as_array() {
+        for done in restored {
+            if done["item"]
+                != inspect_write_item(
+                    manager,
+                    storage,
+                    project_id,
+                    &current,
+                    done["index"].as_u64().ok_or_else(invalid)?,
+                )?
+            {
+                return Err(invalid());
+            }
+        }
+    }
     Ok(current)
 }
 
@@ -288,6 +326,7 @@ pub(in crate::project) fn advance_regular_item(
     request: &str,
 ) -> Result<Value, ProjectFailure> {
     if inspect_pending_item(manager, storage, project_id)? != *expected
+        || expected.get("restoredItems").is_some()
         || expected["pendingItem"]["writeJournal"]["phase"] != "applied"
         || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
             != "matchesAppliedPair"
@@ -328,6 +367,71 @@ pub(in crate::project) fn advance_regular_item(
             aggregate_id: project_id.to_owned(),
             operation_id: format!(
                 "op_{}_item_{index}_pending",
+                expected["applicationId"].as_str().ok_or_else(invalid)?
+            ),
+            request_id: Some(request.to_owned()),
+            payload: project,
+        }],
+        &[
+            ("project", project_id, revision),
+            ("lock", lock_id, lock_revision),
+        ],
+    )?;
+    Ok(next)
+}
+
+/// Move backwards only after explicit restoration of the current item. Keep the
+/// restored suffix, including retained after images, for final reconciliation.
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub(in crate::project) fn previous_regular_item(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if inspect_pending_item(manager, storage, project_id)? != *expected
+        || expected["pendingItem"]["writeJournal"]["phase"] != "restored"
+        || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
+            != "matchesUnappliedPair"
+    {
+        return Err(invalid());
+    }
+    let mut completed = expected["completedItems"]
+        .as_array()
+        .ok_or_else(invalid)?
+        .clone();
+    let previous = completed.pop().ok_or_else(invalid)?;
+    let index = previous["index"].as_u64().ok_or_else(invalid)?;
+    let mut restored = match expected.get("restoredItems") {
+        Some(value) => value.as_array().ok_or_else(invalid)?.clone(),
+        None => Vec::new(),
+    };
+    restored.push(expected["pendingItem"].clone());
+    let mut next = expected.clone();
+    next["completedItems"] = json!(completed);
+    next["restoredItems"] = json!(restored);
+    next["pendingItem"] = previous;
+    if serde_json::to_vec(&next).map_err(|_| invalid())?.len() > 32 * 1024 * 1024 {
+        return Err(invalid());
+    }
+    let mut project = required_project(storage, project_id)?;
+    let revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
+    let lock = storage
+        .projection_record("lock", lock_id)?
+        .ok_or_else(invalid)?;
+    let lock_revision = lock["last_event_sequence"].as_u64().ok_or_else(invalid)?;
+    project.insert("application_intent".into(), next.clone());
+    storage.upsert_projection_records_atomic_checked(
+        vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.to_owned(),
+            operation_id: format!(
+                "op_{}_item_{index}_restore_selected",
                 expected["applicationId"].as_str().ok_or_else(invalid)?
             ),
             request_id: Some(request.to_owned()),

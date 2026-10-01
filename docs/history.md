@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (역순 다중 복원 연결)
+
+- 직전3c44ee9의 다중 파일 전진 구현은 진전이다. 현재 Git 상태와 기록을 대조하고 기존 archive 변경을 보존했다. Karpathy 지침으로 완료 목록을 재사용해 현재 파일이 restored인 경우에만 직전 applied 항목을 복원 대상으로 선택하도록 구현했다.
+- 복원한 suffix는 restoredItems에 전체 journal로 보존한다. 순번의 연속성·phase·archive metadata·project/lock CAS·32MiB 상한을 대조하며 복원 진행 뒤 정방향 전진을 거절한다. 읽기/선택만으로 파일을 자동 복원하거나 잠금을 해제하지 않는다. 첫 항목 이전 요청도 거절한다.
+- 두 파일 회귀에 역순 복원·추가 파일 제거 대신 보존 이름 이동·이전/복원 기록 유지·복원 전 후퇴 거절·정방향 재진입 거절을 작성했다. 테스트/빌드/독립 검토는 사용자 지시대로 미실행이며 포맷과 diff만 확인한다. 내부 후보·미검증 상태로 전체 완료/잠금 해제·링크/디렉터리·IPC/UI·통합 검증이 남는다. 사용자 파일/계정/모델 및 main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (다중 일반 파일 진행 기록 연결)
 
 - 직전7f27e93의 복원/명시 확인 구현은 진전이다. 현행 checkout과 기존 archive 변경을 확인하고 Karpathy 지침으로 첫 항목 고정이던 내부 intent를 순차 항목으로 확장했다. pending index는 보존한 completedItems 길이와 일치해야 하며 이전 항목 metadata를 신뢰 archive와 다시 대조한다.
