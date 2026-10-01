@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n.tsx";
+import { RestorationPreview } from "./restoration-preview.tsx";
 import { useEffect, useRef, useState } from "react";
 import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
 
@@ -84,6 +85,7 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
         {application.currentIndex !== null && <p>{t("m5.application.item")} {application.currentIndex + 1} / {application.total}</p>}
       </div>
       {application.running && application.applicationId && <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "cancelApplication", projectId, applicationId: application.applicationId! })}>{t("m5.application.stop")}</button>}
+      {!application.running && application.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview key={application.applicationId} projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} />}
     </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setHistory(null); void request({ action: "applicationHistory", projectId }); }}>{t("m5.application.history")}</button>
     {history && <section aria-label={t("m5.application.history")}>

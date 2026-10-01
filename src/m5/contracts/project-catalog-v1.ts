@@ -8,6 +8,7 @@ export interface ApplicationHistoryEntry { applicationId: string; state: "applie
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
+  | { action: "restorationPreview"; projectId: string; applicationId: string; offset: number; fingerprint: string | null }
   | { action: "cancelApplication"; projectId: string; applicationId: string }
   | { action: "openApplicationConfirmation"; projectId: string; chatId: string; fingerprint: string }
   | { action: "cancelApplicationConfirmation"; confirmationId: string }
@@ -21,6 +22,7 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "restorationPreview"; projectId: string; applicationId: string; state: "prepared" | "applying" | "applied"; page: ApplicationPreviewPage }
   | { schemaVersion: 1; action: "cancelApplication"; projectId: string; applicationId: string }
   | { schemaVersion: 1; action: "openApplicationConfirmation"; projectId: string; chatId: string; confirmationId: string; worktreeId: string; total: number; expiresInSeconds: number }
   | { schemaVersion: 1; action: "cancelApplicationConfirmation"; confirmationId: string }
@@ -56,7 +58,11 @@ export function validatePreparationInspection(value: unknown): PreparationInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "cancelApplication") {
+  if (request.action === "restorationPreview") {
+    keys(request, ["action", "projectId", "applicationId", "offset", "fingerprint"]);
+    validateProjectCatalogRequest({action:"cancelApplication",projectId:request.projectId,applicationId:request.applicationId});
+    validateProjectCatalogRequest({action:"applicationPreviewPage",projectId:request.projectId,chatId:null,offset:request.offset,fingerprint:request.fingerprint});
+  } else if (request.action === "cancelApplication") {
     keys(request, ["action", "projectId", "applicationId"]); id(request.projectId);
     if (typeof request.applicationId !== "string" || !/^application_[a-f0-9]{32}$/.test(request.applicationId)) throw new Error("invalid application cancellation ID");
   } else if (request.action === "openApplicationConfirmation") {
@@ -85,7 +91,11 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "cancelApplication") {
+  if (request.action === "restorationPreview") {
+    keys(result, ["schemaVersion", "action", "projectId", "applicationId", "state", "page"]);
+    if (result.projectId !== request.projectId || result.applicationId !== request.applicationId || !["prepared", "applying", "applied"].includes(String(result.state))) throw new Error("restoration target mismatch");
+    validateProjectCatalogResult({schemaVersion:1,action:"applicationPreviewPage",projectId:result.projectId,chatId:null,page:result.page}, {action:"applicationPreviewPage",projectId:request.projectId,chatId:null,offset:request.offset,fingerprint:request.fingerprint});
+  } else if (request.action === "cancelApplication") {
     keys(result, ["schemaVersion", "action", "projectId", "applicationId"]);
     if (result.projectId !== request.projectId || result.applicationId !== request.applicationId) throw new Error("application cancellation mismatch");
   } else if (request.action === "openApplicationConfirmation") {

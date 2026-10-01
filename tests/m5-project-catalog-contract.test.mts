@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("restoration pages bind the exact current application and record fingerprint", () => {
+  const request = {action:"restorationPreview" as const,projectId:"project_a",applicationId:`application_${"a".repeat(32)}`,offset:0,fingerprint:null};
+  const result = {schemaVersion:1,action:request.action,projectId:request.projectId,applicationId:request.applicationId,state:"applying",page:{worktreeId:"worktree_a",total:1,offset:0,fingerprint:"b".repeat(64),changes:[{path:"src/file.ts",kind:"modified"}]}};
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  for (const patch of [{applicationId:`application_${"c".repeat(32)}`},{state:"restored"},{projectId:"other"}]) {
+    assert.throws(() => validateProjectCatalogResult({...result,...patch},request));
+  }
+  assert.throws(() => validateProjectCatalogResult(result,{...request,fingerprint:"c".repeat(64)}));
+  assert.throws(() => validateProjectCatalogRequest({...request,offset:100}));
+});
+
 test("application status is read-only, bounded, and tied to the selected project", () => {
   const request = {action:"applicationStatus" as const,projectId:"project_a"};
   const status = {projectId:"project_a",applicationId:"application_0123456789abcdef0123456789abcdef",state:"applying",currentIndex:1,total:2,running:true};

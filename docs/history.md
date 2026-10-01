@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (복구 기록의 파일 목록 연결)
+
+- 기준1a431cc에서 Karpathy 지침으로 restorationPreview 읽기 전용 catalog/UI를 추가했다. exact 현재 project/application 원장·lock과 백업 header/내용을 검증하고 100개 페이지를 반환한다. 기록 fingerprint가 바뀌면 후속 조회를 거절하며 실행 중 조회는 막는다. 원장/파일 쓰기나 복원 권한 생성은 없다.
+- 화면은 원래 반영 예정 목록임을 명시하고 미처리/기복원 포함·현재 파일 충돌 미검증을 안내한다. 이전/다음과 실패 후 처음부터 조회, 대상 전환 응답 무시, 경로 제어문자 escape를 연결했다. 과거 history 항목을 현재 복원 대상으로 승격하지 않는다.
+- TS 대상/기록 fingerprint/페이지 계약 회귀와 Rust 다른 ID·바뀐 지문 거절/원장 무변경 회귀를 작성했다. diff 검사만 수행했고 컴파일·실행 테스트·독립 검토는 통합에 남긴다. 실제 복원 확인/실행 및 반영 시작, 공급자 활성화와 전체 검증은 여전히 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (복원 소유자·주기 실행 연결)
 
 - 기준49e9c95에서 Karpathy 지침으로 기존 restore_selected의 원장 분기들을 RestoringBatch의 단계별 advance로 옮겼다. 기존 동기 호출도 같은 owner를 반복 실행한다. 매 단계 exact 원장·취소를 확인하며 오류/중단 뒤 같은 owner 재개를 거절한다. 단계 수는 archive 최대 항목 수에 맞춰 제한한다.

@@ -32,6 +32,12 @@ fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() 
     f.manager.application_confirmations = confirmations;
     let record = f.manager.start_confirmed_application(&mut f.storage, &token, "req_restore_fixture").unwrap();
     f.manager.stop_application();
+    let preview = f.manager.restoration_preview(&f.storage, &f.project_id, record["applicationId"].as_str().unwrap(), 0, None).unwrap();
+    assert_eq!(preview.result["state"], "prepared");
+    assert!(preview.result["page"]["total"].as_u64().unwrap() > 0);
+    assert!(f.manager.restoration_preview(&f.storage, &f.project_id, "application_other", 0, None).is_err());
+    assert!(f.manager.restoration_preview(&f.storage, &f.project_id, record["applicationId"].as_str().unwrap(), 0, Some("changed")).is_err());
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), record);
     let mut owner = intent::execution::RestoringBatch::start(&f.storage, &f.project_id, &record, "req_restore_cancel").unwrap();
     let canceled = std::sync::atomic::AtomicBool::new(true);
     assert!(owner.advance(&f.manager, &mut f.storage, &canceled).unwrap());

@@ -1098,6 +1098,12 @@ impl Sidecar {
                     let offset = params["offset"].as_u64().filter(|v| *v <= 100_000).ok_or_else(|| invalid_params("invalid review offset".into()))? as usize;
                     self.projects.application_preview_page(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, chat_id, offset, fingerprint)
                 }
+                Some("restorationPreview") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "applicationId", "offset", "fingerprint"]).map_err(invalid_params)?;
+                    let fingerprint = if params["fingerprint"].is_null() { None } else { Some(param_string(params, "fingerprint").map_err(invalid_params)?) };
+                    let offset = params["offset"].as_u64().filter(|v| *v <= 100_000).ok_or_else(|| invalid_params("invalid restoration offset".into()))? as usize;
+                    self.projects.restoration_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "applicationId").map_err(invalid_params)?, offset, fingerprint)
+                }
                 Some("chatApplicationPreview") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.chat_application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)

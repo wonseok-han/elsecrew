@@ -607,6 +607,30 @@ impl ProjectManager {
             ..Default::default()
         })
     }
+    /// Archive contents are evidence, not a prediction that every item will be changed.
+    pub(crate) fn restoration_preview(&self, storage: &Storage, project_id: &str, application_id: &str, offset: usize, expected_fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            use application::review::{backup, intent};
+            let invalid = || ProjectFailure::recovery("restoration review changed or is unavailable");
+            if self.application_running() || offset > 100_000 || offset % 100 != 0 || (offset != 0 && expected_fingerprint.is_none()) { return Err(invalid()); }
+            let record = intent::inspect(storage, project_id)?;
+            if record["applicationId"] != application_id || !matches!(record["state"].as_str(), Some("prepared" | "applying" | "applied")) { return Err(invalid()); }
+            let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| invalid())?));
+            if expected_fingerprint.is_some_and(|value| value != fingerprint) { return Err(invalid()); }
+            let archive = backup::Backup::from_value(&record["backup"]["backup"])?;
+            let (header, items) = backup::verify_items(self, &archive)?;
+            if header != record["backup"]["header"] || offset > items.len() { return Err(invalid()); }
+            let changes: Vec<Value> = items.iter().skip(offset).take(100).map(|item| {
+                let kind = if item["before"].is_null() { "added" } else if item["after"].is_null() { "deleted" } else { "modified" };
+                json!({"path":item["path"],"kind":kind})
+            }).collect();
+            if intent::inspect(storage, project_id)? != record { return Err(invalid()); }
+            Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restorationPreview","projectId":project_id,"applicationId":application_id,"state":record["state"],"page":{"worktreeId":record["binding"]["worktreeId"],"total":items.len(),"offset":offset,"fingerprint":fingerprint,"changes":changes}}), ..Default::default() })
+        }
+        #[cfg(not(unix))]
+        { let _ = (storage, project_id, application_id, offset, expected_fingerprint); Err(ProjectFailure::recovery("restoration review unavailable on this platform")) }
+    }
     pub fn new(database_path: &Path) -> Result<Self, SidecarError> {
         let data_root = database_path.parent().ok_or_else(|| {
             SidecarError::new("dataDirectoryUnavailable", "database has no parent")
