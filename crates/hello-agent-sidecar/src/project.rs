@@ -330,6 +330,8 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    // Remains false in product builds until integrated safety review is complete.
+    source_writes_enabled: bool,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
     application_job: Option<application::review::intent::execution::ApplicationJob>,
@@ -356,6 +358,36 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn application_capabilities(&self) -> ProjectAction {
+        ProjectAction { result: json!({"schemaVersion":1,"action":"applicationCapabilities","enabled":self.source_writes_enabled && cfg!(target_os = "macos")}), ..Default::default() }
+    }
+
+    pub(crate) fn start_application_request(&mut self, storage: &mut Storage, project: &str, chat: &str, token: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
+        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source application is not enabled")); }
+        #[cfg(target_os = "macos")]
+        {
+            if !self.application_confirmations.matches_chat(token, project, chat) { return Err(ProjectFailure::recovery("application confirmation target changed")); }
+            let record = self.start_confirmed_application(storage, token, request)?;
+            Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"startApplication","projectId":project,"chatId":chat,"applicationId":record["applicationId"]}), ..Default::default() })
+        }
+        #[cfg(not(target_os = "macos"))]
+        { let _ = (storage, project, chat, token, request); Err(ProjectFailure::recovery("application unavailable on this platform")) }
+    }
+
+    pub(crate) fn restore_application_request(&mut self, storage: &Storage, project: &str, application_id: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
+        if !self.source_writes_enabled { return Err(ProjectFailure::recovery("source restoration is not enabled")); }
+        #[cfg(target_os = "macos")]
+        {
+            self.restoration_preview(storage, project, application_id, 0, Some(fingerprint))?;
+            let record = application::review::intent::inspect(storage, project)?;
+            let current = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| ProjectFailure::recovery("invalid restoration record"))?));
+            if current != fingerprint { return Err(ProjectFailure::recovery("restoration record changed")); }
+            self.start_selected_restoration(storage, project, &record, request)?;
+            Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"restoreApplication","projectId":project,"applicationId":application_id}), ..Default::default() })
+        }
+        #[cfg(not(target_os = "macos"))]
+        { let _ = (storage, project, application_id, fingerprint, request); Err(ProjectFailure::recovery("restoration unavailable on this platform")) }
+    }
     pub(crate) fn application_running(&self) -> bool {
         #[cfg(target_os = "macos")]
         { self.application_job.is_some() }
@@ -654,6 +686,7 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            source_writes_enabled: false,
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
             application_job: None,

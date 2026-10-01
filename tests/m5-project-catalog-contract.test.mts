@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("application start commands preserve target and reject missing confirmation", () => {
+  const request = {action:"startApplication" as const,projectId:"project_a",chatId:"chat_a",confirmationId:`confirmation_${"a".repeat(32)}`};
+  const result = {schemaVersion:1,action:request.action,projectId:request.projectId,chatId:request.chatId,applicationId:`application_${"b".repeat(32)}`};
+  assert.doesNotThrow(() => validateProjectCatalogResult(result,request));
+  assert.throws(() => validateProjectCatalogRequest({...request,confirmationId:""}));
+  assert.throws(() => validateProjectCatalogResult({...result,chatId:"chat_other"},request));
+  const restore = {action:"restoreApplication" as const,projectId:request.projectId,applicationId:result.applicationId,fingerprint:"c".repeat(64)};
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:restore.action,projectId:restore.projectId,applicationId:restore.applicationId},restore));
+  assert.throws(() => validateProjectCatalogRequest({...restore,fingerprint:null}));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationCapabilities",enabled:"true"},{action:"applicationCapabilities"}));
+});
+
 test("restoration pages bind the exact current application and record fingerprint", () => {
   const request = {action:"restorationPreview" as const,projectId:"project_a",applicationId:`application_${"a".repeat(32)}`,offset:0,fingerprint:null};
   const result = {schemaVersion:1,action:request.action,projectId:request.projectId,applicationId:request.applicationId,state:"applying",page:{worktreeId:"worktree_a",total:1,offset:0,fingerprint:"b".repeat(64),changes:[{path:"src/file.ts",kind:"modified"}]}};

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (반영·복원 시작 IPC와 확인 화면 후보)
+
+- 기준aaea9eb에서 Karpathy 지침으로 applicationCapabilities/startApplication/restoreApplication 계약·dispatch·UI를 연결했다. 시작은 세션 확인 토큰의 exact project/chat와 만료를 먼저 확인하고 기존 백업/owner 입장으로 이어진다. 복원은 현재 원장/백업 검증과 화면 fingerprint 재대조 후 단계별 owner를 만든다. renderer가 켤 수 없는 backend source_writes_enabled는 false로 유지한다.
+- 공용 시작 화면은 외부 편집 중지·원본 변경/보존 정책을 확인받고 단회 요청한다. 성공 응답의 application ID로 상태 조회/중단을 결속하며 다른 실행으로 바뀌면 표시를 비운다. 응답 유실은 자동 재시작하지 않고 프로젝트 기록 확인을 안내한다. capability 비활성은 명시 안내하며 쓰기 버튼을 열지 않는다.
+- 계약 대상/토큰/지문/활성화 응답 회귀와 제품 기본 start/restore 거절 회귀를 작성했다. diff 검사만 수행하고 컴파일·실행/UI·독립 안전 검토는 통합 단계에 남긴다. 시작 전 백업의 동기 대기/취소 수명과 오류 상세, 실제 공급자 활성화·Windows/G6/출시까지 미완료다. 공개 경로 구현은 제품 활성화나 완료를 뜻하지 않는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (복구 기록의 파일 목록 연결)
 
 - 기준1a431cc에서 Karpathy 지침으로 restorationPreview 읽기 전용 catalog/UI를 추가했다. exact 현재 project/application 원장·lock과 백업 header/내용을 검증하고 100개 페이지를 반환한다. 기록 fingerprint가 바뀌면 후속 조회를 거절하며 실행 중 조회는 막는다. 원장/파일 쓰기나 복원 권한 생성은 없다.

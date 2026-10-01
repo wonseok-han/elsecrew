@@ -43,6 +43,10 @@ pub(in crate::project) struct PreparedApplication {
 // No serialization or persisted approval: a new owner always starts empty.
 #[allow(dead_code)]
 impl Confirmations {
+    pub(in crate::project) fn matches_chat(&self, token: &str, project: &str, chat: &str) -> bool {
+        self.pending.as_ref().is_some_and(|pending| pending.token == token && Instant::now() < pending.expires
+            && matches!(&pending.target, Target::Chat(address, _) if address.project_id == project && address.chat_id == chat))
+    }
     pub(in crate::project) fn cancel_token(&mut self, token: &str) -> Result<(), ProjectFailure> {
         if self.pending.as_ref().is_none_or(|pending| pending.token != token) { return Err(invalid()); }
         self.cancel();

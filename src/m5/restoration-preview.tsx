@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
+import { ApplicationStartControl } from "./application-start-control.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage } from "./contracts/project-catalog-v1.ts";
 
 export function RestorationPreview({ projectId, applicationId, disabled }: { projectId: string; applicationId: string; disabled: boolean }) {
@@ -36,6 +37,7 @@ export function RestorationPreview({ projectId, applicationId, disabled }: { pro
       </li>)}</ul>
       <button type="button" disabled={disabled || busy || page.offset === 0} onClick={() => void load(page.offset - 100, page.fingerprint)}>{t("m5.restore.previous")}</button>
       <button type="button" disabled={disabled || busy || page.offset + page.changes.length >= page.total} onClick={() => void load(page.offset + 100, page.fingerprint)}>{t("m5.restore.next")}</button>
+      <ApplicationStartControl key={page.fingerprint} request={{action:"restoreApplication",projectId,applicationId,fingerprint:page.fingerprint}} disabled={disabled || busy} />
     </>}
   </section>;
 }

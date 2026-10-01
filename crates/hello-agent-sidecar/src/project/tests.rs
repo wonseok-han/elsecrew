@@ -27,6 +27,9 @@ fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
 fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
+    assert_eq!(f.manager.application_capabilities().result["enabled"], false);
+    assert!(f.manager.start_application_request(&mut f.storage, &f.project_id, "chat_unknown", "confirmation_unknown", "req_blocked_start").is_err());
+    assert!(f.manager.restore_application_request(&f.storage, &f.project_id, "application_unknown", "unknown", "req_blocked_restore").is_err());
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;

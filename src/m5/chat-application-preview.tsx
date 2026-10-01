@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
+import { ApplicationStartControl } from "./application-start-control.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage } from "./contracts/project-catalog-v1.ts";
 
 export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled }: { projectId: string; chatId: string; worktreeId: string; disabled: boolean }) {
@@ -64,5 +65,6 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
       <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
     {confirmation && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
+    {confirmation && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} />}
   </section>;
 }
