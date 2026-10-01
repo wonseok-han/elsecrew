@@ -4,6 +4,87 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_confirmed_execution_and_selected_restore_roundtrip() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    let before = fs::read(f.source.join("src/edit.txt")).unwrap();
+    fs::write(
+        active.worktree_path.join("src/edit.txt"),
+        b"orchestrated-change",
+    )
+    .unwrap();
+    fs::write(
+        active.worktree_path.join("src/new.txt"),
+        b"orchestrated-new",
+    )
+    .unwrap();
+    let review = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_execution_review",
+    )
+    .unwrap();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            review["reviewId"].as_str().unwrap(),
+        )
+        .unwrap();
+    let prepared = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_execution_backup")
+        .unwrap();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let applied = intent::execution::apply_confirmed(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        prepared,
+        &cancel,
+        "req_execution_apply",
+    )
+    .unwrap();
+    assert_eq!(applied["state"], "applied");
+    assert_eq!(
+        fs::read(f.source.join("src/new.txt")).unwrap(),
+        b"orchestrated-new"
+    );
+    let stopped = std::sync::atomic::AtomicBool::new(true);
+    assert_eq!(
+        intent::execution::restore_selected(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &applied,
+            &stopped,
+            "req_execution_cancel"
+        )
+        .unwrap(),
+        applied
+    );
+    let restored = intent::execution::restore_selected(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &applied,
+        &cancel,
+        "req_execution_restore",
+    )
+    .unwrap();
+    assert_eq!(restored["state"], "restored");
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), before);
+    assert!(!f.source.join("src/new.txt").exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_link_roundtrip_never_changes_target_file() {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();

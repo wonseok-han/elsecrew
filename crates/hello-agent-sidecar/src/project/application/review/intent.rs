@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod completion;
+#[cfg(target_os = "macos")]
+pub(in crate::project) mod execution;
 mod observation;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod writer;

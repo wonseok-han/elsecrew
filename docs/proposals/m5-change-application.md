@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 실행 연결 체크포인트(미검증): execution이 확인 handoff에서 전체 파일/링크 반영 완료까지와 exact 원장 선택에서 역순 복원 완료까지 내부 호출로 묶는다. 항목 경계 취소는 현재 원장을 남기며 자동 쓰기 재개 API는 없다. 디렉터리 묶음은 첫 source write 전 미지원 거절한다. 작업 스레드/IPC/UI 활성화는 아직 남는다.
+
 - 2026-10-01 배치 읽기 체크포인트(미검증): 전체 archive 검증 뒤 bounded metadata 목록을 반환해 한 조회 안의 pending/completed/restored 및 미처리 tail 대조에 재사용한다. 항목별 전체 archive 재읽기를 줄였으며 작업 간 cache는 없다. 아래 단건 반복 검증 설명은 기존 구현 기록이다. 실제 메모리/시간 검증은 남는다.
 
 - 2026-10-01 부분 반영 취소 체크포인트(미검증): completed prefix 이후 journal이 없는 pending부터 unstartedFrom으로 기록해 미처리 tail을 보존하고 prefix만 역복원한다. 복원 완료 전에 미처리 파일도 archive before와 대조한다. reserved/staged 중단과 첫 항목 미시작 취소는 별도 복구로 남는다.
