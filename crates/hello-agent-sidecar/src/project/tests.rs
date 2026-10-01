@@ -4,6 +4,26 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
+    use application::review::{confirmation::Confirmations, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    f.manager.application_confirmations = confirmations;
+    let record = f.manager.start_confirmed_application(&mut f.storage, &token, "req_scheduler_start").unwrap();
+    assert!(f.manager.application_running());
+    assert!(f.manager.cancel_application(&f.project_id, "application_wrong").is_err());
+    assert!(f.manager.application_running());
+    f.manager.poll_application(&mut f.storage);
+    f.manager.cancel_application(&f.project_id, record["applicationId"].as_str().unwrap()).unwrap();
+    assert!(!f.manager.application_running());
+    f.manager.poll_application(&mut f.storage);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    assert!(!f.storage.blocker_ids().unwrap().is_empty());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_owner_cancellation_is_terminal_without_source_writes() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

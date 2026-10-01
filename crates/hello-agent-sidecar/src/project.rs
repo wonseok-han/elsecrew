@@ -330,6 +330,8 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    #[cfg(target_os = "macos")]
+    application_job: Option<application::review::intent::execution::ApplyingBatch>,
     #[cfg(unix)]
     application_confirmations: application::review::confirmation::Confirmations,
     data_root: PathBuf,
@@ -353,6 +355,65 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn application_running(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        { self.application_job.is_some() }
+        #[cfg(not(target_os = "macos"))]
+        { false }
+    }
+
+    /// Internal admission only: no public source-write command is enabled yet.
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn start_confirmed_application(&mut self, storage: &mut Storage, token: &str, request: &str) -> Result<Value, ProjectFailure> {
+        if self.application_job.is_some() || !self.pending_saves.is_empty() || !storage.blocker_ids()?.is_empty() {
+            return Err(ProjectFailure::recovery("application requires an idle workspace"));
+        }
+        let mut confirmations = std::mem::take(&mut self.application_confirmations);
+        let result = confirmations.prepare_backup(self, storage, token, request)
+            .and_then(|prepared| application::review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
+        self.application_confirmations = confirmations;
+        let owner = result?;
+        let record = owner.record().clone();
+        self.application_job = Some(owner);
+        Ok(record)
+    }
+
+    pub(crate) fn poll_application(&mut self, storage: &mut Storage) {
+        #[cfg(target_os = "macos")]
+        if let Some(mut owner) = self.application_job.take() {
+            // Failure leaves the durable application fence for explicit recovery;
+            // never infer completion from dropping the session owner.
+            if matches!(owner.advance(self, storage, &std::sync::atomic::AtomicBool::new(false)), Ok(false)) {
+                self.application_job = Some(owner);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = storage;
+    }
+
+    pub(crate) fn stop_application(&mut self) {
+        #[cfg(target_os = "macos")]
+        { self.application_job = None; }
+        #[cfg(unix)]
+        self.application_confirmations.cancel();
+        // Between synchronous ticks, dropping this owner stops future writes.
+        // The existing recovery lock is deliberately not cleared here.
+    }
+
+    pub(crate) fn cancel_application(&mut self, project_id: &str, application_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(target_os = "macos")]
+        {
+            let owner = self.application_job.as_ref().ok_or_else(|| ProjectFailure::recovery("application is not running"))?;
+            if owner.record()["applicationId"] != application_id || owner.record()["binding"]["projectId"] != project_id {
+                return Err(ProjectFailure::recovery("application cancellation identity changed"));
+            }
+            self.stop_application();
+            Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplication","projectId":project_id,"applicationId":application_id}), ..Default::default() })
+        }
+        #[cfg(not(target_os = "macos"))]
+        { let _ = (project_id, application_id); Err(ProjectFailure::recovery("application unavailable on this platform")) }
+    }
     pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         self.application_confirmations.cancel_token(token)?;
@@ -539,6 +600,8 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            #[cfg(target_os = "macos")]
+            application_job: None,
             #[cfg(unix)]
             application_confirmations: Default::default(),
             data_root,

@@ -886,6 +886,12 @@ impl Sidecar {
         if self.maintenance_poisoned && request.method != "system.status" {
             return Err(maintenance_poisoned_error());
         }
+        if self.projects.application_running()
+            && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
+            && !(request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("applicationStatus" | "applicationHistory" | "cancelApplication")))
+        {
+            return Ok(HandledRequest::response(error_response(&request, "applicationBusy", "requestBlocked", "source application owns the active write slot")));
+        }
         if self.prepared_to_quit
             && !matches!(
                 request.method.as_str(),
@@ -999,6 +1005,7 @@ impl Sidecar {
             "app.prepareQuit" => Ok({
                 require_exact_params(&request.params, &[]).map_err(invalid_params)?;
                 if !self.prepared_to_quit {
+                    self.projects.stop_application();
                     self.projects.stop_watchers();
                     self.prepared_to_quit = true;
                 }
@@ -1049,6 +1056,10 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("cancelApplication") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "applicationId"]).map_err(invalid_params)?;
+                    self.projects.cancel_application(param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "applicationId").map_err(invalid_params)?)
+                }
                 Some("cancelApplicationConfirmation") => {
                     let params = require_exact_params(&request.params, &["action", "confirmationId"]).map_err(invalid_params)?;
                     self.projects.cancel_application_confirmation(param_string(params, "confirmationId").map_err(invalid_params)?)
@@ -1873,6 +1884,7 @@ impl Sidecar {
 
     fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
+        self.projects.poll_application(&mut self.storage);
         events.extend(
             self.agent_runtime
                 .poll(&mut self.storage, &mut self.projects)?,

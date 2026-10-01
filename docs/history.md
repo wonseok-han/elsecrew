@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (반영 소유자의 주기 진행·중단·종료 연결)
+
+- 직전7ce6de5의 파일 단위 소유자는 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 ProjectManager의 단일 application_job을 기존 sidecar poll에 연결했다. 내부 시작은 확인 소비→백업→owner 생성으로 이어지며 기존 저장 작업/복구 blocker가 있으면 거절한다. 공개 start IPC는 아직 없고 원본 쓰기 제품 활성화는 하지 않았다.
+- 실행 중 요청은 상태/이력/정확 ID 중단/종료 확인 외 거절한다. 중단과 prepareQuit은 다음 tick을 막고 세션 확인을 폐기하되 원장 잠금을 해제하지 않는다. poll 오류/완료는 owner를 제거하고 durable 상태를 판단 근거로 남긴다. 실제 파일 복사 내부 선점 취소는 아니며 긴 tick 응답성은 후속이다.
+- 잘못된 중단 ID 거절·fence 후 중단·추가 poll 무쓰기·복구 잠금 유지 회귀를 작성했다. 테스트/컴파일은 최종 통합에 남기고 diff만 확인했다. 공개 실행/복원 UI와 복사 중 취소·전체 검증/독립 안전 검토·공급자 활성화는 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (파일 단위 반영 실행 소유자 연결)
 
 - 직전3d8908b의 확인 세션은 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 move-only PreparedApplication을 소비하는 ApplyingBatch 소유자를 추가했다. 기존 전체 apply_confirmed도 이 소유자를 반복 진행하도록 바꿔 별도 실행 알고리즘을 만들지 않았다.
