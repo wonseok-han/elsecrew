@@ -183,6 +183,11 @@ pub(in crate::project) fn inspect(
         return Err(invalid());
     }
     match record["state"].as_str() {
+        Some("abandoned") if record.as_object().is_some_and(|v| v.len() == 5) && record.get("cleanup").is_some() => {
+            // Cleanup is separate from preparation state; it never makes an archive ready.
+            super::cleanup::preview(manager, storage, project_id, review_id)?;
+            Ok(record.clone())
+        }
         Some("preparing" | "abandoned") if record.as_object().is_some_and(|v| v.len() == 4) => {
             Ok(record.clone())
         }

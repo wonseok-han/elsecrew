@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (종료된 백업 준비의 내부 정리 후보)
+
+- 기준fb51062에서 Karpathy 지침으로 cleanup 내부 preview/remove를 작성했다. abandoned만 대상으로 앱 전체 프로젝트의 현재/과거 참조·중복 파일 이름을 거절하며 원장+현재 파일 신원으로 확인 지문을 만든다. archive flock을 유지하고 삭제 전 pending 신원 기록/CAS, 파일 재대조·unlink/directory fsync 뒤 deleted 기록/CAS를 수행한다.
+- 삭제 후 DB 실패는 pending을 남기며 다음 명시 조회/재시도에서만 부재를 완료한다. 다른 파일이 같은 이름으로 나타나면 거절한다. 원래 abandoned 기록은 유지하며 ready 승격/원본·복구 잠금 변경은 없다. 협력 작성자 잠금과 관측 신원 확인이며 동일 UID 악의적 unlink 직전 경합의 절대 방지는 주장하지 않는다.
+- 임시 파일 신원 변경 거절·완료 원장/원본 보존 회귀를 작성했다. 제품 IPC/UI에는 아직 연결하지 않았고 실제 파일 삭제/테스트 실행은 하지 않았다. 포맷/diff만 검사하며 공개 확인·활성화/독립 검토·현재/과거 복원 지점 정리와 전체 통합 검증이 남는다. 기존9월 archive 변경 보존, main/push 없음.
+
 ## 프로젝트 요약 (고정)
 
 터미널을 한 번도 안 열어본 비개발자를 **코딩 에이전트(Claude Code·Codex)가 굴러가는 상태까지** 데려다주는 데스크톱 GUI 앱. 현재 배포 경로는 Tauri 2 + React 19이고, M5는 Electron + React/TypeScript + Monaco와 Rust sidecar의 별도 작업대 골격으로 전환 중이다.

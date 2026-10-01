@@ -12,6 +12,8 @@ const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
 const RESTORE_BUDGET: u64 = 5 * 1024 * 1024 * 1024;
 mod decode;
 mod budget_settings;
+#[allow(dead_code)]
+pub(in crate::project) mod cleanup;
 pub(in crate::project) mod retention;
 pub(in crate::project) mod staging;
 

@@ -4,6 +4,34 @@ use tempfile::TempDir;
 
 #[cfg(unix)]
 #[test]
+fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
+    use application::review::{backup::{staging, cleanup}, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    assert!(staging::stop_after_reservation_for_test(&f.manager, &mut f.storage, ReviewTarget::Project(&f.project_id), &review_id).is_err());
+    let pending = staging::inspect(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    let name = pending["name"].as_str().unwrap();
+    let root = f.manager.data_root.join("application-backups-v1");
+    fs::create_dir_all(&root).unwrap();
+    let file = root.join(name);
+    fs::write(&file, b"partial backup").unwrap();
+    assert!(cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).is_err());
+    staging::abandon(&f.manager, &mut f.storage, &f.project_id, &review_id, &pending, "req_cleanup_abandon").unwrap();
+    let first = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    fs::write(&file, b"changed partial backup").unwrap();
+    assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, first["fingerprint"].as_str().unwrap(), "req_cleanup_stale").is_err());
+    assert!(file.exists());
+    let fresh = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, fresh["fingerprint"].as_str().unwrap(), "req_cleanup").unwrap();
+    assert!(!file.exists());
+    let done = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    assert_eq!(done["state"], "deleted");
+    assert_eq!(done["filePresent"], false);
+    assert_eq!(staging::inspect(&f.manager, &f.storage, &f.project_id, &review_id).unwrap()["state"], "abandoned");
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn preparation_cancel_reaches_index_and_bound_receipt_without_mutation() {
     use application::git_baseline::{capture_index_baseline, raw_baseline::{capture_clean_baseline, receipt}};
     let (mut f, _) = prepared_backup_fixture();
