@@ -143,6 +143,7 @@ export const ko = {
   "m5.prep.title": "프로젝트 시작 실패 복구",
   "m5.application.inspect": "반영·복원 기록 확인",
   "m5.application.preview": "원본 반영 전 변경 목록 보기",
+  "m5.application.chatPreview": "이 채팅의 반영 전 변경 목록 보기",
   "m5.application.prepare": "반영 검토용 새 작업 복사본 준비",
   "m5.application.prepareHelp": "원본의 저장된 Git 상태에서 새 복사본과 기준 기록을 만들고 이 프로젝트의 현재 작업 복사본으로 선택해요. 기존 복사본·채팅은 보존하며 원본 파일은 변경하지 않아요. 저장되지 않은 원본 변경이나 지원하지 않는 구조가 있으면 준비할 수 없어요. 실제 원본 반영은 아직 사용할 수 없어요.",
   "m5.application.prepareConfirm": "새 복사본 만들기",

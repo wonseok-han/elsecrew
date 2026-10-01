@@ -351,6 +351,25 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn chat_application_preview(&self, storage: &Storage, project_id: &str, chat_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
+            let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
+            let address = WorkspaceAddress {
+                project_id: project_id.to_owned(), chat_id: chat_id.to_owned(),
+                worktree_id: value_string(record, "worktreeId")?.to_owned(),
+                workspace_identity: value_string(record, "workspaceIdentity")?.to_owned(),
+            };
+            let plan = application::review::prepare_target(self, storage, application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? })?;
+            Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"chatApplicationPreview","projectId":project_id,"chatId":chat_id,"preview":plan.preview()}), ..Default::default() })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (storage, project_id, chat_id);
+            Err(ProjectFailure::recovery("chat application preview unavailable on this platform"))
+        }
+    }
     pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         {

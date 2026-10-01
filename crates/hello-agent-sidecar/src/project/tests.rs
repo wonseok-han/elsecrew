@@ -1893,6 +1893,10 @@ fn chat_application_reviews_keep_separate_targets_and_invalidate_on_chat_change(
         ));
     }
     for (address, task, id) in &saved {
+        let preview = fixture.manager.chat_application_preview(&fixture.storage, &address.project_id, &address.chat_id).unwrap();
+        assert_eq!(preview.result["chatId"], address.chat_id);
+        assert_eq!(preview.result["preview"]["worktreeId"], address.worktree_id);
+        assert!(fixture.manager.chat_application_preview(&fixture.storage, "project_other", &address.chat_id).is_err());
         persistence::reopen_target(
             &fixture.manager,
             &fixture.storage,

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (선택한 채팅의 반영 검토 대상 연결)
+
+- 직전74a9180의 명시 생성은 진전이다. 현재 checkout/기존 archive를 보존하고 Karpathy 지침으로 chatApplicationPreview를 연결했다. 선택한 project/chat ID만 받고 저장 원장의 task/workspace를 찾아 기존 ReviewTarget::Chat 검증에 전달한다. 현재 project active 포인터를 대체 대상으로 쓰지 않는다.
+- 채팅 작업대에 읽기 전용 변경 목록을 추가하고 응답 chat/project와 화면의 worktree를 대조한다. 선택/상태 변경 시 결과를 초기화하고 stale 응답을 버리며 실행/복구 중 입장은 기존 backend 검사로 거절한다. 공개 채팅 생성의 baseline 선택 연결은 아직 남아 있어 baseline 없는 채팅은 거절한다.
+- 두 채팅/서로 다른 active 포인터의 backend 조회·잘못된 project 거절과 IPC 교차 채팅 응답 거절 회귀를 작성했다. 테스트/빌드/UI 실측은 최종 통합으로 남겼고 diff만 확인했다. 채팅 생성 옵션·디렉터리·원본 쓰기 UI·통합 검증/독립 안전 검토는 미완료, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (명시적 반영 검토용 복사본 생성 연결)
 
 - 직전3eea89d의 목록 조회는 진전이다. Karpathy 지침으로 기존 ApplicationCandidate 생성과 baseline 결속을 prepareApplicationWorkspace catalog action에 연결했다. 일반/채팅 생성에 clean-source 조건을 강제하지 않고 별도 명시 선택을 제공한다. 원본 baseline 사전 검사는 잠금 예약 전에 수행하고 실제 생성 fence 안에서 다시 수집/대조한다.

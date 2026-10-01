@@ -217,7 +217,7 @@ pub(in crate::project) fn prepare(
     prepare_target(manager, storage, ReviewTarget::Project(project_id))
 }
 
-fn prepare_target(
+pub(in crate::project) fn prepare_target(
     manager: &ProjectManager,
     storage: &Storage,
     target: ReviewTarget<'_>,

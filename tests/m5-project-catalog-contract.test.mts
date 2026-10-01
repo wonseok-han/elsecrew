@@ -26,6 +26,15 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("chat preview cannot return another chat's result", () => {
+  const request = { action: "chatApplicationPreview" as const, projectId: "project_a", chatId: "chat_a" };
+  const result = { schemaVersion: 1, ...request, preview: { worktreeId: "worktree_a", total: 0, changes: [] } };
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  assert.throws(() => validateProjectCatalogResult({ ...result, chatId: "chat_b" }, request));
+  assert.throws(() => validateProjectCatalogResult({ ...result, projectId: "project_b" }, request));
+  assert.throws(() => validateProjectCatalogRequest({ ...request, worktreePath: "/private" }));
+});
+
 test("application workspace preparation binds explicit project without paths", () => {
   const request = { action: "prepareApplicationWorkspace" as const, projectId: "project_a" };
   assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, worktreeId: "worktree_a" }, request));

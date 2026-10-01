@@ -11,10 +11,12 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "applicationStatus"; projectId: string }
   | { action: "applicationHistory"; projectId: string }
   | { action: "applicationPreview"; projectId: string }
+  | { action: "chatApplicationPreview"; projectId: string; chatId: string }
   | { action: "prepareApplicationWorkspace"; projectId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "chatApplicationPreview"; projectId: string; chatId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
   | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
@@ -50,6 +52,8 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     if (request.cursor !== null) id(request.cursor);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
     keys(request, ["action", "projectId"]); id(request.projectId);
+  } else if (request.action === "chatApplicationPreview") {
+    keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
   } else throw new Error("invalid project catalog action");
@@ -63,8 +67,9 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(result, ["schemaVersion", "action", "projectId", "worktreeId"]);
     if (id(result.projectId) !== request.projectId) throw new Error("prepared application project mismatch");
     id(result.worktreeId);
-  } else if (request.action === "applicationPreview") {
-    keys(result, ["schemaVersion", "action", "projectId", "preview"]);
+  } else if (request.action === "applicationPreview" || request.action === "chatApplicationPreview") {
+    keys(result, request.action === "chatApplicationPreview" ? ["schemaVersion", "action", "projectId", "chatId", "preview"] : ["schemaVersion", "action", "projectId", "preview"]);
+    if (request.action === "chatApplicationPreview" && id(result.chatId) !== request.chatId) throw new Error("preview chat mismatch");
     if (id(result.projectId) !== request.projectId) throw new Error("preview project mismatch");
     const preview = object(result.preview);
     keys(preview, ["worktreeId", "total", "changes"]); id(preview.worktreeId);

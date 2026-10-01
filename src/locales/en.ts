@@ -144,6 +144,7 @@ export const en: Record<MessageKey, string> = {
   "m5.prep.title": "Project startup failure recovery",
   "m5.application.inspect": "Check apply/restore record",
   "m5.application.preview": "Preview changes before applying",
+  "m5.application.chatPreview": "Preview this chat's changes before applying",
   "m5.application.prepare": "Prepare a new working copy for application review",
   "m5.application.prepareHelp": "Create a new copy and baseline from the source's committed Git state and select it as this project's current working copy. Existing copies and chats are preserved; source files are not changed. Uncommitted source changes or unsupported structures prevent preparation. Applying to the source is not available yet.",
   "m5.application.prepareConfirm": "Create new copy",

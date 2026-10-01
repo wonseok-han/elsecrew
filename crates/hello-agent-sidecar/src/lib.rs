@@ -1049,6 +1049,10 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("chatApplicationPreview") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.chat_application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)
+                }
                 Some("prepareApplicationWorkspace") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.prepare_application_workspace(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, &request.request_id)
