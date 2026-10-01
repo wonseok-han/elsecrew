@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (공급자 도구 권한 프로필 공용 후보)
+
+- 기준1d7bb89에서 남은 공급자 경로를 조사했다. 기존 실제 실행 후보의 discovery_arguments/PreflightExchange는 sandbox_mode 기반인데 승인된 §6.9 sentinel 시험은 named permissions 기반이다. 그대로 outer sandbox만 제거하면 계약이 일치하지 않으므로 활성화하지 않았다.
+- Karpathy 지침으로 기존 로컬 sentinel 시험의 고정 설정을 provider_tool_policy로 추출하고 읽기/쓰기 작업공간 모드를 분리했다. 응답은 선택한 filesystem 전체·network false·never 승인·legacy sandbox 혼용 부재를 대조한다. 이전 시험은 network/default만 검사해 추가 파일 경로를 놓칠 수 있었으므로 fixture 응답도 전체 정책으로 맞췄다.
+- 추가 경로/네트워크/구형 설정 혼용 거절 회귀를 작성했다. 포맷/diff만 검사하며 실제 공급자·계정·모델은 실행하지 않았다. 이 모듈은 보고 설정 대조일 뿐 OS 강제/제품 admission 증거가 아니다. 다음은 named 정책에 맞는 preflight/thread 계약·서명된 부모 launch 연결이며 설치본 서명 장애와 독립 안전 검토/통합 검증이 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (준비 취소의 index·receipt 연결)
 
 - 기준c067006에서 Karpathy 지침으로 Git index 이미지와 bound receipt 읽기를 기존 크기 상한 안의 64KiB 청크로 바꿔 scoped 준비 취소를 확인했다. receipt 재인코딩도 index/raw 항목 사이에서 같은 callback을 확인한다. 기존 일반 persist/verify 호출은 no-op callback으로 동작을 유지한다.

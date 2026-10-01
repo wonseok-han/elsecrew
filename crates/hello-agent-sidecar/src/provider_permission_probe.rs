@@ -25,27 +25,9 @@ fn failure() -> SidecarError {
 }
 
 fn configuration_arguments() -> Vec<std::ffi::OsString> {
-    [
-        "app-server",
-        "--listen",
-        "stdio://",
-        "--strict-config",
-        "-c",
-        "default_permissions=\"hello-agent-probe\"",
-        "-c",
-        "approval_policy=\"never\"",
-        "-c",
-        "permissions={hello-agent-probe={filesystem={\":root\"=\"deny\",\":minimal\"=\"read\",\":workspace_roots\"={\".\"=\"write\"}},network={enabled=false}}}",
-        "-c",
-        "features.hooks=false",
-        "-c",
-        "features.apps=false",
-        "-c",
-        "features.plugins=false",
-    ]
-    .into_iter()
-    .map(Into::into)
-    .collect()
+    crate::provider_tool_policy::configuration_arguments(
+        crate::provider_tool_policy::WorkspaceMode::Write,
+    )
 }
 
 // Fixed sentinel-only command: output never contains file contents. No model,
@@ -112,11 +94,10 @@ fn exchange(
             1 if !result.is_object() => return Err(failure()),
             2 => {
                 let config = &result["config"];
-                if config["default_permissions"] != "hello-agent-probe"
-                    || config["approval_policy"] != "never"
-                    || !config["sandbox_mode"].is_null()
-                    || config["permissions"]["hello-agent-probe"]["network"]["enabled"] != false
-                {
+                if !crate::provider_tool_policy::matches(
+                    config,
+                    crate::provider_tool_policy::WorkspaceMode::Write,
+                ) {
                     return Err(SidecarError::new(
                         "permissionProbeFailed",
                         "permission config mismatch",
@@ -211,13 +192,18 @@ fn run_probe(installed: bool, rejected: bool, vendor_sandbox: bool) {
             },
         )
     } else {
+        let config_response = json!({"id":2,"result":{"config":{
+            "default_permissions":crate::provider_tool_policy::PROFILE,
+            "approval_policy":"never",
+            "permissions":{crate::provider_tool_policy::PROFILE:crate::provider_tool_policy::profile(crate::provider_tool_policy::WorkspaceMode::Write)}
+        }}});
         let script = format!(
             r#"
 IFS= read -r line || exit 1
 printf '%s\n' '{{"id":1,"result":{{}}}}'
 IFS= read -r line || exit 1
 IFS= read -r line || exit 1
-printf '%s\n' '{{"id":2,"result":{{"config":{{"default_permissions":"hello-agent-probe","approval_policy":"never","permissions":{{"hello-agent-probe":{{"network":{{"enabled":false}}}}}}}}}}}}'
+printf '%s\n' '{config_response}'
 IFS= read -r line || exit 1
 printf '%s\n' '{{"id":3,"result":{{"exitCode":{},"stdout":"protected"}}}}'
 "#,
