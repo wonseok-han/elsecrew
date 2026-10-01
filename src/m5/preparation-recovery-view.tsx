@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n.tsx";
 import { RestorationPreview } from "./restoration-preview.tsx";
+import { BackupPreparationRecovery } from "./backup-preparation-recovery.tsx";
 import { useEffect, useRef, useState } from "react";
 import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
 
@@ -59,6 +60,7 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
     return () => window.clearTimeout(timer);
   }, [application, disabled, busy, projectId]);
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
+    <BackupPreparationRecovery projectId={projectId} disabled={disabled || busy} />
     <button type="button" disabled={disabled || busy} onClick={() => setConfirmWorkspace(true)}>{t("m5.application.prepare")}</button>
     {confirmWorkspace && <div role="group" aria-label={t("m5.application.prepare")}>
       <p>{t("m5.application.prepareHelp")}</p>

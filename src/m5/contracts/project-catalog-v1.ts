@@ -7,8 +7,11 @@ export interface ApplicationStatus { projectId: string; applicationId: string | 
 export interface ApplicationHistoryEntry { applicationId: string; state: "applied" | "restored" | "abandoned"; total: number }
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
+export interface BackupPreparation { reviewId: string; fingerprint: string }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
+  | { action: "backupPreparations"; projectId: string }
+  | { action: "abandonBackupPreparation"; projectId: string; reviewId: string; fingerprint: string }
   | { action: "startApplication"; projectId: string; chatId: string; confirmationId: string }
   | { action: "restoreApplication"; projectId: string; applicationId: string; fingerprint: string }
   | { action: "restorationPreview"; projectId: string; applicationId: string; offset: number; fingerprint: string | null }
@@ -26,6 +29,8 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
+  | { schemaVersion: 1; action: "backupPreparations"; projectId: string; entries: BackupPreparation[] }
+  | { schemaVersion: 1; action: "abandonBackupPreparation"; projectId: string; reviewId: string }
   | { schemaVersion: 1; action: "startApplication"; projectId: string; chatId: string; applicationId: string }
   | { schemaVersion: 1; action: "restoreApplication"; projectId: string; applicationId: string }
   | { schemaVersion: 1; action: "restorationPreview"; projectId: string; applicationId: string; state: "prepared" | "applying" | "applied"; page: ApplicationPreviewPage }
@@ -66,6 +71,11 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   const request = object(value);
   if (request.action === "applicationCapabilities") {
     keys(request, ["action"]);
+  } else if (request.action === "backupPreparations") {
+    keys(request, ["action", "projectId"]); id(request.projectId);
+  } else if (request.action === "abandonBackupPreparation") {
+    keys(request, ["action", "projectId", "reviewId", "fingerprint"]); id(request.projectId);
+    if (typeof request.reviewId !== "string" || !/^review_[a-f0-9]{32}$/.test(request.reviewId) || typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)) throw new Error("invalid backup preparation identity");
   } else if (request.action === "startApplication") {
     keys(request, ["action", "projectId", "chatId", "confirmationId"]); id(request.projectId); id(request.chatId);
     validateProjectCatalogRequest({action:"cancelApplicationConfirmation",confirmationId:request.confirmationId});
@@ -109,6 +119,19 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   if (request.action === "applicationCapabilities") {
     keys(result, ["schemaVersion", "action", "enabled"]);
     if (typeof result.enabled !== "boolean") throw new Error("invalid application capability");
+  } else if (request.action === "backupPreparations") {
+    keys(result, ["schemaVersion", "action", "projectId", "entries"]);
+    if (result.projectId !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid backup preparation list");
+    const seen = new Set<string>();
+    for (const raw of result.entries) {
+      const entry = object(raw); keys(entry, ["reviewId", "fingerprint"]);
+      validateProjectCatalogRequest({action:"abandonBackupPreparation",projectId:request.projectId,...entry});
+      if (seen.has(entry.reviewId as string)) throw new Error("duplicate preparation");
+      seen.add(entry.reviewId as string);
+    }
+  } else if (request.action === "abandonBackupPreparation") {
+    keys(result, ["schemaVersion", "action", "projectId", "reviewId"]);
+    if (result.projectId !== request.projectId || result.reviewId !== request.reviewId) throw new Error("backup preparation response mismatch");
   } else if (request.action === "startApplication" || request.action === "restoreApplication") {
     keys(result, request.action === "startApplication" ? ["schemaVersion", "action", "projectId", "chatId", "applicationId"] : ["schemaVersion", "action", "projectId", "applicationId"]);
     validateProjectCatalogRequest({action:"cancelApplication",projectId:result.projectId,applicationId:result.applicationId});

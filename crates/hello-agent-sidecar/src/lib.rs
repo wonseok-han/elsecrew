@@ -1095,6 +1095,14 @@ impl Sidecar {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())
                 }
+                Some("backupPreparations") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
+                    self.projects.backup_preparations(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
+                }
+                Some("abandonBackupPreparation") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "reviewId", "fingerprint"]).map_err(invalid_params)?;
+                    self.projects.abandon_backup_preparation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "reviewId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
+                }
                 Some("startApplication") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId", "confirmationId"]).map_err(invalid_params)?;
                     self.projects.start_application_request(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "confirmationId").map_err(invalid_params)?, &request.request_id)

@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("backup preparation recovery binds project, record and exact digest", () => {
+  const entry = {reviewId:`review_${"a".repeat(32)}`,fingerprint:"b".repeat(64)};
+  const request = {action:"backupPreparations" as const,projectId:"project_a"};
+  const result = {schemaVersion:1,action:request.action,projectId:request.projectId,entries:[entry]};
+  assert.doesNotThrow(() => validateProjectCatalogResult(result,request));
+  assert.throws(() => validateProjectCatalogResult({...result,entries:[entry,entry]},request));
+  assert.throws(() => validateProjectCatalogResult({...result,projectId:"other"},request));
+  const abandon = {action:"abandonBackupPreparation" as const,projectId:request.projectId,...entry};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(abandon));
+  assert.throws(() => validateProjectCatalogRequest({...abandon,fingerprint:null}));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:abandon.action,projectId:abandon.projectId,reviewId:`review_${"c".repeat(32)}`},abandon));
+});
+
 test("application start commands preserve target and reject missing confirmation", () => {
   const request = {action:"startApplication" as const,projectId:"project_a",chatId:"chat_a",confirmationId:`confirmation_${"a".repeat(32)}`};
   const result = {schemaVersion:1,action:request.action,projectId:request.projectId,chatId:request.chatId,applicationId:`application_${"b".repeat(32)}`};

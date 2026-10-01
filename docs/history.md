@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (중단된 백업 준비의 명시 종료 화면)
+
+- 기준52b07c6에서 Karpathy 지침으로 backupPreparations/abandonBackupPreparation catalog·계약·프로젝트 복구 UI를 연결했다. preparing 기록만 최대1,000건 조회하며 project/review·구조 검증 후 기록 지문을 반환한다. 종료는 현재 기록의 exact 지문과 idle 상태를 다시 확인하고 기존 staging::abandon의 CAS를 재사용한다.
+- 확인 화면은 준비 시도 종료와 파일 삭제/원본 복원/잠금 해제를 구분한다. 파일·backup 이름/내부 경로를 노출하지 않으며 종료 후 새 검토가 필요하다. 응답 유실 때 자동 반복하지 않고 목록 재조회를 안내하고, 대상 전환의 늦은 응답은 버린다. 이는 원본 writer 활성화가 아니다.
+- TS 교차 대상·중복/지문 계약과 Rust stale 지문 무변경·목록 제외·원본 무변경 회귀를 작성했다. diff 검사만 수행했고 실행/컴파일/UI와 독립 검토는 통합 단계에 남긴다. 긴 baseline 대기·오류 상세·실제 공급자 활성화·Windows/G6/전체 검증은 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (준비 시작 전 취소 경합 수정 후보)
 
 - 기준1ae45b9에서 Karpathy 지침으로 취소 슬롯 등록을 확인 토큰 응답 이전으로 옮겼다. 준비 시작은 exact project/token의 기존 flag만 가져오며 누락된 슬롯을 새로 생성하거나 취소를 초기화하지 않는다. 새 확인만 새 슬롯을 만들고 옛 토큰은 새 확인을 중단할 수 없다.

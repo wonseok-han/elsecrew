@@ -2,6 +2,25 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[test]
+fn backup_preparation_catalog_abandons_only_the_reviewed_pending_record() {
+    use application::review::{backup::staging, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    assert!(staging::stop_after_reservation_for_test(&f.manager, &mut f.storage, ReviewTarget::Project(&f.project_id), &review_id).is_err());
+    let before = required_project(&f.storage, &f.project_id).unwrap();
+    let listed = f.manager.backup_preparations(&f.storage, &f.project_id).unwrap();
+    assert_eq!(listed.result["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(listed.result["entries"][0]["reviewId"], review_id);
+    let fingerprint = listed.result["entries"][0]["fingerprint"].as_str().unwrap();
+    assert!(f.manager.abandon_backup_preparation(&mut f.storage, &f.project_id, &review_id, "stale", "req_bad_backup_end").is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+    f.manager.abandon_backup_preparation(&mut f.storage, &f.project_id, &review_id, fingerprint, "req_backup_end").unwrap();
+    assert_eq!(staging::inspect(&f.manager, &f.storage, &f.project_id, &review_id).unwrap()["state"], "abandoned");
+    assert!(f.manager.backup_preparations(&f.storage, &f.project_id).unwrap().result["entries"].as_array().unwrap().is_empty());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn application_canceled_before_start_never_reserves_backup_or_resets_token() {

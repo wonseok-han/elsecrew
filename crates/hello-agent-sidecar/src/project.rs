@@ -359,6 +359,44 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn backup_preparations(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            let project = required_project(storage, project_id)?;
+            let mut entries = Vec::new();
+            if let Some(records) = project.get("application_backups") {
+                let records = records.as_object().ok_or_else(|| ProjectFailure::recovery("invalid backup preparations"))?;
+                for (id, record) in records {
+                    if record["state"] != "preparing" { continue; }
+                    if id.len() != 39 || !id.starts_with("review_") || !id[7..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || entries.len() >= 1000 {
+                        return Err(ProjectFailure::recovery("invalid backup preparation identity"));
+                    }
+                    let checked = application::review::backup::staging::inspect(self, storage, project_id, id)?;
+                    let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&checked).map_err(|_| ProjectFailure::recovery("invalid backup record"))?));
+                    entries.push(json!({"reviewId":id,"fingerprint":fingerprint}));
+                }
+            }
+            Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupPreparations","projectId":project_id,"entries":entries}), ..Default::default() })
+        }
+        #[cfg(not(unix))]
+        { let _ = (storage, project_id); Err(ProjectFailure::recovery("backup recovery unavailable on this platform")) }
+    }
+
+    pub(crate) fn abandon_backup_preparation(&mut self, storage: &mut Storage, project_id: &str, review_id: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup recovery requires idle processing")); }
+            let record = application::review::backup::staging::inspect(self, storage, project_id, review_id)?;
+            let current = format!("{:x}", Sha256::digest(serde_json::to_vec(&record).map_err(|_| ProjectFailure::recovery("invalid backup record"))?));
+            if current != fingerprint || record["state"] != "preparing" { return Err(ProjectFailure::recovery("backup preparation changed; inspect again")); }
+            application::review::backup::staging::abandon(self, storage, project_id, review_id, &record, request)?;
+            self.application_confirmations.cancel();
+            Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"abandonBackupPreparation","projectId":project_id,"reviewId":review_id}), ..Default::default() })
+        }
+        #[cfg(not(unix))]
+        { let _ = (storage, project_id, review_id, fingerprint, request); Err(ProjectFailure::recovery("backup recovery unavailable on this platform")) }
+    }
+
     fn check_application_preparation(&self) -> Result<(), ProjectFailure> {
         if self.preparation_cancel.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
             return Err(ProjectFailure::recovery("application preparation canceled; backup data preserved"));
