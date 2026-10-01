@@ -2,6 +2,49 @@
 //! the last writer response. No backup/retained-file deletion occurs here.
 use super::*;
 
+/// The applying fence may exist before a first item or staged file. This path
+/// never infers "unwritten" from matching bytes once any writer journal exists.
+#[allow(dead_code)]
+pub(in crate::project) fn cancel_before_first_write(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applying"
+        || inspect(storage, project_id)? != *expected
+        || expected.get("completedItems").is_some()
+        || expected.get("restoredItems").is_some()
+        || expected.get("unstartedFrom").is_some()
+        || expected
+            .get("pendingItem")
+            .is_some_and(|item| item["index"] != 0 || item.get("writeJournal").is_some())
+    {
+        return Err(invalid());
+    }
+    let items = inspect_write_items(manager, storage, project_id, expected)?;
+    if let Some(pending) = expected.get("pendingItem") {
+        if items.first() != Some(&pending["item"]) {
+            return Err(invalid());
+        }
+    }
+    for _ in 0..2 {
+        for item in &items {
+            writer::verify_unwritten_item(manager, expected, item)?;
+        }
+    }
+    transition(
+        storage,
+        project_id,
+        expected,
+        "abandoned",
+        "applicationAbandoned",
+        false,
+        request,
+    )
+}
+
 fn verify_batch(
     manager: &ProjectManager,
     storage: &Storage,

@@ -82,7 +82,17 @@ pub(in crate::project) fn restore_selected(
         Some("applied") => {
             completion::begin_restore(manager, storage, project_id, expected, request)?
         }
-        Some("applying") => inspect_pending_item(manager, storage, project_id)?,
+        Some("applying") => {
+            if expected.get("pendingItem").is_none()
+                || (expected["pendingItem"]["index"] == 0
+                    && expected["pendingItem"].get("writeJournal").is_none())
+            {
+                return completion::cancel_before_first_write(
+                    manager, storage, project_id, expected, request,
+                );
+            }
+            inspect_pending_item(manager, storage, project_id)?
+        }
         _ => return Err(invalid()),
     };
     if current["pendingItem"].get("writeJournal").is_none() {

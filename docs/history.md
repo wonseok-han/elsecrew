@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (첫 쓰기 전 취소 복구 연결)
+
+- 직전ba1d3eb의 실행 연결은 진전이다. checkout/기존 archive를 확인하고 Karpathy 지침으로 applying 잠금 이후 첫 항목이 없거나 journal 없는0번 항목만 있는 경우의 명시 취소를 연결했다. completed/restored/tail 기록이나 writer journal이 있으면 이 경로로 취소하지 않는다.
+- 신뢰 archive의 모든 before 항목을 현재 원본과 두 번 대조한 뒤 abandoned와 잠금 해제를 원자 기록한다. 첫 pending이 있었다면 폐기 기록에 보존한다. prepared 취소는 기존 경로를 유지하고 원본 복원 쓰기·임시 파일 삭제·자동 복구를 하지 않는다.
+- pending 예약 전/후 두 경우의 단일 복구 호출·원본 무변경·잠금 해제 회귀를 작성했다. 테스트/빌드/독립 검토는 미실행, 포맷/diff만 확인한다. 제품 미연결·미검증이며 staging 도중 실패 복구·디렉터리·이전 완료 이력·IPC/UI와 누적 검증은 남는다. 실제 사용자 파일/계정/모델/main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (확인된 반영·명시 복원 실행 흐름 결합)
 
 - 직전cf964cd의 중복 읽기 제거는 코드 진전이다. 현행 checkout/기존 archive를 확인하고 Karpathy 지침으로 execution 연결부를 추가했다. move-only 확인 handoff→intent/백업 대조→쓰기 경계→순차 항목→배치 완료를 하나의 내부 호출로 묶었다. 디렉터리 포함 묶음은 현재 첫 원본 쓰기 전 거절하며 prepared 잠금은 명시 취소할 수 있다. 미구현 범위를 전체 지원으로 주장하지 않는다.

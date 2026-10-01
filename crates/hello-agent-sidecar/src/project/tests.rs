@@ -4,6 +4,85 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_cancels_before_first_write_with_or_without_pending_item() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    for with_pending in [false, true] {
+        let (mut f, _) = prepared_backup_fixture();
+        let active = f
+            .manager
+            .validate_active_project(&f.storage, &f.project_id)
+            .unwrap();
+        let before = fs::read(f.source.join("src/edit.txt")).unwrap();
+        fs::write(active.worktree_path.join("src/edit.txt"), b"never-applied").unwrap();
+        let review = persistence::publish(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            "req_unwritten_review",
+        )
+        .unwrap();
+        let mut owner = Confirmations::default();
+        let (token, _) = owner
+            .open(
+                &f.manager,
+                &f.storage,
+                ReviewTarget::Project(&f.project_id),
+                review["reviewId"].as_str().unwrap(),
+            )
+            .unwrap();
+        let prepared = owner
+            .prepare_backup(&f.manager, &mut f.storage, &token, "req_unwritten_backup")
+            .unwrap();
+        let record = intent::begin(
+            &f.manager,
+            &mut f.storage,
+            &mut owner,
+            prepared,
+            "req_unwritten_begin",
+        )
+        .unwrap();
+        let mut record = intent::mark_write_started(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &record,
+            "req_unwritten_fence",
+        )
+        .unwrap();
+        if with_pending {
+            record = intent::record_first_item(
+                &f.manager,
+                &mut f.storage,
+                &f.project_id,
+                &record,
+                "req_unwritten_pending",
+            )
+            .unwrap();
+        }
+        let result = intent::execution::restore_selected(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &record,
+            &std::sync::atomic::AtomicBool::new(false),
+            "req_unwritten_cancel",
+        )
+        .unwrap();
+        assert_eq!(result["state"], "abandoned");
+        assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), result);
+        assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), before);
+        assert_eq!(
+            f.storage
+                .projection_record("lock", result["lockId"].as_str().unwrap())
+                .unwrap()
+                .unwrap()["recovery_required"],
+            false
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_confirmed_execution_and_selected_restore_roundtrip() {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();

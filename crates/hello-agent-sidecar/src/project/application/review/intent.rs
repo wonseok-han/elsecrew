@@ -101,7 +101,7 @@ pub(in crate::project) fn inspect(
     let unstarted = record.get("unstartedFrom");
     let item_state = matches!(
         record["state"].as_str(),
-        Some("applying" | "applied" | "restored")
+        Some("applying" | "applied" | "restored" | "abandoned")
     );
     let completed_count = match completed {
         Some(value) => {
@@ -171,6 +171,15 @@ pub(in crate::project) fn inspect(
         {
             return Err(invalid());
         }
+    }
+    if record["state"] == "abandoned"
+        && pending.is_some()
+        && (completed.is_some()
+            || restored.is_some()
+            || unstarted.is_some()
+            || pending.is_some_and(|v| v.get("writeJournal").is_some()))
+    {
+        return Err(invalid());
     }
     let id = record["applicationId"].as_str().ok_or_else(invalid)?;
     if id.len() != 44
