@@ -99,6 +99,77 @@ fn application_regular_writer_retains_previous_file_and_refuses_replay() {
         "req_writer_abandon"
     )
     .is_err());
+    assert_eq!(
+        intent::writer::inspect_regular_outcome(&f.manager, &f.storage, &f.project_id).unwrap()
+            ["comparison"],
+        "matchesAppliedPair"
+    );
+    fs::write(f.source.join("src/edit.txt"), b"later-user-edit").unwrap();
+    assert!(intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &result,
+        "req_restore_conflict"
+    )
+    .is_err());
+    assert_eq!(
+        fs::read(f.source.join("src/edit.txt")).unwrap(),
+        b"later-user-edit"
+    );
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), result);
+    fs::write(f.source.join("src/edit.txt"), b"applied-content").unwrap();
+    // Simulate a lost completion publication after the filesystem restore.
+    f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_restore_completion BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_item_0_restored' BEGIN SELECT RAISE(ABORT, 'restore completion failure'); END;").unwrap();
+    assert!(intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &result,
+        "req_restore"
+    )
+    .is_err());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), before);
+    let interrupted = intent::inspect(&f.storage, &f.project_id).unwrap();
+    assert_eq!(
+        interrupted["pendingItem"]["writeJournal"]["phase"],
+        "restoring"
+    );
+    assert_eq!(
+        intent::writer::inspect_regular_outcome(&f.manager, &f.storage, &f.project_id).unwrap()
+            ["comparison"],
+        "matchesUnappliedPair"
+    );
+    f.storage
+        .connection_for_test()
+        .execute_batch("DROP TRIGGER fail_restore_completion;")
+        .unwrap();
+    let restored = intent::writer::acknowledge_regular_outcome(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &interrupted,
+        "req_restore_ack",
+    )
+    .unwrap();
+    assert_eq!(restored["pendingItem"]["writeJournal"]["phase"], "restored");
+    assert_eq!(
+        fs::read(
+            f.source
+                .join("src")
+                .join(journal["retainedName"].as_str().unwrap())
+        )
+        .unwrap(),
+        b"applied-content"
+    );
+    assert!(intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &restored,
+        "req_restore_replay"
+    )
+    .is_err());
 }
 
 #[cfg(unix)]

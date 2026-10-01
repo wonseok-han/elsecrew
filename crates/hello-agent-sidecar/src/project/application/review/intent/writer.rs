@@ -75,6 +75,207 @@ fn matches_after(actual: &Value, expected: &Value) -> bool {
         && actual["mode"].as_u64().map(|m| m & 0o100 != 0) == expected["executable"].as_bool()
 }
 
+// A persisted name is still data: never accept paths or unknown journal shapes.
+fn journal(record: &Value) -> Result<&Value, ProjectFailure> {
+    let value = &record["pendingItem"]["writeJournal"];
+    let name = value["retainedName"].as_str().ok_or_else(invalid)?;
+    let suffix = name
+        .strip_prefix(".hello-agent-apply-")
+        .ok_or_else(invalid)?;
+    if value.as_object().is_none_or(|v| v.len() != 6)
+        || value["version"] != 1
+        || suffix.len() != 32
+        || !suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !matches!(
+            value["phase"].as_str(),
+            Some("reserved" | "staged" | "applied" | "restoring" | "restored")
+        )
+    {
+        return Err(invalid());
+    }
+    for key in ["rootIdentity", "parentIdentity"] {
+        let pair = value[key].as_array().ok_or_else(invalid)?;
+        if pair.len() != 2 || pair.iter().any(|v| v.as_u64().is_none()) {
+            return Err(invalid());
+        }
+    }
+    Ok(value)
+}
+
+fn bound_parent(manager: &ProjectManager, record: &Value) -> Result<(Dir, String), ProjectFailure> {
+    let journal = journal(record)?;
+    let binding = &record["binding"];
+    let source = manager.open_source_repository(Path::new(
+        binding["canonicalGitRoot"].as_str().ok_or_else(invalid)?,
+    ))?;
+    if binding["sourceIdentity"] != source.source_identity
+        || binding["baseCommit"] != source.base_commit
+        || binding["baseTree"] != source.base_tree
+        || binding["objectFormat"] != source.object_format
+    {
+        return Err(invalid());
+    }
+    let root = source._root.dir_metadata().map_err(|_| invalid())?;
+    let (dir, leaf) = parent(
+        &source._root,
+        record["pendingItem"]["item"]["path"]
+            .as_str()
+            .ok_or_else(invalid)?,
+    )?;
+    let meta = dir.dir_metadata().map_err(|_| invalid())?;
+    if journal["rootIdentity"] != json!([root.dev(), root.ino()])
+        || journal["parentIdentity"] != json!([meta.dev(), meta.ino()])
+    {
+        return Err(invalid());
+    }
+    Ok((dir, leaf))
+}
+
+fn pair_matches(
+    dir: &Dir,
+    leaf: &str,
+    record: &Value,
+    applied: bool,
+) -> Result<bool, ProjectFailure> {
+    let j = journal(record)?;
+    let old = &record["pendingItem"]["item"]["before"];
+    let new = &j["stagedImage"];
+    if !matches_after(new, &record["pendingItem"]["item"]["after"]) {
+        return Err(invalid());
+    }
+    let (target, saved) = if applied { (new, old) } else { (old, new) };
+    Ok(image(dir, leaf)? == *target
+        && image(dir, j["retainedName"].as_str().ok_or_else(invalid)?)? == *saved)
+}
+
+/// Read-only restart diagnosis. Does not turn matching bytes into execution permission.
+#[allow(dead_code)]
+pub(in crate::project) fn inspect_regular_outcome(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+) -> Result<Value, ProjectFailure> {
+    let current = inspect_pending_item(manager, storage, project_id)?;
+    let j = journal(&current)?;
+    let (dir, leaf) = bound_parent(manager, &current)?;
+    let comparison = if j["phase"] == "reserved" {
+        "incompleteStaging"
+    } else if pair_matches(&dir, &leaf, &current, true)? {
+        "matchesAppliedPair"
+    } else if pair_matches(&dir, &leaf, &current, false)? {
+        "matchesUnappliedPair"
+    } else {
+        "conflict"
+    };
+    Ok(
+        json!({"applicationId":current["applicationId"],"index":0,"phase":j["phase"],"comparison":comparison}),
+    )
+}
+
+/// Explicit acknowledgment of a completed rename whose final ledger write was
+/// lost. Never performs the rename again and never unlocks the application.
+#[allow(dead_code)]
+pub(in crate::project) fn acknowledge_regular_outcome(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let mut j = journal(expected)?.clone();
+    let (applied, phase) = match j["phase"].as_str() {
+        Some("staged") => (true, "applied"),
+        Some("restoring") => (false, "restored"),
+        _ => return Err(invalid()),
+    };
+    let (dir, leaf) = bound_parent(manager, expected)?;
+    if !pair_matches(&dir, &leaf, expected, applied)? {
+        return Err(invalid());
+    }
+    sync_capability_directory(&dir)?;
+    let (fresh, _) = bound_parent(manager, expected)?;
+    if !pair_matches(&fresh, &leaf, expected, applied)? {
+        return Err(invalid());
+    }
+    j["phase"] = json!(phase);
+    publish(storage, project_id, expected, j, request)
+}
+
+/// Restore only the app-owned after image. A later edit/replacement is a
+/// conflict; both old and new contents remain available for manual resolution.
+#[allow(dead_code)]
+pub(in crate::project) fn restore_first_regular_item(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let mut j = journal(expected)?.clone();
+    if j["phase"] != "applied" {
+        return Err(invalid());
+    }
+    let (dir, leaf) = bound_parent(manager, expected)?;
+    if !pair_matches(&dir, &leaf, expected, true)? {
+        return Err(invalid());
+    }
+    j["phase"] = json!("restoring");
+    let current = publish(storage, project_id, expected, j.clone(), request)?;
+    // Reopen the path after durable intent; don't write to a detached old parent.
+    let (dir, leaf) = bound_parent(manager, &current)?;
+    if !pair_matches(&dir, &leaf, &current, true)? {
+        return Err(invalid());
+    }
+    let target = CString::new(leaf.as_str()).map_err(|_| invalid())?;
+    let saved =
+        CString::new(j["retainedName"].as_str().ok_or_else(invalid)?).map_err(|_| invalid())?;
+    let item = &current["pendingItem"]["item"];
+    let status = unsafe {
+        if item["before"].is_null() {
+            libc::renameatx_np(
+                dir.as_raw_fd(),
+                target.as_ptr(),
+                dir.as_raw_fd(),
+                saved.as_ptr(),
+                libc::RENAME_EXCL,
+            )
+        } else {
+            libc::renameatx_np(
+                dir.as_raw_fd(),
+                saved.as_ptr(),
+                dir.as_raw_fd(),
+                target.as_ptr(),
+                if item["after"].is_null() {
+                    libc::RENAME_EXCL
+                } else {
+                    libc::RENAME_SWAP
+                },
+            )
+        }
+    };
+    if status != 0 {
+        return Err(invalid());
+    }
+    sync_capability_directory(&dir)?;
+    if !pair_matches(&dir, &leaf, &current, false)? {
+        return Err(invalid());
+    }
+    let (fresh, _) = bound_parent(manager, &current)?;
+    if !pair_matches(&fresh, &leaf, &current, false)? {
+        return Err(invalid());
+    }
+    j["phase"] = json!("restored");
+    publish(storage, project_id, &current, j, request)
+}
+
 fn publish(
     storage: &mut Storage,
     project_id: &str,
