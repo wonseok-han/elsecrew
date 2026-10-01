@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (검토 묶음의 세션 확인·취소 연결)
+
+- 직전69c8dd2의 폴더 내부 반영은 진전이다. 현재 checkout/기록을 확인하고 Karpathy 지침으로 선택한 chat/project·화면 fingerprint를 재검증한 뒤 descriptor 게시와 기존 5분 Confirmations owner를 연결했다. owner는 ProjectManager 수명에만 존재하며 새 확인/실패는 이전 확인을 폐기한다. 확인 뒤 plan 지문도 다시 대조한다.
+- 채팅 검토 화면에 확인 준비·취소·5분 표시 만료를 연결했다. 확인 ID는 메모리에만 두며 취소는 정확 토큰만 허용한다. 표시 만료 외 실제 만료는 기존 backend consume 경계에서 강제한다. 아직 백업/원본 실행 버튼은 연결하지 않았고 이 확인은 원본 쓰기 완료나 제품 활성화가 아니다.
+- 대상/수명/토큰 결속 계약 회귀를 작성했다. 테스트/컴파일/UI 실측은 최종 통합으로 남겼고 diff만 확인했다. 다음은 확인 소비→백업→실행의 제품 작업 소유권·취소/종료 연결과 복구 UI이며 전체 검증/독립 검토·공급자 활성화도 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (새 폴더 반영·보존형 역복원 후보)
 
 - 직전9c91aa3의 이동 경로 결속은 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 새 directory의 image/staging·0755 생성·기존 보존형 rename/역복원을 연결했다. inode/mode는 결속하되 자식 생성으로 바뀌는 directory nlink/시각은 image 동일성에서 제외하고 별도 자식 집합 검사로 보완한다. 기존 directory 교체/삭제는 거절한다.

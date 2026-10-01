@@ -26,6 +26,15 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("confirmation is bound to target, fixed lifetime and exact cancel token", () => {
+  const request = { action: "openApplicationConfirmation" as const, projectId: "project_a", chatId: "chat_a", fingerprint: "a".repeat(64) };
+  const confirmationId = `confirmation_${"b".repeat(32)}`;
+  const result = { schemaVersion: 1, action: request.action, projectId: request.projectId, chatId: request.chatId, confirmationId, worktreeId: "worktree_a", total: 3, expiresInSeconds: 300 };
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  for (const change of [{ chatId: "chat_b" }, { expiresInSeconds: 301 }, { confirmationId: "forged" }]) assert.throws(() => validateProjectCatalogResult({ ...result, ...change }, request));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion:1, action:"cancelApplicationConfirmation", confirmationId:"other" }, {action:"cancelApplicationConfirmation",confirmationId}));
+});
+
 test("preview pages bind the cursor, target and change fingerprint", () => {
   const fingerprint = "a".repeat(64);
   const request = { action: "applicationPreviewPage" as const, projectId: "project_a", chatId: "chat_a", offset: 100, fingerprint };

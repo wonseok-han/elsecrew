@@ -1049,6 +1049,14 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("cancelApplicationConfirmation") => {
+                    let params = require_exact_params(&request.params, &["action", "confirmationId"]).map_err(invalid_params)?;
+                    self.projects.cancel_application_confirmation(param_string(params, "confirmationId").map_err(invalid_params)?)
+                }
+                Some("openApplicationConfirmation") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId", "fingerprint"]).map_err(invalid_params)?;
+                    self.projects.open_application_confirmation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
+                }
                 Some("applicationPreviewPage") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId", "offset", "fingerprint"]).map_err(invalid_params)?;
                     let chat_id = if params["chatId"].is_null() { None } else { Some(param_string(params, "chatId").map_err(invalid_params)?) };

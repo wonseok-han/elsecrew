@@ -7,16 +7,39 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
   const [preview, setPreview] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
   const generation = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
-    generation.current++; setPreview(null); setError(false);
+    generation.current++; setPreview(null); setError(false); setConfirmation(null);
     return () => { generation.current++; };
   }, [projectId, chatId, worktreeId, disabled]);
+  useEffect(() => {
+    if (!confirmation) return;
+    const timer = setTimeout(() => setConfirmation(null), 300_000);
+    return () => clearTimeout(timer);
+  }, [confirmation]);
+  async function confirmReview(cancel = false) {
+    if (disabled || pending.current || !window.m5Projects || (!cancel && !preview) || (cancel && !confirmation)) return;
+    const epoch = generation.current;
+    pending.current = true; setBusy(true); setError(false);
+    const request = cancel
+      ? { action: "cancelApplicationConfirmation" as const, confirmationId: confirmation! }
+      : { action: "openApplicationConfirmation" as const, projectId, chatId, fingerprint: preview!.fingerprint };
+    try {
+      const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
+      if (generation.current !== epoch) return;
+      if (result.action === "openApplicationConfirmation") {
+        if (result.worktreeId !== worktreeId) throw new Error("confirmation workspace mismatch");
+        setConfirmation(result.confirmationId);
+      } else setConfirmation(null);
+    } catch { if (generation.current === epoch) { setError(true); setConfirmation(null); } }
+    finally { pending.current = false; setBusy(false); }
+  }
   async function inspect(offset = 0, fingerprint: string | null = null) {
     if (disabled || pending.current || !window.m5Projects) return;
     const epoch = generation.current;
-    pending.current = true; setBusy(true); setError(false); setPreview(null);
+    pending.current = true; setBusy(true); setError(false); setPreview(null); setConfirmation(null);
     const request = { action: "applicationPreviewPage" as const, projectId, chatId, offset, fingerprint };
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
@@ -38,6 +61,8 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
       <button type="button" disabled={disabled || busy || preview.offset === 0} onClick={() => void inspect(Math.max(0, preview.offset - 100), preview.fingerprint)}>{t("m5.application.previousPage")}</button>
       <button type="button" disabled={disabled || busy || preview.offset + preview.changes.length >= preview.total} onClick={() => void inspect(preview.offset + 100, preview.fingerprint)}>{t("m5.application.nextPage")}</button>
       <ul>{preview.changes.map(change => <li key={change.path}>{t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code></li>)}</ul>
+      <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
+    {confirmation && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
   </section>;
 }

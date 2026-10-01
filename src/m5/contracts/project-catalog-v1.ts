@@ -8,6 +8,8 @@ export interface ApplicationHistoryEntry { applicationId: string; state: "applie
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
+  | { action: "openApplicationConfirmation"; projectId: string; chatId: string; fingerprint: string }
+  | { action: "cancelApplicationConfirmation"; confirmationId: string }
   | { action: "applicationPreviewPage"; projectId: string; chatId: string | null; offset: number; fingerprint: string | null }
   | { action: "inspectPreparation"; projectId: string }
   | { action: "applicationStatus"; projectId: string }
@@ -18,6 +20,8 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "openApplicationConfirmation"; projectId: string; chatId: string; confirmationId: string; worktreeId: string; total: number; expiresInSeconds: number }
+  | { schemaVersion: 1; action: "cancelApplicationConfirmation"; confirmationId: string }
   | { schemaVersion: 1; action: "applicationPreviewPage"; projectId: string; chatId: string | null; page: ApplicationPreviewPage }
   | { schemaVersion: 1; action: "chatApplicationPreview"; projectId: string; chatId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
@@ -50,7 +54,13 @@ export function validatePreparationInspection(value: unknown): PreparationInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "applicationPreviewPage") {
+  if (request.action === "openApplicationConfirmation") {
+    keys(request, ["action", "projectId", "chatId", "fingerprint"]); id(request.projectId); id(request.chatId);
+    if (typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)) throw new Error("invalid confirmation fingerprint");
+  } else if (request.action === "cancelApplicationConfirmation") {
+    keys(request, ["action", "confirmationId"]);
+    if (typeof request.confirmationId !== "string" || !/^confirmation_[a-f0-9]{32}$/.test(request.confirmationId)) throw new Error("invalid confirmation ID");
+  } else if (request.action === "applicationPreviewPage") {
     keys(request, ["action", "projectId", "chatId", "offset", "fingerprint"]); id(request.projectId);
     if (request.chatId !== null) id(request.chatId);
     if (!Number.isSafeInteger(request.offset) || (request.offset as number) < 0 || (request.offset as number) > 100000 || (request.offset as number) % 100 !== 0 || (request.offset !== 0 && request.fingerprint === null) || (request.fingerprint !== null && (typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)))) throw new Error("invalid review cursor");
@@ -70,7 +80,15 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "applicationPreviewPage") {
+  if (request.action === "openApplicationConfirmation") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId", "confirmationId", "worktreeId", "total", "expiresInSeconds"]);
+    if (result.projectId !== request.projectId || result.chatId !== request.chatId || result.expiresInSeconds !== 300 || !Number.isSafeInteger(result.total) || (result.total as number) < 0 || (result.total as number) > 100000) throw new Error("invalid confirmation response");
+    id(result.worktreeId);
+    validateProjectCatalogRequest({action:"cancelApplicationConfirmation",confirmationId:result.confirmationId});
+  } else if (request.action === "cancelApplicationConfirmation") {
+    keys(result, ["schemaVersion", "action", "confirmationId"]);
+    if (result.confirmationId !== request.confirmationId) throw new Error("confirmation cancellation mismatch");
+  } else if (request.action === "applicationPreviewPage") {
     keys(result, ["schemaVersion", "action", "projectId", "chatId", "page"]);
     if (result.projectId !== request.projectId || result.chatId !== request.chatId) throw new Error("review page target mismatch");
     const page = object(result.page); keys(page, ["worktreeId", "total", "changes", "offset", "fingerprint"]);

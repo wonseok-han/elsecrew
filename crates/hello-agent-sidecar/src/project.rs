@@ -330,6 +330,8 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    #[cfg(unix)]
+    application_confirmations: application::review::confirmation::Confirmations,
     data_root: PathBuf,
     data_dir: Dir,
     worktrees_root: PathBuf,
@@ -351,6 +353,40 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        self.application_confirmations.cancel_token(token)?;
+        #[cfg(not(unix))]
+        return Err(ProjectFailure::recovery("application confirmation unavailable on this platform"));
+        #[cfg(unix)]
+        Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"cancelApplicationConfirmation","confirmationId":token}), ..Default::default() })
+    }
+    pub(crate) fn open_application_confirmation(&mut self, storage: &mut Storage, project_id: &str, chat_id: &str, fingerprint: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            self.application_confirmations.cancel();
+            let chat = storage.projection_record("chat", chat_id)?.ok_or_else(|| ProjectFailure::dirty("review chat missing"))?;
+            let record = chat.get("record").and_then(Value::as_object).ok_or_else(|| ProjectFailure::dirty("review chat record missing"))?;
+            let address = WorkspaceAddress { project_id: project_id.to_owned(), chat_id: chat_id.to_owned(), worktree_id: value_string(record, "worktreeId")?.to_owned(), workspace_identity: value_string(record, "workspaceIdentity")?.to_owned() };
+            let target = application::review::ReviewTarget::Chat { address: &address, task_id: value_string(record, "taskId")? };
+            application::review::prepare_target(self, storage, target)?.preview_page(0, Some(fingerprint))?;
+            let saved = application::review::persistence::publish_target(self, storage, target, request_id)?;
+            let mut owner = std::mem::take(&mut self.application_confirmations);
+            let opened = owner.open(self, storage, target, saved["reviewId"].as_str().ok_or_else(|| ProjectFailure::dirty("review identity missing"))?);
+            let result = opened.and_then(|(token, plan)| {
+                let page = plan.preview_page(0, Some(fingerprint))?;
+                Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"openApplicationConfirmation","projectId":project_id,"chatId":chat_id,"confirmationId":token,"worktreeId":address.worktree_id,"total":page["total"],"expiresInSeconds":300}), ..Default::default() })
+            });
+            if result.is_err() { owner.cancel(); }
+            self.application_confirmations = owner;
+            result
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (storage, project_id, chat_id, fingerprint, request_id);
+            Err(ProjectFailure::recovery("application confirmation unavailable on this platform"))
+        }
+    }
     pub(crate) fn application_preview_page(&self, storage: &Storage, project_id: &str, chat_id: Option<&str>, offset: usize, fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         {
@@ -503,6 +539,8 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            #[cfg(unix)]
+            application_confirmations: Default::default(),
             data_root,
             data_dir,
             worktrees_root,
