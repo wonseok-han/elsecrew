@@ -351,6 +351,35 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    /// Historical summaries are not live lock checks or restoration grants.
+    pub(crate) fn application_history(
+        &self,
+        storage: &Storage,
+        project_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let project = required_project(storage, project_id)?;
+        let mut entries = Vec::new();
+        if let Some(history) = project.get("application_history") {
+            let invalid = || ProjectFailure::recovery("invalid application history");
+            let history = history.as_object().ok_or_else(invalid)?;
+            if history.len() > 1_000 { return Err(invalid()); }
+            for (id, record) in history {
+                if id.len() != 44 || !id.starts_with("application_")
+                    || !id[12..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    || record["applicationId"].as_str() != Some(id.as_str())
+                    || record["binding"]["projectId"] != project_id || record["version"] != 1
+                    || !matches!(record["state"].as_str(), Some("applied" | "restored" | "abandoned"))
+                { return Err(invalid()); }
+                let total = record["backup"]["header"]["count"].as_u64().ok_or_else(invalid)?;
+                if total > 100_000 { return Err(invalid()); }
+                entries.push(serde_json::json!({"applicationId":id,"state":record["state"],"total":total}));
+            }
+        }
+        Ok(ProjectAction {
+            result: serde_json::json!({"schemaVersion":1,"action":"applicationHistory","projectId":project_id,"entries":entries}),
+            ..Default::default()
+        })
+    }
     pub(crate) fn application_status(
         &self,
         storage: &Storage,

@@ -26,6 +26,22 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("application history is bounded, project-bound and terminal-only", () => {
+  const request = { action: "applicationHistory" as const, projectId: "project_a" };
+  const entry = { applicationId: `application_${"a".repeat(32)}`, state: "restored", total: 2 };
+  const result = { schemaVersion: 1, ...request, entries: [entry] };
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ ...result, entries: [] }, request));
+  for (const change of [
+    { projectId: "project_b" }, { entries: [entry, entry] },
+    { entries: [{ ...entry, state: "applying" }] },
+    { entries: [{ ...entry, total: -1 }] },
+    { entries: [{ ...entry, backupPath: "/private" }] },
+    { entries: Array(1001).fill(entry) },
+  ]) assert.throws(() => validateProjectCatalogResult({ ...result, ...change }, request));
+  assert.throws(() => validateProjectCatalogRequest({ ...request, path: "/private" }));
+});
+
 test("view release is ID-only and binds the acknowledgment", () => {
   const input = { action: "releaseView" as const, projectId: "project_a" };
   assert.doesNotThrow(() => validateProjectCatalogRequest(input));

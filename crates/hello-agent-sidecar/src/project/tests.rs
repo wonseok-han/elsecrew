@@ -1212,6 +1212,10 @@ fn application_intent_fence_is_atomic_restart_safe_and_cancelable_before_writes(
                 project["application_history"][abandoned["applicationId"].as_str().unwrap()],
                 abandoned
             );
+            assert_eq!(f.manager.application_history(&storage, &f.project_id).unwrap().result,
+                json!({"schemaVersion":1,"action":"applicationHistory","projectId":f.project_id,
+                    "entries":[{"applicationId":abandoned["applicationId"],"state":"abandoned",
+                    "total":abandoned["backup"]["header"]["count"]}]}));
             assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), next);
             assert!(intent::abandon_unwritten(
                 &mut storage,
