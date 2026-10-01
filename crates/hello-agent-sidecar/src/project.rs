@@ -351,6 +351,32 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn application_status(
+        &self,
+        storage: &Storage,
+        project_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let project = required_project(storage, project_id)?;
+        let status = if project.get("application_intent").is_none() {
+            serde_json::json!({"projectId":project_id,"applicationId":null,"state":"none","currentIndex":null,"total":0})
+        } else {
+            #[cfg(unix)]
+            {
+                let record = application::review::intent::inspect(storage, project_id)?;
+                serde_json::json!({"projectId":project_id,"applicationId":record["applicationId"],"state":record["state"],"currentIndex":record["pendingItem"]["index"],"total":record["backup"]["header"]["count"]})
+            }
+            #[cfg(not(unix))]
+            {
+                return Err(ProjectFailure::recovery(
+                    "application state inspection unavailable on this platform",
+                ));
+            }
+        };
+        Ok(ProjectAction {
+            result: serde_json::json!({"schemaVersion":1,"action":"applicationStatus","status":status}),
+            ..Default::default()
+        })
+    }
     pub fn new(database_path: &Path) -> Result<Self, SidecarError> {
         let data_root = database_path.parent().ok_or_else(|| {
             SidecarError::new("dataDirectoryUnavailable", "database has no parent")

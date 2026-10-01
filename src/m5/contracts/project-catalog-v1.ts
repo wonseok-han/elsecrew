@@ -3,11 +3,14 @@ import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.
 export const PROJECT_CATALOG_METHOD = "project.catalog";
 export const PROJECT_CATALOG_CHANNEL = "m5:project:catalog";
 export interface PreparationInspection { projectId: string; worktreeId: string; workspaceIdentity: string; lockId: string; projectRevision: number; lockRevision: number }
+export interface ApplicationStatus { projectId: string; applicationId: string | null; state: "none" | "prepared" | "applying" | "applied" | "restored" | "abandoned"; currentIndex: number | null; total: number }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "inspectPreparation"; projectId: string }
+  | { action: "applicationStatus"; projectId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
   | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
@@ -37,7 +40,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation") {
+  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -48,7 +51,17 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "inspectPreparation" || request.action === "abandonPreparation") {
+  if (request.action === "applicationStatus") {
+    keys(result,["schemaVersion","action","status"]);
+    const status = object(result.status);
+    keys(status,["projectId","applicationId","state","currentIndex","total"]);
+    if (id(status.projectId) !== request.projectId || !["none","prepared","applying","applied","restored","abandoned"].includes(String(status.state))) throw new Error("invalid application status");
+    if (!Number.isSafeInteger(status.total) || (status.total as number) < 0 || (status.total as number) > 100000) throw new Error("invalid application count");
+    if (status.state === "none") {
+      if (status.applicationId !== null || status.currentIndex !== null || status.total !== 0) throw new Error("invalid empty application");
+    } else if (typeof status.applicationId !== "string" || !/^application_[a-f0-9]{32}$/.test(status.applicationId)) throw new Error("invalid application ID");
+    if (status.currentIndex !== null && (!Number.isSafeInteger(status.currentIndex) || (status.currentIndex as number) < 0 || (status.currentIndex as number) >= (status.total as number))) throw new Error("invalid application cursor");
+  } else if (request.action === "inspectPreparation" || request.action === "abandonPreparation") {
     keys(result, ["schemaVersion", "action", "inspection"]);
     const inspection = validatePreparationInspection(result.inspection);
     if (request.action === "inspectPreparation") {

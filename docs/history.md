@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (누적 컴파일·읽기 전용 반영 상태 화면 연결)
+
+- 직전9a0d652의 미작성 복구는 진전이다. 제품 연결에 필요한 누적 컴파일 진단으로 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests`를1회 실행해8.21초 PASS했다. 이는 이 턴의 UI/IPC 추가 전 코드에 대한 타입 검사이며 동작 테스트/후속 diff 합격이 아니다.
+- Karpathy 지침으로 기존 project.catalog 경로에 applicationStatus 읽기 전용 action을 연결했다. project/lock 결속을 검사한 현재 원장에서 ID·상태·항목 번호/총수만 반환하고 원본 경로·backup descriptor는 노출하지 않는다. 계약 validator는 선택한 project 일치·정확 필드·ID 형식·수치 범위를 검사한다. 기존 Electron main/preload/client의 공통 catalog validator를 재사용한다.
+- 저장 프로젝트 목록의 복구 영역에 반영·복원 기록 확인 버튼과 ko/en 상태·실패 안내를 추가했다. 프로젝트 변경 시 이전 표시를 비우고 stale 응답을 버린다. 쓰기·복원 버튼은 열지 않았다. 계약 회귀는 작성했으나 이번 UI/IPC 변경 뒤 TypeScript/Rust/동작 검증은 미실행이며 최종 통합 목록에 남긴다. diff check만 확인했다. 디렉터리·staging 복구·완료 이력·실제 반영 UI/IPC와 전체 검증은 남고 main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (첫 쓰기 전 취소 복구 연결)
 
 - 직전ba1d3eb의 실행 연결은 진전이다. checkout/기존 archive를 확인하고 Karpathy 지침으로 applying 잠금 이후 첫 항목이 없거나 journal 없는0번 항목만 있는 경우의 명시 취소를 연결했다. completed/restored/tail 기록이나 writer journal이 있으면 이 경로로 취소하지 않는다.

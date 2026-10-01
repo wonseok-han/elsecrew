@@ -1049,6 +1049,10 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("applicationStatus") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
+                    self.projects.application_status(&self.storage,param_string(params,"projectId").map_err(invalid_params)?)
+                }
                 Some("inspectPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.inspect_unstarted_snapshot(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)

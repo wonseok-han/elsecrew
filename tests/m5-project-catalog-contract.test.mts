@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("application status is read-only, bounded, and tied to the selected project", () => {
+  const request = {action:"applicationStatus" as const,projectId:"project_a"};
+  const status = {projectId:"project_a",applicationId:"application_0123456789abcdef0123456789abcdef",state:"applying",currentIndex:1,total:2};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status},request));
+  for (const change of [{projectId:"other"},{currentIndex:2},{total:100001},{state:"unknown"},{applicationId:null},{path:"/source"}]) {
+    assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,...change}},request));
+  }
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{projectId:"project_a",applicationId:null,state:"none",currentIndex:null,total:0}},request));
+});
+
 test("preparation recovery binds exact identity and safe revisions", () => {
   const inspection = { projectId: "project_a", worktreeId: "worktree_a", workspaceIdentity: "workspace_a", lockId: "lock_worktree_a", projectRevision: 8, lockRevision: 9 };
   const request = { action: "abandonPreparation" as const, inspection };
