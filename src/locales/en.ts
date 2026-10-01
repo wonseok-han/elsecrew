@@ -144,6 +144,8 @@ export const en: Record<MessageKey, string> = {
   "m5.prep.title": "Project startup failure recovery",
   "m5.application.inspect": "Check apply/restore record",
   "m5.application.preview": "Preview changes before applying",
+  "m5.application.previousPage": "Previous 100",
+  "m5.application.nextPage": "Next 100",
   "m5.application.chatPreview": "Preview this chat's changes before applying",
   "m5.application.chatBaseline": "Record a baseline for later comparison with the source",
   "m5.application.chatBaselineHelp": "Record a source baseline for this chat's new copy. Uncommitted source changes or unsupported structures stop creation. Source files are not changed; applying changes is not available yet.",

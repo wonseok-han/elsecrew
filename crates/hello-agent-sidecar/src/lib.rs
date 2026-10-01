@@ -1049,6 +1049,13 @@ impl Sidecar {
                 }
             }),
             "project.catalog" => match request.params.get("action").and_then(Value::as_str) {
+                Some("applicationPreviewPage") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId", "offset", "fingerprint"]).map_err(invalid_params)?;
+                    let chat_id = if params["chatId"].is_null() { None } else { Some(param_string(params, "chatId").map_err(invalid_params)?) };
+                    let fingerprint = if params["fingerprint"].is_null() { None } else { Some(param_string(params, "fingerprint").map_err(invalid_params)?) };
+                    let offset = params["offset"].as_u64().filter(|v| *v <= 100_000).ok_or_else(|| invalid_params("invalid review offset".into()))? as usize;
+                    self.projects.application_preview_page(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, chat_id, offset, fingerprint)
+                }
                 Some("chatApplicationPreview") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
                     self.projects.chat_application_preview(&self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "chatId").map_err(invalid_params)?)

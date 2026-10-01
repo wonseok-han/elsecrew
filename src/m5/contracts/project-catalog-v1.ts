@@ -6,7 +6,9 @@ export interface PreparationInspection { projectId: string; worktreeId: string; 
 export interface ApplicationStatus { projectId: string; applicationId: string | null; state: "none" | "prepared" | "applying" | "applied" | "restored" | "abandoned"; currentIndex: number | null; total: number }
 export interface ApplicationHistoryEntry { applicationId: string; state: "applied" | "restored" | "abandoned"; total: number }
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
+export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
+  | { action: "applicationPreviewPage"; projectId: string; chatId: string | null; offset: number; fingerprint: string | null }
   | { action: "inspectPreparation"; projectId: string }
   | { action: "applicationStatus"; projectId: string }
   | { action: "applicationHistory"; projectId: string }
@@ -16,6 +18,7 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "applicationPreviewPage"; projectId: string; chatId: string | null; page: ApplicationPreviewPage }
   | { schemaVersion: 1; action: "chatApplicationPreview"; projectId: string; chatId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
   | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
@@ -47,7 +50,11 @@ export function validatePreparationInspection(value: unknown): PreparationInspec
 }
 export function validateProjectCatalogRequest(value: unknown): ProjectCatalogRequest {
   const request = object(value);
-  if (request.action === "list") {
+  if (request.action === "applicationPreviewPage") {
+    keys(request, ["action", "projectId", "chatId", "offset", "fingerprint"]); id(request.projectId);
+    if (request.chatId !== null) id(request.chatId);
+    if (!Number.isSafeInteger(request.offset) || (request.offset as number) < 0 || (request.offset as number) > 100000 || (request.offset as number) % 100 !== 0 || (request.offset !== 0 && request.fingerprint === null) || (request.fingerprint !== null && (typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)))) throw new Error("invalid review cursor");
+  } else if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
@@ -63,7 +70,15 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "prepareApplicationWorkspace") {
+  if (request.action === "applicationPreviewPage") {
+    keys(result, ["schemaVersion", "action", "projectId", "chatId", "page"]);
+    if (result.projectId !== request.projectId || result.chatId !== request.chatId) throw new Error("review page target mismatch");
+    const page = object(result.page); keys(page, ["worktreeId", "total", "changes", "offset", "fingerprint"]);
+    if (page.offset !== request.offset || !Number.isSafeInteger(page.total) || (page.total as number) < request.offset || (page.total as number) > 100000 || typeof page.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(page.fingerprint) || (request.fingerprint !== null && page.fingerprint !== request.fingerprint) || !Array.isArray(page.changes) || page.changes.length !== Math.min(100, (page.total as number) - request.offset)) throw new Error("review page mismatch");
+    // Reuse the exact path/kind and bounded-list validator without treating a
+    // later page as the first page of the complete change set.
+    validateProjectCatalogResult({schemaVersion:1,action:"applicationPreview",projectId:request.projectId,preview:{worktreeId:page.worktreeId,total:page.changes.length,changes:page.changes}}, {action:"applicationPreview",projectId:request.projectId});
+  } else if (request.action === "prepareApplicationWorkspace") {
     keys(result, ["schemaVersion", "action", "projectId", "worktreeId"]);
     if (id(result.projectId) !== request.projectId) throw new Error("prepared application project mismatch");
     id(result.worktreeId);

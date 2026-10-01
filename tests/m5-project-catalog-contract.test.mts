@@ -26,6 +26,15 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("preview pages bind the cursor, target and change fingerprint", () => {
+  const fingerprint = "a".repeat(64);
+  const request = { action: "applicationPreviewPage" as const, projectId: "project_a", chatId: "chat_a", offset: 100, fingerprint };
+  const result = { schemaVersion: 1, action: request.action, projectId: request.projectId, chatId: request.chatId, page: { worktreeId: "worktree_a", offset: 100, fingerprint, total: 101, changes: [{path:"last.txt",kind:"added"}] } };
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  for (const change of [{ offset: 0 }, { fingerprint: "b".repeat(64) }, { total: 102 }, { changes: [] }]) assert.throws(() => validateProjectCatalogResult({ ...result, page: { ...result.page, ...change } }, request));
+  assert.throws(() => validateProjectCatalogRequest({ ...request, fingerprint: null }));
+});
+
 test("chat preview cannot return another chat's result", () => {
   const request = { action: "chatApplicationPreview" as const, projectId: "project_a", chatId: "chat_a" };
   const result = { schemaVersion: 1, ...request, preview: { worktreeId: "worktree_a", total: 0, changes: [] } };

@@ -356,6 +356,16 @@ pub(in crate::project) fn revalidate(
 }
 
 impl ReviewPlan {
+    pub(in crate::project) fn preview_page(&self, offset: usize, expected: Option<&str>) -> Result<Value, ProjectFailure> {
+        let fingerprint = format!("{:x}", Sha256::digest(serde_json::to_vec(&(&self.binding, self.digest, persistence::snapshot_digest(&self.snapshot)?)).map_err(|_| ProjectFailure::dirty("review fingerprint failed"))?));
+        if offset > self.changes.len() || offset % 100 != 0 || (offset > 0 && expected.is_none()) || expected.is_some_and(|value| value != fingerprint) {
+            return Err(ProjectFailure::dirty("review changed or page cursor is invalid; restart review"));
+        }
+        let changes: Vec<Value> = self.changes.iter().skip(offset).take(100).map(|(path, change)| {
+            serde_json::json!({"path":path,"kind":if change.before.is_none() {"added"} else if change.after.is_none() {"deleted"} else {"modified"}})
+        }).collect();
+        Ok(serde_json::json!({"worktreeId":self.binding["worktreeId"],"total":self.changes.len(),"changes":changes,"offset":offset,"fingerprint":fingerprint}))
+    }
     pub(in crate::project) fn preview(&self) -> Value {
         let changes: Vec<Value> = self
             .changes

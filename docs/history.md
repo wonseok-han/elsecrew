@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (채팅 변경 검토 페이지 조회)
+
+- 직전753cfe2의 컴파일 수정은 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 100개 단위 읽기 전용 검토 페이지를 연결했다. 각 요청에서 기존 baseline/대상/변경 검증을 다시 수행하고 binding·change digest·snapshot digest에 결속된 fingerprint가 달라지면 다음 페이지를 거절한다. 이 값은 승인이나 쓰기 권한이 아니다.
+- 채팅 화면의 처음100개 고정 목록을 이전/다음 조회와 표시 범위로 교체했다. 결과 project/chat/worktree·offset·fingerprint·전체 수를 대조하고 변경 시 목록을 비워 재조회하도록 한다. 프로젝트 목록의 기존 요약 버튼은 계속 처음100개 요약이며 전체 확인으로 주장하지 않는다.
+- cursor/대상/지문 변경·누락/초과 항목 계약 회귀를 작성했다. 동작/컴파일 검증은 최종 통합으로 남기고 diff만 확인했다. 디렉터리·실제 확인/반영/복원 UI·공급자 활성화·전체 검증/독립 검토는 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (누적 연결 컴파일 진단·호환성 수정)
 
 - 직전ebd8d4d의 채팅 기준 선택은 진전이다. 현재 Git/기록을 대조하고 다음 기능 구현에 필요한 누적 컴파일 진단만 수행했다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests는5.65초 PASS였으며 테스트 전용 기존 prepare_chat_workspace 래퍼 미사용 경고가 있었다. 실제 동작 테스트는 실행하지 않았다.

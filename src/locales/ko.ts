@@ -143,6 +143,8 @@ export const ko = {
   "m5.prep.title": "프로젝트 시작 실패 복구",
   "m5.application.inspect": "반영·복원 기록 확인",
   "m5.application.preview": "원본 반영 전 변경 목록 보기",
+  "m5.application.previousPage": "이전 100개",
+  "m5.application.nextPage": "다음 100개",
   "m5.application.chatPreview": "이 채팅의 반영 전 변경 목록 보기",
   "m5.application.chatBaseline": "나중에 원본과 비교할 기준 기록도 만들기",
   "m5.application.chatBaselineHelp": "이 채팅의 새 복사본에 원본 기준을 함께 기록해요. 원본에 저장되지 않은 변경이나 지원하지 않는 구조가 있으면 생성을 중단해요. 원본 파일은 변경하지 않으며 실제 반영은 아직 사용할 수 없어요.",
