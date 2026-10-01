@@ -3,7 +3,7 @@ import { validateProjectIdentityV1, type ProjectIdentityV1 } from "./project-v1.
 export const PROJECT_CATALOG_METHOD = "project.catalog";
 export const PROJECT_CATALOG_CHANNEL = "m5:project:catalog";
 export interface PreparationInspection { projectId: string; worktreeId: string; workspaceIdentity: string; lockId: string; projectRevision: number; lockRevision: number }
-export interface ApplicationStatus { projectId: string; applicationId: string | null; state: "none" | "prepared" | "applying" | "applied" | "restored" | "abandoned"; currentIndex: number | null; total: number }
+export interface ApplicationStatus { projectId: string; applicationId: string | null; state: "none" | "prepared" | "applying" | "applied" | "restored" | "abandoned"; currentIndex: number | null; total: number; running: boolean }
 export interface ApplicationHistoryEntry { applicationId: string; state: "applied" | "restored" | "abandoned"; total: number }
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
@@ -135,7 +135,8 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "applicationStatus") {
     keys(result,["schemaVersion","action","status"]);
     const status = object(result.status);
-    keys(status,["projectId","applicationId","state","currentIndex","total"]);
+    keys(status,["projectId","applicationId","state","currentIndex","total","running"]);
+    if (typeof status.running !== "boolean" || (status.running && status.state !== "prepared" && status.state !== "applying")) throw new Error("invalid application execution state");
     if (id(status.projectId) !== request.projectId || !["none","prepared","applying","applied","restored","abandoned"].includes(String(status.state))) throw new Error("invalid application status");
     if (!Number.isSafeInteger(status.total) || (status.total as number) < 0 || (status.total as number) > 100000) throw new Error("invalid application count");
     if (status.state === "none") {

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (반영 실행 상태·중단 화면 연결)
+
+- 기준5da66e8에서 Karpathy 지침으로 applicationStatus에 현재 세션 owner의 exact project/application 일치로 계산한 running을 추가했다. 영속 applying만으로 현재 실행 중이라고 판단하지 않으며 재시작/오류 뒤 owner가 없으면 중단 상태로 표시한다. terminal/none의 running 응답은 계약에서 거절한다.
+- 프로젝트 복구 영역은 실행 중 조회를 1초 간격으로 갱신하고 정확 ID 중단 요청 뒤 상태를 재조회한다. 실패하면 오래된 실행 표시를 비우고 재조회를 안내한다. ko/en에서 현재 항목 번호와 완료 개수를 구분하고, 멈춘 기록은 일부 반영 가능성과 복구 필요를 알린다. 기존 epoch 대상 전환 방어를 유지했다.
+- 계약 회귀에 잘못된 running 타입·terminal/running 모순을 추가했다. diff 검사만 수행했고 컴파일/자동 테스트/UI 동작과 독립 검토는 통합 단계에 남긴다. 공개 시작/복원 실행과 복구 UI는 아직 남으며 현재 화면 추가로 원본 쓰기를 활성화하지 않는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (입력 스레드의 반영 취소 신호 연결)
 
 - 기준7cfe04e에서 Karpathy 지침으로 입력 스레드·ProjectManager가 세션 전용 취소 슬롯을 공유하도록 연결했다. 정확 sidecar/project/application ID와 고정 cancel 필드만 stop 신호를 주며 응답/정상 요청 검증은 기존 dispatch에 남긴다. 종료 요청·EOF/입력 오류도 현재 슬롯을 중단한다. 쓰기 시작 권한은 주지 않는다.

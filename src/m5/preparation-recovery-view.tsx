@@ -28,6 +28,12 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
       if (epoch.current !== generation) return;
       if (result.action === "inspectPreparation") setInspection(result.inspection);
       else if (result.action === "applicationStatus") setApplication(result.status);
+      else if (result.action === "cancelApplication") {
+        setApplication(null);
+        const query = { action: "applicationStatus" as const, projectId };
+        const refreshed = validateProjectCatalogResult(await window.m5Projects.request(query), query);
+        if (epoch.current === generation && refreshed.action === "applicationStatus") setApplication(refreshed.status);
+      }
       else if (result.action === "applicationHistory") setHistory(result.entries);
       else if (result.action === "applicationPreview") setPreview(result.preview);
       else if (result.action === "prepareApplicationWorkspace") {
@@ -38,13 +44,19 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
         setMessage("done");
       }
     } catch {
+      if (epoch.current === generation && (input.action === "applicationStatus" || input.action === "cancelApplication")) setApplication(null);
       if (epoch.current === generation) setMessage(input.action === "abandonPreparation"
         ? "unknown"
         : input.action === "prepareApplicationWorkspace" ? "prepareError"
         : input.action === "applicationPreview" ? "previewError"
-        : input.action === "applicationStatus" || input.action === "applicationHistory" ? "applicationError" : "error");
+        : input.action === "applicationStatus" || input.action === "applicationHistory" || input.action === "cancelApplication" ? "applicationError" : "error");
     } finally { pending.current = false; setBusy(false); }
   };
+  useEffect(() => {
+    if (!application?.running || disabled || busy) return;
+    const timer = window.setTimeout(() => { void request({ action: "applicationStatus", projectId }); }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [application, disabled, busy, projectId]);
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
     <button type="button" disabled={disabled || busy} onClick={() => setConfirmWorkspace(true)}>{t("m5.application.prepare")}</button>
     {confirmWorkspace && <div role="group" aria-label={t("m5.application.prepare")}>
@@ -66,7 +78,13 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
     </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
     <button type="button" disabled={disabled || busy} onClick={() => { setApplication(null); void request({action:"applicationStatus",projectId}); }}>{t("m5.application.inspect")}</button>
-    {application && <div role="status"><p>{t(`m5.application.${application.state}`)}</p>{application.currentIndex !== null && <p>{t("m5.application.item")} {application.currentIndex + 1} / {application.total}</p>}</div>}
+    {application && <section aria-label={t("m5.application.inspect")}>
+      <div role="status">
+        <p>{t(application.running ? "m5.application.running" : application.state === "prepared" || application.state === "applying" ? "m5.application.interrupted" : `m5.application.${application.state}`)}</p>
+        {application.currentIndex !== null && <p>{t("m5.application.item")} {application.currentIndex + 1} / {application.total}</p>}
+      </div>
+      {application.running && application.applicationId && <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "cancelApplication", projectId, applicationId: application.applicationId! })}>{t("m5.application.stop")}</button>}
+    </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setHistory(null); void request({ action: "applicationHistory", projectId }); }}>{t("m5.application.history")}</button>
     {history && <section aria-label={t("m5.application.history")}>
       <p>{t("m5.application.historyHelp")}</p>

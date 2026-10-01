@@ -565,7 +565,7 @@ impl ProjectManager {
         project_id: &str,
     ) -> Result<ProjectAction, ProjectFailure> {
         let project = required_project(storage, project_id)?;
-        let status = if project.get("application_intent").is_none() {
+        let mut status = if project.get("application_intent").is_none() {
             serde_json::json!({"projectId":project_id,"applicationId":null,"state":"none","currentIndex":null,"total":0})
         } else {
             #[cfg(unix)]
@@ -580,6 +580,13 @@ impl ProjectManager {
                 ));
             }
         };
+        let mut running = false;
+        #[cfg(target_os = "macos")]
+        if let Some(owner) = self.application_job.as_ref() {
+            running = owner.record()["applicationId"] == status["applicationId"]
+                && owner.record()["binding"]["projectId"] == project_id;
+        }
+        status["running"] = serde_json::json!(running);
         Ok(ProjectAction {
             result: serde_json::json!({"schemaVersion":1,"action":"applicationStatus","status":status}),
             ..Default::default()
