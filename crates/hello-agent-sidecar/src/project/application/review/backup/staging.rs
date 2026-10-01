@@ -127,6 +127,7 @@ fn prepare_inner(
     )?;
     // The exact filename and target are durable before O_EXCL or any payload bytes.
     reserved()?;
+    manager.check_application_preparation()?;
     let backup = create_inner(manager, storage, target, review_id, &name, |_| Ok(()))?;
     if verify(manager, &backup)? != header {
         return Err(invalid());
@@ -148,6 +149,7 @@ fn prepare_inner(
     }
     let ready =
         json!({"version":1,"state":"ready","name":name,"header":header,"backup":backup.to_value()});
+    manager.check_application_preparation()?;
     write_record(
         storage,
         target,

@@ -194,6 +194,7 @@ fn create_inner(
     name: &str,
     mut check: impl FnMut(u8) -> Result<(), ProjectFailure>,
 ) -> Result<Backup, ProjectFailure> {
+    manager.check_application_preparation()?;
     let plan = persistence::reopen_target(manager, storage, target, review_id)?;
     let (active, _) = target.resolve(manager, storage)?;
     let source = manager.open_source_repository(&active.canonical_git_root)?;
@@ -226,6 +227,7 @@ fn create_inner(
         out.write_all(b"\n").map_err(|_| invalid())?;
         check(1)?;
         for (path, change) in &plan.changes {
+            manager.check_application_preparation()?;
             let entry = baseline.inventory().entries.get(path);
             if change.before.as_ref() != entry.map(Image::from).as_ref() {
                 return Err(invalid());
@@ -257,8 +259,10 @@ fn create_inner(
                     let mut remaining = entry.size;
                     let mut buffer = [0u8; 65536];
                     while remaining > 0 {
+                        manager.check_application_preparation()?;
                         let limit = remaining.min(buffer.len() as u64) as usize;
                         let n = file.read(&mut buffer[..limit]).map_err(|_| invalid())?;
+                        manager.check_application_preparation()?;
                         if n == 0 {
                             return Err(invalid());
                         }
@@ -317,9 +321,10 @@ fn create_inner(
         {
             return Err(invalid());
         }
+        manager.check_application_preparation()?;
         Ok(backup)
     })();
-    if result.is_err() {
+    if result.is_err() && manager.check_application_preparation().is_ok() {
         remove_failed(dir, name, &file)?;
     }
     result
@@ -442,6 +447,7 @@ fn verify_inner(
     let mut buffer = [0u8; 65536];
     let mut length = 0;
     loop {
+        manager.check_application_preparation()?;
         let n = file.read(&mut buffer).map_err(|_| invalid())?;
         if n == 0 {
             break;

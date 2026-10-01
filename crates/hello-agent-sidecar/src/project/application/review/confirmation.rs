@@ -43,6 +43,11 @@ pub(in crate::project) struct PreparedApplication {
 // No serialization or persisted approval: a new owner always starts empty.
 #[allow(dead_code)]
 impl Confirmations {
+    pub(in crate::project) fn project_for_token(&self, token: &str) -> Result<String, ProjectFailure> {
+        let pending = self.pending.as_ref().ok_or_else(invalid)?;
+        if pending.token != token || Instant::now() >= pending.expires { return Err(invalid()); }
+        Ok(pending.target.borrowed().project_id().to_owned())
+    }
     pub(in crate::project) fn matches_chat(&self, token: &str, project: &str, chat: &str) -> bool {
         self.pending.as_ref().is_some_and(|pending| pending.token == token && Instant::now() < pending.expires
             && matches!(&pending.target, Target::Chat(address, _) if address.project_id == project && address.chat_id == chat))
@@ -114,6 +119,7 @@ impl Confirmations {
         token: &str,
         request_id: &str,
     ) -> Result<PreparedApplication, ProjectFailure> {
+        manager.check_application_preparation()?;
         let pending = self.pending.take().ok_or_else(invalid)?;
         if pending.token != token || Instant::now() >= pending.expires {
             return Err(invalid());
@@ -135,6 +141,7 @@ impl Confirmations {
             }
             _ => return Err(invalid()), // Pending recovery needs a separate explicit action.
         };
+        manager.check_application_preparation()?;
         if Instant::now() >= pending.expires {
             return Err(invalid());
         }
@@ -153,6 +160,7 @@ impl Confirmations {
         storage: &Storage,
         prepared: PreparedApplication,
     ) -> Result<(ReviewPlan, Value), ProjectFailure> {
+        manager.check_application_preparation()?;
         if self.generation.take() != Some(prepared.generation)
             || Instant::now() >= prepared.pending.expires
         {
@@ -170,6 +178,7 @@ impl Confirmations {
         if current != prepared.backup || Instant::now() >= prepared.pending.expires {
             return Err(invalid());
         }
+        manager.check_application_preparation()?;
         Ok((plan, current))
     }
 }

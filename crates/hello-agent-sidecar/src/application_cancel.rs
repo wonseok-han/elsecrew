@@ -12,6 +12,7 @@ struct Slot {
     project: String,
     application: String,
     flag: Arc<AtomicBool>,
+    confirmation: Option<String>,
 }
 
 impl ApplicationCancel {
@@ -20,7 +21,22 @@ impl ApplicationCancel {
             project: project.into(),
             application: application.into(),
             flag: Arc::new(AtomicBool::new(false)),
+            confirmation: application
+                .starts_with("confirmation_")
+                .then(|| application.to_owned()),
         });
+    }
+
+    pub(crate) fn promote(&self, project: &str, confirmation: &str, application: &str) -> bool {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(slot) = slot.as_mut() else {
+            return false;
+        };
+        if slot.project != project || slot.confirmation.as_deref() != Some(confirmation) {
+            return false;
+        }
+        slot.application = application.to_owned();
+        true
     }
 
     pub(crate) fn flag(&self) -> Option<Arc<AtomicBool>> {
@@ -35,6 +51,18 @@ impl ApplicationCancel {
         if let Some(flag) = self.flag() {
             flag.store(true, Ordering::Release);
         }
+    }
+
+    pub(crate) fn cancel_confirmation(&self, token: &str) -> bool {
+        let slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = slot
+            .as_ref()
+            .filter(|slot| slot.confirmation.as_deref() == Some(token))
+        {
+            slot.flag.store(true, Ordering::Release);
+            return true;
+        }
+        false
     }
 
     pub(crate) fn canceled(&self, project: &str, application: &str) -> bool {
@@ -62,6 +90,20 @@ impl ApplicationCancel {
         if request.method == "app.prepareQuit" && params.is_empty() {
             self.stop();
         } else if request.method == "project.catalog"
+            && params.len() == 2
+            && params.get("action").and_then(|v| v.as_str())
+                == Some("cancelApplicationConfirmation")
+        {
+            let slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(slot) = slot.as_ref() {
+                if slot.confirmation.is_some()
+                    && params.get("confirmationId").and_then(|v| v.as_str())
+                        == slot.confirmation.as_deref()
+                {
+                    slot.flag.store(true, Ordering::Release);
+                }
+            }
+        } else if request.method == "project.catalog"
             && params.len() == 3
             && params.get("action").and_then(|v| v.as_str()) == Some("cancelApplication")
         {
@@ -81,6 +123,17 @@ impl ApplicationCancel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preparation_cancel_survives_promotion_without_resetting_flag() {
+        let cancel = ApplicationCancel::default();
+        cancel.begin("project", "confirmation_test");
+        let flag = cancel.flag().unwrap();
+        assert!(!cancel.cancel_confirmation("confirmation_other"));
+        assert!(cancel.cancel_confirmation("confirmation_test"));
+        assert!(cancel.promote("project", "confirmation_test", "application_test"));
+        assert!(flag.load(Ordering::Acquire));
+        assert!(cancel.canceled("project", "application_test"));
+    }
     #[test]
     fn ingress_requires_exact_instance_target_and_fields() {
         let cancel = ApplicationCancel::default();

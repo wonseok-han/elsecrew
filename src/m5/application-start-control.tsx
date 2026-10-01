@@ -12,6 +12,7 @@ export function ApplicationStartControl({ request, disabled }: { request: StartR
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
   const [status, setStatus] = useState<ApplicationStatus | null>(null);
   const pending = useRef(false);
   const expectedId = useRef<string | null>(request.action === "restoreApplication" ? request.applicationId : null);
@@ -58,6 +59,14 @@ export function ApplicationStartControl({ request, disabled }: { request: StartR
     catch { if (alive.current) setUnknown(true); }
     finally { pending.current = false; if (alive.current) { setBusy(false); void refresh(); } }
   }
+  async function stopPreparation() {
+    if (!window.m5Projects || request.action !== "startApplication" || cancelPending) return;
+    setCancelPending(true);
+    const command = {action:"cancelApplicationConfirmation" as const,confirmationId:request.confirmationId};
+    try { validateProjectCatalogResult(await window.m5Projects.request(command), command); }
+    catch { if (alive.current) setUnknown(true); }
+    finally { if (alive.current) setCancelPending(false); }
+  }
   return <div aria-busy={busy}>
     {!enabled && <p>{t("m5.application.notEnabled")}</p>}
     {enabled && !attempted && <>
@@ -65,6 +74,7 @@ export function ApplicationStartControl({ request, disabled }: { request: StartR
       <button type="button" disabled={disabled || busy || !agreed} onClick={() => void submit()}>{t(request.action === "startApplication" ? "m5.application.start" : "m5.restore.start")}</button>
     </>}
     {unknown && <p role="status">{t("m5.application.startUnknown")}</p>}
+    {busy && request.action === "startApplication" && <button type="button" disabled={cancelPending} onClick={() => void stopPreparation()}>{t("m5.application.stopPreparation")}</button>}
     {attempted && <button type="button" disabled={disabled || busy} onClick={() => void refresh()}>{t("m5.application.inspect")}</button>}
     {status && <div role="status">
       <p>{t(status.running ? "m5.application.running" : status.state === "prepared" || status.state === "applying" ? "m5.application.interrupted" : `m5.application.${status.state}`)}</p>

@@ -330,6 +330,7 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    preparation_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     // Remains false in product builds until integrated safety review is complete.
     source_writes_enabled: bool,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
@@ -358,6 +359,12 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    fn check_application_preparation(&self) -> Result<(), ProjectFailure> {
+        if self.preparation_cancel.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(ProjectFailure::recovery("application preparation canceled; backup data preserved"));
+        }
+        Ok(())
+    }
     pub(crate) fn application_capabilities(&self) -> ProjectAction {
         ProjectAction { result: json!({"schemaVersion":1,"action":"applicationCapabilities","enabled":self.source_writes_enabled && cfg!(target_os = "macos")}), ..Default::default() }
     }
@@ -402,16 +409,21 @@ impl ProjectManager {
         if self.application_job.is_some() || !self.pending_saves.is_empty() || !storage.blocker_ids()?.is_empty() {
             return Err(ProjectFailure::recovery("application requires an idle workspace"));
         }
+        let project = self.application_confirmations.project_for_token(token)?;
+        self.application_cancel.begin(&project, token);
+        self.preparation_cancel = self.application_cancel.flag();
         let mut confirmations = std::mem::take(&mut self.application_confirmations);
         let result = confirmations.prepare_backup(self, storage, token, request)
             .and_then(|prepared| application::review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
         self.application_confirmations = confirmations;
+        self.preparation_cancel = None;
         let owner = result?;
         let record = owner.record().clone();
-        self.application_cancel.begin(
+        if !self.application_cancel.promote(
             record["binding"]["projectId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application project"))?,
+            token,
             record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
-        );
+        ) { return Err(ProjectFailure::recovery("application preparation identity changed")); }
         self.application_job = Some(application::review::intent::execution::ApplicationJob::Apply(owner));
         Ok(record)
     }
@@ -471,7 +483,11 @@ impl ProjectManager {
     }
     pub(crate) fn cancel_application_confirmation(&mut self, token: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
-        self.application_confirmations.cancel_token(token)?;
+        if self.application_cancel.cancel_confirmation(token) {
+            self.stop_application();
+        } else {
+            self.application_confirmations.cancel_token(token)?;
+        }
         #[cfg(not(unix))]
         return Err(ProjectFailure::recovery("application confirmation unavailable on this platform"));
         #[cfg(unix)]
@@ -686,6 +702,7 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            preparation_cancel: None,
             source_writes_enabled: false,
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]

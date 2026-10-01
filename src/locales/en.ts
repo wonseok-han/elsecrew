@@ -149,6 +149,7 @@ export const en: Record<MessageKey, string> = {
   "m5.application.notEnabled": "Source application and restoration are unavailable until integrated safety review is complete.",
   "m5.application.sourceConsent": "I stopped other apps from editing the source folder and understand that this changes source files. Conflicts stop processing, and recovery data is not automatically deleted.",
   "m5.application.start": "Back up and apply to source",
+  "m5.application.stopPreparation": "Request preparation/application stop",
   "m5.restore.start": "Check record and start restoration",
   "m5.application.startUnknown": "The request outcome could not be confirmed. Check the project's application record instead of starting again.",
   "m5.application.cancelConfirmation": "Cancel confirmation",

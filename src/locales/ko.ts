@@ -148,6 +148,7 @@ export const ko = {
   "m5.application.notEnabled": "원본 반영·복원은 통합 안전 검토 전이라 아직 사용할 수 없어요.",
   "m5.application.sourceConsent": "다른 앱의 원본 폴더 편집을 중지했고, 원본 파일을 변경하는 작업임을 확인했어요. 충돌하면 중단되며 복구 자료는 자동 삭제되지 않아요.",
   "m5.application.start": "백업 후 원본에 반영",
+  "m5.application.stopPreparation": "준비·반영 중단 요청",
   "m5.restore.start": "기록을 확인하고 복원 시작",
   "m5.application.startUnknown": "요청 결과를 확인하지 못했어요. 다시 시작하지 말고 프로젝트의 반영 기록에서 현재 상태를 확인해 주세요.",
   "m5.application.cancelConfirmation": "확인 취소",

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (백업 준비 취소 전달 후보)
+
+- 기준e2758ad에서 Karpathy 지침으로 확인 토큰에 결속된 준비 취소 슬롯을 백업 전에 생성하고 실행 ID로 전환할 때 같은 flag를 유지했다. 준비/실행 중 exact confirmation 취소도 동일 슬롯을 중단하며, 확인 소비 뒤 도착한 요청도 처리한다. UI는 시작 응답 대기 중 별도 중단 요청을 보낼 수 있다.
+- 백업 항목·64KiB 복사·archive 해시와 준비 완료/권한 handoff에 취소 확인을 추가했다. 취소된 부분 archive는 자동 삭제하지 않고 preparing 기록과 함께 보존한다. 기존 다른 실패의 cleanup 정책은 바꾸지 않았다. scoped preparation flag는 호출 종료 후 제거해 후속 읽기 전용 복구를 막지 않는다.
+- 준비→실행 승격에서 취소 flag 유지 회귀를 작성했다. 포맷/diff만 확인하며 컴파일/실행/UI와 독립 검토는 통합에 남긴다. **준비 슬롯 생성 전 입력 스레드가 먼저 본 취소의 경합은 아직 남음**. baseline/시스템 호출 선점·준비 복구 UI·오류 상세와 공급자/전체 검증도 남는다. 제품 쓰기는 계속 비활성, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (반영·복원 시작 IPC와 확인 화면 후보)
 
 - 기준aaea9eb에서 Karpathy 지침으로 applicationCapabilities/startApplication/restoreApplication 계약·dispatch·UI를 연결했다. 시작은 세션 확인 토큰의 exact project/chat와 만료를 먼저 확인하고 기존 백업/owner 입장으로 이어진다. 복원은 현재 원장/백업 검증과 화면 fingerprint 재대조 후 단계별 owner를 만든다. renderer가 켤 수 없는 backend source_writes_enabled는 false로 유지한다.
