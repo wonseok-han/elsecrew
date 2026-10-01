@@ -1,5 +1,192 @@
 # 작업 이력 아카이브 2026-09 (Hello, Agent)
 
+### 2026-09-30 · by GPT-6 Astra (실제 실행 정책 결정 입력 대기)
+
+- HEAD3707342에서 직전 오류 안내 수정은 완료된 진전으로 확인했다. §6.9 격리 책임 전환의 명시 응답 부재는 제안 요청 이후 연속3회 이상 같은 조건으로 유지됐다. 독립적인 로그인 호환/오류 안내 변경은 끝났으나 핵심 실제 실행 연결은 부모 신뢰 경계를 선택하지 않고 진행할 수 없다. 기존 실패 시험을 반복하거나 설정만 완화해 입장시키지 않는다.
+- 전체 목표를 완료나 사용자 요청 pause가 아닌 blocked(정책 결정 입력 대기)로 전환한다. 재개에 필요한 답변은 서명된 공급자 부모를 신뢰하고 공식 도구 sandbox에 격리를 맡기는 변경 및 임시 자료 검증에 대한 승인/대안 선택이다. 실제 계정·유료 모델·사용자 프로젝트 시험은 별도 승인 경계로 유지한다. 반영/복원·G6/Windows/출시 잔여 범위를 완료로 간주하지 않는다.
+- 상태/제안 대조·diff check만 수행했고 신규 실행·권한 변경·커밋/main 병합/push 없음. 미커밋 제안·archive와 이번 기록을 보존한다.
+
+### 2026-09-30 · by GPT-6 Astra (서명 검증 오류 안내 정합화)
+
+- 직전 승인 대기 재확인은 무진전이며, 격리 정책 승인을 대신하지 않는다. 157fbf3의 로그인 변경과 독립적으로 UI를 대조해 providerExecutableChanged가 여전히 앱 호환성 업데이트를 필수 해결책으로 단정하는 오류를 찾았다. Karpathy 지침으로 ko/en 문구를 제작자 서명/파일 상태 검증 실패·진행 중 업데이트 완료 후 재확인·오류 도움 요청으로 수정했다. 로그인 정보 보존 안내는 유지하며 재설치/삭제/서명 우회는 권하지 않는다.
+- 두 공급자의 ko/en 메시지와 잘못된 필수 업데이트 단정 부재를 회귀에 추가했다. 로그인 집중 테스트·TypeScript noEmit·diff check PASS, 표시 문구만 바꿔 직접 diff 검토했으며 새 안전 권한 변경은 없다. 기존 조사/대기 기록은 함께 보존하고 미승인 §6.9 제안과 archive 변경은 워킹 트리에 남긴다. 실제 실행 격리 전환 응답은 여전히 없고 부모 정책/계정/모델 실행·main 병합/push는 하지 않았다.
+
+### 2026-09-30 · by GPT-6 Astra (격리 책임 변경 승인 대기 확인)
+
+- 자동 목표 재개에는 §6.9의 부모 신뢰/공식 도구 격리 전환에 대한 명시 답변이 없다. HEAD157fbf3과 미승인 제안 상태를 확인했으며 자동 재개를 승인으로 처리하지 않았다. 직전 턴은 공식 문서/코드 대조에 따른 결정 요청 진전이고 이번 재확인 자체는 구현 진전이나 실행 중 handle의 verified wait가 아니다.
+- 새로운 실행·정책 변경·계정/모델 시험·커밋/push 없음. 기존 미커밋 제안/작업 기록/archive를 보존하고 diff check를 확인한다. 실제 실행 경로의 다음 단계는 해당 정책 변경 및 임시 자료 시험 승인이다. 전체 앱 목표는 여전히 미완료·active이며 원본 반영/복원과 G6/Windows/출시까지 완료로 축소하지 않는다.
+
+### 2026-09-30 · by GPT-6 Astra (실제 실행 격리 책임 재선택 제안)
+
+- 직전157fbf3은 구현/검증/커밋 진전이다. 현재 실제 runtime과 OpenAI Docs App Server 본문을 다시 대조했다. 공식 externalSandbox는 서버 자체 격리가 이미 있을 때 내부 격리를 생략하는 방식이지만 현재 outer의 PROFILE 권한이 자손에게 상속되므로 이를 적용하는 것만으로 인증 파일 보호가 해결되지 않는다. 외부 인증 tokens/remote host도 호스트 인증 수명·experimental 조건이 있어 임의 대체하지 않았다.
+- 제안서 §6.9에 신뢰한 공급자 부모+공식 도구 sandbox 분담을 미승인 후보로 작성했다. 현재 outer의 부모 자체 OS 제한을 없애는 경계 변경이므로 업데이트 호환 승인이나 자동 목표 지시만으로 시행하지 않는다. 승인 후 가짜 sentinel/임시 snapshot·무계정/무모델 시험을 제안하되 부모 network가 OS 차단되지 않으므로 이전 오프라인 승인과 구분한다. 별도 사용자/VM은 더 큰 대안이며 현재 선택하지 않았다.
+- 소스·공식 본문 대조와 diff check만 수행했다. 실행 정책/계정/프로젝트/네트워크 시험·커밋/push 없음. 사용자에게 격리 책임 전환 승인을 요청하며 전체 목표는 미완료·active다. 원본 반영/복원·G6/Windows/출시도 남고 기존 archive 변경을 보존한다.
+
+### 2026-09-30 · by GPT-6 Astra (Claude 로그인 업데이트 대응)
+
+- bcac6f4 이후 현재 설치를 확인했다. native launcher는2.1.285를 선택하고 versions에는283/284/285만 있어 기존 고정275/270 경로는 더 이상 존재하지 않는다. 실제 인증 실패를 주장하지 않으며 구버전 파일 목록으로 새 설치를 거절하는 원인을 수정한다. Karpathy 지침으로 native 링크 선택·공급자 검증만 바꾸고 로그인 명령/profile/OAuth 코드/종료 정책을 유지했다.
+- 공식 setup 문서의 native symlink/auto-update 구조를 확인했다(https://code.claude.com/docs/en/setup#auto-updates). 링크를 실행하지 않고 no-follow 부모에서 raw 내용을 읽어 고정 versions의 단일 숫자 X.Y.Z 대상만 허용한다. Anthropic PBC의 Apple 인증서 TeamQ6L2SF6YDW와 com.anthropic.claude-code 식별자를 현재 설치본에서 확인하고 strict 서명 검증을 통과했다. 기존 서명 검사 전후·실행 직전 파일/상위경로 교체 검증을 재사용한다.
+- 최초 실제 선택 검사는 cap_std read_link가 절대 링크를 거절해 FAIL했다. read_link_contents로 바꿔 내용만 읽고 별도 경로 제한을 유지한 뒤 설치본 직접 검사1 PASS(0.92초)했다. 기존 digest helper의 마지막 제품 caller가 사라져 clippy가 dead_code를 보고했고 test-only로 한정했다. 최종 Claude6 PASS/설치1 ignored, 공통 executable5 PASS/1 ignored·manager8 PASS/3 ignored, strict clippy·rustfmt·diff check PASS. 같은 독립 검토자가 raw 링크 읽기와 target 제한·서명 결속·test-only 변경을 재확인해 차단 지적 없이 승인했다. 실제 계정/모델/사용자 프로젝트 실행 없음. native 외 설치·실제 agent 실행·원본 반영/복원·G6/Windows/출시는 남고, 기존 archive 미커밋 보존·main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (Codex 로그인 공급자 서명 전환)
+
+- 94aefcc의 복원 예산 완료 뒤 실제 채팅 생성의 baseline 연결을 대조했다. FreshChat을 ApplicationCandidate로 바로 바꾸면 미지원 원본까지 새 입장 조건으로 막으므로 제품 안내/복구와 함께 연결해야 한다. 대신 확정된 업데이트 호환 요구에 따라 Codex 로그인·진단의 exact SHA release 목록을 제거하고 OpenAI 서명 신뢰와 실행 중 bytes 결속을 분리했다. Karpathy 지침으로 Claude·실제 모델 실행 정책은 변경하지 않는다.
+- 고정 native CLI/helper 경로와 Apple anchor·OpenAI Team2DC432GLL2·각 executable identifier를 OS codesign으로 검증한다. 기존 trusted release의 서명 신원을 확인했고 CLI/helper 실제 읽기 전용 서명 검사는 통과했다. 검사 전 파일 digest를 보관하고 검사 후 및 실행 전 신원/bytes를 다시 확인한다. 기존 로그인 wire/URL/profile/종료 검증은 유지한다. 버전이 바뀌어도 서명으로 입장하며 실제 프로토콜 비호환은 기존 응답 검증에서 거절한다.
+- 독립 검토에서 pathname 서명 검사 동안 다른 파일로 바꿨다가 원래 inode/bytes로 되돌리는 경합을 지적했다. 최초 파일·모든 상위 directory의 no-follow handle와 ctime/mtime(ns 포함)·신원 stamp를 보관하고 서명 후 및 기존 실행 전 revalidate에서 held/path 모두 대조하도록 수정했다. 파일/부모 swap-and-restore 회귀는 authenticator 도달까지 확인한다. 초기 수정은 기존 helper의 루트 경로 거절로 positive1 FAIL했고 signature용 루트 handle 처리를 분리해 고쳤다. 반환 이후 적대적 same-UID 경합까지 막는 fd-exec로 주장하지 않는다.
+- executable5 PASS/설치1 ignored, manager8 PASS/3 ignored, 설치본 별도 서명 경로1 PASS(2.19초, CLI/helper 수락·다른 식별자/공급자 거절), 최종 strict clippy·rustfmt·diff check PASS. 독립 재검토에서 P1 교체 경합 해소를 확인했다. 병렬 fixture의 공용 임시 부모 변경으로 정상 대조군1 FAIL을 관측해 정상 대조군만 최대32회 안정 관측을 기다리게 했고 거절 회귀는 재시도하지 않는다. 제품도 상위 폴더 변경을 보수적으로 거절할 수 있으며 point-in-time 검증 한계를 유지한다. 계정/모델 실행은 하지 않았으며 Claude 업데이트 정책·actual 실행·원본 반영과 복원·G6/Windows/출시는 남는다. 기존 archive 변경 보존, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (승인된 복원 예산 구현)
+
+- 직전 지침 확인 응답은 개발 진전이 아니며 beb44ec/m5 통합 브랜치와 기존 archive 변경을 확인하고 직접 구현을 재개했다. Karpathy 지침으로 내부 반영 백업 생성 경로에 앱 전체 기본5GiB 제한을 연결했다. 고아/abandoned 파일도 합산하고 directory flock으로 협력 작성자를 직렬화하며 각 write 전에 남은 예산을 검사한다. 기존 복원 파일 자동 삭제나 원본 쓰기는 추가하지 않는다.
+- 검증: application18 PASS, backup10 PASS(재시작·복구 포함), strict all-target clippy·변경 파일 rustfmt·diff check PASS. 독립 검토자는 census/작성/실패 정리까지 guard 수명과 미게시 archive 합산을 확인해 차단 지적 없이 승인했다. 합성 작은 예산으로 초과 쓰기·동시 작성 거절·기존 파일 보존·링크 거절을 검사했으며 실제5GiB 파일이나 사용자 프로젝트/계정/모델 시험은 없다. 제품 반영/복원·용량 설정/명시 정리 UI와 provider 업데이트 호환 구조/실제 실행·G6/Windows/출시는 남는다. 기존 archive 미커밋 변경 보존, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (1·3 승인 반영·설치 CLI 오프라인 시험)
+
+- 사용자 명시 승인으로 임시 profile/가짜 sentinel만 쓰는 설치 CLI command/exec 시험을 실행했다. 원본 반영은 외부 편집 중지·보존형 충돌 중단, 복원 데이터 앱 전체5GiB/자동 삭제 없음 정책을 채택해 제안서에 기록했다. 기존2번은 업데이트 호환 우선으로 확정돼 전용 구버전 고정 설치 권고는 철회 상태다. 실제 인증·사용자 프로젝트·네트워크·유료 모델 호출은 이번 승인/시험에 포함하지 않았다.
+- 3ec81cf에서 Karpathy 지침으로 시험 오류만 수정했다. quoted dotted CLI override가 FilesystemPermissionToml 파싱을 실패시켜 단일 inline TOML table로 바꿨고, test-only 수신이 합쳐 도착한 JSONL2줄을 한 JSON으로 읽던 문제를 줄 단위 bounded buffer로 고쳤다. remoteControl 알림 opt-out을 기존 방식대로 명시했다. 원문 stderr 임시 진단은 제거하고 고정 오류 분류/숫자만 남겼다.
+- 실제 시험은 설정 조회 이후 command/exec에서 exit71·sandbox_apply Operation not permitted로 실패했다. 현재 outer sandbox 아래 vendor 내부 sandbox 적용이 거절됐으며 인증/profile 접근 보호 성공으로 해석하지 않는다. 기존 실행 정책은 완화하지 않았고 native 제품 입장도 미활성이다. 로그 `/private/tmp/m5-approved-permission-probe-command.log`에 실패 근거를 보존했다. 다음은 업데이트 대응 공식 adapter와 도구/인증 격리 책임 재설계·검증이며, 단순 externalSandbox 우회는 해결책으로 채택하지 않는다.
+- 집중 toy2 PASS/설치 시험1 ignored(별도 실측은 FAIL), I/O6 PASS. strict all-target clippy·변경 Rust rustfmt·diff check PASS. 최종 실제 시험2.62초 FAIL 로그 `/private/tmp/m5-approved-permission-probe-final.log`는 실패 판정 전에 cleanup confirmed·sentinel unchanged·auth absent를 확인한다. 독립 검토자는3개 시험 코드 변경을 차단 지적 없이 승인했고 실제 실행 호환/제품 안전 합격과 구분했다. 이전 작업 기록/승인된 정책 문서를 함께 보존하며 관련 변경만 선택 커밋하고 main 병합/push하지 않는다. 과거 아카이브 미커밋 기록은 별도 보존한다.
+
+### 2026-09-30 · by GPT-6 Astra (업데이트 호환 요구 확정·버전 고정 권고 철회)
+
+- 사용자는 Codex/Claude Code 업데이트 후에도 연동 유지를 원하며 exact SHA-256 허용 목록으로 업데이트를 막는 방식을 거부했다. 이를 확정 제품 요구로 제안서 §5.1.1에 기록했다. 앱 전용 고정 버전 설치를 해결책으로 권고한 것과 이전3개 질문 중 설치 공급 A/B 선택 요청은 철회한다. 초보자용 설치 지원은 유지하며 공식 연동 인터페이스·공급자 adapter·신뢰와 기능 호환 검증 분리·업데이트 전후 회귀를 후속 방향으로 정리했다.
+- 현재 코드가 바뀌었다고 주장하지 않는다. 기존 보안 검사를 삭제하거나 미검증 실행을 활성화하지 않았으며 공식 계약 자체의 파괴적 변경까지 무조건 호환된다고 약속하지 않는다. 무결성/실행 중 교체 탐지용 해시와 제품 호환성을 exact 파일 해시로 판단하는 정책을 구분했다.
+- 문서 diff check 확인, 코드/설치/인증 변경·커밋·push 없음. 기존 미커밋 문서는 보존한다. 오프라인 시험과 원본 반영 정책의 별도 승인 문제는 이번 요구로 자동 승인되지 않는다. 다음은 새 호환성 요구에 맞춘 연동 구조 재설계/구현이며 이전 설치 정책 질문을 다시 반복하지 않는다.
+
+### 2026-09-30 · by GPT-6 Astra (외부 업데이트와 연결 차단 원인 설명 정정)
+
+- 사용자 질문에 현행 select_pair/PinnedExecutable을 확인했다. Codex 로그인은 다른 앱 번들의 CLI/helper에 의존하고 고정 SHA-256 pair와 일치해야 한다. 정상 업데이트도 파일 내용이 달라지면 providerExecutableChanged로 차단될 수 있다. 이것은 실제 프로토콜 비호환이나 인증 소실을 입증한 것이 아니라 현재 exact-pin 정책의 의도적 미검증 버전 거절이다.
+- 외부 업데이트는 항상 연결을 깨뜨린다는 설명으로 일반화하지 않는다. 버전별 경로/규격 변화 가능성과 현재 코드의 과도한 결합을 분리했다. 앱 전용 설치는 한 해결 후보일 뿐 필수 결론이 아니며 공급자 신뢰·지원 버전/기능 호환 검사와 검증된 fallback의 설계 선택이 남는다. 이번에는 정책/허용 목록/설치/인증을 변경하지 않았고 기존 승인 대기 유지. 소스 대조·diff check만 수행했다.
+
+### 2026-09-30 · by GPT-6 Astra (자동 목표 입력 대기 전환)
+
+- 같은 명시 승인 대기가 연속3개 목표 턴에서 유지됐고 사용자 답변·실행 중 검증 handle·새 코드 변경은 없다. 직전 턴의 범위 재확인은 구현 진전이나 verified wait가 아니다. 현재 HEAD 3ec81cf와 미승인 제안 상태를 재확인했다.
+- 실제 CLI 오프라인 격리 시험, 앱 전용 공급 정책, 원본 반영 지원 조건/복원 예산을 임의 확정해 핵심 기능을 연결할 수 없어 목표를 blocked(입력 대기)로 전환했다. 완료/사용자 요청 pause가 아니며 전체 제품 목표는 그대로 보존된다. 준비된 시험은 실행하지 않았고 인증·사용자 프로젝트·main/push 변경도 없다.
+- 재개 조건: 사용자가3가지 요청에 답한다. 부분 승인이라면 승인된 경로만 진행한다. 기존 미커밋 정책/아카이브/이번 작업 기록은 보존했으며 diff check PASS. 같은 상태 확인을 자동 반복하며 완료로 포장하지 않는다.
+
+### 2026-09-30 · by GPT-6 Astra (승인 대기와 변경 검토 연결 전제 확인)
+
+- 자동 목표 재개에는 앞서 요청한3개 결정의 실제 답변이 없다. 설치 CLI 오프라인 시험·설치 공급 선택·원본 반영 지원 조건을 승인으로 간주하지 않았다. 실행 중인 검증 handle도 없어 verified wait로 표현하지 않는다. 목표는 active/미완료이며 승인 대기를 새 구현 진전으로 세지 않는다.
+- 독립적인 읽기 전용 검토 UI 연결 가능성을 소스에서 확인했다. 공개 prepare_chat_workspace는 FreshChat이고 source baseline은 내부 ApplicationCandidate에서만 생성한다. 내부 ReviewPlan은 생성 당시 receipt 검증을 요구하므로 기존 제품 snapshot을 현재 원본과 비교해 반영 가능한 것으로 승격할 수 없다. 실제 연결에는 신규 baseline 생성·실패/legacy 상태 처리부터 필요하며 단순 UI 바인딩으로 대체하지 않는다.
+- 이번은 읽기 전용 범위 재확인이고 코드/인증/사용자 프로젝트 변경은 없다. 기존 미커밋 문서를 보존하고 diff check를 확인했다. 다음 핵심 실행 단계는 명시 승인된 범위의 오프라인 실측이며 사용자 결정 응답을 기다린다. main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (실제 실행 연결의 승인 경계 재확인)
+
+- 3ec81cf의 제품 start/내부 native owner·PROFILE sandbox와 준비된 provider_permission_probe를 대조했다. 직전 목표 턴은 연결 UI 구현/검증 진전이지만 실제 실행 활성화가 아니다. native 후보의 PROFILE 읽기/쓰기 권한이 자손에게 상속되는 문제가 남아, 공개 start/accept를 단순 연결해서는 안 된다.
+- 다음 직접 실측은 이미 준비된 ignored installed_permission_profile_blocks_profile_access다. 설치 CLI/helper SHA-256이 시험의 고정값 3e11ccc…aca5a/4c398936…43f6d와 현재도 일치함을 읽기 전용 확인했다. OpenAI Docs의 공식 app-server command execution 본문은 command/exec가 thread 없이 sandbox 명령을 실행한다고 설명하지만 고정 CLI의 named permission 강제 증거는 아니다. https://learn.chatgpt.com/docs/app-server#command-execution
+- 과거 별도 승인 대기를 자동 목표 재개로 덮지 않았다. 임시 profile/가짜 sentinel만 사용하는 오프라인 시험 승인, 앱 전용 설치 공급 정책, 외부 편집 중지/보존형 원본 반영과5GiB 무자동삭제 정책을 사용자에게 다시 명확히 질문했다. 실제 계정/프로젝트/유료 모델/네트워크 시험은 요청 범위에서 제외했다. 응답 전 시험 실행·정책 변경·제품 활성화는 하지 않는다.
+- 이번 검증은 소스/문서/고정 실행 파일 해시 대조와 diff check다. 기존 미커밋 정책/아카이브 보존, main 병합/push 없음. 전체 앱 목표는 미완료·active이며 다음 핵심 실행 작업은 해당 시험 승인 응답 후 진행한다.
+
+### 2026-09-30 · by GPT-6 Astra (연결 완료 후 작업대 설정 접기)
+
+- 8b46f3a에서 승인된 설정 후 작업대 진입 흐름을 대조하고, 메인이 Karpathy 지침으로 로그인 완료 패널의 점진적 표시를 구현했다. 오류 없는 connected만 접고 사용자가 다시 펼칠 수 있다. 주기적 상태 확인은 컴포넌트 unmount 없이 유지하며 진행/복구/조회 오류는 항상 노출한다. 다른 공급자의 패널과 인증·실행 권한은 변경하지 않는다.
+- 검증: 로그인/선택 Node11 PASS, TypeScript noEmit·renderer build PASS, 합성 Chromium2 PASS(최종6.86초). 명시 펼침의 polling 유지, 복구 조작 노출, Claude 코드 입력 회귀, 접힌 상태 조회 오류의 자동 펼침/복원과 공급자별 독립성을 확인했다. 직접 diff 검토·diff check PASS. 실제 계정/유료 호출은 없고 독립 안전 경계 변경도 없다.
+- 기존 복구 확인 기록을 함께 보존하고 관련 파일만 선택 커밋한다. 설치 공급 정책/원본 반영 정책 응답과 실제 provider 제품 활성화·반영/복원·G6/Windows/출시는 남는다. 전체 목표는 active이며 main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 재확인)
+
+- 사용자 재요청으로 현재 OS 프로세스와 앱 전용 로그인 파일 메타데이터를 확인했다. hello-agent 개발 앱/Electron/Vite 프로세스는 없고 활성 codex-login.pending도 없어 추가 종료·잠금 해제 대상이 없다. 앞선 보존 복구가 유지되는 상태이며 이번에 복구를 새로 수행했다고 주장하지 않는다.
+- preserved pending inode 168613811과 helper inode 166226396, 인증 파일 inode 165969554/0600을 확인했다. 인증 내용 조회·변경·삭제, 다른 앱 종료, 재부팅은 하지 않았다. 다음은 개발 앱 재실행 후 연결 상태 확인이며 실제 인증 성공은 이번 검사 범위가 아니다. 기존 미커밋 문서는 보존했다.
+
+### 2026-09-30 · by GPT-6 Astra (비활성 실제 adapter의 미설치 오보고 수정)
+
+- 5c6b6ea에서 actual 실행 연결을 조사하며 AgentRuntime::blocked가 설치 관측 없이 항상 notInstalled를 반환하는 결함을 확인했다. Karpathy 지침으로 공개 capability snapshot에만 unknown을 추가해 미관측 사실을 표시하고 macOS capabilityUnknown/비지원 플랫폼 platformUnsupported와 canStart=false를 유지했다. 로그인 성공과 실제 작업 가능을 혼동하지 않으며 제품 실제 시작은 여전히 비활성이다.
+- 실제 G5C 관측용 설치 enum은 확장하지 않았다. unknown이면 실행 파일 없음·auth unknown·discovery unavailable·모델 없음이 요구되며 fingerprint/기존 차단 순서를 유지한다. Rust/TS 공동 golden과 forged auth/model/executable/start 및 Windows 회귀를 추가했다. 구형 renderer는 새 값을 거부하므로 sidecar/renderer 동시 배포가 필요하다.
+- 검증: Rust protocol adapter10 PASS, sidecar 집중1 PASS, 최종 executable 부정 회귀1 PASS. Node 계약10·G5C/notice12·actual UI21 PASS, TypeScript noEmit·renderer build·strict clippy·변경 파일 rustfmt·diff check PASS. UI controller가 실제/fixture 시작을 모두0회로 막고 미설치 안내를 하지 않음을 확인했다. 독립 검토의 unknown+실행 파일 수락 의심은 기존 boolean 불변식과 실제 회귀로 반증돼 철회됐으며 최종 검토는 차단 지적 없이 승인됐다.
+- 기존 정책/아카이브 변경 보존. 실제 CLI/인증·모델·원본 쓰기 시험 없음. 설치 공급 정책과 원본 보호/보존 예산은 여전히 응답 대기이며 native 시작 연결·실제 검증/반영·복원/G6/Windows/출시는 미완료다. main 병합·push 없음, 전체 목표 active 유지.
+
+### 2026-09-30 · by GPT-6 Astra (최초 에이전트 선택·선택 기억 연결)
+
+- 1b19604에서 설치 관리 정책 응답과 독립적인 승인된 시작 흐름 §5.1의 에이전트 선택을 구현했다. 메인이 Karpathy 지침으로 UI 선호값만 추가했으며 저장된 유효 선택이 없으면 명시 선택 전 공급자 호출0회다. 한 공급자만 시작하거나 나머지를 나중에 추가할 수 있고 기존 연결 컴포넌트/인증·프로젝트별 역할은 보존한다. 선택을 지원/로그인/실행 성공으로 해석하지 않는다.
+- version1의 제한된 공급자 목록만 저장/복원하며 corrupt/unknown/duplicate/future 값은 재선택으로 돌아간다. 저장 불가 시 현재 세션은 계속하고 다음 실행 재선택 안내를 표시한다. ko/en 안내와 키보드 접근 가능한 checkbox/fieldset을 연결했다. 진행 중 연결을 숨기는 해제 기능은 추가하지 않았다.
+- 검증: Node 선택/로그인/번역13 PASS, TypeScript noEmit·renderer build·diff check PASS. Chromium2 PASS(5.20초)에서 최초 호출 없음, Codex 단독 호출, Claude 명시 추가, 기존 로그인/복구/코드 초안/프로젝트 UI 회귀, 화면 reload 후 선택 유지 확인. 테스트를 메모리 전용 session으로 격리하면서 protocol 등록 session 불일치와 저장소 준비 전 클릭을 각각 수정 후 통과했다. 실제 설치/계정/모델 시험은 아니다. 일반 UI 변경으로 직접 diff 검토했으며 새 안전 권한/복구 조건은 없다.
+- 관련 파일만 선택 커밋하고 기존 정책 제안/아카이브 변경은 보존한다. 설치 관리 정책과 원본 반영 정책 응답, 실제 provider/반영·복원/G6/Windows/출시는 여전히 남아 전체 목표 active를 유지한다. main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (설치 공급 경로 불일치 확인·선택 요청)
+
+- b5bd325와 기존 Tauri install.rs를 대조했다. 최신 standalone/vendor installer를 그대로 연결하면 M5의 pinned 앱 번들 pair/Claude 버전 허용과 불일치한다. OpenAI Docs로 Codex CLI/App Server 공식 문서를 조회·본문 확인하고 Claude 공식 setup 문서도 대조했다. 공식 설치 지원과 이 앱의 정확한 실행 파일 신뢰·runtime gate는 별개다. 이번 조사로 레거시 installer의 즉시 제품 연결 대신 공급 정책을 먼저 결정해야 함을 확인했다.
+- 제안서 §5.1.1에 앱 전용 검증 버전 설치(A 권장)와 기존 설치만 사용/안내(B)를 미승인 선택지로 분리하고, 전역 설치 보존·설치 전 표시·다운로드/취소·원자 게시/재검증·인증 분리의 후속 합격 범위를 남겼다. 사용자에게 선택을 비동기 요청했으며 자동 목표 재개를 정책 승인으로 간주하지 않는다. Karpathy 지침에 따라 결정 전 임의 공급 경로/실행 허용을 추가하지 않았다.
+- 검증: 실제 코드/공식 문서 대조 및 diff check. 설치·다운로드 실행, 인증 파일 조회/변경, 실제 모델 호출은 없다. 기존 정책/아카이브 변경 보존. 설치 정책 응답 후 해당 경로 구현을 이어가며 독립적인 다른 잔여 개발도 가능하다. 앱 전체 목표는 active이고 완료/blocked가 아니다. main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (로그인 전 설치 사전 진단 연결)
+
+- 30b65f8 기준 메인이 Karpathy 지침으로 기존 pinned 실행 파일 선택을 재사용한 고정 diagnose 요청을 구현했다. 진단 자체는 프로필/인증 파일 생성·CLI 실행·네트워크 없이 supported 프로그램만 검사하며 installed와 실제 connected를 분리한다. renderer 최초 진단 성공 뒤 기존 계정 확인을 수행하고 명시 재진단 버튼도 제공한다. Claude 설치 경로 부재는 미지원/변조 후보와 구분한다.
+- 다음 설치 연결의 주의점: 기존 src-tauri/src/install.rs는 Claude vendor script와 Codex standalone 최신 release 다운로드를 사용하지만 M5 Codex 로그인은 앱 번들의 pinned CLI+code-mode-host pair만 받는다. 레거시 설치 함수를 그대로 연결해 설치 성공=연결 가능이라고 표시하면 안 된다. supported 공급/업데이트 경로를 먼저 정합시켜야 하며 이번 진단은 전체 PATH 설치 유무를 주장하지 않는다.
+- 진단은 기존 worker·복구 필요 상태를 덮어쓰지 않는다. 완료 publication과 worker 종료 경합, 완료 직후 취소 경합을 처리해 다음 계정 확인이 잘못 시작되지 않게 했다. 검증: Node 계약/번역10 및 bridge/security57 PASS, TypeScript noEmit·renderer build PASS, 합성 Chromium2 PASS(4.88초). Rust manager8 PASS/3 ignored와 Claude pin/missing1 PASS, strict clippy·변경 파일 rustfmt·diff check PASS. 취소 회귀 추가 시 테스트가 앞선 prepare_quit의 취소 플래그를 재사용해1 FAIL했고 합성 상태를 초기화한 뒤 집중 검사 PASS했다. 전체 cargo fmt는 기존 비범위 파일 포맷 불일치로 실패해 변경 파일만 정리했다.
+- 상시 승인된 독립 검토자1명이 진단/복구/취소 경계를 최종 승인했다. 검토자가 동일 테스트 상태 초기화 문제를 확인했으며 수정 뒤 차단 지적은 없다. 실제 계정·유료 모델·설치 실행은 하지 않았고 기존 정책/아카이브 변경은 보존했다. 자동 설치·전체 기기 진단, 실제 공급자 실행, 원본 반영/복원 및 G6/Windows/출시는 여전히 미완료다. 관련 파일과 직전 복구 확인 기록만 선택 커밋하며 main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (개발 앱 종료·복구 요청 현재 상태 확인)
+
+- 사용자 요청으로 30b65f8/m5/coding-agent-ide의 개발 앱·Vite·sidecar 실행 여부와 앱 전용 로그인 파일 메타데이터를 다시 확인했다. 권한 확장 읽기 전용 프로세스 조회에서 개발 앱은 이미 종료돼 추가 종료 대상이 없었다. Codex/ChatGPT와 다른 앱의 crash handler는 유지했다.
+- 활성 codex-login.pending은 없으며 이전 보존 잠금(inode 168613811, 0600, 61바이트)과 stale helper(inode 166226396)는 유지된다. 인증 파일도 0600으로 존재하며 내용은 읽거나 변경하지 않았다. 이미 수행된 보존 복구를 반복하거나 인증을 초기화하지 않았고 재부팅도 필요하지 않다.
+- 검증은 OS 프로세스·파일 메타데이터 및 diff check이며 실제 계정 연결 성공 재검증은 아니다. 현재 추가 해제 대상은 없고 다음은 앱에서 연결 상태 재확인이다. 기존 정책/아카이브 미커밋 변경 보존, main 병합·push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (다국어 파동 후 핵심 제품 경로 재대조)
+
+- 998c011/m5 통합 checkout과 제품 명세 §5.1, provider-login.tsx, AgentRuntime::blocked/blocked_capability, native dispatcher 및 원본 반영 제안을 대조했다. 이전 파동은 구현/누적404 PASS의 진전이며 전체 완료가 아니다. 제품 actual 시작은 여전히 차단돼 있고 source writer/restore·공개 반영 UI가 없다. Electron에는 로그인은 있지만 설치·기기 진단을 포함한 승인된 guided-start 연결이 없다.
+- 다음 독립 구현 우선순위는 Electron guided-start의 설치/진단 연결이다. 기존 Tauri 시스템 레시피와 Electron IPC/sidecar 경계부터 조사하고 설치 완료·로그인 완료·실제 실행 가능을 분리해야 한다. 단순 성공 배지나 로그인만으로 사용 가능을 선언하지 않는다. 실제 공급자 활성화는 독립 검토와 명시 계정/모델 검증이 별도 필요하다.
+- 원본 반영의 외부 편집 중지/보존형 충돌 중단 지원 조건과 복원 데이터5GiB·자동 삭제 없음 정책을 각각 비동기 질문으로 요청했다. 응답 전 승인으로 간주하지 않는다. 전체 목표를 blocked/complete로 변경하지 않으며 설치/진단 등 독립 작업은 계속 가능하다. 성능 절차도 읽었으나 clean checkout 필수 조건과 기존 미커밋 문서를 보존해 측정은 실행하지 않았다. 이번은 코드 검증 추가가 아닌 근거 재대조이며 diff check만 수행, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (Monaco 앱 명령 번역·다국어 파동 누적 검증)
+
+- 3b18fbb 기준 앱이 등록한 Monaco 저장 명령과 접근성 이름을 ko/en으로 갱신한다. 언어 전환은 명령만 재등록하고 모델/편집기를 재생성하지 않는다. 최신 언어는 지연 로딩에도 반영하며 갱신 실패는 기존 보존/명시 재시도 화면으로 전환한다. Karpathy 지침으로 Monaco 자체 내장 메뉴 전체 번역은 별도 범위로 명시했다.
+- 검증: 집중9 PASS, TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.68초). 명령1회 교체·초안/읽기 잠금/편집기1회 생성과 단축키를 확인했다. 최초 mock은 부분 updateOptions를 전체 덮어쓰기로 처리해6 FAIL했고 실제 부분 갱신 의미로 수정 후 통과했다. 누적 tests/*.test.mts 404 PASS/0 FAIL(23.58초), diff check PASS. 로그 /private/tmp/hello-agent-i18n-wave-tests.log. Monaco chunk 경고 유지.
+- 관련 코드/기록만 선택 커밋하며 정책 제안/아카이브 미커밋 기록은 보존한다. 이번 파동은 앱 안내 다국어/회귀의 완료이며 제품 전체 완료가 아니다. 원본 반영 정책 결정·실제 공급자 활성화·G6/Windows·패키징/출시 검증은 남는다. 실제 계정/모델·main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (역할·공급자 조합 안내와 복구 확인 언어)
+
+- 35a8b7b의 역할/공급자 준비·실행 불가 안내를 순수 chat-notice formatter로 분리하고 키/role/runtime/reason을 보관했다. 알려진8개 원인만 선택하고 unknown은 안전한 기본 안내로 표시한다. 복구 확인은 UI 언어를 인자로 받되 기본 한국어 호환과 기존 취소/종료 증거 경계를 유지한다. Karpathy 지침으로 실행 정책은 변경하지 않았다.
+- 검증: 조합/확인·chat state/번역23 PASS, 실제-agent 합성 UI state20 PASS(영어 확인 취소 시 inspect/resolve0회·잠금 유지 추가), TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.74초). 테스트 runtime 표기를 실제 claude-code 계약과 맞춘 뒤 조합2 PASS 재확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지.
+- 관련 코드/기록만 선택 커밋한다. 이전 정책/아카이브 미커밋 기록은 보존한다. 다음은 Monaco 내부 앱 제공 표시와 누적 UI 검증이다. 실제 계정/모델·사용자 복구 실행 아님, 원본 적용/실제 provider/G6/Windows/출시 미완료이며 main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (채팅 상태 안내 누락 연결·고정 문구 다국어)
+
+- b521090에서 chat.notice가 controller에만 저장되고 renderer에는 표시되지 않는 누락을 확인해 role=status 영역에 연결했다. 고정 준비/실행/종료/복구/설정 안내19종과 전환 오류 notice에 typed noticeKey를 보관하며 기존 한국어 문자열은 유지한다. 새 notice/null은 stale key를 제거한다. Karpathy 지침으로 동작 조건·대화 본문은 변경하지 않았다.
+- 검증: chat UI state/번역 Node21 PASS, TypeScript noEmit·renderer build PASS, Chromium2 PASS(4.72초). 설정 재읽기 상태의 실제 표시·ko/en 전환·모델값 보존 및 기존 저장/전환 흐름을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/모델 시험 아님.
+- 관련 코드/기록만 선택 커밋한다. 역할/공급자/실행 불가 원인의 조합 문구와 네이티브 복구 확인창, Monaco 내부 표시 번역은 남는다. 정책/아카이브 미커밋 기록은 보존하며 원본 반영/실제 provider/G6/Windows/출시 미완료, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (편집 상태·차단 notice 다국어)
+
+- a1b3cba에서 편집 완료/외부 변경/전환·복구 차단 안내28종에 typed noticeKey를 연결했다. 기존 notice 문자열과 setActionBlocked 문자열 인자 호환은 유지하며 명시 key 인자만 추가했다. 새 notice/null로 갱신할 때 이전 key를 제거하고 notice를 갱신하지 않는 차단 해제는 기존 안내를 유지한다. Karpathy 지침으로 차단/저장/복구 조건을 변경하지 않았다.
+- 검증: editor/workspace/번역 Node 51 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.70초). notice key 제거·기존 호출 호환과 화면의 영어 설정 차단 안내 및 기존 초안/설정/저장 동작을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 사용자 파일/모델 요청 없음.
+- 관련 코드/기록만 선택 커밋하고 정책 제안/아카이브 미커밋 변경은 보존한다. 다음은 채팅 일반 상태 안내와 Monaco 내부 표시, 누적 UI 검증이다. 원본 정책/실제 공급자/G6/Windows/출시는 미완료이며 main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (동적 채팅 오류 번역 키 연결)
+
+- d1d1c15 기준 ChatUiController의 생성/전환/설정/실행/종료/복구 오류13종에 typed messageKey를 추가하고 화면에서 현재 언어로 표시한다. 기존 한국어 message·기술 detail·오류/복구 조건은 유지했다. Karpathy 지침으로 모델 자동 대체 없음과 종료 미확인 보호 안내를 그대로 번역했다. 일반 notice는 별도 남는다.
+- 검증: chat UI state/번역 Node 21 PASS, TypeScript noEmit·renderer build PASS, Chromium 기존+오류 언어 전환 회귀2 PASS. 저장 실패 이후 ko/en 전환에도 동일 모델 입력/초안·기술 상세 보존과 기존 재읽기 흐름을 확인했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/모델 요청 아님.
+- 관련 코드/기록만 선택 커밋하고 이전 정책/아카이브 변경은 보존한다. 다음은 일반 상태/차단 notice와 Monaco 내부 안내의 번역 및 누적 UI 검증이다. 원본 정책·실제 공급자/G6/Windows/출시는 미완료, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (동적 편집 오류 번역 키 연결)
+
+- 8b085b9의 ProjectEditorController 오류18종에 typed messageKey를 보관하고 renderer가 현재 언어로 해석하도록 연결했다. 기존 한국어 message와 기술 상세2048자 제한은 호환성을 위해 유지한다. Karpathy 지침으로 실행/저장/복구 조건과 오류 시점은 변경하지 않았다. 일반 notice와 ChatUiController 오류는 아직 별도다.
+- 검증: editor/workspace/번역 Node 50 PASS, TypeScript noEmit·renderer build PASS, Chromium 기존 회귀2 PASS. 동일 저장 오류 객체의 ko/en 키 해석과 technicalDetail 불변을 단위 검사했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 계정/프로젝트 시험은 아니다.
+- 관련 코드/기록만 선택 커밋하고 정책 제안 및 아카이브 미커밋 기록은 보존한다. 다음은 일반 차단/상태 notice·채팅 오류의 구조화와 남은 Monaco 내부 안내다. 원본 정책·실제 provider/G6/Windows/출시 미완료이며 main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (작업 패널 배치 다국어)
+
+- b4fd359에서 WorkbenchDock의 패널 이름·분할/탭 배치·드래그/집중/숨김·크기 조절 접근성 안내를 ko/en 24개 키로 옮겼다. Karpathy 지침으로 저장 형식과 위치/크기/탭 선택 계산·이벤트·효과 의존성은 유지했다.
+- 검증: dock/번역 Node 16 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.53초). 언어 전환 전후 저장된 layout 문자열·패널 위치/숨김 상태·Monaco DOM/초안을 대조하고 기존 이동/크기/탭/저장 흐름을 통과했다. 직접 diff 검토·diff check PASS, dock 한국어 하드코딩 검색 없음. 기존 Monaco chunk 경고 유지.
+- 관련 구현/기록만 선택 커밋한다. 기존 정책 제안/아카이브 미커밋 기록은 보존한다. 남은 번역은 동적 controller 오류·차단 안내와 Monaco 내부 표시이며 이후 누적 UI 검증이 필요하다. 원본 반영 정책·실제 provider·G6/Windows/출시는 미완료, main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (프로젝트·작업 상태·준비 복구 다국어)
+
+- be0ecaa에서 저장된 프로젝트/작업 상태/시작 실패 복구 안내 ko/en 28개 키를 연결했다. Karpathy 지침으로 표시와 결과 안내 종류만 변경하고 요청/검증·generation/epoch·종료 조건은 유지한다. 원본/작업 파일 비삭제 및 재부팅 해결 단정 금지 경고를 양쪽 언어에 유지했다.
+- 검증: 프로젝트 계약/작업 상태/번역 Node 9 PASS, TypeScript noEmit·renderer build PASS, Chromium 2 PASS(4.57초). 결과 불명 상태에서 ko/en 전환에도 같은 준비 확인 DOM/ID·프로젝트 경로를 보존하고 명시 재확인으로 종료하는 기존 합성 흐름을 검증했다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지. 실제 사용자 복구를 실행한 것은 아니다.
+- 관련 구현/기록만 선택 커밋한다. 이전 정책/로그인 미커밋 기록은 아카이브에 보존한다. 다음은 동적 controller 오류/차단 안내와 dock·Monaco 내부 표시의 남은 번역 및 누적 UI 검증이다. 원본 정책/실제 공급자·G6/Windows/출시는 여전히 남는다. main 병합/push 없음.
+
+### 2026-09-30 · by GPT-6 Astra (편집기 실패·공통 안내 다국어)
+
+- 3680a71에서 Monaco 초기화 실패/보존 초안/명시 재시도와 작업대 이동 실패·목록 갱신·상세 펼치기 안내 ko/en 7개 키를 연결했다. Karpathy 지침으로 효과 의존성/복구/저장 동작은 변경하지 않았다. controller 생성 오류 본문과 Monaco 내부 메뉴는 아직 번역되지 않았다.
+- 검증: 실제 component effects의 loader/editor/action 실패 및 언어 전환 시 초안/읽기 잠금·자동 재시도 없음 포함 Node 9 PASS, TypeScript noEmit·renderer build PASS. Chromium 정상 mount/초안/저장 회귀 2 PASS, diff check PASS. 실패 주입은 VM 검사이며 실제 Chromium 장애 주입은 아니다. 기존 Monaco chunk 경고 유지.
+- 관련 코드와 기록만 선택 커밋한다. 정책 제안과 아카이브 미커밋 기록은 보존하며 다음은 프로젝트/작업 상태 화면과 동적 오류 안내다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
+
+### 2026-09-30 · by GPT-6 Astra (편집·충돌·초안 폐기 안내 다국어)
+
+- 014abf7 기준 앱 편집기/탭/저장/충돌/초안 폐기 확인과 변경 패널에 ko/en 27개 키를 연결했다. Karpathy 지침으로 표시만 변경하며 저장·재읽기 조건, 초안/경로/상세 원문은 유지한다. Monaco 내부 메뉴·초기화 실패 안내는 별도 남는다.
+- 검증: 편집 동작/상태·번역 Node 45 PASS, TypeScript noEmit·renderer build PASS. Chromium 기존 dirty 라벨 검사가 영어에서도 한국어를 찾는 실패를 재현한 뒤 언어별 라벨로 수정해 최종 2 PASS(4.21초). 새 검사는 폐기 확인창/Monaco DOM/초안 유지·영어 경고와 기존 취소/명시 재읽기/단축키 저장을 확인한다. 직접 diff 검토·diff check PASS, 기존 Monaco chunk 경고 유지.
+- 구현/기록만 선택 커밋하며 아카이브의 미승인 정책/로그인 기록 및 정책 제안은 보존한다. 다음은 Monaco 실패 안내·작업대/프로젝트 오류 번역과 원본 적용 정책 결정이다. 실제 계정/모델·main 병합/push 없음. 앱 전체 완료 아님.
+
 ### 2026-09-30 · by GPT-6 Astra (검색·변경 상세 다국어와 기록 롤오버)
 
 - b255fc6에서 검색 안내/오류 종류와 diff 종류/비교/페이지 안내 ko/en 30개 키를 연결했다. Karpathy 지침으로 검색 실행·취소/예산과 diff parser는 유지하고 표시만 변경했다. 검색 오류는 종류로 보관해 언어 전환 시 갱신한다.

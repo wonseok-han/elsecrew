@@ -35,11 +35,28 @@ pub(in crate::project) fn begin(
         plan.binding["worktreeId"].as_str().ok_or_else(invalid)?
     );
     let mut project = required_project(storage, project_id)?;
-    if project
-        .get("application_intent")
-        .is_some_and(|v| v["state"] != "abandoned")
-    {
-        return Err(invalid());
+    if project.contains_key("application_intent") {
+        // A completed record remains evidence, not authority for another write.
+        // Fail closed if its lock has changed since completion.
+        let previous = inspect(storage, project_id)?;
+        if !matches!(
+            previous["state"].as_str(),
+            Some("applied" | "restored" | "abandoned")
+        ) {
+            return Err(invalid());
+        }
+        let previous_id = previous["applicationId"]
+            .as_str()
+            .ok_or_else(invalid)?
+            .to_owned();
+        let history = project
+            .entry("application_history")
+            .or_insert_with(|| json!({}));
+        let history = history.as_object_mut().ok_or_else(invalid)?;
+        if history.len() >= 1_000 || history.contains_key(&previous_id) {
+            return Err(invalid());
+        }
+        history.insert(previous_id, previous);
     }
     let mut lock = storage
         .projection_record("lock", &lock_id)?
@@ -72,6 +89,9 @@ pub(in crate::project) fn begin(
     let id = format!("application_{}", Uuid::new_v4().simple());
     let record = json!({"version":1,"applicationId":id,"state":"prepared","binding":plan.binding,"lockId":lock_id,"worktreePath":lock["worktree_path"],"backup":backup});
     project.insert("application_intent".into(), record.clone());
+    if serde_json::to_vec(&project).map_err(|_| invalid())?.len() > 32 * 1024 * 1024 {
+        return Err(invalid());
+    }
     lock.insert("recovery_required".into(), json!(true));
     lock.insert(
         "evidence".into(),

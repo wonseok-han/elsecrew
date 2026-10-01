@@ -1076,6 +1076,63 @@ fn application_intent_fence_is_atomic_restart_safe_and_cancelable_before_writes(
         abandoned
     );
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    // A fresh review/confirmation is required; archiving never reuses approval.
+    for fail_commit in [true, false] {
+        let review = application::review::persistence::publish(
+            &f.manager,
+            &mut storage,
+            &f.project_id,
+            "req_history_review",
+        )
+        .unwrap();
+        let (token, _) = owner
+            .open(
+                &f.manager,
+                &storage,
+                target,
+                review["reviewId"].as_str().unwrap(),
+            )
+            .unwrap();
+        let grant = owner
+            .prepare_backup(&f.manager, &mut storage, &token, "req_history_backup")
+            .unwrap();
+        let before = required_project(&storage, &f.project_id).unwrap();
+        if fail_commit {
+            storage.connection_for_test().execute_batch("CREATE TRIGGER fail_history BEFORE INSERT ON events WHEN NEW.operation_id LIKE 'op_application_%_prepare_lock' BEGIN SELECT RAISE(ABORT, 'history atomicity'); END;").unwrap();
+        }
+        let next = intent::begin(
+            &f.manager,
+            &mut storage,
+            &mut owner,
+            grant,
+            "req_history_begin",
+        );
+        if fail_commit {
+            assert!(next.is_err());
+            assert_eq!(required_project(&storage, &f.project_id).unwrap(), before);
+            assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), abandoned);
+            storage
+                .connection_for_test()
+                .execute_batch("DROP TRIGGER fail_history;")
+                .unwrap();
+        } else {
+            let next = next.unwrap();
+            assert_ne!(next["applicationId"], abandoned["applicationId"]);
+            let project = required_project(&storage, &f.project_id).unwrap();
+            assert_eq!(
+                project["application_history"][abandoned["applicationId"].as_str().unwrap()],
+                abandoned
+            );
+            assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), next);
+            assert!(intent::abandon_unwritten(
+                &mut storage,
+                &f.project_id,
+                &abandoned,
+                "req_history_stale"
+            )
+            .is_err());
+        }
+    }
 }
 
 #[cfg(unix)]
