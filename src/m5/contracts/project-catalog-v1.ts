@@ -8,12 +8,14 @@ export interface ApplicationHistoryEntry { applicationId: string; state: "applie
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export interface BackupPreparation { reviewId: string; fingerprint: string }
+export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation" }
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "backupStorageUsage" }
   | { action: "setBackupStorageLimit"; expectedLimitBytes: number; limitBytes: number }
   | { action: "backupPreparations"; projectId: string }
+  | { action: "backupRetention"; projectId: string }
   | { action: "abandonBackupPreparation"; projectId: string; reviewId: string; fingerprint: string }
   | { action: "startApplication"; projectId: string; chatId: string; confirmationId: string }
   | { action: "restoreApplication"; projectId: string; applicationId: string; fingerprint: string }
@@ -35,6 +37,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "backupStorageUsage"; usage: BackupStorageUsage }
   | { schemaVersion: 1; action: "setBackupStorageLimit"; limitBytes: number }
   | { schemaVersion: 1; action: "backupPreparations"; projectId: string; entries: BackupPreparation[] }
+  | { schemaVersion: 1; action: "backupRetention"; projectId: string; entries: BackupRetention[] }
   | { schemaVersion: 1; action: "abandonBackupPreparation"; projectId: string; reviewId: string }
   | { schemaVersion: 1; action: "startApplication"; projectId: string; chatId: string; applicationId: string }
   | { schemaVersion: 1; action: "restoreApplication"; projectId: string; applicationId: string }
@@ -82,7 +85,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "setBackupStorageLimit") {
     keys(request, ["action", "expectedLimitBytes", "limitBytes"]);
     backupLimit(request.expectedLimitBytes); backupLimit(request.limitBytes);
-  } else if (request.action === "backupPreparations") {
+  } else if (request.action === "backupPreparations" || request.action === "backupRetention") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "abandonBackupPreparation") {
     keys(request, ["action", "projectId", "reviewId", "fingerprint"]); id(request.projectId);
@@ -142,6 +145,15 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   } else if (request.action === "setBackupStorageLimit") {
     keys(result, ["schemaVersion", "action", "limitBytes"]);
     if (result.limitBytes !== request.limitBytes) throw new Error("backup storage limit response mismatch");
+  } else if (request.action === "backupRetention") {
+    keys(result, ["schemaVersion", "action", "projectId", "entries"]);
+    if (result.projectId !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid backup retention list");
+    const seen = new Set<string>();
+    for (const raw of result.entries) {
+      const entry = object(raw); keys(entry, ["reviewId", "state", "retainedFor"]); id(entry.reviewId);
+      if (seen.has(entry.reviewId as string) || !["preparing", "ready", "abandoned"].includes(String(entry.state)) || !["currentApplication", "applicationHistory", "unfinishedPreparation", "preparedBackup", "abandonedPreparation"].includes(String(entry.retainedFor))) throw new Error("invalid backup retention entry");
+      seen.add(entry.reviewId as string);
+    }
   } else if (request.action === "backupPreparations") {
     keys(result, ["schemaVersion", "action", "projectId", "entries"]);
     if (result.projectId !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid backup preparation list");

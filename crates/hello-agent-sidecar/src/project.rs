@@ -360,6 +360,14 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn backup_retention(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        { let project = required_project(storage, project_id)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupRetention","projectId":project_id,"entries":application::review::backup::retention::summarize(&project)?}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (storage, project_id); Err(ProjectFailure::recovery("backup retention inspection unavailable on this platform")) }
+    }
+
     pub(crate) fn set_backup_storage_limit(&self, expected: u64, limit: u64) -> Result<ProjectAction, ProjectFailure> {
         if self.application_running() || self.preparation_cancel.is_some() { return Err(ProjectFailure::recovery("backup budget change requires idle processing")); }
         #[cfg(unix)]

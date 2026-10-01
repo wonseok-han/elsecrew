@@ -27,3 +27,13 @@ test("budget changes require the inspected budget and whole GiB values", () => {
   assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,limitBytes:request.limitBytes},request));
   assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,limitBytes:request.expectedLimitBytes},request));
 });
+
+test("retention replies cannot substitute another project or duplicate records", () => {
+  const request = {action:"backupRetention" as const,projectId:"project_a"};
+  const entry = {reviewId:"review_a",state:"abandoned",retainedFor:"applicationHistory"};
+  const response = {schemaVersion:1,...request,entries:[entry]};
+  assert.doesNotThrow(() => validateProjectCatalogResult(response, request));
+  assert.throws(() => validateProjectCatalogResult({...response,projectId:"project_b"}, request));
+  assert.throws(() => validateProjectCatalogResult({...response,entries:[entry,entry]}, request));
+  assert.throws(() => validateProjectCatalogResult({...response,entries:[{...entry,retainedFor:"safeToDelete"}]}, request));
+});

@@ -730,6 +730,14 @@ export const ko = {
   "m5.backup.limitInspect": "용량 확인을 눌러 현재 저장된 예산을 확인하세요.",
   "m5.backup.limitUnknown": "변경 결과를 확인하지 못했습니다. 자동으로 다시 변경하지 않습니다. 용량 확인으로 현재 예산을 다시 확인하세요.",
   "m5.backup.storageError": "복원 데이터 용량을 확인하지 못했습니다. 진행 중인 백업이 끝난 뒤 다시 확인해 주세요. 파일은 삭제하지 않았습니다.",
+  "m5.backup.retentionTitle": "이 프로젝트의 백업 보존 이유",
+  "m5.backup.retentionHelp": "기록에 남은 백업의 연결 관계입니다. 파일 존재·복원 가능 여부를 검사한 결과나 삭제 허가는 아닙니다. 이 화면에서는 삭제하지 않습니다.",
+  "m5.backup.retentionEmpty": "기록된 백업이 없습니다.",
+  "m5.backup.currentApplication": "현재 반영·복구 기록에서 사용 중",
+  "m5.backup.applicationHistory": "이전 반영 이력에 연결됨",
+  "m5.backup.unfinishedPreparation": "아직 종료하지 않은 백업 준비",
+  "m5.backup.preparedBackup": "준비된 백업 — 반영 전",
+  "m5.backup.abandonedPreparation": "준비 종료 — 파일은 보존됨",
 } as const;
 
 export type MessageKey = keyof typeof ko;
