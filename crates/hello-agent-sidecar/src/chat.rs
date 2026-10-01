@@ -208,6 +208,7 @@ impl G5Manager {
         Ok(updated)
     }
 
+    #[cfg(test)]
     pub fn prepare_chat_workspace(
         &self,
         storage: &mut Storage,

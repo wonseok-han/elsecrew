@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (누적 연결 컴파일 진단·호환성 수정)
+
+- 직전ebd8d4d의 채팅 기준 선택은 진전이다. 현재 Git/기록을 대조하고 다음 기능 구현에 필요한 누적 컴파일 진단만 수행했다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests는5.65초 PASS였으며 테스트 전용 기존 prepare_chat_workspace 래퍼 미사용 경고가 있었다. 실제 동작 테스트는 실행하지 않았다.
+- pnpm exec tsc --noEmit은 Object.hasOwn의 현행 lib 미지원2건으로 실패했다. Karpathy 지침으로 프로젝트 target/lib를 확대하지 않고 hasOwnProperty.call로 바꿨다. 동일 TypeScript 진단 재실행은 PASS했다. Rust 래퍼는 실제 caller가 chat/tests.rs뿐임을 확인해 cfg(test)로 제한했으며 이 선언 변경 뒤 Rust 재검사는 미실행이다.
+- diff check PASS. 이 결과는 UI 실측/소스 반영 안전성/최종 하네스 합격이 아니다. 디렉터리 반영·완전한 검토/확인·실제 반영/복원 UI·실제 공급자 활성화·전체 누적 검증/독립 검토는 남는다. 기존 archive 21줄 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (채팅 생성의 기준 기록 선택 연결)
 
 - 직전d2952d2의 채팅 조회는 진전이다. 현재 checkout/기존 archive를 확인하고 Karpathy 지침으로 workspace.prepareChat의 선택적 boolean applicationBaseline을 Rust/TS validator·sidecar·채팅 controller에 연결했다. 생략/false는 기존 fresh 생성이고 true만 기준 기록 생성 후 기존 unbound preparation/채팅 결속·실패 복구 흐름을 따른다. 실패를 일반 복사본으로 대체하지 않는다.
