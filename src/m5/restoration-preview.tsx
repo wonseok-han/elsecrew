@@ -8,14 +8,20 @@ export function RestorationPreview({ projectId, applicationId, disabled }: { pro
   const [page, setPage] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [started, setStarted] = useState(false);
+  const startedRef = useRef(false);
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
     epoch.current++; setPage(null); setFailed(false);
+    startedRef.current = false; setStarted(false);
     return () => { epoch.current++; };
-  }, [projectId, applicationId, disabled]);
+  }, [projectId, applicationId]);
+  useEffect(() => {
+    if (disabled && !startedRef.current) { epoch.current++; setPage(null); }
+  }, [disabled]);
   async function load(offset = 0, fingerprint: string | null = null) {
-    if (disabled || pending.current || !window.m5Projects) return;
+    if (disabled || startedRef.current || pending.current || !window.m5Projects) return;
     const generation = epoch.current;
     pending.current = true; setBusy(true); setFailed(false); setPage(null);
     const request = { action: "restorationPreview" as const, projectId, applicationId, offset, fingerprint };
@@ -27,7 +33,7 @@ export function RestorationPreview({ projectId, applicationId, disabled }: { pro
     } finally { pending.current = false; setBusy(false); }
   }
   return <section aria-label={t("m5.restore.preview")} aria-busy={busy}>
-    <button type="button" disabled={disabled || busy} onClick={() => void load()}>{t("m5.restore.preview")}</button>
+    <button type="button" disabled={disabled || busy || started} onClick={() => void load()}>{t("m5.restore.preview")}</button>
     {failed && <p role="status">{t("m5.restore.error")}</p>}
     {page && <>
       <p>{t("m5.restore.help")}</p>
@@ -35,9 +41,9 @@ export function RestorationPreview({ projectId, applicationId, disabled }: { pro
       <ul>{page.changes.map(change => <li key={change.path}>
         {t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code>
       </li>)}</ul>
-      <button type="button" disabled={disabled || busy || page.offset === 0} onClick={() => void load(page.offset - 100, page.fingerprint)}>{t("m5.restore.previous")}</button>
-      <button type="button" disabled={disabled || busy || page.offset + page.changes.length >= page.total} onClick={() => void load(page.offset + 100, page.fingerprint)}>{t("m5.restore.next")}</button>
-      <ApplicationStartControl key={page.fingerprint} request={{action:"restoreApplication",projectId,applicationId,fingerprint:page.fingerprint}} disabled={disabled || busy} />
+      <button type="button" disabled={disabled || busy || started || page.offset === 0} onClick={() => void load(page.offset - 100, page.fingerprint)}>{t("m5.restore.previous")}</button>
+      <button type="button" disabled={disabled || busy || started || page.offset + page.changes.length >= page.total} onClick={() => void load(page.offset + 100, page.fingerprint)}>{t("m5.restore.next")}</button>
+      <ApplicationStartControl key={page.fingerprint} request={{action:"restoreApplication",projectId,applicationId,fingerprint:page.fingerprint}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} />
     </>}
   </section>;
 }

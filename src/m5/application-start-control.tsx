@@ -6,7 +6,7 @@ import { validateProjectCatalogResult, type ProjectCatalogRequest, type Applicat
 type StartRequest = Extract<ProjectCatalogRequest, { action: "startApplication" | "restoreApplication" }>;
 
 /** Start once per reviewed target. A lost response requires status inspection, not replay. */
-export function ApplicationStartControl({ request, disabled }: { request: StartRequest; disabled: boolean }) {
+export function ApplicationStartControl({ request, disabled, onAttempt }: { request: StartRequest; disabled: boolean; onAttempt?: () => void }) {
   const { t } = useI18n();
   const [enabled, setEnabled] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -52,7 +52,7 @@ export function ApplicationStartControl({ request, disabled }: { request: StartR
     if (stop && !status?.applicationId) return;
     const command = stop ? { action: "cancelApplication" as const, projectId: request.projectId, applicationId: status!.applicationId! } : request;
     pending.current = true; setBusy(true); setUnknown(false);
-    if (!stop) setAttempted(true);
+    if (!stop) { setAttempted(true); onAttempt?.(); }
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(command), command);
       if (result.action === "startApplication") expectedId.current = result.applicationId;

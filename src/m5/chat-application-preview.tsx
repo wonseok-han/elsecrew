@@ -9,19 +9,28 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [started, setStarted] = useState(false);
+  const startedRef = useRef(false);
   const generation = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
     generation.current++; setPreview(null); setError(false); setConfirmation(null);
+    startedRef.current = false; setStarted(false);
     return () => { generation.current++; };
-  }, [projectId, chatId, worktreeId, disabled]);
+  }, [projectId, chatId, worktreeId]);
+  useEffect(() => {
+    if (disabled && !startedRef.current) {
+      generation.current++; setPreview(null); setConfirmation(null);
+    }
+  }, [disabled]);
   useEffect(() => {
     if (!confirmation) return;
-    const timer = setTimeout(() => setConfirmation(null), 300_000);
+    // Expiry limits admission, not the lifetime of an already submitted operation.
+    const timer = setTimeout(() => { if (!startedRef.current) setConfirmation(null); }, 300_000);
     return () => clearTimeout(timer);
   }, [confirmation]);
   async function confirmReview(cancel = false) {
-    if (disabled || pending.current || !window.m5Projects || (!cancel && !preview) || (cancel && !confirmation)) return;
+    if (disabled || startedRef.current || pending.current || !window.m5Projects || (!cancel && !preview) || (cancel && !confirmation)) return;
     const epoch = generation.current;
     pending.current = true; setBusy(true); setError(false);
     const request = cancel
@@ -38,7 +47,7 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
     finally { pending.current = false; setBusy(false); }
   }
   async function inspect(offset = 0, fingerprint: string | null = null) {
-    if (disabled || pending.current || !window.m5Projects) return;
+    if (disabled || startedRef.current || pending.current || !window.m5Projects) return;
     const epoch = generation.current;
     pending.current = true; setBusy(true); setError(false); setPreview(null); setConfirmation(null);
     const request = { action: "applicationPreviewPage" as const, projectId, chatId, offset, fingerprint };
@@ -51,7 +60,7 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
     finally { pending.current = false; setBusy(false); }
   }
   return <section aria-label={t("m5.application.chatPreview")} aria-busy={busy}>
-    <button type="button" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.application.chatPreview")}</button>
+    <button type="button" disabled={disabled || busy || started} onClick={() => void inspect()}>{t("m5.application.chatPreview")}</button>
     {error && <p role="status">{t("m5.application.previewError")}</p>}
     {preview && <>
       <p>{t("m5.application.previewHelp")}</p>
@@ -59,12 +68,12 @@ export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled
       <p>{t("m5.application.total")} {preview.total}</p>
       {preview.total === 0 && <p>{t("m5.application.noChanges")}</p>}
       <p>{preview.total === 0 ? 0 : preview.offset + 1}–{preview.offset + preview.changes.length} / {preview.total}</p>
-      <button type="button" disabled={disabled || busy || preview.offset === 0} onClick={() => void inspect(Math.max(0, preview.offset - 100), preview.fingerprint)}>{t("m5.application.previousPage")}</button>
-      <button type="button" disabled={disabled || busy || preview.offset + preview.changes.length >= preview.total} onClick={() => void inspect(preview.offset + 100, preview.fingerprint)}>{t("m5.application.nextPage")}</button>
+      <button type="button" disabled={disabled || busy || started || preview.offset === 0} onClick={() => void inspect(Math.max(0, preview.offset - 100), preview.fingerprint)}>{t("m5.application.previousPage")}</button>
+      <button type="button" disabled={disabled || busy || started || preview.offset + preview.changes.length >= preview.total} onClick={() => void inspect(preview.offset + 100, preview.fingerprint)}>{t("m5.application.nextPage")}</button>
       <ul>{preview.changes.map(change => <li key={change.path}>{t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code></li>)}</ul>
       <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
-    {confirmation && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
-    {confirmation && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} />}
+    {confirmation && !started && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
+    {confirmation && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} />}
   </section>;
 }
