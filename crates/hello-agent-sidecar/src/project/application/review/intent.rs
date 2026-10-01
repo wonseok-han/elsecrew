@@ -6,6 +6,8 @@ use confirmation::{Confirmations, PreparedApplication};
 use serde_json::json;
 use uuid::Uuid;
 
+#[cfg(target_os = "macos")]
+pub(in crate::project) mod completion;
 mod observation;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod writer;
@@ -94,10 +96,14 @@ pub(in crate::project) fn inspect(
     let pending = record.get("pendingItem");
     let completed = record.get("completedItems");
     let restored = record.get("restoredItems");
+    let item_state = matches!(
+        record["state"].as_str(),
+        Some("applying" | "applied" | "restored")
+    );
     let completed_count = match completed {
         Some(value) => {
             let items = value.as_array().ok_or_else(invalid)?;
-            if items.len() > 100_000 || pending.is_none() || record["state"] != "applying" {
+            if items.len() > 100_000 || pending.is_none() || !item_state {
                 return Err(invalid());
             }
             for (index, item) in items.iter().enumerate() {
@@ -115,11 +121,7 @@ pub(in crate::project) fn inspect(
     };
     if let Some(restored) = restored {
         let items = restored.as_array().ok_or_else(invalid)?;
-        if items.is_empty()
-            || items.len() > 100_000
-            || pending.is_none()
-            || record["state"] != "applying"
-        {
+        if items.is_empty() || items.len() > 100_000 || pending.is_none() || !item_state {
             return Err(invalid());
         }
         for (offset, item) in items.iter().enumerate() {
@@ -143,7 +145,7 @@ pub(in crate::project) fn inspect(
         return Err(invalid());
     }
     if let Some(pending) = pending {
-        if record["state"] != "applying"
+        if !item_state
             || pending
                 .as_object()
                 .is_none_or(|v| v.len() != 2 + usize::from(v.contains_key("writeJournal")))
@@ -179,6 +181,8 @@ pub(in crate::project) fn inspect(
     let phase = match record["state"].as_str() {
         Some("prepared") => "applicationPrepared",
         Some("applying") => "applicationWriting",
+        Some("applied") => "applicationApplied",
+        Some("restored") => "applicationRestored",
         Some("abandoned") => "applicationAbandoned",
         _ => return Err(invalid()),
     };
@@ -187,7 +191,11 @@ pub(in crate::project) fn inspect(
         || lock.get("worktree_path") != record.get("worktreePath")
         || lock.get("writer_run_id") != Some(&Value::Null)
         || lock.get("poisoned") != Some(&json!(false))
-        || lock.get("recovery_required") != Some(&json!(record["state"] != "abandoned"))
+        || lock.get("recovery_required")
+            != Some(&json!(matches!(
+                record["state"].as_str(),
+                Some("prepared" | "applying")
+            )))
         || lock.get("evidence") != Some(&json!({"phase":phase,"applicationId":id}))
     {
         return Err(invalid());
@@ -205,7 +213,11 @@ pub(in crate::project) fn inspect_write_item(
     expected: &Value,
     index: u64,
 ) -> Result<Value, ProjectFailure> {
-    if expected["state"] != "applying" || inspect(storage, project_id)? != *expected {
+    if !matches!(
+        expected["state"].as_str(),
+        Some("applying" | "applied" | "restored")
+    ) || inspect(storage, project_id)? != *expected
+    {
         return Err(invalid());
     }
     let review_id = expected["backup"]["header"]["reviewId"]
@@ -239,7 +251,7 @@ pub(in crate::project) fn record_first_item(
     expected: &Value,
     request_id: &str,
 ) -> Result<Value, ProjectFailure> {
-    if expected.get("pendingItem").is_some() {
+    if expected["state"] != "applying" || expected.get("pendingItem").is_some() {
         return Err(invalid());
     }
     let item = inspect_write_item(manager, storage, project_id, expected, 0)?;
@@ -326,6 +338,7 @@ pub(in crate::project) fn advance_regular_item(
     request: &str,
 ) -> Result<Value, ProjectFailure> {
     if inspect_pending_item(manager, storage, project_id)? != *expected
+        || expected["state"] != "applying"
         || expected.get("restoredItems").is_some()
         || expected["pendingItem"]["writeJournal"]["phase"] != "applied"
         || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
@@ -392,6 +405,7 @@ pub(in crate::project) fn previous_regular_item(
     request: &str,
 ) -> Result<Value, ProjectFailure> {
     if inspect_pending_item(manager, storage, project_id)? != *expected
+        || expected["state"] != "applying"
         || expected["pendingItem"]["writeJournal"]["phase"] != "restored"
         || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
             != "matchesUnappliedPair"

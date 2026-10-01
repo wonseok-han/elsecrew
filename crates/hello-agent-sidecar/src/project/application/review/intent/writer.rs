@@ -181,6 +181,23 @@ fn pair_matches(
         && image(dir, j["retainedName"].as_str().ok_or_else(invalid)?)? == *saved)
 }
 
+pub(super) fn verify_record_pair(
+    manager: &ProjectManager,
+    record: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
+    let j = journal(record)?;
+    if j["phase"] != if applied { "applied" } else { "restored" } {
+        return Err(invalid());
+    }
+    let (dir, leaf) = bound_parent(manager, record)?;
+    if !pair_matches(&dir, &leaf, record, applied)? {
+        return Err(invalid());
+    }
+    sync_capability_directory(&dir)?;
+    Ok(())
+}
+
 /// Read-only restart diagnosis. Does not turn matching bytes into execution permission.
 #[allow(dead_code)]
 pub(in crate::project) fn inspect_regular_outcome(
@@ -314,7 +331,7 @@ fn publish(
     journal: Value,
     request: &str,
 ) -> Result<Value, ProjectFailure> {
-    if inspect(storage, project_id)? != *expected {
+    if expected["state"] != "applying" || inspect(storage, project_id)? != *expected {
         return Err(invalid());
     }
     let mut project = required_project(storage, project_id)?;

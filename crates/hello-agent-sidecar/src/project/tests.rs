@@ -201,6 +201,40 @@ fn application_advances_two_files_without_losing_prior_journal() {
         intent::inspect_pending_item(&f.manager, &f.storage, &f.project_id).unwrap(),
         second
     );
+    let second = intent::completion::finish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        false,
+        "req_multi_finish",
+    )
+    .unwrap();
+    assert_eq!(second["state"], "applied");
+    assert_eq!(
+        f.storage
+            .projection_record("lock", second["lockId"].as_str().unwrap())
+            .unwrap()
+            .unwrap()["recovery_required"],
+        false
+    );
+    assert!(intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_restore_without_lock"
+    )
+    .is_err());
+    let second = intent::completion::begin_restore(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_relock",
+    )
+    .unwrap();
+    assert_eq!(second["state"], "applying");
     assert!(intent::previous_regular_item(
         &f.manager,
         &mut f.storage,
@@ -257,6 +291,31 @@ fn application_advances_two_files_without_losing_prior_journal() {
         &f.project_id,
         &restored_first,
         "req_multi_before_start"
+    )
+    .is_err());
+    let finished = intent::completion::finish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &restored_first,
+        true,
+        "req_multi_restored_finish",
+    )
+    .unwrap();
+    assert_eq!(finished["state"], "restored");
+    assert_eq!(
+        f.storage
+            .projection_record("lock", finished["lockId"].as_str().unwrap())
+            .unwrap()
+            .unwrap()["recovery_required"],
+        false
+    );
+    assert!(intent::completion::begin_restore(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &finished,
+        "req_multi_restore_twice"
     )
     .is_err());
 }

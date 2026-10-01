@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (배치 완료·복원 재입장 경계 구현)
+
+- 직전a7b43e0의 링크 구현은 진전이다. 현재 checkout과 기존 archive를 확인하고 Karpathy 지침으로 intent에 applied/restored 완료 상태와 completion 모듈을 추가했다. 마지막 항목 번호·전체 개수·순방향/복원 목록을 대조하고 모든 원본/보존 쌍을 두 차례 확인한 뒤 project/lock을 함께 갱신해 recovery 잠금을 해제한다. 동일 UID 외부 편집의 OS 배제를 보장하지 않는다.
+- 완료 상태는 조회만 허용하며 writer journal 게시와 전진/후퇴는 applying에서만 허용한다. 명시 begin_restore는 전체 applied 쌍과 blocker 부재를 재확인하고 잠금을 다시 취득한다. 완료된 기록을 쓰기 허가로 재사용하지 않는다. backup/보존 파일은 삭제하지 않는다.
+- 다중 파일 회귀에 반영 완료/잠금 해제·재취득 없는 복원 거절·명시 복원 입장·전체 복원 완료·반복 복원 거절을 작성했다. 테스트/빌드/독립 검토는 미실행이고 포맷/diff만 확인했다. 제품 IPC 미연결·미검증이다. 디렉터리, 새 반영 때 이전 완료 원장 보존/선택, 부분 적용 후 미처리 항목을 포함한 취소 복원, IPC/UI와 최종 통합 검증은 남는다. 실제 사용자 파일/계정/모델 및 main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (링크 자체 반영·복원 후보)
 
 - 직전460dbae의 역순 복원 구현은 진전이다. 현행 checkout/기존 archive를 확인하고 Karpathy 지침으로 writer image·staging만 확장해 일반 파일 외 심볼릭 링크를 연결했다. readlinkat으로 최대4096byte 링크 문자열을 읽고 symlinkat으로 새 링크를 준비하며 대상 파일을 따라 읽거나 쓰지 않는다. 링크의 executable은 false로 비교하고 기존 신원/내용·보존형 rename·복원 경로를 재사용한다.
