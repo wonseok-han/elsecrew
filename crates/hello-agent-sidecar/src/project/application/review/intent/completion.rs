@@ -109,7 +109,7 @@ fn verify_batch(
         for item in items {
             let mut selected = record.clone();
             selected["pendingItem"] = item.clone();
-            writer::verify_record_pair(manager, &selected, applied)?;
+            writer::verify_record_pair_in_scope(manager, &selected, record, applied)?;
         }
     }
     Ok(())

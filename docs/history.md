@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (폴더 보존 이동 뒤 하위 기록 경로 결속)
+
+- 직전555a573의 페이지 조회는 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 새 폴더 복원의 후속 경로 처리를 연결했다. restored인 새 directory journal의 보존 이름만 원래 조상 경로에 대응시키고 파일 자신의 leaf는 유지한다. 중첩 폴더는 원래 경로 단위로 해석하며 단순 문자열 prefix 치환은 하지 않는다.
+- 배치 완료가 개별 항목을 검사할 때 전체 복원 목록을 함께 전달해 이동된 조상 기록을 잃지 않도록 했다. no-follow 부모 열기와 root/parent inode 검증은 유지한다. canceled staging은 이동으로 취급하지 않으며 traversal·Git metadata·중복/잘못된 journal은 거절한다. 파일 이동이나 폴더 writer 활성화는 아직 없다.
+- 중첩 이동·자기 leaf 유지·비슷한 이름 분리·traversal 거절 단위 회귀를 작성했다. 실행 검증은 최종 통합으로 남기고 rustfmt/diff만 확인했다. 다음은 directory image/staging·배치의 자식 집합 대조와 반영/복원 연결이다. 전체 제품/실제 원본 쓰기 미완료, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (채팅 변경 검토 페이지 조회)
 
 - 직전753cfe2의 컴파일 수정은 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 100개 단위 읽기 전용 검토 페이지를 연결했다. 각 요청에서 기존 baseline/대상/변경 검증을 다시 수행하고 binding·change digest·snapshot digest에 결속된 fingerprint가 달라지면 다음 페이지를 거절한다. 이 값은 승인이나 쓰기 권한이 아니다.

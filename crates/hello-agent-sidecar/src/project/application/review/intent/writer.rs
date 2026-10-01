@@ -9,6 +9,7 @@ use std::ffi::CString;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
+mod relocation;
 
 fn parent(root: &Dir, path: &str) -> Result<(Dir, String), ProjectFailure> {
     let mut parts: Vec<_> = path.split('/').collect();
@@ -131,7 +132,10 @@ pub(super) fn verify_unwritten_item(
 
 // A persisted name is still data: never accept paths or unknown journal shapes.
 fn journal(record: &Value) -> Result<&Value, ProjectFailure> {
-    let value = &record["pendingItem"]["writeJournal"];
+    validate_journal(&record["pendingItem"]["writeJournal"])
+}
+
+fn validate_journal(value: &Value) -> Result<&Value, ProjectFailure> {
     let name = value["retainedName"].as_str().ok_or_else(invalid)?;
     let suffix = name
         .strip_prefix(".hello-agent-apply-")
@@ -163,6 +167,14 @@ fn journal(record: &Value) -> Result<&Value, ProjectFailure> {
 }
 
 fn bound_parent(manager: &ProjectManager, record: &Value) -> Result<(Dir, String), ProjectFailure> {
+    bound_parent_in_scope(manager, record, record)
+}
+
+fn bound_parent_in_scope(
+    manager: &ProjectManager,
+    record: &Value,
+    scope: &Value,
+) -> Result<(Dir, String), ProjectFailure> {
     let journal = journal(record)?;
     let binding = &record["binding"];
     let source = manager.open_source_repository(Path::new(
@@ -178,9 +190,12 @@ fn bound_parent(manager: &ProjectManager, record: &Value) -> Result<(Dir, String
     let root = source._root.dir_metadata().map_err(|_| invalid())?;
     let (dir, leaf) = parent(
         &source._root,
-        record["pendingItem"]["item"]["path"]
-            .as_str()
-            .ok_or_else(invalid)?,
+        &relocation::path(
+            scope,
+            record["pendingItem"]["item"]["path"]
+                .as_str()
+                .ok_or_else(invalid)?,
+        )?,
     )?;
     let meta = dir.dir_metadata().map_err(|_| invalid())?;
     if journal["rootIdentity"] != json!([root.dev(), root.ino()])
@@ -217,11 +232,20 @@ pub(super) fn verify_record_pair(
     record: &Value,
     applied: bool,
 ) -> Result<(), ProjectFailure> {
+    verify_record_pair_in_scope(manager, record, record, applied)
+}
+
+pub(super) fn verify_record_pair_in_scope(
+    manager: &ProjectManager,
+    record: &Value,
+    scope: &Value,
+    applied: bool,
+) -> Result<(), ProjectFailure> {
     let j = journal(record)?;
     if j["phase"] != if applied { "applied" } else { "restored" } {
         return Err(invalid());
     }
-    let (dir, leaf) = bound_parent(manager, record)?;
+    let (dir, leaf) = bound_parent_in_scope(manager, record, scope)?;
     if !pair_matches(&dir, &leaf, record, applied)? {
         return Err(invalid());
     }
