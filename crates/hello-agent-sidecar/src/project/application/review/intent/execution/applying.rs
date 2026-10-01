@@ -41,8 +41,8 @@ impl ApplyingBatch {
         })
     }
 
-    /// At most one file writer per tick. Cancellation is between steps, not
-    /// inside a large file copy or archive read. Failures permanently stop this owner.
+    /// At most one file writer per tick. Copy chunks observe the supplied flag;
+    /// archive reads remain synchronous. Failures permanently stop this owner.
     pub(in crate::project) fn advance(
         &mut self,
         manager: &ProjectManager,
@@ -71,12 +71,13 @@ impl ApplyingBatch {
         } else if self.current["state"] == "applying" {
             let pending = &self.current["pendingItem"];
             if pending.get("writeJournal").is_none() {
-                writer::write_first_regular_item(
+                writer::write_item_cancellable(
                     manager,
                     storage,
                     &self.project_id,
                     &self.current,
                     &self.request,
+                    canceled,
                 )?
             } else if pending["writeJournal"]["phase"] == "applied" {
                 if pending["index"].as_u64().ok_or_else(invalid)? + 1

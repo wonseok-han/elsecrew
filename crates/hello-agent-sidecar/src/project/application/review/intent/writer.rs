@@ -9,6 +9,7 @@ use std::ffi::CString;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 mod directories;
 mod relocation;
 
@@ -512,6 +513,25 @@ pub(in crate::project) fn write_first_regular_item(
     expected: &Value,
     request: &str,
 ) -> Result<Value, ProjectFailure> {
+    write_item_cancellable(
+        manager,
+        storage,
+        project_id,
+        expected,
+        request,
+        &AtomicBool::new(false),
+    )
+}
+
+pub(super) fn write_item_cancellable(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+    canceled: &AtomicBool,
+) -> Result<Value, ProjectFailure> {
+    check_canceled(canceled)?;
     if inspect_pending_item(manager, storage, project_id)? != *expected
         || expected["pendingItem"].get("writeJournal").is_some()
     {
@@ -595,8 +615,7 @@ pub(in crate::project) fn write_first_regular_item(
             }
             let mut output = File::from_std(unsafe { std::fs::File::from_raw_fd(fd) });
             let size = item["after"]["size"].as_u64().ok_or_else(invalid)?;
-            let copied = std::io::copy(&mut (&mut input).take(size + 1), &mut output)
-                .map_err(|_| invalid())?;
+            let copied = copy_cancellable(&mut (&mut input).take(size + 1), &mut output, canceled)?;
             let mode = if item["before"].is_null() {
                 0o644
             } else {
@@ -623,6 +642,7 @@ pub(in crate::project) fn write_first_regular_item(
         journal["stagedImage"] = staged;
     }
     sync_capability_directory(&dir)?;
+    check_canceled(canceled)?;
     journal["phase"] = json!("staged");
     current = publish(storage, project_id, &current, journal.clone(), request)?;
     let reopened = open_absolute_directory_capability(root_path)?;
@@ -639,6 +659,7 @@ pub(in crate::project) fn write_first_regular_item(
     let target = CString::new(leaf.as_str()).map_err(|_| invalid())?;
     let saved = CString::new(retained.as_str()).map_err(|_| invalid())?;
     directories::verify(&dir, &leaf, &current, &current, false, false)?;
+    check_canceled(canceled)?;
     let status = unsafe {
         if item["after"].is_null() {
             libc::renameatx_np(
@@ -681,4 +702,67 @@ pub(in crate::project) fn write_first_regular_item(
     }
     journal["phase"] = json!("applied");
     publish(storage, project_id, &current, journal, request)
+}
+
+fn check_canceled(canceled: &AtomicBool) -> Result<(), ProjectFailure> {
+    if canceled.load(Ordering::Acquire) {
+        return Err(ProjectFailure::recovery(
+            "application canceled; preserve staging for explicit recovery",
+        ));
+    }
+    Ok(())
+}
+
+fn copy_cancellable(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    canceled: &AtomicBool,
+) -> Result<u64, ProjectFailure> {
+    let mut buffer = [0u8; 65536];
+    let mut count = 0u64;
+    loop {
+        check_canceled(canceled)?;
+        let n = match input.read(&mut buffer) {
+            Ok(n) => n,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(invalid()),
+        };
+        check_canceled(canceled)?;
+        if n == 0 {
+            return Ok(count);
+        }
+        output.write_all(&buffer[..n]).map_err(|_| invalid())?;
+        count = count.checked_add(n as u64).ok_or_else(invalid)?;
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    #[test]
+    fn cancellation_after_read_never_writes_that_chunk() {
+        struct CancelingReader<'a>(&'a AtomicBool);
+        impl Read for CancelingReader<'_> {
+            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+                bytes[0] = 42;
+                self.0.store(true, Ordering::Release);
+                Ok(1)
+            }
+        }
+        let canceled = AtomicBool::new(false);
+        let mut output = Vec::new();
+        assert!(copy_cancellable(&mut CancelingReader(&canceled), &mut output, &canceled).is_err());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn normal_copy_keeps_exact_bytes_across_chunks() {
+        let bytes = vec![13u8; 131_073];
+        let mut output = Vec::new();
+        assert_eq!(
+            copy_cancellable(&mut bytes.as_slice(), &mut output, &AtomicBool::new(false)).unwrap(),
+            bytes.len() as u64
+        );
+        assert_eq!(output, bytes);
+    }
 }
