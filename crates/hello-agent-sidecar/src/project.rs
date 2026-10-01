@@ -330,6 +330,7 @@ impl Drop for StreamingGitChild {
 }
 
 pub struct ProjectManager {
+    pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
     application_job: Option<application::review::intent::execution::ApplyingBatch>,
     #[cfg(unix)]
@@ -375,6 +376,10 @@ impl ProjectManager {
         self.application_confirmations = confirmations;
         let owner = result?;
         let record = owner.record().clone();
+        self.application_cancel.begin(
+            record["binding"]["projectId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application project"))?,
+            record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
+        );
         self.application_job = Some(owner);
         Ok(record)
     }
@@ -384,7 +389,8 @@ impl ProjectManager {
         if let Some(mut owner) = self.application_job.take() {
             // Failure leaves the durable application fence for explicit recovery;
             // never infer completion from dropping the session owner.
-            if matches!(owner.advance(self, storage, &std::sync::atomic::AtomicBool::new(false)), Ok(false)) {
+            let Some(canceled) = self.application_cancel.flag() else { return; };
+            if matches!(owner.advance(self, storage, &canceled), Ok(false)) {
                 self.application_job = Some(owner);
             }
         }
@@ -393,6 +399,7 @@ impl ProjectManager {
     }
 
     pub(crate) fn stop_application(&mut self) {
+        self.application_cancel.stop();
         #[cfg(target_os = "macos")]
         { self.application_job = None; }
         #[cfg(unix)]
@@ -404,8 +411,9 @@ impl ProjectManager {
     pub(crate) fn cancel_application(&mut self, project_id: &str, application_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(target_os = "macos")]
         {
-            let owner = self.application_job.as_ref().ok_or_else(|| ProjectFailure::recovery("application is not running"))?;
-            if owner.record()["applicationId"] != application_id || owner.record()["binding"]["projectId"] != project_id {
+            let matches_owner = self.application_job.as_ref().is_some_and(|owner|
+                owner.record()["applicationId"] == application_id && owner.record()["binding"]["projectId"] == project_id);
+            if !matches_owner && !self.application_cancel.canceled(project_id, application_id) {
                 return Err(ProjectFailure::recovery("application cancellation identity changed"));
             }
             self.stop_application();
@@ -600,6 +608,7 @@ impl ProjectManager {
         let (save_staging_root, save_staging_dir) =
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
+            application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
             application_job: None,
             #[cfg(unix)]

@@ -3,6 +3,7 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
+mod application_cancel;
 mod chat;
 mod project;
 #[cfg(target_os = "macos")]
@@ -324,6 +325,8 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
     sidecar.start_admission(database_path);
 
     let (sender, receiver) = mpsc::sync_channel(1);
+    let application_cancel = sidecar.application_cancel.clone();
+    let input_instance = sidecar.ready.sidecar_instance_id.clone();
     thread::spawn(move || {
         let mut input = BufReader::with_capacity(8 * 1024, input);
         loop {
@@ -333,7 +336,22 @@ fn serve_stdio_with_identity_and_runtime<R: Read + Send + 'static, W: Write>(
                 Err(error) => InputMessage::Error(error),
             };
             let finished = !matches!(message, InputMessage::Line(_));
-            if sender.send(message).is_err() || finished {
+            if let InputMessage::Line(line) = &message {
+                application_cancel.observe(line, &input_instance);
+            } else {
+                application_cancel.stop();
+            }
+            let sent = match sender.try_send(message) {
+                Ok(()) => true,
+                Err(mpsc::TrySendError::Full(message)) => {
+                    // Bound memory without letting a blocked reader hide a later
+                    // stop request from an in-flight source copy.
+                    application_cancel.stop();
+                    sender.send(message).is_ok()
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => false,
+            };
+            if !sent || finished {
                 break;
             }
         }
@@ -524,6 +542,7 @@ enum AdmissionState {
 }
 
 struct SidecarSession {
+    application_cancel: application_cancel::ApplicationCancel,
     ready: ReadyPayloadV1,
     started_at: String,
     admission: AdmissionState,
@@ -538,6 +557,7 @@ impl SidecarSession {
             G5D_PRODUCT_CAPABILITIES_V1
         };
         Self {
+            application_cancel: Default::default(),
             ready: ReadyPayloadV1 {
                 protocol_version: PROTOCOL_VERSION,
                 sidecar_schema_version: SIDECAR_SCHEMA_VERSION,
@@ -633,10 +653,13 @@ impl SidecarSession {
             .expect("finished admission worker")
             .join();
         self.admission = match outcome {
-            Ok(Ok(sidecar)) => AdmissionState::Ready {
-                completed_at: now_utc(),
-                sidecar: Box::new(sidecar),
-            },
+            Ok(Ok(mut sidecar)) => {
+                sidecar.projects.application_cancel = self.application_cancel.clone();
+                AdmissionState::Ready {
+                    completed_at: now_utc(),
+                    sidecar: Box::new(sidecar),
+                }
+            }
             Ok(Err(_)) | Err(_) => AdmissionState::Failed {
                 completed_at: now_utc(),
             },
