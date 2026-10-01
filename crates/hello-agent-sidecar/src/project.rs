@@ -410,12 +410,13 @@ impl ProjectManager {
             return Err(ProjectFailure::recovery("application requires an idle workspace"));
         }
         let project = self.application_confirmations.project_for_token(token)?;
-        self.application_cancel.begin(&project, token);
-        self.preparation_cancel = self.application_cancel.flag();
+        self.preparation_cancel = Some(self.application_cancel.preparation_flag(&project, token)
+            .ok_or_else(|| ProjectFailure::recovery("application confirmation cancellation slot missing"))?);
         let mut confirmations = std::mem::take(&mut self.application_confirmations);
         let result = confirmations.prepare_backup(self, storage, token, request)
             .and_then(|prepared| application::review::intent::execution::ApplyingBatch::start(self, storage, &mut confirmations, prepared, request));
         self.application_confirmations = confirmations;
+        if result.is_err() { self.application_confirmations.cancel(); }
         self.preparation_cancel = None;
         let owner = result?;
         let record = owner.record().clone();
@@ -507,6 +508,7 @@ impl ProjectManager {
             let opened = owner.open(self, storage, target, saved["reviewId"].as_str().ok_or_else(|| ProjectFailure::dirty("review identity missing"))?);
             let result = opened.and_then(|(token, plan)| {
                 let page = plan.preview_page(0, Some(fingerprint))?;
+                self.application_cancel.begin(project_id, &token);
                 Ok(ProjectAction { result: serde_json::json!({"schemaVersion":1,"action":"openApplicationConfirmation","projectId":project_id,"chatId":chat_id,"confirmationId":token,"worktreeId":address.worktree_id,"total":page["total"],"expiresInSeconds":300}), ..Default::default() })
             });
             if result.is_err() { owner.cancel(); }

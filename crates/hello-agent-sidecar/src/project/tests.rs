@@ -4,12 +4,32 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_canceled_before_start_never_reserves_backup_or_resets_token() {
+    use application::review::{confirmation::Confirmations, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    f.manager.application_confirmations = confirmations;
+    f.manager.application_cancel.begin(&f.project_id, &token);
+    let before = required_project(&f.storage, &f.project_id).unwrap();
+    assert!(f.manager.application_cancel.cancel_confirmation(&token));
+    assert!(f.manager.start_confirmed_application(&mut f.storage, &token, "req_early_cancel").is_err());
+    assert!(!f.manager.application_running());
+    assert!(f.manager.preparation_cancel.is_none());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+    assert!(f.manager.start_confirmed_application(&mut f.storage, &token, "req_early_retry").is_err());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
     use application::review::{confirmation::Confirmations, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;
+    f.manager.application_cancel.begin(&f.project_id, &token);
     let record = f.manager.start_confirmed_application(&mut f.storage, &token, "req_scheduler_start").unwrap();
     assert!(f.manager.application_running());
     assert!(f.manager.cancel_application(&f.project_id, "application_wrong").is_err());
@@ -33,6 +53,7 @@ fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() 
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;
+    f.manager.application_cancel.begin(&f.project_id, &token);
     let record = f.manager.start_confirmed_application(&mut f.storage, &token, "req_restore_fixture").unwrap();
     f.manager.stop_application();
     let preview = f.manager.restoration_preview(&f.storage, &f.project_id, record["applicationId"].as_str().unwrap(), 0, None).unwrap();

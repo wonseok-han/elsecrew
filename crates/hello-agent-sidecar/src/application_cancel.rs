@@ -47,6 +47,21 @@ impl ApplicationCancel {
             .map(|s| s.flag.clone())
     }
 
+    /// Opening confirmation registers this flag before exposing its token.
+    /// Starting preparation must reuse it, never clear an earlier stop.
+    pub(crate) fn preparation_flag(&self, project: &str, token: &str) -> Option<Arc<AtomicBool>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .filter(|slot| {
+                slot.project == project
+                    && slot.application == token
+                    && slot.confirmation.as_deref() == Some(token)
+            })
+            .map(|slot| slot.flag.clone())
+    }
+
     pub(crate) fn stop(&self) {
         if let Some(flag) = self.flag() {
             flag.store(true, Ordering::Release);
@@ -123,6 +138,31 @@ impl ApplicationCancel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancel_before_preparation_is_retained_and_target_bound() {
+        let cancel = ApplicationCancel::default();
+        assert!(cancel
+            .preparation_flag("project", "confirmation_early")
+            .is_none());
+        cancel.begin("project", "confirmation_early");
+        assert!(cancel.cancel_confirmation("confirmation_early"));
+        assert!(cancel
+            .preparation_flag("project", "confirmation_early")
+            .unwrap()
+            .load(Ordering::Acquire));
+        assert!(cancel
+            .preparation_flag("other", "confirmation_early")
+            .is_none());
+        assert!(cancel
+            .preparation_flag("project", "confirmation_other")
+            .is_none());
+        cancel.begin("project", "confirmation_new");
+        assert!(!cancel.cancel_confirmation("confirmation_early"));
+        assert!(!cancel
+            .preparation_flag("project", "confirmation_new")
+            .unwrap()
+            .load(Ordering::Acquire));
+    }
     #[test]
     fn preparation_cancel_survives_promotion_without_resetting_flag() {
         let cancel = ApplicationCancel::default();
