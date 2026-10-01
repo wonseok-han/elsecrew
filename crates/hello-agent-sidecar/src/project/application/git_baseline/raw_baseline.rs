@@ -1,5 +1,5 @@
 //! Raw committed-blob comparison, without checkout/filter/textconv transformations.
-use super::super::{capture_once, failure, stamp, Entry, SourceInventory, MAX_BYTES};
+use super::super::{capture_once_checked, failure, stamp, Entry, SourceInventory, MAX_BYTES};
 use super::{capture_index_baseline, GitIndexBaseline};
 use crate::project::{
     open_absolute_directory_capability, validated_oid, ProjectFailure, ProjectManager,
@@ -20,7 +20,9 @@ pub(in crate::project) struct SourceBaseline {
 }
 
 impl SourceBaseline {
-    pub(in crate::project::application) fn inventory(&self) -> &SourceInventory { &self.raw }
+    pub(in crate::project::application) fn inventory(&self) -> &SourceInventory {
+        &self.raw
+    }
     pub(in crate::project::application) fn tracked_paths(&self) -> impl Iterator<Item = &str> {
         self.index.entries.keys().map(String::as_str)
     }
@@ -31,16 +33,21 @@ pub(in crate::project) fn capture_clean_baseline(
     manager: &ProjectManager,
     source: &SourceRepository,
 ) -> Result<SourceBaseline, ProjectFailure> {
+    let check = || manager.check_application_preparation();
+    check()?;
     let index = capture_index_baseline(manager, source)?;
-    let raw = capture_once(&source._root)?;
+    let raw = capture_once_checked(&source._root, &check)?;
     verify_root_path(source, &raw)?;
     verify_blobs(manager, source, &index, &raw)?;
-    if raw != capture_once(&source._root)? || index != capture_index_baseline(manager, source)? {
+    if raw != capture_once_checked(&source._root, &check)?
+        || index != capture_index_baseline(manager, source)?
+    {
         return Err(ProjectFailure::dirty(
             "source changed while recording its baseline",
         ));
     }
     verify_root_path(source, &raw)?;
+    check()?;
     Ok(SourceBaseline {
         source_root: crate::project::canonical_protocol_path_without_existing(
             &source.canonical_root,
@@ -91,6 +98,7 @@ fn verify_blobs(
     let mut output = BufReader::new(child.stdout.take().ok_or_else(failure)?);
     let mut remaining = MAX_BYTES;
     for (path, entry) in &index.entries {
+        manager.check_application_preparation()?;
         let actual = raw
             .entries
             .get(path)
@@ -108,12 +116,13 @@ fn verify_blobs(
         }
         writeln!(input, "{}", entry.oid).map_err(|_| failure())?;
         input.flush().map_err(|_| failure())?;
-        compare_blob(
+        compare_blob_checked(
             &mut output,
             &entry.oid,
             &source.object_format,
             actual,
             &mut remaining,
+            &|| manager.check_application_preparation(),
         )?;
     }
     drop(input);
@@ -129,6 +138,7 @@ fn verify_blobs(
     Ok(())
 }
 
+#[cfg(test)]
 fn compare_blob<R: BufRead>(
     output: &mut R,
     oid: &str,
@@ -136,6 +146,18 @@ fn compare_blob<R: BufRead>(
     actual: &Entry,
     remaining: &mut u64,
 ) -> Result<(), ProjectFailure> {
+    compare_blob_checked(output, oid, format, actual, remaining, &|| Ok(()))
+}
+
+fn compare_blob_checked<R: BufRead>(
+    output: &mut R,
+    oid: &str,
+    format: &str,
+    actual: &Entry,
+    remaining: &mut u64,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
+    check()?;
     let mut header = Vec::new();
     output
         .by_ref()
@@ -176,10 +198,12 @@ fn compare_blob<R: BufRead>(
     git_sha256.update(object_header.as_bytes());
     let mut buffer = vec![0; 64 * 1024];
     while left > 0 {
+        check()?;
         let count = left.min(buffer.len() as u64) as usize;
         output
             .read_exact(&mut buffer[..count])
             .map_err(|_| failure())?;
+        check()?;
         hash.update(&buffer[..count]);
         git_sha1.update(&buffer[..count]);
         git_sha256.update(&buffer[..count]);

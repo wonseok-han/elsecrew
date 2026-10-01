@@ -74,15 +74,26 @@ fn open(root: &Dir, name: &str, directory: bool) -> Result<File, ProjectFailure>
 // Kept private and unconnected until HEAD/index comparison and durable binding exist.
 #[allow(dead_code)]
 pub(super) fn capture(root: &Dir) -> Result<SourceInventory, ProjectFailure> {
-    let first = capture_once(root)?;
-    let second = capture_once(root)?;
+    capture_checked(root, &|| Ok(()))
+}
+
+fn capture_checked(
+    root: &Dir,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<SourceInventory, ProjectFailure> {
+    let first = capture_once_checked(root, check)?;
+    let second = capture_once_checked(root, check)?;
     if first != second {
         return Err(failure());
     }
     Ok(first)
 }
 
-fn capture_once(root: &Dir) -> Result<SourceInventory, ProjectFailure> {
+fn capture_once_checked(
+    root: &Dir,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<SourceInventory, ProjectFailure> {
+    check()?;
     let metadata = root.dir_metadata().map_err(|_| failure())?;
     let mut inventory = SourceInventory {
         root_stamp: stamp(&metadata),
@@ -93,7 +104,7 @@ fn capture_once(root: &Dir) -> Result<SourceInventory, ProjectFailure> {
         bytes: MAX_BYTES,
         paths: MAX_PATH_BYTES,
     };
-    scan(root, "", 0, &mut inventory.entries, &mut budget)?;
+    scan(root, "", 0, &mut inventory.entries, &mut budget, check)?;
     if stamp(&metadata) != stamp(&root.dir_metadata().map_err(|_| failure())?) {
         return Err(failure());
     }
@@ -106,12 +117,15 @@ fn scan(
     depth: usize,
     entries: &mut BTreeMap<String, Entry>,
     budget: &mut Budget,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
 ) -> Result<(), ProjectFailure> {
+    check()?;
     if depth > MAX_DEPTH {
         return Err(failure());
     }
     let before = root.dir_metadata().map_err(|_| failure())?;
     for item in root.entries().map_err(|_| failure())? {
+        check()?;
         let name = item.map_err(|_| failure())?.file_name();
         let name = name.to_str().ok_or_else(failure)?;
         if prefix.is_empty() && name == ".git" {
@@ -157,7 +171,14 @@ fn scan(
                 return Err(failure());
             }
             let child = Dir::from_std_file(opened.into_std());
-            scan(&child, &format!("{path}/"), depth + 1, entries, budget)?;
+            scan(
+                &child,
+                &format!("{path}/"),
+                depth + 1,
+                entries,
+                budget,
+                check,
+            )?;
             (2, 0, [0; 32])
         } else if meta.is_file() && meta.nlink() == 1 {
             let mut opened = open(root, name, false)?;
@@ -171,7 +192,9 @@ fn scan(
             let mut bytes = vec![0u8; 64 * 1024];
             let mut size = 0u64;
             loop {
+                check()?;
                 let count = opened.read(&mut bytes).map_err(|_| failure())?;
+                check()?;
                 if count == 0 {
                     break;
                 }
@@ -216,6 +239,26 @@ fn scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canceled_inventory_stops_between_chunks_without_changing_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large");
+        std::fs::write(&path, vec![5u8; 256 * 1024]).unwrap();
+        let root = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let calls = std::cell::Cell::new(0usize);
+        let check = || {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 6 {
+                Err(ProjectFailure::recovery("test cancellation"))
+            } else {
+                Ok(())
+            }
+        };
+        let error = capture_checked(&root, &check).unwrap_err();
+        assert_eq!(error.detail, "test cancellation");
+        assert_eq!(calls.get(), 6);
+        assert_eq!(std::fs::read(path).unwrap(), vec![5u8; 256 * 1024]);
+    }
     use cap_std::ambient_authority;
     use std::fs;
     use std::os::unix::ffi::OsStrExt;

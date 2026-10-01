@@ -1,6 +1,5 @@
 //! Read-only project review candidate. Not an approval ticket or write capability.
 use super::{
-    capture,
     git_baseline::raw_baseline::{capture_clean_baseline, receipt},
     Entry, SourceInventory,
 };
@@ -232,7 +231,7 @@ pub(in crate::project) fn prepare_target(
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
     let workspace = manager.worktree_capability(&active)?;
-    let snapshot = capture(&workspace)?;
+    let snapshot = super::capture_checked(&workspace, &|| manager.check_application_preparation())?;
     // Snapshot files are materialized with Git's 0644/0755 modes. Other chmod
     // changes have no supported application semantics yet; never omit them.
     for entry in snapshot.entries.values() {
@@ -299,7 +298,7 @@ pub(in crate::project) fn prepare_target(
     }
     // Source entries not tracked by Git are never inferred to be deletions.
     // Existing directories remain; only new directories appear as additions.
-    if baseline != capture_clean_baseline(manager, &source)? || snapshot != capture(&workspace)? {
+    if baseline != capture_clean_baseline(manager, &source)? || snapshot != super::capture_checked(&workspace, &|| manager.check_application_preparation())? {
         return Err(ProjectFailure::dirty(
             "source or snapshot changed during review",
         ));

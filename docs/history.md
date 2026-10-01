@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (원본 기준·작업 복사본 읽기의 준비 취소 연결)
+
+- 기준f1c6616에서 Karpathy 지침으로 raw inventory의 양쪽 관측·디렉터리 항목·64KiB 읽기에 취소 callback을 전달했다. 기존 capture 호출은 no-op callback을 사용하고 반영 준비의 source baseline/작업 복사본 비교만 manager의 scoped 준비 신호를 사용한다. 기존 두 pass·신원/내용/예산 검증은 유지한다.
+- committed blob 비교도 파일별·청크별 준비 취소를 확인하도록 연결했다. 취소는 기존 Git child 소유권 Drop/종료 처리를 따르며 읽기/쓰기/시스템 호출 자체를 선점하지 않는다. Git index 수집/receipt 검증 등 아직 확인점이 없는 하위 경로는 즉시 취소를 보장하지 않는다.
+- 청크 사이 취소 시 같은 오류 전달·후속 읽기 중단·파일 무변경 회귀를 작성했다. 포맷/diff만 검사하고 컴파일/실행·독립 검토는 통합에 남긴다. 전체 제품/공급자 활성화·Windows/G6/출시 검증은 여전히 남고 제품 쓰기는 비활성이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (반영·복원 실행 오류 상세 연결)
 
 - 기준27c455e에서 Karpathy 지침으로 poll에서 버리던 ProjectFailure를 현재 세션에 보관하고 exact project/application 상태 조회에만 연결했다. 새 실행에서 지우며 durable 원장·복구 잠금을 오류 상세로 대체하지 않는다. code와 최대2,048문자 detail만 전달하고 다른 대상/현재 running 상태에는 노출하지 않는다.
