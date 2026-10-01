@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (미처리 구간 취소·부분 반영 복원)
+
+- 직전ae752dd의 배치 완료/복원 재입장 구현은 진전이다. 현재 checkout/기존 archive를 대조하고 Karpathy 지침으로 부분 반영 뒤 아직 journal이 없는 현재 항목부터의 구간을 취소하는 경로를 추가했다. unstartedFrom 경계를 저장하고 완료 prefix의 마지막 항목으로 복원 대상을 옮기며 파일 자체는 변경하지 않는다.
+- 미처리 경계와 completed/restored 수를 대조하고 정방향 재진입을 거절한다. 최종 복원 완료는 written prefix의 before/after 쌍 외에 미처리 tail도 archive의 before 상태와 대조한다. 준비 journal이 있는 현재 항목·첫 항목도 미시작인 별도 상황은 이 경로로 임의 승격하지 않는다.
+- 기존 두 파일 fixture를 재사용해 첫 파일만 반영한 뒤 tail 취소→첫 파일 복원→완료 및 두 번째 파일 미생성 회귀를 작성했다. 테스트/빌드/독립 검토는 사용자 지시대로 미실행, 포맷/diff만 확인한다. 제품 미연결·미검증 상태이며 준비 도중 실패 복구·디렉터리·이전 완료 기록 수명·IPC/UI·통합 검증은 남는다. 실제 사용자 파일/계정/모델/main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (배치 완료·복원 재입장 경계 구현)
 
 - 직전a7b43e0의 링크 구현은 진전이다. 현재 checkout과 기존 archive를 확인하고 Karpathy 지침으로 intent에 applied/restored 완료 상태와 completion 모듈을 추가했다. 마지막 항목 번호·전체 개수·순방향/복원 목록을 대조하고 모든 원본/보존 쌍을 두 차례 확인한 뒤 project/lock을 함께 갱신해 recovery 잠금을 해제한다. 동일 UID 외부 편집의 OS 배제를 보장하지 않는다.

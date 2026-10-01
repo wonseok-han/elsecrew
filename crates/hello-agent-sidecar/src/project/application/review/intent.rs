@@ -96,6 +96,7 @@ pub(in crate::project) fn inspect(
     let pending = record.get("pendingItem");
     let completed = record.get("completedItems");
     let restored = record.get("restoredItems");
+    let unstarted = record.get("unstartedFrom");
     let item_state = matches!(
         record["state"].as_str(),
         Some("applying" | "applied" | "restored")
@@ -119,6 +120,19 @@ pub(in crate::project) fn inspect(
         }
         None => 0,
     };
+    if let Some(boundary) = unstarted {
+        let boundary = boundary.as_u64().ok_or_else(invalid)?;
+        let restored_count = restored.and_then(Value::as_array).map_or(0, Vec::len) as u64;
+        if boundary == 0
+            || boundary
+                >= record["backup"]["header"]["count"]
+                    .as_u64()
+                    .ok_or_else(invalid)?
+            || boundary != completed_count + restored_count + 1
+        {
+            return Err(invalid());
+        }
+    }
     if let Some(restored) = restored {
         let items = restored.as_array().ok_or_else(invalid)?;
         if items.is_empty() || items.len() > 100_000 || pending.is_none() || !item_state {
@@ -139,6 +153,7 @@ pub(in crate::project) fn inspect(
             != 7 + usize::from(pending.is_some())
                 + usize::from(completed.is_some())
                 + usize::from(restored.is_some())
+                + usize::from(unstarted.is_some())
     }) || record["version"] != 1
         || record["binding"]["projectId"] != project_id
     {
@@ -340,6 +355,7 @@ pub(in crate::project) fn advance_regular_item(
     if inspect_pending_item(manager, storage, project_id)? != *expected
         || expected["state"] != "applying"
         || expected.get("restoredItems").is_some()
+        || expected.get("unstartedFrom").is_some()
         || expected["pendingItem"]["writeJournal"]["phase"] != "applied"
         || writer::inspect_regular_outcome(manager, storage, project_id)?["comparison"]
             != "matchesAppliedPair"
@@ -380,6 +396,66 @@ pub(in crate::project) fn advance_regular_item(
             aggregate_id: project_id.to_owned(),
             operation_id: format!(
                 "op_{}_item_{index}_pending",
+                expected["applicationId"].as_str().ok_or_else(invalid)?
+            ),
+            request_id: Some(request.to_owned()),
+            payload: project,
+        }],
+        &[
+            ("project", project_id, revision),
+            ("lock", lock_id, lock_revision),
+        ],
+    )?;
+    Ok(next)
+}
+
+/// Cancel the untouched tail after a completed prefix. No filesystem mutation:
+/// an item with any writer journal is not known-unstarted and is refused here.
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub(in crate::project) fn cancel_unstarted_tail(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if expected["state"] != "applying"
+        || inspect_pending_item(manager, storage, project_id)? != *expected
+        || expected["pendingItem"].get("writeJournal").is_some()
+        || expected.get("restoredItems").is_some()
+        || expected.get("unstartedFrom").is_some()
+    {
+        return Err(invalid());
+    }
+    let boundary = expected["pendingItem"]["index"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let mut completed = expected["completedItems"]
+        .as_array()
+        .ok_or_else(invalid)?
+        .clone();
+    let previous = completed.pop().ok_or_else(invalid)?;
+    let mut next = expected.clone();
+    next["unstartedFrom"] = json!(boundary);
+    next["completedItems"] = json!(completed);
+    next["pendingItem"] = previous;
+    let mut project = required_project(storage, project_id)?;
+    let revision = project["last_event_sequence"]
+        .as_u64()
+        .ok_or_else(invalid)?;
+    let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
+    let lock = storage
+        .projection_record("lock", lock_id)?
+        .ok_or_else(invalid)?;
+    let lock_revision = lock["last_event_sequence"].as_u64().ok_or_else(invalid)?;
+    project.insert("application_intent".into(), next.clone());
+    storage.upsert_projection_records_atomic_checked(
+        vec![crate::storage::ProjectionUpsert {
+            aggregate_type: "project",
+            aggregate_id: project_id.to_owned(),
+            operation_id: format!(
+                "op_{}_cancel_tail_{boundary}",
                 expected["applicationId"].as_str().ok_or_else(invalid)?
             ),
             request_id: Some(request.to_owned()),

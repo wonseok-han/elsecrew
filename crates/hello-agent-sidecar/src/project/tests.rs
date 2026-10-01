@@ -87,6 +87,17 @@ fn application_link_roundtrip_never_changes_target_file() {
 #[cfg(target_os = "macos")]
 #[test]
 fn application_advances_two_files_without_losing_prior_journal() {
+    application_two_file_roundtrip(false);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn application_cancels_unstarted_tail_and_restores_only_written_prefix() {
+    application_two_file_roundtrip(true);
+}
+
+#[cfg(target_os = "macos")]
+fn application_two_file_roundtrip(cancel_tail: bool) {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();
     let active = f
@@ -172,6 +183,47 @@ fn application_advances_two_files_without_losing_prior_journal() {
         "req_multi_stale"
     )
     .is_err());
+    if cancel_tail {
+        let cancel = intent::cancel_unstarted_tail(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &second,
+            "req_cancel_tail",
+        )
+        .unwrap();
+        assert_eq!(cancel["unstartedFrom"], 1);
+        assert!(!f.source.join("src/new.txt").exists());
+        assert!(intent::advance_regular_item(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &cancel,
+            "req_cancel_no_forward"
+        )
+        .is_err());
+        let restored = intent::writer::restore_first_regular_item(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &cancel,
+            "req_cancel_restore",
+        )
+        .unwrap();
+        let finished = intent::completion::finish(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &restored,
+            true,
+            "req_cancel_finish",
+        )
+        .unwrap();
+        assert_eq!(finished["state"], "restored");
+        assert_eq!(finished["unstartedFrom"], 1);
+        assert!(!f.source.join("src/new.txt").exists());
+        return;
+    }
     let second = intent::writer::write_first_regular_item(
         &f.manager,
         &mut f.storage,

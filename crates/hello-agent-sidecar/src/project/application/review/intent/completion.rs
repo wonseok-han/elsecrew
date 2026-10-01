@@ -4,6 +4,8 @@ use super::*;
 
 fn verify_batch(
     manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
     record: &Value,
     applied: bool,
 ) -> Result<(), ProjectFailure> {
@@ -17,7 +19,10 @@ fn verify_batch(
         return Err(invalid());
     }
     let other = if applied {
-        if index + 1 != count || record.get("restoredItems").is_some() {
+        if index + 1 != count
+            || record.get("restoredItems").is_some()
+            || record.get("unstartedFrom").is_some()
+        {
             return Err(invalid());
         }
         record.get("completedItems")
@@ -36,12 +41,20 @@ fn verify_batch(
         Some(value) => value.as_array().ok_or_else(invalid)?,
         None => &empty,
     };
-    if items.len() as u64 + 1 != count {
+    let written = record
+        .get("unstartedFrom")
+        .and_then(Value::as_u64)
+        .unwrap_or(count);
+    if items.len() as u64 + 1 != written {
         return Err(invalid());
     }
     // Repeat the complete observation to catch changes while walking the batch.
     // Still not an OS exclusion guarantee against an uncooperative same-UID editor.
     for _ in 0..2 {
+        for index in written..count {
+            let item = inspect_write_item(manager, storage, project_id, record, index)?;
+            writer::verify_unwritten_item(manager, record, &item)?;
+        }
         writer::verify_record_pair(manager, record, applied)?;
         for item in items {
             let mut selected = record.clone();
@@ -107,7 +120,7 @@ pub(in crate::project) fn finish(
     {
         return Err(invalid());
     }
-    verify_batch(manager, expected, !restored)?;
+    verify_batch(manager, storage, project_id, expected, !restored)?;
     transition(
         storage,
         project_id,
@@ -139,7 +152,7 @@ pub(in crate::project) fn begin_restore(
     {
         return Err(invalid());
     }
-    verify_batch(manager, expected, true)?;
+    verify_batch(manager, storage, project_id, expected, true)?;
     transition(
         storage,
         project_id,

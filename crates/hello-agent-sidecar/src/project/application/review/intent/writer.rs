@@ -106,6 +106,29 @@ fn matches_after(actual: &Value, expected: &Value) -> bool {
             == expected["executable"].as_bool()
 }
 
+pub(super) fn verify_unwritten_item(
+    manager: &ProjectManager,
+    record: &Value,
+    item: &Value,
+) -> Result<(), ProjectFailure> {
+    let binding = &record["binding"];
+    let source = manager.open_source_repository(Path::new(
+        binding["canonicalGitRoot"].as_str().ok_or_else(invalid)?,
+    ))?;
+    if binding["sourceIdentity"] != source.source_identity
+        || binding["baseCommit"] != source.base_commit
+        || binding["baseTree"] != source.base_tree
+        || binding["objectFormat"] != source.object_format
+    {
+        return Err(invalid());
+    }
+    let (dir, leaf) = parent(&source._root, item["path"].as_str().ok_or_else(invalid)?)?;
+    if image(&dir, &leaf)? != item["before"] {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
 // A persisted name is still data: never accept paths or unknown journal shapes.
 fn journal(record: &Value) -> Result<&Value, ProjectFailure> {
     let value = &record["pendingItem"]["writeJournal"];

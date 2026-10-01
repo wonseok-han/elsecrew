@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 부분 반영 취소 체크포인트(미검증): completed prefix 이후 journal이 없는 pending부터 unstartedFrom으로 기록해 미처리 tail을 보존하고 prefix만 역복원한다. 복원 완료 전에 미처리 파일도 archive before와 대조한다. reserved/staged 중단과 첫 항목 미시작 취소는 별도 복구로 남는다.
+
 - 2026-10-01 배치 완료 체크포인트(미검증): completion은 전체 항목 수·목록·원본/보존 쌍을 대조해 applied/restored와 잠금 해제를 원자 기록한다. 완료 상태는 조회용이며 명시 begin_restore의 전체 재대조/재잠금 후 복원한다. 기존 기록 교체/다음 반영 수명, 디렉터리·부분 중단 복원·제품 IPC/UI 및 통합 검증은 남는다.
 
 - 2026-10-01 링크 체크포인트(미검증): writer의 image/staging에 symlink 문자열 읽기/생성을 연결했다. 대상 추적 없이 최대4096byte·신원/내용을 대조하고 기존 보존형 rename/역복원을 재사용한다. 일반 파일↔링크 종류 전환은 review의 기존 거절 정책을 유지한다. 디렉터리와 전체 완료/제품 활성화는 남는다.
