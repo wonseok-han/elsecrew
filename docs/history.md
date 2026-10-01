@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (다중 일반 파일 진행 기록 연결)
+
+- 직전7f27e93의 복원/명시 확인 구현은 진전이다. 현행 checkout과 기존 archive 변경을 확인하고 Karpathy 지침으로 첫 항목 고정이던 내부 intent를 순차 항목으로 확장했다. pending index는 보존한 completedItems 길이와 일치해야 하며 이전 항목 metadata를 신뢰 archive와 다시 대조한다.
+- 현재 항목의 applied 파일 쌍 확인 뒤에만 다음 archive 항목을 예약한다. 이전 journal은 completedItems로 보존하고 project/lock CAS 및 32MiB 기록 상한을 적용했다. writer event ID·관측 결과의 index를 실제 항목 번호로 바꿨다. 끝을 넘는 전진·미완료 전진·stale 요청은 거절하며 전체 적용 완료나 잠금 해제로 해석하지 않는다.
+- 두 파일 수정/추가·이전 journal 유지·너무 이른 전진·재전송·끝 범위 거절 회귀를 작성했다. 빌드/테스트/독립 검토는 최종 통합 단계로 미실행, rustfmt/diff만 확인한다. 다음은 역순 다중 복원·전체 완료 경계·다른 파일 종류·IPC/UI 연결이며 제품 미활성/미검증 상태다. 실제 사용자 파일·계정·유료 모델·main 병합/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (일반 파일 복원·중단 결과 확인 구현)
 
 - 직전0466b86은 보존형 writer 코드/체크포인트 커밋이라는 진전이다. 현재 m5 통합 checkout과 기존 archive만 미커밋인 상태를 확인했다. Karpathy 지침으로 같은 journal/image/부모 검사를 재사용해 첫 일반 파일의 역복원과 명시 중단 결과 확인을 구현했다.

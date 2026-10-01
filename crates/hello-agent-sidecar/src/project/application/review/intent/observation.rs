@@ -60,7 +60,7 @@ pub(in crate::project) fn observe_pending_source(
     };
     // No durable state changes: current bytes cannot prove which process wrote them.
     Ok(
-        json!({"applicationId":current["applicationId"],"index":0,"path":path,
+        json!({"applicationId":current["applicationId"],"index":current["pendingItem"]["index"],"path":path,
         "comparison":comparison,"rootIdentity":[meta.dev(),meta.ino()],"observed":before}),
     )
 }

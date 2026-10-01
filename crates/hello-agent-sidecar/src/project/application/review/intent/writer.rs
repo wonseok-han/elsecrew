@@ -170,7 +170,7 @@ pub(in crate::project) fn inspect_regular_outcome(
         "conflict"
     };
     Ok(
-        json!({"applicationId":current["applicationId"],"index":0,"phase":j["phase"],"comparison":comparison}),
+        json!({"applicationId":current["applicationId"],"index":current["pendingItem"]["index"],"phase":j["phase"],"comparison":comparison}),
     )
 }
 
@@ -304,8 +304,11 @@ fn publish(
             aggregate_type: "project",
             aggregate_id: project_id.to_owned(),
             operation_id: format!(
-                "op_{}_item_0_{phase}",
-                expected["applicationId"].as_str().ok_or_else(invalid)?
+                "op_{}_item_{}_{phase}",
+                expected["applicationId"].as_str().ok_or_else(invalid)?,
+                expected["pendingItem"]["index"]
+                    .as_u64()
+                    .ok_or_else(invalid)?
             ),
             request_id: Some(request.to_owned()),
             payload: project,

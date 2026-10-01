@@ -4,6 +4,125 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_advances_two_files_without_losing_prior_journal() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    fs::write(active.worktree_path.join("src/edit.txt"), b"first-update").unwrap();
+    fs::write(active.worktree_path.join("src/new.txt"), b"second-addition").unwrap();
+    let review = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_multi_review",
+    )
+    .unwrap();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            review["reviewId"].as_str().unwrap(),
+        )
+        .unwrap();
+    let prepared = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_multi_backup")
+        .unwrap();
+    let start = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        prepared,
+        "req_multi_begin",
+    )
+    .unwrap();
+    let start = intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &start,
+        "req_multi_start",
+    )
+    .unwrap();
+    let first = intent::record_first_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &start,
+        "req_multi_first",
+    )
+    .unwrap();
+    assert!(intent::advance_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &first,
+        "req_multi_early"
+    )
+    .is_err());
+    let first = intent::writer::write_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &first,
+        "req_multi_write_first",
+    )
+    .unwrap();
+    let second = intent::advance_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &first,
+        "req_multi_next",
+    )
+    .unwrap();
+    assert_eq!(second["completedItems"][0], first["pendingItem"]);
+    assert_eq!(second["pendingItem"]["index"], 1);
+    assert!(intent::advance_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &first,
+        "req_multi_stale"
+    )
+    .is_err());
+    let second = intent::writer::write_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_write_second",
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(f.source.join("src/edit.txt")).unwrap(),
+        b"first-update"
+    );
+    assert_eq!(
+        fs::read(f.source.join("src/new.txt")).unwrap(),
+        b"second-addition"
+    );
+    assert_eq!(second["completedItems"][0], first["pendingItem"]);
+    assert!(intent::advance_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &second,
+        "req_multi_past_end"
+    )
+    .is_err());
+    assert_eq!(
+        intent::inspect_pending_item(&f.manager, &f.storage, &f.project_id).unwrap(),
+        second
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_regular_writer_retains_previous_file_and_refuses_replay() {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();
