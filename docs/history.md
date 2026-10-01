@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (파일 단위 반영 실행 소유자 연결)
+
+- 직전3d8908b의 확인 세션은 진전이다. 현재 checkout/기록을 대조하고 Karpathy 지침으로 move-only PreparedApplication을 소비하는 ApplyingBatch 소유자를 추가했다. 기존 전체 apply_confirmed도 이 소유자를 반복 진행하도록 바꿔 별도 실행 알고리즘을 만들지 않았다.
+- 각 tick은 현재 원장 동일성 확인 후 최대 한 파일 writer만 실행하며 fence/다음 항목/전체 완료를 별도 단계로 진행한다. 취소·오류·완료 뒤 소유자는 영구 중단하고 durable 기록을 권한으로 재구성하지 않는다. 오류 시 메모리 record는 마지막 성공 단계일 뿐이므로 현재 복구 원장을 다시 조회해야 한다. 대용량 파일 복사/백업 내부 취소와 실제 sidecar scheduler 연결은 아직 남는다.
+- fence 이후 첫 쓰기 전 취소·원본 무변경·잠금 유지·취소 flag 해제 후 재개 거절 회귀를 작성했다. 테스트/컴파일은 최종 통합에 남기고 포맷/diff만 확인했다. 제품 원본 쓰기 비활성, 실행/복원 UI·취소/종료·전체 검증/독립 검토와 공급자 활성화는 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (검토 묶음의 세션 확인·취소 연결)
 
 - 직전69c8dd2의 폴더 내부 반영은 진전이다. 현재 checkout/기록을 확인하고 Karpathy 지침으로 선택한 chat/project·화면 fingerprint를 재검증한 뒤 descriptor 게시와 기존 5분 Confirmations owner를 연결했다. owner는 ProjectManager 수명에만 존재하며 새 확인/실패는 이전 확인을 폐기한다. 확인 뒤 plan 지문도 다시 대조한다.

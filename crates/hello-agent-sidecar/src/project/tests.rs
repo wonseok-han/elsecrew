@@ -2,6 +2,43 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn application_owner_cancellation_is_terminal_without_source_writes() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            &review_id,
+        )
+        .unwrap();
+    let prepared = confirmations
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_owner_backup")
+        .unwrap();
+    let mut owner = intent::execution::ApplyingBatch::start(
+        &f.manager,
+        &mut f.storage,
+        &mut confirmations,
+        prepared,
+        "req_owner_start",
+    )
+    .unwrap();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    assert!(!owner.advance(&f.manager, &mut f.storage, &cancel).unwrap());
+    assert_eq!(owner.record()["state"], "applying");
+    assert!(owner.record()["pendingItem"].get("writeJournal").is_none());
+    cancel.store(true, std::sync::atomic::Ordering::Release);
+    assert!(owner.advance(&f.manager, &mut f.storage, &cancel).unwrap());
+    cancel.store(false, std::sync::atomic::Ordering::Release);
+    assert!(owner.advance(&f.manager, &mut f.storage, &cancel).is_err());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    assert!(!f.storage.blocker_ids().unwrap().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn explicit_application_workspace_records_baseline_and_rejects_dirty_before_reservation() {

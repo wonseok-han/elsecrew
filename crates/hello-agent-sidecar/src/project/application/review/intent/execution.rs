@@ -2,6 +2,8 @@
 //! worker-thread/cancellation transport are separate integration steps.
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
+mod applying;
+pub(in crate::project) use applying::ApplyingBatch;
 
 /// New execution requires a move-only confirmation handoff. There is deliberately
 /// no method that resumes source writes from a persisted applying record.
@@ -17,44 +19,9 @@ pub(in crate::project) fn apply_confirmed(
     if canceled.load(Ordering::Acquire) {
         return Err(invalid());
     }
-    let mut current = begin(manager, storage, confirmations, prepared, request)?;
-    let project_id = current["binding"]["projectId"]
-        .as_str()
-        .ok_or_else(invalid)?
-        .to_owned();
-    let archive = backup::Backup::from_value(&current["backup"]["backup"])?;
-    let (header, items) = backup::verify_items(manager, &archive)?;
-    if header != current["backup"]["header"] || items.is_empty() {
-        return Err(invalid());
-    }
-    // Existing directories are never replacement/deletion targets. New
-    // directories precede their descendants in the validated sorted archive.
-    if items.iter().any(|item| {
-        item["before"]["kind"] == 2 || (item["after"]["kind"] == 2 && !item["before"].is_null())
-    }) {
-        return Err(ProjectFailure::recovery(
-            "existing directory replacement is unsupported; source unchanged",
-        ));
-    }
-    if canceled.load(Ordering::Acquire) {
-        return Ok(current);
-    }
-    current = mark_write_started(manager, storage, &project_id, &current, request)?;
-    current = record_first_item(manager, storage, &project_id, &current, request)?;
-    for index in 0..items.len() {
-        if canceled.load(Ordering::Acquire) {
-            return Ok(current);
-        }
-        current =
-            writer::write_first_regular_item(manager, storage, &project_id, &current, request)?;
-        if index + 1 < items.len() {
-            if canceled.load(Ordering::Acquire) {
-                return Ok(current);
-            }
-            current = advance_regular_item(manager, storage, &project_id, &current, request)?;
-        }
-    }
-    completion::finish(manager, storage, &project_id, &current, false, request)
+    let mut owner = ApplyingBatch::start(manager, storage, confirmations, prepared, request)?;
+    while !owner.advance(manager, storage, canceled)? {}
+    Ok(owner.record().clone())
 }
 
 /// Explicit restoration request, tied to the exact displayed durable record.
