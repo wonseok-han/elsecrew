@@ -215,8 +215,26 @@ impl G5Manager {
         project_id: &str,
         request_id: &str,
     ) -> Result<G5Action, ProjectFailure> {
+        self.prepare_chat_workspace_with_baseline(storage, projects, project_id, request_id, false)
+    }
+
+    pub fn prepare_chat_workspace_with_baseline(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        project_id: &str,
+        request_id: &str,
+        application_baseline: bool,
+    ) -> Result<G5Action, ProjectFailure> {
         let before = project_record(storage, project_id)?;
-        let action = projects.prepare_chat_workspace(storage, project_id, request_id)?;
+        let action = if application_baseline {
+            projects.prepare_application_workspace(storage, project_id, request_id)?;
+            // Reuse only the just-created active snapshot; normal preparation
+            // remains fresh and existing snapshots are never retrofitted.
+            projects.create_worktree(storage, project_id, request_id)?
+        } else {
+            projects.prepare_chat_workspace(storage, project_id, request_id)?
+        };
         let manifest = action.result;
         let existing = prepared_workspace_records(storage)?;
         let worktree_id = manifest["worktreeId"].as_str().unwrap_or_default();

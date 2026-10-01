@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (채팅 생성의 기준 기록 선택 연결)
+
+- 직전d2952d2의 채팅 조회는 진전이다. 현재 checkout/기존 archive를 확인하고 Karpathy 지침으로 workspace.prepareChat의 선택적 boolean applicationBaseline을 Rust/TS validator·sidecar·채팅 controller에 연결했다. 생략/false는 기존 fresh 생성이고 true만 기준 기록 생성 후 기존 unbound preparation/채팅 결속·실패 복구 흐름을 따른다. 실패를 일반 복사본으로 대체하지 않는다.
+- 새 채팅 폼에 기본 해제된 선택과 ko/en 원본 조건/무변경/실제 반영 미지원 안내를 추가했다. 기존 채팅 소급 승격이나 원본 writer 활성화는 없다. 원본 기준이 있는 새 채팅에서 앞선 채팅별 preview 경로를 사용할 수 있도록 구현했다.
+- 기존 입력 호환·true/false·null/string/추가 경로 거절 Rust/TS 계약 회귀를 작성했다. 테스트/빌드/실제 생성 UI 검증은 통합 단계에 남겼고 diff만 확인했다. 디렉터리·전체 검토/확인·실제 반영과 복원 UI·전체 누적 검증/독립 안전 검토는 남는다. main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (선택한 채팅의 반영 검토 대상 연결)
 
 - 직전74a9180의 명시 생성은 진전이다. 현재 checkout/기존 archive를 보존하고 Karpathy 지침으로 chatApplicationPreview를 연결했다. 선택한 project/chat ID만 받고 저장 원장의 task/workspace를 찾아 기존 ReviewTarget::Chat 검증에 전달한다. 현재 project active 포인터를 대체 대상으로 쓰지 않는다.

@@ -110,6 +110,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const admissionReadyRef = useRef(admissionReady);
   admissionReadyRef.current = admissionReady;
   const [goal, setGoal] = useState("");
+  const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leavingProject, setLeavingProject] = useState(false);
   const [leaveError, setLeaveError] = useState(false);
@@ -158,7 +159,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const createChat = async () => {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
-    const created = await chatController.createChat({ projectId: snapshot.project.id }, goal);
+    const created = await chatController.createChat({ projectId: snapshot.project.id }, goal, applicationBaseline);
     if (created) { setGoal(""); await switchChat(created.chatId); }
     else controller.setActionBlocked(chatController.isActionBlocked());
   };
@@ -217,6 +218,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
           <input aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
+          <label><input type="checkbox" checked={applicationBaseline} disabled={!admissionReady || chat.preparing} onChange={event => setApplicationBaseline(event.target.checked)} />{t("m5.application.chatBaseline")}</label>
+          {applicationBaseline && <p>{t("m5.application.chatBaselineHelp")}</p>}
           <button type="submit" disabled={!admissionReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
         </form>
       </section>}

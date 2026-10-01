@@ -232,14 +232,14 @@ export class ChatUiController {
     }
   }
 
-  async createChat(source: { projectId: string }, goal: string): Promise<ChatRecordV1 | null> {
+  async createChat(source: { projectId: string }, goal: string, applicationBaseline = false): Promise<ChatRecordV1 | null> {
     const settings = this.#state.settings;
     if (!settings || this.#state.switching || this.isRecoveryBlocked() || settings.projectId !== source.projectId || !goal.trim() || this.#state.preparing) return null;
     const generation = this.#generation;
     let prepared: PreparedChatWorkspaceV1 | null = null;
     this.#set({ preparing: true, preparationApiUnavailable: false, error: null, ...chatNotice("m5.chatNotice.preparing") });
     try {
-      prepared = await this.#bridge.prepareChatWorkspace({ projectId: source.projectId });
+      prepared = await this.#bridge.prepareChatWorkspace({ projectId: source.projectId, ...(applicationBaseline ? { applicationBaseline: true } : {}) });
       const manifest = prepared.manifest;
       if (prepared.bindingState !== "unbound" || manifest.projectId !== source.projectId) throw new Error("prepared workspace identity mismatch");
       const created = await this.#bridge.createChat({ preparationId: prepared.preparationId, projectId: source.projectId, worktreeId: manifest.worktreeId, workspaceIdentity: manifest.workspaceIdentity, goal: goal.trim(), expectedSettingsRevision: settings.revision });

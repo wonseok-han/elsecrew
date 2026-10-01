@@ -360,7 +360,12 @@ fn validate_prepare_chat_workspace_request(
     value: &Value,
 ) -> Result<&Map<String, Value>, G5ContractError> {
     let object = object(value, "prepare chat workspace request")?;
-    exact_keys(object, &["projectId"])?;
+    if let Some(baseline) = object.get("applicationBaseline") {
+        exact_keys(object, &["projectId", "applicationBaseline"])?;
+        if !baseline.is_boolean() { return Err(G5ContractError::new("applicationBaseline must be boolean")); }
+    } else {
+        exact_keys(object, &["projectId"])?;
+    }
     id(object.get("projectId"), "projectId")?;
     Ok(object)
 }

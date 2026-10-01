@@ -1470,13 +1470,19 @@ impl Sidecar {
                     }
                 }
                 "workspace.prepareChat" => {
-                    let params = require_exact_params(&request.params, &["projectId"])
+                    let keys: &[&str] = if request.params.get("applicationBaseline").is_some() { &["projectId", "applicationBaseline"] } else { &["projectId"] };
+                    let params = require_exact_params(&request.params, keys)
                         .map_err(ProjectFailure::manifest)?;
-                    self.g5.prepare_chat_workspace(
+                    let baseline = match params.get("applicationBaseline") {
+                        Some(value) => value.as_bool().ok_or_else(|| ProjectFailure::manifest("applicationBaseline must be boolean"))?,
+                        None => false,
+                    };
+                    self.g5.prepare_chat_workspace_with_baseline(
                         &mut self.storage,
                         &mut self.projects,
                         param_string(params, "projectId").map_err(ProjectFailure::manifest)?,
                         &request.request_id,
+                        baseline,
                     )?
                 }
                 "workspace.abandonPrepared" => {

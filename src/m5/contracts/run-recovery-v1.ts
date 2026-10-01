@@ -159,7 +159,7 @@ export interface ChatCreateRequestV1 {
   goal: string;
   expectedSettingsRevision: number;
 }
-export interface PrepareChatWorkspaceRequestV1 { projectId: string }
+export interface PrepareChatWorkspaceRequestV1 { projectId: string; applicationBaseline?: boolean }
 export interface PreparedChatWorkspaceV1 {
   schemaVersion: typeof G5_SCHEMA_VERSION_V1;
   preparationId: string;
@@ -369,8 +369,9 @@ export function validateProjectRoleSettingsUpdateRequestV1(value: unknown): Proj
 
 export function validatePrepareChatWorkspaceRequestV1(value: unknown): PrepareChatWorkspaceRequestV1 {
   const object = requireObject(value, "prepare chat workspace request");
-  exactKeys(object, ["projectId"]);
+  exactKeys(object, Object.hasOwn(object, "applicationBaseline") ? ["projectId", "applicationBaseline"] : ["projectId"]);
   requireId(object.projectId, "projectId");
+  if (Object.hasOwn(object, "applicationBaseline") && typeof object.applicationBaseline !== "boolean") throw new Error("applicationBaseline must be boolean");
   return object as unknown as PrepareChatWorkspaceRequestV1;
 }
 

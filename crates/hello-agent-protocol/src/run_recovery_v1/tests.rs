@@ -4,6 +4,16 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+#[test]
+fn chat_preparation_baseline_is_optional_and_strictly_boolean() {
+    for value in [serde_json::json!({"projectId":"project_a"}), serde_json::json!({"projectId":"project_a","applicationBaseline":true}), serde_json::json!({"projectId":"project_a","applicationBaseline":false})] {
+        assert!(validate_g5_payload_v1("prepareChatWorkspaceRequest", &value).is_ok());
+    }
+    for value in [serde_json::json!({"projectId":"project_a","applicationBaseline":null}), serde_json::json!({"projectId":"project_a","applicationBaseline":"true"}), serde_json::json!({"projectId":"project_a","applicationBaseline":true,"path":"/tmp"})] {
+        assert!(validate_g5_payload_v1("prepareChatWorkspaceRequest", &value).is_err());
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {
