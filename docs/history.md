@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (불완전 준비 파일의 보존형 취소)
+
+- 직전aebca85의 중단 복구는 진전이다. 현재 원장/코드를 대조하고 Karpathy 지침으로 reserved에서 멈춘 복사의 명시 취소를 연결했다. exact 현재 원장·source/Git/부모 신원·원본 before와 두 번의 보존 파일 관측을 요구하며 파일을 삭제하거나 rename하지 않는다.
+- canceledStaging 표시와 실제 부분 이미지/부재를 restored journal에 기록하고 기존 prefix 역복원·untouched tail·최종 두-pass 대조를 재사용한다. 이 표시는 applied 증거로 사용할 수 없고 정상 after와 일치한다고 주장하지 않는다. 외부 원본 수정·특수 파일·hardlink·관측 불일치는 차단한다.
+- staged 기록 실패 주입 후 부분 파일 보존·외부 원본 수정 거절·미처리 파일 무생성 회귀를 작성했다. 테스트/빌드는 최종 통합에 남기고 포맷/diff만 확인했다. 디렉터리와 제품 반영/복원 IPC/UI·전체 검증/독립 안전 검토가 남으며 제품 쓰기 미활성, main/push 없음. 기존 archive 21줄 보존.
+
 ### 2026-10-01 · by GPT-6 Astra (파일 교체 중단의 명시 복구 연결)
 
 - 직전bddda66의 완료 이력 보존은 코드 진전이다. 현재 checkout/기존 archive 21줄을 보존하고 Karpathy 지침으로 staged 쌍을 실제 반영/미반영으로 구분해 명시 복구에 연결했다. 미반영이면 파일 교체 없이 staged 파일을 보존하며 restored를 기록한다. reserved의 불완전 복사는 여전히 차단한다.

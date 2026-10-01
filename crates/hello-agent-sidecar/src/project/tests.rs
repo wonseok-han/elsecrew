@@ -247,23 +247,29 @@ fn application_link_roundtrip_never_changes_target_file() {
 #[cfg(target_os = "macos")]
 #[test]
 fn application_advances_two_files_without_losing_prior_journal() {
-    application_two_file_roundtrip(false, false);
+    application_two_file_roundtrip(false, None);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn application_cancels_unstarted_tail_and_restores_only_written_prefix() {
-    application_two_file_roundtrip(true, false);
+    application_two_file_roundtrip(true, None);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn application_recovers_lost_applied_record_without_writing_remaining_files() {
-    application_two_file_roundtrip(false, true);
+    application_two_file_roundtrip(false, Some("applied"));
 }
 
 #[cfg(target_os = "macos")]
-fn application_two_file_roundtrip(cancel_tail: bool, lose_applied_record: bool) {
+#[test]
+fn application_preserves_partial_staging_when_explicitly_canceled() {
+    application_two_file_roundtrip(false, Some("staged"));
+}
+
+#[cfg(target_os = "macos")]
+fn application_two_file_roundtrip(cancel_tail: bool, lost_phase: Option<&str>) {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();
     let active = f
@@ -323,8 +329,9 @@ fn application_two_file_roundtrip(cancel_tail: bool, lose_applied_record: bool) 
         "req_multi_early"
     )
     .is_err());
-    if lose_applied_record {
-        f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_applied BEFORE INSERT ON events WHEN NEW.operation_id LIKE '%_item_0_applied' BEGIN SELECT RAISE(ABORT, 'lost applied record'); END;").unwrap();
+    if let Some(phase) = lost_phase {
+        assert!(matches!(phase, "applied" | "staged"));
+        f.storage.connection_for_test().execute_batch(&format!("CREATE TRIGGER fail_applied BEFORE INSERT ON events WHEN NEW.operation_id LIKE '%_item_0_{phase}' BEGIN SELECT RAISE(ABORT, 'lost writer record'); END;")).unwrap();
         assert!(intent::writer::write_first_regular_item(
             &f.manager,
             &mut f.storage,
@@ -340,12 +347,43 @@ fn application_two_file_roundtrip(cancel_tail: bool, lose_applied_record: bool) 
         let interrupted = intent::inspect(&f.storage, &f.project_id).unwrap();
         assert_eq!(
             interrupted["pendingItem"]["writeJournal"]["phase"],
-            "staged"
+            if phase == "staged" {
+                "reserved"
+            } else {
+                "staged"
+            }
         );
         assert_eq!(
             fs::read(f.source.join("src/edit.txt")).unwrap(),
-            b"first-update"
+            if phase == "staged" {
+                b"hello".as_slice()
+            } else {
+                b"first-update".as_slice()
+            }
         );
+        let retained = f.source.join("src").join(
+            interrupted["pendingItem"]["writeJournal"]["retainedName"]
+                .as_str()
+                .unwrap(),
+        );
+        if phase == "staged" {
+            fs::write(&retained, b"partial").unwrap();
+            fs::write(f.source.join("src/edit.txt"), b"external-edit").unwrap();
+            assert!(intent::execution::restore_selected(
+                &f.manager,
+                &mut f.storage,
+                &f.project_id,
+                &interrupted,
+                &std::sync::atomic::AtomicBool::new(false),
+                "req_partial_conflict"
+            )
+            .is_err());
+            assert_eq!(
+                intent::inspect(&f.storage, &f.project_id).unwrap(),
+                interrupted
+            );
+            fs::write(f.source.join("src/edit.txt"), b"hello").unwrap();
+        }
         let restored = intent::execution::restore_selected(
             &f.manager,
             &mut f.storage,
@@ -359,6 +397,13 @@ fn application_two_file_roundtrip(cancel_tail: bool, lose_applied_record: bool) 
         assert_eq!(restored["unstartedFrom"], 1);
         assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
         assert!(!f.source.join("src/new.txt").exists());
+        if phase == "staged" {
+            assert_eq!(
+                restored["pendingItem"]["writeJournal"]["canceledStaging"],
+                true
+            );
+            assert_eq!(fs::read(retained).unwrap(), b"partial");
+        }
         return;
     }
     let first = intent::writer::write_first_regular_item(

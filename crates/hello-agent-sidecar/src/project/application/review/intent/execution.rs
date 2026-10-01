@@ -98,6 +98,9 @@ pub(in crate::project) fn restore_selected(
     if current["pendingItem"].get("writeJournal").is_none() {
         current = cancel_unstarted_tail(manager, storage, project_id, &current, request)?;
     }
+    if current["pendingItem"]["writeJournal"]["phase"] == "reserved" {
+        current = writer::cancel_reserved_staging(manager, storage, project_id, &current, request)?;
+    }
     if current["pendingItem"]["writeJournal"]["phase"] == "staged" {
         current =
             writer::acknowledge_regular_outcome(manager, storage, project_id, &current, request)?;

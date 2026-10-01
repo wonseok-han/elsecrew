@@ -136,7 +136,11 @@ fn journal(record: &Value) -> Result<&Value, ProjectFailure> {
     let suffix = name
         .strip_prefix(".hello-agent-apply-")
         .ok_or_else(invalid)?;
-    if value.as_object().is_none_or(|v| v.len() != 6)
+    let canceled = value.get("canceledStaging");
+    if value
+        .as_object()
+        .is_none_or(|v| v.len() != 6 + usize::from(canceled.is_some()))
+        || canceled.is_some_and(|v| v.as_bool() != Some(true) || value["phase"] != "restored")
         || value["version"] != 1
         || suffix.len() != 32
         || !suffix
@@ -196,7 +200,11 @@ fn pair_matches(
     let j = journal(record)?;
     let old = &record["pendingItem"]["item"]["before"];
     let new = &j["stagedImage"];
-    if !matches_after(new, &record["pendingItem"]["item"]["after"]) {
+    if j["canceledStaging"] == true {
+        if applied {
+            return Ok(false);
+        }
+    } else if !matches_after(new, &record["pendingItem"]["item"]["after"]) {
         return Err(invalid());
     }
     let (target, saved) = if applied { (new, old) } else { (old, new) };
@@ -243,6 +251,41 @@ pub(in crate::project) fn inspect_regular_outcome(
     Ok(
         json!({"applicationId":current["applicationId"],"index":current["pendingItem"]["index"],"phase":j["phase"],"comparison":comparison}),
     )
+}
+
+/// Cancel an interrupted copy before its durable staged fence. Preserve whatever
+/// bounded regular/link image exists; it is evidence, never a valid after image.
+pub(super) fn cancel_reserved_staging(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    if inspect_pending_item(manager, storage, project_id)? != *expected {
+        return Err(invalid());
+    }
+    let mut j = journal(expected)?.clone();
+    if j["phase"] != "reserved" || !j["stagedImage"].is_null() {
+        return Err(invalid());
+    }
+    let (dir, leaf) = bound_parent(manager, expected)?;
+    if image(&dir, &leaf)? != expected["pendingItem"]["item"]["before"] {
+        return Err(invalid());
+    }
+    let saved = j["retainedName"].as_str().ok_or_else(invalid)?;
+    let partial = image(&dir, saved)?;
+    sync_capability_directory(&dir)?;
+    let (fresh, fresh_leaf) = bound_parent(manager, expected)?;
+    if image(&fresh, &fresh_leaf)? != expected["pendingItem"]["item"]["before"]
+        || image(&fresh, saved)? != partial
+    {
+        return Err(invalid());
+    }
+    j["stagedImage"] = partial;
+    j["canceledStaging"] = json!(true);
+    j["phase"] = json!("restored");
+    publish(storage, project_id, expected, j, request)
 }
 
 /// Explicit reconciliation of a staged/restoring pair. An untouched staged pair
