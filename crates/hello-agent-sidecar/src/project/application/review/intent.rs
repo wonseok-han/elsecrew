@@ -7,6 +7,8 @@ use serde_json::json;
 use uuid::Uuid;
 
 mod observation;
+#[cfg(target_os = "macos")]
+pub(in crate::project) mod writer;
 #[allow(unused_imports)]
 pub(in crate::project) use observation::observe_pending_source;
 
@@ -100,7 +102,9 @@ pub(in crate::project) fn inspect(
     }
     if let Some(pending) = pending {
         if record["state"] != "applying"
-            || pending.as_object().is_none_or(|v| v.len() != 2)
+            || pending
+                .as_object()
+                .is_none_or(|v| v.len() != 2 + usize::from(v.contains_key("writeJournal")))
             || pending["index"].as_u64() != Some(0)
             || !pending["item"].is_object()
         {

@@ -2,6 +2,105 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn application_regular_writer_retains_previous_file_and_refuses_replay() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    let before = fs::read(f.source.join("src/edit.txt")).unwrap();
+    fs::write(
+        active.worktree_path.join("src/edit.txt"),
+        b"applied-content",
+    )
+    .unwrap();
+    let review = persistence::publish(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        "req_writer_review",
+    )
+    .unwrap();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            review["reviewId"].as_str().unwrap(),
+        )
+        .unwrap();
+    let prepared = confirmations
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_writer_backup")
+        .unwrap();
+    let intent = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut confirmations,
+        prepared,
+        "req_writer_begin",
+    )
+    .unwrap();
+    let intent = intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &intent,
+        "req_writer_start",
+    )
+    .unwrap();
+    let intent = intent::record_first_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &intent,
+        "req_writer_pending",
+    )
+    .unwrap();
+    let result = intent::writer::write_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &intent,
+        "req_writer_apply",
+    )
+    .unwrap();
+    let journal = &result["pendingItem"]["writeJournal"];
+    assert_eq!(journal["phase"], "applied");
+    assert_eq!(
+        fs::read(f.source.join("src/edit.txt")).unwrap(),
+        b"applied-content"
+    );
+    assert_eq!(
+        fs::read(
+            f.source
+                .join("src")
+                .join(journal["retainedName"].as_str().unwrap())
+        )
+        .unwrap(),
+        before
+    );
+    assert!(intent::writer::write_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &result,
+        "req_writer_replay"
+    )
+    .is_err());
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), result);
+    assert!(intent::abandon_unwritten(
+        &mut f.storage,
+        &f.project_id,
+        &result,
+        "req_writer_abandon"
+    )
+    .is_err());
+}
+
 #[cfg(unix)]
 fn prepared_backup_fixture() -> (Fixture, String) {
     use application::review::persistence;
@@ -1343,7 +1442,11 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
         clean.changed_paths()
     );
     fs::write(active.worktree_path.join("src/edit.txt"), [0, 255, 7]).unwrap();
-    fs::set_permissions(active.worktree_path.join("src/edit.txt"), fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        active.worktree_path.join("src/edit.txt"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
     assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
     fs::set_permissions(
         active.worktree_path.join("src/edit.txt"),
@@ -1366,8 +1469,18 @@ fn application_review_binds_all_changes_and_rejects_stale_snapshot() {
     )
     .unwrap();
     fs::write(active.worktree_path.join("new-dir/replacement"), b"added").unwrap();
-    fs::rename(active.worktree_path.join("new-dir/replacement"), active.worktree_path.join("new-dir/file")).unwrap();
-    assert!(review::revalidate(&fixture.manager, &fixture.storage, &fixture.project_id, &plan).is_err());
+    fs::rename(
+        active.worktree_path.join("new-dir/replacement"),
+        active.worktree_path.join("new-dir/file"),
+    )
+    .unwrap();
+    assert!(review::revalidate(
+        &fixture.manager,
+        &fixture.storage,
+        &fixture.project_id,
+        &plan
+    )
+    .is_err());
     let plan = review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).unwrap();
     assert!(review::revalidate(
         &fixture.manager,
@@ -1439,12 +1552,24 @@ fn application_review_preserves_untracked_source_and_rejects_legacy() {
     fs::write(active.worktree_path.join("Personal"), b"case collision").unwrap();
     assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
     fs::remove_file(active.worktree_path.join("Personal")).unwrap();
-    fs::write(active.worktree_path.join("cafe\u{301}"), b"unicode collision").unwrap();
+    fs::write(
+        active.worktree_path.join("cafe\u{301}"),
+        b"unicode collision",
+    )
+    .unwrap();
     assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
     fs::remove_file(active.worktree_path.join("cafe\u{301}")).unwrap();
-    fs::rename(active.worktree_path.join("src/edit.txt"), active.worktree_path.join("src/Edit.txt")).unwrap();
+    fs::rename(
+        active.worktree_path.join("src/edit.txt"),
+        active.worktree_path.join("src/Edit.txt"),
+    )
+    .unwrap();
     assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
-    fs::rename(active.worktree_path.join("src/Edit.txt"), active.worktree_path.join("src/edit.txt")).unwrap();
+    fs::rename(
+        active.worktree_path.join("src/Edit.txt"),
+        active.worktree_path.join("src/edit.txt"),
+    )
+    .unwrap();
     fs::write(fixture.source.join("personal"), b"changed externally").unwrap();
     assert!(review::prepare(&fixture.manager, &fixture.storage, &fixture.project_id).is_err());
     assert_eq!(
@@ -3121,10 +3246,21 @@ fn unstarted_snapshot_recovery_survives_restart_and_allows_new_identity() {
         .abandon_unstarted_snapshot(&mut storage, &inspection, "req_abandon_unstarted")
         .unwrap();
     assert!(storage.blocker_ids().unwrap().is_empty());
-    let completed_project = storage.projection_record("project", &fixture.project_id).unwrap();
-    manager.abandon_unstarted_snapshot(&mut storage, &inspection, "req_response_lost").unwrap();
-    assert_eq!(storage.projection_record("project", &fixture.project_id).unwrap(), completed_project);
-    assert!(manager.abandon_unstarted_snapshot(&mut storage, &stale, "req_stale_completed").is_err());
+    let completed_project = storage
+        .projection_record("project", &fixture.project_id)
+        .unwrap();
+    manager
+        .abandon_unstarted_snapshot(&mut storage, &inspection, "req_response_lost")
+        .unwrap();
+    assert_eq!(
+        storage
+            .projection_record("project", &fixture.project_id)
+            .unwrap(),
+        completed_project
+    );
+    assert!(manager
+        .abandon_unstarted_snapshot(&mut storage, &stale, "req_stale_completed")
+        .is_err());
     manager
         .open_project(
             &mut storage,
@@ -3136,7 +3272,9 @@ fn unstarted_snapshot_recovery_survives_restart_and_allows_new_identity() {
         .create_worktree(&mut storage, &fixture.project_id, "req_new_snapshot")
         .unwrap();
     assert_ne!(created.result["worktreeId"], inspection["worktreeId"]);
-    assert!(manager.abandon_unstarted_snapshot(&mut storage, &inspection, "req_old_snapshot").is_err());
+    assert!(manager
+        .abandon_unstarted_snapshot(&mut storage, &inspection, "req_old_snapshot")
+        .is_err());
     assert_eq!(
         before,
         git_bytes_raw(&fixture.source, ["worktree", "list", "--porcelain"])

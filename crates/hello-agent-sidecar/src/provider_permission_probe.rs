@@ -1,5 +1,6 @@
 //! Test-only, model-free permission experiment. Not compiled into the product.
-//! The installed CLI case requires separate explicit approval; toy cases do not.
+//! Installed cases require explicit approval for their trust boundary; toy cases do not.
+//! The trusted-parent case does not claim OS-level offline confinement.
 use crate::provider_login_io::NativeFrame;
 use crate::provider_login_process::LoginProcess;
 use crate::provider_profile::CodexProfileBinding;
@@ -139,12 +140,17 @@ fn exchange(
     Ok(())
 }
 
-fn run_probe(installed: bool, rejected: bool) {
+fn run_probe(installed: bool, rejected: bool, vendor_sandbox: bool) {
     if installed {
+        let approval = if vendor_sandbox {
+            "HELLO_AGENT_APPROVED_VENDOR_SANDBOX_PROBE"
+        } else {
+            "HELLO_AGENT_APPROVED_PERMISSION_PROBE"
+        };
         assert_eq!(
-            std::env::var("HELLO_AGENT_APPROVED_PERMISSION_PROBE").as_deref(),
+            std::env::var(approval).as_deref(),
             Ok("1"),
-            "explicit offline command/exec approval required"
+            "explicit approval for the selected command/exec trust boundary required"
         );
     }
     let temp = tempfile::tempdir().unwrap();
@@ -160,26 +166,37 @@ fn run_probe(installed: bool, rejected: bool) {
     let mut process = LoginProcess::reserve(&profile).unwrap();
     let launch = if installed {
         use crate::provider_executable::PinnedExecutable;
-        let cli = PinnedExecutable::open(Path::new("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"), crate::provider_login_manager::digest("3e11ccc743e8198a5ef84fb57c89941d845b0ea0302485ed1fbac2f0821aca5a")).unwrap();
-        let helper = PinnedExecutable::open(
+        let cli = PinnedExecutable::open_codex_signed(Path::new("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"), false).unwrap();
+        let helper = PinnedExecutable::open_codex_signed(
             Path::new(
                 "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host",
             ),
-            crate::provider_login_manager::digest(
-                "4c39893666a166addd217df78f158c5975f69b598404a9f86ff0df0f3da43f6d",
-            ),
+            true,
         )
         .unwrap();
         process.launch_with_barrier(
             || {
-                let mut command = crate::provider_runtime_sandbox::command(
-                    cli.revalidate().map_err(std::io::Error::other)?,
-                    helper.revalidate().map_err(std::io::Error::other)?,
-                    &configuration_arguments(),
-                    &home,
-                    &workspace,
-                    crate::provider_runtime_sandbox::WorkspaceAccess::Write,
-                )?;
+                let arguments = configuration_arguments();
+                // Separate, explicitly approved experiment. The parent is trusted;
+                // only its tools are sandboxed. This is NOT an offline guarantee.
+                let mut command = if vendor_sandbox {
+                    helper.revalidate().map_err(std::io::Error::other)?;
+                    let args: Vec<_> = arguments.iter().map(|arg| arg.as_os_str()).collect();
+                    crate::provider_login_gate::command(
+                        cli.revalidate().map_err(std::io::Error::other)?,
+                        &args,
+                        &workspace,
+                    )?
+                } else {
+                    crate::provider_runtime_sandbox::command(
+                        cli.revalidate().map_err(std::io::Error::other)?,
+                        helper.revalidate().map_err(std::io::Error::other)?,
+                        &arguments,
+                        &home,
+                        &workspace,
+                        crate::provider_runtime_sandbox::WorkspaceAccess::Write,
+                    )?
+                };
                 command
                     .env("HOME", &home)
                     .env("CODEX_HOME", &home)
@@ -249,8 +266,8 @@ printf '%s\n' '{{"id":3,"result":{{"exitCode":{},"stdout":"protected"}}}}'
 
 #[test]
 fn toy_permission_probe_uses_owned_cleanup() {
-    run_probe(false, false);
-    run_probe(false, true);
+    run_probe(false, false, false);
+    run_probe(false, true, false);
 }
 
 #[test]
@@ -288,5 +305,11 @@ fn permission_probe_never_mixes_legacy_sandbox_flags() {
 #[test]
 #[ignore = "requires explicit installed CLI offline command/exec approval"]
 fn installed_permission_profile_blocks_profile_access() {
-    run_probe(true, false);
+    run_probe(true, false, false);
+}
+
+#[test]
+#[ignore = "requires explicit trusted-parent vendor-sandbox command/exec approval; not offline"]
+fn installed_vendor_sandbox_blocks_profile_access() {
+    run_probe(true, false, true);
 }

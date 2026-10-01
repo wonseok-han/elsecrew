@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 구현 체크포인트(미검증): macOS `intent/writer.rs`가 첫 일반 파일의 추가/수정/삭제를 reserved/staged/applied 기록과 결속한다. 같은 부모의 무작위 이름에 새 내용을 준비하고 수정은 SWAP, 추가/삭제는 EXCL로 이전 파일을 보존한다. 실패 시 잠금·파일을 남기고 재실행을 거절한다. 컴파일/실행/독립 검토는 통합 단계로 미뤘으며 제품 IPC에는 미연결이다. 전체 cursor·링크/디렉터리·복원·재시작 해석은 여전히 미완료다. 아래 원본 writer 부재 기록은 이 제한된 내부 후보 이전 상태이며 제품 반영 기능은 아직 없다.
+
 - 원본 관측(2026-09-30 내부): pending 항목을 현재 raw inventory와 비교해 before metadata/inode 일치·after image 일치·충돌을 읽기 전용으로 보고한다. 실제 Git/root 결속과 부모 real directory를 확인하지만 과거 root 신원/동일 UID 경합 배제나 앱 작성 소유권을 증명하지 않는다. 분류 결과로 journal을 완료시키거나 자동 복원하지 않는다.
 
 - 첫 파일 기록(2026-09-30 내부): applying 상태에서 첫 archive 항목의 pending metadata를 project/lock CAS로 저장하고 재시작 때 archive와 대조한다. 중복/stale 요청은 실행 권위로 재사용하지 않는다. 완료와 다음 항목 전진에는 writer가 생성할 파일 소유 신원·동기화/사후 관측 증거가 필요하며 아직 연결하지 않았다. 이 단계는 전체 journal/restore 완료가 아니다.
