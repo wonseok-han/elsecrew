@@ -117,19 +117,7 @@ impl BudgetGuard {
                 "another backup preparation is active",
             ));
         }
-        let mut used = 0u64;
-        for entry in dir.entries().map_err(|_| invalid())? {
-            let entry = entry.map_err(|_| invalid())?;
-            let meta = dir
-                .symlink_metadata(entry.file_name())
-                .map_err(|_| invalid())?;
-            // Include orphaned/abandoned archives, not just ledger restore points.
-            // Unknown objects are not followed, removed, or silently discounted.
-            if !meta.is_file() || meta.nlink() != 1 {
-                return Err(invalid());
-            }
-            used = used.checked_add(meta.len()).ok_or_else(invalid)?;
-        }
+        let used = stored_bytes(&dir)?;
         let remaining = budget.checked_sub(used).filter(|v| *v > 0).ok_or_else(|| {
             ProjectFailure::recovery("restore storage budget reached; existing backups preserved")
         })?;
@@ -138,6 +126,30 @@ impl BudgetGuard {
             remaining,
         })
     }
+}
+
+fn stored_bytes(dir: &Dir) -> Result<u64, ProjectFailure> {
+    let mut used = 0u64;
+    for entry in dir.entries().map_err(|_| invalid())? {
+        let entry = entry.map_err(|_| invalid())?;
+        let meta = dir.symlink_metadata(entry.file_name()).map_err(|_| invalid())?;
+        // Include orphaned/abandoned archives. Never follow or discount unknown objects.
+        if !meta.is_file() || meta.nlink() != 1 { return Err(invalid()); }
+        used = used.checked_add(meta.len()).ok_or_else(invalid)?;
+    }
+    Ok(used)
+}
+
+pub(in crate::project) fn storage_usage(manager: &ProjectManager) -> Result<Value, ProjectFailure> {
+    // Same managed directory and cooperative lock as archive creation. This may
+    // initialize an empty managed directory, but never changes archive contents.
+    let dir = directory(manager)?;
+    if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } != 0 {
+        return Err(ProjectFailure::recovery("backup usage unavailable during preparation"));
+    }
+    let used = stored_bytes(&dir)?;
+    if used > 9_007_199_254_740_991 { return Err(invalid()); }
+    Ok(serde_json::json!({"usedBytes":used,"limitBytes":RESTORE_BUDGET,"remainingBytes":RESTORE_BUDGET.saturating_sub(used)}))
 }
 
 // Every intermediate component is opened without following links.
@@ -537,12 +549,15 @@ mod tests {
         output.write_all(b"ok").unwrap();
         assert!(output.write_all(b"x").is_err());
         drop(guard);
+        // Inspection still reports occupied bytes when admission has no budget.
+        assert_eq!(stored_bytes(&open_dir()).unwrap(), 6);
         assert!(BudgetGuard::acquire(open_dir(), 6).is_err());
         assert!(BudgetGuard::acquire(open_dir(), 5).is_err());
         assert_eq!(std::fs::read(temp.path().join("orphan")).unwrap(), b"keep");
         assert_eq!(std::fs::read(temp.path().join("new")).unwrap(), b"ok");
         assert!(BudgetGuard::acquire(open_dir(), 7).is_ok());
         std::os::unix::fs::symlink("orphan", temp.path().join("link")).unwrap();
+        assert!(stored_bytes(&open_dir()).is_err());
         assert!(BudgetGuard::acquire(open_dir(), 100).is_err());
     }
 }

@@ -720,4 +720,9 @@ export const en: Record<MessageKey, string> = {
   "appUpdate.update": "Update now",
   "appUpdate.updating": "Updating…",
   "appUpdate.failed": "The update failed. Please try again in a moment.",
+  "m5.backup.storageTitle": "Check app-wide restore storage",
+  "m5.backup.storageAmounts": "Used {used} bytes / limit {limit} bytes · remaining budget {remaining} bytes",
+  "m5.backup.storageHelp": "A snapshot of restore data across all projects, including interrupted or abandoned backups. Nothing is automatically deleted. This is not free disk space; capacity is checked again when starting an application.",
+  "m5.backup.storageFull": "Restore storage has reached its limit. Existing data is preserved and new backups cannot be created. This view cannot delete data or change the limit.",
+  "m5.backup.storageError": "Could not inspect restore storage. Try again after any active backup finishes. No files were deleted.",
 };

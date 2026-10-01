@@ -360,6 +360,13 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn backup_storage_usage(&self) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":application::review::backup::storage_usage(self)?}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { Err(ProjectFailure::recovery("backup storage inspection unavailable on this platform")) }
+    }
+
     pub(crate) fn backup_preparations(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         {

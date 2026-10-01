@@ -1098,6 +1098,10 @@ impl Sidecar {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     Ok(self.projects.application_capabilities())
                 }
+                Some("backupStorageUsage") => {
+                    require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
+                    self.projects.backup_storage_usage()
+                }
                 Some("backupPreparations") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.backup_preparations(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)

@@ -720,6 +720,11 @@ export const ko = {
   "appUpdate.update": "지금 업데이트",
   "appUpdate.updating": "업데이트 중…",
   "appUpdate.failed": "업데이트에 실패했어요. 잠시 후 다시 시도해 주세요.",
+  "m5.backup.storageTitle": "앱 전체 복원 데이터 용량 확인",
+  "m5.backup.storageAmounts": "사용 {used}바이트 / 한도 {limit}바이트 · 남은 예산 {remaining}바이트",
+  "m5.backup.storageHelp": "조회 시점의 모든 프로젝트 복원 데이터입니다. 중단되거나 종료한 백업도 포함하며 자동 삭제하지 않습니다. 디스크 여유 공간과는 다르고, 새 반영 가능 여부는 시작할 때 다시 확인합니다.",
+  "m5.backup.storageFull": "복원 데이터 한도에 도달했습니다. 기존 데이터는 보존하며 새 백업은 만들 수 없습니다. 이 화면에서는 삭제하거나 한도를 변경할 수 없습니다.",
+  "m5.backup.storageError": "복원 데이터 용량을 확인하지 못했습니다. 진행 중인 백업이 끝난 뒤 다시 확인해 주세요. 파일은 삭제하지 않았습니다.",
 } as const;
 
 export type MessageKey = keyof typeof ko;

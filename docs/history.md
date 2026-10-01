@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (복원 데이터 용량 조회 연결)
+
+- 기준049c8c9에서 Karpathy 지침으로 기존5GiB 백업 예산의 집계 코드를 조회와 공유했다. 앱 전체의 중단/고아 백업을 포함하며 no-follow metadata·일반 단일링크 파일 검사와 작성자와의 비차단 flock을 유지한다. 한도 도달/초과 상태도 사용량을 반환하고 남은 예산은0으로 표시한다. 처음 조회 시 빈 managed 디렉터리는 생성할 수 있지만 백업 내용은 변경하지 않는다.
+- 고정 backupStorageUsage IPC·정수/합계 계약과 복구 영역의 ko/en 조회 화면을 연결했다. 디스크 여유 공간/시작 권한과 구분하고 자동 삭제 없음·삭제/예산 변경 UI 미지원도 설명한다. 기존 원본 writer는 계속 비활성이다.
+- 한도 도달 집계·링크 거절과 TS 초과/비정수/필드/합계 회귀를 작성했다. 실행/타입/UI·누적 안전 검토는 최종 통합에 남기고 diff만 검사한다. 실제 공급자 연결·복원 정리/예산 변경·Windows/G6/전체 검증은 미완료이며 설치본 교체는 실행하지 않았다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (검토 대상별 UI 수명 분리)
 
 - 기준e7d4e07에서 Karpathy 지침으로 반영/복원 제어를 action·project·chat/record·confirmation/fingerprint 조합의 keyed session으로 분리했다. 검토/복원 부모도 exact 대상 key를 사용해 대상 변경 render에서 이전 확인 버튼이 잠시 남거나 이전 pending ref가 새 대상을 막지 않도록 했다.
