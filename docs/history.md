@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (권한 조회 계약·설치본 재확인)
+
+- 기준35861ab에서 OpenAI Docs와 Karpathy 지침으로 permissionProfile/list 계약을 재확인했다. 공식 App Server 안내는 cwd별 허용 여부 조회를 요구하지만 응답 필드의 상세 스키마는 제공하지 않는다. 이전 조사 자료 /private/tmp/hello-agent-permission-schema.ntmzFl은 현재 없으므로 기억으로 필드를 만들어 구현하지 않았다.
+- 현재 ChatGPT.app 내부 Codex CLI에 /usr/bin/codesign --verify --strict를 재실행했고 arm64 invalid signature (code or signature have been modified)로 실패했다. /Applications/Codex.app 대체 후보도 없다. CLI 실행·스키마 재생성·계정/모델 호출·재서명·앱 교체는 하지 않았다. 이 오류는 앱의 고정 SHA 등록 정책 실패가 아니라 OS 서명 검사 결과다.
+- 다음은 정상 서명 설치본 또는 공급자 공식 응답 스키마 확보 후 named 권한 조회/실효 정책 검증 연결이다. 설치 앱 교체는 별도 조치가 필요하다. 제품 실행/원본 쓰기는 비활성으로 유지하며 전체 완료를 주장하지 않는다. 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (named 권한 beta handshake)
 
 - 기준03e93a7에서 OpenAI Docs 지침으로 공식 App Server 문서를 검색·직접 가져왔다. named profile의 experimentalApi opt-in·permissions/sandbox 상호 배타·cwd별 permissionProfile/list 확인 필요를 제안서 §6.9에 출처와 기록했다.
@@ -266,6 +272,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **named 권한 스키마 재확인 경계(2026-10-01)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐고 현재 CLI는 OS codesign strict 검사에서도 invalid signature다. 필드 추측·서명 우회로 연결하지 않으며 정상 설치본/공식 스키마 확보가 필요하다.
 - **구현 우선 운영(2026-10-01 사용자 지시)**: 매 작업 검증 대신 남은 기능 전체 연결 후 통합 검증·순차 버그 수정을 진행한다. 미검증 구현 체크포인트 커밋은 가능하지만 제품 완료/gate PASS가 아니다. 실제 실행 활성화·계정/유료/사용자 프로젝트·출시 경계는 유지하며 설치본 장애와 독립적인 기능 구현은 계속한다. 루트 지침의 같은 제목 절이 과거 검증 빈도 규칙보다 우선한다.
 - **실행 격리 전환 승인(2026-10-01)**: §6.9의 서명된 공급자 부모 신뢰와 공식 도구 sandbox 분담/무계정 임시 자료 시험은 사용자 승인 완료다. 이전 정책 입력 대기를 반복하지 않는다. 다만 새 설치 시험은 CLI 자체 서명 불일치로 실행 전 차단됐고 OS codesign에서도 동일 오류를 확인했다. 제품 활성화·실제 계정/유료 모델 승인이 아니며 정상 서명 설치본의 도구 보호/종료 검증이 남는다.
 - **Claude 로그인 업데이트 입장(2026-09-30)**: 고정275/270 버전/SHA 목록 대신 공식 native launcher가 가리키는 versions/X.Y.Z 실파일을 Anthropic 서명으로 검증한다. 공식 링크는 bin 밖 절대경로이므로 cap_std의 read_link가 아닌 read_link_contents 후 고정 target 검증을 사용한다. launcher 자체는 실행하지 않고 현재 선택한 실파일을 bind한다. 설치2.1.285 읽기 전용 검증 통과는 계정 인증/모델 실행 완료가 아니다. npm/Homebrew/custom launcher 경로는 별도다.
