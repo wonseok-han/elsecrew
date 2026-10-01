@@ -3,7 +3,34 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 mod applying;
+mod restoring;
 pub(in crate::project) use applying::ApplyingBatch;
+pub(in crate::project) use restoring::RestoringBatch;
+
+pub(in crate::project) enum ApplicationJob {
+    Apply(ApplyingBatch),
+    Restore(RestoringBatch),
+}
+
+impl ApplicationJob {
+    pub(in crate::project) fn record(&self) -> &Value {
+        match self {
+            Self::Apply(owner) => owner.record(),
+            Self::Restore(owner) => owner.record(),
+        }
+    }
+    pub(in crate::project) fn advance(
+        &mut self,
+        manager: &ProjectManager,
+        storage: &mut Storage,
+        canceled: &AtomicBool,
+    ) -> Result<bool, ProjectFailure> {
+        match self {
+            Self::Apply(owner) => owner.advance(manager, storage, canceled),
+            Self::Restore(owner) => owner.advance(manager, storage, canceled),
+        }
+    }
+}
 
 /// New execution requires a move-only confirmation handoff. There is deliberately
 /// no method that resumes source writes from a persisted applying record.
@@ -36,82 +63,9 @@ pub(in crate::project) fn restore_selected(
     canceled: &AtomicBool,
     request: &str,
 ) -> Result<Value, ProjectFailure> {
-    if inspect(storage, project_id)? != *expected {
-        return Err(invalid());
-    }
-    if canceled.load(Ordering::Acquire) {
-        return Ok(expected.clone());
-    }
-    let mut current = match expected["state"].as_str() {
-        Some("prepared") => return abandon_unwritten(storage, project_id, expected, request),
-        Some("applied") => {
-            completion::begin_restore(manager, storage, project_id, expected, request)?
-        }
-        Some("applying") => {
-            if expected.get("pendingItem").is_none()
-                || (expected["pendingItem"]["index"] == 0
-                    && expected["pendingItem"].get("writeJournal").is_none())
-            {
-                return completion::cancel_before_first_write(
-                    manager, storage, project_id, expected, request,
-                );
-            }
-            inspect_pending_item(manager, storage, project_id)?
-        }
-        _ => return Err(invalid()),
-    };
-    if current["pendingItem"].get("writeJournal").is_none() {
-        current = cancel_unstarted_tail(manager, storage, project_id, &current, request)?;
-    }
-    if current["pendingItem"]["writeJournal"]["phase"] == "reserved" {
-        current = writer::cancel_reserved_staging(manager, storage, project_id, &current, request)?;
-    }
-    if current["pendingItem"]["writeJournal"]["phase"] == "staged" {
-        current =
-            writer::acknowledge_regular_outcome(manager, storage, project_id, &current, request)?;
-    }
-    if matches!(
-        current["pendingItem"]["writeJournal"]["phase"].as_str(),
-        Some("applied" | "restored" | "restoring")
-    ) && current.get("restoredItems").is_none()
-        && current.get("unstartedFrom").is_none()
-        && current["pendingItem"]["index"]
-            .as_u64()
-            .ok_or_else(invalid)?
-            + 1
-            < current["backup"]["header"]["count"]
-                .as_u64()
-                .ok_or_else(invalid)?
-    {
-        if current["pendingItem"]["writeJournal"]["phase"] == "restoring" {
-            current = recover_restoring(manager, storage, project_id, &current, request)?;
-        }
-        current = cancel_unstarted_tail(manager, storage, project_id, &current, request)?;
-    }
-    // Bound execution by the archive contract, even if a malformed cursor ever
-    // reaches this layer. Every successful pass decreases the pending index.
-    for _ in 0..100_000 {
-        if canceled.load(Ordering::Acquire) {
-            return Ok(current);
-        }
-        match current["pendingItem"]["writeJournal"]["phase"].as_str() {
-            Some("applied") => {
-                current = writer::restore_first_regular_item(
-                    manager, storage, project_id, &current, request,
-                )?;
-            }
-            Some("restoring") => {
-                current = recover_restoring(manager, storage, project_id, &current, request)?;
-            }
-            Some("restored") => {}
-            _ => return Err(invalid()),
-        }
-        if current["pendingItem"]["index"] == 0 {
-            return completion::finish(manager, storage, project_id, &current, true, request);
-        }
-        current = previous_regular_item(manager, storage, project_id, &current, request)?;
-    }
-    Err(invalid())
+    let mut owner = RestoringBatch::start(storage, project_id, expected, request)?;
+    while !owner.advance(manager, storage, canceled)? {}
+    Ok(owner.record().clone())
 }
 
 fn recover_restoring(

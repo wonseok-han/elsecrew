@@ -24,6 +24,30 @@ fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut confirmations = Confirmations::default();
+    let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    f.manager.application_confirmations = confirmations;
+    let record = f.manager.start_confirmed_application(&mut f.storage, &token, "req_restore_fixture").unwrap();
+    f.manager.stop_application();
+    let mut owner = intent::execution::RestoringBatch::start(&f.storage, &f.project_id, &record, "req_restore_cancel").unwrap();
+    let canceled = std::sync::atomic::AtomicBool::new(true);
+    assert!(owner.advance(&f.manager, &mut f.storage, &canceled).unwrap());
+    canceled.store(false, std::sync::atomic::Ordering::Release);
+    assert!(owner.advance(&f.manager, &mut f.storage, &canceled).is_err());
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), record);
+    f.manager.start_selected_restoration(&f.storage, &f.project_id, &record, "req_restore_new").unwrap();
+    assert!(f.manager.application_running());
+    f.manager.poll_application(&mut f.storage);
+    assert!(!f.manager.application_running());
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap()["state"], "abandoned");
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_owner_cancellation_is_terminal_without_source_writes() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

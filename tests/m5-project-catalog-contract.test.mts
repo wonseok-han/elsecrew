@@ -7,7 +7,7 @@ test("application status is read-only, bounded, and tied to the selected project
   const status = {projectId:"project_a",applicationId:"application_0123456789abcdef0123456789abcdef",state:"applying",currentIndex:1,total:2,running:true};
   assert.doesNotThrow(() => validateProjectCatalogRequest(request));
   assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status},request));
-  for (const change of [{projectId:"other"},{currentIndex:2},{total:100001},{state:"unknown"},{applicationId:null},{path:"/source"},{running:"true"},{running:true,state:"applied"}]) {
+  for (const change of [{projectId:"other"},{currentIndex:2},{total:100001},{state:"unknown"},{applicationId:null},{path:"/source"},{running:"true"},{running:true,state:"restored"}]) {
     assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{...status,...change}},request));
   }
   assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:"applicationStatus",status:{projectId:"project_a",applicationId:null,state:"none",currentIndex:null,total:0,running:false}},request));

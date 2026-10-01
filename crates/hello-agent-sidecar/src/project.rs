@@ -332,7 +332,7 @@ impl Drop for StreamingGitChild {
 pub struct ProjectManager {
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
-    application_job: Option<application::review::intent::execution::ApplyingBatch>,
+    application_job: Option<application::review::intent::execution::ApplicationJob>,
     #[cfg(unix)]
     application_confirmations: application::review::confirmation::Confirmations,
     data_root: PathBuf,
@@ -380,8 +380,23 @@ impl ProjectManager {
             record["binding"]["projectId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application project"))?,
             record["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?,
         );
-        self.application_job = Some(owner);
+        self.application_job = Some(application::review::intent::execution::ApplicationJob::Apply(owner));
         Ok(record)
+    }
+
+    /// Internal exact-record restoration admission; not a public write endpoint.
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    fn start_selected_restoration(&mut self, storage: &Storage, project_id: &str, expected: &Value, request: &str) -> Result<Value, ProjectFailure> {
+        if self.application_job.is_some() || !self.pending_saves.is_empty() {
+            return Err(ProjectFailure::recovery("restoration requires an idle workspace"));
+        }
+        let owner = application::review::intent::execution::RestoringBatch::start(storage, project_id, expected, request)?;
+        let id = expected["applicationId"].as_str().ok_or_else(|| ProjectFailure::recovery("missing application identity"))?;
+        self.application_confirmations.cancel();
+        self.application_cancel.begin(project_id, id);
+        self.application_job = Some(application::review::intent::execution::ApplicationJob::Restore(owner));
+        Ok(expected.clone())
     }
 
     pub(crate) fn poll_application(&mut self, storage: &mut Storage) {

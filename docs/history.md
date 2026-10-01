@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (복원 소유자·주기 실행 연결)
+
+- 기준49e9c95에서 Karpathy 지침으로 기존 restore_selected의 원장 분기들을 RestoringBatch의 단계별 advance로 옮겼다. 기존 동기 호출도 같은 owner를 반복 실행한다. 매 단계 exact 원장·취소를 확인하며 오류/중단 뒤 같은 owner 재개를 거절한다. 단계 수는 archive 최대 항목 수에 맞춰 제한한다.
+- 반영/복원이 하나의 application_job 슬롯·입력 취소·poll·종료 경계를 공유한다. 내부 복원 입장은 exact 기록과 idle 저장 상태를 요구하며 확인 토큰을 폐기한다. 복원 시작 직전에는 영속 applied와 running이 함께 있을 수 있어 상태 계약에 이 조합을 허용했다. 공개 복원/반영 시작 IPC는 여전히 미활성이다.
+- 복원 owner 취소·기록 보존·재사용 거절·새 명시 입장 후 prepared 폐기 회귀를 작성했다. 기존 전체 복원 회귀도 새 owner를 경유한다. 포맷/diff만 검사했고 동작/컴파일·독립 검토는 통합에 남긴다. 개별 hash/시스템 호출의 긴 대기, 공개 확인/실행 UI, 공급자 활성화와 전체 검증은 후속이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (반영 실행 상태·중단 화면 연결)
 
 - 기준5da66e8에서 Karpathy 지침으로 applicationStatus에 현재 세션 owner의 exact project/application 일치로 계산한 running을 추가했다. 영속 applying만으로 현재 실행 중이라고 판단하지 않으며 재시작/오류 뒤 owner가 없으면 중단 상태로 표시한다. terminal/none의 running 응답은 계약에서 거절한다.

@@ -136,7 +136,7 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     keys(result,["schemaVersion","action","status"]);
     const status = object(result.status);
     keys(status,["projectId","applicationId","state","currentIndex","total","running"]);
-    if (typeof status.running !== "boolean" || (status.running && status.state !== "prepared" && status.state !== "applying")) throw new Error("invalid application execution state");
+    if (typeof status.running !== "boolean" || (status.running && !["prepared", "applying", "applied"].includes(String(status.state)))) throw new Error("invalid application execution state");
     if (id(status.projectId) !== request.projectId || !["none","prepared","applying","applied","restored","abandoned"].includes(String(status.state))) throw new Error("invalid application status");
     if (!Number.isSafeInteger(status.total) || (status.total as number) < 0 || (status.total as number) > 100000) throw new Error("invalid application count");
     if (status.state === "none") {
