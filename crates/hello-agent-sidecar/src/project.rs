@@ -351,6 +351,21 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            let plan = application::review::prepare(self, storage, project_id)?;
+            Ok(ProjectAction {
+                result: serde_json::json!({"schemaVersion":1,"action":"applicationPreview","projectId":project_id,"preview":plan.preview()}),
+                ..Default::default()
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (storage, project_id);
+            Err(ProjectFailure::recovery("application preview unavailable on this platform"))
+        }
+    }
     /// Historical summaries are not live lock checks or restoration grants.
     pub(crate) fn application_history(
         &self,

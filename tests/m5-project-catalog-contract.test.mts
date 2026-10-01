@@ -26,6 +26,21 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("application preview binds project, relative paths and explicit truncation", () => {
+  const request = { action: "applicationPreview" as const, projectId: "project_a" };
+  const preview = { worktreeId: "worktree_a", total: 1, changes: [{ path: "src/file.ts", kind: "modified" }] };
+  const result = { schemaVersion: 1, ...request, preview };
+  assert.doesNotThrow(() => validateProjectCatalogResult(result, request));
+  assert.throws(() => validateProjectCatalogResult({ ...result, projectId: "other" }, request));
+  for (const change of [
+    { total: 2 }, { total: -1 }, { changes: [{ path: "../secret", kind: "added" }] },
+    { changes: [{ path: "/absolute", kind: "added" }] },
+    { changes: [{ path: "src/file.ts", kind: "execute" }] },
+    { changes: [{ path: "src/file.ts", kind: "added", content: "private" }] },
+  ]) assert.throws(() => validateProjectCatalogResult({ ...result, preview: { ...preview, ...change } }, request));
+  assert.doesNotThrow(() => validateProjectCatalogResult({ ...result, preview: { ...preview, total: 101, changes: Array.from({ length: 100 }, (_, index) => ({path: `file-${index}`, kind: "added"})) } }, request));
+});
+
 test("application history is bounded, project-bound and terminal-only", () => {
   const request = { action: "applicationHistory" as const, projectId: "project_a" };
   const entry = { applicationId: `application_${"a".repeat(32)}`, state: "restored", total: 2 };

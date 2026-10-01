@@ -1,18 +1,19 @@
 import { useI18n } from "../i18n.tsx";
 import { useEffect, useRef, useState } from "react";
-import { validateProjectCatalogResult, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
+import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
 
 export function PreparationRecovery({ projectId, disabled }: { projectId: string; disabled: boolean }) {
   const { t } = useI18n();
   const [inspection, setInspection] = useState<PreparationInspection | null>(null);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
   const [history, setHistory] = useState<ApplicationHistoryEntry[] | null>(null);
+  const [preview, setPreview] = useState<ApplicationPreview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError">("");
+  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "previewError">("");
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
-    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setMessage("");
+    epoch.current++; setInspection(null); setApplication(null); setHistory(null); setPreview(null); setMessage("");
     return () => { epoch.current++; };
   }, [projectId, disabled]);
   const request = async (input: ProjectCatalogRequest) => {
@@ -25,6 +26,7 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
       if (result.action === "inspectPreparation") setInspection(result.inspection);
       else if (result.action === "applicationStatus") setApplication(result.status);
       else if (result.action === "applicationHistory") setHistory(result.entries);
+      else if (result.action === "applicationPreview") setPreview(result.preview);
       else if (result.action === "abandonPreparation") {
         setInspection(null);
         setMessage("done");
@@ -32,10 +34,22 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
     } catch {
       if (epoch.current === generation) setMessage(input.action === "abandonPreparation"
         ? "unknown"
+        : input.action === "applicationPreview" ? "previewError"
         : input.action === "applicationStatus" || input.action === "applicationHistory" ? "applicationError" : "error");
     } finally { pending.current = false; setBusy(false); }
   };
   return <div aria-label={t("m5.prep.title")} aria-busy={busy}>
+    <button type="button" disabled={disabled || busy} onClick={() => { setPreview(null); void request({ action: "applicationPreview", projectId }); }}>{t("m5.application.preview")}</button>
+    {preview && <section aria-label={t("m5.application.preview")}>
+      <p>{t("m5.application.previewHelp")}</p>
+      <p>{t("m5.application.workspace")} <code>{preview.worktreeId}</code></p>
+      <p>{t("m5.application.total")} {preview.total}</p>
+      {preview.total === 0 && <p>{t("m5.application.noChanges")}</p>}
+      {preview.total > preview.changes.length && <p>{t("m5.application.previewPartial")}</p>}
+      <ul>{preview.changes.map(change => <li key={change.path}>
+        {t(`m5.application.${change.kind}`)} <code>{change.path.replace(/[\p{Cc}\p{Cf}]/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}</code>
+      </li>)}</ul>
+    </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setInspection(null); void request({ action: "inspectPreparation", projectId }); }}>{t("m5.prep.inspect")}</button>
     <button type="button" disabled={disabled || busy} onClick={() => { setApplication(null); void request({action:"applicationStatus",projectId}); }}>{t("m5.application.inspect")}</button>
     {application && <div role="status"><p>{t(`m5.application.${application.state}`)}</p>{application.currentIndex !== null && <p>{t("m5.application.item")} {application.currentIndex + 1} / {application.total}</p>}</div>}
@@ -55,6 +69,6 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
       <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "abandonPreparation", inspection })}>{t("m5.prep.abandon")}</button>
       <button type="button" disabled={busy} onClick={() => setInspection(null)}>{t("m5.prep.back")}</button>
     </div>}
-    {message && <p role="status">{t(message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
+    {message && <p role="status">{t(message === "previewError" ? "m5.application.previewError" : message === "applicationError" ? "m5.application.error" : `m5.prep.${message}`)}</p>}
   </div>;
 }

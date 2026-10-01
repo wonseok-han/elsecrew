@@ -355,8 +355,27 @@ pub(in crate::project) fn revalidate(
     Ok(())
 }
 
-#[cfg(test)]
 impl ReviewPlan {
+    pub(in crate::project) fn preview(&self) -> Value {
+        let changes: Vec<Value> = self
+            .changes
+            .iter()
+            .take(100)
+            .map(|(path, change)| {
+                let kind = if change.before.is_none() {
+                    "added"
+                } else if change.after.is_none() {
+                    "deleted"
+                } else {
+                    "modified"
+                };
+                serde_json::json!({"path":path,"kind":kind})
+            })
+            .collect();
+        serde_json::json!({"worktreeId":self.binding["worktreeId"],"total":self.changes.len(),"changes":changes})
+    }
+
+    #[cfg(test)]
     pub(in crate::project) fn changed_paths(&self) -> Vec<&str> {
         self.changes.keys().map(String::as_str).collect()
     }

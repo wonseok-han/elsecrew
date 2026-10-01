@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (반영 전 변경 목록 제품 조회 연결)
+
+- 직전65bdfc8의 이력 화면은 진전이다. 현재 checkout/기존 archive를 보존하고 Karpathy 지침으로 기존 source baseline/lock 검증 기반 ReviewPlan을 읽기 전용 applicationPreview catalog 경로에 연결했다. 원장 승인/파일 쓰기 없이 작업 복사본 ID·전체 수·처음100개 상대경로/추가·수정·삭제만 반환한다.
+- 프로젝트 화면에 ko/en 목록·빈 상태·100개 초과 명시 안내와 실패 안내를 추가했다. 경로의 제어/방향 문자는 escape해 표시하고 stale 응답은 버린다. 검토 목록을 승인이나 현재 이후의 파일 일치 보장으로 사용하지 않는다. baseline 없는 기존 제품 snapshot은 계속 거절하며 공개 생성의 baseline 연결은 남아 있다.
+- 프로젝트 결속·상대경로·허용 종류·내부 필드 거절·명시 truncation 계약 회귀를 작성했다. 사용자 지시대로 빌드/테스트/UI 실측은 통합에 남기고 diff만 확인했다. 디렉터리·생성 baseline·채팅별 대상 연결·전체 목록/확인/실제 반영 UI와 최종 검증이 남는다. main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (프로젝트별 이전 반영 이력 화면)
 
 - 직전03f663c의 준비 중단 복구는 코드 진전이다. 현재 checkout/기존 archive를 보존하고 Karpathy 지침으로 applicationHistory 읽기 전용 catalog action과 저장 프로젝트 이력 목록을 연결했다. 종료 기록만 최대1,000개 요약하고 ID·프로젝트 결속·종료 상태·항목 수를 검사한다. 내부 경로·backup descriptor는 전달하지 않는다.
