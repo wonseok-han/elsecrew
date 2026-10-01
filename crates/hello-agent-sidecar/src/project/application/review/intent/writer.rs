@@ -32,6 +32,16 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(_) => return Err(invalid()),
     };
+    if meta.file_type().is_symlink() && meta.nlink() == 1 {
+        let bytes = link_bytes(dir, name)?;
+        if stamp(&meta) != stamp(&dir.symlink_metadata(name).map_err(|_| invalid())?) {
+            return Err(invalid());
+        }
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        return Ok(
+            json!({"kind":3,"mode":meta.mode(),"size":bytes.len(),"digest":digest,"identity":[meta.dev(),meta.ino(),meta.nlink()]}),
+        );
+    }
     if !meta.is_file() || meta.nlink() != 1 || meta.len() > super::super::super::MAX_BYTES {
         return Err(invalid());
     }
@@ -65,6 +75,24 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
     )
 }
 
+fn link_bytes(dir: &Dir, name: &str) -> Result<Vec<u8>, ProjectFailure> {
+    let name = CString::new(name).map_err(|_| invalid())?;
+    let mut bytes = vec![0u8; 4097];
+    let n = unsafe {
+        libc::readlinkat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+        )
+    };
+    if n <= 0 || n as usize >= bytes.len() {
+        return Err(invalid());
+    }
+    bytes.truncate(n as usize);
+    Ok(bytes)
+}
+
 fn matches_after(actual: &Value, expected: &Value) -> bool {
     if actual.is_null() || expected.is_null() {
         return actual == expected;
@@ -72,7 +100,10 @@ fn matches_after(actual: &Value, expected: &Value) -> bool {
     actual["kind"] == expected["kind"]
         && actual["size"] == expected["size"]
         && actual["digest"] == expected["digest"]
-        && actual["mode"].as_u64().map(|m| m & 0o100 != 0) == expected["executable"].as_bool()
+        && actual["mode"]
+            .as_u64()
+            .map(|m| actual["kind"] == 1 && m & 0o100 != 0)
+            == expected["executable"].as_bool()
 }
 
 // A persisted name is still data: never accept paths or unknown journal shapes.
@@ -338,7 +369,7 @@ pub(in crate::project) fn write_first_regular_item(
     }
     let item = &expected["pendingItem"]["item"];
     for side in ["before", "after"] {
-        if !item[side].is_null() && item[side]["kind"] != 1 {
+        if !item[side].is_null() && !matches!(item[side]["kind"].as_u64(), Some(1 | 3)) {
             return Err(invalid());
         }
     }
@@ -376,39 +407,54 @@ pub(in crate::project) fn write_first_regular_item(
         if !matches_after(&input_image, &item["after"]) {
             return Err(invalid());
         }
-        let mut input = open(&input_dir, &input_leaf, false)?;
-        let name = CString::new(retained.as_str()).map_err(|_| invalid())?;
-        let fd = unsafe {
-            libc::openat(
-                dir.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        if fd < 0 {
-            return Err(invalid());
-        }
-        let mut output = File::from_std(unsafe { std::fs::File::from_raw_fd(fd) });
-        let size = item["after"]["size"].as_u64().ok_or_else(invalid)?;
-        let copied =
-            std::io::copy(&mut (&mut input).take(size + 1), &mut output).map_err(|_| invalid())?;
-        let mode = if item["before"].is_null() {
-            0o644
+        if item["after"]["kind"] == 3 {
+            let bytes = link_bytes(&input_dir, &input_leaf)?;
+            let target = CString::new(bytes).map_err(|_| invalid())?;
+            let name = CString::new(retained.as_str()).map_err(|_| invalid())?;
+            // symlinkat creates a new directory entry and never follows its target.
+            if unsafe { libc::symlinkat(target.as_ptr(), dir.as_raw_fd(), name.as_ptr()) } != 0 {
+                return Err(invalid());
+            }
         } else {
-            item["before"]["mode"].as_u64().ok_or_else(invalid)? & 0o777
-        };
-        let mode = if item["after"]["executable"] == true {
-            mode | 0o100
-        } else {
-            mode & !0o100
-        };
-        if copied != size || unsafe { libc::fchmod(output.as_raw_fd(), mode as libc::mode_t) } != 0
-        {
-            return Err(invalid());
+            let mut input = open(&input_dir, &input_leaf, false)?;
+            let name = CString::new(retained.as_str()).map_err(|_| invalid())?;
+            let fd = unsafe {
+                libc::openat(
+                    dir.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_WRONLY
+                        | libc::O_CREAT
+                        | libc::O_EXCL
+                        | libc::O_NOFOLLOW
+                        | libc::O_CLOEXEC,
+                    0o600,
+                )
+            };
+            if fd < 0 {
+                return Err(invalid());
+            }
+            let mut output = File::from_std(unsafe { std::fs::File::from_raw_fd(fd) });
+            let size = item["after"]["size"].as_u64().ok_or_else(invalid)?;
+            let copied = std::io::copy(&mut (&mut input).take(size + 1), &mut output)
+                .map_err(|_| invalid())?;
+            let mode = if item["before"].is_null() {
+                0o644
+            } else {
+                item["before"]["mode"].as_u64().ok_or_else(invalid)? & 0o777
+            };
+            let mode = if item["after"]["executable"] == true {
+                mode | 0o100
+            } else {
+                mode & !0o100
+            };
+            if copied != size
+                || unsafe { libc::fchmod(output.as_raw_fd(), mode as libc::mode_t) } != 0
+            {
+                return Err(invalid());
+            }
+            output.flush().map_err(|_| invalid())?;
+            output.sync_all().map_err(|_| invalid())?;
         }
-        output.flush().map_err(|_| invalid())?;
-        output.sync_all().map_err(|_| invalid())?;
         let staged = image(&dir, &retained)?;
         if !matches_after(&staged, &item["after"]) || image(&input_dir, &input_leaf)? != input_image
         {

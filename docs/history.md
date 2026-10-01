@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (링크 자체 반영·복원 후보)
+
+- 직전460dbae의 역순 복원 구현은 진전이다. 현행 checkout/기존 archive를 확인하고 Karpathy 지침으로 writer image·staging만 확장해 일반 파일 외 심볼릭 링크를 연결했다. readlinkat으로 최대4096byte 링크 문자열을 읽고 symlinkat으로 새 링크를 준비하며 대상 파일을 따라 읽거나 쓰지 않는다. 링크의 executable은 false로 비교하고 기존 신원/내용·보존형 rename·복원 경로를 재사용한다.
+- 합성 source 파일을 가리키는 링크의 추가→복원과 대상 bytes 유지·보존 이름에 링크 유지 회귀를 작성했다. 테스트/빌드/독립 검토는 미실행이며 포맷/diff만 확인한다. 제품 활성화 없음. 디렉터리·전체 완료/잠금 해제·IPC/UI 및 누적 검증은 남는다. 기존 함수의 regular/first 이름은 내부 호환 이름으로 남아 있으며 실제 pending index와 regular/link를 처리한다. 실제 사용자 파일·계정·모델·main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (역순 다중 복원 연결)
 
 - 직전3c44ee9의 다중 파일 전진 구현은 진전이다. 현재 Git 상태와 기록을 대조하고 기존 archive 변경을 보존했다. Karpathy 지침으로 완료 목록을 재사용해 현재 파일이 restored인 경우에만 직전 applied 항목을 복원 대상으로 선택하도록 구현했다.

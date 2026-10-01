@@ -4,6 +4,88 @@ use tempfile::TempDir;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn application_link_roundtrip_never_changes_target_file() {
+    use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f
+        .manager
+        .validate_active_project(&f.storage, &f.project_id)
+        .unwrap();
+    let target = f.source.join("src/edit.txt");
+    let bytes = fs::read(&target).unwrap();
+    std::os::unix::fs::symlink(&target, active.worktree_path.join("src/link.txt")).unwrap();
+    let review =
+        persistence::publish(&f.manager, &mut f.storage, &f.project_id, "req_link_review").unwrap();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner
+        .open(
+            &f.manager,
+            &f.storage,
+            ReviewTarget::Project(&f.project_id),
+            review["reviewId"].as_str().unwrap(),
+        )
+        .unwrap();
+    let prepared = owner
+        .prepare_backup(&f.manager, &mut f.storage, &token, "req_link_backup")
+        .unwrap();
+    let record = intent::begin(
+        &f.manager,
+        &mut f.storage,
+        &mut owner,
+        prepared,
+        "req_link_begin",
+    )
+    .unwrap();
+    let record = intent::mark_write_started(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &record,
+        "req_link_start",
+    )
+    .unwrap();
+    let record = intent::record_first_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &record,
+        "req_link_pending",
+    )
+    .unwrap();
+    let applied = intent::writer::write_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &record,
+        "req_link_apply",
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_link(f.source.join("src/link.txt")).unwrap(),
+        target
+    );
+    assert_eq!(fs::read(&target).unwrap(), bytes);
+    let restored = intent::writer::restore_first_regular_item(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &applied,
+        "req_link_restore",
+    )
+    .unwrap();
+    assert!(fs::symlink_metadata(f.source.join("src/link.txt")).is_err());
+    let retained = restored["pendingItem"]["writeJournal"]["retainedName"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        fs::read_link(f.source.join("src").join(retained)).unwrap(),
+        target
+    );
+    assert_eq!(fs::read(&target).unwrap(), bytes);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn application_advances_two_files_without_losing_prior_journal() {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();

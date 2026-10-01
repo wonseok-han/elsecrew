@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 링크 체크포인트(미검증): writer의 image/staging에 symlink 문자열 읽기/생성을 연결했다. 대상 추적 없이 최대4096byte·신원/내용을 대조하고 기존 보존형 rename/역복원을 재사용한다. 일반 파일↔링크 종류 전환은 review의 기존 거절 정책을 유지한다. 디렉터리와 전체 완료/제품 활성화는 남는다.
+
 - 2026-10-01 역순 복원 체크포인트(미검증): restored인 현재 항목을 restoredItems로 보존하고 직전 applied 항목을 선택하는 경로를 추가했다. 복원한 suffix 순번/phase/archive를 확인하며 복원 후 정방향 전진은 거절한다. 마지막 전체 대조/잠금 해제·제품 연결은 여전히 미완료다.
 
 - 2026-10-01 다중 항목 체크포인트(미검증): applied인 현재 항목의 양쪽 파일을 확인한 뒤 다음 archive index로 전진하며 이전 journal 전체를 completedItems에 보존한다. index/목록 길이·archive metadata·project/lock CAS와 metadata32MiB 한도를 대조한다. 마지막 항목 이후 전체 완료, 역순 다중 복원과 제품 IPC/UI는 아직 연결 전이다.
