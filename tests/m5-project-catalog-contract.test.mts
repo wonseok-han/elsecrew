@@ -26,6 +26,13 @@ test("preparation recovery binds exact identity and safe revisions", () => {
   assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, action: "inspectPreparation", inspection }, { action: "inspectPreparation", projectId: "other" }));
 });
 
+test("application workspace preparation binds explicit project without paths", () => {
+  const request = { action: "prepareApplicationWorkspace" as const, projectId: "project_a" };
+  assert.doesNotThrow(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, worktreeId: "worktree_a" }, request));
+  assert.throws(() => validateProjectCatalogResult({ schemaVersion: 1, ...request, projectId: "other", worktreeId: "worktree_a" }, request));
+  assert.throws(() => validateProjectCatalogRequest({ ...request, path: "/tmp/project" }));
+});
+
 test("application preview binds project, relative paths and explicit truncation", () => {
   const request = { action: "applicationPreview" as const, projectId: "project_a" };
   const preview = { worktreeId: "worktree_a", total: 1, changes: [{ path: "src/file.ts", kind: "modified" }] };

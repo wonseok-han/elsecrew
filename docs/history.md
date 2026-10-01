@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (명시적 반영 검토용 복사본 생성 연결)
+
+- 직전3eea89d의 목록 조회는 진전이다. Karpathy 지침으로 기존 ApplicationCandidate 생성과 baseline 결속을 prepareApplicationWorkspace catalog action에 연결했다. 일반/채팅 생성에 clean-source 조건을 강제하지 않고 별도 명시 선택을 제공한다. 원본 baseline 사전 검사는 잠금 예약 전에 수행하고 실제 생성 fence 안에서 다시 수집/대조한다.
+- 프로젝트 화면에서 원본 무변경·기존 복사본/채팅 보존·현재 복사본 전환·실제 반영 미지원 안내 후 확인하도록 했다. 성공 시 새 ID/프로젝트 재열기 안내, 실패 시 자동 재시도 없이 상태 확인을 제공한다. 기존 복사본을 소급 승격하지 않는다.
+- 새 baseline·기존 기준 보존·빈 preview·dirty 원본 거절 시 원장 무변경과 IPC ID 결속 회귀를 작성했다. 테스트/빌드/UI 실측은 최종 통합에 남기고 diff만 확인했다. 채팅별 대상 선택·디렉터리·실제 반영/복원·통합 검증/독립 안전 검토는 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (반영 전 변경 목록 제품 조회 연결)
 
 - 직전65bdfc8의 이력 화면은 진전이다. 현재 checkout/기존 archive를 보존하고 Karpathy 지침으로 기존 source baseline/lock 검증 기반 ReviewPlan을 읽기 전용 applicationPreview catalog 경로에 연결했다. 원장 승인/파일 쓰기 없이 작업 복사본 ID·전체 수·처음100개 상대경로/추가·수정·삭제만 반환한다.

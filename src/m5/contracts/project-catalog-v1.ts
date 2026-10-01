@@ -11,9 +11,11 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "applicationStatus"; projectId: string }
   | { action: "applicationHistory"; projectId: string }
   | { action: "applicationPreview"; projectId: string }
+  | { action: "prepareApplicationWorkspace"; projectId: string }
   | { action: "abandonPreparation"; inspection: PreparationInspection };
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
+  | { schemaVersion: 1; action: "prepareApplicationWorkspace"; projectId: string; worktreeId: string }
   | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
@@ -46,7 +48,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   if (request.action === "list") {
     keys(request, ["action", "cursor"]);
     if (request.cursor !== null) id(request.cursor);
-  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview") {
+  } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -57,7 +59,11 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   const request = validateProjectCatalogRequest(input);
   const result = object(value);
   if (result.schemaVersion !== 1 || result.action !== request.action || new TextEncoder().encode(JSON.stringify(value)).byteLength > 768 * 1024) throw new Error("invalid catalog response envelope");
-  if (request.action === "applicationPreview") {
+  if (request.action === "prepareApplicationWorkspace") {
+    keys(result, ["schemaVersion", "action", "projectId", "worktreeId"]);
+    if (id(result.projectId) !== request.projectId) throw new Error("prepared application project mismatch");
+    id(result.worktreeId);
+  } else if (request.action === "applicationPreview") {
     keys(result, ["schemaVersion", "action", "projectId", "preview"]);
     if (id(result.projectId) !== request.projectId) throw new Error("preview project mismatch");
     const preview = object(result.preview);

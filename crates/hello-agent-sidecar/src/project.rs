@@ -157,7 +157,7 @@ pub enum WorktreeFailurePoint {
 enum SnapshotCreation {
     ReuseActive,
     FreshChat,
-    // Not exposed through product IPC until application admission is ready.
+    // Explicit clean-source creation; never upgrades an existing snapshot.
     #[cfg(unix)]
     #[allow(dead_code)]
     ApplicationCandidate,
@@ -351,6 +351,27 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn prepare_application_workspace(&mut self, storage: &mut Storage, project_id: &str, request_id: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        {
+            // Reject unsupported/dirty input before reserving a recovery lock.
+            // Creation captures again under its durable launch fence.
+            let project = required_project(storage, project_id)?;
+            let source = self.open_source_repository(Path::new(value_string(&project, "canonical_path")?))?;
+            application::git_baseline::raw_baseline::capture_clean_baseline(self, &source)?;
+            self.create_worktree_inner(storage, project_id, request_id, None, None, SnapshotCreation::ApplicationCandidate)?;
+            let active = self.validate_active_project(storage, project_id)?;
+            Ok(ProjectAction {
+                result: serde_json::json!({"schemaVersion":1,"action":"prepareApplicationWorkspace","projectId":project_id,"worktreeId":active.worktree_id}),
+                ..Default::default()
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (storage, project_id, request_id);
+            Err(ProjectFailure::recovery("application workspace unavailable on this platform"))
+        }
+    }
     pub(crate) fn application_preview(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         {

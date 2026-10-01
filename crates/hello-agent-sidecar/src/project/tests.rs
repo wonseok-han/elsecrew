@@ -2,6 +2,25 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[test]
+fn explicit_application_workspace_records_baseline_and_rejects_dirty_before_reservation() {
+    let (mut f, _) = prepared_backup_fixture();
+    let previous = required_project(&f.storage, &f.project_id).unwrap();
+    let result = f.manager.prepare_application_workspace(&mut f.storage, &f.project_id, "req_public_baseline").unwrap();
+    let worktree = result.result["worktreeId"].as_str().unwrap();
+    assert_ne!(previous["worktree_id"], worktree);
+    let current = required_project(&f.storage, &f.project_id).unwrap();
+    assert!(current["source_baselines"].get(worktree).is_some());
+    assert!(current["source_baselines"].get(previous["worktree_id"].as_str().unwrap()).is_some());
+    assert_eq!(f.manager.application_preview(&f.storage, &f.project_id).unwrap().result["preview"]["total"], 0);
+    fs::write(f.source.join("src/edit.txt"), b"user changes").unwrap();
+    assert!(f.manager.prepare_application_workspace(&mut f.storage, &f.project_id, "req_dirty_baseline").is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), current);
+    assert!(f.storage.blocker_ids().unwrap().is_empty());
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"user changes");
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn application_cancels_before_first_write_with_or_without_pending_item() {
