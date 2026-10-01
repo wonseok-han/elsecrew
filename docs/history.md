@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (검토 대상별 UI 수명 분리)
+
+- 기준e7d4e07에서 Karpathy 지침으로 반영/복원 제어를 action·project·chat/record·confirmation/fingerprint 조합의 keyed session으로 분리했다. 검토/복원 부모도 exact 대상 key를 사용해 대상 변경 render에서 이전 확인 버튼이 잠시 남거나 이전 pending ref가 새 대상을 막지 않도록 했다.
+- unmount 뒤 늦은 시작 응답은 이전 실행 ID를 갱신하지 않고 기존 alive 검사로 후속 상태 조회도 수행하지 않는다. capability effect는 effect-local 유효성으로 StrictMode의 이전 조회 응답도 버린다. 같은 대상의 일시 disabled는 이전 커밋의 시작 후 수명 유지를 따른다.
+- 대상 필드별 key 분리와 disabled 전환의 key 유지 회귀를 작성했다(비동기 React 동작의 증거는 아님). diff만 검사했고 회귀 실행·실제 대상 전환·늦은 IPC 응답·타입/UI 검증은 통합 단계에 남긴다. backend 원본 쓰기/실제 공급자는 활성화하지 않았다. 설치본 복구 승인 대기와 독립적으로 구현했으며 전체 앱은 미완료다. archive 변경 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (반영·복원 화면의 시작 후 수명 분리)
 
 - 기준0f37f05에서 설치본 복구 승인과 독립적인 UI 연결을 계속했다. Karpathy 지침으로 시작 요청 직전 부모에 시도 사실을 전달해 이후 확인 만료·페이지 이동·재조회가 실행 상태/중단 UI를 제거하지 않도록 했다. 시작 응답 유실도 같은 화면에서 재시도하지 않는다.

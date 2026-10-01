@@ -3,7 +3,12 @@ import { useI18n } from "../i18n.tsx";
 import { ApplicationStartControl } from "./application-start-control.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage } from "./contracts/project-catalog-v1.ts";
 
-export function ChatApplicationPreview({ projectId, chatId, worktreeId, disabled }: { projectId: string; chatId: string; worktreeId: string; disabled: boolean }) {
+type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean };
+export function ChatApplicationPreview(props: PreviewProps) {
+  return <ChatApplicationPreviewSession key={JSON.stringify([props.projectId, props.chatId, props.worktreeId])} {...props} />;
+}
+
+function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled }: PreviewProps) {
   const { t } = useI18n();
   const [preview, setPreview] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);

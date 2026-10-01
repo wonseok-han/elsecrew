@@ -4,9 +4,18 @@ import { ApplicationFailure } from "./application-failure.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogRequest, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
 type StartRequest = Extract<ProjectCatalogRequest, { action: "startApplication" | "restoreApplication" }>;
+type StartProps = { request: StartRequest; disabled: boolean; onAttempt?: () => void };
 
 /** Start once per reviewed target. A lost response requires status inspection, not replay. */
-export function ApplicationStartControl({ request, disabled, onAttempt }: { request: StartRequest; disabled: boolean; onAttempt?: () => void }) {
+export function ApplicationStartControl(props: StartProps) {
+  const request = props.request;
+  const key = JSON.stringify(request.action === "startApplication"
+    ? [request.action, request.projectId, request.chatId, request.confirmationId]
+    : [request.action, request.projectId, request.applicationId, request.fingerprint]);
+  return <ApplicationStartSession key={key} {...props} />;
+}
+
+function ApplicationStartSession({ request, disabled, onAttempt }: StartProps) {
   const { t } = useI18n();
   const [enabled, setEnabled] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -20,12 +29,13 @@ export function ApplicationStartControl({ request, disabled, onAttempt }: { requ
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
+    let current = true;
     const query = { action: "applicationCapabilities" as const };
     if (window.m5Projects) void window.m5Projects.request(query).then(raw => {
       const result = validateProjectCatalogResult(raw, query);
-      if (alive.current && result.action === "applicationCapabilities") setEnabled(result.enabled);
-    }).catch(() => { if (alive.current) setEnabled(false); });
-    return () => { alive.current = false; };
+      if (current && result.action === "applicationCapabilities") setEnabled(result.enabled);
+    }).catch(() => { if (current) setEnabled(false); });
+    return () => { current = false; alive.current = false; };
   }, []);
 
   async function refresh() {
@@ -55,7 +65,7 @@ export function ApplicationStartControl({ request, disabled, onAttempt }: { requ
     if (!stop) { setAttempted(true); onAttempt?.(); }
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(command), command);
-      if (result.action === "startApplication") expectedId.current = result.applicationId;
+      if (alive.current && result.action === "startApplication") expectedId.current = result.applicationId;
     }
     catch { if (alive.current) setUnknown(true); }
     finally { pending.current = false; if (alive.current) { setBusy(false); void refresh(); } }

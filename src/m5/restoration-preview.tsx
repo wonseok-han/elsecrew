@@ -3,7 +3,12 @@ import { useI18n } from "../i18n.tsx";
 import { ApplicationStartControl } from "./application-start-control.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage } from "./contracts/project-catalog-v1.ts";
 
-export function RestorationPreview({ projectId, applicationId, disabled }: { projectId: string; applicationId: string; disabled: boolean }) {
+type RestorationProps = { projectId: string; applicationId: string; disabled: boolean };
+export function RestorationPreview(props: RestorationProps) {
+  return <RestorationPreviewSession key={JSON.stringify([props.projectId, props.applicationId])} {...props} />;
+}
+
+function RestorationPreviewSession({ projectId, applicationId, disabled }: RestorationProps) {
   const { t } = useI18n();
   const [page, setPage] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
