@@ -110,11 +110,12 @@ pub(in crate::project) fn verify_bound(
         return Err(invalid());
     }
     let receipt = BaselineReceipt::from_value(record.get("receipt").ok_or_else(invalid)?)?;
-    verify(
+    verify_checked(
         &ReceiptStore::open(manager)?,
         active,
         current,
         Some(&receipt),
+        &|| manager.check_application_preparation(),
     )
 }
 
@@ -208,6 +209,15 @@ impl Write for LimitedBytes {
 }
 
 fn encode(active: &ActiveProject, baseline: &SourceBaseline) -> Result<Vec<u8>, ProjectFailure> {
+    encode_checked(active, baseline, &|| Ok(()))
+}
+
+fn encode_checked(
+    active: &ActiveProject,
+    baseline: &SourceBaseline,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<Vec<u8>, ProjectFailure> {
+    check()?;
     if baseline.source_root != canonical_protocol_path_without_existing(&active.canonical_git_root)?
         || baseline.source_identity != active.source_identity
         || baseline.object_format != active.object_format
@@ -238,6 +248,7 @@ fn encode(active: &ActiveProject, baseline: &SourceBaseline) -> Result<Vec<u8>, 
         .write_all(b",\"indexEntries\":[")
         .map_err(|_| invalid())?;
     for (i, (path, e)) in baseline.index.entries.iter().enumerate() {
+        check()?;
         if i != 0 {
             output.write_all(b",").map_err(|_| invalid())?;
         }
@@ -247,6 +258,7 @@ fn encode(active: &ActiveProject, baseline: &SourceBaseline) -> Result<Vec<u8>, 
         .write_all(b"],\"rawEntries\":[")
         .map_err(|_| invalid())?;
     for (i, (path, e)) in baseline.raw.entries.iter().enumerate() {
+        check()?;
         if i != 0 {
             output.write_all(b",").map_err(|_| invalid())?;
         }
@@ -330,6 +342,17 @@ pub(in crate::project) fn verify(
     current: &SourceBaseline,
     recorded: Option<&BaselineReceipt>,
 ) -> Result<(), ProjectFailure> {
+    verify_checked(store, active, current, recorded, &|| Ok(()))
+}
+
+fn verify_checked(
+    store: &ReceiptStore,
+    active: &ActiveProject,
+    current: &SourceBaseline,
+    recorded: Option<&BaselineReceipt>,
+    check: &dyn Fn() -> Result<(), ProjectFailure>,
+) -> Result<(), ProjectFailure> {
+    check()?;
     let root = &store.directory;
     // A file appearing on disk is not evidence that an old snapshot had a baseline.
     let recorded = recorded.ok_or_else(invalid)?;
@@ -347,15 +370,22 @@ pub(in crate::project) fn verify(
         return Err(invalid());
     }
     let mut bytes = Vec::new();
-    (&mut file)
-        .take(recorded.length + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| invalid())?;
+    let mut input = (&mut file).take(recorded.length + 1);
+    let mut buffer = [0u8; 65536];
+    loop {
+        check()?;
+        let n = input.read(&mut buffer).map_err(|_| invalid())?;
+        check()?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..n]);
+    }
     if bytes.len() as u64 != recorded.length
         || stamp(&before) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&before) != stamp(&root.symlink_metadata(&name).map_err(|_| invalid())?)
         || format!("sha256:{:x}", Sha256::digest(&bytes)) != recorded.digest
-        || bytes != encode(active, current)?
+        || bytes != encode_checked(active, current, check)?
     {
         return Err(invalid());
     }

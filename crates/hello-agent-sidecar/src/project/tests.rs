@@ -2,6 +2,24 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[test]
+fn preparation_cancel_reaches_index_and_bound_receipt_without_mutation() {
+    use application::git_baseline::{capture_index_baseline, raw_baseline::{capture_clean_baseline, receipt}};
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f.manager.validate_active_project(&f.storage, &f.project_id).unwrap();
+    let source = f.manager.open_source_repository(&active.canonical_git_root).unwrap();
+    let baseline = capture_clean_baseline(&f.manager, &source).unwrap();
+    let before = required_project(&f.storage, &f.project_id).unwrap();
+    f.manager.preparation_cancel = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)));
+    assert!(capture_index_baseline(&f.manager, &source).is_err());
+    assert!(receipt::verify_bound(&f.manager, &f.storage, &active, &baseline).is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+    f.manager.preparation_cancel = None;
+    assert!(capture_index_baseline(&f.manager, &source).is_ok());
+    assert!(receipt::verify_bound(&f.manager, &f.storage, &active, &baseline).is_ok());
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn application_poll_conflict_exposes_bounded_failure_without_unlocking() {

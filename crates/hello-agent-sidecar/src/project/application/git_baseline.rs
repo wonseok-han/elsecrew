@@ -33,15 +33,17 @@ pub(in crate::project) fn capture_index_baseline(
     manager: &ProjectManager,
     source: &SourceRepository,
 ) -> Result<GitIndexBaseline, ProjectFailure> {
+    manager.check_application_preparation()?;
     validated_oid(&source.base_commit, &source.object_format)?;
     validated_oid(&source.base_tree, &source.object_format)?;
-    let before = index_image(source)?;
+    let before = index_image(manager, source)?;
     let shared = manager.git_at(&source.git_dir, ["rev-parse", "--shared-index-path"])?;
     if !shared.stdout.is_empty() {
         return Err(ProjectFailure::dirty(
             "split index needs a separate shared-index baseline",
         ));
     }
+    manager.check_application_preparation()?;
     let index = manager.git_limited_bytes_at(
         &source.git_dir,
         [
@@ -59,6 +61,7 @@ pub(in crate::project) fn capture_index_baseline(
         &[0],
         OUTPUT_LIMIT,
     )?;
+    manager.check_application_preparation()?;
     let tree = manager.git_limited_bytes_at(
         &source.git_dir,
         [
@@ -76,6 +79,7 @@ pub(in crate::project) fn capture_index_baseline(
         &[0],
         OUTPUT_LIMIT,
     )?;
+    manager.check_application_preparation()?;
     let entries = parse(&index, &source.object_format, true)?;
     if entries != parse(&tree, &source.object_format, false)? {
         return Err(ProjectFailure::dirty(
@@ -84,6 +88,7 @@ pub(in crate::project) fn capture_index_baseline(
     }
     // Mode/OID/path alone hides intent-to-add on a committed empty blob. Cached-only
     // plumbing checks that flag without reading working-tree files or invoking converters.
+    manager.check_application_preparation()?;
     let difference = manager.git_allow_status_at(
         &source.git_dir,
         [
@@ -120,6 +125,7 @@ pub(in crate::project) fn capture_index_baseline(
         ("HEAD^{commit}", &source.base_commit),
         ("HEAD^{tree}", &source.base_tree),
     ] {
+        manager.check_application_preparation()?;
         let output = manager.git_at(&source.git_dir, ["rev-parse", "--verify", revision])?;
         if trim_output(&output)? != *expected {
             return Err(ProjectFailure::dirty(
@@ -127,7 +133,7 @@ pub(in crate::project) fn capture_index_baseline(
             ));
         }
     }
-    if before != index_image(source)? {
+    if before != index_image(manager, source)? {
         return Err(ProjectFailure::dirty(
             "source index changed during baseline capture",
         ));
@@ -140,17 +146,27 @@ pub(in crate::project) fn capture_index_baseline(
     })
 }
 
-fn index_image(source: &SourceRepository) -> Result<([i128; 9], [u8; 32]), ProjectFailure> {
+fn index_image(
+    manager: &ProjectManager,
+    source: &SourceRepository,
+) -> Result<([i128; 9], [u8; 32]), ProjectFailure> {
     let mut file = open(&source.git_dir, "index", false)?;
     let metadata = file.metadata().map_err(|_| failure())?;
     if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > INDEX_LIMIT {
         return Err(failure());
     }
     let mut bytes = Vec::new();
-    (&mut file)
-        .take(INDEX_LIMIT + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| failure())?;
+    let mut input = (&mut file).take(INDEX_LIMIT + 1);
+    let mut buffer = [0u8; 65536];
+    loop {
+        manager.check_application_preparation()?;
+        let n = input.read(&mut buffer).map_err(|_| failure())?;
+        manager.check_application_preparation()?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..n]);
+    }
     if bytes.len() as u64 != metadata.len()
         || stamp(&metadata) != stamp(&file.metadata().map_err(|_| failure())?)
         || stamp(&metadata)

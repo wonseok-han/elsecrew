@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (준비 취소의 index·receipt 연결)
+
+- 기준c067006에서 Karpathy 지침으로 Git index 이미지와 bound receipt 읽기를 기존 크기 상한 안의 64KiB 청크로 바꿔 scoped 준비 취소를 확인했다. receipt 재인코딩도 index/raw 항목 사이에서 같은 callback을 확인한다. 기존 일반 persist/verify 호출은 no-op callback으로 동작을 유지한다.
+- Git index baseline의 명령 사이에도 취소 확인을 추가했다. 현재 실행 중인 Git subprocess/블로킹 read는 기존 시간 제한·소유권 정리를 따르며 즉시 선점 취소를 주장하지 않는다. 두 이미지 비교·receipt 바이트 비교·서명 아닌 데이터 digest 의미는 바뀌지 않았다.
+- 준비 취소가 index/receipt까지 전달되고 project 기록은 유지되며 scoped flag 제거 후 일반 검증이 가능함을 확인하는 회귀를 작성했다. 포맷/diff만 검사했고 실행/컴파일·독립 검토는 통합에 남긴다. 실제 공급자 활성화·Windows/G6/전체 제품 검증은 아직 남고 제품 원본 쓰기는 비활성이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (원본 기준·작업 복사본 읽기의 준비 취소 연결)
 
 - 기준f1c6616에서 Karpathy 지침으로 raw inventory의 양쪽 관측·디렉터리 항목·64KiB 읽기에 취소 callback을 전달했다. 기존 capture 호출은 no-op callback을 사용하고 반영 준비의 source baseline/작업 복사본 비교만 manager의 scoped 준비 신호를 사용한다. 기존 두 pass·신원/내용/예산 검증은 유지한다.
