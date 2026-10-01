@@ -12,6 +12,7 @@ export interface BackupStorageUsage { usedBytes: number; limitBytes: number; rem
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
   | { action: "backupStorageUsage" }
+  | { action: "setBackupStorageLimit"; expectedLimitBytes: number; limitBytes: number }
   | { action: "backupPreparations"; projectId: string }
   | { action: "abandonBackupPreparation"; projectId: string; reviewId: string; fingerprint: string }
   | { action: "startApplication"; projectId: string; chatId: string; confirmationId: string }
@@ -32,6 +33,7 @@ export interface ProjectCatalogEntry { projectId: string; canonicalPath: string 
 export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
   | { schemaVersion: 1; action: "backupStorageUsage"; usage: BackupStorageUsage }
+  | { schemaVersion: 1; action: "setBackupStorageLimit"; limitBytes: number }
   | { schemaVersion: 1; action: "backupPreparations"; projectId: string; entries: BackupPreparation[] }
   | { schemaVersion: 1; action: "abandonBackupPreparation"; projectId: string; reviewId: string }
   | { schemaVersion: 1; action: "startApplication"; projectId: string; chatId: string; applicationId: string }
@@ -62,6 +64,9 @@ function id(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new Error("invalid catalog ID");
   return value;
 }
+function backupLimit(value: unknown) {
+  if (!Number.isSafeInteger(value) || (value as number) < 1024 ** 3 || (value as number) > 1024 ** 4 || (value as number) % 1024 ** 3 !== 0) throw new Error("invalid backup storage limit");
+}
 export function validatePreparationInspection(value: unknown): PreparationInspection {
   const inspection = object(value);
   keys(inspection, ["projectId", "worktreeId", "workspaceIdentity", "lockId", "projectRevision", "lockRevision"]);
@@ -74,6 +79,9 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   const request = object(value);
   if (request.action === "applicationCapabilities" || request.action === "backupStorageUsage") {
     keys(request, ["action"]);
+  } else if (request.action === "setBackupStorageLimit") {
+    keys(request, ["action", "expectedLimitBytes", "limitBytes"]);
+    backupLimit(request.expectedLimitBytes); backupLimit(request.limitBytes);
   } else if (request.action === "backupPreparations") {
     keys(request, ["action", "projectId"]); id(request.projectId);
   } else if (request.action === "abandonBackupPreparation") {
@@ -129,7 +137,11 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     for (const key of ["usedBytes", "limitBytes", "remainingBytes"]) {
       if (!Number.isSafeInteger(usage[key]) || (usage[key] as number) < 0) throw new Error("invalid backup storage amount");
     }
-    if (usage.limitBytes !== 5 * 1024 ** 3 || usage.remainingBytes !== Math.max(0, (usage.limitBytes as number) - (usage.usedBytes as number))) throw new Error("inconsistent backup storage budget");
+    backupLimit(usage.limitBytes);
+    if (usage.remainingBytes !== Math.max(0, (usage.limitBytes as number) - (usage.usedBytes as number))) throw new Error("inconsistent backup storage budget");
+  } else if (request.action === "setBackupStorageLimit") {
+    keys(result, ["schemaVersion", "action", "limitBytes"]);
+    if (result.limitBytes !== request.limitBytes) throw new Error("backup storage limit response mismatch");
   } else if (request.action === "backupPreparations") {
     keys(result, ["schemaVersion", "action", "projectId", "entries"]);
     if (result.projectId !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid backup preparation list");

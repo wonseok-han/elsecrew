@@ -360,6 +360,15 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn set_backup_storage_limit(&self, expected: u64, limit: u64) -> Result<ProjectAction, ProjectFailure> {
+        if self.application_running() || self.preparation_cancel.is_some() { return Err(ProjectFailure::recovery("backup budget change requires idle processing")); }
+        #[cfg(unix)]
+        { application::review::backup::set_storage_limit(self, expected, limit)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"setBackupStorageLimit","limitBytes":limit}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (expected, limit); Err(ProjectFailure::recovery("backup budget change unavailable on this platform")) }
+    }
+
     pub(crate) fn backup_storage_usage(&self) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"backupStorageUsage","usage":application::review::backup::storage_usage(self)?}), ..Default::default() }) }

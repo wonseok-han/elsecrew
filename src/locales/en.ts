@@ -723,6 +723,11 @@ export const en: Record<MessageKey, string> = {
   "m5.backup.storageTitle": "Check app-wide restore storage",
   "m5.backup.storageAmounts": "Used {used} bytes / limit {limit} bytes · remaining budget {remaining} bytes",
   "m5.backup.storageHelp": "A snapshot of restore data across all projects, including interrupted or abandoned backups. Nothing is automatically deleted. This is not free disk space; capacity is checked again when starting an application.",
-  "m5.backup.storageFull": "Restore storage has reached its limit. Existing data is preserved and new backups cannot be created. This view cannot delete data or change the limit.",
+  "m5.backup.storageFull": "Restore storage has reached its limit. Existing data is preserved and new backups cannot be created. You can increase the budget after checking free disk space. This view does not delete backups.",
+  "m5.backup.limitLabel": "Restore storage budget (GiB, 1–1024)",
+  "m5.backup.limitConsent": "This applies to the whole app. Increasing it allows more disk usage; reducing it will not delete existing files.",
+  "m5.backup.limitChange": "Change budget",
+  "m5.backup.limitInspect": "Check storage to see the currently saved budget.",
+  "m5.backup.limitUnknown": "The change result is unknown. It will not be retried automatically. Check storage again to see the current budget.",
   "m5.backup.storageError": "Could not inspect restore storage. Try again after any active backup finishes. No files were deleted.",
 };

@@ -11,6 +11,7 @@ use uuid::Uuid;
 const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
 const RESTORE_BUDGET: u64 = 5 * 1024 * 1024 * 1024;
 mod decode;
+mod budget_settings;
 pub(in crate::project) mod staging;
 
 pub(in crate::project) struct Backup {
@@ -111,13 +112,19 @@ struct BudgetGuard {
 }
 
 impl BudgetGuard {
+    #[cfg(test)]
     fn acquire(dir: Dir, budget: u64) -> Result<Self, ProjectFailure> {
+        Self::acquire_with(dir, || Ok(budget))
+    }
+
+    fn acquire_with(dir: Dir, budget: impl FnOnce() -> Result<u64, ProjectFailure>) -> Result<Self, ProjectFailure> {
         if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(ProjectFailure::recovery(
                 "another backup preparation is active",
             ));
         }
         let used = stored_bytes(&dir)?;
+        let budget = budget()?;
         let remaining = budget.checked_sub(used).filter(|v| *v > 0).ok_or_else(|| {
             ProjectFailure::recovery("restore storage budget reached; existing backups preserved")
         })?;
@@ -149,7 +156,16 @@ pub(in crate::project) fn storage_usage(manager: &ProjectManager) -> Result<Valu
     }
     let used = stored_bytes(&dir)?;
     if used > 9_007_199_254_740_991 { return Err(invalid()); }
-    Ok(serde_json::json!({"usedBytes":used,"limitBytes":RESTORE_BUDGET,"remainingBytes":RESTORE_BUDGET.saturating_sub(used)}))
+    let limit = budget_settings::read(manager)?;
+    Ok(serde_json::json!({"usedBytes":used,"limitBytes":limit,"remainingBytes":limit.saturating_sub(used)}))
+}
+
+pub(in crate::project) fn set_storage_limit(manager: &ProjectManager, expected: u64, limit: u64) -> Result<(), ProjectFailure> {
+    let dir = directory(manager)?;
+    if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err(ProjectFailure::recovery("backup budget change requires idle preparation"));
+    }
+    budget_settings::set(manager, expected, limit)
 }
 
 // Every intermediate component is opened without following links.
@@ -212,7 +228,7 @@ fn create_inner(
     let source = manager.open_source_repository(&active.canonical_git_root)?;
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
-    let budget = BudgetGuard::acquire(directory(manager)?, RESTORE_BUDGET)?;
+    let budget = BudgetGuard::acquire_with(directory(manager)?, || budget_settings::read(manager))?;
     let dir = &budget._directory;
     let c = CString::new(name).map_err(|_| invalid())?;
     let fd = unsafe {

@@ -16,3 +16,14 @@ test("backup storage is app-wide with a consistent bounded byte budget", () => {
     assert.throws(() => validateProjectCatalogResult(invalid, request));
   }
 });
+
+test("budget changes require the inspected budget and whole GiB values", () => {
+  const request = {action:"setBackupStorageLimit" as const,expectedLimitBytes:5*1024**3,limitBytes:10*1024**3};
+  assert.deepEqual(validateProjectCatalogRequest(request), request);
+  for (const value of [0, -1, 1024**3+1, 1025*1024**3, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(() => validateProjectCatalogRequest({...request,limitBytes:value}));
+    assert.throws(() => validateProjectCatalogRequest({...request,expectedLimitBytes:value}));
+  }
+  assert.doesNotThrow(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,limitBytes:request.limitBytes},request));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:request.action,limitBytes:request.expectedLimitBytes},request));
+});

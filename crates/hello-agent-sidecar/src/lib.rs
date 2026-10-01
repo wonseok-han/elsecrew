@@ -1102,6 +1102,12 @@ impl Sidecar {
                     require_exact_params(&request.params, &["action"]).map_err(invalid_params)?;
                     self.projects.backup_storage_usage()
                 }
+                Some("setBackupStorageLimit") => {
+                    let params = require_exact_params(&request.params, &["action", "expectedLimitBytes", "limitBytes"]).map_err(invalid_params)?;
+                    let expected = params.get("expectedLimitBytes").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid expected budget".to_string()))?;
+                    let limit = params.get("limitBytes").and_then(Value::as_u64).ok_or_else(|| invalid_params("invalid budget".to_string()))?;
+                    self.projects.set_backup_storage_limit(expected, limit)
+                }
                 Some("backupPreparations") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.backup_preparations(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)

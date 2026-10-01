@@ -723,7 +723,12 @@ export const ko = {
   "m5.backup.storageTitle": "앱 전체 복원 데이터 용량 확인",
   "m5.backup.storageAmounts": "사용 {used}바이트 / 한도 {limit}바이트 · 남은 예산 {remaining}바이트",
   "m5.backup.storageHelp": "조회 시점의 모든 프로젝트 복원 데이터입니다. 중단되거나 종료한 백업도 포함하며 자동 삭제하지 않습니다. 디스크 여유 공간과는 다르고, 새 반영 가능 여부는 시작할 때 다시 확인합니다.",
-  "m5.backup.storageFull": "복원 데이터 한도에 도달했습니다. 기존 데이터는 보존하며 새 백업은 만들 수 없습니다. 이 화면에서는 삭제하거나 한도를 변경할 수 없습니다.",
+  "m5.backup.storageFull": "복원 데이터 한도에 도달했습니다. 기존 데이터는 보존하며 새 백업은 만들 수 없습니다. 여유 공간을 확인한 뒤 예산을 늘릴 수 있습니다. 이 화면에서는 백업을 삭제하지 않습니다.",
+  "m5.backup.limitLabel": "복원 데이터 예산 (GiB, 1~1024)",
+  "m5.backup.limitConsent": "앱 전체에 적용됩니다. 늘리면 더 많은 저장공간을 사용할 수 있고, 줄여도 기존 파일은 삭제되지 않는다는 것을 확인했습니다.",
+  "m5.backup.limitChange": "예산 변경",
+  "m5.backup.limitInspect": "용량 확인을 눌러 현재 저장된 예산을 확인하세요.",
+  "m5.backup.limitUnknown": "변경 결과를 확인하지 못했습니다. 자동으로 다시 변경하지 않습니다. 용량 확인으로 현재 예산을 다시 확인하세요.",
   "m5.backup.storageError": "복원 데이터 용량을 확인하지 못했습니다. 진행 중인 백업이 끝난 뒤 다시 확인해 주세요. 파일은 삭제하지 않았습니다.",
 } as const;
 
