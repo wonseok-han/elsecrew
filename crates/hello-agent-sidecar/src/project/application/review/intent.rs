@@ -449,8 +449,8 @@ pub(in crate::project) fn advance_regular_item(
     Ok(next)
 }
 
-/// Cancel the untouched tail after a completed prefix. No filesystem mutation:
-/// an item with any writer journal is not known-unstarted and is refused here.
+/// Cancel the untouched tail after a completed prefix, preserving its current
+/// applied/restored journal, or move back from a journal-free next item.
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]
 pub(in crate::project) fn cancel_unstarted_tail(
@@ -462,24 +462,40 @@ pub(in crate::project) fn cancel_unstarted_tail(
 ) -> Result<Value, ProjectFailure> {
     if expected["state"] != "applying"
         || inspect_pending_item(manager, storage, project_id)? != *expected
-        || expected["pendingItem"].get("writeJournal").is_some()
         || expected.get("restoredItems").is_some()
         || expected.get("unstartedFrom").is_some()
     {
         return Err(invalid());
     }
-    let boundary = expected["pendingItem"]["index"]
+    let index = expected["pendingItem"]["index"]
         .as_u64()
         .ok_or_else(invalid)?;
-    let mut completed = expected["completedItems"]
-        .as_array()
-        .ok_or_else(invalid)?
-        .clone();
-    let previous = completed.pop().ok_or_else(invalid)?;
     let mut next = expected.clone();
+    let boundary = if let Some(journal) = expected["pendingItem"].get("writeJournal") {
+        let applied = match journal["phase"].as_str() {
+            Some("applied") => true,
+            Some("restored") => false,
+            _ => return Err(invalid()),
+        };
+        writer::verify_record_pair(manager, expected, applied)?;
+        index.checked_add(1).ok_or_else(invalid)?
+    } else {
+        let mut completed = expected["completedItems"]
+            .as_array()
+            .ok_or_else(invalid)?
+            .clone();
+        next["pendingItem"] = completed.pop().ok_or_else(invalid)?;
+        next["completedItems"] = json!(completed);
+        index
+    };
+    if boundary
+        >= expected["backup"]["header"]["count"]
+            .as_u64()
+            .ok_or_else(invalid)?
+    {
+        return Err(invalid());
+    }
     next["unstartedFrom"] = json!(boundary);
-    next["completedItems"] = json!(completed);
-    next["pendingItem"] = previous;
     let mut project = required_project(storage, project_id)?;
     let revision = project["last_event_sequence"]
         .as_u64()

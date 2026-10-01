@@ -98,8 +98,14 @@ pub(in crate::project) fn restore_selected(
     if current["pendingItem"].get("writeJournal").is_none() {
         current = cancel_unstarted_tail(manager, storage, project_id, &current, request)?;
     }
-    if current["pendingItem"]["writeJournal"]["phase"] == "applied"
-        && current.get("restoredItems").is_none()
+    if current["pendingItem"]["writeJournal"]["phase"] == "staged" {
+        current =
+            writer::acknowledge_regular_outcome(manager, storage, project_id, &current, request)?;
+    }
+    if matches!(
+        current["pendingItem"]["writeJournal"]["phase"].as_str(),
+        Some("applied" | "restored" | "restoring")
+    ) && current.get("restoredItems").is_none()
         && current.get("unstartedFrom").is_none()
         && current["pendingItem"]["index"]
             .as_u64()
@@ -109,7 +115,9 @@ pub(in crate::project) fn restore_selected(
                 .as_u64()
                 .ok_or_else(invalid)?
     {
-        current = advance_regular_item(manager, storage, project_id, &current, request)?;
+        if current["pendingItem"]["writeJournal"]["phase"] == "restoring" {
+            current = recover_restoring(manager, storage, project_id, &current, request)?;
+        }
         current = cancel_unstarted_tail(manager, storage, project_id, &current, request)?;
     }
     // Bound execution by the archive contract, even if a malformed cursor ever
@@ -124,15 +132,8 @@ pub(in crate::project) fn restore_selected(
                     manager, storage, project_id, &current, request,
                 )?;
             }
-            Some("staged" | "restoring") => {
-                current = writer::acknowledge_regular_outcome(
-                    manager, storage, project_id, &current, request,
-                )?;
-                if current["pendingItem"]["writeJournal"]["phase"] == "applied" {
-                    current = writer::restore_first_regular_item(
-                        manager, storage, project_id, &current, request,
-                    )?;
-                }
+            Some("restoring") => {
+                current = recover_restoring(manager, storage, project_id, &current, request)?;
             }
             Some("restored") => {}
             _ => return Err(invalid()),
@@ -143,4 +144,23 @@ pub(in crate::project) fn restore_selected(
         current = previous_regular_item(manager, storage, project_id, &current, request)?;
     }
     Err(invalid())
+}
+
+fn recover_restoring(
+    manager: &ProjectManager,
+    storage: &mut Storage,
+    project_id: &str,
+    expected: &Value,
+    request: &str,
+) -> Result<Value, ProjectFailure> {
+    let outcome = writer::inspect_regular_outcome(manager, storage, project_id)?;
+    match outcome["comparison"].as_str() {
+        Some("matchesAppliedPair") => {
+            writer::restore_first_regular_item(manager, storage, project_id, expected, request)
+        }
+        Some("matchesUnappliedPair") => {
+            writer::acknowledge_regular_outcome(manager, storage, project_id, expected, request)
+        }
+        _ => Err(invalid()),
+    }
 }

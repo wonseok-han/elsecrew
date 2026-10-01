@@ -247,17 +247,23 @@ fn application_link_roundtrip_never_changes_target_file() {
 #[cfg(target_os = "macos")]
 #[test]
 fn application_advances_two_files_without_losing_prior_journal() {
-    application_two_file_roundtrip(false);
+    application_two_file_roundtrip(false, false);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn application_cancels_unstarted_tail_and_restores_only_written_prefix() {
-    application_two_file_roundtrip(true);
+    application_two_file_roundtrip(true, false);
 }
 
 #[cfg(target_os = "macos")]
-fn application_two_file_roundtrip(cancel_tail: bool) {
+#[test]
+fn application_recovers_lost_applied_record_without_writing_remaining_files() {
+    application_two_file_roundtrip(false, true);
+}
+
+#[cfg(target_os = "macos")]
+fn application_two_file_roundtrip(cancel_tail: bool, lose_applied_record: bool) {
     use application::review::{confirmation::Confirmations, intent, persistence, ReviewTarget};
     let (mut f, _) = prepared_backup_fixture();
     let active = f
@@ -317,6 +323,44 @@ fn application_two_file_roundtrip(cancel_tail: bool) {
         "req_multi_early"
     )
     .is_err());
+    if lose_applied_record {
+        f.storage.connection_for_test().execute_batch("CREATE TRIGGER fail_applied BEFORE INSERT ON events WHEN NEW.operation_id LIKE '%_item_0_applied' BEGIN SELECT RAISE(ABORT, 'lost applied record'); END;").unwrap();
+        assert!(intent::writer::write_first_regular_item(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &first,
+            "req_lost_applied",
+        )
+        .is_err());
+        f.storage
+            .connection_for_test()
+            .execute_batch("DROP TRIGGER fail_applied;")
+            .unwrap();
+        let interrupted = intent::inspect(&f.storage, &f.project_id).unwrap();
+        assert_eq!(
+            interrupted["pendingItem"]["writeJournal"]["phase"],
+            "staged"
+        );
+        assert_eq!(
+            fs::read(f.source.join("src/edit.txt")).unwrap(),
+            b"first-update"
+        );
+        let restored = intent::execution::restore_selected(
+            &f.manager,
+            &mut f.storage,
+            &f.project_id,
+            &interrupted,
+            &std::sync::atomic::AtomicBool::new(false),
+            "req_recover_lost_applied",
+        )
+        .unwrap();
+        assert_eq!(restored["state"], "restored");
+        assert_eq!(restored["unstartedFrom"], 1);
+        assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+        assert!(!f.source.join("src/new.txt").exists());
+        return;
+    }
     let first = intent::writer::write_first_regular_item(
         &f.manager,
         &mut f.storage,

@@ -245,8 +245,8 @@ pub(in crate::project) fn inspect_regular_outcome(
     )
 }
 
-/// Explicit acknowledgment of a completed rename whose final ledger write was
-/// lost. Never performs the rename again and never unlocks the application.
+/// Explicit reconciliation of a staged/restoring pair. An untouched staged pair
+/// is canceled as restored, keeping its staged image. Never renames or unlocks.
 #[allow(dead_code)]
 pub(in crate::project) fn acknowledge_regular_outcome(
     manager: &ProjectManager,
@@ -259,12 +259,13 @@ pub(in crate::project) fn acknowledge_regular_outcome(
         return Err(invalid());
     }
     let mut j = journal(expected)?.clone();
+    let (dir, leaf) = bound_parent(manager, expected)?;
     let (applied, phase) = match j["phase"].as_str() {
-        Some("staged") => (true, "applied"),
+        Some("staged") if pair_matches(&dir, &leaf, expected, true)? => (true, "applied"),
+        Some("staged") => (false, "restored"),
         Some("restoring") => (false, "restored"),
         _ => return Err(invalid()),
     };
-    let (dir, leaf) = bound_parent(manager, expected)?;
     if !pair_matches(&dir, &leaf, expected, applied)? {
         return Err(invalid());
     }
@@ -291,15 +292,21 @@ pub(in crate::project) fn restore_first_regular_item(
         return Err(invalid());
     }
     let mut j = journal(expected)?.clone();
-    if j["phase"] != "applied" {
+    if !matches!(j["phase"].as_str(), Some("applied" | "restoring")) {
         return Err(invalid());
     }
     let (dir, leaf) = bound_parent(manager, expected)?;
     if !pair_matches(&dir, &leaf, expected, true)? {
         return Err(invalid());
     }
-    j["phase"] = json!("restoring");
-    let current = publish(storage, project_id, expected, j.clone(), request)?;
+    let current = if j["phase"] == "applied" {
+        j["phase"] = json!("restoring");
+        publish(storage, project_id, expected, j.clone(), request)?
+    } else {
+        // Explicit recovery may retry only the exact still-applied pair. Keep
+        // the original durable restoring intent rather than posting it twice.
+        expected.clone()
+    };
     // Reopen the path after durable intent; don't write to a detached old parent.
     let (dir, leaf) = bound_parent(manager, &current)?;
     if !pair_matches(&dir, &leaf, &current, true)? {

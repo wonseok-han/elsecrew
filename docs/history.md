@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (파일 교체 중단의 명시 복구 연결)
+
+- 직전bddda66의 완료 이력 보존은 코드 진전이다. 현재 checkout/기존 archive 21줄을 보존하고 Karpathy 지침으로 staged 쌍을 실제 반영/미반영으로 구분해 명시 복구에 연결했다. 미반영이면 파일 교체 없이 staged 파일을 보존하며 restored를 기록한다. reserved의 불완전 복사는 여전히 차단한다.
+- restoring 상태에서 정확한 applied 쌍이 남아 있으면 기존 복원 intent를 재사용해 명시 역교체하고, 이미 복원된 쌍이면 기록만 마감한다. 여러 파일 중 현재 항목의 기록 저장 실패를 복구한 뒤 untouched tail을 원장에 결속해 나머지 파일은 쓰지 않는다. 외부 수정/신원 불일치/불명 결과는 거절하며 자동 복구·제품 활성화는 없다.
+- 첫 파일 rename 후 applied DB 저장 실패를 주입한 두 파일 복구 회귀를 추가했다. 사용자 지시대로 테스트/빌드는 미실행, rustfmt/diff만 확인했다. reserved 복구·디렉터리·제품 IPC/UI·누적 검증/독립 안전 검토가 남는다. main 병합/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (완료 원장 보존·다음 반영 준비)
 
 - a1f0751에서 Karpathy 지침으로 종료된 applied/restored/abandoned 원장을 다음 준비 시 application_history에 보존했다. 기존 inspect의 exact lock 검사와 새 확인 토큰·revision CAS를 유지한다. 진행 중/잠금 변경/중복 ID·1,000건·project metadata 32MiB 초과는 거절하고 기록을 삭제하지 않는다. 과거 기록을 복원 권한으로 재사용하지 않는다.
