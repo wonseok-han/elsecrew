@@ -4,6 +4,8 @@
 
 ## 확정 범위와 현재 격차
 
+- 2026-10-01 배치 읽기 체크포인트(미검증): 전체 archive 검증 뒤 bounded metadata 목록을 반환해 한 조회 안의 pending/completed/restored 및 미처리 tail 대조에 재사용한다. 항목별 전체 archive 재읽기를 줄였으며 작업 간 cache는 없다. 아래 단건 반복 검증 설명은 기존 구현 기록이다. 실제 메모리/시간 검증은 남는다.
+
 - 2026-10-01 부분 반영 취소 체크포인트(미검증): completed prefix 이후 journal이 없는 pending부터 unstartedFrom으로 기록해 미처리 tail을 보존하고 prefix만 역복원한다. 복원 완료 전에 미처리 파일도 archive before와 대조한다. reserved/staged 중단과 첫 항목 미시작 취소는 별도 복구로 남는다.
 
 - 2026-10-01 배치 완료 체크포인트(미검증): completion은 전체 항목 수·목록·원본/보존 쌍을 대조해 applied/restored와 잠금 해제를 원자 기록한다. 완료 상태는 조회용이며 명시 begin_restore의 전체 재대조/재잠금 후 복원한다. 기존 기록 교체/다음 반영 수명, 디렉터리·부분 중단 복원·제품 IPC/UI 및 통합 검증은 남는다.

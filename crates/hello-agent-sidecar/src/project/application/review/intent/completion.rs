@@ -50,10 +50,17 @@ fn verify_batch(
     }
     // Repeat the complete observation to catch changes while walking the batch.
     // Still not an OS exclusion guarantee against an uncooperative same-UID editor.
+    let archive_items = if written < count {
+        inspect_write_items(manager, storage, project_id, record)?
+    } else {
+        Vec::new()
+    };
     for _ in 0..2 {
         for index in written..count {
-            let item = inspect_write_item(manager, storage, project_id, record, index)?;
-            writer::verify_unwritten_item(manager, record, &item)?;
+            let item = archive_items
+                .get(usize::try_from(index).map_err(|_| invalid())?)
+                .ok_or_else(invalid)?;
+            writer::verify_unwritten_item(manager, record, item)?;
         }
         writer::verify_record_pair(manager, record, applied)?;
         for item in items {

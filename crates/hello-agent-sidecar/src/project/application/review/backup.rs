@@ -395,7 +395,7 @@ pub(in crate::project) fn verify(
     manager: &ProjectManager,
     backup: &Backup,
 ) -> Result<Value, ProjectFailure> {
-    verify_inner(manager, backup, None).map(|(header, _)| header)
+    verify_inner(manager, backup, None, false).map(|(header, _)| header)
 }
 
 /// Read a recovery item's exact metadata from a trusted ledger descriptor.
@@ -406,14 +406,26 @@ pub(in crate::project) fn verify_item(
     backup: &Backup,
     index: u64,
 ) -> Result<(Value, Value), ProjectFailure> {
-    let (header, item) = verify_inner(manager, backup, Some(index))?;
+    let (header, item) = verify_inner(manager, backup, Some(index), false)?;
     Ok((header, item.ok_or_else(invalid)?))
+}
+
+pub(in crate::project) fn verify_items(
+    manager: &ProjectManager,
+    backup: &Backup,
+) -> Result<(Value, Vec<Value>), ProjectFailure> {
+    let (header, items) = verify_inner(manager, backup, None, true)?;
+    let Some(Value::Array(items)) = items else {
+        return Err(invalid());
+    };
+    Ok((header, items))
 }
 
 fn verify_inner(
     manager: &ProjectManager,
     backup: &Backup,
     index: Option<u64>,
+    collect_all: bool,
 ) -> Result<(Value, Option<Value>), ProjectFailure> {
     let dir = directory(manager)?;
     let mut file = open(&dir, &backup.name, false)?;
@@ -448,15 +460,20 @@ fn verify_inner(
         return Err(invalid());
     }
     file.rewind().map_err(|_| invalid())?;
-    let (header, item) = match index {
-        Some(index) => {
-            let (header, item) = decode::item(&mut std::io::BufReader::new(&mut file), index)?;
-            (header, Some(item))
+    let (header, item) = if collect_all {
+        let (header, items) = decode::items(&mut std::io::BufReader::new(&mut file))?;
+        (header, Some(items))
+    } else {
+        match index {
+            Some(index) => {
+                let (header, item) = decode::item(&mut std::io::BufReader::new(&mut file), index)?;
+                (header, Some(item))
+            }
+            None => (
+                decode::validate(&mut std::io::BufReader::new(&mut file))?,
+                None,
+            ),
         }
-        None => (
-            decode::validate(&mut std::io::BufReader::new(&mut file))?,
-            None,
-        ),
     };
     if stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&meta) != stamp(&dir.symlink_metadata(&backup.name).map_err(|_| invalid())?)

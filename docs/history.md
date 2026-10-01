@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-01 · by GPT-6 Astra (배치 백업 중복 읽기 제거)
+
+- 직전05eeb0e의 부분 취소/복원 구현은 진전이다. 현행 checkout을 확인하고 Karpathy 지침으로 다중 파일 조회의 반복 전체 archive 읽기를 줄였다. decoder가 같은 metadata32MiB/항목100,000 상한 아래 모든 항목 metadata를 수집하되 전체 payload hash·변경 digest·EOF 검증 뒤에만 반환한다. 파일 신원/크기/전체 digest 전후 대조는 기존 verify 경로를 유지한다.
+- pending/completed/restored 대조는 한 번 읽은 항목 목록을 사용하고 미처리 tail의 두 번 source 관측도 같은 검증 목록을 사용한다. 작업 간 장기 cache나 예전 검증 결과 재사용은 없다. 매 단계의 전체 읽기는 여전히 남지만 한 조회 안에서 항목 수만큼 archive를 다시 읽는 부분을 제거했다. 실측 성능 개선을 주장하지 않는다.
+- 목록 동일성·잘림/뒤쪽 payload 훼손 거절 회귀를 기존 decoder 시험에 추가했다. 사용자 지시대로 테스트/빌드/독립 검토는 미실행이고 포맷/diff만 확인했다. 기존 archive 미커밋 보존, 제품 미연결/미검증·디렉터리/준비 중단 복구/이력 수명/IPC/UI/통합 검증은 남는다. 실제 사용자 파일/계정/모델/main/push 변경 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (미처리 구간 취소·부분 반영 복원)
 
 - 직전ae752dd의 배치 완료/복원 재입장 구현은 진전이다. 현재 checkout/기존 archive를 대조하고 Karpathy 지침으로 부분 반영 뒤 아직 journal이 없는 현재 항목부터의 구간을 취소하는 경로를 추가했다. unstartedFrom 경계를 저장하고 완료 prefix의 마지막 항목으로 복원 대상을 옮기며 파일 자체는 변경하지 않는다.

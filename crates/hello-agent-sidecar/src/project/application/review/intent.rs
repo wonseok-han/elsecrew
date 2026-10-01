@@ -228,6 +228,19 @@ pub(in crate::project) fn inspect_write_item(
     expected: &Value,
     index: u64,
 ) -> Result<Value, ProjectFailure> {
+    let index = usize::try_from(index).map_err(|_| invalid())?;
+    inspect_write_items(manager, storage, project_id, expected)?
+        .get(index)
+        .cloned()
+        .ok_or_else(invalid)
+}
+
+fn inspect_write_items(
+    manager: &ProjectManager,
+    storage: &Storage,
+    project_id: &str,
+    expected: &Value,
+) -> Result<Vec<Value>, ProjectFailure> {
     if !matches!(
         expected["state"].as_str(),
         Some("applying" | "applied" | "restored")
@@ -248,11 +261,11 @@ pub(in crate::project) fn inspect_write_item(
         return Err(invalid());
     }
     let archive = backup::Backup::from_value(&expected["backup"]["backup"])?;
-    let (header, item) = backup::verify_item(manager, &archive, index)?;
+    let (header, items) = backup::verify_items(manager, &archive)?;
     if header != expected["backup"]["header"] || header["binding"] != expected["binding"] {
         return Err(invalid());
     }
-    Ok(item)
+    Ok(items)
 }
 
 /// Reserve the first file before a writer may attempt its mutation. No completion
@@ -309,30 +322,26 @@ pub(in crate::project) fn inspect_pending_item(
 ) -> Result<Value, ProjectFailure> {
     let current = inspect(storage, project_id)?;
     let pending = current.get("pendingItem").ok_or_else(invalid)?;
-    let index = pending["index"].as_u64().ok_or_else(invalid)?;
-    let item = inspect_write_item(manager, storage, project_id, &current, index)?;
-    if pending["item"] != item {
+    let items = inspect_write_items(manager, storage, project_id, &current)?;
+    let index =
+        usize::try_from(pending["index"].as_u64().ok_or_else(invalid)?).map_err(|_| invalid())?;
+    if Some(&pending["item"]) != items.get(index) {
         return Err(invalid());
     }
     if let Some(completed) = current["completedItems"].as_array() {
         for (index, done) in completed.iter().enumerate() {
-            if done["item"]
-                != inspect_write_item(manager, storage, project_id, &current, index as u64)?
-            {
+            if Some(&done["item"]) != items.get(index) {
                 return Err(invalid());
             }
         }
     }
     if let Some(restored) = current["restoredItems"].as_array() {
         for done in restored {
-            if done["item"]
-                != inspect_write_item(
-                    manager,
-                    storage,
-                    project_id,
-                    &current,
-                    done["index"].as_u64().ok_or_else(invalid)?,
-                )?
+            if Some(&done["item"])
+                != items.get(
+                    usize::try_from(done["index"].as_u64().ok_or_else(invalid)?)
+                        .map_err(|_| invalid())?,
+                )
             {
                 return Err(invalid());
             }
