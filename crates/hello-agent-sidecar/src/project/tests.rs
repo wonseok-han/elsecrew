@@ -7,18 +7,38 @@ use tempfile::TempDir;
 fn explicit_application_workspace_records_baseline_and_rejects_dirty_before_reservation() {
     let (mut f, _) = prepared_backup_fixture();
     let previous = required_project(&f.storage, &f.project_id).unwrap();
-    let result = f.manager.prepare_application_workspace(&mut f.storage, &f.project_id, "req_public_baseline").unwrap();
+    let result = f
+        .manager
+        .prepare_application_workspace(&mut f.storage, &f.project_id, "req_public_baseline")
+        .unwrap();
     let worktree = result.result["worktreeId"].as_str().unwrap();
     assert_ne!(previous["worktree_id"], worktree);
     let current = required_project(&f.storage, &f.project_id).unwrap();
     assert!(current["source_baselines"].get(worktree).is_some());
-    assert!(current["source_baselines"].get(previous["worktree_id"].as_str().unwrap()).is_some());
-    assert_eq!(f.manager.application_preview(&f.storage, &f.project_id).unwrap().result["preview"]["total"], 0);
+    assert!(current["source_baselines"]
+        .get(previous["worktree_id"].as_str().unwrap())
+        .is_some());
+    assert_eq!(
+        f.manager
+            .application_preview(&f.storage, &f.project_id)
+            .unwrap()
+            .result["preview"]["total"],
+        0
+    );
     fs::write(f.source.join("src/edit.txt"), b"user changes").unwrap();
-    assert!(f.manager.prepare_application_workspace(&mut f.storage, &f.project_id, "req_dirty_baseline").is_err());
-    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), current);
+    assert!(f
+        .manager
+        .prepare_application_workspace(&mut f.storage, &f.project_id, "req_dirty_baseline")
+        .is_err());
+    assert_eq!(
+        required_project(&f.storage, &f.project_id).unwrap(),
+        current
+    );
     assert!(f.storage.blocker_ids().unwrap().is_empty());
-    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"user changes");
+    assert_eq!(
+        fs::read(f.source.join("src/edit.txt")).unwrap(),
+        b"user changes"
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -120,6 +140,12 @@ fn application_confirmed_execution_and_selected_restore_roundtrip() {
         b"orchestrated-new",
     )
     .unwrap();
+    fs::create_dir_all(active.worktree_path.join("new-folder/nested")).unwrap();
+    fs::write(
+        active.worktree_path.join("new-folder/nested/file.txt"),
+        b"nested-new",
+    )
+    .unwrap();
     let review = persistence::publish(
         &f.manager,
         &mut f.storage,
@@ -151,6 +177,26 @@ fn application_confirmed_execution_and_selected_restore_roundtrip() {
     .unwrap();
     assert_eq!(applied["state"], "applied");
     assert_eq!(
+        fs::read(f.source.join("new-folder/nested/file.txt")).unwrap(),
+        b"nested-new"
+    );
+    fs::write(f.source.join("new-folder/foreign.txt"), b"external").unwrap();
+    assert!(intent::execution::restore_selected(
+        &f.manager,
+        &mut f.storage,
+        &f.project_id,
+        &applied,
+        &cancel,
+        "req_foreign_directory"
+    )
+    .is_err());
+    assert_eq!(intent::inspect(&f.storage, &f.project_id).unwrap(), applied);
+    fs::rename(
+        f.source.join("new-folder/foreign.txt"),
+        active.worktree_path.join("foreign-preserved.txt"),
+    )
+    .unwrap();
+    assert_eq!(
         fs::read(f.source.join("src/new.txt")).unwrap(),
         b"orchestrated-new"
     );
@@ -179,6 +225,7 @@ fn application_confirmed_execution_and_selected_restore_roundtrip() {
     assert_eq!(restored["state"], "restored");
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), before);
     assert!(!f.source.join("src/new.txt").exists());
+    assert!(!f.source.join("new-folder").exists());
 }
 
 #[cfg(target_os = "macos")]
@@ -1231,10 +1278,15 @@ fn application_intent_fence_is_atomic_restart_safe_and_cancelable_before_writes(
                 project["application_history"][abandoned["applicationId"].as_str().unwrap()],
                 abandoned
             );
-            assert_eq!(f.manager.application_history(&storage, &f.project_id).unwrap().result,
+            assert_eq!(
+                f.manager
+                    .application_history(&storage, &f.project_id)
+                    .unwrap()
+                    .result,
                 json!({"schemaVersion":1,"action":"applicationHistory","projectId":f.project_id,
                     "entries":[{"applicationId":abandoned["applicationId"],"state":"abandoned",
-                    "total":abandoned["backup"]["header"]["count"]}]}));
+                    "total":abandoned["backup"]["header"]["count"]}]})
+            );
             assert_eq!(intent::inspect(&storage, &f.project_id).unwrap(), next);
             assert!(intent::abandon_unwritten(
                 &mut storage,
@@ -1893,10 +1945,16 @@ fn chat_application_reviews_keep_separate_targets_and_invalidate_on_chat_change(
         ));
     }
     for (address, task, id) in &saved {
-        let preview = fixture.manager.chat_application_preview(&fixture.storage, &address.project_id, &address.chat_id).unwrap();
+        let preview = fixture
+            .manager
+            .chat_application_preview(&fixture.storage, &address.project_id, &address.chat_id)
+            .unwrap();
         assert_eq!(preview.result["chatId"], address.chat_id);
         assert_eq!(preview.result["preview"]["worktreeId"], address.worktree_id);
-        assert!(fixture.manager.chat_application_preview(&fixture.storage, "project_other", &address.chat_id).is_err());
+        assert!(fixture
+            .manager
+            .chat_application_preview(&fixture.storage, "project_other", &address.chat_id)
+            .is_err());
         persistence::reopen_target(
             &fixture.manager,
             &fixture.storage,

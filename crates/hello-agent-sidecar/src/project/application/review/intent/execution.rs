@@ -27,15 +27,13 @@ pub(in crate::project) fn apply_confirmed(
     if header != current["backup"]["header"] || items.is_empty() {
         return Err(invalid());
     }
-    // Reject currently unsupported directory batches before the first source
-    // mutation, rather than applying a prefix and discovering this halfway in.
+    // Existing directories are never replacement/deletion targets. New
+    // directories precede their descendants in the validated sorted archive.
     if items.iter().any(|item| {
-        ["before", "after"].iter().any(|side| {
-            !item[*side].is_null() && !matches!(item[*side]["kind"].as_u64(), Some(1 | 3))
-        })
+        item["before"]["kind"] == 2 || (item["after"]["kind"] == 2 && !item["before"].is_null())
     }) {
         return Err(ProjectFailure::recovery(
-            "directory application is not connected yet; source unchanged",
+            "existing directory replacement is unsupported; source unchanged",
         ));
     }
     if canceled.load(Ordering::Acquire) {

@@ -9,6 +9,7 @@ use std::ffi::CString;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
+mod directories;
 mod relocation;
 
 fn parent(root: &Dir, path: &str) -> Result<(Dir, String), ProjectFailure> {
@@ -33,6 +34,17 @@ fn image(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(_) => return Err(invalid()),
     };
+    if meta.is_dir() {
+        let opened = open(dir, name, true)?;
+        if stamp(&meta) != stamp(&opened.metadata().map_err(|_| invalid())?) {
+            return Err(invalid());
+        }
+        // Child creation changes directory link counts and timestamps. Its
+        // identity is stable; exact child membership is checked separately.
+        return Ok(
+            json!({"kind":2,"mode":meta.mode(),"size":0,"digest":vec![0u8;32],"identity":[meta.dev(),meta.ino(),0]}),
+        );
+    }
     if meta.file_type().is_symlink() && meta.nlink() == 1 {
         let bytes = link_bytes(dir, name)?;
         if stamp(&meta) != stamp(&dir.symlink_metadata(name).map_err(|_| invalid())?) {
@@ -123,8 +135,29 @@ pub(super) fn verify_unwritten_item(
     {
         return Err(invalid());
     }
-    let (dir, leaf) = parent(&source._root, item["path"].as_str().ok_or_else(invalid)?)?;
-    if image(&dir, &leaf)? != item["before"] {
+    let path = item["path"].as_str().ok_or_else(invalid)?;
+    let mut parts: Vec<_> = path.split('/').collect();
+    if parts.iter().any(|part| {
+        part.is_empty() || matches!(*part, "." | "..") || part.eq_ignore_ascii_case(".git")
+    }) {
+        return Err(invalid());
+    }
+    let leaf = parts.pop().ok_or_else(invalid)?;
+    let mut dir = source._root.try_clone().map_err(|_| invalid())?;
+    for part in parts {
+        match dir.symlink_metadata(part) {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && item["before"].is_null() =>
+            {
+                return Ok(())
+            }
+            Ok(meta) if meta.is_dir() => {
+                dir = Dir::from_std_file(open(&dir, part, true)?.into_std());
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    if image(&dir, leaf)? != item["before"] {
         return Err(invalid());
     }
     Ok(())
@@ -249,6 +282,7 @@ pub(super) fn verify_record_pair_in_scope(
     if !pair_matches(&dir, &leaf, record, applied)? {
         return Err(invalid());
     }
+    directories::verify(&dir, &leaf, record, scope, applied, !applied)?;
     sync_capability_directory(&dir)?;
     Ok(())
 }
@@ -366,6 +400,7 @@ pub(in crate::project) fn restore_first_regular_item(
     if !pair_matches(&dir, &leaf, expected, true)? {
         return Err(invalid());
     }
+    directories::verify(&dir, &leaf, expected, expected, true, true)?;
     let current = if j["phase"] == "applied" {
         j["phase"] = json!("restoring");
         publish(storage, project_id, expected, j.clone(), request)?
@@ -379,6 +414,7 @@ pub(in crate::project) fn restore_first_regular_item(
     if !pair_matches(&dir, &leaf, &current, true)? {
         return Err(invalid());
     }
+    directories::verify(&dir, &leaf, &current, &current, true, true)?;
     let target = CString::new(leaf.as_str()).map_err(|_| invalid())?;
     let saved =
         CString::new(j["retainedName"].as_str().ok_or_else(invalid)?).map_err(|_| invalid())?;
@@ -483,9 +519,12 @@ pub(in crate::project) fn write_first_regular_item(
     }
     let item = &expected["pendingItem"]["item"];
     for side in ["before", "after"] {
-        if !item[side].is_null() && !matches!(item[side]["kind"].as_u64(), Some(1 | 3)) {
+        if !item[side].is_null() && !matches!(item[side]["kind"].as_u64(), Some(1..=3)) {
             return Err(invalid());
         }
+    }
+    if item["before"]["kind"] == 2 || (item["after"]["kind"] == 2 && !item["before"].is_null()) {
+        return Err(invalid());
     }
     if item["before"].is_null() && item["after"].is_null() {
         return Err(invalid());
@@ -521,7 +560,14 @@ pub(in crate::project) fn write_first_regular_item(
         if !matches_after(&input_image, &item["after"]) {
             return Err(invalid());
         }
-        if item["after"]["kind"] == 3 {
+        if item["after"]["kind"] == 2 {
+            dir.create_dir(&retained).map_err(|_| invalid())?;
+            let staged_dir = open(&dir, &retained, true)?;
+            if unsafe { libc::fchmod(staged_dir.as_raw_fd(), 0o755) } != 0 {
+                return Err(invalid());
+            }
+            staged_dir.sync_all().map_err(|_| invalid())?;
+        } else if item["after"]["kind"] == 3 {
             let bytes = link_bytes(&input_dir, &input_leaf)?;
             let target = CString::new(bytes).map_err(|_| invalid())?;
             let name = CString::new(retained.as_str()).map_err(|_| invalid())?;
@@ -592,6 +638,7 @@ pub(in crate::project) fn write_first_regular_item(
     }
     let target = CString::new(leaf.as_str()).map_err(|_| invalid())?;
     let saved = CString::new(retained.as_str()).map_err(|_| invalid())?;
+    directories::verify(&dir, &leaf, &current, &current, false, false)?;
     let status = unsafe {
         if item["after"].is_null() {
             libc::renameatx_np(
