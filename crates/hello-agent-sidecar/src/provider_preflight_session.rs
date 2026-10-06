@@ -28,9 +28,69 @@ fn failure() -> SidecarError {
 
 /// Internal discovery entry point for a separately admitted executable pair.
 /// Does not create a thread, send user input, or grant runtime execution authority.
-pub(crate) struct ProviderInspection<'a> {
-    pub(crate) result: Result<(), SidecarError>,
+pub(crate) struct ProviderInspection<'a, T = ()> {
+    pub(crate) result: Result<T, SidecarError>,
     pub(crate) process: LoginProcess<'a>,
+}
+
+/// A bounded, selected-profile observation, not a global provider capability.
+/// Constructed only after the named exchange and confirmed cleanup succeed.
+/// It contains no account response, credentials, or arbitrary vendor payload.
+pub(crate) struct NamedProfileObservation {
+    model: String,
+    effort: String,
+    permission: ExpectedPermission,
+    workspace: std::path::PathBuf,
+    home: std::path::PathBuf,
+    observed_at: std::time::Instant,
+}
+
+impl NamedProfileObservation {
+    /// Discovery is short-lived and bound to the exact inputs. A fresh start
+    /// still repeats the same-connection preflight before sending user input.
+    #[allow(dead_code)] // Product capability projection follows this boundary.
+    pub(crate) fn matches(
+        &self,
+        expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+        permission: ExpectedPermission,
+        workspace: &std::path::Path,
+        home: &std::path::Path,
+    ) -> bool {
+        self.model == expected.model
+            && self.effort == expected.reasoning_effort
+            && self.permission == permission
+            && self.workspace == workspace
+            && self.home == home
+            && self.observed_at.elapsed() <= Duration::from_secs(30)
+    }
+}
+
+#[cfg(test)]
+mod named_observation_tests {
+    use super::*;
+
+    #[test]
+    fn selected_observation_cannot_move_to_another_profile_or_workspace() {
+        use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
+        let expected = ExpectedProfile { model: "test-model", reasoning_effort: "medium" };
+        let workspace = std::path::Path::new("/managed/snapshot");
+        let home = std::path::Path::new("/managed/profile");
+        let mut observed = NamedProfileObservation {
+            model: expected.model.into(), effort: expected.reasoning_effort.into(),
+            permission: ExpectedPermission::ReadOnly, workspace: workspace.into(),
+            home: home.into(), observed_at: Instant::now(),
+        };
+        assert!(observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
+        assert!(!observed.matches(&expected, ExpectedPermission::WorkspaceWrite, workspace, home));
+        assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, std::path::Path::new("/other"), home));
+        assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, std::path::Path::new("/other")));
+        let other = ExpectedProfile { model: "another-model", reasoning_effort: "medium" };
+        assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
+        let other = ExpectedProfile { model: "test-model", reasoning_effort: "high" };
+        assert!(!observed.matches(&other, ExpectedPermission::ReadOnly, workspace, home));
+        observed.observed_at = Instant::now() - Duration::from_secs(31);
+        assert!(!observed.matches(&expected, ExpectedPermission::ReadOnly, workspace, home));
+    }
 }
 
 /// Inspect the same named policy used by the native launcher. The workspace
@@ -45,7 +105,7 @@ pub(crate) fn inspect_named_preflight_candidate<'a>(
     permission: ExpectedPermission,
     workspace: &std::path::Path,
     cancel: &AtomicBool,
-) -> Result<ProviderInspection<'a>, SidecarError> {
+) -> Result<ProviderInspection<'a, NamedProfileObservation>, SidecarError> {
     let home = profile.revalidate()?;
     let mut flow = PreflightExchange::with_named_permission(
         expected,
@@ -84,7 +144,22 @@ pub(crate) fn inspect_named_preflight_candidate<'a>(
             let _ = process.finish();
             return Err(failure());
         }
-        observe_and_close(&mut process, &mut flow, cancel)
+        observe_and_close(&mut process, &mut flow, cancel)?;
+        // Do not retain an observation if executable/profile identity changed
+        // while shutting down, even though the protocol itself matched.
+        executable.revalidate()?;
+        helper.revalidate()?;
+        if profile.revalidate()? != home || cancel.load(Ordering::Acquire) {
+            return Err(failure());
+        }
+        Ok(NamedProfileObservation {
+            model: expected.model.into(),
+            effort: expected.reasoning_effort.into(),
+            permission,
+            workspace: workspace.into(),
+            home: home.clone(),
+            observed_at: Instant::now(),
+        })
     });
     // Even launch/cleanup errors return the original owner for explicit cleanup.
     Ok(ProviderInspection { result, process })

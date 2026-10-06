@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (사전 조회의 선택 프로필 관측값 보존)
+
+- 기준 338b473에서 named 조회가 단순 성공만 반환하던 부분을 NamedProfileObservation으로 확장했다. 계정 원문 없이 모델/effort/권한/snapshot/profile 경로 및 단조 시각만 내부에 보존한다. 같은 입력·30초 이내 여부를 대조하며 설정 전용 조회나 임의 renderer 값으로 생성하지 않는다. 종료 성공 뒤 CLI/helper/profile·취소를 다시 확인하고서만 반환한다.
+- Karpathy 지침으로 ProviderInspection의 결과형만 기본값 ()를 유지하는 generic으로 확장해 기존 진단 caller를 유지했다. 이 관측값은 글로벌 capability나 실행 허가가 아니며 다음 실행에서도 같은 연결의 사전 검증이 필요하다. 제품 capability projection 및 caller 연결은 아직 남는다.
+- 최근 start/cleanup 변경까지 포함한 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked PASS(3.83초). 이후 다른 모델/effort/권한/공간/profile·만료 거절 회귀를 추가했으며 실행하지 않았다. git diff --check 확인. 실제 계정/모델/사용자 프로젝트 실행 없음, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named 실행과 동일한 사전 조회 경로)
 
 - 기준 a055ac4에서 기존 inspect_full/proxied가 legacy 설정 flow만 만드는 점을 확인했다. inspect_named_preflight_candidate를 추가해 검증된 snapshot·역할 권한과 앱 profile을 같은 CodexCommand/PreflightExchange named 경로로 조회하도록 연결했다. CLI/helper·profile·취소를 release 직전 재확인하며 typed process scope 대조 후 기존 observe_and_close를 재사용한다.
