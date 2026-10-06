@@ -844,10 +844,13 @@ impl<'a> LoginProcess<'a> {
                 != matches!(
                     &frame,
                     crate::provider_login_io::NativeFrame::ClaudeInitialize(_)
+                        | crate::provider_login_io::NativeFrame::ClaudeAllow(_)
                         | crate::provider_login_io::NativeFrame::ClaudeDenial(_)
                         | crate::provider_login_io::NativeFrame::ClaudePrompt(_)
                 )
             || matches!(&frame, crate::provider_login_io::NativeFrame::ClaudeDenial(reply)
+                if reply.connection() != self.connection_id())
+            || matches!(&frame, crate::provider_login_io::NativeFrame::ClaudeAllow(reply)
                 if reply.connection() != self.connection_id())
             || matches!(&frame, crate::provider_login_io::NativeFrame::ClaudePrompt(prompt)
                 if prompt.connection() != self.connection_id())

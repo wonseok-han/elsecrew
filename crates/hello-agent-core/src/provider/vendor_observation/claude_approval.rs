@@ -1,19 +1,27 @@
-//! Claude SDK control permissions. Denials only until the runtime admits tool grants.
+//! Claude SDK control permissions. Runtime admission is separate from wire replies.
 //! Wire: anthropics/claude-agent-sdk-python/_internal/query.py (2026-10-06).
 //! One instance belongs to one connection. Raw tool inputs are never public output.
 use super::{BoundedObservation, ProviderError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 pub const PRE_TOOL_CALLBACK: &str = "hello_agent_pre_tool";
 
 #[derive(Default)]
 pub struct Permissions {
     seen: BTreeSet<String>,
-    pending: BTreeMap<String, bool>, // true: PreToolUse, false: can_use_tool
+    pending: BTreeMap<String, Pending>,
     hook_scope: Option<(String, String)>,
     failed: bool,
+}
+
+struct Pending {
+    hook: bool,
+    token: Arc<()>,
+    tool_name: String,
+    tool_use_id: Option<String>,
 }
 
 /// Private inspection, not authorization. Never serialize into chat or run metadata.
@@ -23,6 +31,7 @@ pub struct Request {
     pub tool_use_id: Option<String>,
     target: ToolTarget,
     tool_input: String,
+    token: Arc<()>,
 }
 
 /// Paths are private inspection data, never public chat/status metadata.
@@ -82,6 +91,12 @@ impl Denial {
     }
 }
 
+/// A single response to the exact inspected request, not a persistent permission.
+pub struct AllowOnce(String);
+impl AllowOnce {
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
 fn invalid() -> ProviderError {
     ProviderError("Claude permission request did not match".into())
 }
@@ -121,6 +136,7 @@ impl Permissions {
             input: Value,
             tool_use_id: Option<String>,
             callback_id: Option<String>,
+            agent_id: Option<String>,
         }
         if self.failed {
             return Err(invalid());
@@ -180,6 +196,7 @@ impl Permissions {
         };
         if wire.kind != "control_request"
             || (!hook && request.subtype != "can_use_tool")
+            || request.agent_id.is_some()
             || !valid_id(&tool_name)
             || !request.input.is_object()
             || tool_use_id.as_deref().is_some_and(|id| !valid_id(id))
@@ -192,13 +209,17 @@ impl Permissions {
         if tool_input.len() > 128 * 1024 {
             return Err(invalid());
         }
-        self.pending.insert(wire.request_id.clone(), hook);
+        let token = Arc::new(());
+        self.pending.insert(wire.request_id.clone(), Pending {
+            hook, token: token.clone(), tool_name: tool_name.clone(), tool_use_id: tool_use_id.clone(),
+        });
         let request = Request {
             request_id: wire.request_id,
             tool_name,
             tool_use_id,
             target,
             tool_input,
+            token,
         };
         Ok(if hook {
             Observation::ToolCheck(request)
@@ -212,8 +233,8 @@ impl Permissions {
         if self.failed {
             return Err(invalid());
         }
-        let hook = self.pending.remove(request_id).ok_or_else(invalid)?;
-        let response = if hook {
+        let pending = self.pending.remove(request_id).ok_or_else(invalid)?;
+        let response = if pending.hook {
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
                 "permissionDecisionReason":"Tool execution has not passed the application boundary check."}})
         } else {
@@ -224,6 +245,30 @@ impl Permissions {
             "response":response
         }});
         Ok(Denial(format!("{frame}\n")))
+    }
+
+    /// Caller must first admit the tool against the execution boundary and user decision.
+    /// No caller-supplied replacement input or persistent permission updates are accepted.
+    pub fn allow_once(&mut self, request: &Request) -> Result<AllowOnce, ProviderError> {
+        let pending = self.pending.get(&request.request_id).ok_or_else(invalid)?;
+        if self.failed || self.hook_scope.is_none()
+            || !Arc::ptr_eq(&pending.token, &request.token)
+            || pending.tool_name != request.tool_name || pending.tool_use_id != request.tool_use_id
+            || matches!(request.target, ToolTarget::Unsupported)
+        { return Err(invalid()); }
+        let input: Value = serde_json::from_str(&request.tool_input).map_err(|_| invalid())?;
+        let response = if pending.hook {
+            json!({"hookSpecificOutput":{"hookEventName":"PreToolUse",
+                "permissionDecision":"allow","updatedInput":input}})
+        } else {
+            json!({"behavior":"allow","updatedInput":input})
+        };
+        let frame = format!("{}\n", json!({"type":"control_response","response":{
+            "subtype":"success","request_id":request.request_id,"response":response
+        }}));
+        if frame.len() > crate::provider::PROVIDER_OBSERVATION_LINE_MAX_BYTES { return Err(invalid()); }
+        self.pending.remove(&request.request_id);
+        Ok(AllowOnce(frame))
     }
 
     pub fn close(&mut self) {
@@ -242,6 +287,43 @@ mod tests {
         input(json!({"type":"control_request","request_id":id,"request":{
             "subtype":"can_use_tool","tool_name":"Bash","input":{"command":"SECRET"},"tool_use_id":"tool1"
         }}))
+    }
+    #[test]
+    fn allow_once_binds_connection_request_and_original_input() {
+        let mut first = Permissions::default();
+        let mut second = Permissions::default();
+        first.bind_hook_scope("s", "/snapshot");
+        second.bind_hook_scope("s", "/snapshot");
+        let Observation::Requested(mut a) = first.observe(&request("a")).unwrap() else { panic!() };
+        let Observation::Requested(b) = second.observe(&request("a")).unwrap() else { panic!() };
+        assert!(first.allow_once(&b).is_err());
+        a.tool_name = "Read".into();
+        assert!(first.allow_once(&a).is_err());
+        a.tool_name = "Bash".into();
+        let reply = first.allow_once(&a).unwrap();
+        let wire: Value = serde_json::from_str(reply.as_str()).unwrap();
+        assert_eq!(wire["response"]["response"], json!({"behavior":"allow","updatedInput":{"command":"SECRET"}}));
+        assert!(first.allow_once(&a).is_err());
+        assert!(first.deny("a", false).is_err());
+        second.observe(&input(json!({"type":"control_cancel_request","request_id":"a"}))).unwrap();
+        assert!(second.allow_once(&b).is_err());
+    }
+    #[test]
+    fn hook_allow_keeps_input_and_does_not_add_persistent_permissions() {
+        let mut permissions = Permissions::default();
+        permissions.bind_hook_scope("s", "/snapshot");
+        let hook = input(json!({"type":"control_request","request_id":"h","request":{
+            "subtype":"hook_callback","callback_id":PRE_TOOL_CALLBACK,"tool_use_id":"t",
+            "input":{"session_id":"s","cwd":"/snapshot","hook_event_name":"PreToolUse",
+                "tool_name":"Read","tool_use_id":"t","tool_input":{"file_path":"src/lib.rs"}}
+        }}));
+        let Observation::ToolCheck(request) = permissions.observe(&hook).unwrap() else { panic!() };
+        let reply = permissions.allow_once(&request).unwrap();
+        let wire: Value = serde_json::from_str(reply.as_str()).unwrap();
+        assert_eq!(wire["response"]["response"], json!({"hookSpecificOutput":{
+            "hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":"src/lib.rs"}
+        }}));
+        assert!(permissions.allow_once(&request).is_err());
     }
     #[test]
     fn explicit_inspection_retains_input_without_echoing_in_denial() {

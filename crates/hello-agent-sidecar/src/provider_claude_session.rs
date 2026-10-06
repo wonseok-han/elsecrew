@@ -141,6 +141,15 @@ pub(crate) struct PermissionDenial {
     reply: hello_agent_core::provider::vendor_observation::claude_approval::Denial,
 }
 
+pub(crate) struct PermissionAllow {
+    connection: uuid::Uuid,
+    reply: hello_agent_core::provider::vendor_observation::claude_approval::AllowOnce,
+}
+impl PermissionAllow {
+    pub(crate) fn connection(&self) -> uuid::Uuid { self.connection }
+    pub(crate) fn as_str(&self) -> &str { self.reply.as_str() }
+}
+
 impl PermissionDenial {
     pub(crate) fn connection(&self) -> uuid::Uuid {
         self.connection
@@ -279,6 +288,29 @@ impl SessionChannel {
             return Err(failure());
         }
         self.permissions.observe(input).map_err(|_| failure())
+    }
+
+    /// Trusted caller must recheck confinement and the explicit user decision here.
+    /// Not wired to the product until that admission boundary is implemented.
+    pub(crate) fn allow_once(
+        &mut self,
+        process: &mut LoginProcess<'_>,
+        request: &hello_agent_core::provider::vendor_observation::claude_approval::Request,
+        cancel: &AtomicBool,
+        admit: &mut impl FnMut(&hello_agent_core::provider::vendor_observation::claude_approval::Request) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        if !self.can_queue_reply() || process.connection_id() != self.connection
+            || Instant::now() >= self.deadline || cancel.load(Ordering::Acquire)
+            || !self.is_permission_pending(&request.request_id)
+        { self.permissions.close(); return Err(failure()); }
+        admit(request)?;
+        if Instant::now() >= self.deadline || cancel.load(Ordering::Acquire) {
+            self.permissions.close(); return Err(failure());
+        }
+        let reply = self.permissions.allow_once(request).map_err(|_| failure())?;
+        let result = process.queue_native(NativeFrame::ClaudeAllow(PermissionAllow { connection:self.connection, reply }));
+        if result.is_err() { self.permissions.close(); } else { self.transmitting = true; }
+        result
     }
 
     /// `advance` flushes the reply; caller owns cleanup on every failure.

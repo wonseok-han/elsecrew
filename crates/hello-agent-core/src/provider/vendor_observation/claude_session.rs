@@ -130,6 +130,11 @@ impl Session {
         }
         self.permissions.deny(request_id, interrupt)
     }
+    pub fn allow_once(&mut self, request: &claude_approval::Request) -> Result<claude_approval::AllowOnce, ProviderError> {
+        if self.failed || self.projection.is_none() { return Err(invalid()); }
+        self.permissions.allow_once(request)
+    }
+
     pub fn close(&mut self) {
         self.failed = true;
         self.permissions.close();

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 단발 허용 응답·연결 결속)
+
+- 기준 6730880. 공식 SDK query.py와 hooks 문서의 can_use_tool/PreToolUse allow 응답 형식을 확인했다. 원래 입력만 사용하는 AllowOnce를 추가하고 pending 요청의 비공개 인스턴스·도구 이름/ID를 대조한 뒤 단회 소비한다. 다른 세션·변조·취소·중복 처리와 미지원 대상/하위 agent 요청은 허용하지 않는다. 영속 permission update는 생성하지 않는다.
+- Karpathy 지침으로 기존 SessionChannel/NativeFrame 수명을 확장했다. 허용 전 trusted admission callback, 취소/기한 재확인과 process connection 대조를 요구하고 전송 실패 시 채널을 닫는다. 이 callback의 실제 격리/사용자 결정 검증 caller와 허용 UI는 아직 미연결이며 제품 blocked는 유지한다. wire builder는 격리 증거가 아니다.
+- 세션 간 재사용·도구 변조·단회 처리·취소 및 hook 원본 입력 회귀를 추가했다. 이번 테스트/빌드는 미실행, diff check만 확인한다. 다음은 실제 Claude launch admission 및 허용 UI 연결 후 전체 회귀/독립 안전 검토. 기존 9월 아카이브 보존, 실제 계정/모델·main/push 없음.
+- 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py 및 https://code.claude.com/docs/en/agent-sdk/hooks (2026-10-06 확인).
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 도구 입력 상세 표시)
 
 - 기준 34ee14e. Claude hook/can_use_tool의 실제 tool input을 요청 소유자의 비공개 문자열로 보관하고 명시 inspect에서만 기존 approval card로 전달했다. 파일 경로·명령·수정 입력을 확인할 수 있으며 목록/공개 event/원장에는 넣지 않는다. can_use_tool도 확인된 session cwd가 있으면 기존 파일/검색 대상 분류를 재사용한다.
