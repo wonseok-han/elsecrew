@@ -69,6 +69,104 @@ impl ScopedEvidence {
 }
 
 impl AgentRuntime {
+    /// Start discovery is never served from a capability cache. Resolve the
+    /// stored role and input before scheduling the same bounded query worker.
+    #[allow(dead_code)] // Native start dispatcher is connected after admission review.
+    pub(crate) fn begin_scoped_start(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        request: &AgentRunStartRequestV1,
+        request_id: &str,
+    ) -> Result<(), SidecarError> {
+        let preparation = preparation::RunPreparation::resolve(storage, projects, request)
+            .map_err(|_| SidecarError::new("agentInputChanged", "start input is unavailable"))?;
+        self.begin_scoped_discovery(
+            storage,
+            projects,
+            &AgentCapabilitiesRequestV1 {
+                runtime: preparation.profile.runtime,
+                refresh: true,
+                chat_id: Some(request.chat_id.clone()),
+                role_id: Some(request.role_id.clone()),
+            },
+            request_id,
+        )
+    }
+
+    /// Prepare a fresh process, then reserve the durable run. The caller retains
+    /// every nonempty slot on error and must explicitly drain/record it; this
+    /// function never drops a process after a later preparation failure.
+    #[allow(dead_code)]
+    pub(crate) fn reserve_scoped_start(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        request: &AgentRunStartRequestV1,
+        request_id: &str,
+        observed: &ScopedEvidence,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+    ) -> Result<(), SidecarError> {
+        let failure =
+            || SidecarError::new("agentInputChanged", "start discovery no longer matches");
+        if self.preparing_to_quit
+            || reservation.is_some()
+            || process.is_some()
+            || active_run_limit_reached(self.owned_run_ids().len())
+        {
+            return Err(failure());
+        }
+        let capability = observed.capability()?;
+        let preparation = preparation::RunPreparation::resolve(storage, projects, request)
+            .map_err(|_| failure())?;
+        if observed.scope
+            != capability_scope(&preparation.chat, &request.role_id).map_err(|_| failure())?
+            || observed.profile != preparation.profile
+            || preflight_outcome(request, &preparation.profile, &capability) != "started"
+        {
+            return Err(failure());
+        }
+        let binding = crate::provider_profile::CodexProfileBinding::from_storage(storage)?;
+        *process = Some(crate::provider_login_process::LoginProcess::reserve_codex_owned(binding)?);
+        let permission = match preparation.profile.permission.as_str() {
+            "readOnly" => ExpectedPermission::ReadOnly,
+            "workspaceWrite" => ExpectedPermission::WorkspaceWrite,
+            _ => return Err(failure()),
+        };
+        let expected =
+            hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
+                model: &preparation.profile.model_selector,
+                reasoning_effort: preparation
+                    .profile
+                    .reasoning_effort
+                    .as_deref()
+                    .ok_or_else(failure)?,
+            };
+        let workspace = Path::new(
+            preparation.manifest["worktreePath"]
+                .as_str()
+                .ok_or_else(failure)?,
+        );
+        let home = process
+            .as_ref()
+            .ok_or_else(failure)?
+            .codex_preflight_home()?;
+        if !observed
+            .evidence
+            .observation
+            .matches(&expected, permission, workspace, &home)
+        {
+            return Err(failure());
+        }
+        *reservation = Some(
+            preparation
+                .reserve(storage, projects, &capability, request_id)
+                .map_err(|_| failure())?,
+        );
+        Ok(())
+    }
+
     #[allow(dead_code)] // IPC deferral will call this after native activation review.
     pub(crate) fn begin_scoped_discovery(
         &mut self,

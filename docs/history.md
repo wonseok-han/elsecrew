@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (실행 요청의 fresh 조회·예약 연결)
+
+- 기준 9f9e718. 실행 입력/저장된 역할을 resolve한 뒤 캐시 없이 scoped worker를 시작하는 경로와, 완료 관측을 현재 scope/profile/fingerprint에 대조해 새 owned process 및 durable run을 준비하는 경로를 추가했다. 조회 프로세스를 재사용하지 않으며 home/workspace/30초 관측을 durable 예약 전에 확인한다.
+- Karpathy 지침으로 기존 RunPreparation·profile reservation을 재사용했다. 오류 시 process/reservation 출력 슬롯을 호출자에게 보존하며 자동 재실행하지 않는다. 다음은 이 슬롯을 dispatcher의 pending start 수명에 보관하고 native start 및 실패 정리로 인계하는 연결이다. 제품 활성화는 아직 하지 않았다.
+- 이번에는 rustfmt와 diff 확인만 수행했으며 컴파일/회귀는 미실행이다. 사용자 방침대로 전체 기능 연결 후 통합 검증한다. 기존 9월 archive 변경 보존, main 병합/push·실제 계정/모델 실행 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (scoped capability 응답·지연 요청 수명 연결)
 
 - 기준 0b81814. 기존 미커밋 조회 projection을 마무리하고 lib.rs에 scoped 조회 요청 보관·완료 응답 수집·종료 전 대기 처리를 연결했다. 조회 결과는 저장된 역할·scope와 대조하고 30초 유효 관측의 선택 모델/권한과 현재 실행 파일의 비공개 경로 식별값만 응답한다. digest는 현재 파일 신원이며 사전 등록한 릴리스 허용목록이 아니다.
