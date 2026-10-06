@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (공식 복구 승인 및 서명 장애 판단 정정)
+
+- 사용자가 Codex·Claude의 공식 업데이트/재설치 복구를 승인했다. 인증 정보·프로젝트 보존, 앱 종료 필요 시 사전 안내 범위다. OpenAI 공식 CLI 문서(https://learn.chatgpt.com/docs/codex/cli)와 양사 공식 설치 스크립트를 확인하고 Claude 2.1.291 배포본을 임시 폴더에 다운로드했지만 실행·설치는 하지 않았다.
+- 같은 새 배포본의 codesign --verify --strict --all-architectures가 제한된 실행 환경에서는 invalid signature, require_escalated 환경에서는 valid on disk / satisfies its Designated Requirement(exit0)였다. 기존 Claude 2.1.287, ~/.local/bin/codex, ChatGPT.app 내장 Codex도 제한 밖의 동일 검사에서 모두 통과했다. 따라서 이전 로그의 설치본 서명 장애/복구 필요 판단을 철회한다. 샌드박스 안 검사 결과만으로 파일 손상을 진단하면 안 된다. 제한 환경의 정확한 시스템 실패 원인까지 확정하지 않는다.
+- 현재 호스트 앱 업데이트는 available(26.928.31416 → 26.930.61225)이지만 서명 복구 목적으로 필요하다는 근거가 없어 앱 종료·업데이트·재설치를 하지 않았다. 실행 중인 Claude 2.1.286 세션도 유지했다. 인증·설정·프로젝트는 변경하지 않고 이번 다운로드와 설치 스크립트만 임시 폴더에서 제거했다.
+- 문서 diff 검사 수행. 직전 누적 cargo check --tests PASS는 컴파일 증거만 유지하며 실제 로그인/모델/UI 성공으로 확대하지 않는다. 다음은 정상 서명을 확인한 기존 설치본으로 모델 없는 공급자 계약 확인 및 실제 launcher/owner/UI 연결이다. 기존 9월 archive 변경 보존, main 병합/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (Claude 설치 서명 장애와 누적 컴파일 확인)
+
+- 기준8cc067b·m5/coding-agent-ide에서 현재 ~/.local/bin/claude의 symlink가 ~/.local/share/claude/versions/2.1.287을 가리킴을 읽기 전용으로 확인했다. 해당 실제 파일에 /usr/bin/codesign --verify --strict --all-architectures를 실행했고 arm64 invalid signature (code or signature have been modified), exit1을 관측했다. CLI/계정/모델은 실행하지 않았다. 원인이나 고의 변조 여부까지 확정하지 않는다.
+- Codex뿐 아니라 Claude 실제 연결 실측도 현재 설치 상태로 진행할 수 없다. 공식 배포 경로의 업데이트/재설치 복구 승인을 비동기 질문으로 요청했으며 답변 전 설치본·인증 정보·실행 앱은 변경하지 않는다. 기존 1·3번 정책 승인이나 자동 목표 진행을 설치 복구 승인으로 해석하지 않는다. 독립 코드 연결 작업은 여전히 가능하다.
+- 누적 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked 통과(5.06초). 최근 hook/대상 관측/owned profile 회귀도 컴파일됐지만 실행되지 않았다. 제품 launcher·owner/UI·최종 통합 검증은 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 프로필의 장기 실행 소유권)
 
 - 기준f5746e7에서 LoginProcess의 owned profile이 Codex만 지원해 Claude 실행을 dispatcher 요청 사이에 보관할 수 없는 연결 누락을 확인했다. Karpathy 지침으로 기존 ProfileOwner/Reservation에 Claude 소유 variant와 reserve_claude_owned를 추가했다. borrowed 로그인 API와 profile 디렉터리 whitelist/인증 파일은 변경하지 않는다.
@@ -154,6 +167,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **서명 검사 실행 환경 주의(2026-10-06 정정)**: 제한 환경의 codesign invalid signature만으로 설치본 손상을 판정하지 않는다. 같은 공식 Claude 2.1.291 다운로드가 제한 밖에서 통과했고 기존 Claude 2.1.287·standalone Codex·ChatGPT.app 내장 Codex도 strict/all-architectures 검사를 모두 통과했다. 이전 서명 장애 및 재설치 필요 판단은 철회한다. 공식 복구는 사용자 승인됐지만 불필요한 설치/종료는 수행하지 않았다. 제품 서명 검사는 유지하며 우회·재서명·고정 해시 등록으로 대체하지 않는다.
 - **Claude shell sandbox와 파일 도구 구분(2026-10-06)**: 공식 sandboxing 문서상 sandbox는 셸 도구에만 적용되고 Read/Edit/Write는 권한 규칙을 따른다. 기본 셸 읽기는 광범위하며 can_use_tool 콜백이 모든 호출을 가로채지도 않는다. 후보 인자의 strict shell 설정은 전체 target/credential 보호가 아니며 native owner는 여전히 Codex 전용이다. Claude 활성화 전 이 차이를 구현/검증해야 한다.
 - **Claude 권한 통신(2026-10-06)**: SDK can_use_tool은 --permission-prompt-tool stdio로 control 요청을 받는다. 옵션만으로 모든 도구가 콜백을 거친다고 보장하지 않으며 allow 규칙/권한 모드의 우회와 실행 격리 검증은 별도다. 후보 인자와 거절 IO가 연결됐으나 제품 실행/UI 활성화 증거는 아니다.
 - **Claude safe-mode 경계(2026-10-06)**: 공식 CLI의 safe-mode는 bare와 달리 구독 인증을 유지하지만 관리 정책 hook 등 일부 동작은 제외하지 않는다. 인자 구성만으로 실행 admission/OS 격리를 입증하지 않는다. 앱 프로필로 실제 실행할 때 생성되는 파일과 권한 응답·종료 검증은 여전히 후속이다.
@@ -166,9 +180,9 @@
 - **정리 후보 확장(2026-10-06 후속)**: 현재 복구가 참조하지 않는 ready 백업 및 원본 백업이 정확히 일치하는 terminal 과거 이력을 명시 정리 후보에 포함했다. 파일 삭제 시 해당 백업 복원을 포기하고 이력/삭제 기록은 남긴다. 제품 삭제는 아직 비활성이고 현재 복구점/고아 파일은 미지원이다.
 - **복원 예산 UI 후보(2026-10-01)**: 앱 전체 사용량 조회와 명시 예산 변경(기본5GiB, 정수1~1024GiB)을 IPC/UI에 연결했다. application-settings-v1의 원자 설정과 archive flock을 공유하며 기존 백업 자동 삭제는 없다. 통합 검증 전 구현이며 원본 writer 활성화·삭제 기능 완료를 뜻하지 않는다.
 
-- **named 권한 스키마 재확인 경계(2026-10-01)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐고 현재 CLI는 OS codesign strict 검사에서도 invalid signature다. 필드 추측·서명 우회로 연결하지 않으며 정상 설치본/공식 스키마 확보가 필요하다.
+- **named 권한 스키마 재확인 경계(2026-10-06 정정)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐다. 기존 CLI의 제한 밖 codesign strict 검사는 통과했으므로 설치 손상을 차단 사유로 반복하지 않는다. 필드 추측 없이 모델 없는 공식 스키마 확인을 이어간다.
 - **구현 우선 운영(2026-10-01 사용자 지시)**: 매 작업 검증 대신 남은 기능 전체 연결 후 통합 검증·순차 버그 수정을 진행한다. 미검증 구현 체크포인트 커밋은 가능하지만 제품 완료/gate PASS가 아니다. 실제 실행 활성화·계정/유료/사용자 프로젝트·출시 경계는 유지하며 설치본 장애와 독립적인 기능 구현은 계속한다. 루트 지침의 같은 제목 절이 과거 검증 빈도 규칙보다 우선한다.
-- **실행 격리 전환 승인(2026-10-01)**: §6.9의 서명된 공급자 부모 신뢰와 공식 도구 sandbox 분담/무계정 임시 자료 시험은 사용자 승인 완료다. 이전 정책 입력 대기를 반복하지 않는다. 다만 새 설치 시험은 CLI 자체 서명 불일치로 실행 전 차단됐고 OS codesign에서도 동일 오류를 확인했다. 제품 활성화·실제 계정/유료 모델 승인이 아니며 정상 서명 설치본의 도구 보호/종료 검증이 남는다.
+- **실행 격리 전환 승인(2026-10-01, 10-06 정정)**: §6.9의 서명된 공급자 부모 신뢰와 공식 도구 sandbox 분담/무계정 임시 자료 시험은 사용자 승인 완료다. 이전 정책 입력 대기를 반복하지 않는다. 당시 제한 환경의 서명 오류로 시험을 중단했으나 10-06 제한 밖 검사는 통과했다. 설치 손상이라는 판단은 철회하며 제품 활성화·실제 계정/유료 모델 승인과 구분한다. 정상 서명 설치본의 도구 보호/종료 검증은 남는다.
 - **Claude 로그인 업데이트 입장(2026-09-30)**: 고정275/270 버전/SHA 목록 대신 공식 native launcher가 가리키는 versions/X.Y.Z 실파일을 Anthropic 서명으로 검증한다. 공식 링크는 bin 밖 절대경로이므로 cap_std의 read_link가 아닌 read_link_contents 후 고정 target 검증을 사용한다. launcher 자체는 실행하지 않고 현재 선택한 실파일을 bind한다. 설치2.1.285 읽기 전용 검증 통과는 계정 인증/모델 실행 완료가 아니다. npm/Homebrew/custom launcher 경로는 별도다.
 - **Codex 로그인 업데이트 입장(2026-09-30)**: 로그인·진단은 고정 bundle native 후보의 Apple anchor/OpenAI Team2DC432GLL2/exact CLI·helper identifier 서명으로 입장한다. release SHA 목록은 이 경로에서 제거했고 실행 중 교체 감지용 digest는 유지한다. 새 코드 경로의 설치본 검사는 CLI/helper 수락·잘못된 identifier/다른 공급자 거절을 확인했으나 계정/모델을 호출하지 않았다. Claude와 actual runtime의 pin/호환 전환은 남으며 모든 upstream 파괴적 변경 호환을 보장하지 않는다.
 - **복원 예산 내부 연결(2026-09-30)**: 반영 백업 생성은 앱 데이터 루트의 모든 archive 일반 파일을 합산해 기본5GiB 내 write만 허용한다. 고아/abandoned도 포함하고 directory flock으로 협력 작성자를 직렬화한다. 기존 파일 자동 삭제 없음. preparing 예약 뒤 한도 실패 시 명시 복구가 필요할 수 있다. 제품 원본 writer·복원/정리/예산 설정 UI는 별도 미구현이며 이 내부 제한으로 전체 반영 기능 완료를 주장하지 않는다.
