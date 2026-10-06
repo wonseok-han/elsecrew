@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude fresh 조회·실행 예약 연결)
+
+- 기준 93003f5. 직전 일회 허용 연결은 구현 진전이다. begin_scoped_claude_start는 저장된 요청을 다시 resolve해 fresh 조회를 요구하고 reserve_scoped_claude_start는 scope/역할/fingerprint·snapshot/source/profile·30초 관측·실행 파일을 다시 대조한 뒤 새 owned process와 원장 예약을 만든다. 조회 때 종료한 process를 재사용하거나 조회를 runtime attestation으로 만들지 않는다. 이후 오류에도 caller 슬롯의 process 소유권을 보존한다.
+- Karpathy 지침으로 기존 Codex 예약 흐름을 재사용했다. 최근 capability/일회 승인/예약 연결의 cargo check -p hello-agent-sidecar --tests --locked PASS(3.90초, jobs/threads=4), diff check 확인. Rust/TS 전체 테스트·UI·실제 계정/모델 검증은 아직 누적 검증 대상이다.
+- 상시 승인된 기존 claude_activation_review 1명에게 §6.9에서 관측 가능한 안전 조건과 구체 admission의 유한한 다음 패치, 최근 승인 경계 결함을 읽기 전용 재검토 요청했다. 현재 진행 중이며 합격으로 간주하지 않는다. 제품 blocked 유지, 다음은 결과를 반영한 정책/dispatcher 연결이다. 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 일회 허용의 owner·UI 연결)
 
 - 기준 dc5c12f. 이전 턴의 capability projection은 구현 진전이다. Claude pending 요청에 상세 확인/허용 결정 상태를 추가했다. acceptOnce는 같은 live 요청을 먼저 inspect했고 초기화/취소 상태가 유효하며 trusted tool admission을 가진 owner만 접수한다. UI의 tool 종류 전용 허용 차단을 제거해 상세 확인 뒤 같은 일회 허용 버튼을 사용한다.

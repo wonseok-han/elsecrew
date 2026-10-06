@@ -202,6 +202,66 @@ impl ScopedEvidence {
 }
 
 impl AgentRuntime {
+    /// A start always obtains fresh, stored-role evidence; it cannot reuse a UI
+    /// capability response. The caller owns the actual policy admission.
+    #[allow(dead_code)]
+    pub(crate) fn begin_scoped_claude_start(
+        &mut self, storage: &Storage, projects: &ProjectManager,
+        request: &AgentRunStartRequestV1, request_id: &str,
+        admit: impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess)
+            -> Result<(), SidecarError> + Send + 'static,
+    ) -> Result<(), SidecarError> {
+        let preparation = preparation::RunPreparation::resolve(storage, projects, request)
+            .map_err(|_| SidecarError::new("agentInputChanged", "Claude start input differs"))?;
+        self.begin_claude_discovery(storage, projects, request_id, &AgentCapabilitiesRequestV1 {
+            runtime: preparation.profile.runtime,
+            refresh: true,
+            chat_id: Some(request.chat_id.clone()),
+            role_id: Some(request.role_id.clone()),
+        }, admit)
+    }
+
+    /// Preserve the fresh process in caller storage on every later error. No
+    /// launch or fabricated runtime attestation occurs during reservation.
+    #[allow(dead_code)]
+    pub(crate) fn reserve_scoped_claude_start(
+        &mut self, storage: &mut Storage, projects: &ProjectManager,
+        request: &AgentRunStartRequestV1, request_id: &str,
+        observed: &ScopedClaudeEvidence,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_claude_session::ToolAccess;
+        let failure = || SidecarError::new("agentInputChanged", "Claude start discovery differs");
+        if self.preparing_to_quit || reservation.is_some() || process.is_some()
+            || active_run_limit_reached(self.owned_run_ids().len()) { return Err(failure()); }
+        let capability = observed.capability()?;
+        let preparation = preparation::RunPreparation::resolve(storage, projects, request)
+            .map_err(|_| failure())?;
+        if observed.scope != capability_scope(&preparation.chat, &request.role_id).map_err(|_| failure())?
+            || observed.profile != preparation.profile
+            || preflight_outcome(request, &preparation.profile, &capability) != "started"
+        { return Err(failure()); }
+        let access = match preparation.profile.permission.as_str() {
+            "readOnly" => ToolAccess::ReadOnly,
+            "workspaceWrite" => ToolAccess::Edit,
+            _ => return Err(failure()),
+        };
+        let binding = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?;
+        *process = Some(crate::provider_login_process::LoginProcess::reserve_claude_owned(binding)?);
+        let home = process.as_ref().ok_or_else(failure)?.claude_preflight_home()?;
+        if !observed.evidence.is_fresh() || !observed.evidence.observation.matches(
+            &preparation.profile.model_selector,
+            preparation.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+            Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
+            Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
+        ) { return Err(failure()); }
+        observed.evidence.executable.revalidate()?;
+        *reservation = Some(preparation.reserve(storage, projects, &capability, request_id)
+            .map_err(|_| failure())?);
+        Ok(())
+    }
+
     /// Resolve all launch inputs from the durable chat; renderer supplies IDs
     /// only. Policy admission remains an internal caller responsibility.
     #[allow(dead_code)]
