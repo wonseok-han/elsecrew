@@ -5,6 +5,7 @@ mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
 mod claude;
 pub(crate) use claude::OwnedClaudeRun;
+pub(crate) use claude::ClaudeToolAdmission;
 #[allow(unused_imports)] // Pending native Claude dispatcher integration.
 pub(crate) use claude::ClaudeStart;
 

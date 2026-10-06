@@ -28,12 +28,21 @@ pub(crate) struct OwnedClaudeRun {
     output: ClaudeOutputState,
     cancel: std::sync::atomic::AtomicBool,
     approvals: Vec<ClaudePending>,
+    tool_admission: Option<ClaudeToolAdmission>,
 }
+
+/// Trusted, live tool-policy validation; never supplied by renderer input.
+pub(crate) type ClaudeToolAdmission = Box<dyn for<'a> FnMut(
+    &mut crate::provider_login_process::LoginProcess<'a>,
+    &hello_agent_core::provider::vendor_observation::claude_approval::Request,
+) -> Result<(), SidecarError> + Send>;
 
 struct ClaudePending {
     id: String,
     request: hello_agent_core::provider::vendor_observation::claude_approval::Request,
     declined: bool,
+    inspected: bool,
+    accepted: bool,
 }
 
 /// The caller retains reservation/process slots until a fully prepared owner is
@@ -119,6 +128,10 @@ impl ClaudeStart {
 
 impl OwnedClaudeRun {
 
+    pub(crate) fn set_tool_admission(&mut self, admission: ClaudeToolAdmission) {
+        self.tool_admission = Some(admission);
+    }
+
     pub(crate) fn polling_finished(&self) -> bool {
         self.output.finished
     }
@@ -129,16 +142,21 @@ impl OwnedClaudeRun {
         let mut queued = None;
         if action != "list" {
             let id = id.ok_or_else(failure)?;
-            let entry = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined).ok_or_else(failure)?;
+            let entry = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined && !entry.accepted).ok_or_else(failure)?;
             match action {
                 "decline" => { entry.declined = true; queued = Some(id); },
-                "inspect" => inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
+                "acceptOnce" if entry.inspected && self.tool_admission.is_some()
+                    && !self.cancel.load(std::sync::atomic::Ordering::Acquire)
+                    && self.output.initialized && !self.output.finished => {
+                    entry.accepted = true; queued = Some(id);
+                },
+                "inspect" => { entry.inspected = true; inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
                     "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null,
-                    "toolInput":entry.request.inspect_input()})),
+                    "toolInput":entry.request.inspect_input()})); },
                 _ => return Err(failure()),
             }
         }
-        let pending: Vec<_> = self.approvals.iter().filter(|entry| !entry.declined)
+        let pending: Vec<_> = self.approvals.iter().filter(|entry| !entry.declined && !entry.accepted)
             .map(|entry| json!({"approvalId":entry.id,"kind":"tool"})).collect();
         let mut result = json!({"identity":identity,"pending":pending,"queued":queued});
         if let Some(inspection) = inspection { result["inspection"] = inspection; }
@@ -185,6 +203,7 @@ impl OwnedClaudeRun {
             output,
             cancel: std::sync::atomic::AtomicBool::new(false),
             approvals: Vec::new(),
+            tool_admission: None,
         })
     }
 
@@ -259,10 +278,16 @@ impl OwnedClaudeRun {
     ) -> Result<bool, SidecarError> {
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
         if self.channel.can_queue_reply() {
-            if let Some(index) = self.approvals.iter().position(|entry| entry.declined) {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined || entry.accepted) {
                 let entry = self.approvals.remove(index);
-                if let Err(error) = self.channel.deny(&mut self.process, &entry.request.request_id, false) {
+                let reply = if entry.accepted {
+                    self.allow_tool_once(storage, projects, &entry.request)
+                } else {
+                    self.channel.deny(&mut self.process, &entry.request.request_id, false)
+                };
+                if let Err(error) = reply {
                     self.output.completion = Some(Err(error));
+                    self.cancel.store(true, std::sync::atomic::Ordering::Release);
                 }
             }
         }
@@ -281,7 +306,7 @@ impl OwnedClaudeRun {
                         if approvals.len() >= 128 || approvals.iter().any(|entry| entry.request.request_id == request.request_id) {
                             return Err(SidecarError::new("agentApprovalChanged", "Claude approval queue is invalid"));
                         }
-                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false});
+                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false,inspected:false,accepted:false});
                         Ok(())
                     },
                     Event::Permission(Observation::Cancelled) => { approvals.retain(|entry| channel.is_permission_pending(&entry.request.request_id)); Ok(()) },
@@ -299,6 +324,27 @@ impl OwnedClaudeRun {
         crate::provider_login_process::LoginProcess<'static>,
     ) {
         (self.reservation, self.process)
+    }
+
+    fn allow_tool_once(
+        &mut self, storage: &mut Storage, projects: &ProjectManager,
+        request: &hello_agent_core::provider::vendor_observation::claude_approval::Request,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentApprovalChanged", "Claude tool boundary differs");
+        if !self.output.initialized || self.output.finished
+            || self.output.completion.is_some()
+            || self.cancel.load(std::sync::atomic::Ordering::Acquire) { return Err(failure()); }
+        let (cwd, access) = self.reservation.verify_claude_launch(storage, projects, &self.process)?;
+        let address = address_from_chat(&self.reservation.run).map_err(|_| failure())?;
+        projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
+        if !self.channel.matches_process(&self.process, Path::new(&cwd))
+            || !self.channel.matches_role(self.reservation.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?, access)
+        { return Err(failure()); }
+        self.reservation.observe_process(storage, &mut self.process)?;
+        // Recheck policy at delivery, not merely when the user clicked. Input and
+        // connection identity remain owned by the original opaque request.
+        let admission = self.tool_admission.as_mut().ok_or_else(failure)?;
+        self.channel.allow_once(&mut self.process, request, &self.cancel, &mut |process, request| admission(process, request))
     }
 }
 

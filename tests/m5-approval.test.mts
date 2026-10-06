@@ -50,4 +50,6 @@ test("one-time acceptance has exact identity and a consumed-request receipt", ()
   assert.throws(()=>validateApprovalRequest({action:"acceptOnce",identity,approvalId,always:true}));
   assert.throws(()=>validateApprovalResult({identity,pending:[],queued:null},request));
   assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"command"}],queued:approvalId},request));
+  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"tool"}],queued:approvalId},request));
+  assert.throws(()=>validateApprovalRequest({action:"acceptOnce",identity,approvalId,toolInput:"replacement"}));
 });

@@ -336,19 +336,19 @@ impl SessionChannel {
     }
 
     /// Trusted caller must recheck confinement and the explicit user decision here.
-    /// Not wired to the product until that admission boundary is implemented.
+    /// The run owner supplies its retained admission; product activation is separate.
     pub(crate) fn allow_once(
         &mut self,
         process: &mut LoginProcess<'_>,
         request: &hello_agent_core::provider::vendor_observation::claude_approval::Request,
         cancel: &AtomicBool,
-        admit: &mut impl FnMut(&hello_agent_core::provider::vendor_observation::claude_approval::Request) -> Result<(), SidecarError>,
+        admit: &mut impl FnMut(&mut LoginProcess<'_>, &hello_agent_core::provider::vendor_observation::claude_approval::Request) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         if !self.can_queue_reply() || process.connection_id() != self.connection
             || Instant::now() >= self.deadline || cancel.load(Ordering::Acquire)
             || !self.is_permission_pending(&request.request_id)
         { self.permissions.close(); return Err(failure()); }
-        admit(request)?;
+        admit(process, request)?;
         if Instant::now() >= self.deadline || cancel.load(Ordering::Acquire) {
             self.permissions.close(); return Err(failure());
         }

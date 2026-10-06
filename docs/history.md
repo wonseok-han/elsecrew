@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 일회 허용의 owner·UI 연결)
+
+- 기준 dc5c12f. 이전 턴의 capability projection은 구현 진전이다. Claude pending 요청에 상세 확인/허용 결정 상태를 추가했다. acceptOnce는 같은 live 요청을 먼저 inspect했고 초기화/취소 상태가 유효하며 trusted tool admission을 가진 owner만 접수한다. UI의 tool 종류 전용 허용 차단을 제거해 상세 확인 뒤 같은 일회 허용 버튼을 사용한다.
+- launch caller가 별도 ClaudeToolAdmission을 제공하도록 시작 계약에 추가하고 초기화 완료 시 실행 owner에 인계했다. 실제 전송 poll에서 저장된 입력/역할·snapshot 격리·서명 scope·연결·process 관측을 재확인한 뒤 그 callback으로 원래 opaque 요청을 검사하고 단발 응답을 큐에 넣는다. 오류 시 취소/기존 terminal 정리로 넘어간다. prompt admission을 도구 권한으로 재사용하거나 무조건 허용 callback을 만들지 않았다.
+- Karpathy 지침으로 기존 SessionChannel과 승인 계약을 재사용했다. tool 승인 receipt가 같은 pending ID를 남기거나 renderer가 입력을 교체하는 회귀를 추가했다. diff check 확인; Rust/TS 빌드·테스트·독립 검토는 기능 파동 누적 검증 대상으로 남긴다. 제품은 blocked이며 구체 정책 callback과 시작 dispatcher 연결 전이다. 기존 9월 archive 변경 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude capability 응답 projection)
 
 - 기준 6678c4c. 직전 턴은 버전/인증 worker 연결과 컴파일 증거를 남긴 구현 진전이다. 이번에는 관측된 Claude selector/effort/권한을 scoped capability로 변환하고 scope/저장된 역할·전체 유효 시간·서명 실행 파일을 재확인한다. credential 없는 결과는 notAuthenticated/canStart=false로 반환하며 catalog를 인증으로 대체하지 않는다.

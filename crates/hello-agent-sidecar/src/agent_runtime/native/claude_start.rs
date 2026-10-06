@@ -13,6 +13,7 @@ pub(crate) struct PendingClaudeStart {
     controller: preparation::ClaudeStart,
     cancel: AtomicBool,
     admit: PromptAdmission,
+    tool_admit: Option<preparation::ClaudeToolAdmission>,
     failed: bool,
 }
 
@@ -53,6 +54,7 @@ impl AgentRuntime {
             crate::provider_claude_session::ToolAccess,
         ) -> Result<(), SidecarError>,
         prompt_admit: PromptAdmission,
+        tool_admit: preparation::ClaudeToolAdmission,
     ) -> Result<G5Action, SidecarError> {
         let failure = || SidecarError::new("agentLaunchRejected", "Claude start unavailable");
         let pending = reservation.as_ref().ok_or_else(failure)?;
@@ -89,7 +91,7 @@ impl AgentRuntime {
             if cancel.load(Ordering::Acquire) {
                 return Err(failure());
             }
-            self.register_claude_start(storage, projects, reservation, process, prompt_admit)
+            self.register_claude_start(storage, projects, reservation, process, prompt_admit, tool_admit)
         })();
         if let Err(error) = result {
             // If cleanup registration rejects, caller slots still own the process.
@@ -112,6 +114,7 @@ impl AgentRuntime {
         reservation: &mut Option<preparation::RunReservation>,
         process: &mut Option<LoginProcess<'static>>,
         admit: PromptAdmission,
+        tool_admit: preparation::ClaudeToolAdmission,
     ) -> Result<(), SidecarError> {
         let failure =
             || SidecarError::new("agentRegistrationRejected", "Claude startup unavailable");
@@ -152,6 +155,7 @@ impl AgentRuntime {
         self.pending_claude_starts.insert(
             identity.run_id.clone(),
             PendingClaudeStart {
+                tool_admit: Some(tool_admit),
                 identity,
                 reservation: reservation.take(),
                 process: process.take(),
@@ -188,7 +192,10 @@ impl AgentRuntime {
                         self.pending_claude_starts.insert(id, pending);
                         continue;
                     }
-                    Ok(Some(owner)) => {
+                    Ok(Some(mut owner)) => {
+                        if let Some(admission) = pending.tool_admit.take() {
+                            owner.set_tool_admission(admission);
+                        }
                         let mut slot = Some(owner);
                         match self.register_claude_candidate(storage, projects, &mut slot) {
                             Ok(()) => continue,
