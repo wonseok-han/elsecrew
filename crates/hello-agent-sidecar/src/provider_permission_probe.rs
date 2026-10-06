@@ -60,7 +60,7 @@ fn exchange(
     };
     process.begin_preflight()?;
     let initialize: Value = serde_json::from_str(
-        &hello_agent_core::provider::vendor_observation::codex_rpc::ModelFreeExchange::with_named_permission_config()
+        &hello_agent_core::provider::vendor_observation::codex_rpc::ModelFreeExchange::with_named_permission_config(workspace).map_err(|_| failure())?
             .next_request().map_err(|_| failure())?.ok_or_else(failure)?
     ).map_err(|_| failure())?;
     for frame in [

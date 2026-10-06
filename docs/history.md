@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named 실행 설정의 snapshot 경계)
+
+- 직전 c1dbc9c는 실제 CLI 스키마 확보와 조회 구현의 진전이었다. OpenAI Docs로 https://learn.chatgpt.com/docs/permissions 를 확인하고 invocation-only named 실행 인자 후보를 추가했다. 기존 로그인 config 파일은 변경하지 않으며 legacy sandbox_mode/sandbox_workspace_write 인자를 제거한 뒤 명시적 named profile을 전달한다.
+- 동적 workspace_roots를 그대로 허용하는 기존 임시 sentinel probe와 달리 정확한 snapshot 절대 경로만 read/write로 지정했다. root deny·minimal read·인증 profile deny·snapshot의 .git/.codex/.claude/.agents deny·도구 network=false를 요청한다. profile/snapshot 포함 관계와 glob 문자가 있는 경로를 거절하고 경로 문자열을 인자에 안전하게 인용한다. 최소 런타임 예외/설정 layer 병합/공급자 집행은 별도 확인해야 하므로 launcher 활성화나 안전 합격은 아니다.
+- 인자 분리/경계 회귀를 작성했다. 누적 컴파일 진단에서 이전 named constructor 변경의 test-only permission probe 호출 누락을 발견해 workspace 인자를 연결했다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked 재실행 통과(2.43초), 전체 테스트/실제 CLI 실행/통합 gate는 후속이다. 다음은 named effective config·thread/turn 관측을 owner에 연결하고 승인된 임시 자료로 도구 보호를 확인하는 작업이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Codex named 권한 조회 계약 연결)
 
 - 직전 턴은 제한 밖 서명 재검증으로 잘못된 설치 차단을 제거한 진전이었다. 기준638c441에서 정상 서명된 앱 내장 Codex 0.159.2의 app-server generate-json-schema --experimental을 임시 폴더로 실행해 PermissionProfileListParams/Response를 확보했다. 서버·계정 조회·로그인·모델 호출은 하지 않았다. 생성물은 /private/tmp/hello-agent-codex-schema.ZWa0QJ에 있으며 언제든 같은 CLI에서 재생성할 수 있다.
