@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (native 접수 응답·이벤트 보존과 제품 연결 검토)
+
+- 기준 9ed20aa에서 start_reserved_codex가 영속 예약으로 만든 runAccepted(preparing)를 검증한 뒤 런타임 등록 성공에만 G5Action으로 반환하도록 연결했다. native polling은 한 owner의 취소/원장 오류에도 다른 owner를 진행하고, 이미 cursor를 전진한 공개 이벤트를 후속 오류로 버리지 않는다. 종료 미확인 소유자는 계속 보관한다.
+- 상시 승인된 읽기 전용 검토자 1명이 제품 연결을 조사했다. runtime-only agent.getCapabilities/캐시는 snapshot·역할에 결속된 NamedProfileObservation의 출처가 될 수 없다. 다음 변경은 chatId+roleId로 저장된 snapshot을 해석하는 scoped discovery 계약이며, 시작에서는 다시 조회한 증거로 예약한다. 조회 process는 이미 종료됐으므로 새 owned process를 시작에 사용해야 한다. 제품 활성화/안전 최종 승인 검토는 아니다.
+- Karpathy 지침으로 기존 응답·polling을 수정했다. native.rs rustfmt·git diff --check만 확인, 컴파일·통합 회귀·실제 UI/모델 실행 미실행이다. 다음은 scoped 요청의 Rust/TS/renderer 전달과 backend 조회 연결이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (선택 프로필 관측값을 실제 시작 입구에 결속)
 
 - 기준 761d400에서 start_reserved_codex가 NamedProfileObservation을 필수 입력으로 받도록 연결했다. durable reservation/lock/역할 입력을 재검증하고 현재 worktree manifest 경로와 process의 실제 앱 profile HOME으로 관측값을 대조한다. 다른 모델/effort/권한/작업 사본/profile 또는 만료 관측은 launch/fence 인계 전에 거절한다.

@@ -129,7 +129,7 @@ impl AgentRuntime {
         executable: &crate::provider_executable::PinnedExecutable,
         helper: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
-    ) -> Result<String, SidecarError> {
+    ) -> Result<G5Action, SidecarError> {
         let failure = || SidecarError::new("agentLaunchRejected", "native start unavailable");
         let run_id = reservation.as_ref().ok_or_else(failure)?.run_id.clone();
         if self.preparing_to_quit
@@ -147,6 +147,15 @@ impl AgentRuntime {
                 process.as_ref().ok_or_else(failure)?,
                 observation,
             )?;
+        let run = &reservation.as_ref().ok_or_else(failure)?.run;
+        let accepted = json!({
+            "schemaVersion": 1, "runId": run["runId"], "chatId": run["chatId"],
+            "taskId": run["taskId"], "projectId": run["projectId"],
+            "worktreeId": run["worktreeId"], "workspaceIdentity": run["workspaceIdentity"],
+            "roleId": run["selectedProfile"]["roleId"],
+            "capabilityFingerprint": run["capabilityFingerprint"], "state": "preparing",
+        });
+        validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(|_| failure())?;
         let launch_error = match preparation::RunReservation::prepare_named_owner(
             reservation,
             process,
@@ -159,7 +168,12 @@ impl AgentRuntime {
             Ok(owner) => {
                 let mut slot = Some(owner);
                 match self.register_native_candidate(storage, projects, &mut slot) {
-                    Ok(()) => return Ok(run_id),
+                    Ok(()) => {
+                        return Ok(G5Action {
+                            result: accepted,
+                            events: Vec::new(),
+                        })
+                    }
                     Err(error) => {
                         // Registration never consumes on rejection. Recover the
                         // exact owner, not a reconstructed or relaunched process.
@@ -447,6 +461,7 @@ impl AgentRuntime {
     ) -> Result<Vec<G5Event>, SidecarError> {
         use crate::provider_preflight_session::TextAction;
         let mut events = Vec::new();
+        let mut pending_error = None;
         let ids: Vec<_> = self.native.keys().cloned().collect();
         for id in ids {
             let active = self.native.get_mut(&id).unwrap();
@@ -486,20 +501,36 @@ impl AgentRuntime {
                     )
                     .is_err()
                 {
-                    active.owner.request_cancel(&active.identity)?;
+                    if let Err(error) = active.owner.request_cancel(&active.identity) {
+                        pending_error = Some(error);
+                    }
                 }
             }
-            let (emitted, terminal) = active.events(storage)?;
+            let (emitted, terminal) = match active.events(storage) {
+                Ok(result) => result,
+                Err(error) => {
+                    pending_error = Some(error);
+                    continue;
+                }
+            };
+            // `events` advances the cursor. Never discard those events because
+            // a later owner (or this owner's terminal write) needs recovery.
+            events.extend(emitted);
             if active.stopped && !terminal {
                 // Keep the owner and durable fence on terminal persistence failure.
-                return Err(SidecarError::new(
+                pending_error = Some(SidecarError::new(
                     "agentRecoveryRequired",
                     "native terminal requires recovery",
                 ));
+                continue;
             }
-            events.extend(emitted);
             if active.stopped && terminal {
                 self.native.remove(&id);
+            }
+        }
+        if events.is_empty() {
+            if let Some(error) = pending_error {
+                return Err(error);
             }
         }
         Ok(events)
