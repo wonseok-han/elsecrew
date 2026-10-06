@@ -24,10 +24,76 @@ fn failure() -> SidecarError {
     )
 }
 
-fn configuration_arguments() -> Vec<std::ffi::OsString> {
-    crate::provider_tool_policy::configuration_arguments(
-        crate::provider_tool_policy::WorkspaceMode::Write,
+fn configuration_arguments(home: &Path, workspace: &Path) -> Vec<std::ffi::OsString> {
+    use hello_agent_core::provider::vendor_observation::codex_preflight::{
+        ExpectedPermission, ExpectedProfile,
+    };
+    let mut args = crate::provider_preflight_session::named_discovery_arguments(
+        home,
+        workspace,
+        &ExpectedProfile {
+            model: "test-model",
+            reasoning_effort: "medium",
+        },
+        ExpectedPermission::WorkspaceWrite,
     )
+    .unwrap();
+    // Probe never asks a user/agent to expand permissions, even if enforcement fails.
+    for arg in &mut args {
+        if arg == "approval_policy=\"on-request\"" {
+            *arg = "approval_policy=\"never\"".into();
+        }
+    }
+    args.push("--strict-config".into());
+    args
+}
+
+fn expected_policy(home: &Path, workspace: &Path) -> Value {
+    json!({"filesystem":{
+        ":root":"deny", ":minimal":"read", home.to_str().unwrap():"deny",
+        workspace.to_str().unwrap():{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
+    },"network":{"enabled":false}})
+}
+
+fn matches_policy(value: &Value, home: &Path, workspace: &Path) -> bool {
+    let mut normalized = value.clone();
+    // Observed 0.159.2 serializer defaults, not an arbitrary null-field bypass.
+    for (object, keys) in [
+        ("", &["description", "extends", "workspace_roots"][..]),
+        ("filesystem", &["glob_scan_max_depth"][..]),
+        (
+            "network",
+            &[
+                "allow_local_binding",
+                "allow_upstream_proxy",
+                "dangerously_allow_all_unix_sockets",
+                "dangerously_allow_non_loopback_proxy",
+                "domains",
+                "enable_socks5",
+                "enable_socks5_udp",
+                "mitm",
+                "mode",
+                "proxy_url",
+                "socks_url",
+                "unix_sockets",
+            ][..],
+        ),
+    ] {
+        let target = if object.is_empty() {
+            &mut normalized
+        } else {
+            &mut normalized[object]
+        };
+        let Some(map) = target.as_object_mut() else {
+            return false;
+        };
+        for key in keys {
+            if map.get(*key).is_some_and(Value::is_null) {
+                map.remove(*key);
+            }
+        }
+    }
+    normalized == expected_policy(home, workspace)
 }
 
 // Fixed sentinel-only command: output never contains file contents. No model,
@@ -67,6 +133,7 @@ fn exchange(
         initialize,
         json!({"method":"initialized"}),
         json!({"id":2,"method":"config/read","params":{"includeLayers":true}}),
+        json!({"id":51,"method":"permissionProfile/list","params":{"cwd":workspace,"limit":256}}),
         json!({"id":3,"method":"command/exec","params":probe_command(home, workspace)}),
     ] {
         remaining()?;
@@ -98,15 +165,35 @@ fn exchange(
             1 if !result.is_object() => return Err(failure()),
             2 => {
                 let config = &result["config"];
-                if !crate::provider_tool_policy::matches(
-                    config,
-                    crate::provider_tool_policy::WorkspaceMode::Write,
-                ) {
+                if config["default_permissions"] != "hello-agent-snapshot"
+                    || config["approval_policy"] != "never"
+                    || !config["sandbox_mode"].is_null()
+                    || !config["sandbox_workspace_write"].is_null()
+                    || !matches_policy(
+                        &config["permissions"]["hello-agent-snapshot"],
+                        home,
+                        workspace,
+                    )
+                {
                     return Err(SidecarError::new(
                         "permissionProbeFailed",
-                        "permission config mismatch",
+                        format!("permission config mismatch: selection={}, approval={}, legacy_mode_absent={}, legacy_write_absent={}, policy={}",
+                            config["default_permissions"] == "hello-agent-snapshot",
+                            config["approval_policy"] == "never",
+                            config["sandbox_mode"].is_null(),
+                            config["sandbox_workspace_write"].is_null(),
+                            matches_policy(&config["permissions"]["hello-agent-snapshot"], home, workspace)),
                     ));
                 }
+            }
+            51 => {
+                let observation = hello_agent_core::provider::BoundedObservation::new(
+                    serde_json::to_vec(result).map_err(|_| failure())?,
+                )
+                .map_err(|_| failure())?;
+                hello_agent_core::provider::vendor_observation::codex_preflight::match_named_permission_profile(
+                    &observation, "hello-agent-snapshot"
+                ).map_err(|_| failure())?;
             }
             3 if result["exitCode"] != 0 || result["stdout"] != "protected" => {
                 return Err(SidecarError::new(
@@ -161,7 +248,7 @@ fn run_probe(installed: bool, rejected: bool, vendor_sandbox: bool) {
         .unwrap();
         process.launch_with_barrier(
             || {
-                let arguments = configuration_arguments();
+                let arguments = configuration_arguments(&home, &workspace);
                 // Separate, explicitly approved experiment. The parent is trusted;
                 // only its tools are sandboxed. This is NOT an offline guarantee.
                 let mut command = if vendor_sandbox {
@@ -197,9 +284,9 @@ fn run_probe(installed: bool, rejected: bool, vendor_sandbox: bool) {
         )
     } else {
         let config_response = json!({"id":2,"result":{"config":{
-            "default_permissions":crate::provider_tool_policy::PROFILE,
+            "default_permissions":"hello-agent-snapshot",
             "approval_policy":"never",
-            "permissions":{crate::provider_tool_policy::PROFILE:crate::provider_tool_policy::profile(crate::provider_tool_policy::WorkspaceMode::Write)}
+            "permissions":{"hello-agent-snapshot":expected_policy(&home, &workspace)}
         }}});
         let script = format!(
             r#"
@@ -208,6 +295,8 @@ printf '%s\n' '{{"id":1,"result":{{}}}}'
 IFS= read -r line || exit 1
 IFS= read -r line || exit 1
 printf '%s\n' '{config_response}'
+IFS= read -r line || exit 1
+printf '%s\n' '{{"id":51,"result":{{"data":[{{"id":"hello-agent-snapshot","allowed":true}}],"nextCursor":null}}}}'
 IFS= read -r line || exit 1
 printf '%s\n' '{{"id":3,"result":{{"exitCode":{},"stdout":"protected"}}}}'
 "#,
@@ -261,10 +350,35 @@ fn toy_permission_probe_uses_owned_cleanup() {
 }
 
 #[test]
+fn normalized_policy_does_not_accept_added_authority() {
+    let home = Path::new("/synthetic/profile");
+    let workspace = Path::new("/synthetic/workspace");
+    let mut valid = expected_policy(home, workspace);
+    valid["extends"] = Value::Null;
+    valid["network"]["domains"] = Value::Null;
+    assert!(matches_policy(&valid, home, workspace));
+    for (field, value) in [
+        ("extends", json!(":workspace")),
+        ("workspace_roots", json!({"/outside":true})),
+        ("unknown", Value::Null),
+    ] {
+        let mut changed = valid.clone();
+        changed[field] = value;
+        assert!(!matches_policy(&changed, home, workspace));
+    }
+    let mut changed = valid;
+    changed["network"]["enabled"] = json!(true);
+    assert!(!matches_policy(&changed, home, workspace));
+}
+
+#[test]
 fn permission_probe_never_mixes_legacy_sandbox_flags() {
-    let arguments = configuration_arguments();
+    let arguments = configuration_arguments(
+        Path::new("/synthetic/profile"),
+        Path::new("/synthetic/workspace"),
+    );
     let arguments: Vec<_> = arguments.iter().map(|arg| arg.to_str().unwrap()).collect();
-    assert!(arguments.contains(&"default_permissions=\"hello-agent-probe\""));
+    assert!(arguments.contains(&"default_permissions=\"hello-agent-snapshot\""));
     assert!(arguments.contains(&"approval_policy=\"never\""));
     // Override keys are split by the CLI, not parsed as quoted TOML keys.
     // Keep special filesystem keys inside one TOML value instead.

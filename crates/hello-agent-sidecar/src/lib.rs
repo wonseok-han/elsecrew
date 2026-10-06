@@ -5,7 +5,6 @@
 mod agent_runtime;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Named tool-policy candidate; product launch remains blocked.
-mod provider_tool_policy;
 mod application_cancel;
 mod chat;
 mod project;

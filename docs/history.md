@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (설치 Codex의 snapshot 도구 격리 실측 통과)
+
+- 직전103d8a7은 named 인자 후보 구현의 진전이었다. Karpathy 지침으로 기존 permission probe에 named_discovery_arguments를 연결하고 같은 cwd의 permissionProfile/list 허용 확인 뒤에만 command/exec를 보내도록 바꿨다. probe에서는 approval_policy=never를 유지한다. 호출이 사라진 구형 provider_tool_policy 모듈은 제거했다.
+- 승인된 무계정 임시 자료 시험을 제한 밖에서 수행했다. 초기 실패는 실제 config/read가 description/extends/workspace_roots, filesystem.glob_scan_max_depth 및 network 선택 항목을 null로 직렬화하기 때문이었다. 확인된 항목의 null만 정규화하고 실제 추가 값·알 수 없는 키·권한 확대는 거절한다. 이 정규화는 test-only probe에만 있으며 제품 admission 완료로 보지 않는다. 관련 회귀를 추가했다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 HELLO_AGENT_APPROVED_VENDOR_SANDBOX_PROBE=1 cargo test -p hello-agent-sidecar provider_permission_probe::installed_vendor_sandbox_blocks_profile_access --locked -- --ignored --exact --nocapture 최종1개 PASS(시험2.86초). 설치 Codex0.159.2에서 named config/선택 허용, 가짜 profile 파일의 읽기·쓰기 및 자식 접근 거절, 임시 workspace 쓰기, auth 부재·sentinel 불변·소유 프로세스 종료 확인을 관측했다. 실제 계정/모델/사용자 프로젝트는 사용하지 않았다. 새 null 회귀 및 전체 테스트는 미실행이다.
+- 이 증거는 특정 임시 파일/명령의 보호다. 모든 도구·네트워크·설정 layer·경로 경합·제품 owner/UI 검증을 대체하지 않는다. 다음은 이 관측을 토대로 named 설정/thread/turn과 실제 owner를 연결하는 구현이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named 실행 설정의 snapshot 경계)
 
 - 직전 c1dbc9c는 실제 CLI 스키마 확보와 조회 구현의 진전이었다. OpenAI Docs로 https://learn.chatgpt.com/docs/permissions 를 확인하고 invocation-only named 실행 인자 후보를 추가했다. 기존 로그인 config 파일은 변경하지 않으며 legacy sandbox_mode/sandbox_workspace_write 인자를 제거한 뒤 명시적 named profile을 전달한다.
