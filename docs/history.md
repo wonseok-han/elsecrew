@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 정책 조회의 공식 계약 확인)
+
+- 기준 65659e1. CLI/SDK/managed-settings/tools-reference 공식 문서를 읽기 전용 조회했다. SDK resolveSettings는 policyHelper 실행·서버 정책 fetch를 하지 않아 live admission 근거로 단독 사용 불가다. 관리 정책은 여러 OS/서버 source와 reload가 있으므로 파일 하나의 부재로 판정하지 않는다. 제안서 §6.9에 관측 한계와 다음 무계정 초기화/sentinel 증거 수집 순서를 기록했다.
+- EndConversation의 자동 포함 설명을 실행 surface까지 확인했다. print/SDK에는 제외되므로 현재 expected tools를 변경하지 않는다. 새 SDK 의존성·정책 우회·계정 조회를 추가하지 않았다. 이번은 근거 조사/설계 기록이며 실행 기능 완료가 아니다.
+- diff check 확인, 코드/빌드/테스트·실제 CLI 실행 없음. 다음은 승인된 임시 profile의 무계정 관측과 도구 보호 증거를 바탕으로 Claude scoped discovery/admission을 연결한다. 기존 archive 변경 보존, 제품 blocked 유지, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (native 종료 poll의 오류·완료 구분)
 
 - 기준 364b147. 공통 poll_native가 모든 Err를 stopped로 바꿔 Claude의 terminal 저장/fence 해제 실패 뒤 재처리를 막는 결함을 확인했다. 공급자 소유자의 실제 finished 상태를 사용하도록 수정하고 오류를 보존해 보고하며 미완료 소유자에는 취소를 요청한다. Claude completion/terminal_saved 체크포인트는 다음 poll에서 이어지고 Codex의 기존 finished/복구 의미는 유지한다.

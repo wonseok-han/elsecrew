@@ -564,6 +564,16 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 대안은 별도 사용자/VM 등의 독립 실행 환경으로 공급자 전체를 격리하는 것이다. 설치·인증 공유·자원/패키징 비용이 커져 별도 제품 결정과 구현이 필요하다. 자동 목표 진행만으로 두 신뢰 모델 중 하나를 확정하지 않는다.
 
+#### Claude 정책 관측의 남은 연결 조건 (2026-10-06 조사)
+
+확인된 공식 계약과 현재 제안을 구분한다. [SDK `resolveSettings()`](https://code.claude.com/docs/en/agent-sdk/typescript#resolvesettings)는 CLI를 띄우지 않고 같은 merge engine으로 설정과 출처를 조회하지만 `policyHelper`를 실행하지 않고 서버 관리 설정을 가져오지도 않는다. `settingSources: []`도 endpoint 관리 정책을 제외하지 않는다. 따라서 이 함수의 snapshot만으로 live session의 격리/관리 정책 합격을 만들지 않는다. 새 SDK 의존성을 추가하는 것만으로 현재 admission 공백은 해소되지 않는다.
+
+[관리 설정 문서](https://code.claude.com/docs/en/managed-settings)는 서버·MDM·파일·Windows HKCU, 파일의 `managed-settings.d/`와 실행 중 reload를 설명한다. 한 파일의 부재, 초기화 모델 목록, `hooks_applied`만으로 정책 부재나 불변성을 추론하지 않는다. 기존 `--safe-mode`/`--restricted`도 관리 정책 전체를 제거하는 옵션이 아니다.
+
+다음 구현의 근거 수집 순서는 (1) 승인된 무계정 임시 profile에서 초기화 전후 관측 가능한 정보 확인, (2) 실제 도구 경계의 가짜 sentinel 시험, (3) 관측 가능한 조건을 세션/실행 대상에 결속하고 알 수 없는 조건은 명시적 불가 사유로 반환하는 것이다. 계정/정책 원문을 renderer나 공개 원장에 저장하지 않는다. 정책 우회나 VM 전환을 이 조사만으로 승인한 것으로 해석하지 않는다.
+
+도구 목록도 실행 surface를 구분한다. [EndConversation](https://code.claude.com/docs/en/tools-reference#endconversation-tool-behavior)은 일반 CLI 설명상 자동 포함되지만 `-p`/Agent SDK에서는 제외된다. 현재 stream-json print 실행의 expected tools에 이를 임의 추가하거나 알려지지 않은 도구 전부를 허용하지 않는다.
+
 ## 7. 안전 경계
 
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.
