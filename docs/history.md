@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 실제 모델 ID 선택 연결)
+
+- 기준 366ca79. 실제 초기화 목록의 value 별칭과 resolvedModel 전체 ID가 분리되어 있는데 profile_model이 value만 비교하는 것을 확인했다. 직접 광고된 selector를 우선하고, 없으면 관측된 resolvedModel과 정확히 같은 ID를 허용한다. 같은 ID를 가리키는 별칭들의 요청 effort 지원이 모두 일치해야 하며 목록 순서/미관측 모델 fallback을 쓰지 않는다.
+- Karpathy 지침으로 기존 파서만 확장하고 전체 ID·미지원 effort·충돌/일치 별칭과 순서 반전 회귀를 작성했다. diff check만 확인, 테스트/빌드는 기능 연결 뒤 누적 검증으로 남긴다.
+- 상시 승인된 읽기 전용 독립 검토자 claude_activation_review에게 native Claude의 남은 입장/dispatcher 계약과 출시 검증 분리를 요청했다. 현재 검토 진행 중이며 합격으로 기록하지 않는다. 다음은 검토의 실제 연결 결함을 반영하는 것이다. 제품 blocked, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 셸 OS 경계 분리·재현 스크립트)
 
 - 기준 98617de. 동일 무계정 loopback fixture에서 시험에 한해 permissions.deny/사전 외부 읽기 제한을 제거하고 sandbox denyRead/denyWrite는 유지했다. 실제 셸 내부 읽기·쓰기 성공, 외부 cat/리다이렉션은 Operation not permitted·exit1, 원본 sentinel 보존을 관측했다. CLI 전체 exit0/result success와 개별 도구 오류는 별개다. 제품 설정은 변경하지 않았다.

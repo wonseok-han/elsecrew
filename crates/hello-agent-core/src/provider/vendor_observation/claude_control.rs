@@ -150,11 +150,21 @@ impl InitializeExchange {
     /// Provider-reported catalog and mode, not account entitlement or confinement.
     pub fn profile_model(&self, model: &str, effort: &str) -> Result<&str, ProviderError> {
         if self.state != State::Ready || !self.hooks_applied || !self.default_permission_mode { return Err(invalid()); }
-        let entry = self.models.iter().find(|entry| entry.value == model).ok_or_else(invalid)?;
-        if entry.supports_effort != Some(true) || !entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort)) {
+        let supports = |entry: &ModelEntry| entry.supports_effort == Some(true)
+            && entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort));
+        // Prefer a directly advertised selector. A full ID may instead be
+        // advertised as resolvedModel by several aliases; require agreement
+        // on the requested effort rather than depending on catalog order.
+        if let Some(entry) = self.models.iter().find(|entry| entry.value == model) {
+            if !supports(entry) { return Err(invalid()); }
+            return Ok(entry.resolved_model.as_deref().unwrap_or(&entry.value));
+        }
+        let mut matches = self.models.iter().filter(|entry| entry.resolved_model.as_deref() == Some(model));
+        let entry = matches.next().ok_or_else(invalid)?;
+        if !supports(entry) || matches.any(|entry| !supports(entry)) {
             return Err(invalid());
         }
-        Ok(entry.resolved_model.as_deref().unwrap_or(&entry.value))
+        entry.resolved_model.as_deref().ok_or_else(invalid)
     }
 
     pub fn close(&mut self) {
@@ -184,6 +194,8 @@ mod tests {
         exchange.request().unwrap();
         exchange.accept_response(&input(&base)).unwrap();
         assert_eq!(exchange.profile_model("opus", "high").unwrap(), "claude-opus-test");
+        assert_eq!(exchange.profile_model("claude-opus-test", "high").unwrap(), "claude-opus-test");
+        assert!(exchange.profile_model("claude-opus-test", "max").is_err());
         assert!(exchange.profile_model("opus", "max").is_err());
         assert!(exchange.profile_model("other", "high").is_err());
         exchange.close();
@@ -211,6 +223,32 @@ mod tests {
         exchange.request().unwrap();
         assert!(exchange.accept_response(&input(&duplicate)).is_err());
         assert!(exchange.profile_model("opus", "high").is_err());
+    }
+    #[test]
+    fn resolved_model_does_not_pick_an_arbitrary_conflicting_alias() {
+        for reverse in [false, true] {
+            let mut entries = vec![
+                json!({"value":"default","resolvedModel":"claude-model","supportsEffort":true,"supportedEffortLevels":["high"]}),
+                json!({"value":"opus","resolvedModel":"claude-model","supportsEffort":true,"supportedEffortLevels":["low"]}),
+            ];
+            if reverse { entries.reverse(); }
+            let mut wire = response();
+            wire["response"]["response"] = json!({"hooks_applied":true,"current_permission_mode":"default","models":entries});
+            let mut exchange = InitializeExchange::new("init_a").unwrap();
+            exchange.request().unwrap();
+            exchange.accept_response(&input(&wire)).unwrap();
+            assert!(exchange.profile_model("claude-model", "high").is_err());
+            assert!(exchange.profile_model("claude-model", "low").is_err());
+            assert_eq!(exchange.profile_model("opus", "low").unwrap(), "claude-model");
+            assert!(exchange.profile_model("claude-model-new", "low").is_err());
+            for entry in wire["response"]["response"]["models"].as_array_mut().unwrap() {
+                entry["supportedEffortLevels"] = json!(["high"]);
+            }
+            let mut consistent = InitializeExchange::new("init_a").unwrap();
+            consistent.request().unwrap();
+            consistent.accept_response(&input(&wire)).unwrap();
+            assert_eq!(consistent.profile_model("claude-model", "high").unwrap(), "claude-model");
+        }
     }
     #[test]
     fn initializes_once_without_a_user_prompt_and_cannot_reuse_a_closed_connection() {
