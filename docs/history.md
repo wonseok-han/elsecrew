@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (native 종료 poll의 오류·완료 구분)
+
+- 기준 364b147. 공통 poll_native가 모든 Err를 stopped로 바꿔 Claude의 terminal 저장/fence 해제 실패 뒤 재처리를 막는 결함을 확인했다. 공급자 소유자의 실제 finished 상태를 사용하도록 수정하고 오류를 보존해 보고하며 미완료 소유자에는 취소를 요청한다. Claude completion/terminal_saved 체크포인트는 다음 poll에서 이어지고 Codex의 기존 finished/복구 의미는 유지한다.
+- Karpathy 지침으로 별도 재시도 엔진 없이 기존 owner 상태를 공개·재사용했다. 최근 3개 연결 변경의 후속 구현을 위해 제한된 cargo check --tests --locked를 실행, 예약 실행 closure의 reservation 중첩 borrow 오류 1건을 수정한 뒤 PASS(2.18초)했다. 이후 diff check 확인. 테스트 실행·저장 실패 주입·전체 안전 검토는 누적 검증으로 남는다.
+- 다음은 Claude 정책/지원 기능 관측과 실제 dispatcher 연결이다. 제품 blocked 유지, 기존 9월 archive 변경 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 예약 실행·초기화 인계 연결)
 
 - 기준 5086d8c. 실제 시작 dispatcher의 Codex 연결과 Claude 누락을 확인하고 start_reserved_claude를 추가했다. 종료 중/취소/중복/한도·runAccepted 계약을 먼저 검사하고 기존 launch fence·서명 명령·trusted launch admission을 거쳐 비동기 초기화 registry에 인계한다. 시작 실패는 retain_rejected_start로 같은 reservation/process를 보존한다.

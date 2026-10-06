@@ -7,6 +7,13 @@ pub(super) enum NativeOwner {
 }
 
 impl NativeOwner {
+    pub(super) fn polling_finished(&self) -> bool {
+        match self {
+            Self::Codex(owner) => owner.polling_finished(),
+            Self::Claude(owner) => owner.polling_finished(),
+        }
+    }
+
     pub(super) fn connection_id(&self) -> Uuid {
         match self {
             Self::Codex(owner) => owner.connection_id(),

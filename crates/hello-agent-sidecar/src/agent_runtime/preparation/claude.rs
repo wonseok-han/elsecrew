@@ -118,6 +118,10 @@ impl ClaudeStart {
 }
 
 impl OwnedClaudeRun {
+
+    pub(crate) fn polling_finished(&self) -> bool {
+        self.output.finished
+    }
     pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, identity: &Value) -> Result<Value, SidecarError> {
         let failure = || SidecarError::new("agentApprovalChanged", "Claude approval is no longer live");
         self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));

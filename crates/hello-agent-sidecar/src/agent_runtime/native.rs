@@ -571,29 +571,33 @@ impl AgentRuntime {
                 let connection = format!("{}:{}", active.stream_id, active.owner.connection_id());
                 // Tool notifications grant no permission. Only an explicit
                 // queued decision can produce a reply; waiting keeps polling.
-                active.stopped = !matches!(
-                    active
-                        .owner
-                        .advance(storage, projects, &mut |storage, action| {
-                            match action {
-                                TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
-                                TextAction::PollApproval { request, decision } => {
-                                    *decision = active.approvals.poll(
-                                        storage,
-                                        &active.identity,
-                                        &connection,
-                                        request,
-                                    )?;
-                                    Ok(())
-                                }
-                                _ => Err(SidecarError::new(
-                                    "agentRecoveryRequired",
-                                    "unexpected native checkpoint",
-                                )),
-                            }
-                        }),
-                    Ok(None)
-                );
+                let advance = active.owner.advance(storage, projects, &mut |storage, action| {
+                    match action {
+                        TextAction::Public(_) | TextAction::Tool(_) => Ok(()),
+                        TextAction::PollApproval { request, decision } => {
+                            *decision = active.approvals.poll(
+                                storage,
+                                &active.identity,
+                                &connection,
+                                request,
+                            )?;
+                            Ok(())
+                        }
+                        _ => Err(SidecarError::new(
+                            "agentRecoveryRequired",
+                            "unexpected native checkpoint",
+                        )),
+                    }
+                });
+                // An error is not proof that cleanup/terminal persistence has
+                // completed. Claude retains a retryable terminal checkpoint.
+                active.stopped = active.owner.polling_finished();
+                if let Err(error) = advance {
+                    pending_error = Some(error);
+                    if !active.stopped {
+                        let _ = active.owner.request_cancel(&active.identity);
+                    }
+                }
                 if active
                     .approvals
                     .retain_live(

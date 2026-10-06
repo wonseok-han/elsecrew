@@ -73,6 +73,7 @@ impl AgentRuntime {
         });
         validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(|_| failure())?;
         let result = (|| {
+            let pending = reservation.as_ref().ok_or_else(failure)?;
             let owner = process.as_mut().ok_or_else(failure)?;
             if !owner.matches_startup_run(&pending.run_id) {
                 owner.retain_fence_before_launch(&pending.run_id)?;

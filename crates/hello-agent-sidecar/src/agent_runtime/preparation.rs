@@ -71,6 +71,10 @@ pub(crate) struct OwnedTextRun {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl OwnedTextRun {
+    pub(super) fn polling_finished(&self) -> bool {
+        self.state.finished
+    }
+
     pub(super) fn verify_approval_boundary(
         &mut self,
         storage: &mut Storage,
