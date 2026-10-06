@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (시작 실패 정리와 terminal 전 잠금 유지)
+
+- 직전c38f551은 실제 계층 형식 보정과 named owner 인계의 진전이었다. native 준비에서 spawn 전부터 profile fence를 run ID에 결속하도록 변경했다. begin_text_candidate는 이미 보유한 run fence를 재획득하지 않으며 원래 로그인 finish-and-release 경로는 유지한다.
+- 기존 fail_before_release의 원장 저장 부분을 persist_start_failure로 분리해 재사용한다. RunReservation::poll_failed_start는 같은 시작 run의 소유자를 확인하고 증분 종료가 완료될 때까지 false를 반환한다. 이후 현재 예약/공간·기록된 프로세스 ID와 closure evidence를 대조해 failed/recoveryRequired를 원자 기록한 뒤에만 확인된 profile fence를 해제한다. 기록 실패·신원 불일치는 잠금을 보존하며 자동 재실행하지 않는다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked PASS(3.67초). 그 뒤 무spawn 종료에서도 terminal 전까지 profile 재예약을 거절하는 회귀를 작성했고 실행은 하지 않았다. 전체 시작 실패 주입·저장 실패/재시작·독립 안전 검토와 dispatcher 활성화는 여전히 남는다. 기존 archive 보존, 실제 계정/모델/원본 실행·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named 실행 소유권 인계와 실제 계층 형식 보정)
 
 - 직전4eb97e1은 signed-parent launcher와 실행 소유자 연결의 진전이었다. 새 계층 검사까지 적용한 승인 임시 자료 시험에서 layers=false를 발견했다. 값/인증 정보를 출력하지 않고 계층 이름/키만 확인해 실제 CLI의 user.profile=null 직렬화가 원인임을 확인했다. user source의 해당 null만 제외하며 다른 profile 선택/추가 필드는 계속 거절한다. 임시 진단 출력은 제거했다.

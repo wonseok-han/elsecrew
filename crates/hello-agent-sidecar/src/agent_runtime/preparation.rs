@@ -206,6 +206,52 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
+    /// Incremental startup cleanup. False keeps the original process owner alive.
+    #[allow(dead_code)] // Dispatcher startup integration remains pending.
+    pub(crate) fn poll_failed_start(
+        &self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<bool, SidecarError> {
+        let failure =
+            || SidecarError::new("agentRecoveryRequired", "startup cleanup requires recovery");
+        if !process.matches_startup_run(&self.run_id) {
+            return Err(failure());
+        }
+        if matches!(process.poll_finish(), Ok(false)) {
+            return Ok(false);
+        }
+        let evidence = process.closure_evidence().ok_or_else(failure)?;
+        self.validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        let projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        let prior = projection["process_identity_internal"]
+            .as_array()
+            .ok_or_else(failure)?;
+        if prior.iter().any(|item| {
+            !evidence.identities().iter().any(|identity| {
+                item["pid"].as_u64() == Some(identity.pid as u64)
+                    && item["start_us"].as_i64() == Some(identity.start_us)
+            })
+        }) {
+            return Err(failure());
+        }
+        persist_start_failure(
+            storage,
+            projects,
+            &self.run_id,
+            evidence.confirmed(),
+            evidence.identities(),
+            "native startup failed",
+        )
+        .map_err(|_| failure())?;
+        if evidence.confirmed() {
+            process.release_after_run_terminal()?;
+        }
+        Ok(true)
+    }
+
     /// Transfer ownership only after launch and transport preparation succeed.
     /// On every error the caller retains both objects for explicit cleanup and
     /// recovery persistence; a released process must never be retried here.
@@ -227,6 +273,7 @@ impl RunReservation {
         };
         let pending = reservation.as_ref().ok_or_else(failure)?;
         let pending_process = process.as_mut().ok_or_else(failure)?;
+        pending_process.retain_fence_before_launch(&pending.run_id)?;
         pending.launch_named_codex_candidate(
             storage,
             projects,
@@ -571,7 +618,9 @@ impl RunReservation {
             )
         }
         .map_err(|_| failure())?;
-        process.retain_fence_until_terminal()?;
+        if !process.retains_run_fence() {
+            process.retain_fence_until_terminal()?;
+        }
         let transport = crate::provider_preflight_session::BoundTextSession::begin(
             process, flow, &workspace, text,
         )?;

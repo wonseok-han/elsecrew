@@ -2077,111 +2077,7 @@ fn fail_before_release(
         .or_else(|| tracker.as_ref().map(TreeTracker::tracked_identities))
         .unwrap_or_default();
 
-    let persisted = (|| -> Result<(), ProjectFailure> {
-        let projection = actual_run_projection(storage, run_id)?;
-        let recovery_id = reserved_recovery_id(&projection)?;
-        let chat_id = identity_string(&projection["record"], "chatId")?;
-        let chat_projection = actual_chat_projection(storage, &chat_id)?;
-        let chat = chat_projection["record"].clone();
-        let profile: AgentResolvedProfileV1 =
-            serde_json::from_value(projection["record"]["selectedProfile"].clone())
-                .map_err(json_failure)?;
-        let outcome = if clean {
-            "cleanExit"
-        } else {
-            "recoveryRequired"
-        };
-        let state = if clean { "failed" } else { "recoveryRequired" };
-        let run = agent_run_record(
-            run_id,
-            &chat,
-            &profile,
-            projection["record"]["capabilityFingerprint"]
-                .as_str()
-                .unwrap_or_default(),
-            state,
-            Some(outcome),
-            projection["record"]["createdAt"]
-                .as_str()
-                .unwrap_or_default(),
-        )?;
-        let public = identities
-            .iter()
-            .map(|identity| process_value(*identity, Path::new("/redacted/agent"), clean))
-            .collect::<Vec<_>>();
-        let internal = identities
-            .iter()
-            .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
-            .collect::<Vec<_>>();
-        let mut payload = agent_run_projection(
-            &run,
-            &projection["workspace_manifest"],
-            projection.get("barrier").cloned(),
-            Some(Value::Array(internal)),
-            projection["public_events"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default(),
-        )?;
-        preserve_provider_evidence(&projection, &mut payload);
-        preserve_recovery_internal(&projection, &mut payload);
-        payload.insert(
-            "pre_release_failure".into(),
-            json!({"stage":"beforeRelease","evidenceDigest":digest_text(detail),"processesProvenGone":clean,"observedAt":now()}),
-        );
-        let recovery = if clean {
-            None
-        } else {
-            Some(
-                json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":if public.is_empty() {"processIdentityUnavailable"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":public,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}),
-            )
-        };
-        if !public.is_empty() {
-            let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":clean,"poisoned":!clean,"writerLockState":if clean {if profile.permission == "workspaceWrite" {"released"} else {"none"}} else {"recoveryRequired"},"chatState":if clean {"failed"} else {"recoveryRequired"},"trackedProcesses":public,"evidenceDigest":digest_text("agent-pre-release-termination-v1"),"observedAt":now()});
-            validate_agent_adapter_payload_v1("terminationTranscript", &termination)
-                .map_err(contract_failure)?;
-            payload.insert("termination".into(), termination);
-        }
-        if let Some(value) = &recovery {
-            validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;
-            payload.insert("recovery".into(), value.clone());
-        }
-        let address = address_from_chat(&chat)?;
-        if !clean {
-            projects.workspace_mark_recovery_required(storage, &address)?;
-        }
-        let updated = updated_chat(
-            &chat,
-            if clean {
-                "needsAttention"
-            } else {
-                "recoveryRequired"
-            },
-        )?;
-        let mut upserts = vec![
-            ProjectionUpsert {
-                aggregate_type: "run",
-                aggregate_id: run_id.into(),
-                operation_id: format!("op_agent_pre_release_terminal_{run_id}"),
-                request_id: None,
-                payload,
-            },
-            ProjectionUpsert {
-                aggregate_type: "chat",
-                aggregate_id: chat_id,
-                operation_id: format!("op_agent_pre_release_chat_{run_id}"),
-                request_id: None,
-                payload: chat_projection_with_record(&chat_projection, &updated, None)?,
-            },
-        ];
-        if profile.permission == "workspaceWrite" {
-            upserts.push(release_writer_lock(
-                storage, &address, run_id, run_id, !clean,
-            )?);
-        }
-        storage.upsert_projection_records_atomic(upserts)?;
-        Ok(())
-    })();
+    let persisted = persist_start_failure(storage, projects, run_id, clean, &identities, detail);
     match persisted {
         Ok(()) => ProjectFailure::recovery(detail),
         Err(error) => ProjectFailure::recovery(format!(
@@ -2189,6 +2085,119 @@ fn fail_before_release(
             error.detail
         )),
     }
+}
+
+fn persist_start_failure(
+    storage: &mut Storage,
+    projects: &mut ProjectManager,
+    run_id: &str,
+    clean: bool,
+    identities: &[ProcIdentity],
+    detail: &str,
+) -> Result<(), ProjectFailure> {
+    let projection = actual_run_projection(storage, run_id)?;
+    let recovery_id = reserved_recovery_id(&projection)?;
+    let chat_id = identity_string(&projection["record"], "chatId")?;
+    let chat_projection = actual_chat_projection(storage, &chat_id)?;
+    let chat = chat_projection["record"].clone();
+    let profile: AgentResolvedProfileV1 =
+        serde_json::from_value(projection["record"]["selectedProfile"].clone())
+            .map_err(json_failure)?;
+    let outcome = if clean {
+        "cleanExit"
+    } else {
+        "recoveryRequired"
+    };
+    let state = if clean { "failed" } else { "recoveryRequired" };
+    let run = agent_run_record(
+        run_id,
+        &chat,
+        &profile,
+        projection["record"]["capabilityFingerprint"]
+            .as_str()
+            .unwrap_or_default(),
+        state,
+        Some(outcome),
+        projection["record"]["createdAt"]
+            .as_str()
+            .unwrap_or_default(),
+    )?;
+    let public = identities
+        .iter()
+        .map(|identity| process_value(*identity, Path::new("/redacted/agent"), clean))
+        .collect::<Vec<_>>();
+    let internal = identities
+        .iter()
+        .map(|identity| json!({"pid":identity.pid,"start_us":identity.start_us}))
+        .collect::<Vec<_>>();
+    let mut payload = agent_run_projection(
+        &run,
+        &projection["workspace_manifest"],
+        projection.get("barrier").cloned(),
+        Some(Value::Array(internal)),
+        projection["public_events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+    )?;
+    preserve_provider_evidence(&projection, &mut payload);
+    preserve_recovery_internal(&projection, &mut payload);
+    payload.insert(
+            "pre_release_failure".into(),
+            json!({"stage":"beforeRelease","evidenceDigest":digest_text(detail),"processesProvenGone":clean,"observedAt":now()}),
+        );
+    let recovery = if clean {
+        None
+    } else {
+        Some(
+            json!({"schemaVersion":1,"recoveryId":recovery_id,"chatId":chat["chatId"],"taskId":chat["taskId"],"projectId":chat["projectId"],"worktreeId":chat["worktreeId"],"workspaceIdentity":chat["workspaceIdentity"],"runId":run_id,"source":"actualAgent","reason":if public.is_empty() {"processIdentityUnavailable"} else {"processIdentityUncertain"},"state":"unresolved","trackedProcesses":public,"poisoned":true,"revision":1,"createdAt":now(),"resolvedAt":null}),
+        )
+    };
+    if !public.is_empty() {
+        let termination = json!({"schemaVersion":1,"runId":run_id,"outcome":outcome,"processesProvenGone":clean,"poisoned":!clean,"writerLockState":if clean {if profile.permission == "workspaceWrite" {"released"} else {"none"}} else {"recoveryRequired"},"chatState":if clean {"failed"} else {"recoveryRequired"},"trackedProcesses":public,"evidenceDigest":digest_text("agent-pre-release-termination-v1"),"observedAt":now()});
+        validate_agent_adapter_payload_v1("terminationTranscript", &termination)
+            .map_err(contract_failure)?;
+        payload.insert("termination".into(), termination);
+    }
+    if let Some(value) = &recovery {
+        validate_agent_adapter_payload_v1("recoveryRecord", value).map_err(contract_failure)?;
+        payload.insert("recovery".into(), value.clone());
+    }
+    let address = address_from_chat(&chat)?;
+    if !clean {
+        projects.workspace_mark_recovery_required(storage, &address)?;
+    }
+    let updated = updated_chat(
+        &chat,
+        if clean {
+            "needsAttention"
+        } else {
+            "recoveryRequired"
+        },
+    )?;
+    let mut upserts = vec![
+        ProjectionUpsert {
+            aggregate_type: "run",
+            aggregate_id: run_id.into(),
+            operation_id: format!("op_agent_pre_release_terminal_{run_id}"),
+            request_id: None,
+            payload,
+        },
+        ProjectionUpsert {
+            aggregate_type: "chat",
+            aggregate_id: chat_id,
+            operation_id: format!("op_agent_pre_release_chat_{run_id}"),
+            request_id: None,
+            payload: chat_projection_with_record(&chat_projection, &updated, None)?,
+        },
+    ];
+    if profile.permission == "workspaceWrite" {
+        upserts.push(release_writer_lock(
+            storage, &address, run_id, run_id, !clean,
+        )?);
+    }
+    storage.upsert_projection_records_atomic(upserts)?;
+    Ok(())
 }
 
 enum ProviderLine {

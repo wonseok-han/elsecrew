@@ -287,6 +287,7 @@ pub(crate) struct LoginProcess<'a> {
     claude_preflight: bool,
     closure: Option<ProcessClosureEvidence>,
     retain_for_terminal: bool,
+    startup_run_id: Option<String>,
     cleanup_started: Option<Instant>,
     // Own the service with the process; uncertain cleanup quarantines its bound
     // listener after closing relays/jobs. Sidecar crashes remain a separate risk.
@@ -356,6 +357,25 @@ impl<'a> LoginProcess<'a> {
         Ok(())
     }
 
+    /// Retain the profile fence before spawn until startup's durable terminal
+    /// record exists, including failures before protocol I/O is attached.
+    pub(crate) fn retain_fence_before_launch(&mut self, run_id: &str) -> Result<(), SidecarError> {
+        if run_id.is_empty() || self.attempted || self.finished || self.failed || self.retain_for_terminal {
+            return Err(failure());
+        }
+        self.profile.as_ref().revalidate()?;
+        self.reservation.verify()?;
+        self.retain_for_terminal = true;
+        self.startup_run_id = Some(run_id.into());
+        Ok(())
+    }
+
+    pub(crate) fn retains_run_fence(&self) -> bool { self.retain_for_terminal }
+
+    pub(crate) fn matches_startup_run(&self, run_id: &str) -> bool {
+        self.retain_for_terminal && self.startup_run_id.as_deref() == Some(run_id)
+    }
+
     /// Called by the run owner only after its terminal transaction succeeded.
     /// A failed release remains blocked; ordinary finish/drop cannot bypass it.
     pub(crate) fn release_after_run_terminal(&mut self) -> Result<(), SidecarError> {
@@ -416,6 +436,7 @@ impl<'a> LoginProcess<'a> {
             claude_preflight: false,
             closure: None,
             retain_for_terminal: false,
+            startup_run_id: None,
             cleanup_started: None,
             model_proxy: None,
             runtime_scope: None,
@@ -1239,6 +1260,22 @@ mod tests {
             .join("hello-agent.sqlite3");
         let storage = crate::Storage::open(&path).unwrap();
         CodexProfileBinding::from_storage(&storage).unwrap()
+    }
+
+    #[test]
+    fn startup_fence_remains_after_no_spawn_cleanup_until_terminal_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut process = LoginProcess::reserve_codex_owned(profile(&temp)).unwrap();
+        process.retain_fence_before_launch("run-startup").unwrap();
+        assert!(process.matches_startup_run("run-startup"));
+        assert!(!process.matches_startup_run("other-run"));
+        assert!(process.retain_fence_before_launch("other-run").is_err());
+        process.finish().unwrap();
+        assert!(process.closure_evidence().unwrap().confirmed());
+        assert!(LoginProcess::reserve_codex_owned(profile(&temp)).is_err());
+        process.release_after_run_terminal().unwrap();
+        assert!(!process.matches_startup_run("run-startup"));
+        LoginProcess::reserve_codex_owned(profile(&temp)).unwrap().finish().unwrap();
     }
 
     // Owned toy process only; no provider, user auth, browser, project or paid model.
