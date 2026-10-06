@@ -9,6 +9,10 @@ import { useEffect, useRef, useState } from "react";
 import { validateProjectCatalogResult, type ApplicationPreview, type ApplicationHistoryEntry, type ApplicationStatus, type PreparationInspection, type ProjectCatalogRequest } from "./contracts/project-catalog-v1.ts";
 
 export function PreparationRecovery({ projectId, disabled }: { projectId: string; disabled: boolean }) {
+  return <PreparationRecoverySession key={projectId} projectId={projectId} disabled={disabled} />;
+}
+
+function PreparationRecoverySession({ projectId, disabled }: { projectId: string; disabled: boolean }) {
   const { t } = useI18n();
   const [inspection, setInspection] = useState<PreparationInspection | null>(null);
   const [application, setApplication] = useState<ApplicationStatus | null>(null);
@@ -95,7 +99,11 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
       {application.running && application.applicationId && <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "cancelApplication", projectId, applicationId: application.applicationId! })}>{t("m5.application.stop")}</button>}
       <ApplicationFailure failure={application.failure} />
       {!application.running && application.applicationId && ["applied", "restored", "abandoned"].includes(application.state) && <ApplicationRetirement projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} onRetired={() => { setApplication(null); setHistory(null); setMessage("retired"); }} />}
-      {!application.running && application.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview key={application.applicationId} projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} />}
+      {!application.running && application.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview key={application.applicationId} projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} onStatus={status => {
+        // The child has validated the project and application response. Do not
+        // replace a newer selection or a status cleared by another action.
+        setApplication(current => current?.applicationId === status.applicationId ? status : current);
+      }} />}
     </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setHistory(null); void request({ action: "applicationHistory", projectId }); }}>{t("m5.application.history")}</button>
     {history && <section aria-label={t("m5.application.history")}>

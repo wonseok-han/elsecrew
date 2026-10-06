@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (복원 진행과 프로젝트 복구 화면 연결)
+
+- 기준e8ba0eb에서 복원 제어가 자체 상태만 갱신해 상위 복구 화면은 이전 applied 상태에 남는 연결 누락을 확인했다. Karpathy/React 지침으로 exact project/application 대조를 통과한 상태를 상위 화면에 전달하고, running 이후 기존 프로젝트 polling·중단 UI로 이어지게 했다. 완료 상태는 복구점 종료 UI에 반영하며 다른 대상으로 바뀌거나 지운 선택은 늦은 응답으로 덮지 않는다.
+- 프로젝트 복구 화면은 projectId별 keyed session으로 분리했고 신원 경계 회귀에 추가했다. diff 확인만 수행하며 실제 복원/UI 실행과 통합 검증은 남긴다. 제품 원본 쓰기·삭제 비활성은 유지한다.
+- 기존 standalone ~/.local/bin/codex도 실행하지 않고 codesign strict/all-architectures로 조사했으며 arm64 invalid signature를 확인했다. 설치 경로 대체로 회피하지 않았고 공식 앱 업데이트/재설치 허용 여부를 비동기로 요청했다. 응답 전 설치본·인증 정보는 변경하지 않는다. 실제 공급자 연결·Windows/G6·통합 검증이 남고 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (백업 이력과 정리 상태 표시 연결)
 
 - 기준336fcfc·m5/coding-agent-ide에서 OpenAI Docs로 app-server의 named permissions/command 실행 문서를 다시 읽었다. permissionProfile/list 상세 응답 형식은 여전히 확보하지 못했으며 이를 추측하거나 기존 서명 장애를 우회하지 않았다. 출처: https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread 및 #command-execution. 실제 공급자 연결은 계속 미완료다.

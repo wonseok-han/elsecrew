@@ -37,6 +37,7 @@ test("preview sessions separate projects, chats, workspaces and restoration reco
   for (const [file, name, props] of [
     ["chat-application-preview", "ChatApplicationPreview", { projectId: "p", chatId: "c", worktreeId: "w" }],
     ["restoration-preview", "RestorationPreview", { projectId: "p", applicationId: "a" }],
+    ["preparation-recovery-view", "PreparationRecovery", { projectId: "p" }],
   ] as const) {
     const render = load(file, name);
     const key = render({ ...props, disabled: false }).key;

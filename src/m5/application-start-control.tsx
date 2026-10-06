@@ -4,7 +4,7 @@ import { ApplicationFailure } from "./application-failure.tsx";
 import { validateProjectCatalogResult, type ProjectCatalogRequest, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
 type StartRequest = Extract<ProjectCatalogRequest, { action: "startApplication" | "restoreApplication" }>;
-type StartProps = { request: StartRequest; disabled: boolean; onAttempt?: () => void };
+type StartProps = { request: StartRequest; disabled: boolean; onAttempt?: () => void; onStatus?: (status: ApplicationStatus) => void };
 
 /** Start once per reviewed target. A lost response requires status inspection, not replay. */
 export function ApplicationStartControl(props: StartProps) {
@@ -15,7 +15,7 @@ export function ApplicationStartControl(props: StartProps) {
   return <ApplicationStartSession key={key} {...props} />;
 }
 
-function ApplicationStartSession({ request, disabled, onAttempt }: StartProps) {
+function ApplicationStartSession({ request, disabled, onAttempt, onStatus }: StartProps) {
   const { t } = useI18n();
   const [enabled, setEnabled] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -47,6 +47,7 @@ function ApplicationStartSession({ request, disabled, onAttempt }: StartProps) {
       if (alive.current && result.action === "applicationStatus") {
         if (!expectedId.current || result.status.applicationId !== expectedId.current) { setStatus(null); setUnknown(true); return; }
         setStatus(result.status); setUnknown(false);
+        onStatus?.(result.status);
       }
     } catch { if (alive.current) { setStatus(null); setUnknown(true); } }
     finally { pending.current = false; }
