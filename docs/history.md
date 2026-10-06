@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (종료된 준비 정리의 확인 화면·IPC)
+
+- 기준dfc74f1·m5/coding-agent-ide와 기존9월 archive 미커밋 변경을 확인했다. Karpathy/React 지침으로 inspectBackupCleanup/cleanupBackup 고정 계약·sidecar dispatch와 보존 목록의 대상별 확인 화면을 연결했다. 백업 이름/임의 경로는 renderer 입력으로 받지 않는다.
+- 조회 응답은 exact project/review·기록/파일 지문·존재/상태를 결속한다. 동의 후 단회 실행하고 응답 유실은 자동 재전송하지 않으며 명시 재조회를 요구한다. pending/deleted/부재를 구분하고 삭제의 비가역성을 ko/en으로 표시한다. 기존 backend source_writes_enabled=false와 macOS 조건으로 제품 삭제는 계속 차단한다.
+- 계약 교차 대상·잘못된 지문/상태·임의 파일 필드 거절 및 기본 제품 삭제 차단 회귀를 작성했다. diff 검사만 수행했으며 타입/실행/UI·독립 검토는 최종 통합에 남긴다. 실제 삭제·계정 실행은 하지 않았다. 현재/과거 복원 지점 정리·공급자 연결·Windows/G6/전체 검증은 여전히 남는다. main/push 없음.
+
 ### 2026-10-01 · by GPT-6 Astra (종료된 백업 준비의 내부 정리 후보)
 
 - 기준fb51062에서 Karpathy 지침으로 cleanup 내부 preview/remove를 작성했다. abandoned만 대상으로 앱 전체 프로젝트의 현재/과거 참조·중복 파일 이름을 거절하며 원장+현재 파일 신원으로 확인 지문을 만든다. archive flock을 유지하고 삭제 전 pending 신원 기록/CAS, 파일 재대조·unlink/directory fsync 뒤 deleted 기록/CAS를 수행한다.
@@ -18,6 +24,7 @@
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
 - **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
+- **종료된 준비 정리 후보(2026-10-06)**: 참조 없는 abandoned 준비 파일의 pending/deleted 영속 정리와 명시 확인 IPC/UI를 연결했다. 제품 삭제는 검증 전 비활성이다. 현재/과거 복구 백업과 소유 기록 없는 파일은 정리 대상이 아니며 전체 복원 지점 삭제 완료를 뜻하지 않는다.
 - **복원 예산 UI 후보(2026-10-01)**: 앱 전체 사용량 조회와 명시 예산 변경(기본5GiB, 정수1~1024GiB)을 IPC/UI에 연결했다. application-settings-v1의 원자 설정과 archive flock을 공유하며 기존 백업 자동 삭제는 없다. 통합 검증 전 구현이며 원본 writer 활성화·삭제 기능 완료를 뜻하지 않는다.
 
 - **named 권한 스키마 재확인 경계(2026-10-01)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐고 현재 CLI는 OS codesign strict 검사에서도 invalid signature다. 필드 추측·서명 우회로 연결하지 않으며 정상 설치본/공식 스키마 확보가 필요하다.

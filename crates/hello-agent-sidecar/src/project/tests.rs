@@ -21,6 +21,10 @@ fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
     assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, first["fingerprint"].as_str().unwrap(), "req_cleanup_stale").is_err());
     assert!(file.exists());
     let fresh = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    let public = f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).unwrap();
+    assert_eq!(public.result["enabled"], false);
+    assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, fresh["fingerprint"].as_str().unwrap(), "req_product_cleanup_disabled").is_err());
+    assert!(file.exists());
     cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, fresh["fingerprint"].as_str().unwrap(), "req_cleanup").unwrap();
     assert!(!file.exists());
     let done = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();

@@ -360,6 +360,25 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn inspect_backup_cleanup(&self, storage: &Storage, project: &str, review: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        { let inspection = application::review::backup::cleanup::preview(self, storage, project, review)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectBackupCleanup","projectId":project,"enabled":self.source_writes_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (storage, project, review); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
+    }
+
+    pub(crate) fn cleanup_backup(&mut self, storage: &mut Storage, project: &str, review: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
+        if !self.source_writes_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("backup cleanup is not enabled")); }
+        if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup cleanup requires idle processing")); }
+        #[cfg(unix)]
+        { self.application_confirmations.cancel();
+          application::review::backup::cleanup::remove(self, storage, project, review, fingerprint, request)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"cleanupBackup","projectId":project,"reviewId":review}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (storage, project, review, fingerprint, request); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
+    }
+
     pub(crate) fn backup_retention(&self, storage: &Storage, project_id: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { let project = required_project(storage, project_id)?;

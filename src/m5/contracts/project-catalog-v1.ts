@@ -8,6 +8,7 @@ export interface ApplicationHistoryEntry { applicationId: string; state: "applie
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export interface BackupPreparation { reviewId: string; fingerprint: string }
+export interface BackupCleanupInspection { reviewId: string; fingerprint: string; filePresent: boolean; state: "available" | "pending" | "deleted" }
 export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation" }
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
@@ -16,6 +17,8 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "setBackupStorageLimit"; expectedLimitBytes: number; limitBytes: number }
   | { action: "backupPreparations"; projectId: string }
   | { action: "backupRetention"; projectId: string }
+  | { action: "inspectBackupCleanup"; projectId: string; reviewId: string }
+  | { action: "cleanupBackup"; projectId: string; reviewId: string; fingerprint: string }
   | { action: "abandonBackupPreparation"; projectId: string; reviewId: string; fingerprint: string }
   | { action: "startApplication"; projectId: string; chatId: string; confirmationId: string }
   | { action: "restoreApplication"; projectId: string; applicationId: string; fingerprint: string }
@@ -38,6 +41,8 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "setBackupStorageLimit"; limitBytes: number }
   | { schemaVersion: 1; action: "backupPreparations"; projectId: string; entries: BackupPreparation[] }
   | { schemaVersion: 1; action: "backupRetention"; projectId: string; entries: BackupRetention[] }
+  | { schemaVersion: 1; action: "inspectBackupCleanup"; projectId: string; enabled: boolean; inspection: BackupCleanupInspection }
+  | { schemaVersion: 1; action: "cleanupBackup"; projectId: string; reviewId: string }
   | { schemaVersion: 1; action: "abandonBackupPreparation"; projectId: string; reviewId: string }
   | { schemaVersion: 1; action: "startApplication"; projectId: string; chatId: string; applicationId: string }
   | { schemaVersion: 1; action: "restoreApplication"; projectId: string; applicationId: string }
@@ -87,7 +92,10 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     backupLimit(request.expectedLimitBytes); backupLimit(request.limitBytes);
   } else if (request.action === "backupPreparations" || request.action === "backupRetention") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "abandonBackupPreparation") {
+  } else if (request.action === "inspectBackupCleanup") {
+    keys(request, ["action", "projectId", "reviewId"]); id(request.projectId);
+    if (typeof request.reviewId !== "string" || !/^review_[a-f0-9]{32}$/.test(request.reviewId)) throw new Error("invalid cleanup review");
+  } else if (request.action === "cleanupBackup" || request.action === "abandonBackupPreparation") {
     keys(request, ["action", "projectId", "reviewId", "fingerprint"]); id(request.projectId);
     if (typeof request.reviewId !== "string" || !/^review_[a-f0-9]{32}$/.test(request.reviewId) || typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)) throw new Error("invalid backup preparation identity");
   } else if (request.action === "startApplication") {
@@ -164,7 +172,13 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
       if (seen.has(entry.reviewId as string)) throw new Error("duplicate preparation");
       seen.add(entry.reviewId as string);
     }
-  } else if (request.action === "abandonBackupPreparation") {
+  } else if (request.action === "inspectBackupCleanup") {
+    keys(result, ["schemaVersion", "action", "projectId", "enabled", "inspection"]);
+    const inspection = object(result.inspection);
+    keys(inspection, ["reviewId", "fingerprint", "filePresent", "state"]);
+    if (result.projectId !== request.projectId || inspection.reviewId !== request.reviewId || typeof result.enabled !== "boolean" || typeof inspection.filePresent !== "boolean" || !["available", "pending", "deleted"].includes(String(inspection.state)) || (inspection.state === "deleted" && inspection.filePresent)) throw new Error("invalid cleanup inspection");
+    validateProjectCatalogRequest({action:"cleanupBackup",projectId:request.projectId,reviewId:inspection.reviewId,fingerprint:inspection.fingerprint});
+  } else if (request.action === "cleanupBackup" || request.action === "abandonBackupPreparation") {
     keys(result, ["schemaVersion", "action", "projectId", "reviewId"]);
     if (result.projectId !== request.projectId || result.reviewId !== request.reviewId) throw new Error("backup preparation response mismatch");
   } else if (request.action === "startApplication" || request.action === "restoreApplication") {

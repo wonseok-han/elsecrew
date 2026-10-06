@@ -37,3 +37,23 @@ test("retention replies cannot substitute another project or duplicate records",
   assert.throws(() => validateProjectCatalogResult({...response,entries:[entry,entry]}, request));
   assert.throws(() => validateProjectCatalogResult({...response,entries:[{...entry,retainedFor:"safeToDelete"}]}, request));
 });
+
+test("cleanup inspection and command bind exact project, review and fingerprint", () => {
+  const reviewId = `review_${"a".repeat(32)}`;
+  const fingerprint = "b".repeat(64);
+  const request = {action:"inspectBackupCleanup" as const,projectId:"project_a",reviewId};
+  const inspection = {reviewId,fingerprint,filePresent:true,state:"available"};
+  const result = {schemaVersion:1,...request,enabled:false,inspection};
+  // reviewId belongs inside inspection, not the response envelope.
+  const {reviewId: omitted, ...response} = result;
+  assert.equal(omitted, reviewId);
+  assert.doesNotThrow(() => validateProjectCatalogResult(response,request));
+  for (const changed of [{...inspection,reviewId:`review_${"c".repeat(32)}`},{...inspection,fingerprint:"bad"},{...inspection,state:"deleted"}]) {
+    assert.throws(() => validateProjectCatalogResult({...response,inspection:changed},request));
+  }
+  assert.throws(() => validateProjectCatalogResult({...response,projectId:"project_b"},request));
+  const command = {action:"cleanupBackup" as const,projectId:"project_a",reviewId,fingerprint};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(command));
+  assert.throws(() => validateProjectCatalogRequest({...command,filename:"backup.bin"}));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:command.action,projectId:"project_a",reviewId:`review_${"c".repeat(32)}`},command));
+});

@@ -1116,6 +1116,14 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.backup_retention(&self.storage, param_string(params, "projectId").map_err(invalid_params)?)
                 }
+                Some("inspectBackupCleanup") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "reviewId"]).map_err(invalid_params)?;
+                    self.projects.inspect_backup_cleanup(&self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"reviewId").map_err(invalid_params)?)
+                }
+                Some("cleanupBackup") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "reviewId", "fingerprint"]).map_err(invalid_params)?;
+                    self.projects.cleanup_backup(&mut self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"reviewId").map_err(invalid_params)?, param_string(params,"fingerprint").map_err(invalid_params)?, &request.request_id)
+                }
                 Some("abandonBackupPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "reviewId", "fingerprint"]).map_err(invalid_params)?;
                     self.projects.abandon_backup_preparation(&mut self.storage, param_string(params, "projectId").map_err(invalid_params)?, param_string(params, "reviewId").map_err(invalid_params)?, param_string(params, "fingerprint").map_err(invalid_params)?, &request.request_id)
