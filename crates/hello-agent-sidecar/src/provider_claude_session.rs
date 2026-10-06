@@ -55,6 +55,8 @@ pub(crate) fn arguments(
         tools,
         "--permission-mode",
         "default",
+        "--permission-prompt-tool",
+        "stdio",
         "--model",
         model,
         "--effort",
@@ -247,6 +249,9 @@ mod tests {
             assert!(args.windows(2).any(|a| a == ["--effort", "medium"]));
             assert!(args
                 .windows(2)
+                .any(|a| a == ["--permission-prompt-tool", "stdio"]));
+            assert!(args
+                .windows(2)
                 .any(|a| a == ["--permission-mode", "default"]));
         }
         assert!(arguments("--help", "medium", ToolAccess::ReadOnly).is_err());
@@ -304,5 +309,101 @@ mod tests {
                 .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_err());
         }
+    }
+
+    #[test]
+    fn permission_denial_round_trips_through_owned_transport() {
+        use hello_agent_core::provider::vendor_observation::claude_approval::Observation;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let id = format!("init_{}", process.connection_id().simple());
+        let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let request = serde_json::json!({"type":"control_request","request_id":"permission_a","request":{
+            "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_a","input":{"command":"PRIVATE"}
+        }});
+        let expected = serde_json::json!({"type":"control_response","response":{
+            "subtype":"success","request_id":"permission_a","response":{
+                "behavior":"deny","message":"Tool request declined by the application user.","interrupt":false
+            }
+        }});
+        let cancelled =
+            serde_json::json!({"type":"control_cancel_request","request_id":"permission_a"});
+        // No provider/account/model. The toy acknowledges only the exact denial bytes.
+        let script = format!(
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{request}'\nIFS= read -r denial || exit 2\n[ \"$denial\" = '{expected}' ] || exit 3\nprintf '%s\\n' '{cancelled}'\nIFS= read -r last\n"
+        );
+        process
+            .launch_gated_command(
+                Path::new("/bin/sh"),
+                &["-c".as_ref(), script.as_ref()],
+                &home,
+            )
+            .unwrap();
+        let cancel = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = (|| -> Result<(), SidecarError> {
+            let mut session = ControlInitialization::start(&mut process, &cancel)?;
+            while !session.advance(&mut process, &cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline {
+                    return Err(failure());
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let mut permissions = session.into_permission_channel()?;
+            let incoming = loop {
+                if Instant::now() >= deadline {
+                    return Err(failure());
+                }
+                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                    break input;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            let Observation::Requested(request) = permissions.observe(&process, &incoming)? else {
+                return Err(failure());
+            };
+            if request.request_id != "permission_a"
+                || request.tool_use_id.as_deref() != Some("tool_a")
+            {
+                return Err(failure());
+            }
+            permissions.deny(&mut process, &request.request_id, false)?;
+            while !process.flush_native_observed(&cancel, &mut |_| Ok(()))? {
+                if Instant::now() >= deadline {
+                    return Err(failure());
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let incoming = loop {
+                if Instant::now() >= deadline {
+                    return Err(failure());
+                }
+                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                    break input;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            if !matches!(
+                permissions.observe(&process, &incoming)?,
+                Observation::Cancelled
+            ) {
+                return Err(failure());
+            }
+            if permissions
+                .deny(&mut process, "permission_a", false)
+                .is_ok()
+            {
+                return Err(failure());
+            }
+            Ok(())
+        })();
+        let cleanup = process.finish();
+        assert!(cleanup.is_ok());
+        assert!(process.closure_evidence().is_some_and(|e| e.confirmed()));
+        assert!(result.is_ok());
     }
 }

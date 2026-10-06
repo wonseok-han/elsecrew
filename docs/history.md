@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 권한 요청 stdio 라우팅)
+
+- 기준771c282의 권한 응답 구현에 이어 공식 SDK types.py의 _configure_can_use_tool과 transport/subprocess_cli.py를 확인했다. can_use_tool은 permission_prompt_tool_name=stdio를 통해 CLI의 --permission-prompt-tool stdio로 연결된다. 기존 실행 인자 후보의 누락을 보완했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py 및 _internal/transport/subprocess_cli.py (2026-10-06 mutable main).
+- Karpathy 지침으로 기존 channel/IO를 재사용했다. 임시 shell이 initialize→도구 요청→정확한 거절 bytes 확인→취소 통지를 수행하는 왕복 회귀를 작성하고 deadline 및 명시 종료 확인을 넣었다. 실제 공급자 실행이나 회귀 실행은 하지 않았고 rustfmt/diff만 확인했다.
+- 공식 SDK도 allow 규칙/권한 모드가 콜백을 건너뛸 수 있음을 설명한다. 이 옵션을 모든 도구 실행의 승인 게이트나 OS sandbox 증거로 해석하지 않는다. 실제 실행 owner·설정 admission·UI 승인 연결과 최종 통합 검증은 남는다. 이전 턴은 구현 진전이며 목표는 계속 활성, archive 보존·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 도구 권한 거절 경로 연결)
 
 - 기준769a694에서 공식 Python SDK query.py의 control_request/can_use_tool, control_cancel_request, control_response 구조를 다시 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py (mutable main). Karpathy 지침으로 기존 JSONL 전송에 단회 거절 응답을 연결했다.
@@ -106,6 +112,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Claude 권한 통신(2026-10-06)**: SDK can_use_tool은 --permission-prompt-tool stdio로 control 요청을 받는다. 옵션만으로 모든 도구가 콜백을 거친다고 보장하지 않으며 allow 규칙/권한 모드의 우회와 실행 격리 검증은 별도다. 후보 인자와 거절 IO가 연결됐으나 제품 실행/UI 활성화 증거는 아니다.
 - **Claude safe-mode 경계(2026-10-06)**: 공식 CLI의 safe-mode는 bare와 달리 구독 인증을 유지하지만 관리 정책 hook 등 일부 동작은 제외하지 않는다. 인자 구성만으로 실행 admission/OS 격리를 입증하지 않는다. 앱 프로필로 실제 실행할 때 생성되는 파일과 권한 응답·종료 검증은 여전히 후속이다.
 - **Claude init의 관측 한계(2026-10-06)**: 공식 SDKSystemMessage의 effort는 일반 앱 init에서 누락된다. claude_init은 cwd/model/권한 모드/도구 및 비로딩 확장을 비교하지만 effort·계정·OS 격리를 입증하지 않는다. interrupt capability는 버전 대신 개별 이름으로 확인하고 실행 owner 연결은 후속이다.
 - **Claude 공개 출력 계약(2026-10-06)**: 실제 SDK assistant frame은 message.id가 반복될 수 있어 uuid로 구분한다. core claude_events projection은 main-session text만 내보내며 result는 프로세스 종료 증거가 아니다. 아직 실행 owner와 연결 전이고 fake provider/parser를 실제 실행 증거로 사용하지 않는다.
