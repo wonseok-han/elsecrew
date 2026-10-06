@@ -315,7 +315,7 @@ export class ChatUiController {
     if (!profile) return;
     this.#set({ agentStartingRoleId: roleId, error: null, ...chatNotice("m5.agentNotice.checking", { roleId, runtime: profile.runtime }) });
     try {
-      const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true });
+      const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
       if (!capability.canStart) {
         this.#set({ ...chatNotice("m5.agentNotice.blocked", { roleId, runtime: profile.runtime, reason: capability.blockedReason }) });

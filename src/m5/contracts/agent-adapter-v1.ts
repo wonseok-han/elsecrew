@@ -198,6 +198,8 @@ export type InternalProviderEventV1 =
 export interface AgentCapabilitiesRequestV1 {
   runtime: RuntimeV1;
   refresh: boolean;
+  chatId?: string;
+  roleId?: RoleIdV1;
 }
 
 export interface AgentExecutableIdentityV1 {
@@ -428,9 +430,14 @@ export interface AgentRecoveryResolveResultV1 {
 }
 
 export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabilitiesRequestV1 {
-  const object = exactObject(value, ["runtime", "refresh"], "agent capabilities request");
+  const scoped = typeof value === "object" && value !== null && ("chatId" in value || "roleId" in value);
+  const object = exactObject(value, scoped ? ["runtime", "refresh", "chatId", "roleId"] : ["runtime", "refresh"], "agent capabilities request");
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   if (typeof object.refresh !== "boolean") fail("refresh must be boolean");
+  if (scoped) {
+    id(object.chatId, "chatId");
+    oneOf(object.roleId, G5_ROLE_IDS_V1, "roleId");
+  }
   return object as unknown as AgentCapabilitiesRequestV1;
 }
 

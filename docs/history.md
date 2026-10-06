@@ -1,5 +1,9 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (채팅·역할별 상태 조회 요청 연결)
+
+- 기준 6cd3411. Karpathy 지침으로 capability 요청에 함께 제공하는 선택적 chatId/roleId를 Rust/TS에 추가하고 renderer→Electron→sidecar까지 연결했다. 백엔드는 저장 역할의 runtime·현재 작업 사본을 확인하며 제품 blocked 상태에서 기존 runtime 캐시를 scoped 증거로 재사용하지 않는다. 기존 두 필드 요청 유지, null/한쪽만 전달은 거절한다. tsc --noEmit 및 제한된 Cargo check --tests --locked PASS(5.32초), 이후 요청 계약 회귀 추가·실행은 미실시; 실제 조회/모델 실행 없음. 독립 검토 완료: scope 조회 필요, 닫힌 inspection process 재사용 금지, 조회 실패 소유권 보관이 남은 연결 조건이다. 다음은 scoped 응답 fingerprint/조회 소유권과 새 실행 owner 연결·통합 검증. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (native 접수 응답·이벤트 보존과 제품 연결 검토)
 
 - 기준 9ed20aa에서 start_reserved_codex가 영속 예약으로 만든 runAccepted(preparing)를 검증한 뒤 런타임 등록 성공에만 G5Action으로 반환하도록 연결했다. native polling은 한 owner의 취소/원장 오류에도 다른 owner를 진행하고, 이미 cursor를 전진한 공개 이벤트를 후속 오류로 버리지 않는다. 종료 미확인 소유자는 계속 보관한다.
@@ -493,5 +497,4 @@
 2026-09-15·2026-09-28 전체 워크로그: [월간 아카이브](archive/history-2026-09.md). 원문 일치 확인 후 날짜 단위로 이동했다.
 2026-09-29 전체 워크로그: [월간 아카이브](archive/history-2026-09.md). 날짜 단위로 원문을 보존했다.
 2026-09-30 전체 워크로그(검색·변경 상세 다국어 검증 포함): [월간 아카이브](archive/history-2026-09.md). 날짜 단위 원문 보존; 후속 현행 요약은 핵심 결정에서 확인한다.
-
 2026-10-01 전체 워크로그: [10월 아카이브](archive/history-2026-10.md). 현재 판단은 위 핵심 결정 우선.

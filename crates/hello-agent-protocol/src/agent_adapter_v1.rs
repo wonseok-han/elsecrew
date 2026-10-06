@@ -361,6 +361,10 @@ pub enum InternalProviderEventV1 {
 pub struct AgentCapabilitiesRequestV1 {
     pub runtime: String,
     pub refresh: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1200,7 +1204,35 @@ fn validate_capabilities_request(
 ) -> Result<AgentCapabilitiesRequestV1, AgentAdapterContractError> {
     let request: AgentCapabilitiesRequestV1 = from_value(value, "agent capabilities request")?;
     one_of(&request.runtime, G5_RUNTIMES_V1, "runtime")?;
+    match (&request.chat_id, &request.role_id) {
+        (Some(chat), Some(role)) => {
+            id(chat, "chatId")?;
+            one_of(role, G5_ROLE_IDS_V1, "roleId")?;
+        }
+        (None, None) if value.get("chatId").is_none() && value.get("roleId").is_none() => {}
+        _ => return fail("chatId and roleId must be supplied together"),
+    }
     Ok(request)
+}
+
+#[test]
+fn capability_query_scope_requires_both_non_null_identifiers() {
+    use serde_json::json;
+    for value in [
+        json!({"runtime":"codex","refresh":true}),
+        json!({"runtime":"codex","refresh":true,"chatId":"chat-a","roleId":"coding"}),
+    ] {
+        assert!(validate_capabilities_request(&value).is_ok());
+    }
+    for value in [
+        json!({"runtime":"codex","refresh":true,"chatId":"chat-a"}),
+        json!({"runtime":"codex","refresh":true,"roleId":"coding"}),
+        json!({"runtime":"codex","refresh":true,"chatId":null,"roleId":null}),
+        json!({"runtime":"codex","refresh":true,"chatId":"","roleId":"coding"}),
+        json!({"runtime":"codex","refresh":true,"chatId":"chat-a","roleId":"unknown"}),
+    ] {
+        assert!(validate_capabilities_request(&value).is_err());
+    }
 }
 
 fn validate_capability_snapshot(

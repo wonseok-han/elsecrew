@@ -1836,15 +1836,15 @@ impl Sidecar {
             (|| -> Result<chat::G5Action, ProjectFailure> {
                 match request.method.as_str() {
                     "agent.getCapabilities" => {
-                        let params = require_exact_params(&request.params, &["runtime", "refresh"])
-                            .map_err(ProjectFailure::manifest)?;
+                        hello_agent_protocol::agent_adapter_v1::validate_agent_adapter_payload_v1(
+                            "capabilitiesRequest", &request.params,
+                        ).map_err(|error| ProjectFailure::manifest(error.to_string()))?;
+                        let input: hello_agent_protocol::agent_adapter_v1::AgentCapabilitiesRequestV1 =
+                            serde_json::from_value(request.params.clone())
+                                .map_err(|error| ProjectFailure::manifest(error.to_string()))?;
                         Ok(chat::G5Action {
-                            result: self.agent_runtime.get_capabilities(
-                                param_string(params, "runtime")
-                                    .map_err(ProjectFailure::manifest)?,
-                                params.get("refresh").and_then(Value::as_bool).ok_or_else(
-                                    || ProjectFailure::manifest("refresh must be a boolean"),
-                                )?,
+                            result: self.agent_runtime.get_context_capabilities(
+                                &self.storage, &self.projects, &input,
                             )?,
                             ..chat::G5Action::default()
                         })

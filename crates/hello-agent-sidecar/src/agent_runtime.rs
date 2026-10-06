@@ -439,6 +439,36 @@ impl AgentRuntime {
         self.provider == ProviderMode::FakeExact
     }
 
+    pub(crate) fn get_context_capabilities(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        request: &hello_agent_protocol::agent_adapter_v1::AgentCapabilitiesRequestV1,
+    ) -> Result<Value, ProjectFailure> {
+        validate_agent_adapter_payload_v1(
+            "capabilitiesRequest", &serde_json::to_value(request).map_err(json_failure)?,
+        ).map_err(contract_failure)?;
+        if let (Some(chat_id), Some(role_id)) = (&request.chat_id, &request.role_id) {
+            let chat = actual_chat_projection(storage, chat_id)?["record"].clone();
+            let profile: AgentResolvedProfileV1 = serde_json::from_value(
+                chat["roleSnapshots"].as_array()
+                    .and_then(|roles| roles.iter().find(|role| role["roleId"] == *role_id))
+                    .cloned().ok_or_else(|| ProjectFailure::manifest("chat role snapshot is missing"))?,
+            ).map_err(json_failure)?;
+            if profile.runtime != request.runtime {
+                return Err(ProjectFailure::manifest("capability runtime differs from stored role"));
+            }
+            projects.verify_workspace_for_run(storage, &address_from_chat(&chat)?)?;
+            if self.provider == ProviderMode::Blocked {
+                // Never reuse the runtime-only fixture cache as scoped native
+                // evidence. Native discovery/cleanup ownership is still gated.
+                return serde_json::to_value(self.blocked_capability(&request.runtime)?)
+                    .map_err(json_failure);
+            }
+        }
+        self.get_capabilities(&request.runtime, request.refresh)
+    }
+
     pub(crate) fn get_capabilities(
         &mut self,
         runtime: &str,
