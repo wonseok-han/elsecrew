@@ -173,6 +173,17 @@ pub(crate) struct CodexProfileBinding {
 }
 
 impl CodexProfileBinding {
+    pub(crate) fn try_clone(&self) -> Result<Self, SidecarError> {
+        self.revalidate()?;
+        let binding = Self {
+            app_data_path: self.app_data_path.clone(),
+            app_data: self.app_data.try_clone().map_err(|_| failure())?,
+            profile: self.profile.try_clone().map_err(|_| failure())?,
+        };
+        binding.revalidate()?;
+        Ok(binding)
+    }
+
     pub(super) fn login_lease_directory(&self) -> Result<Dir, SidecarError> {
         self.revalidate()?;
         self.app_data.try_clone().map_err(|_| failure())

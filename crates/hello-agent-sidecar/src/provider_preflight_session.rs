@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 mod incremental;
+#[allow(dead_code)] // Product dispatcher activation follows complete discovery projection.
+pub(crate) mod discovery_worker;
 pub(crate) mod vendor_launch;
 pub(crate) mod named_permissions;
 #[allow(unused_imports)] // Candidate until named config/thread admission is connected.

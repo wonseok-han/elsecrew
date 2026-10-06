@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (버전·역할 조회의 취소 가능한 worker 연결)
+
+- 기준 6a7a2b3. DiscoveryWorker가 앱 profile과 서명 검증된 실행 파일 pair를 소유하고 버전 조회→명시 종료→새 프로세스의 named 역할 조회를 순서대로 수행하도록 묶었다. profile은 현재 directory identity를 보존한 handle 복제로 넘기며 설정/인증 파일을 다시 생성하지 않는다. 실패 결과는 해당 process owner를 함께 반환하고 성공 결과는 버전/관측값/원래 실행 파일 pair를 보관한다.
+- Karpathy 지침으로 기존 조회와 정리 경로를 재사용했다. dispatcher용 poll은 is_finished 확인 뒤에만 join하며 취소 flag와 종료 시 비정상 Drop fallback을 제공한다. 늦게 완료된 성공 결과도 취소 후 반환 시에는 실패로 바꾼다. Drop의 동기 join은 비정상 fallback이며 제품 정상 종료는 cancel/poll/cleanup 인계를 써야 한다.
+- 제한된 cargo check -p hello-agent-sidecar --tests --locked PASS(4.73초), 이후 늦은 취소 결과 거절 추가와 rustfmt/diff만 확인했다. 실제 공급자/계정/모델 실행 및 새 회귀는 미실행이다. 다음은 worker를 scoped 요청/종료 lifecycle에 등록하고 결과를 capability 응답으로 만드는 연결이다. 제품 blocked 유지, 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (공급자 버전의 소유된 조회 경로)
 
 - 기준 b37ec8b. 설치 CLI에서 생성해 둔 InitializeResponse 스키마는 userAgent만 제공하고 버전 전용 필드가 없음을 확인했다. userAgent를 임의로 exactCliVersion으로 해석하지 않고 고정 --version 조회 후보를 추가했다. profile을 소유한 LoginProcess·기존 gate/환경/프로세스 추적을 사용하며 5초/1024바이트·정상 exit·명시 cleanup 및 종료 뒤 파일/profile 재검증을 요구한다.
