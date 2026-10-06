@@ -17,6 +17,19 @@ pub enum State {
 pub struct InitializeExchange {
     request_id: String,
     state: State,
+    models: Vec<ModelEntry>,
+    hooks_applied: bool,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    value: String,
+    #[serde(rename = "resolvedModel")]
+    resolved_model: Option<String>,
+    #[serde(rename = "supportsEffort")]
+    supports_effort: Option<bool>,
+    #[serde(rename = "supportedEffortLevels")]
+    efforts: Option<Vec<String>>,
 }
 
 /// Only fixed initialization can construct this wire frame. No caller command payload.
@@ -44,6 +57,8 @@ impl InitializeExchange {
         Ok(Self {
             request_id: request_id.into(),
             state: State::New,
+            models: Vec::new(),
+            hooks_applied: false,
         })
     }
     pub fn state(&self) -> State {
@@ -80,7 +95,7 @@ impl InitializeExchange {
         result
     }
 
-    fn accept_inner(&self, input: &BoundedObservation) -> Result<(), ProviderError> {
+    fn accept_inner(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Envelope {
@@ -105,12 +120,43 @@ impl InitializeExchange {
         {
             return Err(invalid());
         }
-        // Do not retain raw account/model/catalog data or infer permission from it.
+        #[derive(Deserialize)]
+        struct Capabilities {
+            #[serde(default)]
+            models: Vec<ModelEntry>,
+            hooks_applied: Option<bool>,
+        }
+        let capabilities: Capabilities = serde_json::from_str(wire.response.response.get()).map_err(|_| invalid())?;
+        let valid_model = |s: &str| !s.is_empty() && s.len() <= 128 && !s.starts_with('-')
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'-'|b'_'|b'.'));
+        let mut names = std::collections::BTreeSet::new();
+        if capabilities.models.len() > 128 || capabilities.models.iter().any(|entry| {
+            !valid_model(&entry.value) || !names.insert(entry.value.as_str())
+                || entry.resolved_model.as_deref().is_some_and(|s| !valid_model(s))
+                || entry.efforts.as_ref().is_some_and(|levels| levels.len() > 5
+                    || levels.iter().any(|s| !matches!(s.as_str(), "low"|"medium"|"high"|"xhigh"|"max"))
+                    || levels.iter().collect::<std::collections::BTreeSet<_>>().len() != levels.len())
+        }) { return Err(invalid()); }
+        self.models = capabilities.models;
+        self.hooks_applied = capabilities.hooks_applied == Some(true);
+        // Keep only model capability fields; never retain account or raw response data.
         Ok(())
+    }
+
+    /// Provider-reported availability, not authentication or tool confinement.
+    pub fn profile_model(&self, model: &str, effort: &str) -> Result<&str, ProviderError> {
+        if self.state != State::Ready || !self.hooks_applied { return Err(invalid()); }
+        let entry = self.models.iter().find(|entry| entry.value == model).ok_or_else(invalid)?;
+        if entry.supports_effort != Some(true) || !entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort)) {
+            return Err(invalid());
+        }
+        Ok(entry.resolved_model.as_deref().unwrap_or(&entry.value))
     }
 
     pub fn close(&mut self) {
         self.state = State::Closed;
+        self.models.clear();
+        self.hooks_applied = false;
     }
 }
 
@@ -122,6 +168,36 @@ mod tests {
     }
     fn input(value: &serde_json::Value) -> BoundedObservation {
         BoundedObservation::new(value.to_string().into_bytes()).unwrap()
+    }
+    #[test]
+    fn profile_requires_reported_model_effort_and_registered_hooks() {
+        let base = json!({"type":"control_response","response":{"subtype":"success","request_id":"init_a","response":{
+            "hooks_applied":true,"models":[{"value":"opus","resolvedModel":"claude-opus-test",
+                "supportsEffort":true,"supportedEffortLevels":["low","high"]}],"account":{"private":"SECRET"}
+        }}});
+        let mut exchange = InitializeExchange::new("init_a").unwrap();
+        exchange.request().unwrap();
+        exchange.accept_response(&input(&base)).unwrap();
+        assert_eq!(exchange.profile_model("opus", "high").unwrap(), "claude-opus-test");
+        assert!(exchange.profile_model("opus", "max").is_err());
+        assert!(exchange.profile_model("other", "high").is_err());
+        exchange.close();
+        assert!(exchange.profile_model("opus", "high").is_err());
+        for field in ["hooks_applied", "models"] {
+            let mut wire = base.clone();
+            wire["response"]["response"].as_object_mut().unwrap().remove(field);
+            let mut exchange = InitializeExchange::new("init_a").unwrap();
+            exchange.request().unwrap();
+            exchange.accept_response(&input(&wire)).unwrap();
+            assert!(exchange.profile_model("opus", "high").is_err());
+        }
+        let mut duplicate = base.clone();
+        let entry = duplicate["response"]["response"]["models"][0].clone();
+        duplicate["response"]["response"]["models"].as_array_mut().unwrap().push(entry);
+        let mut exchange = InitializeExchange::new("init_a").unwrap();
+        exchange.request().unwrap();
+        assert!(exchange.accept_response(&input(&duplicate)).is_err());
+        assert!(exchange.profile_model("opus", "high").is_err());
     }
     #[test]
     fn initializes_once_without_a_user_prompt_and_cannot_reuse_a_closed_connection() {

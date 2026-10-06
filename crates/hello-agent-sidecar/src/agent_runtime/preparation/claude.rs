@@ -90,7 +90,8 @@ impl ClaudeStart {
                 permission_mode:"default",
                 tools:crate::provider_claude_session::expected_tools(access),
             };
-            self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_session_channel(&expected)?);
+            let effort = pending.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?;
+            self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_profile_channel(&expected, effort)?);
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.
             let queued = if cancel.load(std::sync::atomic::Ordering::Acquire) {

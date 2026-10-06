@@ -103,6 +103,8 @@ pub(crate) struct ControlInitialization {
 pub(crate) struct SessionChannel {
     connection: uuid::Uuid,
     cwd: std::path::PathBuf,
+    requested_model: String,
+    session_model: String,
     prompt_attempted: bool,
     transmitting: bool,
     deadline: Instant,
@@ -168,9 +170,9 @@ impl SessionChannel {
     pub(crate) fn can_queue_reply(&self) -> bool { !self.transmitting && !self.permissions.is_closed() }
 
     pub(crate) fn matches_role(&self, model: &str, access: ToolAccess) -> bool {
-        self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
+        self.requested_model == model && self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
             &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
-                cwd, model, permission_mode: "default", tools: expected_tools(access),
+                cwd, model: &self.session_model, permission_mode: "default", tools: expected_tools(access),
             }
         ))
     }
@@ -398,6 +400,21 @@ fn failure() -> SidecarError {
 }
 
 impl ControlInitialization {
+    /// Resolve only the selected catalog entry on this connection; never fallback.
+    pub(crate) fn into_profile_channel(
+        self,
+        expected: &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit<'_>,
+        effort: &str,
+    ) -> Result<SessionChannel, SidecarError> {
+        let resolved = self.exchange.profile_model(expected.model, effort).map_err(|_| failure())?.to_owned();
+        let resolved_expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
+            cwd:expected.cwd, model:&resolved, permission_mode:expected.permission_mode, tools:expected.tools,
+        };
+        let mut channel = self.into_session_channel(&resolved_expected)?;
+        channel.requested_model = expected.model.into();
+        Ok(channel)
+    }
+
     pub(crate) fn into_session_channel(
         self,
         expected: &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit<'_>,
@@ -408,6 +425,8 @@ impl ControlInitialization {
         Ok(SessionChannel {
             connection: self.connection,
             cwd: expected.cwd.into(),
+            requested_model: expected.model.into(),
+            session_model: expected.model.into(),
             prompt_attempted: false,
             transmitting: false,
             deadline: Instant::now() + Duration::from_secs(10 * 60),
@@ -492,6 +511,26 @@ mod tests {
         provider_claude_profile::ClaudeProfileBinding, provider_profile::LoginProfile, Storage,
     };
     use std::path::Path;
+
+    #[test]
+    fn resolved_session_model_remains_bound_to_the_selected_alias() {
+        let mut exchange = InitializeExchange::new("init_test").unwrap();
+        exchange.request().unwrap();
+        let response = serde_json::json!({"type":"control_response","response":{
+            "subtype":"success","request_id":"init_test","response":{"hooks_applied":true,
+                "models":[{"value":"opus","resolvedModel":"claude-opus-test","supportsEffort":true,"supportedEffortLevels":["high"]}]}
+        }});
+        exchange.accept_response(&hello_agent_core::provider::BoundedObservation::new(response.to_string().into_bytes()).unwrap()).unwrap();
+        let initialization = ControlInitialization {exchange,connection:uuid::Uuid::new_v4(),deadline:Instant::now()+Duration::from_secs(15),flushed:true,failed:false};
+        let expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
+            cwd:"/snapshot",model:"opus",permission_mode:"default",tools:expected_tools(ToolAccess::ReadOnly),
+        };
+        let channel = initialization.into_profile_channel(&expected,"high").unwrap();
+        assert!(channel.matches_role("opus", ToolAccess::ReadOnly));
+        assert!(!channel.matches_role("claude-opus-test", ToolAccess::ReadOnly));
+        assert_eq!(channel.session_model,"claude-opus-test");
+        assert!(!channel.matches_role("opus", ToolAccess::Edit));
+    }
 
     #[test]
     fn snapshot_file_observation_rejects_escape_links_and_metadata() {

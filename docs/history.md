@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화 모델 목록·추론 수준 대조)
+
+- 기준 034e4da. 공식 TypeScript SDK 문서의 SDKControlInitializeResponse.models/ModelInfo(value, resolvedModel, supportsEffort, supportedEffortLevels) 및 hooks_applied를 확인했다. 초기화 파서는 bounded 모델 정보만 보관하고 계정/원문 응답은 보존하지 않는다. 중복 selector·잘못된 추론 목록은 거절한다.
+- ClaudeStart의 첫 메시지 전 채널 생성은 같은 연결에서 선택 selector·effort가 명시 지원되고 hook 등록 true여야 한다. 별칭은 공급자가 반환한 resolvedModel로 system/init을 대조하되 원래 선택 selector와 역할 결속을 유지한다. 누락/미지원 정보는 임의 기본값이나 다른 모델로 대체하지 않는다. 이 관측은 실제 추론 설정 적용/인증/도구 격리 증거가 아니다.
+- Karpathy 지침으로 기존 초기화/채널 경로를 확장했다. 모델·effort·hooks 누락/중복/닫힌 exchange와 별칭 결속 회귀를 추가했으며 diff check PASS. 빌드/테스트·실제 계정/모델 실행은 미실행이다. 다음은 Claude 실제 보호 정책 admission과 dispatcher/초기화 원장 연결 후 누적 검증. 제품 blocked, 기존 9월 archive 보존, main/push 없음.
+- 출처: https://code.claude.com/docs/en/agent-sdk/typescript.md (2026-10-06 공식 Markdown 조회; 웹 도구 HTML 크기 제한으로 읽기 전용 curl 사용).
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 초기화·프롬프트·소유권 인계)
 
 - 기준 a7801d4. ClaudeStart가 실행된 프로세스의 control 초기화를 비차단 tick으로 진행하고, 동일 run/connection·현재 저장 입력·실행 scope를 대조한 뒤 저장된 역할로 SessionChannel을 구성하게 연결했다. 초기화 성공 전 사용자 메시지는 큐잉하지 않는다.
