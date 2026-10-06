@@ -284,6 +284,7 @@ pub(crate) struct LoginProcess<'a> {
     finished: bool,
     transport_used: bool,
     preflight_claimed: bool,
+    claude_preflight: bool,
     closure: Option<ProcessClosureEvidence>,
     retain_for_terminal: bool,
     cleanup_started: Option<Instant>,
@@ -393,6 +394,7 @@ impl<'a> LoginProcess<'a> {
             finished: false,
             transport_used: false,
             preflight_claimed: false,
+            claude_preflight: false,
             closure: None,
             retain_for_terminal: false,
             cleanup_started: None,
@@ -661,16 +663,30 @@ impl<'a> LoginProcess<'a> {
 
     /// Reserve an untouched Codex transport for exactly one preflight exchange.
     pub(crate) fn begin_preflight(&mut self) -> Result<(), SidecarError> {
+        self.begin_native_preflight(false)
+    }
+
+    pub(crate) fn begin_claude_preflight(&mut self) -> Result<(), SidecarError> {
+        self.begin_native_preflight(true)
+    }
+
+    fn begin_native_preflight(&mut self, claude: bool) -> Result<(), SidecarError> {
         if self.failed
             || self.finished
             || self.transport_used
             || self.preflight_claimed
             || self.io.is_none()
-            || self.profile.as_ref().pending_name() != "codex-login.pending"
+            || self.profile.as_ref().pending_name()
+                != if claude {
+                    "claude-login.pending"
+                } else {
+                    "codex-login.pending"
+                }
         {
             return Err(failure());
         }
         self.preflight_claimed = true;
+        self.claude_preflight = claude;
         Ok(())
     }
 
@@ -709,7 +725,7 @@ impl<'a> LoginProcess<'a> {
         cancel: &AtomicBool,
         observer: &mut impl FnMut(&mut Self) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
-        if self.failed || self.finished || !self.preflight_claimed {
+        if self.failed || self.finished || !self.preflight_claimed || self.claude_preflight {
             return Err(failure());
         }
         self.transport_used = true;
@@ -739,7 +755,15 @@ impl<'a> LoginProcess<'a> {
         &mut self,
         frame: crate::provider_login_io::NativeFrame,
     ) -> Result<(), SidecarError> {
-        if self.failed || self.finished || !self.preflight_claimed {
+        if self.failed
+            || self.finished
+            || !self.preflight_claimed
+            || self.claude_preflight
+                != matches!(
+                    &frame,
+                    crate::provider_login_io::NativeFrame::ClaudeInitialize(_)
+                )
+        {
             return Err(failure());
         }
         self.transport_used = true;

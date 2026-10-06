@@ -42,6 +42,9 @@ pub(crate) struct LoginIo {
 
 /// Only requests already admitted by the corresponding protocol state machine.
 pub(crate) enum NativeFrame {
+    ClaudeInitialize(
+        hello_agent_core::provider::vendor_observation::claude_control::InitializeRequest,
+    ),
     Preflight(
         hello_agent_core::provider::vendor_observation::codex_preflight::exchange::PreflightRequest,
     ),
@@ -55,6 +58,7 @@ pub(crate) enum NativeFrame {
 impl NativeFrame {
     fn bytes(&self) -> &[u8] {
         match self {
+            Self::ClaudeInitialize(frame) => frame.as_str().as_bytes(),
             Self::Preflight(frame) => frame.as_str().as_bytes(),
             Self::Turn(frame) => frame.as_str().as_bytes(),
             Self::Approval(frame) => frame.as_str().as_bytes(),

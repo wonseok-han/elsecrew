@@ -39,6 +39,9 @@ mod provider_permission_probe;
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Internal preflight; not product execution authority.
 mod provider_preflight_session;
+#[cfg(target_os = "macos")]
+#[allow(dead_code)] // Internal Claude control IO; launch policy and runtime activation remain separate.
+mod provider_claude_session;
 #[cfg(unix)]
 #[allow(dead_code)] // Prepared profile capability; login transport is not activated yet.
 mod provider_profile;

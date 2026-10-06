@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 제어 초기화의 기존 process IO 연결)
+
+- 기준9de6fca에서 Claude ControlInitialization을 기존 LoginProcess의 bounded/nonblocking JSONL 큐·flush·poll·프로세스 관측에 연결했다. 한 advance마다 한 단계만 진행하고 동일 connection ID·15초 deadline·취소를 확인한다. 초기화 실패해도 process 소유권은 호출자에 남아 명시 finish/종료 증거 확인이 필요하다.
+- Codex 전용 begin_preflight는 유지하고 Claude profile 전용 claim을 추가했다. native frame 공급자 일치 검사와 Codex preflight 직접 송신의 Claude 거절을 넣어 서로의 연결에서 실행/승인 frame을 혼용하지 않는다. 새 경로는 고정 initialize만 보낼 수 있고 실제 provider spawn·목표 전송·제품 시작 경로는 열지 않았다.
+- Karpathy 지침으로 임시 /bin/sh toy의 정상 응답·request ID 불일치·취소·deadline·중복 claim·종료 확인 회귀를 작성했다. 이번에는 rustfmt/diff만 확인했으며 fixture 실행·컴파일·통합 검증은 미실행이다. 다음은 별도로 검증된 Claude launcher/설정과 실제 실행 owner의 결합이다. 계정/모델 실행 없음, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 모델 없는 제어 초기화 계약)
 
 - 기준e29cb36에서 Anthropic 공식 Python SDK의 _internal/query.py를 읽고 initialize 제어 요청과 사용자 메시지 전송을 분리한 구조를 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py (2026-10-06 관측, mutable main). system/init 관측과 control_response는 별개 계약이며 서로 대체하지 않는다.
