@@ -17,6 +17,20 @@ pub(crate) struct ScopedEvidence {
     pub(crate) evidence: Evidence,
 }
 
+pub(super) struct PendingClaudeDiscovery {
+    pub(super) worker: crate::provider_claude_session::discovery::DiscoveryWorker,
+    completion: Option<crate::provider_claude_session::discovery::Completion>,
+    scope: AgentCapabilityScopeV1,
+    profile: AgentResolvedProfileV1,
+}
+
+#[allow(dead_code)] // Consumed by forthcoming Claude capability/reservation branch.
+pub(crate) struct ScopedClaudeEvidence {
+    pub(crate) scope: AgentCapabilityScopeV1,
+    pub(crate) profile: AgentResolvedProfileV1,
+    pub(crate) evidence: crate::provider_claude_session::discovery::DiscoveryEvidence,
+}
+
 pub(super) struct NativeProviderContext {
     manifest: Value,
     discovery: Value,
@@ -145,26 +159,53 @@ impl ScopedEvidence {
 }
 
 impl AgentRuntime {
-    /// Internal registration only: the caller resolves the stored scope and
-    /// supplies concrete policy admission before creating this request.
+    /// Resolve all launch inputs from the durable chat; renderer supplies IDs
+    /// only. Policy admission remains an internal caller responsibility.
     #[allow(dead_code)]
     pub(crate) fn begin_claude_discovery(
         &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
         request_id: &str,
-        request: crate::provider_claude_session::discovery::DiscoveryRequest,
+        request: &AgentCapabilitiesRequestV1,
         admit: impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess)
             -> Result<(), SidecarError> + Send + 'static,
     ) -> Result<(), SidecarError> {
-        use crate::provider_claude_session::discovery::{DiscoveryWorker, PendingDiscovery};
-        if self.preparing_to_quit || request_id.is_empty() || request_id.len() > 256
+        use crate::provider_claude_session::{discovery::{DiscoveryWorker, DiscoveryRequest}, ToolAccess};
+        let failure = || SidecarError::new("agentDiscoveryRejected", "Claude discovery unavailable");
+        validate_agent_adapter_payload_v1("capabilitiesRequest", &serde_json::to_value(request).map_err(|_| failure())?)
+            .map_err(|_| failure())?;
+        if self.preparing_to_quit || request.runtime != "claude-code"
+            || request_id.is_empty() || request_id.len() > 256
             || self.pending_claude_discoveries.contains_key(request_id)
             || self.pending_discoveries.contains_key(request_id)
             || active_run_limit_reached(self.owned_run_ids().len())
         {
-            return Err(SidecarError::new("agentDiscoveryRejected", "Claude discovery unavailable"));
+            return Err(failure());
         }
-        let worker = DiscoveryWorker::spawn(request, admit)?;
-        self.pending_claude_discoveries.insert(request_id.into(), PendingDiscovery { worker, completion: None });
+        let chat_id = request.chat_id.as_deref().ok_or_else(failure)?;
+        let role_id = request.role_id.as_deref().ok_or_else(failure)?;
+        let chat = actual_chat_projection(storage, chat_id).map_err(|_| failure())?["record"].clone();
+        let profile: AgentResolvedProfileV1 = serde_json::from_value(
+            chat["roleSnapshots"].as_array().and_then(|roles| roles.iter().find(|role| role["roleId"] == role_id))
+                .cloned().ok_or_else(failure)?,
+        ).map_err(|_| failure())?;
+        if profile.runtime != "claude-code" { return Err(failure()); }
+        let access = match profile.permission.as_str() {
+            "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit,
+            _ => return Err(failure()),
+        };
+        let address = address_from_chat(&chat).map_err(|_| failure())?;
+        projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
+        let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
+        let scope = capability_scope(&chat, role_id).map_err(|_| failure())?;
+        let worker = DiscoveryWorker::spawn(DiscoveryRequest {
+            profile: crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?,
+            selector: profile.model_selector.clone(), effort: profile.reasoning_effort.clone().ok_or_else(failure)?, access,
+            workspace: PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?),
+            source: PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+        }, admit)?;
+        self.pending_claude_discoveries.insert(request_id.into(), PendingClaudeDiscovery { worker, completion: None, scope, profile });
         Ok(())
     }
 
@@ -188,16 +229,39 @@ impl AgentRuntime {
 
     #[allow(dead_code)]
     pub(crate) fn take_claude_discovery(
-        &mut self, request_id: &str,
-    ) -> Option<Result<crate::provider_claude_session::discovery::DiscoveryEvidence, SidecarError>> {
+        &mut self, storage: &Storage, projects: &ProjectManager, request_id: &str,
+    ) -> Option<Result<ScopedClaudeEvidence, SidecarError>> {
         let pending = self.pending_claude_discoveries.get(request_id)?;
         if pending.completion.as_ref()?.cleanup.is_some() { return None; }
         let mut pending = self.pending_claude_discoveries.remove(request_id)?;
         let result = pending.completion.take()?.result;
-        if self.preparing_to_quit {
-            return Some(Err(SidecarError::new("agentDiscoveryRejected", "Claude discovery canceled")));
-        }
-        Some(result)
+        Some(result.and_then(|evidence| {
+            use crate::provider_profile::LoginProfile;
+            use crate::provider_claude_session::ToolAccess;
+            let failure = || SidecarError::new("agentInputChanged", "Claude discovery context changed");
+            if self.preparing_to_quit { return Err(failure()); }
+            let chat = actual_chat_projection(storage, &pending.scope.chat_id).map_err(|_| failure())?["record"].clone();
+            if capability_scope(&chat, &pending.scope.role_id).map_err(|_| failure())? != pending.scope
+                || !chat["roleSnapshots"].as_array().is_some_and(|roles| roles.iter().any(|role| {
+                    serde_json::from_value::<AgentResolvedProfileV1>(role.clone()).ok().as_ref() == Some(&pending.profile)
+                })) { return Err(failure()); }
+            let address = address_from_chat(&chat).map_err(|_| failure())?;
+            projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
+            let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
+            let home = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?.revalidate()?;
+            let access = match pending.profile.permission.as_str() {
+                "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit,
+                _ => return Err(failure()),
+            };
+            if !evidence.observation.matches(&pending.profile.model_selector,
+                pending.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+                Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
+                Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home) {
+                return Err(failure());
+            }
+            evidence.executable.revalidate()?;
+            Ok(ScopedClaudeEvidence { scope: pending.scope, profile: pending.profile, evidence })
+        }))
     }
 
     /// Start discovery is never served from a capability cache. Resolve the

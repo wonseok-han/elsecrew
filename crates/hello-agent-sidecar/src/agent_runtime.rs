@@ -167,7 +167,7 @@ pub(crate) struct AgentRuntime {
     failed_starts: HashMap<String, native::FailedStart>,
     discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
     pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
-    pending_claude_discoveries: HashMap<String, crate::provider_claude_session::discovery::PendingDiscovery>,
+    pending_claude_discoveries: HashMap<String, discovery::PendingClaudeDiscovery>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,

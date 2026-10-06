@@ -27,11 +27,6 @@ pub(crate) struct Completion {
     pub(crate) cleanup: Option<LoginProcess<'static>>,
 }
 
-pub(crate) struct PendingDiscovery {
-    pub(crate) worker: DiscoveryWorker,
-    pub(crate) completion: Option<Completion>,
-}
-
 pub(crate) struct DiscoveryWorker {
     cancel: Arc<AtomicBool>,
     handle: Option<JoinHandle<Completion>>,

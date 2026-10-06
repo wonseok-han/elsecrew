@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 조회의 저장된 채팅·역할 범위 연결)
+
+- 기준 dcb8649. begin_claude_discovery 입력을 임의 DiscoveryRequest에서 공용 capability 요청 ID로 바꾸고 저장된 chat/roleSnapshots와 검증된 manifest에서 모델/effort/권한·snapshot/source 경로를 구성한다. 잘못된 runtime/역할·격리 불일치를 worker 시작 전에 거절한다. pending scope/profile 소유권은 공급자 모듈에서 실행 관리자 계층으로 이동했다.
+- 완료 결과도 현재 저장된 scope/역할·파일 격리·manifest·Claude profile·30초 관측·실행 파일을 다시 대조한 ScopedClaudeEvidence로만 반환한다. 다른 채팅/역할/원본으로 옮기거나 오래된 관측을 재사용하지 않는다. Karpathy 지침으로 기존 Codex scoped 조회 패턴을 재사용했고 인증·canStart를 추론하지 않았다.
+- diff check 확인. 이번 컴파일/테스트·계정/모델 실행은 미실행이며 후속 누적 검증 대상이다. 다음은 Claude 인증/버전 증거와 capability/manifest projection·예약·실제 dispatcher 연결, 명시적 일회 승인이다. 제품 blocked 유지, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 관측 worker·관리자 수명 연결)
 
 - 기준 cee5f07. Claude 사전 관측을 별도 worker로 실행하고 서명/초기화 조회를 dispatcher 밖으로 옮겼다. 취소 flag·완료 후 단발 join·늦은 성공 취소 처리를 추가했다. 실행 관리자에 요청 ID별 pending registry와 중복/한도·owned 목록·poll·prepareQuit를 연결하고 실패 process는 기존 discovery cleanup으로 인계한다. cleanup 인계 실패 시 원래 슬롯을 보존하며 결과는 한 번만 꺼낸다.
