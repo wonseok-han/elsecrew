@@ -699,6 +699,31 @@ impl RunReservation {
                 projects,
                 &mut |storage, process, action| {
                     let event = match action {
+                        TextAction::ThreadMatched(receipt) => {
+                            self.validate_text_input(storage, projects).map_err(|_| failure())?;
+                            let address = address_from_chat(&self.run).map_err(|_| failure())?;
+                            let manifest = projects.verify_workspace_for_run(storage, &address)
+                                .map_err(|_| failure())?;
+                            let cwd = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+                            if !receipt.matches(process, cwd) { return Err(failure()); }
+                            self.observe_process(storage, process)?;
+                            let mut projection = actual_run_projection(storage, &self.run_id)
+                                .map_err(|_| failure())?;
+                            let mut evidence = receipt.redacted();
+                            evidence["runId"] = json!(self.run_id);
+                            evidence["workspaceIdentity"] = self.run["workspaceIdentity"].clone();
+                            evidence["capabilityFingerprint"] = self.run["capabilityFingerprint"].clone();
+                            evidence["selectedProfile"] = self.run["selectedProfile"].clone();
+                            if projection.contains_key("native_thread_receipt") { return Err(failure()); }
+                            projection.remove("last_event_sequence");
+                            projection.insert("native_thread_receipt".into(), evidence);
+                            storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+                                aggregate_type: "run", aggregate_id: self.run_id.clone(),
+                                operation_id: format!("op_agent_native_thread_{}", self.run_id),
+                                request_id: None, payload: projection,
+                            }]).map_err(|_| failure())?;
+                            return Ok(());
+                        }
                         TextAction::VerifyApprovalBoundary => {
                             return self
                                 .verify_approval_boundary(storage, projects, process, cancel);

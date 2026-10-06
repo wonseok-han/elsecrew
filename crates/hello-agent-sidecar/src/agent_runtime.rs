@@ -2627,6 +2627,7 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
     for field in [
         "provider_discovery",
         "runtime_attestation",
+        "native_thread_receipt",
         "approval_intents_internal",
     ] {
         if let Some(value) = source.get(field) {

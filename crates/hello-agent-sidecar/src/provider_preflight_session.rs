@@ -15,6 +15,7 @@ pub(crate) mod named_permissions;
 #[allow(unused_imports)] // Candidate until named config/thread admission is connected.
 pub(crate) use named_permissions::named_discovery_arguments;
 pub(crate) use incremental::ConfinedAcceptReply;
+pub(crate) use incremental::MatchedThreadReceipt;
 
 #[cfg(test)]
 thread_local! {
@@ -676,6 +677,9 @@ pub(crate) fn run_text_and_close(
         &mut |storage, process, action| match action {
             TextAction::Public(value) => on_public(storage, value),
             TextAction::ObserveProcess => on_process(storage, process),
+            // Compatibility transport has no durable run; the reserved-run
+            // driver handles this action with its own persistence barrier.
+            TextAction::ThreadMatched(_) => on_process(storage, process),
             TextAction::Tool(_)
             | TextAction::PollApproval { .. }
             | TextAction::VerifyWorkspace
@@ -796,6 +800,7 @@ pub(crate) enum TextAction<'a> {
     /// workspace/fence, live process and sealed outer-sandbox launch provenance.
     VerifyApprovalBoundary,
     ObserveProcess,
+    ThreadMatched(&'a MatchedThreadReceipt),
     Public(hello_agent_core::provider::vendor_observation::codex_events::Projection),
     Tool(hello_agent_core::provider::vendor_observation::codex_events::stream::ToolEvent),
     /// Must return promptly; None keeps waiting, never grants a default decision.
@@ -1479,6 +1484,7 @@ IFS= read -r hold
                     "test goal",
                     &mut |_, action| {
                         let value = match action {
+                            TextAction::ThreadMatched(_) => return Ok(()),
                             TextAction::VerifyApprovalBoundary => return Err(failure()),
                             TextAction::ObserveProcess => {
                                 if approval_polls > 0 {

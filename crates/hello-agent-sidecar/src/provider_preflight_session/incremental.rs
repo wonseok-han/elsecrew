@@ -23,6 +23,28 @@ impl ConfinedAcceptReply {
     }
 }
 
+/// Issued only after this connection's configuration/account/catalog and
+/// correlated thread response have matched. Not filesystem isolation proof.
+pub(crate) struct MatchedThreadReceipt {
+    connection: uuid::Uuid,
+    cwd: std::path::PathBuf,
+    thread_digest: String,
+}
+
+impl MatchedThreadReceipt {
+    pub(crate) fn matches(&self, process: &LoginProcess<'_>, cwd: &std::path::Path) -> bool {
+        self.connection == process.connection_id() && self.cwd == cwd
+    }
+
+    pub(crate) fn redacted(&self) -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "connectionId": self.connection.to_string(),
+            "threadDigest": self.thread_digest,
+        })
+    }
+}
+
 enum Stage {
     Preflight {
         flow: PreflightExchange,
@@ -167,6 +189,18 @@ impl TextSession {
                     PreflightState::ThreadMatched => {
                         on_action(process, TextAction::VerifyWorkspace)?;
                         on_action(process, TextAction::ObserveProcess)?;
+                        use sha2::{Digest, Sha256};
+                        let receipt = MatchedThreadReceipt {
+                            connection: process.connection_id(),
+                            cwd: self.cwd.clone(),
+                            thread_digest: format!("sha256:{:x}", Sha256::digest(
+                                flow.matched_thread_id().ok_or_else(failure)?.as_bytes()
+                            )),
+                        };
+                        // Persistence failure is sticky and occurs before any
+                        // frame containing the user's input is even queued.
+                        on_action(process, TextAction::ThreadMatched(&receipt))?;
+                        self.remaining(cancel)?;
                         let mut turn = flow.into_text_turn(&self.text).map_err(|_| failure())?;
                         self.outgoing.push_back(NativeFrame::Turn(
                             turn.take_frame().map_err(|_| failure())?,

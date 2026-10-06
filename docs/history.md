@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (사용자 입력 전 thread 확인 기록)
+
+- 기준 f32ffe3. 같은 연결의 config/account/catalog 및 correlated thread 검사가 끝난 지점에서만 생성되는 내부 MatchedThreadReceipt와 callback을 추가했다. 예약된 실행은 process connection/cwd·기존 입력/잠금을 대조해 run/profile/fingerprint에 결속된 native_thread_receipt를 저장한 뒤에만 사용자 입력 프레임을 준비한다. 저장 오류는 transport stage를 무효화하며 프롬프트를 큐에 넣지 않는다.
+- Karpathy 지침으로 기존 callback·원장 경로를 재사용했다. thread ID 원문/계정 정보/경로는 저장하지 않고 thread ID UTF-8의 SHA-256 식별값과 무작위 연결 ID를 사용한다. 이는 릴리스 해시 등록이나 OS 격리/전체 G5C attestation 증거가 아니다. 기존 provider evidence 보존 함수도 새 내부 기록을 유지한다.
+- 새 action의 기존 compatibility driver/test match 누락을 컴파일로 찾아 보완했고 제한된 cargo check --tests --locked PASS. 전체 회귀는 미실행이다. running 전환은 기존 준비/출력/종료 검증의 상태 전제를 함께 고쳐야 하므로 다음 작업이며 제품 blocked 유지. 기존 9월 archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (native mode 요청 분기 연결)
 
 - 기준 7f61af8. NativeCodex 모드를 fixture/blocked와 분리하고 해당 모드의 scoped Codex 조회·실행 요청을 지연 dispatcher에 연결했다. 무범위·미지원 조회는 blocked 응답이며 실제 모드가 fixture discovery/cache로 fallback하지 않도록 했다. 검토용 native constructor는 추가했지만 일반 stdio는 여전히 blocked constructor를 사용한다.
