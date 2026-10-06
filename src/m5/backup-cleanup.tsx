@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { validateProjectCatalogResult, type BackupCleanupInspection } from "./contracts/project-catalog-v1.ts";
 
-type Props = { projectId: string; reviewId: string; disabled: boolean };
+type Props = { projectId: string; reviewId: string; disabled: boolean; onDeleted?: (reviewId: string) => void };
 export function BackupCleanup(props: Props) {
   return <CleanupSession key={JSON.stringify([props.projectId, props.reviewId])} {...props} />;
 }
 
-function CleanupSession({ projectId, reviewId, disabled }: Props) {
+function CleanupSession({ projectId, reviewId, disabled, onDeleted }: Props) {
   const { t } = useI18n();
   const [inspection, setInspection] = useState<BackupCleanupInspection | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -30,8 +30,10 @@ function CleanupSession({ projectId, reviewId, disabled }: Props) {
     try {
       const result = validateProjectCatalogResult(await window.m5Projects.request(request), request);
       if (generation !== epoch.current) return;
-      if (result.action === "inspectBackupCleanup") { setInspection(result.inspection); setEnabled(result.enabled); }
-      else if (result.action === "cleanupBackup") setMessage("done");
+      if (result.action === "inspectBackupCleanup") {
+        setInspection(result.inspection); setEnabled(result.enabled);
+        if (result.inspection.state === "deleted") onDeleted?.(reviewId);
+      } else if (result.action === "cleanupBackup") { setMessage("done"); onDeleted?.(reviewId); }
     } catch { if (generation === epoch.current) setMessage(remove ? "unknown" : "error"); }
     finally { pending.current = false; setBusy(false); }
   }

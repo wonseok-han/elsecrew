@@ -30,12 +30,21 @@ test("budget changes require the inspected budget and whole GiB values", () => {
 
 test("retention replies cannot substitute another project or duplicate records", () => {
   const request = {action:"backupRetention" as const,projectId:"project_a"};
-  const entry = {reviewId:"review_a",state:"abandoned",retainedFor:"applicationHistory"};
+  const entry = {reviewId:"review_a",state:"abandoned",retainedFor:"applicationHistory",cleanupState:"none"};
   const response = {schemaVersion:1,...request,entries:[entry]};
   assert.doesNotThrow(() => validateProjectCatalogResult(response, request));
   assert.throws(() => validateProjectCatalogResult({...response,projectId:"project_b"}, request));
   assert.throws(() => validateProjectCatalogResult({...response,entries:[entry,entry]}, request));
   assert.throws(() => validateProjectCatalogResult({...response,entries:[{...entry,retainedFor:"safeToDelete"}]}, request));
+  for (const cleanupState of ["pending", "deleted"]) {
+    assert.doesNotThrow(() => validateProjectCatalogResult({...response,entries:[{...entry,cleanupState}]}, request));
+    for (const patch of [{state:"preparing"}, {retainedFor:"currentApplication"}]) {
+      assert.throws(() => validateProjectCatalogResult({...response,entries:[{...entry,cleanupState,...patch}]}, request));
+    }
+  }
+  for (const cleanupState of [undefined, null, "safeToDelete"]) {
+    assert.throws(() => validateProjectCatalogResult({...response,entries:[{...entry,cleanupState}]}, request));
+  }
 });
 
 test("cleanup inspection and command bind exact project, review and fingerprint", () => {

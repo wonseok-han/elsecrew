@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (백업 이력과 정리 상태 표시 연결)
+
+- 기준336fcfc·m5/coding-agent-ide에서 OpenAI Docs로 app-server의 named permissions/command 실행 문서를 다시 읽었다. permissionProfile/list 상세 응답 형식은 여전히 확보하지 못했으며 이를 추측하거나 기존 서명 장애를 우회하지 않았다. 출처: https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread 및 #command-execution. 실제 공급자 연결은 계속 미완료다.
+- Karpathy/React 지침으로 백업 보존 조회에 cleanupState(none/pending/deleted)를 연결했다. 삭제 뒤 남는 역사적 연결과 정리 기록을 분리하고, 명시 조회 또는 삭제 성공 응답 뒤 목록 표시를 갱신한다. 응답 유실은 완료로 표시하지 않고 별도 재확인을 유지한다. 현재 복구/준비 중 기록의 정리 상태 모순과 불완전 삭제 원장은 거절한다.
+- Rust·TypeScript 회귀를 작성했으며 이번에는 포맷/diff 확인만 수행한다. 실제 삭제·계정 실행·제품 활성화는 없고 테스트/UI/안전 검토는 통합 단계에 남긴다. 기존9월 archive 변경을 보존하고 main/push는 하지 않는다. 실제 공급자 연결·Windows/G6·전체 검증은 계속 남는다.
+
 ### 2026-10-06 · by GPT-6 Astra (반영·복구 연결 묶음의 컴파일 확인)
 
 - 기준9836518에서 다음 구현의 기반 확인을 위해 누적 연결 코드의 최소 컴파일 진단만 수행했다. pnpm exec tsc --noEmit은 통과했다. cargo check -p hello-agent-sidecar --tests --locked는 이전 취소 callback 변경에 따른 capture import 누락1개와 scan 테스트 인자 누락2개로 실패했다.
@@ -47,6 +53,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **백업 목록의 정리 상태(2026-10-06)**: backupRetention은 연결 이유와 별도로 cleanupState를 반환한다. deleted는 영속 정리 기록이며 파일 부재의 새 관측이 아니다. 별도 inspectBackupCleanup에서 실제 파일을 대조하고, 정리 후에도 이력은 보존한다. 제품 삭제는 여전히 비활성이다.
 - **복구점 종료 후보(2026-10-06)**: 완료된 현재 기록을 project/lock CAS로 과거 이력에 보존하는 내부 경로와 확인 IPC/UI를 연결했다. 원본·백업 파일/잠금은 변경하지 않으며 종료 뒤 별도 확인으로 과거 백업을 정리한다. 제품 기본값은 비활성, 통합·독립 검토 전이다.
 - **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
 - **종료된 준비 정리 후보(2026-10-06)**: 참조 없는 abandoned 준비 파일의 pending/deleted 영속 정리와 명시 확인 IPC/UI를 연결했다. 제품 삭제는 검증 전 비활성이다. 현재/과거 복구 백업과 소유 기록 없는 파일은 정리 대상이 아니며 전체 복원 지점 삭제 완료를 뜻하지 않는다.

@@ -77,8 +77,12 @@ pub(in crate::project) fn summarize(
         if !matches!(state, "preparing" | "ready" | "abandoned") {
             return Err(invalid());
         }
+        let cleanup_state = super::cleanup::recorded_state(record)?;
+        if cleanup_state != "none" && (current.contains(&key) || state == "preparing") {
+            return Err(invalid());
+        }
         seen.insert(key);
-        result.push(json!({"reviewId":review,"state":state,"retainedFor":reason}));
+        result.push(json!({"reviewId":review,"state":state,"retainedFor":reason,"cleanupState":cleanup_state}));
     }
     if !current.is_subset(&seen) || !history.is_subset(&seen) {
         return Err(invalid());
@@ -89,6 +93,28 @@ pub(in crate::project) fn summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cleanup_status_is_separate_from_historical_retention() {
+        let backup = json!({"version":1,"name":format!("backup_{}.bin", "a".repeat(32)),"state":"ready","header":{"reviewId":"review_a"}});
+        let mut project = json!({"application_backups":{"review_a":backup},"application_history":{"application_a":{"state":"restored","backup":backup}}}).as_object().unwrap().clone();
+        assert_eq!(summarize(&project).unwrap()[0]["cleanupState"], "none");
+        for state in ["pending", "deleted"] {
+            project.get_mut("application_backups").unwrap()["review_a"]["cleanup"] =
+                json!({"version":1,"state":state,"identity":null});
+            let summary = summarize(&project).unwrap();
+            assert_eq!(summary[0]["cleanupState"], state);
+            assert_eq!(summary[0]["retainedFor"], "applicationHistory");
+        }
+        project.insert(
+            "application_intent".into(),
+            json!({"state":"restored","backup":backup}),
+        );
+        assert!(summarize(&project).is_err());
+        project.remove("application_intent");
+        project.get_mut("application_backups").unwrap()["review_a"]["cleanup"] =
+            json!({"version":1,"state":"deleted","unexpected":null});
+        assert!(summarize(&project).is_err());
+    }
     #[test]
     fn current_and_historical_references_prevent_unreferenced_classification() {
         let name = format!("backup_{}.bin", "a".repeat(32));

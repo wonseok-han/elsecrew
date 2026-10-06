@@ -70,21 +70,31 @@ fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, Proje
     }
     match value.get("cleanup") {
         None if value.as_object().is_some_and(|v| v.len() == fields) => {}
-        Some(cleanup) if value.as_object().is_some_and(|v| v.len() == fields + 1) => {
-            if cleanup.as_object().map(|v| v.len()) != Some(3)
-                || cleanup["version"] != 1
-                || !matches!(cleanup["state"].as_str(), Some("pending" | "deleted"))
-            {
-                return Err(invalid());
-            }
-            if !cleanup["identity"].is_null() {
-                serde_json::from_value::<[i128; 9]>(cleanup["identity"].clone())
-                    .map_err(|_| invalid())?;
-            }
+        Some(_) if value.as_object().is_some_and(|v| v.len() == fields + 1) => {
+            recorded_state(value)?;
         }
         _ => return Err(invalid()),
     }
     Ok(value.clone())
+}
+
+/// Ledger status only; this does not inspect the archive or grant deletion authority.
+pub(super) fn recorded_state(record: &Value) -> Result<&str, ProjectFailure> {
+    let Some(cleanup) = record.get("cleanup") else {
+        return Ok("none");
+    };
+    if cleanup.as_object().map(|v| v.len()) != Some(3) || cleanup["version"] != 1 {
+        return Err(invalid());
+    }
+    let state = cleanup["state"]
+        .as_str()
+        .filter(|s| matches!(*s, "pending" | "deleted"))
+        .ok_or_else(invalid)?;
+    let identity = cleanup.get("identity").ok_or_else(invalid)?;
+    if !identity.is_null() {
+        serde_json::from_value::<[i128; 9]>(identity.clone()).map_err(|_| invalid())?;
+    }
+    Ok(state)
 }
 
 fn historical_reference_matches(application: &Value, backup: &Value) -> bool {

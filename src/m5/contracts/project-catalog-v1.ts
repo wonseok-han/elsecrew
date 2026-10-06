@@ -10,7 +10,7 @@ export interface ApplicationPreviewPage extends ApplicationPreview { offset: num
 export interface BackupPreparation { reviewId: string; fingerprint: string }
 export interface ApplicationRetirementInspection { applicationId: string; fingerprint: string; state: "applied" | "restored" | "abandoned" }
 export interface BackupCleanupInspection { reviewId: string; fingerprint: string; filePresent: boolean; state: "available" | "pending" | "deleted" }
-export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation" }
+export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation"; cleanupState: "none" | "pending" | "deleted" }
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
@@ -171,7 +171,8 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
     if (result.projectId !== request.projectId || !Array.isArray(result.entries) || result.entries.length > 1000) throw new Error("invalid backup retention list");
     const seen = new Set<string>();
     for (const raw of result.entries) {
-      const entry = object(raw); keys(entry, ["reviewId", "state", "retainedFor"]); id(entry.reviewId);
+      const entry = object(raw); keys(entry, ["reviewId", "state", "retainedFor", "cleanupState"]); id(entry.reviewId);
+      if (!["none", "pending", "deleted"].includes(String(entry.cleanupState)) || (entry.cleanupState !== "none" && (entry.state === "preparing" || entry.retainedFor === "currentApplication"))) throw new Error("invalid backup cleanup state");
       if (seen.has(entry.reviewId as string) || !["preparing", "ready", "abandoned"].includes(String(entry.state)) || !["currentApplication", "applicationHistory", "unfinishedPreparation", "preparedBackup", "abandonedPreparation"].includes(String(entry.retainedFor))) throw new Error("invalid backup retention entry");
       seen.add(entry.reviewId as string);
     }
