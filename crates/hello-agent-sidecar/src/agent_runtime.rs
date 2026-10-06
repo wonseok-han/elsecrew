@@ -46,6 +46,7 @@ use uuid::Uuid;
 const SOURCE_KIND: &str = "actualAgent";
 mod approval;
 mod native;
+mod native_evidence;
 mod discovery;
 pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
@@ -216,6 +217,8 @@ impl AgentRuntime {
             if projection.get("source_kind").and_then(Value::as_str) != Some(SOURCE_KIND) {
                 continue;
             }
+            native_evidence::validate(&projection)
+                .map_err(|error| SidecarError::new("recoveryInvalid", error.detail))?;
             let projection = if projection
                 .get("recovery")
                 .is_some_and(|value| !value.is_null())
@@ -2620,6 +2623,7 @@ fn actual_run_projection(
         ));
     }
     stored_public_budget(&value)?;
+    native_evidence::validate(&value)?;
     Ok(value)
 }
 
@@ -2628,6 +2632,7 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
         "provider_discovery",
         "runtime_attestation",
         "native_thread_receipt",
+        "native_transport",
         "approval_intents_internal",
     ] {
         if let Some(value) = source.get(field) {
@@ -2712,6 +2717,7 @@ fn preserve_recovery_internal(source: &Map<String, Value>, target: &mut Map<Stri
 }
 
 fn validate_provider_projection(projection: &Map<String, Value>) -> Result<(), ProjectFailure> {
+    native_evidence::validate(projection)?;
     let discovery = projection.get("provider_discovery");
     let attestation = projection.get("runtime_attestation");
     if discovery.is_none() && attestation.is_none() {

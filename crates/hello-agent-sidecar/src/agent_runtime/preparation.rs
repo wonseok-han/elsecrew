@@ -640,6 +640,18 @@ impl RunReservation {
         };
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if projection.contains_key("native_transport") { return Err(failure()); }
+        projection.remove("last_event_sequence");
+        projection.insert("native_transport".into(), json!({
+            "schemaVersion": 1, "adapter": "codex.preflight.v1",
+            "connectionId": process.connection_id().to_string(),
+        }));
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type: "run", aggregate_id: self.run_id.clone(),
+            operation_id: format!("op_agent_native_transport_{}", self.run_id),
+            request_id: None, payload: projection,
+        }]).map_err(|_| failure())?;
         let workspace =
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
         let flow = if process.uses_named_scope() {

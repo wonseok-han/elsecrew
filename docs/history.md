@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (native 기록 재시작·복구 검증 연결)
+
+- 기준 d384fe0. text transport 생성 전에 native 연결 표식을 영속화하고, 새 native_evidence 검증기가 marker/receipt의 정확한 키·연결 UUID·thread digest 형식·run/workspace/profile/fingerprint를 대조한다. 실행 중/성공 및 공개 출력이 있는 native 기록은 receipt 없이는 거절한다. thread 전 실패/준비 기록은 허용하고 기존 레거시 기록은 구분해 유지한다.
+- Karpathy 지침에 따라 기존 원장 읽기·재시작 복구 전·provider 검증 경로에 연결했으며 복구 재작성에서 marker/receipt를 함께 보존한다. 이 내부 기록 검증을 전체 provider attestation이나 재시작 후 프로세스 소유권 증명으로 사용하지 않는다. 제품은 blocked 유지다.
+- 최초 컴파일에서 sidecar에 없는 serde 직접 의존과 TextWorkspace storage borrow 충돌을 확인해 기존 exact-param 검사 재사용/표식 저장 순서로 수정했다. 제한된 cargo check --tests --locked PASS(3.96초); 이후 receipt 변조/누락·준비 상태 경계 회귀를 추가했으며 그 테스트는 미실행이다. diff check 확인. 다음은 native provider attestation 계약/재시작 복구 시나리오와 전체 기능 누적 검증. 기존 9월 archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (native 실행 중 상태와 종료 대조 연결)
 
 - 기준 681e3a0. thread 확인 callback에서 receipt·run running·chat running을 하나의 원장 transaction으로 저장하고 성공한 정확한 record/receipt 쌍을 실행 소유자에 한 번만 고정했다. 사용자 입력은 해당 저장 뒤 준비되며 native event polling이 기존 runStateChanged로 running을 전달한다.
