@@ -5,9 +5,10 @@ use super::*;
 pub(super) fn validate(projection: &Map<String, Value>) -> Result<(), ProjectFailure> {
     let failure = || ProjectFailure::recovery("native execution evidence differs");
     let Some(marker) = projection.get("native_transport") else {
-        return if projection.contains_key("native_thread_receipt") { Err(failure()) } else { Ok(()) };
+        return if projection.contains_key("native_thread_receipt") || projection.contains_key("native_provider_manifest") { Err(failure()) } else { Ok(()) };
     };
-    let marker = crate::require_exact_params(marker, &["schemaVersion", "adapter", "connectionId"]).map_err(|_| failure())?;
+    let marker = crate::require_exact_params(marker, &["schemaVersion", "adapter", "connectionId", "requiresProviderAttestation"]).map_err(|_| failure())?;
+    let requires_provider = marker["requiresProviderAttestation"].as_bool().ok_or_else(failure)?;
     let connection_id = marker["connectionId"].as_str().ok_or_else(failure)?;
     let connection = Uuid::parse_str(connection_id).map_err(|_| failure())?;
     let record = projection.get("record").ok_or_else(failure)?;
@@ -25,6 +26,9 @@ pub(super) fn validate(projection: &Map<String, Value>) -> Result<(), ProjectFai
         { return Err(failure()); }
         return Ok(());
     };
+    if requires_provider && ["native_provider_manifest", "provider_discovery", "runtime_attestation"]
+        .iter().any(|field| !projection.contains_key(*field))
+    { return Err(failure()); }
     let receipt = crate::require_exact_params(receipt, &[
         "schemaVersion", "connectionId", "threadDigest", "runId", "workspaceIdentity", "capabilityFingerprint", "selectedProfile",
     ]).map_err(|_| failure())?;
@@ -56,7 +60,7 @@ mod tests {
         let record = agent_run_record("agent_run_test", &chat, &profile, &fingerprint, "running", None, &now()).unwrap();
         let connection = Uuid::new_v4().to_string();
         json!({"record":record, "state":"running", "public_events":[],
-            "native_transport":{"schemaVersion":1,"adapter":"codex.preflight.v1","connectionId":connection},
+            "native_transport":{"schemaVersion":1,"adapter":"codex.preflight.v1","connectionId":connection,"requiresProviderAttestation":false},
             "native_thread_receipt":{"schemaVersion":1,"connectionId":connection,
                 "threadDigest":format!("sha256:{}", "b".repeat(64)), "runId":"agent_run_test",
                 "workspaceIdentity":"workspace_test", "capabilityFingerprint":fingerprint,

@@ -37,6 +37,7 @@ pub(crate) struct RunReservation {
     prompt: Vec<u8>,
     // Set exactly once, only after the atomic thread-receipt/running commit.
     running_record: std::sync::OnceLock<(Value, Value)>,
+    pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
 }
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
@@ -646,6 +647,7 @@ impl RunReservation {
         projection.insert("native_transport".into(), json!({
             "schemaVersion": 1, "adapter": "codex.preflight.v1",
             "connectionId": process.connection_id().to_string(),
+            "requiresProviderAttestation": self.native_provider.is_some(),
         }));
         storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
             aggregate_type: "run", aggregate_id: self.run_id.clone(),
@@ -752,6 +754,12 @@ impl RunReservation {
                             projection.insert("native_thread_receipt".into(), evidence.clone());
                             projection.insert("record".into(), running.clone());
                             projection.insert("state".into(), json!("running"));
+                            if let Some(provider) = &self.native_provider {
+                                let (manifest, discovery, attestation) = provider.attest(&running, cwd)?;
+                                projection.insert("native_provider_manifest".into(), manifest);
+                                projection.insert("provider_discovery".into(), discovery);
+                                projection.insert("runtime_attestation".into(), attestation);
+                            }
                             storage.upsert_projection_records_atomic(vec![
                                 ProjectionUpsert {
                                     aggregate_type: "run", aggregate_id: self.run_id.clone(),
@@ -1301,6 +1309,7 @@ impl RunPreparation {
         storage.upsert_projection_records_atomic(upserts)?;
         Ok(RunReservation {
             running_record: std::sync::OnceLock::new(),
+            native_provider: None,
             run_id,
             created,
             run,

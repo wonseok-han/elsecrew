@@ -2633,6 +2633,7 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
         "runtime_attestation",
         "native_thread_receipt",
         "native_transport",
+        "native_provider_manifest",
         "approval_intents_internal",
     ] {
         if let Some(value) = source.get(field) {
@@ -2748,8 +2749,20 @@ fn validate_provider_projection(projection: &Map<String, Value>) -> Result<(), P
             .map(provider_file_identity_from_value)
             .collect::<Result<Vec<_>, _>>()?,
     };
-    let definition = ProviderDefinitionV1::new(provider, observed).map_err(provider_failure)?;
-    let manifest = serde_json::to_value(definition.manifest()).map_err(json_failure)?;
+    let manifest = if let Some(manifest) = projection.get("native_provider_manifest") {
+        if !projection.contains_key("native_transport") || !projection.contains_key("native_thread_receipt") {
+            return Err(ProjectFailure::recovery("native provider has no transport receipt"));
+        }
+        let parsed = hello_agent_protocol::agent_adapter_v1::validate_provider_manifest_v1(manifest)
+            .map_err(contract_failure)?;
+        if parsed.runtime != "codex" || parsed.manifest_version != "codex-native-named-v1" {
+            return Err(ProjectFailure::recovery("native provider manifest identity differs"));
+        }
+        manifest.clone()
+    } else {
+        let definition = ProviderDefinitionV1::new(provider, observed).map_err(provider_failure)?;
+        serde_json::to_value(definition.manifest()).map_err(json_failure)?
+    };
     let record = projection
         .get("record")
         .ok_or_else(|| ProjectFailure::recovery("actual-agent run record is missing"))?;

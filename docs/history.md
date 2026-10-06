@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (관측 기반 native provider evidence 연결)
+
+- 기준 6053508. fresh scoped 조회의 실행 파일/필수 helper 식별값·실측 버전·선택 역할로 native provider manifest/discovery를 만들고 기존 공용 검증기를 통과시켜 실행 예약에 보관한다. 고정 fixture 버전/모델 정의를 재사용하지 않는다. 동일 연결 thread 확인 callback에서 accepted run/profile/workspace에 대조한 attestation을 receipt/run/chat과 함께 저장한다.
+- Karpathy 지침으로 공용 fingerprint/closure/manifest 검증을 재사용했다. native marker는 provider evidence 필요 여부를 보관하며 필요한 실행에서 receipt 뒤 manifest/discovery/attestation 누락을 거절한다. 재시작 검증은 저장된 native manifest를 사용하고 fixture는 기존 정의로 검증한다. cwd identity는 검증된 cwd OS 문자열 byte SHA-256으로 정의하며 원문 경로는 저장하지 않는다.
+- 제한된 cargo check --tests --locked PASS(2.61초). 이후 공용 enum 대조로 catalog evidence 값을 runtimeVerified로 정정하고 required-attestation 누락 검사 추가·diff check 확인; 이 후속 및 전체 회귀는 미실행이다. 이 레코드는 현재 서명·모델/설정·thread 관측을 결속하지만 공식 도구 sandbox의 실제 보호/종료 시험 및 독립 검토를 대체하지 않는다. 제품 blocked 유지, 다음은 통합 흐름의 결함 정리와 Claude/나머지 제품 기능 연결. 기존 9월 archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (native 기록 재시작·복구 검증 연결)
 
 - 기준 d384fe0. text transport 생성 전에 native 연결 표식을 영속화하고, 새 native_evidence 검증기가 marker/receipt의 정확한 키·연결 UUID·thread digest 형식·run/workspace/profile/fingerprint를 대조한다. 실행 중/성공 및 공개 출력이 있는 native 기록은 receipt 없이는 거절한다. thread 전 실패/준비 기록은 허용하고 기존 레거시 기록은 구분해 유지한다.

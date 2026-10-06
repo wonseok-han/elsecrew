@@ -17,7 +17,83 @@ pub(crate) struct ScopedEvidence {
     pub(crate) evidence: Evidence,
 }
 
+pub(super) struct NativeProviderContext {
+    manifest: Value,
+    discovery: Value,
+}
+
+impl NativeProviderContext {
+    pub(super) fn attest(&self, run: &Value, cwd: &Path) -> Result<(Value, Value, Value), SidecarError> {
+        use hello_agent_protocol::agent_adapter_v1 as contract;
+        let failure = || SidecarError::new("agentInputChanged", "native provider evidence differs");
+        let profile = &run["selectedProfile"];
+        let attestation = json!({
+            "schemaVersion":1,"runId":run["runId"],"providerId":"codex","runtime":"codex",
+            "capabilityFingerprint":run["capabilityFingerprint"],
+            "manifestDigest":self.manifest["manifestDigest"],
+            "executableClosureDigest":self.manifest["executableClosure"]["closureDigest"],
+            "effectiveProfile":{"modelSelector":profile["modelSelector"],"reasoningEffort":profile["reasoningEffort"],"permission":profile["permission"]},
+            "workspaceIdentity":run["workspaceIdentity"],
+            "managedCwdIdentity":format!("sha256:{:x}", Sha256::digest(cwd.as_os_str().as_encoded_bytes())),
+            "eventParserId":"codex.jsonl.v1",
+            "verifiedRuntimeEvidence":self.manifest["launchPolicy"]["requiredRuntimeVerification"],
+            "verifiedAt":now(),
+        });
+        let accepted = json!({"schemaVersion":1,"runId":run["runId"],"chatId":run["chatId"],
+            "taskId":run["taskId"],"projectId":run["projectId"],"worktreeId":run["worktreeId"],
+            "workspaceIdentity":run["workspaceIdentity"],"roleId":profile["roleId"],
+            "capabilityFingerprint":run["capabilityFingerprint"],"state":"preparing"});
+        contract::validate_agent_runtime_attestation_against_accepted_v1(
+            &attestation, &self.manifest, &self.discovery, &accepted, profile,
+        ).map_err(|_| failure())?;
+        Ok((self.manifest.clone(), self.discovery.clone(), attestation))
+    }
+}
+
 impl ScopedEvidence {
+    fn provider_context(&self, capability: &AgentCapabilitySnapshotV1) -> Result<NativeProviderContext, SidecarError> {
+        use hello_agent_protocol::agent_adapter_v1 as contract;
+        let failure = || SidecarError::new("agentInputChanged", "native provider manifest differs");
+        let binary = capability.executable.as_ref().ok_or_else(failure)?;
+        let helper = self.evidence.helper.public_identity(&self.evidence.version)?;
+        let mut closure = contract::ProviderExecutableClosureV1 {
+            binary: contract::ProviderExecutableBinaryIdentityV1 {
+                logical_name:"codex".into(), path_digest:binary.path_digest.clone(),
+                file_identity_digest:binary.file_identity_digest.clone(), cli_version:self.evidence.version.clone(),
+            },
+            required_helpers:vec![contract::ProviderExecutableFileIdentityV1 {
+                logical_name:"codex-code-mode-host".into(), path_digest:helper.path_digest,
+                file_identity_digest:helper.file_identity_digest,
+            }], closure_digest:String::new(),
+        };
+        closure.closure_digest = contract::compute_provider_executable_closure_digest_v1(&closure).map_err(|_| failure())?;
+        let profiles = vec![contract::ProviderProfileTupleV1 {
+            model_selector:self.profile.model_selector.clone(), reasoning_effort:self.profile.reasoning_effort.clone(),
+            permission:self.profile.permission.clone(),
+        }];
+        let verification: Vec<String> = contract::G5C_CODEX_RUNTIME_VERIFICATION_V1.iter().map(|value| (*value).into()).collect();
+        let mut manifest = contract::ProviderManifestV1 {
+            schema_version:1,provider_id:"codex".into(),runtime:"codex".into(),manifest_version:"codex-native-named-v1".into(),
+            executable_closure:closure.clone(),exact_profiles:profiles.clone(),
+            auth_parser_id:"codex.auth-status.v1".into(),event_parser_id:"codex.jsonl.v1".into(),
+            launch_policy:contract::ProviderLaunchPolicyV1 {
+                invocation:"oneShot".into(),prompt_transport:"serverResolvedMessages".into(),cwd_policy:"managedWorkspaceExact".into(),
+                environment_policy:"allowlistedNoSecrets".into(),fallback_policy:"forbidden".into(),required_runtime_verification:verification.clone(),
+            },manifest_digest:String::new(),
+        };
+        manifest.manifest_digest = contract::compute_provider_manifest_digest_v1(&manifest).map_err(|_| failure())?;
+        let observation = contract::SanitizedDiscoveryObservationV1 {
+            schema_version:1,provider_id:"codex".into(),runtime:"codex".into(),manifest_digest:manifest.manifest_digest.clone(),
+            installation_state:"installed".into(),auth_state:"authenticated".into(),executable_closure:Some(closure),
+            exact_cli_version:Some(self.evidence.version.clone()),model_catalog_evidence:"runtimeVerified".into(),
+            exact_profiles:profiles,auth_parser_id:manifest.auth_parser_id.clone(),event_parser_id:manifest.event_parser_id.clone(),
+            observed_runtime_verification:verification,can_start:true,blocked_reason:None,observed_at:now(),
+        };
+        let manifest = serde_json::to_value(manifest).map_err(|_| failure())?;
+        let discovery = serde_json::to_value(observation).map_err(|_| failure())?;
+        contract::validate_sanitized_discovery_observation_v1(&discovery, &manifest).map_err(|_| failure())?;
+        Ok(NativeProviderContext { manifest, discovery })
+    }
     /// Discovery eligibility only. The start path must freshly inspect and
     /// perform its own same-connection preflight before sending user input.
     #[allow(dead_code)] // Deferred capability response consumes this projection.
@@ -116,6 +192,7 @@ impl AgentRuntime {
             return Err(failure());
         }
         let capability = observed.capability()?;
+        let provider_context = observed.provider_context(&capability)?;
         let preparation = preparation::RunPreparation::resolve(storage, projects, request)
             .map_err(|_| failure())?;
         if observed.scope
@@ -162,6 +239,7 @@ impl AgentRuntime {
                 .reserve(storage, projects, &capability, request_id)
                 .map_err(|_| failure())?,
         );
+        reservation.as_mut().ok_or_else(failure)?.native_provider = Some(provider_context);
         Ok(())
     }
 
