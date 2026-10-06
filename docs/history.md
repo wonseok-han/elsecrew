@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Codex 명시적 일회 허용 UI 연결)
+
+- 기준 2da597e. 기존 Codex의 inspected fingerprint/작업 사본·role·process 경계 재검사/단발 승인 큐를 public approval IPC의 acceptOnce로 연결했다. UI는 상세를 연 해당 요청에만 명시 허용 버튼을 표시하고 선택 직후 상세를 지우며 중복 전송을 막는다. preload/main/sidecar는 같은 exact 계약을 검증하고 영속 허용 옵션은 없다.
+- Claude는 아직 실제 launch/도구 격리 admission이 없음을 코드에서 확인했다. 기존 inspect/decline은 유지하되 tool 종류는 허용 버튼을 숨기고 backend도 acceptOnce를 거절한다. 공통 UI 연결을 Claude 실행 완료로 주장하지 않는다. Codex도 일반 제품 runtime은 blocked 유지이며 전체 안전 경계 독립 검토 전 제품 활성화하지 않는다.
+- Karpathy 지침으로 기존 승인 큐/반환 검증/한영 UI를 재사용했다. 기존 Rust acceptance 회귀가 public 요청을 통과하도록 수정하고 TS 단발 receipt/추가 옵션 거절 및 렌더 버튼 회귀를 갱신했다. diff check PASS, 테스트·빌드는 최종 누적 검증으로 남겼다. 다음은 Claude 실제 launch/입장 보호와 일회 허용 연결. 기존 9월 archive 보존, 실제 계정·모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 단발 허용 응답·연결 결속)
 
 - 기준 6730880. 공식 SDK query.py와 hooks 문서의 can_use_tool/PreToolUse allow 응답 형식을 확인했다. 원래 입력만 사용하는 AllowOnce를 추가하고 pending 요청의 비공개 인스턴스·도구 이름/ID를 대조한 뒤 단회 소비한다. 다른 세션·변조·취소·중복 처리와 미지원 대상/하위 agent 요청은 허용하지 않는다. 영속 permission update는 생성하지 않는다.

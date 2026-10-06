@@ -1452,7 +1452,7 @@ fn text_candidate_cases_selected(
                                     let public_identity = json!({"chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,"worktreeId":identity.worktree_id,"workspaceIdentity":identity.workspace_identity,"runId":identity.run_id});
                                     let listing = runtime
                                         .approval_request(
-                                            &fixture.storage,
+                                            &mut fixture.storage,
                                             &fixture.projects,
                                             &json!({"action":"list","identity":public_identity}),
                                         )
@@ -1467,15 +1467,14 @@ fn text_candidate_cases_selected(
                                         .unwrap();
                                     if accepting {
                                         assert!(runtime
-                                            .accept_native_approval_once(
+                                            .approval_request(
                                                 &mut fixture.storage,
                                                 &fixture.projects,
-                                                &identity,
-                                                &id
+                                                &json!({"action":"acceptOnce","identity":public_identity,"approvalId":id})
                                             )
                                             .is_err());
                                     }
-                                    let detail = runtime.approval_request(&fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
+                                    let detail = runtime.approval_request(&mut fixture.storage, &fixture.projects, &json!({"action":"inspect","identity":public_identity,"approvalId":id})).unwrap();
                                     assert_eq!(detail["inspection"]["approvalId"], id);
                                     assert_eq!(detail["inspection"]["command"], "echo test");
                                     if failure == "bound-handler-runtime" {
@@ -1498,11 +1497,10 @@ fn text_candidate_cases_selected(
                                     );
                                     if accepting {
                                         runtime
-                                            .accept_native_approval_once(
+                                            .approval_request(
                                                 &mut fixture.storage,
                                                 &fixture.projects,
-                                                &identity,
-                                                &id,
+                                                &json!({"action":"acceptOnce","identity":public_identity,"approvalId":id}),
                                             )
                                             .unwrap_or_else(|error| {
                                                 panic!("approval acceptance failed for {failure}: {error:?}")
@@ -1540,7 +1538,7 @@ fn text_candidate_cases_selected(
                                     } else {
                                         let receipt = runtime
                                         .approval_request(
-                                            &fixture.storage,
+                                            &mut fixture.storage,
                                             &fixture.projects,
                                             &json!({"action":"decline","approvalId":id,"identity":{
                                                 "chatId":identity.chat_id,"taskId":identity.task_id,"projectId":identity.project_id,

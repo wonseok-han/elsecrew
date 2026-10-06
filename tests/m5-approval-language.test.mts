@@ -14,7 +14,7 @@ const compiled = ts.transpileModule(readFileSync(new URL("../src/m5/approval-car
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 },
 }).outputText;
 
-test("approval translations preserve warnings, raw detail and decline-only controls", () => {
+test("approval translations preserve warnings, raw detail and inspected acceptance controls", () => {
   for (const dictionary of [ko, en]) {
     let index = 0;
     const states = [[{approvalId:"approval_test",kind:"command"}], true, true, true,
@@ -34,8 +34,10 @@ test("approval translations preserve warnings, raw detail and decline-only contr
       assert.ok(html.includes(expected), key);
     }
     assert.ok(html.includes("echo PRIVATE &lt;tag&gt;"));
-    assert.equal((html.match(/<button/g) ?? []).length, 3);
-    assert.equal((html.match(/disabled=""/g) ?? []).length, 2);
+    assert.ok(html.includes(renderToStaticMarkup(dictionary["m5.approval.acceptOnce"])));
+    assert.ok(html.includes(renderToStaticMarkup(dictionary["m5.approval.acceptWarning"])));
+    assert.equal((html.match(/<button/g) ?? []).length, 4);
+    assert.equal((html.match(/disabled=""/g) ?? []).length, 3);
     assert.ok(html.includes('aria-expanded="true"'));
   }
 });

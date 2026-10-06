@@ -367,7 +367,7 @@ impl AgentRuntime {
 
     pub(crate) fn approval_request(
         &mut self,
-        storage: &Storage,
+        storage: &mut Storage,
         projects: &ProjectManager,
         params: &Value,
     ) -> Result<Value, SidecarError> {
@@ -378,7 +378,7 @@ impl AgentRuntime {
             .ok_or_else(invalid)?;
         let keys: &[&str] = match action {
             "list" => &["action", "identity"],
-            "decline" | "inspect" => &["action", "identity", "approvalId"],
+            "decline" | "inspect" | "acceptOnce" => &["action", "identity", "approvalId"],
             _ => return Err(invalid()),
         };
         let object = params.as_object().ok_or_else(invalid)?;
@@ -404,7 +404,7 @@ impl AgentRuntime {
                 return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);
             }
         }
-        let queued = if action == "decline" {
+        let queued = if action == "decline" || action == "acceptOnce" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
             if !id.strip_prefix("approval_").is_some_and(|suffix| {
                 suffix.len() == 32
@@ -414,7 +414,11 @@ impl AgentRuntime {
             }) {
                 return Err(invalid());
             }
-            self.decline_native_approval(storage, projects, &identity, id)?;
+            if action == "acceptOnce" {
+                self.accept_native_approval_once(storage, projects, &identity, id)?;
+            } else {
+                self.decline_native_approval(storage, projects, &identity, id)?;
+            }
             Some(id)
         } else {
             None
@@ -471,7 +475,7 @@ impl AgentRuntime {
             .decline(approval_id)
     }
 
-    /// Internal candidate only. Public IPC acceptance is a separate UI boundary.
+    /// Explicit UI acceptance still requires live inspection and confinement checks.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn accept_native_approval_once(
         &mut self,

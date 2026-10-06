@@ -44,3 +44,10 @@ test("approval contract only admits exact list/decline and binds the receipt", (
   assert.throws(()=>validateApprovalResult({identity,pending:[approvalId,approvalId],queued:null},list));
   assert.throws(()=>validateApprovalResult({identity,pending:[],queued:approvalId},list));
 });
+test("one-time acceptance has exact identity and a consumed-request receipt", () => {
+  const request = validateApprovalRequest({action:"acceptOnce",identity,approvalId});
+  assert.equal(validateApprovalResult({identity,pending:[],queued:approvalId},request).queued,approvalId);
+  assert.throws(()=>validateApprovalRequest({action:"acceptOnce",identity,approvalId,always:true}));
+  assert.throws(()=>validateApprovalResult({identity,pending:[],queued:null},request));
+  assert.throws(()=>validateApprovalResult({identity,pending:[{approvalId,kind:"command"}],queued:approvalId},request));
+});

@@ -44,13 +44,14 @@ export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  async function decline(approvalId: string) {
+  async function decide(approvalId: string, action: "decline" | "acceptOnce") {
     if (busy.current || !window.m5Approval) return;
+    if (action === "acceptOnce" && (inspection?.approvalId !== approvalId || inspection.kind === "tool")) return;
     busy.current = true;
     const revision = ++epoch.current;
     setSending(true);
     setInspection(null);
-    const request = { action: "decline" as const, identity, approvalId };
+    const request = { action, identity, approvalId };
     try {
       const result = validateApprovalResult(await window.m5Approval.request(request), request);
       if (live.current && revision === epoch.current) { setPending(result.pending); setQueued(true); setError(false); }
@@ -82,8 +83,12 @@ export function ApprovalCard({ identity, onCancel }: { identity: AgentRunCancelR
   return <section className="m5-error" aria-label={t("m5.approval.title")}>
     <strong>{t("m5.approval.title")}</strong>
     {pending.length > 0 && <p>{t("m5.approval.help")}</p>}
-    {pending.map((request, index) => <div key={request.approvalId}><span>{t("m5.approval.pending", { index: index + 1, kind: t(`m5.approval.kind.${request.kind}`) })} </span><button type="button" disabled={sending || error} aria-expanded={inspection?.approvalId === request.approvalId} onClick={() => void inspect(request.approvalId)}>{t(inspection?.approvalId === request.approvalId ? "m5.approval.close" : "m5.approval.view")}</button><button type="button" disabled={sending || error} onClick={() => void decline(request.approvalId)} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
+    {pending.map((request, index) => <div key={request.approvalId}><span>{t("m5.approval.pending", { index: index + 1, kind: t(`m5.approval.kind.${request.kind}`) })} </span><button type="button" disabled={sending || error} aria-expanded={inspection?.approvalId === request.approvalId} onClick={() => void inspect(request.approvalId)}>{t(inspection?.approvalId === request.approvalId ? "m5.approval.close" : "m5.approval.view")}</button><button type="button" disabled={sending || error} onClick={() => void decide(request.approvalId, "decline")} aria-label={t("m5.approval.declineLabel", { kind: t(`m5.approval.kind.${request.kind}`) })}>{t("m5.approval.decline")}</button>
       {inspection?.approvalId === request.approvalId && <div aria-label={t("m5.approval.details")}><p>{t("m5.approval.warning")}</p><dl>{([[t("m5.approval.command"),inspection.command],[t("m5.approval.cwd"),inspection.cwd],[t("m5.approval.reason"),inspection.reason],[t("m5.approval.toolInput"),inspection.toolInput ?? null],[t("m5.approval.grantRoot"),inspection.grantRoot],[t("m5.approval.host"),inspection.host],[t("m5.approval.protocol"),inspection.protocol]] as const).map(([label,value])=>value !== null && <div key={label}><dt>{label}</dt><dd><pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{visibleApprovalText(value)}</pre></dd></div>)}</dl></div>}
+      {inspection?.approvalId === request.approvalId && inspection.kind !== "tool" && <div>
+        <p>{t("m5.approval.acceptWarning")}</p>
+        <button type="button" disabled={sending || error} onClick={() => void decide(request.approvalId, "acceptOnce")}>{t("m5.approval.acceptOnce")}</button>
+      </div>}
     </div>)}
     {queued && <p role="status">{t("m5.approval.queued")}</p>}
     {error && <p role="alert">{t("m5.approval.error")}</p>}

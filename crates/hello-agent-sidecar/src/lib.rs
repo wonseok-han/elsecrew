@@ -988,7 +988,7 @@ impl Sidecar {
         let action = match request.method.as_str() {
             "run.approval" => {
                 let result = match self.agent_runtime.approval_request(
-                    &self.storage,
+                    &mut self.storage,
                     &self.projects,
                     &request.params,
                 ) {

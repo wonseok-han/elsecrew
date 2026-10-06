@@ -1,7 +1,7 @@
 import { validateAgentRunCancelRequestV1, type AgentRunCancelRequestV1 } from "./agent-adapter-v1.ts";
 
 export const APPROVAL_CHANNEL = "m5:approval:v1";
-export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect"; identity: AgentRunCancelRequestV1; approvalId: string };
+export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect" | "acceptOnce"; identity: AgentRunCancelRequestV1; approvalId: string };
 export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
 export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string };
@@ -21,7 +21,7 @@ export function validateApprovalRequest(value: unknown): ApprovalRequest {
   const v = object(value);
   const identity = validateAgentRunCancelRequestV1(v.identity);
   if (v.action === "list" && Object.keys(v).sort().join() === "action,identity") return { action: "list", identity };
-  if ((v.action === "decline" || v.action === "inspect") && Object.keys(v).sort().join() === "action,approvalId,identity") return { action: v.action, identity, approvalId: id(v.approvalId) };
+  if ((v.action === "decline" || v.action === "inspect" || v.action === "acceptOnce") && Object.keys(v).sort().join() === "action,approvalId,identity") return { action: v.action, identity, approvalId: id(v.approvalId) };
   throw new Error("invalid approval action");
 }
 export function validateApprovalResult(value: unknown, request: ApprovalRequest): ApprovalResult {
@@ -38,7 +38,7 @@ export function validateApprovalResult(value: unknown, request: ApprovalRequest)
   const ids = pending.map(item=>item.approvalId);
   if (new Set(ids).size !== ids.length) throw new Error("duplicate approval");
   const queued = v.queued === null ? null : id(v.queued);
-  if (queued !== (request.action === "decline" ? request.approvalId : null) || (queued !== null && ids.includes(queued))) throw new Error("approval receipt differs");
+  if (queued !== (request.action === "decline" || request.action === "acceptOnce" ? request.approvalId : null) || (queued !== null && ids.includes(queued))) throw new Error("approval receipt differs");
   if (request.action === "inspect") {
     const detail = object(v.inspection);
     const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "");
