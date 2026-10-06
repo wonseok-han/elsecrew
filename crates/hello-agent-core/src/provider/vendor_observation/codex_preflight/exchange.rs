@@ -339,6 +339,9 @@ impl PreflightExchange {
             reasoning_effort: &self.effort,
         };
         match kind {
+            // The legacy sandbox adapter must not treat a named-profile report
+            // as equivalent to its own config/thread policy checks.
+            ObservationKind::PermissionProfiles => return Err(invalid()),
             ObservationKind::Initialize => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]

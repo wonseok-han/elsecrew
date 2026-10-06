@@ -13,6 +13,7 @@ pub enum ObservationKind {
     Account,
     Models,
     Requirements,
+    PermissionProfiles,
 }
 
 #[derive(Debug, Default)]
@@ -22,6 +23,7 @@ pub struct ModelFreeExchange {
     failed: bool,
     include_config_layers: bool,
     experimental_permissions: bool,
+    permission_cwd: Option<String>,
 }
 
 fn error() -> ProviderError {
@@ -44,17 +46,28 @@ impl ModelFreeExchange {
     }
     /// Explicit beta handshake for the named-permission adapter. This does not
     /// validate permission profiles or grant thread/turn authority.
-    pub fn with_named_permission_config() -> Self {
-        Self {
+    pub fn with_named_permission_config(cwd: &std::path::Path) -> Result<Self, ProviderError> {
+        let text = cwd.to_str().ok_or_else(error)?;
+        if !cwd.is_absolute()
+            || text.len() > 16 * 1024
+            || text.chars().any(char::is_control)
+            || cwd
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err(error());
+        }
+        Ok(Self {
             include_config_layers: true,
             experimental_permissions: true,
+            permission_cwd: Some(text.into()),
             ..Self::default()
-        }
+        })
     }
     // Keep the existing thread/turn IDs 5/6 unchanged on the same connection.
     fn request_id(&self) -> u64 {
-        if self.next == 4 {
-            50
+        if self.next >= 4 {
+            50 + (self.next - 4) as u64
         } else {
             self.next as u64 + 1
         }
@@ -81,6 +94,10 @@ impl ModelFreeExchange {
                 serde_json::json!({"limit":256,"includeHidden":false}),
             ),
             4 if self.include_config_layers => ("configRequirements/read", serde_json::json!({})),
+            5 if self.permission_cwd.is_some() => (
+                "permissionProfile/list",
+                serde_json::json!({"cwd":self.permission_cwd,"limit":256}),
+            ),
             _ => return Ok(None),
         };
         if self.next == 0 && self.include_config_layers {
@@ -154,6 +171,7 @@ impl ModelFreeExchange {
             2 => ObservationKind::Account,
             3 => ObservationKind::Models,
             4 if self.include_config_layers => ObservationKind::Requirements,
+            5 if self.permission_cwd.is_some() => ObservationKind::PermissionProfiles,
             _ => return Err(error()),
         };
         self.next += 1;
@@ -167,7 +185,9 @@ mod tests {
     use super::*;
     #[test]
     fn named_permissions_opt_in_does_not_change_stable_handshake() {
-        let mut named = ModelFreeExchange::with_named_permission_config();
+        let mut named =
+            ModelFreeExchange::with_named_permission_config(std::path::Path::new("/snapshot"))
+                .unwrap();
         let beta: serde_json::Value =
             serde_json::from_str(&named.next_request().unwrap().unwrap()).unwrap();
         let stable: serde_json::Value = serde_json::from_str(
@@ -180,6 +200,43 @@ mod tests {
         assert_eq!(beta["params"]["capabilities"]["experimentalApi"], true);
         assert_eq!(stable["params"]["capabilities"]["experimentalApi"], false);
         assert!(named.next_request().is_err());
+    }
+
+    #[test]
+    fn named_profile_query_binds_cwd_without_reusing_thread_ids() {
+        let mut exchange =
+            ModelFreeExchange::with_named_permission_config(std::path::Path::new("/snapshot"))
+                .unwrap();
+        for id in [1, 2, 3, 4, 50, 51] {
+            let request = exchange.next_request().unwrap().unwrap();
+            let wire: serde_json::Value =
+                serde_json::from_str(request.lines().last().unwrap()).unwrap();
+            assert_eq!(wire["id"], id);
+            if id == 51 {
+                assert_eq!(wire["method"], "permissionProfile/list");
+                assert_eq!(
+                    wire["params"],
+                    serde_json::json!({"cwd":"/snapshot","limit":256})
+                );
+            }
+            let body = if id == 1 {
+                r#"{"userAgent":"test"}"#
+            } else {
+                "{}"
+            };
+            let (kind, _) = exchange
+                .accept(&input(&format!(r#"{{"id":{id},"result":{body}}}"#)))
+                .unwrap();
+            if id == 51 {
+                assert_eq!(kind, ObservationKind::PermissionProfiles);
+            }
+        }
+        assert!(exchange.next_request().unwrap().is_none());
+        for cwd in ["relative", "/snapshot/../source", "/snapshot\n"] {
+            assert!(
+                ModelFreeExchange::with_named_permission_config(std::path::Path::new(cwd)).is_err()
+            );
+        }
     }
     fn input(text: &str) -> BoundedObservation {
         BoundedObservation::new(text.as_bytes().to_vec()).unwrap()

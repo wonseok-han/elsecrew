@@ -53,6 +53,80 @@ fn invalid() -> ProviderError {
     ProviderError("Codex preflight observation is incomplete or mismatched".into())
 }
 
+/// Match a complete, correlated permissionProfile/list result for the requested
+/// cwd. `allowed` is selection eligibility, not proof of filesystem enforcement.
+/// Schema source: installed official CLI generate-json-schema --experimental,
+/// v2/PermissionProfileListResponse.json (2026-10-06).
+pub fn match_named_permission_profile(
+    input: &BoundedObservation,
+    expected_id: &str,
+) -> Result<(), ProviderError> {
+    #[derive(Deserialize)]
+    struct Summary {
+        id: String,
+        allowed: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Page {
+        data: Vec<Summary>,
+        next_cursor: Option<String>,
+    }
+    let page: Page = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+    if expected_id.is_empty() || page.next_cursor.is_some() || page.data.len() > 256 {
+        return Err(invalid());
+    }
+    let mut seen = BTreeSet::new();
+    let mut matched = false;
+    for profile in page.data {
+        if profile.id.is_empty() || profile.id.len() > 1024 || !seen.insert(profile.id.clone()) {
+            return Err(invalid());
+        }
+        if profile.id == expected_id {
+            matched = profile.allowed;
+        }
+    }
+    if matched {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
+}
+
+#[cfg(test)]
+mod named_permission_tests {
+    use super::*;
+
+    #[test]
+    fn requires_unique_allowed_profile_and_complete_page() {
+        for good in [
+            r#"{"data":[{"id":"app-read","allowed":true}],"nextCursor":null}"#,
+            r#"{"data":[{"id":"other","allowed":false},{"id":"app-read","allowed":true,"description":"display only"}]}"#,
+        ] {
+            assert!(match_named_permission_profile(
+                &BoundedObservation::new(good.as_bytes().to_vec()).unwrap(),
+                "app-read"
+            )
+            .is_ok());
+        }
+        for bad in [
+            r#"{"data":[]}"#,
+            r#"{"data":[{"id":"app-read","allowed":false}]}"#,
+            r#"{"data":[{"id":"other","allowed":true}]}"#,
+            r#"{"data":[{"id":"app-read","allowed":true}],"nextCursor":"more"}"#,
+            r#"{"data":[{"id":"app-read","allowed":true},{"id":"app-read","allowed":false}]}"#,
+            r#"{"data":[{"id":"app-read","allowed":true,"allowed":false}]}"#,
+            r#"{"data":[{"id":"app-read"}]}"#,
+        ] {
+            assert!(match_named_permission_profile(
+                &BoundedObservation::new(bad.as_bytes().to_vec()).unwrap(),
+                "app-read"
+            )
+            .is_err());
+        }
+    }
+}
+
 fn validate_profile(profile: &ExpectedProfile<'_>) -> Result<(), ProviderError> {
     for value in [profile.model, profile.reasoning_effort] {
         if value.is_empty()

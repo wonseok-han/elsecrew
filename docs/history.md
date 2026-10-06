@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Codex named 권한 조회 계약 연결)
+
+- 직전 턴은 제한 밖 서명 재검증으로 잘못된 설치 차단을 제거한 진전이었다. 기준638c441에서 정상 서명된 앱 내장 Codex 0.159.2의 app-server generate-json-schema --experimental을 임시 폴더로 실행해 PermissionProfileListParams/Response를 확보했다. 서버·계정 조회·로그인·모델 호출은 하지 않았다. 생성물은 /private/tmp/hello-agent-codex-schema.ZWa0QJ에 있으며 언제든 같은 CLI에서 재생성할 수 있다.
+- Karpathy 지침으로 기존 named ModelFreeExchange에 절대 snapshot cwd 결속과 permissionProfile/list(limit256, id51)를 추가했다. 기존 thread/turn id5/6 및 stable 흐름은 유지한다. 응답의 data/id/allowed/nextCursor 계약으로 요청 프로필의 유일한 allowed=true를 대조하며 중복·부재·거절·미완료 페이지를 거부한다. 설명은 권한으로 쓰지 않는다. allowed는 선택 가능성일 뿐 도구 격리 증거가 아니다.
+- legacy PreflightExchange는 named 조회 결과를 자체 sandbox 승인으로 받아들이지 않는다. 조회 순서/cwd/ID와 응답 회귀를 작성하고 rustfmt/diff만 확인했다. 컴파일·테스트 실행은 누적 검증에 남긴다. named 설정 작성·thread/turn 및 owner 연결·공급자 도구 보호 실측과 Claude 실제 실행 연결이 아직 남으므로 제품 실행을 활성화하지 않았다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (공식 복구 승인 및 서명 장애 판단 정정)
 
 - 사용자가 Codex·Claude의 공식 업데이트/재설치 복구를 승인했다. 인증 정보·프로젝트 보존, 앱 종료 필요 시 사전 안내 범위다. OpenAI 공식 CLI 문서(https://learn.chatgpt.com/docs/codex/cli)와 양사 공식 설치 스크립트를 확인하고 Claude 2.1.291 배포본을 임시 폴더에 다운로드했지만 실행·설치는 하지 않았다.
@@ -180,7 +186,7 @@
 - **정리 후보 확장(2026-10-06 후속)**: 현재 복구가 참조하지 않는 ready 백업 및 원본 백업이 정확히 일치하는 terminal 과거 이력을 명시 정리 후보에 포함했다. 파일 삭제 시 해당 백업 복원을 포기하고 이력/삭제 기록은 남긴다. 제품 삭제는 아직 비활성이고 현재 복구점/고아 파일은 미지원이다.
 - **복원 예산 UI 후보(2026-10-01)**: 앱 전체 사용량 조회와 명시 예산 변경(기본5GiB, 정수1~1024GiB)을 IPC/UI에 연결했다. application-settings-v1의 원자 설정과 archive flock을 공유하며 기존 백업 자동 삭제는 없다. 통합 검증 전 구현이며 원본 writer 활성화·삭제 기능 완료를 뜻하지 않는다.
 
-- **named 권한 스키마 재확인 경계(2026-10-06 정정)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐다. 기존 CLI의 제한 밖 codesign strict 검사는 통과했으므로 설치 손상을 차단 사유로 반복하지 않는다. 필드 추측 없이 모델 없는 공식 스키마 확인을 이어간다.
+- **named 권한 조회 계약(2026-10-06)**: 정상 서명된 앱 내장 Codex 0.159.2에서 generate-json-schema --experimental로 상세 계약을 확보했다. permissionProfile/list는 cwd/cursor/limit, 응답은 data[{id,allowed,description?}]/nextCursor다. 기존 named RPC 후보에 cwd와 조회를 연결했고 complete page의 유일한 요청 ID/allowed=true를 대조한다. 선택 허용은 실제 filesystem/network 보호 증거가 아니며 named 설정/thread/turn·owner 연결은 아직 남는다. 제한 환경 서명 오류를 설치 손상 차단으로 반복하지 않는다.
 - **구현 우선 운영(2026-10-01 사용자 지시)**: 매 작업 검증 대신 남은 기능 전체 연결 후 통합 검증·순차 버그 수정을 진행한다. 미검증 구현 체크포인트 커밋은 가능하지만 제품 완료/gate PASS가 아니다. 실제 실행 활성화·계정/유료/사용자 프로젝트·출시 경계는 유지하며 설치본 장애와 독립적인 기능 구현은 계속한다. 루트 지침의 같은 제목 절이 과거 검증 빈도 규칙보다 우선한다.
 - **실행 격리 전환 승인(2026-10-01, 10-06 정정)**: §6.9의 서명된 공급자 부모 신뢰와 공식 도구 sandbox 분담/무계정 임시 자료 시험은 사용자 승인 완료다. 이전 정책 입력 대기를 반복하지 않는다. 당시 제한 환경의 서명 오류로 시험을 중단했으나 10-06 제한 밖 검사는 통과했다. 설치 손상이라는 판단은 철회하며 제품 활성화·실제 계정/유료 모델 승인과 구분한다. 정상 서명 설치본의 도구 보호/종료 검증은 남는다.
 - **Claude 로그인 업데이트 입장(2026-09-30)**: 고정275/270 버전/SHA 목록 대신 공식 native launcher가 가리키는 versions/X.Y.Z 실파일을 Anthropic 서명으로 검증한다. 공식 링크는 bin 밖 절대경로이므로 cap_std의 read_link가 아닌 read_link_contents 후 고정 target 검증을 사용한다. launcher 자체는 실행하지 않고 현재 선택한 실파일을 bind한다. 설치2.1.285 읽기 전용 검증 통과는 계정 인증/모델 실행 완료가 아니다. npm/Homebrew/custom launcher 경로는 별도다.
