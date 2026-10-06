@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화·프롬프트·소유권 인계)
+
+- 기준 a7801d4. ClaudeStart가 실행된 프로세스의 control 초기화를 비차단 tick으로 진행하고, 동일 run/connection·현재 저장 입력·실행 scope를 대조한 뒤 저장된 역할로 SessionChannel을 구성하게 연결했다. 초기화 성공 전 사용자 메시지는 큐잉하지 않는다.
+- caller의 reservation/process 슬롯은 인계 완료 전 유지한다. 초기화/채널 구성 실패는 슬롯을 소비하지 않으며, OwnedClaudeRun 생성 뒤 첫 메시지 큐잉 실패나 취소는 cleanup parts를 슬롯에 복원한다. 실패/완료 controller 재사용은 거절하고 기존 register_failed_start 경로에 넘길 수 있다. 초기화 응답을 모델 가용성·managed 정책·도구 보호 증거로 사용하지 않는다.
+- Karpathy 지침으로 기존 ControlInitialization/OwnedClaudeRun/정리 소유권을 재사용하고 시작 scope 대조를 공통 helper로 정리했다. 제품 dispatcher 및 실제 Claude 실행 입장 검증 caller는 여전히 미연결이다. diff check PASS; 이번 빌드·테스트/실제 계정·모델 실행은 미실행이며 후속 누적 검증 대상이다.
+- 다음은 실제 admission·discovery/dispatcher와 초기화 상태 원장 연결. 제품 blocked 유지, 기존 9월 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 서명 실행 명령·예약 launch 연결)
 
 - 기준 90a2d49. ClaudeCommand가 서명 검증된 구체 실행 파일과 저장된 모델/effort/권한, 분리된 profile/snapshot을 결속하고 기존 descriptor 차단 gate·최소 환경으로 명령을 구성하도록 추가했다. Keychain용 OS HOME은 유지하고 CLAUDE_CONFIG_DIR만 앱 namespace로 지정한다. 상속 API key/proxy 환경은 복사하지 않는다.

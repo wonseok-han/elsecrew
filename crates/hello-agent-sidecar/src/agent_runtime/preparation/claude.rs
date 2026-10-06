@@ -2,6 +2,7 @@
 //! No launch, prompt, or tool grant authority is created here.
 use super::*;
 use crate::provider_claude_session::SessionChannel;
+use crate::provider_claude_session::ControlInitialization;
 use hello_agent_core::provider::vendor_observation::{
     claude_events::{Projection, ReportedOutcome},
     claude_session::Event,
@@ -33,6 +34,86 @@ struct ClaudePending {
     id: String,
     request: hello_agent_core::provider::vendor_observation::claude_approval::Request,
     declined: bool,
+}
+
+/// The caller retains reservation/process slots until a fully prepared owner is
+/// returned. Any error leaves those slots available for register_failed_start.
+pub(crate) struct ClaudeStart {
+    connection: Uuid,
+    run_id: String,
+    initialization: Option<ControlInitialization>,
+    channel: Option<SessionChannel>,
+    failed: bool,
+    handed_off: bool,
+}
+
+impl ClaudeStart {
+    pub(crate) fn start(
+        reservation: &RunReservation,
+        storage: &Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Self, SidecarError> {
+        reservation.verify_claude_launch(storage, projects, process)?;
+        let initialization = ControlInitialization::start(process, cancel)?;
+        Ok(Self { connection:process.connection_id(), run_id:reservation.run_id.clone(),
+            initialization:Some(initialization), channel:None, failed:false, handed_off:false })
+    }
+
+    /// One nonblocking initialization tick, then exactly one stored prompt queue.
+    pub(crate) fn advance(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        reservation: &mut Option<RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        cancel: &std::sync::atomic::AtomicBool,
+        admit: &mut impl FnMut(&mut crate::provider_login_process::LoginProcess<'_>) -> Result<(), SidecarError>,
+    ) -> Result<Option<OwnedClaudeRun>, SidecarError> {
+        let result = (|| {
+            let failure = || SidecarError::new("agentInputChanged", "Claude initialization owner differs");
+            if self.failed || self.handed_off || cancel.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(failure());
+            }
+            let pending = reservation.as_ref().ok_or_else(failure)?;
+            let running = process.as_mut().ok_or_else(failure)?;
+            if self.connection != running.connection_id() || self.run_id != pending.run_id { return Err(failure()); }
+            let (workspace, access) = pending.verify_claude_launch(storage, projects, running)?;
+            let initialization = self.initialization.as_mut().ok_or_else(failure)?;
+            if !initialization.advance(running, cancel, &mut |process| pending.observe_process(storage, process))? {
+                return Ok(None);
+            }
+            let expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
+                cwd:&workspace,
+                model:pending.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
+                permission_mode:"default",
+                tools:crate::provider_claude_session::expected_tools(access),
+            };
+            self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_session_channel(&expected)?);
+            let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
+            // After this point every failure must restore ownership, not drop it.
+            let queued = if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                Err(failure())
+            } else {
+                owner.queue_prompt(storage, projects, admit)
+            };
+            if let Err(error) = queued {
+                let (pending, running) = owner.into_cleanup_parts();
+                *reservation = Some(pending); *process = Some(running);
+                return Err(error);
+            }
+            if cancel.load(std::sync::atomic::Ordering::Acquire) {
+                let (pending, running) = owner.into_cleanup_parts();
+                *reservation = Some(pending); *process = Some(running);
+                return Err(failure());
+            }
+            self.handed_off = true;
+            Ok(Some(owner))
+        })();
+        if result.is_err() { self.failed = true; }
+        result
+    }
 }
 
 impl OwnedClaudeRun {
@@ -207,6 +288,29 @@ impl OwnedClaudeRun {
 }
 
 impl RunReservation {
+    /// Recheck invocation identity and durable inputs during initialization.
+    /// The returned cwd/access are not an execution-confinement grant.
+    fn verify_claude_launch(
+        &self, storage: &Storage, projects: &ProjectManager,
+        process: &crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<(String, crate::provider_claude_session::ToolAccess), SidecarError> {
+        use crate::provider_claude_session::ToolAccess;
+        let failure = || SidecarError::new("agentInputChanged", "Claude launch binding differs");
+        if self.run["selectedProfile"]["runtime"] != "claude-code" || !process.matches_startup_run(&self.run_id) { return Err(failure()); }
+        self.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let access = match self.run["selectedProfile"]["permission"].as_str() {
+            Some("readOnly") => ToolAccess::ReadOnly,
+            Some("workspaceWrite") => ToolAccess::Edit,
+            _ => return Err(failure()),
+        };
+        let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
+        let workspace = manifest["worktreePath"].as_str().ok_or_else(failure)?;
+        if !process.matches_claude_scope(Path::new(workspace),
+            self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
+            self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?, access) { return Err(failure()); }
+        Ok((workspace.into(),access))
+    }
+
     /// Prepare the vendor parent from durable inputs. The trusted caller must
     /// separately admit managed settings and tool isolation before the gate opens.
     pub(crate) fn launch_claude_candidate(
@@ -261,17 +365,7 @@ impl RunReservation {
         channel: &SessionChannel,
     ) -> Result<ClaudeOutputState, SidecarError> {
         let failure = || SidecarError::new("agentInputChanged", "Claude output owner differs");
-        if self.run["selectedProfile"]["runtime"] != "claude-code"
-            || !process.matches_startup_run(&self.run_id)
-        {
-            return Err(failure());
-        }
-        process.claude_preflight_home()?;
-        let access = match self.run["selectedProfile"]["permission"].as_str() {
-            Some("readOnly") => crate::provider_claude_session::ToolAccess::ReadOnly,
-            Some("workspaceWrite") => crate::provider_claude_session::ToolAccess::Edit,
-            _ => return Err(failure()),
-        };
+        let (workspace, access) = self.verify_claude_launch(storage, projects, process)?;
         if !channel.matches_role(
             self.run["selectedProfile"]["modelSelector"]
                 .as_str()
@@ -280,21 +374,7 @@ impl RunReservation {
         ) {
             return Err(failure());
         }
-        self.validate_text_input(storage, projects)
-            .map_err(|_| failure())?;
-        let manifest = projects
-            .verify_workspace_for_run(
-                storage,
-                &address_from_chat(&self.run).map_err(|_| failure())?,
-            )
-            .map_err(|_| failure())?;
-        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        if !channel.matches_process(process, workspace) || !process.matches_claude_scope(
-            workspace,
-            self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
-            self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?,
-            access,
-        ) {
+        if !channel.matches_process(process, Path::new(&workspace)) {
             return Err(failure());
         }
         Ok(ClaudeOutputState {

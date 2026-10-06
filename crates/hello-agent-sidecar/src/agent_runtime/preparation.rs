@@ -5,6 +5,8 @@ mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
 mod claude;
 pub(crate) use claude::OwnedClaudeRun;
+#[allow(unused_imports)] // Pending native Claude dispatcher integration.
+pub(crate) use claude::ClaudeStart;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodexLaunchMode {
