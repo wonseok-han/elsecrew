@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 도구 권한 거절 경로 연결)
+
+- 기준769a694에서 공식 Python SDK query.py의 control_request/can_use_tool, control_cancel_request, control_response 구조를 다시 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py (mutable main). Karpathy 지침으로 기존 JSONL 전송에 단회 거절 응답을 연결했다.
+- core는 요청 ID 중복·취소·닫힘·1024개 한도를 관리하고 도구 입력/권한 제안은 공개하지 않는다. sidecar는 초기화 완료 후에만 permission channel을 만들고 connection ID를 수신·큐 삽입에서 대조한다. Codex/Claude 전송 namespace 분리도 유지했다. 취소 요청에는 답하지 않고, 거절 응답은 해당 요청을 소비하며 허용/권한 확대 기능은 아직 없다.
+- 상관관계·중복·취소·닫힘·비공개 입력 비반사 회귀를 작성했다. rustfmt와 diff만 확인하며 컴파일/테스트 실행·실제 공급자/UI 연결·통합 검증은 남는다. 직전 턴은 승인 재확인뿐이었고 이번 턴은 구현 진전이다. 실제 계정/모델 호출·제품 활성화 없음, 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (1·3번 승인 범위 재확인)
+
+- 사용자 승인 대상을 기존 m5-change-application의 1번 임시 자료 시험과 3번 반영·복원 정책으로 대조했다. 외부 편집 중지·충돌 검사·복원 데이터 기본 5GiB·자동 삭제 없음의 기존 승인 결정을 유지한다. 공급자 업데이트마다 실행 파일 해시를 수동 등록하지 않는 2번 결정도 유지한다.
+- 이 승인을 설치 앱 교체·실제 인증 정보 접근·유료 모델 호출·사용자 원본 쓰기의 추가 승인으로 확대하지 않는다. 해당 정책은 이미 승인 기록이 있으므로 구현 완료로 다시 보고하지 않는다. 현재 HEAD 769a694, m5/coding-agent-ide이며 기존 9월 archive 변경을 보존했다. 이번에는 문서 대조만 수행했고 다음 구현은 Claude 권한 응답/실행 owner 연결과 최종 통합 검증이다.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 실행 인자와 서명 discovery 재사용)
 
 - 기준0670202의 누적 Rust/core/sidecar 및 테스트 코드에 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked를 실행해7.15초에 통과했다. 다음 연결의 최소 컴파일 진단이며 테스트 자체를 실행한 것은 아니다. 이후 아래 인자 변경에는 rustfmt/diff만 수행했다.

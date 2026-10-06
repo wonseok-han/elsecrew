@@ -762,7 +762,10 @@ impl<'a> LoginProcess<'a> {
                 != matches!(
                     &frame,
                     crate::provider_login_io::NativeFrame::ClaudeInitialize(_)
+                        | crate::provider_login_io::NativeFrame::ClaudeDenial(_)
                 )
+            || matches!(&frame, crate::provider_login_io::NativeFrame::ClaudeDenial(reply)
+                if reply.connection() != self.connection_id())
         {
             return Err(failure());
         }

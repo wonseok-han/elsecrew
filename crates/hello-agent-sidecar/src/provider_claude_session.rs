@@ -73,6 +73,68 @@ pub(crate) struct ControlInitialization {
     failed: bool,
 }
 
+/// Created only after the handshake on this connection. Not a tool-grant authority.
+pub(crate) struct PermissionChannel {
+    connection: uuid::Uuid,
+    permissions: hello_agent_core::provider::vendor_observation::claude_approval::Permissions,
+}
+
+pub(crate) struct PermissionDenial {
+    connection: uuid::Uuid,
+    reply: hello_agent_core::provider::vendor_observation::claude_approval::Denial,
+}
+
+impl PermissionDenial {
+    pub(crate) fn connection(&self) -> uuid::Uuid {
+        self.connection
+    }
+    pub(crate) fn as_str(&self) -> &str {
+        self.reply.as_str()
+    }
+}
+
+impl PermissionChannel {
+    pub(crate) fn observe(
+        &mut self,
+        process: &LoginProcess<'_>,
+        input: &hello_agent_core::provider::BoundedObservation,
+    ) -> Result<
+        hello_agent_core::provider::vendor_observation::claude_approval::Observation,
+        SidecarError,
+    > {
+        if process.connection_id() != self.connection {
+            self.permissions.close();
+            return Err(failure());
+        }
+        self.permissions.observe(input).map_err(|_| failure())
+    }
+
+    /// Caller flushes through the same observed nonblocking transport and owns cleanup.
+    pub(crate) fn deny(
+        &mut self,
+        process: &mut LoginProcess<'_>,
+        request_id: &str,
+        interrupt: bool,
+    ) -> Result<(), SidecarError> {
+        if process.connection_id() != self.connection {
+            self.permissions.close();
+            return Err(failure());
+        }
+        let reply = self
+            .permissions
+            .deny(request_id, interrupt)
+            .map_err(|_| failure())?;
+        let result = process.queue_native(NativeFrame::ClaudeDenial(PermissionDenial {
+            connection: self.connection,
+            reply,
+        }));
+        if result.is_err() {
+            self.permissions.close();
+        }
+        result
+    }
+}
+
 fn failure() -> SidecarError {
     SidecarError::new(
         "providerPreflightFailed",
@@ -81,6 +143,16 @@ fn failure() -> SidecarError {
 }
 
 impl ControlInitialization {
+    pub(crate) fn into_permission_channel(self) -> Result<PermissionChannel, SidecarError> {
+        if self.failed || self.exchange.state() != State::Ready {
+            return Err(failure());
+        }
+        Ok(PermissionChannel {
+            connection: self.connection,
+            permissions: Default::default(),
+        })
+    }
+
     pub(crate) fn start(
         process: &mut LoginProcess<'_>,
         cancel: &AtomicBool,
