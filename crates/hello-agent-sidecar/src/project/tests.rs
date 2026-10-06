@@ -4,6 +4,33 @@ use tempfile::TempDir;
 
 #[cfg(unix)]
 #[test]
+fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_retire_backup").unwrap();
+    let prepared = intent::begin(&f.manager, &mut f.storage, &mut owner, grant, "req_retire_prepare").unwrap();
+    let id = prepared["applicationId"].as_str().unwrap();
+    assert!(intent::retirement::preview(&f.storage, &f.project_id, id).is_err());
+    let terminal = intent::abandon_unwritten(&mut f.storage, &f.project_id, &prepared, "req_retire_abandon").unwrap();
+    let lock_id = terminal["lockId"].as_str().unwrap();
+    let lock = f.storage.projection_record("lock", lock_id).unwrap();
+    let before = required_project(&f.storage, &f.project_id).unwrap();
+    assert!(intent::retirement::retire(&mut f.storage, &f.project_id, id, "stale", "req_retire_stale").is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+    let preview = intent::retirement::preview(&f.storage, &f.project_id, id).unwrap();
+    intent::retirement::retire(&mut f.storage, &f.project_id, id, preview["fingerprint"].as_str().unwrap(), "req_retire").unwrap();
+    let after = required_project(&f.storage, &f.project_id).unwrap();
+    assert!(!after.contains_key("application_intent"));
+    assert_eq!(after["application_history"][id], terminal);
+    assert_eq!(f.storage.projection_record("lock", lock_id).unwrap(), lock);
+    assert_eq!(after["application_backups"], before["application_backups"]);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[cfg(unix)]
+#[test]
 fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
     use application::review::{backup::{staging, cleanup}, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();

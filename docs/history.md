@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (완료된 현재 복구점의 명시 종료 후보)
+
+- 기준c9e22f6에서 Karpathy 지침으로 intent::retirement의 읽기 전용 preview와 영속 retire를 작성했다. 기존 inspect가 검증하는 applicationId·terminal 상태·poisoned=false·recovery_required=false·writer 부재·phase 증거를 요구한다. prepared/applying은 거절하며 확인 지문을 재대조한다.
+- 기존 다음 반영 시작의 이력 보존 방식과 같은 형태로 current record를 그대로 application_history에 넣고 current 포인터만 같은 project CAS에서 제거한다. lock revision도 guard하지만 lock 자체를 바꾸거나 원본·백업 파일을 삭제하지 않는다. 이후 별도 확인을 거쳐 과거 백업을 정리할 수 있는 경계다.
+- pending 거절·stale 지문 무변경·이력/lock/백업 metadata/원본 보존 회귀를 작성했다. 내부 후보이며 공개 명시 확인/IPC는 후속, 테스트 실행/통합·독립 검토는 최종 단계에 남긴다. 포맷/diff만 확인했고 제품 쓰기/삭제는 비활성이다. 고아 파일 정책·공급자 연결·Windows/G6/전체 검증 미완료, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (과거 백업의 명시 정리 후보 확장)
 
 - 기준42dc612에서 설치 CLI를 재확인했지만 macOS strict 서명 검사는 여전히 arm64 invalid signature이고 Codex.app 대체 설치는 없다. CLI/계정/모델 실행·앱 교체 없이 독립적인 정리 구현을 계속했다.
