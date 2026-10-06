@@ -294,6 +294,7 @@ pub(crate) struct LoginProcess<'a> {
     model_proxy: Option<crate::provider_model_proxy::broker::Broker>,
     runtime_scope: Option<crate::provider_runtime_sandbox::RuntimeScope>,
     named_scope: Option<crate::provider_preflight_session::vendor_launch::Scope>,
+    claude_scope: Option<crate::provider_claude_session::launch::Scope>,
     #[cfg(test)]
     fail_next_cleanup: bool,
     #[cfg(test)]
@@ -453,6 +454,7 @@ impl<'a> LoginProcess<'a> {
             model_proxy: None,
             runtime_scope: None,
             named_scope: None,
+            claude_scope: None,
             #[cfg(test)]
             fail_next_cleanup: false,
             #[cfg(test)]
@@ -560,6 +562,30 @@ impl<'a> LoginProcess<'a> {
 
     pub(crate) fn uses_named_scope(&self) -> bool {
         self.named_scope.is_some()
+    }
+
+    pub(crate) fn launch_claude(
+        &mut self, mut command: Command,
+        scope: crate::provider_claude_session::launch::Scope,
+        release: impl FnOnce(&mut Child, &[ProcIdentity]) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        self.claude_preflight_home()?;
+        scope.revalidate()?;
+        self.launch_with_identity_barrier(|| command.spawn(), |child, identities| {
+            scope.revalidate().map_err(std::io::Error::other)?;
+            release(child, identities)
+        })?;
+        self.claude_scope = Some(scope);
+        Ok(())
+    }
+
+    /// Invocation identity only; this does not certify provider tool confinement.
+    pub(crate) fn matches_claude_scope(&self, workspace: &std::path::Path, model: &str, effort: &str, access: crate::provider_claude_session::ToolAccess) -> bool {
+        !self.failed && !self.finished && self.cleanup_started.is_none()
+            && self.io.is_some() && self.child.is_some()
+            && self.claude_preflight_home().ok().is_some_and(|home| {
+                self.claude_scope.as_ref().is_some_and(|scope| scope.matches(workspace, &home, model, effort, access))
+            })
     }
 
     /// The trusted run owner can durably bind the already observed identities

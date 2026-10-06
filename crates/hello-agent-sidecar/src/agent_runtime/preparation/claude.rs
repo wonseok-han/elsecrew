@@ -207,6 +207,52 @@ impl OwnedClaudeRun {
 }
 
 impl RunReservation {
+    /// Prepare the vendor parent from durable inputs. The trusted caller must
+    /// separately admit managed settings and tool isolation before the gate opens.
+    pub(crate) fn launch_claude_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+        admit: &mut impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_claude_session::{launch::ClaudeCommand, ToolAccess};
+        use std::sync::atomic::Ordering;
+        let failure = || SidecarError::new("agentLaunchRejected", "Claude launch inputs differ");
+        if self.run["selectedProfile"]["runtime"] != "claude-code"
+            || !process.matches_startup_run(&self.run_id) || cancel.load(Ordering::Acquire)
+        { return Err(failure()); }
+        let selected = &self.run["selectedProfile"];
+        let model = selected["modelSelector"].as_str().ok_or_else(failure)?;
+        let effort = selected["reasoningEffort"].as_str().ok_or_else(failure)?;
+        let access = match selected["permission"].as_str() {
+            Some("readOnly") => ToolAccess::ReadOnly,
+            Some("workspaceWrite") => ToolAccess::Edit,
+            _ => return Err(failure()),
+        };
+        let address = address_from_chat(&self.run).map_err(|_| failure())?;
+        projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
+        self.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let home = process.claude_preflight_home()?;
+        let command = ClaudeCommand::new(executable.revalidate()?, &home, workspace, model, effort, access)?;
+        admit(workspace, &home, model, effort, access)?;
+        if cancel.load(Ordering::Acquire) { return Err(failure()); }
+        command.launch(process, |child, identities| {
+            // Recheck both policy and durable input at the last pre-vendor boundary.
+            admit(workspace, &home, model, effort, access).map_err(std::io::Error::other)?;
+            executable.revalidate().map_err(std::io::Error::other)?;
+            if cancel.load(Ordering::Acquire) { return Err(std::io::Error::other("Claude launch canceled")); }
+            self.record_pre_release(storage, projects, identities)
+                .map_err(|_| std::io::Error::other("Claude run identity persistence failed"))?;
+            crate::provider_login_gate::release(child)
+        })?;
+        self.record_released_or_invalidate(storage, process)
+    }
+
     pub(crate) fn begin_claude_output(
         &self,
         storage: &Storage,
@@ -242,9 +288,12 @@ impl RunReservation {
                 &address_from_chat(&self.run).map_err(|_| failure())?,
             )
             .map_err(|_| failure())?;
-        if !channel.matches_process(
-            process,
-            Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        if !channel.matches_process(process, workspace) || !process.matches_claude_scope(
+            workspace,
+            self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
+            self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?,
+            access,
         ) {
             return Err(failure());
         }

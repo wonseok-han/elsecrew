@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 서명 실행 명령·예약 launch 연결)
+
+- 기준 90a2d49. ClaudeCommand가 서명 검증된 구체 실행 파일과 저장된 모델/effort/권한, 분리된 profile/snapshot을 결속하고 기존 descriptor 차단 gate·최소 환경으로 명령을 구성하도록 추가했다. Keychain용 OS HOME은 유지하고 CLAUDE_CONFIG_DIR만 앱 namespace로 지정한다. 상속 API key/proxy 환경은 복사하지 않는다.
+- RunReservation의 Claude 시작 후보를 추가했다. runtime/역할/원본과 snapshot 파일 격리/입력/시작 fence를 대조한 뒤 trusted admission을 먼저 요구하고, gate 해제 직전에 재검사·프로세스 신원 영속화를 수행한다. release 기록 실패는 transport를 무효화하고 기존 owner에 cleanup 책임을 남긴다. LoginProcess가 실제 사용한 Claude scope를 보유하며 output owner 생성도 cwd/profile/model/effort/access와 일치해야 한다.
+- Karpathy 지침으로 기존 로그인 gate·환경·소유권/기록 함수를 재사용했다. 이 scope는 실행 인자 신원이지 도구 sandbox 증거가 아니다. 실제 managed 정책/파일 도구 격리 admission caller와 discovery/dispatcher는 아직 미연결이며 일반 제품 blocked 유지. 시스템 바이너리의 Claude 신원 사칭 거절 회귀를 추가했고 diff check PASS, 빌드/테스트·실제 계정/모델은 미실행이다.
+- 다음은 Claude 설정/도구 보호 입장과 실행 준비/초기화 수명 연결 후 누적 검증이다. 기존 9월 아카이브 변경 보존, main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Codex 명시적 일회 허용 UI 연결)
 
 - 기준 2da597e. 기존 Codex의 inspected fingerprint/작업 사본·role·process 경계 재검사/단발 승인 큐를 public approval IPC의 acceptOnce로 연결했다. UI는 상세를 연 해당 요청에만 명시 허용 버튼을 표시하고 선택 직후 상세를 지우며 중복 전송을 막는다. preload/main/sidecar는 같은 exact 계약을 검증하고 영속 허용 옵션은 없다.

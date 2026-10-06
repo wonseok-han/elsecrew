@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy)]
+pub(crate) mod launch;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolAccess {
     ReadOnly,
     Edit,
