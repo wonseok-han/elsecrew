@@ -426,6 +426,16 @@ impl<'a> LoginProcess<'a> {
         self.profile.as_ref().revalidate()
     }
 
+    pub(crate) fn closed_claude_home(&self) -> Result<std::path::PathBuf, SidecarError> {
+        if !self.finished || self.retain_for_terminal
+            || !self.closure.as_ref().is_some_and(|receipt| receipt.confirmed)
+            || self.profile.as_ref().pending_name() != "claude-login.pending"
+        {
+            return Err(failure());
+        }
+        self.profile.as_ref().revalidate()
+    }
+
     pub(crate) fn reserve(profile: &'a dyn LoginProfile) -> Result<Self, SidecarError> {
         Self::reserve_profile(ProfileOwner::Borrowed(profile))
     }

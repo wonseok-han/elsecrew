@@ -8,6 +8,8 @@ use std::{
 };
 
 pub(crate) mod launch;
+#[allow(dead_code)] // Native Claude discovery dispatcher is not activated yet.
+pub(crate) mod discovery;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolAccess {

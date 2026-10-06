@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 전용 사전 관측 소유권)
+
+- 기준 a9e05c7. Claude 전용 inspect_candidate를 추가했다. 서명된 기존 ClaudeCommand·trusted admission·ControlInitialization을 재사용해 사용자 메시지 없이 선택 모델/effort·보고 권한 모드/hook 등록을 관측한다. selector와 resolved ID를 구분하고 source/snapshot/profile/access에 결속한 30초 관측으로 반환한다. 계정 entitlement·canStart·실제 tool/init attestation은 반환하지 않는다.
+- 실패에도 원래 LoginProcess를 ProviderInspection에 반환하며 명시 finish와 confirmed closure 뒤 같은 Claude profile을 재확인한다. worker에서만 호출할 blocking 조회이고 dispatcher/인증/정책 수집 caller 연결은 아직 남는다. Karpathy 지침으로 Codex 소유권 패턴과 기존 제어 초기화를 재사용했다.
+- 새 파일 rustfmt/diff check 확인, 범위/만료 회귀 작성. 빌드/테스트·실제 계정/모델 실행 없음. 독립 검토자의 출력 전부 실패 지적은 내부 Assistant/Result 처리 확인 뒤 철회됐고, 실제 남은 것은 Codex 전용 discovery/dispatch 및 Claude acceptOnce 미연결이다. 정책 증거에 대한 최종 검토는 진행 중이다.
+- 다음은 Claude 관측 worker·프로필/실행 예약 연결과 구체 admission, 일회 승인 경로다. 제품 blocked 유지, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 실제 모델 ID 선택 연결)
 
 - 기준 366ca79. 실제 초기화 목록의 value 별칭과 resolvedModel 전체 ID가 분리되어 있는데 profile_model이 value만 비교하는 것을 확인했다. 직접 광고된 selector를 우선하고, 없으면 관측된 resolvedModel과 정확히 같은 ID를 허용한다. 같은 ID를 가리키는 별칭들의 요청 effort 지원이 모두 일치해야 하며 목록 순서/미관측 모델 fallback을 쓰지 않는다.
