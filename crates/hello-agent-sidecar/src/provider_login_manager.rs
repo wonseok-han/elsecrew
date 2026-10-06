@@ -321,7 +321,7 @@ pub(super) fn digest(value: &str) -> [u8; 32] {
     bytes
 }
 
-fn select_signed_pair(
+pub(crate) fn select_signed_pair(
     roots: &[&Path],
 ) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
     select_candidates(roots, |cli, host| {

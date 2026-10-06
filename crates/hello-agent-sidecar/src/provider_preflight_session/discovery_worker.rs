@@ -34,8 +34,6 @@ pub(crate) struct DiscoveryWorker {
 impl DiscoveryWorker {
     pub(crate) fn spawn(
         profile: CodexProfileBinding,
-        executable: PinnedExecutable,
-        helper: PinnedExecutable,
         model: String,
         effort: String,
         permission: ExpectedPermission,
@@ -46,6 +44,14 @@ impl DiscoveryWorker {
         let handle = std::thread::Builder::new()
             .name("codex-discovery".into())
             .spawn(move || {
+                let (executable, helper) =
+                    match crate::provider_login_manager::select_signed_pair(&[
+                        std::path::Path::new("/Applications/ChatGPT.app/Contents/Resources"),
+                        std::path::Path::new("/Applications/Codex.app/Contents/Resources"),
+                    ]) {
+                        Ok(pair) => pair,
+                        Err(error) => return Completion::failed(error, None),
+                    };
                 let version_profile = match profile.try_clone() {
                     Ok(profile) => profile,
                     Err(error) => return Completion::failed(error, None),

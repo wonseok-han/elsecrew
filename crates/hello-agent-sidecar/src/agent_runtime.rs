@@ -46,6 +46,7 @@ use uuid::Uuid;
 const SOURCE_KIND: &str = "actualAgent";
 mod approval;
 mod native;
+mod discovery;
 pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
 const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
@@ -162,6 +163,7 @@ pub(crate) struct AgentRuntime {
     native: HashMap<String, native::NativeRun>,
     failed_starts: HashMap<String, native::FailedStart>,
     discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
+    pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -184,6 +186,7 @@ impl AgentRuntime {
             native: HashMap::new(),
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
+            pending_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -409,6 +412,7 @@ impl AgentRuntime {
             .chain(self.native.keys())
             .chain(self.failed_starts.keys())
             .chain(self.discovery_cleanup.keys())
+            .chain(self.pending_discoveries.keys())
             .cloned()
             .collect()
     }
@@ -433,6 +437,7 @@ impl AgentRuntime {
             native: HashMap::new(),
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
+            pending_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -1121,6 +1126,7 @@ impl AgentRuntime {
         // Deliver successfully collected events before reporting a persistent
         // error on a subsequent idle poll, rather than discarding those events.
         for result in [
+            self.poll_discoveries(),
             self.poll_discovery_cleanup(),
             self.poll_failed_starts(storage, projects),
             self.poll_native(storage, projects),
@@ -1646,6 +1652,9 @@ impl AgentRuntime {
 
     pub(crate) fn prepare_quit(&mut self, storage: &mut Storage, projects: &mut ProjectManager) {
         self.preparing_to_quit = true;
+        for pending in self.pending_discoveries.values() {
+            pending.worker.cancel();
+        }
         for active in self.native.values() {
             let _ = active.request_cancel(&active.identity);
         }

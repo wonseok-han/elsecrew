@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (scoped 조회 worker의 런타임 수명 연결)
+
+- 기준 87c764d. 채팅·저장된 역할·작업 사본 격리를 확인하고 scoped worker를 요청 ID별로 보관하는 런타임 경로를 추가했다. 중복·종료 중·한도 초과는 시작 전에 거절한다. 서명된 CLI/helper 선택도 worker 안으로 옮겨 dispatcher를 서명 검사로 막지 않도록 했다. 성공 관측은 조회 당시 scope/profile과 함께 한 번만 반환한다.
+- Karpathy 지침으로 기존 poll/cleanup/종료 차단 목록에 worker를 연결했다. 실패 process는 discovery_cleanup으로 넘기고 인계 실패 시 원래 completion에 복원한다. 완료 결과 반환 전 현재 durable scope·역할·작업 사본을 다시 확인하며 종료 중에는 성공으로 내보내지 않는다. app.prepareQuit는 조회 취소 후 기존 polling을 통해 정리하도록 했다.
+- 제한된 cargo check -p hello-agent-sidecar --tests --locked PASS(3.03초). 이후 반환 결과에 scope/profile을 포함하는 묶음 추가·rustfmt/diff만 확인했다. 실제 계정/모델/사용자 프로젝트 실행 없음. 다음은 scoped evidence의 capability projection과 lib.rs 지연 응답 연결이며 제품 blocked 상태는 유지한다. 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (버전·역할 조회의 취소 가능한 worker 연결)
 
 - 기준 6a7a2b3. DiscoveryWorker가 앱 profile과 서명 검증된 실행 파일 pair를 소유하고 버전 조회→명시 종료→새 프로세스의 named 역할 조회를 순서대로 수행하도록 묶었다. profile은 현재 directory identity를 보존한 handle 복제로 넘기며 설정/인증 파일을 다시 생성하지 않는다. 실패 결과는 해당 process owner를 함께 반환하고 성공 결과는 버전/관측값/원래 실행 파일 pair를 보관한다.
