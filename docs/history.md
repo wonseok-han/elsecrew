@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 공개 출력·종료 원장 bridge)
+
+- 기준 1def998. 별도로 입장·실행된 Claude channel을 run/process/workspace에 결속하고 incremental event→공개 assistant text→명시 process cleanup→공통 terminal 저장 순서로 처리하는 내부 bridge를 추가했다. 정상 init 전 출력을 거절하고 private/tool/control 이벤트는 trusted handler에만 전달한다. result success라도 queue가 명시 0이고 permission denial이 없어야 성공 후보이며 종료 확인과 구분한다.
+- Karpathy 지침으로 공통 공개 원장/종료 저장을 재사용했다. 마지막 답변은 cleanup 후 한 번만 기록하고 오류/취소 시 status로 분류하며 terminal 저장과 fence 해제를 별도로 기억한다. 공통 terminal의 permission 분기는 Claude/Codex 두 runtime만 허용하고 Codex launch 제한은 유지한다. 아직 Claude launch/격리/승인/owner dispatcher에는 미연결이며 제품 활성화 아님.
+- 제한된 cargo check --tests --locked PASS(2.57초, 미연결 경고). 이후 unused re-export 제거·미연결 모듈 표시와 cleanup 증거 실패/최종 출력 분류 보완·rustfmt/diff만 확인했다. 전체 테스트·실제 계정/모델 실행 없음. 다음은 Claude admission과 process owner/prompt 경로 연결이며 공식 shell sandbox와 파일 도구 권한 차이를 유지한다. 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (관측 기반 native provider evidence 연결)
 
 - 기준 6053508. fresh scoped 조회의 실행 파일/필수 helper 식별값·실측 버전·선택 역할로 native provider manifest/discovery를 만들고 기존 공용 검증기를 통과시켜 실행 예약에 보관한다. 고정 fixture 버전/모델 정의를 재사용하지 않는다. 동일 연결 thread 확인 callback에서 accepted run/profile/workspace에 대조한 attestation을 receipt/run/chat과 함께 저장한다.

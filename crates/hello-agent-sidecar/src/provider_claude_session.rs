@@ -147,6 +147,10 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    pub(crate) fn matches_process(&self, process: &LoginProcess<'_>, cwd: &std::path::Path) -> bool {
+        self.connection == process.connection_id() && self.cwd == cwd
+    }
+
     /// Snapshot path observation only, not a grant: a later provider open can race
     /// this check. Search traversal and shell commands need their own confinement.
     pub(crate) fn inspect_file_target(

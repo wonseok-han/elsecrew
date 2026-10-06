@@ -2,6 +2,8 @@
 use super::*;
 use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 mod terminal;
+#[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
+mod claude;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodexLaunchMode {
@@ -887,7 +889,7 @@ impl RunReservation {
         result.map(Some)
     }
 
-    fn persist_text(
+    pub(super) fn persist_text(
         &self,
         storage: &mut Storage,
         kind: &str,

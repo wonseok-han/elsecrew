@@ -17,9 +17,11 @@ impl RunReservation {
         let projection = actual_run_projection(storage, &self.run_id)?;
         let profile: AgentResolvedProfileV1 =
             serde_json::from_value(self.run["selectedProfile"].clone()).map_err(json_failure)?;
-        let writer = codex_permission(&profile)
-            .map_err(|_| ProjectFailure::recovery("reserved permission changed"))?
-            == ExpectedPermission::WorkspaceWrite;
+        let writer = match (profile.runtime.as_str(), profile.permission.as_str()) {
+            ("codex" | "claude-code", "workspaceWrite") => true,
+            ("codex" | "claude-code", "readOnly") => false,
+            _ => return Err(ProjectFailure::recovery("reserved permission changed")),
+        };
         let identities = evidence.identities();
         let prior = projection["process_identity_internal"]
             .as_array()
