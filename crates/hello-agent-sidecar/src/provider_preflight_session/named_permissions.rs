@@ -4,6 +4,81 @@ use super::{discovery_arguments, ExpectedPermission, PreflightExchange};
 use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
 use std::{ffi::OsString, io, path::Path};
 
+/// Reported layer provenance only. This does not prove that startup extensions
+/// never ran, nor authorize a process/turn. The RPC owner must validate framing.
+pub(crate) fn matches_configuration_layers(
+    result: &serde_json::Value,
+    home: &Path,
+    expected: &ExpectedProfile<'_>,
+    expected_policy: &serde_json::Value,
+    approval: &str,
+) -> bool {
+    use serde_json::json;
+    if !matches!(approval, "never" | "on-request") {
+        return false;
+    }
+    let flags = json!({
+        "model":expected.model,"model_reasoning_effort":expected.reasoning_effort,
+        "model_provider":"openai","approval_policy":approval,
+        "default_permissions":"hello-agent-snapshot",
+        "permissions":{"hello-agent-snapshot":expected_policy},
+        "features":{"hooks":false,"apps":false,"plugins":false}
+    });
+    let Some(layers) = result["layers"].as_array() else {
+        return false;
+    };
+    if layers.len() != 3 {
+        return false;
+    }
+    let Some(home) = home.to_str() else {
+        return false;
+    };
+    let mut seen = [false; 3];
+    for layer in layers {
+        if !layer["disabledReason"].is_null() {
+            return false;
+        }
+        let (index, expected_name, expected_config) = match layer["name"]["type"].as_str() {
+            Some("sessionFlags") => (0, json!({"type":"sessionFlags"}), flags.clone()),
+            Some("user") => (
+                1,
+                json!({"type":"user","file":format!("{home}/config.toml")}),
+                json!({"cli_auth_credentials_store":"file"}),
+            ),
+            Some("system") => (
+                2,
+                json!({"type":"system","file":"/etc/codex/config.toml"}),
+                json!({}),
+            ),
+            _ => return false,
+        };
+        if layer["name"] != expected_name
+            || layer["config"] != expected_config
+            || std::mem::replace(&mut seen[index], true)
+        {
+            return false;
+        }
+    }
+    let config = &result["config"];
+    for key in [
+        "model",
+        "model_provider",
+        "model_reasoning_effort",
+        "approval_policy",
+        "default_permissions",
+    ] {
+        if config[key] != flags[key] {
+            return false;
+        }
+    }
+    for feature in ["hooks", "apps", "plugins"] {
+        if config["features"][feature] != false {
+            return false;
+        }
+    }
+    config["sandbox_mode"].is_null() && config["sandbox_workspace_write"].is_null()
+}
+
 /// Do not inherit :workspace: its default temp writes are outside our snapshot.
 /// Fixed policy name is scoped to this process's flags, never user config files.
 pub(crate) fn named_discovery_arguments(
@@ -56,6 +131,43 @@ pub(crate) fn named_discovery_arguments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_layers_reject_extra_sources_flags_and_policy() {
+        use serde_json::json;
+        let expected = ExpectedProfile {
+            model: "test-model",
+            reasoning_effort: "medium",
+        };
+        let policy = json!({"filesystem":{":root":"deny"},"network":{"enabled":false}});
+        let flags = json!({"model":"test-model","model_reasoning_effort":"medium","model_provider":"openai","approval_policy":"on-request","default_permissions":"hello-agent-snapshot","permissions":{"hello-agent-snapshot":policy},"features":{"hooks":false,"apps":false,"plugins":false}});
+        let base = json!({"config":flags,"layers":[{"name":{"type":"sessionFlags"},"config":flags},{"name":{"type":"user","file":"/profile/config.toml"},"config":{"cli_auth_credentials_store":"file"}},{"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}]});
+        assert!(matches_configuration_layers(
+            &base,
+            Path::new("/profile"),
+            &expected,
+            &policy,
+            "on-request"
+        ));
+        for pointer in [
+            "/layers/0/config/sandbox_mode",
+            "/layers/1/config/hooks",
+            "/layers/2/config/permissions",
+            "/config/features/hooks",
+            "/layers/0/disabledReason",
+        ] {
+            let mut changed = base.clone();
+            let (parent, field) = pointer.rsplit_once('/').unwrap();
+            changed.pointer_mut(parent).unwrap()[field] = json!(true);
+            assert!(!matches_configuration_layers(
+                &changed,
+                Path::new("/profile"),
+                &expected,
+                &policy,
+                "on-request"
+            ));
+        }
+    }
 
     #[test]
     fn named_candidate_has_no_legacy_sandbox_or_profile_file_writes() {

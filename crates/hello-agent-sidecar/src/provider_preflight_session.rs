@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 mod incremental;
-mod named_permissions;
+pub(crate) mod named_permissions;
 #[allow(unused_imports)] // Candidate until named config/thread admission is connected.
 pub(crate) use named_permissions::named_discovery_arguments;
 pub(crate) use incremental::ConfinedAcceptReply;

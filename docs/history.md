@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named 설정 계층 대조 연결)
+
+- 직전 da43b1d는 설치 공급자 임시 시험 통과로 다음 실행 연결의 근거를 확보한 진전이었다. named 실행 설정 후보에 sessionFlags/user/system 세 계층의 출처·설정 대조를 추가하고 기존 permission probe에서 도구 실행 전에 사용하도록 연결했다. 추가 project/system 설정·중복 계층·비활성 계층·legacy sandbox 혼합·다른 model/effort·확장 기능 활성화를 거절한다. effective policy의 null 정규화/내용 대조는 기존 probe 검사와 함께 사용한다.
+- 새 관측 함수는 JSON Value 기반 계층 대조이며 raw 중복 키 검출이나 startup 확장 미실행의 증거가 아니다. 제품 owner admission/typed parser와 named thread 응답을 아직 결합하지 않았으므로 이를 완료된 실행 전 게이트로 표현하지 않는다. fixture의 계층 응답과 추가 설정 거절 회귀를 함께 작성했다.
+- 이전 provider_tool_policy 제거 시 남은 cfg(macos)/allow 속성이 application_cancel에 붙은 것을 현재 diff와 이전 HEAD로 확인해 제거했다. 공통 취소 모듈을 원래 플랫폼 범위로 복원했으며 Windows 실제 컴파일은 아직 수행하지 않았다.
+- 이번에는 rustfmt/diff만 확인했다. 직전 설치 시험 PASS는 변경 전 증거이며 새 계층 검사·회귀는 아직 실행하지 않았다. 다음은 named config raw/typed 대조와 실제 thread/turn owner 연결, 이후 누적 검증이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (설치 Codex의 snapshot 도구 격리 실측 통과)
 
 - 직전103d8a7은 named 인자 후보 구현의 진전이었다. Karpathy 지침으로 기존 permission probe에 named_discovery_arguments를 연결하고 같은 cwd의 permissionProfile/list 허용 확인 뒤에만 command/exec를 보내도록 바꿨다. probe에서는 approval_policy=never를 유지한다. 호출이 사라진 구형 provider_tool_policy 모듈은 제거했다.

@@ -165,7 +165,13 @@ fn exchange(
             1 if !result.is_object() => return Err(failure()),
             2 => {
                 let config = &result["config"];
-                if config["default_permissions"] != "hello-agent-snapshot"
+                let layers_match = crate::provider_preflight_session::named_permissions::matches_configuration_layers(
+                    result, home,
+                    &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile { model:"test-model", reasoning_effort:"medium" },
+                    &expected_policy(home, workspace), "never",
+                );
+                if !layers_match
+                    || config["default_permissions"] != "hello-agent-snapshot"
                     || config["approval_policy"] != "never"
                     || !config["sandbox_mode"].is_null()
                     || !config["sandbox_workspace_write"].is_null()
@@ -177,7 +183,7 @@ fn exchange(
                 {
                     return Err(SidecarError::new(
                         "permissionProbeFailed",
-                        format!("permission config mismatch: selection={}, approval={}, legacy_mode_absent={}, legacy_write_absent={}, policy={}",
+                        format!("permission config mismatch: layers={layers_match}, selection={}, approval={}, legacy_mode_absent={}, legacy_write_absent={}, policy={}",
                             config["default_permissions"] == "hello-agent-snapshot",
                             config["approval_policy"] == "never",
                             config["sandbox_mode"].is_null(),
@@ -283,11 +289,18 @@ fn run_probe(installed: bool, rejected: bool, vendor_sandbox: bool) {
             },
         )
     } else {
-        let config_response = json!({"id":2,"result":{"config":{
+        let flags = json!({
+            "model":"test-model","model_provider":"openai","model_reasoning_effort":"medium",
+            "features":{"hooks":false,"apps":false,"plugins":false},
             "default_permissions":"hello-agent-snapshot",
             "approval_policy":"never",
             "permissions":{"hello-agent-snapshot":expected_policy(&home, &workspace)}
-        }}});
+        });
+        let config_response = json!({"id":2,"result":{"config":flags,"layers":[
+            {"name":{"type":"sessionFlags"},"config":flags},
+            {"name":{"type":"user","file":home.join("config.toml")},"config":{"cli_auth_credentials_store":"file"}},
+            {"name":{"type":"system","file":"/etc/codex/config.toml"},"config":{}}
+        ]}});
         let script = format!(
             r#"
 IFS= read -r line || exit 1

@@ -3,8 +3,6 @@
 //! 실제 유료 agent 실행과 원본 적용은 후속 게이트에서 추가한다.
 
 mod agent_runtime;
-#[cfg(target_os = "macos")]
-#[allow(dead_code)] // Named tool-policy candidate; product launch remains blocked.
 mod application_cancel;
 mod chat;
 mod project;
