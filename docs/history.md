@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 모델 없는 제어 초기화 계약)
+
+- 기준e29cb36에서 Anthropic 공식 Python SDK의 _internal/query.py를 읽고 initialize 제어 요청과 사용자 메시지 전송을 분리한 구조를 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py (2026-10-06 관측, mutable main). system/init 관측과 control_response는 별개 계약이며 서로 대체하지 않는다.
+- claude_control에 고정 initialize frame과 단회 요청·request_id 대조·성공 object 응답·실패/닫힘 상태를 추가했다. hooks:null은 SDK callback 미등록일 뿐 디스크 hook 차단 증거가 아니고 skills:[]만 명시한다. 응답의 원시 account/catalog는 보존하지 않으며 Ready는 제어 연결 상태만 뜻한다. 목표·임의 명령·권한 승인 frame은 만들지 않는다.
+- Karpathy 지침으로 단회·잘못된 신원·error·누락·중복 필드·unsolicited·닫힌 연결 회귀를 작성했다. rustfmt/diff만 수행하고 실제 process IO 연결·launch 격리·초기화 순서 실측·통합 검증은 남긴다. 설치/계정/모델 실행·제품 활성화·main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 초기화 관측과 출력 session 연결)
 
 - 기준90d5d45에서 공식 SDKSystemMessage 원문을 다시 읽고 claude_init을 구현했다. https://code.claude.com/docs/en/agent-sdk/typescript#sdksystemmessage 및 공식 .md 원문 기준이다. 요청 cwd/model/permissionMode/tool 집합과 실제 init을 비교하고 MCP·skills·plugins·agents·plugin 오류가 없는 구성을 요구한다. 외부 확장을 실행해 보고 검사한 것이 아니라 초기화 parser 후보다.
