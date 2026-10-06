@@ -96,15 +96,15 @@ mod named_observation_tests {
 /// must already be a verified managed snapshot. This queries account/models,
 /// but never creates a thread or sends a goal; it is not a capability grant.
 #[allow(dead_code)] // Product discovery integration remains gated.
-pub(crate) fn inspect_named_preflight_candidate<'a>(
-    profile: &'a crate::provider_profile::CodexProfileBinding,
+pub(crate) fn inspect_named_preflight_candidate(
+    profile: crate::provider_profile::CodexProfileBinding,
     executable: &crate::provider_executable::PinnedExecutable,
     helper: &crate::provider_executable::PinnedExecutable,
     expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
     permission: ExpectedPermission,
     workspace: &std::path::Path,
     cancel: &AtomicBool,
-) -> Result<ProviderInspection<'a, NamedProfileObservation>, SidecarError> {
+) -> Result<ProviderInspection<'static, NamedProfileObservation>, SidecarError> {
     let home = profile.revalidate()?;
     let mut flow = PreflightExchange::with_named_permission(
         expected,
@@ -124,13 +124,13 @@ pub(crate) fn inspect_named_preflight_candidate<'a>(
         expected,
         permission,
     )?;
-    let mut process = LoginProcess::reserve(profile)?;
+    let mut process = LoginProcess::reserve_codex_owned(profile)?;
     let launched = command.launch(&mut process, |child, _| {
         executable.revalidate().map_err(std::io::Error::other)?;
         helper.revalidate().map_err(std::io::Error::other)?;
-        if profile.revalidate().map_err(std::io::Error::other)? != home
-            || cancel.load(Ordering::Acquire)
-        {
+        // launch_with_identity_barrier revalidates its owned profile before
+        // this callback. No borrowed profile survives outside the request.
+        if cancel.load(Ordering::Acquire) {
             return Err(std::io::Error::other(
                 "preflight canceled or profile changed",
             ));
@@ -148,7 +148,7 @@ pub(crate) fn inspect_named_preflight_candidate<'a>(
         // while shutting down, even though the protocol itself matched.
         executable.revalidate()?;
         helper.revalidate()?;
-        if profile.revalidate()? != home || cancel.load(Ordering::Acquire) {
+        if process.closed_codex_home()? != home || cancel.load(Ordering::Acquire) {
             return Err(failure());
         }
         Ok(NamedProfileObservation {

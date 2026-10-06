@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (실패한 조회의 장기 소유권·종료 차단 연결)
+
+- 기준 374ce23. named 사전 조회가 CodexProfileBinding을 빌려 쓰지 않고 LoginProcess에 소유권을 넘겨 static inspection owner를 반환하도록 바꿨다. 기존 launch barrier의 profile 재검증을 재사용하며 성공 종료 뒤 profile 경로를 재확인하는 별도 accessor는 종료 확인·run fence 부재·Codex namespace를 요구한다. 종료한 process를 다시 실행할 수 있게 만들지 않았다.
+- Karpathy 지침으로 runtime에 discovery_cleanup registry를 추가했다. run fence를 가진 소유자는 거절하고 실패한 조회의 원래 process만 보관해 polling한다. 확인된 종료에만 제거하고 불확실하면 보관·오류를 유지한다. 앱 종료 blocker와 실행 한도에 포함하며 조회용 가짜 run/terminal 이벤트를 만들지 않는다.
+- native.rs rustfmt·git diff --check 확인. 이번 컴파일/회귀·실제 계정 조회는 미실행이며 아직 제품 scoped discovery caller는 registry/inspection을 호출하지 않는다. 다음은 해당 caller 및 관측→capability projection 연결, 이후 전체 통합 검증이다. 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (채팅 범위 응답 fingerprint 연결·기록 롤오버)
 
 - 기준 84e20c0. Karpathy 지침으로 선택적 capability scope(chatId/roleId/worktreeId/workspaceIdentity)를 Rust/TS 응답과 canonical fingerprint에 포함했다. scoped 조회는 현재 채팅에서 scope를 만들고, fixture 시작은 재조회한 capability에 현재 scope를 다시 결속한다. 예약은 교차 scope를 거절하며 renderer도 반환된 scope 불일치를 거절한다. 기존 무범위 fixture 계약은 유지하고 제품 blocked 상태는 바꾸지 않았다.

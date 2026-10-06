@@ -161,6 +161,7 @@ pub(crate) struct AgentRuntime {
     active: HashMap<String, ActiveAgentRun>,
     native: HashMap<String, native::NativeRun>,
     failed_starts: HashMap<String, native::FailedStart>,
+    discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -182,6 +183,7 @@ impl AgentRuntime {
             active: HashMap::new(),
             native: HashMap::new(),
             failed_starts: HashMap::new(),
+            discovery_cleanup: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -406,6 +408,7 @@ impl AgentRuntime {
             .keys()
             .chain(self.native.keys())
             .chain(self.failed_starts.keys())
+            .chain(self.discovery_cleanup.keys())
             .cloned()
             .collect()
     }
@@ -429,6 +432,7 @@ impl AgentRuntime {
             active: HashMap::new(),
             native: HashMap::new(),
             failed_starts: HashMap::new(),
+            discovery_cleanup: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -511,7 +515,7 @@ impl AgentRuntime {
         if self.preparing_to_quit {
             return Err(ProjectFailure::recovery("sidecar is preparing to quit"));
         }
-        if active_run_limit_reached(self.active.len() + self.native.len() + self.failed_starts.len()) {
+        if active_run_limit_reached(self.owned_run_ids().len()) {
             return Err(ProjectFailure::recovery(
                 "actual-agent session active-run limit reached before spawn or lock",
             ));
@@ -1117,6 +1121,7 @@ impl AgentRuntime {
         // Deliver successfully collected events before reporting a persistent
         // error on a subsequent idle poll, rather than discarding those events.
         for result in [
+            self.poll_discovery_cleanup(),
             self.poll_failed_starts(storage, projects),
             self.poll_native(storage, projects),
             self.poll_fixture_runs(storage, projects),

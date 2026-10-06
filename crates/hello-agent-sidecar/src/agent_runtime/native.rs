@@ -115,6 +115,55 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    /// An unsuccessful model-free inspection is not a run, but still owns a
+    /// process and profile reservation. Keep it through polls and app shutdown.
+    #[allow(dead_code)] // Called by the forthcoming scoped discovery dispatcher.
+    pub(crate) fn retain_discovery_cleanup(
+        &mut self,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+    ) -> Result<(), SidecarError> {
+        let failure =
+            || SidecarError::new("agentRecoveryRequired", "discovery cleanup owner differs");
+        let owner = process.as_ref().ok_or_else(failure)?;
+        let key = format!("provider-discovery:{}", owner.connection_id());
+        if owner.retains_run_fence() || self.discovery_cleanup.contains_key(&key) {
+            return Err(failure());
+        }
+        self.discovery_cleanup
+            .insert(key, process.take().ok_or_else(failure)?);
+        Ok(())
+    }
+
+    pub(super) fn poll_discovery_cleanup(&mut self) -> Result<Vec<G5Event>, SidecarError> {
+        let keys: Vec<_> = self.discovery_cleanup.keys().cloned().collect();
+        let mut failure = None;
+        for key in keys {
+            let process = self.discovery_cleanup.get_mut(&key).unwrap();
+            match process.poll_finish() {
+                Ok(false) => continue,
+                Ok(true)
+                    if process
+                        .closure_evidence()
+                        .is_some_and(|receipt| receipt.confirmed()) =>
+                {
+                    self.discovery_cleanup.remove(&key);
+                }
+                Ok(true) | Err(_) => {
+                    // No synthetic run or terminal event: discovery has neither.
+                    // Preserve the actual owner and expose a recovery error.
+                    failure = Some(SidecarError::new(
+                        "agentRecoveryRequired",
+                        "provider discovery cleanup is unconfirmed",
+                    ));
+                }
+            }
+        }
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        Ok(Vec::new())
+    }
+
     /// Bridge a durably admitted reservation to dispatcher ownership. This is
     /// not admission: the product caller must obtain fresh provider evidence
     /// before reserving. On rejection, nonempty input slots remain caller-owned.
@@ -424,11 +473,7 @@ impl AgentRuntime {
                 "native registration unavailable",
             )
         };
-        if self.preparing_to_quit
-            || active_run_limit_reached(
-                self.active.len() + self.native.len() + self.failed_starts.len(),
-            )
-        {
+        if self.preparing_to_quit || active_run_limit_reached(self.owned_run_ids().len()) {
             return Err(failure());
         }
         let identity = owner

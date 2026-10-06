@@ -397,6 +397,18 @@ impl<'a> LoginProcess<'a> {
     pub(crate) fn closure_evidence(&self) -> Option<&ProcessClosureEvidence> {
         self.closure.as_ref()
     }
+
+    /// Validate the owned Codex profile after the inspection reservation was
+    /// released. This cannot be used to resume or launch the finished process.
+    pub(crate) fn closed_codex_home(&self) -> Result<std::path::PathBuf, SidecarError> {
+        if !self.finished || self.retain_for_terminal
+            || !self.closure.as_ref().is_some_and(|receipt| receipt.confirmed)
+            || self.profile.as_ref().pending_name() != "codex-login.pending"
+        {
+            return Err(failure());
+        }
+        self.profile.as_ref().revalidate()
+    }
     pub(crate) fn codex_preflight_home(&self) -> Result<std::path::PathBuf, SidecarError> {
         if self.profile.as_ref().pending_name() != "codex-login.pending" {
             return Err(failure());
