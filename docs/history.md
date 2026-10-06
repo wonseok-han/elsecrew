@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 최종 결과 관측 연결)
+
+- 기준f5488cb의 공개 출력 parser에 앞선 턴에서 읽은 공식 SDKResultMessage 계약의 최종 결과 관측을 추가했다. 출처: https://code.claude.com/docs/en/agent-sdk/typescript#sdkresultmessage. success/error subtype·is_error·terminal_reason을 구분하며 미지 종료 이유는 성공으로 승격하지 않는다. result 본문을 assistant 답변에 다시 붙이거나 오류 원문을 공개하지 않는다.
+- queued_turn_count 누락은 0이 아닌 unknown으로 유지하고 권한 거절 존재만 전달한다. 같은 session/uuid·예산 검사와 sticky 실패를 유지한다. 최종 결과가 와도 같은 session의 다음 queued turn이 있을 수 있으며, 결과 관측은 프로세스 종료·자손 회수·잠금 해제 권한이 아니다.
+- Karpathy 지침으로 기존 모듈만 확장하고 성공/실패/비완료 이유·큐 미관측/잔류·교차 session·중복·오류 원문 비노출 회귀를 작성했다. rustfmt/diff 통과, 테스트 실행과 실제 transport·초기화/권한/종료 연결은 후속이다. 계정/모델 호출·제품 활성화·main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 실제 출력 형식 adapter 착수)
 
 - 기준158352c에서 공식 headless/TypeScript SDK 문서를 직접 읽고 Claude stream-json의 assistant 출력 projection을 core에 추가했다. https://code.claude.com/docs/en/headless 및 https://code.claude.com/docs/en/agent-sdk/typescript#sdkassistantmessage 기준이며 SDK 문서는 웹 도구 크기 제한 때문에 공식 .md 원문을 curl로 읽었다. 설치 CLI·계정·모델은 실행하지 않았다.

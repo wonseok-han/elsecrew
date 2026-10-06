@@ -1,6 +1,7 @@
 //! Public assistant projection for Claude Code stream-json, not launch authority.
 //! Source: https://code.claude.com/docs/en/agent-sdk/typescript#sdkassistantmessage
-//! The owner must separately handle initialization, tools, result, and process exit.
+//! The owner must separately handle initialization, tools, and process exit.
+//! Result observations are not proof of completion, empty queues, or child cleanup.
 //! Partial stream events are not emitted here, avoiding duplicate text delivery.
 use super::{BoundedObservation, ProviderError};
 use crate::provider::{
@@ -19,7 +20,35 @@ pub enum Projection {
         /// The original frame still needs non-public block handling by the owner.
         has_private_blocks: bool,
     },
+    Result(ResultObservation),
     RequiresHandling,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReportedOutcome {
+    Success,
+    Failure,
+    /// A non-completion reason is not promoted to successful work.
+    RequiresHandling,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResultObservation {
+    pub outcome: ReportedOutcome,
+    /// None means the provider did not report queue state, not an empty queue.
+    pub queued_turn_count: Option<u64>,
+    pub permission_denied: bool,
+}
+
+#[derive(Deserialize)]
+struct ResultWire {
+    uuid: String,
+    session_id: String,
+    subtype: String,
+    is_error: bool,
+    terminal_reason: Option<String>,
+    queued_turn_count: Option<u64>,
+    permission_denials: Vec<Box<RawValue>>,
 }
 
 #[derive(Deserialize)]
@@ -99,6 +128,40 @@ impl SessionProjection {
             return Err(invalid());
         }
         let tag: Tag = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if tag.kind == "result" {
+            let wire: ResultWire = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            if wire.session_id != self.session_id
+                || !identifier(&wire.uuid)
+                || !self.seen.insert(wire.uuid)
+                || wire
+                    .queued_turn_count
+                    .is_some_and(|n| n > 9_007_199_254_740_991)
+            {
+                return Err(invalid());
+            }
+            let outcome = match wire.subtype.as_str() {
+                "success" if wire.is_error => ReportedOutcome::Failure,
+                "success"
+                    if wire
+                        .terminal_reason
+                        .as_deref()
+                        .is_none_or(|r| r == "completed") =>
+                {
+                    ReportedOutcome::Success
+                }
+                "success" => ReportedOutcome::RequiresHandling,
+                "error_max_turns"
+                | "error_during_execution"
+                | "error_max_budget_usd"
+                | "error_max_structured_output_retries" => ReportedOutcome::Failure,
+                _ => return Err(invalid()),
+            };
+            return Ok(Projection::Result(ResultObservation {
+                outcome,
+                queued_turn_count: wire.queued_turn_count,
+                permission_denied: !wire.permission_denials.is_empty(),
+            }));
+        }
         if tag.kind != "assistant" {
             return Ok(Projection::RequiresHandling);
         }
@@ -157,6 +220,102 @@ impl SessionProjection {
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+    fn result() -> Value {
+        json!({"type":"result","uuid":"result-a","session_id":"session-a",
+            "subtype":"success","is_error":false,"permission_denials":[],
+            "result":"DO_NOT_APPEND_AGAIN","errors":["PRIVATE"]})
+    }
+    #[test]
+    fn result_is_a_report_not_public_text_or_queue_and_exit_proof() {
+        let mut parser = SessionProjection::new("session-a").unwrap();
+        match parser.project(&observe(&result())).unwrap() {
+            Projection::Result(observation) => assert_eq!(
+                observation,
+                ResultObservation {
+                    outcome: ReportedOutcome::Success,
+                    queued_turn_count: None,
+                    permission_denied: false,
+                }
+            ),
+            _ => panic!("expected result observation"),
+        }
+        // A session may have another queued turn; observing a result does not close it.
+        assert!(matches!(
+            parser.project(&observe(&frame("uuid-next"))).unwrap(),
+            Projection::Assistant { .. }
+        ));
+        assert!(parser.project(&observe(&result())).is_err());
+    }
+    #[test]
+    fn result_preserves_failure_attention_and_pending_queue_distinctions() {
+        for (patch, expected) in [
+            (json!({"is_error":true}), ReportedOutcome::Failure),
+            (
+                json!({"subtype":"error_max_turns"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_during_execution"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_max_budget_usd"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"subtype":"error_max_structured_output_retries"}),
+                ReportedOutcome::Failure,
+            ),
+            (
+                json!({"terminal_reason":"tool_deferred"}),
+                ReportedOutcome::RequiresHandling,
+            ),
+            (
+                json!({"terminal_reason":"new_reason"}),
+                ReportedOutcome::RequiresHandling,
+            ),
+            (
+                json!({"terminal_reason":"completed"}),
+                ReportedOutcome::Success,
+            ),
+        ] {
+            let mut wire = result();
+            wire.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            wire["queued_turn_count"] = json!(2);
+            wire["permission_denials"] = json!([{"tool_input":"SECRET"}]);
+            match SessionProjection::new("session-a")
+                .unwrap()
+                .project(&observe(&wire))
+                .unwrap()
+            {
+                Projection::Result(observation) => {
+                    assert_eq!(observation.outcome, expected);
+                    assert_eq!(observation.queued_turn_count, Some(2));
+                    assert!(observation.permission_denied);
+                    assert!(!format!("{observation:?}").contains("SECRET"));
+                }
+                _ => panic!("expected result observation"),
+            }
+        }
+        for patch in [
+            json!({"session_id":"other"}),
+            json!({"subtype":"unknown"}),
+            json!({"queued_turn_count":-1}),
+            json!({"queued_turn_count":9007199254740992_u64}),
+            json!({"permission_denials":null}),
+            json!({"is_error":null}),
+        ] {
+            let mut wire = result();
+            wire.as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            let mut parser = SessionProjection::new("session-a").unwrap();
+            assert!(parser.project(&observe(&wire)).is_err());
+            assert!(parser.project(&observe(&result())).is_err());
+        }
+    }
     fn frame(uuid: &str) -> Value {
         json!({"type":"assistant","uuid":uuid,"session_id":"session-a","parent_tool_use_id":null,
         "message":{"id":"message-shared","role":"assistant","content":[
@@ -192,7 +351,6 @@ mod tests {
     fn does_not_publish_partial_result_error_or_subagent_frames() {
         for (key, value) in [
             ("type", json!("stream_event")),
-            ("type", json!("result")),
             ("parent_tool_use_id", json!("tool-a")),
             ("error", json!("authentication_failed")),
             ("aborted", json!(true)),
