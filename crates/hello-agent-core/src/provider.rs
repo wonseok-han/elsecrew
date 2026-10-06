@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub mod vendor_observation;
+mod unique_json;
 
 pub const PROVIDER_OBSERVATION_LINE_MAX_BYTES: usize = 128 * 1024;
 pub const PROVIDER_OBSERVATION_TOTAL_MAX_BYTES: usize = 1024 * 1024;
@@ -150,7 +151,7 @@ impl BoundedObservation {
     }
 
     fn json(&self) -> Result<Value, ProviderError> {
-        serde_json::from_slice(&self.bytes)
+        unique_json::parse(&self.bytes)
             .map_err(|_| ProviderError("provider observation is malformed JSON".into()))
     }
 }

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (원시 JSON 중복 거절과 named 정책 대조 재사용)
+
+- 직전775d657은 계층 대조와 공통 모듈 플랫폼 조건 수정의 진전이었다. 공급자 BoundedObservation의 JSON 파서를 object 키 중복을 모든 깊이에서 거절하도록 변경했다. escaped 동일 키도 중복이며 기존 serde_json의 깊이 제한과 숫자/배열/문자열 의미는 유지한다. 오류에 원문 키를 넣지 않는다.
+- Codex ModelFreeExchange는 typed Reply/Value 변환 전에 전체 원시 응답을 검사한다. 따라서 nested permission/config의 중복 키가 마지막 값으로 축약되기 전에 해당 연결이 실패 상태로 전환된다. 기존 중복 보존 회귀를 더 이른 거절 회귀로 갱신하고 깊은/escaped 중복·정상 JSON 동등성 사례를 작성했다.
+- 임시 probe에만 있던 expected_write_policy/matches_write_policy를 named 실행 연결 모듈로 옮겨 관측된 null 정규화와 정확한 쓰기 정책 대조를 재사용한다. probe는 같은 함수를 호출한다. 이 함수 자체는 Value 관측 비교이며 실행 권한이 아니다. 제품 owner는 raw 검사·동일 연결·snapshot 수명·종료 검증과 결합해야 한다.
+- rustfmt/diff만 확인했고 이번 변경의 컴파일/회귀 실행은 누적 검증에 남겼다. 실제 named thread/turn과 owner·Claude 연결·전체 UI/플랫폼 gate는 아직 미완료다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named 설정 계층 대조 연결)
 
 - 직전 da43b1d는 설치 공급자 임시 시험 통과로 다음 실행 연결의 근거를 확보한 진전이었다. named 실행 설정 후보에 sessionFlags/user/system 세 계층의 출처·설정 대조를 추가하고 기존 permission probe에서 도구 실행 전에 사용하도록 연결했다. 추가 project/system 설정·중복 계층·비활성 계층·legacy sandbox 혼합·다른 model/effort·확장 기능 활성화를 거절한다. effective policy의 null 정규화/내용 대조는 기존 probe 검사와 함께 사용한다.

@@ -2,7 +2,56 @@
 //! The runtime must match effective config/layers and tool enforcement before use.
 use super::{discovery_arguments, ExpectedPermission, PreflightExchange};
 use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
+use serde_json::{json, Value};
 use std::{ffi::OsString, io, path::Path};
+
+pub(crate) fn expected_write_policy(home: &Path, workspace: &Path) -> Value {
+    json!({"filesystem":{
+        ":root":"deny", ":minimal":"read", home.to_str().unwrap():"deny",
+        workspace.to_str().unwrap():{".":"write",".git":"deny",".codex":"deny",".claude":"deny",".agents":"deny"}
+    },"network":{"enabled":false}})
+}
+
+pub(crate) fn matches_write_policy(value: &Value, home: &Path, workspace: &Path) -> bool {
+    let mut normalized = value.clone();
+    // Observed 0.159.2 serializer defaults, not an arbitrary null-field bypass.
+    for (object, keys) in [
+        ("", &["description", "extends", "workspace_roots"][..]),
+        ("filesystem", &["glob_scan_max_depth"][..]),
+        (
+            "network",
+            &[
+                "allow_local_binding",
+                "allow_upstream_proxy",
+                "dangerously_allow_all_unix_sockets",
+                "dangerously_allow_non_loopback_proxy",
+                "domains",
+                "enable_socks5",
+                "enable_socks5_udp",
+                "mitm",
+                "mode",
+                "proxy_url",
+                "socks_url",
+                "unix_sockets",
+            ][..],
+        ),
+    ] {
+        let target = if object.is_empty() {
+            &mut normalized
+        } else {
+            &mut normalized[object]
+        };
+        let Some(map) = target.as_object_mut() else {
+            return false;
+        };
+        for key in keys {
+            if map.get(*key).is_some_and(Value::is_null) {
+                map.remove(*key);
+            }
+        }
+    }
+    normalized == expected_write_policy(home, workspace)
+}
 
 /// Reported layer provenance only. This does not prove that startup extensions
 /// never ran, nor authorize a process/turn. The RPC owner must validate framing.

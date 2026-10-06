@@ -148,6 +148,9 @@ impl ModelFreeExchange {
         if self.failed || !self.pending {
             return Err(error());
         }
+        // Validate the entire raw tree before typed parsing or Value projection
+        // can erase duplicate keys in nested permission/config objects.
+        input.json().map_err(|_| error())?;
         let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| error())?;
         if reply.id != self.request_id() || !reply.result.get().trim_start().starts_with('{') {
             return Err(error());
@@ -338,27 +341,19 @@ mod tests {
     }
 
     #[test]
-    fn nested_duplicates_survive_for_the_vendor_validator() {
+    fn nested_duplicates_fail_before_value_projection() {
         let mut exchange = ModelFreeExchange::default();
         exchange.next_request().unwrap();
         exchange
             .accept(&input(r#"{"id":1,"result":{"userAgent":"test"}}"#))
             .unwrap();
         exchange.next_request().unwrap();
-        let (_, result) = exchange
+        let error = exchange
             .accept(&input(
                 r#"{"id":2,"result":{"config":{"model":"SECRET","model":"test"}}}"#,
             ))
-            .unwrap();
-        assert_eq!(
-            std::str::from_utf8(&result.bytes).unwrap(),
-            r#"{"config":{"model":"SECRET","model":"test"}}"#
-        );
-        assert!(!format!("{result:?} {exchange:?}").contains("SECRET"));
-        let profile = super::super::codex_preflight::ExpectedProfile {
-            model: "test",
-            reasoning_effort: "medium",
-        };
-        assert!(super::super::codex_preflight::match_read_only_config(&result, &profile).is_err());
+            .unwrap_err();
+        assert!(!format!("{error:?} {exchange:?}").contains("SECRET"));
+        assert!(exchange.next_request().is_err());
     }
 }
