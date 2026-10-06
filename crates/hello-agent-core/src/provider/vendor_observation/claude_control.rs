@@ -19,6 +19,7 @@ pub struct InitializeExchange {
     state: State,
     models: Vec<ModelEntry>,
     hooks_applied: bool,
+    default_permission_mode: bool,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +60,7 @@ impl InitializeExchange {
             state: State::New,
             models: Vec::new(),
             hooks_applied: false,
+            default_permission_mode: false,
         })
     }
     pub fn state(&self) -> State {
@@ -125,6 +127,7 @@ impl InitializeExchange {
             #[serde(default)]
             models: Vec<ModelEntry>,
             hooks_applied: Option<bool>,
+            current_permission_mode: Option<String>,
         }
         let capabilities: Capabilities = serde_json::from_str(wire.response.response.get()).map_err(|_| invalid())?;
         let valid_model = |s: &str| !s.is_empty() && s.len() <= 128 && !s.starts_with('-')
@@ -139,13 +142,14 @@ impl InitializeExchange {
         }) { return Err(invalid()); }
         self.models = capabilities.models;
         self.hooks_applied = capabilities.hooks_applied == Some(true);
-        // Keep only model capability fields; never retain account or raw response data.
+        self.default_permission_mode = capabilities.current_permission_mode.as_deref() == Some("default");
+        // Keep only bounded capability/mode evidence, never account or raw response data.
         Ok(())
     }
 
-    /// Provider-reported availability, not authentication or tool confinement.
+    /// Provider-reported catalog and mode, not account entitlement or confinement.
     pub fn profile_model(&self, model: &str, effort: &str) -> Result<&str, ProviderError> {
-        if self.state != State::Ready || !self.hooks_applied { return Err(invalid()); }
+        if self.state != State::Ready || !self.hooks_applied || !self.default_permission_mode { return Err(invalid()); }
         let entry = self.models.iter().find(|entry| entry.value == model).ok_or_else(invalid)?;
         if entry.supports_effort != Some(true) || !entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort)) {
             return Err(invalid());
@@ -157,6 +161,7 @@ impl InitializeExchange {
         self.state = State::Closed;
         self.models.clear();
         self.hooks_applied = false;
+        self.default_permission_mode = false;
     }
 }
 
@@ -172,7 +177,7 @@ mod tests {
     #[test]
     fn profile_requires_reported_model_effort_and_registered_hooks() {
         let base = json!({"type":"control_response","response":{"subtype":"success","request_id":"init_a","response":{
-            "hooks_applied":true,"models":[{"value":"opus","resolvedModel":"claude-opus-test",
+            "hooks_applied":true,"current_permission_mode":"default","models":[{"value":"opus","resolvedModel":"claude-opus-test",
                 "supportsEffort":true,"supportedEffortLevels":["low","high"]}],"account":{"private":"SECRET"}
         }}});
         let mut exchange = InitializeExchange::new("init_a").unwrap();
@@ -183,9 +188,17 @@ mod tests {
         assert!(exchange.profile_model("other", "high").is_err());
         exchange.close();
         assert!(exchange.profile_model("opus", "high").is_err());
-        for field in ["hooks_applied", "models"] {
+        for field in ["hooks_applied", "models", "current_permission_mode"] {
             let mut wire = base.clone();
             wire["response"]["response"].as_object_mut().unwrap().remove(field);
+            let mut exchange = InitializeExchange::new("init_a").unwrap();
+            exchange.request().unwrap();
+            exchange.accept_response(&input(&wire)).unwrap();
+            assert!(exchange.profile_model("opus", "high").is_err());
+        }
+        for mode in ["bypassPermissions", "acceptEdits", "auto", "plan", "unknown"] {
+            let mut wire = base.clone();
+            wire["response"]["response"]["current_permission_mode"] = json!(mode);
             let mut exchange = InitializeExchange::new("init_a").unwrap();
             exchange.request().unwrap();
             exchange.accept_response(&input(&wire)).unwrap();

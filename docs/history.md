@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (무계정 Claude 초기화 실측·권한 모드 결속)
+
+- 기준 fadd733. 승인된 임시 HOME/profile/workspace에서 서명 확인된 Claude 2.1.287에 stream-json control initialize만 전송했다. 사용자 메시지 0, 계정/API key 환경 상속 없음, 모델 호출 없음. success/hooks_applied=true 및 모델별 resolvedModel/effort 목록을 관측했고 두 번째 조회에서 current_permission_mode=default를 확인했다. 계정/원문 응답은 출력·저장하지 않았다.
+- 무계정 초기화에도 모델 목록이 나오므로 모델 목록을 계정 entitlement로 취급하면 안 된다. 기존 profile_model에 보고된 default 권한 모드 확인을 추가하고 누락/auto/acceptEdits/bypass/기타 모드 거절 회귀를 작성했다. system/init의 기존 모드 대조도 유지하며 이 사전 확인은 격리 증거가 아니다.
+- 각 probe는 init 뒤 stdin 종료/SIGTERM, CLI exit 0이었다. close 시 groupAlive=true여서 동일 probe 그룹에 SIGKILL을 요청했으며 후속 ps에서 해당 CLI/probe 잔여 명령이 없음을 확인했다. 이는 제품 자손 종료 gate 증거가 아니다. 임시 자료는 /private/tmp/hello-agent-claude-init.Yf4d9h (약12KiB), 실제 인증/프로젝트 변경 없음.
+- Karpathy 지침으로 기존 파서를 확장했다. diff check 확인, Rust 빌드/회귀는 이번 미실행. 다음은 정책/도구 보호 관측과 Claude scoped discovery 연결. 제품 blocked, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 정책 조회의 공식 계약 확인)
 
 - 기준 65659e1. CLI/SDK/managed-settings/tools-reference 공식 문서를 읽기 전용 조회했다. SDK resolveSettings는 policyHelper 실행·서버 정책 fetch를 하지 않아 live admission 근거로 단독 사용 불가다. 관리 정책은 여러 OS/서버 source와 reload가 있으므로 파일 하나의 부재로 판정하지 않는다. 제안서 §6.9에 관측 한계와 다음 무계정 초기화/sentinel 증거 수집 순서를 기록했다.

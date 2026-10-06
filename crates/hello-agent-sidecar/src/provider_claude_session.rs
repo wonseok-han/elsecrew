@@ -556,7 +556,7 @@ mod tests {
         let mut exchange = InitializeExchange::new("init_test").unwrap();
         exchange.request().unwrap();
         let response = serde_json::json!({"type":"control_response","response":{
-            "subtype":"success","request_id":"init_test","response":{"hooks_applied":true,
+            "subtype":"success","request_id":"init_test","response":{"hooks_applied":true,"current_permission_mode":"default",
                 "models":[{"value":"opus","resolvedModel":"claude-opus-test","supportsEffort":true,"supportedEffortLevels":["high"]}]}
         }});
         exchange.accept_response(&hello_agent_core::provider::BoundedObservation::new(response.to_string().into_bytes()).unwrap()).unwrap();
