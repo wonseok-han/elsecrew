@@ -125,6 +125,7 @@ impl AgentRuntime {
         projects: &ProjectManager,
         reservation: &mut Option<preparation::RunReservation>,
         process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        observation: &crate::provider_preflight_session::NamedProfileObservation,
         executable: &crate::provider_executable::PinnedExecutable,
         helper: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
@@ -137,6 +138,15 @@ impl AgentRuntime {
         {
             return Err(failure());
         }
+        reservation
+            .as_ref()
+            .ok_or_else(failure)?
+            .verify_named_observation(
+                storage,
+                projects,
+                process.as_ref().ok_or_else(failure)?,
+                observation,
+            )?;
         let launch_error = match preparation::RunReservation::prepare_named_owner(
             reservation,
             process,

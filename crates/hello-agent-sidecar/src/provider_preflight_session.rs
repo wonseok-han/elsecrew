@@ -48,7 +48,6 @@ pub(crate) struct NamedProfileObservation {
 impl NamedProfileObservation {
     /// Discovery is short-lived and bound to the exact inputs. A fresh start
     /// still repeats the same-connection preflight before sending user input.
-    #[allow(dead_code)] // Product capability projection follows this boundary.
     pub(crate) fn matches(
         &self,
         expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,

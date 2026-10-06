@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (선택 프로필 관측값을 실제 시작 입구에 결속)
+
+- 기준 761d400에서 start_reserved_codex가 NamedProfileObservation을 필수 입력으로 받도록 연결했다. durable reservation/lock/역할 입력을 재검증하고 현재 worktree manifest 경로와 process의 실제 앱 profile HOME으로 관측값을 대조한다. 다른 모델/effort/권한/작업 사본/profile 또는 만료 관측은 launch/fence 인계 전에 거절한다.
+- Karpathy 지침으로 기존 validate_text_input·verify_workspace_for_run·codex_permission 검사를 재사용했다. 관측값은 실행 capability를 대체하지 않으며 기존 reserve의 capability/fingerprint 검증과 이후 같은 연결의 preflight도 유지한다. 거절한 reservation/process Option은 호출자에게 남으므로 상위 caller의 예약 실패 정리는 계속 필요하다.
+- native.rs rustfmt·git diff --check만 수행했다. 컴파일/새 회귀·실제 계정/모델/UI 연결·통합 검증은 후속이다. 다음은 제품 discovery/capability 및 상위 예약 caller 연결이며 제품 실행은 아직 비활성이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (사전 조회의 선택 프로필 관측값 보존)
 
 - 기준 338b473에서 named 조회가 단순 성공만 반환하던 부분을 NamedProfileObservation으로 확장했다. 계정 원문 없이 모델/effort/권한/snapshot/profile 경로 및 단조 시각만 내부에 보존한다. 같은 입력·30초 이내 여부를 대조하며 설정 전용 조회나 임의 renderer 값으로 생성하지 않는다. 종료 성공 뒤 CLI/helper/profile·취소를 다시 확인하고서만 반환한다.

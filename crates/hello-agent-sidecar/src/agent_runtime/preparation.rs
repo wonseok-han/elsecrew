@@ -207,6 +207,34 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
+    /// Recheck the selected discovery observation against durable inputs and
+    /// the actual profile owner immediately before attempting native launch.
+    pub(super) fn verify_named_observation(
+        &self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        process: &crate::provider_login_process::LoginProcess<'_>,
+        observation: &crate::provider_preflight_session::NamedProfileObservation,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "named discovery no longer matches");
+        self.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 =
+            serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let permission = codex_permission(&profile)?;
+        let manifest = projects.verify_workspace_for_run(
+            storage, &address_from_chat(&self.run).map_err(|_| failure())?,
+        ).map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let expected = hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
+        if !observation.matches(&expected, permission, workspace, &process.codex_preflight_home()?) {
+            return Err(failure());
+        }
+        Ok(())
+    }
+
     /// Incremental startup cleanup and terminal persistence. True authorizes the
     /// owner to release a confirmed fence separately, without repeating this
     /// transaction if that release needs another attempt.
