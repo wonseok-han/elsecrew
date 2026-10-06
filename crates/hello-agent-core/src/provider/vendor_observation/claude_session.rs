@@ -29,6 +29,10 @@ fn invalid() -> ProviderError {
 }
 
 impl Session {
+    pub fn is_closed(&self) -> bool {
+        self.failed
+    }
+
     pub fn new(expected: &claude_init::ExpectedInit<'_>) -> Self {
         Self {
             cwd: expected.cwd.into(),

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 첫 목표 메시지의 작업 공간 결속)
+
+- 기준b3b381e에서 공식 SDK client.py의 initialize 응답 뒤 user/session_id=""/parent_tool_use_id=null 메시지 전송을 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/client.py (2026-10-06 mutable main). Karpathy 지침으로 기존 TextWorkspace 검증을 재사용해 SessionChannel의 단회 초기 입력 큐를 연결했다.
+- 예상 cwd·연결 ID·닫힘/취소를 대조하고 workspace 재검증→실행 owner admission callback→재검증 후에만 opaque ClaudePrompt를 큐에 넣는다. owner는 run lock/역할/launch provenance/공급자 sandbox를 여전히 입증해야 한다. renderer 호출이나 실제 제품 실행은 열지 않았다. 원문64KiB와 JSON escape 뒤 wire 상한을 함께 확인하며 시도 실패·부분 전송은 새 메시지로 자동 재전송하지 않는다.
+- 직전 여러 연결 변경의 최소 누적 컴파일 진단으로 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked 통과(5.87초). 초기 user frame escaping/빈 입력/크기 회귀 작성, rustfmt/diff 통과. 테스트 실행·실제 실행 owner admission/launch·UI와 통합 검증은 남으며 컴파일 합격을 제품 완료로 해석하지 않는다. archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 단일 세션 수신 흐름)
 
 - 기준fdc279a에서 Karpathy 지침으로 기존 init/public projection/permission parser를 claude_session의 단일 수신 상태에 결합했다. 초기화 전 출력·권한 요청과 중복 init·미대기 control_response를 거절하고 모든 frame에 공통 event/byte 예산을 적용한다. 파싱/세션 오류는 권한 대기를 함께 닫으며 raw 입력은 공개하지 않는다.

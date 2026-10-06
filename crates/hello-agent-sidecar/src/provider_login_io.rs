@@ -43,6 +43,8 @@ pub(crate) struct LoginIo {
 /// Only requests already admitted by the corresponding protocol state machine.
 pub(crate) enum NativeFrame {
     #[cfg(target_os = "macos")]
+    ClaudePrompt(crate::provider_claude_session::InitialPrompt),
+    #[cfg(target_os = "macos")]
     ClaudeDenial(crate::provider_claude_session::PermissionDenial),
     ClaudeInitialize(
         hello_agent_core::provider::vendor_observation::claude_control::InitializeRequest,
@@ -60,6 +62,8 @@ pub(crate) enum NativeFrame {
 impl NativeFrame {
     fn bytes(&self) -> &[u8] {
         match self {
+            #[cfg(target_os = "macos")]
+            Self::ClaudePrompt(frame) => frame.as_str().as_bytes(),
             #[cfg(target_os = "macos")]
             Self::ClaudeDenial(frame) => frame.as_str().as_bytes(),
             Self::ClaudeInitialize(frame) => frame.as_str().as_bytes(),

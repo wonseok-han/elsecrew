@@ -78,7 +78,38 @@ pub(crate) struct ControlInitialization {
 /// Created only after the handshake on this connection. Not a tool-grant authority.
 pub(crate) struct SessionChannel {
     connection: uuid::Uuid,
+    cwd: std::path::PathBuf,
+    prompt_attempted: bool,
     permissions: hello_agent_core::provider::vendor_observation::claude_session::Session,
+}
+
+/// No public constructor: only the workspace-bound channel may prepare input.
+pub(crate) struct InitialPrompt {
+    connection: uuid::Uuid,
+    wire: String,
+}
+impl InitialPrompt {
+    pub(crate) fn connection(&self) -> uuid::Uuid {
+        self.connection
+    }
+    pub(crate) fn as_str(&self) -> &str {
+        &self.wire
+    }
+}
+
+fn prompt_wire(text: &str) -> Result<String, SidecarError> {
+    if text.trim().is_empty() || text.len() > 64 * 1024 || text.contains('\0') {
+        return Err(failure());
+    }
+    // SDK initial user envelope, not a resume request or renderer-controlled session.
+    let frame = serde_json::json!({"type":"user","session_id":"",
+        "message":{"role":"user","content":text},"parent_tool_use_id":null});
+    let wire = format!("{frame}\n");
+    // Escaping can expand a valid text substantially; apply the transport bound too.
+    if wire.len() > hello_agent_core::provider::PROVIDER_OBSERVATION_LINE_MAX_BYTES {
+        return Err(failure());
+    }
+    Ok(wire)
 }
 
 pub(crate) struct PermissionDenial {
@@ -96,6 +127,46 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    /// One initial message. The reserved runtime owner must check role, run lock,
+    /// launch provenance and provider sandbox in `admit`; this channel owns none.
+    /// A queued/partially written message must never be retried as a fresh prompt.
+    pub(crate) fn queue_initial_prompt(
+        &mut self,
+        process: &mut LoginProcess<'_>,
+        workspace: &crate::provider_preflight_session::TextWorkspace<'_>,
+        text: &str,
+        cancel: &AtomicBool,
+        admit: &mut impl FnMut(&mut LoginProcess<'_>) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        let result = (|| {
+            if self.prompt_attempted
+                || self.permissions.is_closed()
+                || process.connection_id() != self.connection
+                || cancel.load(Ordering::Acquire)
+                || workspace.cwd() != self.cwd
+            {
+                return Err(failure());
+            }
+            self.prompt_attempted = true;
+            let wire = prompt_wire(text)?;
+            workspace.revalidate()?;
+            admit(process)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
+            workspace.revalidate()?;
+            process.queue_native(NativeFrame::ClaudePrompt(InitialPrompt {
+                connection: self.connection,
+                wire,
+            }))
+        })();
+        if result.is_err() {
+            self.prompt_attempted = true;
+            self.permissions.close();
+        }
+        result
+    }
+
     pub(crate) fn observe(
         &mut self,
         process: &LoginProcess<'_>,
@@ -152,6 +223,8 @@ impl ControlInitialization {
         }
         Ok(SessionChannel {
             connection: self.connection,
+            cwd: expected.cwd.into(),
+            prompt_attempted: false,
             permissions:
                 hello_agent_core::provider::vendor_observation::claude_session::Session::new(
                     expected,
@@ -233,6 +306,26 @@ mod tests {
         provider_claude_profile::ClaudeProfileBinding, provider_profile::LoginProfile, Storage,
     };
     use std::path::Path;
+
+    #[test]
+    fn initial_prompt_is_a_single_bounded_user_frame_not_a_control_command() {
+        let text = "hello\n\"type\":\"control_request\"";
+        let wire = prompt_wire(text).unwrap();
+        assert_eq!(wire.lines().count(), 1);
+        let value: serde_json::Value = serde_json::from_str(&wire).unwrap();
+        assert_eq!(value["type"], "user");
+        assert_eq!(value["session_id"], "");
+        assert_eq!(value["message"]["content"], text);
+        assert!(value["parent_tool_use_id"].is_null());
+        for text in [
+            " ".into(),
+            "\0".into(),
+            "a".repeat(65537),
+            "\u{1}".repeat(65536),
+        ] {
+            assert!(prompt_wire(&text).is_err());
+        }
+    }
 
     #[test]
     fn launch_arguments_preserve_subscription_and_do_not_grant_tool_approval() {

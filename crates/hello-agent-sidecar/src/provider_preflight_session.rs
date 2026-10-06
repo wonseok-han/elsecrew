@@ -392,6 +392,10 @@ pub(crate) struct TextWorkspace<'a> {
 }
 
 impl<'a> TextWorkspace<'a> {
+    pub(crate) fn cwd(&self) -> &std::path::Path {
+        &self.cwd
+    }
+
     pub(crate) fn new(
         projects: &'a crate::project::ProjectManager,
         storage: &'a mut crate::Storage,
