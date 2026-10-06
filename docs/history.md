@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화 관측과 출력 session 연결)
+
+- 기준90d5d45에서 공식 SDKSystemMessage 원문을 다시 읽고 claude_init을 구현했다. https://code.claude.com/docs/en/agent-sdk/typescript#sdksystemmessage 및 공식 .md 원문 기준이다. 요청 cwd/model/permissionMode/tool 집합과 실제 init을 비교하고 MCP·skills·plugins·agents·plugin 오류가 없는 구성을 요구한다. 외부 확장을 실행해 보고 검사한 것이 아니라 초기화 parser 후보다.
+- 성공 관측은 동일 session 출력 projection으로 연결한다. capabilities의 interrupt_receipt_v1/interrupt_cancel_queued_v1을 독립적으로 관측하고 알 수 없는 capability 이름은 알려진 기능 권한으로 승격하지 않는다. 버전 문자열의 exact pin은 추가하지 않았다. 공식 문서상 일반 앱 init에는 effort가 누락되므로 추론 수준이 검증됐다고 주장하지 않는다.
+- Karpathy 지침으로 코드·회귀를 추가하고 rustfmt/diff만 검사했다. 인증·계정·모델 실행 없음. 실제 launch 설정 격리·effort 확인·transport/종료 owner 연결 및 누적 검증은 아직 남는다. 제품 실행은 비활성, Codex 설치 복구 승인 답변 대기, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 최종 결과 관측 연결)
 
 - 기준f5488cb의 공개 출력 parser에 앞선 턴에서 읽은 공식 SDKResultMessage 계약의 최종 결과 관측을 추가했다. 출처: https://code.claude.com/docs/en/agent-sdk/typescript#sdkresultmessage. success/error subtype·is_error·terminal_reason을 구분하며 미지 종료 이유는 성공으로 승격하지 않는다. result 본문을 assistant 답변에 다시 붙이거나 오류 원문을 공개하지 않는다.
@@ -71,6 +77,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Claude init의 관측 한계(2026-10-06)**: 공식 SDKSystemMessage의 effort는 일반 앱 init에서 누락된다. claude_init은 cwd/model/권한 모드/도구 및 비로딩 확장을 비교하지만 effort·계정·OS 격리를 입증하지 않는다. interrupt capability는 버전 대신 개별 이름으로 확인하고 실행 owner 연결은 후속이다.
 - **Claude 공개 출력 계약(2026-10-06)**: 실제 SDK assistant frame은 message.id가 반복될 수 있어 uuid로 구분한다. core claude_events projection은 main-session text만 내보내며 result는 프로세스 종료 증거가 아니다. 아직 실행 owner와 연결 전이고 fake provider/parser를 실제 실행 증거로 사용하지 않는다.
 - **백업 목록의 정리 상태(2026-10-06)**: backupRetention은 연결 이유와 별도로 cleanupState를 반환한다. deleted는 영속 정리 기록이며 파일 부재의 새 관측이 아니다. 별도 inspectBackupCleanup에서 실제 파일을 대조하고, 정리 후에도 이력은 보존한다. 제품 삭제는 여전히 비활성이다.
 - **복구점 종료 후보(2026-10-06)**: 완료된 현재 기록을 project/lock CAS로 과거 이력에 보존하는 내부 경로와 확인 IPC/UI를 연결했다. 원본·백업 파일/잠금은 변경하지 않으며 종료 뒤 별도 확인으로 과거 백업을 정리한다. 제품 기본값은 비활성, 통합·독립 검토 전이다.

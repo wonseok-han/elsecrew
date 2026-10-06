@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 pub mod codex_approval;
 pub mod claude_events;
+pub mod claude_init;
 pub mod codex_events;
 pub mod codex_login;
 pub mod codex_preflight;
