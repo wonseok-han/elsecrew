@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 셸 OS 경계 분리·재현 스크립트)
+
+- 기준 98617de. 동일 무계정 loopback fixture에서 시험에 한해 permissions.deny/사전 외부 읽기 제한을 제거하고 sandbox denyRead/denyWrite는 유지했다. 실제 셸 내부 읽기·쓰기 성공, 외부 cat/리다이렉션은 Operation not permitted·exit1, 원본 sentinel 보존을 관측했다. CLI 전체 exit0/result success와 개별 도구 오류는 별개다. 제품 설정은 변경하지 않았다.
+- 재현 경로 scripts/m5-claude-tool-probe.mjs를 추가했다. macOS 명시 --run과 절대 실행 파일을 요구하고 Anthropic 서명을 확인한 뒤 새 임시 HOME/profile/source/workspace 및 loopback 가짜 API만 사용한다. stdin은 가짜 메시지 1개, 응답/시간/요청 수 제한, 그룹 정리와 증거 조건·실패 exit2를 포함한다. 일반 테스트나 제품 admission에 자동 연결하지 않으며 productGate=false를 명시한다.
+- 원본 임시 probe는 실측 성공, 저장소용으로 일반화한 스크립트는 node --check/diff check만 확인했다. 이 스크립트 자체 재실행·관리 정책·네트워크·전체 자손/승인 UI 게이트는 후속이다. 다음은 이 경계 근거를 기존 Claude admission과 실제 dispatcher에 연결한다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (로컬 가짜 API의 실제 Claude 도구 경계 관측)
 
 - 기준 65720dc. 승인된 무계정 임시 자료로 loopback 가짜 Anthropic API를 띄워 고정 tool_use만 반환했다. Claude 2.1.287에 가짜 API key/별도 HOME/profile/workspace만 전달했다. 실제 계정·외부 모델 호출 없이 각 실행은 로컬 messages 2회로 끝났다. 실제 Read는 내부 sentinel을 반환하고 외부 source sentinel은 오류/미반환이었다.

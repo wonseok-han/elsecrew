@@ -578,6 +578,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 ## 7. 안전 경계
 
+셸 OS 경계 후속 관측에서는 fixture의 사전 외부 읽기 제한을 제거하고 sandbox denyRead/denyWrite만 유지했을 때 내부 쓰기 성공/외부 읽기·쓰기 Operation not permitted를 확인했다(2026-10-06, Claude 2.1.287). 재현은 별도 승인 후 `node scripts/m5-claude-tool-probe.mjs --run /absolute/signed/claude`로 수행한다. 일반 테스트 자동 실행과 제품 활성화 근거로 자동 승격하지 않는다. 스크립트는 새 임시 자료를 보존하고 요약에 위치를 표시한다. 원본 probe의 성공과 저장소 스크립트/전체 제품 검증은 구분한다.
+
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.
 
 | 경계 | M5 계약 |
