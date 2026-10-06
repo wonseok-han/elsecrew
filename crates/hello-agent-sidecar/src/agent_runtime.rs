@@ -163,6 +163,7 @@ pub(crate) struct AgentRuntime {
     scenario: FakeScenario,
     active: HashMap<String, ActiveAgentRun>,
     native: HashMap<String, native::NativeRun>,
+    pending_claude_starts: HashMap<String, native::PendingClaudeStart>,
     failed_starts: HashMap<String, native::FailedStart>,
     discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
     pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
@@ -199,6 +200,7 @@ impl AgentRuntime {
             scenario: FakeScenario::Clean,
             active: HashMap::new(),
             native: HashMap::new(),
+            pending_claude_starts: HashMap::new(),
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
             pending_discoveries: HashMap::new(),
@@ -420,6 +422,7 @@ impl AgentRuntime {
     pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
         self.active.contains_key(run_id)
             || self.native.contains_key(run_id)
+            || self.pending_claude_starts.contains_key(run_id)
             || self.failed_starts.contains_key(run_id)
     }
 
@@ -427,6 +430,7 @@ impl AgentRuntime {
         self.active
             .keys()
             .chain(self.native.keys())
+            .chain(self.pending_claude_starts.keys())
             .chain(self.failed_starts.keys())
             .chain(self.discovery_cleanup.keys())
             .chain(self.pending_discoveries.keys())
@@ -452,6 +456,7 @@ impl AgentRuntime {
             scenario,
             active: HashMap::new(),
             native: HashMap::new(),
+            pending_claude_starts: HashMap::new(),
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
             pending_discoveries: HashMap::new(),
@@ -1147,6 +1152,7 @@ impl AgentRuntime {
         for result in [
             self.poll_discoveries(),
             self.poll_discovery_cleanup(),
+            self.poll_claude_starts(storage, projects),
             self.poll_failed_starts(storage, projects),
             self.poll_native(storage, projects),
             self.poll_fixture_runs(storage, projects),
@@ -1375,6 +1381,9 @@ impl AgentRuntime {
 
     /// Queue only. The wire response must wait for the terminal transaction.
     pub(crate) fn request_cancel(&mut self, identity: &RunIdentity) -> Result<(), ProjectFailure> {
+        if let Some(pending) = self.pending_claude_starts.get(&identity.run_id) {
+            return pending.request_cancel(identity);
+        }
         if let Some(active) = self.native.get(&identity.run_id) {
             return active.request_cancel(identity);
         }
@@ -1671,6 +1680,9 @@ impl AgentRuntime {
 
     pub(crate) fn prepare_quit(&mut self, storage: &mut Storage, projects: &mut ProjectManager) {
         self.preparing_to_quit = true;
+        for pending in self.pending_claude_starts.values() {
+            pending.cancel();
+        }
         for pending in self.pending_discoveries.values() {
             pending.worker.cancel();
         }

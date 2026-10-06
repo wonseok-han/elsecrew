@@ -3,6 +3,8 @@
 use super::*;
 use preparation::OwnedTextRun;
 mod owner;
+mod claude_start;
+pub(super) use claude_start::PendingClaudeStart;
 use owner::NativeOwner;
 
 pub(super) struct FailedStart {

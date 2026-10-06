@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화 대기의 실행 관리자 소유권)
+
+- 기준 6fbd3f8. ClaudeStart를 pending registry에 등록하고 실행 한도/중복 검사·owned run 목록·취소·prepareQuit·poll에 연결했다. 등록 전 실패는 caller의 reservation/process 슬롯을 유지한다. 초기화 완료만 기존 native registry로 넘기며 실패는 기존 failed-start 종료/원장/fence 경로로 인계한다. 정리 등록 실패도 소유권을 보존하고 초기화/첫 메시지는 재시도하지 않는다.
+- Karpathy 지침으로 기존 소유자/정리 경로를 재사용했다. trusted prompt admission callback은 호출자가 제공해야 하며 초기화 성공을 허용으로 간주하지 않는다. 제품 admission/dispatcher는 아직 미연결이고 blocked 유지다.
+- 새 파일 rustfmt 및 diff check 확인. 사용자 방침대로 이번 빌드/테스트·실제 계정/모델 검증은 실행하지 않았으며 기능 연결 뒤 누적 검증 대상이다. 다음은 실제 Claude 정책 admission과 dispatcher 연결, 누적 회귀 및 안전 검토다. 기존 9월 archive 변경 보존, main/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (공식 복구 승인 재수신 확인)
+
+- 기준 6fbd3f8, m5/coding-agent-ide. 이전 공식 복구 질문의 승인을 수신해 제한 밖 읽기 전용 codesign --verify --strict --all-architectures로 Claude 2.1.287 실파일과 standalone Codex를 다시 확인했다. 둘 다 valid on disk / satisfies its Designated Requirement, exit 0이다.
+- 따라서 이전 제한 환경의 서명 오류를 설치 손상으로 판단한 결론은 철회 상태를 유지한다. 업데이트·재설치·앱 종료는 수행하지 않았으며 인증 정보·프로젝트도 변경하지 않았다. 로그인/모델 실행은 이번 검사 대상이 아니다.
+- 다음은 기존 Claude 초기화의 공통 실행 관리자 연결 및 실제 실행 입장 검증이다. 이번에는 진단 기록만 추가했고 기존 9월 아카이브 변경을 보존했다. main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 초기화 원장·실행 중 상태 연결)
 
 - 기준 9c608f8. 검증된 system/init만 만들 수 있는 opaque InitReceipt를 추가하고 Claude 채널의 cwd/실제 모델과 대조한다. 첫 입력 전 claude.stream.v1 transport 표식을 저장하며 초기화 시 같은 연결의 session 식별 digest·run/역할/작업 사본 결속을 저장한다. 세션 ID 원문은 원장에 넣지 않는다.
