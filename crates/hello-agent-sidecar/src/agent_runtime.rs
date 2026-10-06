@@ -54,6 +54,7 @@ const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
     Blocked,
+    NativeCodex,
     #[cfg_attr(not(test), allow(dead_code))]
     FakeExact,
 }
@@ -177,6 +178,19 @@ struct ObservedProvider {
 }
 
 impl AgentRuntime {
+    /// Integrated candidate for admission tests. The normal stdio constructor
+    /// stays blocked until native attestation and the activation review pass.
+    #[allow(dead_code)]
+    pub(crate) fn native_codex_candidate() -> Self {
+        let mut runtime = Self::blocked();
+        runtime.provider = ProviderMode::NativeCodex;
+        runtime
+    }
+
+    pub(crate) fn uses_native_codex(&self) -> bool {
+        self.provider == ProviderMode::NativeCodex
+    }
+
     pub(crate) fn blocked() -> Self {
         Self {
             provider: ProviderMode::Blocked,
@@ -445,7 +459,7 @@ impl AgentRuntime {
     }
 
     pub(crate) fn advertises_g5a(&self) -> bool {
-        self.provider == ProviderMode::FakeExact
+        self.provider != ProviderMode::Blocked
     }
 
     pub(crate) fn get_context_capabilities(
@@ -489,7 +503,9 @@ impl AgentRuntime {
         let request = json!({"runtime":runtime,"refresh":refresh});
         validate_agent_adapter_payload_v1("capabilitiesRequest", &request)
             .map_err(contract_failure)?;
-        let snapshot = if self.provider == ProviderMode::Blocked {
+        // Native queries without an exact chat/role must not use fixture
+        // discovery or a runtime-global cache as provider authority.
+        let snapshot = if self.provider != ProviderMode::FakeExact {
             self.blocked_capability(runtime)?
         } else if !refresh {
             match self.discovery_cache.get(runtime) {
@@ -3768,6 +3784,23 @@ pub(crate) fn run_agent_fixture_grandchild() {
 
 #[cfg(test)]
 mod budget_tests {
+    #[test]
+    fn native_mode_never_uses_global_fixture_discovery() {
+        let mut runtime = super::AgentRuntime::native_codex_candidate();
+        assert!(runtime.uses_native_codex());
+        assert!(runtime.advertises_g5a());
+        for provider in ["codex", "claude-code"] {
+            for refresh in [false, true] {
+                let snapshot = runtime.get_capabilities(provider, refresh).unwrap();
+                assert_eq!(snapshot["canStart"], false);
+                assert_eq!(snapshot["discovery"]["source"], "unavailable");
+            }
+        }
+        assert!(runtime.discovery_cache.is_empty());
+        assert!(runtime.observation_counts.is_empty());
+        assert!(!super::AgentRuntime::blocked().advertises_g5a());
+    }
+
     use super::*;
 
     #[test]

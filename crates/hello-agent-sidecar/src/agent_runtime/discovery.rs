@@ -71,7 +71,6 @@ impl ScopedEvidence {
 impl AgentRuntime {
     /// Start discovery is never served from a capability cache. Resolve the
     /// stored role and input before scheduling the same bounded query worker.
-    #[allow(dead_code)] // Native start dispatcher is connected after admission review.
     pub(crate) fn begin_scoped_start(
         &mut self,
         storage: &Storage,
@@ -97,7 +96,6 @@ impl AgentRuntime {
     /// Prepare a fresh process, then reserve the durable run. The caller retains
     /// every nonempty slot on error and must explicitly drain/record it; this
     /// function never drops a process after a later preparation failure.
-    #[allow(dead_code)]
     pub(crate) fn reserve_scoped_start(
         &mut self,
         storage: &mut Storage,
@@ -167,7 +165,6 @@ impl AgentRuntime {
         Ok(())
     }
 
-    #[allow(dead_code)] // IPC deferral will call this after native activation review.
     pub(crate) fn begin_scoped_discovery(
         &mut self,
         storage: &Storage,
@@ -268,7 +265,6 @@ impl AgentRuntime {
     }
 
     /// Single-consumer result; recheck durable scope after background work.
-    #[allow(dead_code)] // Deferred IPC response collection follows this owner.
     pub(crate) fn take_scoped_discovery(
         &mut self,
         storage: &Storage,

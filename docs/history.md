@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (native mode 요청 분기 연결)
+
+- 기준 7f61af8. NativeCodex 모드를 fixture/blocked와 분리하고 해당 모드의 scoped Codex 조회·실행 요청을 지연 dispatcher에 연결했다. 무범위·미지원 조회는 blocked 응답이며 실제 모드가 fixture discovery/cache로 fallback하지 않도록 했다. 검토용 native constructor는 추가했지만 일반 stdio는 여전히 blocked constructor를 사용한다.
+- Karpathy 지침으로 기존 지연 경로를 직접 호출하며 별도 CLI 우회 스위치는 추가하지 않았다. native 모드의 무범위 조회가 false/unavailable이고 fixture 관측 횟수/캐시가 비어 있는 회귀를 작성했다. 이번에는 실행하지 않았고 diff만 확인했다.
+- 실제 thread preflight 뒤 실행 검증 정보의 durable 저장 및 running 전환이 native 경로에 아직 없음을 확인했다. 이를 fixture의 attestation으로 대체하거나 preparing을 임의 running으로 표시하지 않는다. 다음은 native 관측 근거/상태 저장 연결, 이후 누적 검증과 독립 안전 검토다. 기존 9월 archive 보존, 실제 계정/모델 실행·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (지연 시작 요청·실패 소유권 인계)
 
 - 기준 c45c5ca. Sidecar에 pending 시작 요청과 원래 run/process 슬롯을 보관하고 fresh 조회 완료→예약→native start→응답 수집 경로를 연결했다. 오류 후 남은 슬롯은 기존 실패 실행/조회 정리 registry로 넘기고, 인계 거절이면 원래 결과와 슬롯을 보존해 실행을 반복하지 않는다. 예약만 된 시작도 run fence를 결속한 뒤 실패 정리로 인계한다.

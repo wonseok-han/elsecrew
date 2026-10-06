@@ -1799,6 +1799,25 @@ impl Sidecar {
 
     fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        if self.agent_runtime.uses_native_codex() {
+            if request.method == "run.startAgent" {
+                return self.defer_agent_start(request);
+            }
+            if request.method == "agent.getCapabilities" {
+                use hello_agent_protocol::agent_adapter_v1::{
+                    validate_agent_adapter_payload_v1, AgentCapabilitiesRequestV1,
+                };
+                validate_agent_adapter_payload_v1("capabilitiesRequest", &request.params)
+                    .map_err(|_| SidecarError::new("invalidParams", "invalid discovery request"))?;
+                let input: AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
+                    .map_err(|_| SidecarError::new("invalidParams", "invalid discovery request"))?;
+                if input.runtime == "codex" && input.chat_id.is_some() {
+                    return self.defer_agent_capabilities(request);
+                }
+                // Unsupported/unscoped queries keep a blocked capability,
+                // never a fixture-derived start permission.
+            }
+        }
         if request.method == "run.cancelAgent" {
             let queued = (|| -> Result<agent_runtime::RunIdentity, ProjectFailure> {
                 let params = require_exact_params(
@@ -1987,9 +2006,8 @@ impl Sidecar {
         self.action_events(&action)
     }
 
-    /// Native activation will dispatch scoped requests here. Keep the request
+    /// Native mode dispatches scoped requests here. Keep the request
     /// until its owned worker has completed, including failed-query cleanup.
-    #[allow(dead_code)]
     fn defer_agent_capabilities(
         &mut self,
         request: RequestV1,
@@ -2021,7 +2039,6 @@ impl Sidecar {
         })
     }
 
-    #[allow(dead_code)] // Product activation remains gated until integrated review.
     fn defer_agent_start(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         if request.method != "run.startAgent"
             || self.pending_agent_starts.contains_key(&request.request_id)
