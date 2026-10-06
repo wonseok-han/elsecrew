@@ -80,6 +80,9 @@ mod tests {
         value.get_mut("native_thread_receipt").unwrap()["selectedProfile"]["runtime"] = json!("claude-code");
         value.get_mut("native_transport").unwrap()["adapter"] = json!("claude.stream.v1");
         validate(&value).unwrap();
+        let mut required = value.clone();
+        required.get_mut("native_transport").unwrap()["requiresProviderAttestation"] = json!(true);
+        assert!(validate(&required).is_err());
         let mut wrong = value.clone();
         wrong.get_mut("native_transport").unwrap()["adapter"] = json!("codex.preflight.v1");
         assert!(validate(&wrong).is_err());

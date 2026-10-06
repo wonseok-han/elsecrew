@@ -226,7 +226,7 @@ impl OwnedClaudeRun {
         projection.remove("last_event_sequence");
         projection.insert("native_transport".into(), json!({"schemaVersion":1,
             "adapter":"claude.stream.v1","connectionId":self.process.connection_id().to_string(),
-            "requiresProviderAttestation":false}));
+            "requiresProviderAttestation":self.reservation.native_provider.is_some()}));
         storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
             aggregate_type:"run",aggregate_id:self.reservation.run_id.clone(),
             operation_id:format!("op_agent_native_transport_{}",self.reservation.run_id),request_id:None,payload:projection,

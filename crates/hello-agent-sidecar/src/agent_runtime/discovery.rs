@@ -85,14 +85,14 @@ impl NativeProviderContext {
         let failure = || SidecarError::new("agentInputChanged", "native provider evidence differs");
         let profile = &run["selectedProfile"];
         let attestation = json!({
-            "schemaVersion":1,"runId":run["runId"],"providerId":"codex","runtime":"codex",
+            "schemaVersion":1,"runId":run["runId"],"providerId":self.manifest["providerId"],"runtime":self.manifest["runtime"],
             "capabilityFingerprint":run["capabilityFingerprint"],
             "manifestDigest":self.manifest["manifestDigest"],
             "executableClosureDigest":self.manifest["executableClosure"]["closureDigest"],
             "effectiveProfile":{"modelSelector":profile["modelSelector"],"reasoningEffort":profile["reasoningEffort"],"permission":profile["permission"]},
             "workspaceIdentity":run["workspaceIdentity"],
             "managedCwdIdentity":format!("sha256:{:x}", Sha256::digest(cwd.as_os_str().as_encoded_bytes())),
-            "eventParserId":"codex.jsonl.v1",
+            "eventParserId":self.manifest["eventParserId"],
             "verifiedRuntimeEvidence":self.manifest["launchPolicy"]["requiredRuntimeVerification"],
             "verifiedAt":now(),
         });
