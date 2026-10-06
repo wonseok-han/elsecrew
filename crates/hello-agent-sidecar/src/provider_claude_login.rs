@@ -110,7 +110,7 @@ fn selected_version_path(
     Ok(versions.join(name))
 }
 
-fn account(bytes: &[u8], exit: i32, home: &std::path::Path) -> Result<bool, SidecarError> {
+pub(crate) fn account(bytes: &[u8], exit: i32, home: &std::path::Path) -> Result<bool, SidecarError> {
     let observation = BoundedObservation::new(bytes.to_vec()).map_err(|_| failure())?;
     let auth = Vendor::Claude21269
         .observe_auth(&observation, exit)

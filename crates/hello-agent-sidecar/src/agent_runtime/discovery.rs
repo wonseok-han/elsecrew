@@ -253,7 +253,7 @@ impl AgentRuntime {
                 "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit,
                 _ => return Err(failure()),
             };
-            if !evidence.observation.matches(&pending.profile.model_selector,
+            if !evidence.is_fresh() || !evidence.observation.matches(&pending.profile.model_selector,
                 pending.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
                 Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
                 Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home) {

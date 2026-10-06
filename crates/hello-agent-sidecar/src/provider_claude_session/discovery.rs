@@ -8,6 +8,8 @@ use crate::{
 use std::path::{Path, PathBuf};
 use std::{sync::Arc, thread::JoinHandle};
 
+mod status;
+
 pub(crate) struct DiscoveryRequest {
     pub(crate) profile: ClaudeProfileBinding,
     pub(crate) selector: String,
@@ -20,6 +22,16 @@ pub(crate) struct DiscoveryRequest {
 pub(crate) struct DiscoveryEvidence {
     pub(crate) observation: ProfileObservation,
     pub(crate) executable: PinnedExecutable,
+    pub(crate) version: String,
+    /// Credential presence, not a successful model request or entitlement.
+    pub(crate) credentials_present: bool,
+    observed_from: Instant,
+}
+
+impl DiscoveryEvidence {
+    pub(crate) fn is_fresh(&self) -> bool {
+        self.observed_from.elapsed() <= Duration::from_secs(30)
+    }
 }
 
 pub(crate) struct Completion {
@@ -54,6 +66,44 @@ impl DiscoveryWorker {
                         }
                     }
                 };
+                let observed_from = Instant::now();
+                let mut cleanup = None;
+                let metadata = (|| {
+                    let mut inspect = |query| {
+                        let inspection = status::inspect(
+                            request.profile.try_clone()?,
+                            &executable,
+                            &signal,
+                            query,
+                        )?;
+                        match inspection.result {
+                            Ok(observation) => Ok(observation),
+                            Err(error) => {
+                                cleanup = Some(inspection.process);
+                                Err(error)
+                            }
+                        }
+                    };
+                    let status::Observation::Version(version) = inspect(status::Query::Version)?
+                    else {
+                        return Err(failure());
+                    };
+                    let status::Observation::CredentialsPresent(credentials_present) =
+                        inspect(status::Query::Auth)?
+                    else {
+                        return Err(failure());
+                    };
+                    Ok((version, credentials_present))
+                })();
+                let (version, credentials_present) = match metadata {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        return Completion {
+                            result: Err(error),
+                            cleanup,
+                        }
+                    }
+                };
                 match inspect_candidate(
                     request.profile,
                     &executable,
@@ -70,6 +120,9 @@ impl DiscoveryWorker {
                             result: Ok(DiscoveryEvidence {
                                 observation,
                                 executable,
+                                version,
+                                credentials_present,
+                                observed_from,
                             }),
                             cleanup: None,
                         },

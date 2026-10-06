@@ -25,6 +25,17 @@ pub(crate) struct ClaudeProfileBinding {
     profile: Dir,
 }
 impl ClaudeProfileBinding {
+    pub(crate) fn try_clone(&self) -> Result<Self, SidecarError> {
+        self.revalidate()?;
+        let binding = Self {
+            path: self.path.clone(),
+            parent: self.parent.try_clone().map_err(|_| failure())?,
+            profile: self.profile.try_clone().map_err(|_| failure())?,
+        };
+        binding.revalidate()?;
+        Ok(binding)
+    }
+
     pub(crate) fn from_storage(storage: &Storage) -> Result<Self, SidecarError> {
         let database = storage.path();
         if database.file_name() != Some(hello_agent_protocol::lifecycle_v1::SQLITE_FILE_V1.as_ref())

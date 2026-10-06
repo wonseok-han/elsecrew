@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 버전·인증 상태 관측 연결)
+
+- 기준 cb7c5bc. 공식 복구 승인 재수신을 확인했다. 기존 제한 밖 서명 검사 통과 기록에 따라 불필요한 재설치·앱 종료는 하지 않았다. 인증 정보·프로젝트 변경 및 실제 계정/모델 호출 없음.
+- Karpathy 지침으로 기존 로그인 account 파서와 tracked process를 재사용했다. Claude 조회 worker가 --version 및 auth status --json을 고정 명령·제한된 시간/출력으로 실행하도록 연결했다. 디렉터리 신원을 보존한 profile clone을 쓰며 각 명령의 확인된 종료 뒤 다음 조회를 시작하고 실패 owner는 cleanup으로 돌려준다. 반환 데이터는 버전/credential 존재 여부뿐이며 원문 인증 응답을 저장·전달하지 않는다.
+- 버전/인증/모델 관측 전체의 시작부터 30초 유효성을 적용했다. credential 존재는 모델 호출 성공·entitlement·canStart가 아니다. cargo check -p hello-agent-sidecar --tests --locked PASS(3.86초, jobs/threads=4), 해당 신규 모듈 rustfmt 및 diff check 확인. 전체 테스트/실제 UI·계정 시험은 누적 검증 대상이다.
+- 다음은 이 관측의 capability/manifest projection과 예약·dispatcher 연결, Claude 명시적 일회 승인이다. 제품 blocked 유지, 기존 9월 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 조회의 저장된 채팅·역할 범위 연결)
 
 - 기준 dcb8649. begin_claude_discovery 입력을 임의 DiscoveryRequest에서 공용 capability 요청 ID로 바꾸고 저장된 chat/roleSnapshots와 검증된 manifest에서 모델/effort/권한·snapshot/source 경로를 구성한다. 잘못된 runtime/역할·격리 불일치를 worker 시작 전에 거절한다. pending scope/profile 소유권은 공급자 모듈에서 실행 관리자 계층으로 이동했다.
