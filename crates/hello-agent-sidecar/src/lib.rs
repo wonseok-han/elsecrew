@@ -521,6 +521,7 @@ struct Sidecar {
     g5: chat::G5Manager,
     agent_runtime: agent_runtime::AgentRuntime,
     pending_agent_cancels: BTreeMap<String, (RequestV1, agent_runtime::RunIdentity)>,
+    pending_agent_capabilities: BTreeMap<String, RequestV1>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
 }
@@ -891,6 +892,7 @@ impl Sidecar {
             g5,
             agent_runtime,
             pending_agent_cancels: BTreeMap::new(),
+            pending_agent_capabilities: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         })
@@ -1060,6 +1062,7 @@ impl Sidecar {
                     && login_stopped
                     && runtime_blockers.is_empty()
                     && self.pending_agent_cancels.is_empty()
+                    && self.pending_agent_capabilities.is_empty()
                     && !self.safe_to_quit
                 {
                     self.storage.checkpoint()?;
@@ -1971,6 +1974,39 @@ impl Sidecar {
         self.action_events(&action)
     }
 
+    /// Native activation will dispatch scoped requests here. Keep the request
+    /// until its owned worker has completed, including failed-query cleanup.
+    #[allow(dead_code)]
+    fn defer_agent_capabilities(
+        &mut self,
+        request: RequestV1,
+    ) -> Result<HandledRequest, SidecarError> {
+        if request.method != "agent.getCapabilities"
+            || self
+                .pending_agent_capabilities
+                .contains_key(&request.request_id)
+        {
+            return Err(SidecarError::new(
+                "invalidParams",
+                "duplicate or invalid discovery request",
+            ));
+        }
+        let input = serde_json::from_value(request.params.clone())
+            .map_err(|_| SidecarError::new("invalidParams", "invalid scoped discovery request"))?;
+        self.agent_runtime.begin_scoped_discovery(
+            &self.storage,
+            &self.projects,
+            &input,
+            &request.request_id,
+        )?;
+        self.pending_agent_capabilities
+            .insert(request.request_id.clone(), request);
+        Ok(HandledRequest {
+            response: None,
+            events: Vec::new(),
+        })
+    }
+
     fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
         self.projects.poll_application(&mut self.storage);
@@ -1979,6 +2015,29 @@ impl Sidecar {
                 .poll(&mut self.storage, &mut self.projects)?,
         );
         let mut responses = Vec::new();
+        let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
+        for id in ids {
+            let Some(result) =
+                self.agent_runtime
+                    .take_scoped_discovery(&self.storage, &self.projects, &id)
+            else {
+                continue;
+            };
+            let request = self.pending_agent_capabilities.remove(&id).unwrap();
+            let result = result
+                .and_then(|evidence| evidence.capability())
+                .and_then(|snapshot| {
+                    serde_json::to_value(snapshot).map_err(|_| {
+                        SidecarError::new("agentDiscoveryRejected", "invalid discovery response")
+                    })
+                });
+            responses.push(match result {
+                Ok(value) => success_response(&request, value),
+                Err(error) => {
+                    error_response(&request, error.kind(), "requestBlocked", error.detail())
+                }
+            });
+        }
         let ids: Vec<_> = self.pending_agent_cancels.keys().cloned().collect();
         for run_id in ids {
             let (request, identity) = &self.pending_agent_cancels[&run_id];

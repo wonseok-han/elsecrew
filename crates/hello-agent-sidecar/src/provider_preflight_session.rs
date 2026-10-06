@@ -115,6 +115,25 @@ pub(crate) struct NamedProfileObservation {
 }
 
 impl NamedProfileObservation {
+    pub(crate) fn selected_model(
+        &self,
+    ) -> Result<hello_agent_protocol::agent_adapter_v1::AgentModelCapabilityV1, SidecarError> {
+        if self.observed_at.elapsed() > Duration::from_secs(30) {
+            return Err(failure());
+        }
+        Ok(
+            hello_agent_protocol::agent_adapter_v1::AgentModelCapabilityV1 {
+                model_selector: self.model.clone(),
+                reasoning_efforts: vec![self.effort.clone()],
+                permissions: vec![match self.permission {
+                    ExpectedPermission::ReadOnly => "readOnly",
+                    ExpectedPermission::WorkspaceWrite => "workspaceWrite",
+                }
+                .into()],
+            },
+        )
+    }
+
     /// Discovery is short-lived and bound to the exact inputs. A fresh start
     /// still repeats the same-connection preflight before sending user input.
     pub(crate) fn matches(

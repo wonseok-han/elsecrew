@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (scoped capability 응답·지연 요청 수명 연결)
+
+- 기준 0b81814. 기존 미커밋 조회 projection을 마무리하고 lib.rs에 scoped 조회 요청 보관·완료 응답 수집·종료 전 대기 처리를 연결했다. 조회 결과는 저장된 역할·scope와 대조하고 30초 유효 관측의 선택 모델/권한과 현재 실행 파일의 비공개 경로 식별값만 응답한다. digest는 현재 파일 신원이며 사전 등록한 릴리스 허용목록이 아니다.
+- Karpathy 지침에 따라 기존 worker와 응답 함수를 재사용했다. 제품 dispatcher에서 새 지연 진입점을 호출하는 활성화는 아직 하지 않았고 기존 blocked 경계는 유지했다. capability의 runtimeVerified는 조회 계약 관측이며 실제 thread/turn 성공 증거가 아니다. 시작 시 fresh 조회·동일 연결 사전 확인과 native 실행 caller 연결이 다음 작업이다.
+- 제한된 cargo check -p hello-agent-sidecar --tests --locked PASS(5.16초). 기존 코드의 무관한 rustfmt 차이는 되돌리고 이번 추가 구간만 유지했다. 전체 회귀/하네스/독립 안전 검토·실제 계정/모델/UI 시험은 기능 연결 뒤 수행한다. 9월 아카이브 기존 변경 보존, main 병합/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (공식 복구 승인 수신·설치본 재확인)
+
+- 이전 공식 업데이트·재설치 질문에 대한 사용자 승인을 수신했다. 현재 HEAD 0b81814, m5/coding-agent-ide의 기존 Rust 3파일 및 9월 아카이브 미커밋 변경은 그대로 보존했다.
+- 제한 밖 읽기 전용 codesign --verify --strict --all-architectures 검사에서 Claude 2.1.287, standalone Codex, ChatGPT.app 내장 Codex 모두 valid on disk / satisfies its Designated Requirement를 다시 확인했다. 기존 서명 오류만을 근거로 한 설치 손상·재설치 필요 판단은 여전히 철회 상태다.
+- 불필요한 업데이트·재설치·앱 종료는 하지 않았고 인증 정보·프로젝트도 변경하지 않았다. 이번 확인은 설치 파일 서명에 한정하며 로그인/실제 모델 실행 성공 증거가 아니다. 다음 개발은 기존 scoped capability 응답과 실제 실행 연결이며 제품 blocked 상태를 유지한다. main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (scoped 조회 worker의 런타임 수명 연결)
 
 - 기준 87c764d. 채팅·저장된 역할·작업 사본 격리를 확인하고 scoped worker를 요청 ID별로 보관하는 런타임 경로를 추가했다. 중복·종료 중·한도 초과는 시작 전에 거절한다. 서명된 CLI/helper 선택도 worker 안으로 옮겨 dispatcher를 서명 검사로 막지 않도록 했다. 성공 관측은 조회 당시 scope/profile과 함께 한 번만 반환한다.

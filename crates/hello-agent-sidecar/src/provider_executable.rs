@@ -44,6 +44,35 @@ fn signature_directory(path: &Path) -> Result<cap_std::fs::Dir, SidecarError> {
 }
 
 impl PinnedExecutable {
+    /// Redacted identity of the currently observed file, not a pre-registered
+    /// release hash or a version allowlist. Caller supplies a measured version.
+    pub(crate) fn public_identity(
+        &self,
+        cli_version: &str,
+    ) -> Result<hello_agent_protocol::agent_adapter_v1::AgentExecutableIdentityV1, SidecarError>
+    {
+        self.revalidate()?;
+        if cli_version.is_empty() || cli_version.len() > 128 {
+            return Err(failure());
+        }
+        let metadata = self.held.metadata().map_err(|_| failure())?;
+        let path_digest = format!(
+            "sha256:{:x}",
+            Sha256::digest(self.path.as_os_str().as_encoded_bytes())
+        );
+        let mut identity = Sha256::new();
+        identity.update(metadata.dev().to_le_bytes());
+        identity.update(metadata.ino().to_le_bytes());
+        identity.update(self.digest);
+        Ok(
+            hello_agent_protocol::agent_adapter_v1::AgentExecutableIdentityV1 {
+                path_digest,
+                file_identity_digest: format!("sha256:{:x}", identity.finalize()),
+                cli_version: cli_version.into(),
+            },
+        )
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn open_codex_signed(path: &Path, helper: bool) -> Result<Self, SidecarError> {
         let requirement = if helper {

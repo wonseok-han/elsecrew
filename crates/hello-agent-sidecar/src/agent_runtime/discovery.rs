@@ -17,6 +17,57 @@ pub(crate) struct ScopedEvidence {
     pub(crate) evidence: Evidence,
 }
 
+impl ScopedEvidence {
+    /// Discovery eligibility only. The start path must freshly inspect and
+    /// perform its own same-connection preflight before sending user input.
+    #[allow(dead_code)] // Deferred capability response consumes this projection.
+    pub(crate) fn capability(&self) -> Result<AgentCapabilitySnapshotV1, SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "discovery projection differs");
+        let model = self.evidence.observation.selected_model()?;
+        if self.profile.runtime != "codex"
+            || self.profile.role_id != self.scope.role_id
+            || model.model_selector != self.profile.model_selector
+            || model.reasoning_efforts.first() != self.profile.reasoning_effort.as_ref()
+            || model.permissions != vec![self.profile.permission.clone()]
+        {
+            return Err(failure());
+        }
+        self.evidence.helper.revalidate()?;
+        let executable = self
+            .evidence
+            .executable
+            .public_identity(&self.evidence.version)?;
+        let mut snapshot = AgentCapabilitySnapshotV1 {
+            scope: Some(self.scope.clone()),
+            schema_version: 1,
+            runtime: "codex".into(),
+            platform: "darwin".into(),
+            installation_state: "installed".into(),
+            auth_state: "authenticated".into(),
+            executable: Some(executable),
+            models: vec![model],
+            discovery: AgentDiscoveryEvidenceV1 {
+                source: "machineReadableCatalog".into(),
+                verification_level: "runtimeVerified".into(),
+                exact_cli_version: Some(self.evidence.version.clone()),
+                effective_model_evidence: "runtimeVerified".into(),
+            },
+            can_start: true,
+            blocked_reason: None,
+            fingerprint: String::new(),
+            observed_at: now(),
+        };
+        snapshot.fingerprint =
+            compute_agent_capability_fingerprint_v1(&snapshot).map_err(|_| failure())?;
+        validate_agent_adapter_payload_v1(
+            "capabilitySnapshot",
+            &serde_json::to_value(&snapshot).map_err(|_| failure())?,
+        )
+        .map_err(|_| failure())?;
+        Ok(snapshot)
+    }
+}
+
 impl AgentRuntime {
     #[allow(dead_code)] // IPC deferral will call this after native activation review.
     pub(crate) fn begin_scoped_discovery(
