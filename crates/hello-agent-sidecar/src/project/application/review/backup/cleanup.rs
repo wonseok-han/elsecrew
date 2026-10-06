@@ -1,5 +1,5 @@
-//! Explicit cleanup of unreferenced abandoned preparations only.
-//! Not yet exposed through product IPC; never called by startup or inspection.
+//! Explicit cleanup of non-current backups; never called by startup or inspection.
+//! Historical evidence survives, but the selected archive becomes unrestorable.
 use super::*;
 use crate::project::required_project;
 use crate::storage::ProjectionUpsert;
@@ -22,16 +22,26 @@ fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, Proje
         .and_then(|v| v.get(review))
         .ok_or_else(invalid)?;
     if value["version"] != 1
-        || value["state"] != "abandoned"
+        || !matches!(value["state"].as_str(), Some("abandoned" | "ready"))
         || value["header"]["reviewId"] != review
         || value["header"]["binding"]["projectId"] != project
         || !value["name"].as_str().is_some_and(valid_name)
     {
         return Err(invalid());
     }
+    let fields = if value["state"] == "ready" {
+        let backup = Backup::from_value(&value["backup"])?;
+        if value["name"] != backup.name {
+            return Err(invalid());
+        }
+        5
+    } else {
+        4
+    };
     let mut owners = 0;
     // A duplicate filename in any project is ambiguous; no unlink authority.
     for other in storage.projection_records("project")? {
+        retention::summarize(&other)?;
         if let Some(backups) = other.get("application_backups") {
             for candidate in backups.as_object().ok_or_else(invalid)?.values() {
                 if candidate["name"] == value["name"] {
@@ -39,16 +49,19 @@ fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, Proje
                 }
             }
         }
-        let mut applications = Vec::new();
         if let Some(current) = other.get("application_intent") {
-            applications.push(current);
+            // Even a completed current application remains a restoration target.
+            if current["backup"]["name"] == value["name"] {
+                return Err(invalid());
+            }
         }
         if let Some(history) = other.get("application_history") {
-            applications.extend(history.as_object().ok_or_else(invalid)?.values());
-        }
-        for application in applications {
-            if application["backup"]["name"] == value["name"] {
-                return Err(invalid());
+            for application in history.as_object().ok_or_else(invalid)?.values() {
+                if application["backup"]["name"] == value["name"]
+                    && !historical_reference_matches(application, value)
+                {
+                    return Err(invalid());
+                }
             }
         }
     }
@@ -56,8 +69,8 @@ fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, Proje
         return Err(invalid());
     }
     match value.get("cleanup") {
-        None if value.as_object().is_some_and(|v| v.len() == 4) => {}
-        Some(cleanup) if value.as_object().is_some_and(|v| v.len() == 5) => {
+        None if value.as_object().is_some_and(|v| v.len() == fields) => {}
+        Some(cleanup) if value.as_object().is_some_and(|v| v.len() == fields + 1) => {
             if cleanup.as_object().map(|v| v.len()) != Some(3)
                 || cleanup["version"] != 1
                 || !matches!(cleanup["state"].as_str(), Some("pending" | "deleted"))
@@ -72,6 +85,41 @@ fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, Proje
         _ => return Err(invalid()),
     }
     Ok(value.clone())
+}
+
+fn historical_reference_matches(application: &Value, backup: &Value) -> bool {
+    if !matches!(
+        application["state"].as_str(),
+        Some("applied" | "restored" | "abandoned")
+    ) {
+        return false;
+    }
+    let mut original = backup.clone();
+    let Some(object) = original.as_object_mut() else {
+        return false;
+    };
+    object.remove("cleanup");
+    application["backup"] == original
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    #[test]
+    fn only_exact_terminal_history_may_lose_its_archive() {
+        let backup =
+            json!({"version":1,"state":"ready","name":"backup","header":{"reviewId":"review"}});
+        let mut application = json!({"state":"applied","backup":backup});
+        assert!(historical_reference_matches(&application, &backup));
+        let mut pending = backup.clone();
+        pending["cleanup"] = json!({"state":"pending"});
+        assert!(historical_reference_matches(&application, &pending));
+        application["state"] = json!("applying");
+        assert!(!historical_reference_matches(&application, &backup));
+        application["state"] = json!("restored");
+        application["backup"]["header"]["reviewId"] = json!("other");
+        assert!(!historical_reference_matches(&application, &backup));
+    }
 }
 
 fn identity(dir: &Dir, name: &str) -> Result<Value, ProjectFailure> {

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (과거 백업의 명시 정리 후보 확장)
+
+- 기준42dc612에서 설치 CLI를 재확인했지만 macOS strict 서명 검사는 여전히 arm64 invalid signature이고 Codex.app 대체 설치는 없다. CLI/계정/모델 실행·앱 교체 없이 독립적인 정리 구현을 계속했다.
+- Karpathy 지침으로 ready/abandoned 중 현재 application_intent가 참조하지 않는 백업을 정리 후보로 확장했다. 과거 이력은 terminal 상태와 cleanup 필드를 제외한 원본 백업 전체 일치가 있어야 허용한다. 앱 전체 참조 그래프·중복 파일 이름 검사는 유지하며 과거 이력/삭제 원장 자체는 지우지 않는다. ready에 cleanup이 생기면 기존 staging 검증은 이를 새 반영 준비로 재사용하지 않는다.
+- UI는 과거/준비 백업도 별도 조회 대상으로 제공하고 영구 삭제·해당 백업 복원 포기를 ko/en 동의에 명시했다. 현재 복구 대상·미완료 준비·소유 원장 없는 파일은 제외한다. 정확 terminal 이력과 준비/다른 백업 거절 회귀를 작성했으나 실행하지 않았다. 포맷/diff만 확인하고 제품 삭제는 계속 비활성이다. 현재 복구점 폐기·고아 파일 정책·공급자 연결·Windows/G6·통합 검증/독립 검토가 남는다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (종료된 준비 정리의 확인 화면·IPC)
 
 - 기준dfc74f1·m5/coding-agent-ide와 기존9월 archive 미커밋 변경을 확인했다. Karpathy/React 지침으로 inspectBackupCleanup/cleanupBackup 고정 계약·sidecar dispatch와 보존 목록의 대상별 확인 화면을 연결했다. 백업 이름/임의 경로는 renderer 입력으로 받지 않는다.
@@ -25,6 +31,7 @@
 
 - **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
 - **종료된 준비 정리 후보(2026-10-06)**: 참조 없는 abandoned 준비 파일의 pending/deleted 영속 정리와 명시 확인 IPC/UI를 연결했다. 제품 삭제는 검증 전 비활성이다. 현재/과거 복구 백업과 소유 기록 없는 파일은 정리 대상이 아니며 전체 복원 지점 삭제 완료를 뜻하지 않는다.
+- **정리 후보 확장(2026-10-06 후속)**: 현재 복구가 참조하지 않는 ready 백업 및 원본 백업이 정확히 일치하는 terminal 과거 이력을 명시 정리 후보에 포함했다. 파일 삭제 시 해당 백업 복원을 포기하고 이력/삭제 기록은 남긴다. 제품 삭제는 아직 비활성이고 현재 복구점/고아 파일은 미지원이다.
 - **복원 예산 UI 후보(2026-10-01)**: 앱 전체 사용량 조회와 명시 예산 변경(기본5GiB, 정수1~1024GiB)을 IPC/UI에 연결했다. application-settings-v1의 원자 설정과 archive flock을 공유하며 기존 백업 자동 삭제는 없다. 통합 검증 전 구현이며 원본 writer 활성화·삭제 기능 완료를 뜻하지 않는다.
 
 - **named 권한 스키마 재확인 경계(2026-10-01)**: permissionProfile/list의 cwd별 허용 확인은 공식 문서 요구지만 상세 응답 형식은 아직 확보하지 못했다. 이전 임시 experimental 스키마는 소실됐고 현재 CLI는 OS codesign strict 검사에서도 invalid signature다. 필드 추측·서명 우회로 연결하지 않으며 정상 설치본/공식 스키마 확보가 필요하다.

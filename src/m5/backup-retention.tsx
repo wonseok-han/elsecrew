@@ -26,7 +26,7 @@ export function BackupRetentionView({ projectId, disabled }: { projectId: string
   return <section aria-label={t("m5.backup.retentionTitle")} aria-busy={busy}>
     <button type="button" disabled={disabled || busy} onClick={() => void inspect()}>{t("m5.backup.retentionTitle")}</button>
     {entries && <><p>{t("m5.backup.retentionHelp")}</p>{entries.length === 0 ? <p>{t("m5.backup.retentionEmpty")}</p> : <ul>{entries.map(entry => <li key={entry.reviewId}><code>{entry.reviewId}</code> — {t(`m5.backup.${entry.retainedFor}`)}
-      {entry.retainedFor === "abandonedPreparation" && <button type="button" disabled={disabled || busy} onClick={() => setSelected(entry.reviewId)}>{t("m5.backup.cleanupTitle")}</button>}
+      {["abandonedPreparation", "preparedBackup", "applicationHistory"].includes(entry.retainedFor) && <button type="button" disabled={disabled || busy} onClick={() => setSelected(entry.reviewId)}>{t("m5.backup.cleanupTitle")}</button>}
     </li>)}</ul>}</>}
     {selected && <BackupCleanup projectId={projectId} reviewId={selected} disabled={disabled || busy} />}
     {failed && <p role="status">{t("m5.backup.error")}</p>}
