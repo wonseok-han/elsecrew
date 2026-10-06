@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화 순서 실측·활성화 한계)
+
+- 기준 27f7c29. 독립 검토 최종 결과는 Claude provider context 미부착, G5C 전체 관측 요구와 실제 CLI 관측의 불일치, capability의 실행 가능 의미 구분이다. 로컬 파일 검사 누락은 27f7c29로 보완했고 해당 수정의 독립 재검증은 아직 아니다. 검토안의 system/init 후 첫 목표 전송 순서는 코드상 성립하지 않아 그대로 구현하지 않았다.
+- 승인된 무계정·무모델 임시 HOME/profile에서 Claude 2.1.287에 control initialize만 보냈다. default 모드/hooks_applied 및 catalog 응답 뒤 stdin을 5초 더 열었지만 system/init은 관측되지 않았다. 사용자 메시지 0, 자기 그룹 SIGTERM 뒤 exit143/groupAlive=false, stderr0. 이는 5초 관측이며 모든 CLI 버전에서 불가능하다는 증거는 아니다. 별도 ps 검사는 sandbox 제한으로 실패했다. 자료는 /private/tmp/hello-agent-init-order-JCXUYp와 /private/tmp/hello-agent-init-order-probe.mjs, 사용자 인증·프로젝트 변경 없음.
+- 현재 코드는 control 초기화→목표 전송→system/init 관측 순서다. 실제로 보고되지 않는 config/관리 정책 불변성 및 첫 목표 전송 전 system/init 확인을 검증 완료로 꾸밀 수 없다. 공식 공급자 보호를 신뢰하되 요청 설정/실제 관측을 구분하는 활성화 조건을 명시해야 하며, 그보다 강한 실행 전 증명이 필수라면 별도 격리 설계가 필요하다. 이 차이를 사용자에게 확인하기 전 제품 활성화/안전 조건 변경은 하지 않는다. diff check 확인, main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 파일 허용 누락 수정·단계별 증거 계약 발견)
 
 - 기준 e7d35e7. 기존 검토자의 실행 중 handle을 확인하고 동일 검토를 기다렸다. 중간 결과에서 G5C는 부분 observedRuntimeVerification을 저장할 수 있지만 전체 required 목록이 아니면 canStart=false이며 attestation도 전체를 요구함을 확인했다. Claude의 사전 조회는 system/init의 cwd/tools/MCP/plugins를 아직 관측하지 않고 config는 init에서도 보고되지 않으므로 required 목록 복사로 해결하면 허위 증거가 된다.
