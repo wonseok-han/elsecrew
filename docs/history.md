@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (지연 시작 요청·실패 소유권 인계)
+
+- 기준 c45c5ca. Sidecar에 pending 시작 요청과 원래 run/process 슬롯을 보관하고 fresh 조회 완료→예약→native start→응답 수집 경로를 연결했다. 오류 후 남은 슬롯은 기존 실패 실행/조회 정리 registry로 넘기고, 인계 거절이면 원래 결과와 슬롯을 보존해 실행을 반복하지 않는다. 예약만 된 시작도 run fence를 결속한 뒤 실패 정리로 인계한다.
+- Karpathy 지침으로 기존 예약·native owner·종료 수명을 재사용했다. pending 시작/조회 요청을 종료 blocker에 표시하고, 다른 runtime owner 오류가 이미 완료된 응답 전달을 막지 않도록 했다. 제품 dispatcher의 실제 진입점 활성화와 독립 안전 검토는 아직 남는다.
+- 연결용 cargo check에서 요청 타입 참조 누락을 발견해 수정했다. 제한된 cargo check --tests --locked 재실행 PASS, diff 확인. 전체 테스트/실제 계정/모델 실행은 하지 않았다. 다음은 제품 native mode·공개 실행 상태/attestation 연결 후 누적 검증이며 미검증 코드를 완료로 판단하지 않는다. 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (실행 요청의 fresh 조회·예약 연결)
 
 - 기준 9f9e718. 실행 입력/저장된 역할을 resolve한 뒤 캐시 없이 scoped worker를 시작하는 경로와, 완료 관측을 현재 scope/profile/fingerprint에 대조해 새 owned process 및 durable run을 준비하는 경로를 추가했다. 조회 프로세스를 재사용하지 않으며 home/workspace/30초 관측을 durable 예약 전에 확인한다.

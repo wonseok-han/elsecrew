@@ -522,8 +522,17 @@ struct Sidecar {
     agent_runtime: agent_runtime::AgentRuntime,
     pending_agent_cancels: BTreeMap<String, (RequestV1, agent_runtime::RunIdentity)>,
     pending_agent_capabilities: BTreeMap<String, RequestV1>,
+    pending_agent_starts: BTreeMap<String, PendingAgentStart>,
     maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler,
     maintenance_poisoned: bool,
+}
+
+struct PendingAgentStart {
+    request: RequestV1,
+    input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1,
+    reservation: Option<agent_runtime::preparation::RunReservation>,
+    process: Option<provider_login_process::LoginProcess<'static>>,
+    result: Option<Result<chat::G5Action, SidecarError>>,
 }
 
 struct AdmissionWorker {
@@ -893,6 +902,7 @@ impl Sidecar {
             agent_runtime,
             pending_agent_cancels: BTreeMap::new(),
             pending_agent_capabilities: BTreeMap::new(),
+            pending_agent_starts: BTreeMap::new(),
             maintenance_scheduler: storage_lifetime::scheduler::CooperativeScheduler::default(),
             maintenance_poisoned: false,
         })
@@ -1063,6 +1073,7 @@ impl Sidecar {
                     && runtime_blockers.is_empty()
                     && self.pending_agent_cancels.is_empty()
                     && self.pending_agent_capabilities.is_empty()
+                    && self.pending_agent_starts.is_empty()
                     && !self.safe_to_quit
                 {
                     self.storage.checkpoint()?;
@@ -1082,6 +1093,8 @@ impl Sidecar {
                         blockers.push(run_id.clone());
                     }
                 }
+                blockers.extend(self.pending_agent_starts.keys().map(|id| format!("agent-start:{id}")));
+                blockers.extend(self.pending_agent_capabilities.keys().map(|id| format!("agent-discovery:{id}")));
                 project::ProjectAction {
                     result: serde_json::to_value(PrepareQuitResultV1 {
                         safe_to_quit: self.safe_to_quit && blockers.is_empty(),
@@ -1982,6 +1995,7 @@ impl Sidecar {
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
         if request.method != "agent.getCapabilities"
+            || self.pending_agent_starts.contains_key(&request.request_id)
             || self
                 .pending_agent_capabilities
                 .contains_key(&request.request_id)
@@ -2007,14 +2021,63 @@ impl Sidecar {
         })
     }
 
+    #[allow(dead_code)] // Product activation remains gated until integrated review.
+    fn defer_agent_start(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
+        if request.method != "run.startAgent"
+            || self.pending_agent_starts.contains_key(&request.request_id)
+            || self.pending_agent_capabilities.contains_key(&request.request_id)
+        {
+            return Err(SidecarError::new("invalidParams", "duplicate or invalid start request"));
+        }
+        let input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1 = serde_json::from_value(request.params.clone())
+            .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
+        self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
+        self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
+            request, input, reservation: None, process: None, result: None,
+        });
+        Ok(HandledRequest { response: None, events: Vec::new() })
+    }
+
     fn poll_runtime_events(&mut self) -> Result<(Vec<ResponseV1>, Vec<EventV1>), SidecarError> {
         let mut events = self.g5.poll_runs(&mut self.storage, &mut self.projects);
         self.projects.poll_application(&mut self.storage);
-        events.extend(
-            self.agent_runtime
-                .poll(&mut self.storage, &mut self.projects)?,
-        );
+        // A cleanup error in another owner must not starve completed requests.
+        let runtime_error = match self.agent_runtime.poll(&mut self.storage, &mut self.projects) {
+            Ok(next) => { events.extend(next); None },
+            Err(error) => Some(error),
+        };
         let mut responses = Vec::new();
+        let ids: Vec<_> = self.pending_agent_starts.keys().cloned().collect();
+        for id in ids {
+            let mut pending = self.pending_agent_starts.remove(&id).unwrap();
+            if pending.result.is_none() {
+                let Some(observed) = self.agent_runtime.take_scoped_discovery(&self.storage, &self.projects, &id) else {
+                    self.pending_agent_starts.insert(id, pending);
+                    continue;
+                };
+                pending.result = Some(observed.and_then(|observed| {
+                    self.agent_runtime.reserve_scoped_start(
+                        &mut self.storage, &self.projects, &pending.input, &id,
+                        &observed, &mut pending.reservation, &mut pending.process,
+                    )?;
+                    self.agent_runtime.start_reserved_codex(
+                        &mut self.storage, &self.projects, &mut pending.reservation,
+                        &mut pending.process, &observed.evidence.observation,
+                        &observed.evidence.executable, &observed.evidence.helper,
+                        &AtomicBool::new(self.prepared_to_quit),
+                    )
+                }));
+            }
+            if self.agent_runtime.retain_rejected_start(&mut pending.reservation, &mut pending.process).is_err() {
+                // Keep the original result and both owners; never rerun launch.
+                self.pending_agent_starts.insert(id, pending);
+                continue;
+            }
+            responses.push(match pending.result.take().unwrap() {
+                Ok(action) => { events.extend(action.events); success_response(&pending.request, action.result) },
+                Err(error) => error_response(&pending.request, error.kind(), "requestBlocked", error.detail()),
+            });
+        }
         let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
         for id in ids {
             let Some(result) =
@@ -2048,6 +2111,9 @@ impl Sidecar {
             };
             self.pending_agent_cancels.remove(&run_id);
             responses.push(response);
+        }
+        if responses.is_empty() && events.is_empty() {
+            if let Some(error) = runtime_error { return Err(error); }
         }
         Ok((responses, self.g5_events(events)))
     }

@@ -115,6 +115,27 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    /// Drain rejected-start slots without losing either the durable reservation
+    /// or its process owner. The caller retains slots if handoff is rejected.
+    pub(crate) fn retain_rejected_start(
+        &mut self,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+    ) -> Result<(), SidecarError> {
+        if let Some(pending) = reservation.as_ref() {
+            let owner = process.as_mut().ok_or_else(||
+                SidecarError::new("agentRecoveryRequired", "reserved start has no process owner"))?;
+            if !owner.matches_startup_run(&pending.run_id) {
+                owner.retain_fence_before_launch(&pending.run_id)?;
+            }
+            self.register_failed_start(reservation, process)
+        } else if process.is_some() {
+            self.retain_discovery_cleanup(process)
+        } else {
+            Ok(())
+        }
+    }
+
     /// An unsuccessful model-free inspection is not a run, but still owns a
     /// process and profile reservation. Keep it through polls and app shutdown.
     #[allow(dead_code)] // Called by the forthcoming scoped discovery dispatcher.
