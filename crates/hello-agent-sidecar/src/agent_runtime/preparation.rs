@@ -3,6 +3,13 @@ use super::*;
 use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission;
 mod terminal;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodexLaunchMode {
+    OfflineOuter,
+    ProxiedOuter,
+    NamedTools,
+}
+
 fn codex_permission(profile: &AgentResolvedProfileV1) -> Result<ExpectedPermission, SidecarError> {
     match (profile.runtime.as_str(), profile.permission.as_str()) {
         ("codex", "readOnly") => Ok(ExpectedPermission::ReadOnly),
@@ -218,7 +225,7 @@ impl RunReservation {
             process,
             (executable, helper),
             cancel,
-            false,
+            CodexLaunchMode::OfflineOuter,
         )
     }
 
@@ -239,7 +246,28 @@ impl RunReservation {
             process,
             (executable, helper),
             cancel,
-            true,
+            CodexLaunchMode::ProxiedOuter,
+        )
+    }
+
+    /// Internal named-tools candidate. Parent is trusted, not OS-offline confined.
+    #[allow(dead_code)] // Product activation follows integrated provider verification.
+    pub(crate) fn launch_named_codex_candidate(
+        &self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.launch_codex_with_network(
+            storage,
+            projects,
+            process,
+            (executable, helper),
+            cancel,
+            CodexLaunchMode::NamedTools,
         )
     }
 
@@ -253,7 +281,7 @@ impl RunReservation {
             &crate::provider_executable::PinnedExecutable,
         ),
         cancel: &std::sync::atomic::AtomicBool,
-        proxied: bool,
+        mode: CodexLaunchMode,
     ) -> Result<(), SidecarError> {
         let (executable, helper) = pair;
         use crate::provider_runtime_sandbox::WorkspaceAccess;
@@ -313,7 +341,22 @@ impl RunReservation {
             }
             crate::provider_login_gate::release(child)
         };
-        if proxied {
+        if mode == CodexLaunchMode::NamedTools {
+            let command = crate::provider_preflight_session::vendor_launch::CodexCommand::new(
+                executable.revalidate()?,
+                helper.revalidate()?,
+                &home,
+                workspace,
+                &expected,
+                permission,
+            )?;
+            command.launch(process, |child, identities| {
+                self.record_pre_release(storage, projects, identities)
+                    .map_err(|_| std::io::Error::other("run identity persistence failed"))?;
+                release(child)
+            })?;
+            self.record_released_or_invalidate(storage, process)
+        } else if mode == CodexLaunchMode::ProxiedOuter {
             let args = crate::provider_preflight_session::discovery_arguments(
                 &home, &expected, permission,
             )
@@ -462,19 +505,32 @@ impl RunReservation {
         // Reject a different owner before the transport acquires cleanup authority.
         self.observe_process(storage, process)?;
         let home = process.codex_preflight_home()?;
-        let flow = PreflightExchange::with_permission(
-            &ExpectedProfile {
-                model: &profile.model_selector,
-                reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
-            },
-            home.to_str().ok_or_else(failure)?,
-            permission,
-        )
-        .map_err(|_| failure())?;
+        let expected = ExpectedProfile {
+            model: &profile.model_selector,
+            reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
+        };
         let text = std::str::from_utf8(&self.prompt).map_err(|_| failure())?;
         let address = address_from_chat(&self.run).map_err(|_| failure())?;
         let workspace =
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
+        let flow = if process.uses_named_scope() {
+            if !process.matches_named_scope(workspace.cwd(), permission) {
+                return Err(failure());
+            }
+            PreflightExchange::with_named_permission(
+                &expected,
+                home.to_str().ok_or_else(failure)?,
+                workspace.cwd(),
+                permission,
+            )
+        } else {
+            PreflightExchange::with_permission(
+                &expected,
+                home.to_str().ok_or_else(failure)?,
+                permission,
+            )
+        }
+        .map_err(|_| failure())?;
         process.retain_fence_until_terminal()?;
         let transport = crate::provider_preflight_session::BoundTextSession::begin(
             process, flow, &workspace, text,
@@ -696,7 +752,9 @@ impl RunReservation {
             .verify_workspace_for_run(storage, &address)
             .map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
-        if !process.matches_runtime_scope(workspace, access) {
+        if !process.matches_runtime_scope(workspace, access)
+            && !process.matches_named_scope(workspace, codex_permission(&profile)?)
+        {
             return Err(failure());
         }
         let home = process.codex_preflight_home()?;

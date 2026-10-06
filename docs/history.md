@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (서명된 부모·named 도구 launcher 후보 연결)
+
+- 직전a0ad54c는 named preflight 상태기계 결합의 진전이었다. 고정 named 인자/strict-config/정리된 환경을 기존 inert gate로 실행하는 CodexCommand를 추가했다. 생성 시 CLI/host의 OpenAI 서명을 각각 확인하고 실행 파일 handle 및 profile/snapshot/역할 범위를 process owner에 보관한다. 부모 네트워크를 OS-offline으로 제한한다는 주장은 하지 않는다.
+- RunReservation에 NamedTools launch 분기를 연결했다. 기존 role/snapshot/설정 파일 검사·취소·release 전 프로세스 신원 저장·release 뒤 기록을 재사용한다. named scope는 기존 outer scope와 별개이며 lifecycle 종료/실패와 실행 파일·profile 재검증을 거친다. begin_text_candidate는 이 출처가 있을 때 named preflight를 선택하고 출처가 무효하면 legacy로 우회하지 않는다. 승인 경계도 기존 원장/역할/공간 검사를 유지한다.
+- 제품 dispatcher의 활성화는 아직 하지 않았다. 위 연결과 직전 상태기계의 누적 cargo check -p hello-agent-sidecar --tests --locked 통과(5.90초, 제품 호출 전 후보의 dead_code 경고1개). 이후 미사용 후보 주석·무효 named 출처 fallback 거절·비Codex 실행 파일 거절 회귀를 추가하고 rustfmt/diff만 확인했다. 마지막 수정/새 회귀 실행과 실제 owner·UI·독립 안전 검토는 후속이다. 실제 계정/모델/사용자 프로젝트 실행 없음, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named preflight 상태기계 결합)
 
 - 직전c3884e3은 named thread 응답 계약과 누적 컴파일 확인의 진전이었다. Karpathy 지침으로 sidecar의 named 설정 계층/정책 대조를 core named_config로 옮겨 기존 PreflightExchange가 원시 중복 검사와 함께 직접 사용하도록 연결했다. probe는 동일 함수를 재사용한다.

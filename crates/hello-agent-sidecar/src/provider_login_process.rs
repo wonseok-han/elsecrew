@@ -292,6 +292,7 @@ pub(crate) struct LoginProcess<'a> {
     // listener after closing relays/jobs. Sidecar crashes remain a separate risk.
     model_proxy: Option<crate::provider_model_proxy::broker::Broker>,
     runtime_scope: Option<crate::provider_runtime_sandbox::RuntimeScope>,
+    named_scope: Option<crate::provider_preflight_session::vendor_launch::Scope>,
     #[cfg(test)]
     fail_next_cleanup: bool,
     #[cfg(test)]
@@ -418,6 +419,7 @@ impl<'a> LoginProcess<'a> {
             cleanup_started: None,
             model_proxy: None,
             runtime_scope: None,
+            named_scope: None,
             #[cfg(test)]
             fail_next_cleanup: false,
             #[cfg(test)]
@@ -496,6 +498,35 @@ impl<'a> LoginProcess<'a> {
                 .runtime_scope
                 .as_ref()
                 .is_some_and(|scope| scope.matches(workspace, access))
+    }
+
+    pub(crate) fn launch_named_codex(
+        &mut self, mut command: Command,
+        scope: crate::provider_preflight_session::vendor_launch::Scope,
+        release: impl FnOnce(&mut Child, &[ProcIdentity]) -> std::io::Result<()>,
+    ) -> Result<(), SidecarError> {
+        scope.revalidate()?;
+        self.launch_with_identity_barrier(|| command.spawn(), |child, identities| {
+            scope.revalidate().map_err(std::io::Error::other)?;
+            release(child, identities)
+        })?;
+        self.named_scope = Some(scope);
+        Ok(())
+    }
+
+    pub(crate) fn matches_named_scope(
+        &self, workspace: &std::path::Path,
+        permission: hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPermission,
+    ) -> bool {
+        !self.failed && !self.finished && self.cleanup_started.is_none()
+            && self.io.is_some() && self.child.is_some()
+            && self.codex_preflight_home().ok().is_some_and(|home| {
+                self.named_scope.as_ref().is_some_and(|scope| scope.matches(workspace, &home, permission))
+            })
+    }
+
+    pub(crate) fn uses_named_scope(&self) -> bool {
+        self.named_scope.is_some()
     }
 
     /// The trusted run owner can durably bind the already observed identities
