@@ -2,6 +2,8 @@
 //! admission: product construction/start remains blocked until launch gates pass.
 use super::*;
 use preparation::OwnedTextRun;
+mod owner;
+use owner::NativeOwner;
 
 pub(super) struct FailedStart {
     reservation: preparation::RunReservation,
@@ -11,7 +13,7 @@ pub(super) struct FailedStart {
 }
 
 pub(super) struct NativeRun {
-    owner: OwnedTextRun,
+    owner: NativeOwner,
     pub(super) identity: RunIdentity,
     stream_id: String,
     sequence: u64,
@@ -507,7 +509,7 @@ impl AgentRuntime {
         self.native.insert(
             identity.run_id.clone(),
             NativeRun {
-                owner: owner.take().ok_or_else(failure)?,
+                owner: NativeOwner::Codex(Box::new(owner.take().ok_or_else(failure)?)),
                 identity,
                 stream_id: format!("agent_stream_{}", Uuid::new_v4().simple()),
                 sequence: 0,
@@ -517,6 +519,25 @@ impl AgentRuntime {
                 approvals: Default::default(),
             },
         );
+        Ok(())
+    }
+
+    /// No launch or approval authority: register an already admitted Claude
+    /// owner. Rejections leave the original slot available for explicit cleanup.
+    #[allow(dead_code)]
+    pub(crate) fn register_claude_candidate(
+        &mut self, storage: &Storage, projects: &ProjectManager,
+        owner: &mut Option<preparation::OwnedClaudeRun>,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentRegistrationRejected", "Claude registration unavailable");
+        if self.preparing_to_quit || active_run_limit_reached(self.owned_run_ids().len()) { return Err(failure()); }
+        let identity = owner.as_ref().ok_or_else(failure)?.registration_identity(storage, projects)?;
+        if self.has_active_run(&identity.run_id) { return Err(failure()); }
+        self.native.insert(identity.run_id.clone(), NativeRun {
+            owner: NativeOwner::Claude(Box::new(owner.take().ok_or_else(failure)?)), identity,
+            stream_id:format!("agent_stream_{}", Uuid::new_v4().simple()), sequence:0,
+            public_count:0, last_state:None, stopped:false, approvals:Default::default(),
+        });
         Ok(())
     }
 

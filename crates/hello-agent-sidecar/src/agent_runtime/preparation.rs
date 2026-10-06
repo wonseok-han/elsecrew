@@ -4,6 +4,7 @@ use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedPer
 mod terminal;
 #[allow(dead_code)] // Claude launch admission/owner will call this output bridge.
 mod claude;
+pub(crate) use claude::OwnedClaudeRun;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CodexLaunchMode {

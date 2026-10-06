@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 소유자의 공통 실행 관리자 등록)
+
+- 기준 3a3ff40. NativeOwner를 Codex/Claude로 분리해 준비된 Claude 소유자도 기존 native registry·poll·cancel·prepareQuit·공개 event 전달에 등록할 수 있도록 연결했다. 등록은 run/process/저장 입력을 다시 대조하고 중복·종료 중·한도 초과를 거절하며 실패 시 원래 소유자 슬롯을 유지한다.
+- Karpathy 지침으로 별도 Claude 실행 목록을 중복 생성하지 않고 기존 관리자와 event 원장을 재사용했다. Claude에 Codex approval을 적용하는 경로는 명시 거절한다. Claude tool/control 승인 handler는 아직 미연결이므로 해당 이벤트를 자동 허용하지 않고 실패/정리한다. 이는 도구 기능 완료가 아니며 실제 launch/discovery/승인 UI 및 init attestation 연결은 후속이다.
+- 제한된 cargo check --tests --locked PASS(3.08초), 새 owner 파일 rustfmt·diff check 확인. 전체 테스트·실제 계정/모델 실행 없음. 제품 blocked 유지, 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 실행 소유자·역할 대조)
 
 - 기준 a1f23b9. 준비된 reservation/process/channel을 검증 후 함께 인계받는 OwnedClaudeRun을 추가해 입력 큐·취소·출력/종료 tick과 실패 cleanup parts를 한 수명으로 묶었다. 구성 실패는 원래 슬롯을 소비하지 않고 prompt 입력은 저장된 메시지만 사용한다. 실제 spawn/launch admission 및 dispatcher 등록은 아직 미연결이다.

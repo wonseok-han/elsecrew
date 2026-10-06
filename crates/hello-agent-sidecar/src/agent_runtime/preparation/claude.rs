@@ -29,6 +29,22 @@ pub(crate) struct OwnedClaudeRun {
 }
 
 impl OwnedClaudeRun {
+    pub(crate) fn connection_id(&self) -> Uuid { self.process.connection_id() }
+
+    pub(crate) fn registration_identity(&self, storage: &Storage, projects: &ProjectManager) -> Result<RunIdentity, SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "Claude registration binding differs");
+        if self.output.finished || self.output.connection != self.process.connection_id()
+            || self.output.run_id != self.reservation.run_id
+            || !self.process.matches_startup_run(&self.reservation.run_id) { return Err(failure()); }
+        self.reservation.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let run = &self.reservation.run;
+        let field = |name| run.get(name).and_then(Value::as_str).map(str::to_owned).ok_or_else(failure);
+        Ok(RunIdentity {
+            chat_id:field("chatId")?, task_id:field("taskId")?, project_id:field("projectId")?,
+            worktree_id:field("worktreeId")?, workspace_identity:field("workspaceIdentity")?, run_id:field("runId")?,
+        })
+    }
+
     pub(crate) fn take_prepared(
         storage: &Storage,
         projects: &ProjectManager,
