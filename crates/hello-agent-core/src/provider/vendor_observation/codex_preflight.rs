@@ -157,6 +157,26 @@ pub fn match_thread(
     expected_cwd: &std::path::Path,
     permission: ExpectedPermission,
 ) -> Result<(), ProviderError> {
+    match_thread_policy(input, profile, expected_cwd, Some(permission))
+}
+
+/// Named provenance must accompany previously matched config, profile selection,
+/// and the owner's snapshot boundary. The legacy sandbox summary cannot express
+/// the split filesystem policy and must not be used to infer its enforcement.
+pub fn match_named_thread(
+    input: &BoundedObservation,
+    profile: &ExpectedProfile<'_>,
+    expected_cwd: &std::path::Path,
+) -> Result<(), ProviderError> {
+    match_thread_policy(input, profile, expected_cwd, None)
+}
+
+fn match_thread_policy(
+    input: &BoundedObservation,
+    profile: &ExpectedProfile<'_>,
+    expected_cwd: &std::path::Path,
+    permission: Option<ExpectedPermission>,
+) -> Result<(), ProviderError> {
     #[derive(Deserialize)]
     struct Thread {
         id: String,
@@ -178,6 +198,12 @@ pub fn match_thread(
         },
     }
     #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ActivePermission {
+        id: String,
+        extends: Option<String>,
+    }
+    #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Response {
         thread: Thread,
@@ -187,8 +213,10 @@ pub fn match_thread(
         instruction_sources: Vec<String>,
         approval_policy: String,
         approvals_reviewer: String,
-        sandbox: Sandbox,
+        sandbox: Box<serde_json::value::RawValue>,
         reasoning_effort: String,
+        active_permission_profile: Option<ActivePermission>,
+        runtime_workspace_roots: Option<Vec<String>>,
     }
     validate_profile(profile)?;
     let expected = expected_cwd.to_str().ok_or_else(invalid)?;
@@ -200,24 +228,35 @@ pub fn match_thread(
     {
         return Err(invalid());
     }
+    input.json()?;
     let response: Response = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
-    let sandbox_matches = match (permission, response.sandbox) {
-        (ExpectedPermission::ReadOnly, Sandbox::ReadOnly { network_access }) => !network_access,
-        (
-            ExpectedPermission::WorkspaceWrite,
-            Sandbox::WorkspaceWrite {
-                writable_roots,
-                network_access,
-                exclude_tmpdir_env_var,
-                exclude_slash_tmp,
-            },
-        ) => {
-            writable_roots.is_empty()
-                && !network_access
-                && exclude_tmpdir_env_var
-                && exclude_slash_tmp
+    let sandbox_matches = if let Some(permission) = permission {
+        let sandbox: Sandbox =
+            serde_json::from_str(response.sandbox.get()).map_err(|_| invalid())?;
+        match (permission, sandbox) {
+            (ExpectedPermission::ReadOnly, Sandbox::ReadOnly { network_access }) => !network_access,
+            (
+                ExpectedPermission::WorkspaceWrite,
+                Sandbox::WorkspaceWrite {
+                    writable_roots,
+                    network_access,
+                    exclude_tmpdir_env_var,
+                    exclude_slash_tmp,
+                },
+            ) => {
+                writable_roots.is_empty()
+                    && !network_access
+                    && exclude_tmpdir_env_var
+                    && exclude_slash_tmp
+            }
+            _ => false,
         }
-        _ => false,
+    } else {
+        response
+            .active_permission_profile
+            .as_ref()
+            .is_some_and(|active| active.id == "hello-agent-snapshot" && active.extends.is_none())
+            && response.runtime_workspace_roots.as_deref() == Some(&[expected.to_owned()][..])
     };
     if response.thread.id.is_empty()
         || response.thread.id.len() > 128
@@ -367,6 +406,38 @@ mod tests {
 
     fn thread() -> Value {
         json!({"thread":{"id":"thread-test"},"model":"test-model","modelProvider":"openai","cwd":"/managed/snapshot","instructionSources":[],"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly","networkAccess":false},"reasoningEffort":"medium"})
+    }
+
+    #[test]
+    fn named_thread_requires_selected_profile_and_exact_runtime_root() {
+        let cwd = std::path::Path::new("/managed/snapshot");
+        let mut named = thread();
+        named["activePermissionProfile"] = json!({"id":"hello-agent-snapshot","extends":null});
+        named["runtimeWorkspaceRoots"] = json!(["/managed/snapshot"]);
+        // This legacy compatibility summary cannot represent named split policy.
+        named["sandbox"] = json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":true,"excludeSlashTmp":true});
+        assert!(match_named_thread(&input(&named), &profile(), cwd).is_ok());
+        for (key, value) in [
+            ("activePermissionProfile", Value::Null),
+            ("activePermissionProfile", json!({"id":":workspace"})),
+            (
+                "activePermissionProfile",
+                json!({"id":"hello-agent-snapshot","extends":":workspace"}),
+            ),
+            ("runtimeWorkspaceRoots", json!([])),
+            (
+                "runtimeWorkspaceRoots",
+                json!(["/managed/snapshot", "/outside"]),
+            ),
+            ("model", json!("other")),
+            ("reasoningEffort", json!("high")),
+            ("approvalsReviewer", json!("auto_review")),
+        ] {
+            let mut wrong = named.clone();
+            wrong[key] = value;
+            assert!(match_named_thread(&input(&wrong), &profile(), cwd).is_err());
+        }
+        assert!(match_named_thread(&input(&thread()), &profile(), cwd).is_err());
     }
 
     #[test]

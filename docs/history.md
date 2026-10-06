@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named thread 응답 계약)
+
+- 직전465dddc는 원시 중복 거절과 정책 대조 재사용의 진전이었다. 기준 CLI0.159.2에서 생성한 ThreadStartResponse 스키마를 확인했다. activePermissionProfile는 id/extends, runtimeWorkspaceRoots는 thread 루트이며 sandbox는 legacy 호환 표시로 문서화돼 있다. Karpathy 지침으로 기존 thread 대조를 공통화하고 별도의 match_named_thread를 추가했다.
+- named 경로는 hello-agent-snapshot 선택·부모 profile 없음·정확히 요청한 cwd 하나의 runtime root를 요구한다. 모델/effort/provider/cwd·on-request/user 승인·빈 instructionSources·thread ID와 raw 중복 검사는 공통으로 유지한다. legacy sandbox 요약을 split filesystem 집행 근거로 쓰지 않는다. 이 parser는 config/선택 가능성/프로세스 소유 증거 없이 실행을 허가하지 않으며 product caller는 아직 연결 전이다.
+- 선택 profile 부재/다른 profile/상속·추가 root·다른 model/effort/reviewer 회귀를 작성했다. 최근 raw parser·계층 변경까지 포함한 누적 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked PASS(5.98초). 테스트 자체/실제 named thread 생성/최종 통합 gate는 미실행이다. 다음은 preflight 상태기계와 named thread 요청의 결합이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (원시 JSON 중복 거절과 named 정책 대조 재사용)
 
 - 직전775d657은 계층 대조와 공통 모듈 플랫폼 조건 수정의 진전이었다. 공급자 BoundedObservation의 JSON 파서를 object 키 중복을 모든 깊이에서 거절하도록 변경했다. escaped 동일 키도 중복이며 기존 serde_json의 깊이 제한과 숫자/배열/문자열 의미는 유지한다. 오류에 원문 키를 넣지 않는다.
