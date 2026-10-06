@@ -527,7 +527,9 @@ mod tests {
             let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
             let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
             let home = profile.revalidate().unwrap();
-            let mut process = LoginProcess::reserve(&profile).unwrap();
+            let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+            assert_eq!(process.claude_preflight_home().unwrap(), home);
+            assert!(process.codex_preflight_home().is_err());
             let id = if case == "mismatch" {
                 "wrong".into()
             } else {
@@ -580,7 +582,8 @@ mod tests {
         let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
         let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
         let home = profile.revalidate().unwrap();
-        let mut process = LoginProcess::reserve(&profile).unwrap();
+        let mut process = LoginProcess::reserve_claude_owned(profile).unwrap();
+        assert_eq!(process.claude_preflight_home().unwrap(), home);
         let id = format!("init_{}", process.connection_id().simple());
         let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
         let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Bash"],"mcp_servers":[],"skills":[],"plugins":[]});

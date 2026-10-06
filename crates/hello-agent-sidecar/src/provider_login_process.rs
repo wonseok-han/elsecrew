@@ -303,6 +303,7 @@ pub(crate) struct LoginProcess<'a> {
 enum ProfileOwner<'a> {
     Borrowed(&'a dyn LoginProfile),
     Codex(crate::provider_profile::CodexProfileBinding),
+    Claude(crate::provider_claude_profile::ClaudeProfileBinding),
 }
 
 impl ProfileOwner<'_> {
@@ -310,11 +311,20 @@ impl ProfileOwner<'_> {
         match self {
             Self::Borrowed(profile) => *profile,
             Self::Codex(profile) => profile,
+            Self::Claude(profile) => profile,
         }
     }
 }
 
 impl LoginProcess<'static> {
+    /// Retain Claude's verified directory handles across dispatcher requests.
+    /// This only reserves the existing shared login/runtime fence, not a launch.
+    pub(crate) fn reserve_claude_owned(
+        profile: crate::provider_claude_profile::ClaudeProfileBinding,
+    ) -> Result<Self, SidecarError> {
+        Self::reserve_profile(ProfileOwner::Claude(profile))
+    }
+
     /// Move the already verified profile capability into the process lifetime.
     /// Suitable for retention between dispatcher requests; not launch authority.
     pub(crate) fn reserve_codex_owned(
@@ -368,6 +378,14 @@ impl<'a> LoginProcess<'a> {
     }
     pub(crate) fn codex_preflight_home(&self) -> Result<std::path::PathBuf, SidecarError> {
         if self.profile.as_ref().pending_name() != "codex-login.pending" {
+            return Err(failure());
+        }
+        self.reservation.verify()?;
+        self.profile.as_ref().revalidate()
+    }
+
+    pub(crate) fn claude_preflight_home(&self) -> Result<std::path::PathBuf, SidecarError> {
+        if self.profile.as_ref().pending_name() != "claude-login.pending" {
             return Err(failure());
         }
         self.reservation.verify()?;
@@ -1491,6 +1509,41 @@ mod tests {
         process.release_after_run_terminal().unwrap();
         assert!(LoginProcess::reserve(&binding).is_ok());
         assert!(process.poll_finish().is_err());
+    }
+
+    #[test]
+    fn owned_claude_profile_survives_request_and_rejects_directory_replacement() {
+        use crate::provider_claude_profile::ClaudeProfileBinding;
+        fn binding(temp: &tempfile::TempDir) -> ClaudeProfileBinding {
+            let storage = crate::Storage::open(&temp.path().join("hello-agent.sqlite3")).unwrap();
+            ClaudeProfileBinding::from_storage(&storage).unwrap()
+        }
+        for replace in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            // Neither the request-local Storage nor a borrowed binding is retained.
+            let mut process = LoginProcess::reserve_claude_owned(binding(&temp)).unwrap();
+            let home = process.claude_preflight_home().unwrap();
+            assert!(process.codex_preflight_home().is_err());
+            process.launch(cat).unwrap();
+            process.retain_fence_until_terminal().unwrap();
+            assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+            if replace {
+                std::fs::rename(&home, home.with_file_name("retained-claude-profile")).unwrap();
+                let _replacement = binding(&temp);
+                assert!(process.claude_preflight_home().is_err());
+            }
+            let cleanup = process.finish();
+            if !replace {
+                assert!(cleanup.is_ok());
+                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+                process.release_after_run_terminal().unwrap();
+                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_ok());
+            } else {
+                assert!(cleanup.is_err());
+                assert!(process.release_after_run_terminal().is_err());
+                assert!(LoginProcess::reserve_claude_owned(binding(&temp)).is_err());
+            }
+        }
     }
 
     #[test]

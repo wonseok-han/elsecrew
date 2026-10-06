@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 프로필의 장기 실행 소유권)
+
+- 기준f5746e7에서 LoginProcess의 owned profile이 Codex만 지원해 Claude 실행을 dispatcher 요청 사이에 보관할 수 없는 연결 누락을 확인했다. Karpathy 지침으로 기존 ProfileOwner/Reservation에 Claude 소유 variant와 reserve_claude_owned를 추가했다. borrowed 로그인 API와 profile 디렉터리 whitelist/인증 파일은 변경하지 않는다.
+- Claude 전용 profile 재검증 접근자를 추가하고 Codex namespace에서는 거절한다. 기존 Claude handshake/권한 왕복 toy를 owned profile로 전환했다. 요청-local Storage가 사라진 뒤도 디렉터리 capability 유지·중복 reservation 거절·terminal 전 fence 유지·디렉터리 교체 거절 회귀를 작성했다.
+- rustfmt/diff만 확인했으며 테스트 실행/컴파일·실제 launch admission·파일/검색/셸 보호·owner/UI·통합 검증은 남는다. profile 소유권은 공급자 실행 허가가 아니며 실제 CLI/계정/모델은 실행하지 않았다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 파일 도구 대상 검사)
 
 - 기준e099ff0에서 공식 hooks 문서의 Read/Edit/Write.file_path와 Glob/Grep.path를 확인했다(https://code.claude.com/docs/en/hooks). Karpathy 지침으로 hook 요청에서 파일/검색 루트/셸/미지원만 추출하고 본문·검색식·명령을 보존하지 않는다. 검색 path 누락은 bound cwd이며 잘못된 필드 형식은 거절한다.
