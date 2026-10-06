@@ -106,7 +106,15 @@ pub fn matches_configuration_layers(
             ),
             _ => return false,
         };
-        if layer["name"] != expected_name
+        let mut name = layer["name"].clone();
+        // Codex serializes the absent user config profile as explicit null.
+        // A selected profile or any other extra source field still differs.
+        if index == 1 && name.get("profile").is_some_and(Value::is_null) {
+            if let Some(object) = name.as_object_mut() {
+                object.remove("profile");
+            }
+        }
+        if name != expected_name
             || layer["config"] != expected_config
             || std::mem::replace(&mut seen[index], true)
         {

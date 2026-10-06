@@ -78,6 +78,23 @@ mod tests {
             &policy,
             "on-request"
         ));
+        let mut explicit_null = base.clone();
+        explicit_null["layers"][1]["name"]["profile"] = serde_json::Value::Null;
+        assert!(matches_configuration_layers(
+            &explicit_null,
+            Path::new("/profile"),
+            &expected,
+            &policy,
+            "on-request"
+        ));
+        explicit_null["layers"][1]["name"]["profile"] = json!("other-profile");
+        assert!(!matches_configuration_layers(
+            &explicit_null,
+            Path::new("/profile"),
+            &expected,
+            &policy,
+            "on-request"
+        ));
         for pointer in [
             "/layers/0/config/sandbox_mode",
             "/layers/1/config/hooks",

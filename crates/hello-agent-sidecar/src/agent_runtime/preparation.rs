@@ -206,6 +206,46 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
+    /// Transfer ownership only after launch and transport preparation succeed.
+    /// On every error the caller retains both objects for explicit cleanup and
+    /// recovery persistence; a released process must never be retried here.
+    #[allow(dead_code)] // Dispatcher activation follows the integrated provider gate.
+    pub(crate) fn prepare_named_owner(
+        reservation: &mut Option<Self>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<OwnedTextRun, SidecarError> {
+        let failure = || {
+            SidecarError::new(
+                "agentLaunchRejected",
+                "native preparation ownership is missing",
+            )
+        };
+        let pending = reservation.as_ref().ok_or_else(failure)?;
+        let pending_process = process.as_mut().ok_or_else(failure)?;
+        pending.launch_named_codex_candidate(
+            storage,
+            projects,
+            pending_process,
+            executable,
+            helper,
+            cancel,
+        )?;
+        let state = pending.begin_text_candidate(storage, projects, pending_process)?;
+        let mut owner = OwnedTextRun::from_prepared(
+            reservation.take().ok_or_else(failure)?,
+            process.take().ok_or_else(failure)?,
+            state,
+        );
+        // Preserve cancellation racing with setup; registration/poll will drain it.
+        *owner.cancel.get_mut() = cancel.load(std::sync::atomic::Ordering::Acquire);
+        Ok(owner)
+    }
+
     /// Offline OS-isolated launch candidate only, with no model networking.
     /// Pins do not supply provider admission. Caller retains failure cleanup.
     /// Model/effort come from the reserved role, never independent launch arguments.

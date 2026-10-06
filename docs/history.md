@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named 실행 소유권 인계와 실제 계층 형식 보정)
+
+- 직전4eb97e1은 signed-parent launcher와 실행 소유자 연결의 진전이었다. 새 계층 검사까지 적용한 승인 임시 자료 시험에서 layers=false를 발견했다. 값/인증 정보를 출력하지 않고 계층 이름/키만 확인해 실제 CLI의 user.profile=null 직렬화가 원인임을 확인했다. user source의 해당 null만 제외하며 다른 profile 선택/추가 필드는 계속 거절한다. 임시 진단 출력은 제거했다.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 HELLO_AGENT_APPROVED_VENDOR_SANDBOX_PROBE=1 cargo test -p hello-agent-sidecar provider_permission_probe::installed_vendor_sandbox_blocks_profile_access --locked -- --ignored --exact --nocapture 최종1개 PASS(시험2.84초). config 계층/정책·프로필 허용 조회·가짜 인증 파일 차단·snapshot 쓰기·자손 및 종료 확인을 함께 통과했다. 실제 계정/모델/사용자 프로젝트는 사용하지 않았다.
+- RunReservation::prepare_named_owner를 추가해 launch와 transport 준비가 모두 성공한 뒤에만 reservation/process를 OwnedTextRun으로 넘긴다. 실패하면 두 객체를 호출자 Option에 유지해 명시 종료/복구 기록 책임이 사라지지 않게 했으며 준비와 경합한 취소도 보존한다. 아직 dispatcher의 제품 start 경로는 연결하지 않았다.
+- 이후 소유권 인계 함수와 user.profile null/다른 profile 회귀를 추가하고 rustfmt/diff만 확인했다. 이 마지막 변경의 컴파일/회귀·실제 계정 흐름·최종 통합 및 독립 검토는 미실행이다. 다음은 시작 실패의 명시 정리·복구와 dispatcher 연결이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (서명된 부모·named 도구 launcher 후보 연결)
 
 - 직전a0ad54c는 named preflight 상태기계 결합의 진전이었다. 고정 named 인자/strict-config/정리된 환경을 기존 inert gate로 실행하는 CodexCommand를 추가했다. 생성 시 CLI/host의 OpenAI 서명을 각각 확인하고 실행 파일 handle 및 profile/snapshot/역할 범위를 process owner에 보관한다. 부모 네트워크를 OS-offline으로 제한한다는 주장은 하지 않는다.
