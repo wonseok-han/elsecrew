@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named preflight 상태기계 결합)
+
+- 직전c3884e3은 named thread 응답 계약과 누적 컴파일 확인의 진전이었다. Karpathy 지침으로 sidecar의 named 설정 계층/정책 대조를 core named_config로 옮겨 기존 PreflightExchange가 원시 중복 검사와 함께 직접 사용하도록 연결했다. probe는 동일 함수를 재사용한다.
+- with_named_permission은 모델/effort/home과 snapshot cwd를 고정하며 포함 관계·glob 경로를 거절한다. config→account→models→requirements 이후에도 Checking에 머물고 동일 연결의 permissionProfile/list 허용 확인까지 완료해야 ObservationsMatched가 된다. legacy 경로는 기존 순서를 유지한다.
+- named start_thread는 고정된 cwd만 허용하고 permissions/runtimeWorkspaceRoots를 명시하며 sandbox 및 sandbox_workspace_write를 함께 보내지 않는다. 응답은 named profile/root 대조를 거쳐 기존 thread 통지/응답 쌍 및 turn 전환을 사용한다. 읽기/쓰기별 선택 확인 전 시작 거절·allowed=false 실패·다른 cwd·중복 시작·legacy 인자 부재 회귀를 작성했다.
+- rustfmt/diff만 확인했고 이 변경의 컴파일·회귀·실제 thread 시작은 아직 미실행이다. 실제 launcher/실행 소유자의 named 생성자 선택은 아직 연결 전이며 제품 실행을 활성화하지 않았다. 다음은 서명된 공급자 부모/공식 도구 sandbox launcher와 owner 연결이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (named thread 응답 계약)
 
 - 직전465dddc는 원시 중복 거절과 정책 대조 재사용의 진전이었다. 기준 CLI0.159.2에서 생성한 ThreadStartResponse 스키마를 확인했다. activePermissionProfile는 id/extends, runtimeWorkspaceRoots는 thread 루트이며 sandbox는 legacy 호환 표시로 문서화돼 있다. Karpathy 지침으로 기존 thread 대조를 공통화하고 별도의 match_named_thread를 추가했다.

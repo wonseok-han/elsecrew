@@ -42,6 +42,7 @@ pub struct PreflightExchange {
     notified_thread_id: Option<String>,
     configuration_only: bool,
     account_note_seen: bool,
+    named_cwd: Option<std::path::PathBuf>,
 }
 
 fn invalid() -> ProviderError {
@@ -93,7 +94,32 @@ impl PreflightExchange {
             notified_thread_id: None,
             configuration_only: false,
             account_note_seen: false,
+            named_cwd: None,
         })
+    }
+
+    /// Named policy preflight on this exact connection and snapshot path.
+    /// The caller still owns executable/profile/snapshot admission and cleanup.
+    pub fn with_named_permission(
+        profile: &ExpectedProfile<'_>,
+        expected_home: &str,
+        cwd: &std::path::Path,
+        permission: ExpectedPermission,
+    ) -> Result<Self, ProviderError> {
+        let mut flow = Self::with_permission(profile, expected_home, permission)?;
+        let path = Self::validate_thread_cwd(cwd)?;
+        let home = std::path::Path::new(expected_home);
+        if cwd.starts_with(home)
+            || home.starts_with(cwd)
+            || [path, expected_home]
+                .iter()
+                .any(|value| value.contains(['*', '?', '[', ']', '{', '}']))
+        {
+            return Err(invalid());
+        }
+        flow.rpc = ModelFreeExchange::with_named_permission_config(cwd)?;
+        flow.named_cwd = Some(cwd.into());
+        Ok(flow)
     }
 
     pub fn state(&self) -> PreflightState {
@@ -155,13 +181,27 @@ impl PreflightExchange {
             return Err(invalid());
         }
         let path = Self::validate_thread_cwd(cwd)?;
+        if self
+            .named_cwd
+            .as_deref()
+            .is_some_and(|expected| expected != cwd)
+        {
+            return Err(invalid());
+        }
         let mut request = serde_json::json!({"id":5,"method":"thread/start","params":{
             "model":self.model,"modelProvider":"openai","cwd":path,
             "approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":self.permission.sandbox_mode(),
             "config":{"model_reasoning_effort":self.effort},"ephemeral":true,
             "baseInstructions":"","developerInstructions":""
         }});
-        if self.permission == ExpectedPermission::WorkspaceWrite {
+        if self.named_cwd.is_some() {
+            request["params"]
+                .as_object_mut()
+                .ok_or_else(invalid)?
+                .remove("sandbox");
+            request["params"]["permissions"] = serde_json::json!("hello-agent-snapshot");
+            request["params"]["runtimeWorkspaceRoots"] = serde_json::json!([path]);
+        } else if self.permission == ExpectedPermission::WorkspaceWrite {
             request["params"]["config"]["sandbox_workspace_write"] = serde_json::json!({
                 "writable_roots":[], "network_access":false,
                 "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
@@ -286,15 +326,26 @@ impl PreflightExchange {
                 return Err(invalid());
             }
             let observation = BoundedObservation::new(reply.result.get().as_bytes().to_vec())?;
-            match_thread(
-                &observation,
-                &ExpectedProfile {
-                    model: &self.model,
-                    reasoning_effort: &self.effort,
-                },
-                self.thread_cwd.as_deref().ok_or_else(invalid)?,
-                self.permission,
-            )?;
+            if self.named_cwd.is_some() {
+                super::match_named_thread(
+                    &observation,
+                    &ExpectedProfile {
+                        model: &self.model,
+                        reasoning_effort: &self.effort,
+                    },
+                    self.thread_cwd.as_deref().ok_or_else(invalid)?,
+                )?;
+            } else {
+                match_thread(
+                    &observation,
+                    &ExpectedProfile {
+                        model: &self.model,
+                        reasoning_effort: &self.effort,
+                    },
+                    self.thread_cwd.as_deref().ok_or_else(invalid)?,
+                    self.permission,
+                )?;
+            }
             let result: ResultWire =
                 serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
             self.thread_id = Some(result.thread.id);
@@ -339,9 +390,13 @@ impl PreflightExchange {
             reasoning_effort: &self.effort,
         };
         match kind {
-            // The legacy sandbox adapter must not treat a named-profile report
-            // as equivalent to its own config/thread policy checks.
-            ObservationKind::PermissionProfiles => return Err(invalid()),
+            ObservationKind::PermissionProfiles => {
+                if self.named_cwd.is_none() {
+                    return Err(invalid());
+                }
+                super::match_named_permission_profile(&observation, "hello-agent-snapshot")?;
+                self.state = PreflightState::ObservationsMatched;
+            }
             ObservationKind::Initialize => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
@@ -360,12 +415,22 @@ impl PreflightExchange {
                 }
             }
             ObservationKind::Config => {
-                super::layers::match_layers(
-                    &observation,
-                    &profile,
-                    &self.expected_home,
-                    self.permission,
-                )?;
+                if let Some(cwd) = &self.named_cwd {
+                    super::named_config::match_configuration(
+                        &observation,
+                        std::path::Path::new(&self.expected_home),
+                        cwd,
+                        &profile,
+                        self.permission,
+                    )?;
+                } else {
+                    super::layers::match_layers(
+                        &observation,
+                        &profile,
+                        &self.expected_home,
+                        self.permission,
+                    )?;
+                }
                 if self.configuration_only {
                     self.state = PreflightState::ConfigurationMatched;
                 }
@@ -406,7 +471,9 @@ impl PreflightExchange {
                 if result.requirements.get() != "null" {
                     return Err(invalid());
                 }
-                self.state = PreflightState::ObservationsMatched;
+                if self.named_cwd.is_none() {
+                    self.state = PreflightState::ObservationsMatched;
+                }
             }
         }
         Ok(self.state)
@@ -481,6 +548,76 @@ mod tests {
             ExpectedPermission::WorkspaceWrite,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn named_preflight_requires_profile_selection_before_starting_same_snapshot() {
+        let cwd = std::path::Path::new("/managed/snapshot");
+        for permission in [
+            ExpectedPermission::ReadOnly,
+            ExpectedPermission::WorkspaceWrite,
+        ] {
+            for allowed in [false, true] {
+                let mut flow = PreflightExchange::with_named_permission(
+                    &ExpectedProfile {
+                        model: "test-model",
+                        reasoning_effort: "medium",
+                    },
+                    "/app/profile",
+                    cwd,
+                    permission,
+                )
+                .unwrap();
+                let mut values = results();
+                let config = &mut values[1]["config"];
+                config.as_object_mut().unwrap().remove("sandbox_mode");
+                config["default_permissions"] = json!("hello-agent-snapshot");
+                let mut policy = super::super::named_config::expected_write_policy(
+                    std::path::Path::new("/app/profile"),
+                    cwd,
+                );
+                if permission == ExpectedPermission::ReadOnly {
+                    policy["filesystem"]["/managed/snapshot"]["."] = json!("read");
+                }
+                config["permissions"] = json!({"hello-agent-snapshot":policy});
+                values[1]["layers"][0]["config"] = values[1]["config"].clone();
+                for (index, result) in values.iter().enumerate() {
+                    flow.next_frames().unwrap();
+                    assert_eq!(
+                        flow.accept(&reply(index, result)).unwrap(),
+                        PreflightState::Checking
+                    );
+                }
+                assert!(flow.start_thread(cwd).is_err());
+                let frames = flow.next_frames().unwrap();
+                let query: Value = serde_json::from_str(frames[0].as_str()).unwrap();
+                assert_eq!(query["method"], "permissionProfile/list");
+                assert_eq!(query["params"]["cwd"], "/managed/snapshot");
+                let answer = BoundedObservation::new(serde_json::to_vec(&json!({"id":51,"result":{"data":[{"id":"hello-agent-snapshot","allowed":allowed}],"nextCursor":null}})).unwrap()).unwrap();
+                if !allowed {
+                    assert!(flow.accept(&answer).is_err());
+                    assert_eq!(flow.state(), PreflightState::Failed);
+                    continue;
+                }
+                assert_eq!(
+                    flow.accept(&answer).unwrap(),
+                    PreflightState::ObservationsMatched
+                );
+                assert!(flow.start_thread(std::path::Path::new("/other")).is_err());
+                let request = flow.start_thread(cwd).unwrap();
+                let wire: Value = serde_json::from_str(request.as_str()).unwrap();
+                assert_eq!(wire["params"]["permissions"], "hello-agent-snapshot");
+                assert_eq!(
+                    wire["params"]["runtimeWorkspaceRoots"],
+                    json!(["/managed/snapshot"])
+                );
+                assert!(wire["params"].get("sandbox").is_none());
+                assert!(wire["params"]["config"]
+                    .get("sandbox_workspace_write")
+                    .is_none());
+                assert!(flow.start_thread(cwd).is_err());
+            }
+        }
     }
 
     #[test]
