@@ -18,6 +18,123 @@ pub(crate) struct ClaudeOutputState {
     finished: bool,
 }
 
+/// Owns the reservation, channel and cleanup together across dispatcher polls.
+/// Construction and prompt queueing require a separately admitted launch.
+pub(crate) struct OwnedClaudeRun {
+    reservation: RunReservation,
+    process: crate::provider_login_process::LoginProcess<'static>,
+    channel: SessionChannel,
+    output: ClaudeOutputState,
+    cancel: std::sync::atomic::AtomicBool,
+}
+
+impl OwnedClaudeRun {
+    pub(crate) fn take_prepared(
+        storage: &Storage,
+        projects: &ProjectManager,
+        reservation: &mut Option<RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        channel: &mut Option<SessionChannel>,
+    ) -> Result<Self, SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "Claude owner is unavailable");
+        let output = reservation
+            .as_ref()
+            .ok_or_else(failure)?
+            .begin_claude_output(
+                storage,
+                projects,
+                process.as_ref().ok_or_else(failure)?,
+                channel.as_ref().ok_or_else(failure)?,
+            )?;
+        Ok(Self {
+            reservation: reservation.take().unwrap(),
+            process: process.take().unwrap(),
+            channel: channel.take().unwrap(),
+            output,
+            cancel: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    pub(crate) fn queue_prompt(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        admit: &mut impl FnMut(
+            &mut crate::provider_login_process::LoginProcess<'_>,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "Claude prompt binding differs");
+        self.reservation
+            .validate_text_input(storage, projects)
+            .map_err(|_| failure())?;
+        self.reservation
+            .observe_process(storage, &mut self.process)?;
+        let address = address_from_chat(&self.reservation.run).map_err(|_| failure())?;
+        let workspace =
+            crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
+        let text = std::str::from_utf8(&self.reservation.prompt).map_err(|_| failure())?;
+        let result = self.channel.queue_initial_prompt(
+            &mut self.process,
+            &workspace,
+            text,
+            &self.cancel,
+            admit,
+        );
+        if result.is_err() {
+            self.cancel
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        result
+    }
+
+    pub(crate) fn request_cancel(&self, identity: &RunIdentity) -> Result<(), SidecarError> {
+        if self.output.finished || !identity_value(identity)
+            .as_object()
+            .unwrap()
+            .iter()
+            .all(|(key, value)| self.reservation.run.get(key) == Some(value))
+        {
+            return Err(SidecarError::new(
+                "agentInputChanged",
+                "Claude cancel identity differs",
+            ));
+        }
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn advance(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+        handle: &mut impl FnMut(
+            &mut crate::provider_login_process::LoginProcess<'_>,
+            &mut SessionChannel,
+            Event,
+        ) -> Result<(), SidecarError>,
+    ) -> Result<bool, SidecarError> {
+        self.reservation.advance_claude_output(
+            storage,
+            projects,
+            &mut self.process,
+            &mut self.channel,
+            &self.cancel,
+            &mut self.output,
+            handle,
+        )
+    }
+
+    pub(crate) fn into_cleanup_parts(
+        self,
+    ) -> (
+        RunReservation,
+        crate::provider_login_process::LoginProcess<'static>,
+    ) {
+        (self.reservation, self.process)
+    }
+}
+
 impl RunReservation {
     pub(crate) fn begin_claude_output(
         &self,
@@ -30,6 +147,20 @@ impl RunReservation {
         if self.run["selectedProfile"]["runtime"] != "claude-code"
             || !process.matches_startup_run(&self.run_id)
         {
+            return Err(failure());
+        }
+        process.claude_preflight_home()?;
+        let access = match self.run["selectedProfile"]["permission"].as_str() {
+            Some("readOnly") => crate::provider_claude_session::ToolAccess::ReadOnly,
+            Some("workspaceWrite") => crate::provider_claude_session::ToolAccess::Edit,
+            _ => return Err(failure()),
+        };
+        if !channel.matches_role(
+            self.run["selectedProfile"]["modelSelector"]
+                .as_str()
+                .ok_or_else(failure)?,
+            access,
+        ) {
             return Err(failure());
         }
         self.validate_text_input(storage, projects)

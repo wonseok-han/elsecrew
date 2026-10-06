@@ -13,6 +13,13 @@ pub(crate) enum ToolAccess {
     Edit,
 }
 
+pub(crate) fn expected_tools(access: ToolAccess) -> &'static [&'static str] {
+    match access {
+        ToolAccess::ReadOnly => &["Read", "Glob", "Grep"],
+        ToolAccess::Edit => &["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
+    }
+}
+
 /// Shell-tool protection only. File tools need separate permission rules and
 /// managed settings still require admission; this is not whole-process isolation.
 /// https://code.claude.com/docs/en/sandboxing
@@ -46,10 +53,7 @@ pub(crate) fn arguments(
     {
         return Err(failure());
     }
-    let tools = match access {
-        ToolAccess::ReadOnly => "Read,Glob,Grep",
-        ToolAccess::Edit => "Read,Glob,Grep,Edit,Write,Bash",
-    };
+    let tools = expected_tools(access).join(",");
     let settings = shell_settings();
     Ok([
         "--print",
@@ -70,7 +74,7 @@ pub(crate) fn arguments(
         "--disallowedTools",
         "mcp__*",
         "--tools",
-        tools,
+        &tools,
         "--permission-mode",
         "default",
         "--permission-prompt-tool",
@@ -147,6 +151,14 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    pub(crate) fn matches_role(&self, model: &str, access: ToolAccess) -> bool {
+        self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
+            &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
+                cwd, model, permission_mode: "default", tools: expected_tools(access),
+            }
+        ))
+    }
+
     pub(crate) fn matches_process(&self, process: &LoginProcess<'_>, cwd: &std::path::Path) -> bool {
         self.connection == process.connection_id() && self.cwd == cwd
     }

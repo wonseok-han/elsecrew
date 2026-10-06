@@ -29,6 +29,12 @@ fn invalid() -> ProviderError {
 }
 
 impl Session {
+    pub fn matches_expected(&self, expected: &claude_init::ExpectedInit<'_>) -> bool {
+        !self.failed && self.cwd == expected.cwd && self.model == expected.model
+            && self.permission_mode == expected.permission_mode
+            && self.tools.iter().map(String::as_str).eq(expected.tools.iter().copied())
+    }
+
     pub fn is_closed(&self) -> bool {
         self.failed
     }
@@ -131,6 +137,23 @@ impl Session {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn session_binding_rejects_role_changes_and_closed_session() {
+        let mut session = Session::new(&expected());
+        assert!(session.matches_expected(&expected()));
+        let mut other = expected();
+        other.model = "other-model";
+        assert!(!session.matches_expected(&other));
+        other = expected();
+        other.permission_mode = "bypassPermissions";
+        assert!(!session.matches_expected(&other));
+        other = expected();
+        other.tools = &["Read", "Write"];
+        assert!(!session.matches_expected(&other));
+        session.close();
+        assert!(!session.matches_expected(&expected()));
+    }
+
     fn expected() -> claude_init::ExpectedInit<'static> {
         claude_init::ExpectedInit {
             cwd: "/snapshot",

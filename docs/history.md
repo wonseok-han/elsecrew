@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 실행 소유자·역할 대조)
+
+- 기준 a1f23b9. 준비된 reservation/process/channel을 검증 후 함께 인계받는 OwnedClaudeRun을 추가해 입력 큐·취소·출력/종료 tick과 실패 cleanup parts를 한 수명으로 묶었다. 구성 실패는 원래 슬롯을 소비하지 않고 prompt 입력은 저장된 메시지만 사용한다. 실제 spawn/launch admission 및 dispatcher 등록은 아직 미연결이다.
+- Karpathy 지침으로 기존 세션과 원장을 재사용했다. Claude profile namespace 및 저장된 모델/default 권한 모드/권한별 도구 목록을 channel 기대값과 대조한다. 실행 인자와 init 대조는 같은 expected_tools 목록을 사용한다. 이는 세션 기대값 결속이며 실제 init/effort/격리 증거로 오인하지 않는다. tool grant는 여전히 별도 trusted handler 책임이다.
+- 역할 불일치/닫힌 세션 대조 회귀 추가, 변경 파일 rustfmt 및 diff 확인. 이번 컴파일/테스트는 미실행이며 기능 연결 후 누적 검증에 포함한다. 다음은 Claude launch admission/owner 등록과 도구 승인 연결. 제품 blocked 유지, 기존 9월 archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 공개 출력·종료 원장 bridge)
 
 - 기준 1def998. 별도로 입장·실행된 Claude channel을 run/process/workspace에 결속하고 incremental event→공개 assistant text→명시 process cleanup→공통 terminal 저장 순서로 처리하는 내부 bridge를 추가했다. 정상 init 전 출력을 거절하고 private/tool/control 이벤트는 trusted handler에만 전달한다. result success라도 queue가 명시 0이고 permission denial이 없어야 성공 후보이며 종료 확인과 구분한다.
