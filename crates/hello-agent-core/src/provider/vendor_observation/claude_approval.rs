@@ -16,12 +16,13 @@ pub struct Permissions {
     failed: bool,
 }
 
-/// Internal inspection, not authorization. No raw content or permission suggestions.
+/// Private inspection, not authorization. Never serialize into chat or run metadata.
 pub struct Request {
     pub request_id: String,
     pub tool_name: String,
     pub tool_use_id: Option<String>,
     target: ToolTarget,
+    tool_input: String,
 }
 
 /// Paths are private inspection data, never public chat/status metadata.
@@ -32,6 +33,10 @@ pub enum ToolTarget {
     Unsupported,
 }
 impl Request {
+    /// Only expose following an explicit, live approval inspection request.
+    pub fn inspect_input(&self) -> &str {
+        &self.tool_input
+    }
     pub fn target(&self) -> &ToolTarget {
         &self.target
     }
@@ -134,7 +139,7 @@ impl Permissions {
         }
         let request = wire.request.ok_or_else(invalid)?;
         let hook = request.subtype == "hook_callback";
-        let (tool_name, tool_use_id, target) = if hook {
+        let (tool_name, tool_use_id, target, tool_input) = if hook {
             #[derive(Deserialize)]
             struct HookInput {
                 session_id: String,
@@ -159,12 +164,18 @@ impl Permissions {
                 return Err(invalid());
             }
             let target = tool_target(&data.tool_name, &data.tool_input, cwd)?;
-            (data.tool_name, Some(data.tool_use_id), target)
+            (data.tool_name, Some(data.tool_use_id), target, data.tool_input)
         } else {
+            let tool_name = request.tool_name.ok_or_else(invalid)?;
+            let target = match self.hook_scope.as_ref() {
+                Some((_, cwd)) => tool_target(&tool_name, &request.input, cwd)?,
+                None => ToolTarget::Unsupported,
+            };
             (
-                request.tool_name.ok_or_else(invalid)?,
+                tool_name,
                 request.tool_use_id,
-                ToolTarget::Unsupported,
+                target,
+                request.input.clone(),
             )
         };
         if wire.kind != "control_request"
@@ -177,12 +188,17 @@ impl Permissions {
         {
             return Err(invalid());
         }
+        let tool_input = tool_input.to_string();
+        if tool_input.len() > 128 * 1024 {
+            return Err(invalid());
+        }
         self.pending.insert(wire.request_id.clone(), hook);
         let request = Request {
             request_id: wire.request_id,
             tool_name,
             tool_use_id,
             target,
+            tool_input,
         };
         Ok(if hook {
             Observation::ToolCheck(request)
@@ -226,6 +242,21 @@ mod tests {
         input(json!({"type":"control_request","request_id":id,"request":{
             "subtype":"can_use_tool","tool_name":"Bash","input":{"command":"SECRET"},"tool_use_id":"tool1"
         }}))
+    }
+    #[test]
+    fn explicit_inspection_retains_input_without_echoing_in_denial() {
+        let mut permissions = Permissions::default();
+        permissions.bind_hook_scope("s", "/snapshot");
+        let wire = input(json!({"type":"control_request","request_id":"edit","request":{
+            "subtype":"can_use_tool","tool_name":"Edit","input":{
+                "file_path":"src/main.rs","old_string":"OLD_PRIVATE","new_string":"NEW_PRIVATE"
+            },"tool_use_id":"tool1"
+        }}));
+        let Observation::Requested(request) = permissions.observe(&wire).unwrap() else { panic!() };
+        assert!(matches!(request.target(), ToolTarget::File { path, writes:true } if path == "src/main.rs"));
+        let content: Value = serde_json::from_str(request.inspect_input()).unwrap();
+        assert_eq!(content["new_string"], "NEW_PRIVATE");
+        assert!(!permissions.deny("edit", false).unwrap().as_str().contains("PRIVATE"));
     }
     #[test]
     fn pre_tool_checks_require_bound_scope_and_use_hook_denials() {

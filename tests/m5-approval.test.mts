@@ -18,12 +18,22 @@ test("inspection is explicit, scoped, bounded and not a list payload", () => {
 });
 test("approval summaries admit only fixed types and never raw command fields", () => {
   const request = validateApprovalRequest({action:"list",identity});
-  for (const kind of ["command","writeStdin","network","fileChange"]) {
+  for (const kind of ["command","writeStdin","network","fileChange","tool"]) {
     const summary = {approvalId,kind};
     assert.deepEqual(validateApprovalResult({identity,pending:[summary],queued:null},request).pending,[summary]);
     for (const changed of [{...summary,command:"PRIVATE"},{...summary,kind:"unknown"},{...summary,kind:"toString"}]) assert.throws(()=>validateApprovalResult({identity,pending:[changed],queued:null},request));
     assert.throws(()=>validateApprovalResult({identity,pending:[summary,summary],queued:null},request));
   }
+});
+test("Claude tool input is bounded and only available in explicit inspection", () => {
+  const request = validateApprovalRequest({action:"inspect",identity,approvalId});
+  const inspection = {approvalId,kind:"tool",command:null,cwd:null,reason:"Edit",grantRoot:null,host:null,protocol:null,toolInput:'{"file_path":"PRIVATE","new_string":"<tag>"}'};
+  const response = {identity,pending:[{approvalId,kind:"tool"}],queued:null,inspection};
+  assert.equal(validateApprovalResult(response,request).inspection?.toolInput,inspection.toolInput);
+  for (const toolInput of [null, undefined, {}, "x".repeat(128 * 1024 + 1)]) {
+    assert.throws(()=>validateApprovalResult({...response,inspection:{...inspection,toolInput}},request));
+  }
+  assert.throws(()=>validateApprovalResult({...response,pending:[{approvalId,kind:"tool",toolInput:inspection.toolInput}]},request));
 });
 test("approval contract only admits exact list/decline and binds the receipt", () => {
   const request = validateApprovalRequest({action:"decline",identity,approvalId});

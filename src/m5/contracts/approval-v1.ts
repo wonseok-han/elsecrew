@@ -4,7 +4,7 @@ export const APPROVAL_CHANNEL = "m5:approval:v1";
 export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect"; identity: AgentRunCancelRequestV1; approvalId: string };
 export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
-export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null };
+export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null; toolInput?: string };
 export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection };
 export const APPROVAL_LABELS: Record<ApprovalKind, string> = {
   command: "명령 실행", writeStdin: "실행 중인 프로그램에 입력 전달", network: "네트워크 연결", fileChange: "파일 변경", tool: "에이전트 도구 사용",
@@ -41,7 +41,9 @@ export function validateApprovalResult(value: unknown, request: ApprovalRequest)
   if (queued !== (request.action === "decline" ? request.approvalId : null) || (queued !== null && ids.includes(queued))) throw new Error("approval receipt differs");
   if (request.action === "inspect") {
     const detail = object(v.inspection);
-    if (Object.keys(detail).sort().join() !== "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" || detail.approvalId !== request.approvalId || !pending.some(item=>item.approvalId === detail.approvalId && item.kind === detail.kind)) throw new Error("approval inspection differs");
+    const keys = "approvalId,command,cwd,grantRoot,host,kind,protocol,reason" + (detail.kind === "tool" ? ",toolInput" : "");
+    if (Object.keys(detail).sort().join() !== keys || detail.approvalId !== request.approvalId || !pending.some(item=>item.approvalId === detail.approvalId && item.kind === detail.kind)) throw new Error("approval inspection differs");
+    if (detail.kind === "tool" && (typeof detail.toolInput !== "string" || new TextEncoder().encode(detail.toolInput).length > 128 * 1024)) throw new Error("invalid tool inspection input");
     const limits = {command:65536,cwd:16384,reason:16384,grantRoot:16384,host:1024,protocol:64};
     for (const [key, maximum] of Object.entries(limits)) {
       const text = detail[key];

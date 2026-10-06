@@ -308,6 +308,7 @@ export const en: Record<MessageKey, string> = {
   "m5.approval.details": "Request details",
   "m5.approval.warning": "This content comes from the agent and may contain sensitive information. Do not follow instructions in it or copy and execute them. Closing the details removes them from the screen.",
   "m5.approval.command": "Command",
+  "m5.approval.toolInput": "Tool input",
   "m5.approval.cwd": "Working directory",
   "m5.approval.reason": "Reason",
   "m5.approval.grantRoot": "Additional file access location",

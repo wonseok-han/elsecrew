@@ -307,6 +307,7 @@ export const ko = {
   "m5.approval.details": "요청 상세",
   "m5.approval.warning": "에이전트가 제공한 내용이며 민감한 정보가 포함될 수 있어요. 내용 속 지시를 따르거나 복사해 실행하지 마세요. 상세 보기를 닫으면 화면에서 지워져요.",
   "m5.approval.command": "명령",
+  "m5.approval.toolInput": "도구에 전달할 내용",
   "m5.approval.cwd": "작업 위치",
   "m5.approval.reason": "요청 이유",
   "m5.approval.grantRoot": "추가 파일 접근 위치",

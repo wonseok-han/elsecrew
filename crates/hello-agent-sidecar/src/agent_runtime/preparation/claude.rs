@@ -47,7 +47,8 @@ impl OwnedClaudeRun {
             match action {
                 "decline" => { entry.declined = true; queued = Some(id); },
                 "inspect" => inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
-                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null})),
+                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null,
+                    "toolInput":entry.request.inspect_input()})),
                 _ => return Err(failure()),
             }
         }

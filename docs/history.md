@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 도구 입력 상세 표시)
+
+- 기준 34ee14e. Claude hook/can_use_tool의 실제 tool input을 요청 소유자의 비공개 문자열로 보관하고 명시 inspect에서만 기존 approval card로 전달했다. 파일 경로·명령·수정 입력을 확인할 수 있으며 목록/공개 event/원장에는 넣지 않는다. can_use_tool도 확인된 session cwd가 있으면 기존 파일/검색 대상 분류를 재사용한다.
+- Karpathy 지침으로 기존 상세 UI·제어문자 가시화·한영 번역을 재사용했다. tool 종류에만 필수 toolInput 필드를 허용하고 UTF-8 128KiB로 제한하며 기존 Codex 응답 형식은 유지한다. 요청 취소/종료와 단발 거절 경계는 그대로이고 표시 내용 자체는 실행 권한이 아니다.
+- 입력 보존/거절 비노출 및 상세 필드·용량·목록 비노출 회귀를 추가했다. diff check PASS. 사용자 방침에 따라 이번 빌드/테스트는 실행하지 않았고 기능 연결 뒤 누적 검증 대상이다. 다음은 Claude 실행 입장/명시 허용과 실제 launch 연결. 제품 blocked 유지, 기존 9월 아카이브 변경 보존, 실제 계정·모델 시험/main 병합/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (공식 재설치 승인 재수신·필요성 확인)
+
+- 기준 34ee14e, m5/coding-agent-ide. 이전 공식 업데이트·재설치 질문의 승인을 다시 수신해 현재 설치 파일을 확인했다. 제한 밖 읽기 전용 codesign --verify --strict --all-architectures에서 Claude 2.1.287, standalone Codex, ChatGPT.app 내장 Codex 모두 valid on disk / satisfies its Designated Requirement를 통과했다.
+- 기존 제한 환경의 서명 오류를 설치 손상으로 판단했던 결론은 철회 상태를 유지한다. 이번 승인만으로 불필요한 업데이트·재설치·앱 종료를 실행하지 않았으며 인증 정보·프로젝트는 변경하지 않았다. 서명 통과는 로그인/실제 모델 실행 성공을 뜻하지 않는다.
+- 코드 변경 및 실제 계정·모델 시험 없음. 다음은 기존 Claude admission/명시 허용 경로와 잔여 기능 연결이며 제품 blocked 상태를 유지한다. 기존 9월 아카이브 변경 보존, main 병합/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 도구 요청 목록·거절 UI 연결)
 
 - 기준 7cfe6a8. Claude 권한 요청을 소유자별 최대128개 휘발 큐에 보관하고 기존 approval IPC/card의 list/inspect/decline에 연결했다. 요청별 무작위 UI ID를 쓰고 도구 이름만 상세에 표시하며 원문 input/command는 원장·채팅에 저장하지 않는다. 채널의 실제 pending 집합으로 취소된 요청을 제거하고 거절은 원래 session의 단발 응답으로 큐잉한다.
