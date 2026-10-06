@@ -147,6 +147,28 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    /// Snapshot path observation only, not a grant: a later provider open can race
+    /// this check. Search traversal and shell commands need their own confinement.
+    pub(crate) fn inspect_file_target(
+        &self,
+        workspace: &crate::provider_preflight_session::TextWorkspace<'_>,
+        request: &hello_agent_core::provider::vendor_observation::claude_approval::Request,
+        access: ToolAccess,
+    ) -> Result<(), SidecarError> {
+        use hello_agent_core::provider::vendor_observation::claude_approval::ToolTarget;
+        if self.permissions.is_closed() || workspace.cwd() != self.cwd {
+            return Err(failure());
+        }
+        workspace.revalidate()?;
+        let ToolTarget::File { path, writes } = request.target() else {
+            return Err(failure());
+        };
+        if *writes && matches!(access, ToolAccess::ReadOnly) {
+            return Err(failure());
+        }
+        inspect_snapshot_file(&self.cwd, path, request.tool_name == "Write")
+    }
+
     /// Incremental drive: a result event is still just an observation, never cleanup.
     /// Runtime owner persists process identity through `observer` and must finish on error.
     pub(crate) fn advance<'a>(
@@ -269,6 +291,50 @@ impl SessionChannel {
     }
 }
 
+fn inspect_snapshot_file(
+    root: &std::path::Path,
+    value: &str,
+    allow_new: bool,
+) -> Result<(), SidecarError> {
+    use std::path::{Component, Path};
+    let path = Path::new(value);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).map_err(|_| failure())?
+    } else {
+        path
+    };
+    if relative.as_os_str().is_empty() {
+        return Err(failure());
+    }
+    let components: Vec<_> = relative.components().collect();
+    let mut current = root.to_path_buf();
+    for (index, part) in components.iter().enumerate() {
+        let Component::Normal(name) = part else {
+            return Err(failure());
+        };
+        if matches!(
+            name.to_str(),
+            Some(".git" | ".claude" | ".codex" | ".agents")
+        ) {
+            return Err(failure());
+        }
+        current.push(name);
+        let last = index + 1 == components.len();
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata)
+                if !metadata.file_type().is_symlink()
+                    && (if last {
+                        metadata.is_file()
+                    } else {
+                        metadata.is_dir()
+                    }) => {}
+            Err(error) if last && allow_new && error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err(failure()),
+        }
+    }
+    Ok(())
+}
+
 fn failure() -> SidecarError {
     SidecarError::new(
         "providerPreflightFailed",
@@ -371,6 +437,26 @@ mod tests {
         provider_claude_profile::ClaudeProfileBinding, provider_profile::LoginProfile, Storage,
     };
     use std::path::Path;
+
+    #[test]
+    fn snapshot_file_observation_rejects_escape_links_and_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::write(root.join("existing"), b"test").unwrap();
+        std::os::unix::fs::symlink("existing", root.join("link")).unwrap();
+        assert!(inspect_snapshot_file(&root, "existing", false).is_ok());
+        assert!(inspect_snapshot_file(&root, "new", true).is_ok());
+        for path in [
+            "../outside",
+            "/outside",
+            "link",
+            ".git/config",
+            "missing/child",
+        ] {
+            assert!(inspect_snapshot_file(&root, path, true).is_err());
+        }
+        assert!(inspect_snapshot_file(&root, "missing", false).is_err());
+    }
 
     #[test]
     fn initial_prompt_is_a_single_bounded_user_frame_not_a_control_command() {

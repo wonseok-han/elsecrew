@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 파일 도구 대상 검사)
+
+- 기준e099ff0에서 공식 hooks 문서의 Read/Edit/Write.file_path와 Glob/Grep.path를 확인했다(https://code.claude.com/docs/en/hooks). Karpathy 지침으로 hook 요청에서 파일/검색 루트/셸/미지원만 추출하고 본문·검색식·명령을 보존하지 않는다. 검색 path 누락은 bound cwd이며 잘못된 필드 형식은 거절한다.
+- SessionChannel에 기존 TextWorkspace 재검증을 거친 파일 대상 관측을 연결했다. readOnly 역할 쓰기, 경계 밖/부모 경로, 예약 metadata 구성요소, 심볼릭 링크, 비파일·부모 부재를 거절한다. Write만 최종 새 파일 부재를 허용한다. 이 관측 뒤 공급자가 별도로 여는 시점의 경합이나 검색의 재귀 순회를 보호했다고 주장하지 않으며 allow 응답은 추가하지 않았다.
+- 경로 이탈·링크·신규/기존 파일 관측 회귀를 작성하고 rustfmt/diff만 확인했다. 컴파일/테스트 실행·검색/셸 및 TOCTOU 보호·callback 실패 동작·native owner/UI·최종 통합 검증은 남는다. 실제 사용자 파일 읽기/쓰기·계정/모델 호출 없음, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 도구 실행 직전 SDK 콜백 연결)
 
 - 기준a6508b7에서 공식 SDK query.py의 hookCallbackIds 초기화와 hook_callback 응답, 공식 hooks 문서의 PreToolUse 입력/거절 출력을 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py 및 https://code.claude.com/docs/en/hooks (2026-10-06). Karpathy 지침으로 고정 SDK callback을 등록하고 기존 control 요청/취소/단회 응답 큐를 재사용했다.

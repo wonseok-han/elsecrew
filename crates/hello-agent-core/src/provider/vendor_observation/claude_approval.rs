@@ -16,11 +16,52 @@ pub struct Permissions {
     failed: bool,
 }
 
-/// Display metadata, not authorization. No raw input or permission suggestions.
+/// Internal inspection, not authorization. No raw content or permission suggestions.
 pub struct Request {
     pub request_id: String,
     pub tool_name: String,
     pub tool_use_id: Option<String>,
+    target: ToolTarget,
+}
+
+/// Paths are private inspection data, never public chat/status metadata.
+pub enum ToolTarget {
+    File { path: String, writes: bool },
+    Search { path: String },
+    Shell,
+    Unsupported,
+}
+impl Request {
+    pub fn target(&self) -> &ToolTarget {
+        &self.target
+    }
+}
+fn tool_target(tool: &str, input: &Value, cwd: &str) -> Result<ToolTarget, ProviderError> {
+    fn path(value: &Value) -> Result<String, ProviderError> {
+        let path = value.as_str().ok_or_else(invalid)?;
+        if path.is_empty() || path.len() > 16 * 1024 || path.chars().any(char::is_control) {
+            return Err(invalid());
+        }
+        Ok(path.into())
+    }
+    match tool {
+        "Read" | "Write" | "Edit" => Ok(ToolTarget::File {
+            path: path(input.get("file_path").ok_or_else(invalid)?)?,
+            writes: tool != "Read",
+        }),
+        "Glob" | "Grep" => {
+            if !input.get("pattern").is_some_and(Value::is_string) {
+                return Err(invalid());
+            }
+            let root = match input.get("path") {
+                Some(value) => path(value)?,
+                None => cwd.into(),
+            };
+            Ok(ToolTarget::Search { path: root })
+        }
+        "Bash" => Ok(ToolTarget::Shell),
+        _ => Ok(ToolTarget::Unsupported),
+    }
 }
 
 pub enum Observation {
@@ -89,7 +130,7 @@ impl Permissions {
         }
         let request = wire.request.ok_or_else(invalid)?;
         let hook = request.subtype == "hook_callback";
-        let (tool_name, tool_use_id) = if hook {
+        let (tool_name, tool_use_id, target) = if hook {
             #[derive(Deserialize)]
             struct HookInput {
                 session_id: String,
@@ -113,9 +154,14 @@ impl Permissions {
             {
                 return Err(invalid());
             }
-            (data.tool_name, Some(data.tool_use_id))
+            let target = tool_target(&data.tool_name, &data.tool_input, cwd)?;
+            (data.tool_name, Some(data.tool_use_id), target)
         } else {
-            (request.tool_name.ok_or_else(invalid)?, request.tool_use_id)
+            (
+                request.tool_name.ok_or_else(invalid)?,
+                request.tool_use_id,
+                ToolTarget::Unsupported,
+            )
         };
         if wire.kind != "control_request"
             || (!hook && request.subtype != "can_use_tool")
@@ -132,6 +178,7 @@ impl Permissions {
             request_id: wire.request_id,
             tool_name,
             tool_use_id,
+            target,
         };
         Ok(if hook {
             Observation::ToolCheck(request)
