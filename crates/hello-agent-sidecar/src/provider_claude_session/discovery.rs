@@ -195,6 +195,23 @@ pub(crate) struct ProfileObservation {
 }
 
 impl ProfileObservation {
+    pub(crate) fn selected_model(
+        &self,
+    ) -> Result<hello_agent_protocol::agent_adapter_v1::AgentModelCapabilityV1, SidecarError> {
+        self.resolved_model()?;
+        Ok(
+            hello_agent_protocol::agent_adapter_v1::AgentModelCapabilityV1 {
+                model_selector: self.selector.clone(),
+                reasoning_efforts: vec![self.effort.clone()],
+                permissions: vec![match self.access {
+                    ToolAccess::ReadOnly => "readOnly",
+                    ToolAccess::Edit => "workspaceWrite",
+                }
+                .into()],
+            },
+        )
+    }
+
     pub(crate) fn matches(
         &self,
         selector: &str,
@@ -324,6 +341,10 @@ mod tests {
             )
         };
         assert!(matches(&observation, "/source"));
+        let model = observation.selected_model().unwrap();
+        assert_eq!(model.model_selector, "opus");
+        assert_eq!(model.reasoning_efforts, vec!["high"]);
+        assert_eq!(model.permissions, vec!["workspaceWrite"]);
         assert!(!matches(&observation, "/other"));
         assert!(!observation.matches(
             "opus",
@@ -344,5 +365,6 @@ mod tests {
         observation.observed_at = Instant::now() - Duration::from_secs(31);
         assert!(!matches(&observation, "/source"));
         assert!(observation.resolved_model().is_err());
+        assert!(observation.selected_model().is_err());
     }
 }

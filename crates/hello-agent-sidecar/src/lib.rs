@@ -2097,15 +2097,20 @@ impl Sidecar {
         }
         let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
         for id in ids {
-            let Some(result) =
+            let result = if self.pending_agent_capabilities[&id].params["runtime"] == "claude-code" {
+                self.agent_runtime
+                    .take_claude_discovery(&self.storage, &self.projects, &id)
+                    .map(|result| result.and_then(|evidence| evidence.capability()))
+            } else {
                 self.agent_runtime
                     .take_scoped_discovery(&self.storage, &self.projects, &id)
-            else {
+                    .map(|result| result.and_then(|evidence| evidence.capability()))
+            };
+            let Some(result) = result else {
                 continue;
             };
             let request = self.pending_agent_capabilities.remove(&id).unwrap();
             let result = result
-                .and_then(|evidence| evidence.capability())
                 .and_then(|snapshot| {
                     serde_json::to_value(snapshot).map_err(|_| {
                         SidecarError::new("agentDiscoveryRejected", "invalid discovery response")

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude capability 응답 projection)
+
+- 기준 6678c4c. 직전 턴은 버전/인증 worker 연결과 컴파일 증거를 남긴 구현 진전이다. 이번에는 관측된 Claude selector/effort/권한을 scoped capability로 변환하고 scope/저장된 역할·전체 유효 시간·서명 실행 파일을 재확인한다. credential 없는 결과는 notAuthenticated/canStart=false로 반환하며 catalog를 인증으로 대체하지 않는다.
+- Karpathy 지침에 따라 기존 공용 capability 계약/지문/validator를 재사용했다. take_claude_discovery가 반환 전 projection을 검증하고 공통 pending capability 응답 poll에 Claude 분기를 연결했다. selected_model의 selector/effort/권한·만료 회귀도 작성했다. 명령 시작 dispatcher에는 구체 policy admission 연결이 여전히 필요하며 noop admission으로 활성화하지 않았다.
+- diff check 및 신규 모듈 rustfmt 확인. 사용자 방침대로 이번 빌드/테스트는 반복하지 않고 기능 연결 뒤 누적 검증 대상으로 남겼다. 실제 계정/모델 호출 없음. 다음은 Claude admission·manifest/예약·시작 dispatch, 명시적 일회 허용과 제품 통합 검증이다. 기존 9월 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 버전·인증 상태 관측 연결)
 
 - 기준 cb7c5bc. 공식 복구 승인 재수신을 확인했다. 기존 제한 밖 서명 검사 통과 기록에 따라 불필요한 재설치·앱 종료는 하지 않았다. 인증 정보·프로젝트 변경 및 실제 계정/모델 호출 없음.

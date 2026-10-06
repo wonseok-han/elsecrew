@@ -31,6 +31,49 @@ pub(crate) struct ScopedClaudeEvidence {
     pub(crate) evidence: crate::provider_claude_session::discovery::DiscoveryEvidence,
 }
 
+impl ScopedClaudeEvidence {
+    /// Eligibility for the selected stored role, not permission to send a prompt.
+    /// Launch still requires fresh discovery and same-connection initialization.
+    pub(crate) fn capability(&self) -> Result<AgentCapabilitySnapshotV1, SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "Claude discovery projection differs");
+        let model = self.evidence.observation.selected_model()?;
+        if !self.evidence.is_fresh()
+            || self.profile.runtime != "claude-code"
+            || self.profile.role_id != self.scope.role_id
+            || model.model_selector != self.profile.model_selector
+            || model.reasoning_efforts.first() != self.profile.reasoning_effort.as_ref()
+            || model.permissions != vec![self.profile.permission.clone()]
+        {
+            return Err(failure());
+        }
+        let authenticated = self.evidence.credentials_present;
+        let mut snapshot = AgentCapabilitySnapshotV1 {
+            schema_version: 1,
+            scope: Some(self.scope.clone()),
+            runtime: "claude-code".into(),
+            platform: "darwin".into(),
+            installation_state: "installed".into(),
+            auth_state: if authenticated { "authenticated" } else { "notAuthenticated" }.into(),
+            executable: Some(self.evidence.executable.public_identity(&self.evidence.version)?),
+            models: vec![model],
+            discovery: AgentDiscoveryEvidenceV1 {
+                source: "machineReadableCatalog".into(),
+                verification_level: "runtimeVerified".into(),
+                exact_cli_version: Some(self.evidence.version.clone()),
+                effective_model_evidence: "runtimeVerified".into(),
+            },
+            can_start: authenticated,
+            blocked_reason: (!authenticated).then(|| "notAuthenticated".into()),
+            fingerprint: String::new(),
+            observed_at: now(),
+        };
+        snapshot.fingerprint = compute_agent_capability_fingerprint_v1(&snapshot).map_err(|_| failure())?;
+        validate_agent_adapter_payload_v1("capabilitySnapshot", &serde_json::to_value(&snapshot).map_err(|_| failure())?)
+            .map_err(|_| failure())?;
+        Ok(snapshot)
+    }
+}
+
 pub(super) struct NativeProviderContext {
     manifest: Value,
     discovery: Value,
@@ -260,7 +303,9 @@ impl AgentRuntime {
                 return Err(failure());
             }
             evidence.executable.revalidate()?;
-            Ok(ScopedClaudeEvidence { scope: pending.scope, profile: pending.profile, evidence })
+            let scoped = ScopedClaudeEvidence { scope: pending.scope, profile: pending.profile, evidence };
+            scoped.capability()?;
+            Ok(scoped)
         }))
     }
 
