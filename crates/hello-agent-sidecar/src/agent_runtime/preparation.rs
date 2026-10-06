@@ -1198,6 +1198,11 @@ impl RunPreparation {
                 "provider evidence does not admit this run",
             ));
         }
+        if let Some(scope) = &capability.scope {
+            if *scope != capability_scope(&self.chat, &self.request.role_id)? {
+                return Err(ProjectFailure::manifest("provider capability scope changed"));
+            }
+        }
         let run_id = format!("agent_run_{}", Uuid::new_v4().simple());
         let created = now();
         let run = agent_run_record(

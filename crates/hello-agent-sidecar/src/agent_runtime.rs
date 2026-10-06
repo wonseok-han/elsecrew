@@ -459,12 +459,15 @@ impl AgentRuntime {
                 return Err(ProjectFailure::manifest("capability runtime differs from stored role"));
             }
             projects.verify_workspace_for_run(storage, &address_from_chat(&chat)?)?;
-            if self.provider == ProviderMode::Blocked {
-                // Never reuse the runtime-only fixture cache as scoped native
-                // evidence. Native discovery/cleanup ownership is still gated.
-                return serde_json::to_value(self.blocked_capability(&request.runtime)?)
-                    .map_err(json_failure);
-            }
+            // Blocked product discovery stays blocked; fixture evidence remains
+            // test-only. Scope is included in the canonical fingerprint in both.
+            let mut capability: AgentCapabilitySnapshotV1 = serde_json::from_value(
+                self.get_capabilities(&request.runtime, request.refresh)?,
+            ).map_err(json_failure)?;
+            capability.scope = Some(capability_scope(&chat, role_id)?);
+            capability.fingerprint = compute_agent_capability_fingerprint_v1(&capability)
+                .map_err(contract_failure)?;
+            return serde_json::to_value(capability).map_err(json_failure);
         }
         self.get_capabilities(&request.runtime, request.refresh)
     }
@@ -530,10 +533,15 @@ impl AgentRuntime {
         } else {
             None
         };
-        let capability = match observed_provider.as_ref() {
+        let mut capability = match observed_provider.as_ref() {
             Some(observed) => observed.capability.clone(),
             None => self.blocked_capability(&profile.runtime)?,
         };
+        if request.expected_capability_fingerprint != capability.fingerprint {
+            capability.scope = Some(capability_scope(&chat, &request.role_id)?);
+            capability.fingerprint = compute_agent_capability_fingerprint_v1(&capability)
+                .map_err(contract_failure)?;
+        }
         let outcome = preflight_outcome(&request, &profile, &capability);
         if outcome != "started" {
             return Err(ProjectFailure::manifest(format!(
@@ -1658,6 +1666,7 @@ impl AgentRuntime {
             "win32"
         };
         let mut snapshot = AgentCapabilitySnapshotV1 {
+            scope: None,
             schema_version: 1,
             runtime: runtime.into(),
             platform: platform.into(),
@@ -2403,6 +2412,7 @@ fn capability_from_discovery(
             cli_version: closure.binary.cli_version.clone(),
         });
     let mut snapshot = AgentCapabilitySnapshotV1 {
+        scope: None,
         schema_version: 1,
         runtime: observation.runtime.clone(),
         platform: platform.into(),
@@ -2437,6 +2447,18 @@ fn capability_from_discovery(
     )
     .map_err(contract_failure)?;
     Ok(snapshot)
+}
+
+fn capability_scope(
+    chat: &Value,
+    role_id: &str,
+) -> Result<hello_agent_protocol::agent_adapter_v1::AgentCapabilityScopeV1, ProjectFailure> {
+    let field = |key: &str| chat[key].as_str().map(str::to_owned)
+        .ok_or_else(|| ProjectFailure::manifest("capability scope identity is missing"));
+    Ok(hello_agent_protocol::agent_adapter_v1::AgentCapabilityScopeV1 {
+        chat_id: field("chatId")?, role_id: role_id.into(),
+        worktree_id: field("worktreeId")?, workspace_identity: field("workspaceIdentity")?,
+    })
 }
 
 fn preflight_outcome(

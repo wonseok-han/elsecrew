@@ -317,6 +317,10 @@ export class ChatUiController {
     try {
       const capability = await bridge.getAgentCapabilities({ runtime: profile.runtime, refresh: true, chatId: chat.chatId, roleId });
       if (!this.#live(generation) || this.#state.activeChat?.chatId !== chat.chatId) return;
+      if (capability.scope && (capability.scope.chatId !== chat.chatId || capability.scope.roleId !== roleId
+        || capability.scope.worktreeId !== chat.worktreeId || capability.scope.workspaceIdentity !== chat.workspaceIdentity)) {
+        throw new Error("Capability response does not match the selected chat and role");
+      }
       if (!capability.canStart) {
         this.#set({ ...chatNotice("m5.agentNotice.blocked", { roleId, runtime: profile.runtime, reason: capability.blockedReason }) });
         return;

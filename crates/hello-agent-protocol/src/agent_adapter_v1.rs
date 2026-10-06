@@ -395,6 +395,8 @@ pub struct AgentDiscoveryEvidenceV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AgentCapabilitySnapshotV1 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AgentCapabilityScopeV1>,
     pub schema_version: u64,
     pub runtime: String,
     pub platform: String,
@@ -408,6 +410,15 @@ pub struct AgentCapabilitySnapshotV1 {
     /// SHA-256 of canonical snapshot fields except fingerprint and observedAt.
     pub fingerprint: String,
     pub observed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AgentCapabilityScopeV1 {
+    pub chat_id: String,
+    pub role_id: String,
+    pub worktree_id: String,
+    pub workspace_identity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1240,6 +1251,14 @@ fn validate_capability_snapshot(
 ) -> Result<AgentCapabilitySnapshotV1, AgentAdapterContractError> {
     let snapshot: AgentCapabilitySnapshotV1 = from_value(value, "agent capability snapshot")?;
     schema(snapshot.schema_version)?;
+    if let Some(scope) = &snapshot.scope {
+        id(&scope.chat_id, "chatId")?;
+        id(&scope.worktree_id, "worktreeId")?;
+        id(&scope.workspace_identity, "workspaceIdentity")?;
+        one_of(&scope.role_id, G5_ROLE_IDS_V1, "roleId")?;
+    } else if value.get("scope").is_some() {
+        return fail("scope must be an object when present");
+    }
     one_of(&snapshot.runtime, G5_RUNTIMES_V1, "runtime")?;
     one_of(&snapshot.platform, &["darwin", "win32"], "platform")?;
     one_of(

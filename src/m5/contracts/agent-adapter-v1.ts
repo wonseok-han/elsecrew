@@ -222,6 +222,7 @@ export interface AgentDiscoveryEvidenceV1 {
 }
 
 export interface AgentCapabilitySnapshotV1 {
+  scope?: { chatId: string; roleId: RoleIdV1; worktreeId: string; workspaceIdentity: string };
   schemaVersion: 1;
   runtime: RuntimeV1;
   platform: "darwin" | "win32";
@@ -442,10 +443,17 @@ export function validateAgentCapabilitiesRequestV1(value: unknown): AgentCapabil
 }
 
 export function validateAgentCapabilitySnapshotV1(value: unknown): AgentCapabilitySnapshotV1 {
+  const scoped = typeof value === "object" && value !== null && "scope" in value;
   const object = exactObject(value, [
     "schemaVersion", "runtime", "platform", "installationState", "authState", "executable",
     "models", "discovery", "canStart", "blockedReason", "fingerprint", "observedAt",
+    ...(scoped ? ["scope"] : []),
   ], "agent capability snapshot");
+  if (scoped) {
+    const scope = exactObject(object.scope, ["chatId", "roleId", "worktreeId", "workspaceIdentity"], "capability scope");
+    for (const key of ["chatId", "worktreeId", "workspaceIdentity"]) id(scope[key], key);
+    oneOf(scope.roleId, G5_ROLE_IDS_V1, "roleId");
+  }
   schema(object.schemaVersion);
   oneOf(object.runtime, G5_RUNTIMES_V1, "runtime");
   oneOf(object.platform, ["darwin", "win32"] as const, "platform");
