@@ -3,6 +3,13 @@
 use super::*;
 use preparation::OwnedTextRun;
 
+pub(super) struct FailedStart {
+    reservation: preparation::RunReservation,
+    process: crate::provider_login_process::LoginProcess<'static>,
+    stream_id: String,
+    persisted: bool,
+}
+
 pub(super) struct NativeRun {
     owner: OwnedTextRun,
     pub(super) identity: RunIdentity,
@@ -108,6 +115,86 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    /// Cleanup ownership must still be accepted during shutdown or at capacity:
+    /// this process already exists. Rejection never consumes the caller's owner.
+    #[allow(dead_code)] // Product start dispatcher is not activated yet.
+    pub(crate) fn register_failed_start(
+        &mut self,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+    ) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentRecoveryRequired", "startup owner differs");
+        let pending = reservation.as_ref().ok_or_else(failure)?;
+        let owner = process.as_ref().ok_or_else(failure)?;
+        if self.has_active_run(&pending.run_id) || !owner.matches_startup_run(&pending.run_id) {
+            return Err(failure());
+        }
+        self.failed_starts.insert(
+            pending.run_id.clone(),
+            FailedStart {
+                reservation: reservation.take().ok_or_else(failure)?,
+                process: process.take().ok_or_else(failure)?,
+                stream_id: format!("agent_stream_{}", Uuid::new_v4().simple()),
+                persisted: false,
+            },
+        );
+        Ok(())
+    }
+
+    pub(super) fn poll_failed_starts(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+    ) -> Result<Vec<G5Event>, SidecarError> {
+        let mut events = Vec::new();
+        let mut cleanup_error = None;
+        let ids: Vec<_> = self.failed_starts.keys().cloned().collect();
+        for id in ids {
+            let pending = self.failed_starts.get_mut(&id).unwrap();
+            if !pending.persisted {
+                // Keep ownership on cleanup or persistence errors. Other owners
+                // must still get their cleanup poll even if this one is blocked.
+                match pending
+                    .reservation
+                    .poll_failed_start(storage, projects, &mut pending.process)
+                {
+                    Ok(true) => pending.persisted = true,
+                    Ok(false) => continue,
+                    Err(error) => {
+                        cleanup_error = Some(error);
+                        continue;
+                    }
+                }
+            }
+            let failure = || SidecarError::new("agentRecoveryRequired", "startup terminal differs");
+            let projection = actual_run_projection(storage, &id).map_err(|_| failure())?;
+            let run = &projection["record"];
+            if !matches!(run["state"].as_str(), Some("failed" | "recoveryRequired")) {
+                return Err(failure());
+            }
+            let payload = json!({"schemaVersion":1,
+                "eventId":format!("agent_state_event_{}",Uuid::new_v4().simple()),"run":run});
+            validate_agent_adapter_payload_v1("runStateChanged", &payload)
+                .map_err(|_| failure())?;
+            events.push(G5Event {
+                stream_id: pending.stream_id.clone(),
+                seq: 1,
+                event: "agent.runStateChanged",
+                chat_id: Some(run["chatId"].as_str().ok_or_else(failure)?.into()),
+                task_id: Some(run["taskId"].as_str().ok_or_else(failure)?.into()),
+                run_id: Some(id.clone()),
+                payload,
+            });
+            self.failed_starts.remove(&id);
+        }
+        if events.is_empty() {
+            if let Some(error) = cleanup_error {
+                return Err(error);
+            }
+        }
+        Ok(events)
+    }
+
     pub(crate) fn approval_request(
         &mut self,
         storage: &Storage,
@@ -239,7 +326,10 @@ impl AgentRuntime {
                 "native registration unavailable",
             )
         };
-        if self.preparing_to_quit || active_run_limit_reached(self.active.len() + self.native.len())
+        if self.preparing_to_quit
+            || active_run_limit_reached(
+                self.active.len() + self.native.len() + self.failed_starts.len(),
+            )
         {
             return Err(failure());
         }
@@ -247,8 +337,7 @@ impl AgentRuntime {
             .as_ref()
             .ok_or_else(failure)?
             .registration_identity(storage, projects)?;
-        if self.active.contains_key(&identity.run_id) || self.native.contains_key(&identity.run_id)
-        {
+        if self.has_active_run(&identity.run_id) {
             return Err(failure());
         }
         self.native.insert(

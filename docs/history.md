@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (실패한 시작의 런타임 소유권 보관)
+
+- 기준 ed860ea에서 시작 실패의 reservation/process를 런타임에 인계하는 등록 경로와 증분 정리 polling을 추가했다. 등록 거절은 호출자 소유권을 보존하고, 이미 시작한 프로세스 정리는 종료 중/실행 한도에서도 등록 가능하다. 실패 소유자는 중복 실행/한도 계산에 포함하며 저장 실패 시 보관한다. 정리·저장 완료 뒤 failed/recoveryRequired 이벤트를 내보낸다.
+- Karpathy 지침으로 기존 poll_failed_start를 재사용했다. 컴파일에서 has_active_run의 test-only 속성을 발견해 제품 경로에서도 사용하도록 수정했다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked 재실행 PASS(2.07초). 이후 app.prepareQuit에 모든 런타임 소유자의 종료 차단을 연결했으며 이 마지막 변경은 diff 검사만 수행했다.
+- 제품 start caller는 여전히 미활성이다. terminal 저장 뒤 profile release 실패 재시도, 정리 오류와 다른 실행 이벤트 전달, 종료/재시작 회귀 및 독립 안전 검토는 후속 통합에서 확인해야 한다. 실제 계정/모델/사용자 프로젝트 실행 없음. 기존 archive 변경 보존, main/push 없음.
+
+### 2026-10-06 · by GPT-6 Astra (공식 복구 승인 답변 재수신·설치 상태 재확인)
+
+- 공식 업데이트·재설치 복구 승인 답변을 받았다. 기준 ed860ea에서 제한 밖 읽기 전용 codesign --verify --strict --all-architectures --verbose=2로 Claude 2.1.287, standalone Codex, ChatGPT.app 내장 Codex 세 파일을 다시 검사했으며 모두 valid on disk / satisfies its Designated Requirement를 확인했다.
+- 앞선 서명 장애 정정과 일치하므로 불필요한 재설치·앱 종료를 하지 않았다. 인증·프로젝트·설치 파일은 변경하지 않았다. 서명 통과는 로그인/모델 실행 성공을 뜻하지 않는다. 다음 구현은 시작 실패 소유자의 런타임 보관·정리 및 제품 dispatcher 연결이며 통합 검증은 여전히 남는다. 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (시작 실패 정리와 terminal 전 잠금 유지)
 
 - 직전c38f551은 실제 계층 형식 보정과 named owner 인계의 진전이었다. native 준비에서 spawn 전부터 profile fence를 run ID에 결속하도록 변경했다. begin_text_candidate는 이미 보유한 run fence를 재획득하지 않으며 원래 로그인 finish-and-release 경로는 유지한다.

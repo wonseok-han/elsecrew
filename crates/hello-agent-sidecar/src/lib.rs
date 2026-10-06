@@ -1055,8 +1055,10 @@ impl Sidecar {
                 #[cfg(not(target_os = "macos"))]
                 let login_blockers: Vec<String> = Vec::new();
                 let login_stopped = login_blockers.is_empty();
+                let runtime_blockers = self.agent_runtime.owned_run_ids();
                 if blockers.is_empty()
                     && login_stopped
+                    && runtime_blockers.is_empty()
                     && self.pending_agent_cancels.is_empty()
                     && !self.safe_to_quit
                 {
@@ -1067,6 +1069,11 @@ impl Sidecar {
                 }
                 let mut blockers = self.storage.blocker_ids()?;
                 blockers.extend(login_blockers);
+                for run_id in runtime_blockers {
+                    if !blockers.contains(&run_id) {
+                        blockers.push(run_id);
+                    }
+                }
                 for run_id in self.pending_agent_cancels.keys() {
                     if !blockers.contains(run_id) {
                         blockers.push(run_id.clone());

@@ -160,6 +160,7 @@ pub(crate) struct AgentRuntime {
     scenario: FakeScenario,
     active: HashMap<String, ActiveAgentRun>,
     native: HashMap<String, native::NativeRun>,
+    failed_starts: HashMap<String, native::FailedStart>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -180,6 +181,7 @@ impl AgentRuntime {
             scenario: FakeScenario::Clean,
             active: HashMap::new(),
             native: HashMap::new(),
+            failed_starts: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -393,9 +395,19 @@ impl AgentRuntime {
         Ok(())
     }
 
-    #[cfg(test)]
     pub(crate) fn has_active_run(&self, run_id: &str) -> bool {
-        self.active.contains_key(run_id) || self.native.contains_key(run_id)
+        self.active.contains_key(run_id)
+            || self.native.contains_key(run_id)
+            || self.failed_starts.contains_key(run_id)
+    }
+
+    pub(crate) fn owned_run_ids(&self) -> Vec<String> {
+        self.active
+            .keys()
+            .chain(self.native.keys())
+            .chain(self.failed_starts.keys())
+            .cloned()
+            .collect()
     }
 
     #[cfg(test)]
@@ -416,6 +428,7 @@ impl AgentRuntime {
             scenario,
             active: HashMap::new(),
             native: HashMap::new(),
+            failed_starts: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -465,7 +478,7 @@ impl AgentRuntime {
         if self.preparing_to_quit {
             return Err(ProjectFailure::recovery("sidecar is preparing to quit"));
         }
-        if active_run_limit_reached(self.active.len() + self.native.len()) {
+        if active_run_limit_reached(self.active.len() + self.native.len() + self.failed_starts.len()) {
             return Err(ProjectFailure::recovery(
                 "actual-agent session active-run limit reached before spawn or lock",
             ));
@@ -1061,7 +1074,8 @@ impl AgentRuntime {
         projects: &mut ProjectManager,
     ) -> Result<Vec<G5Event>, SidecarError> {
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
-        let mut events = self.poll_native(storage, projects)?;
+        let mut events = self.poll_failed_starts(storage, projects)?;
+        events.extend(self.poll_native(storage, projects)?);
         for run_id in ids {
             if self
                 .active
