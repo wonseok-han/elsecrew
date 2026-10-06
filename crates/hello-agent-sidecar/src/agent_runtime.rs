@@ -1073,9 +1073,36 @@ impl AgentRuntime {
         storage: &mut Storage,
         projects: &mut ProjectManager,
     ) -> Result<Vec<G5Event>, SidecarError> {
+        let mut events = Vec::new();
+        let mut failure = None;
+        // Poll every ownership namespace even when another needs recovery.
+        // Deliver successfully collected events before reporting a persistent
+        // error on a subsequent idle poll, rather than discarding those events.
+        for result in [
+            self.poll_failed_starts(storage, projects),
+            self.poll_native(storage, projects),
+            self.poll_fixture_runs(storage, projects),
+        ] {
+            match result {
+                Ok(emitted) => events.extend(emitted),
+                Err(error) => failure = Some(error),
+            }
+        }
+        if events.is_empty() {
+            if let Some(error) = failure {
+                return Err(error);
+            }
+        }
+        Ok(events)
+    }
+
+    fn poll_fixture_runs(
+        &mut self,
+        storage: &mut Storage,
+        projects: &mut ProjectManager,
+    ) -> Result<Vec<G5Event>, SidecarError> {
         let ids = self.active.keys().cloned().collect::<Vec<_>>();
-        let mut events = self.poll_failed_starts(storage, projects)?;
-        events.extend(self.poll_native(storage, projects)?);
+        let mut events = Vec::new();
         for run_id in ids {
             if self
                 .active

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (시작 실패 terminal 저장·해제 재시도 분리)
+
+- 직전 da05256은 실패 시작 소유권을 런타임에 연결한 진전이다. 이어 terminal 저장은 성공했지만 profile 잠금 해제가 실패하면 재시도에서 preparing 검증에 막히는 경로를 수정했다. poll_failed_start는 정리·저장까지만 담당하고 런타임은 persisted 상태를 보관해 확인된 잠금 해제만 재시도한다. 불확실 종료는 기존 recoveryRequired와 잠금을 유지한다.
+- Karpathy 지침에 따라 기존 소유자/증거를 재사용했다. failed-start/native/fixture polling을 각각 호출하고 성공 이벤트를 먼저 반환하도록 연결해 시작 정리 오류가 다른 namespace 진행을 막지 않게 했다. 같은 namespace 내부의 오류 후 이벤트 처리·오류 통지의 내구성은 최종 실패 주입에서 별도 확인해야 한다. native 등록 회귀에 종료 차단용 owned_run_ids 확인을 추가했다.
+- 이번 변경은 native.rs rustfmt 및 git diff --check만 확인했으며 컴파일·새 회귀·통합 검증은 미실행이다. 다음은 실제 start caller와 공급자 입장 연결, 이후 실패 주입·독립 안전 검토다. 실제 계정/모델/사용자 프로젝트 실행·제품 활성화 없음, 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (실패한 시작의 런타임 소유권 보관)
 
 - 기준 ed860ea에서 시작 실패의 reservation/process를 런타임에 인계하는 등록 경로와 증분 정리 polling을 추가했다. 등록 거절은 호출자 소유권을 보존하고, 이미 시작한 프로세스 정리는 종료 중/실행 한도에서도 등록 가능하다. 실패 소유자는 중복 실행/한도 계산에 포함하며 저장 실패 시 보관한다. 정리·저장 완료 뒤 failed/recoveryRequired 이벤트를 내보낸다.

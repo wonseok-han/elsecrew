@@ -206,8 +206,9 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
-    /// Incremental startup cleanup. False keeps the original process owner alive.
-    #[allow(dead_code)] // Dispatcher startup integration remains pending.
+    /// Incremental startup cleanup and terminal persistence. True authorizes the
+    /// owner to release a confirmed fence separately, without repeating this
+    /// transaction if that release needs another attempt.
     pub(crate) fn poll_failed_start(
         &self,
         storage: &mut Storage,
@@ -246,9 +247,6 @@ impl RunReservation {
             "native startup failed",
         )
         .map_err(|_| failure())?;
-        if evidence.confirmed() {
-            process.release_after_run_terminal()?;
-        }
         Ok(true)
     }
 

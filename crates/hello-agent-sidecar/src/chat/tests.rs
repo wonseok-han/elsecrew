@@ -1331,6 +1331,7 @@ fn text_candidate_cases_selected(
                         .unwrap();
                     assert!(slot.is_none());
                     assert!(runtime.has_active_run(&identity.run_id));
+                    assert_eq!(runtime.owned_run_ids(), vec![identity.run_id.clone()]);
                     assert!(runtime
                         .cancel_result(&fixture.storage, &identity)
                         .unwrap()

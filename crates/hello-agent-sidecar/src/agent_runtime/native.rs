@@ -167,6 +167,20 @@ impl AgentRuntime {
                 }
             }
             let failure = || SidecarError::new("agentRecoveryRequired", "startup terminal differs");
+            // Terminal persistence is remembered independently from release.
+            // A retry must not validate the already-terminal run as preparing
+            // or repeat its terminal transaction.
+            if pending
+                .process
+                .closure_evidence()
+                .is_some_and(|evidence| evidence.confirmed())
+                && pending.process.retains_run_fence()
+            {
+                if let Err(error) = pending.process.release_after_run_terminal() {
+                    cleanup_error = Some(error);
+                    continue;
+                }
+            }
             let projection = actual_run_projection(storage, &id).map_err(|_| failure())?;
             let run = &projection["record"];
             if !matches!(run["state"].as_str(), Some("failed" | "recoveryRequired")) {
