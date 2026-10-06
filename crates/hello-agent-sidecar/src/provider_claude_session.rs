@@ -13,6 +13,21 @@ pub(crate) enum ToolAccess {
     Edit,
 }
 
+/// Shell-tool protection only. File tools need separate permission rules and
+/// managed settings still require admission; this is not whole-process isolation.
+/// https://code.claude.com/docs/en/sandboxing
+fn shell_settings() -> String {
+    serde_json::json!({"sandbox":{
+        "enabled":true,
+        "failIfUnavailable":true,
+        "allowUnsandboxedCommands":false,
+        "autoAllowBashIfSandboxed":false,
+        "excludedCommands":[],
+        "filesystem":{"disabled":false}
+    }})
+    .to_string()
+}
+
 /// Fixed, noninteractive launch arguments; not an OS sandbox or approval grant.
 /// Managed policy can override customization settings and must be admitted before spawn.
 /// https://code.claude.com/docs/en/cli-reference
@@ -35,6 +50,7 @@ pub(crate) fn arguments(
         ToolAccess::ReadOnly => "Read,Glob,Grep",
         ToolAccess::Edit => "Read,Glob,Grep,Edit,Write,Bash",
     };
+    let settings = shell_settings();
     Ok([
         "--print",
         "--input-format",
@@ -43,6 +59,8 @@ pub(crate) fn arguments(
         "stream-json",
         "--verbose",
         "--safe-mode",
+        "--settings",
+        &settings,
         "--setting-sources",
         "",
         "--disable-slash-commands",
@@ -380,6 +398,18 @@ mod tests {
             let args = arguments("selected-model", "medium", access).unwrap();
             let args: Vec<_> = args.iter().map(|a| a.to_str().unwrap()).collect();
             assert!(args.contains(&"--safe-mode"));
+            assert_eq!(args.iter().filter(|a| **a == "--settings").count(), 1);
+            let settings = args.windows(2).find(|a| a[0] == "--settings").unwrap()[1];
+            let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
+            assert_eq!(settings["sandbox"]["enabled"], true);
+            assert_eq!(settings["sandbox"]["failIfUnavailable"], true);
+            assert_eq!(settings["sandbox"]["allowUnsandboxedCommands"], false);
+            assert_eq!(settings["sandbox"]["autoAllowBashIfSandboxed"], false);
+            assert_eq!(settings["sandbox"]["filesystem"]["disabled"], false);
+            assert_eq!(
+                settings["sandbox"]["excludedCommands"],
+                serde_json::json!([])
+            );
             assert!(!args.iter().any(|a| matches!(
                 *a,
                 "--bare"

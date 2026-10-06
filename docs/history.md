@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 실행 전 셸 격리 누락 보완)
+
+- 기준f741b37에서 실제 native dispatcher와 OwnedTextRun을 조사했다. 현행 owner의 역할 해석·launch·진행·승인·결과 타입은 Codex 전용이고 Claude SessionChannel을 실제 등록하지 않는다. 단순 enum 분기 추가로 제품 실행을 열 수 없으며 Claude 프로필/launch admission/도구별 보호와 owner 결합이 필요하다.
+- 공식 https://code.claude.com/docs/en/sandboxing 에서 셸 sandbox 기본 비활성·미지원 시 unsandboxed fallback 및 파일 도구 미포함을 확인했다. Karpathy 지침으로 후보 --settings에 enabled/failIfUnavailable=true, allowUnsandboxedCommands/autoAllowBashIfSandboxed=false, excludedCommands=[], filesystem.disabled=false를 명시했다. 공급자 설치나 사용자 설정 파일을 변경하지 않았다.
+- 인자 회귀를 확장하고 rustfmt/diff만 확인했다. 실행 검증과 관리 정책 우선순위·기본 광범위 읽기/네트워크·파일 도구 보호는 아직 해결되지 않았으며 이 설정만으로 격리 완료라고 주장하지 않는다. 실제 launcher/owner·UI·통합 검증이 남고 제품 실행은 계속 비활성이다. archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 증분 전송·수신 구동)
 
 - 기준2c64a0d에서 Karpathy 지침으로 SessionChannel.advance를 추가했다. 큐가 있으면 bounded flush 한 단계, 없으면 bounded poll 후 기존 세션 파서로 전달한다. 두 경로 모두 기존 process observer를 사용하고 동일 연결·취소·고정10분 deadline·닫힘을 검사한다. 활동 때 deadline을 연장하지 않는다.
@@ -130,6 +136,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Claude shell sandbox와 파일 도구 구분(2026-10-06)**: 공식 sandboxing 문서상 sandbox는 셸 도구에만 적용되고 Read/Edit/Write는 권한 규칙을 따른다. 기본 셸 읽기는 광범위하며 can_use_tool 콜백이 모든 호출을 가로채지도 않는다. 후보 인자의 strict shell 설정은 전체 target/credential 보호가 아니며 native owner는 여전히 Codex 전용이다. Claude 활성화 전 이 차이를 구현/검증해야 한다.
 - **Claude 권한 통신(2026-10-06)**: SDK can_use_tool은 --permission-prompt-tool stdio로 control 요청을 받는다. 옵션만으로 모든 도구가 콜백을 거친다고 보장하지 않으며 allow 규칙/권한 모드의 우회와 실행 격리 검증은 별도다. 후보 인자와 거절 IO가 연결됐으나 제품 실행/UI 활성화 증거는 아니다.
 - **Claude safe-mode 경계(2026-10-06)**: 공식 CLI의 safe-mode는 bare와 달리 구독 인증을 유지하지만 관리 정책 hook 등 일부 동작은 제외하지 않는다. 인자 구성만으로 실행 admission/OS 격리를 입증하지 않는다. 앱 프로필로 실제 실행할 때 생성되는 파일과 권한 응답·종료 검증은 여전히 후속이다.
 - **Claude init의 관측 한계(2026-10-06)**: 공식 SDKSystemMessage의 effort는 일반 앱 init에서 누락된다. claude_init은 cwd/model/권한 모드/도구 및 비로딩 확장을 비교하지만 effort·계정·OS 격리를 입증하지 않는다. interrupt capability는 버전 대신 개별 이름으로 확인하고 실행 owner 연결은 후속이다.
