@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (named 실행과 동일한 사전 조회 경로)
+
+- 기준 a055ac4에서 기존 inspect_full/proxied가 legacy 설정 flow만 만드는 점을 확인했다. inspect_named_preflight_candidate를 추가해 검증된 snapshot·역할 권한과 앱 profile을 같은 CodexCommand/PreflightExchange named 경로로 조회하도록 연결했다. CLI/helper·profile·취소를 release 직전 재확인하며 typed process scope 대조 후 기존 observe_and_close를 재사용한다.
+- Karpathy 지침으로 기존 프로세스 정리 소유권을 재사용했다. 조회는 account/model/config/requirements/선택 profile까지이며 thread/turn/목표 전송은 하지 않는다. 실패해도 원래 process를 ProviderInspection으로 반환한다. 이 함수는 아직 제품 discovery caller에 연결되지 않았으며 조회 성공 자체로 실행 capability를 만들지 않는다.
+- git diff --check만 확인했고 컴파일·실제 계정 조회·회귀는 실행하지 않았다. 다음은 조회 결과의 제한된 capability 표현과 제품 caller 연결이다. 원본/인증/설치 변경·main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-06 · by GPT-6 Astra (예약된 Codex 시작과 런타임 인계 연결)
 
 - 기준 3b973a5에서 start_reserved_codex를 추가했다. 종료 중/중복/한도를 launch 전에 검사하고 기존 prepare_named_owner와 register_native_candidate를 연결한다. 준비·등록 실패 시 원래 reservation/process를 실패 정리 registry로 넘기며, fence 인계 전 거절은 호출자 Option에 그대로 남긴다. 시작 실패 응답을 성공으로 바꾸거나 재실행하지 않는다.

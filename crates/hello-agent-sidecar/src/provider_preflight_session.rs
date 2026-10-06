@@ -33,6 +33,63 @@ pub(crate) struct ProviderInspection<'a> {
     pub(crate) process: LoginProcess<'a>,
 }
 
+/// Inspect the same named policy used by the native launcher. The workspace
+/// must already be a verified managed snapshot. This queries account/models,
+/// but never creates a thread or sends a goal; it is not a capability grant.
+#[allow(dead_code)] // Product discovery integration remains gated.
+pub(crate) fn inspect_named_preflight_candidate<'a>(
+    profile: &'a crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    helper: &crate::provider_executable::PinnedExecutable,
+    expected: &hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile<'_>,
+    permission: ExpectedPermission,
+    workspace: &std::path::Path,
+    cancel: &AtomicBool,
+) -> Result<ProviderInspection<'a>, SidecarError> {
+    let home = profile.revalidate()?;
+    let mut flow = PreflightExchange::with_named_permission(
+        expected,
+        home.to_str().ok_or_else(failure)?,
+        workspace,
+        permission,
+    )
+    .map_err(|_| failure())?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(failure());
+    }
+    let command = vendor_launch::CodexCommand::new(
+        executable.revalidate()?,
+        helper.revalidate()?,
+        &home,
+        workspace,
+        expected,
+        permission,
+    )?;
+    let mut process = LoginProcess::reserve(profile)?;
+    let launched = command.launch(&mut process, |child, _| {
+        executable.revalidate().map_err(std::io::Error::other)?;
+        helper.revalidate().map_err(std::io::Error::other)?;
+        if profile.revalidate().map_err(std::io::Error::other)? != home
+            || cancel.load(Ordering::Acquire)
+        {
+            return Err(std::io::Error::other(
+                "preflight canceled or profile changed",
+            ));
+        }
+        crate::provider_login_gate::release(child)
+    });
+    let result = launched.and_then(|()| {
+        if !process.matches_named_scope(workspace, permission) {
+            // A rejected scope still belongs to this inspection and must close.
+            let _ = process.finish();
+            return Err(failure());
+        }
+        observe_and_close(&mut process, &mut flow, cancel)
+    });
+    // Even launch/cleanup errors return the original owner for explicit cleanup.
+    Ok(ProviderInspection { result, process })
+}
+
 /// Full candidate includes account/read, model/list and configRequirements/read. This is NOT the approved
 /// config-only smoke and must not be invoked under that narrower authorization.
 /// No product caller exists; configuration isolation/admission remains separate.
