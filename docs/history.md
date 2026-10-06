@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 실제 출력 형식 adapter 착수)
+
+- 기준158352c에서 공식 headless/TypeScript SDK 문서를 직접 읽고 Claude stream-json의 assistant 출력 projection을 core에 추가했다. https://code.claude.com/docs/en/headless 및 https://code.claude.com/docs/en/agent-sdk/typescript#sdkassistantmessage 기준이며 SDK 문서는 웹 도구 크기 제한 때문에 공식 .md 원문을 curl로 읽었다. 설치 CLI·계정·모델은 실행하지 않았다.
+- 공개 text block만 전달하고 thinking/tool/error/subagent/result/partial stream은 채팅 답변으로 전재하지 않는다. mixed frame은 비공개 block 처리 필요를 별도로 알린다. 같은 message.id가 여러 assistant frame에 쓰일 수 있다는 공식 계약에 따라 uuid를 개별 전달 신원으로 사용하며 중복·다른 session·불명 parent scope·예산 초과는 sticky 실패한다. 원문 로그/Debug 출력은 남기지 않는다.
+- Karpathy 지침으로 기존 Codex projection과 같은 자원 예산을 재사용했다. 공개/비공개 분리·동일 message ID·중복·교차 session·큰 text 회귀를 작성하고 rustfmt/diff만 확인한다. 이 모듈은 아직 런타임에 연결하지 않은 출력 parser이며 Claude 실행 완료를 뜻하지 않는다. 초기화·권한·종료/복구·실제 transport 연결과 통합 검증이 다음이다. Codex 설치 복구 승인 답변 대기, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (복원 진행과 프로젝트 복구 화면 연결)
 
 - 기준e8ba0eb에서 복원 제어가 자체 상태만 갱신해 상위 복구 화면은 이전 applied 상태에 남는 연결 누락을 확인했다. Karpathy/React 지침으로 exact project/application 대조를 통과한 상태를 상위 화면에 전달하고, running 이후 기존 프로젝트 polling·중단 UI로 이어지게 했다. 완료 상태는 복구점 종료 UI에 반영하며 다른 대상으로 바뀌거나 지운 선택은 늦은 응답으로 덮지 않는다.
@@ -59,6 +65,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Claude 공개 출력 계약(2026-10-06)**: 실제 SDK assistant frame은 message.id가 반복될 수 있어 uuid로 구분한다. core claude_events projection은 main-session text만 내보내며 result는 프로세스 종료 증거가 아니다. 아직 실행 owner와 연결 전이고 fake provider/parser를 실제 실행 증거로 사용하지 않는다.
 - **백업 목록의 정리 상태(2026-10-06)**: backupRetention은 연결 이유와 별도로 cleanupState를 반환한다. deleted는 영속 정리 기록이며 파일 부재의 새 관측이 아니다. 별도 inspectBackupCleanup에서 실제 파일을 대조하고, 정리 후에도 이력은 보존한다. 제품 삭제는 여전히 비활성이다.
 - **복구점 종료 후보(2026-10-06)**: 완료된 현재 기록을 project/lock CAS로 과거 이력에 보존하는 내부 경로와 확인 IPC/UI를 연결했다. 원본·백업 파일/잠금은 변경하지 않으며 종료 뒤 별도 확인으로 과거 백업을 정리한다. 제품 기본값은 비활성, 통합·독립 검토 전이다.
 - **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
