@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 도구 실행 직전 SDK 콜백 연결)
+
+- 기준a6508b7에서 공식 SDK query.py의 hookCallbackIds 초기화와 hook_callback 응답, 공식 hooks 문서의 PreToolUse 입력/거절 출력을 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py 및 https://code.claude.com/docs/en/hooks (2026-10-06). Karpathy 지침으로 고정 SDK callback을 등록하고 기존 control 요청/취소/단회 응답 큐를 재사용했다.
+- reported init 뒤 고정 callback ID·session/cwd·inner/outer tool_use_id·PreToolUse·main agent 범위를 대조한다. 일반 can_use_tool과 ToolCheck를 구분하며 hook 거절은 hookSpecificOutput.permissionDecision=deny로 응답한다. 원시 도구 입력은 공개하지 않고 허용·입력 변경 경로는 열지 않았다. 교차 scope·표준 거절과 hook 거절 구분 회귀를 작성했다.
+- rustfmt/diff만 확인했고 컴파일/회귀/실제 CLI는 실행하지 않았다. 경로별 허용 판단·안전한 callback timeout/오류 동작과 safe-mode 호환·SDK callback 실행 실측은 남는다. 일반 command hook timeout의 진행 허용을 SDK callback에도 같다고 단정하거나, 등록만으로 전체 보호를 주장하지 않는다. 제품 실행은 비활성, 기존 archive 보존, 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 실행 전 셸 격리 누락 보완)
 
 - 기준f741b37에서 실제 native dispatcher와 OwnedTextRun을 조사했다. 현행 owner의 역할 해석·launch·진행·승인·결과 타입은 Codex 전용이고 Claude SessionChannel을 실제 등록하지 않는다. 단순 enum 분기 추가로 제품 실행을 열 수 없으며 Claude 프로필/launch admission/도구별 보호와 owner 결합이 필요하다.

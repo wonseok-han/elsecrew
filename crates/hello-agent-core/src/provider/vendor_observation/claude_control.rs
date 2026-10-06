@@ -55,9 +55,12 @@ impl InitializeExchange {
             return Err(invalid());
         }
         self.state = State::AwaitingResponse;
-        // hooks:null registers no SDK hooks; it does not disable on-disk hooks.
+        // SDK callback only, never an on-disk command hook. Runtime admission
+        // must establish callback failure/timeout semantics before activation.
         let frame = json!({"type":"control_request","request_id":self.request_id,
-            "request":{"subtype":"initialize","hooks":null,"skills":[]}});
+            "request":{"subtype":"initialize","hooks":{"PreToolUse":[{
+                "matcher":null,"hookCallbackIds":[super::claude_approval::PRE_TOOL_CALLBACK]
+            }]},"skills":[]}});
         Ok(InitializeRequest(format!("{frame}\n")))
     }
 
@@ -128,7 +131,7 @@ mod tests {
         let wire: serde_json::Value = serde_json::from_str(frame.as_str()).unwrap();
         assert_eq!(
             wire,
-            json!({"type":"control_request","request_id":"init_a","request":{"subtype":"initialize","hooks":null,"skills":[]}})
+            json!({"type":"control_request","request_id":"init_a","request":{"subtype":"initialize","hooks":{"PreToolUse":[{"matcher":null,"hookCallbackIds":[super::super::claude_approval::PRE_TOOL_CALLBACK]}]},"skills":[]}})
         );
         assert!(exchange.request().is_err());
         exchange.accept_response(&input(&response())).unwrap();

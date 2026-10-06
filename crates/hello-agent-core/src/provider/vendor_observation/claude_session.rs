@@ -94,6 +94,8 @@ impl Session {
                 interrupt_receipt: init.interrupt_receipt,
                 interrupt_cancel_queued: init.interrupt_cancel_queued,
             };
+            self.permissions
+                .bind_hook_scope(init.session_id(), &self.cwd);
             self.projection = Some(init.into_projection()?);
             return Ok(event);
         }
