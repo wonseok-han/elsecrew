@@ -340,6 +340,17 @@ impl OwnedClaudeRun {
         if !self.channel.matches_process(&self.process, Path::new(&cwd))
             || !self.channel.matches_role(self.reservation.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?, access)
         { return Err(failure()); }
+        use hello_agent_core::provider::vendor_observation::claude_approval::ToolTarget;
+        match request.target() {
+            ToolTarget::File { .. } => {
+                let workspace = crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
+                self.channel.inspect_file_target(&workspace, request, access)?;
+            }
+            ToolTarget::Unsupported => return Err(failure()),
+            // Traversal/shell protection cannot be inferred from a file-path
+            // check. The separately supplied trusted admission must cover them.
+            ToolTarget::Search { .. } | ToolTarget::Shell => {}
+        }
         self.reservation.observe_process(storage, &mut self.process)?;
         // Recheck policy at delivery, not merely when the user clicked. Input and
         // connection identity remain owned by the original opaque request.

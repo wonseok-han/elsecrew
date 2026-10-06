@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 파일 허용 누락 수정·단계별 증거 계약 발견)
+
+- 기준 e7d35e7. 기존 검토자의 실행 중 handle을 확인하고 동일 검토를 기다렸다. 중간 결과에서 G5C는 부분 observedRuntimeVerification을 저장할 수 있지만 전체 required 목록이 아니면 canStart=false이며 attestation도 전체를 요구함을 확인했다. Claude의 사전 조회는 system/init의 cwd/tools/MCP/plugins를 아직 관측하지 않고 config는 init에서도 보고되지 않으므로 required 목록 복사로 해결하면 허위 증거가 된다.
+- 유한한 후속은 사전 정적 실행 설정과 같은 연결의 관측된 세션 검증을 분리하는 native 단계 계약이다. 기존 fixture/G5C 계약을 조용히 완화하지 않고 별도 명시적 구분이 필요하다. 검토자의 최종 제안은 아직 대기 중이며 제품은 blocked다.
+- 독립 검토로 확인된 파일 허용 누락을 즉시 수정했다. allow_tool_once가 File 요청에 기존 TextWorkspace/inspect_file_target 검사를 적용하고 Unsupported 도구를 거절한다. Search/Shell은 이 검사로 안전하다고 주장하지 않으며 별도 trusted callback이 여전히 필수다. Karpathy 지침으로 기존 검사만 재사용했고 diff check 확인, 빌드/전체 회귀는 누적 검증 대상이다. 기존 archive 변경 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (공급자 증거의 Claude 기록 경계·인계 정정)
 
 - 기준 46b3536. 검토 중 Claude 예약이 native_provider를 아직 부착하지 않고 transport도 requiresProviderAttestation=false로 고정하는 누락이 확인됐다. 공통 attestation의 provider/runtime/parser를 실제 manifest에서 가져오고 Claude transport는 provider context 존재 시 필수 기록을 요구하도록 수정했다. Claude 필수 증거 누락 거절 회귀를 추가했다. 아직 context 생성/부착 자체를 완료했다는 뜻은 아니다.
