@@ -29,6 +29,10 @@ fn invalid() -> ProviderError {
 }
 
 impl Session {
+    pub fn is_permission_pending(&self, request_id: &str) -> bool {
+        !self.failed && self.permissions.is_pending(request_id)
+    }
+
     pub fn matches_expected(&self, expected: &claude_init::ExpectedInit<'_>) -> bool {
         !self.failed && self.cwd == expected.cwd && self.model == expected.model
             && self.permission_mode == expected.permission_mode

@@ -26,9 +26,38 @@ pub(crate) struct OwnedClaudeRun {
     channel: SessionChannel,
     output: ClaudeOutputState,
     cancel: std::sync::atomic::AtomicBool,
+    approvals: Vec<ClaudePending>,
+}
+
+struct ClaudePending {
+    id: String,
+    request: hello_agent_core::provider::vendor_observation::claude_approval::Request,
+    declined: bool,
 }
 
 impl OwnedClaudeRun {
+    pub(crate) fn approval_request(&mut self, action: &str, id: Option<&str>, identity: &Value) -> Result<Value, SidecarError> {
+        let failure = || SidecarError::new("agentApprovalChanged", "Claude approval is no longer live");
+        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
+        let mut inspection = None;
+        let mut queued = None;
+        if action != "list" {
+            let id = id.ok_or_else(failure)?;
+            let entry = self.approvals.iter_mut().find(|entry| entry.id == id && !entry.declined).ok_or_else(failure)?;
+            match action {
+                "decline" => { entry.declined = true; queued = Some(id); },
+                "inspect" => inspection = Some(json!({"approvalId":id,"kind":"tool","command":null,
+                    "cwd":null,"reason":entry.request.tool_name,"grantRoot":null,"host":null,"protocol":null})),
+                _ => return Err(failure()),
+            }
+        }
+        let pending: Vec<_> = self.approvals.iter().filter(|entry| !entry.declined)
+            .map(|entry| json!({"approvalId":entry.id,"kind":"tool"})).collect();
+        let mut result = json!({"identity":identity,"pending":pending,"queued":queued});
+        if let Some(inspection) = inspection { result["inspection"] = inspection; }
+        Ok(result)
+    }
+
     pub(crate) fn connection_id(&self) -> Uuid { self.process.connection_id() }
 
     pub(crate) fn registration_identity(&self, storage: &Storage, projects: &ProjectManager) -> Result<RunIdentity, SidecarError> {
@@ -68,6 +97,7 @@ impl OwnedClaudeRun {
             channel: channel.take().unwrap(),
             output,
             cancel: std::sync::atomic::AtomicBool::new(false),
+            approvals: Vec::new(),
         })
     }
 
@@ -130,6 +160,16 @@ impl OwnedClaudeRun {
             Event,
         ) -> Result<(), SidecarError>,
     ) -> Result<bool, SidecarError> {
+        self.approvals.retain(|entry| self.channel.is_permission_pending(&entry.request.request_id));
+        if self.channel.can_queue_reply() {
+            if let Some(index) = self.approvals.iter().position(|entry| entry.declined) {
+                let entry = self.approvals.remove(index);
+                if let Err(error) = self.channel.deny(&mut self.process, &entry.request.request_id, false) {
+                    self.output.completion = Some(Err(error));
+                }
+            }
+        }
+        let approvals = &mut self.approvals;
         self.reservation.advance_claude_output(
             storage,
             projects,
@@ -137,7 +177,21 @@ impl OwnedClaudeRun {
             &mut self.channel,
             &self.cancel,
             &mut self.output,
-            handle,
+            &mut |process, channel, event| {
+                use hello_agent_core::provider::vendor_observation::claude_approval::Observation;
+                match event {
+                    Event::Permission(Observation::Requested(request) | Observation::ToolCheck(request)) => {
+                        if approvals.len() >= 128 || approvals.iter().any(|entry| entry.request.request_id == request.request_id) {
+                            return Err(SidecarError::new("agentApprovalChanged", "Claude approval queue is invalid"));
+                        }
+                        approvals.push(ClaudePending {id:format!("approval_{}", Uuid::new_v4().simple()),request,declined:false});
+                        Ok(())
+                    },
+                    Event::Permission(Observation::Cancelled) => { approvals.retain(|entry| channel.is_permission_pending(&entry.request.request_id)); Ok(()) },
+                    Event::Output(Projection::RequiresHandling) => Ok(()), // Private blocks confer no grant.
+                    event => handle(process, channel, event),
+                }
+            },
         )
     }
 

@@ -320,6 +320,7 @@ export const en: Record<MessageKey, string> = {
   "m5.approval.kind.writeStdin": "Input to a running program",
   "m5.approval.kind.network": "Network connection",
   "m5.approval.kind.fileChange": "File change",
+  "m5.approval.kind.tool": "Agent tool use",
   "m5.chat.state.draft": "Draft",
   "m5.chat.state.preparing": "Preparing",
   "m5.chat.state.running": "Running",

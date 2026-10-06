@@ -319,6 +319,7 @@ export const ko = {
   "m5.approval.kind.writeStdin": "실행 중인 프로그램에 입력 전달",
   "m5.approval.kind.network": "네트워크 연결",
   "m5.approval.kind.fileChange": "파일 변경",
+  "m5.approval.kind.tool": "에이전트 도구 사용",
   "m5.chat.state.draft": "초안",
   "m5.chat.state.preparing": "준비 중",
   "m5.chat.state.running": "진행 중",

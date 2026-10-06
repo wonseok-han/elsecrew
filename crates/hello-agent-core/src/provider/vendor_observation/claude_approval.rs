@@ -85,6 +85,10 @@ fn valid_id(value: &str) -> bool {
 }
 
 impl Permissions {
+    pub fn is_pending(&self, request_id: &str) -> bool {
+        !self.failed && self.pending.contains_key(request_id)
+    }
+
     pub(super) fn bind_hook_scope(&mut self, session: &str, cwd: &str) {
         self.hook_scope = Some((session.into(), cwd.into()));
     }

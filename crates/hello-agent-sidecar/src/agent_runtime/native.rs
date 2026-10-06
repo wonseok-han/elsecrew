@@ -395,6 +395,15 @@ impl AgentRuntime {
             workspace_identity: raw["workspaceIdentity"].as_str().unwrap().into(),
             run_id: raw["runId"].as_str().unwrap().into(),
         };
+        if let Some(active) = self.native.get_mut(&identity.run_id) {
+            if let NativeOwner::Claude(owner) = &mut active.owner {
+                if active.stopped || !same_identity(&active.identity, &identity)
+                    || !same_identity(&owner.registration_identity(storage, projects)?, &identity) {
+                    return Err(invalid());
+                }
+                return owner.approval_request(action, params.get("approvalId").and_then(Value::as_str), &raw);
+            }
+        }
         let queued = if action == "decline" {
             let id = params["approvalId"].as_str().ok_or_else(invalid)?;
             if !id.strip_prefix("approval_").is_some_and(|suffix| {

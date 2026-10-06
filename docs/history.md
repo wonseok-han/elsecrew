@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 도구 요청 목록·거절 UI 연결)
+
+- 기준 7cfe6a8. Claude 권한 요청을 소유자별 최대128개 휘발 큐에 보관하고 기존 approval IPC/card의 list/inspect/decline에 연결했다. 요청별 무작위 UI ID를 쓰고 도구 이름만 상세에 표시하며 원문 input/command는 원장·채팅에 저장하지 않는다. 채널의 실제 pending 집합으로 취소된 요청을 제거하고 거절은 원래 session의 단발 응답으로 큐잉한다.
+- Karpathy 지침으로 기존 UI 계약을 tool 종류 하나로 확장하고 한·영 문구를 추가했다. Claude 요청을 Codex 승인으로 바꾸지 않는다. private block 알림은 공개/권한으로 승격하지 않고 별도 control 요청을 기다린다. 허용·파일/셸 경계 검증은 미연결이며 list/decline만으로 도구 승인 기능 완료를 주장하지 않는다.
+- 제한된 cargo check --tests --locked PASS(2.90초), pnpm exec tsc --noEmit PASS, diff 확인. 전체 회귀·실제 UI/계정/모델 실행은 미실행이다. 다음은 Claude admission/명시 허용 경로와 잔여 기능 연결. 제품 blocked 유지, 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 소유자의 공통 실행 관리자 등록)
 
 - 기준 3a3ff40. NativeOwner를 Codex/Claude로 분리해 준비된 Claude 소유자도 기존 native registry·poll·cancel·prepareQuit·공개 event 전달에 등록할 수 있도록 연결했다. 등록은 run/process/저장 입력을 다시 대조하고 중복·종료 중·한도 초과를 거절하며 실패 시 원래 소유자 슬롯을 유지한다.

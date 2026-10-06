@@ -2,12 +2,12 @@ import { validateAgentRunCancelRequestV1, type AgentRunCancelRequestV1 } from ".
 
 export const APPROVAL_CHANNEL = "m5:approval:v1";
 export type ApprovalRequest = { action: "list"; identity: AgentRunCancelRequestV1 } | { action: "decline" | "inspect"; identity: AgentRunCancelRequestV1; approvalId: string };
-export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange";
+export type ApprovalKind = "command" | "writeStdin" | "network" | "fileChange" | "tool";
 export type ApprovalSummary = { approvalId: string; kind: ApprovalKind };
 export type ApprovalInspection = ApprovalSummary & { command: string | null; cwd: string | null; reason: string | null; grantRoot: string | null; host: string | null; protocol: string | null };
 export type ApprovalResult = { identity: AgentRunCancelRequestV1; pending: ApprovalSummary[]; queued: string | null; inspection?: ApprovalInspection };
 export const APPROVAL_LABELS: Record<ApprovalKind, string> = {
-  command: "명령 실행", writeStdin: "실행 중인 프로그램에 입력 전달", network: "네트워크 연결", fileChange: "파일 변경",
+  command: "명령 실행", writeStdin: "실행 중인 프로그램에 입력 전달", network: "네트워크 연결", fileChange: "파일 변경", tool: "에이전트 도구 사용",
 };
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid approval object");

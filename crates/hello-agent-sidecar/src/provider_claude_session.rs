@@ -151,6 +151,11 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    pub(crate) fn is_permission_pending(&self, request_id: &str) -> bool {
+        self.permissions.is_permission_pending(request_id)
+    }
+    pub(crate) fn can_queue_reply(&self) -> bool { !self.transmitting && !self.permissions.is_closed() }
+
     pub(crate) fn matches_role(&self, model: &str, access: ToolAccess) -> bool {
         self.cwd.to_str().is_some_and(|cwd| self.permissions.matches_expected(
             &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
