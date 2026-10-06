@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (native 실행 중 상태와 종료 대조 연결)
+
+- 기준 681e3a0. thread 확인 callback에서 receipt·run running·chat running을 하나의 원장 transaction으로 저장하고 성공한 정확한 record/receipt 쌍을 실행 소유자에 한 번만 고정했다. 사용자 입력은 해당 저장 뒤 준비되며 native event polling이 기존 runStateChanged로 running을 전달한다.
+- Karpathy 지침으로 준비 단계의 불변 record는 보존하고 이후 입력·프로세스 증거·출력·종료는 고정된 running record를 사용하게 연결했다. 원장 record/state뿐 아니라 receipt의 삭제/변경도 거절한다. 시작 전 release/identity 검사는 preparing 전용으로 유지한다.
+- 이번은 diff 검토·diff check만 했으며 컴파일/회귀는 미실행이다. 전체 G5C provider attestation/재시작 검증과 native 활성화는 여전히 남고, 상태 연결을 실행 게이트 합격으로 주장하지 않는다. 다음은 persisted native evidence 검증/복구 및 통합 테스트 연결이다. 기존 9월 archive 보존, 실제 계정/모델·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (사용자 입력 전 thread 확인 기록)
 
 - 기준 f32ffe3. 같은 연결의 config/account/catalog 및 correlated thread 검사가 끝난 지점에서만 생성되는 내부 MatchedThreadReceipt와 callback을 추가했다. 예약된 실행은 process connection/cwd·기존 입력/잠금을 대조해 run/profile/fingerprint에 결속된 native_thread_receipt를 저장한 뒤에만 사용자 입력 프레임을 준비한다. 저장 오류는 transport stage를 무효화하며 프롬프트를 큐에 넣지 않는다.

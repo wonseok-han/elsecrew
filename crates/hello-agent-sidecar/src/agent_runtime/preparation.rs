@@ -35,6 +35,8 @@ pub(crate) struct RunReservation {
     pub(super) run: Value,
     request: AgentRunStartRequestV1,
     prompt: Vec<u8>,
+    // Set exactly once, only after the atomic thread-receipt/running commit.
+    running_record: std::sync::OnceLock<(Value, Value)>,
 }
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
@@ -207,6 +209,19 @@ impl OwnedTextRun {
 }
 
 impl RunReservation {
+    fn current_record(&self) -> &Value {
+        self.running_record.get().map(|(record, _)| record).unwrap_or(&self.run)
+    }
+
+    fn matches_current_record(&self, projection: &Map<String, Value>) -> bool {
+        projection.get("record") == Some(self.current_record())
+            && projection.get("state") == self.current_record().get("state")
+            && match self.running_record.get() {
+                Some((_, receipt)) => projection.get("native_thread_receipt") == Some(receipt),
+                None => !projection.contains_key("native_thread_receipt"),
+            }
+    }
+
     /// Recheck the selected discovery observation against durable inputs and
     /// the actual profile owner immediately before attempting native launch.
     pub(super) fn verify_named_observation(
@@ -714,14 +729,31 @@ impl RunReservation {
                             evidence["workspaceIdentity"] = self.run["workspaceIdentity"].clone();
                             evidence["capabilityFingerprint"] = self.run["capabilityFingerprint"].clone();
                             evidence["selectedProfile"] = self.run["selectedProfile"].clone();
-                            if projection.contains_key("native_thread_receipt") { return Err(failure()); }
+                            if projection.contains_key("native_thread_receipt") || self.running_record.get().is_some() { return Err(failure()); }
+                            let chat_projection = actual_chat_projection(storage, &self.request.chat_id).map_err(|_| failure())?;
+                            let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+                            let running = agent_run_record(&self.run_id, &chat_projection["record"], &profile,
+                                self.run["capabilityFingerprint"].as_str().ok_or_else(failure)?,
+                                "running", None, &self.created).map_err(|_| failure())?;
+                            let chat = updated_chat(&chat_projection["record"], "running").map_err(|_| failure())?;
                             projection.remove("last_event_sequence");
-                            projection.insert("native_thread_receipt".into(), evidence);
-                            storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
-                                aggregate_type: "run", aggregate_id: self.run_id.clone(),
-                                operation_id: format!("op_agent_native_thread_{}", self.run_id),
-                                request_id: None, payload: projection,
-                            }]).map_err(|_| failure())?;
+                            projection.insert("native_thread_receipt".into(), evidence.clone());
+                            projection.insert("record".into(), running.clone());
+                            projection.insert("state".into(), json!("running"));
+                            storage.upsert_projection_records_atomic(vec![
+                                ProjectionUpsert {
+                                    aggregate_type: "run", aggregate_id: self.run_id.clone(),
+                                    operation_id: format!("op_agent_native_thread_{}", self.run_id),
+                                    request_id: None, payload: projection,
+                                },
+                                ProjectionUpsert {
+                                    aggregate_type: "chat", aggregate_id: self.request.chat_id.clone(),
+                                    operation_id: format!("op_agent_native_running_chat_{}", self.run_id),
+                                    request_id: None,
+                                    payload: chat_projection_with_record(&chat_projection, &chat, None).map_err(|_| failure())?,
+                                },
+                            ]).map_err(|_| failure())?;
+                            self.running_record.set((running, evidence)).map_err(|_| failure())?;
                             return Ok(());
                         }
                         TextAction::VerifyApprovalBoundary => {
@@ -850,7 +882,7 @@ impl RunReservation {
             "capabilityFingerprint":self.run["capabilityFingerprint"],
             "kind":kind, "text":text, "createdAt":now()
         });
-        persist_public_event_record(storage, &self.run, &event).map_err(|_| {
+        persist_public_event_record(storage, self.current_record(), &event).map_err(|_| {
             SidecarError::new(
                 "agentOutputPersistenceFailed",
                 "public output could not be stored within the run budget",
@@ -938,8 +970,7 @@ impl RunReservation {
                     .iter()
                     .find(|role| role["roleId"] == self.request.role_id)
             });
-        if projection["record"] != self.run
-            || projection["state"] != "preparing"
+        if !self.matches_current_record(&projection)
             || !projection["recovery"].is_null()
             || role != Some(&self.run["selectedProfile"])
             || address_from_chat(&chat["record"])? != address_from_chat(&self.run)?
@@ -982,8 +1013,7 @@ impl RunReservation {
         identities: &[ProcIdentity],
     ) -> Result<(), ProjectFailure> {
         let projection = actual_run_projection(storage, &self.run_id)?;
-        if projection["record"] != self.run
-            || projection["state"] != "preparing"
+        if !self.matches_current_record(&projection)
             || projection["barrier"]["phase"] != "providerLaunchGate"
             || projection["barrier"]["releaseGranted"] != true
             || !projection["recovery"].is_null()
@@ -1258,6 +1288,7 @@ impl RunPreparation {
         }
         storage.upsert_projection_records_atomic(upserts)?;
         Ok(RunReservation {
+            running_record: std::sync::OnceLock::new(),
             run_id,
             created,
             run,

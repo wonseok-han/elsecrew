@@ -24,8 +24,7 @@ impl RunReservation {
         let prior = projection["process_identity_internal"]
             .as_array()
             .ok_or_else(|| ProjectFailure::recovery("reserved process identities are missing"))?;
-        if projection["record"] != self.run
-            || projection["state"] != "preparing"
+        if !self.matches_current_record(&projection)
             || !projection["recovery"].is_null()
             || projection["barrier"]["phase"] != "providerLaunchGate"
             || projection["barrier"]["releaseGranted"] != true
