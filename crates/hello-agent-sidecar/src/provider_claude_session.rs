@@ -199,6 +199,10 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    pub(crate) fn matches_init_receipt(&self, receipt: &hello_agent_core::provider::vendor_observation::claude_session::InitReceipt) -> bool {
+        !self.permissions.is_closed() && self.cwd.to_str().is_some_and(|cwd| receipt.matches(cwd, &self.session_model))
+    }
+
     pub(crate) fn is_permission_pending(&self, request_id: &str) -> bool {
         self.permissions.is_permission_pending(request_id)
     }

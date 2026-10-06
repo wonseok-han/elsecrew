@@ -5,11 +5,19 @@ use serde::Deserialize;
 
 pub enum Event {
     Initialized {
+        receipt: InitReceipt,
         interrupt_receipt: bool,
         interrupt_cancel_queued: bool,
     },
     Permission(claude_approval::Observation),
     Output(claude_events::Projection),
+}
+
+/// Constructed only by a successful system/init observation. Not launch authority.
+pub struct InitReceipt { session_id: String, cwd: String, model: String }
+impl InitReceipt {
+    pub fn session_id(&self) -> &str { &self.session_id }
+    pub fn matches(&self, cwd: &str, model: &str) -> bool { self.cwd == cwd && self.model == model }
 }
 
 pub struct Session {
@@ -101,6 +109,7 @@ impl Session {
                 },
             )?;
             let event = Event::Initialized {
+                receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone() },
                 interrupt_receipt: init.interrupt_receipt,
                 interrupt_cancel_queued: init.interrupt_cancel_queued,
             };

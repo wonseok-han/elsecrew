@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 초기화 원장·실행 중 상태 연결)
+
+- 기준 9c608f8. 검증된 system/init만 만들 수 있는 opaque InitReceipt를 추가하고 Claude 채널의 cwd/실제 모델과 대조한다. 첫 입력 전 claude.stream.v1 transport 표식을 저장하며 초기화 시 같은 연결의 session 식별 digest·run/역할/작업 사본 결속을 저장한다. 세션 ID 원문은 원장에 넣지 않는다.
+- Codex의 receipt/run running/chat running 원자 저장을 공통 함수로 추출해 Claude에 재사용했다. 저장 후 정확한 record/receipt를 OnceLock에 고정하고 기존 출력/종료 및 native run-state event가 이를 사용한다. 재시작 검증은 adapter와 runtime을 대조하고 초기화 기록 없는 running/success·공개 출력을 거절한다. native_thread_receipt/threadDigest라는 기존 필드 이름은 Claude 세션에도 유지한다.
+- Karpathy 지침으로 기존 원장과 회복 경로를 재사용했다. Claude/Codex 표식 혼용 및 누락 회귀를 추가했다. 최근 연결 변경의 컴파일 확인으로 cargo check -p hello-agent-sidecar --tests --locked PASS(6.99초, jobs/threads=4), diff check PASS. 테스트 실행/실제 계정·모델/전체 안전 검토는 미실행이며 provider attestation/실제 admission·dispatcher 활성화는 여전히 남는다. 제품 blocked, 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude restricted·원본/프로필 보호 설정 연결)
 
 - 기준 a581c38. 공식 문서에서 --restricted의 파일 도구 working-directory 제한과 permissions.blockReadsOutsideWorkingDirectories의 셸 사용자 루트 차단을 확인하고 실제 ClaudeCommand 인자에 연결했다. 모델 실행 도구 목록은 계속 명시하며 managed 정책은 우회하지 않는다.

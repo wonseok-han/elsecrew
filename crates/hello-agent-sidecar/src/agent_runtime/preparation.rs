@@ -741,45 +741,12 @@ impl RunReservation {
                             let cwd = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
                             if !receipt.matches(process, cwd) { return Err(failure()); }
                             self.observe_process(storage, process)?;
-                            let mut projection = actual_run_projection(storage, &self.run_id)
-                                .map_err(|_| failure())?;
                             let mut evidence = receipt.redacted();
                             evidence["runId"] = json!(self.run_id);
                             evidence["workspaceIdentity"] = self.run["workspaceIdentity"].clone();
                             evidence["capabilityFingerprint"] = self.run["capabilityFingerprint"].clone();
                             evidence["selectedProfile"] = self.run["selectedProfile"].clone();
-                            if projection.contains_key("native_thread_receipt") || self.running_record.get().is_some() { return Err(failure()); }
-                            let chat_projection = actual_chat_projection(storage, &self.request.chat_id).map_err(|_| failure())?;
-                            let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
-                            let running = agent_run_record(&self.run_id, &chat_projection["record"], &profile,
-                                self.run["capabilityFingerprint"].as_str().ok_or_else(failure)?,
-                                "running", None, &self.created).map_err(|_| failure())?;
-                            let chat = updated_chat(&chat_projection["record"], "running").map_err(|_| failure())?;
-                            projection.remove("last_event_sequence");
-                            projection.insert("native_thread_receipt".into(), evidence.clone());
-                            projection.insert("record".into(), running.clone());
-                            projection.insert("state".into(), json!("running"));
-                            if let Some(provider) = &self.native_provider {
-                                let (manifest, discovery, attestation) = provider.attest(&running, cwd)?;
-                                projection.insert("native_provider_manifest".into(), manifest);
-                                projection.insert("provider_discovery".into(), discovery);
-                                projection.insert("runtime_attestation".into(), attestation);
-                            }
-                            storage.upsert_projection_records_atomic(vec![
-                                ProjectionUpsert {
-                                    aggregate_type: "run", aggregate_id: self.run_id.clone(),
-                                    operation_id: format!("op_agent_native_thread_{}", self.run_id),
-                                    request_id: None, payload: projection,
-                                },
-                                ProjectionUpsert {
-                                    aggregate_type: "chat", aggregate_id: self.request.chat_id.clone(),
-                                    operation_id: format!("op_agent_native_running_chat_{}", self.run_id),
-                                    request_id: None,
-                                    payload: chat_projection_with_record(&chat_projection, &chat, None).map_err(|_| failure())?,
-                                },
-                            ]).map_err(|_| failure())?;
-                            self.running_record.set((running, evidence)).map_err(|_| failure())?;
-                            return Ok(());
+                            return self.persist_native_running(storage, evidence, cwd);
                         }
                         TextAction::VerifyApprovalBoundary => {
                             return self
@@ -890,6 +857,38 @@ impl RunReservation {
             process.release_after_run_terminal()?;
         }
         result.map(Some)
+    }
+
+    /// A provider-specific verified observation calls this shared atomic transition.
+    fn persist_native_running(&self, storage: &mut Storage, evidence: Value, cwd: &Path) -> Result<(), SidecarError> {
+        let failure = || SidecarError::new("agentInputChanged", "native initialization receipt differs");
+        let mut projection = actual_run_projection(storage, &self.run_id).map_err(|_| failure())?;
+        if !self.matches_current_record(&projection) || projection.contains_key("native_thread_receipt") || self.running_record.get().is_some() { return Err(failure()); }
+        let chat_projection = actual_chat_projection(storage, &self.request.chat_id).map_err(|_| failure())?;
+        let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let running = agent_run_record(&self.run_id, &chat_projection["record"], &profile,
+            self.run["capabilityFingerprint"].as_str().ok_or_else(failure)?, "running", None, &self.created).map_err(|_| failure())?;
+        let chat = updated_chat(&chat_projection["record"], "running").map_err(|_| failure())?;
+        projection.remove("last_event_sequence");
+        projection.insert("native_thread_receipt".into(), evidence.clone());
+        projection.insert("record".into(), running.clone());
+        projection.insert("state".into(), json!("running"));
+        if let Some(provider) = &self.native_provider {
+            let (manifest, discovery, attestation) = provider.attest(&running, cwd)?;
+            projection.insert("native_provider_manifest".into(), manifest);
+            projection.insert("provider_discovery".into(), discovery);
+            projection.insert("runtime_attestation".into(), attestation);
+        }
+        super::native_evidence::validate(&projection).map_err(|_| failure())?;
+        storage.upsert_projection_records_atomic(vec![
+            ProjectionUpsert { aggregate_type:"run", aggregate_id:self.run_id.clone(),
+                operation_id:format!("op_agent_native_thread_{}",self.run_id), request_id:None, payload:projection },
+            ProjectionUpsert { aggregate_type:"chat", aggregate_id:self.request.chat_id.clone(),
+                operation_id:format!("op_agent_native_running_chat_{}",self.run_id), request_id:None,
+                payload:chat_projection_with_record(&chat_projection,&chat,None).map_err(|_| failure())? },
+        ]).map_err(|_| failure())?;
+        self.running_record.set((running,evidence)).map_err(|_| failure())?;
+        Ok(())
     }
 
     pub(super) fn persist_text(

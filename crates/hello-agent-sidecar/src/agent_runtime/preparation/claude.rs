@@ -198,6 +198,16 @@ impl OwnedClaudeRun {
             .map_err(|_| failure())?;
         self.reservation
             .observe_process(storage, &mut self.process)?;
+        let mut projection = actual_run_projection(storage, &self.reservation.run_id).map_err(|_| failure())?;
+        if projection.contains_key("native_transport") { return Err(failure()); }
+        projection.remove("last_event_sequence");
+        projection.insert("native_transport".into(), json!({"schemaVersion":1,
+            "adapter":"claude.stream.v1","connectionId":self.process.connection_id().to_string(),
+            "requiresProviderAttestation":false}));
+        storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
+            aggregate_type:"run",aggregate_id:self.reservation.run_id.clone(),
+            operation_id:format!("op_agent_native_transport_{}",self.reservation.run_id),request_id:None,payload:projection,
+        }]).map_err(|_| failure())?;
         let address = address_from_chat(&self.reservation.run).map_err(|_| failure())?;
         let workspace =
             crate::provider_preflight_session::TextWorkspace::new(projects, storage, &address)?;
@@ -429,6 +439,17 @@ impl RunReservation {
                         if state.initialized {
                             return Err(failure());
                         }
+                        let Event::Initialized { ref receipt, .. } = event else { unreachable!() };
+                        let (workspace, _) = self.verify_claude_launch(storage, projects, process)?;
+                        if !channel.matches_init_receipt(receipt) { return Err(failure()); }
+                        self.observe_process(storage, process)?;
+                        // Retain the existing field name for both provider sessions.
+                        // This digest identifies the session; it is not an executable allowlist.
+                        let evidence = json!({"schemaVersion":1,"connectionId":process.connection_id().to_string(),
+                            "threadDigest":format!("sha256:{:x}",Sha256::digest(receipt.session_id().as_bytes())),
+                            "runId":self.run_id,"workspaceIdentity":self.run["workspaceIdentity"],
+                            "capabilityFingerprint":self.run["capabilityFingerprint"],"selectedProfile":self.run["selectedProfile"]});
+                        self.persist_native_running(storage,evidence,Path::new(&workspace))?;
                         handle(process, channel, event)?;
                         state.initialized = true;
                     }

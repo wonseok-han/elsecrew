@@ -13,9 +13,14 @@ pub(super) fn validate(projection: &Map<String, Value>) -> Result<(), ProjectFai
     let connection = Uuid::parse_str(connection_id).map_err(|_| failure())?;
     let record = projection.get("record").ok_or_else(failure)?;
     validate_agent_adapter_payload_v1("runRecord", record).map_err(|_| failure())?;
-    if marker["schemaVersion"] != 1 || marker["adapter"] != "codex.preflight.v1"
+    let runtime = match marker["adapter"].as_str() {
+        Some("codex.preflight.v1") => "codex",
+        Some("claude.stream.v1") => "claude-code",
+        _ => return Err(failure()),
+    };
+    if marker["schemaVersion"] != 1
         || connection.is_nil() || connection.to_string() != connection_id
-        || record["selectedProfile"]["runtime"] != "codex"
+        || record["selectedProfile"]["runtime"] != runtime
         || projection.get("state") != record.get("state")
     { return Err(failure()); }
     let Some(receipt) = projection.get("native_thread_receipt") else {
@@ -66,6 +71,20 @@ mod tests {
                 "workspaceIdentity":"workspace_test", "capabilityFingerprint":fingerprint,
                 "selectedProfile":profile}
         }).as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn claude_receipt_cannot_be_relabelled_as_codex_or_omit_initialization() {
+        let mut value = projection();
+        value.get_mut("record").unwrap()["selectedProfile"]["runtime"] = json!("claude-code");
+        value.get_mut("native_thread_receipt").unwrap()["selectedProfile"]["runtime"] = json!("claude-code");
+        value.get_mut("native_transport").unwrap()["adapter"] = json!("claude.stream.v1");
+        validate(&value).unwrap();
+        let mut wrong = value.clone();
+        wrong.get_mut("native_transport").unwrap()["adapter"] = json!("codex.preflight.v1");
+        assert!(validate(&wrong).is_err());
+        value.remove("native_thread_receipt");
+        assert!(validate(&value).is_err());
     }
 
     #[test]
