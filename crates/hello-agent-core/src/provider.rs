@@ -780,7 +780,9 @@ fn build_closure(
     Ok(closure)
 }
 
-fn parse_cli_version(
+/// Parse bounded version output. This identifies a reported version only;
+/// it does not authenticate the executable or grant runtime admission.
+pub fn parse_cli_version(
     provider: ProviderId,
     observation: &BoundedObservation,
 ) -> Result<String, ProviderError> {

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (공급자 버전의 소유된 조회 경로)
+
+- 기준 b37ec8b. 설치 CLI에서 생성해 둔 InitializeResponse 스키마는 userAgent만 제공하고 버전 전용 필드가 없음을 확인했다. userAgent를 임의로 exactCliVersion으로 해석하지 않고 고정 --version 조회 후보를 추가했다. profile을 소유한 LoginProcess·기존 gate/환경/프로세스 추적을 사용하며 5초/1024바이트·정상 exit·명시 cleanup 및 종료 뒤 파일/profile 재검증을 요구한다.
+- Karpathy 지침으로 core의 기존 bounded 버전 parser를 공개 재사용했다. 버전 식별은 실행 파일 인증/실행 허가와 별개다. 오류도 원래 process owner를 반환해 discovery cleanup registry로 넘길 수 있으며 종료한 owner를 다음 단계에 재사용하지 않는다. worker에서 호출할 함수이며 dispatcher 직접 호출은 금지하는 계약을 명시했다.
+- git diff --check 확인, 이번 컴파일·실제 명령·계정/모델 조회는 실행하지 않았다. 다음은 버전/선택 프로필 관측을 묶는 scoped discovery worker 및 응답 projection 연결이다. 제품 blocked 유지, 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (실패한 조회의 장기 소유권·종료 차단 연결)
 
 - 기준 374ce23. named 사전 조회가 CodexProfileBinding을 빌려 쓰지 않고 LoginProcess에 소유권을 넘겨 static inspection owner를 반환하도록 바꿨다. 기존 launch barrier의 profile 재검증을 재사용하며 성공 종료 뒤 profile 경로를 재확인하는 별도 accessor는 종료 확인·run fence 부재·Codex namespace를 요구한다. 종료한 process를 다시 실행할 수 있게 만들지 않았다.

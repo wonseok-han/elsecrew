@@ -33,6 +33,73 @@ pub(crate) struct ProviderInspection<'a, T = ()> {
     pub(crate) process: LoginProcess<'a>,
 }
 
+/// Fixed, model-free version probe through the same tracked process owner.
+/// Call on a discovery worker, not on the dispatch loop. A failed result still
+/// returns its owner for explicit cleanup; no account/config query is sent.
+#[allow(dead_code)] // Scoped discovery worker will combine version and profile evidence.
+pub(crate) fn inspect_codex_version(
+    profile: crate::provider_profile::CodexProfileBinding,
+    executable: &crate::provider_executable::PinnedExecutable,
+    cancel: &AtomicBool,
+) -> Result<ProviderInspection<'static, String>, SidecarError> {
+    use crate::provider_login_io::OutputChunk;
+    use hello_agent_core::provider::{BoundedObservation, ProviderId, parse_cli_version};
+    let home = profile.revalidate()?;
+    if cancel.load(Ordering::Acquire) { return Err(failure()); }
+    let mut command = crate::provider_login_gate::command(
+        executable.revalidate()?, &[std::ffi::OsStr::new("--version")], &home,
+    ).map_err(|_| failure())?;
+    discovery_environment(&mut command, &home);
+    let mut process = LoginProcess::reserve_codex_owned(profile)?;
+    let result = (|| {
+        process.launch_with_barrier(|| command.spawn(), |child| {
+            executable.revalidate().map_err(std::io::Error::other)?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(std::io::Error::other("version inspection canceled"));
+            }
+            crate::provider_login_gate::release(child)
+        })?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut output = Vec::new();
+        let mut eof = false;
+        loop {
+            if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
+                return Err(failure());
+            }
+            if !eof {
+                match process.poll_output(cancel)? {
+                    OutputChunk::Bytes(bytes) => {
+                        if output.len() + bytes.len() > 1024 { return Err(failure()); }
+                        output.extend(bytes);
+                    }
+                    OutputChunk::Eof => eof = true,
+                    OutputChunk::Pending => {}
+                }
+            } else {
+                process.tick()?;
+            }
+            if eof {
+                if let Some(status) = process.exit_status()? {
+                    if !status.success() { return Err(failure()); }
+                    return parse_cli_version(ProviderId::Codex, &BoundedObservation::new(output)
+                        .map_err(|_| failure())?).map_err(|_| failure());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    })();
+    let cleanup = process.finish();
+    let result = result.and_then(|version| {
+        cleanup?;
+        executable.revalidate()?;
+        if process.closed_codex_home()? != home || cancel.load(Ordering::Acquire) {
+            return Err(failure());
+        }
+        Ok(version)
+    });
+    Ok(ProviderInspection { result, process })
+}
+
 /// A bounded, selected-profile observation, not a global provider capability.
 /// Constructed only after the named exchange and confirmed cleanup succeed.
 /// It contains no account response, credentials, or arbitrary vendor payload.
