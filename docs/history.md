@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (예약된 Codex 시작과 런타임 인계 연결)
+
+- 기준 3b973a5에서 start_reserved_codex를 추가했다. 종료 중/중복/한도를 launch 전에 검사하고 기존 prepare_named_owner와 register_native_candidate를 연결한다. 준비·등록 실패 시 원래 reservation/process를 실패 정리 registry로 넘기며, fence 인계 전 거절은 호출자 Option에 그대로 남긴다. 시작 실패 응답을 성공으로 바꾸거나 재실행하지 않는다.
+- Karpathy 지침으로 기존 테스트 전용 owner 분해를 명시적인 into_cleanup_parts로 재사용했다. 등록 실패에서 transport만 폐기하고 동일 프로세스 소유자를 복원하며 해당 helper를 쓰던 회귀 이름도 갱신했다. 실제 공급자 admission 및 run.startAgent 제품 caller 연결은 아직 남아 있고 새 메서드 자체를 제품 실행 완료로 보지 않는다.
+- native.rs rustfmt·git diff --check 확인, 이번 컴파일/회귀는 누적 검증으로 남겼다. 다음은 실제 discovery 결과와 앱 프로필을 예약/시작 요청에 연결하는 작업이다. 실제 계정/유료 모델/사용자 프로젝트 실행 없음, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (시작 실패 terminal 저장·해제 재시도 분리)
 
 - 직전 da05256은 실패 시작 소유권을 런타임에 연결한 진전이다. 이어 terminal 저장은 성공했지만 profile 잠금 해제가 실패하면 재시도에서 preparing 검증에 막히는 경로를 수정했다. poll_failed_start는 정리·저장까지만 담당하고 런타임은 persisted 상태를 보관해 확인된 잠금 해제만 재시도한다. 불확실 종료는 기존 recoveryRequired와 잠금을 유지한다.

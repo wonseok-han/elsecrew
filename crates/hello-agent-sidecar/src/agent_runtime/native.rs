@@ -115,6 +115,66 @@ impl NativeRun {
 }
 
 impl AgentRuntime {
+    /// Bridge a durably admitted reservation to dispatcher ownership. This is
+    /// not admission: the product caller must obtain fresh provider evidence
+    /// before reserving. On rejection, nonempty input slots remain caller-owned.
+    #[allow(dead_code)] // Enable through product discovery only after its gate.
+    pub(crate) fn start_reserved_codex(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<crate::provider_login_process::LoginProcess<'static>>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        helper: &crate::provider_executable::PinnedExecutable,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<String, SidecarError> {
+        let failure = || SidecarError::new("agentLaunchRejected", "native start unavailable");
+        let run_id = reservation.as_ref().ok_or_else(failure)?.run_id.clone();
+        if self.preparing_to_quit
+            || self.has_active_run(&run_id)
+            || active_run_limit_reached(self.owned_run_ids().len())
+        {
+            return Err(failure());
+        }
+        let launch_error = match preparation::RunReservation::prepare_named_owner(
+            reservation,
+            process,
+            storage,
+            projects,
+            executable,
+            helper,
+            cancel,
+        ) {
+            Ok(owner) => {
+                let mut slot = Some(owner);
+                match self.register_native_candidate(storage, projects, &mut slot) {
+                    Ok(()) => return Ok(run_id),
+                    Err(error) => {
+                        // Registration never consumes on rejection. Recover the
+                        // exact owner, not a reconstructed or relaunched process.
+                        let (pending, owned_process) = slot
+                            .expect("rejected native registration retains owner")
+                            .into_cleanup_parts();
+                        *reservation = Some(pending);
+                        *process = Some(owned_process);
+                        error
+                    }
+                }
+            }
+            Err(error) => error,
+        };
+        if process
+            .as_ref()
+            .is_some_and(|owner| owner.matches_startup_run(&run_id))
+        {
+            self.register_failed_start(reservation, process)?;
+        }
+        // The response remains a failed start, even when cleanup is now owned
+        // by the runtime. No fabricated running event or automatic retry.
+        Err(launch_error)
+    }
+
     /// Cleanup ownership must still be accepted during shutdown or at capacity:
     /// this process already exists. Rejection never consumes the caller's owner.
     #[allow(dead_code)] // Product start dispatcher is not activated yet.

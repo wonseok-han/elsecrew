@@ -194,8 +194,9 @@ impl OwnedTextRun {
         self.state.completion.is_some() && !self.state.finished
     }
 
-    #[cfg(test)]
-    pub(crate) fn into_parts_for_test(
+    /// Return the original owners when dispatcher registration fails. The text
+    /// session is abandoned; its process still requires explicit cleanup.
+    pub(crate) fn into_cleanup_parts(
         self,
     ) -> (
         RunReservation,

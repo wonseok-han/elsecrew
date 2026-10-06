@@ -1755,7 +1755,7 @@ fn text_candidate_cases_selected(
                     )
                     .is_err());
                 assert!(owned.request_cancel(&identity).is_err());
-                let (restored, returned_process) = owned.into_parts_for_test();
+                let (restored, returned_process) = owned.into_cleanup_parts();
                 process = returned_process;
                 if failure == "bound-handler-cleanup-save" {
                     assert!(outcome.is_err());
