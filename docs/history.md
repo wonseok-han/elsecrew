@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 실행 인자와 서명 discovery 재사용)
+
+- 기준0670202의 누적 Rust/core/sidecar 및 테스트 코드에 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --tests --locked를 실행해7.15초에 통과했다. 다음 연결의 최소 컴파일 진단이며 테스트 자체를 실행한 것은 아니다. 이후 아래 인자 변경에는 rustfmt/diff만 수행했다.
+- 공식 https://code.claude.com/docs/en/cli-reference 에서 --safe-mode가 인증을 유지하면서 사용자 확장을 끄지만 관리 정책 hook 등은 여전히 적용됨을 확인했다. Karpathy 지침으로 print/stream-json·safe-mode·빈 setting-sources·strict 빈 MCP·MCP 도구 거절·명시 모델/effort·default 권한과 역할별 도구 목록을 구성했다. bare/permission bypass/자동 승인/fallback 모델은 추가하지 않는다. 관리 정책/OS sandbox를 검증하지 않은 인자 후보이며 실제 spawn은 아직 연결하지 않았다.
+- 로그인과 향후 runtime이 같은 native link/제작자 서명 검사 함수를 재사용하도록 installed_executable을 분리했다. 실제 binary 선택/실행은 하지 않았고 로그인 namespace/저장 파일을 변경하지 않았다. 인자 회귀 작성, 실제 설정 입장·SDK 권한 응답·입력/출력 owner·통합 검증은 다음이다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 제어 초기화의 기존 process IO 연결)
 
 - 기준9de6fca에서 Claude ControlInitialization을 기존 LoginProcess의 bounded/nonblocking JSONL 큐·flush·poll·프로세스 관측에 연결했다. 한 advance마다 한 단계만 진행하고 동일 connection ID·15초 deadline·취소를 확인한다. 초기화 실패해도 process 소유권은 호출자에 남아 명시 finish/종료 증거 확인이 필요하다.
@@ -89,6 +95,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **Claude safe-mode 경계(2026-10-06)**: 공식 CLI의 safe-mode는 bare와 달리 구독 인증을 유지하지만 관리 정책 hook 등 일부 동작은 제외하지 않는다. 인자 구성만으로 실행 admission/OS 격리를 입증하지 않는다. 앱 프로필로 실제 실행할 때 생성되는 파일과 권한 응답·종료 검증은 여전히 후속이다.
 - **Claude init의 관측 한계(2026-10-06)**: 공식 SDKSystemMessage의 effort는 일반 앱 init에서 누락된다. claude_init은 cwd/model/권한 모드/도구 및 비로딩 확장을 비교하지만 effort·계정·OS 격리를 입증하지 않는다. interrupt capability는 버전 대신 개별 이름으로 확인하고 실행 owner 연결은 후속이다.
 - **Claude 공개 출력 계약(2026-10-06)**: 실제 SDK assistant frame은 message.id가 반복될 수 있어 uuid로 구분한다. core claude_events projection은 main-session text만 내보내며 result는 프로세스 종료 증거가 아니다. 아직 실행 owner와 연결 전이고 fake provider/parser를 실제 실행 증거로 사용하지 않는다.
 - **백업 목록의 정리 상태(2026-10-06)**: backupRetention은 연결 이유와 별도로 cleanupState를 반환한다. deleted는 영속 정리 기록이며 파일 부재의 새 관측이 아니다. 별도 inspectBackupCleanup에서 실제 파일을 대조하고, 정리 후에도 이력은 보존한다. 제품 삭제는 여전히 비활성이다.

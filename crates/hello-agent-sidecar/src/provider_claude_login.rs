@@ -20,13 +20,17 @@ fn failure() -> SidecarError {
 }
 
 pub(crate) fn diagnose() -> Result<(), SidecarError> {
+    installed_executable().map(|_| ())
+}
+
+/// Shared native discovery for login and future runtime owners. Does not execute it.
+pub(crate) fn installed_executable() -> Result<PinnedExecutable, SidecarError> {
     let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
         .join(".local/share/claude/versions");
     select_executable(
         &versions,
         &PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?).join(".local/bin/claude"),
     )
-    .map(|_| ())
 }
 
 pub(crate) fn run(
@@ -38,11 +42,7 @@ pub(crate) fn run(
 ) -> Result<(), SidecarError> {
     // Resolve only the native installer's bounded link target, then authenticate
     // and execute the concrete binary, never the mutable launcher itself.
-    let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
-        .join(".local/share/claude/versions");
-    let launcher =
-        PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?).join(".local/bin/claude");
-    let executable = select_executable(&versions, &launcher)?;
+    let executable = installed_executable()?;
     if !check_only {
         let (_, exit) = command_with_code(profile, &executable, cancel, false, publish, code)?;
         if cancel.load(Ordering::Acquire) {

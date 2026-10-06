@@ -7,6 +7,64 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(Clone, Copy)]
+pub(crate) enum ToolAccess {
+    ReadOnly,
+    Edit,
+}
+
+/// Fixed, noninteractive launch arguments; not an OS sandbox or approval grant.
+/// Managed policy can override customization settings and must be admitted before spawn.
+/// https://code.claude.com/docs/en/cli-reference
+pub(crate) fn arguments(
+    model: &str,
+    effort: &str,
+    access: ToolAccess,
+) -> Result<Vec<std::ffi::OsString>, SidecarError> {
+    if model.is_empty()
+        || model.len() > 128
+        || model.starts_with('-')
+        || !model
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        || !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max")
+    {
+        return Err(failure());
+    }
+    let tools = match access {
+        ToolAccess::ReadOnly => "Read,Glob,Grep",
+        ToolAccess::Edit => "Read,Glob,Grep,Edit,Write,Bash",
+    };
+    Ok([
+        "--print",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--safe-mode",
+        "--setting-sources",
+        "",
+        "--disable-slash-commands",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--disallowedTools",
+        "mcp__*",
+        "--tools",
+        tools,
+        "--permission-mode",
+        "default",
+        "--model",
+        model,
+        "--effort",
+        effort,
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect())
+}
+
 pub(crate) struct ControlInitialization {
     exchange: InitializeExchange,
     connection: uuid::Uuid,
@@ -97,6 +155,32 @@ mod tests {
         provider_claude_profile::ClaudeProfileBinding, provider_profile::LoginProfile, Storage,
     };
     use std::path::Path;
+
+    #[test]
+    fn launch_arguments_preserve_subscription_and_do_not_grant_tool_approval() {
+        for access in [ToolAccess::ReadOnly, ToolAccess::Edit] {
+            let args = arguments("selected-model", "medium", access).unwrap();
+            let args: Vec<_> = args.iter().map(|a| a.to_str().unwrap()).collect();
+            assert!(args.contains(&"--safe-mode"));
+            assert!(!args.iter().any(|a| matches!(
+                *a,
+                "--bare"
+                    | "--allowedTools"
+                    | "--dangerously-skip-permissions"
+                    | "--fallback-model"
+                    | "--resume"
+            )));
+            assert!(args.windows(2).any(|a| a == ["--setting-sources", ""]));
+            assert!(args.windows(2).any(|a| a == ["--model", "selected-model"]));
+            assert!(args.windows(2).any(|a| a == ["--effort", "medium"]));
+            assert!(args
+                .windows(2)
+                .any(|a| a == ["--permission-mode", "default"]));
+        }
+        assert!(arguments("--help", "medium", ToolAccess::ReadOnly).is_err());
+        assert!(arguments("selected-model", "auto", ToolAccess::Edit).is_err());
+        assert!(arguments("model\nother", "high", ToolAccess::Edit).is_err());
+    }
 
     #[test]
     fn owned_toy_control_exchange_handles_reply_cancel_and_deadline_without_prompt() {
