@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (로컬 가짜 API의 실제 Claude 도구 경계 관측)
+
+- 기준 65720dc. 승인된 무계정 임시 자료로 loopback 가짜 Anthropic API를 띄워 고정 tool_use만 반환했다. Claude 2.1.287에 가짜 API key/별도 HOME/profile/workspace만 전달했다. 실제 계정·외부 모델 호출 없이 각 실행은 로컬 messages 2회로 끝났다. 실제 Read는 내부 sentinel을 반환하고 외부 source sentinel은 오류/미반환이었다.
+- 셸 fixture에서는 시험 전용 Bash 허용으로 내부 cat/파일 생성을 확인했고 외부 source 읽기/쓰기는 거절·원본 보존이었다. Read deny를 제거해 원인을 분리한 후에도 permissions.blockReadsOutsideWorkingDirectories의 승인 요구로 실행 전에 거절됐다. 그러므로 OS sandbox denyRead/denyWrite 자체 합격으로 기록하지 않는다. 공식 SDK readFile은 실제 Read보다 좁다는 문서를 확인해 대체 시험으로 사용하지 않았다.
+- 도구 거절이 있어도 CLI result success/is_error=false가 나올 수 있었다. 기존 claude_events의 permission_denials와 sidecar의 permission_denied 검사를 유지한다. fixture는 승인 prompt 없음/모델 응답 가짜 조건이므로 제품의 명시 허용·관리 정책·네트워크·취소/자손 게이트를 대체하지 않는다.
+- 실행별 CLI exit0, probe 그룹 정리 후 ps에서 해당 CLI/probe 잔여 명령 없음. 임시 파일 /private/tmp/hello-agent-claude-tools.XNBwob 약212KiB 보존. 코드/전체 빌드·테스트 변경 없음, diff check 확인. 다음은 OS 도구 보호와 관리 정책 admission 근거를 확보해 실제 dispatcher에 연결하는 것이다. 제품 blocked, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (무계정 Claude 초기화 실측·권한 모드 결속)
 
 - 기준 fadd733. 승인된 임시 HOME/profile/workspace에서 서명 확인된 Claude 2.1.287에 stream-json control initialize만 전송했다. 사용자 메시지 0, 계정/API key 환경 상속 없음, 모델 호출 없음. success/hooks_applied=true 및 모델별 resolvedModel/effort 목록을 관측했고 두 번째 조회에서 current_permission_mode=default를 확인했다. 계정/원문 응답은 출력·저장하지 않았다.

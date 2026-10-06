@@ -574,6 +574,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 도구 목록도 실행 surface를 구분한다. [EndConversation](https://code.claude.com/docs/en/tools-reference#endconversation-tool-behavior)은 일반 CLI 설명상 자동 포함되지만 `-p`/Agent SDK에서는 제외된다. 현재 stream-json print 실행의 expected tools에 이를 임의 추가하거나 알려지지 않은 도구 전부를 허용하지 않는다.
 
+**임시 자료 관측(2026-10-06, 제품 gate 아님)**: 로컬 가짜 API가 반환한 tool_use를 실제 Claude 2.1.287이 실행했을 때 Read 내부 성공/외부 거절과 Bash 내부 읽기·쓰기 성공/외부 거절을 확인했다. 후자는 Read deny 또는 blockReadsOutsideWorkingDirectories의 사전 승인 거절이므로 OS sandbox 자체 증거와 분리한다. [SDK readFile](https://code.claude.com/docs/en/agent-sdk/typescript#what-readfile-can-read)은 Read보다 좁은 범위라 대체 증거로 사용하지 않는다. 개별 도구 거절 뒤에도 최종 result success가 나왔으므로 result success만으로 앱 작업을 성공 처리하지 않는다. 실제 계정·유료 모델·사용자 프로젝트는 이 관측에 사용하지 않았다.
+
 ## 7. 안전 경계
 
 M5는 M4의 실행 계약을 제품 셸 아래에 숨길 뿐, 약화하지 않는다.
