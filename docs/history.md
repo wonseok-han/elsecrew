@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 단일 세션 수신 흐름)
+
+- 기준fdc279a에서 Karpathy 지침으로 기존 init/public projection/permission parser를 claude_session의 단일 수신 상태에 결합했다. 초기화 전 출력·권한 요청과 중복 init·미대기 control_response를 거절하고 모든 frame에 공통 event/byte 예산을 적용한다. 파싱/세션 오류는 권한 대기를 함께 닫으며 raw 입력은 공개하지 않는다.
+- sidecar handshake를 소비해 만드는 SessionChannel에 이 수신 상태를 연결했다. owner가 고정한 cwd/model/mode/tools를 초기화와 비교하고 기존 connection ID 검사를 유지한다. toy 왕복 회귀도 system init을 거쳐 권한 응답으로 이어지게 변경했고 core의 초기화 순서/중복/공개 출력·권한 혼합 회귀를 작성했다.
+- rustfmt/diff만 확인했으며 새 회귀 실행·컴파일·실제 CLI/UI·최종 통합 검증은 미실행이다. 이 상태는 reported init 이후 수신용이고 초기화 관측 자체는 launch admission이나 모델 호출 승인 권위가 아니다. 목표 전송·실행 owner·UI 및 최종 검증이 남는다. 기존 archive 보존, 실제 계정/유료 실행·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 권한 요청 stdio 라우팅)
 
 - 기준771c282의 권한 응답 구현에 이어 공식 SDK types.py의 _configure_can_use_tool과 transport/subprocess_cli.py를 확인했다. can_use_tool은 permission_prompt_tool_name=stdio를 통해 CLI의 --permission-prompt-tool stdio로 연결된다. 기존 실행 인자 후보의 누락을 보완했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py 및 _internal/transport/subprocess_cli.py (2026-10-06 mutable main).

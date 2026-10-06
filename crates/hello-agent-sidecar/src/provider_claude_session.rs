@@ -76,9 +76,9 @@ pub(crate) struct ControlInitialization {
 }
 
 /// Created only after the handshake on this connection. Not a tool-grant authority.
-pub(crate) struct PermissionChannel {
+pub(crate) struct SessionChannel {
     connection: uuid::Uuid,
-    permissions: hello_agent_core::provider::vendor_observation::claude_approval::Permissions,
+    permissions: hello_agent_core::provider::vendor_observation::claude_session::Session,
 }
 
 pub(crate) struct PermissionDenial {
@@ -95,15 +95,13 @@ impl PermissionDenial {
     }
 }
 
-impl PermissionChannel {
+impl SessionChannel {
     pub(crate) fn observe(
         &mut self,
         process: &LoginProcess<'_>,
         input: &hello_agent_core::provider::BoundedObservation,
-    ) -> Result<
-        hello_agent_core::provider::vendor_observation::claude_approval::Observation,
-        SidecarError,
-    > {
+    ) -> Result<hello_agent_core::provider::vendor_observation::claude_session::Event, SidecarError>
+    {
         if process.connection_id() != self.connection {
             self.permissions.close();
             return Err(failure());
@@ -145,13 +143,19 @@ fn failure() -> SidecarError {
 }
 
 impl ControlInitialization {
-    pub(crate) fn into_permission_channel(self) -> Result<PermissionChannel, SidecarError> {
+    pub(crate) fn into_session_channel(
+        self,
+        expected: &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit<'_>,
+    ) -> Result<SessionChannel, SidecarError> {
         if self.failed || self.exchange.state() != State::Ready {
             return Err(failure());
         }
-        Ok(PermissionChannel {
+        Ok(SessionChannel {
             connection: self.connection,
-            permissions: Default::default(),
+            permissions:
+                hello_agent_core::provider::vendor_observation::claude_session::Session::new(
+                    expected,
+                ),
         })
     }
 
@@ -314,6 +318,7 @@ mod tests {
     #[test]
     fn permission_denial_round_trips_through_owned_transport() {
         use hello_agent_core::provider::vendor_observation::claude_approval::Observation;
+        use hello_agent_core::provider::vendor_observation::claude_session::Event;
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
         let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
@@ -322,6 +327,7 @@ mod tests {
         let mut process = LoginProcess::reserve(&profile).unwrap();
         let id = format!("init_{}", process.connection_id().simple());
         let init = serde_json::json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{}}});
+        let reported = serde_json::json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":"/snapshot","model":"model","permissionMode":"default","tools":["Bash"],"mcp_servers":[],"skills":[],"plugins":[]});
         let request = serde_json::json!({"type":"control_request","request_id":"permission_a","request":{
             "subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool_a","input":{"command":"PRIVATE"}
         }});
@@ -334,7 +340,7 @@ mod tests {
             serde_json::json!({"type":"control_cancel_request","request_id":"permission_a"});
         // No provider/account/model. The toy acknowledges only the exact denial bytes.
         let script = format!(
-            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{request}'\nIFS= read -r denial || exit 2\n[ \"$denial\" = '{expected}' ] || exit 3\nprintf '%s\\n' '{cancelled}'\nIFS= read -r last\n"
+            "IFS= read -r first || exit 1\nprintf '%s\\n' '{init}' '{reported}' '{request}'\nIFS= read -r denial || exit 2\n[ \"$denial\" = '{expected}' ] || exit 3\nprintf '%s\\n' '{cancelled}'\nIFS= read -r last\n"
         );
         process
             .launch_gated_command(
@@ -353,7 +359,14 @@ mod tests {
                 }
                 std::thread::sleep(Duration::from_millis(2));
             }
-            let mut permissions = session.into_permission_channel()?;
+            let mut permissions = session.into_session_channel(
+                &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
+                    cwd: "/snapshot",
+                    model: "model",
+                    permission_mode: "default",
+                    tools: &["Bash"],
+                },
+            )?;
             let incoming = loop {
                 if Instant::now() >= deadline {
                     return Err(failure());
@@ -363,7 +376,24 @@ mod tests {
                 }
                 std::thread::sleep(Duration::from_millis(2));
             };
-            let Observation::Requested(request) = permissions.observe(&process, &incoming)? else {
+            if !matches!(
+                permissions.observe(&process, &incoming)?,
+                Event::Initialized { .. }
+            ) {
+                return Err(failure());
+            }
+            let incoming = loop {
+                if Instant::now() >= deadline {
+                    return Err(failure());
+                }
+                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                    break input;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            let Event::Permission(Observation::Requested(request)) =
+                permissions.observe(&process, &incoming)?
+            else {
                 return Err(failure());
             };
             if request.request_id != "permission_a"
@@ -389,7 +419,7 @@ mod tests {
             };
             if !matches!(
                 permissions.observe(&process, &incoming)?,
-                Observation::Cancelled
+                Event::Permission(Observation::Cancelled)
             ) {
                 return Err(failure());
             }
