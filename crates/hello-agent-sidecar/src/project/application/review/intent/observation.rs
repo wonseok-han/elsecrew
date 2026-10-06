@@ -1,5 +1,6 @@
 //! Point-in-time comparison only. Matching an after image is not writer ownership.
 use super::*;
+use crate::project::application::capture;
 use cap_std::fs::MetadataExt;
 use std::path::Path;
 

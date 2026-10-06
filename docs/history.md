@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (반영·복구 연결 묶음의 컴파일 확인)
+
+- 기준9836518에서 다음 구현의 기반 확인을 위해 누적 연결 코드의 최소 컴파일 진단만 수행했다. pnpm exec tsc --noEmit은 통과했다. cargo check -p hello-agent-sidecar --tests --locked는 이전 취소 callback 변경에 따른 capture import 누락1개와 scan 테스트 인자 누락2개로 실패했다.
+- Karpathy 지침으로 해당 import와 기존 테스트의 no-op 취소 callback만 보완했다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4로 같은 Cargo check를 재실행해3.84초에 통과했다. 신규 예산/정리/복구점 종료 코드와 테스트도 컴파일 대상에 포함되지만 테스트 자체는 실행하지 않았다.
+- 전체 하네스·실행/복구·UI·독립 검토는 최종 통합에 남는다. 컴파일 통과는 원본 쓰기/삭제/실제 공급자 활성화 증거가 아니며 제품 기본값은 바꾸지 않았다. 설치본 서명 장애·공급자 계약/연결·Windows/G6·고아 파일 처리와 전체 검증 미완료, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (복구점 종료 확인·IPC 연결)
 
 - 기준39af81d에서 Karpathy/React 지침으로 inspectApplicationRetirement/retireApplication 고정 계약·dispatch·명시 확인 UI를 연결했다. exact project/application·terminal 상태·fingerprint를 대조하고 진행 중 반영/준비/저장 때 종료를 거절한다. backend 제품 비활성은 유지한다.

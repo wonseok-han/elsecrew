@@ -319,7 +319,7 @@ mod tests {
                 paths: 3,
             },
         ] {
-            assert!(scan(&root, "", 0, &mut BTreeMap::new(), &mut budget).is_err());
+            assert!(scan(&root, "", 0, &mut BTreeMap::new(), &mut budget, &|| Ok(())).is_err());
         }
         fs::hard_link(temp.path().join("file"), temp.path().join("alias")).unwrap();
         assert!(capture(&root).is_err());
@@ -365,7 +365,8 @@ mod tests {
                 entries: MAX_ENTRIES,
                 bytes: MAX_BYTES,
                 paths: MAX_PATH_BYTES
-            }
+            },
+            &|| Ok(())
         )
         .is_err());
     }
