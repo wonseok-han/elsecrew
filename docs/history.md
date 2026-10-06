@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 증분 전송·수신 구동)
+
+- 기준2c64a0d에서 Karpathy 지침으로 SessionChannel.advance를 추가했다. 큐가 있으면 bounded flush 한 단계, 없으면 bounded poll 후 기존 세션 파서로 전달한다. 두 경로 모두 기존 process observer를 사용하고 동일 연결·취소·고정10분 deadline·닫힘을 검사한다. 활동 때 deadline을 연장하지 않는다.
+- 초기 입력/권한 거절이 transmitting 상태를 소유하며 진행 중 큐 덮어쓰기를 거절한다. 전송·수신 오류는 세션을 닫고 process 종료/원장 처리는 소유자 책임으로 유지한다. result frame은 이벤트일 뿐 종료나 잠금 해제 권한으로 바꾸지 않는다. toy 회귀를 직접 flush/poll 대신 이 구동 경로로 전환하고 만료 뒤 재사용 거절을 작성했다.
+- rustfmt/diff만 확인했으며 직전 컴파일 PASS를 이번 변경의 실행 증거로 재사용하지 않는다. 실제 launcher/owner·UI·통합 검증과 안전 검토는 남는다. 이전 턴과 이번 턴은 구현 진전이며 전체 목표는 미완료다. 기존 archive 보존, 계정/모델 실행·main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 첫 목표 메시지의 작업 공간 결속)
 
 - 기준b3b381e에서 공식 SDK client.py의 initialize 응답 뒤 user/session_id=""/parent_tool_use_id=null 메시지 전송을 확인했다. 출처: https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/client.py (2026-10-06 mutable main). Karpathy 지침으로 기존 TextWorkspace 검증을 재사용해 SessionChannel의 단회 초기 입력 큐를 연결했다.

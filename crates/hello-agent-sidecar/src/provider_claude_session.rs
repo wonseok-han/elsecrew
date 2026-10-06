@@ -80,6 +80,8 @@ pub(crate) struct SessionChannel {
     connection: uuid::Uuid,
     cwd: std::path::PathBuf,
     prompt_attempted: bool,
+    transmitting: bool,
+    deadline: Instant,
     permissions: hello_agent_core::provider::vendor_observation::claude_session::Session,
 }
 
@@ -127,6 +129,40 @@ impl PermissionDenial {
 }
 
 impl SessionChannel {
+    /// Incremental drive: a result event is still just an observation, never cleanup.
+    /// Runtime owner persists process identity through `observer` and must finish on error.
+    pub(crate) fn advance<'a>(
+        &mut self,
+        process: &mut LoginProcess<'a>,
+        cancel: &AtomicBool,
+        observer: &mut impl FnMut(&mut LoginProcess<'a>) -> Result<(), SidecarError>,
+    ) -> Result<
+        Option<hello_agent_core::provider::vendor_observation::claude_session::Event>,
+        SidecarError,
+    > {
+        let result = (|| {
+            if self.permissions.is_closed()
+                || self.connection != process.connection_id()
+                || cancel.load(Ordering::Acquire)
+                || Instant::now() >= self.deadline
+            {
+                return Err(failure());
+            }
+            if self.transmitting {
+                self.transmitting = !process.flush_native_observed(cancel, observer)?;
+                return Ok(None);
+            }
+            match process.poll_preflight_observed(cancel, observer)? {
+                Some(input) => self.observe(process, &input).map(Some),
+                None => Ok(None),
+            }
+        })();
+        if result.is_err() {
+            self.permissions.close();
+        }
+        result
+    }
+
     /// One initial message. The reserved runtime owner must check role, run lock,
     /// launch provenance and provider sandbox in `admit`; this channel owns none.
     /// A queued/partially written message must never be retried as a fresh prompt.
@@ -140,6 +176,8 @@ impl SessionChannel {
     ) -> Result<(), SidecarError> {
         let result = (|| {
             if self.prompt_attempted
+                || self.transmitting
+                || Instant::now() >= self.deadline
                 || self.permissions.is_closed()
                 || process.connection_id() != self.connection
                 || cancel.load(Ordering::Acquire)
@@ -158,7 +196,9 @@ impl SessionChannel {
             process.queue_native(NativeFrame::ClaudePrompt(InitialPrompt {
                 connection: self.connection,
                 wire,
-            }))
+            }))?;
+            self.transmitting = true;
+            Ok(())
         })();
         if result.is_err() {
             self.prompt_attempted = true;
@@ -167,7 +207,7 @@ impl SessionChannel {
         result
     }
 
-    pub(crate) fn observe(
+    fn observe(
         &mut self,
         process: &LoginProcess<'_>,
         input: &hello_agent_core::provider::BoundedObservation,
@@ -180,14 +220,17 @@ impl SessionChannel {
         self.permissions.observe(input).map_err(|_| failure())
     }
 
-    /// Caller flushes through the same observed nonblocking transport and owns cleanup.
+    /// `advance` flushes the reply; caller owns cleanup on every failure.
     pub(crate) fn deny(
         &mut self,
         process: &mut LoginProcess<'_>,
         request_id: &str,
         interrupt: bool,
     ) -> Result<(), SidecarError> {
-        if process.connection_id() != self.connection {
+        if process.connection_id() != self.connection
+            || self.transmitting
+            || Instant::now() >= self.deadline
+        {
             self.permissions.close();
             return Err(failure());
         }
@@ -201,6 +244,8 @@ impl SessionChannel {
         }));
         if result.is_err() {
             self.permissions.close();
+        } else {
+            self.transmitting = true;
         }
         result
     }
@@ -225,6 +270,8 @@ impl ControlInitialization {
             connection: self.connection,
             cwd: expected.cwd.into(),
             prompt_attempted: false,
+            transmitting: false,
+            deadline: Instant::now() + Duration::from_secs(10 * 60),
             permissions:
                 hello_agent_core::provider::vendor_observation::claude_session::Session::new(
                     expected,
@@ -464,29 +511,24 @@ mod tests {
                 if Instant::now() >= deadline {
                     return Err(failure());
                 }
-                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                if let Some(input) = permissions.advance(&mut process, &cancel, &mut |_| Ok(()))? {
                     break input;
                 }
                 std::thread::sleep(Duration::from_millis(2));
             };
-            if !matches!(
-                permissions.observe(&process, &incoming)?,
-                Event::Initialized { .. }
-            ) {
+            if !matches!(incoming, Event::Initialized { .. }) {
                 return Err(failure());
             }
             let incoming = loop {
                 if Instant::now() >= deadline {
                     return Err(failure());
                 }
-                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                if let Some(input) = permissions.advance(&mut process, &cancel, &mut |_| Ok(()))? {
                     break input;
                 }
                 std::thread::sleep(Duration::from_millis(2));
             };
-            let Event::Permission(Observation::Requested(request)) =
-                permissions.observe(&process, &incoming)?
-            else {
+            let Event::Permission(Observation::Requested(request)) = incoming else {
                 return Err(failure());
             };
             if request.request_id != "permission_a"
@@ -495,29 +537,35 @@ mod tests {
                 return Err(failure());
             }
             permissions.deny(&mut process, &request.request_id, false)?;
-            while !process.flush_native_observed(&cancel, &mut |_| Ok(()))? {
-                if Instant::now() >= deadline {
-                    return Err(failure());
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
             let incoming = loop {
                 if Instant::now() >= deadline {
                     return Err(failure());
                 }
-                if let Some(input) = process.poll_preflight_observed(&cancel, &mut |_| Ok(()))? {
+                if let Some(input) = permissions.advance(&mut process, &cancel, &mut |_| Ok(()))? {
                     break input;
                 }
                 std::thread::sleep(Duration::from_millis(2));
             };
-            if !matches!(
-                permissions.observe(&process, &incoming)?,
-                Event::Permission(Observation::Cancelled)
-            ) {
+            if !matches!(incoming, Event::Permission(Observation::Cancelled)) {
                 return Err(failure());
             }
             if permissions
                 .deny(&mut process, "permission_a", false)
+                .is_ok()
+            {
+                return Err(failure());
+            }
+            // Expiry closes the channel; moving the clock bound cannot reopen it.
+            permissions.deadline = Instant::now();
+            if permissions
+                .advance(&mut process, &cancel, &mut |_| Ok(()))
+                .is_ok()
+            {
+                return Err(failure());
+            }
+            permissions.deadline = Instant::now() + Duration::from_secs(60);
+            if permissions
+                .advance(&mut process, &cancel, &mut |_| Ok(()))
                 .is_ok()
             {
                 return Err(failure());
