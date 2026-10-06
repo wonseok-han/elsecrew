@@ -33,6 +33,74 @@ impl PendingClaudeStart {
 }
 
 impl AgentRuntime {
+    /// Launch a reserved Claude run and keep initialization asynchronous. Both
+    /// policy callbacks come from the trusted caller, never renderer payloads.
+    /// Any rejected launch retains its exact process for the common cleanup path.
+    #[allow(dead_code)] // Awaiting Claude discovery/policy admission integration.
+    pub(crate) fn start_reserved_claude(
+        &mut self,
+        storage: &mut Storage,
+        projects: &ProjectManager,
+        reservation: &mut Option<preparation::RunReservation>,
+        process: &mut Option<LoginProcess<'static>>,
+        executable: &crate::provider_executable::PinnedExecutable,
+        cancel: &AtomicBool,
+        launch_admit: &mut impl FnMut(
+            &std::path::Path,
+            &std::path::Path,
+            &str,
+            &str,
+            crate::provider_claude_session::ToolAccess,
+        ) -> Result<(), SidecarError>,
+        prompt_admit: PromptAdmission,
+    ) -> Result<G5Action, SidecarError> {
+        let failure = || SidecarError::new("agentLaunchRejected", "Claude start unavailable");
+        let pending = reservation.as_ref().ok_or_else(failure)?;
+        if self.preparing_to_quit
+            || cancel.load(Ordering::Acquire)
+            || self.has_active_run(&pending.run_id)
+            || active_run_limit_reached(self.owned_run_ids().len())
+        {
+            return Err(failure());
+        }
+        let run = &pending.run;
+        let accepted = json!({
+            "schemaVersion": 1, "runId": run["runId"], "chatId": run["chatId"],
+            "taskId": run["taskId"], "projectId": run["projectId"],
+            "worktreeId": run["worktreeId"], "workspaceIdentity": run["workspaceIdentity"],
+            "roleId": run["selectedProfile"]["roleId"],
+            "capabilityFingerprint": run["capabilityFingerprint"], "state": "preparing",
+        });
+        validate_agent_adapter_payload_v1("runAccepted", &accepted).map_err(|_| failure())?;
+        let result = (|| {
+            let owner = process.as_mut().ok_or_else(failure)?;
+            if !owner.matches_startup_run(&pending.run_id) {
+                owner.retain_fence_before_launch(&pending.run_id)?;
+            }
+            pending.launch_claude_candidate(
+                storage,
+                projects,
+                owner,
+                executable,
+                cancel,
+                launch_admit,
+            )?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(failure());
+            }
+            self.register_claude_start(storage, projects, reservation, process, prompt_admit)
+        })();
+        if let Err(error) = result {
+            // If cleanup registration rejects, caller slots still own the process.
+            self.retain_rejected_start(reservation, process)?;
+            return Err(error);
+        }
+        Ok(G5Action {
+            result: accepted,
+            events: Vec::new(),
+        })
+    }
+
     /// The trusted launch caller supplies admission. Initialization is not a
     /// permission grant; rejection leaves both caller slots available to cleanup.
     #[allow(dead_code)] // Product launch admission/dispatcher is not activated.

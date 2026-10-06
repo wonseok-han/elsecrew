@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 예약 실행·초기화 인계 연결)
+
+- 기준 5086d8c. 실제 시작 dispatcher의 Codex 연결과 Claude 누락을 확인하고 start_reserved_claude를 추가했다. 종료 중/취소/중복/한도·runAccepted 계약을 먼저 검사하고 기존 launch fence·서명 명령·trusted launch admission을 거쳐 비동기 초기화 registry에 인계한다. 시작 실패는 retain_rejected_start로 같은 reservation/process를 보존한다.
+- Karpathy 지침으로 Codex와 동일한 preparing 응답·기존 복구 소유권을 재사용했다. 초기화 전에 running 성공을 만들지 않으며 launch/prompt admission은 renderer 입력이 아닌 trusted caller 책임이다. Claude scoped discovery/관리 정책 증거 수집이 아직 없어 제품 dispatcher 호출 및 활성화는 남는다.
+- 새 경로 rustfmt·diff check 확인. 빌드/회귀·실제 계정/모델 검증은 이번에 실행하지 않았고 최종 기능 연결 뒤 누적 검증한다. 다음은 Claude 정책/지원 기능 관측과 scoped discovery 통합이다. 기존 9월 archive 변경 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 초기화 대기의 실행 관리자 소유권)
 
 - 기준 6fbd3f8. ClaudeStart를 pending registry에 등록하고 실행 한도/중복 검사·owned run 목록·취소·prepareQuit·poll에 연결했다. 등록 전 실패는 caller의 reservation/process 슬롯을 유지한다. 초기화 완료만 기존 native registry로 넘기며 실패는 기존 failed-start 종료/원장/fence 경로로 인계한다. 정리 등록 실패도 소유권을 보존하고 초기화/첫 메시지는 재시도하지 않는다.
