@@ -2,6 +2,7 @@ import { useI18n } from "../i18n.tsx";
 import { RestorationPreview } from "./restoration-preview.tsx";
 import { BackupPreparationRecovery } from "./backup-preparation-recovery.tsx";
 import { ApplicationFailure } from "./application-failure.tsx";
+import { ApplicationRetirement } from "./application-retirement.tsx";
 import { BackupStorageUsageView } from "./backup-storage-usage.tsx";
 import { BackupRetentionView } from "./backup-retention.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +17,7 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
   const [confirmWorkspace, setConfirmWorkspace] = useState(false);
   const [createdWorkspace, setCreatedWorkspace] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "previewError" | "prepareError">("");
+  const [message, setMessage] = useState<"" | "done" | "unknown" | "error" | "applicationError" | "previewError" | "prepareError" | "retired">("");
   const epoch = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
@@ -93,6 +94,7 @@ export function PreparationRecovery({ projectId, disabled }: { projectId: string
       </div>
       {application.running && application.applicationId && <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "cancelApplication", projectId, applicationId: application.applicationId! })}>{t("m5.application.stop")}</button>}
       <ApplicationFailure failure={application.failure} />
+      {!application.running && application.applicationId && ["applied", "restored", "abandoned"].includes(application.state) && <ApplicationRetirement projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} onRetired={() => { setApplication(null); setHistory(null); setMessage("retired"); }} />}
       {!application.running && application.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview key={application.applicationId} projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} />}
     </section>}
     <button type="button" disabled={disabled || busy} onClick={() => { setHistory(null); void request({ action: "applicationHistory", projectId }); }}>{t("m5.application.history")}</button>

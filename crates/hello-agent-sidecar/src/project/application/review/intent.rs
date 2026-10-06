@@ -11,7 +11,6 @@ pub(in crate::project) mod completion;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod execution;
 mod observation;
-#[allow(dead_code)]
 pub(in crate::project) mod retirement;
 #[cfg(target_os = "macos")]
 pub(in crate::project) mod writer;

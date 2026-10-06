@@ -1120,6 +1120,14 @@ impl Sidecar {
                     let params = require_exact_params(&request.params, &["action", "projectId", "reviewId"]).map_err(invalid_params)?;
                     self.projects.inspect_backup_cleanup(&self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"reviewId").map_err(invalid_params)?)
                 }
+                Some("inspectApplicationRetirement") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "applicationId"]).map_err(invalid_params)?;
+                    self.projects.inspect_application_retirement(&self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"applicationId").map_err(invalid_params)?)
+                }
+                Some("retireApplication") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "applicationId", "fingerprint"]).map_err(invalid_params)?;
+                    self.projects.retire_application(&mut self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"applicationId").map_err(invalid_params)?, param_string(params,"fingerprint").map_err(invalid_params)?, &request.request_id)
+                }
                 Some("cleanupBackup") => {
                     let params = require_exact_params(&request.params, &["action", "projectId", "reviewId", "fingerprint"]).map_err(invalid_params)?;
                     self.projects.cleanup_backup(&mut self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"reviewId").map_err(invalid_params)?, param_string(params,"fingerprint").map_err(invalid_params)?, &request.request_id)

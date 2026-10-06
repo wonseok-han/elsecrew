@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (복구점 종료 확인·IPC 연결)
+
+- 기준39af81d에서 Karpathy/React 지침으로 inspectApplicationRetirement/retireApplication 고정 계약·dispatch·명시 확인 UI를 연결했다. exact project/application·terminal 상태·fingerprint를 대조하고 진행 중 반영/준비/저장 때 종료를 거절한다. backend 제품 비활성은 유지한다.
+- 종료 동의는 현재 복구 기능 포기와 이력 보존을 설명하며 백업 파일 삭제와 구분한다. 대상별 React 세션과 일회 요청을 사용하고 응답 유실은 상태/이력 재조회를 안내한다. 성공 응답 뒤 기존 현재 복구 표시를 지우고 이력 조회를 새로 할 수 있게 한다.
+- terminal/교차 대상/지문 계약과 제품 기본 차단·원장 무변경 회귀를 작성했다. diff만 검사하며 실행·타입·UI·안전 검토는 최종 통합에 남긴다. 원본 쓰기/정리/복구점 종료는 아직 활성화하지 않았다. 고아 파일 정책·실제 공급자 연결·Windows/G6/전체 검증이 남으며 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (완료된 현재 복구점의 명시 종료 후보)
 
 - 기준c9e22f6에서 Karpathy 지침으로 intent::retirement의 읽기 전용 preview와 영속 retire를 작성했다. 기존 inspect가 검증하는 applicationId·terminal 상태·poisoned=false·recovery_required=false·writer 부재·phase 증거를 요구한다. prepared/applying은 거절하며 확인 지문을 재대조한다.
@@ -35,6 +41,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **복구점 종료 후보(2026-10-06)**: 완료된 현재 기록을 project/lock CAS로 과거 이력에 보존하는 내부 경로와 확인 IPC/UI를 연결했다. 원본·백업 파일/잠금은 변경하지 않으며 종료 뒤 별도 확인으로 과거 백업을 정리한다. 제품 기본값은 비활성, 통합·독립 검토 전이다.
 - **백업 보존 조회(2026-10-01)**: backupRetention은 현재/과거 기록의 review·파일 이름 연결을 UI에 표시한다. 파일 검증/삭제 권한은 아니며, 삭제는 staging 파일 검증과 intent 복사본을 함께 다루는 영속 삭제 계약이 필요하다. 삭제 기능은 미구현이다.
 - **종료된 준비 정리 후보(2026-10-06)**: 참조 없는 abandoned 준비 파일의 pending/deleted 영속 정리와 명시 확인 IPC/UI를 연결했다. 제품 삭제는 검증 전 비활성이다. 현재/과거 복구 백업과 소유 기록 없는 파일은 정리 대상이 아니며 전체 복원 지점 삭제 완료를 뜻하지 않는다.
 - **정리 후보 확장(2026-10-06 후속)**: 현재 복구가 참조하지 않는 ready 백업 및 원본 백업이 정확히 일치하는 terminal 과거 이력을 명시 정리 후보에 포함했다. 파일 삭제 시 해당 백업 복원을 포기하고 이력/삭제 기록은 남긴다. 제품 삭제는 아직 비활성이고 현재 복구점/고아 파일은 미지원이다.

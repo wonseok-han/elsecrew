@@ -8,11 +8,14 @@ export interface ApplicationHistoryEntry { applicationId: string; state: "applie
 export interface ApplicationPreview { worktreeId: string; total: number; changes: { path: string; kind: "added" | "modified" | "deleted" }[] }
 export interface ApplicationPreviewPage extends ApplicationPreview { offset: number; fingerprint: string }
 export interface BackupPreparation { reviewId: string; fingerprint: string }
+export interface ApplicationRetirementInspection { applicationId: string; fingerprint: string; state: "applied" | "restored" | "abandoned" }
 export interface BackupCleanupInspection { reviewId: string; fingerprint: string; filePresent: boolean; state: "available" | "pending" | "deleted" }
 export interface BackupRetention { reviewId: string; state: "preparing" | "ready" | "abandoned"; retainedFor: "currentApplication" | "applicationHistory" | "unfinishedPreparation" | "preparedBackup" | "abandonedPreparation" }
 export interface BackupStorageUsage { usedBytes: number; limitBytes: number; remainingBytes: number }
 export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | { action: "reopen"; projectId: string } | { action: "releaseView"; projectId: string }
   | { action: "applicationCapabilities" }
+  | { action: "inspectApplicationRetirement"; projectId: string; applicationId: string }
+  | { action: "retireApplication"; projectId: string; applicationId: string; fingerprint: string }
   | { action: "backupStorageUsage" }
   | { action: "setBackupStorageLimit"; expectedLimitBytes: number; limitBytes: number }
   | { action: "backupPreparations"; projectId: string }
@@ -37,6 +40,8 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
 export interface ProjectCatalogEntry { projectId: string; canonicalPath: string }
 export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationCapabilities"; enabled: boolean }
+  | { schemaVersion: 1; action: "inspectApplicationRetirement"; projectId: string; enabled: boolean; inspection: ApplicationRetirementInspection }
+  | { schemaVersion: 1; action: "retireApplication"; projectId: string; applicationId: string }
   | { schemaVersion: 1; action: "backupStorageUsage"; usage: BackupStorageUsage }
   | { schemaVersion: 1; action: "setBackupStorageLimit"; limitBytes: number }
   | { schemaVersion: 1; action: "backupPreparations"; projectId: string; entries: BackupPreparation[] }
@@ -101,7 +106,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
   } else if (request.action === "startApplication") {
     keys(request, ["action", "projectId", "chatId", "confirmationId"]); id(request.projectId); id(request.chatId);
     validateProjectCatalogRequest({action:"cancelApplicationConfirmation",confirmationId:request.confirmationId});
-  } else if (request.action === "restoreApplication") {
+  } else if (request.action === "restoreApplication" || request.action === "retireApplication") {
     keys(request, ["action", "projectId", "applicationId", "fingerprint"]);
     if (typeof request.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(request.fingerprint)) throw new Error("invalid restoration fingerprint");
     validateProjectCatalogRequest({action:"cancelApplication",projectId:request.projectId,applicationId:request.applicationId});
@@ -109,7 +114,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     keys(request, ["action", "projectId", "applicationId", "offset", "fingerprint"]);
     validateProjectCatalogRequest({action:"cancelApplication",projectId:request.projectId,applicationId:request.applicationId});
     validateProjectCatalogRequest({action:"applicationPreviewPage",projectId:request.projectId,chatId:null,offset:request.offset,fingerprint:request.fingerprint});
-  } else if (request.action === "cancelApplication") {
+  } else if (request.action === "cancelApplication" || request.action === "inspectApplicationRetirement") {
     keys(request, ["action", "projectId", "applicationId"]); id(request.projectId);
     if (typeof request.applicationId !== "string" || !/^application_[a-f0-9]{32}$/.test(request.applicationId)) throw new Error("invalid application cancellation ID");
   } else if (request.action === "openApplicationConfirmation") {
@@ -141,6 +146,14 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
   if (request.action === "applicationCapabilities") {
     keys(result, ["schemaVersion", "action", "enabled"]);
     if (typeof result.enabled !== "boolean") throw new Error("invalid application capability");
+  } else if (request.action === "inspectApplicationRetirement") {
+    keys(result, ["schemaVersion", "action", "projectId", "enabled", "inspection"]);
+    const inspection = object(result.inspection); keys(inspection, ["applicationId", "fingerprint", "state"]);
+    if (result.projectId !== request.projectId || inspection.applicationId !== request.applicationId || typeof result.enabled !== "boolean" || !["applied", "restored", "abandoned"].includes(String(inspection.state))) throw new Error("invalid retirement inspection");
+    validateProjectCatalogRequest({action:"retireApplication",projectId:request.projectId,applicationId:inspection.applicationId,fingerprint:inspection.fingerprint});
+  } else if (request.action === "retireApplication") {
+    keys(result, ["schemaVersion", "action", "projectId", "applicationId"]);
+    if (result.projectId !== request.projectId || result.applicationId !== request.applicationId) throw new Error("retirement target mismatch");
   } else if (request.action === "backupStorageUsage") {
     keys(result, ["schemaVersion", "action", "usage"]);
     const usage = object(result.usage);

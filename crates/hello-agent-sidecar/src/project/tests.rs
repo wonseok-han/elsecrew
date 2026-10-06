@@ -20,6 +20,9 @@ fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
     assert!(intent::retirement::retire(&mut f.storage, &f.project_id, id, "stale", "req_retire_stale").is_err());
     assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
     let preview = intent::retirement::preview(&f.storage, &f.project_id, id).unwrap();
+    assert_eq!(f.manager.inspect_application_retirement(&f.storage, &f.project_id, id).unwrap().result["enabled"], false);
+    assert!(f.manager.retire_application(&mut f.storage, &f.project_id, id, preview["fingerprint"].as_str().unwrap(), "req_product_retire_disabled").is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
     intent::retirement::retire(&mut f.storage, &f.project_id, id, preview["fingerprint"].as_str().unwrap(), "req_retire").unwrap();
     let after = required_project(&f.storage, &f.project_id).unwrap();
     assert!(!after.contains_key("application_intent"));

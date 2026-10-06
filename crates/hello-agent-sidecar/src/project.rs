@@ -360,6 +360,25 @@ pub struct WorkspaceAddress {
 }
 
 impl ProjectManager {
+    pub(crate) fn inspect_application_retirement(&self, storage: &Storage, project: &str, application: &str) -> Result<ProjectAction, ProjectFailure> {
+        #[cfg(unix)]
+        { let inspection = application::review::intent::retirement::preview(storage, project, application)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectApplicationRetirement","projectId":project,"enabled":self.source_writes_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (storage,project,application); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
+    }
+
+    pub(crate) fn retire_application(&mut self, storage: &mut Storage, project: &str, application: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
+        if !self.source_writes_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("application retirement is not enabled")); }
+        if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("application retirement requires idle processing")); }
+        #[cfg(unix)]
+        { self.application_confirmations.cancel();
+          application::review::intent::retirement::retire(storage, project, application, fingerprint, request)?;
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"retireApplication","projectId":project,"applicationId":application}), ..Default::default() }) }
+        #[cfg(not(unix))]
+        { let _ = (storage,project,application,fingerprint,request); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
+    }
+
     pub(crate) fn inspect_backup_cleanup(&self, storage: &Storage, project: &str, review: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { let inspection = application::review::backup::cleanup::preview(self, storage, project, review)?;

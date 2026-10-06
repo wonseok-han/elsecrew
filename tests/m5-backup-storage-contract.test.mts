@@ -57,3 +57,17 @@ test("cleanup inspection and command bind exact project, review and fingerprint"
   assert.throws(() => validateProjectCatalogRequest({...command,filename:"backup.bin"}));
   assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:command.action,projectId:"project_a",reviewId:`review_${"c".repeat(32)}`},command));
 });
+
+test("retirement inspection accepts terminal states only and binds the current application", () => {
+  const applicationId = `application_${"a".repeat(32)}`;
+  const fingerprint = "b".repeat(64);
+  const request = {action:"inspectApplicationRetirement" as const,projectId:"project_a",applicationId};
+  const response = {schemaVersion:1,action:request.action,projectId:request.projectId,enabled:false,inspection:{applicationId,fingerprint,state:"applied"}};
+  for (const state of ["applied","restored","abandoned"]) assert.doesNotThrow(() => validateProjectCatalogResult({...response,inspection:{...response.inspection,state}},request));
+  for (const state of ["prepared","applying","none"]) assert.throws(() => validateProjectCatalogResult({...response,inspection:{...response.inspection,state}},request));
+  assert.throws(() => validateProjectCatalogResult({...response,inspection:{...response.inspection,applicationId:`application_${"c".repeat(32)}`}},request));
+  const command = {action:"retireApplication" as const,projectId:request.projectId,applicationId,fingerprint};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(command));
+  assert.throws(() => validateProjectCatalogRequest({...command,fingerprint:"stale"}));
+  assert.throws(() => validateProjectCatalogResult({schemaVersion:1,action:command.action,projectId:"project_b",applicationId},command));
+});
