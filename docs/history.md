@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude restricted·원본/프로필 보호 설정 연결)
+
+- 기준 a581c38. 공식 문서에서 --restricted의 파일 도구 working-directory 제한과 permissions.blockReadsOutsideWorkingDirectories의 셸 사용자 루트 차단을 확인하고 실제 ClaudeCommand 인자에 연결했다. 모델 실행 도구 목록은 계속 명시하며 managed 정책은 우회하지 않는다.
+- scoped 인자는 검증된 manifest의 canonicalGitRoot와 앱 profile·snapshot 제어 경로(.git/.claude/.codex/.agents)를 파일 Read/Edit 규칙 및 sandbox denyRead/denyWrite에 넣는다. 파일 규칙의 // 절대 경로와 sandbox의 / 경로를 구분하며 glob/규칙 구분문자·겹친 source/profile/snapshot을 거절한다. 읽기 역할에는 Edit deny도 추가했고 shell network의 빈 허용 목록/local binding·Unix socket 확장을 명시 차단했다.
+- Karpathy 지침으로 기존 settings/argv와 launch를 확장했다. 경로 규칙·추가 권한·문자/중첩 거절 회귀를 작성, diff check PASS. 빌드/테스트·실제 sentinel/계정/모델은 미실행이다. 공식 기본 per-user temp 쓰기와 관리 정책의 additionalDirectories/allowManagedReadPathsOnly 및 global Git config 읽기 예외가 있으므로 이 설정만으로 최종 보호 합격을 주장하지 않는다. 정책 admission/실측·독립 검토와 dispatcher 연결이 다음이며 제품 blocked 유지, 기존 archive 보존, main/push 없음.
+- 출처(2026-10-06 읽기 전용 공식 Markdown): https://code.claude.com/docs/en/cli-reference.md , https://code.claude.com/docs/en/sandboxing.md , https://code.claude.com/docs/en/settings-reference.md .
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 초기화 모델 목록·추론 수준 대조)
 
 - 기준 034e4da. 공식 TypeScript SDK 문서의 SDKControlInitializeResponse.models/ModelInfo(value, resolvedModel, supportsEffort, supportedEffortLevels) 및 hooks_applied를 확인했다. 초기화 파서는 bounded 모델 정보만 보관하고 계정/원문 응답은 보존하지 않는다. 중복 selector·잘못된 추론 목록은 거절한다.

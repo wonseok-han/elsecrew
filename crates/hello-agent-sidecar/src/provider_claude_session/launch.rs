@@ -1,5 +1,5 @@
 //! Signed parent invocation; not evidence of tool confinement or managed policy.
-use super::{arguments, failure, ToolAccess};
+use super::{scoped_arguments, failure, ToolAccess};
 use crate::{provider_executable::PinnedExecutable, provider_login_process::LoginProcess, SidecarError};
 use std::{path::{Path, PathBuf}, process::{Child, Command}};
 
@@ -30,14 +30,14 @@ pub(crate) struct ClaudeCommand {
 }
 
 impl ClaudeCommand {
-    pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, model: &str, effort: &str, access: ToolAccess) -> Result<Self, SidecarError> {
+    pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, source: &Path, model: &str, effort: &str, access: ToolAccess) -> Result<Self, SidecarError> {
         let executable = PinnedExecutable::open_claude_signed(executable)?;
         let user_home = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?);
         if !user_home.is_absolute() || user_home == home || !home.is_absolute() || !workspace.is_absolute()
             || home.starts_with(workspace) || workspace.starts_with(home)
             || executable.revalidate()?.starts_with(workspace)
         { return Err(failure()); }
-        let args = arguments(model, effort, access)?;
+        let args = scoped_arguments(model, effort, access, home, workspace, source)?;
         let borrowed: Vec<_> = args.iter().map(|arg| arg.as_os_str()).collect();
         let mut command = crate::provider_login_gate::command(executable.revalidate()?, &borrowed, workspace)
             .map_err(|_| failure())?;
@@ -66,6 +66,6 @@ mod tests {
     #[test]
     fn unrelated_binary_cannot_claim_claude_launch() {
         assert!(ClaudeCommand::new(Path::new("/usr/bin/true"), Path::new("/synthetic/profile"),
-            Path::new("/synthetic/snapshot"), "test-model", "medium", ToolAccess::ReadOnly).is_err());
+            Path::new("/synthetic/snapshot"), Path::new("/synthetic/source"), "test-model", "medium", ToolAccess::ReadOnly).is_err());
     }
 }

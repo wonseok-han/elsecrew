@@ -25,16 +25,50 @@ pub(crate) fn expected_tools(access: ToolAccess) -> &'static [&'static str] {
 /// Shell-tool protection only. File tools need separate permission rules and
 /// managed settings still require admission; this is not whole-process isolation.
 /// https://code.claude.com/docs/en/sandboxing
-fn shell_settings() -> String {
-    serde_json::json!({"sandbox":{
+fn shell_settings() -> serde_json::Value {
+    serde_json::json!({"permissions":{"blockReadsOutsideWorkingDirectories":true,"additionalDirectories":[]},"sandbox":{
         "enabled":true,
         "failIfUnavailable":true,
         "allowUnsandboxedCommands":false,
         "autoAllowBashIfSandboxed":false,
         "excludedCommands":[],
-        "filesystem":{"disabled":false}
+        "filesystem":{"disabled":false},
+        "network":{"allowedDomains":[],"allowLocalBinding":false,"allowAllUnixSockets":false,"allowUnixSockets":[]}
     }})
-    .to_string()
+}
+
+/// Explicit deny paths supplement restricted mode; managed settings still need admission.
+pub(crate) fn scoped_arguments(model: &str, effort: &str, access: ToolAccess, home: &std::path::Path, workspace: &std::path::Path, source: &std::path::Path) -> Result<Vec<std::ffi::OsString>, SidecarError> {
+    fn literal(path: &std::path::Path) -> Result<String, SidecarError> {
+        let value = path.to_str().ok_or_else(failure)?;
+        if !path.is_absolute() || value.len() > 16 * 1024 || value.chars().any(char::is_control)
+            || value.contains(['*','?','[',']','{','}','(',')','\\'])
+            || path.components().any(|part| matches!(part,std::path::Component::ParentDir|std::path::Component::CurDir))
+        { return Err(failure()); }
+        Ok(value.into())
+    }
+    if workspace.starts_with(home) || home.starts_with(workspace)
+        || workspace.starts_with(source) || source.starts_with(workspace) { return Err(failure()); }
+    literal(workspace)?;
+    let mut denied = vec![literal(home)?, literal(source)?];
+    for name in [".git", ".claude", ".codex", ".agents"] { denied.push(literal(&workspace.join(name))?); }
+    let mut rules = Vec::new();
+    for path in &denied {
+        // File permission rules use // for absolute paths; sandbox paths use /.
+        for tool in ["Read", "Edit"] {
+            rules.push(format!("{tool}(/{path})"));
+            rules.push(format!("{tool}(/{path}/**)"));
+        }
+    }
+    if access == ToolAccess::ReadOnly { rules.push("Edit".into()); }
+    let mut settings = shell_settings();
+    settings["permissions"]["deny"] = serde_json::json!(rules);
+    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!(denied);
+    settings["sandbox"]["filesystem"]["denyWrite"] = serde_json::json!(denied);
+    let mut args = arguments(model, effort, access)?;
+    let index = args.iter().position(|arg| arg == "--settings").ok_or_else(failure)?;
+    args[index + 1] = settings.to_string().into();
+    Ok(args)
 }
 
 /// Fixed, noninteractive launch arguments; not an OS sandbox or approval grant.
@@ -56,7 +90,7 @@ pub(crate) fn arguments(
         return Err(failure());
     }
     let tools = expected_tools(access).join(",");
-    let settings = shell_settings();
+    let settings = shell_settings().to_string();
     Ok([
         "--print",
         "--input-format",
@@ -65,6 +99,7 @@ pub(crate) fn arguments(
         "stream-json",
         "--verbose",
         "--safe-mode",
+        "--restricted",
         "--settings",
         &settings,
         "--setting-sources",
@@ -570,6 +605,28 @@ mod tests {
         ] {
             assert!(prompt_wire(&text).is_err());
         }
+    }
+
+    #[test]
+    fn scoped_launch_separates_file_rules_from_shell_paths() {
+        let home = Path::new("/app/profile");
+        let workspace = Path::new("/app/snapshot");
+        let source = Path::new("/projects/user-source");
+        let args = scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, workspace, source).unwrap();
+        assert!(args.iter().any(|arg| arg == "--restricted"));
+        let index = args.iter().position(|arg| arg == "--settings").unwrap();
+        let settings: serde_json::Value = serde_json::from_str(args[index+1].to_str().unwrap()).unwrap();
+        assert_eq!(settings["permissions"]["blockReadsOutsideWorkingDirectories"],true);
+        assert!(settings["permissions"]["deny"].as_array().unwrap().contains(&serde_json::json!("Read(//app/profile/**)")));
+        for path in ["/app/profile", "/projects/user-source", "/app/snapshot/.git", "/app/snapshot/.claude"] {
+            assert!(settings["sandbox"]["filesystem"]["denyRead"].as_array().unwrap().contains(&serde_json::json!(path)));
+            assert!(settings["sandbox"]["filesystem"]["denyWrite"].as_array().unwrap().contains(&serde_json::json!(path)));
+        }
+        assert_eq!(settings["sandbox"]["network"]["allowLocalBinding"],false);
+        for path in ["/app/snap*", "/app/snap?", "/app/snap[1]", "/app/snap)extra", "relative"] {
+            assert!(scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, Path::new(path), source).is_err());
+        }
+        assert!(scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, workspace, Path::new("/app")).is_err());
     }
 
     #[test]

@@ -343,7 +343,8 @@ impl RunReservation {
         let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
-        let command = ClaudeCommand::new(executable.revalidate()?, &home, workspace, model, effort, access)?;
+        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let command = ClaudeCommand::new(executable.revalidate()?, &home, workspace, source, model, effort, access)?;
         admit(workspace, &home, model, effort, access)?;
         if cancel.load(Ordering::Acquire) { return Err(failure()); }
         command.launch(process, |child, identities| {
