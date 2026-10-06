@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-06 · by GPT-6 Astra (Claude 관측 worker·관리자 수명 연결)
+
+- 기준 cee5f07. Claude 사전 관측을 별도 worker로 실행하고 서명/초기화 조회를 dispatcher 밖으로 옮겼다. 취소 flag·완료 후 단발 join·늦은 성공 취소 처리를 추가했다. 실행 관리자에 요청 ID별 pending registry와 중복/한도·owned 목록·poll·prepareQuit를 연결하고 실패 process는 기존 discovery cleanup으로 인계한다. cleanup 인계 실패 시 원래 슬롯을 보존하며 결과는 한 번만 꺼낸다.
+- Karpathy 지침으로 기존 Codex 조회 소유권 패턴을 재사용했다. request는 내부 caller가 저장된 범위에서 구성하고 구체 admission을 제공해야 하며 renderer 입력을 직접 신뢰하지 않는다. 실제 Claude capability/manifest/인증·예약·public dispatcher 분기는 여전히 후속이다.
+- 최근 연결분 cargo check -p hello-agent-sidecar --tests --locked PASS(4.83초, jobs/threads=4), diff check 확인. 전체 테스트·실제 계정/모델 시험은 미실행이다. 독립 검토 최종 결과는 Claude dispatch/discovery/manifest가 Codex 전용인 점과 acceptOnce 미연결을 확인했고, 정상 출력 실패 지적은 철회했다. init만으로 managed additionalDirectories/sandbox reload를 증명하지 못한다는 한계도 유지한다. 이 신규 worker는 그 리뷰 대상 이후 변경으로 독립 합격을 주장하지 않는다.
+- 다음은 scoped Claude 결과를 capability/예약에 연결하고 일회 승인 경계를 완성하는 것이다. 제품 blocked 유지, 기존 archive 보존, main/push 없음.
+
 ### 2026-10-06 · by GPT-6 Astra (Claude 전용 사전 관측 소유권)
 
 - 기준 a9e05c7. Claude 전용 inspect_candidate를 추가했다. 서명된 기존 ClaudeCommand·trusted admission·ControlInitialization을 재사용해 사용자 메시지 없이 선택 모델/effort·보고 권한 모드/hook 등록을 관측한다. selector와 resolved ID를 구분하고 source/snapshot/profile/access에 결속한 30초 관측으로 반환한다. 계정 entitlement·canStart·실제 tool/init attestation은 반환하지 않는다.

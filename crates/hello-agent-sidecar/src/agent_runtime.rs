@@ -167,6 +167,7 @@ pub(crate) struct AgentRuntime {
     failed_starts: HashMap<String, native::FailedStart>,
     discovery_cleanup: HashMap<String, crate::provider_login_process::LoginProcess<'static>>,
     pending_discoveries: HashMap<String, discovery::PendingDiscovery>,
+    pending_claude_discoveries: HashMap<String, crate::provider_claude_session::discovery::PendingDiscovery>,
     preparing_to_quit: bool,
     discovery_cache: HashMap<String, ObservedProvider>,
     observation_counts: HashMap<String, usize>,
@@ -204,6 +205,7 @@ impl AgentRuntime {
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
             pending_discoveries: HashMap::new(),
+            pending_claude_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -434,6 +436,7 @@ impl AgentRuntime {
             .chain(self.failed_starts.keys())
             .chain(self.discovery_cleanup.keys())
             .chain(self.pending_discoveries.keys())
+            .chain(self.pending_claude_discoveries.keys())
             .cloned()
             .collect()
     }
@@ -460,6 +463,7 @@ impl AgentRuntime {
             failed_starts: HashMap::new(),
             discovery_cleanup: HashMap::new(),
             pending_discoveries: HashMap::new(),
+            pending_claude_discoveries: HashMap::new(),
             preparing_to_quit: false,
             discovery_cache: HashMap::new(),
             observation_counts: HashMap::new(),
@@ -1151,6 +1155,7 @@ impl AgentRuntime {
         // error on a subsequent idle poll, rather than discarding those events.
         for result in [
             self.poll_discoveries(),
+            self.poll_claude_discoveries(),
             self.poll_discovery_cleanup(),
             self.poll_claude_starts(storage, projects),
             self.poll_failed_starts(storage, projects),
@@ -1684,6 +1689,9 @@ impl AgentRuntime {
             pending.cancel();
         }
         for pending in self.pending_discoveries.values() {
+            pending.worker.cancel();
+        }
+        for pending in self.pending_claude_discoveries.values() {
             pending.worker.cancel();
         }
         for active in self.native.values() {

@@ -6,6 +6,134 @@ use crate::{
     provider_preflight_session::ProviderInspection, provider_profile::LoginProfile,
 };
 use std::path::{Path, PathBuf};
+use std::{sync::Arc, thread::JoinHandle};
+
+pub(crate) struct DiscoveryRequest {
+    pub(crate) profile: ClaudeProfileBinding,
+    pub(crate) selector: String,
+    pub(crate) effort: String,
+    pub(crate) access: ToolAccess,
+    pub(crate) workspace: PathBuf,
+    pub(crate) source: PathBuf,
+}
+
+pub(crate) struct DiscoveryEvidence {
+    pub(crate) observation: ProfileObservation,
+    pub(crate) executable: PinnedExecutable,
+}
+
+pub(crate) struct Completion {
+    pub(crate) result: Result<DiscoveryEvidence, SidecarError>,
+    pub(crate) cleanup: Option<LoginProcess<'static>>,
+}
+
+pub(crate) struct PendingDiscovery {
+    pub(crate) worker: DiscoveryWorker,
+    pub(crate) completion: Option<Completion>,
+}
+
+pub(crate) struct DiscoveryWorker {
+    cancel: Arc<AtomicBool>,
+    handle: Option<JoinHandle<Completion>>,
+}
+
+impl DiscoveryWorker {
+    pub(crate) fn spawn(
+        request: DiscoveryRequest,
+        mut admit: impl FnMut(&Path, &Path, &str, &str, ToolAccess) -> Result<(), SidecarError>
+            + Send
+            + 'static,
+    ) -> Result<Self, SidecarError> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        let handle = std::thread::Builder::new()
+            .name("claude-discovery".into())
+            .spawn(move || {
+                // Signature checks and initialization must not block the dispatcher.
+                let executable = match crate::provider_claude_login::installed_executable() {
+                    Ok(executable) => executable,
+                    Err(error) => {
+                        return Completion {
+                            result: Err(error),
+                            cleanup: None,
+                        }
+                    }
+                };
+                match inspect_candidate(
+                    request.profile,
+                    &executable,
+                    &request.selector,
+                    &request.effort,
+                    request.access,
+                    &request.workspace,
+                    &request.source,
+                    &signal,
+                    &mut admit,
+                ) {
+                    Ok(inspection) => match inspection.result {
+                        Ok(observation) => Completion {
+                            result: Ok(DiscoveryEvidence {
+                                observation,
+                                executable,
+                            }),
+                            cleanup: None,
+                        },
+                        Err(error) => Completion {
+                            result: Err(error),
+                            cleanup: Some(inspection.process),
+                        },
+                    },
+                    Err(error) => Completion {
+                        result: Err(error),
+                        cleanup: None,
+                    },
+                }
+            })
+            .map_err(|_| failure())?;
+        Ok(Self {
+            cancel,
+            handle: Some(handle),
+        })
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.cancel.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn poll(&mut self) -> Option<Completion> {
+        if !self
+            .handle
+            .as_ref()
+            .is_some_and(|handle| handle.is_finished())
+        {
+            return None;
+        }
+        let mut completion = self
+            .handle
+            .take()
+            .unwrap()
+            .join()
+            .unwrap_or_else(|_| Completion {
+                result: Err(failure()),
+                cleanup: None,
+            });
+        if self.cancel.load(Ordering::Acquire) && completion.result.is_ok() {
+            completion.result = Err(failure());
+        }
+        Some(completion)
+    }
+}
+
+impl Drop for DiscoveryWorker {
+    fn drop(&mut self) {
+        self.cancel();
+        // Abnormal fallback only; normal shutdown cancels, polls and transfers
+        // the retained process into runtime cleanup rather than detaching it.
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
 
 pub(crate) struct ProfileObservation {
     selector: String,

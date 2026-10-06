@@ -145,6 +145,61 @@ impl ScopedEvidence {
 }
 
 impl AgentRuntime {
+    /// Internal registration only: the caller resolves the stored scope and
+    /// supplies concrete policy admission before creating this request.
+    #[allow(dead_code)]
+    pub(crate) fn begin_claude_discovery(
+        &mut self,
+        request_id: &str,
+        request: crate::provider_claude_session::discovery::DiscoveryRequest,
+        admit: impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess)
+            -> Result<(), SidecarError> + Send + 'static,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_claude_session::discovery::{DiscoveryWorker, PendingDiscovery};
+        if self.preparing_to_quit || request_id.is_empty() || request_id.len() > 256
+            || self.pending_claude_discoveries.contains_key(request_id)
+            || self.pending_discoveries.contains_key(request_id)
+            || active_run_limit_reached(self.owned_run_ids().len())
+        {
+            return Err(SidecarError::new("agentDiscoveryRejected", "Claude discovery unavailable"));
+        }
+        let worker = DiscoveryWorker::spawn(request, admit)?;
+        self.pending_claude_discoveries.insert(request_id.into(), PendingDiscovery { worker, completion: None });
+        Ok(())
+    }
+
+    pub(super) fn poll_claude_discoveries(&mut self) -> Result<Vec<G5Event>, SidecarError> {
+        let ids: Vec<_> = self.pending_claude_discoveries.keys().cloned().collect();
+        let mut failure = None;
+        for id in ids {
+            let pending = self.pending_claude_discoveries.get_mut(&id).unwrap();
+            if pending.completion.is_none() { pending.completion = pending.worker.poll(); }
+            let mut cleanup = pending.completion.as_mut().and_then(|done| done.cleanup.take());
+            if cleanup.is_some() {
+                if let Err(error) = self.retain_discovery_cleanup(&mut cleanup) {
+                    self.pending_claude_discoveries.get_mut(&id).unwrap()
+                        .completion.as_mut().unwrap().cleanup = cleanup;
+                    failure = Some(error);
+                }
+            }
+        }
+        match failure { Some(error) => Err(error), None => Ok(Vec::new()) }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_claude_discovery(
+        &mut self, request_id: &str,
+    ) -> Option<Result<crate::provider_claude_session::discovery::DiscoveryEvidence, SidecarError>> {
+        let pending = self.pending_claude_discoveries.get(request_id)?;
+        if pending.completion.as_ref()?.cleanup.is_some() { return None; }
+        let mut pending = self.pending_claude_discoveries.remove(request_id)?;
+        let result = pending.completion.take()?.result;
+        if self.preparing_to_quit {
+            return Some(Err(SidecarError::new("agentDiscoveryRejected", "Claude discovery canceled")));
+        }
+        Some(result)
+    }
+
     /// Start discovery is never served from a capability cache. Resolve the
     /// stored role and input before scheduling the same bounded query worker.
     pub(crate) fn begin_scoped_start(
@@ -262,6 +317,7 @@ impl AgentRuntime {
             || request_id.is_empty()
             || request_id.len() > 256
             || self.pending_discoveries.contains_key(request_id)
+            || self.pending_claude_discoveries.contains_key(request_id)
             || active_run_limit_reached(self.owned_run_ids().len())
         {
             return Err(failure());
