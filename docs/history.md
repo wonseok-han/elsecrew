@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (대화 표시의 페이지 상한 연결)
+
+- 기준8b286c8. G6 미완료 수집기를 대조하며 TeamTimeline이 모든 누적 메시지를 DOM으로 만드는 경로를 확인했다. 표시만 최대200개로 나누고 이전/다음/최신 이동·전체 개수·범위의 한영 안내를 추가했다. 저장/조회 메시지나 실행 원장은 줄이지 않는다. 최신 페이지에서 과거로 스크롤하면 시작 위치를 고정하고 새 메시지는 알림만 표시하며 명시 최신 이동 때 따라가기를 재개한다.
+- Karpathy 지침으로 기존 메시지 배열과 스크롤 상태에 한정했고 자동 실행/권한/원본 쓰기 경계는 변경하지 않았다. 페이지 이동만으로 새 메시지 알림을 켜지 않도록 마지막 관측 revision을 구분했다. TypeScript PASS, diff check 확인. 실제 긴 대화/스크롤·4 stream12,000 event 부하와 event→paint는 아직 미검증이며 이 변경을 G6 합격으로 표현하지 않는다.
+- 전체 performance 수집기는 여전히 미완료이며 예약 게이트를 임의로 열지 않았다. 다음은 긴 대화 UI 회귀와 누락 수집 경로, 나머지 제품/실제 공급자/G6/Windows 검증이다. 기존9월 archive 변경 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (최근 UI 파동 통합 통과·선택 카드 공간 정리)
 
 - 기준41dbefd. 편집기/Monaco/diff/채팅 상태82 PASS(3.20초), TypeScript·renderer build PASS. 실제 main/preload/native sidecar와 격리 합성 프로젝트에서 시작·설정 저장/재열기→편집·diff→원본 반영→renderer reload→복원→두 채팅 전환/상태 표시 PASS/exit0. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-8zRPm6/project.png 직접 확인. 실제 계정/유료 모델 호출 없음; 기존 Monaco chunk 경고와 meta frame-ancestors 경고는 남아 있다.
