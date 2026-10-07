@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (대화 결과에서 diff 검토 동선 연결)
+
+- 기준21912b6. 채팅의 반영 전 목록 영역에 작업 사본 diff 열기를 연결했다. 기존 selectPanel/refreshChanges를 사용해 숨은 변경 패널을 다시 표시하며 actionBlocked는 계속 지킨다. diff 조회와 실제 반영 대상 재확인·동의를 구분하는 한영 안내, 검토 불가 상태 안내와 영역 스타일을 추가했다.
+- Karpathy·React 지침에 따라 실행/반영/복원 API나 승인 계약은 변경하지 않았다. 실제 반영은 기존 목록 fingerprint·확인 만료·동의 단계가 담당하며 diff 버튼 클릭을 승인이나 검토 완료 증거로 저장하지 않는다.
+- 기존 native 편집→반영→복원 시나리오에 대화 영역→diff 이동을 추가했다. 실행은 다른 최근 UI 변경과 함께 후속 누적 검증 대상이고 이번에는 diff 검사만 통과했다. 실제 공급자 종단·메모리/G6·전체 시안/Windows는 미완료. 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (팀 대화 코드 블록 읽기·복사 연결)
 
 - 기준a4ba5bb. 팀 대화의 단일 plain paragraph를 MessageBody로 연결했다. backtick/tilde fence만 코드 영역으로 분리하고 언어 표시·가로 스크롤·키보드 focus·명시 복사 버튼·성공/실패 안내를 추가했다. 나머지 내용은 literal text이며 HTML/링크 실행, 파일 적용, 자동 명령 실행은 하지 않는다.

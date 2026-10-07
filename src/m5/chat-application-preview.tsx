@@ -4,12 +4,12 @@ import { ApplicationStartControl } from "./application-start-control.tsx";
 import { RestorationPreview } from "./restoration-preview.tsx";
 import { validateProjectCatalogResult, type ApplicationPreviewPage, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
-type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean };
+type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean; onReviewDiff?: () => void };
 export function ChatApplicationPreview(props: PreviewProps) {
   return <ChatApplicationPreviewSession key={JSON.stringify([props.projectId, props.chatId, props.worktreeId])} {...props} />;
 }
 
-function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled }: PreviewProps) {
+function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled, onReviewDiff }: PreviewProps) {
   const { t } = useI18n();
   const [preview, setPreview] = useState<ApplicationPreviewPage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,7 +84,10 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
     } catch { if (generation.current === epoch) setError(true); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <section aria-label={t("m5.application.chatPreview")} aria-busy={busy}>
+  return <section className="m5-chat-review" aria-label={t("m5.application.chatPreview")} aria-busy={busy}>
+    <header><h3>{t("m5.application.reviewTitle")}</h3>{onReviewDiff && <button type="button" className="m5-secondary" disabled={disabled || busy || started} onClick={onReviewDiff}>{t("m5.application.reviewDiff")}</button>}</header>
+    <p className="m5-review-help">{t("m5.application.reviewFlow")}</p>
+    {disabled && <p role="status" className="m5-review-help">{t("m5.application.reviewBlocked")}</p>}
     <button type="button" disabled={disabled || busy || started} onClick={() => void inspect()}>{t("m5.application.chatPreview")}</button>
     {error && <p role="status">{t("m5.application.previewError")}</p>}
     {preview && <>

@@ -114,7 +114,9 @@ app.on('browser-window-created', (_event, window) => {
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='저장').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&b.disabled)`);
       await wait(`document.querySelector('.m5-changes')?.textContent.includes('hello.txt') || document.body.innerText.includes('변경 (1)')`);
-      await showPanel('변경');
+      await showPanel('팀 대화');
+      await run(`Array.from(document.querySelectorAll('.m5-chat-review button')).find(b=>b.textContent==='작업 사본 diff 열기').click()`);
+      await wait(`Array.from(document.querySelectorAll('.m5-dock-group-tab')).some(b=>b.textContent.includes('변경')&&b.getAttribute('aria-selected')==='true') || Boolean(document.querySelector('.m5-changes')?.getBoundingClientRect().height)`);
       await run(`document.querySelector('.m5-change-row').click()`);
       await wait(`document.querySelector('.m5-diff-details')?.textContent.includes('edited in snapshot')`);
       await new Promise(r=>setTimeout(r,700));
