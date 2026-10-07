@@ -15,6 +15,10 @@ mod stale_helper;
 #[cfg(target_os = "macos")]
 mod runtime_files;
 #[cfg(target_os = "macos")]
+mod claude_runtime_files;
+#[cfg(target_os = "macos")]
+pub(crate) use claude_runtime_files::verify_claude_runtime_files;
+#[cfg(target_os = "macos")]
 pub(crate) use runtime_files::verify_codex_runtime_files;
 
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";

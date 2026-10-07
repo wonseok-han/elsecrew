@@ -599,7 +599,9 @@ impl<'a> LoginProcess<'a> {
         if self.failed || self.finished || self.cleanup_started.is_some()
             || self.io.is_none() || self.child.is_none() { return Err(unavailable()); }
         let home = self.claude_preflight_home()?;
-        self.claude_scope.as_ref().ok_or_else(unavailable)?.verify(workspace, &home, model, effort, access)
+        let pid = self.child.as_ref().ok_or_else(unavailable)?.id();
+        let owner = self.tracked_for_cleanup().into_iter().find(|identity| identity.pid == pid).ok_or_else(unavailable)?;
+        self.claude_scope.as_ref().ok_or_else(unavailable)?.verify(workspace, &home, model, effort, access, owner)
     }
 
     /// The trusted run owner can durably bind the already observed identities

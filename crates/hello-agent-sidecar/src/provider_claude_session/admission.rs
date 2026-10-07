@@ -44,6 +44,11 @@ impl Admission {
     }
 
     fn revalidate(&self) -> Result<(), SidecarError> {
+        verify_runtime_files(&self.home)?;
+        self.revalidate_bound_inputs()
+    }
+
+    fn revalidate_bound_inputs(&self) -> Result<(), SidecarError> {
         for (path, directory) in [&self.workspace, &self.home, &self.source]
             .into_iter()
             .zip(&self.directories)
@@ -52,7 +57,6 @@ impl Admission {
                 return Err(failure());
             }
         }
-        verify_runtime_files(&self.home)?;
         verify_runtime_files(&self.workspace)?;
         if requested_policy_digest(
             &self.model,
@@ -88,7 +92,9 @@ impl Admission {
     }
 
     pub(crate) fn process(&self, process: &mut LoginProcess<'_>) -> Result<(), SidecarError> {
-        self.revalidate()?;
+        // The live signed-parent scope checks profile files with its exact PID.
+        // Before launch, revalidate() remains strict and admits no sockets.
+        self.revalidate_bound_inputs()?;
         if process.claude_preflight_home()? != self.home
             || !process.matches_claude_scope(
                 &self.workspace,

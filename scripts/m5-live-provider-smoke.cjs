@@ -4,6 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 if (process.env.HELLO_AGENT_APPROVED_LIVE_SMOKE !== '1') throw new Error('Explicit live-run approval required');
+const selectedProvider = process.env.HELLO_AGENT_LIVE_PROVIDER;
+if (selectedProvider && !['codex', 'claude'].includes(selectedProvider)) throw new Error('Unknown live provider selection');
+const providers = selectedProvider ? [selectedProvider] : ['codex', 'claude'];
 const userData = process.env.HELLO_AGENT_LIVE_USER_DATA;
 if (!userData || !path.isAbsolute(userData) || !fs.statSync(userData).isDirectory()) throw new Error('Existing app userData required');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-live-'));
@@ -24,8 +27,8 @@ function finish(error) {
   const unchanged = execFileSync('/usr/bin/git', ['status','--porcelain'], {cwd:source,encoding:'utf8'}).trim() === '';
   const runsPassed = !error && unchanged && (catalogOnly
     ? outcomes.length===1 && outcomes[0].state==='catalogObserved'
-    : outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved));
-  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
+    : outcomes.length===providers.length && providers.every(p=>outcomes.some(o=>o.provider===p&&o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved)));
+  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', providers, outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
   persist();
   console.log(JSON.stringify({stage:'RUNS_FINISHED',root,outcomes,sourceUnchanged:unchanged,error}));
@@ -62,7 +65,7 @@ app.on('browser-window-created', (_event, window) => {
     try {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
       const connected = {};
-      for(const provider of ['codex','claude']) {
+      for(const provider of providers) {
         // The mounted login panel diagnoses and checks automatically. Let that
         // owner finish before issuing the runner's explicit request.
         await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['installed','diagnosing','starting','verifying'].includes(s.state))`);
@@ -112,6 +115,7 @@ app.on('browser-window-created', (_event, window) => {
         console.log(JSON.stringify({stage:'TEST_MODEL_SELECTED',provider:'codex',model:testModel,reasoningEffort:'medium',generatedProjectOnly:true}));
       }
       for(const [provider,roleId,runtime] of [['codex','planning','codex'],['claude','coding','claude-code']]) {
+        if (!providers.includes(provider)) continue;
         if(connected[provider].state!=='connected'){outcomes.push({provider,state:'loginBlocked'});continue;}
         try {
           const capability = await run(`window.m5.getAgentCapabilities({runtime:${JSON.stringify(runtime)},refresh:true,chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)}})`);

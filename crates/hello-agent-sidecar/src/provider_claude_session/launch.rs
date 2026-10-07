@@ -18,12 +18,13 @@ impl Scope {
         crate::provider_profile::verify_runtime_files(&self.home)
     }
 
-    pub(crate) fn verify(&self, workspace: &Path, home: &Path, model: &str, effort: Option<&str>, access: ToolAccess) -> Result<(), SidecarError> {
+    pub(crate) fn verify(&self, workspace: &Path, home: &Path, model: &str, effort: Option<&str>, access: ToolAccess, owner: hello_agent_core::proctree::ProcIdentity) -> Result<(), SidecarError> {
         if self.workspace != workspace || self.home != home || self.model != model
             || self.effort.as_deref() != effort || self.access != access {
             return Err(super::initialization_failure("launch scope identity"));
         }
-        self.revalidate()
+        self.executable.revalidate()?;
+        crate::provider_profile::verify_claude_runtime_files(&self.home, owner)
     }
 }
 

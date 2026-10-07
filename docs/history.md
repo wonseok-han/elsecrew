@@ -1,5 +1,24 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (두 항목 승인·Claude 소켓 범위 수정·Codex 준비 실패)
+
+- 사용자 '승인'을 Claude 앱 전용 내부 소켓 제한적 지원/독립 검토와 Codex 임시 프로젝트 실제 작업1회 재시험의 승인으로 확인했다. 기존 history/9월 archive를 보존했다. Karpathy 지침에 따라 workspace/공용 scanner를 풀지 않고 Claude live scope만 별도 검사한다. 실행 전 admission은 strict 유지, 실행 중 Child PID를 TreeTracker identity에서 찾아 socket 발견 시 scan 전후 PID/start_us·uid/nlink/mode·정확 tmp 경로/이름을 검증한다. 소켓 없는 정상 종료 뒤 buffered output은 막지 않는다. 커널 endpoint 소유권을 증명한다고 주장하지 않는다.
+- 상시 승인된 동일 검토자가 최종 socket_seen 처리까지 차단 결함 없음으로 승인했다. socket 회귀는 제한 환경 bind EPERM으로 실패한 뒤 제한 밖 임시 socket2개 PASS, admission 기존 경로2개 PASS. symlink/hardlink 원본 보존 포함 최종 socket 회귀2개 PASS. 실제 Claude 연결은 아직 미시험이며 live owner 전체 경로의 fixture 증거 보강은 남는다.
+- live smoke에 명시 단일 provider 옵션/결과 범위와 회귀를 추가했다(8/8 PASS). 승인된 Codex 시험 session34955는 로그인 connected였지만 모델 목록 조회의 provider settings 검증에서 실패했다. RUN_ACCEPTED/모델 목표 전달0회, 원본 불변, shutdown accepted/exit1. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-ehJEDm/result.json. 이전 thread timestamp 수정까지 도달하지 않았으므로 원인 해소 주장 불가. 추가 실제 호출은 하지 않았다.
+- 다음: Codex 목록 준비 실패의 고정 단계 진단으로 원인 식별(실제 작업1회 승인은 아직 접수 전), Claude live owner 통합 회귀·최신 빌드/실연결. 기존9월 archive는 커밋 제외하며 main/push 없음. 이전 승인 대기 차단은 해소됐고 앱 전체 완료는 아니다.
+
+### 2026-10-07 · by GPT-6 Astra (실제 연결 승인 차단 재확인)
+
+- 기준29b6cce와 최신 debug/main 빌드 시각을 확인했다. 직전 턴은 최신 macOS 패키징 완료로 진척했으며 진행 중이던 빌드·독립 검토는 모두 종료됐다. 대기 중 프로세스를 작업 진행으로 오인하지 않는다. 현재 dirty는 앞선 빌드 기록과 기존9월 archive뿐이다.
+- 실제 연결 마무리에 필요한 Claude 제한적 소켓 지원/독립 검토와 Codex 소규모 실제 재시험 승인 미응답이 최근 연속 goal 턴에서도 같은 차단 조건으로 남았다. 안전하게 가능한 정적 조사·호환 수정·관련 회귀·최신 빌드까지 마쳤다. 이 시점에서 같은 검사를 반복하거나 실제 실행 실패와 무관한 작은 개선을 계속 추가하지 않고 승인 대기로 분류한다. 제품 전체 완료를 뜻하지 않는다.
+- 다음 사용자 응답은 두 항목 모두 또는 항목별 승인이다. 승인 후 Claude의 앱 전용/추적 프로세스 소켓만 지원하고 실제 Codex1회 시험으로 기존 실패와 timestamp 수정의 관계를 확인한다. 원본·인증정보 보존, 강제 종료/추가 유료 실행/main 병합/push 별도 경계 유지. UI·성능·Windows/출시 검증 등 전체 잔여 범위는 축소하지 않는다.
+
+### 2026-10-07 · by GPT-6 Astra (최신 실행 산출물 갱신)
+
+- 기준29b6cce, 기존9월 archive만 dirty. 직전 턴은 thread 알림 timestamp 호환 수정·독립 검토·28개 회귀·커밋으로 진척했다. 이번 CARGO_BUILD_JOBS=4 cargo build -p hello-agent-sidecar --locked -j4는 debug 빌드 PASS. 제한 밖 pnpm run m5:package는 main/preload/renderer 및 release sidecar·macOS arm64 패키징까지 exit0/PASS다. 앞선 fetch failed는 이 재시도로 해소됐다.
+- 최신 종료 진단(a14707e)과 thread timestamp(29b6cce)가 개발 산출물에 반영됐다. 앱 실행/실제 모델 동작/로그인 지속/종료 경고 해결/출시 승인으로 확대 해석하지 않는다. 사용자 프로젝트·인증정보 변경, 설치, 강제 종료, 모델 호출은0회다.
+- 제품 성공 기준을 재대조했으며 실제 교차 공급자 실행·종료/복구와 UI 완성도·성능·Windows/출시 증거가 남는다. Claude 앱 전용 내부 소켓 제한적 지원 수정/독립 검토와 Codex 임시 프로젝트 실제 작업1회 재시험의 승인을 다시 간결하게 요청했다. 자동 goal continuation은 그 승인으로 취급하지 않는다. 현재 패키지 준비 완료, 다음 실제 연결 시험은 해당 승인 후 진행한다. main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (thread 생성 알림 timestamp 호환 수정)
 
 - 기준a14707e, 기존9월 archive 보존. 직전 턴은 진단 코드와 타입 오류 수정/커밋으로 진척했다. OpenAI Docs 지침으로 공식 https://learn.chatgpt.com/docs/app-server 를 조회하고 기존 CLI0.159.2 생성물 /private/tmp/hello-agent-codex-schema.ZWa0QJ/ServerNotification.json의 공통 emittedAtMs integer 필드를 대조했다. ThreadStartedNotification의 내부 thread 객체에는 원래 extra 필드를 허용하므로 'thread가 id만 있어야 한다'는 이전 가설은 정정한다. 실제 누락은 상위 envelope의 timestamp다.

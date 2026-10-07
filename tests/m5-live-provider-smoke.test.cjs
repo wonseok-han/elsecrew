@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../scripts/m5-live-provider-smoke.cjs'), 'utf8');
 
-function harness(catalogOnly = false, autoFinish = true, projectUi = false) {
+function harness(catalogOnly = false, autoFinish = true, projectUi = false, selectedProvider = undefined) {
   const events = new Map();
   const timers = new Map();
   const exits = [];
@@ -17,7 +17,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false) {
   };
   const context = vm.createContext({
     __dirname: path.resolve(__dirname, '../scripts'),
-    process: {platform:'darwin',env:{HELLO_AGENT_APPROVED_LIVE_SMOKE:'1',HELLO_AGENT_LIVE_USER_DATA:'/synthetic/userdata',HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY:catalogOnly?'1':'0'}},
+    process: {platform:'darwin',env:{HELLO_AGENT_APPROVED_LIVE_SMOKE:'1',HELLO_AGENT_LIVE_USER_DATA:'/synthetic/userdata',HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY:catalogOnly?'1':'0',HELLO_AGENT_LIVE_PROVIDER:selectedProvider}},
     console: {log() {}},
     setTimeout(callback, delay) { timers.set(delay, callback); return delay; },
     clearTimeout(id) { timers.delete(id); },
@@ -39,9 +39,18 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false) {
   if (projectUi) vm.runInContext('finish(null);', context);
   if (autoFinish && !projectUi) vm.runInContext(catalogOnly
     ? `outcomes.push({provider:'codex',state:'catalogObserved',models:[]});finish();`
-    : `outcomes.push(...['codex','claude'].map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
+    : `outcomes.push(...providers.map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
   return {events,timers,exits,evidence: () => evidence};
 }
+
+test('a single approved provider produces explicitly scoped evidence', () => {
+  const h = harness(false, true, false, 'codex');
+  h.events.get('will-quit')();
+  assert.equal(h.evidence().status, 'PASS');
+  assert.deepEqual(h.evidence().providers, ['codex']);
+  assert.deepEqual(h.evidence().outcomes.map(o => o.provider), ['codex']);
+  assert.throws(() => harness(false, false, false, 'unknown'), /Unknown live provider/);
+});
 
 test('project UI smoke also requires accepted shutdown before PASS', () => {
   const h = harness(false, true, true);

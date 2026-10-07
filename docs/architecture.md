@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> Claude 내부 소켓 호환(2026-10-08): 실행 전 profile 검사는 여전히 모든 소켓을 거절한다. 서명된 부모를 소유한 live scope에서만 `profile/tmp/srt-mux-<추적된 Child PID>-<base36>.sock` 직계 항목을 uid·single-link·group/other write 금지와 함께 검사한다. 소켓이 존재하면 scan 전후 정확한 PID/start_us 생존을 요구한다. 경로는 retained capability/no-follow로 확인하고 작업 복사본 검사는 변경하지 않는다. 소켓이 사라진 정상 종료 뒤에는 버퍼 출력 수신을 허용한다. 이는 커널 소켓 peer 소유권 증명이나 같은 UID의 적대적 교체 방어가 아니며 기존 signed-parent 신뢰 경계 안의 호환 처리다. 실제 Claude 모델 실행 성공은 아직 미검증이다.
+
 > 프로필 호환 검사 변경(2026-10-07, 독립 검토 완료·실연결은 후속): Codex/Claude 앱 전용 프로필의 top-level 생성물은 owner·mode·real-directory 또는 single-link regular-file로 검사하고 알려진 고정 설정/credential·기존 경로 타입·지시 파일 거절을 유지한다. Codex named-tool 경로는 별도 bounded no-follow scanner로 `tmp/arg0/codex-arg0*/`의 세 도구 alias가 현재 선택·재검증된 실행 파일을 정확히 가리킬 때만 링크를 허용한다. 일반 workspace/Claude/legacy outer scanner는 변경하지 않는다. 실계정 연결 복구는 아직 미검증이다.
 
 > 작업대 표시 수명(2026-10-07): 파일 트리는 페이지500개 중 최대120행만 렌더한다. diff는 페이지별 hunk 위치를 색인해 현재200행만 만들며 전체 탐색·잘못된 hunk의 원문 fallback을 유지한다. 대화는200개 표시와 이전/다음/최신 이동을 제공하고 과거 페이지를 읽을 때 새 이벤트가 화면을 이동시키지 않는다. 원장과 조회 기록을 잘라내는 정책은 아니다. Monaco는 마지막 동기화 문자열을 재사용하고 종료된 editor는 미완료 read를 끝내며 늦은 descriptor를 거절한다.
