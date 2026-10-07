@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (renderer 메모리 기준 초과 확인)
+
+- 기준6dcdff8. 직전 시간 진단은 진전이다. --diagnostic --memory의 최초2회는 입력 paint 대기에서 중단됐다. 두 번째에 visibility=visible/focused=false를 확인해 Electron 앱 활성화·편집기 focus 확인 후에만 char를1회 전송하고 그 직전부터 inputPaint를 측정하도록 runner를 정정했다. 제품 메모리/GC/보안 설정은 변경하지 않았다.
+- 최종10회+닫은 뒤60030ms 관측 완료: idle431MiB(기준400), peak948.125MiB(800), retained delta154.797MiB(120), FAIL/exit1. 시간 최대 tree65.4ms/expand20.3ms/file77.2ms/input30.4ms/diff79.2/24.4ms, DOM362는 기준 이내다. 증거 .artifacts/m5-performance/renderer-2026-10-07T06-06-52.681Z-85652.json. 이전 중단 run의 약944MiB peak도 실패 관측으로 보존한다.
+- 범위는 synthetic bridge+Electron 현재 process tree이며 실제 sidecar/agent는 포함하지 않는다. 마지막 renderer RSS 약256MiB와 전체 약586MiB가 남지만 이것만으로 누수 원인을 특정하지 않는다. 다음은 대기/반복 문서 수명/Monaco·renderer 잔류의 원인 분리 및 제품 최적화이며 기준 상향/강제GC로 합격시키지 않는다. Karpathy 지침으로 먼저 증거를 수집했다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (대형 renderer 진단 계측 복구·10회 수집)
 
 - 기준f56336b. 직전 가상화는 구현 진전이다. 기존 사용자 archive 변경을 보존하면서 계측할 명시 --diagnostic 모드를 추가했다. 이 모드는 전후 dirty 상태와 gateEligible=false를 기록하며 기준 이내도 NOT_READY/exit2, 실패는FAIL/1이다. 기본 clean-only 조건은 유지한다. 별도 임시 userData를 사용해 저장 배치/시험 상태가 실제 앱과 섞이지 않게 했다.

@@ -131,9 +131,20 @@ app.whenReady().then(async () => {
       globalThis.__performanceObserver = observer;
       return result;
     })()`);
+    app.focus({ steal: true }); window.show(); window.focus(); window.webContents.focus();
+    await window.webContents.executeJavaScript(`(async () => {
+      const input = document.querySelector('.monaco-editor textarea');
+      input?.focus();
+      const deadline = performance.now() + 1000;
+      while (!document.hasFocus() || document.activeElement !== input) {
+        if (performance.now() > deadline) throw new Error('benchmark input focus unavailable');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      globalThis.__performanceInputStart = performance.now();
+    })()`);
     window.webContents.sendInputEvent({ type: "char", keyCode: "Z" });
     Object.assign(sample, await window.webContents.executeJavaScript(`(async () => {
-      const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("benchmark view did not settle"); await new Promise(r => setTimeout(r, 5)); } };
+      const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("benchmark view did not settle: " + predicate.toString() + " / visibility=" + document.visibilityState + " / focused=" + document.hasFocus()); await new Promise(r => setTimeout(r, 5)); } };
       const paint = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       await wait(() => document.querySelector('[aria-label="저장되지 않은 변경"]') && document.querySelector('.view-line')?.textContent.includes('Z')); await paint();
       const inputPaintMs = performance.now() - globalThis.__performanceInputStart;
