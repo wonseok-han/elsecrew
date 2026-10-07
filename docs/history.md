@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (최신 macOS 패키지 빌드·시작 경계 검증)
+
+- 기준837c96e, 기존9월 archive만 dirty. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 electron-forge package를 실행해 최신 main/preload/renderer와 release Rust sidecar가 포함된 darwin-arm64 패키지를 생성했다. 빌드 exit0, Rust release 단계17.63초. 로그 /private/tmp/hello-agent-package-oct7.log.
+- node scripts/m5-electron-package-smoke.mjs PASS/exit0: ASAR 포함 자산/Monaco worker, sidecar ASAR 외부 배치, fuse 값과 포함 sidecar의 빈 임시 DB 시작·제품 capability/admission·정상 종료를 검증했다. Electron GUI 전체를 실행한 증거는 아니며 CSP framing/실제 계정·모델 성공을 대신하지 않는다.
+- 결과물 out/hello-agent-darwin-arm64는 du 할당량308M이며 정식 logical-byte/압축 크기 판정과 구분한다. /Applications 설치나 사용자 인증정보 변경·외부 배포는 하지 않았다. 실제 모델 종단·메모리/전체 G6·Windows·시안 전체 마감은 계속 남으며 기존 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (CSP 독립 검토 마감·개발 서버 회귀 추가)
 
 - 이전 턴의 검토자는 실제 running 상태였으며 이번에 terminal 결과를 수신했다. 지정 diff의 차단 결함 없음: 응답 body/status/headers 보존·기존 resource policy 유지 확인, 독립 main 회귀8 PASS, 임시 Vite dev 실제 HTTP 응답의 frame-ancestors 헤더 확인. Chromium framing enforcement E2E는 여전히 별도 미검증이다.
