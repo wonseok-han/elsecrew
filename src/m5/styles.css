@@ -172,6 +172,10 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-vertical .m5-dock-slot > .m5-panel, .m5-dock-vertical .m5-dock-slot > .m5-timeline { min-height: 0; }
 .m5-dock-vertical .m5-dock-separator { cursor: row-resize; }
 .m5-dock-visibility { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.m5-layout-settings { margin: 4px 0 8px; border: 1px solid #303b49; border-radius: 7px; padding: 7px 10px; background: #171d26; }
+.m5-layout-settings > summary { cursor: pointer; color: #aab4c1; font-size: 12px; }
+.m5-layout-settings > summary:focus-visible { outline: 2px solid #91c5ff; outline-offset: 3px; }
+.m5-layout-settings[open] > summary { margin-bottom: 8px; color: #e6edf3; }
 .m5-dock-visibility button { padding: 5px 10px; background: #202a37; color: #aab4c1; }
 .m5-dock-visibility button[aria-pressed="true"] { color: #e4f1ff; border-color: #91c5ff; }
 .m5-dock-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border-bottom: 1px solid #3b495b; }

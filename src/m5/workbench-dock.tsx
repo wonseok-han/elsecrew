@@ -26,6 +26,8 @@ export function WorkbenchDock({ children, conversation, reveal }: { children: Re
   const preset = (kind: "horizontal" | "vertical" | "tabs") => { resizing.current = null; setLayout(current => ({ ...current, tree: undefined, tabbed: kind === "tabs", direction: kind === "vertical" ? "vertical" : "horizontal" })); };
   const move = (source: DockPanel, target: DockPanel, placement: DockPlacement) => { resizing.current = null; setDrop(null); setLayout(current => placeDockPanel(current, source, target, placement)); };
   return <>
+    <details className="m5-layout-settings">
+    <summary>{t("m5.dock.settings")}</summary>
     <div className="m5-dock-help"><span>{t("m5.dock.help")}</span><button type="button" onClick={() => { resizing.current = null; setLayout(defaultDockLayout()); }}>{t("m5.dock.reset")}</button></div>
     <nav className="m5-dock-visibility" aria-label={t("m5.dock.visibility")}>
       <button type="button" aria-pressed={!layout.tree && !layout.tabbed && layout.direction !== "vertical"} onClick={() => preset("horizontal")}>{t("m5.dock.horizontal")}</button>
@@ -33,6 +35,7 @@ export function WorkbenchDock({ children, conversation, reveal }: { children: Re
       <button type="button" aria-pressed={!layout.tree && layout.tabbed === true} onClick={() => preset("tabs")}>{t("m5.dock.tabs")}</button>
       {available.map(id => <button key={id} type="button" aria-pressed={eligible.includes(id)} disabled={eligible.length === 1 && eligible.includes(id)} onClick={() => { resizing.current = null; setLayout(current => toggleDockPanel(current, id, available)); }}>{labels[id]}</button>)}
     </nav>
+    </details>
     <section ref={container} className="m5-panels m5-dock m5-dock-tree" aria-label={t("m5.dock.panels")} onDragEnd={() => setDrop(null)}>
       {/* Flat stable parents preserve Monaco and unsaved editor state during moves. */}
       {available.map(id => {

@@ -3,6 +3,18 @@ import test from "node:test";
 import { revealDockPanel } from "../src/m5/dock-layout.ts";
 import { activeDockTab, defaultDockLayout, dockGeometry, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockPanels, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockPlacement } from "../src/m5/dock-layout.ts";
 
+test("new workspaces start with three columns and a shared files/changes group", () => {
+  const initial = defaultDockLayout();
+  const geometry = dockGeometry(initial, PANEL_IDS);
+  assert.equal(geometry.groups.length, 3);
+  assert.deepEqual(geometry.groups[0].panels, ["files", "changes"]);
+  assert.equal(geometry.groups[0].active, "files");
+  assert.equal(dockGeometry(revealDockPanel(initial, "changes"), PANEL_IDS).groups[0].active, "changes");
+  const { tree: _tree, ...legacy } = initial;
+  assert.deepEqual(parseDockLayout(JSON.stringify(legacy)), legacy);
+  assert.equal(dockGeometry(legacy, PANEL_IDS).groups.length, 4);
+});
+
 test("nested split and tab groups preserve all panels and round-trip", () => {
   let layout = placeDockPanel(defaultDockLayout(), "changes", "files", "bottom");
   assert.ok(dockGeometry(layout, PANEL_IDS).separators.some(split => split.axis === "vertical"));
@@ -24,7 +36,7 @@ test("explicit navigation reveals a hidden panel and selects its existing tab wi
   assert.deepEqual(revealed.hidden, ["changes", "conversation"]);
   assert.equal(dockGeometry(revealed, PANEL_IDS).groups[0].active, "editor");
   assert.deepEqual(parseDockLayout(JSON.stringify(revealed)), revealed);
-  const legacy = revealDockPanel({ ...defaultDockLayout(), tabbed: true, activeTab: "files" }, "editor");
+  const legacy = revealDockPanel({ ...defaultDockLayout(), tree: undefined, tabbed: true, activeTab: "files" }, "editor");
   assert.equal(legacy.activeTab, "editor");
   assert.equal(legacy.tree, undefined);
 });

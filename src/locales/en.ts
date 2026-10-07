@@ -110,6 +110,7 @@ export const en: Record<MessageKey, string> = {
   "m5.dock.help": "Drag a title to an edge to split panels, or to the center to group them as tabs.",
   "m5.dock.reset": "Reset layout",
   "m5.dock.visibility": "Panel visibility",
+  "m5.dock.settings": "Workbench layout",
   "m5.dock.horizontal": "Horizontal layout",
   "m5.dock.vertical": "Vertical layout",
   "m5.dock.tabs": "Tabbed layout",

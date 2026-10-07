@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (작업대 배치 설정의 점진적 노출)
+
+- 기준868178a. 직전 편집기/높이 수정 뒤 기본 화면의 배치 도움말·초기화·프리셋·표시 버튼을 native details/summary의 작업대 배치 설정으로 묶었다. 키보드로 펼칠 수 있고 실제 panel mount/drag/resize/저장 구현은 유지한다. 한영 문구를 추가했다.
+- 새 기본 배치는 files/changes 탭 그룹, editor, conversation의3열이다. 기존 저장된 version1 평면/트리 배치는 덮어쓰지 않고 새 초기값 또는 명시적 기본 배치 복원에만 적용한다. 새 기본3그룹/변경 탭 reveal/기존4열 roundtrip 회귀를 추가하고 legacy tab 시험은 tree 없는 fixture로 명시했다. Karpathy 지침에 따라 기존 dock tree 모델을 재사용했다.
+- 사용자 구현 우선 지침에 따라 이번 변경마다 전체 빌드/UI/회귀를 반복하지 않았다. diff 검사만 확인했고 새 배치 회귀·실제 화면 검증은 화면 파동 마감에 묶어서 수행한다. 실제 계정 실행 승인 답변은 아직 없으며 임의 실행하지 않는다. 다음은 연결/설정 화면의 공간 정리와 UI 누적 검증, 실제 공급자 흐름 및 G6/Windows다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (복구 재진입 검토 마감·편집 화면 정리)
 
 - 기준 1fbd276. 직전은 macOS 원본 적용/복구·renderer 재진입 연결과 실제 합성 UI 검증의 진전이다. 기존 독립 검토자가 chatApplicationStatus의 durable chat binding 필터, exact 응답, unmount/late hydration 차단 및 별도 cleanup 비활성을 확인해 최종 차단 없음으로 종료했다. backend matching/mismatching binding 직접 회귀와 적용 상태 다른 chat none 확인은 권고 후속이며 이전 동일-chat reload PASS와 구분한다.

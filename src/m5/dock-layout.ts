@@ -4,7 +4,19 @@ export type DockNode = { type: "tabs"; panels: DockPanel[]; active: DockPanel } 
 export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
 export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
-  return { version: 1, order: [...PANEL_IDS], widths: { files: .17, editor: .36, changes: .21, conversation: .26 } };
+  return {
+    version: 1, order: [...PANEL_IDS],
+    widths: { files: .17, editor: .36, changes: .21, conversation: .26 },
+    tree: {
+      type: "split", axis: "horizontal", ratio: .22,
+      first: { type: "tabs", panels: ["files", "changes"], active: "files" },
+      second: {
+        type: "split", axis: "horizontal", ratio: .6,
+        first: { type: "tabs", panels: ["editor"], active: "editor" },
+        second: { type: "tabs", panels: ["conversation"], active: "conversation" },
+      },
+    },
+  };
 }
 export function parseDockLayout(raw: string | null): DockLayout {
   try {
