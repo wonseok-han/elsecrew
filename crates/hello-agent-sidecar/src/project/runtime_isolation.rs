@@ -15,25 +15,36 @@ fn scan(root: &Dir, depth: usize, remaining: &mut u64) -> Result<(), ProjectFail
             "runtime file scan exceeds depth budget",
         ));
     }
-    let failure = || {
-        ProjectFailure::recovery(
-            "runtime files must be unshared regular files and real directories",
-        )
-    };
-    for entry in root.entries().map_err(|_| failure())? {
-        let entry = entry.map_err(|_| failure())?;
+    for entry in root
+        .entries()
+        .map_err(|_| ProjectFailure::recovery("runtime directory listing failed"))?
+    {
+        let entry =
+            entry.map_err(|_| ProjectFailure::recovery("runtime directory entry unavailable"))?;
         *remaining = remaining
             .checked_sub(1)
             .ok_or_else(|| ProjectFailure::recovery("runtime file scan exceeds entry budget"))?;
         let name = entry.file_name();
-        let meta = root.symlink_metadata(&name).map_err(|_| failure())?;
+        let meta = root
+            .symlink_metadata(&name)
+            .map_err(|_| ProjectFailure::recovery("runtime entry metadata unavailable"))?;
         if meta.is_file() && meta.nlink() == 1 {
             continue;
         }
         if meta.is_dir() && !meta.file_type().is_symlink() {
-            scan(&open_real_os_child_dir(root, &name)?, depth + 1, remaining)?;
+            let child = open_real_os_child_dir(root, &name).map_err(|mut error| {
+                error.detail = "runtime directory capability unavailable".into();
+                error
+            })?;
+            scan(&child, depth + 1, remaining)?;
         } else {
-            return Err(failure());
+            return Err(ProjectFailure::recovery(if meta.file_type().is_symlink() {
+                "runtime symbolic link rejected"
+            } else if meta.is_file() {
+                "runtime shared regular file rejected"
+            } else {
+                "runtime special file rejected"
+            }));
         }
     }
     Ok(())
@@ -57,10 +68,16 @@ mod tests {
             verify(&root).unwrap();
             fs::remove_file(&target).unwrap();
             fs::hard_link(&outside, &target).unwrap();
-            assert!(verify(&root).is_err());
+            assert_eq!(
+                verify(&root).unwrap_err().detail,
+                "runtime shared regular file rejected"
+            );
             fs::remove_file(&target).unwrap();
             std::os::unix::fs::symlink(&outside, &target).unwrap();
-            assert!(verify(&root).is_err());
+            assert_eq!(
+                verify(&root).unwrap_err().detail,
+                "runtime symbolic link rejected"
+            );
             assert_eq!(fs::read(&outside).unwrap(), b"original");
         }
     }
@@ -74,5 +91,17 @@ mod tests {
         assert!(scan(&root, 129, &mut 10).is_err());
         std::os::unix::fs::symlink(temp.path(), temp.path().join("loop")).unwrap();
         assert!(verify(&root).is_err());
+    }
+
+    #[test]
+    fn runtime_scan_reports_special_files_without_exposing_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        let _socket =
+            std::os::unix::net::UnixListener::bind(temp.path().join("private-name")).unwrap();
+        assert_eq!(
+            verify(&root).unwrap_err().detail,
+            "runtime special file rejected"
+        );
     }
 }

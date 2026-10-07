@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실행본 갱신·Claude 특수 파일 거절 확정)
+
+- 직전 턴은 소스/산출물 불일치를 확인한 진척이다. Karpathy 지침에 따라 runtime scanner의 허용 조건·예산을 유지하면서 고정 실패 유형만 분리했다. profile 경계는 allowlist 문구만 전달하며 경로·파일명·인증 내용은 노출하지 않는다. 디렉터리 capability 실패의 기존 code/kind도 보존했다. 링크/공유 파일/소켓 진단 회귀를 추가했으며 실행은 누적 검증에 남긴다.
+- 직접 Vite main 명령은 Forge 전용 설정 누락으로 실패했다. 정상 Forge package 경로의 main/preload/renderer build는 PASS이며 .vite/build/main.cjs에 세션당 unavailable 알림 억제 반영을 확인했다. 패키지 생성은 fetch failed로 미완료. sidecar debug build PASS 후 승인된 실제 runner session60083은 종료 exit1/시험 FAIL, shutdown accepted를 기록했다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-zlMZTZ/result.json: 양쪽 로그인 connected, Codex selected model absent from catalog, Claude provider runtime special file rejected. 모델 목표0회·임시 원본 unchanged. Claude는 파일 소멸 추정보다 특수 파일 종류/용도 확인이 다음 근거이며 임의 허용하지 않는다. 정상 종료 뒤 늦은 login 요청은 prepared-to-quit로 거절됐고 종료 성공과 구분한다.
+- 다음: Claude 특수 파일의 메타데이터/수명·격리 조건 확인, 실제 지원 모델 목록과 프로젝트 역할 선택 연결. 전체 검증/제품 완료 아님. 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (반복 종료 경고 재확인)
+
+- 사용자 화면은 main.ts의 unavailable 종료 경고와 일치한다. HEAD a48c14a의 quit-coordinator에는 세션당 중복 알림 억제가 있지만, 현재 .vite/build/main.cjs의 handleBeforeQuit에는 억제가 없고 매 실패마다 알림을 호출한다. 소스 수정과 실행 산출물 반영을 구분해야 한다. 해당 화면을 만든 프로세스의 신원 자체는 확인되지 않았다.
+- 읽기 전용 ps 검사에서 알려진 live smoke/저장소 Electron/sidecar/Hello, Agent.app 패턴의 잔류 프로세스는 없었다. 강제 종료·재로그인·잠금 삭제·실제 모델 실행 없음. 다음 실행 전 최신 main 산출물 반영과 UI 확인이 필요하며, 알림 억제는 내부 서비스 단절 복구 완료를 뜻하지 않는다. 기존9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (초기 응답 독립 승인·실제 후속 실패 확정)
 
 - 기준ccec021, 기존9월 archive만 dirty. 직전 턴은 호환 수정/회귀/커밋의 진척이다. 같은 독립 검토자가 차단 결함 없음으로 마감했다. Codex 알림은 RPC 순서를 진행시키지 않으며 실제 config/account 응답 필수, Claude pending 목록은 비어야 한다. 검토자 자체 테스트/실계정 실행은 없었다.

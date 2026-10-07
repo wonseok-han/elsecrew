@@ -39,11 +39,24 @@ fn failure() -> SidecarError {
 /// alone is not plugin-disable authority or a same-UID race barrier.
 pub(crate) fn verify_runtime_files(home: &Path) -> Result<(), SidecarError> {
     let profile = open_absolute_directory(home)?;
-    crate::project::runtime_isolation::verify(&profile).map_err(|_| {
-        SidecarError::new(
-            "providerProfileUnavailable",
-            "provider runtime file isolation scan rejected profile contents",
-        )
+    crate::project::runtime_isolation::verify(&profile).map_err(|error| {
+        // Only fixed diagnostic categories cross this boundary, never paths,
+        // filenames, OS error strings, or provider/credential contents.
+        let detail = match error.detail.as_str() {
+            "runtime directory listing failed" => "provider runtime directory listing failed",
+            "runtime directory entry unavailable" => "provider runtime directory entry unavailable",
+            "runtime entry metadata unavailable" => "provider runtime entry metadata unavailable",
+            "runtime directory capability unavailable" => {
+                "provider runtime directory capability unavailable"
+            }
+            "runtime symbolic link rejected" => "provider runtime symbolic link rejected",
+            "runtime shared regular file rejected" => "provider runtime shared regular file rejected",
+            "runtime special file rejected" => "provider runtime special file rejected",
+            "runtime file scan exceeds depth budget" => "provider runtime scan exceeds depth budget",
+            "runtime file scan exceeds entry budget" => "provider runtime scan exceeds entry budget",
+            _ => "provider runtime file isolation scan rejected profile contents",
+        };
+        SidecarError::new("providerProfileUnavailable", detail)
     })
 }
 
