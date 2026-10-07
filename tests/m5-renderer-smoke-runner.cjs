@@ -36,11 +36,11 @@ app.whenReady().then(async () => {
     if (asset !== rendererDirectory && !asset.startsWith(`${rendererDirectory}${sep}`)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).toString());
   });
-  const window = new BrowserWindow({ show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
+  const window = new BrowserWindow({ width: 960, height: 640, show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
   window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
-  const result = await window.webContents.executeJavaScript(`(async () => {
+  const mountScript = `(async () => {
     delete globalThis.MonacoEnvironment;
     if (typeof globalThis.MonacoEnvironment !== "undefined" || Object.hasOwn(globalThis, "MonacoEnvironment")) {
       throw new Error("MonacoEnvironment should be created by the product renderer");
@@ -132,7 +132,7 @@ app.whenReady().then(async () => {
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");
-    document.querySelector('.m5-project-catalog > button').click();
+    // Saved projects are now a persistent rail, not a toolbar popover.
     await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
@@ -284,7 +284,12 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '가로 배치').click();
     await ${waitFor("!document.querySelector('[data-panel=editor]').hidden && !document.querySelector('[data-panel=files]').hidden && document.querySelectorAll('.m5-dock-separator').length === 2", "split restored")};
     return { workerCreated: true, dockVerified: true, text: document.body.textContent };
-  })()`);
+  })()`;
+  const result = await window.webContents.executeJavaScript(mountScript).catch(error => {
+    const line = /<anonymous>:(\d+):/.exec(error.stack || '')?.[1];
+    if (line) process.stderr.write(`Synthetic mount statement: ${mountScript.split('\n')[Number(line) - 1]}\n`);
+    throw error;
+  });
   if (!result.workerCreated || !result.text.includes("example.ts")) throw new Error("Monaco editor or local worker did not mount");
   if (!result.dockVerified) throw new Error("panel layout was not verified");
   // Keep the synthetic window hidden: foregrounding it captures the user's real
@@ -405,6 +410,19 @@ app.whenReady().then(async () => {
     if (input !== document.querySelector('#m5-followup-text') || input.value !== '설명을 추가해 주세요.') throw new Error('language change lost follow-up draft');
     if (goalInput !== document.querySelector('.m5-new-chat-form input') || goalInput.value !== '새 목표 초안' || goalInput.getAttribute('aria-label') !== 'New conversation goal') throw new Error('language change lost goal draft or label');
     if (selectedChat !== document.querySelector('.m5-chat-chip.selected')) throw new Error('language change changed selected chat');
+    // Layout-only fixture: exercise a long title at the product minimum window
+    // size without changing stored chat data or the selected conversation.
+    const goalLabel = selectedChat.querySelector('.m5-chat-goal');
+    const savedLabel = goalLabel.textContent;
+    try {
+      goalLabel.textContent = 'A very long project conversation title '.repeat(12);
+      const chip = selectedChat.getBoundingClientRect();
+      const goal = goalLabel.getBoundingClientRect();
+      const status = selectedChat.querySelector('.m5-chat-status, .m5-chat-update').getBoundingClientRect();
+      if (goal.width <= 0 || status.width <= 0 || goal.right > status.left + 1 || status.right > chip.right + 1) throw new Error('long chat title obscures status');
+      selectedChat.focus();
+      if (document.activeElement !== selectedChat) throw new Error('chat chip cannot receive keyboard focus');
+    } finally { goalLabel.textContent = savedLabel; }
     if (document.querySelector('.m5-files').getAttribute('aria-label') !== 'Files' || !document.querySelector('.m5-tree-pages').textContent.includes('First page')) throw new Error('file navigation not translated');
     if (JSON.stringify(previousMessages) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('language change translated user messages');
     document.querySelector('.m5-followup button').click();
@@ -458,7 +476,7 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-settings')", "role settings closed")};
     leave.click();
     await ${waitFor("!document.querySelector('#m5-followup-text') && document.querySelector('h1').textContent === '프로젝트를 선택해 시작하세요'", "project and chat view cleared")};
-    document.querySelector('.m5-project-catalog > button').click();
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "catalog reopened")};
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "saved project available again")};
