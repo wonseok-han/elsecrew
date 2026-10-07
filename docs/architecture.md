@@ -238,6 +238,8 @@
 
 - **프로젝트 화면 닫기**: toolbar의 나가기는 project.catalog releaseView로 해당 프로젝트의 standalone/workspace watcher만 해제한 뒤 renderer 선택을 비우고 영속 snapshot·채팅·후속 메시지 초안을 보존한다. 이는 manifest를 abandoned로 바꾸는 workspace.close/폐기와 다르다. 감시 해제 실패·dirty/저장·실행·채팅 전환·복구·snapshot 생성·열린 역할 설정창은 나가기를 막는다. 다시 프로젝트와 채팅을 선택해 기존 작업을 이어간다. 닫힌 화면으로 오는 이전 응답은 generation으로 무효화한다.
 
+- **프로젝트 역할 설정창**: 작업대의 역할·모델 버튼은 native modal dialog를 연다. 배경 작업대는 inert가 되며 기존 editor action 차단도 유지한다. Escape/돌아가기는 같은 미저장 확인을 거치고 처리 중에는 닫지 않는다. 저장 결과·오류/상세·admission 안내를 창 안에서도 표시한다. 닫은 뒤 진입 버튼으로 포커스를 돌린다. 설정 revision/프로젝트 결속과 기존 채팅의 역할 snapshot 정책은 바뀌지 않는다. 이 modal 전환의 실제 UI 회귀 검증은 아직 남아 있다.
+
 - **저장된 프로젝트 목록/재열기 계약**: `storage/catalog.rs`는 admission 이후 기존 projects table의 ID/경로만 keyset 페이지 조회한다. 50행·원시 UTF-8 합계 512KiB/경로 128KiB와 wire JSON 768KiB 상한이며 목록 조회는 파일 시스템 접근·활성화를 하지 않는다. `project.catalog` capability와 고정 `m5:project:catalog` IPC(`window.m5Projects.request`)의 list/reopen 요청은 양방향 검증한다. reopen은 renderer 경로가 아닌 저장 ID로 조회하고 ID hash·현재 canonical 경로·실제 Git root와 기존 recovery/active snapshot 경계를 검증한다. 작업대의 저장된 프로젝트 목록은 ID 순 페이지를 교체 표시하고 선택 시 기존 snapshot-before-tree 흐름을 사용한다. dirty/열린 채팅 및 조회 중 새 편집은 전환을 막는다. 목록 반환 자체는 파일 접근 권한이 아니다.
 
 - **탐색과 패널 표시**: 폴더 경로 버튼으로 상위 폴더에 돌아갈 수 있다. 명시 파일/변경 열기는 controller의 panel 요청으로 해당 도킹 패널을 표시하고 기존 그룹의 탭을 활성화한다. 일반 상태 갱신은 사용자 배치를 바꾸지 않으며 같은 파일 재선택도 새 표시 요청으로 처리한다. Monaco 부모와 분할 구조는 유지한다.
