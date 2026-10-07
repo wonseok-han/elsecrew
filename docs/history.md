@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (지원 모델 선택용 관측 기반 분리)
+
+- 기준415a155, 기존9월 archive만 dirty. 직전 턴은 실행본 갱신과 특수 파일 실패 원인 확보의 진척이다. Codex의 기존 model/list 검증을 read_model_catalog로 추출해 완전한 bounded 목록의 model/effort만 반환하도록 했다. hidden 항목은 출력하지 않지만 중복/형식 검증은 전체에 적용한다. 기존 match_model_catalog는 같은 parser와 exact 선택 검사를 사용하며 별칭/기본값 fallback을 추가하지 않았다.
+- PreflightExchange는 correlated model/list 응답에서 검증된 표시용 목록을 보관한다. 요청한 모델이 없으면 기존대로 Failed이고 thread/turn 권한을 얻지 못하나, 대안 표시에 사용할 값은 분리해 조회할 수 있다. 현재 core 기반만 연결됐으며 sidecar 정리 완료 후 전달·typed IPC·역할 설정 UI까지는 아직 미완료다. 이를 실제 모델 선택 기능 완료로 표현하지 않는다.
+- 표시용 목록의 비밀 metadata 제외/hidden 항목 검증과 선택 실패 뒤 thread/turn 금지 회귀를 추가했다. 사용자 지시대로 이번 구현 중 빌드·테스트를 반복하지 않았고 실행은 기능 연결 후 누적 검증에 남긴다. diff 검사 수행, 실제 계정 호출·원본 변경·main/push 없음. 다음은 종료 증거에 결속된 목록 전달과 프로젝트 역할 설정 연결이며 Claude 특수 파일 조사도 남는다.
+
 ### 2026-10-07 · by GPT-6 Astra (실행본 갱신·Claude 특수 파일 거절 확정)
 
 - 직전 턴은 소스/산출물 불일치를 확인한 진척이다. Karpathy 지침에 따라 runtime scanner의 허용 조건·예산을 유지하면서 고정 실패 유형만 분리했다. profile 경계는 allowlist 문구만 전달하며 경로·파일명·인증 내용은 노출하지 않는다. 디렉터리 capability 실패의 기존 code/kind도 보존했다. 링크/공유 파일/소켓 진단 회귀를 추가했으며 실행은 누적 검증에 남긴다.
@@ -244,7 +250,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **실계정 연결 재검증(2026-10-07)**: 두 provider의 앱 전용 로그인은 connected이나 실제 작업 준비는 실패한다. Codex 프로필 검증 및 Claude control 초기화 차단으로 목표 전달 전 중단됐다. login 성공을 실행 성공으로 취급하지 않는다. 승인된 소규모 모델 호출은 아직 발생하지 않았으며 임시 시험 원본은 불변이다. 두 번째 시험 창의 정상 종료도 미완료로 남는다(상단 실연결 워크로그).
+- **실계정 연결 재검증(2026-10-07, 415a155 시점)**: 두 provider의 앱 전용 로그인은 connected이나 실제 작업 준비는 실패한다. 최신 Codex는 선택 모델의 catalog 부재, Claude는 runtime 특수 파일 거절로 목표 전달 전에 중단된다. login 성공을 실행 성공으로 취급하지 않는다. 승인된 모델 목표는 아직0회이며 임시 원본은 불변이다. 최신 시험 session60083은 shutdown accepted/exit1(연결 FAIL)로 정상 종료했고 main 산출물에도 반복 unavailable 알림 억제가 반영됐다. 이전 초기화·잔류 창 기록은 당시 상태다.
 
 - **현재 M5 마감 상태(2026-10-07, 5209128 이후)**: macOS 합성 실제 UI에서 시작 안내/설정 저장·재열기/두 채팅·편집·diff/원본 반영·renderer reload·복원 PASS. 파일 목록은120행 가상화, 설정 modal/첫 목표/최신 대화 따라가기는 연결됐으나 전체 시안 마감과 실제 모델 종단 검증·Windows/G6/출시는 미완료다. 편집기 dispose는 미완료 stream을 끝내고 늦은 descriptor를 무시한다. 최신 synthetic 메모리 idle428/peak944MiB는 FAIL,60초 잔류delta51MiB는 기준 이내며 heap 감소만으로 누수 여부를 단정하지 않는다. 아래 과거 실측보다 이 최신 상태를 우선한다.
 

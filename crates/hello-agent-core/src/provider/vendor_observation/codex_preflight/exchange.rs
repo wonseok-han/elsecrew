@@ -44,6 +44,7 @@ pub struct PreflightExchange {
     account_note_seen: bool,
     named_cwd: Option<std::path::PathBuf>,
     configuration_failure: Option<&'static str>,
+    display_models: Option<Vec<super::CatalogModel>>,
 }
 
 fn invalid() -> ProviderError {
@@ -97,6 +98,7 @@ impl PreflightExchange {
             account_note_seen: false,
             named_cwd: None,
             configuration_failure: None,
+            display_models: None,
         })
     }
 
@@ -126,6 +128,13 @@ impl PreflightExchange {
 
     pub fn state(&self) -> PreflightState {
         self.state
+    }
+
+    /// Display-only alternatives from a validated complete model/list reply.
+    /// Available even when the selected model was rejected; does not advance
+    /// the exchange, change the selected tuple, or grant start authority.
+    pub fn display_models(&self) -> Option<&[super::CatalogModel]> {
+        self.display_models.as_deref()
     }
 
     pub fn diagnostic_stage(&self) -> &'static str {
@@ -485,6 +494,7 @@ impl PreflightExchange {
                 }
             }
             ObservationKind::Models => {
+                self.display_models = super::read_model_catalog(&observation).ok();
                 match_model_catalog(&observation, &profile).map_err(|error| {
                     self.configuration_failure = Some("model catalog schema or effort");
                     if let Ok(value) = observation.json() {
@@ -566,6 +576,26 @@ mod tests {
     fn thread_reply(result: &Value) -> BoundedObservation {
         BoundedObservation::new(serde_json::to_vec(&json!({"id":5,"result":result})).unwrap())
             .unwrap()
+    }
+
+    #[test]
+    fn rejected_selection_retains_display_choices_without_run_authority() {
+        let mut flow = exchange();
+        let mut values = results();
+        values[3]["data"][0]["model"] = json!("available-model");
+        assert!(flow.display_models().is_none());
+        for (index, value) in values.iter().take(3).enumerate() {
+            flow.next_frames().unwrap();
+            flow.accept(&reply(index, value)).unwrap();
+        }
+        flow.next_frames().unwrap();
+        assert!(flow.accept(&reply(3, &values[3])).is_err());
+        assert_eq!(flow.state(), PreflightState::Failed);
+        assert_eq!(flow.display_models().unwrap()[0].model, "available-model");
+        assert_eq!(flow.model, "test-model");
+        assert!(flow.next_frames().is_err());
+        assert!(flow.start_thread(std::path::Path::new("/managed/snapshot")).is_err());
+        assert!(flow.into_text_turn("must not send").is_err());
     }
 
     fn write_results() -> Vec<Value> {

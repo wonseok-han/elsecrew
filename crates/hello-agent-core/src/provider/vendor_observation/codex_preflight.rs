@@ -336,6 +336,29 @@ pub fn match_model_catalog(
     input: &BoundedObservation,
     profile: &ExpectedProfile<'_>,
 ) -> Result<(), ProviderError> {
+    validate_profile(profile)?;
+    let catalog = read_model_catalog(input)?;
+    if catalog.iter().any(|model| {
+        model.model == profile.model
+            && model.reasoning_efforts.iter().any(|effort| effort == profile.reasoning_effort)
+    }) {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
+}
+
+/// Display-only choices observed from a complete catalog. This is not a
+/// capability, entitlement, configuration proof, or permission to start a run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogModel {
+    pub model: String,
+    pub reasoning_efforts: Vec<String>,
+}
+
+/// Validate every entry, including hidden entries, before returning visible
+/// choices. Never exposes arbitrary vendor metadata or selects a default.
+pub fn read_model_catalog(input: &BoundedObservation) -> Result<Vec<CatalogModel>, ProviderError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Effort {
@@ -355,7 +378,6 @@ pub fn match_model_catalog(
         data: Vec<Model>,
         next_cursor: Option<String>,
     }
-    validate_profile(profile)?;
     // Missing cursor is not evidence of a complete catalog. Typed parsing below rejects duplicates.
     if input.json()?.get("nextCursor").is_none() {
         return Err(invalid());
@@ -366,7 +388,7 @@ pub fn match_model_catalog(
     }
     let mut ids = BTreeSet::new();
     let mut names = BTreeSet::new();
-    let mut found = false;
+    let mut visible = Vec::new();
     for model in response.data {
         if model.id.is_empty()
             || model.id.len() > 128
@@ -387,17 +409,14 @@ pub fn match_model_catalog(
                 return Err(invalid());
             }
         }
-        if model.model == profile.model
-            && !model.hidden
-            && efforts.contains(profile.reasoning_effort)
-        {
-            found = true;
+        if !model.hidden {
+            visible.push(CatalogModel {
+                model: model.model,
+                reasoning_efforts: efforts.into_iter().collect(),
+            });
         }
     }
-    if !found {
-        return Err(invalid());
-    }
-    Ok(())
+    Ok(visible)
 }
 
 #[cfg(test)]
@@ -515,6 +534,27 @@ mod tests {
     }
     fn catalog() -> Value {
         json!({"data":[{"id":"display-id","model":"test-model","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"PRIVATE"}]}],"nextCursor":null})
+    }
+
+    #[test]
+    fn display_catalog_is_sanitized_and_does_not_select_a_replacement() {
+        let choices = read_model_catalog(&input(&catalog())).unwrap();
+        assert_eq!(choices, vec![CatalogModel {
+            model: "test-model".into(), reasoning_efforts: vec!["medium".into()],
+        }]);
+        assert!(!format!("{choices:?}").contains("PRIVATE"));
+        let missing = ExpectedProfile { model: "obsolete-model", reasoning_effort: "medium" };
+        assert!(match_model_catalog(&input(&catalog()), &missing).is_err());
+
+        let mut hidden = catalog();
+        hidden["data"][0]["hidden"] = json!(true);
+        assert!(read_model_catalog(&input(&hidden)).unwrap().is_empty());
+        hidden["data"][0]["supportedReasoningEfforts"] = json!([
+            {"reasoningEffort":"medium"}, {"reasoningEffort":"medium"}
+        ]);
+        assert!(read_model_catalog(&input(&hidden)).is_err());
+        hidden["nextCursor"] = json!("more");
+        assert!(read_model_catalog(&input(&hidden)).is_err());
     }
 
     #[test]
