@@ -136,6 +136,19 @@ pub(crate) struct ControlInitialization {
     failed: bool,
 }
 
+/// Digest of what the app requests, not evidence of effective managed settings.
+pub(crate) fn requested_policy_digest(model: &str, effort: &str, access: ToolAccess,
+    home: &std::path::Path, workspace: &std::path::Path, source: &std::path::Path,
+) -> Result<String, SidecarError> {
+    use sha2::{Digest, Sha256};
+    let args = scoped_arguments(model, effort, access, home, workspace, source)?;
+    let args: Vec<_> = args.iter().map(|arg| arg.to_str().ok_or_else(failure)).collect::<Result<_, _>>()?;
+    let requested = serde_json::json!({"policy":"claude-request-v1","argv":args,
+        "profile":home,"workspace":workspace,"source":source,"environment":"claude-native-allowlist-v1"});
+    let bytes = serde_json::to_vec(&requested).map_err(|_| failure())?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
 /// Created only after the handshake on this connection. Not a tool-grant authority.
 pub(crate) struct SessionChannel {
     connection: uuid::Uuid,

@@ -44,6 +44,7 @@ pub(crate) struct RunReservation {
     // Set exactly once, only after the atomic thread-receipt/running commit.
     running_record: std::sync::OnceLock<(Value, Value)>,
     pub(super) native_provider: Option<super::discovery::NativeProviderContext>,
+    pub(super) claude_preflight: Option<hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight>,
 }
 
 /// No Storage borrow: the dispatcher can service other requests between steps.
@@ -878,6 +879,22 @@ impl RunReservation {
         projection.insert("native_thread_receipt".into(), evidence.clone());
         projection.insert("record".into(), running.clone());
         projection.insert("state".into(), json!("running"));
+        if let Some(preflight) = &self.claude_preflight {
+            use hello_agent_protocol::agent_adapter_v1::phased_claude::{SessionObservation, SESSION_OBSERVATIONS};
+            if projection.get("claude_preflight") != Some(&serde_json::to_value(preflight).map_err(|_| failure())?)
+                || projection["native_transport"]["adapter"] != "claude.stream.v2" { return Err(failure()); }
+            let session = SessionObservation {
+                schema_version:1, run_id:self.run_id.clone(),
+                connection_id:evidence["connectionId"].as_str().ok_or_else(failure)?.into(),
+                preflight_digest:preflight.digest().map_err(|_| failure())?,
+                workspace_identity:preflight.scope.workspace_identity.clone(),
+                resolved_model:preflight.resolved_model.clone(),
+                observed_session_verification:SESSION_OBSERVATIONS.iter().map(|value| (*value).into()).collect(),
+                observed_at:now(),
+            };
+            session.validate_against(preflight).map_err(|_| failure())?;
+            projection.insert("claude_session_observation".into(), serde_json::to_value(session).map_err(|_| failure())?);
+        }
         if let Some(provider) = &self.native_provider {
             let (manifest, discovery, attestation) = provider.attest(&running, cwd)?;
             projection.insert("native_provider_manifest".into(), manifest);
@@ -1319,6 +1336,7 @@ impl RunPreparation {
         Ok(RunReservation {
             running_record: std::sync::OnceLock::new(),
             native_provider: None,
+            claude_preflight: None,
             run_id,
             created,
             run,

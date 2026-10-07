@@ -2654,6 +2654,8 @@ fn preserve_provider_evidence(source: &Map<String, Value>, target: &mut Map<Stri
         "native_thread_receipt",
         "native_transport",
         "native_provider_manifest",
+        "claude_preflight",
+        "claude_session_observation",
         "approval_intents_internal",
     ] {
         if let Some(value) = source.get(field) {

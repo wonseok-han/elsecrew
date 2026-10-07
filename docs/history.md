@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (Claude 단계 기록의 실행·복구 연결)
+
+- 기준 925f26c. 직전 턴은 승인된 단계 계약 구현 진전이다. Claude fresh 예약에 실제 조회의 실행 파일/역할/credential/모델 및 고정 scoped argv·경로·환경 정책 버전으로 계산한 요청 정책 digest를 결속했다. launch 시 실행 파일/정책, 이후 owner 확인 시 저장된 역할/사본/정책을 재대조한다. 고정 바이너리 해시 허용 목록은 추가하지 않았다.
+- claude.stream.v2는 목표 전송 전에 preflight를 저장하고, 검증된 opaque init receipt에서 실제 resolved model을 확인한 뒤 세션 관측과 run/chat running을 같은 원자 기록으로 저장한다. 기존 G5C manifest를 허위로 채우지 않으며 v1과 분리했다. 종료/복구 projection 보존 목록에도 두 기록을 추가하고 누락·정책 변경·연결 불일치·v1 표식 혼용 거절 회귀를 작성했다.
+- Karpathy 지침으로 기존 예약/원자 원장/복구 validator를 재사용했다. 최근 연결분 cargo check -p hello-agent-sidecar --tests --locked PASS(9.66초, jobs/threads=4); 이후 추가 회귀는 실행 전이다. diff check 확인. 다음은 실제 caller/정책 callback·capability 의미/UI 연결과 파동 누적 검증이다. 제품 실행은 아직 비활성, 실제 계정/모델 및 main/push 없음, 기존 archive 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (보장 범위 승인·Claude 단계 계약 착수)
 
 - 사용자가 공식 CLI 보호를 신뢰하되 관측 불가능한 관리 설정까지 보장하지 않는 방향을 명시 승인했다. 목표 도구의 active 상태를 확인했고 기존 결정 대기는 해소됐다. §6.9에 보장/비보장, control 초기화→목표→system/init→도구 허용 순서를 확정 기록했다. 원본 보호·종료/복구·실제 계정 시험 및 main/push 승인 경계는 유지한다.

@@ -224,8 +224,12 @@ impl OwnedClaudeRun {
         let mut projection = actual_run_projection(storage, &self.reservation.run_id).map_err(|_| failure())?;
         if projection.contains_key("native_transport") { return Err(failure()); }
         projection.remove("last_event_sequence");
+        if let Some(preflight) = &self.reservation.claude_preflight {
+            preflight.validate().map_err(|_| failure())?;
+            projection.insert("claude_preflight".into(), serde_json::to_value(preflight).map_err(|_| failure())?);
+        }
         projection.insert("native_transport".into(), json!({"schemaVersion":1,
-            "adapter":"claude.stream.v1","connectionId":self.process.connection_id().to_string(),
+            "adapter":if self.reservation.claude_preflight.is_some() { "claude.stream.v2" } else { "claude.stream.v1" },"connectionId":self.process.connection_id().to_string(),
             "requiresProviderAttestation":self.reservation.native_provider.is_some()}));
         storage.upsert_projection_records_atomic(vec![ProjectionUpsert {
             aggregate_type:"run",aggregate_id:self.reservation.run_id.clone(),
@@ -377,6 +381,19 @@ impl RunReservation {
         };
         let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
         let workspace = manifest["worktreePath"].as_str().ok_or_else(failure)?;
+        if let Some(preflight) = &self.claude_preflight {
+            preflight.validate().map_err(|_| failure())?;
+            let home = process.claude_preflight_home()?;
+            let requested = crate::provider_claude_session::requested_policy_digest(
+                self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
+                self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?, access,
+                &home, Path::new(workspace), Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+            )?;
+            if requested != preflight.requested_launch_policy_digest || !preflight.credentials_present
+                || serde_json::to_value(&preflight.profile).map_err(|_| failure())? != self.run["selectedProfile"]
+                || preflight.scope.workspace_identity != self.run["workspaceIdentity"].as_str().ok_or_else(failure)?
+            { return Err(failure()); }
+        }
         if !process.matches_claude_scope(Path::new(workspace),
             self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
             self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?, access) { return Err(failure()); }
@@ -415,6 +432,12 @@ impl RunReservation {
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
         let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        if let Some(preflight) = &self.claude_preflight {
+            if executable.public_identity(&preflight.executable.cli_version)? != preflight.executable
+                || crate::provider_claude_session::requested_policy_digest(model, effort, access, &home, workspace, source)?
+                    != preflight.requested_launch_policy_digest
+            { return Err(failure()); }
+        }
         let command = ClaudeCommand::new(executable.revalidate()?, &home, workspace, source, model, effort, access)?;
         admit(workspace, &home, model, effort, access)?;
         if cancel.load(Ordering::Acquire) { return Err(failure()); }
@@ -503,6 +526,9 @@ impl RunReservation {
                         let Event::Initialized { ref receipt, .. } = event else { unreachable!() };
                         let (workspace, _) = self.verify_claude_launch(storage, projects, process)?;
                         if !channel.matches_init_receipt(receipt) { return Err(failure()); }
+                        if let Some(preflight) = &self.claude_preflight {
+                            if !receipt.matches(&workspace, &preflight.resolved_model) { return Err(failure()); }
+                        }
                         self.observe_process(storage, process)?;
                         // Retain the existing field name for both provider sessions.
                         // This digest identifies the session; it is not an executable allowlist.

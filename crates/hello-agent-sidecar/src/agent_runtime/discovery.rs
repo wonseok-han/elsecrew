@@ -257,8 +257,22 @@ impl AgentRuntime {
             Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
         ) { return Err(failure()); }
         observed.evidence.executable.revalidate()?;
+        let preflight = hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight {
+            schema_version:1, scope:observed.scope.clone(), profile:observed.profile.clone(),
+            executable:observed.evidence.executable.public_identity(&observed.evidence.version)?,
+            requested_launch_policy_digest:crate::provider_claude_session::requested_policy_digest(
+                &preparation.profile.model_selector,
+                preparation.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access, &home,
+                Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
+                Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+            )?,
+            resolved_model:observed.evidence.observation.resolved_model()?.into(),
+            credentials_present:observed.evidence.credentials_present, observed_at:now(),
+        };
+        preflight.validate().map_err(|_| failure())?;
         *reservation = Some(preparation.reserve(storage, projects, &capability, request_id)
             .map_err(|_| failure())?);
+        reservation.as_mut().ok_or_else(failure)?.claude_preflight = Some(preflight);
         Ok(())
     }
 
