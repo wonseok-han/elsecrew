@@ -14,14 +14,18 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', fs.realpathSync(userData));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 const outcomes = [];
+// Separate read-only probe: a catalog PASS must never imply a model-run PASS.
+const catalogOnly = process.env.HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY === '1';
 let finished = false;
 const timer = setTimeout(() => finish('timeout'), 240000);
 function finish(error) {
   if (finished) return;
   finished = true; clearTimeout(timer);
   const unchanged = execFileSync('/usr/bin/git', ['status','--porcelain'], {cwd:source,encoding:'utf8'}).trim() === '';
-  const runsPassed = !error && unchanged && outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved);
-  const result = {root, outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
+  const runsPassed = !error && unchanged && (catalogOnly
+    ? outcomes.length===1 && outcomes[0].state==='catalogObserved'
+    : outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved));
+  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
   persist();
   console.log(JSON.stringify({stage:'RUNS_FINISHED',root,outcomes,sourceUnchanged:unchanged,error}));
@@ -76,6 +80,11 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.m5-timeline h2')?.textContent.startsWith('Reply exactly')`);
       const projectId = await run(`(async()=>{let cursor=null;do{const p=await window.m5Projects.request({action:'list',cursor});const found=p.projects.find(p=>p.canonicalPath===${JSON.stringify(fs.realpathSync(source))});if(found)return found.projectId;cursor=p.nextCursor;}while(cursor);throw new Error('Generated project missing');})()`);
       const chatId = await run(`window.m5.listChats({projectId:${JSON.stringify(projectId)},cursor:null,limit:50}).then(p=>{if(p.items.length!==1)throw new Error('Unexpected generated chat count');return p.items[0].chatId;})`);
+      if (catalogOnly) {
+        const catalog = await run(`window.m5Models.request({runtime:'codex',refresh:true,chatId:${JSON.stringify(chatId)},roleId:'planning'})`);
+        outcomes.push({provider:'codex',state:'catalogObserved',models:catalog.models});
+        return finish();
+      }
       for(const [provider,roleId,runtime] of [['codex','planning','codex'],['claude','coding','claude-code']]) {
         if(connected[provider].state!=='connected'){outcomes.push({provider,state:'loginBlocked'});continue;}
         try {

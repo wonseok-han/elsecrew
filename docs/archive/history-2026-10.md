@@ -1,5 +1,255 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-07 · by GPT-6 Astra (Claude 내부 프록시 소켓 원인 확정)
+
+- 기준f1a135c, 기존9월 archive 보존. 직전 턴은 모델 조회 UI 연결의 진척이다. 승인된 임시 시험 session53973과 메타데이터 전용 관찰32375 모두 종료했다. 실행 중 profile/tmp/srt-mux-34486-0.sock(unix socket,uid501,mode755,nlink1)1개를 관측했고 종료 후 남지 않았다. 실제 결과 hello-agent-live-W2ZvZf/result.json은 양쪽 connected·목표0회·원본 unchanged·shutdown accepted/exit1(연결 FAIL). Codex 모델 부재·Claude special file rejected는 유지된다.
+- 공식 https://github.com/anthropics/sandbox-runtime/blob/main/src/sandbox/mux-proxy.ts 에 tmpdir의 srt-mux-PID-base36seq.sock 생성과 close시unlink, 내부 HTTP proxy 용도를 확인했다. Karpathy 지침에 따라 일반 scanner를 완화하지 않았다. 추적 중인 Claude parent와 전용 tmp에 결속한 제한적 소켓 예외는 사용자 승인 요청 상태이며 구현/활성화 전이다. 기존 독립 검토자는 모델 목록 경로를 계속 검토 중이다. 다음은 승인 범위의 소켓 호환 수정과 모델 목록 검토 반영. 인증내용 조회·파일 삭제·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (Codex 모델 조회·역할 설정 연결)
+
+- 기준79fc2a9, 기존9월 archive 보존. 직전 턴은 core 표시용 목록 분리의 진척이다. named inspection은 correlated catalog를 관측하고 exact owner의 confirmed closure·취소 없음·executable/helper 재검증·closed home 일치 후에만 표시 목록을 전달한다. worker 취소 시 목록을 제거하고 runtime은 durable 채팅/역할/workspace 스코프를 재검증해 단발 소비한다. 기존 실행 evidence/예약 경로는 이 목록을 사용하지 않는다.
+- agent.getModelChoices와 고정 m5Models IPC를 추가했다. native Codex+저장된 채팅 역할에서만 조회하며 TS 경계는 exact 필드·scope·model256/effort32·문자열 크기/중복을 검사한다. 역할 설정의 지원 모델 조회/명시 선택과 한영 문구를 연결했다. 저장은 기존 프로젝트 역할 API이고 기존 채팅 snapshot은 바꾸지 않는다. 채팅이 없으면 먼저 열도록 안내하며 Claude 모델 조회는 아직 지원하지 않는다.
+- 연결 진단의 Option closure/ES2020 Object.hasOwn/매크로 경로 컴파일 오류를 수정했다. 최종 tsc --noEmit·cargo check PASS, diff 검사 수행. contract 회귀를 추가했지만 테스트·실계정/UI 시험은 누적 검증에 남겼다. 기존 독립 검토자1명에게 전체 변경의 종료/취소/권한·스코프 검토 요청, 결과 대기. 새 모델 실행·main/push 없음. 다음은 검토 수정·실제 목록 선택 흐름 확인과 Claude 특수 파일 원인 수정이다.
+
+### 2026-10-07 · by GPT-6 Astra (지원 모델 선택용 관측 기반 분리)
+
+- 기준415a155, 기존9월 archive만 dirty. 직전 턴은 실행본 갱신과 특수 파일 실패 원인 확보의 진척이다. Codex의 기존 model/list 검증을 read_model_catalog로 추출해 완전한 bounded 목록의 model/effort만 반환하도록 했다. hidden 항목은 출력하지 않지만 중복/형식 검증은 전체에 적용한다. 기존 match_model_catalog는 같은 parser와 exact 선택 검사를 사용하며 별칭/기본값 fallback을 추가하지 않았다.
+- PreflightExchange는 correlated model/list 응답에서 검증된 표시용 목록을 보관한다. 요청한 모델이 없으면 기존대로 Failed이고 thread/turn 권한을 얻지 못하나, 대안 표시에 사용할 값은 분리해 조회할 수 있다. 현재 core 기반만 연결됐으며 sidecar 정리 완료 후 전달·typed IPC·역할 설정 UI까지는 아직 미완료다. 이를 실제 모델 선택 기능 완료로 표현하지 않는다.
+- 표시용 목록의 비밀 metadata 제외/hidden 항목 검증과 선택 실패 뒤 thread/turn 금지 회귀를 추가했다. 사용자 지시대로 이번 구현 중 빌드·테스트를 반복하지 않았고 실행은 기능 연결 후 누적 검증에 남긴다. diff 검사 수행, 실제 계정 호출·원본 변경·main/push 없음. 다음은 종료 증거에 결속된 목록 전달과 프로젝트 역할 설정 연결이며 Claude 특수 파일 조사도 남는다.
+
+### 2026-10-07 · by GPT-6 Astra (실행본 갱신·Claude 특수 파일 거절 확정)
+
+- 직전 턴은 소스/산출물 불일치를 확인한 진척이다. Karpathy 지침에 따라 runtime scanner의 허용 조건·예산을 유지하면서 고정 실패 유형만 분리했다. profile 경계는 allowlist 문구만 전달하며 경로·파일명·인증 내용은 노출하지 않는다. 디렉터리 capability 실패의 기존 code/kind도 보존했다. 링크/공유 파일/소켓 진단 회귀를 추가했으며 실행은 누적 검증에 남긴다.
+- 직접 Vite main 명령은 Forge 전용 설정 누락으로 실패했다. 정상 Forge package 경로의 main/preload/renderer build는 PASS이며 .vite/build/main.cjs에 세션당 unavailable 알림 억제 반영을 확인했다. 패키지 생성은 fetch failed로 미완료. sidecar debug build PASS 후 승인된 실제 runner session60083은 종료 exit1/시험 FAIL, shutdown accepted를 기록했다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-zlMZTZ/result.json: 양쪽 로그인 connected, Codex selected model absent from catalog, Claude provider runtime special file rejected. 모델 목표0회·임시 원본 unchanged. Claude는 파일 소멸 추정보다 특수 파일 종류/용도 확인이 다음 근거이며 임의 허용하지 않는다. 정상 종료 뒤 늦은 login 요청은 prepared-to-quit로 거절됐고 종료 성공과 구분한다.
+- 다음: Claude 특수 파일의 메타데이터/수명·격리 조건 확인, 실제 지원 모델 목록과 프로젝트 역할 선택 연결. 전체 검증/제품 완료 아님. 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (반복 종료 경고 재확인)
+
+- 사용자 화면은 main.ts의 unavailable 종료 경고와 일치한다. HEAD a48c14a의 quit-coordinator에는 세션당 중복 알림 억제가 있지만, 현재 .vite/build/main.cjs의 handleBeforeQuit에는 억제가 없고 매 실패마다 알림을 호출한다. 소스 수정과 실행 산출물 반영을 구분해야 한다. 해당 화면을 만든 프로세스의 신원 자체는 확인되지 않았다.
+- 읽기 전용 ps 검사에서 알려진 live smoke/저장소 Electron/sidecar/Hello, Agent.app 패턴의 잔류 프로세스는 없었다. 강제 종료·재로그인·잠금 삭제·실제 모델 실행 없음. 다음 실행 전 최신 main 산출물 반영과 UI 확인이 필요하며, 알림 억제는 내부 서비스 단절 복구 완료를 뜻하지 않는다. 기존9월 archive 변경 보존.
+
+### 2026-10-07 · by GPT-6 Astra (초기 응답 독립 승인·실제 후속 실패 확정)
+
+- 기준ccec021, 기존9월 archive만 dirty. 직전 턴은 호환 수정/회귀/커밋의 진척이다. 같은 독립 검토자가 차단 결함 없음으로 마감했다. Codex 알림은 RPC 순서를 진행시키지 않으며 실제 config/account 응답 필수, Claude pending 목록은 비어야 한다. 검토자 자체 테스트/실계정 실행은 없었다.
+- 승인된 runner session8282 결과는 Codex가 model/list까지 진행했고 Claude도 이전 envelope 오류를 벗어났지만 후속 실패가 남았다. 추가 고정 진단으로 model catalog에 요청 model 부재와 Claude scope owner/identity/profile 재검증을 분리했다. 기존 bool scope 호출은 동일 Result의 is_ok이며 허용 조건은 그대로다. debug build PASS.
+- session18931의 실제 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-Xz9ivC/result.json: Codex selected model absent from catalog, Claude provider runtime file isolation scan rejected profile contents. chat.rs 기본 역할 FIXTURE_PROFILES의 sol과 actual catalog 불일치를 확인했다. 임의 모델 fallback은 금지하며 제안서의 지원 목록 제시/사용자 선택 흐름을 연결해야 한다.
+- Claude profile의 종료 후 메타데이터 검사에는 symlink/공유 regular file이 없었다. 실행 중 일시 생성물/교체 가능성은 아직 추정이며 파일 내용을 읽거나 삭제하지 않았다. 두 runner 모두 양쪽 로그인 connected·모델 목표0회·원본 unchanged·shutdown accepted/exit1(연결 FAIL)로 정상 종료했다. 초기 handshake/종료 경로 개선과 전체 실연결 완료를 구분한다.
+- 다음: actual 모델 선택 목록/기본 fixture 모델과 제품 모델 분리, Claude runtime scan의 구체 거절 유형 확인·수정. 이번 턴 전체 회귀 재실행 없음, diff 검사 수행. 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (공급자 초기 응답 순서·형식 호환 수정)
+
+- 기준bdd5011. 직전 정상 종료 실측은 진척이며 기존 미커밋 진단/기록과9월 archive를 보존했다. Karpathy 지침으로 응답 원문 대신 고정 단계명만 남기도록 Codex layer/RPC/notification, Claude envelope/catalog 진단을 분리했다. 첫 build의 match 구분자 오타는 수정했고 debug build PASS다.
+- 첫 runner는 renderer의 자동 diagnose/check와 직접 check가 충돌해 invalidRequest가 났다. session67922의 시험 PID58846은 승인 범위에서 TERM 후 KILL로 정리했다. runner는 installed/diagnosing/starting/verifying 동안 기다린 뒤 check하도록 수정했다. 이어 session99178·99966은 양쪽 로그인 connected, 모델 전달0회, 원본 unchanged, shutdown accepted/exit1로 종료했다.
+- 최신 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-8Vww3Z/result.json: Codex config/read 대기 중 account/updated 알림 거절, Claude control response의 result 필드 구성 거절로 분리됐다. Codex 알림을 초기화 이후 pending RPC 중1회 수용하되 순서 진행/인증 근거로 삼지 않고 실제 config/account/requirements 응답을 모두 요구하도록 수정했다. 알림2회/잘못된 모드·필드·timestamp는 계속 거절한다. 관련 회귀2 PASS.
+- Claude 공식 배포 SDK0.3.220 ControlResponse의 optional pending_permission_requests/pending_user_dialog_requests 배열을 지원했다. 생략/빈 배열만 허용하며 null/대기 요청/unknown 필드는 거절한다. 근거 https://app.unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.220/files/sdk.d.ts (ControlResponse); Python 공식 types도 비교했으나 최신 두 필드는 TS 배포 타입 기준이다. 이 필드가 실제 실패의 원인인지 재시험은 아직 안 했다. Claude 회귀6 PASS, 기존 named layers 거절 회귀1 PASS, diff 검사 PASS.
+- 같은 독립 검토자1명에게 순서·형식 변경 검토를 요청했다. 응답 검증을 일반적으로 완화하지 않았고 새 실제 모델 작업 허용·main/push 없음. 검토 후 승인된 한도 내 실제 연결 재시험, 나머지 G6/UI/Windows 마감은 계속 남는다.
+
+### 2026-10-07 · by GPT-6 Astra (중복 정리 수정 독립 검토·실제 정상 종료 확인)
+
+- 기준bdd5011과 기존9월 archive만 dirty 상태를 확인했다. 직전 턴은 중복 정리/반복 알림 구현의 진척이다. 동일 독립 검토자가 차단 결함 없음으로 마감했다. confirmed closure 소비는 run fence/uncertain owner를 해제하지 않으며 unavailable 알림 억제는 종료 권한을 넓히지 않는다고 확인했다. 권고대로 drop(process.take()) 의도를 명시했다. Completion 오류→idle poll 통합 회귀는 후속 보강 사항이다.
+- debug build PASS 후 승인된 임시 프로젝트 runner session16853을 실행했다. 양쪽 login.check connected; Claude 복구 요청 자체는 실패했으나 뒤의 로그인 확인은 성공했으므로 이번 recover 성공으로 표현하지 않는다. Codex config/read 검증 거절·Claude response validation 거절은 남았지만 sidecar exit70은 재발하지 않았고 shutdown=accepted, 프로세스 exit1(연결 시험 FAIL)로 정상 종료했다. ps에서 시험 앱/sidecar 잔류 없음. 모델 목표 전달0회, 원본 unchanged.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-iQEEcO/result.json. 이 결과는 실패 정리/정상 종료 경로의 실측 증거이며 실제 모델 작업 성공이 아니다. runner에 서비스 종료 시 기존 system status의 알려진 고정 원인만 분류하는 진단을 추가했고 raw stderr는 내보내지 않는다(이번에는 서비스 종료 없어 분류 미실행). 새 main의 알림 UI 재검증은 별도다.
+- 다음은 Codex config/read 세부 불일치와 Claude 첫 수신 frame/응답 스키마 분리다. 공급자 응답과 설정 내용 검증을 임의 완화하지 않는다. main/push 없음, 기존9월 archive 보존.
+
+### 2026-10-07 · by GPT-6 Astra (중복 정리 오류·반복 종료 알림 수정)
+
+- 기준0503fb4. 직전 턴은 잔류 프로세스 없음과 반복 경고 원인을 확인한 진척이다. unavailable 종료 경고를 같은 세션에서 성공 표시한 뒤 반복 표시하지 않도록 수정했다. 매 종료 요청의 prepareQuit 재확인·실패 시 종료 차단은 유지하고 recoveryRequired 경고는 숨기지 않는다.
+- Claude discovery는 검증 결과 실패와 process.finish 성공이 함께 가능하지만 이미 confirmed closure인 owner도 정리 큐에 넣어 poll_finish를 다시 호출했다. 이 호출은 의도대로 실패하고 idle runtime poll의 오류가 sidecar 종료로 전파될 수 있다. retain_discovery_cleanup에서 기존 run fence/중복 거절을 유지하고 confirmed receipt만 소비하도록 수정했다. 종료 불확실 owner는 그대로 보존/실패하며 일반 오류를 삼키지 않는다. 실제 직전 exit70과 동일 원인인지는 아직 재시험 전이다.
+- focused Rust 회귀1 PASS(open/confirmed/uncertain), 종료 알림 회귀1 PASS, diff 검사 PASS. 상시 승인된 동일 읽기 전용 검토자1명에게 두 변경의 안전 경계 검토를 요청했다. Karpathy 지침에 따라 cleanup의 일괄 완화 없이 확정 종료 증거만 재사용한다. 실계정 재시험·전체 검증은 아직 미완료, Codex config/read 불일치도 남는다. 기존9월 archive 보존, main/push 없음.
+- runFence 보호 회귀도 추가했다. 첫 fixture의 I/O 미생성 owner에 대한 API 선택 오류는 retain_fence_before_launch로 수정했고 최신4경로 회귀 PASS(0.68초). debug build PASS. 검토자는 현재 running이며 결과 대기 상태로 구현 체크포인트를 남긴다. 독립 합격·실제 연결 복구 완료로 표현하지 않는다.
+
+### 2026-10-07 · by GPT-6 Astra (반복 종료 경고 사용자 보고)
+
+- 사용자가 보낸 화면은 notifyQuitBlocked의 unavailable 경고와 일치한다. 직전 실연결 시험에서 sidecar exit70 후 종료 확인이 실패한 경로이며 로그인 실패 메시지가 아니다. 종료 재시도마다 경고가 다시 표시될 수 있다.
+- 시험 앱 정리 뒤 ps로 live smoke·Electron 시험 앱·sidecar 잔류 없음 재확인. 사용자에게 추가 로그인/재부팅을 요구하지 않는다. 다음은 내부 서비스 종료 원인과 반복 경고 UX 수정이며 현재 제품 해결 완료 아님. 코드 변경 없음, 기존9월 archive 보존.
+
+### 2026-10-07 · by GPT-6 Astra (승인된 시험 앱 종료·Claude 정상 잠금 복구)
+
+- 사용자 승인 범위의 임시 시험 앱 PID9578을 TERM 후 KILL로 종료했다. Codex RPC 실패 위치를 공급자 원문 없이 고정 단계명으로 표시하고 회귀를 보강했다. Karpathy 지침에 따라 허용 조건·인증정보·사용자 원본은 변경하지 않았다. focused core1 PASS, sidecar debug build PASS, runner 회귀2 PASS, diff 검사 PASS. rustfmt --check는 기존 sidecar 파일/하위 모듈 포맷 차이를 보고했으며 관련 없는 대량 재포맷은 하지 않았다.
+- runner에 명시 opt-in Claude recover 호출을 추가했다. 첫 호출은 필수 attemptId 누락으로 거절돼 보완했고, 해당 시험 앱 PID28303도 승인 범위에서 종료했다. 후속 정상 recover는 idle/error=null로 성공했으며 Codex와 Claude 모두 login.check connected였다. 잠금 파일을 임의 삭제하지 않았고 재로그인하지 않았다.
+- 최신 임시 시험 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-QwEFlZ/result.json. Codex는 config/read 관측 검증에서 차단, Claude 준비 중 sidecar exit70으로 실패했다. 모델 start/목표 전달0회, 임시 원본 unchanged. 로그인 복구와 실제 작업 성공은 별개다. 다음은 config/read 불일치와 sidecar 종료 원인 수정이며 전체 완료 아님. 기존9월 archive 보존, main/push 없음.
+- 마지막 잔류 시험 앱 PID30313도 TERM 후 KILL로 정리했다. 정상 종료 성공으로 판정하지 않으며 실패 증거와 인증 상태를 보존한다.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 독립 검토 통과·실연결 후속 차단)
+
+- 8bccd16의 호환성 patch는 동일 독립 검토자의 재검토에서 남은 차단 결함 없음으로 마감했다(검토자 자체 실계정/테스트 재실행 없음). main/preload/renderer·release package build와 package smoke PASS. 기존 프로필 생성물 거절 수정과 전체 실연결 성공은 구분한다.
+- 승인된 모델 각1회 한도 내 실제 runner session41315를 실행했다. Codex login connected 뒤 기존 runtime file isolation 오류를 넘어 provider settings could not be verified에서 차단됐다. Claude는 이전 실패의 providerLoginRecoveryRequired로 차단된다. startAgentRun/목표 전달은 아직0회, 임시 원본 clean. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-HpNO8c/result.json.
+- 종료15초 내 승인 미관측으로 새 runner가 shutdown=notConfirmed/FAIL을 정확히 기록했다. session41315는 아직 live이고 native UI에서도 시험 창이 남아 있음을 확인했다. 이번 새 시험 앱을 강제 종료하거나 복구 fence를 삭제하지 않았다. 다음은 이 handle의 실제 상태·정상 복구 경로와 Codex 설정 관측 실패 분기를 확인하는 것이다. 제품 완료 아님, 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (승인된 프로필 호환성 수정 구현)
+
+- 사용자 명시 승인으로 직전 프로필 계약 변경 대기를 해소했다. 기준c2c3513, 기존 검토/대기 기록과9월 archive 변경을 보존한다. vendor 생성물은 이름 목록 대신 owner/mode/real-directory·single-link regular-file로 검사하되 고정 config/credential·기존 경로 타입·지시 파일 거절을 유지하도록 Codex/Claude profile을 수정했다. 결정은 제안서§6.9와 현행 구조에 별도 기록한다.
+- Codex 전용 bounded no-follow scanner를 추가해 현재 선택·재검증된 executable에 결속된 tmp/arg0 helper3종 링크와 regular .lock만 예외로 둔다. signature 검증 호출 경로, named launch/release/approval 재확인에 연결하고 일반 workspace·Claude·legacy outer 경로는 그대로 유지한다. macOS symlink mode0777 자체는 의미 있는 쓰기 권한 검사가 아니므로 owner/target/위치로 검사한다. 생성물/인증을 삭제하거나 실제 provider를 실행하지 않았다.
+- 첫 회귀의 기존 경로 타입2건 실패는 타입 제약 복원으로 수정했다. profile 회귀15 PASS/4실계정 ignored. 추가 executable replacement 회귀의 초기 fixture 실행 bit 누락은700으로 바로잡아 재실행 중이다. Karpathy 지침으로 공통 scanner를 완화하지 않고 scoped 변경에 한정했다. 동일 독립 검토자에게 승인 범위와 현재 patch 재검토를 요청했고 결과 대기다. 실제 모델 시험은 독립 검토 뒤 이어가며 제품 완료/연결 성공을 주장하지 않는다.
+- 후속 결과: executable 교체 회귀 PASS, 독립 검토의 case-insensitive instruction alias 거절 누락을 수정하고 Codex/Claude 양쪽 회귀를 추가했다. 정상 .lock·dangling codex-execve-wrapper 및 동일 내용/권한의 inode 교체 검사를 보강했다. 최신 profile suite17 PASS/4실계정 ignored(3.62초), 동일 검토자 재검토 대기다. known-type·credential 이름도 ASCII-fold해 case alias를 같은 경계로 다루며 signature/프로필 신원 검사는 유지한다.
+- 최신 main/preload/renderer build는 통과했다. 최초 Forge package는 sandbox fetch failed로 실패했으나 허용된 네트워크 재시도에서 darwin-arm64 package PASS(release Rust14.70초), 최신 debug bin build PASS(2.53초)다. 잔류 live smoke process 없음도 확인했다. 독립 재검토와 실연결 성공은 별도이며 이번 commit은 구현 체크포인트다.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 계약 승인 대기·자동 반복 중단)
+
+- HEAD c2c3513과 미커밋 검토 기록/기존9월 archive를 재확인했다. 직전 턴은 시험 종료 판정 수정의 진척이었으나 프로필 admission 계약 승인은 없는 상태다. 동일 승인 경계가 최초 확인 요청부터3개 연속 goal turn에 유지됐다. 실행 전 실패 재현·원인 분리·독립 검토·종료 안내·시험 판정 보완을 마쳤고, 재시험 반복이나 무관한 수정으로 실제 연결 마감을 대체하지 않는다.
+- 다음 실제 연결 수정은 정상 vendor 생성물의 구조 기반 허용과 selected signed Codex 실행 파일에 결속된 helper 링크 예외라는 계약 변경 방향을 사용자가 확인해야 한다. 승인 전 일반 scanner·프로필 허용 조건·실행 권한을 변경하지 않는다. 전체 완료가 아니며 goal은 승인 대기 blocked로 전환 요청한다. 새 모델 호출·파일 삭제·main 병합·push 없음. 작업 기억은 미커밋으로 보존한다.
+
+### 2026-10-07 · by GPT-6 Astra (실연결 시험 종료 판정 보완)
+
+- 기준10bf79e, 직전 프로필 계약 검토 기록과 기존9월 archive를 보존했다. 자동 목표 계속 메시지는 프로필 admission 변경 승인으로 간주하지 않았다. 해당 변경은 사용자 확인 대기이며 진행 중인 동일 검토자를 중복 호출하지 않았다.
+- 실연결 runner가 app.quit 전에 PASS/FAIL을 출력하던 문제를 고쳤다. 작업 결과는 RUNS_FINISHED와 PENDING으로 먼저 보존하고 정상 will-quit가 관측돼야 shutdown=accepted와 최종 판정을 기록한다.15초 내 미관측은 notConfirmed/FAIL로 남기며 강제 종료하지 않는다. OS 프로세스 소멸 증거와 앱의 종료 승인 관측은 구분한다.
+- Karpathy 지침으로 제품 종료 권한이나 프로필 허용 조건을 바꾸지 않고 시험 판정만 수정했다. 전체 runner를 mock Electron/메모리 filesystem에서 실행하는 회귀2 PASS(종료 전 PASS 금지·종료 차단 시 강제 exit0 금지), 문법/diff 검사 통과. 실제 모델·인증·프로젝트 호출 없음. 연결 결함과 전체 제품 완료는 여전히 미완료이며 main/push 없음.
+- 이후 동일 검토자의 최종 결과를 수신했다. 현재 failure-stage 변경에 차단 결함은 없으며, 권고 범위는 Claude 관측4항목의 엄격한 mode/type 검사와 Codex selected executable 결속 예외까지다. 임의 vendor 파일명의 일반 구조 기반 허용을 검토자가 승인한 것은 아니다. 사용자 방향 확정 후 구체 패치에 대해 별도 동일 검토자의 재검토가 필요하다.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 호환 계약 검토·승인 경계)
+
+- 기준10bf79e, 기존9월 archive만 dirty. 직전 턴은 종료 안내 구현과 재현 증거 확보의 진척이다. 같은 읽기 전용 검토자 provider_profile_compat_review의 중간 결과를 수신했다. 일반 workspace/runtime scanner의 링크 거절을 완화하거나 생성물을 지우는 수정은 금지하며 Codex 전용 selected signed executable 결속 예외와 Claude 생성물 허용은 명시적 프로필 admission 계약 변경으로 구분해야 한다.
+- 검토자의 최소 수정안은 Claude의 관측된4개 top-level 항목을 기존 no-follow/owner/mode/nlink 검사 아래 허용하고, Codex의 정확한 tmp/arg0 helper leaf만 현재 선택·재검증된 signed Codex 실행 파일에 결속해 검사하는 것이다. wrong target/추가 leaf/다른 위치 링크·hardlink/교체를 계속 거절하며 workspace scanner는 변경하지 않는다. 제품 패치는 아직 작성하지 않았다.
+- 사용자의 업데이트 호환 요구에는 파일명 허용 목록을 계속 늘리는 임시 해결만으로 부족하다. 따라서 고정 앱 설정·credential·프로필 신원은 엄격히 유지하고 vendor 생성물은 구조/소유권/권한으로 검사하는 방향을 제안하되, 아직 승인/안전 검토 완료 사실로 취급하지 않는다. 계약 변경 방향의 사용자 확인이 필요하며 그 전 실행 권한을 확대하지 않는다. 이번 턴 코드/실제 실행/검증 재실행 없음, 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (종료 차단 안내·실제 프로필 호환성 재현)
+
+- 기준4b1e6b4. before-quit가 복구 blocker/sidecar 오류를 삼켜 창만 남던 경로에 고정 사유의 OS 언어(한국어/영어) 안내를 연결했다. 중복 종료 요청은 같은 처리와 안내를 공유하고 닫은 뒤 명시 재시도할 수 있다. 강제 종료 버튼·clean marker 우회·raw stderr 전달은 추가하지 않았다. 관련 종료 회귀4 PASS, TypeScript PASS. 실제 새 main UI는 아직 미검증이다.
+- 사용자에게 잔류 시험 앱 강제 종료·복구 확인 승인을 받고 PID51171의 정확한 시험 runner 명령을 재확인했다. TERM 뒤에도 살아 있어 동일 PID에 KILL을 보냈고 session90464 exit1/SIGKILL을 확인했다. 다른 앱·인증정보·사용자 프로젝트는 건드리지 않았다. Rust debug 재빌드 PASS(3.16초) 뒤 승인 한도 내 재시도는 session60915 exit1로 정상 끝났고 모델 목표 전달은 여전히0회다.
+- 새 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-T8e4pa/result.json: Codex connected이나 runtime file isolation scan 거절로 차단, Claude login.check는 providerProfileUnavailable로 변경됐다. 메타데이터만 확인한 Claude profile에 sessions/seed-admin/policy-limits.json/policy-limits.json.stamp.json이 추가돼 현재 top-level allowlist와 충돌한다. Codex tmp/arg0 vendor helper symlink도 다시 관측했다. 기존 인증을 삭제하거나 새 파일을 임의 제거하지 않았다.
+- Karpathy 지침으로 진단과 종료 안내를 분리했고 안전 허용 조건은 아직 바꾸지 않았다. 상시 승인된 읽기 전용 검토자1명에게 정상 vendor 생성물과 안전 검사 간 호환 수정 범위를 검토 요청했다. 실제 실행 성공·복구/출시 완료는 미완료, 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (실행 전 실패 단계 분리)
+
+- 기준a6fb8c1. 직전 턴은 두 로그인 유지와 서로 다른 실행 전 실패를 확보한 진척이었다. 이번에는 일반 프로필 검증과 runtime file isolation scan 거절을 분리하고 Claude 초기화의 연결 상태/취소/응답 제한시간/응답 검증/모델·추론·hook·권한 선택 실패를 고정 문구로 구분했다. 공급자 원문·인증정보·경로를 오류에 추가하지 않으며 허용 조건과 cleanup 소유권은 변경하지 않았다.
+- Karpathy 지침으로 아직 원인이 확정되지 않은 검사 완화 대신 진단 손실을 먼저 고쳤다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar PASS(4.60초), diff 검사 통과. 새 binary 재빌드/실제 재현과 각 결함 수정은 후속이며 이 변경을 연결 복구로 주장하지 않는다.
+- 기존 시험 session90464는 여전히 live다. PID51171 직계 자식 조회에는 Electron helper3개만 있고 sidecar가 없다. 앱의 before-quit는 ready 이후 sidecar 오류에 대해 종료를 거절하므로 이번 잔류 창과 일치하지만 sidecar 종료 원인/자손 전체 회수는 아직 확정하지 않았다. 강제 종료하지 않았고 추가 모델 호출0·기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (승인된 실제 연결 시험·실행 전 차단 재현)
+
+- 기준209e3bb, 사용자에게 Codex·Claude 각1회 소규모 실제 모델 실행 승인을 받았다. 기존 앱 userData의 정상 login API를 사용하고 생성한 임시 Git 프로젝트만 선택하는 명시 opt-in runner를 추가했다. 인증 내용 읽기/복사·기존 사용자 프로젝트 접근·검사 우회는 하지 않았다. Karpathy 지침에 따라 제품 변경 없이 실제 실패를 먼저 확보했다.
+- 두 번의 준비 시험 모두 Codex/Claude login.check는 connected였다. 첫 시험은 Codex capability 오류에서 중단됐고, provider별 오류를 분리한 두 번째도 모델 startAgentRun까지 도달하지 못했다. Codex: app-owned provider profile could not be verified. Claude: control initialization unavailable; process cleanup required. 목표 전달/모델 응답 성공은0건이다. 두 임시 원본 Git status는 clean이었다.
+- 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-nwzImP/result.json 및 hello-agent-live-ZUsnAl/result.json. Codex 프로필 tmp/arg0에서 applypatch/apply_patch/codex-execve-wrapper symlink가 관측됐고 이후 사라졌다. 현재 runtime scanner는 모든 symlink를 거절한다. 실행 중 생성물과 scope 재검사의 충돌 가능성이 있지만 정확한 실패 분기 확정/수정은 아직 남는다. Claude 초기화의 구체 실패 원인은 별도 추적 필요하다.
+- 두 번째 시험의 정상 app.quit 및 Cmd+Q 뒤에도 Electron 창이 남았다. 공급자 종료 성공이나 앱 정상 종료를 주장하지 않고 강제 종료하지 않았다. 재시작/추가 시험 전에 잔류 시험 앱·sidecar 종료/복구 상태를 먼저 확인해야 한다. 검사 완화·설치 복구·재로그인으로 우회하지 않는다. 스크립트 문법/diff 검사 수행, 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (실제 native UI 메모리 진단 연결·첫 실측)
+
+- 기준db3dfd9. HELLO_AGENT_SMOKE_MEMORY=1 선택 시 기존 실제 UI 시험에250ms 현재 root/자손 RSS,1초 idle, 정상 프로젝트 닫기 뒤60초 retained 수집을 연결했다. 기존 processTreeMemory/summarizeMemory를 재사용하며 collector ps만 제외한다. 부분/실패 표본도 memory.json으로 보존하고 작은 프로젝트 진단임을 명시한다. 임계값/제품 GC/실행 권한 변경 없음.
+- 실제 APPLY+RELOAD 흐름은 설정/편집/diff/반영/reload/복원/두 채팅까지 통과했고 이후 메모리 판정은 FAIL/exit1. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-OxiFSX/memory.json, 로그 /private/tmp/hello-agent-native-memory-oct7.log. 360표본·native 자손 관측, idle429080576(약409MiB)만 기준 초과, peak600899584(약573MiB), retained118636544(약113MiB)는 기준 이내, 실제닫기대기60026ms.
+- 합성 대형 renderer의 peak 실패와 작은 native UI의 idle 실패는 다른 조건이며 이번 성공 항목으로 이전 실패를 대체하지 않는다. 최신 main에서 CSP meta 경고는 로그에 없지만 framing 거절 E2E는 별도다. Karpathy 지침으로 기존 collector/정상 종료를 유지했다. 문법/diff 검사 통과, 절차 갱신. 실제 모델·대형 native 부하·G6/Windows/시안 전체는 미완료. 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (종료 정리 이후 누적 UI 메모리 재측정)
+
+- 기준0449f1d, renderer diagnostic memory 실행을 동일 handle로 완료했다(FAIL/exit1). 증거 .artifacts/m5-performance/renderer-2026-10-07T07-10-36.202Z-18055.json, 로그 /private/tmp/hello-agent-memory-after-ui-oct7.log. idle426557440 bytes(약407MiB), peak927318016(약884MiB)는400/800MiB 기준 초과,60초 retained delta13926400(약13MiB)는120MiB 기준 이내다. 기존 실패를 해소했다고 주장하지 않는다.
+- tree/file/input/diff 표시 최대54.5/90.7/43.1/71.2·22.9ms와 DOM362는 기준 이내, 측정 trial longtask0이었다. renderer working set은 중간 약583MiB까지 증가했다가 잔류154MiB·heap15MiB로 감소했다. 영구 누수로 단정하지 않으며 강제GC·기준 변경·DevTools 부착은 하지 않았다.
+- pagehide 정리 후 잔류 증가량 기준은 이번 표본에서 충족했지만 idle/peak는 남는다. 합성 bridge/no-sidecar인 부분 측정을 실제 앱 전체 메모리 또는 G6로 대체할 수 없으므로 다음은 실제 native 전체 수집 범위와 메모리 원인 분리다. 제품 코드 변경 없음, 실제 공급자/Windows/출시도 미완료, 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (최신 macOS 패키지 빌드·시작 경계 검증)
+
+- 기준837c96e, 기존9월 archive만 dirty. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 electron-forge package를 실행해 최신 main/preload/renderer와 release Rust sidecar가 포함된 darwin-arm64 패키지를 생성했다. 빌드 exit0, Rust release 단계17.63초. 로그 /private/tmp/hello-agent-package-oct7.log.
+- node scripts/m5-electron-package-smoke.mjs PASS/exit0: ASAR 포함 자산/Monaco worker, sidecar ASAR 외부 배치, fuse 값과 포함 sidecar의 빈 임시 DB 시작·제품 capability/admission·정상 종료를 검증했다. Electron GUI 전체를 실행한 증거는 아니며 CSP framing/실제 계정·모델 성공을 대신하지 않는다.
+- 결과물 out/hello-agent-darwin-arm64는 du 할당량308M이며 정식 logical-byte/압축 크기 판정과 구분한다. /Applications 설치나 사용자 인증정보 변경·외부 배포는 하지 않았다. 실제 모델 종단·메모리/전체 G6·Windows·시안 전체 마감은 계속 남으며 기존 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (CSP 독립 검토 마감·개발 서버 회귀 추가)
+
+- 이전 턴의 검토자는 실제 running 상태였으며 이번에 terminal 결과를 수신했다. 지정 diff의 차단 결함 없음: 응답 body/status/headers 보존·기존 resource policy 유지 확인, 독립 main 회귀8 PASS, 임시 Vite dev 실제 HTTP 응답의 frame-ancestors 헤더 확인. Chromium framing enforcement E2E는 여전히 별도 미검증이다.
+- 검토자의 비차단 공백을 닫기 위해 실제 Vite config의 dev/preview 헤더와 HTML 리소스 정책 보존 회귀2개를 추가하고 보안 묶음 명령에 포함했다. 신규2 PASS, diff 검사 통과. Karpathy 지침으로 검토 대상 제품 코드는 추가 변경하지 않았고 검토자를 재호출하지 않는다.
+- CSP 변경을 로컬 작업 단위로 커밋한다. 새 main build의 실제 UI 확인·실제 모델 종단·메모리/G6/Windows·시안 전체 마감은 아직 남는다. 기존9월 archive 변경 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (CSP 프레임 제한 전달 위치 수정)
+
+- 기준f37226f. 실제 UI console에서 반복된 frame-ancestors meta 무시 경고를 조사했다. 제품 app:// 자산 응답을 원래 body/status/headers와 함께 감싸 frame-ancestors 'none' CSP 헤더를 추가하고 Vite dev/preview에도 같은 헤더를 설정했다. HTML meta의 리소스 제한은 유지하고 지원되지 않는 frame-ancestors만 제거했다. 공식 근거: https://www.electronjs.org/docs/latest/tutorial/security/ .
+- Karpathy 지침으로 정책 완화나 외부 리소스 허용 없이 전달 위치에 한정했다. main 경계 회귀8 PASS(응답 body/CSP 포함), diff 검사 통과. 실제 Chromium framing 거절·새 main build의 UI 경고 제거는 아직 미검증이다. 상시 승인된 독립 검토자1명을 호출했으며 결과는 후속 기록한다.
+- 전체 완료와 구분하며 실제 공급자 종단·메모리/G6/Windows·전체 시안은 계속 남는다. 기존9월 archive 변경 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (최근 UI 연결 묶음 실제 검증)
+
+- 기준808dd12. TypeScript·renderer production build 통과, 코드 블록4+bootstrap 수명주기1 회귀 통과. 실제 native UI의 첫 실행은 시작/설정/편집/diff/원본 반영까지 통과한 뒤 reload에서 제거된 catalog 팝업 버튼을 기다리며 실패했다. 새 sidebar 목록의 활성 항목을 직접 선택하도록 runner를 갱신했다. Karpathy 지침으로 제품 동작을 검사에 맞춰 되돌리지 않았다.
+- 동일 조건 재실행(HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1)은 PASS/exit0. 새 채팅 modal·초안 재열기·설정 저장·Monaco 편집·대화→diff·원본 반영·renderer reload·저장 프로젝트/채팅 재선택·복원·두 채팅 전환을 확인했다. 증거 /private/tmp/hello-agent-ui-wave-oct7-retry.log, screenshot /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-J4Ymy6/project.png 직접 확인. 시험용 프로젝트/userData만 사용하고 실제 계정/모델 호출 없음.
+- 화면의 시작 안내가 목록을 위쪽으로 잘못 가리켜 한영 문구를 왼쪽으로 정정했다(실측 이후 문구만 변경). Monaco 큰 chunk/CSP meta 경고는 남고 코드 복사 권한·실제 공급자 종단·메모리/G6/Windows·전체 시안 마감은 별도 미완료다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (대화 결과에서 diff 검토 동선 연결)
+
+- 기준21912b6. 채팅의 반영 전 목록 영역에 작업 사본 diff 열기를 연결했다. 기존 selectPanel/refreshChanges를 사용해 숨은 변경 패널을 다시 표시하며 actionBlocked는 계속 지킨다. diff 조회와 실제 반영 대상 재확인·동의를 구분하는 한영 안내, 검토 불가 상태 안내와 영역 스타일을 추가했다.
+- Karpathy·React 지침에 따라 실행/반영/복원 API나 승인 계약은 변경하지 않았다. 실제 반영은 기존 목록 fingerprint·확인 만료·동의 단계가 담당하며 diff 버튼 클릭을 승인이나 검토 완료 증거로 저장하지 않는다.
+- 기존 native 편집→반영→복원 시나리오에 대화 영역→diff 이동을 추가했다. 실행은 다른 최근 UI 변경과 함께 후속 누적 검증 대상이고 이번에는 diff 검사만 통과했다. 실제 공급자 종단·메모리/G6·전체 시안/Windows는 미완료. 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (팀 대화 코드 블록 읽기·복사 연결)
+
+- 기준a4ba5bb. 팀 대화의 단일 plain paragraph를 MessageBody로 연결했다. backtick/tilde fence만 코드 영역으로 분리하고 언어 표시·가로 스크롤·키보드 focus·명시 복사 버튼·성공/실패 안내를 추가했다. 나머지 내용은 literal text이며 HTML/링크 실행, 파일 적용, 자동 명령 실행은 하지 않는다.
+- 코드 내부 공백/CRLF를 보존하고 짧거나 다른 fence는 종료로 취급하지 않는다. 미완성 streamed fence도 현재 내용까지 표시한다. 원장 메시지와 실행 권한은 변경하지 않는다. Karpathy·React 지침으로 의존성 추가 없이 텍스트 전용 표시와 오래된 복사 완료 응답 무시를 적용했다.
+- 파서 회귀4개(HTML 유사문자열/CRLF/다른 fence/미완성·빈 블록)를 추가했으나 사용자 검증 빈도 지시에 따라 실행은 누적 단계로 남긴다. diff 검사만 통과했으며 실제 복사 권한/실제 렌더러 시각 검증·전체 제품 완료를 주장하지 않는다. 다음은 남은 화면/실제 공급자 종단과 묶음 통합 검증이며 기존9월 archive 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (새 채팅 목표 창·작업대 상단 정리)
+
+- 기준08e8f2d. 늘 노출되던 새 채팅 폼을 native dialog로 옮겼다. 첫 목표/예시와 채팅 목록 버튼에서 열고 역할별 provider·모델·추론 snapshot 예정값을 확인하며 기존 baseline 명시 선택과 create/switch 경로를 사용한다. 실제 모델 자동 실행은 추가하지 않았다.
+- 같은 프로젝트에서 닫기/재열기 시 초안을 보존하고 프로젝트 변경 시 초기화한다. 준비 중 닫기를 막고 오류/진행 안내를 창 안에 표시하며 성공 시 닫는다. 작업대 프로젝트 헤더와 채팅 목록을 한층 압축했다. Karpathy 지침으로 실행 API/저장 계약은 변경하지 않았다.
+- TypeScript noEmit 통과(역할 미리보기·마지막 CSS 조정 전), diff 검사 통과. 기존 native UI runner에 modal 진입·초안 보존·생성 시나리오를 반영했으나 실행은 후속 누적 검증 대상이다. 실제 공급자 종단·전체 시안·메모리/G6/Windows는 미완료이며 기존9월 archive 변경을 보존한다.
+
+### 2026-10-07 · by GPT-6 Astra (프로젝트 사이드바 연결)
+
+- 기준 2b99d2c. 직전 상태 설명은 구현 진척이 아니므로 이번에는 시안의 상시 프로젝트 목록을 작업대에 연결했다. 기존 상단 팝업을 좌측 rail로 배치하고 준비 완료 후 저장 프로젝트 조회·현재 프로젝트 강조·경로·페이지 이동을 유지한다. 복구 및 작업 기록은 프로젝트별 details 안에 보존한다.
+- 기존 전환 금지 조건과 reopenProject를 재사용하며 실행/편집 중 전환을 새로 허용하지 않았다. 목록은 전환이 잠겨도 읽을 수 있고 잠금 사유의 안내를 추가했다. 비동기 자동 조회는 세대/cleanup으로 오래된 응답을 무시한다. Karpathy·React 지침에 따라 별도 목록 저장소나 실행 API는 만들지 않았다.
+- 이번 파동은 구현 체크포인트이며 실제 화면/목록 전환/좁은 창 회귀는 후속 누적 검증 대상이다. diff 검사만 수행하며 시안 전체 합격을 주장하지 않는다. 실제 모델 핵심 흐름·나머지 화면·메모리/G6/Windows 마감은 계속 남고 기존 9월 archive 변경은 보존한다.
+
+### 2026-10-07 · by GPT-6 Astra (사용자 요청 현재 진척 정리)
+
+- HEAD 2b99d2c, m5/coding-agent-ide와 기존 9월 archive 미커밋 변경을 확인했다. 이번에는 구현/시험을 추가하지 않고 최신 실측 기록과 Git 상태를 대조했다.
+- macOS 합성 프로젝트의 편집·diff·반영·복원·채팅 전환은 통과했지만 실제 Codex/Claude 모델 작업의 종단 검증, 전체 시안 마감, 메모리 기준 및 G6/Windows/출시는 미완료다. 최신 pagehide 정리는 단위 회귀만 통과했으며 실제 reload/메모리 효과는 아직 확인하지 않았다.
+- 작은 성능 수정과 측정 도구 보완에 작업이 길어진 상태를 사용자에게 명시한다. 다음 마감은 실제 모델 핵심 흐름 검증(별도 승인 경계 유지), 화면 마감, 묶음 안정화/배포 검증으로 구분하며 부분 테스트 통과를 전체 완료로 표현하지 않는다. main 병합/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (DOM 보유 원인 분리·페이지 종료 cleanup 연결)
+
+- 기준ea67f5a. 공식 ChromeDevTools Memory.pdl을 확인해 강제GC/누수 준비와 별개인 getDOMCounters만 --diagnostic --memory --dom-counters에서 호출하도록 추가했다. 기본 측정은 미부착, 부착 모드는 정식 gate 불가이며 teardown 때 detach한다. 최신 증거 renderer-2026-10-07T06-42-03.879Z-53898.json은 idle/peak FAIL, 잔류delta 약17MiB다. trial 문서3→21개·listener2486→25374 증가와60초 뒤 문서1/listener146/DOM121 감소를 관측했다. 영구 누수나 기존 실패 해소로 단정하지 않는다.
+- bootstrap에 non-persisted pagehide→root.unmount를 연결해 페이지 navigation 때 기존 React effect cleanup이 실행되게 했다. bfcache persisted 페이지는 유지하며 process 종료/잠금 권위는 바꾸지 않는다. Karpathy 지침으로 강제GC/메모리압박/임의 캐시 비우기를 추가하지 않았다. 원문 bootstrap을 실행하는 회귀1 PASS; 최초 test transpile의 CommonJS import alias 오류는 ESNext 변환으로 수정했다.
+- 이 제품 수정 후 실제 reload/메모리 재측정은 아직 미실행이며 다음 묶음 검증 대상이다. 진단 절차 갱신·스크립트 문법/diff 검사 통과. 실제 provider/G6/Windows·전체 시안은 별도 미완료. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (최근 성능 변경 묶음 재측정·메모리 실패 유지)
+
+- 기준2612b74, 기존9월 archive만 dirty인 상태에서 --diagnostic --memory warm-up1+10회와60초 잔류 측정을 완료했다. .artifacts/m5-performance/renderer-2026-10-07T06-37-44.888Z-45537.json, FAIL/exit1. idle419364864 bytes(약399.94MiB)는 기준 이내지만 peak1087193088(약1036.83MiB), retained delta134610944(약128.38MiB)는 초과한다. 직전 메모리 개선의 효과나 해소를 주장하지 않는다.
+- 최대 표시 시간은 tree58.2ms/expand17.6/file76.1/input29.7/diff72.7/23.8, DOM362·관측longtask0으로 모두 기준 이내다. 마지막 renderer working set 약232MiB, heap 약15MiB로 둘을 동일한 누수 지표로 해석하지 않는다. synthetic renderer 측정이며 최근 긴 대화/네 채팅 부하 또는 전체 native 앱 RSS를 포함하지 않는다.
+- 이번 턴은 제품 코드 변경 없이 새로운 실패 증거를 확보했다. 다음은 반복 문서 열기에서 renderer peak가 증가하는 경로를 분리하고 실제 stream/전체 앱 수집기와 남은 제품 검증을 연결하는 것이다. 기준 상향·강제GC·기존 실패 삭제 없음. main/push 없음, 기존 archive 변경 보존.
+
+### 2026-10-07 · by GPT-6 Astra (연속 메시지 병합 비용·네 채팅 회귀)
+
+- 기준e70ad7a. 이벤트마다 전체 기존 메시지를 Map 재구축·정렬하던 mergeMessages에 이미 검증된 연속 base의 다음 단일 eventSequence만 append하는 경로를 추가했다. 겹침/중복/순서 오류는 기존 충돌 검사 경로를 그대로 사용하며 원장/권한/실행 동작은 바꾸지 않았다. Karpathy 지침으로 관측된 반복 비용에 한정했다.
+- 네 채팅에 각각3000개씩 총12000개 이벤트를 교차 전달하고250회마다 active chat을 바꿔 전체 내용/순서/ID 유일성과 교차 채팅 혼입을 검사하는 회귀를 추가했다. 비활성 채팅은 실제 controller처럼 페이지50개 조회로 복원한다. 관련 chat-ui suite PASS, 로그 /private/tmp/hello-agent-chat-streams.log; diff check PASS.
+- 이 검사는 합성 메모리 bridge의 burst 회귀이며50events/s·60초 실제 pacing, renderer event→paint, native sidecar/IPC 유실 증거가 아니다. 전체 수집기와 G6를 대체하지 않으며 그 작업은 남는다. 실제 provider·시안 마감·메모리/Windows도 미완료, 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (긴 대화 Chromium 회귀·기존 UI 검사 갱신)
+
+- 기준890a013. 테스트 preload에만451개 합성 메시지를 기존 chat event 경로로 추가하는 도우미를 연결했다. 실제 renderer에서 최신200개/이전 페이지/첫 메시지 접근/새 메시지가 와도 과거 페이지 불변/최신 복귀를 검사한다. 제품 bridge나 실제 계정 API는 추가하지 않았다.
+- 기존 broad renderer smoke는 선택 카드의 제거된 aria-label, 파일 아이콘을 포함한 textContent, 파일/변경 tab group의 비선택, modal 성공 status까지 없어야 한다는 오래된 조건 때문에 순차 실패했다. 현재 의미 요소/펼치기/렌더 이후 탭 선택/미저장 상태만 검사하도록 정정했다. 중간 파일명 class 오기는 실제 m5-tree-name 확인 후 바로잡았다. 최초 실패를 저장 상태 혼입으로 단정하지 않았고 임시 userData도 추가해 실행별 격리를 유지한다. console callback은 현행 Electron 인자로 수정했다.
+- Karpathy 지침으로 기존 실제 Chromium 시나리오를 재사용했다. renderer build PASS, 최종 renderer-mount 2/2 PASS/exit0이며 숨은 창은 desktop focus를 잡지 않았다. 증거 /private/tmp/hello-agent-history-pages-smoke.log. 긴 대화 외 기존 다국어/설정 실패·보존/편집/배치/검색도 실행됐다. 4 stream12,000 event 속도·event→paint·실제 provider/G6/Windows는 별도 미완료다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (대화 표시의 페이지 상한 연결)
+
+- 기준8b286c8. G6 미완료 수집기를 대조하며 TeamTimeline이 모든 누적 메시지를 DOM으로 만드는 경로를 확인했다. 표시만 최대200개로 나누고 이전/다음/최신 이동·전체 개수·범위의 한영 안내를 추가했다. 저장/조회 메시지나 실행 원장은 줄이지 않는다. 최신 페이지에서 과거로 스크롤하면 시작 위치를 고정하고 새 메시지는 알림만 표시하며 명시 최신 이동 때 따라가기를 재개한다.
+- Karpathy 지침으로 기존 메시지 배열과 스크롤 상태에 한정했고 자동 실행/권한/원본 쓰기 경계는 변경하지 않았다. 페이지 이동만으로 새 메시지 알림을 켜지 않도록 마지막 관측 revision을 구분했다. TypeScript PASS, diff check 확인. 실제 긴 대화/스크롤·4 stream12,000 event 부하와 event→paint는 아직 미검증이며 이 변경을 G6 합격으로 표현하지 않는다.
+- 전체 performance 수집기는 여전히 미완료이며 예약 게이트를 임의로 열지 않았다. 다음은 긴 대화 UI 회귀와 누락 수집 경로, 나머지 제품/실제 공급자/G6/Windows 검증이다. 기존9월 archive 변경 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (최근 UI 파동 통합 통과·선택 카드 공간 정리)
+
+- 기준41dbefd. 편집기/Monaco/diff/채팅 상태82 PASS(3.20초), TypeScript·renderer build PASS. 실제 main/preload/native sidecar와 격리 합성 프로젝트에서 시작·설정 저장/재열기→편집·diff→원본 반영→renderer reload→복원→두 채팅 전환/상태 표시 PASS/exit0. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-8zRPm6/project.png 직접 확인. 실제 계정/유료 모델 호출 없음; 기존 Monaco chunk 경고와 meta frame-ancestors 경고는 남아 있다.
+- 캡처에서 미선택 에이전트 카드가 프로젝트 작업 중에도 크게 열린 것을 확인했다. 작업대 진입 때 선택 details만 접고 처음 시작 화면은 미선택 시 펼치도록 compact prop을 연결했다. 사용자는 다시 펼칠 수 있고 ProviderConnection은 unmount하지 않아 인증/설치/오류 상태가 유지된다. Karpathy·React 지침으로 조건부 로그인 mount나 별도 저장소를 만들지 않았다. 이 추가 UI 변경은 위 PASS 이후이며 후속 누적 검증 대상, runner에 접힘 확인 추가.
+- 메모리 기준·시안 전체 마감·실제 공급자·G6/Windows는 여전히 미완료다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (채팅 목록 상태와 선택 표시)
+
+- 기준5bb0139. 채팅 목록에 제목만 보여 진행/확인/복구 상태를 열기 전 구분할 수 없던 부분을 연결했다. 선택 채팅은 activeChat의 현재 상태, 나머지는 저장 목록 상태를 사용하며 갱신 필요 항목은 오래된 상태 대신 새 상태 있음 안내를 표시한다. 목표와 상태를 두 줄로 분리하고 전체 title·aria-current 및 한영 기존 상태 문구를 연결했다. 상태만으로 실행 완료나 안전을 새로 추론하지 않는다.
+- Karpathy 지침으로 기존 채팅 상태만 사용하고 실행/복구/채팅 전환 계약은 변경하지 않았다. 실제 UI runner의 목표 선택을 상태 문구와 분리하고 두 번째 채팅의 선택/상태 표시 검사를 추가했다. diff check만 수행했으며 직전 프로젝트 조회 재시도와 이번 목록 UI는 묶음 빌드/실제 UI 검증 대상으로 남긴다.
+- 메모리 기준·전체 시안·실제 공급자·G6/Windows는 미완료다. 다음은 남은 화면 연결 후 누적 검증과 버그 수정이다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (프로젝트 데이터 로딩·설정 진입 복구)
+
+- 기준4734828. 역할 설정은 settings가 있을 때만 modal을 렌더하지만 진입 버튼은 settings 조회 전에도 활성이라 settingsOpen만 켜져 편집이 잠기는 경로가 있었다. 선택 프로젝트와 chat/settings의 projectId가 모두 일치할 때만 설정/새 채팅을 활성화한다. 조회 중 한영 안내와 최초 채팅/설정 조회 실패 시 읽기 전용 재시도를 연결했다. 초기 실패는 active chat/settings가 없는 경우에만 재요청하며 실행 중 채팅을 초기화하지 않는다.
+- Karpathy 지침으로 기존 openProject/오류 모델을 재사용했다. 재시도 시 settings·채팅 복구 및 create/prepare 호출0 회귀를 추가했다. 이번 구현은 diff 검사만 수행했으며 신규 회귀·실제 UI·빌드는 누적 검증 대상으로 남긴다. 메모리/전체 시안/실제 모델/G6/Windows 완료를 주장하지 않는다.
+- 다음은 남은 화면 연결·누적 검증과 버그 수정이다. 기존9월 archive 변경 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (대형 diff의 페이지 단위 메모리 보관)
+
+- 기준 b1515d1. 변경 화면은200줄만 표시하면서 split과 DiffRow 배열로 전체 diff 줄을 계속 보관하고 있었다. diffPages는 원문을 순회해 페이지별 offset/hunk 상태만 색인하고 선택한 페이지 최대200행만 생성한다. 전체 내용을 버리거나 최대 줄 수를 줄이지 않으며 역순/임의 페이지 이동·한글·마지막 개행·정확한 줄 번호를 보존한다. 뒤쪽 invalid hunk는 앞쪽 페이지도 기존처럼 번호 없는 원문으로 표시한다.
+- Karpathy 지침으로 표시 전용 parser/UI에 한정했고 실제 patch 적용·승인·원본 쓰기 계약은 변경하지 않았다. 기존 diffRows는 전체 배열이 필요한 소비자용으로 유지하고 UI는 bounded page를 사용한다. 관련6 PASS(10만줄·임의 접근·뒤쪽 오류 포함), TypeScript PASS. 전체 성능/실제 UI 재검증은 누적 단계로 남기며 RSS 기준 통과를 주장하지 않는다.
+- 다음은 화면/기능 마감과 실제 공급자·메모리/G6/Windows 통합 검증이다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (Monaco 중복 문자열 복사 제거·이력 롤오버)
+
+- 기준5209128. 입력 callback에서 읽은 전체 문자열을 React effect가 다시 getValue로 복사하던 경로를 modelText ref 비교로 바꿨다. 모델 생성/입력/외부 setValue/해제 때 ref를 갱신하며 외부 재읽기·잠금·저장·재시도를 보존한다. Karpathy 지침으로 확인된 중복 복사에 한정했다.
+- Monaco mock에 content callback과 읽기 횟수를 추가해 입력당1회·상태/잠금 render 추가 읽기0·외부 재읽기 보존을 확인했다. 관련7 PASS(0.21초). 전체 성능은 누적 검증 대상이며 메모리 기준 통과를 주장하지 않는다.
+- 기존10월7일과6일 상단 기록을 날짜별 원문 그대로 월별 archive로 이동했다. 현재 상태는 고정 요약에 보존한다. 다음은 남은 화면/기능 마감·메모리/실제 공급자/G6/Windows 통합 검증이다. 기존9월 archive 변경 보존, main/push 없음.
+
+
 ### 2026-10-07 · by GPT-6 Astra (renderer 메모리 프로세스별 원인 분리)
 
 - 기준 fb71150. Karpathy 지침으로 RSS 표본에 프로세스 종류와 idle/trial/retained의 main·Chromium metrics·근사 renderer heap/DOM checkpoint를 추가했다. 기준/강제GC/제품 설정 불변. sandbox 실행은 프로세스 시작 실패 NOT_READY, 승인된 격리 Electron 재실행은10회+60초 완료 FAIL: idle428.109MiB/peak944.203MiB 초과, retained delta51.344MiB는 기준 이내. 증거 .artifacts/m5-performance/renderer-2026-10-07T06-15-37.886Z-2739.json. 마지막 trial renderer working set543MiB/heap136MiB에서 닫은 뒤190MiB/15MiB·DOM57로 감소했다. 이 결과만으로 누수 없음이나 직전 수정 효과를 단정하지 않는다. 시간 지표는 모두 기준 이내이며 다음은 renderer loaded peak와 Electron 기본 RSS 원인 분리다. 절차 문서 갱신, diff check 통과; 기존9월 archive 보존, main/push 없음. 실제 모델·시안·G6/Windows는 미완료다.

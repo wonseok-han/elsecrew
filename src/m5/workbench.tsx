@@ -266,7 +266,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </dialog>
       </section>}
 
-      {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} activeChat={chat.activeChat} disabled={!admissionReady} feedback={<>
+      {settingsOpen && chat.settings && <RoleSettings key={`${chat.settings.projectId}:${chat.settings.revision}:${chat.activeChat?.chatId ?? "none"}`} settings={chat.settings} activeChat={chat.activeChat} disabled={!admissionReady} feedback={<>
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
