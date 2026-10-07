@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (누적 Rust 실패 수정·Claude 복구 통합 회귀)
+
+- 기준 7601f91. 전체 검사에서 발생한 깊이128 원본 inventory stack overflow를 heap DFS frame으로 수정했다. 깊이/예산/no-follow·디렉터리 진입 및 복귀 stamp·취소 검사는 유지한다. 독립 검토자 1명이 이 변경과 Claude 단계 기록/Admission/dispatcher를 정적으로 검토해 새 차단 결함 없음으로 보고했다. 제품 활성화나 실사용 합격을 뜻하지 않는다.
+- 수정 후 sidecar lib 누적 실행은 559 PASS/5 FAIL/33 ignored(833.49초). 초기화 영속화 이후에도 preparing을 기대하던 테스트 3개 지점을 running+receipt로 정정했고, 실행/취소 테스트 4개가 zero-diff 백업 fixture로 시작을 시도하던 문제는 사본 파일을 변경한 검토 fixture로 분리했다. 실행 보호를 완화하지 않았다. 실패5건은 후속 focused 재검사에서 모두 통과(취소 관련15 PASS, 나머지3 PASS)했고 전체를 다시 실행하지 않았다.
+- cargo clippy -p hello-agent-sidecar --lib --tests --locked 종료0(10.80초), lib11/test12 경고가 남는다(인자 수·불필요 borrow·is_multiple_of·큰 enum·test module 순서). 경고 없는 합격으로 표현하지 않으며 이번 결함 수정과 무관한 구조 변경은 하지 않았다.
+- 검토 권고대로 실제 recover_unclean_runs를 거치는 합성 Claude v2 회귀를 추가했다. preflight/session 각각 누락·모델 변조 시 recoveryInvalid/run·lock 불변, 정상은 recoveryRequired와 두 증거 보존·재호출 불변을 확인했다(신규1 PASS, 독립 정적 검토 문제 없음). source inventory8 PASS, 신규 모듈/수정 scanner rustfmt 및 diff check PASS. 실제 공급자/계정/유료 작업·UI·최종 누적 하네스는 별도이며 다음은 native 실행 전체 흐름과 제품 활성화 게이트 검증이다. 기존 9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (Claude 정책 검사·시작 dispatcher 연결)
 
 - 기준 364cb63. 메인이 기존 콜백/예약 경로를 재사용해 저장된 역할에 따른 Codex/Claude 조회·시작 분기를 연결했다. Claude Admission은 프로필/사본/원본 directory handle 신원 및 요청 역할을 재검사하고 파일·검색 대상과 sandbox 해제 요청을 검사한다. 공식 CLI 보호를 신뢰하는 승인 범위이며 관리 정책 불변성 증거를 만들지 않는다. 검색의 Grep 파일 대상도 기존 안전 파일 검사로 처리한다.

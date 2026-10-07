@@ -461,6 +461,72 @@ fn actual_run_preparation_reserves_once_and_is_visible_to_restart_recovery() {
 }
 
 #[test]
+fn phased_claude_restart_rejects_changed_evidence_and_preserves_valid_records() {
+    use crate::agent_runtime::preparation::RunPreparation;
+    use hello_agent_protocol::agent_adapter_v1::phased_claude::{Preflight, SessionObservation, SESSION_OBSERVATIONS};
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_phase_snapshot");
+    let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_phase_chat");
+    let chat_id = chat["chatId"].as_str().unwrap();
+    let mut runtime = AgentRuntime::fake(sidecar_binary(), FakeScenario::Clean);
+    let capability = runtime.get_capabilities("claude-code", true).unwrap();
+    let request = AgentRunStartRequestV1 {
+        chat_id: chat_id.into(), role_id: "coding".into(),
+        input_message_ids: vec![initial_message_id(&f, chat_id)],
+        expected_capability_fingerprint: capability["fingerprint"].as_str().unwrap().into(),
+    };
+    RunPreparation::resolve(&f.storage, &f.projects, &request).unwrap()
+        .reserve(&mut f.storage, &f.projects, &serde_json::from_value(capability).unwrap(), "req_phase_reserve").unwrap();
+    // Synthetic already-initialized projection: no provider or model is run.
+    let mut saved = f.storage.projection_records("run").unwrap().remove(0);
+    let run_id = saved["run_id"].as_str().unwrap().to_owned();
+    saved.insert("state".into(), json!("running"));
+    saved.get_mut("record").unwrap()["state"] = json!("running");
+    let record = saved["record"].clone();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let preflight: Preflight = serde_json::from_value(json!({
+        "schemaVersion":1,"scope":{"chatId":chat_id,"roleId":"coding",
+            "worktreeId":record["worktreeId"],"workspaceIdentity":record["workspaceIdentity"]},
+        "profile":record["selectedProfile"],"executable":{"pathDigest":digest,"fileIdentityDigest":digest,"cliVersion":"2.1.287"},
+        "requestedLaunchPolicyDigest":digest,"resolvedModel":"claude-opus-5","credentialsPresent":true,"observedAt":record["createdAt"],
+    })).unwrap();
+    let session = SessionObservation {
+        schema_version:1,run_id:run_id.clone(),connection_id:connection.clone(),
+        preflight_digest:preflight.digest().unwrap(),workspace_identity:preflight.scope.workspace_identity.clone(),
+        resolved_model:preflight.resolved_model.clone(),observed_at:preflight.observed_at.clone(),
+        observed_session_verification:SESSION_OBSERVATIONS.iter().map(|v| (*v).into()).collect(),
+    };
+    saved.insert("native_transport".into(), json!({"schemaVersion":1,"adapter":"claude.stream.v2","connectionId":connection,"requiresProviderAttestation":false}));
+    saved.insert("native_thread_receipt".into(), json!({"schemaVersion":1,"connectionId":connection,
+        "threadDigest":digest,"runId":run_id,"workspaceIdentity":record["workspaceIdentity"],
+        "capabilityFingerprint":record["capabilityFingerprint"],"selectedProfile":record["selectedProfile"]}));
+    saved.insert("claude_preflight".into(), serde_json::to_value(preflight).unwrap());
+    saved.insert("claude_session_observation".into(), serde_json::to_value(session).unwrap());
+    for (index, field) in ["claude_preflight", "claude_session_observation"].iter().enumerate() {
+        for remove in [false, true] {
+            let mut changed = saved.clone();
+            if remove { changed.remove(*field); }
+            else { changed.get_mut(*field).unwrap()["resolvedModel"] = json!("different-model"); }
+            f.storage.upsert_projection_record("run", &run_id, &format!("op_phase_bad_{index}_{remove}"), None, changed).unwrap();
+            let before = f.storage.projection_records("run").unwrap();
+            let locks = f.storage.projection_records("lock").unwrap();
+            let error = AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap_err();
+            assert_eq!(error.kind(), "recoveryInvalid");
+            assert_eq!(f.storage.projection_records("run").unwrap(), before);
+            assert_eq!(f.storage.projection_records("lock").unwrap(), locks);
+        }
+    }
+    f.storage.upsert_projection_record("run", &run_id, "op_phase_valid", None, saved.clone()).unwrap();
+    AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap();
+    let recovered = f.storage.projection_records("run").unwrap().remove(0);
+    assert_eq!(recovered["state"], "recoveryRequired");
+    for field in ["claude_preflight", "claude_session_observation"] { assert_eq!(recovered[field], saved[field]); }
+    AgentRuntime::blocked().recover_unclean_runs(&mut f.storage, &mut f.projects).unwrap();
+    assert_eq!(f.storage.projection_records("run").unwrap()[0], recovered);
+}
+
+#[test]
 fn actual_run_preparation_rejects_foreign_input_and_stale_evidence_without_writes() {
     use crate::agent_runtime::preparation::RunPreparation;
     for case in ["foreign", "fingerprint", "closed"] {
@@ -1371,7 +1437,8 @@ fn text_candidate_cases_selected(
                                     .projection_record("run", &identity.run_id)
                                     .unwrap()
                                     .unwrap();
-                                assert_eq!(run["state"], "preparing");
+                                assert_eq!(run["state"], "running", "{failure}");
+                                assert!(run["native_thread_receipt"].is_object());
                                 drop(runtime);
                                 let recovery = AgentRuntime::blocked();
                                 recovery
@@ -1674,7 +1741,10 @@ fn text_candidate_cases_selected(
                             if owned.closing_for_test() {
                                 closing_steps += 1;
                                 let run = &fixture.storage.projection_records("run").unwrap()[0];
-                                assert_eq!(run["state"], "preparing");
+                                // Initialization is already durable. Cleanup
+                                // cannot rewind it or publish terminal early.
+                                assert_eq!(run["state"], "running", "{failure}");
+                                assert!(run["native_thread_receipt"].is_object());
                                 assert!(run["termination"].is_null());
                                 assert!(!run["public_events"]
                                     .as_array()
@@ -2133,7 +2203,8 @@ fn text_candidate_cases_selected(
         ) {
             let before = fixture.storage.projection_records("run").unwrap();
             if failure == "bound-terminal" {
-                assert_eq!(before[0]["state"], "preparing");
+                assert_eq!(before[0]["state"], "running");
+                assert!(before[0]["native_thread_receipt"].is_object());
                 assert!(before[0]["termination"].is_null());
                 assert_ne!(stored["state"], "reviewReady");
                 fixture

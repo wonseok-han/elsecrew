@@ -123,9 +123,45 @@ fn scan(
     if depth > MAX_DEPTH {
         return Err(failure());
     }
-    let before = root.dir_metadata().map_err(|_| failure())?;
-    for item in root.entries().map_err(|_| failure())? {
+    // Keep traversal state on the heap. Debug builds and small worker stacks
+    // must support the same depth budget without one Rust frame per directory.
+    struct Frame {
+        root: Dir,
+        prefix: String,
+        depth: usize,
+        before: Metadata,
+        items: cap_std::fs::ReadDir,
+        parent_entry: Option<(String, [i128; 9])>,
+    }
+    let mut stack = vec![Frame {
+        root: root.try_clone().map_err(|_| failure())?,
+        prefix: prefix.into(),
+        depth,
+        before: root.dir_metadata().map_err(|_| failure())?,
+        items: root.entries().map_err(|_| failure())?,
+        parent_entry: None,
+    }];
+    while let Some(frame) = stack.last_mut() {
         check()?;
+        let Some(item) = frame.items.next() else {
+            let finished = stack.pop().ok_or_else(failure)?;
+            if stamp(&finished.before)
+                != stamp(&finished.root.dir_metadata().map_err(|_| failure())?)
+            {
+                return Err(failure());
+            }
+            if let Some((name, meta)) = finished.parent_entry {
+                let parent = stack.last().ok_or_else(failure)?;
+                if meta != stamp(&parent.root.symlink_metadata(name).map_err(|_| failure())?) {
+                    return Err(failure());
+                }
+            }
+            continue;
+        };
+        let root = &frame.root;
+        let prefix = &frame.prefix;
+        let depth = frame.depth;
+        let mut child_frame = None;
         let name = item.map_err(|_| failure())?.file_name();
         let name = name.to_str().ok_or_else(failure)?;
         if prefix.is_empty() && name == ".git" {
@@ -166,19 +202,22 @@ fn scan(
                 Sha256::digest(&bytes[..count as usize]).into(),
             )
         } else if meta.is_dir() {
+            if depth == MAX_DEPTH {
+                return Err(failure());
+            }
             let opened = open(root, name, true)?;
             if stamp(&meta) != stamp(&opened.metadata().map_err(|_| failure())?) {
                 return Err(failure());
             }
             let child = Dir::from_std_file(opened.into_std());
-            scan(
-                &child,
-                &format!("{path}/"),
-                depth + 1,
-                entries,
-                budget,
-                check,
-            )?;
+            child_frame = Some(Frame {
+                before: child.dir_metadata().map_err(|_| failure())?,
+                items: child.entries().map_err(|_| failure())?,
+                root: child,
+                prefix: format!("{path}/"),
+                depth: depth + 1,
+                parent_entry: Some((name.into(), stamp(&meta))),
+            });
             (2, 0, [0; 32])
         } else if meta.is_file() && meta.nlink() == 1 {
             let mut opened = open(root, name, false)?;
@@ -229,9 +268,9 @@ fn scan(
         {
             return Err(failure());
         }
-    }
-    if stamp(&before) != stamp(&root.dir_metadata().map_err(|_| failure())?) {
-        return Err(failure());
+        if let Some(child) = child_frame {
+            stack.push(child);
+        }
     }
     Ok(())
 }

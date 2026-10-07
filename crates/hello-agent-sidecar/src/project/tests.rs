@@ -86,7 +86,7 @@ fn preparation_cancel_reaches_index_and_bound_receipt_without_mutation() {
 #[test]
 fn application_poll_conflict_exposes_bounded_failure_without_unlocking() {
     use application::review::{confirmation::Confirmations, ReviewTarget};
-    let (mut f, review_id) = prepared_backup_fixture();
+    let (mut f, review_id) = prepared_edit_fixture();
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;
@@ -146,7 +146,7 @@ fn application_canceled_before_start_never_reserves_backup_or_resets_token() {
 #[test]
 fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
     use application::review::{confirmation::Confirmations, ReviewTarget};
-    let (mut f, review_id) = prepared_backup_fixture();
+    let (mut f, review_id) = prepared_edit_fixture();
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;
@@ -167,7 +167,7 @@ fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
 #[test]
 fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
-    let (mut f, review_id) = prepared_backup_fixture();
+    let (mut f, review_id) = prepared_edit_fixture();
     assert_eq!(f.manager.application_capabilities().result["enabled"], false);
     assert!(f.manager.start_application_request(&mut f.storage, &f.project_id, "chat_unknown", "confirmation_unknown", "req_blocked_start").is_err());
     assert!(f.manager.restore_application_request(&f.storage, &f.project_id, "application_unknown", "unknown", "req_blocked_restore").is_err());
@@ -201,7 +201,7 @@ fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() 
 #[test]
 fn application_owner_cancellation_is_terminal_without_source_writes() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
-    let (mut f, review_id) = prepared_backup_fixture();
+    let (mut f, review_id) = prepared_edit_fixture();
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations
         .open(
@@ -1118,6 +1118,19 @@ fn prepared_backup_fixture() -> (Fixture, String) {
     )
     .unwrap();
     (f, record["reviewId"].as_str().unwrap().to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn prepared_edit_fixture() -> (Fixture, String) {
+    let (mut f, _) = prepared_backup_fixture();
+    let active = f.manager.validate_active_project(&f.storage, &f.project_id).unwrap();
+    // Execution requires a nonempty reviewed diff; the backup-only fixture
+    // deliberately contains no edits and cannot exercise cancellation mid-run.
+    fs::write(active.worktree_path.join("src/edit.txt"), b"updated").unwrap();
+    let review = application::review::persistence::publish(
+        &f.manager, &mut f.storage, &f.project_id, "req_execution_review",
+    ).unwrap();
+    (f, review["reviewId"].as_str().unwrap().to_owned())
 }
 
 #[cfg(unix)]
