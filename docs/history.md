@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (화면 묶음 검증·재진입 편집 표시 실패)
+
+- 기준6318ff4. 최근 화면 변경을 묶어 TypeScript/renderer build를 진행했고 messages.at의 현행 lib 미지원 오류를 인덱스 접근으로 수정했다. 수정 후 둘 다 PASS(기존 Monaco chunk 크기 경고 유지). main/preload/native sidecar는 마지막 관련 변경1fbd276의 기존 산출물을 재사용했고 이번에 재빌드하지 않았다.
+- HELLO_AGENT_SMOKE_APPLY=1/RELOAD=1 통합 실행1은 START_AND_SETTINGS/APPLIED/RESTORED 뒤 캡처 UnknownVizError가 실패 보고를 가려 timeout FAIL이 됐다(naBu58). runner의 실패 캡처를 별도 catch하고 Electron이 process.exitCode를 무시해 실패에도0을 반환하는 문제를 정상 quit의 will-quit 이후 app.exit(code)로 수정했다. Karpathy 지침으로 제품 종료 경로를 바꾸지 않았다.
+- 재실행2(DAUMOv)는 설정·원본 적용·renderer reload·복원까지 통과한 뒤 Second task의 Monaco original 표시 대기에서 FAIL/exit1로 정상 보고했다. editor 크기570x172이나 view-lines 크기0/text빈값이며 capturePage는 UnknownVizError다. 경로는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-DAUMOv. 파일 내용 유실/제품 결함/렌더 환경 문제 중 원인은 아직 확정하지 않았고 UI 전체 PASS를 주장하지 않는다.
+- 다음은 이 재진입 편집 표시 실패 원인 분리와 수정 후 영향 흐름 재실행이다. 실제 계정·유료 모델·사용자 프로젝트를 사용하지 않았다. G6/Windows/출시 별도, 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (시작·설정 통합 시나리오 연결)
 
 - 기준b815a0a. 직전 UI runner 저장소 편입은 진전이다. 한 실행에 시작 화면/dock 부재, 목표 예시의 입력만 채우기/초안 보호, 실제 native modal Escape 확인/계속 편집/폐기/포커스 복원, 설정 저장·재열기·원래 값 복원 시나리오를 추가했다. 뒤의 편집·diff·반영/복원·두 채팅 흐름을 유지하며 모델 실행은 호출하지 않는다.

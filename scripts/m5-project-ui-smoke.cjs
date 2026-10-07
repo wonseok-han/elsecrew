@@ -18,7 +18,9 @@ const timer = setTimeout(() => finish(new Error('flow timeout')), 90000);
 function finish(error, details) {
   if (finished) return;
   finished = true; clearTimeout(timer);
-  process.exitCode = error ? 1 : 0;
+  // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
+  // after the app has accepted quitting. process.exitCode alone is ignored here.
+  app.once('will-quit', () => app.exit(error ? 1 : 0));
   console.log(JSON.stringify({status:error?'FAIL':'PASS',root,error:error?.message,...details}));
   app.quit();
 }
@@ -158,13 +160,16 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`document.querySelector('.monaco-editor textarea')!==null`);
       await run(`document.querySelector('.monaco-editor textarea').scrollIntoView({block:'center'})`);
       await wait(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('edited')`);
+      console.log(JSON.stringify({stage:'PROJECT_FLOW_COMPLETE',root}));
       const screenshot = path.join(root,'project.png');
       fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG());
       finish(null,{screenshot,text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');
-      fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG());
-      finish(error,{screenshot,details:await run(`Array.from(document.querySelectorAll('pre')).map(e=>e.textContent)`).catch(()=>[]),editor:await run(`Array.from(document.querySelectorAll('.m5-monaco,.monaco-editor,.view-lines')).map(e=>({class:e.className,rect:e.getBoundingClientRect().toJSON(),text:e.textContent?.slice(0,100)}))`).catch(()=>[])});
+      let captureError;
+      try { fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG()); }
+      catch (failure) { captureError = failure.message; }
+      finish(error,{screenshot:captureError ? null : screenshot,captureError,details:await run(`Array.from(document.querySelectorAll('pre')).map(e=>e.textContent)`).catch(()=>[]),editor:await run(`Array.from(document.querySelectorAll('.m5-monaco,.monaco-editor,.view-lines')).map(e=>({class:e.className,rect:e.getBoundingClientRect().toJSON(),text:e.textContent?.slice(0,100)}))`).catch(()=>[])});
     }
   });
 });

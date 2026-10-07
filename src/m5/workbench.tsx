@@ -404,7 +404,7 @@ function TeamTimeline({ controller, chat, admissionReady, fixtureAvailable }: { 
   const messagesRef = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const [newMessages, setNewMessages] = useState(false);
-  const lastMessage = chat.messages.at(-1);
+  const lastMessage = chat.messages[chat.messages.length - 1];
   const messageRevision = `${chat.messages.length}:${lastMessage?.messageId ?? ""}:${lastMessage?.text ?? ""}`;
   const showLatest = () => {
     followLatest.current = true;
