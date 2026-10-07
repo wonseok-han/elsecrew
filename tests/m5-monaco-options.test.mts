@@ -53,6 +53,8 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   let cursor = 0;
   let pending: (() => unknown)[] = [];
   let text = "original";
+  let valueReads = 0;
+  let changeContent: (() => void) | undefined;
   let readOnly: boolean | undefined;
   let lang: "ko" | "en" = "ko";
   let editorCreates = 0;
@@ -62,7 +64,7 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   let saveAction: { run(): void; keybindings: number[]; label: string } | undefined;
   let resolveLoader!: (value: unknown) => void;
   const loader = new Promise(resolve => { resolveLoader = resolve; });
-  const model = { getValue: () => text, setValue: (value: string) => { text = value; }, onDidChangeContent: () => ({ dispose() {} }), dispose() {} };
+  const model = { getValue: () => { valueReads++; return text; }, setValue: (value: string) => { text = value; changeContent?.(); }, onDidChangeContent: (listener: () => void) => { changeContent = listener; return { dispose() { changeContent = undefined; } }; }, dispose() {} };
   const editor = { updateOptions: (options: { readOnly?: boolean; ariaLabel?: string }) => { if (options.readOnly !== undefined) readOnly = options.readOnly; if (options.ariaLabel !== undefined) accessibleName = options.ariaLabel; }, addAction: (action: typeof saveAction) => { saveAction = action; return { dispose() { actionDisposals++; } }; }, dispose() {} };
   const context: Record<string, any> = {
     useState: (initial: unknown) => [initial, () => {}],
@@ -128,6 +130,14 @@ for (const delayedGate of [null, "admission", "saving"]) test(`Monaco keeps curr
   await render(false, "saving");
   saveAction.run();
   assert.deepEqual(saves, ["test.txt"], "saving must block a duplicate shortcut");
+  const beforeInput = valueReads;
+  text = "typed locally";
+  changeContent!();
+  await render(false, "dirty", text);
+  await render(true, "dirty", text);
+  assert.equal(valueReads, beforeInput + 1, "typing copies model text once; state and gate renders do not read it again");
+  await render(false, "clean", "reloaded externally");
+  assert.equal(text, "reloaded externally", "external reload still updates the model");
 });
 
 for (const failure of ["load", "editor", "action"]) test(`Monaco preserves drafts and explicitly retries ${failure} failure`, async () => {

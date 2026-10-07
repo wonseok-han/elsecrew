@@ -496,6 +496,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const model = useRef<Monaco.editor.ITextModel | null>(null);
+  const modelText = useRef<string | null>(null);
   const labels = { save: t("m5.editor.commandSave"), name: t("m5.editor.accessibleName", { path: tab.path }) };
   const refreshLabels = useRef<(() => void) | null>(null);
   const latest = useRef({ tab, readOnly, onChange, onSave, labels });
@@ -510,6 +511,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       for (const resource of resources.splice(0).reverse()) resource.dispose();
       editor.current = null;
       model.current = null;
+      modelText.current = null;
     };
     void loadMonaco().then((monaco) => {
       if (cancelled || !host.current) return;
@@ -517,6 +519,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       const nextModel = monaco.editor.createModel(current.tab.text, languageFor(current.tab.path));
       resources.push(nextModel);
       model.current = nextModel;
+      modelText.current = current.tab.text;
       const nextEditor = monaco.editor.create(host.current, {
         model: nextModel,
         theme: "vs-dark",
@@ -550,7 +553,11 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
         try { registerLabels(); }
         catch { cleanup(); setFailed(true); }
       };
-      const subscription = nextModel.onDidChangeContent(() => latest.current.onChange(nextModel.getValue()));
+      const subscription = nextModel.onDidChangeContent(() => {
+        const text = nextModel.getValue();
+        modelText.current = text;
+        latest.current.onChange(text);
+      });
       resources.push(subscription);
     }).catch(() => {
       if (cancelled) return;
@@ -567,7 +574,10 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 
   useEffect(() => {
     const currentModel = model.current;
-    if (currentModel && currentModel.getValue() !== tab.text) currentModel.setValue(tab.text);
+    if (currentModel && modelText.current !== tab.text) {
+      currentModel.setValue(tab.text);
+      modelText.current = tab.text;
+    }
     editor.current?.updateOptions({ readOnly: readOnly || tab.saveState === "saving" });
   }, [tab.text, tab.saveState, readOnly]);
 
