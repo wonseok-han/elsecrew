@@ -130,10 +130,13 @@ impl TurnStart {
         struct Note {
             method: String,
             params: Params,
+            #[serde(default, rename = "emittedAtMs")]
+            emitted_at_ms: u64,
         }
         if input.json()?.get("method").is_some() {
             let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
             if note.method != "turn/started"
+                || note.emitted_at_ms > 9_007_199_254_740_991
                 || note.params.thread_id != self.thread
                 || self.started.is_some()
             {
@@ -211,6 +214,26 @@ mod tests {
                 Observed::Finished(_)
             ));
             assert!(stream.finish().is_ok());
+        }
+    }
+    #[test]
+    fn started_timestamp_is_optional_bounded_and_not_turn_authority() {
+        for reverse in [false, true] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            let mut values = frames();
+            values[1]["emittedAtMs"] = json!(1790643701003_u64);
+            if reverse { values.reverse(); }
+            assert!(start.accept(&input(values[0].clone())).unwrap().is_none());
+            assert!(start.accept(&input(values[1].clone())).unwrap().is_some());
+        }
+        for stamp in ["-1", "9007199254740992", "null", "\"123\"", "1,\"emittedAtMs\":2"] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            let raw = frames()[1].to_string().replacen('{', &format!("{{\"emittedAtMs\":{stamp},"), 1);
+            let note = BoundedObservation::new(raw.into_bytes()).unwrap();
+            assert!(start.accept(&note).is_err());
+            assert!(start.accept(&input(frames()[0].clone())).is_err());
         }
     }
     #[test]

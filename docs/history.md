@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (공급자 파서 묶음 회귀·Claude fixture 정정)
+
+- 기준2bf0441+직전 turn timestamp 수정. 이전 턴은 호환 누락 수정/회귀 추가로 진척했다. 후속 TurnStream을 확인해 시작 응답과 알림의 ID 일치·타임스탬프 경계가 이어지는 것을 대조했다. 독립 검토자는 Codex 변경에 차단 결함 없음으로 승인했으며 실제 실패 원인은 아직 확정하지 않았다.
+- vendor_observation 묶음98개 중97PASS/1FAIL: 기존 Claude session 성공 fixture가 Read input:{}로 필수 file_path를 빠뜨려 실패했다. 제품 tool_target 검사는 유지하고 성공 fixture에 hello.txt를 추가, 경로 누락 시 세션 종료/deny 거절 회귀를 추가했다. 재실행99/99 PASS. 추가 유료 호출 없이 합성 입력만 사용했다.
+- 최신 debug sidecar build PASS. 다음: 실제 turn 후속 진단과 Claude live 검증, UI/성능/Windows 잔여 게이트. 묶음 파서 합격은 실제 연결/앱 완료가 아니다. 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (turn 시작 timestamp 호환 누락)
+
+- 기준2bf0441, 기존9월 archive 보존. 직전 턴은 실제 시험이 thread receipt까지 진척한 실패 증거와 버전 수정 커밋을 남겼다. 이번에는 추가 모델 호출 없이 incremental Starting→TurnStart→TurnStream 경로를 조사했다.
+- codex_events의 공통 Notification은 emittedAtMs를 허용하지만 TurnStart의 Note는 deny_unknown_fields로 이를 거절하는 불일치를 확인했다. 동일 optional u64/JS-safe 상한을 적용했다. method/thread/turn ID 상관관계·양쪽 응답 요구·중복 및 sticky 실패는 유지한다. Karpathy 지침에 따라 해당 파서만 수정했으며 실제 실패 frame이 없으므로 원인 해결로 단정하지 않는다.
+- 양순서 timestamp 및 음수/상한 초과/null/문자열/중복 키 회귀를 추가했다. 사용자 구현 우선 방침에 따라 현재 diff 검사만 PASS, 테스트·빌드는 묶음 검증 대상으로 남겼다. 같은 읽기 전용 검토자에게 범위 한정 재검토 요청. 다음: 검토 결과 반영과 turn 후속 호환성 조사, 누적 검사. 추가 유료 실행/원본 수정/main 병합/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (Codex 프리릴리스 버전 차단 원인 확인)
 
 - 기준9811a04, 기존9월 archive 보존. 직전 턴은 승인된 Claude 소켓 수정/검토 및 Codex 준비 실패 관측으로 진척했다. Karpathy 지침으로 기존 정책 대신 고정 진단을 보강했다. 준비 budget 만료에 현재 단계를 남기며 version probe의 출력 크기/exit/문자열 해석 실패를 구분한다. deadline 경계 회귀1개 PASS.

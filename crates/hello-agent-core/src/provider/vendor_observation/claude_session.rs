@@ -215,13 +215,25 @@ mod tests {
             Event::Output(claude_events::Projection::Assistant { .. })
         ));
         let request = input(
-            json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Read","input":{}}}),
+            json!({"type":"control_request","request_id":"r","request":{"subtype":"can_use_tool","tool_name":"Read","input":{"file_path":"hello.txt"}}}),
         );
         assert!(matches!(
             session.observe(&request).unwrap(),
             Event::Permission(claude_approval::Observation::Requested(_))
         ));
         assert!(session.deny("r", false).is_ok());
+        assert!(session.deny("r", false).is_err());
+    }
+
+    #[test]
+    fn read_permission_without_target_closes_initialized_session() {
+        let mut session = Session::new(&expected());
+        session.observe(&init()).unwrap();
+        let request = input(json!({"type":"control_request","request_id":"r","request":{
+            "subtype":"can_use_tool","tool_name":"Read","input":{}
+        }}));
+        assert!(session.observe(&request).is_err());
+        assert!(session.is_closed());
         assert!(session.deny("r", false).is_err());
     }
 }
