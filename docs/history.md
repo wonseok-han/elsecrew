@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (Claude 소유 실행 전체 흐름 합성 검증)
+
+- 기준 422139e. 직전 턴은 구현/누적 실패 수정 진전이며 목표는 계속 active다. 메인이 Karpathy 지침에 따라 기존 native dispatcher·예약·gate·prompt Admission·공개 원장·종료/복구를 한 실행으로 통과하는 로컬 pipe 회귀를 추가했다. 테스트 전용 cfg(test) constructor만 /bin/sh를 가짜 공급자로 사용하고 제품 서명 검사/기본 blocked는 바꾸지 않았다.
+- 정상, 상세 조회 후 일회 도구 허용, 실행 중 취소, 잘못된 system/init, result의 queued_turn_count 누락 5개 시나리오를 검사한다. 프로필 잠금 재사용과 DB 재오픈 뒤 원장 불변도 확인한다. 최초 정상 실패는 가짜 result에 queue=0을 빠뜨린 fixture 문제였고 제품 결함이 아니었다. 실제 CLI/모델 호출이나 도구의 OS 보호 검증으로 주장하지 않는다.
+- 최종 focused 테스트 1개/5시나리오 PASS(15.41초), 성공 경로에만 hello final 1회 저장도 확인했다. 새 테스트 파일 rustfmt·git diff --check PASS. 이전 전체 통과 증거를 반복 실행하지 않았으며 실제 공급자 admission/활성화 검증은 여전히 별도다.
+- 다음 제품 연결 결함을 확인했다: chat 기본 Claude 역할과 역할 UI는 reasoningEffort=null(기본값)을 허용하지만 native Claude discovery/start/launch는 non-null effort를 요구한다. 기본 역할로 실제 실행이 거절될 수 있으므로 optional effort를 요청 정책/범위/모델 catalog와 일관되게 연결해야 한다. 임의 medium 대체나 기본값 UI 제거로 해결하지 않는다. 다음 작업은 이 누락 수정이며 별도 사용자 결정을 기다릴 사안이 아니다. 실제 계정/유료 실행·main/push 없음, 기존 9월 archive 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (누적 Rust 실패 수정·Claude 복구 통합 회귀)
 
 - 기준 7601f91. 전체 검사에서 발생한 깊이128 원본 inventory stack overflow를 heap DFS frame으로 수정했다. 깊이/예산/no-follow·디렉터리 진입 및 복귀 stamp·취소 검사는 유지한다. 독립 검토자 1명이 이 변경과 Claude 단계 기록/Admission/dispatcher를 정적으로 검토해 새 차단 결함 없음으로 보고했다. 제품 활성화나 실사용 합격을 뜻하지 않는다.

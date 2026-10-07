@@ -364,6 +364,35 @@ impl OwnedClaudeRun {
 }
 
 impl RunReservation {
+    /// Test-only replacement of the signed vendor with a local pipe peer. The
+    /// production gate, durable reservation, scope, and cleanup still run.
+    #[cfg(test)]
+    pub(crate) fn launch_claude_toy(&mut self, storage: &mut Storage, projects: &ProjectManager,
+        process: &mut crate::provider_login_process::LoginProcess<'_>, script: &str,
+    ) -> Result<(), SidecarError> {
+        use crate::provider_claude_session::{launch::ClaudeCommand, ToolAccess};
+        let failure = || SidecarError::new("toyInvalid", "invalid Claude toy fixture");
+        let profile: AgentResolvedProfileV1 = serde_json::from_value(self.run["selectedProfile"].clone()).map_err(|_| failure())?;
+        let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
+        let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let home = process.claude_preflight_home()?;
+        let effort = profile.reasoning_effort.as_deref().ok_or_else(failure)?;
+        let access = if profile.permission == "workspaceWrite" { ToolAccess::Edit } else { ToolAccess::ReadOnly };
+        self.claude_preflight = Some(hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight {
+            schema_version:1, scope:super::super::capability_scope(&self.run, &profile.role_id).map_err(|_| failure())?,
+            executable:crate::provider_executable::PinnedExecutable::open(Path::new("/bin/sh"), Sha256::digest(std::fs::read("/bin/sh").map_err(|_| failure())?).into())?.public_identity("toy")?,
+            requested_launch_policy_digest:crate::provider_claude_session::requested_policy_digest(&profile.model_selector, effort, access, &home, workspace, source)?,
+            resolved_model:profile.model_selector.clone(),credentials_present:true,observed_at:now(),profile:profile.clone(),
+        });
+        process.retain_fence_before_launch(&self.run_id)?;
+        ClaudeCommand::toy(&home, workspace, &profile.model_selector, effort, access, script)?.launch(process, |child, identities| {
+            self.record_pre_release(storage, projects, identities).map_err(|_| std::io::Error::other("toy identity persistence failed"))?;
+            crate::provider_login_gate::release(child)
+        })?;
+        self.record_released_or_invalidate(storage, process)
+    }
+
     pub(crate) fn claude_admission(&self, storage: &Storage, projects: &ProjectManager,
         process: &crate::provider_login_process::LoginProcess<'_>,
     ) -> Result<crate::provider_claude_session::admission::Admission, SidecarError> {

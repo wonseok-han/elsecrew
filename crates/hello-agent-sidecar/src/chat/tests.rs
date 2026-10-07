@@ -9,6 +9,8 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+mod claude_native;
+
 #[test]
 fn project_application_fence_blocks_other_chat_runs_before_reservation() {
     use crate::agent_runtime::preparation::RunPreparation;

@@ -30,6 +30,17 @@ pub(crate) struct ClaudeCommand {
 }
 
 impl ClaudeCommand {
+    #[cfg(test)]
+    pub(crate) fn toy(home: &Path, workspace: &Path, model: &str, effort: &str, access: ToolAccess, script: &str) -> Result<Self, SidecarError> {
+        use sha2::{Digest, Sha256};
+        let path = Path::new("/bin/sh");
+        let digest = Sha256::digest(std::fs::read(path).map_err(|_| failure())?).into();
+        let executable = PinnedExecutable::open(path, digest)?;
+        let command = crate::provider_login_gate::command(path, &["-c".as_ref(), script.as_ref()], workspace)
+            .map_err(|_| failure())?;
+        Ok(Self { command, scope: Scope { workspace:workspace.into(), home:home.into(), model:model.into(), effort:effort.into(), access, executable } })
+    }
+
     pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, source: &Path, model: &str, effort: &str, access: ToolAccess) -> Result<Self, SidecarError> {
         let executable = PinnedExecutable::open_claude_signed(executable)?;
         let user_home = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?);
