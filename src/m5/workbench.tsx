@@ -9,6 +9,7 @@ import {
   type WorkbenchPanel,
 } from "./editor-state.ts";
 import type { DiffEntryV1 } from "./contracts/diff-v1.ts";
+import type { TreeEntryV1 } from "./contracts/project-v1.ts";
 import type { M5BridgeV6 } from "./contracts/bridge-v6.ts";
 import { validateRoleProfileV1, type RoleProfileV1 } from "./contracts/run-recovery-v1.ts";
 import { StorageAdmissionPoller, type AdmissionView } from "./admission-state.ts";
@@ -265,14 +266,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
                 <button className="m5-root" type="button" title={snapshot.project.root} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree("")}>{snapshot.project.name}</button>
                 {snapshot.treeParent.split("/").filter(Boolean).map((part, index, parts) => <button key={index} type="button" aria-current={index === parts.length - 1 ? "location" : undefined} disabled={!admissionReady || snapshot.actionBlocked || snapshot.treeLoading} onClick={() => void controller.loadTree(parts.slice(0, index + 1).join("/"))}>/ {part}</button>)}
               </nav>
-              <div className="m5-file-list">
-                {snapshot.tree.map((entry) => (
-                  <button key={entry.path} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && snapshot.activePath === entry.path ? "true" : undefined} title={entry.path} onClick={() => entry.kind === "file" ? void controller.openFile(entry.path) : entry.kind === "directory" ? void controller.loadTree(entry.path) : undefined} disabled={!admissionReady || entry.kind === "symlink"}>
-                    <span className="m5-file-glyph" aria-hidden="true">{entry.kind === "directory" ? "▸" : entry.kind === "symlink" ? "↗" : entry.name.includes(".") ? entry.name.split(".").pop()!.slice(0, 4).toUpperCase() : "—"}</span>
-                    <span className="m5-tree-name">{entry.name}</span>
-                  </button>
-                ))}
-              </div>
+              <VirtualFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}:${snapshot.treeParent}:${snapshot.treePage}`} entries={snapshot.tree} activePath={snapshot.activePath} disabled={!admissionReady || snapshot.actionBlocked} onOpen={entry => { if (entry.kind === "file") void controller.openFile(entry.path); else if (entry.kind === "directory") void controller.loadTree(entry.path); }} />
               <nav className="m5-tree-pages" aria-label={t("m5.navigation.pages")}>
                 <button type="button" disabled={!admissionReady || snapshot.treeLoading || snapshot.treePage === 1} onClick={() => void controller.loadTree(snapshot.treeParent)}>{t("m5.navigation.first")}</button>
                 <span>{snapshot.treeLoading ? t("m5.navigation.loading") : t("m5.navigation.page", { page: snapshot.treePage })}</span>
@@ -339,6 +333,37 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </WorkbenchDock>}
     </main>
   );
+}
+
+function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: readonly TreeEntryV1[]; activePath: string | null; disabled: boolean; onOpen: (entry: TreeEntryV1) => void }) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowHeight = 32;
+  const start = Math.min(Math.max(0, entries.length - 1), Math.max(0, Math.floor(scrollTop / rowHeight) - 8));
+  const end = Math.min(entries.length, start + 120);
+  return <div ref={listRef} className="m5-file-list m5-virtual-file-list" style={{ height: Math.min(400, entries.length * rowHeight) }} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} onKeyDown={event => {
+    if (disabled || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const current = Number((event.target as HTMLElement).closest<HTMLButtonElement>("button[data-index]")?.dataset.index);
+    if (!Number.isInteger(current)) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowUp" || event.key === "End" ? -1 : 1;
+    let next = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1 : current + direction;
+    while (next >= 0 && next < entries.length && entries[next].kind === "symlink") next += direction;
+    if (next < 0 || next >= entries.length) return;
+    const list = listRef.current;
+    if (!list) return;
+    if (next * rowHeight < list.scrollTop) list.scrollTop = next * rowHeight;
+    else if ((next + 1) * rowHeight > list.scrollTop + list.clientHeight) list.scrollTop = (next + 1) * rowHeight - list.clientHeight;
+    setScrollTop(list.scrollTop);
+    requestAnimationFrame(() => list.querySelector<HTMLButtonElement>(`button[data-index="${next}"]`)?.focus());
+  }}>
+    <div aria-hidden="true" style={{ height: start * rowHeight }} />
+    {entries.slice(start, end).map((entry, index) => <button key={entry.path} data-index={start + index} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && activePath === entry.path ? "true" : undefined} title={entry.path} onClick={() => onOpen(entry)} disabled={disabled || entry.kind === "symlink"}>
+      <span className="m5-file-glyph" aria-hidden="true">{entry.kind === "directory" ? "▸" : entry.kind === "symlink" ? "↗" : entry.name.includes(".") ? entry.name.split(".").pop()!.slice(0, 4).toUpperCase() : "—"}</span>
+      <span className="m5-tree-name">{entry.name}</span>
+    </button>)}
+    <div aria-hidden="true" style={{ height: (entries.length - end) * rowHeight }} />
+  </div>;
 }
 
 function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {

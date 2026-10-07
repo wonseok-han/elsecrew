@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (대형 파일 트리 DOM 상한 연결)
+
+- 기준ee24174. 직전 통합 UI는 진전이다. G6 기존 계측과 명세 §10을 대조해500행 전체 렌더에 아이콘/이름 span이 더해지면 트리 DOM500 상한을 넘는 누락을 확인했다. 기준을 올리지 않고 고정32px 행/최대120행/앞뒤 spacer의 가상 목록을 연결했다. 500개 backend 페이지 계약·다음 목록/폴더 탐색·원본 읽기 보호는 유지한다.
+- 프로젝트/사본/폴더/페이지 key로 새 목록의 스크롤을 초기화하고 방향키/Home/End 포커스 이동 및 symlink 건너뛰기를 추가했다. Karpathy·React 지침으로 기존 tree state를 사용하고 외부 라이브러리/중복 파일 저장소를 추가하지 않았다. 성능 runner는120행 표시와 동일500개 페이지 끝 folder-499 도달, 다음 페이지 folder-500 및 실제 DOM 계수를 측정하도록 정정했다. 기준 DOM500은 유지한다.
+- TypeScript PASS. 실제 대형 목록 스크롤/키보드와 성능 수치는 아직 미측정이며 clean checkout을 요구하는 정식 계측에 기존 사용자9월 archive 변경을 숨기거나 덮지 않는다. 다음은 해당 UI 회귀·나머지 전체 성능 계측과 실제 공급자/Windows이며 전체 G6 완료 아님. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (재진입 편집 가시성 원인 분리·통합 UI 통과)
 
 - 기준c48922b. 직전 실패는 검증 진전이며 이번에는 저장 내용과 창 상태를 분리했다. DAUMOv의 원본/새 사본은9바이트, 편집 사본은28바이트로 보존돼 있었다. 재실행에서 Second task 시점 window.visible=true/minimized=false/focused=false, page.visibility=hidden, backgroundThrottling=false를 실제 관측했다. runner가 편집 화면 읽기 전에 창 show/focus를 다시 수행하자 원본 표시·사본 분리·최종 캡처가 통과했다. 제품 Monaco/보안/종료 구현은 변경하지 않았고 모든 환경에서 제품 렌더 결함이 없다는 증거로 확대하지 않는다.

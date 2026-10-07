@@ -144,6 +144,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-file-glyph { display: grid; place-items: center; flex: 0 0 25px; height: 20px; border-radius: 4px; background: #27374c; color: #8ebbf1; font-size: 8px; font-weight: 700; }
 .m5-file-row[data-kind="directory"] .m5-file-glyph { background: #443b26; color: #e0bc67; font-size: 12px; }
 .m5-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m5-virtual-file-list { box-sizing: content-box; padding-top: 0; padding-bottom: 0; overflow-anchor: none; }
+.m5-virtual-file-list .m5-file-row { height: 32px; min-height: 32px; box-sizing: border-box; }
 .m5-change-file { display: grid; min-width: 0; gap: 2px; }
 .m5-change-file strong, .m5-change-file small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m5-change-file strong { font-size: 12px; font-weight: 500; }

@@ -96,11 +96,16 @@ app.whenReady().then(async () => {
       observer.observe({ type: 'longtask' });
       const result = {};
       let start = performance.now(); button('프로젝트 선택').click();
-      await wait(() => document.querySelectorAll('.m5-file-row').length === 500); await paint();
+      await wait(() => document.querySelectorAll('.m5-file-row').length === 120); await paint();
       result.treeRootMs = performance.now() - start;
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
       await wait(() => document.querySelectorAll('.m5-change-row').length === 500); await paint();
       result.diffSummaryMs = performance.now() - start;
+      // Verify the bounded DOM still exposes the end of the same 500-entry page.
+      const treeList = document.querySelector('.m5-file-list');
+      treeList.scrollTop = treeList.scrollHeight;
+      await wait(() => [...document.querySelectorAll('.m5-file-row')].some(e => e.textContent.includes('folder-499'))); await paint();
+      result.treeDomNodes = Math.max(result.treeDomNodes, treeList.querySelectorAll('*').length);
       button('다음 목록').click(); await wait(() => document.querySelector('.m5-file-row')?.textContent.includes('folder-500')); await paint();
       start = performance.now(); document.querySelector('.m5-file-row').click();
       await wait(() => document.querySelector('.m5-file-row')?.textContent.includes('large.txt')); await paint();
