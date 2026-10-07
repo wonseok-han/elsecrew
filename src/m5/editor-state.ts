@@ -969,22 +969,26 @@ export class ProjectEditorController {
 
 export function splitUtf8(text: string, maxBytes: number): string[] {
   if (text.length === 0) return [];
-  const encoder = new TextEncoder();
   const chunks: string[] = [];
-  let current = "";
+  let start = 0;
+  let offset = 0;
   let currentBytes = 0;
   for (const character of text) {
-    const bytes = encoder.encode(character).byteLength;
+    // for..of keeps valid surrogate pairs together. Lone surrogates cost
+    // three bytes (TextEncoder's U+FFFD replacement), just like other BMP
+    // characters here. Avoid allocating a Uint8Array for every character.
+    const point = character.codePointAt(0)!;
+    const bytes = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
     if (bytes > maxBytes) throw new Error("a Unicode character exceeds the protocol chunk limit");
     if (currentBytes + bytes > maxBytes) {
-      chunks.push(current);
-      current = "";
+      chunks.push(text.slice(start, offset));
+      start = offset;
       currentBytes = 0;
     }
-    current += character;
+    offset += character.length;
     currentBytes += bytes;
   }
-  if (current.length > 0) chunks.push(current);
+  if (offset > start) chunks.push(text.slice(start));
   return chunks;
 }
 

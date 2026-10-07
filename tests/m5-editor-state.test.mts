@@ -796,6 +796,26 @@ test("UTF-8 splitter는 문자 경계를 깨지 않고 protocol byte limit을 �
   assert.ok(chunks.every((chunk) => new TextEncoder().encode(chunk).byteLength <= 4));
 });
 
+test("UTF-8 splitter preserves TextEncoder byte boundaries including lone surrogates", () => {
+  const encoder = new TextEncoder();
+  const texts = ["", "plain ASCII", "\0\u007f\u0080\u07ff\u0800\uffff", "가🦦e\u0301", "\ud800a\udc00", "🦦".repeat(100)];
+  for (const text of texts) for (const limit of [1, 2, 3, 4, 5, 16, 64]) {
+    if ([...text].some(char => encoder.encode(char).byteLength > limit)) {
+      assert.throws(() => splitUtf8(text, limit));
+      continue;
+    }
+    const expected: string[] = [];
+    let chunk = "";
+    for (const char of text) {
+      if (encoder.encode(chunk + char).byteLength > limit) { expected.push(chunk); chunk = ""; }
+      chunk += char;
+    }
+    if (chunk) expected.push(chunk);
+    assert.deepEqual(splitUtf8(text, limit), expected);
+    assert.equal(splitUtf8(text, limit).join(""), text);
+  }
+});
+
 test("cross-IPC에서 descriptor 전에 온 single·multi chunk를 원자적으로 채택하고 정상 post-descriptor stream도 계속 받는다", async () => {
   class PreResponseBridge extends FakeBridge {
     override async readFile({ path }: { projectId: string; path: string }): Promise<FileReadDescriptorV1> {

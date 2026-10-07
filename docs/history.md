@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (큰 파일 저장 분할 할당 감소)
+
+- 기준585bea4. 기존 renderer-2026-10-07T07-10-36.202Z-18055.json을 재검토해 idle/peak RSS 실패와 renderer 증가를 확인했으나 전체 메모리 원인은 아직 미확정이다. 별도 코드 조사로 splitUtf8 저장 전처리가 문자마다 TextEncoder 배열을 할당하고 문자열을 이어 붙이는 비용을 발견했다.
+- 코드 포인트별 UTF-8 길이를 계산하고 원문 UTF-16 경계로 slice하도록 최소 수정했다. 유효 surrogate pair는 함께 처리하고 단독 surrogate는 TextEncoder와 같은3byte로 센다. 전송 크기/문자 경계·오류 조건은 유지한다. 기존9월 archive는 보존했다.
+- 5MiB ASCII·64KiB 조각 단일 Node 비교: 기존1099.59ms, 수정40.08ms, 두 경로80조각·원문 round-trip 동일. 이는 통계적 성능 gate나 RSS 개선 증거가 아니다. Unicode/단독 surrogate/1~64byte 한도 관련2개 focused 회귀 PASS. 앱 전체 재빌드·메모리 재측정은 반복하지 않았다.
+- 다음: 실제 provider 승인 항목, 전체 제품 메모리 원인 조사와 파동 마감 검증. idle/peak FAIL은 계속 유효하며 이 최적화로 G6를 합격 처리하지 않는다. diff 검사 PASS, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (앱 전체 종료 후 채팅·파일 재열기)
 
 - 기준fd4ba32, 기존9월 archive만 dirty. 직전 apply/reload/restore는 정상 완료됐지만 renderer reload였다. 별도 Electron 프로세스로 성공 종료된 생성 시험의 userData만 다시 여는 m5-project-reopen-smoke.cjs를 추가했다. 임시 루트·기존 PASS/accepted 증거·원본 복원 조건을 검사하고 새 폴더 선택은 거절한다. 정상 종료 확인 전에 PASS를 내지 않으며 실제 provider는 호출하지 않는다.
