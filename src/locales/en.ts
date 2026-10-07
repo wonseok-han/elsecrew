@@ -349,6 +349,8 @@ export const en: Record<MessageKey, string> = {
   "m5.chat.add": "Add to conversation",
   "m5.chat.unavailable": "Messages cannot be added in the current app or workspace state.",
   "m5.chat.title": "Team conversation",
+  "m5.chat.messages": "Conversation history",
+  "m5.chat.newMessages": "View new messages ↓",
   "m5.chat.cancelDemo": "Cancel demo run",
   "m5.chat.cancelActual": "Cancel real run",
   "m5.chat.recovery": "This working copy needs recovery.",

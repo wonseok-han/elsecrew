@@ -348,6 +348,8 @@ export const ko = {
   "m5.chat.add": "대화에 추가",
   "m5.chat.unavailable": "현재 앱 또는 작업 공간 상태에서는 메시지를 추가할 수 없어요.",
   "m5.chat.title": "팀 대화",
+  "m5.chat.messages": "대화 내역",
+  "m5.chat.newMessages": "새 메시지 보기 ↓",
   "m5.chat.cancelDemo": "데모 실행 취소",
   "m5.chat.cancelActual": "실제 실행 취소",
   "m5.chat.recovery": "복구가 필요한 작업 복사본이에요.",

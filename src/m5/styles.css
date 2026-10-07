@@ -48,6 +48,10 @@ button, input, textarea, select {
 .m5-goal-examples { display: grid; gap: 8px; margin: 18px 0 12px; }
 .m5-goal-examples button { text-align: left; font-weight: 400; line-height: 1.6; padding: 10px 12px; }
 .m5-first-chat-note { font-size: 12px; }
+.m5-timeline-list { overflow-anchor: none; overscroll-behavior: contain; }
+.m5-timeline-list:focus-visible { outline: 2px solid #91c5ff; outline-offset: 3px; }
+.m5-timeline-list .m5-message { min-width: 0; overflow-wrap: anywhere; }
+.m5-new-messages { display: block; margin: 0 auto 12px; border-color: #6385ae; font-size: 12px; }
 .m5-team-preview { display: grid; gap: 12px; margin: 0; }
 .m5-team-preview > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 10px; }
 .m5-team-preview dt { color: #91c5ff; font-size: 12px; }
