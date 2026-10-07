@@ -1,6 +1,11 @@
 const { app, BrowserWindow, net, protocol, session } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { mkdtempSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+
+const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-smoke-"));
+app.setPath("userData", userData);
 
 const rendererDirectory = resolve(process.env.M5_RENDERER_DIR || "");
 const preload = resolve(__dirname, "m5-renderer-smoke-preload.cjs");
@@ -32,7 +37,7 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(asset).toString());
   });
   const window = new BrowserWindow({ show: false, webPreferences: { preload, partition: "m5-renderer-smoke", contextIsolation: false, sandbox: false, nodeIntegration: false } });
-  window.webContents.on("console-message", (_event, _level, message) => process.stderr.write(`renderer: ${message}\n`));
+  window.webContents.on("console-message", (event) => process.stderr.write(`renderer: ${event.message}\n`));
   window.webContents.on("render-process-gone", (_event, details) => fail(new Error(`renderer exited: ${details.reason}`)));
   await window.loadURL("m5smoke://m5/index.html");
   const result = await window.webContents.executeJavaScript(`(async () => {
@@ -49,7 +54,7 @@ app.whenReady().then(async () => {
     };
     chooseLanguage('en');
     await ${waitFor("document.querySelector('main').lang === 'en' && document.querySelector('h1').textContent === 'Choose a project to get started'", "English shell")};
-    const selection = document.querySelector('[aria-label="Choose your agents"]');
+    const selection = document.querySelector('.m5-provider-selection');
     if (!selection || window.m5SmokeLoginRequests.length !== 0) throw new Error('first-run agents were checked before selection');
     if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
     await ${waitFor("!document.querySelector('.m5-provider-selection input').matches(':disabled')", "storage admission before selection")};
@@ -59,6 +64,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
     if (document.querySelector('[aria-label="Claude Code connection"]') || window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
     if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
+    if (!selection.open) selection.querySelector('summary').click();
     [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
@@ -153,7 +159,7 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-file-row').click();
     await ${waitFor("document.querySelector('.m5-breadcrumbs [aria-current=location]')?.textContent === '/ src'", "folder breadcrumb")};
     document.querySelector('.m5-breadcrumbs .m5-root').click();
-    await ${waitFor("document.querySelector('.m5-file-row')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
+    await ${waitFor("document.querySelector('.m5-file-row .m5-tree-name')?.textContent === 'src' && !document.querySelector('.m5-breadcrumbs [aria-current]')", "root breadcrumb")};
     document.querySelector('[aria-label="편집기 패널 접기"]').click();
     await ${waitFor("document.querySelector('[data-panel=editor]').hidden", "editor hidden before search")};
     const fileSearch = document.querySelector('[aria-label="파일 이름 또는 경로 찾기"]');
@@ -162,7 +168,7 @@ app.whenReady().then(async () => {
     await ${waitFor("!document.querySelector('.m5-file-search button[type=submit]').disabled", "file search enabled")};
     document.querySelector('.m5-file-search button[type=submit]').click();
     await ${waitFor("document.querySelector('.m5-search-results button')?.textContent === 'src/example.ts'", "recursive file search result")};
-    if (document.querySelector('.m5-file-row').textContent !== 'src') throw new Error('search changed folder navigation');
+    if (document.querySelector('.m5-file-row .m5-tree-name').textContent !== 'src') throw new Error('search changed folder navigation');
     const searchLanguage = document.querySelector('.m5-toolbar-actions select');
     searchLanguage.value = 'en'; searchLanguage.dispatchEvent(new Event('change', { bubbles: true }));
     await ${waitFor("document.querySelector('.m5-file-search input')?.getAttribute('aria-label') === 'Find by file name or path'", "English file search")};
@@ -215,6 +221,8 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '파일').click();
     await ${waitFor("!document.querySelector('[data-panel=files]').hidden", "reopen files")};
     [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '변경').click();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '변경' && button.getClientRects().length)?.click();
     await ${waitFor("!document.querySelector('[data-panel=changes]').hidden", "reopen changes")};
     document.querySelector('[aria-label="편집기 패널 접기"]').click();
     await ${waitFor("document.querySelector('[data-panel=editor]').hidden", "collapse editor")};
@@ -439,7 +447,7 @@ app.whenReady().then(async () => {
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '저장된 설정 다시 불러오기').click();
     await ${waitFor("document.querySelector('.m5-settings [role=alertdialog]')", "role reload confirmation")};
     [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '설정 변경 버리고 다시 불러오기').click();
-    await ${waitFor("!document.querySelector('.m5-settings [role=status]') && !document.querySelector('.m5-settings [role=alertdialog]')", "role settings restored")};
+    await ${waitFor("![...document.querySelectorAll('.m5-settings [role=status]')].some(node => node.textContent === '저장하지 않은 설정 변경이 있어요.') && !document.querySelector('.m5-settings [role=alertdialog]')", "role settings restored")};
     if (document.querySelector('.m5-settings input').value !== originalModel) throw new Error('role reload did not restore saved model');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(document.querySelector('.m5-settings input'), 'discard-this-model');
     document.querySelector('.m5-settings input').dispatchEvent(new Event('input', {bubbles: true}));
@@ -458,6 +466,19 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-chat-chip')", "saved chat available again")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("[...document.querySelectorAll('.m5-message p')].some(node => node.textContent === '설명을 추가해 주세요.')", "chat history preserved after reopening")};
+    window.m5SmokeAppendMessages(450);
+    await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 450'", "bounded latest conversation page")};
+    const historyButton = label => [...document.querySelectorAll('.m5-timeline nav button')].find(button => button.textContent === label);
+    historyButton('이전 대화').click();
+    await ${waitFor("[...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 250'", "older conversation page")};
+    const oldPage = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+    window.m5SmokeAppendMessages(1);
+    await ${waitFor("document.querySelector('.m5-new-messages')", "new message notice while reading history")};
+    if (JSON.stringify(oldPage) !== JSON.stringify([...document.querySelectorAll('.m5-message p')].map(node => node.textContent))) throw new Error('new message moved the older page');
+    historyButton('이전 대화').click();
+    await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "first conversation page still reachable")};
+    historyButton('최신 대화').click();
+    await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
     const originalRequest = window.m5Projects.request;
     window.m5Projects.request = input => input.action === 'releaseView' ? Promise.reject(new Error('synthetic release failure')) : originalRequest(input);
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();

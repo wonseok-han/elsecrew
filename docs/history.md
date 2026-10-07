@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (긴 대화 Chromium 회귀·기존 UI 검사 갱신)
+
+- 기준890a013. 테스트 preload에만451개 합성 메시지를 기존 chat event 경로로 추가하는 도우미를 연결했다. 실제 renderer에서 최신200개/이전 페이지/첫 메시지 접근/새 메시지가 와도 과거 페이지 불변/최신 복귀를 검사한다. 제품 bridge나 실제 계정 API는 추가하지 않았다.
+- 기존 broad renderer smoke는 선택 카드의 제거된 aria-label, 파일 아이콘을 포함한 textContent, 파일/변경 tab group의 비선택, modal 성공 status까지 없어야 한다는 오래된 조건 때문에 순차 실패했다. 현재 의미 요소/펼치기/렌더 이후 탭 선택/미저장 상태만 검사하도록 정정했다. 중간 파일명 class 오기는 실제 m5-tree-name 확인 후 바로잡았다. 최초 실패를 저장 상태 혼입으로 단정하지 않았고 임시 userData도 추가해 실행별 격리를 유지한다. console callback은 현행 Electron 인자로 수정했다.
+- Karpathy 지침으로 기존 실제 Chromium 시나리오를 재사용했다. renderer build PASS, 최종 renderer-mount 2/2 PASS/exit0이며 숨은 창은 desktop focus를 잡지 않았다. 증거 /private/tmp/hello-agent-history-pages-smoke.log. 긴 대화 외 기존 다국어/설정 실패·보존/편집/배치/검색도 실행됐다. 4 stream12,000 event 속도·event→paint·실제 provider/G6/Windows는 별도 미완료다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (대화 표시의 페이지 상한 연결)
 
 - 기준8b286c8. G6 미완료 수집기를 대조하며 TeamTimeline이 모든 누적 메시지를 DOM으로 만드는 경로를 확인했다. 표시만 최대200개로 나누고 이전/다음/최신 이동·전체 개수·범위의 한영 안내를 추가했다. 저장/조회 메시지나 실행 원장은 줄이지 않는다. 최신 페이지에서 과거로 스크롤하면 시작 위치를 고정하고 새 메시지는 알림만 표시하며 명시 최신 이동 때 따라가기를 재개한다.

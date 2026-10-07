@@ -64,6 +64,16 @@ let snapshotCreated = false;
 let statusReads = 0;
 const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
+let historyMessageIndex = 0;
+window.m5SmokeAppendMessages = (count) => {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 5000) throw new Error("invalid synthetic message count");
+  for (let index = 0; index < count; index++) {
+    const eventSequence = smokeMessages[smokeMessages.length - 1].eventSequence + 1;
+    const message = { ...smokeMessages[0], messageId: `history_${++historyMessageIndex}`, eventSequence, text: `history message ${historyMessageIndex}` };
+    smokeMessages.push(message);
+    for (const listener of chatListeners) listener(message);
+  }
+};
 
 const unexpected = (method) => async () => { throw new Error(`renderer smoke fixture did not expect ${method}`); };
 const unsubscribe = (listeners, listener) => {
