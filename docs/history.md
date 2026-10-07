@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (Codex 프리릴리스 버전 차단 원인 확인)
+
+- 기준9811a04, 기존9월 archive 보존. 직전 턴은 승인된 Claude 소켓 수정/검토 및 Codex 준비 실패 관측으로 진척했다. Karpathy 지침으로 기존 정책 대신 고정 진단을 보강했다. 준비 budget 만료에 현재 단계를 남기며 version probe의 출력 크기/exit/문자열 해석 실패를 구분한다. deadline 경계 회귀1개 PASS.
+- 모델 없는 목록 조회 session70078은 일반 오류/정상 종료(hello-agent-live-WqVIRa)였고, 버전 단계 진단 추가 뒤 session45366은 `version output format` 실패를 확인했다(hello-agent-live-h2kITW/result.json). 두 회차 모두 목표 전달0/임시 원본 불변/shutdown accepted. 현재 앱 내장 CLI의 --version만 별도 읽어 `codex-cli 0.162.0-alpha.2`를 확인했다. 앞선0.159.2 스키마가 현재 설치본이라는 가정은 폐기한다.
+- core validate_semver의 numeric X.Y.Z 전용 검사가 원인이다. prerelease/build를 포함하는 bounded SemVer 문법으로 수정하고 문자열 전체를 보존한다. 서명·실행 파일 신원·권한/프로토콜 협상은 유지한다. 정상 alpha/rc/build 및 leading zero/빈 identifier/중복+/비ASCII/개행/길이 초과 회귀1개 PASS, 최신 debug sidecar build PASS. 같은 독립 검토자 재검토 진행 중이며 실제 모델 성공은 아직 없다.
+- 독립 검토자는 전체 버전 문자열/manifest 일치와 서명·권한 경계 유지에 차단 결함 없음으로 승인했다. 승인된 실제 시험 session44303은 로그인/모델 목록 및 gpt-6.1-sol medium 선택, RUN_ACCEPTED까지 진척했지만 planning/failed·응답 없음으로 끝났다. 증거 hello-agent-live-VDgWL1/result.json: 원본 불변, shutdown accepted, FAIL/exit1. 실행 ID agent_run_ba273d342e7f4bdfa6e46532b8f6baca. 종료 후 해당 실행만 읽기 전용 조회해 native_thread_receipt/manifest 존재, public_event_count0, processesProvenGone/cleanExit·poisoned false·writerLock none을 확인했다. 일반 readonly SQLite 열기는 실패했고 immutable 읽기로 확인했다.
+- thread 생성 단계는 통과했으나 실제 응답 성공은 아니다. 추가 유료 재시도는 하지 않는다. 다음: thread 이후 turn 처리 실패 원인 조사, Claude 실제 경로와 최종 UI/성능/Windows 검증. 이 변경은 로컬 체크포인트로 커밋하며 기존9월 archive 제외, main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (두 항목 승인·Claude 소켓 범위 수정·Codex 준비 실패)
 
 - 사용자 '승인'을 Claude 앱 전용 내부 소켓 제한적 지원/독립 검토와 Codex 임시 프로젝트 실제 작업1회 재시험의 승인으로 확인했다. 기존 history/9월 archive를 보존했다. Karpathy 지침에 따라 workspace/공용 scanner를 풀지 않고 Claude live scope만 별도 검사한다. 실행 전 admission은 strict 유지, 실행 중 Child PID를 TreeTracker identity에서 찾아 socket 발견 시 scan 전후 PID/start_us·uid/nlink/mode·정확 tmp 경로/이름을 검증한다. 소켓 없는 정상 종료 뒤 buffered output은 막지 않는다. 커널 endpoint 소유권을 증명한다고 주장하지 않는다.

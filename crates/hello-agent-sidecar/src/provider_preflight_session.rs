@@ -36,6 +36,12 @@ fn stage_failure(stage: &'static str) -> SidecarError {
     )
 }
 
+fn remaining_preflight_budget(budget: Duration, elapsed: Duration, stage: &'static str) -> Result<Duration, SidecarError> {
+    budget.checked_sub(elapsed).filter(|remaining| !remaining.is_zero()).ok_or_else(|| {
+        SidecarError::new("providerPreflightFailed", format!("Codex preflight deadline reached at {stage}"))
+    })
+}
+
 /// Internal discovery entry point for a separately admitted executable pair.
 /// Does not create a thread, send user input, or grant runtime execution authority.
 pub(crate) struct ProviderInspection<'a, T = ()> {
@@ -75,12 +81,12 @@ pub(crate) fn inspect_codex_version(
         let mut eof = false;
         loop {
             if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
-                return Err(failure());
+                return Err(stage_failure("version probe canceled or timed out"));
             }
             if !eof {
                 match process.poll_output(cancel)? {
                     OutputChunk::Bytes(bytes) => {
-                        if output.len() + bytes.len() > 1024 { return Err(failure()); }
+                        if output.len() + bytes.len() > 1024 { return Err(stage_failure("version output budget")); }
                         output.extend(bytes);
                     }
                     OutputChunk::Eof => eof = true,
@@ -91,9 +97,9 @@ pub(crate) fn inspect_codex_version(
             }
             if eof {
                 if let Some(status) = process.exit_status()? {
-                    if !status.success() { return Err(failure()); }
+                    if !status.success() { return Err(stage_failure("version process exit")); }
                     return parse_cli_version(ProviderId::Codex, &BoundedObservation::new(output)
-                        .map_err(|_| failure())?).map_err(|_| failure());
+                        .map_err(|_| stage_failure("version output observation"))?).map_err(|_| stage_failure("version output format"));
                 }
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -569,19 +575,17 @@ fn check_claimed(
                 eprintln!("preflight sending_rpc_id={id:?}");
             }
             on_action(process, TextAction::ObserveProcess)?;
-            let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
+            let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
             process.send_preflight_observed(frame, remaining, cancel, &mut |process| {
                 on_action(process, TextAction::ObserveProcess)
             })?;
         }
-        let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
+        let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
         let reply = process.receive_preflight_observed(remaining, cancel, &mut |process| {
             on_action(process, TextAction::ObserveProcess)
         })?;
         on_action(process, TextAction::ObserveProcess)?;
-        if started.elapsed() >= budget {
-            return Err(failure());
-        }
+        remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
         #[cfg(test)]
         let previous = flow.state();
         let stage = flow.diagnostic_stage();
@@ -604,21 +608,19 @@ fn check_claimed(
                 on_action(process, TextAction::VerifyWorkspace)?;
                 on_action(process, TextAction::ObserveProcess)?;
                 let request = flow.start_thread(cwd).map_err(|_| failure())?;
-                let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
+                let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
                 process.send_preflight_observed(request, remaining, cancel, &mut |process| {
                     on_action(process, TextAction::ObserveProcess)
                 })?;
                 // Exactly one reply and one thread/started, in either order.
                 for _ in 0..2 {
-                    let remaining = budget.checked_sub(started.elapsed()).ok_or_else(failure)?;
+                    let remaining = remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
                     let response =
                         process.receive_preflight_observed(remaining, cancel, &mut |process| {
                             on_action(process, TextAction::ObserveProcess)
                         })?;
                     on_action(process, TextAction::ObserveProcess)?;
-                    if started.elapsed() >= budget {
-                        return Err(failure());
-                    }
+                    remaining_preflight_budget(budget, started.elapsed(), flow.diagnostic_stage())?;
                     flow.accept(&response).map_err(|_| failure())?;
                 }
                 if flow.state() != PreflightState::ThreadMatched {
@@ -877,6 +879,17 @@ mod tests {
     use hello_agent_core::provider::vendor_observation::codex_preflight::ExpectedProfile;
     use serde_json::json;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn preflight_deadline_preserves_fixed_stage_and_exact_boundary() {
+        let budget = Duration::from_secs(30);
+        assert_eq!(remaining_preflight_budget(budget, Duration::from_secs(29), "config/read").unwrap(), Duration::from_secs(1));
+        for elapsed in [budget, budget + Duration::from_nanos(1)] {
+            let error = remaining_preflight_budget(budget, elapsed, "config/read").unwrap_err();
+            assert_eq!(error.kind, "providerPreflightFailed");
+            assert_eq!(error.detail, "Codex preflight deadline reached at config/read");
+        }
+    }
 
     /// Explicit approval only: real installed CLI, but fresh profile, OS-denied
     /// networking and config-only RPC. Never select the user's login profile.

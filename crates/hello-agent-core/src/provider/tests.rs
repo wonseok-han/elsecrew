@@ -4,6 +4,20 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 
+#[test]
+fn official_prerelease_versions_are_preserved_without_relaxing_version_syntax() {
+    for version in ["0.162.0-alpha.2", "1.2.3-rc.1+build.001", "1.2.3+001", "1.2.3"] {
+        let observation = BoundedObservation::new(format!("codex-cli {version}\n").into_bytes()).unwrap();
+        assert_eq!(parse_cli_version(ProviderId::Codex, &observation).unwrap(), version);
+    }
+    for version in ["01.2.3", "1.02.3", "1.2.03", "1.2", "1.2.3-", "1.2.3+",
+        "1.2.3-alpha..2", "1.2.3-01", "1.2.3+one+two", "1.2.3-alpha_2", "1.2.3-α", "1.2.3\nextra"] {
+        let observation = BoundedObservation::new(format!("codex-cli {version}").into_bytes()).unwrap();
+        assert!(parse_cli_version(ProviderId::Codex, &observation).is_err(), "{version}");
+    }
+    assert!(validate_semver(&format!("1.2.3-{}", "a".repeat(128))).is_err());
+}
+
 const D1: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const D2: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 const D3: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";

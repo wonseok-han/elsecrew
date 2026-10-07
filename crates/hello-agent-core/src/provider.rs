@@ -966,8 +966,19 @@ fn same_exact_set(actual: &[String], expected: &[String]) -> bool {
 }
 
 fn validate_semver(value: &str) -> Result<(), ProviderError> {
-    let parts: Vec<&str> = value.split('.').collect();
+    // Preserve the exact vendor version, including prerelease/build identity.
+    // A reported version never substitutes for signature or protocol admission.
+    let (release, build) = value.split_once('+').map_or((value, None), |(a, b)| (a, Some(b)));
+    let (core, prerelease) = release.split_once('-').map_or((release, None), |(a, b)| (a, Some(b)));
+    let identifiers_valid = |suffix: &str, prerelease: bool| suffix.split('.').all(|part| {
+        !part.is_empty()
+            && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !(prerelease && part.len() > 1 && part.starts_with('0') && part.bytes().all(|byte| byte.is_ascii_digit()))
+    });
+    let parts: Vec<&str> = core.split('.').collect();
     if value.len() > 128
+        || build.is_some_and(|suffix| !identifiers_valid(suffix, false))
+        || prerelease.is_some_and(|suffix| !identifiers_valid(suffix, true))
         || parts.len() != 3
         || parts.iter().any(|part| {
             part.is_empty()
@@ -975,7 +986,7 @@ fn validate_semver(value: &str) -> Result<(), ProviderError> {
                 || (part.len() > 1 && part.starts_with('0'))
         })
     {
-        return fail("provider CLI version is not an exact numeric semantic version");
+        return fail("provider CLI version is not an exact semantic version");
     }
     Ok(())
 }
