@@ -180,7 +180,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     : null;
 
   return (
-    <main className="m5-workbench" lang={lang} aria-label={t("m5.shell.label")}>
+    <main className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
+      <ProjectCatalog rail ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
       <header className="m5-toolbar">
         <div>
           <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
@@ -191,7 +192,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </div>
         <div className="m5-toolbar-actions">
           <select aria-label={t("m5.shell.language")} title={t("m5.shell.languageScope")} value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select>
-          <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
           {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
             {t("m5.shell.switch")}
           </button>}

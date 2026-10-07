@@ -373,6 +373,8 @@ export const ko = {
   "m5.chat.demo": "데모 실행 · {role}",
   "m5.chat.prepare": "실제 실행 준비 · {role}",
   "m5.chat.connecting": "실제 연결 확인 중…",
+  "m5.catalog.manage": "복구 및 작업 기록",
+  "m5.catalog.switchHelp": "프로젝트를 전환하려면 설정을 닫고, 진행 중인 작업과 파일 편집을 정리한 뒤 상단에서 프로젝트를 닫아 주세요.",
   "m5.roles.label": "프로젝트 역할과 모델 설정",
   "m5.roles.version": "이 프로젝트 전용 설정 · 버전 {revision}",
   "m5.roles.back": "작업대로 돌아가기",
