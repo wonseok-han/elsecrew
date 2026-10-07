@@ -7,6 +7,8 @@ use tempfile::TempDir;
 fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
+    assert_eq!(f.manager.application_capabilities().result["enabled"], cfg!(target_os = "macos"));
+    assert!(!f.manager.application_cleanup_enabled);
     let mut owner = Confirmations::default();
     let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_retire_backup").unwrap();
@@ -826,7 +828,7 @@ fn application_two_file_roundtrip(cancel_tail: bool, lost_phase: Option<&str>) {
     )
     .is_err());
     let before_restore = required_project(&f.storage, &f.project_id).unwrap();
-    application::review::backup::space::with_free_space(0, || {
+    application::review::backup::space::with_free_space(SNAPSHOT_DISK_RESERVE_BYTES_V1 + 64 * 1024 - 1, || {
         assert!(intent::completion::begin_restore(
             &f.manager, &mut f.storage, &f.project_id, &second, "req_restore_no_space"
         ).is_err());
@@ -834,7 +836,7 @@ fn application_two_file_roundtrip(cancel_tail: bool, lost_phase: Option<&str>) {
     assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before_restore);
     assert_eq!(fs::read(f.source.join("src/new.txt")).unwrap(), b"second-addition");
     let second = application::review::backup::space::with_free_space(
-        SNAPSHOT_DISK_RESERVE_BYTES_V1 + 2 * 64 * 1024,
+        SNAPSHOT_DISK_RESERVE_BYTES_V1 + 64 * 1024,
         || intent::completion::begin_restore(
         &f.manager,
         &mut f.storage,

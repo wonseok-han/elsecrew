@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 
+test("chat application status rejects another chat or project response", () => {
+  const request = {action:"chatApplicationStatus" as const,projectId:"project_a",chatId:"chat_a"};
+  const status = {projectId:"project_a",applicationId:null,state:"none",currentIndex:null,total:0,running:false,failure:null};
+  const result = {schemaVersion:1,action:request.action,chatId:request.chatId,status};
+  assert.doesNotThrow(() => validateProjectCatalogRequest(request));
+  assert.doesNotThrow(() => validateProjectCatalogResult(result,request));
+  assert.throws(() => validateProjectCatalogRequest({...request,chatId:undefined}));
+  assert.throws(() => validateProjectCatalogResult({...result,chatId:"chat_other"},request));
+  assert.throws(() => validateProjectCatalogResult({...result,status:{...status,projectId:"project_other"}},request));
+});
+
 test("backup preparation recovery binds project, record and exact digest", () => {
   const entry = {reviewId:`review_${"a".repeat(32)}`,fingerprint:"b".repeat(64)};
   const request = {action:"backupPreparations" as const,projectId:"project_a"};

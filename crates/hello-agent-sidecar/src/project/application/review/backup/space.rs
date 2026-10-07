@@ -47,6 +47,12 @@ impl Volumes {
         }
         Ok(())
     }
+    fn sequential_rename_allowance(&mut self) {
+        // Only one rename is in flight; retained payload is already allocated.
+        for (_, bytes) in self.0.values_mut() {
+            *bytes = ENTRY_ALLOWANCE;
+        }
+    }
 }
 
 // New directories inherit their nearest existing ancestor's filesystem. Existing
@@ -131,11 +137,18 @@ pub(in crate::project) fn intent(
         } else {
             item["after"]["size"].as_u64().ok_or_else(invalid)?
         };
-        let bytes = after.checked_add(ENTRY_ALLOWANCE).ok_or_else(low_space)?;
+        let bytes = if restoring {
+            0
+        } else {
+            after.checked_add(ENTRY_ALLOWANCE).ok_or_else(low_space)?
+        };
         volumes.charge(
             &allocation_parent(&source._root, item["path"].as_str().ok_or_else(invalid)?)?,
             bytes,
         )?;
+    }
+    if restoring {
+        volumes.sequential_rename_allowance();
     }
     volumes.charge(&directory(manager)?, 0)?;
     volumes.verify()
@@ -144,6 +157,17 @@ pub(in crate::project) fn intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sequential_restoration_requires_one_entry_per_volume() {
+        let free = SNAPSHOT_DISK_RESERVE_BYTES_V1 + ENTRY_ALLOWANCE;
+        let mut volumes = Volumes(BTreeMap::from([(1, (free, 0)), (2, (free, 0))]));
+        volumes.sequential_rename_allowance();
+        assert_eq!(volumes.0[&1].1, ENTRY_ALLOWANCE);
+        assert_eq!(volumes.0[&2].1, ENTRY_ALLOWANCE);
+        assert!(volumes.verify().is_ok());
+        volumes.0.get_mut(&2).unwrap().0 -= 1;
+        assert!(volumes.verify().is_err());
+    }
     #[test]
     fn volume_totals_keep_reserve_and_reject_overflow() {
         let reserve = SNAPSHOT_DISK_RESERVE_BYTES_V1;

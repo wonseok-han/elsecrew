@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (macOS 원본 반영·복구 실제 UI 연결)
+
+- 기준 cdcd440. 이전 공간 수정은 구현/회귀 진전이었다. 마지막 독립 지적(restore entry의 파일 수만큼 과도 누적)을 볼륨별 한 rename allowance로 수정했다. reserve+64KiB-1 거절/원장·원본 불변, reserve+64KiB 입장 포함 다중파일 focused1 PASS(10.32초), 공간 단위2 PASS. 공간·취소 범위 독립 재검토 차단 없음.
+- macOS만 source_writes_enabled를 활성화했다. 활성화 검토에서 동일 플래그가 파괴적 backup cleanup/retirement도 여는 것을 발견해 별도 application_cleanup_enabled=false로 분리했다. 기존 일회성 확인/fingerprint/lock/원본 신원 검사를 우회하지 않는다. 활성화+정리 거절 회귀1 PASS(7.31초). 최종 활성화/UI 분리 변경 독립 재검토는 진행 중이다.
+- 실제 임시 Git/userData UI 1차는 원본 적용 성공 후 채팅의 복구 진입점 부재로 실패했다(dS7EOt). 검증된 applicationId에 RestorationPreview를 연결했고 2차는 파일 복원 성공했지만 running 때 UI unmount로 완료 조회가 끊겼다(tvc0yv). 복구 노출 상태를 별도로 유지해 진행 중 mount/polling을 보존했다. 최종 /private/tmp/hello-agent-project-ui-cJ187t/project.png는 main/preload/renderer/native sidecar에서 편집/저장·diff·원본 반영·원본 복원·두 채팅 분리/재열기까지 PASS/정상 종료다. 실제 계정/유료 모델/사용자 프로젝트는 사용하지 않았다.
+- 추가 독립 검토가 적용 후 재진입하면 세션 callback 기반 복구 진입점이 사라지는 문제를 확인했다. exact chatApplicationStatus 요청/응답과 서버의 durable binding.chatBinding.chatId 필터를 추가해 다른 채팅은 none으로 반환한다. mount 조회/진행 중 polling 및 선택 변경 취소를 연결했다. 계약16 PASS, sidecar/main/preload/renderer build PASS. /private/tmp/hello-agent-project-ui-FvTG0Q/project.png에서 적용 완료 후 renderer reload→저장 프로젝트/채팅 재선택→복구 목록→원본 복원→두 채팅 재열기까지 PASS/정상 종료다. 이는 전체 앱 프로세스 재시작이나 실제 모델 검증과 구분한다. 해당 최종 조회 경계 독립 재검토는 진행 중이다.
+- Karpathy 지침에 따라 기존 복구 화면과 확인 계약을 재사용했다. sidecar/renderer build 및 최종 UI 수정 뒤 TypeScript 검사 통과, diff check 확인. 이후 준비 안내의 한영 미활성 문구를 현행 별도 확인 안내로 정정했다. 다음은 최종 재검토, 실제 공급자 계정/작업 흐름·시안/UI 마감·G6/Windows/출시 검증이다. 백업 삭제는 미활성, 전체 완료 아님. 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (공간 중복 청구 수정·적용 복구 회귀)
 
 - 직전 공간 검사 연결은 구현 진전이었다. 독립 검토에서 기존 archive 32MiB 재청구 및 source before 이미지의 이중 청구를 지적받아 수정했다. 신규 백업만 before payload를 청구하고, 적용은 after staging+entry, 복구는 rename entry만 계산한다. 이미 존재하는 backup에는 reserve만 확인한다. 기존 원본/백업을 복사하는 것으로 가정하지 않는다.
@@ -150,7 +158,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **원본 writer 활성화 전 검사(2026-10-07)**: backup 예산과 disk-free/staging 여유를 분리했다. 준비 전 신규 archive와 after staging의 device별 합산/reserve 검사, 적용·복구 입장/개별 쓰기 재검사 및 archive 재검증의 취소 검사를 구현했다. before는 source에서 rename하므로 새 payload로 중복 청구하지 않고 기존 archive도 재청구하지 않는다. application28 회귀 PASS, 공간 수정 독립 재검토와 실제 UI 검증은 남아 source_writes_enabled=false다.
+- **macOS 원본 writer 활성화(2026-10-07)**: 신규 archive/after staging의 device별 disk-free reserve, 순차 rename 복구 allowance, 쓰기 직전 재검사 및 archive 취소 검사를 연결했다. 공간·취소 독립 차단은 해소했고 macOS source_writes_enabled=true다. 합성 실제 UI의 편집→diff→원본 반영→복원→두 채팅 전환 PASS. 삭제/기록 정리는 별도 application_cleanup_enabled=false이며 실제 계정/사용자 프로젝트·Windows/출시 합격과 구분한다.
 - **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.
 - **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
 - **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.

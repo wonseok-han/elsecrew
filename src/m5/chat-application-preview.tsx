@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.tsx";
 import { ApplicationStartControl } from "./application-start-control.tsx";
-import { validateProjectCatalogResult, type ApplicationPreviewPage } from "./contracts/project-catalog-v1.ts";
+import { RestorationPreview } from "./restoration-preview.tsx";
+import { validateProjectCatalogResult, type ApplicationPreviewPage, type ApplicationStatus } from "./contracts/project-catalog-v1.ts";
 
 type PreviewProps = { projectId: string; chatId: string; worktreeId: string; disabled: boolean };
 export function ChatApplicationPreview(props: PreviewProps) {
@@ -15,12 +16,16 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
   const [error, setError] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const [application, setApplication] = useState<ApplicationStatus | null>(null);
+  const [restorationOffered, setRestorationOffered] = useState(false);
   const startedRef = useRef(false);
   const generation = useRef(0);
   const pending = useRef(false);
   useEffect(() => {
     generation.current++; setPreview(null); setError(false); setConfirmation(null);
     startedRef.current = false; setStarted(false);
+    setApplication(null);
+    setRestorationOffered(false);
     return () => { generation.current++; };
   }, [projectId, chatId, worktreeId]);
   useEffect(() => {
@@ -34,6 +39,21 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
     const timer = setTimeout(() => { if (!startedRef.current) setConfirmation(null); }, 300_000);
     return () => clearTimeout(timer);
   }, [confirmation]);
+  useEffect(() => {
+    if (disabled || !window.m5Projects) return;
+    let current = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const request = { action: "chatApplicationStatus" as const, projectId, chatId };
+    const refresh = () => { void window.m5Projects!.request(request).then(raw => {
+      const result = validateProjectCatalogResult(raw, request);
+      if (!current || startedRef.current || result.action !== "chatApplicationStatus") return;
+      setApplication(result.status);
+      setRestorationOffered(!result.status.running && ["prepared", "applying", "applied"].includes(result.status.state));
+      if (result.status.running) timer = setTimeout(refresh, 1000);
+    }).catch(() => { if (current && !startedRef.current) setError(true); }); };
+    refresh();
+    return () => { current = false; clearTimeout(timer); };
+  }, [projectId, chatId, worktreeId, disabled]);
   async function confirmReview(cancel = false) {
     if (disabled || startedRef.current || pending.current || !window.m5Projects || (!cancel && !preview) || (cancel && !confirmation)) return;
     const epoch = generation.current;
@@ -79,6 +99,11 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
       <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
     {confirmation && !started && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
-    {confirmation && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} />}
+    {confirmation && application?.state !== "restored" && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} onStatus={status => {
+      setApplication(status);
+      if (!status.running && status.applicationId && ["prepared", "applying", "applied"].includes(status.state)) setRestorationOffered(true);
+    }} />}
+    {application?.state === "restored" && <p role="status">{t("m5.application.restored")}</p>}
+    {restorationOffered && application?.applicationId && ["prepared", "applying", "applied"].includes(application.state) && <RestorationPreview projectId={projectId} applicationId={application.applicationId} disabled={disabled || busy} onStatus={status => setApplication(current => current?.applicationId === status.applicationId ? status : current)} />}
   </section>;
 }

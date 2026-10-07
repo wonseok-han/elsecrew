@@ -333,6 +333,7 @@ pub struct ProjectManager {
     preparation_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     // Remains false in product builds until integrated safety review is complete.
     source_writes_enabled: bool,
+    application_cleanup_enabled: bool,
     application_failure: Option<(String, String, ProjectFailure)>,
     pub(crate) application_cancel: crate::application_cancel::ApplicationCancel,
     #[cfg(target_os = "macos")]
@@ -363,13 +364,13 @@ impl ProjectManager {
     pub(crate) fn inspect_application_retirement(&self, storage: &Storage, project: &str, application: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { let inspection = application::review::intent::retirement::preview(storage, project, application)?;
-          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectApplicationRetirement","projectId":project,"enabled":self.source_writes_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectApplicationRetirement","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
         #[cfg(not(unix))]
         { let _ = (storage,project,application); Err(ProjectFailure::recovery("application retirement unavailable on this platform")) }
     }
 
     pub(crate) fn retire_application(&mut self, storage: &mut Storage, project: &str, application: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("application retirement is not enabled")); }
+        if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("application retirement is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("application retirement requires idle processing")); }
         #[cfg(unix)]
         { self.application_confirmations.cancel();
@@ -382,13 +383,13 @@ impl ProjectManager {
     pub(crate) fn inspect_backup_cleanup(&self, storage: &Storage, project: &str, review: &str) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
         { let inspection = application::review::backup::cleanup::preview(self, storage, project, review)?;
-          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectBackupCleanup","projectId":project,"enabled":self.source_writes_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
+          Ok(ProjectAction { result: json!({"schemaVersion":1,"action":"inspectBackupCleanup","projectId":project,"enabled":self.application_cleanup_enabled && cfg!(target_os="macos"),"inspection":inspection}), ..Default::default() }) }
         #[cfg(not(unix))]
         { let _ = (storage, project, review); Err(ProjectFailure::recovery("backup cleanup unavailable on this platform")) }
     }
 
     pub(crate) fn cleanup_backup(&mut self, storage: &mut Storage, project: &str, review: &str, fingerprint: &str, request: &str) -> Result<ProjectAction, ProjectFailure> {
-        if !self.source_writes_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("backup cleanup is not enabled")); }
+        if !self.application_cleanup_enabled || !cfg!(target_os="macos") { return Err(ProjectFailure::recovery("backup cleanup is not enabled")); }
         if self.application_running() || self.preparation_cancel.is_some() || !self.pending_saves.is_empty() { return Err(ProjectFailure::recovery("backup cleanup requires idle processing")); }
         #[cfg(unix)]
         { self.application_confirmations.cancel();
@@ -773,6 +774,20 @@ impl ProjectManager {
             ..Default::default()
         })
     }
+    pub(crate) fn chat_application_status(
+        &self, storage: &Storage, project_id: &str, chat_id: &str,
+    ) -> Result<ProjectAction, ProjectFailure> {
+        let mut action = self.application_status(storage, project_id)?;
+        let project = required_project(storage, project_id)?;
+        let matches = project.get("application_intent")
+            .is_some_and(|record| record["binding"]["chatBinding"]["chatId"] == chat_id);
+        if !matches {
+            action.result["status"] = json!({"projectId":project_id,"applicationId":null,"state":"none","currentIndex":null,"total":0,"running":false,"failure":null});
+        }
+        action.result["action"] = json!("chatApplicationStatus");
+        action.result["chatId"] = json!(chat_id);
+        Ok(action)
+    }
     /// Archive contents are evidence, not a prediction that every item will be changed.
     pub(crate) fn restoration_preview(&self, storage: &Storage, project_id: &str, application_id: &str, offset: usize, expected_fingerprint: Option<&str>) -> Result<ProjectAction, ProjectFailure> {
         #[cfg(unix)]
@@ -821,7 +836,11 @@ impl ProjectManager {
             create_managed_directory(&data_root, &data_dir, SAVE_STAGING_DIRECTORY)?;
         Ok(Self {
             preparation_cancel: None,
-            source_writes_enabled: false,
+            // Only macOS has the no-follow/atomic rename writer and recovery gate.
+            // Enabling the capability never bypasses review, consent, or fencing.
+            source_writes_enabled: cfg!(target_os = "macos"),
+            // Destructive retention/cleanup has its own activation review.
+            application_cleanup_enabled: false,
             application_failure: None,
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]

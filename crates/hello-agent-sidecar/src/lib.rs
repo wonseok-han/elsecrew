@@ -939,7 +939,7 @@ impl Sidecar {
         }
         if self.projects.application_running()
             && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
-            && !(request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("applicationStatus" | "applicationHistory" | "cancelApplication")))
+            && !(request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("applicationStatus" | "chatApplicationStatus" | "applicationHistory" | "cancelApplication")))
         {
             return Ok(HandledRequest::response(error_response(&request, "applicationBusy", "requestBlocked", "source application owns the active write slot")));
         }
@@ -1212,6 +1212,10 @@ impl Sidecar {
                 Some("applicationStatus") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;
                     self.projects.application_status(&self.storage,param_string(params,"projectId").map_err(invalid_params)?)
+                }
+                Some("chatApplicationStatus") => {
+                    let params = require_exact_params(&request.params, &["action", "projectId", "chatId"]).map_err(invalid_params)?;
+                    self.projects.chat_application_status(&self.storage, param_string(params,"projectId").map_err(invalid_params)?, param_string(params,"chatId").map_err(invalid_params)?)
                 }
                 Some("inspectPreparation") => {
                     let params = require_exact_params(&request.params, &["action", "projectId"]).map_err(invalid_params)?;

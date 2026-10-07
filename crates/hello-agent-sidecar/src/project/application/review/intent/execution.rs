@@ -1,5 +1,5 @@
-//! Internal synchronous orchestration candidate. Product IPC activation and
-//! worker-thread/cancellation transport are separate integration steps.
+//! Apply/restore state machines advanced by the macOS product scheduler.
+//! Synchronous entry points below also support focused recovery tests.
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 mod applying;

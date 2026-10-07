@@ -32,6 +32,7 @@ export type ProjectCatalogRequest = { action: "list"; cursor: string | null } | 
   | { action: "applicationPreviewPage"; projectId: string; chatId: string | null; offset: number; fingerprint: string | null }
   | { action: "inspectPreparation"; projectId: string }
   | { action: "applicationStatus"; projectId: string }
+  | { action: "chatApplicationStatus"; projectId: string; chatId: string }
   | { action: "applicationHistory"; projectId: string }
   | { action: "applicationPreview"; projectId: string }
   | { action: "chatApplicationPreview"; projectId: string; chatId: string }
@@ -61,6 +62,7 @@ export type ProjectCatalogResult =
   | { schemaVersion: 1; action: "applicationPreview"; projectId: string; preview: ApplicationPreview }
   | { schemaVersion: 1; action: "applicationHistory"; projectId: string; entries: ApplicationHistoryEntry[] }
   | { schemaVersion: 1; action: "applicationStatus"; status: ApplicationStatus }
+  | { schemaVersion: 1; action: "chatApplicationStatus"; chatId: string; status: ApplicationStatus }
   | { schemaVersion: 1; action: "inspectPreparation" | "abandonPreparation"; inspection: PreparationInspection }
   | { schemaVersion: 1; action: "list"; projects: ProjectCatalogEntry[]; nextCursor: string | null }
   | { schemaVersion: 1; action: "releaseView"; projectId: string }
@@ -132,7 +134,7 @@ export function validateProjectCatalogRequest(value: unknown): ProjectCatalogReq
     if (request.cursor !== null) id(request.cursor);
   } else if (request.action === "reopen" || request.action === "releaseView" || request.action === "inspectPreparation" || request.action === "applicationStatus" || request.action === "applicationHistory" || request.action === "applicationPreview" || request.action === "prepareApplicationWorkspace") {
     keys(request, ["action", "projectId"]); id(request.projectId);
-  } else if (request.action === "chatApplicationPreview") {
+  } else if (request.action === "chatApplicationPreview" || request.action === "chatApplicationStatus") {
     keys(request, ["action", "projectId", "chatId"]); id(request.projectId); id(request.chatId);
   } else if (request.action === "abandonPreparation") {
     keys(request, ["action", "inspection"]); validatePreparationInspection(request.inspection);
@@ -250,8 +252,9 @@ export function validateProjectCatalogResult(value: unknown, input: ProjectCatal
       seen.add(entry.applicationId);
       if (!["applied", "restored", "abandoned"].includes(String(entry.state)) || !Number.isSafeInteger(entry.total) || (entry.total as number) < 0 || (entry.total as number) > 100000) throw new Error("invalid historical summary");
     }
-  } else if (request.action === "applicationStatus") {
-    keys(result,["schemaVersion","action","status"]);
+  } else if (request.action === "applicationStatus" || request.action === "chatApplicationStatus") {
+    keys(result, request.action === "chatApplicationStatus" ? ["schemaVersion","action","chatId","status"] : ["schemaVersion","action","status"]);
+    if (request.action === "chatApplicationStatus" && id(result.chatId) !== request.chatId) throw new Error("application status chat mismatch");
     const status = object(result.status);
     keys(status,["projectId","applicationId","state","currentIndex","total","running","failure"]);
     if (status.failure !== null) {
