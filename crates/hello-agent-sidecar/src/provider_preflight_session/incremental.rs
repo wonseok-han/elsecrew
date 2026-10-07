@@ -65,9 +65,15 @@ pub(super) struct TextSession {
     outgoing: VecDeque<NativeFrame>,
     transmitting: bool,
     requires_approval_boundary: bool,
+    // Fixed labels only: never retain provider frames, paths, or account data.
+    diagnostic_stage: &'static str,
 }
 
 impl TextSession {
+    pub(super) fn diagnostic_stage(&self) -> &'static str {
+        self.diagnostic_stage
+    }
+
     pub(super) fn pending_approvals(&self) -> Vec<&PendingApproval> {
         let Some(Stage::Streaming(stream)) = &self.stage else {
             return Vec::new();
@@ -101,6 +107,7 @@ impl TextSession {
             outgoing: VecDeque::new(),
             transmitting: false,
             requires_approval_boundary: false,
+            diagnostic_stage: "preflight initialization",
         })
     }
 
@@ -142,6 +149,11 @@ impl TextSession {
         on_action: &mut impl FnMut(&mut LoginProcess<'_>, TextAction) -> Result<(), SidecarError>,
     ) -> Result<Option<TurnOutcome>, SidecarError> {
         let stage = self.stage.take().ok_or_else(failure)?;
+        self.diagnostic_stage = match &stage {
+            Stage::Preflight { flow, .. } => flow.diagnostic_stage(),
+            Stage::Starting(_) => "turn start",
+            Stage::Streaming(_) => "turn stream",
+        };
         self.remaining(cancel)?;
         if self.transmitting || !self.outgoing.is_empty() {
             if self.requires_approval_boundary {
@@ -217,7 +229,10 @@ impl TextSession {
                             })?
                         {
                             on_action(process, TextAction::ObserveProcess)?;
-                            flow.accept(&frame).map_err(|_| failure())?;
+                            flow.accept(&frame).map_err(|_| {
+                                self.diagnostic_stage = flow.diagnostic_stage();
+                                failure()
+                            })?;
                             waiting = flow.awaiting_response();
                         }
                     }
@@ -413,12 +428,14 @@ mod tests {
             assert!(session
                 .advance(&mut process, &cancel, &mut |_, _| Err(failure()))
                 .is_err());
+            assert_eq!(session.diagnostic_stage(), "initialize");
             cancel.store(false, Ordering::Release);
             session.started = Instant::now();
             session.turn_started = None;
             assert!(session
                 .advance(&mut process, &cancel, &mut observe)
                 .is_err());
+            assert_eq!(session.diagnostic_stage(), "initialize");
             assert!(LoginProcess::reserve(&profile).is_err());
             process.finish().unwrap();
             assert!(LoginProcess::reserve(&profile).is_ok());

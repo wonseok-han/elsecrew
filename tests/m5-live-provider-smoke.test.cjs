@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../scripts/m5-live-provider-smoke.cjs'), 'utf8');
 
-function harness() {
+function harness(catalogOnly = false) {
   const events = new Map();
   const timers = new Map();
   const exits = [];
@@ -17,7 +17,7 @@ function harness() {
   };
   const context = vm.createContext({
     __dirname: path.resolve(__dirname, '../scripts'),
-    process: {env:{HELLO_AGENT_APPROVED_LIVE_SMOKE:'1',HELLO_AGENT_LIVE_USER_DATA:'/synthetic/userdata'}},
+    process: {env:{HELLO_AGENT_APPROVED_LIVE_SMOKE:'1',HELLO_AGENT_LIVE_USER_DATA:'/synthetic/userdata',HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY:catalogOnly?'1':'0'}},
     console: {log() {}},
     setTimeout(callback, delay) { timers.set(delay, callback); return delay; },
     clearTimeout(id) { timers.delete(id); },
@@ -34,7 +34,9 @@ function harness() {
     },
   });
   vm.runInContext(source, context);
-  vm.runInContext(`outcomes.push(...['codex','claude'].map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
+  vm.runInContext(catalogOnly
+    ? `outcomes.push({provider:'codex',state:'catalogObserved',models:[]});finish();`
+    : `outcomes.push(...['codex','claude'].map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
   return {events,timers,exits,evidence: () => evidence};
 }
 
@@ -55,4 +57,14 @@ test('blocked shutdown writes failure without forcing process exit', () => {
   assert.equal(h.evidence().status, 'FAIL');
   assert.equal(h.evidence().shutdown, 'notConfirmed');
   assert.deepEqual(h.exits, []);
+});
+
+test('catalog-only evidence cannot be mistaken for actual model-run evidence', () => {
+  const h = harness(true);
+  assert.equal(h.evidence().verificationKind, 'modelChoicesOnly');
+  assert.equal(h.evidence().status, 'PENDING');
+  h.events.get('will-quit')();
+  assert.equal(h.evidence().status, 'PASS');
+  assert.equal(h.evidence().outcomes[0].state, 'catalogObserved');
+  assert.equal(h.evidence().outcomes[0].responseObserved, undefined);
 });

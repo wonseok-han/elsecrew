@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실행 결과·종료 확인 분리 UI)
+
+- 기준 a39d2b8. 직전 진단 코드 추가는 진행 사항이며 실제 원인 해결·검증 완료는 아니다. 실행 목록이 상태명만 표시하던 부분에 실패/취소/성공과 cleanExit/미확인/복구 필요를 분리한 ko/en 안내, 펼칠 수 있는 실행 ID·종료 확인 정보를 연결했다.
+- 순수 표시 함수 runOutcomeNotice는 recovery를 우선하고 terminal 상태여도 cleanExit 없이는 종료 확인을 주장하지 않는다. 정상 실패를 로그인 만료로 단정하지 않고 설정 확인을 안내한다. 자동 재실행·원본 변경 없음 주장·적용 권한 부여는 추가하지 않았다. 상태 조합 회귀를 추가했으며 UI 렌더/빌드와 전체 테스트는 사용자 방침대로 누적 검증에 남긴다.
+- 기존 Codex 내부 단계 진단·smoke 실행 ID 결속과 함께 구현 체크포인트로 남긴다. 기존9월 archive 변경은 포함하지 않는다. diff 검사만 수행하며 제품 합격/실제 연결 성공으로 취급하지 않는다. 다음: 실제 준비 실패 원인 해소, 화면·계약·Rust 누적 검증. main 병합/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (Codex 실행 준비 진단 연결)
+
+- 직전 턴의 저장 기록 조사로 실패가 thread 확인 이전임을 좁혔으나 세부 원인은 남지 않았다. 기준 a39d2b8에서 기존 미커밋 변경을 보존하고 TextSession에 고정 문자열 단계만 유지하도록 추가했다. 기존 PreflightExchange 진단을 사용해 initialize/config/account/model/permission/thread 또는 turn 단계 실패를 구분하며, 실패로 상태가 소비돼도 마지막 단계는 유지한다.
+- RunReservation은 transport 실패를 cleanup 전에 sidecar stderr에 고정 단계로 한 번 기록한다. 원문 오류·응답·계정·경로를 출력하지 않으며 실행 허가/종료·잠금/terminal 저장 순서는 변경하지 않았다. 이는 내부 진단이며 사용자 화면의 오류 개선이나 해당 실제 실패 원인 규명 완료를 뜻하지 않는다.
+- 기존 stalled-peer 회귀에 실패 및 재개 거절 후 initialize 단계 보존 검사를 추가했다. 사용자 요청대로 빌드/실행은 누적 검증으로 유보하고 diff 검사만 수행한다. 실제 모델 재호출0회. 다음은 최신 빌드의 진단을 이용한 준비 실패 해소와 누적 검증; Claude 제한적 소켓 예외는 승인 대기. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (실제 실행 실패 단계 조사·증거 결속)
+
+- 직전 종료 경고 조사에서 현재 시험 앱 부재·정상 종료 증거를 확보했다. 이어 a39d2b8의 실제 실패 실행 agent_run_ec77a70445954eceb1f4adfaf7161be5를 앱 SQLite immutable/read-only로 조회했다. createdAt 09:04:32Z/updatedAt 09:05:00Z로 F5uLUs 시험과 일치한다. 상태 failed, 공개 event0, poisoned false, processesProvenGone true, writerLockState none이며 native_thread_receipt/native_provider_manifest가 없다. 최신 실행과 일치하는 행을 확인했으나 immutable 조회의 WAL 미반영 가능성은 일반적으로 주의한다.
+- 코드상 ThreadMatched 콜백에서 thread receipt/running을 원자 저장한 뒤에만 사용자 입력 frame을 큐에 넣는다(incremental.rs, preparation.rs). 따라서 관측 기록은 thread 확인 이전 실패를 가리키며 모델 답변 실패나 로그인 만료로 단정하지 않는다. 구체적인 RPC/검증 실패 이유는 현행 run projection에 남지 않아 아직 미확정이다. 실제 재호출·설치·인증 수정은 하지 않았다.
+- Karpathy 지침으로 runner의 RUN_ACCEPTED/terminal/timeout 결과에 runId·chatId만 추가해 후속 저장 기록과 정확히 결속하도록 했다. 원문 응답/credential 출력은 추가하지 않았다. 기존 catalog-only 회귀 변경은 보존했다. 검증은 누적 단계로 유보하며 diff 검사만 수행한다. 다음: 준비 실패의 비밀 없는 단계별 진단 연결, 실제 대화 흐름 수정과 누적 검증. Claude 소켓 예외 승인 대기는 유지하며 main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (반복 종료 경고 재확인)
+
+- 사용자 스크린샷은 Electron의 unavailable 종료 알림과 일치한다. 로그인 실패 메시지가 아니라 내부 서비스 종료 확인 실패이며 스크린샷만으로 해당 회차의 서비스 단절 원인은 확정하지 않는다. 기준 a39d2b8, m5/coding-agent-ide. 기존9월 archive와 live smoke test 변경은 보존했다.
+- 현재 소스는 동일 앱 세션의 unavailable 알림을 한 번만 표시하고 종료 안전 검사는 계속 유지한다. main.cjs 산출물은 10월7일18:02:44 갱신 상태다. 18:09 프로세스 조회에서 hello-agent Electron 시험 앱/sidecar는 발견되지 않아 실행 중인 구버전 여부를 확정할 수 없었다. 강제 종료·재시작·인증정보 변경은 하지 않았다.
+- 직전 실제 시험 증거 hello-agent-live-F5uLUs/result.json은 Codex failed/cleanExit/responseObserved false, Claude 특수 파일 거절, sourceUnchanged true, shutdown accepted를 기록한다. 실제 모델 성공은 아니지만 해당 시험 앱의 정상 종료는 확인된다. Codex 실행 접수 후 목표 전달 여부 확인 없이 실제 호출을 반복하지 않는다. 다음: 재발 회차의 앱 경로·서비스 종료 로그 결속 및 기존 Codex 실패 기록 진단. main 병합/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (모델 조회 협상 계약 검토 수정)
 
 - 기준dc37426, 기존9월 archive만 dirty. 직전 턴은 실제 목록 관측·경합 수정의 진척이다. 독립 검토자가 agent.getModelChoices의 METHODS 예약/dispatch와 native ready 광고 누락을 지적했다. Rust/TS의 exact native baseline에 동일 위치로 추가하고 client도 실제 advertised 항목을 요구하도록 수정했다. fixture/G5A 계약은 확대하지 않으며 오래된 native 목록은 exact 협상에서 거절한다. 표시용 새 API만 추가하며 run 권한 조건은 그대로다.

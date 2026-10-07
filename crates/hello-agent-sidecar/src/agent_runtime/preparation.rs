@@ -802,7 +802,13 @@ impl RunReservation {
                     return Ok(None);
                 }
                 Ok(Some(outcome)) => Ok(outcome),
-                Err(error) => Err(error),
+                Err(error) => {
+                    // The terminal record intentionally contains no raw provider
+                    // error. Keep a fixed-label transport checkpoint in stderr
+                    // before cleanup consumes the failed session.
+                    eprintln!("native Codex transport failed at {}", state.transport.diagnostic_stage());
+                    Err(error)
+                }
             });
         }
         // Preserve cleanup-before-final and terminal-before-fence-release ordering.

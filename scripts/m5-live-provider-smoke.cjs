@@ -110,15 +110,15 @@ app.on('browser-window-created', (_event, window) => {
           const capability = await run(`window.m5.getAgentCapabilities({runtime:${JSON.stringify(runtime)},refresh:true,chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)}})`);
           if(!capability.canStart){outcomes.push({provider,state:'admissionBlocked',reason:capability.blockedReason});continue;}
           const accepted = await run(`(async()=>{const chat=await window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0});return window.m5.startAgentRun({chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)},inputMessageIds:chat.messages.map(m=>m.messageId),expectedCapabilityFingerprint:${JSON.stringify(capability.fingerprint)}});})()`);
-          console.log(JSON.stringify({stage:'RUN_ACCEPTED',provider}));
+          console.log(JSON.stringify({stage:'RUN_ACCEPTED',provider,runId:accepted.runId,chatId}));
           let terminal;
           for(let i=0;i<900;i++){
             const detail=await run(`window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0})`);
             const record=detail.agentRuns?.find(r=>r.runId===accepted.runId);
-            if(record && ['succeeded','failed','canceled','recoveryRequired'].includes(record.state)){terminal={provider,state:record.state,stage:record.stage,terminationOutcome:record.terminationOutcome,responseObserved:detail.messages.some(m=>m.runId===accepted.runId && m.kind==='role' && m.text.includes('HELLO_AGENT_SMOKE_OK'))};break;}
+            if(record && ['succeeded','failed','canceled','recoveryRequired'].includes(record.state)){terminal={provider,runId:accepted.runId,chatId,state:record.state,stage:record.stage,terminationOutcome:record.terminationOutcome,responseObserved:detail.messages.some(m=>m.runId===accepted.runId && m.kind==='role' && m.text.includes('HELLO_AGENT_SMOKE_OK'))};break;}
             await new Promise(r=>setTimeout(r,100));
           }
-          outcomes.push(terminal??{provider,state:'timeout'});
+          outcomes.push(terminal??{provider,runId:accepted.runId,chatId,state:'timeout'});
           if(!terminal) break;
         } catch(error) {
           const message = String(error.message).slice(0,500);

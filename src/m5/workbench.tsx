@@ -1,4 +1,5 @@
 import { formatChatNotice } from "./chat-notice.ts";
+import { runOutcomeNotice } from "./work-status.ts";
 import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -543,7 +544,22 @@ return <section className="m5-timeline" aria-label={t("m5.chat.title")}><header>
 function AgentRuns({ runs }: { runs: ReturnType<ChatUiController["snapshot"]>["agentRuns"] }) {
   const { t } = useI18n();
   if (runs.length === 0) return null;
-  return <section className="m5-agent-runs" aria-label={t("m5.run.label")}><strong>{t("m5.run.title")}</strong>{runs.map((run) => <article key={run.runId}><span>{t(`m5.roles.${run.selectedProfile.roleId}`)}</span><span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span><span> · {t(`m5.run.${run.state}`)}</span></article>)}</section>;
+  return <section className="m5-agent-runs" aria-label={t("m5.run.label")}>
+    <strong>{t("m5.run.title")}</strong>
+    {runs.map((run) => {
+      const notice = runOutcomeNotice(run);
+      return <article key={run.runId}>
+        <span>{t(`m5.roles.${run.selectedProfile.roleId}`)}</span>{" "}
+        <span>{run.selectedProfile.runtime === "codex" ? "Codex" : "Claude Code"} · {run.selectedProfile.modelSelector}{run.selectedProfile.reasoningEffort ? ` · ${run.selectedProfile.reasoningEffort}` : ""}</span>
+        <span> · {t(`m5.run.${run.state}`)}</span>
+        {notice && <p>{t(notice)}</p>}
+        <details><summary>{t("m5.run.details")}</summary>
+          <p>{t("m5.chat.runId", { id: run.runId })}</p>
+          <p>{t(`m5.run.exit.${run.terminationOutcome ?? "unknown"}`)}</p>
+        </details>
+      </article>;
+    })}
+  </section>;
 }
 
 function profileLabel(chat: NonNullable<ReturnType<ChatUiController["snapshot"]>["activeChat"]>, roleId: RoleProfileV1["roleId"]): string { const profile = chat.roleSnapshots.find((item) => item.roleId === roleId); return profile ? `${profile.runtime === "codex" ? "Codex" : "Claude Code"} · ${profile.modelSelector}${profile.reasoningEffort ? ` · ${profile.reasoningEffort}` : ""}` : ""; }

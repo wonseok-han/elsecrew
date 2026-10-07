@@ -1,4 +1,15 @@
 import type { SystemStatusG5DV1 } from "./contracts/lifecycle-g5d-v1.ts";
+import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
+
+/** Display only. A clean exit is not a successful task or permission to apply. */
+export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome">) {
+  if (run.state === "recoveryRequired" || run.terminationOutcome === "recoveryRequired") return "m5.run.help.recovery" as const;
+  if (!["succeeded", "failed", "canceled"].includes(run.state)) return null;
+  if (run.terminationOutcome !== "cleanExit") return "m5.run.help.unconfirmed" as const;
+  if (run.state === "failed") return "m5.run.help.failedClean" as const;
+  if (run.state === "canceled") return "m5.run.help.canceledClean" as const;
+  return "m5.run.help.succeededClean" as const;
+}
 
 export interface WorkStatusSummary { total: number; ids: string[]; omitted: number }
 

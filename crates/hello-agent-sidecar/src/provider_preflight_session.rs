@@ -783,6 +783,10 @@ impl BoundTextSession {
         self.connection_id == process.connection_id()
     }
 
+    pub(crate) fn diagnostic_stage(&self) -> &'static str {
+        self.session.diagnostic_stage()
+    }
+
     pub(crate) fn advance(
         &mut self,
         process: &mut LoginProcess<'_>,
