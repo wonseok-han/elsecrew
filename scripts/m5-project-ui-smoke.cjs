@@ -26,6 +26,8 @@ app.on('browser-window-created', (_event, window) => {
   window.webContents.setBackgroundThrottling(false);
   window.webContents.once('did-finish-load', async () => {
     const run = code => window.webContents.executeJavaScript(code);
+    const clickText = (label, scope = 'body') => run(`Array.from(document.querySelectorAll(${JSON.stringify(scope + ' button')})).find(b=>b.textContent===${JSON.stringify(label)}&&!b.disabled)?.click()`);
+    const fill = (selector, value) => run(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw new Error('input unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     const showPanel = title => run(`(()=>{ const tab=Array.from(document.querySelectorAll('.m5-dock-group-tabs button')).find(b=>b.textContent===${JSON.stringify(title)}&&b.getClientRects().length); if(tab)tab.click(); })()`);
     const wait = async predicate => {
       for(let i=0;i<150;i++) { if(await run(predicate)) return; await new Promise(r=>setTimeout(r,100)); }
@@ -33,11 +35,50 @@ app.on('browser-window-created', (_event, window) => {
     };
     try {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
+      if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
       await run(`(()=>{ const d=document.querySelector('.m5-provider-selection'); if(d?.open)d.querySelector('summary').click(); })()`);
       await wait(`document.querySelector('.m5-provider-selection')?.open===false`);
       if(await run(`document.querySelector('.m5-layout-settings')?.open!==false`)) throw new Error('layout settings not initially collapsed');
+      await wait(`document.querySelectorAll('.m5-team-preview > div').length===3`);
+      await run(`document.querySelector('.m5-goal-examples button').click()`);
+      await wait(`document.querySelector('.m5-new-chat-form > input').value.length>0&&Array.from(document.querySelectorAll('.m5-goal-examples button')).every(b=>b.disabled)`);
+      if (await run(`document.querySelectorAll('.m5-chat-chip').length!==0`)) throw new Error('goal example created a chat');
+      await fill('.m5-new-chat-form > input', '');
+      await clickText('역할과 모델');
+      await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
+      const originalModel = await run(`document.querySelector('.m5-role-card input').value`);
+      const modelInput = '.m5-role-card input';
+      await fill(modelInput, 'ui-smoke-unsaved');
+      window.show(); window.focus(); window.webContents.focus();
+      window.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+      window.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+      await wait(`Boolean(document.querySelector('.m5-settings-dialog [role=alertdialog]'))`);
+      await clickText('설정 계속 편집', '.m5-settings-dialog');
+      await wait(`!document.querySelector('.m5-settings-dialog [role=alertdialog]')`);
+      if (await run(`document.querySelector('.m5-role-card input').value!=='ui-smoke-unsaved'`)) throw new Error('Escape lost settings draft');
+      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
+      await clickText('설정 변경 버리고 닫기', '.m5-settings-dialog');
+      await wait(`!document.querySelector('.m5-settings-dialog')`);
+      await wait(`document.activeElement?.textContent==='역할과 모델'`);
+      await clickText('역할과 모델');
+      await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
+      if (await run(`document.querySelector('.m5-role-card input').value!==${JSON.stringify(originalModel)}`)) throw new Error('discarded role draft persisted');
+      await fill(modelInput, 'ui-smoke-saved');
+      await clickText('새 채팅 설정 저장', '.m5-settings-dialog');
+      await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
+      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
+      await wait(`!document.querySelector('.m5-settings-dialog')`);
+      await clickText('역할과 모델');
+      await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
+      if (await run(`document.querySelector('.m5-role-card input').value!=='ui-smoke-saved'`)) throw new Error('saved role model not preserved');
+      await fill(modelInput, originalModel);
+      await clickText('새 채팅 설정 저장', '.m5-settings-dialog');
+      await wait(`!Array.from(document.querySelectorAll('.m5-settings-dialog [role=status]')).some(e=>e.textContent==='저장하지 않은 설정 변경이 있어요.')&&!Array.from(document.querySelectorAll('.m5-settings-dialog button')).some(b=>b.textContent==='처리 중…')`);
+      await clickText('작업대로 돌아가기', '.m5-settings-dialog');
+      await wait(`!document.querySelector('.m5-settings-dialog')`);
+      console.log(JSON.stringify({stage:'START_AND_SETTINGS',root}));
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Improve hello');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await run(`document.querySelector('.m5-new-chat-form input[type=checkbox]').click()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
