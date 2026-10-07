@@ -17,6 +17,7 @@ let window;
 let timeout;
 const measureMemory = process.env.M5_MEASURE_MEMORY === "1";
 const diagnostic = process.env.M5_MEASURE_DIAGNOSTIC === "1";
+const domCounters = process.env.M5_MEASURE_DOM_COUNTERS === "1";
 const memorySamples = [];
 let memoryPhase = "idle";
 let memoryTimer;
@@ -65,6 +66,7 @@ function finish(error) {
     writeFileSync(report.evidencePath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
   } catch { report.status = "FAIL"; }
   process.stdout.write(JSON.stringify(report) + "\n");
+  if (window && !window.isDestroyed() && window.webContents.debugger.isAttached()) window.webContents.debugger.detach();
   if (window && !window.isDestroyed()) window.destroy();
   app.exit(report.status === "PASS" ? 0 : report.status === "NOT_READY" ? 2 : 1);
 }
@@ -74,6 +76,7 @@ async function memoryCheckpoint(label) {
   // Attribution only: V8 heap and Electron working set are not RSS and do not
   // replace the existing process-tree gate or trigger garbage collection.
   report.memory.checkpoints.push({ label, elapsedMs: performance.now(),
+    ...(domCounters ? { domCounters: await window.webContents.debugger.sendCommand("Memory.getDOMCounters") } : {}),
     main: process.memoryUsage(),
     processes: app.getAppMetrics().map(({ pid, type, name, memory }) => ({ pid, type, name, memory })),
     renderer: await window.webContents.executeJavaScript(`({
@@ -102,6 +105,11 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(asset).href);
   });
   window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload: resolve(__dirname, "m5-renderer-performance-preload.cjs"), contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false } });
+  if (domCounters) {
+    if (!diagnostic || !measureMemory) throw new Error("DOM counters are diagnostic memory observations only");
+    window.webContents.debugger.attach("1.3");
+    report.limitations.push("DevTools Memory.getDOMCounters attached for attribution; not comparable to an uninstrumented release measurement. No leak preparation, cache purge or forced GC.");
+  }
   window.webContents.on("render-process-gone", (_event, details) => finish(new Error(details.reason)));
   if (measureMemory) {
     report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples, checkpoints: [], attributionNote: "Checkpoint V8 heap is approximate; Chromium working set and V8 heap are not additive to RSS. No forced GC." };

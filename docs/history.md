@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (DOM 보유 원인 분리·페이지 종료 cleanup 연결)
+
+- 기준ea67f5a. 공식 ChromeDevTools Memory.pdl을 확인해 강제GC/누수 준비와 별개인 getDOMCounters만 --diagnostic --memory --dom-counters에서 호출하도록 추가했다. 기본 측정은 미부착, 부착 모드는 정식 gate 불가이며 teardown 때 detach한다. 최신 증거 renderer-2026-10-07T06-42-03.879Z-53898.json은 idle/peak FAIL, 잔류delta 약17MiB다. trial 문서3→21개·listener2486→25374 증가와60초 뒤 문서1/listener146/DOM121 감소를 관측했다. 영구 누수나 기존 실패 해소로 단정하지 않는다.
+- bootstrap에 non-persisted pagehide→root.unmount를 연결해 페이지 navigation 때 기존 React effect cleanup이 실행되게 했다. bfcache persisted 페이지는 유지하며 process 종료/잠금 권위는 바꾸지 않는다. Karpathy 지침으로 강제GC/메모리압박/임의 캐시 비우기를 추가하지 않았다. 원문 bootstrap을 실행하는 회귀1 PASS; 최초 test transpile의 CommonJS import alias 오류는 ESNext 변환으로 수정했다.
+- 이 제품 수정 후 실제 reload/메모리 재측정은 아직 미실행이며 다음 묶음 검증 대상이다. 진단 절차 갱신·스크립트 문법/diff 검사 통과. 실제 provider/G6/Windows·전체 시안은 별도 미완료. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (최근 성능 변경 묶음 재측정·메모리 실패 유지)
 
 - 기준2612b74, 기존9월 archive만 dirty인 상태에서 --diagnostic --memory warm-up1+10회와60초 잔류 측정을 완료했다. .artifacts/m5-performance/renderer-2026-10-07T06-37-44.888Z-45537.json, FAIL/exit1. idle419364864 bytes(약399.94MiB)는 기준 이내지만 peak1087193088(약1036.83MiB), retained delta134610944(약128.38MiB)는 초과한다. 직전 메모리 개선의 효과나 해소를 주장하지 않는다.

@@ -36,6 +36,8 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 원인 분리를 위해 각 RSS 표본에 Electron 프로세스 종류를 붙이고 idle/각 trial/retained checkpoint에 main 메모리, Electron process metrics, renderer DOM 수와 제공되는 경우 근사 V8 heap 크기를 함께 저장한다. 이 값은 RSS에 더하거나 대신 사용하지 않으며, heap 크기만으로 누수 여부를 판정하지 않는다. checkpoint 수집은 개별 시간 측정 구간 밖에서 실행한다.
 
+반복 reload의 DOM 보유를 조사할 때만 `--diagnostic --memory --dom-counters`를 사용한다. 격리 시험 창에 DevTools를 붙여 [Memory.getDOMCounters](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Memory.pdl)의 documents/nodes/jsEventListeners를 checkpoint마다 기록한다. `prepareForLeakDetection`·강제 GC·cache purge는 호출하지 않는다. 계측 부착 자체가 메모리에 영향을 줄 수 있으므로 일반 run과 동일 조건 또는 release gate 증거로 취급하지 않으며, 숫자 증가만으로 누수를 확정하지 않는다. 정식/비메모리 모드에서는 이 옵션을 거절한다.
+
 `pnpm run m5:measure:performance --input <measurement.json>`은 공급된 측정값을 검증한다. 계측기를 대신하지 않으며 unit fixture를 실측으로 사용하면 안 된다. `PASS`=0, 기준 초과 `FAIL`=1, 누락·잘못된 입력·불일치 HEAD `NOT_READY`=2이다. 알려진 기준 초과는 다른 항목 누락과 함께 있어도 FAIL로 남긴다. 최대 4 MiB regular UTF-8 JSON만 받는다. 출력 JSON은 stdout으로 전달한다.
 
 입력 schemaVersion은 1이며 필수 필드는 다음과 같다.
