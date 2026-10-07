@@ -514,9 +514,11 @@ export class SidecarClientV1 {
   getAgentCapabilities(input: AgentCapabilitiesRequestV1): Promise<AgentCapabilitySnapshotV1> {
     return this.#requestAgent("agent.getCapabilities", validateAgentCapabilitiesRequestV1(input)) as Promise<AgentCapabilitySnapshotV1>;
   }
-  getModelChoices(input: ModelChoicesRequest): Promise<ModelChoicesResult> {
+  async getModelChoices(input: ModelChoicesRequest): Promise<ModelChoicesResult> {
     this.#requireAgentAdapter();
-    if (!this.#nativeAdapterNegotiated) return Promise.reject(new Error("native model choices unavailable"));
+    if (!this.#nativeAdapterNegotiated || !this.#ready?.capabilities.includes("agent.getModelChoices")) {
+      throw new Error("native model choices unavailable: capability was not advertised");
+    }
     return this.#request("agent.getModelChoices", validateModelChoicesRequest(input)) as Promise<ModelChoicesResult>;
   }
   startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {

@@ -53,6 +53,7 @@ export const G5D_NATIVE_CAPABILITIES_V1 = [
   "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings",
   "chat.create", "chat.list", "chat.get", "run.cancel", "recovery.list",
   "recovery.inspect", "recovery.markResolved", "agent.getCapabilities",
+  "agent.getModelChoices",
   "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent",
   "storage.status",
 ] as const;

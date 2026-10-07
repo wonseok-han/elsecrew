@@ -144,6 +144,8 @@ test("native handshake excludes fixture execution and preserves storage status",
   const ready = JSON.parse(g5dAgentReadyLine());
   ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
   assert.doesNotThrow(() => parseG5DNativeReadyPayloadV1(ready.payload));
+  assert.ok(ready.payload.capabilities.includes("agent.getModelChoices"));
+  assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: ready.payload.capabilities.filter((method: string) => method !== "agent.getModelChoices") }));
   assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(ready.payload));
   assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: [...G5D_AGENT_FIXTURE_CAPABILITIES_V1] }));
   assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: [...G5D_NATIVE_CAPABILITIES_V1, "run.futureFixture"] }));
@@ -158,6 +160,27 @@ test("native handshake excludes fixture execution and preserves storage status",
   (status.sidecar as Record<string, unknown>).capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
   child.stdout.write(responseLine(request.requestId, status));
   await pending;
+});
+
+test("model choice calls require an advertised native method and reject fixture mode locally", async () => {
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${g5dAgentReadyLine()}\n`); await starting;
+  const before = child.writes.length;
+  await assert.rejects(client.getModelChoices({ runtime: "codex", refresh: true, chatId: "chat_test", roleId: "planning" }), /capability was not advertised/);
+  assert.equal(child.writes.length, before);
+});
+
+test("advertised native model choices round-trip only scoped display data", async () => {
+  const { child, client } = createClient();
+  const ready = JSON.parse(g5dAgentReadyLine());
+  ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
+  const starting = client.start(); child.stdout.write(`${JSON.stringify(ready)}\n`); await starting;
+  const pending = client.getModelChoices({ runtime: "codex", refresh: true, chatId: "chat_test", roleId: "planning" });
+  const request = JSON.parse(child.writes.at(-1)!);
+  assert.equal(request.method, "agent.getModelChoices");
+  const result = { schemaVersion: 1, runtime: "codex", scope: { chatId: "chat_test", roleId: "planning", worktreeId: "work_test", workspaceIdentity: "workspace_test" }, models: [{ modelSelector: "test-model", reasoningEfforts: ["medium"] }] };
+  child.stdout.write(responseLine(request.requestId, result));
+  assert.deepEqual(await pending, result);
 });
 
 function g5dStatus(state: "verifying" | "ready" | "failed"): Record<string, unknown> {

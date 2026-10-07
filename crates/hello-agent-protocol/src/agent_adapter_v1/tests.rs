@@ -4,6 +4,17 @@ use std::fs;
 use std::path::PathBuf;
 
 #[test]
+fn native_model_choices_are_advertised_without_expanding_fixture_contracts() {
+    assert!(G5D_NATIVE_CAPABILITIES_V1.contains(&"agent.getModelChoices"));
+    assert!(!G5A_CAPABILITIES_V1.contains(&"agent.getModelChoices"));
+    assert!(!G5D_AGENT_FIXTURE_CAPABILITIES_V1.contains(&"agent.getModelChoices"));
+    validate_g5d_native_ready_payload_v1(&ready(G5D_NATIVE_CAPABILITIES_V1)).unwrap();
+    let old: Vec<_> = G5D_NATIVE_CAPABILITIES_V1.iter().copied()
+        .filter(|method| *method != "agent.getModelChoices").collect();
+    assert!(validate_g5d_native_ready_payload_v1(&ready(&old)).is_err());
+}
+
+#[test]
 fn unobserved_installation_is_not_missing_or_startable() {
     let (root, _) = manifest();
     let value: Value = read_json(root.join("unobserved-capability.json"));

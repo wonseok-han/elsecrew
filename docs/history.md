@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (모델 조회 협상 계약 검토 수정)
+
+- 기준dc37426, 기존9월 archive만 dirty. 직전 턴은 실제 목록 관측·경합 수정의 진척이다. 독립 검토자가 agent.getModelChoices의 METHODS 예약/dispatch와 native ready 광고 누락을 지적했다. Rust/TS의 exact native baseline에 동일 위치로 추가하고 client도 실제 advertised 항목을 요구하도록 수정했다. fixture/G5A 계약은 확대하지 않으며 오래된 native 목록은 exact 협상에서 거절한다. 표시용 새 API만 추가하며 run 권한 조건은 그대로다.
+- Rust native-only 광고/누락 거절, TS 양언어 목록 일치·fixture 요청 전 write0·native 표시 응답 round-trip 회귀를 추가했다. Karpathy 지침으로 기존 협상 구조에 한정했다. 실행은 누적 검증으로 남기며 현재는 diff 검사와 runner 문법 검사만 수행했다. 같은 검토자 재검토 요청 상태이며 변경 후 실제 앱 빌드는 아직 이전 baseline이다.
+- live runner에 명시 HELLO_AGENT_LIVE_CODEX_MODEL 입력을 추가했다. medium 지원을 actual catalog에서 확인하고 runner가 생성한 임시 프로젝트의 planning 역할만 갱신한 뒤 새 snapshot 채팅을 생성한다. 제품 자동 fallback이나 기존 사용자 프로젝트 수정이 아니며, 입력이 없으면 기존 동작이다. 이번 턴 실제 모델 호출0회. 다음은 재검토 후 최신 빌드로 승인된 소규모 실제 실행, Claude 제한적 소켓 예외는 사용자 승인 대기를 유지한다. main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (모델 목록 실측·화면 스코프 경합 수정)
 
 - 기준f1a135c. 직전 턴은 Claude 소켓 원인 확보의 진척이며 해당 예외 승인은 아직 대기다. 모델 선택 독립 검토에서 A→B 채팅 전환의 passive effect 이전 늦은 응답 경합을 발견했다. RoleSettings key를 projectId/revision/chatId로 결속해 인스턴스를 분리했고 같은 검토자가 해당 경로 해소를 확인했다. 종료/취소 결과 방지 통합 회귀와 deferred UI 회귀는 추가 검증 권고로 남는다.

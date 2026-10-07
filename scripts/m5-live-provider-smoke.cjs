@@ -79,11 +79,30 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent.startsWith('Reply exactly')`);
       const projectId = await run(`(async()=>{let cursor=null;do{const p=await window.m5Projects.request({action:'list',cursor});const found=p.projects.find(p=>p.canonicalPath===${JSON.stringify(fs.realpathSync(source))});if(found)return found.projectId;cursor=p.nextCursor;}while(cursor);throw new Error('Generated project missing');})()`);
-      const chatId = await run(`window.m5.listChats({projectId:${JSON.stringify(projectId)},cursor:null,limit:50}).then(p=>{if(p.items.length!==1)throw new Error('Unexpected generated chat count');return p.items[0].chatId;})`);
+      let chatId = await run(`window.m5.listChats({projectId:${JSON.stringify(projectId)},cursor:null,limit:50}).then(p=>{if(p.items.length!==1)throw new Error('Unexpected generated chat count');return p.items[0].chatId;})`);
       if (catalogOnly) {
         const catalog = await run(`window.m5Models.request({runtime:'codex',refresh:true,chatId:${JSON.stringify(chatId)},roleId:'planning'})`);
         outcomes.push({provider:'codex',state:'catalogObserved',models:catalog.models});
         return finish();
+      }
+      const testModel = process.env.HELLO_AGENT_LIVE_CODEX_MODEL;
+      if (testModel) {
+        // Explicit test input, never a product default/fallback. Only this
+        // runner's newly generated project gets new role settings and chat.
+        const catalog = await run(`window.m5Models.request({runtime:'codex',refresh:true,chatId:${JSON.stringify(chatId)},roleId:'planning'})`);
+        const model = catalog.models.find(item => item.modelSelector === testModel);
+        if (!model || !model.reasoningEfforts.includes('medium')) throw new Error('Requested test model is not observed with medium effort');
+        chatId = await run(`(async()=>{
+          const projectId=${JSON.stringify(projectId)};
+          const settings=await window.m5.getProjectRoleSettings({projectId});
+          const roles=settings.roles.map(role=>role.roleId==='planning'?{...role,modelSelector:${JSON.stringify(testModel)},reasoningEffort:'medium'}:role);
+          const updated=await window.m5.updateProjectRoleSettings({projectId,expectedRevision:settings.revision,roles});
+          const prepared=await window.m5.prepareChatWorkspace({projectId});
+          const manifest=prepared.manifest;
+          const chat=await window.m5.createChat({preparationId:prepared.preparationId,projectId,worktreeId:manifest.worktreeId,workspaceIdentity:manifest.workspaceIdentity,goal:'Reply exactly HELLO_AGENT_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.',expectedSettingsRevision:updated.revision});
+          return chat.chatId;
+        })()`);
+        console.log(JSON.stringify({stage:'TEST_MODEL_SELECTED',provider:'codex',model:testModel,reasoningEffort:'medium',generatedProjectOnly:true}));
       }
       for(const [provider,roleId,runtime] of [['codex','planning','codex'],['claude','coding','claude-code']]) {
         if(connected[provider].state!=='connected'){outcomes.push({provider,state:'loginBlocked'});continue;}
