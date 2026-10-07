@@ -121,6 +121,13 @@ pub fn parse_current_agent_fixture_system_status_v1(
     parse_followup_status(value, parse_g5d_agent_fixture_system_status_v1)
 }
 
+pub fn parse_current_native_system_status_v1(value: &Value) -> Result<SystemStatusG5DV1, G5DAdmissionContractError> {
+    parse_followup_status(value, |value| parse_system_status(value, |sidecar| {
+        crate::agent_adapter_v1::validate_g5d_native_ready_payload_v1(sidecar)
+            .map_err(|error| G5DAdmissionContractError::new(error.to_string()))
+    }))
+}
+
 fn parse_followup_status(
     value: &Value,
     baseline: fn(&Value) -> Result<SystemStatusG5DV1, G5DAdmissionContractError>,

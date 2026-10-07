@@ -22,6 +22,37 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
+    let (_root, path) = database();
+    let instance = "native_admission_contract";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::native_candidate());
+    let ready = session.ready_event().unwrap();
+    let capabilities = ready.payload["capabilities"].as_array().unwrap();
+    assert!(capabilities.iter().any(|value| value == "run.startAgent"));
+    assert!(!capabilities.iter().any(|value| value == "run.startFixture"));
+    let mut baseline = ready.payload.clone();
+    baseline["capabilities"] = json!(hello_agent_protocol::agent_adapter_v1::g5d_native_capabilities_v1());
+    assert!(hello_agent_protocol::agent_adapter_v1::validate_g5d_native_ready_payload_v1(&baseline).is_ok());
+    baseline["capabilities"] = json!(G5D_AGENT_FIXTURE_CAPABILITIES_V1);
+    assert!(hello_agent_protocol::agent_adapter_v1::validate_g5d_native_ready_payload_v1(&baseline).is_err());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    assert!(matches!(session.admission, AdmissionState::Ready { .. }));
+    for runtime in ["codex", "claude-code"] {
+        let response = session.handle_request(request_value(instance, runtime, "agent.getCapabilities", json!({"runtime":runtime,"refresh":true}))).unwrap().response.unwrap();
+        assert!(response.ok, "{response:?}");
+        assert_eq!(response.result.unwrap()["canStart"], false);
+    }
+    let response = session.handle_request(request_value(instance, "invalid_start", "run.startAgent", json!({}))).unwrap().response.unwrap();
+    assert!(!response.ok);
+    let response = session.handle_request(request_value(instance, "fixture_denied", "run.startFixture", json!({}))).unwrap().response.unwrap();
+    assert!(!response.ok);
+    let AdmissionState::Ready { sidecar, .. } = &session.admission else { unreachable!() };
+    assert!(sidecar.storage.projection_records("run").unwrap().is_empty());
+    assert!(sidecar.storage.projection_records("lock").unwrap().is_empty());
+}
+
+#[test]
 fn catalog_preparation_dispatch_binds_inspection_and_retries_completion() {
     let (_root, path) = database();
     let instance = "preparation_session";

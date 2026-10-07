@@ -43,6 +43,8 @@ export const G5D_AGENT_FIXTURE_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 export const AGENT_INSTALLATION_STATES_V1 = ["installed", "notInstalled", "incomplete"] as const;
+// Legacy recovery remains available; native mode cannot create fixture runs.
+export const G5D_NATIVE_CAPABILITIES_V1 = G5D_AGENT_FIXTURE_CAPABILITIES_V1.filter(method => method !== "run.startFixture");
 export const AGENT_CAPABILITY_INSTALLATION_STATES_V1 = [...AGENT_INSTALLATION_STATES_V1, "unknown"] as const;
 export const AGENT_AUTH_STATES_V1 = ["authenticated", "notAuthenticated", "expired", "unknown"] as const;
 export const AGENT_DISCOVERY_SOURCES_V1 = ["machineReadableCatalog", "exactVersionManifest", "unavailable"] as const;
@@ -1161,15 +1163,23 @@ export function parsePlannedG5AReadyPayloadV1(value: unknown): ReadyPayloadV1 {
 }
 
 export function parseG5DAgentFixtureReadyPayloadV1(value: unknown): ReadyPayloadV1 {
+  return parseAgentReadyBaseline(value, G5D_AGENT_FIXTURE_CAPABILITIES_V1);
+}
+
+export function parseG5DNativeReadyPayloadV1(value: unknown): ReadyPayloadV1 {
+  return parseAgentReadyBaseline(value, G5D_NATIVE_CAPABILITIES_V1);
+}
+
+function parseAgentReadyBaseline(value: unknown, expected: readonly string[]): ReadyPayloadV1 {
   assertG5DAgentFixtureCapabilitiesV1();
   const object = exactObject(value, ["protocolVersion", "sidecarSchemaVersion", "appSchemaVersion", "pid", "platform", "capabilities", "sidecarInstanceId"], "G5D agent-fixture ready payload");
   if (object.protocolVersion !== 1 || object.sidecarSchemaVersion !== 1 || object.appSchemaVersion !== 1) fail("G5D agent-fixture ready versions must be 1");
   if (!Number.isSafeInteger(object.pid) || (object.pid as number) <= 0) fail("pid must be positive");
   bounded(object.platform, "platform", 64);
   id(object.sidecarInstanceId, "sidecarInstanceId");
-  const capabilities = array(object.capabilities, "capabilities", G5D_AGENT_FIXTURE_CAPABILITIES_V1.length);
-  if (capabilities.length !== G5D_AGENT_FIXTURE_CAPABILITIES_V1.length
-    || !capabilities.every((item, index) => item === G5D_AGENT_FIXTURE_CAPABILITIES_V1[index])) {
+  const capabilities = array(object.capabilities, "capabilities", expected.length);
+  if (capabilities.length !== expected.length
+    || !capabilities.every((item, index) => item === expected[index])) {
     fail("G5D agent-fixture ready capabilities must match the exact D1 method set");
   }
   return object as unknown as ReadyPayloadV1;

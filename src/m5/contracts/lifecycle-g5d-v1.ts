@@ -1,4 +1,4 @@
-import { parseG5DAgentFixtureReadyPayloadV1 } from "./agent-adapter-v1.ts";
+import { parseG5DAgentFixtureReadyPayloadV1, parseG5DNativeReadyPayloadV1 } from "./agent-adapter-v1.ts";
 import { APP_SCHEMA_VERSION, type ProtocolErrorV1, type ReadyPayloadV1 } from "./protocol-v1.ts";
 import { parseG5DProductReadyPayloadV1 } from "./run-recovery-v1.ts";
 
@@ -96,9 +96,9 @@ export function parseG5DProductSystemStatusV1(value: unknown): SystemStatusG5DV1
 }
 
 /** Optional follow-up suffix over an otherwise exact D1 baseline. */
-export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean): SystemStatusG5DV1 {
+export function parseCurrentSystemStatusV1(value: unknown, agentFixture: boolean, native = false): SystemStatusG5DV1 {
   return parseSystemStatus(value, (sidecar) => {
-    const baseline = agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
+    const baseline = native ? parseG5DNativeReadyPayloadV1 : agentFixture ? parseG5DAgentFixtureReadyPayloadV1 : parseG5DProductReadyPayloadV1;
     if (typeof sidecar === "object" && sidecar !== null && "capabilities" in sidecar && Array.isArray(sidecar.capabilities) && sidecar.capabilities[sidecar.capabilities.length - 1] === "project.catalog") {
       const caps = sidecar.capabilities;
       const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog"];

@@ -565,7 +565,10 @@ struct SidecarSession {
 
 impl SidecarSession {
     fn new(sidecar_instance_id: String, runtime: agent_runtime::AgentRuntime) -> Self {
-        let capabilities = if runtime.advertises_g5a() {
+        let native_capabilities = hello_agent_protocol::agent_adapter_v1::g5d_native_capabilities_v1();
+        let capabilities = if runtime.uses_native_providers() {
+            native_capabilities.as_slice()
+        } else if runtime.advertises_g5a() {
             G5D_AGENT_FIXTURE_CAPABILITIES_V1
         } else {
             G5D_PRODUCT_CAPABILITIES_V1
@@ -693,6 +696,11 @@ impl SidecarSession {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
+        if request.method == "run.startFixture" && !self.ready.capabilities.iter().any(|method| method == "run.startFixture") {
+            return Ok(HandledRequest::response(error_response(
+                &request, "unsupportedMethod", "requestBlocked", "fixture execution is unavailable in native mode",
+            )));
+        }
         match &mut self.admission {
             AdmissionState::Ready { sidecar, .. } => {
                 if request.method == "system.status" {

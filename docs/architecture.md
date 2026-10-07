@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> native 실행 후보의 공개 기능: 별도 exact ready/status baseline은 `run.startFixture`를 제외한다. sidecar와 Electron은 새 fixture 실행을 거절하고 작업대는 광고된 기능에 따라 데모 시작을 숨긴다. 기존 fixture 원장의 취소/복구는 보존한다. 일반 `--stdio`의 blocked 설정은 아직 유지한다.
+
 > Claude 추론 기본값: 저장된 역할의 `reasoningEffort=null`은 native 조회·예약·실행에서 `--effort` 생략으로 전달한다. 임의 수준으로 대체하지 않으며 실제 적용된 추론 수준을 관측했다고 주장하지 않는다. 명시한 수준은 모델 catalog의 지원 여부를 검사하고, 기본값/명시값 전환도 역할·실행 범위·요청 정책 결속 변경으로 거절한다.
 
 > Claude native 실행 후보(2026-10-07, 제품 비활성): 저장된 채팅 역할로 조회/시작 공급자를 선택하고, `Admission`이 작업 사본·앱 프로필·원본 디렉터리 신원과 요청 모델/추론/권한을 재대조한다. 목표 전송 전에 `claude.stream.v2` preflight를 저장하고 실제 system/init 검증 후 여섯 관측(model/cwd/permission/tools/mcp/plugins)과 running을 원자 저장한다. 종료/복구에서도 이 결속을 검증한다. 파일·검색 대상과 셸 sandbox 해제 요청을 검사하되 공식 CLI 보호를 신뢰하며 관측 불가능한 관리 설정/정책 reload 불변성을 증명했다고 주장하지 않는다. capability는 선택 역할의 시작 시도 자격이며 모델 사용권·실행 성공 증거가 아니다. 기본 `--stdio`는 blocked이고 후보 dispatcher/승인·복구의 누적 검증 및 제품 활성화는 별도다.

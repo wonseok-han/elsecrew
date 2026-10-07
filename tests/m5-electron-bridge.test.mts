@@ -17,6 +17,9 @@ import { G5_CAPABILITIES_V1, G5D_PRODUCT_CAPABILITIES_V1 } from "../src/m5/contr
 import {
   G5A_CAPABILITIES_V1,
   G5D_AGENT_FIXTURE_CAPABILITIES_V1,
+  G5D_NATIVE_CAPABILITIES_V1,
+  parseG5DNativeReadyPayloadV1,
+  parseG5DAgentFixtureReadyPayloadV1,
   computeAgentCapabilityFingerprintV1,
   type AgentCapabilitySnapshotV1,
 } from "../src/m5/contracts/agent-adapter-v1.ts";
@@ -132,6 +135,25 @@ function g5dAgentReadyLine() {
   ready.payload.capabilities = [...G5D_AGENT_FIXTURE_CAPABILITIES_V1];
   return JSON.stringify(ready);
 }
+
+test("native handshake excludes fixture execution and preserves storage status", async () => {
+  const ready = JSON.parse(g5dAgentReadyLine());
+  ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
+  assert.doesNotThrow(() => parseG5DNativeReadyPayloadV1(ready.payload));
+  assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(ready.payload));
+  assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: [...G5D_AGENT_FIXTURE_CAPABILITIES_V1] }));
+  const { child, client } = createClient();
+  const starting = client.start(); child.stdout.write(`${JSON.stringify(ready)}\n`); await starting;
+  const before = child.writes.length;
+  await assert.rejects(client.startFixtureRun({ chatId: "chat_test", roleId: "coding", scenario: "success" }), /fixture execution/);
+  assert.equal(child.writes.length, before);
+  const pending = client.getSystemStatus();
+  const request = JSON.parse(child.writes.at(-1)!);
+  const status = g5dStatus("ready");
+  (status.sidecar as Record<string, unknown>).capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
+  child.stdout.write(responseLine(request.requestId, status));
+  await pending;
+});
 
 function g5dStatus(state: "verifying" | "ready" | "failed"): Record<string, unknown> {
   const admission = state === "verifying"

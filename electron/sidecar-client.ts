@@ -114,6 +114,8 @@ import {
   G5A_CAPABILITIES_V1,
   G5D_AGENT_FIXTURE_CAPABILITIES_V1,
   parseG5DAgentFixtureReadyPayloadV1,
+  G5D_NATIVE_CAPABILITIES_V1,
+  parseG5DNativeReadyPayloadV1,
   parsePlannedG5AReadyPayloadV1,
   validateAgentCapabilitiesRequestV1,
   validateAgentCapabilitySnapshotV1,
@@ -273,6 +275,7 @@ export class SidecarClientV1 {
   #stdout = Buffer.alloc(0);
   #ready: ReadyPayloadV1 | undefined;
   #agentAdapterNegotiated = false;
+  #nativeAdapterNegotiated = false;
   #storageAdmissionNegotiated = false;
   #lastReady: ReadyPayloadV1 | null = null;
   #readyPromise: Promise<ReadyPayloadV1> | undefined;
@@ -498,7 +501,10 @@ export class SidecarClientV1 {
     if (!this.#ready?.capabilities.includes("chat.appendMessage")) return Promise.reject(new Error("sidecar does not support follow-up messages"));
     return this.#request("chat.appendMessage", validateChatAppendMessageRequestV1(input)) as Promise<TeamMessageV1>;
   }
-  startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> { return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>; }
+  startFixtureRun(input: FixtureRunStartRequestV1): Promise<RunRecordV1> {
+    if (this.#nativeAdapterNegotiated) return Promise.reject(new Error("fixture execution is unavailable in native mode"));
+    return this.#request("run.startFixture", validateFixtureRunStartRequestV1(input)) as Promise<RunRecordV1>;
+  }
   cancelRun(input: RunCancelRequestV1): Promise<RunRecordV1> { return this.#request("run.cancel", validateRunCancelRequestV1(input)) as Promise<RunRecordV1>; }
   listRecoveries(input: PageRequestV1): Promise<RecoveryPageV1> { return this.#request("recovery.list", validatePageRequestV1(input)) as Promise<RecoveryPageV1>; }
   inspectRecovery(input: { recoveryId: string }): Promise<RecoveryRecordV1> { return this.#request("recovery.inspect", validateRecoveryId(input)) as Promise<RecoveryRecordV1>; }
@@ -641,10 +647,13 @@ export class SidecarClientV1 {
         const rawReady = hasFollowup
           ? { ...advertisedReady, capabilities: advertisedReady.capabilities.slice(0, -1) }
           : advertisedReady;
-        const negotiatedG5DAgent = sameStrings(rawReady.capabilities, G5D_AGENT_FIXTURE_CAPABILITIES_V1);
+        const negotiatedNative = sameStrings(rawReady.capabilities, G5D_NATIVE_CAPABILITIES_V1);
+        const negotiatedG5DAgent = negotiatedNative || sameStrings(rawReady.capabilities, G5D_AGENT_FIXTURE_CAPABILITIES_V1);
         const negotiatedG5DProduct = sameStrings(rawReady.capabilities, G5D_PRODUCT_CAPABILITIES_V1);
         const negotiatedG5A = !negotiatedG5DAgent && sameStrings(rawReady.capabilities, G5A_CAPABILITIES_V1);
-        const ready = negotiatedG5DAgent
+        const ready = negotiatedNative
+          ? parseG5DNativeReadyPayloadV1(rawReady)
+          : negotiatedG5DAgent
           ? parseG5DAgentFixtureReadyPayloadV1(rawReady)
           : negotiatedG5DProduct
             ? parseG5DProductReadyPayloadV1(rawReady)
@@ -658,6 +667,7 @@ export class SidecarClientV1 {
         if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
+        this.#nativeAdapterNegotiated = negotiatedNative;
         this.#storageAdmissionNegotiated = negotiatedG5DAgent || negotiatedG5DProduct;
         this.#lastReady = negotiatedReady;
         clearTimeout(this.#readyTimer);
@@ -765,7 +775,7 @@ export class SidecarClientV1 {
     }
     if (pending.method === "system.status") {
       const status = this.#storageAdmissionNegotiated
-        ? parseCurrentSystemStatusV1(response.result, this.#agentAdapterNegotiated)
+        ? parseCurrentSystemStatusV1(response.result, this.#agentAdapterNegotiated, this.#nativeAdapterNegotiated)
         : parseG5SystemStatus(response.result, this.#agentAdapterNegotiated);
       if ((status.state === "ready" || status.state === "shellReady") && !sameReady(status.sidecar, this.#ready)) {
         throw new Error("system.status identity does not match system.ready");

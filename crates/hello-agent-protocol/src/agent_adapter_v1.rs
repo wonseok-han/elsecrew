@@ -89,6 +89,11 @@ pub const G5D_AGENT_FIXTURE_CAPABILITIES_V1: &[&str] = &[
     "storage.status",
 ];
 pub const AGENT_INSTALLATION_STATES_V1: &[&str] = &["installed", "notInstalled", "incomplete"];
+/// Exact native baseline: retain legacy recovery, never offer a new fixture run.
+pub fn g5d_native_capabilities_v1() -> Vec<&'static str> {
+    G5D_AGENT_FIXTURE_CAPABILITIES_V1.iter().copied()
+        .filter(|method| *method != "run.startFixture").collect()
+}
 // Only public capability snapshots can be unobserved. Sanitized provider
 // observations still require one of the measured installation states above.
 pub const AGENT_CAPABILITY_INSTALLATION_STATES_V1: &[&str] =
@@ -1195,6 +1200,14 @@ pub fn validate_g5d_agent_fixture_ready_payload_v1(
     value: &Value,
 ) -> Result<(), AgentAdapterContractError> {
     assert_g5d_agent_fixture_capabilities_v1()?;
+    validate_agent_ready_baseline(value, G5D_AGENT_FIXTURE_CAPABILITIES_V1)
+}
+
+pub fn validate_g5d_native_ready_payload_v1(value: &Value) -> Result<(), AgentAdapterContractError> {
+    validate_agent_ready_baseline(value, &g5d_native_capabilities_v1())
+}
+
+fn validate_agent_ready_baseline(value: &Value, expected: &[&str]) -> Result<(), AgentAdapterContractError> {
     let ready: crate::ReadyPayloadV1 = from_value(value, "G5D agent-fixture ready payload")?;
     if ready.protocol_version != crate::PROTOCOL_VERSION
         || ready.sidecar_schema_version != crate::SIDECAR_SCHEMA_VERSION
@@ -1204,7 +1217,7 @@ pub fn validate_g5d_agent_fixture_ready_payload_v1(
             .capabilities
             .iter()
             .map(String::as_str)
-            .eq(G5D_AGENT_FIXTURE_CAPABILITIES_V1.iter().copied())
+            .eq(expected.iter().copied())
     {
         return fail("G5D agent-fixture ready payload does not match the exact D1 contract");
     }

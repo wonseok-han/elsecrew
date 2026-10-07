@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (native 제품과 테스트 실행 기능 분리)
+
+- 기준 5ecc706. 직전 턴은 기본 추론값 결함 수정 진전이다. 메인이 native 제품 활성화 경계를 조사하고 상시 승인된 독립 검토자 1명에게 시작 설정 변경 전 차단 결함 검토를 요청했다. 후보가 fixture용 capability를 그대로 광고해 run.startFixture까지 실행 가능하다는 차단 문제를 확인했다. 시작 설정은 아직 변경하지 않았다.
+- Karpathy 지침에 따라 기존 exact baseline에서 run.startFixture만 제외한 native ready/status 계약을 Rust/TypeScript에 추가했다. 기존 원장의 run.cancel/legacy recovery는 보존한다. sidecar는 광고하지 않은 fixture 시작을 직접 요청해도 거절하고 Electron도 송신 전 거절한다. 작업대는 조회한 capability에 따라 데모 시작/설명을 숨긴다. 실제 공급자 호출·원본 쓰기 활성화는 하지 않았다.
+- Electron native handshake·상태·fixture 거절 회귀 1 PASS, tsc --noEmit PASS. native session 저장소 입장·두 공급자 unscoped canStart=false·잘못된 실행/fixture 요청 이후 run/lock 0건 회귀 PASS. exact Rust native baseline 검증 및 상태 parser 추가 후 최신 집중 1 PASS(0.26초), diff check PASS. 전체 테스트/실제 CLI·UI 합격은 아니다. 독립 검토의 나머지 활성화 판정은 진행 중이며 이 변경은 구현 체크포인트다. 다음은 활성화 검토의 남은 결함과 제품 시작 설정/패키지 기준 연결이다. main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (Claude 추론 기본값 실행 연결)
 
 - 기준 cabf023. 기존 역할/UI 계약의 reasoningEffort=null을 native Claude 조회·예약·실행·정책 digest·프로세스 범위에 일관되게 전달했다. null은 --effort 생략이며 medium 대체나 유효 추론 수준 관측 주장이 아니다. 명시 수준은 catalog 지원을 요구하고 null/명시값 변경도 admission에서 거절한다. Karpathy 지침에 따라 공개 계약/화면/제품 활성화는 변경하지 않았다.
@@ -75,6 +81,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **native/fixture 기능 분리(2026-10-07)**: native ready/status는 기존 agent baseline에서 run.startFixture를 제외한 별도 exact 계약이다. native 세션은 새 fixture 시작을 sidecar/Electron에서 거절하고 작업대에서 숨긴다. 과거 원장용 cancel/recovery는 유지한다. 이 분리만으로 일반 --stdio 활성화 또는 실제 계정/모델 검증을 완료한 것은 아니다.
 
 - **Claude 추론 기본값(2026-10-07)**: reasoningEffort=null은 공급자 기본값 요청이며 --effort를 생략한다. 실제 적용 수준을 관측한 값이나 medium으로 치환하지 않는다. 명시 수준의 catalog 지원 검사와 null/명시값 역할·범위·요청 정책 결속은 별도로 유지한다.
 
