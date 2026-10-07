@@ -461,6 +461,8 @@ export const ko = {
   "m5.shell.switch": "프로젝트 바꾸기",
   "m5.shell.close": "프로젝트 화면 닫기",
   "m5.shell.roles": "역할과 모델",
+  "m5.shell.projectLoading": "이 프로젝트의 채팅과 역할 설정을 불러오고 있습니다.",
+  "m5.shell.projectRetryHelp": "채팅과 역할 설정을 불러오지 못했습니다. 파일은 그대로 유지됩니다. 다시 시도해 주세요.",
   "m5.shell.finishSettings": "역할과 모델 설정을 먼저 마무리해 주세요.",
   "m5.admission.failed": "작업 공간을 아직 열 수 없어요.",
   "m5.admission.preparing": "작업 공간을 안전하게 준비하고 있어요.",

@@ -90,6 +90,29 @@ test("pending send and chat switch prevent leaving the project view", async () =
   } finally { f.controller.dispose(); }
 });
 
+test("failed initial project data can be retried without creating a chat or workspace", async () => {
+  const bridge = new FakeBridge();
+  const list = bridge.listChats.bind(bridge);
+  bridge.listChats = async () => { throw new Error("temporary list failure"); };
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start();
+  try {
+    await controller.openProject("project_a");
+    assert.equal(controller.snapshot().settings, null);
+    assert.equal(controller.snapshot().error?.messageKey, "m5.chatError.project");
+    bridge.listChats = list;
+    const retry = controller.openProject("project_a");
+    assert.equal(controller.snapshot().error, null);
+    assert.equal(controller.snapshot().settings, null);
+    await retry;
+    assert.equal(controller.snapshot().settings?.projectId, "project_a");
+    assert.equal(controller.snapshot().chats.length, 2);
+    assert.equal(controller.snapshot().activeChat, null);
+    assert.deepEqual(bridge.created, []);
+    assert.deepEqual(bridge.prepared, []);
+  } finally { controller.dispose(); }
+});
+
 test("late project loading cannot repopulate a cleared view", async () => {
   const bridge = new FakeBridge();
   let resolve!: (value: Awaited<ReturnType<FakeBridge["listChats"]>>) => void;

@@ -462,6 +462,8 @@ export const en: Record<MessageKey, string> = {
   "m5.shell.switch": "Switch project",
   "m5.shell.close": "Close project view",
   "m5.shell.roles": "Roles and models",
+  "m5.shell.projectLoading": "Loading chats and role settings for this project.",
+  "m5.shell.projectRetryHelp": "Chats and role settings could not be loaded. Your files are unchanged. Please try again.",
   "m5.shell.finishSettings": "Finish editing roles and models first.",
   "m5.admission.failed": "Your workspace could not be opened yet.",
   "m5.admission.preparing": "Preparing your workspace safely.",

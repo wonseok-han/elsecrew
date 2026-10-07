@@ -132,6 +132,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     () => controller.snapshot(),
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
+  const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
   useEffect(() => {
     controller.start();
     chatController.start();
@@ -199,7 +200,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {t("m5.shell.close")}
             </button>
           )}
-          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => { controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen}>{t("m5.shell.roles")}</button>}
+          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => { if (!projectDataReady) return; controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen || !projectDataReady}>{t("m5.shell.roles")}</button>}
         </div>
       </header>
 
@@ -216,6 +217,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </section>
       )}
       {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
+      {snapshot.project && !projectDataReady && <section className="m5-notice" role="status">
+        {chat.error?.messageKey === "m5.chatError.project" ? <><span>{t("m5.shell.projectRetryHelp")}</span><button type="button" className="m5-secondary" disabled={!admissionReady || settingsOpen} onClick={() => { if (snapshot.project && !chat.activeChat && !chat.settings) void chatController.openProject(snapshot.project.id); }}>{t("m5.feedback.retry")}</button></> : <span>{t("m5.shell.projectLoading")}</span>}
+      </section>}
       {snapshot.rescanRequired && (
         <section className="m5-rescan" role="status">
           <span>{t("m5.feedback.overflow")}</span>
@@ -230,7 +234,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <label><input type="checkbox" checked={applicationBaseline} disabled={!admissionReady || chat.preparing} onChange={event => setApplicationBaseline(event.target.checked)} />{t("m5.application.chatBaseline")}</label>
           {applicationBaseline && <p>{t("m5.application.chatBaselineHelp")}</p>}
-          <button type="submit" disabled={!admissionReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
+          <button type="submit" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
         </form>
       </section>}
 
