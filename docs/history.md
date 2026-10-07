@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실제 native UI 메모리 진단 연결·첫 실측)
+
+- 기준db3dfd9. HELLO_AGENT_SMOKE_MEMORY=1 선택 시 기존 실제 UI 시험에250ms 현재 root/자손 RSS,1초 idle, 정상 프로젝트 닫기 뒤60초 retained 수집을 연결했다. 기존 processTreeMemory/summarizeMemory를 재사용하며 collector ps만 제외한다. 부분/실패 표본도 memory.json으로 보존하고 작은 프로젝트 진단임을 명시한다. 임계값/제품 GC/실행 권한 변경 없음.
+- 실제 APPLY+RELOAD 흐름은 설정/편집/diff/반영/reload/복원/두 채팅까지 통과했고 이후 메모리 판정은 FAIL/exit1. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-OxiFSX/memory.json, 로그 /private/tmp/hello-agent-native-memory-oct7.log. 360표본·native 자손 관측, idle429080576(약409MiB)만 기준 초과, peak600899584(약573MiB), retained118636544(약113MiB)는 기준 이내, 실제닫기대기60026ms.
+- 합성 대형 renderer의 peak 실패와 작은 native UI의 idle 실패는 다른 조건이며 이번 성공 항목으로 이전 실패를 대체하지 않는다. 최신 main에서 CSP meta 경고는 로그에 없지만 framing 거절 E2E는 별도다. Karpathy 지침으로 기존 collector/정상 종료를 유지했다. 문법/diff 검사 통과, 절차 갱신. 실제 모델·대형 native 부하·G6/Windows/시안 전체는 미완료. 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (종료 정리 이후 누적 UI 메모리 재측정)
 
 - 기준0449f1d, renderer diagnostic memory 실행을 동일 handle로 완료했다(FAIL/exit1). 증거 .artifacts/m5-performance/renderer-2026-10-07T07-10-36.202Z-18055.json, 로그 /private/tmp/hello-agent-memory-after-ui-oct7.log. idle426557440 bytes(약407MiB), peak927318016(약884MiB)는400/800MiB 기준 초과,60초 retained delta13926400(약13MiB)는120MiB 기준 이내다. 기존 실패를 해소했다고 주장하지 않는다.

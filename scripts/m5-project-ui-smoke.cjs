@@ -3,7 +3,32 @@
 const { app, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFile, execFileSync } = require('node:child_process');
+const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
+const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
+const memorySamples = [];
+let memoryPhase = 'idle';
+let memoryTimer;
+let memoryPending;
+let memoryError;
+let memoryReport;
+function sampleMemory() {
+  if (memoryPending) return memoryPending;
+  const phase = memoryPhase;
+  memoryPending = new Promise((resolveSample, reject) => {
+    const child = execFile('/bin/ps', ['-axo', 'pid=,ppid=,rss='], { timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+      if (error) return reject(error);
+      try {
+        const rows = stdout.split('\n').filter(line => Number(line.trim().split(/\s+/)[0]) !== child.pid).join('\n');
+        const tree = processTreeMemory(rows, process.pid);
+        const metrics = new Map(app.getAppMetrics().map(metric => [metric.pid, metric]));
+        memorySamples.push({ elapsedMs: performance.now(), phase, ...tree, processes: tree.processes.map(entry => ({ ...entry, type: metrics.get(entry.pid)?.type ?? 'nonElectronChild' })) });
+        resolveSample();
+      } catch (failure) { reject(failure); }
+    });
+  }).finally(() => { memoryPending = null; });
+  return memoryPending;
+}
 if (process.platform !== 'darwin') throw new Error('This native UI smoke currently supports macOS only');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-project-ui-'));
 const repoRoot = path.resolve(__dirname, '..');
@@ -14,14 +39,21 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', path.join(root,'userdata'));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 let finished = false;
-const timer = setTimeout(() => finish(new Error('flow timeout')), 90000);
+const timer = setTimeout(() => finish(new Error('flow timeout')), measureMemory ? 160000 : 90000);
 function finish(error, details) {
   if (finished) return;
-  finished = true; clearTimeout(timer);
+  finished = true; clearTimeout(timer); clearInterval(memoryTimer);
+  if (measureMemory) fs.writeFileSync(path.join(root, 'memory.json'), JSON.stringify({
+    schemaVersion: 1, diagnostic: true, gateEligible: false,
+    scope: 'Native UI Electron root and current descendants, including its sidecar; escaped descendants and agents not measured',
+    fixture: 'Small generated project, two chats; not the G6 large-file or streaming fixture',
+    intervalMs: 250, closeWaitMs: 60000, samples: memorySamples,
+    ...memoryReport, error: memoryError?.message ?? error?.message,
+  }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
   app.once('will-quit', () => app.exit(error ? 1 : 0));
-  console.log(JSON.stringify({status:error?'FAIL':'PASS',root,error:error?.message,...details}));
+  console.log(JSON.stringify({status:error?'FAIL':'PASS',root,error:error?.message,...details,...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {})}));
   app.quit();
 }
 app.on('browser-window-created', (_event, window) => {
@@ -39,6 +71,13 @@ app.on('browser-window-created', (_event, window) => {
     };
     try {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
+      if (measureMemory) {
+        await sampleMemory();
+        memoryTimer = setInterval(() => { void sampleMemory().catch(error => { memoryError = error; }); }, 250);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (memoryPending) await memoryPending;
+        memoryPhase = 'loaded';
+      }
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
@@ -182,6 +221,23 @@ app.on('browser-window-created', (_event, window) => {
       console.log(JSON.stringify({stage:'PROJECT_FLOW_COMPLETE',root}));
       const screenshot = path.join(root,'project.png');
       fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG());
+      if (measureMemory) {
+        await sampleMemory();
+        memoryPhase = 'closing';
+        await clickText('프로젝트 화면 닫기');
+        await wait(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`);
+        console.log(JSON.stringify({stage:'MEMORY_CLOSE_WAIT',root,waitMs:60000}));
+        const closedAt = performance.now();
+        await new Promise(resolve => setTimeout(resolve, 60000));
+        if (memoryPending) await memoryPending;
+        memoryPhase = 'retained';
+        await sampleMemory();
+        clearInterval(memoryTimer);
+        if (memoryError) throw memoryError;
+        const summary = summarizeMemory(memorySamples);
+        memoryReport = { ...summary, actualCloseWaitMs: performance.now() - closedAt, status: summary.failedMetrics.length ? 'FAIL' : 'NOT_READY' };
+        if (summary.failedMetrics.length) throw new Error('native diagnostic memory limits exceeded: '+summary.failedMetrics.join(', '));
+      }
       finish(null,{screenshot,text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');
