@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (원본 반영 활성화 전 차단 발견)
+
+- 기준 81e7db3. 실행 중인 기존 독립 검토자 claude_activation_review가 원본 쓰기 활성화 전 실제 볼륨 여유공간 검사 누락을 확인했다. backup 총량 예산은 있지만 available_space/512MiB reserve는 snapshot 생성에서만 사용된다. ENOSPC 후 잠금/자료 보존은 사전 공간 확보 요구를 대체하지 않는다. source_writes_enabled=false를 유지한다.
+- 다음 구현은 immutable review의 before archive/after staging 필요량을 계산해 preparing 게시 전 backup capability와 source capability의 볼륨 여유를 확인하고, apply/restore 쓰기 입장에서도 재확인하는 것이다. 동일 볼륨 합산·서로 다른 볼륨·reserve·산술 overflow와 저용량 거절/source writes0 회귀를 포함한다. 실제 공간 예약/동시 외부 소비 방지라고 주장하지 않는다.
+- 추가 검토 후보는 4GiB archive decoder 재읽기 중 취소 확인 부재로 main 처리 반환이 늦는 경로다. 현재 검토자는 계속 실행 중이며 최종 차단 목록은 아직 미수신이다. 다음 턴은 같은 검토자 상태/메시지를 이어 받고 작업을 중복 시작하지 않는다. 이번에는 제품 활성화/원본 쓰기 변경 없음, diff check 확인; main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (재시작·반영 검토 UI와 원본 writer 통합 검사)
 
 - 기준 d1b86a8, 직전 저장/채팅 복구는 구현·실제 UI 진전이다. 정상 종료했던 합성 userData로 새 Electron 프로세스를 실행해 picker 없이 저장된 프로젝트 선택, 두 채팅 목록, 편집한 채팅의 파일/변경 재열기와 원본 불변을 확인했다(PASS/정상 종료, /private/tmp/hello-agent-project-ui-OzasD2/reopen.png).
@@ -122,6 +128,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **원본 writer 활성화 차단(2026-10-07)**: backup 예산은 실제 disk-free/staging 여유 검사와 다르다. 현재 사전 디스크 여유 검사는 snapshot 생성에만 있어, backup/source 볼륨 양쪽의 반영/복원 공간 admission과 archive 재검증 취소 응답을 점검해야 한다. 내부 통합38 PASS만으로 source_writes_enabled를 켜지 않는다.
 - **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.
 - **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
 - **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.
