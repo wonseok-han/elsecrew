@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (저장 알림 경합 수정·다중 채팅 UI 검증)
+
+- 기준 2200ef5, 직전은 실제 편집/저장 IPC 복구 진전이다. 실제 UI에서 자신의 저장 알림이 성공 응답보다 먼저 도착하면 draft를 충돌로 바꾸는 경합까지 재현했다. 일반 file.changed는 saving 중 보류하고 완료 뒤 bounded read/version 비교로 확인한다. clean tab도 저장 버전과 같으면 외부 변경 안내를 내지 않는다. explicit file.conflict·실제 다른 버전·조회 실패 보호와 새 draft 보존은 유지한다.
+- Karpathy 지침으로 기존 읽기/stream/버전 계약을 재사용했다. 독립 검토가 async read 도중 blocked 전환의 늦은 상태 변경을 지적해 await 뒤 gate 재확인과 회귀를 추가했다. 최종 재검토에서 추가 차단 결함 없음. 영향 suite53 PASS 후 마지막 gate 회귀 포함 집중7 PASS, renderer build·tsc·diff check PASS. 결과를 전체 제품/플랫폼 합격으로 확대하지 않는다.
+- 실제 임시 프로젝트/UI에서 최종 저장·diff 상세·외부 변경 안내 없음·원본 불변을 확인하고 두 번째 채팅 생성까지 진행했다(8qGED2/fX6flz 임시 시험). 그러나 두 번째 채팅 Monaco 내용이 DOM에 보이지 않아 전체 다중 채팅 flow는 FAIL이다. 최초 화면에도 간헐 입력/렌더 대기가 있어 시험 초점 문제와 제품 표시 문제를 구분 중이며 가상화 문제라고 단정하지 않는다. 다음은 화면/크기 증거 확인과 채팅 재열기, 적용/복구 통합 검증이다. 실제 계정·유료 모델 사용 및 main/push 없음; 기존 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (실제 프로젝트·채팅·편집 저장 흐름 복구)
 
 - 기준 897d77e. 임시 Git 프로젝트와 격리 userData에서 실제 Electron main/preload/renderer+native sidecar로 프로젝트 선택 → 새 채팅 → Monaco 편집 → 저장 → 변경 목록을 검사했다. picker 반환 경로만 합성 폴더로 고정했으며 실제 계정/모델·사용자 프로젝트는 사용하지 않았다.
@@ -102,6 +108,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.
 - **실제 편집 IPC 정합성(2026-10-07)**: tree 루트 빈 경로만 허용하고 파일 경로의 빈 값/탈출은 계속 거절한다. ChatRecord에서 IPC workspace 주소 네 필드만 추출해야 하며 workspace 저장 chunk/commit은 V2와 달리 saveId를 응답해야 한다. 격리 실제 UI에서 편집·저장·diff 목록/원본 불변 확인; 자신의 저장 후 외부 변경 안내가 남는 감시 UX는 후속이다.
 
 - **macOS native 제품 연결(2026-10-07)**: 일반 --stdio의 전역 blocked를 macOS에서 해제하고 scoped native dispatcher를 선택한다. 시작별 입장·관측·도구 승인·종료/복구 검사는 유지하며 비-macOS G4 차단은 유지한다. native capability는 fixture와 독립된 고정 목록이다. 이전 비활성 기록은 당시 상태이며 현재 코드 연결/무계정 stdio 검증과 실제 계정/모델·패키지/UI 합격은 구분한다.

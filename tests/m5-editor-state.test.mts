@@ -598,6 +598,54 @@ test("stale save는 초안을 보존한 conflicted 상태로 닫기·프로젝�
   controller.dispose();
 });
 
+test("clean file watcher checks the saved version before reporting an external change", async () => {
+  const { bridge, controller } = await openText();
+  const emit = () => bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  const notice = controller.snapshot().notice;
+  emit();
+  await settle();
+  assert.equal(controller.snapshot().notice, notice);
+  bridge.fileText = "external update\n";
+  emit();
+  await settle();
+  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.external");
+  assert.notEqual(controller.snapshot().tabs[0]?.text, bridge.fileText);
+  controller.dispose();
+});
+
+test("watcher version checks preserve newer drafts and do not read through a blocked gate", async () => {
+  const { bridge, controller } = await openText();
+  const pending = deferred<Awaited<ReturnType<FakeBridge["readFile"]>>>();
+  let reads = 0;
+  bridge.readFile = async () => { reads++; return pending.promise; };
+  const emit = () => bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  controller.setActionBlocked(true);
+  emit();
+  assert.equal(reads, 0);
+  controller.setActionBlocked(false);
+  emit();
+  controller.updateText("src/file-000.ts", "new draft");
+  pending.resolve({ projectId: "project_01", path: "src/file-000.ts", classification: "binary", byteLength: 0, version: version("different"), stream: null });
+  await nextTurn();
+  assert.equal(controller.snapshot().tabs[0]?.saveState, "conflicted");
+  assert.equal(controller.snapshot().tabs[0]?.text, "new draft");
+  controller.dispose();
+});
+
+test("a delayed watcher read cannot overwrite a newly blocked workspace notice", async () => {
+  const { bridge, controller } = await openText();
+  const pending = deferred<Awaited<ReturnType<FakeBridge["readFile"]>>>();
+  bridge.readFile = async () => pending.promise;
+  bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  controller.setActionBlocked(true);
+  const before = controller.snapshot();
+  pending.resolve({ projectId: "project_01", path: "src/file-000.ts", classification: "binary", byteLength: 0, version: version("different"), stream: null });
+  await nextTurn();
+  assert.deepEqual(controller.snapshot(), before);
+  controller.dispose();
+});
+
 test("외부 파일 event는 dirty draft를 conflicted로 바꾸되 draft를 보존한다", async () => {
   const { bridge, controller } = await openText();
   controller.updateText("src/file-000.ts", "보존할 초안\n");
@@ -947,12 +995,31 @@ test("saving 중 watcher conflict가 늦은 commit 성공보다 우선하며 dra
   const saving = controller.saveActive();
   await nextTurn();
   assert.equal(controller.snapshot().tabs[0]?.saveState, "saving");
-  bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  bridge.emitProject({ projectId: "project_01", event: "file.conflict", paths: ["src/file-000.ts"], rescanRequired: false });
   bridge.pendingCommit.resolve({ outcome: "committed", version: version("보존할 저장 초안\n") });
   await saving;
   assert.equal(controller.snapshot().tabs[0]?.saveState, "conflicted");
   assert.equal(controller.snapshot().tabs[0]?.text, "보존할 저장 초안\n");
   assert.equal(controller.snapshot().rescanRequired, true);
+  controller.dispose();
+});
+
+test("a self-save watch notification before commit is reconciled without losing a newer draft", async () => {
+  const { bridge, controller } = await openText();
+  bridge.pendingCommit = deferred();
+  controller.updateText("src/file-000.ts", "saved text");
+  const saving = controller.saveActive();
+  await nextTurn();
+  bridge.fileText = "saved text";
+  bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  controller.updateText("src/file-000.ts", "newer draft");
+  bridge.pendingCommit.resolve({ outcome: "committed", version: version("saved text") });
+  await saving;
+  await nextTurn();
+  assert.equal(controller.snapshot().tabs[0]?.saveState, "dirty");
+  assert.equal(controller.snapshot().tabs[0]?.text, "newer draft");
+  assert.equal(controller.snapshot().rescanRequired, false);
+  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.newerDraft");
   controller.dispose();
 });
 
@@ -1295,6 +1362,7 @@ test("picker 취소는 기존 프로젝트의 tree·tabs·notice·error를 그�
   bridge.readError = new Error("E_READ_EVIDENCE");
   await controller.openFile("src/other.ts");
   bridge.emitProject({ projectId: "project_01", event: "file.changed", paths: ["src/file-000.ts"], rescanRequired: false });
+  await nextTurn();
   const before = controller.snapshot();
   bridge.openError = Object.assign(new Error("native picker cancelled"), { name: "AbortError" });
 

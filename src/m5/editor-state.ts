@@ -119,6 +119,7 @@ export class ProjectEditorController {
   readonly #streams = new Map<string, StreamAssembly>();
   readonly #pendingStreams = new Map<string, PendingStream>();
   readonly #saveGenerations = new Map<string, number>();
+  readonly #saveWatchPending = new Set<string>();
   readonly #snapshotCreationTimeoutMs: number;
   #pendingStreamBytes = 0;
   #pendingOverflowUntil = 0;
@@ -581,6 +582,11 @@ export class ProjectEditorController {
         this.#replaceTab(path, { ...latest, saveState: "dirty" });
       }
       this.#setError("m5.editorError.save", error);
+    } finally {
+      if (this.#saveWatchPending.delete(path) && this.#isCurrent(project.id, epoch)) {
+        const latest = this.#tab(path);
+        if (latest && latest.saveState !== "conflicted") void this.#checkCleanFileChange(latest);
+      }
     }
   }
 
@@ -792,14 +798,46 @@ export class ProjectEditorController {
     for (const path of event.paths) {
       const tab = this.#tab(path);
       if (!tab) continue;
+      if (event.event === "file.changed" && tab.saveState === "saving") {
+        this.#saveWatchPending.add(path);
+        continue;
+      }
       if (event.event === "file.conflict" || tab.saveState === "dirty" || tab.saveState === "saving") {
         this.#replaceTab(path, { ...tab, saveState: "conflicted", technicalDetail: "external file change" });
         this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.externalDraft") });
       } else {
-        this.#setNotice("m5.editorNotice.external");
+        void this.#checkCleanFileChange(tab);
       }
     }
     if (event.event === "diff.changed") void this.refreshChanges();
+  }
+
+  async #checkCleanFileChange(tab: EditorTab): Promise<void> {
+    const project = this.#state.project;
+    const workspace = this.#state.workspace;
+    const epoch = this.#projectEpoch;
+    if (!project) return;
+    if (this.#actionBlocked) return;
+    let unchanged = false;
+    try {
+      const descriptor = workspace
+        ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path: tab.path })
+        : await this.#bridge.readFile({ projectId: project.id, path: tab.path });
+      // Drain the bounded read stream even when only its version is needed.
+      if (descriptor.stream) await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
+      unchanged = descriptor.version === tab.baseVersion;
+    } catch {
+      // An unreadable/deleted file is not evidence that the editor is current.
+    }
+    if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || this.#actionBlocked) return;
+    const latest = this.#tab(tab.path);
+    if (!latest || latest.baseVersion !== tab.baseVersion || unchanged) return;
+    if (latest.saveState !== "clean") {
+      this.#replaceTab(tab.path, { ...latest, saveState: "conflicted", technicalDetail: "external file change" });
+      this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.externalDraft") });
+    } else {
+      this.#setNotice("m5.editorNotice.external");
+    }
   }
 
   #observeWorkspaceEvent(event: WorkspaceEventV1): void {
