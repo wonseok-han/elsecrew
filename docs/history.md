@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (편집기 종료 시 미완료 읽기 정리)
+
+- 직전 상태 설명은 구현 진전이 아니었다. HEAD ad90d37에서 편집기 dispose가 stream timer/map만 지우고 대기 Promise를 끝내지 않는 결함을 수정했다. 진행 중 읽기를 reject하고, 파일/재읽기/diff/감시 읽기의 descriptor 반환 직후 project epoch·workspace를 확인해 종료/재시작 뒤 오래된 응답이 새 stream을 만들지 않게 했다. 기존 draft와 StrictMode 재시작 상태는 보존한다.
+- 미완료 파일·diff 읽기의 종료 및 재시작 후 정상 읽기, 재시작 뒤 늦은 descriptor 회귀를 추가했다. editor-state 49개 PASS(3.22초). 그 뒤 감시 읽기에도 같은 사전 guard를 추가했으며 누적 검증 대상이다. Monaco는 editor/model/subscription의 역순 dispose가 이미 있어 추측성 해제/강제GC를 추가하지 않았다. Karpathy 지침으로 확인된 결함에 한정했다.
+- 이번 수정이 RSS 초과의 원인 또는 해결이라는 증거는 없다. 메모리 진단 재실행/원인 분리, 실제 모델 종단 검증·시안 마감/G6/Windows가 남는다. 기존 9월 archive 변경 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (사용자 진척 질문·완료 경계 재확인)
+
+- HEAD ad90d37, m5/coding-agent-ide와 기존 9월 archive 변경만 있는 상태를 확인했다. 프로젝트/다중 채팅/편집·저장/diff/원본 반영·복원/renderer 재진입은 앞선 macOS 합성 실제 UI에서 통과했으며, 이번에는 새 실행 시험을 하지 않았다. 코드의 macOS source writes 활성·backup cleanup 비활성 및 가상 파일 목록/설정 modal을 대조했다.
+- 실제 계정으로 모델 작업부터 검토·반영까지의 종단 검증, 전체 시안 마감, G6 성능/패키징 및 Windows/출시 검증은 남아 있다. 최신 메모리 진단은 idle431/peak948/retained delta155MiB로 세 기준을 초과했다. 이를 단순 마무리나 제품 완료로 표현하지 않는다.
+- 작은 수정·검증 단위에 진척 보고가 치우쳐 사용자에게 완료 경계가 불명확해진 점을 설명하고 현재 단계를 핵심 흐름 연결 후 통합 안정화로 정리한다. 다음은 메모리 원인 분리/수정과 실제 공급자 종단 검증·화면 마감이다. 신규 코드 변경/커밋/main 병합/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (renderer 메모리 기준 초과 확인)
 
 - 기준6dcdff8. 직전 시간 진단은 진전이다. --diagnostic --memory의 최초2회는 입력 paint 대기에서 중단됐다. 두 번째에 visibility=visible/focused=false를 확인해 Electron 앱 활성화·편집기 focus 확인 후에만 char를1회 전송하고 그 직전부터 inputPaint를 측정하도록 runner를 정정했다. 제품 메모리/GC/보안 설정은 변경하지 않았다.

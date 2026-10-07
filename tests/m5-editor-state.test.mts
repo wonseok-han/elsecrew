@@ -477,6 +477,48 @@ async function openText(bridge = new FakeBridge()) {
   return { bridge, controller };
 }
 
+test("dispose settles unfinished file and diff reads without publishing stale state", { timeout: 2000 }, async () => {
+  const bridge = new FakeBridge();
+  bridge.autoReadChunks = false;
+  bridge.autoDiffChunks = false;
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  const reading = controller.openFile("src/file-000.ts");
+  const diffing = controller.openDiff("src/file-000.ts");
+  await nextTurn();
+  const before = controller.snapshot();
+  controller.dispose();
+  await Promise.all([reading, diffing]);
+  assert.equal(controller.snapshot(), before);
+  controller.start();
+  bridge.autoReadChunks = true;
+  try {
+    await controller.openFile("src/file-000.ts");
+    assert.equal(controller.snapshot().tabs[0]?.text, bridge.fileText);
+  } finally { controller.dispose(); }
+});
+
+test("late read descriptor after disposal and restart cannot start an orphan stream", { timeout: 2000 }, async () => {
+  const bridge = new FakeBridge();
+  bridge.autoReadChunks = false;
+  const descriptor = await bridge.readFile({ projectId: "project_01", path: "src/file-000.ts" });
+  const pending = deferred<typeof descriptor>();
+  bridge.readFile = () => pending.promise;
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  const reading = controller.openFile("src/file-000.ts");
+  controller.dispose();
+  controller.start();
+  const before = controller.snapshot();
+  pending.resolve(descriptor);
+  try {
+    await reading;
+    assert.equal(controller.snapshot(), before);
+  } finally { controller.dispose(); }
+});
+
 test("confirmed reload clears a conflict only after saved text is available without writing", async () => {
   const { bridge, controller } = await openText();
   try {

@@ -202,6 +202,7 @@ export class ProjectEditorController {
     this.#started = false;
     for (const stream of this.#streams.values()) {
       if (stream.timeout) clearTimeout(stream.timeout);
+      stream.reject?.(new Error("editor disposed before stream completed"));
     }
     this.#streams.clear();
     for (const stream of this.#pendingStreams.values()) clearTimeout(stream.expiry);
@@ -489,6 +490,7 @@ export class ProjectEditorController {
     try {
       const workspace = this.#state.workspace;
       const descriptor = workspace ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path }) : await this.#bridge.readFile({ projectId: project.id, path });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       const text = descriptor.classification === "utf8" && descriptor.stream
         ? await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1)
         : "";
@@ -523,6 +525,7 @@ export class ProjectEditorController {
     if (!project || this.#actionBlocked || confirmed.saveState === "saving" || this.#tab(confirmed.path) !== confirmed) return false;
     try {
       const descriptor = workspace ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path: confirmed.path }) : await this.#bridge.readFile({ projectId: project.id, path: confirmed.path });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return false;
       if (descriptor.classification !== "utf8" || !descriptor.stream) throw new Error("saved file is not an editable text file");
       const text = await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
       if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || this.#actionBlocked || this.#tab(confirmed.path) !== confirmed) return false;
@@ -681,6 +684,7 @@ export class ProjectEditorController {
     try {
       const workspace = this.#state.workspace;
       const diffFile = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffFile({ ...workspace, path }) : await this.#bridge.getDiffFile({ projectId: project.id, path });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       const diffText = diffFile.stream
         ? await this.#awaitStream(diffFile.stream.streamId, diffFile.byteLength, MAX_DIFF_STREAM_BYTES)
         : "";
@@ -823,6 +827,7 @@ export class ProjectEditorController {
       const descriptor = workspace
         ? await this.#workspaceMethods()!.readWorkspaceFile({ ...workspace, path: tab.path })
         : await this.#bridge.readFile({ projectId: project.id, path: tab.path });
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
       // Drain the bounded read stream even when only its version is needed.
       if (descriptor.stream) await this.#awaitStream(descriptor.stream.streamId, descriptor.byteLength, FILE_MAX_BYTES_V1);
       unchanged = descriptor.version === tab.baseVersion;
