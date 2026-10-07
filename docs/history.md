@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (thread 생성 알림 timestamp 호환 수정)
+
+- 기준a14707e, 기존9월 archive 보존. 직전 턴은 진단 코드와 타입 오류 수정/커밋으로 진척했다. OpenAI Docs 지침으로 공식 https://learn.chatgpt.com/docs/app-server 를 조회하고 기존 CLI0.159.2 생성물 /private/tmp/hello-agent-codex-schema.ZWa0QJ/ServerNotification.json의 공통 emittedAtMs integer 필드를 대조했다. ThreadStartedNotification의 내부 thread 객체에는 원래 extra 필드를 허용하므로 'thread가 id만 있어야 한다'는 이전 가설은 정정한다. 실제 누락은 상위 envelope의 timestamp다.
+- core ThreadStarting Notification에 기존 account/login/events와 같은 optional default u64/JS-safe 상한을 추가했다. ID/응답 대조·중복/미지 메서드 거절·알림 단독 실행 금지는 유지한다. before/after 및 음수/상한 초과/문자열/null/중복 키/추가 필드 회귀를 보강했으며 focused 검사1개 PASS. 실제 실패 frame은 확보하지 못해 이 수정이 실제28초 실패 원인 해소라고 주장하지 않는다.
+- 같은 상시 승인 읽기 전용 검토자가 스키마·선택 timestamp 범위·기존 상관관계 유지에 차단 결함 없음으로 승인했다(검토자 실행0회). 메인의 core codex_preflight 관련28/28 PASS. 실제 모델/계정/CLI 실행0회. 다음: 최신 sidecar 빌드와 승인된 실제 재시험으로 원인 결속. 종료 경고/제품 전체 완료는 여전히 미확인, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (진단 묶음 검증·Electron 타입 누락 수정)
 
 - 기준a892009+종료 진단 변경. 직전 턴은 고정 진단 코드/회귀 추가로 진척했다. bridge·work-status·live smoke·editor-state·heap-sampling 묶음118/118 PASS, 프런트 tsc PASS. forge는 main/preload/renderer 번들을 생성했으나 패키징 다운로드에서 fetch failed/exit1로 실패했다. 설치 패키지 성공으로 기록하지 않는다.

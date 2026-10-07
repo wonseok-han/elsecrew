@@ -324,12 +324,15 @@ impl PreflightExchange {
             struct Notification {
                 method: String,
                 params: ResultWire,
+                #[serde(default, rename = "emittedAtMs")]
+                emitted_at_ms: u64,
             }
             if input.json()?.get("method").is_some() {
                 let note: Notification =
                     serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
                 let id = note.params.thread.id;
                 if note.method != "thread/started"
+                    || note.emitted_at_ms > 9_007_199_254_740_991
                     || self.notified_thread_id.is_some()
                     || id.is_empty()
                     || id.len() > 128
@@ -1247,6 +1250,14 @@ mod tests {
             "request",
             "unknown",
             "empty",
+            "timedBefore",
+            "timedAfter",
+            "negativeTime",
+            "overflowTime",
+            "stringTime",
+            "nullTime",
+            "duplicateTime",
+            "extraEnvelope",
         ] {
             let mut flow = exchange();
             for (index, result) in results().iter().enumerate() {
@@ -1261,12 +1272,21 @@ mod tests {
                 "request" => note["id"] = json!(99),
                 "unknown" => note["method"] = json!("thread/unknown"),
                 "empty" => note["params"]["thread"]["id"] = json!(""),
+                "timedBefore" | "timedAfter" | "duplicateTime" => note["emittedAtMs"] = json!(1790643701003_u64),
+                "negativeTime" => note["emittedAtMs"] = json!(-1),
+                "overflowTime" => note["emittedAtMs"] = json!(9_007_199_254_740_992_u64),
+                "stringTime" => note["emittedAtMs"] = json!("123"),
+                "nullTime" => note["emittedAtMs"] = Value::Null,
+                "extraEnvelope" => note["unexpected"] = json!(true),
                 _ => {}
             }
-            let note = BoundedObservation::new(note.to_string().into_bytes()).unwrap();
-            if matches!(case, "request" | "unknown" | "empty") {
+            let raw = if case == "duplicateTime" {
+                note.to_string().replacen('{', "{\"emittedAtMs\":1,", 1)
+            } else { note.to_string() };
+            let note = BoundedObservation::new(raw.into_bytes()).unwrap();
+            if matches!(case, "request" | "unknown" | "empty" | "negativeTime" | "overflowTime" | "stringTime" | "nullTime" | "duplicateTime" | "extraEnvelope") {
                 assert!(flow.accept(&note).is_err());
-            } else if case == "after" {
+            } else if matches!(case, "after" | "timedAfter") {
                 assert_eq!(
                     flow.accept(&thread_reply(&result)).unwrap(),
                     PreflightState::ThreadStarting
@@ -1287,7 +1307,7 @@ mod tests {
                     );
                 }
             }
-            if matches!(case, "before" | "after") {
+            if matches!(case, "before" | "after" | "timedBefore" | "timedAfter") {
                 assert_eq!(flow.matched_thread_id(), Some("thread-1"));
             } else {
                 assert_eq!(flow.state(), PreflightState::Failed);
