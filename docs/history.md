@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (최근 UI 연결 묶음 실제 검증)
+
+- 기준808dd12. TypeScript·renderer production build 통과, 코드 블록4+bootstrap 수명주기1 회귀 통과. 실제 native UI의 첫 실행은 시작/설정/편집/diff/원본 반영까지 통과한 뒤 reload에서 제거된 catalog 팝업 버튼을 기다리며 실패했다. 새 sidebar 목록의 활성 항목을 직접 선택하도록 runner를 갱신했다. Karpathy 지침으로 제품 동작을 검사에 맞춰 되돌리지 않았다.
+- 동일 조건 재실행(HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1)은 PASS/exit0. 새 채팅 modal·초안 재열기·설정 저장·Monaco 편집·대화→diff·원본 반영·renderer reload·저장 프로젝트/채팅 재선택·복원·두 채팅 전환을 확인했다. 증거 /private/tmp/hello-agent-ui-wave-oct7-retry.log, screenshot /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-J4Ymy6/project.png 직접 확인. 시험용 프로젝트/userData만 사용하고 실제 계정/모델 호출 없음.
+- 화면의 시작 안내가 목록을 위쪽으로 잘못 가리켜 한영 문구를 왼쪽으로 정정했다(실측 이후 문구만 변경). Monaco 큰 chunk/CSP meta 경고는 남고 코드 복사 권한·실제 공급자 종단·메모리/G6/Windows·전체 시안 마감은 별도 미완료다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (대화 결과에서 diff 검토 동선 연결)
 
 - 기준21912b6. 채팅의 반영 전 목록 영역에 작업 사본 diff 열기를 연결했다. 기존 selectPanel/refreshChanges를 사용해 숨은 변경 패널을 다시 표시하며 actionBlocked는 계속 지킨다. diff 조회와 실제 반영 대상 재확인·동의를 구분하는 한영 안내, 검토 불가 상태 안내와 영역 스타일을 추가했다.

@@ -470,7 +470,7 @@ export const en: Record<MessageKey, string> = {
   "m5.start.connect": "Prepare your agent",
   "m5.start.connectHelp": "Select Codex or Claude Code above and follow the installation and sign-in guidance. You can also explore your files before connecting.",
   "m5.start.project": "Choose a project",
-  "m5.start.projectHelp": "Choose a project folder on your computer. Use Saved projects above to return to a project you opened earlier.",
+  "m5.start.projectHelp": "Choose a project folder on your computer. Use Saved projects on the left to return to a project you opened earlier.",
   "m5.start.goal": "Start your first chat with a small goal",
   "m5.start.goalHelp": "Describe what you want to do to create a working copy for the chat. Review the changes before deciding whether to apply them to the original.",
   "m5.start.projectLimit": "Existing Git projects are currently supported. Choosing a folder alone does not change original files or run an agent.",

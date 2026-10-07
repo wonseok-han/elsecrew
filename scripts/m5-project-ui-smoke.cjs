@@ -141,9 +141,7 @@ app.on('browser-window-created', (_event, window) => {
         console.log(JSON.stringify({stage:'APPLIED',root}));
         if (process.env.HELLO_AGENT_SMOKE_RELOAD === '1') {
           await new Promise(resolve => { window.webContents.once('did-finish-load', resolve); window.webContents.reload(); });
-          await wait(`document.querySelector('.m5-project-catalog > button')&&!document.querySelector('.m5-project-catalog > button').disabled`);
-          await run(`document.querySelector('.m5-project-catalog > button').click()`);
-          await wait(`document.querySelector('.m5-project-catalog-list li > button')!==null`);
+          await wait(`document.querySelector('.m5-project-rail .m5-project-catalog-list li > button')&&!document.querySelector('.m5-project-rail .m5-project-catalog-list li > button').disabled`);
           await run(`document.querySelector('.m5-project-catalog-list li > button').click()`);
           await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello')`);
           await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
