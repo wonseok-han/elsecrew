@@ -433,6 +433,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
       model.current = nextModel;
       const nextEditor = monaco.editor.create(host.current, {
         model: nextModel,
+        theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: false },
         fontSize: 13,

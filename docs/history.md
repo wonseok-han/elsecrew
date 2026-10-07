@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (복구 재진입 검토 마감·편집 화면 정리)
+
+- 기준 1fbd276. 직전은 macOS 원본 적용/복구·renderer 재진입 연결과 실제 합성 UI 검증의 진전이다. 기존 독립 검토자가 chatApplicationStatus의 durable chat binding 필터, exact 응답, unmount/late hydration 차단 및 별도 cleanup 비활성을 확인해 최종 차단 없음으로 종료했다. backend matching/mismatching binding 직접 회귀와 적용 상태 다른 chat none 확인은 권고 후속이며 이전 동일-chat reload PASS와 구분한다.
+- 실제 스크린샷에서 작업대가 dark인데 Monaco는 light인 불일치와 패널 최소680px로 인한 화면 이탈을 확인했다. Monaco vs-dark, dark form controls, 시안의13px 밀도 및 flex 잔여 높이/최소300px 작업대 레이아웃으로 수정했다. 사용자 저장 배치·drag/drop·resize 동작은 바꾸지 않았다. renderer build, Monaco7 PASS, 합성 저장 프로젝트 재열기/두 채팅/편집/diff PASS·정상 종료(/private/tmp/hello-agent-project-ui-OzasD2/reopen.png) 후 화면을 직접 확인했다. 큰 설치 안내/배치 조작의 점진적 노출과 전체 시안 마감은 여전히 남았다.
+- 실제 계정으로 Codex·Claude 각각1회 임시 프로젝트 수정 시험(사용량 발생 가능)에 대해 비동기 승인 질문을 보냈다. 답변 전 실제 계정/유료 실행은 하지 않으며 독립적인 UI 구현은 계속할 수 있다. 다음은 화면 셸 마감·실제 실행 흐름 및 G6/Windows/출시 검증이다. 기존 archive 변경 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (macOS 원본 반영·복구 실제 UI 연결)
 
 - 기준 cdcd440. 이전 공간 수정은 구현/회귀 진전이었다. 마지막 독립 지적(restore entry의 파일 수만큼 과도 누적)을 볼륨별 한 rename allowance로 수정했다. reserve+64KiB-1 거절/원장·원본 불변, reserve+64KiB 입장 포함 다중파일 focused1 PASS(10.32초), 공간 단위2 PASS. 공간·취소 범위 독립 재검토 차단 없음.

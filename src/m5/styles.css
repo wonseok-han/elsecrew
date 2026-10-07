@@ -1,4 +1,7 @@
 :root {
+  color-scheme: dark;
+  font-size: 13px;
+  line-height: 1.45;
   color: #e6edf3;
   background: #12161d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -16,10 +19,16 @@ button, input, textarea, select {
 
 .m5-workbench {
   min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
   box-sizing: border-box;
   padding: 20px;
   background: #12161d;
 }
+
+.m5-workbench > * { flex-shrink: 0; }
 
 .m5-toolbar {
   display: flex;
@@ -168,7 +177,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border-bottom: 1px solid #3b495b; }
 .m5-dock-tabs button { border-radius: 6px 6px 0 0; background: #202a37; color: #aab4c1; cursor: grab; }
 .m5-dock-tabs button[aria-selected="true"] { color: #e4f1ff; border-bottom: 2px solid #91c5ff; background: #171d26; }
-.m5-panels.m5-dock-tree { position: relative; display: block; height: max(680px, calc(100vh - 200px)); min-height: 0; }
+.m5-panels.m5-dock-tree { position: relative; display: block; flex: 1 0 300px; height: auto; min-height: 300px; }
 .m5-dock-tree .m5-dock-slot { position: absolute; box-sizing: border-box; padding: 4px; min-height: 0; overflow: hidden; }
 .m5-dock-tree .m5-dock-heading { flex-shrink: 0; overflow: auto; }
 .m5-dock-group-tabs { display: flex; flex: 1; gap: 2px; min-width: max-content; }
