@@ -1,5 +1,9 @@
 # Hello, Agent 기술 설계
 
+> 작업대 표시 수명(2026-10-07): 파일 트리는 페이지500개 중 최대120행만 렌더한다. diff는 페이지별 hunk 위치를 색인해 현재200행만 만들며 전체 탐색·잘못된 hunk의 원문 fallback을 유지한다. 대화는200개 표시와 이전/다음/최신 이동을 제공하고 과거 페이지를 읽을 때 새 이벤트가 화면을 이동시키지 않는다. 원장과 조회 기록을 잘라내는 정책은 아니다. Monaco는 마지막 동기화 문자열을 재사용하고 종료된 editor는 미완료 read를 끝내며 늦은 descriptor를 거절한다.
+
+> 최신 부분 성능 관측(2026-10-07, 2612b74): synthetic renderer10회에서 표시 시간·DOM 기준은 이내지만 전체 Electron subtree RSS는 idle399.94MiB/peak1036.83MiB/60초 잔류delta128.38MiB로 **FAIL**이다. 아래 예전 PASS 수치를 현행 메모리 합격으로 인용하지 않는다. 실제 native sidecar/agent·stream paint·전체 G6 합격 증거는 아니다. 증거와 한계는 `docs/history.md` 및 `procedures/m5-performance.md`에 기록한다.
+
 > 원본 적용·복구 활성화(2026-10-07): macOS의 `source_writes_enabled`를 활성화했다. immutable 검토/일회성 확인, 정확한 복구 fingerprint, 원장 잠금, 디스크 여유 및 취소 검사와 no-follow/atomic rename writer를 그대로 거친다. 새 archive의 before payload와 apply의 after staging만 추가 할당으로 계산하고 restore는 볼륨별 순차 rename 여유를 사용한다. 백업 삭제/기록 정리는 별도 `application_cleanup_enabled=false`로 유지한다. 임시 프로젝트 실제 UI에서 편집·diff·원본 반영·복원·두 채팅 전환을 확인했다. Windows/실제 사용자 프로젝트/출시 합격을 뜻하지 않는다.
 
 > macOS native 실행 연결(2026-10-07): 일반 `--stdio`가 native provider runtime을 선택한다. Rust/TypeScript의 독립된 고정 ready/status 목록은 `run.startFixture`를 포함하지 않고 fixture 목록 변경을 상속하지 않는다. sidecar/Electron은 새 fixture 실행을 거절하고 작업대는 데모 시작을 숨긴다. 기존 fixture 취소/복구는 유지한다. 비-macOS는 기존 blocked/G4 gate를 유지한다. 이 연결과 무계정 stdio 회귀는 실제 계정·유료 모델·패키지 UI 합격 증거와 별개다.

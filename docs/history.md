@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (최근 성능 변경 묶음 재측정·메모리 실패 유지)
+
+- 기준2612b74, 기존9월 archive만 dirty인 상태에서 --diagnostic --memory warm-up1+10회와60초 잔류 측정을 완료했다. .artifacts/m5-performance/renderer-2026-10-07T06-37-44.888Z-45537.json, FAIL/exit1. idle419364864 bytes(약399.94MiB)는 기준 이내지만 peak1087193088(약1036.83MiB), retained delta134610944(약128.38MiB)는 초과한다. 직전 메모리 개선의 효과나 해소를 주장하지 않는다.
+- 최대 표시 시간은 tree58.2ms/expand17.6/file76.1/input29.7/diff72.7/23.8, DOM362·관측longtask0으로 모두 기준 이내다. 마지막 renderer working set 약232MiB, heap 약15MiB로 둘을 동일한 누수 지표로 해석하지 않는다. synthetic renderer 측정이며 최근 긴 대화/네 채팅 부하 또는 전체 native 앱 RSS를 포함하지 않는다.
+- 이번 턴은 제품 코드 변경 없이 새로운 실패 증거를 확보했다. 다음은 반복 문서 열기에서 renderer peak가 증가하는 경로를 분리하고 실제 stream/전체 앱 수집기와 남은 제품 검증을 연결하는 것이다. 기준 상향·강제GC·기존 실패 삭제 없음. main/push 없음, 기존 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (연속 메시지 병합 비용·네 채팅 회귀)
 
 - 기준e70ad7a. 이벤트마다 전체 기존 메시지를 Map 재구축·정렬하던 mergeMessages에 이미 검증된 연속 base의 다음 단일 eventSequence만 append하는 경로를 추가했다. 겹침/중복/순서 오류는 기존 충돌 검사 경로를 그대로 사용하며 원장/권한/실행 동작은 바꾸지 않았다. Karpathy 지침으로 관측된 반복 비용에 한정했다.
