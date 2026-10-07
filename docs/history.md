@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (종료 정리 이후 누적 UI 메모리 재측정)
+
+- 기준0449f1d, renderer diagnostic memory 실행을 동일 handle로 완료했다(FAIL/exit1). 증거 .artifacts/m5-performance/renderer-2026-10-07T07-10-36.202Z-18055.json, 로그 /private/tmp/hello-agent-memory-after-ui-oct7.log. idle426557440 bytes(약407MiB), peak927318016(약884MiB)는400/800MiB 기준 초과,60초 retained delta13926400(약13MiB)는120MiB 기준 이내다. 기존 실패를 해소했다고 주장하지 않는다.
+- tree/file/input/diff 표시 최대54.5/90.7/43.1/71.2·22.9ms와 DOM362는 기준 이내, 측정 trial longtask0이었다. renderer working set은 중간 약583MiB까지 증가했다가 잔류154MiB·heap15MiB로 감소했다. 영구 누수로 단정하지 않으며 강제GC·기준 변경·DevTools 부착은 하지 않았다.
+- pagehide 정리 후 잔류 증가량 기준은 이번 표본에서 충족했지만 idle/peak는 남는다. 합성 bridge/no-sidecar인 부분 측정을 실제 앱 전체 메모리 또는 G6로 대체할 수 없으므로 다음은 실제 native 전체 수집 범위와 메모리 원인 분리다. 제품 코드 변경 없음, 실제 공급자/Windows/출시도 미완료, 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (최신 macOS 패키지 빌드·시작 경계 검증)
 
 - 기준837c96e, 기존9월 archive만 dirty. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 electron-forge package를 실행해 최신 main/preload/renderer와 release Rust sidecar가 포함된 darwin-arm64 패키지를 생성했다. 빌드 exit0, Rust release 단계17.63초. 로그 /private/tmp/hello-agent-package-oct7.log.
