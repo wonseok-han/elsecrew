@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{self, Display};
 
+pub mod phased_claude;
+
 use crate::run_recovery_v1::{
     G5_CAPABILITIES_V1, G5_EVENT_PAGE_MAX_ITEMS_V1, G5_ID_MAX_BYTES_V1,
     G5_MODEL_SELECTOR_MAX_BYTES_V1, G5_PERMISSIONS_V1, G5_PUBLIC_MESSAGE_MAX_BYTES_V1,

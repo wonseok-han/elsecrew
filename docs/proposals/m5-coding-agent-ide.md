@@ -566,6 +566,13 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 #### Claude 정책 관측의 남은 연결 조건 (2026-10-06 조사)
 
+**2026-10-07 사용자 확정 — 보장 범위와 단계 분리**: 공식 CLI의 보호 기능을 신뢰하되 공급자가 보고하지 않는 관리 설정·실행 중 설정 불변성까지 검증했다고 주장하지 않는 방향을 승인했다. 이 결정은 별도 VM 전환, sandbox 우회, 원본 직접 쓰기 또는 실제 계정/유료 모델 시험 승인이 아니다. standalone snapshot·명시적 대상·도구 승인·종료 확인·poisoned 잠금은 유지한다.
+
+- 실행 전 기록은 서명 확인된 실행 파일의 버전/신원, 앱 프로필의 credential 존재, 선택 역할/모델/effort, 앱이 **요청한** 실행 설정의 결속이다. credential 존재는 모델 사용 권한이나 실제 실행 성공이 아니다. 정책 digest는 기록의 결속용이며 고정 실행 파일 해시 허용 목록으로 업데이트를 막는 수단이 아니다.
+- 세션 기록은 같은 연결에서 실제 검증한 model/cwd/permission/tools/mcp/plugins만 포함한다. config·sandbox 실효 상태·관리 설정의 부재는 관측 목록에 넣지 않는다. 기존 G5C V1 전체 관측 계약은 유지하고 native Claude의 단계별 기록을 별도 버전 계약으로 다룬다.
+- 순서는 control 초기화와 실행 전 검사 → 목표 전송 → system/init 검증 → 도구 허용이다. system/init 이전 도구 요청·불일치 init·증거 누락은 거절하고 종료/복구한다. 목표 전송 전 system/init이 온다고 가정하지 않는다. 부모의 모델 통신 전체를 앱의 OS 격리로 차단한다는 보장은 하지 않는다.
+- 공식 도구 보호의 임시 sentinel 시험은 호환성/출시 검증이지 매 실행의 실효 정책 증명이 아니다. 알려진 보호 실패는 차단한다. 이 승인만으로 제품 gate를 PASS로 바꾸지 않고 실제 연결·누적 회귀·독립 검토를 마친다.
+
 확인된 공식 계약과 현재 제안을 구분한다. [SDK `resolveSettings()`](https://code.claude.com/docs/en/agent-sdk/typescript#resolvesettings)는 CLI를 띄우지 않고 같은 merge engine으로 설정과 출처를 조회하지만 `policyHelper`를 실행하지 않고 서버 관리 설정을 가져오지도 않는다. `settingSources: []`도 endpoint 관리 정책을 제외하지 않는다. 따라서 이 함수의 snapshot만으로 live session의 격리/관리 정책 합격을 만들지 않는다. 새 SDK 의존성을 추가하는 것만으로 현재 admission 공백은 해소되지 않는다.
 
 [관리 설정 문서](https://code.claude.com/docs/en/managed-settings)는 서버·MDM·파일·Windows HKCU, 파일의 `managed-settings.d/`와 실행 중 reload를 설명한다. 한 파일의 부재, 초기화 모델 목록, `hooks_applied`만으로 정책 부재나 불변성을 추론하지 않는다. 기존 `--safe-mode`/`--restricted`도 관리 정책 전체를 제거하는 옵션이 아니다.
