@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (승인된 실제 연결 시험·실행 전 차단 재현)
+
+- 기준209e3bb, 사용자에게 Codex·Claude 각1회 소규모 실제 모델 실행 승인을 받았다. 기존 앱 userData의 정상 login API를 사용하고 생성한 임시 Git 프로젝트만 선택하는 명시 opt-in runner를 추가했다. 인증 내용 읽기/복사·기존 사용자 프로젝트 접근·검사 우회는 하지 않았다. Karpathy 지침에 따라 제품 변경 없이 실제 실패를 먼저 확보했다.
+- 두 번의 준비 시험 모두 Codex/Claude login.check는 connected였다. 첫 시험은 Codex capability 오류에서 중단됐고, provider별 오류를 분리한 두 번째도 모델 startAgentRun까지 도달하지 못했다. Codex: app-owned provider profile could not be verified. Claude: control initialization unavailable; process cleanup required. 목표 전달/모델 응답 성공은0건이다. 두 임시 원본 Git status는 clean이었다.
+- 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-nwzImP/result.json 및 hello-agent-live-ZUsnAl/result.json. Codex 프로필 tmp/arg0에서 applypatch/apply_patch/codex-execve-wrapper symlink가 관측됐고 이후 사라졌다. 현재 runtime scanner는 모든 symlink를 거절한다. 실행 중 생성물과 scope 재검사의 충돌 가능성이 있지만 정확한 실패 분기 확정/수정은 아직 남는다. Claude 초기화의 구체 실패 원인은 별도 추적 필요하다.
+- 두 번째 시험의 정상 app.quit 및 Cmd+Q 뒤에도 Electron 창이 남았다. 공급자 종료 성공이나 앱 정상 종료를 주장하지 않고 강제 종료하지 않았다. 재시작/추가 시험 전에 잔류 시험 앱·sidecar 종료/복구 상태를 먼저 확인해야 한다. 검사 완화·설치 복구·재로그인으로 우회하지 않는다. 스크립트 문법/diff 검사 수행, 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (실제 native UI 메모리 진단 연결·첫 실측)
 
 - 기준db3dfd9. HELLO_AGENT_SMOKE_MEMORY=1 선택 시 기존 실제 UI 시험에250ms 현재 root/자손 RSS,1초 idle, 정상 프로젝트 닫기 뒤60초 retained 수집을 연결했다. 기존 processTreeMemory/summarizeMemory를 재사용하며 collector ps만 제외한다. 부분/실패 표본도 memory.json으로 보존하고 작은 프로젝트 진단임을 명시한다. 임계값/제품 GC/실행 권한 변경 없음.
@@ -137,6 +144,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **실계정 연결 재검증(2026-10-07)**: 두 provider의 앱 전용 로그인은 connected이나 실제 작업 준비는 실패한다. Codex 프로필 검증 및 Claude control 초기화 차단으로 목표 전달 전 중단됐다. login 성공을 실행 성공으로 취급하지 않는다. 승인된 소규모 모델 호출은 아직 발생하지 않았으며 임시 시험 원본은 불변이다. 두 번째 시험 창의 정상 종료도 미완료로 남는다(상단 실연결 워크로그).
 
 - **현재 M5 마감 상태(2026-10-07, 5209128 이후)**: macOS 합성 실제 UI에서 시작 안내/설정 저장·재열기/두 채팅·편집·diff/원본 반영·renderer reload·복원 PASS. 파일 목록은120행 가상화, 설정 modal/첫 목표/최신 대화 따라가기는 연결됐으나 전체 시안 마감과 실제 모델 종단 검증·Windows/G6/출시는 미완료다. 편집기 dispose는 미완료 stream을 끝내고 늦은 descriptor를 무시한다. 최신 synthetic 메모리 idle428/peak944MiB는 FAIL,60초 잔류delta51MiB는 기준 이내며 heap 감소만으로 누수 여부를 단정하지 않는다. 아래 과거 실측보다 이 최신 상태를 우선한다.
 

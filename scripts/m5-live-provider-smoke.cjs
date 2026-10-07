@@ -1,0 +1,77 @@
+// Explicit user approval required: one small model run per provider, generated project only.
+const { app, dialog } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+if (process.env.HELLO_AGENT_APPROVED_LIVE_SMOKE !== '1') throw new Error('Explicit live-run approval required');
+const userData = process.env.HELLO_AGENT_LIVE_USER_DATA;
+if (!userData || !path.isAbsolute(userData) || !fs.statSync(userData).isDirectory()) throw new Error('Existing app userData required');
+const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hello-agent-live-'));
+const source = path.join(root, 'project');
+fs.mkdirSync(source);
+fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:source, env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}});
+app.setPath('userData', fs.realpathSync(userData));
+dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
+const outcomes = [];
+let finished = false;
+const timer = setTimeout(() => finish('timeout'), 240000);
+function finish(error) {
+  if (finished) return;
+  finished = true; clearTimeout(timer);
+  const unchanged = execFileSync('/usr/bin/git', ['status','--porcelain'], {cwd:source,encoding:'utf8'}).trim() === '';
+  const result = {root, outcomes, sourceUnchanged:unchanged, error, status:!error && unchanged && outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved)?'PASS':'FAIL'};
+  fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
+  console.log(JSON.stringify(result));
+  app.once('will-quit', () => app.exit(result.status==='PASS'?0:1));
+  app.quit();
+}
+app.on('browser-window-created', (_event, window) => {
+  window.webContents.setBackgroundThrottling(false);
+  window.webContents.once('did-finish-load', async () => {
+    const run = code => window.webContents.executeJavaScript(code);
+    const wait = async predicate => { for(let i=0;i<300;i++){if(await run(predicate))return;await new Promise(r=>setTimeout(r,100));}throw new Error('UI readiness timeout'); };
+    try {
+      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
+      const connected = {};
+      for(const provider of ['codex','claude']) {
+        await run(`window.m5Login.request({action:'check',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(()=>null)`);
+        await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['diagnosing','starting','verifying'].includes(s.state))`);
+        connected[provider] = await run(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>({state:s.state,error:s.error}))`);
+      }
+      console.log(JSON.stringify({stage:'LOGIN_CHECK',connected}));
+      if (!Object.values(connected).some(s=>s.state==='connected')) return finish('Neither app-owned login is connected');
+      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택'&&!b.disabled).click()`);
+      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
+      await wait(`document.querySelector('.m5-new-chat-button:not(:disabled)')!==null`);
+      await run(`document.querySelector('.m5-new-chat-button').click()`);
+      await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
+      await run(`(()=>{const e=document.querySelector('.m5-new-chat-form > input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Reply exactly HELLO_AGENT_SMOKE_OK. Do not use tools, read or write files, or execute commands. This is a connectivity test.');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
+      await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
+      await wait(`document.querySelector('.m5-timeline h2')?.textContent.startsWith('Reply exactly')`);
+      const projectId = await run(`(async()=>{let cursor=null;do{const p=await window.m5Projects.request({action:'list',cursor});const found=p.projects.find(p=>p.canonicalPath===${JSON.stringify(fs.realpathSync(source))});if(found)return found.projectId;cursor=p.nextCursor;}while(cursor);throw new Error('Generated project missing');})()`);
+      const chatId = await run(`window.m5.listChats({projectId:${JSON.stringify(projectId)},cursor:null,limit:50}).then(p=>{if(p.items.length!==1)throw new Error('Unexpected generated chat count');return p.items[0].chatId;})`);
+      for(const [provider,roleId,runtime] of [['codex','planning','codex'],['claude','coding','claude-code']]) {
+        if(connected[provider].state!=='connected'){outcomes.push({provider,state:'loginBlocked'});continue;}
+        try {
+          const capability = await run(`window.m5.getAgentCapabilities({runtime:${JSON.stringify(runtime)},refresh:true,chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)}})`);
+          if(!capability.canStart){outcomes.push({provider,state:'admissionBlocked',reason:capability.blockedReason});continue;}
+          const accepted = await run(`(async()=>{const chat=await window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0});return window.m5.startAgentRun({chatId:${JSON.stringify(chatId)},roleId:${JSON.stringify(roleId)},inputMessageIds:chat.messages.map(m=>m.messageId),expectedCapabilityFingerprint:${JSON.stringify(capability.fingerprint)}});})()`);
+          console.log(JSON.stringify({stage:'RUN_ACCEPTED',provider}));
+          let terminal;
+          for(let i=0;i<900;i++){
+            const detail=await run(`window.m5.getChat({chatId:${JSON.stringify(chatId)},cursor:null,limit:50,afterEventSequence:0})`);
+            const record=detail.agentRuns?.find(r=>r.runId===accepted.runId);
+            if(record && ['succeeded','failed','canceled','recoveryRequired'].includes(record.state)){terminal={provider,state:record.state,stage:record.stage,terminationOutcome:record.terminationOutcome,responseObserved:detail.messages.some(m=>m.runId===accepted.runId && m.kind==='role' && m.text.includes('HELLO_AGENT_SMOKE_OK'))};break;}
+            await new Promise(r=>setTimeout(r,100));
+          }
+          outcomes.push(terminal??{provider,state:'timeout'});
+          if(!terminal) break;
+        } catch(error) { outcomes.push({provider,state:'requestFailed',error:String(error.message).slice(0,500)}); }
+      }
+      finish();
+    } catch(error) { finish(String(error.message).slice(0,500)); }
+  });
+});
+require(path.resolve(__dirname,'../.vite/build/main.cjs'));
