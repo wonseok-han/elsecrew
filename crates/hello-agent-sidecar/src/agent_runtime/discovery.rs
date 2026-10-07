@@ -208,8 +208,6 @@ impl AgentRuntime {
     pub(crate) fn begin_scoped_claude_start(
         &mut self, storage: &Storage, projects: &ProjectManager,
         request: &AgentRunStartRequestV1, request_id: &str,
-        admit: impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess)
-            -> Result<(), SidecarError> + Send + 'static,
     ) -> Result<(), SidecarError> {
         let preparation = preparation::RunPreparation::resolve(storage, projects, request)
             .map_err(|_| SidecarError::new("agentInputChanged", "Claude start input differs"))?;
@@ -218,7 +216,7 @@ impl AgentRuntime {
             refresh: true,
             chat_id: Some(request.chat_id.clone()),
             role_id: Some(request.role_id.clone()),
-        }, admit)
+        })
     }
 
     /// Preserve the fresh process in caller storage on every later error. No
@@ -285,8 +283,6 @@ impl AgentRuntime {
         projects: &ProjectManager,
         request_id: &str,
         request: &AgentCapabilitiesRequestV1,
-        admit: impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess)
-            -> Result<(), SidecarError> + Send + 'static,
     ) -> Result<(), SidecarError> {
         use crate::provider_claude_session::{discovery::{DiscoveryWorker, DiscoveryRequest}, ToolAccess};
         let failure = || SidecarError::new("agentDiscoveryRejected", "Claude discovery unavailable");
@@ -316,12 +312,19 @@ impl AgentRuntime {
         projects.verify_runtime_file_isolation(storage, &address).map_err(|_| failure())?;
         let manifest = projects.verify_workspace_for_run(storage, &address).map_err(|_| failure())?;
         let scope = capability_scope(&chat, role_id).map_err(|_| failure())?;
+        use crate::provider_profile::LoginProfile;
+        let binding = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?;
+        let workspace = PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?);
+        let source = PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
+        let admission = crate::provider_claude_session::admission::Admission::new(
+            &workspace, &binding.revalidate()?, &source, &profile.model_selector,
+            profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+        )?;
         let worker = DiscoveryWorker::spawn(DiscoveryRequest {
-            profile: crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?,
+            profile: binding,
             selector: profile.model_selector.clone(), effort: profile.reasoning_effort.clone().ok_or_else(failure)?, access,
-            workspace: PathBuf::from(manifest["worktreePath"].as_str().ok_or_else(failure)?),
-            source: PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
-        }, admit)?;
+            workspace, source,
+        }, move |workspace, home, model, effort, access| admission.launch(workspace, home, model, effort, access))?;
         self.pending_claude_discoveries.insert(request_id.into(), PendingClaudeDiscovery { worker, completion: None, scope, profile });
         Ok(())
     }
@@ -391,9 +394,14 @@ impl AgentRuntime {
         projects: &ProjectManager,
         request: &AgentRunStartRequestV1,
         request_id: &str,
-    ) -> Result<(), SidecarError> {
+    ) -> Result<String, SidecarError> {
         let preparation = preparation::RunPreparation::resolve(storage, projects, request)
             .map_err(|_| SidecarError::new("agentInputChanged", "start input is unavailable"))?;
+        let runtime = preparation.profile.runtime.clone();
+        if runtime == "claude-code" {
+            self.begin_scoped_claude_start(storage, projects, request, request_id)?;
+            return Ok(runtime);
+        }
         self.begin_scoped_discovery(
             storage,
             projects,
@@ -404,7 +412,8 @@ impl AgentRuntime {
                 role_id: Some(request.role_id.clone()),
             },
             request_id,
-        )
+        )?;
+        Ok(runtime)
     }
 
     /// Prepare a fresh process, then reserve the durable run. The caller retains

@@ -7,7 +7,7 @@ export const en: Record<MessageKey, string> = {
   "m5.editor.commandSave": "Save to working copy",
   "m5.editor.accessibleName": "{path} code editor",
   "m5.agentNotice.checking": "Checking {runtime} readiness for the {role} role.",
-  "m5.agentNotice.ready": "Safely prepared the {role} role run. Follow its progress in the saved conversation.",
+  "m5.agentNotice.ready": "Accepted the run request for the {role} role. Check the conversation for its actual start and outcome.",
   "m5.agentNotice.blocked": "{runtime} did not start for the {role} role: {cause}. No automatic switch to another model was made.",
   "m5.agentNotice.cause.platformUnsupported": "unsupported operating system",
   "m5.agentNotice.cause.notInstalled": "not installed",

@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> Claude native 실행 후보(2026-10-07, 제품 비활성): 저장된 채팅 역할로 조회/시작 공급자를 선택하고, `Admission`이 작업 사본·앱 프로필·원본 디렉터리 신원과 요청 모델/추론/권한을 재대조한다. 목표 전송 전에 `claude.stream.v2` preflight를 저장하고 실제 system/init 검증 후 여섯 관측(model/cwd/permission/tools/mcp/plugins)과 running을 원자 저장한다. 종료/복구에서도 이 결속을 검증한다. 파일·검색 대상과 셸 sandbox 해제 요청을 검사하되 공식 CLI 보호를 신뢰하며 관측 불가능한 관리 설정/정책 reload 불변성을 증명했다고 주장하지 않는다. capability는 선택 역할의 시작 시도 자격이며 모델 사용권·실행 성공 증거가 아니다. 기본 `--stdio`는 blocked이고 후보 dispatcher/승인·복구의 누적 검증 및 제품 활성화는 별도다.
+
 > Claude 로그인 업데이트 호환: macOS native 설치의 `~/.local/bin/claude` 링크 내용을 no-follow 부모 capability로 읽고, 고정 `~/.local/share/claude/versions/<숫자 X.Y.Z>` 또는 이에 해당하는 `../share/claude/versions/<숫자 X.Y.Z>`만 선택한다. 런처 자체를 실행하거나 PATH/임의 최신 파일로 fallback하지 않는다. 선택한 실파일은 Apple anchor + Anthropic TeamIdentifier `Q6L2SF6YDW` + `com.anthropic.claude-code` 서명과 기존 파일/상위 경로 stamp로 검증한다. 기존 버전/SHA 목록은 제거했고 auth·profile·코드 입력·종료 경계는 유지한다. native 설치 외 npm/Homebrew·custom launcher 지원은 이 경로의 범위가 아니다. [공식 설치/업데이트 문서](https://code.claude.com/docs/en/setup#auto-updates)의 런처 구조와 현재 설치2.1.285의 읽기 전용 선택/서명 검사를 확인했으며 실제 계정 로그인 회귀는 별도다.
 
 > Codex 로그인 업데이트 호환: macOS 로그인·설치 진단은 고정 bundle 후보의 native CLI/helper를 Apple 서명 anchor + OpenAI TeamIdentifier `2DC432GLL2` + 각각 `codex`/`codex-code-mode-host` identifier로 검증한다. 버전별 파일 SHA 허용 목록은 이 경로에서 제거했다. 검증 시점 bytes의 SHA는 실행 중 교체 감지에만 사용하며 기존 로그인 응답·URL·profile·종료 검증을 유지한다. 진단은 공급자를 실행하지 않지만 고정 `/usr/bin/codesign` 검증 프로세스는 실행한다. Claude와 실제 모델 실행의 기존 admission은 별도이며, 업데이트 전후 실제 계정 인증 회귀까지 입증한 것은 아니다. 아래 과거 pinned 로그인 설명은 이 Codex 경로에 한해 갱신한다.

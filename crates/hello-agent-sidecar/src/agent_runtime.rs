@@ -55,7 +55,7 @@ const RECOVERY_INTENT_FIELD: &str = "recovery_resolution_intent";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
     Blocked,
-    NativeCodex,
+    NativeProviders,
     #[cfg_attr(not(test), allow(dead_code))]
     FakeExact,
 }
@@ -184,14 +184,14 @@ impl AgentRuntime {
     /// Integrated candidate for admission tests. The normal stdio constructor
     /// stays blocked until native attestation and the activation review pass.
     #[allow(dead_code)]
-    pub(crate) fn native_codex_candidate() -> Self {
+    pub(crate) fn native_candidate() -> Self {
         let mut runtime = Self::blocked();
-        runtime.provider = ProviderMode::NativeCodex;
+        runtime.provider = ProviderMode::NativeProviders;
         runtime
     }
 
-    pub(crate) fn uses_native_codex(&self) -> bool {
-        self.provider == ProviderMode::NativeCodex
+    pub(crate) fn uses_native_providers(&self) -> bool {
+        self.provider == ProviderMode::NativeProviders
     }
 
     pub(crate) fn blocked() -> Self {
@@ -3828,8 +3828,8 @@ pub(crate) fn run_agent_fixture_grandchild() {
 mod budget_tests {
     #[test]
     fn native_mode_never_uses_global_fixture_discovery() {
-        let mut runtime = super::AgentRuntime::native_codex_candidate();
-        assert!(runtime.uses_native_codex());
+        let mut runtime = super::AgentRuntime::native_candidate();
+        assert!(runtime.uses_native_providers());
         assert!(runtime.advertises_g5a());
         for provider in ["codex", "claude-code"] {
             for refresh in [false, true] {

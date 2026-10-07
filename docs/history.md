@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (Claude 정책 검사·시작 dispatcher 연결)
+
+- 기준 364cb63. 메인이 기존 콜백/예약 경로를 재사용해 저장된 역할에 따른 Codex/Claude 조회·시작 분기를 연결했다. Claude Admission은 프로필/사본/원본 directory handle 신원 및 요청 역할을 재검사하고 파일·검색 대상과 sandbox 해제 요청을 검사한다. 공식 CLI 보호를 신뢰하는 승인 범위이며 관리 정책 불변성 증거를 만들지 않는다. 검색의 Grep 파일 대상도 기존 안전 파일 검사로 처리한다.
+- 역할 변경·디렉터리 교체·늦게 생긴 링크 회귀를 추가했다. UI 문구는 실제 성공이 아닌 요청 접수를 표시하고 architecture에 현행 경계를 기록했다. Karpathy 지침에 따라 기존 검사를 재사용했다. 읽기 전용 기존 검토자 1명에게 925f26c 이후 단계 증거/승인/복구 연결을 재검토 요청했다.
+- cargo check --tests PASS(앞선 4.02초), Claude 집중24 PASS/2ignored, protocol56 PASS, i18n/notice4 PASS. sidecar 전체 lib 검사는 reserved_interactions 1실패 뒤 기존 source_inventory_depth_limit 테스트 stack overflow로 중단되어 전체 합격이 아니다. 최신 bin build PASS 뒤 실패 집중 재확인 중이다. 다음은 두 실패 수정·누적 검사 완료·독립 검토 반영이며 제품 --stdio blocked 유지. 실제 계정/유료 모델·main/push 없음, 기존 9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (Claude 단계 기록의 실행·복구 연결)
 
 - 기준 925f26c. 직전 턴은 승인된 단계 계약 구현 진전이다. Claude fresh 예약에 실제 조회의 실행 파일/역할/credential/모델 및 고정 scoped argv·경로·환경 정책 버전으로 계산한 요청 정책 digest를 결속했다. launch 시 실행 파일/정책, 이후 owner 확인 시 저장된 역할/사본/정책을 재대조한다. 고정 바이너리 해시 허용 목록은 추가하지 않았다.
@@ -52,7 +58,7 @@
 
 - **Claude 보장 범위 승인(2026-10-07)**: 공식 공급자 보호를 신뢰하고 요청 정책/실제 세션 관측을 분리한다. 관측 불가능한 config·관리 설정 불변성은 런타임 증거로 만들지 않는다. control 초기화 뒤 목표를 보내고 system/init을 검증한 뒤 도구를 허용한다. 이 설계 결정 대기는 해소됐으나 제품 활성화·계정/유료 시험·전체 완료 승인과 다르다. 구체 계약은 제안서 §6.9의 사용자 확정 항목, 구현은 phased_claude 기록에서 시작한다.
 
-- **실제 실행 연결의 현재 경계(2026-10-06, 46b3536)**: Codex와 Claude의 scoped 조회 worker·실패 정리·fresh 프로세스 예약, Claude 초기화/공개 출력/terminal owner와 상세 확인 후 단발 승인 후보를 연결했다. Claude 버전·앱 프로필 인증·모델 관측은 분리하고 scope/역할/전체 30초 수명에 결속한다. 제품은 아직 blocked이며 구체 Claude 정책 admission·manifest/실제 시작 dispatcher·통합/독립 안전 검증이 남는다. 초기화 성공이나 credential 존재를 실제 유료 모델 성공으로 취급하지 않는다. 원문은 월간 아카이브에 보존한다.
+- **실제 실행 연결의 현재 경계(2026-10-07)**: Codex/Claude scoped 조회·fresh 예약·시작 dispatcher와 Claude 정책 Admission·단계별 원장·상세 확인 후 단발 승인 후보를 연결했다. Claude 버전·앱 프로필 인증·모델 관측은 분리하고 scope/역할/전체 30초 수명에 결속한다. 제품은 아직 blocked이며 누적/독립 안전 검증과 활성화가 남는다. 초기화 성공이나 credential 존재를 실제 유료 모델 성공으로 취급하지 않는다. 원문은 월간 아카이브에 보존한다.
 
 - **서명 검사 실행 환경 주의(2026-10-06 정정)**: 제한 환경의 codesign invalid signature만으로 설치본 손상을 판정하지 않는다. 같은 공식 Claude 2.1.291 다운로드가 제한 밖에서 통과했고 기존 Claude 2.1.287·standalone Codex·ChatGPT.app 내장 Codex도 strict/all-architectures 검사를 모두 통과했다. 이전 서명 장애 및 재설치 필요 판단은 철회한다. 공식 복구는 사용자 승인됐지만 불필요한 설치/종료는 수행하지 않았다. 제품 서명 검사는 유지하며 우회·재서명·고정 해시 등록으로 대체하지 않는다.
 - **Claude shell sandbox와 파일 도구 구분(2026-10-06)**: 공식 sandboxing 문서상 sandbox는 셸 도구에만 적용되고 Read/Edit/Write는 권한 규칙을 따른다. 기본 셸 읽기는 광범위하며 can_use_tool 콜백이 모든 호출을 가로채지도 않는다. Claude native owner는 연결됐지만 strict shell 인자만으로 전체 target/credential 보호를 주장하지 않는다. 가짜 API/sentinel의 내부 도구 성공·외부 셸 OS 거절 관측은 scripts/m5-claude-tool-probe.mjs로 재현 가능하며 관리 정책/reload/전체 제품 gate를 대체하지 않는다.

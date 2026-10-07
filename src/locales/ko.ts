@@ -6,7 +6,7 @@ export const ko = {
   "m5.editor.commandSave": "작업 복사본에 저장",
   "m5.editor.accessibleName": "{path} 코드 편집기",
   "m5.agentNotice.checking": "{role} 역할의 {runtime} 준비 상태를 확인하고 있어요.",
-  "m5.agentNotice.ready": "{role} 역할 실행을 안전하게 준비했어요. 진행 내용은 저장된 대화 기록으로 확인해요.",
+  "m5.agentNotice.ready": "{role} 역할의 실행 요청을 접수했어요. 실제 시작 여부와 결과는 대화 기록에서 확인해요.",
   "m5.agentNotice.blocked": "{role} 역할의 {runtime}은 {cause} 시작하지 않았어요. 다른 모델로 자동 변경하지 않았어요.",
   "m5.agentNotice.cause.platformUnsupported": "이 운영체제에서는",
   "m5.agentNotice.cause.notInstalled": "설치되지 않아",

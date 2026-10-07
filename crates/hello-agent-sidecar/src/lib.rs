@@ -528,6 +528,7 @@ struct Sidecar {
 }
 
 struct PendingAgentStart {
+    runtime: String,
     request: RequestV1,
     input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1,
     reservation: Option<agent_runtime::preparation::RunReservation>,
@@ -1799,7 +1800,7 @@ impl Sidecar {
 
     fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
-        if self.agent_runtime.uses_native_codex() {
+        if self.agent_runtime.uses_native_providers() {
             if request.method == "run.startAgent" {
                 return self.defer_agent_start(request);
             }
@@ -1811,7 +1812,7 @@ impl Sidecar {
                     .map_err(|_| SidecarError::new("invalidParams", "invalid discovery request"))?;
                 let input: AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
                     .map_err(|_| SidecarError::new("invalidParams", "invalid discovery request"))?;
-                if input.runtime == "codex" && input.chat_id.is_some() {
+                if matches!(input.runtime.as_str(), "codex" | "claude-code") && input.chat_id.is_some() {
                     return self.defer_agent_capabilities(request);
                 }
                 // Unsupported/unscoped queries keep a blocked capability,
@@ -2023,14 +2024,16 @@ impl Sidecar {
                 "duplicate or invalid discovery request",
             ));
         }
-        let input = serde_json::from_value(request.params.clone())
+        let input: hello_agent_protocol::agent_adapter_v1::AgentCapabilitiesRequestV1 = serde_json::from_value(request.params.clone())
             .map_err(|_| SidecarError::new("invalidParams", "invalid scoped discovery request"))?;
-        self.agent_runtime.begin_scoped_discovery(
+        if input.runtime == "claude-code" {
+            self.agent_runtime.begin_claude_discovery(&self.storage, &self.projects, &request.request_id, &input)?;
+        } else { self.agent_runtime.begin_scoped_discovery(
             &self.storage,
             &self.projects,
             &input,
             &request.request_id,
-        )?;
+        )?; }
         self.pending_agent_capabilities
             .insert(request.request_id.clone(), request);
         Ok(HandledRequest {
@@ -2048,9 +2051,9 @@ impl Sidecar {
         }
         let input: hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1 = serde_json::from_value(request.params.clone())
             .map_err(|_| SidecarError::new("invalidParams", "invalid start request"))?;
-        self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
+        let runtime = self.agent_runtime.begin_scoped_start(&self.storage, &self.projects, &input, &request.request_id)?;
         self.pending_agent_starts.insert(request.request_id.clone(), PendingAgentStart {
-            request, input, reservation: None, process: None, result: None,
+            runtime, request, input, reservation: None, process: None, result: None,
         });
         Ok(HandledRequest { response: None, events: Vec::new() })
     }
@@ -2068,6 +2071,26 @@ impl Sidecar {
         for id in ids {
             let mut pending = self.pending_agent_starts.remove(&id).unwrap();
             if pending.result.is_none() {
+                if pending.runtime == "claude-code" {
+                    let Some(observed) = self.agent_runtime.take_claude_discovery(&self.storage, &self.projects, &id) else {
+                        self.pending_agent_starts.insert(id, pending); continue;
+                    };
+                    pending.result = Some(observed.and_then(|observed| {
+                        self.agent_runtime.reserve_scoped_claude_start(&mut self.storage, &self.projects,
+                            &pending.input, &id, &observed, &mut pending.reservation, &mut pending.process)?;
+                        let invalid = || SidecarError::new("agentInputChanged", "Claude reservation unavailable");
+                        let admission = Arc::new(pending.reservation.as_ref().ok_or_else(invalid)?.claude_admission(
+                            &self.storage, &self.projects, pending.process.as_ref().ok_or_else(invalid)?)?);
+                        let prompt_admission = admission.clone();
+                        let tool_admission = admission.clone();
+                        self.agent_runtime.start_reserved_claude(&mut self.storage, &self.projects,
+                            &mut pending.reservation, &mut pending.process, &observed.evidence.executable,
+                            &AtomicBool::new(self.prepared_to_quit),
+                            &mut |workspace, home, model, effort, access| admission.launch(workspace, home, model, effort, access),
+                            Box::new(move |process| prompt_admission.process(process)),
+                            Box::new(move |process, request| tool_admission.tool(process, request)))
+                    }));
+                } else {
                 let Some(observed) = self.agent_runtime.take_scoped_discovery(&self.storage, &self.projects, &id) else {
                     self.pending_agent_starts.insert(id, pending);
                     continue;
@@ -2084,6 +2107,7 @@ impl Sidecar {
                         &AtomicBool::new(self.prepared_to_quit),
                     )
                 }));
+                }
             }
             if self.agent_runtime.retain_rejected_start(&mut pending.reservation, &mut pending.process).is_err() {
                 // Keep the original result and both owners; never rerun launch.

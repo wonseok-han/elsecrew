@@ -364,6 +364,23 @@ impl OwnedClaudeRun {
 }
 
 impl RunReservation {
+    pub(crate) fn claude_admission(&self, storage: &Storage, projects: &ProjectManager,
+        process: &crate::provider_login_process::LoginProcess<'_>,
+    ) -> Result<crate::provider_claude_session::admission::Admission, SidecarError> {
+        use crate::provider_claude_session::{admission::Admission, ToolAccess};
+        let failure = || SidecarError::new("agentInputChanged", "Claude admission inputs differ");
+        self.validate_text_input(storage, projects).map_err(|_| failure())?;
+        let preflight = self.claude_preflight.as_ref().ok_or_else(failure)?;
+        preflight.validate().map_err(|_| failure())?;
+        let manifest = projects.verify_workspace_for_run(storage, &address_from_chat(&self.run).map_err(|_| failure())?).map_err(|_| failure())?;
+        let access = match preflight.profile.permission.as_str() {
+            "readOnly" => ToolAccess::ReadOnly, "workspaceWrite" => ToolAccess::Edit, _ => return Err(failure()),
+        };
+        Admission::new(Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
+            &process.claude_preflight_home()?, Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
+            &preflight.profile.model_selector, preflight.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access)
+    }
+
     /// Recheck invocation identity and durable inputs during initialization.
     /// The returned cwd/access are not an execution-confinement grant.
     fn verify_claude_launch(
