@@ -13,10 +13,17 @@ use hello_agent_protocol::agent_adapter_v1::{
 };
 use hello_agent_protocol::lifecycle_g5d_v1::{
     parse_current_agent_fixture_system_status_v1 as parse_g5d_agent_fixture_system_status_v1,
-    parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1,
     validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
 };
-use hello_agent_protocol::run_recovery_v1::{validate_g5_payload_v1, G5D_PRODUCT_CAPABILITIES_V1};
+use hello_agent_protocol::run_recovery_v1::validate_g5_payload_v1;
+#[cfg(target_os = "macos")]
+use hello_agent_protocol::agent_adapter_v1::G5D_NATIVE_CAPABILITIES_V1 as G5D_PRODUCT_CAPABILITIES_V1;
+#[cfg(not(target_os = "macos"))]
+use hello_agent_protocol::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1;
+#[cfg(target_os = "macos")]
+use hello_agent_protocol::lifecycle_g5d_v1::parse_current_native_system_status_v1 as parse_g5d_product_system_status_v1;
+#[cfg(not(target_os = "macos"))]
+use hello_agent_protocol::lifecycle_g5d_v1::parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1;
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 
@@ -120,6 +127,21 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
             .collect::<Vec<_>>()
     );
     wait_for_storage_ready_reader(&mut stdin, &mut stdout, &ready.sidecar_instance_id, false);
+
+    #[cfg(target_os = "macos")]
+    for (request_id, method, params, success) in [
+        ("native_codex", "agent.getCapabilities", serde_json::json!({"runtime":"codex","refresh":true}), true),
+        ("native_claude", "agent.getCapabilities", serde_json::json!({"runtime":"claude-code","refresh":true}), true),
+        ("native_fixture_denied", "run.startFixture", serde_json::json!({}), false),
+        ("native_start_denied", "run.startAgent", serde_json::json!({}), false),
+    ] {
+        write_request(&mut stdin, &ready.sidecar_instance_id, request_id, method, params);
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("native response") };
+        assert_eq!(response.ok, success, "{method}");
+        if success { assert_eq!(response.result.unwrap()["canStart"], false); }
+    }
 
     for (request_id, method) in [
         ("req_process_status", "system.status"),
@@ -1577,7 +1599,7 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         ],
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
-        .arg("--stdio")
+        .args(["--stdio-agent-fixture", "clean"])
         .current_dir(&data)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1590,7 +1612,7 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         panic!("ready")
     };
     let ready = ready_payload(&ready_event).unwrap();
-    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, true);
 
     write_request(
         &mut stdin,

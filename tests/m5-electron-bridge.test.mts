@@ -137,11 +137,16 @@ function g5dAgentReadyLine() {
 }
 
 test("native handshake excludes fixture execution and preserves storage status", async () => {
+  const rust = readFileSync(new URL("../crates/hello-agent-protocol/src/agent_adapter_v1.rs", import.meta.url), "utf8");
+  const nativeList = rust.match(/pub const G5D_NATIVE_CAPABILITIES_V1: &\[&str\] = &\[([\s\S]*?)\];/)?.[1];
+  assert.ok(nativeList);
+  assert.deepEqual([...nativeList.matchAll(/"([^"]+)"/g)].map(match => match[1]), [...G5D_NATIVE_CAPABILITIES_V1]);
   const ready = JSON.parse(g5dAgentReadyLine());
   ready.payload.capabilities = [...G5D_NATIVE_CAPABILITIES_V1];
   assert.doesNotThrow(() => parseG5DNativeReadyPayloadV1(ready.payload));
   assert.throws(() => parseG5DAgentFixtureReadyPayloadV1(ready.payload));
   assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: [...G5D_AGENT_FIXTURE_CAPABILITIES_V1] }));
+  assert.throws(() => parseG5DNativeReadyPayloadV1({ ...ready.payload, capabilities: [...G5D_NATIVE_CAPABILITIES_V1, "run.futureFixture"] }));
   const { child, client } = createClient();
   const starting = client.start(); child.stdout.write(`${JSON.stringify(ready)}\n`); await starting;
   const before = child.writes.length;

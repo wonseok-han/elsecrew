@@ -35,6 +35,9 @@ fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
     assert!(hello_agent_protocol::agent_adapter_v1::validate_g5d_native_ready_payload_v1(&baseline).is_ok());
     baseline["capabilities"] = json!(G5D_AGENT_FIXTURE_CAPABILITIES_V1);
     assert!(hello_agent_protocol::agent_adapter_v1::validate_g5d_native_ready_payload_v1(&baseline).is_err());
+    baseline["capabilities"] = json!(hello_agent_protocol::agent_adapter_v1::g5d_native_capabilities_v1());
+    baseline["capabilities"].as_array_mut().unwrap().push(json!("run.futureFixture"));
+    assert!(hello_agent_protocol::agent_adapter_v1::validate_g5d_native_ready_payload_v1(&baseline).is_err());
     session.start_admission(&path);
     wait_until_admitted(&mut session);
     assert!(matches!(session.admission, AdmissionState::Ready { .. }));

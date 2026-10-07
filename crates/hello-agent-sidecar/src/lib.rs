@@ -308,7 +308,11 @@ fn serve_stdio_with_identity<R: Read + Send + 'static, W: Write>(
         input,
         output,
         sidecar_instance_id,
-        agent_runtime::AgentRuntime::blocked(),
+        if cfg!(target_os = "macos") {
+            agent_runtime::AgentRuntime::native_candidate()
+        } else {
+            agent_runtime::AgentRuntime::blocked()
+        },
     )
 }
 

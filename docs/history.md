@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (macOS 일반 앱 native 실행 연결)
+
+- 기준 951134f. 직전 턴은 native/fixture 분리 구현 진전이었다. 실제 실행 중인 기존 검토자 결과를 이어 받아 native 목록이 fixture를 자동 상속하는 마지막 계약 문제를 수정했다. Rust/TypeScript 각각 독립된 고정 목록으로 분리하고 두 목록의 exact 일치·미지 fixture 추가 거절 회귀를 추가했다. 검토는 이 수정 뒤 macOS 생성자 전환이 가능하고 기존 소유/종료/복구에서 추가 코드 차단 결함을 찾지 못했다고 판단했다. 최신 activation patch의 독립 재검토도 추가 차단 결함 없음으로 끝났다(정적 검토, 메인 실행 증거와 구분).
+- 일반 --stdio는 macOS에서 native runtime을 선택한다. 비-macOS blocked와 DB/ready 이전 G4 gate는 그대로다. 실제 시작은 저장된 채팅/역할·fresh 조회·예약·실행 입장 검사를 여전히 요구한다. 패키지 smoke 기대 목록을 native로 맞췄고 기존 fixture 취소 시험은 명시 --stdio-agent-fixture 모드로 옮겼다. Karpathy 지침에 따라 새 실행기/자동 허용을 추가하지 않았다.
+- 일반 binary ready/status/quit 회귀 PASS(1.03초): exact native 목록, 두 runtime의 unscoped canStart=false, raw fixture/빈 start 거절을 확인했다. Node 협상/계약 목록 회귀 PASS, tsc --noEmit PASS, 패키지 상태 validator 회귀 PASS(패키지 빌드/실행 아님), diff check 확인. 명시 fixture 모드의 정상 종료·불확실 종료 후 복구 취소 회귀 2 PASS(1.90초). 실제 계정/모델·원본 프로젝트 사용 없음; 최종 앱/UI/공급자/패키지 통합 검증이 다음이며 제품 전체 완료는 아니다. main/push 없음, 기존 archive 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (native 제품과 테스트 실행 기능 분리)
 
 - 기준 5ecc706. 직전 턴은 기본 추론값 결함 수정 진전이다. 메인이 native 제품 활성화 경계를 조사하고 상시 승인된 독립 검토자 1명에게 시작 설정 변경 전 차단 결함 검토를 요청했다. 후보가 fixture용 capability를 그대로 광고해 run.startFixture까지 실행 가능하다는 차단 문제를 확인했다. 시작 설정은 아직 변경하지 않았다.
@@ -81,6 +87,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **macOS native 제품 연결(2026-10-07)**: 일반 --stdio의 전역 blocked를 macOS에서 해제하고 scoped native dispatcher를 선택한다. 시작별 입장·관측·도구 승인·종료/복구 검사는 유지하며 비-macOS G4 차단은 유지한다. native capability는 fixture와 독립된 고정 목록이다. 이전 비활성 기록은 당시 상태이며 현재 코드 연결/무계정 stdio 검증과 실제 계정/모델·패키지/UI 합격은 구분한다.
 
 - **native/fixture 기능 분리(2026-10-07)**: native ready/status는 기존 agent baseline에서 run.startFixture를 제외한 별도 exact 계약이다. native 세션은 새 fixture 시작을 sidecar/Electron에서 거절하고 작업대에서 숨긴다. 과거 원장용 cancel/recovery는 유지한다. 이 분리만으로 일반 --stdio 활성화 또는 실제 계정/모델 검증을 완료한 것은 아니다.
 

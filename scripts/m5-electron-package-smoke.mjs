@@ -24,7 +24,10 @@ const sidecar = process.platform === "darwin"
   ? resolve(appBundle, "Contents", "Resources", "sidecar", "hello-agent-sidecar")
   : resolve(packageDirectory, "resources", "sidecar", `hello-agent-sidecar${process.platform === "win32" ? ".exe" : ""}`);
 const storageStatusD1Manifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/storage-status-d1/manifest.json"), "utf8"));
-const expectedProductCapabilities = storageStatusD1Manifest.modes?.generalProduct?.d1Capabilities;
+const { G5D_NATIVE_CAPABILITIES_V1 } = await import("../src/m5/contracts/agent-adapter-v1.ts");
+const expectedProductCapabilities = process.platform === "darwin"
+  ? G5D_NATIVE_CAPABILITIES_V1
+  : storageStatusD1Manifest.modes?.generalProduct?.d1Capabilities;
 const g5dAdmissionManifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/g5d-admission-v1/manifest.json"), "utf8"));
 const verifyingStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "verifying")?.value;
 const failedStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "failed")?.value;

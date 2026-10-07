@@ -89,10 +89,22 @@ pub const G5D_AGENT_FIXTURE_CAPABILITIES_V1: &[&str] = &[
     "storage.status",
 ];
 pub const AGENT_INSTALLATION_STATES_V1: &[&str] = &["installed", "notInstalled", "incomplete"];
-/// Exact native baseline: retain legacy recovery, never offer a new fixture run.
+/// Reviewed independently of fixture capabilities; additions require native review.
+pub const G5D_NATIVE_CAPABILITIES_V1: &[&str] = &[
+    "system.status", "app.prepareQuit", "project.open", "project.getTree",
+    "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
+    "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+    "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+    "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat",
+    "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings",
+    "chat.create", "chat.list", "chat.get", "run.cancel", "recovery.list",
+    "recovery.inspect", "recovery.markResolved", "agent.getCapabilities",
+    "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent",
+    "storage.status",
+];
+
 pub fn g5d_native_capabilities_v1() -> Vec<&'static str> {
-    G5D_AGENT_FIXTURE_CAPABILITIES_V1.iter().copied()
-        .filter(|method| *method != "run.startFixture").collect()
+    G5D_NATIVE_CAPABILITIES_V1.to_vec()
 }
 // Only public capability snapshots can be unobserved. Sanitized provider
 // observations still require one of the measured installation states above.

@@ -43,8 +43,19 @@ export const G5D_AGENT_FIXTURE_CAPABILITIES_V1 = [
   "storage.status",
 ] as const;
 export const AGENT_INSTALLATION_STATES_V1 = ["installed", "notInstalled", "incomplete"] as const;
-// Legacy recovery remains available; native mode cannot create fixture runs.
-export const G5D_NATIVE_CAPABILITIES_V1 = G5D_AGENT_FIXTURE_CAPABILITIES_V1.filter(method => method !== "run.startFixture");
+// Reviewed independently: fixture additions must never expand native authority.
+export const G5D_NATIVE_CAPABILITIES_V1 = [
+  "system.status", "app.prepareQuit", "project.open", "project.getTree",
+  "project.createWorktree", "project.close", "file.read", "file.save", "file.watch",
+  "diff.getSummary", "diff.getFile", "workspace.getTree", "workspace.close",
+  "workspace.file.read", "workspace.file.save", "workspace.file.watch",
+  "workspace.diff.getSummary", "workspace.diff.getFile", "workspace.prepareChat",
+  "workspace.abandonPrepared", "project.getRoleSettings", "project.updateRoleSettings",
+  "chat.create", "chat.list", "chat.get", "run.cancel", "recovery.list",
+  "recovery.inspect", "recovery.markResolved", "agent.getCapabilities",
+  "run.startAgent", "run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent",
+  "storage.status",
+] as const;
 export const AGENT_CAPABILITY_INSTALLATION_STATES_V1 = [...AGENT_INSTALLATION_STATES_V1, "unknown"] as const;
 export const AGENT_AUTH_STATES_V1 = ["authenticated", "notAuthenticated", "expired", "unknown"] as const;
 export const AGENT_DISCOVERY_SOURCES_V1 = ["machineReadableCatalog", "exactVersionManifest", "unavailable"] as const;

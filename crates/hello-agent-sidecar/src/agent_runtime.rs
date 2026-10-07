@@ -1,7 +1,7 @@
 //! Planned G5A actual-agent boundary with a deterministic fake adapter gate.
 //!
-//! Production construction is deliberately blocked: it can report capabilities but cannot create a
-//! process. Tests may inject an exact fake manifest and the sidecar binary as the only executable.
+//! macOS production selects native providers with scoped discovery and owned admission.
+//! Tests may separately inject an exact fake manifest and the sidecar fixture executable.
 
 use crate::chat::{G5Action, G5Event};
 use crate::project::{ProjectFailure, ProjectManager, WorkspaceAddress};
@@ -181,8 +181,8 @@ struct ObservedProvider {
 }
 
 impl AgentRuntime {
-    /// Integrated candidate for admission tests. The normal stdio constructor
-    /// stays blocked until native attestation and the activation review pass.
+    /// Native provider runtime. macOS stdio selects it; each start still needs
+    /// fresh scoped discovery, reservation, and same-connection admission.
     #[allow(dead_code)]
     pub(crate) fn native_candidate() -> Self {
         let mut runtime = Self::blocked();
