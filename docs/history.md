@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (Claude 초기화 순서 검토·진단 단계 정정)
+
+- 기준f16d196+추론 배열 호환 수정. 직전 턴은 최신 스키마 대조와 수정으로 진척했다. 독립 검토는 Claude control init→profile channel→prompt→system/init 순서의 확정 결함을 찾지 못했다. discovery도 같은 control init을 사용한다. native_transport 저장은 prompt queue보다 먼저이므로 전송 증거가 아니다. 검증되지 않은 순서 변경은 하지 않았다.
+- 검토자가 발견한 확정 진단 결함은 post-init 실패도 control initialization으로 표시하는 것이었다. 시작 binding/control/profile/owner/prompt admission/handoff cancellation을 로컬 고정 라벨로 구분했다. 반환/소유권 복원/권한 검사는 동일하며 smoke whitelist와 회귀를 갱신했다. 세부 stage는 원인이 아니라 실패 경계다.
+- reasoning 배열 변경 독립 검토 승인, provider parser 묶음100/100 PASS. smoke9/9 PASS, debug build PASS. 진단 재검토도 권한/수명주기 차단 결함 없음이며 작은 지적대로 profile 라벨 대입을 ExpectedInit 구성 앞으로 이동했다(이 마지막 대입 위치 변경 뒤 재빌드는 하지 않음). 실연결 성공은 아직 미확인. 추가 유료 호출0회, 기존9월 archive 보존/main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (최신 Codex 스키마 대조·추론 배열 기본값)
+
+- 기준f16d196, 기존9월 archive 보존. 직전 턴은 진단/합성 회귀/커밋으로 진척했다. debug sidecar build PASS로 고정 진단을 산출물에 반영했다. 같은 승인된 readonly 검토자에게 Claude 초기화 경로 구조 조사를 요청했으며 현재 결과 대기다.
+- OpenAI Docs 지침으로 공식 https://learn.chatgpt.com/docs/app-server 를 조회 후 현재 설치 CLI의 offline generate-json-schema를 /private/tmp/hello-agent-codex-current-schema.qtBljR에 생성했다(exit0, PATH alias 경고). 서버/계정/모델 호출 없음. ServerNotification ThreadItem reasoning은 required id/type만, summary/content default[]다. 현재 private.rs는 필수여서 해당 필드 생략을 잘못 거절한다.
+- reasoning 배열에 serde default만 추가하고 생략 성공/null·중복·잘못된 타입 거절 회귀를 유지·보강했다. 사용자 구현 우선 방침으로 새 Rust 회귀/빌드는 다음 묶음 검증 대상, diff 검사 PASS. 새 변경은 아직 빌드 산출물에 없다. thread/status/changed도 현재 스키마에 있지만 실제 수신 여부/순서 증거가 없어 무조건 무시하는 수정은 하지 않았다.
+- 실제 실패 원인 결속은 미완료다. 다음: Claude 조사 결과, 스키마 기반 호환 수정의 묶음 검증/검토와 실연결 재시험 승인. 제품 UI/성능/Windows 잔여 범위 유지, 추가 유료 호출/main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (두 공급자 실패 단계 수집)
 
 - 기준6226ef2+직전 smoke 진단. 이전 턴은 승인된 두 실행의 실패/정상 종료 증거로 진척했다. 해당 두 실행만 readonly immutable SQLite 조회: Codex native_thread_receipt 존재, Claude claude_preflight 존재/claude_session_observation 없음, 둘 다 public_event_count0. Claude는 검증된 session 초기화 기록 전 구간이며 목표 전송 여부까지 이 증거만으로 단정하지 않는다.

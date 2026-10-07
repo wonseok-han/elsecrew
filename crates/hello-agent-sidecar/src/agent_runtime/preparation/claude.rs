@@ -80,6 +80,7 @@ impl ClaudeStart {
         cancel: &std::sync::atomic::AtomicBool,
         admit: &mut impl FnMut(&mut crate::provider_login_process::LoginProcess<'_>) -> Result<(), SidecarError>,
     ) -> Result<Option<OwnedClaudeRun>, SidecarError> {
+        let mut stage = "start binding";
         let result = (|| {
             let failure = || SidecarError::new("agentInputChanged", "Claude initialization owner differs");
             if self.failed || self.handed_off || cancel.load(std::sync::atomic::Ordering::Acquire) {
@@ -89,10 +90,12 @@ impl ClaudeStart {
             let running = process.as_mut().ok_or_else(failure)?;
             if self.connection != running.connection_id() || self.run_id != pending.run_id { return Err(failure()); }
             let (workspace, access) = pending.verify_claude_launch(storage, projects, running)?;
+            stage = "control initialization";
             let initialization = self.initialization.as_mut().ok_or_else(failure)?;
             if !initialization.advance(running, cancel, &mut |process| pending.observe_process(storage, process))? {
                 return Ok(None);
             }
+            stage = "profile matching";
             let expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
                 cwd:&workspace,
                 model:pending.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
@@ -101,8 +104,10 @@ impl ClaudeStart {
             };
             let effort = pending.run["selectedProfile"]["reasoningEffort"].as_str();
             self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_profile_channel(&expected, effort)?);
+            stage = "owner preparation";
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.
+            stage = "prompt admission";
             let queued = if cancel.load(std::sync::atomic::Ordering::Acquire) {
                 Err(failure())
             } else {
@@ -113,6 +118,7 @@ impl ClaudeStart {
                 *reservation = Some(pending); *process = Some(running);
                 return Err(error);
             }
+            stage = "handoff cancellation";
             if cancel.load(std::sync::atomic::Ordering::Acquire) {
                 let (pending, running) = owner.into_cleanup_parts();
                 *reservation = Some(pending); *process = Some(running);
@@ -122,7 +128,7 @@ impl ClaudeStart {
             Ok(Some(owner))
         })();
         if result.is_err() {
-            eprintln!("native Claude transport failed at control initialization");
+            eprintln!("native Claude transport failed at {stage}");
             self.failed = true;
         }
         result

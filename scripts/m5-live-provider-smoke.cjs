@@ -32,7 +32,7 @@ childProcess.spawn = function (...args) {
       tail = lines.pop().slice(-256);
       for (const line of lines) {
         const codex = /^native Codex transport failed at (thread\/start|turn start|turn stream)$/.exec(line);
-        const claude = /^native Claude transport failed at (control initialization|session initialization|session output)$/.exec(line);
+        const claude = /^native Claude transport failed at (start binding|control initialization|profile matching|owner preparation|prompt admission|handoff cancellation|session initialization|session output)$/.exec(line);
         if (codex) transportCheckpoints.add(`codex:${codex[1]}`);
         if (claude) transportCheckpoints.add(`claude:${claude[1]}`);
       }

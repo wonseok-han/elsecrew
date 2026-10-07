@@ -18,9 +18,9 @@ enum Item {
     Reasoning {
         #[serde(rename = "id")]
         _id: String,
-        #[serde(rename = "summary")]
+        #[serde(default, rename = "summary")]
         _summary: Vec<String>,
-        #[serde(rename = "content")]
+        #[serde(default, rename = "content")]
         _content: Vec<String>,
     },
 }
@@ -77,9 +77,19 @@ pub(super) fn validate_delta(method: &str, raw: &str) -> Result<(), ProviderErro
 mod tests {
     use super::*;
     #[test]
+    fn reasoning_arrays_default_to_empty_as_in_vendor_schema() {
+        for raw in [
+            r#"{"type":"reasoning","id":"i"}"#,
+            r#"{"type":"reasoning","id":"i","content":[]}"#,
+            r#"{"type":"reasoning","id":"i","summary":[]}"#,
+        ] {
+            validate_item(raw).unwrap();
+        }
+    }
+    #[test]
     fn incomplete_duplicate_or_tool_shaped_items_are_not_discardable() {
         for raw in [
-            r#"{"type":"reasoning","id":"i","content":[]}"#,
+            r#"{"type":"reasoning","id":"i","summary":null,"content":[]}"#,
             r#"{"type":"reasoning","id":"i","summary":[],"content":[],"content":["PRIVATE"]}"#,
             r#"{"type":"reasoning","id":"i","summary":[],"content":[{}]}"#,
             r#"{"type":"userMessage","id":"i","content":[{"type":"localImage","path":"PRIVATE"}]}"#,
