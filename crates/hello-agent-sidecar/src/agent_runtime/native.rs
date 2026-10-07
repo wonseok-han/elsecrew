@@ -154,6 +154,13 @@ impl AgentRuntime {
         if owner.retains_run_fence() || self.discovery_cleanup.contains_key(&key) {
             return Err(failure());
         }
+        // Inspection can fail after explicit cleanup already succeeded. A
+        // closed owner cannot be polled again; keep its failed observation,
+        // but do not manufacture a second cleanup failure from that receipt.
+        if owner.closure_evidence().is_some_and(|receipt| receipt.confirmed()) {
+            process.take();
+            return Ok(());
+        }
         self.discovery_cleanup
             .insert(key, process.take().ok_or_else(failure)?);
         Ok(())
@@ -640,5 +647,45 @@ impl AgentRuntime {
             }
         }
         Ok(events)
+    }
+}
+
+#[cfg(test)]
+mod cleanup_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn discovery_cleanup_consumes_only_confirmed_closed_owners() {
+        use crate::provider_login_process::LoginProcess;
+        use crate::provider_profile::CodexProfileBinding;
+        for state in ["open", "confirmed", "uncertain", "runFence"] {
+            let temp = tempfile::tempdir().unwrap();
+            let storage = Storage::open(&temp.path().join("hello-agent.sqlite3")).unwrap();
+            let profile = CodexProfileBinding::from_storage(&storage).unwrap();
+            let mut process = LoginProcess::reserve_codex_owned(profile).unwrap();
+            if state == "runFence" {
+                process.retain_fence_before_launch("run_cleanup_test").unwrap();
+            }
+            if state != "open" {
+                process.finish().unwrap();
+                if state == "uncertain" {
+                    process.invalidate_cleanup_evidence();
+                }
+            }
+            let mut runtime = AgentRuntime::native_candidate();
+            let mut process = Some(process);
+            if state == "runFence" {
+                assert!(runtime.retain_discovery_cleanup(&mut process).is_err());
+                assert!(process.is_some());
+                assert!(runtime.discovery_cleanup.is_empty());
+                continue;
+            }
+            runtime.retain_discovery_cleanup(&mut process).unwrap();
+            assert!(process.is_none());
+            assert_eq!(runtime.discovery_cleanup.is_empty(), state == "confirmed");
+            let result = runtime.poll_discovery_cleanup();
+            assert_eq!(result.is_ok(), state != "uncertain");
+            assert_eq!(runtime.discovery_cleanup.is_empty(), state != "uncertain");
+        }
     }
 }

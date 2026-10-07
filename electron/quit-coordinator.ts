@@ -15,6 +15,7 @@ export class QuitCoordinatorV1 {
   #exitAllowed = false;
   #inFlight: Promise<PrepareQuitResultV1> | undefined;
   #handlingBeforeQuit = false;
+  #unavailableNotified = false;
 
   constructor(options: QuitCoordinatorOptionsV1) {
     this.#options = options;
@@ -69,7 +70,12 @@ export class QuitCoordinatorV1 {
       },
       async () => {
         // No raw provider error or credential-bearing stderr reaches the dialog.
-        await this.#options.notifyQuitBlocked?.("unavailable");
+        // A disconnected sidecar is not restarted in this session. Rechecking
+        // shutdown must not repeatedly interrupt the user with the same modal.
+        if (!this.#unavailableNotified) {
+          await this.#options.notifyQuitBlocked?.("unavailable");
+          this.#unavailableNotified = true;
+        }
       },
     ).catch(() => {
       // A failed notification never grants permission to exit.

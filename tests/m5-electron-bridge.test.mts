@@ -1301,6 +1301,10 @@ test("unsafe quit reports a fixed reason once while its notification is open", a
     coordinator.handleBeforeQuit();
     await new Promise<void>(resolve => setImmediate(resolve));
     assert.equal(calls, 2, "dismissed notification permits an explicit retry");
+    assert.equal(notices.length, unavailable ? 1 : 2,
+      "a disconnected service is reported once, without granting exit");
+    assert.equal(coordinator.exitAllowed, false);
+    assert.deepEqual(exits, []);
     release();
   }
 });

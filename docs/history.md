@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (중복 정리 오류·반복 종료 알림 수정)
+
+- 기준0503fb4. 직전 턴은 잔류 프로세스 없음과 반복 경고 원인을 확인한 진척이다. unavailable 종료 경고를 같은 세션에서 성공 표시한 뒤 반복 표시하지 않도록 수정했다. 매 종료 요청의 prepareQuit 재확인·실패 시 종료 차단은 유지하고 recoveryRequired 경고는 숨기지 않는다.
+- Claude discovery는 검증 결과 실패와 process.finish 성공이 함께 가능하지만 이미 confirmed closure인 owner도 정리 큐에 넣어 poll_finish를 다시 호출했다. 이 호출은 의도대로 실패하고 idle runtime poll의 오류가 sidecar 종료로 전파될 수 있다. retain_discovery_cleanup에서 기존 run fence/중복 거절을 유지하고 confirmed receipt만 소비하도록 수정했다. 종료 불확실 owner는 그대로 보존/실패하며 일반 오류를 삼키지 않는다. 실제 직전 exit70과 동일 원인인지는 아직 재시험 전이다.
+- focused Rust 회귀1 PASS(open/confirmed/uncertain), 종료 알림 회귀1 PASS, diff 검사 PASS. 상시 승인된 동일 읽기 전용 검토자1명에게 두 변경의 안전 경계 검토를 요청했다. Karpathy 지침에 따라 cleanup의 일괄 완화 없이 확정 종료 증거만 재사용한다. 실계정 재시험·전체 검증은 아직 미완료, Codex config/read 불일치도 남는다. 기존9월 archive 보존, main/push 없음.
+- runFence 보호 회귀도 추가했다. 첫 fixture의 I/O 미생성 owner에 대한 API 선택 오류는 retain_fence_before_launch로 수정했고 최신4경로 회귀 PASS(0.68초). debug build PASS. 검토자는 현재 running이며 결과 대기 상태로 구현 체크포인트를 남긴다. 독립 합격·실제 연결 복구 완료로 표현하지 않는다.
+
+### 2026-10-07 · by GPT-6 Astra (반복 종료 경고 사용자 보고)
+
+- 사용자가 보낸 화면은 notifyQuitBlocked의 unavailable 경고와 일치한다. 직전 실연결 시험에서 sidecar exit70 후 종료 확인이 실패한 경로이며 로그인 실패 메시지가 아니다. 종료 재시도마다 경고가 다시 표시될 수 있다.
+- 시험 앱 정리 뒤 ps로 live smoke·Electron 시험 앱·sidecar 잔류 없음 재확인. 사용자에게 추가 로그인/재부팅을 요구하지 않는다. 다음은 내부 서비스 종료 원인과 반복 경고 UX 수정이며 현재 제품 해결 완료 아님. 코드 변경 없음, 기존9월 archive 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (승인된 시험 앱 종료·Claude 정상 잠금 복구)
 
 - 사용자 승인 범위의 임시 시험 앱 PID9578을 TERM 후 KILL로 종료했다. Codex RPC 실패 위치를 공급자 원문 없이 고정 단계명으로 표시하고 회귀를 보강했다. Karpathy 지침에 따라 허용 조건·인증정보·사용자 원본은 변경하지 않았다. focused core1 PASS, sidecar debug build PASS, runner 회귀2 PASS, diff 검사 PASS. rustfmt --check는 기존 sidecar 파일/하위 모듈 포맷 차이를 보고했으며 관련 없는 대량 재포맷은 하지 않았다.
