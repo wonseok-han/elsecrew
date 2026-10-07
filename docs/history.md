@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (대형 diff의 페이지 단위 메모리 보관)
+
+- 기준 b1515d1. 변경 화면은200줄만 표시하면서 split과 DiffRow 배열로 전체 diff 줄을 계속 보관하고 있었다. diffPages는 원문을 순회해 페이지별 offset/hunk 상태만 색인하고 선택한 페이지 최대200행만 생성한다. 전체 내용을 버리거나 최대 줄 수를 줄이지 않으며 역순/임의 페이지 이동·한글·마지막 개행·정확한 줄 번호를 보존한다. 뒤쪽 invalid hunk는 앞쪽 페이지도 기존처럼 번호 없는 원문으로 표시한다.
+- Karpathy 지침으로 표시 전용 parser/UI에 한정했고 실제 patch 적용·승인·원본 쓰기 계약은 변경하지 않았다. 기존 diffRows는 전체 배열이 필요한 소비자용으로 유지하고 UI는 bounded page를 사용한다. 관련6 PASS(10만줄·임의 접근·뒤쪽 오류 포함), TypeScript PASS. 전체 성능/실제 UI 재검증은 누적 단계로 남기며 RSS 기준 통과를 주장하지 않는다.
+- 다음은 화면/기능 마감과 실제 공급자·메모리/G6/Windows 통합 검증이다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (Monaco 중복 문자열 복사 제거·이력 롤오버)
 
 - 기준5209128. 입력 callback에서 읽은 전체 문자열을 React effect가 다시 getValue로 복사하던 경로를 modelText ref 비교로 바꿨다. 모델 생성/입력/외부 setValue/해제 때 ref를 갱신하며 외부 재읽기·잠금·저장·재시도를 보존한다. Karpathy 지침으로 확인된 중복 복사에 한정했다.

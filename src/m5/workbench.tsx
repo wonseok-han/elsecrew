@@ -19,7 +19,7 @@ import { WorkbenchDock } from "./workbench-dock.tsx";
 import { ProviderLogin } from "./provider-login.tsx";
 import { ApprovalCard } from "./approval-card.tsx";
 import { ChatApplicationPreview } from "./chat-application-preview.tsx";
-import { diffRows, DIFF_PAGE_ROWS } from "./diff-view.ts";
+import { diffPages, DIFF_PAGE_ROWS } from "./diff-view.ts";
 import { FileSearch } from "./file-search-view.tsx";
 import { requestEditorSave } from "./editor-actions.ts";
 import { languageFor } from "./editor-language.ts";
@@ -586,12 +586,12 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
 
 function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string }) {
   const { t } = useI18n();
-  const rows = useMemo(() => diffRows(text), [text]);
+  const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
   useEffect(() => setPage(0), [descriptor, text]);
-  const pages = Math.max(1, Math.ceil(rows.length / DIFF_PAGE_ROWS));
+  const pages = indexed.pageCount;
   const current = Math.min(page, pages - 1);
-  const visible = rows.slice(current * DIFF_PAGE_ROWS, (current + 1) * DIFF_PAGE_ROWS);
+  const visible = useMemo(() => indexed.page(current), [indexed, current]);
   return (
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
       <strong>{descriptor.path}</strong>
@@ -605,7 +605,7 @@ function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<
         </div>
         {pages > 1 && <nav className="m5-diff-pages" aria-label={t("m5.diff.pages")}>
           <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>{t("m5.diff.previous")}</button>
-          <span aria-live="polite">{t("m5.diff.page", { page: current + 1, pages, rows: rows.length })}</span>
+          <span aria-live="polite">{t("m5.diff.page", { page: current + 1, pages, rows: indexed.rowCount })}</span>
           <button type="button" disabled={current === pages - 1} onClick={() => setPage(current + 1)}>{t("m5.diff.next")}</button>
         </nav>}
       </>}

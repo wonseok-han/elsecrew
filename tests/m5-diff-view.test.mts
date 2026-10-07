@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { diffRows, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
+import { diffPages, diffRows, DIFF_PAGE_ROWS } from "../src/m5/diff-view.ts";
 
 test("unified diff distinguishes file headers, context, changes and multiple hunks", () => {
   const rows = diffRows("--- a/a.ts\n+++ b/a.ts\n@@ -2,2 +2,2 @@ function\n same\n-old\n+new\n@@ -10 +20 @@\n-x\n+y\n");
@@ -37,4 +37,34 @@ test("large changes retain all lines and numbering across bounded page boundarie
   assert.ok(pages.every(page => page.length <= 200));
   assert.deepEqual(pages.flat(), rows);
   assert.equal(rows.at(-1)?.after, 1000);
+});
+
+test("indexed pages support random access without retaining all row objects", () => {
+  const text = `@@ -0,0 +1,100000 @@\n${"+한글\n".repeat(100000)}`;
+  const indexed = diffPages(text);
+  assert.equal(indexed.rowCount, 100001);
+  assert.equal(indexed.pageCount, 501);
+  assert.equal(indexed.page(500)[0]?.after, 100000);
+  assert.equal(indexed.page(1)[0]?.after, 200);
+  assert.equal(indexed.page(0).length, 200);
+  assert.equal(indexed.page(0)[0]?.kind, "metadata");
+  assert.equal(indexed.page(1).length, 200);
+  assert.deepEqual(indexed.page(-1), []);
+  assert.deepEqual(indexed.page(501), []);
+  assert.deepEqual(indexed.page(NaN), []);
+  const changed = indexed.page(1);
+  changed[0]!.text = "consumer mutation";
+  assert.equal(indexed.page(1)[0]?.text, "+한글");
+});
+
+test("a malformed final hunk invalidates numbering on earlier indexed pages too", () => {
+  const text = `@@ -0,0 +1,600 @@\n${"+line\n".repeat(600)}@@ -1 +1 @@\n-old\n`;
+  const indexed = diffPages(text);
+  for (const index of [2, 0, 3, 1]) {
+    assert.ok(indexed.page(index).every(row => row.kind === "metadata" && row.before === null && row.after === null));
+  }
+  assert.equal(Array.from({ length: indexed.pageCount }, (_, i) => indexed.page(i)).flat().map(row => row.text).join("\n"), text.slice(0, -1));
+  assert.equal(diffPages("").rowCount, 0);
+  assert.deepEqual(diffPages("").page(0), []);
+  assert.equal(diffPages("\n").rowCount, 1);
 });
