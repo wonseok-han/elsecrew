@@ -15,7 +15,14 @@ fn quoted(value: &Value) -> String {
 
 #[test]
 fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init() {
-    for case in ["success", "allow", "cancel", "bad-init", "unknown-queue"] {
+    for case in [
+        "success",
+        "default-effort",
+        "allow",
+        "cancel",
+        "bad-init",
+        "unknown-queue",
+    ] {
         let mut f = Fixture::new();
         let snapshot = f.snapshot("req_claude_snapshot");
         let chat = f.create_exact_claude_chat(&snapshot, "goal", "req_claude_chat");
@@ -25,7 +32,12 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             .projection_record("chat", chat_id)
             .unwrap()
             .unwrap();
-        saved.get_mut("record").unwrap()["roleSnapshots"][1]["reasoningEffort"] = json!("medium");
+        saved.get_mut("record").unwrap()["roleSnapshots"][1]["reasoningEffort"] =
+            if case == "default-effort" {
+                Value::Null
+            } else {
+                json!("medium")
+            };
         f.storage
             .upsert_projection_record("chat", chat_id, "op_claude_medium", None, saved)
             .unwrap();
@@ -37,7 +49,11 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         )
         .unwrap();
         for model in &mut capability.models {
-            model.reasoning_efforts = vec!["medium".into()];
+            model.reasoning_efforts = if case == "default-effort" {
+                vec![]
+            } else {
+                vec!["medium".into()]
+            };
         }
         capability.fingerprint = compute_agent_capability_fingerprint_v1(&capability).unwrap();
         let request = AgentRunStartRequestV1 {
@@ -70,7 +86,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
         let control = json!({"type":"control_response","response":{"subtype":"success",
             "request_id":format!("init_{}",process.connection_id().simple()),"response":{
                 "hooks_applied":true,"current_permission_mode":"default","models":[{
-                    "value":"claude-opus-5","resolvedModel":"claude-opus-5","supportsEffort":true,"supportedEffortLevels":["medium"]}]}}});
+                    "value":"claude-opus-5","resolvedModel":"claude-opus-5","supportsEffort":case != "default-effort","supportedEffortLevels":if case == "default-effort" {json!([])} else {json!(["medium"])} }]}}});
         let init = json!({"type":"system","subtype":"init","uuid":"init","session_id":"s","cwd":cwd,
             "model":if case == "bad-init" {"other"} else {"claude-opus-5"},"permissionMode":"default",
             "tools":["Read","Glob","Grep","Edit","Write","Bash"],"mcp_servers":[],"skills":[],"plugins":[]});
@@ -209,7 +225,7 @@ fn claude_native_owner_runs_prompt_output_approval_cancel_and_rejects_bad_init()
             .collect();
         assert_eq!(
             final_text,
-            if matches!(case, "success" | "allow") {
+            if matches!(case, "success" | "default-effort" | "allow") {
                 vec![json!("hello")]
             } else {
                 vec![]

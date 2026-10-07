@@ -13,7 +13,7 @@ mod status;
 pub(crate) struct DiscoveryRequest {
     pub(crate) profile: ClaudeProfileBinding,
     pub(crate) selector: String,
-    pub(crate) effort: String,
+    pub(crate) effort: Option<String>,
     pub(crate) access: ToolAccess,
     pub(crate) workspace: PathBuf,
     pub(crate) source: PathBuf,
@@ -47,7 +47,7 @@ pub(crate) struct DiscoveryWorker {
 impl DiscoveryWorker {
     pub(crate) fn spawn(
         request: DiscoveryRequest,
-        mut admit: impl FnMut(&Path, &Path, &str, &str, ToolAccess) -> Result<(), SidecarError>
+        mut admit: impl FnMut(&Path, &Path, &str, Option<&str>, ToolAccess) -> Result<(), SidecarError>
             + Send
             + 'static,
     ) -> Result<Self, SidecarError> {
@@ -108,7 +108,7 @@ impl DiscoveryWorker {
                     request.profile,
                     &executable,
                     &request.selector,
-                    &request.effort,
+                    request.effort.as_deref(),
                     request.access,
                     &request.workspace,
                     &request.source,
@@ -186,7 +186,7 @@ impl Drop for DiscoveryWorker {
 pub(crate) struct ProfileObservation {
     selector: String,
     resolved_model: String,
-    effort: String,
+    effort: Option<String>,
     access: ToolAccess,
     workspace: PathBuf,
     source: PathBuf,
@@ -202,7 +202,7 @@ impl ProfileObservation {
         Ok(
             hello_agent_protocol::agent_adapter_v1::AgentModelCapabilityV1 {
                 model_selector: self.selector.clone(),
-                reasoning_efforts: vec![self.effort.clone()],
+                reasoning_efforts: self.effort.iter().cloned().collect(),
                 permissions: vec![match self.access {
                     ToolAccess::ReadOnly => "readOnly",
                     ToolAccess::Edit => "workspaceWrite",
@@ -215,14 +215,14 @@ impl ProfileObservation {
     pub(crate) fn matches(
         &self,
         selector: &str,
-        effort: &str,
+        effort: Option<&str>,
         access: ToolAccess,
         workspace: &Path,
         source: &Path,
         home: &Path,
     ) -> bool {
         self.selector == selector
-            && self.effort == effort
+            && self.effort.as_deref() == effort
             && self.access == access
             && self.workspace == workspace
             && self.source == source
@@ -244,12 +244,12 @@ pub(crate) fn inspect_candidate(
     profile: ClaudeProfileBinding,
     executable: &PinnedExecutable,
     selector: &str,
-    effort: &str,
+    effort: Option<&str>,
     access: ToolAccess,
     workspace: &Path,
     source: &Path,
     cancel: &AtomicBool,
-    admit: &mut impl FnMut(&Path, &Path, &str, &str, ToolAccess) -> Result<(), SidecarError>,
+    admit: &mut impl FnMut(&Path, &Path, &str, Option<&str>, ToolAccess) -> Result<(), SidecarError>,
 ) -> Result<ProviderInspection<'static, ProfileObservation>, SidecarError> {
     let home = profile.revalidate()?;
     if cancel.load(Ordering::Acquire) {
@@ -304,7 +304,7 @@ pub(crate) fn inspect_candidate(
         Ok(ProfileObservation {
             selector: selector.into(),
             resolved_model,
-            effort: effort.into(),
+            effort: effort.map(str::to_owned),
             access,
             workspace: workspace.into(),
             source: source.into(),
@@ -323,7 +323,7 @@ mod tests {
         let mut observation = ProfileObservation {
             selector: "opus".into(),
             resolved_model: "claude-model".into(),
-            effort: "high".into(),
+            effort: Some("high".into()),
             access: ToolAccess::Edit,
             workspace: "/snapshot".into(),
             source: "/source".into(),
@@ -333,7 +333,7 @@ mod tests {
         let matches = |observation: &ProfileObservation, source: &str| {
             observation.matches(
                 "opus",
-                "high",
+                Some("high"),
                 ToolAccess::Edit,
                 Path::new("/snapshot"),
                 Path::new(source),
@@ -348,7 +348,7 @@ mod tests {
         assert!(!matches(&observation, "/other"));
         assert!(!observation.matches(
             "opus",
-            "high",
+            Some("high"),
             ToolAccess::ReadOnly,
             Path::new("/snapshot"),
             Path::new("/source"),
@@ -356,7 +356,22 @@ mod tests {
         ));
         assert!(!observation.matches(
             "claude-model",
-            "high",
+            Some("high"),
+            ToolAccess::Edit,
+            Path::new("/snapshot"),
+            Path::new("/source"),
+            Path::new("/profile")
+        ));
+        observation.effort = None;
+        assert!(observation
+            .selected_model()
+            .unwrap()
+            .reasoning_efforts
+            .is_empty());
+        assert!(!matches(&observation, "/source"));
+        assert!(observation.matches(
+            "opus",
+            None,
             ToolAccess::Edit,
             Path::new("/snapshot"),
             Path::new("/source"),

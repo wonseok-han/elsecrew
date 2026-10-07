@@ -148,10 +148,11 @@ impl InitializeExchange {
     }
 
     /// Provider-reported catalog and mode, not account entitlement or confinement.
-    pub fn profile_model(&self, model: &str, effort: &str) -> Result<&str, ProviderError> {
+    pub fn profile_model(&self, model: &str, effort: Option<&str>) -> Result<&str, ProviderError> {
         if self.state != State::Ready || !self.hooks_applied || !self.default_permission_mode { return Err(invalid()); }
-        let supports = |entry: &ModelEntry| entry.supports_effort == Some(true)
-            && entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort));
+        // None requests the provider default, not a measured effective effort.
+        let supports = |entry: &ModelEntry| effort.is_none_or(|effort| entry.supports_effort == Some(true)
+            && entry.efforts.as_ref().is_some_and(|levels| levels.iter().any(|level| level == effort)));
         // Prefer a directly advertised selector. A full ID may instead be
         // advertised as resolvedModel by several aliases; require agreement
         // on the requested effort rather than depending on catalog order.
@@ -193,20 +194,31 @@ mod tests {
         let mut exchange = InitializeExchange::new("init_a").unwrap();
         exchange.request().unwrap();
         exchange.accept_response(&input(&base)).unwrap();
-        assert_eq!(exchange.profile_model("opus", "high").unwrap(), "claude-opus-test");
-        assert_eq!(exchange.profile_model("claude-opus-test", "high").unwrap(), "claude-opus-test");
-        assert!(exchange.profile_model("claude-opus-test", "max").is_err());
-        assert!(exchange.profile_model("opus", "max").is_err());
-        assert!(exchange.profile_model("other", "high").is_err());
+        assert_eq!(exchange.profile_model("opus", None).unwrap(), "claude-opus-test");
+        assert!(exchange.profile_model("other", None).is_err());
+        let mut no_effort = base.clone();
+        let model = no_effort["response"]["response"]["models"][0].as_object_mut().unwrap();
+        model.remove("supportsEffort");
+        model.remove("supportedEffortLevels");
+        let mut defaults = InitializeExchange::new("init_a").unwrap();
+        defaults.request().unwrap();
+        defaults.accept_response(&input(&no_effort)).unwrap();
+        assert_eq!(defaults.profile_model("opus", None).unwrap(), "claude-opus-test");
+        assert!(defaults.profile_model("opus", Some("high")).is_err());
+        assert_eq!(exchange.profile_model("opus", Some("high")).unwrap(), "claude-opus-test");
+        assert_eq!(exchange.profile_model("claude-opus-test", Some("high")).unwrap(), "claude-opus-test");
+        assert!(exchange.profile_model("claude-opus-test", Some("max")).is_err());
+        assert!(exchange.profile_model("opus", Some("max")).is_err());
+        assert!(exchange.profile_model("other", Some("high")).is_err());
         exchange.close();
-        assert!(exchange.profile_model("opus", "high").is_err());
+        assert!(exchange.profile_model("opus", Some("high")).is_err());
         for field in ["hooks_applied", "models", "current_permission_mode"] {
             let mut wire = base.clone();
             wire["response"]["response"].as_object_mut().unwrap().remove(field);
             let mut exchange = InitializeExchange::new("init_a").unwrap();
             exchange.request().unwrap();
             exchange.accept_response(&input(&wire)).unwrap();
-            assert!(exchange.profile_model("opus", "high").is_err());
+            assert!(exchange.profile_model("opus", Some("high")).is_err());
         }
         for mode in ["bypassPermissions", "acceptEdits", "auto", "plan", "unknown"] {
             let mut wire = base.clone();
@@ -214,7 +226,7 @@ mod tests {
             let mut exchange = InitializeExchange::new("init_a").unwrap();
             exchange.request().unwrap();
             exchange.accept_response(&input(&wire)).unwrap();
-            assert!(exchange.profile_model("opus", "high").is_err());
+            assert!(exchange.profile_model("opus", Some("high")).is_err());
         }
         let mut duplicate = base.clone();
         let entry = duplicate["response"]["response"]["models"][0].clone();
@@ -222,7 +234,7 @@ mod tests {
         let mut exchange = InitializeExchange::new("init_a").unwrap();
         exchange.request().unwrap();
         assert!(exchange.accept_response(&input(&duplicate)).is_err());
-        assert!(exchange.profile_model("opus", "high").is_err());
+        assert!(exchange.profile_model("opus", Some("high")).is_err());
     }
     #[test]
     fn resolved_model_does_not_pick_an_arbitrary_conflicting_alias() {
@@ -237,17 +249,17 @@ mod tests {
             let mut exchange = InitializeExchange::new("init_a").unwrap();
             exchange.request().unwrap();
             exchange.accept_response(&input(&wire)).unwrap();
-            assert!(exchange.profile_model("claude-model", "high").is_err());
-            assert!(exchange.profile_model("claude-model", "low").is_err());
-            assert_eq!(exchange.profile_model("opus", "low").unwrap(), "claude-model");
-            assert!(exchange.profile_model("claude-model-new", "low").is_err());
+            assert!(exchange.profile_model("claude-model", Some("high")).is_err());
+            assert!(exchange.profile_model("claude-model", Some("low")).is_err());
+            assert_eq!(exchange.profile_model("opus", Some("low")).unwrap(), "claude-model");
+            assert!(exchange.profile_model("claude-model-new", Some("low")).is_err());
             for entry in wire["response"]["response"]["models"].as_array_mut().unwrap() {
                 entry["supportedEffortLevels"] = json!(["high"]);
             }
             let mut consistent = InitializeExchange::new("init_a").unwrap();
             consistent.request().unwrap();
             consistent.accept_response(&input(&wire)).unwrap();
-            assert_eq!(consistent.profile_model("claude-model", "high").unwrap(), "claude-model");
+            assert_eq!(consistent.profile_model("claude-model", Some("high")).unwrap(), "claude-model");
         }
     }
     #[test]

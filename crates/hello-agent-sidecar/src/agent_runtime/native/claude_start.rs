@@ -50,7 +50,7 @@ impl AgentRuntime {
             &std::path::Path,
             &std::path::Path,
             &str,
-            &str,
+            Option<&str>,
             crate::provider_claude_session::ToolAccess,
         ) -> Result<(), SidecarError>,
         prompt_admit: PromptAdmission,

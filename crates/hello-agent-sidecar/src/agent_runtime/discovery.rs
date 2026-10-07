@@ -250,7 +250,7 @@ impl AgentRuntime {
         let home = process.as_ref().ok_or_else(failure)?.claude_preflight_home()?;
         if !observed.evidence.is_fresh() || !observed.evidence.observation.matches(
             &preparation.profile.model_selector,
-            preparation.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+            preparation.profile.reasoning_effort.as_deref(), access,
             Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
             Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
         ) { return Err(failure()); }
@@ -260,7 +260,7 @@ impl AgentRuntime {
             executable:observed.evidence.executable.public_identity(&observed.evidence.version)?,
             requested_launch_policy_digest:crate::provider_claude_session::requested_policy_digest(
                 &preparation.profile.model_selector,
-                preparation.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access, &home,
+                preparation.profile.reasoning_effort.as_deref(), access, &home,
                 Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
                 Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
             )?,
@@ -318,11 +318,11 @@ impl AgentRuntime {
         let source = PathBuf::from(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
         let admission = crate::provider_claude_session::admission::Admission::new(
             &workspace, &binding.revalidate()?, &source, &profile.model_selector,
-            profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+            profile.reasoning_effort.as_deref(), access,
         )?;
         let worker = DiscoveryWorker::spawn(DiscoveryRequest {
             profile: binding,
-            selector: profile.model_selector.clone(), effort: profile.reasoning_effort.clone().ok_or_else(failure)?, access,
+            selector: profile.model_selector.clone(), effort: profile.reasoning_effort.clone(), access,
             workspace, source,
         }, move |workspace, home, model, effort, access| admission.launch(workspace, home, model, effort, access))?;
         self.pending_claude_discoveries.insert(request_id.into(), PendingClaudeDiscovery { worker, completion: None, scope, profile });
@@ -374,7 +374,7 @@ impl AgentRuntime {
                 _ => return Err(failure()),
             };
             if !evidence.is_fresh() || !evidence.observation.matches(&pending.profile.model_selector,
-                pending.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access,
+                pending.profile.reasoning_effort.as_deref(), access,
                 Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
                 Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home) {
                 return Err(failure());

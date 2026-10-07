@@ -99,7 +99,7 @@ impl ClaudeStart {
                 permission_mode:"default",
                 tools:crate::provider_claude_session::expected_tools(access),
             };
-            let effort = pending.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?;
+            let effort = pending.run["selectedProfile"]["reasoningEffort"].as_str();
             self.channel = Some(self.initialization.take().ok_or_else(failure)?.into_profile_channel(&expected, effort)?);
             let mut owner = OwnedClaudeRun::take_prepared(storage, projects, reservation, process, &mut self.channel)?;
             // After this point every failure must restore ownership, not drop it.
@@ -377,7 +377,7 @@ impl RunReservation {
         let workspace = Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?);
         let source = Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?);
         let home = process.claude_preflight_home()?;
-        let effort = profile.reasoning_effort.as_deref().ok_or_else(failure)?;
+        let effort = profile.reasoning_effort.as_deref();
         let access = if profile.permission == "workspaceWrite" { ToolAccess::Edit } else { ToolAccess::ReadOnly };
         self.claude_preflight = Some(hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight {
             schema_version:1, scope:super::super::capability_scope(&self.run, &profile.role_id).map_err(|_| failure())?,
@@ -407,7 +407,7 @@ impl RunReservation {
         };
         Admission::new(Path::new(manifest["worktreePath"].as_str().ok_or_else(failure)?),
             &process.claude_preflight_home()?, Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
-            &preflight.profile.model_selector, preflight.profile.reasoning_effort.as_deref().ok_or_else(failure)?, access)
+            &preflight.profile.model_selector, preflight.profile.reasoning_effort.as_deref(), access)
     }
 
     /// Recheck invocation identity and durable inputs during initialization.
@@ -432,7 +432,7 @@ impl RunReservation {
             let home = process.claude_preflight_home()?;
             let requested = crate::provider_claude_session::requested_policy_digest(
                 self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
-                self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?, access,
+                self.run["selectedProfile"]["reasoningEffort"].as_str(), access,
                 &home, Path::new(workspace), Path::new(manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?),
             )?;
             if requested != preflight.requested_launch_policy_digest || !preflight.credentials_present
@@ -442,7 +442,7 @@ impl RunReservation {
         }
         if !process.matches_claude_scope(Path::new(workspace),
             self.run["selectedProfile"]["modelSelector"].as_str().ok_or_else(failure)?,
-            self.run["selectedProfile"]["reasoningEffort"].as_str().ok_or_else(failure)?, access) { return Err(failure()); }
+            self.run["selectedProfile"]["reasoningEffort"].as_str(), access) { return Err(failure()); }
         Ok((workspace.into(),access))
     }
 
@@ -455,7 +455,7 @@ impl RunReservation {
         process: &mut crate::provider_login_process::LoginProcess<'_>,
         executable: &crate::provider_executable::PinnedExecutable,
         cancel: &std::sync::atomic::AtomicBool,
-        admit: &mut impl FnMut(&Path, &Path, &str, &str, crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError>,
+        admit: &mut impl FnMut(&Path, &Path, &str, Option<&str>, crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError>,
     ) -> Result<(), SidecarError> {
         use crate::provider_claude_session::{launch::ClaudeCommand, ToolAccess};
         use std::sync::atomic::Ordering;
@@ -465,7 +465,7 @@ impl RunReservation {
         { return Err(failure()); }
         let selected = &self.run["selectedProfile"];
         let model = selected["modelSelector"].as_str().ok_or_else(failure)?;
-        let effort = selected["reasoningEffort"].as_str().ok_or_else(failure)?;
+        let effort = selected["reasoningEffort"].as_str();
         let access = match selected["permission"].as_str() {
             Some("readOnly") => ToolAccess::ReadOnly,
             Some("workspaceWrite") => ToolAccess::Edit,

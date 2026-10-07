@@ -7,7 +7,7 @@ pub(crate) struct Scope {
     workspace: PathBuf,
     home: PathBuf,
     model: String,
-    effort: String,
+    effort: Option<String>,
     access: ToolAccess,
     executable: PinnedExecutable,
 }
@@ -18,9 +18,9 @@ impl Scope {
         crate::provider_profile::verify_runtime_files(&self.home)
     }
 
-    pub(crate) fn matches(&self, workspace: &Path, home: &Path, model: &str, effort: &str, access: ToolAccess) -> bool {
+    pub(crate) fn matches(&self, workspace: &Path, home: &Path, model: &str, effort: Option<&str>, access: ToolAccess) -> bool {
         self.workspace == workspace && self.home == home && self.model == model
-            && self.effort == effort && self.access == access && self.revalidate().is_ok()
+            && self.effort.as_deref() == effort && self.access == access && self.revalidate().is_ok()
     }
 }
 
@@ -31,17 +31,17 @@ pub(crate) struct ClaudeCommand {
 
 impl ClaudeCommand {
     #[cfg(test)]
-    pub(crate) fn toy(home: &Path, workspace: &Path, model: &str, effort: &str, access: ToolAccess, script: &str) -> Result<Self, SidecarError> {
+    pub(crate) fn toy(home: &Path, workspace: &Path, model: &str, effort: Option<&str>, access: ToolAccess, script: &str) -> Result<Self, SidecarError> {
         use sha2::{Digest, Sha256};
         let path = Path::new("/bin/sh");
         let digest = Sha256::digest(std::fs::read(path).map_err(|_| failure())?).into();
         let executable = PinnedExecutable::open(path, digest)?;
         let command = crate::provider_login_gate::command(path, &["-c".as_ref(), script.as_ref()], workspace)
             .map_err(|_| failure())?;
-        Ok(Self { command, scope: Scope { workspace:workspace.into(), home:home.into(), model:model.into(), effort:effort.into(), access, executable } })
+        Ok(Self { command, scope: Scope { workspace:workspace.into(), home:home.into(), model:model.into(), effort:effort.map(str::to_owned), access, executable } })
     }
 
-    pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, source: &Path, model: &str, effort: &str, access: ToolAccess) -> Result<Self, SidecarError> {
+    pub(crate) fn new(executable: &Path, home: &Path, workspace: &Path, source: &Path, model: &str, effort: Option<&str>, access: ToolAccess) -> Result<Self, SidecarError> {
         let executable = PinnedExecutable::open_claude_signed(executable)?;
         let user_home = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?);
         if !user_home.is_absolute() || user_home == home || !home.is_absolute() || !workspace.is_absolute()
@@ -61,7 +61,7 @@ impl ClaudeCommand {
             .env("BROWSER", "/usr/bin/false")
             .env("DISABLE_AUTOUPDATER", "1")
             .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
-        let scope = Scope {workspace:workspace.into(),home:home.into(),model:model.into(),effort:effort.into(),access,executable};
+        let scope = Scope {workspace:workspace.into(),home:home.into(),model:model.into(),effort:effort.map(str::to_owned),access,executable};
         scope.revalidate()?;
         Ok(Self {command,scope})
     }
@@ -77,6 +77,6 @@ mod tests {
     #[test]
     fn unrelated_binary_cannot_claim_claude_launch() {
         assert!(ClaudeCommand::new(Path::new("/usr/bin/true"), Path::new("/synthetic/profile"),
-            Path::new("/synthetic/snapshot"), Path::new("/synthetic/source"), "test-model", "medium", ToolAccess::ReadOnly).is_err());
+            Path::new("/synthetic/snapshot"), Path::new("/synthetic/source"), "test-model", Some("medium"), ToolAccess::ReadOnly).is_err());
     }
 }

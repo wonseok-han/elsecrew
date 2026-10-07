@@ -590,7 +590,7 @@ impl<'a> LoginProcess<'a> {
     }
 
     /// Invocation identity only; this does not certify provider tool confinement.
-    pub(crate) fn matches_claude_scope(&self, workspace: &std::path::Path, model: &str, effort: &str, access: crate::provider_claude_session::ToolAccess) -> bool {
+    pub(crate) fn matches_claude_scope(&self, workspace: &std::path::Path, model: &str, effort: Option<&str>, access: crate::provider_claude_session::ToolAccess) -> bool {
         !self.failed && !self.finished && self.cleanup_started.is_none()
             && self.io.is_some() && self.child.is_some()
             && self.claude_preflight_home().ok().is_some_and(|home| {

@@ -10,7 +10,7 @@ pub(crate) struct Admission {
     source: PathBuf,
     directories: [cap_std::fs::Dir; 3],
     model: String,
-    effort: String,
+    effort: Option<String>,
     access: ToolAccess,
     policy: String,
 }
@@ -21,7 +21,7 @@ impl Admission {
         home: &Path,
         source: &Path,
         model: &str,
-        effort: &str,
+        effort: Option<&str>,
         access: ToolAccess,
     ) -> Result<Self, SidecarError> {
         let policy = requested_policy_digest(model, effort, access, home, workspace, source)?;
@@ -35,7 +35,7 @@ impl Admission {
                 open_absolute_directory(source)?,
             ],
             model: model.into(),
-            effort: effort.into(),
+            effort: effort.map(str::to_owned),
             access,
             policy,
         };
@@ -56,7 +56,7 @@ impl Admission {
         verify_runtime_files(&self.workspace)?;
         if requested_policy_digest(
             &self.model,
-            &self.effort,
+            self.effort.as_deref(),
             self.access,
             &self.home,
             &self.workspace,
@@ -73,13 +73,13 @@ impl Admission {
         workspace: &Path,
         home: &Path,
         model: &str,
-        effort: &str,
+        effort: Option<&str>,
         access: ToolAccess,
     ) -> Result<(), SidecarError> {
         if workspace != self.workspace
             || home != self.home
             || model != self.model
-            || effort != self.effort
+            || effort != self.effort.as_deref()
             || access != self.access
         {
             return Err(failure());
@@ -93,7 +93,7 @@ impl Admission {
             || !process.matches_claude_scope(
                 &self.workspace,
                 &self.model,
-                &self.effort,
+                self.effort.as_deref(),
                 self.access,
             )
         {
@@ -184,24 +184,48 @@ mod tests {
             &home,
             &source,
             "opus",
-            "medium",
+            Some("medium"),
             ToolAccess::Edit,
         )
         .unwrap();
+        let defaults =
+            Admission::new(&workspace, &home, &source, "opus", None, ToolAccess::Edit).unwrap();
+        assert!(defaults
+            .launch(&workspace, &home, "opus", None, ToolAccess::Edit)
+            .is_ok());
+        assert!(defaults
+            .launch(&workspace, &home, "opus", Some("medium"), ToolAccess::Edit)
+            .is_err());
         assert!(admission
-            .launch(&workspace, &home, "opus", "medium", ToolAccess::Edit)
+            .launch(&workspace, &home, "opus", None, ToolAccess::Edit)
+            .is_err());
+        assert_ne!(defaults.policy, admission.policy);
+        assert!(admission
+            .launch(&workspace, &home, "opus", Some("medium"), ToolAccess::Edit)
             .is_ok());
         assert!(admission
-            .launch(&workspace, &home, "sonnet", "medium", ToolAccess::Edit)
+            .launch(
+                &workspace,
+                &home,
+                "sonnet",
+                Some("medium"),
+                ToolAccess::Edit
+            )
             .is_err());
         assert!(admission
-            .launch(&workspace, &home, "opus", "high", ToolAccess::Edit)
+            .launch(&workspace, &home, "opus", Some("high"), ToolAccess::Edit)
             .is_err());
         assert!(admission
-            .launch(&workspace, &home, "opus", "medium", ToolAccess::ReadOnly)
+            .launch(
+                &workspace,
+                &home,
+                "opus",
+                Some("medium"),
+                ToolAccess::ReadOnly
+            )
             .is_err());
         assert!(admission
-            .launch(&source, &home, "opus", "medium", ToolAccess::Edit)
+            .launch(&source, &home, "opus", Some("medium"), ToolAccess::Edit)
             .is_err());
         for path in [&workspace, &home, &source] {
             let moved = path.with_extension("retained");
@@ -230,7 +254,7 @@ mod tests {
             &home,
             &source,
             "opus",
-            "medium",
+            Some("medium"),
             ToolAccess::Edit,
         )
         .unwrap();

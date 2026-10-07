@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (Claude 추론 기본값 실행 연결)
+
+- 기준 cabf023. 기존 역할/UI 계약의 reasoningEffort=null을 native Claude 조회·예약·실행·정책 digest·프로세스 범위에 일관되게 전달했다. null은 --effort 생략이며 medium 대체나 유효 추론 수준 관측 주장이 아니다. 명시 수준은 catalog 지원을 요구하고 null/명시값 변경도 admission에서 거절한다. Karpathy 지침에 따라 공개 계약/화면/제품 활성화는 변경하지 않았다.
+- core claude_control 4 PASS, sidecar Claude 집중 26 PASS/2 ignored. 기본값 합성 peer를 supportsEffort=false/빈 levels로 강화한 후 실행·승인·취소·오류·DB 재열기 6시나리오 테스트 1 PASS(18.54초). Admission의 null/명시값 교체 및 digest 차이, 조회 범위, argv 생략/빈 문자열 거절도 검사했다. 수정된 정형 3개 모듈 rustfmt와 diff check PASS. 실제 계정/모델·최종 누적 gate 합격은 아니다.
+- cargo check --tests PASS(3.76초). 기존 독립 검토자 1명이 현재 diff를 정적 검토해 차단 결함 없음으로 보고했고 테스트는 메인 증거와 구분한다. malformed effort는 typed preflight/profile exact 비교에서, 재시작 변경은 기존 기록 결속에서 거절됨을 확인했다. 후속 강화 권고는 restart fixture에 effort 변경 case 추가이며 현재 차단 결함은 아니다. 다음은 native 후보 제품 활성화/실제 UI 통합 검증이며 기본 --stdio blocked 유지. main/push 없음, 기존 9월 archive 변경은 제외해 보존한다.
+
 ### 2026-10-07 · by GPT-6 Astra (Claude 소유 실행 전체 흐름 합성 검증)
 
 - 기준 422139e. 직전 턴은 구현/누적 실패 수정 진전이며 목표는 계속 active다. 메인이 Karpathy 지침에 따라 기존 native dispatcher·예약·gate·prompt Admission·공개 원장·종료/복구를 한 실행으로 통과하는 로컬 pipe 회귀를 추가했다. 테스트 전용 cfg(test) constructor만 /bin/sh를 가짜 공급자로 사용하고 제품 서명 검사/기본 blocked는 바꾸지 않았다.
@@ -69,6 +75,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude 추론 기본값(2026-10-07)**: reasoningEffort=null은 공급자 기본값 요청이며 --effort를 생략한다. 실제 적용 수준을 관측한 값이나 medium으로 치환하지 않는다. 명시 수준의 catalog 지원 검사와 null/명시값 역할·범위·요청 정책 결속은 별도로 유지한다.
 
 - **Claude 보장 범위 승인(2026-10-07)**: 공식 공급자 보호를 신뢰하고 요청 정책/실제 세션 관측을 분리한다. 관측 불가능한 config·관리 설정 불변성은 런타임 증거로 만들지 않는다. control 초기화 뒤 목표를 보내고 system/init을 검증한 뒤 도구를 허용한다. 이 설계 결정 대기는 해소됐으나 제품 활성화·계정/유료 시험·전체 완료 승인과 다르다. 구체 계약은 제안서 §6.9의 사용자 확정 항목, 구현은 phased_claude 기록에서 시작한다.
 

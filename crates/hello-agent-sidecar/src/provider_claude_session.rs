@@ -41,7 +41,7 @@ fn shell_settings() -> serde_json::Value {
 }
 
 /// Explicit deny paths supplement restricted mode; managed settings still need admission.
-pub(crate) fn scoped_arguments(model: &str, effort: &str, access: ToolAccess, home: &std::path::Path, workspace: &std::path::Path, source: &std::path::Path) -> Result<Vec<std::ffi::OsString>, SidecarError> {
+pub(crate) fn scoped_arguments(model: &str, effort: Option<&str>, access: ToolAccess, home: &std::path::Path, workspace: &std::path::Path, source: &std::path::Path) -> Result<Vec<std::ffi::OsString>, SidecarError> {
     fn literal(path: &std::path::Path) -> Result<String, SidecarError> {
         let value = path.to_str().ok_or_else(failure)?;
         if !path.is_absolute() || value.len() > 16 * 1024 || value.chars().any(char::is_control)
@@ -79,7 +79,7 @@ pub(crate) fn scoped_arguments(model: &str, effort: &str, access: ToolAccess, ho
 /// https://code.claude.com/docs/en/cli-reference
 pub(crate) fn arguments(
     model: &str,
-    effort: &str,
+    effort: Option<&str>,
     access: ToolAccess,
 ) -> Result<Vec<std::ffi::OsString>, SidecarError> {
     if model.is_empty()
@@ -88,13 +88,13 @@ pub(crate) fn arguments(
         || !model
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-        || !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max")
+        || effort.is_some_and(|effort| !matches!(effort, "low" | "medium" | "high" | "xhigh" | "max"))
     {
         return Err(failure());
     }
     let tools = expected_tools(access).join(",");
     let settings = shell_settings().to_string();
-    Ok([
+    let mut args: Vec<std::ffi::OsString> = [
         "--print",
         "--input-format",
         "stream-json",
@@ -121,12 +121,12 @@ pub(crate) fn arguments(
         "stdio",
         "--model",
         model,
-        "--effort",
-        effort,
     ]
     .into_iter()
     .map(Into::into)
-    .collect())
+    .collect();
+    if let Some(effort) = effort { args.extend(["--effort".into(), effort.into()]); }
+    Ok(args)
 }
 
 pub(crate) struct ControlInitialization {
@@ -138,7 +138,7 @@ pub(crate) struct ControlInitialization {
 }
 
 /// Digest of what the app requests, not evidence of effective managed settings.
-pub(crate) fn requested_policy_digest(model: &str, effort: &str, access: ToolAccess,
+pub(crate) fn requested_policy_digest(model: &str, effort: Option<&str>, access: ToolAccess,
     home: &std::path::Path, workspace: &std::path::Path, source: &std::path::Path,
 ) -> Result<String, SidecarError> {
     use sha2::{Digest, Sha256};
@@ -459,7 +459,7 @@ impl ControlInitialization {
     pub(crate) fn into_profile_channel(
         self,
         expected: &hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit<'_>,
-        effort: &str,
+        effort: Option<&str>,
     ) -> Result<SessionChannel, SidecarError> {
         let resolved = self.exchange.profile_model(expected.model, effort).map_err(|_| failure())?.to_owned();
         let resolved_expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
@@ -580,7 +580,7 @@ mod tests {
         let expected = hello_agent_core::provider::vendor_observation::claude_init::ExpectedInit {
             cwd:"/snapshot",model:"opus",permission_mode:"default",tools:expected_tools(ToolAccess::ReadOnly),
         };
-        let channel = initialization.into_profile_channel(&expected,"high").unwrap();
+        let channel = initialization.into_profile_channel(&expected,Some("high")).unwrap();
         assert!(channel.matches_role("opus", ToolAccess::ReadOnly));
         assert!(!channel.matches_role("claude-opus-test", ToolAccess::ReadOnly));
         assert_eq!(channel.session_model,"claude-opus-test");
@@ -632,7 +632,7 @@ mod tests {
         let home = Path::new("/app/profile");
         let workspace = Path::new("/app/snapshot");
         let source = Path::new("/projects/user-source");
-        let args = scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, workspace, source).unwrap();
+        let args = scoped_arguments("selected-model", Some("medium"), ToolAccess::Edit, home, workspace, source).unwrap();
         assert!(args.iter().any(|arg| arg == "--restricted"));
         let index = args.iter().position(|arg| arg == "--settings").unwrap();
         let settings: serde_json::Value = serde_json::from_str(args[index+1].to_str().unwrap()).unwrap();
@@ -644,15 +644,18 @@ mod tests {
         }
         assert_eq!(settings["sandbox"]["network"]["allowLocalBinding"],false);
         for path in ["/app/snap*", "/app/snap?", "/app/snap[1]", "/app/snap)extra", "relative"] {
-            assert!(scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, Path::new(path), source).is_err());
+            assert!(scoped_arguments("selected-model", Some("medium"), ToolAccess::Edit, home, Path::new(path), source).is_err());
         }
-        assert!(scoped_arguments("selected-model", "medium", ToolAccess::Edit, home, workspace, Path::new("/app")).is_err());
+        assert!(scoped_arguments("selected-model", Some("medium"), ToolAccess::Edit, home, workspace, Path::new("/app")).is_err());
     }
 
     #[test]
     fn launch_arguments_preserve_subscription_and_do_not_grant_tool_approval() {
+        let defaults = arguments("selected-model", None, ToolAccess::Edit).unwrap();
+        assert!(!defaults.iter().any(|arg| arg == "--effort"));
+        assert!(arguments("selected-model", Some(""), ToolAccess::Edit).is_err());
         for access in [ToolAccess::ReadOnly, ToolAccess::Edit] {
-            let args = arguments("selected-model", "medium", access).unwrap();
+            let args = arguments("selected-model", Some("medium"), access).unwrap();
             let args: Vec<_> = args.iter().map(|a| a.to_str().unwrap()).collect();
             assert!(args.contains(&"--safe-mode"));
             assert_eq!(args.iter().filter(|a| **a == "--settings").count(), 1);
@@ -685,9 +688,9 @@ mod tests {
                 .windows(2)
                 .any(|a| a == ["--permission-mode", "default"]));
         }
-        assert!(arguments("--help", "medium", ToolAccess::ReadOnly).is_err());
-        assert!(arguments("selected-model", "auto", ToolAccess::Edit).is_err());
-        assert!(arguments("model\nother", "high", ToolAccess::Edit).is_err());
+        assert!(arguments("--help", Some("medium"), ToolAccess::ReadOnly).is_err());
+        assert!(arguments("selected-model", Some("auto"), ToolAccess::Edit).is_err());
+        assert!(arguments("model\nother", Some("high"), ToolAccess::Edit).is_err());
     }
 
     #[test]
