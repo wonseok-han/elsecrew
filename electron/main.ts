@@ -145,7 +145,16 @@ async function serveAppAsset(request: Request) {
     return new Response("Not found", { status: 404 });
   }
 
-  return net.fetch(pathToFileURL(asset).toString());
+  const assetResponse = await net.fetch(pathToFileURL(asset).toString());
+  const response = new Response(assetResponse.body, {
+    status: assetResponse.status,
+    statusText: assetResponse.statusText,
+    headers: assetResponse.headers,
+  });
+  // Chromium ignores frame-ancestors in HTML meta policies. Keep the resource
+  // policy in the document, and enforce embedding restrictions in the response.
+  response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+  return response;
 }
 
 function isAllowedNavigation(target: string) {

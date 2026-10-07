@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (CSP 독립 검토 마감·개발 서버 회귀 추가)
+
+- 이전 턴의 검토자는 실제 running 상태였으며 이번에 terminal 결과를 수신했다. 지정 diff의 차단 결함 없음: 응답 body/status/headers 보존·기존 resource policy 유지 확인, 독립 main 회귀8 PASS, 임시 Vite dev 실제 HTTP 응답의 frame-ancestors 헤더 확인. Chromium framing enforcement E2E는 여전히 별도 미검증이다.
+- 검토자의 비차단 공백을 닫기 위해 실제 Vite config의 dev/preview 헤더와 HTML 리소스 정책 보존 회귀2개를 추가하고 보안 묶음 명령에 포함했다. 신규2 PASS, diff 검사 통과. Karpathy 지침으로 검토 대상 제품 코드는 추가 변경하지 않았고 검토자를 재호출하지 않는다.
+- CSP 변경을 로컬 작업 단위로 커밋한다. 새 main build의 실제 UI 확인·실제 모델 종단·메모리/G6/Windows·시안 전체 마감은 아직 남는다. 기존9월 archive 변경 보존·main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (CSP 프레임 제한 전달 위치 수정)
+
+- 기준f37226f. 실제 UI console에서 반복된 frame-ancestors meta 무시 경고를 조사했다. 제품 app:// 자산 응답을 원래 body/status/headers와 함께 감싸 frame-ancestors 'none' CSP 헤더를 추가하고 Vite dev/preview에도 같은 헤더를 설정했다. HTML meta의 리소스 제한은 유지하고 지원되지 않는 frame-ancestors만 제거했다. 공식 근거: https://www.electronjs.org/docs/latest/tutorial/security/ .
+- Karpathy 지침으로 정책 완화나 외부 리소스 허용 없이 전달 위치에 한정했다. main 경계 회귀8 PASS(응답 body/CSP 포함), diff 검사 통과. 실제 Chromium framing 거절·새 main build의 UI 경고 제거는 아직 미검증이다. 상시 승인된 독립 검토자1명을 호출했으며 결과는 후속 기록한다.
+- 전체 완료와 구분하며 실제 공급자 종단·메모리/G6/Windows·전체 시안은 계속 남는다. 기존9월 archive 변경 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (최근 UI 연결 묶음 실제 검증)
 
 - 기준808dd12. TypeScript·renderer production build 통과, 코드 블록4+bootstrap 수명주기1 회귀 통과. 실제 native UI의 첫 실행은 시작/설정/편집/diff/원본 반영까지 통과한 뒤 reload에서 제거된 catalog 팝업 버튼을 기다리며 실패했다. 새 sidebar 목록의 활성 항목을 직접 선택하도록 runner를 갱신했다. Karpathy 지침으로 제품 동작을 검사에 맞춰 되돌리지 않았다.

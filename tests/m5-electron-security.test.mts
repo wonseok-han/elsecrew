@@ -115,6 +115,8 @@ test("app protocol rejects external, encoded, absolute, malformed, and missing a
 
   const valid = await serve({ url: "app://m5/index.html" });
   assert.equal(valid.status, 200);
+  assert.equal(valid.headers.get("Content-Security-Policy"), "frame-ancestors 'none'");
+  assert.equal(await valid.text(), "local");
   assert.equal(harness.netFetches.length, 1);
   assert.match(harness.netFetches[0] ?? "", /^file:/);
 

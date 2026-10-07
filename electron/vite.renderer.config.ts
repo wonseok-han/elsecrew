@@ -9,6 +9,8 @@ const outputDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..", "
 export default defineConfig({
   root,
   plugins: [react()],
+  server: { headers: { "Content-Security-Policy": "frame-ancestors 'none'" } },
+  preview: { headers: { "Content-Security-Policy": "frame-ancestors 'none'" } },
   build: {
     // Forge packages only the project-root .vite directory. `root` is the
     // isolated M5 renderer source directory, so this must remain absolute.
