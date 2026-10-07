@@ -247,8 +247,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               </nav>
               <div className="m5-file-list">
                 {snapshot.tree.map((entry) => (
-                  <button key={entry.path} type="button" className="m5-file-row" data-kind={entry.kind} onClick={() => entry.kind === "file" ? void controller.openFile(entry.path) : entry.kind === "directory" ? void controller.loadTree(entry.path) : undefined} disabled={!admissionReady || entry.kind === "symlink"}>
-                    {entry.name}
+                  <button key={entry.path} type="button" className="m5-file-row" data-kind={entry.kind} aria-current={entry.kind === "file" && snapshot.activePath === entry.path ? "true" : undefined} title={entry.path} onClick={() => entry.kind === "file" ? void controller.openFile(entry.path) : entry.kind === "directory" ? void controller.loadTree(entry.path) : undefined} disabled={!admissionReady || entry.kind === "symlink"}>
+                    <span className="m5-file-glyph" aria-hidden="true">{entry.kind === "directory" ? "▸" : entry.kind === "symlink" ? "↗" : entry.name.includes(".") ? entry.name.split(".").pop()!.slice(0, 4).toUpperCase() : "—"}</span>
+                    <span className="m5-tree-name">{entry.name}</span>
                   </button>
                 ))}
               </div>
@@ -304,9 +305,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady}>{t("m5.editor.refresh")}</button>
               <div className="m5-change-list">
                 {snapshot.diffSummary?.entries.map((entry) => (
-                  <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" onClick={() => void controller.openDiff(entry.path)} disabled={!admissionReady}>
+                  <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" aria-current={snapshot.diffFile?.path === entry.path ? "true" : undefined} title={entry.path} onClick={() => void controller.openDiff(entry.path)} disabled={!admissionReady}>
                     <ChangeKind entry={entry} />
-                    <span>{entry.path}</span>
+                    <span className="m5-change-file"><strong>{entry.path.split("/").pop()}</strong><small>{entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "/"}</small></span>
                   </button>
                 ))}
                 {snapshot.diffSummary?.entries.length === 0 && <Empty text={t("m5.editor.noChanges")} />}

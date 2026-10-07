@@ -16,7 +16,7 @@
 
 > 오프라인 도구 격리 실측(2026-09-30): 사용자 승인된 설치 Codex/임시 profile·가짜 sentinel 시험에서 named permission 설정 조회까지 도달했으나 command/exec가 exit71, `sandbox-exec: sandbox_apply: Operation not permitted`로 실패했다. 현재 외부 deny-default 정책 아래 vendor 내부 sandbox 적용이 거절된 관측이며 인증 파일 차단 성공이나 macOS의 모든 중첩 정책 불가능성을 입증한 것은 아니다. 시험의 inline TOML 전달/JSONL 여러 줄 수신 오류는 수정했고 제품 정책·실제 실행 활성화는 변경하지 않았다. 다음은 공식 실행 경계와 격리 책임을 함께 재설계·검증하는 것이다.
 
-> 연결 설정의 점진적 표시: 공급자 로그인 상태가 오류 없는 connected이면 상세 조작을 접고 연결 요약과 `연결 관리`를 남긴다. 펼친 상태는 반복 status 조회에서 유지하고 새 connected 전환에서 다시 접는다. 연결 컴포넌트와 polling은 유지하며, 진행 중·미연결·복구 필요·조회 오류는 접을 수 없다. 이는 표시 정책일 뿐 실제 모델 실행 가능을 뜻하지 않는다.
+> 연결 설정의 점진적 표시: 공급자 선택/추가 영역은 처음에 펼쳐지고 선택을 저장하면 접힌 요약을 남기며 사용자가 다시 펼칠 수 있다. 선택 저장 실패는 접힌 상태에서도 표시한다. 공급자별 연결 컴포넌트는 이 영역 밖에서 계속 mount/polling한다. 로그인 상태가 오류 없는 connected이면 상세 조작을 접고 연결 요약과 `연결 관리`를 남긴다. 펼친 상태는 반복 status 조회에서 유지하고 새 connected 전환에서 다시 접는다. 진행 중·미연결·복구 필요·조회 오류의 연결 상세는 접을 수 없다. 이는 표시 정책일 뿐 실제 모델 실행 가능을 뜻하지 않는다.
 
 > 실제 실행 capability의 미관측 상태: 비활성 제품 adapter는 설치를 조사하지 않았으므로 `installationState: unknown`, `authState: unknown`, 빈 모델 목록·실행 파일 없음과 `canStart: false`를 반환한다. macOS 사유는 `capabilityUnknown`, 비지원 플랫폼은 `platformUnsupported`다. 로그인 사전 진단 성공으로 실행 capability를 승격하지 않는다. unknown은 공개 capability snapshot에만 추가한 값이며 실제 G5C 공급자 관측의 installation enum은 변경하지 않는다. Rust/TypeScript는 unknown의 인증·discovery 증거 주장을 거부하고 기존 fingerprint 검증을 유지한다. sidecar/renderer는 함께 배포하며 구형 renderer가 새 값을 거부하는 경우 fail-closed한다.
 
@@ -372,7 +372,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 - **실제 vendor 관측 파서**: `core/provider/vendor_observation.rs`는 Codex 0.149.1·Claude 2.1.269의 exact version과 모델 없는 인증 상태 응답만 읽는다. transient bounded input에서 계정/토큰을 제거한 분류만 반환하며 runtime·capability·영속 원장에는 아직 연결하지 않는다. config/model/handshake, 설정 격리와 launch authority는 별도 미구현이다. 이후 설치 CLI는 0.153.4로 변경됐으며 기존 exact version 허용을 자동 확대하지 않았다.
 - **로그인 schema 드리프트 검사**: `node scripts/m5-codex-login-schema.mjs <기준 생성 폴더> <후보 생성 폴더>`는 초기화·로그인/취소·계정 조회/알림 타입과 재귀 type import의 원문 해시를 비교한다. 종료 0은 이 범위의 원문 동일, 2는 검토 필요, 1은 비교 불가이며 전체 프로토콜/실행 호환 판정이 아니다. 0.149.1→0.153.4 대조는 20파일 중 Bedrock 인증 추가 2파일 변경으로 검토 필요다. 생성 입력은 로컬 임시 증거이며 이 도구가 CLI 실행·인증 조회를 하지는 않는다.
 
-- **작업대 배치 현행**: `src/m5/workbench-dock.tsx`는 파일·편집기·변경·팀 대화를 중첩 가로/세로 분할과 여러 탭 그룹으로 구성한다. 제목/tab을 가장자리에 놓으면 분할하고 가운데 놓으면 탭으로 묶으며 배치 선택 메뉴로도 같은 작업을 할 수 있다. 경계선 pointer/키보드 조절, 탭 좌우/Home/End 및 초점 이동을 지원한다. 검증된 트리를 기존 v1 localStorage에 추가 저장하며 이전 평면 배치를 계속 읽는다. 숨김/재배치 때 평면 keyed DOM을 유지해 Monaco를 재생성하지 않는다. 합성 Chromium smoke는 사용자 키보드와 분리된 숨김 창/CDP 입력으로 편집 복구와 후속 대화를 검사한다. 전체 승인 시안 적용 완료를 뜻하지 않는다.
+- **작업대 배치 현행**: `src/m5/workbench-dock.tsx`는 파일·편집기·변경·팀 대화를 중첩 가로/세로 분할과 여러 탭 그룹으로 구성한다. 새 기본은 파일/변경 탭·편집기·팀 대화의3열이며 기존 저장 배치는 보존한다. 초기화/프리셋/표시 조작은 펼칠 수 있는 배치 설정에 모았다. 제목/tab을 가장자리에 놓으면 분할하고 가운데 놓으면 탭으로 묶으며 배치 선택 메뉴로도 같은 작업을 할 수 있다. 경계선 pointer/키보드 조절, 탭 좌우/Home/End 및 초점 이동을 지원한다. 검증된 트리를 기존 v1 localStorage에 추가 저장하며 이전 평면 배치를 계속 읽는다. 숨김/재배치 때 평면 keyed DOM을 유지해 Monaco를 재생성하지 않는다. 다크 Monaco와 잔여 창 높이 기반 패널을 사용한다. 전체 승인 시안 적용 완료를 뜻하지 않는다.
 - **실제 CLI 최소 관측(2026-09-14)**: 빈 임시 폴더에서 Codex 0.149.1 app-server 초기화·config/account 조회·정상 종료와 Claude 2.1.269 인증 상태 조회를 확인했다. 모델 요청과 thread 생성은 없었다. 이 관측만으로 설정 격리·모델 가용성·실행 권위를 보장하지 않으며 제품 actual provider는 활성화하지 않았다.
 
 - **부분 RSS 관측 경계**: `m5:measure:renderer --memory`는 실제 Electron subtree의 RSS를 250ms 간격으로 관측한다. `f4def74`는 idle 약 409.73 MiB 및 한 회차 표시 지연으로 FAIL했다. 테스트 fixture의 idle 선할당을 분리한 `dfe12bd`는 idle/peak/60초 잔류 356.70/761.73/110.125 MiB와 GUI 시간 기준을 통과했다. 합성 bridge를 쓰며 실제 sidecar/agent·이탈 자손은 포함하지 않아 전체 제품 메모리 증거가 아니다. 이전 실패는 삭제하지 않는다.

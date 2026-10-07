@@ -7,16 +7,18 @@ import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginPro
 export function ProviderLogin({ disabled }: {disabled: boolean}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(readProviderSelection);
+  const [selectionExpanded, setSelectionExpanded] = useState(selected.length === 0);
   const [draft, setDraft] = useState<LoginProvider[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
   const select = (providers: LoginProvider[]) => {
     if (disabled) return;
     setSaveFailed(!saveProviderSelection(providers));
     setSelected(providers);
+    setSelectionExpanded(false);
   };
   return <>
-    <section className="m5-provider-selection" aria-label={t("m5.setup.agents.title")}>
-      <h2>{t("m5.setup.agents.title")}</h2>
+    <details className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
+      <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>
       <p>{t("m5.setup.agents.help")}</p>
       {selected.length === 0 ? <form onSubmit={event => { event.preventDefault(); if (draft.length) select(draft); }}>
         <fieldset disabled={disabled}>
@@ -32,7 +34,8 @@ export function ProviderLogin({ disabled }: {disabled: boolean}) {
         {LOGIN_PROVIDERS.filter(p => !selected.includes(p)).map(provider => <button key={provider} type="button" disabled={disabled} onClick={() => select([...selected,provider])}>{t("m5.setup.agents.add", {name: provider === "codex" ? "Codex" : "Claude Code"})}</button>)}
       </div>}
       {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    </section>
+    </details>
+    {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
     {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={provider} disabled={disabled} provider={provider}/>)}
   </>;
 }
