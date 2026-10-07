@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (재진입 편집 가시성 원인 분리·통합 UI 통과)
+
+- 기준c48922b. 직전 실패는 검증 진전이며 이번에는 저장 내용과 창 상태를 분리했다. DAUMOv의 원본/새 사본은9바이트, 편집 사본은28바이트로 보존돼 있었다. 재실행에서 Second task 시점 window.visible=true/minimized=false/focused=false, page.visibility=hidden, backgroundThrottling=false를 실제 관측했다. runner가 편집 화면 읽기 전에 창 show/focus를 다시 수행하자 원본 표시·사본 분리·최종 캡처가 통과했다. 제품 Monaco/보안/종료 구현은 변경하지 않았고 모든 환경에서 제품 렌더 결함이 없다는 증거로 확대하지 않는다.
+- 실제 통합 PASS/exit0: 시작 안내·목표 예시·설정 Escape/폐기/저장 재열기→편집 저장/diff→원본 반영→renderer reload→복원→두 채팅 전환. root /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-5pybyf, project.png 직접 확인(3열/선택 파일/편집 내용 표시). source 파일·사용자 계정은 합성이며 실제 공급자 모델 검증은 아니다.
+- runner에 가시성 및 renderer crash/error 진단을 남기고 console-message callback은 설치된 Electron 타입의 현행 event 인자를 사용하도록 정리했다. Karpathy 지침으로 검증의 포커스 조건만 고쳤다. 직전 TypeScript/renderer PASS 재사용, diff check 확인. 최근 메시지 스크롤 읽기 위치/설정 실패 주입·전체 시안 마감, 실제 계정·G6/Windows는 별도 잔여다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (화면 묶음 검증·재진입 편집 표시 실패)
 
 - 기준6318ff4. 최근 화면 변경을 묶어 TypeScript/renderer build를 진행했고 messages.at의 현행 lib 미지원 오류를 인덱스 접근으로 수정했다. 수정 후 둘 다 PASS(기존 Monaco chunk 크기 경고 유지). main/preload/native sidecar는 마지막 관련 변경1fbd276의 기존 산출물을 재사용했고 이번에 재빌드하지 않았다.

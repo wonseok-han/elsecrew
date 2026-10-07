@@ -9,6 +9,7 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 - `HELLO_AGENT_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트만 명시 확인 UI로 적용 후 복원한다.
 - 위 설정에 `HELLO_AGENT_SMOKE_RELOAD=1`을 함께 주면 적용 후 renderer reload→저장 프로젝트/채팅 재선택→복원 경로를 포함한다. 전체 앱 재시작 검증은 아니다.
 - 시작 화면의 빈 dock 부재, 목표 예시의 입력만 채우기/기존 초안 보호, 역할 설정 modal의 Escape→계속 편집→폐기·닫기/포커스 복원, 저장 후 재열기 및 원래 모델 복원도 같은 실행에서 확인한다. `START_AND_SETTINGS`는 중간 단계이며 마지막 PASS가 전체 시나리오 결과다. 저장 실패 주입과 메시지 스크롤은 별도 회귀가 필요하다.
+- 이 시각 검증은 앱 창을 표시하고 포커스를 가져온다. macOS에서는 window가 visible이어도 renderer가 hidden인 상태가 관측돼 Monaco 표시/캡처가 멈춘 적이 있어, 재진입 편집 전 창을 다시 활성화한다. `SECOND_CHAT_WINDOW`의 창/페이지 가시성 진단과 renderer 오류를 함께 기록한다. 제품의 background 정책은 변경하지 않는다.
 - PASS/FAIL JSON과 screenshot 경로를 출력하고 실패는 종료 코드1이다. 임시 프로젝트/userData는 성공·실패 모두 증거 확인을 위해 보존하며 자동 삭제하지 않는다. 이 실행은 실제 공급자·Windows·G6 합격을 대신하지 않는다.
 
 ## 실제 sidecar 시작 측정 절차

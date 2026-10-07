@@ -26,6 +26,8 @@ function finish(error, details) {
 }
 app.on('browser-window-created', (_event, window) => {
   window.webContents.setBackgroundThrottling(false);
+  window.webContents.on('render-process-gone', (_event, details) => console.log(JSON.stringify({stage:'RENDER_PROCESS_GONE',details})));
+  window.webContents.on('console-message', details => { if (details.level === 'error') console.log(JSON.stringify({stage:'RENDERER_ERROR',message:details.message})); });
   window.webContents.once('did-finish-load', async () => {
     const run = code => window.webContents.executeJavaScript(code);
     const clickText = (label, scope = 'body') => run(`Array.from(document.querySelectorAll(${JSON.stringify(scope + ' button')})).find(b=>b.textContent===${JSON.stringify(label)}&&!b.disabled)?.click()`);
@@ -147,6 +149,8 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`);
+      console.log(JSON.stringify({stage:'SECOND_CHAT_WINDOW',visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),backgroundThrottling:window.webContents.getBackgroundThrottling(),page:await run(`({visibility:document.visibilityState,focus:document.hasFocus()})`)}));
+      window.show(); window.focus(); window.webContents.focus();
       await showPanel('파일');
       await run(`Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('hello.txt')).click()`);
       await wait(`document.querySelector('.monaco-editor textarea')!==null`);
