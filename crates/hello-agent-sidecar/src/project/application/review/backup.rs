@@ -12,6 +12,7 @@ const MAX_ARCHIVE: u64 = MAX_BYTES + 32 * 1024 * 1024;
 const RESTORE_BUDGET: u64 = 5 * 1024 * 1024 * 1024;
 mod decode;
 mod budget_settings;
+pub(in crate::project) mod space;
 pub(in crate::project) mod cleanup;
 pub(in crate::project) mod retention;
 pub(in crate::project) mod staging;
@@ -230,6 +231,7 @@ fn create_inner(
     let source = manager.open_source_repository(&active.canonical_git_root)?;
     let baseline = capture_clean_baseline(manager, &source)?;
     receipt::verify_bound(manager, storage, &active, &baseline)?;
+    space::plan(manager, &plan)?;
     let budget = BudgetGuard::acquire_with(directory(manager)?, || budget_settings::read(manager))?;
     let dir = &budget._directory;
     let c = CString::new(name).map_err(|_| invalid())?;
@@ -397,6 +399,7 @@ fn recover_candidate(
     let mut total = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
+        manager.check_application_preparation()?;
         let n = file.read(&mut buffer).map_err(|_| invalid())?;
         if n == 0 {
             break;
@@ -408,7 +411,10 @@ fn recover_candidate(
         hash.update(&buffer[..n]);
     }
     file.rewind().map_err(|_| invalid())?;
-    let header = decode::validate_against(&mut std::io::BufReader::new(&mut file), baseline)?;
+    let (header, _) = decode::validate_inner(
+        &mut std::io::BufReader::new(&mut file), Some(baseline), None, false,
+        || manager.check_application_preparation(),
+    )?;
     if total != meta.len()
         || stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&meta) != stamp(&dir.symlink_metadata(name).map_err(|_| invalid())?)
@@ -496,21 +502,10 @@ fn verify_inner(
         return Err(invalid());
     }
     file.rewind().map_err(|_| invalid())?;
-    let (header, item) = if collect_all {
-        let (header, items) = decode::items(&mut std::io::BufReader::new(&mut file))?;
-        (header, Some(items))
-    } else {
-        match index {
-            Some(index) => {
-                let (header, item) = decode::item(&mut std::io::BufReader::new(&mut file), index)?;
-                (header, Some(item))
-            }
-            None => (
-                decode::validate(&mut std::io::BufReader::new(&mut file))?,
-                None,
-            ),
-        }
-    };
+    let (header, item) = decode::validate_inner(
+        &mut std::io::BufReader::new(&mut file), None, index, collect_all,
+        || manager.check_application_preparation(),
+    )?;
     if stamp(&meta) != stamp(&file.metadata().map_err(|_| invalid())?)
         || stamp(&meta) != stamp(&dir.symlink_metadata(&backup.name).map_err(|_| invalid())?)
     {

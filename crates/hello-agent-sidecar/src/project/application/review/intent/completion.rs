@@ -203,6 +203,7 @@ pub(in crate::project) fn begin_restore(
         return Err(invalid());
     }
     verify_batch(manager, storage, project_id, expected, true)?;
+    backup::space::intent(manager, expected, true)?;
     transition(
         storage,
         project_id,

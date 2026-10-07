@@ -63,37 +63,43 @@ fn image(value: &Value) -> Result<(), ProjectFailure> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate(input: &mut impl BufRead) -> Result<Value, ProjectFailure> {
-    validate_inner(input, None, None, false).map(|(header, _)| header)
+    validate_inner(input, None, None, false, || Ok(())).map(|(header, _)| header)
 }
 
 // Retain only one bounded metadata frame; never expose it before EOF and the
 // complete changes digest have passed. Payload bytes are validated, not retained.
+#[cfg(test)]
 pub(super) fn item(input: &mut impl BufRead, index: u64) -> Result<(Value, Value), ProjectFailure> {
-    let (header, selected) = validate_inner(input, None, Some(index), false)?;
+    let (header, selected) = validate_inner(input, None, Some(index), false, || Ok(()))?;
     Ok((header, selected.ok_or_else(invalid)?))
 }
 
 // Metadata only, with the same 32 MiB serialized budget and 100,000 item limit.
 // Nothing escapes before all payload hashes and final EOF/digest validate.
+#[cfg(test)]
 pub(super) fn items(input: &mut impl BufRead) -> Result<(Value, Value), ProjectFailure> {
-    let (header, selected) = validate_inner(input, None, None, true)?;
+    let (header, selected) = validate_inner(input, None, None, true, || Ok(()))?;
     Ok((header, selected.ok_or_else(invalid)?))
 }
 
+#[cfg(test)]
 pub(super) fn validate_against(
     input: &mut impl BufRead,
     baseline: &SourceInventory,
 ) -> Result<Value, ProjectFailure> {
-    validate_inner(input, Some(baseline), None, false).map(|(header, _)| header)
+    validate_inner(input, Some(baseline), None, false, || Ok(())).map(|(header, _)| header)
 }
 
-fn validate_inner(
+pub(super) fn validate_inner(
     input: &mut impl BufRead,
     baseline: Option<&SourceInventory>,
     selected_index: Option<u64>,
     collect_all: bool,
+    mut check: impl FnMut() -> Result<(), ProjectFailure>,
 ) -> Result<(Value, Option<Value>), ProjectFailure> {
+    check()?;
     let mut metadata_budget = 32 * 1024 * 1024;
     let mut content_budget = MAX_BYTES;
     let mut path_budget = 8 * 1024 * 1024usize;
@@ -129,6 +135,7 @@ fn validate_inner(
         None
     };
     for index in 0..count {
+        check()?;
         let item = line(input, &mut metadata_budget)?;
         object(&item, &["path", "before", "after"])?;
         let path = item["path"].as_str().ok_or_else(invalid)?;
@@ -178,6 +185,7 @@ fn validate_inner(
             let mut remaining = size;
             let mut buffer = [0u8; 65536];
             while remaining != 0 {
+                check()?;
                 let n = remaining.min(buffer.len() as u64) as usize;
                 input.read_exact(&mut buffer[..n]).map_err(|_| invalid())?;
                 if kind == 3 && buffer[..n].contains(&0) {
@@ -209,6 +217,7 @@ fn validate_inner(
             selected = Some(item);
         }
     }
+    check()?;
     if !input.fill_buf().map_err(|_| invalid())?.is_empty()
         || <[u8; 32]>::from(changes.hash.finalize()) != expected
     {
@@ -258,6 +267,43 @@ mod tests {
 
     fn valid(bytes: &[u8]) -> bool {
         validate(&mut std::io::Cursor::new(bytes)).is_ok()
+    }
+
+    #[test]
+    fn cancellation_stops_each_decoder_mode_before_exposing_partial_results() {
+        let (mut item, _) = fixture();
+        let payload = vec![b'x'; 256 * 1024];
+        item["before"]["size"] = json!(payload.len());
+        item["before"]["digest"] = json!(<[u8; 32]>::from(Sha256::digest(&payload)));
+        let bytes = archive(&[(item, payload)]);
+        for (index, collect) in [(None, false), (Some(0), false), (None, true)] {
+            // Header, frame, four payload chunks, and final EOF check.
+            for cancel_at in 1..=7 {
+                let mut input = std::io::Cursor::new(&bytes);
+                let mut checks = 0;
+                let result = validate_inner(&mut input, None, index, collect, || {
+                    checks += 1;
+                    if checks == cancel_at {
+                        Err(ProjectFailure::recovery("canceled during archive decode"))
+                    } else {
+                        Ok(())
+                    }
+                });
+                assert_eq!(result.unwrap_err().detail, "canceled during archive decode");
+                assert_eq!(checks, cancel_at);
+                if cancel_at < 7 {
+                    assert!(input.position() < bytes.len() as u64);
+                }
+            }
+            assert!(validate_inner(
+                &mut std::io::Cursor::new(&bytes),
+                None,
+                index,
+                collect,
+                || Ok(())
+            )
+            .is_ok());
+        }
     }
 
     #[test]

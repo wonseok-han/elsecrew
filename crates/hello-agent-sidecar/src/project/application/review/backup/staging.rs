@@ -114,6 +114,7 @@ fn prepare_inner(
         return Err(invalid());
     }
     let name = format!("backup_{}.bin", Uuid::new_v4().simple());
+    space::plan(manager, &plan)?;
     let header = json!({"version":2,"reviewId":review_id,"binding":plan.binding,"changesDigest":plan.digest,"count":plan.changes.len()});
     let pending = json!({"version":1,"state":"preparing","name":name,"header":header});
     write_record(

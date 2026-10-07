@@ -617,6 +617,7 @@ pub(in crate::project) fn mark_write_started(
     {
         return Err(invalid());
     }
+    backup::space::intent(manager, expected, false)?;
     let id = expected["applicationId"].as_str().ok_or_else(invalid)?;
     let lock_id = expected["lockId"].as_str().ok_or_else(invalid)?;
     let mut project = required_project(storage, project_id)?;

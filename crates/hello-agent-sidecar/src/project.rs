@@ -553,7 +553,10 @@ impl ProjectManager {
             // Failure leaves the durable application fence for explicit recovery;
             // never infer completion from dropping the session owner.
             let Some(canceled) = self.application_cancel.flag() else { return; };
-            match owner.advance(self, storage, &canceled) {
+            let previous_cancel = self.preparation_cancel.replace(canceled.clone());
+            let outcome = owner.advance(self, storage, &canceled);
+            self.preparation_cancel = previous_cancel;
+            match outcome {
                 Ok(false) => self.application_job = Some(owner),
                 Ok(true) => {},
                 Err(failure) => {

@@ -825,14 +825,25 @@ fn application_two_file_roundtrip(cancel_tail: bool, lost_phase: Option<&str>) {
         "req_multi_restore_without_lock"
     )
     .is_err());
-    let second = intent::completion::begin_restore(
+    let before_restore = required_project(&f.storage, &f.project_id).unwrap();
+    application::review::backup::space::with_free_space(0, || {
+        assert!(intent::completion::begin_restore(
+            &f.manager, &mut f.storage, &f.project_id, &second, "req_restore_no_space"
+        ).is_err());
+    });
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before_restore);
+    assert_eq!(fs::read(f.source.join("src/new.txt")).unwrap(), b"second-addition");
+    let second = application::review::backup::space::with_free_space(
+        SNAPSHOT_DISK_RESERVE_BYTES_V1 + 2 * 64 * 1024,
+        || intent::completion::begin_restore(
         &f.manager,
         &mut f.storage,
         &f.project_id,
         &second,
         "req_multi_relock",
-    )
+    ))
     .unwrap();
+    assert_eq!(fs::read(f.source.join("src/new.txt")).unwrap(), b"second-addition");
     assert_eq!(second["state"], "applying");
     assert!(intent::previous_regular_item(
         &f.manager,
@@ -1278,6 +1289,18 @@ fn application_write_boundary_survives_restart_and_cannot_be_abandoned() {
             &review_id,
         )
         .unwrap();
+    let before_backup = required_project(&f.storage, &f.project_id).unwrap();
+    application::review::backup::space::with_free_space(0, || {
+        assert!(owner.prepare_backup(
+            &f.manager, &mut f.storage, &token, "req_backup_no_space"
+        ).is_err());
+    });
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before_backup);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    // A failed attempt consumes the confirmation; retry requires fresh consent.
+    let (token, _) = owner.open(
+        &f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id
+    ).unwrap();
     let grant = owner
         .prepare_backup(&f.manager, &mut f.storage, &token, "req_write_backup")
         .unwrap();
@@ -1292,6 +1315,23 @@ fn application_write_boundary_survives_restart_and_cannot_be_abandoned() {
     let before_project = required_project(&f.storage, &f.project_id).unwrap();
     let lock_id = prepared["lockId"].as_str().unwrap();
     let before_lock = f.storage.projection_record("lock", lock_id).unwrap();
+    let source_before = fs::read(f.source.join("src/edit.txt")).unwrap();
+    f.manager.preparation_cancel = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)));
+    assert!(intent::mark_write_started(
+        &f.manager, &mut f.storage, &f.project_id, &prepared, "req_write_canceled"
+    ).is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before_project);
+    assert_eq!(f.storage.projection_record("lock", lock_id).unwrap(), before_lock);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), source_before);
+    f.manager.preparation_cancel = None;
+    application::review::backup::space::with_free_space(0, || {
+        assert!(intent::mark_write_started(
+            &f.manager, &mut f.storage, &f.project_id, &prepared, "req_write_no_space"
+        ).is_err());
+    });
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before_project);
+    assert_eq!(f.storage.projection_record("lock", lock_id).unwrap(), before_lock);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), source_before);
     let backup_path = f
         .manager
         .data_root
@@ -1337,13 +1377,15 @@ fn application_write_boundary_survives_restart_and_cannot_be_abandoned() {
         .connection_for_test()
         .execute_batch("DROP TRIGGER fail_writing;")
         .unwrap();
-    let applying = intent::mark_write_started(
+    let applying = application::review::backup::space::with_free_space(
+        SNAPSHOT_DISK_RESERVE_BYTES_V1,
+        || intent::mark_write_started(
         &f.manager,
         &mut f.storage,
         &f.project_id,
         &prepared,
         "req_write_start",
-    )
+    ))
     .unwrap();
     assert_eq!(applying["state"], "applying");
     let db = f.manager.data_root.join("hello-agent.sqlite3");

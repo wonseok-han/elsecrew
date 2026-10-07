@@ -1,5 +1,27 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (공간 중복 청구 수정·적용 복구 회귀)
+
+- 직전 공간 검사 연결은 구현 진전이었다. 독립 검토에서 기존 archive 32MiB 재청구 및 source before 이미지의 이중 청구를 지적받아 수정했다. 신규 백업만 before payload를 청구하고, 적용은 after staging+entry, 복구는 rename entry만 계산한다. 이미 존재하는 backup에는 reserve만 확인한다. 기존 원본/백업을 복사하는 것으로 가정하지 않는다.
+- application_ 최초27 PASS/1 FAIL은 신규 테스트의 이미 소비된 confirmation token 재사용이었다. 새 사용자 확인을 재생성하도록 회귀를 수정했으며 제품 single-use 규칙은 유지했다. 최종 application_28 PASS(55.05초), 공간/취소를 포함한 backup 모듈11 PASS(0.03초, 중복 청구 수정 전), 중복 청구 수정 뒤 reserve 경계의 적용·복구 입장 회귀는 최종28개에 포함된다. 관련 파일 diff 검사 통과. 기존 통과 검사를 무변경 반복하지 않았다.
+- 동일 검토자에게 수정 재검토를 요청했다. 원본 쓰기는 아직 비활성이다. 다음은 재검토 결과 반영 및 macOS 실제 적용·복구 UI 검증/연결이며 전체 앱/실제 계정/Windows/G6 완료는 아니다. 기존 archive 변경 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (원본 적용·복구 공간 검사 연결)
+
+- 직전은 상태 설명만 한 턴이며 이번에는 구현을 재개했다. 준비 전 immutable plan에서 before archive와 before/after staging을 합산하고 실제 부모 capability의 device별 여유와 512MiB reserve를 확인한다. 준비 기록 전/백업 생성 전 검사, 검증된 archive 기반 applying/restore 진입 재검사, 개별 write/restore 직전 검사를 연결했다. 이는 실제 공간 예약이나 외부 동시 소비 방지가 아니다.
+- Karpathy 지침에 따라 기존 경로/원장/취소 보호를 재사용했다. 취소 범위 독립 검토는 차단 없음으로 완료됐고 같은 검토자에게 공간 검사 범위를 추가 요청했다. thread-local 시험 전용 여유공간 주입으로 저용량 준비/쓰기 거절과 원본/원장 불변 회귀를 추가했다. 쓰기 거절 포함 focused1 PASS(7.77초); 그 뒤 추가한 준비 거절을 포함한 application_ 누적 검사는 실행 중이며 아직 합격으로 기록하지 않는다.
+- 제품 source_writes_enabled=false 유지. 공간 검토·누적 회귀 결과 반영, 복구/저용량 추가 경로와 실제 적용 UI 검증이 다음이다. 변경은 아직 미커밋이며 기존 9월 archive 변경 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (전체 진척 재확인)
+
+- 사용자 진척 질문에 HEAD 7d6c448과 현재 변경을 다시 확인했다. 실제 합성 UI의 프로젝트·채팅 전환·편집/저장·diff·재시작 보존은 확인했지만 원본 적용/복구는 제품에서 아직 비활성이고 실제 계정/모델 전체 흐름·시안 마감·Windows/G6/출시는 미완료다. 기초 내부 검증을 제품 완료처럼 전달하지 않는다.
+- 직전 기록 이후 취소 전파/decoder 회귀와 디스크 공간 검사 모듈 및 일부 호출부가 미커밋으로 추가됐다. 취소 범위 독립 정적 검토는 차단 발견 없음으로 종료했으며 공간 검사는 그 검토 범위 밖이다. 최신 cargo check --tests는 통과했으나 공간 검사 연결·회귀/통합 검증은 남았다. 이번 응답에서는 새 구현·시험·커밋 없이 상태만 확인했다. 기존 9월 archive 변경 보존, main 병합/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (사용자 요청 현재 진척 설명)
+
+- 사용자가 장기 지연과 전체 진척을 질문해 실제 HEAD7d6c448/워킹 트리/생성자를 재확인했다. 작업대 프로젝트·채팅·편집/저장/diff·재시작 흐름은 합성 실제 UI에서 통과했으나 원본 쓰기는 source_writes_enabled=false다. macOS native provider 연결 코드는 있지만 실제 계정/모델 end-to-end, 원본 적용/복원 UI, Windows/G6/출시 판정은 미완료다. 전체 완료율/완료 ETA를 추정 사실로 제공하지 않는다.
+- 현재 미커밋 구현은 archive 취소 검사와 원장/원본 보존 회귀4파일이며 별도 disk-free/staging admission은 아직 구현 전이다. 이전 집중 시험 핸들36693은 missing이라 신규 회귀 PASS로 인용하지 않는다. 기존 application_28 PASS 로그는 마지막 추가 회귀 전 증거다. 이전 검토자 세션이 없어 상시 승인된 단1명 application_cancel_review로 읽기 전용 검토를 이어갔다. 사용자 상태 질문에 답하며 신규 구현은 추가하지 않았다. 기존 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (원본 반영 활성화 전 차단 발견)
 
 - 기준 81e7db3. 실행 중인 기존 독립 검토자 claude_activation_review가 원본 쓰기 활성화 전 실제 볼륨 여유공간 검사 누락을 확인했다. backup 총량 예산은 있지만 available_space/512MiB reserve는 snapshot 생성에서만 사용된다. ENOSPC 후 잠금/자료 보존은 사전 공간 확보 요구를 대체하지 않는다. source_writes_enabled=false를 유지한다.
@@ -128,7 +150,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **원본 writer 활성화 차단(2026-10-07)**: backup 예산은 실제 disk-free/staging 여유 검사와 다르다. 현재 사전 디스크 여유 검사는 snapshot 생성에만 있어, backup/source 볼륨 양쪽의 반영/복원 공간 admission과 archive 재검증 취소 응답을 점검해야 한다. 내부 통합38 PASS만으로 source_writes_enabled를 켜지 않는다.
+- **원본 writer 활성화 전 검사(2026-10-07)**: backup 예산과 disk-free/staging 여유를 분리했다. 준비 전 신규 archive와 after staging의 device별 합산/reserve 검사, 적용·복구 입장/개별 쓰기 재검사 및 archive 재검증의 취소 검사를 구현했다. before는 source에서 rename하므로 새 payload로 중복 청구하지 않고 기존 archive도 재청구하지 않는다. application28 회귀 PASS, 공간 수정 독립 재검토와 실제 UI 검증은 남아 source_writes_enabled=false다.
 - **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.
 - **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
 - **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.

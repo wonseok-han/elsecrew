@@ -402,6 +402,7 @@ pub(in crate::project) fn restore_first_regular_item(
         return Err(invalid());
     }
     directories::verify(&dir, &leaf, expected, expected, true, true)?;
+    backup::space::writer_parent(&dir, 0)?;
     let current = if j["phase"] == "applied" {
         j["phase"] = json!("restoring");
         publish(storage, project_id, expected, j.clone(), request)?
@@ -416,6 +417,7 @@ pub(in crate::project) fn restore_first_regular_item(
         return Err(invalid());
     }
     directories::verify(&dir, &leaf, &current, &current, true, true)?;
+    backup::space::writer_parent(&dir, 0)?;
     let target = CString::new(leaf.as_str()).map_err(|_| invalid())?;
     let saved =
         CString::new(j["retainedName"].as_str().ok_or_else(invalid)?).map_err(|_| invalid())?;
@@ -566,6 +568,7 @@ pub(super) fn write_item_cancellable(
     let path = item["path"].as_str().ok_or_else(invalid)?;
     let (dir, leaf) = parent(&root, path)?;
     let parent_identity = dir.dir_metadata().map_err(|_| invalid())?;
+    backup::space::writer_parent(&dir, item["after"]["size"].as_u64().unwrap_or(0))?;
     let retained = format!(".hello-agent-apply-{}", Uuid::new_v4().simple());
     let mut journal = json!({"version":1,"phase":"reserved","retainedName":retained,
         "rootIdentity":[root_identity.dev(),root_identity.ino()],
