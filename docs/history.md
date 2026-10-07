@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (할당 샘플 실측·초기화 순서 수정)
+
+- 기준6b98e3f+진단 미커밋. 요약기2개 회귀 PASS. 첫 session8314는 초기 about:blank에서 HeapProfiler.startSampling 대기 중120초 timeout/FAIL(09:36:13-20285 보고서)했다. 신규 합성 문서 loadURL 완료 후 샘플러를 시작하도록 옮긴 session85131은 전체 trial/60초 대기 수집을 완료했다. 첫 bootstrap 할당은 수집 전임을 제한에 명시했다.
+- 증거 .artifacts/m5-performance/renderer-2026-10-07T09-38-51.399Z-24652.json, exit1/FAIL/gateEligible false. idle433799168/peak715423744/retained112721920 bytes, 실패 idleRssBytes. 작업 시점 live sample약28MB의 큰 항목은 node:buffer byteLength와 join 각약10MB, Monaco _constructLines/_ensureValid 각약0.9MB. 정리 뒤 live sample약1.7MB다. live sample은 전체 heap/RSS/retained size가 아니며 join의 호출 조상은 현재 요약에 없어 제품·fixture 원인을 단정하지 않는다.
+- 계측 없는 이전 peak FAIL을 이 실행으로 대체하지 않는다. sampler overhead/GC 영향과 합성 bridge를 감안해야 하며 임의 데이터 축소·기준 완화는 하지 않았다. 수집 도구와 증거를 커밋해 후속 중복 조사를 줄인다. 실제 provider 호출0회, 승인 대기 유지, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (합성 renderer 할당 샘플링 후보)
+
+- 기준6b98e3f, 이전 메모리 정정 기록/9월 archive를 보존. CDP 공식 js_protocol.pdl의 HeapProfiler startSampling/getSamplingProfile 기본 live-object 계약을 확인하고 --heap-sampling을 diagnostic+memory 전용으로 추가했다. 제품 창/실제 계정이 아닌 기존 합성 renderer만 대상이며 gateEligible false 경계를 유지한다.
+- 64KiB 평균 샘플·깊이32, checkpoint별 상위50개 호출 위치와 selfSize 합계·생략 수를 저장한다. 원문 객체·힙 덤프·강제 GC는 수집하지 않는다. 10만 노드 한도와 exclusive 합계/행 한도 회귀를 추가했다. 원인 규명 완료가 아니며 실제 profiler 실행은 다음 단계다. 적용 중 문서 문맥 불일치 patch는 무변경 실패 후 정확한 문맥으로 재적용했다.
+- 다음: 샘플 결과로 큰 할당 위치 분리, 실제 연결 승인 항목과 최종 gate. diff 검사만 수행하고 성능 개선·실행 합격을 주장하지 않는다. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (메모리 기존 증거 재대조)
+
+- 기준6b98e3f, 기존9월 archive만 dirty. 직전 저장 분할 최적화와 RSS 실패를 혼동하지 않도록 기존10월7일 보고서를 비교했다. 최신 renderer-2026-10-07T07-10-36.202Z-18055.json의 memory.maxima는 idle426557440/peak927318016/retained13926400 bytes(약406.8/884.4/13.3MiB)다. 고정 요약의 이전428/944/51MiB 수치를 정정한다. idle/peak 실패는 유지한다.
+- DOM 계측 보고서06:42:03에서는 반복 load 중 documents3→21 등 증가했지만 마지막60초 대기 뒤 documents1/listeners146/nodes121로 감소한다. 최신07:10 보고서는 DOM counters 미포함이며 현재 문서 nodes3216→57, heap약90MB→15MB를 기록한다. 두 서로 다른 실행을 하나의 증거로 합치거나 영구 누수 부재/성능 합격으로 단정하지 않는다.
+- bootstrap.tsx의 non-bfcache pagehide root.unmount와 Monaco effect cleanup은 이미 구현돼 있다. 같은 정리를 재추가하지 않았다. 다음 조사는 살아 있는 객체 보유와 GC/할당기 잔류를 구분하는 계측이 필요하며, 근거 없이 GC 강제·기준 완화·기능 축소로 PASS를 만들지 않는다. 실제 연결 승인 대기·최종 gate 미완료는 유지한다. 새 앱/모델 실행0회, diff 검사만 수행, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (큰 파일 저장 분할 할당 감소)
 
 - 기준585bea4. 기존 renderer-2026-10-07T07-10-36.202Z-18055.json을 재검토해 idle/peak RSS 실패와 renderer 증가를 확인했으나 전체 메모리 원인은 아직 미확정이다. 별도 코드 조사로 splitUtf8 저장 전처리가 문자마다 TextEncoder 배열을 할당하고 문자열을 이어 붙이는 비용을 발견했다.
@@ -96,7 +114,7 @@
 
 - **실계정 연결 재검증(2026-10-07, 415a155 시점)**: 두 provider의 앱 전용 로그인은 connected이나 실제 작업 준비는 실패한다. 최신 Codex는 선택 모델의 catalog 부재, Claude는 runtime 특수 파일 거절로 목표 전달 전에 중단된다. login 성공을 실행 성공으로 취급하지 않는다. 승인된 모델 목표는 아직0회이며 임시 원본은 불변이다. 최신 시험 session60083은 shutdown accepted/exit1(연결 FAIL)로 정상 종료했고 main 산출물에도 반복 unavailable 알림 억제가 반영됐다. 이전 초기화·잔류 창 기록은 당시 상태다.
 
-- **현재 M5 마감 상태(2026-10-07, 5209128 이후)**: macOS 합성 실제 UI에서 시작 안내/설정 저장·재열기/두 채팅·편집·diff/원본 반영·renderer reload·복원 PASS. 파일 목록은120행 가상화, 설정 modal/첫 목표/최신 대화 따라가기는 연결됐으나 전체 시안 마감과 실제 모델 종단 검증·Windows/G6/출시는 미완료다. 편집기 dispose는 미완료 stream을 끝내고 늦은 descriptor를 무시한다. 최신 synthetic 메모리 idle428/peak944MiB는 FAIL,60초 잔류delta51MiB는 기준 이내며 heap 감소만으로 누수 여부를 단정하지 않는다. 아래 과거 실측보다 이 최신 상태를 우선한다.
+- **현재 M5 마감 상태(2026-10-07, 5209128 이후)**: macOS 합성 실제 UI에서 시작 안내/설정 저장·재열기/두 채팅·편집·diff/원본 반영·renderer reload·복원 PASS. 585bea4에서 별도 앱 프로세스 정상 재시작 후 두 채팅의 저장 파일 분리와 원본 불변도 확인했다. 파일 목록은120행 가상화, 설정 modal/첫 목표/최신 대화 따라가기는 연결됐으나 전체 시안 마감과 실제 모델 종단 검증·Windows/G6/출시는 미완료다. 편집기 dispose는 미완료 stream을 끝내고 늦은 descriptor를 무시한다. 최신07:10 synthetic 메모리 idle406.8/peak884.4MiB는 FAIL,60초 잔류delta13.3MiB는 기준 이내며 heap 감소만으로 누수 여부를 단정하지 않는다. 아래 과거 실측보다 이 최신 상태를 우선한다.
 
 - **macOS 원본 writer 활성화(2026-10-07)**: 신규 archive/after staging의 device별 disk-free reserve, 순차 rename 복구 allowance, 쓰기 직전 재검사 및 archive 취소 검사를 연결했다. 공간·취소 독립 차단은 해소했고 macOS source_writes_enabled=true다. 합성 실제 UI의 편집→diff→원본 반영→복원→두 채팅 전환 PASS. 삭제/기록 정리는 별도 application_cleanup_enabled=false이며 실제 계정/사용자 프로젝트·Windows/출시 합격과 구분한다.
 - **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.

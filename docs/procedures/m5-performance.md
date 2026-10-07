@@ -1,5 +1,7 @@
 # M5 성능 측정
 
+`--diagnostic --memory --heap-sampling`은 합성 renderer에만 CDP 할당 샘플러를 붙인다. 평균64KiB 간격·깊이32로 수집하고 checkpoint마다 살아 있는 할당의 상위50개 호출 위치와 전체 샘플 크기를 기록한다. [공식 HeapProfiler 계약](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/js_protocol.pdl)의 기본 live-object 모드이며 GC 강제·힙 스냅샷은 호출하지 않는다. 샘플 크기는 RSS나 retained size가 아니며 minified 함수명/번들 위치의 추가 분석이 필요하다. 계측 오버헤드가 있으므로 정식 성능 PASS 근거로 사용할 수 없다.
+
 합격선은 `../proposals/m5-electron-spike.md` §10이다. 다음 도구는 로컬 개발 측정용이며 전체 G6 완료를 뜻하지 않는다.
 
 ## 실제 프로젝트 UI 회귀 (성능 측정과 별도)

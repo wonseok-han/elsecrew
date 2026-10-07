@@ -5,6 +5,7 @@ const { pathToFileURL } = require("node:url");
 const { mkdirSync, writeFileSync, mkdtempSync } = require("node:fs");
 const { spawnSync, execFile } = require("node:child_process");
 const { processTreeMemory, summarizeMemory } = require("../scripts/m5-process-memory.cjs");
+const { summarizeHeapSampling } = require("../scripts/m5-heap-sampling.cjs");
 const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { cpus, totalmem, release, tmpdir } = require("node:os");
@@ -18,6 +19,7 @@ let timeout;
 const measureMemory = process.env.M5_MEASURE_MEMORY === "1";
 const diagnostic = process.env.M5_MEASURE_DIAGNOSTIC === "1";
 const domCounters = process.env.M5_MEASURE_DOM_COUNTERS === "1";
+const heapSampling = process.env.M5_MEASURE_HEAP_SAMPLING === "1";
 const memorySamples = [];
 let memoryPhase = "idle";
 let memoryTimer;
@@ -77,6 +79,7 @@ async function memoryCheckpoint(label) {
   // replace the existing process-tree gate or trigger garbage collection.
   report.memory.checkpoints.push({ label, elapsedMs: performance.now(),
     ...(domCounters ? { domCounters: await window.webContents.debugger.sendCommand("Memory.getDOMCounters") } : {}),
+    ...(heapSampling ? { liveAllocationSample: summarizeHeapSampling((await window.webContents.debugger.sendCommand("HeapProfiler.getSamplingProfile")).profile) } : {}),
     main: process.memoryUsage(),
     processes: app.getAppMetrics().map(({ pid, type, name, memory }) => ({ pid, type, name, memory })),
     renderer: await window.webContents.executeJavaScript(`({
@@ -105,15 +108,21 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(asset).href);
   });
   window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload: resolve(__dirname, "m5-renderer-performance-preload.cjs"), contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false } });
-  if (domCounters) {
-    if (!diagnostic || !measureMemory) throw new Error("DOM counters are diagnostic memory observations only");
+  if (domCounters || heapSampling) {
+    if (!diagnostic || !measureMemory) throw new Error("Profiler observations require diagnostic memory mode");
     window.webContents.debugger.attach("1.3");
-    report.limitations.push("DevTools Memory.getDOMCounters attached for attribution; not comparable to an uninstrumented release measurement. No leak preparation, cache purge or forced GC.");
+    report.limitations.push("DevTools attached for memory attribution; not comparable to an uninstrumented release measurement. No leak preparation, cache purge or forced GC.");
   }
   window.webContents.on("render-process-gone", (_event, details) => finish(new Error(details.reason)));
   if (measureMemory) {
     report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples, checkpoints: [], attributionNote: "Checkpoint V8 heap is approximate; Chromium working set and V8 heap are not additive to RSS. No forced GC." };
     await window.loadURL("m5perf://m5/index.html");
+    if (heapSampling) {
+      // The initial about:blank target may not have a live renderer isolate.
+      // Start only after navigation has created the synthetic document.
+      await window.webContents.debugger.sendCommand("HeapProfiler.startSampling", { samplingInterval:65536, stackDepth:32 });
+      report.limitations.push("HeapProfiler live-allocation sampling at 64KiB interval, depth32; top50 callsites per checkpoint. Not retained-size, RSS, or proof of a leak; profiler overhead included. Initial document bootstrap precedes sampling. No heap snapshot or collectGarbage command.");
+    }
     await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
       const deadline = performance.now() + 10000;
       const check = () => { if (document.querySelector('.m5-workbench')) resolve(); else if (performance.now() > deadline) reject(new Error('idle UI missing')); else setTimeout(check, 10); }; check();
