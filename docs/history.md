@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실제 프로젝트·채팅·편집 저장 흐름 복구)
+
+- 기준 897d77e. 임시 Git 프로젝트와 격리 userData에서 실제 Electron main/preload/renderer+native sidecar로 프로젝트 선택 → 새 채팅 → Monaco 편집 → 저장 → 변경 목록을 검사했다. picker 반환 경로만 합성 폴더로 고정했으며 실제 계정/모델·사용자 프로젝트는 사용하지 않았다.
+- 실제 흐름에서 세 연결 결함을 수정했다: 루트 tree의 빈 parentPath를 preload가 잘못 거절하던 문제, 전체 ChatRecord를 exact workspace 주소로 보관하던 문제, workspace save chunk/commit 응답의 saveId 누락. Karpathy 지침에 따라 기존 검사/원본 보호는 유지하고 정확한 입력·응답만 보완했다. V2 저장 응답은 그대로다. 기존 독립 검토자 1명이 각 수정 정적 검토에서 차단 결함 없음으로 보고했다.
+- root 경로 validator 1 PASS, workspace editor 7 PASS, Rust 교차 채팅 저장 거절+exact chunk/commit 응답 1 PASS(1.69초), sidecar build·tsc·diff check PASS. preload/renderer 수정 빌드 후 최종 실제 UI smoke PASS/정상 종료: /private/tmp/hello-agent-project-ui-XJwJZ1/project.png. 저장된 snapshot 내용과 원본 original 불변, 변경1건을 확인했다. 초기 입력 스크립트의 전체 선택 실패는 제품 결함이 아니며 삽입 검증으로 정정했다. 프로토콜 오류로 종료 확인에 남은 자체 격리 시험 앱 두 PID만 정리했다.
+- 다음: 저장 후 파일 감시가 자신의 저장을 외부 변경으로 안내하는 현상 조사, diff 상세·채팅 재열기·적용/복구 흐름 검증. 현재 저장 성공 화면에 외부 변경 안내가 남으므로 UX 전체 완료라고 하지 않는다. 실제 공급자 계정/모델·Windows·G6/출시 검증도 별도다. main/push 없음, 기존 9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (native 연결 후 통합 검사·시작 안내 수정)
 
 - 기준 2a524a7. 직전 턴은 macOS 제품 native 연결 진전이다. npm test 전체 431개 중 430 PASS/1 FAIL(25.39초); 유일 실패는 패키지 smoke의 예전 blocked product 목록을 요구하는 source assertion이었다. macOS native/다른 플랫폼 product 선택을 정확 검사하도록 갱신하고 해당 scaffold 5 PASS를 확인했다. 전체를 반복 실행하지 않았다.
@@ -94,6 +101,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **실제 편집 IPC 정합성(2026-10-07)**: tree 루트 빈 경로만 허용하고 파일 경로의 빈 값/탈출은 계속 거절한다. ChatRecord에서 IPC workspace 주소 네 필드만 추출해야 하며 workspace 저장 chunk/commit은 V2와 달리 saveId를 응답해야 한다. 격리 실제 UI에서 편집·저장·diff 목록/원본 불변 확인; 자신의 저장 후 외부 변경 안내가 남는 감시 UX는 후속이다.
 
 - **macOS native 제품 연결(2026-10-07)**: 일반 --stdio의 전역 blocked를 macOS에서 해제하고 scoped native dispatcher를 선택한다. 시작별 입장·관측·도구 승인·종료/복구 검사는 유지하며 비-macOS G4 차단은 유지한다. native capability는 fixture와 독립된 고정 목록이다. 이전 비활성 기록은 당시 상태이며 현재 코드 연결/무계정 stdio 검증과 실제 계정/모델·패키지/UI 합격은 구분한다.
 

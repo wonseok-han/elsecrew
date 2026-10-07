@@ -108,7 +108,7 @@ function exact(value: unknown, keys: readonly string[]): Record<string, unknown>
 }
 function id(value: unknown, name: string): string { return string(value, name, 512); }
 function string(value: unknown, name: string, max = Number.MAX_SAFE_INTEGER): string { if (typeof value !== "string" || value.length === 0 || new TextEncoder().encode(value).byteLength > max) throw new Error(`${name} is invalid`); return value; }
-function path(value: unknown, empty: boolean): string { const valueString = empty && value === "" ? "" : string(value, "path"); if ((!empty && valueString === "") || valueString.startsWith("/") || valueString.includes("\\") || valueString.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("path is not normalized"); return valueString; }
+function path(value: unknown, empty: boolean): string { if (empty && value === "") return ""; const valueString = string(value, "path"); if (valueString.startsWith("/") || valueString.includes("\\") || valueString.split("/").some((part) => part === "" || part === "." || part === "..")) throw new Error("path is not normalized"); return valueString; }
 function bytes(value: unknown, name: string): number { if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > FILE_MAX_BYTES_V1) throw new Error(`${name} is invalid`); return value as number; }
 function sequence(value: unknown, name: string): number { if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_SEQUENCE) throw new Error(`${name} is invalid`); return value as number; }
 function literal(value: unknown, expected: string, name: string): "utf8" { if (value !== expected) throw new Error(`${name} is invalid`); return "utf8"; }

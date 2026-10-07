@@ -1648,7 +1648,9 @@ impl ProjectManager {
         self.validate_workspace_address(storage, address)?;
         self.verify_pending_save_address(address, save_id)?;
         self.verify_durable_save_session(storage, address, save_id)?;
-        self.append_save_chunk(save_id, seq, text)
+        let mut action = self.append_save_chunk(save_id, seq, text)?;
+        action.result["saveId"] = json!(save_id);
+        Ok(action)
     }
 
     fn verify_pending_save_address(
@@ -1729,7 +1731,10 @@ impl ProjectManager {
                 }
             }
         }
-        result
+        result.map(|mut action| {
+            action.result["saveId"] = json!(save_id);
+            action
+        })
     }
 
     fn verify_durable_save_session(

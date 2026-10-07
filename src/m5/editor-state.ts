@@ -270,7 +270,10 @@ export class ProjectEditorController {
   }
 
   /** Binds the editor only after chat.create persisted its immutable workspace triple. */
-  async bindChat(workspace: ChatWorkspaceRefV1): Promise<boolean> {
+  async bindChat(input: ChatWorkspaceRefV1): Promise<boolean> {
+    // Chat records are structurally assignable to this type but contain fields
+    // forbidden by the exact workspace IPC contract. Retain only the address.
+    const workspace: ChatWorkspaceRefV1 = { projectId: input.projectId, chatId: input.chatId, worktreeId: input.worktreeId, workspaceIdentity: input.workspaceIdentity };
     if (this.#disposed) return false;
     if (!this.canLeaveProject()) { this.#setNotice("m5.editorNotice.dirtyChat"); return false; }
     if (!this.#workspaceMethods()) { this.#setError("m5.editorError.workspaceUnavailable", new Error("M5BridgeV3 workspace methods are unavailable")); return false; }

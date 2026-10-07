@@ -1478,6 +1478,11 @@ test("G4 bounds empty stream events and releases completed stream state", async 
 });
 
 test("BridgeV2 runtime validators reject malformed and extra input before IPC", () => {
+  assert.deepEqual(validateTreeInput({ projectId: "project_01", parentPath: "", cursor: null }), { projectId: "project_01", parentPath: "", cursor: null });
+  for (const path of ["", "/", "src/", "src//file", ".", "../escape"]) {
+    assert.throws(() => validatePathInput({ projectId: "project_01", path }));
+    if (path !== "") assert.throws(() => validateTreeInput({ projectId: "project_01", parentPath: path, cursor: null }));
+  }
   assert.throws(() => validateTreeInput({ projectId: "project_01", parentPath: "../escape", cursor: null }));
   assert.throws(() => validatePathInput({ projectId: "project_01", path: "a", extra: true }));
   assert.throws(() => validateSaveBeginInput({ ...saveBeginInput(), totalBytes: 5 * 1024 * 1024 + 1 }));

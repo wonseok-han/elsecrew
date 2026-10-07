@@ -2586,11 +2586,12 @@ fn save_continuations_reject_cross_chat_and_preserve_other_workspace() {
             .kind,
         "manifestMismatch"
     );
-    fixture
+    let chunk = fixture
         .projects
         .workspace_append_save_chunk(&fixture.storage, &address_a, save_id, 1, "after")
         .unwrap();
-    fixture
+    assert_eq!(chunk.result, json!({"saveId": save_id, "acceptedSeq": 1}));
+    let commit = fixture
         .projects
         .workspace_commit_save(
             &mut fixture.storage,
@@ -2602,6 +2603,10 @@ fn save_continuations_reject_cross_chat_and_preserve_other_workspace() {
             "req_save_commit",
         )
         .unwrap();
+    assert_eq!(
+        commit.result,
+        json!({"saveId": save_id, "outcome": "committed", "version": sha256_file_version_v1(b"after")})
+    );
     let b = fixture
         .projects
         .workspace_read_file(&fixture.storage, &address_b, "src/value.txt")

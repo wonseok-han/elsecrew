@@ -3,11 +3,23 @@ import test from "node:test";
 
 import { ProjectEditorController, type ChatProjectBridge } from "../src/m5/editor-state.ts";
 import type { ChatWorkspaceRefV1, WorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
+import { validateWorkspaceTreeRequestV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 
 const version = sha256FileVersionV1(new TextEncoder().encode("one\n"));
 const a: ChatWorkspaceRefV1 = { chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a" };
 const b: ChatWorkspaceRefV1 = { chatId: "chat_b", projectId: "project_01", worktreeId: "worktree_b", workspaceIdentity: "workspace_b" };
+
+test("binding a full chat record retains only the exact workspace address", async () => {
+  const bridge = new Bridge();
+  const controller = new ProjectEditorController(bridge as unknown as ChatProjectBridge);
+  await controller.chooseProject();
+  const original = bridge.getWorkspaceTree.bind(bridge);
+  bridge.getWorkspaceTree = async input => { validateWorkspaceTreeRequestV1(input); return original(input); };
+  assert.equal(await controller.bindChat({ ...a, ...{ goal: "goal", state: "draft", roleSnapshots: [], createdAt: "today" } }), true);
+  assert.deepEqual(controller.snapshot().workspace, a);
+  controller.dispose();
+});
 
 class Bridge {
   calls: string[] = []; workspaceListeners = new Set<(event: WorkspaceEventV1) => void>(); sidecarListeners = new Set<(event: never) => void>(); projectListeners = new Set<(event: never) => void>();
