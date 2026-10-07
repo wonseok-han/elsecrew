@@ -5,6 +5,12 @@
   color: #e6edf3;
   background: #12161d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --m5-control-bg: #263140;
+  --m5-control-hover: #354253;
+  --m5-control-text: #e6edf3;
+  --m5-action-bg: #e87d62;
+  --m5-action-hover: #ff987c;
+  --m5-action-text: #161b22;
 }
 
 body {
@@ -132,8 +138,11 @@ h1 { margin: 0; font-size: 22px; }
 .m5-project-rail li span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .m5-project-rail summary { cursor: pointer; color: #aab4c1; font-size: 11px; padding: 4px 10px; }
 .m5-project-rail .m5-project-catalog-list > p { color: #aab4c1; font-size: 11px; padding: 0 8px; }
-button { border: 1px solid #3f4c5c; border-radius: 7px; padding: 8px 10px; background: #e87d62; color: #161b22; cursor: pointer; font-weight: 650; }
-button:hover:not(:disabled) { background: #ff987c; }
+button { border: 1px solid #3f4c5c; border-radius: 7px; padding: 8px 10px; background: var(--m5-control-bg); color: var(--m5-control-text); cursor: pointer; font-weight: 650; }
+button:hover:not(:disabled) { background: var(--m5-control-hover); }
+/* Keep navigation, resize/focus controls and pagination visually secondary. */
+.m5-new-chat-button, .m5-start-action > button, .m5-workbench button[type="submit"] { background: var(--m5-action-bg); color: var(--m5-action-text); }
+.m5-new-chat-button:hover:not(:disabled), .m5-start-action > button:hover:not(:disabled), .m5-workbench button[type="submit"]:hover:not(:disabled) { background: var(--m5-action-hover); }
 button:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-secondary, .m5-refresh { background: #263140; color: #e6edf3; }
@@ -144,7 +153,8 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-admission-failed { border-color: #a7515b; background: #412126; color: #ffd7d9; }
 .m5-notice { background: #1e3141; color: #d3ecff; }
 .m5-rescan { display: flex; justify-content: space-between; align-items: center; background: #3b3020; color: #f9d8a5; }
-.m5-rescan button { background: #f3bd65; }
+.m5-rescan button { background: #f3bd65; color: #161b22; }
+.m5-rescan button:hover:not(:disabled) { background: #ffd18a; }
 .m5-error { background: #412126; color: #ffd7d9; }
 .m5-error details { margin-top: 8px; }
 .m5-error pre, .m5-conflict pre { overflow: auto; white-space: pre-wrap; color: #d7dee8; }

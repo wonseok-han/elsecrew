@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (작업대 보조 버튼 시각 계층)
+
+- 기준6ccef87, 기존 패키징 기록/9월 archive 보존. 직전 턴은 최신 패키지·smoke PASS로 진척했다. 실연결 승인 대기 중 기존 BzvgMn 화면과 시안을 대조해 패널 접기/집중·목록 이동 등 모든 기본 버튼이 주황 강조인 문제를 확인했다. Karpathy 지침으로 CSS만 수정해 중립/강조 색상 토큰을 분리하고 시작·새 채팅·제출 외 기본 버튼과 hover를 중립색으로 변경했다. rescan 노란 버튼 글자 대비는 명시 유지했다.
+- renderer Vite build PASS. 무계정 native project-ui session62731은 독립 userData/생성 프로젝트 편집·저장·diff/두 채팅/정상 종료 PASS(exit0). 증거 hello-agent-project-ui-3wTfD8/result.json/project.png를 직접 확인해 중립 패널/페이지 버튼과 강조 새 채팅을 확인했다. APPLY/RELOAD 옵션은 없으며 실제 에이전트/전체 시안/성능 합격이 아니다. 최신 CSS는 개발 renderer에만 반영됐고 직전 패키지는 변경 전이다.
+- 다음: 실제 provider 진단 승인, 전체 화면/성능/Windows 잔여 범위. 사용자 원본/실제 모델 호출0회. 로컬 작업 커밋, 기존9월 archive 제외/main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (최신 macOS 패키지·패키지 smoke)
+
+- 기준6ccef87, 기존9월 archive만 dirty. 직전 턴은 호환/진단 수정과 로컬 커밋으로 진척했다. debug build PASS로 마지막 stage 위치 변경까지 반영했다. 제한 환경 m5:package는 Vite main/preload/renderer 성공 후 fetch failed/exit1. 다운로드 허용 재시도 session68615는 release sidecar와 darwin-arm64 패키징 exit0/PASS.
+- node scripts/m5-electron-package-smoke.mjs session53984 exit0/PASS. 패키지 asset/fuse/별도 sidecar의 임시 저장소 프로토콜 검증이며 사용자 계정/모델은 호출하지 않았다. 앱 설치/배포/서명/실제 응답 성공으로 확대 해석하지 않는다. 기존 메모리 수집기는 collector ps만 제외하고 앱 자손은 유지하므로 임의 측정 범위 변경 없이 성능 FAIL을 유지했다.
+- Codex/Claude 각1회 새 진단 포함 재시험 승인을 요청했으며 현재 응답 대기다. 이전 승인 횟수는 이미 사용했으므로 자동 continuation으로 재실행하지 않는다. 그 외 UI/성능/Windows/출시 잔여 범위도 유지한다. main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (Claude 초기화 순서 검토·진단 단계 정정)
 
 - 기준f16d196+추론 배열 호환 수정. 직전 턴은 최신 스키마 대조와 수정으로 진척했다. 독립 검토는 Claude control init→profile channel→prompt→system/init 순서의 확정 결함을 찾지 못했다. discovery도 같은 control init을 사용한다. native_transport 저장은 prompt queue보다 먼저이므로 전송 증거가 아니다. 검증되지 않은 순서 변경은 하지 않았다.
