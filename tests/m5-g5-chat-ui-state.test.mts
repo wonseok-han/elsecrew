@@ -113,6 +113,47 @@ test("failed initial project data can be retried without creating a chat or work
   } finally { controller.dispose(); }
 });
 
+test("four interleaved chat streams retain all 12000 messages across switches", async () => {
+  const bridge = new FakeBridge();
+  bridge.chats = Array.from({ length: 4 }, (_, i) => chat(`stream_${i}`));
+  const records = new Map(bridge.chats.map(item => [item.chatId, [] as TeamMessageV1[]]));
+  Object.assign(bridge, { getChat: async ({ chatId, afterEventSequence = 0, limit = 50 }: { chatId: string; afterEventSequence?: number; limit?: number }) => {
+    const all = records.get(chatId)!;
+    const messages = all.slice(afterEventSequence, afterEventSequence + limit);
+    const next = afterEventSequence + messages.length;
+    return { chat: bridge.chats.find(item => item.chatId === chatId)!, afterEventSequence, messages, runs: [], nextEventSequence: next < all.length ? next : null };
+  } });
+  const controller = new ChatUiController(bridge as unknown as M5BridgeV3);
+  controller.start();
+  const select = async (id: string) => {
+    assert.ok(await controller.prepareSwitch(id, true));
+    await controller.commitPrepared(id, true);
+  };
+  const verify = (id: string) => {
+    const visible = controller.snapshot().messages;
+    assert.deepEqual(visible, records.get(id));
+    assert.equal(new Set(visible.map(message => message.messageId)).size, visible.length);
+    assert.equal(controller.snapshot().error, null);
+  };
+  try {
+    await controller.openProject("project_a");
+    await select("stream_0");
+    for (let sequence = 1; sequence <= 3000; sequence++) {
+      for (const item of bridge.chats) {
+        const message: TeamMessageV1 = { schemaVersion: 1, messageId: `${item.chatId}_${sequence}`, chatId: item.chatId, taskId: item.taskId, worktreeId: item.worktreeId, eventSequence: sequence, kind: "user", roleId: null, runId: null, text: `message ${sequence}`, createdAt: item.createdAt };
+        records.get(item.chatId)!.push(message);
+        bridge.emit(message);
+      }
+      if (sequence % 250 === 0) {
+        verify(controller.snapshot().activeChat!.chatId);
+        await select(`stream_${(sequence / 250) % 4}`);
+      }
+    }
+    for (const item of bridge.chats) { await select(item.chatId); verify(item.chatId); }
+    assert.equal([...records.values()].reduce((count, messages) => count + messages.length, 0), 12000);
+  } finally { controller.dispose(); }
+});
+
 test("late project loading cannot repopulate a cleared view", async () => {
   const bridge = new FakeBridge();
   let resolve!: (value: Awaited<ReturnType<FakeBridge["listChats"]>>) => void;

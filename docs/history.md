@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (연속 메시지 병합 비용·네 채팅 회귀)
+
+- 기준e70ad7a. 이벤트마다 전체 기존 메시지를 Map 재구축·정렬하던 mergeMessages에 이미 검증된 연속 base의 다음 단일 eventSequence만 append하는 경로를 추가했다. 겹침/중복/순서 오류는 기존 충돌 검사 경로를 그대로 사용하며 원장/권한/실행 동작은 바꾸지 않았다. Karpathy 지침으로 관측된 반복 비용에 한정했다.
+- 네 채팅에 각각3000개씩 총12000개 이벤트를 교차 전달하고250회마다 active chat을 바꿔 전체 내용/순서/ID 유일성과 교차 채팅 혼입을 검사하는 회귀를 추가했다. 비활성 채팅은 실제 controller처럼 페이지50개 조회로 복원한다. 관련 chat-ui suite PASS, 로그 /private/tmp/hello-agent-chat-streams.log; diff check PASS.
+- 이 검사는 합성 메모리 bridge의 burst 회귀이며50events/s·60초 실제 pacing, renderer event→paint, native sidecar/IPC 유실 증거가 아니다. 전체 수집기와 G6를 대체하지 않으며 그 작업은 남는다. 실제 provider·시안 마감·메모리/Windows도 미완료, 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (긴 대화 Chromium 회귀·기존 UI 검사 갱신)
 
 - 기준890a013. 테스트 preload에만451개 합성 메시지를 기존 chat event 경로로 추가하는 도우미를 연결했다. 실제 renderer에서 최신200개/이전 페이지/첫 메시지 접근/새 메시지가 와도 과거 페이지 불변/최신 복귀를 검사한다. 제품 bridge나 실제 계정 API는 추가하지 않았다.
