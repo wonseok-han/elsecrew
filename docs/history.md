@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (초기 응답 독립 승인·실제 후속 실패 확정)
+
+- 기준ccec021, 기존9월 archive만 dirty. 직전 턴은 호환 수정/회귀/커밋의 진척이다. 같은 독립 검토자가 차단 결함 없음으로 마감했다. Codex 알림은 RPC 순서를 진행시키지 않으며 실제 config/account 응답 필수, Claude pending 목록은 비어야 한다. 검토자 자체 테스트/실계정 실행은 없었다.
+- 승인된 runner session8282 결과는 Codex가 model/list까지 진행했고 Claude도 이전 envelope 오류를 벗어났지만 후속 실패가 남았다. 추가 고정 진단으로 model catalog에 요청 model 부재와 Claude scope owner/identity/profile 재검증을 분리했다. 기존 bool scope 호출은 동일 Result의 is_ok이며 허용 조건은 그대로다. debug build PASS.
+- session18931의 실제 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-Xz9ivC/result.json: Codex selected model absent from catalog, Claude provider runtime file isolation scan rejected profile contents. chat.rs 기본 역할 FIXTURE_PROFILES의 sol과 actual catalog 불일치를 확인했다. 임의 모델 fallback은 금지하며 제안서의 지원 목록 제시/사용자 선택 흐름을 연결해야 한다.
+- Claude profile의 종료 후 메타데이터 검사에는 symlink/공유 regular file이 없었다. 실행 중 일시 생성물/교체 가능성은 아직 추정이며 파일 내용을 읽거나 삭제하지 않았다. 두 runner 모두 양쪽 로그인 connected·모델 목표0회·원본 unchanged·shutdown accepted/exit1(연결 FAIL)로 정상 종료했다. 초기 handshake/종료 경로 개선과 전체 실연결 완료를 구분한다.
+- 다음: actual 모델 선택 목록/기본 fixture 모델과 제품 모델 분리, Claude runtime scan의 구체 거절 유형 확인·수정. 이번 턴 전체 회귀 재실행 없음, diff 검사 수행. 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (공급자 초기 응답 순서·형식 호환 수정)
 
 - 기준bdd5011. 직전 정상 종료 실측은 진척이며 기존 미커밋 진단/기록과9월 archive를 보존했다. Karpathy 지침으로 응답 원문 대신 고정 단계명만 남기도록 Codex layer/RPC/notification, Claude envelope/catalog 진단을 분리했다. 첫 build의 match 구분자 오타는 수정했고 debug build PASS다.

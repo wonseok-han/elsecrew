@@ -485,7 +485,18 @@ impl PreflightExchange {
                 }
             }
             ObservationKind::Models => {
-                match_model_catalog(&observation, &profile)?;
+                match_model_catalog(&observation, &profile).map_err(|error| {
+                    self.configuration_failure = Some("model catalog schema or effort");
+                    if let Ok(value) = observation.json() {
+                        if value.get("nextCursor").is_none() || !value["nextCursor"].is_null() {
+                            self.configuration_failure = Some("model catalog pagination");
+                        } else if value["data"].as_array().is_some_and(|models|
+                            !models.iter().any(|model| model["model"] == profile.model)) {
+                            self.configuration_failure = Some("selected model absent from catalog");
+                        }
+                    }
+                    error
+                })?;
             }
             ObservationKind::Requirements => {
                 // Managed policies are not supported by this isolated candidate.

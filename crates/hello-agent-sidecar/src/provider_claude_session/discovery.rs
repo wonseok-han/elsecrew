@@ -289,9 +289,7 @@ pub(crate) fn inspect_candidate(
             .profile_model(selector, effort)
             .map_err(|_| initialization_failure("model, effort, hooks or permission selection"))?
             .to_owned();
-        if !process.matches_claude_scope(workspace, selector, effort, access) {
-            return Err(failure());
-        }
+        process.verify_claude_scope(workspace, selector, effort, access)?;
         Ok(resolved_model)
     })();
     let cleanup = process.finish();

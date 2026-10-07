@@ -455,7 +455,7 @@ fn failure() -> SidecarError {
 }
 
 // Fixed local stages only: never include provider response text, paths, or credentials.
-fn initialization_failure(stage: &'static str) -> SidecarError {
+pub(crate) fn initialization_failure(stage: &'static str) -> SidecarError {
     SidecarError::new(
         "providerPreflightFailed",
         format!("Claude control initialization failed at {stage}; process cleanup required"),

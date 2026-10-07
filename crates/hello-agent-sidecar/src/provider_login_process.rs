@@ -591,11 +591,15 @@ impl<'a> LoginProcess<'a> {
 
     /// Invocation identity only; this does not certify provider tool confinement.
     pub(crate) fn matches_claude_scope(&self, workspace: &std::path::Path, model: &str, effort: Option<&str>, access: crate::provider_claude_session::ToolAccess) -> bool {
-        !self.failed && !self.finished && self.cleanup_started.is_none()
-            && self.io.is_some() && self.child.is_some()
-            && self.claude_preflight_home().ok().is_some_and(|home| {
-                self.claude_scope.as_ref().is_some_and(|scope| scope.matches(workspace, &home, model, effort, access))
-            })
+        self.verify_claude_scope(workspace, model, effort, access).is_ok()
+    }
+
+    pub(crate) fn verify_claude_scope(&self, workspace: &std::path::Path, model: &str, effort: Option<&str>, access: crate::provider_claude_session::ToolAccess) -> Result<(), SidecarError> {
+        let unavailable = || crate::provider_claude_session::initialization_failure("launch scope owner");
+        if self.failed || self.finished || self.cleanup_started.is_some()
+            || self.io.is_none() || self.child.is_none() { return Err(unavailable()); }
+        let home = self.claude_preflight_home()?;
+        self.claude_scope.as_ref().ok_or_else(unavailable)?.verify(workspace, &home, model, effort, access)
     }
 
     /// The trusted run owner can durably bind the already observed identities
