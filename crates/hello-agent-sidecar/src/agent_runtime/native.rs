@@ -158,7 +158,7 @@ impl AgentRuntime {
         // closed owner cannot be polled again; keep its failed observation,
         // but do not manufacture a second cleanup failure from that receipt.
         if owner.closure_evidence().is_some_and(|receipt| receipt.confirmed()) {
-            process.take();
+            drop(process.take());
             return Ok(());
         }
         self.discovery_cleanup

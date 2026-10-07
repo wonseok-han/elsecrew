@@ -1,5 +1,20 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (공급자 초기 응답 순서·형식 호환 수정)
+
+- 기준bdd5011. 직전 정상 종료 실측은 진척이며 기존 미커밋 진단/기록과9월 archive를 보존했다. Karpathy 지침으로 응답 원문 대신 고정 단계명만 남기도록 Codex layer/RPC/notification, Claude envelope/catalog 진단을 분리했다. 첫 build의 match 구분자 오타는 수정했고 debug build PASS다.
+- 첫 runner는 renderer의 자동 diagnose/check와 직접 check가 충돌해 invalidRequest가 났다. session67922의 시험 PID58846은 승인 범위에서 TERM 후 KILL로 정리했다. runner는 installed/diagnosing/starting/verifying 동안 기다린 뒤 check하도록 수정했다. 이어 session99178·99966은 양쪽 로그인 connected, 모델 전달0회, 원본 unchanged, shutdown accepted/exit1로 종료했다.
+- 최신 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-8Vww3Z/result.json: Codex config/read 대기 중 account/updated 알림 거절, Claude control response의 result 필드 구성 거절로 분리됐다. Codex 알림을 초기화 이후 pending RPC 중1회 수용하되 순서 진행/인증 근거로 삼지 않고 실제 config/account/requirements 응답을 모두 요구하도록 수정했다. 알림2회/잘못된 모드·필드·timestamp는 계속 거절한다. 관련 회귀2 PASS.
+- Claude 공식 배포 SDK0.3.220 ControlResponse의 optional pending_permission_requests/pending_user_dialog_requests 배열을 지원했다. 생략/빈 배열만 허용하며 null/대기 요청/unknown 필드는 거절한다. 근거 https://app.unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.220/files/sdk.d.ts (ControlResponse); Python 공식 types도 비교했으나 최신 두 필드는 TS 배포 타입 기준이다. 이 필드가 실제 실패의 원인인지 재시험은 아직 안 했다. Claude 회귀6 PASS, 기존 named layers 거절 회귀1 PASS, diff 검사 PASS.
+- 같은 독립 검토자1명에게 순서·형식 변경 검토를 요청했다. 응답 검증을 일반적으로 완화하지 않았고 새 실제 모델 작업 허용·main/push 없음. 검토 후 승인된 한도 내 실제 연결 재시험, 나머지 G6/UI/Windows 마감은 계속 남는다.
+
+### 2026-10-07 · by GPT-6 Astra (중복 정리 수정 독립 검토·실제 정상 종료 확인)
+
+- 기준bdd5011과 기존9월 archive만 dirty 상태를 확인했다. 직전 턴은 중복 정리/반복 알림 구현의 진척이다. 동일 독립 검토자가 차단 결함 없음으로 마감했다. confirmed closure 소비는 run fence/uncertain owner를 해제하지 않으며 unavailable 알림 억제는 종료 권한을 넓히지 않는다고 확인했다. 권고대로 drop(process.take()) 의도를 명시했다. Completion 오류→idle poll 통합 회귀는 후속 보강 사항이다.
+- debug build PASS 후 승인된 임시 프로젝트 runner session16853을 실행했다. 양쪽 login.check connected; Claude 복구 요청 자체는 실패했으나 뒤의 로그인 확인은 성공했으므로 이번 recover 성공으로 표현하지 않는다. Codex config/read 검증 거절·Claude response validation 거절은 남았지만 sidecar exit70은 재발하지 않았고 shutdown=accepted, 프로세스 exit1(연결 시험 FAIL)로 정상 종료했다. ps에서 시험 앱/sidecar 잔류 없음. 모델 목표 전달0회, 원본 unchanged.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-iQEEcO/result.json. 이 결과는 실패 정리/정상 종료 경로의 실측 증거이며 실제 모델 작업 성공이 아니다. runner에 서비스 종료 시 기존 system status의 알려진 고정 원인만 분류하는 진단을 추가했고 raw stderr는 내보내지 않는다(이번에는 서비스 종료 없어 분류 미실행). 새 main의 알림 UI 재검증은 별도다.
+- 다음은 Codex config/read 세부 불일치와 Claude 첫 수신 frame/응답 스키마 분리다. 공급자 응답과 설정 내용 검증을 임의 완화하지 않는다. main/push 없음, 기존9월 archive 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (중복 정리 오류·반복 종료 알림 수정)
 
 - 기준0503fb4. 직전 턴은 잔류 프로세스 없음과 반복 경고 원인을 확인한 진척이다. unavailable 종료 경고를 같은 세션에서 성공 표시한 뒤 반복 표시하지 않도록 수정했다. 매 종료 요청의 prepareQuit 재확인·실패 시 종료 차단은 유지하고 recoveryRequired 경고는 숨기지 않는다.

@@ -20,6 +20,7 @@ pub struct InitializeExchange {
     models: Vec<ModelEntry>,
     hooks_applied: bool,
     default_permission_mode: bool,
+    diagnostic_stage: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +62,7 @@ impl InitializeExchange {
             models: Vec::new(),
             hooks_applied: false,
             default_permission_mode: false,
+            diagnostic_stage: "response state",
         })
     }
     pub fn state(&self) -> State {
@@ -98,6 +100,13 @@ impl InitializeExchange {
     }
 
     fn accept_inner(&mut self, input: &BoundedObservation) -> Result<(), ProviderError> {
+        self.diagnostic_stage = match input.json()?.get("type").and_then(serde_json::Value::as_str) {
+            Some("system") => "startup system frame",
+            Some("control_request") => "startup control request",
+            Some("keep_alive") => "startup keep-alive frame",
+            Some("control_response") => "control response envelope",
+            _ => "unexpected startup frame",
+        };
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Envelope {
@@ -111,11 +120,33 @@ impl InitializeExchange {
             subtype: String,
             request_id: String,
             response: Box<RawValue>,
+            // SDK 0.3.220 reports pending requests beside the result. A fresh
+            // app-owned initialization must not inherit any outstanding work.
+            #[serde(default)]
+            pending_permission_requests: Vec<serde_json::Value>,
+            #[serde(default)]
+            pending_user_dialog_requests: Vec<serde_json::Value>,
         }
-        let wire: Envelope = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        let wire: Envelope = serde_json::from_slice(&input.bytes).map_err(|_| {
+            if let Ok(value) = input.json() {
+                if value["type"] == "control_response" {
+                    self.diagnostic_stage = if value["response"]["subtype"] == "error" {
+                        "provider control error response"
+                    } else if value.as_object().is_some_and(|v| v.len() != 2) {
+                        "control response extra envelope fields"
+                    } else if value["response"].as_object().is_some_and(|v| v.len() != 3) {
+                        "control response extra or missing result fields"
+                    } else { "control response field types" };
+                }
+            }
+            invalid()
+        })?;
+        self.diagnostic_stage = "response correlation or status";
         if wire.kind != "control_response"
             || wire.response.subtype != "success"
             || wire.response.request_id != self.request_id
+            || !wire.response.pending_permission_requests.is_empty()
+            || !wire.response.pending_user_dialog_requests.is_empty()
             || !serde_json::from_str::<serde_json::Value>(wire.response.response.get())
                 .map_err(|_| invalid())?
                 .is_object()
@@ -129,7 +160,9 @@ impl InitializeExchange {
             hooks_applied: Option<bool>,
             current_permission_mode: Option<String>,
         }
+        self.diagnostic_stage = "model catalog shape";
         let capabilities: Capabilities = serde_json::from_str(wire.response.response.get()).map_err(|_| invalid())?;
+        self.diagnostic_stage = "model catalog identifiers or efforts";
         let valid_model = |s: &str| !s.is_empty() && s.len() <= 128 && !s.starts_with('-')
             && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'-'|b'_'|b'.'));
         let mut names = std::collections::BTreeSet::new();
@@ -145,6 +178,11 @@ impl InitializeExchange {
         self.default_permission_mode = capabilities.current_permission_mode.as_deref() == Some("default");
         // Keep only bounded capability/mode evidence, never account or raw response data.
         Ok(())
+    }
+
+    /// Fixed local labels only; never returns provider frame contents.
+    pub fn diagnostic_stage(&self) -> &'static str {
+        self.diagnostic_stage
     }
 
     /// Provider-reported catalog and mode, not account entitlement or confinement.
@@ -179,6 +217,29 @@ impl InitializeExchange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fresh_initialization_accepts_only_empty_pending_request_lists() {
+        for key in ["pending_permission_requests", "pending_user_dialog_requests"] {
+            for (list, accepted) in [(json!([]), true), (json!([{}]), false), (json!(null), false)] {
+                let mut exchange = InitializeExchange::new("init_a").unwrap();
+                exchange.request().unwrap();
+                let mut value = response();
+                value["response"][key] = list;
+                assert_eq!(exchange.accept_response(&input(&value)).is_ok(), accepted);
+            }
+        }
+    }
+    #[test]
+    fn error_response_diagnostic_never_returns_provider_text() {
+        let mut exchange = InitializeExchange::new("init_a").unwrap();
+        exchange.request().unwrap();
+        let value = json!({"type":"control_response","response":{
+            "subtype":"error","request_id":"init_a","error":"PRIVATE_ACCOUNT_DETAIL"
+        }});
+        assert!(exchange.accept_response(&input(&value)).is_err());
+        assert_eq!(exchange.diagnostic_stage(), "provider control error response");
+        assert_eq!(exchange.state(), State::Failed);
+    }
     fn response() -> serde_json::Value {
         json!({"type":"control_response","response":{"subtype":"success","request_id":"init_a","response":{"account":{"private":"SECRET"}}}})
     }

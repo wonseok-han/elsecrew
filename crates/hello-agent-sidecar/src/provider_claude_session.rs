@@ -562,9 +562,9 @@ impl ControlInitialization {
         let Some(input) = process.poll_preflight_observed(cancel, observer)? else {
             return Ok(false);
         };
-        self.exchange
-            .accept_response(&input)
-            .map_err(|_| initialization_failure("response validation"))?;
+        if self.exchange.accept_response(&input).is_err() {
+            return Err(initialization_failure(self.exchange.diagnostic_stage()));
+        }
         Ok(true)
     }
 }

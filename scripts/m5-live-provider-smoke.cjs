@@ -52,6 +52,9 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
       const connected = {};
       for(const provider of ['codex','claude']) {
+        // The mounted login panel diagnoses and checks automatically. Let that
+        // owner finish before issuing the runner's explicit request.
+        await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['installed','diagnosing','starting','verifying'].includes(s.state))`);
         if (process.env.HELLO_AGENT_APPROVED_LOGIN_RECOVERY === provider) {
           const recovery = await run(`window.m5Login.request({action:'recover',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(s=>({state:s.state,error:s.error}))`);
           console.log(JSON.stringify({stage:'LOGIN_RECOVERY',provider,...recovery}));
@@ -89,7 +92,21 @@ app.on('browser-window-created', (_event, window) => {
           }
           outcomes.push(terminal??{provider,state:'timeout'});
           if(!terminal) break;
-        } catch(error) { outcomes.push({provider,state:'requestFailed',error:String(error.message).slice(0,500)}); }
+        } catch(error) {
+          const message = String(error.message).slice(0,500);
+          outcomes.push({provider,state:'requestFailed',error:message});
+          if (message.includes('sidecar exited')) {
+            // Classify only known internal messages. Never export raw stderr:
+            // system status's technical detail is not credential-redacted.
+            const diagnostic = await run(`window.m5.getSystemStatus().then(s=>({state:s.state,knownCause:[
+              'provider discovery cleanup is unconfirmed',
+              'discovery cleanup owner differs',
+              'native terminal requires recovery',
+              'stdin closed before app.prepareQuit; clean shutdown was not marked'
+            ].find(c=>s.error?.detail?.includes(c))??'unclassified'}))`).catch(()=>({state:'unavailable',knownCause:'status unavailable'}));
+            console.log(JSON.stringify({stage:'SERVICE_FAILURE',...diagnostic}));
+          }
+        }
       }
       finish();
     } catch(error) { finish(String(error.message).slice(0,500)); }

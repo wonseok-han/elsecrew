@@ -67,9 +67,19 @@ pub fn matches_configuration_layers(
     expected_policy: &serde_json::Value,
     approval: &str,
 ) -> bool {
+    check_configuration_layers(result, home, expected, expected_policy, approval).is_ok()
+}
+
+fn check_configuration_layers(
+    result: &Value,
+    home: &Path,
+    expected: &ExpectedProfile<'_>,
+    expected_policy: &Value,
+    approval: &str,
+) -> Result<(), &'static str> {
     use serde_json::json;
     if !matches!(approval, "never" | "on-request") {
-        return false;
+        return Err("approval expectation");
     }
     let flags = json!({
         "model":expected.model,"model_reasoning_effort":expected.reasoning_effort,
@@ -79,18 +89,18 @@ pub fn matches_configuration_layers(
         "features":{"hooks":false,"apps":false,"plugins":false}
     });
     let Some(layers) = result["layers"].as_array() else {
-        return false;
+        return Err("layers shape");
     };
     if layers.len() != 3 {
-        return false;
+        return Err("layers count");
     }
     let Some(home) = home.to_str() else {
-        return false;
+        return Err("profile path");
     };
     let mut seen = [false; 3];
     for layer in layers {
         if !layer["disabledReason"].is_null() {
-            return false;
+            return Err("disabled layer");
         }
         let (index, expected_name, expected_config) = match layer["name"]["type"].as_str() {
             Some("sessionFlags") => (0, json!({"type":"sessionFlags"}), flags.clone()),
@@ -104,7 +114,7 @@ pub fn matches_configuration_layers(
                 json!({"type":"system","file":"/etc/codex/config.toml"}),
                 json!({}),
             ),
-            _ => return false,
+            _ => return Err("layer source"),
         };
         let mut name = layer["name"].clone();
         // Codex serializes the absent user config profile as explicit null.
@@ -114,11 +124,18 @@ pub fn matches_configuration_layers(
                 object.remove("profile");
             }
         }
-        if name != expected_name
-            || layer["config"] != expected_config
-            || std::mem::replace(&mut seen[index], true)
-        {
-            return false;
+        if name != expected_name {
+            return Err("layer identity");
+        }
+        if layer["config"] != expected_config {
+            return Err(match index {
+                0 => "session flags",
+                1 => "user layer",
+                _ => "system layer",
+            });
+        }
+        if std::mem::replace(&mut seen[index], true) {
+            return Err("duplicate layer");
         }
     }
     let config = &result["config"];
@@ -130,15 +147,18 @@ pub fn matches_configuration_layers(
         "default_permissions",
     ] {
         if config[key] != flags[key] {
-            return false;
+            return Err("effective model or permission selector");
         }
     }
     for feature in ["hooks", "apps", "plugins"] {
         if config["features"][feature] != false {
-            return false;
+            return Err("effective extensions");
         }
     }
-    config["sandbox_mode"].is_null() && config["sandbox_workspace_write"].is_null()
+    if !config["sandbox_mode"].is_null() || !config["sandbox_workspace_write"].is_null() {
+        return Err("legacy sandbox settings");
+    }
+    Ok(())
 }
 
 pub(super) fn match_configuration(
@@ -147,19 +167,18 @@ pub(super) fn match_configuration(
     workspace: &Path,
     expected: &ExpectedProfile<'_>,
     permission: ExpectedPermission,
-) -> Result<(), super::ProviderError> {
+) -> Result<(), &'static str> {
     let mut policy = expected_write_policy(home, workspace);
     if permission == ExpectedPermission::ReadOnly {
-        policy["filesystem"][workspace.to_str().ok_or_else(super::invalid)?]["."] = json!("read");
+        policy["filesystem"][workspace.to_str().ok_or("workspace path")?]["."] = json!("read");
     }
-    let result = input.json()?;
-    if !matches_configuration_layers(&result, home, expected, &policy, "on-request")
-        || !matches_policy(
-            &result["config"]["permissions"]["hello-agent-snapshot"],
-            &policy,
-        )
-    {
-        return Err(super::invalid());
+    let result = input.json().map_err(|_| "configuration JSON")?;
+    check_configuration_layers(&result, home, expected, &policy, "on-request")?;
+    if !matches_policy(
+        &result["config"]["permissions"]["hello-agent-snapshot"],
+        &policy,
+    ) {
+        return Err("effective filesystem or network policy");
     }
     Ok(())
 }

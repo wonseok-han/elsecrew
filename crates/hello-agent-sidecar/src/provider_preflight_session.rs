@@ -574,7 +574,10 @@ fn check_claimed(
         let accepted = flow.accept(&reply);
         #[cfg(test)]
         eprintln!("preflight stage={previous:?} accepted={}", accepted.is_ok());
-        let state = accepted.map_err(|_| stage_failure(stage))?;
+        let state = accepted.map_err(|_| {
+            let detail = flow.diagnostic_stage();
+            stage_failure(if detail == "exchange state" { stage } else { detail })
+        })?;
         if state == PreflightState::ConfigurationMatched {
             return if thread_cwd.is_none() {
                 Ok(())

@@ -47,8 +47,8 @@ impl ModelFreeExchange {
         self.pending && !self.failed
     }
 
-    pub(super) fn awaiting_account_reply(&self) -> bool {
-        self.awaiting_reply() && self.next == 2
+    pub(super) fn awaiting_initialized_reply(&self) -> bool {
+        self.awaiting_reply() && self.next > 0
     }
     pub fn with_config_layers() -> Self {
         Self {

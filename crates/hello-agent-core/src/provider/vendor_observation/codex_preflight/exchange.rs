@@ -43,6 +43,7 @@ pub struct PreflightExchange {
     configuration_only: bool,
     account_note_seen: bool,
     named_cwd: Option<std::path::PathBuf>,
+    configuration_failure: Option<&'static str>,
 }
 
 fn invalid() -> ProviderError {
@@ -95,6 +96,7 @@ impl PreflightExchange {
             configuration_only: false,
             account_note_seen: false,
             named_cwd: None,
+            configuration_failure: None,
         })
     }
 
@@ -127,6 +129,9 @@ impl PreflightExchange {
     }
 
     pub fn diagnostic_stage(&self) -> &'static str {
+        if let Some(reason) = self.configuration_failure {
+            return reason;
+        }
         match self.state {
             PreflightState::Checking => self.rpc.diagnostic_stage(),
             PreflightState::ThreadStarting | PreflightState::ThreadMatched => "thread/start",
@@ -363,6 +368,11 @@ impl PreflightExchange {
             return Err(invalid());
         }
         if input.json()?.get("method").is_some() {
+            self.configuration_failure = Some(match input.json()?["method"].as_str() {
+                Some("account/updated") => "account notification phase or envelope",
+                Some("configWarning") => "configuration warning notification",
+                _ => "unexpected preflight notification",
+            });
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields, rename_all = "camelCase")]
             struct Params {
@@ -378,7 +388,9 @@ impl PreflightExchange {
                 emitted_at_ms: u64,
             }
             let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
-            if !self.rpc.awaiting_account_reply()
+            // This asynchronous note may precede config/read's response after
+            // initialized. It never advances RPC order or proves account state.
+            if !self.rpc.awaiting_initialized_reply()
                 || self.account_note_seen
                 || note.method != "account/updated"
                 || note.params.auth_mode != "chatgpt"
@@ -390,9 +402,15 @@ impl PreflightExchange {
                 return Err(invalid());
             }
             self.account_note_seen = true;
+            self.configuration_failure = None;
             return Ok(self.state);
         }
-        let (kind, observation) = self.rpc.accept(input)?;
+        let (kind, observation) = self.rpc.accept(input).map_err(|error| {
+            self.configuration_failure = Some(if input.json().ok().is_some_and(|v| v.get("error").is_some()) {
+                "provider RPC error response"
+            } else { "RPC response envelope" });
+            error
+        })?;
         let profile = ExpectedProfile {
             model: &self.model,
             reasoning_effort: &self.effort,
@@ -430,7 +448,11 @@ impl PreflightExchange {
                         cwd,
                         &profile,
                         self.permission,
-                    )?;
+                    )
+                    .map_err(|reason| {
+                        self.configuration_failure = Some(reason);
+                        invalid()
+                    })?;
                 } else {
                     super::layers::match_layers(
                         &observation,
@@ -958,12 +980,31 @@ mod tests {
             }
             flow.next_frames().unwrap();
             let note = BoundedObservation::new(valid.as_bytes().to_vec()).unwrap();
-            if at == 2 {
+            if at > 0 {
                 flow.accept(&note).unwrap();
+                assert!(flow.awaiting_response());
             }
             assert!(flow.accept(&note).is_err()); // wrong stage or duplicate
             assert_eq!(flow.state(), PreflightState::Failed);
         }
+    }
+
+    #[test]
+    fn early_account_note_does_not_skip_config_or_account_observation() {
+        let mut flow = exchange();
+        let values = results();
+        flow.next_frames().unwrap();
+        flow.accept(&reply(0, &values[0])).unwrap();
+        flow.next_frames().unwrap();
+        let note = BoundedObservation::new(br#"{"method":"account/updated","params":{"authMode":"chatgpt"}}"#.to_vec()).unwrap();
+        flow.accept(&note).unwrap();
+        assert!(flow.awaiting_response());
+        assert!(flow.next_frames().is_err());
+        for (index, value) in values.iter().enumerate().skip(1) {
+            if index > 1 { flow.next_frames().unwrap(); }
+            flow.accept(&reply(index, value)).unwrap();
+        }
+        assert_eq!(flow.state(), PreflightState::ObservationsMatched);
     }
 
     #[test]
