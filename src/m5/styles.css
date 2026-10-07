@@ -30,6 +30,18 @@ button, input, textarea, select {
 
 .m5-workbench > * { flex-shrink: 0; }
 
+.m5-guided-start { width: min(860px, 100%); box-sizing: border-box; margin: 24px auto; padding: 32px; border: 1px solid #303b49; border-radius: 16px; background: #171d26; }
+.m5-start-heading h2 { margin: 8px 0; font-size: 26px; letter-spacing: -.03em; }
+.m5-start-heading > p:last-child, .m5-start-steps p { color: #aab4c1; line-height: 1.7; }
+.m5-start-steps { list-style: none; padding: 0; margin: 28px 0; display: grid; gap: 22px; }
+.m5-start-steps li { display: flex; align-items: flex-start; gap: 16px; }
+.m5-start-number { flex: 0 0 32px; height: 32px; display: grid; place-items: center; border: 1px solid #42546b; border-radius: 50%; color: #91c5ff; background: #202a37; font-weight: 700; }
+.m5-start-steps h3 { margin: 2px 0 4px; font-size: 15px; }
+.m5-start-steps p { margin: 0; }
+.m5-start-action { padding-top: 20px; border-top: 1px solid #303b49; }
+.m5-start-action button { padding: 10px 20px; }
+.m5-start-action p { margin: 12px 0 0; max-width: 660px; color: #aab4c1; font-size: 12px; line-height: 1.6; }
+
 .m5-toolbar {
   display: flex;
   justify-content: space-between;

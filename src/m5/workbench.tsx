@@ -189,9 +189,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-toolbar-actions">
           <select aria-label={t("m5.shell.language")} title={t("m5.shell.languageScope")} value={lang} onChange={event => setLang(event.target.value === "en" ? "en" : "ko")}><option value="ko">한국어</option><option value="en">English</option></select>
           <ProjectCatalog controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
-          <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
-            {t(snapshot.project ? "m5.shell.switch" : "m5.shell.choose")}
-          </button>
+          {snapshot.project && <button type="button" onClick={() => void controller.chooseProject()} disabled={settingsOpen || !admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>
+            {t("m5.shell.switch")}
+          </button>}
           {snapshot.project && (
             <button className="m5-secondary" type="button" onClick={() => void leaveProject()} disabled={!admissionReady || settingsOpen || leavingProject || leaveError || !window.m5Projects || snapshot.actionBlocked || !controller.canLeaveProject() || !chatController.canLeaveProjectView()} title={settingsOpen ? t("m5.shell.finishSettings") : undefined}>
               {t("m5.shell.close")}
@@ -238,7 +238,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={() => { setSettingsOpen(false); requestAnimationFrame(() => settingsButtonRef.current?.focus()); }} />}
 
-      <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
+      {!snapshot.project && <section className="m5-guided-start" aria-label={t("m5.start.title")}>
+        <div className="m5-start-heading"><p className="m5-eyebrow">Hello, Agent</p><h2>{t("m5.start.title")}</h2><p>{t("m5.start.help")}</p></div>
+        <ol className="m5-start-steps">{(["connect", "project", "goal"] as const).map((step, index) => <li key={step}>
+          <span className="m5-start-number" aria-hidden="true">{index + 1}</span><div><h3>{t(`m5.start.${step}`)}</h3><p>{t(`m5.start.${step}Help`)}</p></div>
+        </li>)}</ol>
+        <div className="m5-start-action"><button type="button" onClick={() => void controller.chooseProject()} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>{t("m5.shell.choose")}</button><p>{t("m5.start.projectLimit")}</p></div>
+      </section>}
+      {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
         <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>
           <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
             {t("m5.navigation.files")}
@@ -321,7 +328,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
         </aside>
-      </WorkbenchDock>
+      </WorkbenchDock>}
     </main>
   );
 }
