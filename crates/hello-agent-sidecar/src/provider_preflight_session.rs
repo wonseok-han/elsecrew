@@ -41,6 +41,7 @@ fn stage_failure(stage: &'static str) -> SidecarError {
 pub(crate) struct ProviderInspection<'a, T = ()> {
     pub(crate) result: Result<T, SidecarError>,
     pub(crate) process: LoginProcess<'a>,
+    pub(crate) display_models: Option<Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>>,
 }
 
 /// Fixed, model-free version probe through the same tracked process owner.
@@ -107,7 +108,7 @@ pub(crate) fn inspect_codex_version(
         }
         Ok(version)
     });
-    Ok(ProviderInspection { result, process })
+    Ok(ProviderInspection { result, process, display_models: None })
 }
 
 /// A bounded, selected-profile observation, not a global provider capability.
@@ -256,8 +257,21 @@ pub(crate) fn inspect_named_preflight_candidate(
             observed_at: Instant::now(),
         })
     });
+    // Display choices are not execution evidence. Even a rejected selection
+    // can offer alternatives, but only after this exact owner closed and its
+    // executable/profile binding survived cleanup. Never mask the original error.
+    let display_models = if process.closure_evidence().is_some_and(|evidence| evidence.confirmed())
+        && !cancel.load(Ordering::Acquire)
+        && executable.revalidate().is_ok()
+        && helper.revalidate().is_ok()
+        && process.closed_codex_home().is_ok_and(|closed| closed == home)
+    {
+        flow.display_models().map(<[_]>::to_vec)
+    } else {
+        None
+    };
     // Even launch/cleanup errors return the original owner for explicit cleanup.
-    Ok(ProviderInspection { result, process })
+    Ok(ProviderInspection { result, process, display_models })
 }
 
 /// Full candidate includes account/read, model/list and configRequirements/read. This is NOT the approved
@@ -359,7 +373,7 @@ fn inspect_preflight_candidate<'a>(
     };
     let result = launch.and_then(|()| observe_and_close(&mut process, &mut flow, cancel));
     // Even a launch/cleanup error returns its owner for explicit cleanup retries.
-    Ok(ProviderInspection { result, process })
+    Ok(ProviderInspection { result, process, display_models: None })
 }
 
 /// Invocation-only overrides: never rewrite the user's app-owned login config.

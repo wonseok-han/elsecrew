@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (Codex 모델 조회·역할 설정 연결)
+
+- 기준79fc2a9, 기존9월 archive 보존. 직전 턴은 core 표시용 목록 분리의 진척이다. named inspection은 correlated catalog를 관측하고 exact owner의 confirmed closure·취소 없음·executable/helper 재검증·closed home 일치 후에만 표시 목록을 전달한다. worker 취소 시 목록을 제거하고 runtime은 durable 채팅/역할/workspace 스코프를 재검증해 단발 소비한다. 기존 실행 evidence/예약 경로는 이 목록을 사용하지 않는다.
+- agent.getModelChoices와 고정 m5Models IPC를 추가했다. native Codex+저장된 채팅 역할에서만 조회하며 TS 경계는 exact 필드·scope·model256/effort32·문자열 크기/중복을 검사한다. 역할 설정의 지원 모델 조회/명시 선택과 한영 문구를 연결했다. 저장은 기존 프로젝트 역할 API이고 기존 채팅 snapshot은 바꾸지 않는다. 채팅이 없으면 먼저 열도록 안내하며 Claude 모델 조회는 아직 지원하지 않는다.
+- 연결 진단의 Option closure/ES2020 Object.hasOwn/매크로 경로 컴파일 오류를 수정했다. 최종 tsc --noEmit·cargo check PASS, diff 검사 수행. contract 회귀를 추가했지만 테스트·실계정/UI 시험은 누적 검증에 남겼다. 기존 독립 검토자1명에게 전체 변경의 종료/취소/권한·스코프 검토 요청, 결과 대기. 새 모델 실행·main/push 없음. 다음은 검토 수정·실제 목록 선택 흐름 확인과 Claude 특수 파일 원인 수정이다.
+
 ### 2026-10-07 · by GPT-6 Astra (지원 모델 선택용 관측 기반 분리)
 
 - 기준415a155, 기존9월 archive만 dirty. 직전 턴은 실행본 갱신과 특수 파일 실패 원인 확보의 진척이다. Codex의 기존 model/list 검증을 read_model_catalog로 추출해 완전한 bounded 목록의 model/effort만 반환하도록 했다. hidden 항목은 출력하지 않지만 중복/형식 검증은 전체에 적용한다. 기존 match_model_catalog는 같은 parser와 exact 선택 검사를 사용하며 별칭/기본값 fallback을 추가하지 않았다.

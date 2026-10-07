@@ -44,6 +44,7 @@ export const METHODS_V1 = [
   "run.approval",
   "project.catalog",
   "agent.getCapabilities",
+  "agent.getModelChoices",
   "run.startFixture",
   "run.startAgent",
   "run.startAgentSmoke",

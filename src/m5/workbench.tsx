@@ -1,4 +1,5 @@
 import { formatChatNotice } from "./chat-notice.ts";
+import type { ModelChoicesResult } from "./contracts/model-choices-v1.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
 import { I18nProvider, useI18n } from "../i18n";
@@ -265,7 +266,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </dialog>
       </section>}
 
-      {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} disabled={!admissionReady} feedback={<>
+      {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} activeChat={chat.activeChat} disabled={!admissionReady} feedback={<>
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
@@ -398,12 +399,32 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
   </div>;
 }
 
-function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {
+function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
   const [busy, setBusy] = useState(false);
   const [discardAction, setDiscardAction] = useState<"close" | "reload" | null>(null);
+  const [choices, setChoices] = useState<Partial<Record<RoleProfileV1["roleId"], ModelChoicesResult["models"]>>>({});
+  const [choicesError, setChoicesError] = useState(false);
+  const choiceEpoch = useRef(0);
+  useEffect(() => {
+    choiceEpoch.current += 1;
+    setChoices({}); setChoicesError(false);
+    return () => { choiceEpoch.current += 1; };
+  }, [settings, activeChat?.chatId]);
+  const loadChoices = async (role: RoleProfileV1) => {
+    if (!activeChat || !window.m5Models || role.runtime !== "codex") return;
+    const epoch = choiceEpoch.current;
+    setBusy(true); setChoicesError(false);
+    try {
+      const result = await window.m5Models.request({ runtime: "codex", refresh: true, chatId: activeChat.chatId, roleId: role.roleId });
+      if (epoch !== choiceEpoch.current) return;
+      if (result.scope.worktreeId !== activeChat.worktreeId || result.scope.workspaceIdentity !== activeChat.workspaceIdentity) throw new Error("model choice scope changed");
+      setChoices(old => ({ ...old, [role.roleId]: result.models }));
+    } catch { if (epoch === choiceEpoch.current) setChoicesError(true); }
+    finally { setBusy(false); }
+  };
   const dirty = JSON.stringify(roles) !== JSON.stringify(settings.roles);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -426,10 +447,19 @@ function RoleSettings({ settings, disabled, feedback, onSave, onReload, onClose 
       <button type="button" disabled={disabled || busy} onClick={() => { const action = discardAction; setDiscardAction(null); if (action === "close") onClose(); else void run(onReload); }}>{t(discardAction === "close" ? "m5.roles.discardClose" : "m5.roles.discardReload")}</button>
     </section>}
     <p>{t("m5.roles.help")}</p>
+    {choicesError && <p role="alert">{t("m5.roles.choicesError")}</p>}
     <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card">
       <strong>{t(`m5.roles.${role.roleId}`)}</strong>
       <label>{t("m5.roles.runtime")}<select disabled={disabled || busy || discardAction !== null} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
       <label>{t("m5.roles.model")}<input disabled={disabled || busy || discardAction !== null} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
+      {role.runtime === "codex" && <>
+        <button type="button" className="m5-secondary" disabled={disabled || busy || discardAction !== null || !activeChat || !window.m5Models} onClick={() => void loadChoices(role)}>{t("m5.roles.loadChoices")}</button>
+        {!activeChat && <small>{t("m5.roles.choicesNeedChat")}</small>}
+        {choices[role.roleId] && <label>{t("m5.roles.availableChoices")}<select value="" disabled={disabled || busy || discardAction !== null} onChange={event => { if (event.target.value) change(index, "modelSelector", event.target.value); }}>
+          <option value="">{t("m5.roles.chooseModel")}</option>
+          {choices[role.roleId]!.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector} · {model.reasoningEfforts.join(", ")}</option>)}
+        </select><small>{t("m5.roles.choicesHelp")}</small></label>}
+      </>}
       <label>{t("m5.roles.reasoning")}<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} placeholder={t("m5.roles.default")} onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
       <small>{t("m5.roles.modelHelp")}</small>
       <span>{t(role.permission === "readOnly" ? "m5.roles.readOnly" : "m5.roles.write")}</span>

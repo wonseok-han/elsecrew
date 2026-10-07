@@ -590,7 +590,41 @@ impl AgentRuntime {
         Ok(Vec::new())
     }
 
-    /// Single-consumer result; recheck durable scope after background work.
+    /// Display-only consumer. It cannot construct ScopedEvidence or reserve a
+    /// run, and consumes the request exactly once just like capability lookup.
+    pub(crate) fn take_scoped_model_choices(
+        &mut self,
+        storage: &Storage,
+        projects: &ProjectManager,
+        request_id: &str,
+    ) -> Option<Result<(AgentCapabilityScopeV1, Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>), SidecarError>> {
+        let pending = self.pending_discoveries.get(request_id)?;
+        if !pending.completion.as_ref().is_some_and(|done| done.cleanup.is_none()) {
+            return None;
+        }
+        let mut pending = self.pending_discoveries.remove(request_id).unwrap();
+        let completion = pending.completion.take().unwrap();
+        Some((|| {
+            let failure = || SidecarError::new("agentInputChanged", "model choice context changed");
+            if self.preparing_to_quit { return Err(failure()); }
+            let chat = actual_chat_projection(storage, &pending.scope.chat_id)
+                .map_err(|_| failure())?["record"].clone();
+            if capability_scope(&chat, &pending.scope.role_id).map_err(|_| failure())? != pending.scope
+                || !chat["roleSnapshots"].as_array().is_some_and(|roles| roles.iter().any(|role| {
+                    serde_json::from_value::<AgentResolvedProfileV1>(role.clone()).ok().as_ref() == Some(&pending.profile)
+                })) {
+                return Err(failure());
+            }
+            projects.verify_workspace_for_run(storage, &address_from_chat(&chat).map_err(|_| failure())?)
+                .map_err(|_| failure())?;
+            let choices = completion.display_models.ok_or_else(|| {
+                completion.result.err().unwrap_or_else(|| SidecarError::new("agentDiscoveryRejected", "model choices unavailable"))
+            })?;
+            Ok((pending.scope, choices))
+        })())
+    }
+
+    /// Single-consumer execution evidence; never uses display-only choices.
     pub(crate) fn take_scoped_discovery(
         &mut self,
         storage: &Storage,

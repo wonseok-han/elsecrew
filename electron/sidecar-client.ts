@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
@@ -513,6 +514,11 @@ export class SidecarClientV1 {
   getAgentCapabilities(input: AgentCapabilitiesRequestV1): Promise<AgentCapabilitySnapshotV1> {
     return this.#requestAgent("agent.getCapabilities", validateAgentCapabilitiesRequestV1(input)) as Promise<AgentCapabilitySnapshotV1>;
   }
+  getModelChoices(input: ModelChoicesRequest): Promise<ModelChoicesResult> {
+    this.#requireAgentAdapter();
+    if (!this.#nativeAdapterNegotiated) return Promise.reject(new Error("native model choices unavailable"));
+    return this.#request("agent.getModelChoices", validateModelChoicesRequest(input)) as Promise<ModelChoicesResult>;
+  }
   startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {
     return this.#requestAgent("run.startAgent", validateAgentRunStartRequestV1(input)) as Promise<AgentRunAcceptedV1>;
   }
@@ -939,6 +945,7 @@ export class SidecarClientV1 {
         assertResponseField(value, pending.params, "runtime");
         return value;
       }
+      case "agent.getModelChoices": return validateModelChoicesResult(response.result, validateModelChoicesRequest(pending.params));
       case "run.startAgent": {
         const request = validateAgentRunStartRequestV1(pending.params);
         const chat = this.#agentChatContexts.get(request.chatId);

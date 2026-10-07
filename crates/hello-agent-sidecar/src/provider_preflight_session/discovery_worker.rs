@@ -13,6 +13,9 @@ pub(crate) struct Evidence {
 
 pub(crate) struct Completion {
     pub(crate) result: Result<Evidence, SidecarError>,
+    /// Display-only, never consumed by reservation or launch paths.
+    pub(crate) display_models:
+        Option<Vec<hello_agent_core::provider::vendor_observation::codex_preflight::CatalogModel>>,
     /// Must be transferred to runtime cleanup on failure, never to a new run.
     pub(crate) cleanup: Option<LoginProcess<'static>>,
 }
@@ -22,6 +25,7 @@ impl Completion {
         Self {
             result: Err(error),
             cleanup,
+            display_models: None,
         }
     }
 }
@@ -79,18 +83,24 @@ impl DiscoveryWorker {
                     &workspace,
                     &signal,
                 ) {
-                    Ok(inspection) => match inspection.result {
-                        Ok(observation) => Completion {
-                            result: Ok(Evidence {
-                                version,
-                                observation,
-                                executable,
-                                helper,
-                            }),
-                            cleanup: None,
-                        },
-                        Err(error) => Completion::failed(error, Some(inspection.process)),
-                    },
+                    Ok(inspection) => {
+                        let display_models = inspection.display_models;
+                        let mut completion = match inspection.result {
+                            Ok(observation) => Completion {
+                                result: Ok(Evidence {
+                                    version,
+                                    observation,
+                                    executable,
+                                    helper,
+                                }),
+                                cleanup: None,
+                                display_models: None,
+                            },
+                            Err(error) => Completion::failed(error, Some(inspection.process)),
+                        };
+                        completion.display_models = display_models;
+                        completion
+                    }
                     Err(error) => Completion::failed(error, None),
                 }
             })
@@ -122,6 +132,9 @@ impl DiscoveryWorker {
             .unwrap_or_else(|_| Completion::failed(failure(), None));
         if self.cancel.load(Ordering::Acquire) && completion.result.is_ok() {
             completion.result = Err(failure());
+        }
+        if self.cancel.load(Ordering::Acquire) {
+            completion.display_models = None;
         }
         Some(completion)
     }

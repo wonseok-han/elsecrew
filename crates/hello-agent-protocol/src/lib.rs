@@ -59,6 +59,7 @@ pub const METHODS_V1: &[&str] = &[
     "run.approval",
     "project.catalog",
     "agent.getCapabilities",
+    "agent.getModelChoices",
     "run.startFixture",
     "run.startAgent",
     "run.startAgentSmoke",

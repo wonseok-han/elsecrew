@@ -979,6 +979,7 @@ impl Sidecar {
                 | "recovery.inspect"
                 | "recovery.markResolved"
                 | "agent.getCapabilities"
+                | "agent.getModelChoices"
                 | "run.startAgent"
                 | "run.cancelAgent"
                 | "recovery.inspectAgent"
@@ -987,6 +988,7 @@ impl Sidecar {
             return if matches!(
                 request.method.as_str(),
                 "agent.getCapabilities"
+                    | "agent.getModelChoices"
                     | "run.startAgent"
                     | "run.cancelAgent"
                     | "recovery.inspectAgent"
@@ -1816,6 +1818,12 @@ impl Sidecar {
 
     fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {
         use hello_agent_protocol::agent_adapter_v1::AgentRunStartRequestV1;
+        if request.method == "agent.getModelChoices" {
+            if !self.agent_runtime.uses_native_providers() || request.params["runtime"] != "codex" {
+                return Err(SidecarError::new("agentDiscoveryRejected", "model choices require a native Codex context"));
+            }
+            return self.defer_agent_capabilities(request);
+        }
         if self.agent_runtime.uses_native_providers() {
             if request.method == "run.startAgent" {
                 return self.defer_agent_start(request);
@@ -2029,7 +2037,7 @@ impl Sidecar {
         &mut self,
         request: RequestV1,
     ) -> Result<HandledRequest, SidecarError> {
-        if request.method != "agent.getCapabilities"
+        if !matches!(request.method.as_str(), "agent.getCapabilities" | "agent.getModelChoices")
             || self.pending_agent_starts.contains_key(&request.request_id)
             || self
                 .pending_agent_capabilities
@@ -2137,6 +2145,18 @@ impl Sidecar {
         }
         let ids: Vec<_> = self.pending_agent_capabilities.keys().cloned().collect();
         for id in ids {
+            if self.pending_agent_capabilities[&id].method == "agent.getModelChoices" {
+                let Some(result) = self.agent_runtime.take_scoped_model_choices(&self.storage, &self.projects, &id) else { continue; };
+                let request = self.pending_agent_capabilities.remove(&id).unwrap();
+                responses.push(match result {
+                    Ok((scope, choices)) => success_response(&request, serde_json::json!({
+                        "schemaVersion":1, "runtime":"codex", "scope":scope,
+                        "models":choices.into_iter().map(|choice| serde_json::json!({"modelSelector":choice.model,"reasoningEfforts":choice.reasoning_efforts})).collect::<Vec<_>>()
+                    })),
+                    Err(error) => error_response(&request, error.kind(), "requestBlocked", error.detail()),
+                });
+                continue;
+            }
             let result = if self.pending_agent_capabilities[&id].params["runtime"] == "claude-code" {
                 self.agent_runtime
                     .take_claude_discovery(&self.storage, &self.projects, &id)

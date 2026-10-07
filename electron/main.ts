@@ -1,3 +1,4 @@
+import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
@@ -396,6 +397,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryInspect, invoke((client, input: { recoveryId: string }) => client.inspectRecovery(input)));
   ipcMain.handle(M5_BRIDGE_V3_CHANNELS.recoveryMarkResolved, invoke((client, input: RecoveryMarkResolvedRequestV1) => client.markRecoveryResolved(input)));
   ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentGetCapabilities, invoke((client, input: AgentCapabilitiesRequestV1) => client.getAgentCapabilities(input)));
+  ipcMain.handle(MODEL_CHOICES_CHANNEL, invoke((client, input: unknown) => client.getModelChoices(validateModelChoicesRequest(input))));
   ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentStartRun, invoke((client, input: AgentRunStartRequestV1) => client.startAgentRun(input)));
   ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentCancelRun, invoke((client, input: AgentRunCancelRequestV1) => client.cancelAgentRun(input)));
   ipcMain.handle(M5_BRIDGE_V4_CHANNELS.agentRecoveryInspect, invoke((client, input: AgentRecoveryInspectRequestV1) => client.inspectAgentRecovery(input)));
