@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (저장 후 채팅 재열기 복구)
+
+- 기준 0580a78. 직전 감시 수정 진전 뒤 격리 UI를 계속했다. 화면 캡처 시 original이 나타나는 렌더 지연을 확인해 임시 runner에서만 background throttling을 해제했다(제품 설정 불변). 실제 두 채팅 전환을 진행하자 첫 채팅 재열기에서 durable eventSequence contiguous 오류를 재현했다.
+- 원인은 save-session metadata 원장 이벤트가 최신 last_message snapshot을 보존하는데 get_chat이 이를 새 메시지로 중복 반환하는 것이었다. 조회에서 연속된 완전 동일 JSON snapshot만 dedup하며 다른 내용/identity/sequence는 기존 검증으로 거절한다. 원장/마이그레이션/저장 계약은 변경하지 않았다. 기존 저장 회귀에 실제 agent detail 재조회 메시지1건/sequence1 검사를 추가했다. 최초 테스트의 page limit100은 허용 계약 밖이라50으로 바로잡았으며 최종 focused1 PASS(1.63초), sidecar build PASS, diff check PASS다. 독립 정적 검토 차단 결함 없음.
+- 최종 실제 main/preload/renderer+native sidecar의 합성 프로젝트 흐름 PASS/정상 종료: 프로젝트 선택 → 채팅1 생성 → 편집/저장 → diff 상세 → 원본 불변/사본 내용 확인 → 채팅2 생성/원본 내용 확인 → 채팅1 재열기/저장 내용 확인. /private/tmp/hello-agent-project-ui-OzasD2/project.png. 앞선 다중 채팅 실패는 이 결과로 해소됐다. 실제 계정/유료 모델은 호출하지 않았다.
+- 다음은 앱 재시작 영속성·원본 적용/폐기/복구 흐름과 나머지 제품/G6/Windows 검증이다. 전체 앱 완료/출시 합격은 아직 아니다. main/push 없음; 기존 9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (저장 알림 경합 수정·다중 채팅 UI 검증)
 
 - 기준 2200ef5, 직전은 실제 편집/저장 IPC 복구 진전이다. 실제 UI에서 자신의 저장 알림이 성공 응답보다 먼저 도착하면 draft를 충돌로 바꾸는 경합까지 재현했다. 일반 file.changed는 saving 중 보류하고 완료 뒤 bounded read/version 비교로 확인한다. clean tab도 저장 버전과 같으면 외부 변경 안내를 내지 않는다. explicit file.conflict·실제 다른 버전·조회 실패 보호와 새 draft 보존은 유지한다.
@@ -108,6 +115,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
 - **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.
 - **실제 편집 IPC 정합성(2026-10-07)**: tree 루트 빈 경로만 허용하고 파일 경로의 빈 값/탈출은 계속 거절한다. ChatRecord에서 IPC workspace 주소 네 필드만 추출해야 하며 workspace 저장 chunk/commit은 V2와 달리 saveId를 응답해야 한다. 격리 실제 UI에서 편집·저장·diff 목록/원본 불변 확인; 자신의 저장 후 외부 변경 안내가 남는 감시 UX는 후속이다.
 

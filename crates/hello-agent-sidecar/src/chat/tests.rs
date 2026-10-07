@@ -2607,6 +2607,12 @@ fn save_continuations_reject_cross_chat_and_preserve_other_workspace() {
         commit.result,
         json!({"saveId": save_id, "outcome": "committed", "version": sha256_file_version_v1(b"after")})
     );
+    let detail = fixture
+        .chats
+        .get_chat(&fixture.storage, &address_a.chat_id, 0, None, 50, true)
+        .unwrap();
+    assert_eq!(detail["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(detail["messages"][0]["eventSequence"], 1);
     let b = fixture
         .projects
         .workspace_read_file(&fixture.storage, &address_b, "src/value.txt")
