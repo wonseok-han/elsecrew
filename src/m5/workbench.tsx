@@ -228,7 +228,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       )}
 
       {snapshot.project && <section className="m5-chat-strip" aria-label={t("m5.navigation.chats")}>
-        <div className="m5-chat-list"><strong>{t("m5.navigation.chatTitle")}</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={!admissionReady || chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}{chat.refreshNeededChatIds.includes(item.chatId) && <span className="m5-chat-update">{t("m5.navigation.newState")}</span>}</button>)}</div>
+        <div className="m5-chat-list"><strong>{t("m5.navigation.chatTitle")}</strong>{chat.chats.map((item) => {
+          const selected = chat.activeChat?.chatId === item.chatId;
+          const state = selected ? chat.activeChat!.state : item.state;
+          const changed = chat.refreshNeededChatIds.includes(item.chatId);
+          const status = changed ? t("m5.navigation.newState") : t(`m5.chat.state.${state}`);
+          return <button key={item.chatId} type="button" disabled={!admissionReady || chat.switching} aria-current={selected ? "true" : undefined} title={`${item.goal} · ${status}`} className={selected ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>
+            <span className="m5-chat-goal">{item.goal}</span><span className={changed ? "m5-chat-update" : `m5-chat-status m5-chat-status-${state}`}>{status}</span>
+          </button>;
+        })}</div>
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />

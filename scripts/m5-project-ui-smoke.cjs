@@ -132,8 +132,8 @@ app.on('browser-window-created', (_event, window) => {
           await run(`document.querySelector('.m5-project-catalog > button').click()`);
           await wait(`document.querySelector('.m5-project-catalog-list li > button')!==null`);
           await run(`document.querySelector('.m5-project-catalog-list li > button').click()`);
-          await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.textContent==='Improve hello')`);
-          await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.textContent==='Improve hello').click()`);
+          await wait(`Array.from(document.querySelectorAll('.m5-chat-chip')).some(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello')`);
+          await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
         }
         await run(`Array.from(document.querySelectorAll('button')).filter(b=>b.textContent==='반영·복원 기록 확인').forEach(b=>b.click())`);
         await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='복구 기록의 파일 목록 확인')`);
@@ -149,6 +149,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`);
+      await wait(`document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-goal')?.textContent==='Second task' && Boolean(document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-status')?.textContent)`);
       console.log(JSON.stringify({stage:'SECOND_CHAT_WINDOW',visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),backgroundThrottling:window.webContents.getBackgroundThrottling(),page:await run(`({visibility:document.visibilityState,focus:document.hasFocus()})`)}));
       window.show(); window.focus(); window.webContents.focus();
       await showPanel('파일');
@@ -157,7 +158,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.monaco-editor textarea').scrollIntoView({block:'center'})`);
       await wait(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('original')`);
       if(await run(`document.querySelector('.monaco-editor .view-lines').textContent.includes('edited')`)) throw new Error('chat snapshots mixed');
-      await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.textContent==='Improve hello').click()`);
+      await run(`Array.from(document.querySelectorAll('.m5-chat-chip')).find(b=>b.querySelector('.m5-chat-goal')?.textContent==='Improve hello').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`);
       await showPanel('파일');
       await run(`Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('hello.txt')).click()`);
