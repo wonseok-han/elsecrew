@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (native 연결 후 통합 검사·시작 안내 수정)
+
+- 기준 2a524a7. 직전 턴은 macOS 제품 native 연결 진전이다. npm test 전체 431개 중 430 PASS/1 FAIL(25.39초); 유일 실패는 패키지 smoke의 예전 blocked product 목록을 요구하는 source assertion이었다. macOS native/다른 플랫폼 product 선택을 정확 검사하도록 갱신하고 해당 scaffold 5 PASS를 확인했다. 전체를 반복 실행하지 않았다.
+- pnpm m5:package:smoke 최초 실행은 fetch failed로 종료됐다. 네트워크 제한 밖 재실행에서 package 빌드·자산/fuse·포함 sidecar ready/저장소 입장/clean 종료 PASS(darwin-arm64). stdio_process 전체 13 PASS(4.48초). 외부 설치는 하지 않았으며 빌드 출력은 저장소 out 아래다. 기존 로그인/프로젝트/유료 모델은 사용하지 않았다.
+- 임시 userData의 실제 Electron main/preload/renderer+native IPC 시작 smoke를 수행했다. 최초 임시 runner의 require 경로 오류는 검사 스크립트 결함이며 해당 자체 프로세스만 종료 후 수정했다. 정상 화면에서 admission=ready인데 preparing 안내가 남는 제품 UI 결함을 발견했다. Karpathy 지침으로 차단 해제 때 preparing/settings/switching/protected 안내만 지우고 사용자 지정/다른 결과 안내는 보존했다. 편집기 관련49 PASS, renderer 재빌드 PASS, 격리 UI 재검사 PASS/정상 종료. 최종 화면은 /private/tmp/hello-agent-native-ui-xp8aTE/startup.png, 초기 화면은 /private/tmp/hello-agent-native-ui-fO4F6p/startup.png. 패키지 smoke는 안내 수정 전, 최종 UI smoke는 수정 후 소스 빌드 증거다.
+- diff check 확인. 다음은 프로젝트 선택·채팅·편집/diff/적용·실제 공급자 사용자 흐름과 나머지 G6/플랫폼 검증이다. 현재 결과를 실제 계정/모델·Windows·최종 출시 합격으로 주장하지 않는다. main/push 없음, 기존 9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (macOS 일반 앱 native 실행 연결)
 
 - 기준 951134f. 직전 턴은 native/fixture 분리 구현 진전이었다. 실제 실행 중인 기존 검토자 결과를 이어 받아 native 목록이 fixture를 자동 상속하는 마지막 계약 문제를 수정했다. Rust/TypeScript 각각 독립된 고정 목록으로 분리하고 두 목록의 exact 일치·미지 fixture 추가 거절 회귀를 추가했다. 검토는 이 수정 뒤 macOS 생성자 전환이 가능하고 기존 소유/종료/복구에서 추가 코드 차단 결함을 찾지 못했다고 판단했다. 최신 activation patch의 독립 재검토도 추가 차단 결함 없음으로 끝났다(정적 검토, 메인 실행 증거와 구분).

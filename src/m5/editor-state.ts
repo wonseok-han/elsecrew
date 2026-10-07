@@ -177,9 +177,11 @@ export class ProjectEditorController {
     return this.#state;
   }
   setActionBlocked(blocked: boolean, notice?: string | { key: EditorNoticeKey }): void {
+    const clearBlockingNotice = !blocked && this.#actionBlocked && this.#state.noticeKey !== undefined
+      && ["m5.editorNotice.preparing", "m5.editorNotice.settings", "m5.editorNotice.switching", "m5.editorNotice.protected"].includes(this.#state.noticeKey);
     if (blocked && !this.#actionBlocked) this.#selectionGeneration += 1;
     this.#actionBlocked = blocked;
-    this.#set({ actionBlocked: blocked, ...(blocked && notice ? typeof notice === "string" ? { notice } : editorNotice(notice.key) : {}) });
+    this.#set({ actionBlocked: blocked, ...(clearBlockingNotice ? { notice: null, noticeKey: undefined } : {}), ...(blocked && notice ? typeof notice === "string" ? { notice } : editorNotice(notice.key) : {}) });
   }
 
   subscribe(listener: () => void): () => void {

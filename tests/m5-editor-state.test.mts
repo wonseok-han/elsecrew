@@ -10,12 +10,14 @@ test("localized blocking notices preserve compatibility and clear stale keys", a
   assert.equal(controller.snapshot().notice, ko["m5.editorNotice.preparing"]);
   assert.equal(en[controller.snapshot().noticeKey!], "Changes cannot be made or saved while the workspace is being prepared.");
   controller.setActionBlocked(false);
-  assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.preparing");
+  assert.equal(controller.snapshot().noticeKey, undefined);
+  assert.equal(controller.snapshot().notice, null);
   assert.equal(controller.snapshot().actionBlocked, false);
   controller.setActionBlocked(true, "custom caller notice");
   assert.equal(controller.snapshot().noticeKey, undefined);
   assert.equal(controller.snapshot().notice, "custom caller notice");
   controller.setActionBlocked(false);
+  assert.equal(controller.snapshot().notice, "custom caller notice");
   await controller.chooseProject();
   assert.equal(controller.snapshot().noticeKey, undefined);
   assert.equal(controller.snapshot().notice, null);
