@@ -121,7 +121,10 @@ impl ClaudeStart {
             self.handed_off = true;
             Ok(Some(owner))
         })();
-        if result.is_err() { self.failed = true; }
+        if result.is_err() {
+            eprintln!("native Claude transport failed at control initialization");
+            self.failed = true;
+        }
         result
     }
 }
@@ -630,6 +633,7 @@ impl RunReservation {
                 Ok(())
             });
             if let Err(error) = result {
+                eprintln!("native Claude transport failed at {}", if state.initialized { "session output" } else { "session initialization" });
                 state.completion = Some(Err(error));
             }
         }

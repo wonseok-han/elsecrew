@@ -10,6 +10,12 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   const timers = new Map();
   const exits = [];
   let evidence;
+  const spawned = [];
+  const childProcess = {execFileSync: () => '', spawn(...args) {
+    const child = {stderr: new (require('node:events').EventEmitter)()};
+    spawned.push({args, child});
+    return child;
+  }};
   const app = {
     setPath() {}, on(name, callback) { events.set(name, callback); }, quit() {},
     once(name, callback) { events.set(name, callback); },
@@ -29,7 +35,7 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
         mkdtempSync: () => '/synthetic/run', mkdirSync() {}, realpathSync: value => value,
         writeFileSync(file, value) { if (file.endsWith('result.json')) evidence = JSON.parse(value); },
       };
-      if (name === 'node:child_process') return {execFileSync: () => ''};
+      if (name === 'node:child_process') return childProcess;
       if (name.endsWith('/.vite/build/main.cjs')) return {};
       if (name === './m5-process-memory.cjs') return {};
       return require(name);
@@ -40,8 +46,26 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   if (autoFinish && !projectUi) vm.runInContext(catalogOnly
     ? `outcomes.push({provider:'codex',state:'catalogObserved',models:[]});finish();`
     : `outcomes.push(...providers.map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
-  return {events,timers,exits,evidence: () => evidence};
+  return {events,timers,exits,evidence: () => evidence, childProcess, spawned};
 }
+
+test('transport diagnostics collect only fixed sidecar labels across chunks', () => {
+  const h = harness(false, false);
+  const options = {stdio:'pipe'};
+  const child = h.childProcess.spawn('/synthetic/hello-agent-sidecar', ['--stdio'], options);
+  assert.equal(child, h.spawned[0].child);
+  assert.equal(h.spawned[0].args[2], options);
+  child.stderr.emit('data', Buffer.from('PRIVATE_TOKEN\nnative Codex transport failed at turn sta'));
+  child.stderr.emit('data', Buffer.from('rt\nnative Codex transport failed at turn stream\n'));
+  child.stderr.emit('data', Buffer.from('native Codex transport failed at turn start\nnative Codex transport failed at PRIVATE_TOKEN\n'));
+  child.stderr.emit('data', Buffer.from('native Claude transport failed at session initialization\n'));
+  const unrelated = h.childProcess.spawn('/synthetic/other', []);
+  unrelated.stderr.emit('data', Buffer.from('native Codex transport failed at thread/start\n'));
+  h.timers.get(240000)();
+  assert.deepEqual(h.evidence().transportCheckpoints, ['codex:turn start', 'codex:turn stream', 'claude:session initialization']);
+  assert.ok(!JSON.stringify(h.evidence()).includes('PRIVATE_TOKEN'));
+  assert.equal(h.evidence().status, 'PENDING');
+});
 
 test('a single approved provider produces explicitly scoped evidence', () => {
   const h = harness(false, true, false, 'codex');

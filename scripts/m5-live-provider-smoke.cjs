@@ -17,6 +17,29 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', fs.realpathSync(userData));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 const outcomes = [];
+// Observe only fixed sidecar checkpoints, never export its raw stderr (which
+// may contain private provider data). This does not affect run admission.
+const transportCheckpoints = new Set();
+const childProcess = require('node:child_process');
+const originalSpawn = childProcess.spawn;
+childProcess.spawn = function (...args) {
+  const child = Reflect.apply(originalSpawn, this, args);
+  if (typeof args[0] === 'string' && path.basename(args[0]) === 'hello-agent-sidecar') {
+    let tail = '';
+    child.stderr?.on('data', chunk => {
+      const text = tail + chunk.toString('utf8');
+      const lines = text.split('\n');
+      tail = lines.pop().slice(-256);
+      for (const line of lines) {
+        const codex = /^native Codex transport failed at (thread\/start|turn start|turn stream)$/.exec(line);
+        const claude = /^native Claude transport failed at (control initialization|session initialization|session output)$/.exec(line);
+        if (codex) transportCheckpoints.add(`codex:${codex[1]}`);
+        if (claude) transportCheckpoints.add(`claude:${claude[1]}`);
+      }
+    });
+  }
+  return child;
+};
 // Separate read-only probe: a catalog PASS must never imply a model-run PASS.
 const catalogOnly = process.env.HELLO_AGENT_LIVE_MODEL_CHOICES_ONLY === '1';
 let finished = false;
@@ -28,7 +51,7 @@ function finish(error) {
   const runsPassed = !error && unchanged && (catalogOnly
     ? outcomes.length===1 && outcomes[0].state==='catalogObserved'
     : outcomes.length===providers.length && providers.every(p=>outcomes.some(o=>o.provider===p&&o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved)));
-  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', providers, outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
+  const result = {root, verificationKind:catalogOnly?'modelChoicesOnly':'actualProviderRuns', providers, outcomes, transportCheckpoints:[...transportCheckpoints], sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
   persist();
   console.log(JSON.stringify({stage:'RUNS_FINISHED',root,outcomes,sourceUnchanged:unchanged,error}));

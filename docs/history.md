@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (두 공급자 실패 단계 수집)
+
+- 기준6226ef2+직전 smoke 진단. 이전 턴은 승인된 두 실행의 실패/정상 종료 증거로 진척했다. 해당 두 실행만 readonly immutable SQLite 조회: Codex native_thread_receipt 존재, Claude claude_preflight 존재/claude_session_observation 없음, 둘 다 public_event_count0. Claude는 검증된 session 초기화 기록 전 구간이며 목표 전송 여부까지 이 증거만으로 단정하지 않는다.
+- Karpathy 지침으로 권한/종료 동작 대신 진단만 보강했다. Claude control 초기화/세션 초기화/출력 오류에 원문 없는 고정 stderr 라벨 추가. smoke는 Codex/Claude 고정 라벨만 공급자 접두어와 함께 수집한다. spawn 인수와 child 동일성·분할 chunk·중복·다른 프로세스 무시·민감 문구 비출력 포함 합성 회귀9/9 PASS, diff 검사 PASS. Rust 새 로그는 아직 재빌드하지 않았으며 실제 실패 원인 해결 주장은 없다.
+- 다음: 새 진단 포함 산출물 갱신과 승인된 실연결 증거, UI/성능/Windows 잔여 범위. 추가 실제 계정 호출/원본 변경0회. 로컬 체크포인트만 커밋하며 기존9월 archive 제외, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (두 공급자 승인 실험·응답 실패)
+
+- 기준6226ef2, 기존9월 archive 보존. 직전 턴은 파서99개/빌드/독립 검토와 커밋으로 진척했다. 이번 사용자 두 에이전트 각1회 승인 뒤 최신 debug 산출물로 session7156 실행. 둘 다 로그인 connected와 RUN_ACCEPTED였지만 Codex planning/Claude implementing에서 failed·cleanExit·응답 없음. hello-agent-live-PGfqeE/result.json은 sourceUnchanged true/shutdown accepted/FAIL, exit1. 추가 실제 호출은 하지 않는다. timestamp 수정만으로 실제 실패가 해결됐다는 주장은 반증됐다.
+- 시험에서 raw stderr는 보존하지 않아 실패 상세 단계가 결과에 없다. live runner가 정확한 sidecar 실행의 stderr 중 고정 세 라벨(thread/start, turn start, turn stream)만 결과에 수집하도록 추가했다. raw 오류/계정/출력은 내보내지 않고 원래 spawn 인수·결과·권한은 변경하지 않는다. 새 진단 코드는 이번 종료된 실행을 소급 설명하지 않으며 다음 승인된 시험에서 검증해야 한다.
+- 화면 조사에서 dock tree의 상하/좌우/탭 구현을 확인했다. architecture의 과거 '상하 분할 미완료' 문구만으로 새 구현을 중복하지 않았다. 다음: 고정 진단의 합성 검증·실패 원인 결속, 실제 연결과 UI/성능/Windows 잔여 작업. 제품 완료 아님, main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (공급자 파서 묶음 회귀·Claude fixture 정정)
 
 - 기준2bf0441+직전 turn timestamp 수정. 이전 턴은 호환 누락 수정/회귀 추가로 진척했다. 후속 TurnStream을 확인해 시작 응답과 알림의 ID 일치·타임스탬프 경계가 이어지는 것을 대조했다. 독립 검토자는 Codex 변경에 차단 결함 없음으로 승인했으며 실제 실패 원인은 아직 확정하지 않았다.
