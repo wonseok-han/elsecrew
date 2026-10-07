@@ -110,17 +110,20 @@ fn open(parent: &Dir, create: bool) -> Result<Dir, SidecarError> {
     }
     for entry in dir.entries().map_err(|_| failure())? {
         let entry = entry.map_err(|_| failure())?;
-        let name = entry.file_name();
-        let name = name.to_str().ok_or_else(failure)?;
-        let directory = matches!(name, "backups" | "debug" | "cache" | "tmp");
-        if !directory && !matches!(name, "settings.json" | ".claude.json" | ".credentials.json") {
+        let file_name = entry.file_name();
+        let folded = file_name.to_str().ok_or_else(failure)?.to_ascii_lowercase();
+        let name = folded.as_str();
+        if matches!(name, "agents.md" | "claude.md" | "settings.local.json" | ".mcp.json") {
             return Err(failure());
         }
-        let meta = dir.symlink_metadata(name).map_err(|_| failure())?;
+        let meta = dir.symlink_metadata(&file_name).map_err(|_| failure())?;
+        // Permit evolving vendor artifacts by structure; app settings and
+        // credential constraints below remain exact and never get rewritten.
         if meta.uid() != unsafe { libc::geteuid() }
             || meta.mode() & 0o022 != 0
-            || (directory && !meta.is_dir())
-            || (!directory && (!meta.is_file() || meta.nlink() != 1))
+            || !(meta.is_dir() || (meta.is_file() && meta.nlink() == 1))
+            || (matches!(name, "backups" | "debug" | "cache" | "tmp") && !meta.is_dir())
+            || (matches!(name, "settings.json" | ".claude.json" | ".credentials.json") && !meta.is_file())
             || (name == ".credentials.json" && meta.mode() & 0o777 != 0o600)
         {
             return Err(failure());
@@ -204,6 +207,50 @@ mod tests {
         );
         assert!(codex.revalidate().is_ok());
     }
+    #[test]
+    fn vendor_artifacts_are_structural_not_version_named() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let profile = ClaudeProfileBinding::from_storage(&storage).unwrap();
+        let home = profile.revalidate().unwrap();
+        for name in ["sessions", "seed-admin", "future-vendor-directory"] {
+            std::fs::create_dir(home.join(name)).unwrap();
+        }
+        for name in ["policy-limits.json", "policy-limits.json.stamp.json", "future-vendor-cache"] {
+            std::fs::write(home.join(name), b"synthetic").unwrap();
+        }
+        profile.revalidate().unwrap();
+        let artifact = home.join("future-vendor-cache");
+        std::fs::set_permissions(&artifact, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(profile.revalidate().is_err());
+        std::fs::set_permissions(&artifact, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::hard_link(&artifact, home.join("shared")).unwrap();
+        assert!(profile.revalidate().is_err());
+        std::fs::remove_file(home.join("shared")).unwrap();
+        symlink(&artifact, home.join("link")).unwrap();
+        assert!(profile.revalidate().is_err());
+        assert_eq!(std::fs::read(artifact).unwrap(), b"synthetic");
+    }
+
+    #[test]
+    fn instruction_aliases_are_rejected_without_mutation_in_both_profiles() {
+        for name in ["agents.md", "claude.md", "SETTINGS.LOCAL.JSON", ".MCP.JSON"] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let claude = ClaudeProfileBinding::from_storage(&storage).unwrap();
+            let codex = crate::provider_profile::CodexProfileBinding::from_storage(&storage).unwrap();
+            for home in [claude.revalidate().unwrap(), codex.revalidate().unwrap()] {
+                std::fs::write(home.join(name), b"synthetic instructions").unwrap();
+                std::fs::set_permissions(home.join(name), std::fs::Permissions::from_mode(0o600)).unwrap();
+                assert_eq!(std::fs::read(home.join(name)).unwrap(), b"synthetic instructions");
+            }
+            assert!(claude.revalidate().is_err(), "{name}");
+            assert!(codex.revalidate().is_err(), "{name}");
+        }
+    }
+
     #[test]
     fn profile_symlink_is_not_followed() {
         let temp = tempfile::tempdir().unwrap();

@@ -12,6 +12,10 @@ use std::path::{Component, Path, PathBuf};
 
 #[cfg(target_os = "macos")]
 mod stale_helper;
+#[cfg(target_os = "macos")]
+mod runtime_files;
+#[cfg(target_os = "macos")]
+pub(crate) use runtime_files::verify_codex_runtime_files;
 
 pub(crate) const CODEX_PROFILE_DIRECTORY: &str = "codex-profile-v1";
 pub(crate) trait LoginProfile: Sync {
@@ -80,40 +84,32 @@ fn profile_directory(app_data: &Dir, create_missing: bool) -> Result<Dir, Sideca
         return Err(failure());
     }
     let profile = Dir::from_std_file(handle.into_std());
-    // Login-only profile contract: only the pinned vendor's observed runtime
-    // artifact names below are admitted; arbitrary existing profiles are rejected.
+    // Vendor artifact names evolve. Preserve structural ownership checks and
+    // exact app-managed config/credential checks, not a version-specific name list.
     for entry in profile.entries().map_err(|_| failure())? {
         let entry = entry.map_err(|_| failure())?;
-        if entry.file_name() != "config.toml" && entry.file_name() != "auth.json" {
-            let name = entry.file_name();
-            let name = name.to_str().ok_or_else(failure)?;
-            let directory = matches!(name, "skills" | "tmp" | ".tmp" | "plugins");
-            let database = [
-                "goals_1.sqlite",
-                "logs_2.sqlite",
-                "memories_1.sqlite",
-                "queue_1.sqlite",
-                "state_5.sqlite",
-            ]
-            .iter()
-            .any(|base| {
-                name == *base || name == format!("{base}-shm") || name == format!("{base}-wal")
-            });
-            if !directory && !database && !matches!(name, "installation_id" | "models_cache.json") {
+        let file_name = entry.file_name();
+        let folded = file_name.to_str().ok_or_else(failure)?.to_ascii_lowercase();
+        let name = folded.as_str();
+        if name != "config.toml" && name != "auth.json" {
+            if matches!(name, "agents.md" | "claude.md" | "settings.local.json" | ".mcp.json") {
                 return Err(failure());
             }
-            let meta = profile.symlink_metadata(name).map_err(|_| failure())?;
+            let meta = profile.symlink_metadata(&file_name).map_err(|_| failure())?;
+            let requires_directory = matches!(name, "skills" | "tmp" | ".tmp" | "plugins");
+            let requires_file = matches!(name, "installation_id" | "models_cache.json")
+                || name.ends_with(".sqlite") || name.ends_with(".sqlite-wal") || name.ends_with(".sqlite-shm");
             if meta.uid() != unsafe { libc::geteuid() }
                 || meta.permissions().mode() & 0o022 != 0
-                || (directory && !meta.is_dir())
-                || (!directory && (!meta.is_file() || meta.nlink() != 1))
+                || !(meta.is_dir() || (meta.is_file() && meta.nlink() == 1))
+                || (requires_directory && !meta.is_dir()) || (requires_file && !meta.is_file())
             {
                 return Err(failure());
             }
         }
-        if entry.file_name() == "auth.json" {
+        if name == "auth.json" {
             let metadata = profile
-                .symlink_metadata("auth.json")
+                .symlink_metadata(&file_name)
                 .map_err(|_| failure())?;
             if !metadata.is_file()
                 || metadata.uid() != unsafe { libc::geteuid() }
@@ -617,9 +613,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_profile_artifacts_without_mutation() {
+    fn accepts_new_vendor_names_but_rejects_instruction_files_without_mutation() {
         let temp = tempfile::tempdir().unwrap();
         let profile = prepare_codex_profile(&root(&temp)).unwrap();
+        profile.write("future-vendor-cache", b"synthetic cache").unwrap();
+        profile.create_dir("future-vendor-directory").unwrap();
+        prepare_codex_profile(&root(&temp)).unwrap();
         profile
             .write("AGENTS.md", b"unexpected instructions")
             .unwrap();

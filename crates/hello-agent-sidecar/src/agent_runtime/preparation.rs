@@ -450,7 +450,14 @@ impl RunReservation {
         self.validate_text_input(storage, projects)
             .map_err(|_| failure())?;
         let home = process.codex_preflight_home()?;
-        crate::provider_profile::verify_runtime_files(&home)?;
+        let verify_profile = || {
+            if mode == CodexLaunchMode::NamedTools {
+                crate::provider_profile::verify_codex_runtime_files(&home, executable)
+            } else {
+                crate::provider_profile::verify_runtime_files(&home)
+            }
+        };
+        verify_profile()?;
         let expected = ExpectedProfile {
             model: &profile.model_selector,
             reasoning_effort: profile.reasoning_effort.as_deref().ok_or_else(failure)?,
@@ -476,7 +483,7 @@ impl RunReservation {
             });
             executable.revalidate().map_err(std::io::Error::other)?;
             helper.revalidate().map_err(std::io::Error::other)?;
-            crate::provider_profile::verify_runtime_files(&home).map_err(std::io::Error::other)?;
+            verify_profile().map_err(std::io::Error::other)?;
             if cancel.load(std::sync::atomic::Ordering::Acquire) {
                 return Err(std::io::Error::other("provider launch canceled"));
             }
@@ -977,7 +984,11 @@ impl RunReservation {
             return Err(failure());
         }
         let home = process.codex_preflight_home()?;
-        crate::provider_profile::verify_runtime_files(&home)?;
+        // Named scope above revalidates the selected signed executable and its
+        // vendor helper links. Legacy outer-sandbox scope stays link-free.
+        if !process.uses_named_scope() {
+            crate::provider_profile::verify_runtime_files(&home)?;
+        }
         self.observe_process(storage, process)?;
         if cancel.load(std::sync::atomic::Ordering::Acquire) {
             return Err(failure());

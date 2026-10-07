@@ -27,7 +27,7 @@ impl Scope {
     pub(crate) fn revalidate(&self) -> Result<(), SidecarError> {
         self.executable.revalidate()?;
         self.helper.revalidate()?;
-        crate::provider_profile::verify_runtime_files(&self.home)
+        crate::provider_profile::verify_codex_runtime_files(&self.home, &self.executable)
     }
 }
 

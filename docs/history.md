@@ -1,10 +1,24 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (승인된 프로필 호환성 수정 구현)
+
+- 사용자 명시 승인으로 직전 프로필 계약 변경 대기를 해소했다. 기준c2c3513, 기존 검토/대기 기록과9월 archive 변경을 보존한다. vendor 생성물은 이름 목록 대신 owner/mode/real-directory·single-link regular-file로 검사하되 고정 config/credential·기존 경로 타입·지시 파일 거절을 유지하도록 Codex/Claude profile을 수정했다. 결정은 제안서§6.9와 현행 구조에 별도 기록한다.
+- Codex 전용 bounded no-follow scanner를 추가해 현재 선택·재검증된 executable에 결속된 tmp/arg0 helper3종 링크와 regular .lock만 예외로 둔다. signature 검증 호출 경로, named launch/release/approval 재확인에 연결하고 일반 workspace·Claude·legacy outer 경로는 그대로 유지한다. macOS symlink mode0777 자체는 의미 있는 쓰기 권한 검사가 아니므로 owner/target/위치로 검사한다. 생성물/인증을 삭제하거나 실제 provider를 실행하지 않았다.
+- 첫 회귀의 기존 경로 타입2건 실패는 타입 제약 복원으로 수정했다. profile 회귀15 PASS/4실계정 ignored. 추가 executable replacement 회귀의 초기 fixture 실행 bit 누락은700으로 바로잡아 재실행 중이다. Karpathy 지침으로 공통 scanner를 완화하지 않고 scoped 변경에 한정했다. 동일 독립 검토자에게 승인 범위와 현재 patch 재검토를 요청했고 결과 대기다. 실제 모델 시험은 독립 검토 뒤 이어가며 제품 완료/연결 성공을 주장하지 않는다.
+- 후속 결과: executable 교체 회귀 PASS, 독립 검토의 case-insensitive instruction alias 거절 누락을 수정하고 Codex/Claude 양쪽 회귀를 추가했다. 정상 .lock·dangling codex-execve-wrapper 및 동일 내용/권한의 inode 교체 검사를 보강했다. 최신 profile suite17 PASS/4실계정 ignored(3.62초), 동일 검토자 재검토 대기다. known-type·credential 이름도 ASCII-fold해 case alias를 같은 경계로 다루며 signature/프로필 신원 검사는 유지한다.
+- 최신 main/preload/renderer build는 통과했다. 최초 Forge package는 sandbox fetch failed로 실패했으나 허용된 네트워크 재시도에서 darwin-arm64 package PASS(release Rust14.70초), 최신 debug bin build PASS(2.53초)다. 잔류 live smoke process 없음도 확인했다. 독립 재검토와 실연결 성공은 별도이며 이번 commit은 구현 체크포인트다.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 계약 승인 대기·자동 반복 중단)
+
+- HEAD c2c3513과 미커밋 검토 기록/기존9월 archive를 재확인했다. 직전 턴은 시험 종료 판정 수정의 진척이었으나 프로필 admission 계약 승인은 없는 상태다. 동일 승인 경계가 최초 확인 요청부터3개 연속 goal turn에 유지됐다. 실행 전 실패 재현·원인 분리·독립 검토·종료 안내·시험 판정 보완을 마쳤고, 재시험 반복이나 무관한 수정으로 실제 연결 마감을 대체하지 않는다.
+- 다음 실제 연결 수정은 정상 vendor 생성물의 구조 기반 허용과 selected signed Codex 실행 파일에 결속된 helper 링크 예외라는 계약 변경 방향을 사용자가 확인해야 한다. 승인 전 일반 scanner·프로필 허용 조건·실행 권한을 변경하지 않는다. 전체 완료가 아니며 goal은 승인 대기 blocked로 전환 요청한다. 새 모델 호출·파일 삭제·main 병합·push 없음. 작업 기억은 미커밋으로 보존한다.
+
 ### 2026-10-07 · by GPT-6 Astra (실연결 시험 종료 판정 보완)
 
 - 기준10bf79e, 직전 프로필 계약 검토 기록과 기존9월 archive를 보존했다. 자동 목표 계속 메시지는 프로필 admission 변경 승인으로 간주하지 않았다. 해당 변경은 사용자 확인 대기이며 진행 중인 동일 검토자를 중복 호출하지 않았다.
 - 실연결 runner가 app.quit 전에 PASS/FAIL을 출력하던 문제를 고쳤다. 작업 결과는 RUNS_FINISHED와 PENDING으로 먼저 보존하고 정상 will-quit가 관측돼야 shutdown=accepted와 최종 판정을 기록한다.15초 내 미관측은 notConfirmed/FAIL로 남기며 강제 종료하지 않는다. OS 프로세스 소멸 증거와 앱의 종료 승인 관측은 구분한다.
 - Karpathy 지침으로 제품 종료 권한이나 프로필 허용 조건을 바꾸지 않고 시험 판정만 수정했다. 전체 runner를 mock Electron/메모리 filesystem에서 실행하는 회귀2 PASS(종료 전 PASS 금지·종료 차단 시 강제 exit0 금지), 문법/diff 검사 통과. 실제 모델·인증·프로젝트 호출 없음. 연결 결함과 전체 제품 완료는 여전히 미완료이며 main/push 없음.
+- 이후 동일 검토자의 최종 결과를 수신했다. 현재 failure-stage 변경에 차단 결함은 없으며, 권고 범위는 Claude 관측4항목의 엄격한 mode/type 검사와 Codex selected executable 결속 예외까지다. 임의 vendor 파일명의 일반 구조 기반 허용을 검토자가 승인한 것은 아니다. 사용자 방향 확정 후 구체 패치에 대해 별도 동일 검토자의 재검토가 필요하다.
 
 ### 2026-10-07 · by GPT-6 Astra (프로필 호환 계약 검토·승인 경계)
 

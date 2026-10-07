@@ -552,6 +552,8 @@ G5D 완료 뒤 실제 adapter를 연결한다. 기존 `core/provider.rs`의 exac
 
 ### 6.9 실행 격리 책임 재선택 (2026-10-01 사용자 승인, 제품 연결 전)
 
+**2026-10-07 사용자 확정 — 업데이트와 프로필 생성물**: 정상 공급자 생성물은 고정 파일명 허용 목록 대신 소유권·권한·파일 구조로 검사한다. 앱 고정 설정·credential 파일의 기존 제약과 프로필 디렉터리 신원 검사는 유지한다. 알려진 설정/지시 파일을 임의 허용하거나 읽어 실행 권한을 얻는 정책이 아니다. Codex 임시 도구 링크는 선택한 공식 서명 실행 파일에 결속된 전용 검사에서만 허용하며 일반 프로젝트/작업 사본과 Claude의 링크 거절은 유지한다. 이 결정은 실제 연결 성공·모든 미래 CLI 호환성을 보장하지 않으며 구체 패치의 독립 검토·회귀가 필요하다.
+
 **공식 계약 재확인(2026-10-01)**: [App Server thread 시작](https://learn.chatgpt.com/docs/app-server#start-or-resume-a-thread)은 named profile 사용에 experimentalApi=true와 permissions/sandbox 상호 배타를 요구한다. 실제 cwd로 permissionProfile/list를 조회해 관리 정책상 허용을 확인해야 한다. 별도 beta handshake 후보는 이 후속 검증을 대체하지 않으며 기존 stable thread 응답을 새 정책 보호 증거로 사용하지 않는다.
 
 현재 두 공급자의 로그인 설치 입장은 공급자 서명 검증으로 전환했지만 실제 모델 실행은 여전히 비활성이다. 기존 outer 정책은 인증 PROFILE 읽기/쓰기를 모든 자손에게 상속한다. 승인된 임시 sentinel 시험에서 이 정책 아래 Codex 내부 도구 sandbox 적용은 exit71로 실패했다. 이는 해당 조합의 실패이며 모든 macOS 중첩 방식의 불가능 증거가 아니다.
