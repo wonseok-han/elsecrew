@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실연결 시험 종료 판정 보완)
+
+- 기준10bf79e, 직전 프로필 계약 검토 기록과 기존9월 archive를 보존했다. 자동 목표 계속 메시지는 프로필 admission 변경 승인으로 간주하지 않았다. 해당 변경은 사용자 확인 대기이며 진행 중인 동일 검토자를 중복 호출하지 않았다.
+- 실연결 runner가 app.quit 전에 PASS/FAIL을 출력하던 문제를 고쳤다. 작업 결과는 RUNS_FINISHED와 PENDING으로 먼저 보존하고 정상 will-quit가 관측돼야 shutdown=accepted와 최종 판정을 기록한다.15초 내 미관측은 notConfirmed/FAIL로 남기며 강제 종료하지 않는다. OS 프로세스 소멸 증거와 앱의 종료 승인 관측은 구분한다.
+- Karpathy 지침으로 제품 종료 권한이나 프로필 허용 조건을 바꾸지 않고 시험 판정만 수정했다. 전체 runner를 mock Electron/메모리 filesystem에서 실행하는 회귀2 PASS(종료 전 PASS 금지·종료 차단 시 강제 exit0 금지), 문법/diff 검사 통과. 실제 모델·인증·프로젝트 호출 없음. 연결 결함과 전체 제품 완료는 여전히 미완료이며 main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 호환 계약 검토·승인 경계)
+
+- 기준10bf79e, 기존9월 archive만 dirty. 직전 턴은 종료 안내 구현과 재현 증거 확보의 진척이다. 같은 읽기 전용 검토자 provider_profile_compat_review의 중간 결과를 수신했다. 일반 workspace/runtime scanner의 링크 거절을 완화하거나 생성물을 지우는 수정은 금지하며 Codex 전용 selected signed executable 결속 예외와 Claude 생성물 허용은 명시적 프로필 admission 계약 변경으로 구분해야 한다.
+- 검토자의 최소 수정안은 Claude의 관측된4개 top-level 항목을 기존 no-follow/owner/mode/nlink 검사 아래 허용하고, Codex의 정확한 tmp/arg0 helper leaf만 현재 선택·재검증된 signed Codex 실행 파일에 결속해 검사하는 것이다. wrong target/추가 leaf/다른 위치 링크·hardlink/교체를 계속 거절하며 workspace scanner는 변경하지 않는다. 제품 패치는 아직 작성하지 않았다.
+- 사용자의 업데이트 호환 요구에는 파일명 허용 목록을 계속 늘리는 임시 해결만으로 부족하다. 따라서 고정 앱 설정·credential·프로필 신원은 엄격히 유지하고 vendor 생성물은 구조/소유권/권한으로 검사하는 방향을 제안하되, 아직 승인/안전 검토 완료 사실로 취급하지 않는다. 계약 변경 방향의 사용자 확인이 필요하며 그 전 실행 권한을 확대하지 않는다. 이번 턴 코드/실제 실행/검증 재실행 없음, 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (종료 차단 안내·실제 프로필 호환성 재현)
 
 - 기준4b1e6b4. before-quit가 복구 blocker/sidecar 오류를 삼켜 창만 남던 경로에 고정 사유의 OS 언어(한국어/영어) 안내를 연결했다. 중복 종료 요청은 같은 처리와 안내를 공유하고 닫은 뒤 명시 재시도할 수 있다. 강제 종료 버튼·clean marker 우회·raw stderr 전달은 추가하지 않았다. 관련 종료 회귀4 PASS, TypeScript PASS. 실제 새 main UI는 아직 미검증이다.

@@ -20,10 +20,27 @@ function finish(error) {
   if (finished) return;
   finished = true; clearTimeout(timer);
   const unchanged = execFileSync('/usr/bin/git', ['status','--porcelain'], {cwd:source,encoding:'utf8'}).trim() === '';
-  const result = {root, outcomes, sourceUnchanged:unchanged, error, status:!error && unchanged && outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved)?'PASS':'FAIL'};
-  fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
-  console.log(JSON.stringify(result));
-  app.once('will-quit', () => app.exit(result.status==='PASS'?0:1));
+  const runsPassed = !error && unchanged && outcomes.length===2 && outcomes.every(o=>o.state==='succeeded'&&o.terminationOutcome==='cleanExit'&&o.responseObserved);
+  const result = {root, outcomes, sourceUnchanged:unchanged, error, shutdown:'pending', status:'PENDING'};
+  const persist = () => fs.writeFileSync(path.join(root,'result.json'), JSON.stringify(result,null,2));
+  persist();
+  console.log(JSON.stringify({stage:'RUNS_FINISHED',root,outcomes,sourceUnchanged:unchanged,error}));
+  // A successful model response is not proof that app cleanup accepted exit.
+  // Preserve failure evidence without killing the app or bypassing its blockers.
+  const shutdownTimer = setTimeout(() => {
+    result.shutdown = 'notConfirmed';
+    result.status = 'FAIL';
+    persist();
+    console.log(JSON.stringify(result));
+  }, 15000);
+  app.once('will-quit', () => {
+    clearTimeout(shutdownTimer);
+    result.shutdown = 'accepted';
+    result.status = runsPassed ? 'PASS' : 'FAIL';
+    persist();
+    console.log(JSON.stringify(result));
+    app.exit(result.status==='PASS'?0:1);
+  });
   app.quit();
 }
 app.on('browser-window-created', (_event, window) => {
