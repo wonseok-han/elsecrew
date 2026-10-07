@@ -31,6 +31,18 @@ fn error() -> ProviderError {
 }
 
 impl ModelFreeExchange {
+    /// Fixed diagnostic label only; never exposes an observed account/config value.
+    pub(super) fn diagnostic_stage(&self) -> &'static str {
+        match self.next {
+            0 => "initialize",
+            1 => "config/read",
+            2 => "account/read",
+            3 => "model/list",
+            4 => "configRequirements/read",
+            5 => "permissionProfile/list",
+            _ => "complete",
+        }
+    }
     pub(super) fn awaiting_reply(&self) -> bool {
         self.pending && !self.failed
     }
@@ -215,6 +227,7 @@ mod tests {
             let wire: serde_json::Value =
                 serde_json::from_str(request.lines().last().unwrap()).unwrap();
             assert_eq!(wire["id"], id);
+            assert_eq!(wire["method"], exchange.diagnostic_stage());
             if id == 51 {
                 assert_eq!(wire["method"], "permissionProfile/list");
                 assert_eq!(

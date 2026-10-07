@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (승인된 시험 앱 종료·Claude 정상 잠금 복구)
+
+- 사용자 승인 범위의 임시 시험 앱 PID9578을 TERM 후 KILL로 종료했다. Codex RPC 실패 위치를 공급자 원문 없이 고정 단계명으로 표시하고 회귀를 보강했다. Karpathy 지침에 따라 허용 조건·인증정보·사용자 원본은 변경하지 않았다. focused core1 PASS, sidecar debug build PASS, runner 회귀2 PASS, diff 검사 PASS. rustfmt --check는 기존 sidecar 파일/하위 모듈 포맷 차이를 보고했으며 관련 없는 대량 재포맷은 하지 않았다.
+- runner에 명시 opt-in Claude recover 호출을 추가했다. 첫 호출은 필수 attemptId 누락으로 거절돼 보완했고, 해당 시험 앱 PID28303도 승인 범위에서 종료했다. 후속 정상 recover는 idle/error=null로 성공했으며 Codex와 Claude 모두 login.check connected였다. 잠금 파일을 임의 삭제하지 않았고 재로그인하지 않았다.
+- 최신 임시 시험 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-QwEFlZ/result.json. Codex는 config/read 관측 검증에서 차단, Claude 준비 중 sidecar exit70으로 실패했다. 모델 start/목표 전달0회, 임시 원본 unchanged. 로그인 복구와 실제 작업 성공은 별개다. 다음은 config/read 불일치와 sidecar 종료 원인 수정이며 전체 완료 아님. 기존9월 archive 보존, main/push 없음.
+- 마지막 잔류 시험 앱 PID30313도 TERM 후 KILL로 정리했다. 정상 종료 성공으로 판정하지 않으며 실패 증거와 인증 상태를 보존한다.
+
+### 2026-10-07 · by GPT-6 Astra (프로필 독립 검토 통과·실연결 후속 차단)
+
+- 8bccd16의 호환성 patch는 동일 독립 검토자의 재검토에서 남은 차단 결함 없음으로 마감했다(검토자 자체 실계정/테스트 재실행 없음). main/preload/renderer·release package build와 package smoke PASS. 기존 프로필 생성물 거절 수정과 전체 실연결 성공은 구분한다.
+- 승인된 모델 각1회 한도 내 실제 runner session41315를 실행했다. Codex login connected 뒤 기존 runtime file isolation 오류를 넘어 provider settings could not be verified에서 차단됐다. Claude는 이전 실패의 providerLoginRecoveryRequired로 차단된다. startAgentRun/목표 전달은 아직0회, 임시 원본 clean. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-HpNO8c/result.json.
+- 종료15초 내 승인 미관측으로 새 runner가 shutdown=notConfirmed/FAIL을 정확히 기록했다. session41315는 아직 live이고 native UI에서도 시험 창이 남아 있음을 확인했다. 이번 새 시험 앱을 강제 종료하거나 복구 fence를 삭제하지 않았다. 다음은 이 handle의 실제 상태·정상 복구 경로와 Codex 설정 관측 실패 분기를 확인하는 것이다. 제품 완료 아님, 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (승인된 프로필 호환성 수정 구현)
 
 - 사용자 명시 승인으로 직전 프로필 계약 변경 대기를 해소했다. 기준c2c3513, 기존 검토/대기 기록과9월 archive 변경을 보존한다. vendor 생성물은 이름 목록 대신 owner/mode/real-directory·single-link regular-file로 검사하되 고정 config/credential·기존 경로 타입·지시 파일 거절을 유지하도록 Codex/Claude profile을 수정했다. 결정은 제안서§6.9와 현행 구조에 별도 기록한다.

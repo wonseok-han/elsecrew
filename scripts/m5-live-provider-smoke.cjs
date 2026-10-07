@@ -52,6 +52,10 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
       const connected = {};
       for(const provider of ['codex','claude']) {
+        if (process.env.HELLO_AGENT_APPROVED_LOGIN_RECOVERY === provider) {
+          const recovery = await run(`window.m5Login.request({action:'recover',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(s=>({state:s.state,error:s.error}))`);
+          console.log(JSON.stringify({stage:'LOGIN_RECOVERY',provider,...recovery}));
+        }
         await run(`window.m5Login.request({action:'check',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(()=>null)`);
         await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['diagnosing','starting','verifying'].includes(s.state))`);
         connected[provider] = await run(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>({state:s.state,error:s.error}))`);

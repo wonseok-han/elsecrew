@@ -29,6 +29,13 @@ fn failure() -> SidecarError {
     )
 }
 
+fn stage_failure(stage: &'static str) -> SidecarError {
+    SidecarError::new(
+        "providerPreflightFailed",
+        format!("Codex preflight failed at {stage}"),
+    )
+}
+
 /// Internal discovery entry point for a separately admitted executable pair.
 /// Does not create a thread, send user input, or grant runtime execution authority.
 pub(crate) struct ProviderInspection<'a, T = ()> {
@@ -230,7 +237,7 @@ pub(crate) fn inspect_named_preflight_candidate(
         if !process.matches_named_scope(workspace, permission) {
             // A rejected scope still belongs to this inspection and must close.
             let _ = process.finish();
-            return Err(failure());
+            return Err(stage_failure("named launch scope"));
         }
         observe_and_close(&mut process, &mut flow, cancel)?;
         // Do not retain an observation if executable/profile identity changed
@@ -563,10 +570,11 @@ fn check_claimed(
         }
         #[cfg(test)]
         let previous = flow.state();
+        let stage = flow.diagnostic_stage();
         let accepted = flow.accept(&reply);
         #[cfg(test)]
         eprintln!("preflight stage={previous:?} accepted={}", accepted.is_ok());
-        let state = accepted.map_err(|_| failure())?;
+        let state = accepted.map_err(|_| stage_failure(stage))?;
         if state == PreflightState::ConfigurationMatched {
             return if thread_cwd.is_none() {
                 Ok(())

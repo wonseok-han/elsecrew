@@ -126,6 +126,14 @@ impl PreflightExchange {
         self.state
     }
 
+    pub fn diagnostic_stage(&self) -> &'static str {
+        match self.state {
+            PreflightState::Checking => self.rpc.diagnostic_stage(),
+            PreflightState::ThreadStarting | PreflightState::ThreadMatched => "thread/start",
+            _ => "exchange state",
+        }
+    }
+
     /// An account notification is not the correlated RPC response. Keep reading
     /// under the same owner/deadline without sending another request.
     pub fn awaiting_response(&self) -> bool {
