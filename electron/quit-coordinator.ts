@@ -6,6 +6,7 @@ export interface QuitCoordinatorOptionsV1 {
   prepareSidecarQuit(): Promise<PrepareQuitResultV1>;
   failedBeforeReady(): boolean;
   allowProcessExit(kind: ExitKindV1): void;
+  notifyQuitBlocked?(reason: "recoveryRequired" | "unavailable"): void | Promise<void>;
 }
 
 /** Main-owned only: renderer calls cannot turn an unavailable startup into clean exit. */
@@ -13,6 +14,7 @@ export class QuitCoordinatorV1 {
   readonly #options: QuitCoordinatorOptionsV1;
   #exitAllowed = false;
   #inFlight: Promise<PrepareQuitResultV1> | undefined;
+  #handlingBeforeQuit = false;
 
   constructor(options: QuitCoordinatorOptionsV1) {
     this.#options = options;
@@ -59,8 +61,18 @@ export class QuitCoordinatorV1 {
       this.#options.allowProcessExit("uncleanStartupFailure");
       return;
     }
-    void this.prepareQuit().catch(() => {
-      // The before-quit handler has prevented exit; an unsafe error keeps the app alive.
-    });
+    if (this.#handlingBeforeQuit) return;
+    this.#handlingBeforeQuit = true;
+    void this.prepareQuit().then(
+      async (result) => {
+        if (!result.safeToQuit) await this.#options.notifyQuitBlocked?.("recoveryRequired");
+      },
+      async () => {
+        // No raw provider error or credential-bearing stderr reaches the dialog.
+        await this.#options.notifyQuitBlocked?.("unavailable");
+      },
+    ).catch(() => {
+      // A failed notification never grants permission to exit.
+    }).finally(() => { this.#handlingBeforeQuit = false; });
   }
 }

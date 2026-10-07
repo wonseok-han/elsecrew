@@ -1269,6 +1269,42 @@ test("persistent login recovery remains blocked after the bounded quit retry bud
   assert.deepEqual(exits, []);
 });
 
+test("unsafe quit reports a fixed reason once while its notification is open", async () => {
+  for (const unavailable of [false, true]) {
+    const notices: string[] = [];
+    const exits: string[] = [];
+    let release!: () => void;
+    let calls = 0;
+    const coordinator = new QuitCoordinatorV1({
+      prepareSidecarQuit: async () => {
+        calls += 1;
+        if (unavailable) throw new Error("private provider stderr");
+        return { safeToQuit: false, blockers: ["recovery_01"] };
+      },
+      failedBeforeReady: () => false,
+      allowProcessExit: kind => { exits.push(kind); },
+      notifyQuitBlocked: reason => {
+        notices.push(reason);
+        return new Promise<void>(resolve => { release = resolve; });
+      },
+    });
+    coordinator.handleBeforeQuit();
+    coordinator.handleBeforeQuit();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    coordinator.handleBeforeQuit();
+    assert.equal(calls, 1);
+    assert.deepEqual(notices, [unavailable ? "unavailable" : "recoveryRequired"]);
+    assert.equal(coordinator.exitAllowed, false);
+    assert.deepEqual(exits, []);
+    release();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    coordinator.handleBeforeQuit();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(calls, 2, "dismissed notification permits an explicit retry");
+    release();
+  }
+});
+
 test("pre-ready startup failure permits one explicitly unclean app close without re-entering quit", () => {
   let sidecarCalls = 0;
   const exits: string[] = [];

@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (종료 차단 안내·실제 프로필 호환성 재현)
+
+- 기준4b1e6b4. before-quit가 복구 blocker/sidecar 오류를 삼켜 창만 남던 경로에 고정 사유의 OS 언어(한국어/영어) 안내를 연결했다. 중복 종료 요청은 같은 처리와 안내를 공유하고 닫은 뒤 명시 재시도할 수 있다. 강제 종료 버튼·clean marker 우회·raw stderr 전달은 추가하지 않았다. 관련 종료 회귀4 PASS, TypeScript PASS. 실제 새 main UI는 아직 미검증이다.
+- 사용자에게 잔류 시험 앱 강제 종료·복구 확인 승인을 받고 PID51171의 정확한 시험 runner 명령을 재확인했다. TERM 뒤에도 살아 있어 동일 PID에 KILL을 보냈고 session90464 exit1/SIGKILL을 확인했다. 다른 앱·인증정보·사용자 프로젝트는 건드리지 않았다. Rust debug 재빌드 PASS(3.16초) 뒤 승인 한도 내 재시도는 session60915 exit1로 정상 끝났고 모델 목표 전달은 여전히0회다.
+- 새 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-T8e4pa/result.json: Codex connected이나 runtime file isolation scan 거절로 차단, Claude login.check는 providerProfileUnavailable로 변경됐다. 메타데이터만 확인한 Claude profile에 sessions/seed-admin/policy-limits.json/policy-limits.json.stamp.json이 추가돼 현재 top-level allowlist와 충돌한다. Codex tmp/arg0 vendor helper symlink도 다시 관측했다. 기존 인증을 삭제하거나 새 파일을 임의 제거하지 않았다.
+- Karpathy 지침으로 진단과 종료 안내를 분리했고 안전 허용 조건은 아직 바꾸지 않았다. 상시 승인된 읽기 전용 검토자1명에게 정상 vendor 생성물과 안전 검사 간 호환 수정 범위를 검토 요청했다. 실제 실행 성공·복구/출시 완료는 미완료, 기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (실행 전 실패 단계 분리)
 
 - 기준a6fb8c1. 직전 턴은 두 로그인 유지와 서로 다른 실행 전 실패를 확보한 진척이었다. 이번에는 일반 프로필 검증과 runtime file isolation scan 거절을 분리하고 Claude 초기화의 연결 상태/취소/응답 제한시간/응답 검증/모델·추론·hook·권한 선택 실패를 고정 문구로 구분했다. 공급자 원문·인증정보·경로를 오류에 추가하지 않으며 허용 조건과 cleanup 소유권은 변경하지 않았다.

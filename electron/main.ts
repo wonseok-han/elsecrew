@@ -61,6 +61,25 @@ const quitCoordinator = new QuitCoordinatorV1({
   },
   failedBeforeReady: () => sidecar?.failedBeforeReady ?? false,
   allowProcessExit: () => app.quit(),
+  notifyQuitBlocked: async (reason) => {
+    const korean = app.getLocale().toLowerCase().startsWith("ko");
+    const options: Electron.MessageBoxOptions = {
+      type: "warning",
+      title: "Hello, Agent",
+      message: korean ? "아직 안전하게 종료할 수 없어요." : "The app cannot safely close yet.",
+      detail: reason === "unavailable"
+        ? (korean ? "작업을 관리하는 내부 프로그램과 연결이 끊겨 종료 여부를 확인하지 못했어요. 프로젝트 원본을 변경하거나 에이전트를 다시 실행하지 말고 도움을 요청해 주세요."
+          : "The internal task service is unavailable, so shutdown could not be confirmed. Do not change the original project or restart agents; please request help.")
+        : (korean ? "아직 정리하거나 복구해야 할 작업이 있어요. 작업 화면의 실행·복구 상태를 확인한 뒤 다시 종료해 주세요."
+          : "Some work still requires cleanup or recovery. Check execution and recovery status in the workbench, then try closing again."),
+      buttons: [korean ? "앱으로 돌아가기" : "Return to app"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) await dialog.showMessageBox(mainWindow, options);
+    else await dialog.showMessageBox(options);
+  },
 });
 
 protocol.registerSchemesAsPrivileged([
