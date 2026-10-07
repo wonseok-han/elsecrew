@@ -117,6 +117,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const admissionReadyRef = useRef(admissionReady);
   admissionReadyRef.current = admissionReady;
   const [goal, setGoal] = useState("");
+  const goalInputRef = useRef<HTMLInputElement>(null);
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -225,7 +226,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <div className="m5-chat-list"><strong>{t("m5.navigation.chatTitle")}</strong>{chat.chats.map((item) => <button key={item.chatId} type="button" disabled={!admissionReady || chat.switching} className={chat.activeChat?.chatId === item.chatId ? "m5-chat-chip selected" : "m5-chat-chip"} onClick={() => void switchChat(item.chatId)}>{item.goal}{chat.refreshNeededChatIds.includes(item.chatId) && <span className="m5-chat-update">{t("m5.navigation.newState")}</span>}</button>)}</div>
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
-          <input aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
+          <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <label><input type="checkbox" checked={applicationBaseline} disabled={!admissionReady || chat.preparing} onChange={event => setApplicationBaseline(event.target.checked)} />{t("m5.application.chatBaseline")}</label>
           {applicationBaseline && <p>{t("m5.application.chatBaselineHelp")}</p>}
           <button type="submit" disabled={!admissionReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
@@ -245,7 +246,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         </li>)}</ol>
         <div className="m5-start-action"><button type="button" onClick={() => void controller.chooseProject()} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>{t("m5.shell.choose")}</button><p>{t("m5.start.projectLimit")}</p></div>
       </section>}
-      {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : undefined}>
+      {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
+        <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
+        <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); goalInputRef.current?.focus(); }}>
+          {t(`m5.firstChat.${example}`)}
+        </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
+        {chat.settings && <><h3>{t("m5.firstChat.team")}</h3><dl className="m5-team-preview">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl></>}
+        <p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p>
+      </section>}>
         <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>
           <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
             {t("m5.navigation.files")}

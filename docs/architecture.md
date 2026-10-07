@@ -242,6 +242,8 @@
 
 - **프로젝트 미선택 시작 화면**: ProviderLogin의 설치·로그인과 저장 프로젝트 catalog를 유지하며 빈 dock 대신 실제 프로젝트 시작 안내/선택 버튼을 표시한다. 연결은 파일 탐색의 새 선행 조건이 아니다. 기존 Git 프로젝트만 지원한다는 제한을 명시하고 선택은 기존 picker/controller 경로를 사용한다. 프로젝트 선택 후 dock을 mount한다. 이는 시작 화면 연결이며 guided-start 전체 시안 및 실제 계정 검증 완료를 뜻하지 않는다.
 
+- **첫 채팅 안내**: 프로젝트 선택 후 active chat이 없으면 대화 패널에 목표 예시와 현재 프로젝트의 역할 설정을 표시한다. 예시는 비어 있는 목표 입력만 채우고 포커스를 옮기며 자동 생성/실행하지 않는다. 기존 목표 초안이 있으면 예시 버튼은 비활성이다. 역할 표시는 설정값이며 로그인/모델 사용권/실행 성공의 증거가 아니다.
+
 - **저장된 프로젝트 목록/재열기 계약**: `storage/catalog.rs`는 admission 이후 기존 projects table의 ID/경로만 keyset 페이지 조회한다. 50행·원시 UTF-8 합계 512KiB/경로 128KiB와 wire JSON 768KiB 상한이며 목록 조회는 파일 시스템 접근·활성화를 하지 않는다. `project.catalog` capability와 고정 `m5:project:catalog` IPC(`window.m5Projects.request`)의 list/reopen 요청은 양방향 검증한다. reopen은 renderer 경로가 아닌 저장 ID로 조회하고 ID hash·현재 canonical 경로·실제 Git root와 기존 recovery/active snapshot 경계를 검증한다. 작업대의 저장된 프로젝트 목록은 ID 순 페이지를 교체 표시하고 선택 시 기존 snapshot-before-tree 흐름을 사용한다. dirty/열린 채팅 및 조회 중 새 편집은 전환을 막는다. 목록 반환 자체는 파일 접근 권한이 아니다.
 
 - **탐색과 패널 표시**: 폴더 경로 버튼으로 상위 폴더에 돌아갈 수 있다. 명시 파일/변경 열기는 controller의 panel 요청으로 해당 도킹 패널을 표시하고 기존 그룹의 탭을 활성화한다. 일반 상태 갱신은 사용자 배치를 바꾸지 않으며 같은 파일 재선택도 새 표시 요청으로 처리한다. Monaco 부모와 분할 구조는 유지한다.
