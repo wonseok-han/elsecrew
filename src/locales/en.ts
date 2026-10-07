@@ -375,6 +375,7 @@ export const en: Record<MessageKey, string> = {
   "m5.chat.prepare": "Prepare real run · {role}",
   "m5.chat.connecting": "Checking real connection…",
   "m5.catalog.manage": "Recovery and work history",
+  "m5.navigation.newChatHelp": "Describe what you want to do in this project. We will prepare a separate workspace and conversation. To run an agent, choose a role in the chat afterwards.",
   "m5.catalog.switchHelp": "To switch projects, close settings, finish active work and file edits, then close the project using the toolbar.",
   "m5.roles.label": "Project roles and model settings",
   "m5.roles.version": "Settings for this project · revision {revision}",

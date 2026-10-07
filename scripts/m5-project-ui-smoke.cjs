@@ -49,7 +49,16 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.m5-goal-examples button').click()`);
       await wait(`document.querySelector('.m5-new-chat-form > input').value.length>0&&Array.from(document.querySelectorAll('.m5-goal-examples button')).every(b=>b.disabled)`);
       if (await run(`document.querySelectorAll('.m5-chat-chip').length!==0`)) throw new Error('goal example created a chat');
+      await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
+      const exampleGoal = await run(`document.querySelector('.m5-new-chat-form > input').value`);
+      await run(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+      await wait(`!document.querySelector('.m5-new-chat-dialog')?.open`);
+      await run(`document.querySelector('.m5-new-chat-button').click()`);
+      await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
+      if (await run(`document.querySelector('.m5-new-chat-form > input').value!==${JSON.stringify(exampleGoal)}`)) throw new Error('closing new chat lost goal draft');
       await fill('.m5-new-chat-form > input', '');
+      await run(`document.querySelector('.m5-new-chat-dialog header button').click()`);
+      await wait(`!document.querySelector('.m5-new-chat-dialog')?.open`);
       await clickText('역할과 모델');
       await wait(`document.querySelector('.m5-settings-dialog')?.matches(':modal')`);
       const originalModel = await run(`document.querySelector('.m5-role-card input').value`);
@@ -83,6 +92,8 @@ app.on('browser-window-created', (_event, window) => {
       await clickText('작업대로 돌아가기', '.m5-settings-dialog');
       await wait(`!document.querySelector('.m5-settings-dialog')`);
       console.log(JSON.stringify({stage:'START_AND_SETTINGS',root}));
+      await run(`document.querySelector('.m5-new-chat-button').click()`);
+      await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Improve hello');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await run(`document.querySelector('.m5-new-chat-form input[type=checkbox]').click()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
@@ -145,6 +156,8 @@ app.on('browser-window-created', (_event, window) => {
         if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('restoration did not restore source');
         console.log(JSON.stringify({stage:'RESTORED',root}));
       }
+      await run(`document.querySelector('.m5-new-chat-button').click()`);
+      await wait(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`);
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Second task');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);

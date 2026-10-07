@@ -119,6 +119,9 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   admissionReadyRef.current = admissionReady;
   const [goal, setGoal] = useState("");
   const goalInputRef = useRef<HTMLInputElement>(null);
+  const newChatDialogRef = useRef<HTMLDialogElement>(null);
+  const newChatButtonRef = useRef<HTMLButtonElement>(null);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -133,6 +136,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
+  useEffect(() => { setNewChatOpen(false); setGoal(""); setApplicationBaseline(false); }, [snapshot.project?.id]);
+  useEffect(() => {
+    const dialog = newChatDialogRef.current;
+    if (newChatOpen) { dialog?.showModal(); goalInputRef.current?.focus(); }
+    else dialog?.close();
+    return () => { dialog?.close(); };
+  }, [newChatOpen]);
   useEffect(() => {
     controller.start();
     chatController.start();
@@ -171,7 +181,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (!snapshot.project) return;
     controller.setActionBlocked(true, { key: "m5.editorNotice.newChat" });
     const created = await chatController.createChat({ projectId: snapshot.project.id }, goal, applicationBaseline);
-    if (created) { setGoal(""); await switchChat(created.chatId); }
+    if (created) { setGoal(""); setNewChatOpen(false); await switchChat(created.chatId); }
     else controller.setActionBlocked(chatController.isActionBlocked());
   };
 
@@ -182,7 +192,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   return (
     <main className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
       <ProjectCatalog rail ready={admissionReady} controller={controller} currentId={snapshot.project?.id} disabled={settingsOpen || !admissionReady || snapshot.actionBlocked || !controller.canLeaveProject() || snapshot.selectionBlocked || Boolean(snapshot.workspace)} />
-      <header className="m5-toolbar">
+      <header className={`m5-toolbar${snapshot.project ? " m5-toolbar-project" : ""}`}>
         <div>
           <p className="m5-eyebrow">{t("m5.shell.eyebrow")}</p>
           <h1>{snapshot.project?.name ?? t("m5.shell.start")}</h1>
@@ -238,12 +248,20 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           </button>;
         })}</div>
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
-        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); void createChat(); }}>
+        <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
+        <dialog ref={newChatDialogRef} className="m5-new-chat-dialog" aria-labelledby="m5-new-chat-heading" onCancel={event => { event.preventDefault(); if (!chat.preparing && !chat.switching) setNewChatOpen(false); }} onClose={() => newChatButtonRef.current?.focus()}>
+        <header><div><p className="m5-eyebrow">{snapshot.project.name}</p><h2 id="m5-new-chat-heading">{t("m5.navigation.newChat")}</h2></div><button type="button" className="m5-secondary" disabled={chat.preparing || chat.switching} onClick={() => setNewChatOpen(false)}>{t("m5.editor.cancel")}</button></header>
+        <p>{t("m5.navigation.newChatHelp")}</p>
+        {chat.settings && <dl className="m5-new-chat-team">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+        {chat.error && <p role="alert" className="m5-error">{t(chat.error.messageKey)}</p>}
+        {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
+        <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
           <input ref={goalInputRef} aria-label={t("m5.navigation.goal")} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder={t("m5.navigation.goalPlaceholder")} disabled={!admissionReady || chat.preparing} />
           <label><input type="checkbox" checked={applicationBaseline} disabled={!admissionReady || chat.preparing} onChange={event => setApplicationBaseline(event.target.checked)} />{t("m5.application.chatBaseline")}</label>
           {applicationBaseline && <p>{t("m5.application.chatBaselineHelp")}</p>}
           <button type="submit" disabled={!admissionReady || !projectDataReady || !goal.trim() || chat.preparing || chat.preparationApiUnavailable || chat.switching || Boolean(snapshot.workspace && !controller.canLeaveProject())}>{t("m5.navigation.newChat")}</button>
         </form>
+        </dialog>
       </section>}
 
       {settingsOpen && chat.settings && <RoleSettings key={chat.settings.projectId} settings={chat.settings} disabled={!admissionReady} feedback={<>
@@ -261,7 +279,8 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       </section>}
       {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
-        <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); goalInputRef.current?.focus(); }}>
+        <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
+        <div className="m5-goal-examples">{(["explain", "plan", "readme"] as const).map(example => <button key={example} type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching || goal.trim().length > 0} onClick={() => { setGoal(t(`m5.firstChat.${example}`)); setNewChatOpen(true); }}>
           {t(`m5.firstChat.${example}`)}
         </button>)}</div><p className="m5-first-chat-note">{t("m5.firstChat.exampleHelp")}</p>
         {chat.settings && <><h3>{t("m5.firstChat.team")}</h3><dl className="m5-team-preview">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl></>}
