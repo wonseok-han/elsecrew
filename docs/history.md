@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (최근 UI 파동 통합 통과·선택 카드 공간 정리)
+
+- 기준41dbefd. 편집기/Monaco/diff/채팅 상태82 PASS(3.20초), TypeScript·renderer build PASS. 실제 main/preload/native sidecar와 격리 합성 프로젝트에서 시작·설정 저장/재열기→편집·diff→원본 반영→renderer reload→복원→두 채팅 전환/상태 표시 PASS/exit0. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-8zRPm6/project.png 직접 확인. 실제 계정/유료 모델 호출 없음; 기존 Monaco chunk 경고와 meta frame-ancestors 경고는 남아 있다.
+- 캡처에서 미선택 에이전트 카드가 프로젝트 작업 중에도 크게 열린 것을 확인했다. 작업대 진입 때 선택 details만 접고 처음 시작 화면은 미선택 시 펼치도록 compact prop을 연결했다. 사용자는 다시 펼칠 수 있고 ProviderConnection은 unmount하지 않아 인증/설치/오류 상태가 유지된다. Karpathy·React 지침으로 조건부 로그인 mount나 별도 저장소를 만들지 않았다. 이 추가 UI 변경은 위 PASS 이후이며 후속 누적 검증 대상, runner에 접힘 확인 추가.
+- 메모리 기준·시안 전체 마감·실제 공급자·G6/Windows는 여전히 미완료다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (채팅 목록 상태와 선택 표시)
 
 - 기준5bb0139. 채팅 목록에 제목만 보여 진행/확인/복구 상태를 열기 전 구분할 수 없던 부분을 연결했다. 선택 채팅은 activeChat의 현재 상태, 나머지는 저장 목록 상태를 사용하며 갱신 필요 항목은 오래된 상태 대신 새 상태 있음 안내를 표시한다. 목표와 상태를 두 줄로 분리하고 전체 title·aria-current 및 한영 기존 상태 문구를 연결했다. 상태만으로 실행 완료나 안전을 새로 추론하지 않는다.

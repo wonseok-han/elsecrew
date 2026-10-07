@@ -4,10 +4,11 @@ import { loginErrorMessage } from "./provider-login-message.ts";
 import { LOGIN_PROVIDERS, readProviderSelection, saveProviderSelection } from "./provider-selection.ts";
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
 
-export function ProviderLogin({ disabled }: {disabled: boolean}) {
+export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(readProviderSelection);
-  const [selectionExpanded, setSelectionExpanded] = useState(selected.length === 0);
+  const [selectionExpanded, setSelectionExpanded] = useState(!compact && selected.length === 0);
+  useEffect(() => { setSelectionExpanded(!compact && selected.length === 0); }, [compact, selected.length]);
   const [draft, setDraft] = useState<LoginProvider[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
   const select = (providers: LoginProvider[]) => {

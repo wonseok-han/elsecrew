@@ -209,7 +209,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
-      <ProviderLogin disabled={!admissionReady} />
+      <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
           <strong>{t(snapshot.error.messageKey)}</strong>

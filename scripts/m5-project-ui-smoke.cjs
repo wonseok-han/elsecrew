@@ -149,6 +149,7 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
       await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`);
+      if (await run(`document.querySelector('.m5-provider-selection')?.open!==false`)) throw new Error('project workbench selection should start collapsed');
       await wait(`document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-goal')?.textContent==='Second task' && Boolean(document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-status')?.textContent)`);
       console.log(JSON.stringify({stage:'SECOND_CHAT_WINDOW',visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),backgroundThrottling:window.webContents.getBackgroundThrottling(),page:await run(`({visibility:document.visibilityState,focus:document.hasFocus()})`)}));
       window.show(); window.focus(); window.webContents.focus();
