@@ -1,6 +1,19 @@
 import type { SystemStatusG5DV1 } from "./contracts/lifecycle-g5d-v1.ts";
 import type { AgentRunRecordV1 } from "./contracts/agent-adapter-v1.ts";
 
+/** Collapse only older confirmed terminal records, never live/recovery work. */
+export function groupRunHistory(runs: readonly AgentRunRecordV1[]) {
+  const ordered = [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const current: AgentRunRecordV1[] = [];
+  const previous: AgentRunRecordV1[] = [];
+  ordered.forEach((run, index) => {
+    const closed = ["succeeded", "failed", "canceled"].includes(run.state)
+      && run.terminationOutcome === "cleanExit";
+    (index > 0 && closed ? previous : current).push(run);
+  });
+  return { current, previous };
+}
+
 /** Display only. A clean exit is not a successful task or permission to apply. */
 export function runOutcomeNotice(run: Pick<AgentRunRecordV1, "state" | "terminationOutcome">) {
   if (run.state === "recoveryRequired" || run.terminationOutcome === "recoveryRequired") return "m5.run.help.recovery" as const;

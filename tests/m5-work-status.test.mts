@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runOutcomeNotice, summarizeWorkStatus } from "../src/m5/work-status.ts";
+import { groupRunHistory, runOutcomeNotice, summarizeWorkStatus } from "../src/m5/work-status.ts";
+import type { AgentRunRecordV1 } from "../src/m5/contracts/agent-adapter-v1.ts";
 import type { SystemStatusG5DV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 
 const status = (ids: string[], recoveryRequired = ids.length > 0) => ({
   storageAdmission: { state: "ready" }, blockerIds: ids, recoveryRequired,
 }) as SystemStatusG5DV1;
+
+test("run history collapses only older confirmed terminal records without mutating input", () => {
+  const run = (id: string, state: AgentRunRecordV1["state"], terminationOutcome: AgentRunRecordV1["terminationOutcome"], day: number) =>
+    ({runId:id,state,terminationOutcome,createdAt:`2026-10-0${day}T00:00:00Z`}) as AgentRunRecordV1;
+  const runs = [run("old", "failed", "cleanExit", 1), run("latest", "succeeded", "cleanExit", 4),
+    run("live", "running", null, 2), run("unknown", "failed", null, 2), run("recovery", "recoveryRequired", "recoveryRequired", 3)];
+  const before = [...runs];
+  const grouped = groupRunHistory(runs);
+  assert.deepEqual(grouped.current.map(r => r.runId), ["latest", "recovery", "live", "unknown"]);
+  assert.deepEqual(grouped.previous.map(r => r.runId), ["old"]);
+  assert.deepEqual(runs, before);
+  assert.deepEqual(groupRunHistory([]), {current:[], previous:[]});
+});
 
 test("run outcome guidance distinguishes failure from unconfirmed termination", () => {
   assert.equal(runOutcomeNotice({state:"failed", terminationOutcome:"cleanExit"}), "m5.run.help.failedClean");

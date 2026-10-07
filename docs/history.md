@@ -1,5 +1,24 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (임시 원본 반영·재로딩·복원 UI 확인)
+
+- 직전 무계정 편집 시험은 PASS였지만 반영/복원 옵션이 빠져 있었다. 같은 최신 산출물에서 HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui 실행(session54996)이 APPLIED→RESTORED→PROJECT_FLOW_COMPLETE→shutdown accepted/PASS, exit0으로 종료됐다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-BzvgMn/result.json 및 project.png. 독립 userData와 생성된 임시 원본만 사용했다. 사용자 프로젝트·실제 계정·provider 실행은 사용하지 않았다. UI 명시 확인 뒤 반영된 파일 내용, renderer reload 후 저장 프로젝트/채팅 재선택과 복구 기록 조회, 원래 파일 내용 복원, 두 채팅 분리·정상 종료를 확인했다.
+- 실행 기록 표시 변경·합성 회귀와 project-ui 정상 종료 증거 보강을 로컬 커밋으로 정리한다. 기존9월 archive는 제외한다. 신규 실제 실행 기록 화면 자체와 전체 앱 재시작·실제 에이전트·G6 성능/Windows는 미검증으로 남으며, 실제 연결 승인 대기 항목은 수행하지 않았다. diff 검사 PASS. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (무계정 프로젝트 UI·정상 종료 확인)
+
+- 기준6137cf6+미커밋 실행 목록 UI. 완료 조건을 대조하던 중 project-ui smoke가 app.quit 접수 전에 PASS를 출력하는 증거 결함을 발견했다. result.json의 PENDING→will-quit accepted 뒤 PASS/FAIL, 15초 종료 미확인 FAIL 기록으로 수정하고 late UI response 차단을 추가했다. 강제 종료나 종료 보호 우회는 없다.
+- live/project-ui 종료 회귀와 실행 기록 분류 검사 묶음11/11 PASS. 최신 main/preload/renderer 빌드 PASS; 제한 환경 package fetch failed 뒤 허용된 다운로드로 macOS arm64 package/release sidecar PASS. 최신 debug sidecar build PASS. 기존9월 archive는 유지한다.
+- pnpm m5:smoke:project-ui 실제 Electron/native sidecar 시험 exit0/PASS·shutdown accepted. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-u3qf7j/result.json, project.png. 독립 userData/생성 프로젝트에서 시작·역할 설정, Monaco 편집/저장·diff, 원본 불변, 두 채팅 작업 사본 분리와 반영 확인 취소를 검증했다. APPLY/RELOAD 옵션은 사용하지 않아 실제 반영/복원·전체 재시작 증거가 아니다. 실제 provider 호출0회이며 실행 기록 없는 캡처를 새 AgentRuns 시각 합격으로 쓰지 않는다.
+- 다음: 실제 연결 승인 항목, 실제 실행/복구 흐름과 신규 실행 목록 시각 검증, G6 성능/Windows/출시 게이트. 무계정 편집 흐름 PASS는 앱 개발 전체 완료가 아니다. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (채팅 실행 기록의 단계적 표시)
+
+- 기준6137cf6, 기존9월 archive는 보존. 직전 묶음 검사 이후 별도 UI 구현이다. 실행 목록의 가로 flex가 결과 안내/상세를 한 줄로 압축하는 구조를 수정했다. 최신 실행과 실행 중·종료 미확인·복구 필요 항목은 기본 표시하고, 종료가 확인된 이전 terminal 기록만 접힌 목록으로 분리했다. 전체 시안 적용 완료 주장은 아니다.
+- 기존 기록을 수정/삭제하지 않고 정렬한 표시용 복사본만 사용한다. 이전 기록 영역은 높이를 제한하고 펼침·키보드 초점·긴 모델/ID 줄바꿈을 제공한다. ko/en 문구와 기존 work-status 회귀 파일에 최신/실행 중/복구/미확인/불변성 검사를 추가했다. Karpathy 지침에 따라 실행 권한·복구 조건은 바꾸지 않았다.
+- diff 검사만 수행했으며 직전63개 PASS로 새 변경을 검증했다고 주장하지 않는다. UI 렌더·새 회귀는 누적 검사 대상이다. 실제 연결 승인 대기와 최종 gate 미완료는 유지한다. main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (연결·종료 UI 변경 묶음 컴파일 확인)
 
 - 직전 watchdog 경합 수정과 a7faba4까지의 모델 선택/실행 결과 UI를 한 묶음으로 확인했다. node --test --experimental-strip-types tests/m5-model-choices.test.mts tests/m5-work-status.test.mts tests/m5-live-provider-smoke.test.cjs tests/m5-electron-bridge.test.mts: 63/63 PASS. tsc --noEmit -p tsconfig.json PASS, CARGO_BUILD_JOBS=4 cargo check -p hello-agent-sidecar --locked -j4 PASS. 반복 전체 하네스나 실제 모델 시험은 하지 않았다.

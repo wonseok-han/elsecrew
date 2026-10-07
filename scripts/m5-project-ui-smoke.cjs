@@ -52,8 +52,20 @@ function finish(error, details) {
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
-  app.once('will-quit', () => app.exit(error ? 1 : 0));
-  console.log(JSON.stringify({status:error?'FAIL':'PASS',root,error:error?.message,...details,...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {})}));
+  const result = {root,error:error?.message,...details,...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
+  persist();
+  console.log(JSON.stringify(result));
+  const shutdownTimer = setTimeout(() => {
+    result.shutdown = 'notConfirmed'; result.status = 'FAIL';
+    persist(); console.log(JSON.stringify(result));
+  }, 15000);
+  app.once('will-quit', () => {
+    clearTimeout(shutdownTimer);
+    result.shutdown = 'accepted'; result.status = error ? 'FAIL' : 'PASS';
+    persist(); console.log(JSON.stringify(result));
+    app.exit(error ? 1 : 0);
+  });
   app.quit();
 }
 app.on('browser-window-created', (_event, window) => {
@@ -61,7 +73,12 @@ app.on('browser-window-created', (_event, window) => {
   window.webContents.on('render-process-gone', (_event, details) => console.log(JSON.stringify({stage:'RENDER_PROCESS_GONE',details})));
   window.webContents.on('console-message', details => { if (details.level === 'error') console.log(JSON.stringify({stage:'RENDERER_ERROR',message:details.message})); });
   window.webContents.once('did-finish-load', async () => {
-    const run = code => window.webContents.executeJavaScript(code);
+    const run = async code => {
+      if (finished) throw new Error('UI smoke session has finished');
+      const result = await window.webContents.executeJavaScript(code);
+      if (finished) throw new Error('UI smoke session has finished');
+      return result;
+    };
     const clickText = (label, scope = 'body') => run(`Array.from(document.querySelectorAll(${JSON.stringify(scope + ' button')})).find(b=>b.textContent===${JSON.stringify(label)}&&!b.disabled)?.click()`);
     const fill = (selector, value) => run(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw new Error('input unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     const showPanel = title => run(`(()=>{ const tab=Array.from(document.querySelectorAll('.m5-dock-group-tabs button')).find(b=>b.textContent===${JSON.stringify(title)}&&b.getClientRects().length); if(tab)tab.click(); })()`);

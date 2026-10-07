@@ -303,6 +303,7 @@ export const en: Record<MessageKey, string> = {
   "m5.run.help.recovery": "Termination needs verification or recovery. Check the recovery instructions first.",
   "m5.run.help.unconfirmed": "This record has no termination confirmation. Success or failure alone does not prove execution has safely stopped.",
   "m5.run.details": "Run information",
+  "m5.run.previous": "Previous stopped runs ({count})",
   "m5.run.exit.cleanExit": "Execution stopped",
   "m5.run.exit.recoveryRequired": "Termination recovery required",
   "m5.run.exit.unknown": "No termination confirmation",

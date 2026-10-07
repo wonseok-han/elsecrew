@@ -302,6 +302,7 @@ export const ko = {
   "m5.run.help.recovery": "종료 상태를 확인하거나 복구해야 해요. 복구 안내를 먼저 확인해 주세요.",
   "m5.run.help.unconfirmed": "이 기록에는 실행 종료 확인이 없어요. 성공 또는 실패 표시만으로 안전한 종료를 판단할 수 없어요.",
   "m5.run.details": "실행 정보",
+  "m5.run.previous": "종료된 이전 실행 {count}개",
   "m5.run.exit.cleanExit": "실행 종료 확인됨",
   "m5.run.exit.recoveryRequired": "종료 복구 필요",
   "m5.run.exit.unknown": "종료 확인 기록 없음",
