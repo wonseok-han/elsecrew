@@ -32,7 +32,14 @@ function sampleMemory() {
       try {
         // Exclude only the collector process itself, not application helpers.
         const rows = stdout.split("\n").filter(line => Number(line.trim().split(/\s+/)[0]) !== child.pid).join("\n");
-        memorySamples.push({ elapsedMs: performance.now(), phase, ...processTreeMemory(rows, process.pid) });
+        const tree = processTreeMemory(rows, process.pid);
+        const metrics = new Map(app.getAppMetrics().map(metric => [metric.pid, metric]));
+        memorySamples.push({ elapsedMs: performance.now(), phase, ...tree,
+          processes: tree.processes.map(entry => ({ ...entry,
+            type: metrics.get(entry.pid)?.type ?? "unknown",
+            name: metrics.get(entry.pid)?.name ?? null,
+          })),
+        });
         resolveSample();
       } catch (error) { reject(error); }
     });
@@ -61,6 +68,24 @@ function finish(error) {
   if (window && !window.isDestroyed()) window.destroy();
   app.exit(report.status === "PASS" ? 0 : report.status === "NOT_READY" ? 2 : 1);
 }
+async function memoryCheckpoint(label) {
+  if (!measureMemory) return;
+  await sampleMemory();
+  // Attribution only: V8 heap and Electron working set are not RSS and do not
+  // replace the existing process-tree gate or trigger garbage collection.
+  report.memory.checkpoints.push({ label, elapsedMs: performance.now(),
+    main: process.memoryUsage(),
+    processes: app.getAppMetrics().map(({ pid, type, name, memory }) => ({ pid, type, name, memory })),
+    renderer: await window.webContents.executeJavaScript(`({
+      domNodes: document.querySelectorAll('*').length,
+      heap: performance.memory ? {
+        usedJSHeapSize: performance.memory.usedJSHeapSize,
+        totalJSHeapSize: performance.memory.totalJSHeapSize,
+        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+      } : null,
+    })`),
+  });
+}
 app.on("window-all-closed", () => {});
 app.whenReady().then(async () => {
   const git = (args) => { const result = spawnSync("/usr/bin/git", args, { cwd: root, encoding: "utf8" }); if (result.status !== 0) throw new Error("Git unavailable"); return result.stdout.trim(); };
@@ -79,7 +104,7 @@ app.whenReady().then(async () => {
   window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload: resolve(__dirname, "m5-renderer-performance-preload.cjs"), contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false } });
   window.webContents.on("render-process-gone", (_event, details) => finish(new Error(details.reason)));
   if (measureMemory) {
-    report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples };
+    report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples, checkpoints: [], attributionNote: "Checkpoint V8 heap is approximate; Chromium working set and V8 heap are not additive to RSS. No forced GC." };
     await window.loadURL("m5perf://m5/index.html");
     await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
       const deadline = performance.now() + 10000;
@@ -89,6 +114,7 @@ app.whenReady().then(async () => {
     memoryTimer = setInterval(() => { sampleMemory().catch(error => { memoryError = error; }); }, 250);
     await new Promise(resolve => setTimeout(resolve, 1000));
     if (memoryPending) await memoryPending;
+    await memoryCheckpoint("idle");
     memoryPhase = "loaded";
   }
   for (let trial = 0; trial < 11; trial++) {
@@ -157,6 +183,7 @@ app.whenReady().then(async () => {
       return { inputPaintMs, diffFirstFileMs, rendererLongTaskMs: Math.max(0, ...globalThis.__performanceLongTasks) };
     })()`));
     if (trial === 0) report.warmup = sample; else samples.push(sample);
+    await memoryCheckpoint(`trial-${trial}`);
   }
   const limits = { treeRootMs: 1000, treeExpandMs: 250, fileEditableMs: 1500, inputPaintMs: 50, diffSummaryMs: 2000, diffFirstFileMs: 1500, rendererLongTaskMs: 200, treeDomNodes: 500 };
   report.maxima = Object.fromEntries(Object.keys(limits).map(key => [key, Math.max(...samples.map(sample => sample[key]))]));
@@ -171,6 +198,7 @@ app.whenReady().then(async () => {
     if (memoryPending) await memoryPending;
     memoryPhase = "retained";
     await sampleMemory();
+    await memoryCheckpoint("retained");
     report.memory.actualCloseWaitMs = performance.now() - closedAt;
     clearInterval(memoryTimer);
     if (memoryError) throw memoryError;

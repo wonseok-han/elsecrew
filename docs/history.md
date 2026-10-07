@@ -1,5 +1,9 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (renderer 메모리 프로세스별 원인 분리)
+
+- 기준 fb71150. Karpathy 지침으로 RSS 표본에 프로세스 종류와 idle/trial/retained의 main·Chromium metrics·근사 renderer heap/DOM checkpoint를 추가했다. 기준/강제GC/제품 설정 불변. sandbox 실행은 프로세스 시작 실패 NOT_READY, 승인된 격리 Electron 재실행은10회+60초 완료 FAIL: idle428.109MiB/peak944.203MiB 초과, retained delta51.344MiB는 기준 이내. 증거 .artifacts/m5-performance/renderer-2026-10-07T06-15-37.886Z-2739.json. 마지막 trial renderer working set543MiB/heap136MiB에서 닫은 뒤190MiB/15MiB·DOM57로 감소했다. 이 결과만으로 누수 없음이나 직전 수정 효과를 단정하지 않는다. 시간 지표는 모두 기준 이내이며 다음은 renderer loaded peak와 Electron 기본 RSS 원인 분리다. 절차 문서 갱신, diff check 통과; 기존9월 archive 보존, main/push 없음. 실제 모델·시안·G6/Windows는 미완료다.
+
 ### 2026-10-07 · by GPT-6 Astra (편집기 종료 시 미완료 읽기 정리)
 
 - 직전 상태 설명은 구현 진전이 아니었다. HEAD ad90d37에서 편집기 dispose가 stream timer/map만 지우고 대기 Promise를 끝내지 않는 결함을 수정했다. 진행 중 읽기를 reject하고, 파일/재읽기/diff/감시 읽기의 descriptor 반환 직후 project epoch·workspace를 확인해 종료/재시작 뒤 오래된 응답이 새 stream을 만들지 않게 했다. 기존 draft와 StrictMode 재시작 상태는 보존한다.
