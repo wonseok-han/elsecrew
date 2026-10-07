@@ -454,6 +454,14 @@ fn failure() -> SidecarError {
     )
 }
 
+// Fixed local stages only: never include provider response text, paths, or credentials.
+fn initialization_failure(stage: &'static str) -> SidecarError {
+    SidecarError::new(
+        "providerPreflightFailed",
+        format!("Claude control initialization failed at {stage}; process cleanup required"),
+    )
+}
+
 impl ControlInitialization {
     /// Resolve only the selected catalog entry on this connection; never fallback.
     pub(crate) fn into_profile_channel(
@@ -537,13 +545,15 @@ impl ControlInitialization {
         cancel: &AtomicBool,
         observer: &mut impl FnMut(&mut LoginProcess<'a>) -> Result<(), SidecarError>,
     ) -> Result<bool, SidecarError> {
-        if self.failed
-            || self.connection != process.connection_id()
-            || cancel.load(Ordering::Acquire)
-            || Instant::now() >= self.deadline
-            || self.exchange.state() != State::AwaitingResponse
-        {
-            return Err(failure());
+        if self.failed || self.connection != process.connection_id()
+            || self.exchange.state() != State::AwaitingResponse {
+            return Err(initialization_failure("connection state"));
+        }
+        if cancel.load(Ordering::Acquire) {
+            return Err(initialization_failure("cancellation"));
+        }
+        if Instant::now() >= self.deadline {
+            return Err(initialization_failure("response deadline"));
         }
         if !self.flushed {
             self.flushed = process.flush_native_observed(cancel, observer)?;
@@ -554,7 +564,7 @@ impl ControlInitialization {
         };
         self.exchange
             .accept_response(&input)
-            .map_err(|_| failure())?;
+            .map_err(|_| initialization_failure("response validation"))?;
         Ok(true)
     }
 }

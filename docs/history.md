@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (실행 전 실패 단계 분리)
+
+- 기준a6fb8c1. 직전 턴은 두 로그인 유지와 서로 다른 실행 전 실패를 확보한 진척이었다. 이번에는 일반 프로필 검증과 runtime file isolation scan 거절을 분리하고 Claude 초기화의 연결 상태/취소/응답 제한시간/응답 검증/모델·추론·hook·권한 선택 실패를 고정 문구로 구분했다. 공급자 원문·인증정보·경로를 오류에 추가하지 않으며 허용 조건과 cleanup 소유권은 변경하지 않았다.
+- Karpathy 지침으로 아직 원인이 확정되지 않은 검사 완화 대신 진단 손실을 먼저 고쳤다. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar PASS(4.60초), diff 검사 통과. 새 binary 재빌드/실제 재현과 각 결함 수정은 후속이며 이 변경을 연결 복구로 주장하지 않는다.
+- 기존 시험 session90464는 여전히 live다. PID51171 직계 자식 조회에는 Electron helper3개만 있고 sidecar가 없다. 앱의 before-quit는 ready 이후 sidecar 오류에 대해 종료를 거절하므로 이번 잔류 창과 일치하지만 sidecar 종료 원인/자손 전체 회수는 아직 확정하지 않았다. 강제 종료하지 않았고 추가 모델 호출0·기존9월 archive 보존·main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (승인된 실제 연결 시험·실행 전 차단 재현)
 
 - 기준209e3bb, 사용자에게 Codex·Claude 각1회 소규모 실제 모델 실행 승인을 받았다. 기존 앱 userData의 정상 login API를 사용하고 생성한 임시 Git 프로젝트만 선택하는 명시 opt-in runner를 추가했다. 인증 내용 읽기/복사·기존 사용자 프로젝트 접근·검사 우회는 하지 않았다. Karpathy 지침에 따라 제품 변경 없이 실제 실패를 먼저 확보했다.

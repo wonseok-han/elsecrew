@@ -287,7 +287,7 @@ pub(crate) fn inspect_candidate(
         let resolved_model = initialization
             .exchange
             .profile_model(selector, effort)
-            .map_err(|_| failure())?
+            .map_err(|_| initialization_failure("model, effort, hooks or permission selection"))?
             .to_owned();
         if !process.matches_claude_scope(workspace, selector, effort, access) {
             return Err(failure());

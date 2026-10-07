@@ -35,7 +35,12 @@ fn failure() -> SidecarError {
 /// alone is not plugin-disable authority or a same-UID race barrier.
 pub(crate) fn verify_runtime_files(home: &Path) -> Result<(), SidecarError> {
     let profile = open_absolute_directory(home)?;
-    crate::project::runtime_isolation::verify(&profile).map_err(|_| failure())
+    crate::project::runtime_isolation::verify(&profile).map_err(|_| {
+        SidecarError::new(
+            "providerProfileUnavailable",
+            "provider runtime file isolation scan rejected profile contents",
+        )
+    })
 }
 
 /// Returns a retained directory capability, not a path or launch authorization.
