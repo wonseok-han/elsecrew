@@ -292,7 +292,7 @@ R3C-S3의 `storage/reopen/semantic.rs`는 live/frozen payload와 projects/chats/
 
 - **모델 중계(내부 후보)**: `provider_model_proxy`의 Broker가 실행별 Basic credential·정확한 HTTPS authority/Host·8KiB/5초 단회 CONNECT 검사와 연결 작업·Relay를 묶는다. 동시8연결·poll당4accept·서비스 총600초/128MiB payload 예산을 적용한다. DNS는 고정 목적지만 한 번 조회하고 최대16개 결과 전체의443/public IP 여부를 검사한 뒤 숫자 주소에 연결한다. 전역8개 작업자 슬롯·10초 연결 예산·시도당최대2초이며 OS DNS가 멈추면 취소 후에도 실제 작업자 종료까지 슬롯을 보유한다. 이는 DNS 스레드를 강제 종료한다는 보장이 아니다. Relay는 방향별8KiB 버퍼, 200응답 배출 후 전달, EOF half-close와 취소/오류/Drop 종료를 유지한다. Broker stop은 연결을 닫되 listener는 drop까지 보유한다. 검사 증거는 합성 DNS 목록·가짜 지연 작업자·로컬 소켓 통합뿐이며 실제 DNS/목적지 연결은 실행하지 않았다. LoginProcess 수명에는 내부 연결했지만 native CLI 호환성과 제품 admission은 아직 없다. 자손도 credential을 사용할 수 있으며 TLS peer/SNI/HTTP 경로를 검사하지 않아 공유 IP의 domain fronting까지 차단한다고 주장하지 않는다.
 
-- **변경 검토 현행**: 텍스트 diff는 변경 전후 줄 번호·추가/삭제 색상과 기호를 표시하며 페이지당 200행으로 전체 내용을 탐색한다. 불완전/미지원 hunk는 원문 표시로 보존하고 이 파서는 파일 적용 권위로 사용하지 않는다. 파일 반영·복원 루프는 여전히 후속이다.
+- **변경 검토 현행**: 텍스트 diff는 변경 전후 줄 번호·추가/삭제 색상과 기호를 표시하며 페이지당 200행으로 전체 내용을 탐색한다. 불완전/미지원 hunk는 원문 표시로 보존하고 이 파서는 파일 적용 권위로 사용하지 않는다. 기준 기록을 포함한 채팅은 별도 immutable 변경 검토와 세션 확인/취소를 제공한다. `project/application/review/intent/execution`의 반영·복원 실행, 고정 catalog IPC와 UI는 연결되어 있지만 `ProjectManager::source_writes_enabled=false`라 제품 원본 쓰기는 거절한다. 활성화 전 통합 검증/독립 안전 검토가 남아 있으며 실제 검토/확인 취소 성공을 원본 적용 성공으로 간주하지 않는다.
 
 - **편집 초안 재읽기**: dirty/충돌 탭은 명시적 확인 후 저장된 파일을 다시 읽을 수 있다. 읽기 완료까지 초안을 보존하고 확인 이후 변경된 탭·프로젝트/작업 복사본·차단 상태에서는 교체하지 않는다. 충돌 초안은 복사 가능하다. 파일 쓰기나 원본 프로젝트 적용/되돌리기가 아니며 Monaco의 동일 텍스트 동기화는 dirty를 만들지 않는다.
 

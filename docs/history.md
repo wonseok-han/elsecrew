@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (재시작·반영 검토 UI와 원본 writer 통합 검사)
+
+- 기준 d1b86a8, 직전 저장/채팅 복구는 구현·실제 UI 진전이다. 정상 종료했던 합성 userData로 새 Electron 프로세스를 실행해 picker 없이 저장된 프로젝트 선택, 두 채팅 목록, 편집한 채팅의 파일/변경 재열기와 원본 불변을 확인했다(PASS/정상 종료, /private/tmp/hello-agent-project-ui-OzasD2/reopen.png).
+- 새 합성 Git 프로젝트에서 baseline 포함 채팅 → 편집/저장 → diff 상세 → 원본 반영 전 검토 → 확인 준비 → 확인 취소 → 원본 불변 → 두 채팅 전환까지 실제 main/preload/renderer/native sidecar로 PASS했다(/private/tmp/hello-agent-project-ui-oYKZkJ/project.png). 실제 계정/모델·사용자 프로젝트는 사용하지 않았고 원본 반영은 실행하지 않았다.
+- 현행 제품 source_writes_enabled는 false다. 기존 내부 application_ 통합28 PASS(54.86초), backup_10 PASS(22.45초), jobs/threads4로 순차 실행했다. 증거 로그는 /private/tmp/hello-agent-{application,backup}-integration.log. 다중 파일/링크 반영·복원, 취소·재시작/기록 유실·백업 실패/변조를 포함하지만 실제 활성화된 UI 쓰기·Windows/출시 완료는 아니다.
+- Karpathy 지침에 따라 미활성 플래그를 임의로 열지 않고 기존 독립 검토자1명에게 원본 쓰기 활성화 전 구현/계약 경계 검토를 요청했다. 제안서 상단의 writer 구현 전이라는 오래된 상태와 architecture의 후속 표현을 현행 미활성 구현/검증 단계로 바로잡고 날짜별 과거 기록은 보존했다. 다음은 독립 검토 차단 사항 수정 및 합성 프로젝트에서 실제 원본 적용/복원 UI 검증이다. main/push 없음; 기존 9월 archive 변경 보존.
+
 ### 2026-10-07 · by GPT-6 Astra (저장 후 채팅 재열기 복구)
 
 - 기준 0580a78. 직전 감시 수정 진전 뒤 격리 UI를 계속했다. 화면 캡처 시 original이 나타나는 렌더 지연을 확인해 임시 runner에서만 background throttling을 해제했다(제품 설정 불변). 실제 두 채팅 전환을 진행하자 첫 채팅 재열기에서 durable eventSequence contiguous 오류를 재현했다.
@@ -115,6 +122,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **재시작·원본 반영 준비 실측(2026-10-07)**: 합성 userData의 앱 재시작/저장 프로젝트·채팅·편집 보존, baseline 포함 채팅의 검토/확인 취소·원본 불변 UI PASS. 원본 writer의 내부 application28/backup10 통합은 통과했지만 제품 source_writes_enabled=false와 활성화 전 독립 검토는 별도다.
 - **메시지 snapshot과 새 메시지 구분(2026-10-07)**: metadata-only chat 원장 이벤트는 last_message를 보존한다. get_chat은 연속된 완전 동일 snapshot만 합쳐 공개 메시지 순서를 유지한다. 저장 후 두 채팅 전환/재열기 및 사본 분리 실제 UI PASS로 직전 미완료를 해소했다. 시험 창 background throttling 해제는 제품 변경이 아니다.
 - **자신의 저장 알림(2026-10-07)**: file.changed는 외부 변경의 확정 증거가 아니다. saving 중 알림을 저장 결과 뒤 현재 버전과 대조하고 clean 버전 일치도 안내 없이 소비한다. explicit conflict는 즉시 보호한다. 늦은 읽기는 epoch/workspace/baseVersion뿐 아니라 blocked gate도 다시 확인한다. 실제 저장/diff는 진전했으나 두 번째 채팅 편집기 표시 검증은 미완료다.
 - **실제 편집 IPC 정합성(2026-10-07)**: tree 루트 빈 경로만 허용하고 파일 경로의 빈 값/탈출은 계속 거절한다. ChatRecord에서 IPC workspace 주소 네 필드만 추출해야 하며 workspace 저장 chunk/commit은 V2와 달리 saveId를 응답해야 한다. 격리 실제 UI에서 편집·저장·diff 목록/원본 불변 확인; 자신의 저장 후 외부 변경 안내가 남는 감시 UX는 후속이다.
