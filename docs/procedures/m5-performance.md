@@ -4,6 +4,14 @@
 
 ## 실제 프로젝트 UI 회귀 (성능 측정과 별도)
 
+### 앱 전체 재시작 후 저장 채팅 확인
+
+`node_modules/.bin/electron scripts/m5-project-reopen-smoke.cjs <앞선 project-ui 시험 폴더>`는 별도 Electron 프로세스로 이전 합성 시험의 userData를 다시 연다. OS 임시 폴더 바로 아래의 `hello-agent-project-ui-*`이며 앞선 `result.json`이 PASS/종료 accepted이고 원본이 복원된 경우만 받는다. 임의 사용자 프로젝트나 실제 앱 데이터 경로를 주지 않는다.
+
+저장 프로젝트를 선택해 `Improve hello`와 `Second task`의 작업 복사본을 Monaco로 다시 열고 각각 저장된 편집/원래 내용이 유지되는지 확인한다. 새 폴더 선택·에이전트 실행은 하지 않는다. `reopen-result.json`은 정상 종료 수락 뒤에만 PASS가 되며 `reopen.png`를 함께 보존한다. 이는 정상 종료 후 프로젝트/채팅/파일 영속성 시험이며 강제 종료 복구, 실제 계정 로그인 유지, 실행 중인 에이전트 재시작의 증거는 아니다. 최신 `.vite/build`와 debug sidecar를 먼저 준비한다.
+
+### 생성부터 편집·반영·복원까지
+
 macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sidecar를 먼저 빌드한 뒤 `pnpm m5:smoke:project-ui`로 실행한다. 스크립트 자체는 빌드하지 않으므로 오래된 산출물의 PASS를 최신 코드 증거로 쓰지 않는다. 실행할 때마다 임시 Git 프로젝트와 독립 userData를 만들며 사용자 프로젝트·선택된 에이전트·인증 정보를 사용하지 않는다. 실제 Electron/native sidecar를 통해 채팅 생성, Monaco 편집/저장, diff, 원본 불변, 반영 확인 취소, 두 채팅 사본 분리를 확인한다.
 
 - `HELLO_AGENT_SMOKE_APPLY=1 pnpm m5:smoke:project-ui`: 스크립트가 생성한 프로젝트만 명시 확인 UI로 적용 후 복원한다.

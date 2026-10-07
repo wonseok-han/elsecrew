@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (앱 전체 종료 후 채팅·파일 재열기)
+
+- 기준fd4ba32, 기존9월 archive만 dirty. 직전 apply/reload/restore는 정상 완료됐지만 renderer reload였다. 별도 Electron 프로세스로 성공 종료된 생성 시험의 userData만 다시 여는 m5-project-reopen-smoke.cjs를 추가했다. 임시 루트·기존 PASS/accepted 증거·원본 복원 조건을 검사하고 새 폴더 선택은 거절한다. 정상 종료 확인 전에 PASS를 내지 않으며 실제 provider는 호출하지 않는다.
+- BzvgMn fixture의 최초 프로세스 session54996 exit0 뒤 신규 session35972로 실행해 저장 프로젝트 및 두 채팅을 다시 열었다. Improve hello의 저장 편집 내용과 Second task의 원래 내용, 원본 불변, shutdown accepted/PASS·exit0 확인. 증거 /private/var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-BzvgMn/reopen-result.json, reopen.png. 실행 절차는 docs/procedures/m5-performance.md에 추가했다.
+- 이는 전체 프로세스 정상 재시작 뒤 프로젝트/채팅/작업 복사본 영속성 증거다. 실제 로그인 유지·실행 중 중단·강제 종료 복구·전체 gate는 증명하지 않는다. 실제 연결 승인 대기는 유지한다. diff 검사 PASS, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (임시 원본 반영·재로딩·복원 UI 확인)
 
 - 직전 무계정 편집 시험은 PASS였지만 반영/복원 옵션이 빠져 있었다. 같은 최신 산출물에서 HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui 실행(session54996)이 APPLIED→RESTORED→PROJECT_FLOW_COMPLETE→shutdown accepted/PASS, exit0으로 종료됐다.
