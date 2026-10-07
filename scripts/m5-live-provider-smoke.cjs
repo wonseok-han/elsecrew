@@ -50,7 +50,14 @@ function finish(error) {
 app.on('browser-window-created', (_event, window) => {
   window.webContents.setBackgroundThrottling(false);
   window.webContents.once('did-finish-load', async () => {
-    const run = code => window.webContents.executeJavaScript(code);
+    const run = async code => {
+      // The watchdog may finish while an IPC/UI request is still pending.
+      // Never let a late response advance to another paid run after shutdown.
+      if (finished) throw new Error('Smoke session has finished');
+      const result = await window.webContents.executeJavaScript(code);
+      if (finished) throw new Error('Smoke session has finished');
+      return result;
+    };
     const wait = async predicate => { for(let i=0;i<300;i++){if(await run(predicate))return;await new Promise(r=>setTimeout(r,100));}throw new Error('UI readiness timeout'); };
     try {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='프로젝트 선택'&&!b.disabled)`);
@@ -121,6 +128,7 @@ app.on('browser-window-created', (_event, window) => {
           outcomes.push(terminal??{provider,runId:accepted.runId,chatId,state:'timeout'});
           if(!terminal) break;
         } catch(error) {
+          if (finished) return;
           const message = String(error.message).slice(0,500);
           outcomes.push({provider,state:'requestFailed',error:message});
           if (message.includes('sidecar exited')) {

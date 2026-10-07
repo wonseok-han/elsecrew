@@ -5,13 +5,13 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../scripts/m5-live-provider-smoke.cjs'), 'utf8');
 
-function harness(catalogOnly = false) {
+function harness(catalogOnly = false, autoFinish = true) {
   const events = new Map();
   const timers = new Map();
   const exits = [];
   let evidence;
   const app = {
-    setPath() {}, on() {}, quit() {},
+    setPath() {}, on(name, callback) { events.set(name, callback); }, quit() {},
     once(name, callback) { events.set(name, callback); },
     exit(code) { exits.push(code); },
   };
@@ -34,11 +34,50 @@ function harness(catalogOnly = false) {
     },
   });
   vm.runInContext(source, context);
-  vm.runInContext(catalogOnly
+  if (autoFinish) vm.runInContext(catalogOnly
     ? `outcomes.push({provider:'codex',state:'catalogObserved',models:[]});finish();`
     : `outcomes.push(...['codex','claude'].map(provider=>({provider,state:'succeeded',terminationOutcome:'cleanExit',responseObserved:true})));finish();`, context);
   return {events,timers,exits,evidence: () => evidence};
 }
+
+test('watchdog finish prevents late UI response from starting another request', async () => {
+  const h = harness(false, false);
+  let loaded;
+  let resolveRequest;
+  let requests = 0;
+  h.events.get('browser-window-created')(null, {webContents: {
+    setBackgroundThrottling() {},
+    once(_name, callback) { loaded = callback; },
+    executeJavaScript() {
+      requests += 1;
+      return new Promise(resolve => { resolveRequest = resolve; });
+    },
+  }});
+  const pending = loaded();
+  assert.equal(requests, 1);
+  h.timers.get(240000)();
+  resolveRequest(true);
+  await pending;
+  assert.equal(requests, 1);
+  assert.equal(h.evidence().error, 'timeout');
+  assert.equal(h.evidence().shutdown, 'pending');
+  assert.deepEqual(h.exits, []);
+});
+
+test('a page loaded after watchdog shutdown sends no UI requests', async () => {
+  const h = harness(false, false);
+  let loaded;
+  let requests = 0;
+  h.events.get('browser-window-created')(null, {webContents: {
+    setBackgroundThrottling() {},
+    once(_name, callback) { loaded = callback; },
+    executeJavaScript() { requests += 1; return Promise.resolve(true); },
+  }});
+  h.timers.get(240000)();
+  await loaded();
+  assert.equal(requests, 0);
+  assert.equal(h.evidence().error, 'timeout');
+});
 
 test('live smoke cannot pass before normal shutdown is accepted', () => {
   const h = harness();

@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (연결·종료 UI 변경 묶음 컴파일 확인)
+
+- 직전 watchdog 경합 수정과 a7faba4까지의 모델 선택/실행 결과 UI를 한 묶음으로 확인했다. node --test --experimental-strip-types tests/m5-model-choices.test.mts tests/m5-work-status.test.mts tests/m5-live-provider-smoke.test.cjs tests/m5-electron-bridge.test.mts: 63/63 PASS. tsc --noEmit -p tsconfig.json PASS, CARGO_BUILD_JOBS=4 cargo check -p hello-agent-sidecar --locked -j4 PASS. 반복 전체 하네스나 실제 모델 시험은 하지 않았다.
+- Codex preflight의 thread/start 경로를 추가 조사했다. 응답과 thread/started 알림 결속을 요구하는 코드가 있으나 이번 실제 실패의 원시 증거가 없으므로 알림 형식/timeout을 원인으로 단정하거나 허용 범위를 확대하지 않았다. 앞선 고정 단계 진단은 컴파일 확인됐고 실제 원인 관측은 아직 남는다.
+- watchdog 경합 수정은 관련 합성 회귀가 통과한 로컬 커밋으로 남긴다. 기존9월 archive는 제외한다. 다음: 요청한 Claude 제한적 예외/실제 재시험 승인 확인, 실제 연결 실패 해소, 최종 누적 Rust/UI/안전 검증. 63개 PASS는 앱 전체 완료·G6 합격·실계정 동작의 증거가 아니다. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (시험 종료 후 늦은 응답 차단)
+
+- 기준 a7faba4, 기존9월 archive만 dirty. 남은 기능과 실제 연결 차단을 대조하던 중 live smoke watchdog의 finish 뒤에도 비동기 UI callback이 다음 요청/유료 실행으로 진행할 수 있는 경합을 발견했다. 실행 wrapper의 await 전후 finished 검사와 provider catch의 종료 guard로 늦은 응답의 후속 요청·결과 변경을 차단했다. 이미 전송된 요청을 취소했다고 주장하지 않으며 기존 정상 app.quit/복구 경계를 유지한다.
+- 제한 시간 중 pending 응답과 제한 시간 후 page load의 두 합성 회귀를 추가했다. 실행은 누적 검증에 남기며 diff 검사만 수행한다. 실제 모델 호출0회. Claude 전용 임시 소켓의 제한적 허용 수정/독립 검토와 Codex 소규모 재시험1회 승인을 묶어 비동기 질문으로 명확히 요청했다. 미승인 상태에서 실행하거나 예외를 열지 않는다.
+- 다음: 승인된 범위의 실제 연결 마무리, 준비 실패 진단, 누적 UI/Rust/계약 검증. 전체 개발 완료가 아니며 main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (실행 결과·종료 확인 분리 UI)
 
 - 기준 a39d2b8. 직전 진단 코드 추가는 진행 사항이며 실제 원인 해결·검증 완료는 아니다. 실행 목록이 상태명만 표시하던 부분에 실패/취소/성공과 cleanExit/미확인/복구 필요를 분리한 ko/en 안내, 펼칠 수 있는 실행 ID·종료 확인 정보를 연결했다.
