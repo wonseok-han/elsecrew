@@ -1,5 +1,7 @@
 const { contextBridge } = require("electron");
 require("./m5-renderer-smoke-preload.cjs");
+// Performance samples measure the normal ready path, not the recovery fixture.
+window.m5SmokeBlockers = [];
 const { getFileText, patch, tree } = require("./m5-renderer-performance-fixture.cjs");
 const { createHash } = require("node:crypto");
 const bridge = window.m5;
@@ -19,7 +21,7 @@ function send(text) {
 }
 const getOriginalTree = bridge.getProjectTree;
 bridge.getProjectTree = async ({ parentPath, cursor }) => {
-  await getOriginalTree(); // Keep snapshot-before-tree guard.
+  await getOriginalTree({ parentPath, cursor }); // Keep snapshot-before-tree guard.
   return tree(parentPath, cursor);
 };
 bridge.onSidecarEvent = (listener) => { streamListeners.add(listener); return () => streamListeners.delete(listener); };

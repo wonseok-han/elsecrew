@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (대형 renderer 진단 계측 복구·10회 수집)
+
+- 기준f56336b. 직전 가상화는 구현 진전이다. 기존 사용자 archive 변경을 보존하면서 계측할 명시 --diagnostic 모드를 추가했다. 이 모드는 전후 dirty 상태와 gateEligible=false를 기록하며 기준 이내도 NOT_READY/exit2, 실패는FAIL/1이다. 기본 clean-only 조건은 유지한다. 별도 임시 userData를 사용해 저장 배치/시험 상태가 실제 앱과 섞이지 않게 했다.
+- 첫 실행은 성능 fixture가 변경된 getOriginalTree를 인자 없이 호출해 중단됐다. 인자 전달/정상 ready blocker fixture를 정정했다. 두 번째는 첫 trial의 Changes 활성 탭이 다음 trial에 보존돼 숨은 파일 목록 끝 도달이 실패했다. 각 trial에서 Files를 명시 표시하고 창을 활성화하도록 수정했다. 제품 admission/안전 계약을 완화하지 않았다.
+- 최종 warm-up1+측정10 수집 완료, failedMetrics=[]이나 진단이므로 NOT_READY/2 유지. 최대값: tree67.8ms, expand16.7ms, 5MiB/10만줄 편집84.9ms, 입력25.1ms, diff요약81.6ms/첫파일23.6ms, 관측 longtask0ms, treeDOM362. 가상목록 동일 페이지 끝/다음 페이지 접근도 실행됐다. 증거 .artifacts/m5-performance/renderer-2026-10-07T06-03-50.476Z-80086.json. synthetic bridge renderer 증거이며 실제 sidecar/agent 처리량·전체 앱 RSS·패키지 시작·G6 전체 합격은 아니다.
+- Karpathy 지침으로 기존 계측을 재사용했다. 다음은 남은 event/전체 앱 계측·가상화 키보드 및 실제 공급자/Windows다. 이전 PASS를 새 범위로 확대하지 않는다. 기존9월 archive 보존, main/push 없음.
+
 ### 2026-10-07 · by GPT-6 Astra (대형 파일 트리 DOM 상한 연결)
 
 - 기준ee24174. 직전 통합 UI는 진전이다. G6 기존 계측과 명세 §10을 대조해500행 전체 렌더에 아이콘/이름 span이 더해지면 트리 DOM500 상한을 넘는 누락을 확인했다. 기준을 올리지 않고 고정32px 행/최대120행/앞뒤 spacer의 가상 목록을 연결했다. 500개 backend 페이지 계약·다음 목록/폴더 탐색·원본 읽기 보호는 유지한다.

@@ -2,18 +2,21 @@
 const { app, BrowserWindow, net, protocol } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { mkdirSync, writeFileSync } = require("node:fs");
+const { mkdirSync, writeFileSync, mkdtempSync } = require("node:fs");
 const { spawnSync, execFile } = require("node:child_process");
 const { processTreeMemory, summarizeMemory } = require("../scripts/m5-process-memory.cjs");
 const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
-const { cpus, totalmem, release } = require("node:os");
+const { cpus, totalmem, release, tmpdir } = require("node:os");
+const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-perf-"));
+app.setPath("userData", userData);
 const root = resolve(__dirname, "..");
 const renderer = resolve(root, ".vite/renderer/main_window");
 const samples = [];
 let window;
 let timeout;
 const measureMemory = process.env.M5_MEASURE_MEMORY === "1";
+const diagnostic = process.env.M5_MEASURE_DIAGNOSTIC === "1";
 const memorySamples = [];
 let memoryPhase = "idle";
 let memoryTimer;
@@ -38,6 +41,7 @@ function sampleMemory() {
 }
 protocol.registerSchemesAsPrivileged([{ scheme: "m5perf", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const report = { schemaVersion: 1, evidence: "m5-renderer-fixture-performance", status: "NOT_READY", head: process.env.M5_MEASUREMENT_HEAD, startedAt: new Date().toISOString(), samples,
+  diagnostic, gateEligible: !diagnostic, userData,
   environment: { electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model, ramBytes: totalmem(), os: release() },
   limitations: ["Production renderer build with synthetic bridge, not packaged-app startup, filesystem/IPC throughput, real agent streams, or overall G6 readiness."] };
 function finish(error) {
@@ -46,6 +50,7 @@ function finish(error) {
   clearTimeout(timeout);
   clearInterval(memoryTimer);
   if (error) { report.status = "FAIL"; report.error = String(error.stack || error); }
+  if (diagnostic && report.status === "PASS") report.status = "NOT_READY";
   report.finishedAt = new Date().toISOString();
   try {
     const directory = resolve(root, ".artifacts/m5-performance"); mkdirSync(directory, { recursive: true });
@@ -54,13 +59,15 @@ function finish(error) {
   } catch { report.status = "FAIL"; }
   process.stdout.write(JSON.stringify(report) + "\n");
   if (window && !window.isDestroyed()) window.destroy();
-  app.exit(report.status === "PASS" ? 0 : 1);
+  app.exit(report.status === "PASS" ? 0 : report.status === "NOT_READY" ? 2 : 1);
 }
 app.on("window-all-closed", () => {});
 app.whenReady().then(async () => {
   const git = (args) => { const result = spawnSync("/usr/bin/git", args, { cwd: root, encoding: "utf8" }); if (result.status !== 0) throw new Error("Git unavailable"); return result.stdout.trim(); };
-  if (process.platform !== "darwin" || process.arch !== "arm64" || !report.head || git(["rev-parse", "HEAD"]) !== report.head || git(["status", "--porcelain"]) !== "") throw new Error("requires a clean macOS arm64 measurement build");
-  report.dirtyBefore = false;
+  report.checkoutBefore = git(["status", "--porcelain"]);
+  report.dirtyBefore = report.checkoutBefore !== "";
+  if (process.platform !== "darwin" || process.arch !== "arm64" || !report.head || git(["rev-parse", "HEAD"]) !== report.head || (!diagnostic && report.dirtyBefore)) throw new Error("requires a clean macOS arm64 measurement build");
+  if (diagnostic) report.limitations.push("Diagnostic only: includes working-tree changes and can never pass a release gate.");
   report.rendererHtmlSha256 = createHash("sha256").update(readFileSync(resolve(renderer, "index.html"))).digest("hex");
   timeout = setTimeout(() => finish(new Error("renderer benchmark timed out")), 120000);
   await protocol.handle("m5perf", (request) => {
@@ -86,8 +93,9 @@ app.whenReady().then(async () => {
   }
   for (let trial = 0; trial < 11; trial++) {
     await window.loadURL("m5perf://m5/index.html");
+    window.show(); window.focus(); window.webContents.focus();
     const sample = await window.webContents.executeJavaScript(`(async () => {
-      const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("missing benchmark control: " + document.body.innerText.slice(0, 500)); await new Promise(r => setTimeout(r, 5)); } };
+      const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("missing benchmark control: " + predicate.toString() + " / " + document.body.innerText.slice(0, 500)); await new Promise(r => setTimeout(r, 5)); } };
       const paint = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       const button = (label) => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === label && !b.disabled);
       await wait(() => button('프로젝트 선택'));
@@ -96,7 +104,10 @@ app.whenReady().then(async () => {
       observer.observe({ type: 'longtask' });
       const result = {};
       let start = performance.now(); button('프로젝트 선택').click();
-      await wait(() => document.querySelectorAll('.m5-file-row').length === 120); await paint();
+      await wait(() => document.querySelectorAll('.m5-file-row').length === 120);
+      // The previous trial ends in Changes; expose Files before scrolling it.
+      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '파일' && b.getClientRects().length)?.click();
+      await paint();
       result.treeRootMs = performance.now() - start;
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
       await wait(() => document.querySelectorAll('.m5-change-row').length === 500); await paint();
@@ -156,7 +167,7 @@ app.whenReady().then(async () => {
     report.failedMetrics.push(...report.memory.failedMetrics);
   }
   report.status = report.failedMetrics.length ? "FAIL" : "PASS";
-  report.headAfter = git(["rev-parse", "HEAD"]); report.dirtyAfter = git(["status", "--porcelain"]) !== "";
-  if (report.headAfter !== report.head || report.dirtyAfter) throw new Error("checkout changed during measurement");
+  report.headAfter = git(["rev-parse", "HEAD"]); report.checkoutAfter = git(["status", "--porcelain"]); report.dirtyAfter = report.checkoutAfter !== "";
+  if (report.headAfter !== report.head || (!diagnostic && report.dirtyAfter)) throw new Error("checkout changed during measurement");
   finish();
 }).catch(finish);
