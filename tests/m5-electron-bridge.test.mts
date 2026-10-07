@@ -70,6 +70,27 @@ function createClient(timeout = 1_000) {
   return { child, client, spawns: () => spawns };
 }
 
+test("sidecar diagnostic classification preserves the first failure without exposing raw errors", async () => {
+  const { child, client } = createClient();
+  const starting = client.start();
+  child.emit("error", new Error("secret-provider-token"));
+  await assert.rejects(starting);
+  assert.equal(client.failureCode, "processError");
+  child.emit("exit", 1, null);
+  client.failRendererDisconnected();
+  assert.equal(client.failureCode, "processError");
+  assert.equal(child.terminations, 1);
+});
+
+test("sidecar protocol failure is distinct from subsequent process exit", async () => {
+  const { child, client } = createClient();
+  const starting = client.start();
+  child.stdout.write("not-json\n");
+  await assert.rejects(starting);
+  child.emit("exit", 1, null);
+  assert.equal(client.failureCode, "protocolInvalid");
+});
+
 function readyLine() {
   return JSON.stringify({
     protocolVersion: 1,

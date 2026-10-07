@@ -284,6 +284,7 @@ export class SidecarClientV1 {
   #rejectReady: ((error: Error) => void) | undefined;
   #readyTimer: NodeJS.Timeout | undefined;
   #failure: Error | undefined;
+  #failureCode: "readyTimeout" | "pipesUnavailable" | "processError" | "processExit" | "consumerTooSlow" | "rendererDisconnected" | "requestWrite" | "requestInvalid" | "protocolInvalid" | "protocolOversized" | undefined;
   #stderrTail = Buffer.alloc(0);
   #terminationAttempted = false;
 
@@ -316,7 +317,7 @@ export class SidecarClientV1 {
       this.#resolveReady = resolve;
       this.#rejectReady = reject;
       this.#readyTimer = setTimeout(() => {
-        this.#fail(new Error("sidecar did not emit system.ready within 3 seconds"));
+        this.#fail(new Error("sidecar did not emit system.ready within 3 seconds"), "readyTimeout");
       }, this.#readyTimeoutMs);
     });
 
@@ -330,17 +331,17 @@ export class SidecarClientV1 {
       // Own the child before validating its pipes so partial spawn failures can stop it.
       this.#process = process;
       if (!process.stdin || !process.stdout || !process.stderr) {
-        this.#fail(new Error("sidecar stdio pipes are unavailable"));
+        this.#fail(new Error("sidecar stdio pipes are unavailable"), "pipesUnavailable");
         return this.#readyPromise;
       }
       process.stdout.on("data", (chunk: Buffer) => this.#onStdout(Buffer.from(chunk)));
       process.stderr.on("data", (chunk: Buffer) => this.#onStderr(Buffer.from(chunk)));
-      process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start")));
+      process.once("error", (error: unknown) => this.#fail(asError(error, "sidecar failed to start"), "processError"));
       process.once("exit", (code: unknown, signal: unknown) => {
-        this.#fail(new Error(`sidecar exited (${String(code ?? "null")}, ${String(signal ?? "none")})`));
+        this.#fail(new Error(`sidecar exited (${String(code ?? "null")}, ${String(signal ?? "none")})`), "processExit");
       });
     } catch (error) {
-      this.#fail(asError(error, "sidecar failed to start"));
+      this.#fail(asError(error, "sidecar failed to start"), "processError");
     }
     return this.#readyPromise;
   }
@@ -353,8 +354,11 @@ export class SidecarClientV1 {
     return this.#failure;
   }
 
-  failConsumerTooSlow(): void { this.#fail(new Error("consumerTooSlow: renderer event credit exhausted")); }
-  failRendererDisconnected(): void { this.#fail(new Error("rendererDisconnected: renderer delivery ended before acknowledgement")); }
+  /** Fixed local classification only; never includes provider output or credentials. */
+  get failureCode() { return this.#failureCode; }
+
+  failConsumerTooSlow(): void { this.#fail(new Error("consumerTooSlow: renderer event credit exhausted"), "consumerTooSlow"); }
+  failRendererDisconnected(): void { this.#fail(new Error("rendererDisconnected: renderer delivery ended before acknowledgement"), "rendererDisconnected"); }
 
   get failedBeforeReady(): boolean {
     return this.#failure !== undefined && this.#lastReady === null;
@@ -512,7 +516,7 @@ export class SidecarClientV1 {
   markRecoveryResolved(input: RecoveryMarkResolvedRequestV1): Promise<RecoveryRecordV1> { return this.#request("recovery.markResolved", validateRecoveryMarkResolvedRequestV1(input)) as Promise<RecoveryRecordV1>; }
 
   getAgentCapabilities(input: AgentCapabilitiesRequestV1): Promise<AgentCapabilitySnapshotV1> {
-    return this.#requestAgent("agent.getCapabilities", validateAgentCapabilitiesRequestV1(input)) as Promise<AgentCapabilitySnapshotV1>;
+    return this.#requestAgent("agent.getCapabilities", { ...validateAgentCapabilitiesRequestV1(input) }) as Promise<AgentCapabilitySnapshotV1>;
   }
   async getModelChoices(input: ModelChoicesRequest): Promise<ModelChoicesResult> {
     this.#requireAgentAdapter();
@@ -522,16 +526,16 @@ export class SidecarClientV1 {
     return this.#request("agent.getModelChoices", validateModelChoicesRequest(input)) as Promise<ModelChoicesResult>;
   }
   startAgentRun(input: AgentRunStartRequestV1): Promise<AgentRunAcceptedV1> {
-    return this.#requestAgent("run.startAgent", validateAgentRunStartRequestV1(input)) as Promise<AgentRunAcceptedV1>;
+    return this.#requestAgent("run.startAgent", { ...validateAgentRunStartRequestV1(input) }) as Promise<AgentRunAcceptedV1>;
   }
   cancelAgentRun(input: AgentRunCancelRequestV1): Promise<AgentRunCancelResultV1> {
-    return this.#requestAgent("run.cancelAgent", validateAgentRunCancelRequestV1(input)) as Promise<AgentRunCancelResultV1>;
+    return this.#requestAgent("run.cancelAgent", { ...validateAgentRunCancelRequestV1(input) }) as Promise<AgentRunCancelResultV1>;
   }
   inspectAgentRecovery(input: AgentRecoveryInspectRequestV1): Promise<AgentRecoveryRecordV1> {
-    return this.#requestAgent("recovery.inspectAgent", validateAgentRecoveryInspectRequestV1(input)) as Promise<AgentRecoveryRecordV1>;
+    return this.#requestAgent("recovery.inspectAgent", { ...validateAgentRecoveryInspectRequestV1(input) }) as Promise<AgentRecoveryRecordV1>;
   }
   resolveAgentRecovery(input: AgentRecoveryResolveRequestV1): Promise<AgentRecoveryResolveResultV1> {
-    return this.#requestAgent("recovery.resolveAgent", validateAgentRecoveryResolveRequestV1(input)) as Promise<AgentRecoveryResolveResultV1>;
+    return this.#requestAgent("recovery.resolveAgent", { ...validateAgentRecoveryResolveRequestV1(input) }) as Promise<AgentRecoveryResolveResultV1>;
   }
 
   #requestAgent(method: Extract<MethodV1, "agent.getCapabilities" | "run.startAgent" | "run.cancelAgent" | "recovery.inspectAgent" | "recovery.resolveAgent">, params: Record<string, unknown>): Promise<unknown> {
@@ -584,11 +588,11 @@ export class SidecarClientV1 {
           reject,
         });
         process.stdin?.write(encoded, "utf8", (error) => {
-          if (error) this.#fail(asError(error, "sidecar request write failed"));
+          if (error) this.#fail(asError(error, "sidecar request write failed"), "requestWrite");
         });
       });
     } catch (error) {
-      this.#fail(asError(error, "invalid sidecar request"));
+      this.#fail(asError(error, "invalid sidecar request"), "requestInvalid");
       return Promise.reject(this.#failure);
     }
   }
@@ -602,7 +606,7 @@ export class SidecarClientV1 {
       const rawLine = this.#stdout.subarray(0, lineEnd);
       this.#stdout = this.#stdout.subarray(lineEnd + 1);
       if (rawLine.byteLength > MAX_CONTROL_LINE_BYTES) {
-        this.#fail(new Error("sidecar stdout line exceeds 1 MiB"));
+        this.#fail(new Error("sidecar stdout line exceeds 1 MiB"), "protocolOversized");
         return;
       }
       try {
@@ -610,13 +614,13 @@ export class SidecarClientV1 {
         const envelope = decodeJsonl(line);
         this.#onEnvelope(envelope);
       } catch (error) {
-        this.#fail(asError(error, "invalid sidecar stdout protocol"));
+        this.#fail(asError(error, "invalid sidecar stdout protocol"), "protocolInvalid");
         return;
       }
       lineEnd = this.#stdout.indexOf(0x0a);
     }
     if (this.#stdout.byteLength > MAX_CONTROL_LINE_BYTES) {
-      this.#fail(new Error("sidecar stdout has an oversized or unterminated line"));
+      this.#fail(new Error("sidecar stdout has an oversized or unterminated line"), "protocolOversized");
     }
   }
 
@@ -883,7 +887,7 @@ export class SidecarClientV1 {
       }
       case "workspace.abandonPrepared": {
         const value = validateAbandonPreparedWorkspaceResultV1(response.result);
-        assertPreparedResponse(value, pending.params);
+        assertPreparedResponse(value, validateAbandonPreparedWorkspaceRequestV1(pending.params));
         this.#preparedWorkspaces.delete(value.preparationId);
         return value;
       }
@@ -1078,9 +1082,10 @@ export class SidecarClientV1 {
     }
   }
 
-  #fail(error: Error): void {
+  #fail(error: Error, code: NonNullable<SidecarClientV1["failureCode"]>): void {
     if (this.#failure) return;
     this.#failure = error;
+    this.#failureCode = code;
     clearTimeout(this.#readyTimer);
     this.#rejectReady?.(error);
     this.#resolveReady = undefined;
@@ -1283,7 +1288,7 @@ function agentRunBindingFromAccepted(run: AgentRunAcceptedV1): AgentRunBindingV1
 }
 
 function observedAgentRunState(state: AgentRunRecordV1["state"]): AgentRunObservedStateV1 {
-  if (["succeeded", "failed", "canceled", "recoveryRequired"].includes(state)) return "terminal";
+  if (state === "succeeded" || state === "failed" || state === "canceled" || state === "recoveryRequired") return "terminal";
   return state;
 }
 
@@ -1366,7 +1371,7 @@ function validateWorkspaceSaveBeginRequest(value: unknown): WorkspaceSaveBeginRe
   const ref = workspaceRefFrom(object);
   if (typeof object.path !== "string" || object.path.length === 0 || object.path.startsWith("/") || object.path.includes("\\")
     || object.path.split("/").some((part) => part === "" || part === "." || part === "..")
-    || !Number.isSafeInteger(object.totalBytes) || object.totalBytes < 0 || object.encoding !== "utf8") {
+    || typeof object.totalBytes !== "number" || !Number.isSafeInteger(object.totalBytes) || object.totalBytes < 0 || object.encoding !== "utf8") {
     throw new Error("workspace save begin request is invalid");
   }
   return { ...ref, path: object.path, expectedVersion: validateFileVersionV1(object.expectedVersion), totalBytes: object.totalBytes, encoding: "utf8" };
@@ -1389,7 +1394,7 @@ function validateWorkspaceSaveBeginResult(value: unknown): WorkspaceSaveBeginRes
 function validateWorkspaceSaveChunkResult(value: unknown): ChatWorkspaceRefV1 & { saveId: string; acceptedSeq: number } {
   const object = strictObject(value, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "saveId", "acceptedSeq"], "workspace save chunk result");
   const ref = workspaceRefFrom(object);
-  if (!validId(object.saveId) || !Number.isSafeInteger(object.acceptedSeq) || object.acceptedSeq < 1) throw new Error("workspace save chunk result is invalid");
+  if (!validId(object.saveId) || typeof object.acceptedSeq !== "number" || !Number.isSafeInteger(object.acceptedSeq) || object.acceptedSeq < 1) throw new Error("workspace save chunk result is invalid");
   return { ...ref, saveId: object.saveId, acceptedSeq: object.acceptedSeq };
 }
 
@@ -1416,14 +1421,14 @@ function validateWorkspaceWatchResult(value: unknown): WorkspaceWatchResultV1 {
 }
 
 function validateSaveChunk(value: Record<string, unknown>): SaveChunkV1 {
-  if (!validId(value.saveId) || !Number.isSafeInteger(value.seq) || value.seq < 1 || typeof value.text !== "string"
+  if (!validId(value.saveId) || typeof value.seq !== "number" || !Number.isSafeInteger(value.seq) || value.seq < 1 || typeof value.text !== "string"
     || new TextEncoder().encode(value.text).byteLength > 256 * 1024) throw new Error("workspace save chunk request is invalid");
   return { saveId: value.saveId, seq: value.seq, text: value.text };
 }
 
 function validateSaveCommit(value: Record<string, unknown>): SaveCommitV1 {
-  if (!validId(value.saveId) || !Number.isSafeInteger(value.lastSeq) || value.lastSeq < 1
-    || !Number.isSafeInteger(value.totalBytes) || value.totalBytes < 0) throw new Error("workspace save commit request is invalid");
+  if (!validId(value.saveId) || typeof value.lastSeq !== "number" || !Number.isSafeInteger(value.lastSeq) || value.lastSeq < 1
+    || typeof value.totalBytes !== "number" || !Number.isSafeInteger(value.totalBytes) || value.totalBytes < 0) throw new Error("workspace save commit request is invalid");
   return { saveId: value.saveId, expectedVersion: validateFileVersionV1(value.expectedVersion), lastSeq: value.lastSeq, totalBytes: value.totalBytes };
 }
 

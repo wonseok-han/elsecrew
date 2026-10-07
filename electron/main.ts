@@ -78,6 +78,9 @@ const quitCoordinator = new QuitCoordinatorV1({
       cancelId: 0,
       noLink: true,
     };
+    if (reason === "unavailable") {
+      options.detail += `\n\n${korean ? "진단 코드" : "Diagnostic code"}: ${sidecar?.failureCode ?? "shutdownUnconfirmed"}`;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) await dialog.showMessageBox(mainWindow, options);
     else await dialog.showMessageBox(options);
   },

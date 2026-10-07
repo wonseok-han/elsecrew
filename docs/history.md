@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-07 · by GPT-6 Astra (진단 묶음 검증·Electron 타입 누락 수정)
+
+- 기준a892009+종료 진단 변경. 직전 턴은 고정 진단 코드/회귀 추가로 진척했다. bridge·work-status·live smoke·editor-state·heap-sampling 묶음118/118 PASS, 프런트 tsc PASS. forge는 main/preload/renderer 번들을 생성했으나 패키징 다운로드에서 fetch failed/exit1로 실패했다. 설치 패키지 성공으로 기록하지 않는다.
+- 기본 tsconfig는 src만 검사하므로 Electron 검증을 별도 수행했다. sidecar-client 단독 strict 검사에서17개 오류가 나왔다. 검증된 요청을 plain object로 전달하고 준비 응답 비교 전 기존 validator로 재확인하며, terminal 상태 분기/숫자 typeof narrowing을 명시했다. Number.isSafeInteger·exact 입력 검증은 유지하고 타입 단언으로 우회하지 않았다. 수정 후 동일 strict 검사 PASS. 타입 변경 뒤 bridge 회귀55/55 PASS.
+- 안전 종료 정책 변경·실제 계정/모델 호출은 없으며 현재 진단 변경은 로컬 작업 단위로 커밋한다. 기존9월 archive는 제외한다. 빌드 산출물은 숫자 narrowing 수정 전이며 다음 빌드 때 갱신 필요. 다음: 실제 준비 실패/Claude 호환 승인 항목, 최종 UI/성능/Windows 게이트. 전체 앱 완료는 아니다. main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (종료 경고 고정 진단 코드)
+
+- 기준a892009, 기존 history/9월 archive 보존. 이전 턴은 실행 프로세스 부재와 현재 알림 경로를 확인한 조사 진척이며 재발 원인 해결은 아니었다. SidecarClient 실패 지점마다 고정 코드(서비스 종료/시작 오류/준비 시간 초과/통신 규약/요청 쓰기/renderer 연결 등)를 지정하고 첫 실패 코드를 보존했다. 이후 정리로 발생한 exit가 최초 원인을 덮지 않는다.
+- unavailable 종료 경고에 고정 진단 코드만 표시한다. 원문 오류·stderr·계정·경로는 추가하지 않으며 종료 허가/프로세스 정리/재시작 정책은 그대로다. Karpathy 지침에 따라 안전 경계를 바꾸지 않는 표시·진단에 한정했다. 코드가 근본 원인을 확정하는 것은 아니며 protocolInvalid 등은 추가 조사가 필요하다.
+- 첫 실패 유지·민감 원문 비노출·protocol 후 exit 분류 회귀2개를 추가했다. 사용자 방침대로 실행/빌드는 파동 검증에 남기고 diff 검사만 수행한다. 현재 실행 산출물에는 아직 반영되지 않았다. 다음: 최신 빌드의 재발 코드 확보, 실제 provider 연결 차단 해소와 누적 검증. 실제 모델 호출/강제 종료/main 병합/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (사용자 종료 경고 재신고 확인)
+
+- 사용자 스크린샷 문구를 electron/main.ts의 unavailable 종료 알림과 대조했다. 내부 서비스 종료 확인 요청 실패를 뜻하며 로그인 만료나 원본 손상 증거는 아니다. 현재 a892009의 QuitCoordinator는 세션당 같은 알림을 한 번만 표시하지만 단절 원인 자체를 해결한 것으로 볼 수 없다.
+- 제한 환경 ps 거절 뒤 읽기 전용 권한으로 다시 확인했으며 현재 hello-agent Electron/sidecar 실행 프로세스는 발견되지 않았다. 따라서 재신고된 창의 실행본/단절 원인은 확정하지 못했다. 강제 종료·재실행·모델 호출·인증정보 변경은 하지 않았다. 다음은 재발 중인 창의 실행 시점/실행본과 서비스 종료 로그 결속이며 구버전 탓으로 단정하지 않는다.
+- 이전 읽기 전용 Codex 검토가 완료됐다. catalog 성공은 thread/start를 증명하지 않으며 실제 준비 실패 원인은 미확정, 고정 실패 단계가 stderr에만 남는 진단 한계가 확인됐다. 이 별도 실패를 이번 종료 경고 원인으로 혼동하지 않는다. 기존 미커밋 기록과9월 archive 보존, main/push 없음.
+
+### 2026-10-07 · by GPT-6 Astra (할당 경로 구분·Codex 준비 독립 조사)
+
+- 기준a892009, 기존9월 archive 보존. 합성 preload의 readFile/getDiffFile과 fixture sizedLines가 node:buffer byteLength를 호출하며 제품 renderer는 Node API를 노출받지 않는다. 따라서 그 큰 샘플을 제품 저장 경로의 누수로 단정하거나 fixture 데이터를 줄여 제품 메모리 개선으로 보고하지 않았다. join의 호출 조상은 아직 미확정이다.
+- 실제 연결 조사에는 상시 승인된 읽기 전용 검토자1명(codex_start_static_review)을 호출했다. 범위는 core Codex preflight/exchange와 sidecar discovery/준비/증분 실행의 정적 차이이며 편집·계정·모델 호출·추가 위임을 금지했다. 본문 기록 시점 검토 진행 중으로 독립 합격이나 원인 확정을 주장하지 않는다.
+- 메인도 ThreadMatched 원자 저장 전 사용자 입력 frame을 큐에 넣지 않는 경계와 두 launch 경로를 재확인했다. 실제28초 실패와30초 예산의 상관만으로 timeout을 원인으로 단정하지 않았다. 실제 연결 승인 대기는 유지한다. 새 모델/앱 실행0회, main/push 없음. 다음: 검토 결과에 따른 입증 가능한 수정, 승인 후 실제 준비 단계 진단.
+
 ### 2026-10-07 · by GPT-6 Astra (할당 샘플 실측·초기화 순서 수정)
 
 - 기준6b98e3f+진단 미커밋. 요약기2개 회귀 PASS. 첫 session8314는 초기 about:blank에서 HeapProfiler.startSampling 대기 중120초 timeout/FAIL(09:36:13-20285 보고서)했다. 신규 합성 문서 loadURL 완료 후 샘플러를 시작하도록 옮긴 session85131은 전체 trial/60초 대기 수집을 완료했다. 첫 bootstrap 할당은 수집 전임을 제한에 명시했다.
