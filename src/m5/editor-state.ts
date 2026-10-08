@@ -503,6 +503,12 @@ export class ProjectEditorController {
         byteLength: descriptor.byteLength,
         text,
       };
+      // Another read may have opened this path while this stream was pending.
+      // Keep its current draft/version rather than appending a duplicate tab.
+      if (this.#tab(path)) {
+        this.#set({ activePath: path, panel: "editor" });
+        return;
+      }
       this.#set({ tabs: [...this.#state.tabs, tab], activePath: path, panel: "editor" });
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;

@@ -477,6 +477,34 @@ async function openText(bridge = new FakeBridge()) {
   return { bridge, controller };
 }
 
+test("overlapping file reads keep one tab and preserve the already edited draft", async () => {
+  const bridge = new FakeBridge();
+  bridge.autoReadChunks = false;
+  const descriptor = await bridge.readFile({ projectId: "project_01", path: "src/file-000.ts" });
+  const first = deferred<typeof descriptor>();
+  const second = deferred<typeof descriptor>();
+  let calls = 0;
+  bridge.readFile = () => (++calls === 1 ? first.promise : second.promise);
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  await controller.chooseProject();
+  try {
+    const a = controller.openFile(descriptor.path);
+    const b = controller.openFile(descriptor.path);
+    bridge.emitChunk("read_first", bridge.fileText);
+    first.resolve({ ...descriptor, stream: { streamId: "read_first", chunkBytes: 262144 } });
+    await a;
+    controller.updateText(descriptor.path, "unsaved draft");
+    const edited = controller.snapshot().tabs[0];
+    bridge.emitChunk("read_second", bridge.fileText);
+    second.resolve({ ...descriptor, stream: { streamId: "read_second", chunkBytes: 262144 } });
+    await b;
+    assert.equal(controller.snapshot().tabs.length, 1);
+    assert.equal(controller.snapshot().tabs[0], edited);
+    assert.equal(controller.snapshot().tabs[0].text, "unsaved draft");
+  } finally { controller.dispose(); }
+});
+
 test("dispose settles unfinished file and diff reads without publishing stale state", { timeout: 2000 }, async () => {
   const bridge = new FakeBridge();
   bridge.autoReadChunks = false;

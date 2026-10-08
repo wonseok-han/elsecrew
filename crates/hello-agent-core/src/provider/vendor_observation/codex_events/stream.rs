@@ -360,6 +360,11 @@ impl TurnStream {
         if !self.started {
             return Err(invalid());
         }
+        if frame.method == "thread/tokenUsage/updated" {
+            self.check_scope(frame.params.get())?;
+            super::usage::validate(frame.params.get())?;
+            return Ok(Observed::Private);
+        }
         if frame.method == "item/started" || frame.method == "item/completed" {
             self.check_scope(frame.params.get())?;
             let wire: Completed = decode(frame.params.get())?;
@@ -534,6 +539,41 @@ mod tests {
         ));
         stream
     }
+    #[test]
+    fn usage_updates_are_scoped_private_metadata_not_completion() {
+        let counts = json!({"totalTokens":12,"inputTokens":10,"cachedInputTokens":2,
+            "outputTokens":2,"reasoningOutputTokens":1});
+        let body = json!({"threadId":"t","turnId":"r",
+            "tokenUsage":{"total":counts,"last":counts,"modelContextWindow":null}});
+        let mut stream = started();
+        for window in [Value::Null, json!(200000)] {
+            let mut update = body.clone();
+            update["tokenUsage"]["modelContextWindow"] = window;
+            update["tokenUsage"]["last"]["cacheWriteInputTokens"] = json!(0);
+            assert!(matches!(stream.observe(&frame("thread/tokenUsage/updated", update)).unwrap(), Observed::Private));
+            assert!(stream.outcome.is_none());
+            assert!(stream.approvals.is_empty());
+        }
+        assert!(matches!(stream.observe(&turn("turn/completed", "completed")).unwrap(), Observed::Finished(TurnOutcome::Completed)));
+        for case in ["thread", "turn", "missing", "negative", "overflow", "type", "before", "after", "budget"] {
+            let mut stream = if case == "before" { TurnStream::new("t", "r").unwrap() } else { started() };
+            let mut update = body.clone();
+            match case {
+                "thread" => update["threadId"] = json!("other"),
+                "turn" => update["turnId"] = json!("other"),
+                "missing" => { update["tokenUsage"]["last"].as_object_mut().unwrap().remove("inputTokens"); }
+                "negative" => update["tokenUsage"]["total"]["totalTokens"] = json!(-1),
+                "overflow" => update["tokenUsage"]["modelContextWindow"] = json!(u64::MAX),
+                "type" => update["tokenUsage"]["last"]["inputTokens"] = json!("10"),
+                "after" => { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
+                "budget" => stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX,
+                _ => {}
+            }
+            assert!(stream.observe(&frame("thread/tokenUsage/updated", update)).is_err(), "{case}");
+            assert!(stream.observe(&turn("turn/completed", "completed")).is_err(), "{case}");
+        }
+    }
+
     #[test]
     fn diagnostic_labels_do_not_echo_unknown_frames_or_reopen_failures() {
         let mut stream = started();

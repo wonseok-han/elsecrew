@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 mod private;
+mod usage;
 pub mod stream;
 
 #[derive(Debug, PartialEq, Eq)]
