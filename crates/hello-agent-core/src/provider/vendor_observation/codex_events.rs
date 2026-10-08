@@ -16,6 +16,7 @@ use serde_json::value::RawValue;
 
 mod private;
 mod usage;
+mod rate_limits;
 pub mod stream;
 
 #[derive(Debug, PartialEq, Eq)]

@@ -299,6 +299,12 @@ impl TurnStream {
             return Ok(Observed::Private);
         }
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+        if frame.method == "account/rateLimits/updated" {
+            // Global advisory event has no thread/turn identity and may precede
+            // turn/started. It consumes the same budget and confers no authority.
+            super::rate_limits::validate(frame.params.get())?;
+            return Ok(Observed::Private);
+        }
         if frame.method == "serverRequest/resolved" {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -549,6 +555,43 @@ mod tests {
         ));
         stream
     }
+    #[test]
+    fn account_limits_are_bounded_advisory_not_auth_or_completion() {
+        let body = json!({"rateLimits":{"limitId":"codex","primary":{"usedPercent":31,
+            "windowDurationMins":15,"resetsAt":1730948100},"secondary":null,
+            "credits":{"hasCredits":false,"unlimited":false,"balance":null},
+            "individualLimit":{"limit":"10","used":"2","remainingPercent":80,"resetsAt":10},
+            "planType":"future-display-plan","spendControlReached":false}});
+        let mut stream = TurnStream::new("t", "r").unwrap();
+        for update in [json!({"rateLimits":{}}), body.clone()] {
+            assert!(matches!(stream.observe(&frame("account/rateLimits/updated", update)).unwrap(), Observed::Private));
+            assert!(!stream.started);
+            assert!(stream.outcome.is_none());
+            assert!(stream.approvals.is_empty());
+        }
+        assert!(stream.finish().is_err());
+        let mut stream = started();
+        assert!(matches!(stream.observe(&frame("account/rateLimits/updated", body.clone())).unwrap(), Observed::Private));
+        assert!(matches!(stream.observe(&frame("account/updated", json!({"authMode":null}))).unwrap(), Observed::RequiresHandling));
+        for update in [json!({}), json!({"rateLimits":null}), json!({"rateLimits":[]}),
+            json!({"rateLimits":{"primary":{}}}),
+            json!({"rateLimits":{"primary":{"usedPercent":"31"}}}),
+            json!({"rateLimits":{"primary":{"usedPercent":2147483648_i64}}}),
+            json!({"rateLimits":{"credits":{"hasCredits":true}}}),
+            json!({"rateLimits":{"spendControlReached":"false"}})] {
+            let mut stream = started();
+            assert!(stream.observe(&frame("account/rateLimits/updated", update)).is_err());
+            assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
+        }
+        for case in ["budget", "after"] {
+            let mut stream = started();
+            if case == "budget" { stream.projection.events = PROVIDER_INTERNAL_EVENTS_MAX; }
+            else { stream.observe(&turn("turn/completed", "completed")).unwrap(); }
+            assert!(stream.observe(&frame("account/rateLimits/updated", body.clone())).is_err());
+            assert!(stream.finish().is_err());
+        }
+    }
+
     #[test]
     fn usage_updates_are_scoped_private_metadata_not_completion() {
         let counts = json!({"totalTokens":12,"inputTokens":10,"cachedInputTokens":2,

@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (계정 사용량 안내 호환)
+
+- 기준548c4f8, 기존 history/9월 archive 보존. OpenAI 공식 https://learn.chatgpt.com/docs/app-server 및 현재 로컬 생성 AccountRateLimitsUpdatedNotification 스키마를 대조했다. account/rateLimits/updated는 thread/turn ID 없는 sparse 계정 전체 안내이며 account/updated의 인증 변경과 다르다. 앞선 실제 실패가 두 알림 중 어느 것인지는 아직 미확정이다.
+- Karpathy 지침으로 rateLimits 필수 객체와 선택 window/credits/spend 필드의 타입을 검증한 뒤 Private로만 처리한다. 표시 enum의 신규 문자열/추가 필드는 허용하되 인증 변경·권한·완료 처리에는 사용하지 않는다. 시작 전 안내도 기존 예산 안에서 허용하고 종료 후/실패 sticky 거절, account/updated 별도 처리 요구를 유지한다.
+- vendor_observation108/108 PASS(session68387), 새 파일 rustfmt 및 diff 검사 PASS. readonly 기존 검토자 APPROVE, debug sidecar build PASS(session6415). 관련 코드와 이번 기록을 로컬 커밋하며 기존9월 archive는 제외한다. 추가 실제 모델 호출0회, 기존 실측 승인 소진 상태다. 다음: Claude 다른 내장 플러그인 조사 및 UI/G6/Windows 잔여 작업. main/push 없음, 제품 완료 아님.
+
+### 2026-10-08 · by GPT-6 Astra (세부 분류 승인 시험 WD8GdD)
+
+- 사용자 새 각1회 승인으로 최신548c4f8 debug/renderer를 session34740에서 시험했다. 두 로그인 connected/모델 선택/두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/responseObserved=false, 임시 원본 불변, shutdown accepted, FAIL/exit1이다. 기존 history/9월 archive 보존, 실제 성공·전체 완료 아님.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-WD8GdD/result.json. chat_c31b23fc6efd48d7a343066a7f4e9e4a, Codex agent_run_1444748d41b3487890cc9183d82f4a8e, Claude agent_run_b6f43306f65f46da85470bb6962bd7ba. 고정 진단은 codex:turn stream account metadata, claude:init plugins other builtins/session initialization/session channel이다. Codex account/updated 또는 account/rateLimits/updated, Claude path=builtin이나 알려진 두 source 외 항목 존재로 범위를 좁혔다. 이름/계정/원문은 출력하지 않았고 플러그인 표시값을 신뢰 근거로 쓰지 않는다.
+- 이번 각1회 승인 소진. 다음: Codex 계정 알림의 공식 스키마·상관관계 처리, Claude 다른 내장 플러그인의 등록 조건 조사. 계정/권한 변경을 무시하거나 plugins 검사를 제거하지 않는다. 사용자 프로젝트·인증정보/main/push 불변. UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-08 · by GPT-6 Astra (UTF-8 할당 제거 후 메모리 재측정)
+
+- 직전 턴은169개 관련 검사·debug build·548c4f8 로컬 커밋으로 진척했다. 실제 모델 새 승인 응답은 없어 호출하지 않았다. 기존9월 archive만 dirty인 상태에서 pnpm m5:measure:renderer --diagnostic --memory session90258을 실행했다. 최신 production renderer 재빌드, 합성 bridge/독립 userData이며 실제 sidecar/계정/모델은 사용하지 않는다.
+- 증거 .artifacts/m5-performance/renderer-2026-10-08T00-45-36.718Z-13663.json: FAIL/exit1, gateEligible=false. idle445841408 bytes(425.1875MiB), peak934903808(891.59375MiB),60초 뒤 retained 증가분0. 실패는 idle400MiB/peak800MiB 초과이며 나머지 시간/DOM 기준은 충족했다. 기존 peak929.4MiB보다 낮지만 단일 표본 차이만으로 인과적 개선을 단정하지 않는다. 합성 프로세스 범위·기준·기능은 축소하지 않았다.
+- 다음: 기본 Electron 프로세스 idle 및 반복 대형 모델 peak 기여 개선, 실제 공급자 진단 시험 승인 대기, UI/Windows/출시 잔여 작업. G6 미완료 유지. 사용자 프로젝트/인증정보/main/push 변경 없음. 이번 결과 기록은 미커밋이다.
+
 ### 2026-10-08 · by GPT-6 Astra (진단·바이트 계산 묶음 검증)
 
 - 직전 턴은 Claude 실제 선택 경로·무계정 초기화 대조와 고정 분류 구현으로 진척했다. 기준0dd9e74/기존 dirty 보존. Karpathy 지침으로 Codex other frame을 로컬 생성 ServerNotification.json의 알려진 method에 한해 diff/plan/thread name/settings/hook/model/warning/account/MCP/moderation 고정 분류로 세분화했다. payload나 임의 method는 출력하지 않고 수락·승인·종료 조건은 바꾸지 않는다. Claude plugin 분류와 함께 smoke exact whitelist 및 비공개 문자열 제외 회귀를 갱신했다.
@@ -129,7 +147,7 @@
 
 - **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 
-- **실제 연결 최신 관측(2026-10-08, 0dd9e74)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 VA9bd7 시험에서 Codex turn stream other frame, Claude init plugins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 무계정2.1.293 plugins 제거 결과를 실계정 성공으로 대체하지 않는다.
+- **실제 연결 최신 관측(2026-10-08, 548c4f8)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 WD8GdD 시험에서 Codex turn stream account metadata, Claude init plugins other builtins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 무계정2.1.293 plugins 제거 결과를 실계정 성공으로 대체하지 않는다.
 - **모델 선택과 실행 권한 분리(2026-10-07)**: Codex의 bounded catalog 표시값은 종료 확정·exe/helper/home 재검증 뒤 agent.getModelChoices/m5Models로 전달한다. 채팅/역할/workspace 결속과 단발 소비를 유지하고, 실행 경로는 여전히 선택 tuple의 새 preflight를 요구한다. 역할 화면은 projectId/revision/chatId로 remount해 이전 채팅 응답 유입을 막는다. 기능 코드f1a135c, 실제 목록 조회·안전 회귀는 최신 워크로그 참조.
 - **Claude 내부 소켓 호환성(2026-10-07)**: profile/tmp/srt-mux-PID-seq.sock은 실행 중 생성·종료 후 제거되는 unix socket으로 관측됐고 공식 anthropics/sandbox-runtime mux-proxy.ts의 내부 HTTP proxy와 일치한다. 일반 scanner는 계속 거절한다. 추적 Claude parent와 전용 tmp에 결속하는 제한적 예외는 사용자 승인 대기이며 일반 소켓/링크 허용 승인이 아니다.
 
