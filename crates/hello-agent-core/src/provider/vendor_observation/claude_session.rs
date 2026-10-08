@@ -30,6 +30,7 @@ pub struct Session {
     events: usize,
     bytes: usize,
     failed: bool,
+    diagnostic_stage: &'static str,
 }
 
 fn invalid() -> ProviderError {
@@ -37,6 +38,7 @@ fn invalid() -> ProviderError {
 }
 
 impl Session {
+    pub fn diagnostic_stage(&self) -> &'static str { self.diagnostic_stage }
     pub fn is_permission_pending(&self, request_id: &str) -> bool {
         !self.failed && self.permissions.is_pending(request_id)
     }
@@ -62,6 +64,7 @@ impl Session {
             events: 0,
             bytes: 0,
             failed: false,
+            diagnostic_stage: "session state",
         }
     }
 
@@ -83,6 +86,7 @@ impl Session {
         if self.failed {
             return Err(invalid());
         }
+        self.diagnostic_stage = "session budget";
         self.events = self.events.checked_add(1).ok_or_else(invalid)?;
         self.bytes = self
             .bytes
@@ -93,13 +97,14 @@ impl Session {
         {
             return Err(invalid());
         }
+        self.diagnostic_stage = "session tag";
         let tag: Tag = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
         if tag.kind == "system" && tag.subtype.as_deref() == Some("init") {
             if self.projection.is_some() {
                 return Err(invalid());
             }
             let tools: Vec<_> = self.tools.iter().map(String::as_str).collect();
-            let init = claude_init::observe(
+            let init = claude_init::observe_with_stage(
                 input,
                 &claude_init::ExpectedInit {
                     cwd: &self.cwd,
@@ -107,6 +112,7 @@ impl Session {
                     permission_mode: &self.permission_mode,
                     tools: &tools,
                 },
+                &mut self.diagnostic_stage,
             )?;
             let event = Event::Initialized {
                 receipt: InitReceipt { session_id:init.session_id().into(), cwd:self.cwd.clone(), model:self.model.clone() },
@@ -119,7 +125,9 @@ impl Session {
             return Ok(event);
         }
         // Do not infer a session or quietly accept tool requests before reported init.
+        self.diagnostic_stage = "session before init";
         let projection = self.projection.as_mut().ok_or_else(invalid)?;
+        self.diagnostic_stage = "session event";
         match tag.kind.as_str() {
             "control_request" | "control_cancel_request" => {
                 self.permissions.observe(input).map(Event::Permission)

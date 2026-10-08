@@ -61,10 +61,11 @@ test('transport diagnostics collect only fixed sidecar labels across chunks', ()
   child.stderr.emit('data', Buffer.from('native Claude transport failed at session initialization\n'));
   child.stderr.emit('data', Buffer.from('native Claude transport failed at prompt admission\n'));
   child.stderr.emit('data', Buffer.from('native Codex transport failed at turn start reply shape\nnative Claude transport failed at session persistence\n'));
+  child.stderr.emit('data', Buffer.from('native Claude transport failed at init model\nnative Claude transport failed at PRIVATE_TOKEN\n'));
   const unrelated = h.childProcess.spawn('/synthetic/other', []);
   unrelated.stderr.emit('data', Buffer.from('native Codex transport failed at thread/start\n'));
   h.timers.get(240000)();
-  assert.deepEqual(h.evidence().transportCheckpoints, ['codex:turn start', 'codex:turn stream', 'claude:session initialization', 'claude:prompt admission', 'codex:turn start reply shape', 'claude:session persistence']);
+  assert.deepEqual(h.evidence().transportCheckpoints, ['codex:turn start', 'codex:turn stream', 'claude:session initialization', 'claude:prompt admission', 'codex:turn start reply shape', 'claude:session persistence', 'claude:init model']);
   assert.ok(!JSON.stringify(h.evidence()).includes('PRIVATE_TOKEN'));
   assert.equal(h.evidence().status, 'PENDING');
 });

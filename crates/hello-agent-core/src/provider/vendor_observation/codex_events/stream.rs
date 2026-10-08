@@ -266,6 +266,9 @@ impl TurnStream {
         }
         // Charge all notifications, including non-public ones, exactly once.
         let projected = self.projection.project(input)?;
+        if super::thread_status(input, &self.projection.thread_id)? {
+            return Ok(Observed::Private);
+        }
         let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
         if frame.method == "serverRequest/resolved" {
             #[derive(Deserialize)]
@@ -512,6 +515,22 @@ mod tests {
         ));
         stream
     }
+    #[test]
+    fn thread_status_neither_finishes_turn_nor_grants_approval() {
+        let mut stream = started();
+        for status in [json!({"type":"active","activeFlags":["waitingOnApproval"]}),
+            json!({"type":"idle"}), json!({"type":"systemError"}), json!({"type":"notLoaded"})] {
+            assert!(matches!(stream.observe(&frame("thread/status/changed",
+                json!({"threadId":"t","status":status}))).unwrap(), Observed::Private));
+            assert!(stream.outcome.is_none());
+            assert!(stream.approvals.is_empty());
+        }
+        assert!(matches!(stream.observe(&turn("turn/completed", "completed")).unwrap(), Observed::Finished(TurnOutcome::Completed)));
+        let mut stream = started();
+        assert!(stream.observe(&frame("thread/status/changed", json!({"threadId":"other","status":{"type":"idle"}}))).is_err());
+        assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
+    }
+
     #[test]
     fn complete_stream_requires_both_item_and_turn_completion() {
         let mut stream = started();

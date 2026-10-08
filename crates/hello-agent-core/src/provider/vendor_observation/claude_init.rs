@@ -62,6 +62,15 @@ pub fn observe(
     input: &BoundedObservation,
     expected: &ExpectedInit<'_>,
 ) -> Result<InitObservation, ProviderError> {
+    observe_with_stage(input, expected, &mut "init expected")
+}
+
+pub(super) fn observe_with_stage(
+    input: &BoundedObservation,
+    expected: &ExpectedInit<'_>,
+    stage: &mut &'static str,
+) -> Result<InitObservation, ProviderError> {
+    *stage = "init expected";
     // Local syntax only. The owner must bind the real snapshot directory identity.
     let path = std::path::Path::new(expected.cwd);
     if !path.is_absolute()
@@ -77,25 +86,36 @@ pub fn observe(
     {
         return Err(invalid());
     }
+    *stage = "init shape";
     let wire: Init = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
     let expected_tools: BTreeSet<_> = expected.tools.iter().copied().collect();
     let tools: BTreeSet<_> = wire.tools.iter().map(String::as_str).collect();
+    *stage = "init identity";
     if wire.kind != "system"
         || wire.subtype != "init"
         || !name(&wire.uuid)
         || !name(&wire.session_id)
-        || wire.cwd != expected.cwd
-        || wire.model != expected.model
-        || wire.permission_mode != expected.permission_mode
-        || tools != expected_tools
+    { return Err(invalid()); }
+    *stage = "init cwd";
+    if wire.cwd != expected.cwd { return Err(invalid()); }
+    *stage = "init model";
+    if wire.model != expected.model { return Err(invalid()); }
+    *stage = "init permission";
+    if wire.permission_mode != expected.permission_mode { return Err(invalid()); }
+    *stage = "init tools";
+    if tools != expected_tools
         || tools.len() != wire.tools.len()
         || expected_tools.len() != expected.tools.len()
-        || !wire.mcp_servers.is_empty()
+    { return Err(invalid()); }
+    *stage = "init extensions";
+    if !wire.mcp_servers.is_empty()
         || !wire.skills.is_empty()
         || !wire.plugins.is_empty()
         || !wire.agents.is_empty()
         || !wire.plugin_errors.is_empty()
-        || wire.capabilities.len() > 128
+    { return Err(invalid()); }
+    *stage = "init capabilities";
+    if wire.capabilities.len() > 128
         || wire.capabilities.iter().any(|c| !name(c))
     {
         return Err(invalid());
@@ -134,6 +154,25 @@ mod tests {
     fn input(value: &Value) -> BoundedObservation {
         BoundedObservation::new(value.to_string().into_bytes()).unwrap()
     }
+    #[test]
+    fn mismatch_stage_contains_only_fixed_labels() {
+        for (key, value, stage) in [
+            ("cwd", json!("PRIVATE"), "init cwd"),
+            ("model", json!("PRIVATE"), "init model"),
+            ("permissionMode", json!("PRIVATE"), "init permission"),
+            ("tools", json!(["PRIVATE"]), "init tools"),
+            ("skills", json!(["PRIVATE"]), "init extensions"),
+            ("uuid", json!(""), "init identity"),
+            ("capabilities", json!([""]), "init capabilities"),
+            ("model", json!(null), "init shape"),
+        ] {
+            let mut wire = init(); wire[key] = value;
+            let mut observed = "";
+            assert!(observe_with_stage(&input(&wire), &expected(), &mut observed).is_err());
+            assert_eq!(observed, stage);
+        }
+    }
+
     #[test]
     fn capabilities_are_feature_detected_not_version_pinned() {
         let baseline = observe(&input(&init()), &expected()).unwrap();

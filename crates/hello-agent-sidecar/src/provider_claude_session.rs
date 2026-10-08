@@ -269,6 +269,7 @@ impl SessionChannel {
         Option<hello_agent_core::provider::vendor_observation::claude_session::Event>,
         SidecarError,
     > {
+        let mut stage = "channel state";
         let result = (|| {
             if self.permissions.is_closed()
                 || self.connection != process.connection_id()
@@ -278,15 +279,21 @@ impl SessionChannel {
                 return Err(failure());
             }
             if self.transmitting {
+                stage = "channel send";
                 self.transmitting = !process.flush_native_observed(cancel, observer)?;
                 return Ok(None);
             }
+            stage = "channel receive";
             match process.poll_preflight_observed(cancel, observer)? {
-                Some(input) => self.observe(process, &input).map(Some),
+                Some(input) => self.observe(process, &input).map(Some).map_err(|error| {
+                    stage = self.permissions.diagnostic_stage();
+                    error
+                }),
                 None => Ok(None),
             }
         })();
         if result.is_err() {
+            eprintln!("native Claude transport failed at {stage}");
             self.permissions.close();
         }
         result

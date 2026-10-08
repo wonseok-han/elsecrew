@@ -13,6 +13,8 @@ pub struct TurnStart {
     failed: bool,
     complete: bool,
     diagnostic_stage: &'static str,
+    status_events: usize,
+    status_bytes: usize,
 }
 
 /// Typed text request. No arbitrary renderer JSON can construct it.
@@ -78,6 +80,8 @@ impl TurnStart {
             failed: false,
             complete: false,
             diagnostic_stage: "turn start state",
+            status_events: 0,
+            status_bytes: 0,
         })
     }
 
@@ -142,6 +146,15 @@ impl TurnStart {
             emitted_at_ms: u64,
         }
         if input.json()?.get("method").is_some() {
+            if super::codex_events::thread_status(input, &self.thread)? {
+                self.status_events = self.status_events.checked_add(1).ok_or_else(invalid)?;
+                self.status_bytes = self.status_bytes.checked_add(input.bytes.len()).ok_or_else(invalid)?;
+                if self.status_events > crate::provider::PROVIDER_INTERNAL_EVENTS_MAX
+                    || self.status_bytes > crate::provider::PROVIDER_OBSERVATION_TOTAL_MAX_BYTES {
+                    return Err(invalid());
+                }
+                return Ok(None);
+            }
             self.diagnostic_stage = "turn start notification shape";
             let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
             self.diagnostic_stage = "turn start notification correlation";
@@ -195,6 +208,43 @@ mod tests {
             json!({"method":"turn/started","params":{"threadId":"thread-1","turn":turn}}),
         ]
     }
+    #[test]
+    fn thread_status_is_advisory_and_never_replaces_turn_receipts() {
+        for status in [json!({"type":"active","activeFlags":[]}), json!({"type":"idle"}),
+            json!({"type":"systemError"}), json!({"type":"notLoaded"})] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            let note = input(json!({"method":"thread/status/changed","params":{"threadId":"thread-1","status":status}}));
+            assert!(start.accept(&note).unwrap().is_none());
+            assert!(start.accept(&input(frames()[0].clone())).unwrap().is_none());
+            assert!(start.accept(&note).unwrap().is_none());
+            assert!(start.accept(&input(frames()[1].clone())).unwrap().is_some());
+            assert!(start.accept(&note).is_err());
+        }
+    }
+
+    #[test]
+    fn thread_status_mismatch_and_budget_failure_are_sticky() {
+        for params in [
+            json!({"threadId":"other","status":{"type":"idle"}}),
+            json!({"threadId":"thread-1","status":{"type":"active"}}),
+            json!({"threadId":"thread-1","status":{"type":"active","activeFlags":["unknown"]}}),
+            json!({"threadId":"thread-1","status":{"type":"unknown"}}),
+        ] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            assert!(start.accept(&input(json!({"method":"thread/status/changed","params":params}))).is_err());
+            assert!(start.accept(&input(frames()[0].clone())).is_err());
+        }
+        for bytes_limit in [false, true] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            if bytes_limit { start.status_bytes = crate::provider::PROVIDER_OBSERVATION_TOTAL_MAX_BYTES; }
+            else { start.status_events = crate::provider::PROVIDER_INTERNAL_EVENTS_MAX; }
+            assert!(start.accept(&input(json!({"method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"idle"}}}))).is_err());
+        }
+    }
+
     #[test]
     fn failure_checkpoints_are_fixed_and_do_not_relax_rejection() {
         for (wire, checkpoint) in [

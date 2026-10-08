@@ -49,6 +49,33 @@ struct Notification {
     emitted_at_ms: u64,
 }
 
+/// Thread status is advisory, not a turn receipt, tool decision, or exit proof.
+/// https://learn.chatgpt.com/docs/app-server#track-thread-status-changes
+pub(super) fn thread_status(input: &BoundedObservation, thread: &str) -> Result<bool, ProviderError> {
+    let frame: Notification = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+    if frame.method != "thread/status/changed" { return Ok(false); }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Params { thread_id: String, status: Status }
+    #[derive(Deserialize)]
+    #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+    enum Status {
+        NotLoaded, Idle, SystemError,
+        Active { #[serde(rename = "activeFlags")] active_flags: Vec<Flag> },
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    enum Flag { WaitingOnApproval, WaitingOnUserInput }
+    let params: Params = decode(frame.params.get())?;
+    if params.thread_id != thread || frame.emitted_at_ms > 9_007_199_254_740_991 {
+        return Err(invalid());
+    }
+    if let Status::Active { active_flags } = params.status {
+        if active_flags.len() > 128 { return Err(invalid()); }
+    }
+    Ok(true)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Scope {
