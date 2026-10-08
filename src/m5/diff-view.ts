@@ -16,12 +16,14 @@ interface Cursor {
   valid: boolean;
 }
 
-function nextRow(source: string, cursor: Cursor): DiffRow {
+function nextRow(source: string, cursor: Cursor): DiffRow;
+function nextRow(source: string, cursor: Cursor, materialize: false): undefined;
+function nextRow(source: string, cursor: Cursor, materialize = true): DiffRow | undefined {
     const end = source.indexOf("\n", cursor.offset);
     const text = source.slice(cursor.offset, end < 0 ? source.length : end);
     cursor.offset = end < 0 ? source.length : end + 1;
     let { before, after, oldLeft, newLeft } = cursor;
-    const row: DiffRow = { text, kind: "metadata", before: null, after: null };
+    const row: DiffRow | undefined = materialize ? { text, kind: "metadata", before: null, after: null } : undefined;
     if (!cursor.valid) return row;
     if (text.startsWith("@@")) {
       const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/.exec(text);
@@ -32,14 +34,20 @@ function nextRow(source: string, cursor: Cursor): DiffRow {
       // This marker consumes no source line and remains visible as metadata.
     } else if (oldLeft || newLeft) {
       if (text.startsWith(" ") && oldLeft > 0 && newLeft > 0) {
-        row.kind = "context"; row.before = before++; row.after = after++; oldLeft--; newLeft--;
+        if (row) { row.kind = "context"; row.before = before; row.after = after; }
+        before++; after++; oldLeft--; newLeft--;
       } else if (text.startsWith("-") && oldLeft > 0) {
-        row.kind = "deleted"; row.before = before++; oldLeft--;
+        if (row) { row.kind = "deleted"; row.before = before; }
+        before++; oldLeft--;
       } else if (text.startsWith("+") && newLeft > 0) {
-        row.kind = "added"; row.after = after++; newLeft--;
+        if (row) { row.kind = "added"; row.after = after; }
+        after++; newLeft--;
       } else { cursor.valid = false; return row; }
     }
-    Object.assign(cursor, { before, after, oldLeft, newLeft });
+    cursor.before = before;
+    cursor.after = after;
+    cursor.oldLeft = oldLeft;
+    cursor.newLeft = newLeft;
     return row;
 }
 
@@ -50,7 +58,8 @@ export function diffPages(text: string): { rowCount: number; pageCount: number; 
   let rowCount = 0;
   while (cursor.offset < text.length) {
     if (rowCount % DIFF_PAGE_ROWS === 0) boundaries.push({ ...cursor });
-    nextRow(text, cursor);
+    // The index keeps one cursor per page; row objects are only for visible pages.
+    nextRow(text, cursor, false);
     rowCount++;
   }
   const valid = cursor.valid && cursor.oldLeft === 0 && cursor.newLeft === 0;

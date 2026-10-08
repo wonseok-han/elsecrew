@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (diff 색인 임시 객체 최적화 마감)
+
+- 앞서 검증한 diff-view 변경을 별도 로컬 커밋으로 정리한다. 색인에서 표시하지 않을 행 객체를 생성하지 않으며 실제 페이지 행·번호·fallback은 유지한다. 동일 변경의6/6 회귀 PASS를 재사용하며 새로운 기능/안전 경계 변경은 없다. Electron 메모리 기준 초과를 해결했다는 주장은 하지 않는다.
+- 실제 공급자 시험 session68106은 별도로 진행 중이고 이 UI 최적화와 무관하다. 기존9월 archive 제외, main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (호환·진단 묶음 검증)
 
 - 기준8fa871f 위 Codex 상태 알림/Claude 진단 변경을 묶어 core vendor_observation105/105, Node smoke9/9 PASS. debug sidecar build PASS로 실행 파일을 갱신했다. Codex 처리 변경은 이전 동일 readonly 검토자 APPROVE이며 Claude 변경은 기존 동일 거절 조건에 고정 라벨을 추가한 진단이다. diff 검사 PASS.
