@@ -553,7 +553,7 @@ export class ProjectEditorController {
     const path = activePath;
     const tab = this.#tab(path);
     if (!project || !tab || tab.mode !== "text" || tab.saveState !== "dirty") return;
-    const totalBytes = new TextEncoder().encode(tab.text).byteLength;
+    const totalBytes = utf8ByteLength(tab.text);
     if (totalBytes > FILE_MAX_BYTES_V1) {
       this.#setError("m5.editorError.large", new Error(`draft is ${totalBytes} bytes`));
       return;
@@ -727,7 +727,7 @@ export class ProjectEditorController {
       stream.failure = new Error(`stream ${streamId} expected seq ${stream.nextSeq}, got ${seq}`);
       return;
     }
-    const chunkBytes = new TextEncoder().encode(text).byteLength;
+    const chunkBytes = utf8ByteLength(text);
     if (chunkBytes > 256 * 1024) {
       stream.failure = new Error(`stream ${streamId} chunk exceeds 256 KiB`);
       return;
@@ -971,6 +971,22 @@ export class ProjectEditorController {
     this.#state = { ...this.#state, ...update, ...("notice" in update ? { noticeKey: update.notice ? update.noticeKey : undefined } : {}), ...(update.panel ? { panelRequest: { panel: update.panel } } : {}) };
     for (const listener of this.#listeners) listener();
   }
+}
+
+/** TextEncoder byte length without allocating an encoded copy of the text. */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index++) {
+    const unit = text.charCodeAt(index);
+    if (unit <= 0x7f) bytes++;
+    else if (unit <= 0x7ff) bytes += 2;
+    else if (unit >= 0xd800 && unit <= 0xdbff
+      && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4;
+      index++;
+    } else bytes += 3; // Includes lone surrogates, encoded as U+FFFD.
+  }
+  return bytes;
 }
 
 export function splitUtf8(text: string, maxBytes: number): string[] {

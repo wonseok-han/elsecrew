@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (진단·바이트 계산 묶음 검증)
+
+- 직전 턴은 Claude 실제 선택 경로·무계정 초기화 대조와 고정 분류 구현으로 진척했다. 기준0dd9e74/기존 dirty 보존. Karpathy 지침으로 Codex other frame을 로컬 생성 ServerNotification.json의 알려진 method에 한해 diff/plan/thread name/settings/hook/model/warning/account/MCP/moderation 고정 분류로 세분화했다. payload나 임의 method는 출력하지 않고 수락·승인·종료 조건은 바꾸지 않는다. Claude plugin 분류와 함께 smoke exact whitelist 및 비공개 문자열 제외 회귀를 갱신했다.
+- core vendor_observation107/107 PASS(session69893), 편집기+smoke62/62 PASS(session90641). Unicode byte 계산은65536 개별 code unit/경계/다국어 반복을 TextEncoder와 비교해 통과했다. 메모리 peak 실측 개선이나 실제 공급자 성공 증거는 아니다. debug sidecar build session8255를 수행했다. 관련 코드·이번 기록만 로컬 커밋하고 기존9월 archive는 제외한다.
+- 추가 유료 호출0회, 이전 실측 승인 소진 상태다. 다음: 새 승인 실측으로 분류 확인·G6 메모리 재측정·UI 잔여 작업. diff 검사 PASS, main/push 없음. 기능 완료 아님.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 실환경 차이 조사·비공개 진단 분류)
+
+- 직전 턴은 승인 실측으로 최신 실패 증거를 얻은 진척이다. 기준0dd9e74, 기존 미커밋 editor/history/9월 archive 보존. installed_executable은 .local/bin/claude 링크 대상을 서명 검증하며 현재 링크는2.1.293으로 합성 시험과 일치했다(과거 실행 순간 신원 자체의 증명은 아님). 새 임시 HOME/프로필·로컬400 API에 제품과 같은6개 도구 목록·sandbox 설정을 준 sX8Xz3, 이어 permission-prompt stdio/control initialize까지 맞춘 kMmljr 모두 plugins=[]다. code1/signal null 정상 프로세스 종료, 실제 모델·도구 호출0회.
+- 계정/OS HOME/관리 설정 등 남은 차이가 있으나 근본 원인을 확정하지 않았다. Karpathy 지침으로 nonempty plugins 거절은 그대로 두고 고정 진단을 disabled builtins/other builtins/other registration으로 구분했다. 알려진 source와 builtin path 표시만 분류하며 provider 이름/경로/원문은 로그에 출력하지 않는다. 표시값은 신뢰·수락 근거가 아니다. smoke exact whitelist 및 PRIVATE/null 분류 회귀 갱신.
+- diff 검사 PASS, 새 회귀·빌드는 다음 묶음 대상. 추가 실계정 실행 승인 소진 상태 유지. 다음: Codex other frame의 안전한 분류와 관련 묶음 검증, 실제 환경 증거 확보. 원본/인증정보/main/push 불변, UI/G6/Windows/출시 미완료.
+
+### 2026-10-08 · by GPT-6 Astra (0dd9e74 승인 실계정 재시험)
+
+- 사용자 재시험 승인으로 session76501에서 Codex·Claude 각1회 실행했다. 최신 debug sidecar0dd9e74, 기존 미커밋 editor-state 메모리 변경/9월 archive 보존. 두 로그인 connected/모델 선택/두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/responseObserved=false, 임시 원본 불변, shutdown accepted, FAIL/exit1이다. 실제 계정 성공 또는 전체 완료가 아니다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-VA9bd7/result.json. chat_8020057d5ad9466ea8f80e45d1ede080, Codex agent_run_d0ca72c670624a95bd5a58ac75b5b065, Claude agent_run_f66b7e6fe66349d599ed1ba67c70f150. 진단 codex:turn stream other frame, claude:init plugins/session initialization/session channel. Codex 이전 token usage 거절보다 진행했으나 unknown 이벤트 정체는 미확정이다. Claude는2.1.293 합성 환경의 빈 plugins와 달라 실제 선택 실행 파일/버전·계정 프로필·정책 차이를 조사해야 한다. raw payload/인증정보 출력 없음.
+- 이번 각1회 승인은 소진됐다. 다음: 추가 실계정 호출 없이 실제 executable 선택과 합성 재현 환경 대조, Codex 미지원 이벤트의 안전한 분류. 종료 준비 뒤 늦은 login check는 requestBlocked로 거절됐지만 정상 종료했다. 사용자 프로젝트·인증정보 변경/main/push 없음. UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-08 · by GPT-6 Astra (편집 stream 바이트 검사 임시 배열 제거)
+
+- 직전 턴은 Claude 검증·독립 승인·0dd9e74 커밋으로 진척했다. 실제 각1회 재시험 승인 응답은 아직 없어 호출하지 않았다. 기존9월 archive 보존. Monaco 모델은 path별 생성/dispose이고 지연 로딩하므로 근거 없이 누수로 단정하지 않았다. editor-state는 stream chunk마다 TextEncoder.encode 배열을 만들고 저장 전 파일 전체 배열도 만든 뒤 길이만 사용하고 있었다.
+- Karpathy 지침으로 두 경로를 UTF-16 순회 기반 utf8ByteLength로 교체했다. 정상 surrogate pair는4bytes, lone surrogate는 TextEncoder의 U+FFFD와 같은3bytes로 계산한다. 파일/stream 제한·편집 모델·프로토콜은 유지한다. 전체65536 code unit, 경계 조합과 반복 다국어 문자열을 TextEncoder와 비교하는 회귀 추가.
+- diff 검사 PASS, 새 회귀/빌드/성능 재측정은 후속 묶음 대상이다. 할당 제거는 코드상 사실이나 G6 RSS 초과 해소·성능 개선 수치는 아직 미확인이다. 다음: 관련 검증과 메모리 재측정, 승인된 경우 실제 모델 종단 시험. UI/G6/Windows/출시 미완료, 사용자 프로젝트·인증정보/main/push 불변.
+
 ### 2026-10-08 · by GPT-6 Astra (Claude 플러그인 수정 묶음 검증)
 
 - 직전 턴은 무계정 재현과 내장 플러그인 비활성화 구현으로 진척했다. 기준f4b52d6, 기존9월 archive 보존. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar provider_claude_session --lib --locked -j4는11/11 PASS(session63483), debug sidecar build PASS(session2810)다. 앞선 동일 Codex107/편집기51 PASS는 반복하지 않았다.
@@ -105,7 +129,7 @@
 
 - **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 
-- **실제 연결 최신 관측(2026-10-08, e59ae16)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 KJbXmN 시험에서 Codex turn stream token usage, Claude init plugins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 과거 시작 단계 실패보다 이 관측이 최신이다.
+- **실제 연결 최신 관측(2026-10-08, 0dd9e74)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 VA9bd7 시험에서 Codex turn stream other frame, Claude init plugins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 무계정2.1.293 plugins 제거 결과를 실계정 성공으로 대체하지 않는다.
 - **모델 선택과 실행 권한 분리(2026-10-07)**: Codex의 bounded catalog 표시값은 종료 확정·exe/helper/home 재검증 뒤 agent.getModelChoices/m5Models로 전달한다. 채팅/역할/workspace 결속과 단발 소비를 유지하고, 실행 경로는 여전히 선택 tuple의 새 preflight를 요구한다. 역할 화면은 projectId/revision/chatId로 remount해 이전 채팅 응답 유입을 막는다. 기능 코드f1a135c, 실제 목록 조회·안전 회귀는 최신 워크로그 참조.
 - **Claude 내부 소켓 호환성(2026-10-07)**: profile/tmp/srt-mux-PID-seq.sock은 실행 중 생성·종료 후 제거되는 unix socket으로 관측됐고 공식 anthropics/sandbox-runtime mux-proxy.ts의 내부 HTTP proxy와 일치한다. 일반 scanner는 계속 거절한다. 추적 Claude parent와 전용 tmp에 결속하는 제한적 예외는 사용자 승인 대기이며 일반 소켓/링크 허용 승인이 아니다.
 

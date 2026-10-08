@@ -112,7 +112,23 @@ pub(super) fn observe_with_stage(
     *stage = "init skills";
     if !wire.skills.is_empty() { return Err(invalid()); }
     *stage = "init plugins";
-    if !wire.plugins.is_empty() { return Err(invalid()); }
+    if !wire.plugins.is_empty() {
+        // Classify only local labels; never log provider names or paths.
+        let plugins: Vec<serde_json::Value> = wire.plugins.iter()
+            .map(|raw| serde_json::from_str(raw.get()).unwrap_or(serde_json::Value::Null))
+            .collect();
+        *stage = if plugins.iter().all(|plugin| {
+            plugin["path"] == "builtin" && matches!(plugin["source"].as_str(),
+                Some("cc-plugin-agents-md@builtin" | "cc-plugin-plugin-authoring@builtin"))
+        }) {
+            "init plugins disabled builtins"
+        } else if plugins.iter().all(|plugin| plugin["path"] == "builtin") {
+            "init plugins other builtins"
+        } else {
+            "init plugins other registration"
+        };
+        return Err(invalid());
+    }
     *stage = "init agents";
     if !wire.agents.is_empty() { return Err(invalid()); }
     *stage = "init plugin errors";
@@ -167,7 +183,10 @@ mod tests {
             ("skills", json!(["PRIVATE"]), "init skills"),
             ("agents", json!(["PRIVATE"]), "init agents"),
             ("mcp_servers", json!([{"name":"PRIVATE"}]), "init mcp"),
-            ("plugins", json!([{"name":"PRIVATE"}]), "init plugins"),
+            ("plugins", json!([{"name":"PRIVATE"}]), "init plugins other registration"),
+            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-agents-md@builtin"}]), "init plugins disabled builtins"),
+            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"PRIVATE"}]), "init plugins other builtins"),
+            ("plugins", json!([null]), "init plugins other registration"),
             ("plugin_errors", json!([{"message":"PRIVATE"}]), "init plugin errors"),
             ("uuid", json!(""), "init identity"),
             ("capabilities", json!([""]), "init capabilities"),

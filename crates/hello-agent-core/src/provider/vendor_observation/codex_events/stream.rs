@@ -143,6 +143,16 @@ impl TurnStream {
             Some("item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" | "item/reasoning/summaryPartAdded") => "turn stream reasoning",
             Some("serverRequest/resolved") => "turn stream request resolved",
             Some("error") => "turn stream provider error",
+            Some("turn/diff/updated") => "turn stream diff metadata",
+            Some("turn/plan/updated" | "item/plan/delta") => "turn stream plan metadata",
+            Some("thread/name/updated") => "turn stream thread name",
+            Some("thread/settings/updated") => "turn stream thread settings",
+            Some("hook/started" | "hook/completed") => "turn stream hook",
+            Some("model/rerouted" | "model/verification" | "model/safetyBuffering/updated") => "turn stream model metadata",
+            Some("warning" | "guardianWarning" | "deprecationNotice" | "configWarning") => "turn stream warning",
+            Some("account/updated" | "account/rateLimits/updated") => "turn stream account metadata",
+            Some("mcpServer/startupStatus/updated" | "mcpServer/event/stream/notification") => "turn stream mcp metadata",
+            Some("turn/moderationMetadata") => "turn stream moderation metadata",
             _ => "turn stream other frame",
         };
         let result = self.observe_inner(input);

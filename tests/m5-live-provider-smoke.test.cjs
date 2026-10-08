@@ -80,6 +80,22 @@ test('a single approved provider produces explicitly scoped evidence', () => {
   assert.throws(() => harness(false, false, false, 'unknown'), /Unknown live provider/);
 });
 
+test('new diagnostic groups never export provider payloads', () => {
+  const h = harness(false, false);
+  const child = h.childProcess.spawn('/synthetic/hello-agent-sidecar', []);
+  const labels = ['turn stream diff metadata','turn stream plan metadata','turn stream thread name',
+    'turn stream thread settings','turn stream hook','turn stream model metadata','turn stream warning',
+    'turn stream account metadata','turn stream mcp metadata','turn stream moderation metadata'];
+  for (const label of labels) child.stderr.emit('data', Buffer.from(`native Codex transport failed at ${label}\n`));
+  for (const suffix of ['disabled builtins','other builtins','other registration']) {
+    child.stderr.emit('data', Buffer.from(`native Claude transport failed at init plugins ${suffix}\n`));
+  }
+  child.stderr.emit('data', Buffer.from('native Claude transport failed at init plugins PRIVATE\nnative Codex transport failed at turn stream warning PRIVATE\n'));
+  h.timers.get(240000)();
+  assert.equal(h.evidence().transportCheckpoints.length, 13);
+  assert.ok(!JSON.stringify(h.evidence()).includes('PRIVATE'));
+});
+
 test('project UI smoke also requires accepted shutdown before PASS', () => {
   const h = harness(false, true, true);
   assert.equal(h.evidence().status, 'PENDING');

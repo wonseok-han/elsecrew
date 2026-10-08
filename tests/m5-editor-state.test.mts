@@ -32,6 +32,7 @@ import {
   ProjectEditorController,
   STREAM_TIMEOUT_MS,
   splitUtf8,
+  utf8ByteLength,
   type ProjectBridge,
 } from "../src/m5/editor-state.ts";
 import { sha256FileVersionV1, type FileReadDescriptorV1, type FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
@@ -816,6 +817,22 @@ test("binary·tooLarge 파일, watcher overflow, bounded tree와 rename diff를 
   assert.equal(controller.snapshot().diffFile?.kind, "binary");
   assert.equal(controller.snapshot().diffText, "");
   controller.dispose();
+});
+
+test("allocation-free byte lengths match TextEncoder for Unicode and lone surrogates", () => {
+  const encoder = new TextEncoder();
+  const samples = ["", "ascii", "한글", "🦦", "\ud800", "\udc00", "\ud800a\udc00", "🦦나".repeat(10000)];
+  // Every UTF-16 code unit individually, and mixed boundaries/pairs in context.
+  for (let unit = 0; unit <= 0xffff; unit++) {
+    const text = String.fromCharCode(unit);
+    assert.equal(utf8ByteLength(text), encoder.encode(text).byteLength);
+  }
+  for (const left of [0, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xe000, 0xffff]) {
+    for (const right of [0x61, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xffff]) {
+      samples.push(String.fromCharCode(left, right));
+    }
+  }
+  for (const text of samples) assert.equal(utf8ByteLength(text), encoder.encode(text).byteLength);
 });
 
 test("UTF-8 splitter는 문자 경계를 깨지 않고 protocol byte limit을 지킨다", () => {
