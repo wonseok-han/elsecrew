@@ -64,6 +64,9 @@ impl ClaudeCommand {
             .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
             .env("BROWSER", "/usr/bin/false")
             .env("DISABLE_AUTOUPDATER", "1")
+            // Non-interactive sessions must not register vendor built-in agents.
+            // https://code.claude.com/docs/en/sub-agents#built-in-subagents
+            .env("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1")
             .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
         let scope = Scope {workspace:workspace.into(),home:home.into(),model:model.into(),effort:effort.map(str::to_owned),access,executable};
         scope.revalidate()?;

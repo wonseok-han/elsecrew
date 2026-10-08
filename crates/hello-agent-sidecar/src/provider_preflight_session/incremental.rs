@@ -264,7 +264,10 @@ impl TextSession {
                     .retain(|request| stream.awaits_approval_decision(&request.request_id));
                 if let Some(frame) = frame {
                     on_action(process, TextAction::ObserveProcess)?;
-                    let observed = stream.observe(&frame).map_err(|_| failure())?;
+                    let observed = stream.observe(&frame).map_err(|_| {
+                        self.diagnostic_stage = stream.diagnostic_stage();
+                        failure()
+                    })?;
                     self.remaining(cancel)?;
                     match observed {
                         Observed::Public(value) => on_action(process, TextAction::Public(value))?,
@@ -274,7 +277,10 @@ impl TextSession {
                         }
                         Observed::Tool(tool) => on_action(process, TextAction::Tool(tool))?,
                         Observed::Approval(request) => self.pending.push(*request),
-                        Observed::Started | Observed::RequiresHandling => return Err(failure()),
+                        Observed::Started | Observed::RequiresHandling => {
+                            self.diagnostic_stage = stream.diagnostic_stage();
+                            return Err(failure());
+                        }
                     }
                 } else {
                     for request in &self.pending {

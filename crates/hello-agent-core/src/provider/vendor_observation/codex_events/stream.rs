@@ -86,6 +86,7 @@ pub struct TurnStream {
     failed: bool,
     approvals: BTreeMap<RequestId, Option<String>>,
     prepared_replies: BTreeSet<RequestId>,
+    diagnostic_stage: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -120,6 +121,7 @@ impl TurnStream {
             failed: false,
             approvals: BTreeMap::new(),
             prepared_replies: BTreeSet::new(),
+            diagnostic_stage: "turn stream state",
         })
     }
 
@@ -128,12 +130,29 @@ impl TurnStream {
             self.failed = true;
             return Err(invalid());
         }
+        // A closed local vocabulary, never an arbitrary method or payload in logs.
+        self.diagnostic_stage = match input.json().ok().as_ref()
+            .and_then(|value| value.get("method")).and_then(|value| value.as_str()) {
+            Some("thread/status/changed") => "turn stream thread status",
+            Some("thread/tokenUsage/updated") => "turn stream token usage",
+            Some("turn/started") => "turn stream started",
+            Some("turn/completed") => "turn stream completed",
+            Some("item/started") => "turn stream item started",
+            Some("item/completed") => "turn stream item completed",
+            Some("item/agentMessage/delta") => "turn stream message delta",
+            Some("item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" | "item/reasoning/summaryPartAdded") => "turn stream reasoning",
+            Some("serverRequest/resolved") => "turn stream request resolved",
+            Some("error") => "turn stream provider error",
+            _ => "turn stream other frame",
+        };
         let result = self.observe_inner(input);
         if result.is_err() {
             self.failed = true;
         }
         result
     }
+
+    pub fn diagnostic_stage(&self) -> &'static str { self.diagnostic_stage }
 
     /// EOF without a terminal event is never success. Even successful return says
     /// only what the vendor reported; process-tree cleanup remains mandatory.
@@ -515,6 +534,17 @@ mod tests {
         ));
         stream
     }
+    #[test]
+    fn diagnostic_labels_do_not_echo_unknown_frames_or_reopen_failures() {
+        let mut stream = started();
+        assert!(matches!(stream.observe(&frame("PRIVATE_TOKEN", json!({}))).unwrap(), Observed::RequiresHandling));
+        assert_eq!(stream.diagnostic_stage(), "turn stream other frame");
+        assert!(stream.observe(&frame("item/started", json!({"private":"SECRET"}))).is_err());
+        assert_eq!(stream.diagnostic_stage(), "turn stream item started");
+        assert!(stream.observe(&turn("turn/completed", "completed")).is_err());
+        assert_eq!(stream.diagnostic_stage(), "turn stream item started");
+    }
+
     #[test]
     fn thread_status_neither_finishes_turn_nor_grants_approval() {
         let mut stream = started();

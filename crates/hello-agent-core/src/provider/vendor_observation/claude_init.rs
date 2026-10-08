@@ -107,13 +107,16 @@ pub(super) fn observe_with_stage(
         || tools.len() != wire.tools.len()
         || expected_tools.len() != expected.tools.len()
     { return Err(invalid()); }
-    *stage = "init extensions";
-    if !wire.mcp_servers.is_empty()
-        || !wire.skills.is_empty()
-        || !wire.plugins.is_empty()
-        || !wire.agents.is_empty()
-        || !wire.plugin_errors.is_empty()
-    { return Err(invalid()); }
+    *stage = "init mcp";
+    if !wire.mcp_servers.is_empty() { return Err(invalid()); }
+    *stage = "init skills";
+    if !wire.skills.is_empty() { return Err(invalid()); }
+    *stage = "init plugins";
+    if !wire.plugins.is_empty() { return Err(invalid()); }
+    *stage = "init agents";
+    if !wire.agents.is_empty() { return Err(invalid()); }
+    *stage = "init plugin errors";
+    if !wire.plugin_errors.is_empty() { return Err(invalid()); }
     *stage = "init capabilities";
     if wire.capabilities.len() > 128
         || wire.capabilities.iter().any(|c| !name(c))
@@ -161,7 +164,11 @@ mod tests {
             ("model", json!("PRIVATE"), "init model"),
             ("permissionMode", json!("PRIVATE"), "init permission"),
             ("tools", json!(["PRIVATE"]), "init tools"),
-            ("skills", json!(["PRIVATE"]), "init extensions"),
+            ("skills", json!(["PRIVATE"]), "init skills"),
+            ("agents", json!(["PRIVATE"]), "init agents"),
+            ("mcp_servers", json!([{"name":"PRIVATE"}]), "init mcp"),
+            ("plugins", json!([{"name":"PRIVATE"}]), "init plugins"),
+            ("plugin_errors", json!([{"message":"PRIVATE"}]), "init plugin errors"),
             ("uuid", json!(""), "init identity"),
             ("capabilities", json!([""]), "init capabilities"),
             ("model", json!(null), "init shape"),
