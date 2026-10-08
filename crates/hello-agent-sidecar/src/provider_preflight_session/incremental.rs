@@ -245,7 +245,10 @@ impl TextSession {
                     on_action(process, TextAction::ObserveProcess)
                 })? {
                     on_action(process, TextAction::ObserveProcess)?;
-                    match turn.accept(&frame).map_err(|_| failure())? {
+                    match turn.accept(&frame).map_err(|_| {
+                        self.diagnostic_stage = turn.diagnostic_stage();
+                        failure()
+                    })? {
                         Some(stream) => Stage::Streaming(stream),
                         None => Stage::Starting(turn),
                     }

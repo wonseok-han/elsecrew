@@ -563,10 +563,12 @@ impl RunReservation {
             return Err(failure());
         }
         if state.completion.is_none() {
+            let mut checkpoint = "session input";
             let next = self
                 .validate_text_input(storage, projects)
                 .map_err(|_| failure())
                 .and_then(|_| {
+                    checkpoint = "session channel";
                     channel.advance(process, cancel, &mut |owner| {
                         self.observe_process(storage, owner)
                     })
@@ -575,6 +577,7 @@ impl RunReservation {
                 match event {
                     None => {}
                     Some(event @ Event::Initialized { .. }) => {
+                        checkpoint = "session receipt";
                         if state.initialized {
                             return Err(failure());
                         }
@@ -584,6 +587,7 @@ impl RunReservation {
                         if let Some(preflight) = &self.claude_preflight {
                             if !receipt.matches(&workspace, &preflight.resolved_model) { return Err(failure()); }
                         }
+                        checkpoint = "session process observation";
                         self.observe_process(storage, process)?;
                         // Retain the existing field name for both provider sessions.
                         // This digest identifies the session; it is not an executable allowlist.
@@ -591,7 +595,9 @@ impl RunReservation {
                             "threadDigest":format!("sha256:{:x}",Sha256::digest(receipt.session_id().as_bytes())),
                             "runId":self.run_id,"workspaceIdentity":self.run["workspaceIdentity"],
                             "capabilityFingerprint":self.run["capabilityFingerprint"],"selectedProfile":self.run["selectedProfile"]});
+                        checkpoint = "session persistence";
                         self.persist_native_running(storage,evidence,Path::new(&workspace))?;
+                        checkpoint = "session handler";
                         handle(process, channel, event)?;
                         state.initialized = true;
                     }
@@ -640,6 +646,9 @@ impl RunReservation {
             });
             if let Err(error) = result {
                 eprintln!("native Claude transport failed at {}", if state.initialized { "session output" } else { "session initialization" });
+                if !state.initialized {
+                    eprintln!("native Claude transport failed at {checkpoint}");
+                }
                 state.completion = Some(Err(error));
             }
         }

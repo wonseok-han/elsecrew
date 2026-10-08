@@ -1,5 +1,26 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (진단·diff 묶음 검사 및 실행 파일 갱신)
+
+- 기준dcff026+앞선 진단 변경과 diff-view 최적화. 직전 턴은 고정 세부 진단/회귀 구현으로 진척했다. core vendor_observation101/101, Node smoke9/9, diff-view6/6 PASS. CARGO_BUILD_JOBS=4 cargo build -p hello-agent-sidecar --locked -j4 PASS로 최신 debug 실행 파일에 진단을 반영했다. 패키지/실제 응답/제품 전체 gate 합격을 뜻하지 않는다.
+- 앞선 미커밋 diff-view 변경은 페이지 색인 단계에서 버릴 DiffRow와 Object.assign 임시 객체를 만들지 않고 화면에 요청된 페이지에서만 행을 생성한다. 기존 malformed fallback·랜덤 접근·행 번호6개 회귀가 통과했으며 Electron RSS 기준 초과 해결은 미입증이다. 관련 없는9월 archive 변경은 보존한다.
+- 사용자가 새 각1회 재시험을 명시 승인해 session59571을 실행했다. hello-agent-live-kUIIHP/result.json은 두 실행 failed/cleanExit/responseObserved false, sourceUnchanged true, shutdown accepted, FAIL/exit1이다. Codex agent_run_f22d9b1ab1ab4465b28ea58009d381ca의 고정 진단은 turn start notification shape, Claude agent_run_e4f965ee577e4c34924eda2c3a92a535는 session initialization + session channel이다. 동일 채팅 chat_1526cbfb9aa442f9a5e8f9d66d1a157d. 다음 조사는 Codex 시작 알림 serde 형식과 Claude channel의 수신/관측 경로이며 구체 원문/필드 원인은 아직 미확인이다. 추가 승인 횟수는 소진됐고 재시도하지 않는다.
+- 진단·회귀·실험 기록만 로컬 체크포인트 커밋, diff-view 최적화와9월 archive는 미커밋 보존. main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (실패 경계의 고정 세부 진단 구현)
+
+- 직전 턴은 승인된 각1회 실제 실행으로 turn start/session initialization 실패 증거를 확보한 진척이다. 기준dcff026와 기존 dirty를 확인했다. 자동 continuation은 새 유료 실행 승인이 아니며 이번 호출0회다.
+- Karpathy 지침으로 프로토콜 허용 범위를 넓히지 않고 진단만 보강했다. Codex TurnStart는 envelope/notification shape·correlation·state/reply shape·correlation·state/stream binding 고정 라벨을 저장하고 실제 실패 시 transport까지 전달한다. Claude 초기 세션은 input/channel/receipt/process observation/persistence/handler를 구분한다. 원문·식별자·경로를 진단으로 내보내지 않으며 기존 종료/실패 계약은 유지한다.
+- smoke의 exact whitelist 및 민감 문자열 비노출 회귀를 갱신했고 Codex 거절 후 sticky 실패/고정 라벨 회귀를 추가했다. diff 검사 PASS, 새 Rust/Node 회귀와 빌드는 후속 묶음 검증 대상이다. 따라서 새 산출물 반영이나 실제 원인 해결/제품 합격을 주장하지 않는다. 기존 diff-view/9월 archive 변경은 별개로 보존했다.
+- 다음: 진단 변경 묶음 컴파일·회귀 후 승인된 실측에 결속, 실제 응답·G6/화면·Windows/출시 잔여 범위 진행. main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (승인된 각 1회 실제 연결 시험·실패 경계 확인)
+
+- 기준dcff026, 기존 diff-view 최적화와 9월 archive 미커밋 변경 보존. 사용자 두 에이전트 각1회 승인으로 session29794를 실행했다. 두 로그인 connected, Codex gpt-6.1-sol/medium 목록 확인과 두 RUN_ACCEPTED 이후 모두 failed/cleanExit/responseObserved false다. Codex agent_run_c3c13ea183c24042aedfec681f545057, Claude agent_run_73b491bf8921427681e1241a38941a62, 생성 채팅 chat_b4d514148eea4e4c9bbdf6eef35d456e.
+- 증거: 임시 hello-agent-live-MMH4Ki/result.json. 고정 transportCheckpoints는 codex:turn start / claude:session initialization이며 직전 추론 배열 수정만으로 해결되지 않았다. sourceUnchanged true, shutdown accepted, FAIL/exit1. 종료 중 늦은 로그인 IPC가 requestBlocked로 거절된 로그는 있으나 종료 경고/강제 종료 없이 앱이 종료됐다. 이것으로 모든 종료 장애가 해결됐다고 주장하지 않는다.
+- 해당 코드 읽기 확인: Codex는 thread 생성 이후 turn 시작 응답/알림 처리 경계, Claude는 control/profile/prompt admission 이후 초기 session 처리 경계다. Claude 라벨 범위에는 입력 재검사·채널 수신·init 검증·원장 저장이 모두 포함되어 있어 특정 필드 불일치를 원인으로 확정할 수 없다. 비공개 원문은 수집하지 않았으며 승인된 횟수는 모두 소비했다. 추가 모델 실행/인증정보 변경/사용자 프로젝트 변경/main/push 없음.
+- 다음: 위 경계의 원인을 구분하는 오프라인 회귀와 제한된 진단 보강 후 필요한 실제 재시험을 별도 승인받는다. 실제 응답 성공·G6 메모리·전체 시안·Windows/출시 잔여 범위 유지. 기존 diff-view 미커밋 최적화는 이번 실제 연결 결과와 별개이며 아직 커밋하지 않았다. git diff --check PASS.
+
 ### 2026-10-08 · by GPT-6 Astra (작업대 최소 크기 묶음 검증)
 
 - 기준53e6197+상단 밀도 CSS, 기존9월 archive 보존. 직전 턴은 CSS 구현으로 진척했다. renderer build PASS 뒤 최소960×640 합성 Chromium 검사를 수행했다. 첫 실행은 기존 popover용 `.m5-project-catalog > button`이 현재 상시 rail에 없어 FAIL. 합성 실행문 위치를 출력해 확인했고 최초 자동목록 대기/재열기 시 첫페이지 버튼으로 갱신했다. 제품 동작을 테스트에 맞춰 바꾸지 않았다.
@@ -227,6 +248,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
+- **실제 연결 최신 관측(2026-10-08, dcff026)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 MMH4Ki 시험에서 Codex turn start, Claude session initialization 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 근본 원인 확정이나 제품 완료가 아니다. 이전 준비 단계 실패 기록보다 최신이며 추가 실제 실행 승인은 소진됐다.
 - **모델 선택과 실행 권한 분리(2026-10-07)**: Codex의 bounded catalog 표시값은 종료 확정·exe/helper/home 재검증 뒤 agent.getModelChoices/m5Models로 전달한다. 채팅/역할/workspace 결속과 단발 소비를 유지하고, 실행 경로는 여전히 선택 tuple의 새 preflight를 요구한다. 역할 화면은 projectId/revision/chatId로 remount해 이전 채팅 응답 유입을 막는다. 기능 코드f1a135c, 실제 목록 조회·안전 회귀는 최신 워크로그 참조.
 - **Claude 내부 소켓 호환성(2026-10-07)**: profile/tmp/srt-mux-PID-seq.sock은 실행 중 생성·종료 후 제거되는 unix socket으로 관측됐고 공식 anthropics/sandbox-runtime mux-proxy.ts의 내부 HTTP proxy와 일치한다. 일반 scanner는 계속 거절한다. 추적 Claude parent와 전용 tmp에 결속하는 제한적 예외는 사용자 승인 대기이며 일반 소켓/링크 허용 승인이 아니다.
 

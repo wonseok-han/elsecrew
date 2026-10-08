@@ -31,8 +31,8 @@ childProcess.spawn = function (...args) {
       const lines = text.split('\n');
       tail = lines.pop().slice(-256);
       for (const line of lines) {
-        const codex = /^native Codex transport failed at (thread\/start|turn start|turn stream)$/.exec(line);
-        const claude = /^native Claude transport failed at (start binding|control initialization|profile matching|owner preparation|prompt admission|handoff cancellation|session initialization|session output)$/.exec(line);
+        const codex = /^native Codex transport failed at (thread\/start|turn start(?: state| envelope| notification shape| notification correlation| notification state| reply shape| reply correlation| reply state| stream binding)?|turn stream)$/.exec(line);
+        const claude = /^native Claude transport failed at (start binding|control initialization|profile matching|owner preparation|prompt admission|handoff cancellation|session initialization|session output|session input|session channel|session receipt|session process observation|session persistence|session handler)$/.exec(line);
         if (codex) transportCheckpoints.add(`codex:${codex[1]}`);
         if (claude) transportCheckpoints.add(`claude:${claude[1]}`);
       }

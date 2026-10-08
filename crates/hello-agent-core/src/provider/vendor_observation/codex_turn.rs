@@ -12,6 +12,7 @@ pub struct TurnStart {
     started: Option<BoundedObservation>,
     failed: bool,
     complete: bool,
+    diagnostic_stage: &'static str,
 }
 
 /// Typed text request. No arbitrary renderer JSON can construct it.
@@ -50,6 +51,11 @@ impl Turn {
 }
 
 impl TurnStart {
+    /// Fixed local labels only; no provider text or identifiers are retained.
+    pub fn diagnostic_stage(&self) -> &'static str {
+        self.diagnostic_stage
+    }
+
     /// Validate before acquiring a process or sending initialization frames.
     pub fn validate_text(text: &str) -> Result<(), ProviderError> {
         if text.trim().is_empty() || text.len() > 64 * 1024 || text.contains('\0') {
@@ -71,6 +77,7 @@ impl TurnStart {
             started: None,
             failed: false,
             complete: false,
+            diagnostic_stage: "turn start state",
         })
     }
 
@@ -109,6 +116,7 @@ impl TurnStart {
         if self.failed || self.complete || self.request.is_some() {
             return Err(invalid());
         }
+        self.diagnostic_stage = "turn start envelope";
         #[derive(Deserialize)]
         struct ResultWire {
             turn: Turn,
@@ -134,7 +142,9 @@ impl TurnStart {
             emitted_at_ms: u64,
         }
         if input.json()?.get("method").is_some() {
+            self.diagnostic_stage = "turn start notification shape";
             let note: Note = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            self.diagnostic_stage = "turn start notification correlation";
             if note.method != "turn/started"
                 || note.emitted_at_ms > 9_007_199_254_740_991
                 || note.params.thread_id != self.thread
@@ -142,17 +152,22 @@ impl TurnStart {
             {
                 return Err(invalid());
             }
+            self.diagnostic_stage = "turn start notification state";
             note.params.turn.validate()?;
             self.started = Some(BoundedObservation::new(input.bytes.clone())?);
         } else {
+            self.diagnostic_stage = "turn start reply shape";
             let reply: Reply = serde_json::from_slice(&input.bytes).map_err(|_| invalid())?;
+            self.diagnostic_stage = "turn start reply correlation";
             if reply.id != 6 || self.reply.is_some() {
                 return Err(invalid());
             }
+            self.diagnostic_stage = "turn start reply state";
             reply.result.turn.validate()?;
             self.reply = Some(reply.result.turn.id);
         }
         if let (Some(turn), Some(started)) = (&self.reply, &self.started) {
+            self.diagnostic_stage = "turn start stream binding";
             let mut stream = TurnStream::new(&self.thread, turn)?;
             if !matches!(stream.observe(started)?, Observed::Started) {
                 return Err(invalid());
@@ -180,6 +195,23 @@ mod tests {
             json!({"method":"turn/started","params":{"threadId":"thread-1","turn":turn}}),
         ]
     }
+    #[test]
+    fn failure_checkpoints_are_fixed_and_do_not_relax_rejection() {
+        for (wire, checkpoint) in [
+            (json!({"id":6,"error":{"message":"PRIVATE"}}), "turn start reply shape"),
+            (json!({"method":"PRIVATE","params":{}}), "turn start notification shape"),
+            ({ let mut wire = frames()[0].clone(); wire["id"] = json!(7); wire }, "turn start reply correlation"),
+            ({ let mut wire = frames()[1].clone(); wire["params"]["turn"]["status"] = json!("PRIVATE"); wire }, "turn start notification state"),
+        ] {
+            let mut start = TurnStart::new("thread-1", "goal").unwrap();
+            start.take_request().unwrap();
+            assert!(start.accept(&input(wire)).is_err());
+            assert_eq!(start.diagnostic_stage(), checkpoint);
+            assert!(start.accept(&input(frames()[0].clone())).is_err());
+            assert_eq!(start.diagnostic_stage(), checkpoint);
+        }
+    }
+
     #[test]
     fn text_request_is_single_use_and_cannot_override_policy() {
         for text in ["", " \n", "bad\0text", &"x".repeat(65537)] {
