@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-08 · by GPT-6 Astra (Claude 플러그인 수정 묶음 검증)
+
+- 직전 턴은 무계정 재현과 내장 플러그인 비활성화 구현으로 진척했다. 기준f4b52d6, 기존9월 archive 보존. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar provider_claude_session --lib --locked -j4는11/11 PASS(session63483), debug sidecar build PASS(session2810)다. 앞선 동일 Codex107/편집기51 PASS는 반복하지 않았다.
+- 같은 readonly codex_start_static_review가 설정·argv digest·nonempty plugins 거절 보존을 APPROVE했다. 도구/승인/종료 계약 변경 없음, unknown/future/custom/managed plugins가 나타나면 계속 거절함을 확인했다. 새 실제 호출0회, 두 공급자 실제 응답 성공은 아직 미검증이다. diff 검사 PASS. 해당 코드/기록만 로컬 커밋한다. 다음: 별도 각1회 승인 실측, 이후 UI/G6/Windows/출시 잔여 범위. main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 내장 플러그인 원인 재현·비활성화)
+
+- 직전 턴은 검증·검토된 수정 f4b52d6 커밋으로 진척했다. 기존9월 archive 보존. Karpathy 지침에 따라 제품 검사를 완화하기 전에 /private/tmp/hello-agent-plugin-init-probe.mjs로 서명 검사된 현재 설치 Claude2.1.293을 새 HOME/profile/workspace·가짜 API key·loopback 오류 서버·tools 빈 값으로 실행했다. 실계정/유료 모델/사용자 프로젝트/강제종료는 사용하지 않았다. 서버는 항상400이며 모델 성공 시험이 아니다.
+- 5ikQWQ/result.json: safe-mode에서도 plugins에 cc-plugin-agents-md@builtin 및 cc-plugin-plugin-authoring@builtin이 나타났고 agents/skills/MCP/tools는 모두 빈 배열이다. 공식 https://code.claude.com/docs/en/settings-reference.md 의 enabledPlugins/pluginConfigs와 env-vars.md를 대조했다. 공식 enabledPlugins로 두 ID를 false로 지정한 동일 시험7D0mvz/result.json은 plugins도 빈 배열이다. 두 프로세스 모두 code1/signal null로 종료했고 로컬 요청만2회씩이며 실제 모델 호출0회다. 이는 실계정 KJbXmN payload 자체를 읽은 증거는 아니지만 빈 프로필 재현과 설정별 차이를 확인했다.
+- 제품 shell_settings에 두 내장 ID의 명시적 false 설정과 argv 회귀 assertion을 추가했다. safe-mode·권한·도구·MCP·예상하지 않은 nonempty plugins 거절은 유지한다. requested_policy_digest는 전체 scoped argv를 이미 포함하므로 새 설정도 결속된다. 컴파일/관련 회귀/독립 검토는 다음 묶음 대상이며 이번 diff 검사 PASS. 다음: 해당 묶음 검증·빌드 후 새 승인된 실제 연결 확인. UI/G6/Windows/출시 미완료, main/push 없음.
+
 ### 2026-10-08 · by GPT-6 Astra (사용량 알림·편집기 수정 로컬 마감)
 
 - 직전 턴은 Rust107/편집기51 회귀와 debug build PASS로 진척했다. e59ae16 기준 Codex 알림 변경을 동일 readonly 검토자가 APPROVE했다. 시작 상태/exact thread·turn/기존 event·byte budget/Private-only/sticky 오류 보존을 확인했으며 검토자는 실제 실행하지 않았다. 새 usage.rs만 rustfmt 적용했다.
@@ -91,6 +102,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 
 - **실제 연결 최신 관측(2026-10-08, e59ae16)**: 두 로그인/모델 조회 및 실행 접수는 가능하나 실제 응답은 실패한다. 승인된 각1회 KJbXmN 시험에서 Codex turn stream token usage, Claude init plugins 경계 실패·둘 다 cleanExit, 임시 원본 불변/앱 정상 종료를 확인했다. 이는 구체 payload 원인 확정이나 제품 완료가 아니다. 추가 실제 실행 승인은 소진됐으며 과거 시작 단계 실패보다 이 관측이 최신이다.
 - **모델 선택과 실행 권한 분리(2026-10-07)**: Codex의 bounded catalog 표시값은 종료 확정·exe/helper/home 재검증 뒤 agent.getModelChoices/m5Models로 전달한다. 채팅/역할/workspace 결속과 단발 소비를 유지하고, 실행 경로는 여전히 선택 tuple의 새 preflight를 요구한다. 역할 화면은 projectId/revision/chatId로 remount해 이전 채팅 응답 유입을 막는다. 기능 코드f1a135c, 실제 목록 조회·안전 회귀는 최신 워크로그 참조.

@@ -29,7 +29,14 @@ pub(crate) fn expected_tools(access: ToolAccess) -> &'static [&'static str] {
 /// managed settings still require admission; this is not whole-process isolation.
 /// https://code.claude.com/docs/en/sandboxing
 fn shell_settings() -> serde_json::Value {
-    serde_json::json!({"permissions":{"blockReadsOutsideWorkingDirectories":true,"additionalDirectories":[]},"sandbox":{
+    // Safe mode still reports these built-in plugins in current native Claude.
+    // Disable them through the documented per-plugin setting; init validation
+    // continues to reject any non-empty plugin list, including future built-ins.
+    // https://code.claude.com/docs/en/settings-reference#enabledplugins
+    serde_json::json!({"enabledPlugins":{
+        "cc-plugin-agents-md@builtin":false,
+        "cc-plugin-plugin-authoring@builtin":false
+    },"permissions":{"blockReadsOutsideWorkingDirectories":true,"additionalDirectories":[]},"sandbox":{
         "enabled":true,
         "failIfUnavailable":true,
         "allowUnsandboxedCommands":false,
@@ -678,6 +685,10 @@ mod tests {
             assert_eq!(args.iter().filter(|a| **a == "--settings").count(), 1);
             let settings = args.windows(2).find(|a| a[0] == "--settings").unwrap()[1];
             let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
+            assert_eq!(settings["enabledPlugins"], serde_json::json!({
+                "cc-plugin-agents-md@builtin":false,
+                "cc-plugin-plugin-authoring@builtin":false
+            }));
             assert_eq!(settings["sandbox"]["enabled"], true);
             assert_eq!(settings["sandbox"]["failIfUnavailable"], true);
             assert_eq!(settings["sandbox"]["allowUnsandboxedCommands"], false);
