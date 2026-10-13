@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (입력 지연 구간 실측·계측 한계 확인)
+
+- 기준a743e61의 추가 구간 계측을 sOTu30 실제 패키지에서 실행했다. 본10회 inputDom19.5~21.4ms, paintObservation26.2~30.4ms, 전달0.2~0.6ms, 기존 요청→2 RAF p95 51.1ms로50ms 기준 초과를 유지한다. 적어도 절반 이상은 DOM 확인 뒤 계측상 프레임 대기이며,51.1ms 전체가 편집/getValue 비용이라는 해석은 배제한다. DOM 반영은 물리 paint 증명이 아니므로21.4ms로 합격값을 대체하지 않는다. 근거 없는 debounce·저장 동기화 변경을 하지 않았다.
+- /private/tmp/hello-agent-packaged-input-segments.log와 OS 임시 hello-agent-packaged-ui-sOTu30/result.json/PNG 보존. 정상exit0/shutdown confirmed·PID 부재 후 생성3디렉터리 정리. idle457588736B 초과는 유지하며 프로젝트/계정 원본 미사용. 다음은 기존 지연 수치를 더 반복하기보다 실제 paint 증거 방법 또는 누락된 long-task/stream/peak·retained RSS 계측을 완성하는 작업이다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (패키지 대형 편집 입력 계측 연결)
 
 - 기준571c5b5에서 Karpathy 최소 범위로 --large-project 진단에 실제 Monaco textarea focus→CDP Input.insertText→trusted beforeinput→view-line 텍스트 확인→2 RAF 계측을 연결했다. 예열1+본10 입력을 같은 프로세스에서 수행하며 bridge/model 직접 변조·저장은 없다. 실제 키보드/IME 또는10개 독립 앱 세션 합격으로 주장하지 않는다. 입력 요청부터 화면 확인까지/전달/전달 후 시간을 모두 보존하고50ms 기준을 유지한다.
