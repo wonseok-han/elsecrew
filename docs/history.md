@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (미저장 파일 전환 보존 확인)
+
+- 직전8fd3439는 다중 파일 키보드 기능/회귀로 진척했다. 기존9월 archive 보존. Chromium CDP 입력으로 JSON 초안을 만든 뒤 Home으로 TypeScript 이동, End로 복귀해 미저장 표시와 표시 내용 동일성, 이어 저장 완료를 확인하는 회귀를 추가했다. synthetic bridge이며 실제 파일 저장 내구성/계정 실행 증거는 아니다.
+- 구문/diff 검사 PASS, renderer-mount-smoke2/2 PASS(session42135). 앞선 미저장 탭 전환 미검증을 이 합성 화면 범위에서 해소했다. undo 이력·긴 경로 배치·전체 시안/G6는 이 시험 범위가 아니다. 동일 제품 빌드를 재사용했다.
+- 회귀/기록만 로컬 커밋, 기존9월 archive 제외. 다음: 시안 잔여 마감·메모리/Claude 로그인/Windows/출시 범위. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (다중 파일 키보드 회귀)
 
 - 직전 턴은 파일 탭 이동 구현으로 진척했다.766e186 위 기존 workbench/history 및9월 archive 보존. 기존 Chromium fixture의 네 파일을 이용해 Home/End·좌우 끝 순환·선택/초점 일치·Tab 진입점 하나를 검증하는 시나리오를 추가했다.

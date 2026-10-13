@@ -401,6 +401,22 @@ app.whenReady().then(async () => {
         }, 25);
       });
     }
+    await ${waitFor("document.querySelector('.m5-monaco')?.getAttribute('data-mode-id') === 'json'", "JSON tab ready for draft")};
+    document.querySelector('.monaco-editor textarea').focus();
+  })()`);
+  await window.webContents.debugger.sendCommand("Input.insertText", { text: "unsaved-tab-draft" });
+  await window.webContents.executeJavaScript(`(async () => {
+    await ${waitFor("document.querySelector('.m5-editor-tab [aria-label=\"저장되지 않은 변경\"]') && document.querySelector('.view-lines')?.textContent.includes('unsaved-tab-draft')", "unsaved JSON draft")};
+    const draft = document.querySelector('.view-lines').textContent;
+    const selectedFile = () => document.querySelector('.m5-tab-list [aria-selected=true]');
+    selectedFile().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+    await ${waitFor("document.querySelector('.m5-monaco')?.getAttribute('data-mode-id') === 'typescript'", "leave unsaved JSON tab")};
+    if (!document.querySelector('.m5-editor-tab [aria-label="저장되지 않은 변경"]')) throw new Error('tab switch lost dirty marker');
+    selectedFile().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    await ${waitFor("document.querySelector('.m5-monaco')?.getAttribute('data-mode-id') === 'json' && document.querySelector('.view-lines')?.textContent.includes('unsaved-tab-draft')", "return to unsaved JSON draft")};
+    if (document.querySelector('.view-lines').textContent !== draft) throw new Error('tab switch changed draft content');
+    [...document.querySelectorAll('.m5-editor-head button')].find(button => button.textContent === '저장').click();
+    await ${waitFor("!document.querySelector('.m5-editor-tab [aria-label=\"저장되지 않은 변경\"]')", "save preserved draft")};
     const jsonWorker = globalThis.MonacoEnvironment.getWorker('smoke', 'json');
     jsonWorker.terminate();
     document.querySelector('.m5-change-row').click();
