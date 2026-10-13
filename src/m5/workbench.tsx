@@ -362,15 +362,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           {snapshot.project ? (
             <>
               <button className="m5-refresh" type="button" onClick={() => void controller.refreshChanges()} disabled={!admissionReady}>{t("m5.editor.refresh")}</button>
-              <div className="m5-change-list">
-                {snapshot.diffSummary?.entries.map((entry) => (
-                  <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" aria-current={snapshot.diffFile?.path === entry.path ? "true" : undefined} title={entry.path} onClick={() => void controller.openDiff(entry.path)} disabled={!admissionReady}>
-                    <ChangeKind entry={entry} />
-                    <span className="m5-change-file"><strong>{entry.path.split("/").pop()}</strong><small>{entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "/"}</small></span>
-                  </button>
-                ))}
-                {snapshot.diffSummary?.entries.length === 0 && <Empty text={t("m5.editor.noChanges")} />}
-              </div>
+              {snapshot.diffSummary && <ChangeFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked} onOpen={path => { void controller.openDiff(path); }} />}
               {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
@@ -737,6 +729,37 @@ function DiffDetails({ descriptor, text, canOpen, onOpen }: { descriptor: NonNul
       </>}
     </section>
   );
+}
+
+function ChangeFileList({ entries, selected, disabled, onOpen }: { entries: readonly DiffEntryV1[]; selected?: string; disabled: boolean; onOpen: (path: string) => void }) {
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const needle = query.trim().toLowerCase();
+  const matches = useMemo(() => entries.filter(entry => !needle || entry.path.toLowerCase().includes(needle) || entry.oldPath?.toLowerCase().includes(needle)), [entries, needle]);
+  const pageSize = 100;
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(matches.length / pageSize) - 1));
+  const start = currentPage * pageSize;
+  const visible = matches.slice(start, start + pageSize);
+  useEffect(() => setPage(0), [entries]);
+  return <>
+    {entries.length > 0 && <section className="m5-file-search" aria-label={t("m5.diff.filter")}>
+      <input type="search" aria-label={t("m5.diff.filter")} placeholder={t("m5.diff.filter")} value={query} maxLength={256} disabled={disabled} onChange={event => { setQuery(event.target.value); setPage(0); }} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); setQuery(""); setPage(0); } }} />
+      <p role="status">{t("m5.diff.fileCount", { shown: matches.length, total: entries.length })}</p>
+    </section>}
+    <div className="m5-change-list">
+      {visible.map(entry => <button key={`${entry.kind}:${entry.path}`} type="button" className="m5-change-row" aria-current={selected === entry.path ? "true" : undefined} title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path} onClick={() => onOpen(entry.path)} disabled={disabled}>
+        <ChangeKind entry={entry} />
+        <span className="m5-change-file"><strong>{fileName(entry.path)}</strong><small>{entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "/"}</small></span>
+      </button>)}
+      {matches.length === 0 && <Empty text={t(entries.length === 0 ? "m5.editor.noChanges" : "m5.diff.noMatches")} />}
+    </div>
+    {matches.length > pageSize && <nav className="m5-change-pages" aria-label={t("m5.diff.filePages")}>
+      <button type="button" disabled={disabled || currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("m5.diff.previous")}</button>
+      <span>{t("m5.diff.fileRange", { first: start + 1, last: start + visible.length, total: matches.length })}</span>
+      <button type="button" disabled={disabled || start + visible.length >= matches.length} onClick={() => setPage(currentPage + 1)}>{t("m5.diff.next")}</button>
+    </nav>}
+  </>;
 }
 
 function ChangeKind({ entry }: { entry: DiffEntryV1 }) {
