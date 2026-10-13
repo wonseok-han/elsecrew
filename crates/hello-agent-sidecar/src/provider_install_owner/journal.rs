@@ -14,7 +14,9 @@ const MAX_BYTES: u64 = 16 * 1024;
 const MAX_EVENTS: u64 = 16;
 
 pub(crate) struct InstallJournal<'a> {
-    scope: &'a InstallScope,
+    pub(super) scope: &'a InstallScope,
+    pub(super) operation: uuid::Uuid,
+    pub(super) provider: String,
     file: File,
     state: InstallLifecycle,
     sequence: u64,
@@ -52,6 +54,8 @@ impl<'a> InstallJournal<'a> {
             .map_err(|_| failure())?;
         let journal = Self {
             scope,
+            operation,
+            provider: provider.to_owned(),
             file,
             state: InstallLifecycle::default(),
             sequence: 0,
@@ -105,7 +109,7 @@ impl<'a> InstallJournal<'a> {
         Ok(())
     }
 
-    fn verify(&self) -> Result<(), SidecarError> {
+    pub(super) fn verify(&self) -> Result<(), SidecarError> {
         let directory = self.scope.login_lease_directory()?;
         let current = directory.symlink_metadata(NAME).map_err(|_| failure())?;
         let held = self.file.metadata().map_err(|_| failure())?;

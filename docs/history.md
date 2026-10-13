@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 다운로드 단계 연결)
+
+- 직전 목표 턴은 앱 이름 설명으로 구현 진척 없음이었다. 실제 m5/coding-agent-ide/10c3d7a와 기존 dirty를 재확인하고 설치 원장에 결속된 다운로드 worker를 추가했다. 고정 공식 HTTPS 주소만 받고 curlrc/상속 환경 차단, HTTPS redirect 제한, 시간/128KiB 크기 제한, bounded stdout 메모리 수집을 적용한다. 다운로드 내용은 파일 게시나 실행하지 않는다.
+- 기존 프로세스 gate/소유권/명시 종료 확인을 재사용했다. 동의 전과 취소된 시작을 거절하고 성공은 EOF/exit0/내용 형식/자손 종료 확인 뒤에만 downloadVerified로 기록한다. 늦은 취소는 이미 관측한 실패를 지우지 않는다. 프로세스 불확실은 recoveryRequired로 남기며 다운로드 성공/Drop에서 설치 잠금을 해제하지 않는다.
+- Karpathy 지침으로 기존 구조에 한정했다. 정책/크기/형식 및 동의 전·취소 시 무실행 회귀3개를 추가했고 rustfmt/diff 검사만 수행했다. 테스트/빌드·오류 주입·독립 검토는 설치 연결 묶음에 남긴다. 실제 네트워크/설치/계정 실행 없음, 새 대형 빌드 캐시 없음.
+- 다음: 다운로드 owner에서 installer로의 영속 단계 인계, 설치 산출물 검증·terminal 보관/복구, 정확한 동의 token과 IPC/UI 연결. 현재 downloader는 내부 미활성 코드이며 설치 기능/제품 완료가 아니다. 기존 dirty 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 transaction 영속 기록과 재검증)
 
 - 직전542beb4는 설치용 프로세스 바인딩 구현 진척이다. 같은 InstallScope 아래 고정 create-new JSONL 원장을 추가했다. 작업 UUID/공급자 header와 최대16개 전이/16KiB 한도,600 단일 링크 regular file·flock·no-follow·dev/ino/길이 재검증을 적용한다. 인증정보나 renderer 제공 경로는 받지 않는다.
