@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+RSS 원인 분리용으로 관측 앞뒤의 [CDP 프로세스 종류](https://chromedevtools.github.io/devtools-protocol/tot/SystemInfo/#method-getProcessInfo)와 [renderer heap](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-getHeapUsage)도 기록한다. Chromium 목록에 없는 PID의 역할을 추측하지 않으며 heap은 RSS에 더하지 않는다. resource timing 목록이 비어 있으면 자산 미로딩의 증거가 아니다. 강제 GC나 GPU 비활성화로 기준을 우회하지 않는다.
+
 `pnpm m5:smoke:packaged-ui`는 미리 만든 macOS arm64 패키지의 실제 실행 파일을 별도 OS 임시 userData로 시작한다. 제품 main/preload/renderer를 교체하거나 bridge를 가짜로 덮어쓰지 않는다. [Electron 공식 원격 디버깅 스위치](https://www.electronjs.org/docs/latest/api/command-line-switches/)로 해당 프로세스가 출력한 loopback CDP endpoint에만 연결해 시작 화면·실제 저장소 ready·스크린샷·10초 RSS를 관측한다. 프로젝트 선택·인증·모델 호출은 하지 않는다. 종료는 기존 renderer prepareQuit → main coordinator를 사용하고 실제 exit0 및 해당 sidecar instance의 DB clean marker를 확인한다. 종료 불확실이면 강제 종료/프로필 삭제 없이 실패 기록과 PID를 보존한다.
 
 단일 migration 포함 cold 시작·디버거 계측이며 locked Mac의 물리 키보드/포커스 증거가 아니다. `diagnostic=true/gateEligible=false`, 기준 초과·흐름 오류는 FAIL/1, 관측 완료도 NOT_READY/2다. source HEAD/Git 상태와 실제 asar/sidecar 지문을 따로 기록하므로 오래된 패키지를 현재 소스의 증거로 간주하지 않는다. 현재 앱 산출물을 먼저 갱신하고 동일 패키지의 추가 수집을 진행한다. 이 시작 smoke만으로 전체 성능 게이트를 열지 않는다.

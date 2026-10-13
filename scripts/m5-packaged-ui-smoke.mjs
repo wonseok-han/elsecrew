@@ -122,6 +122,13 @@ try {
       ? {enabledButtons: buttons.length, projectSelectionEnabled: true, rootChildren: root.childElementCount, origin: location.origin} : null;
   })()`));
   report.uiObservedMs = performance.now() - started;
+  // Attribute RSS without guessing helper roles from PID order. CDP describes
+  // Chromium processes only; unmatched descendants remain explicitly unknown.
+  report.chromiumProcessesBefore = (await send('SystemInfo.getProcessInfo')).processInfo;
+  report.rendererHeapBefore = await send('Runtime.getHeapUsage', {}, sessionId);
+  report.rendererAssets = await evaluate(`performance.getEntriesByType('resource')
+    .filter(entry => entry.name.startsWith('app://m5/'))
+    .map(entry => ({path: new URL(entry.name).pathname, decodedBodySize: entry.decodedBodySize}))`);
   for (let index = 0; index < 40; index++) {
     assert.ok(!termination, 'App exited during RSS collection');
     const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding: 'utf8', timeout: 5000, maxBuffer: 4 * 1024 * 1024});
@@ -130,6 +137,8 @@ try {
   }
   report.idleRssBytes = Math.max(...report.memory.map(sample => sample.rssBytes));
   report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
+  report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
+  report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, 'startup.png'), Buffer.from(capture.data, 'base64'));
 } catch (error) { report.error = String(error); }

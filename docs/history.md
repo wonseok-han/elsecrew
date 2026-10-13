@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패키지 메모리 원인 분리)
+
+- 이전 턴395e746은 UI 수정으로 진전했다. Karpathy 최소 범위로 기존 packaged 관측기에 CDP process 종류·renderer heap 전후 조회를 추가했다. 제품 설정/안전 경계 변경 없이 같은 기존8b10ed6 패키지를 측정했다(최신 UI 패키지 검증 아님). 공식 CDP 참조는 성능 절차에 기록했다.
+- ufEg0G 결과461045760B(약440MiB) FAIL, 종료confirmed/exit0. 첫 표본 main154MiB/renderer129MiB/GPU95MiB/network45MiB/미분류 자손17MiB, JS heap3408472→3409884B다. 단기 JS 증가가 작다는 관측이며 누수 부재/전체 성능 PASS는 아니다. resource timing 빈 배열도 미로딩으로 해석하지 않는다. 증거 OS 임시 hello-agent-packaged-ui-ufEg0G/result.json 및 /private/tmp/hello-agent-memory-attribution.log.
+- 종료 및5 PID 부재/일반 디렉터리 확인 후 이번 userdata2.3MiB만 삭제했다(재생성 가능). JSON/PNG 유지. 다음은 동일 Electron 최소 창 기준선과 제품 비용 비교다. 전체 완료 아님. 사용자9월 archive 보존·main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (좁은 프로젝트 목록 표시 수정)
 
 - 직전 승인 재확인은 구현 진척이 아니었다. 4d59c33 실제 패키지 캡처에서 확인한92px rail에 맞춰 접힌 제목/조회/빈 목록/새로고침을 ko/en 짧은 문구로 변경했다. 펼친 상태의 상세 안내·오류 자동 펼침·복구 경로·페이지 조회는 유지하고 새로고침의 전체 접근성 이름을 보존했다. Karpathy 최소 범위로 제품 동작이나 안전 계약은 변경하지 않았다.
