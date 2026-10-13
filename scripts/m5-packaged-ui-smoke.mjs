@@ -19,12 +19,13 @@ import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-pr
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
-const { processTreeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
+const { processTreeMemory, summarizeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
 const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
-const largeDiff = process.argv.length === 3 && process.argv[2] === '--large-diff';
+const memoryDiff = process.argv.length === 3 && process.argv[2] === '--memory-diff';
+const largeDiff = memoryDiff || (process.argv.length === 3 && process.argv[2] === '--large-diff');
 const diagnosticLanguage = process.argv.length === 3
   ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
   : undefined;
@@ -98,6 +99,7 @@ async function until(read, milliseconds = 15000) {
 }
 let socket, sessionId, nextId = 0;
 let longTaskProbeStarted = false, longTaskWindowCompleted = false;
+let memoryTimer, memoryPhase = 'loaded';
 const pending = new Map();
 function send(method, params = {}, targetSession) {
   return new Promise((resolve, reject) => {
@@ -179,6 +181,26 @@ try {
   report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
+  if (memoryDiff) {
+    report.memoryLifecycle = {diagnostic:true, gateEligible:false,
+      intervalMs:250, samples:report.memory.map(sample => ({...sample, phase:'idle'})),
+      limitations:['Sampled current descendants only; not escaped processes or between-sample peak.',
+        'Large diff only; does not cover all large fixtures concurrently.']};
+    const sample = () => {
+      try {
+        assert.ok(!termination, 'App exited during memory lifecycle observation');
+        assert.ok(report.memoryLifecycle.samples.length < 10000, 'Memory sample budget exceeded');
+        const rows = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,rss='], {encoding:'utf8', timeout:5000, maxBuffer:4 * 1024 * 1024});
+        report.memoryLifecycle.samples.push({phase:memoryPhase, elapsedMs:performance.now() - started,
+          ...processTreeMemory(rows, child.pid)});
+      } catch (error) {
+        report.memoryLifecycle.error = String(error);
+        clearInterval(memoryTimer);
+      }
+    };
+    memoryTimer = setInterval(sample, 250);
+    sample();
+  }
   if (projectFlow) {
     report.rendererLongTaskStart = await evaluate(`(${beginLongTaskProbe.toString()})()`);
     longTaskProbeStarted = true;
@@ -283,11 +305,34 @@ try {
     }
     }
   }
+  if (memoryDiff) {
+    const loadedCapture = await send('Page.captureScreenshot', {format:'png'}, sessionId);
+    fs.writeFileSync(path.join(root, 'loaded-diff.png'), Buffer.from(loadedCapture.data, 'base64'));
+    await evaluate(`(() => {
+      const close = [...document.querySelectorAll('button')].find(button =>
+        ['프로젝트 화면 닫기', 'Close project view'].includes(button.textContent) && !button.disabled);
+      if (!close) throw new Error('Project close control missing');
+      close.click();
+    })()`);
+    await until(() => evaluate(`!document.querySelector('.m5-files') && !!document.querySelector('.m5-start-action')`));
+    memoryPhase = 'closing';
+    report.memoryLifecycle.closedAtMs = performance.now() - started;
+    console.log(JSON.stringify({stage:'RETENTION_WAIT_STARTED', root}));
+    await sleep(60000);
+    report.memoryLifecycle.retainedStartedAtMs = performance.now() - started;
+    memoryPhase = 'retained';
+    await sleep(3000);
+    clearInterval(memoryTimer);
+    assert.ok(!report.memoryLifecycle.error, report.memoryLifecycle.error);
+    Object.assign(report.memoryLifecycle, summarizeMemory(report.memoryLifecycle.samples));
+    if (report.memoryLifecycle.failedMetrics.length) report.error ??= 'Memory lifecycle limits exceeded';
+  }
   longTaskWindowCompleted = true;
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, resume ? 'restart.png' : 'startup.png'), Buffer.from(capture.data, 'base64'));
 } catch (error) { report.error = String(error); }
 finally {
+  clearInterval(memoryTimer);
   if (longTaskProbeStarted && sessionId && !termination) {
     try {
       report.rendererLongTasks = {...await evaluate(`(${endLongTaskProbe.toString()})()`),

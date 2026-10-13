@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (대형 diff 최대·잔류 RSS 수집)
+
+- 기준5fc9752에서 Karpathy 최소 범위로 --memory-diff 전용 진단을 추가했다. 기존 summarizeMemory를 재사용하며250ms 현재 자손 RSS를 idle/loaded/closing/retained로 보존한다. 실제 프로젝트 닫기 UI·시작화면 복귀 확인→60초 대기→3초 표본을 수집한다. 무한 수집을 막는10000표본 한도와 샘플 오류 기록/타이머 해제, 실패 중 부분 증거 보존을 연결했다. 제품/기준/GC 동작은 변경하지 않았다.
+- 실제hpKbEE 결과: idle40/loaded11/closing238/retained12표본, 닫기 이후 retained 시작60002ms. idle457375744B(약436MiB) FAIL, 전체 관측 peak501170176B(약478MiB)와 baseline 대비 retained 증가0B는 각800/120MiB 기준 이내다. retained 절대RSS418004992B(약399MiB), 정상exit0/shutdown confirmed. 표본 간 순간 peak·escaped 자손·전체 fixture 동시 열기·반복 누수는 미측정이며 단일 diff 증거로 전체G6 합격/누수 부재를 주장하지 않는다.
+- 재사용 집계/관측 회귀6 PASS, syntax/diff PASS. /private/tmp/hello-agent-packaged-memory-lifecycle.log 및 root result.json/startup.png/loaded-diff.png 보존. 모든 lifecycle 관측PID 부재 후 생성3디렉터리 정리했다. 다음은 초기 유휴 초과 및 누락 main/stream/입력paint 증거다. 사용자9월 archive 보존, 실제 계정/사용자 프로젝트 미사용, main 병합/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지 renderer long-task 수집)
 
 - 기준cde315d에서 Karpathy 최소 범위로 project 시나리오 시작→스크린샷 완료 구간에 실제 renderer PerformanceObserver longtask 수집을 연결했다. takeRecords 후 disconnect, 최대10000개/overflow 표시, 미지원·비정상 값·overflow는 null을 유지한다. supported/valid/관측시작·끝/시나리오완료/200ms 초과 건수를 저장하며 startup·main·미관측 구간은 제외한다. 실패 중에도 가능한 부분 관측은 종료 전에 수집한다.
