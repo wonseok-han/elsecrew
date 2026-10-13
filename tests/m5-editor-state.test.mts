@@ -832,7 +832,7 @@ test("binary·tooLarge 파일, watcher overflow, bounded tree와 rename diff를 
   controller.dispose();
 });
 
-test("manual diff refreshes share an active read but mutations request fresh data", async () => {
+test("diff refresh requests fresh data and only the latest summary can publish", async () => {
   const bridge = new FakeBridge();
   const controller = new ProjectEditorController(bridge);
   controller.start();
@@ -846,35 +846,32 @@ test("manual diff refreshes share an active read but mutations request fresh dat
     };
     const first = controller.refreshChanges();
     await nextTurn();
-    const shared = controller.refreshChanges();
-    await nextTurn();
-    assert.equal(requests.length, 1);
-    const changed = controller.refreshChanges(true);
+    const latest = controller.refreshChanges();
     await nextTurn();
     assert.equal(requests.length, 2);
     const summary = { projectId: "project_01", baseCommit, entries: [] };
     requests[0].resolve(summary);
-    await Promise.all([first, shared]);
-    const latestShared = controller.refreshChanges();
-    await nextTurn();
-    assert.equal(requests.length, 2, "older completion must not clear the latest pending read");
+    await first;
+    assert.equal(controller.snapshot().diffSummary, null, "an older partial scan is not the requested fresh list");
     requests[1].resolve(summary);
-    await Promise.all([changed, latestShared]);
+    await latest;
+    assert.equal(controller.snapshot().diffSummary, summary);
     const beforeWatch = controller.refreshChanges();
     await nextTurn();
     bridge.emitProject({ projectId: "project_01", event: "diff.changed", paths: ["src/new.ts"], rescanRequired: false });
     await nextTurn();
     assert.equal(requests.length, 4, "watcher changes must not share a pre-change read");
-    requests[2].resolve(summary);
     requests[3].resolve(summary);
-    await beforeWatch;
     await nextTurn();
+    requests[2].reject(new Error("late outdated failure"));
+    await beforeWatch;
+    assert.equal(controller.snapshot().diffSummary, summary);
+    assert.equal(controller.snapshot().error, null);
     const failed = controller.refreshChanges();
-    const failedShared = controller.refreshChanges();
     await nextTurn();
     assert.equal(requests.length, 5);
     requests[4].reject(new Error("summary unavailable"));
-    await Promise.all([failed, failedShared]);
+    await failed;
     assert.ok(controller.snapshot().error);
   } finally { controller.dispose(); }
 });

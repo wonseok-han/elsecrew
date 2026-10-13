@@ -7,7 +7,8 @@ import { spawn, execFileSync } from 'node:child_process';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (process.platform !== 'darwin') throw new Error('Native project measurement requires macOS');
-if (process.argv.length !== 2) throw new Error('This collector takes no arguments');
+const diffOnly = process.argv.length === 3 && process.argv[2] === '--diff';
+if (process.argv.length !== 2 && !diffOnly) throw new Error('Usage: m5-native-project-metrics.mjs [--diff]');
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hello-agent-native-metrics-'));
 const git = (...args) => execFileSync('/usr/bin/git', args, { cwd: repo, encoding: 'utf8' }).trim();
 const report = {
@@ -16,6 +17,7 @@ const report = {
   measuredAt: new Date().toISOString(), platform: process.platform, arch: process.arch,
   machine: os.hostname(), cpu: os.cpus()[0]?.model, ramBytes: os.totalmem(),
   warmupRuns: 1, measuredRuns: 10, trials: [],
+  scenario: diffOnly ? 'nativeLargeDiffOnly' : 'nativeLargeTreeAndFile',
   scope: 'Development native UI; not packaged, RSS, streams, save races or detached descendants',
 };
 const persist = () => fs.writeFileSync(path.join(output, 'measurement.json'), JSON.stringify(report, null, 2));
@@ -27,8 +29,11 @@ async function trial(index) {
   const env = { ...process.env };
   // Do not inherit source writes, reload, or memory scenarios into this run.
   for (const key of Object.keys(env)) if (key.startsWith('HELLO_AGENT_SMOKE_')) delete env[key];
-  env.HELLO_AGENT_SMOKE_LARGE_TREE = '1';
-  env.HELLO_AGENT_SMOKE_LARGE_FILE = '1';
+  if (diffOnly) env.HELLO_AGENT_SMOKE_LARGE_DIFF = '1';
+  else {
+    env.HELLO_AGENT_SMOKE_LARGE_TREE = '1';
+    env.HELLO_AGENT_SMOKE_LARGE_FILE = '1';
+  }
   delete env.ELECTRON_RUN_AS_NODE;
   let pending = '';
   let result;
@@ -69,11 +74,21 @@ try {
   }
   const measured = report.trials.filter(sample => !sample.warmup);
   report.timings = {};
-  for (const [group, key] of [['largeTree', 'snapshotReadyMs'], ['largeTree', 'treeRootMs'], ['largeTree', 'treeExpandMs'], ['largeFile', 'fileEditableMs'], ['confirmation', 'readyMs']]) {
+  const metrics = diffOnly
+    ? [['largeDiff', 'diffSummaryMs'], ['largeDiff', 'diffFirstFileMs']]
+    : [['largeTree', 'snapshotReadyMs'], ['largeTree', 'treeRootMs'], ['largeTree', 'treeExpandMs'], ['largeFile', 'fileEditableMs'], ['confirmation', 'readyMs']];
+  for (const [group, key] of metrics) {
     const values = measured.map(sample => sample.result?.[group]?.[key]);
     report.timings[key] = { values, p95: values.every(value => Number.isFinite(value) && value >= 0) ? Math.max(...values) : null };
   }
   report.status = report.trials.some(sample => sample.code !== 0 || sample.result?.status !== 'PASS') ? 'FAIL' : 'NOT_READY';
+  if (diffOnly && report.trials.some(sample => sample.result?.scenario !== 'nativeLargeDiffOnly'
+    || sample.result?.largeDiff?.diffFiles !== 500
+    || sample.result?.largeDiff?.diffChangedLines !== 20000
+    || sample.result?.largeDiff?.diffBytes !== 10485760)) {
+    report.status = 'FAIL';
+    report.error = 'Missing or mismatched native diff fixture evidence';
+  }
 } catch (error) {
   report.status = 'FAIL'; report.error = error.message;
 } finally {

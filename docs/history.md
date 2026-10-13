@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (반복 native diff에서 stale 조회 발견·수정)
+
+- 직전b6a68d1은 구현/단일 관측 진척이었지만 공유 최적화의 정확성이 충분히 검증되지 않았다. native 반복 수집기에 --diff(준비1회＋측정10회)를 연결했다. 기존 source-write/실제 provider 없이 각 앱 정상 종료 뒤 다음을 시작하고 fixture 크기/원시 IPC 시간/실패를 보존한다.
+- 최초84539/yxxJHt는 측정4·7회 timeout으로 FAIL/exit1이다. 4회 실패 화면은500개 중236개만 표시했고 IPC summary1건뿐이었다. 변경 도중 시작된 옛 조회를 명시 새로고침이 공유해 새 스캔이 생략되는 결함으로, b6a68d1의 공유 최적화를 철회했다. 새로고침은 매번 실제 조회하며 summary 전용 generation과 목록 초기화로 이전 결과/오류가 최신 목록을 덮지 못하게 했다. 본문 선택 generation과 프로젝트/workspace 결속은 유지한다.
+- 최종 editor/workspace65/65·TypeScript·renderer build·JS 구문·diff PASS. 이어20926/SOlVal 반복은 준비＋측정 전11앱 PASS/정상 종료, 측정10회 p95 summary1155.3ms/first816.6ms로2000/1500ms 이내다. collector는 개발 빌드 diagnostic이므로 NOT_READY/exit2로 정확히 종료했다. 실패 run도 증거 보존, 실제 모델/원본 적용/사용자 프로젝트 없음.
+- 다음: 남은 native 대형 트리/파일 반복·RSS와 packaged 전체 계측, Claude 실제 작업·Windows·출시 검증. 전체 개발 완료 아님. 별도 승인 대기 정리 기능은 계속 false이며 기존 미커밋 UI/문서 및9월 archive 변경 보존, main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (diff 조회 대기 계측·중복 수동 조회 공유)
 
 - 직전 승인 응답 턴은 이미 종료된 PID 부재를 확인한 것으로, 개발 진척은 아니었다. a871f9c에서 첫 diff 지연 조사로 복귀했다. native smoke에 실제 IPC handler 호출 시각/소요/성공·실패만 기록하며 응답을 대체하지 않는 계측을 추가했다. qMRshW/session37266은 summary496ms·first1700ms FAIL/정상 종료였고, 중첩 summary2건 뒤 file handler1668ms로 화면 렌더보다 요청 대기가 주된 관측 구간이었다.
@@ -83,7 +90,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **2026-10-13 native 대형 diff 실패**: LARGE_DIFF 모드46Z4Lw에서500파일/2만 변경 줄/10MiB patch의 실제 목록9892ms·첫 파일9983ms가 기준 초과했다. 원본 불변/정상 종료이며 다음 성능 병목 조사 대상이다. 합성 renderer의 빠른 수치로 이 native 실패를 대체하지 않는다.
+- **2026-10-13 native 대형 diff 최신 결과**: 초기46Z4Lw의 목록9892ms·첫 파일9983ms 초과 이후 요청 단위 Git batch 재사용을 적용했다. b6a68d1의 수동 조회 공유는 반복 시험에서236/500개 stale 목록을 만들어 철회했다. 매번 새 조회＋summary generation 적용 후 SOlVal은 준비1회/측정10회 전부 정상 종료, p95 목록1155.3ms·첫 파일816.6ms로 기준 이내다. 개발 빌드 diagnostic/NOT_READY이며 packaged G6 합격은 아니다.
 
 - **2026-10-13 macOS 명시 정리 활성화 승인 대기**: 공개 경로·중단 후 DB 재열기·합성 UI 동의/응답 유실 검증과 독립 APPROVE 완료. 커밋 권한 검토가 별도 사용자 승인을 요구해 거절했고 application_cleanup_enabled=false로 복원했다. 승인된 구현 정책과 제품 활성화 승인을 구분하며 임의 재시도하지 않는다. current terminal 복구점 보호·명시 retirement/별도 정리·자동 삭제 없음·원본/잠금/이력 보존 계약은 유지한다.
 

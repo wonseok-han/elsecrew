@@ -30,6 +30,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### Native 프로젝트 반복 수집
 
+`pnpm m5:measure:native-project --diff`는 별도 대형 diff 시나리오만 준비1회＋측정10회 수집한다. 각 실행의500파일/20000변경 줄/10MiB 증거와 실제 IPC handler 시간(대기 포함)을 보존하며 `diffSummaryMs`·`diffFirstFileMs`의 p95를 계산한다. 트리/큰 파일/메모리 모드와 혼합하지 않는다. 정상 종료한 기준 초과 표본도 버리지 않으며 아래와 같은 diagnostic/NOT_READY 경계를 따른다.
+
 `pnpm m5:measure:native-project`는 현재 빌드된 native UI 시험을 준비 실행1회＋측정10회 순차 실행한다. 각 실행은 새 임시 프로젝트에1만 파일 트리와5MiB 파일을 함께 생성하며, 편집/저장/diff·반영 확인 취소·두 채팅 흐름까지 수행한다. 원본 적용·reload·메모리 환경 옵션은 상속하지 않는다. 빌드는 자동 수행하지 않으므로 먼저 최신 main/renderer/debug sidecar를 준비한다.
 
 결과는 새 OS 임시 `hello-agent-native-metrics-*`의 measurement.json과 각 trial 로그에 남긴다. 실제 앱 종료를 기다린 뒤 다음 실행을 시작하며 종료 미확정/비정상 종료면 중단한다. 강제 종료나 증거 삭제는 하지 않는다. 정상 종료한 실패 표본도 제외하지 않고10회에 포함하며, 누락 수치의 p95는 null이다. 준비 실행 실패도 전체 FAIL로 남긴다.10개 값의 nearest-rank p95는 최대값이다. 기준 초과/흐름 실패는 exit1, 모두 통과해도 개발 빌드 진단이므로 NOT_READY/exit2다. 이 명령은 packaged·전체 RSS·stream·save race·종료 안전성 측정을 대신하지 않으며 `m5:test:performance` 게이트를 열지 않는다.
