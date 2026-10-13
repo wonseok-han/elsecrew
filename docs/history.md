@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (기본 테스트 탐색 누락 수정)
+
+- 기준645c2f0에서 동시 스트림 경로를 조사하다 npm test가 tests/*.test.mts만 실행해 .test.cjs 4파일(heap-sampling/message-paint-probe/parallel-chat-fixture/live-provider-smoke)을 제외함을 확인했다. 네 파일을 읽어 실제 계정·앱 실행 없이 순수 helper/VM mock 테스트임을 확인한 후 기본 test glob에 *.test.cjs를 추가했다. Karpathy 최소 범위로 package script만 변경했고 lockfile/제품/안전 계약은 변경하지 않았다.
+- 확장된 npm test513 PASS/0FAIL/0ignored,24.46초(/private/tmp/hello-agent-complete-node-test-discovery.log), diff PASS. 기존495 결과는 당시 범위의 증거이며 이번513 결과로 기본 단위 묶음 범위를 갱신한다. 테스트명 live-provider를 실제 로그인/모델 성공으로 인용하지 않는다.
+- 기존12000메시지 검사는 FakeBridge 또는 renderer-smoke-preload의 synthetic user 메시지로, native sidecar 공개 이벤트/실제 provider 증거가 아니다. 실제 agent 공개 이벤트는 실행당256개 제한이므로 단일 run당3000개로 늘리는 시험은 현재 안전 계약과 다르다. 제한을 완화하지 않았다. 다음은 별도 synthetic 전송·renderer 성능 증거와 native bounded run 검증을 분리해 연결하는 작업이며, 기존 메모리/입력paint/Windows/실계정 미완료도 유지한다. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (대형 diff 최대·잔류 RSS 수집)
 
 - 기준5fc9752에서 Karpathy 최소 범위로 --memory-diff 전용 진단을 추가했다. 기존 summarizeMemory를 재사용하며250ms 현재 자손 RSS를 idle/loaded/closing/retained로 보존한다. 실제 프로젝트 닫기 UI·시작화면 복귀 확인→60초 대기→3초 표본을 수집한다. 무한 수집을 막는10000표본 한도와 샘플 오류 기록/타이머 해제, 실패 중 부분 증거 보존을 연결했다. 제품/기준/GC 동작은 변경하지 않았다.
