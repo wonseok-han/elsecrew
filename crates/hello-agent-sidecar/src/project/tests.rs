@@ -170,9 +170,13 @@ fn application_scheduler_cancel_keeps_recovery_and_rejects_wrong_identity() {
 fn restoration_owner_cancellation_preserves_record_and_requires_new_admission() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_edit_fixture();
+    assert_eq!(f.manager.application_capabilities().result["enabled"], true);
+    // Exercise the disabled guard explicitly; macOS production is enabled.
+    f.manager.source_writes_enabled = false;
     assert_eq!(f.manager.application_capabilities().result["enabled"], false);
     assert!(f.manager.start_application_request(&mut f.storage, &f.project_id, "chat_unknown", "confirmation_unknown", "req_blocked_start").is_err());
     assert!(f.manager.restore_application_request(&f.storage, &f.project_id, "application_unknown", "unknown", "req_blocked_restore").is_err());
+    f.manager.source_writes_enabled = true;
     let mut confirmations = Confirmations::default();
     let (token, _) = confirmations.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     f.manager.application_confirmations = confirmations;
@@ -1821,7 +1825,10 @@ fn staged_backup_survives_restart_and_keeps_header_binding() {
         "req_backup_fail_reserve"
     )
     .is_err());
-    assert!(!f.manager.data_root.join("application-backups-v1").exists());
+    // Free-space admission may create the managed directory, but no archive
+    // bytes may be allocated before the durable reservation succeeds.
+    let backup_root = f.manager.data_root.join("application-backups-v1");
+    assert_eq!(fs::read_dir(&backup_root).unwrap().count(), 0);
     assert!(required_project(&f.storage, &f.project_id)
         .unwrap()
         .get("application_backups")

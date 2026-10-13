@@ -39,6 +39,7 @@
       "run.approval",
       "project.catalog",
       "agent.getCapabilities",
+      "agent.getModelChoices",
       "run.startFixture",
       "run.startAgent",
       "run.startAgentSmoke",

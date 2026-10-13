@@ -1,5 +1,25 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (통합 검사 실패 5건 수정 확인)
+
+- 직전 턴은 Electron22건/프로토콜4건 통과와 Rust 실패 테스트 수정으로 진척했다. 이어 session75596 종료를 확인했다: sidecar574통과/5실패/33ignored,934.67초/exit101. 실패 상세가 모두 앞서 수정한 전제와 일치했다(기능 기본값 true, 빈 백업 폴더, 허용된 vendor 파일명3건).
+- 수정 후5건만 집중 재실행(session35295)하여5/5 PASS. 앞선 실패로 건너뛴 stdio_process13/13 PASS(session11197), macOS sandbox2건은 기존 ignored 그대로 유지했다. 기존574건 결과와 수정5건을 조합한 증거이며 수정 후 전체612건 재실행으로 표현하지 않는다. 제품 코드/안전 조건 완화 없음, 실제 계정 호출0회.
+- diff 검사 PASS. 테스트6파일과 누적 history만 선택 커밋하며 기존9월 archive21줄은 제외한다. main 병합/push 없음. 다음: G6 수집·메모리 실패와 실제 패키지/Windows/Claude 실연결 검증; 전체 제품 완료는 아직 미달이다.
+
+### 2026-10-13 · by GPT-6 Astra (통합 회귀의 오래된 시험 전제 수정)
+
+- c912c07/m5 통합 브랜치와 기존 변경을 확인했다. 최신 승인 실연결은 이미974Ab5에서 소진돼 이번에는 추가 실제 계정 호출을 하지 않았다(Codex planning 성공/Claude 로그인 idle). 기존9월 archive21줄은 보존한다.
+- 진행 중이던 session75596을 계속 조회했다. protocol 통과 뒤 sidecar에서 restoration_owner_cancellation, staged_backup_survives_restart, login manager explicit_recovery, login process explicit_recovery 및 termination_evidence 시험의 실패를 관측했다. 전체 Rust 검사는 아직 실행 중이며 마지막으로 storage reopen_plan_v9 단계까지 진행했다. 최종 실패 상세/집계를 아직 받지 않았으며 새 Cargo를 겹쳐 실행하지 않는다.
+- 현행 코드를 대조해 테스트만 수정했다: macOS source_writes 기본 true를 확인한 뒤 disabled guard를 명시 설정; 공간 검사에서 만들어진 백업 폴더는 비어 있어야 함; 허용된 미래 vendor 파일명 대신 금지된 AGENTS.md로 프로필 오류를 주입. 제품 실행/복구/안전 로직은 변경하지 않았다. 수정된 Rust 테스트는 현재 실행 파일에 반영되지 않아 후속 집중 검증이 필요하다. Karpathy 최소 변경 지침 적용.
+- Electron security 독립 실행은13통과/9실패였다. VM loader의 model-choices 계약 import 누락과 CSP 검사 명령 기대값 누락을 보완한 뒤22/22 PASS/구문 검사 PASS. protocol TypeScript4/4 PASS, diff 검사 PASS. 기존 manifest 수정 포함 전체 변경은 미커밋이다.
+- 다음: 반드시 session75596 최종 결과/실패 상세를 수집하고 수정5건 집중 Rust 검증 및 남은 실패 처리 후 선택 커밋. 전체 G6/native/Windows/Claude 실제 흐름은 미완료이며 main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (통합 검사에서 모델 목록 계약 누락 수정)
+
+- 직전c912c07은 diff 구현/회귀 완료로 진척했다. 현재 M5 완료 기준과 검사 경로를 대조한 뒤 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test --workspace --locked 및 후속 Electron security 묶음을 시작했다. 제한 환경47200은 crates.io DNS/exit101, 네트워크 허용35425는 기존 Tauri105통과/13ignored 이후 protocol의 canonical method 목록 불일치에서 exit101. 후속 security는 아직 실행되지 않았다.
+- Rust METHODS_V1/TypeScript/sidecar dispatch에 이미 구현된 agent.getModelChoices가 protocol-v1 manifest에서만 빠진 것을 확인해 목록에 추가했다. 검사의 exact 비교를 유지하며 제품 권한/메서드 동작을 바꾸지 않았다. 기존9월 archive 보존.
+- 실패한 protocol과 아직 실행되지 않은 sidecar/security를 이어가는 session75596이 현재 실행 중이다. protocol 단계 통과 후 sidecar 회귀가 진행 중이며 followup compaction/100개 이상 snapshot 시험의60초 경과 메시지가 관측됐다. timeout 경고는 종료가 아니며 같은 handle을 계속 조회해야 한다. 전체 PASS/새 실행을 주장하지 않는다. 실제 계정 호출0회/main/push 없음. 다음: session75596 완료 결과 수집·실패 수정, 미연결 G6 collector/native/Windows/Claude 증거. 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (diff 줄 접기 묶음 검증)
 
 - 직전 턴의 줄 접기 구현과 패키지 관측 기록을 보존했다. 기존 Chromium 회귀에 변경 패널을 실제로 표시한240px 폭·긴 연속 문자열의 가로 overflow 없음·기본 접기/해제 후 원문 동일·영어 라벨 검사를 추가했다. 기존 diff 페이지/언어 보존도 함께 실행했다. 합성 DOM 기하 회귀이며 최신 native 패키지에 새 CSS를 포함한 검증은 아니다.

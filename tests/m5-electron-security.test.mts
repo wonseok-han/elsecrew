@@ -6,6 +6,7 @@ import { createContext, runInContext } from "node:vm";
 import test from "node:test";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
+import * as modelChoicesContract from "../src/m5/contracts/model-choices-v1.ts";
 import { M5_BRIDGE_V2_CHANNELS, M5_BRIDGE_V3_CHANNELS, M5_BRIDGE_V4_CHANNELS, M5_BRIDGE_V5_CHANNELS, M5_BRIDGE_V6_CHANNELS, M5_BRIDGE_V7_CHANNELS } from "../electron/ipc-channels.ts";
 
 const require = createRequire(import.meta.url);
@@ -317,6 +318,7 @@ function moduleFor(
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
   if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
+  if (specifier.endsWith("model-choices-v1.ts")) return modelChoicesContract;
   if (specifier === "node:fs") {
     return {
       mkdirSync: () => undefined,

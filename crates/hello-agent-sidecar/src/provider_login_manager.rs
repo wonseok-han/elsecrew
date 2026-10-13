@@ -638,7 +638,8 @@ mod tests {
         let profile = CodexProfileBinding::from_storage(&storage).unwrap();
         let home = profile.revalidate().unwrap();
         let mut owner = crate::provider_login_process::LoginProcess::reserve(&profile).unwrap();
-        let obstacle = home.join("unrecognized-artifact");
+        // Vendor cache names may evolve; instruction files remain forbidden.
+        let obstacle = home.join("AGENTS.md");
         std::fs::write(&obstacle, b"synthetic").unwrap();
         assert!(owner.finish().is_err());
         std::fs::remove_file(obstacle).unwrap();

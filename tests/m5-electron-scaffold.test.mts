@@ -87,7 +87,7 @@ test("M5 Electron 의존성과 명령은 Forge 8 alpha exact pin 및 실제 명�
   assert.equal(manifest.scripts["m5:package:smoke"], "pnpm run m5:package && node scripts/m5-electron-package-smoke.mjs");
   assert.equal(
     manifest.scripts["m5:test:security"],
-    "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
+    "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
   );
   assert.equal(
     manifest.scripts["m5:test:package"],

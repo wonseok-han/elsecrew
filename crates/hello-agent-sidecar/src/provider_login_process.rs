@@ -1937,7 +1937,8 @@ mod tests {
         let mut process = LoginProcess::reserve(&binding).unwrap();
         process.launch(cat).unwrap();
         let home = binding.revalidate().unwrap();
-        let obstacle = home.join("unexpected-artifact");
+        // Inject an actual policy violation, not a permitted future cache name.
+        let obstacle = home.join("AGENTS.md");
         std::fs::write(&obstacle, b"preserve").unwrap();
         assert!(process.finish().is_err());
         std::fs::remove_file(obstacle).unwrap();
@@ -2033,7 +2034,7 @@ mod tests {
         let mut process = LoginProcess::reserve(&binding).unwrap();
         process.launch(cat).unwrap();
         let home = binding.revalidate().unwrap();
-        std::fs::write(home.join("unrecognized-artifact"), b"preserve").unwrap();
+        std::fs::write(home.join("AGENTS.md"), b"preserve").unwrap();
         assert!(process.finish().is_err());
         let receipt = process.closure_evidence().unwrap();
         assert!(receipt.termination_confirmed());
@@ -2043,7 +2044,7 @@ mod tests {
             .unwrap()
             .ends_with(LOGIN_TERMINATED));
         // Repairing a profile is not retroactive cleanup authority.
-        std::fs::remove_file(home.join("unrecognized-artifact")).unwrap();
+        std::fs::remove_file(home.join("AGENTS.md")).unwrap();
         assert!(process.finish().is_err());
         assert!(LoginProcess::reserve(&binding).is_err());
     }
