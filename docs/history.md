@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (네 채팅 합성 스트림 실제 renderer 관측)
+
+- 기준3cf0f1b에서 기존 M5_MEASURE_PARALLEL_PAINT 경로를 실행했다. renderer 소스는 마지막 빌드 기준7ddac69 이후 변경 없음(git diff src/m5 electron 확인). 숨겨진 Electron/실제 React renderer에 네 합성 채팅 각50회/초·3000개, 총12000개를 전달했고 선택 chat0의3000개를 모두 관측했다. elapsed60002.2ms, 최대 두-frame 표시 지연35.4ms, 발송 scheduling delay 최대4.8ms, 미관측0·관측 ID 중복0. 이후 네 채팅의 최신200개가 각2801~3000번과 일치했다. 정상exit0이며 실제 공급자/원장/native IPC/packaged G6 증거가 아니다.
+- /private/tmp/hello-agent-parallel-paint-final.log 및 OS 임시 hello-agent-renderer-smoke-NNe0ks/parallel-message-paint.json에 원시3000표본/한계를 보존했다. 정상 종료와 관련 프로세스 부재를 확인한 뒤 이 시험의 캐시·임시 설정만 정리한다. 실제 계정·사용자 프로젝트 미사용, 제품 코드/안전 제한 변경 없음. 다음은 native 전송·bounded run 관측과 기존 초기 RSS/입력paint/Windows/실계정 검증이며 전체 미완료다. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (기본 테스트 탐색 누락 수정)
 
 - 기준645c2f0에서 동시 스트림 경로를 조사하다 npm test가 tests/*.test.mts만 실행해 .test.cjs 4파일(heap-sampling/message-paint-probe/parallel-chat-fixture/live-provider-smoke)을 제외함을 확인했다. 네 파일을 읽어 실제 계정·앱 실행 없이 순수 helper/VM mock 테스트임을 확인한 후 기본 test glob에 *.test.cjs를 추가했다. Karpathy 최소 범위로 package script만 변경했고 lockfile/제품/안전 계약은 변경하지 않았다.
@@ -172,6 +177,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **동시 메시지 증거 범위(2026-10-13)**: NNe0ks의 실제 renderer 합성4채팅12000개/60초 시험은 선택 chat0 전체3000개 관측·최대35.4ms 및 네 채팅 최신200개 전환 일치를 확인했다. background3000개 전체를 화면에서 관측하거나 native 원장/공급자/패키지 G6를 검증한 것은 아니다. actual-agent 실행당256개 제한을 부하 시험 편의로 완화하지 않는다.
 
 - **첫 diff stat 초기화(2026-10-13)**: read-tree 뒤 raw materialize한 snapshot은 stat 정보가 비어 첫 diff에 파일 재확인 비용이 몰렸다. unpublished staging에서 고정 update-index -q --ignore-submodules --refresh 후 기준 트리 검증을 유지한다. 원본 인덱스 불변/동일 길이 편집 감지·필터 미실행 회귀와 독립 APPROVE, 단일 packaged firstTree966→272ms 관측을 확보했다. 반복p95·메모리400MiB 기준은 별도 미완료다.
 
