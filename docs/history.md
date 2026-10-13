@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (프런트 누적 검사와 Electron 빌드)
+
+- c1529cc에서 출시 체크리스트§6과 제품 제안§9를 대조하고 최근 수정의 프런트 누적 검사를 실행했다. npm test 491/491 PASS23.04초, pnpm build의 TypeScript와 기존 Tauri renderer PASS다. 로그는 /private/tmp/hello-agent-node-final-c1529cc.log 및 /private/tmp/hello-agent-build-final-c1529cc.log다.
+- Electron main config를 CLI 단독 호출한 첫 시도는 Forge가 제공하는 forgeConfigSelf.entry 누락으로 실패했다. 이는 제품 실행 실패가 아닌 호출 방식 오류다. 이후 Vite API로 main/preload CJS entry·Node/Electron external·고정 main_window 이름을 제공해 각각 빌드 PASS, 전용 renderer config도 PASS다. 첫 inline 명령의 괄호 오류는 실행 전 수정했다. 개발 빌드 확인이며 Forge 패키지·실행 합격이 아니다. Monaco chunk500kB 경고는 남아 있다.
+- 새 설치 패키지/계정 호출 없음. target약1.8GiB·기존 out308MiB이며 ps가 제한 환경에서 거부돼 기존 패키지 실행 여부는 확인하지 못했다. 따라서 삭제하지 않았다. 남은 것은 packaged UI·전체 성능 수집/메모리 기준·실제 provider 흐름·최종 안전 검증이다. Mac 잠금/Claude 연결 확인 대기는 유지한다. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (배포 검사 설치 capability 누락 수정)
 
 - 005e467에서 배포 통합 경로를 조사했다. 개발 UI smoke는 main을 직접 로드/계측하고 dialog·userdata를 주입하므로 이를 그대로 packaged 증거로 바꾸지 않는다. 기존 패키지 smoke의 exact ready 기대 목록에는 현행 lib.rs가 제공하는 provider.install suffix가 빠져 정상 최신 패키지도 거절하게 됨을 확인했다.
