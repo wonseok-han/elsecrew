@@ -13,13 +13,15 @@ import { createRequire } from 'node:module';
 import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1.ts';
 import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
+import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
 
 const { processTreeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
-const projectFlow = process.argv.length === 3 && process.argv[2] === '--project';
-assert.ok(process.argv.length === 2 || projectFlow, 'Only the fixed --project scenario is accepted');
+const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
+const projectFlow = largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
+assert.ok(process.argv.length === 2 || projectFlow, 'Only fixed project scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -48,7 +50,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 delete env.NODE_OPTIONS;
 if (projectFlow) {
   try {
-    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env);
+    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env, largeProject);
     persist();
   } catch (error) {
     report.status = 'FAIL'; report.error = String(error); persist();
@@ -156,6 +158,7 @@ try {
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
   if (projectFlow) {
+    const projectOpenedAt = performance.now();
     const expectedPath = fs.realpathSync(report.project.source);
     await until(() => evaluate(`(() => {
       const button = [...document.querySelectorAll('.m5-project-catalog-list li > button')]
@@ -164,7 +167,12 @@ try {
       button.click(); return true;
     })()`));
     await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')]
-      .find(button => button.textContent.includes('hello.txt') && !button.disabled)`));
+      .find(button => button.textContent.includes('hello.txt') && !button.disabled)`), largeProject ? 65000 : 15000);
+    report.project.snapshotObservedMs = performance.now() - projectOpenedAt;
+    if (largeProject) {
+      report.largeProject = await evaluate(`(${probeLargeProject.toString()})()`);
+      if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
+    } else {
     if (resume) {
       await until(() => evaluate(`!![...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check') && !button.disabled)`));
       await evaluate(`[...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check')).click()`);
@@ -234,6 +242,7 @@ try {
       await until(() => evaluate(`document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('edited in packaged snapshot')`));
       assert.equal(fs.readFileSync(path.join(report.project.otherSource, 'other.txt'), 'utf8'), 'second project only\n');
       report.project.multiProject = {otherFilesIsolated:true, otherChatsEmpty:true, originalChatReopened:true, otherSourceUnchanged:true};
+    }
     }
   }
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);

@@ -6,11 +6,23 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { decodeJsonl, parseReadyPayload } from '../src/m5/contracts/protocol-v1.ts';
 
-export async function seedPackagedProject(binary, root, userData, env) {
+export async function seedPackagedProject(binary, root, userData, env, largeProject = false) {
   const source = path.join(root, 'project');
   const otherSource = path.join(root, 'other-project');
   fs.mkdirSync(source);
   fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+  if (largeProject) {
+    const tree = path.join(source, 'aaa-tree');
+    fs.mkdirSync(tree);
+    for (let index = 0; index < 1000; index++) {
+      const folder = index === 0 ? tree : path.join(tree, `folder-${String(index).padStart(4, '0')}`);
+      if (index) fs.mkdirSync(folder);
+      for (let file = 0; file < 10; file++) fs.writeFileSync(path.join(folder, `file-${file}.txt`), 'tree fixture\n');
+    }
+    const fixture = new URL('../tests/m5-renderer-performance-fixture.cjs', import.meta.url);
+    execFileSync(process.execPath, ['-e', "require('node:fs').writeFileSync(process.argv[1], require(process.argv[2]).getFileText())", path.join(source, 'large.txt'), fixture.pathname], {env});
+    assert.equal(fs.statSync(path.join(source, 'large.txt')).size, 5242880);
+  }
   fs.mkdirSync(otherSource);
   fs.writeFileSync(path.join(otherSource, 'other.txt'), 'second project only\n');
   for (const cwd of [source, otherSource]) {

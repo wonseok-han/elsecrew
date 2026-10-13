@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 트리·파일 측정 연결)
+
+- 이전 글꼴/preload 비용 분리에서 주원인 가설을 좁혔다. 이번에는 Karpathy 최소 범위로 기존 fixture를 재사용한 --large-project를 연결했다. 자체10,000파일/1,000디렉터리 subtree와5MiB/100,000줄 파일을 실제 packaged sidecar→snapshot→renderer/Monaco로 연다. 제품 main/bridge를 대체하지 않으며 단일 진단임을 유지한다.
+- UMef0s는 snapshotObserved30742.52ms, renderer treeRoot895.90ms/treeExpand66.40ms/fileEditable366.50ms/DOM362로 해당 단일 기준 이내, 정상 exit0/종료confirmed. idle442925056B로 전체 FAIL 유지한다. /private/tmp/hello-agent-packaged-large.log 및 OS 임시 hello-agent-packaged-ui-UMef0s/result.json/PNG 보존. 10회p95·대형diff·입력/stream·전체메모리/실계정/Windows·G6 완료 아님. 다음은 같은 실제 패키지의 누락 성능 수집 연결이다.
+- 종료/PID 부재·일반 디렉터리 확인 후 생성 project/other-project/userdata 약93MiB를 제거하고 작은 JSON/PNG 증거만 남겼다(시험으로 재생성 가능). 기존 사용자 데이터/9월 archive/main/push 경계 보존. diff 검사 PASS, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (한국어 글꼴·preload 메모리 비용 분리)
+
+- 9ffba30의 최신 패키지 통합 확인은 진전이었다. 같은 Electron43.4.0/창 크기/보안·시스템 글꼴 설정의 빈 창에서 영어384483328B, 한국어386154496B, 한국어+실제 preload389824512B를40표본씩 관측했다. 모두 정상 exit0이며 /private/tmp/hello-agent-electron-baseline.rcJrU9의 result-{system-font,korean-font,korean-preload}.json·로그 보존. 한국어 차이약1.6MiB/preload차이약3.5MiB로 실제 앱439MiB 초과의 주원인이라고 볼 근거는 없다. 단일 진단이며 data URL·자체 ps약1.8MiB 포함 등 패키지와 다른 조건이므로 정확한 제품 비용 분해는 아니다.
+- Karpathy 최소 변경 원칙으로 제품 설정·안전 기능·400MiB 기준은 바꾸지 않았다. 다음 원인 분리는 실제 화면 레이아웃/렌더러·GPU 비용이며 전체 성능 collector와 실계정/Windows 검증도 미완료다. CUA 직접 조회는 여전히 Mac locked/자동 unlock 불가를 반환해 사용자에게 잠금 해제를 비차단 요청했다. 브라우저 탭 존재를 네이티브 입력 가능으로 해석하지 않는다.
+- 세 비교 창 root/Chromium PID 부재와 일반 디렉터리를 확인 후 임시 profile3개만 제거했다(재생성 가능). 코드·JSON·로그는 보존, 사용자 데이터·9월 archive/main/push 경계 유지. 제품 수정 없음, diff 검사 PASS, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (최신 패키지 통합 흐름 확인·debug 캐시 정리)
 
 - ec0b981에서 기존 시험 프로세스 부재를 확인하고 최신 package/smoke PASS(/private/tmp/hello-agent-package-ec0b981.log). 이어 같은 최신 패키지의 전체 --project 시나리오를 실행했다. aDPxMz의 첫 실행/재시작 모두 종료confirmed/exit0이며 저장 본문·diff·반영복원 별도 동의5항목·두 프로젝트 격리4항목이true다. 직전 미검증으로 남긴 준비 완료 대기 및 첫 프로젝트 복귀 뒤 편집 내용 재확인도 이번 코드로 실행 완료했다. /private/tmp/hello-agent-packaged-final-ec0b981.log 및 OS 임시 hello-agent-packaged-ui-aDPxMz의 result/restart JSON·PNG에 보존한다.

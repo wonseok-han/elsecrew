@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+`pnpm m5:smoke:packaged-ui --large-project`는 같은 실제 패키지 경로에10,000파일/1,000디렉터리 subtree와 기존5MiB/100,000줄 파일 fixture를 생성한다. 두 control 파일은 별도다. 프로젝트 snapshot 준비 관측은65초로 제한하고 제품60초 제한은 변경하지 않는다. renderer performance.now로 트리 진입/하위 폴더/파일 입력 요소+본문+두 frame까지 측정하며 각각1000/250/1500ms, 트리 DOM500개 기준을 적용한다. 부모 관측기의 snapshotObservedMs는 별도 값이다. 단일 migration 포함 진단으로 warm-up/10회p95·전체 입력/stream/RSS peak/최종G6를 대체하지 않으며 기준 초과를 FAIL로 보존한다. 이 모드는 편집·반영·재시작을 반복하지 않는다.
+
 프로젝트 모드는 고유 파일을 가진 두 번째 임시 Git도 등록한다. 재시작/반영/복원 뒤 프로젝트 화면을 닫아 두 번째 프로젝트를 열고 파일·채팅 비혼입 및 원본 불변을 확인한 후 첫 채팅으로 돌아온다. 모든 project ID는 실제 API 결과를 사용하며 경로/목록을 mock하지 않는다. 이는 순차 전환 증거이며 동시 에이전트의 교차 프로젝트 안전 시험을 대신하지 않는다.
 
 프로젝트 시나리오는 첫 실행에서 편집/저장/diff·정상 종료가 확인된 경우에만 같은 profile을 재시작한다. 두 번째 실행은 새 sidecar instance와 기존 채팅·저장된 편집기 본문·diff·원본 불변을 확인하고 restart.json/PNG를 따로 남긴다. 정상 종료가 불확실하면 재시작하지 않는다. Monaco view-lines의 NBSP는 표시 공백으로 정규화하되 파일이나 diff 내용을 바꾸지 않는다.
