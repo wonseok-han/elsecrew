@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (성능 fixture의 실제 sandbox 조건 정합화)
+
+- 9a8b9c6 이후 시험 preload를 기존 Vite로 사전 번들하고 Electron sandbox:true로 바꿨다. 로컬 require를 번들 내부로 합치고 fixture 버전 hash는 정확한 원문에서 별도 빌드 프로세스가 계산한다. UTF-8 길이는 TextEncoder로 대체했다. 번들러/대형 fixture 생성이 측정 대상 main RSS를 부풀리지 않도록 빌드 child를 먼저 종료한다. 실제 앱·파일 크기·성능 임계값은 변경하지 않았다.
+- isolated preload의 process.sandboxed를 bridge로 확인한 묶음 측정은 끝까지 완료됐지만 FAIL이다. renderer-2026-10-13T08-43-13.041Z-396.json: idle423002112B/peak998096896B, retained delta0; input48.8ms/file100.1ms/가시diff78.9ms/DOM362는 기준 이내다. dirty 보존 diagnostic이며 출시 합격 아님. 별도 유휴 대조 idle-product-99267.json은399.5~403.3MiB였다. sandbox 정합화가 메모리 문제 해결이라는 주장은 하지 않는다.
+- fixture 크기/경로2 PASS, builder syntax/diff PASS. 다음은 sandbox fixture의 UTF-8 길이 계산이 만드는 임시 배열과 반복 문서 교체 비용을 구분하고 실제 제품 최적화 대상을 확인하는 일이다. 최종 메모리/실제 Claude·G6/출시 미완료. 종료된 임시 userdata2개만 정리/증거 보존하며 사용자 archive/main/push 경계 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (유휴 메모리 비용 대조·시험 환경 차이 확인)
 
 - 88d224e에서 별도 새 Electron 프로세스의 blank/preload/product 대조 도구를 추가하고 각1초 안정 후5회 RSS를 측정했다. 빈 창 최대340.5MiB, 시험 preload368.6MiB, 제품 화면431.1MiB였다. product의 GPU약93.8/renderer128.2MiB, blank GPU58.5/renderer91.3MiB로 증가가 양쪽에 분산된다. 단회 진단 대조이며 차이를 정확 인과 기여량·누수·출시 합격으로 단정하지 않는다.

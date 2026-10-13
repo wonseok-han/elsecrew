@@ -10,6 +10,7 @@ const { createHash } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const { cpus, totalmem, release, tmpdir } = require("node:os");
 const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-perf-"));
+const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs');
 app.setPath("userData", userData);
 const root = resolve(__dirname, "..");
 const renderer = resolve(root, ".vite/renderer/main_window");
@@ -107,7 +108,9 @@ app.whenReady().then(async () => {
     if (url.hostname !== "m5" || !asset.startsWith(renderer + sep)) return new Response("not found", { status: 404 });
     return net.fetch(pathToFileURL(asset).href);
   });
-  window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload: resolve(__dirname, "m5-renderer-performance-preload.cjs"), contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false } });
+  const preload = buildPerformancePreload(resolve(userData, 'performance-preload.cjs'));
+  report.rendererSandbox = true;
+  window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   if (domCounters || heapSampling) {
     if (!diagnostic || !measureMemory) throw new Error("Profiler observations require diagnostic memory mode");
     window.webContents.debugger.attach("1.3");
@@ -117,6 +120,7 @@ app.whenReady().then(async () => {
   if (measureMemory) {
     report.memory = { scope: "Electron process tree only; synthetic bridge, no sidecar or agent", intervalMs: 250, closeWaitMs: 60000, samples: memorySamples, checkpoints: [], attributionNote: "Checkpoint V8 heap is approximate; Chromium working set and V8 heap are not additive to RSS. No forced GC." };
     await window.loadURL("m5perf://m5/index.html");
+    if (!await window.webContents.executeJavaScript('window.m5PerformanceEnvironment?.sandboxed === true')) throw new Error('performance preload is not sandboxed');
     if (heapSampling) {
       // The initial about:blank target may not have a live renderer isolate.
       // Start only after navigation has created the synthetic document.

@@ -6,6 +6,7 @@ const { mkdtempSync, mkdirSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { processTreeMemory } = require('../scripts/m5-process-memory.cjs');
+const { buildPerformancePreload } = require('./m5-performance-preload-build.cjs');
 const mode = process.argv[2];
 if (!['blank', 'preload', 'product'].includes(mode)) throw new Error('expected blank, preload, or product');
 const root = resolve(__dirname, '..');
@@ -25,10 +26,11 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(asset).href);
   });
   window = new BrowserWindow({ width: 1440, height: 1000, show: true, webPreferences: {
-    ...(mode !== 'blank' ? { preload: resolve(__dirname, 'm5-renderer-performance-preload.cjs') } : {}),
-    contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false,
+    ...(mode !== 'blank' ? { preload: buildPerformancePreload(resolve(userData, 'performance-preload.cjs')) } : {}),
+    contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false,
   } });
   await window.loadURL('m5idle://m5/index.html');
+  if (mode !== 'blank' && !await window.webContents.executeJavaScript('window.m5PerformanceEnvironment?.sandboxed === true')) throw new Error('preload is not sandboxed');
   await new Promise(r => setTimeout(r, 1000));
   const samples = [];
   for (let i = 0; i < 5; i++) {
@@ -39,7 +41,7 @@ app.whenReady().then(async () => {
     samples.push(processTreeMemory(clean, process.pid));
     await new Promise(r => setTimeout(r, 250));
   }
-  const report = { diagnostic: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+  const report = { diagnostic: true, rendererSandbox: true, mode, userData, head: execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     scope: 'fresh Electron app idle only; no sidecar/provider; five samples after one second; not release evidence',
     samples, metrics: app.getAppMetrics(), dom: await window.webContents.executeJavaScript('({nodes:document.querySelectorAll("*").length,ready:Boolean(document.querySelector(".m5-workbench"))})') };
   if (mode === 'product' && !report.dom.ready) throw new Error('product did not mount');

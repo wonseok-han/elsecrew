@@ -1,14 +1,14 @@
 const { contextBridge } = require("electron");
+contextBridge.exposeInMainWorld('m5PerformanceEnvironment', { sandboxed: process.sandboxed === true });
 require("./m5-renderer-smoke-preload.cjs");
 // Performance samples measure the normal ready path, not the recovery fixture.
 window.m5SmokeBlockers = [];
 const { getFileText, patch, tree } = require("./m5-renderer-performance-fixture.cjs");
-const { createHash } = require("node:crypto");
 const bridge = window.m5;
 const streamListeners = new Set();
 let streamIndex = 0;
-let version;
-function fileVersion() { return version ??= "sha256:" + createHash("sha256").update(getFileText()).digest("hex"); }
+// Computed from the exact fixture by the pre-measurement bundle builder.
+function fileVersion() { return __M5_PERF_FILE_VERSION__; }
 function send(text) {
   const streamId = `performance_${++streamIndex}`;
   // UTF-8 safe chunks, including the Korean content in the large-file fixture.
