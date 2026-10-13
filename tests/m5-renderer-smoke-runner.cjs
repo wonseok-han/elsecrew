@@ -67,9 +67,15 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex connection\"]')?.textContent.includes('Codex is signed in')", "selected provider diagnosed and checked")};
     if (document.querySelector('[aria-label="Claude Code connection"]') || window.m5SmokeLoginRequests.some(r => r.provider === 'claude')) throw new Error('unselected Claude was checked');
     if (JSON.parse(localStorage.getItem('hello-agent.m5.providers.v1')).providers.join() !== 'codex') throw new Error('single provider selection not saved');
+    await ${waitFor("document.querySelector('.m5-setup-navigation [aria-current=step]')?.textContent.includes('Check installation')", "selection advances to installation")};
+    await ${waitFor("!document.querySelector('.m5-setup-navigation button').disabled", "setup navigation available")};
+    document.querySelector('.m5-setup-navigation button').click();
+    await ${waitFor("!document.querySelector('.m5-provider-selection').parentElement.hidden", "return to agent selection")};
     if (!selection.open) selection.querySelector('summary').click();
     [...selection.querySelectorAll('button')].find(b => b.textContent === 'Connect Claude Code too').click();
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code connection\"]')", "second agent added")};
+    document.querySelectorAll('.m5-setup-navigation button')[2].click();
+    await ${waitFor("!document.querySelector('[aria-label=\"Claude Code connection\"]').parentElement.hidden", "login step visible")};
     if (!document.querySelector('[aria-label="Codex connection"]') || !document.querySelector('[aria-label="Claude Code connection"]')) throw new Error('provider connection labels are not translated');
     if (localStorage.getItem('hello-agent.lang') !== 'en') throw new Error('language choice was not saved');
     chooseLanguage('ko');
@@ -132,6 +138,8 @@ app.whenReady().then(async () => {
     if (!document.getElementById('claude-connection-details').hidden) throw new Error('Codex error expanded unrelated Claude');
     window.m5SmokeLoginStatusFailure = false;
     await ${waitFor("document.getElementById('codex-connection-details').hidden", "status restoration compacts connection")};
+    document.querySelectorAll('.m5-setup-navigation button')[1].click();
+    await ${waitFor("!document.querySelector('.m5-provider-install').parentElement.hidden", "installation step visible")};
     await (${probeInstallConsent.toString()})();
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));

@@ -57,6 +57,12 @@ button, input, textarea, select {
 .m5-workbench > * { flex-shrink: 0; }
 
 .m5-guided-start { width: 100%; box-sizing: border-box; margin: 0 0 16px; padding: 20px; border: 1px solid #303b49; border-radius: 12px; background: #171d26; }
+.m5-setup-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 20px 16px; }
+.m5-setup-navigation button { display: flex; align-items: center; gap: 8px; background: #202a37; color: #c6d0dc; border: 1px solid #3b495b; }
+.m5-setup-navigation button[aria-current="step"] { background: #39251f; color: #ffb39f; border-color: #e87d61; }
+.m5-setup-navigation button > span { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid currentColor; border-radius: 50%; font-size: 12px; }
+.m5-setup-next { margin: 16px 20px; }
+.m5-setup-next p, p.m5-setup-next { color: #aab4c1; line-height: 1.6; }
 .m5-start-heading h2 { margin: 0 0 6px; font-size: 20px; letter-spacing: -.03em; }
 .m5-start-heading > p:last-child, .m5-start-steps p { color: #aab4c1; line-height: 1.7; }
 .m5-start-steps { list-style: none; padding: 0; margin: 20px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
