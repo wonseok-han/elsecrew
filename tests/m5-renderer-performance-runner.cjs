@@ -153,6 +153,10 @@ app.whenReady().then(async () => {
       await paint();
       result.treeRootMs = performance.now() - start;
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
+      // The default dock now groups Files and Changes. A hidden list reaching
+      // the right row count is not evidence that the user has seen it paint.
+      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '변경' && b.getClientRects().length)?.click();
+      await wait(() => document.querySelector('.m5-change-row')?.getClientRects().length > 0);
       await wait(() => document.querySelectorAll('.m5-change-row').length === 100); await paint();
       result.diffSummaryMs = performance.now() - start;
       // Changes are paged separately from the virtualized tree. Keep all 500
@@ -172,6 +176,8 @@ app.whenReady().then(async () => {
         await wait(() => document.querySelector('.m5-change-row')?.title === 'file-' + (page * 100) + '.txt');
       }
       // Verify the bounded DOM still exposes the end of the same 500-entry page.
+      [...document.querySelectorAll('.m5-dock-group-tabs button')].find(b => b.textContent === '파일' && b.getClientRects().length)?.click();
+      await wait(() => document.querySelector('.m5-file-row')?.getClientRects().length > 0);
       const treeList = document.querySelector('.m5-file-list');
       treeList.scrollTop = treeList.scrollHeight;
       await wait(() => [...document.querySelectorAll('.m5-file-row')].some(e => e.textContent.includes('folder-499'))); await paint();

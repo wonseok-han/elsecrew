@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (비프로파일링 메모리 기준 초과 재현)
+
+- 직전541d210은 묶음 UI 검증 진척이다. 같은 HEAD에서 DevTools/DOM counters/heap sampling 없이 준비1회+측정10회/닫은 뒤60초 대기를 실행했다. 사용자 archive dirty를 보존해 diagnostic=true이며 출시 gate 증거는 아니다. renderer-2026-10-13T08-34-53.660Z-83256.json의 RSS idle453197824B(약432.2MiB)/peak852557824B(약813.1MiB)는400/800MiB 기준 FAIL, retained delta0은 기준 이내다. 이전 프로파일링 진단의402.7MiB를 제품 합격으로 대체할 수 없다.
+- 최대 입력24.4ms/편집83ms/트리34.5ms/첫diff16.8ms, DOM362였다. 메모리 증가 대부분 renderer에 있으나60초 뒤 유휴 아래로 돌아와 누수 원인을 확정하지 않는다. fixture/Chromium 기본 비용과 제품 비용의 대조가 다음 조사다. 실제 계정·sidecar/사용자 프로젝트 미사용.
+- 검사 소스를 대조해 새 기본 dock의 숨겨진 변경 목록도 diffSummary paint로 세던 누락을 확인했다. 변경 탭을 실제 열고 가시성을 확인한 뒤 측정하며 트리 작업 전 파일 탭으로 복귀하도록 보완했다. 이번 기록의51.1ms diffSummary는 숨김 상태 결과이므로 유효한 가시성 증거로 쓰지 않는다. 보완 스크립트 syntax/diff PASS, 재측정은 후속이며 임계값/제품 메모리 정책은 바꾸지 않았다. 종료된 시험의 임시 userdata만 삭제/증거 보존, 사용자 archive/main/push 경계 유지. 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (시작·설정·작업대 UI 묶음 검증)
 
 - c6e935b 기준 renderer build PASS(기존 chunk 경고), 실제 Chromium smoke2 PASS12.5초다. 에이전트 준비 단계 탐색/로그인 복구·설치 동의/응답 유실·프로젝트 레일/Monaco 유지·채팅 dock/설정 실패 및 초안 복귀가 포함된다. 220128c·f850cbd의 미실행 회귀를 이 범위에서 해소했으며 전체 제품/G6/실제 공급자 합격은 아니다.
