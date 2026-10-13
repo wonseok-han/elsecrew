@@ -40,6 +40,8 @@ export function assessPerformance(input, expectedHead) {
   const missing = (field) => report.reasons.push({ code: "missingOrInvalidMeasurement", field });
   if (!input || typeof input !== "object" || Array.isArray(input)) { missing("report"); return report; }
   if (input.schemaVersion !== 1) missing("schemaVersion");
+  if (Object.hasOwn(input, "diagnostic") && input.diagnostic !== false) missing("nonDiagnosticEvidence");
+  if (Object.hasOwn(input, "gateEligible") && input.gateEligible !== true) missing("gateEligibleEvidence");
   if (!/^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(expectedHead ?? "") || input.head !== expectedHead || input.dirty !== false) missing("cleanMatchingHead");
   for (const field of ["machine", "cpu", "os", "electron", "chromium", "node", "rust", "measuredAt"]) {
     if (!text(input.environment?.[field])) missing(`environment.${field}`);

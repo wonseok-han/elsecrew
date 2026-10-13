@@ -44,6 +44,16 @@ test("p95 uses nearest rank, so one slow trial cannot be hidden by nine fast tri
   assert.equal(report.checks.find((check: any) => check.metric === "appInteractiveMs")?.value, 3001);
 });
 
+test("diagnostic and ineligible observations cannot be promoted by otherwise complete numbers", () => {
+  for (const flags of [{ diagnostic: true }, { gateEligible: false }, { diagnostic: "false" }, { gateEligible: null }]) {
+    const data = { ...measurements(), ...flags };
+    assert.equal(assessPerformance(data, head).status, "NOT_READY");
+    data.maxima.peakRssBytes += 1;
+    assert.equal(assessPerformance(data, head).status, "FAIL", "known failure must remain visible");
+  }
+  assert.equal(assessPerformance({ ...measurements(), diagnostic: false, gateEligible: true }, head).status, "PASS");
+});
+
 test("each limit and every safety counter fails independently", () => {
   for (const group of ["timings", "maxima", "counters"]) {
     for (const key of Object.keys(measurements()[group])) {

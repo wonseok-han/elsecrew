@@ -58,6 +58,8 @@ clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 prod
 
 입력 schemaVersion은 1이며 필수 필드는 다음과 같다.
 
+선택 필드 `diagnostic`을 제공하면 false, `gateEligible`을 제공하면 true여야 정식 판정 후보가 된다. 진단/부적격/잘못된 타입 표시가 있으면 수치가 모두 있어도 NOT_READY이며, 확인된 기준 초과는 계속 FAIL로 남긴다. 이 표시는 자료의 진위를 인증하거나 합성 측정을 실제 측정으로 바꾸지 않는다.
+
 | 필드 | 내용 |
 | --- | --- |
 | `head`, `dirty`, `warmupRuns` | 현재 clean Git SHA, false, 1 |

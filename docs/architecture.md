@@ -1,5 +1,11 @@
 # Hello, Agent 기술 설계
 
+> **현재 검증 경계(2026-10-13)**: macOS 일반 실행 경로에서 Codex `gpt-6.1-sol/medium`의 작은 planning 작업은 실제 응답·cleanExit·임시 원본 불변·앱 정상 종료를 확인했다(c5dde79, 974Ab5). Claude는 같은 시험의 요청 ID에 결속된 로그인 확인이 idle여서 실행하지 못했다. 아래 과거의 내부 후보/미연결 설명을 최신 Codex planning 경로의 상태로 인용하지 않는다. 도구 쓰기·승인·명시 중단·복구 전체와 두 공급자의 완성은 별도 미완료다.
+>
+> **현재 작업대(3ade00b)**: 도킹 패널 메뉴·집중/복귀, 파일명 말줄임·키보드 탭 이동, 마지막 diff 선택 보존·목록 갱신 시 이전 본문 무효화, 대화 기록과 후속 입력 영역 분리를 구현했다. 합성 Chromium 회귀로 미저장 탭 전환 및 낮은 대화 패널 배치를 확인했다. 전체 시안 충실도 합격은 아직 아니다.
+>
+> **현재 성능 증거**: 2026-10-13 renderer 진단(21150)은 idle452657152/peak898629632 bytes,60초 잔류 증가0, 최대 입력71.8ms로 입력/idle/peak 기준 FAIL이다. 진단은 release gate 증거가 아니며 `m5:test:performance`도 아직 등록되지 않았다. 아래 날짜가 더 오래된 수치보다 이 관측을 우선한다. Windows는 M5.0 명세상 패키지 UI·sidecar·fixture 검증과 실제 에이전트 실행 차단 유지가 필요하며 native 실행 활성화를 자동으로 완료 범위에 추가하지 않는다.
+
 > Claude 내부 소켓 호환(2026-10-08): 실행 전 profile 검사는 여전히 모든 소켓을 거절한다. 서명된 부모를 소유한 live scope에서만 `profile/tmp/srt-mux-<추적된 Child PID>-<base36>.sock` 직계 항목을 uid·single-link·group/other write 금지와 함께 검사한다. 소켓이 존재하면 scan 전후 정확한 PID/start_us 생존을 요구한다. 경로는 retained capability/no-follow로 확인하고 작업 복사본 검사는 변경하지 않는다. 소켓이 사라진 정상 종료 뒤에는 버퍼 출력 수신을 허용한다. 이는 커널 소켓 peer 소유권 증명이나 같은 UID의 적대적 교체 방어가 아니며 기존 signed-parent 신뢰 경계 안의 호환 처리다. 실제 Claude 모델 실행 성공은 아직 미검증이다.
 
 > 프로필 호환 검사 변경(2026-10-07, 독립 검토 완료·실연결은 후속): Codex/Claude 앱 전용 프로필의 top-level 생성물은 owner·mode·real-directory 또는 single-link regular-file로 검사하고 알려진 고정 설정/credential·기존 경로 타입·지시 파일 거절을 유지한다. Codex named-tool 경로는 별도 bounded no-follow scanner로 `tmp/arg0/codex-arg0*/`의 세 도구 alias가 현재 선택·재검증된 실행 파일을 정확히 가리킬 때만 링크를 허용한다. 일반 workspace/Claude/legacy outer scanner는 변경하지 않는다. 실계정 연결 복구는 아직 미검증이다.

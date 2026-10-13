@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (성능 판정 회귀·수집 범위 분리)
+
+- 직전 턴은 diagnostic/gateEligible 판정 구현으로 진척했다. 기존 문서/9월 archive 보존. node --test --experimental-strip-types tests/m5-performance-metrics.test.mts는9/9 PASS. 기준 초과 FAIL 유지·기존 schema1 호환·진단 자격 차단을 확인했다.
+- 기존4채팅12000메시지 시험은 ChatUiController에 동기적으로 emit하고 전환별 내용/중복을 검사한다.60초 pacing/Chromium paint/sidecar IPC를 관측하지 않으므로 eventPaintMs나 실제 스트림 collector로 재사용할 수 없다. mergeMessages에는 이미 단일 순차 append fast path가 있어 원인 증거 없이 동일 최적화를 반복하지 않았다.
+- 성능 판정/회귀/절차와 직전 현행 문서·출시 범위 정리를 로컬 커밋한다. diff 검사 PASS,9월 archive 제외. 다음: 실시간 Chromium 이벤트 수집 경로 구현과 메모리 실패 해소·패키지 UI·Claude 로그인·Windows/출시 증거. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (G6 입력 증거 자격 보존)
+
+- 직전 턴은 명세/현재 상태 대조로 진척했다. 기존 문서/9월 archive 변경 보존. G6 절차·평가기·renderer preload를 확인해 package startup/실제4stream/전체 자손/경합 collector가 아직 연결되지 않았고 supplied measurement 판정기만 존재함을 재확인했다. 이 단계에서 성능 script를 허위 등록하지 않았다.
+- 평가기가 diagnostic/gateEligible 표시를 무시하는 누락을 고쳤다. 해당 선택 필드가 있으면 false/true만 정식 후보로 받고 진단·부적격·잘못된 타입은 NOT_READY, 알려진 초과는 FAIL을 유지한다. 기존 schema1 필드 생략 호환 유지·자료 인증 주장은 없음. 관련 회귀/절차 추가.
+- diff 검사만 수행, 평가기 회귀는 후속 묶음 대상. 실제 계정 호출0회/main/push 없음. 다음: collector 구현과 메모리 실패 원인 해소, 패키지 UI·Claude 로그인·Windows/출시 증거. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (잔여 범위·출시 증거 대조)
+
+- 직전3ade00b는 대화 입력창 구현/회귀로 진척했다. 현재 코드·package scripts·M5.0 명세§13을 대조했다. Windows는 현 단계 패키지 UI/sidecar/fixture와 실제 실행 차단 유지가 요구되며 native 실행 활성화를 새 완료 조건으로 추가하지 않는다. 두 공급자 실제 작업/안전 흐름·G6·시안·배포 검증은 여전히 남는다.
+- architecture 상단에 최신 Codex planning 성공/Claude 로그인 차단·작업대 구현·성능 FAIL을 명시해 오래된 미연결/수치 기록의 오독을 방지했다. 기존 Tauri release checklist와 분리한 M5 추가 게이트를 정리했다. m5:test:performance 부재를 재확인했고 진단을 release gate로 바꾸지 않았다.
+- 문서 diff 검사 수행, 제품 변경·실제 계정 호출0회. 기존9월 archive 보존/main/push 없음. 다음 우선순위: G6 collector/메모리 실패 해소와 패키지 기반 UI 마감, 별도 사용자 로그인/실행 승인 및 Windows 환경 증거. 전체 완료 감사는 아직 통과하지 못했다.
+
 ### 2026-10-13 · by GPT-6 Astra (분리 입력창 낮은 패널 회귀)
 
 - 직전 턴은 입력 영역 분리 구현으로 진척했다. 기존9월 archive 보존. tsc/renderer build PASS(session72978). 대화 높이280/500px에서 기록 공간 양수·입력 최대 절반·겹침/탈출 없음·기록 스크롤에도 입력창 위치 불변을 검사하는 Chromium 회귀를 추가했다.
