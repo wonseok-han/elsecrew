@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (누적 검사 실패 수정·설치 기록 잠금 수명)
+
+- 앞선 세션66516은 종료101: protocol58 PASS, sidecar615 PASS/1 FAIL/36 ignored(791.33초). 실패는 execute.rs의 finalize가 아니라 완료 후 drop(journal) 다음 inspect였다. 원래 검사 단독은 PASS라 전체 실행의 원인을 단정하지 않았다. 동일 open-file-description의 복제 핸들을 보유하는 새 회귀로 Drop 후 flock 잔류/inspect 거부를 결정적으로 재현(수정 전 FAIL)했다. InstallJournal::Drop에서 LOCK_UN을 명시해 소유자 수명에 잠금을 결속했다. journal 이름/프로세스 fence/명시 recovery·archive 조건은 그대로다. 읽기 전용 독립 검토자1명 APPROVE, 설치 관련26 PASS4.86초다.
+- 라이브러리 실패로 이전에 실행되지 않은 stdio 통합은8 PASS/5 FAIL이었고 모두 provider.install suffix가 빠진 기대 목록3곳 때문이었다. 실제 ready 생성과 대조 후 목록을 수정, 기존 파일 포맷도 정리했다. 해당13건 PASS3.46초. 전체615건을 변경 후 다시 실행했다고 주장하지 않으며 이번 파동의 실패들은 영향 검사로 확인했다.
+- 합성 Chromium smoke의 임시 userdata 누적을 막기 위해 부모가 만든 새 임시 root 아래에만 생성하고, spawnSync의 정상 종료 회수(status0/1, signal/error 없음) 뒤 그 root만 정리한다. 비정상 종료는 보존, standalone 성능 진단은 기존처럼 증거 보존, 두 paint 환경 플래그는 일반 검사에서 비활성이다. Chromium2 PASS12.36초와 종료 후 새 root 부재를 확인했다. 기존 임시 폴더·사용자 인증은 삭제하지 않았다.
+- rustfmt(변경 Rust2파일)/script syntax/diff PASS. 새 설치/모델 호출 없음. 다음은 메모리·네이티브 키보드 focus와 Claude 로그인 확인 후 실연결·최종 G6/출시다. 전체 미완료, 사용자9월 archive21줄 보존, main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (누적 로직 검사·공용 설치 fixture 정합화)
 
 - 기준8d998be/m5 통합 checkout을 확인했다. 초기 편집기는 이미 파일 선택 후 Monaco를 lazy load하므로 유휴 메모리 초과를 eager editor 로딩 탓으로 단정하거나 기준을 변경하지 않았다. Karpathy 최소 변경 원칙으로 누적 검사에서 확인한 불일치만 수정했다.
@@ -73,6 +80,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **설치 journal 잠금 수명(2026-10-13)**: flock은 descriptor 하나가 아니라 open-file-description에 남는다. concurrent fork/dup의 핸들이 남으면 단순 drop 뒤 inspect가 잠김으로 거부될 수 있어 InstallJournal::Drop에서 명시 LOCK_UN한다. duplicateFD 회귀의 수정 전 FAIL/후 PASS와 독립 APPROVE를 확보했다. 이는 소유자의 잠금 해제일 뿐 journal/fence 삭제나 설치 완료·프로세스 종료 추정이 아니다. 기존 pending/이력과 명시 복구 조건을 유지한다.
 
 - **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. TLS literal 보완의 검토 후 사용자 명시 승인으로 macOS enabled=true를 연결했으며944bba1 활성화 diff 독립 재검토도 APPROVE다. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
 

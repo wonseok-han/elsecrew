@@ -43,6 +43,16 @@ pub(crate) struct InstallJournal<'a> {
     contents: Vec<u8>,
 }
 
+impl Drop for InstallJournal<'_> {
+    fn drop(&mut self) {
+        // flock belongs to the open file description, not just this descriptor.
+        // A concurrent fork can retain a duplicate until exec even with CLOEXEC.
+        // End this owner's lock explicitly; the journal and process fences stay
+        // on disk and still require the normal explicit recovery checks.
+        let _ = lock(&self.file, libc::LOCK_UN);
+    }
+}
+
 impl<'a> InstallJournal<'a> {
     pub(crate) fn begin(
         scope: &'a InstallScope,
@@ -457,6 +467,30 @@ fn apply(state: &mut InstallLifecycle, event: &str) -> Result<(), SidecarError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropped_journal_releases_lock_even_while_duplicate_descriptor_is_held() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = InstallScope::from_storage(&storage).unwrap();
+        let operation = uuid::Uuid::new_v4();
+        let mut journal = InstallJournal::begin(&scope, operation, "codex").unwrap();
+        for event in ["consented", "downloadFailed", "cleanupConfirmed"] {
+            journal.record(event).unwrap();
+        }
+        // dup models a descriptor inherited between fork and exec, without
+        // launching a process or relying on concurrent-test timing.
+        let duplicate = journal.file.try_clone().unwrap();
+        assert!(inspect(&scope).is_err()); // The live owner still excludes readers.
+        drop(journal);
+        assert_eq!(
+            inspect(&scope).unwrap(),
+            (operation, "codex".into(), InstallPhase::Failed)
+        );
+        assert!(InstallJournal::begin(&scope, uuid::Uuid::new_v4(), "codex").is_err());
+        drop(duplicate);
+    }
 
     #[test]
     fn interrupted_recovery_requires_closed_process_fences_and_records_failure() {

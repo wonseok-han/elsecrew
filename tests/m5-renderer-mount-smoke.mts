@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
@@ -35,15 +36,24 @@ test("renderer smoke preload exposes the complete V7 bridge with ready admission
 });
 
 test("packaged renderer build mounts lazy Monaco and creates a local worker in Chromium", { timeout: 20_000 }, () => {
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-test-"));
   const result = spawnSync(electronPath, ["tests/m5-renderer-smoke-runner.cjs"], {
     cwd: resolve("."),
     encoding: "utf8",
     env: {
       ...process.env,
+      M5_SMOKE_TEMP_ROOT: temporaryRoot,
+      M5_MEASURE_PARALLEL_PAINT: "0",
+      M5_MEASURE_MESSAGE_PAINT: "0",
       M5_RENDERER_DIR: resolve(".vite/renderer/main_window"),
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
     },
   });
+  // spawnSync has reaped this child. On abnormal termination leave its data
+  // for diagnosis instead; never remove a path supplied by child output/env.
+  if (!result.error && result.signal === null && [0, 1].includes(result.status ?? -1)) {
+    rmSync(temporaryRoot, { recursive: true });
+  }
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /"workerCreated":true/);
 });

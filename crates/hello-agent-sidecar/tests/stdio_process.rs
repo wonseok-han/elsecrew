@@ -8,22 +8,22 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+use hello_agent_protocol::agent_adapter_v1::G5D_NATIVE_CAPABILITIES_V1 as G5D_PRODUCT_CAPABILITIES_V1;
 use hello_agent_protocol::agent_adapter_v1::{
     validate_agent_adapter_payload_v1, G5D_AGENT_FIXTURE_CAPABILITIES_V1,
 };
+#[cfg(target_os = "macos")]
+use hello_agent_protocol::lifecycle_g5d_v1::parse_current_native_system_status_v1 as parse_g5d_product_system_status_v1;
+#[cfg(not(target_os = "macos"))]
+use hello_agent_protocol::lifecycle_g5d_v1::parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1;
 use hello_agent_protocol::lifecycle_g5d_v1::{
     parse_current_agent_fixture_system_status_v1 as parse_g5d_agent_fixture_system_status_v1,
     validate_g5d_blocked_request_error_v1, StorageAdmissionStateV1,
 };
 use hello_agent_protocol::run_recovery_v1::validate_g5_payload_v1;
-#[cfg(target_os = "macos")]
-use hello_agent_protocol::agent_adapter_v1::G5D_NATIVE_CAPABILITIES_V1 as G5D_PRODUCT_CAPABILITIES_V1;
 #[cfg(not(target_os = "macos"))]
 use hello_agent_protocol::run_recovery_v1::G5D_PRODUCT_CAPABILITIES_V1;
-#[cfg(target_os = "macos")]
-use hello_agent_protocol::lifecycle_g5d_v1::parse_current_native_system_status_v1 as parse_g5d_product_system_status_v1;
-#[cfg(not(target_os = "macos"))]
-use hello_agent_protocol::lifecycle_g5d_v1::parse_current_product_system_status_v1 as parse_g5d_product_system_status_v1;
 use hello_agent_protocol::{decode_jsonl, encode_jsonl, ready_payload, EnvelopeV1, RequestV1};
 use rusqlite::Connection;
 
@@ -122,7 +122,7 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -130,17 +130,47 @@ fn binary_ready_status_quit_flow_marks_clean_and_exits_zero() {
 
     #[cfg(target_os = "macos")]
     for (request_id, method, params, success) in [
-        ("native_codex", "agent.getCapabilities", serde_json::json!({"runtime":"codex","refresh":true}), true),
-        ("native_claude", "agent.getCapabilities", serde_json::json!({"runtime":"claude-code","refresh":true}), true),
-        ("native_fixture_denied", "run.startFixture", serde_json::json!({}), false),
-        ("native_start_denied", "run.startAgent", serde_json::json!({}), false),
+        (
+            "native_codex",
+            "agent.getCapabilities",
+            serde_json::json!({"runtime":"codex","refresh":true}),
+            true,
+        ),
+        (
+            "native_claude",
+            "agent.getCapabilities",
+            serde_json::json!({"runtime":"claude-code","refresh":true}),
+            true,
+        ),
+        (
+            "native_fixture_denied",
+            "run.startFixture",
+            serde_json::json!({}),
+            false,
+        ),
+        (
+            "native_start_denied",
+            "run.startAgent",
+            serde_json::json!({}),
+            false,
+        ),
     ] {
-        write_request(&mut stdin, &ready.sidecar_instance_id, request_id, method, params);
+        write_request(
+            &mut stdin,
+            &ready.sidecar_instance_id,
+            request_id,
+            method,
+            params,
+        );
         let mut line = String::new();
         stdout.read_line(&mut line).unwrap();
-        let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else { panic!("native response") };
+        let EnvelopeV1::Response(response) = decode_jsonl(line.as_bytes()).unwrap() else {
+            panic!("native response")
+        };
         assert_eq!(response.ok, success, "{method}");
-        if success { assert_eq!(response.result.unwrap()["canStart"], false); }
+        if success {
+            assert_eq!(response.result.unwrap()["canStart"], false);
+        }
     }
 
     for (request_id, method) in [
@@ -425,7 +455,7 @@ fn g5a_public_event_flow(continuous_requests: bool, cancellation: Option<&str>) 
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );
@@ -1236,7 +1266,7 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
             .iter()
             .chain(std::iter::once(&"chat.appendMessage"))
             .chain(std::iter::once(&"provider.login"))
-            .chain(["run.approval", "project.catalog"].iter())
+            .chain(["run.approval", "project.catalog", "provider.install"].iter())
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>()
     );

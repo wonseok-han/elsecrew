@@ -7,7 +7,9 @@ const { probeInstallConsent } = require("./m5-install-ui-probe.cjs");
 const { probeCleanupConsent } = require("./m5-cleanup-ui-probe.cjs");
 const { tmpdir } = require("node:os");
 
-const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-smoke-"));
+// The normal parent test owns this root and removes it after confirmed exit.
+// Standalone diagnostic runs retain their evidence in the default temp root.
+const userData = mkdtempSync(resolve(process.env.M5_SMOKE_TEMP_ROOT || tmpdir(), "hello-agent-renderer-smoke-"));
 app.setPath("userData", userData);
 
 const rendererDirectory = resolve(process.env.M5_RENDERER_DIR || "");
