@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패키지 반영·복원 동의와 바이트 확인)
+
+- 336ada2의 재시작 뒤 실제 UI로 확인 취소→원본 불변, 동의 전 반영 차단→검토한 바이트 반영, 별도 동의 전 복원 차단→원래 바이트 복원을 연결했다. Karpathy 최소 범위의 관측기 변경이며 제품 코드/안전 경계를 바꾸거나 bridge를 mock하지 않았다. 자체 생성 프로젝트만 사용했고 모델/계정 호출은 없다.
+- rrwOVL restart.json의 application5항목 모두true, 재시작 영속성·원본 보호·두 실행 정상 종료confirmed/exit0. /private/tmp/hello-agent-packaged-application.log와 OS 임시 hello-agent-packaged-ui-rrwOVL의 JSON/PNG를 보존한다. idle459964416B로 전체 FAIL 유지, syntax/diff PASS. CDP 입력·기존8b10ed6 패키지의 단일 성공이며 최신UI/물리키보드/다중프로젝트/실패주입/전체G6 합격은 아니다.
+- 종료/PID 부재 및 일반 디렉터리 확인 후 이번 generated project와 userdata(약3MiB)만 정리하며 증거는 유지한다. 다음은 다중 프로젝트 격리와 남은 메모리/최종 검증이다. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지 재시작 영속성 확인)
 
 - 0a873e9 위 관측기를 확장해 첫 실행의 정상 종료 후에만 같은 임시 profile로 재시작한다. 최초 kvDyiD의 표시 비교 timeout은 실제 snapshot 바이트가 정상임을 확인한 뒤 Monaco NBSP 표시 공백만 정규화했다. 재시험5DDcSr은 기존 채팅·저장 본문·diff·원본 불변과 새 sidecar instance, 두 실행 exit0/종료confirmed를 확인했다. /private/tmp/hello-agent-packaged-restart{,-retry}.log 및 OS 임시 hello-agent-packaged-ui-5DDcSr/restart.json/PNG에 실패/성공 증거 보존. idle459390976B로 전체 FAIL 유지, CDP 입력·기존8b10ed6 패키지의 관측이지 전체G6/최신UI 합격 아님.

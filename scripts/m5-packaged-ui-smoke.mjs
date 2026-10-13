@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
 import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1.ts';
 import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
+import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
 
 const { processTreeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -202,6 +203,8 @@ try {
     report.project.savedDiffVisible = true;
     assert.equal(fs.readFileSync(path.join(report.project.source, 'hello.txt'), 'utf8'), 'original\n');
     report.project.originalUnchanged = true;
+    if (resume) report.project.application = await probePackagedApplication(evaluate, until,
+      () => fs.readFileSync(path.join(report.project.source, 'hello.txt'), 'utf8'));
   }
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, resume ? 'restart.png' : 'startup.png'), Buffer.from(capture.data, 'base64'));
