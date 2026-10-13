@@ -5,12 +5,14 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { decodeJsonl, parseReadyPayload } from '../src/m5/contracts/protocol-v1.ts';
+import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
-export async function seedPackagedProject(binary, root, userData, env, largeProject = false) {
+export async function seedPackagedProject(binary, root, userData, env, largeProject = false, largeDiff = false) {
   const source = path.join(root, 'project');
   const otherSource = path.join(root, 'other-project');
   fs.mkdirSync(source);
   fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+  if (largeDiff) diffFixture.prepare(source);
   if (largeProject) {
     const tree = path.join(source, 'aaa-tree');
     fs.mkdirSync(tree);

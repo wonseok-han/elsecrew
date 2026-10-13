@@ -14,13 +14,16 @@ import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1
 import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
 import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
+import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
+import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
 const { processTreeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
 const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
-const projectFlow = largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
+const largeDiff = process.argv.length === 3 && process.argv[2] === '--large-diff';
+const projectFlow = largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
 assert.ok(process.argv.length === 2 || projectFlow, 'Only fixed project scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
@@ -50,7 +53,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 delete env.NODE_OPTIONS;
 if (projectFlow) {
   try {
-    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env, largeProject);
+    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env, largeProject, largeDiff);
     persist();
   } catch (error) {
     report.status = 'FAIL'; report.error = String(error); persist();
@@ -169,7 +172,19 @@ try {
     await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')]
       .find(button => button.textContent.includes('hello.txt') && !button.disabled)`), largeProject ? 65000 : 15000);
     report.project.snapshotObservedMs = performance.now() - projectOpenedAt;
-    if (largeProject) {
+    if (largeDiff) {
+      const worktrees = path.join(userData, 'com.wonseokhan.helloagent/m5/worktrees-v1');
+      const matches = fs.readdirSync(worktrees, {withFileTypes:true})
+        .filter(entry => entry.isDirectory() && fs.existsSync(path.join(worktrees, entry.name, 'native-diff-fixture')))
+        .map(entry => path.join(worktrees, entry.name));
+      assert.equal(matches.length, 1, 'Expected one generated diff snapshot');
+      const dimensions = diffFixture.change(matches[0]);
+      report.largeDiff = {...await evaluate(`(${probeLargeDiff.toString()})()`), ...dimensions};
+      assert.equal(execFileSync('/usr/bin/git', ['-C', report.project.source, 'status', '--porcelain'],
+        {encoding:'utf8', env:{...env, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_COUNT:'0'}}).trim(), '', 'Large diff changed original project');
+      report.largeDiff.originalUnchanged = true;
+      if (report.largeDiff.failedMetrics.length) report.error = `Large diff limits exceeded: ${report.largeDiff.failedMetrics.join(', ')}`;
+    } else if (largeProject) {
       report.largeProject = await evaluate(`(${probeLargeProject.toString()})()`);
       if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
     } else {

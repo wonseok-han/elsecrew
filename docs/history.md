@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 diff 측정 연결)
+
+- 3c6ec7d의 트리/파일에 이어 Karpathy 최소 범위로 기존 native fixture를 재사용한 --large-diff를 연결했다. 자체 snapshot에만500파일/20,000변경 줄/10MiB patch를 만들고 실제 패키지 변경 패널의 목록/첫 파일을 renderer 시계로 관측한다. 제품 bridge/안전 경계 변경 없음.
+- q1BxKi는 diffSummary481.30ms/diffFirstFile316.60ms, 실제 fixture dimensions 일치·originalUnchanged=true, 정상 exit0/종료confirmed다. /private/tmp/hello-agent-packaged-large-diff.log 및 OS 임시 hello-agent-packaged-ui-q1BxKi/result.json/PNG 보존. idle459177984B로 전체 FAIL은 유지한다. 단일 진단이며 반복p95·입력/stream·전체메모리/실계정/Windows·G6 완료 아님. syntax/diff PASS, 다음은 실제 패키지 반복 수집과 잔여 성능 항목이다.
+- 종료/PID 부재·일반 디렉터리 확인 후 이번 generated project/other-project/userdata 약15MiB를 제거하고 증거만 남겼다. 시험으로 재생성 가능, 사용자 데이터/9월 archive/main/push 경계 보존. 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 트리·파일 측정 연결)
 
 - 이전 글꼴/preload 비용 분리에서 주원인 가설을 좁혔다. 이번에는 Karpathy 최소 범위로 기존 fixture를 재사용한 --large-project를 연결했다. 자체10,000파일/1,000디렉터리 subtree와5MiB/100,000줄 파일을 실제 packaged sidecar→snapshot→renderer/Monaco로 연다. 제품 main/bridge를 대체하지 않으며 단일 진단임을 유지한다.
