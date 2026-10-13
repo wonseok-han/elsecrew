@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (시험 종료 재확인·대형 프로젝트 흐름 통과)
+
+- PID27469 강제 종료 승인 응답을 재확인했으나 해당 PID는 이미 없었다. 기존10월 아카이브에 승인 후 종료 기록이 있고, 현재 프로세스 조회에서도 시험 Electron/sidecar 잔류가 없어 추가 signal은 보내지 않았다. 사용자 앱·프로젝트·인증정보는 변경하지 않았다.
+- 084ceae의 동기화 batch 회귀2개(빈/1개/4개 정상 파일, /dev/null 실제 sync 오류 및 handle drain)를 추가했다. session97323 focused Rust 2/2 PASS와 debug sidecar build PASS. spawn 실패/worker panic은 이번 동적 회귀 대상이 아니다.
+- 진행 중이던 session24900의 결과를 회수했다. h5k4N8 임시 프로젝트의 10000파일/1000디렉터리 native UI 시험은 PASS/exit0·shutdown accepted. snapshot33442ms, treeRoot977ms, expand75ms, DOM362, 반영 확인13267ms. 편집/저장/diff·확인 취소·두 채팅 흐름을 완료했다. 원본 적용/실제 계정 호출은 하지 않았다. 증거는 OS 임시 폴더 hello-agent-project-ui-h5k4N8에 보존한다.
+- 이전53~60초 snapshot 실패/지연 대비 이번 단일 관측은 개선됐으나 diagnostic=true/gateEligible=false이며 정식 반복 성능 gate가 아니다. 다음: G6 성능 수집/반복 검증·RSS 초과·Claude 실제 작업·Windows/출시 증거. 전체 개발 완료 아님. 기존9월 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (snapshot 동기화 병목 실측·제한 병렬화 초안)
 
 - 직전5242eb2는 대형 실패 계측/원문 롤오버로 진척했다. 같은 native 시험70464/FkxwK2의 sidecar59380을 macOS sample로3초 관측했다. main2250표본 중 materialize_snapshot2131, materialize_regular_blob→sync_all1915(하위fcntl1914)로 파일별 내구성 동기화가 주된 대기 위치다. 원시 증거 /private/tmp/hello-agent-sidecar-59380.sample.txt. 이 관측 실행은 다시60초 snapshot timeout으로FAIL/exit1·shutdown accepted였다.
@@ -22,6 +29,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-13 대형 프로젝트 최신 단일 관측**: 084ceae batch sync 반영 debug sidecar의 h5k4N8 native UI는 1만 파일에서 편집/저장/diff·반영 확인 취소·두 채팅·정상 종료까지 PASS했다. snapshot33.4초/treeRoot977ms/expand75ms다. 아래 이전 실패를 최신 실행 결과로 반복하지 않되, 단일 diagnostic을 반복 성능/G6 합격으로 확대하지 않는다.
 
 - **2026-10-13 대형 프로젝트 현황**: Unix Git 파이프는 poll 준비 상태 대기로 변경(b08eddf), 파일/채팅 감시 한도 초과는 exact `watching:false,rescanRequired:true`를 양쪽 UI에 전달(c4fb3bf/60fccd8). 기존 실제10000파일 시험에서 snapshot53초·treeRoot1534ms(1000ms 초과), 편집/저장/diff 성공 뒤 반영 확인15초 대기 실패. 전체 성공 아님. 현재 성능 수집기·RSS 초과·Claude 실제 작업·Windows/출시 증거가 남으며 진단 PASS를 G6로 확대하지 않는다.
 

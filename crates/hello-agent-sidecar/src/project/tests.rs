@@ -2,6 +2,39 @@ use super::*;
 use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
+#[test]
+fn materialized_sync_batch_drains_full_and_trailing_files() {
+    let temporary = TempDir::new().unwrap();
+    let root = Dir::open_ambient_dir(temporary.path(), ambient_authority()).unwrap();
+    for count in [0, 1, 4] {
+        let mut files = Vec::new();
+        for index in 0..count {
+            let mut file = root.create(format!("{count}-{index}")).unwrap();
+            file.write_all(b"committed bytes").unwrap();
+            files.push(file);
+        }
+        sync_materialized_files(&mut files).unwrap();
+        assert!(files.is_empty());
+        for index in 0..count {
+            assert_eq!(root.read(format!("{count}-{index}")).unwrap(), b"committed bytes");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn materialized_sync_batch_propagates_sync_failure_and_drains_handles() {
+    let temporary = TempDir::new().unwrap();
+    let root = Dir::open_ambient_dir(temporary.path(), ambient_authority()).unwrap();
+    let mut files = vec![root.create("before").unwrap()];
+    // A device cannot provide regular-file durability. Exercise the real I/O
+    // failure alongside successful file workers without modifying user files.
+    files.push(CapFile::from_std(fs::File::open("/dev/null").unwrap()));
+    files.push(root.create("after").unwrap());
+    assert!(sync_materialized_files(&mut files).is_err());
+    assert!(files.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
