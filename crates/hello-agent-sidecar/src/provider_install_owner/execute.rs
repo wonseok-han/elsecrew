@@ -11,7 +11,8 @@ use crate::{
     provider_profile::{open_absolute_directory, same_directory, LoginProfile},
     SidecarError,
 };
-use cap_std::fs::{Dir, DirBuilder, DirBuilderExt, MetadataExt, PermissionsExt};
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
+use cap_std::fs::{Dir, DirBuilder, DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use hello_agent_core::install_lifecycle::InstallPhase;
 use std::{
     ffi::{OsStr, OsString},
@@ -24,8 +25,26 @@ use std::{
 const DEADLINE: Duration = Duration::from_secs(600);
 const OUTPUT_LIMIT: usize = 1024 * 1024;
 const POLICY: &str = r#"(version 1)
-(allow default)
-(deny file-write*)
+(deny default)
+(deny file-link)
+(allow file-read-metadata)
+(allow file-read*
+    (literal "/")
+    (subpath "/System") (subpath "/usr/bin") (subpath "/usr/sbin")
+    (subpath "/usr/lib") (subpath "/usr/share") (subpath "/bin") (subpath "/sbin")
+    (literal "/dev/null") (literal "/dev/urandom")
+    (literal "/private/etc/ssl/cert.pem") (literal "/private/etc/resolv.conf")
+    (literal "/private/etc/hosts") (literal "/private/etc/localtime")
+    (subpath (param "TEMP")))
+(allow process-exec
+    (subpath "/usr/bin") (subpath "/usr/sbin") (subpath "/bin") (subpath "/sbin"))
+(allow process-fork)
+(allow signal (target self))
+(allow sysctl-read)
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))
+; DNS and HTTPS only. No generic Mach, AppleEvent, local socket or listener grant.
+; HTTPS here is a port restriction, not a destination-domain authentication rule.
+(allow network-outbound (literal "/private/var/run/mDNSResponder") (remote tcp "*:443"))
 (allow file-write-data (literal "/dev/null"))
 (allow file-write* (subpath (param "TEMP")))
 "#;
@@ -79,6 +98,10 @@ impl Target {
                 return Err(failure());
             }
         }
+        let mut remaining = 20_000;
+        for (_, held) in &self.directories {
+            reject_shared_files(held, 0, &mut remaining)?;
+        }
         Ok(())
     }
 
@@ -120,7 +143,7 @@ impl Target {
         {
             let key = format!("INSTALL{index}");
             policy.push_str(&format!(
-                "(allow file-write* (subpath (param \"{key}\")))\n"
+                "(allow file-read* file-write* process-exec (subpath (param \"{key}\")))\n"
             ));
             parameters.extend([OsString::from("-D"), parameter(&key, path)]);
         }
@@ -148,6 +171,7 @@ impl Target {
             .env("PATH", path)
             .env("TMPDIR", &self.temporary)
             .env("CURL_HOME", &self.temporary)
+            .env("CURL_CA_BUNDLE", "/private/etc/ssl/cert.pem")
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .env("CODEX_NON_INTERACTIVE", "true");
@@ -159,6 +183,65 @@ fn parameter(name: &str, path: &Path) -> OsString {
     let mut value = OsString::from(format!("{name}="));
     value.push(path);
     value
+}
+
+/// Inspect metadata only. Official launcher symlinks remain supported; reads
+/// and writes through them are still bounded by the sandbox's resolved paths.
+/// Pre-existing hard links and special files are refused, never repaired.
+fn reject_shared_files(
+    root: &Dir,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<(), SidecarError> {
+    if depth > 64 {
+        return Err(failure());
+    }
+    for entry in root.entries().map_err(|_| failure())? {
+        *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
+        let name = entry.map_err(|_| failure())?.file_name();
+        let before = root.symlink_metadata(&name).map_err(|_| failure())?;
+        if before.uid() != unsafe { libc::geteuid() } {
+            return Err(failure());
+        }
+        if before.file_type().is_symlink() {
+            if before.nlink() != 1 {
+                return Err(failure());
+            }
+        } else if before.is_file() {
+            if before.nlink() != 1 || before.mode() & 0o022 != 0 {
+                return Err(failure());
+            }
+        } else if before.is_dir() {
+            let mut options = cap_std::fs::OpenOptions::new();
+            options
+                .read(true)
+                .follow(FollowSymlinks::No)
+                .maybe_dir(true)
+                .custom_flags(libc::O_NONBLOCK);
+            let handle = root.open_with(&name, &options).map_err(|_| failure())?;
+            let held = handle.metadata().map_err(|_| failure())?;
+            if !held.is_dir()
+                || held.dev() != before.dev()
+                || held.ino() != before.ino()
+                || held.mode() & 0o022 != 0
+            {
+                return Err(failure());
+            }
+            reject_shared_files(&Dir::from_std_file(handle.into_std()), depth + 1, remaining)?;
+        } else {
+            return Err(failure());
+        }
+        let after = root.symlink_metadata(&name).map_err(|_| failure())?;
+        if after.dev() != before.dev()
+            || after.ino() != before.ino()
+            || after.nlink() != before.nlink()
+            || after.mode() != before.mode()
+            || after.uid() != before.uid()
+        {
+            return Err(failure());
+        }
+    }
+    Ok(())
 }
 
 fn checked_directory(path: &Path) -> Result<Dir, SidecarError> {
@@ -502,7 +585,11 @@ mod tests {
         assert!(args.contains(&OsStr::new("/usr/bin/sandbox-exec")));
         let policy_index = args.iter().position(|a| *a == "-p").unwrap() + 1;
         let policy = args[policy_index].to_str().unwrap();
-        assert!(policy.contains("(deny file-write*)"));
+        assert!(policy.contains("(deny default)"));
+        assert!(!policy.contains("(allow default)"));
+        assert!(policy.contains("(deny file-link)"));
+        assert!(!policy.contains("(subpath (param \"HOME\"))"));
+        assert!(!policy.contains("(allow mach-lookup)"));
         assert!(!policy.contains(home_path.to_str().unwrap()));
         assert!(args.contains(&parameter("INSTALL0", &home_path.join(".local/bin")).as_os_str()));
         let environment: Vec<_> = command.get_envs().collect();
@@ -516,5 +603,106 @@ mod tests {
             .any(|(key, _)| matches!(key.to_str(), Some("BASH_ENV" | "ENV" | "CODEX_HOME"))));
         assert!(target.command("other", b"#!/bin/sh\n").is_err());
         assert!(target.command("claude", b"<html>error</html>").is_err());
+    }
+
+    #[test]
+    fn writable_installation_roots_reject_hardlinks_without_modifying_originals() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let target = target(&root);
+        let original = root.join(".zshrc");
+        std::fs::write(&original, b"preserve shell settings").unwrap();
+        let linked = root.join(".local/bin/linked-command");
+        std::fs::hard_link(&original, &linked).unwrap();
+        assert!(target.command("codex", b"#!/bin/sh\nexit 0\n").is_err());
+        assert_eq!(
+            std::fs::read(&original).unwrap(),
+            b"preserve shell settings"
+        );
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().len(),
+            std::fs::metadata(&linked).unwrap().len()
+        );
+        let mut empty_budget = 0;
+        assert!(reject_shared_files(&target.directories[0].1, 0, &mut empty_budget).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires external macOS sandbox; temporary fixtures and system tools only, no installer/network/account"]
+    fn installer_default_deny_policy_protects_outside_files_through_children_and_preferences() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let home = root.join("home");
+        std::fs::create_dir(&home).unwrap();
+        let target = target(&home);
+        let outside = home.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let original = outside.join("original");
+        std::fs::write(&original, b"original sentinel").unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = super::super::InstallScope::from_storage(&storage).unwrap();
+        let script = br##"#!/bin/sh
+set -eu
+printf allowed > "$HOME/.local/bin/probe"
+printf allowed > "$HOME/.codex/packages/standalone/probe"
+printf temporary > "$TMPDIR/probe"
+if (printf changed > "$OUTSIDE/original") 2>/dev/null; then exit 31; fi
+if /bin/sh -c 'printf changed > "$OUTSIDE/original"' 2>/dev/null; then exit 32; fi
+if /bin/cat "$OUTSIDE/original" >/dev/null 2>&1; then exit 33; fi
+if /bin/ln "$OUTSIDE/original" "$HOME/.local/bin/hard" 2>/dev/null; then exit 34; fi
+/bin/ln -s "$OUTSIDE/original" "$HOME/.local/bin/symbolic"
+if (printf changed > "$HOME/.local/bin/symbolic") 2>/dev/null; then exit 35; fi
+if /bin/mv "$OUTSIDE/original" "$HOME/.local/bin/moved" 2>/dev/null; then exit 36; fi
+/usr/bin/defaults write "$OUTSIDE/preferences" protected changed >/dev/null 2>&1 || true
+printf installer-boundary-ok
+"##;
+        let mut command = target.command("codex", script).unwrap();
+        command.env("OUTSIDE", &outside);
+        let mut owner = scope.reserve(uuid::Uuid::new_v4()).unwrap();
+        owner
+            .launch_with_barrier(|| command.spawn(), crate::provider_login_gate::release)
+            .unwrap();
+        let cancel = AtomicBool::new(false);
+        let started = Instant::now();
+        let mut output = Vec::new();
+        let outcome = (|| -> Result<bool, SidecarError> {
+            loop {
+                if started.elapsed() > Duration::from_secs(15) {
+                    return Err(failure());
+                }
+                match owner.poll_output(&cancel)? {
+                    OutputChunk::Bytes(bytes) => {
+                        output.extend(bytes);
+                        if output.len() > 16 * 1024 {
+                            return Err(failure());
+                        }
+                    }
+                    OutputChunk::Eof => {
+                        if let Some(status) = owner.exit_status()? {
+                            return Ok(status.success());
+                        }
+                    }
+                    OutputChunk::Pending => {}
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })();
+        owner.finish().unwrap();
+        assert!(
+            outcome.unwrap(),
+            "sandbox toy command failed: {}",
+            String::from_utf8_lossy(&output)
+        );
+        assert!(String::from_utf8_lossy(&output).contains("installer-boundary-ok"));
+        assert_eq!(std::fs::read(&original).unwrap(), b"original sentinel");
+        assert!(!outside.join("preferences.plist").exists());
+        assert_eq!(
+            std::fs::read(home.join(".local/bin/probe")).unwrap(),
+            b"allowed"
+        );
+        assert_eq!(
+            std::fs::read(home.join(".codex/packages/standalone/probe")).unwrap(),
+            b"allowed"
+        );
     }
 }

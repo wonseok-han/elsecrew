@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 독립 검토 차단 사항 보강)
+
+- 직전a04aff5는 테스트 연결 수정 진척이다. 기존 전체 테스트 session24039의 실행 지속을 확인했으며 중복 실행하지 않았다. 현재501개 진행 관측에서 실패는 Unix socket 관련3건, vendor gate descriptor1건, backup cleanup interruption1건이며 최종 오류 출력은 아직 대기다. 이 실행은 보강 전 바이너리/기존 dirty 포함 기준이다.
+- 독립 검토자 installer_boundary_review는 b710cde에 activation blocker2건을 확인했다: allow-default 설치 정책의 광범위 권한, 허용 폴더의 기존 hardlink를 통한 외부 원본 변경. 동의/원장·fence/dispatch/반복 시작에서는 추가 확인 결함이 없었으며 승인이 아니다. 실제 설치는 계속 비활성이다.
+- execute 정책을 deny-default로 바꾸고 시스템의 제한된 read/exec 폴더·명시 INSTALL/TEMP·DNS 소켓/HTTPS443·단일 identity Mach service만 허용했다. /usr 전체·HOME 내용·일반 Mach/AppleEvent/네트워크 허용은 없다. 시스템 PEM을 명시하고 file-link를 거절한다. macOS 내장 sandbox profile의 DNS/tcp443/file-link 문법을 확인했으나 공식 installer 호환과 실제 OS 보호를 증명한 것은 아니다.
+- 쓰기 대상 전체를 metadata-only/no-follow/20,000항목·깊이64 한도로 검사해 shared regular file·특수 파일·소유/권한/identity 변화는 거절한다. 기존 공식 symbolic launcher는 허용하되 OS resolved-path 보호가 필요하다. 기존 파일을 고치거나 삭제하지 않는다. hardlink 거절 회귀와 system shell/child/read/link/move/defaults 경계의 opt-in 임시 자료 probe를 추가했다. 후자는 네트워크/공급자/계정 없이 positive write와 outside sentinel 보존을 검사하도록 작성했으며 아직 미실행이다.
+- Karpathy 지침으로 기존 Target/owner를 재사용했다. rustfmt/diff PASS. 다음은 기존 전체 테스트 종료 결과 확인, 보강 컴파일/초점 회귀·OS probe, 같은 검토자 수정 재검토다. 실제 설치/계정 실행 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 묶음 검증 시작·테스트 연결 수정)
 
 - 직전b710cde는 interrupted 복구 구현 진척이다. 실제 HEAD/dirty를 확인하고 설치 파동 검증을 시작했다. 신규 admission 회귀의 존재하지 않는 Sidecar::new를 기존 SidecarSession 입장 절차로 수정했다. Electron 보안 대역의 누락된 device-report 모듈을 추가하고 preload의 고정 device/install 채널 별칭을 기존 M5_* 검사 규칙에 맞췄다. 런타임 채널 문자열/권한을 바꾸거나 검사를 완화하지 않았다. 설치 IPC의 다른 frame·임의 경로·작업 ID 없는 복구 거절 회귀도 추가했다.
@@ -128,6 +136,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **설치 활성화 차단(2026-10-13)**: 공식 설치 스크립트도 allow-default + file-write 거절만으로 보호를 주장하지 않는다. 같은 HOME의 허용 폴더에 기존 hardlink가 있으면 외부 원본이 바뀔 수 있어 metadata admission과 새 file-link 금지가 필요하다. deny-default/제한 read·exec·DNS/443 후보와 공유 파일 거절을 추가했으나 OS 경계·공식 설치 호환·독립 재검토 전이며 제품 enabled=false를 유지한다. 단위 테스트를 설치 활성화 증거로 대신하지 않는다.
 
 - **설치/기기 진단 연결(2026-10-13)**: d8b131d는 읽기 전용 OS/CPU/RAM/userData 여유 공간 표시만 연결했다(설치 준비/실행 가능 판정 아님). Codex 선택기는 기존 bundle→레거시 ~/.local/bin 직접 pair→공식 ~/.codex/packages/standalone 링크의 concrete pair 순서이며 기존 서명/no-follow/identity 검증을 유지한다. 465901d의 test-only helper 참조는 수정하고 일반 cargo check·독립 정적 검토를 통과했다. 전체 자동 설치 worker/launcher 회귀/실제 설치 및 기기 UI 검증은 미완료다.
 
