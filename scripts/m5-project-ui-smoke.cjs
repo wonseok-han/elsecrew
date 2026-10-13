@@ -8,6 +8,9 @@ const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs'
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
 const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
 const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
+const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
+if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
+let largeDiffReport;
 let largeFileReport;
 let largeTreeReport;
 let confirmationReport;
@@ -40,6 +43,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 fs.mkdirSync(source);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+if (largeDiff) require('../tests/m5-native-diff-fixture.cjs').prepare(source);
 if (largeTree) {
   // 1,000 directories and 10,000 files in the measured subtree. Existing
   // smoke control files remain outside it and are reported separately.
@@ -75,7 +79,7 @@ function finish(error, details) {
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
-  const result = {root,error:error?.message,...details,confirmation:confirmationReport,...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  const result = {root,error:error?.message,...details,confirmation:confirmationReport,...(largeDiff ? {largeDiff:largeDiffReport} : {}),...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
@@ -125,6 +129,31 @@ app.on('browser-window-created', (_event, window) => {
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`, largeTree ? 65000 : 15000);
       const snapshotReadyMs = performance.now() - snapshotStarted;
       console.log(JSON.stringify({stage:'SNAPSHOT_READY',snapshotReadyMs,root}));
+      if (largeDiff) {
+        const matches = execFileSync('/usr/bin/find',[path.join(root,'userdata'),'-type','d','-name','native-diff-fixture'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
+        if(matches.length!==1)throw new Error('expected one generated diff snapshot');
+        const snapshot = path.dirname(matches[0]);
+        const dimensions = JSON.parse(execFileSync('node',['-e', 'console.log(JSON.stringify(require(process.argv[1]).change(process.argv[2])))',path.join(repoRoot,'tests/m5-native-diff-fixture.cjs'),snapshot],{encoding:'utf8'}));
+        await showPanel('변경');
+        largeDiffReport = await run(`(async()=>{
+          const observe=async(ready)=>{const end=performance.now()+15000;while(!ready()){if(performance.now()>end)throw new Error('native diff timeout');await new Promise(r=>setTimeout(r,10));}await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));};
+          const start=performance.now();
+          const refresh=Array.from(document.querySelectorAll('.m5-changes button')).find(b=>b.textContent==='변경 새로 고침');
+          if(!refresh||refresh.disabled)throw new Error('diff refresh unavailable');refresh.click();
+          await observe(()=>document.querySelector('.m5-changes')?.textContent.includes('변경 (500)'));
+          const diffSummaryMs=performance.now()-start;
+          const file=Array.from(document.querySelectorAll('.m5-change-row')).find(b=>b.title==='native-diff-fixture/file-000.txt');
+          if(!file)throw new Error('first diff file missing');
+          const opened=performance.now();file.click();
+          await observe(()=>document.querySelector('.m5-diff-details')?.textContent.includes('after--'));
+          return {diffSummaryMs,diffFirstFileMs:performance.now()-opened};
+        })()`);
+        largeDiffReport={...largeDiffReport,...dimensions,diagnostic:true,gateEligible:false};
+        const original = execFileSync('/usr/bin/git',['-C',source,'status','--porcelain'],{encoding:'utf8'}).trim();
+        if(original)throw new Error('large diff source changed');
+        if(largeDiffReport.diffSummaryMs>2000||largeDiffReport.diffFirstFileMs>1500)throw new Error('native diagnostic diff limits exceeded');
+        finish(null,{scenario:'nativeLargeDiffOnly'});return;
+      }
       if (largeTree) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
         largeTreeReport = await run(`(async()=>{

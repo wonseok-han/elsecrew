@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (native 대형 diff 경로 연결·지연 재현)
+
+- 직전 작업은 UI 회귀/독립 검토와 활성화 승인 경계 확인으로 진척했다. 자동 goal 재개를 삭제 활성화 승인으로 해석하지 않고 flag=false를 유지했다. 승인 대기 UI/문서 변경은 보존하고 독립 작업인 대형 native diff 경로를 기존 smoke에 추가했다.
+- 별도 임시 Git fixture500파일/20000변경 줄/10MiB patch를 실제 검증하고, 앱 생성 snapshot에만 변경해 실제 sidecar→목록/첫 파일 표시를 관측한다. 이 모드는 원본 적용/에이전트/기존 전체 채팅 흐름 없이 끝나며 다른 대형·메모리 옵션과 혼합하지 않는다. Karpathy 지침에 따라 기존 native 실행/종료 경로를 재사용했다.
+- session63333/46Z4Lw: snapshot2035ms 이후 diffSummary9892ms, diffFirstFile9983ms로2000/1500ms 기준 초과 FAIL/exit1, shutdown accepted. 원본 Git 상태 깨끗함, fixture exact 크기 검증 완료. 단일 개발 빌드 diagnostic이며 G6 합격 아님. JS 구문/diff PASS. 사용자 프로젝트/인증/실제 모델/삭제 기능 사용 없음.
+- 다음: 실제 diff 요청의 파일별 Git 실행/무결성 검사 비용을 조사·개선한다. 삭제 활성화 별도 승인, 정식 성능/RSS·Claude·Windows/출시 증거는 미완료다. 기존9월 archive 및 승인 대기 변경 보존, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (macOS 명시 정리 활성화 후보 검증·승인 차단)
+
+- 직전2fe12a0의 공개 API/중단 재개 회귀 뒤 남은 UI 동의 경로를 기존 Chromium smoke에 연결했다. 두 기능 모두 fresh unchecked 동의, 중복 클릭 단일 요청, 응답 유실 후 무자동재시도, 재조회 후 새 동의를 검사한다. 첫43420은 시험 완료 문구 오타로 FAIL했고 수정 뒤71310 전체 renderer smoke exit0 PASS. 합성 bridge이므로 실제 사용자 파일 삭제/패키지 종단 증거는 아니다.
+- `application_cleanup_enabled`의 macOS 활성화 후보를 검증했으나 커밋 권한 검토가 이 영구 삭제 기능의 별도 사용자 승인을 요구해 거절했다. 우회하지 않고 flag를 false로 복원했다. 현재 복구 대상 보호·terminal retirement·원장/파일 fingerprint 재검증·idle fence·pending/unlink/fsync/deleted 순서를 변경하지 않았다. Karpathy 지침에 따라 새 승인 API 없이 기존 경계를 재사용했다.
+- 활성화 diff에서 Rust cleanup19 PASS/4기존 ignored + retirement2 PASS(session48090), JS 구문/diff PASS. 동일 독립 검토자 backup_budget_review 최종 APPROVE. 실제 앱의 새 실행파일/패키지는 아직 재빌드하지 않았다. 현행 구조는 architecture 상단에 반영했다.
+- 다음: 사용자에게 macOS 명시 정리 활성화와 해당 커밋 승인을 요청한다. UI 시험/문서 변경은 미커밋으로 보존했다. 승인 후 최신 패키지의 원본 반영/복원→정리 종단 확인을 최종 통합 검증에 포함한다. 정식 성능 수집/RSS·Claude 실계정 작업·Windows/출시 증거는 여전히 남는다. 사용자 자료 삭제/실제 provider 호출/main/push 없음. 기존9월 archive 변경 보존.
+
 ### 2026-10-13 · by GPT-6 Astra (정리 공개 경로·중단 재개 검증)
 
 - 직전a291887의 독립 검토는 확정 코드 차단 결함 없음으로 종료했다. renderer 토큰 부재 지적은 같은 renderer가 토큰을 발급/소비해도 인간 동의를 증명하지 못하고 별도 계약 근거가 없어 검토자가 철회했다. 불필요한 승인 API를 추가하지 않았다. 활성화 전 공백은 공개 enabled 경로, pending/unlink 중단 재개, UI 동의/응답 유실 처리다.
@@ -48,6 +62,10 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **2026-10-13 native 대형 diff 실패**: LARGE_DIFF 모드46Z4Lw에서500파일/2만 변경 줄/10MiB patch의 실제 목록9892ms·첫 파일9983ms가 기준 초과했다. 원본 불변/정상 종료이며 다음 성능 병목 조사 대상이다. 합성 renderer의 빠른 수치로 이 native 실패를 대체하지 않는다.
+
+- **2026-10-13 macOS 명시 정리 활성화 승인 대기**: 공개 경로·중단 후 DB 재열기·합성 UI 동의/응답 유실 검증과 독립 APPROVE 완료. 커밋 권한 검토가 별도 사용자 승인을 요구해 거절했고 application_cleanup_enabled=false로 복원했다. 승인된 구현 정책과 제품 활성화 승인을 구분하며 임의 재시도하지 않는다. current terminal 복구점 보호·명시 retirement/별도 정리·자동 삭제 없음·원본/잠금/이력 보존 계약은 유지한다.
 
 - **2026-10-13 대형 프로젝트 최신 단일 관측**: 084ceae batch sync 반영 debug sidecar의 h5k4N8 native UI는 1만 파일에서 편집/저장/diff·반영 확인 취소·두 채팅·정상 종료까지 PASS했다. snapshot33.4초/treeRoot977ms/expand75ms다. 아래 이전 실패를 최신 실행 결과로 반복하지 않되, 단일 diagnostic을 반복 성능/G6 합격으로 확대하지 않는다.
 

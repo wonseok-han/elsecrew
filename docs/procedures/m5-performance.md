@@ -24,6 +24,10 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ## Native UI 작은 프로젝트 메모리 진단
 
+### Native 대형 diff 진단
+
+`HELLO_AGENT_SMOKE_LARGE_DIFF=1 pnpm m5:smoke:project-ui`는 별도의500파일/20000변경 줄/10MiB Git diff 시나리오다. 임시 원본을 commit하고 앱이 만든 유일한 격리 snapshot의 fixture 파일만 변경한다. Git patch의 실제 byte/변경 줄/파일 개수를 검증하며 원본 Git 상태가 깨끗한지 확인한다. 실제 sidecar와 renderer를 거친 변경 목록·첫 파일 두 frame 관측을2000/1500ms와 비교한 뒤 정상 종료한다. 이 모드에서는 기존 두 채팅/반영 흐름을 실행하지 않으며 다른 대형/메모리/원본 적용 옵션과 결합하지 않는다. 결과는 `largeDiff`, `scenario:nativeLargeDiffOnly`로 구분한다. 단일 개발 빌드 진단이며 packaged/반복 p95/G6 합격을 뜻하지 않는다.
+
 ### Native 프로젝트 반복 수집
 
 `pnpm m5:measure:native-project`는 현재 빌드된 native UI 시험을 준비 실행1회＋측정10회 순차 실행한다. 각 실행은 새 임시 프로젝트에1만 파일 트리와5MiB 파일을 함께 생성하며, 편집/저장/diff·반영 확인 취소·두 채팅 흐름까지 수행한다. 원본 적용·reload·메모리 환경 옵션은 상속하지 않는다. 빌드는 자동 수행하지 않으므로 먼저 최신 main/renderer/debug sidecar를 준비한다.
