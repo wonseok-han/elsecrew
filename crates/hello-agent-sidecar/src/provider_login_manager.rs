@@ -8,7 +8,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -98,11 +98,7 @@ impl LoginManager {
                     let result = if claude {
                         crate::provider_claude_login::diagnose()
                     } else {
-                        select_signed_pair(&[
-                            Path::new("/Applications/ChatGPT.app/Contents/Resources"),
-                            Path::new("/Applications/Codex.app/Contents/Resources"),
-                        ])
-                        .map(|_| ())
+                        select_installed_codex_pair().map(|_| ())
                     };
                     let (state, error) = if cancel.load(Ordering::Acquire) {
                         ("canceled", None)
@@ -321,7 +317,35 @@ pub(super) fn digest(value: &str) -> [u8; 32] {
     bytes
 }
 
-pub(crate) fn select_signed_pair(
+fn codex_installation_roots(home: Option<&Path>) -> Vec<PathBuf> {
+    // Preserve existing bundle preference. The legacy installer places both
+    // native executables in ~/.local/bin; never search PATH or run a launcher.
+    let mut roots = vec![
+        PathBuf::from("/Applications/ChatGPT.app/Contents/Resources"),
+        PathBuf::from("/Applications/Codex.app/Contents/Resources"),
+    ];
+    if let Some(home) = home.filter(|home| {
+        home.is_absolute()
+            && home.components().all(|part| {
+                matches!(
+                    part,
+                    std::path::Component::RootDir | std::path::Component::Normal(_)
+                )
+            })
+    }) {
+        roots.push(home.join(".local/bin"));
+    }
+    roots
+}
+
+pub(crate) fn select_installed_codex_pair(
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let roots = codex_installation_roots(home.as_deref());
+    select_signed_pair(&roots.iter().map(PathBuf::as_path).collect::<Vec<_>>())
+}
+
+fn select_signed_pair(
     roots: &[&Path],
 ) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
     select_candidates(roots, |cli, host| {
@@ -388,10 +412,7 @@ fn run(
     publish: &impl Fn(&str, Option<String>, Option<&str>),
     check_only: bool,
 ) -> Result<(), SidecarError> {
-    let (executable, helper) = select_signed_pair(&[
-        Path::new("/Applications/ChatGPT.app/Contents/Resources"),
-        Path::new("/Applications/Codex.app/Contents/Resources"),
-    ])?;
+    let (executable, helper) = select_installed_codex_pair()?;
     let home = profile.revalidate()?;
     if cancel.load(Ordering::Acquire) {
         publish("canceled", None, None);
@@ -478,6 +499,55 @@ pub(super) fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), Sideca
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn installation_roots_preserve_bundles_and_bound_standalone_to_home() {
+        let bundles = codex_installation_roots(None);
+        assert_eq!(bundles.len(), 2);
+        for invalid in ["", "relative", "/Users/example/../other"] {
+            assert_eq!(codex_installation_roots(Some(Path::new(invalid))), bundles);
+        }
+        let roots = codex_installation_roots(Some(Path::new("/Users/example")));
+        assert_eq!(&roots[..2], bundles.as_slice());
+        assert_eq!(roots[2], Path::new("/Users/example/.local/bin"));
+    }
+
+    #[test]
+    fn standalone_fallback_requires_a_complete_authenticated_pair_in_one_root() {
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let bundle = root.join("bundle");
+        let standalone = root.join(".local/bin");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::create_dir_all(&standalone).unwrap();
+        let cli_hash = format!("{:x}", Sha256::digest(b"cli"));
+        let host_hash = format!("{:x}", Sha256::digest(b"host"));
+        let pairs = [(cli_hash.as_str(), host_hash.as_str())];
+        let write = |path: &Path, bytes: &[u8]| {
+            std::fs::write(path, bytes).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        write(&bundle.join("codex"), b"cli");
+        write(&standalone.join("codex-code-mode-host"), b"host");
+        assert!(select_pair(&[&bundle, &standalone], &pairs).is_err());
+        write(&standalone.join("codex"), b"untrusted");
+        assert!(select_pair(&[&bundle, &standalone], &pairs).is_err());
+        write(&standalone.join("codex"), b"cli");
+        let (cli, host) = select_pair(&[&bundle, &standalone], &pairs).unwrap();
+        assert_eq!(cli.revalidate().unwrap(), standalone.join("codex"));
+        assert_eq!(
+            host.revalidate().unwrap(),
+            standalone.join("codex-code-mode-host")
+        );
+        write(&bundle.join("codex-code-mode-host"), b"host");
+        let (cli, _) = select_pair(&[&bundle, &standalone], &pairs).unwrap();
+        assert_eq!(cli.revalidate().unwrap(), bundle.join("codex"));
+        std::fs::remove_file(standalone.join("codex")).unwrap();
+        std::os::unix::fs::symlink(bundle.join("codex"), standalone.join("codex")).unwrap();
+        assert!(select_pair(&[&standalone], &pairs).is_err());
+    }
 
     #[test]
     fn diagnosis_cannot_clear_recovery_or_overlap_an_active_worker() {

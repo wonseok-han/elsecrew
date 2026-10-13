@@ -49,10 +49,7 @@ impl DiscoveryWorker {
             .name("codex-discovery".into())
             .spawn(move || {
                 let (executable, helper) =
-                    match crate::provider_login_manager::select_signed_pair(&[
-                        std::path::Path::new("/Applications/ChatGPT.app/Contents/Resources"),
-                        std::path::Path::new("/Applications/Codex.app/Contents/Resources"),
-                    ]) {
+                    match crate::provider_login_manager::select_installed_codex_pair() {
                         Ok(pair) => pair,
                         Err(error) => return Completion::failed(error, None),
                     };
