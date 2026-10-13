@@ -29,14 +29,8 @@ fn inject_failure(point: FailurePoint) -> Result<(), ProjectFailure> {
     })
 }
 
-fn lock(manager: &ProjectManager) -> Result<Dir, ProjectFailure> {
-    let dir = directory(manager)?;
-    if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(ProjectFailure::recovery(
-            "backup cleanup requires idle preparation",
-        ));
-    }
-    Ok(dir)
+fn lock(manager: &ProjectManager) -> Result<ArchiveLock, ProjectFailure> {
+    ArchiveLock::acquire(directory(manager)?, libc::LOCK_EX, "backup cleanup requires idle preparation")
 }
 
 fn record(storage: &Storage, project: &str, review: &str) -> Result<Value, ProjectFailure> {

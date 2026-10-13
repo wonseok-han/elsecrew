@@ -107,10 +107,34 @@ fn directory(manager: &ProjectManager) -> Result<Dir, ProjectFailure> {
     .1)
 }
 
-// Held through publication/cleanup. All archive creators cooperate on the same
-// directory inode; closing this separately opened descriptor releases the lock.
+// The owner explicitly ends its lock, including on error. Closing a descriptor
+// alone does not release flock while a concurrent fork/dup retains the same
+// open file description. Construct only after successful acquisition.
+struct ArchiveLock(Dir);
+
+impl ArchiveLock {
+    fn acquire(dir: Dir, operation: libc::c_int, detail: &'static str) -> Result<Self, ProjectFailure> {
+        if unsafe { libc::flock(dir.as_raw_fd(), operation | libc::LOCK_NB) } != 0 {
+            return Err(ProjectFailure::recovery(detail));
+        }
+        Ok(Self(dir))
+    }
+}
+
+impl std::ops::Deref for ArchiveLock {
+    type Target = Dir;
+    fn deref(&self) -> &Dir { &self.0 }
+}
+
+impl Drop for ArchiveLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+// Held through publication/cleanup on the same directory inode.
 struct BudgetGuard {
-    _directory: Dir,
+    _directory: ArchiveLock,
     remaining: u64,
 }
 
@@ -121,11 +145,7 @@ impl BudgetGuard {
     }
 
     fn acquire_with(dir: Dir, budget: impl FnOnce() -> Result<u64, ProjectFailure>) -> Result<Self, ProjectFailure> {
-        if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err(ProjectFailure::recovery(
-                "another backup preparation is active",
-            ));
-        }
+        let dir = ArchiveLock::acquire(dir, libc::LOCK_EX, "another backup preparation is active")?;
         let used = stored_bytes(&dir)?;
         let budget = budget()?;
         let remaining = budget.checked_sub(used).filter(|v| *v > 0).ok_or_else(|| {
@@ -153,10 +173,7 @@ fn stored_bytes(dir: &Dir) -> Result<u64, ProjectFailure> {
 pub(in crate::project) fn storage_usage(manager: &ProjectManager) -> Result<Value, ProjectFailure> {
     // Same managed directory and cooperative lock as archive creation. This may
     // initialize an empty managed directory, but never changes archive contents.
-    let dir = directory(manager)?;
-    if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) } != 0 {
-        return Err(ProjectFailure::recovery("backup usage unavailable during preparation"));
-    }
+    let dir = ArchiveLock::acquire(directory(manager)?, libc::LOCK_SH, "backup usage unavailable during preparation")?;
     let used = stored_bytes(&dir)?;
     if used > 9_007_199_254_740_991 { return Err(invalid()); }
     let limit = budget_settings::read(manager)?;
@@ -164,10 +181,7 @@ pub(in crate::project) fn storage_usage(manager: &ProjectManager) -> Result<Valu
 }
 
 pub(in crate::project) fn set_storage_limit(manager: &ProjectManager, expected: u64, limit: u64) -> Result<(), ProjectFailure> {
-    let dir = directory(manager)?;
-    if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err(ProjectFailure::recovery("backup budget change requires idle preparation"));
-    }
+    let _lock = ArchiveLock::acquire(directory(manager)?, libc::LOCK_EX, "backup budget change requires idle preparation")?;
     budget_settings::set(manager, expected, limit)
 }
 
@@ -543,6 +557,38 @@ mod tests {
             std::fs::read(temp.path().join("archive")).unwrap(),
             b"replacement"
         );
+    }
+
+    #[test]
+    fn backup_lock_ends_with_owner_even_if_descriptor_is_duplicated() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_dir = || Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let guard = BudgetGuard::acquire(open_dir(), 10).unwrap();
+        let duplicate = guard._directory.try_clone().unwrap();
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_err());
+        drop(guard);
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_ok());
+        drop(duplicate);
+    }
+
+    #[test]
+    fn backup_lock_releases_shared_owner_and_failed_budget_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_dir = || Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        let reader = ArchiveLock::acquire(open_dir(), libc::LOCK_SH, "busy").unwrap();
+        let duplicate = reader.try_clone().unwrap();
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_err());
+        // Failed acquisition must not unlock another owner's shared lock.
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_err());
+        drop(reader);
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_ok());
+        drop(duplicate);
+
+        let dir = open_dir();
+        let duplicate = dir.try_clone().unwrap();
+        assert!(BudgetGuard::acquire_with(dir, || Err(invalid())).is_err());
+        assert!(BudgetGuard::acquire(open_dir(), 10).is_ok());
+        drop(duplicate);
     }
 
     #[test]

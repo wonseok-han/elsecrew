@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (누적 Rust 실패 분류·백업 디렉터리 잠금 수명 수정)
+
+- 동일 session41351의 전체 실행이 exit101로 종료됐다. Tauri105 PASS/13 ignored, core198 PASS, protocol58 PASS, sidecar613 PASS/4 FAIL/36 ignored(778.91초). Unix socket 생성3건은 EPERM이며 권한확대한 집중 실행에서3 PASS(/private/tmp/hello-agent-socket-retry.log). 제품 로직으로 오류를 무시하거나 테스트를 제외하지 않았다.
+- 남은 current backup 시험은 cleanup.rs의 flock 거절이었다(project/tests.rs147). 직전 비교 기준 가설과 다른 원인이다. 백업 디렉터리도 fd close만으로 flock이 풀린다고 가정했으며 복제된 open-file-description이 남으면 소유자 종료 후 잠금이 남는다. 신규 duplicateFD regression은 수정 전 deterministic FAIL(/private/tmp/hello-agent-backup-lock-before.log)했다.
+- Karpathy 최소 변경으로 성공 취득 후 생성되는 ArchiveLock RAII에 Drop LOCK_UN을 추가하고 생성 예산/사용량 조회/예산 변경/명시 정리가 함께 사용한다. 원장/사용자 동의/삭제 순서/복구점 보호 조건은 불변이다. shared lock의 취득 실패가 기존 소유자를 해제하지 않음과 취득 후 예산 오류 경로도 회귀로 확인했다. backup24 PASS18.50초, stdio13 PASS/1 ignored3.60초, workspace doc-tests PASS(0개), diff PASS. 로그 /private/tmp/hello-agent-backup-lock-final.log, /private/tmp/hello-agent-stdio-final.log, /private/tmp/hello-agent-rust-doc-final.log. 전체 suite를 최신 수정으로 다시 실행했다는 주장은 아니다.
+- 동일 final_application_safety 검토자가 성공 취득·오류 경로·잠금 보유 구간과24 PASS를 확인하고 APPROVE했다. 원본/삭제 권한 확장 없음. 실제 에이전트/GUI/메모리·packaged 전체 성능은 여전히 미완료이며 기존 out 패키지는 이번 Rust 수정 전4a92d39 코드의 산출물이다. Mac 잠금 해제·Claude 연결 확인 대기 유지, 사용자9월 archive/main/push 경계 보존.
+
+### 2026-10-13 · by GPT-6 Astra (동일 Rust 회귀 핸들 관측·실패 분류 대기)
+
+- 직전 턴의 session41351을 재확인해 live임을 확인하고 같은 실행을 계속 관측했다. 새 검사/빌드/GUI/모델을 중복 시작하지 않았다. runtime special-file socket, Claude profile socket2개, current backup retirement 시험의 실패가 중간 출력에 나타났다. 전체 실행과 최종 panic 상세는 아직 종료되지 않아 환경 제한/제품 결함을 단정하지 않는다.
+- backup 시험의 비교 기준이 잘못됐다는 중간 해석은 실제 파일 재대조에서 철회했다. patch가 적용 전 거절됐으며 해당 코드 변경은 없다. 최종 실패 상세를 근거로 후속 조사를 수행한다. 이 기록은 합격이나 수정 완료가 아니며 원본 보호/삭제 조건을 완화하지 않았다.
+
+### 2026-10-13 · by GPT-6 Astra (Rust 누적 회귀 진행·네이티브 화면 차단 확인)
+
+- 이전 턴은4a92d39 코드의 실제 패키징/내부 smoke·크기 검증으로 진전했고8246a7b에 기록했다. 이번 컴퓨터 조작 도구의 직접 조회는 Mac locked/자동 unlock 불가를 다시 반환했다. 사용자에게 잠금 해제를 요청했고 실제 패키지 GUI를 새로 실행하지 않았다. 잠금 해제 확인 전 화면·직접 입력을 관측했다고 주장하지 않는다.
+- 설치 journal 잠금 수정 이후 전체 Rust 회귀의 남은 재확인을 시작했다. 기준 코드8246a7b, CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test --workspace --locked, 로그 /private/tmp/hello-agent-rust-final-8246a7b.log. exec session41351은 현재 live이며 동일 핸들을 이어 관측한다. Tauri105 PASS/13 ignored, core198 PASS, protocol58 PASS 뒤 sidecar suite 진행 중이다. 전체 완료/PASS 아님. 실제 로그인/유료 모델 시험은 실행하지 않았다.
+- workspace에 기존 Tauri도 포함돼 debug 캐시가 약4.0GiB로 증가했다. 빌드·시험 중 삭제하지 않으며 종료 후 정리 후보를 확인한다. 이번 실행을 중복 시작하지 않는다. 최종 결과와 관련 실패 수정 뒤 기록을 확정할 예정이며 사용자9월 archive·main/push 경계 유지. packaged 전체 성능 수집과 실제 계정 흐름은 별도 미완료다.
+
 ### 2026-10-13 · by GPT-6 Astra (최신 macOS release 패키지 검증)
 
 - 이전 턴은4a92d39의 UI 복구 수정·회귀·독립 승인·커밋으로 진전했다. 이번에는 남은 packaged 검증 경로를 확인하고 최신 HEAD에서 Forge main/preload/renderer 및 Rust release sidecar를 실제 패키징했다. CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4/CARGO_INCREMENTAL=0, 무거운 작업1개를 유지했다. 최초 제한 환경 fetch 실패 후 승인된 외부 실행으로 완료했다.
@@ -168,6 +186,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **백업 디렉터리 flock 수명(2026-10-13)**: 설치 journal과 마찬가지로 backup Dir close만으로는 concurrent fork/dup의 OFD 잠금 잔류를 막지 못한다. 생성·조회·예산·정리 모두 성공 취득 전용 ArchiveLock의 Drop LOCK_UN으로 소유자 수명을 끝낸다. duplicateFD 수정 전 FAIL/후 PASS·shared/error 경로·backup24·독립 APPROVE를 확보했다. 이는 잠금 수명 수정이며 동의/원장/복구점 보호/삭제 조건은 그대로다.
 
 - **반영 응답 유실/취소 경합 UI(2026-10-13)**: start 응답만으로 ID를 정하면 접수 응답 유실 뒤 조회·취소가 막힌다. 시작 전 chat-scoped baseline과 다른 새 ID만 채택하고 known ID는 exact 유지한다. 준비 취소 성공만으로 화면을 초기화하지 않으며 진행 요청 종료 뒤 같은 scope에 새 intent가 없음을 확인해야 새 검토로 복귀한다. 합성 React/Chromium 회귀로 검증하며 실제 source write 증거와 구분한다.
 
