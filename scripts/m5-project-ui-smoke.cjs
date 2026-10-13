@@ -316,6 +316,8 @@ app.on('browser-window-created', (_event, window) => {
       if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('source changed');
       const files = execFileSync('/usr/bin/find',[path.join(root,'userdata'),'-name','hello.txt'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
       if(!files.some(file=>fs.readFileSync(file,'utf8')==='edited in snapshot\noriginal\n')) throw new Error('saved snapshot content missing');
+      const followupReview = await run(`(${require('../tests/m5-diff-followup-probe.cjs').toString()})()`);
+      console.log(JSON.stringify({stage:'DIFF_FOLLOWUP_REVIEW',...followupReview}));
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 채팅의 반영 전 변경 목록 보기').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='이 변경 묶음으로 확인 준비'&&!b.disabled)`);
       const confirmationStarted = performance.now();

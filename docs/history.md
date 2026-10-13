@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (후속 요청 연결 UI 파동 통합 확인)
+
+- 직전738f24f까지의 파일·줄 후속 요청 구현을 묶어 확인했다. TypeScript와 editor/chat/diff 상태 테스트86/86 PASS, renderer build·새 probe JS 구문·diff 검사 PASS. Rust 빈 diff 최적화는 이번 빌드에 포함하지 않았고 검증 대기다.
+- native 작은 합성 프로젝트1회(session99820/9rYRth)는 파일/줄 참조 버튼·기존 초안 보존·팀 대화 패널 열림·시험 초안 복원을 모두 통과했다. bridge/파일 응답 대체 없이 DOM 조작만 수행했다. 기존 설정·코드 편집/저장·diff·반영 확인 취소·두 채팅 왕복도 완료했고 shutdown accepted/exit0/PASS다. 자동 메시지 제출/모델 실행/원본 적용 없음.
+- 시험 project/userdata는 정상 종료 뒤 삭제하고 result.json/project.png를 hello-agent-project-ui-9rYRth에 보존했다. target1.1GiB/.vite3.7MiB 유지. 대형 반복 시험/새 Rust 캐시 없음. Karpathy 지침으로 기존 native 흐름에 작은 probe만 연결했다.
+- 이번 PASS는 작은 프로젝트 UI 흐름에 한정한다. 대형 초기 대기/RSS/packaged G6, 실제 공급자 작업·Windows/출시 검증과 별도 백업 정리 활성화 승인 경계는 남는다. 전체 목표 미완료/main/push 없음, 기존 dirty 보존.
+
 ### 2026-10-13 · by GPT-6 Astra (diff 줄 위치를 후속 요청에 지정)
 
 - 직전0c444fe의 파일 단위 후속 요청 연결을 줄 단위로 확장했다. 기존 diff parser가 검증해 제공한 before/after 줄 번호만 버튼으로 표시한다. 삭제 줄은 변경 전, 추가 줄은 변경 후로 구분하고 rename의 변경 전 위치는 oldPath로 적는다. metadata/번호 없는 줄에는 버튼이 없다.
