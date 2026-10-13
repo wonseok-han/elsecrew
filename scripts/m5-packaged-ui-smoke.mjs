@@ -54,6 +54,8 @@ if (projectFlow) {
     throw error; // Do not start an app after an uncertain seed shutdown.
   }
 }
+async function observe(report, resume = false) {
+const persist = () => fs.writeFileSync(path.join(root, resume ? 'restart.json' : 'result.json'), JSON.stringify(report, null, 2));
 const started = performance.now();
 const child = spawn(executable, [`--user-data-dir=${userData}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
   cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
@@ -122,6 +124,7 @@ try {
     return parsed.storageAdmission.state === 'ready' ? parsed : null;
   });
   report.sidecarInstanceId = status.sidecar.sidecarInstanceId;
+  if (resume) assert.notEqual(report.sidecarInstanceId, report.previousSidecarInstanceId, 'Restart must create a new sidecar instance');
   report.storageObservedMs = performance.now() - started;
   // The database must exist under our explicit profile before further probes.
   const database = path.join(userData, 'com.wonseokhan.helloagent/m5/hello-agent.sqlite3');
@@ -161,6 +164,10 @@ try {
     })()`));
     await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')]
       .find(button => button.textContent.includes('hello.txt') && !button.disabled)`));
+    if (resume) {
+      await until(() => evaluate(`!![...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check') && !button.disabled)`));
+      await evaluate(`[...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check')).click()`);
+    } else {
     await evaluate(`document.querySelector('.m5-new-chat-button').click()`);
     await until(() => evaluate(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`));
     await evaluate(`(() => {
@@ -171,17 +178,23 @@ try {
     })()`);
     await until(() => evaluate(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`));
     await evaluate(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
+    }
     await until(() => evaluate(`document.querySelector('.m5-timeline h2')?.textContent === 'Packaged editing check'`));
     await evaluate(`[...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('hello.txt')).click()`);
     report.project.editor = await until(() => evaluate(`(() => {
       const editor = document.querySelector('.monaco-editor');
       return editor && editor.innerText.includes('original') ? {opened: true, text: 'original'} : null;
     })()`));
+    if (resume) {
+      await until(() => evaluate(`document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('edited in packaged snapshot')`));
+      report.project.persistedEditorText = true;
+    } else {
     await evaluate(`document.querySelector('.monaco-editor textarea').focus()`);
     await send('Input.insertText', {text:'edited in packaged snapshot\n'}, sessionId);
     await until(() => evaluate(`!![...document.querySelectorAll('button')].find(button => button.textContent === '저장' && !button.disabled)`));
     await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === '저장').click()`);
     await until(() => evaluate(`!![...document.querySelectorAll('button')].find(button => button.textContent === '저장' && button.disabled)`));
+    }
     await evaluate(`[...document.querySelectorAll('.m5-chat-review button')].find(button => button.textContent === '작업 사본 diff 열기').click()`);
     await until(() => evaluate(`!![...document.querySelectorAll('.m5-change-row')].find(button => button.title === 'hello.txt' && !button.disabled)`));
     await evaluate(`[...document.querySelectorAll('.m5-change-row')].find(button => button.title === 'hello.txt').click()`);
@@ -191,7 +204,7 @@ try {
     report.project.originalUnchanged = true;
   }
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
-  fs.writeFileSync(path.join(root, 'startup.png'), Buffer.from(capture.data, 'base64'));
+  fs.writeFileSync(path.join(root, resume ? 'restart.png' : 'startup.png'), Buffer.from(capture.data, 'base64'));
 } catch (error) { report.error = String(error); }
 finally {
   // Existing IPC invokes the normal main-owned shutdown coordinator. A lost
@@ -222,5 +235,19 @@ finally {
   pending.clear();
   console.log(JSON.stringify({root, status: report.status, shutdown: report.shutdown, pid: child.pid, idleRssBytes: report.idleRssBytes, error: report.error}));
   // Retain failed/uncertain data. Never kill an app or remove its profile here.
-  process.exitCode = report.status === 'FAIL' ? 1 : 2;
 }
+}
+await observe(report);
+let restart;
+if (projectFlow && report.shutdown === 'confirmed' && !report.error && report.project.savedDiffVisible) {
+  restart = {
+    schemaVersion: 1, diagnostic: true, gateEligible: false, status: 'RUNNING',
+    root, head: git('rev-parse', 'HEAD'), measuredAt: new Date().toISOString(),
+    packagedApp: true, userData, asarSha256: report.asarSha256, sidecarSha256: report.sidecarSha256,
+    limitations: report.limitations, memory: [], shutdown: 'pending',
+    project: {source: report.project.source, projectId: report.project.projectId},
+    previousSidecarInstanceId: report.sidecarInstanceId,
+  };
+  await observe(restart, true);
+}
+process.exitCode = report.status === 'FAIL' || restart?.status === 'FAIL' ? 1 : 2;

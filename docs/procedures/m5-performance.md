@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+프로젝트 시나리오는 첫 실행에서 편집/저장/diff·정상 종료가 확인된 경우에만 같은 profile을 재시작한다. 두 번째 실행은 새 sidecar instance와 기존 채팅·저장된 편집기 본문·diff·원본 불변을 확인하고 restart.json/PNG를 따로 남긴다. 정상 종료가 불확실하면 재시작하지 않는다. Monaco view-lines의 NBSP는 표시 공백으로 정규화하되 파일이나 diff 내용을 바꾸지 않는다.
+
 `pnpm m5:smoke:packaged-ui --project`는 자체 생성한 작은 Git 프로젝트를 packaged sidecar의 정상 project.open API로 목록에 등록하고 안전 종료한 뒤 같은 임시 profile로 앱을 시작한다. 실제 목록 다시 열기→채팅 생성→Monaco 편집→저장→diff 표시와 원본 불변을 확인한다. bridge/제품 main을 교체하지 않지만 CDP 입력이므로 실제 키보드/OS 포커스 증거가 아니다. 재시작·반영/복원·다중 프로젝트·실제 모델 검증을 대신하지 않는다. 측정 RSS는 프로젝트를 열기 전 idle이며 편집 후 peak가 아니다.
 
 RSS 원인 분리용으로 관측 앞뒤의 [CDP 프로세스 종류](https://chromedevtools.github.io/devtools-protocol/tot/SystemInfo/#method-getProcessInfo)와 [renderer heap](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-getHeapUsage)도 기록한다. Chromium 목록에 없는 PID의 역할을 추측하지 않으며 heap은 RSS에 더하지 않는다. resource timing 목록이 비어 있으면 자산 미로딩의 증거가 아니다. 강제 GC나 GPU 비활성화로 기준을 우회하지 않는다.
