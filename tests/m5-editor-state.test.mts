@@ -832,6 +832,53 @@ test("binary·tooLarge 파일, watcher overflow, bounded tree와 rename diff를 
   controller.dispose();
 });
 
+test("manual diff refreshes share an active read but mutations request fresh data", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    const requests: ReturnType<typeof deferred<DiffSummaryV1>>[] = [];
+    bridge.getDiffSummary = async () => {
+      const request = deferred<DiffSummaryV1>();
+      requests.push(request);
+      return request.promise;
+    };
+    const first = controller.refreshChanges();
+    await nextTurn();
+    const shared = controller.refreshChanges();
+    await nextTurn();
+    assert.equal(requests.length, 1);
+    const changed = controller.refreshChanges(true);
+    await nextTurn();
+    assert.equal(requests.length, 2);
+    const summary = { projectId: "project_01", baseCommit, entries: [] };
+    requests[0].resolve(summary);
+    await Promise.all([first, shared]);
+    const latestShared = controller.refreshChanges();
+    await nextTurn();
+    assert.equal(requests.length, 2, "older completion must not clear the latest pending read");
+    requests[1].resolve(summary);
+    await Promise.all([changed, latestShared]);
+    const beforeWatch = controller.refreshChanges();
+    await nextTurn();
+    bridge.emitProject({ projectId: "project_01", event: "diff.changed", paths: ["src/new.ts"], rescanRequired: false });
+    await nextTurn();
+    assert.equal(requests.length, 4, "watcher changes must not share a pre-change read");
+    requests[2].resolve(summary);
+    requests[3].resolve(summary);
+    await beforeWatch;
+    await nextTurn();
+    const failed = controller.refreshChanges();
+    const failedShared = controller.refreshChanges();
+    await nextTurn();
+    assert.equal(requests.length, 5);
+    requests[4].reject(new Error("summary unavailable"));
+    await Promise.all([failed, failedShared]);
+    assert.ok(controller.snapshot().error);
+  } finally { controller.dispose(); }
+});
+
 test("refreshing changes clears stale diff content and invalidates an in-flight selection", async () => {
   const bridge = new FakeBridge();
   const controller = new ProjectEditorController(bridge);

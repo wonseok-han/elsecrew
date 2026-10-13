@@ -131,6 +131,7 @@ export class ProjectEditorController {
   #selectionGeneration = 0;
   #treeGeneration = 0;
   #diffGeneration = 0;
+  #diffRefresh: { projectId: string; epoch: number; workspace: ChatWorkspaceRefV1 | null; promise: Promise<void> } | null = null;
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
   #actionBlocked = false;
@@ -596,7 +597,7 @@ export class ProjectEditorController {
       const hasNewerDraft = latest.text !== tab.text;
       this.#replaceTab(path, { ...latest, baseVersion: committed.version, saveState: hasNewerDraft ? "dirty" : "clean", byteLength: totalBytes });
       this.#setNotice(hasNewerDraft ? "m5.editorNotice.newerDraft" : "m5.editorNotice.saved");
-      await this.refreshChanges();
+      await this.refreshChanges(true);
     } catch (error) {
       if (!this.#isCurrent(project.id, epoch)) return;
       const latest = this.#tab(path);
@@ -679,14 +680,40 @@ export class ProjectEditorController {
     return true;
   }
 
-  async refreshChanges(): Promise<void> {
+  async refreshChanges(afterMutation = false): Promise<void> {
     if (this.#actionBlocked) return;
     const project = this.#state.project;
     if (!project) return;
+    const pending = this.#diffRefresh;
+    if (!afterMutation && pending?.projectId === project.id && pending.epoch === this.#projectEpoch && sameWorkspace(pending.workspace, this.#state.workspace)) {
+      this.#diffGeneration++;
+      this.#set({ diffFile: null, diffText: "" });
+      // Binding callers may request propagation; a toolbar refresh keeps the
+      // normal public behavior of reporting the error in editor state.
+      await pending.promise.catch(() => {});
+      return;
+    }
     await this.#refreshChanges(project.id, this.#projectEpoch);
   }
 
   async #refreshChanges(projectId: string, epoch: number, propagate = false): Promise<void> {
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    const pending = { projectId, epoch, workspace: this.#state.workspace, promise };
+    // Register before notifying subscribers. Manual refreshes share the active
+    // read; saves and watcher changes still require a newer read.
+    this.#diffRefresh = pending;
+    void this.#readChanges(projectId, epoch, propagate).then(resolve, reject);
+    try {
+      await pending.promise;
+    } finally {
+      if (this.#diffRefresh === pending) this.#diffRefresh = null;
+    }
+  }
+
+  async #readChanges(projectId: string, epoch: number, propagate: boolean): Promise<void> {
+    if (!this.#isCurrent(projectId, epoch)) return;
     // A refreshed summary cannot certify the previously fetched file content.
     this.#diffGeneration++;
     this.#set({ diffFile: null, diffText: "" });
@@ -840,7 +867,7 @@ export class ProjectEditorController {
         void this.#checkCleanFileChange(tab);
       }
     }
-    if (event.event === "diff.changed") void this.refreshChanges();
+    if (event.event === "diff.changed") void this.refreshChanges(true);
   }
 
   async #checkCleanFileChange(tab: EditorTab): Promise<void> {

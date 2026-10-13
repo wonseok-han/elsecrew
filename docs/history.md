@@ -1,5 +1,18 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (diff 조회 대기 계측·중복 수동 조회 공유)
+
+- 직전 승인 응답 턴은 이미 종료된 PID 부재를 확인한 것으로, 개발 진척은 아니었다. a871f9c에서 첫 diff 지연 조사로 복귀했다. native smoke에 실제 IPC handler 호출 시각/소요/성공·실패만 기록하며 응답을 대체하지 않는 계측을 추가했다. qMRshW/session37266은 summary496ms·first1700ms FAIL/정상 종료였고, 중첩 summary2건 뒤 file handler1668ms로 화면 렌더보다 요청 대기가 주된 관측 구간이었다.
+- editor는 같은 project/epoch/workspace의 진행 중 목록 조회를 수동 새로고침끼리 공유한다. 저장 완료/실제 watcher 변경은 반드시 새 조회를 시작하며 이전 요청 완료가 최신 pending을 지우지 않는다. 본문 무효화·오류 표시/프로젝트 결속을 유지한다. Karpathy 지침에 따라 backend 검사 제거/캐시나 새로운 계약 없이 수정했다.
+- 최초 deferred microtask 초안은 기존 호출 순서 회귀3개를 실패시켜 동기 시작을 복원했다. 최종 editor/workspace65/65 PASS(session27012), TypeScript/renderer build/JS 구문/diff PASS. 공유·변경 후 새 조회·실제 watcher·실패 전파 회귀 포함. native30730/MGQWhr는 summary761ms·first783ms PASS/exit0·shutdown accepted, 원본 불변이다. 이 실행은 summary가 자연스럽게 겹치지 않았으므로 성능 차이 전부를 코드 효과로 단정하지 않는다. 단일 diagnostic이며 반복 p95/G6 합격 아님.
+- 다음: native 반복 수집과 남은 RSS/정식 성능 계측을 진행한다. 백업 정리 활성화는 별도 승인 전 false, Claude 실제 작업·Windows·출시 미완료다. 기존 정리 UI/문서 및9월 archive 변경을 보존했다. 실제 모델/사용자 프로젝트/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (시험 앱 종료 승인 재확인)
+
+- PID27469 시험 앱만 강제 종료하라는 사용자 승인에 따라 현재 프로세스를 다시 조회했다. sandbox 안의 ps는 권한 오류였으며 승인된 외부 읽기 전용 ps는 결과 없음/exit1로 해당 PID 부재를 확인했다. 이미 종료된 대상에 추가 signal을 보내지 않았다.
+- 기존 종료 기록과 현재 상태가 일치한다. 다른 앱·사용자 프로젝트·인증정보와 기존 미커밋 변경은 건드리지 않았다. 이번 승인을 백업 영구 삭제 활성화나 새 실제 모델 시험 승인으로 확대하지 않았다.
+- 다음: 첫 native diff 지연과 기존 G6 후속 작업을 이어가며, 백업 정리 활성화는 별도 승인 대기를 유지한다. 이번 변경은 확인 기록뿐이며 제품 완료/새 성능 합격을 뜻하지 않는다.
+
 ### 2026-10-13 · by GPT-6 Astra (native diff Git 조회 재사용·부분 성능 개선)
 
 - 직전a0260c3의500파일 native 지연을 조사했다. 기존 diff_entries는 각 기준 파일마다 cat-file 크기/내용 프로세스2개를 생성했고 첫 파일 조회에서도 전체 분류를 반복했다. 요청 단위 batch-check/batch 프로세스2개로 교체해 재사용하며 파일별 내용 분류·크기 상한·경로 검증은 유지한다. 요청 간 캐시는 없다.

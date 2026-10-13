@@ -1,6 +1,6 @@
 // macOS native UI smoke: synthetic project and isolated app data, no providers selected.
 // Requires current .vite/build output and native sidecar; this script does not build them.
-const { app, dialog } = require('electron');
+const { app, dialog, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
@@ -11,6 +11,27 @@ const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
 const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
 let largeDiffReport;
+const diffRequests = [];
+if (largeDiff) {
+  // Handler time includes sidecar queueing, not only backend processing.
+  // Preserve the actual handler, arguments, result and rejection.
+  const handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, listener) => handle(channel, async (...args) => {
+    if (!/diff/i.test(channel)) return listener(...args);
+    const sample = { channel, startedMs: performance.now(), status: 'pending' };
+    diffRequests.push(sample);
+    try {
+      const result = await listener(...args);
+      sample.status = 'resolved';
+      return result;
+    } catch (error) {
+      sample.status = 'rejected';
+      throw error;
+    } finally {
+      sample.durationMs = performance.now() - sample.startedMs;
+    }
+  });
+}
 let largeFileReport;
 let largeTreeReport;
 let confirmationReport;
@@ -80,6 +101,7 @@ function finish(error, details) {
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
   const result = {root,error:error?.message,...details,confirmation:confirmationReport,...(largeDiff ? {largeDiff:largeDiffReport} : {}),...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  if (largeDiff) result.diffRequests = diffRequests;
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
