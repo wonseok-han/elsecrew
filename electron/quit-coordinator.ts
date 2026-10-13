@@ -49,7 +49,7 @@ export class QuitCoordinatorV1 {
       const result = await this.#options.prepareSidecarQuit();
       if (result.safeToQuit || attempt >= 40 || result.blockers.length === 0
         || !result.blockers.every((blocker) => blocker === "provider-login:codex"
-          || blocker === "provider-login:claude")) return result;
+          || blocker === "provider-login:claude" || blocker === "provider-install")) return result;
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
     }
   }

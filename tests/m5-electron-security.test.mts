@@ -316,6 +316,7 @@ function moduleFor(
 ) {
   if (specifier === "electron") return fakes.electron;
   if (specifier.endsWith("provider-login-v1.ts")) return loginContract;
+  if (specifier.endsWith("provider-install-v1.ts")) return installContract;
   if (specifier.endsWith("approval-v1.ts")) return approvalContract;
   if (specifier.endsWith("project-catalog-v1.ts")) return catalogContract;
   if (specifier.endsWith("model-choices-v1.ts")) return modelChoicesContract;
@@ -342,6 +343,7 @@ function moduleFor(
 import * as loginContract from "../src/m5/contracts/provider-login-v1.ts";
 import * as approvalContract from "../src/m5/contracts/approval-v1.ts";
 import * as catalogContract from "../src/m5/contracts/project-catalog-v1.ts";
+import * as installContract from "../src/m5/contracts/provider-install-v1.ts";
 
 test("catalog IPC rejects foreign frames and renderer-supplied paths", async () => {
   const harness = await loadMain();

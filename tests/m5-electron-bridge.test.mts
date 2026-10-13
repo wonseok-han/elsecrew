@@ -525,6 +525,27 @@ test("login capability negotiates exact status and fixed requests", async () => 
   assert.deepEqual(await login, idle);
 });
 
+test("installation suffix negotiates exact baseline without enabling installation", async () => {
+  const { child, client } = createClient();
+  const started = client.start();
+  const suffix = ["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install"];
+  const ready = JSON.parse(g5dReadyLine());
+  ready.payload.capabilities.push(...suffix);
+  child.stdout.write(`${JSON.stringify(ready)}\n`);
+  assert.equal((await started).capabilities.at(-1), "provider.install");
+  const pending = client.install({ action: "status" });
+  const sent = JSON.parse(child.writes.at(-1)!);
+  assert.equal(sent.method, "provider.install");
+  const unsupported = { state: "unsupported", operationId: null, provider: null, plan: null, error: null, cancelRequested: false };
+  child.stdout.write(responseLine(sent.requestId, unsupported));
+  assert.deepEqual(await pending, unsupported);
+  const status = client.getSystemStatus();
+  const result = g5dStatus("ready") as any;
+  result.sidecar.capabilities.push(...suffix);
+  child.stdout.write(responseLine(JSON.parse(child.writes.at(-1)!).requestId, result));
+  await status;
+});
+
 test("catalog capability negotiates status and validates selected IDs", async () => {
   const { child, client } = createClient();
   const started = client.start();

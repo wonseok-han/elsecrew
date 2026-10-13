@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 typed IPC와 비활성 제품 경로)
+
+- 직전736452e는 요청 manager 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 provider.install의 정확한 요청/계획/상태 TypeScript 검증과 m5Install preload→현재 main frame→sidecar client→Rust manager 경로를 연결했다. 임의 명령/경로/URL·추가 필드·공급자/설치 위치 불일치·작업 ID 없는 실행 상태를 거절한다. plan/operation UUID와 필드 이름을 기존 Rust 출력에 맞췄다.
+- capability는 기존 exact baseline 뒤 chat.appendMessage/provider.login/run.approval/project.catalog/provider.install 순서로만 협상한다. 구버전 sidecar는 unsupported로 처리한다. 실제 제품 dispatcher는 manager enabled=false를 고정 전달하므로 status/prepare/start 호출로 설치나 계획을 시작할 수 없다. 비활성 여부와 protocol 지원 여부를 구분하며 별도 환경 변수 우회는 없다.
+- Sidecar의 app.prepareQuit에 install manager를 연결하고 Electron의 제한된 비동기 정리 재조회에 provider-install blocker를 추가했다. active evidence는 비활성이어도 recoveryRequired로 보존한다. 설치와 실제 에이전트/로그인의 동시 실행 배제·복구 UI·공개 활성화 독립 검토는 여전히 남는다.
+- 계약 회귀3개·협상/unsupported 브리지 회귀1개·제품 비활성 무실행 Rust 회귀를 추가하고 기존 manager 테스트 및 Electron import 대역을 갱신했다(미실행). 연결 컴파일에서 renderer ES lib의 Array.at 오류를 인덱스 접근으로 수정해 tsc --noEmit PASS, 일반 sidecar cargo check PASS4.76초, diff PASS다. Electron 전체 빌드/신규 테스트·누적/독립 검증은 묶음에 남긴다. Karpathy 지침으로 기존 typed IPC/협상 패턴을 재사용했다. 실제 설치/로그인/계정 호출 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 요청 manager와 종료 수명 연결부)
 
 - 직전8bae6f1은 단발 동의 구현 진척이다. 실제 checkout/dirty를 확인하고 status/prepare/dismiss/start/cancel의 정확한 필드만 받는 내부 InstallManager를 추가했다. 수락된 같은 plan/provider 재전송은 같은 작업 상태를 반환하며 새 worker를 만들지 않는다. worker 슬롯·작업 ID·취소 신호를 결속하고 terminal callback이 thread 종료보다 먼저 UI 성공/후속 로그인을 허용하지 않게 처리했다.

@@ -38,6 +38,7 @@ impl InstallManager {
         &mut self,
         storage: &Storage,
         params: &Value,
+        enabled: bool,
     ) -> Result<Value, SidecarError> {
         self.reap();
         let action = params
@@ -58,6 +59,23 @@ impl InstallManager {
         }
         if self.closing && !matches!(action, "status" | "cancel") {
             return Err(invalid());
+        }
+        if matches!(action, "prepare" | "start") {
+            provider(params)?;
+        }
+        if action == "start" && !params["planId"].as_str().is_some_and(valid_id) {
+            return Err(invalid());
+        }
+        if action == "cancel" && !params["operationId"].as_str().is_some_and(valid_id) {
+            return Err(invalid());
+        }
+        if !enabled {
+            self.detect_pending(storage)?;
+            return Ok(if self.snapshot()["state"] == "recoveryRequired" {
+                self.status()
+            } else {
+                view("unsupported", None, None, None, None)
+            });
         }
         match action {
             "status" => self.detect_pending(storage)?,
@@ -317,6 +335,31 @@ fn phase_name(phase: InstallPhase) -> &'static str {
 mod tests {
     use super::*;
     #[test]
+    fn disabled_product_does_not_prepare_or_start_installation() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = Storage::open(
+            &temp
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("hello-agent.sqlite3"),
+        )
+        .unwrap();
+        let mut manager = InstallManager::default();
+        for request in [
+            json!({"action":"status"}),
+            json!({"action":"prepare","provider":"codex"}),
+            json!({"action":"start","provider":"codex","planId":uuid::Uuid::new_v4().to_string()}),
+        ] {
+            assert_eq!(
+                manager.request(&storage, &request, false).unwrap()["state"],
+                "unsupported"
+            );
+        }
+        assert!(manager.worker.is_none());
+        assert!(!journal::has_active(&storage).unwrap());
+    }
+    #[test]
     fn rejects_extra_fields_and_quits_without_starting_a_process() {
         let temp = tempfile::tempdir().unwrap();
         let storage = Storage::open(
@@ -330,28 +373,34 @@ mod tests {
         let mut manager = InstallManager::default();
         assert_eq!(
             manager
-                .request(&storage, &json!({"action":"status"}))
+                .request(&storage, &json!({"action":"status"}), true)
                 .unwrap()["state"],
             "idle"
         );
         assert!(manager
-            .request(&storage, &json!({"action":"status","path":"/tmp"}))
+            .request(&storage, &json!({"action":"status","path":"/tmp"}), true)
             .is_err());
         assert!(manager
             .request(
                 &storage,
-                &json!({"action":"start","provider":"claude","planId":"unknown"})
+                &json!({"action":"start","provider":"claude","planId":"unknown"}),
+                true
             )
             .is_err());
         assert!(manager
             .request(
                 &storage,
-                &json!({"action":"cancel","operationId":uuid::Uuid::new_v4().to_string()})
+                &json!({"action":"cancel","operationId":uuid::Uuid::new_v4().to_string()}),
+                true
             )
             .is_err());
         assert!(manager.prepare_quit(&storage));
         assert!(manager
-            .request(&storage, &json!({"action":"prepare","provider":"codex"}))
+            .request(
+                &storage,
+                &json!({"action":"prepare","provider":"codex"}),
+                true
+            )
             .is_err());
         assert!(manager.worker.is_none());
     }
@@ -364,7 +413,7 @@ mod tests {
         let mut manager = InstallManager::default();
         assert_eq!(
             manager
-                .request(&storage, &json!({"action":"status"}))
+                .request(&storage, &json!({"action":"status"}), true)
                 .unwrap()["state"],
             "recoveryRequired"
         );

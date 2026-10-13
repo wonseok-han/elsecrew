@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest, type ModelChoicesResult } from "../src/m5/contracts/model-choices-v1.ts";
 import { validateApprovalRequest, validateApprovalResult, type ApprovalRequest, type ApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { validateLoginRequest, validateLoginStatus, type LoginRequest, type LoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+import { validateInstallRequest, validateInstallStatus, type InstallRequest, type InstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest, type ProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import type { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -422,6 +423,13 @@ export class SidecarClientV1 {
     if (!this.#ready?.capabilities.includes("provider.login")) return Promise.reject(new Error("login unavailable"));
     return this.#request("provider.login", validateLoginRequest(input)) as Promise<LoginStatus>;
   }
+  install(input: InstallRequest): Promise<InstallStatus> {
+    const request = validateInstallRequest(input);
+    if (!this.#ready?.capabilities.includes("provider.install")) {
+      return Promise.resolve({ state: "unsupported", operationId: null, provider: null, plan: null, error: null, cancelRequested: false });
+    }
+    return this.#request("provider.install", request) as Promise<InstallStatus>;
+  }
   approval(input: ApprovalRequest): Promise<ApprovalResult> {
     if (!this.#ready?.capabilities.includes("run.approval")) return Promise.reject(new Error("approval unavailable"));
     return this.#request("run.approval", validateApprovalRequest(input)) as Promise<ApprovalResult>;
@@ -639,6 +647,11 @@ export class SidecarClientV1 {
     if (envelope.kind === "event") {
       if (envelope.event === "system.ready") {
         const advertisedReady = parseReadyPayload(envelope);
+        const hasInstall = advertisedReady.capabilities.at(-1) === "provider.install";
+        if (hasInstall) {
+          if (advertisedReady.capabilities.at(-2) !== "project.catalog") throw new Error("invalid installation capability baseline");
+          advertisedReady.capabilities = advertisedReady.capabilities.slice(0, -1);
+        }
         const hasCatalog = advertisedReady.capabilities.at(-1) === "project.catalog";
         if (hasCatalog) {
           if (advertisedReady.capabilities.at(-2) !== "run.approval") throw new Error("invalid catalog capability baseline");
@@ -678,6 +691,7 @@ export class SidecarClientV1 {
         if (hasLogin) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.login"];
         if (hasApproval) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "run.approval"];
         if (hasCatalog) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "project.catalog"];
+        if (hasInstall) negotiatedReady.capabilities = [...negotiatedReady.capabilities, "provider.install"];
         this.#ready = negotiatedReady;
         this.#agentAdapterNegotiated = negotiatedG5A || negotiatedG5DAgent;
         this.#nativeAdapterNegotiated = negotiatedNative;
@@ -915,6 +929,7 @@ export class SidecarClientV1 {
         return response.result;
       }
       case "provider.login": return validateLoginStatus(response.result, validateLoginRequest(pending.params).provider);
+      case "provider.install": return validateInstallStatus(response.result);
       case "run.approval": return validateApprovalResult(response.result, validateApprovalRequest(pending.params));
       case "chat.list": {
         const value = validateChatListPageV1(response.result); assertResponseField(value, pending.params, "projectId"); return value;

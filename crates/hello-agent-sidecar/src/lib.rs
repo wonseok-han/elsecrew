@@ -520,6 +520,8 @@ struct Sidecar {
     login: provider_login_manager::LoginManager,
     #[cfg(target_os = "macos")]
     claude_login: provider_login_manager::LoginManager,
+    #[cfg(target_os = "macos")]
+    install: provider_install_owner::manager::InstallManager,
     storage: Storage,
     projects: ProjectManager,
     ready: ReadyPayloadV1,
@@ -594,6 +596,7 @@ impl SidecarSession {
                     .chain(std::iter::once(&"provider.login"))
                     .chain(std::iter::once(&"run.approval"))
                     .chain(std::iter::once(&"project.catalog"))
+                    .chain(std::iter::once(&"provider.install"))
                     .map(|value| (*value).to_string())
                     .collect(),
                 sidecar_instance_id,
@@ -910,6 +913,8 @@ impl Sidecar {
             login: provider_login_manager::LoginManager::default(),
             #[cfg(target_os = "macos")]
             claude_login: provider_login_manager::LoginManager::claude(),
+            #[cfg(target_os = "macos")]
+            install: provider_install_owner::manager::InstallManager::default(),
             projects,
             ready,
             prepared_to_quit: false,
@@ -1025,6 +1030,15 @@ impl Sidecar {
                     ..project::ProjectAction::default()
                 })
             }
+            "provider.install" => {
+                // Activation requires installation boundary review and integration
+                // verification. Merely negotiating this method grants no install.
+                #[cfg(target_os = "macos")]
+                let result = self.install.request(&self.storage, &request.params, false)?;
+                #[cfg(not(target_os = "macos"))]
+                let result = serde_json::json!({"state":"unsupported","operationId":null,"provider":null,"plan":null,"error":null,"cancelRequested":false});
+                Ok(project::ProjectAction { result, ..project::ProjectAction::default() })
+            }
             "provider.login" => {
                 #[cfg(target_os = "macos")]
                 let result =
@@ -1079,6 +1093,9 @@ impl Sidecar {
                     }
                     if !self.claude_login.prepare_quit() {
                         blockers.push("provider-login:claude".to_owned());
+                    }
+                    if !self.install.prepare_quit(&self.storage) {
+                        blockers.push("provider-install".to_owned());
                     }
                     blockers
                 };

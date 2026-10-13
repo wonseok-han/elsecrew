@@ -3,6 +3,7 @@ import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
 import { readDeviceReport } from "./device-report.ts";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
+import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus } from "../src/m5/contracts/provider-install-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult } from "../src/m5/contracts/project-catalog-v1.ts";
 import { mkdirSync, realpathSync, statSync } from "node:fs";
@@ -313,6 +314,11 @@ function prepareQuit(): Promise<PrepareQuitResultV1> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle(INSTALL_CHANNEL, async (event, input: unknown) => {
+    assertCurrentMainFrame(event);
+    if (!sidecar) throw new Error("sidecar was not started");
+    return validateInstallStatus(await sidecar.install(validateInstallRequest(input)));
+  });
   ipcMain.handle(DEVICE_REPORT_CHANNEL, async (event, ...args: unknown[]) => {
     assertCurrentMainFrame(event);
     if (args.length !== 0) throw new Error("device report takes no input");
