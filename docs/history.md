@@ -1,5 +1,25 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (외부 RSS 원시 표본 보존 도구)
+
+- 직전 턴은 프런트/계약467건 통과로 진척했다. packaged 측정이 터미널 출력에만 남던 누락을 줄이기 위해 m5-observe-process-memory.cjs를 추가했다. 명시 PID·최대240표본·단계 라벨만 받아 ps를 읽으며 앱 실행/종료/설정 변경은 하지 않는다. 새 임시 폴더에 원시 표본/오류를 보존하며 기존 파일을 덮지 않는다.
+- Karpathy 최소 변경 원칙으로 기존 processTreeMemory를 재사용했다. OBSERVED는 수집 완료일 뿐 gate PASS가 아니며 diagnostic/gateEligible false 및 PID 재사용·escaped descendant 미검증을 명시했다. 오류 시 부분 표본 보존/잘못된 인자 거절 포함 단위3/3 PASS. 별도 생성 Node 트리의 실제 CLI2표본 저장도 OBSERVED/exit0(1MdXr5); 앱 성능 수치로 쓰지 않는다.
+- 절차 문서와 npm test에 포함되는 .test.mts 회귀 추가, diff 검사 PASS. 도구/회귀/절차와 누적 history 선택 커밋, 기존9월 archive 보존. 다음: packaged 전체 collector 연결·메모리 원인/Claude·Windows·출시 증거. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (프런트·계약 전체 회귀 확인)
+
+- 직전 턴은 최신 packaged 유휴 RSS 초과와 GPU 비교 증거로 진척했다. 이번은 현재 사용자 흐름/남은 요구를 대조하고 아직 이번 통합에서 실행하지 않은 프런트·계약 전체 npm test를 수행했다(session84105).
+- 467/467 PASS,23.78초/exit0. 편집 상태·프로젝트/채팅 분리·IPC·저장 계약·하네스 판정·측정기 회귀를 포함하며 실제 계정·GUI 렌더링·Windows/성능 수치의 합격 증거로 확대하지 않는다. 기존 메모리 FAIL은 그대로다.
+- 현재 온보딩은 기존 Git 프로젝트 선택이고 standalone snapshot 계약은 committed source를 요구한다. 사용자 원본에 git init/첫 commit을 새로 수행하는 기능을 이번에 임의 추가하지 않았다. 제품 코드 변경/실제 계정 호출0회, 기존9월 archive 보존/main/push 없음.
+- 다음: packaged G6 collector 및 유휴 메모리 원인, Claude 사용자 로그인 후 승인된 실제 작업 검증, Windows/출시 증거. 전체 목표 미완료이며 누적 검증 성공 항목을 의미 없이 반복하지 않는다.
+
+### 2026-10-13 · by GPT-6 Astra (패키징 앱 유휴 RSS와 GPU 비교)
+
+- 직전d8d3ca8은 native 대형 파일 collector/실패 증거로 진척했다. 최신 HEAD를 pnpm m5:package:smoke로 갱신해 darwin-arm64 PASS(session68368). out 산출물만 갱신했고 설치/게시하지 않았다.
+- 새 격리 userData /private/tmp/hello-agent-packaged-memory.7oqXYK로 패키지 실행(session90148/PID78227). CUA에서 저장 프로젝트 없는 처음 시작하기 확인 후 root와 자손5개를 ps RSS250ms 간격10회 관측: 모두461193216B=439.828125MiB,400MiB 기준 초과. main174538752/GPU93339648/utility47087616/renderer128925696/sidecar17301504B. Cmd-Q 및 exit0 확인. 이전346MiB 단일 표본을 현재 패키지 합격 근거로 재사용하지 않는다.
+- 같은 임시 userData에서 --disable-gpu 옵션만 붙인 비교 실행(session76929/PID81709)은10표본509296640B=485.703125MiB였다. 첫 화면 확인·Cmd-Q/exit0. 한 쌍의 진단으로 인과/반복 안정성을 확정하지 않지만 개선 근거가 없어 제품 기본 GPU 설정은 변경하지 않았다. 제품 코드 수정/실제 계정 호출0회, 임시 증거 폴더 보존.
+- 다음: packaged 유휴 RSS 원인과 G6 전체 collector/10회 조건, Claude 실연결·Windows·출시 증거. 개발 실행만의 초과라는 가설은 이번 관측으로 지지되지 않는다. 기준 완화/강제 GC/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (native 대형 파일 경로와 RSS 진단 연결)
 
 - 직전 턴은 최신 native 편집/반영/복원·전체 재시작 확인으로 진척했다. 빈 화면에서는 Monaco가 생성되지 않고 활성 파일에서만 초기화되며 cleanup이 기존에 연결돼 있음을 확인했다. 기존 합성 반복 reload의 RSS만으로 제품 누수로 단정하거나 무근거 최적화를 추가하지 않았다.

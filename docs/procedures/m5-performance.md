@@ -24,6 +24,10 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ## Native UI 작은 프로젝트 메모리 진단
 
+### 패키징 앱 외부 관측
+
+격리 userData로 실행한 시험 앱의 PID를 확인한 뒤 `node scripts/m5-observe-process-memory.cjs PID 40 idle`을 실행하면250ms 간격40표본을 수집한다. `idle|loaded|retained` 표시는 관측자가 확인한 화면 단계이며 자동 판정하지 않는다. 앱을 실행/종료/변경하지 않고 원시 PID별 RSS를 새 OS 임시 폴더의 observation.json에 보존한다. 수집 오류는 부분 표본을 남기고 실패한다. `OBSERVED`/exit0은 수집 완료일 뿐 성능 PASS가 아니며 `diagnostic:true`, `gateEligible:false`다. 현재 자손만 관측하고 PID 재사용/부모 이탈을 검증하지 않으므로 실제 에이전트 전체 프로세스 게이트를 대신하지 않는다.
+
 `HELLO_AGENT_SMOKE_LARGE_FILE=1`을 추가하면 별도 생성 프로세스가 동일한 UTF-8 5MiB/100,000줄 fixture를 실제 Git 프로젝트에 넣는다. 실제 sidecar 읽기→Monaco 본문/입력 요소→두 frame 관측까지 renderer 시계로 재며 결과의 `largeFile.fileEditableMs`에 기록한다. 1,500ms 초과는 진단 실패다. 파일 생성용 캐시를 측정 앱의 main에 남기지 않는다. `HELLO_AGENT_SMOKE_MEMORY=1`과 결합하면 해당 파일 열기와 기존 두 채팅 흐름을 RSS 범위에 포함한다. 단일 관측이며 packaged/10회 p95/실제 입력 paint/4 stream 증거는 아니므로 `diagnostic:true`, `gateEligible:false`를 유지한다.
 
 `HELLO_AGENT_SMOKE_MEMORY=1 HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui`는 기존 실제 UI 시나리오에 250ms RSS 수집을 추가한다. 시작 화면에서 1초 idle을 수집한 뒤 생성 프로젝트 편집/반영/reload/복원/두 채팅을 실행하고 프로젝트 화면을 정상적으로 닫아 60초 뒤 잔류량을 기록한다. 제품 GC 설정이나 캐시를 변경하지 않는다.
