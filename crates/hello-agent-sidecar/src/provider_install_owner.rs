@@ -8,6 +8,8 @@ use crate::{
 use cap_std::fs::{Dir, DirBuilder, DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
+pub(crate) mod journal;
+
 const STAGING: &str = "provider-install-staging-v1";
 const PENDING: &str = "provider-install.pending";
 

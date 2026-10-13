@@ -26,7 +26,7 @@ pub enum InstallFailure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidInstallTransition;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InstallLifecycle {
     phase: InstallPhase,
     failure: Option<InstallFailure>,

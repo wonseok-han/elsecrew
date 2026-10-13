@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 transaction 영속 기록과 재검증)
+
+- 직전542beb4는 설치용 프로세스 바인딩 구현 진척이다. 같은 InstallScope 아래 고정 create-new JSONL 원장을 추가했다. 작업 UUID/공급자 header와 최대16개 전이/16KiB 한도,600 단일 링크 regular file·flock·no-follow·dev/ino/길이 재검증을 적용한다. 인증정보나 renderer 제공 경로는 받지 않는다.
+- 기존 InstallLifecycle을 복제해 전이를 먼저 검증하고 append+sync 성공 뒤 메모리 상태를 공개한다. 기록 실패는 sticky recoveryRequired다. replay는 순번·정확 필드·canonical JSON(중복키 포함 다른 인코딩 거절)·완전한 마지막 줄과 같은 상태 전이를 검사한다. 조회는 기록/잠금을 삭제하거나 프로세스 신호·자동 재개 권한을 만들지 않는다.
+- 취소 플래그까지 상태 동등성을 비교해 검증 후 stopping 중 취소를 유실하지 않는다. 최종 정리 중 취소의 재생, live writer/중복 시작 차단, 파일 교체·손상 거절 회귀2개를 추가했다. 설치 worker/동의/IPC와 이 원장의 연결 및 명시 terminal 보관·복구 해제는 아직 미구현이다.
+- Karpathy 지침으로 기존 상태·scope를 재사용했다. 일반 sidecar cargo check(CARGO_INCREMENTAL=0/jobs4) PASS4.09초, rustfmt/diff PASS, target1.2GiB. 새 테스트·프로세스/파일 오류 주입·독립 안전 검토는 설치 묶음 검증에 남긴다. 실제 설치/계정 실행 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 전용 프로세스 소유권 바인딩)
 
 - 직전82ea134는 내부 설치 상태 구현 진척이다. 기존 LoginProcess가 실제로 수행하는 create-new durable fence/flock·spawn barrier·자손 신원 기록·종료 관측·terminal 이전 잠금 유지를 확인했다. Karpathy 지침에 따라 이를 복제하지 않고 설치용 LoginProfile 바인딩을 추가했다.
