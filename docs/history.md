@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (최신 macOS release 패키지 검증)
+
+- 이전 턴은4a92d39의 UI 복구 수정·회귀·독립 승인·커밋으로 진전했다. 이번에는 남은 packaged 검증 경로를 확인하고 최신 HEAD에서 Forge main/preload/renderer 및 Rust release sidecar를 실제 패키징했다. CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4/CARGO_INCREMENTAL=0, 무거운 작업1개를 유지했다. 최초 제한 환경 fetch 실패 후 승인된 외부 실행으로 완료했다.
+- m5:package:smoke PASS: macOS arm64의 실제 asar/Monaco worker·fuses와 packaged sidecar의 현행 ready/status·SQLite 시작/정상 종료를 검증했다. 이어 make --skip-package로 같은 최신 패키지의 ZIP 생성 성공. package-size-only 측정은 unpacked322239272B/압축124072446B로350/200MiB 기준 PASS다. 로그 /private/tmp/hello-agent-package-4a92d39{,-retry}.log, /private/tmp/hello-agent-make-4a92d39.log, /private/tmp/hello-agent-package-size-4a92d39.json에 보존한다.
+- 사용자9월 archive 변경 때문에 clean-HEAD 정식 G6 gate와 구분한다. 서명/공증·실제 GUI·입력·메모리·실계정/모델 흐름·전체 성능 수집기는 아직 미완료다. 개발용 측정값을 packaged 결과로 승격하지 않는다. 이번에는 앱 GUI/계정/모델을 실행하지 않았다.
+- 저장공간 요청에 따라 생성·측정이 끝난 ZIP 중복본만 제거하고 다음 native 검증용 out/hello-agent-darwin-arm64의 최신 앱 한 벌은 유지한다. ZIP은 make --skip-package로 재생성 가능하다. 사용자 원본/인증/복구 백업은 보존하며 main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (준비 취소 경합 화면 복구·활성화 승인 재확인)
 
 - 두 macOS 기능 활성화 승인을 재수신하고944bba1 및 현재 코드와 대조했다. 이미 활성화된 설치/명시 백업 정리를 중복 변경하거나 실제 설치·삭제하지 않았다. 사용자9월 archive21줄은 계속 별도 보존한다.
