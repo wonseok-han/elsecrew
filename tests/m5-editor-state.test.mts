@@ -819,6 +819,64 @@ test("binary·tooLarge 파일, watcher overflow, bounded tree와 rename diff를 
   controller.dispose();
 });
 
+test("refreshing changes clears stale diff content and invalidates an in-flight selection", async () => {
+  const bridge = new FakeBridge();
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    await controller.openDiff("src/removed.ts");
+    assert.equal(controller.snapshot().diffText, "-removed\n");
+    await controller.refreshChanges();
+    assert.equal(controller.snapshot().diffFile, null);
+    assert.equal(controller.snapshot().diffText, "");
+    bridge.autoDiffChunks = false;
+    const pending = controller.openDiff("src/new.ts");
+    await nextTurn();
+    await controller.refreshChanges();
+    bridge.emitChunk("stream_diff", "-old\n+new\n");
+    await pending;
+    assert.equal(controller.snapshot().diffFile, null);
+    assert.equal(controller.snapshot().diffText, "");
+  } finally { controller.dispose(); }
+});
+
+test("latest diff selection survives an older descriptor, stream, or failure", async () => {
+  for (const late of ["descriptor", "stream", "failure"] as const) {
+    class DelayedDiffBridge extends FakeBridge {
+      pending = deferred<DiffFileDescriptorV1>();
+      override async getDiffFile({ path }: { projectId: string; path: string }): Promise<DiffFileDescriptorV1> {
+        if (path === "src/first.ts") return this.pending.promise;
+        return super.getDiffFile({ projectId: "project_01", path });
+      }
+    }
+    const bridge = new DelayedDiffBridge();
+    const controller = new ProjectEditorController(bridge);
+    controller.start();
+    try {
+      await controller.chooseProject();
+      const first = controller.openDiff("src/first.ts");
+      const descriptor: DiffFileDescriptorV1 = {
+        projectId: "project_01", path: "src/first.ts", oldPath: null, kind: "modified",
+        baseVersion: version("old"), worktreeVersion: version("first"), byteLength: 7,
+        stream: { streamId: "stream_late_diff", chunkBytes: 262144 },
+      };
+      if (late === "stream") { bridge.pending.resolve(descriptor); await nextTurn(); }
+      await controller.openDiff("src/removed.ts");
+      if (late === "failure") bridge.pending.reject(new Error("stale diff failure"));
+      else {
+        bridge.pending.resolve(descriptor);
+        await nextTurn();
+        bridge.emitChunk("stream_late_diff", "+first\n");
+      }
+      await first;
+      assert.equal(controller.snapshot().diffFile?.path, "src/removed.ts", late);
+      assert.equal(controller.snapshot().diffText, "-removed\n", late);
+      assert.equal(controller.snapshot().error, null, late);
+    } finally { controller.dispose(); }
+  }
+});
+
 test("allocation-free byte lengths match TextEncoder for Unicode and lone surrogates", () => {
   const encoder = new TextEncoder();
   const samples = ["", "ascii", "한글", "🦦", "\ud800", "\udc00", "\ud800a\udc00", "🦦나".repeat(10000)];

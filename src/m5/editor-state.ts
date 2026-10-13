@@ -130,6 +130,7 @@ export class ProjectEditorController {
   #projectEpoch = 0;
   #selectionGeneration = 0;
   #treeGeneration = 0;
+  #diffGeneration = 0;
   #snapshotCreation: SnapshotCreationOperation | null = null;
   #snapshotCreationBlocked: SnapshotCreationOperation | null = null;
   #actionBlocked = false;
@@ -670,6 +671,9 @@ export class ProjectEditorController {
   }
 
   async #refreshChanges(projectId: string, epoch: number, propagate = false): Promise<void> {
+    // A refreshed summary cannot certify the previously fetched file content.
+    this.#diffGeneration++;
+    this.#set({ diffFile: null, diffText: "" });
     try {
       const workspace = this.#state.workspace;
       const diffSummary = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffSummary(workspace) : await this.#bridge.getDiffSummary({ projectId });
@@ -687,6 +691,7 @@ export class ProjectEditorController {
     const project = this.#state.project;
     if (!project) return;
     const epoch = this.#projectEpoch;
+    const generation = ++this.#diffGeneration;
     try {
       const workspace = this.#state.workspace;
       const diffFile = workspace ? await this.#workspaceMethods()!.getWorkspaceDiffFile({ ...workspace, path }) : await this.#bridge.getDiffFile({ projectId: project.id, path });
@@ -694,10 +699,10 @@ export class ProjectEditorController {
       const diffText = diffFile.stream
         ? await this.#awaitStream(diffFile.stream.streamId, diffFile.byteLength, MAX_DIFF_STREAM_BYTES)
         : "";
-      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace)) return;
+      if (!this.#isCurrent(project.id, epoch) || !sameWorkspace(this.#state.workspace, workspace) || generation !== this.#diffGeneration) return;
       this.#set({ diffFile, diffText, panel: "changes", error: null });
     } catch (error) {
-      if (!this.#isCurrent(project.id, epoch)) return;
+      if (!this.#isCurrent(project.id, epoch) || generation !== this.#diffGeneration) return;
       this.#setError("m5.editorError.diff", error);
     }
   }

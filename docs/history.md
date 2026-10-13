@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (변경 갱신 시 오래된 diff 제거)
+
+- 직전 턴은 diff 선택 경합 구현으로 진척했다. 저장/감시 뒤 refreshChanges는 목록만 갱신하고 이전 diff 본문을 유지하는 점을 확인했다. 갱신 시작 시 이전 본문을 비우고 diff 요청 세대를 올려 진행 중인 과거 조회도 다시 노출되지 않도록 했다. 최신 본문은 파일 재선택으로 조회하며 원본 쓰기·실행 권한은 변경하지 않는다.
+- 앞선 선택 경합과 이번 갱신 무효화 회귀를 묶어 node --test --experimental-strip-types tests/m5-editor-state.test.mts 실행:54/54 PASS(session29802). diff 검사 PASS. 실제 화면·G6 메모리·전체 제품 합격은 별도이며 이번 수정이 RSS 원인을 해결했다고 주장하지 않는다.
+- 관련 controller/회귀/history만 로컬 커밋하고 기존9월 archive는 제외한다. 실제 계정 호출0회, main/push 없음. 다음: UI 마감·메모리 기여 조사, Claude 사용자 로그인 확인과 별도 승인 실측, Windows/출시 잔여 범위. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (diff 마지막 선택 보존)
+
+- 직전 턴은 실측·6ed3cfc 커밋으로 진척했다. 현재 동일 브랜치/기존9월 archive 변경을 보존했다. 메모리 경로 조사 중 openDiff가 프로젝트 epoch만 검사해 같은 프로젝트의 이전 응답/실패가 마지막 선택을 덮는 경합을 발견했다. 이 경합을 메모리 초과 원인으로 단정하지 않는다.
+- Karpathy 지침으로 diff 요청 세대 번호를 추가하고 최신 요청만 내용/오류를 반영한다. 이전 stream도 기존 바이트 제한·완료 정리를 거치며 원본 쓰기·실행/복구 계약은 변경하지 않는다. 늦은 descriptor/stream/실패 각각 마지막 선택 유지 회귀를 추가했다.
+- 이번은 구현 체크포인트이며 실행 검증은 후속 편집기 묶음 대상이다. diff 검사만 수행. 실제 계정 호출0회/main/push 없음. 다음: 편집기 묶음 검증·메모리 기여 조사와 UI/Claude 로그인/Windows/출시 잔여 범위, 제품 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (입력 구간 실측·진단 기록 마감)
 
 - c5dde79 위 입력 관측 보강으로 pnpm m5:measure:renderer --diagnostic --memory 실행(session11802), exit1/FAIL. 증거 .artifacts/m5-performance/renderer-2026-10-13T01-41-13.598Z-21150.json. inputPaint 최대71.8ms 표본은 전달 전61.8ms/수신 후10ms이며 후자는 상태 polling·두 frame도 포함한다. 이 표본만으로 이전305.5ms 원인이나 Monaco 무결함을 단정하지 않는다. 기존50ms 판정은 유지한다.
