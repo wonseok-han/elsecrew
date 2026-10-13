@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 화면·공식 임시 설치 호환 통과)
+
+- 직전053aced는 실패 진단/화면 묶음 검증 진척이다. 실제 checkout/dirty를 확인하고 기존 Chromium smoke에 설치 동의 전 무실행, 공급자/계획 변경 시 재동의, 정확 쓰기 위치, 이중 클릭/응답 유실 후 단1회 시작, 상태 조회 후 취소·작업 ID 결속 복구를 추가했다. UI2 PASS10.1초이며 가짜 설치 응답이다. Karpathy 지침으로 기존 화면/시험을 재사용했다.
+- 같은 독립 검토자는7228665의 deny-default·기존 hardlink 차단으로 기존 blocker2건 해소/추가 확인 결함 없음으로 보고했다. 공식 호환/화면 검증과 hostile same-UID TOCTOU 범위 명시를 활성화 전제로 남겼다. 이번 UI/아래 공식 시험 증거와 후속 TLS literal 수정의 재검토는 별도다.
+- 사용자가 두 공식 installer의 임시 HOME 신규 설치·업데이트 시험을 명시 승인했다. OpenAI Docs로 [공식 CLI 설치 문서](https://developers.openai.com/codex/cli)의 standalone URL을 재확인했다. cfg(test)/ignored 시험이 제품 consent/다운로드/deny-default sandbox/종료·서명 검증/원장 보관을 그대로 호출한다. 첫2회 묶음은 installer 단계 실패/안전 종료/임시 자료 제거였다. test-only 출력으로 root 소유0644 `/private/etc/ssl/openssl.cnf` 읽기 누락을 확인해 해당 literal만 read 허용했다. 사용자 설정·자격증명·쓰기 경계는 확대하지 않았다.
+- 수정 후 공식 Claude2.1.296과 Codex0.162.1 각각 신규 설치+재설치/업데이트 모두 Installed·서명/경로·종료/잠금 해제·합성 .zshrc 불변을 통과했다(ignored2 PASS87.58초, session79102). Codex PATH aliases 권한 경고는 있었지만 고정 standalone pair 검증은 통과했다. 모델/로그인/실제 HOME은 사용하지 않았다. 확정 종료 뒤 각 TempDir를 제거했고 같은 prefix 디렉터리가 남지 않음을 확인했다. Rust target 약1.6GiB이며 incremental 비활성 유지.
+- rustfmt/diff PASS. 제품 enabled=false 유지, 기존 미커밋 cleanup/문서 변경 보존, main/push 없음. 다음: TLS 파일 한정 보완 재검토와 설치 활성화 판단, 누적 실패2건/실제 Claude 로그인 확인/UI 전체/G6/Windows·배포 등 전체 미완료 범위 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (누적 실패 진단·화면 묶음 검증)
 
 - 직전6841fed는 설치 상태 계약 수정 진척이다. 실제 checkout/HEAD/기존 dirty를 확인했다. backup cleanup은 이제 의도한 오류 주입에 도달했는지를 먼저 확인하며, vendor gate 회귀는 최소/실제 FD·종료 상태·임시 child stderr를 출력한다. 이전의 일반 is_err/누출 단정 메시지로 원인을 잃지 않게 했고 제품 보호 정책은 바꾸지 않았다.
@@ -150,7 +158,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **설치 활성화 차단(2026-10-13)**: 공식 설치 스크립트도 allow-default + file-write 거절만으로 보호를 주장하지 않는다. 같은 HOME의 허용 폴더에 기존 hardlink가 있으면 외부 원본이 바뀔 수 있어 metadata admission과 새 file-link 금지가 필요하다. deny-default/제한 read·exec·DNS/443 후보와 공유 파일 거절을 추가했으나 OS 경계·공식 설치 호환·독립 재검토 전이며 제품 enabled=false를 유지한다. 단위 테스트를 설치 활성화 증거로 대신하지 않는다.
+- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. 시스템 openssl.cnf literal 읽기 보완의 후속 검토/제품 활성화는 남으며 enabled=false 유지. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
 
 - **설치/기기 진단 연결(2026-10-13)**: d8b131d는 읽기 전용 OS/CPU/RAM/userData 여유 공간 표시만 연결했다(설치 준비/실행 가능 판정 아님). Codex 선택기는 기존 bundle→레거시 ~/.local/bin 직접 pair→공식 ~/.codex/packages/standalone 링크의 concrete pair 순서이며 기존 서명/no-follow/identity 검증을 유지한다. 465901d의 test-only helper 참조는 수정하고 일반 cargo check·독립 정적 검토를 통과했다. 전체 자동 설치 worker/launcher 회귀/실제 설치 및 기기 UI 검증은 미완료다.
 

@@ -1,4 +1,5 @@
 const listeners = new Set();
+window.m5Install = { request: async () => ({state:"unsupported", operationId:null, provider:null, plan:null, error:null, cancelRequested:false}) };
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {

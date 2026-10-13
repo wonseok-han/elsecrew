@@ -24,6 +24,10 @@ use std::{
 
 const DEADLINE: Duration = Duration::from_secs(600);
 const OUTPUT_LIMIT: usize = 1024 * 1024;
+#[cfg(test)]
+thread_local! {
+    pub(super) static INSTALL_DIAGNOSTICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 const POLICY: &str = r#"(version 1)
 (deny default)
 (deny file-link)
@@ -34,6 +38,7 @@ const POLICY: &str = r#"(version 1)
     (subpath "/usr/lib") (subpath "/usr/share") (subpath "/bin") (subpath "/sbin")
     (literal "/dev/null") (literal "/dev/urandom")
     (literal "/private/etc/ssl/cert.pem") (literal "/private/etc/resolv.conf")
+    (literal "/private/etc/ssl/openssl.cnf")
     (literal "/private/etc/hosts") (literal "/private/etc/localtime")
     (subpath (param "TEMP")))
 (allow process-exec
@@ -327,6 +332,12 @@ impl InstallerReservation<'_> {
             )?;
             self.collect(cancel)
         })();
+        #[cfg(test)]
+        INSTALL_DIAGNOSTICS.with(|enabled| {
+            if enabled.get() {
+                eprintln!("installer execution result: {result:?}");
+            }
+        });
         if self.installer.finish().is_err()
             || !self
                 .installer
@@ -458,6 +469,12 @@ impl InstallerReservation<'_> {
                         if count > OUTPUT_LIMIT {
                             return Err(failure());
                         }
+                        #[cfg(test)]
+                        INSTALL_DIAGNOSTICS.with(|enabled| {
+                            if enabled.get() {
+                                eprintln!("installer output: {}", String::from_utf8_lossy(&bytes));
+                            }
+                        });
                         continue;
                     }
                     OutputChunk::Eof => eof = true,

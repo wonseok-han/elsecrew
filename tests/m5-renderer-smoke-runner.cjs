@@ -3,6 +3,7 @@ const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mkdtempSync, writeFileSync } = require("node:fs");
 const { measureMessagePaint } = require("../scripts/m5-message-paint-probe.cjs");
+const { probeInstallConsent } = require("./m5-install-ui-probe.cjs");
 const { tmpdir } = require("node:os");
 
 const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-smoke-"));
@@ -130,6 +131,7 @@ app.whenReady().then(async () => {
     if (!document.getElementById('claude-connection-details').hidden) throw new Error('Codex error expanded unrelated Claude');
     window.m5SmokeLoginStatusFailure = false;
     await ${waitFor("document.getElementById('codex-connection-details').hidden", "status restoration compacts connection")};
+    await (${probeInstallConsent.toString()})();
     await ${waitFor("[...document.querySelectorAll('button')].some((button) => !button.disabled && (button.getAttribute('aria-label') === controlLabel || button.textContent?.trim() === controlLabel))", "enabled accessible project-selection control")};
     const projectButton = [...document.querySelectorAll("button")].find((button) => !button.disabled && (button.getAttribute("aria-label") === controlLabel || button.textContent?.trim() === controlLabel));
     if (!projectButton) throw new Error("renderer smoke lost its enabled accessible project-selection control after it was observed");

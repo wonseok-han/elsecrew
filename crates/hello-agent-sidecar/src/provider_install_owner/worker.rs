@@ -93,6 +93,74 @@ mod tests {
     use crate::Storage;
     use std::sync::Mutex;
 
+    // Explicit opt-in only: downloads and runs official installers in an isolated
+    // temporary HOME using the product consent, sandbox, owner and verifier.
+    fn official_install_and_update(provider: &str) {
+        super::super::execute::INSTALL_DIAGNOSTICS.with(|enabled| enabled.set(true));
+        let temp = tempfile::Builder::new()
+            .prefix("hello-agent-official-install-")
+            .tempdir()
+            .unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let home = root.join("home");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::write(home.join(".zshrc"), b"preserve synthetic shell settings\n").unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        for attempt in 1..=2 {
+            let mut consent = super::super::consent::ConsentStore::default();
+            let plan = consent.prepare_at_home(provider, &home).unwrap();
+            let authorization = consent
+                .accept(plan["planId"].as_str().unwrap(), provider)
+                .unwrap();
+            let outcome = execute_consented(
+                InstallScope::from_storage(&storage).unwrap(),
+                authorization,
+                &AtomicBool::new(false),
+                &|phase| {
+                    eprintln!(
+                        "official-install provider={provider} attempt={attempt} phase={phase:?}"
+                    )
+                },
+            );
+            let closed = !root.join(super::super::PENDING).exists()
+                && !root.join(super::super::EXECUTION_PENDING).exists()
+                && !root.join("provider-install-journal-v1.jsonl").exists();
+            if !closed {
+                let retained = temp.keep();
+                panic!(
+                    "unconfirmed installation closure; retained={} outcome={outcome:?}",
+                    retained.display()
+                );
+            }
+            assert_eq!(
+                std::fs::read(home.join(".zshrc")).unwrap(),
+                b"preserve synthetic shell settings\n"
+            );
+            assert_eq!(
+                outcome.unwrap(),
+                InstallPhase::Installed,
+                "{provider} attempt={attempt}; confirmed-closed temporary data will be removed"
+            );
+        }
+        drop(storage);
+        temp.close().unwrap();
+        eprintln!(
+            "official-install provider={provider} install+update passed; temporary files removed"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires explicit approval: official network download and temporary HOME installation; no login/model"]
+    fn official_codex_installer_temp_home_install_and_update() {
+        official_install_and_update("codex");
+    }
+
+    #[test]
+    #[ignore = "requires explicit approval: official network download and temporary HOME installation; no login/model"]
+    fn official_claude_installer_temp_home_install_and_update() {
+        official_install_and_update("claude");
+    }
+
     #[test]
     fn pre_canceled_transaction_archives_without_network_or_processes() {
         let temp = tempfile::tempdir().unwrap();
