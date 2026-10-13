@@ -1,10 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { DEVICE_REPORT_CHANNEL, validateDeviceReport } from "../src/m5/contracts/device-report-v1.ts";
+import { DEVICE_REPORT_CHANNEL as M5_DEVICE_REPORT_CHANNEL, validateDeviceReport } from "../src/m5/contracts/device-report-v1.ts";
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { APPROVAL_CHANNEL as M5_APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult, type ApprovalRequest } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL as M5_PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest } from "../src/m5/contracts/project-catalog-v1.ts";
 import { LOGIN_CHANNEL as M5_LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus, type LoginRequest } from "../src/m5/contracts/provider-login-v1.ts";
-import { INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus, type InstallRequest } from "../src/m5/contracts/provider-install-v1.ts";
+import { INSTALL_CHANNEL as M5_INSTALL_CHANNEL, validateInstallRequest, validateInstallStatus, type InstallRequest } from "../src/m5/contracts/provider-install-v1.ts";
 
 import { M5_INTERNAL_CHANNELS_V1 } from "../src/m5/contracts/lifecycle-v1.ts";
 import type { M5BridgeV6 } from "../src/m5/contracts/bridge-v6.ts";
@@ -112,7 +112,7 @@ contextBridge.exposeInMainWorld("m5Approval", Object.freeze({
   },
 }));
 contextBridge.exposeInMainWorld("m5Device", Object.freeze({
-  inspect: async () => validateDeviceReport(await ipcRenderer.invoke(DEVICE_REPORT_CHANNEL)),
+  inspect: async () => validateDeviceReport(await ipcRenderer.invoke(M5_DEVICE_REPORT_CHANNEL)),
 }));
 contextBridge.exposeInMainWorld("m5Login", Object.freeze({
   request: async (input: LoginRequest) => {
@@ -123,7 +123,7 @@ contextBridge.exposeInMainWorld("m5Login", Object.freeze({
 contextBridge.exposeInMainWorld("m5Install", Object.freeze({
   request: async (input: InstallRequest) => {
     const request = validateInstallRequest(input);
-    return validateInstallStatus(await ipcRenderer.invoke(INSTALL_CHANNEL, request));
+    return validateInstallStatus(await ipcRenderer.invoke(M5_INSTALL_CHANNEL, request));
   },
 }));
 

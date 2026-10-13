@@ -60,7 +60,10 @@ fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
 fn installation_admission_preserves_fences_and_allows_status_and_cancellation() {
     let (root, _) = database();
     let path = root.path().canonicalize().unwrap().join("hello-agent.sqlite3");
-    let mut sidecar = Sidecar::new(&path, "installation_exclusion".into()).unwrap();
+    let mut session = SidecarSession::new("installation_exclusion".into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let AdmissionState::Ready { sidecar, .. } = &mut session.admission else { panic!("admission failed") };
     let request = |method: &str, params: Value| request_value("installation_exclusion", "check", method, params);
     for name in ["codex-login.pending", "claude-login.pending"] {
         let fence = path.parent().unwrap().join(name);

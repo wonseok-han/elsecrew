@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 묶음 검증 시작·테스트 연결 수정)
+
+- 직전b710cde는 interrupted 복구 구현 진척이다. 실제 HEAD/dirty를 확인하고 설치 파동 검증을 시작했다. 신규 admission 회귀의 존재하지 않는 Sidecar::new를 기존 SidecarSession 입장 절차로 수정했다. Electron 보안 대역의 누락된 device-report 모듈을 추가하고 preload의 고정 device/install 채널 별칭을 기존 M5_* 검사 규칙에 맞췄다. 런타임 채널 문자열/권한을 바꾸거나 검사를 완화하지 않았다. 설치 IPC의 다른 frame·임의 경로·작업 ID 없는 복구 거절 회귀도 추가했다.
+- renderer tsc --noEmit PASS, provider_install Rust24 PASS, 설치 계약+브리지 Node60 PASS, Electron 보안 Node9 PASS. 첫 Rust 테스트 컴파일 실패와 Node 보안8/브리지3 실패는 위 수정 후 해당 검사에서 해소했다. Karpathy 지침으로 원인에 해당하는 연결만 수정했다.
+- 전체 sidecar --lib는 CARGO_INCREMENTAL=0/CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4로 실행 중(session24039, 로그 /private/tmp/hello-agent-install-sidecar-tests.log). 약187개 진행 관측 시 UnixListener 생성 회귀 runtime_scan_reports_special_files_without_exposing_names 1건 실패가 보이며 종료 후 오류/환경 제한을 구분해야 한다. 이 전체 검사는 기존 project/tests.rs 미커밋 변경을 포함한 현재 워킹 트리 기준이고 아직 PASS가 아니다. 별도 Rust 빌드 병렬 실행 없음. target은1.2GiB→1.5GiB, 볼륨 가용518GiB 관측.
+- 상시 승인된 읽기 전용 검토자 installer_boundary_review가 immutable b710cde 설치·동의·종료·복구 경계를 검토 중이다. 결과는 아직 합격 근거가 아니며 후속 메시지로 테스트 연결 수정 사실을 공유했다. 다음 턴은 기존 session/검토자를 이어서 확인하고 실패·지적 수정, core/renderer 실제 UI·OS 설치 경계 검증으로 진행한다. 실제 설치/계정 호출 없음, 제품 비활성/기존 dirty/main·push 경계 유지, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (중단된 설치의 종료 증거 복구)
 
 - 직전ecd5b8a는 terminal 기록 복구 진척이다. 실제 HEAD/dirty를 확인하고 설치 전용 retained process fence에도 실제 종료/회수 후 기존 v2 종료 표시를 남기도록 연결했다. 일반 actual run의 terminal DB 선행 계약은 변경하지 않았으며 설치도 표시를 남기는 것만으로 fence를 해제하지 않는다.
