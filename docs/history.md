@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (최신 실제 앱의 유휴 메모리 초과 확인)
+
+- fdcea20 이후 기존 native smoke에 HELLO_AGENT_SMOKE_IDLE_ONLY=1을 추가했다. memory 모드 필수·다른 프로젝트 시나리오와 병용 금지이며 실제 main/preload/Rust sidecar로 시작해 준비 후1초 RSS만 측정하고 정상 종료한다. 로드/잔류 성능은 측정하지 않았다고 표시한다. 제공된 임시 폴더를 열거나 에이전트를 선택하지 않는다.
+- 기존 main/preload(12:47)·sidecar(13:27)가 최근 소스보다 오래돼 기존 .vite/build와 target/debug만 갱신했다. Cargo -j4/incremental0 build5.89초 PASS, Vite main/preload build와 script syntax PASS. 설치 패키지 미생성, target약1.7GiB/.vite3.9MiB다.
+- 실제 앱 유휴449757184B(약428.9MiB)로400MiB 기준 FAIL. peak sample별 Browser151.25/GPU91.17/Utility40.27/renderer125.61/sidecar20.63MiB였다. 합성 시험만의 문제는 아니나 단회 개발 앱 관측이고 packaged gate는 아니다. 정상 quit accepted/exit1 확인, 검증된 cleanup helper로 project/userdata만 정리했다. 증거·idle.png는 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-1lXgRp에 보존한다.
+- 다음은 이 실제 앱 상태에서 남은 통합 흐름/실패를 닫고 메모리 기준 초과 원인을 계속 좁히는 일이다. 모델/실제 계정·사용자 프로젝트 미사용, Claude 연결 완료 답은 아직 없음. 사용자 archive/main/push 경계 유지, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (같은 작업대의 프로젝트 열기·닫기 대조)
 
 - d7ca6c6 이후 diagnostic 전용 --project-lifecycle 모드를 추가했다. 매 trial의 document reload 대신 실제 편집 버리기 확인→프로젝트 화면 닫기→다시 선택을 사용한다. 종료 뒤60초 대기도 같은 방식이다. 기존 reload 모드/기준값은 그대로 두고 결과에 lifecycle을 표시해 서로 대체하지 않는다. performance preload가 빠뜨렸던 합성 m5Projects/Install/Login UI 진입점을 expose했다(실제 계정 아님).

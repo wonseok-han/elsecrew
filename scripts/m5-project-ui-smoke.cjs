@@ -6,9 +6,12 @@ const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
+const idleOnly = process.env.HELLO_AGENT_SMOKE_IDLE_ONLY === '1';
+if (idleOnly && !measureMemory) throw new Error('Idle-only diagnostic requires memory mode');
 const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
 const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
 const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
+if (idleOnly && (largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
 let largeDiffReport;
 const diffRequests = [];
@@ -94,9 +97,9 @@ function finish(error, details) {
   if (measureMemory) fs.writeFileSync(path.join(root, 'memory.json'), JSON.stringify({
     schemaVersion: 1, diagnostic: true, gateEligible: false,
     scope: 'Native UI Electron root and current descendants, including its sidecar; escaped descendants and agents not measured',
-    fixture: largeFile ? 'Generated project with 5 MiB/100000-line file and two chats; no streaming fixture' : 'Small generated project, two chats; not the G6 large-file or streaming fixture',
+    fixture: idleOnly ? 'Native startup only; no project selected or agent connected' : largeFile ? 'Generated project with 5 MiB/100000-line file and two chats; no streaming fixture' : 'Small generated project, two chats; not the G6 large-file or streaming fixture',
     ...(largeTree ? {treeFixture:{files:10000,directories:1000,controlFiles:largeFile ? 2 : 1}} : {}),
-    intervalMs: 250, closeWaitMs: 60000, samples: memorySamples,
+    intervalMs: 250, closeWaitMs: idleOnly ? null : 60000, samples: memorySamples,
     ...memoryReport, error: memoryError?.message ?? error?.message,
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
@@ -145,6 +148,17 @@ app.on('browser-window-created', (_event, window) => {
         memoryTimer = setInterval(() => { void sampleMemory().catch(error => { memoryError = error; }); }, 250);
         await new Promise(resolve => setTimeout(resolve, 1000));
         if (memoryPending) await memoryPending;
+        if (idleOnly) {
+          clearInterval(memoryTimer);
+          if (memoryError) throw memoryError;
+          const idleRssBytes = Math.max(...memorySamples.map(sample => sample.rssBytes));
+          memoryReport = { status: idleRssBytes > 400 * 1024 ** 2 ? 'FAIL' : 'NOT_READY', maxima: { idleRssBytes },
+            scope: 'One native development startup; no loaded/retained measurement or packaged gate' };
+          const screenshot = path.join(root, 'idle.png');
+          fs.writeFileSync(screenshot, (await window.webContents.capturePage()).toPNG());
+          finish(idleRssBytes > 400 * 1024 ** 2 ? new Error('native idle memory exceeds limit') : null, { screenshot, idleOnly: true });
+          return;
+        }
         memoryPhase = 'loaded';
       }
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
