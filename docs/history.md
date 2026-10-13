@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (작업대 간격·파일명 묶음 검증)
+
+- 직전 턴은 긴 이름/도구줄 보존 구현으로 진척했다. 기준01adc32와 기존 UI/history/9월 archive 보존. tsc --noEmit 오류 없음, renderer build PASS, editor-state54/54 PASS(session55076). 같은 실행의 renderer smoke는 Electron status null로 실패해 제품 assertion 결과로 보지 않았다.
+- GUI 권한 환경에서 renderer-mount-smoke만 재실행(session69252),2/2 PASS. 실제 Chromium Monaco/worker·기존 조작 회귀 증거이며 긴 경로 픽셀/전체 시안 충실도와 G6 메모리는 별도다. 동일 상태 검사는 반복하지 않았다. diff 검사 PASS.
+- UI 두 파일과 기록만 로컬 커밋하고9월 archive는 제외한다. 다음: 긴 경로/좁은 패널 시각 확인과 시안 잔여 마감, 메모리/Claude 로그인/Windows/출시 범위. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (긴 파일명·경로의 편집 도구줄 보존)
+
+- 직전 턴은 작업대 제목/간격 구현으로 진척했다. 01adc32 위 기존 UI 변경과9월 archive를 보존했다. 파일 탭은 무제한 nowrap이고 편집 head 경로는 min-width/overflow 제한이 없어 긴 이름이 도구 공간을 차지할 수 있음을 확인했다.
+- 파일 탭 폭을 제한해 이름만 말줄임하고 dirty 표시·닫기는 분리 보존했다. 경로 title로 전체 이름을 제공하며 head 경로는 축소 가능, 저장/새로읽기 버튼은 축소하지 않는다. 변경 상태 표시와 코드/저장 동작은 그대로다.
+- diff 검사만 수행, 앞선 여백 변경과 타입/렌더링 검증을 묶을 예정이다. 긴 경로의 실제 표시·키보드 접근은 아직 미검증, 전체 시안/G6 합격 아님. 다음: UI 묶음 확인 및 메모리/Claude 로그인/Windows/출시 잔여 범위. 실제 계정 호출0회/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (작업대 중복 제목·간격 정리)
+
+- 직전01adc32는 native 편집·캡처 성공으로 진척했다. 기준 화면4yWpFo와 시안의 압축된 도구줄을 대조해 도킹 파일 탭 아래의 동일 제목, 폴더 경로 이중 여백을 확인했다. 기존9월 archive 변경은 보존했다.
+- Karpathy 지침으로 중복 파일 PanelTitle만 제거했다. 명명된 aside/도킹 tabpanel·키보드 전환은 유지한다. 공통 pane space/row height 토큰으로 경로/변경 제목/편집 탭/저장 도구줄 간격을 정리했다. 변경 건수·저장·안전 안내·레이아웃 배치 기능 삭제 없음.
+- 이번은 UI 구현 체크포인트, diff 검사만 수행. 실제 화면/시안 충실도 검증은 추가 UI 변경과 묶어 수행하며 기존 PASS로 대신하지 않는다. 다음: UI 마감·묶음 화면 확인, 메모리/Claude 로그인/Windows/출시 잔여 작업. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (native 입력 초점·최종 캡처 확인)
 
 - 직전 턴은 EMVWh2 실패 관측과 원문 보존 롤오버로 진척했다. 기존 변경 보존. smoke의 insertText 직전에 window/webContents/document 초점을 고정 boolean으로 기록·확인하도록 보강했다. 실패 시 입력 준비 오류로 구분하며 재입력/자동 반복하지 않는다. 제품 편집 코드·권한 계약 변경 없음.

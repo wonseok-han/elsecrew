@@ -290,9 +290,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         <p className="m5-first-chat-note">{t("m5.firstChat.teamHelp")}</p>
       </section>}>
         <aside className="m5-panel m5-files" aria-label={t("m5.navigation.files")}>
-          <PanelTitle active={snapshot.panel === "files"} panel="files" onSelect={controller.selectPanel.bind(controller)}>
-            {t("m5.navigation.files")}
-          </PanelTitle>
           {snapshot.project ? (
             <>
               <FileSearch key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} disabled={!admissionReady || snapshot.actionBlocked} search={(query, signal) => controller.searchFiles(query, signal)} open={path => { void controller.openFile(path); }} />
@@ -314,15 +311,15 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <div className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
               <div className="m5-editor-tab" key={tab.path}>
-                <button type="button" role="tab" aria-selected={snapshot.activePath === tab.path} onClick={() => controller.openFile(tab.path)} disabled={!admissionReady}>
-                  {fileName(tab.path)} {tab.saveState !== "clean" && <span aria-label={t("m5.editor.dirty")}>●</span>}
+                <button type="button" role="tab" title={tab.path} aria-selected={snapshot.activePath === tab.path} onClick={() => controller.openFile(tab.path)} disabled={!admissionReady}>
+                  <span className="m5-editor-tab-name">{fileName(tab.path)}</span> {tab.saveState !== "clean" && <span className="m5-editor-tab-dirty" aria-label={t("m5.editor.dirty")}>●</span>}
                 </button>
                 <button type="button" className="m5-close-tab" aria-label={t("m5.editor.close", { path: tab.path })} onClick={() => controller.closeTab(tab.path)} disabled={!admissionReady}>×</button>
               </div>
             ))}
           </div>
           <div className="m5-editor-head">
-            <span>{activeTab?.path ?? t("m5.editor.select")}</span>
+            <span title={activeTab?.path}>{activeTab?.path ?? t("m5.editor.select")}</span>
             {activeTab?.mode === "text" && (activeTab.saveState === "dirty" || activeTab.saveState === "conflicted") && <button type="button" className="m5-secondary" disabled={!admissionReady || snapshot.actionBlocked || reloadingDraft} onClick={() => setReloadDraft(activeTab)}>{t("m5.editor.reload")}</button>}
             {activeTab?.mode === "text" && (
               <button type="button" title={t("m5.editor.shortcut")} onClick={() => void controller.saveActive()} disabled={!admissionReady || activeTab.saveState !== "dirty"}>
