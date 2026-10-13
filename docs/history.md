@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (native 반복 시험 데이터 자동 정리)
+
+- 직전 사용자 응답은 로그인 대상이 우리가 만드는 Hello, Agent임을 설명한 안내였다. 개발 변경 없이 대기만 반복하지 않고 저장공간 관리 요청을 기존 native 반복 collector에 구현했다. 각 child close 뒤 accepted shutdown·종료 코드/상태·디스크 result.json 일치를 확인하고 project/userdata만 삭제한다.
+- 대상은 OS temp 바로 아래 hello-agent-project-ui-6자리 이름의 실제 디렉터리뿐이다. root/자식/result 심볼릭 링크·과대 증거 파일·불확실 종료는 거절하고 다음 시험도 중단한다. 로그/JSON/스크린샷은 남기며 첫 FAIL fixture1개는 재현용으로 보관한다. 실제 공급자 계정 시험·제품 복구 백업·사용자 프로젝트는 연결하지 않았다.
+- 작은 파일만 쓰는 focused3/3(증거 보존, 종료 불확실/결과 불일치 거절, 링크 자식 거절)·collector JS 구문·diff 검사 PASS. 테스트가 만든 fixture는 자체 정리했다. 새 대형 시험/빌드/실제 계정 호출 없음. 제품 기능 안전 검사나 백업 정리 활성화 결정은 변경하지 않았다.
+- 다음: Claude 앱 전용 로그인 완료 통지 후 승인된 모델1회, 독립적인 설치/진단 연결·UI/성능·Windows/출시 작업을 계속한다. 전체 목표 미완료/main/push 없음, 기존 dirty 보존.
+
 ### 2026-10-13 · by GPT-6 Astra (승인된 Claude 시험 전 로그인 재확인 실패)
 
 - 직전ad3e505는 작은 프로젝트 UI 파동 검증 진척이다. 최신 actual-provider 결과974Ab5와 provider_claude_login::run/account를 대조했다. check의 idle/error null은 로그인 확인에서 자격증명이 관측되지 않은 결과이며 코드 호환 오류나 로그인 만료의 구체 원인으로 단정할 수 없다.

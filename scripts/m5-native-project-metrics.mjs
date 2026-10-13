@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
+import { cleanupCompletedNativeFixture } from './m5-native-fixture-cleanup.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (process.platform !== 'darwin') throw new Error('Native project measurement requires macOS');
@@ -63,6 +64,7 @@ async function trial(index) {
 }
 
 try {
+  let retainedFailure = false;
   for (let index = 0; index <= report.measuredRuns; index++) {
     const sample = await trial(index);
     report.trials.push(sample);
@@ -71,6 +73,13 @@ try {
     if (sample.signal || sample.error || sample.result?.shutdown !== 'accepted') {
       throw new Error(`Trial ${index} did not confirm normal shutdown; no further app will be launched`);
     }
+    if (sample.result.status === 'FAIL' && !retainedFailure) {
+      retainedFailure = true;
+      sample.fixtureRetention = { reason: 'first failure retained for reproduction' };
+    } else {
+      sample.fixtureCleanup = cleanupCompletedNativeFixture(sample);
+    }
+    persist();
   }
   const measured = report.trials.filter(sample => !sample.warmup);
   report.timings = {};
