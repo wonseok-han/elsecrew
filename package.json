@@ -20,6 +20,7 @@
     "m5:measure:performance": "node scripts/m5-performance-metrics.mjs",
     "m5:measure:sidecar-startup": "node --experimental-strip-types scripts/m5-sidecar-startup-metrics.mts",
     "m5:measure:renderer": "node scripts/m5-renderer-metrics.mjs",
+    "m5:measure:native-project": "node scripts/m5-native-project-metrics.mjs",
     "m5:smoke:project-ui": "electron scripts/m5-project-ui-smoke.cjs",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
     "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",

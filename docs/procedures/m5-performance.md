@@ -24,6 +24,12 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ## Native UI 작은 프로젝트 메모리 진단
 
+### Native 프로젝트 반복 수집
+
+`pnpm m5:measure:native-project`는 현재 빌드된 native UI 시험을 준비 실행1회＋측정10회 순차 실행한다. 각 실행은 새 임시 프로젝트에1만 파일 트리와5MiB 파일을 함께 생성하며, 편집/저장/diff·반영 확인 취소·두 채팅 흐름까지 수행한다. 원본 적용·reload·메모리 환경 옵션은 상속하지 않는다. 빌드는 자동 수행하지 않으므로 먼저 최신 main/renderer/debug sidecar를 준비한다.
+
+결과는 새 OS 임시 `hello-agent-native-metrics-*`의 measurement.json과 각 trial 로그에 남긴다. 실제 앱 종료를 기다린 뒤 다음 실행을 시작하며 종료 미확정/비정상 종료면 중단한다. 강제 종료나 증거 삭제는 하지 않는다. 정상 종료한 실패 표본도 제외하지 않고10회에 포함하며, 누락 수치의 p95는 null이다. 준비 실행 실패도 전체 FAIL로 남긴다.10개 값의 nearest-rank p95는 최대값이다. 기준 초과/흐름 실패는 exit1, 모두 통과해도 개발 빌드 진단이므로 NOT_READY/exit2다. 이 명령은 packaged·전체 RSS·stream·save race·종료 안전성 측정을 대신하지 않으며 `m5:test:performance` 게이트를 열지 않는다.
+
 `HELLO_AGENT_SMOKE_LARGE_TREE=1 pnpm m5:smoke:project-ui`는 실제 임시 Git 프로젝트에 1,000폴더/10,000파일의 `aaa-tree` 하위 트리를 추가한다. 기존 시험용 hello.txt 및 선택적 large.txt는 이 숫자 밖이며 `controlFiles`로 별도 기록한다. 실제 sidecar→파일 패널에서 하위 트리 첫 페이지와 한 폴더를 열고 두 animation frame까지 관측한다. `largeTree` 결과에 시간·가상 목록 DOM 수를 보존하고 1,000/250ms·500노드 초과를 실패 처리한다. 원본 snapshot 생성 시간은 treeRootMs에 포함하지 않는다. 단일 개발 실행·첫 페이지 진단이며 packaged/10회 p95·전체 탐색/G6 합격을 대체하지 않는다. 큰 파일/메모리 옵션과 결합할 수 있다.
 
 대형 트리 모드의 최초 snapshot 및 새 채팅 생성 관측은 최대65초, 전체 시험은5분으로 제한한다. 이는 시험이15초에 먼저 quit을 요청하던 문제를 피하기 위한 관측 창이며 제품의60초 snapshot timeout이나 트리 성능 기준을 늘리지 않는다. 최초 프로젝트 선택→트리 표시 시간은 `SNAPSHOT_READY` 및 `largeTree.snapshotReadyMs`로 별도 보존한다.
