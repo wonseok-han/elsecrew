@@ -65,6 +65,18 @@ let statusReads = 0;
 const smokeChat = { schemaVersion: 1, chatId: "smoke_chat", taskId: "smoke_task", projectId: "smoke_project", worktreeId: "smoke_chat_worktree", workspaceIdentity: "smoke_chat_identity", goal: "후속 대화 확인", settingsRevision: 1, roleSnapshots: [], state: "draft", createdAt: "2026-09-14T00:00:00Z", updatedAt: "2026-09-14T00:00:00Z" };
 const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: smokeChat.chatId, taskId: smokeChat.taskId, worktreeId: smokeChat.worktreeId, eventSequence: 1, kind: "user", roleId: null, runId: null, text: "처음 요청", createdAt: smokeChat.createdAt }];
 let historyMessageIndex = 0;
+let parallelPaint = null;
+window.m5SmokeEnableParallelChats = () => {
+  if (parallelPaint) throw new Error("parallel paint fixture already enabled");
+  const { parallelChatFixture } = require("./m5-parallel-chat-fixture.cjs");
+  parallelPaint = parallelChatFixture(smokeChat, message => { for (const listener of chatListeners) listener(message); });
+  return parallelPaint.chats;
+};
+window.m5SmokeEmitParallelRound = () => {
+  if (!parallelPaint) throw new Error("parallel paint fixture not enabled");
+  return parallelPaint.emitRound();
+};
+window.m5SmokeParallelCounts = () => parallelPaint?.counts() ?? null;
 window.m5SmokeAppendMessages = (count) => {
   if (!Number.isSafeInteger(count) || count < 1 || count > 5000) throw new Error("invalid synthetic message count");
   const emitted = [];
@@ -236,8 +248,8 @@ window.m5 = {
   }),
   updateProjectRoleSettings: unexpected("updateProjectRoleSettings"),
   createChat: unexpected("createChat"),
-  listChats: async ({ projectId }) => ({ projectId, items: [smokeChat], nextCursor: null }),
-  getChat: async ({ afterEventSequence }) => ({ chat: smokeChat, afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > afterEventSequence), runs: [], nextEventSequence: null }),
+  listChats: async ({ projectId }) => ({ projectId, items: parallelPaint ? parallelPaint.chats : [smokeChat], nextCursor: null }),
+  getChat: async (request) => parallelPaint ? parallelPaint.detail(request) : ({ chat: smokeChat, afterEventSequence: request.afterEventSequence, messages: smokeMessages.filter(message => message.eventSequence > request.afterEventSequence), runs: [], nextEventSequence: null }),
   startFixtureRun: unexpected("startFixtureRun"),
   cancelRun: unexpected("cancelRun"),
   listRecoveries: async () => ({ items: [], nextCursor: null }),

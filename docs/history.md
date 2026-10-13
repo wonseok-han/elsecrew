@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (네 채팅 시간 기반 진단 연결)
+
+- b5a4772 위에서 합성 원장을 네 채팅으로 분리하고 선택적 M5_MEASURE_PARALLEL_PAINT 경로를 연결했다. 각50회/초·3000개, 총12000개를 발송하고 첫 채팅만 두 frame 관측 지연을 측정한다. 전환 후 각 채팅 최신200개가2801~3000번과 정확히 일치하는지 확인하며 background 발송 수를 화면 표시 수로 주장하지 않는다. 제품/권한 코드 변경 없음, 기존9월 archive 보존.
+- 원장 전체 페이지·순서·ID 단위 회귀1/1 및 구문/diff PASS. 첫 session46214는 앞선 종료 실패 주입의 의도된 잠금 때문에 다음 시험이 막혔다. 제품 잠금은 유지하고 실패 주입을 마지막으로 이동했다. session38878의 whYuav/parallel-message-paint.json은 네 채팅 각3000/전환 복원4개 성공, 최대101.3ms로100ms 기준 초과 FAIL/exit1. 기준 완화·자동 재시험 없음. 실행 도중 설명 문자열만 수정했으며 측정 로직은 동일하다.
+- diagnostic true/gateEligible false 유지. 실제 계정 호출0회, 앞선 승인 실연결 결과는 Codex planning 성공/Claude 로그인 idle(974Ab5) 그대로다. 다음: frame 지연/메모리 병목 조사, native IPC·패키지/Windows 검증과 Claude 앱 로그인 후 별도 승인 실행. 전체 목표 미완료, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (단일 채팅 시간 기반 화면 관측 연결)
 
 - 직전7fc0e46은 성능 판정/문서 검증으로 진척했다. 기존9월 archive 보존. m5-message-paint-probe를 합성 renderer smoke의 명시 환경 옵션에 연결했다.50회/초·3000메시지의 발송 시간, scheduling 지연, DOM 연속 두 frame 관측, 개별 지연/미관측 ID를 기록한다. 오류/중복 발송은 중단하며 미관측 또는100ms 초과는 실패한다.

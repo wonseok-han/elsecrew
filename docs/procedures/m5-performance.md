@@ -48,6 +48,8 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ### Renderer 대형 fixture 실측
 
+네 채팅 합성 진단은 같은 명령에서 `M5_MEASURE_PARALLEL_PAINT=1`을 사용한다. 각 채팅에50회/초·3000개씩 총12000개를 보내며 선택한 첫 채팅만 frame 지연을 측정한다. 종료 후 네 채팅을 차례로 선택해 최신200개가 해당 채팅의2801~3000번과 정확히 일치하는지 검사한다. 원장 전체 페이지/순서/ID 격리는 `node --test tests/m5-parallel-chat-fixture.test.cjs`에서 별도로 확인한다. `parallel-message-paint.json`의 sourceCounts는 합성 원장 수이며 background 메시지의 화면 관측 수가 아니다. 이 모드도 diagnostic true/gateEligible false로, native IPC·실제 모델·G6 전체 합격 근거로 사용하지 않는다.
+
 개발 중 기존 변경을 보존하면서 수치만 확인하려면 `pnpm run m5:measure:renderer --diagnostic`을 사용한다. 이 모드는 dirty checkout을 허용하되 `diagnostic:true`, `gateEligible:false`와 전후 Git 상태를 기록하고, 기준 초과는 FAIL/1, 기준 이내도 NOT_READY/2로 반환한다. 정식 기본 모드의 clean 조건은 유지한다. 두 모드 모두 별도 임시 userData를 사용하며 경로를 결과에 남긴다. 임시 userData는 진단용으로 보존되고 자동 삭제하지 않는다.
 
 clean checkout에서 `pnpm run m5:measure:renderer`를 실행한다. 현재 production Vite renderer를 빌드한 뒤 보이는 Electron 창에서 warm-up 1회·측정 10회를 수행한다. 1,000개 폴더/10,000개 파일의 페이지 탐색, 한국어가 포함된 5 MiB·100,000줄 파일의 실제 Monaco 표시·입력, 500개 파일/20,000 changed lines/총 10 MiB diff의 요약·첫 파일 표시를 측정한다. 시각 완료는 조건 충족 후 두 animation frame으로 관측하며 renderer의 performance.now와 longtask observer를 사용한다. 입력 측정은 Electron의 실제 char event 전달과 dirty 상태·화면 텍스트 관측을 포함하므로 IPC 지연도 포함한 상한이다. 첫 diff는 전체 10 MiB patch 중 한 파일만 요청한다.

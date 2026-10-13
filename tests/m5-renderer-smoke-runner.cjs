@@ -566,12 +566,53 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
     ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent) });` : ""}
     const originalRequest = window.m5Projects.request;
+    ${process.env.M5_MEASURE_PARALLEL_PAINT === "1" ? `
+    window.m5Projects.request = originalRequest;
+    [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
+    await ${waitFor("!document.querySelector('#m5-followup-text')", "parallel project closed")};
+    window.m5SmokeEnableParallelChats();
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '처음부터 다시 확인').click();
+    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/earlier'", "parallel catalog reset")};
+    [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
+    await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "parallel project available")};
+    document.querySelector('.m5-project-catalog-list li button').click();
+    await ${waitFor("document.querySelectorAll('.m5-chat-chip').length === 4", "four chats listed")};
+    document.querySelector('.m5-chat-chip').click();
+    await ${waitFor("document.querySelector('#m5-followup-text')", "parallel chat selected")};
+    globalThis.parallelPaintReport = await (${measureMessagePaint.toString()})({
+      emit: () => window.m5SmokeEmitParallelRound()[0].text,
+      visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent),
+    });
+    parallelPaintReport.sourceCounts = window.m5SmokeParallelCounts();
+    parallelPaintReport.restoredChats = [];
+    for (let index = 0; index < 4; index++) {
+      document.querySelectorAll('.m5-chat-chip')[index].click();
+      await new Promise((resolve, reject) => {
+        const deadline = Date.now() + 7000;
+        const timer = setInterval(() => {
+          const messages = [...document.querySelectorAll('.m5-message p')].map(node => node.textContent);
+          if (messages.length === 200 && messages.every((text, offset) => text === 'paint_chat_' + index + ' message ' + (2801 + offset))) {
+            clearInterval(timer); resolve();
+          } else if (Date.now() > deadline) { clearInterval(timer); reject(new Error('parallel chat restore failed: ' + index)); }
+        }, 25);
+      });
+      parallelPaintReport.restoredChats.push('paint_chat_' + index);
+    }
+    parallelPaintReport.limitations = ['Four synthetic sources; only chat 0 timed. Background chats checked after selection, not painted during input.', 'Two animation frames are a presentation proxy, not a compositor timestamp. No native sidecar transport, packaged startup, or complete G6 gate.'];
+    ` : ""}
     window.m5Projects.request = input => input.action === 'releaseView' ? Promise.reject(new Error('synthetic release failure')) : originalRequest(input);
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
     await ${waitFor("[...document.querySelectorAll('[role=alert]')].some(node => node.textContent.includes('파일 감시 해제를 확인하지 못해'))", "failed release blocks leaving")};
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (process.env.M5_MEASURE_PARALLEL_PAINT === "1") {
+    const measurement = await window.webContents.executeJavaScript('globalThis.parallelPaintReport');
+    const evidencePath = resolve(userData, 'parallel-message-paint.json');
+    writeFileSync(evidencePath, JSON.stringify(measurement, null, 2));
+    process.stdout.write(JSON.stringify({ evidencePath, diagnostic: true, maxPaintMs: measurement.maxPaintMs, sourceCounts: measurement.sourceCounts, restoredChats: measurement.restoredChats }) + '\n');
+    if (measurement.observationError || measurement.unobserved.length || measurement.maxPaintMs > 100) throw new Error('diagnostic parallel message paint limit failed');
+  }
   if (process.env.M5_MEASURE_MESSAGE_PAINT === "1") {
     const measurement = await window.webContents.executeJavaScript('globalThis.messagePaintReport');
     const evidencePath = resolve(userData, 'message-paint.json');
