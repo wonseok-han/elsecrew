@@ -539,6 +539,8 @@ export const en: Record<MessageKey, string> = {
   "m5.firstChat.help": "Choose New chat and describe your goal, or select an existing conversation to continue.",
   "m5.firstChat.editTeam": "Change this project's roles & models",
   "m5.roles.backToDraft": "Back to new chat draft",
+  "m5.roles.scope": "Project for these settings",
+  "m5.roles.scopeHelp": "Applies to future chats in this project. Other projects and existing chats keep their roles and models.",
   "m5.firstChat.editTeamHelp": "Your goal stays here while you change settings. Saved settings apply only to chats you create from now on.",
   "m5.firstChat.explain": "Explain this project's structure in a way a beginner can understand.",
   "m5.firstChat.plan": "Suggest improvements and a work plan before changing any code.",

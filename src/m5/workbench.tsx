@@ -278,7 +278,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
-      </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} />}
+      </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} projectName={snapshot.project?.name ?? chat.settings.projectId} />}
 
       {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview onReviewDiff={() => { if (controller.snapshot().actionBlocked) return; controller.selectPanel("changes"); void controller.refreshChanges(); }} key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /></div><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
@@ -435,7 +435,7 @@ function GuidedStart({ disabled, onChoose }: { disabled: boolean; onChoose: () =
   </section>;
 }
 
-function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose, returnToDraft = false }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean }) {
+function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose, returnToDraft = false, projectName }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean; projectName: string }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
@@ -475,6 +475,8 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
   const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else onClose(); } };
   return <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>
     <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t("m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : "m5.roles.back")}</button></header>
+    <div className="m5-settings-body">
+    <section className="m5-settings-scope" aria-label={t("m5.roles.scope")}><span>{t("m5.roles.scope")}</span><strong>{projectName}</strong><p>{t("m5.roles.scopeHelp")}</p></section>
     {feedback}
     {dirty && <p role="status">{t("m5.roles.dirty")}</p>}
     {discardAction && <section role="alertdialog" aria-label={t("m5.roles.discardLabel")}>
@@ -484,26 +486,29 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
     </section>}
     <p>{t("m5.roles.help")}</p>
     {choicesError && <p role="alert">{t("m5.roles.choicesError")}</p>}
-    <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card">
-      <strong>{t(`m5.roles.${role.roleId}`)}</strong>
+    <div className="m5-role-cards">{roles.map((role, index) => <article key={role.roleId} className="m5-role-card" aria-labelledby={`m5-role-heading-${role.roleId}`}>
+      <strong id={`m5-role-heading-${role.roleId}`}>{t(`m5.roles.${role.roleId}`)}</strong>
       <label>{t("m5.roles.runtime")}<select disabled={disabled || busy || discardAction !== null} value={role.runtime} onChange={event => change(index, "runtime", event.target.value)}><option value="codex">Codex</option><option value="claude-code">Claude Code</option></select></label>
       <label>{t("m5.roles.model")}<input disabled={disabled || busy || discardAction !== null} value={role.modelSelector} onChange={event => change(index, "modelSelector", event.target.value)} /></label>
-      {role.runtime === "codex" && <>
+      <label>{t("m5.roles.reasoning")}<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} placeholder={t("m5.roles.default")} onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
+      <span className="m5-role-permission">{t(role.permission === "readOnly" ? "m5.roles.readOnly" : "m5.roles.write")}</span>
+      {role.runtime === "codex" && <div className="m5-role-model-tools">
         <button type="button" className="m5-secondary" disabled={disabled || busy || discardAction !== null || !activeChat || !window.m5Models} onClick={() => void loadChoices(role)}>{t("m5.roles.loadChoices")}</button>
         {!activeChat && <small>{t("m5.roles.choicesNeedChat")}</small>}
         {choices[role.roleId] && <label>{t("m5.roles.availableChoices")}<select value="" disabled={disabled || busy || discardAction !== null} onChange={event => { if (event.target.value) change(index, "modelSelector", event.target.value); }}>
           <option value="">{t("m5.roles.chooseModel")}</option>
           {choices[role.roleId]!.map(model => <option key={model.modelSelector} value={model.modelSelector}>{model.modelSelector} · {model.reasoningEfforts.join(", ")}</option>)}
         </select><small>{t("m5.roles.choicesHelp")}</small></label>}
-      </>}
-      <label>{t("m5.roles.reasoning")}<input disabled={disabled || busy || discardAction !== null} value={role.reasoningEffort ?? ""} placeholder={t("m5.roles.default")} onChange={event => change(index, "reasoningEffort", event.target.value || null)} /></label>
-      <small>{t("m5.roles.modelHelp")}</small>
-      <span>{t(role.permission === "readOnly" ? "m5.roles.readOnly" : "m5.roles.write")}</span>
+      </div>}
+      <small className="m5-role-model-help">{t("m5.roles.modelHelp")}</small>
     </article>)}</div>
     {!valid && <p role="alert">{t("m5.roles.invalid")}</p>}
+    </div>
+    <footer className="m5-settings-actions">
     <button type="button" disabled={disabled || busy || !valid || discardAction !== null} onClick={() => void run(() => onSave(roles))}>{t(busy ? "m5.roles.busy" : "m5.roles.save")}</button>
     <button className="m5-secondary" type="button" disabled={disabled || busy || discardAction !== null} onClick={() => dirty ? setDiscardAction("reload") : void run(onReload)}>{t("m5.roles.reload")}</button>
     <p>{t("m5.roles.reloadHelp")}</p>
+    </footer>
   </dialog>;
 }
 

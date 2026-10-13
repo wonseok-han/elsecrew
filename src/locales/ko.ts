@@ -538,6 +538,8 @@ export const ko = {
   "m5.firstChat.help": "‘새 채팅’을 눌러 하고 싶은 일을 적어 보세요. 기존 대화를 선택해 이어갈 수도 있어요.",
   "m5.firstChat.editTeam": "이 프로젝트의 역할·모델 바꾸기",
   "m5.roles.backToDraft": "작성 중인 새 채팅으로 돌아가기",
+  "m5.roles.scope": "설정 적용 프로젝트",
+  "m5.roles.scopeHelp": "이 프로젝트에서 앞으로 만드는 채팅에 적용해요. 다른 프로젝트와 이미 만들어진 채팅의 역할·모델은 바뀌지 않아요.",
   "m5.firstChat.editTeamHelp": "설정을 바꾸고 돌아와도 입력한 목표는 남아 있어요. 저장한 설정은 앞으로 만드는 채팅에만 적용돼요.",
   "m5.firstChat.explain": "이 프로젝트가 어떤 구조인지 초보자도 이해할 수 있게 설명해 줘.",
   "m5.firstChat.plan": "코드를 바꾸기 전에 개선할 만한 부분과 작업 순서를 제안해 줘.",

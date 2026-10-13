@@ -53,6 +53,14 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript("[...document.querySelectorAll('button')].find(b => b.textContent === '역할과 모델').click()");
   await wait("document.querySelector('.m5-settings-dialog')?.open");
   await capture(window, 'product-settings');
+  window.setContentSize(960, 640);
+  await wait("document.querySelector('.m5-settings-actions').getBoundingClientRect().bottom <= innerHeight");
+  await window.webContents.executeJavaScript(`(() => {
+    const body = document.querySelector('.m5-settings-body');
+    if (body.scrollWidth > body.clientWidth + 1) throw new Error('settings body overflows horizontally');
+    if (!document.querySelector('.m5-settings-scope strong').textContent.trim()) throw new Error('settings project scope missing');
+  })()`);
+  await capture(window, 'product-settings-minimum');
   const concept = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { partition: 'm5-visual', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   windows.push(concept);
   for (const name of ['agent-ide', 'guided-start']) {

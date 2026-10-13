@@ -381,16 +381,33 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-followup textarea { box-sizing: border-box; width: 100%; min-height: 64px; max-height: 160px; resize: vertical; padding: 10px; color: #e6edf3; background: #11161d; border: 1px solid #526176; border-radius: 8px; font: inherit; }
 .m5-followup p { margin: 0; font-size: 12px; color: #b9c7d5; white-space: pre-wrap; }
 .m5-followup pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.m5-settings-dialog { box-sizing: border-box; width: min(880px, calc(100vw - 48px)); max-height: calc(100vh - 48px); margin: auto; padding: 24px; overflow: auto; color: #e6edf3; box-shadow: 0 24px 80px #0009; }
+.m5-settings-dialog { box-sizing: border-box; width: calc(100vw - var(--m5-project-rail-width, 0px) - 24px); max-width: none; height: calc(100vh - 24px); max-height: none; margin: 12px 12px 12px auto; padding: 24px; overflow: hidden; color: #e6edf3; box-shadow: 0 24px 80px #0009; }
+.m5-settings-dialog[open] { display: flex; flex-direction: column; }
+.m5-settings-body { flex: 1; min-height: 0; overflow: auto; padding-right: 8px; }
+.m5-settings-body > p { color: #b9c7d5; line-height: 1.6; }
+.m5-settings-scope { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; padding: 16px; border: 1px solid #3b495b; border-radius: 8px; background: #202a37; }
+.m5-settings-scope > span { color: #aab4c1; font-size: 12px; }
+.m5-settings-scope strong { overflow-wrap: anywhere; }
+.m5-settings-scope p { grid-column: 1 / -1; margin: 0; color: #aab4c1; font-size: 12px; line-height: 1.6; }
+.m5-settings-actions { flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding-top: 16px; border-top: 1px solid #303b49; }
+.m5-settings-actions p { flex: 1 1 100%; margin: 0; color: #aab4c1; font-size: 12px; }
+.m5-settings-actions > button:first-child { background: var(--m5-action-bg); color: var(--m5-action-text); }
 .m5-settings-dialog::backdrop { background: #080c14b3; backdrop-filter: blur(3px); }
-.m5-settings-dialog > header { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid #303b49; }
+.m5-settings-dialog > header { flex: none; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid #303b49; }
 .m5-settings-dialog > button { margin: 4px 8px 0 0; }
 .m5-settings-dialog [role="alertdialog"] { border: 1px solid #a87d42; border-radius: 8px; padding: 12px; background: #352c20; }
 .m5-settings-dialog [role="alertdialog"] button { margin-right: 8px; }
-.m5-settings-dialog .m5-role-card { min-width: 0; padding: 16px; gap: 12px; }
+.m5-settings-dialog .m5-role-cards { grid-template-columns: minmax(0, 1fr); }
+.m5-settings-dialog .m5-role-card { min-width: 0; padding: 16px; gap: 12px; grid-template-columns: 64px minmax(110px, 1fr) minmax(140px, 1.4fr) minmax(100px, .8fr) minmax(100px, 1fr); align-items: center; }
+.m5-role-model-tools { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.m5-role-model-tools label { flex: 1 1 260px; }
+.m5-role-model-help { grid-column: 2 / -1; }
 .m5-settings-dialog .m5-role-card > strong { font-size: 15px; }
 .m5-settings-dialog .m5-role-card small { color: #aab4c1; line-height: 1.5; }
-@media (max-width: 720px) { .m5-settings-dialog .m5-role-cards { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .m5-settings-dialog .m5-role-card { grid-template-columns: 60px repeat(2, minmax(0, 1fr)); }
+  .m5-settings-dialog .m5-role-card > label:nth-of-type(3) { grid-column: 2; }
+}
 .m5-provider-login { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin:8px 20px; padding:16px; border:1px solid #3a414d; border-radius:12px; background:#202630; color:#e8edf5; }
 .m5-provider-selection { margin:8px 20px; padding:16px; border:1px solid #3a414d; border-radius:12px; background:#202630; color:#e8edf5; }
 .m5-provider-selection > summary { cursor:pointer; }
