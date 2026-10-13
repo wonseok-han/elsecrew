@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패키지 대형 편집 입력 계측 연결)
+
+- 기준571c5b5에서 Karpathy 최소 범위로 --large-project 진단에 실제 Monaco textarea focus→CDP Input.insertText→trusted beforeinput→view-line 텍스트 확인→2 RAF 계측을 연결했다. 예열1+본10 입력을 같은 프로세스에서 수행하며 bridge/model 직접 변조·저장은 없다. 실제 키보드/IME 또는10개 독립 앱 세션 합격으로 주장하지 않는다. 입력 요청부터 화면 확인까지/전달/전달 후 시간을 모두 보존하고50ms 기준을 유지한다.
+- NG1IWL의 실제 패키지 p95 inputPaint51ms로50ms 초과 FAIL, 본 표본 전달0.3~0.4ms·전달 후47.2~50.7ms다. 기존 treeRoot230.5/expand116.5/file433.4/DOM362는 기준 이내, idle460161024B 초과도 유지한다. 정상exit0/shutdown confirmed·PID 부재 후 생성 project/other-project/userdata만 제거했고 result.json/PNG 및 /private/tmp/hello-agent-packaged-input.log 보존했다.
+- 이후 원인 분리용 inputDomMs/paintObservationMs 필드를 추가했으나 이 두 필드의 실제 패키지 값은 아직 수집 전이다. syntax/diff PASS이며 이전51ms 관측을 새 필드의 실행 증거로 재사용하지 않는다. 다음은 해당 구간 분리 측정 후 getValue/상태 갱신/프레임 대기 중 원인을 좁히는 작업이다. 제품 코드는 미변경, 사용자9월 archive 보존, main 병합/push 없음, 전체G6/메모리/실계정/Windows 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (메모리 언어 요인 비교)
 
 - 기준96bc719에서 Karpathy 최소 범위로 packaged UI 진단에 고정 --english/--korean 옵션을 추가했다. 최초 --lang=ko-KR 인자만 전달한 TtphrV는 실제 선택en으로 검증 실패해 비교에서 제외했다. 최종 구현은 자체 임시 프로필의 실제 언어 select change 및 두 animation frame 뒤 선택값 일치를 확인한다. UI 전환 후 표본이며 언어별 cold startup이 아니라는 한계를 report에 명시한다. 제품/사용자 설정·메모리 기준은 바꾸지 않았다.

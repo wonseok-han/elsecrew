@@ -14,6 +14,7 @@ import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1
 import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
 import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
+import { probePackagedInput } from './m5-packaged-input-probe.mjs';
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
@@ -203,6 +204,8 @@ try {
     } else if (largeProject) {
       report.largeProject = await evaluate(`(${probeLargeProject.toString()})(${JSON.stringify(report.project.projectId)})`);
       if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
+      report.largeProjectInput = await probePackagedInput(evaluate, text => send('Input.insertText', {text}, sessionId));
+      if (!report.largeProjectInput.withinLimit) report.error ??= 'Large project input paint limit exceeded';
     } else {
     if (resume) {
       await until(() => evaluate(`!![...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check') && !button.disabled)`));
