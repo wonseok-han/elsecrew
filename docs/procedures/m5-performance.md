@@ -57,6 +57,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ## 실제 sidecar 시작 측정 절차
 
+사용자 변경을 보존한 개발 진단은 `pnpm run m5:measure:sidecar-startup --diagnostic`으로 실행한다. 현재 checkout을 debug로 빌드(CARGO_INCREMENTAL=0)하고 동일한 준비/10회 측정을 수행한다. 전후 HEAD·Git 상태를 비교하고 binary SHA-256/buildProfile을 기록한다. 기준 초과는 FAIL/1, 기준 이내도 NOT_READY/2이며 diagnostic=true/gateEligible=false다. release 성능 또는 G6 합격 자료로 사용하지 않는다. 인자 없는 정식 실행은 계속 clean checkout을 요구한다.
+
 clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실행한다. Cargo가 현재 checkout으로 빌드한 release executable을 사용한다. 생성한 임시 빈 DB의 최초 migration을 제외하고 warm-up 1회 뒤 10회 실행한다. 각 실행은 canonical protocol/status/quit validator로 응답을 검증하고 DB clean marker와 정상 프로세스 종료까지 확인한다. 프로젝트·에이전트 실행 요청은 보내지 않는다.
 
 - `shellReadyMs`: spawn 직전부터 system.ready 검증 완료까지.

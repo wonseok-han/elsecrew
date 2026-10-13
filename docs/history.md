@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (시작 수집기 현행 계약 연결)
+
+- f3711a7에서 G6 측정 경로를 확인했다. sidecar startup collector가 구형 product-only status parser를 사용해 현재 native capabilities/설치 suffix와 불일치했다. macOS 전용 수집기에 기존 parseCurrentSystemStatusV1(..., false, true)를 연결했다. protocol/status/quit·DB clean marker 확인은 유지한다. Karpathy 최소 변경 원칙으로 해당 수집기만 수정했다.
+- --diagnostic은 현재 debug executable을 Cargo로 빌드하고 사용자 dirty를 보존하며 전후 HEAD/Git status를 비교한다. 준비 migration 제외/warmup1+10회·기존1000ms 기준은 유지한다. diagnostic=true/gateEligible=false, 정상 측정도 NOT_READY/2; 초과/실행 오류는 FAIL이다. 정식 인자 없음은 release/clean 조건 유지, 시작도 못 한 결과는 gateEligible=false다. incremental0으로 추가 캐시를 억제한다.
+- 실제 빈 임시 DB 측정10회·정상 quit/clean marker 확인 완료: shell p95 4.2925ms/storage p95 101.259959ms, NOT_READY/exit2. 증거 .artifacts/m5-performance/sidecar-startup-2026-10-13T09-41-24.068Z-63868.json. 종료 후 임시 DB 삭제/결과 보존. GUI·계정·모델 호출 없음. dirty 정식 경로는 빌드/측정 없이 samples0/NOT_READY/exit2로 거절됨을 별도 확인했고 두 결과 assertion·syntax/diff PASS다.
+- 전체 G6 수집기 연결은 아직 미완료다. 이번 것은 기존 시작 collector의 호환 수정이며 독립 성능 수치만으로 제품 합격이 아니다. 다음은 저장 경합/종료 등 미연결 관측과 packaged 통합, 잠금 해제 후 네이티브 입력/메모리, Claude 확인 후 실연결이다. 사용자9월 archive/main/push 경계 유지, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (직접 입력 진단·잠긴 Mac 확인)
 
 - dd7d5cf 이후 제품 마일스톤/출시 체크리스트와 현행 검사 범위를 대조했다. 실제 계정/패키징/통합 성능 증거는 여전히 미완료다. 특히 m5:test:performance의 전체 수집기 연결은 아직 없으며 기존 diagnostic 수치를 정식 G6로 바꾸지 않는다.

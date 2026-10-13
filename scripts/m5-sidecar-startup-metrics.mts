@@ -1,4 +1,4 @@
-/** Real release-sidecar startup measurements on one generated, pre-migrated empty DB. */
+/** Real sidecar startup on a generated pre-migrated DB; release or explicit debug diagnostic. */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { decodeJsonl, parseReadyPayload, parsePrepareQuitResult } from "../src/m5/contracts/protocol-v1.ts";
-import { parseG5DProductSystemStatusV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
+import { parseCurrentSystemStatusV1 } from "../src/m5/contracts/lifecycle-g5d-v1.ts";
 import { qaEnvironment, lowerQaPriority } from "./m5-qa-resources.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -62,7 +62,7 @@ async function trial(binary: string, directory: string) {
       return response;
     };
     for (;;) {
-      const status = parseG5DProductSystemStatusV1((await request("system.status")).result);
+      const status = parseCurrentSystemStatusV1((await request("system.status")).result, false, true);
       assert.deepEqual(status.sidecar, ready);
       assert.notEqual(status.storageAdmission.state, "failed");
       if (status.storageAdmission.state === "ready") {
@@ -91,17 +91,19 @@ async function trial(binary: string, directory: string) {
   }
 }
 
-const report: any = { schemaVersion: 1, evidence: "m5-sidecar-startup-only", status: "NOT_READY", startedAt: new Date().toISOString(), samples: [], reasons: [],
+const diagnostic = process.argv.length === 3 && process.argv[2] === "--diagnostic";
+const report: any = { schemaVersion: 1, evidence: "m5-sidecar-startup-only", status: "NOT_READY", diagnostic, gateEligible: false, buildProfile: diagnostic ? "debug" : "release", startedAt: new Date().toISOString(), samples: [], reasons: [],
   limitations: ["Sidecar-only warm startup on a generated empty DB. Does not measure packaged UI interactivity, loaded databases, Windows or overall G6 readiness."] };
 let directory: string | undefined;
 try {
+  assert.ok(process.argv.length === 2 || diagnostic, "only --diagnostic is supported");
   assert.equal(process.platform, "darwin", "macOS measurement only");
   assert.equal(process.arch, "arm64", "macOS arm64 measurement only");
-  report.head = git(["rev-parse", "HEAD"]); report.dirtyBefore = git(["status", "--porcelain"]) !== "";
-  assert.equal(report.dirtyBefore, false, "clean checkout required");
+  report.head = git(["rev-parse", "HEAD"]); report.gitStatusBefore = git(["status", "--porcelain"]); report.dirtyBefore = report.gitStatusBefore !== "";
+  assert.ok(diagnostic || !report.dirtyBefore, "clean checkout required");
   lowerQaPriority();
-  const build = spawnSync("cargo", ["build", "--release", "--locked", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json"], { cwd: root, env: qaEnvironment(), encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
-  assert.equal(build.status, 0, "release sidecar build failed");
+  const build = spawnSync("cargo", ["build", ...(diagnostic ? [] : ["--release"]), "--locked", "-p", "hello-agent-sidecar", "--bin", "hello-agent-sidecar", "--message-format=json"], { cwd: root, env: { ...qaEnvironment(), CARGO_INCREMENTAL: "0" }, encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(build.status, 0, "sidecar build failed");
   const binaries = build.stdout.trim().split("\n").map((line) => JSON.parse(line)).filter((value) => value.reason === "compiler-artifact" && value.target?.name === "hello-agent-sidecar" && value.target.kind.includes("bin") && value.executable).map((value) => value.executable);
   assert.equal(binaries.length, 1, "expected exact Cargo executable");
   const binary = binaries[0];
@@ -119,13 +121,15 @@ try {
   report.shellReadyP95Ms = Math.max(...report.samples.map((sample: any) => sample.shellReadyMs));
   report.storageReadyP95Ms = Math.max(...report.samples.map((sample: any) => sample.storageReadyMs));
   report.shellHardTimeoutPassed = report.samples.every((sample: any) => sample.shellReadyMs <= 3000);
-  report.headAfter = git(["rev-parse", "HEAD"]); report.dirtyAfter = git(["status", "--porcelain"]) !== "";
-  assert.equal(report.headAfter, report.head); assert.equal(report.dirtyAfter, false);
-  report.status = report.shellReadyP95Ms <= 1000 && report.storageReadyP95Ms <= 1000 ? "PASS" : "FAIL";
+  report.headAfter = git(["rev-parse", "HEAD"]); report.gitStatusAfter = git(["status", "--porcelain"]); report.dirtyAfter = report.gitStatusAfter !== "";
+  assert.equal(report.headAfter, report.head); assert.equal(report.gitStatusAfter, report.gitStatusBefore);
+  report.gateEligible = !diagnostic;
+  report.status = report.shellReadyP95Ms <= 1000 && report.storageReadyP95Ms <= 1000 ? (diagnostic ? "NOT_READY" : "PASS") : "FAIL";
+  if (diagnostic) report.reasons.push("debug diagnostic only; clean release measurements still required");
   if (report.status === "FAIL") report.reasons.push("sidecar startup exceeded 1000ms p95");
   await rm(directory, { recursive: true }); report.temporaryDirectory = null;
 } catch (error) {
-  report.status = report.head && report.dirtyBefore === false ? "FAIL" : "NOT_READY";
+  report.status = report.head && (diagnostic || report.dirtyBefore === false) ? "FAIL" : "NOT_READY";
   report.reasons.push(error instanceof Error ? error.message : "measurement failed");
   // Preserve generated DB evidence on any failed/uncertain trial.
 }
