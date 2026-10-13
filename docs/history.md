@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (초기 설치 조회 순서 수정·실제 프로젝트 흐름 확인)
+
+- 19fa094 최신 실제 앱 시험에서 ProviderInstall이 storage admission verifying 중 status를 호출해 requestBlocked/불필요한 uncertain을 만들었다. 초기 조회는 disabled 해제 뒤 시작하고 기존 active/uncertain polling과 소유자 mount 수명은 유지하도록 수정했다. 초기 admission100ms 지연과 premature install read 카운터 회귀를 추가했다. renderer build/tsc/diff 및 합성 Chromium2 PASS12.3초다.
+- native 기본 흐름은 OS 창/contents focus=false(document focus=true)에서 중단됐다.3초 bounded focus 재시도도 같은 결과라 실패를 숨기지 않고 최종 verdict에 보존하면서 targeted webContents.insertText로 후속 독립 검사를 이어가게 했다. pFdoU8 실행은 PROJECT_FLOW_COMPLETE까지 도달해 저장·diff 파일/줄 후속 지시 초안 왕복·반영 전 확인 ready(약1.54초)·두 채팅 복귀를 확인했지만 네이티브 키보드 증거가 아니며 전체 FAIL/exit1이다. 초기 install requestBlocked는 수정 후 재발 관측되지 않았다.
+- 정상 종료 accepted를 확인한 native3개(7blvUv/kLFDKo/pFdoU8)의 임시 project/userdata만 cleanup helper로 삭제하고 결과/스크린샷은 보존했다. 실제 모델·원본 반영은 실행하지 않았다. 다음은 OS focus 문제의 원인 구분, 유휴 메모리 초과·Claude 연결 확인/실행과G6/출시다. 사용자 archive/main/push 경계 유지, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (최신 실제 앱의 유휴 메모리 초과 확인)
 
 - fdcea20 이후 기존 native smoke에 HELLO_AGENT_SMOKE_IDLE_ONLY=1을 추가했다. memory 모드 필수·다른 프로젝트 시나리오와 병용 금지이며 실제 main/preload/Rust sidecar로 시작해 준비 후1초 RSS만 측정하고 정상 종료한다. 로드/잔류 성능은 측정하지 않았다고 표시한다. 제공된 임시 폴더를 열거나 에이전트를 선택하지 않는다.

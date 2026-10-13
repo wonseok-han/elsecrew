@@ -40,9 +40,14 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck, c
   }, [onBlockChange]);
   useEffect(() => {
     mounted.current = true;
-    void request({ action: "status" });
     return () => { mounted.current = false; };
-  }, [request]);
+  }, []);
+  useEffect(() => {
+    // Initial storage verification rejects install requests. Wait for admission
+    // instead of presenting that expected startup phase as an uncertain install.
+    // Existing active/uncertain polling below still tracks owned operations.
+    if (!disabled) void request({ action: "status" });
+  }, [disabled, request]);
   const active = running(status);
   const poll = active || uncertain;
   useEffect(() => {

@@ -1,5 +1,10 @@
 const listeners = new Set();
-window.m5Install = { request: async () => ({state:"unsupported", operationId:null, provider:null, plan:null, error:null, cancelRequested:false}) };
+window.m5SmokeAdmissionReturned = false;
+window.m5SmokePrematureInstallReads = 0;
+window.m5Install = { request: async () => {
+  if (!window.m5SmokeAdmissionReturned) window.m5SmokePrematureInstallReads++;
+  return {state:"unsupported", operationId:null, provider:null, plan:null, error:null, cancelRequested:false};
+} };
 const preparationInspection = { projectId: "earlier_project", worktreeId: "worktree_failed", workspaceIdentity: "workspace_failed", lockId: "lock_worktree_failed", projectRevision: 8, lockRevision: 9 };
 let preparationAttempts = 0;
 window.m5Projects = { request: async (input) => {
@@ -107,6 +112,10 @@ window.m5 = {
   },
   getSystemStatus: async function () {
     if (this !== window.m5) throw new TypeError("Illegal invocation");
+    // Browser fixture: leave enough time for mount effects before admission.
+    // The isolated contract VM has no timer and does not mount React.
+    if (!window.m5SmokeAdmissionReturned && typeof setTimeout === 'function') await new Promise(resolve => setTimeout(resolve, 100));
+    window.m5SmokeAdmissionReturned = true;
     const status = {
     schemaVersion: 1,
     state: "shellReady",

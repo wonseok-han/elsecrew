@@ -39,6 +39,7 @@ if (largeDiff || largeTree) {
 let largeFileReport;
 let largeTreeReport;
 let confirmationReport;
+let nativeFocusUnavailable = false;
 const memorySamples = [];
 let memoryPhase = 'idle';
 let memoryTimer;
@@ -303,6 +304,12 @@ app.on('browser-window-created', (_event, window) => {
       await new Promise(r=>setTimeout(r,500));
       await run(`document.querySelector('.monaco-editor textarea').focus()`);
       await wait(`document.activeElement===document.querySelector('.monaco-editor textarea')`);
+      const focusDeadline = performance.now() + 3000;
+      while ((!window.isFocused() || !window.webContents.isFocused() || !await run('document.hasFocus()')) && performance.now() < focusDeadline) {
+        app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
+        await run(`document.querySelector('.monaco-editor textarea')?.focus()`);
+        await new Promise(r => setTimeout(r, 100));
+      }
       const inputFocus = {
         window: window.isFocused(),
         contents: window.webContents.isFocused(),
@@ -310,7 +317,9 @@ app.on('browser-window-created', (_event, window) => {
       };
       console.log(JSON.stringify({stage:'EDITOR_INPUT_FOCUS',...inputFocus}));
       if (!inputFocus.window || !inputFocus.contents || !inputFocus.document) {
-        throw new Error('Editor input unavailable: native window or document is not focused');
+        // Keep this failure in the final verdict, but collect independent
+        // save/diff/chat evidence using targeted insertion before quitting.
+        nativeFocusUnavailable = true;
       }
       await window.webContents.insertText('edited in snapshot\n');
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&!b.disabled)`);
@@ -420,7 +429,7 @@ app.on('browser-window-created', (_event, window) => {
       }
       if (largeFileReport?.fileEditableMs > 1500) throw new Error('native diagnostic file-open limit exceeded: '+largeFileReport.fileEditableMs);
       if (largeTreeReport && (largeTreeReport.treeRootMs > 1000 || largeTreeReport.treeExpandMs > 250 || largeTreeReport.treeDomNodes > 500)) throw new Error('native diagnostic tree limits exceeded');
-      finish(null,{screenshot,text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
+      finish(nativeFocusUnavailable ? new Error('Native focus unavailable; remaining flow used targeted insertText, not OS keyboard evidence') : null,{screenshot,nativeFocusUnavailable,inputMethod:'webContents.insertText',text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');
       let captureError;

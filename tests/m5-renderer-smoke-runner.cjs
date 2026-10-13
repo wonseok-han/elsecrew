@@ -61,6 +61,7 @@ app.whenReady().then(async () => {
     if (!selection || window.m5SmokeLoginRequests.length !== 0) throw new Error('first-run agents were checked before selection');
     if (!selection.querySelector('button[type=submit]').disabled) throw new Error('empty selection is enabled');
     await ${waitFor("!document.querySelector('.m5-provider-selection input').matches(':disabled')", "storage admission before selection")};
+    if (window.m5SmokePrematureInstallReads !== 0) throw new Error('installation queried before initial storage admission');
     selection.querySelector('input[type=checkbox]').click();
     await ${waitFor("!document.querySelector('.m5-provider-selection button[type=submit]').disabled", "single agent selection")};
     selection.querySelector('button[type=submit]').click();
