@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (workspace 감시 중단 연결·대형 native 진척)
+
+- 직전c4fb3bf 이후 workspace_watch도 대형 snapshot_tree 실패 시 chat 열기를 막는 경로를 확인했다. 주소 검증 후 해당 chat watcher만 제거하고 주소가 붙은 rescan event/false 응답을 반환하도록 project fallback과 맞췄다. TS union·Electron exact validator·transcript validator·bindChat 표시를 함께 연결했다. 기존 저장 CAS/원본 보호 유지, 독립 검토의 transcript 누락 지적 수정 후 APPROVE.
+- workspace TypeScript9/9·Rust oversized watcher1/1 PASS, 기존 watcher→중단→축소 후 재개 포함. tsc/diff PASS. rustfmt가 확장한 무관 포맷은 원상복원해 최소 diff만 남겼다. package smoke darwin-arm64 PASS/session55090 및 debug sidecar 갱신. 설치/게시 없음.
+- 최신 native94388/QXB22y: snapshot53020ms, treeRoot1534ms(1000ms 초과), treeExpand125ms,362DOM. 첫 chat 생성·Monaco 편집/저장/diff까지 진행했으나 반영 확인 취소 버튼15초 대기 실패로 전체FAIL/exit1; shutdown accepted. 두 chat 전체 흐름 합격 아님. 결과/스크린샷 보존. Rust focused검사가 중간 겹쳐 후속 단계 시간은 단독 성능으로 인용하지 않는다(tree측정은 그 검사 전).
+- 다음: treeRoot 지연·반영 확인 준비의 실제 완료/오류 계측, 대형 전체 흐름·G6/RSS·Claude/Windows/출시. 전체 목표 미완료, 기존9월 archive 보존·실제 계정 호출/main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (대형 트리 감시 중단 응답 계약 수정)
 
 - 직전b08eddf는 Git poll 대기 수정으로 진척했다. 대형 트리 시험의 snapshot/채팅 생성 관측65초·전체5분을 적용했다. 제품60초 제한/성능 기준은 그대로다. session68541/SYpsWt의 최초 snapshot은56774ms에 열려 이전60초 timeout과 달라졌지만 여유가 작다.

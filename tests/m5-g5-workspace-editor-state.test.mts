@@ -3,12 +3,35 @@ import test from "node:test";
 
 import { ProjectEditorController, type ChatProjectBridge } from "../src/m5/editor-state.ts";
 import type { ChatWorkspaceRefV1, WorkspaceEventV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
-import { validateWorkspaceTreeRequestV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
+import { validateWorkspaceTreeRequestV1, validateWorkspaceWatchTranscriptV1 } from "../src/m5/contracts/workspace-addressing-v1.ts";
 import { sha256FileVersionV1 } from "../src/m5/contracts/file-v1.ts";
 
 const version = sha256FileVersionV1(new TextEncoder().encode("one\n"));
 const a: ChatWorkspaceRefV1 = { chatId: "chat_a", projectId: "project_01", worktreeId: "worktree_a", workspaceIdentity: "workspace_a" };
 const b: ChatWorkspaceRefV1 = { chatId: "chat_b", projectId: "project_01", worktreeId: "worktree_b", workspaceIdentity: "workspace_b" };
+
+test("workspace watch transcript requires exact suspension and matching address", () => {
+  for (const state of [{ watching: true }, { watching: false, rescanRequired: true }]) {
+    assert.deepEqual(validateWorkspaceWatchTranscriptV1({ request: a, response: { ...a, ...state } }).response, { ...a, ...state });
+  }
+  for (const state of [{ watching: false }, { watching: false, rescanRequired: false }, { watching: true, rescanRequired: true }, { watching: false, rescanRequired: true, extra: 1 }]) {
+    assert.throws(() => validateWorkspaceWatchTranscriptV1({ request: a, response: { ...a, ...state } }));
+  }
+  assert.throws(() => validateWorkspaceWatchTranscriptV1({ request: a, response: { ...b, watching: false, rescanRequired: true } }));
+});
+
+test("suspended workspace watch preserves binding and explicit rescan state", async () => {
+  const bridge = new Bridge() as unknown as ChatProjectBridge;
+  bridge.watchWorkspaceFiles = async input => ({ ...input, watching: false, rescanRequired: true });
+  const controller = new ProjectEditorController(bridge);
+  try {
+    await controller.chooseProject();
+    assert.equal(await controller.bindChat(a), true);
+    assert.deepEqual(controller.snapshot().workspace, a);
+    assert.equal(controller.snapshot().rescanRequired, true);
+    assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.rescan");
+  } finally { controller.dispose(); }
+});
 
 test("binding a full chat record retains only the exact workspace address", async () => {
   const bridge = new Bridge();

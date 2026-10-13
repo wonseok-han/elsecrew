@@ -12,6 +12,38 @@ use tempfile::TempDir;
 mod claude_native;
 
 #[test]
+fn oversized_workspace_watch_preserves_address_and_requests_rescan() {
+    let mut f = Fixture::new();
+    let snapshot = f.snapshot("req_watch_large_snapshot");
+    let chat = f.create_chat(&snapshot, "large watch", "req_watch_large_chat");
+    let address = address_from_chat(&chat).unwrap();
+    assert_eq!(
+        f.projects.workspace_watch(&f.storage, &address).unwrap().result,
+        json!({"watching":true})
+    );
+    let root = std::path::Path::new(snapshot["worktreePath"].as_str().unwrap());
+    let overflow = root.join("overflow");
+    fs::create_dir(&overflow).unwrap();
+    for index in 0..=10_000 {
+        fs::write(overflow.join(format!("{index:05}")), b"").unwrap();
+    }
+    let action = f.projects.workspace_watch(&f.storage, &address).unwrap();
+    assert_eq!(
+        action.result,
+        json!({"watching":false,"rescanRequired":true})
+    );
+    assert_eq!(action.watch_events.len(), 1);
+    assert_eq!(action.watch_events[0].payload["chatId"], chat["chatId"]);
+    assert_eq!(action.watch_events[0].payload["rescanRequired"], true);
+    assert!(f.projects.poll_watchers(&f.storage).is_empty());
+    fs::remove_dir_all(&overflow).unwrap();
+    assert_eq!(
+        f.projects.workspace_watch(&f.storage, &address).unwrap().result,
+        json!({"watching":true})
+    );
+}
+
+#[test]
 fn project_application_fence_blocks_other_chat_runs_before_reservation() {
     use crate::agent_runtime::preparation::RunPreparation;
     let mut f = Fixture::new();

@@ -2367,7 +2367,29 @@ impl ProjectManager {
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_workspace_address(storage, address)?;
         let worktree = self.worktree_capability(&active)?;
-        let snapshot = snapshot_tree(&worktree)?;
+        let snapshot = match snapshot_tree(&worktree) {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                let mut suspended = WatchState {
+                    stream_id: format!("workspace_watch_{}", Uuid::new_v4().simple()),
+                    snapshot: BTreeMap::new(),
+                    next_seq: 1,
+                    workspace: Some(address.clone()),
+                };
+                self.watchers
+                    .remove(&format!("workspace:{}", address.chat_id));
+                return Ok(ProjectAction {
+                    result: json!({"watching":false,"rescanRequired":true}),
+                    watch_events: vec![watch_emission(
+                        &mut suspended,
+                        &address.project_id,
+                        Vec::new(),
+                        true,
+                    )],
+                    ..ProjectAction::default()
+                });
+            }
+        };
         self.watchers.insert(
             format!("workspace:{}", address.chat_id),
             WatchState {

@@ -1416,8 +1416,10 @@ function validateWorkspaceSaveCommitResult(value: unknown): WorkspaceSaveCommitR
 }
 
 function validateWorkspaceWatchResult(value: unknown): WorkspaceWatchResultV1 {
-  const object = strictObject(value, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "watching"], "workspace watch result");
+  const suspended = (value as Record<string, unknown> | null)?.watching === false;
+  const object = strictObject(value, ["chatId", "projectId", "worktreeId", "workspaceIdentity", "watching", ...(suspended ? ["rescanRequired"] : [])], "workspace watch result");
   const ref = workspaceRefFrom(object);
+  if (suspended && object.rescanRequired === true) return { ...ref, watching: false, rescanRequired: true };
   if (object.watching !== true) throw new Error("workspace watch result is invalid");
   return { ...ref, watching: true };
 }

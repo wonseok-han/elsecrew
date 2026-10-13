@@ -16,6 +16,7 @@ import {
   validateWatchEventV1,
   validateWorktreeManifestV1,
   type G4SafetyErrorV1,
+  type ProjectWatchResultV1,
   type TreeEntryV1,
   type WorktreeManifestV1,
 } from "./project-v1.ts";
@@ -103,7 +104,7 @@ export interface WorkspaceSaveTranscriptV1 {
   commitResult: WorkspaceSaveCommitResultV1;
   currentVersionBefore: FileVersionV1;
 }
-export interface WorkspaceWatchResultV1 extends ChatWorkspaceRefV1 { watching: true }
+export type WorkspaceWatchResultV1 = ChatWorkspaceRefV1 & ProjectWatchResultV1;
 export interface WorkspaceDiffSummaryV1 extends ChatWorkspaceRefV1 {
   baseCommit: string; entries: DiffEntryV1[];
 }
@@ -283,9 +284,10 @@ export function validateWorkspaceWatchTranscriptV1(value: unknown): { request: C
   const object = requireObject(value, "workspace watch transcript"); exactKeys(object, ["request", "response"]);
   const request = validateChatWorkspaceRefV1(object.request);
   const responseObject = requireObject(object.response, "workspace watch response");
-  exactKeys(responseObject, [...CHAT_WORKSPACE_REF_FIELDS_V1, "watching"]);
+  const suspended = responseObject.watching === false;
+  exactKeys(responseObject, [...CHAT_WORKSPACE_REF_FIELDS_V1, "watching", ...(suspended ? ["rescanRequired"] : [])]);
   const response = validateChatWorkspaceRefFields(responseObject); assertChatWorkspaceEcho(request, response, "watch response");
-  if (responseObject.watching !== true) fail("workspace watch response must confirm watching");
+  if (suspended ? responseObject.rescanRequired !== true : responseObject.watching !== true) fail("workspace watch response must confirm watching or require rescan");
   return { request, response: responseObject as unknown as WorkspaceWatchResultV1 };
 }
 

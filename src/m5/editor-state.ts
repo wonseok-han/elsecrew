@@ -296,7 +296,10 @@ export class ProjectEditorController {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
       await this.#loadTree(project.id, epoch, "", true);
       await this.#refreshChanges(project.id, epoch, true);
-      await this.#bridge.watchWorkspaceFiles!(workspace);
+      const watch = await this.#bridge.watchWorkspaceFiles!(workspace);
+      if (!watch.watching && this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
+        this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.rescan") });
+      }
       return this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace);
     } catch (error) {
       if (this.#isCurrent(project.id, epoch) && sameWorkspace(this.#state.workspace, workspace)) {
