@@ -521,8 +521,16 @@ impl PreflightExchange {
                     requirements: Box<serde_json::value::RawValue>,
                 }
                 let result: Requirements =
-                    serde_json::from_slice(&observation.bytes).map_err(|_| invalid())?;
+                    serde_json::from_slice(&observation.bytes).map_err(|_| {
+                        self.configuration_failure = Some("requirements response shape");
+                        invalid()
+                    })?;
                 if result.requirements.get() != "null" {
+                    self.configuration_failure = Some(if result.requirements.get().trim_start().starts_with('{') {
+                        "managed requirements present"
+                    } else {
+                        "requirements value shape"
+                    });
                     return Err(invalid());
                 }
                 if self.named_cwd.is_none() {
@@ -1091,6 +1099,12 @@ mod tests {
             } else {
                 let error = accepted.unwrap_err();
                 assert!(!error.to_string().contains("PRIVATE_POLICY"));
+                if result == r#"{"requirements":{}}"# || result.contains("allowedSandboxModes") {
+                    assert_eq!(flow.diagnostic_stage(), "managed requirements present");
+                } else if [r#"{"requirements":false}"#, r#"{"requirements":[]}"#, r#"{"requirements":"null"}"#].contains(&result) {
+                    assert_eq!(flow.diagnostic_stage(), "requirements value shape");
+                }
+                assert!(!flow.diagnostic_stage().contains("PRIVATE_POLICY"));
                 assert_eq!(flow.state(), PreflightState::Failed);
                 assert!(flow
                     .accept(&reply(4, &json!({"requirements":null})))

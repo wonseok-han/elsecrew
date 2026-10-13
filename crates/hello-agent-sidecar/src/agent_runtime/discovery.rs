@@ -231,15 +231,17 @@ impl AgentRuntime {
     ) -> Result<(), SidecarError> {
         use crate::provider_claude_session::ToolAccess;
         let failure = || SidecarError::new("agentInputChanged", "Claude start discovery differs");
+        let checkpoint = |stage: &'static str| SidecarError::new("agentInputChanged", format!("Claude start discovery differs at {stage}"));
         if self.preparing_to_quit || reservation.is_some() || process.is_some()
-            || active_run_limit_reached(self.owned_run_ids().len()) { return Err(failure()); }
+            || active_run_limit_reached(self.owned_run_ids().len()) { return Err(checkpoint("owner state")); }
         let capability = observed.capability()?;
         let preparation = preparation::RunPreparation::resolve(storage, projects, request)
-            .map_err(|_| failure())?;
-        if observed.scope != capability_scope(&preparation.chat, &request.role_id).map_err(|_| failure())?
-            || observed.profile != preparation.profile
-            || preflight_outcome(request, &preparation.profile, &capability) != "started"
-        { return Err(failure()); }
+            .map_err(|_| checkpoint("preparation"))?;
+        if observed.scope != capability_scope(&preparation.chat, &request.role_id).map_err(|_| checkpoint("scope"))?
+        { return Err(checkpoint("scope")); }
+        if observed.profile != preparation.profile { return Err(checkpoint("profile")); }
+        if preflight_outcome(request, &preparation.profile, &capability) != "started"
+        { return Err(checkpoint("capability")); }
         let access = match preparation.profile.permission.as_str() {
             "readOnly" => ToolAccess::ReadOnly,
             "workspaceWrite" => ToolAccess::Edit,
@@ -248,12 +250,13 @@ impl AgentRuntime {
         let binding = crate::provider_claude_profile::ClaudeProfileBinding::from_storage(storage)?;
         *process = Some(crate::provider_login_process::LoginProcess::reserve_claude_owned(binding)?);
         let home = process.as_ref().ok_or_else(failure)?.claude_preflight_home()?;
-        if !observed.evidence.is_fresh() || !observed.evidence.observation.matches(
+        if !observed.evidence.is_fresh() { return Err(checkpoint("freshness")); }
+        if !observed.evidence.observation.matches(
             &preparation.profile.model_selector,
             preparation.profile.reasoning_effort.as_deref(), access,
             Path::new(preparation.manifest["worktreePath"].as_str().ok_or_else(failure)?),
             Path::new(preparation.manifest["canonicalGitRoot"].as_str().ok_or_else(failure)?), &home,
-        ) { return Err(failure()); }
+        ) { return Err(checkpoint("launch binding")); }
         observed.evidence.executable.revalidate()?;
         let preflight = hello_agent_protocol::agent_adapter_v1::phased_claude::Preflight {
             schema_version:1, scope:observed.scope.clone(), profile:observed.profile.clone(),
@@ -267,9 +270,9 @@ impl AgentRuntime {
             resolved_model:observed.evidence.observation.resolved_model()?.into(),
             credentials_present:observed.evidence.credentials_present, observed_at:now(),
         };
-        preflight.validate().map_err(|_| failure())?;
+        preflight.validate().map_err(|_| checkpoint("protocol"))?;
         *reservation = Some(preparation.reserve(storage, projects, &capability, request_id)
-            .map_err(|_| failure())?);
+            .map_err(|_| checkpoint("reservation"))?);
         reservation.as_mut().ok_or_else(failure)?.claude_preflight = Some(preflight);
         Ok(())
     }

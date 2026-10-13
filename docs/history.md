@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실행 전 진단 검증·승인 시험 cYNWv3)
+
+- 직전 턴은 Codex requirements 고정 분류 구현으로 진척했다. e89bde5 위 기존 history/9월 archive 보존. vendor_observation108/108 PASS(session74389), debug sidecar build PASS(session98693), diff 검사 PASS. 두 공급자 진단은 수락 조건을 바꾸지 않는다.
+- 새 사용자 각1회 승인으로 session35867 실행, exit1/FAIL. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-cYNWv3/result.json. Codex connected/모델 선택 뒤 requirements response shape로 거절됐으므로 non-null 정책 내용 판정 이전의 역직렬화 실패다(추가 필드/누락 등 세부 형식은 아직 미확정). Claude status idle/error null로 loginBlocked, 실행되지 않았다. 로그아웃 확정 증거가 아니다. 원본 불변/shutdown accepted, RUN_ACCEPTED/응답 없음.
+- 승인 시험은 종료했으며 자동 재시도하지 않는다. 다음: 현재 Codex schema의 requirements 응답 envelope와 strict 필드 대조, Claude UI 자동 진단과 smoke check 상태 전이 경합 확인. 관련 코드·기록 로컬 커밋, 기존9월 archive 제외. main/push 없음, 제품/G6/UI/Windows 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 관리 요구사항 응답 분류)
+
+- 직전 턴은 Claude 실행 전 checkpoint 구현으로 진척했다. 기존 dirty 보존. OpenAI Docs 공식 app-server의 Read admin requirements 절을 검색·열람했다. requirements는 유효 관리 요구사항이며 없을 때 null이다. 현재 앱은 null만 허용하고 관리 요구사항 적용은 지원하지 않는다. W4SUaF가 실제 관리 정책인지 응답 형식 변화인지는 미확정이다.
+- Karpathy 지침으로 requirements response shape / managed requirements present / requirements value shape 고정 진단을 분리하고 기존 회귀에 분류·비공개 값 비노출 assertions를 추가했다. non-null 거절과 duplicate/sticky/시작 차단은 유지하며 정책을 무시하거나 지원한다고 주장하지 않는다. diff 검사 PASS, 컴파일/관련 회귀는 Claude 변경과 후속 묶음 대상이다.
+- 출처 https://learn.chatgpt.com/docs/app-server#read-admin-requirements-configrequirementsread . 실제 계정 호출0회/main/push 없음. 다음: 양쪽 실행 전 진단 묶음 검증과 실제 응답 계약 증거 확보, UI/G6/Windows 잔여 작업. 제품 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (Claude 실행 전 비교 진단 분리)
+
+- 직전 턴은 승인된 W4SUaF 실측으로 새 실행 전 차단 증거를 확보했다. e89bde5 및 기존 history/9월 archive 보존. reserve_scoped_claude_start를 읽어 같은 오류가 owner 상태, 준비, scope/profile/capability,30초 freshness, launch binding, protocol, reservation에 공용으로 쓰임을 확인했다. 따라서 설치 버전 변경만으로 원인을 단정할 수 없다.
+- Karpathy 지침으로 해당 분기를 고정 로컬 checkpoint 문자열로 구분했다. 입력값/경로/계정/모델 원문은 추가하지 않고 조건·실행 순서·종료 책임·오류 kind를 유지한다. freshness 시간을 늘리거나 재검증을 생략하지 않았다. diff 검사 PASS, 컴파일/회귀는 후속 묶음 대상. 실제 계정 호출0회.
+- 다음: Codex requirements 계약 대조와 새 진단 빌드 후 필요한 승인 실측. UI/G6/Windows/출시 잔여 작업 및 전체 목표 미완료, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (최신 빌드 승인 실연결 W4SUaF)
+
+- 직전 턴은 e89bde5 UI·진단 파동 커밋으로 진척했다. 기존9월 archive 보존. debug sidecar build PASS(session76105) 뒤 사용자 새 각1회 승인으로 session22026을 실행했다. 실제 로그인 두 개 connected, Codex 모델 선택까지 완료했으나 Codex configRequirements/read preflight, Claude start discovery differs에서 요청이 거절됐다. RUN_ACCEPTED/모델 응답은 없고 FAIL/exit1이다. 임시 원본 불변, shutdown accepted다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-W4SUaF/result.json. transportCheckpoints는 빈 배열이며 이전 account metadata/init plugins 단계까지 도달하지 않았으므로 앞선 수정의 실계정 성공을 입증하지 않는다. 현재 Claude 설치 링크는2.1.296(10월13일)으로 이전2.1.293과 다르다. 버전 변경이 이번 실패 원인인지는 아직 미확정이다.
+- 이번 승인 시험은 종료했으며 추가 자동 재시도하지 않는다. 다음: 새 config requirements 응답 계약과 Claude discovery 비교 조건을 확인하고 버전/설정 변경과 실제 불일치를 구분한다. 메모리 조사에서는 Monaco 모델 dispose 구조만 재확인했고 새로운 원인 결론은 없다. 실제 모델 성공/UI 시각/G6/Windows/출시 미완료, main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (패널 UI·진단 묶음 검증)
 
 - 직전 작업은 TypeScript 검사/renderer 빌드 PASS와 smoke 예상 개수13→15 수정으로 진척했다. 현재 eb79acc/m5/coding-agent-ide와 기존 dirty를 재확인했다. 패널 상태16개 PASS, 수정 후 private 진단 smoke10개 PASS. Karpathy 지침으로 새 메뉴 조작에 맞춰 renderer 시나리오를 갱신했다.
@@ -167,6 +191,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **최신 실연결 차단(2026-10-13, e89bde5)**: W4SUaF는 두 로그인 유지·Codex 모델 선택 뒤 configRequirements/read 및 Claude start discovery differs에서 차단됐다. RUN_ACCEPTED 없음, 임시 원본 불변/정상 종료. 현재 Claude 링크2.1.296이며 이전2.1.293 관측을 현재 동작으로 가정하지 않는다. 10월8일 account/plugins 실패보다 앞 단계의 최신 증거다.
 
 - **Claude 내장 mod와 safe-mode(2026-10-08)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. cc-plugin-sec-default 조직 guard는 사용자가 끌 수 없으므로 무조건 plugins=[] 요구와 충돌할 수 있다. 현재 실제 항목 미확정, nonempty 거절 유지. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지.
 
