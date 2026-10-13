@@ -99,11 +99,13 @@ fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn completed_current_backup_stays_protected_until_explicit_retirement() {
-    use application::review::{backup::cleanup, confirmation::Confirmations, intent, ReviewTarget};
+    use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
+    // Exercise enabled public dispatch without enabling deletion in the product.
+    f.manager.application_cleanup_enabled = true;
     let mut owner = Confirmations::default();
     let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_cleanup_ready").unwrap();
@@ -117,26 +119,40 @@ fn completed_current_backup_stays_protected_until_explicit_retirement() {
     let lock_id = terminal["lockId"].as_str().unwrap();
     let lock = f.storage.projection_record("lock", lock_id).unwrap();
     // A terminal current application is still a restoration target.
-    assert!(cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).is_err());
-    assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, "unapproved", "req_cleanup_current").is_err());
+    assert!(f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).is_err());
+    assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, "unapproved", "req_cleanup_current").is_err());
     assert_eq!(fs::read(&archive).unwrap(), bytes);
     assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
 
-    let retirement = intent::retirement::preview(&f.storage, &f.project_id, id).unwrap();
-    intent::retirement::retire(&mut f.storage, &f.project_id, id, retirement["fingerprint"].as_str().unwrap(), "req_cleanup_retire").unwrap();
+    let retirement = f.manager.inspect_application_retirement(&f.storage, &f.project_id, id).unwrap().result;
+    assert_eq!(retirement["enabled"], true);
+    let retirement_fingerprint = retirement["inspection"]["fingerprint"].as_str().unwrap();
+    assert!(f.manager.retire_application(&mut f.storage, &f.project_id, id, "stale", "req_retire_stale").is_err());
+    f.manager.preparation_cancel = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    assert!(f.manager.retire_application(&mut f.storage, &f.project_id, id, retirement_fingerprint, "req_retire_busy").is_err());
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+    f.manager.preparation_cancel = None;
+    f.manager.retire_application(&mut f.storage, &f.project_id, id, retirement_fingerprint, "req_cleanup_retire").unwrap();
     assert_eq!(fs::read(&archive).unwrap(), bytes);
-    let preview = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
-    cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, preview["fingerprint"].as_str().unwrap(), "req_cleanup_history").unwrap();
+    let preview = f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).unwrap().result;
+    assert_eq!(preview["enabled"], true);
+    let fingerprint = preview["inspection"]["fingerprint"].as_str().unwrap();
+    assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, "stale", "req_cleanup_stale").is_err());
+    f.manager.preparation_cancel = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, fingerprint, "req_cleanup_busy").is_err());
+    assert_eq!(fs::read(&archive).unwrap(), bytes);
+    f.manager.preparation_cancel = None;
+    f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, fingerprint, "req_cleanup_history").unwrap();
     assert!(!archive.exists());
     let after = required_project(&f.storage, &f.project_id).unwrap();
     assert_eq!(after["application_history"][id], terminal);
     assert_eq!(f.storage.projection_record("lock", lock_id).unwrap(), lock);
     assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
-    let deleted = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    let deleted = f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).unwrap().result["inspection"].clone();
     assert_eq!(deleted["state"], "deleted");
     // A new file at the old archive name must not be consumed by a retry.
     fs::write(&archive, b"replacement must survive").unwrap();
-    assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, deleted["fingerprint"].as_str().unwrap(), "req_cleanup_retry").is_err());
+    assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, deleted["fingerprint"].as_str().unwrap(), "req_cleanup_retry").is_err());
     assert_eq!(fs::read(&archive).unwrap(), b"replacement must survive");
     assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), after);
 }
@@ -157,6 +173,58 @@ fn preparation_cancel_reaches_index_and_bound_receipt_without_mutation() {
     f.manager.preparation_cancel = None;
     assert!(capture_index_baseline(&f.manager, &source).is_ok());
     assert!(receipt::verify_bound(&f.manager, &f.storage, &active, &baseline).is_ok());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn backup_cleanup_interruption_requires_explicit_fresh_resume_after_reopen() {
+    use application::review::{backup::{cleanup, staging}, ReviewTarget};
+    for point in [cleanup::FailurePoint::Pending, cleanup::FailurePoint::Unlinked] {
+        for replacement in [false, true] {
+            let (mut f, review_id) = prepared_backup_fixture();
+            f.manager.application_cleanup_enabled = true;
+            assert!(staging::stop_after_reservation_for_test(&f.manager, &mut f.storage, ReviewTarget::Project(&f.project_id), &review_id).is_err());
+            let pending = staging::inspect(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+            let archive_root = f.manager.data_root.join("application-backups-v1");
+            fs::create_dir_all(&archive_root).unwrap();
+            let archive = archive_root.join(pending["name"].as_str().unwrap());
+            fs::write(&archive, b"partial archive").unwrap();
+            staging::abandon(&f.manager, &mut f.storage, &f.project_id, &review_id, &pending, "req_interruption_abandon").unwrap();
+            let preview = f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).unwrap().result;
+            let old = preview["inspection"]["fingerprint"].as_str().unwrap();
+            cleanup::fail_once_at(point);
+            assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, old, "req_interrupted_cleanup").is_err());
+            assert_eq!(archive.exists(), point == cleanup::FailurePoint::Pending);
+            let before = required_project(&f.storage, &f.project_id).unwrap();
+            assert_eq!(before["application_backups"][&review_id]["cleanup"]["state"], "pending");
+            let database = f._root.path().join("app-data/hello-agent.sqlite3");
+            // Simulated process interruption: destroy both owners and reopen the
+            // durable database. No test hook is present in production builds.
+            let Fixture { _root, source, storage, manager, project_id } = f;
+            drop(manager); drop(storage);
+            if replacement { fs::write(&archive, b"replacement survives recovery").unwrap(); }
+            let mut storage = Storage::open(&database).unwrap();
+            let mut manager = ProjectManager::new(&database).unwrap();
+            manager.application_cleanup_enabled = true;
+            assert_eq!(required_project(&storage, &project_id).unwrap(), before);
+            assert_eq!(archive.exists(), replacement || point == cleanup::FailurePoint::Pending);
+            if replacement {
+                assert!(manager.inspect_backup_cleanup(&storage, &project_id, &review_id).is_err());
+                assert!(manager.cleanup_backup(&mut storage, &project_id, &review_id, old, "req_replacement_cleanup").is_err());
+                assert_eq!(fs::read(&archive).unwrap(), b"replacement survives recovery");
+                assert_eq!(required_project(&storage, &project_id).unwrap(), before);
+            } else {
+                let fresh = manager.inspect_backup_cleanup(&storage, &project_id, &review_id).unwrap().result;
+                assert_eq!(fresh["inspection"]["state"], "pending");
+                assert_eq!(required_project(&storage, &project_id).unwrap(), before);
+                assert!(manager.cleanup_backup(&mut storage, &project_id, &review_id, old, "req_old_cleanup").is_err());
+                manager.cleanup_backup(&mut storage, &project_id, &review_id, fresh["inspection"]["fingerprint"].as_str().unwrap(), "req_explicit_resume").unwrap();
+                assert!(!archive.exists());
+                assert_eq!(manager.inspect_backup_cleanup(&storage, &project_id, &review_id).unwrap().result["inspection"]["state"], "deleted");
+            }
+            assert_eq!(fs::read(source.join("src/edit.txt")).unwrap(), b"hello");
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]

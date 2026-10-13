@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (정리 공개 경로·중단 재개 검증)
+
+- 직전a291887의 독립 검토는 확정 코드 차단 결함 없음으로 종료했다. renderer 토큰 부재 지적은 같은 renderer가 토큰을 발급/소비해도 인간 동의를 증명하지 못하고 별도 계약 근거가 없어 검토자가 철회했다. 불필요한 승인 API를 추가하지 않았다. 활성화 전 공백은 공개 enabled 경로, pending/unlink 중단 재개, UI 동의/응답 유실 처리다.
+- macOS 임시 fixture에서만 flag를 켜고 공개 ProjectManager API로 lifecycle 회귀를 변경했다. 현재 백업 보호·stale fingerprint·준비 중 idle fence·retirement 후 cleanup·원본/잠금/기록/대체 파일 보호 PASS(session20240,1/1). 제품 flag는 계속 false다.
+- production 빌드에서 제거되는 thread-local 단발 시험 hook을 pending 영속 기록 직후와 unlink/directory fsync 직후에 추가했다. 2개 경계×대체 파일 유무4사례에서 manager/storage를 파기 후 DB를 다시 열어 자동 정리 없음, 오래된 fingerprint 거부, 새 명시 확인으로만 재개, 대체 파일 보존을 확인했다(session51652,1/1,8.08초). OS kill/전원 장애가 아니라 결정적 오류 주입·owner 재생성 증거다. diff 검사 PASS.
+- 다음: enabled UI의 동의/unknown 응답 무자동재시도 흐름 및 변경 재검토 후 macOS 정리 활성화 판단. 전체 성능/RSS·Claude·Windows·출시는 미완료다. 사용자 데이터 삭제/main/push 없음, 기존9월 archive 보존.
+
 ### 2026-10-13 · by GPT-6 Astra (백업 정리 활성화 전 수명주기 회귀)
 
 - 직전7c75577은 반복 수집 구현 진척이다. 남은 제품 기능 중 `application_cleanup_enabled=false`인 명시 백업/복구 기록 정리를 조사했다. 현재 복구점은 terminal이어도 정리 불가, 명시 retirement 뒤 별도 동의로 과거 archive만 정리하는 기존 계약을 유지한다. 아직 활성화하지 않았다.

@@ -5,6 +5,30 @@ use crate::project::required_project;
 use crate::storage::ProjectionUpsert;
 use serde_json::json;
 
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::project) enum FailurePoint { Pending, Unlinked }
+
+#[cfg(test)]
+thread_local! {
+    static FAILURE: std::cell::Cell<Option<FailurePoint>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(in crate::project) fn fail_once_at(point: FailurePoint) {
+    FAILURE.with(|slot| slot.set(Some(point)));
+}
+
+#[cfg(test)]
+fn inject_failure(point: FailurePoint) -> Result<(), ProjectFailure> {
+    FAILURE.with(|slot| {
+        if slot.get() == Some(point) {
+            slot.set(None);
+            Err(ProjectFailure::recovery("injected cleanup interruption"))
+        } else { Ok(()) }
+    })
+}
+
 fn lock(manager: &ProjectManager) -> Result<Dir, ProjectFailure> {
     let dir = directory(manager)?;
     if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
@@ -246,6 +270,8 @@ pub(in crate::project) fn remove(
         persist(storage, project, review, &current, next.clone(), request)?;
         current = next;
     }
+    #[cfg(test)]
+    inject_failure(FailurePoint::Pending)?;
     // Recheck after durable intent. Missing only completes this explicit attempt;
     // a replacement file is never interpreted as the previously consented file.
     let name = current["name"].as_str().ok_or_else(invalid)?;
@@ -257,6 +283,8 @@ pub(in crate::project) fn remove(
         dir.remove_file(name).map_err(|_| invalid())?;
     }
     sync_capability_directory(&dir)?;
+    #[cfg(test)]
+    inject_failure(FailurePoint::Unlinked)?;
     let mut complete = current.clone();
     complete["cleanup"]["state"] = json!("deleted");
     persist(storage, project, review, &current, complete, request)
