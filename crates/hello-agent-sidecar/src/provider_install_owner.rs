@@ -11,6 +11,7 @@ use std::path::PathBuf;
 pub(crate) mod download;
 pub(crate) mod execute;
 pub(crate) mod journal;
+pub(crate) mod worker;
 
 const STAGING: &str = "provider-install-staging-v1";
 const PENDING: &str = "provider-install.pending";

@@ -26,6 +26,13 @@ pub(crate) struct DownloadedScript<'a> {
     scope: &'a super::InstallScope,
 }
 
+pub(crate) enum DownloadOutcome<'a> {
+    Ready(DownloadedScript<'a>),
+    // Cleanly stopped downloads still own their reservation until the terminal
+    // journal is synced. None means cancellation before any reservation/spawn.
+    Stopped(Option<LoginProcess<'a>>),
+}
+
 /// Keeps the confirmed download owner alive alongside the fresh installer owner.
 /// No installer is launched by reservation. The coordinator must keep both until
 /// a durable terminal result; neither owner is transferable to another journal.
@@ -45,11 +52,9 @@ impl<'a> DownloadedScript<'a> {
         self,
         journal: &InstallJournal<'a>,
         execution: &'a super::InstallScope,
-        cancel: &AtomicBool,
     ) -> Result<InstallerReservation<'a>, SidecarError> {
         journal.verify()?;
-        if cancel.load(Ordering::Acquire)
-            || journal.phase() != InstallPhase::Installing
+        if journal.phase() != InstallPhase::Installing
             || journal.operation != self.operation
             || journal.provider != self.provider
             || !std::ptr::eq(journal.scope, self.scope)
@@ -111,14 +116,14 @@ fn arguments(provider: &str) -> Result<Vec<&'static OsStr>, SidecarError> {
 pub(crate) fn fetch<'a>(
     journal: &mut InstallJournal<'a>,
     cancel: &AtomicBool,
-) -> Result<DownloadedScript<'a>, SidecarError> {
+) -> Result<DownloadOutcome<'a>, SidecarError> {
     if journal.scope.execution || journal.phase() != InstallPhase::Downloading {
         return Err(failure());
     }
     journal.verify()?;
     if cancel.load(Ordering::Acquire) {
         journal.record("cancelRequested")?;
-        return Err(download_error("installation download canceled"));
+        return Ok(DownloadOutcome::Stopped(None));
     }
     let args = arguments(&journal.provider)?;
     let scope = journal.scope;
@@ -152,13 +157,13 @@ pub(crate) fn fetch<'a>(
     match result {
         Ok(Some(bytes)) if !cancel.load(Ordering::Acquire) => {
             journal.record("downloadVerified")?;
-            Ok(DownloadedScript {
+            Ok(DownloadOutcome::Ready(DownloadedScript {
                 bytes,
                 owner,
                 operation: journal.operation,
                 provider: journal.provider.clone(),
                 scope,
-            })
+            }))
         }
         result => {
             // A late cancellation cannot erase a preceding download failure.
@@ -169,7 +174,7 @@ pub(crate) fn fetch<'a>(
                 journal.record("cancelRequested")?;
             }
             // Terminal archival/release belongs to the coordinator, not fetch.
-            Err(download_error("installation download did not complete"))
+            Ok(DownloadOutcome::Stopped(Some(owner)))
         }
     }
 }
@@ -248,7 +253,10 @@ mod tests {
         assert_eq!(journal.phase(), InstallPhase::AwaitingConsent);
         assert!(!root.join(super::super::PENDING).exists());
         journal.record("consented").unwrap();
-        assert!(fetch(&mut journal, &AtomicBool::new(true)).is_err());
+        assert!(matches!(
+            fetch(&mut journal, &AtomicBool::new(true)).unwrap(),
+            DownloadOutcome::Stopped(None)
+        ));
         assert_eq!(journal.phase(), InstallPhase::Stopping);
         assert!(!root.join(super::super::PENDING).exists());
     }

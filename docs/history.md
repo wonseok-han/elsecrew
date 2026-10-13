@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 coordinator와 terminal 기록 보관)
+
+- 직전676bb59는 결과 검증/종료 순서 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 execute_consented 내부 coordinator로 다운로드→설치→결과 검증→terminal 기록/잠금 해제→기록 보관을 연결했다. 다운로드의 정상 실패/취소도 owner를 반환해 cleanup 후 정리하며 중간 Drop으로 영구 recovery 잠금만 남기던 경로를 분리했다. 단계 인계 직후 취소도 installer spawn 전에 처리한다.
+- 완료 journal은 프로세스 fence가 둘 다 없고 terminal일 때만 UUID별 create-new 파일에 저장한다. 원본의 실제 bytes와 메모리 기록 일치·no-follow/identity/크기·fsync를 확인하고 보관본 내구성 확보 뒤 active 이름을 제거한다. 기존 보관본 덮어쓰기/자동 삭제는 없고 최대128개×16KiB와 bounded 목록 조사로 기록 증가를 제한한다. 한도/보관 실패는 성공 표시하지 않으며 복구/정리 UI는 별도 후속이다.
+- pre-cancel 두 연속 작업이 프로세스/네트워크 없이 canceled 보관·새 transaction으로 이어지는 coordinator 회귀와 fence/기존 보관본/같은 길이 변조 증거 보존 회귀2개를 추가했다. 일반 cargo check PASS3.29초(직전 결과 검증과 이번 coordinator 포함), 새 테스트는 미실행이며 마지막 테스트 추가 뒤 rustfmt/diff만 검사했다. Karpathy 지침으로 기존 owner/state/journal을 재사용했다.
+- 다음은 정확한 대상에 결속된 단발 동의 manager/IPC/UI, 중단된 작업 조회·복구 흐름, 이후 실제 경계·전체 설치 통합 검증이다. coordinator 함수는 아직 내부 미활성이고 consent 검증을 자체 구현했다고 주장하지 않는다. 실제 설치/계정 호출·무거운 테스트 없음, 사용자 dirty 보존/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 결과 검증과 terminal 순서 연결)
 
 - 직전950db69는 공식 설치 실행부 구현 진척이다. 같은 checkout/dirty를 확인하고 설치 단계에 보유한 Target capability를 종료 후에도 유지했다. 결과 확인은 이 작업의 HOME에서 Codex standalone pair 또는 Claude native launcher target의 기존 공급자 서명·경로 검증을 재사용한다. Codex의 기존 앱 번들/legacy pair를 새 standalone 설치 성공으로 대신 인정하지 않는다. 기존 일반 discovery의 후보 우선순위/실패 분류는 보존했다.

@@ -12,6 +12,8 @@ use std::os::fd::AsRawFd;
 const NAME: &str = "provider-install-journal-v1.jsonl";
 const MAX_BYTES: u64 = 16 * 1024;
 const MAX_EVENTS: u64 = 16;
+const ARCHIVE_PREFIX: &str = "provider-install-complete-";
+const MAX_ARCHIVES: usize = 128;
 
 pub(crate) struct InstallJournal<'a> {
     pub(super) scope: &'a InstallScope,
@@ -22,6 +24,7 @@ pub(crate) struct InstallJournal<'a> {
     sequence: u64,
     length: u64,
     failed: bool,
+    contents: Vec<u8>,
 }
 
 impl<'a> InstallJournal<'a> {
@@ -34,6 +37,8 @@ impl<'a> InstallJournal<'a> {
             return Err(failure());
         }
         let directory = scope.login_lease_directory()?;
+        require_no_process_fences(&directory)?;
+        archive_budget(&directory)?;
         let mut options = OpenOptions::new();
         options
             .write(true)
@@ -61,6 +66,7 @@ impl<'a> InstallJournal<'a> {
             sequence: 0,
             length: header.len() as u64,
             failed: false,
+            contents: header.into_bytes(),
         };
         journal.verify()?;
         Ok(journal)
@@ -106,7 +112,83 @@ impl<'a> InstallJournal<'a> {
         // Publish state only after durable append. A failed append is sticky.
         self.sequence += 1;
         self.state = next;
+        self.contents.extend_from_slice(bytes.as_bytes());
         Ok(())
+    }
+
+    /// Archive only a terminal transaction whose process reservations have both
+    /// been released. Preserve a durable copy before removing the active name.
+    /// Any partial archive remains evidence; never overwrite an older file.
+    pub(crate) fn archive_terminal(self) -> Result<(), SidecarError> {
+        if self.failed
+            || !matches!(
+                self.phase(),
+                InstallPhase::Installed | InstallPhase::Canceled | InstallPhase::Failed
+            )
+        {
+            return Err(failure());
+        }
+        self.verify()?;
+        let directory = self.scope.login_lease_directory()?;
+        require_no_process_fences(&directory)?;
+        archive_budget(&directory)?;
+        let mut read_options = OpenOptions::new();
+        read_options
+            .read(true)
+            .follow(FollowSymlinks::No)
+            .custom_flags(libc::O_NONBLOCK);
+        let mut current = directory
+            .open_with(NAME, &read_options)
+            .map_err(|_| failure())?;
+        let current_meta = current.metadata().map_err(|_| failure())?;
+        let held_meta = self.file.metadata().map_err(|_| failure())?;
+        if !valid_metadata(&current_meta)
+            || current_meta.ino() != held_meta.ino()
+            || current_meta.dev() != held_meta.dev()
+        {
+            return Err(failure());
+        }
+        let mut current_bytes = Vec::new();
+        (&mut current)
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut current_bytes)
+            .map_err(|_| failure())?;
+        if current_bytes != self.contents {
+            return Err(failure());
+        }
+        self.verify()?;
+        let name = format!("{ARCHIVE_PREFIX}{}.jsonl", self.operation);
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .follow(FollowSymlinks::No);
+        let mut archive = directory
+            .open_with(&name, &options)
+            .map_err(|_| failure())?;
+        lock(&archive, libc::LOCK_EX)?;
+        archive.write_all(&self.contents).map_err(|_| failure())?;
+        archive.sync_all().map_err(|_| failure())?;
+        let held = archive.metadata().map_err(|_| failure())?;
+        let named = directory.symlink_metadata(&name).map_err(|_| failure())?;
+        if !valid_metadata(&named)
+            || named.len() != self.length
+            || named.ino() != held.ino()
+            || named.dev() != held.dev()
+        {
+            return Err(failure());
+        }
+        directory
+            .try_clone()
+            .map_err(|_| failure())?
+            .into_std_file()
+            .sync_all()
+            .map_err(|_| failure())?;
+        self.verify()?;
+        require_no_process_fences(&directory)?;
+        directory.remove_file(NAME).map_err(|_| failure())?;
+        directory.into_std_file().sync_all().map_err(|_| failure())
     }
 
     pub(super) fn verify(&self) -> Result<(), SidecarError> {
@@ -122,6 +204,33 @@ impl<'a> InstallJournal<'a> {
         }
         Ok(())
     }
+}
+
+fn require_no_process_fences(directory: &cap_std::fs::Dir) -> Result<(), SidecarError> {
+    for name in [super::PENDING, super::EXECUTION_PENDING] {
+        match directory.symlink_metadata(name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err(failure()),
+        }
+    }
+    Ok(())
+}
+
+fn archive_budget(directory: &cap_std::fs::Dir) -> Result<(), SidecarError> {
+    let mut archives = 0;
+    for (index, entry) in directory.entries().map_err(|_| failure())?.enumerate() {
+        if index >= 4096 {
+            return Err(failure());
+        }
+        let name = entry.map_err(|_| failure())?.file_name();
+        if name.to_string_lossy().starts_with(ARCHIVE_PREFIX) {
+            archives += 1;
+            if archives >= MAX_ARCHIVES {
+                return Err(failure());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Includes incomplete records as their last durable phase. Callers must still
@@ -234,6 +343,54 @@ fn apply(state: &mut InstallLifecycle, event: &str) -> Result<(), SidecarError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_preserves_active_evidence_when_a_fence_or_destination_exists() {
+        for pending in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let scope = InstallScope::from_storage(&storage).unwrap();
+            let operation = uuid::Uuid::new_v4();
+            let mut journal = InstallJournal::begin(&scope, operation, "claude").unwrap();
+            journal.record("consented").unwrap();
+            journal.record("cancelRequested").unwrap();
+            journal.record("cleanupConfirmed").unwrap();
+            let old = std::fs::read(root.join(NAME)).unwrap();
+            let archive_name = format!("{ARCHIVE_PREFIX}{operation}.jsonl");
+            let owner = if pending {
+                Some(scope.reserve(operation).unwrap())
+            } else {
+                std::fs::write(root.join(&archive_name), b"preserve prior evidence").unwrap();
+                None
+            };
+            assert!(journal.archive_terminal().is_err());
+            assert_eq!(std::fs::read(root.join(NAME)).unwrap(), old);
+            if !pending {
+                assert_eq!(
+                    std::fs::read(root.join(archive_name)).unwrap(),
+                    b"preserve prior evidence"
+                );
+            }
+            drop(owner);
+        }
+    }
+
+    #[test]
+    fn archive_does_not_replace_same_length_changed_evidence_with_memory_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = InstallScope::from_storage(&storage).unwrap();
+        let mut journal = InstallJournal::begin(&scope, uuid::Uuid::new_v4(), "claude").unwrap();
+        journal.record("cancelRequested").unwrap();
+        let mut altered = std::fs::read(root.join(NAME)).unwrap();
+        let offset = altered.windows(6).position(|w| w == b"claude").unwrap();
+        altered[offset] = b'C';
+        std::fs::write(root.join(NAME), &altered).unwrap();
+        assert!(journal.archive_terminal().is_err());
+        assert_eq!(std::fs::read(root.join(NAME)).unwrap(), altered);
+    }
 
     #[test]
     fn replay_preserves_cancellation_during_final_cleanup() {
