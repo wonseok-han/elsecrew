@@ -3,6 +3,19 @@ import { createRequire } from "node:module";
 import test from "node:test";
 const require = createRequire(import.meta.url);
 const { fileText, patch, tree } = require("./m5-renderer-performance-fixture.cjs");
+const { fixtureUtf8ByteLength } = require("./m5-performance-preload-build.cjs");
+
+test("sandbox fixture byte counter matches native UTF-8 without encoded copies", () => {
+  const cases = ["", "ascii", "가나다", "🦦", "\ud800", "\udc00", "\ud800x\udc00", fileText];
+  for (let unit = 0; unit <= 0xffff; unit++) cases.push(String.fromCharCode(unit));
+  for (const text of cases) assert.equal(fixtureUtf8ByteLength(text), Buffer.byteLength(text));
+  for (let high = 0xd800; high <= 0xdbff; high += 31) {
+    for (let low = 0xdc00; low <= 0xdfff; low += 31) {
+      const text = String.fromCharCode(high, low);
+      assert.equal(fixtureUtf8ByteLength(text), Buffer.byteLength(text));
+    }
+  }
+});
 
 test("renderer performance fixture has exact UTF-8 file size, line count and aggregate diff size", () => {
   assert.equal(Buffer.byteLength(fileText), 5 * 1024 * 1024);

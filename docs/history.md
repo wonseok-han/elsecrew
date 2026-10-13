@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (시험 UTF-8 임시 배열 제거·실패 유지)
+
+- e12777a의 sandbox fixture는 Buffer.byteLength 대체가 전체 TextEncoder 배열을 만들었다. 제품 editor-state.ts는 이미 무할당 계산을 사용함을 대조했다. 제품을 임의 수정하지 않고 시험 bundle의 바이트 계수만 배열 없는 문자열 순회로 바꿨다. 모든 UTF-16 단일 code unit·surrogate pair 표본·실제5MiB 파일의 native Buffer 일치와 크기/경로 총3 PASS다. 입력량·hash·임계값은 그대로다.
+- 샌드박스 실제 확인 후 재측정 renderer-2026-10-13T08-47-11.399Z-7692.json은 FAIL 유지: idle423018496B/peak979697664B/retained70483968B. input49.9ms/편집83.5ms/가시diff76.5ms/DOM362는 기준 이내다. 이전 측정과 차이를 확정 개선/누수 해소로 표현하지 않는다. dirty diagnostic이고 시험의 반복 loadURL과 실제 작업대 수명/IPC 조건 차이를 더 구분해야 한다.
+- 실제 Claude 검증을 위해 사용자가 개발 중인 Hello, Agent에서 연결 완료했는지 비차단 질문을 보냈다. 답 없이 실제 모델 시험은 실행하지 않는다. 임시 성능 앱 종료를 회수하고 userdata만 삭제/증거 보존했다. 다음은 실제 작업대 수명 조건의 메모리 대조와 남은 실연결/G6/출시이며 전체 미완료. 사용자 archive/main/push 경계 유지, diff PASS.
+
 ### 2026-10-13 · by GPT-6 Astra (성능 fixture의 실제 sandbox 조건 정합화)
 
 - 9a8b9c6 이후 시험 preload를 기존 Vite로 사전 번들하고 Electron sandbox:true로 바꿨다. 로컬 require를 번들 내부로 합치고 fixture 버전 hash는 정확한 원문에서 별도 빌드 프로세스가 계산한다. UTF-8 길이는 TextEncoder로 대체했다. 번들러/대형 fixture 생성이 측정 대상 main RSS를 부풀리지 않도록 빌드 child를 먼저 종료한다. 실제 앱·파일 크기·성능 임계값은 변경하지 않았다.
