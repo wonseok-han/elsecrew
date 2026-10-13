@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 전용 프로세스 소유권 바인딩)
+
+- 직전82ea134는 내부 설치 상태 구현 진척이다. 기존 LoginProcess가 실제로 수행하는 create-new durable fence/flock·spawn barrier·자손 신원 기록·종료 관측·terminal 이전 잠금 유지를 확인했다. Karpathy 지침에 따라 이를 복제하지 않고 설치용 LoginProfile 바인딩을 추가했다.
+- InstallScope는 열린 Storage의 고정 app-data 아래700 작업 디렉터리와 provider-install.pending 전용 이름만 사용한다. 디렉터리 no-follow·uid/mode·dev/ino 재검증, 생성 후 부모 동기화를 수행한다. 예약 직후 retain_fence_before_launch를 설정해 중도 Drop/reopen에서 임의 새 예약이 불가능하다. Codex/Claude 인증 namespace는 생성/조회하지 않는다.
+- 예약 중복·중단 뒤 재열기 차단·인증 디렉터리 미생성·작업 폴더 링크/교체 거절 회귀2개를 추가했다. rustfmt/diff 검사만 완료, 테스트 실행/일반 빌드·독립 검토는 설치 파동 검증에 남긴다. 디렉터리 검증이 내부 파일 신뢰를 뜻하지 않으며 worker는 fresh exclusive artifact 생성·검증을 별도로 해야 한다.
+- 이 연결부는 아직 public IPC/실제 설치 worker에 연결되지 않았다. 설치 상태 머신과의 결합·동의 token·설치 transaction journal·다운로드/실행·UI 및 복구 해제는 다음 구현 대상이며 제품 설치 완료로 주장하지 않는다. 실제 프로세스/설치/계정 실행·새 대형 캐시 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 작업 수명 내부 상태 코드)
 
 - 직전968243c는 일반 빌드 차단 수정 진척이다. 현재 통합 checkout/기존 dirty를 확인하고 설치 작업의 내부 상태 전이를 Rust 공용 코어에 추가했다. 동의 전→다운로드→설치→검증→정리 이후만 installed로 끝나며 installer exit0만으로 성공 처리할 수 없다.

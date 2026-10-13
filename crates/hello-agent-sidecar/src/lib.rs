@@ -22,6 +22,9 @@ mod provider_login_io;
 #[cfg(target_os = "macos")]
 mod provider_login_manager;
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Installer worker/IPC integration is not activated yet.
+mod provider_install_owner;
+#[cfg(target_os = "macos")]
 #[allow(dead_code)]
 // Lifecycle owner; validated vendor launcher and IPC activation remain separate.
 mod provider_login_process;
