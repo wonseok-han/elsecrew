@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+`pnpm m5:smoke:packaged-ui --project`는 자체 생성한 작은 Git 프로젝트를 packaged sidecar의 정상 project.open API로 목록에 등록하고 안전 종료한 뒤 같은 임시 profile로 앱을 시작한다. 실제 목록 다시 열기→채팅 생성→Monaco 편집→저장→diff 표시와 원본 불변을 확인한다. bridge/제품 main을 교체하지 않지만 CDP 입력이므로 실제 키보드/OS 포커스 증거가 아니다. 재시작·반영/복원·다중 프로젝트·실제 모델 검증을 대신하지 않는다. 측정 RSS는 프로젝트를 열기 전 idle이며 편집 후 peak가 아니다.
+
 RSS 원인 분리용으로 관측 앞뒤의 [CDP 프로세스 종류](https://chromedevtools.github.io/devtools-protocol/tot/SystemInfo/#method-getProcessInfo)와 [renderer heap](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-getHeapUsage)도 기록한다. Chromium 목록에 없는 PID의 역할을 추측하지 않으며 heap은 RSS에 더하지 않는다. resource timing 목록이 비어 있으면 자산 미로딩의 증거가 아니다. 강제 GC나 GPU 비활성화로 기준을 우회하지 않는다.
 
 `pnpm m5:smoke:packaged-ui`는 미리 만든 macOS arm64 패키지의 실제 실행 파일을 별도 OS 임시 userData로 시작한다. 제품 main/preload/renderer를 교체하거나 bridge를 가짜로 덮어쓰지 않는다. [Electron 공식 원격 디버깅 스위치](https://www.electronjs.org/docs/latest/api/command-line-switches/)로 해당 프로세스가 출력한 loopback CDP endpoint에만 연결해 시작 화면·실제 저장소 ready·스크린샷·10초 RSS를 관측한다. 프로젝트 선택·인증·모델 호출은 하지 않는다. 종료는 기존 renderer prepareQuit → main coordinator를 사용하고 실제 exit0 및 해당 sidecar instance의 DB clean marker를 확인한다. 종료 불확실이면 강제 종료/프로필 삭제 없이 실패 기록과 PID를 보존한다.

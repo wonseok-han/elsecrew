@@ -1,5 +1,6 @@
 // Observe the actual packaged renderer and native sidecar. No bridge mocks,
-// project imports, logins, model calls, source writes or forced termination.
+// user project imports, logins, model calls or forced termination. --project
+// edits only its newly generated project's isolated working copy.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,12 +11,14 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createRequire } from 'node:module';
 import { parseCurrentSystemStatusV1 } from '../src/m5/contracts/lifecycle-g5d-v1.ts';
+import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 
 const { processTreeMemory } = createRequire(import.meta.url)('./m5-process-memory.cjs');
 const repo = fileURLToPath(new URL('..', import.meta.url));
 assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
-assert.equal(process.argv.length, 2, 'No arbitrary executable, profile or endpoint is accepted');
+const projectFlow = process.argv.length === 3 && process.argv[2] === '--project';
+assert.ok(process.argv.length === 2 || projectFlow, 'Only the fixed --project scenario is accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -33,7 +36,7 @@ const report = {
   asarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'app.asar'))).digest('hex'),
   sidecarSha256: createHash('sha256').update(fs.readFileSync(path.join(resources, 'sidecar/hello-agent-sidecar'))).digest('hex'),
   limitations: ['Single cold startup with migration and loopback CDP instrumentation.',
-    'No native keyboard/focus, projects, models, stress fixtures or whole G6 evidence.',
+    'No native keyboard/focus, models, stress fixtures or whole G6 evidence.',
     'RSS includes current descendants only, not escaped processes.'],
   memory: [], shutdown: 'pending',
 };
@@ -42,6 +45,15 @@ persist();
 const env = {...process.env};
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.NODE_OPTIONS;
+if (projectFlow) {
+  try {
+    report.project = await seedPackagedProject(path.join(resources, 'sidecar/hello-agent-sidecar'), root, userData, env);
+    persist();
+  } catch (error) {
+    report.status = 'FAIL'; report.error = String(error); persist();
+    throw error; // Do not start an app after an uncertain seed shutdown.
+  }
+}
 const started = performance.now();
 const child = spawn(executable, [`--user-data-dir=${userData}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
   cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
@@ -139,6 +151,45 @@ try {
   report.idleRssWithinLimit = report.idleRssBytes <= 400 * 1024 * 1024;
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
+  if (projectFlow) {
+    const expectedPath = fs.realpathSync(report.project.source);
+    await until(() => evaluate(`(() => {
+      const button = [...document.querySelectorAll('.m5-project-catalog-list li > button')]
+        .find(item => item.title === ${JSON.stringify(expectedPath)} && !item.disabled);
+      if (!button) return false;
+      button.click(); return true;
+    })()`));
+    await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')]
+      .find(button => button.textContent.includes('hello.txt') && !button.disabled)`));
+    await evaluate(`document.querySelector('.m5-new-chat-button').click()`);
+    await until(() => evaluate(`document.querySelector('.m5-new-chat-dialog')?.matches(':modal')`));
+    await evaluate(`(() => {
+      const input = document.querySelector('.m5-new-chat-form input:not([type=checkbox])');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Packaged editing check');
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      document.querySelector('.m5-new-chat-form input[type=checkbox]').click();
+    })()`);
+    await until(() => evaluate(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`));
+    await evaluate(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
+    await until(() => evaluate(`document.querySelector('.m5-timeline h2')?.textContent === 'Packaged editing check'`));
+    await evaluate(`[...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('hello.txt')).click()`);
+    report.project.editor = await until(() => evaluate(`(() => {
+      const editor = document.querySelector('.monaco-editor');
+      return editor && editor.innerText.includes('original') ? {opened: true, text: 'original'} : null;
+    })()`));
+    await evaluate(`document.querySelector('.monaco-editor textarea').focus()`);
+    await send('Input.insertText', {text:'edited in packaged snapshot\n'}, sessionId);
+    await until(() => evaluate(`!![...document.querySelectorAll('button')].find(button => button.textContent === '저장' && !button.disabled)`));
+    await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === '저장').click()`);
+    await until(() => evaluate(`!![...document.querySelectorAll('button')].find(button => button.textContent === '저장' && button.disabled)`));
+    await evaluate(`[...document.querySelectorAll('.m5-chat-review button')].find(button => button.textContent === '작업 사본 diff 열기').click()`);
+    await until(() => evaluate(`!![...document.querySelectorAll('.m5-change-row')].find(button => button.title === 'hello.txt' && !button.disabled)`));
+    await evaluate(`[...document.querySelectorAll('.m5-change-row')].find(button => button.title === 'hello.txt').click()`);
+    await until(() => evaluate(`document.querySelector('.m5-diff-details')?.textContent.includes('edited in packaged snapshot')`));
+    report.project.savedDiffVisible = true;
+    assert.equal(fs.readFileSync(path.join(report.project.source, 'hello.txt'), 'utf8'), 'original\n');
+    report.project.originalUnchanged = true;
+  }
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, 'startup.png'), Buffer.from(capture.data, 'base64'));
 } catch (error) { report.error = String(error); }

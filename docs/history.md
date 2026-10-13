@@ -1,5 +1,15 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 패키지의 작업 사본 편집·diff 연결)
+
+- 이전 Electron 기준선 비교에서 진전했고 이번에는 Karpathy 최소 범위로 --project 관측 경로를 추가했다. 자체 임시 Git을 packaged sidecar의 정상 project.open으로 등록/정상 종료 후 실제 패키지의 목록→채팅→Monaco 입력→저장→diff를 확인했다. TdMUBe 최초 열기 및 tTiiYV 편집 결과 savedDiffVisible/originalUnchanged=true, seed·앱 exit0/종료confirmed; 후자는 /private/tmp/hello-agent-packaged-project-edit.log 및 OS 임시 hello-agent-packaged-ui-tTiiYV/result.json/PNG에 보존한다. idle460685312B로 전체 판정 FAIL은 유지한다. CDP 입력·기존8b10ed6 패키지의 증거이며 최신 UI/물리 키보드/재시작/반영복원/전체G6 합격이 아니다. 다음은 재시작 영속성과 남은 통합 흐름이다. 두 작은 임시 profile은 후속 재현용 유지, 사용자9월 archive/main/push 경계 보존.
+
+### 2026-10-13 · by GPT-6 Astra (Electron 빈 창 메모리 비교)
+
+- 40e6b57의 계측 결과를 바탕으로 동일 Electron43.4.0·1280×800·sandbox/contextIsolation 설정의 빈 창을 새 임시 userData에서 실행했다. 첫 관측372998144B(356MiB), debugger 연결 대조376504320B(359MiB), 각40표본/정상 exit0. /private/tmp/hello-agent-electron-baseline.rcJrU9의 코드·두 result JSON·로그를 보존한다. 제품 설정은 변경하지 않았다.
+- 실제 앱 약440MiB와 약81MiB 차이가 남아 디버거 연결만으로 초과를 설명할 수 없다. 빈 창은 data URL/개발 Electron이며 제품 preload/sidecar/asar와 다르고, 자체 ps 자손 약1.8MiB도 포함되므로 정밀 동등 비교/제품 gate 증거가 아니다. 기준400MiB는 유지한다. 다음은 실제 renderer와 preload의 추가 비용을 분리하고 전체 패키지 흐름을 연결하는 일이다.
+- 두 시험 root와 Chromium 자손 부재/일반 디렉터리를 확인 후 두 임시 userData 약3.6MiB만 정리한다. 증거/사용자 원본/인증은 보존한다. Karpathy 원칙에 따라 원인 불명 상태에서 제품 GPU/보안 기능을 끄지 않았다. 사용자9월 archive·main/push 경계 유지, 전체 미완료다.
+
 ### 2026-10-13 · by GPT-6 Astra (패키지 메모리 원인 분리)
 
 - 이전 턴395e746은 UI 수정으로 진전했다. Karpathy 최소 범위로 기존 packaged 관측기에 CDP process 종류·renderer heap 전후 조회를 추가했다. 제품 설정/안전 경계 변경 없이 같은 기존8b10ed6 패키지를 측정했다(최신 UI 패키지 검증 아님). 공식 CDP 참조는 성능 절차에 기록했다.
