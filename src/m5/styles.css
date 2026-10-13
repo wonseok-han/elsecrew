@@ -75,6 +75,14 @@ button, input, textarea, select {
 .m5-start-action button { padding: 10px 20px; }
 .m5-start-action p { margin: 0; max-width: 660px; color: #aab4c1; font-size: 12px; line-height: 1.6; }
 .m5-first-chat { padding: 22px 16px; }
+.m5-project-guide { margin: 0 0 12px; padding: 12px 16px; border: 1px solid #303b49; border-radius: 8px; background: #171d26; }
+.m5-project-guide > summary { cursor: pointer; color: #c6d0dc; font-size: 13px; }
+.m5-project-guide ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding-left: 20px; }
+.m5-project-guide li { min-width: 0; padding-left: 4px; }
+.m5-project-guide h3 { font-size: 14px; margin: 8px 0; }
+.m5-project-guide p { color: #aab4c1; font-size: 12px; line-height: 1.6; }
+.m5-project-guide button { margin: 4px 8px 0 0; font-size: 12px; }
+@media (max-width: 1000px) { .m5-project-guide ol { grid-template-columns: 1fr; gap: 8px; } }
 .m5-first-chat h2 { margin: 0 0 12px; font-size: 19px; }
 .m5-first-chat h3 { margin: 24px 0 12px; font-size: 13px; }
 .m5-first-chat > p { color: #aab4c1; line-height: 1.65; }
