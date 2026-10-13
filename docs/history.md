@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (직접 입력 진단·잠긴 Mac 확인)
+
+- dd7d5cf 이후 제품 마일스톤/출시 체크리스트와 현행 검사 범위를 대조했다. 실제 계정/패키징/통합 성능 증거는 여전히 미완료다. 특히 m5:test:performance의 전체 수집기 연결은 아직 없으며 기존 diagnostic 수치를 정식 G6로 바꾸지 않는다.
+- native UI smoke에 HELLO_AGENT_SMOKE_NATIVE_INPUT=1 진단을 추가했다. 자동 insertText 대신 실제 창 활성화·편집기 입력을 각각45초까지 확인하고 성공 시 inputMethod를 구분한다. 수동 대기 때문에 전체 제한은 해당 모드만180초, 대형/메모리 모드와 병용을 거절한다. 반복 collector는 모든 HELLO_AGENT_SMOKE_*를 지워 이 모드를 상속하지 않는다. 제품 코드/성능 기준은 변경하지 않았다(Karpathy 최소 변경 원칙).
+- GL8RCk 시험에서 컴퓨터 조작 도구가 Mac locked/자동 unlock 불가를 반환했다. 사용자에게 잠금 해제를 요청했다. 이 사실은 이번 창 활성화 불가의 환경 원인이며 이전 모든 실패의 원인으로 확대하지 않는다. 최초 시험은 입력 없이 flow timeout/FAIL, 정상 quit accepted/exit1로 끝났다. 이후 focus 불가면 입력 대기를 하지 않고 즉시 실패하도록 보완했다. 재실행은 잠금 해제 확인 후 진행한다. 정상 종료 후 합성 project/userdata만 정리, 결과 JSON 보존.
+- 절차 문서에 직접 입력 모드와 잠금 해제 조건을 추가하고, 현재 sandbox=true인 renderer 성능 fixture를 예전 sandbox=false로 설명하던 부분을 코드와 맞췄다. script syntax/diff PASS. 다음은 잠금 해제 후 직접 입력/실제 화면 성능, Claude 연결 확인 후 승인 범위 실연결, G6 전체 collector·패키징 및 최종 검증이다. 전체 미완료, 사용자9월 archive/main/push 경계 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (누적 검사 실패 수정·설치 기록 잠금 수명)
 
 - 앞선 세션66516은 종료101: protocol58 PASS, sidecar615 PASS/1 FAIL/36 ignored(791.33초). 실패는 execute.rs의 finalize가 아니라 완료 후 drop(journal) 다음 inspect였다. 원래 검사 단독은 PASS라 전체 실행의 원인을 단정하지 않았다. 동일 open-file-description의 복제 핸들을 보유하는 새 회귀로 Drop 후 flock 잔류/inspect 거부를 결정적으로 재현(수정 전 FAIL)했다. InstallJournal::Drop에서 LOCK_UN을 명시해 소유자 수명에 잠금을 결속했다. journal 이름/프로세스 fence/명시 recovery·archive 조건은 그대로다. 읽기 전용 독립 검토자1명 APPROVE, 설치 관련26 PASS4.86초다.

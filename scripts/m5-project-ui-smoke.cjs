@@ -7,10 +7,12 @@ const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
 const idleOnly = process.env.HELLO_AGENT_SMOKE_IDLE_ONLY === '1';
+const nativeInput = process.env.HELLO_AGENT_SMOKE_NATIVE_INPUT === '1';
 if (idleOnly && !measureMemory) throw new Error('Idle-only diagnostic requires memory mode');
 const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
 const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
 const largeDiff = process.env.HELLO_AGENT_SMOKE_LARGE_DIFF === '1';
+if (nativeInput && (measureMemory || largeFile || largeTree || largeDiff)) throw new Error('Native input is a separate manual diagnostic scenario');
 if (idleOnly && (largeFile || largeTree || largeDiff || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Idle-only diagnostic cannot include project scenarios');
 if (largeDiff && (measureMemory || largeFile || largeTree || process.env.HELLO_AGENT_SMOKE_APPLY === '1')) throw new Error('Large diff is a separate diagnostic scenario');
 let largeDiffReport;
@@ -91,7 +93,7 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', path.join(root,'userdata'));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 let finished = false;
-const timer = setTimeout(() => finish(new Error('flow timeout')), largeTree ? 300000 : measureMemory ? 160000 : 90000);
+const timer = setTimeout(() => finish(new Error('flow timeout')), nativeInput ? 180000 : largeTree ? 300000 : measureMemory ? 160000 : 90000);
 function finish(error, details) {
   if (finished) return;
   finished = true; clearTimeout(timer); clearInterval(memoryTimer);
@@ -304,7 +306,8 @@ app.on('browser-window-created', (_event, window) => {
       await new Promise(r=>setTimeout(r,500));
       await run(`document.querySelector('.monaco-editor textarea').focus()`);
       await wait(`document.activeElement===document.querySelector('.monaco-editor textarea')`);
-      const focusDeadline = performance.now() + 3000;
+      const focusDeadline = performance.now() + (nativeInput ? 45000 : 3000);
+      if (nativeInput) console.log(JSON.stringify({stage:'WAITING_FOR_NATIVE_FOCUS',root}));
       if (!window.isFocused()) await app.dock?.show();
       while ((!window.isFocused() || !window.webContents.isFocused() || !await run('document.hasFocus()')) && performance.now() < focusDeadline) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
@@ -327,7 +330,11 @@ app.on('browser-window-created', (_event, window) => {
         // save/diff/chat evidence using targeted insertion before quitting.
         nativeFocusUnavailable = true;
       }
-      await window.webContents.insertText('edited in snapshot\n');
+      if (nativeInput) {
+        if (nativeFocusUnavailable) throw new Error('Native window focus unavailable; unlock the desktop before retrying');
+        console.log(JSON.stringify({stage:'WAITING_FOR_NATIVE_INPUT',root,expected:'edited in snapshot'}));
+        await wait(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('edited in snapshot')`, 45000);
+      } else await window.webContents.insertText('edited in snapshot\n');
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&!b.disabled)`);
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='저장').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&b.disabled)`);
@@ -435,7 +442,7 @@ app.on('browser-window-created', (_event, window) => {
       }
       if (largeFileReport?.fileEditableMs > 1500) throw new Error('native diagnostic file-open limit exceeded: '+largeFileReport.fileEditableMs);
       if (largeTreeReport && (largeTreeReport.treeRootMs > 1000 || largeTreeReport.treeExpandMs > 250 || largeTreeReport.treeDomNodes > 500)) throw new Error('native diagnostic tree limits exceeded');
-      finish(nativeFocusUnavailable ? new Error('Native focus unavailable; remaining flow used targeted insertText, not OS keyboard evidence') : null,{screenshot,nativeFocusUnavailable,inputMethod:'webContents.insertText',text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
+      finish(nativeFocusUnavailable ? new Error('Native focus unavailable; input routing is not verified') : null,{screenshot,nativeFocusUnavailable,inputMethod:nativeInput?'native-window-input':'webContents.insertText',text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');
       let captureError;
