@@ -57,16 +57,17 @@ export function ProjectCatalog({ controller, disabled, currentId, ready = true, 
   return <section className={`m5-project-catalog${rail ? " m5-project-rail" : ""}`} aria-label={t("m5.catalog.title")}>
     {rail ? <h2>{t("m5.catalog.title")}</h2> : <button type="button" className="m5-secondary" disabled={disabled || busy} onClick={() => open ? setOpen(false) : void load(null)} aria-expanded={open}>{t("m5.catalog.title")}</button>}
     {open && <div className="m5-project-catalog-list" aria-busy={busy}>
-      <p>{t("m5.catalog.order")}</p>
-      {rail && ready && disabled && <p>{t("m5.catalog.switchHelp")}</p>}
+      {!rail && <p>{t("m5.catalog.order")}</p>}
+      {rail && ready && disabled && <details className="m5-project-switch-help"><summary>{t("m5.catalog.switchTitle")}</summary><p>{t("m5.catalog.switchHelp")}</p></details>}
       {busy && <p role="status">{t("m5.catalog.busy")}</p>}
       {error ? <p role="alert">{t("m5.catalog.error")}</p> : !busy && entries.length === 0 ? <p>{t("m5.catalog.empty")}</p> :
         <ul>{entries.map(entry => <li key={entry.projectId}><button type="button" aria-current={entry.projectId === currentId ? "true" : undefined} title={entry.canonicalPath} disabled={disabled || busy || entry.projectId === currentId} onClick={() => void select(entry.projectId)}>
-          <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}{entry.projectId === currentId ? t("m5.catalog.current") : ""}</strong>
+          <strong>{entry.canonicalPath.split(/[\\/]/).filter(Boolean).pop() ?? entry.projectId}</strong>
+          {entry.projectId === currentId && <small className="m5-project-current">{t("m5.catalog.active")}</small>}
           <span dir="auto">{entry.canonicalPath}</span>
-        </button><details><summary>{t("m5.catalog.manage")}</summary><PreparationRecovery projectId={entry.projectId} disabled={disabled || busy} /></details></li>)}</ul>}
-      <div><button type="button" disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>
-        <button type="button" disabled={disabled || busy || !next || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button></div>
+        </button><details><summary>{t("m5.catalog.manage")}</summary><p className="m5-project-full-path" dir="auto">{entry.canonicalPath}</p><PreparationRecovery projectId={entry.projectId} disabled={disabled || busy} /></details></li>)}</ul>}
+      {(!rail || !disabled || error) && <div className="m5-project-pagination"><button type="button" disabled={disabled || busy} onClick={() => void load(null)}>{t("m5.catalog.first")}</button>
+        {next && <button type="button" disabled={disabled || busy || error} onClick={() => void load(next)}>{t("m5.catalog.next")}</button>}</div>}
     </div>}
   </section>;
 }
