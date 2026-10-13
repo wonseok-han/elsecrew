@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (파일 목록·편집 왕복 native 통합 확인)
+
+- 직전f6f210f까지 구현한 목록 필터/페이지와181747d 편집 왕복을 기존 native LARGE_DIFF 흐름에 묶었다. 새 change-navigation probe는 bridge 응답을 대체하지 않으며500개 파일을100개씩 모두 방문, 대문자 필터/결과 없음/Escape 초기화/선택 상세 보존/Monaco 진입/새 응답 뒤 diff 활성화를 확인한다.
+- 최초26544/J5aoE3는 PASS였지만 복귀 검사에서 기존 본문만 확인해 file 요청 pending 중에도 통과할 수 있음을 발견했다. 활성 패널이 editor→changes로 실제 전환되는 조건을 추가했다. 최종82830/4LEcxT는 전체 navigation PASS/exit0·shutdown accepted, file 요청 모두 resolved다. summary1473ms·first908ms는 단일 개발 진단이며 이전 반복 p95를 대체하지 않는다.
+- renderer build/JS 구문/diff PASS. 실제 사용자 프로젝트/모델/자동 저장 없음. 미저장 초안 보존은 이전 상태 회귀 증거이며 이번 native probe는 저장 파일 왕복이다. 영문/이름 변경 전 검색/삭제 파일 버튼/키보드 전체 접근성과 시안 충실도 전체 합격으로 확장하지 않는다.
+- 다음: 남은 시안/통합 작업·대형 트리/파일·RSS/packaged 성능, Claude 실제 작업·Windows/출시 검증. 승인 대기 정리 기능 false와 기존 미커밋 파일 보존, main/push 없음. 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (대량 변경 파일 탐색 구현)
 
 - 직전181747d의 편집/diff 왕복 연결에 이어 변경 파일 목록을 개선했다. 기존 전체 map은 최대10000개 버튼을 한꺼번에 만들었으며 파일/경로 필터가 없었다. 현재 목록 안에서 파일명·경로·이름 변경 전 경로를 대소문자 무관 부분 일치로 찾고 전체 변경 수와 검색 결과 수를 구분한다.

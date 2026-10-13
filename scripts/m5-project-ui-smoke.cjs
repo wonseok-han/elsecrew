@@ -174,7 +174,8 @@ app.on('browser-window-created', (_event, window) => {
         const original = execFileSync('/usr/bin/git',['-C',source,'status','--porcelain'],{encoding:'utf8'}).trim();
         if(original)throw new Error('large diff source changed');
         if(largeDiffReport.diffSummaryMs>2000||largeDiffReport.diffFirstFileMs>1500)throw new Error('native diagnostic diff limits exceeded');
-        finish(null,{scenario:'nativeLargeDiffOnly'});return;
+        const navigation = await run(`(${require('../tests/m5-change-navigation-probe.cjs').toString()})()`);
+        finish(null,{scenario:'nativeLargeDiffOnly',navigation});return;
       }
       if (largeTree) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();

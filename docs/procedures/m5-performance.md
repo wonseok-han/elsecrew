@@ -30,6 +30,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### Native 프로젝트 반복 수집
 
+대형 diff 진단은 시간 측정 뒤500개 파일을100개씩 끝까지 탐색하고, 대문자 검색·결과 없음·Escape 해제·선택 상세 보존·편집기 진입과 새 diff 응답 뒤 복귀를 확인한다. 결과의 `navigation`에 기록한다. 이 추가 UI 흐름은 앞선 diff 시간 측정 구간 밖이며 실제 계정이나 자동 저장을 사용하지 않는다.
+
 `pnpm m5:measure:native-project --diff`는 별도 대형 diff 시나리오만 준비1회＋측정10회 수집한다. 각 실행의500파일/20000변경 줄/10MiB 증거와 실제 IPC handler 시간(대기 포함)을 보존하며 `diffSummaryMs`·`diffFirstFileMs`의 p95를 계산한다. 트리/큰 파일/메모리 모드와 혼합하지 않는다. 정상 종료한 기준 초과 표본도 버리지 않으며 아래와 같은 diagnostic/NOT_READY 경계를 따른다.
 
 `pnpm m5:measure:native-project`는 현재 빌드된 native UI 시험을 준비 실행1회＋측정10회 순차 실행한다. 각 실행은 새 임시 프로젝트에1만 파일 트리와5MiB 파일을 함께 생성하며, 편집/저장/diff·반영 확인 취소·두 채팅 흐름까지 수행한다. 원본 적용·reload·메모리 환경 옵션은 상속하지 않는다. 빌드는 자동 수행하지 않으므로 먼저 최신 main/renderer/debug sidecar를 준비한다.
