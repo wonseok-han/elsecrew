@@ -237,6 +237,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
       {leaveError && <p className="m5-error" role="alert">{t("m5.feedback.leaveError")}</p>}
       <StorageAdmissionNotice admission={admission} />
       <WorkStatusNotice bridge={bridge} ready={admissionReady} refreshKey={JSON.stringify([snapshot.error?.message, chat.notice, chat.activeChat?.state])} />
+      {!snapshot.project && <GuidedStart disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked} onChoose={() => void controller.chooseProject()} />}
       <ProviderLogin disabled={!admissionReady} compact={Boolean(snapshot.project)} />
       {snapshot.error && (
         <section className="m5-error" role="alert">
@@ -290,13 +291,6 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
       </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} />}
 
-      {!snapshot.project && <section className="m5-guided-start" aria-label={t("m5.start.title")}>
-        <div className="m5-start-heading"><p className="m5-eyebrow">Hello, Agent</p><h2>{t("m5.start.title")}</h2><p>{t("m5.start.help")}</p></div>
-        <ol className="m5-start-steps">{(["connect", "project", "goal"] as const).map((step, index) => <li key={step}>
-          <span className="m5-start-number" aria-hidden="true">{index + 1}</span><div><h3>{t(`m5.start.${step}`)}</h3><p>{t(`m5.start.${step}Help`)}</p></div>
-        </li>)}</ol>
-        <div className="m5-start-action"><button type="button" onClick={() => void controller.chooseProject()} disabled={!admissionReady || !controller.canLeaveProject() || snapshot.selectionBlocked}>{t("m5.shell.choose")}</button><p>{t("m5.start.projectLimit")}</p></div>
-      </section>}
       {snapshot.project && <WorkbenchDock reveal={snapshot.panelRequest} conversation={chat.activeChat ? <div className="m5-conversation"><div className="m5-conversation-scroll"><TeamTimeline controller={chatController} chat={chat} admissionReady={admissionReady} fixtureAvailable={fixtureAvailable} /><ChatApplicationPreview onReviewDiff={() => { if (controller.snapshot().actionBlocked) return; controller.selectPanel("changes"); void controller.refreshChanges(); }} key={`${chat.activeChat.chatId}:${chat.activeChat.state}`} projectId={chat.activeChat.projectId} chatId={chat.activeChat.chatId} worktreeId={chat.activeChat.worktreeId} disabled={!admissionReady || chat.switching || chatController.isActionBlocked()} /></div><FollowupComposer controller={chatController} chat={chat} admissionReady={admissionReady} /></div> : <section className="m5-first-chat" aria-label={t("m5.firstChat.title")}>
         <h2>{t("m5.firstChat.title")}</h2><p>{t("m5.firstChat.help")}</p>
         <button type="button" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
@@ -427,6 +421,17 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
     </button>)}
     <div aria-hidden="true" style={{ height: (entries.length - end) * rowHeight }} />
   </div>;
+}
+
+function GuidedStart({ disabled, onChoose }: { disabled: boolean; onChoose: () => void }) {
+  const { t } = useI18n();
+  return <section className="m5-guided-start" aria-label={t("m5.start.title")}>
+    <div className="m5-start-heading"><h2>{t("m5.start.title")}</h2><p>{t("m5.start.help")}</p></div>
+    <ol className="m5-start-steps">{(["connect", "project", "goal"] as const).map((step, index) => <li key={step}>
+      <span className="m5-start-number" aria-hidden="true">{index + 1}</span><div><h3>{t(`m5.start.${step}`)}</h3><p>{t(`m5.start.${step}Help`)}</p></div>
+    </li>)}</ol>
+    <div className="m5-start-action"><button type="button" onClick={onChoose} disabled={disabled}>{t("m5.shell.choose")}</button><p>{t("m5.start.projectLimit")}</p></div>
+  </section>;
 }
 
 function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose, returnToDraft = false }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean }) {

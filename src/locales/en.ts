@@ -545,7 +545,7 @@ export const en: Record<MessageKey, string> = {
   "m5.firstChat.teamHelp": "Use Roles and models above to change this project's settings. These settings do not confirm sign-in or model availability.",
   "m5.start.help": "No separate practice project needed. Choose a real project and start with one small task.",
   "m5.start.connect": "Prepare your agent",
-  "m5.start.connectHelp": "Select Codex or Claude Code above and follow the installation and sign-in guidance. You can also explore your files before connecting.",
+  "m5.start.connectHelp": "Select Codex or Claude Code below and follow the installation and sign-in guidance. You can also explore your files before connecting.",
   "m5.start.project": "Choose a project",
   "m5.start.projectHelp": "Choose a project folder on your computer. Use Saved projects on the left to return to a project you opened earlier.",
   "m5.start.goal": "Start your first chat with a small goal",

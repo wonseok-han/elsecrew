@@ -544,7 +544,7 @@ export const ko = {
   "m5.firstChat.teamHelp": "위의 ‘역할과 모델’에서 이 프로젝트의 설정을 바꿀 수 있어요. 표시된 설정은 로그인 상태나 모델 사용 가능 여부를 보장하지 않아요.",
   "m5.start.help": "연습용 프로젝트를 따로 만들 필요 없어요. 실제 프로젝트를 고르고, 작은 작업 하나부터 함께 진행해요.",
   "m5.start.connect": "에이전트 준비하기",
-  "m5.start.connectHelp": "위에서 Codex 또는 Claude Code를 선택하고 설치·로그인 안내를 따라가세요. 파일을 먼저 살펴보고 연결해도 괜찮아요.",
+  "m5.start.connectHelp": "아래에서 Codex 또는 Claude Code를 선택하고 설치·로그인 안내를 따라가세요. 파일을 먼저 살펴보고 연결해도 괜찮아요.",
   "m5.start.project": "프로젝트 선택하기",
   "m5.start.projectHelp": "내 컴퓨터의 프로젝트 폴더를 선택하세요. 전에 열었던 프로젝트는 왼쪽 ‘저장된 프로젝트’에서 이어갈 수 있어요.",
   "m5.start.goal": "작은 목표로 첫 채팅 시작하기",
