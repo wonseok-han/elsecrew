@@ -25,12 +25,17 @@ pub(crate) fn diagnose() -> Result<(), SidecarError> {
 
 /// Shared native discovery for login and future runtime owners. Does not execute it.
 pub(crate) fn installed_executable() -> Result<PinnedExecutable, SidecarError> {
-    let versions = PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?)
-        .join(".local/share/claude/versions");
-    select_executable(
-        &versions,
-        &PathBuf::from(std::env::var_os("HOME").ok_or_else(failure)?).join(".local/bin/claude"),
-    )
+    installed_executable_at_home(&PathBuf::from(
+        std::env::var_os("HOME").ok_or_else(failure)?,
+    ))
+}
+
+/// Use the install transaction's retained home, not a fresh environment lookup.
+pub(crate) fn installed_executable_at_home(
+    home: &std::path::Path,
+) -> Result<PinnedExecutable, SidecarError> {
+    let versions = home.join(".local/share/claude/versions");
+    select_executable(&versions, &home.join(".local/bin/claude"))
 }
 
 pub(crate) fn run(

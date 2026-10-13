@@ -28,7 +28,7 @@ const POLICY: &str = r#"(version 1)
 /// Held capabilities prevent silently switching the destination during launch.
 /// Only fixed installation directories are writable; shell profiles, credentials,
 /// provider settings and user projects are not in the sandbox write allowlist.
-struct Target {
+pub(super) struct Target {
     home_path: PathBuf,
     home: Dir,
     temporary: PathBuf,
@@ -80,6 +80,24 @@ impl Target {
             }
         }
         Ok(())
+    }
+
+    fn verify_installation(&self, provider: &str) -> Result<(), SidecarError> {
+        self.revalidate()?;
+        match provider {
+            "codex" => {
+                let (cli, helper) =
+                    crate::provider_login_manager::select_standalone_codex_pair(&self.home_path)?;
+                cli.revalidate()?;
+                helper.revalidate()?;
+            }
+            "claude" => {
+                crate::provider_claude_login::installed_executable_at_home(&self.home_path)?
+                    .revalidate()?;
+            }
+            _ => return Err(failure()),
+        }
+        self.revalidate()
     }
 
     fn command(&self, provider: &str, bytes: &[u8]) -> Result<Command, SidecarError> {
@@ -239,6 +257,7 @@ impl InstallerReservation<'_> {
             let _ = journal.record("recoveryRequired");
             return Err(failure());
         }
+        self.target = held_target;
         match result {
             Ok(Some(true)) if !cancel.load(Ordering::Acquire) => journal.record("installerExited"),
             Ok(None) | Ok(Some(true)) => journal.record("cancelRequested"),
@@ -253,6 +272,85 @@ impl InstallerReservation<'_> {
                 ))
             }
         }
+    }
+
+    /// Signature/path checks are installation evidence only, not login or model
+    /// readiness. Both subprocesses stay reserved throughout this verification.
+    pub(crate) fn verify_result(
+        &mut self,
+        journal: &mut InstallJournal<'_>,
+        cancel: &AtomicBool,
+    ) -> Result<(), SidecarError> {
+        self.check_transaction(journal)?;
+        if journal.phase() != InstallPhase::Verifying || !self.begun {
+            return Err(failure());
+        }
+        if cancel.load(Ordering::Acquire) {
+            return journal.record("cancelRequested");
+        }
+        let result = self
+            .target
+            .as_ref()
+            .ok_or_else(failure)?
+            .verify_installation(&self.provider);
+        // Persist a failed check before observing a late cancellation.
+        journal.record(if result.is_ok() {
+            "verified"
+        } else {
+            "verificationFailed"
+        })?;
+        if cancel.load(Ordering::Acquire) {
+            journal.record("cancelRequested")?;
+        }
+        result
+    }
+
+    fn check_transaction(&self, journal: &InstallJournal<'_>) -> Result<(), SidecarError> {
+        journal.verify()?;
+        if journal.operation != self.operation
+            || journal.provider != self.provider
+            || !std::ptr::eq(journal.scope, self.scope)
+            || !self
+                .downloader
+                .closure_evidence()
+                .is_some_and(|e| e.confirmed())
+            || !self
+                .installer
+                .closure_evidence()
+                .is_some_and(|e| e.confirmed())
+        {
+            return Err(failure());
+        }
+        Ok(())
+    }
+
+    /// Durable terminal evidence must precede either fence release. Keep the
+    /// journal in place for terminal archival; it still blocks a new transaction.
+    pub(crate) fn finalize(
+        &mut self,
+        journal: &mut InstallJournal<'_>,
+    ) -> Result<(), SidecarError> {
+        if journal.phase() != InstallPhase::Stopping {
+            return Err(failure());
+        }
+        // Includes cancellation before the installer was spawned.
+        if self.installer.closure_evidence().is_none() && self.installer.finish().is_err() {
+            let _ = journal.record("recoveryRequired");
+            return Err(failure());
+        }
+        self.check_transaction(journal)?;
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|target| target.revalidate().is_err())
+        {
+            journal.record("recoveryRequired")?;
+            return Err(failure());
+        }
+        journal.record("cleanupConfirmed")?;
+        self.installer.release_after_run_terminal()?;
+        self.downloader.release_after_run_terminal()?;
+        Ok(())
     }
 
     fn collect(&mut self, cancel: &AtomicBool) -> Result<Option<bool>, SidecarError> {
@@ -305,6 +403,69 @@ mod tests {
             temporary: temp.0.clone(),
             directories: vec![bin, package, temp],
         }
+    }
+
+    #[test]
+    fn failed_target_verification_is_durable_before_fences_are_released() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = super::super::InstallScope::from_storage(&storage).unwrap();
+        let execution = scope.execution_scope().unwrap();
+        let operation = uuid::Uuid::new_v4();
+        let mut journal = InstallJournal::begin(&scope, operation, "codex").unwrap();
+        for event in ["consented", "downloadVerified", "installerExited"] {
+            journal.record(event).unwrap();
+        }
+        // Synthetic process-free receipts exercise transaction ordering only.
+        let mut downloader = scope.reserve(operation).unwrap();
+        downloader.finish().unwrap();
+        let mut installer = execution.reserve(operation).unwrap();
+        installer.finish().unwrap();
+        let home = root.join("empty-home");
+        std::fs::create_dir(&home).unwrap();
+        let mut reservation = InstallerReservation {
+            bytes: Vec::new(),
+            downloader,
+            installer,
+            operation,
+            provider: "codex".into(),
+            begun: true,
+            scope: &scope,
+            target: Some(target(&home)),
+        };
+        assert!(reservation.finalize(&mut journal).is_err());
+        assert!(reservation
+            .verify_result(&mut journal, &AtomicBool::new(false))
+            .is_err());
+        assert_eq!(journal.phase(), InstallPhase::Stopping);
+        assert!(root.join(super::super::PENDING).exists());
+        assert!(root.join(super::super::EXECUTION_PENDING).exists());
+        reservation.finalize(&mut journal).unwrap();
+        assert_eq!(journal.phase(), InstallPhase::Failed);
+        assert!(!root.join(super::super::PENDING).exists());
+        assert!(!root.join(super::super::EXECUTION_PENDING).exists());
+        assert!(reservation.finalize(&mut journal).is_err());
+        drop(journal);
+        assert_eq!(
+            super::super::journal::inspect(&scope).unwrap().2,
+            InstallPhase::Failed
+        );
+        assert!(InstallJournal::begin(&scope, uuid::Uuid::new_v4(), "codex").is_err());
+    }
+
+    #[test]
+    fn installation_verifier_never_accepts_an_unrelated_or_missing_installation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let target = target(&root);
+        assert!(target.verify_installation("codex").is_err());
+        assert!(target.verify_installation("claude").is_err());
+        // Even a legacy executable pair is not the requested standalone install.
+        std::fs::write(root.join(".local/bin/codex"), b"legacy").unwrap();
+        std::fs::write(root.join(".local/bin/codex-code-mode-host"), b"legacy").unwrap();
+        assert!(target.verify_installation("codex").is_err());
+        assert!(target.verify_installation("other").is_err());
     }
 
     #[test]

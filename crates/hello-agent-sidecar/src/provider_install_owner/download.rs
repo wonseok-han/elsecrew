@@ -37,6 +37,7 @@ pub(crate) struct InstallerReservation<'a> {
     pub(super) provider: String,
     pub(super) begun: bool,
     pub(super) scope: &'a super::InstallScope,
+    pub(super) target: Option<super::execute::Target>,
 }
 
 impl<'a> DownloadedScript<'a> {
@@ -67,6 +68,7 @@ impl<'a> DownloadedScript<'a> {
             provider: self.provider,
             begun: false,
             scope: self.scope,
+            target: None,
         })
     }
 }

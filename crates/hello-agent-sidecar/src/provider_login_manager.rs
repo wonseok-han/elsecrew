@@ -353,12 +353,27 @@ pub(crate) fn select_installed_codex_pair(
             let Ok(bin) = standalone_package_bin(home.as_deref().ok_or_else(unavailable)?) else {
                 return Err(original);
             };
-            Ok((
-                PinnedExecutable::open_codex_signed(&bin.join("codex"), false)?,
-                PinnedExecutable::open_codex_signed(&bin.join("codex-code-mode-host"), true)?,
-            ))
+            authenticate_standalone_pair(&bin)
         }
     }
+}
+
+/// Exact native-installer destination. Never fall back to an existing app bundle
+/// when verifying a newly completed standalone installation.
+pub(crate) fn select_standalone_codex_pair(
+    home: &Path,
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    let bin = standalone_package_bin(home)?;
+    authenticate_standalone_pair(&bin)
+}
+
+fn authenticate_standalone_pair(
+    bin: &Path,
+) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
+    Ok((
+        PinnedExecutable::open_codex_signed(&bin.join("codex"), false)?,
+        PinnedExecutable::open_codex_signed(&bin.join("codex-code-mode-host"), true)?,
+    ))
 }
 
 fn standalone_package_bin(home: &Path) -> Result<PathBuf, SidecarError> {

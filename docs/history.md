@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 결과 검증과 terminal 순서 연결)
+
+- 직전950db69는 공식 설치 실행부 구현 진척이다. 같은 checkout/dirty를 확인하고 설치 단계에 보유한 Target capability를 종료 후에도 유지했다. 결과 확인은 이 작업의 HOME에서 Codex standalone pair 또는 Claude native launcher target의 기존 공급자 서명·경로 검증을 재사용한다. Codex의 기존 앱 번들/legacy pair를 새 standalone 설치 성공으로 대신 인정하지 않는다. 기존 일반 discovery의 후보 우선순위/실패 분류는 보존했다.
+- verify_result는 같은 원장/작업/공급자·Verifying·두 프로세스 종료 증거를 요구한다. 확인 실패를 기록한 뒤 늦은 취소를 반영하며 로그인/모델 준비 상태를 만들지 않는다. finalize는 stopping과 종료/대상 재검증 뒤 terminal 원장을 먼저 동기화하고 두 fence를 해제한다. journal은 남겨 새 transaction을 계속 막으며 terminal 보관/재시작 복구는 다음 연결 대상이다. 잠금 해제 오류를 성공으로 반환하지 않는다.
+- 순서 위반/빈 설치 대상 실패·두 잠금 유지→실패 terminal 뒤 해제·원장 재생·중복 시작 거절과 unrelated/legacy 설치 불인정 회귀2개를 추가했다. 이는 process-free synthetic 주문 검사이며 실제 installer/OS 경계 시험을 대신하지 않는다. Karpathy 지침으로 기존 서명 검증을 재사용했고 수정부 rustfmt/diff만 검사했다. 테스트/빌드·독립 검토는 설치 묶음에 남겼다.
+- 다음: terminal 기록 보관·다운로드 실패/취소 포함 coordinator·명시 동의/IPC/UI, 이후 누적 검증과 수정. 실제 설치/로그인/계정 호출·대형 캐시 생성 없음. 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (공식 설치 실행부 내부 연결)
 
 - 직전743b430은 단계 인계 구현 진척이다. 같은 checkout/dirty를 확인하고 InstallerReservation에 공식 스크립트 실행부를 추가했다. 원장/작업/공급자/동의 후 단계에 결속하고 재실행을 거절한다. 다운로드 내용을 별도 실행 파일로 게시하지 않고 고정 shell의 단일 인자로 전달하며, 기존 spawn gate와 두 owner를 계속 보유한다.
