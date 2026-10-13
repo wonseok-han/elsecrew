@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n.tsx";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { restoreDockPanels } from "./dock-layout.ts";
 import { defaultDockLayout, DOCK_STORAGE_KEY, dockGeometry, focusDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockSplit, revealDockPanel, selectDockTab, toggleDockPanel, visibleDockPanels, type DockLayout, type DockPanel, type DockPlacement, type DockRect } from "./dock-layout.ts";
 const dragType = "application/x-hello-agent-panel";
 const position = (rect: DockRect): CSSProperties => ({ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` });
@@ -36,6 +37,7 @@ export function WorkbenchDock({ children, conversation, reveal }: { children: Re
       {available.map(id => <button key={id} type="button" aria-pressed={eligible.includes(id)} disabled={eligible.length === 1 && eligible.includes(id)} onClick={() => { resizing.current = null; setLayout(current => toggleDockPanel(current, id, available)); }}>{labels[id]}</button>)}
     </nav>
     </details>
+    {layout.hiddenBeforeFocus && <button className="m5-dock-restore" type="button" onClick={() => { resizing.current = null; setLayout(current => restoreDockPanels(current)); }}>{t("m5.dock.restore")}</button>}
     <section ref={container} className="m5-panels m5-dock m5-dock-tree" aria-label={t("m5.dock.panels")} onDragEnd={() => setDrop(null)}>
       {/* Flat stable parents preserve Monaco and unsaved editor state during moves. */}
       {available.map(id => {
@@ -64,12 +66,25 @@ export function WorkbenchDock({ children, conversation, reveal }: { children: Re
                   activateTab(target);
                 }} aria-label={t("m5.dock.drag", { panel: labels[tab] })}>{labels[tab]}</button>)}
             </div>
-            <select aria-label={t("m5.dock.placement", { panel: labels[id] })} value="" onChange={event => {
+            <details className="m5-dock-options" onKeyDown={event => {
+              if (event.key === "Escape") {
+                event.preventDefault(); event.currentTarget.open = false;
+                event.currentTarget.querySelector("summary")?.focus();
+              }
+            }}>
+            <summary aria-label={t("m5.dock.options", { panel: labels[id] })} title={t("m5.dock.options", { panel: labels[id] })}>⋯</summary>
+            <div className="m5-dock-options-content">
+            <label>{t("m5.dock.place")}<select aria-label={t("m5.dock.placement", { panel: labels[id] })} value="" onChange={event => {
               const [target, placement] = event.target.value.split(":") as [DockPanel, DockPlacement];
-              if (available.includes(target)) move(id, target, placement);
-            }}><option value="">{t("m5.dock.place")}</option>{available.filter(target => target !== id).map(target => <optgroup key={target} label={labels[target]}>{(Object.keys(placements) as DockPlacement[]).map(placement => <option key={placement} value={`${target}:${placement}`}>{labels[target]} {placements[placement]}</option>)}</optgroup>)}</select>
-            <button type="button" aria-label={t("m5.dock.focus", { panel: labels[id] })} disabled={eligible.length === 1} onClick={() => { resizing.current = null; setLayout(current => focusDockPanel(current, id)); }}>⛶</button>
-            <button type="button" aria-label={t("m5.dock.hide", { panel: labels[id] })} disabled={eligible.length === 1} onClick={() => { resizing.current = null; setLayout(current => toggleDockPanel(current, id, available)); }}>−</button>
+              if (available.includes(target)) {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                move(id, target, placement);
+              }
+            }}><option value="">{t("m5.dock.place")}</option>{available.filter(target => target !== id).map(target => <optgroup key={target} label={labels[target]}>{(Object.keys(placements) as DockPlacement[]).map(placement => <option key={placement} value={`${target}:${placement}`}>{labels[target]} {placements[placement]}</option>)}</optgroup>)}</select></label>
+            <button type="button" disabled={eligible.length === 1} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); resizing.current = null; setLayout(current => focusDockPanel(current, id)); }}>{t("m5.dock.focus", { panel: labels[id] })}</button>
+            <button type="button" disabled={eligible.length === 1} onClick={event => { event.currentTarget.closest("details")?.removeAttribute("open"); resizing.current = null; setLayout(current => toggleDockPanel(current, id, available)); }}>{t("m5.dock.hide", { panel: labels[id] })}</button>
+            </div>
+            </details>
           </div>
           <div className="m5-dock-content" id={`${tabId}-content-${id}`} role="tabpanel" aria-labelledby={`${tabId}-${id}-tab-${id}`}>{panels[id]}</div>
           {drop?.target === id && <div className={`m5-dock-drop m5-dock-drop-${drop.placement}`} aria-hidden="true">{placements[drop.placement]}</div>}

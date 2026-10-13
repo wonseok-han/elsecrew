@@ -119,6 +119,8 @@ export const en: Record<MessageKey, string> = {
   "m5.dock.drag": "Drag {panel} panel",
   "m5.dock.placement": "Place {panel} panel",
   "m5.dock.place": "Place…",
+  "m5.dock.options": "{panel} panel options",
+  "m5.dock.restore": "Restore previous panels",
   "m5.dock.focus": "Focus {panel} panel",
   "m5.dock.hide": "Hide {panel} panel",
   "m5.dock.resizeHorizontal": "Resize side-by-side panels",

@@ -1,5 +1,28 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패널 UI·진단 묶음 검증)
+
+- 직전 작업은 TypeScript 검사/renderer 빌드 PASS와 smoke 예상 개수13→15 수정으로 진척했다. 현재 eb79acc/m5/coding-agent-ide와 기존 dirty를 재확인했다. 패널 상태16개 PASS, 수정 후 private 진단 smoke10개 PASS. Karpathy 지침으로 새 메뉴 조작에 맞춰 renderer 시나리오를 갱신했다.
+- 제한 환경 Electron 실행은 status null로 종료됐고 GUI 권한 환경 재실행에서 예전 aria-label 선택자2개가 남아 실패했다. 두 곳도 실제 메뉴를 열고 버튼을 선택하도록 수정한 session51664는 renderer mount2/2 PASS(7.4초). 집중/복귀/숨김/배치와 Monaco 인스턴스 보존을 확인했다. 이는 합성 bridge 기반 기능 증거이며 시안 픽셀 충실도·실제 계정 종단·제품 메모리 합격이 아니다.
+- Claude init 고정 진단 회귀3/3 PASS(session30342), diff 검사 PASS. 관련 UI/진단/테스트/기록만 로컬 커밋하고 기존9월 archive는 제외한다. 실제 모델 호출0회/main/push 없음. 다음: 실제 연결 실패의 세부 증거 확보(별도 승인), UI 시각 마감·G6 메모리·Windows/출시 잔여 범위. 전체 목표는 미완료다.
+
+### 2026-10-08 · by GPT-6 Astra (집중 표시 복귀 연결)
+
+- 직전 턴은 패널 옵션 메뉴 구현으로 진척했다. eb79acc 위 기존 미커밋 변경 보존. Karpathy 지침으로 focusDockPanel이 다른 패널을 숨기고 이전 표시 상태를 보존하지 않는 점을 확인했다. hiddenBeforeFocus에 이전 숨김 목록만 저장하며 기존 version1 레이아웃과 호환한다. 반복 집중/앱 재열기 뒤에도 복귀 버튼으로 원래 표시 목록을 복원하고 순서·크기·트리·편집 모델은 유지한다.
+- 저장 데이터의 복귀 목록 형식/중복/알 수 없는 ID를 검사하고, 재열기·반복 집중·복귀·크기 보존 회귀를 추가했다. 한국어/영어 버튼 연결. 이번 diff 검사만 수행했고 실행 검증은 메뉴 변경과 묶을 예정이다. 실제 모델 호출0회/main/push 없음, 전체 완료 아님. 다음: 묶음 UI 타입/실제 화면 검증과 잔여 앱 구현.
+
+### 2026-10-08 · by GPT-6 Astra (패널 헤더 보조 조작 정리)
+
+- 직전 턴은 Claude 공식 내장 mod 계약과 고정 진단 추가로 진척했다. eb79acc 위 기존 Claude/history/9월 archive 변경 보존. 현재 dock 코드는 이미 상하/좌우/탭 배치를 구현하므로 과거 가로만 지원 기록을 현재 사실로 반복하지 않았다.
+- Karpathy 지침으로 패널 헤더의 상시 배치 select/집중/숨김 버튼을 native details 옵션 메뉴로 모았다. 탭은 좁은 폭에서 자체 가로 스크롤, 옵션은 한국어/영어 이름과 키보드 Escape 닫기/summary 초점을 제공한다. 기존 drag/resize/배치/저장·Monaco 부모·안전 계약은 유지한다. 메뉴 open 동안만 slot overflow/z-index를 풀어 세로 분할에서 잘리지 않도록 했다.
+- diff 검사만 수행, 타입/실제 렌더링/접근성 및 기존 UI 자동화 영향은 다음 묶음 검증 대상이다. 전체 시안 적용 완료나 시각 검증 PASS로 표현하지 않는다. 실제 모델 호출0회, main/push 없음. 다음: 다른 화면 잔여 구현과 묶음 UI 검증, Claude 진단 빌드/승인된 실제 증거, G6/Windows 잔여 범위.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 내장 mod 계약 확인)
+
+- 직전 턴은 eb79acc 사용량 안내 수정/108개 검사/독립 승인으로 진척했다. 현재 m5/coding-agent-ide, 기존9월 archive만 dirty인 상태를 확인했다. Karpathy 지침으로 실제 계정 호출 없이 공식 https://code.claude.com/docs/en/plugins/mods/overview 의 내장 mod 표를 확인했다. safe-mode/bare/disableAllHooks는 내장 mod를 중단하지 않으며 조직용 cc-plugin-sec-default는 사용자 비활성화가 불가능하다. telemetry는 별도 비활성화 가능하다. 따라서 기존 init plugins=[] 가정과 조직 guard가 충돌할 가능성이 있으나 WD8GdD의 정확한 항목은 아직 미확정이다.
+- 기존 private 고정 진단에 organization guard 단독/telemetry 단독 분류를 추가했다. 다른 항목이 섞이거나 경로 표시가 다르면 기존 other 분류로 남는다. provider 표시를 신뢰·허용 근거로 사용하지 않으며 nonempty plugins는 여전히 거절한다. 해당 분류와 smoke whitelist 회귀를 추가했다. 새 테스트/빌드는 후속 묶음에서 실행하며 이번 diff 검사만 수행한다.
+- 다음: 실제 계정 증거가 필요할 때 별도 승인 후 확인하고, 조직 guard는 사용자 정책을 우회해 끄지 않는다. 전체 UI/G6/Windows 잔여 구현은 독립 진행 가능하다. 실제 모델 호출0회, 원본·인증정보/main/push 변경 없음, 제품 완료 아님.
+
 ### 2026-10-08 · by GPT-6 Astra (계정 사용량 안내 호환)
 
 - 기준548c4f8, 기존 history/9월 archive 보존. OpenAI 공식 https://learn.chatgpt.com/docs/app-server 및 현재 로컬 생성 AccountRateLimitsUpdatedNotification 스키마를 대조했다. account/rateLimits/updated는 thread/turn ID 없는 sparse 계정 전체 안내이며 account/updated의 인증 변경과 다르다. 앞선 실제 실패가 두 알림 중 어느 것인지는 아직 미확정이다.
@@ -144,6 +167,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **Claude 내장 mod와 safe-mode(2026-10-08)**: 공식 mods overview는 safe-mode/bare/disableAllHooks가 내장 mod를 끄지 않는다고 명시한다. cc-plugin-sec-default 조직 guard는 사용자가 끌 수 없으므로 무조건 plugins=[] 요구와 충돌할 수 있다. 현재 실제 항목 미확정, nonempty 거절 유지. 조직 정책을 우회하는 임의 disable 또는 builtin 표시만으로 허용 금지.
 
 - **Claude safe-mode 내장 플러그인(2026-10-08)**: 서명된2.1.293의 빈 임시 프로필/가짜 API/도구 없음에서도 init plugins가 cc-plugin-agents-md@builtin·cc-plugin-plugin-authoring@builtin을 보고했다. 공식 enabledPlugins에서 두 ID를 false로 지정하면 빈 배열이 된다(5ikQWQ→7D0mvz). 제품은 이를 명시 비활성화하며 알 수 없는 플러그인 거절은 유지한다. 실제 계정 성공·다른 버전 보장을 뜻하지 않는다.
 

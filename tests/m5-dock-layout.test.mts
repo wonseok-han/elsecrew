@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { revealDockPanel } from "../src/m5/dock-layout.ts";
+import { revealDockPanel, restoreDockPanels } from "../src/m5/dock-layout.ts";
 import { activeDockTab, defaultDockLayout, dockGeometry, focusDockPanel, moveDockPanel, PANEL_IDS, parseDockLayout, placeDockPanel, resizeDockPanels, resizeDockSplit, selectDockTab, toggleDockPanel, visibleDockPanels, type DockPlacement } from "../src/m5/dock-layout.ts";
+
+test("focus preserves previous visibility across reload and repeated focus", () => {
+  const initial = toggleDockPanel(defaultDockLayout(), "changes", PANEL_IDS);
+  const focused = focusDockPanel(focusDockPanel(initial, "editor"), "conversation");
+  const restored = restoreDockPanels(parseDockLayout(JSON.stringify(focused)));
+  assert.deepEqual(restored, initial);
+  assert.equal(restored.hiddenBeforeFocus, undefined);
+  assert.equal(restoreDockPanels(restored), restored);
+  const resized = resizeDockSplit(focusDockPanel(initial, "editor"), "", .4);
+  assert.deepEqual(restoreDockPanels(resized).tree, resized.tree);
+  for (const invalid of [null, "files", ["unknown"], ["files", "files"], [...PANEL_IDS]]) {
+    assert.deepEqual(parseDockLayout(JSON.stringify({ ...initial, hiddenBeforeFocus: invalid })), defaultDockLayout());
+  }
+});
 
 test("new workspaces start with three columns and a shared files/changes group", () => {
   const initial = defaultDockLayout();

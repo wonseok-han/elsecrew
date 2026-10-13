@@ -122,6 +122,14 @@ pub(super) fn observe_with_stage(
                 Some("cc-plugin-agents-md@builtin" | "cc-plugin-plugin-authoring@builtin"))
         }) {
             "init plugins disabled builtins"
+        } else if plugins.iter().all(|plugin| plugin["path"] == "builtin"
+            && plugin["source"] == "cc-plugin-sec-default@builtin") {
+            // Official organization guard cannot be disabled by a user. This
+            // is diagnosis only, not trust in the provider's registration claim.
+            "init plugins organization guard"
+        } else if plugins.iter().all(|plugin| plugin["path"] == "builtin"
+            && plugin["source"] == "cc-plugin-telemetry@builtin") {
+            "init plugins telemetry"
         } else if plugins.iter().all(|plugin| plugin["path"] == "builtin") {
             "init plugins other builtins"
         } else {
@@ -186,6 +194,10 @@ mod tests {
             ("plugins", json!([{"name":"PRIVATE"}]), "init plugins other registration"),
             ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-agents-md@builtin"}]), "init plugins disabled builtins"),
             ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"PRIVATE"}]), "init plugins other builtins"),
+            ("plugins", json!([{"name":"PRIVATE","path":"builtin","source":"cc-plugin-sec-default@builtin"}]), "init plugins organization guard"),
+            ("plugins", json!([{"path":"builtin","source":"cc-plugin-telemetry@builtin"}]), "init plugins telemetry"),
+            ("plugins", json!([{"path":"PRIVATE","source":"cc-plugin-sec-default@builtin"}]), "init plugins other registration"),
+            ("plugins", json!([{"path":"builtin","source":"cc-plugin-sec-default@builtin"},{"path":"builtin","source":"PRIVATE"}]), "init plugins other builtins"),
             ("plugins", json!([null]), "init plugins other registration"),
             ("plugin_errors", json!([{"message":"PRIVATE"}]), "init plugin errors"),
             ("uuid", json!(""), "init identity"),

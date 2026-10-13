@@ -1,7 +1,7 @@
 export const PANEL_IDS = ["files", "editor", "changes", "conversation"] as const;
 export type DockPanel = typeof PANEL_IDS[number];
 export type DockNode = { type: "tabs"; panels: DockPanel[]; active: DockPanel } | { type: "split"; axis: "horizontal" | "vertical"; ratio: number; first: DockNode; second: DockNode };
-export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
+export interface DockLayout { version: 1; order: DockPanel[]; widths: Record<DockPanel, number>; hidden?: DockPanel[]; hiddenBeforeFocus?: DockPanel[]; direction?: "horizontal" | "vertical"; tabbed?: boolean; activeTab?: DockPanel; tree?: DockNode }
 export const DOCK_STORAGE_KEY = "hello-agent.m5.dock.v1";
 export function defaultDockLayout(): DockLayout {
   return {
@@ -26,6 +26,7 @@ export function parseDockLayout(raw: string | null): DockLayout {
     if (Math.abs(PANEL_IDS.reduce((sum, id) => sum + value.widths[id], 0) - 1) > .000001) return defaultDockLayout();
     if (value.hidden !== undefined && (!Array.isArray(value.hidden) || value.hidden.length >= PANEL_IDS.length || new Set(value.hidden).size !== value.hidden.length || value.hidden.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
     if (value.direction !== undefined && value.direction !== "horizontal" && value.direction !== "vertical") return defaultDockLayout();
+    if (value.hiddenBeforeFocus !== undefined && (!Array.isArray(value.hiddenBeforeFocus) || value.hiddenBeforeFocus.length >= PANEL_IDS.length || new Set(value.hiddenBeforeFocus).size !== value.hiddenBeforeFocus.length || value.hiddenBeforeFocus.some((id: unknown) => !PANEL_IDS.includes(id as DockPanel)))) return defaultDockLayout();
     if (value.tabbed !== undefined && typeof value.tabbed !== "boolean") return defaultDockLayout();
     if (value.activeTab !== undefined && !PANEL_IDS.includes(value.activeTab)) return defaultDockLayout();
     if (value.tree !== undefined) {
@@ -40,7 +41,7 @@ export function parseDockLayout(raw: string | null): DockLayout {
       };
       if (!valid(value.tree) || ids.length !== 4 || new Set(ids).size !== 4) return defaultDockLayout();
     }
-    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.direction ? { direction: value.direction } : {}), ...(value.tabbed !== undefined ? { tabbed: value.tabbed } : {}), ...(value.activeTab ? { activeTab: value.activeTab } : {}), ...(value.tree ? { tree: value.tree } : {}) };
+    return { version: 1, order: [...value.order], widths: Object.fromEntries(PANEL_IDS.map(id => [id, value.widths[id]])) as Record<DockPanel, number>, ...(value.hidden ? { hidden: [...value.hidden] } : {}), ...(value.hiddenBeforeFocus ? { hiddenBeforeFocus: [...value.hiddenBeforeFocus] } : {}), ...(value.direction ? { direction: value.direction } : {}), ...(value.tabbed !== undefined ? { tabbed: value.tabbed } : {}), ...(value.activeTab ? { activeTab: value.activeTab } : {}), ...(value.tree ? { tree: value.tree } : {}) };
   } catch { return defaultDockLayout(); }
 }
 
@@ -67,7 +68,12 @@ export function toggleDockPanel(layout: DockLayout, panel: DockPanel, available:
 }
 
 export function focusDockPanel(layout: DockLayout, panel: DockPanel): DockLayout {
-  return PANEL_IDS.includes(panel) ? { ...layout, hidden: PANEL_IDS.filter(id => id !== panel) } : layout;
+  return PANEL_IDS.includes(panel) ? { ...layout, hiddenBeforeFocus: layout.hiddenBeforeFocus ?? [...(layout.hidden ?? [])], hidden: PANEL_IDS.filter(id => id !== panel) } : layout;
+}
+export function restoreDockPanels(layout: DockLayout): DockLayout {
+  if (!layout.hiddenBeforeFocus) return layout;
+  const { hiddenBeforeFocus, ...rest } = layout;
+  return { ...rest, hidden: [...hiddenBeforeFocus] };
 }
 export function moveDockPanel(layout: DockLayout, source: DockPanel, target: DockPanel): DockLayout {
   if (source === target || !layout.order.includes(source) || !layout.order.includes(target)) return layout;

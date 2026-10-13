@@ -291,11 +291,22 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-dock-tabs button[aria-selected="true"] { color: #e4f1ff; border-bottom: 2px solid #91c5ff; background: #171d26; }
 .m5-panels.m5-dock-tree { position: relative; display: block; flex: 1 0 300px; height: auto; min-height: 300px; }
 .m5-dock-tree .m5-dock-slot { position: absolute; box-sizing: border-box; padding: 4px; min-height: 0; overflow: hidden; }
-.m5-dock-tree .m5-dock-heading { flex-shrink: 0; overflow: auto; }
-.m5-dock-group-tabs { display: flex; flex: 1; gap: 2px; min-width: max-content; }
+.m5-dock-tree .m5-dock-slot:has(.m5-dock-options[open]) { overflow: visible; z-index: 30; }
+.m5-dock-tree .m5-dock-heading { flex-shrink: 0; position: relative; overflow: visible; }
+.m5-dock-group-tabs { display: flex; flex: 1; gap: 2px; min-width: 0; overflow-x: auto; }
 .m5-dock-group-tabs button { cursor: grab; background: #202a37; color: #aab4c1; white-space: nowrap; }
 .m5-dock-group-tabs button[aria-selected="true"] { background: #171d26; color: #e4f1ff; box-shadow: inset 0 -2px #91c5ff; }
 .m5-dock-heading select { max-width: 86px; padding: 4px; background: #202a37; color: #d8e0eb; border: 1px solid #3b495b; border-radius: 4px; }
+.m5-dock-options { flex: 0 0 auto; }
+.m5-dock-restore { align-self: flex-start; margin: 0 4px 4px; font-size: 12px; }
+.m5-dock-options > summary { display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer; border-radius: 4px; color: #aab4c1; list-style: none; }
+.m5-dock-options > summary::-webkit-details-marker { display: none; }
+.m5-dock-options > summary:hover, .m5-dock-options[open] > summary { background: #344256; color: #e4f1ff; }
+.m5-dock-options > summary:focus-visible { outline: 2px solid #91c5ff; outline-offset: 2px; }
+.m5-dock-options-content { position: absolute; right: 4px; top: calc(100% + 3px); z-index: 30; box-sizing: border-box; width: min(250px, calc(100% - 8px)); display: grid; gap: 6px; padding: 10px; border: 1px solid #3b495b; border-radius: 8px; background: #202a37; box-shadow: 0 8px 24px #0006; }
+.m5-dock-options-content label { display: grid; gap: 6px; font-size: 12px; color: #aab4c1; }
+.m5-dock-options-content select { max-width: none; width: 100%; }
+.m5-dock-options-content button { text-align: start; }
 .m5-dock-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .m5-dock-content > .m5-panel, .m5-dock-content > .m5-timeline { flex: 1; min-width: 0; min-height: 0; margin: 0; overflow: auto; }
 .m5-dock-tree .m5-dock-separator { position: absolute; z-index: 2; }

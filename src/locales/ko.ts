@@ -118,6 +118,8 @@ export const ko = {
   "m5.dock.drag": "{panel} 패널 끌기",
   "m5.dock.placement": "{panel} 패널 배치",
   "m5.dock.place": "배치…",
+  "m5.dock.options": "{panel} 패널 옵션",
+  "m5.dock.restore": "이전 패널 배치로 돌아가기",
   "m5.dock.focus": "{panel} 패널에 집중",
   "m5.dock.hide": "{panel} 패널 접기",
   "m5.dock.resizeHorizontal": "좌우 패널 크기 조절",
