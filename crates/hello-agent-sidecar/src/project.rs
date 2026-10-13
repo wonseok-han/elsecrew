@@ -3763,7 +3763,6 @@ impl ProjectManager {
 
     fn diff_entries(&self, active: &ActiveProject) -> Result<Vec<DiffEntry>, ProjectFailure> {
         let worktree = self.worktree_capability(active)?;
-        let mut base_reader = DiffBaseReader::new(self, &worktree, active)?;
         let output = self.git_limited_bytes_at(
             &worktree,
             [
@@ -3784,6 +3783,18 @@ impl ProjectManager {
             .filter(|field| !field.is_empty())
             .map(protocol_git_path)
             .collect::<Result<Vec<_>, _>>()?;
+        let untracked = self.git_limited_bytes_at(
+            &worktree,
+            ["ls-files", "--others", "--exclude-standard", "-z", "--"],
+            &[0],
+            DIFF_MAX_BYTES,
+        )?;
+        // A fresh, unchanged snapshot has no blob contents to classify. Keep
+        // both scans fresh on every request, but do not start idle batch readers.
+        if fields.is_empty() && untracked.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut base_reader = DiffBaseReader::new(self, &worktree, active)?;
         let mut index = 0;
         let mut entries = Vec::new();
         while index < fields.len() {
@@ -3821,12 +3832,6 @@ impl ProjectManager {
                 ));
             }
         }
-        let untracked = self.git_limited_bytes_at(
-            &worktree,
-            ["ls-files", "--others", "--exclude-standard", "-z", "--"],
-            &[0],
-            DIFF_MAX_BYTES,
-        )?;
         for path in untracked
             .split(|byte| *byte == 0)
             .filter(|path| !path.is_empty())

@@ -3970,6 +3970,26 @@ fn restart_and_diff_do_not_depend_on_the_source_repository() {
     assert!(git_bytes_raw(&reopened.worktree_path, ["remote"]).is_empty());
 }
 
+#[test]
+fn clean_diff_does_not_hide_later_tracked_or_untracked_changes() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(summary.result["entries"].as_array().unwrap().is_empty());
+
+    fs::write(active.worktree_path.join("src/edit.txt"), b"changed").unwrap();
+    fs::write(active.worktree_path.join("src/fresh.txt"), b"new").unwrap();
+    let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    let entries = summary.result["entries"].as_array().unwrap();
+    assert!(entries.iter().any(|entry| entry["path"] == "src/edit.txt" && entry["kind"] == "modified"));
+    assert!(entries.iter().any(|entry| entry["path"] == "src/fresh.txt" && entry["kind"] == "added"));
+
+    fs::write(active.worktree_path.join("src/edit.txt"), b"hello").unwrap();
+    fs::remove_file(active.worktree_path.join("src/fresh.txt")).unwrap();
+    let summary = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(summary.result["entries"].as_array().unwrap().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn snapshot_export_succeeds_with_read_only_source_git_directory() {
