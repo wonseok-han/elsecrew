@@ -440,6 +440,27 @@ app.whenReady().then(async () => {
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
     const input = document.querySelector('#m5-followup-text');
+    const conversationToggle = [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '팀 대화');
+    if (conversationToggle.getAttribute('aria-pressed') === 'false') conversationToggle.click();
+    await ${waitFor("!document.querySelector('[data-panel=conversation]').hidden", "conversation visible for geometry")};
+    const conversation = document.querySelector('.m5-conversation');
+    const savedConversationStyle = conversation.getAttribute('style');
+    try {
+      for (const height of [280, 500]) {
+        conversation.style.cssText = 'flex: none; height: ' + height + 'px';
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const bounds = conversation.getBoundingClientRect();
+        const composer = document.querySelector('.m5-followup').getBoundingClientRect();
+        const history = document.querySelector('.m5-conversation-scroll');
+        const historyBounds = history.getBoundingClientRect();
+        if (historyBounds.height < 1 || composer.height > bounds.height / 2 + 1 || composer.bottom > bounds.bottom + 1 || historyBounds.bottom > composer.top + 1) throw new Error('composer geometry: ' + JSON.stringify({height, bounds: bounds.toJSON(), composer: composer.toJSON(), history: historyBounds.toJSON()}));
+        history.scrollTop = history.scrollHeight;
+        if (Math.abs(document.querySelector('.m5-followup').getBoundingClientRect().bottom - composer.bottom) > 1) throw new Error('history scrolling moved the composer');
+      }
+    } finally {
+      if (savedConversationStyle === null) conversation.removeAttribute('style');
+      else conversation.setAttribute('style', savedConversationStyle);
+    }
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, '설명을 추가해 주세요.');
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await ${waitFor("!document.querySelector('.m5-followup button').disabled", "enabled follow-up submit")};
