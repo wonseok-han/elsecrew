@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (100회 저장 경합 실제 stdio 검증)
+
+- 기준1821395의 release/locked stdio_process에서 명시 ignored인 binary_workspace_save_races_preserve_external_bytes_across_two_chats를 실행해1 PASS/50.69초를 확인했다. 자체 임시 Git 프로젝트의 두 채팅 workspace를 번갈아 사용해 save begin 뒤/청크 뒤 외부 쓰기100회와 정상 대조 저장100회를 검증했다. 원시100 observations와 counters(silentOverwrites/unreportedConflicts/crossChatWrites 각각0), 원본 불변·다른 채팅 불변·충돌 보고·외부 바이트 보존 모두true를 /private/tmp/hello-agent-final-save-races.log에서 다시 확인했다.
+- app.prepareQuit safeToQuit 및 child 정상 exit 후 시험 루트 hello-agent-save-races-AFEp3D가 제거됐음을 확인했다. 실제 계정/모델/사용자 프로젝트 미사용. 이 증거는 native stdio의 commit 전 제어된 교차 실행이며 packaged UI·agent writer·commit 내부 임의 경합·전체G6 합격이 아니다. 기존 시험의 한계를 유지하고 미관측 값을0으로 채우지 않았다.
+- 메모리 미해결은 유지한다. 기존7s7oRo 마지막 RSS445579264B에서 main156712960/renderer135020544/GPU88932352/network47136768/sidecar17776640B, renderer JS used2962536B를 읽었다. 이전 빈 창과 조건이 달라 차이를 정확한 원인 분해로 사용하지 않으며 기능 비활성화/기준 상향은 하지 않았다. 다음은 반복 패키지 성능 및 메모리/잔여G6·실계정·Windows. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (종료 확인 뒤 bounded 회수·실패 회귀 해소)
 
 - 7ddac69 위 Karpathy 최소 범위로 fixture G5A finish_with_report의 단발 try_wait를 종료 confirmed일 때만 최대1초/25ms 간격 재확인으로 변경했다. unconfirmed tree는 대기하지 않고, try_wait 오류/기한 초과는 false를 유지한다. process-tree report·durable evidence·forced uncertainty·provider recovery 판정은 기존처럼 모두 필요하다. native provider의 별도 실행 경로 수정/실계정 종료 검증으로 확대하지 않는다.
