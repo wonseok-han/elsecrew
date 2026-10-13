@@ -1,5 +1,24 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (준비 취소 경합 화면 복구·활성화 승인 재확인)
+
+- 두 macOS 기능 활성화 승인을 재수신하고944bba1 및 현재 코드와 대조했다. 이미 활성화된 설치/명시 백업 정리를 중복 변경하거나 실제 설치·삭제하지 않았다. 사용자9월 archive21줄은 계속 별도 보존한다.
+- 185057c 위 미커밋 응답 유실 수정의 잔여 P2를 보완했다. 준비 중 취소 요청은 baseline 뒤 start 전송을 막고, 취소 성공·진행 요청 종료 뒤 fresh chat-scoped 상태가 이전 ID와 같고 running=false일 때만 확인서를 버리고 새 검토로 복귀한다. 새 intent가 있으면 ID를 채택해 조회/중단을 유지한다. 자동 start 재전송은 하지 않는다. Karpathy 최소 변경 및 React 상태/이벤트 점검을 적용했다.
+- tsc/renderer build PASS, reconciliation+session identity4 PASS, Chromium2 PASS13.59초(/private/tmp/hello-agent-cancel-race-ui-retry.log). 최초 Chromium 실패는 projectId 없는 취소 요청을 잘못 넘긴 시험 bridge 라우팅이었으며 exact confirmationId 처리로 수정했다. 최종 회귀는 취소 선행→새 검토, baseline 실패→미전송 재시도, 접수 응답 유실→정확한 새ID 중단, 로그인 idle 무조회/통신 실패 복구를 포함한다. 합성 bridge이므로 native 원본/실계정 증거가 아니다.
+- 동일 독립 검토자가 수정 재검토를 승인했다. 취소/start 응답 순서와 pending/expectedId 결속을 확인했으며 이번 P2 및 앞선 응답 유실 결함에 추가 concrete blocker가 없다고 판정했다. 정적 검토와 제시된 합성 회귀 범위의 승인이다. 전체 제품은 실제 provider 흐름·packaged 성능/메모리·출시 검증이 남는다. main 병합/push 및 실제 계정 호출 없음.
+
+### 2026-10-13 · by GPT-6 Astra (반영 응답 유실 화면 회귀 통과·취소 경합 잔여)
+
+- 미커밋 응답 유실 수정에 실제 React/Chromium 합성 bridge 회귀를 추가했다. baseline 조회 실패 시 start 미전송·버튼 재시도, 이후 접수 뒤 응답만 유실 시 새로운 scoped ID 채택·처리 중단 버튼·정확한 ID cancel·start 단1회를 확인한다. 검토자 추가 지적에 따라 attempted/onAttempt는 baseline 성공 뒤 실제 invoke 직전으로 옮기고 미전송 실패는 재시도 가능한 preview 오류로 분리했다.
+- 제한 환경 Chromium 시작 실패 뒤 외부 실행했다. fixture 중복 변수 선언, 명시 펼침 상태에 대한 구형 로그인 기대, React 실패 렌더 이전의 성급한 재클릭을 수정한 최종 Chromium2 PASS13.48초(/private/tmp/hello-agent-loss-ui.log). 185057c의 정지 상태 무조회와 명시 check 실패→poll 재조회 복구도 함께 확인했다. renderer build/tsc/reconciliation+identity4/diff PASS. 원본 쓰기·실계정 없이 합성 관측이다.
+- 독립 검토는 별도 준비 취소→start 경합에서 UI가 attempted 상태로 남는 잔여 문제를 지적했다. cancel 성공만으로 부모 상태를 초기화하면 이미 접수된 intent를 숨길 수 있어, 양 응답과 scoped 상태의 결속을 확인한 후 별도 수정한다. 현재 결과는 최초 lost response 결함의 회귀 증거이며 전체 안전 승인 아님. 다음은 취소 경합 수정과 동일 검토자의 최종 결과다. 사용자9월 archive/main/push 경계 유지.
+
+### 2026-10-13 · by GPT-6 Astra (반영 응답 유실 복구 결함 수정 중)
+
+- final_application_safety 중간 검토에서 P1을 발견했다. startApplication이 durable 접수된 뒤 응답이 유실되면 expectedId=null 때문에 이후 applicationStatus를 모두 거절하고 취소 버튼을 표시하지 못했다. 부모 chat preview도 시작 후 자체 조회를 중단해 사용자 복구 경로가 막혔다.
+- 185057c 위 working tree에서 시작 직전 chatApplicationStatus로 기존 ID를 기억하고, 시작 후에도 project/chat 결속된 같은 조회를 사용하도록 수정했다. 응답 유실 시 baseline과 다른 새 non-null ID만 채택한다. baseline 미확인/동일 옛 ID/null/다른 chat·project는 거부하고 알려진 ID는 exact 유지한다. restore는 기존 project 조회+known ID, start 자동 재전송 금지는 유지한다. 검토자의 권고와 일치하는 작은 수정이며 원본 쓰기 계약은 완화하지 않았다.
+- 신규 reconciliation2+기존 session identity2 PASS, tsc/diff PASS. 검토자에게 현재 diff 재확인을 요청했다. 실제 화면의 lost reply→조회→정확한 ID 취소 회귀는 아직 추가/실행 전이므로 수정 완료·안전 승인으로 주장하지 않는다. 수정은 미커밋 상태로 인계하며 검토자는 계속 running이다. 다음 작업은 이 화면 회귀와 검토 결과 반영이다. 사용자9월 archive 보존·main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (정지 상태 로그인 반복 조회 제거)
 
 - 0c707fc에서 안전 검토자는 여전히 running이며 중간 보고상 apply/restore/retire/cleanup 동의·원본 보호 경로에서 구체 결함은 아직 없었다. 최종 승인으로 취급하지 않으며 새 검토자는 호출하지 않았다.
@@ -142,6 +161,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **반영 응답 유실/취소 경합 UI(2026-10-13)**: start 응답만으로 ID를 정하면 접수 응답 유실 뒤 조회·취소가 막힌다. 시작 전 chat-scoped baseline과 다른 새 ID만 채택하고 known ID는 exact 유지한다. 준비 취소 성공만으로 화면을 초기화하지 않으며 진행 요청 종료 뒤 같은 scope에 새 intent가 없음을 확인해야 새 검토로 복귀한다. 합성 React/Chromium 회귀로 검증하며 실제 source write 증거와 구분한다.
 
 - **설치 journal 잠금 수명(2026-10-13)**: flock은 descriptor 하나가 아니라 open-file-description에 남는다. concurrent fork/dup의 핸들이 남으면 단순 drop 뒤 inspect가 잠김으로 거부될 수 있어 InstallJournal::Drop에서 명시 LOCK_UN한다. duplicateFD 회귀의 수정 전 FAIL/후 PASS와 독립 APPROVE를 확보했다. 이는 소유자의 잠금 해제일 뿐 journal/fence 삭제나 설치 완료·프로세스 종료 추정이 아니다. 기존 pending/이력과 명시 복구 조건을 유지한다.
 

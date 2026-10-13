@@ -102,7 +102,9 @@ function ChatApplicationPreviewSession({ projectId, chatId, worktreeId, disabled
       <button type="button" disabled={disabled || busy || preview.total === 0 || confirmation !== null} onClick={() => void confirmReview()}>{t("m5.application.openConfirmation")}</button>
     </>}
     {confirmation && !started && <div role="status"><p>{t("m5.application.confirmationReady")}</p><button type="button" disabled={disabled || busy} onClick={() => void confirmReview(true)}>{t("m5.application.cancelConfirmation")}</button></div>}
-    {confirmation && application?.state !== "restored" && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} onStatus={status => {
+    {confirmation && application?.state !== "restored" && <ApplicationStartControl key={confirmation} request={{action:"startApplication",projectId,chatId,confirmationId:confirmation}} disabled={disabled || busy} onAttempt={() => { startedRef.current = true; setStarted(true); }} onPreparationCanceled={() => {
+      setConfirmation(null); setPreview(null); startedRef.current = false; setStarted(false);
+    }} onStatus={status => {
       setApplication(status);
       if (!status.running && status.applicationId && ["prepared", "applying", "applied"].includes(status.state)) setRestorationOffered(true);
     }} />}

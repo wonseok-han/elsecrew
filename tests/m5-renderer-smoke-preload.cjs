@@ -30,7 +30,7 @@ window.m5SmokeLoginStatusFailure = false;
 window.m5Login = { request: async (input) => {
   const provider = input.provider ?? "codex";
   window.m5SmokeLoginRequests.push({provider, action: input.action});
-  if (provider === "codex" && input.action === "status" && window.m5SmokeLoginStatusFailure) throw new Error("synthetic status unavailable");
+  if (provider === "codex" && ["status", "check"].includes(input.action) && window.m5SmokeLoginStatusFailure) throw new Error("synthetic status unavailable");
   let status = loginStates[provider];
   if (input.action === "diagnose") {
     if (status.error === "providerLoginRecoveryRequired") throw new Error("diagnosis cannot clear recovery");

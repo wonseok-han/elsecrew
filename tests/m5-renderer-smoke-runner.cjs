@@ -5,6 +5,7 @@ const { mkdtempSync, writeFileSync } = require("node:fs");
 const { measureMessagePaint } = require("../scripts/m5-message-paint-probe.cjs");
 const { probeInstallConsent } = require("./m5-install-ui-probe.cjs");
 const { probeCleanupConsent } = require("./m5-cleanup-ui-probe.cjs");
+const { probeApplicationResponseLoss } = require("./m5-application-response-loss-probe.cjs");
 const { tmpdir } = require("node:os");
 
 // The normal parent test owns this root and removes it after confirmed exit.
@@ -136,11 +137,20 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Claude Code 연결\"]').textContent.includes('이 앱에 Claude Code 로그인이 연결됐어요')", "Claude code accepted")};
     if (document.querySelector('#claude-connection-code')) throw new Error('submitted code input was retained');
     await ${waitFor("document.getElementById('codex-connection-details').hidden && document.getElementById('claude-connection-details').hidden", "both signed-in panels compact")};
+    await new Promise(resolve => setTimeout(resolve, 600));
+    const idleReads = window.m5SmokeLoginRequests.length;
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    if (window.m5SmokeLoginRequests.length !== idleReads) throw new Error('connected login keeps polling at rest');
     window.m5SmokeLoginStatusFailure = true;
+    const idleCodexSection = document.querySelector('[aria-label="Codex 연결"]');
+    idleCodexSection.querySelector('button[aria-expanded]').click();
+    [...idleCodexSection.querySelectorAll('button')].find(b => b.textContent === '연결 상태 다시 확인').click();
     await ${waitFor("!document.getElementById('codex-connection-details').hidden && document.querySelector('[aria-label=\"Codex 연결\"] [role=alert]')", "poll failure reveals connection controls")};
     if (!document.getElementById('claude-connection-details').hidden) throw new Error('Codex error expanded unrelated Claude');
     window.m5SmokeLoginStatusFailure = false;
-    await ${waitFor("document.getElementById('codex-connection-details').hidden", "status restoration compacts connection")};
+    await ${waitFor("!document.querySelector('[aria-label=\"Codex 연결\"] [role=alert]')", "status retry clears transport failure")};
+    idleCodexSection.querySelector('button[aria-expanded]').click();
+    await ${waitFor("document.getElementById('codex-connection-details').hidden", "explicitly collapse inspected connection")};
     document.querySelectorAll('.m5-setup-navigation button')[1].click();
     await ${waitFor("!document.querySelector('.m5-provider-install').parentElement.hidden", "installation step visible")};
     await (${probeInstallConsent.toString()})();
@@ -496,6 +506,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-diff-pages span').textContent.startsWith('1 /')", "reopened diff resets page")};
     document.querySelector('.m5-chat-chip').click();
     await ${waitFor("document.querySelector('.m5-followup button:not(:disabled)') || document.querySelector('#m5-followup-text')", "follow-up composer")};
+    globalThis.applicationResponseLossReport = await (${probeApplicationResponseLoss.toString()})();
     const input = document.querySelector('#m5-followup-text');
     const conversationToggle = [...document.querySelectorAll('.m5-dock-visibility button')].find(button => button.textContent === '팀 대화');
     if (conversationToggle.getAttribute('aria-pressed') === 'false') conversationToggle.click();
