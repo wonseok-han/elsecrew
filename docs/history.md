@@ -1,5 +1,13 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (시작 화면의 읽기 전용 기기 정보 연결)
+
+- 직전bcaac54는 설치 후보 공통화 구현 진척이며 독립 검토자는 계속 running 상태다. 해당 검토를 중복 호출하지 않고 별도 읽기 전용 기기 진단 UI를 구현했다. 기존 Tauri detect는 셸 PATH/임의 CLI 실행에 의존하므로 그대로 M5 renderer에 노출하지 않았다.
+- 작업 중 bcaac54 독립 정적 APPROVE를 회수했다. 같은 root pair·서명/no-follow/identity·기존 우선순위와 세 호출 경로에서 차단 결함 없음. 실제 signed pair/불완전 fallback 및 launch 회귀는 미검증이며 이번 기기 정보 기능은 그 검토 범위에 포함되지 않는다.
+- Electron main의 고정 무인자 IPC에 운영체제/커널 버전·CPU·전체 메모리·앱 userData 볼륨 여유 공간만 연결했다. 현재 main frame 검증과 exact 응답 검증을 main/preload/renderer에서 수행하며 사용자 경로·명령·인증/계정 정보는 받거나 반환하지 않는다. 조회 실패/범위 초과 공간은 null이고0과 구분한다. 앱 디렉터리 생성/설치/CLI 실행 없음.
+- 시작 화면에 기기 확인/재조회와 ko/en 설명을 추가했다. 이 결과를 설치 용량 admission·필수 도구 확인·로그인/실행 가능 또는 Windows 지원 증거로 사용하지 않는다. Karpathy 지침으로 기존 공급자 선택 화면에 연결했으며 자동 설치 worker와 전체 진단은 후속 미완료다.
+- renderer TypeScript에서 진단 없음, diff 검사 완료. 계약의 잘못된 값/추가 권한 거절 및 실제 읽기 전용 조회·없는 위치의 null 회귀를 추가했지만 아직 실행하지 않았다. Electron 빌드/IPC origin·UI 검증은 통합 검증 대기, Rust/대형 캐시/실제 계정 시험 없음. 기존 dirty 보존, 전체 목표 미완료/main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (Codex 설치 후보와 로그인·실행 준비 일치)
 
 - 직전8905173은 프로젝트 목록 구현 진척이다. 현재 통합 브랜치/dirty를 확인하고 미연결 설치 흐름을 조사했다. 기존 Tauri 설치기는 ~/.local/bin에 CLI/helper를 배치하지만 M5의 세 경로는 앱 번들만 조회하고 있었다. 레거시 설치기를 바로 연결하면 설치 성공 뒤에도 M5 미설치 판정이 가능하다.

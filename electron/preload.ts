@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { DEVICE_REPORT_CHANNEL, validateDeviceReport } from "../src/m5/contracts/device-report-v1.ts";
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest, validateModelChoicesResult, type ModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
 import { APPROVAL_CHANNEL as M5_APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult, type ApprovalRequest } from "../src/m5/contracts/approval-v1.ts";
 import { PROJECT_CATALOG_CHANNEL as M5_PROJECT_CATALOG_CHANNEL, validateProjectCatalogRequest, validateProjectCatalogResult, type ProjectCatalogRequest } from "../src/m5/contracts/project-catalog-v1.ts";
@@ -108,6 +109,9 @@ contextBridge.exposeInMainWorld("m5Approval", Object.freeze({
     const request = validateApprovalRequest(input);
     return validateApprovalResult(await ipcRenderer.invoke(M5_APPROVAL_CHANNEL, request), request);
   },
+}));
+contextBridge.exposeInMainWorld("m5Device", Object.freeze({
+  inspect: async () => validateDeviceReport(await ipcRenderer.invoke(DEVICE_REPORT_CHANNEL)),
 }));
 contextBridge.exposeInMainWorld("m5Login", Object.freeze({
   request: async (input: LoginRequest) => {

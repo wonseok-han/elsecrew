@@ -1,4 +1,6 @@
 import { MODEL_CHOICES_CHANNEL, validateModelChoicesRequest } from "../src/m5/contracts/model-choices-v1.ts";
+import { DEVICE_REPORT_CHANNEL } from "../src/m5/contracts/device-report-v1.ts";
+import { readDeviceReport } from "./device-report.ts";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { LOGIN_CHANNEL, validateLoginRequest, validateLoginStatus } from "../src/m5/contracts/provider-login-v1.ts";
 import { APPROVAL_CHANNEL, validateApprovalRequest, validateApprovalResult } from "../src/m5/contracts/approval-v1.ts";
@@ -311,6 +313,11 @@ function prepareQuit(): Promise<PrepareQuitResultV1> {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle(DEVICE_REPORT_CHANNEL, async (event, ...args: unknown[]) => {
+    assertCurrentMainFrame(event);
+    if (args.length !== 0) throw new Error("device report takes no input");
+    return readDeviceReport(app.getPath("userData"));
+  });
   ipcMain.handle(PROJECT_CATALOG_CHANNEL, async (event, input: unknown) => {
     assertCurrentMainFrame(event);
     if (!sidecar) throw new Error("sidecar was not started");

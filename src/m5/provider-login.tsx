@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import { loginErrorMessage } from "./provider-login-message.ts";
 import { LOGIN_PROVIDERS, readProviderSelection, saveProviderSelection } from "./provider-selection.ts";
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
+import { validateDeviceReport, type DeviceReport } from "./contracts/device-report-v1.ts";
 
 export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
   const { t } = useI18n();
@@ -18,6 +19,7 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     setSelectionExpanded(false);
   };
   return <>
+    <DeviceCheck compact={compact}/>
     <details className="m5-provider-selection" open={selectionExpanded} onToggle={event => setSelectionExpanded(event.currentTarget.open)}>
       <summary><strong>{t("m5.setup.agents.title")}</strong><span>{selected.length ? selected.map(p => p === "codex" ? "Codex" : "Claude Code").join(" · ") : t("m5.setup.agents.choose")}</span></summary>
       <p>{t("m5.setup.agents.help")}</p>
@@ -39,6 +41,44 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
     {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={provider} disabled={disabled} provider={provider}/>)}
   </>;
+}
+function DeviceCheck({ compact }: { compact: boolean }) {
+  const { lang, t } = useI18n();
+  const [report, setReport] = useState<DeviceReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const mounted = useRef(false);
+  const inFlight = useRef(false);
+  const inspect = async () => {
+    if (!window.m5Device || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true); setFailed(false);
+    try {
+      const value = validateDeviceReport(await window.m5Device.inspect());
+      if (mounted.current) setReport(value);
+    } catch { if (mounted.current) { setReport(null); setFailed(true); } }
+    finally { inFlight.current = false; if (mounted.current) setBusy(false); }
+  };
+  useEffect(() => {
+    mounted.current = true;
+    void inspect();
+    return () => { mounted.current = false; };
+  }, []);
+  if (!window.m5Device) return null;
+  const capacity = (bytes: number) => `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(bytes / 1024 ** 3)} GiB`;
+  return <details className="m5-device-check" open={compact ? undefined : true}>
+    <summary>{t("m5.device.title")}</summary>
+    {busy && <p role="status">{t("m5.device.checking")}</p>}
+    {failed && <p role="alert">{t("m5.device.failed")}</p>}
+    {report && <dl>
+      <div><dt>{t("m5.device.os")}</dt><dd>{report.platform === "darwin" ? "macOS" : report.platform === "win32" ? "Windows" : t("m5.device.other")} · {report.osVersion}</dd></div>
+      <div><dt>{t("m5.device.cpu")}</dt><dd>{report.arch === "other" ? t("m5.device.other") : report.arch}</dd></div>
+      <div><dt>{t("m5.device.memory")}</dt><dd>{capacity(report.memoryBytes)}</dd></div>
+      <div><dt>{t("m5.device.space")}</dt><dd>{report.availableBytes === null ? t("m5.device.unknown") : capacity(report.availableBytes)}</dd></div>
+    </dl>}
+    <p>{t("m5.device.scope")}</p>
+    <button type="button" disabled={busy} onClick={() => void inspect()}>{t("m5.device.refresh")}</button>
+  </details>;
 }
 function ProviderConnection({ disabled, provider }: {disabled: boolean; provider: LoginProvider}) {
   const { lang, t } = useI18n();

@@ -124,6 +124,11 @@ h1 { margin: 0; font-size: 22px; }
 .m5-toolbar-project .m5-subtitle { display: none; }
 .m5-toolbar-project .m5-toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
 .m5-project-catalog { position: relative; }
+.m5-device-check { border: 1px solid #39414b; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+.m5-device-check summary { cursor: pointer; font-size: 13px; font-weight: 650; }
+.m5-device-check dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.m5-device-check dt, .m5-device-check p { color: #b8c2ce; font-size: 12px; }
+.m5-device-check dd { margin: 4px 0 0; font-size: 13px; }
 .m5-project-catalog-list { position: absolute; z-index: 20; right: 0; top: 44px; width: min(420px, 85vw); max-height: 65vh; overflow: auto; padding: 16px; border: 1px solid #39414b; border-radius: 12px; background: #20252c; color: #eef1f5; box-shadow: 0 12px 32px #0006; }
 .m5-project-catalog-list ul { list-style: none; margin: 12px 0; padding: 0; }
 .m5-project-catalog-list li { margin: 6px 0; }
