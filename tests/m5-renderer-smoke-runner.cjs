@@ -503,6 +503,15 @@ app.whenReady().then(async () => {
     const goalInput = document.querySelector('.m5-new-chat-form input');
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(goalInput, '새 목표 초안');
     goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.m5-new-chat-button').click();
+    await ${waitFor("document.querySelector('.m5-new-chat-dialog').open", "new chat draft dialog")};
+    [...document.querySelectorAll('.m5-new-chat-dialog button')].find(button => button.textContent === '이 프로젝트의 역할·모델 바꾸기').click();
+    await ${waitFor("document.querySelector('.m5-settings-dialog')?.open && !document.querySelector('.m5-new-chat-dialog').open", "draft to project settings without overlapping modals")};
+    [...document.querySelectorAll('.m5-settings button')].find(button => button.textContent === '작성 중인 새 채팅으로 돌아가기').click();
+    await ${waitFor("document.querySelector('.m5-new-chat-dialog').open && !document.querySelector('.m5-settings-dialog')", "return to preserved draft")};
+    if (goalInput.value !== '새 목표 초안' || document.activeElement !== goalInput) throw new Error('role settings lost goal draft or focus');
+    document.querySelector('.m5-new-chat-dialog header button').click();
+    await ${waitFor("!document.querySelector('.m5-new-chat-dialog').open", "close preserved draft")};
     const selectedChat = document.querySelector('.m5-chat-chip.selected');
     const languageSelect = document.querySelector('.m5-toolbar-actions select');
     languageSelect.value = 'en';

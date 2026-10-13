@@ -127,6 +127,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [applicationBaseline, setApplicationBaseline] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [returnToNewChat, setReturnToNewChat] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const [leavingProject, setLeavingProject] = useState(false);
   const [leaveError, setLeaveError] = useState(false);
@@ -139,7 +140,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
-  useEffect(() => { setNewChatOpen(false); setGoal(""); setApplicationBaseline(false); }, [snapshot.project?.id]);
+  useEffect(() => { setNewChatOpen(false); setReturnToNewChat(false); setGoal(""); setApplicationBaseline(false); }, [snapshot.project?.id]);
   useEffect(() => {
     const dialog = newChatDialogRef.current;
     if (newChatOpen) { dialog?.showModal(); goalInputRef.current?.focus(); }
@@ -191,6 +192,20 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const activeTab = snapshot.activePath
     ? snapshot.tabs.find((tab) => tab.path === snapshot.activePath) ?? null
     : null;
+  const openRoleSettings = (fromNewChat = false) => {
+    if (!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching) return;
+    setReturnToNewChat(fromNewChat);
+    setNewChatOpen(false);
+    controller.setActionBlocked(true);
+    setSettingsOpen(true);
+  };
+  const closeRoleSettings = () => {
+    setSettingsOpen(false);
+    if (returnToNewChat) {
+      setReturnToNewChat(false);
+      setNewChatOpen(true);
+    } else requestAnimationFrame(() => settingsButtonRef.current?.focus());
+  };
 
   return (
     <main className={`m5-workbench${window.m5Projects ? " m5-with-project-rail" : ""}`} lang={lang} aria-label={t("m5.shell.label")}>
@@ -213,7 +228,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {t("m5.shell.close")}
             </button>
           )}
-          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => { if (!projectDataReady) return; controller.setActionBlocked(true); setSettingsOpen(true); }} disabled={!admissionReady || settingsOpen || !projectDataReady}>{t("m5.shell.roles")}</button>}
+          {snapshot.project && <button ref={settingsButtonRef} className="m5-secondary" type="button" onClick={() => openRoleSettings()} disabled={!admissionReady || settingsOpen || !projectDataReady || chat.preparing || chat.switching}>{t("m5.shell.roles")}</button>}
         </div>
       </header>
 
@@ -252,10 +267,12 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         })}</div>
         {chat.nextChatCursor !== null && <button className="m5-secondary" type="button" disabled={!admissionReady || chat.loadingMoreChats} onClick={() => void chatController.loadMoreChats()}>{chat.loadingMoreChats ? t("m5.navigation.loadingChats") : t("m5.navigation.moreChats")}</button>}
         <button ref={newChatButtonRef} type="button" className="m5-new-chat-button" disabled={!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching} onClick={() => setNewChatOpen(true)}>{t("m5.navigation.newChat")}</button>
-        <dialog ref={newChatDialogRef} className="m5-new-chat-dialog" aria-labelledby="m5-new-chat-heading" onCancel={event => { event.preventDefault(); if (!chat.preparing && !chat.switching) setNewChatOpen(false); }} onClose={() => newChatButtonRef.current?.focus()}>
+        <dialog ref={newChatDialogRef} className="m5-new-chat-dialog" aria-labelledby="m5-new-chat-heading" onCancel={event => { event.preventDefault(); if (!chat.preparing && !chat.switching) setNewChatOpen(false); }} onClose={() => { if (!settingsOpen) newChatButtonRef.current?.focus(); }}>
         <header><div><p className="m5-eyebrow">{snapshot.project.name}</p><h2 id="m5-new-chat-heading">{t("m5.navigation.newChat")}</h2></div><button type="button" className="m5-secondary" disabled={chat.preparing || chat.switching} onClick={() => setNewChatOpen(false)}>{t("m5.editor.cancel")}</button></header>
         <p>{t("m5.navigation.newChatHelp")}</p>
         {chat.settings && <dl className="m5-new-chat-team">{chat.settings.roles.map(role => <div key={role.roleId}><dt>{t(`m5.roles.${role.roleId}`)}</dt><dd>{role.runtime === "codex" ? "Codex" : "Claude Code"}<small>{role.modelSelector}{role.reasoningEffort ? ` · ${role.reasoningEffort}` : ""}</small></dd></div>)}</dl>}
+        <button type="button" className="m5-secondary" disabled={!admissionReady || !projectDataReady || chat.preparing || chat.switching} onClick={() => openRoleSettings(true)}>{t("m5.firstChat.editTeam")}</button>
+        <p>{t("m5.firstChat.editTeamHelp")}</p>
         {chat.error && <p role="alert" className="m5-error">{t(chat.error.messageKey)}</p>}
         {chat.notice && <p role="status">{formatChatNotice(chat, lang)}</p>}
         <form className="m5-new-chat-form" onSubmit={(event) => { event.preventDefault(); if (admissionReady && projectDataReady && goal.trim() && !chat.preparing && !chat.switching && !chat.preparationApiUnavailable && !(snapshot.workspace && !controller.canLeaveProject())) void createChat(); }}>
@@ -271,7 +288,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
         {!admissionReady && <StorageAdmissionNotice admission={admission} />}
         {chat.notice && <p className="m5-notice" role="status">{formatChatNotice(chat, lang)}</p>}
         {chat.error && <section className="m5-error" role="alert"><strong>{t(chat.error.messageKey)}</strong><details><summary>{t("m5.feedback.details")}</summary><pre>{chat.error.detail}</pre></details></section>}
-      </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={() => { setSettingsOpen(false); requestAnimationFrame(() => settingsButtonRef.current?.focus()); }} />}
+      </>} onSave={roles => chatController.updateSettings(roles)} onReload={() => chatController.reloadSettings()} onClose={closeRoleSettings} returnToDraft={returnToNewChat} />}
 
       {!snapshot.project && <section className="m5-guided-start" aria-label={t("m5.start.title")}>
         <div className="m5-start-heading"><p className="m5-eyebrow">Hello, Agent</p><h2>{t("m5.start.title")}</h2><p>{t("m5.start.help")}</p></div>
@@ -412,7 +429,7 @@ function VirtualFileList({ entries, activePath, disabled, onOpen }: { entries: r
   </div>;
 }
 
-function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void }) {
+function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onReload, onClose, returnToDraft = false }: { settings: NonNullable<ReturnType<ChatUiController["snapshot"]>["settings"]>; activeChat: ReturnType<ChatUiController["snapshot"]>["activeChat"]; disabled: boolean; feedback: ReactNode; onSave: (roles: readonly RoleProfileV1[]) => Promise<void>; onReload: () => Promise<void>; onClose: () => void; returnToDraft?: boolean }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [roles, setRoles] = useState<readonly RoleProfileV1[]>(settings.roles);
@@ -451,7 +468,7 @@ function RoleSettings({ settings, activeChat, disabled, feedback, onSave, onRelo
   const run = async (action: () => Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); } };
   const requestClose = () => { if (!busy && discardAction === null) { if (dirty) setDiscardAction("close"); else onClose(); } };
   return <dialog ref={dialogRef} className="m5-settings m5-settings-dialog" aria-label={t("m5.roles.label")} onCancel={event => { event.preventDefault(); requestClose(); }}>
-    <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t("m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t("m5.roles.back")}</button></header>
+    <header><div><p className="m5-eyebrow">{t("m5.roles.version", { revision: settings.revision })}</p><h2>{t("m5.shell.roles")}</h2></div><button className="m5-secondary" type="button" disabled={busy || discardAction !== null} onClick={requestClose}>{t(returnToDraft ? "m5.roles.backToDraft" : "m5.roles.back")}</button></header>
     {feedback}
     {dirty && <p role="status">{t("m5.roles.dirty")}</p>}
     {discardAction && <section role="alertdialog" aria-label={t("m5.roles.discardLabel")}>
