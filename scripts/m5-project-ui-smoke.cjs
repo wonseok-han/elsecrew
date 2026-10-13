@@ -301,7 +301,10 @@ app.on('browser-window-created', (_event, window) => {
       await showPanel('팀 대화');
       await run(`Array.from(document.querySelectorAll('.m5-chat-review button')).find(b=>b.textContent==='작업 사본 diff 열기').click()`);
       await wait(`Array.from(document.querySelectorAll('.m5-dock-group-tab')).some(b=>b.textContent.includes('변경')&&b.getAttribute('aria-selected')==='true') || Boolean(document.querySelector('.m5-changes')?.getBoundingClientRect().height)`);
-      await run(`document.querySelector('.m5-change-row').click()`);
+      // Review opens a fresh summary; the previous rows are intentionally
+      // cleared until that request resolves. Panel visibility is not readiness.
+      await wait(`Array.from(document.querySelectorAll('.m5-change-row')).some(b=>b.title==='hello.txt'&&!b.disabled)`);
+      await run(`Array.from(document.querySelectorAll('.m5-change-row')).find(b=>b.title==='hello.txt'&&!b.disabled).click()`);
       await wait(`document.querySelector('.m5-diff-details')?.textContent.includes('edited in snapshot')`);
       await new Promise(r=>setTimeout(r,700));
       if(await run(`document.body.innerText.includes('열어 둔 파일이 밖에서 바뀌었어요')`)) throw new Error('self-save reported as external change');

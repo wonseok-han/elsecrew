@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (진행 중 native 시험의 diff 준비 대기 수정)
+
+- 직전 턴은 live session45168을 확인한 verified wait/첫 실패 관측이다. 같은 handle을 이어 poll했고 준비0에 이어 측정1도FAIL/정상 종료, 측정2/PID74587이 시작됐다. 결과 폴더는 계속 hello-agent-native-metrics-2kfyV1이며 중복 실행하지 않았다.
+- trial0 renderer 로그의 Cannot read properties of null (reading click)과 스크립트를 대조했다. 작업 사본 diff 열기는 새 summary를 요청하고 이전 목록을 비우는데, 시험은 패널 표시만 기다린 뒤 첫 행을 즉시 클릭했다. 대상 hello.txt 행이 실제 존재하며 enabled가 될 때까지 기다리도록 시험만 수정했다. 제품 코드/기준/시간 제한 변경은 없다.
+- 구문/diff PASS. 측정0·1은 수정 전 runner,2부터 수정 후 runner이므로 이 수집 전체를 동일 조건 p95 또는 합격 증거로 쓰지 않는다. 기존 FAIL은 보존한다. 측정1에서 treeRoot1509ms 초과/file465ms를 별도 관측했다. 새 runner 전체 흐름 결과는 아직 미확정이다.
+- 다음: 반드시 live session45168을 이어 poll하고 측정2 이후 결과를 확인한다. 코드/패키지 변경·새 heavy run은 현재 수집 종료 전 하지 않는다. 전체 목표 미완료, 기존 미커밋 정리 후보/9월 archive 보존·실제 모델/사용자 프로젝트/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (대형 프로젝트 반복 측정 진행 중)
+
+- 직전d23813f는 UI 통합 관측 진척이다. 현재 main/renderer/debug sidecar로 native 대형 트리10000파일/1000디렉터리와5MiB/100000줄 파일의 기존 준비1회＋측정10회 수집을 시작했다. 명령 node scripts/m5-native-project-metrics.mjs, live exec session45168, 결과 폴더 hello-agent-native-metrics-2kfyV1. 같은 handle을 여러 번 poll했으며 아직 terminal 결과가 없다. 중복 실행/강제 종료하지 않는다.
+- 준비 실행0/PID69015/ekNP5k에서 snapshot31471ms, treeRoot1223.5ms(1000ms 초과), expand108.3ms/DOM362, fileEditable456ms를 관측했다. START_AND_SETTINGS 이후 흐름이 계속 진행 중이며 아직 전체 성공/정상 종료를 주장하지 않는다. 실패 표본을 버리지 않는다.
+- 다음 턴은 반드시 session45168을 먼저 poll하고 현재 trial 로그/measurement.json을 회수한다. 진행 중 앱이 있으므로 새 무거운 시험을 시작하지 않는다. 최종 p95/G6 완료 아님. 코드 변경/실제 모델/사용자 프로젝트/원본 적용 없음, 승인 대기 및 기존 미커밋 파일 보존/main/push 없음.
+- 마지막 poll에서 준비0은FAIL/exit1로 종료했고 측정1/PID71528이 시작됐다. 수집기는 계속 live이며 최종 결과는 미확정이다.
+
 ### 2026-10-13 · by GPT-6 Astra (파일 목록·편집 왕복 native 통합 확인)
 
 - 직전f6f210f까지 구현한 목록 필터/페이지와181747d 편집 왕복을 기존 native LARGE_DIFF 흐름에 묶었다. 새 change-navigation probe는 bridge 응답을 대체하지 않으며500개 파일을100개씩 모두 방문, 대문자 필터/결과 없음/Escape 초기화/선택 상세 보존/Monaco 진입/새 응답 뒤 diff 활성화를 확인한다.
