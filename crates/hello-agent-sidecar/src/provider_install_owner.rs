@@ -41,6 +41,14 @@ impl InstallScope {
     /// Trusted storage only: renderer inputs cannot choose either directory.
     /// This creates a workspace, not a process reservation or consent token.
     pub(crate) fn from_storage(storage: &Storage) -> Result<Self, SidecarError> {
+        Self::bind(storage, true)
+    }
+
+    pub(crate) fn open_existing(storage: &Storage) -> Result<Self, SidecarError> {
+        Self::bind(storage, false)
+    }
+
+    fn bind(storage: &Storage, create: bool) -> Result<Self, SidecarError> {
         let database = storage.path();
         if database.file_name()
             != Some(std::ffi::OsStr::new(
@@ -57,16 +65,18 @@ impl InstallScope {
         }
         let mut builder = DirBuilder::new();
         builder.mode(0o700);
-        match app.create_dir_with(STAGING, &builder) {
-            Ok(()) => {
-                app.try_clone()
-                    .map_err(|_| failure())?
-                    .into_std_file()
-                    .sync_all()
-                    .map_err(|_| failure())?;
+        if create {
+            match app.create_dir_with(STAGING, &builder) {
+                Ok(()) => {
+                    app.try_clone()
+                        .map_err(|_| failure())?
+                        .into_std_file()
+                        .sync_all()
+                        .map_err(|_| failure())?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(_) => return Err(failure()),
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(failure()),
         }
         let staging = open_absolute_directory(&app_path.join(STAGING))?;
         let scope = Self {

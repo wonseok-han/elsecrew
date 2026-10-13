@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 terminal 기록 명시 복구 연결)
+
+- 직전13b231d는 상호 배제 구현 진척이다. 같은 checkout/dirty를 확인하고 기존 staging을 생성 없이 여는 경로, canonical journal 재생·독점 잠금 재개방, 정확한 operation UUID에 묶인 terminal 기록 마무리를 연결했다. 기존 inspect도 같은 재생 검증을 사용한다. installed/canceled/failed와 두 process fence 부재가 모두 확인돼야 active journal을 보관 처리한다.
+- 보관본 생성 후 active 이름 제거 전에 중단된 경우에는 기존 보관본이 소유자/권한/단일 링크/크기/내용까지 정확히 같을 때만 이어서 마무리한다. 부분·다른 기록은 덮어쓰지 않는다. 원본 journal과 같은 내용의 내구성 있는 보관본을 유지하며 설치 파일 rollback/프로세스 강제 종료/계정 변경은 없다.
+- typed IPC에 inspectRecovery와 operationId 필수 recover를 연결하고 ko/en 설치 화면에 명시 조회/정리 버튼·한계 안내를 추가했다. 제품 enabled=false는 계속 유지하며 조회/복구를 통한 활성화 우회는 없다. 성공 후 idle로 돌아가며 과거 installed 기록을 새 설치·로그인 확인으로 표시하지 않는다. 아직 nonterminal/종료 fence가 남은 설치의 안전 복구는 미완료다.
+- Karpathy 지침으로 기존 journal/owner 계약을 재사용했다. 같은/다른 보관본·잘못된 operation·live writer·nonterminal/fence 보존 회귀2개와 요청 계약 회귀를 추가했다(미실행). 수정 Rust 파일 rustfmt·diff PASS, 컴파일/테스트/실제 UI·독립 검토는 설치 묶음에 남긴다. 실제 설치/로그인/모델 호출·캐시 생성 없음, 기존 dirty 보존/main/push 없음. 다음은 종료 증거가 남은 interrupted 설치 복구 및 설치 통합 검증, 전체 제품 나머지 범위 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (설치·공급자 실행 상호 배제 연결)
 
 - 직전5aafed9는 설치 UI 구현 진척이다. 같은 checkout/기존 dirty를 확인하고 단일 dispatcher에서 설치 준비/시작과 로그인·진단·discovery·native run 예약이 겹치지 않도록 입장을 연결했다. 두 login worker, runtime 소유 작업과 pending start/discovery/cancel, 두 공급자 pending 파일을 설치 전 확인한다. 종료된 worker는 회수하되 panic/복구 필요·빈 기록·깨진 링크·조회 실패는 차단으로 보존한다.

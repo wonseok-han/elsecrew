@@ -96,6 +96,19 @@ impl<'a> InstallJournal<'a> {
         }
     }
 
+    /// Explicit recovery entry point. Reopening never invents completion or
+    /// releases process fences: only an already-terminal journal can archive.
+    pub(crate) fn recover_terminal(
+        scope: &'a InstallScope,
+        expected: uuid::Uuid,
+    ) -> Result<(), SidecarError> {
+        let journal = reopen(scope, true)?;
+        if journal.operation != expected {
+            return Err(failure());
+        }
+        journal.archive_terminal()
+    }
+
     /// Events are trusted worker observations, never renderer input. The process
     /// owner remains responsible for concrete closure/verification evidence.
     pub(crate) fn record(&mut self, event: &str) -> Result<(), SidecarError> {
@@ -147,7 +160,6 @@ impl<'a> InstallJournal<'a> {
         self.verify()?;
         let directory = self.scope.login_lease_directory()?;
         require_no_process_fences(&directory)?;
-        archive_budget(&directory)?;
         let mut read_options = OpenOptions::new();
         read_options
             .read(true)
@@ -174,17 +186,41 @@ impl<'a> InstallJournal<'a> {
         }
         self.verify()?;
         let name = format!("{ARCHIVE_PREFIX}{}.jsonl", self.operation);
-        let mut options = OpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .follow(FollowSymlinks::No);
-        let mut archive = directory
-            .open_with(&name, &options)
-            .map_err(|_| failure())?;
-        lock(&archive, libc::LOCK_EX)?;
-        archive.write_all(&self.contents).map_err(|_| failure())?;
+        // A crash may leave the fully written archive and the active journal.
+        // Accept only an exact existing copy; never overwrite partial evidence.
+        let archive = match directory.open_with(&name, &read_options) {
+            Ok(mut existing) => {
+                lock(&existing, libc::LOCK_EX)?;
+                if !valid_metadata(&existing.metadata().map_err(|_| failure())?) {
+                    return Err(failure());
+                }
+                let mut bytes = Vec::new();
+                (&mut existing)
+                    .take(MAX_BYTES + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| failure())?;
+                if bytes != self.contents {
+                    return Err(failure());
+                }
+                existing
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                archive_budget(&directory)?;
+                let mut options = OpenOptions::new();
+                options
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .follow(FollowSymlinks::No);
+                let mut created = directory
+                    .open_with(&name, &options)
+                    .map_err(|_| failure())?;
+                lock(&created, libc::LOCK_EX)?;
+                created.write_all(&self.contents).map_err(|_| failure())?;
+                created
+            }
+            Err(_) => return Err(failure()),
+        };
         archive.sync_all().map_err(|_| failure())?;
         let held = archive.metadata().map_err(|_| failure())?;
         let named = directory.symlink_metadata(&name).map_err(|_| failure())?;
@@ -254,6 +290,11 @@ fn archive_budget(directory: &cap_std::fs::Dir) -> Result<(), SidecarError> {
 pub(crate) fn inspect(
     scope: &InstallScope,
 ) -> Result<(uuid::Uuid, String, InstallPhase), SidecarError> {
+    let journal = reopen(scope, false)?;
+    Ok((journal.operation, journal.provider.clone(), journal.phase()))
+}
+
+fn reopen(scope: &InstallScope, exclusive: bool) -> Result<InstallJournal<'_>, SidecarError> {
     let directory = scope.login_lease_directory()?;
     let mut options = OpenOptions::new();
     options
@@ -261,7 +302,14 @@ pub(crate) fn inspect(
         .follow(FollowSymlinks::No)
         .custom_flags(libc::O_NONBLOCK);
     let mut file = directory.open_with(NAME, &options).map_err(|_| failure())?;
-    lock(&file, libc::LOCK_SH)?;
+    lock(
+        &file,
+        if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        },
+    )?;
     let meta = file.metadata().map_err(|_| failure())?;
     if !valid_metadata(&meta) {
         return Err(failure());
@@ -290,6 +338,7 @@ pub(crate) fn inspect(
         return Err(failure());
     }
     let mut state = InstallLifecycle::default();
+    let mut sequence = 0;
     for (index, line) in lines.enumerate() {
         let event = parse_record(line)?;
         if index as u64 >= MAX_EVENTS
@@ -299,6 +348,7 @@ pub(crate) fn inspect(
             return Err(failure());
         }
         apply(&mut state, event["event"].as_str().ok_or_else(failure)?)?;
+        sequence += 1;
     }
     let current = directory.symlink_metadata(NAME).map_err(|_| failure())?;
     if !valid_metadata(&current)
@@ -309,7 +359,19 @@ pub(crate) fn inspect(
         return Err(failure());
     }
     scope.revalidate()?;
-    Ok((operation, provider.to_owned(), state.phase()))
+    let journal = InstallJournal {
+        scope,
+        operation,
+        provider: provider.to_owned(),
+        file,
+        state,
+        sequence,
+        length: bytes.len() as u64,
+        failed: false,
+        contents: bytes,
+    };
+    journal.verify()?;
+    Ok(journal)
 }
 
 fn valid_metadata(meta: &cap_std::fs::Metadata) -> bool {
@@ -359,6 +421,59 @@ fn apply(state: &mut InstallLifecycle, event: &str) -> Result<(), SidecarError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_terminal_recovery_accepts_only_exact_operation_and_matching_archive() {
+        use std::os::unix::fs::PermissionsExt;
+        for archive_exists in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let scope = InstallScope::from_storage(&storage).unwrap();
+            let operation = uuid::Uuid::new_v4();
+            let mut journal = InstallJournal::begin(&scope, operation, "codex").unwrap();
+            journal.record("consented").unwrap();
+            journal.record("cancelRequested").unwrap();
+            journal.record("cleanupConfirmed").unwrap();
+            assert!(InstallJournal::recover_terminal(&scope, operation).is_err());
+            drop(journal);
+            let bytes = std::fs::read(root.join(NAME)).unwrap();
+            let archive = root.join(format!("{ARCHIVE_PREFIX}{operation}.jsonl"));
+            if archive_exists {
+                std::fs::write(&archive, &bytes).unwrap();
+                std::fs::set_permissions(&archive, std::fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            assert!(InstallJournal::recover_terminal(&scope, uuid::Uuid::new_v4()).is_err());
+            assert_eq!(std::fs::read(root.join(NAME)).unwrap(), bytes);
+            InstallJournal::recover_terminal(&scope, operation).unwrap();
+            assert!(!has_active(&storage).unwrap());
+            assert_eq!(std::fs::read(&archive).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn explicit_recovery_preserves_interrupted_or_fenced_transactions() {
+        for terminal in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+            let scope = InstallScope::from_storage(&storage).unwrap();
+            let operation = uuid::Uuid::new_v4();
+            let mut journal = InstallJournal::begin(&scope, operation, "claude").unwrap();
+            journal.record("consented").unwrap();
+            if terminal {
+                journal.record("cancelRequested").unwrap();
+                journal.record("cleanupConfirmed").unwrap();
+                let owner = scope.reserve(operation).unwrap();
+                drop(owner);
+            }
+            drop(journal);
+            let bytes = std::fs::read(root.join(NAME)).unwrap();
+            assert!(InstallJournal::recover_terminal(&scope, operation).is_err());
+            assert_eq!(std::fs::read(root.join(NAME)).unwrap(), bytes);
+            assert!(has_active(&storage).unwrap());
+        }
+    }
 
     #[test]
     fn archive_preserves_active_evidence_when_a_fence_or_destination_exists() {

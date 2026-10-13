@@ -8,6 +8,10 @@ const plan = { planId: id, provider: "codex", action: "installOrUpdate", expires
   replacesExistingCommands: true, shellSettingsWritable: false, startsLogin: false };
 const consent = { ...inactive, state: "awaitingConsent", provider: "codex", plan };
 test("installation boundary accepts exact requests and consent state", () => {
+  assert.deepEqual(validateInstallRequest({ action: "inspectRecovery" }), { action: "inspectRecovery" });
+  assert.deepEqual(validateInstallRequest({ action: "recover", operationId: id }), { action: "recover", operationId: id });
+  assert.throws(() => validateInstallRequest({ action: "recover" }));
+  assert.throws(() => validateInstallRequest({ action: "recover", operationId: id, force: true }));
   assert.deepEqual(validateInstallRequest({ action: "start", provider: "codex", planId: id }), { action: "start", provider: "codex", planId: id });
   assert.deepEqual(validateInstallStatus(consent), consent);
   assert.deepEqual(validateInstallStatus(inactive), inactive);

@@ -78,6 +78,12 @@ export function ProviderInstall({ disabled, providers, onBlockChange, onCheck }:
       onClick={() => void request({ action: "cancel", operationId: status.operationId! })}>{t(status.cancelRequested ? "m5.install.canceling" : "m5.install.cancel")}</button>}
     {status?.state === "installed" && status.provider && !uncertain && <button type="button" disabled={disabled || busy}
       onClick={() => onCheck(status.provider!)}>{t("m5.install.checkLogin")}</button>}
+    {status?.state === "recoveryRequired" && !uncertain && <div className="m5-install-actions">
+      <button type="button" disabled={disabled || busy} onClick={() => void request({ action: "inspectRecovery" })}>{t("m5.install.inspectRecovery")}</button>
+      {status.operationId && <button type="button" disabled={disabled || busy}
+        onClick={() => void request({ action: "recover", operationId: status.operationId! })}>{t("m5.install.recover")}</button>}
+      <p>{t("m5.install.recoveryScope")}</p>
+    </div>}
     {status?.error && <details><summary>{t("m5.install.details")}</summary><code>{status.error}</code></details>}
   </section>;
 }

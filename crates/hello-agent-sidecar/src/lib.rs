@@ -1848,7 +1848,7 @@ impl Sidecar {
     #[cfg(target_os = "macos")]
     fn installation_conflicts(&mut self, request: &RequestV1) -> bool {
         if request.method == "provider.install"
-            && matches!(request.params["action"].as_str(), Some("prepare" | "start"))
+            && matches!(request.params["action"].as_str(), Some("prepare" | "start" | "recover"))
         {
             return self.login.blocks_installation(&self.storage)
                 || self.claude_login.blocks_installation(&self.storage)

@@ -1,9 +1,9 @@
 export const INSTALL_CHANNEL = "m5:install:v1";
 export type InstallProvider = "codex" | "claude";
-export type InstallRequest = { action: "status" | "dismiss" }
+export type InstallRequest = { action: "status" | "dismiss" | "inspectRecovery" }
   | { action: "prepare"; provider: InstallProvider }
   | { action: "start"; provider: InstallProvider; planId: string }
-  | { action: "cancel"; operationId: string };
+  | { action: "cancel" | "recover"; operationId: string };
 export type InstallPlan = {
   planId: string; provider: InstallProvider; action: "installOrUpdate"; expiresInSeconds: 180;
   writeDirectories: string[]; replacesExistingCommands: true; shellSettingsWritable: false; startsLogin: false;
@@ -27,7 +27,7 @@ function id(value: unknown): value is string {
 function provider(value: unknown): value is InstallProvider { return value === "codex" || value === "claude"; }
 export function validateInstallRequest(input: unknown): InstallRequest {
   const v = object(input);
-  if (v.action === "status" || v.action === "dismiss") {
+  if (v.action === "status" || v.action === "dismiss" || v.action === "inspectRecovery") {
     keys(v, ["action"]); return { action: v.action };
   }
   if (v.action === "prepare" && provider(v.provider)) {
@@ -36,7 +36,7 @@ export function validateInstallRequest(input: unknown): InstallRequest {
   if (v.action === "start" && provider(v.provider) && id(v.planId)) {
     keys(v, ["action", "provider", "planId"]); return { action: v.action, provider: v.provider, planId: v.planId };
   }
-  if (v.action === "cancel" && id(v.operationId)) {
+  if ((v.action === "cancel" || v.action === "recover") && id(v.operationId)) {
     keys(v, ["action", "operationId"]); return { action: v.action, operationId: v.operationId };
   }
   throw new Error("invalid installation request");

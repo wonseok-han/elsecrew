@@ -46,10 +46,10 @@ impl InstallManager {
             .and_then(Value::as_str)
             .ok_or_else(invalid)?;
         let fields: &[&str] = match action {
-            "status" | "dismiss" => &["action"],
+            "status" | "dismiss" | "inspectRecovery" => &["action"],
             "prepare" => &["action", "provider"],
             "start" => &["action", "provider", "planId"],
-            "cancel" => &["action", "operationId"],
+            "cancel" | "recover" => &["action", "operationId"],
             _ => return Err(invalid()),
         };
         if params.as_object().is_none_or(|object| {
@@ -66,7 +66,9 @@ impl InstallManager {
         if action == "start" && !params["planId"].as_str().is_some_and(valid_id) {
             return Err(invalid());
         }
-        if action == "cancel" && !params["operationId"].as_str().is_some_and(valid_id) {
+        if matches!(action, "cancel" | "recover")
+            && !params["operationId"].as_str().is_some_and(valid_id)
+        {
             return Err(invalid());
         }
         if !enabled {
@@ -79,6 +81,30 @@ impl InstallManager {
         }
         match action {
             "status" => self.detect_pending(storage)?,
+            "inspectRecovery" | "recover" => {
+                if self.worker.is_some() {
+                    return Err(invalid());
+                }
+                self.consent.dismiss();
+                self.accepted = None;
+                let scope = InstallScope::open_existing(storage)?;
+                let (operation, provider, _) = journal::inspect(&scope)?;
+                self.set(view(
+                    "recoveryRequired",
+                    Some(&operation.to_string()),
+                    Some(&provider),
+                    None,
+                    Some("providerInstallRecoveryRequired"),
+                ));
+                if action == "recover" {
+                    let expected =
+                        uuid::Uuid::parse_str(params["operationId"].as_str().ok_or_else(invalid)?)
+                            .map_err(|_| invalid())?;
+                    journal::InstallJournal::recover_terminal(&scope, expected)?;
+                    // Historic completion is not a fresh installation/login check.
+                    self.set(view("idle", None, None, None, None));
+                }
+            }
             "prepare" => {
                 self.require_idle(storage)?;
                 let provider = provider(params)?;
