@@ -163,6 +163,10 @@ app.whenReady().then(async () => {
     const rail = document.querySelector('.m5-project-rail');
     const railToggle = rail.querySelector('.m5-project-rail-header button');
     if (rail.getBoundingClientRect().width > 100 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('project rail not compact');
+    const compactHeading = rail.querySelector('h2');
+    const compactRefresh = rail.querySelector('.m5-project-pagination button');
+    if (compactHeading.textContent !== '프로젝트' || compactHeading.scrollWidth > compactHeading.clientWidth) throw new Error('compact project heading overflows');
+    if (compactRefresh.textContent !== '새로고침' || compactRefresh.getAttribute('aria-label') !== '처음부터 다시 확인' || compactRefresh.scrollWidth > compactRefresh.clientWidth) throw new Error('compact refresh loses label or overflows');
     railToggle.click();
     await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 220", "expanded project rail")};
     if (getComputedStyle(document.querySelector('.m5-project-catalog-list li span')).display === 'none') throw new Error('expanded project path hidden');

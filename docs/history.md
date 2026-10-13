@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (좁은 프로젝트 목록 표시 수정)
+
+- 직전 승인 재확인은 구현 진척이 아니었다. 4d59c33 실제 패키지 캡처에서 확인한92px rail에 맞춰 접힌 제목/조회/빈 목록/새로고침을 ko/en 짧은 문구로 변경했다. 펼친 상태의 상세 안내·오류 자동 펼침·복구 경로·페이지 조회는 유지하고 새로고침의 전체 접근성 이름을 보존했다. Karpathy 최소 범위로 제품 동작이나 안전 계약은 변경하지 않았다.
+- tsc/renderer build/diff PASS, Chromium 기존 통합 smoke2 PASS14.09초(/private/tmp/hello-agent-rail-ui.log). 신규 검사는 접힌 제목/버튼의 문구·실제 너비 overflow와 전체 접근성 이름을 확인한다. 합성 bridge 렌더러 증거이며 새 패키지나 실제 계정 검증은 아니다. 기존500kB chunk 경고 유지.
+- 메모리 원인 조사에서 Monaco가 이미 지연 로딩임을 확인했다. 시작439MiB 초과 원인은 아직 미확정이며 프로세스별 분석과 packaged 통합 검증이 다음이다. 사용자9월 archive 보존, 설치/삭제/유료 모델/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (두 기능 활성화 승인 확인)
+
+- 사용자 승인 응답을 현재 m5/coding-agent-ide, HEAD 4d59c33과 대조했다. macOS 설치 및 명시 동의 백업 정리는 기존 944bba1에서 활성화됐으며 중복 활성화 변경은 필요 없다. 이번 응답은 개별 설치 실행이나 백업 삭제 동의로 확대하지 않았다.
+- 현재 코드/커밋 조회 및 diff 검사만 수행했다. 설치·삭제·모델 호출 없음. 기존 9월 archive 변경 보존, main 병합/push 없음. 실제 패키지 관측에서 남은 좁은 프로젝트 영역 표시 문제와 메모리 기준 초과 등은 이전 기록대로 미완료다.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지 시작·종료 관측 연결)
 
 - 이전 턴은8b10ed6 백업 잠금 수정으로 진전했다. 제품 코드를 계측용으로 교체하지 않는 m5:smoke:packaged-ui를 추가했다. 별도 Electron 최소 프로그램에서 --user-data-dir 격리를 직접 확인한 뒤, 고정 out 패키지를 새 임시 profile로 시작하고 그 프로세스 stderr의 loopback CDP에만 연결한다. 실제 renderer bridge/native storage ready·프로젝트 선택 활성화·스크린샷·40개 RSS를 관측하고 기존 prepareQuit→main coordinator→exit0/정확한 instance DB clean marker로 종료 확인한다. 사용자 프로젝트/로그인/모델/강제 종료 없음.
