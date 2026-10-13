@@ -5330,6 +5330,30 @@ fn close_abandons_without_deletion_and_new_open_never_reuses_path() {
 }
 
 #[test]
+#[cfg(unix)]
+fn watcher_entry_metadata_does_not_follow_external_or_dangling_links() {
+    let root = TempDir::new().unwrap();
+    let watched = root.path().join("watched");
+    let outside = root.path().join("outside");
+    fs::create_dir(&watched).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("private.txt"), b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, watched.join("external")).unwrap();
+    std::os::unix::fs::symlink(root.path().join("missing"), watched.join("dangling")).unwrap();
+    fs::write(watched.join("local.txt"), b"local").unwrap();
+    let capability = Dir::open_ambient_dir(&watched, ambient_authority()).unwrap();
+    let before = snapshot_tree(&capability).unwrap();
+    assert_eq!(before.len(), 3);
+    assert_eq!(before["external"].kind, 3);
+    assert_eq!(before["dangling"].kind, 3);
+    assert_eq!(before["local.txt"].length, 5);
+    fs::write(outside.join("private.txt"), b"changed outside").unwrap();
+    assert!(snapshot_tree(&capability).unwrap() == before);
+    fs::write(watched.join("local.txt"), b"local change").unwrap();
+    assert!(snapshot_tree(&capability).unwrap() != before);
+}
+
+#[test]
 fn watcher_coalesces_paths_and_overflow_requires_rescan() {
     let mut fixture = Fixture::open();
     let active = fixture.create();

@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (파일 감시 항목의 capability 재사용)
+
+- 8cdde4f 기준 직접 조사: 트리 getTree뿐 아니라 초기 watch 요청이 같은 dispatcher에서 최대10,000항목을 동기 조회한다. Karpathy 최소 변경으로 snapshot_tree의 재경로 해석 symlink_metadata 대신 iterator가 보유한 DirEntry::metadata를 사용했다. cap-primitives3.4.6 Unix 구현의 held FD/FollowSymlinks::No를 확인하고 외부 디렉터리·dangling 링크 비추적/로컬 변화 회귀를 추가했다. 안전 검사·감시 한도·정렬/페이지·동의 경계 변경 없음.
+- release watcher4 PASS 및 독립 검토자 final_application_safety APPROVE. 패키징은 제한 환경 다운로드 실패 뒤 네트워크 허용 재실행 PASS. rustfmt 전체 check는 기존 하위 모듈 포맷 차이로 실패했고 무관한 재포맷은 하지 않았다. diff check PASS. 최초 새 테스트의 Debug trait 컴파일 오류는 비교 assertion을 수정한 후 해소했다.
+- 새 패키지 mVxnyp 단일 측정은 treeRoot892.5ms/expand66.6ms/file383.4ms/DOM362, 정상 종료confirmed/exit0. 단일 값이므로 기존 반복 p95 실패 해결이나 성능 개선의 증명은 아니다. idle461455360B 초과로 전체 FAIL 유지. /private/tmp/hello-agent-watcher-{metadata,package,ui}.log와 OS 임시 hello-agent-packaged-ui-mVxnyp의 JSON/PNG 보존; PID 부재 확인 후 자체 fixture3디렉터리를 정리했다. 다음은 지연의 queue/backend/render 구간 분리 및 반복 검증, 메모리/나머지 G6다. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치·백업 정리 활성화 승인 재확인)
+
+- 사용자 응답의 macOS 설치·업데이트 및 명시 동의 백업 정리 활성화 승인을 확인했다. 현재 m5/coding-agent-ide HEAD 8cdde4f는 기존 활성화 커밋944bba1을 포함하며 설치 owner와 application_cleanup_enabled의 macOS 활성화 상태를 코드로 대조했다. 중복 활성화 변경이나 실제 설치·백업 삭제는 수행하지 않았다.
+- 개별 작업의 대상/변경 확인·동의, 현재 복구점 종료 후 별도 정리 동의, 자동 삭제 없음·원본/이력 보존 경계는 유지한다. 이번 확인은 추가 실행 시험이나 전체 제품 합격이 아니다. 다음 작업은 기존 트리 지연·메모리 초과 개선과 잔여 통합 검증이다. 기존9월 archive 변경은 보존하며 main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (트리·파일 반복 수집과 지연 실패 확정)
 
 - fb5445e의 같은 수집기로 --tree-file 준비1+본10회 순차 실행을 완료했다. AyEMnF/measurement.json의 trials11 모두 정상 종료confirmed·fixtureCleaned=true다. /private/tmp/hello-agent-packaged-tree-repeated.log와 OS 임시 hello-agent-packaged-performance-AyEMnF에 원시값·로그·각 trial JSON/PNG 포인터를 보존하고 생성 fixture는 매회 제거했다. 사용자 프로젝트/모델 호출 없음.

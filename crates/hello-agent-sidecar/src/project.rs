@@ -5555,7 +5555,10 @@ fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, Proje
             let entry_name = relative.rsplit('/').next().ok_or_else(|| {
                 ProjectFailure::manifest("watched entry is missing its final component")
             })?;
-            let metadata = directory.symlink_metadata(entry_name).map_err(|error| {
+            // DirEntry metadata is relative to the held iterator directory and
+            // does not follow symlinks. Avoid resolving the same child path a
+            // second time for every item in a potentially 10,000-entry scan.
+            let metadata = entry.metadata().map_err(|error| {
                 ProjectFailure::manifest(format!("could not inspect watched entry: {error}"))
             })?;
             let kind = if metadata.file_type().is_symlink() {
