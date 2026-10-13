@@ -17,6 +17,11 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', fs.realpathSync(userData));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 const outcomes = [];
+function checkedLoginResult(status, attemptId) {
+  if (status.attemptId !== attemptId) throw new Error('Login check attempt changed');
+  if (['diagnosing','starting','verifying'].includes(status.state)) return null;
+  return {state:status.state,error:status.error};
+}
 // Observe only fixed sidecar checkpoints, never export its raw stderr (which
 // may contain private provider data). This does not affect run admission.
 const transportCheckpoints = new Set();
@@ -96,9 +101,14 @@ app.on('browser-window-created', (_event, window) => {
           const recovery = await run(`window.m5Login.request({action:'recover',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(s=>({state:s.state,error:s.error}))`);
           console.log(JSON.stringify({stage:'LOGIN_RECOVERY',provider,...recovery}));
         }
-        await run(`window.m5Login.request({action:'check',provider:${JSON.stringify(provider)},attemptId:crypto.randomUUID()}).then(()=>null)`);
-        await wait(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>!['diagnosing','starting','verifying'].includes(s.state))`);
-        connected[provider] = await run(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>({state:s.state,error:s.error}))`);
+        const attemptId = require('node:crypto').randomUUID();
+        let checked = checkedLoginResult(await run(`window.m5Login.request({action:'check',provider:${JSON.stringify(provider)},attemptId:${JSON.stringify(attemptId)}}).then(s=>({state:s.state,error:s.error,attemptId:s.attemptId}))`), attemptId);
+        for (let poll = 0; !checked && poll < 300; poll++) {
+          await new Promise(resolve => setTimeout(resolve,100));
+          checked = checkedLoginResult(await run(`window.m5Login.request({action:'status',provider:${JSON.stringify(provider)}}).then(s=>({state:s.state,error:s.error,attemptId:s.attemptId}))`), attemptId);
+        }
+        if (!checked) throw new Error('Login check completion timeout');
+        connected[provider] = checked;
       }
       console.log(JSON.stringify({stage:'LOGIN_CHECK',connected}));
       if (!Object.values(connected).some(s=>s.state==='connected')) return finish('Neither app-owned login is connected');

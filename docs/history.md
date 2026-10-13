@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (응답 호환·로그인 시험 결속 검증)
+
+- 직전 턴은 smoke 요청 ID 결속 구현으로 진척했다. ec1c285 및 기존9월 archive 보존. vendor_observation108/108, live smoke11/11 PASS(session47115), debug sidecar build PASS(session83863), diff 검사 PASS다. 새 실제 계정 호출은 없으며 이전 시험 승인은 소진 상태다.
+- 동일 readonly 검토자가 supportsIndependentSpeedModes의 공식 생성 스키마 일치와 null-only 정책 거절/unknown/duplicate/sticky 보존, smoke의 단일 check ID 결속에 APPROVE했다. 표시 호환 정보로만 처리하며 속도 override/관리 정책 허용은 추가하지 않았다. 해당 코드·시험·기록만 로컬 커밋하고9월 archive는 제외한다.
+- 다음: 새 승인된 실연결 시험으로 Codex 다음 단계 및 Claude 자기 요청 idle 여부 확인, UI/G6 메모리/Windows 잔여 범위 진행. 실제 응답 성공·제품 완료 아님, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (실연결 시험 로그인 요청 결속)
+
+- 직전 턴은 Codex 선택 응답 필드 호환 구현으로 진척했다. 기존 dirty/9월 archive 보존. Claude login manager의 idle은 초기 상태뿐 아니라 auth status의 loggedIn=false/exit1 결과에도 사용된다. smoke는 자체 check의 attemptId를 확인하지 않아 관측 idle의 소유 요청을 증명하지 못했다. 과거 결과만으로 경합/로그아웃 원인을 확정하지 않는다.
+- Karpathy 지침으로 smoke가 생성한 ID와 check 응답·후속 status를 결속하고, 진행 상태만300회 한도로 기다린다. 다른 요청 ID면 명시 실패하며 authUrl/계정 원문을 결과에 추가하지 않는다. 기존 종료 후 late request guard는 유지한다. 초기/다른 요청 거절·자기 요청 idle/connected·verifying 대기 회귀 추가. diff 검사만 수행, Codex 변경과 다음 묶음 검증 대상이다.
+- 제품 로그인 동작과 인증정보 변경/실제 계정 호출0회. 다음: Codex 호환 독립 검토·묶음 검증, 승인된 실연결 확인과 UI/G6/Windows 잔여 범위. main/push 없음, 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 선택 응답 필드 호환 수정)
+
+- 직전 턴은108개 검사/빌드/ec1c285 및 승인 실측으로 requirements response shape를 확인한 진척이다. 기존9월 archive 보존. OpenAI Docs 공식 requirements 절을 확인하고 설치된 ChatGPT.app Codex CLI의 generate-json-schema --experimental을 모델 호출 없이 실행했다. /private/tmp/hello-agent-schema-1013.CJzGQi/v2/ConfigRequirementsReadResponse.json에는 supportsIndependentSpeedModes(boolean/null, 이전 서버 생략) 선택 필드가 있다. 기존 deny_unknown_fields 구조는 이 정상 필드를 거절한다. 실제 cYNWv3 원문은 없으므로 해당 응답이 정확히 이 필드였다는 주장은 하지 않는다.
+- Karpathy 지침으로 이 필드만 Option<bool>로 명시 수용했다. requirements 필수/null-only, 알 수 없는 필드·잘못된 타입·중복·non-null 정책 거절은 유지한다. 속도 override를 요청하거나 정책 의미를 변경하지 않는다. 이전/true/false/null 성공 및 문자열/중복/정책 존재 실패 회귀를 추가했다. diff 검사 PASS, 컴파일/회귀/독립 검토는 후속 묶음 대상이다.
+- 실제 계정 호출0회, main/push 없음. 다음: 관련 검증/검토·Claude idle 조회 경합 및 discovery 불일치 조사. 실제 모델 성공/UI/G6/Windows/출시 미완료 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (실행 전 진단 검증·승인 시험 cYNWv3)
 
 - 직전 턴은 Codex requirements 고정 분류 구현으로 진척했다. e89bde5 위 기존 history/9월 archive 보존. vendor_observation108/108 PASS(session74389), debug sidecar build PASS(session98693), diff 검사 PASS. 두 공급자 진단은 수락 조건을 바꾸지 않는다.

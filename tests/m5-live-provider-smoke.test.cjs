@@ -49,6 +49,19 @@ function harness(catalogOnly = false, autoFinish = true, projectUi = false, sele
   return {events,timers,exits,evidence: () => evidence, childProcess, spawned};
 }
 
+test('login evidence is correlated to its own completed check', () => {
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(source.indexOf('function checkedLoginResult'), source.indexOf('// Observe only fixed')), context);
+  const check = context.checkedLoginResult;
+  assert.equal(check({attemptId:'ours',state:'verifying'},'ours'), null);
+  assert.equal(check({attemptId:'ours',state:'idle',error:null},'ours').state, 'idle');
+  assert.equal(check({attemptId:'ours',state:'connected',error:null},'ours').state, 'connected');
+  for (const state of ['idle','connected','starting']) {
+    assert.throws(() => check({attemptId:'other',state},'ours'), /attempt changed/);
+    assert.throws(() => check({attemptId:null,state},'ours'), /attempt changed/);
+  }
+});
+
 test('transport diagnostics collect only fixed sidecar labels across chunks', () => {
   const h = harness(false, false);
   const options = {stdio:'pipe'};

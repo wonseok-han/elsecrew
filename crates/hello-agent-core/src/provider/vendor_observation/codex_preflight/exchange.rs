@@ -519,6 +519,10 @@ impl PreflightExchange {
                 #[serde(deny_unknown_fields)]
                 struct Requirements {
                     requirements: Box<serde_json::value::RawValue>,
+                    // Capability metadata added by newer servers. We request
+                    // no speed override and still reject all managed requirements.
+                    #[serde(rename = "supportsIndependentSpeedModes")]
+                    _supports_independent_speed_modes: Option<bool>,
                 }
                 let result: Requirements =
                     serde_json::from_slice(&observation.bytes).map_err(|_| {
@@ -1063,6 +1067,9 @@ mod tests {
     fn requirements_must_be_explicit_null_before_thread_or_turn() {
         for result in [
             r#"{"requirements":null}"#,
+            r#"{"requirements":null,"supportsIndependentSpeedModes":true}"#,
+            r#"{"requirements":null,"supportsIndependentSpeedModes":false}"#,
+            r#"{"requirements":null,"supportsIndependentSpeedModes":null}"#,
             r#"{}"#,
             r#"{"requirements":{}}"#,
             r#"{"requirements":{"allowedSandboxModes":["readOnly"],"private":"PRIVATE_POLICY"}}"#,
@@ -1072,6 +1079,9 @@ mod tests {
             r#"{"requirements":null,"requirements":null}"#,
             r#"{"requirements":{},"requirements":null}"#,
             r#"{"requirements":null,"extra":"PRIVATE_POLICY"}"#,
+            r#"{"requirements":null,"supportsIndependentSpeedModes":"true"}"#,
+            r#"{"requirements":{},"supportsIndependentSpeedModes":true}"#,
+            r#"{"requirements":null,"supportsIndependentSpeedModes":true,"supportsIndependentSpeedModes":false}"#,
         ] {
             let mut flow = exchange();
             for (index, value) in results().iter().take(4).enumerate() {
@@ -1093,7 +1103,10 @@ mod tests {
                 BoundedObservation::new(format!(r#"{{"id":50,"result":{result}}}"#).into_bytes())
                     .unwrap();
             let accepted = flow.accept(&wire);
-            if result == r#"{"requirements":null}"# {
+            if [r#"{"requirements":null}"#,
+                r#"{"requirements":null,"supportsIndependentSpeedModes":true}"#,
+                r#"{"requirements":null,"supportsIndependentSpeedModes":false}"#,
+                r#"{"requirements":null,"supportsIndependentSpeedModes":null}"#].contains(&result) {
                 assert_eq!(accepted.unwrap(), PreflightState::ObservationsMatched);
                 assert!(flow.next_frames().unwrap().is_empty());
             } else {
