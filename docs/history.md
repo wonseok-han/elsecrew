@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (같은 작업대의 프로젝트 열기·닫기 대조)
+
+- d7ca6c6 이후 diagnostic 전용 --project-lifecycle 모드를 추가했다. 매 trial의 document reload 대신 실제 편집 버리기 확인→프로젝트 화면 닫기→다시 선택을 사용한다. 종료 뒤60초 대기도 같은 방식이다. 기존 reload 모드/기준값은 그대로 두고 결과에 lifecycle을 표시해 서로 대체하지 않는다. performance preload가 빠뜨렸던 합성 m5Projects/Install/Login UI 진입점을 expose했다(실제 계정 아님).
+- 최초 실행은 ‘다음 목록’ 동명 버튼이 프로젝트 레일을 눌러 준비 단계에서 실패했다. 파일 페이지 컨트롤로 대상을 좁힌 후 준비1회+측정10회 완료. renderer-2026-10-13T08-52-12.165Z-16559.json: idle434290688B(약414.2MiB)만 FAIL, peak684457984B(약652.8MiB)/retained54165504B(약51.7MiB)는 기준 이내. 입력48.1ms/편집83.5ms/가시diff73.4ms/DOM362도 기준 이내다. 추가 bridge 노출도 달라 이전 reload와 차이를 수명 하나의 인과 효과로 단정하지 않는다.
+- script syntax/diff PASS. 두 프로세스 exit 회수 후 해당 userdata2개만 삭제/JSON 증거 보존. 다음은 실제 앱 조건의 유휴 메모리 확인·개선과 Claude 연결 확인 후 실연결·G6/출시다. 제품 완료/메모리 gate PASS 아님. 사용자 archive 변경/main/push 경계 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (시험 UTF-8 임시 배열 제거·실패 유지)
 
 - e12777a의 sandbox fixture는 Buffer.byteLength 대체가 전체 TextEncoder 배열을 만들었다. 제품 editor-state.ts는 이미 무할당 계산을 사용함을 대조했다. 제품을 임의 수정하지 않고 시험 bundle의 바이트 계수만 배열 없는 문자열 순회로 바꿨다. 모든 UTF-16 단일 code unit·surrogate pair 표본·실제5MiB 파일의 native Buffer 일치와 크기/경로 총3 PASS다. 입력량·hash·임계값은 그대로다.

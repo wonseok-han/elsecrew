@@ -21,6 +21,7 @@ const measureMemory = process.env.M5_MEASURE_MEMORY === "1";
 const diagnostic = process.env.M5_MEASURE_DIAGNOSTIC === "1";
 const domCounters = process.env.M5_MEASURE_DOM_COUNTERS === "1";
 const heapSampling = process.env.M5_MEASURE_HEAP_SAMPLING === "1";
+const projectLifecycle = process.env.M5_MEASURE_PROJECT_LIFECYCLE === "1";
 const memorySamples = [];
 let memoryPhase = "idle";
 let memoryTimer;
@@ -52,7 +53,7 @@ function sampleMemory() {
 }
 protocol.registerSchemesAsPrivileged([{ scheme: "m5perf", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const report = { schemaVersion: 1, evidence: "m5-renderer-fixture-performance", status: "NOT_READY", head: process.env.M5_MEASUREMENT_HEAD, startedAt: new Date().toISOString(), samples,
-  diagnostic, gateEligible: !diagnostic, userData,
+  diagnostic, gateEligible: !diagnostic, userData, lifecycle: projectLifecycle ? 'project-open-close' : 'document-reload',
   environment: { electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model, ramBytes: totalmem(), os: release() },
   limitations: ["Production renderer build with synthetic bridge, not packaged-app startup, filesystem/IPC throughput, real agent streams, or overall G6 readiness."] };
 function finish(error) {
@@ -94,12 +95,29 @@ async function memoryCheckpoint(label) {
   });
 }
 app.on("window-all-closed", () => {});
+async function closeFixtureProject() {
+  await window.webContents.executeJavaScript(`(async () => {
+    const wait = async predicate => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error('project close did not settle'); await new Promise(r => setTimeout(r, 10)); } };
+    const button = label => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === label && !b.disabled && b.getClientRects().length);
+    // Discard only the synthetic single-character edit via the product's
+    // explicit confirmation, not direct controller mutation or navigation.
+    if (document.querySelector('[aria-label="저장되지 않은 변경"]')) {
+      await wait(() => button('저장된 내용 다시 불러오기')); button('저장된 내용 다시 불러오기').click();
+      await wait(() => button('편집 내용 버리고 다시 불러오기')); button('편집 내용 버리고 다시 불러오기').click();
+      await wait(() => !document.querySelector('[aria-label="저장되지 않은 변경"]'));
+    }
+    await wait(() => button('프로젝트 화면 닫기')); button('프로젝트 화면 닫기').click();
+    await wait(() => document.querySelector('.m5-guided-start') && !document.querySelector('.monaco-editor'));
+  })()`);
+}
 app.whenReady().then(async () => {
   const git = (args) => { const result = spawnSync("/usr/bin/git", args, { cwd: root, encoding: "utf8" }); if (result.status !== 0) throw new Error("Git unavailable"); return result.stdout.trim(); };
   report.checkoutBefore = git(["status", "--porcelain"]);
   report.dirtyBefore = report.checkoutBefore !== "";
   if (process.platform !== "darwin" || process.arch !== "arm64" || !report.head || git(["rev-parse", "HEAD"]) !== report.head || (!diagnostic && report.dirtyBefore)) throw new Error("requires a clean macOS arm64 measurement build");
   if (diagnostic) report.limitations.push("Diagnostic only: includes working-tree changes and can never pass a release gate.");
+  if (projectLifecycle && !diagnostic) throw new Error('project lifecycle comparison requires diagnostic mode');
+  if (projectLifecycle) report.limitations.push('Same-document project open/close comparison; not interchangeable with document-reload trials. Synthetic edit explicitly discarded; no real project.');
   report.rendererHtmlSha256 = createHash("sha256").update(readFileSync(resolve(renderer, "index.html"))).digest("hex");
   timeout = setTimeout(() => finish(new Error("renderer benchmark timed out")), 120000);
   await protocol.handle("m5perf", (request) => {
@@ -139,7 +157,8 @@ app.whenReady().then(async () => {
     memoryPhase = "loaded";
   }
   for (let trial = 0; trial < 11; trial++) {
-    await window.loadURL("m5perf://m5/index.html");
+    if (!projectLifecycle || (trial === 0 && !measureMemory)) await window.loadURL("m5perf://m5/index.html");
+    else if (trial > 0) await closeFixtureProject();
     window.show(); window.focus(); window.webContents.focus();
     const sample = await window.webContents.executeJavaScript(`(async () => {
       const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("missing benchmark control: " + predicate.toString() + " / " + document.body.innerText.slice(0, 500)); await new Promise(r => setTimeout(r, 5)); } };
@@ -186,7 +205,7 @@ app.whenReady().then(async () => {
       treeList.scrollTop = treeList.scrollHeight;
       await wait(() => [...document.querySelectorAll('.m5-file-row')].some(e => e.textContent.includes('folder-499'))); await paint();
       result.treeDomNodes = Math.max(result.treeDomNodes, treeList.querySelectorAll('*').length);
-      button('다음 목록').click(); await wait(() => document.querySelector('.m5-file-row')?.textContent.includes('folder-500')); await paint();
+      document.querySelector('.m5-tree-pages button:last-child').click(); await wait(() => document.querySelector('.m5-file-row')?.textContent.includes('folder-500')); await paint();
       start = performance.now(); document.querySelector('.m5-file-row').click();
       await wait(() => document.querySelector('.m5-file-row')?.textContent.includes('large.txt')); await paint();
       result.treeExpandMs = performance.now() - start;
@@ -247,7 +266,8 @@ app.whenReady().then(async () => {
     await sampleMemory();
     memoryPhase = "closing";
     // Reload the same empty workbench to release documents without force-GC.
-    await window.loadURL("m5perf://m5/index.html");
+    if (projectLifecycle) await closeFixtureProject();
+    else await window.loadURL("m5perf://m5/index.html");
     const closedAt = performance.now();
     await new Promise(resolve => setTimeout(resolve, 60000));
     if (memoryPending) await memoryPending;

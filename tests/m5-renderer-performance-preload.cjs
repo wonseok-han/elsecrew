@@ -34,3 +34,7 @@ bridge.getDiffFile = async ({ path }) => {
   return { projectId: "smoke_project", path, kind: "modified", oldPath: null, baseVersion: fileVersion(), worktreeVersion: fileVersion(), byteLength: Buffer.byteLength(text), stream: send(text) };
 };
 contextBridge.exposeInMainWorld("m5", bridge);
+// Preserve the same optional UI entry points used for project release and setup.
+for (const name of ['m5Projects', 'm5Install', 'm5Login']) {
+  contextBridge.exposeInMainWorld(name, window[name]);
+}
