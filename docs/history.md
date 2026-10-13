@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 상태 계약 수정·누적 실패 분류)
+
+- 직전 앱 이름 설명은 개발 진척 없음이었다. 실제 m5/coding-agent-ide/7228665와 기존 dirty를 확인하고 진행 중이던 OS probe session86674의 PASS를 회수했다. 임시 자료의 허용 쓰기와 외부 read/write·child/link/move/defaults 차단을 확인했으며 공식 installer 호환/제품 활성화 증거는 아니다. 독립 재검토는 모델 capacity 오류로 종료되어 미완료다.
+- 이전 sidecar 전체 검사는605 PASS/9 FAIL/33 ignored(814.99초)로 종료했다. 실패4건은 current Rust status parser의 provider.install suffix 누락으로 수정했다. exact project.catalog 뒤에서만 허용하며 기존 D1은 유지한다. 양 모드의 정상·누락·순서·중복 회귀를 추가해 PASS했고 g5d_3개와 ready/quit1개도 PASS했다.
+- Unix 소켓 생성 권한 실패3건은 외부 샌드박스 밖의 같은 임시 fixture 검사에서 모두 PASS했다. descriptor 누출/backup cleanup interruption2건은 단독 재검사 PASS이나 누적 실행 실패 원인은 미확정이므로 해결 완료로 주장하지 않는다. 전체 검사를 즉시 반복하지 않았다. Karpathy 지침으로 상태 계약의 누락만 수정했다.
+- 실제 설치/계정/모델 호출 없음. Claude 재로그인 완료 통지 전 자동 실제 시험은 반복하지 않는다. 기존 사용자 dirty 보존/main 병합/push 없음. 다음은 누적 실행 경합2건 조사, 설치 독립 재검토·공식 호환/화면 검증이며 전체 UI/Claude/G6/Windows/출시 범위는 여전히 미완료다.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 독립 검토 차단 사항 보강)
 
 - 직전a04aff5는 테스트 연결 수정 진척이다. 기존 전체 테스트 session24039의 실행 지속을 확인했으며 중복 실행하지 않았다. 현재501개 진행 관측에서 실패는 Unix socket 관련3건, vendor gate descriptor1건, backup cleanup interruption1건이며 최종 오류 출력은 아직 대기다. 이 실행은 보강 전 바이너리/기존 dirty 포함 기준이다.

@@ -136,6 +136,37 @@ fn rust_accepts_three_states_and_rejects_malformed_cross_state_combinations() {
 }
 
 #[test]
+fn current_status_requires_exact_installation_suffix_and_preserves_d1() {
+    let manifest = manifest();
+    let state = manifest.system_status_cases.iter().find(|case| case.expected_valid).unwrap();
+    for fixture in [false, true] {
+        let mut value = Value::Object(state.value.clone());
+        value["sidecar"] = if fixture { manifest.ready_payloads.agent_fixture.clone() } else { manifest.ready_payloads.general_product.clone() };
+        let parse = if fixture { parse_current_agent_fixture_system_status_v1 } else { parse_current_product_system_status_v1 };
+        assert!(parse(&value).is_ok());
+        let baseline = value["sidecar"]["capabilities"].as_array().unwrap().clone();
+        for (suffix, valid) in [
+            (vec!["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install"], true),
+            (vec!["provider.install"], false),
+            (vec!["chat.appendMessage", "provider.login", "run.approval", "provider.install"], false),
+            (vec!["chat.appendMessage", "provider.login", "run.approval", "provider.install", "project.catalog"], false),
+            (vec!["chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install", "provider.install"], false),
+        ] {
+            let mut capabilities = baseline.clone();
+            capabilities.extend(suffix.iter().map(|name| Value::String((*name).into())));
+            value["sidecar"]["capabilities"] = Value::Array(capabilities.clone());
+            let result = parse(&value);
+            assert_eq!(result.is_ok(), valid, "fixture={fixture}, suffix={suffix:?}");
+            if let Ok(parsed) = result {
+                assert_eq!(serde_json::to_value(parsed.sidecar.capabilities).unwrap(), Value::Array(capabilities));
+                assert!(parse_g5d_product_system_status_v1(&value).is_err());
+                assert!(parse_g5d_agent_fixture_system_status_v1(&value).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn rust_matches_blocked_errors_known_no_op_policy_and_startup_order() {
     let manifest = manifest();
     for case in manifest.blocked_request_cases {

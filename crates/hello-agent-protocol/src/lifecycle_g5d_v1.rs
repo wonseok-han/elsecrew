@@ -139,7 +139,12 @@ fn parse_followup_status(
     let mut login = false;
     let mut approval = false;
     let mut catalog = false;
+    let mut install = false;
     let extended = capabilities.is_some_and(|capabilities| {
+        if capabilities.last().and_then(Value::as_str) == Some("provider.install") {
+            capabilities.pop();
+            install = true;
+        }
         if capabilities.last().and_then(Value::as_str) == Some("project.catalog") {
             capabilities.pop();
             catalog = true;
@@ -160,6 +165,9 @@ fn parse_followup_status(
         }
     });
     let mut parsed = baseline(&normalized)?;
+    if install && !catalog {
+        return Err(G5DAdmissionContractError::new("installation requires catalog baseline"));
+    }
     if catalog && !approval {
         return Err(G5DAdmissionContractError::new(
             "catalog requires approval baseline",
@@ -195,6 +203,9 @@ fn parse_followup_status(
             .sidecar
             .capabilities
             .push("project.catalog".to_owned());
+    }
+    if install {
+        parsed.sidecar.capabilities.push("provider.install".to_owned());
     }
     Ok(parsed)
 }
