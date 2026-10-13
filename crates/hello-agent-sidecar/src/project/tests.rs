@@ -101,6 +101,48 @@ fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
 
 #[cfg(unix)]
 #[test]
+fn completed_current_backup_stays_protected_until_explicit_retirement() {
+    use application::review::{backup::cleanup, confirmation::Confirmations, intent, ReviewTarget};
+    let (mut f, review_id) = prepared_backup_fixture();
+    let mut owner = Confirmations::default();
+    let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
+    let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_cleanup_ready").unwrap();
+    let prepared = intent::begin(&f.manager, &mut f.storage, &mut owner, grant, "req_cleanup_prepare").unwrap();
+    let id = prepared["applicationId"].as_str().unwrap();
+    let terminal = intent::abandon_unwritten(&mut f.storage, &f.project_id, &prepared, "req_cleanup_terminal").unwrap();
+    let before = required_project(&f.storage, &f.project_id).unwrap();
+    let archive = f.manager.data_root.join("application-backups-v1")
+        .join(before["application_backups"][&review_id]["name"].as_str().unwrap());
+    let bytes = fs::read(&archive).unwrap();
+    let lock_id = terminal["lockId"].as_str().unwrap();
+    let lock = f.storage.projection_record("lock", lock_id).unwrap();
+    // A terminal current application is still a restoration target.
+    assert!(cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).is_err());
+    assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, "unapproved", "req_cleanup_current").is_err());
+    assert_eq!(fs::read(&archive).unwrap(), bytes);
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), before);
+
+    let retirement = intent::retirement::preview(&f.storage, &f.project_id, id).unwrap();
+    intent::retirement::retire(&mut f.storage, &f.project_id, id, retirement["fingerprint"].as_str().unwrap(), "req_cleanup_retire").unwrap();
+    assert_eq!(fs::read(&archive).unwrap(), bytes);
+    let preview = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, preview["fingerprint"].as_str().unwrap(), "req_cleanup_history").unwrap();
+    assert!(!archive.exists());
+    let after = required_project(&f.storage, &f.project_id).unwrap();
+    assert_eq!(after["application_history"][id], terminal);
+    assert_eq!(f.storage.projection_record("lock", lock_id).unwrap(), lock);
+    assert_eq!(fs::read(f.source.join("src/edit.txt")).unwrap(), b"hello");
+    let deleted = cleanup::preview(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
+    assert_eq!(deleted["state"], "deleted");
+    // A new file at the old archive name must not be consumed by a retry.
+    fs::write(&archive, b"replacement must survive").unwrap();
+    assert!(cleanup::remove(&f.manager, &mut f.storage, &f.project_id, &review_id, deleted["fingerprint"].as_str().unwrap(), "req_cleanup_retry").is_err());
+    assert_eq!(fs::read(&archive).unwrap(), b"replacement must survive");
+    assert_eq!(required_project(&f.storage, &f.project_id).unwrap(), after);
+}
+
+#[cfg(unix)]
+#[test]
 fn preparation_cancel_reaches_index_and_bound_receipt_without_mutation() {
     use application::git_baseline::{capture_index_baseline, raw_baseline::{capture_clean_baseline, receipt}};
     let (mut f, _) = prepared_backup_fixture();

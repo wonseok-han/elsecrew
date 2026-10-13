@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (백업 정리 활성화 전 수명주기 회귀)
+
+- 직전7c75577은 반복 수집 구현 진척이다. 남은 제품 기능 중 `application_cleanup_enabled=false`인 명시 백업/복구 기록 정리를 조사했다. 현재 복구점은 terminal이어도 정리 불가, 명시 retirement 뒤 별도 동의로 과거 archive만 정리하는 기존 계약을 유지한다. 아직 활성화하지 않았다.
+- current terminal 백업 삭제 거부→명시 retirement→과거 백업 삭제→같은 이름의 새 파일 재시도 거부를 하나의 회귀로 추가했다. 각 단계에서 원본·잠금·과거 기록 보존을 확인하며 임시 fixture만 사용했다. session39630 focused Rust 1/1 PASS(5.15초), diff 검사 PASS. 전체 G6/사용자 자료 삭제 검증이 아니다.
+- 상시 승인된 읽기 전용 검토자 `/root/backup_budget_review` 한 명에게 활성화 차단 결함/검증 공백 확인을 요청했다. 현재 running이며 결과 미확정, 다음 턴에서 같은 검토 결과를 회수한다. 기능 활성화·실제 사용자 백업 삭제·main/push 없음. 기존9월 archive 보존. 메모리/Claude/Windows·출시 포함 전체 목표는 미완료다.
+
 ### 2026-10-13 · by GPT-6 Astra (native 반복 수집 경로 연결)
 
 - 직전7573c04는 실제 대형 흐름 PASS 증거와 회귀를 남긴 진척이다. 같은 시험을 사람이 반복 실행하지 않도록 `m5:measure:native-project`를 연결했다. 준비1회＋측정10회를 독립 임시 프로젝트에서 순차 실행하고 트리/5MiB 파일·편집/저장/diff·확인 취소·두 채팅 흐름의 원시 로그와 p95를 보존한다.
