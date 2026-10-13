@@ -129,6 +129,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [returnToNewChat, setReturnToNewChat] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreSettingsFocus = useRef(false);
   const [leavingProject, setLeavingProject] = useState(false);
   const [leaveError, setLeaveError] = useState(false);
   const [reloadDraft, setReloadDraft] = useState<EditorTab | null>(null);
@@ -140,6 +141,14 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   );
   const chat = useSyncExternalStore(chatController.subscribe.bind(chatController), () => chatController.snapshot(), () => chatController.snapshot());
   const projectDataReady = Boolean(snapshot.project && chat.projectId === snapshot.project.id && chat.settings?.projectId === snapshot.project.id);
+  useEffect(() => {
+    // Run after the close commit and dialog cleanup, when the toolbar button
+    // is enabled again. A frame callback from the click can beat that commit.
+    if (!settingsOpen && !newChatOpen && restoreSettingsFocus.current) {
+      restoreSettingsFocus.current = false;
+      settingsButtonRef.current?.focus();
+    }
+  }, [settingsOpen, newChatOpen]);
   useEffect(() => { setNewChatOpen(false); setReturnToNewChat(false); setGoal(""); setApplicationBaseline(false); }, [snapshot.project?.id]);
   useEffect(() => {
     const dialog = newChatDialogRef.current;
@@ -195,6 +204,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
   const openRoleSettings = (fromNewChat = false) => {
     if (!admissionReady || !projectDataReady || settingsOpen || chat.preparing || chat.switching) return;
     setReturnToNewChat(fromNewChat);
+    restoreSettingsFocus.current = false;
     setNewChatOpen(false);
     controller.setActionBlocked(true);
     setSettingsOpen(true);
@@ -204,7 +214,7 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
     if (returnToNewChat) {
       setReturnToNewChat(false);
       setNewChatOpen(true);
-    } else requestAnimationFrame(() => settingsButtonRef.current?.focus());
+    } else restoreSettingsFocus.current = true;
   };
 
   return (

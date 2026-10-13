@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설정 닫기 포커스 복귀 순서 수정)
+
+- 9183ae2에서 실제 앱 c4cokm 시험은 설정 닫기 뒤 toolbar 포커스 복귀 검사에서 실패했다. click의 requestAnimationFrame 대신 React 닫기 commit 후 effect에서 복귀하도록 수정했다. 새 1yrOkt 시험은 설정 왕복·편집/저장·diff 후속 지시·두 채팅·반영 전 확인 ready(1.43초)를 통과했다. renderer build/tsc PASS, 합성 Chromium은 제한 환경에서 프로세스 시작 실패 뒤 승인된 외부 실행에서2 PASS12.4초다.
+- native OS focus는 Dock show 시도에도 창/contents=false, document=true, appHidden=false/focusable=true/enabled=true/focusedWindow=null이다. 진단 필드를 추가했으며 원인 해결로 표현하지 않는다. targeted insertText로 후속 검사를 이어갔으므로 전체 native 결과는 FAIL/exit1/정상 종료 accepted다. 모델 실행·원본 반영 없음.
+- 종료된 c4cokm/1yrOkt의 합성 project/userdata만 검증된 cleanup helper로 삭제하고 결과·이미지는 보존했다. 다음은 OS focus 원인 분리, 유휴 메모리 기준 초과와 Claude 로그인 확인 후 실제 실행·최종 G6/출시 검증이다. 전체 미완료, 사용자9월 archive 변경 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (초기 설치 조회 순서 수정·실제 프로젝트 흐름 확인)
 
 - 19fa094 최신 실제 앱 시험에서 ProviderInstall이 storage admission verifying 중 status를 호출해 requestBlocked/불필요한 uncertain을 만들었다. 초기 조회는 disabled 해제 뒤 시작하고 기존 active/uncertain polling과 소유자 mount 수명은 유지하도록 수정했다. 초기 admission100ms 지연과 premature install read 카운터 회귀를 추가했다. renderer build/tsc/diff 및 합성 Chromium2 PASS12.3초다.

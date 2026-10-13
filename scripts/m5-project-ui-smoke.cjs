@@ -1,6 +1,6 @@
 // macOS native UI smoke: synthetic project and isolated app data, no providers selected.
 // Requires current .vite/build output and native sidecar; this script does not build them.
-const { app, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
@@ -305,6 +305,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.monaco-editor textarea').focus()`);
       await wait(`document.activeElement===document.querySelector('.monaco-editor textarea')`);
       const focusDeadline = performance.now() + 3000;
+      if (!window.isFocused()) await app.dock?.show();
       while ((!window.isFocused() || !window.webContents.isFocused() || !await run('document.hasFocus()')) && performance.now() < focusDeadline) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
         await run(`document.querySelector('.monaco-editor textarea')?.focus()`);
@@ -314,6 +315,11 @@ app.on('browser-window-created', (_event, window) => {
         window: window.isFocused(),
         contents: window.webContents.isFocused(),
         document: await run('document.hasFocus()'),
+        appHidden: app.isHidden(),
+        focusable: window.isFocusable(),
+        enabled: window.isEnabled(),
+        focusedWindowId: BrowserWindow.getFocusedWindow()?.id ?? null,
+        windowId: window.id,
       };
       console.log(JSON.stringify({stage:'EDITOR_INPUT_FOCUS',...inputFocus}));
       if (!inputFocus.window || !inputFocus.contents || !inputFocus.document) {
