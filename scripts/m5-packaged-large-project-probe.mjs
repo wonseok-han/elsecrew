@@ -1,5 +1,5 @@
 // Runs inside the actual packaged renderer via the existing CDP connection.
-export async function probeLargeProject() {
+export async function probeLargeProject(projectId) {
   const visible = label => [...document.querySelectorAll('.m5-files button')].some(button => button.textContent.includes(label));
   const wait = async ready => {
     const deadline = performance.now() + 8000;
@@ -20,10 +20,24 @@ export async function probeLargeProject() {
   document.querySelector('.m5-breadcrumbs .m5-root').click();
   await wait(() => visible('large.txt'));
   const file = await open('large.txt', () => document.querySelector('.monaco-editor .view-line')?.textContent.includes('가') && document.querySelector('.monaco-editor textarea'));
+  // Keep the original cold observations above unchanged. These subsequent
+  // same-process diagnostics must not replace cold timing or become gate p95.
+  const repeatedRootMs = [], treeRequestMs = [];
+  for (let index = 0; index < 3; index++) {
+    repeatedRootMs.push((await open('aaa-tree', () => visible('folder-0001'))).ms);
+    document.querySelector('.m5-breadcrumbs .m5-root').click();
+    await wait(() => visible('large.txt'));
+    const start = performance.now();
+    const page = await window.m5.getProjectTree({projectId, parentPath:'aaa-tree', cursor:null});
+    treeRequestMs.push(performance.now() - start);
+    if (page.projectId !== projectId || page.parentPath !== 'aaa-tree' || page.entries.length !== 500 || !page.nextCursor) {
+      throw new Error('Diagnostic tree request returned unexpected page');
+    }
+  }
   const values = {treeRootMs: root.ms, treeExpandMs: child.ms,
     treeDomNodes: Math.max(root.domNodes, child.domNodes), fileEditableMs: file.ms};
   const limits = {treeRootMs:1000, treeExpandMs:250, treeDomNodes:500, fileEditableMs:1500};
-  return {diagnostic:true, gateEligible:false, values,
+  return {diagnostic:true, gateEligible:false, values, subsequent:{repeatedRootMs, treeRequestMs},
     failedMetrics:Object.keys(limits).filter(key => values[key] > limits[key]),
     fixture:{treeFiles:10000, treeDirectories:1000, controlFiles:2, fileBytes:5242880, fileLines:100000}};
 }

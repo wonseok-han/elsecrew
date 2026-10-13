@@ -185,7 +185,7 @@ try {
       report.largeDiff.originalUnchanged = true;
       if (report.largeDiff.failedMetrics.length) report.error = `Large diff limits exceeded: ${report.largeDiff.failedMetrics.join(', ')}`;
     } else if (largeProject) {
-      report.largeProject = await evaluate(`(${probeLargeProject.toString()})()`);
+      report.largeProject = await evaluate(`(${probeLargeProject.toString()})(${JSON.stringify(report.project.projectId)})`);
       if (report.largeProject.failedMetrics.length) report.error = `Large project limits exceeded: ${report.largeProject.failedMetrics.join(', ')}`;
     } else {
     if (resume) {

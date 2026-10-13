@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (첫 트리 진입과 후속 요청 지연 분리)
+
+- eb09719의 최신 패키지에서 기존 cold 지표를 그대로 측정한 뒤 같은 폴더 재진입3회와 실제 getProjectTree IPC3회를 추가했다. 제품 bridge를 대체하지 않으며 후속 warm 값을 cold p95로 사용하지 않는다. Karpathy 최소 진단 범위로 관측기2파일만 수정했다.
+- 31Gp7a는 첫 진입838.4ms, 재진입85.2/91.7/96.0ms, 직접 요청59.9/87.3/57.8ms다. 최초 표시 뒤에도 초기 diff/watch가 동기 dispatcher에 남는 구조와 일치해 초기 요청 대기가 유력하다. 특정 함수의740ms 비용을 직접 계측한 증거는 아니며 기존 반복 FAIL을 해소했다고 선언하지 않는다. 다음 구현은 감시 스캔의 bounded/incremental 처리로 요청 루프의 긴 점유를 줄이되 변경 감지/overflow/rescan/종료 계약을 보존하는 것이다.
+- syntax/diff PASS, 시험 정상 exit0/종료confirmed. idle 메모리 초과로 전체 FAIL 유지. /private/tmp/hello-agent-tree-segments.log와 OS 임시 hello-agent-packaged-ui-31Gp7a/result.json·PNG 보존, PID 부재 확인 후 자체 fixture3디렉터리 정리. 사용자9월 archive/main/push 경계 보존; 메모리·나머지G6/실계정/Windows 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (파일 감시 항목의 capability 재사용)
 
 - 8cdde4f 기준 직접 조사: 트리 getTree뿐 아니라 초기 watch 요청이 같은 dispatcher에서 최대10,000항목을 동기 조회한다. Karpathy 최소 변경으로 snapshot_tree의 재경로 해석 symlink_metadata 대신 iterator가 보유한 DirEntry::metadata를 사용했다. cap-primitives3.4.6 Unix 구현의 held FD/FollowSymlinks::No를 확인하고 외부 디렉터리·dangling 링크 비추적/로컬 변화 회귀를 추가했다. 안전 검사·감시 한도·정렬/페이지·동의 경계 변경 없음.
