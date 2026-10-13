@@ -153,8 +153,24 @@ app.whenReady().then(async () => {
       await paint();
       result.treeRootMs = performance.now() - start;
       result.treeDomNodes = document.querySelector('.m5-file-list').querySelectorAll('*').length;
-      await wait(() => document.querySelectorAll('.m5-change-row').length === 500); await paint();
+      await wait(() => document.querySelectorAll('.m5-change-row').length === 100); await paint();
       result.diffSummaryMs = performance.now() - start;
+      // Changes are paged separately from the virtualized tree. Keep all 500
+      // fixture entries reachable without requiring 500 simultaneous DOM rows.
+      for (let page = 0; page < 5; page++) {
+        const rows = [...document.querySelectorAll('.m5-change-row')];
+        if (rows.length !== 100 || rows.some((row, index) => row.title !== 'file-' + (page * 100 + index) + '.txt')) throw new Error('incomplete change page ' + page);
+        const next = document.querySelector('.m5-change-pages button:last-child');
+        if (!next || next.disabled !== (page === 4)) throw new Error('incorrect change pagination');
+        if (page < 4) {
+          next.click();
+          await wait(() => document.querySelector('.m5-change-row')?.title === 'file-' + ((page + 1) * 100) + '.txt');
+        }
+      }
+      for (let page = 3; page >= 0; page--) {
+        document.querySelector('.m5-change-pages button:first-child').click();
+        await wait(() => document.querySelector('.m5-change-row')?.title === 'file-' + (page * 100) + '.txt');
+      }
       // Verify the bounded DOM still exposes the end of the same 500-entry page.
       const treeList = document.querySelector('.m5-file-list');
       treeList.scrollTop = treeList.scrollHeight;

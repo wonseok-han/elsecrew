@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (활성화 독립 승인·변경 목록 성능 검사 정합성)
+
+- 독립 검토자 installer_boundary_review가60d886b..944bba1 활성화 diff를 APPROVE했다. macOS 한정·계획 없는 설치 시작 거절·현재 복구점 보호·별도 삭제 동의와 영속 정리 순서에 새 차단 결함 없음이다. 실제 사용자 HOME 설치/삭제·로그인/모델을 수행한 검토는 아니다.
+- 944bba1 기준 성능 진단은 변경 목록이100개씩 페이지화됐는데500 DOM 행을 기다리는 오래된 검사 때문에 측정 전에 실패했다. Karpathy 지침으로 제품/기준값은 그대로 두고 초기100행과5개 페이지의 전체500개 경로·마지막 다음 버튼 비활성·첫 페이지 복귀를 검사하도록 수정했다.
+- 재실행 renderer-2026-10-13T07-55-25.470Z-6657.json은 준비1회/측정10회를 끝냈다. 최대 tree35.6ms/편집75.9ms/입력25.6ms/diff목록52.4ms/첫diff17.6ms로 시간 기준 이내다. RSS idle402.7MiB/peak653.9MiB/60초 잔류delta75.6MiB이며 idle 기준 초과로 FAIL이다. DevTools/heap sampling이 붙은 diagnostic이므로 비계측 실행과 성능 개선 비교·G6 합격으로 확대하지 않는다. 종료 뒤 DOM document1개로 감소했고 누수 원인은 확정하지 않았다.
+- node --check/diff PASS. 실제 계정/모델/프로젝트 미사용, 사용자 archive21줄 보존, main/push 없음. 두 시험이 종료됐음을 확인하고 재생성 가능한 임시 userdata만 정리한다. 다음은 비계측 성능 확인·남은 UI/Claude 실연결/G6·Windows/배포이며 전체 완료 아님.
+
 ### 2026-10-13 · by GPT-6 Astra (사용자 승인된 macOS 설치·백업 정리 활성화)
 
 - 직전60d886b는 공식 임시 설치/UI 호환 진척이다. 실제 HEAD/dirty와 현재 제품 비활성 지점을 대조했다. 사용자가 이번 턴에 macOS 설치·업데이트 및 명시 동의 방식 백업 정리의 제품 활성화를 각각 승인했다. 같은 설치 검토자는60d886b TLS literal/시험 변경의 추가 차단 결함 없음으로 보고했으며 활성화 diff 확인은 후속이다.
@@ -165,7 +172,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. TLS literal 보완의 검토 후 사용자 명시 승인으로 macOS enabled=true를 연결했으며 최종 활성화 diff 재검토는 후속이다. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
+- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. TLS literal 보완의 검토 후 사용자 명시 승인으로 macOS enabled=true를 연결했으며944bba1 활성화 diff 독립 재검토도 APPROVE다. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
 
 - **설치/기기 진단 연결(2026-10-13)**: d8b131d는 읽기 전용 OS/CPU/RAM/userData 여유 공간 표시만 연결했다(설치 준비/실행 가능 판정 아님). Codex 선택기는 기존 bundle→레거시 ~/.local/bin 직접 pair→공식 ~/.codex/packages/standalone 링크의 concrete pair 순서이며 기존 서명/no-follow/identity 검증을 유지한다. 465901d의 test-only helper 참조는 수정하고 일반 cargo check·독립 정적 검토를 통과했다. 전체 자동 설치 worker/launcher 회귀/실제 설치 및 기기 UI 검증은 미완료다.
 
