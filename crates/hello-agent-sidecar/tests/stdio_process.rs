@@ -1787,6 +1787,10 @@ fn binary_fresh_b_failure_and_exact_abandon_preserve_bound_a() {
 
 #[cfg(target_os = "macos")]
 fn binary_cancel_scenario(scenario: &str, clean: bool) {
+    use hello_agent_core::proctree::{
+        identity_of, ProbeResult, ProcTable, SystemProcTable, TreeTracker,
+    };
+
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source");
     let data = root.path().join("data");
@@ -1902,6 +1906,28 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
     };
     assert_eq!(started.event, "run.event");
 
+    // Observe from outside the sidecar before cancellation. Keeping identities,
+    // rather than walking only the post-cancel tree, also detects reparenting.
+    let sidecar_identity = identity_of(child.id()).unwrap();
+    let mut observer = TreeTracker::new(sidecar_identity);
+    let observation_deadline = Instant::now() + Duration::from_secs(3);
+    let observed = loop {
+        observer.observe(&SystemProcTable).unwrap();
+        let descendants: Vec<_> = observer
+            .tracked_identities()
+            .into_iter()
+            .filter(|identity| *identity != sidecar_identity)
+            .collect();
+        if descendants.len() >= 2 {
+            break descendants;
+        }
+        assert!(
+            Instant::now() < observation_deadline,
+            "fixture parent and leaf were not observed"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+
     write_request(
         &mut stdin,
         &ready.sidecar_instance_id,
@@ -1924,6 +1950,13 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         panic!("finished")
     };
     assert_eq!(finished.event, "run.finished");
+    for identity in &observed {
+        assert_eq!(
+            SystemProcTable.probe(*identity),
+            ProbeResult::Gone,
+            "observed fixture identity survived cancellation: {identity:?}"
+        );
+    }
     assert_eq!(
         finished.payload["run"]["terminationEvidence"]["processesProvenGone"],
         clean
@@ -1992,6 +2025,17 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
     assert_eq!(quit.result.unwrap()["safeToQuit"], true);
     drop(stdin);
     assert!(child.wait().unwrap().success());
+    assert_eq!(SystemProcTable.probe(sidecar_identity), ProbeResult::Gone);
+    println!(
+        "{}",
+        serde_json::json!({
+            "evidence":"fixture-cancel-external-process-observation",
+            "scenario":scenario,"diagnostic":true,"gateEligible":false,
+            "observedDescendants":observed.len(),"survivingObservedProcesses":0,
+            "uncertainReported":!clean,"shutdown":"accepted",
+            "limitations":["ordinary fixture tree, not detached or real provider processes", "observer shares the core OS probe implementation"]
+        })
+    );
 }
 
 fn wait_for_storage_ready(

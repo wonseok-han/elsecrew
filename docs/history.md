@@ -1,5 +1,16 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (종료 시험 외부 신원 관측)
+
+- 직전 활성화 재확인은 개발 진척이 아니었으므로 f667bb3에서 남은 종료 증거를 보완했다. Karpathy 최소 변경 원칙으로 기존 binary_cancel_scenario에 시험 프로세스 측 OS 관측을 추가했다. 취소 전 sidecar 아래 부모/leaf의 PID+시작 시각을 확보하고 취소 후 각 신원의 Gone 및 sidecar 정상 종료를 직접 검사한다. 제품 종료 코드 변경 없음.
+- focused stdio binary_cancel_ 2 PASS(1.71초): clean/uncertain 각각 자손2개 관측·잔존0·quit accepted. uncertain은 기존 복구 원장/종료 차단/명시 abandon 검사를 유지한다. 관측자는 core OS probe를 공유하며 일반 fixture 트리만 다루므로 detached 자손·실제 공급자·packaged G6 합격으로 확대하지 않는다. JSON diagnostic=true/gateEligible=false로 제한을 명시했다. rustfmt/diff PASS, 실제 계정/모델 호출 없음.
+- 다음은 detached 자손/stream 및 packaged 통합 수집 연결이다. Mac 잠금 해제 후 네이티브 입력/메모리·Claude 연결 확인 후 실연결은 여전히 미완료다. 기존 사용자9월 archive 변경 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (활성화 승인 재수신 확인)
+
+- macOS 설치·업데이트와 명시 동의 백업 정리 활성화 승인을 재수신했다. 현재 f667bb3/m5/coding-agent-ide와 기존 활성화 커밋944bba1을 대조했으며 두 기능은 이미 제품 코드에 활성화돼 있어 중복 변경하지 않았다. 설치는 대상에 결속된 개별 동의, 정리는 복구점 종료 후 별도 동의 조건을 유지한다.
+- 이번에는 설치/업데이트/백업 삭제·모델 호출을 실행하지 않았다. 코드/커밋 읽기와 diff 검사만 수행하며 기존 사용자9월 archive 변경을 보존한다. 남은 G6 통합 관측·Mac 잠금 해제 후 네이티브 입력/메모리·Claude 연결 확인 후 실연결은 별도 미완료다. main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 저장 API 경합100회 관측)
 
 - db576ae 이후 G6 누락 중 GUI 없이 가능한 저장 경합 관측을 추가했다. 기존 stdio 도우미와 실제 --stdio/native sidecar에 두 채팅 snapshot을 만들고 workspace.file.save의 begin/chunk/commit 경로를 호출한다. 교대로100번 외부 쓰기를 begin 또는 chunk 뒤에 삽입, 명시 dirtyConflict·외부 바이트·다른 채팅/원본 불변을 검사한다. 각 회차 최신 버전의 정상 저장도 대조해 모든 쓰기를 거부하는 구현을 합격시키지 않는다(Karpathy 최소 범위).
