@@ -165,6 +165,15 @@ app.on('browser-window-created', (_event, window) => {
       await new Promise(r=>setTimeout(r,500));
       await run(`document.querySelector('.monaco-editor textarea').focus()`);
       await wait(`document.activeElement===document.querySelector('.monaco-editor textarea')`);
+      const inputFocus = {
+        window: window.isFocused(),
+        contents: window.webContents.isFocused(),
+        document: await run('document.hasFocus()'),
+      };
+      console.log(JSON.stringify({stage:'EDITOR_INPUT_FOCUS',...inputFocus}));
+      if (!inputFocus.window || !inputFocus.contents || !inputFocus.document) {
+        throw new Error('Editor input unavailable: native window or document is not focused');
+      }
       await window.webContents.insertText('edited in snapshot\n');
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='저장'&&!b.disabled)`);
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='저장').click()`);
@@ -236,6 +245,8 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.monaco-editor textarea').scrollIntoView({block:'center'})`);
       await wait(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('edited')`);
       console.log(JSON.stringify({stage:'PROJECT_FLOW_COMPLETE',root}));
+      // DOM assertions can complete before Chromium presents the updated editor.
+      await run(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       const screenshot = path.join(root,'project.png');
       fs.writeFileSync(screenshot,(await window.webContents.capturePage()).toPNG());
       if (measureMemory) {

@@ -1,5 +1,240 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-13 · by GPT-6 Astra (최신 작업대 native 흐름·캡처 보강)
+
+- 직전42eceb2는 diff 경합 수정/54개 회귀로 진척했다. renderer 재빌드 후 독립 userData/임시 프로젝트의 pnpm m5:smoke:project-ui 실행(session46105): 설정·편집·저장·두 채팅 분리/복귀, 정상 종료 PASS/exit0. 증거 hello-agent-project-ui-vopYzV/result.json(시스템 임시 폴더). 실제 agent 호출0회, 기존9월 archive 보존.
+- project.png를 직접 확인했으나 편집기 빈 화면과 직후 DOM의 edited 텍스트가 달랐다. DOM 완료와 compositor 캡처 사이 경합 가능성이 있어 최종 캡처 전 두 animation frame 대기를 추가했다. 이 수정의 재캡처는 후속이며 현재 이미지를 편집기/시안 충실도 합격 증거로 쓰지 않는다.
+- diff/구문 검사 수행. 다음: 보강된 캡처로 시안 비교·UI 마감, 메모리/Claude 로그인/Windows/출시 잔여 작업. main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (변경 갱신 시 오래된 diff 제거)
+
+- 직전 턴은 diff 선택 경합 구현으로 진척했다. 저장/감시 뒤 refreshChanges는 목록만 갱신하고 이전 diff 본문을 유지하는 점을 확인했다. 갱신 시작 시 이전 본문을 비우고 diff 요청 세대를 올려 진행 중인 과거 조회도 다시 노출되지 않도록 했다. 최신 본문은 파일 재선택으로 조회하며 원본 쓰기·실행 권한은 변경하지 않는다.
+- 앞선 선택 경합과 이번 갱신 무효화 회귀를 묶어 node --test --experimental-strip-types tests/m5-editor-state.test.mts 실행:54/54 PASS(session29802). diff 검사 PASS. 실제 화면·G6 메모리·전체 제품 합격은 별도이며 이번 수정이 RSS 원인을 해결했다고 주장하지 않는다.
+- 관련 controller/회귀/history만 로컬 커밋하고 기존9월 archive는 제외한다. 실제 계정 호출0회, main/push 없음. 다음: UI 마감·메모리 기여 조사, Claude 사용자 로그인 확인과 별도 승인 실측, Windows/출시 잔여 범위. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (diff 마지막 선택 보존)
+
+- 직전 턴은 실측·6ed3cfc 커밋으로 진척했다. 현재 동일 브랜치/기존9월 archive 변경을 보존했다. 메모리 경로 조사 중 openDiff가 프로젝트 epoch만 검사해 같은 프로젝트의 이전 응답/실패가 마지막 선택을 덮는 경합을 발견했다. 이 경합을 메모리 초과 원인으로 단정하지 않는다.
+- Karpathy 지침으로 diff 요청 세대 번호를 추가하고 최신 요청만 내용/오류를 반영한다. 이전 stream도 기존 바이트 제한·완료 정리를 거치며 원본 쓰기·실행/복구 계약은 변경하지 않는다. 늦은 descriptor/stream/실패 각각 마지막 선택 유지 회귀를 추가했다.
+- 이번은 구현 체크포인트이며 실행 검증은 후속 편집기 묶음 대상이다. diff 검사만 수행. 실제 계정 호출0회/main/push 없음. 다음: 편집기 묶음 검증·메모리 기여 조사와 UI/Claude 로그인/Windows/출시 잔여 범위, 제품 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (입력 구간 실측·진단 기록 마감)
+
+- c5dde79 위 입력 관측 보강으로 pnpm m5:measure:renderer --diagnostic --memory 실행(session11802), exit1/FAIL. 증거 .artifacts/m5-performance/renderer-2026-10-13T01-41-13.598Z-21150.json. inputPaint 최대71.8ms 표본은 전달 전61.8ms/수신 후10ms이며 후자는 상태 polling·두 frame도 포함한다. 이 표본만으로 이전305.5ms 원인이나 Monaco 무결함을 단정하지 않는다. 기존50ms 판정은 유지한다.
+- idle452657152/peak898629632 bytes(약431.7/857.0MiB),60초 뒤 retained 증가0. 입력/idle/peak 기준 실패, 나머지 시간·DOM 기준 충족. 합성 bridge 진단 전용이며 실제 계정 추가 호출0회, 강제GC/자손 제외/기준 완화 없음. 제품 성능 합격·누수 원인 확정 아님.
+- JS 구문·diff 검사와 실측으로 관측 필드 연결을 확인했다. 관련 runner/history만 로컬 커밋하며 기존9월 archive 변경은 보존·제외한다. 다음: 전달 전 지연과 프로세스별 메모리 기여 조사, 사용자 Claude 앱 전용 로그인 확인 후 별도 승인 실측, UI/Windows/출시 잔여 범위. main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (입력 지연 구간 관측 추가)
+
+- 직전 턴은 최신 메모리 실패와 Codex 실제 planning 성공을 확인한 진척이다. c5dde79/기존 history/9월 archive 보존. 성능 runner는 renderer 시작 timestamp 후 main IPC 왕복/sendInputEvent/상태 polling/두 frame까지 전부 inputPaintMs에 포함한다. 따라서305.5ms 표본을 곧바로 Monaco 처리 지연으로 단정할 수 없다.
+- Karpathy 지침으로 해당 textarea의 trusted Z beforeinput 수신 시각을 보조 관측했다. sample에 inputDeliveryMs와 inputAfterDeliveryMs를 추가하되 기존 inputPaintMs/50ms 판정은 그대로 유지한다. 수신 시각이 없으면 보조 값은 null로 남기며0으로 위장하지 않는다. 제품 코드·기능·메모리 측정 범위는 변경하지 않았다.
+- diff 및 JS 구문 검사만 수행, 실제 재측정은 후속 진단 묶음 대상이다. 실제 계정 추가 호출0회/main/push 없음. 다음: 구간별 실측으로 입력 지연/메모리 기여 좁히기, Claude 사용자 재로그인 확인 및 UI/Windows 잔여 범위. 전체 완료 아님.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 첫 최신 종단 성공·Claude 로그인 차단)
+
+- 직전 턴은 c5dde79 호환 수정/119개 검사/독립 승인으로 진척했다. 기존9월 archive 보존. 합성 renderer 메모리 시험 session69592는 FAIL/exit1. .artifacts/m5-performance/renderer-2026-10-13T01-36-01.543Z-3617.json: idle454279168/peak891502592 bytes, retained 증가0, inputPaint 최대305.5ms. idle400MiB/peak800MiB/입력50ms 기준 초과이며 나머지 시간·DOM 기준 충족. 진단 전용, 누수 원인 확정/전체 성능 PASS 아님.
+- 메모리 시험 종료 뒤 새 사용자 각1회 승인으로 session54488 실행. /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-974Ab5/result.json: Codex gpt-6.1-sol/medium, agent_run_8d339ae9bb784ca9829cbdb4be510074, chat_46042260b3b7456390b23e533ed1499f, succeeded/planning/cleanExit/responseObserved=true. 임시 원본 불변·shutdown accepted다. 이는 작은 planning 작업1회의 실제 종단 성공이며 쓰기/승인/복구 전체 검증은 아니다.
+- Claude는 자신의 check attemptId와 일치한 idle/error null로 loginBlocked, 실행되지 않았다. 단순 초기 상태 오인 가능성은 이번 관측에서 배제했으나 자격증명 부재의 근본 원인은 미확정이다. 전체 시험은 FAIL/exit1이며 자동 재시험 없음. 다음: 사용자의 앱 전용 Claude 재로그인 확인 후 별도 승인 실행, 메모리/시안/Windows/출시 잔여 범위. main/push 없음, 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (응답 호환·로그인 시험 결속 검증)
+
+- 직전 턴은 smoke 요청 ID 결속 구현으로 진척했다. ec1c285 및 기존9월 archive 보존. vendor_observation108/108, live smoke11/11 PASS(session47115), debug sidecar build PASS(session83863), diff 검사 PASS다. 새 실제 계정 호출은 없으며 이전 시험 승인은 소진 상태다.
+- 동일 readonly 검토자가 supportsIndependentSpeedModes의 공식 생성 스키마 일치와 null-only 정책 거절/unknown/duplicate/sticky 보존, smoke의 단일 check ID 결속에 APPROVE했다. 표시 호환 정보로만 처리하며 속도 override/관리 정책 허용은 추가하지 않았다. 해당 코드·시험·기록만 로컬 커밋하고9월 archive는 제외한다.
+- 다음: 새 승인된 실연결 시험으로 Codex 다음 단계 및 Claude 자기 요청 idle 여부 확인, UI/G6 메모리/Windows 잔여 범위 진행. 실제 응답 성공·제품 완료 아님, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (실연결 시험 로그인 요청 결속)
+
+- 직전 턴은 Codex 선택 응답 필드 호환 구현으로 진척했다. 기존 dirty/9월 archive 보존. Claude login manager의 idle은 초기 상태뿐 아니라 auth status의 loggedIn=false/exit1 결과에도 사용된다. smoke는 자체 check의 attemptId를 확인하지 않아 관측 idle의 소유 요청을 증명하지 못했다. 과거 결과만으로 경합/로그아웃 원인을 확정하지 않는다.
+- Karpathy 지침으로 smoke가 생성한 ID와 check 응답·후속 status를 결속하고, 진행 상태만300회 한도로 기다린다. 다른 요청 ID면 명시 실패하며 authUrl/계정 원문을 결과에 추가하지 않는다. 기존 종료 후 late request guard는 유지한다. 초기/다른 요청 거절·자기 요청 idle/connected·verifying 대기 회귀 추가. diff 검사만 수행, Codex 변경과 다음 묶음 검증 대상이다.
+- 제품 로그인 동작과 인증정보 변경/실제 계정 호출0회. 다음: Codex 호환 독립 검토·묶음 검증, 승인된 실연결 확인과 UI/G6/Windows 잔여 범위. main/push 없음, 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 선택 응답 필드 호환 수정)
+
+- 직전 턴은108개 검사/빌드/ec1c285 및 승인 실측으로 requirements response shape를 확인한 진척이다. 기존9월 archive 보존. OpenAI Docs 공식 requirements 절을 확인하고 설치된 ChatGPT.app Codex CLI의 generate-json-schema --experimental을 모델 호출 없이 실행했다. /private/tmp/hello-agent-schema-1013.CJzGQi/v2/ConfigRequirementsReadResponse.json에는 supportsIndependentSpeedModes(boolean/null, 이전 서버 생략) 선택 필드가 있다. 기존 deny_unknown_fields 구조는 이 정상 필드를 거절한다. 실제 cYNWv3 원문은 없으므로 해당 응답이 정확히 이 필드였다는 주장은 하지 않는다.
+- Karpathy 지침으로 이 필드만 Option<bool>로 명시 수용했다. requirements 필수/null-only, 알 수 없는 필드·잘못된 타입·중복·non-null 정책 거절은 유지한다. 속도 override를 요청하거나 정책 의미를 변경하지 않는다. 이전/true/false/null 성공 및 문자열/중복/정책 존재 실패 회귀를 추가했다. diff 검사 PASS, 컴파일/회귀/독립 검토는 후속 묶음 대상이다.
+- 실제 계정 호출0회, main/push 없음. 다음: 관련 검증/검토·Claude idle 조회 경합 및 discovery 불일치 조사. 실제 모델 성공/UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (실행 전 진단 검증·승인 시험 cYNWv3)
+
+- 직전 턴은 Codex requirements 고정 분류 구현으로 진척했다. e89bde5 위 기존 history/9월 archive 보존. vendor_observation108/108 PASS(session74389), debug sidecar build PASS(session98693), diff 검사 PASS. 두 공급자 진단은 수락 조건을 바꾸지 않는다.
+- 새 사용자 각1회 승인으로 session35867 실행, exit1/FAIL. 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-cYNWv3/result.json. Codex connected/모델 선택 뒤 requirements response shape로 거절됐으므로 non-null 정책 내용 판정 이전의 역직렬화 실패다(추가 필드/누락 등 세부 형식은 아직 미확정). Claude status idle/error null로 loginBlocked, 실행되지 않았다. 로그아웃 확정 증거가 아니다. 원본 불변/shutdown accepted, RUN_ACCEPTED/응답 없음.
+- 승인 시험은 종료했으며 자동 재시도하지 않는다. 다음: 현재 Codex schema의 requirements 응답 envelope와 strict 필드 대조, Claude UI 자동 진단과 smoke check 상태 전이 경합 확인. 관련 코드·기록 로컬 커밋, 기존9월 archive 제외. main/push 없음, 제품/G6/UI/Windows 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 관리 요구사항 응답 분류)
+
+- 직전 턴은 Claude 실행 전 checkpoint 구현으로 진척했다. 기존 dirty 보존. OpenAI Docs 공식 app-server의 Read admin requirements 절을 검색·열람했다. requirements는 유효 관리 요구사항이며 없을 때 null이다. 현재 앱은 null만 허용하고 관리 요구사항 적용은 지원하지 않는다. W4SUaF가 실제 관리 정책인지 응답 형식 변화인지는 미확정이다.
+- Karpathy 지침으로 requirements response shape / managed requirements present / requirements value shape 고정 진단을 분리하고 기존 회귀에 분류·비공개 값 비노출 assertions를 추가했다. non-null 거절과 duplicate/sticky/시작 차단은 유지하며 정책을 무시하거나 지원한다고 주장하지 않는다. diff 검사 PASS, 컴파일/관련 회귀는 Claude 변경과 후속 묶음 대상이다.
+- 출처 https://learn.chatgpt.com/docs/app-server#read-admin-requirements-configrequirementsread . 실제 계정 호출0회/main/push 없음. 다음: 양쪽 실행 전 진단 묶음 검증과 실제 응답 계약 증거 확보, UI/G6/Windows 잔여 작업. 제품 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (Claude 실행 전 비교 진단 분리)
+
+- 직전 턴은 승인된 W4SUaF 실측으로 새 실행 전 차단 증거를 확보했다. e89bde5 및 기존 history/9월 archive 보존. reserve_scoped_claude_start를 읽어 같은 오류가 owner 상태, 준비, scope/profile/capability,30초 freshness, launch binding, protocol, reservation에 공용으로 쓰임을 확인했다. 따라서 설치 버전 변경만으로 원인을 단정할 수 없다.
+- Karpathy 지침으로 해당 분기를 고정 로컬 checkpoint 문자열로 구분했다. 입력값/경로/계정/모델 원문은 추가하지 않고 조건·실행 순서·종료 책임·오류 kind를 유지한다. freshness 시간을 늘리거나 재검증을 생략하지 않았다. diff 검사 PASS, 컴파일/회귀는 후속 묶음 대상. 실제 계정 호출0회.
+- 다음: Codex requirements 계약 대조와 새 진단 빌드 후 필요한 승인 실측. UI/G6/Windows/출시 잔여 작업 및 전체 목표 미완료, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (최신 빌드 승인 실연결 W4SUaF)
+
+- 직전 턴은 e89bde5 UI·진단 파동 커밋으로 진척했다. 기존9월 archive 보존. debug sidecar build PASS(session76105) 뒤 사용자 새 각1회 승인으로 session22026을 실행했다. 실제 로그인 두 개 connected, Codex 모델 선택까지 완료했으나 Codex configRequirements/read preflight, Claude start discovery differs에서 요청이 거절됐다. RUN_ACCEPTED/모델 응답은 없고 FAIL/exit1이다. 임시 원본 불변, shutdown accepted다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-W4SUaF/result.json. transportCheckpoints는 빈 배열이며 이전 account metadata/init plugins 단계까지 도달하지 않았으므로 앞선 수정의 실계정 성공을 입증하지 않는다. 현재 Claude 설치 링크는2.1.296(10월13일)으로 이전2.1.293과 다르다. 버전 변경이 이번 실패 원인인지는 아직 미확정이다.
+- 이번 승인 시험은 종료했으며 추가 자동 재시도하지 않는다. 다음: 새 config requirements 응답 계약과 Claude discovery 비교 조건을 확인하고 버전/설정 변경과 실제 불일치를 구분한다. 메모리 조사에서는 Monaco 모델 dispose 구조만 재확인했고 새로운 원인 결론은 없다. 실제 모델 성공/UI 시각/G6/Windows/출시 미완료, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (패널 UI·진단 묶음 검증)
+
+- 직전 작업은 TypeScript 검사/renderer 빌드 PASS와 smoke 예상 개수13→15 수정으로 진척했다. 현재 eb79acc/m5/coding-agent-ide와 기존 dirty를 재확인했다. 패널 상태16개 PASS, 수정 후 private 진단 smoke10개 PASS. Karpathy 지침으로 새 메뉴 조작에 맞춰 renderer 시나리오를 갱신했다.
+- 제한 환경 Electron 실행은 status null로 종료됐고 GUI 권한 환경 재실행에서 예전 aria-label 선택자2개가 남아 실패했다. 두 곳도 실제 메뉴를 열고 버튼을 선택하도록 수정한 session51664는 renderer mount2/2 PASS(7.4초). 집중/복귀/숨김/배치와 Monaco 인스턴스 보존을 확인했다. 이는 합성 bridge 기반 기능 증거이며 시안 픽셀 충실도·실제 계정 종단·제품 메모리 합격이 아니다.
+- Claude init 고정 진단 회귀3/3 PASS(session30342), diff 검사 PASS. 관련 UI/진단/테스트/기록만 로컬 커밋하고 기존9월 archive는 제외한다. 실제 모델 호출0회/main/push 없음. 다음: 실제 연결 실패의 세부 증거 확보(별도 승인), UI 시각 마감·G6 메모리·Windows/출시 잔여 범위. 전체 목표는 미완료다.
+
+### 2026-10-08 · by GPT-6 Astra (집중 표시 복귀 연결)
+
+- 직전 턴은 패널 옵션 메뉴 구현으로 진척했다. eb79acc 위 기존 미커밋 변경 보존. Karpathy 지침으로 focusDockPanel이 다른 패널을 숨기고 이전 표시 상태를 보존하지 않는 점을 확인했다. hiddenBeforeFocus에 이전 숨김 목록만 저장하며 기존 version1 레이아웃과 호환한다. 반복 집중/앱 재열기 뒤에도 복귀 버튼으로 원래 표시 목록을 복원하고 순서·크기·트리·편집 모델은 유지한다.
+- 저장 데이터의 복귀 목록 형식/중복/알 수 없는 ID를 검사하고, 재열기·반복 집중·복귀·크기 보존 회귀를 추가했다. 한국어/영어 버튼 연결. 이번 diff 검사만 수행했고 실행 검증은 메뉴 변경과 묶을 예정이다. 실제 모델 호출0회/main/push 없음, 전체 완료 아님. 다음: 묶음 UI 타입/실제 화면 검증과 잔여 앱 구현.
+
+### 2026-10-08 · by GPT-6 Astra (패널 헤더 보조 조작 정리)
+
+- 직전 턴은 Claude 공식 내장 mod 계약과 고정 진단 추가로 진척했다. eb79acc 위 기존 Claude/history/9월 archive 변경 보존. 현재 dock 코드는 이미 상하/좌우/탭 배치를 구현하므로 과거 가로만 지원 기록을 현재 사실로 반복하지 않았다.
+- Karpathy 지침으로 패널 헤더의 상시 배치 select/집중/숨김 버튼을 native details 옵션 메뉴로 모았다. 탭은 좁은 폭에서 자체 가로 스크롤, 옵션은 한국어/영어 이름과 키보드 Escape 닫기/summary 초점을 제공한다. 기존 drag/resize/배치/저장·Monaco 부모·안전 계약은 유지한다. 메뉴 open 동안만 slot overflow/z-index를 풀어 세로 분할에서 잘리지 않도록 했다.
+- diff 검사만 수행, 타입/실제 렌더링/접근성 및 기존 UI 자동화 영향은 다음 묶음 검증 대상이다. 전체 시안 적용 완료나 시각 검증 PASS로 표현하지 않는다. 실제 모델 호출0회, main/push 없음. 다음: 다른 화면 잔여 구현과 묶음 UI 검증, Claude 진단 빌드/승인된 실제 증거, G6/Windows 잔여 범위.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 내장 mod 계약 확인)
+
+- 직전 턴은 eb79acc 사용량 안내 수정/108개 검사/독립 승인으로 진척했다. 현재 m5/coding-agent-ide, 기존9월 archive만 dirty인 상태를 확인했다. Karpathy 지침으로 실제 계정 호출 없이 공식 https://code.claude.com/docs/en/plugins/mods/overview 의 내장 mod 표를 확인했다. safe-mode/bare/disableAllHooks는 내장 mod를 중단하지 않으며 조직용 cc-plugin-sec-default는 사용자 비활성화가 불가능하다. telemetry는 별도 비활성화 가능하다. 따라서 기존 init plugins=[] 가정과 조직 guard가 충돌할 가능성이 있으나 WD8GdD의 정확한 항목은 아직 미확정이다.
+- 기존 private 고정 진단에 organization guard 단독/telemetry 단독 분류를 추가했다. 다른 항목이 섞이거나 경로 표시가 다르면 기존 other 분류로 남는다. provider 표시를 신뢰·허용 근거로 사용하지 않으며 nonempty plugins는 여전히 거절한다. 해당 분류와 smoke whitelist 회귀를 추가했다. 새 테스트/빌드는 후속 묶음에서 실행하며 이번 diff 검사만 수행한다.
+- 다음: 실제 계정 증거가 필요할 때 별도 승인 후 확인하고, 조직 guard는 사용자 정책을 우회해 끄지 않는다. 전체 UI/G6/Windows 잔여 구현은 독립 진행 가능하다. 실제 모델 호출0회, 원본·인증정보/main/push 변경 없음, 제품 완료 아님.
+
+### 2026-10-08 · by GPT-6 Astra (계정 사용량 안내 호환)
+
+- 기준548c4f8, 기존 history/9월 archive 보존. OpenAI 공식 https://learn.chatgpt.com/docs/app-server 및 현재 로컬 생성 AccountRateLimitsUpdatedNotification 스키마를 대조했다. account/rateLimits/updated는 thread/turn ID 없는 sparse 계정 전체 안내이며 account/updated의 인증 변경과 다르다. 앞선 실제 실패가 두 알림 중 어느 것인지는 아직 미확정이다.
+- Karpathy 지침으로 rateLimits 필수 객체와 선택 window/credits/spend 필드의 타입을 검증한 뒤 Private로만 처리한다. 표시 enum의 신규 문자열/추가 필드는 허용하되 인증 변경·권한·완료 처리에는 사용하지 않는다. 시작 전 안내도 기존 예산 안에서 허용하고 종료 후/실패 sticky 거절, account/updated 별도 처리 요구를 유지한다.
+- vendor_observation108/108 PASS(session68387), 새 파일 rustfmt 및 diff 검사 PASS. readonly 기존 검토자 APPROVE, debug sidecar build PASS(session6415). 관련 코드와 이번 기록을 로컬 커밋하며 기존9월 archive는 제외한다. 추가 실제 모델 호출0회, 기존 실측 승인 소진 상태다. 다음: Claude 다른 내장 플러그인 조사 및 UI/G6/Windows 잔여 작업. main/push 없음, 제품 완료 아님.
+
+### 2026-10-08 · by GPT-6 Astra (세부 분류 승인 시험 WD8GdD)
+
+- 사용자 새 각1회 승인으로 최신548c4f8 debug/renderer를 session34740에서 시험했다. 두 로그인 connected/모델 선택/두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/responseObserved=false, 임시 원본 불변, shutdown accepted, FAIL/exit1이다. 기존 history/9월 archive 보존, 실제 성공·전체 완료 아님.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-WD8GdD/result.json. chat_c31b23fc6efd48d7a343066a7f4e9e4a, Codex agent_run_1444748d41b3487890cc9183d82f4a8e, Claude agent_run_b6f43306f65f46da85470bb6962bd7ba. 고정 진단은 codex:turn stream account metadata, claude:init plugins other builtins/session initialization/session channel이다. Codex account/updated 또는 account/rateLimits/updated, Claude path=builtin이나 알려진 두 source 외 항목 존재로 범위를 좁혔다. 이름/계정/원문은 출력하지 않았고 플러그인 표시값을 신뢰 근거로 쓰지 않는다.
+- 이번 각1회 승인 소진. 다음: Codex 계정 알림의 공식 스키마·상관관계 처리, Claude 다른 내장 플러그인의 등록 조건 조사. 계정/권한 변경을 무시하거나 plugins 검사를 제거하지 않는다. 사용자 프로젝트·인증정보/main/push 불변. UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-08 · by GPT-6 Astra (UTF-8 할당 제거 후 메모리 재측정)
+
+- 직전 턴은169개 관련 검사·debug build·548c4f8 로컬 커밋으로 진척했다. 실제 모델 새 승인 응답은 없어 호출하지 않았다. 기존9월 archive만 dirty인 상태에서 pnpm m5:measure:renderer --diagnostic --memory session90258을 실행했다. 최신 production renderer 재빌드, 합성 bridge/독립 userData이며 실제 sidecar/계정/모델은 사용하지 않는다.
+- 증거 .artifacts/m5-performance/renderer-2026-10-08T00-45-36.718Z-13663.json: FAIL/exit1, gateEligible=false. idle445841408 bytes(425.1875MiB), peak934903808(891.59375MiB),60초 뒤 retained 증가분0. 실패는 idle400MiB/peak800MiB 초과이며 나머지 시간/DOM 기준은 충족했다. 기존 peak929.4MiB보다 낮지만 단일 표본 차이만으로 인과적 개선을 단정하지 않는다. 합성 프로세스 범위·기준·기능은 축소하지 않았다.
+- 다음: 기본 Electron 프로세스 idle 및 반복 대형 모델 peak 기여 개선, 실제 공급자 진단 시험 승인 대기, UI/Windows/출시 잔여 작업. G6 미완료 유지. 사용자 프로젝트/인증정보/main/push 변경 없음. 이번 결과 기록은 미커밋이다.
+
+### 2026-10-08 · by GPT-6 Astra (진단·바이트 계산 묶음 검증)
+
+- 직전 턴은 Claude 실제 선택 경로·무계정 초기화 대조와 고정 분류 구현으로 진척했다. 기준0dd9e74/기존 dirty 보존. Karpathy 지침으로 Codex other frame을 로컬 생성 ServerNotification.json의 알려진 method에 한해 diff/plan/thread name/settings/hook/model/warning/account/MCP/moderation 고정 분류로 세분화했다. payload나 임의 method는 출력하지 않고 수락·승인·종료 조건은 바꾸지 않는다. Claude plugin 분류와 함께 smoke exact whitelist 및 비공개 문자열 제외 회귀를 갱신했다.
+- core vendor_observation107/107 PASS(session69893), 편집기+smoke62/62 PASS(session90641). Unicode byte 계산은65536 개별 code unit/경계/다국어 반복을 TextEncoder와 비교해 통과했다. 메모리 peak 실측 개선이나 실제 공급자 성공 증거는 아니다. debug sidecar build session8255를 수행했다. 관련 코드·이번 기록만 로컬 커밋하고 기존9월 archive는 제외한다.
+- 추가 유료 호출0회, 이전 실측 승인 소진 상태다. 다음: 새 승인 실측으로 분류 확인·G6 메모리 재측정·UI 잔여 작업. diff 검사 PASS, main/push 없음. 기능 완료 아님.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 실환경 차이 조사·비공개 진단 분류)
+
+- 직전 턴은 승인 실측으로 최신 실패 증거를 얻은 진척이다. 기준0dd9e74, 기존 미커밋 editor/history/9월 archive 보존. installed_executable은 .local/bin/claude 링크 대상을 서명 검증하며 현재 링크는2.1.293으로 합성 시험과 일치했다(과거 실행 순간 신원 자체의 증명은 아님). 새 임시 HOME/프로필·로컬400 API에 제품과 같은6개 도구 목록·sandbox 설정을 준 sX8Xz3, 이어 permission-prompt stdio/control initialize까지 맞춘 kMmljr 모두 plugins=[]다. code1/signal null 정상 프로세스 종료, 실제 모델·도구 호출0회.
+- 계정/OS HOME/관리 설정 등 남은 차이가 있으나 근본 원인을 확정하지 않았다. Karpathy 지침으로 nonempty plugins 거절은 그대로 두고 고정 진단을 disabled builtins/other builtins/other registration으로 구분했다. 알려진 source와 builtin path 표시만 분류하며 provider 이름/경로/원문은 로그에 출력하지 않는다. 표시값은 신뢰·수락 근거가 아니다. smoke exact whitelist 및 PRIVATE/null 분류 회귀 갱신.
+- diff 검사 PASS, 새 회귀·빌드는 다음 묶음 대상. 추가 실계정 실행 승인 소진 상태 유지. 다음: Codex other frame의 안전한 분류와 관련 묶음 검증, 실제 환경 증거 확보. 원본/인증정보/main/push 불변, UI/G6/Windows/출시 미완료.
+
+### 2026-10-08 · by GPT-6 Astra (0dd9e74 승인 실계정 재시험)
+
+- 사용자 재시험 승인으로 session76501에서 Codex·Claude 각1회 실행했다. 최신 debug sidecar0dd9e74, 기존 미커밋 editor-state 메모리 변경/9월 archive 보존. 두 로그인 connected/모델 선택/두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/responseObserved=false, 임시 원본 불변, shutdown accepted, FAIL/exit1이다. 실제 계정 성공 또는 전체 완료가 아니다.
+- 증거 /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-VA9bd7/result.json. chat_8020057d5ad9466ea8f80e45d1ede080, Codex agent_run_d0ca72c670624a95bd5a58ac75b5b065, Claude agent_run_f66b7e6fe66349d599ed1ba67c70f150. 진단 codex:turn stream other frame, claude:init plugins/session initialization/session channel. Codex 이전 token usage 거절보다 진행했으나 unknown 이벤트 정체는 미확정이다. Claude는2.1.293 합성 환경의 빈 plugins와 달라 실제 선택 실행 파일/버전·계정 프로필·정책 차이를 조사해야 한다. raw payload/인증정보 출력 없음.
+- 이번 각1회 승인은 소진됐다. 다음: 추가 실계정 호출 없이 실제 executable 선택과 합성 재현 환경 대조, Codex 미지원 이벤트의 안전한 분류. 종료 준비 뒤 늦은 login check는 requestBlocked로 거절됐지만 정상 종료했다. 사용자 프로젝트·인증정보 변경/main/push 없음. UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-08 · by GPT-6 Astra (편집 stream 바이트 검사 임시 배열 제거)
+
+- 직전 턴은 Claude 검증·독립 승인·0dd9e74 커밋으로 진척했다. 실제 각1회 재시험 승인 응답은 아직 없어 호출하지 않았다. 기존9월 archive 보존. Monaco 모델은 path별 생성/dispose이고 지연 로딩하므로 근거 없이 누수로 단정하지 않았다. editor-state는 stream chunk마다 TextEncoder.encode 배열을 만들고 저장 전 파일 전체 배열도 만든 뒤 길이만 사용하고 있었다.
+- Karpathy 지침으로 두 경로를 UTF-16 순회 기반 utf8ByteLength로 교체했다. 정상 surrogate pair는4bytes, lone surrogate는 TextEncoder의 U+FFFD와 같은3bytes로 계산한다. 파일/stream 제한·편집 모델·프로토콜은 유지한다. 전체65536 code unit, 경계 조합과 반복 다국어 문자열을 TextEncoder와 비교하는 회귀 추가.
+- diff 검사 PASS, 새 회귀/빌드/성능 재측정은 후속 묶음 대상이다. 할당 제거는 코드상 사실이나 G6 RSS 초과 해소·성능 개선 수치는 아직 미확인이다. 다음: 관련 검증과 메모리 재측정, 승인된 경우 실제 모델 종단 시험. UI/G6/Windows/출시 미완료, 사용자 프로젝트·인증정보/main/push 불변.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 플러그인 수정 묶음 검증)
+
+- 직전 턴은 무계정 재현과 내장 플러그인 비활성화 구현으로 진척했다. 기준f4b52d6, 기존9월 archive 보존. CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-sidecar provider_claude_session --lib --locked -j4는11/11 PASS(session63483), debug sidecar build PASS(session2810)다. 앞선 동일 Codex107/편집기51 PASS는 반복하지 않았다.
+- 같은 readonly codex_start_static_review가 설정·argv digest·nonempty plugins 거절 보존을 APPROVE했다. 도구/승인/종료 계약 변경 없음, unknown/future/custom/managed plugins가 나타나면 계속 거절함을 확인했다. 새 실제 호출0회, 두 공급자 실제 응답 성공은 아직 미검증이다. diff 검사 PASS. 해당 코드/기록만 로컬 커밋한다. 다음: 별도 각1회 승인 실측, 이후 UI/G6/Windows/출시 잔여 범위. main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 내장 플러그인 원인 재현·비활성화)
+
+- 직전 턴은 검증·검토된 수정 f4b52d6 커밋으로 진척했다. 기존9월 archive 보존. Karpathy 지침에 따라 제품 검사를 완화하기 전에 /private/tmp/hello-agent-plugin-init-probe.mjs로 서명 검사된 현재 설치 Claude2.1.293을 새 HOME/profile/workspace·가짜 API key·loopback 오류 서버·tools 빈 값으로 실행했다. 실계정/유료 모델/사용자 프로젝트/강제종료는 사용하지 않았다. 서버는 항상400이며 모델 성공 시험이 아니다.
+- 5ikQWQ/result.json: safe-mode에서도 plugins에 cc-plugin-agents-md@builtin 및 cc-plugin-plugin-authoring@builtin이 나타났고 agents/skills/MCP/tools는 모두 빈 배열이다. 공식 https://code.claude.com/docs/en/settings-reference.md 의 enabledPlugins/pluginConfigs와 env-vars.md를 대조했다. 공식 enabledPlugins로 두 ID를 false로 지정한 동일 시험7D0mvz/result.json은 plugins도 빈 배열이다. 두 프로세스 모두 code1/signal null로 종료했고 로컬 요청만2회씩이며 실제 모델 호출0회다. 이는 실계정 KJbXmN payload 자체를 읽은 증거는 아니지만 빈 프로필 재현과 설정별 차이를 확인했다.
+- 제품 shell_settings에 두 내장 ID의 명시적 false 설정과 argv 회귀 assertion을 추가했다. safe-mode·권한·도구·MCP·예상하지 않은 nonempty plugins 거절은 유지한다. requested_policy_digest는 전체 scoped argv를 이미 포함하므로 새 설정도 결속된다. 컴파일/관련 회귀/독립 검토는 다음 묶음 대상이며 이번 diff 검사 PASS. 다음: 해당 묶음 검증·빌드 후 새 승인된 실제 연결 확인. UI/G6/Windows/출시 미완료, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (사용량 알림·편집기 수정 로컬 마감)
+
+- 직전 턴은 Rust107/편집기51 회귀와 debug build PASS로 진척했다. e59ae16 기준 Codex 알림 변경을 동일 readonly 검토자가 APPROVE했다. 시작 상태/exact thread·turn/기존 event·byte budget/Private-only/sticky 오류 보존을 확인했으며 검토자는 실제 실행하지 않았다. 새 usage.rs만 rustfmt 적용했다.
+- 검증된 Codex 사용량 처리와 중복 파일 탭 방지, 회귀 및 이번 작업 기록을 로컬 커밋한다. 기존 docs/archive/history-2026-09.md 변경은 제외한다. 검사 결과는 이전 동일 코드 묶음 증거를 재사용하고 diff 검사만 추가한다. 실제 모델 성공·G6/제품 완료를 주장하지 않는다.
+- 다음: Claude safe-mode에서 비어 있지 않은 plugins의 정체를 무계정/도구 없는 합성 초기화로 확인할 절차를 준비한다. 현재 기존 tool-probe는 shell/강제종료가 포함돼 실행하지 않았다. 새 실제 호출 승인 없이 유료 재시험하지 않으며 사용자 프로젝트·인증정보/main/push 불변이다.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 공식 옵션 대조·호환 회귀 묶음)
+
+- 직전 턴은 Codex 사용량 알림 구현으로 진척했다. e59ae16+기존 dirty를 보존하고 Claude arguments의 --safe-mode/빈 setting-sources/strict MCP를 확인했다. 공식 https://code.claude.com/docs/en/cli-reference.md 및 env-vars.md를 읽었다. safe-mode는 plugins를 로드하지 않는다고 명시하지만 실제 KJbXmN init plugins는 비어 있지 않았다. 앱 프로필의 얕은 파일 목록에서는 플러그인 파일을 찾지 못했으며 이는 내장/설치/관리 플러그인 정체의 증명이 아니다. 초기화 원문 증거가 없어 무조건 수락하거나 임의 옵션을 추가하지 않았다.
+- 누적 변경 묶음 검사: CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo test -p hello-agent-core vendor_observation --locked -j4 107/107 PASS, node --test --experimental-strip-types tests/m5-editor-state.test.mts 51/51 PASS. Codex 사용량 수락 범위는 기존 readonly codex_start_static_review에게 재검토 요청했다. debug sidecar 빌드를 시작했다. 실제 모델 호출0회.
+- debug sidecar build session94539 PASS/exit0으로 최신 알림 처리 반영. 다음: 독립 검토 결과 확인, Claude 초기화 비어 있지 않은 plugins의 재현 자료 확보. 기존 synthetic tool probe는 별도 승인용 파괴적 shell 시험을 포함하므로 이번에 실행하지 않았다. 필요하면 도구 없는 독립 합성 init 시험으로 분리한다. 실제 연결/UI/G6/Windows/출시 미완료, 기존9월 archive 보존, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (Codex 사용량 알림 호환 구현)
+
+- 직전 턴은 승인 실측으로 token usage/plugins 실패 지점을 얻은 진척이다. 기준e59ae16과 기존 dirty 보존. OpenAI Docs로 https://learn.chatgpt.com/docs/app-server 의 Events/Message schema를 확인했고 기존 생성물 /private/tmp/hello-agent-codex-current-schema.qtBljR/v2/ThreadTokenUsageUpdatedNotification.json을 대조했다. 현재 stream에 thread/tokenUsage/updated 처리 자체가 없어 RequiresHandling으로 거절되는 누락을 확인했다. 이 사실은 실제 payload 전체가 이미 검증됐다는 뜻은 아니다.
+- Karpathy 지침에 따라 해당 method에 한해 기존 notification budget을 소비한 뒤 시작 상태·thread/turn 결속과 total/last 수치 구조를 검사해 Private로 처리한다. 선택 modelContextWindow/cacheWriteInputTokens를 지원하며 음수·int64 범위 초과·잘못된 타입은 거절한다. 완료/승인/공개 메시지/종료 판정으로 사용하지 않는다. 정상/교차 범위/수치 오류/시작 전/완료 후/예산 소진 sticky 실패 회귀를 추가했다.
+- 이번 변경은 구현 체크포인트이며 컴파일·회귀·독립 검토는 후속 묶음 대상이다. diff 검사만 수행한다. 실제 호출0회, 사용자 프로젝트/인증정보/main/push 변경 없음. 다음: Claude plugins 원인 조사, 관련 묶음 검증과 동일 readonly 검토자 확인 후 새 승인 실측. UI/G6/Windows/출시 미완료 유지.
+
+### 2026-10-08 · by GPT-6 Astra (세부 진단 빌드 승인 실측)
+
+- 사용자 새 각1회 승인으로 e59ae16 debug sidecar를 쓰는 실제 Electron 시험 session4357을 실행했다. 기존 editor-state/test/history 및9월 archive 변경은 보존했다. 두 앱 전용 로그인 connected, Codex gpt-6.1-sol/medium 선택과 두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/responseObserved=false다. 임시 원본 불변, shutdown accepted, FAIL/exit1이며 성공 응답이나 제품 완료가 아니다.
+- 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-KJbXmN/result.json. 채팅 chat_de88d26aefc945bca64aac1bf6619a69, Codex agent_run_856630984254412e8e706dd32c0b14eb, Claude agent_run_756d7c9a9f3b4a5086e1ef605b1f1c0a. 고정 진단은 codex:turn stream token usage 및 claude:init plugins/session initialization/session channel이다. 토큰 사용량 알림의 구체 불일치와 plugins 항목의 정체는 아직 미확정이며 안전 검사를 완화하지 않았다. 종료 준비 뒤 늦은 login 요청은 requestBlocked로 거절됐고 정상 종료를 방해하지 않았다.
+- 이번 승인 각1회는 소진됐다. 다음: 추가 실제 호출 없이 Codex token usage 해석과 Claude plugins 등록 원인을 코드/공식 계약으로 조사하고 회귀를 준비한다. 기존 편집기 회귀·UI/G6/Windows/출시 잔여 범위 유지. 사용자 프로젝트·인증정보 수정, main 병합/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (겹친 파일 읽기의 중복 탭 방지)
+
+- 기준e59ae16, 기존 history/9월 archive 보존. 직전 턴은 합성/작은 native 메모리 기여를 분리한 진척이다. stream 조립은 완료 뒤 map 삭제와 timeout 정리가 있고 Monaco는 path/attempt 기준 생성·dispose하므로 코드만으로 누수를 확정하지 않았다. 별도 결함으로 openFile은 시작 때만 열린 탭을 검사해 동일 파일 두 read가 겹치면 완료 때 같은 path 탭을 중복 추가할 수 있음을 확인했다.
+- Karpathy 지침으로 epoch/workspace 확인과 stream 수집 후 같은 path 탭을 재검사한다. 먼저 열린 탭의 draft/version/saveState를 유지하고 중복 추가 대신 활성화만 한다. 원본 쓰기/권한/읽기 byte 제한은 변경하지 않았다. 서로 다른 stream을 지연시켜 첫 결과 편집 뒤 두 번째 읽기 완료에도 같은 탭 객체/unsaved draft 하나만 유지하는 회귀 추가.
+- diff 검사 PASS, 새 회귀·프런트 빌드는 후속 묶음 대상이다. 이번 경합이 기존 순차 성능 시험의929MiB 원인이라고 주장하지 않는다. 다음: 관련 회귀/타입 검사 및 메모리 기여 조사, 실제 공급자 승인 대기와 UI/G6/Windows 잔여 범위. 실제 모델 호출/사용자 원본 변경/main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (실제 무계정 앱 메모리 분리 측정)
+
+- 기준e59ae16, 기존 history/9월 archive 보존. 직전 턴은 최신 합성 RSS 측정으로 진척했다. Karpathy 지침으로 변경 전에 자료와 코드부터 대조했다. 기존 heap sampling 상위에는 fixture preload의 Buffer.byteLength/join과 Monaco 줄 모델이 있고 RSS와 동일한 의미는 아니다. 최신 합성 checkpoint renderer RSS는 trial0 약266MiB→반복 중626MiB→닫은 뒤113MiB, JS heap도 감소한다. 이는 특정 제품 누수/원인의 확정 증거가 아니다.
+- HELLO_AGENT_SMOKE_MEMORY=1 pnpm m5:smoke:project-ui session76128 실행. 독립 userData/작은 임시 프로젝트, 실제 sidecar+renderer이며 에이전트 호출0회. 설정·편집·저장·diff·두 채팅 흐름 PROJECT_FLOW_COMPLETE 뒤60초 측정과 정상 종료 완료. I6OV6Z/result.json 및 memory.json은 idle420298752 bytes(약400.8MiB), peak580616192(약553.7MiB), retained delta43679744(약41.7MiB). idle 기준400MiB 초과로 FAIL/exit1, shutdown accepted다.
+- 작은 native 흐름의 peak가800MiB 이내여도 대형/반복 합성 peak929MiB FAIL을 대체하지 않는다. 현재 다음 조사 축은 기본 프로세스별 idle 기여와 반복 대형 모델 로드의 최대 사용량으로 구분한다. 측정 범위/기준 변경 및 제품 기능 축소는 하지 않았다. 실제 공급자 재시험 승인 대기, UI/G6/Windows/출시 잔여 범위 유지. main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (최적화 후 renderer 메모리 재측정)
+
+- 기준e59ae16, 기존9월 archive만 dirty. 직전 턴은115개 회귀/빌드/로컬 커밋으로 진척했다. 새 실제 모델 승인 응답이 없어 재실행하지 않았다. 대신 pnpm m5:measure:renderer --diagnostic --memory session86613을 실행했다. production renderer 재빌드+합성 bridge/독립 userData이며 계정·sidecar·실제 agent 호출은 없다. DevTools/heap sampling/강제GC 없이 측정했다.
+- 증거 .artifacts/m5-performance/renderer-2026-10-08T00-20-14.030Z-48173.json, FAIL/exit1, gateEligible false. idle RSS416989184 bytes(약397.7MiB), peak974553088 bytes(약929.4MiB),60초 뒤 retained 증가분0. 실패는 peakRssBytes 하나며 tree/file/diff/input 시간·DOM 기준은 충족했다. diff 색인 최적화만으로 G6 peak 기준800MiB를 해소하지 못했다. 이전보다 높은 단일 peak를 특정 변경의 회귀로 단정하지 않는다.
+- 다음: 큰 편집 모델/worker/renderer 메모리 기여와 반복 탐색 과정의 최대 사용량을 조사하되 실제 앱 자손을 측정에서 빼거나 기준을 임의 변경하지 않는다. 현재 실연결 재시험 승인 대기·UI/G6/Windows/출시 잔여 범위 유지. 프로젝트/인증정보 변경0, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (내장 agent 억제·stream 진단 묶음 마감)
+
+- 기준837b2a2+직전 변경. 이전 턴은 Claude 독립 승인 확인과 Codex 고정 stream 진단/회귀 구현으로 진척했다. core vendor_observation106/106, Node smoke9/9 PASS. CARGO_BUILD_JOBS=4 cargo build -p hello-agent-sidecar --locked -j4 PASS로 최신 debug sidecar에 반영했다. diff 검사 PASS. 이 증거는 실제 계정 응답 성공이나 출시 gate 합격이 아니다.
+- Claude 내장 agent 억제/정책digest/개별 확장 진단과 Codex stream 진단·회귀 및 관련 기록만 로컬 커밋한다. 기존9월 archive는 제외한다. 실제 모델 호출0회, main/push 없음. 다음: 새 승인된 각1회 실행으로 Claude extensions·Codex 후속 이벤트를 확인하고 남은 앱 기능/G6/UI/Windows 범위를 진행한다.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 검토 완료·Codex stream 진단)
+
+- 기준837b2a2와 기존 dirty 확인. 직전 턴은 공식 Claude 내장 agent 억제 요청/정책 digest 갱신으로 진척했다. 동일 readonly 검토자는 공식 옵션과 기존 init/tools 거절 유지에 APPROVE, 실행/빌드 없음. 실제 init extensions의 구체 항목과 해결 여부는 아직 미확정이다.
+- Karpathy 지침으로 Codex stream 해석 오류 및 RequiresHandling 거절 시 고정 이벤트 분류를 전달한다. thread status/token usage/turn·item 시작·완료/message·reasoning/request resolved/provider error/other frame의 로컬 문자열만 기록하며 원문 method나 payload를 출력하지 않는다. 입력 수락·예산·권한·성공/종료 계약은 그대로다. 비공개 메서드 비출력·실패 sticky 회귀 및 smoke exact whitelist를 추가했다.
+- diff 검사 PASS, 새 검사·빌드는 Claude 변경과 다음 묶음으로 수행한다. 실제 모델 호출0회/main/push 없음. 다음: 최신 빌드·회귀 후 승인된 실제 증거로 후속 알림을 결속하고 앱 잔여 UI/G6/Windows 작업을 계속한다. 이번 진단만으로 실제 실패 원인 해결을 주장하지 않는다.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 내장 agent 등록 억제 요청)
+
+- 기준837b2a2, 기존 실측기록/9월 archive 보존. 직전 턴은 Codex turn stream·Claude init extensions로 실패 경계를 좁힌 진척이다. 공식 https://code.claude.com/docs/en/sub-agents 의 Built-in subagents 절을 열람해 비대화/SDK 모드에서 CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1로 내장 타입을 제거하는 옵션을 확인했다. 현재 launch는 이 값을 주지 않으면서 init agents가 비어 있기를 요구했다. 실제 실패 항목이 agents인지 아직 미확정이다.
+- Karpathy 지침으로 signed ClaudeCommand에 해당 고정 env를 추가하고 requested_policy_digest의 environment 식별을 v2-no-builtin-agents로 갱신했다. --tools/권한/MCP·skills·plugins·agents 거절/종료 검사는 유지한다. extensions 진단을 다섯 개별 항목으로 나누고 고정 whitelist/field 회귀를 갱신했다. discovery의 세션 실행도 같은 ClaudeCommand를 쓰며 단순 version/auth 조회는 변경하지 않는다.
+- diff 검사 PASS, 새 테스트·빌드는 다음 묶음 검증 대상이다. 동일 readonly 검토자에게 범위 한정 검토 요청, 실제 실행0회/해결 주장 없음. 다음: 검토 결과 반영·Codex 후속 출력 조사·묶음 실행 파일 갱신. 현재 실제 응답/G6/UI/Windows/출시 미완료, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (상태 알림 수정 후 승인 실측)
+
+- 사용자 새 각1회 승인으로 최신 debug sidecar session68106 실행. hello-agent-live-riCLPP/result.json은 두 로그인 connected/두 RUN_ACCEPTED 뒤 모두 failed/cleanExit/응답 없음, 임시 원본 불변, shutdown accepted, FAIL/exit1이다. Codex agent_run_e1126176fa7e4da79ebfb5605455f0da, Claude agent_run_fe67c96b58c64915a837ad9a4c2e5335, 채팅 chat_1f8e9ee0c46a4dc495ef601b5e33df9f.
+- Codex 진단은 이전 turn start notification shape에서 turn stream으로 진척했다. 시작 교환은 통과했으나 후속 출력/관측 실패 원인은 미확정이다. Claude는 init extensions로 좁혀져 초기화 frame은 해석됐고 mcp_servers/skills/plugins/agents/plugin_errors 중 적어도 하나가 비어 있지 않아 거절됐다. 어느 항목인지, 내장 항목인지 외부 설정 유입인지는 이 고정 라벨만으로 미확정이며 검사 완화 없이 조사한다. 원문/인증정보 출력 없음.
+- 승인된 횟수는 소진됐다. 추가 실제 실행 없이 Codex 후속 알림과 Claude 확장 목록/시작 옵션 계약을 조사한다. 기능 완료 아님. 코드311f12a, diff 최적화837b2a2 로컬 커밋 완료. 이번 실측 기록과 기존9월 archive는 미커밋으로 남기며 main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (diff 색인 임시 객체 최적화 마감)
+
+- 앞서 검증한 diff-view 변경을 별도 로컬 커밋으로 정리한다. 색인에서 표시하지 않을 행 객체를 생성하지 않으며 실제 페이지 행·번호·fallback은 유지한다. 동일 변경의6/6 회귀 PASS를 재사용하며 새로운 기능/안전 경계 변경은 없다. Electron 메모리 기준 초과를 해결했다는 주장은 하지 않는다.
+- 실제 공급자 시험 session68106은 별도로 진행 중이고 이 UI 최적화와 무관하다. 기존9월 archive 제외, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (호환·진단 묶음 검증)
+
+- 기준8fa871f 위 Codex 상태 알림/Claude 진단 변경을 묶어 core vendor_observation105/105, Node smoke9/9 PASS. debug sidecar build PASS로 실행 파일을 갱신했다. Codex 처리 변경은 이전 동일 readonly 검토자 APPROVE이며 Claude 변경은 기존 동일 거절 조건에 고정 라벨을 추가한 진단이다. diff 검사 PASS.
+- 이전 턴은 Claude 진단 구현/회귀 추가와 원문 보존 아카이브로 진척했다. 관련 코드·10월 기록만 로컬 커밋하며 diff-view/기존9월 archive는 제외한다. 사용자 새 각1회 실측 승인을 받아 시험을 시작했다. 실제 결과는 후속 기록으로 남긴다. 제품/G6/Windows 합격 아님, main/push 없음.
+
+### 2026-10-08 · by GPT-6 Astra (Claude 초기 세션 고정 진단 보강)
+
+- 기준8fa871f+Codex 상태 알림 수정. 이전 턴은 호환 구현/104개 회귀/독립 승인으로 진척했다. Karpathy 지침으로 channel state/send/receive, session budget/tag/before-init/event 및 init shape/identity/cwd/model/permission/tools/extensions/capabilities를 고정 라벨로 구분했다. 거절 조건·권한·종료 계약과 원문 비출력은 유지하며 smoke whitelist/비공개 값 비노출 회귀를 추가했다.
+- 새 Claude 변경은 diff 검사 PASS, Rust/Node 검사·빌드는 후속 묶음 대상으로 남긴다. 실제 원인 해결/연결 성공 미확인, 모델 호출0회. 다음: 묶음 검증·산출물 갱신, 승인된 실제 증거 및 G6/UI/Windows 잔여 범위. 기존 diff-view/9월 archive 보존, main/push 없음.
+- 기록 추가로500줄 초과하므로 기존 상단10월7~8일 기록 전체를 docs/archive/history-2026-10.md로 원문 이동했다. 고정 섹션은 보존했다.
+
 ### 2026-10-08 · by GPT-6 Astra (Codex thread 상태 알림 호환 구현)
 
 - 기준8fa871f, 이전 턴은104개 검사 이전의 진단 검증/실측/커밋으로 진척했다. OpenAI Docs로 https://learn.chatgpt.com/docs/app-server 를 검색·열람하고 현재 CLI 생성 ServerNotification.json의 ThreadStatus/ThreadActiveFlag를 대조했다. thread/status/changed는 공식 알림이나 기존 시작/stream 경로가 처리하지 못했다. 실제 kUIIHP 수신 원문이 없어 이번 실패 원인이라고 확정하지 않는다.
