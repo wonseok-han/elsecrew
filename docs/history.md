@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (트리·파일 반복 수집과 지연 실패 확정)
+
+- fb5445e의 같은 수집기로 --tree-file 준비1+본10회 순차 실행을 완료했다. AyEMnF/measurement.json의 trials11 모두 정상 종료confirmed·fixtureCleaned=true다. /private/tmp/hello-agent-packaged-tree-repeated.log와 OS 임시 hello-agent-packaged-performance-AyEMnF에 원시값·로그·각 trial JSON/PNG 포인터를 보존하고 생성 fixture는 매회 제거했다. 사용자 프로젝트/모델 호출 없음.
+- 본10회 p95 treeRoot1132.40ms(1000ms 초과 FAIL), treeExpand99.90ms/fileEditable366.70ms/DOM362(각 기준 이내). 트리 진입은7·8회에1111.90/1132.40ms를 관측했고 제외하지 않았다. 기존 idle 메모리 초과도 유지한다. 부분 packaged 진단이며 전체G6/실계정/Windows 합격 아님.
+- 다음은 반복 시험 추가보다 get_tree_from_active→bridge→renderer 트리 진입 비용 분리·수정이다. 해당 함수는 capability 기반 디렉터리 전 항목 분류/정렬 후 페이지를 반환함을 읽었으나 아직 원인이나 수정안을 확정하지 않았다. 제품 코드 변경 없음, diff PASS. 사용자9월 archive/main/push 경계 보존, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (패키지 대형 diff 반복 수집 완료)
 
 - e7541b5 위 Karpathy 최소 범위로 m5-packaged-performance.mjs를 추가했다. 고정 --diff/--tree-file 시나리오를 준비1+본10회 순차 실행하고 source HEAD/실제 asar·sidecar 지문·종료·fixture 치수를 대조한다. 불완전 관측/불확실 종료는 다음 실행을 막으며 정상 종료·PID 부재 확인 후 자체 fixture3디렉터리만 정리하고 JSON/PNG/로그는 유지한다. 원본·계정·모델 호출 없음.
