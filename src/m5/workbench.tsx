@@ -311,7 +311,20 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
           <div className="m5-tab-list" role="tablist" aria-label={t("m5.editor.tabs")}>
             {snapshot.tabs.map((tab) => (
               <div className="m5-editor-tab" key={tab.path}>
-                <button type="button" role="tab" title={tab.path} aria-selected={snapshot.activePath === tab.path} onClick={() => controller.openFile(tab.path)} disabled={!admissionReady}>
+                <button type="button" role="tab" title={tab.path} aria-selected={snapshot.activePath === tab.path} tabIndex={snapshot.activePath === tab.path ? 0 : -1}
+                  onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
+                  onKeyDown={event => {
+                    if (event.altKey || event.ctrlKey || event.metaKey || snapshot.actionBlocked) return;
+                    const tabs = Array.from(event.currentTarget.closest(".m5-tab-list")!.querySelectorAll<HTMLButtonElement>('button[role="tab"]:not(:disabled)'));
+                    const index = tabs.indexOf(event.currentTarget);
+                    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+                      : event.key === "ArrowRight" ? (index + 1) % tabs.length
+                      : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : -1;
+                    if (next < 0) return;
+                    event.preventDefault();
+                    tabs[next]?.focus();
+                    tabs[next]?.click();
+                  }} onClick={() => controller.openFile(tab.path)} disabled={!admissionReady}>
                   <span className="m5-editor-tab-name">{fileName(tab.path)}</span> {tab.saveState !== "clean" && <span className="m5-editor-tab-dirty" aria-label={t("m5.editor.dirty")}>●</span>}
                 </button>
                 <button type="button" className="m5-close-tab" aria-label={t("m5.editor.close", { path: tab.path })} onClick={() => controller.closeTab(tab.path)} disabled={!admissionReady}>×</button>

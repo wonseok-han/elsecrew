@@ -1,5 +1,17 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (다중 파일 키보드 회귀)
+
+- 직전 턴은 파일 탭 이동 구현으로 진척했다.766e186 위 기존 workbench/history 및9월 archive 보존. 기존 Chromium fixture의 네 파일을 이용해 Home/End·좌우 끝 순환·선택/초점 일치·Tab 진입점 하나를 검증하는 시나리오를 추가했다.
+- tsc --noEmit 및 renderer build PASS(session21628), GUI 권한 환경 renderer-mount-smoke2/2 PASS(session16159). 새 키보드 시나리오는 저장된 파일 기준이며 미저장 파일 전환 보존·긴 경로 시각 배치는 별도 미검증이다. 전체 시안/G6/제품 완료가 아니다. diff 검사 PASS.
+- 해당 구현/회귀/history만 로컬 커밋하며 기존9월 archive는 제외한다. 다음: 미저장 전환·UI 잔여 마감, 메모리/Claude 로그인/Windows/출시 범위. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (파일 탭 키보드 이동)
+
+- 직전766e186은 UI 간격/파일명 수정과 묶음 검증으로 진척했다. 현재 브랜치와 기존9월 archive 보존. 파일 tablist는 role만 있고 방향키/Home/End 동작이 없었으며 모든 파일 탭이 Tab 순서에 들어갔다.
+- 선택된 파일 탭만 tabIndex0으로 두고 좌우 순환/Home/End에서 초점과 기존 클릭 동작을 함께 실행하도록 연결했다. 수정키 조합/작업 차단 상태는 건드리지 않고 초점 진입 시 nearest 스크롤로 탭을 보이게 한다. 저장·닫기·파일 읽기 계약은 변경하지 않았다.
+- diff 검사만 수행한 구현 체크포인트. 다중 파일 키보드/스크롤과 타입·실제 화면 회귀는 후속 UI 묶음 대상이다. 다음: 파일 탭 회귀·시안 잔여 마감, 메모리/Claude 로그인/Windows/출시 범위. 실제 계정 호출0회/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (작업대 간격·파일명 묶음 검증)
 
 - 직전 턴은 긴 이름/도구줄 보존 구현으로 진척했다. 기준01adc32와 기존 UI/history/9월 archive 보존. tsc --noEmit 오류 없음, renderer build PASS, editor-state54/54 PASS(session55076). 같은 실행의 renderer smoke는 Electron status null로 실패해 제품 assertion 결과로 보지 않았다.

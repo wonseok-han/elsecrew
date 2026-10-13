@@ -384,6 +384,23 @@ app.whenReady().then(async () => {
         }, 25);
       });
     }
+    const fileTabs = () => [...document.querySelectorAll('.m5-tab-list [role=tab]')];
+    for (const [key, index] of [['Home',0], ['ArrowLeft',3], ['ArrowRight',0], ['End',3]]) {
+      const selected = fileTabs().find(tab => tab.getAttribute('aria-selected') === 'true');
+      selected.focus();
+      selected.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      await new Promise((resolve, reject) => {
+        const deadline = Date.now() + 3000;
+        const timer = setInterval(() => {
+          const tabs = fileTabs();
+          if (tabs[index]?.getAttribute('aria-selected') === 'true' && document.activeElement === tabs[index]) {
+            clearInterval(timer);
+            if (tabs.filter(tab => tab.tabIndex === 0).length !== 1) reject(new Error('file tabs have multiple keyboard entry points'));
+            else resolve();
+          } else if (Date.now() > deadline) { clearInterval(timer); reject(new Error('file tab keyboard selection failed: ' + key)); }
+        }, 25);
+      });
+    }
     const jsonWorker = globalThis.MonacoEnvironment.getWorker('smoke', 'json');
     jsonWorker.terminate();
     document.querySelector('.m5-change-row').click();
