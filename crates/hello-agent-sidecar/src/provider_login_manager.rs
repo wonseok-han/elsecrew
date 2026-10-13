@@ -297,7 +297,6 @@ impl Drop for LoginManager {
 fn invalid() -> SidecarError {
     SidecarError::new("invalidParams", "invalid login request")
 }
-#[cfg(test)]
 fn unavailable() -> SidecarError {
     SidecarError::new(
         "providerUnavailable",
