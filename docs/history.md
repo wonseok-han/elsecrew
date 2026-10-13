@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (공식 설치 실행부 내부 연결)
+
+- 직전743b430은 단계 인계 구현 진척이다. 같은 checkout/dirty를 확인하고 InstallerReservation에 공식 스크립트 실행부를 추가했다. 원장/작업/공급자/동의 후 단계에 결속하고 재실행을 거절한다. 다운로드 내용을 별도 실행 파일로 게시하지 않고 고정 shell의 단일 인자로 전달하며, 기존 spawn gate와 두 owner를 계속 보유한다.
+- macOS sandbox 후보는 파일 쓰기를 기본 거절하고 공급자 설치 디렉터리·임시 폴더만 허용한다. HOME은 기존 사용자 홈이며 앱 전용 고정 버전 설치를 만들지 않는다. 대상 폴더는 no-follow/uid/mode/dev-ino를 확인하고 일반 사용자 설정을 덮어쓰지 않고 필요한 디렉터리만 생성한다. 환경은 명시 HOME/시스템 우선 PATH/TMPDIR/CURL_HOME/locale/비대화형 Codex로 제한한다. 공급자 스크립트가 허용하지 않은 설정 쓰기를 요구하면 실패하며 보호를 완화하지 않는다. 이는 구현 정책이지 실제 OS 경계/공식 installer 호환성 검증 완료가 아니다.
+- 실행은10분/출력1MiB 한도·취소·EOF/exit·자손 종료 확인을 결합한다. 성공은 Verifying까지만 진행하며 서명된 실제 설치 대상 검증·terminal 정리/복구·정확한 동의 계획/IPC/UI는 다음이다. 실패 중에도 대상 capability를 종료 후까지 보유해 교체를 재검사한다. raw 출력은 UI/로그에 보관하지 않는다.
+- Karpathy 지침으로 기존 process owner/gate를 재사용했다. 설정 보존/링크·디렉터리 교체 및 command parameter/env 회귀2개를 추가했다(미실행). 단계 전체 연결을 위한 일반 cargo check PASS3.30초 후 대상 보유 위치를 보강했으며 그 최종 보강의 재컴파일·테스트/독립 검토는 묶음 검증에 남긴다. rustfmt/diff 검사만 추가 수행했다. 실제 다운로드/설치/로그인/모델 실행 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 단계 인계와 공식 스크립트 영향 확인)
 
 - 직전1a57ead는 다운로드 worker 구현 진척이다. 같은 checkout/기존 dirty를 재확인하고 완료된 다운로드 owner를 유지한 채 별도 실행 단계 owner를 예약하는 연결을 추가했다. 같은 원장/작업 UUID/공급자·app-data/staging capability·Installing 단계·다운로드 종료 증거가 일치해야 하며 다운로드 잠금을 해제하는 공백을 만들지 않는다. 설치용 scope에서 원장/다운로드를 새로 시작하는 것도 차단했다.

@@ -30,9 +30,13 @@ pub(crate) struct DownloadedScript<'a> {
 /// No installer is launched by reservation. The coordinator must keep both until
 /// a durable terminal result; neither owner is transferable to another journal.
 pub(crate) struct InstallerReservation<'a> {
-    pub(crate) bytes: Vec<u8>,
-    pub(crate) downloader: LoginProcess<'a>,
-    pub(crate) installer: LoginProcess<'a>,
+    pub(super) bytes: Vec<u8>,
+    pub(super) downloader: LoginProcess<'a>,
+    pub(super) installer: LoginProcess<'a>,
+    pub(super) operation: uuid::Uuid,
+    pub(super) provider: String,
+    pub(super) begun: bool,
+    pub(super) scope: &'a super::InstallScope,
 }
 
 impl<'a> DownloadedScript<'a> {
@@ -59,6 +63,10 @@ impl<'a> DownloadedScript<'a> {
             bytes: self.bytes,
             downloader: self.owner,
             installer,
+            operation: self.operation,
+            provider: self.provider,
+            begun: false,
+            scope: self.scope,
         })
     }
 }
