@@ -10,6 +10,7 @@ const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
 const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
 let largeFileReport;
 let largeTreeReport;
+let confirmationReport;
 const memorySamples = [];
 let memoryPhase = 'idle';
 let memoryTimer;
@@ -74,7 +75,7 @@ function finish(error, details) {
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
-  const result = {root,error:error?.message,...details,...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  const result = {root,error:error?.message,...details,confirmation:confirmationReport,...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
@@ -257,8 +258,17 @@ app.on('browser-window-created', (_event, window) => {
       if(!files.some(file=>fs.readFileSync(file,'utf8')==='edited in snapshot\noriginal\n')) throw new Error('saved snapshot content missing');
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 채팅의 반영 전 변경 목록 보기').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='이 변경 묶음으로 확인 준비'&&!b.disabled)`);
-      await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 변경 묶음으로 확인 준비').click()`);
-      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소'&&!b.disabled)`);
+      const confirmationStarted = performance.now();
+      confirmationReport = {status:'pending',diagnostic:true,gateEligible:false};
+      await run(`(()=>{const button=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='이 변경 묶음으로 확인 준비'); if(!button||button.disabled)throw new Error('confirmation trigger unavailable'); button.click();})()`);
+      try {
+        await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소'&&!b.disabled)`, largeTree ? 65000 : 15000);
+        confirmationReport = {...confirmationReport,status:'ready',readyMs:performance.now()-confirmationStarted};
+      } catch(error) {
+        confirmationReport = {...confirmationReport,status:'failed',elapsedMs:performance.now()-confirmationStarted,ui:await run(`({busy:document.querySelector('.m5-chat-review')?.getAttribute('aria-busy'),statuses:Array.from(document.querySelectorAll('.m5-chat-review [role=status]')).map(e=>e.textContent)})`)};
+        throw error;
+      }
+      console.log(JSON.stringify({stage:'CONFIRMATION_READY',...confirmationReport}));
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='확인 취소').click()`);
       await wait(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='확인 취소')`);
       if(fs.readFileSync(path.join(source,'hello.txt'),'utf8')!=='original\n') throw new Error('preview cancellation changed source');
