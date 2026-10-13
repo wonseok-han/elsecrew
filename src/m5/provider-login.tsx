@@ -4,6 +4,7 @@ import { loginErrorMessage } from "./provider-login-message.ts";
 import { LOGIN_PROVIDERS, readProviderSelection, saveProviderSelection } from "./provider-selection.ts";
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
 import { validateDeviceReport, type DeviceReport } from "./contracts/device-report-v1.ts";
+import { ProviderInstall } from "./provider-install.tsx";
 
 export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
   const { t } = useI18n();
@@ -12,6 +13,8 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
   useEffect(() => { setSelectionExpanded(!compact && selected.length === 0); }, [compact, selected.length]);
   const [draft, setDraft] = useState<LoginProvider[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [installBlocked, setInstallBlocked] = useState(Boolean(window.m5Install));
+  const [checks, setChecks] = useState({ codex: 0, claude: 0 });
   const select = (providers: LoginProvider[]) => {
     if (disabled) return;
     setSaveFailed(!saveProviderSelection(providers));
@@ -39,7 +42,9 @@ export function ProviderLogin({ disabled, compact = false }: {disabled: boolean;
       {saveFailed && <p role="status">{t("m5.setup.agents.saveFailed")}</p>}
     </details>
     {!selectionExpanded && saveFailed && <p className="m5-notice" role="status">{t("m5.setup.agents.saveFailed")}</p>}
-    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={provider} disabled={disabled} provider={provider}/>)}
+    <ProviderInstall disabled={disabled} providers={selected} onBlockChange={setInstallBlocked}
+      onCheck={provider => setChecks(current => ({ ...current, [provider]: current[provider] + 1 }))}/>
+    {LOGIN_PROVIDERS.filter(provider => selected.includes(provider)).map(provider => <ProviderConnection key={`${provider}:${checks[provider]}`} disabled={disabled || installBlocked} provider={provider}/>)}
   </>;
 }
 function DeviceCheck({ compact }: { compact: boolean }) {

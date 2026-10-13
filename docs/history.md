@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 동의·진행 화면 연결)
+
+- 직전 대화는 Hello, Agent와 Codex/Claude 데스크톱 앱을 구분한 설명이며 개발 진척은 아니었다. 실제 HEAD58ce024·m5/coding-agent-ide와 기존 dirty를 확인하고 에이전트 선택 화면에 공용 설치 패널을 연결했다. 공급자별 계획 준비, 정확한 쓰기 위치 표시, 계획 ID별 체크 동의, 설치/취소, 진행·결과·복구 필요·미지원 상태와 설치 후 로그인 확인 버튼을 ko/en으로 추가했다.
+- 한 설치 manager에 한 조회 루프를 사용한다. 진행/응답 불명 상태만 주기 조회하고 start 요청은 자동 재전송하지 않는다. 불명/동의/진행/복구 상태에서는 이 화면의 로그인 요청을 비활성화하며 복구 잠금 해제 기능을 가장하지 않는다. 이는 UI 억제이며 이미 시작된 로그인/실행을 중단하거나 backend 동시 실행 배제를 구현한 것은 아니다. 실제 설치 제품 경로는 계속 비활성이다.
+- Karpathy·React 지침에 따라 기존 연결 컴포넌트와 CSS 색상 변수를 재사용하고 중복 요청/언마운트 뒤 상태 갱신을 방지했다. renderer tsc --noEmit PASS. 실제 UI/신규 설치 회귀/전체 빌드·독립 검토는 기능 묶음 검증에 남겼다. 실제 설치·계정 호출·Rust 캐시 생성 없음, 기존 dirty 보존/main 병합/push 없음.
+- 다음: 설치와 로그인/actual runtime의 backend 상호 배제, 중단된 설치의 안전한 복구 흐름 연결 후 설치 파동 통합 검증. 전체 제품 완료는 아니며 실제 Claude 작업·UI 시안 완성·G6/Windows/출시 항목도 유지한다.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 typed IPC와 비활성 제품 경로)
 
 - 직전736452e는 요청 manager 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 provider.install의 정확한 요청/계획/상태 TypeScript 검증과 m5Install preload→현재 main frame→sidecar client→Rust manager 경로를 연결했다. 임의 명령/경로/URL·추가 필드·공급자/설치 위치 불일치·작업 ID 없는 실행 상태를 거절한다. plan/operation UUID와 필드 이름을 기존 Rust 출력에 맞췄다.

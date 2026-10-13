@@ -25,6 +25,20 @@ button, input, textarea, select {
   font: inherit;
 }
 
+.m5-provider-install { margin: 8px 20px; padding: 16px; border: 1px solid #3a414d; border-radius: 12px; background: #202630; color: var(--m5-control-text); }
+.m5-provider-install header, .m5-install-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.m5-provider-install header { justify-content: space-between; }
+.m5-provider-install p { margin: 10px 0; }
+.m5-provider-install button { background: var(--m5-control-bg); color: var(--m5-control-text); border: 1px solid #64799f; border-radius: 8px; padding: 8px 12px; }
+.m5-provider-install button:hover:not(:disabled) { background: var(--m5-control-hover); }
+.m5-provider-install button:disabled { opacity: .5; cursor: not-allowed; }
+.m5-provider-install form { margin-top: 12px; padding-top: 10px; border-top: 1px solid #3a414d; }
+.m5-provider-install label { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.m5-provider-install input[type="checkbox"] { flex: 0 0 auto; margin-top: 3px; }
+.m5-provider-install code { overflow-wrap: anywhere; white-space: pre-wrap; }
+.m5-provider-install details { margin-top: 12px; color: #b8c2ce; }
+.m5-provider-install summary { cursor: pointer; }
+
 .m5-workbench {
   min-height: 100vh;
   height: 100vh;
