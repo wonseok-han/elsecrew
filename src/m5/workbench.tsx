@@ -365,10 +365,13 @@ function M5WorkbenchReady({ bridge }: { bridge: SupportedM5Bridge }) {
               {snapshot.diffSummary && <ChangeFileList key={`${snapshot.project.id}:${snapshot.workspace?.workspaceIdentity ?? "project"}`} entries={snapshot.diffSummary.entries} selected={snapshot.diffFile?.path} disabled={!admissionReady || snapshot.actionBlocked} onOpen={path => { void controller.openDiff(path); }} />}
               {snapshot.diffFile && <DiffDetails descriptor={snapshot.diffFile} text={snapshot.diffText} canOpen={admissionReady && !snapshot.actionBlocked} onOpen={path => { void controller.openFile(path); }}
                 canDiscuss={admissionReady && !snapshot.actionBlocked && Boolean(snapshot.workspace) && chatController.canAppendFollowup() && !chat.followups?.[chat.activeChat?.chatId ?? ""]?.request}
-                onDiscuss={path => {
+                onDiscuss={(path, side, line) => {
                   const current = controller.snapshot();
                   if (!admissionReady || current.actionBlocked || !current.workspace || current.diffFile?.path !== path) return;
-                  if (chatController.addReviewReference(current.workspace, t("m5.diff.reference", { path }))) controller.revealConversation();
+                  const reference = side && line !== undefined
+                    ? t("m5.diff.lineReference", { path: side === "before" ? current.diffFile.oldPath ?? path : path, side: t(`m5.diff.${side}`), line })
+                    : t("m5.diff.reference", { path });
+                  if (chatController.addReviewReference(current.workspace, reference)) controller.revealConversation();
                 }} />}
             </>
           ) : <Empty text={t("m5.editor.chooseProject")} />}
@@ -705,7 +708,7 @@ function MonacoEditor({ tab, readOnly, onChange, onSave }: { tab: EditorTab; rea
   return <>{failed && <section className="m5-error" role="alert"><strong>{t("m5.feedback.failed")}</strong><p>{t("m5.feedback.help")}</p><textarea aria-label={t("m5.editor.preserved")} readOnly value={tab.text} style={{ width: "100%", minHeight: 240, boxSizing: "border-box" }} /><button type="button" onClick={() => setAttempt(value => value + 1)}>{t("m5.feedback.retry")}</button></section>}<div className="m5-monaco" ref={host} style={failed ? { display: "none" } : undefined} /></>;
 }
 
-function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string) => void }) {
+function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss }: { descriptor: NonNullable<ReturnType<ProjectEditorController["snapshot"]>["diffFile"]>; text: string; canOpen: boolean; onOpen: (path: string) => void; canDiscuss: boolean; onDiscuss: (path: string, side?: "before" | "after", line?: number) => void }) {
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
@@ -714,6 +717,9 @@ function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss 
   const pages = indexed.pageCount;
   const current = Math.min(page, pages - 1);
   const visible = useMemo(() => indexed.page(current), [indexed, current]);
+  const lineNumber = (side: "before" | "after", line: number | null) => line !== null && canDiscuss
+    ? <button type="button" className="m5-diff-line-reference" title={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} aria-label={t("m5.diff.discussLine", { side: t(`m5.diff.${side}`), line })} onClick={() => onDiscuss(descriptor.path, side, line)}>{line}</button>
+    : line;
   return (
     <section className="m5-diff-details" aria-label={t("m5.diff.title")}>
       <strong>{descriptor.path}</strong>
@@ -722,10 +728,11 @@ function DiffDetails({ descriptor, text, canOpen, onOpen, canDiscuss, onDiscuss 
       <p>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</p>
       {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
         <p>{t("m5.diff.help")}</p>
+        {canDiscuss && <p>{t("m5.diff.lineHelp")}</p>}
         <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
         <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
           <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
-            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{row.before}</td><td>{row.after}</td><td><code>{row.text}</code></td></tr>)}
+            {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{lineNumber("before", row.before)}</td><td>{lineNumber("after", row.after)}</td><td><code>{row.text}</code></td></tr>)}
           </tbody></table>
         </div>
         {pages > 1 && <nav className="m5-diff-pages" aria-label={t("m5.diff.pages")}>
