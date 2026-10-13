@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (유휴 메모리 비용 대조·시험 환경 차이 확인)
+
+- 88d224e에서 별도 새 Electron 프로세스의 blank/preload/product 대조 도구를 추가하고 각1초 안정 후5회 RSS를 측정했다. 빈 창 최대340.5MiB, 시험 preload368.6MiB, 제품 화면431.1MiB였다. product의 GPU약93.8/renderer128.2MiB, blank GPU58.5/renderer91.3MiB로 증가가 양쪽에 분산된다. 단회 진단 대조이며 차이를 정확 인과 기여량·누수·출시 합격으로 단정하지 않는다.
+- 실제 electron/main.ts는 sandbox:true지만 기존 performance fixture는 Node require/crypto/Buffer 의존으로 sandbox:false다. 실제 제품 메모리 gate를 주장하기 전에 시험 bridge를 실제 sandbox 조건에 맞추는 작업이 필요하다. 제품 보호/기능/기준값은 바꾸지 않았다. 증거 idle-{blank-91001,preload-91113,product-91000}.json은 .artifacts/m5-performance에 보존한다.
+-3개 시험 모두 exit0/제품 DOM mount 확인, script syntax/diff PASS. 종료 후 해당 임시 userdata3개만 삭제한다. 다음은 sandbox 일치 fixture와 성능 재측정/메모리 개선, Claude 실연결·G6/출시다. 사용자 archive 변경 보존, 실제 계정/모델/main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (비프로파일링 메모리 기준 초과 재현)
 
 - 직전541d210은 묶음 UI 검증 진척이다. 같은 HEAD에서 DevTools/DOM counters/heap sampling 없이 준비1회+측정10회/닫은 뒤60초 대기를 실행했다. 사용자 archive dirty를 보존해 diagnostic=true이며 출시 gate 증거는 아니다. renderer-2026-10-13T08-34-53.660Z-83256.json의 RSS idle453197824B(약432.2MiB)/peak852557824B(약813.1MiB)는400/800MiB 기준 FAIL, retained delta0은 기준 이내다. 이전 프로파일링 진단의402.7MiB를 제품 합격으로 대체할 수 없다.
