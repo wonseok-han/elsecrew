@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (snapshot 동기화 병목 실측·제한 병렬화 초안)
+
+- 직전5242eb2는 대형 실패 계측/원문 롤오버로 진척했다. 같은 native 시험70464/FkxwK2의 sidecar59380을 macOS sample로3초 관측했다. main2250표본 중 materialize_snapshot2131, materialize_regular_blob→sync_all1915(하위fcntl1914)로 파일별 내구성 동기화가 주된 대기 위치다. 원시 증거 /private/tmp/hello-agent-sidecar-59380.sample.txt. 이 관측 실행은 다시60초 snapshot timeout으로FAIL/exit1·shutdown accepted였다.
+- 원본 보호/내구성 검사를 제거하지 않고 unpublished staging의 완성 파일4개씩 sync_all을 scoped thread로 수행하는 초안을 추가했다. 각 batch 전부 join·끝잔여 join 이후만 기존 검증/공개로 진행하며 spawn실패/workerpanic은 오류로 전파한다. cargo check PASS/session57335로 CapFile Send 포함 컴파일 확인, 독립 정적 검토 APPROVE. 아직 실제 실행파일에는 반영하지 않았다.
+- 구현 체크포인트로만 커밋하며 성능/기능 합격은 아니다. 다음: 실패 주입/동기화 완료 회귀와 같은 대형 native 재시험. G6/RSS·Claude/Windows/출시 전체 목표 미완료. 기존9월 archive 보존, 사용자 프로젝트/실제 계정 호출/main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (대형 반영 확인 시간 계측·기록 롤오버)
 
 - 직전60fccd8은 workspace 감시 중단 처리로 진척했다. 반영 확인 준비의 클릭 가능 여부·완료 시간·실패 시 busy/status를 native smoke 결과에 남기도록 보강했다. 대형 모드 관측65초는 제품 제한 변경이 아니며 원본 적용 옵션은 켜지 않았다.

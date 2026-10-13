@@ -3553,6 +3553,7 @@ impl ProjectManager {
             largest_blob: 0,
         };
         let mut folded_paths = BTreeSet::new();
+        let mut pending_sync = Vec::with_capacity(4);
         let mut record = Vec::new();
         loop {
             record.clear();
@@ -3641,15 +3642,19 @@ impl ProjectManager {
                         ))
                     })?;
             } else {
-                materialize_regular_blob(
+                pending_sync.push(materialize_regular_blob(
                     staging,
                     &entry.path,
                     entry.mode == "100755",
                     size,
                     &mut cat_stdout,
-                )?;
+                )?);
+                if pending_sync.len() == 4 {
+                    sync_materialized_files(&mut pending_sync)?;
+                }
             }
         }
+        sync_materialized_files(&mut pending_sync)?;
 
         drop(cat_stdin);
         let (ls_status, ls_stderr) = ls_child.finish().map_err(|error| {
@@ -4327,7 +4332,7 @@ fn materialize_regular_blob(
     executable: bool,
     size: u64,
     input: &mut BufReader<GitStdout>,
-) -> Result<(), ProjectFailure> {
+) -> Result<CapFile, ProjectFailure> {
     let mut options = CapOpenOptions::new();
     options
         .write(true)
@@ -4363,10 +4368,39 @@ fn materialize_regular_blob(
     file.flush().map_err(|error| {
         ProjectFailure::recovery(format!("could not flush materialized file: {error}"))
     })?;
-    file.sync_all().map_err(|error| {
-        ProjectFailure::recovery(format!("could not sync materialized file: {error}"))
-    })?;
-    Ok(())
+    Ok(file)
+}
+
+fn sync_materialized_files(files: &mut Vec<CapFile>) -> Result<(), ProjectFailure> {
+    // Only unpublished staging files enter this bounded batch. Every started
+    // sync is joined even on failure, before staging cleanup or publication.
+    std::thread::scope(|scope| {
+        let mut workers = Vec::with_capacity(files.len());
+        let mut failure = None;
+        for file in files.drain(..) {
+            match std::thread::Builder::new().spawn_scoped(scope, move || file.sync_all()) {
+                Ok(worker) => workers.push(worker),
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+        for worker in workers {
+            let result = worker.join().unwrap_or_else(|_| {
+                Err(std::io::Error::other("snapshot sync worker panicked"))
+            });
+            if let Err(error) = result {
+                failure.get_or_insert(error);
+            }
+        }
+        match failure {
+            Some(error) => Err(ProjectFailure::recovery(format!(
+                "could not sync materialized file: {error}"
+            ))),
+            None => Ok(()),
+        }
+    })
 }
 
 #[cfg(not(unix))]
