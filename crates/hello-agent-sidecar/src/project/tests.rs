@@ -5330,6 +5330,53 @@ fn close_abandons_without_deletion_and_new_open_never_reuses_path() {
 }
 
 #[test]
+fn watcher_scan_slices_match_complete_scan_and_allow_restart() {
+    let root = TempDir::new().unwrap();
+    for index in 0..20 {
+        let child = root.path().join(format!("dir-{index}"));
+        fs::create_dir(&child).unwrap();
+        fs::write(child.join("file.txt"), b"content").unwrap();
+    }
+    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let expected = snapshot_tree(&capability).unwrap();
+    let mut scan = WatchScan::new(&capability).unwrap();
+    assert!(!scan.advance(0).unwrap());
+    assert!(scan.snapshot.is_empty());
+    let mut turns = 0;
+    loop {
+        let before = scan.snapshot.len();
+        let done = scan.advance(3).unwrap();
+        assert!(scan.snapshot.len() - before <= 3);
+        assert!(scan.pending.len() <= 2, "retain ancestors, not siblings");
+        turns += 1;
+        if done { break; }
+        assert!(turns < 100);
+    }
+    assert!(turns > 1);
+    assert!(scan.snapshot == expected);
+    assert!(scan.pending.is_empty());
+    let mut canceled = WatchScan::new(&capability).unwrap();
+    assert!(!canceled.advance(1).unwrap());
+    drop(canceled);
+    assert!(snapshot_tree(&capability).unwrap() == expected);
+}
+
+#[test]
+fn watcher_scan_skipped_names_consume_slice_budget() {
+    let root = TempDir::new().unwrap();
+    for index in 0..20 {
+        fs::write(root.path().join(format!(".hello-agent-save-{index}")), b"").unwrap();
+    }
+    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let mut scan = WatchScan::new(&capability).unwrap();
+    assert!(!scan.advance(2).unwrap());
+    assert!(scan.snapshot.is_empty());
+    assert!(!scan.pending.is_empty());
+    while !scan.advance(2).unwrap() {}
+    assert!(scan.snapshot.is_empty());
+}
+
+#[test]
 #[cfg(unix)]
 fn watcher_entry_metadata_does_not_follow_external_or_dangling_links() {
     let root = TempDir::new().unwrap();

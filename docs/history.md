@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (분할 파일 감시 스캔 구현 체크포인트)
+
+- ac409b6에서 Karpathy 최소 범위로 WatchScan 상태와 advance(budget)를 구현했다. iterator·부모 capability·수집 결과를 보관하고 회차별 항목 수를 제한하며 무시 이름/디렉터리 종료도 예산을 소비한다. 모든 sibling 디렉터리를 미리 열지 않고 DFS 조상만 유지한다. nofollow metadata/자식 디렉터리 검증/10,000항목 초과 거절은 유지한다.
+- 기존 snapshot_tree는 이 구현을 끝까지 호출하므로 아직 dispatcher 양보나 제품 지연 개선은 연결되지 않았다. 다음은 WatchState에 진행 중 scan을 결속하고 초기 완료/변경/오류·overflow·종료 시 보수적인 rescan 알림과 상태 폐기를 연결하는 것이다. 분할 중 경로/원장 변경과 초기 감시 공백을 조용히 성공으로 처리하지 않아야 한다.
+- 분할 결과 일치·회차 한도·중단 후 재시작·무시 항목의 예산 소비 회귀2개를 추가했다. CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 cargo check --release -p hello-agent-sidecar --tests PASS(/private/tmp/hello-agent-watch-slices-check.log), diff PASS. 테스트 실행·독립 안전 검토·패키지 성능 확인은 실제 요청 루프 연결 뒤 묶어서 수행한다. 구현 체크포인트이며 gate/제품 완료 아님. 사용자9월 archive 보존, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (첫 트리 진입과 후속 요청 지연 분리)
 
 - eb09719의 최신 패키지에서 기존 cold 지표를 그대로 측정한 뒤 같은 폴더 재진입3회와 실제 getProjectTree IPC3회를 추가했다. 제품 bridge를 대체하지 않으며 후속 warm 값을 cold p95로 사용하지 않는다. Karpathy 최소 진단 범위로 관측기2파일만 수정했다.

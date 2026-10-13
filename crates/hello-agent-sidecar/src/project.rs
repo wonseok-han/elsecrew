@@ -5524,18 +5524,34 @@ fn remove_capability_temp(parent: &Dir, name: impl AsRef<Path>) {
     let _ = parent.remove_file(name);
 }
 
-fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, ProjectFailure> {
-    let mut pending = vec![(
-        root.try_clone().map_err(|error| {
+struct WatchScan {
+    pending: Vec<(Dir, cap_std::fs::ReadDir, String)>,
+    snapshot: BTreeMap<String, WatchFingerprint>,
+}
+
+impl WatchScan {
+    fn new(root: &Dir) -> Result<Self, ProjectFailure> {
+        let directory = root.try_clone().map_err(|error| {
             ProjectFailure::recovery(format!("could not clone watcher root capability: {error}"))
-        })?,
-        String::new(),
-    )];
-    let mut snapshot = BTreeMap::new();
-    while let Some((directory, prefix)) = pending.pop() {
-        for entry in directory.entries().map_err(|error| {
+        })?;
+        let entries = directory.entries().map_err(|error| {
             ProjectFailure::manifest(format!("could not scan watched directory: {error}"))
-        })? {
+        })?;
+        Ok(Self { pending: vec![(directory, entries, String::new())], snapshot: BTreeMap::new() })
+    }
+
+    // Counts skipped names and exhausted directories too, so a huge directory
+    // of internal names cannot consume an unbounded dispatcher turn. Retain
+    // only ancestors, not a capability for every sibling directory.
+    fn advance(&mut self, budget: usize) -> Result<bool, ProjectFailure> {
+        for _ in 0..budget {
+            let Some((directory, entries, prefix)) = self.pending.last_mut() else {
+                return Ok(true);
+            };
+            let Some(entry) = entries.next() else {
+                self.pending.pop();
+                continue;
+            };
             let entry = entry.map_err(|error| {
                 ProjectFailure::manifest(format!("could not scan watched entry: {error}"))
             })?;
@@ -5577,7 +5593,7 @@ fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, Proje
                 .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|duration| duration.as_nanos())
                 .unwrap_or(0);
-            snapshot.insert(
+            self.snapshot.insert(
                 relative.clone(),
                 WatchFingerprint {
                     kind,
@@ -5585,17 +5601,27 @@ fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, Proje
                     modified_nanos,
                 },
             );
-            if snapshot.len() > WATCH_MAX_ENTRIES {
+            if self.snapshot.len() > WATCH_MAX_ENTRIES {
                 return Err(ProjectFailure::recovery(
                     "watch snapshot exceeds its bounded 10,000-entry capacity",
                 ));
             }
             if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                pending.push((open_real_child_dir(&directory, entry_name)?, relative));
+                let child = open_real_child_dir(directory, entry_name)?;
+                let entries = child.entries().map_err(|error| {
+                    ProjectFailure::manifest(format!("could not scan watched directory: {error}"))
+                })?;
+                self.pending.push((child, entries, relative));
             }
         }
+        Ok(self.pending.is_empty())
     }
-    Ok(snapshot)
+}
+
+fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, ProjectFailure> {
+    let mut scan = WatchScan::new(root)?;
+    while !scan.advance(128)? {}
+    Ok(scan.snapshot)
 }
 
 fn watch_emission(
