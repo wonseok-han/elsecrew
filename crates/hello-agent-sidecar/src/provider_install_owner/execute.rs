@@ -1,6 +1,11 @@
 //! Internal macOS installer execution. Public consent/activation is not wired.
 //! Upstream scripts are trusted installation code, not model-generated commands.
-use super::{download::InstallerReservation, failure, journal::InstallJournal};
+use super::{
+    consent::{self, AuthorizedInstall},
+    download::InstallerReservation,
+    failure,
+    journal::InstallJournal,
+};
 use crate::{
     provider_login_io::OutputChunk,
     provider_profile::{open_absolute_directory, same_directory, LoginProfile},
@@ -36,24 +41,19 @@ pub(super) struct Target {
 }
 
 impl Target {
-    fn prepare(journal: &InstallJournal<'_>) -> Result<Self, SidecarError> {
+    fn prepare(
+        journal: &InstallJournal<'_>,
+        authorization: &AuthorizedInstall,
+    ) -> Result<Self, SidecarError> {
         journal.verify()?;
-        let home_path = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or_else(failure)?;
-        let home = checked_directory(&home_path)?;
+        if journal.operation != authorization.operation()
+            || journal.provider != authorization.provider()
+        {
+            return Err(failure());
+        }
+        let (home_path, home) = authorization.bind_home()?;
         let mut directories = Vec::new();
-        let roots: &[&str] = match journal.provider.as_str() {
-            "codex" => &[".local/bin", ".codex/packages/standalone"],
-            "claude" => &[
-                ".local/bin",
-                ".claude/downloads",
-                ".local/share/claude",
-                ".local/state/claude",
-                ".cache/claude",
-            ],
-            _ => return Err(failure()),
-        };
+        let roots = consent::directories(&journal.provider)?;
         for relative in roots {
             directories.push(prepare_directory(&home_path, relative)?);
         }
@@ -202,6 +202,7 @@ impl InstallerReservation<'_> {
     pub(crate) fn run(
         &mut self,
         journal: &mut InstallJournal<'_>,
+        authorization: &AuthorizedInstall,
         cancel: &AtomicBool,
     ) -> Result<(), SidecarError> {
         journal.verify()?;
@@ -209,6 +210,8 @@ impl InstallerReservation<'_> {
             || journal.phase() != InstallPhase::Installing
             || journal.operation != self.operation
             || journal.provider != self.provider
+            || authorization.operation() != self.operation
+            || authorization.provider() != self.provider
             || !std::ptr::eq(journal.scope, self.scope)
             || !self
                 .downloader
@@ -224,7 +227,7 @@ impl InstallerReservation<'_> {
         }
         let mut held_target = None;
         let result: Result<Option<bool>, SidecarError> = (|| {
-            held_target = Some(Target::prepare(journal)?);
+            held_target = Some(Target::prepare(journal, authorization)?);
             let target = held_target.as_ref().ok_or_else(failure)?;
             let mut command = target.command(&self.provider, &self.bytes)?;
             self.installer.launch_with_barrier(

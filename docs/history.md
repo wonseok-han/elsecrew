@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (단발 설치 동의와 대상 결속)
+
+- 직전edac9d5는 coordinator/기록 보관 구현 진척이다. 실제 checkout/dirty를 확인하고 backend가 고정 공급자·기존 HOME·쓰기 대상 목록으로 만드는180초 단발 설치 계획을 추가했다. 준비는 읽기 전용이며 디렉터리를 생성하지 않는다. 새 계획/닫기/수락 시 이전 token을 폐기하고 잘못된 공급자·만료·중복 수락도 재사용하지 못한다.
+- 계획은 HOME 및 기존 대상 ancestor의 no-follow/소유자/권한/dev-ino capability와 없던 경로를 기억한다. 수락·worker 입장·설치 대상 생성 전에 재검증한다. 기존 폴더 교체/링크/없던 경로 생성은 재동의를 요구한다. 경로는 손실 없이 JSON으로 표시할 수 있어야 하고 PATH 분리 문자/제어문자를 거절한다. GUI가 임의 HOME/URL/명령/설치 스크립트를 넘길 필드는 없다.
+- worker는 이제 raw UUID/provider 대신 복제/역직렬화할 수 없는 AuthorizedInstall을 소비한다. Target은 중간에 HOME 환경을 다시 읽지 않고 동의한 HOME capability를 이어받으며, 표시된 쓰기 폴더와 sandbox 허용 폴더는 같은 고정 목록을 사용한다. 설치는 기존 명령을 갱신할 수 있고 셸 설정 쓰기/로그인 시작은 허용하지 않는다는 표시용 사실도 포함했다.
+- 단발/공급자/만료/준비 무변경·경로 교체/링크 회귀2개를 추가하고 기존 pre-cancel coordinator 회귀를 새 동의 경로로 바꿨다. Karpathy 지침으로 기존 실행 흐름에 권한 객체를 연결했으며 rustfmt/diff만 검사했다. 빌드/테스트·독립 검토는 설치 묶음에 남긴다. 다음: 요청 manager/typed IPC/UI와 재시작 복구. 실제 설치/계정 호출·캐시 생성 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 coordinator와 terminal 기록 보관)
 
 - 직전676bb59는 결과 검증/종료 순서 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 execute_consented 내부 coordinator로 다운로드→설치→결과 검증→terminal 기록/잠금 해제→기록 보관을 연결했다. 다운로드의 정상 실패/취소도 owner를 반환해 cleanup 후 정리하며 중간 Drop으로 영구 recovery 잠금만 남기던 경로를 분리했다. 단계 인계 직후 취소도 installer spawn 전에 처리한다.

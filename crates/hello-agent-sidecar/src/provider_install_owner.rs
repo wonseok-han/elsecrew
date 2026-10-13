@@ -8,6 +8,7 @@ use crate::{
 use cap_std::fs::{Dir, DirBuilder, DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
+pub(crate) mod consent;
 pub(crate) mod download;
 pub(crate) mod execute;
 pub(crate) mod journal;

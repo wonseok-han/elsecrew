@@ -1,6 +1,7 @@
 //! One installation transaction. Internal only: the public manager must first
 //! validate and consume consent for the exact provider/destination/plan.
 use super::{
+    consent::AuthorizedInstall,
     download::{self, DownloadOutcome},
     failure,
     journal::InstallJournal,
@@ -11,14 +12,16 @@ use hello_agent_core::install_lifecycle::InstallPhase;
 use std::sync::atomic::AtomicBool;
 
 /// No renderer-supplied command, script, destination, URL, or credentials.
-/// This does not authorize a new task: callers supply an already-consented ID.
+/// Consumes the non-cloneable authorization, not a caller-asserted consent flag.
 pub(crate) fn execute_consented(
     storage: &Storage,
-    operation: uuid::Uuid,
-    provider: &str,
+    authorization: AuthorizedInstall,
     cancel: &AtomicBool,
     publish: &impl Fn(InstallPhase),
 ) -> Result<InstallPhase, SidecarError> {
+    authorization.revalidate_plan()?;
+    let operation = authorization.operation();
+    let provider = authorization.provider();
     let scope = InstallScope::from_storage(storage)?;
     let execution = scope.execution_scope()?;
     let mut journal = InstallJournal::begin(&scope, operation, provider)?;
@@ -47,7 +50,7 @@ pub(crate) fn execute_consented(
                 // Reserve even if cancellation just arrived: run observes it
                 // before spawn, then the coordinator can finalize both owners.
                 let mut installer = download.reserve_installer(&journal, &execution)?;
-                let run_result = installer.run(&mut journal, cancel);
+                let run_result = installer.run(&mut journal, &authorization, cancel);
                 if run_result.is_err() && journal.phase() != InstallPhase::Stopping {
                     return Err(failure());
                 }
@@ -92,14 +95,15 @@ mod tests {
         let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
         let phases = Mutex::new(Vec::new());
         for _ in 0..2 {
+            let mut consent = super::super::consent::ConsentStore::default();
+            let plan = consent.prepare_at_home("claude", &root).unwrap();
+            let authorization = consent
+                .accept(plan["planId"].as_str().unwrap(), "claude")
+                .unwrap();
             assert_eq!(
-                execute_consented(
-                    &storage,
-                    uuid::Uuid::new_v4(),
-                    "claude",
-                    &AtomicBool::new(true),
-                    &|phase| phases.lock().unwrap().push(phase),
-                )
+                execute_consented(&storage, authorization, &AtomicBool::new(true), &|phase| {
+                    phases.lock().unwrap().push(phase)
+                },)
                 .unwrap(),
                 InstallPhase::Canceled
             );
