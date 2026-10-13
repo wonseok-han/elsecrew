@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패키지 대형 diff 반복 수집 완료)
+
+- e7541b5 위 Karpathy 최소 범위로 m5-packaged-performance.mjs를 추가했다. 고정 --diff/--tree-file 시나리오를 준비1+본10회 순차 실행하고 source HEAD/실제 asar·sidecar 지문·종료·fixture 치수를 대조한다. 불완전 관측/불확실 종료는 다음 실행을 막으며 정상 종료·PID 부재 확인 후 자체 fixture3디렉터리만 정리하고 JSON/PNG/로그는 유지한다. 원본·계정·모델 호출 없음.
+- --diff11회 완료: 본10회 p95 summary432.60ms/firstFile364.10ms로 해당 지연 기준 이내. 1SK0IZ/measurement.json의 trials11 모두 종료confirmed·fixtureCleaned=true, 원본 불변 확인. /private/tmp/hello-agent-packaged-diff-repeated.log 및 OS 임시 hello-agent-packaged-performance-1SK0IZ에 원시값 보존. 기존 idle400MiB 초과로 집계 FAIL/exit1은 유지한다. 이것은 부분 진단이며 전체G6/입력/stream/peak·retained memory/실계정/Windows 합격이 아니다.
+- 실행 후 일반 오류가 지연 초과와 함께 생겨도 임의 계속하지 않도록 허용 오류 문자열을 정확한 기준 초과로 좁혔다. 정상 trial11에는 error가 없어 위 증거에 영향 없고 오류 주입 검증은 미실행이다. syntax/diff PASS. 다음은 tree-file 반복 및 잔여 성능 항목, 사용자9월 archive/main/push 경계 보존·전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (실제 패키지 대형 diff 측정 연결)
 
 - 3c6ec7d의 트리/파일에 이어 Karpathy 최소 범위로 기존 native fixture를 재사용한 --large-diff를 연결했다. 자체 snapshot에만500파일/20,000변경 줄/10MiB patch를 만들고 실제 패키지 변경 패널의 목록/첫 파일을 renderer 시계로 관측한다. 제품 bridge/안전 경계 변경 없음.
