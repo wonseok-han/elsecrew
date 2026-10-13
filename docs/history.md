@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (최신 패키지 통합 흐름 확인·debug 캐시 정리)
+
+- ec0b981에서 기존 시험 프로세스 부재를 확인하고 최신 package/smoke PASS(/private/tmp/hello-agent-package-ec0b981.log). 이어 같은 최신 패키지의 전체 --project 시나리오를 실행했다. aDPxMz의 첫 실행/재시작 모두 종료confirmed/exit0이며 저장 본문·diff·반영복원 별도 동의5항목·두 프로젝트 격리4항목이true다. 직전 미검증으로 남긴 준비 완료 대기 및 첫 프로젝트 복귀 뒤 편집 내용 재확인도 이번 코드로 실행 완료했다. /private/tmp/hello-agent-packaged-final-ec0b981.log 및 OS 임시 hello-agent-packaged-ui-aDPxMz의 result/restart JSON·PNG에 보존한다.
+- restart.png를 직접 확인해 최신 좁은 프로젝트 제목과 두 프로젝트 목록·편집 내용이 표시됨을 관측했다. 재시작 idle460292096B(약439MiB)로400MiB 초과 FAIL은 유지한다. 사용자의9월 archive 변경이 있으므로 clean HEAD G6 합격 아님. CDP 입력이며 물리 키보드/실제 에이전트·중단/전체 성능 collector/Windows·서명배포 검증은 남는다.
+- 빌드/시험 프로세스 부재·일반 디렉터리·미추적을 확인 후 사용자 저장공간 정리 요청에 따라 target/debug4.0GiB만 제거했다. 소스/인증/프로젝트/복구 자료·증거는 보존했고 다음 Rust debug 빌드로 재생성 가능하다. target/release290MiB와 최신 out309MiB 한 벌은 유지한다. diff 검사 PASS, main 병합/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (패키지 다중 프로젝트 순차 격리)
 
 - 816b6ad 위 Karpathy 최소 변경으로 두 번째 임시 Git/고유 파일을 정상 project.open API로 등록하고 기존 UI 시나리오 뒤 첫 프로젝트 닫기→두 번째 열기→첫 채팅 복귀를 연결했다. 3UPviU restart.json의 otherFilesIsolated/otherChatsEmpty/originalChatReopened/otherSourceUnchanged와 기존 재시작·반영복원 검사가true, 두 실행 exit0/종료confirmed다. /private/tmp/hello-agent-packaged-multi-project.log 및 OS 임시 hello-agent-packaged-ui-3UPviU JSON/PNG 보존. idle460472320B로 전체 FAIL 유지한다.
