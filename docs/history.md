@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (최종 원본 보호 검토 착수·이전 패키지 정리)
+
+- cb9e407에서 상시 승인된 읽기 전용 독립 검토자1명(final_application_safety)을 호출했다. application apply/restore/retirement/backup cleanup의 원본 보호·동의 결속·영속 복구와 caller를 현재 코드 기준으로 검토한다. 이 기록 시점 도구 상태는 running이며 합격 여부는 아직 없다. 구현 위임/추가 검토자/모델 호출은 하지 않았다.
+- 이전 제한 환경의 ps 거부를 권한 승인된 읽기 전용 ps로 재확인했다. 해당 out 패키지·시험 sidecar·native smoke 실행은 없었다. out/hello-agent-darwin-arm64는 일반 디렉터리·Git 미추적 빌드 산출물이며 app.asar는10월13일12:47의 이전 빌드였다. 저장공간 정리 요청에 따라 이 경로만 삭제, out308MiB→8KiB 확인. 재빌드 가능하며 사용자 설치 앱·로그인·원본·증거 JSON/로그는 삭제하지 않았다.
+- Mac 잠금 해제 여부를 비차단 질문으로 다시 확인 요청했다. 실제 창 입력/메모리와 Claude 연결 후 실연결, packaged 통합 수집/최종 검증은 여전히 남아 있다. 현재 제품 코드 변경 없음. 사용자9월 archive 변경 보존·diff PASS·main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (프런트 누적 검사와 Electron 빌드)
 
 - c1529cc에서 출시 체크리스트§6과 제품 제안§9를 대조하고 최근 수정의 프런트 누적 검사를 실행했다. npm test 491/491 PASS23.04초, pnpm build의 TypeScript와 기존 Tauri renderer PASS다. 로그는 /private/tmp/hello-agent-node-final-c1529cc.log 및 /private/tmp/hello-agent-build-final-c1529cc.log다.
