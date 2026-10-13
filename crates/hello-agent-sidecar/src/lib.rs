@@ -945,6 +945,15 @@ impl Sidecar {
         if self.maintenance_poisoned && request.method != "system.status" {
             return Err(maintenance_poisoned_error());
         }
+        // This single dispatcher serializes admission before any asynchronous
+        // login, discovery, native run, or installer worker can be reserved.
+        #[cfg(target_os = "macos")]
+        if self.installation_conflicts(&request) {
+            return Ok(HandledRequest::response(error_response(
+                &request, "providerBusy", "requestBlocked",
+                "installation and provider work cannot overlap; check status or request cancellation",
+            )));
+        }
         if self.projects.application_running()
             && !matches!(request.method.as_str(), "system.status" | "app.prepareQuit")
             && !(request.method == "project.catalog" && matches!(request.params["action"].as_str(), Some("applicationStatus" | "chatApplicationStatus" | "applicationHistory" | "cancelApplication")))
@@ -1834,6 +1843,25 @@ impl Sidecar {
             }),
             events: self.g5_events(action.events),
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn installation_conflicts(&mut self, request: &RequestV1) -> bool {
+        if request.method == "provider.install"
+            && matches!(request.params["action"].as_str(), Some("prepare" | "start"))
+        {
+            return self.login.blocks_installation(&self.storage)
+                || self.claude_login.blocks_installation(&self.storage)
+                || !self.agent_runtime.owned_run_ids().is_empty()
+                || !self.pending_agent_starts.is_empty()
+                || !self.pending_agent_capabilities.is_empty()
+                || !self.pending_agent_cancels.is_empty();
+        }
+        let launching = matches!(request.method.as_str(),
+            "agent.getCapabilities" | "agent.getModelChoices" | "run.startAgent")
+            || (request.method == "provider.login"
+                && matches!(request.params["action"].as_str(), Some("diagnose" | "start" | "check" | "recover")));
+        launching && self.install.blocks_provider_launch(&self.storage)
     }
 
     fn handle_agent_request(&mut self, request: RequestV1) -> Result<HandledRequest, SidecarError> {

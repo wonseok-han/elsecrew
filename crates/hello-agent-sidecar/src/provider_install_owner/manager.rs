@@ -221,6 +221,17 @@ impl InstallManager {
         Ok(self.status())
     }
 
+    /// Admission query only: no cancellation, process launch, or evidence removal.
+    pub(crate) fn blocks_provider_launch(&mut self, storage: &Storage) -> bool {
+        self.reap();
+        let _ = self.detect_pending(storage);
+        self.worker.is_some()
+            || matches!(
+                self.snapshot()["state"].as_str(),
+                Some("awaitingConsent" | "recoveryRequired")
+            )
+    }
+
     fn require_idle(&mut self, storage: &Storage) -> Result<(), SidecarError> {
         self.detect_pending(storage)?;
         if self.worker.is_some() || self.snapshot()["state"] == "recoveryRequired" {

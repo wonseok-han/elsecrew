@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치·공급자 실행 상호 배제 연결)
+
+- 직전5aafed9는 설치 UI 구현 진척이다. 같은 checkout/기존 dirty를 확인하고 단일 dispatcher에서 설치 준비/시작과 로그인·진단·discovery·native run 예약이 겹치지 않도록 입장을 연결했다. 두 login worker, runtime 소유 작업과 pending start/discovery/cancel, 두 공급자 pending 파일을 설치 전 확인한다. 종료된 worker는 회수하되 panic/복구 필요·빈 기록·깨진 링크·조회 실패는 차단으로 보존한다.
+- 반대 방향은 install worker/동의 대기/복구 기록이 새 공급자 프로세스 요청을 막는다. status/cancel 및 기존 종료·복구 API는 이 입장 검사로 차단하지 않는다. 사용자 인증 내용을 읽거나 프로필을 새로 생성하거나 기존 프로세스를 강제 종료하지 않는다. 이 검사는 같은 sidecar의 직렬 입장 경계이며 외부 터미널/다른 앱 데이터 인스턴스에서 임의로 시작한 공급자까지 배타 제어한다고 주장하지 않는다.
+- 두 공급자 미종료 기록과 설치 broken-link 증거 보존, 새 실행 거절/상태·취소 허용의 process-free 회귀를 추가했다(미실행). Karpathy 지침으로 기존 manager/owner 상태를 재사용했다. 이번에는 diff 검사만 수행했고 Rust 컴파일/새 회귀/독립 검토는 설치 파동 묶음에 남겼다. 실제 설치 활성화·계정 호출·캐시 생성 없음, 사용자 dirty 보존/main/push 없음.
+- 다음: 중단된 설치의 조회·안전 복구 연결, 이후 설치 통합 검증·독립 검토와 결함 수정. 전체 제품 목표와 미완료 UI/실제 Claude/G6/Windows/출시 범위는 유지한다.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 동의·진행 화면 연결)
 
 - 직전 대화는 Hello, Agent와 Codex/Claude 데스크톱 앱을 구분한 설명이며 개발 진척은 아니었다. 실제 HEAD58ce024·m5/coding-agent-ide와 기존 dirty를 확인하고 에이전트 선택 화면에 공용 설치 패널을 연결했다. 공급자별 계획 준비, 정확한 쓰기 위치 표시, 계획 ID별 체크 동의, 설치/취소, 진행·결과·복구 필요·미지원 상태와 설치 후 로그인 확인 버튼을 ko/en으로 추가했다.

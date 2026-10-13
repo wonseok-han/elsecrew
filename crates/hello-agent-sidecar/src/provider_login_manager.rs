@@ -254,6 +254,33 @@ impl LoginManager {
         result
     }
 
+    /// Installation must not replace a binary while diagnosis/login/runtime owns it.
+    /// Inspect only the app-data fence, without preparing or reading credentials.
+    pub(crate) fn blocks_installation(&mut self, storage: &Storage) -> bool {
+        self.reap_finished();
+        if self.worker.is_some()
+            || self.view.lock().unwrap_or_else(|e| e.into_inner())["error"]
+                == "providerLoginRecoveryRequired"
+        {
+            return true;
+        }
+        let Some(parent) = storage.path().parent() else {
+            return true;
+        };
+        let Ok(directory) = crate::provider_profile::open_absolute_directory(parent) else {
+            return true;
+        };
+        let name = if self.claude {
+            "claude-login.pending"
+        } else {
+            "codex-login.pending"
+        };
+        match directory.symlink_metadata(name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            _ => true,
+        }
+    }
+
     pub(crate) fn prepare_quit(&mut self) -> bool {
         self.cancel.store(true, Ordering::Release);
         self.code.lock().unwrap_or_else(|e| e.into_inner()).take();

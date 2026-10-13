@@ -55,6 +55,44 @@ fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
     assert!(sidecar.storage.projection_records("lock").unwrap().is_empty());
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn installation_admission_preserves_fences_and_allows_status_and_cancellation() {
+    let (root, _) = database();
+    let path = root.path().canonicalize().unwrap().join("hello-agent.sqlite3");
+    let mut sidecar = Sidecar::new(&path, "installation_exclusion".into()).unwrap();
+    let request = |method: &str, params: Value| request_value("installation_exclusion", "check", method, params);
+    for name in ["codex-login.pending", "claude-login.pending"] {
+        let fence = path.parent().unwrap().join(name);
+        std::fs::write(&fence, b"unconfirmed").unwrap();
+        for action in ["prepare", "start"] {
+            assert!(sidecar.installation_conflicts(&request("provider.install", json!({"action":action}))));
+        }
+        assert!(!sidecar.installation_conflicts(&request("provider.install", json!({"action":"status"}))));
+        assert!(!sidecar.installation_conflicts(&request("provider.install", json!({"action":"cancel"}))));
+        assert_eq!(std::fs::read(&fence).unwrap(), b"unconfirmed");
+        std::fs::remove_file(&fence).unwrap();
+    }
+    assert!(!sidecar.installation_conflicts(&request("provider.install", json!({"action":"prepare"}))));
+    let fence = path.parent().unwrap().join("provider-install.pending");
+    // Even a broken link is evidence, not an absent installer.
+    std::os::unix::fs::symlink("missing-installation-record", &fence).unwrap();
+    for method in ["agent.getCapabilities", "agent.getModelChoices", "run.startAgent"] {
+        assert!(sidecar.installation_conflicts(&request(method, json!({}))));
+    }
+    for action in ["start", "check", "diagnose", "recover"] {
+        assert!(sidecar.installation_conflicts(&request("provider.login", json!({"action":action}))));
+    }
+    for action in ["status", "cancel", "submitCode"] {
+        assert!(!sidecar.installation_conflicts(&request("provider.login", json!({"action":action}))));
+    }
+    for method in ["run.cancelAgent", "recovery.inspectAgent", "recovery.resolveAgent", "app.prepareQuit"] {
+        assert!(!sidecar.installation_conflicts(&request(method, json!({}))));
+    }
+    assert_eq!(std::fs::read_link(&fence).unwrap(), std::path::Path::new("missing-installation-record"));
+    assert!(sidecar.storage.projection_records("run").unwrap().is_empty());
+}
+
 #[test]
 fn catalog_preparation_dispatch_binds_inspection_and_retries_completion() {
     let (_root, path) = database();
