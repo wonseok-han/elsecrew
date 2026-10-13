@@ -4,6 +4,7 @@ const { pathToFileURL } = require("node:url");
 const { mkdtempSync, writeFileSync } = require("node:fs");
 const { measureMessagePaint } = require("../scripts/m5-message-paint-probe.cjs");
 const { probeInstallConsent } = require("./m5-install-ui-probe.cjs");
+const { probeCleanupConsent } = require("./m5-cleanup-ui-probe.cjs");
 const { tmpdir } = require("node:os");
 
 const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-smoke-"));
@@ -154,6 +155,7 @@ app.whenReady().then(async () => {
     recoveryButton('이 준비 기록 종료').click();
     await ${waitFor("document.querySelector('[aria-label=\"프로젝트 시작 실패 복구\"]').textContent.includes('실패한 준비 기록을 종료했어요')", "preparation retry acknowledgment")};
     if (document.querySelector('[aria-label="실패한 준비 종료 확인"]')) throw new Error('completed preparation confirmation retained');
+    globalThis.cleanupConsentReport = await (${probeCleanupConsent.toString()})();
     [...document.querySelectorAll('.m5-project-catalog-list button')].find(b => b.textContent === '다음 목록').click();
     await ${waitFor("document.querySelector('.m5-project-catalog-list li span')?.textContent === '/work/smoke'", "next catalog page")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
@@ -630,6 +632,7 @@ app.whenReady().then(async () => {
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  process.stdout.write(JSON.stringify({ cleanupConsent: await window.webContents.executeJavaScript('globalThis.cleanupConsentReport') }) + '\n');
   if (process.env.M5_MEASURE_PARALLEL_PAINT === "1") {
     const measurement = await window.webContents.executeJavaScript('globalThis.parallelPaintReport');
     const evidencePath = resolve(userData, 'parallel-message-paint.json');

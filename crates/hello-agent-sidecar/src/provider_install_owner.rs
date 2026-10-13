@@ -1,5 +1,5 @@
 //! Installation-only binding for the existing durable process owner.
-//! Not wired to public IPC yet. No provider config or credentials live here.
+//! Used by the macOS explicit-consent installer. No credentials live here.
 use crate::{
     provider_login_process::LoginProcess,
     provider_profile::{open_absolute_directory, same_directory, LoginProfile},

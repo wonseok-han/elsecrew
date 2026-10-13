@@ -1,4 +1,4 @@
-//! Request/lifecycle management, not publicly activated yet.
+//! Explicit-consent installation lifecycle; enabled by the macOS dispatcher.
 use super::{consent::ConsentStore, journal, worker, InstallScope};
 use crate::{SidecarError, Storage};
 use hello_agent_core::install_lifecycle::InstallPhase;

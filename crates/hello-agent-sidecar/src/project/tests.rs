@@ -41,7 +41,8 @@ fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
     assert_eq!(f.manager.application_capabilities().result["enabled"], cfg!(target_os = "macos"));
-    assert!(!f.manager.application_cleanup_enabled);
+    assert_eq!(f.manager.application_cleanup_enabled, cfg!(target_os = "macos"));
+    f.manager.application_cleanup_enabled = false;
     let mut owner = Confirmations::default();
     let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_retire_backup").unwrap();
@@ -72,6 +73,7 @@ fn retirement_preserves_completed_record_and_lock_but_rejects_pending() {
 fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
     use application::review::{backup::{staging, cleanup}, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
+    f.manager.application_cleanup_enabled = false;
     assert!(staging::stop_after_reservation_for_test(&f.manager, &mut f.storage, ReviewTarget::Project(&f.project_id), &review_id).is_err());
     let pending = staging::inspect(&f.manager, &f.storage, &f.project_id, &review_id).unwrap();
     let name = pending["name"].as_str().unwrap();
@@ -104,8 +106,8 @@ fn abandoned_backup_cleanup_rechecks_file_and_keeps_durable_result() {
 fn completed_current_backup_stays_protected_until_explicit_retirement() {
     use application::review::{confirmation::Confirmations, intent, ReviewTarget};
     let (mut f, review_id) = prepared_backup_fixture();
-    // Exercise enabled public dispatch without enabling deletion in the product.
-    f.manager.application_cleanup_enabled = true;
+    // Exercise the approved macOS default through public manager methods.
+    assert!(f.manager.application_cleanup_enabled);
     let mut owner = Confirmations::default();
     let (token, _) = owner.open(&f.manager, &f.storage, ReviewTarget::Project(&f.project_id), &review_id).unwrap();
     let grant = owner.prepare_backup(&f.manager, &mut f.storage, &token, "req_cleanup_ready").unwrap();

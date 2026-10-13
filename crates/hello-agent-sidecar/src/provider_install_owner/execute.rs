@@ -1,4 +1,4 @@
-//! Internal macOS installer execution. Public consent/activation is not wired.
+//! macOS installer execution behind destination-bound explicit consent.
 //! Upstream scripts are trusted installation code, not model-generated commands.
 use super::{
     consent::{self, AuthorizedInstall},

@@ -1,5 +1,7 @@
 # Hello, Agent 기술 설계
 
+> **명시 설치·업데이트(2026-10-13 사용자 활성화 승인)**: macOS `provider.install`은 준비→쓰기 위치 표시→180초 단발 동의→공식 스크립트 다운로드/실행→서명·경로 검증→종료 확인·원장 보관으로 연결된다. 시작/로그인·실행은 상호 배제하며 응답 유실에서 시작을 자동 재전송하지 않는다. 고정 쓰기 폴더와 임시 폴더만 허용하는 deny-default sandbox, 기존 hardlink 거절, 설정 파일 쓰기 금지, 단계별 프로세스 fence·명시 복구를 유지한다. read-only 기기 진단은 OS/CPU/RAM/앱 저장공간을 표시한다. 임시 HOME에서 Claude2.1.296/Codex0.162.1 신규·재설치를 검증했으며 사용자 HOME·다른 버전/Windows·인증 성공을 보장하는 증거는 아니다. 마지막 재검증 뒤 hostile same-UID 외부 교체까지 완전히 방어하는 모델은 아니며 Windows 설치는 비활성이다.
+
 > **현재 검증 경계(2026-10-13)**: macOS 일반 실행 경로에서 Codex `gpt-6.1-sol/medium`의 작은 planning 작업은 실제 응답·cleanExit·임시 원본 불변·앱 정상 종료를 확인했다(c5dde79, 974Ab5). Claude는 같은 시험의 요청 ID에 결속된 로그인 확인이 idle여서 실행하지 못했다. 아래 과거의 내부 후보/미연결 설명을 최신 Codex planning 경로의 상태로 인용하지 않는다. 도구 쓰기·승인·명시 중단·복구 전체와 두 공급자의 완성은 별도 미완료다.
 >
 > **현재 작업대(3ade00b)**: 도킹 패널 메뉴·집중/복귀, 파일명 말줄임·키보드 탭 이동, 마지막 diff 선택 보존·목록 갱신 시 이전 본문 무효화, 대화 기록과 후속 입력 영역 분리를 구현했다. 합성 Chromium 회귀로 미저장 탭 전환 및 낮은 대화 패널 배치를 확인했다. 전체 시안 충실도 합격은 아직 아니다.
@@ -14,7 +16,9 @@
 
 > 최신 부분 성능 관측(2026-10-07, 2612b74): synthetic renderer10회에서 표시 시간·DOM 기준은 이내지만 전체 Electron subtree RSS는 idle399.94MiB/peak1036.83MiB/60초 잔류delta128.38MiB로 **FAIL**이다. 아래 예전 PASS 수치를 현행 메모리 합격으로 인용하지 않는다. 실제 native sidecar/agent·stream paint·전체 G6 합격 증거는 아니다. 증거와 한계는 `docs/history.md` 및 `procedures/m5-performance.md`에 기록한다.
 
-> 원본 적용·복구 활성화(2026-10-07): macOS의 `source_writes_enabled`를 활성화했다. immutable 검토/일회성 확인, 정확한 복구 fingerprint, 원장 잠금, 디스크 여유 및 취소 검사와 no-follow/atomic rename writer를 그대로 거친다. 새 archive의 before payload와 apply의 after staging만 추가 할당으로 계산하고 restore는 볼륨별 순차 rename 여유를 사용한다. 백업 삭제/기록 정리는 별도 `application_cleanup_enabled=false`로 유지한다. 임시 프로젝트 실제 UI에서 편집·diff·원본 반영·복원·두 채팅 전환을 확인했다. Windows/실제 사용자 프로젝트/출시 합격을 뜻하지 않는다.
+> 원본 적용·복구 활성화(2026-10-07): macOS의 `source_writes_enabled`를 활성화했다. immutable 검토/일회성 확인, 정확한 복구 fingerprint, 원장 잠금, 디스크 여유 및 취소 검사와 no-follow/atomic rename writer를 그대로 거친다. 새 archive의 before payload와 apply의 after staging만 추가 할당으로 계산하고 restore는 볼륨별 순차 rename 여유를 사용한다. 임시 프로젝트 실제 UI에서 편집·diff·원본 반영·복원·두 채팅 전환을 확인했다. Windows/실제 사용자 프로젝트/출시 합격을 뜻하지 않는다.
+
+> 명시 백업 정리(2026-10-13 사용자 활성화 승인): 독립 검토·관련 회귀 이후 사용자 승인으로 macOS에서만 `application_cleanup_enabled=true`를 사용한다. 현재 복구점은 완료돼도 삭제하지 않으며, 별도의 명시 retirement가 terminal 기록을 이력으로 옮긴 뒤에만 과거 백업 정리 후보가 된다. 정리는 최신 대상/fingerprint·원장 참조·단일 파일 신원·idle 상태를 재검사하고 pending 영속 기록→unlink→디렉터리 fsync→deleted 기록 순서로 진행한다. 응답 유실/중단 뒤에는 자동 재시도하지 않고 재조회 및 새 동의를 요구한다. 원본·잠금·과거 이력은 보존하고 자동 삭제/보존 기간 정책은 추가하지 않았다. Rust 공개 경로/결정적 중단 후 DB 재열기와 합성 Chromium의 동의 흐름 증거는 실제 사용자 자료·OS 전원 장애·패키지 종단 합격과 구분한다.
 
 > macOS native 실행 연결(2026-10-07): 일반 `--stdio`가 native provider runtime을 선택한다. Rust/TypeScript의 독립된 고정 ready/status 목록은 `run.startFixture`를 포함하지 않고 fixture 목록 변경을 상속하지 않는다. sidecar/Electron은 새 fixture 실행을 거절하고 작업대는 데모 시작을 숨긴다. 기존 fixture 취소/복구는 유지한다. 비-macOS는 기존 blocked/G4 gate를 유지한다. 이 연결과 무계정 stdio 회귀는 실제 계정·유료 모델·패키지 UI 합격 증거와 별개다.
 
@@ -36,7 +40,7 @@
 
 > 처음 시작하기의 에이전트 선택: 저장된 유효 선택이 없으면 Codex/Claude Code를 명시적으로 고르기 전 공급자 진단·계정 확인을 호출하지 않는다. 하나만 선택해도 연결 설정을 진행하며 다른 공급자는 나중에 추가할 수 있다. `hello-agent.m5.providers.v1`은 공급자 이름만 저장하는 UI 선호값이고 인증/실행 권한·프로젝트 역할 snapshot을 대체하지 않는다. 저장 실패는 현재 선택을 유지하되 다음 실행에 재선택이 필요함을 알린다. 선택 추가는 기존 연결 컴포넌트를 재생성하지 않으며 진행 중 연결을 숨기는 해제 기능은 이번에 추가하지 않았다.
 
-> 로그인 사전 진단: `provider.login`의 고정 `diagnose` 요청은 기존 로그인과 같은 pinned 실행 파일 후보만 검사한다. 인증/프로필 생성·CLI 실행·설치·네트워크 요청 없이 `diagnosing`→`installed` 또는 실패를 반환하며 renderer는 성공 뒤 기존 계정 확인을 별도로 수행한다. `installed`는 지원하는 로그인 프로그램의 현재 파일 검사 결과일 뿐 인증·모델 실행 가능 증거가 아니다. 진단은 진행 중 worker와 복구 필요 상태를 덮어쓰지 못한다. Claude 설치 디렉터리 부재와 미지원/변조 후보를 구분한다. 자동 설치·전체 기기 진단은 아직 연결되지 않았다.
+> 로그인 사전 진단: `provider.login`의 고정 `diagnose` 요청은 기존 로그인과 같은 pinned 실행 파일 후보만 검사한다. 인증/프로필 생성·CLI 실행·설치·네트워크 요청 없이 `diagnosing`→`installed` 또는 실패를 반환하며 renderer는 성공 뒤 기존 계정 확인을 별도로 수행한다. `installed`는 지원하는 로그인 프로그램의 현재 파일 검사 결과일 뿐 인증·모델 실행 가능 증거가 아니다. 진단은 진행 중 worker와 복구 필요 상태를 덮어쓰지 못한다. Claude 설치 디렉터리 부재와 미지원/변조 후보를 구분한다. 명시 설치·업데이트와 읽기 전용 기기 정보는 별도 경로로 연결되며 이 진단이 자동 설치를 시작하지 않는다.
 
 > 작업대 언어: 기존 I18nProvider/hello-agent.lang 설정으로 앱의 프로젝트·로그인·역할/모델·채팅·복구·권한 요청·파일/검색/diff·편집·패널 배치 안내를 ko/en 전환한다. 대화/코드 원문·경로·모델 ID·기술 상세는 번역하지 않는다. Monaco 자체 내장 메뉴 전체의 번역은 이 범위에 포함되지 않는다.
 >

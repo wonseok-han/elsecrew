@@ -22,6 +22,26 @@ fn database() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn installation_activation_never_starts_without_a_consent_plan() {
+    let (root, path) = database();
+    let instance = "install_activation";
+    let mut session = SidecarSession::new(instance.into(), agent_runtime::AgentRuntime::blocked());
+    session.start_admission(&path);
+    wait_until_admitted(&mut session);
+    let response = session.handle_request(request_value(instance, "status", "provider.install", json!({"action":"status"}))).unwrap().response.unwrap();
+    assert!(response.ok);
+    assert_eq!(response.result.unwrap()["state"], if cfg!(target_os="macos") { "idle" } else { "unsupported" });
+    let response = session.handle_request(request_value(instance, "unconsented", "provider.install", json!({
+        "action":"start", "provider":"codex", "planId":"11111111-2222-3333-4444-555555555555"
+    }))).unwrap().response.unwrap();
+    if cfg!(target_os="macos") { assert!(!response.ok); }
+    else { assert_eq!(response.result.unwrap()["state"], "unsupported"); }
+    for name in ["provider-install.pending", "provider-install-execute.pending", "provider-install-journal-v1.jsonl", "provider-install-staging-v1"] {
+        assert!(!root.path().join(name).exists(), "unconsented action created {name}");
+    }
+}
+
+#[test]
 fn native_session_negotiates_adapter_without_granting_unscoped_execution() {
     let (_root, path) = database();
     let instance = "native_admission_contract";

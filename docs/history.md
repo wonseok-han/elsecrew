@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (사용자 승인된 macOS 설치·백업 정리 활성화)
+
+- 직전60d886b는 공식 임시 설치/UI 호환 진척이다. 실제 HEAD/dirty와 현재 제품 비활성 지점을 대조했다. 사용자가 이번 턴에 macOS 설치·업데이트 및 명시 동의 방식 백업 정리의 제품 활성화를 각각 승인했다. 같은 설치 검토자는60d886b TLS literal/시험 변경의 추가 차단 결함 없음으로 보고했으며 활성화 diff 확인은 후속이다.
+- macOS provider.install의 manager enabled를 true로, ProjectManager의 cleanup 기본값을 cfg!(macos)로 연결했다. Windows 미지원, 단발 계획/동의·provider 상호 배제·종료 확인·원장 잠금·current 복구점 보호·명시 retirement 후 별도 삭제 동의는 그대로다. 이 코드 변경이 사용자 HOME에서 설치/삭제를 실행한 것은 아니며 실제 사용자 자료/계정은 건드리지 않았다.
+- 기존 미커밋 cleanup 회귀의 disabled override·Chromium probe·현행 문서 변경은 이번 승인 범위에 맞춰 통합한다. 현재 복구점 보호 회귀는 test-only 활성화 대신 실제 macOS 기본값을 사용한다. 사용자 archive/history-2026-09.md의21줄은 범위 밖으로 보존한다. 문서의 자동 설치/기기 진단 미연결 설명도 별도 연결/명시 동의 동작으로 정정했다.
+- installation_5 PASS, cleanup_16 PASS/1 ignored, retirement2 PASS, diff PASS. 기존 UI2 PASS와 공식 임시 설치2 PASS는 동작 변경 없는 부분의 증거로 재사용하며 전체 QA/Windows/출시 합격으로 확대하지 않는다. Karpathy 지침으로 활성화 지점/회귀만 바꿨다. 다음은 활성화 commit의 독립 최종 확인, 전체 성능/UI/실제 Claude 로그인·실행 및 남은 G6·Windows/배포이며 main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 화면·공식 임시 설치 호환 통과)
 
 - 직전053aced는 실패 진단/화면 묶음 검증 진척이다. 실제 checkout/dirty를 확인하고 기존 Chromium smoke에 설치 동의 전 무실행, 공급자/계획 변경 시 재동의, 정확 쓰기 위치, 이중 클릭/응답 유실 후 단1회 시작, 상태 조회 후 취소·작업 ID 결속 복구를 추가했다. UI2 PASS10.1초이며 가짜 설치 응답이다. Karpathy 지침으로 기존 화면/시험을 재사용했다.
@@ -158,7 +165,7 @@
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
 
-- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. 시스템 openssl.cnf literal 읽기 보완의 후속 검토/제품 활성화는 남으며 enabled=false 유지. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
+- **설치 활성화 경계(2026-10-13)**: deny-default/제한 read·exec·DNS/443와 기존 shared-file admission·새 file-link 거절로 이전 blocker2건은 독립 정적 재검토에서 해소됐다. OS toy probe와 실제 임시 HOME의 Claude2.1.296/Codex0.162.1 신규 설치+재설치도 통과했다. TLS literal 보완의 검토 후 사용자 명시 승인으로 macOS enabled=true를 연결했으며 최종 활성화 diff 재검토는 후속이다. 이 경로는 hostile same-UID 외부 프로세스가 마지막 경로 재검증 뒤 교체하는 공격까지 완전히 보장하지 않는다. 실제 사용자 HOME·다른 OS/버전·로그인/모델 성공으로 확대하지 않는다.
 
 - **설치/기기 진단 연결(2026-10-13)**: d8b131d는 읽기 전용 OS/CPU/RAM/userData 여유 공간 표시만 연결했다(설치 준비/실행 가능 판정 아님). Codex 선택기는 기존 bundle→레거시 ~/.local/bin 직접 pair→공식 ~/.codex/packages/standalone 링크의 concrete pair 순서이며 기존 서명/no-follow/identity 검증을 유지한다. 465901d의 test-only helper 참조는 수정하고 일반 cargo check·독립 정적 검토를 통과했다. 전체 자동 설치 worker/launcher 회귀/실제 설치 및 기기 UI 검증은 미완료다.
 
@@ -168,7 +175,7 @@
 
 - **2026-10-13 native 대형 diff 최신 결과**: 초기46Z4Lw의 목록9892ms·첫 파일9983ms 초과 이후 요청 단위 Git batch 재사용을 적용했다. b6a68d1의 수동 조회 공유는 반복 시험에서236/500개 stale 목록을 만들어 철회했다. 매번 새 조회＋summary generation 적용 후 SOlVal은 준비1회/측정10회 전부 정상 종료, p95 목록1155.3ms·첫 파일816.6ms로 기준 이내다. 개발 빌드 diagnostic/NOT_READY이며 packaged G6 합격은 아니다.
 
-- **2026-10-13 macOS 명시 정리 활성화 승인 대기**: 공개 경로·중단 후 DB 재열기·합성 UI 동의/응답 유실 검증과 독립 APPROVE 완료. 커밋 권한 검토가 별도 사용자 승인을 요구해 거절했고 application_cleanup_enabled=false로 복원했다. 승인된 구현 정책과 제품 활성화 승인을 구분하며 임의 재시도하지 않는다. current terminal 복구점 보호·명시 retirement/별도 정리·자동 삭제 없음·원본/잠금/이력 보존 계약은 유지한다.
+- **2026-10-13 macOS 명시 정리 활성화 승인**: 공개 경로·중단 후 DB 재열기·합성 UI 동의/응답 유실 검증과 독립 APPROVE 후 사용자가 제품 활성화를 별도로 승인했다. application_cleanup_enabled는 macOS에서만 true다. 이전 승인 대기는 해소됐으며 current terminal 복구점 보호·명시 retirement/별도 정리·자동 삭제 없음·원본/잠금/이력 보존 계약은 유지한다. 실제 사용자 백업을 이 개발 작업에서 삭제하지 않는다.
 
 - **2026-10-13 대형 프로젝트 최신 단일 관측**: 084ceae batch sync 반영 debug sidecar의 h5k4N8 native UI는 1만 파일에서 편집/저장/diff·반영 확인 취소·두 채팅·정상 종료까지 PASS했다. snapshot33.4초/treeRoot977ms/expand75ms다. 아래 이전 실패를 최신 실행 결과로 반복하지 않되, 단일 diagnostic을 반복 성능/G6 합격으로 확대하지 않는다.
 

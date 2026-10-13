@@ -1040,10 +1040,10 @@ impl Sidecar {
                 })
             }
             "provider.install" => {
-                // Activation requires installation boundary review and integration
-                // verification. Merely negotiating this method grants no install.
+                // User-approved macOS activation. Each execution still requires
+                // a fresh destination-bound consent plan; status never installs.
                 #[cfg(target_os = "macos")]
-                let result = self.install.request(&self.storage, &request.params, false)?;
+                let result = self.install.request(&self.storage, &request.params, true)?;
                 #[cfg(not(target_os = "macos"))]
                 let result = serde_json::json!({"state":"unsupported","operationId":null,"provider":null,"plan":null,"error":null,"cancelRequested":false});
                 Ok(project::ProjectAction { result, ..project::ProjectAction::default() })

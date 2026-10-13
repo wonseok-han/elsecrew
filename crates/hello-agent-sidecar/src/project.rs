@@ -840,7 +840,7 @@ impl ProjectManager {
             // Enabling the capability never bypasses review, consent, or fencing.
             source_writes_enabled: cfg!(target_os = "macos"),
             // Destructive retention/cleanup has its own activation review.
-            application_cleanup_enabled: false,
+            application_cleanup_enabled: cfg!(target_os = "macos"),
             application_failure: None,
             application_cancel: Default::default(),
             #[cfg(target_os = "macos")]
