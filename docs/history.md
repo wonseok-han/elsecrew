@@ -1,5 +1,19 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (native 대형 파일 경로와 RSS 진단 연결)
+
+- 직전 턴은 최신 native 편집/반영/복원·전체 재시작 확인으로 진척했다. 빈 화면에서는 Monaco가 생성되지 않고 활성 파일에서만 초기화되며 cleanup이 기존에 연결돼 있음을 확인했다. 기존 합성 반복 reload의 RSS만으로 제품 누수로 단정하거나 무근거 최적화를 추가하지 않았다.
+- Karpathy 최소 변경 원칙에 따라 기존 UI smoke에 HELLO_AGENT_SMOKE_LARGE_FILE 옵션을 추가했다. 별도 생성 프로세스에서 기존5MiB/100000줄 UTF-8 fixture를 실제 임시 Git 프로젝트에 쓰며 측정 앱에 fixture 문자열 캐시를 남기지 않는다. 실제 sidecar 읽기→Monaco 본문/입력 요소→두 frame 관측과1500ms 초과 실패를 연결했다. 단일 diagnostic/gateEligible false이며 전체 packaged G6가 아니다.
+- session2978/3vUnaG는 대형 파일779.1ms 및 기존 전체 흐름 PASS/정상 종료. 메모리 결합 session15040/hFoeVG는984.8ms·편집/반영/복원 성공 뒤 idle474234880B(약452MiB)로 FAIL/exit1. peak734674944B(약701MiB),60초 잔류 delta55934976B(약53MiB)는 기준 내; shutdown accepted. memory.json에 원시 PID 표본 보존. 임계값 변경/강제 GC/실제 계정 호출 없음.
+- 구문/diff 검사 PASS. 도구·절차와 누적 history를 선택 커밋하며 기존9월 archive 제외. 다음: 개발 실행의 초기 RSS와 실제 packaged 실행 차이 및 G6 collector 연결, Claude/Windows/출시 증거. 현재 실패를 전체 합격으로 바꾸지 않으며 main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (최신 native UI 전체 흐름·앱 재시작 확인)
+
+- 직전012901e는 통합 검사 실패 수정/검증으로 진척했다. 현재 브랜치/변경을 대조하고 e8d81ea 이후 main/preload 제품 변경이 없음을 확인했다. renderer는 c912c07의 빌드, sidecar는 직전 Rust 통합에서 갱신된 debug 산출물을 사용했다. 전체 패키지 재빌드나 G6 성능 시험은 아니다.
+- HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui PASS(session62314). 제가 생성한 PAtFmj 임시 프로젝트/userData만 사용해 시작 화면·설정 초안 취소/저장·재열기·채팅 생성·Monaco 저장·diff·원본 반영·renderer reload 뒤 복원·두 채팅 편집 분리·정상 종료를 확인했다. project.png 직접 열어 실제 생성 화면도 관측했다.
+- 같은 fixture를 새 Electron 프로세스로 연 m5-project-reopen-smoke PASS(session11560). Improve hello/Second task의 편집/원래 내용 복원, 원본 original 유지, 정상 종료 accepted. 증거: /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-project-ui-PAtFmj/{result.json,project.png,reopen-result.json}. 임시 폴더는 증거로 보존하며 설치본을 추가하지 않았다.
+- 실제 계정 호출0회, 제품 코드 변경 없음, 기존9월 archive 보존/main/push 없음. 다음: 아직 미연결인 packaged G6 collector/전체 메모리 실패, Claude 로그인 이후 실연결·Windows 및 출시 검증. 이번 작은 native 프로젝트 성공을 해당 요구의 완료로 대신하지 않는다.
+
 ### 2026-10-13 · by GPT-6 Astra (통합 검사 실패 5건 수정 확인)
 
 - 직전 턴은 Electron22건/프로토콜4건 통과와 Rust 실패 테스트 수정으로 진척했다. 이어 session75596 종료를 확인했다: sidecar574통과/5실패/33ignored,934.67초/exit101. 실패 상세가 모두 앞서 수정한 전제와 일치했다(기능 기본값 true, 빈 백업 폴더, 허용된 vendor 파일명3건).

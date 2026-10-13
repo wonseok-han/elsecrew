@@ -6,6 +6,8 @@ const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
+const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
+let largeFileReport;
 const memorySamples = [];
 let memoryPhase = 'idle';
 let memoryTimer;
@@ -35,6 +37,12 @@ const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 fs.mkdirSync(source);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+if (largeFile) {
+  // Generate outside the measured app so the fixture's cached 5 MiB string
+  // does not become permanent main-process memory in this native measurement.
+  execFileSync('node', ['-e', "require('node:fs').writeFileSync(process.argv[1], require(process.argv[2]).getFileText())",
+    path.join(source, 'large.txt'), path.join(repoRoot, 'tests/m5-renderer-performance-fixture.cjs')]);
+}
 for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPath=/dev/null','-c','user.name=Smoke','-c','user.email=smoke@example.invalid','commit','-qm','fixture']]) execFileSync('/usr/bin/git', args, {cwd:source, env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'0'}});
 app.setPath('userData', path.join(root,'userdata'));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
@@ -46,13 +54,13 @@ function finish(error, details) {
   if (measureMemory) fs.writeFileSync(path.join(root, 'memory.json'), JSON.stringify({
     schemaVersion: 1, diagnostic: true, gateEligible: false,
     scope: 'Native UI Electron root and current descendants, including its sidecar; escaped descendants and agents not measured',
-    fixture: 'Small generated project, two chats; not the G6 large-file or streaming fixture',
+    fixture: largeFile ? 'Generated project with 5 MiB/100000-line file and two chats; no streaming fixture' : 'Small generated project, two chats; not the G6 large-file or streaming fixture',
     intervalMs: 250, closeWaitMs: 60000, samples: memorySamples,
     ...memoryReport, error: memoryError?.message ?? error?.message,
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
-  const result = {root,error:error?.message,...details,...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  const result = {root,error:error?.message,...details,...(largeFile ? {largeFile:largeFileReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
@@ -98,6 +106,21 @@ app.on('browser-window-created', (_event, window) => {
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
+      if (largeFile) {
+        app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
+        largeFileReport = await run(`(async()=>{
+          const start=performance.now();
+          const file=Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('large.txt'));
+          if(!file)throw new Error('large fixture absent'); file.click();
+          while(!document.querySelector('.monaco-editor .view-line')?.textContent.includes('가') || !document.querySelector('.monaco-editor textarea')) {
+            if(performance.now()-start>15000)throw new Error('native large-file open timeout');
+            await new Promise(r=>setTimeout(r,10));
+          }
+          await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+          return {fileEditableMs:performance.now()-start,bytes:5242880,lines:100000,diagnostic:true,gateEligible:false};
+        })()`);
+        console.log(JSON.stringify({stage:'NATIVE_LARGE_FILE',...largeFileReport}));
+      }
       await run(`(()=>{ const d=document.querySelector('.m5-provider-selection'); if(d?.open)d.querySelector('summary').click(); })()`);
       await wait(`document.querySelector('.m5-provider-selection')?.open===false`);
       if(await run(`document.querySelector('.m5-layout-settings')?.open!==false`)) throw new Error('layout settings not initially collapsed');
@@ -266,6 +289,7 @@ app.on('browser-window-created', (_event, window) => {
         memoryReport = { ...summary, actualCloseWaitMs: performance.now() - closedAt, status: summary.failedMetrics.length ? 'FAIL' : 'NOT_READY' };
         if (summary.failedMetrics.length) throw new Error('native diagnostic memory limits exceeded: '+summary.failedMetrics.join(', '));
       }
+      if (largeFileReport?.fileEditableMs > 1500) throw new Error('native diagnostic file-open limit exceeded: '+largeFileReport.fileEditableMs);
       finish(null,{screenshot,text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');

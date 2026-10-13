@@ -24,6 +24,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ## Native UI 작은 프로젝트 메모리 진단
 
+`HELLO_AGENT_SMOKE_LARGE_FILE=1`을 추가하면 별도 생성 프로세스가 동일한 UTF-8 5MiB/100,000줄 fixture를 실제 Git 프로젝트에 넣는다. 실제 sidecar 읽기→Monaco 본문/입력 요소→두 frame 관측까지 renderer 시계로 재며 결과의 `largeFile.fileEditableMs`에 기록한다. 1,500ms 초과는 진단 실패다. 파일 생성용 캐시를 측정 앱의 main에 남기지 않는다. `HELLO_AGENT_SMOKE_MEMORY=1`과 결합하면 해당 파일 열기와 기존 두 채팅 흐름을 RSS 범위에 포함한다. 단일 관측이며 packaged/10회 p95/실제 입력 paint/4 stream 증거는 아니므로 `diagnostic:true`, `gateEligible:false`를 유지한다.
+
 `HELLO_AGENT_SMOKE_MEMORY=1 HELLO_AGENT_SMOKE_APPLY=1 HELLO_AGENT_SMOKE_RELOAD=1 pnpm m5:smoke:project-ui`는 기존 실제 UI 시나리오에 250ms RSS 수집을 추가한다. 시작 화면에서 1초 idle을 수집한 뒤 생성 프로젝트 편집/반영/reload/복원/두 채팅을 실행하고 프로젝트 화면을 정상적으로 닫아 60초 뒤 잔류량을 기록한다. 제품 GC 설정이나 캐시를 변경하지 않는다.
 
 결과는 해당 시험 임시 폴더의 `memory.json`에 원시 PID별 표본과 함께 저장한다. 현재 Electron root의 자손인 sidecar도 합산하지만, 부모를 이탈한 프로세스와 실제 에이전트는 관측 범위 밖이다. 400/800/120MiB 기준 초과는 FAIL로 실행을 끝내며 기준 이내도 메모리 보고서는 `NOT_READY`, `diagnostic:true`, `gateEligible:false`다. 바깥 UI 시나리오의 PASS와 성능 보고서 판정을 구분한다. 작은 파일·한 차례 UI 흐름이므로 대형 파일/4 stream·전체 G6의 대체 증거로 사용하지 않는다. 샘플러 실패나 시나리오 중단 시 불완전 표본과 오류를 보존한다.
