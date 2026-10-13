@@ -67,12 +67,15 @@ const smokeMessages = [{ schemaVersion: 1, messageId: "smoke_initial", chatId: s
 let historyMessageIndex = 0;
 window.m5SmokeAppendMessages = (count) => {
   if (!Number.isSafeInteger(count) || count < 1 || count > 5000) throw new Error("invalid synthetic message count");
+  const emitted = [];
   for (let index = 0; index < count; index++) {
     const eventSequence = smokeMessages[smokeMessages.length - 1].eventSequence + 1;
     const message = { ...smokeMessages[0], messageId: `history_${++historyMessageIndex}`, eventSequence, text: `history message ${historyMessageIndex}` };
     smokeMessages.push(message);
+    emitted.push(message.text);
     for (const listener of chatListeners) listener(message);
   }
+  return emitted;
 };
 
 const unexpected = (method) => async () => { throw new Error(`renderer smoke fixture did not expect ${method}`); };

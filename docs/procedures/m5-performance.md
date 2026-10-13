@@ -40,6 +40,12 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ## 전체 측정값 판정
 
+### 단일 채팅 renderer 입력 스트림 진단
+
+현재 renderer를 빌드한 뒤 `M5_MEASURE_MESSAGE_PAINT=1 M5_RENDERER_DIR="$PWD/.vite/renderer/main_window" node_modules/.bin/electron tests/m5-renderer-smoke-runner.cjs`로 기존 합성 화면 회귀에50회/초·3000메시지 관측을 추가할 수 있다. 관측은 renderer performance.now 발송 시각부터 메시지 DOM이 연속 두 animation frame에 나타날 때까지다. 지연된 발송은 schedulingDelayMs로 보존하며 매 메시지 표본·미관측 ID·최대값을 독립 userData의 message-paint.json에 저장한다.
+
+이 경로는 단일 합성 채팅의 진단 전용(`diagnostic:true`, `gateEligible:false`)이며4개 stream·실제 sidecar/패키징·G6 eventPaintMs를 대신하지 않는다.100ms 초과나 미관측은 실패한다. 기본 화면 회귀에서는 실행되지 않고 실제 계정 호출도 없다. 숨겨진 시험 창의 frame 관측이므로 실제 compositor 표시 시각이라고 주장하지 않는다.
+
 ### Renderer 대형 fixture 실측
 
 개발 중 기존 변경을 보존하면서 수치만 확인하려면 `pnpm run m5:measure:renderer --diagnostic`을 사용한다. 이 모드는 dirty checkout을 허용하되 `diagnostic:true`, `gateEligible:false`와 전후 Git 상태를 기록하고, 기준 초과는 FAIL/1, 기준 이내도 NOT_READY/2로 반환한다. 정식 기본 모드의 clean 조건은 유지한다. 두 모드 모두 별도 임시 userData를 사용하며 경로를 결과에 남긴다. 임시 userData는 진단용으로 보존되고 자동 삭제하지 않는다.

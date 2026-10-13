@@ -1,7 +1,8 @@
 const { app, BrowserWindow, net, protocol, session } = require("electron");
 const { resolve, sep } = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { mkdtempSync } = require("node:fs");
+const { mkdtempSync, writeFileSync } = require("node:fs");
+const { measureMessagePaint } = require("../scripts/m5-message-paint-probe.cjs");
 const { tmpdir } = require("node:os");
 
 const userData = mkdtempSync(resolve(tmpdir(), "hello-agent-renderer-smoke-"));
@@ -563,6 +564,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('.m5-message p')?.textContent === '처음 요청'", "first conversation page still reachable")};
     historyButton('최신 대화').click();
     await ${waitFor("document.querySelectorAll('.m5-message').length === 200 && [...document.querySelectorAll('.m5-message p')].at(-1)?.textContent === 'history message 451' && !document.querySelector('.m5-new-messages')", "return to latest conversation page")};
+    ${process.env.M5_MEASURE_MESSAGE_PAINT === "1" ? `globalThis.messagePaintReport = await (${measureMessagePaint.toString()})({ emit: () => window.m5SmokeAppendMessages(1)[0], visible: () => [...document.querySelectorAll('.m5-message p')].map(node => node.textContent) });` : ""}
     const originalRequest = window.m5Projects.request;
     window.m5Projects.request = input => input.action === 'releaseView' ? Promise.reject(new Error('synthetic release failure')) : originalRequest(input);
     [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '프로젝트 화면 닫기').click();
@@ -570,6 +572,13 @@ app.whenReady().then(async () => {
     if (!document.querySelector('#m5-followup-text') || document.querySelector('h1').textContent !== 'smoke') throw new Error('failed release cleared the project');
   })()`);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (process.env.M5_MEASURE_MESSAGE_PAINT === "1") {
+    const measurement = await window.webContents.executeJavaScript('globalThis.messagePaintReport');
+    const evidencePath = resolve(userData, 'message-paint.json');
+    writeFileSync(evidencePath, JSON.stringify(measurement, null, 2));
+    process.stdout.write(JSON.stringify({ evidencePath, diagnostic: true, maxPaintMs: measurement.maxPaintMs, unobserved: measurement.unobserved.length }) + '\n');
+    if (measurement.observationError || measurement.unobserved.length || measurement.maxPaintMs > 100) throw new Error('diagnostic message paint limit failed');
+  }
   await window.loadURL("m5smoke://m5/index.html");
   await window.webContents.executeJavaScript(`(async () => {
     await ${waitFor("document.querySelector('[aria-label=\"Codex 연결\"]')?.textContent.includes('로그인이 연결됐어요')", "saved agent selection after reload")};

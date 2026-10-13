@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (단일 채팅 시간 기반 화면 관측 연결)
+
+- 직전7fc0e46은 성능 판정/문서 검증으로 진척했다. 기존9월 archive 보존. m5-message-paint-probe를 합성 renderer smoke의 명시 환경 옵션에 연결했다.50회/초·3000메시지의 발송 시간, scheduling 지연, DOM 연속 두 frame 관측, 개별 지연/미관측 ID를 기록한다. 오류/중복 발송은 중단하며 미관측 또는100ms 초과는 실패한다.
+- 단위 회귀1/1·구문/diff 검사 PASS. 실제 Chromium session44428 exit0, hello-agent-renderer-smoke-3RexP7/message-paint.json 최대79ms/미관측0. 단일 합성 채팅 진단이며4chat·sidecar IPC·패키징·compositor 실표시·G6 전체 증거가 아니다. diagnostic true/gateEligible false 유지, 실제 계정 호출0회.
+- 새 수집 경로/회귀/절차/history를 보존한다. 다음: 네 채팅 격리·native stream 연계 수집, 메모리 실패/패키지 UI/Claude 로그인/Windows/출시 범위. 기존 성능 gate 미등록 유지/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (성능 판정 회귀·수집 범위 분리)
 
 - 직전 턴은 diagnostic/gateEligible 판정 구현으로 진척했다. 기존 문서/9월 archive 보존. node --test --experimental-strip-types tests/m5-performance-metrics.test.mts는9/9 PASS. 기준 초과 FAIL 유지·기존 schema1 호환·진단 자격 차단을 확인했다.
