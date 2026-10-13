@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 단계 인계와 공식 스크립트 영향 확인)
+
+- 직전1a57ead는 다운로드 worker 구현 진척이다. 같은 checkout/기존 dirty를 재확인하고 완료된 다운로드 owner를 유지한 채 별도 실행 단계 owner를 예약하는 연결을 추가했다. 같은 원장/작업 UUID/공급자·app-data/staging capability·Installing 단계·다운로드 종료 증거가 일치해야 하며 다운로드 잠금을 해제하는 공백을 만들지 않는다. 설치용 scope에서 원장/다운로드를 새로 시작하는 것도 차단했다.
+- 단계별 pending 두 파일은 최종 transaction까지 함께 보관한다. 실행 scope 복제·중복 예약·다른 app-data 거절·Drop 뒤 두 잠금 보존 회귀를 추가했다. 아직 실제 installer spawn/terminal 해제·복구·동의/IPC/UI는 미연결이다. 공개 제품 동작이나 설치 완료로 주장하지 않는다.
+- OpenAI Docs로 [공식 CLI 설치 문서](https://developers.openai.com/codex/cli)를 재확인하고 [Codex 공식 스크립트](https://chatgpt.com/codex/install.sh)·[Claude 공식 스크립트](https://claude.ai/install.sh)를 읽기만 했다. 현재 Codex는 NON_INTERACTIVE에서 추가 실행/기존 manager 삭제 prompt를 거절하지만 add_to_path는 PATH/충돌 조건에 따라 기존 shell profile block을 수정할 수 있다. Claude 스크립트는 내려받은 binary의 install에 shell integration을 위임한다. 비대화형만으로 사용자 설정 불변을 보장한다고 가정하면 안 된다.
+- 다음 실행 연결은 이 설정 영향과 실제 대상·동의 범위를 해결해야 한다. 버전 고정/앱 전용 중복 설치로 대체하지 않는다. Karpathy 지침으로 기존 process owner를 재사용했으며 rustfmt/diff만 검사했다. 새 회귀/일반 빌드/독립 검토는 설치 연결 묶음에 남긴다. 네트워크는 공식 스크립트 읽기만 수행했고 설치/로그인/모델 실행·대형 캐시 생성은 없었다. main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 다운로드 단계 연결)
 
 - 직전 목표 턴은 앱 이름 설명으로 구현 진척 없음이었다. 실제 m5/coding-agent-ide/10c3d7a와 기존 dirty를 재확인하고 설치 원장에 결속된 다운로드 worker를 추가했다. 고정 공식 HTTPS 주소만 받고 curlrc/상속 환경 차단, HTTPS redirect 제한, 시간/128KiB 크기 제한, bounded stdout 메모리 수집을 적용한다. 다운로드 내용은 파일 게시나 실행하지 않는다.

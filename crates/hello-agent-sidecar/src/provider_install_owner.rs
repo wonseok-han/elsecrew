@@ -13,6 +13,7 @@ pub(crate) mod journal;
 
 const STAGING: &str = "provider-install-staging-v1";
 const PENDING: &str = "provider-install.pending";
+const EXECUTION_PENDING: &str = "provider-install-execute.pending";
 
 fn failure() -> SidecarError {
     SidecarError::new(
@@ -25,6 +26,7 @@ pub(crate) struct InstallScope {
     app_path: PathBuf,
     app: Dir,
     staging: Dir,
+    execution: bool,
 }
 
 // Directory identity does not authenticate existing staging contents. A worker
@@ -67,6 +69,7 @@ impl InstallScope {
             app_path,
             app,
             staging,
+            execution: false,
         };
         scope.revalidate()?;
         Ok(scope)
@@ -82,6 +85,32 @@ impl InstallScope {
         let mut process = LoginProcess::reserve(self)?;
         process.retain_fence_before_launch(&operation.to_string())?;
         Ok(process)
+    }
+
+    /// A second process has a separate durable identity log. The transaction
+    /// journal remains the global installation lock and the downloader's fence
+    /// stays held: there is no unlink/re-reserve gap between installation steps.
+    pub(crate) fn execution_scope(&self) -> Result<Self, SidecarError> {
+        if self.execution {
+            return Err(failure());
+        }
+        self.revalidate()?;
+        Ok(Self {
+            app_path: self.app_path.clone(),
+            app: self.app.try_clone().map_err(|_| failure())?,
+            staging: self.staging.try_clone().map_err(|_| failure())?,
+            execution: true,
+        })
+    }
+
+    fn is_execution_of(&self, download: &Self) -> Result<bool, SidecarError> {
+        self.revalidate()?;
+        download.revalidate()?;
+        Ok(self.execution
+            && !download.execution
+            && self.app_path == download.app_path
+            && same_directory(&self.app, &download.app)?
+            && same_directory(&self.staging, &download.staging)?)
     }
 }
 
@@ -107,13 +136,49 @@ impl LoginProfile for InstallScope {
         self.app.try_clone().map_err(|_| failure())
     }
     fn pending_name(&self) -> &'static str {
-        PENDING
+        if self.execution {
+            EXECUTION_PENDING
+        } else {
+            PENDING
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn step_reservations_keep_both_fences_and_cannot_cross_app_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = InstallScope::from_storage(&storage).unwrap();
+        let execution = scope.execution_scope().unwrap();
+        assert!(execution.is_execution_of(&scope).unwrap());
+        assert!(!scope.is_execution_of(&execution).unwrap());
+        assert!(execution.execution_scope().is_err());
+        let operation = uuid::Uuid::new_v4();
+        let downloader = scope.reserve(operation).unwrap();
+        let installer = execution.reserve(operation).unwrap();
+        assert!(scope.reserve(operation).is_err());
+        assert!(execution.reserve(operation).is_err());
+        drop(installer);
+        drop(downloader);
+        assert!(root.join(PENDING).is_file());
+        assert!(root.join(EXECUTION_PENDING).is_file());
+        let other = tempfile::tempdir().unwrap();
+        let other_storage = Storage::open(
+            &other
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("hello-agent.sqlite3"),
+        )
+        .unwrap();
+        let other_scope = InstallScope::from_storage(&other_storage).unwrap();
+        assert!(!execution.is_execution_of(&other_scope).unwrap());
+    }
 
     #[test]
     fn interrupted_install_reservation_blocks_reopen_without_touching_auth() {

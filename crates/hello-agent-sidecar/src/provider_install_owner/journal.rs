@@ -30,7 +30,7 @@ impl<'a> InstallJournal<'a> {
         operation: uuid::Uuid,
         provider: &str,
     ) -> Result<Self, SidecarError> {
-        if operation.is_nil() || !matches!(provider, "codex" | "claude") {
+        if scope.execution || operation.is_nil() || !matches!(provider, "codex" | "claude") {
             return Err(failure());
         }
         let directory = scope.login_lease_directory()?;

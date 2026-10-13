@@ -19,8 +19,48 @@ const DEADLINE: Duration = Duration::from_secs(65);
 /// implement a durable step handoff before launching an installer; dropping this
 /// value does not release the fence. Bytes are not executable admission evidence.
 pub(crate) struct DownloadedScript<'a> {
+    bytes: Vec<u8>,
+    owner: LoginProcess<'a>,
+    operation: uuid::Uuid,
+    provider: String,
+    scope: &'a super::InstallScope,
+}
+
+/// Keeps the confirmed download owner alive alongside the fresh installer owner.
+/// No installer is launched by reservation. The coordinator must keep both until
+/// a durable terminal result; neither owner is transferable to another journal.
+pub(crate) struct InstallerReservation<'a> {
     pub(crate) bytes: Vec<u8>,
-    pub(crate) owner: LoginProcess<'a>,
+    pub(crate) downloader: LoginProcess<'a>,
+    pub(crate) installer: LoginProcess<'a>,
+}
+
+impl<'a> DownloadedScript<'a> {
+    pub(crate) fn reserve_installer(
+        self,
+        journal: &InstallJournal<'a>,
+        execution: &'a super::InstallScope,
+        cancel: &AtomicBool,
+    ) -> Result<InstallerReservation<'a>, SidecarError> {
+        journal.verify()?;
+        if cancel.load(Ordering::Acquire)
+            || journal.phase() != InstallPhase::Installing
+            || journal.operation != self.operation
+            || journal.provider != self.provider
+            || !std::ptr::eq(journal.scope, self.scope)
+            || !execution.is_execution_of(self.scope)?
+            || !self.owner.closure_evidence().is_some_and(|e| e.confirmed())
+        {
+            return Err(failure());
+        }
+        let installer = execution.reserve(self.operation)?;
+        journal.verify()?;
+        Ok(InstallerReservation {
+            bytes: self.bytes,
+            downloader: self.owner,
+            installer,
+        })
+    }
 }
 
 fn arguments(provider: &str) -> Result<Vec<&'static OsStr>, SidecarError> {
@@ -62,7 +102,7 @@ pub(crate) fn fetch<'a>(
     journal: &mut InstallJournal<'a>,
     cancel: &AtomicBool,
 ) -> Result<DownloadedScript<'a>, SidecarError> {
-    if journal.phase() != InstallPhase::Downloading {
+    if journal.scope.execution || journal.phase() != InstallPhase::Downloading {
         return Err(failure());
     }
     journal.verify()?;
@@ -102,7 +142,13 @@ pub(crate) fn fetch<'a>(
     match result {
         Ok(Some(bytes)) if !cancel.load(Ordering::Acquire) => {
             journal.record("downloadVerified")?;
-            Ok(DownloadedScript { bytes, owner })
+            Ok(DownloadedScript {
+                bytes,
+                owner,
+                operation: journal.operation,
+                provider: journal.provider.clone(),
+                scope,
+            })
         }
         result => {
             // A late cancellation cannot erase a preceding download failure.
