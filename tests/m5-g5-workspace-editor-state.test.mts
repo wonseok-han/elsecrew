@@ -33,6 +33,20 @@ test("suspended workspace watch preserves binding and explicit rescan state", as
   } finally { controller.dispose(); }
 });
 
+test("delayed initial workspace scan requests rescan only for the bound workspace", async () => {
+  const { bridge, controller } = await bound();
+  try {
+    assert.equal(controller.snapshot().rescanRequired, false);
+    for (const address of [b, a]) {
+      bridge.emit({ protocolVersion: 1, kind: "event", sidecarInstanceId: "sidecar", streamId: `initial_${address.chatId}`, seq: 1,
+        event: "workspace.changed", payload: { ...address, event: "file.changed", paths: [], rescanRequired: true } });
+      assert.equal(controller.snapshot().rescanRequired, address === a);
+    }
+    assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.rescan");
+    assert.deepEqual(controller.snapshot().workspace, a);
+  } finally { controller.dispose(); }
+});
+
 test("binding a full chat record retains only the exact workspace address", async () => {
   const bridge = new Bridge();
   const controller = new ProjectEditorController(bridge as unknown as ChatProjectBridge);

@@ -1471,7 +1471,7 @@ impl Sidecar {
             }
         };
 
-        let mut action = match action {
+        let action = match action {
             Ok(action) => action,
             Err(failure) => {
                 return Ok(HandledRequest::response(project_error_response(
@@ -1479,9 +1479,9 @@ impl Sidecar {
                 )))
             }
         };
-        action
-            .watch_events
-            .extend(self.projects.poll_watchers(&self.storage));
+        // The stdio loop advances watchers after responses (and on its 100ms
+        // idle tick). Do not repeat a scan/identity check before every project
+        // response, which delays user requests while a large scan is pending.
         let events = self.action_events(&action);
         Ok(HandledRequest {
             response: Some(ResponseV1 {

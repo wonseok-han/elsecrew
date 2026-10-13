@@ -50,6 +50,10 @@ const MANIFEST_DIRECTORY: &str = "worktree-manifests-v1";
 const WORKTREE_DIRECTORY: &str = "worktrees-v1";
 const SAVE_STAGING_DIRECTORY: &str = "save-staging-v1";
 const WATCH_MAX_ENTRIES: usize = 10_000;
+// Cross-turn directory identity validation is currently implemented on Unix.
+// Other platforms retain the prior single-call scan until equivalent identity
+// checks are available; do not retain unchecked handles between turns there.
+const WATCH_SCAN_BUDGET: usize = if cfg!(unix) { 128 } else { usize::MAX };
 const WATCH_MAX_CHANGED_PATHS: usize = 1_024;
 const DIFF_MAX_BYTES: usize = 10 * 1024 * 1024;
 const DIFF_MAX_ENTRIES: usize = 10_000;
@@ -216,6 +220,8 @@ struct WatchState {
     snapshot: BTreeMap<String, WatchFingerprint>,
     next_seq: u64,
     workspace: Option<WorkspaceAddress>,
+    scan: Option<WatchScan>,
+    initial_scan_pending: bool,
 }
 
 struct ActiveProject {
@@ -2324,15 +2330,18 @@ impl ProjectManager {
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_active_project(storage, project_id)?;
         let worktree = self.worktree_capability(&active)?;
-        let snapshot = match snapshot_tree(&worktree) {
-            Ok(snapshot) => snapshot,
+        let (snapshot, scan) = match begin_watch_scan(&worktree) {
+            Ok(started) => started,
             Err(_) => {
                 let mut suspended = WatchState {
                     stream_id: format!("watch_{}", Uuid::new_v4().simple()),
                     snapshot: BTreeMap::new(),
                     next_seq: 1,
                     workspace: None,
+                    scan: None,
+                    initial_scan_pending: false,
                 };
+                self.watchers.remove(project_id);
                 return Ok(ProjectAction {
                     result: json!({"watching":false,"rescanRequired":true}),
                     watch_events: vec![watch_emission(
@@ -2352,6 +2361,8 @@ impl ProjectManager {
                 snapshot,
                 next_seq: 1,
                 workspace: None,
+                initial_scan_pending: scan.is_some(),
+                scan,
             },
         );
         Ok(ProjectAction {
@@ -2367,14 +2378,16 @@ impl ProjectManager {
     ) -> Result<ProjectAction, ProjectFailure> {
         let active = self.validate_workspace_address(storage, address)?;
         let worktree = self.worktree_capability(&active)?;
-        let snapshot = match snapshot_tree(&worktree) {
-            Ok(snapshot) => snapshot,
+        let (snapshot, scan) = match begin_watch_scan(&worktree) {
+            Ok(started) => started,
             Err(_) => {
                 let mut suspended = WatchState {
                     stream_id: format!("workspace_watch_{}", Uuid::new_v4().simple()),
                     snapshot: BTreeMap::new(),
                     next_seq: 1,
                     workspace: Some(address.clone()),
+                    scan: None,
+                    initial_scan_pending: false,
                 };
                 self.watchers
                     .remove(&format!("workspace:{}", address.chat_id));
@@ -2397,6 +2410,8 @@ impl ProjectManager {
                 snapshot,
                 next_seq: 1,
                 workspace: Some(address.clone()),
+                initial_scan_pending: scan.is_some(),
+                scan,
             },
         );
         Ok(ProjectAction {
@@ -2448,8 +2463,22 @@ impl ProjectManager {
                     continue;
                 }
             };
-            let fresh = match snapshot_tree(&worktree) {
-                Ok(snapshot) => snapshot,
+            let scan_result: Result<_, ProjectFailure> = (|| {
+                let state = self.watchers.get_mut(&project_id).expect("selected watcher");
+                if state.scan.is_none() {
+                    state.scan = Some(WatchScan::new(&worktree)?);
+                }
+                let scan = state.scan.as_mut().expect("started scan");
+                #[cfg(unix)]
+                scan.validate_held_paths(&worktree)?;
+                if !scan.advance(WATCH_SCAN_BUDGET)? {
+                    return Ok(None);
+                }
+                Ok(Some(state.scan.take().expect("completed scan").snapshot))
+            })();
+            let fresh = match scan_result {
+                Ok(Some(snapshot)) => snapshot,
+                Ok(None) => continue,
                 Err(_) => {
                     if let Some(mut state) = self.watchers.remove(&project_id) {
                         emitted.push(watch_emission(
@@ -2465,6 +2494,14 @@ impl ProjectManager {
             let Some(state) = self.watchers.get_mut(&project_id) else {
                 continue;
             };
+            if state.initial_scan_pending {
+                state.initial_scan_pending = false;
+                state.snapshot = fresh;
+                // Initial collection spanned dispatcher turns: callers must
+                // refresh any view read before this baseline was complete.
+                emitted.push(watch_emission(state, emission_project_id, Vec::new(), true));
+                continue;
+            }
             let mut changed = BTreeSet::new();
             for path in state.snapshot.keys().chain(fresh.keys()) {
                 if state.snapshot.get(path) != fresh.get(path) {
@@ -5530,6 +5567,17 @@ struct WatchScan {
 }
 
 impl WatchScan {
+    #[cfg(unix)]
+    fn validate_held_paths(&self, root: &Dir) -> Result<(), ProjectFailure> {
+        for (held, _, prefix) in &self.pending {
+            let current = open_relative_dir(root, prefix)?;
+            if capability_directory_identity(held)? != capability_directory_identity(&current)? {
+                return Err(ProjectFailure::recovery("watched directory changed between scan slices"));
+            }
+        }
+        Ok(())
+    }
+
     fn new(root: &Dir) -> Result<Self, ProjectFailure> {
         let directory = root.try_clone().map_err(|error| {
             ProjectFailure::recovery(format!("could not clone watcher root capability: {error}"))
@@ -5618,6 +5666,16 @@ impl WatchScan {
     }
 }
 
+fn begin_watch_scan(root: &Dir) -> Result<(BTreeMap<String, WatchFingerprint>, Option<WatchScan>), ProjectFailure> {
+    let mut scan = WatchScan::new(root)?;
+    if scan.advance(WATCH_SCAN_BUDGET)? {
+        Ok((scan.snapshot, None))
+    } else {
+        Ok((BTreeMap::new(), Some(scan)))
+    }
+}
+
+#[cfg(test)]
 fn snapshot_tree(root: &Dir) -> Result<BTreeMap<String, WatchFingerprint>, ProjectFailure> {
     let mut scan = WatchScan::new(root)?;
     while !scan.advance(128)? {}

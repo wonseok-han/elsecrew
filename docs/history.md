@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (분할 감시 요청 루프 연결·교체 방어)
+
+- 54e50bc 위 Karpathy 최소 범위로 WatchState가 진행 중 scan을 보관하고 Unix 초기 등록/poll에서128단계씩 처리하도록 연결했다. 미완료 baseline은 게시하지 않으며 초기 다회차 완료 시 rescan, 오류·overflow 시 rescan 후 폐기한다. stop/close는 iterator도 폐기한다. 감시 재등록 실패 시 기존 project watcher도 제거한다. non-Unix는 신원 대조 구현 전까지 종전 단일 호출을 유지한다.
+- 독립 검토에서 중간에 교체된 자식 디렉터리를 이전 핸들로 읽는 결함을 지적받아 매 회차 현재 worktree에서 모든 보관 경로를 재열고 dev/ino를 대조하도록 보완했다. 결정적 rename/recreate 회귀를 추가했다. workspace 기존 즉시 overflow 테스트를 지연 알림 계약으로 갱신하고 네 신원 필드 일치·화면의 다른 채팅 알림 무시를 검증했다. 최종 final_application_safety APPROVE.128은 watcher별이며 전체 watcher 시간 상한 보장은 아니다.
+- release watcher8 PASS, oversized_workspace_watch1 PASS, renderer workspace10 PASS, cargo check와 최신 package smoke PASS, diff PASS. 상세 /private/tmp/hello-agent-watch-{dispatch-tests,workspace,renderer,response-check,response-package}.log. 전체 Rust/하네스·Windows·최종G6는 아직 미실행이다.
+- 최초 패키지03Z8Co는 firstTree1038ms/후속약200ms로 악화·FAIL했고 보존했다. 응답 직전 중복 poll을 제거하고 기존 stdio의 응답 후/idle100ms poll만 유지한 ocbMpL은 첫966.3ms/expand116.6ms/file416.6ms/DOM362, 후속88.4~147ms다. 단일 기준 이내지만 기존838ms보다 개선됐다는 증거는 아니며 반복 지연 문제는 미해결로 유지한다. idle458833920B 초과로 전체 FAIL. 두 시험 정상 exit0/종료confirmed·PID 부재 뒤 자체 fixture3디렉터리씩 정리하고 JSON/PNG 및 /private/tmp/hello-agent-watch-{dispatch,response}-ui.log 보존했다. 다음은 초기 diff 작업 대기 비용 및 메모리/잔여 통합 검증이다. 사용자9월 archive/main/push 경계 유지, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (분할 파일 감시 스캔 구현 체크포인트)
 
 - ac409b6에서 Karpathy 최소 범위로 WatchScan 상태와 advance(budget)를 구현했다. iterator·부모 capability·수집 결과를 보관하고 회차별 항목 수를 제한하며 무시 이름/디렉터리 종료도 예산을 소비한다. 모든 sibling 디렉터리를 미리 열지 않고 DFS 조상만 유지한다. nofollow metadata/자식 디렉터리 검증/10,000항목 초과 거절은 유지한다.
@@ -88,6 +95,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **분할 감시 핸들 재결속(2026-10-13)**: Unix watcher는128단계씩 진행하지만 다음 회차에 보관된 자식 핸들을 그대로 믿지 않는다. 현재 root에서 모든 보관 prefix를 재열어 dev/ino를 대조하고 교체는 rescan/폐기한다. 초기 다회차 수집 완료도 rescan을 알린다. non-Unix는 종전 동기 스캔 유지. 감시는 stdio 응답 후/idle poll에서만 진행하며 요청 응답 직전 중복 poll은 제거했다. 반복 성능 문제·전체 watcher 합계 시간 상한은 미해결이다.
 
 - **백업 디렉터리 flock 수명(2026-10-13)**: 설치 journal과 마찬가지로 backup Dir close만으로는 concurrent fork/dup의 OFD 잠금 잔류를 막지 못한다. 생성·조회·예산·정리 모두 성공 취득 전용 ArchiveLock의 Drop LOCK_UN으로 소유자 수명을 끝낸다. duplicateFD 수정 전 FAIL/후 PASS·shared/error 경로·backup24·독립 APPROVE를 확보했다. 이는 잠금 수명 수정이며 동의/원장/복구점 보호/삭제 조건은 그대로다.
 

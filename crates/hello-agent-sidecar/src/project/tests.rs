@@ -3536,6 +3536,8 @@ fn releasing_project_view_removes_watchers_without_abandoning_snapshot() {
             format!("workspace:{chat_id}"),
             WatchState {
                 stream_id: format!("watch_{chat_id}"),
+                scan: None,
+                initial_scan_pending: false,
                 snapshot: BTreeMap::new(),
                 next_seq: 1,
                 workspace: Some(WorkspaceAddress {
@@ -5400,6 +5402,48 @@ fn watcher_entry_metadata_does_not_follow_external_or_dangling_links() {
     assert!(snapshot_tree(&capability).unwrap() != before);
 }
 
+fn poll_until_watch_event(fixture: &mut Fixture) -> Vec<WatchEmission> {
+    for _ in 0..256 {
+        let events = fixture.manager.poll_watchers(&fixture.storage);
+        if !events.is_empty() { return events; }
+    }
+    panic!("watch event did not arrive within bounded scan turns");
+}
+
+#[test]
+#[cfg(unix)]
+fn watcher_scan_rejects_descendant_replaced_between_slices() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir(root.path().join("child")).unwrap();
+    fs::write(root.path().join("child/old.txt"), b"old").unwrap();
+    let capability = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+    let mut scan = WatchScan::new(&capability).unwrap();
+    assert!(!scan.advance(1).unwrap());
+    assert_eq!(scan.pending.last().unwrap().2, "child");
+    fs::rename(root.path().join("child"), root.path().join("moved")).unwrap();
+    fs::create_dir(root.path().join("child")).unwrap();
+    fs::write(root.path().join("child/new.txt"), b"new").unwrap();
+    assert!(scan.validate_held_paths(&capability).is_err());
+}
+
+#[test]
+#[cfg(unix)]
+fn watcher_pending_scan_allows_tree_requests_and_stop_drops_scan() {
+    let mut fixture = Fixture::open();
+    let active = fixture.create();
+    for index in 0..300 {
+        fs::write(active.worktree_path.join(format!("scan-{index}")), b"x").unwrap();
+    }
+    fixture.manager.watch_project(&fixture.storage, &fixture.project_id).unwrap();
+    let state = &fixture.manager.watchers[&fixture.project_id];
+    assert!(state.initial_scan_pending);
+    assert!(state.scan.as_ref().unwrap().snapshot.len() <= 128);
+    assert!(fixture.manager.get_tree(&fixture.storage, &fixture.project_id, "", None).is_ok());
+    fixture.manager.stop_watchers();
+    assert!(fixture.manager.watchers.is_empty());
+    assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());
+}
+
 #[test]
 fn watcher_coalesces_paths_and_overflow_requires_rescan() {
     let mut fixture = Fixture::open();
@@ -5438,7 +5482,7 @@ fn watcher_coalesces_paths_and_overflow_requires_rescan() {
         )
         .unwrap();
     }
-    let events = fixture.manager.poll_watchers(&fixture.storage);
+    let events = poll_until_watch_event(&mut fixture);
     assert_eq!(events.len(), 1);
     assert!(events[0].payload["rescanRequired"].as_bool().unwrap());
     assert!(events[0].payload["paths"].as_array().unwrap().is_empty());
@@ -5450,8 +5494,12 @@ fn watcher_coalesces_paths_and_overflow_requires_rescan() {
         .watch_project(&fixture.storage, &fixture.project_id)
         .unwrap();
     assert!(resumed.result["watching"].as_bool().unwrap());
+    if cfg!(unix) {
+        let initial = poll_until_watch_event(&mut fixture);
+        assert!(initial[0].payload["rescanRequired"].as_bool().unwrap());
+    }
     fs::write(active.worktree_path.join("resumed.txt"), b"x").unwrap();
-    let resumed_events = fixture.manager.poll_watchers(&fixture.storage);
+    let resumed_events = poll_until_watch_event(&mut fixture);
     assert_eq!(resumed_events.len(), 1);
     assert!(!resumed_events[0].payload["rescanRequired"]
         .as_bool()
@@ -5471,10 +5519,17 @@ fn watcher_initial_scan_over_capacity_emits_once_and_stays_suspended() {
         .manager
         .watch_project(&fixture.storage, &fixture.project_id)
         .unwrap();
-    assert!(!action.result["watching"].as_bool().unwrap());
-    assert!(action.result["rescanRequired"].as_bool().unwrap());
-    assert_eq!(action.watch_events.len(), 1);
-    assert!(action.watch_events[0].payload["rescanRequired"]
+    let events = if cfg!(unix) {
+        assert!(action.result["watching"].as_bool().unwrap());
+        assert!(action.watch_events.is_empty());
+        assert!(fixture.manager.watchers[&fixture.project_id].initial_scan_pending);
+        poll_until_watch_event(&mut fixture)
+    } else {
+        assert!(!action.result["watching"].as_bool().unwrap());
+        action.watch_events
+    };
+    assert_eq!(events.len(), 1);
+    assert!(events[0].payload["rescanRequired"]
         .as_bool()
         .unwrap());
     assert!(fixture.manager.poll_watchers(&fixture.storage).is_empty());

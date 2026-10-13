@@ -28,13 +28,22 @@ fn oversized_workspace_watch_preserves_address_and_requests_rescan() {
         fs::write(overflow.join(format!("{index:05}")), b"").unwrap();
     }
     let action = f.projects.workspace_watch(&f.storage, &address).unwrap();
-    assert_eq!(
-        action.result,
-        json!({"watching":false,"rescanRequired":true})
-    );
-    assert_eq!(action.watch_events.len(), 1);
-    assert_eq!(action.watch_events[0].payload["chatId"], chat["chatId"]);
-    assert_eq!(action.watch_events[0].payload["rescanRequired"], true);
+    let mut events = action.watch_events;
+    if cfg!(unix) {
+        assert_eq!(action.result, json!({"watching":true}));
+        assert!(events.is_empty());
+        for _ in 0..256 {
+            events = f.projects.poll_watchers(&f.storage);
+            if !events.is_empty() { break; }
+        }
+    } else {
+        assert_eq!(action.result, json!({"watching":false,"rescanRequired":true}));
+    }
+    assert_eq!(events.len(), 1);
+    for field in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+        assert_eq!(events[0].payload[field], chat[field]);
+    }
+    assert_eq!(events[0].payload["rescanRequired"], true);
     assert!(f.projects.poll_watchers(&f.storage).is_empty());
     fs::remove_dir_all(&overflow).unwrap();
     assert_eq!(
