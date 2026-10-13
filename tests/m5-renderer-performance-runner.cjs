@@ -184,20 +184,32 @@ app.whenReady().then(async () => {
         await new Promise(resolve => setTimeout(resolve, 10));
       }
       globalThis.__performanceInputStart = performance.now();
+      globalThis.__performanceInputReceived = null;
+      const captureInput = event => {
+        if (event.target !== input || !event.isTrusted || event.data !== 'Z') return;
+        globalThis.__performanceInputReceived = performance.now();
+        document.removeEventListener('beforeinput', captureInput, true);
+      };
+      document.addEventListener('beforeinput', captureInput, true);
     })()`);
     window.webContents.sendInputEvent({ type: "char", keyCode: "Z" });
     Object.assign(sample, await window.webContents.executeJavaScript(`(async () => {
       const wait = async (predicate) => { const end = performance.now() + 10000; while (!predicate()) { if (performance.now() > end) throw new Error("benchmark view did not settle: " + predicate.toString() + " / visibility=" + document.visibilityState + " / focused=" + document.hasFocus()); await new Promise(r => setTimeout(r, 5)); } };
       const paint = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       await wait(() => document.querySelector('[aria-label="저장되지 않은 변경"]') && document.querySelector('.view-line')?.textContent.includes('Z')); await paint();
-      const inputPaintMs = performance.now() - globalThis.__performanceInputStart;
+      const inputPaintAt = performance.now();
+      const inputPaintMs = inputPaintAt - globalThis.__performanceInputStart;
+      const received = globalThis.__performanceInputReceived;
+      // Attribution only: neither component replaces the end-to-end gate.
+      const inputDeliveryMs = typeof received === 'number' ? received - globalThis.__performanceInputStart : null;
+      const inputAfterDeliveryMs = typeof received === 'number' ? inputPaintAt - received : null;
       let start = performance.now(); document.querySelector('.m5-change-row').click();
       await wait(() => document.querySelector('.m5-diff-lines tbody code')?.textContent.startsWith('--- a/file-0')); await paint();
       const diffFirstFileMs = performance.now() - start;
       await new Promise(r => setTimeout(r, 50));
       globalThis.__performanceLongTasks.push(...globalThis.__performanceObserver.takeRecords().map(e => e.duration));
       globalThis.__performanceObserver.disconnect();
-      return { inputPaintMs, diffFirstFileMs, rendererLongTaskMs: Math.max(0, ...globalThis.__performanceLongTasks) };
+      return { inputPaintMs, inputDeliveryMs, inputAfterDeliveryMs, diffFirstFileMs, rendererLongTaskMs: Math.max(0, ...globalThis.__performanceLongTasks) };
     })()`));
     if (trial === 0) report.warmup = sample; else samples.push(sample);
     await memoryCheckpoint(`trial-${trial}`);

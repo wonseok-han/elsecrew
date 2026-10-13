@@ -1,5 +1,23 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (입력 구간 실측·진단 기록 마감)
+
+- c5dde79 위 입력 관측 보강으로 pnpm m5:measure:renderer --diagnostic --memory 실행(session11802), exit1/FAIL. 증거 .artifacts/m5-performance/renderer-2026-10-13T01-41-13.598Z-21150.json. inputPaint 최대71.8ms 표본은 전달 전61.8ms/수신 후10ms이며 후자는 상태 polling·두 frame도 포함한다. 이 표본만으로 이전305.5ms 원인이나 Monaco 무결함을 단정하지 않는다. 기존50ms 판정은 유지한다.
+- idle452657152/peak898629632 bytes(약431.7/857.0MiB),60초 뒤 retained 증가0. 입력/idle/peak 기준 실패, 나머지 시간·DOM 기준 충족. 합성 bridge 진단 전용이며 실제 계정 추가 호출0회, 강제GC/자손 제외/기준 완화 없음. 제품 성능 합격·누수 원인 확정 아님.
+- JS 구문·diff 검사와 실측으로 관측 필드 연결을 확인했다. 관련 runner/history만 로컬 커밋하며 기존9월 archive 변경은 보존·제외한다. 다음: 전달 전 지연과 프로세스별 메모리 기여 조사, 사용자 Claude 앱 전용 로그인 확인 후 별도 승인 실측, UI/Windows/출시 잔여 범위. main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (입력 지연 구간 관측 추가)
+
+- 직전 턴은 최신 메모리 실패와 Codex 실제 planning 성공을 확인한 진척이다. c5dde79/기존 history/9월 archive 보존. 성능 runner는 renderer 시작 timestamp 후 main IPC 왕복/sendInputEvent/상태 polling/두 frame까지 전부 inputPaintMs에 포함한다. 따라서305.5ms 표본을 곧바로 Monaco 처리 지연으로 단정할 수 없다.
+- Karpathy 지침으로 해당 textarea의 trusted Z beforeinput 수신 시각을 보조 관측했다. sample에 inputDeliveryMs와 inputAfterDeliveryMs를 추가하되 기존 inputPaintMs/50ms 판정은 그대로 유지한다. 수신 시각이 없으면 보조 값은 null로 남기며0으로 위장하지 않는다. 제품 코드·기능·메모리 측정 범위는 변경하지 않았다.
+- diff 및 JS 구문 검사만 수행, 실제 재측정은 후속 진단 묶음 대상이다. 실제 계정 추가 호출0회/main/push 없음. 다음: 구간별 실측으로 입력 지연/메모리 기여 좁히기, Claude 사용자 재로그인 확인 및 UI/Windows 잔여 범위. 전체 완료 아님.
+
+### 2026-10-13 · by GPT-6 Astra (Codex 첫 최신 종단 성공·Claude 로그인 차단)
+
+- 직전 턴은 c5dde79 호환 수정/119개 검사/독립 승인으로 진척했다. 기존9월 archive 보존. 합성 renderer 메모리 시험 session69592는 FAIL/exit1. .artifacts/m5-performance/renderer-2026-10-13T01-36-01.543Z-3617.json: idle454279168/peak891502592 bytes, retained 증가0, inputPaint 최대305.5ms. idle400MiB/peak800MiB/입력50ms 기준 초과이며 나머지 시간·DOM 기준 충족. 진단 전용, 누수 원인 확정/전체 성능 PASS 아님.
+- 메모리 시험 종료 뒤 새 사용자 각1회 승인으로 session54488 실행. /var/folders/fm/mxcpps3x7f5_w2gp3g5r668c0000gn/T/hello-agent-live-974Ab5/result.json: Codex gpt-6.1-sol/medium, agent_run_8d339ae9bb784ca9829cbdb4be510074, chat_46042260b3b7456390b23e533ed1499f, succeeded/planning/cleanExit/responseObserved=true. 임시 원본 불변·shutdown accepted다. 이는 작은 planning 작업1회의 실제 종단 성공이며 쓰기/승인/복구 전체 검증은 아니다.
+- Claude는 자신의 check attemptId와 일치한 idle/error null로 loginBlocked, 실행되지 않았다. 단순 초기 상태 오인 가능성은 이번 관측에서 배제했으나 자격증명 부재의 근본 원인은 미확정이다. 전체 시험은 FAIL/exit1이며 자동 재시험 없음. 다음: 사용자의 앱 전용 Claude 재로그인 확인 후 별도 승인 실행, 메모리/시안/Windows/출시 잔여 범위. main/push 없음, 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (응답 호환·로그인 시험 결속 검증)
 
 - 직전 턴은 smoke 요청 ID 결속 구현으로 진척했다. ec1c285 및 기존9월 archive 보존. vendor_observation108/108, live smoke11/11 PASS(session47115), debug sidecar build PASS(session83863), diff 검사 PASS다. 새 실제 계정 호출은 없으며 이전 시험 승인은 소진 상태다.
@@ -209,6 +227,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **최신 실제 응답 성공 범위(2026-10-13, c5dde79)**: 974Ab5에서 Codex gpt-6.1-sol medium planning1회 succeeded/cleanExit/응답 확인, 원본 불변/앱 정상 종료. Claude는 요청 ID 결속된 로그인 검사에서 idle로 실행 못 함. 전체 시험 FAIL이며 아래 이전 Codex requirements 차단은 최신 작은 planning 경로에서는 해소됐다. 다른 쓰기/복구/Windows/제품 완료로 확장하지 않는다.
 
 - **최신 실연결 차단(2026-10-13, e89bde5)**: W4SUaF는 두 로그인 유지·Codex 모델 선택 뒤 configRequirements/read 및 Claude start discovery differs에서 차단됐다. RUN_ACCEPTED 없음, 임시 원본 불변/정상 종료. 현재 Claude 링크2.1.296이며 이전2.1.293 관측을 현재 동작으로 가정하지 않는다. 10월8일 account/plugins 실패보다 앞 단계의 최신 증거다.
 
