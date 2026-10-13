@@ -3,6 +3,7 @@ import { MAX_TEXT_CHUNK_BYTES, METHODS_V1 } from "./protocol-v1.ts";
 export const PROJECT_SCHEMA_VERSION_V1 = 1 as const;
 export const TREE_PAGE_MAX_ENTRIES_V1 = 500 as const;
 export const FILE_MAX_BYTES_V1 = 5 * 1024 * 1024;
+export type ProjectWatchResultV1 = { watching: true } | { watching: false; rescanRequired: true };
 export const FILE_VERSION_ALGORITHM_V1 = "sha256" as const;
 export const FILE_VERSION_PREFIX_V1 = "sha256:" as const;
 export const FILE_VERSION_DIGEST_INPUT_V1 = "exactFileBytes" as const;

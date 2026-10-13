@@ -60,7 +60,7 @@ for (const args of [['init','-q','--template='],['add','.'],['-c','core.hooksPat
 app.setPath('userData', path.join(root,'userdata'));
 dialog.showOpenDialog = async () => ({canceled:false,filePaths:[source]});
 let finished = false;
-const timer = setTimeout(() => finish(new Error('flow timeout')), measureMemory ? 160000 : 90000);
+const timer = setTimeout(() => finish(new Error('flow timeout')), largeTree ? 300000 : measureMemory ? 160000 : 90000);
 function finish(error, details) {
   if (finished) return;
   finished = true; clearTimeout(timer); clearInterval(memoryTimer);
@@ -104,8 +104,9 @@ app.on('browser-window-created', (_event, window) => {
     const clickText = (label, scope = 'body') => run(`Array.from(document.querySelectorAll(${JSON.stringify(scope + ' button')})).find(b=>b.textContent===${JSON.stringify(label)}&&!b.disabled)?.click()`);
     const fill = (selector, value) => run(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw new Error('input unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     const showPanel = title => run(`(()=>{ const tab=Array.from(document.querySelectorAll('.m5-dock-group-tabs button')).find(b=>b.textContent===${JSON.stringify(title)}&&b.getClientRects().length); if(tab)tab.click(); })()`);
-    const wait = async predicate => {
-      for(let i=0;i<150;i++) { if(await run(predicate)) return; await new Promise(r=>setTimeout(r,100)); }
+    const wait = async (predicate, timeoutMs = 15000) => {
+      const deadline = performance.now() + timeoutMs;
+      while(performance.now() < deadline) { if(await run(predicate)) return; await new Promise(r=>setTimeout(r,100)); }
       throw new Error('UI condition timeout: '+predicate+'\n'+await run('document.body.innerText'));
     };
     try {
@@ -118,8 +119,11 @@ app.on('browser-window-created', (_event, window) => {
         memoryPhase = 'loaded';
       }
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
+      const snapshotStarted = performance.now();
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
-      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
+      await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`, largeTree ? 65000 : 15000);
+      const snapshotReadyMs = performance.now() - snapshotStarted;
+      console.log(JSON.stringify({stage:'SNAPSHOT_READY',snapshotReadyMs,root}));
       if (largeTree) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
         largeTreeReport = await run(`(async()=>{
@@ -142,6 +146,7 @@ app.on('browser-window-created', (_event, window) => {
             treeFiles:10000,treeDirectories:1000,controlFiles:${largeFile ? 2 : 1},diagnostic:true,gateEligible:false};
         })()`);
         await wait(`Array.from(document.querySelectorAll('.m5-files button')).some(b=>b.textContent.includes('hello.txt'))`);
+        largeTreeReport.snapshotReadyMs = snapshotReadyMs;
         console.log(JSON.stringify({stage:'NATIVE_LARGE_TREE',...largeTreeReport}));
       }
       if (largeFile) {
@@ -215,7 +220,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`document.querySelector('.m5-new-chat-form input[type=checkbox]').click()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
-      await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`);
+      await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Improve hello'`, largeTree ? 65000 : 15000);
       await run(`Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes('hello.txt')).click()`);
       app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
       await wait(`document.querySelector('.monaco-editor textarea')!==null`);
@@ -287,7 +292,7 @@ app.on('browser-window-created', (_event, window) => {
       await run(`(()=>{const e=document.querySelector('.m5-new-chat-form input:not([type=checkbox])');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Second task');e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await wait(`!document.querySelector('.m5-new-chat-form button[type=submit]').disabled`);
       await run(`document.querySelector('.m5-new-chat-form button[type=submit]').click()`);
-      await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`);
+      await wait(`document.querySelector('.m5-timeline h2')?.textContent==='Second task'`, largeTree ? 65000 : 15000);
       if (await run(`document.querySelector('.m5-provider-selection')?.open!==false`)) throw new Error('project workbench selection should start collapsed');
       await wait(`document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-goal')?.textContent==='Second task' && Boolean(document.querySelector('.m5-chat-chip[aria-current=true] .m5-chat-status')?.textContent)`);
       console.log(JSON.stringify({stage:'SECOND_CHAT_WINDOW',visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),backgroundThrottling:window.webContents.getBackgroundThrottling(),page:await run(`({visibility:document.visibilityState,focus:document.hasFocus()})`)}));

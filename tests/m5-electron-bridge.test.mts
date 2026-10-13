@@ -1561,6 +1561,27 @@ test("G4 bounds empty stream events and releases completed stream state", async 
   assert.match(complete.client.failure?.message ?? "", /unknown or completed/); assert.equal(complete.child.terminations, 1);
 });
 
+test("file watch suspension remains explicit without failing the sidecar session", async () => {
+  for (const result of [{ watching: true }, { watching: false, rescanRequired: true }]) {
+    const { client, child } = createClient();
+    const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+    const pending = client.watchProjectFiles({ projectId: "project_01" });
+    const request = JSON.parse(child.writes[0] ?? "{}");
+    child.stdout.write(responseLine(request.requestId, result));
+    assert.deepEqual(await pending, result);
+    assert.equal(child.terminations, 0);
+  }
+  for (const result of [{ watching: false }, { watching: false, rescanRequired: false }, { watching: true, rescanRequired: true }, { watching: false, rescanRequired: true, extra: 1 }]) {
+    const { client, child } = createClient();
+    const started = client.start(); child.stdout.write(`${readyLine()}\n`); await started;
+    const pending = client.watchProjectFiles({ projectId: "project_01" });
+    const request = JSON.parse(child.writes[0] ?? "{}");
+    child.stdout.write(responseLine(request.requestId, result));
+    await assert.rejects(pending, /file.watch result is invalid/);
+    assert.equal(child.terminations, 1);
+  }
+});
+
 test("BridgeV2 runtime validators reject malformed and extra input before IPC", () => {
   assert.deepEqual(validateTreeInput({ projectId: "project_01", parentPath: "", cursor: null }), { projectId: "project_01", parentPath: "", cursor: null });
   for (const path of ["", "/", "src/", "src//file", ".", "../escape"]) {

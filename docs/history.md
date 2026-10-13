@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (대형 트리 감시 중단 응답 계약 수정)
+
+- 직전b08eddf는 Git poll 대기 수정으로 진척했다. 대형 트리 시험의 snapshot/채팅 생성 관측65초·전체5분을 적용했다. 제품60초 제한/성능 기준은 그대로다. session68541/SYpsWt의 최초 snapshot은56774ms에 열려 이전60초 timeout과 달라졌지만 여유가 작다.
+- 이어 Rust watch_project의 정상 fallback {watching:false,rescanRequired:true}를 Electron이 불법 응답으로 취급해 세션을 실패시키는 결함을 재현했다. WATCH_MAX_ENTRIES=10000에 비해 fixture는 폴더/제어 파일도 포함한다. 기존 정확한1필드 성공/2필드 suspended 응답만 받는 union으로 TypeScript/클라이언트를 맞췄다. watching false를 true로 바꾸지 않으며 기존 rescan event 안내·저장 충돌 방지는 유지한다.
+- bridge 회귀에 정상2개/비정상4개 payload를 추가,56/56 PASS·tsc/diff PASS. 새 main 빌드/native 재시험은 아직 미수행. 큰 트리 시험은 FAIL이고 tree timing 미확보다. 시험 sidecar 종료 뒤 Electron만 남아 사용자 승인 후 PID27469만 TERM→KILL했고 session68541 exit1/SIGKILL로 종료 확인했다. 증거 폴더/사용자 데이터는 삭제하지 않았다.
+- 독립 검토에서 초기 tree/diff 완료가 suspended event의 rescan 표시를 지울 수 있다는 지적을 받아 Promise.all 완료 후 현행 project/epoch을 확인하고 watch false를 명시 반영했다. 초기 suspended 회귀 포함 editor55/55 PASS. 최신 main 빌드 후 native 재시험, workspace watch의 대형 범위 처리·snapshot 시간 여유 검토는 다음 작업이다. G6/RSS·Claude/Windows/출시 미완료, 기존9월 archive 보존/main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (Git 파이프 준비 상태 대기)
 
 - 직전fdf809a의 대형 snapshot 실패에 이어 Unix BudgetPipe의 WouldBlock 고정5ms sleep을 poll 준비 상태 대기로 바꿨다. 취소 검사 간격5ms·120초 wall budget·nonblocking 입출력·Drop kill/reap은 유지한다. Karpathy 최소 변경 원칙 적용, 메인 직접 구현/읽기 전용 기존 검토자1명 정적 APPROVE(차단 지적 없음).

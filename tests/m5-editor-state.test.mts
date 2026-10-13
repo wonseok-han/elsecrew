@@ -49,6 +49,19 @@ import {
 const version = (text: string): FileVersionV1 => sha256FileVersionV1(new TextEncoder().encode(text));
 const baseCommit = "a".repeat(40);
 
+test("initial suspended watcher result preserves rescan after tree and diff finish", async () => {
+  const bridge: ProjectBridge = new FakeBridge();
+  bridge.watchProjectFiles = async () => ({ watching: false, rescanRequired: true });
+  const controller = new ProjectEditorController(bridge);
+  controller.start();
+  try {
+    await controller.chooseProject();
+    assert.equal(controller.snapshot().rescanRequired, true);
+    assert.equal(controller.snapshot().noticeKey, "m5.editorNotice.rescan");
+    assert.equal(controller.snapshot().error, null);
+  } finally { controller.dispose(); }
+});
+
 test("leaving a project view preserves the durable snapshot and rejects dirty views", async () => {
   const bridge = new FakeBridge(); const controller = new ProjectEditorController(bridge);
   controller.start();

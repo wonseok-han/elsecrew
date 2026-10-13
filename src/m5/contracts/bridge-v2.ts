@@ -2,6 +2,7 @@ import type { M5BridgeV1, UnsubscribeV1 } from "./bridge-v1.ts";
 import type {
   G4SafetyErrorV1,
   ProjectCloseResultV1,
+  ProjectWatchResultV1,
   ProjectIdentityV1,
   TreePageV1,
   WatchEventV1,
@@ -53,7 +54,7 @@ export type M5BridgeV2 = Omit<M5BridgeV1, "version"> & {
     | { outcome: "committed"; version: FileVersionV1 }
     | { outcome: "dirtyConflict"; error: G4SafetyErrorV1 }
   >;
-  watchProjectFiles(input: { projectId: string }): Promise<{ watching: true }>;
+  watchProjectFiles(input: { projectId: string }): Promise<ProjectWatchResultV1>;
   getDiffSummary(input: { projectId: string }): Promise<DiffSummaryV1>;
   getDiffFile(input: { projectId: string; path: string }): Promise<DiffFileDescriptorV1>;
   onProjectEvent(listener: (event: WatchEventV1) => void): UnsubscribeV1;

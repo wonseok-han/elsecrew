@@ -42,6 +42,7 @@ import {
   validateWatchEventV1,
   validateWorktreeManifestV1,
   type ProjectCloseResultV1,
+  type ProjectWatchResultV1,
   type ProjectIdentityV1,
   type TreePageV1,
   type WatchEventV1,
@@ -438,7 +439,7 @@ export class SidecarClientV1 {
   beginFileSave(input: Omit<SaveBeginV1, "saveId" | "chunkBytes">): Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }> { return this.#request("file.save", input) as Promise<{ saveId: string; chunkBytes: SaveBeginV1["chunkBytes"] }>; }
   appendFileSaveChunk(input: SaveChunkV1): Promise<{ acceptedSeq: number }> { return this.#request("file.save", input) as Promise<{ acceptedSeq: number }>; }
   commitFileSave(input: SaveCommitV1): Promise<{ outcome: "committed"; version: FileVersionV1 } | { outcome: "dirtyConflict"; error: ReturnType<typeof validateG4SafetyErrorV1> }> { return this.#request("file.save", input) as Promise<{ outcome: "committed"; version: FileVersionV1 } | { outcome: "dirtyConflict"; error: ReturnType<typeof validateG4SafetyErrorV1> }>; }
-  watchProjectFiles(input: { projectId: string }): Promise<{ watching: true }> { return this.#request("file.watch", input) as Promise<{ watching: true }>; }
+  watchProjectFiles(input: { projectId: string }): Promise<ProjectWatchResultV1> { return this.#request("file.watch", input) as Promise<ProjectWatchResultV1>; }
   getDiffSummary(input: { projectId: string }): Promise<DiffSummaryV1> { return this.#request("diff.getSummary", input) as Promise<DiffSummaryV1>; }
   getDiffFile(input: { projectId: string; path: string }): Promise<DiffFileDescriptorV1> { return this.#request("diff.getFile", input) as Promise<DiffFileDescriptorV1>; }
 
@@ -844,7 +845,7 @@ export class SidecarClientV1 {
         this.#registerStream(value.byteLength, value.stream, null, MAX_DIFF_STREAM_BYTES);
         return value;
       }
-      case "file.watch": return isWatchResult(response.result) ? { watching: true } : failResult("file.watch result is invalid");
+      case "file.watch": return isWatchResult(response.result) ? response.result : failResult("file.watch result is invalid");
       case "file.save": return this.#validateSaveResult(pending, response.result);
       case "workspace.getTree": {
         const value = validateWorkspaceTreePageV1(response.result);
@@ -1230,10 +1231,11 @@ function asRequestParams(value: object): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function isWatchResult(value: unknown): boolean {
+function isWatchResult(value: unknown): value is ProjectWatchResultV1 {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
-  return Object.keys(result).length === 1 && result.watching === true;
+  return (Object.keys(result).length === 1 && result.watching === true)
+    || (Object.keys(result).length === 2 && result.watching === false && result.rescanRequired === true);
 }
 
 function validId(value: unknown): value is string {

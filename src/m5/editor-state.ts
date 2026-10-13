@@ -260,11 +260,14 @@ export class ProjectEditorController {
       }
       const active = await this.#createSnapshot(project, selection, controllerGeneration);
       if (!active || !this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
-      await Promise.all([
+      const [, , watch] = await Promise.all([
         this.#loadTree(project.projectId, active.epoch, ""),
         this.#refreshChanges(project.projectId, active.epoch),
         this.#bridge.watchProjectFiles({ projectId: project.projectId }),
       ]);
+      if (!watch.watching && this.#isCurrent(project.projectId, active.epoch)) {
+        this.#set({ rescanRequired: true, ...editorNotice("m5.editorNotice.rescan") });
+      }
     } catch (error) {
       if (!this.#isLiveGeneration(controllerGeneration) || selection !== this.#selectionGeneration) return;
       if (isPickerCancelled(error)) {
