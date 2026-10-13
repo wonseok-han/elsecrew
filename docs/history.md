@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (누적 로직 검사·공용 설치 fixture 정합화)
+
+- 기준8d998be/m5 통합 checkout을 확인했다. 초기 편집기는 이미 파일 선택 후 Monaco를 lazy load하므로 유휴 메모리 초과를 eager editor 로딩 탓으로 단정하거나 기준을 변경하지 않았다. Karpathy 최소 변경 원칙으로 누적 검사에서 확인한 불일치만 수정했다.
+- 전체 npm test는491건 중490 PASS/1 FAIL(23.2초). provider.install이 Rust/TypeScript METHODS_V1 및 실제 dispatch에는 있지만 canonical manifest methods에서만 빠져 있었다. manifest에 해당 메서드를 같은 위치에 추가했으며 TypeScript protocol4 PASS, Rust protocol58 PASS로 양쪽 계약 일치를 확인했다. 제품 권한/실행 정책 변경 없음.
+- protocol+sidecar 누적 Rust 검사(CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4/CARGO_INCREMENTAL=0, --locked -j4)는 세션66516에서 계속 실행 중이다. 설치 failed_target_verification_is_durable_before_fences_are_released 1건 FAILED가 관측돼 전체 통과 아님. 정확한 panic과 나머지 결과는 종료 후 /private/tmp/hello-agent-rust-regression-8d998be.log에서 확인하고 영향 검사만 재실행한다. 실행 중인 이 세션을 중복 시작하지 않는다. Node 전체 기록은 /private/tmp/hello-agent-node-regression-8d998be.log다.
+- 다음은 진행 중 검사 회수와 설치 실패 원인 수정, 이후 메모리/네이티브 포커스·Claude 로그인 확인 후 실연결·G6/출시다. 새 패키지/모델 호출 없음. target 약1.8GiB/.vite3.9MiB, 사용자9월 archive 변경 보존·main/push 없음. 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (설정 닫기 포커스 복귀 순서 수정)
 
 - 9183ae2에서 실제 앱 c4cokm 시험은 설정 닫기 뒤 toolbar 포커스 복귀 검사에서 실패했다. click의 requestAnimationFrame 대신 React 닫기 commit 후 effect에서 복귀하도록 수정했다. 새 1yrOkt 시험은 설정 왕복·편집/저장·diff 후속 지시·두 채팅·반영 전 확인 ready(1.43초)를 통과했다. renderer build/tsc PASS, 합성 Chromium은 제한 환경에서 프로세스 시작 실패 뒤 승인된 외부 실행에서2 PASS12.4초다.
