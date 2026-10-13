@@ -205,6 +205,36 @@ try {
     report.project.originalUnchanged = true;
     if (resume) report.project.application = await probePackagedApplication(evaluate, until,
       () => fs.readFileSync(path.join(report.project.source, 'hello.txt'), 'utf8'));
+    if (resume) {
+      const closeProject = async () => {
+        await until(() => evaluate(`!![...document.querySelectorAll('button')].find(button => button.textContent === '프로젝트 화면 닫기' && !button.disabled)`));
+        await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === '프로젝트 화면 닫기').click()`);
+        await until(() => evaluate(`!document.querySelector('.m5-timeline')`));
+      };
+      const openProject = async source => {
+        const title = JSON.stringify(fs.realpathSync(source));
+        await until(() => evaluate(`!![...document.querySelectorAll('.m5-project-catalog-list li > button')].find(button => button.title === ${title} && !button.disabled)`));
+        await evaluate(`[...document.querySelectorAll('.m5-project-catalog-list li > button')].find(button => button.title === ${title}).click()`);
+      };
+      await closeProject();
+      await openProject(report.project.otherSource);
+      await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('other.txt') && !button.disabled)`));
+      await until(() => evaluate(`document.querySelector('.m5-new-chat-button')?.disabled === false`));
+      assert.equal(await evaluate(`document.querySelectorAll('.m5-chat-chip').length`), 0, 'First project chats leaked into second project');
+      assert.equal(await evaluate(`[...document.querySelectorAll('.m5-files button')].some(button => button.textContent.includes('hello.txt'))`), false, 'First project file leaked');
+      await evaluate(`[...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('other.txt')).click()`);
+      await until(() => evaluate(`document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('second project only')`));
+      await closeProject();
+      await openProject(report.project.source);
+      await until(() => evaluate(`!![...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check') && !button.disabled)`));
+      await evaluate(`[...document.querySelectorAll('.m5-chat-chip')].find(button => button.textContent.includes('Packaged editing check')).click()`);
+      await until(() => evaluate(`document.querySelector('.m5-timeline h2')?.textContent === 'Packaged editing check'`));
+      await until(() => evaluate(`!![...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('hello.txt') && !button.disabled)`));
+      await evaluate(`[...document.querySelectorAll('.m5-files button')].find(button => button.textContent.includes('hello.txt')).click()`);
+      await until(() => evaluate(`document.querySelector('.monaco-editor .view-lines')?.textContent.replace(/\u00a0/g, ' ').includes('edited in packaged snapshot')`));
+      assert.equal(fs.readFileSync(path.join(report.project.otherSource, 'other.txt'), 'utf8'), 'second project only\n');
+      report.project.multiProject = {otherFilesIsolated:true, otherChatsEmpty:true, originalChatReopened:true, otherSourceUnchanged:true};
+    }
   }
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, resume ? 'restart.png' : 'startup.png'), Buffer.from(capture.data, 'base64'));
@@ -248,7 +278,8 @@ if (projectFlow && report.shutdown === 'confirmed' && !report.error && report.pr
     root, head: git('rev-parse', 'HEAD'), measuredAt: new Date().toISOString(),
     packagedApp: true, userData, asarSha256: report.asarSha256, sidecarSha256: report.sidecarSha256,
     limitations: report.limitations, memory: [], shutdown: 'pending',
-    project: {source: report.project.source, projectId: report.project.projectId},
+    project: {source: report.project.source, projectId: report.project.projectId,
+      otherSource: report.project.otherSource, otherProjectId: report.project.otherProjectId},
     previousSidecarInstanceId: report.sidecarInstanceId,
   };
   await observe(restart, true);

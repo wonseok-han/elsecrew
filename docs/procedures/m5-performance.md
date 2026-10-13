@@ -47,6 +47,8 @@ macOS에서 현재 checkout의 main/preload/renderer `.vite/build`와 native sid
 
 ### 패키징 앱 외부 관측
 
+프로젝트 모드는 고유 파일을 가진 두 번째 임시 Git도 등록한다. 재시작/반영/복원 뒤 프로젝트 화면을 닫아 두 번째 프로젝트를 열고 파일·채팅 비혼입 및 원본 불변을 확인한 후 첫 채팅으로 돌아온다. 모든 project ID는 실제 API 결과를 사용하며 경로/목록을 mock하지 않는다. 이는 순차 전환 증거이며 동시 에이전트의 교차 프로젝트 안전 시험을 대신하지 않는다.
+
 프로젝트 시나리오는 첫 실행에서 편집/저장/diff·정상 종료가 확인된 경우에만 같은 profile을 재시작한다. 두 번째 실행은 새 sidecar instance와 기존 채팅·저장된 편집기 본문·diff·원본 불변을 확인하고 restart.json/PNG를 따로 남긴다. 정상 종료가 불확실하면 재시작하지 않는다. Monaco view-lines의 NBSP는 표시 공백으로 정규화하되 파일이나 diff 내용을 바꾸지 않는다.
 
 `pnpm m5:smoke:packaged-ui --project`는 자체 생성한 작은 Git 프로젝트를 packaged sidecar의 정상 project.open API로 목록에 등록하고 안전 종료한 뒤 같은 임시 profile로 앱을 시작한다. 실제 목록 다시 열기→채팅 생성→Monaco 편집→저장→diff 표시와 원본 불변을 확인한다. 재시작 후 확인 취소의 원본 불변, 반영/복원 각각의 별도 동의 전 차단과 실행 후 정확한 파일 바이트를 확인한다. bridge/제품 main을 교체하지 않지만 CDP 입력이므로 실제 키보드/OS 포커스 증거가 아니다. 다중 프로젝트·실제 모델·실패 주입 전체 검증을 대신하지 않는다. 측정 RSS는 프로젝트를 열기 전 idle이며 편집 후 peak가 아니다.

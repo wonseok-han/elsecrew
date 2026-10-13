@@ -8,10 +8,15 @@ import { decodeJsonl, parseReadyPayload } from '../src/m5/contracts/protocol-v1.
 
 export async function seedPackagedProject(binary, root, userData, env) {
   const source = path.join(root, 'project');
+  const otherSource = path.join(root, 'other-project');
   fs.mkdirSync(source);
   fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+  fs.mkdirSync(otherSource);
+  fs.writeFileSync(path.join(otherSource, 'other.txt'), 'second project only\n');
+  for (const cwd of [source, otherSource]) {
   for (const args of [['init', '-q', '--template='], ['add', '.'], ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Smoke', '-c', 'user.email=smoke@example.invalid', 'commit', '-qm', 'fixture']]) {
-    execFileSync('/usr/bin/git', args, {cwd: source, env: {...env, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_COUNT:'0'}});
+    execFileSync('/usr/bin/git', args, {cwd, env: {...env, GIT_CONFIG_NOSYSTEM:'1', GIT_CONFIG_GLOBAL:'/dev/null', GIT_CONFIG_COUNT:'0'}});
+  }
   }
   const directory = path.join(userData, 'com.wonseokhan.helloagent/m5');
   fs.mkdirSync(directory, {recursive: true});
@@ -52,11 +57,14 @@ export async function seedPackagedProject(binary, root, userData, env) {
     };
     while ((await request('system.status')).storageAdmission.state !== 'ready') await new Promise(resolve => setTimeout(resolve, 25));
     const project = await request('project.open', {selectedPath:source});
+    await request('project.catalog', {action:'releaseView', projectId:project.projectId});
+    const other = await request('project.open', {selectedPath:otherSource});
+    assert.notEqual(project.projectId, other.projectId);
     const quit = await request('app.prepareQuit');
     assert.equal(quit.safeToQuit, true);
     assert.deepEqual(quit.blockers, []);
     child.stdin.end();
     assert.deepEqual(await Promise.race([closed, deadline]), {code:0, signal:null});
-    return {source, projectId:project.projectId, seedPid:child.pid, shutdown:'confirmed'};
+    return {source, projectId:project.projectId, otherSource, otherProjectId:other.projectId, seedPid:child.pid, shutdown:'confirmed'};
   } finally { clearTimeout(timer); lines.close(); child.stdin.end(); }
 }

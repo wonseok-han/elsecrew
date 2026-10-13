@@ -1,5 +1,10 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (패키지 다중 프로젝트 순차 격리)
+
+- 816b6ad 위 Karpathy 최소 변경으로 두 번째 임시 Git/고유 파일을 정상 project.open API로 등록하고 기존 UI 시나리오 뒤 첫 프로젝트 닫기→두 번째 열기→첫 채팅 복귀를 연결했다. 3UPviU restart.json의 otherFilesIsolated/otherChatsEmpty/originalChatReopened/otherSourceUnchanged와 기존 재시작·반영복원 검사가true, 두 실행 exit0/종료confirmed다. /private/tmp/hello-agent-packaged-multi-project.log 및 OS 임시 hello-agent-packaged-ui-3UPviU JSON/PNG 보존. idle460472320B로 전체 FAIL 유지한다.
+- 실행 중 추가한 프로젝트 준비 완료 대기/복귀 뒤 저장 본문 재확인은 해당 프로세스가 읽은 버전에는 없으므로 아직 미검증이다. syntax/diff PASS, 다음 최신 패키지 묶음에서 포함해 확인한다. 기존8b10ed6 패키지의 CDP 순차 전환 증거이지 최신UI/물리키보드/동시 에이전트/전체G6 합격은 아니다. 임시 profile은 재현용 유지, 사용자9월 archive/main/push 경계 보존. 다음은 최신 패키지와 잔여 성능·출시 검증이다.
+
 ### 2026-10-13 · by GPT-6 Astra (패키지 반영·복원 동의와 바이트 확인)
 
 - 336ada2의 재시작 뒤 실제 UI로 확인 취소→원본 불변, 동의 전 반영 차단→검토한 바이트 반영, 별도 동의 전 복원 차단→원래 바이트 복원을 연결했다. Karpathy 최소 범위의 관측기 변경이며 제품 코드/안전 경계를 바꾸거나 bridge를 mock하지 않았다. 자체 생성 프로젝트만 사용했고 모델/계정 호출은 없다.
