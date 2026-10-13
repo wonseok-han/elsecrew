@@ -253,6 +253,8 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.filePages": "Changed file list pages",
   "m5.diff.fileRange": "Files {first}–{last} of {total}",
   "m5.diff.openEditor": "Open file in editor",
+  "m5.diff.discuss": "Draft a follow-up about this file",
+  "m5.diff.reference": "Changed file to review: {path}",
   "m5.diff.viewSaved": "View saved changes",
   "m5.diff.old": " · Previously: {path}",
   "m5.diff.binaryHelp": "Binary changes show that the file changed, not its contents.",

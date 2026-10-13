@@ -252,6 +252,8 @@ export const ko = {
   "m5.diff.filePages": "변경 파일 목록 페이지",
   "m5.diff.fileRange": "{first}–{last} / {total}개 파일",
   "m5.diff.openEditor": "이 파일 편집하기",
+  "m5.diff.discuss": "이 파일에 대해 후속 요청 쓰기",
+  "m5.diff.reference": "검토할 변경 파일: {path}",
   "m5.diff.viewSaved": "저장된 변경 보기",
   "m5.diff.old": " · 이전: {path}",
   "m5.diff.binaryHelp": "이진 변경은 내용 대신 파일 변경 사실만 보여요.",

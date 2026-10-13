@@ -208,6 +208,23 @@ test("fixture launch pending prevents leaving before its run record arrives", as
   } finally { f.controller.dispose(); }
 });
 
+test("diff reference preserves drafts, binds the workspace, and never sends automatically", async () => {
+  const f = await followupFixture();
+  try {
+    const active = f.controller.snapshot().activeChat!;
+    f.controller.editFollowup("Keep this request");
+    assert.equal(f.controller.addReviewReference({ ...active, workspaceIdentity: "another" }, "src/a.ts"), false);
+    assert.equal(f.controller.snapshot().followups?.[active.chatId]?.text, "Keep this request");
+    assert.equal(f.controller.addReviewReference(active, "Changed file: src/a.ts"), true);
+    assert.equal(f.controller.snapshot().followups?.[active.chatId]?.text, "Keep this request\n\nChanged file: src/a.ts\n");
+    assert.equal(f.calls.length, 0);
+    const pending = f.controller.appendFollowup(true);
+    assert.equal(f.controller.addReviewReference(active, "src/b.ts"), false);
+    f.complete();
+    await pending;
+  } finally { f.controller.dispose(); }
+});
+
 test("follow-up preserves newer input and deduplicates the response/event pair", async () => {
   const f = await followupFixture();
   f.controller.editFollowup("send this");

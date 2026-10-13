@@ -77,6 +77,17 @@ export class ChatUiController {
     const draft = this.#state.followups?.[chat.chatId] ?? { text: "", request: null, sending: false, error: null };
     this.#setFollowup(chat.chatId, { ...draft, text });
   }
+  addReviewReference(workspace: Pick<ChatRecordV1, "chatId" | "projectId" | "worktreeId" | "workspaceIdentity">, reference: string): boolean {
+    const chat = this.#state.activeChat;
+    if (!chat || !this.canAppendFollowup() || !reference.trim()) return false;
+    if (chat.chatId !== workspace.chatId || chat.projectId !== workspace.projectId
+      || chat.worktreeId !== workspace.worktreeId || chat.workspaceIdentity !== workspace.workspaceIdentity) return false;
+    const draft = this.#state.followups?.[chat.chatId];
+    // An uncertain delivery must retry the original immutable message first.
+    if (draft?.sending || draft?.request) return false;
+    this.editFollowup(`${draft?.text ? `${draft.text}\n\n` : ""}${reference}\n`);
+    return true;
+  }
   async appendFollowup(admissionReady: boolean): Promise<void> {
     const chat = this.#state.activeChat;
     const bridge = this.#bridge;
