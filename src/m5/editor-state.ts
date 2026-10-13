@@ -196,6 +196,8 @@ export class ProjectEditorController {
     this.#controllerGeneration += 1;
     this.#selectionGeneration += 1;
     this.#projectEpoch += 1;
+    this.#saveGenerations.clear();
+    this.#saveWatchPending.clear();
     this.#snapshotCreationBlocked = null;
     this.#snapshotCreation?.resolve(null);
     for (const unsubscribe of this.#unsubscribers) unsubscribe();
@@ -284,6 +286,8 @@ export class ProjectEditorController {
     if (!project || project.id !== workspace.projectId) { this.#setError("m5.editorError.identity", new Error("chat project identity mismatch")); return false; }
     const previous = this.#state;
     const epoch = ++this.#projectEpoch;
+    this.#saveGenerations.clear();
+    this.#saveWatchPending.clear();
     this.#set({ workspace, tree: [], treeParent: "", treeNextCursor: null, treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null, diffFile: null, diffText: "", rescanRequired: false, error: null, ...editorNotice("m5.editorNotice.opened") });
     try {
       // Bind in order. A failed tree must not start later diff/watch operations for B.
@@ -348,6 +352,8 @@ export class ProjectEditorController {
         return;
       }
       const epoch = ++this.#projectEpoch;
+      this.#saveGenerations.clear();
+      this.#saveWatchPending.clear();
       this.#set({
         project: {
           id: operation.project.projectId,
@@ -593,7 +599,7 @@ export class ProjectEditorController {
       }
       this.#setError("m5.editorError.save", error);
     } finally {
-      if (this.#saveWatchPending.delete(path) && this.#isCurrent(project.id, epoch)) {
+      if (this.#isCurrent(project.id, epoch) && this.#saveWatchPending.delete(path)) {
         const latest = this.#tab(path);
         if (latest && latest.saveState !== "conflicted") void this.#checkCleanFileChange(latest);
       }
@@ -629,6 +635,8 @@ export class ProjectEditorController {
       else await this.#bridge.closeProject({ projectId: project.id });
       if (!this.#isCurrent(project.id, epoch)) return;
       this.#projectEpoch += 1;
+      this.#saveGenerations.clear();
+      this.#saveWatchPending.clear();
       this.#set({
         project: null,
         workspace: null,
@@ -656,6 +664,8 @@ export class ProjectEditorController {
     if (this.#disposed || this.#actionBlocked || this.#snapshotCreation || this.#snapshotCreationBlocked || !this.canLeaveProject()) return false;
     this.#selectionGeneration++;
     this.#projectEpoch++;
+    this.#saveGenerations.clear();
+    this.#saveWatchPending.clear();
     this.#set({ project: null, workspace: null, tree: [], treeParent: "", treeNextCursor: null,
       treePage: 1, treeLoading: false, tabs: [], activePath: null, diffSummary: null,
       diffFile: null, diffText: "", rescanRequired: false, error: null,

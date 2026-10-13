@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (편집 컨텍스트 저장 bookkeeping 해제)
+
+- 직전1c4062f는 StrictMode 채팅 재연결 수정으로 진척했다. 이어 검토자가 지적한 editor saveGenerations/saveWatchPending를 확인해 프로젝트 snapshot 생성·채팅 바인딩·프로젝트 이탈/닫기·dispose에서 정리했다. 이전 파일 경로가 다른 컨텍스트까지 유지되지 않도록 했으며 저장 중 이탈 차단 조건은 그대로다.
+- save finally에서 현행 project/epoch 확인 전에 pending path를 삭제하던 순서를 수정했다. 이전 수명의 늦은 완료가 새 컨텍스트의 같은 경로 알림을 지우지 않도록 현행 여부를 먼저 확인한다. 원본 쓰기/IPC/복구 계약 변경 없음.
+- 영향 범위인 editor-state 기존 회귀54/54 PASS(3.3초), diff 검사 PASS. 새로운 heap/RSS 측정이나 전체 빌드·G6 합격 증거는 아니다. 누적 GUI/전체 검증은 기능 파동에서 묶어 진행한다. 기존9월 archive 보존, 실제 계정 호출/main/push 없음.
+- 다음: G6 전체 collector와 유휴 RSS 초과 원인, 전송 중 controller 재사용 정책, Claude 실제 연결·Windows·출시 증거. 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (개발 모드 채팅 controller 재연결 수정)
 
 - 기준2f0b6f9에서 초기 로딩/자원 해제를 직접 조사하고 상시 승인된 읽기 전용 검토자1명에게 같은 범위를 검토받았다. bootstrap의 React StrictMode effect 재설치에서 ChatUiController.dispose 이후 start가 disposed를 복원하지 않아 채팅 projection이 정지하는 결함을 확인했다. editor controller와 동일하게 start에서 복원하는 한 줄만 추가했다.
