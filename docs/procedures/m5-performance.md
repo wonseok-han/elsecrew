@@ -69,6 +69,12 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ## 전체 측정값 판정
 
+### Native 저장 경합 관측
+
+`CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_workspace_save_races_preserve_external_bytes_across_two_chats -- --ignored --nocapture`는 생성한 Git 프로젝트와 실제 `--stdio` sidecar에서 두 채팅의 `workspace.file.save` begin/chunk/commit을 실행한다. 100회 동안 두 사본을 번갈아 선택하고 begin 또는 chunk 이후 외부 내용을 써 commit 충돌을 유도한다. 각 충돌의 명시 응답·외부 바이트 보존·다른 채팅/원본 불변을 검사한 뒤, 최신 버전으로 정상 저장되는지 대조한다.
+
+정상 종료 뒤 출력하는 `native-workspace-save-races` JSON에는100개 개별 관측과 overwrite/미보고 충돌/교차 채팅 쓰기 카운터를 남긴다. 실패한 assertion은 테스트 실패로 남으며 완료 JSON을 만들지 않는다. 성공한 임시 프로젝트/DB는 종료 확인 후 정리하고 실패 데이터는 진단용으로 보존한다. 일반 검사에서는 ignored이며 명시 실행한다. 이는 commit 전 제어된 순서의 실제 프로토콜 관측이고, packaged UI·에이전트 동시 쓰기·모든 OS 스케줄링 경합의 증거는 아니므로 diagnostic=true/gateEligible=false다. 전체 G6 수집기의 대체물이 아니다.
+
 ### 단일 채팅 renderer 입력 스트림 진단
 
 현재 renderer를 빌드한 뒤 `M5_MEASURE_MESSAGE_PAINT=1 M5_RENDERER_DIR="$PWD/.vite/renderer/main_window" node_modules/.bin/electron tests/m5-renderer-smoke-runner.cjs`로 기존 합성 화면 회귀에50회/초·3000메시지 관측을 추가할 수 있다. 관측은 renderer performance.now 발송 시각부터 메시지 DOM이 연속 두 animation frame에 나타날 때까지다. 지연된 발송은 schedulingDelayMs로 보존하며 매 메시지 표본·미관측 ID·최대값을 독립 userData의 message-paint.json에 저장한다.

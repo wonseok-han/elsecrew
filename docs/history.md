@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 저장 API 경합100회 관측)
+
+- db576ae 이후 G6 누락 중 GUI 없이 가능한 저장 경합 관측을 추가했다. 기존 stdio 도우미와 실제 --stdio/native sidecar에 두 채팅 snapshot을 만들고 workspace.file.save의 begin/chunk/commit 경로를 호출한다. 교대로100번 외부 쓰기를 begin 또는 chunk 뒤에 삽입, 명시 dirtyConflict·외부 바이트·다른 채팅/원본 불변을 검사한다. 각 회차 최신 버전의 정상 저장도 대조해 모든 쓰기를 거부하는 구현을 합격시키지 않는다(Karpathy 최소 범위).
+- 최초 rbxOaN은 기존3초 응답 도우미 timeout으로 실패했고 요청 단계가 남지 않아 원인 미확정이다. 새 요청에는 method/id를 오류에 남기고10초 관측 제한을 적용, macOS 임시 경로는 canonicalize했다. 제품 저장/성능 기준 변경 없음. NqwFtY 재실행은100충돌+100정상 저장·두 채팅·원본 불변·quit accepted/exit0, 71.97초 PASS. JSON100행/chats2/counters 전부0를 확인했다. 일반 검사에서는 명시 ignored이며 실제 계정/모델 미사용이다.
+- 성공 fixture는 sidecar 종료 후 제거됐고 부재 확인했다. 최초 실패 fixture는 종료 증거가 없어 보존한다. 로그 /private/tmp/hello-agent-save-races-db576ae.log 및 /private/tmp/hello-agent-save-races-retry.log에 실패와 실제 관측을 남겼다. 출력은 diagnostic=true/gateEligible=false이며 UI/packaged·동시 모델 쓰기·전체 경합 안전성/G6 합격으로 확대하지 않는다. rustfmt/diff와 결과 구조 assertion PASS.
+- 다음은 이 관측을 포함할 packaged 통합 수집, 종료/자손·stream 등 누락 항목 연결이다. Mac 잠금 해제 후 입력/메모리, Claude 로그인 확인 후 승인 범위 실연결은 계속 대기다. 전체 미완료, 사용자9월 archive/main/push 경계 유지.
+
 ### 2026-10-13 · by GPT-6 Astra (시작 수집기 현행 계약 연결)
 
 - f3711a7에서 G6 측정 경로를 확인했다. sidecar startup collector가 구형 product-only status parser를 사용해 현재 native capabilities/설치 suffix와 불일치했다. macOS 전용 수집기에 기존 parseCurrentSystemStatusV1(..., false, true)를 연결했다. protocol/status/quit·DB clean marker 확인은 유지한다. Karpathy 최소 변경 원칙으로 해당 수집기만 수정했다.

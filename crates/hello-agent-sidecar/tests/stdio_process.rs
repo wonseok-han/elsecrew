@@ -1368,6 +1368,186 @@ fn binary_project_worktree_read_stream_and_quit_follow_g4_order() {
     assert!(child.wait().unwrap().success());
 }
 
+#[test]
+#[ignore = "explicit 100-race native protocol diagnostic; no provider or account"]
+fn binary_workspace_save_races_preserve_external_bytes_across_two_chats() {
+    use hello_agent_protocol::project_v1::sha256_file_version_v1;
+    use serde_json::{json, Value};
+
+    // Preserve data on failure; only confirmed quit permits synthetic cleanup.
+    let root = tempfile::Builder::new()
+        .prefix("hello-agent-save-races-")
+        .tempdir()
+        .unwrap()
+        .keep()
+        .canonicalize()
+        .unwrap();
+    eprintln!("save race diagnostic: {}", root.display());
+    let source = root.join("source");
+    let data = root.join("data");
+    fs::create_dir_all(source.join("src")).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    fs::write(source.join("src/file.txt"), "original").unwrap();
+    git(&source, &["init", "-q"]);
+    git(&source, &["add", "."]);
+    git(
+        &source,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hello-agent-sidecar"))
+        .arg("--stdio")
+        .current_dir(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let envelopes = spawn_envelope_reader(child.stdout.take().unwrap());
+    let EnvelopeV1::Event(event) = receive_envelope(&envelopes) else {
+        panic!("ready");
+    };
+    let ready = ready_payload(&event).unwrap();
+    wait_for_storage_ready(&mut stdin, &envelopes, &ready.sidecar_instance_id, false);
+    let mut sequence = 0;
+    let mut request = |method: &str, params: Value| -> Value {
+        sequence += 1;
+        let id = format!("req_save_race_{sequence}");
+        write_request(&mut stdin, &ready.sidecar_instance_id, &id, method, params);
+        for _ in 0..100 {
+            match envelopes
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|error| panic!("{method} {id}: {error}"))
+            {
+                EnvelopeV1::Response(response) => {
+                    assert_eq!(response.request_id, id);
+                    assert_eq!(response.sidecar_instance_id, ready.sidecar_instance_id);
+                    assert!(response.ok, "{method}: {:?}", response.error);
+                    return response.result.unwrap();
+                }
+                EnvelopeV1::Event(event) => {
+                    assert_eq!(event.sidecar_instance_id, ready.sidecar_instance_id)
+                }
+                _ => panic!("unexpected request from sidecar"),
+            }
+        }
+        panic!("response event budget exceeded");
+    };
+    let project = request("project.open", json!({"selectedPath": source}));
+    let settings = request(
+        "project.getRoleSettings",
+        json!({"projectId": project["projectId"]}),
+    );
+    let mut workspaces = Vec::new();
+    for index in 0..2 {
+        let prepared = request(
+            "workspace.prepareChat",
+            json!({"projectId": project["projectId"]}),
+        );
+        let chat = request(
+            "chat.create",
+            json!({
+                "projectId": project["projectId"], "preparationId": prepared["preparationId"],
+                "worktreeId": prepared["manifest"]["worktreeId"],
+                "workspaceIdentity": prepared["manifest"]["workspaceIdentity"],
+                "goal": format!("save race {index}"), "expectedSettingsRevision": settings["revision"]
+            }),
+        );
+        let address = json!({"chatId": chat["chatId"], "projectId": chat["projectId"],
+            "worktreeId": chat["worktreeId"], "workspaceIdentity": chat["workspaceIdentity"]});
+        let path = std::path::PathBuf::from(prepared["manifest"]["worktreePath"].as_str().unwrap())
+            .join("src/file.txt");
+        assert!(path.starts_with(&data));
+        workspaces.push((address, path));
+    }
+    let mut observations = Vec::new();
+    for index in 0..100 {
+        let (address, path) = &workspaces[index % 2];
+        let other = &workspaces[1 - index % 2].1;
+        let other_before = fs::read(other).unwrap();
+        let external = format!("external-{index}");
+        let replacement = format!("saved-{index}");
+        for conflict in [true, false] {
+            let expected = sha256_file_version_v1(&fs::read(path).unwrap());
+            let addressed = |fields: Value| {
+                let mut params = address.clone();
+                params
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(fields.as_object().unwrap().clone());
+                params
+            };
+            let begin = request(
+                "workspace.file.save",
+                addressed(json!({"path":"src/file.txt",
+                "expectedVersion":expected,"totalBytes":replacement.len(),"encoding":"utf8"})),
+            );
+            if conflict && index % 2 == 0 {
+                fs::write(path, &external).unwrap();
+            }
+            request(
+                "workspace.file.save",
+                addressed(json!({"saveId":begin["saveId"],"seq":1,"text":replacement})),
+            );
+            if conflict && index % 2 == 1 {
+                fs::write(path, &external).unwrap();
+            }
+            let committed = request(
+                "workspace.file.save",
+                addressed(json!({"saveId":begin["saveId"],
+                "expectedVersion":expected,"lastSeq":1,"totalBytes":replacement.len()})),
+            );
+            for key in ["chatId", "projectId", "worktreeId", "workspaceIdentity"] {
+                assert_eq!(committed[key], address[key]);
+            }
+            assert_eq!(
+                committed["outcome"],
+                if conflict {
+                    "dirtyConflict"
+                } else {
+                    "committed"
+                }
+            );
+            assert_eq!(
+                fs::read(path).unwrap(),
+                if conflict {
+                    external.as_bytes()
+                } else {
+                    replacement.as_bytes()
+                }
+            );
+            assert_eq!(fs::read(other).unwrap(), other_before);
+            assert_eq!(fs::read(source.join("src/file.txt")).unwrap(), b"original");
+        }
+        observations.push(json!({"trial":index,"chatId":address["chatId"],
+            "externalWriteStage":if index % 2 == 0 {"afterBegin"} else {"afterChunk"},
+            "reportedConflict":true,"externalBytesPreserved":true,"controlSaveCommitted":true,
+            "otherChatUnchanged":true,"sourceUnchanged":true}));
+    }
+    let quit = request("app.prepareQuit", json!({}));
+    assert_eq!(quit["safeToQuit"], true);
+    drop(request);
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    println!(
+        "{}",
+        json!({"evidence":"native-workspace-save-races", "diagnostic":true,
+        "gateEligible":false,"saveRaces":100,"controlSaves":100,"observations":observations,
+        "counters":{"silentOverwrites":0,"unreportedConflicts":0,"crossChatWrites":0},
+        "shutdown":"accepted","limitations":["not packaged UI; no agent writes; controlled interleavings before commit"]})
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn binary_cancel_clean_proves_fixture_parent_and_descendant_gone() {
