@@ -23,8 +23,11 @@ assert.equal(process.platform, 'darwin');
 assert.equal(process.arch, 'arm64');
 const largeProject = process.argv.length === 3 && process.argv[2] === '--large-project';
 const largeDiff = process.argv.length === 3 && process.argv[2] === '--large-diff';
+const diagnosticLanguage = process.argv.length === 3
+  ? (process.argv[2] === '--english' ? 'en' : process.argv[2] === '--korean' ? 'ko' : undefined)
+  : undefined;
 const projectFlow = largeDiff || largeProject || (process.argv.length === 3 && process.argv[2] === '--project');
-assert.ok(process.argv.length === 2 || projectFlow, 'Only fixed project scenarios are accepted');
+assert.ok(process.argv.length === 2 || projectFlow || diagnosticLanguage, 'Only fixed diagnostic scenarios are accepted');
 const bundle = path.join(repo, 'out/hello-agent-darwin-arm64/hello-agent.app/Contents');
 const executable = path.join(bundle, 'MacOS/hello-agent');
 const resources = path.join(bundle, 'Resources');
@@ -45,7 +48,9 @@ const report = {
     'No native keyboard/focus, models, stress fixtures or whole G6 evidence.',
     'RSS includes current descendants only, not escaped processes.'],
   memory: [], shutdown: 'pending',
+  requestedLanguage: diagnosticLanguage ?? null,
 };
+if (diagnosticLanguage) report.limitations.push('Language selected through the real UI before RSS sampling; not a cold per-language startup.');
 const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(report, null, 2));
 persist();
 const env = {...process.env};
@@ -143,6 +148,17 @@ try {
       ? {enabledButtons: buttons.length, projectSelectionEnabled: true, rootChildren: root.childElementCount, origin: location.origin} : null;
   })()`));
   report.uiObservedMs = performance.now() - started;
+  if (diagnosticLanguage) {
+    await evaluate(`(async () => {
+      const select = document.querySelector('select:has(option[value="ko"])');
+      if (!select) throw new Error('Language control missing');
+      select.value = ${JSON.stringify(diagnosticLanguage)};
+      select.dispatchEvent(new Event('change', {bubbles: true}));
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()`);
+  }
+  report.observedLanguage = await evaluate(`document.querySelector('select:has(option[value="ko"])')?.value`);
+  if (diagnosticLanguage) assert.equal(report.observedLanguage, diagnosticLanguage, 'Requested diagnostic language was not applied');
   // Attribute RSS without guessing helper roles from PID order. CDP describes
   // Chromium processes only; unmatched descendants remain explicitly unknown.
   report.chromiumProcessesBefore = (await send('SystemInfo.getProcessInfo')).processInfo;

@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (메모리 언어 요인 비교)
+
+- 기준96bc719에서 Karpathy 최소 범위로 packaged UI 진단에 고정 --english/--korean 옵션을 추가했다. 최초 --lang=ko-KR 인자만 전달한 TtphrV는 실제 선택en으로 검증 실패해 비교에서 제외했다. 최종 구현은 자체 임시 프로필의 실제 언어 select change 및 두 animation frame 뒤 선택값 일치를 확인한다. UI 전환 후 표본이며 언어별 cold startup이 아니라는 한계를 report에 명시한다. 제품/사용자 설정·메모리 기준은 바꾸지 않았다.
+- 동일 패키지 단일 비교: Ald8ia observed ko/RSS457654272B, bmWUH4 observed en/RSS459898880B. 둘 다400MiB 초과 FAIL이나 정상 exit0/shutdown confirmed다. 한국어가 메모리 초과 주원인이라는 근거는 나오지 않았으며, 작은 차이를 일반적인 성능 개선/누수 부재 증명으로 해석하지 않는다. /private/tmp/hello-agent-memory-{english,korean,english-ui,korean-ui}.log 및 각 root의 result.json/PNG 보존.
+- 초기 인자 시험4tMCUd/TtphrV와 최종Ald8ia/bmWUH4 총4개 root는 정상 종료·관측 PID 전부 부재 확인 후 정확한 userdata만 제거했다. 인증정보·사용자프로젝트 미사용. syntax/diff PASS. 다음은 renderer 구성별 메모리 비용 분리 또는 잔여G6 계측이며 반복 트리 지연은 앞선 측정으로 해소됐다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (최신 패키지 트리 반복 지연 해소 확인)
 
 - 기준806c5d9 최신 macOS arm64 package smoke PASS 후 기존 --tree-file collector를 예열1+본10회 순차 실행했다. 본10회 p95 treeRoot258.70ms/expand167.80ms/fileEditable432.70ms/DOM362로 각 지연·DOM 기준 이내다. 기존 AyEMnF의 treeRoot p95 1132.40ms 실패는 이번 최신 패키지 반복에서 해소됐다. 측정조건/지표를 바꾸거나 실패 표본을 제외하지 않았다.
