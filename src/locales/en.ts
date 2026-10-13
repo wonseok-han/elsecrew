@@ -251,6 +251,7 @@ export const en: Record<MessageKey, string> = {
   "m5.diff.binaryHelp": "Binary changes show that the file changed, not its contents.",
   "m5.diff.empty": "No text changes to display.",
   "m5.diff.help": "− Removed lines · + Added lines · Left numbers are before the change; right numbers are after.",
+  "m5.diff.wrapLines": "Wrap long lines",
   "m5.diff.comparison": "Before and after line comparison",
   "m5.diff.before": "Before",
   "m5.diff.after": "After",

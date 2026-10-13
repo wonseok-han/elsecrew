@@ -221,6 +221,11 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .m5-diff-lines td { padding: 2px 6px; vertical-align: top; }
 .m5-diff-lines td:not(:last-child) { width: 4ch; min-width: 4ch; text-align: right; color: #abb9ca; user-select: none; border-right: 1px solid #303b49; }
 .m5-diff-lines code { white-space: pre; font: inherit; }
+.m5-diff-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.m5-diff-lines-wrapped table { table-layout: fixed; }
+.m5-diff-lines-wrapped th:not(:last-child) { width: 4ch; }
+.m5-diff-lines-wrapped code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.m5-diff-details > strong { overflow-wrap: anywhere; }
 .m5-diff-added { background: #153d2d; color: #bcf5d0; }
 .m5-diff-deleted { background: #49242d; color: #ffd0d6; }
 .m5-diff-metadata { background: #202a36; color: #b8c9e3; }

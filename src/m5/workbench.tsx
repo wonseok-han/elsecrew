@@ -710,6 +710,7 @@ function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<
   const { t } = useI18n();
   const indexed = useMemo(() => diffPages(text), [text]);
   const [page, setPage] = useState(0);
+  const [wrapLines, setWrapLines] = useState(true);
   useEffect(() => setPage(0), [descriptor, text]);
   const pages = indexed.pageCount;
   const current = Math.min(page, pages - 1);
@@ -720,7 +721,8 @@ function DiffDetails({ descriptor, text }: { descriptor: NonNullable<ReturnType<
       <p>{t(`m5.diff.${descriptor.kind}`)}{descriptor.oldPath ? t("m5.diff.old", { path: descriptor.oldPath }) : ""}</p>
       {descriptor.kind === "binary" ? <Empty text={t("m5.diff.binaryHelp")} /> : !text ? <Empty text={t("m5.diff.empty")} /> : <>
         <p>{t("m5.diff.help")}</p>
-        <div className="m5-diff-lines" tabIndex={0} aria-label={t("m5.diff.comparison")}>
+        <label className="m5-diff-wrap"><input type="checkbox" checked={wrapLines} onChange={event => setWrapLines(event.target.checked)} />{t("m5.diff.wrapLines")}</label>
+        <div className={`m5-diff-lines${wrapLines ? " m5-diff-lines-wrapped" : ""}`} tabIndex={0} aria-label={t("m5.diff.comparison")}>
           <table><thead><tr><th scope="col">{t("m5.diff.before")}</th><th scope="col">{t("m5.diff.after")}</th><th scope="col">{t("m5.diff.content")}</th></tr></thead><tbody>
             {visible.map((row, index) => <tr key={current * DIFF_PAGE_ROWS + index} className={`m5-diff-${row.kind}`}><td>{row.before}</td><td>{row.after}</td><td><code>{row.text}</code></td></tr>)}
           </tbody></table>

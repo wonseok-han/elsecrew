@@ -1,5 +1,41 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (diff 줄 접기 묶음 검증)
+
+- 직전 턴의 줄 접기 구현과 패키지 관측 기록을 보존했다. 기존 Chromium 회귀에 변경 패널을 실제로 표시한240px 폭·긴 연속 문자열의 가로 overflow 없음·기본 접기/해제 후 원문 동일·영어 라벨 검사를 추가했다. 기존 diff 페이지/언어 보존도 함께 실행했다. 합성 DOM 기하 회귀이며 최신 native 패키지에 새 CSS를 포함한 검증은 아니다.
+- tsc --noEmit/renderer build PASS(session8825), renderer-mount-smoke2/2 PASS(session5088), diff 검사 PASS. Karpathy 최소 변경 지침 적용. 줄 접기 구현4파일·회귀·누적 history만 로컬 커밋하고 기존9월 archive 제외. 실제 계정 호출0회/main/push 없음.
+- 다음: 전체 메모리/native 최종 흐름/Windows·Claude 실연결 증거. 기존 패키지 e8d81ea와 이번 renderer 변경을 구분하며 전체 목표 미완료 유지.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 채팅 복원·diff 줄 접기 구현)
+
+- 직전 턴은 패키지 저장 파일 재진입/채팅·후속 저장으로 진척했다. 같은6ArLik 패키지 재시작(session1229/PID34832) 후 OaircF 프로젝트→채팅 선택으로 최초 목표와 Saved follow-up for package restart verification. 복원 확인. 실제 모델 호출 없이 Cmd-Q/session1229 exit0.
+- 좁은 변경 패널에서 긴 diff가 가로로 잘리는 관측에 따라 기본 줄 접기와 해제 체크박스를 추가했다. 표의 이전/이후 번호·추가/삭제·원문 내용은 유지하고 표시만 pre-wrap으로 바꾼다. 긴 파일 경로도 넘치지 않도록 했다. ko/en 안내 추가. Karpathy 최소 변경 지침 사용; 이전 패키지 관측을 새 표시 구현 검증으로 간주하지 않는다.
+- diff 검사만 수행, 새 줄 접기의 타입/좁은 화면/해제/페이지·언어 검증은 후속 묶음 대상. 기존9월 archive 보존. 다음: diff 표시 묶음 검증과 메모리/native/Windows·Claude 실연결 증거. main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 재진입·채팅 생성 관측)
+
+- 직전 턴은 패키지 편집/저장/diff/원본 불변으로 진척했다. 같은6ArLik userData로 재시작(session57050/PID26981), 저장 프로젝트OaircF가 목록에 남아 클릭으로 진입했고 변경1개도 유지됐다. example.ts를 다시 열고 편집기에 edited in packaged snapshot이 복원된 것을 AX로 확인했다. 원본 Git clean/original 유지.
+- 모델 호출 없이 Package persistence check. Do not run any agent. 채팅과 전용 사본을 생성했다. 후속 Saved follow-up for package restart verification.을 UI로 저장해 대화에 나타남/입력 초기화를 확인했다. CUA typeText의 한글 입력은 공백만 들어와 붙여넣기로 ASCII 목표를 사용했다; 제품 한글 IME 결함으로 단정하지 않는다.
+- Cmd-Q/session57050 exit0. 다음: 새 채팅/후속 메시지의 재시작 복원 확인, 좁은 diff 개선·전체 메모리/Windows/Claude 실제 실행 증거. 실제 계정 호출0회, 기존9월 archive 보존/main/push 없음. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 프로젝트 편집·원본 분리 확인)
+
+- 직전 턴은 패키지 첫 화면/유휴 단일 표본/정상 종료 증거로 진척했다. 제가 만든 /private/tmp/hello-agent-package-project.OaircF Git fixture를 기존 격리 userData6ArLik의 패키지에서 실제 폴더 선택 UI로 열었다(session27236/PID19374). 에이전트 선택/로그인/모델 실행 없이 프로젝트와 example.ts를 열었다.
+- CUA Monaco 입력으로 original을 edited in packaged snapshot으로 바꾸고 Cmd-S 저장. dirty 표시/이동 차단 → 안전하게 저장했어요/dirty 해제를 확인했다. 파일 직접 대조에서 원본original 유지, worktrees-v1 사본만 수정됐다. 변경 탭1개와 삭제original/추가edited diff를 AX와 재캡처에서 확인했다(첫 diff 캡처는 흰 이미지라 재관측). 좁은 왼쪽 diff는 가로 잘림이 있어 전체 시안 합격으로 보지 않는다.
+- Cmd-Q 종료/session27236 exit0. 별도 앱 설치·실제 계정 호출·사용자 프로젝트 변경 없음. 다음: 패키지 재시작 기록/작업 복사본 재진입, diff 가독성 및 전체 메모리/Windows/Claude 실제 실행 증거. 기존9월 archive 보존, main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (패키지 첫 화면·격리·정상 종료 관측)
+
+- 직전 턴은 최신 macOS 패키징/sidecar smoke PASS로 진척했다. Electron43.4.0 공식 소스의 user-data-dir 처리(https://github.com/electron/electron/blob/v43.4.0/shell/app/electron_main_delegate.cc#L233)와 앱의 app.getPath(userData) 경로 사용을 확인한 뒤 기존 인증을 쓰지 않는 /private/tmp/hello-agent-packaged-ui.6ArLik에서 패키지를 실행했다(session13339/PID15954). 임시 디렉터리 안 m5/hello-agent.sqlite3 생성을 확인했다.
+- CUA로 app://m5/index.html의 빈 프로젝트/에이전트 선택/내 프로젝트 시작 화면과 스크린샷을 확인했다. 사용자 프로젝트나 에이전트 로그인/호출을 수행하지 않았다. ps 자손 전체5개(앱/GPU/utility/renderer/sidecar) 단일 RSS 표본363315200bytes=346.484375MiB.400MiB 미만 표본이나 정식 시간 창/반복/loaded·retained 전체 증거는 아니다.
+- CUA Cmd-Q 정상 종료, session13339 exit0 및 관측5개 PID 모두 부재 확인. 시험 앱 설치·강제 종료 없음. 다음: 실제 패키지 임시 프로젝트 편집/복원 흐름 및 전체 메모리/Windows·Claude 실제 작업 증거. 기존9월 archive 보존, main/push 없음. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (최신 macOS 패키지 갱신)
+
+- 직전e8d81ea는 메시지 렌더링 개선/진단 통과로 진척했다. 기존 메모리 자료21150의 idle renderer heap은 약8MB이고 Browser/GPU/Utility RSS도 합산된다. Monaco model/editor/subscription은 이미 cleanup에서 해제하며 이 자료만으로 모델 누수라고 단정하지 않았다.11회 문서 reload 진단과 제품 내 파일 전환은 구분한다. 기존9월 archive 보존.
+- CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 pnpm m5:package:smoke 실행. 제한 환경40884는 Forge fetch failed로 종료했고 네트워크 허용 재실행5329는 release sidecar/최신 renderer 패키징 및 darwin-arm64 package smoke PASS/exit0. 로컬 out/hello-agent-darwin-arm64/hello-agent.app 갱신, 설치/게시/실제 계정 호출 없음.
+- package smoke는 fuses/asar/assets 및 packaged sidecar 계약을 확인하며 패키지 창의 실제 UI·전체G6 RSS 합격을 증명하지 않는다. 다음: 최신 패키지 UI/유휴 메모리 확인과 native 흐름, Claude 로그인/Windows 증거. main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (메시지 행 재렌더링 축소·묶음 확인)
 
 - 직전 턴의 시간 포맷터 재사용 변경을 보존하고, TeamMessageRow를 memo로 분리했다. 같은 메시지 참조·역할 표시·포맷터에서는 본문/시각을 다시 렌더링하지 않는다. context 기반 언어 변경과 새 메시지 객체는 갱신되며 계약/저장/실행 경계 변경 없음. 기존9월 archive 보존.
