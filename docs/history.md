@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 renderer long-task 수집)
+
+- 기준cde315d에서 Karpathy 최소 범위로 project 시나리오 시작→스크린샷 완료 구간에 실제 renderer PerformanceObserver longtask 수집을 연결했다. takeRecords 후 disconnect, 최대10000개/overflow 표시, 미지원·비정상 값·overflow는 null을 유지한다. supported/valid/관측시작·끝/시나리오완료/200ms 초과 건수를 저장하며 startup·main·미관측 구간은 제외한다. 실패 중에도 가능한 부분 관측은 종료 전에 수집한다.
+- 신규 단위3 PASS: 미지원에서0생성 금지,200ms strict 경계·대기 레코드 수집·중복 시작 거절·disconnect, 빈 관측0과 overflow/잘못된 값null 구분. syntax/diff PASS. 실제500파일/20000줄/10MiB diff 패키지9Qp8Mu에서 observer supported/valid/windowCompleted=true,11381.4~14160.7ms 구간 entries0/overLimit0을 관측했다. diff summary200ms/first233.3ms·원본 불변 PASS. 단일 renderer 구간 증거이지 main/전체G6 합격이 아니다.
+- idle460521472B 초과로 전체FAIL 유지, 정상exit0/shutdown confirmed. /private/tmp/hello-agent-packaged-long-tasks.log 및 root result.json/PNG 보존; PID 부재 후 생성3디렉터리 정리. 실제 사용자자료/계정 미사용, 사용자9월 archive 보존, main 병합/push 없음. 다음은 누락 main/stream/peak·retained memory 관측 및 기존 입력 계측 한계·메모리 초과 해결이다.
+
 ### 2026-10-13 · by GPT-6 Astra (입력 지연 구간 실측·계측 한계 확인)
 
 - 기준a743e61의 추가 구간 계측을 sOTu30 실제 패키지에서 실행했다. 본10회 inputDom19.5~21.4ms, paintObservation26.2~30.4ms, 전달0.2~0.6ms, 기존 요청→2 RAF p95 51.1ms로50ms 기준 초과를 유지한다. 적어도 절반 이상은 DOM 확인 뒤 계측상 프레임 대기이며,51.1ms 전체가 편집/getValue 비용이라는 해석은 배제한다. DOM 반영은 물리 paint 증명이 아니므로21.4ms로 합격값을 대체하지 않는다. 근거 없는 debounce·저장 동기화 변경을 하지 않았다.

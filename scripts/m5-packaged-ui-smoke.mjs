@@ -15,6 +15,7 @@ import { seedPackagedProject } from './m5-packaged-project-seed.mjs';
 import { probePackagedApplication } from './m5-packaged-application-probe.mjs';
 import { probeLargeProject } from './m5-packaged-large-project-probe.mjs';
 import { probePackagedInput } from './m5-packaged-input-probe.mjs';
+import { beginLongTaskProbe, endLongTaskProbe } from './m5-packaged-long-task-probe.mjs';
 import { probeLargeDiff } from './m5-packaged-diff-probe.mjs';
 import diffFixture from '../tests/m5-native-diff-fixture.cjs';
 
@@ -96,6 +97,7 @@ async function until(read, milliseconds = 15000) {
   throw new Error('Packaged observation deadline exceeded');
 }
 let socket, sessionId, nextId = 0;
+let longTaskProbeStarted = false, longTaskWindowCompleted = false;
 const pending = new Map();
 function send(method, params = {}, targetSession) {
   return new Promise((resolve, reject) => {
@@ -178,6 +180,8 @@ try {
   report.chromiumProcessesAfter = (await send('SystemInfo.getProcessInfo')).processInfo;
   report.rendererHeapAfter = await send('Runtime.getHeapUsage', {}, sessionId);
   if (projectFlow) {
+    report.rendererLongTaskStart = await evaluate(`(${beginLongTaskProbe.toString()})()`);
+    longTaskProbeStarted = true;
     const projectOpenedAt = performance.now();
     const expectedPath = fs.realpathSync(report.project.source);
     await until(() => evaluate(`(() => {
@@ -279,10 +283,19 @@ try {
     }
     }
   }
+  longTaskWindowCompleted = true;
   const capture = await send('Page.captureScreenshot', {format: 'png'}, sessionId);
   fs.writeFileSync(path.join(root, resume ? 'restart.png' : 'startup.png'), Buffer.from(capture.data, 'base64'));
 } catch (error) { report.error = String(error); }
 finally {
+  if (longTaskProbeStarted && sessionId && !termination) {
+    try {
+      report.rendererLongTasks = {...await evaluate(`(${endLongTaskProbe.toString()})()`),
+        windowCompleted:longTaskWindowCompleted,
+        scope:'Renderer project scenario only; excludes startup, main process and unobserved windows.'};
+      if (report.rendererLongTasks.overLimitCount > 0) report.error ??= 'Renderer long-task limit exceeded';
+    } catch (error) { report.rendererLongTaskError = String(error); }
+  }
   // Existing IPC invokes the normal main-owned shutdown coordinator. A lost
   // reply during exit is not success: require exit 0 and the durable DB marker.
   if (sessionId && !termination) {
