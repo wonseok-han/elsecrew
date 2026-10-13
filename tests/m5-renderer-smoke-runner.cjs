@@ -139,6 +139,16 @@ app.whenReady().then(async () => {
     // Saved projects are now a persistent rail, not a toolbar popover.
     await ${waitFor("document.querySelector('.m5-project-catalog-list li button') && !document.querySelector('.m5-project-catalog-list li button').disabled", "saved project catalog loaded")};
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/earlier') throw new Error('catalog first page missing');
+    const rail = document.querySelector('.m5-project-rail');
+    const railToggle = rail.querySelector('.m5-project-rail-header button');
+    if (rail.getBoundingClientRect().width > 100 || railToggle.getAttribute('aria-expanded') !== 'false') throw new Error('project rail not compact');
+    railToggle.click();
+    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 220", "expanded project rail")};
+    if (getComputedStyle(document.querySelector('.m5-project-catalog-list li span')).display === 'none') throw new Error('expanded project path hidden');
+    railToggle.click();
+    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width < 100", "collapsed project rail")};
+    rail.querySelector('li details summary').click();
+    await ${waitFor("document.querySelector('.m5-project-rail').getBoundingClientRect().width >= 220", "recovery opens full project details")};
     const recoveryButton = text => [...document.querySelectorAll('[aria-label="프로젝트 시작 실패 복구"] button')].find(b => b.textContent === text);
     recoveryButton('시작 실패 확인').click();
     await ${waitFor("document.querySelector('[aria-label=\"실패한 준비 종료 확인\"]')", "explicit preparation inspection")};
@@ -161,6 +171,7 @@ app.whenReady().then(async () => {
     if (document.querySelector('.m5-project-catalog-list li span').textContent !== '/work/smoke') throw new Error('catalog path missing');
     document.querySelector('.m5-project-catalog-list li button').click();
     await ${waitFor("document.querySelector('.m5-file-row')", "project tree")};
+    [...document.querySelectorAll('.m5-dock-group-tabs button')].find(button => button.textContent === '파일' && button.getClientRects().length).click();
     await ${waitFor("document.getElementById('m5-install-details')?.hidden", "installation controls compact in workbench")};
     const installToggle = document.querySelector('.m5-provider-install header button');
     if (installToggle.getAttribute('aria-expanded') !== 'false') throw new Error('installation toggle state incorrect');
@@ -237,7 +248,7 @@ app.whenReady().then(async () => {
     await ${waitFor("document.querySelector('[data-panel=files]').hidden && document.querySelector('[data-panel=changes]').hidden && document.querySelectorAll('.m5-dock-separator').length === 0", "focus editor")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('focus remounted Monaco');
     document.querySelector('.m5-dock-restore').click();
-    await ${waitFor("!document.querySelector('[data-panel=files]').hidden && document.querySelectorAll('.m5-dock-separator').length === 2", "restore pre-focus layout")};
+    await ${waitFor("!document.querySelector('[data-panel=chats]').hidden && document.querySelectorAll('.m5-dock-separator').length === 2", "restore pre-focus layout")};
     if (document.querySelector('.monaco-editor') !== editorNode) throw new Error('focus restore remounted Monaco');
     editorOptions.querySelector('summary').click();
     [...editorOptions.querySelectorAll('button')].find(button => button.textContent === '편집기 패널에 집중').click();

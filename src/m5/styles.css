@@ -154,8 +154,9 @@ h1 { margin: 0; font-size: 22px; }
 .m5-project-catalog-list li button { display: grid; gap: 6px; width: 100%; text-align: left; }
 .m5-project-catalog-list li span { font-size: 12px; color: #b8c2ce; overflow-wrap: anywhere; }
 .m5-project-catalog-list > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.m5-with-project-rail { padding: 12px 12px 12px 208px; }
-.m5-project-rail { position: fixed; inset: 0 auto 0 0; width: 196px; box-sizing: border-box; padding: 20px 12px; overflow: auto; background: #171d26; border-right: 1px solid #303b49; }
+.m5-with-project-rail { --m5-project-rail-width: 92px; padding: 12px 12px 12px calc(var(--m5-project-rail-width) + 12px); }
+.m5-with-project-rail:has(.m5-project-rail-expanded) { --m5-project-rail-width: 224px; }
+.m5-project-rail { position: fixed; inset: 0 auto 0 0; width: var(--m5-project-rail-width); box-sizing: border-box; padding: 16px 8px; overflow: auto; background: #171d26; border-right: 1px solid #303b49; display: flex; flex-direction: column; }
 .m5-project-rail h2 { margin: 0 8px 16px; font-size: 14px; }
 .m5-project-rail .m5-project-catalog-list { position: static; width: auto; max-height: none; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .m5-project-rail li > button { grid-template-columns: minmax(0, 1fr) auto; align-items: center; background: transparent; border-color: transparent; padding: 10px; }
@@ -168,6 +169,19 @@ h1 { margin: 0; font-size: 22px; }
 .m5-project-rail .m5-project-pagination button { padding: 6px 8px; font-size: 11px; }
 .m5-project-rail summary { cursor: pointer; color: #aab4c1; font-size: 11px; padding: 4px 10px; }
 .m5-project-rail .m5-project-catalog-list > p { color: #aab4c1; font-size: 11px; padding: 0 8px; }
+.m5-project-rail-header { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.m5-project-rail-header h2 { margin: 0; flex: 1; font-size: 11px; line-height: 1.5; }
+.m5-project-rail-header button { padding: 2px 6px; }
+.m5-project-rail .m5-project-monogram { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #465466; border-radius: 9px; font-size: 12px; font-style: normal; color: #d8e0eb; background: #263140; }
+.m5-project-rail li > button[aria-current="true"] .m5-project-monogram { color: var(--m5-action-bg); border-color: var(--m5-action-bg); }
+.m5-project-rail:not(.m5-project-rail-expanded) li > button { grid-template-columns: minmax(0, 1fr); justify-items: center; padding: 8px 3px; gap: 5px; }
+.m5-project-rail:not(.m5-project-rail-expanded) li strong { max-width: 100%; font-size: 11px; }
+.m5-project-rail:not(.m5-project-rail-expanded) li > button > span { display: none; }
+.m5-project-rail:not(.m5-project-rail-expanded) summary { padding: 4px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.m5-project-rail:not(.m5-project-rail-expanded) .m5-project-pagination button { width: 100%; padding: 5px 2px; font-size: 10px; }
+.m5-project-rail-expanded li > button { grid-template-columns: 34px minmax(0, 1fr) auto; }
+.m5-project-rail-expanded li > button > span { grid-column: 1 / -1; }
+.m5-project-add { margin: auto auto 0; width: 38px; min-height: 38px; font-size: 22px; }
 button { border: 1px solid #3f4c5c; border-radius: 7px; padding: 8px 10px; background: var(--m5-control-bg); color: var(--m5-control-text); cursor: pointer; font-weight: 650; }
 button:hover:not(:disabled) { background: var(--m5-control-hover); }
 /* Keep navigation, resize/focus controls and pagination visually secondary. */
@@ -307,7 +321,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 
 @media (max-width: 1050px) {
   .m5-workbench { padding: 12px; }
-  .m5-workbench.m5-with-project-rail { padding-left: 208px; }
+  .m5-workbench.m5-with-project-rail { padding-left: calc(var(--m5-project-rail-width) + 12px); }
   .m5-panels { grid-template-columns: 200px minmax(360px, 1fr) 240px; }
 }
 
