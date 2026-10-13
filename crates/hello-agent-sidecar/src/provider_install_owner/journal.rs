@@ -15,6 +15,22 @@ const MAX_EVENTS: u64 = 16;
 const ARCHIVE_PREFIX: &str = "provider-install-complete-";
 const MAX_ARCHIVES: usize = 128;
 
+/// Any active name blocks new work, including malformed files and links.
+/// Inspection never resumes a process, signals a PID or removes evidence.
+pub(super) fn has_active(storage: &crate::Storage) -> Result<bool, SidecarError> {
+    let directory = crate::provider_profile::open_absolute_directory(
+        storage.path().parent().ok_or_else(failure)?,
+    )?;
+    for name in [NAME, super::PENDING, super::EXECUTION_PENDING] {
+        match directory.symlink_metadata(name) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(failure()),
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) struct InstallJournal<'a> {
     pub(super) scope: &'a InstallScope,
     pub(super) operation: uuid::Uuid,

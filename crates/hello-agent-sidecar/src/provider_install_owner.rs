@@ -12,6 +12,7 @@ pub(crate) mod consent;
 pub(crate) mod download;
 pub(crate) mod execute;
 pub(crate) mod journal;
+pub(crate) mod manager;
 pub(crate) mod worker;
 
 const STAGING: &str = "provider-install-staging-v1";

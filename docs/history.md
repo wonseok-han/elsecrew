@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (설치 요청 manager와 종료 수명 연결부)
+
+- 직전8bae6f1은 단발 동의 구현 진척이다. 실제 checkout/dirty를 확인하고 status/prepare/dismiss/start/cancel의 정확한 필드만 받는 내부 InstallManager를 추가했다. 수락된 같은 plan/provider 재전송은 같은 작업 상태를 반환하며 새 worker를 만들지 않는다. worker 슬롯·작업 ID·취소 신호를 결속하고 terminal callback이 thread 종료보다 먼저 UI 성공/후속 로그인을 허용하지 않게 처리했다.
+- 설치 worker에는 Storage를 다시 열지 않고 기존 Storage에서 검증한 InstallScope capability를 이동한다. prepare_quit은 비차단 취소/종료 조회이며 새 준비/시작을 차단한다. Drop은 취소 후 자기 thread를 회수한다. 아직 Sidecar/public IPC에는 붙이지 않았으며 실제 app.prepareQuit 동작이 바뀌었다고 주장하지 않는다.
+- startup/status/종료 조회는 active journal/두 pending 이름을 읽기만 확인한다. 링크/손상/조회 실패도 새 설치·안전 종료를 자동 허용하지 않고 recoveryRequired로 남긴다. PID 신호/삭제/자동 재개는 없다. 단, worker 입장 전 동의 만료/경로 변화는 프로세스가 시작되지 않은 일반 실패로 구분해 불필요한 복구 잠금 표시를 줄인다.
+- 잘못된/추가 필드·동의 없는 시작·남의 작업 취소·종료 이후 준비 거절과 pending 증거 보존 회귀2개를 추가했다. Karpathy 지침으로 기존 consent/worker를 직접 연결했다. 일반 cargo check PASS3.01초 후 계획 준비 오류 표시·입장 전 실패 분류·종료 시 pending 검사 보강은 rustfmt/diff만 확인했다. 최종 빌드/새 테스트/독립 검토는 묶음에 남긴다. 다음: typed IPC/화면/재시작 복구 및 누적 검증. 실제 설치/계정 호출 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (단발 설치 동의와 대상 결속)
 
 - 직전edac9d5는 coordinator/기록 보관 구현 진척이다. 실제 checkout/dirty를 확인하고 backend가 고정 공급자·기존 HOME·쓰기 대상 목록으로 만드는180초 단발 설치 계획을 추가했다. 준비는 읽기 전용이며 디렉터리를 생성하지 않는다. 새 계획/닫기/수락 시 이전 token을 폐기하고 잘못된 공급자·만료·중복 수락도 재사용하지 못한다.

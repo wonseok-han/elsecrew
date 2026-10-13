@@ -7,22 +7,26 @@ use super::{
     journal::InstallJournal,
     InstallScope,
 };
-use crate::{SidecarError, Storage};
+use crate::SidecarError;
 use hello_agent_core::install_lifecycle::InstallPhase;
 use std::sync::atomic::AtomicBool;
 
 /// No renderer-supplied command, script, destination, URL, or credentials.
 /// Consumes the non-cloneable authorization, not a caller-asserted consent flag.
 pub(crate) fn execute_consented(
-    storage: &Storage,
+    scope: InstallScope,
     authorization: AuthorizedInstall,
     cancel: &AtomicBool,
     publish: &impl Fn(InstallPhase),
 ) -> Result<InstallPhase, SidecarError> {
-    authorization.revalidate_plan()?;
+    authorization.revalidate_plan().map_err(|_| {
+        SidecarError::new(
+            "providerInstallConsentExpired",
+            "installation consent or destination changed before admission",
+        )
+    })?;
     let operation = authorization.operation();
     let provider = authorization.provider();
-    let scope = InstallScope::from_storage(storage)?;
     let execution = scope.execution_scope()?;
     let mut journal = InstallJournal::begin(&scope, operation, provider)?;
     journal.record("consented")?;
@@ -86,6 +90,7 @@ pub(crate) fn execute_consented(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Storage;
     use std::sync::Mutex;
 
     #[test]
@@ -101,9 +106,12 @@ mod tests {
                 .accept(plan["planId"].as_str().unwrap(), "claude")
                 .unwrap();
             assert_eq!(
-                execute_consented(&storage, authorization, &AtomicBool::new(true), &|phase| {
-                    phases.lock().unwrap().push(phase)
-                },)
+                execute_consented(
+                    InstallScope::from_storage(&storage).unwrap(),
+                    authorization,
+                    &AtomicBool::new(true),
+                    &|phase| { phases.lock().unwrap().push(phase) },
+                )
                 .unwrap(),
                 InstallPhase::Canceled
             );
