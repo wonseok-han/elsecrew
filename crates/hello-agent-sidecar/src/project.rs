@@ -3763,6 +3763,7 @@ impl ProjectManager {
 
     fn diff_entries(&self, active: &ActiveProject) -> Result<Vec<DiffEntry>, ProjectFailure> {
         let worktree = self.worktree_capability(active)?;
+        let mut base_reader = DiffBaseReader::new(self, &worktree, active)?;
         let output = self.git_limited_bytes_at(
             &worktree,
             [
@@ -3795,7 +3796,7 @@ impl ProjectManager {
                 let old = fields[index].clone();
                 let path = fields[index + 1].clone();
                 index += 2;
-                entries.push(self.classify_diff(active, &worktree, "renamed", path, Some(old))?);
+                entries.push(self.classify_diff(&mut base_reader, &worktree, "renamed", path, Some(old))?);
             } else {
                 let path = fields
                     .get(index)
@@ -3812,7 +3813,7 @@ impl ProjectManager {
                         )))
                     }
                 };
-                entries.push(self.classify_diff(active, &worktree, kind, path, None)?);
+                entries.push(self.classify_diff(&mut base_reader, &worktree, kind, path, None)?);
             }
             if entries.len() > DIFF_MAX_ENTRIES {
                 return Err(ProjectFailure::manifest(
@@ -3832,7 +3833,7 @@ impl ProjectManager {
         {
             let path = protocol_git_path(path)?;
             if !is_internal_relative_path(&path) {
-                entries.push(self.classify_diff(active, &worktree, "added", path, None)?);
+                entries.push(self.classify_diff(&mut base_reader, &worktree, "added", path, None)?);
                 if entries.len() > DIFF_MAX_ENTRIES {
                     return Err(ProjectFailure::manifest(
                         "diff summary exceeds its bounded 10,000-entry capacity",
@@ -3868,7 +3869,7 @@ impl ProjectManager {
         }
         let mut consumed = BTreeSet::new();
         for (deleted_index, old_path) in &deleted {
-            let base = self.base_content(active, old_path)?;
+            let base = base_reader.read(old_path)?;
             if base.binary {
                 continue;
             }
@@ -3899,12 +3900,13 @@ impl ProjectManager {
             entries.extend(renamed);
         }
         entries.sort_by(|left, right| left.path.cmp(&right.path));
+        base_reader.finish()?;
         Ok(entries)
     }
 
     fn classify_diff(
         &self,
-        active: &ActiveProject,
+        base_reader: &mut DiffBaseReader,
         worktree: &Dir,
         kind: &'static str,
         path: String,
@@ -3918,7 +3920,7 @@ impl ProjectManager {
         let base = if kind == "added" {
             None
         } else {
-            Some(self.base_content(active, base_path)?)
+            Some(base_reader.read(base_path)?)
         };
         let current = if kind == "deleted" {
             None
@@ -4165,6 +4167,88 @@ struct DiffEntry {
     old_path: Option<String>,
     base_exists: bool,
     current_exists: bool,
+}
+
+// Request-local processes, not a cross-request cache. Each blob is still read
+// and classified independently; oversized objects never enter the body pipe.
+struct DiffBaseReader {
+    sizes: DiffBlobPipe,
+    bodies: DiffBlobPipe,
+    commit: String,
+    object_format: String,
+}
+
+struct DiffBlobPipe {
+    owner: StreamingGitChild,
+    input: Option<GitStdin>,
+    output: BufReader<GitStdout>,
+}
+
+impl DiffBlobPipe {
+    fn new(manager: &ProjectManager, root: &Dir, mode: &str) -> Result<Self, ProjectFailure> {
+        let mut command = manager.git_command_at(root)?;
+        command.args(["cat-file", mode]).stdin(Stdio::piped()).stdout(Stdio::piped());
+        let mut owner = StreamingGitChild::spawn(&mut command)
+            .map_err(|error| ProjectFailure::recovery(format!("could not start diff blob reader: {error}")))?;
+        let input = owner.stdin.take().ok_or_else(|| ProjectFailure::recovery("diff blob stdin missing"))?;
+        let output = owner.stdout.take().ok_or_else(|| ProjectFailure::recovery("diff blob stdout missing"))?;
+        Ok(Self { owner, input: Some(input), output: BufReader::new(output) })
+    }
+
+    fn header(&mut self, object: &str) -> Result<String, ProjectFailure> {
+        let input = self.input.as_mut().ok_or_else(|| ProjectFailure::recovery("diff blob reader closed"))?;
+        input.write_all(object.as_bytes()).and_then(|_| input.write_all(b"\n")).and_then(|_| input.flush())
+            .map_err(|error| ProjectFailure::recovery(format!("diff blob request failed: {error}")))?;
+        let mut header = Vec::new();
+        (&mut self.output).take(257).read_until(b'\n', &mut header)
+            .map_err(|error| ProjectFailure::recovery(format!("diff blob header failed: {error}")))?;
+        if header.len() > 256 || header.last() != Some(&b'\n') {
+            return Err(ProjectFailure::manifest("diff blob header truncated or oversized"));
+        }
+        String::from_utf8(header).map_err(|_| ProjectFailure::manifest("diff blob header is not UTF-8"))
+    }
+
+    fn finish(mut self) -> Result<(), ProjectFailure> {
+        drop(self.input.take());
+        let mut extra = [0];
+        if self.output.read(&mut extra).map_err(|error| ProjectFailure::recovery(format!("diff blob EOF failed: {error}")))? != 0 {
+            return Err(ProjectFailure::manifest("unexpected trailing diff blob output"));
+        }
+        let (status, _) = self.owner.finish().map_err(|error| ProjectFailure::recovery(format!("diff blob exit failed: {error}")))?;
+        if !status.success() { return Err(ProjectFailure::recovery("diff blob reader exited unsuccessfully")); }
+        Ok(())
+    }
+}
+
+impl DiffBaseReader {
+    fn new(manager: &ProjectManager, root: &Dir, active: &ActiveProject) -> Result<Self, ProjectFailure> {
+        Ok(Self { sizes: DiffBlobPipe::new(manager, root, "--batch-check")?, bodies: DiffBlobPipe::new(manager, root, "--batch")?, commit: active.base_commit.clone(), object_format: active.object_format.clone() })
+    }
+
+    fn read(&mut self, path: &str) -> Result<ContentInfo, ProjectFailure> {
+        validate_relative_path(path, false)?; // In particular, no newline request injection.
+        let header = self.sizes.header(&format!("{}:{path}", self.commit))?;
+        let fields = header.trim_end_matches('\n').split(' ').collect::<Vec<_>>();
+        if fields.len() != 3 || fields[1] != "blob" {
+            return Err(ProjectFailure::manifest("diff base is not a blob"));
+        }
+        let oid = validated_oid(fields[0], &self.object_format)?;
+        let size = fields[2].parse::<u64>().map_err(|_| ProjectFailure::manifest("invalid diff blob size"))?;
+        if size > DIFF_MAX_BYTES as u64 { return Ok(ContentInfo::too_large(size)); }
+        let body_header = self.bodies.header(&oid)?;
+        if body_header != format!("{oid} blob {size}\n") {
+            return Err(ProjectFailure::recovery("diff blob identity or length changed"));
+        }
+        let mut bytes = vec![0; size as usize];
+        self.bodies.output.read_exact(&mut bytes).map_err(|error| ProjectFailure::recovery(format!("diff blob body truncated: {error}")))?;
+        consume_batch_newline(&mut self.bodies.output)?;
+        Ok(ContentInfo::from_bytes(bytes))
+    }
+
+    fn finish(self) -> Result<(), ProjectFailure> {
+        self.sizes.finish()?;
+        self.bodies.finish()
+    }
 }
 
 struct ContentInfo {

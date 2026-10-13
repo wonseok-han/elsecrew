@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (native diff Git 조회 재사용·부분 성능 개선)
+
+- 직전a0260c3의500파일 native 지연을 조사했다. 기존 diff_entries는 각 기준 파일마다 cat-file 크기/내용 프로세스2개를 생성했고 첫 파일 조회에서도 전체 분류를 반복했다. 요청 단위 batch-check/batch 프로세스2개로 교체해 재사용하며 파일별 내용 분류·크기 상한·경로 검증은 유지한다. 요청 간 캐시는 없다.
+- header257byte 제한 읽기·UTF-8/type/OID/size 검증, body 동일OID/길이·정확한 본문/개행, oversized body 요청 생략, stdin 닫기→EOF→성공 종료 확인을 적용했다. 기존 StreamingGitChild의120초 예산/오류 Drop 종료 회수를 유지한다. 동일 읽기 전용 검토자 codex_start_static_review APPROVE.
+- cargo check PASS; 최초 cargo test 필터 인자 오류는 실행 전 실패였고 수정한 diff 필터7/7 PASS 및 debug build PASS(session24191). 새 native34452/paenMC는 snapshot2257ms, diffSummary528ms(이전9892), diffFirstFile1943ms(이전9983). 첫 파일1500ms 초과로 전체 FAIL/exit1·shutdown accepted, 원본 불변. diff 검사 PASS. 전체G6 성공이나 반복p95로 주장하지 않는다.
+- 다음: 남은 첫 diff 지연을 계측해 요청 대기/중복 summary/본문 생성·표시 비용을 분리한다. 삭제 활성화는 승인 전 false, 관련 미커밋 UI/문서 및9월 archive 변경을 보존한다. 실제계정/사용자자료/main/push 없음. 전체 성능/RSS·Claude·Windows·출시 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (native 대형 diff 경로 연결·지연 재현)
 
 - 직전 작업은 UI 회귀/독립 검토와 활성화 승인 경계 확인으로 진척했다. 자동 goal 재개를 삭제 활성화 승인으로 해석하지 않고 flag=false를 유지했다. 승인 대기 UI/문서 변경은 보존하고 독립 작업인 대형 native diff 경로를 기존 smoke에 추가했다.
