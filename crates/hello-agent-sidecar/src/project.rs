@@ -3712,6 +3712,13 @@ impl ProjectManager {
                 bounded_stderr(&cat_stderr)
             )));
         }
+        // read-tree populated object IDs before raw materialization, leaving
+        // stat data empty. Refresh only that data while staging is unpublished
+        // so the first interactive diff need not re-read every copied blob.
+        // No paths/add/remove flags: object IDs and the base tree stay fixed.
+        // Quiet permits an entry that cannot be refreshed to remain uncached;
+        // later snapshot identity and diff checks still run normally.
+        self.git_at(staging, ["update-index", "-q", "--ignore-submodules", "--refresh"])?;
         sync_capability_directory(staging)?;
         Ok(stats)
     }

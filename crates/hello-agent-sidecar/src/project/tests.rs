@@ -3,6 +3,23 @@ use hello_agent_protocol::project_v1::validate_project_payload_v1;
 use tempfile::TempDir;
 
 #[test]
+fn materialized_snapshot_refreshes_index_stat_without_hiding_edits() {
+    let mut fixture = Fixture::open();
+    let source_before = fs::read(fixture.source.join(".git/index")).unwrap();
+    let active = fixture.create();
+    assert_eq!(fs::read(fixture.source.join(".git/index")).unwrap(), source_before);
+    let debug = git_text(&active.worktree_path, ["ls-files", "--debug", "--", "src/edit.txt"]);
+    assert!(!debug.contains("ctime: 0:0"), "materialized index lacks stat data: {debug}");
+    assert_eq!(git_text(&active.worktree_path, ["write-tree"]), active.base_tree);
+    assert!(fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap().result["entries"].as_array().unwrap().is_empty());
+    fs::write(active.worktree_path.join("src/edit.txt"), b"world").unwrap();
+    let changed = fixture.manager.diff_summary(&fixture.storage, &fixture.project_id).unwrap();
+    assert!(changed.result["entries"].as_array().unwrap().iter().any(|entry| entry["path"] == "src/edit.txt"));
+    assert_eq!(git_text(&active.worktree_path, ["write-tree"]), active.base_tree);
+    assert_eq!(fs::read(fixture.source.join("src/edit.txt")).unwrap(), b"hello");
+}
+
+#[test]
 fn materialized_sync_batch_drains_full_and_trailing_files() {
     let temporary = TempDir::new().unwrap();
     let root = Dir::open_ambient_dir(temporary.path(), ambient_authority()).unwrap();

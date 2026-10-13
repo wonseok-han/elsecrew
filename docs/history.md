@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (작업 복사본 stat 초기화·첫 트리 진입 개선)
+
+- a277ce7에서 read-tree 후 raw 파일 생성으로 인덱스 stat가 비어 있는 경로를 확인했다. 자체 임시10,000파일 probe의 최초 diff652ms/후속약21ms를 관측하고, Karpathy 최소 변경으로 unpublished staging의 blob 자식 종료 뒤 고정 update-index -q --ignore-submodules --refresh를 연결했다. 경로/add/remove/assume-unchanged 없이 object ID/기준 트리를 유지하고 기존 검증·fresh diff를 생략하지 않는다. 원본 index에는 실행하지 않는다. [Git 공식 --refresh 설명](https://git-scm.com/docs/git-update-index#_using_refresh)도 read-tree 이후 stat 연결 용도를 명시한다. 전체 복사 준비 비용을 없애는 변경이 아니라 첫 사용자 요청 이전으로 초기 확인을 옮긴다.
+- materialized3·inherited filter1·executable configuration1 PASS(기존 ignored helper1), package smoke PASS, diff PASS, final_application_safety APPROVE. 원본 index 바이트 불변·snapshot stat 생성·기준 tree 불변·동일 길이 수정 감지를 추가 회귀로 확인했다. /private/tmp/hello-agent-index-refresh-{tests,package,ui}.log와 자체 probe nzdO2P/result.json 보존.
+- 실제 새 패키지7s7oRo: firstTree271.8ms(직전966.3ms), expand117.3ms/file413.9ms/DOM362, 정상 exit0/종료confirmed. 단일 측정 개선이며 반복p95 합격은 아직 아니다. idle460324864B 초과로 전체 FAIL 유지한다. OS 임시 hello-agent-packaged-ui-7s7oRo의 JSON/PNG 보존·PID 부재 확인 후 생성 fixture3디렉터리 정리, probe fixture도 정상 완료 후 정리했다. 다음은 묶음 반복 검증과 메모리/잔여G6·실계정·Windows다. 사용자9월 archive 보존, main 병합/push 없음, 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (분할 감시 요청 루프 연결·교체 방어)
 
 - 54e50bc 위 Karpathy 최소 범위로 WatchState가 진행 중 scan을 보관하고 Unix 초기 등록/poll에서128단계씩 처리하도록 연결했다. 미완료 baseline은 게시하지 않으며 초기 다회차 완료 시 rescan, 오류·overflow 시 rescan 후 폐기한다. stop/close는 iterator도 폐기한다. 감시 재등록 실패 시 기존 project watcher도 제거한다. non-Unix는 신원 대조 구현 전까지 종전 단일 호출을 유지한다.
@@ -95,6 +101,8 @@
 - 주요 모듈: 기존 Tauri `src-tauri/src/`, 공용 Rust `crates/hello-agent-{core,protocol,sidecar}`, M5 셸 `electron/`과 작업대 `src/m5/`
 
 ## 핵심 결정·발견 (고정 — 재조사 방지)
+
+- **첫 diff stat 초기화(2026-10-13)**: read-tree 뒤 raw materialize한 snapshot은 stat 정보가 비어 첫 diff에 파일 재확인 비용이 몰렸다. unpublished staging에서 고정 update-index -q --ignore-submodules --refresh 후 기준 트리 검증을 유지한다. 원본 인덱스 불변/동일 길이 편집 감지·필터 미실행 회귀와 독립 APPROVE, 단일 packaged firstTree966→272ms 관측을 확보했다. 반복p95·메모리400MiB 기준은 별도 미완료다.
 
 - **분할 감시 핸들 재결속(2026-10-13)**: Unix watcher는128단계씩 진행하지만 다음 회차에 보관된 자식 핸들을 그대로 믿지 않는다. 현재 root에서 모든 보관 prefix를 재열어 dev/ino를 대조하고 교체는 rescan/폐기한다. 초기 다회차 수집 완료도 rescan을 알린다. non-Unix는 종전 동기 스캔 유지. 감시는 stdio 응답 후/idle poll에서만 진행하며 요청 응답 직전 중복 poll은 제거했다. 반복 성능 문제·전체 watcher 합계 시간 상한은 미해결이다.
 
