@@ -7,7 +7,9 @@ const { execFile, execFileSync } = require('node:child_process');
 const { processTreeMemory, summarizeMemory } = require('./m5-process-memory.cjs');
 const measureMemory = process.env.HELLO_AGENT_SMOKE_MEMORY === '1';
 const largeFile = process.env.HELLO_AGENT_SMOKE_LARGE_FILE === '1';
+const largeTree = process.env.HELLO_AGENT_SMOKE_LARGE_TREE === '1';
 let largeFileReport;
+let largeTreeReport;
 const memorySamples = [];
 let memoryPhase = 'idle';
 let memoryTimer;
@@ -37,6 +39,17 @@ const repoRoot = path.resolve(__dirname, '..');
 const source = path.join(root, 'project');
 fs.mkdirSync(source);
 fs.writeFileSync(path.join(source, 'hello.txt'), 'original\n');
+if (largeTree) {
+  // 1,000 directories and 10,000 files in the measured subtree. Existing
+  // smoke control files remain outside it and are reported separately.
+  const treeRoot = path.join(source, 'aaa-tree');
+  fs.mkdirSync(treeRoot);
+  for (let directory = 0; directory < 1000; directory++) {
+    const folder = directory === 0 ? treeRoot : path.join(treeRoot, `folder-${String(directory).padStart(4, '0')}`);
+    if (directory) fs.mkdirSync(folder);
+    for (let file = 0; file < 10; file++) fs.writeFileSync(path.join(folder, `file-${file}.txt`), 'tree fixture\n');
+  }
+}
 if (largeFile) {
   // Generate outside the measured app so the fixture's cached 5 MiB string
   // does not become permanent main-process memory in this native measurement.
@@ -55,12 +68,13 @@ function finish(error, details) {
     schemaVersion: 1, diagnostic: true, gateEligible: false,
     scope: 'Native UI Electron root and current descendants, including its sidecar; escaped descendants and agents not measured',
     fixture: largeFile ? 'Generated project with 5 MiB/100000-line file and two chats; no streaming fixture' : 'Small generated project, two chats; not the G6 large-file or streaming fixture',
+    ...(largeTree ? {treeFixture:{files:10000,directories:1000,controlFiles:largeFile ? 2 : 1}} : {}),
     intervalMs: 250, closeWaitMs: 60000, samples: memorySamples,
     ...memoryReport, error: memoryError?.message ?? error?.message,
   }, null, 2));
   // Preserve normal before-quit/sidecar cleanup; set Electron's exit status only
   // after the app has accepted quitting. process.exitCode alone is ignored here.
-  const result = {root,error:error?.message,...details,...(largeFile ? {largeFile:largeFileReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
+  const result = {root,error:error?.message,...details,...(largeFile ? {largeFile:largeFileReport} : {}),...(largeTree ? {largeTree:largeTreeReport} : {}),...(measureMemory ? {memoryEvidence:path.join(root, 'memory.json'), memory:memoryReport} : {}),shutdown:'pending',status:'PENDING'};
   const persist = () => fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
   persist();
   console.log(JSON.stringify(result));
@@ -106,6 +120,30 @@ app.on('browser-window-created', (_event, window) => {
       if (!await run(`Boolean(document.querySelector('.m5-guided-start'))&&!document.querySelector('.m5-dock-tree')`)) throw new Error('initial guided start missing or empty dock exposed');
       await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='프로젝트 선택').click()`);
       await wait(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('hello.txt'))`);
+      if (largeTree) {
+        app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
+        largeTreeReport = await run(`(async()=>{
+          const observe=async(label,ready)=>{
+            const start=performance.now();
+            const button=Array.from(document.querySelectorAll('.m5-files button')).find(b=>b.textContent.includes(label)&&!b.disabled);
+            if(!button)throw new Error('tree target absent: '+label); button.click();
+            while(!ready()) {
+              if(performance.now()-start>15000)throw new Error('native tree timeout: '+label);
+              await new Promise(r=>setTimeout(r,10));
+            }
+            await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+            return {ms:performance.now()-start,domNodes:document.querySelectorAll('.m5-file-list *').length};
+          };
+          const visible=label=>Array.from(document.querySelectorAll('.m5-files button')).some(b=>b.textContent.includes(label));
+          const root=await observe('aaa-tree',()=>visible('folder-0001'));
+          const expand=await observe('folder-0001',()=>visible('file-0.txt')&&!visible('folder-0002'));
+          document.querySelector('.m5-breadcrumbs .m5-root').click();
+          return {treeRootMs:root.ms,treeExpandMs:expand.ms,treeDomNodes:Math.max(root.domNodes,expand.domNodes),
+            treeFiles:10000,treeDirectories:1000,controlFiles:${largeFile ? 2 : 1},diagnostic:true,gateEligible:false};
+        })()`);
+        await wait(`Array.from(document.querySelectorAll('.m5-files button')).some(b=>b.textContent.includes('hello.txt'))`);
+        console.log(JSON.stringify({stage:'NATIVE_LARGE_TREE',...largeTreeReport}));
+      }
       if (largeFile) {
         app.focus({steal:true}); window.show(); window.focus(); window.webContents.focus();
         largeFileReport = await run(`(async()=>{
@@ -290,6 +328,7 @@ app.on('browser-window-created', (_event, window) => {
         if (summary.failedMetrics.length) throw new Error('native diagnostic memory limits exceeded: '+summary.failedMetrics.join(', '));
       }
       if (largeFileReport?.fileEditableMs > 1500) throw new Error('native diagnostic file-open limit exceeded: '+largeFileReport.fileEditableMs);
+      if (largeTreeReport && (largeTreeReport.treeRootMs > 1000 || largeTreeReport.treeExpandMs > 250 || largeTreeReport.treeDomNodes > 500)) throw new Error('native diagnostic tree limits exceeded');
       finish(null,{screenshot,text:await run('document.body.innerText'),inputs:await run(`Array.from(document.querySelectorAll('input,textarea')).map(e=>({tag:e.tagName,placeholder:e.placeholder,disabled:e.disabled}))`)});
     } catch(error) {
       const screenshot = path.join(root,'failure.png');

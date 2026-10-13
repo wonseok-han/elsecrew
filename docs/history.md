@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (native 대형 트리 연결·snapshot 시간 초과 재현)
+
+- 직전59099c1은 편집 컨텍스트 정리로 진척했다. 실제 filesystem/sidecar가 빠진 트리 성능 범위를 줄이기 위해 기존 project-ui smoke에 LARGE_TREE 옵션을 추가했다. 생성 Git 저장소의 aaa-tree에1000폴더/10000파일을 넣고 제어 파일 수는 별도 보고한다. 폴더 열기→두 frame 시간/가상 목록 노드 수 수집을 연결했지만 아직 해당 단계 실측은 미완료다. Karpathy 최소 변경 원칙으로 기존 시험을 확장했다.
+- 최신 renderer build PASS. 제한 환경 Electron은 SIGABRT; 승인 환경 session85808/8458d7은 최초 프로젝트 열기15초 wait 실패 후 CUA에서 실제 snapshot 생성60초 timeout까지 확인했다. 트리 숫자/전체 PASS 없음. 시험 중 sidecar15805, ls-tree zombie15846, cat-file15847을 확인했고 Git blob 입출력의 WouldBlock마다5ms sleep이 누적되는 코드가 원인 후보다. 아직 인과 확정/수정은 아니다.
+- 실패 뒤 동일 session을 계속 관측했고 exit1·shutdown accepted로 정상 종료를 확인했다. 중간 notConfirmed를 최종 미종료로 오인해 강제 종료/중복 실행하지 않았다. failure.png/result.json은 hello-agent-project-ui-8458d7에 보존. 별도 설치/실제 계정 호출/사용자 프로젝트 수정 없음.
+- 스크립트 구문/diff 검사 PASS. 다음 최우선: 대형 snapshot 입출력 대기 원인 검증·수정 후 같은 native 조건 재시험; 이후 전체 G6 collector/RSS·Claude/Windows·출시. 전체 목표 미완료, 기존9월 archive 보존/main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (편집 컨텍스트 저장 bookkeeping 해제)
 
 - 직전1c4062f는 StrictMode 채팅 재연결 수정으로 진척했다. 이어 검토자가 지적한 editor saveGenerations/saveWatchPending를 확인해 프로젝트 snapshot 생성·채팅 바인딩·프로젝트 이탈/닫기·dispose에서 정리했다. 이전 파일 경로가 다른 컨텍스트까지 유지되지 않도록 했으며 저장 중 이탈 차단 조건은 그대로다.
