@@ -5,5 +5,6 @@ pub mod agent_adapter;
 pub mod claude_pilot;
 pub mod codex_pilot;
 pub mod error;
+pub mod install_lifecycle;
 pub mod proctree;
 pub mod provider;
