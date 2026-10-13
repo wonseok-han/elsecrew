@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (최신 패키지 트리 반복 지연 해소 확인)
+
+- 기준806c5d9 최신 macOS arm64 package smoke PASS 후 기존 --tree-file collector를 예열1+본10회 순차 실행했다. 본10회 p95 treeRoot258.70ms/expand167.80ms/fileEditable432.70ms/DOM362로 각 지연·DOM 기준 이내다. 기존 AyEMnF의 treeRoot p95 1132.40ms 실패는 이번 최신 패키지 반복에서 해소됐다. 측정조건/지표를 바꾸거나 실패 표본을 제외하지 않았다.
+- OS 임시 hello-agent-packaged-performance-vb7yyj/measurement.json에서 head/headAfter806c5d9 동일,11회 모두 normal exit0·shutdown confirmed·fixtureCleaned=true·largeProject.failedMetrics=[]를 재확인했다. JSON/PNG/log만 보존하고 각 생성 project/other-project/userdata는 정상 종료 및 PID 부재 후 정리됐다. /private/tmp/hello-agent-final-performance-package.log, hello-agent-final-tree-repeated.log 보존.
+- 유휴 RSS457326592~460701696B(약436~439MiB)는400MiB 초과이므로 전체 FAIL/exit1을 유지한다. 이것은 트리/파일의 부분 packaged 진단이며 전체G6 collector·입력/stream·peak/retained RSS·실계정·Windows·물리 키보드 합격이 아니다. 사용자9월 archive 변경 때문에 clean-tree release gate도 주장하지 않는다. 다음은 메모리 비용 분리 및 나머지 검증이다. 실제 계정/사용자 프로젝트 미사용, main 병합/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (100회 저장 경합 실제 stdio 검증)
 
 - 기준1821395의 release/locked stdio_process에서 명시 ignored인 binary_workspace_save_races_preserve_external_bytes_across_two_chats를 실행해1 PASS/50.69초를 확인했다. 자체 임시 Git 프로젝트의 두 채팅 workspace를 번갈아 사용해 save begin 뒤/청크 뒤 외부 쓰기100회와 정상 대조 저장100회를 검증했다. 원시100 observations와 counters(silentOverwrites/unreportedConflicts/crossChatWrites 각각0), 원본 불변·다른 채팅 불변·충돌 보고·외부 바이트 보존 모두true를 /private/tmp/hello-agent-final-save-races.log에서 다시 확인했다.
