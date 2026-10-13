@@ -22,6 +22,7 @@
     "m5:measure:renderer": "node scripts/m5-renderer-metrics.mjs",
     "m5:measure:native-project": "node scripts/m5-native-project-metrics.mjs",
     "m5:smoke:project-ui": "electron scripts/m5-project-ui-smoke.cjs",
+    "m5:smoke:packaged-ui": "node --experimental-strip-types scripts/m5-packaged-ui-smoke.mjs",
     "m5:test:electron": "node --test --experimental-strip-types tests/m5-electron*.test.mts && pnpm run m5:package:smoke",
     "m5:test:security": "node --test --experimental-strip-types tests/m5-electron-security.test.mts tests/m5-renderer-csp.test.mts tests/m5-electron-scaffold.test.mts tests/m5-sidecar-staging.test.mts && node --experimental-strip-types --check electron/main.ts",
     "m5:test:package": "node --test --experimental-strip-types tests/m5-g6-package-gate.test.mts tests/m5-package-metrics.test.mts tests/m5-sidecar-staging.test.mts && node scripts/m5-g6-package-gate.mjs",

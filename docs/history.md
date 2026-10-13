@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (실제 패키지 시작·종료 관측 연결)
+
+- 이전 턴은8b10ed6 백업 잠금 수정으로 진전했다. 제품 코드를 계측용으로 교체하지 않는 m5:smoke:packaged-ui를 추가했다. 별도 Electron 최소 프로그램에서 --user-data-dir 격리를 직접 확인한 뒤, 고정 out 패키지를 새 임시 profile로 시작하고 그 프로세스 stderr의 loopback CDP에만 연결한다. 실제 renderer bridge/native storage ready·프로젝트 선택 활성화·스크린샷·40개 RSS를 관측하고 기존 prepareQuit→main coordinator→exit0/정확한 instance DB clean marker로 종료 확인한다. 사용자 프로젝트/로그인/모델/강제 종료 없음.
+- 최신 Rust 수정 포함 패키지 rebuild/smoke PASS(/private/tmp/hello-agent-package-8b10ed6.log). 첫 F9fUxo 관측은 UI 준비 조건이 넓고 캡처가 RSS보다 빨랐다. 이를 실제 프로젝트 선택 버튼과 캡처 후순위로 고친 VXpMR4는 storage809.60ms/UI1225.45ms, 종료 confirmed/exit0, RSS460046336B(약439MiB)로400MiB 초과 FAIL이다. 계측된 단일 startup/migration 포함 진단이며 native 키보드·전체 성능/gate PASS가 아니다. 최초 결과도 보존했다.
+- 결과/스크린샷은 OS 임시 hello-agent-packaged-ui-F9fUxo 및 VXpMR4에 보존하며 로그는 /private/tmp/hello-agent-packaged-ui-8b10ed6{,-retry}.log다. 두 종료 PID 부재와 일반 profile directory를 확인 후 userdata 약4.6MiB만 정리했다. 측정/이미지 증거는 유지하며 새 시험으로 재생성 가능하다. 기존 사용자 profile은 건드리지 않았다.
+- 실제 캡처에서 좁은 프로젝트 rail의 빈 목록 안내·다시 확인 버튼 줄바꿈이 과도함을 관측했다. 후속 UI 수정 대상이며 이번에는 수집 경로만 연결했다. shell 코드에는 안전 경계 변경 없음. syntax/diff PASS. Windows·실제 계정·native 입력·전체 성능·메모리 개선은 남음, 사용자9월 archive 보존·main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (누적 Rust 실패 분류·백업 디렉터리 잠금 수명 수정)
 
 - 동일 session41351의 전체 실행이 exit101로 종료됐다. Tauri105 PASS/13 ignored, core198 PASS, protocol58 PASS, sidecar613 PASS/4 FAIL/36 ignored(778.91초). Unix socket 생성3건은 EPERM이며 권한확대한 집중 실행에서3 PASS(/private/tmp/hello-agent-socket-retry.log). 제품 로직으로 오류를 무시하거나 테스트를 제외하지 않았다.
