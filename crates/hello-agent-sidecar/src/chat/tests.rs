@@ -4025,7 +4025,9 @@ fn exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_dist
             .storage
             .projection_record("run", &run_id)
             .unwrap()
-            .unwrap()["state"]
+            .unwrap()["record"]["state"]
+            .as_str()
+            .expect("persisted run state")
             != "running"
         {
             break;
@@ -5733,7 +5735,9 @@ fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed
                     .storage
                     .projection_record("run", &run_id)
                     .unwrap()
-                    .unwrap()["state"]
+                    .unwrap()["record"]["state"]
+                    .as_str()
+                    .expect("persisted run state")
                     != "running"
                 {
                     break;
@@ -5745,7 +5749,11 @@ fn fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed
                 .projection_record("run", &run_id)
                 .unwrap()
                 .unwrap();
-            assert_eq!(terminal["record"]["state"], "failed");
+            assert_eq!(
+                terminal["record"]["state"], "failed",
+                "scenario {scenario:?}, termination: {}",
+                terminal["termination"]
+            );
             assert_eq!(terminal["termination"]["processesProvenGone"], true);
         }
     }

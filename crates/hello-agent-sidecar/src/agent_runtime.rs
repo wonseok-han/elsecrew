@@ -47,6 +47,7 @@ const SOURCE_KIND: &str = "actualAgent";
 mod approval;
 mod native;
 mod native_evidence;
+mod reap;
 mod discovery;
 pub(crate) mod preparation;
 const RECOVERY_RESERVATION_FIELD: &str = "recovery_id_reservation";
@@ -1935,8 +1936,13 @@ impl AgentRuntime {
             .active
             .get_mut(run_id)
             .ok_or_else(|| ProjectFailure::manifest("active agent run is missing"))?;
-        // Never wait indefinitely after an uncertain process-tree observation.
-        let reaped = matches!(active.launcher.try_wait(), Ok(Some(_)));
+        // OS exit observation can precede waitpid readiness. Never block on wait(),
+        // and never spend a retry budget when tree termination is unconfirmed.
+        let reaped = reap::after_confirmation(
+            report.confirmed(),
+            || active.launcher.try_wait().map(|status| status.is_some()),
+            &SystemClock::default(),
+        );
         let forced_uncertain =
             active.scenario == FakeScenario::CancelUncertain || active.evidence_failed;
         let observed_processes_gone = report.confirmed() && reaped && !forced_uncertain;

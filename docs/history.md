@@ -1,5 +1,29 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (종료 확인 뒤 bounded 회수·실패 회귀 해소)
+
+- 7ddac69 위 Karpathy 최소 범위로 fixture G5A finish_with_report의 단발 try_wait를 종료 confirmed일 때만 최대1초/25ms 간격 재확인으로 변경했다. unconfirmed tree는 대기하지 않고, try_wait 오류/기한 초과는 false를 유지한다. process-tree report·durable evidence·forced uncertainty·provider recovery 판정은 기존처럼 모두 필요하다. native provider의 별도 실행 경로 수정/실계정 종료 검증으로 확대하지 않는다.
+- 기존 실패 fake_agent_3 PASS(oversized/clean cancel/uncertain poison 포함), 가짜 시계 reap3 PASS(즉시·지연·timeout·오류·미확인), provider_terminal_2 PASS, stdio_process13 PASS/1ignored. 앞선 lib 실패로 미실행됐던 macos_sandbox_probe는0PASS/2ignored, doc0개로 확인했으며 ignored를 합격으로 세지 않는다. /private/tmp/hello-agent-final-reap-{fake,unit,terminal}.log, final-stdio.log, final-sandbox-tests.log, final-sidecar-doc.log 보존. 새 helper rustfmt/diff PASS. 전체 library 재실행 대신 이전621PASS와 영향 집중 검사를 구분해 재사용한다.
+- final_application_safety 최종 APPROVE. 검토 의견에 따라 unconfirmed tree의 direct child는 비차단 회수1회를 하더라도 helper 결과false를 유지하도록 엄격화하고 해당 unit을 포함해3 PASS 재확인했다. 이번/직전 테스트 및 작업 기록만 커밋하고 사용자9월 archive는 제외한다. 메모리·반복 성능·G6·실계정·Windows 미완료. main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (sidecar 전체 결과·종료 회수 경합 확인)
+
+- session16034 정상 종료(exit101): 621 PASS/4 FAIL/36 ignored, 535.85초. 라이브러리 실패로 이후 binary/integration/doc 단계는 실행되지 않았다. 실패3건(runtime_scan_reports_special_files_without_exposing_names, claude_runtime_files의 only_live_owner_mux_in_private_tmp_is_admitted/unrelated_sockets_and_links_remain_rejected)은 UnixListener::bind EPERM이었다. 제한 밖에서 해당3건 모두 PASS를 확인했다(/private/tmp/hello-agent-final-{socket-recheck,claude-sockets}.log). 실제 계정/프로젝트를 사용하지 않은 임시 자료 시험이다.
+- fake_agent_clean_cancel 실패는 poll 상태 경로 수정 뒤에도 제한 안팎에서 재현됐다. assertion에 시나리오/termination 진단을 추가해 Oversized로 한정했다. 임시 test-only 로그로 finish_with_report의 report=Confirmed/all2gone, reaped=false, evidence_failed=false를 확인했다(/private/tmp/hello-agent-final-cancel-tracker.log). 즉 OS 종료 확인 직후 Child::try_wait가 아직 회수 완료를 반환하지 않는 경합이다. 임시 runtime 로그는 제거했고 제품 코드는 변경하지 않았다. 전체 실패를 sandbox 탓이나 poll 수정으로 해결됐다고 주장하지 않는다.
+- 다음은 종료 증명과 fail-closed를 유지하면서 confirmed report 뒤의 launcher 회수를 bounded 처리하는 수정·회귀·독립 안전 검토다. fake_agent_ 집중 검사의 다른2건은 PASS, 문제1건은 미해결이다. 앞선 진행 중 기록의 session16034는 이제 종료됐으므로 재대기/전체 중복 실행하지 않는다. 모든 이번 검사 세션 종료, 변경은 chat/tests.rs와 작업 기록에 미커밋으로 남김. 사용자9월 archive 보존, main/push 없음, G6/메모리/실계정/Windows 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (sidecar 대기 조건 결함 수정 후보)
+
+- 기존 session16034를 재확인해 같은 전체 검사가 계속 진행 중임을 확인했다. 검사 중인 실행 파일은 7ddac69에서 만들어졌으며 이후 소스 편집을 포함하지 않는다. 대형 snapshot100개 초과 회귀는 완료 PASS, storage 검사는 진행 중이다. 최종 집계/실패 panic은 아직 나오지 않았다.
+- 실패한 fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed의 poll 루프가 실제 영속 run 구조 record.state 대신 최상위 state를 읽어 null != running으로 조기 중단하는 코드 결함을 발견했다. exact_fake_agent_barrier_filters_private_events_and_keeps_fixture_ledger_distinct에도 같은 패턴이 있어 두 곳을 record.state + 필수 문자열 확인으로 수정했다. 최종 상태/종료 증거 검증은 완화하지 않았고 제품 코드는 변경하지 않았다. 아직 수정 후 테스트 미실행이며 실패 원인 확정은 전체 검사 종료 후 panic과 집중 재현으로 검증한다.
+- 다음: 반드시 session16034 종료/최종 오류를 먼저 수집하고, 두 수정 테스트와 UnixListener 특수 파일 검사 실패 원인을 구분해 필요한 집중 검사만 실행한다. 현재 전체 검사와 Cargo를 겹쳐 실행하지 않았다. 소스 및 이번/직전 기록 미커밋, 사용자9월 archive 변경 보존. 메모리·반복 성능·전체G6·실계정·Windows 미완료, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (최신 통합 소스 묶음 회귀 진행)
+
+- 기준 HEAD 7ddac69에서 npm test 495 PASS/0 FAIL, pnpm exec tsc --noEmit, pnpm build 및 Electron M5 renderer Vite build PASS. M5 build의 Monaco 큰 chunk 경고는 남으며 패키지 실행/메모리 합격으로 해석하지 않는다. 공용 Rust release/locked core198·protocol58·core doc3 PASS. 로그는 /private/tmp/hello-agent-final-{node-tests,frontend-build,m5-renderer,core-protocol}.log다.
+- sidecar 전체 release/locked 검사 661개는 exec session16034에서 현재 실행 중이다. /private/tmp/hello-agent-final-sidecar.log에 fake_agent_clean_cancel_releases_writer_and_malformed_or_oversize_fail_closed 및 runtime_scan_reports_special_files_without_exposing_names 실패가 먼저 관측됐다. 최종 panic/집계 전이므로 원인을 단정하지 않는다. 다음 작업은 반드시 같은 session16034의 종료를 확인한 뒤 실패 원인을 분류하고 영향 검사만 재실행한다. 관찰 timeout을 종료로 취급하거나 전체 검사를 중복 시작하지 않는다.
+- CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4/CARGO_INCREMENTAL=0 및 기존 release 캐시를 사용했다. 실제 에이전트/사용자 프로젝트/설치/삭제는 실행하지 않았다. 반복 성능 측정은 이 무거운 검사가 끝난 다음으로 미뤘다. 메모리/G6/실계정/Windows 미완료, 사용자 9월 archive 변경 보존, main 병합/push 없음. 이번 기록은 진행 중 검사와 함께 미커밋으로 남긴다.
+
 ### 2026-10-13 · by GPT-6 Astra (작업 복사본 stat 초기화·첫 트리 진입 개선)
 
 - a277ce7에서 read-tree 후 raw 파일 생성으로 인덱스 stat가 비어 있는 경로를 확인했다. 자체 임시10,000파일 probe의 최초 diff652ms/후속약21ms를 관측하고, Karpathy 최소 변경으로 unpublished staging의 blob 자식 종료 뒤 고정 update-index -q --ignore-submodules --refresh를 연결했다. 경로/add/remove/assume-unchanged 없이 object ID/기준 트리를 유지하고 기존 검증·fresh diff를 생략하지 않는다. 원본 index에는 실행하지 않는다. [Git 공식 --refresh 설명](https://git-scm.com/docs/git-update-index#_using_refresh)도 read-tree 이후 stat 연결 용도를 명시한다. 전체 복사 준비 비용을 없애는 변경이 아니라 첫 사용자 요청 이전으로 초기 확인을 옮긴다.
