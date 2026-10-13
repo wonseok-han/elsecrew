@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (세션 분리 자손 종료 관측)
+
+- c8b5f73 이후 실제 detached 시험을 조사했다. core의 재부모화 시험은 모의 ProcTable이고 기존 stdio 취소 leaf는 동일 세션이었다. Karpathy 최소 변경으로 취소 fixture의 leaf만 pre_exec setsid로 분리했다. 실제 provider/제품 실행 정책은 변경하지 않았다. 외부 관측 시험은 세션 leader가 정확히1개이며 sidecar와 다른 세션인지 확인한 뒤 기존 PID+시작 시각 소멸 검사를 수행한다.
+- binary_cancel_ 2 PASS1.78초: 각 부모/leaf2개 중 별도 세션1개·잔존0·정상 quit. uncertain 복구 전 차단도 유지한다. 세션 분리 증거이며 독립 재부모화 orphan/실제 공급자/packaged G6 합격은 아니다. 절차에 실행 명령·한계를 기록했다. rustfmt가 만든 무관한 기존 포맷 변경은 이번 변경만 되돌렸고 diff 검사 PASS. 실제 계정/모델 호출·새 패키지 없음.
+- 네 채팅12000 event 합성 진단은 이미 있으므로 중복 구현하지 않는다. 남은 것은 native IPC/packaged 통합 관측 및 Mac 잠금 해제 후 입력/메모리·Claude 연결 확인 후 실연결이다. 전체 미완료이며 사용자9월 archive 변경 보존·main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (종료 시험 외부 신원 관측)
 
 - 직전 활성화 재확인은 개발 진척이 아니었으므로 f667bb3에서 남은 종료 증거를 보완했다. Karpathy 최소 변경 원칙으로 기존 binary_cancel_scenario에 시험 프로세스 측 OS 관측을 추가했다. 취소 전 sidecar 아래 부모/leaf의 PID+시작 시각을 확보하고 취소 후 각 신원의 Gone 및 sidecar 정상 종료를 직접 검사한다. 제품 종료 코드 변경 없음.

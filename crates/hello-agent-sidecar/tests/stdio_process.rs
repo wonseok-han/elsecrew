@@ -1927,6 +1927,22 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
         );
         thread::sleep(Duration::from_millis(10));
     };
+    let detached: Vec<_> = observed
+        .iter()
+        .filter(|identity| {
+            // getsid only observes these already-owned fixture identities.
+            unsafe { libc::getsid(identity.pid as libc::pid_t) == identity.pid as libc::pid_t }
+        })
+        .collect();
+    assert_eq!(
+        detached.len(),
+        1,
+        "fixture leaf must lead its own OS session"
+    );
+    assert_ne!(
+        unsafe { libc::getsid(child.id() as libc::pid_t) },
+        detached[0].pid as libc::pid_t
+    );
 
     write_request(
         &mut stdin,
@@ -2032,8 +2048,9 @@ fn binary_cancel_scenario(scenario: &str, clean: bool) {
             "evidence":"fixture-cancel-external-process-observation",
             "scenario":scenario,"diagnostic":true,"gateEligible":false,
             "observedDescendants":observed.len(),"survivingObservedProcesses":0,
+            "detachedSessionDescendants":detached.len(),
             "uncertainReported":!clean,"shutdown":"accepted",
-            "limitations":["ordinary fixture tree, not detached or real provider processes", "observer shares the core OS probe implementation"]
+            "limitations":["session-detached fixture, not an independently reparented orphan or real provider", "observer shares the core OS probe implementation"]
         })
     );
 }

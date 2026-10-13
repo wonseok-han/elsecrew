@@ -1549,16 +1549,30 @@ pub fn run_fixture_child(scenario: &str) -> Result<(), SidecarError> {
         let executable = std::env::current_exe().map_err(|error| {
             SidecarError::new("fixtureFailure", format!("fixture executable: {error}"))
         })?;
-        let mut leaf = Command::new(executable)
+        let mut command = Command::new(executable);
+        command
             .arg("--fixture-leaf")
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| {
-                SidecarError::new("fixtureFailure", format!("fixture leaf: {error}"))
-            })?;
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // Exercise identity tracking across a session boundary, not merely
+            // process-group termination. Only the synthetic fixture uses this.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let mut leaf = command.spawn().map_err(|error| {
+            SidecarError::new("fixtureFailure", format!("fixture leaf: {error}"))
+        })?;
         let _ = leaf.wait();
     } else {
         std::thread::sleep(Duration::from_millis(120));

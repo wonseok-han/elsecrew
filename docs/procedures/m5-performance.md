@@ -77,6 +77,8 @@ clean `m5/coding-agent-ide`에서 `pnpm run m5:measure:sidecar-startup`을 실�
 
 ### 단일 채팅 renderer 입력 스트림 진단
 
+종료 관측은 `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 CARGO_INCREMENTAL=0 cargo test -p hello-agent-sidecar --locked -j4 --test stdio_process binary_cancel_ -- --nocapture`로 실행한다. 기존 취소 fixture의 leaf는 `setsid`로 별도 OS 세션에 진입한다. 시험 프로세스는 취소 전 부모/leaf의 PID·시작 시각과 leaf의 세션 ID를 확인하고, 취소 후 각 신원 소멸과 sidecar 정상 종료를 검사한다. uncertain 시나리오의 복구 전 quit 차단도 유지한다. 실제 공급자·독립적으로 재부모화된 orphan·packaged 통합은 검증하지 않으며 core OS probe를 공유한다. 결과는 diagnostic=true/gateEligible=false다.
+
 현재 renderer를 빌드한 뒤 `M5_MEASURE_MESSAGE_PAINT=1 M5_RENDERER_DIR="$PWD/.vite/renderer/main_window" node_modules/.bin/electron tests/m5-renderer-smoke-runner.cjs`로 기존 합성 화면 회귀에50회/초·3000메시지 관측을 추가할 수 있다. 관측은 renderer performance.now 발송 시각부터 메시지 DOM이 연속 두 animation frame에 나타날 때까지다. 지연된 발송은 schedulingDelayMs로 보존하며 매 메시지 표본·미관측 ID·최대값을 독립 userData의 message-paint.json에 저장한다.
 
 이 경로는 단일 합성 채팅의 진단 전용(`diagnostic:true`, `gateEligible:false`)이며4개 stream·실제 sidecar/패키징·G6 eventPaintMs를 대신하지 않는다.100ms 초과나 미관측은 실패한다. 기본 화면 회귀에서는 실행되지 않고 실제 계정 호출도 없다. 숨겨진 시험 창의 frame 관측이므로 실제 compositor 표시 시각이라고 주장하지 않는다.
