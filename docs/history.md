@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (정지 상태 로그인 반복 조회 제거)
+
+- 0c707fc에서 안전 검토자는 여전히 running이며 중간 보고상 apply/restore/retire/cleanup 동의·원본 보호 경로에서 구체 결함은 아직 없었다. 최종 승인으로 취급하지 않으며 새 검토자는 호출하지 않았다.
+- 로그인 UI는 connected/idle/canceled/failed/unsupported에서도500ms마다 상태를 읽어 busy·status를 갱신했다. backend status는 현재 저장 상태 조회이며 인증 갱신이 아니다. Karpathy 최소 변경으로 초기 진단/disabled 복귀 조회와 진행 상태 polling을 분리했다. diagnosing/installed/starting/waiting/verifying 또는 통신 오류일 때만 polling하며 정지 상태는 멈춘다. 사용자 명시 check·로그인/취소·복구와 inFlight 중복 방지는 유지했다.
+- 상태별 polling 및 기존 로그인 계약9 PASS, tsc --noEmit/diff PASS. 이는 무의미한 IPC/화면 갱신 제거이며 메모리400MiB 초과 해소를 입증하지 않는다. 실제 GUI 타이머/로그인 회귀는 잠금 해제 뒤 통합 검증에 포함한다. 실제 계정/모델 실행 없음. 사용자9월 archive·main/push 경계 유지, 제품 전체 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (최종 원본 보호 검토 착수·이전 패키지 정리)
 
 - cb9e407에서 상시 승인된 읽기 전용 독립 검토자1명(final_application_safety)을 호출했다. application apply/restore/retirement/backup cleanup의 원본 보호·동의 결속·영속 복구와 caller를 현재 코드 기준으로 검토한다. 이 기록 시점 도구 상태는 running이며 합격 여부는 아직 없다. 구현 위임/추가 검토자/모델 호출은 하지 않았다.

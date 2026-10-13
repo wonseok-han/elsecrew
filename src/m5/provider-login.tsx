@@ -5,6 +5,7 @@ import { LOGIN_PROVIDERS, readProviderSelection, saveProviderSelection } from ".
 import { validateLoginStatus, type LoginRequest, type LoginStatus, type LoginProvider } from "./contracts/provider-login-v1.ts";
 import { validateDeviceReport, type DeviceReport } from "./contracts/device-report-v1.ts";
 import { ProviderInstall } from "./provider-install.tsx";
+import { shouldPollLogin } from "./provider-login-poll.ts";
 
 export function ProviderLogin({ disabled, compact = false }: {disabled: boolean; compact?: boolean}) {
   const { t } = useI18n();
@@ -138,9 +139,14 @@ function ProviderConnection({ disabled, provider, onAttention }: {disabled: bool
       checked.current=true;
       void request({action:"diagnose",attemptId:crypto.randomUUID()});
     } else void request({action:"status"});
-    const timer=window.setInterval(()=>void request({action:"status"}),500);
-    return () => { mounted.current=false; window.clearInterval(timer); };
+    return () => { mounted.current=false; };
   },[disabled]);
+  const poll = shouldPollLogin(status.state, error, disabled);
+  useEffect(() => {
+    if (!poll) return;
+    const timer = window.setInterval(() => void request({action:"status"}), 500);
+    return () => window.clearInterval(timer);
+  }, [poll]);
   useEffect(() => {
     // Installation is not authentication. Only the existing account check can
     // report a connected account; diagnosis never reads credentials.
