@@ -1,5 +1,220 @@
 # 작업 이력 아카이브 — 2026-10
 
+### 2026-10-13 · by GPT-6 Astra (실제 프로젝트의 첫 작업 안내 연결)
+
+- f850cbd의 에이전트 준비 다음 흐름으로 실제 프로젝트 작업대에 접을 수 있는 첫 작업 안내를 연결했다. 목표/프로젝트 팀 설정→팀 대화의 실행·승인/후속 지시→변경 비교와 반영·복구 안내로 기존 화면을 연다. 채팅을 열면 안내를 접고 필요하면 다시 볼 수 있다. 가짜 완료 표시나 별도 연습 자료는 만들지 않았다.
+- Karpathy 지침으로 기존 new-chat/역할 modal·dock reveal·변경 조회를 재사용했다. 버튼은 탐색/조회만 수행하며 실행·반영·삭제 승인을 대신하지 않는다. tsc/diff PASS, 실제 UI/전체 회귀는 최종 UI 묶음으로 남긴다. 다음은 지금까지 연결한 UI 묶음의 실제 화면·흐름 확인과 남은 성능/Claude 실연결·G6/출시다. 사용자 archive 변경 보존/main·push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (처음 시작의 에이전트 준비 단계 연결)
+
+- 직전220128c는 설정 UI 구현 진척이다. 선택·설치 확인·로그인 연결을 탐색 가능한3단계로 나누고 에이전트를 선택하면 설치 확인으로, 설치 후 연결 확인은 로그인으로 이동한다. 기존 설치본은 재설치 없이 로그인 확인으로 진행할 수 있다. 프로젝트 선택은 실제 폴더 탐색을 허용하던 기존 정책을 유지한다.
+- 단계 전환은 hidden 표시만 바꾸며 provider/설치 소유자 컴포넌트·조회 수명을 유지한다. 설치 동의/진행/불확실·복구 중 설치 화면, 로그인 진행/오류/복구 화면은 단계와 관계없이 노출한다. 탐색만으로 설치/로그인을 시작하거나 연결 성공을 선언하지 않는다. Karpathy/React 지침으로 기존 상태/동작을 재사용했다.
+- tsc/diff PASS. 기존 Chromium 시나리오에 선택 후 설치 이동·선택으로 복귀·로그인 및 설치 화면 가시성 검사를 추가했다. 이번 변경의 실제 Chromium/시각·전체 회귀는 아직 실행하지 않았고 다음 UI 묶음 검증으로 남긴다. 다음은 실제 프로젝트에서 첫 목표/검토까지의 안내 연결, UI/성능·실연결/G6/출시 검증이다. 사용자 archive 보존/main·push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (프로젝트 역할 설정 화면 정리)
+
+- 직전 활성화 재확인은 구현 진척이 아니었다. 4f77a05의 진행 중 UI 변경을 이어서 프로젝트 레일 옆 작업대 크기의 설정 dialog로 정리했다. 적용 프로젝트/앞으로 만드는 채팅만 변경됨을 명시하고 역할별 runtime·모델·추론·권한을 비교 행으로 배치했다. 본문만 스크롤하고 저장/다시 불러오기 행동은 하단에 유지한다. 명시 저장·취소/초안 복귀·기존 채팅 snapshot·권한 계약은 변경하지 않았다.
+- Karpathy 지침으로 기존 컴포넌트를 재사용했다. 기존 tsc session66511 exit0을 회수했고 renderer build PASS(기존 chunk 경고). 전체 회귀는 묶음 검증으로 남겼다. 합성 UI 캡처에960×640 설정 footer 가시성·수평 넘침 없음·프로젝트명 표시 검사를 추가해 PASS했고 실제 최소 화면 이미지를 확인했다. 증거 .artifacts/m5-visual/capture-VLx5kd; 실제 계정/sidecar/설치 실행 없음.
+- 종료된 캡처 시험의 임시 userdata만 정리하고 증거는 보존한다. 사용자 archive21줄은 별도 보존한다. 다음은 단계별 처음 시작하기 연결, UI 묶음 회귀와 비계측 성능·Claude 실연결/G6/출시이며 전체 미완료다. main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (활성화 승인 재확인)
+
+- macOS 설치·업데이트 및 명시 동의 방식 백업 정리 활성화 승인 응답을 현재 m5/coding-agent-ide/4f77a05와 대조했다. 이미 통합된944bba1이 두 활성화를 포함하며 현행 dispatch/manager에도 유지됨을 확인했다. 중복 활성화나 실제 설치·삭제는 실행하지 않았다.
+- 설치의 작업별 동의와 백업의 복구점 종료 후 별도 삭제 동의 경계는 유지한다. 기존 활성화 검증/독립 검토 기록을 재사용하며 새 테스트 통과로 표현하지 않는다. 진행 중인 역할 설정 UI4파일 및 사용자 archive 변경은 그대로 보존했다. 남은 UI·실연결·성능/G6·출시 검증은 미완료이며 main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (프로젝트 레일 시안 정리·채팅 패널 묶음 검증)
+
+- 직전74353c9는 chats dock 연결 진척이다. 현재 HEAD/dirty를 확인하고 프로젝트 레일을 기본92px 약칭/이름·현재 선택 표시와224px 전체 경로/관리 상세 보기로 분리했다. 복구·전환 설명을 열면 자동 확장하고 오류도 상세 폭으로 표시한다. 추가 버튼은 기존 chooseProject/기존 disabled 경계를 재사용한다. 실제 프로젝트·권한/복구 동작은 바꾸지 않았다.
+- Karpathy 지침으로 기존 목록/복구 컴포넌트를 유지했다. tsc/diff PASS, renderer build PASS(기존 chunk 경고). 최초 실제 Chromium 검사는 기본 탭을 files로 기대하는 옛 복원 assertion에서 실패해 새 chats 기본에 맞춰 수정했다. 재실행2 PASS12.0초이며 레일 너비/전체 경로/복구 확장, 앞선 채팅 dock의 focus/복원·기존 Monaco 보존·새 채팅 초안 왕복을 포함한다. 74353c9의 미실행 Chrome 회귀는 이 범위에서 해소했다.
+- 테스트는 합성 공급자/임시 자료이며 실제 로그인/모델·시안 전체 합격이 아니다. 다음은 설정 화면 배치·단계별 시작 흐름의 시안 연결, 비계측 성능/Claude 실연결/G6·Windows/배포다. 사용자 archive21줄 보존/main·push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (시안의 이동 가능한 채팅 탐색 패널 연결)
+
+- 직전ee76401은 시각 대조/시작 화면 수정 진척이다. 실제 HEAD/사용자 dirty를 확인하고 상단 가로 채팅 strip을 독립 chats dock panel로 옮겼다. 기본3열은 왼쪽 채팅·파일·변경 탭/가운데 편집기/오른쪽 팀 대화이며 채팅도 기존 drag/drop·키보드 이동·크기/접기/집중 기능을 공유한다. 제목은2줄/상태는별도줄, 새 채팅은 패널 하단이다. 데이터·권한·대화 수명은 바꾸지 않았다.
+- 저장 배치 payload를 version2로 확장하되 기존 storage key를 유지한다. version1의 split 비율/선택 탭/순서를 보존하고 files 그룹에 chats만 추가하며 flat 구형도 기존4열을 유지한다. 집중 보기 중에는 새 탭을 숨겨 방해하지 않고 복귀 때 복원한다. 새 채팅 modal 종료 시 숨겨진 채팅 패널을 먼저 열고 버튼 포커스를 복구한다.
+- Karpathy/React 지침으로 기존 dock·stable panel parent를 재사용했다. tsc/diff PASS, dock17 PASS(구형→신형 재저장/최소 폭/집중 복원/모든 이동 partition 포함). Chrome의 제목 레이아웃 검사는 새 세로 배치에 맞췄으나 전체 UI/drag·focus 실제 검사는 후속 묶음에 남긴다. 제품/시안 전체 합격은 아니다.
+- 다음은 프로젝트 rail·설정 배치 시안 반영과 묶음 UI 검증, 비계측 성능/Claude 실연결/G6·Windows/출시다. 사용자 archive21줄 보존, 계정·원본 실행/main·push 없음. 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (시안 시각 대조·시작 화면 행동 가시성)
+
+- 직전49088d7은 새 채팅/역할 설정 왕복과 실제 화면 검증 진척이다. HEAD/dirty를 확인하고 기존 smoke preload와 production renderer를 사용하는 외부 통신 차단/숨김 창 캡처 도구 tests/m5-ui-capture.cjs를 추가했다. sidecar/계정/공급자 실행 없이 시작·작업대·설정·두 로컬 시안을 PNG로 남긴다. 최초 렌더 대기 null 오류와 sandbox iframe paint/허용 경로를 고쳤고 비교 이미지를 직접 확인했다.
+- 현재 시작 화면은 큰 설치 영역 뒤의 안내/프로젝트 선택이 화면 밖으로 밀렸다. 안내를 설치보다 앞에 두고3개 단계/선택 행동을 간결한 가로 배치로 정리했다. DOM 순서도 같고 설치/로그인·권한 검사·실제 프로젝트 시작 정책은 바꾸지 않았다. ko/en 상대 위치 문구를 함께 고쳤다. Karpathy 지침으로 확인된 UI 가시성 문제에 한정했다.
+- renderer build PASS(기존 chunk 경고), 캡처 실행 PASS. .artifacts/m5-visual/capture-lBGAV4에서 최소960×640의 프로젝트 버튼 viewport 포함 검사와 실제 시작/설정/시안 픽셀을 확인했다. 전체 Chrome 회귀는 이번 UI 묶음 마감에 남긴다. fixture의 설치 unsupported 표시는 제품 활성화 상태 증거가 아니다.
+- 시안 대비 남은 차이는 넓은 프로젝트 레일/상단 채팅 strip 대 시안의 레일+채팅 세로 목록, 설정 modal 대 시안 설정 화면, 처음 시작의 단계별 진행이다. 이번 안내 재배치를 시안 전체 적용으로 주장하지 않는다. 다음 UI 구현 기준으로 캡처를 남기며 비계측 성능/Claude 실연결/G6/Windows/출시도 미완료다. 사용자 archive21줄 보존/main·push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (새 채팅 초안과 역할 설정 왕복 연결)
+
+- 직전5a44f4e는 설치 관리 UI 구현 진척이다. 실제 HEAD/dirty를 확인하고 새 채팅의 팀 요약에서 프로젝트 역할·모델 설정으로 직접 이동하도록 연결했다. 입력한 목표/원본 반영 준비 선택은 유지하고 돌아오면 같은 초안과 목표 포커스를 복구한다. 두 modal을 동시에 열지 않으며 설정의 미저장 변경 확인/기존 채팅 snapshot 보존은 유지한다. 준비·채팅 전환 중 설정 진입을 막고 첫 채팅 안내의 존재하지 않는 ‘위의 입력칸’ 문구도 고쳤다.
+- 기존 Chromium 회귀에 초안→설정→복귀·단일 modal·목표/포커스 보존을 추가했다. 앞선 설치 compact 변경과 묶어 renderer build 및 실제 Chromium smoke2 PASS12.0초, tsc/diff PASS다. 이전5a44f4e의 미실행 UI probe는 이번 묶음으로 해소했다. 대형 chunk 경고는 유지되며 이 검사는 가짜 공급자/임시 userdata이고 실제 모델·전체 시안/G6 합격은 아니다.
+- Karpathy 최소 변경으로 기존 설정 저장/권한 경로를 재사용했다. 실제 계정/설치/삭제/사용자 프로젝트 미사용, 사용자 archive21줄 보존, main/push 없음. 다음은 전체 UI 시안 대조·비계측 성능과 실제 Claude 연결/작업·G6/Windows/출시 검증이다. 전체 목표는 계속 미완료다.
+
+### 2026-10-13 · by GPT-6 Astra (작업 중 설치 관리 표시 축소)
+
+- 직전65e06da는 실제 검사 수정/진단 증거가 있는 진척이다. 같은 통합 브랜치와 사용자 archive 변경을 확인했다. 최종 UI 연결의 일부로 프로젝트 작업 중 설치 관리를 기본 접힘으로 바꾸고 상태는 계속 노출한다. 처음 시작하기에서는 설치 내용을 그대로 펼친다. 동의 계획·실행/응답 불명·오류/복구·설치 완료 후 연결 확인은 강제 표시하며 관리 버튼에 aria-expanded/controls를 제공한다.
+- 설치 컴포넌트는 계속 mount되어 조회/owner/동의 수명·상호 배제는 바뀌지 않는다. 기존 Chrome probe에 작업대 접기/펼치기와 응답 유실 시 중요 내용 노출 검사를 추가했다. Karpathy 최소 변경과 React 지침의 파생 상태/컴포넌트 수명/접근성을 적용했다.
+- tsc --noEmit, 두 시험 스크립트 node --check, diff PASS. Chromium 실행은 UI 변경 묶음 검증으로 남긴다(새 probe는 아직 미실행). 실제 계정·설치·삭제 없음. 다음은 시안의 나머지 UI 연결과 묶음 검증, 비계측 성능·Claude 재로그인/실행·G6/Windows/배포다. 전체 미완료, main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (활성화 독립 승인·변경 목록 성능 검사 정합성)
+
+- 독립 검토자 installer_boundary_review가60d886b..944bba1 활성화 diff를 APPROVE했다. macOS 한정·계획 없는 설치 시작 거절·현재 복구점 보호·별도 삭제 동의와 영속 정리 순서에 새 차단 결함 없음이다. 실제 사용자 HOME 설치/삭제·로그인/모델을 수행한 검토는 아니다.
+- 944bba1 기준 성능 진단은 변경 목록이100개씩 페이지화됐는데500 DOM 행을 기다리는 오래된 검사 때문에 측정 전에 실패했다. Karpathy 지침으로 제품/기준값은 그대로 두고 초기100행과5개 페이지의 전체500개 경로·마지막 다음 버튼 비활성·첫 페이지 복귀를 검사하도록 수정했다.
+- 재실행 renderer-2026-10-13T07-55-25.470Z-6657.json은 준비1회/측정10회를 끝냈다. 최대 tree35.6ms/편집75.9ms/입력25.6ms/diff목록52.4ms/첫diff17.6ms로 시간 기준 이내다. RSS idle402.7MiB/peak653.9MiB/60초 잔류delta75.6MiB이며 idle 기준 초과로 FAIL이다. DevTools/heap sampling이 붙은 diagnostic이므로 비계측 실행과 성능 개선 비교·G6 합격으로 확대하지 않는다. 종료 뒤 DOM document1개로 감소했고 누수 원인은 확정하지 않았다.
+- node --check/diff PASS. 실제 계정/모델/프로젝트 미사용, 사용자 archive21줄 보존, main/push 없음. 두 시험이 종료됐음을 확인하고 재생성 가능한 임시 userdata만 정리한다. 다음은 비계측 성능 확인·남은 UI/Claude 실연결/G6·Windows/배포이며 전체 완료 아님.
+
+### 2026-10-13 · by GPT-6 Astra (사용자 승인된 macOS 설치·백업 정리 활성화)
+
+- 직전60d886b는 공식 임시 설치/UI 호환 진척이다. 실제 HEAD/dirty와 현재 제품 비활성 지점을 대조했다. 사용자가 이번 턴에 macOS 설치·업데이트 및 명시 동의 방식 백업 정리의 제품 활성화를 각각 승인했다. 같은 설치 검토자는60d886b TLS literal/시험 변경의 추가 차단 결함 없음으로 보고했으며 활성화 diff 확인은 후속이다.
+- macOS provider.install의 manager enabled를 true로, ProjectManager의 cleanup 기본값을 cfg!(macos)로 연결했다. Windows 미지원, 단발 계획/동의·provider 상호 배제·종료 확인·원장 잠금·current 복구점 보호·명시 retirement 후 별도 삭제 동의는 그대로다. 이 코드 변경이 사용자 HOME에서 설치/삭제를 실행한 것은 아니며 실제 사용자 자료/계정은 건드리지 않았다.
+- 기존 미커밋 cleanup 회귀의 disabled override·Chromium probe·현행 문서 변경은 이번 승인 범위에 맞춰 통합한다. 현재 복구점 보호 회귀는 test-only 활성화 대신 실제 macOS 기본값을 사용한다. 사용자 archive/history-2026-09.md의21줄은 범위 밖으로 보존한다. 문서의 자동 설치/기기 진단 미연결 설명도 별도 연결/명시 동의 동작으로 정정했다.
+- installation_5 PASS, cleanup_16 PASS/1 ignored, retirement2 PASS, diff PASS. 기존 UI2 PASS와 공식 임시 설치2 PASS는 동작 변경 없는 부분의 증거로 재사용하며 전체 QA/Windows/출시 합격으로 확대하지 않는다. Karpathy 지침으로 활성화 지점/회귀만 바꿨다. 다음은 활성화 commit의 독립 최종 확인, 전체 성능/UI/실제 Claude 로그인·실행 및 남은 G6·Windows/배포이며 main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (설치 화면·공식 임시 설치 호환 통과)
+
+- 직전053aced는 실패 진단/화면 묶음 검증 진척이다. 실제 checkout/dirty를 확인하고 기존 Chromium smoke에 설치 동의 전 무실행, 공급자/계획 변경 시 재동의, 정확 쓰기 위치, 이중 클릭/응답 유실 후 단1회 시작, 상태 조회 후 취소·작업 ID 결속 복구를 추가했다. UI2 PASS10.1초이며 가짜 설치 응답이다. Karpathy 지침으로 기존 화면/시험을 재사용했다.
+- 같은 독립 검토자는7228665의 deny-default·기존 hardlink 차단으로 기존 blocker2건 해소/추가 확인 결함 없음으로 보고했다. 공식 호환/화면 검증과 hostile same-UID TOCTOU 범위 명시를 활성화 전제로 남겼다. 이번 UI/아래 공식 시험 증거와 후속 TLS literal 수정의 재검토는 별도다.
+- 사용자가 두 공식 installer의 임시 HOME 신규 설치·업데이트 시험을 명시 승인했다. OpenAI Docs로 [공식 CLI 설치 문서](https://developers.openai.com/codex/cli)의 standalone URL을 재확인했다. cfg(test)/ignored 시험이 제품 consent/다운로드/deny-default sandbox/종료·서명 검증/원장 보관을 그대로 호출한다. 첫2회 묶음은 installer 단계 실패/안전 종료/임시 자료 제거였다. test-only 출력으로 root 소유0644 `/private/etc/ssl/openssl.cnf` 읽기 누락을 확인해 해당 literal만 read 허용했다. 사용자 설정·자격증명·쓰기 경계는 확대하지 않았다.
+- 수정 후 공식 Claude2.1.296과 Codex0.162.1 각각 신규 설치+재설치/업데이트 모두 Installed·서명/경로·종료/잠금 해제·합성 .zshrc 불변을 통과했다(ignored2 PASS87.58초, session79102). Codex PATH aliases 권한 경고는 있었지만 고정 standalone pair 검증은 통과했다. 모델/로그인/실제 HOME은 사용하지 않았다. 확정 종료 뒤 각 TempDir를 제거했고 같은 prefix 디렉터리가 남지 않음을 확인했다. Rust target 약1.6GiB이며 incremental 비활성 유지.
+- rustfmt/diff PASS. 제품 enabled=false 유지, 기존 미커밋 cleanup/문서 변경 보존, main/push 없음. 다음: TLS 파일 한정 보완 재검토와 설치 활성화 판단, 누적 실패2건/실제 Claude 로그인 확인/UI 전체/G6/Windows·배포 등 전체 미완료 범위 유지.
+
+### 2026-10-13 · by GPT-6 Astra (누적 실패 진단·화면 묶음 검증)
+
+- 직전6841fed는 설치 상태 계약 수정 진척이다. 실제 checkout/HEAD/기존 dirty를 확인했다. backup cleanup은 이제 의도한 오류 주입에 도달했는지를 먼저 확인하며, vendor gate 회귀는 최소/실제 FD·종료 상태·임시 child stderr를 출력한다. 이전의 일반 is_err/누출 단정 메시지로 원인을 잃지 않게 했고 제품 보호 정책은 바꾸지 않았다.
+- backup_cleanup2개·vendor gate1개 PASS. 두 누적 실패는 아직 재현되지 않았으며 환경/경합 원인을 해결했다고 주장하지 않는다. renderer Vite build PASS(큰 chunk 경고 유지), 실제 Chromium/Electron의 기존 mount smoke2개 PASS8.5초(기존 미커밋 cleanup UI probe 포함). 가짜 공급자/임시 userdata 시험이며 실제 계정·설치/공식 배포 검증이 아니다. 설치 패널 동작 시나리오는 기존 preload에 없어 별도 검증이 남는다.
+- Karpathy 지침으로 실패 진단에 한정했다. 상시 승인된 같은 설치 검토자에게7228665 보강과 OS probe 결과의 정적 재검토를 다시 요청했으며 진행 중이다. 기존 dirty는 보존하고 main/push·실제 모델 호출 없음. 다음은 설치 검토 결과/패널 시나리오, 공식 installer 호환의 승인 경계와 남은 전체 제품 구현·검증이다.
+
+### 2026-10-13 · by GPT-6 Astra (설치 상태 계약 수정·누적 실패 분류)
+
+- 직전 앱 이름 설명은 개발 진척 없음이었다. 실제 m5/coding-agent-ide/7228665와 기존 dirty를 확인하고 진행 중이던 OS probe session86674의 PASS를 회수했다. 임시 자료의 허용 쓰기와 외부 read/write·child/link/move/defaults 차단을 확인했으며 공식 installer 호환/제품 활성화 증거는 아니다. 독립 재검토는 모델 capacity 오류로 종료되어 미완료다.
+- 이전 sidecar 전체 검사는605 PASS/9 FAIL/33 ignored(814.99초)로 종료했다. 실패4건은 current Rust status parser의 provider.install suffix 누락으로 수정했다. exact project.catalog 뒤에서만 허용하며 기존 D1은 유지한다. 양 모드의 정상·누락·순서·중복 회귀를 추가해 PASS했고 g5d_3개와 ready/quit1개도 PASS했다.
+- Unix 소켓 생성 권한 실패3건은 외부 샌드박스 밖의 같은 임시 fixture 검사에서 모두 PASS했다. descriptor 누출/backup cleanup interruption2건은 단독 재검사 PASS이나 누적 실행 실패 원인은 미확정이므로 해결 완료로 주장하지 않는다. 전체 검사를 즉시 반복하지 않았다. Karpathy 지침으로 상태 계약의 누락만 수정했다.
+- 실제 설치/계정/모델 호출 없음. Claude 재로그인 완료 통지 전 자동 실제 시험은 반복하지 않는다. 기존 사용자 dirty 보존/main 병합/push 없음. 다음은 누적 실행 경합2건 조사, 설치 독립 재검토·공식 호환/화면 검증이며 전체 UI/Claude/G6/Windows/출시 범위는 여전히 미완료다.
+
+### 2026-10-13 · by GPT-6 Astra (설치 독립 검토 차단 사항 보강)
+
+- 직전a04aff5는 테스트 연결 수정 진척이다. 기존 전체 테스트 session24039의 실행 지속을 확인했으며 중복 실행하지 않았다. 현재501개 진행 관측에서 실패는 Unix socket 관련3건, vendor gate descriptor1건, backup cleanup interruption1건이며 최종 오류 출력은 아직 대기다. 이 실행은 보강 전 바이너리/기존 dirty 포함 기준이다.
+- 독립 검토자 installer_boundary_review는 b710cde에 activation blocker2건을 확인했다: allow-default 설치 정책의 광범위 권한, 허용 폴더의 기존 hardlink를 통한 외부 원본 변경. 동의/원장·fence/dispatch/반복 시작에서는 추가 확인 결함이 없었으며 승인이 아니다. 실제 설치는 계속 비활성이다.
+- execute 정책을 deny-default로 바꾸고 시스템의 제한된 read/exec 폴더·명시 INSTALL/TEMP·DNS 소켓/HTTPS443·단일 identity Mach service만 허용했다. /usr 전체·HOME 내용·일반 Mach/AppleEvent/네트워크 허용은 없다. 시스템 PEM을 명시하고 file-link를 거절한다. macOS 내장 sandbox profile의 DNS/tcp443/file-link 문법을 확인했으나 공식 installer 호환과 실제 OS 보호를 증명한 것은 아니다.
+- 쓰기 대상 전체를 metadata-only/no-follow/20,000항목·깊이64 한도로 검사해 shared regular file·특수 파일·소유/권한/identity 변화는 거절한다. 기존 공식 symbolic launcher는 허용하되 OS resolved-path 보호가 필요하다. 기존 파일을 고치거나 삭제하지 않는다. hardlink 거절 회귀와 system shell/child/read/link/move/defaults 경계의 opt-in 임시 자료 probe를 추가했다. 후자는 네트워크/공급자/계정 없이 positive write와 outside sentinel 보존을 검사하도록 작성했으며 아직 미실행이다.
+- Karpathy 지침으로 기존 Target/owner를 재사용했다. rustfmt/diff PASS. 다음은 기존 전체 테스트 종료 결과 확인, 보강 컴파일/초점 회귀·OS probe, 같은 검토자 수정 재검토다. 실제 설치/계정 실행 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 묶음 검증 시작·테스트 연결 수정)
+
+- 직전b710cde는 interrupted 복구 구현 진척이다. 실제 HEAD/dirty를 확인하고 설치 파동 검증을 시작했다. 신규 admission 회귀의 존재하지 않는 Sidecar::new를 기존 SidecarSession 입장 절차로 수정했다. Electron 보안 대역의 누락된 device-report 모듈을 추가하고 preload의 고정 device/install 채널 별칭을 기존 M5_* 검사 규칙에 맞췄다. 런타임 채널 문자열/권한을 바꾸거나 검사를 완화하지 않았다. 설치 IPC의 다른 frame·임의 경로·작업 ID 없는 복구 거절 회귀도 추가했다.
+- renderer tsc --noEmit PASS, provider_install Rust24 PASS, 설치 계약+브리지 Node60 PASS, Electron 보안 Node9 PASS. 첫 Rust 테스트 컴파일 실패와 Node 보안8/브리지3 실패는 위 수정 후 해당 검사에서 해소했다. Karpathy 지침으로 원인에 해당하는 연결만 수정했다.
+- 전체 sidecar --lib는 CARGO_INCREMENTAL=0/CARGO_BUILD_JOBS=4/RUST_TEST_THREADS=4로 실행 중(session24039, 로그 /private/tmp/hello-agent-install-sidecar-tests.log). 약187개 진행 관측 시 UnixListener 생성 회귀 runtime_scan_reports_special_files_without_exposing_names 1건 실패가 보이며 종료 후 오류/환경 제한을 구분해야 한다. 이 전체 검사는 기존 project/tests.rs 미커밋 변경을 포함한 현재 워킹 트리 기준이고 아직 PASS가 아니다. 별도 Rust 빌드 병렬 실행 없음. target은1.2GiB→1.5GiB, 볼륨 가용518GiB 관측.
+- 상시 승인된 읽기 전용 검토자 installer_boundary_review가 immutable b710cde 설치·동의·종료·복구 경계를 검토 중이다. 결과는 아직 합격 근거가 아니며 후속 메시지로 테스트 연결 수정 사실을 공유했다. 다음 턴은 기존 session/검토자를 이어서 확인하고 실패·지적 수정, core/renderer 실제 UI·OS 설치 경계 검증으로 진행한다. 실제 설치/계정 호출 없음, 제품 비활성/기존 dirty/main·push 경계 유지, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (중단된 설치의 종료 증거 복구)
+
+- 직전ecd5b8a는 terminal 기록 복구 진척이다. 실제 HEAD/dirty를 확인하고 설치 전용 retained process fence에도 실제 종료/회수 후 기존 v2 종료 표시를 남기도록 연결했다. 일반 actual run의 terminal DB 선행 계약은 변경하지 않았으며 설치도 표시를 남기는 것만으로 fence를 해제하지 않는다.
+- 명시 recover는 exact operation의 journal 독점 잠금을 유지한 채 다운로드/설치 두 fence를 기존 recover_confirmed_login으로 검증한다. 유효한 종료 표시·소유/권한/identity·배타 잠금·기록된 PID+시작 시각의 Gone 확인이 없으면 거절하고 신호를 보내지 않는다. 한 fence 정리 후 중단돼도 active journal이 새 실행을 막고 다음 명시 요청에서 재개할 수 있다. 이미 없는 fence는 모든 launch가 사전 예약한다는 기존 계약 아래 미시작/정리 완료로 다루며 수동 안전 기록 삭제까지 보장하지 않는다.
+- 모든 fence 종료 확인 후 nonterminal 기록은 별도 recoveredStopped 이벤트로 Failed/Interrupted를 남기고 보관한다. 일반 cleanup의 늦은 성공으로 RecoveryRequired를 해제하지 않으며 설치 성공·파일 rollback·로그인 완료를 주장하지 않는다. 기존 terminal 기록의 결과는 보존한다. 제품 비활성 경계도 유지했다.
+- Karpathy 지침으로 기존 종료 검증을 재사용했다. live lock/종료 표시 있는 두 fence 복구·불확실 기록 보존·복구 실패 상태 전이 회귀3개를 추가했다(미실행). 해당 core/journal/manager rustfmt·diff PASS; 설치 파동 컴파일/회귀/실제 UI·독립 검토는 다음 묶음으로 남긴다. 실제 설치/계정 실행·캐시 생성 없음, 기존 dirty 보존/main/push 없음. 전체 제품 완료 아님.
+
+### 2026-10-13 · by GPT-6 Astra (설치 terminal 기록 명시 복구 연결)
+
+- 직전13b231d는 상호 배제 구현 진척이다. 같은 checkout/dirty를 확인하고 기존 staging을 생성 없이 여는 경로, canonical journal 재생·독점 잠금 재개방, 정확한 operation UUID에 묶인 terminal 기록 마무리를 연결했다. 기존 inspect도 같은 재생 검증을 사용한다. installed/canceled/failed와 두 process fence 부재가 모두 확인돼야 active journal을 보관 처리한다.
+- 보관본 생성 후 active 이름 제거 전에 중단된 경우에는 기존 보관본이 소유자/권한/단일 링크/크기/내용까지 정확히 같을 때만 이어서 마무리한다. 부분·다른 기록은 덮어쓰지 않는다. 원본 journal과 같은 내용의 내구성 있는 보관본을 유지하며 설치 파일 rollback/프로세스 강제 종료/계정 변경은 없다.
+- typed IPC에 inspectRecovery와 operationId 필수 recover를 연결하고 ko/en 설치 화면에 명시 조회/정리 버튼·한계 안내를 추가했다. 제품 enabled=false는 계속 유지하며 조회/복구를 통한 활성화 우회는 없다. 성공 후 idle로 돌아가며 과거 installed 기록을 새 설치·로그인 확인으로 표시하지 않는다. 아직 nonterminal/종료 fence가 남은 설치의 안전 복구는 미완료다.
+- Karpathy 지침으로 기존 journal/owner 계약을 재사용했다. 같은/다른 보관본·잘못된 operation·live writer·nonterminal/fence 보존 회귀2개와 요청 계약 회귀를 추가했다(미실행). 수정 Rust 파일 rustfmt·diff PASS, 컴파일/테스트/실제 UI·독립 검토는 설치 묶음에 남긴다. 실제 설치/로그인/모델 호출·캐시 생성 없음, 기존 dirty 보존/main/push 없음. 다음은 종료 증거가 남은 interrupted 설치 복구 및 설치 통합 검증, 전체 제품 나머지 범위 유지.
+
+### 2026-10-13 · by GPT-6 Astra (설치·공급자 실행 상호 배제 연결)
+
+- 직전5aafed9는 설치 UI 구현 진척이다. 같은 checkout/기존 dirty를 확인하고 단일 dispatcher에서 설치 준비/시작과 로그인·진단·discovery·native run 예약이 겹치지 않도록 입장을 연결했다. 두 login worker, runtime 소유 작업과 pending start/discovery/cancel, 두 공급자 pending 파일을 설치 전 확인한다. 종료된 worker는 회수하되 panic/복구 필요·빈 기록·깨진 링크·조회 실패는 차단으로 보존한다.
+- 반대 방향은 install worker/동의 대기/복구 기록이 새 공급자 프로세스 요청을 막는다. status/cancel 및 기존 종료·복구 API는 이 입장 검사로 차단하지 않는다. 사용자 인증 내용을 읽거나 프로필을 새로 생성하거나 기존 프로세스를 강제 종료하지 않는다. 이 검사는 같은 sidecar의 직렬 입장 경계이며 외부 터미널/다른 앱 데이터 인스턴스에서 임의로 시작한 공급자까지 배타 제어한다고 주장하지 않는다.
+- 두 공급자 미종료 기록과 설치 broken-link 증거 보존, 새 실행 거절/상태·취소 허용의 process-free 회귀를 추가했다(미실행). Karpathy 지침으로 기존 manager/owner 상태를 재사용했다. 이번에는 diff 검사만 수행했고 Rust 컴파일/새 회귀/독립 검토는 설치 파동 묶음에 남겼다. 실제 설치 활성화·계정 호출·캐시 생성 없음, 사용자 dirty 보존/main/push 없음.
+- 다음: 중단된 설치의 조회·안전 복구 연결, 이후 설치 통합 검증·독립 검토와 결함 수정. 전체 제품 목표와 미완료 UI/실제 Claude/G6/Windows/출시 범위는 유지한다.
+
+### 2026-10-13 · by GPT-6 Astra (설치 동의·진행 화면 연결)
+
+- 직전 대화는 Hello, Agent와 Codex/Claude 데스크톱 앱을 구분한 설명이며 개발 진척은 아니었다. 실제 HEAD58ce024·m5/coding-agent-ide와 기존 dirty를 확인하고 에이전트 선택 화면에 공용 설치 패널을 연결했다. 공급자별 계획 준비, 정확한 쓰기 위치 표시, 계획 ID별 체크 동의, 설치/취소, 진행·결과·복구 필요·미지원 상태와 설치 후 로그인 확인 버튼을 ko/en으로 추가했다.
+- 한 설치 manager에 한 조회 루프를 사용한다. 진행/응답 불명 상태만 주기 조회하고 start 요청은 자동 재전송하지 않는다. 불명/동의/진행/복구 상태에서는 이 화면의 로그인 요청을 비활성화하며 복구 잠금 해제 기능을 가장하지 않는다. 이는 UI 억제이며 이미 시작된 로그인/실행을 중단하거나 backend 동시 실행 배제를 구현한 것은 아니다. 실제 설치 제품 경로는 계속 비활성이다.
+- Karpathy·React 지침에 따라 기존 연결 컴포넌트와 CSS 색상 변수를 재사용하고 중복 요청/언마운트 뒤 상태 갱신을 방지했다. renderer tsc --noEmit PASS. 실제 UI/신규 설치 회귀/전체 빌드·독립 검토는 기능 묶음 검증에 남겼다. 실제 설치·계정 호출·Rust 캐시 생성 없음, 기존 dirty 보존/main 병합/push 없음.
+- 다음: 설치와 로그인/actual runtime의 backend 상호 배제, 중단된 설치의 안전한 복구 흐름 연결 후 설치 파동 통합 검증. 전체 제품 완료는 아니며 실제 Claude 작업·UI 시안 완성·G6/Windows/출시 항목도 유지한다.
+
+### 2026-10-13 · by GPT-6 Astra (설치 typed IPC와 비활성 제품 경로)
+
+- 직전736452e는 요청 manager 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 provider.install의 정확한 요청/계획/상태 TypeScript 검증과 m5Install preload→현재 main frame→sidecar client→Rust manager 경로를 연결했다. 임의 명령/경로/URL·추가 필드·공급자/설치 위치 불일치·작업 ID 없는 실행 상태를 거절한다. plan/operation UUID와 필드 이름을 기존 Rust 출력에 맞췄다.
+- capability는 기존 exact baseline 뒤 chat.appendMessage/provider.login/run.approval/project.catalog/provider.install 순서로만 협상한다. 구버전 sidecar는 unsupported로 처리한다. 실제 제품 dispatcher는 manager enabled=false를 고정 전달하므로 status/prepare/start 호출로 설치나 계획을 시작할 수 없다. 비활성 여부와 protocol 지원 여부를 구분하며 별도 환경 변수 우회는 없다.
+- Sidecar의 app.prepareQuit에 install manager를 연결하고 Electron의 제한된 비동기 정리 재조회에 provider-install blocker를 추가했다. active evidence는 비활성이어도 recoveryRequired로 보존한다. 설치와 실제 에이전트/로그인의 동시 실행 배제·복구 UI·공개 활성화 독립 검토는 여전히 남는다.
+- 계약 회귀3개·협상/unsupported 브리지 회귀1개·제품 비활성 무실행 Rust 회귀를 추가하고 기존 manager 테스트 및 Electron import 대역을 갱신했다(미실행). 연결 컴파일에서 renderer ES lib의 Array.at 오류를 인덱스 접근으로 수정해 tsc --noEmit PASS, 일반 sidecar cargo check PASS4.76초, diff PASS다. Electron 전체 빌드/신규 테스트·누적/독립 검증은 묶음에 남긴다. Karpathy 지침으로 기존 typed IPC/협상 패턴을 재사용했다. 실제 설치/로그인/계정 호출 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 요청 manager와 종료 수명 연결부)
+
+- 직전8bae6f1은 단발 동의 구현 진척이다. 실제 checkout/dirty를 확인하고 status/prepare/dismiss/start/cancel의 정확한 필드만 받는 내부 InstallManager를 추가했다. 수락된 같은 plan/provider 재전송은 같은 작업 상태를 반환하며 새 worker를 만들지 않는다. worker 슬롯·작업 ID·취소 신호를 결속하고 terminal callback이 thread 종료보다 먼저 UI 성공/후속 로그인을 허용하지 않게 처리했다.
+- 설치 worker에는 Storage를 다시 열지 않고 기존 Storage에서 검증한 InstallScope capability를 이동한다. prepare_quit은 비차단 취소/종료 조회이며 새 준비/시작을 차단한다. Drop은 취소 후 자기 thread를 회수한다. 아직 Sidecar/public IPC에는 붙이지 않았으며 실제 app.prepareQuit 동작이 바뀌었다고 주장하지 않는다.
+- startup/status/종료 조회는 active journal/두 pending 이름을 읽기만 확인한다. 링크/손상/조회 실패도 새 설치·안전 종료를 자동 허용하지 않고 recoveryRequired로 남긴다. PID 신호/삭제/자동 재개는 없다. 단, worker 입장 전 동의 만료/경로 변화는 프로세스가 시작되지 않은 일반 실패로 구분해 불필요한 복구 잠금 표시를 줄인다.
+- 잘못된/추가 필드·동의 없는 시작·남의 작업 취소·종료 이후 준비 거절과 pending 증거 보존 회귀2개를 추가했다. Karpathy 지침으로 기존 consent/worker를 직접 연결했다. 일반 cargo check PASS3.01초 후 계획 준비 오류 표시·입장 전 실패 분류·종료 시 pending 검사 보강은 rustfmt/diff만 확인했다. 최종 빌드/새 테스트/독립 검토는 묶음에 남긴다. 다음: typed IPC/화면/재시작 복구 및 누적 검증. 실제 설치/계정 호출 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (단발 설치 동의와 대상 결속)
+
+- 직전edac9d5는 coordinator/기록 보관 구현 진척이다. 실제 checkout/dirty를 확인하고 backend가 고정 공급자·기존 HOME·쓰기 대상 목록으로 만드는180초 단발 설치 계획을 추가했다. 준비는 읽기 전용이며 디렉터리를 생성하지 않는다. 새 계획/닫기/수락 시 이전 token을 폐기하고 잘못된 공급자·만료·중복 수락도 재사용하지 못한다.
+- 계획은 HOME 및 기존 대상 ancestor의 no-follow/소유자/권한/dev-ino capability와 없던 경로를 기억한다. 수락·worker 입장·설치 대상 생성 전에 재검증한다. 기존 폴더 교체/링크/없던 경로 생성은 재동의를 요구한다. 경로는 손실 없이 JSON으로 표시할 수 있어야 하고 PATH 분리 문자/제어문자를 거절한다. GUI가 임의 HOME/URL/명령/설치 스크립트를 넘길 필드는 없다.
+- worker는 이제 raw UUID/provider 대신 복제/역직렬화할 수 없는 AuthorizedInstall을 소비한다. Target은 중간에 HOME 환경을 다시 읽지 않고 동의한 HOME capability를 이어받으며, 표시된 쓰기 폴더와 sandbox 허용 폴더는 같은 고정 목록을 사용한다. 설치는 기존 명령을 갱신할 수 있고 셸 설정 쓰기/로그인 시작은 허용하지 않는다는 표시용 사실도 포함했다.
+- 단발/공급자/만료/준비 무변경·경로 교체/링크 회귀2개를 추가하고 기존 pre-cancel coordinator 회귀를 새 동의 경로로 바꿨다. Karpathy 지침으로 기존 실행 흐름에 권한 객체를 연결했으며 rustfmt/diff만 검사했다. 빌드/테스트·독립 검토는 설치 묶음에 남긴다. 다음: 요청 manager/typed IPC/UI와 재시작 복구. 실제 설치/계정 호출·캐시 생성 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 coordinator와 terminal 기록 보관)
+
+- 직전676bb59는 결과 검증/종료 순서 구현 진척이다. 실제 checkout/기존 dirty를 확인하고 execute_consented 내부 coordinator로 다운로드→설치→결과 검증→terminal 기록/잠금 해제→기록 보관을 연결했다. 다운로드의 정상 실패/취소도 owner를 반환해 cleanup 후 정리하며 중간 Drop으로 영구 recovery 잠금만 남기던 경로를 분리했다. 단계 인계 직후 취소도 installer spawn 전에 처리한다.
+- 완료 journal은 프로세스 fence가 둘 다 없고 terminal일 때만 UUID별 create-new 파일에 저장한다. 원본의 실제 bytes와 메모리 기록 일치·no-follow/identity/크기·fsync를 확인하고 보관본 내구성 확보 뒤 active 이름을 제거한다. 기존 보관본 덮어쓰기/자동 삭제는 없고 최대128개×16KiB와 bounded 목록 조사로 기록 증가를 제한한다. 한도/보관 실패는 성공 표시하지 않으며 복구/정리 UI는 별도 후속이다.
+- pre-cancel 두 연속 작업이 프로세스/네트워크 없이 canceled 보관·새 transaction으로 이어지는 coordinator 회귀와 fence/기존 보관본/같은 길이 변조 증거 보존 회귀2개를 추가했다. 일반 cargo check PASS3.29초(직전 결과 검증과 이번 coordinator 포함), 새 테스트는 미실행이며 마지막 테스트 추가 뒤 rustfmt/diff만 검사했다. Karpathy 지침으로 기존 owner/state/journal을 재사용했다.
+- 다음은 정확한 대상에 결속된 단발 동의 manager/IPC/UI, 중단된 작업 조회·복구 흐름, 이후 실제 경계·전체 설치 통합 검증이다. coordinator 함수는 아직 내부 미활성이고 consent 검증을 자체 구현했다고 주장하지 않는다. 실제 설치/계정 호출·무거운 테스트 없음, 사용자 dirty 보존/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 결과 검증과 terminal 순서 연결)
+
+- 직전950db69는 공식 설치 실행부 구현 진척이다. 같은 checkout/dirty를 확인하고 설치 단계에 보유한 Target capability를 종료 후에도 유지했다. 결과 확인은 이 작업의 HOME에서 Codex standalone pair 또는 Claude native launcher target의 기존 공급자 서명·경로 검증을 재사용한다. Codex의 기존 앱 번들/legacy pair를 새 standalone 설치 성공으로 대신 인정하지 않는다. 기존 일반 discovery의 후보 우선순위/실패 분류는 보존했다.
+- verify_result는 같은 원장/작업/공급자·Verifying·두 프로세스 종료 증거를 요구한다. 확인 실패를 기록한 뒤 늦은 취소를 반영하며 로그인/모델 준비 상태를 만들지 않는다. finalize는 stopping과 종료/대상 재검증 뒤 terminal 원장을 먼저 동기화하고 두 fence를 해제한다. journal은 남겨 새 transaction을 계속 막으며 terminal 보관/재시작 복구는 다음 연결 대상이다. 잠금 해제 오류를 성공으로 반환하지 않는다.
+- 순서 위반/빈 설치 대상 실패·두 잠금 유지→실패 terminal 뒤 해제·원장 재생·중복 시작 거절과 unrelated/legacy 설치 불인정 회귀2개를 추가했다. 이는 process-free synthetic 주문 검사이며 실제 installer/OS 경계 시험을 대신하지 않는다. Karpathy 지침으로 기존 서명 검증을 재사용했고 수정부 rustfmt/diff만 검사했다. 테스트/빌드·독립 검토는 설치 묶음에 남겼다.
+- 다음: terminal 기록 보관·다운로드 실패/취소 포함 coordinator·명시 동의/IPC/UI, 이후 누적 검증과 수정. 실제 설치/로그인/계정 호출·대형 캐시 생성 없음. 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (공식 설치 실행부 내부 연결)
+
+- 직전743b430은 단계 인계 구현 진척이다. 같은 checkout/dirty를 확인하고 InstallerReservation에 공식 스크립트 실행부를 추가했다. 원장/작업/공급자/동의 후 단계에 결속하고 재실행을 거절한다. 다운로드 내용을 별도 실행 파일로 게시하지 않고 고정 shell의 단일 인자로 전달하며, 기존 spawn gate와 두 owner를 계속 보유한다.
+- macOS sandbox 후보는 파일 쓰기를 기본 거절하고 공급자 설치 디렉터리·임시 폴더만 허용한다. HOME은 기존 사용자 홈이며 앱 전용 고정 버전 설치를 만들지 않는다. 대상 폴더는 no-follow/uid/mode/dev-ino를 확인하고 일반 사용자 설정을 덮어쓰지 않고 필요한 디렉터리만 생성한다. 환경은 명시 HOME/시스템 우선 PATH/TMPDIR/CURL_HOME/locale/비대화형 Codex로 제한한다. 공급자 스크립트가 허용하지 않은 설정 쓰기를 요구하면 실패하며 보호를 완화하지 않는다. 이는 구현 정책이지 실제 OS 경계/공식 installer 호환성 검증 완료가 아니다.
+- 실행은10분/출력1MiB 한도·취소·EOF/exit·자손 종료 확인을 결합한다. 성공은 Verifying까지만 진행하며 서명된 실제 설치 대상 검증·terminal 정리/복구·정확한 동의 계획/IPC/UI는 다음이다. 실패 중에도 대상 capability를 종료 후까지 보유해 교체를 재검사한다. raw 출력은 UI/로그에 보관하지 않는다.
+- Karpathy 지침으로 기존 process owner/gate를 재사용했다. 설정 보존/링크·디렉터리 교체 및 command parameter/env 회귀2개를 추가했다(미실행). 단계 전체 연결을 위한 일반 cargo check PASS3.30초 후 대상 보유 위치를 보강했으며 그 최종 보강의 재컴파일·테스트/독립 검토는 묶음 검증에 남긴다. rustfmt/diff 검사만 추가 수행했다. 실제 다운로드/설치/로그인/모델 실행 없음, 기존 dirty 보존/main/push 없음, 전체 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 단계 인계와 공식 스크립트 영향 확인)
+
+- 직전1a57ead는 다운로드 worker 구현 진척이다. 같은 checkout/기존 dirty를 재확인하고 완료된 다운로드 owner를 유지한 채 별도 실행 단계 owner를 예약하는 연결을 추가했다. 같은 원장/작업 UUID/공급자·app-data/staging capability·Installing 단계·다운로드 종료 증거가 일치해야 하며 다운로드 잠금을 해제하는 공백을 만들지 않는다. 설치용 scope에서 원장/다운로드를 새로 시작하는 것도 차단했다.
+- 단계별 pending 두 파일은 최종 transaction까지 함께 보관한다. 실행 scope 복제·중복 예약·다른 app-data 거절·Drop 뒤 두 잠금 보존 회귀를 추가했다. 아직 실제 installer spawn/terminal 해제·복구·동의/IPC/UI는 미연결이다. 공개 제품 동작이나 설치 완료로 주장하지 않는다.
+- OpenAI Docs로 [공식 CLI 설치 문서](https://developers.openai.com/codex/cli)를 재확인하고 [Codex 공식 스크립트](https://chatgpt.com/codex/install.sh)·[Claude 공식 스크립트](https://claude.ai/install.sh)를 읽기만 했다. 현재 Codex는 NON_INTERACTIVE에서 추가 실행/기존 manager 삭제 prompt를 거절하지만 add_to_path는 PATH/충돌 조건에 따라 기존 shell profile block을 수정할 수 있다. Claude 스크립트는 내려받은 binary의 install에 shell integration을 위임한다. 비대화형만으로 사용자 설정 불변을 보장한다고 가정하면 안 된다.
+- 다음 실행 연결은 이 설정 영향과 실제 대상·동의 범위를 해결해야 한다. 버전 고정/앱 전용 중복 설치로 대체하지 않는다. Karpathy 지침으로 기존 process owner를 재사용했으며 rustfmt/diff만 검사했다. 새 회귀/일반 빌드/독립 검토는 설치 연결 묶음에 남긴다. 네트워크는 공식 스크립트 읽기만 수행했고 설치/로그인/모델 실행·대형 캐시 생성은 없었다. main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 다운로드 단계 연결)
+
+- 직전 목표 턴은 앱 이름 설명으로 구현 진척 없음이었다. 실제 m5/coding-agent-ide/10c3d7a와 기존 dirty를 재확인하고 설치 원장에 결속된 다운로드 worker를 추가했다. 고정 공식 HTTPS 주소만 받고 curlrc/상속 환경 차단, HTTPS redirect 제한, 시간/128KiB 크기 제한, bounded stdout 메모리 수집을 적용한다. 다운로드 내용은 파일 게시나 실행하지 않는다.
+- 기존 프로세스 gate/소유권/명시 종료 확인을 재사용했다. 동의 전과 취소된 시작을 거절하고 성공은 EOF/exit0/내용 형식/자손 종료 확인 뒤에만 downloadVerified로 기록한다. 늦은 취소는 이미 관측한 실패를 지우지 않는다. 프로세스 불확실은 recoveryRequired로 남기며 다운로드 성공/Drop에서 설치 잠금을 해제하지 않는다.
+- Karpathy 지침으로 기존 구조에 한정했다. 정책/크기/형식 및 동의 전·취소 시 무실행 회귀3개를 추가했고 rustfmt/diff 검사만 수행했다. 테스트/빌드·오류 주입·독립 검토는 설치 연결 묶음에 남긴다. 실제 네트워크/설치/계정 실행 없음, 새 대형 빌드 캐시 없음.
+- 다음: 다운로드 owner에서 installer로의 영속 단계 인계, 설치 산출물 검증·terminal 보관/복구, 정확한 동의 token과 IPC/UI 연결. 현재 downloader는 내부 미활성 코드이며 설치 기능/제품 완료가 아니다. 기존 dirty 보존, main 병합/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (설치 transaction 영속 기록과 재검증)
+
+- 직전542beb4는 설치용 프로세스 바인딩 구현 진척이다. 같은 InstallScope 아래 고정 create-new JSONL 원장을 추가했다. 작업 UUID/공급자 header와 최대16개 전이/16KiB 한도,600 단일 링크 regular file·flock·no-follow·dev/ino/길이 재검증을 적용한다. 인증정보나 renderer 제공 경로는 받지 않는다.
+- 기존 InstallLifecycle을 복제해 전이를 먼저 검증하고 append+sync 성공 뒤 메모리 상태를 공개한다. 기록 실패는 sticky recoveryRequired다. replay는 순번·정확 필드·canonical JSON(중복키 포함 다른 인코딩 거절)·완전한 마지막 줄과 같은 상태 전이를 검사한다. 조회는 기록/잠금을 삭제하거나 프로세스 신호·자동 재개 권한을 만들지 않는다.
+- 취소 플래그까지 상태 동등성을 비교해 검증 후 stopping 중 취소를 유실하지 않는다. 최종 정리 중 취소의 재생, live writer/중복 시작 차단, 파일 교체·손상 거절 회귀2개를 추가했다. 설치 worker/동의/IPC와 이 원장의 연결 및 명시 terminal 보관·복구 해제는 아직 미구현이다.
+- Karpathy 지침으로 기존 상태·scope를 재사용했다. 일반 sidecar cargo check(CARGO_INCREMENTAL=0/jobs4) PASS4.09초, rustfmt/diff PASS, target1.2GiB. 새 테스트·프로세스/파일 오류 주입·독립 안전 검토는 설치 묶음 검증에 남긴다. 실제 설치/계정 실행 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 전용 프로세스 소유권 바인딩)
+
+- 직전82ea134는 내부 설치 상태 구현 진척이다. 기존 LoginProcess가 실제로 수행하는 create-new durable fence/flock·spawn barrier·자손 신원 기록·종료 관측·terminal 이전 잠금 유지를 확인했다. Karpathy 지침에 따라 이를 복제하지 않고 설치용 LoginProfile 바인딩을 추가했다.
+- InstallScope는 열린 Storage의 고정 app-data 아래700 작업 디렉터리와 provider-install.pending 전용 이름만 사용한다. 디렉터리 no-follow·uid/mode·dev/ino 재검증, 생성 후 부모 동기화를 수행한다. 예약 직후 retain_fence_before_launch를 설정해 중도 Drop/reopen에서 임의 새 예약이 불가능하다. Codex/Claude 인증 namespace는 생성/조회하지 않는다.
+- 예약 중복·중단 뒤 재열기 차단·인증 디렉터리 미생성·작업 폴더 링크/교체 거절 회귀2개를 추가했다. rustfmt/diff 검사만 완료, 테스트 실행/일반 빌드·독립 검토는 설치 파동 검증에 남긴다. 디렉터리 검증이 내부 파일 신뢰를 뜻하지 않으며 worker는 fresh exclusive artifact 생성·검증을 별도로 해야 한다.
+- 이 연결부는 아직 public IPC/실제 설치 worker에 연결되지 않았다. 설치 상태 머신과의 결합·동의 token·설치 transaction journal·다운로드/실행·UI 및 복구 해제는 다음 구현 대상이며 제품 설치 완료로 주장하지 않는다. 실제 프로세스/설치/계정 실행·새 대형 캐시 없음, 기존 dirty 보존/main/push 없음, 전체 목표 미완료.
+
+### 2026-10-13 · by GPT-6 Astra (설치 작업 수명 내부 상태 코드)
+
+- 직전968243c는 일반 빌드 차단 수정 진척이다. 현재 통합 checkout/기존 dirty를 확인하고 설치 작업의 내부 상태 전이를 Rust 공용 코어에 추가했다. 동의 전→다운로드→설치→검증→정리 이후만 installed로 끝나며 installer exit0만으로 성공 처리할 수 없다.
+- 취소 후 늦은 단계 성공은 거절하고 정리/종료 확인 전 소유권 해제를 막는다. 먼저 발생한 실패는 취소로 지우지 않으며 종료 불확실 recoveryRequired는 late success/cancel로 해제할 수 없다. 재동의/중복 시작·검증 전 성공·취소/실패·불확실 종료 회귀3개를 추가했다.
+- Karpathy 지침으로 새 실행기/검증 증거를 추정하지 않고 순수 상태 코드에 한정했다. 이 타입의 bool 입력은 worker가 확인한 결과를 전달하는 자리이지 실제 프로세스·서명·내구성 증거가 아니다. 다운로드/실행 owner·영속 fence·단발 동의 token·IPC/UI는 아직 연결되지 않아 현재 제품 설치 동작은 바뀌지 않는다.
+- rustfmt/diff 검사 완료, 새 테스트 실행/전체 빌드는 파동 검증에 남겼다. 실제 설치/로그인/계정 호출·새 대형 캐시 없음. 다음은 이 상태를 사용하는 설치 worker와 영속 복구/동의 연결이다. 기존 dirty 보존, 전체 목표 미완료/main/push 없음.
+
+### 2026-10-13 · by GPT-6 Astra (standalone 후보의 일반 빌드 결함 수정)
+
+- 직전465901d는 공식 설치 링크 경로 구현 진척이다. 설치 worker 진행 전에 독립 검토에서 새 production 경로가 cfg(test) 전용 unavailable() 함수를 참조하는 컴파일 차단을 회수해 해당 cfg를 제거했다. 테스트 전용 빌드는 숨길 수 있는 결함이므로 일반 라이브러리 cargo check를 선택 실행했다.
+- CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 cargo check -p hello-agent-sidecar --lib PASS(7.78초), target 약1.2GiB. 같은 검토자가 수정 후 추가 정적 차단 없음으로 재확인했다. Rust 테스트/실제 package 및 launcher 실행·자동 설치 worker·UI/Windows/G6 완성은 별도 미완료다. 실제 로그인/설치/모델 실행 없음.
+- 기록 추가로500줄을 넘는 시점에 상단 기존10월13일 전체 워크로그를 월간 아카이브로 이동했다. 기존 HEAD 원문과 이동 전후 전체 문자열 일치 PASS이며 고정 섹션/다른 날짜 archive 사용자 변경은 보존했다. 최종 diff 검사 후 이번 수정과 기록만 로컬 커밋한다. 전체 목표 active, main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (공식 Codex standalone 링크 구조 연결)
 
 - 직전d8b131d는 기기 정보 연결 진척이다. OpenAI Docs로 [공식 CLI 설치](https://developers.openai.com/codex/cli)를 다시 확인하고 공식 https://chatgpt.com/codex/install.sh를 크기/시간 제한을 둔 읽기 전용 curl로 조회했다(실행/설치 없음). 최신 스크립트는 ~/.local/bin의 두 링크→~/.codex/packages/standalone/current/bin→releases/버전-플랫폼/bin 구조다. 앞선bcaac54의 직접 파일 후보만으로는 이 구조를 수용하지 못한다.
