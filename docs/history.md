@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (배포 검사 설치 capability 누락 수정)
+
+- 005e467에서 배포 통합 경로를 조사했다. 개발 UI smoke는 main을 직접 로드/계측하고 dialog·userdata를 주입하므로 이를 그대로 packaged 증거로 바꾸지 않는다. 기존 패키지 smoke의 exact ready 기대 목록에는 현행 lib.rs가 제공하는 provider.install suffix가 빠져 정상 최신 패키지도 거절하게 됨을 확인했다.
+- Karpathy 최소 수정으로 current capability 목록을 ready와 status 검사에서 공유하고 provider.install을 추가했다. 기존 검증 전용 fixture도 현재 목록을 사용하며 누락/중복/역순을 status와 ready 양쪽에 동일하게 넣어도 거절하는 실행 회귀를 추가했다. 최초 scaffold4 PASS/1 FAIL은 구형 소스 regex였고 기대 목록을 갱신한 뒤5 PASS(147ms), diff PASS다. 제품 설치 권한/안전 경계 변경 없음.
+- 실제 패키지 재생성/GUI/모델 실행은 하지 않았다. 이 수정은 검사 호환성이지 배포 합격이 아니다. native IPC/packaged 전체 수집, Mac 잠금 해제 후 입력/메모리, Claude 연결 확인 후 실연결은 남는다. 사용자9월 archive 변경 보존·main/push 없음.
+
 ### 2026-10-13 · by GPT-6 Astra (세션 분리 자손 종료 관측)
 
 - c8b5f73 이후 실제 detached 시험을 조사했다. core의 재부모화 시험은 모의 ProcTable이고 기존 stdio 취소 leaf는 동일 세션이었다. Karpathy 최소 변경으로 취소 fixture의 leaf만 pre_exec setsid로 분리했다. 실제 provider/제품 실행 정책은 변경하지 않았다. 외부 관측 시험은 세션 leader가 정확히1개이며 sidecar와 다른 세션인지 확인한 뒤 기존 PID+시작 시각 소멸 검사를 수행한다.

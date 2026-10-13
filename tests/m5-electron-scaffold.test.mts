@@ -16,7 +16,8 @@ test("패키지 smoke는 플랫폼별 native/product capability 순서를 exact 
   assert.match(smoke, /tests\/fixtures\/m5\/storage-status-d1\/manifest\.json/);
   assert.match(smoke, /await import\("\.\.\/src\/m5\/contracts\/agent-adapter-v1\.ts"\)/);
   assert.match(smoke, /const expectedProductCapabilities = process\.platform === "darwin"\s*\? G5D_NATIVE_CAPABILITIES_V1\s*: storageStatusD1Manifest\.modes\?\.generalProduct\?\.d1Capabilities/);
-  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, \[\.\.\.expectedProductCapabilities, "chat\.appendMessage", "provider\.login", "run\.approval", "project\.catalog"\]\)/);
+  assert.match(smoke, /assert\.deepEqual\(ready\.payload\.capabilities, expectedCurrentCapabilities\)/);
+  assert.match(smoke, /"chat\.appendMessage", "provider\.login", "run\.approval", "project\.catalog", "provider\.install"\]/);
   assert.match(smoke, /expectedProductCapabilities\.at\(-1\) === "storage\.status"/);
   assert.match(smoke, /assert\.equal\(status\.result\.state, "shellReady"\)/);
   assert.match(smoke, /await waitForStorageReady\(/);

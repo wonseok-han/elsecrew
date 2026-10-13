@@ -28,6 +28,8 @@ const { G5D_NATIVE_CAPABILITIES_V1 } = await import("../src/m5/contracts/agent-a
 const expectedProductCapabilities = process.platform === "darwin"
   ? G5D_NATIVE_CAPABILITIES_V1
   : storageStatusD1Manifest.modes?.generalProduct?.d1Capabilities;
+const expectedCurrentCapabilities = [...expectedProductCapabilities,
+  "chat.appendMessage", "provider.login", "run.approval", "project.catalog", "provider.install"];
 const g5dAdmissionManifest = JSON.parse(await readFile(resolve(root, "tests/fixtures/m5/g5d-admission-v1/manifest.json"), "utf8"));
 const verifyingStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "verifying")?.value;
 const failedStatusFixture = g5dAdmissionManifest.systemStatusCases.find(({ value }) => value.storageAdmission?.state === "failed")?.value;
@@ -115,7 +117,7 @@ async function smokePackagedSidecar(binary) {
     assert.ok(Number.isSafeInteger(ready.payload.pid) && ready.payload.pid > 0);
     assert.equal(typeof ready.payload.platform, "string");
     assert.ok(ready.payload.platform.length > 0);
-    assert.deepEqual(ready.payload.capabilities, [...expectedProductCapabilities, "chat.appendMessage", "provider.login", "run.approval", "project.catalog"]);
+    assert.deepEqual(ready.payload.capabilities, expectedCurrentCapabilities);
     assert.equal(ready.payload.sidecarInstanceId, ready.sidecarInstanceId);
 
     const status = await request(lines, child, ready.sidecarInstanceId, "package_status_initial", "system.status");
@@ -165,6 +167,7 @@ function validateProductSystemStatus(value, readyPayload) {
   assert.equal(status.schemaVersion, 1, "G5D status schemaVersion must be 1");
   assert.equal(status.state, "shellReady", "G5D status must be shellReady");
   assert.deepEqual(Object.keys(readyPayload).sort(), [...expectedReadyPayloadFields].sort(), "system.ready payload fields must be exact");
+  assert.deepEqual(readyPayload.capabilities, expectedCurrentCapabilities, "packaged capabilities must match the current product contract");
   assert.deepEqual(status.sidecar, readyPayload, "G5D status sidecar must match system.ready exactly");
 
   const admission = exactObject(status.storageAdmission, expectedAdmissionFields, "storageAdmission");
@@ -239,12 +242,21 @@ function validateBlockers(value, recoveryRequired) {
 }
 
 function runStatusValidatorRegression() {
-  const readyPayload = g5dAdmissionManifest.readyPayloads.generalProduct;
+  const readyPayload = { ...structuredClone(g5dAdmissionManifest.readyPayloads.generalProduct), capabilities: [...expectedCurrentCapabilities] };
   const makeStatus = (fixture) => ({ ...structuredClone(fixture), sidecar: structuredClone(readyPayload) });
   const verifying = makeStatus(verifyingStatusFixture);
   const failed = makeStatus(failedStatusFixture);
   assert.doesNotThrow(() => validateProductSystemStatus(verifying, readyPayload));
   assert.doesNotThrow(() => validateProductSystemStatus(failed, readyPayload));
+  for (const capabilities of [
+    expectedCurrentCapabilities.slice(0, -1),
+    [...expectedCurrentCapabilities, "provider.install"],
+    [...expectedCurrentCapabilities].reverse(),
+  ]) {
+    const staleReady = { ...readyPayload, capabilities };
+    assert.throws(() => validateProductSystemStatus({ ...verifying, sidecar: staleReady }, staleReady), undefined,
+      "missing, duplicated and reordered capabilities must be refused even when status matches ready");
+  }
 
   const malformed = [
     ["missing schemaVersion", (status) => { delete status.storageAdmission.schemaVersion; }],
