@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (공식 Codex standalone 링크 구조 연결)
+
+- 직전d8b131d는 기기 정보 연결 진척이다. OpenAI Docs로 [공식 CLI 설치](https://developers.openai.com/codex/cli)를 다시 확인하고 공식 https://chatgpt.com/codex/install.sh를 크기/시간 제한을 둔 읽기 전용 curl로 조회했다(실행/설치 없음). 최신 스크립트는 ~/.local/bin의 두 링크→~/.codex/packages/standalone/current/bin→releases/버전-플랫폼/bin 구조다. 앞선bcaac54의 직접 파일 후보만으로는 이 구조를 수용하지 못한다.
+- 기존 bundle/레거시 직접 pair가 실패할 때만 공식 두 launcher의 정확한 절대 목적지와 current의 단일 버전/플랫폼 경로를 no-follow 부모 capability로 읽는다. 고정 home/default standalone 밖의 목적지·경로 탈출·다른 helper·release/bin의 링크는 거절한다. 실제 파일의 기존 공급자 서명/소유권/권한/identity 검사는 유지한다. current/launcher 자체를 실행하거나 사용자 CODEX_HOME/config를 읽지 않는다.
+- 경로 선택과 탈출/혼합/하위 링크 거절 회귀를 추가하고 rustfmt/diff 검사 완료. Karpathy 지침으로 공용 selector만 확장했다. 같은 독립 검토자1명에게 이 변경만 재검토 요청했으며 Rust 빌드/회귀 실행/실제 package 관측은 아직 대기다. 공식 문서와 스크립트 관측은 모든 버전의 서명/프로토콜 호환 보장이 아니다.
+- 다음: 공식 설치 worker의 동의·다운로드/취소·기존 설치 보존과 UI 연결. 자동 설치 완성/실제 계정 시험을 주장하지 않는다. 기존 dirty 보존, 대형 캐시 생성/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (시작 화면의 읽기 전용 기기 정보 연결)
 
 - 직전bcaac54는 설치 후보 공통화 구현 진척이며 독립 검토자는 계속 running 상태다. 해당 검토를 중복 호출하지 않고 별도 읽기 전용 기기 진단 UI를 구현했다. 기존 Tauri detect는 셸 PATH/임의 CLI 실행에 의존하므로 그대로 M5 renderer에 노출하지 않았다.

@@ -342,7 +342,60 @@ pub(crate) fn select_installed_codex_pair(
 ) -> Result<(PinnedExecutable, PinnedExecutable), SidecarError> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let roots = codex_installation_roots(home.as_deref());
-    select_signed_pair(&roots.iter().map(PathBuf::as_path).collect::<Vec<_>>())
+    match select_signed_pair(&roots.iter().map(PathBuf::as_path).collect::<Vec<_>>()) {
+        Ok(pair) => Ok(pair),
+        Err(original) => {
+            // Official standalone installs use two fixed launcher links and one
+            // current-release link. Resolve their contents without following them;
+            // authenticate the concrete files, never execute a mutable launcher.
+            if roots.len() != 3 {
+                return Err(original);
+            }
+            let Ok(bin) = standalone_package_bin(home.as_deref().ok_or_else(unavailable)?) else {
+                return Err(original);
+            };
+            Ok((
+                PinnedExecutable::open_codex_signed(&bin.join("codex"), false)?,
+                PinnedExecutable::open_codex_signed(&bin.join("codex-code-mode-host"), true)?,
+            ))
+        }
+    }
+}
+
+fn standalone_package_bin(home: &Path) -> Result<PathBuf, SidecarError> {
+    let base = home.join(".codex/packages/standalone");
+    let launchers = crate::provider_profile::open_absolute_directory(&home.join(".local/bin"))?;
+    for name in ["codex", "codex-code-mode-host"] {
+        let target = launchers
+            .read_link_contents(name)
+            .map_err(|_| unavailable())?;
+        if target.as_os_str() != base.join("current/bin").join(name).as_os_str() {
+            return Err(unavailable());
+        }
+    }
+    let directory = crate::provider_profile::open_absolute_directory(&base)?;
+    let current = directory
+        .read_link_contents("current")
+        .map_err(|_| unavailable())?;
+    let releases = base.join("releases");
+    let name = current.strip_prefix(&releases).map_err(|_| unavailable())?;
+    let name = name.to_str().ok_or_else(unavailable)?;
+    // One installer-generated version/platform component; no nested directories,
+    // relative traversal, shell syntax, or arbitrary CODEX_HOME override.
+    if name.len() > 128
+        || !name.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+        || !(name.ends_with("-aarch64-apple-darwin") || name.ends_with("-x86_64-apple-darwin"))
+        || current.as_os_str() != releases.join(name).as_os_str()
+    {
+        return Err(unavailable());
+    }
+    let bin = releases.join(name).join("bin");
+    // Reject linked release/bin ancestors before returning the concrete candidate.
+    crate::provider_profile::open_absolute_directory(&bin)?;
+    Ok(bin)
 }
 
 fn select_signed_pair(
@@ -499,6 +552,54 @@ pub(super) fn retry_cleanup_ticks(mut cleanup: impl FnMut() -> Result<(), Sideca
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn official_standalone_links_select_only_concrete_release_files() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        let base = home.join(".codex/packages/standalone");
+        let launchers = home.join(".local/bin");
+        let release = base.join("releases/0.999.0-aarch64-apple-darwin");
+        std::fs::create_dir_all(release.join("bin")).unwrap();
+        std::fs::create_dir_all(&launchers).unwrap();
+        for name in ["codex", "codex-code-mode-host"] {
+            symlink(base.join("current/bin").join(name), launchers.join(name)).unwrap();
+        }
+        symlink(&release, base.join("current")).unwrap();
+        assert_eq!(standalone_package_bin(&home).unwrap(), release.join("bin"));
+        for bad in [
+            home.join("outside"),
+            base.join("releases/../outside"),
+            base.join("releases/0.999.0-aarch64-apple-darwin/extra"),
+            base.join("releases/0.999.0-unknown-platform"),
+            PathBuf::from("releases/0.999.0-aarch64-apple-darwin"),
+        ] {
+            std::fs::remove_file(base.join("current")).unwrap();
+            symlink(bad, base.join("current")).unwrap();
+            assert!(standalone_package_bin(&home).is_err());
+        }
+        std::fs::remove_file(base.join("current")).unwrap();
+        symlink(&release, base.join("current")).unwrap();
+        std::fs::remove_file(launchers.join("codex-code-mode-host")).unwrap();
+        symlink(
+            home.join("other-host"),
+            launchers.join("codex-code-mode-host"),
+        )
+        .unwrap();
+        assert!(standalone_package_bin(&home).is_err());
+        std::fs::remove_file(launchers.join("codex-code-mode-host")).unwrap();
+        symlink(
+            base.join("current/bin/codex-code-mode-host"),
+            launchers.join("codex-code-mode-host"),
+        )
+        .unwrap();
+        let outside = home.join("outside-bin");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::remove_dir(release.join("bin")).unwrap();
+        symlink(outside, release.join("bin")).unwrap();
+        assert!(standalone_package_bin(&home).is_err());
+    }
 
     #[test]
     fn installation_roots_preserve_bundles_and_bound_standalone_to_home() {
