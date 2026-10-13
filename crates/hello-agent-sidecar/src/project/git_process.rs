@@ -24,6 +24,26 @@ pub(super) struct BudgetPipe<T> {
 }
 
 impl<T: AsRawFd> BudgetPipe<T> {
+    fn wait_ready(&self, events: libc::c_short) -> io::Result<()> {
+        self.check()?;
+        let mut descriptor = libc::pollfd {
+            fd: self.pipe.as_raw_fd(),
+            events,
+            revents: 0,
+        };
+        // Wake as soon as the pipe is ready, while retaining the cancellation
+        // check interval. Sleeping on every blob round trip compounds latency.
+        let result = unsafe { libc::poll(&mut descriptor, 1, TICK.as_millis() as i32) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+        // EOF and pipe errors are consumed by the next read/write, not hidden.
+        self.check()
+    }
+
     fn new(pipe: T, deadline: Instant, cancelled: Arc<AtomicBool>) -> io::Result<Self> {
         let fd = pipe.as_raw_fd();
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -56,12 +76,12 @@ impl<T> BudgetPipe<T> {
     }
 }
 
-impl<T: Read> Read for BudgetPipe<T> {
+impl<T: Read + AsRawFd> Read for BudgetPipe<T> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         loop {
             self.check()?;
             match self.pipe.read(buffer) {
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(TICK),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => self.wait_ready(libc::POLLIN)?,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 result => return result,
             }
@@ -69,12 +89,14 @@ impl<T: Read> Read for BudgetPipe<T> {
     }
 }
 
-impl<T: Write> Write for BudgetPipe<T> {
+impl<T: Write + AsRawFd> Write for BudgetPipe<T> {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         loop {
             self.check()?;
             match self.pipe.write(buffer) {
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(TICK),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    self.wait_ready(libc::POLLOUT)?
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 result => return result,
             }
@@ -224,6 +246,25 @@ mod tests {
             io::Error::last_os_error().raw_os_error(),
             Some(libc::ECHILD)
         );
+    }
+
+    #[test]
+    fn git_budget_handles_many_interactive_round_trips() {
+        let mut command = shell("while IFS= read -r line; do printf 'x'; done");
+        command.stdin(Stdio::piped()).stdout(Stdio::piped());
+        let mut child =
+            StreamingGitChild::spawn_with_budget(&mut command, Duration::from_secs(3)).unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let mut output = child.stdout.take().unwrap();
+        for _ in 0..1000 {
+            input.write_all(b"request\n").unwrap();
+            let mut byte = [0];
+            output.read_exact(&mut byte).unwrap();
+            assert_eq!(byte, [b'x']);
+        }
+        drop(input);
+        assert_eq!(output.read(&mut [0]).unwrap(), 0);
+        assert!(child.finish().unwrap().0.success());
     }
 
     #[test]

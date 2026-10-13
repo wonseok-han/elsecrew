@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (Git 파이프 준비 상태 대기)
+
+- 직전fdf809a의 대형 snapshot 실패에 이어 Unix BudgetPipe의 WouldBlock 고정5ms sleep을 poll 준비 상태 대기로 바꿨다. 취소 검사 간격5ms·120초 wall budget·nonblocking 입출력·Drop kill/reap은 유지한다. Karpathy 최소 변경 원칙 적용, 메인 직접 구현/읽기 전용 기존 검토자1명 정적 APPROVE(차단 지적 없음).
+- 1000회 요청/응답 회귀를 추가했다. 기존 stdout/stdin/상속stderr/exit timeout·출력/종료상태·drop 취소 포함4/4 PASS(0.36초), debug sidecar build·rustfmt/diff PASS. 전체 Rust 재검증은 반복하지 않았다.
+- 같은 native10000파일 시험(session22242/5SFBAk)은 여전히 시험의 최초15초 wait에서 FAIL. 약30초 시점 materialized 파일5949개·실행 중 cat-file을 확인했고 동일 handle을 계속 관측해 exit1/shutdown accepted까지 확인했다. 이번 실패만으로 제품60초 초과가 여전하다고 단정할 수 없다. 종료 요청 뒤 catalog/chat IPC 차단 로그는 시험이 먼저 quit을 요청한 이후의 기록이다. 트리 성능 합격 없음.
+- 다음: 시험의 최초 snapshot 관측 창을 제품60초 제한과 맞춰 완료 시간/오류를 기록하고 재시험; 파일별 sync_all 비용 등 추가 원인 조사. 내구성 보장을 성능 이유로 제거하지 않는다. 기존9월 archive 보존, 실제 계정 호출/main/push 없음, 전체 목표 미완료.
+
 ### 2026-10-13 · by GPT-6 Astra (native 대형 트리 연결·snapshot 시간 초과 재현)
 
 - 직전59099c1은 편집 컨텍스트 정리로 진척했다. 실제 filesystem/sidecar가 빠진 트리 성능 범위를 줄이기 위해 기존 project-ui smoke에 LARGE_TREE 옵션을 추가했다. 생성 Git 저장소의 aaa-tree에1000폴더/10000파일을 넣고 제어 파일 수는 별도 보고한다. 폴더 열기→두 frame 시간/가상 목록 노드 수 수집을 연결했지만 아직 해당 단계 실측은 미완료다. Karpathy 최소 변경 원칙으로 기존 시험을 확장했다.
