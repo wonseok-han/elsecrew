@@ -1,5 +1,12 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (중단된 설치의 종료 증거 복구)
+
+- 직전ecd5b8a는 terminal 기록 복구 진척이다. 실제 HEAD/dirty를 확인하고 설치 전용 retained process fence에도 실제 종료/회수 후 기존 v2 종료 표시를 남기도록 연결했다. 일반 actual run의 terminal DB 선행 계약은 변경하지 않았으며 설치도 표시를 남기는 것만으로 fence를 해제하지 않는다.
+- 명시 recover는 exact operation의 journal 독점 잠금을 유지한 채 다운로드/설치 두 fence를 기존 recover_confirmed_login으로 검증한다. 유효한 종료 표시·소유/권한/identity·배타 잠금·기록된 PID+시작 시각의 Gone 확인이 없으면 거절하고 신호를 보내지 않는다. 한 fence 정리 후 중단돼도 active journal이 새 실행을 막고 다음 명시 요청에서 재개할 수 있다. 이미 없는 fence는 모든 launch가 사전 예약한다는 기존 계약 아래 미시작/정리 완료로 다루며 수동 안전 기록 삭제까지 보장하지 않는다.
+- 모든 fence 종료 확인 후 nonterminal 기록은 별도 recoveredStopped 이벤트로 Failed/Interrupted를 남기고 보관한다. 일반 cleanup의 늦은 성공으로 RecoveryRequired를 해제하지 않으며 설치 성공·파일 rollback·로그인 완료를 주장하지 않는다. 기존 terminal 기록의 결과는 보존한다. 제품 비활성 경계도 유지했다.
+- Karpathy 지침으로 기존 종료 검증을 재사용했다. live lock/종료 표시 있는 두 fence 복구·불확실 기록 보존·복구 실패 상태 전이 회귀3개를 추가했다(미실행). 해당 core/journal/manager rustfmt·diff PASS; 설치 파동 컴파일/회귀/실제 UI·독립 검토는 다음 묶음으로 남긴다. 실제 설치/계정 실행·캐시 생성 없음, 기존 dirty 보존/main/push 없음. 전체 제품 완료 아님.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 terminal 기록 명시 복구 연결)
 
 - 직전13b231d는 상호 배제 구현 진척이다. 같은 checkout/dirty를 확인하고 기존 staging을 생성 없이 여는 경로, canonical journal 재생·독점 잠금 재개방, 정확한 operation UUID에 묶인 terminal 기록 마무리를 연결했다. 기존 inspect도 같은 재생 검증을 사용한다. installed/canceled/failed와 두 process fence 부재가 모두 확인돼야 active journal을 보관 처리한다.

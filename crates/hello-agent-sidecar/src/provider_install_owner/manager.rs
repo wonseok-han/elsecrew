@@ -100,7 +100,7 @@ impl InstallManager {
                     let expected =
                         uuid::Uuid::parse_str(params["operationId"].as_str().ok_or_else(invalid)?)
                             .map_err(|_| invalid())?;
-                    journal::InstallJournal::recover_terminal(&scope, expected)?;
+                    journal::InstallJournal::recover(&scope, expected)?;
                     // Historic completion is not a fresh installation/login check.
                     self.set(view("idle", None, None, None, None));
                 }

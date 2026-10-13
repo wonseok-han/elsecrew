@@ -1161,9 +1161,14 @@ impl<'a> LoginProcess<'a> {
             self.evidence_failed = true;
             return Err(failure());
         }
-        if !self.retain_for_terminal {
+        if !self.retain_for_terminal
+            || matches!(self.profile.as_ref().pending_name(),
+                "provider-install.pending" | "provider-install-execute.pending")
+        {
             // Only after tracked termination/reaping and identity persistence.
-            // A run reservation must still rely on its terminal DB transaction.
+            // Installation retains this proven-closed fence until its journal
+            // is terminal; explicit restart recovery can inspect this marker.
+            // Agent run reservations still rely on their terminal DB transaction.
             self.reservation.record_login_termination()?;
         }
         self.finished = true;

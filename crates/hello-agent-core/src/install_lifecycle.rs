@@ -21,6 +21,7 @@ pub enum InstallFailure {
     Download,
     Installer,
     Verification,
+    Interrupted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,6 +156,21 @@ impl InstallLifecycle {
         )
     }
 
+    /// Explicit restart recovery only, after the owner has independently proved
+    /// all installation processes stopped. Never turns an interrupted run into
+    /// success, and cannot be used as an ordinary late cleanup observation.
+    pub fn recover_stopped(&mut self) -> Result<(), InvalidInstallTransition> {
+        if matches!(
+            self.phase,
+            InstallPhase::Installed | InstallPhase::Canceled | InstallPhase::Failed
+        ) {
+            return Err(InvalidInstallTransition);
+        }
+        self.failure.get_or_insert(InstallFailure::Interrupted);
+        self.phase = InstallPhase::Failed;
+        Ok(())
+    }
+
     fn require(&self, phase: InstallPhase) -> Result<(), InvalidInstallTransition> {
         if self.phase == phase {
             Ok(())
@@ -167,6 +183,19 @@ impl InstallLifecycle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_stopped_recovery_is_failure_not_late_success() {
+        let mut state = InstallLifecycle::default();
+        state.accept_consent().unwrap();
+        state.require_recovery().unwrap();
+        assert!(state.cleanup_finished(true).is_err());
+        state.recover_stopped().unwrap();
+        assert_eq!(state.phase(), InstallPhase::Failed);
+        assert_eq!(state.failure(), Some(InstallFailure::Interrupted));
+        assert!(state.recover_stopped().is_err());
+        assert!(state.verified(true).is_err());
+    }
 
     #[test]
     fn only_verified_and_cleaned_installation_can_succeed() {

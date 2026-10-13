@@ -109,6 +109,40 @@ impl<'a> InstallJournal<'a> {
         journal.archive_terminal()
     }
 
+    /// Hold the journal lock throughout recovery. A partial fence cleanup is
+    /// restartable because the active journal continues to block all new work.
+    /// Never signal old PIDs or infer termination from an unlocked file alone.
+    pub(crate) fn recover(
+        scope: &'a InstallScope,
+        expected: uuid::Uuid,
+    ) -> Result<(), SidecarError> {
+        let mut journal = reopen(scope, true)?;
+        if journal.operation != expected {
+            return Err(failure());
+        }
+        let execution = scope.execution_scope()?;
+        for owner in [scope, &execution] {
+            journal.verify()?;
+            let directory = owner.login_lease_directory()?;
+            match directory.symlink_metadata(owner.pending_name()) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(_) => crate::provider_login_process::recover_confirmed_login(owner)?,
+                Err(_) => return Err(failure()),
+            }
+        }
+        require_no_process_fences(&scope.login_lease_directory()?)?;
+        if !matches!(
+            journal.phase(),
+            InstallPhase::Installed | InstallPhase::Canceled | InstallPhase::Failed
+        ) {
+            // All spawns reserve a fence first. Missing fences under this locked
+            // journal mean no process was launched or cleanup already released
+            // it. Manual deletion of safety records is outside this guarantee.
+            journal.record("recoveredStopped")?;
+        }
+        journal.archive_terminal()
+    }
+
     /// Events are trusted worker observations, never renderer input. The process
     /// owner remains responsible for concrete closure/verification evidence.
     pub(crate) fn record(&mut self, event: &str) -> Result<(), SidecarError> {
@@ -299,6 +333,7 @@ fn reopen(scope: &InstallScope, exclusive: bool) -> Result<InstallJournal<'_>, S
     let mut options = OpenOptions::new();
     options
         .read(true)
+        .append(exclusive)
         .follow(FollowSymlinks::No)
         .custom_flags(libc::O_NONBLOCK);
     let mut file = directory.open_with(NAME, &options).map_err(|_| failure())?;
@@ -413,6 +448,7 @@ fn apply(state: &mut InstallLifecycle, event: &str) -> Result<(), SidecarError> 
         "cleanupConfirmed" => state.cleanup_finished(true),
         "cleanupUnconfirmed" => state.cleanup_finished(false),
         "recoveryRequired" => state.require_recovery(),
+        "recoveredStopped" => state.recover_stopped(),
         _ => return Err(failure()),
     };
     result.map_err(|_| failure())
@@ -421,6 +457,59 @@ fn apply(state: &mut InstallLifecycle, event: &str) -> Result<(), SidecarError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_recovery_requires_closed_process_fences_and_records_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = InstallScope::from_storage(&storage).unwrap();
+        let execution = scope.execution_scope().unwrap();
+        let operation = uuid::Uuid::new_v4();
+        let mut journal = InstallJournal::begin(&scope, operation, "codex").unwrap();
+        journal.record("consented").unwrap();
+        let mut downloader = scope.reserve(operation).unwrap();
+        downloader.finish().unwrap();
+        journal.record("downloadVerified").unwrap();
+        let mut installer = execution.reserve(operation).unwrap();
+        installer.finish().unwrap();
+        journal.record("recoveryRequired").unwrap();
+        drop(journal);
+        // Finished owners still hold exclusive locks until released/dropped.
+        assert!(InstallJournal::recover(&scope, operation).is_err());
+        drop(downloader);
+        drop(installer);
+        InstallJournal::recover(&scope, operation).unwrap();
+        assert!(!has_active(&storage).unwrap());
+        let bytes =
+            std::fs::read_to_string(root.join(format!("{ARCHIVE_PREFIX}{operation}.jsonl")))
+                .unwrap();
+        assert!(bytes.contains("recoveredStopped"));
+        assert!(!bytes.contains("\"event\":\"verified\""));
+        assert!(!root.join(super::super::PENDING).exists());
+        assert!(!root.join(super::super::EXECUTION_PENDING).exists());
+    }
+
+    #[test]
+    fn interrupted_recovery_never_unlocks_uncertain_process_evidence() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let storage = crate::Storage::open(&root.join("hello-agent.sqlite3")).unwrap();
+        let scope = InstallScope::from_storage(&storage).unwrap();
+        let operation = uuid::Uuid::new_v4();
+        let mut journal = InstallJournal::begin(&scope, operation, "claude").unwrap();
+        journal.record("consented").unwrap();
+        drop(journal);
+        let fence = root.join(super::super::PENDING);
+        std::fs::write(&fence, b"hello-agent provider login pending v1\n").unwrap();
+        let before = std::fs::read(root.join(NAME)).unwrap();
+        assert!(InstallJournal::recover(&scope, operation).is_err());
+        assert_eq!(std::fs::read(root.join(NAME)).unwrap(), before);
+        assert_eq!(
+            std::fs::read(&fence).unwrap(),
+            b"hello-agent provider login pending v1\n"
+        );
+    }
 
     #[test]
     fn explicit_terminal_recovery_accepts_only_exact_operation_and_matching_archive() {
