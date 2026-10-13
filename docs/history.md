@@ -1,5 +1,11 @@
 # 작업 이력 (Hello, Agent)
 
+### 2026-10-13 · by GPT-6 Astra (누적 실패 진단·화면 묶음 검증)
+
+- 직전6841fed는 설치 상태 계약 수정 진척이다. 실제 checkout/HEAD/기존 dirty를 확인했다. backup cleanup은 이제 의도한 오류 주입에 도달했는지를 먼저 확인하며, vendor gate 회귀는 최소/실제 FD·종료 상태·임시 child stderr를 출력한다. 이전의 일반 is_err/누출 단정 메시지로 원인을 잃지 않게 했고 제품 보호 정책은 바꾸지 않았다.
+- backup_cleanup2개·vendor gate1개 PASS. 두 누적 실패는 아직 재현되지 않았으며 환경/경합 원인을 해결했다고 주장하지 않는다. renderer Vite build PASS(큰 chunk 경고 유지), 실제 Chromium/Electron의 기존 mount smoke2개 PASS8.5초(기존 미커밋 cleanup UI probe 포함). 가짜 공급자/임시 userdata 시험이며 실제 계정·설치/공식 배포 검증이 아니다. 설치 패널 동작 시나리오는 기존 preload에 없어 별도 검증이 남는다.
+- Karpathy 지침으로 실패 진단에 한정했다. 상시 승인된 같은 설치 검토자에게7228665 보강과 OS probe 결과의 정적 재검토를 다시 요청했으며 진행 중이다. 기존 dirty는 보존하고 main/push·실제 모델 호출 없음. 다음은 설치 검토 결과/패널 시나리오, 공식 installer 호환의 승인 경계와 남은 전체 제품 구현·검증이다.
+
 ### 2026-10-13 · by GPT-6 Astra (설치 상태 계약 수정·누적 실패 분류)
 
 - 직전 앱 이름 설명은 개발 진척 없음이었다. 실제 m5/coding-agent-ide/7228665와 기존 dirty를 확인하고 진행 중이던 OS probe session86674의 PASS를 회수했다. 임시 자료의 허용 쓰기와 외부 read/write·child/link/move/defaults 차단을 확인했으며 공식 installer 호환/제품 활성화 증거는 아니다. 독립 재검토는 모델 capacity 오류로 종료되어 미완료다.

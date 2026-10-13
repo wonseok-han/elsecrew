@@ -193,7 +193,8 @@ fn backup_cleanup_interruption_requires_explicit_fresh_resume_after_reopen() {
             let preview = f.manager.inspect_backup_cleanup(&f.storage, &f.project_id, &review_id).unwrap().result;
             let old = preview["inspection"]["fingerprint"].as_str().unwrap();
             cleanup::fail_once_at(point);
-            assert!(f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, old, "req_interrupted_cleanup").is_err());
+            let interrupted = f.manager.cleanup_backup(&mut f.storage, &f.project_id, &review_id, old, "req_interrupted_cleanup").err().expect("injected interruption must fail");
+            assert_eq!(interrupted.detail, "injected cleanup interruption", "cleanup failed before the intended interruption point");
             assert_eq!(archive.exists(), point == cleanup::FailurePoint::Pending);
             let before = required_project(&f.storage, &f.project_id).unwrap();
             assert_eq!(before["application_backups"][&review_id]["cleanup"]["state"], "pending");

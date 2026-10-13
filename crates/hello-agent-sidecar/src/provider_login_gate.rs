@@ -85,7 +85,7 @@ mod tests {
             assert!(raw >= minimum);
             let inherited = unsafe { OwnedFd::from_raw_fd(raw) };
             let number = raw.to_string();
-            let mut child = spawn(
+            let mut child = command(
                 Path::new("/bin/sh"),
                 &[
                     OsStr::new("-c"),
@@ -97,6 +97,9 @@ mod tests {
                 ],
                 temp.path(),
             )
+            .unwrap()
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
             release(&mut child).unwrap();
             let output = child.wait_with_output().unwrap();
@@ -108,7 +111,9 @@ mod tests {
             drop(inherited);
             assert!(
                 output.status.success(),
-                "unrelated descriptor reached payload"
+                "descriptor probe failed: minimum={minimum}, fd={raw}, status={:?}, stderr={:?}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
             );
             assert_eq!(output.stdout, b"closed");
             assert_eq!(std::fs::read(path).unwrap(), b"original");
